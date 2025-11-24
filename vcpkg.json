@@ -1,0 +1,16 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "vulkan-game",
+  "version": "1.0.0",
+  "dependencies": [
+    {
+      "name": "sdl3",
+      "features": ["vulkan"]
+    },
+    "vulkan",
+    "glm",
+    "stb",
+    "vk-bootstrap",
+    "vulkan-memory-allocator"
+  ]
+}

@@ -1,0 +1,15 @@
+# Build directories
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+
+# Compiled shaders (regenerated during build)
+*.spv
