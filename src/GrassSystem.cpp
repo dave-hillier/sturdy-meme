@@ -553,8 +553,8 @@ void GrassSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex
     vkCmdPushConstants(cmd, computePipelineLayout,
                        VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(GrassPushConstants), &grassPush);
 
-    // Dispatch: ceil(10000 / 64) = 157 workgroups
-    vkCmdDispatch(cmd, 157, 1, 1);
+    // Dispatch: ceil(1,000,000 / 64) = 15,625 workgroups (1000x1000 grid)
+    vkCmdDispatch(cmd, 15625, 1, 1);
 
     // Memory barrier: compute write -> vertex read and indirect read
     VkMemoryBarrier memBarrier{};

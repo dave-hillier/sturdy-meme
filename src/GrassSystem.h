@@ -89,5 +89,5 @@ private:
     std::vector<VkDescriptorSet> computeDescriptorSets;
     std::vector<VkDescriptorSet> graphicsDescriptorSets;
 
-    static constexpr uint32_t MAX_INSTANCES = 10000;
+    static constexpr uint32_t MAX_INSTANCES = 100000;  // ~100k rendered after culling
 };
