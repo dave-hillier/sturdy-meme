@@ -183,6 +183,11 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     brushedCube = glm::rotate(brushedCube, glm::radians(45.0f), glm::vec3(0.0f, 1.0f, 0.0f));
     sceneObjects.push_back({brushedCube, &cubeMesh, &metalTexture, 0.6f, 1.0f});
 
+    // Glowing emissive sphere on top of the first crate - demonstrates bloom effect
+    glm::mat4 glowingSphereTransform = glm::translate(glm::mat4(1.0f), glm::vec3(2.0f, 1.3f, 0.0f));
+    glowingSphereTransform = glm::scale(glowingSphereTransform, glm::vec3(0.3f));
+    sceneObjects.push_back({glowingSphereTransform, &sphereMesh, &metalTexture, 0.2f, 0.0f, 25.0f, false});
+
     if (!createDescriptorSets()) return false;
 
     // Initialize grass system using HDR render pass
@@ -1414,6 +1419,8 @@ void Renderer::render(const Camera& camera) {
                                 shadowPipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);
 
         for (const auto& obj : sceneObjects) {
+            if (!obj.castsShadow) continue;
+
             ShadowPushConstants shadowPush{};
             shadowPush.model = obj.transform;
             vkCmdPushConstants(commandBuffers[currentFrame], shadowPipelineLayout,
@@ -1461,6 +1468,7 @@ void Renderer::render(const Camera& camera) {
         push.model = obj.transform;
         push.roughness = obj.roughness;
         push.metallic = obj.metallic;
+        push.emissiveIntensity = obj.emissiveIntensity;
 
         vkCmdPushConstants(commandBuffers[currentFrame], pipelineLayout,
                           VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,

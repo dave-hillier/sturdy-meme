@@ -75,78 +75,42 @@ vec3 extractBright(vec3 color, float threshold) {
     return color * max(contribution, 0.0);
 }
 
-// Simple blur using weighted samples at multiple scales
+// Poisson disc bloom - samples spread energy smoothly
+vec3 bloomMultiTap(vec2 uv, float radiusPixels) {
+    const vec2 poisson[12] = vec2[](
+        vec2(-0.326, -0.406), vec2(-0.840, -0.074), vec2(-0.696, 0.457),
+        vec2(-0.203, 0.621),  vec2(0.962, -0.195), vec2(0.473, -0.480),
+        vec2(0.519, 0.767),   vec2(0.185, -0.893), vec2(0.507, 0.064),
+        vec2(0.896, 0.412),   vec2(-0.322, -0.933), vec2(-0.792, -0.598)
+    );
+
+    vec2 texelSize = radiusPixels / vec2(textureSize(hdrInput, 0));
+
+    vec3 center = extractBright(texture(hdrInput, uv).rgb, ubo.bloomThreshold);
+    vec3 accum = center * 0.35;
+    float weightSum = 0.35;
+
+    for (int i = 0; i < 12; i++) {
+        vec2 offset = poisson[i] * texelSize;
+        float w = exp(-dot(poisson[i], poisson[i]) * 2.5);
+        vec3 bright = extractBright(texture(hdrInput, uv + offset).rgb, ubo.bloomThreshold);
+        accum += bright * w;
+        weightSum += w;
+    }
+
+    return accum / max(weightSum, 0.0001);
+}
+
+// Chain multiple radii for smooth falloff
 vec3 sampleBloom(vec2 uv, float radius) {
-    vec2 texelSize = 1.0 / vec2(textureSize(hdrInput, 0));
-    vec3 bloom = vec3(0.0);
-    float totalWeight = 0.0;
+    float baseRadius = max(radius, 0.5);
 
-    // Multi-scale sampling for wider blur without separate passes
-    // Scale 1: Fine detail (13-tap cross)
-    const float scale1 = 1.0;
-    const float weight1 = 0.3;
+    // Blend a few radii to build a soft falloff without large spaced kernels
+    vec3 small = bloomMultiTap(uv, baseRadius * 0.6);
+    vec3 medium = bloomMultiTap(uv, baseRadius);
+    vec3 large = bloomMultiTap(uv, baseRadius * 1.8);
 
-    // Scale 2: Medium blur
-    const float scale2 = 4.0;
-    const float weight2 = 0.4;
-
-    // Scale 3: Wide blur
-    const float scale3 = 8.0;
-    const float weight3 = 0.3;
-
-    // Gaussian-like 13-tap filter pattern (3 scales)
-    vec2 offsets[13];
-    offsets[0] = vec2(0.0, 0.0);
-    offsets[1] = vec2(1.0, 0.0);
-    offsets[2] = vec2(-1.0, 0.0);
-    offsets[3] = vec2(0.0, 1.0);
-    offsets[4] = vec2(0.0, -1.0);
-    offsets[5] = vec2(1.0, 1.0);
-    offsets[6] = vec2(-1.0, -1.0);
-    offsets[7] = vec2(1.0, -1.0);
-    offsets[8] = vec2(-1.0, 1.0);
-    offsets[9] = vec2(2.0, 0.0);
-    offsets[10] = vec2(-2.0, 0.0);
-    offsets[11] = vec2(0.0, 2.0);
-    offsets[12] = vec2(0.0, -2.0);
-
-    float weights[13];
-    weights[0] = 0.2;  // center
-    weights[1] = 0.12; weights[2] = 0.12;  // horizontal
-    weights[3] = 0.12; weights[4] = 0.12;  // vertical
-    weights[5] = 0.06; weights[6] = 0.06;  // diagonal
-    weights[7] = 0.06; weights[8] = 0.06;
-    weights[9] = 0.02; weights[10] = 0.02;  // outer
-    weights[11] = 0.02; weights[12] = 0.02;
-
-    // Sample at scale 1
-    for (int i = 0; i < 13; i++) {
-        vec2 sampleUV = uv + offsets[i] * texelSize * radius * scale1;
-        vec3 color = texture(hdrInput, sampleUV).rgb;
-        vec3 bright = extractBright(color, ubo.bloomThreshold);
-        bloom += bright * weights[i] * weight1;
-        totalWeight += weights[i] * weight1;
-    }
-
-    // Sample at scale 2
-    for (int i = 0; i < 13; i++) {
-        vec2 sampleUV = uv + offsets[i] * texelSize * radius * scale2;
-        vec3 color = texture(hdrInput, sampleUV).rgb;
-        vec3 bright = extractBright(color, ubo.bloomThreshold);
-        bloom += bright * weights[i] * weight2;
-        totalWeight += weights[i] * weight2;
-    }
-
-    // Sample at scale 3
-    for (int i = 0; i < 13; i++) {
-        vec2 sampleUV = uv + offsets[i] * texelSize * radius * scale3;
-        vec3 color = texture(hdrInput, sampleUV).rgb;
-        vec3 bright = extractBright(color, ubo.bloomThreshold);
-        bloom += bright * weights[i] * weight3;
-        totalWeight += weights[i] * weight3;
-    }
-
-    return bloom / totalWeight;
+    return small * 0.4 + medium * 0.35 + large * 0.25;
 }
 
 void main() {
