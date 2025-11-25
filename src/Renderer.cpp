@@ -723,68 +723,64 @@ bool Renderer::createShadowPipeline() {
 }
 
 glm::mat4 Renderer::calculateLightSpaceMatrix(const glm::vec3& lightDir, const Camera& camera) {
-    // Build a light matrix that tightly fits the camera frustum to maximize shadow resolution.
     glm::vec3 lightDirNorm = glm::normalize(lightDir);
     if (glm::length(lightDirNorm) < std::numeric_limits<float>::epsilon()) {
         lightDirNorm = glm::vec3(0.0f, -1.0f, 0.0f);
     }
 
-    glm::mat4 view = camera.getViewMatrix();
-    glm::mat4 proj = camera.getProjectionMatrix();
-    glm::mat4 invViewProj = glm::inverse(proj * view);
+    glm::mat4 lightView;
+    glm::mat4 lightProjection;
 
-    std::array<glm::vec3, 8> frustumCorners{};
-    int cornerIndex = 0;
-    for (int x = -1; x <= 1; x += 2) {
-        for (int y = -1; y <= 1; y += 2) {
-            for (int z = -1; z <= 1; z += 2) {
-                glm::vec4 corner = invViewProj * glm::vec4(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z), 1.0f);
-                frustumCorners[cornerIndex++] = glm::vec3(corner) / corner.w;
+    if (useFrustumFittedShadows) {
+        // Frustum-fitted shadows: uses a sphere-based approach for uniform coverage
+        const float shadowNear = 0.1f;
+        const float shadowFar = 50.0f;
+
+        glm::mat4 view = camera.getViewMatrix();
+        glm::mat4 shadowProj = glm::perspective(glm::radians(45.0f), 16.0f/9.0f, shadowNear, shadowFar);
+        glm::mat4 invViewProj = glm::inverse(shadowProj * view);
+
+        std::array<glm::vec3, 8> frustumCorners{};
+        int cornerIndex = 0;
+        for (int x = -1; x <= 1; x += 2) {
+            for (int y = -1; y <= 1; y += 2) {
+                for (int z = -1; z <= 1; z += 2) {
+                    glm::vec4 corner = invViewProj * glm::vec4(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z), 1.0f);
+                    frustumCorners[cornerIndex++] = glm::vec3(corner) / corner.w;
+                }
             }
         }
+
+        glm::vec3 center(0.0f);
+        for (const auto& corner : frustumCorners) {
+            center += corner;
+        }
+        center /= static_cast<float>(frustumCorners.size());
+
+        // Use bounding sphere for uniform shadow map coverage
+        float radius = 0.0f;
+        for (const auto& corner : frustumCorners) {
+            radius = std::max(radius, glm::length(corner - center));
+        }
+
+        // Position light far enough to avoid near-plane clipping
+        glm::vec3 lightPos = center + lightDirNorm * (radius + 50.0f);
+        glm::vec3 up = (std::abs(lightDirNorm.y) > 0.99f) ? glm::vec3(0.0f, 0.0f, 1.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
+        lightView = glm::lookAt(lightPos, center, up);
+
+        // Use sphere-based ortho projection for uniform texel density
+        // This avoids the tight-fitting issues that cause light leaking at contact edges
+        float orthoSize = radius * 1.1f;  // Small margin for safety
+        float zPadding = 50.0f;
+
+        lightProjection = glm::ortho(-orthoSize, orthoSize, -orthoSize, orthoSize, 0.1f, radius * 2.0f + zPadding * 2.0f);
+    } else {
+        // Fixed shadows: centered at origin, fixed size (crisp, but limited range)
+        glm::vec3 lightPos = lightDirNorm * 50.0f;
+        glm::vec3 up = (std::abs(lightDirNorm.y) > 0.99f) ? glm::vec3(0.0f, 0.0f, 1.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
+        lightView = glm::lookAt(lightPos, glm::vec3(0.0f), up);
+        lightProjection = glm::ortho(-15.0f, 15.0f, -15.0f, 15.0f, 0.1f, 100.0f);
     }
-
-    glm::vec3 center(0.0f);
-    for (const auto& corner : frustumCorners) {
-        center += corner;
-    }
-    center /= static_cast<float>(frustumCorners.size());
-
-    float radius = 0.0f;
-    for (const auto& corner : frustumCorners) {
-        radius = std::max(radius, glm::length(corner - center));
-    }
-
-    // Position the light back along the incoming light direction (-sunDir). sunPos.direction
-    // points from the scene toward the sun, so the incoming light travels along -sunDir.
-    glm::vec3 lightPos = center + lightDirNorm * (radius * 2.0f);
-
-    glm::vec3 up = (std::abs(lightDirNorm.y) > 0.99f) ? glm::vec3(0.0f, 0.0f, 1.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
-    glm::mat4 lightView = glm::lookAt(lightPos, center, up);
-
-    float minX = std::numeric_limits<float>::max();
-    float maxX = std::numeric_limits<float>::lowest();
-    float minY = std::numeric_limits<float>::max();
-    float maxY = std::numeric_limits<float>::lowest();
-    float minZ = std::numeric_limits<float>::max();
-    float maxZ = std::numeric_limits<float>::lowest();
-
-    for (const auto& corner : frustumCorners) {
-        glm::vec4 lightSpaceCorner = lightView * glm::vec4(corner, 1.0f);
-        minX = std::min(minX, lightSpaceCorner.x);
-        maxX = std::max(maxX, lightSpaceCorner.x);
-        minY = std::min(minY, lightSpaceCorner.y);
-        maxY = std::max(maxY, lightSpaceCorner.y);
-        minZ = std::min(minZ, lightSpaceCorner.z);
-        maxZ = std::max(maxZ, lightSpaceCorner.z);
-    }
-
-    // Extend the depth range slightly to catch shadow casters behind the camera.
-    float zMult = 10.0f;
-    minZ = minZ < 0 ? minZ * zMult : minZ / zMult;
-    maxZ = maxZ < 0 ? maxZ / zMult : maxZ * zMult;
-
-    glm::mat4 lightProjection = glm::ortho(minX, maxX, minY, maxY, minZ, maxZ);
 
     // Vulkan corrections:
     lightProjection[1][1] *= -1.0f;

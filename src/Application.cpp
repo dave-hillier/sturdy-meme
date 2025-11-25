@@ -124,6 +124,10 @@ void Application::processEvents() {
                     renderer.resumeAutoTime();
                     renderer.setTimeScale(1.0f);
                 }
+                else if (event.key.scancode == SDL_SCANCODE_5) {
+                    renderer.toggleShadowMode();
+                    SDL_Log("Shadow mode: %s", renderer.isUsingFrustumFittedShadows() ? "Frustum-fitted" : "Fixed");
+                }
                 break;
             case SDL_EVENT_GAMEPAD_ADDED:
                 if (!gamepad) {

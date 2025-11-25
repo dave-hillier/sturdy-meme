@@ -75,6 +75,9 @@ public:
     void resumeAutoTime() { useManualTime = false; }
     float getTimeOfDay() const { return currentTimeOfDay; }
 
+    void toggleShadowMode() { useFrustumFittedShadows = !useFrustumFittedShadows; }
+    bool isUsingFrustumFittedShadows() const { return useFrustumFittedShadows; }
+
     // Celestial/astronomical settings
     void setLocation(const GeographicLocation& location) { celestialCalculator.setLocation(location); }
     const GeographicLocation& getLocation() const { return celestialCalculator.getLocation(); }
@@ -197,4 +200,6 @@ private:
     int currentYear = 2024;
     int currentMonth = 6;
     int currentDay = 21;  // Summer solstice by default
+
+    bool useFrustumFittedShadows = false;  // false = fixed shadows (crisp), true = frustum-fitted
 };
