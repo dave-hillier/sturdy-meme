@@ -211,8 +211,10 @@ CelestialPosition CelestialCalculator::calculateSunPosition(const DateTime& date
 
     // Intensity based on altitude (smoothstep from -6 degrees to +10 degrees)
     // Civil twilight ends at -6 degrees
-    float normalizedAlt = (result.altitude + 6.0f) / 16.0f;
-    result.intensity = glm::clamp(normalizedAlt * normalizedAlt * (3.0f - 2.0f * normalizedAlt), 0.0f, 1.0f);
+    // Clamp to [0,1] before applying smoothstep curve; otherwise values above 10°
+    // would push the polynomial negative and kill intensity at midday.
+    float normalizedAlt = glm::clamp((result.altitude + 6.0f) / 16.0f, 0.0f, 1.0f);
+    result.intensity = normalizedAlt * normalizedAlt * (3.0f - 2.0f * normalizedAlt);
 
     return result;
 }
@@ -309,8 +311,12 @@ MoonPosition CelestialCalculator::calculateMoonPosition(const DateTime& dateTime
     result.illumination = (1.0f - std::cos(result.phase * 2.0f * glm::pi<float>())) * 0.5f;
 
     // Intensity based on altitude and illumination
-    float altFactor = glm::clamp((result.altitude + 5.0f) / 15.0f, 0.0f, 1.0f);
-    result.intensity = altFactor * result.illumination * 0.3f;  // Moon is ~30% as bright as full sun
+    // Allow useful moon light sooner after rise and push it a bit brighter overall.
+    float altFactor = glm::clamp((result.altitude + 2.0f) / 12.0f, 0.0f, 1.0f);
+    float baseMoon = altFactor * result.illumination * 0.5f;  // Boosted to ~50% of sun for visibility
+    // Keep a small floor so nights aren't pitch black even with a low moon.
+    float minMoon = result.illumination * 0.05f;
+    result.intensity = glm::max(baseMoon, minMoon);
 
     return result;
 }
@@ -329,8 +335,8 @@ glm::vec3 CelestialCalculator::getAmbientColor(float sunAltitude) const {
     // Transition from night ambient to day ambient
     float t = glm::smoothstep(-10.0f, 10.0f, sunAltitude);
 
-    glm::vec3 nightAmbient(0.02f, 0.02f, 0.05f);  // Dark blue
-    glm::vec3 dayAmbient(0.15f, 0.15f, 0.2f);     // Light blue
+    glm::vec3 nightAmbient(0.05f, 0.05f, 0.08f);  // Slightly brighter night floor
+    glm::vec3 dayAmbient(0.15f, 0.15f, 0.20f);    // Keep daytime ambient lower for stronger shadow contrast
 
     return glm::mix(nightAmbient, dayAmbient, t);
 }

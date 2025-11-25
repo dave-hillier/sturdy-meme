@@ -164,12 +164,7 @@ void main() {
         float targetExp = log2(targetLum / max(avgLum, 0.001));
 
         // Clamp to reasonable range
-        targetExp = clamp(targetExp, -4.0, 4.0);
-
-        // Temporal smoothing: interpolate from previous exposure toward target
-        float adaptSpeed = ubo.adaptationSpeed * ubo.deltaTime;
-        adaptSpeed = clamp(adaptSpeed, 0.0, 1.0);
-        finalExposure = mix(ubo.previousExposure, targetExp, adaptSpeed);
+        finalExposure = clamp(targetExp, -4.0, 4.0);
     }
 
     // Compute bloom

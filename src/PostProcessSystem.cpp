@@ -563,14 +563,9 @@ void PostProcessSystem::recordPostProcess(VkCommandBuffer cmd, uint32_t frameInd
     ubo->bloomIntensity = bloomIntensity;
     ubo->bloomRadius = bloomRadius;
 
-    // Update tracked exposure for next frame (estimate based on current)
-    // Note: In fragment shader approach, all pixels compute the same exposure
-    // The lastAutoExposure will be updated by the shader's output being read back
-    // For now, we just slowly adapt the CPU-side value
-    if (autoExposureEnabled) {
-        // Simple approximation - let shader handle actual adaptation
-        lastAutoExposure = ubo->previousExposure;
-    }
+    // No GPU readback: just keep CPU-side exposure as the last value we sent so
+    // subsequent frames have a stable starting point for manual mode.
+    lastAutoExposure = ubo->autoExposure > 0.5f ? ubo->previousExposure : manualExposure;
 
     // Begin swapchain render pass for final composite
     VkRenderPassBeginInfo renderPassInfo{};

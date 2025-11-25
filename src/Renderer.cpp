@@ -1349,6 +1349,8 @@ void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera& camera) 
     ubo.timeOfDay = currentTimeOfDay;
     ubo.shadowMapSize = static_cast<float>(SHADOW_MAP_SIZE);
 
+    lastSunIntensity = sunIntensity;
+
     memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
 }
 
@@ -1391,8 +1393,8 @@ void Renderer::render(const Camera& camera) {
     grassSystem.updateUniforms(currentFrame, camera.getPosition(), viewProj);
     grassSystem.recordResetAndCompute(commandBuffers[currentFrame], currentFrame, grassTime);
 
-    // Shadow pass
-    {
+    // Shadow pass (skip when the sun is effectively below the horizon to avoid invalid light POV)
+    if (lastSunIntensity > 0.001f) {
         VkRenderPassBeginInfo shadowPassInfo{};
         shadowPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         shadowPassInfo.renderPass = shadowRenderPass;
@@ -1491,7 +1493,7 @@ void Renderer::render(const Camera& camera) {
 
     // Post-process pass - tone map HDR to LDR swapchain
     postProcessSystem.recordPostProcess(commandBuffers[currentFrame], currentFrame,
-                                         framebuffers[imageIndex], 0.0f);
+                                         framebuffers[imageIndex], deltaTime);
 
     vkEndCommandBuffer(commandBuffers[currentFrame]);
 
