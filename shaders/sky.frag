@@ -302,6 +302,33 @@ float ozoneDensity(float altitude) {
     return exp(-0.5 * z * z);
 }
 
+// Earth shadow at sunrise/sunset (Phase 4.1.8)
+// Computes shadow factor for a point in the atmosphere
+float computeEarthShadow(vec3 worldPos, vec3 sunDir) {
+    // worldPos is relative to planet center (origin at planet center)
+    float altitude = length(worldPos) - PLANET_RADIUS;
+
+    // Project position onto sun direction
+    float sunDist = dot(worldPos, sunDir);
+
+    // Check if behind planet relative to sun (in shadow cone)
+    if (sunDist < 0.0) {
+        // Calculate perpendicular distance from sun ray through planet center
+        float perpDist = length(worldPos - sunDir * sunDist);
+
+        // Shadow radius decreases with altitude (cone shape)
+        float shadowRadius = PLANET_RADIUS * (1.0 - altitude / (ATMOSPHERE_RADIUS - PLANET_RADIUS));
+
+        if (perpDist < shadowRadius) {
+            // In umbra/penumbra region
+            float penumbraWidth = (ATMOSPHERE_RADIUS - PLANET_RADIUS) * 0.1;  // Soft edge
+            return smoothstep(shadowRadius - penumbraWidth, shadowRadius, perpDist);
+        }
+    }
+
+    return 1.0;  // Fully lit
+}
+
 struct ScatteringResult {
     vec3 inscatter;
     vec3 transmittance;
@@ -358,8 +385,12 @@ ScatteringResult integrateAtmosphere(vec3 origin, vec3 dir, int sampleCount) {
                           mieDensity * vec3(MIE_ABSORPTION_BASE) +
                           ozone * OZONE_ABSORPTION;
 
-        // Combine LMS Rayleigh with RGB Mie for scattering
-        vec3 segmentScatter = rayleighScatterLMS + mieScatter * mieP;
+        // Earth shadow modulates in-scattering (Phase 4.1.8)
+        // Points in Earth's shadow don't receive direct sunlight
+        float earthShadow = computeEarthShadow(pos, sunDir);
+
+        // Combine LMS Rayleigh with RGB Mie for scattering, modulated by shadow
+        vec3 segmentScatter = (rayleighScatterLMS + mieScatter * mieP) * earthShadow;
 
         vec3 attenuation = exp(-extinction * stepSize);
         inscatter += transmittance * segmentScatter * stepSize;
