@@ -37,7 +37,8 @@ struct PushConstants {
     glm::mat4 model;
     float roughness;
     float metallic;
-    float padding[2];  // Align to 16 bytes
+    float emissiveIntensity;
+    float padding;
 };
 
 struct SceneObject {
@@ -46,6 +47,8 @@ struct SceneObject {
     Texture* texture;
     float roughness = 0.5f;
     float metallic = 0.0f;
+    float emissiveIntensity = 0.0f;
+    bool castsShadow = true;
 };
 
 class Renderer {

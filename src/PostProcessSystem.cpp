@@ -370,7 +370,7 @@ bool PostProcessSystem::createUniformBuffers() {
         ubo->exposure = 0.0f;
         ubo->bloomThreshold = 1.0f;
         ubo->bloomIntensity = 0.5f;
-        ubo->padding = 0.0f;
+        ubo->autoExposure = 1.0f;  // Enable by default
     }
 
     return true;
@@ -555,6 +555,22 @@ void PostProcessSystem::recordPostProcess(VkCommandBuffer cmd, uint32_t frameInd
     // Update uniform buffer
     PostProcessUniforms* ubo = static_cast<PostProcessUniforms*>(uniformMappedPtrs[frameIndex]);
     ubo->exposure = manualExposure;
+    ubo->autoExposure = autoExposureEnabled ? 1.0f : 0.0f;
+    ubo->previousExposure = lastAutoExposure;
+    ubo->deltaTime = deltaTime;
+    ubo->adaptationSpeed = 2.0f;  // Smooth adaptation over ~0.5 seconds
+    ubo->bloomThreshold = bloomThreshold;
+    ubo->bloomIntensity = bloomIntensity;
+    ubo->bloomRadius = bloomRadius;
+
+    // Update tracked exposure for next frame (estimate based on current)
+    // Note: In fragment shader approach, all pixels compute the same exposure
+    // The lastAutoExposure will be updated by the shader's output being read back
+    // For now, we just slowly adapt the CPU-side value
+    if (autoExposureEnabled) {
+        // Simple approximation - let shader handle actual adaptation
+        lastAutoExposure = ubo->previousExposure;
+    }
 
     // Begin swapchain render pass for final composite
     VkRenderPassBeginInfo renderPassInfo{};

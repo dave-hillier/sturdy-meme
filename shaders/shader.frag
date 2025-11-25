@@ -24,6 +24,7 @@ layout(push_constant) uniform PushConstants {
     mat4 model;
     float roughness;
     float metallic;
+    float emissiveIntensity;
 } material;
 
 layout(location = 0) in vec3 fragNormal;
@@ -178,6 +179,10 @@ void main() {
     vec3 ambient = ambientDiffuse + ambientSpecular;
 
     vec3 finalColor = ambient + sunLight + moonLight;
+
+    // Add emissive glow
+    vec3 emissive = albedo * material.emissiveIntensity;
+    finalColor += emissive;
 
     outColor = vec4(finalColor, texColor.a);
 }
