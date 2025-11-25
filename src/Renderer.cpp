@@ -5,6 +5,9 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <stdexcept>
 #include <cstring>
+#include <cmath>
+#include <array>
+#include <limits>
 
 bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     window = win;
@@ -720,27 +723,71 @@ bool Renderer::createShadowPipeline() {
 }
 
 glm::mat4 Renderer::calculateLightSpaceMatrix(const glm::vec3& lightDir, const Camera& camera) {
-    // Orthographic projection - tighter frustum for better shadow resolution
-    // Scene objects are within ~10 units of origin, so 20 units coverage is enough
-    float orthoSize = 15.0f;
-    float nearPlane = 0.1f;
-    float farPlane = 100.0f;
+    // Build a light matrix that tightly fits the camera frustum to maximize shadow resolution.
+    glm::vec3 lightDirNorm = glm::normalize(lightDir);
+    if (glm::length(lightDirNorm) < std::numeric_limits<float>::epsilon()) {
+        lightDirNorm = glm::vec3(0.0f, -1.0f, 0.0f);
+    }
 
-    // Light view matrix - looking from the sun position toward the scene center
-    // lightDir points toward where the sun is, so lightPos should be along lightDir
-    glm::vec3 lightPos = lightDir * 75.0f;  // Position light at the sun's location
+    glm::mat4 view = camera.getViewMatrix();
+    glm::mat4 proj = camera.getProjectionMatrix();
+    glm::mat4 invViewProj = glm::inverse(proj * view);
 
-    // Use a stable up vector - avoid issues when light is nearly vertical
-    glm::vec3 up = (abs(lightDir.y) > 0.99f) ? glm::vec3(0.0f, 0.0f, 1.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
-    glm::mat4 lightView = glm::lookAt(lightPos, glm::vec3(0.0f), up);
+    std::array<glm::vec3, 8> frustumCorners{};
+    int cornerIndex = 0;
+    for (int x = -1; x <= 1; x += 2) {
+        for (int y = -1; y <= 1; y += 2) {
+            for (int z = -1; z <= 1; z += 2) {
+                glm::vec4 corner = invViewProj * glm::vec4(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z), 1.0f);
+                frustumCorners[cornerIndex++] = glm::vec3(corner) / corner.w;
+            }
+        }
+    }
 
-    // Orthographic projection - GLM uses OpenGL conventions
-    glm::mat4 lightProjection = glm::ortho(-orthoSize, orthoSize, -orthoSize, orthoSize, nearPlane, farPlane);
+    glm::vec3 center(0.0f);
+    for (const auto& corner : frustumCorners) {
+        center += corner;
+    }
+    center /= static_cast<float>(frustumCorners.size());
+
+    float radius = 0.0f;
+    for (const auto& corner : frustumCorners) {
+        radius = std::max(radius, glm::length(corner - center));
+    }
+
+    // Position the light back along the incoming light direction (-sunDir). sunPos.direction
+    // points from the scene toward the sun, so the incoming light travels along -sunDir.
+    glm::vec3 lightPos = center + lightDirNorm * (radius * 2.0f);
+
+    glm::vec3 up = (std::abs(lightDirNorm.y) > 0.99f) ? glm::vec3(0.0f, 0.0f, 1.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
+    glm::mat4 lightView = glm::lookAt(lightPos, center, up);
+
+    float minX = std::numeric_limits<float>::max();
+    float maxX = std::numeric_limits<float>::lowest();
+    float minY = std::numeric_limits<float>::max();
+    float maxY = std::numeric_limits<float>::lowest();
+    float minZ = std::numeric_limits<float>::max();
+    float maxZ = std::numeric_limits<float>::lowest();
+
+    for (const auto& corner : frustumCorners) {
+        glm::vec4 lightSpaceCorner = lightView * glm::vec4(corner, 1.0f);
+        minX = std::min(minX, lightSpaceCorner.x);
+        maxX = std::max(maxX, lightSpaceCorner.x);
+        minY = std::min(minY, lightSpaceCorner.y);
+        maxY = std::max(maxY, lightSpaceCorner.y);
+        minZ = std::min(minZ, lightSpaceCorner.z);
+        maxZ = std::max(maxZ, lightSpaceCorner.z);
+    }
+
+    // Extend the depth range slightly to catch shadow casters behind the camera.
+    float zMult = 10.0f;
+    minZ = minZ < 0 ? minZ * zMult : minZ / zMult;
+    maxZ = maxZ < 0 ? maxZ / zMult : maxZ * zMult;
+
+    glm::mat4 lightProjection = glm::ortho(minX, maxX, minY, maxY, minZ, maxZ);
 
     // Vulkan corrections:
-    // 1. Flip Y axis (Vulkan Y is inverted compared to OpenGL)
     lightProjection[1][1] *= -1.0f;
-    // 2. Convert depth from [-1,1] to [0,1]
     lightProjection[2][2] = lightProjection[2][2] * 0.5f;
     lightProjection[3][2] = lightProjection[3][2] * 0.5f + 0.5f;
 
