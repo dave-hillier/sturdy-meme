@@ -147,7 +147,8 @@ float celestialDisc(vec3 dir, vec3 celestialDir, float size) {
 }
 
 vec3 renderAtmosphere(vec3 dir) {
-    vec3 origin = vec3(0.0, PLANET_RADIUS + max(ubo.cameraPosition.y, 0.0), 0.0);
+    // Include camera X/Z to avoid radial artifacts centered at world origin
+    vec3 origin = vec3(ubo.cameraPosition.x, PLANET_RADIUS + max(ubo.cameraPosition.y, 0.0), ubo.cameraPosition.z);
     ScatteringResult result = integrateAtmosphere(origin, normalize(dir), 24);
 
     vec3 sunLight = ubo.sunColor.rgb * ubo.sunDirection.w;

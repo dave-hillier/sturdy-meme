@@ -170,7 +170,8 @@ ScatteringResult integrateAtmosphere(vec3 origin, vec3 dir, float maxDistance, i
 }
 
 vec3 applyAerialPerspective(vec3 color, vec3 viewDir, float viewDistance) {
-    vec3 origin = vec3(0.0, PLANET_RADIUS + max(ubo.cameraPosition.y, 0.0), 0.0);
+    // Include camera X/Z to avoid radial artifacts centered at world origin
+    vec3 origin = vec3(ubo.cameraPosition.x, PLANET_RADIUS + max(ubo.cameraPosition.y, 0.0), ubo.cameraPosition.z);
     ScatteringResult result = integrateAtmosphere(origin, normalize(viewDir), viewDistance, 8);
 
     vec3 sunLight = ubo.sunColor.rgb * ubo.sunDirection.w;
