@@ -191,27 +191,18 @@ float WindSystem::perlinNoise(float x, float y) const {
 }
 
 float WindSystem::sampleWindAtPosition(const glm::vec2& worldPos) const {
-    // Project world position onto wind direction for wave propagation
-    float windDist = glm::dot(worldPos, windDirection);
+    // Scroll the sampling position based on wind direction and time
+    glm::vec2 scrolledPos = worldPos - windDirection * totalTime * windSpeed;
 
-    // Primary motion: smooth traveling sine wave
-    float primaryWave = std::sin((windDist * noiseScale - totalTime * windSpeed) * 0.5f) * 0.5f + 0.5f;
+    // Single octave of low-frequency noise for smooth, gentle waves
+    float lowFreqScale = noiseScale * 0.15f;
+    float noise = perlinNoise(scrolledPos.x * lowFreqScale, scrolledPos.y * lowFreqScale);
 
-    // Secondary wave at different frequency for gentle variation
-    float secondaryWave = std::sin((windDist * noiseScale * 0.7f - totalTime * windSpeed * 0.8f) * 0.3f) * 0.5f + 0.5f;
+    // Apply smoothstep to make transitions even gentler
+    noise = noise * noise * (3.0f - 2.0f * noise);
 
-    // Combine waves (primary dominant, secondary adds subtle variation)
-    float waveMotion = primaryWave * 0.7f + secondaryWave * 0.3f;
+    // Add gust variation (time-based sine wave)
+    float gust = (std::sin(totalTime * gustFrequency * 6.28318f) * 0.5f + 0.5f) * gustAmplitude;
 
-    // Subtle noise for spatial variation (very gentle, not dominant)
-    glm::vec2 scrolledPos = worldPos - windDirection * totalTime * windSpeed * 0.5f;
-    float noise = perlinNoise(scrolledPos.x * noiseScale * 0.3f, scrolledPos.y * noiseScale * 0.3f);
-
-    // Noise modulates the wave amplitude slightly (10% influence)
-    float noiseModulation = 0.9f + noise * 0.2f;
-
-    // Global gust variation (time-based intensity changes)
-    float gust = 1.0f + (std::sin(totalTime * gustFrequency * 6.28318f) * 0.5f + 0.5f) * gustAmplitude;
-
-    return waveMotion * noiseModulation * gust * windStrength;
+    return (noise + gust) * windStrength;
 }

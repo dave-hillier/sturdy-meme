@@ -112,7 +112,7 @@ float perlinNoise(float x, float y) {
     return (res + 1.0) * 0.5;
 }
 
-// Sample wind at a world position with smooth sine wave + subtle noise modulation
+// Sample wind at a world position with smooth, low-frequency scrolling noise
 float sampleWind(vec2 worldPos) {
     vec2 windDir = wind.windDirectionAndStrength.xy;
     float windStrength = wind.windDirectionAndStrength.z;
@@ -122,30 +122,21 @@ float sampleWind(vec2 worldPos) {
     float gustFreq = wind.windParams.x;
     float gustAmp = wind.windParams.y;
 
-    // Project world position onto wind direction for wave propagation
-    float windDist = dot(worldPos, windDir);
+    // Scroll position in wind direction
+    vec2 scrolledPos = worldPos - windDir * windTime * windSpeed;
 
-    // Primary motion: smooth traveling sine wave
-    // Wave moves in wind direction with configurable speed
-    float primaryWave = sin((windDist * noiseScale - windTime * windSpeed) * 0.5) * 0.5 + 0.5;
+    // Single octave of low-frequency noise for smooth, gentle waves
+    // Using a much lower frequency (0.15x) for broad, smooth wind patterns
+    float lowFreqScale = noiseScale * 0.15;
+    float noise = perlinNoise(scrolledPos.x * lowFreqScale, scrolledPos.y * lowFreqScale);
 
-    // Secondary wave at different frequency for gentle variation
-    float secondaryWave = sin((windDist * noiseScale * 0.7 - windTime * windSpeed * 0.8) * 0.3) * 0.5 + 0.5;
+    // Apply smoothstep to make transitions even gentler
+    noise = smoothstep(0.0, 1.0, noise);
 
-    // Combine waves (primary dominant, secondary adds subtle variation)
-    float waveMotion = primaryWave * 0.7 + secondaryWave * 0.3;
+    // Add time-varying gust
+    float gust = (sin(windTime * gustFreq * 6.28318) * 0.5 + 0.5) * gustAmp;
 
-    // Subtle noise for spatial variation (very gentle, not dominant)
-    vec2 scrolledPos = worldPos - windDir * windTime * windSpeed * 0.5;
-    float noise = perlinNoise(scrolledPos.x * noiseScale * 0.3, scrolledPos.y * noiseScale * 0.3);
-
-    // Noise modulates the wave amplitude slightly (10% influence)
-    float noiseModulation = 0.9 + noise * 0.2;
-
-    // Global gust variation (time-based intensity changes)
-    float gust = 1.0 + (sin(windTime * gustFreq * 6.28318) * 0.5 + 0.5) * gustAmp;
-
-    return waveMotion * noiseModulation * gust * windStrength;
+    return (noise + gust) * windStrength;
 }
 
 layout(location = 0) out vec3 fragColor;
