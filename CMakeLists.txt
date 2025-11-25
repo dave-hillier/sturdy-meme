@@ -60,6 +60,8 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.frag.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow.vert.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow.frag.spv
 )
 
 set_source_files_properties(${RESOURCE_FILES} PROPERTIES
@@ -124,6 +126,18 @@ if(SHADER_COMPILE_CMD)
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.frag
         COMMENT "Compiling grass fragment shader"
     )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow.vert.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow.vert.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow.vert
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow.vert
+        COMMENT "Compiling shadow vertex shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow.frag.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow.frag.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow.frag
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow.frag
+        COMMENT "Compiling shadow fragment shader"
+    )
     add_custom_target(shaders DEPENDS
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.frag.spv
@@ -132,6 +146,8 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.frag.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow.vert.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow.frag.spv
     )
     add_dependencies(${PROJECT_NAME} shaders)
 else()

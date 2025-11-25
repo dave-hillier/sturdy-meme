@@ -17,17 +17,26 @@ struct UniformBufferObject {
     glm::mat4 model;
     glm::mat4 view;
     glm::mat4 proj;
+    glm::mat4 lightSpaceMatrix;
     glm::vec4 sunDirection;
     glm::vec4 moonDirection;
     glm::vec4 sunColor;
     glm::vec4 ambientColor;
     glm::vec4 cameraPosition;
     float timeOfDay;
-    float padding[3];
+    float shadowMapSize;
+    float padding[2];
+};
+
+struct ShadowPushConstants {
+    glm::mat4 model;
 };
 
 struct PushConstants {
     glm::mat4 model;
+    float roughness;
+    float metallic;
+    float padding[2];  // Align to 16 bytes
 };
 
 struct SceneObject {
@@ -71,6 +80,12 @@ private:
     bool createDescriptorSets();
     bool createDepthResources();
 
+    // Shadow mapping
+    bool createShadowResources();
+    bool createShadowRenderPass();
+    bool createShadowPipeline();
+    glm::mat4 calculateLightSpaceMatrix(const glm::vec3& lightDir, const Camera& camera);
+
     void updateUniformBuffer(uint32_t currentImage, const Camera& camera);
 
     SDL_Window* window = nullptr;
@@ -109,6 +124,17 @@ private:
     VmaAllocation depthImageAllocation = VK_NULL_HANDLE;
     VkImageView depthImageView = VK_NULL_HANDLE;
     VkFormat depthFormat = VK_FORMAT_UNDEFINED;
+
+    // Shadow map resources
+    static constexpr uint32_t SHADOW_MAP_SIZE = 2048;
+    VkImage shadowImage = VK_NULL_HANDLE;
+    VmaAllocation shadowImageAllocation = VK_NULL_HANDLE;
+    VkImageView shadowImageView = VK_NULL_HANDLE;
+    VkSampler shadowSampler = VK_NULL_HANDLE;
+    VkRenderPass shadowRenderPass = VK_NULL_HANDLE;
+    VkFramebuffer shadowFramebuffer = VK_NULL_HANDLE;
+    VkPipeline shadowPipeline = VK_NULL_HANDLE;
+    VkPipelineLayout shadowPipelineLayout = VK_NULL_HANDLE;
 
     std::vector<VkBuffer> uniformBuffers;
     std::vector<VmaAllocation> uniformBuffersAllocations;
