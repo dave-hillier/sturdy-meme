@@ -182,7 +182,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     grassInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
 
     if (!grassSystem.init(grassInfo)) return false;
-    grassSystem.updateDescriptorSets(device, uniformBuffers);
+    grassSystem.updateDescriptorSets(device, uniformBuffers, shadowImageView, shadowSampler);
 
     if (!createSyncObjects()) return false;
 

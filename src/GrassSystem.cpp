@@ -199,7 +199,7 @@ bool GrassSystem::createComputePipeline() {
 }
 
 bool GrassSystem::createGraphicsDescriptorSetLayout() {
-    std::array<VkDescriptorSetLayoutBinding, 2> bindings{};
+    std::array<VkDescriptorSetLayoutBinding, 3> bindings{};
 
     // UBO (same as main pipeline)
     bindings[0].binding = 0;
@@ -212,6 +212,13 @@ bool GrassSystem::createGraphicsDescriptorSetLayout() {
     bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     bindings[1].descriptorCount = 1;
     bindings[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
+    // Shadow map sampler (for receiving shadows)
+    bindings[2].binding = 2;
+    bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[2].descriptorCount = 1;
+    bindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    bindings[2].pImmutableSamplers = nullptr;
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -450,8 +457,9 @@ bool GrassSystem::createDescriptorSets() {
     return true;
 }
 
-void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>& uniformBuffers) {
-    // Update graphics descriptor sets with UBO and instance buffers
+void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>& uniformBuffers,
+                                        VkImageView shadowMapView, VkSampler shadowSampler) {
+    // Update graphics descriptor sets with UBO, instance buffers, and shadow map
     for (size_t i = 0; i < framesInFlight; i++) {
         VkDescriptorBufferInfo uboInfo{};
         uboInfo.buffer = uniformBuffers[i];
@@ -463,7 +471,12 @@ void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>
         instanceBufferInfo.offset = 0;
         instanceBufferInfo.range = sizeof(GrassInstance) * MAX_INSTANCES;
 
-        std::array<VkWriteDescriptorSet, 2> graphicsWrites{};
+        VkDescriptorImageInfo shadowImageInfo{};
+        shadowImageInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+        shadowImageInfo.imageView = shadowMapView;
+        shadowImageInfo.sampler = shadowSampler;
+
+        std::array<VkWriteDescriptorSet, 3> graphicsWrites{};
 
         graphicsWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         graphicsWrites[0].dstSet = graphicsDescriptorSets[i];
@@ -480,6 +493,14 @@ void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>
         graphicsWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         graphicsWrites[1].descriptorCount = 1;
         graphicsWrites[1].pBufferInfo = &instanceBufferInfo;
+
+        graphicsWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        graphicsWrites[2].dstSet = graphicsDescriptorSets[i];
+        graphicsWrites[2].dstBinding = 2;
+        graphicsWrites[2].dstArrayElement = 0;
+        graphicsWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        graphicsWrites[2].descriptorCount = 1;
+        graphicsWrites[2].pImageInfo = &shadowImageInfo;
 
         vkUpdateDescriptorSets(dev, static_cast<uint32_t>(graphicsWrites.size()),
                                graphicsWrites.data(), 0, nullptr);

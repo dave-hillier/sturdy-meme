@@ -31,6 +31,7 @@ layout(location = 0) out vec3 fragColor;
 layout(location = 1) out vec3 fragNormal;
 layout(location = 2) out float fragHeight;
 layout(location = 3) out float fragClumpId;
+layout(location = 4) out vec3 fragWorldPos;
 
 // Quadratic Bezier evaluation
 vec3 bezier(vec3 p0, vec3 p1, vec3 p2, float t) {
@@ -128,4 +129,5 @@ void main() {
     fragNormal = normal;
     fragHeight = t;
     fragClumpId = clumpId;
+    fragWorldPos = worldPos;
 }

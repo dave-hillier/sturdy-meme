@@ -14,15 +14,54 @@ layout(binding = 0) uniform UniformBufferObject {
     float shadowMapSize;
 } ubo;
 
+layout(binding = 2) uniform sampler2DShadow shadowMap;
+
 layout(location = 0) in vec3 fragColor;
 layout(location = 1) in vec3 fragNormal;
 layout(location = 2) in float fragHeight;
 layout(location = 3) in float fragClumpId;
+layout(location = 4) in vec3 fragWorldPos;
 
 layout(location = 0) out vec4 outColor;
 
 // Clump color variation parameters
 const float CLUMP_COLOR_INFLUENCE = 0.15;  // Subtle color variation (0-1)
+
+// Shadow calculation with PCF
+float calculateShadow(vec3 worldPos, vec3 normal, vec3 lightDir) {
+    // Transform to light space
+    vec4 lightSpacePos = ubo.lightSpaceMatrix * vec4(worldPos, 1.0);
+    vec3 projCoords = lightSpacePos.xyz / lightSpacePos.w;
+
+    // Transform to [0,1] range for UV coordinates
+    projCoords.xy = projCoords.xy * 0.5 + 0.5;
+
+    // Check if outside shadow map
+    if (projCoords.x < 0.0 || projCoords.x > 1.0 ||
+        projCoords.y < 0.0 || projCoords.y > 1.0 ||
+        projCoords.z > 1.0) {
+        return 1.0;  // No shadow outside frustum
+    }
+
+    // Bias to reduce shadow acne - grass needs less bias due to thin geometry
+    float cosTheta = max(dot(normal, lightDir), 0.0);
+    float bias = 0.003 * tan(acos(cosTheta));
+    bias = clamp(bias, 0.0, 0.008);
+
+    // PCF 3x3
+    float shadow = 0.0;
+    float texelSize = 1.0 / ubo.shadowMapSize;
+
+    for (int x = -1; x <= 1; x++) {
+        for (int y = -1; y <= 1; y++) {
+            vec2 offset = vec2(x, y) * texelSize;
+            shadow += texture(shadowMap, vec3(projCoords.xy + offset, projCoords.z - bias));
+        }
+    }
+    shadow /= 9.0;
+
+    return shadow;
+}
 
 void main() {
     vec3 normal = normalize(fragNormal);
@@ -42,10 +81,14 @@ void main() {
     float brightnessVar = 0.9 + fragClumpId * 0.2;  // 0.9 to 1.1
     color *= mix(1.0, brightnessVar, CLUMP_COLOR_INFLUENCE);
 
+    // Calculate shadow for sun light
+    vec3 sunL = normalize(ubo.sunDirection.xyz);
+    float shadow = calculateShadow(fragWorldPos, normal, sunL);
+
     // Two-sided lighting (grass blades are thin)
     float sunDot = dot(normal, ubo.sunDirection.xyz);
     float sunDiffuse = max(sunDot, 0.0) + max(-sunDot, 0.0) * 0.6;  // Backface gets some light
-    vec3 sunLight = ubo.sunColor.rgb * sunDiffuse * ubo.sunDirection.w;
+    vec3 sunLight = ubo.sunColor.rgb * sunDiffuse * ubo.sunDirection.w * shadow;
 
     float moonDot = dot(normal, ubo.moonDirection.xyz);
     float moonDiffuse = max(moonDot, 0.0) + max(-moonDot, 0.0) * 0.6;
