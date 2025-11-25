@@ -188,6 +188,7 @@ private:
     float manualTime = 0.0f;
     bool useManualTime = false;
     float currentTimeOfDay = 0.0f;
+    float lastSunIntensity = 1.0f;
 
     // Celestial calculations
     CelestialCalculator celestialCalculator;
