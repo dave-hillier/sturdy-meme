@@ -29,6 +29,15 @@ struct PushConstants {
     glm::mat4 model;
 };
 
+struct GrassPushConstants {
+    float time;
+};
+
+struct GrassInstance {
+    glm::vec4 positionAndFacing;  // xyz = position, w = facing angle
+    glm::vec4 heightHashTilt;     // x = height, y = hash, z = tilt, w = unused
+};
+
 struct SceneObject {
     glm::mat4 transform;
     Mesh* mesh;
@@ -70,6 +79,14 @@ private:
     bool createDescriptorSets();
     bool createDepthResources();
 
+    // Grass system
+    bool createGrassBuffers();
+    bool createGrassComputeDescriptorSetLayout();
+    bool createGrassComputePipeline();
+    bool createGrassGraphicsDescriptorSetLayout();
+    bool createGrassGraphicsPipeline();
+    bool createGrassDescriptorSets();
+
     VkShaderModule createShaderModule(const std::vector<char>& code);
     std::vector<char> readFile(const std::string& filename);
     void updateUniformBuffer(uint32_t currentImage, const Camera& camera);
@@ -99,6 +116,28 @@ private:
     VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
     VkPipeline graphicsPipeline = VK_NULL_HANDLE;
     VkPipeline skyPipeline = VK_NULL_HANDLE;
+
+    // Grass compute pipeline
+    VkDescriptorSetLayout grassComputeDescriptorSetLayout = VK_NULL_HANDLE;
+    VkPipelineLayout grassComputePipelineLayout = VK_NULL_HANDLE;
+    VkPipeline grassComputePipeline = VK_NULL_HANDLE;
+
+    // Grass graphics pipeline
+    VkDescriptorSetLayout grassGraphicsDescriptorSetLayout = VK_NULL_HANDLE;
+    VkPipelineLayout grassGraphicsPipelineLayout = VK_NULL_HANDLE;
+    VkPipeline grassGraphicsPipeline = VK_NULL_HANDLE;
+
+    // Grass storage buffers (per frame)
+    std::vector<VkBuffer> grassInstanceBuffers;
+    std::vector<VmaAllocation> grassInstanceAllocations;
+    std::vector<VkBuffer> grassIndirectBuffers;
+    std::vector<VmaAllocation> grassIndirectAllocations;
+
+    // Grass descriptor sets
+    std::vector<VkDescriptorSet> grassComputeDescriptorSets;
+    std::vector<VkDescriptorSet> grassGraphicsDescriptorSets;
+
+    static constexpr uint32_t MAX_GRASS_INSTANCES = 10000;
 
     std::vector<VkFramebuffer> framebuffers;
     VkCommandPool commandPool = VK_NULL_HANDLE;

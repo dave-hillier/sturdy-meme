@@ -1,0 +1,84 @@
+#version 450
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+struct GrassInstance {
+    vec4 positionAndFacing;  // xyz = position, w = facing angle
+    vec4 heightHashTilt;     // x = height, y = hash, z = tilt, w = unused
+};
+
+struct DrawIndirectCommand {
+    uint vertexCount;
+    uint instanceCount;
+    uint firstVertex;
+    uint firstInstance;
+};
+
+layout(std430, binding = 0) buffer InstanceBuffer {
+    GrassInstance instances[];
+};
+
+layout(std430, binding = 1) buffer IndirectBuffer {
+    DrawIndirectCommand drawCmd;
+};
+
+layout(push_constant) uniform PushConstants {
+    float time;
+} push;
+
+// Hash functions for procedural placement
+float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+float hash2(vec2 p) {
+    return fract(sin(dot(p, vec2(269.5, 183.3))) * 43758.5453);
+}
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+
+    // Set vertexCount atomically (buffer is pre-cleared to 0 by CPU, so atomicMax ensures it becomes 15)
+    // This is safe even with multiple workgroups since they all write the same value
+    if (idx == 0) {
+        atomicMax(drawCmd.vertexCount, 15);  // 5 segments * 3 vertices per triangle
+    }
+
+    // Generate grass positions in a grid pattern
+    // Grid: 100x100 = 10000 potential blades
+    uint gridSize = 100;
+    if (idx >= gridSize * gridSize) return;
+
+    uint gridX = idx % gridSize;
+    uint gridZ = idx / gridSize;
+
+    // Map to world space (-25 to +25, centered on origin)
+    float spacing = 0.5;
+    float x = (float(gridX) - float(gridSize) / 2.0) * spacing;
+    float z = (float(gridZ) - float(gridSize) / 2.0) * spacing;
+
+    // Add some randomness to position (jitter)
+    vec2 cell = vec2(gridX, gridZ);
+    float h1 = hash(cell);
+    float h2 = hash2(cell);
+
+    x += (h1 - 0.5) * spacing * 0.8;
+    z += (hash(cell + vec2(100.0, 0.0)) - 0.5) * spacing * 0.8;
+
+    // Only place grass within disc radius (50 units)
+    float distSq = x * x + z * z;
+    if (distSq > 50.0 * 50.0) return;
+
+    // Atomically increment instance count and get our slot
+    uint slot = atomicAdd(drawCmd.instanceCount, 1);
+
+    // Generate varied instance properties
+    float facing = h1 * 6.28318;           // Random facing direction
+    float height = 0.3 + h2 * 0.4;         // Height between 0.3 and 0.7
+    float bladeHash = h1;                  // For wind animation
+    float tilt = (hash(cell + vec2(50.0, 50.0)) - 0.5) * 0.3;  // Slight tilt
+
+    // Write instance data
+    instances[slot].positionAndFacing = vec4(x, 0.0, z, facing);
+    instances[slot].heightHashTilt = vec4(height, bladeHash, tilt, 0.0);
+}

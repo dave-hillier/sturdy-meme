@@ -55,6 +55,9 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.frag.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.frag.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.vert.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.frag.spv
 )
 
 set_source_files_properties(${RESOURCE_FILES} PROPERTIES
@@ -101,11 +104,32 @@ if(SHADER_COMPILE_CMD)
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.frag
         COMMENT "Compiling sky fragment shader"
     )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.comp.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.comp
+        COMMENT "Compiling grass compute shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.vert.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.vert.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.vert
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.vert
+        COMMENT "Compiling grass vertex shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.frag.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.frag.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.frag
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.frag
+        COMMENT "Compiling grass fragment shader"
+    )
     add_custom_target(shaders DEPENDS
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.frag.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.frag.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.vert.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.frag.spv
     )
     add_dependencies(${PROJECT_NAME} shaders)
 else()
