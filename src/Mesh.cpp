@@ -2,6 +2,20 @@
 #include <cstring>
 #include <stdexcept>
 
+void Mesh::createPlane(float width, float depth) {
+    float hw = width * 0.5f;
+    float hd = depth * 0.5f;
+
+    vertices = {
+        {{-hw, 0.0f,  hd}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
+        {{ hw, 0.0f,  hd}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
+        {{ hw, 0.0f, -hd}, {0.0f, 1.0f, 0.0f}, {1.0f, 1.0f}},
+        {{-hw, 0.0f, -hd}, {0.0f, 1.0f, 0.0f}, {0.0f, 1.0f}},
+    };
+
+    indices = {0, 1, 2, 2, 3, 0};
+}
+
 void Mesh::createCube() {
     vertices = {
         // Front face (Z+)

@@ -90,17 +90,30 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     if (!createCommandPool()) return false;
     if (!createDescriptorSetLayout()) return false;
     if (!createGraphicsPipeline()) return false;
+    if (!createSkyPipeline()) return false;
     if (!createCommandBuffers()) return false;
     if (!createUniformBuffers()) return false;
 
-    mesh.createCube();
-    mesh.upload(allocator, device, commandPool, graphicsQueue);
+    groundMesh.createPlane(20.0f, 20.0f);
+    groundMesh.upload(allocator, device, commandPool, graphicsQueue);
+
+    cubeMesh.createCube();
+    cubeMesh.upload(allocator, device, commandPool, graphicsQueue);
 
     std::string texturePath = resourcePath + "/textures/crate.png";
-    if (!texture.load(texturePath, allocator, device, commandPool, graphicsQueue, physicalDevice)) {
+    if (!crateTexture.load(texturePath, allocator, device, commandPool, graphicsQueue, physicalDevice)) {
         SDL_Log("Failed to load texture: %s", texturePath.c_str());
         return false;
     }
+
+    if (!groundTexture.createSolidColor(80, 140, 70, 255, allocator, device, commandPool, graphicsQueue)) {
+        SDL_Log("Failed to create ground texture");
+        return false;
+    }
+
+    sceneObjects.push_back({glm::mat4(1.0f), &groundMesh, &groundTexture});
+    sceneObjects.push_back({glm::translate(glm::mat4(1.0f), glm::vec3(2.0f, 0.5f, 0.0f)), &cubeMesh, &crateTexture});
+    sceneObjects.push_back({glm::translate(glm::mat4(1.0f), glm::vec3(-1.5f, 0.5f, 1.0f)), &cubeMesh, &crateTexture});
 
     if (!createDescriptorPool()) return false;
     if (!createDescriptorSets()) return false;
@@ -119,8 +132,11 @@ void Renderer::shutdown() {
             vkDestroyFence(device, inFlightFences[i], nullptr);
         }
 
-        texture.destroy(allocator, device);
-        mesh.destroy(allocator);
+        crateTexture.destroy(allocator, device);
+        groundTexture.destroy(allocator, device);
+        cubeMesh.destroy(allocator);
+        groundMesh.destroy(allocator);
+        sceneObjects.clear();
 
         vkDestroyDescriptorPool(device, descriptorPool, nullptr);
 
@@ -128,6 +144,7 @@ void Renderer::shutdown() {
             vmaDestroyBuffer(allocator, uniformBuffers[i], uniformBuffersAllocations[i]);
         }
 
+        vkDestroyPipeline(device, skyPipeline, nullptr);
         vkDestroyPipeline(device, graphicsPipeline, nullptr);
         vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
         vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
@@ -396,7 +413,7 @@ bool Renderer::createDescriptorSetLayout() {
     uboLayoutBinding.binding = 0;
     uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     uboLayoutBinding.descriptorCount = 1;
-    uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     uboLayoutBinding.pImmutableSamplers = nullptr;
 
     VkDescriptorSetLayoutBinding samplerLayoutBinding{};
@@ -515,10 +532,17 @@ bool Renderer::createGraphicsPipeline() {
     colorBlending.attachmentCount = 1;
     colorBlending.pAttachments = &colorBlendAttachment;
 
+    VkPushConstantRange pushConstantRange{};
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = sizeof(PushConstants);
+
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.setLayoutCount = 1;
     pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
 
     if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
         SDL_Log("Failed to create pipeline layout");
@@ -542,6 +566,123 @@ bool Renderer::createGraphicsPipeline() {
 
     if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &graphicsPipeline) != VK_SUCCESS) {
         SDL_Log("Failed to create graphics pipeline");
+        return false;
+    }
+
+    vkDestroyShaderModule(device, fragShaderModule, nullptr);
+    vkDestroyShaderModule(device, vertShaderModule, nullptr);
+
+    return true;
+}
+
+bool Renderer::createSkyPipeline() {
+    auto vertShaderCode = readFile(resourcePath + "/shaders/sky.vert.spv");
+    auto fragShaderCode = readFile(resourcePath + "/shaders/sky.frag.spv");
+
+    if (vertShaderCode.empty() || fragShaderCode.empty()) {
+        SDL_Log("Failed to load sky shader files");
+        return false;
+    }
+
+    VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
+    VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);
+
+    VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
+    vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+    vertShaderStageInfo.module = vertShaderModule;
+    vertShaderStageInfo.pName = "main";
+
+    VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
+    fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    fragShaderStageInfo.module = fragShaderModule;
+    fragShaderStageInfo.pName = "main";
+
+    VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
+
+    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
+    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    vertexInputInfo.vertexBindingDescriptionCount = 0;
+    vertexInputInfo.pVertexBindingDescriptions = nullptr;
+    vertexInputInfo.vertexAttributeDescriptionCount = 0;
+    vertexInputInfo.pVertexAttributeDescriptions = nullptr;
+
+    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    inputAssembly.primitiveRestartEnable = VK_FALSE;
+
+    VkViewport viewport{};
+    viewport.x = 0.0f;
+    viewport.y = 0.0f;
+    viewport.width = static_cast<float>(swapchainExtent.width);
+    viewport.height = static_cast<float>(swapchainExtent.height);
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+
+    VkRect2D scissor{};
+    scissor.offset = {0, 0};
+    scissor.extent = swapchainExtent;
+
+    VkPipelineViewportStateCreateInfo viewportState{};
+    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewportState.viewportCount = 1;
+    viewportState.pViewports = &viewport;
+    viewportState.scissorCount = 1;
+    viewportState.pScissors = &scissor;
+
+    VkPipelineRasterizationStateCreateInfo rasterizer{};
+    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    rasterizer.depthClampEnable = VK_FALSE;
+    rasterizer.rasterizerDiscardEnable = VK_FALSE;
+    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+    rasterizer.lineWidth = 1.0f;
+    rasterizer.cullMode = VK_CULL_MODE_NONE;
+    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    rasterizer.depthBiasEnable = VK_FALSE;
+
+    VkPipelineMultisampleStateCreateInfo multisampling{};
+    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    multisampling.sampleShadingEnable = VK_FALSE;
+    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    VkPipelineDepthStencilStateCreateInfo depthStencil{};
+    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    depthStencil.depthTestEnable = VK_FALSE;
+    depthStencil.depthWriteEnable = VK_FALSE;
+    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+    depthStencil.depthBoundsTestEnable = VK_FALSE;
+    depthStencil.stencilTestEnable = VK_FALSE;
+
+    VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+    colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                                          VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    colorBlendAttachment.blendEnable = VK_FALSE;
+
+    VkPipelineColorBlendStateCreateInfo colorBlending{};
+    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    colorBlending.logicOpEnable = VK_FALSE;
+    colorBlending.attachmentCount = 1;
+    colorBlending.pAttachments = &colorBlendAttachment;
+
+    VkGraphicsPipelineCreateInfo pipelineInfo{};
+    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pipelineInfo.stageCount = 2;
+    pipelineInfo.pStages = shaderStages;
+    pipelineInfo.pVertexInputState = &vertexInputInfo;
+    pipelineInfo.pInputAssemblyState = &inputAssembly;
+    pipelineInfo.pViewportState = &viewportState;
+    pipelineInfo.pRasterizationState = &rasterizer;
+    pipelineInfo.pMultisampleState = &multisampling;
+    pipelineInfo.pDepthStencilState = &depthStencil;
+    pipelineInfo.pColorBlendState = &colorBlending;
+    pipelineInfo.layout = pipelineLayout;
+    pipelineInfo.renderPass = renderPass;
+    pipelineInfo.subpass = 0;
+
+    if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &skyPipeline) != VK_SUCCESS) {
+        SDL_Log("Failed to create sky pipeline");
         return false;
     }
 
@@ -585,15 +726,15 @@ bool Renderer::createUniformBuffers() {
 bool Renderer::createDescriptorPool() {
     std::array<VkDescriptorPoolSize, 2> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+    poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 2);
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 2);
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
     poolInfo.pPoolSizes = poolSizes.data();
-    poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+    poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 2);
 
     if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS) {
         SDL_Log("Failed to create descriptor pool");
@@ -618,16 +759,22 @@ bool Renderer::createDescriptorSets() {
         return false;
     }
 
+    groundDescriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
+    if (vkAllocateDescriptorSets(device, &allocInfo, groundDescriptorSets.data()) != VK_SUCCESS) {
+        SDL_Log("Failed to allocate ground descriptor sets");
+        return false;
+    }
+
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         VkDescriptorBufferInfo bufferInfo{};
         bufferInfo.buffer = uniformBuffers[i];
         bufferInfo.offset = 0;
         bufferInfo.range = sizeof(UniformBufferObject);
 
-        VkDescriptorImageInfo imageInfo{};
-        imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        imageInfo.imageView = texture.getImageView();
-        imageInfo.sampler = texture.getSampler();
+        VkDescriptorImageInfo crateImageInfo{};
+        crateImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        crateImageInfo.imageView = crateTexture.getImageView();
+        crateImageInfo.sampler = crateTexture.getSampler();
 
         std::array<VkWriteDescriptorSet, 2> descriptorWrites{};
 
@@ -645,7 +792,19 @@ bool Renderer::createDescriptorSets() {
         descriptorWrites[1].dstArrayElement = 0;
         descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         descriptorWrites[1].descriptorCount = 1;
-        descriptorWrites[1].pImageInfo = &imageInfo;
+        descriptorWrites[1].pImageInfo = &crateImageInfo;
+
+        vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
+                               descriptorWrites.data(), 0, nullptr);
+
+        VkDescriptorImageInfo groundImageInfo{};
+        groundImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        groundImageInfo.imageView = groundTexture.getImageView();
+        groundImageInfo.sampler = groundTexture.getSampler();
+
+        descriptorWrites[0].dstSet = groundDescriptorSets[i];
+        descriptorWrites[1].dstSet = groundDescriptorSets[i];
+        descriptorWrites[1].pImageInfo = &groundImageInfo;
 
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                descriptorWrites.data(), 0, nullptr);
@@ -691,10 +850,35 @@ void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera& camera) 
     auto currentTime = std::chrono::high_resolution_clock::now();
     float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
+    float cycleDuration = 120.0f;
+    float timeOfDay;
+    if (useManualTime) {
+        timeOfDay = manualTime;
+    } else {
+        timeOfDay = fmod((time * timeScale) / cycleDuration, 1.0f);
+    }
+
+    float sunAngle = timeOfDay * 2.0f * 3.14159265f - 3.14159265f * 0.5f;
+    glm::vec3 sunDir = glm::normalize(glm::vec3(cos(sunAngle), sin(sunAngle), 0.3f));
+    glm::vec3 moonDir = -sunDir;
+
+    float sunIntensity = glm::max(0.0f, sunDir.y);
+    float moonIntensity = glm::max(0.0f, moonDir.y) * 0.3f;
+
+    float dayFactor = glm::smoothstep(-0.1f, 0.3f, sunDir.y);
+    glm::vec3 sunColor = glm::mix(glm::vec3(1.0f, 0.4f, 0.2f), glm::vec3(1.0f, 0.95f, 0.9f), dayFactor);
+    glm::vec3 ambientColor = glm::mix(glm::vec3(0.02f, 0.02f, 0.05f), glm::vec3(0.15f, 0.15f, 0.2f), dayFactor);
+
     UniformBufferObject ubo{};
-    ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(45.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    ubo.model = glm::mat4(1.0f);
     ubo.view = camera.getViewMatrix();
     ubo.proj = camera.getProjectionMatrix();
+    ubo.sunDirection = glm::vec4(sunDir, sunIntensity);
+    ubo.moonDirection = glm::vec4(moonDir, moonIntensity);
+    ubo.sunColor = glm::vec4(sunColor, 1.0f);
+    ubo.ambientColor = glm::vec4(ambientColor, 1.0f);
+    ubo.cameraPosition = glm::vec4(camera.getPosition(), 1.0f);
+    ubo.timeOfDay = timeOfDay;
 
     memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
 }
@@ -737,17 +921,32 @@ void Renderer::render(const Camera& camera) {
 
     vkCmdBeginRenderPass(commandBuffers[currentFrame], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-    vkCmdBindPipeline(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
-
-    VkBuffer vertexBuffers[] = {mesh.getVertexBuffer()};
-    VkDeviceSize offsets[] = {0};
-    vkCmdBindVertexBuffers(commandBuffers[currentFrame], 0, 1, vertexBuffers, offsets);
-    vkCmdBindIndexBuffer(commandBuffers[currentFrame], mesh.getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
-
+    vkCmdBindPipeline(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, skyPipeline);
     vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS,
                             pipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);
+    vkCmdDraw(commandBuffers[currentFrame], 3, 1, 0, 0);
 
-    vkCmdDrawIndexed(commandBuffers[currentFrame], mesh.getIndexCount(), 1, 0, 0, 0);
+    vkCmdBindPipeline(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+
+    for (const auto& obj : sceneObjects) {
+        PushConstants push{};
+        push.model = obj.transform;
+        vkCmdPushConstants(commandBuffers[currentFrame], pipelineLayout,
+                          VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &push);
+
+        VkDescriptorSet* descSet = (obj.texture == &groundTexture)
+            ? &groundDescriptorSets[currentFrame]
+            : &descriptorSets[currentFrame];
+        vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                pipelineLayout, 0, 1, descSet, 0, nullptr);
+
+        VkBuffer vertexBuffers[] = {obj.mesh->getVertexBuffer()};
+        VkDeviceSize offsets[] = {0};
+        vkCmdBindVertexBuffers(commandBuffers[currentFrame], 0, 1, vertexBuffers, offsets);
+        vkCmdBindIndexBuffer(commandBuffers[currentFrame], obj.mesh->getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+
+        vkCmdDrawIndexed(commandBuffers[currentFrame], obj.mesh->getIndexCount(), 1, 0, 0, 0);
+    }
 
     vkCmdEndRenderPass(commandBuffers[currentFrame]);
 

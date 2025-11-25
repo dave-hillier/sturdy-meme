@@ -52,6 +52,8 @@ set(RESOURCE_FILES
 set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.frag.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.vert.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.frag.spv
 )
 
 set_source_files_properties(${RESOURCE_FILES} PROPERTIES
@@ -86,9 +88,23 @@ if(SHADER_COMPILE_CMD)
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.frag
         COMMENT "Compiling fragment shader"
     )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.vert.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.vert.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.vert
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.vert
+        COMMENT "Compiling sky vertex shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.frag.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.frag.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.frag
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.frag
+        COMMENT "Compiling sky fragment shader"
+    )
     add_custom_target(shaders DEPENDS
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.frag.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.vert.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.frag.spv
     )
     add_dependencies(${PROJECT_NAME} shaders)
 else()
