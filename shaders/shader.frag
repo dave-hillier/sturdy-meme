@@ -2,6 +2,22 @@
 
 const float PI = 3.14159265359;
 
+// Atmospheric parameters (Phase 4 - scaled to kilometers for scene scale)
+const float PLANET_RADIUS = 6371.0;
+const float ATMOSPHERE_RADIUS = 6471.0;
+
+const vec3 RAYLEIGH_SCATTERING_BASE = vec3(5.802e-3, 13.558e-3, 33.1e-3);
+const float RAYLEIGH_SCALE_HEIGHT = 8.0;
+
+const float MIE_SCATTERING_BASE = 3.996e-3;
+const float MIE_ABSORPTION_BASE = 4.4e-3;
+const float MIE_SCALE_HEIGHT = 1.2;
+const float MIE_ANISOTROPY = 0.8;
+
+const vec3 OZONE_ABSORPTION = vec3(0.65e-3, 1.881e-3, 0.085e-3);
+const float OZONE_LAYER_CENTER = 25.0;
+const float OZONE_LAYER_WIDTH = 15.0;
+
 layout(binding = 0) uniform UniformBufferObject {
     mat4 model;
     mat4 view;
@@ -32,6 +48,103 @@ layout(location = 1) in vec2 fragTexCoord;
 layout(location = 2) in vec3 fragWorldPos;
 
 layout(location = 0) out vec4 outColor;
+
+struct ScatteringResult {
+    vec3 inscatter;
+    vec3 transmittance;
+};
+
+float rayleighPhase(float cosTheta) {
+    return 3.0 / (16.0 * PI) * (1.0 + cosTheta * cosTheta);
+}
+
+float cornetteShanksPhase(float cosTheta, float g) {
+    float g2 = g * g;
+    float num = 3.0 * (1.0 - g2) * (1.0 + cosTheta * cosTheta);
+    float denom = 8.0 * PI * (2.0 + g2) * pow(1.0 + g2 - 2.0 * g * cosTheta, 1.5);
+    return num / denom;
+}
+
+vec2 raySphereIntersect(vec3 origin, vec3 dir, float radius) {
+    float b = dot(origin, dir);
+    float c = dot(origin, origin) - radius * radius;
+    float h = b * b - c;
+    if (h < 0.0) return vec2(1e9, -1e9);
+    h = sqrt(h);
+    return vec2(-b - h, -b + h);
+}
+
+float ozoneDensity(float altitude) {
+    float z = (altitude - OZONE_LAYER_CENTER) / OZONE_LAYER_WIDTH;
+    return exp(-0.5 * z * z);
+}
+
+ScatteringResult integrateAtmosphere(vec3 origin, vec3 dir, float maxDistance, int sampleCount) {
+    vec2 atmo = raySphereIntersect(origin, dir, ATMOSPHERE_RADIUS);
+    float start = max(atmo.x, 0.0);
+    float end = min(atmo.y, maxDistance);
+
+    if (end <= 0.0) {
+        return ScatteringResult(vec3(0.0), vec3(1.0));
+    }
+
+    vec2 planet = raySphereIntersect(origin, dir, PLANET_RADIUS);
+    if (planet.x > 0.0) {
+        end = min(end, planet.x);
+    }
+
+    if (end <= start) {
+        return ScatteringResult(vec3(0.0), vec3(1.0));
+    }
+
+    float stepSize = (end - start) / float(sampleCount);
+    vec3 transmittance = vec3(1.0);
+    vec3 inscatter = vec3(0.0);
+
+    vec3 sunDir = normalize(ubo.sunDirection.xyz);
+    float cosViewSun = dot(dir, sunDir);
+    float rayleighP = rayleighPhase(cosViewSun);
+    float mieP = cornetteShanksPhase(cosViewSun, MIE_ANISOTROPY);
+
+    for (int i = 0; i < sampleCount; i++) {
+        float t = start + (float(i) + 0.5) * stepSize;
+        vec3 pos = origin + dir * t;
+        float altitude = max(length(pos) - PLANET_RADIUS, 0.0);
+
+        float rayleighDensity = exp(-altitude / RAYLEIGH_SCALE_HEIGHT);
+        float mieDensity = exp(-altitude / MIE_SCALE_HEIGHT);
+        float ozone = ozoneDensity(altitude);
+
+        vec3 rayleighScatter = rayleighDensity * RAYLEIGH_SCATTERING_BASE;
+        vec3 mieScatter = mieDensity * vec3(MIE_SCATTERING_BASE);
+
+        vec3 extinction = rayleighScatter + mieScatter +
+                          mieDensity * vec3(MIE_ABSORPTION_BASE) +
+                          ozone * OZONE_ABSORPTION;
+
+        vec3 segmentScatter = rayleighScatter * rayleighP + mieScatter * mieP;
+
+        vec3 attenuation = exp(-extinction * stepSize);
+        inscatter += transmittance * segmentScatter * stepSize;
+        transmittance *= attenuation;
+    }
+
+    return ScatteringResult(inscatter, transmittance);
+}
+
+vec3 applyAerialPerspective(vec3 color, vec3 viewDir, float viewDistance) {
+    vec3 origin = vec3(0.0, PLANET_RADIUS + max(ubo.cameraPosition.y, 0.0), 0.0);
+    ScatteringResult result = integrateAtmosphere(origin, normalize(viewDir), viewDistance, 12);
+
+    vec3 sunLight = ubo.sunColor.rgb * ubo.sunDirection.w;
+    vec3 scatterLight = result.inscatter * (sunLight + vec3(0.02));
+
+    float night = 1.0 - smoothstep(-0.05, 0.08, ubo.sunDirection.y);
+    scatterLight += night * vec3(0.01, 0.015, 0.03) * (1.0 - result.transmittance);
+
+    vec3 foggedColor = color * result.transmittance + scatterLight;
+    return foggedColor;
+}
 
 // GGX Normal Distribution Function
 float D_GGX(float NoH, float roughness) {
@@ -184,5 +297,8 @@ void main() {
     vec3 emissive = albedo * material.emissiveIntensity;
     finalColor += emissive;
 
-    outColor = vec4(finalColor, texColor.a);
+    vec3 cameraToFrag = fragWorldPos - ubo.cameraPosition.xyz;
+    vec3 atmosphericColor = applyAerialPerspective(finalColor, cameraToFrag, length(cameraToFrag));
+
+    outColor = vec4(atmosphericColor, texColor.a);
 }
