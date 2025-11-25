@@ -22,6 +22,7 @@ set(SOURCES
     src/ShaderLoader.cpp
     src/GrassSystem.cpp
     src/CelestialCalculator.cpp
+    src/WindSystem.cpp
     src/PostProcessSystem.cpp
 )
 
