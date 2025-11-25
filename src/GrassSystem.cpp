@@ -472,8 +472,8 @@ bool GrassSystem::createShadowPipeline() {
     rasterizer.cullMode = VK_CULL_MODE_NONE;  // No culling for grass
     rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     rasterizer.depthBiasEnable = VK_TRUE;
-    rasterizer.depthBiasConstantFactor = 1.0f;
-    rasterizer.depthBiasSlopeFactor = 1.5f;
+    rasterizer.depthBiasConstantFactor = 0.25f;
+    rasterizer.depthBiasSlopeFactor = 0.75f;
 
     VkPipelineMultisampleStateCreateInfo multisampling{};
     multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
@@ -782,15 +782,15 @@ void GrassSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex
     // Dispatch: ceil(1,000,000 / 64) = 15,625 workgroups (1000x1000 grid)
     vkCmdDispatch(cmd, 15625, 1, 1);
 
-    // Memory barrier: compute write -> vertex read and indirect read
+    // Memory barrier: compute write -> vertex shader read (storage buffer) and indirect read
     VkMemoryBarrier memBarrier{};
     memBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
     memBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    memBarrier.dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
+    memBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
 
     vkCmdPipelineBarrier(cmd,
                          VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
+                         VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
                          0, 1, &memBarrier, 0, nullptr, 0, nullptr);
 }
 
