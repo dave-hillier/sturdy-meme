@@ -81,8 +81,6 @@ public:
     void resumeAutoTime() { useManualTime = false; }
     float getTimeOfDay() const { return currentTimeOfDay; }
 
-    void toggleShadowMode() { useFrustumFittedShadows = !useFrustumFittedShadows; }
-    bool isUsingFrustumFittedShadows() const { return useFrustumFittedShadows; }
     void toggleCascadeDebug() { showCascadeDebug = !showCascadeDebug; }
     bool isShowingCascadeDebug() const { return showCascadeDebug; }
 
@@ -216,6 +214,5 @@ private:
     int currentMonth = 6;
     int currentDay = 21;  // Summer solstice by default
 
-    bool useFrustumFittedShadows = false;  // false = fixed shadows (crisp), true = frustum-fitted
     bool showCascadeDebug = false;         // true = show cascade colors overlay
 };
