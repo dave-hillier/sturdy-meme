@@ -29,6 +29,7 @@ layout(push_constant) uniform PushConstants {
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec2 inTexCoord;
+layout(location = 3) in vec4 inTangent;  // Not used, but must match vertex format
 
 void main() {
     gl_Position = ubo.cascadeViewProj[push.cascadeIndex] * push.model * vec4(inPosition, 1.0);

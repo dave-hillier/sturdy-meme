@@ -11,11 +11,14 @@ void Mesh::createPlane(float width, float depth) {
     float hw = width * 0.5f;
     float hd = depth * 0.5f;
 
+    // For a Y-up plane, tangent points along +X (U direction), bitangent along -Z (V direction)
+    glm::vec4 tangent(1.0f, 0.0f, 0.0f, 1.0f);
+
     vertices = {
-        {{-hw, 0.0f,  hd}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
-        {{ hw, 0.0f,  hd}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
-        {{ hw, 0.0f, -hd}, {0.0f, 1.0f, 0.0f}, {1.0f, 1.0f}},
-        {{-hw, 0.0f, -hd}, {0.0f, 1.0f, 0.0f}, {0.0f, 1.0f}},
+        {{-hw, 0.0f,  hd}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}, tangent},
+        {{ hw, 0.0f,  hd}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}, tangent},
+        {{ hw, 0.0f, -hd}, {0.0f, 1.0f, 0.0f}, {1.0f, 1.0f}, tangent},
+        {{-hw, 0.0f, -hd}, {0.0f, 1.0f, 0.0f}, {0.0f, 1.0f}, tangent},
     };
 
     indices = {0, 1, 2, 2, 3, 0};
@@ -25,8 +28,11 @@ void Mesh::createDisc(float radius, int segments, float uvScale) {
     vertices.clear();
     indices.clear();
 
+    // For a Y-up disc, tangent points along +X
+    glm::vec4 tangent(1.0f, 0.0f, 0.0f, 1.0f);
+
     // Center vertex
-    vertices.push_back({{0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {uvScale * 0.5f, uvScale * 0.5f}});
+    vertices.push_back({{0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {uvScale * 0.5f, uvScale * 0.5f}, tangent});
 
     // Edge vertices
     for (int i = 0; i <= segments; ++i) {
@@ -38,7 +44,7 @@ void Mesh::createDisc(float radius, int segments, float uvScale) {
         float u = (x / radius + 1.0f) * 0.5f * uvScale;
         float v = (z / radius + 1.0f) * 0.5f * uvScale;
 
-        vertices.push_back({{x, 0.0f, z}, {0.0f, 1.0f, 0.0f}, {u, v}});
+        vertices.push_back({{x, 0.0f, z}, {0.0f, 1.0f, 0.0f}, {u, v}, tangent});
     }
 
     // Create triangles from center to edge (clockwise winding when viewed from above)
@@ -68,7 +74,12 @@ void Mesh::createSphere(float radius, int stacks, int slices) {
             glm::vec3 normal = glm::normalize(pos);
             glm::vec2 uv((float)j / (float)slices, (float)i / (float)stacks);
 
-            vertices.push_back({pos, normal, uv});
+            // Tangent is perpendicular to the normal in the theta direction
+            // For spherical coordinates, tangent = d(pos)/d(theta) normalized
+            glm::vec3 tangentDir(-std::sin(theta), 0.0f, std::cos(theta));
+            glm::vec4 tangent(glm::normalize(tangentDir), 1.0f);
+
+            vertices.push_back({pos, normal, uv, tangent});
         }
     }
 
@@ -92,42 +103,50 @@ void Mesh::createSphere(float radius, int stacks, int slices) {
 }
 
 void Mesh::createCube() {
+    // Tangents are computed based on UV layout - tangent points in +U direction
+    glm::vec4 tangentPosX( 0.0f,  0.0f, -1.0f, 1.0f);  // Front face: +U is +X, tangent is +X
+    glm::vec4 tangentNegX( 0.0f,  0.0f,  1.0f, 1.0f);  // Back face: +U is -X, tangent is -X
+    glm::vec4 tangentPosY( 1.0f,  0.0f,  0.0f, 1.0f);  // Top face: +U is +X
+    glm::vec4 tangentNegY( 1.0f,  0.0f,  0.0f, 1.0f);  // Bottom face: +U is +X
+    glm::vec4 tangentPosZ( 1.0f,  0.0f,  0.0f, 1.0f);  // Right face: +U is -Z
+    glm::vec4 tangentNegZ(-1.0f,  0.0f,  0.0f, 1.0f);  // Left face: +U is +Z
+
     vertices = {
-        // Front face (Z+)
-        {{-0.5f, -0.5f,  0.5f}, { 0.0f,  0.0f,  1.0f}, {0.0f, 1.0f}},
-        {{ 0.5f, -0.5f,  0.5f}, { 0.0f,  0.0f,  1.0f}, {1.0f, 1.0f}},
-        {{ 0.5f,  0.5f,  0.5f}, { 0.0f,  0.0f,  1.0f}, {1.0f, 0.0f}},
-        {{-0.5f,  0.5f,  0.5f}, { 0.0f,  0.0f,  1.0f}, {0.0f, 0.0f}},
+        // Front face (Z+) - tangent along +X
+        {{-0.5f, -0.5f,  0.5f}, { 0.0f,  0.0f,  1.0f}, {0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+        {{ 0.5f, -0.5f,  0.5f}, { 0.0f,  0.0f,  1.0f}, {1.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+        {{ 0.5f,  0.5f,  0.5f}, { 0.0f,  0.0f,  1.0f}, {1.0f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+        {{-0.5f,  0.5f,  0.5f}, { 0.0f,  0.0f,  1.0f}, {0.0f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
 
-        // Back face (Z-)
-        {{ 0.5f, -0.5f, -0.5f}, { 0.0f,  0.0f, -1.0f}, {0.0f, 1.0f}},
-        {{-0.5f, -0.5f, -0.5f}, { 0.0f,  0.0f, -1.0f}, {1.0f, 1.0f}},
-        {{-0.5f,  0.5f, -0.5f}, { 0.0f,  0.0f, -1.0f}, {1.0f, 0.0f}},
-        {{ 0.5f,  0.5f, -0.5f}, { 0.0f,  0.0f, -1.0f}, {0.0f, 0.0f}},
+        // Back face (Z-) - tangent along -X
+        {{ 0.5f, -0.5f, -0.5f}, { 0.0f,  0.0f, -1.0f}, {0.0f, 1.0f}, {-1.0f, 0.0f, 0.0f, 1.0f}},
+        {{-0.5f, -0.5f, -0.5f}, { 0.0f,  0.0f, -1.0f}, {1.0f, 1.0f}, {-1.0f, 0.0f, 0.0f, 1.0f}},
+        {{-0.5f,  0.5f, -0.5f}, { 0.0f,  0.0f, -1.0f}, {1.0f, 0.0f}, {-1.0f, 0.0f, 0.0f, 1.0f}},
+        {{ 0.5f,  0.5f, -0.5f}, { 0.0f,  0.0f, -1.0f}, {0.0f, 0.0f}, {-1.0f, 0.0f, 0.0f, 1.0f}},
 
-        // Top face (Y+)
-        {{-0.5f,  0.5f,  0.5f}, { 0.0f,  1.0f,  0.0f}, {0.0f, 1.0f}},
-        {{ 0.5f,  0.5f,  0.5f}, { 0.0f,  1.0f,  0.0f}, {1.0f, 1.0f}},
-        {{ 0.5f,  0.5f, -0.5f}, { 0.0f,  1.0f,  0.0f}, {1.0f, 0.0f}},
-        {{-0.5f,  0.5f, -0.5f}, { 0.0f,  1.0f,  0.0f}, {0.0f, 0.0f}},
+        // Top face (Y+) - tangent along +X
+        {{-0.5f,  0.5f,  0.5f}, { 0.0f,  1.0f,  0.0f}, {0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+        {{ 0.5f,  0.5f,  0.5f}, { 0.0f,  1.0f,  0.0f}, {1.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+        {{ 0.5f,  0.5f, -0.5f}, { 0.0f,  1.0f,  0.0f}, {1.0f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+        {{-0.5f,  0.5f, -0.5f}, { 0.0f,  1.0f,  0.0f}, {0.0f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
 
-        // Bottom face (Y-)
-        {{-0.5f, -0.5f, -0.5f}, { 0.0f, -1.0f,  0.0f}, {0.0f, 1.0f}},
-        {{ 0.5f, -0.5f, -0.5f}, { 0.0f, -1.0f,  0.0f}, {1.0f, 1.0f}},
-        {{ 0.5f, -0.5f,  0.5f}, { 0.0f, -1.0f,  0.0f}, {1.0f, 0.0f}},
-        {{-0.5f, -0.5f,  0.5f}, { 0.0f, -1.0f,  0.0f}, {0.0f, 0.0f}},
+        // Bottom face (Y-) - tangent along +X
+        {{-0.5f, -0.5f, -0.5f}, { 0.0f, -1.0f,  0.0f}, {0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+        {{ 0.5f, -0.5f, -0.5f}, { 0.0f, -1.0f,  0.0f}, {1.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+        {{ 0.5f, -0.5f,  0.5f}, { 0.0f, -1.0f,  0.0f}, {1.0f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+        {{-0.5f, -0.5f,  0.5f}, { 0.0f, -1.0f,  0.0f}, {0.0f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
 
-        // Right face (X+)
-        {{ 0.5f, -0.5f,  0.5f}, { 1.0f,  0.0f,  0.0f}, {0.0f, 1.0f}},
-        {{ 0.5f, -0.5f, -0.5f}, { 1.0f,  0.0f,  0.0f}, {1.0f, 1.0f}},
-        {{ 0.5f,  0.5f, -0.5f}, { 1.0f,  0.0f,  0.0f}, {1.0f, 0.0f}},
-        {{ 0.5f,  0.5f,  0.5f}, { 1.0f,  0.0f,  0.0f}, {0.0f, 0.0f}},
+        // Right face (X+) - tangent along -Z
+        {{ 0.5f, -0.5f,  0.5f}, { 1.0f,  0.0f,  0.0f}, {0.0f, 1.0f}, {0.0f, 0.0f, -1.0f, 1.0f}},
+        {{ 0.5f, -0.5f, -0.5f}, { 1.0f,  0.0f,  0.0f}, {1.0f, 1.0f}, {0.0f, 0.0f, -1.0f, 1.0f}},
+        {{ 0.5f,  0.5f, -0.5f}, { 1.0f,  0.0f,  0.0f}, {1.0f, 0.0f}, {0.0f, 0.0f, -1.0f, 1.0f}},
+        {{ 0.5f,  0.5f,  0.5f}, { 1.0f,  0.0f,  0.0f}, {0.0f, 0.0f}, {0.0f, 0.0f, -1.0f, 1.0f}},
 
-        // Left face (X-)
-        {{-0.5f, -0.5f, -0.5f}, {-1.0f,  0.0f,  0.0f}, {0.0f, 1.0f}},
-        {{-0.5f, -0.5f,  0.5f}, {-1.0f,  0.0f,  0.0f}, {1.0f, 1.0f}},
-        {{-0.5f,  0.5f,  0.5f}, {-1.0f,  0.0f,  0.0f}, {1.0f, 0.0f}},
-        {{-0.5f,  0.5f, -0.5f}, {-1.0f,  0.0f,  0.0f}, {0.0f, 0.0f}},
+        // Left face (X-) - tangent along +Z
+        {{-0.5f, -0.5f, -0.5f}, {-1.0f,  0.0f,  0.0f}, {0.0f, 1.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
+        {{-0.5f, -0.5f,  0.5f}, {-1.0f,  0.0f,  0.0f}, {1.0f, 1.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
+        {{-0.5f,  0.5f,  0.5f}, {-1.0f,  0.0f,  0.0f}, {1.0f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
+        {{-0.5f,  0.5f, -0.5f}, {-1.0f,  0.0f,  0.0f}, {0.0f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
     };
 
     indices = {

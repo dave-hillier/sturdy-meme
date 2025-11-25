@@ -132,7 +132,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     }
 
     std::string crateNormalPath = resourcePath + "/textures/crates/crate1/crate1_normal.png";
-    if (!crateNormalMap.load(crateNormalPath, allocator, device, commandPool, graphicsQueue, physicalDevice)) {
+    if (!crateNormalMap.load(crateNormalPath, allocator, device, commandPool, graphicsQueue, physicalDevice, false)) {
         SDL_Log("Failed to load crate normal map: %s", crateNormalPath.c_str());
         return false;
     }
@@ -144,7 +144,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     }
 
     std::string grassNormalPath = resourcePath + "/textures/grass/grass/grass01_n.jpg";
-    if (!groundNormalMap.load(grassNormalPath, allocator, device, commandPool, graphicsQueue, physicalDevice)) {
+    if (!groundNormalMap.load(grassNormalPath, allocator, device, commandPool, graphicsQueue, physicalDevice, false)) {
         SDL_Log("Failed to load grass normal map: %s", grassNormalPath.c_str());
         return false;
     }
@@ -156,7 +156,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     }
 
     std::string metalNormalPath = resourcePath + "/textures/industrial/metal_1_norm.jpg";
-    if (!metalNormalMap.load(metalNormalPath, allocator, device, commandPool, graphicsQueue, physicalDevice)) {
+    if (!metalNormalMap.load(metalNormalPath, allocator, device, commandPool, graphicsQueue, physicalDevice, false)) {
         SDL_Log("Failed to load metal normal map: %s", metalNormalPath.c_str());
         return false;
     }

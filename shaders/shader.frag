@@ -52,6 +52,7 @@ layout(push_constant) uniform PushConstants {
 layout(location = 0) in vec3 fragNormal;
 layout(location = 1) in vec2 fragTexCoord;
 layout(location = 2) in vec3 fragWorldPos;
+layout(location = 3) in vec4 fragTangent;
 
 layout(location = 0) out vec4 outColor;
 
@@ -177,27 +178,19 @@ vec3 F_Schlick(float VoH, vec3 F0) {
     return F0 + (1.0 - F0) * pow(1.0 - VoH, 5.0);
 }
 
-// Compute TBN matrix from derivatives (cotangent frame)
-mat3 cotangentFrame(vec3 N, vec3 p, vec2 uv) {
-    vec3 dp1 = dFdx(p);
-    vec3 dp2 = dFdy(p);
-    vec2 duv1 = dFdx(uv);
-    vec2 duv2 = dFdy(uv);
+// Apply normal map using vertex tangent to build TBN matrix
+vec3 perturbNormal(vec3 N, vec4 tangent, vec2 texcoord) {
+    vec3 T = normalize(tangent.xyz);
+    // Re-orthogonalize T with respect to N
+    T = normalize(T - dot(T, N) * N);
+    // Compute bitangent using handedness stored in tangent.w
+    vec3 B = cross(N, T) * tangent.w;
 
-    vec3 dp2perp = cross(dp2, N);
-    vec3 dp1perp = cross(N, dp1);
-    vec3 T = dp2perp * duv1.x + dp1perp * duv2.x;
-    vec3 B = dp2perp * duv1.y + dp1perp * duv2.y;
+    mat3 TBN = mat3(T, B, N);
 
-    float invmax = inversesqrt(max(dot(T, T), dot(B, B)));
-    return mat3(T * invmax, B * invmax, N);
-}
-
-// Apply normal map to get perturbed normal
-vec3 perturbNormal(vec3 N, vec3 V, vec2 texcoord, vec3 worldPos) {
     vec3 normalSample = texture(normalMap, texcoord).rgb;
     normalSample = normalSample * 2.0 - 1.0;
-    mat3 TBN = cotangentFrame(N, worldPos, texcoord);
+
     return normalize(TBN * normalSample);
 }
 
@@ -360,8 +353,8 @@ void main() {
     vec3 geometricN = normalize(fragNormal);
     vec3 V = normalize(ubo.cameraPosition.xyz - fragWorldPos);
 
-    // Apply normal mapping
-    vec3 N = perturbNormal(geometricN, V, fragTexCoord, fragWorldPos);
+    // Enable normal mapping for debugging
+    vec3 N = perturbNormal(geometricN, fragTangent, fragTexCoord);
 
     vec4 texColor = texture(texSampler, fragTexCoord);
     vec3 albedo = texColor.rgb;
