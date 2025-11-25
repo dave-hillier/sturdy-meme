@@ -91,6 +91,21 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     if (!createFramebuffers()) return false;
     if (!createCommandPool()) return false;
     if (!createDescriptorSetLayout()) return false;
+    if (!createDescriptorPool()) return false;
+
+    // Initialize post-process system early to get HDR render pass
+    PostProcessSystem::InitInfo postProcessInfo{};
+    postProcessInfo.device = device;
+    postProcessInfo.allocator = allocator;
+    postProcessInfo.outputRenderPass = renderPass;
+    postProcessInfo.descriptorPool = descriptorPool;
+    postProcessInfo.extent = swapchainExtent;
+    postProcessInfo.swapchainFormat = swapchainImageFormat;
+    postProcessInfo.shaderPath = resourcePath + "/shaders";
+    postProcessInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+
+    if (!postProcessSystem.init(postProcessInfo)) return false;
+
     if (!createGraphicsPipeline()) return false;
     if (!createSkyPipeline()) return false;
     if (!createShadowPipeline()) return false;
@@ -168,14 +183,13 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     brushedCube = glm::rotate(brushedCube, glm::radians(45.0f), glm::vec3(0.0f, 1.0f, 0.0f));
     sceneObjects.push_back({brushedCube, &cubeMesh, &metalTexture, 0.6f, 1.0f});
 
-    if (!createDescriptorPool()) return false;
     if (!createDescriptorSets()) return false;
 
-    // Initialize grass system
+    // Initialize grass system using HDR render pass
     GrassSystem::InitInfo grassInfo{};
     grassInfo.device = device;
     grassInfo.allocator = allocator;
-    grassInfo.renderPass = renderPass;
+    grassInfo.renderPass = postProcessSystem.getHDRRenderPass();
     grassInfo.shadowRenderPass = shadowRenderPass;
     grassInfo.descriptorPool = descriptorPool;
     grassInfo.extent = swapchainExtent;
@@ -219,6 +233,7 @@ void Renderer::shutdown() {
         }
 
         grassSystem.destroy(device, allocator);
+        postProcessSystem.destroy(device, allocator);
 
         vkDestroyPipeline(device, skyPipeline, nullptr);
         vkDestroyPipeline(device, graphicsPipeline, nullptr);
@@ -962,7 +977,7 @@ bool Renderer::createGraphicsPipeline() {
     pipelineInfo.pDepthStencilState = &depthStencil;
     pipelineInfo.pColorBlendState = &colorBlending;
     pipelineInfo.layout = pipelineLayout;
-    pipelineInfo.renderPass = renderPass;
+    pipelineInfo.renderPass = postProcessSystem.getHDRRenderPass();
     pipelineInfo.subpass = 0;
 
     if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &graphicsPipeline) != VK_SUCCESS) {
@@ -1079,7 +1094,7 @@ bool Renderer::createSkyPipeline() {
     pipelineInfo.pDepthStencilState = &depthStencil;
     pipelineInfo.pColorBlendState = &colorBlending;
     pipelineInfo.layout = pipelineLayout;
-    pipelineInfo.renderPass = renderPass;
+    pipelineInfo.renderPass = postProcessSystem.getHDRRenderPass();
     pipelineInfo.subpass = 0;
 
     if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &skyPipeline) != VK_SUCCESS) {
@@ -1127,9 +1142,9 @@ bool Renderer::createUniformBuffers() {
 bool Renderer::createDescriptorPool() {
     std::array<VkDescriptorPoolSize, 3> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 4);
+    poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 6);  // +2 for post-process
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 12);  // diffuse + shadow + normal per set
+    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 14);  // diffuse + shadow + normal + HDR sampler
     poolSizes[2].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     poolSizes[2].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 6);
 
@@ -1137,7 +1152,7 @@ bool Renderer::createDescriptorPool() {
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
     poolInfo.pPoolSizes = poolSizes.data();
-    poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 6);
+    poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 8);  // +2 for post-process
 
     if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS) {
         SDL_Log("Failed to create descriptor pool");
@@ -1392,22 +1407,22 @@ void Renderer::render(const Camera& camera) {
         vkCmdEndRenderPass(commandBuffers[currentFrame]);
     }
 
-    // Main render pass
-    VkRenderPassBeginInfo renderPassInfo{};
-    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    renderPassInfo.renderPass = renderPass;
-    renderPassInfo.framebuffer = framebuffers[imageIndex];
-    renderPassInfo.renderArea.offset = {0, 0};
-    renderPassInfo.renderArea.extent = swapchainExtent;
+    // HDR render pass - render scene to HDR target
+    VkRenderPassBeginInfo hdrPassInfo{};
+    hdrPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    hdrPassInfo.renderPass = postProcessSystem.getHDRRenderPass();
+    hdrPassInfo.framebuffer = postProcessSystem.getHDRFramebuffer();
+    hdrPassInfo.renderArea.offset = {0, 0};
+    hdrPassInfo.renderArea.extent = postProcessSystem.getExtent();
 
     std::array<VkClearValue, 2> clearValues{};
-    clearValues[0].color = {{0.1f, 0.1f, 0.1f, 1.0f}};
+    clearValues[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
     clearValues[1].depthStencil = {1.0f, 0};
 
-    renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
-    renderPassInfo.pClearValues = clearValues.data();
+    hdrPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
+    hdrPassInfo.pClearValues = clearValues.data();
 
-    vkCmdBeginRenderPass(commandBuffers[currentFrame], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdBeginRenderPass(commandBuffers[currentFrame], &hdrPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
     vkCmdBindPipeline(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, skyPipeline);
     vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -1450,6 +1465,10 @@ void Renderer::render(const Camera& camera) {
     grassSystem.recordDraw(commandBuffers[currentFrame], currentFrame, grassTime);
 
     vkCmdEndRenderPass(commandBuffers[currentFrame]);
+
+    // Post-process pass - tone map HDR to LDR swapchain
+    postProcessSystem.recordPostProcess(commandBuffers[currentFrame], currentFrame,
+                                         framebuffers[imageIndex], 0.0f);
 
     vkEndCommandBuffer(commandBuffers[currentFrame]);
 

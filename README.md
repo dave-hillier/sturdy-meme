@@ -8,7 +8,7 @@ A simple Vulkan-based 3D game rendering a textured cube with camera controls.
 - C++17 compiler
 - Vulkan SDK (includes MoltenVK on macOS)
 - vcpkg
-- Ninja (recommended)
+- Ninja
 
 ### macOS Setup
 

@@ -22,6 +22,7 @@ set(SOURCES
     src/ShaderLoader.cpp
     src/GrassSystem.cpp
     src/CelestialCalculator.cpp
+    src/PostProcessSystem.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
@@ -66,6 +67,8 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass_shadow.frag.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow.frag.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.vert.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.frag.spv
 )
 
 set_source_files_properties(${RESOURCE_FILES} PROPERTIES
@@ -154,6 +157,18 @@ if(SHADER_COMPILE_CMD)
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass_shadow.frag
         COMMENT "Compiling grass shadow fragment shader"
     )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.vert.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.vert.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.vert
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.vert
+        COMMENT "Compiling postprocess vertex shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.frag.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.frag.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.frag
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.frag
+        COMMENT "Compiling postprocess fragment shader"
+    )
     add_custom_target(shaders DEPENDS
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.frag.spv
@@ -166,6 +181,8 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass_shadow.frag.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow.frag.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.vert.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.frag.spv
     )
     add_dependencies(${PROJECT_NAME} shaders)
 else()
