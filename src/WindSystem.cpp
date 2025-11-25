@@ -194,15 +194,18 @@ float WindSystem::sampleWindAtPosition(const glm::vec2& worldPos) const {
     // Scroll the sampling position based on wind direction and time
     glm::vec2 scrolledPos = worldPos - windDirection * totalTime * windSpeed;
 
-    // Single octave of low-frequency noise for smooth, gentle waves
-    float lowFreqScale = noiseScale * 0.15f;
-    float noise = perlinNoise(scrolledPos.x * lowFreqScale, scrolledPos.y * lowFreqScale);
+    // Low-frequency turbulence: sum of |noise| at multiple octaves
+    float baseFreq = noiseScale * 0.08f;
 
-    // Apply smoothstep to make transitions even gentler
-    noise = noise * noise * (3.0f - 2.0f * noise);
+    // Perlin noise returns [0,1], remap to [-1,1] for abs()
+    float n1 = perlinNoise(scrolledPos.x * baseFreq, scrolledPos.y * baseFreq) * 2.0f - 1.0f;
+    float n2 = perlinNoise(scrolledPos.x * baseFreq * 2.0f, scrolledPos.y * baseFreq * 2.0f) * 2.0f - 1.0f;
+
+    // Turbulence: absolute value creates the characteristic billowy creases
+    float turbulence = std::abs(n1) * 0.7f + std::abs(n2) * 0.3f;
 
     // Add gust variation (time-based sine wave)
     float gust = (std::sin(totalTime * gustFrequency * 6.28318f) * 0.5f + 0.5f) * gustAmplitude;
 
-    return (noise + gust) * windStrength;
+    return (turbulence + gust) * windStrength;
 }

@@ -112,7 +112,8 @@ float perlinNoise(float x, float y) {
     return (res + 1.0) * 0.5;
 }
 
-// Sample wind at a world position with smooth, low-frequency scrolling noise
+// Sample wind using low-frequency turbulence (absolute value of Perlin noise)
+// Creates billowy, flowing patterns with soft creases
 float sampleWind(vec2 worldPos) {
     vec2 windDir = wind.windDirectionAndStrength.xy;
     float windStrength = wind.windDirectionAndStrength.z;
@@ -125,18 +126,21 @@ float sampleWind(vec2 worldPos) {
     // Scroll position in wind direction
     vec2 scrolledPos = worldPos - windDir * windTime * windSpeed;
 
-    // Single octave of low-frequency noise for smooth, gentle waves
-    // Using a much lower frequency (0.15x) for broad, smooth wind patterns
-    float lowFreqScale = noiseScale * 0.15;
-    float noise = perlinNoise(scrolledPos.x * lowFreqScale, scrolledPos.y * lowFreqScale);
+    // Low-frequency turbulence: sum of |noise| at multiple octaves
+    // Using very low base frequency for broad, smooth wind waves
+    float baseFreq = noiseScale * 0.08;
 
-    // Apply smoothstep to make transitions even gentler
-    noise = smoothstep(0.0, 1.0, noise);
+    // Perlin noise returns [0,1] after our normalization, remap to [-1,1] for abs()
+    float n1 = perlinNoise(scrolledPos.x * baseFreq, scrolledPos.y * baseFreq) * 2.0 - 1.0;
+    float n2 = perlinNoise(scrolledPos.x * baseFreq * 2.0, scrolledPos.y * baseFreq * 2.0) * 2.0 - 1.0;
+
+    // Turbulence: absolute value creates the characteristic billowy creases
+    float turbulence = abs(n1) * 0.7 + abs(n2) * 0.3;
 
     // Add time-varying gust
     float gust = (sin(windTime * gustFreq * 6.28318) * 0.5 + 0.5) * gustAmp;
 
-    return (noise + gust) * windStrength;
+    return (turbulence + gust) * windStrength;
 }
 
 layout(location = 0) out vec3 fragColor;
