@@ -56,19 +56,47 @@ open build/release/vulkan-game.app
 
 ## Controls
 
+### Keyboard
+
 | Key | Action |
 |-----|--------|
-| Arrow Up | Move forward |
-| Arrow Down | Move backward |
-| Arrow Left | Strafe left |
-| Arrow Right | Strafe right |
-| W | Look up (pitch) |
-| S | Look down (pitch) |
-| A | Look left (yaw) |
-| D | Look right (yaw) |
-| Page Up | Move up |
-| Page Down | Move down |
+| W | Move forward |
+| S | Move backward |
+| A | Strafe left |
+| D | Strafe right |
+| Arrow Up | Look up (pitch) |
+| Arrow Down | Look down (pitch) |
+| Arrow Left | Look left (yaw) |
+| Arrow Right | Look right (yaw) |
+| Space / E | Move up |
+| C / Q | Move down |
+| 1 | Set time to sunrise |
+| 2 | Set time to noon |
+| 3 | Set time to sunset |
+| 4 | Set time to midnight |
+| + | Speed up time (2x) |
+| - | Slow down time (0.5x) |
+| R | Reset to real-time |
 | Escape | Quit |
+
+### Gamepad (SDL3)
+
+| Input | Action |
+|-------|--------|
+| Left Stick | Movement |
+| Right Stick | Camera look |
+| Right Bumper (RB/R1) | Move up |
+| Left Bumper (LB/L1) | Move down |
+| A / Cross | Set time to sunrise |
+| B / Circle | Set time to noon |
+| X / Square | Set time to sunset |
+| Y / Triangle | Set time to midnight |
+| Right Trigger | Speed up time |
+| Left Trigger | Slow down time |
+| Start | Reset to real-time |
+| Back / Select | Quit |
+
+Gamepads are automatically detected when connected (hot-plug supported).
 
 ## Project Structure
 
