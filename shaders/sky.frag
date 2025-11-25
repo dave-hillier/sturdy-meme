@@ -47,7 +47,17 @@ float starField(vec3 dir) {
     float nightFactor = 1.0 - smoothstep(-0.1, 0.2, ubo.sunDirection.y);
     if (nightFactor < 0.01) return 0.0;
 
-    vec3 p = floor(dir * 300.0);
+    // Use spherical coordinates for stable star positions when panning
+    dir = normalize(dir);
+    float theta = atan(dir.z, dir.x);  // Azimuth angle [-PI, PI]
+    float phi = asin(clamp(dir.y, -1.0, 1.0));  // Elevation angle [-PI/2, PI/2]
+
+    // Create grid in spherical space - scale controls star density
+    // Use different scales to avoid alignment artifacts
+    vec2 gridCoord = vec2(theta * 80.0, phi * 80.0);
+    vec2 cell = floor(gridCoord);
+
+    vec3 p = vec3(cell, 0.0);
     float h = hash(p);
 
     float star = step(0.997, h);
