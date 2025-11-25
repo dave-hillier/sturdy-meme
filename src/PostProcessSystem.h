@@ -7,14 +7,12 @@
 #include <string>
 
 struct PostProcessUniforms {
-    float exposure;
-    float bloomThreshold;
-    float bloomIntensity;
-    float autoExposure;  // 0 = manual, 1 = auto
-    float previousExposure;
-    float deltaTime;
-    float adaptationSpeed;
-    float bloomRadius;
+    glm::vec4 exposureParams;    // x: manual exposure, y: auto flag, z: previous exposure, w: delta time
+    glm::vec4 histogramParams;   // x: adaptation speed, y: low percentile, z: high percentile, w: exposure bias
+    glm::vec4 bloomParams;       // x: threshold, y: intensity, z: radius, w: unused
+    glm::vec4 colorLift;         // xyz: lift, w: unused
+    glm::vec4 colorGamma;        // xyz: gamma, w: saturation
+    glm::vec4 colorGain;         // xyz: gain, w: Purkinje strength
 };
 
 class PostProcessSystem {
@@ -57,6 +55,17 @@ public:
     float getBloomIntensity() const { return bloomIntensity; }
     void setBloomRadius(float r) { bloomRadius = r; }
     float getBloomRadius() const { return bloomRadius; }
+
+    void setExposureCompensation(float bias) { exposureCompensation = bias; }
+    void setHistogramPercentiles(float low, float high) {
+        histogramLowPercentile = low;
+        histogramHighPercentile = high;
+    }
+    void setColorLift(const glm::vec3& value) { colorLift = value; }
+    void setColorGamma(const glm::vec3& value) { colorGamma = value; }
+    void setColorGain(const glm::vec3& value) { colorGain = value; }
+    void setSaturation(float value) { saturation = value; }
+    void setPurkinjeStrength(float value) { purkinjeStrength = value; }
 
 private:
     bool createHDRRenderTarget();
@@ -117,6 +126,18 @@ private:
     float bloomThreshold = 1.0f;   // Brightness threshold for bloom
     float bloomIntensity = 0.3f;   // Bloom strength
     float bloomRadius = 4.0f;      // Bloom sample radius
+
+    // Histogram and exposure shaping
+    float exposureCompensation = 0.0f;  // Extra EV offset
+    float histogramLowPercentile = 0.35f;
+    float histogramHighPercentile = 0.9f;
+
+    // Color grading
+    glm::vec3 colorLift = glm::vec3(0.0f);
+    glm::vec3 colorGamma = glm::vec3(1.1f);
+    glm::vec3 colorGain = glm::vec3(1.0f);
+    float saturation = 1.0f;
+    float purkinjeStrength = 0.65f;
 
     // Auto-exposure parameters
     static constexpr float MIN_EXPOSURE = -4.0f;  // EV

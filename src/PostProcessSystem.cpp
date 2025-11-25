@@ -2,6 +2,7 @@
 #include "ShaderLoader.h"
 #include <SDL3/SDL.h>
 #include <array>
+#include <cmath>
 
 bool PostProcessSystem::init(const InitInfo& info) {
     device = info.device;
@@ -367,10 +368,13 @@ bool PostProcessSystem::createUniformBuffers() {
 
         // Initialize with defaults
         PostProcessUniforms* ubo = static_cast<PostProcessUniforms*>(uniformMappedPtrs[i]);
-        ubo->exposure = 0.0f;
-        ubo->bloomThreshold = 1.0f;
-        ubo->bloomIntensity = 0.5f;
-        ubo->autoExposure = 1.0f;  // Enable by default
+        ubo->exposureParams = glm::vec4(0.0f, 1.0f, 0.0f, 0.0f);
+        ubo->histogramParams = glm::vec4(2.0f, histogramLowPercentile, histogramHighPercentile,
+                                         exposureCompensation);
+        ubo->bloomParams = glm::vec4(1.0f, bloomIntensity, bloomRadius, 0.0f);
+        ubo->colorLift = glm::vec4(colorLift, 0.0f);
+        ubo->colorGamma = glm::vec4(colorGamma, saturation);
+        ubo->colorGain = glm::vec4(colorGain, purkinjeStrength);
     }
 
     return true;
@@ -554,22 +558,25 @@ void PostProcessSystem::recordPostProcess(VkCommandBuffer cmd, uint32_t frameInd
                                           VkFramebuffer swapchainFB, float deltaTime) {
     // Update uniform buffer
     PostProcessUniforms* ubo = static_cast<PostProcessUniforms*>(uniformMappedPtrs[frameIndex]);
-    ubo->exposure = manualExposure;
-    ubo->autoExposure = autoExposureEnabled ? 1.0f : 0.0f;
-    ubo->previousExposure = lastAutoExposure;
-    ubo->deltaTime = deltaTime;
-    ubo->adaptationSpeed = 2.0f;  // Smooth adaptation over ~0.5 seconds
-    ubo->bloomThreshold = bloomThreshold;
-    ubo->bloomIntensity = bloomIntensity;
-    ubo->bloomRadius = bloomRadius;
+    ubo->exposureParams = glm::vec4(manualExposure, autoExposureEnabled ? 1.0f : 0.0f,
+                                    lastAutoExposure, deltaTime);
+    ubo->histogramParams = glm::vec4(2.5f, histogramLowPercentile, histogramHighPercentile,
+                                     exposureCompensation);
+    ubo->bloomParams = glm::vec4(bloomThreshold, bloomIntensity, bloomRadius, 0.0f);
+    ubo->colorLift = glm::vec4(colorLift, 0.0f);
+    ubo->colorGamma = glm::vec4(colorGamma, saturation);
+    ubo->colorGain = glm::vec4(colorGain, purkinjeStrength);
 
     // Update tracked exposure for next frame (estimate based on current)
     // Note: In fragment shader approach, all pixels compute the same exposure
     // The lastAutoExposure will be updated by the shader's output being read back
     // For now, we just slowly adapt the CPU-side value
-    if (autoExposureEnabled) {
-        // Simple approximation - let shader handle actual adaptation
-        lastAutoExposure = ubo->previousExposure;
+    if (!autoExposureEnabled) {
+        lastAutoExposure = manualExposure;
+    } else {
+        float settleRate = 1.0f - expf(-ubo->histogramParams.x * deltaTime);
+        lastAutoExposure = glm::mix(lastAutoExposure, manualExposure + exposureCompensation,
+                                    settleRate * 0.25f);
     }
 
     // Begin swapchain render pass for final composite

@@ -3,18 +3,28 @@
 layout(binding = 0) uniform sampler2D hdrInput;
 
 layout(binding = 1) uniform PostProcessUniforms {
-    float exposure;
-    float bloomThreshold;
-    float bloomIntensity;
-    float autoExposure;  // 0 = manual, 1 = auto
-    float previousExposure;
-    float deltaTime;
-    float adaptationSpeed;
-    float bloomRadius;
+    vec4 exposureParams;    // x: manual exposure, y: auto flag, z: previous exposure, w: delta time
+    vec4 histogramParams;   // x: adaptation speed, y: low percentile, z: high percentile, w: exposure bias
+    vec4 bloomParams;       // x: threshold, y: intensity, z: radius, w: unused
+    vec4 colorLift;         // xyz: lift
+    vec4 colorGamma;        // xyz: gamma, w: saturation
+    vec4 colorGain;         // xyz: gain, w: Purkinje strength
 } ubo;
 
 layout(location = 0) in vec2 fragTexCoord;
 layout(location = 0) out vec4 outColor;
+
+const int BIN_COUNT = 16;
+const float TARGET_LUMINANCE = 0.18;
+const float LOG_LUM_MIN = -10.0;
+const float LOG_LUM_MAX = 6.0;
+
+vec2 samplePattern[16] = vec2[](
+    vec2(-0.75, -0.25), vec2(-0.25, -0.75), vec2(0.25, -0.25), vec2(0.75, -0.75),
+    vec2(-0.75, 0.25),  vec2(-0.25, 0.75),  vec2(0.25, 0.25),  vec2(0.75, 0.75),
+    vec2(-0.5, -0.5),   vec2(0.5, -0.5),    vec2(-0.5, 0.5),   vec2(0.5, 0.5),
+    vec2(0.0, -1.0),    vec2(-1.0, 0.0),    vec2(1.0, 0.0),    vec2(0.0, 1.0)
+);
 
 // ACES Filmic Tone Mapping
 vec3 ACESFilmic(vec3 x) {
@@ -26,47 +36,56 @@ vec3 ACESFilmic(vec3 x) {
     return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
 }
 
-// Compute luminance using standard weights
 float getLuminance(vec3 color) {
     return dot(color, vec3(0.2126, 0.7152, 0.0722));
 }
 
-// Sample luminance at multiple points for auto-exposure
-float computeAverageLuminance() {
-    const float minLum = 0.001;
-    const float maxLum = 10.0;
-
-    // Sample a 5x5 grid across the image (center-weighted)
-    float totalLogLum = 0.0;
-    float totalWeight = 0.0;
-
-    // Center-weighted sampling pattern
-    for (int y = 0; y < 5; y++) {
-        for (int x = 0; x < 5; x++) {
-            vec2 uv = vec2(0.1 + 0.2 * float(x), 0.1 + 0.2 * float(y));
-
-            // Center-weighted bias
-            vec2 center = vec2(0.5, 0.5);
-            float dist = length(uv - center);
-            float weight = 1.0 - dist * 0.5;
-
-            vec3 color = texture(hdrInput, uv).rgb;
-            float lum = clamp(getLuminance(color), minLum, maxLum);
-
-            // Log-average for geometric mean
-            totalLogLum += log(lum) * weight;
-            totalWeight += weight;
-        }
-    }
-
-    // Convert back from log space (geometric mean)
-    return exp(totalLogLum / totalWeight);
+float binToLuminance(int bin) {
+    float t = (float(bin) + 0.5) / float(BIN_COUNT);
+    return exp2(mix(LOG_LUM_MIN, LOG_LUM_MAX, t));
 }
 
-// Extract bright pixels for bloom with soft knee
+float buildHistogram(out float histogram[BIN_COUNT], out float averageLum) {
+    for (int i = 0; i < BIN_COUNT; i++) {
+        histogram[i] = 0.0;
+    }
+
+    float totalWeight = 0.0;
+    float logLumSum = 0.0;
+
+    // Slight jitter to avoid visible banding in adaptation
+    vec2 jitter = fract(fragTexCoord.yx * vec2(37.0, 17.0)) - 0.5;
+
+    for (int i = 0; i < 16; i++) {
+        vec2 uv = clamp(samplePattern[i] * 0.35 + 0.5 + jitter * 0.02, 0.0, 1.0);
+        vec3 color = texture(hdrInput, uv).rgb;
+        float lum = clamp(getLuminance(color), 0.0001, 64.0);
+        float logLum = log2(lum);
+        float bin = clamp((logLum - LOG_LUM_MIN) / (LOG_LUM_MAX - LOG_LUM_MIN), 0.0, 0.999) * float(BIN_COUNT);
+        int idx = int(bin);
+        histogram[idx] += 1.0;
+        totalWeight += 1.0;
+        logLumSum += logLum;
+    }
+
+    averageLum = exp2(logLumSum / max(totalWeight, 1.0));
+    return totalWeight;
+}
+
+float percentileFromHistogram(float histogram[BIN_COUNT], float totalWeight, float percentile) {
+    float target = clamp(percentile, 0.0, 1.0) * totalWeight;
+    float accum = 0.0;
+    for (int i = 0; i < BIN_COUNT; i++) {
+        accum += histogram[i];
+        if (accum >= target) {
+            return binToLuminance(i);
+        }
+    }
+    return binToLuminance(BIN_COUNT / 2);
+}
+
 vec3 extractBright(vec3 color, float threshold) {
     float brightness = getLuminance(color);
-    // Soft knee for smoother transition
     float knee = threshold * 0.5;
     float soft = brightness - threshold + knee;
     soft = clamp(soft, 0.0, 2.0 * knee);
@@ -75,117 +94,84 @@ vec3 extractBright(vec3 color, float threshold) {
     return color * max(contribution, 0.0);
 }
 
-// Simple blur using weighted samples at multiple scales
-vec3 sampleBloom(vec2 uv, float radius) {
+vec3 bloomBlur(vec2 uv, vec2 texelSize, float radius) {
+    vec2 offsets[9] = vec2[](
+        vec2(-1.0, -1.0), vec2(0.0, -1.0), vec2(1.0, -1.0),
+        vec2(-1.0, 0.0),  vec2(0.0, 0.0),  vec2(1.0, 0.0),
+        vec2(-1.0, 1.0),  vec2(0.0, 1.0),  vec2(1.0, 1.0)
+    );
+    float weights[9] = float[](0.05, 0.09, 0.05, 0.09, 0.16, 0.09, 0.05, 0.09, 0.05);
+
+    vec3 accum = vec3(0.0);
+    float total = 0.0;
+    for (int i = 0; i < 9; i++) {
+        vec2 sampleUV = uv + offsets[i] * texelSize * radius;
+        vec3 sampleColor = texture(hdrInput, sampleUV).rgb;
+        vec3 bright = extractBright(sampleColor, ubo.bloomParams.x);
+        accum += bright * weights[i];
+        total += weights[i];
+    }
+    return accum / max(total, 0.0001);
+}
+
+vec3 bloomChain(vec2 uv) {
     vec2 texelSize = 1.0 / vec2(textureSize(hdrInput, 0));
-    vec3 bloom = vec3(0.0);
-    float totalWeight = 0.0;
 
-    // Multi-scale sampling for wider blur without separate passes
-    // Scale 1: Fine detail (13-tap cross)
-    const float scale1 = 1.0;
-    const float weight1 = 0.3;
+    // Downsample and blur at progressively larger footprints
+    vec3 level0 = bloomBlur(uv, texelSize, ubo.bloomParams.z * 0.5);
+    vec3 level1 = bloomBlur(uv, texelSize * 2.0, ubo.bloomParams.z * 1.0);
+    vec3 level2 = bloomBlur(uv, texelSize * 4.0, ubo.bloomParams.z * 1.5);
+    vec3 level3 = bloomBlur(uv, texelSize * 8.0, ubo.bloomParams.z * 2.5);
 
-    // Scale 2: Medium blur
-    const float scale2 = 4.0;
-    const float weight2 = 0.4;
+    // Upsample and accumulate
+    vec3 up2 = level3;
+    vec3 up1 = level2 + up2 * 0.6;
+    vec3 up0 = level1 + up1 * 0.6;
 
-    // Scale 3: Wide blur
-    const float scale3 = 8.0;
-    const float weight3 = 0.3;
+    vec3 bloom = level0 + up0 * 0.6;
+    return bloom * ubo.bloomParams.y;
+}
 
-    // Gaussian-like 13-tap filter pattern (3 scales)
-    vec2 offsets[13];
-    offsets[0] = vec2(0.0, 0.0);
-    offsets[1] = vec2(1.0, 0.0);
-    offsets[2] = vec2(-1.0, 0.0);
-    offsets[3] = vec2(0.0, 1.0);
-    offsets[4] = vec2(0.0, -1.0);
-    offsets[5] = vec2(1.0, 1.0);
-    offsets[6] = vec2(-1.0, -1.0);
-    offsets[7] = vec2(1.0, -1.0);
-    offsets[8] = vec2(-1.0, 1.0);
-    offsets[9] = vec2(2.0, 0.0);
-    offsets[10] = vec2(-2.0, 0.0);
-    offsets[11] = vec2(0.0, 2.0);
-    offsets[12] = vec2(0.0, -2.0);
+vec3 applyColorGrading(vec3 color, float nightFactor) {
+    vec3 graded = color + ubo.colorLift.xyz;
+    graded = pow(max(graded, vec3(0.0001)), ubo.colorGamma.xyz);
+    graded *= ubo.colorGain.xyz;
 
-    float weights[13];
-    weights[0] = 0.2;  // center
-    weights[1] = 0.12; weights[2] = 0.12;  // horizontal
-    weights[3] = 0.12; weights[4] = 0.12;  // vertical
-    weights[5] = 0.06; weights[6] = 0.06;  // diagonal
-    weights[7] = 0.06; weights[8] = 0.06;
-    weights[9] = 0.02; weights[10] = 0.02;  // outer
-    weights[11] = 0.02; weights[12] = 0.02;
+    float luma = dot(graded, vec3(0.2126, 0.7152, 0.0722));
+    graded = mix(vec3(luma), graded, ubo.colorGamma.w);
 
-    // Sample at scale 1
-    for (int i = 0; i < 13; i++) {
-        vec2 sampleUV = uv + offsets[i] * texelSize * radius * scale1;
-        vec3 color = texture(hdrInput, sampleUV).rgb;
-        vec3 bright = extractBright(color, ubo.bloomThreshold);
-        bloom += bright * weights[i] * weight1;
-        totalWeight += weights[i] * weight1;
-    }
-
-    // Sample at scale 2
-    for (int i = 0; i < 13; i++) {
-        vec2 sampleUV = uv + offsets[i] * texelSize * radius * scale2;
-        vec3 color = texture(hdrInput, sampleUV).rgb;
-        vec3 bright = extractBright(color, ubo.bloomThreshold);
-        bloom += bright * weights[i] * weight2;
-        totalWeight += weights[i] * weight2;
-    }
-
-    // Sample at scale 3
-    for (int i = 0; i < 13; i++) {
-        vec2 sampleUV = uv + offsets[i] * texelSize * radius * scale3;
-        vec3 color = texture(hdrInput, sampleUV).rgb;
-        vec3 bright = extractBright(color, ubo.bloomThreshold);
-        bloom += bright * weights[i] * weight3;
-        totalWeight += weights[i] * weight3;
-    }
-
-    return bloom / totalWeight;
+    // Purkinje effect: favor blue channel in low light
+    vec3 mesopicTarget = vec3(graded.r * 0.7, graded.g * 0.9, graded.b * 1.2);
+    graded = mix(graded, mesopicTarget, ubo.colorGain.w * nightFactor);
+    return graded;
 }
 
 void main() {
     vec3 hdr = texture(hdrInput, fragTexCoord).rgb;
 
-    float finalExposure = ubo.exposure;
+    float histogram[BIN_COUNT];
+    float averageLum;
+    float totalWeight = buildHistogram(histogram, averageLum);
 
-    // Auto-exposure: compute target exposure from scene luminance
-    if (ubo.autoExposure > 0.5) {
-        float avgLum = computeAverageLuminance();
+    float darkLum = percentileFromHistogram(histogram, totalWeight, ubo.histogramParams.y);
+    float brightLum = percentileFromHistogram(histogram, totalWeight, ubo.histogramParams.z);
+    float targetLum = mix(darkLum, brightLum, 0.5);
 
-        // Target middle gray (0.18) for average luminance
-        // exposure = log2(targetLum / avgLum)
-        const float targetLum = 0.18;
-        float targetExp = log2(targetLum / max(avgLum, 0.001));
+    float targetExposure = log2(TARGET_LUMINANCE / max(targetLum, 0.0001)) + ubo.histogramParams.w;
+    targetExposure = clamp(targetExposure, -8.0, 8.0);
 
-        // Clamp to reasonable range
-        targetExp = clamp(targetExp, -4.0, 4.0);
+    float adaptRate = 1.0 - exp(-ubo.histogramParams.x * ubo.exposureParams.w);
+    float finalExposure = mix(ubo.exposureParams.x, targetExposure, ubo.exposureParams.y);
+    finalExposure = mix(ubo.exposureParams.z, finalExposure, adaptRate);
 
-        // Temporal smoothing: interpolate from previous exposure toward target
-        float adaptSpeed = ubo.adaptationSpeed * ubo.deltaTime;
-        adaptSpeed = clamp(adaptSpeed, 0.0, 1.0);
-        finalExposure = mix(ubo.previousExposure, targetExp, adaptSpeed);
-    }
+    float nightFactor = 1.0 - smoothstep(0.05, 0.25, averageLum);
 
-    // Compute bloom
-    vec3 bloom = vec3(0.0);
-    if (ubo.bloomIntensity > 0.0) {
-        bloom = sampleBloom(fragTexCoord, ubo.bloomRadius);
-    }
+    vec3 bloom = (ubo.bloomParams.y > 0.0) ? bloomChain(fragTexCoord) : vec3(0.0);
+    vec3 combined = hdr + bloom;
 
-    // Combine HDR with bloom
-    vec3 combined = hdr + bloom * ubo.bloomIntensity;
-
-    // Apply exposure
     vec3 exposed = combined * exp2(finalExposure);
-
-    // Apply ACES tone mapping
     vec3 mapped = ACESFilmic(exposed);
 
-    outColor = vec4(mapped, 1.0);
+    vec3 graded = applyColorGrading(mapped, nightFactor);
+    outColor = vec4(graded, 1.0);
 }
