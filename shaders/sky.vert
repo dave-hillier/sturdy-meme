@@ -24,12 +24,14 @@ void main() {
     vec2 pos = positions[gl_VertexIndex];
     gl_Position = vec4(pos, 0.9999, 1.0);
 
+    // Transform screen position to view-space direction
     mat4 invProj = inverse(ubo.proj);
-    mat4 invView = inverse(mat4(mat3(ubo.view)));
-
     vec4 clipPos = vec4(pos, 1.0, 1.0);
     vec4 viewPos = invProj * clipPos;
-    viewPos.w = 0.0;
-    vec4 worldDir = invView * viewPos;
-    rayDir = normalize(worldDir.xyz);
+    vec3 viewDir = normalize(viewPos.xyz);
+
+    // Transform to world space using only rotation
+    // transpose(mat3) = inverse for orthonormal rotation matrices
+    mat3 invViewRot = transpose(mat3(ubo.view));
+    rayDir = invViewRot * viewDir;
 }
