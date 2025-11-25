@@ -10,6 +10,15 @@ struct GrassPushConstants {
     float time;
 };
 
+struct GrassUniforms {
+    glm::vec4 cameraPosition;      // xyz = position, w = unused
+    glm::vec4 frustumPlanes[6];    // 6 frustum planes (ax+by+cz+d form)
+    float maxDrawDistance;          // Max distance for grass rendering
+    float lodTransitionStart;       // Distance where LOD transition begins
+    float lodTransitionEnd;         // Distance where LOD transition ends
+    float padding;
+};
+
 struct GrassInstance {
     glm::vec4 positionAndFacing;  // xyz = position, w = facing angle
     glm::vec4 heightHashTilt;     // x = height, y = hash, z = tilt, w = unused
@@ -35,6 +44,7 @@ public:
 
     void updateDescriptorSets(VkDevice device, const std::vector<VkBuffer>& uniformBuffers);
 
+    void updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos, const glm::mat4& viewProj);
     void recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex, float time);
     void recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time);
 
@@ -69,6 +79,11 @@ private:
     std::vector<VmaAllocation> instanceAllocations;
     std::vector<VkBuffer> indirectBuffers;
     std::vector<VmaAllocation> indirectAllocations;
+
+    // Uniform buffers for culling (per frame)
+    std::vector<VkBuffer> uniformBuffers;
+    std::vector<VmaAllocation> uniformAllocations;
+    std::vector<void*> uniformMappedPtrs;
 
     // Descriptor sets
     std::vector<VkDescriptorSet> computeDescriptorSets;

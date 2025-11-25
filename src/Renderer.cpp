@@ -899,7 +899,9 @@ void Renderer::render(const Camera& camera) {
     auto currentTime = std::chrono::high_resolution_clock::now();
     float grassTime = std::chrono::duration<float>(currentTime - startTime).count();
 
-    // Run grass compute shader before render pass
+    // Update grass culling uniforms and run compute shader
+    glm::mat4 viewProj = camera.getProjectionMatrix() * camera.getViewMatrix();
+    grassSystem.updateUniforms(currentFrame, camera.getPosition(), viewProj);
     grassSystem.recordResetAndCompute(commandBuffers[currentFrame], currentFrame, grassTime);
 
     VkRenderPassBeginInfo renderPassInfo{};

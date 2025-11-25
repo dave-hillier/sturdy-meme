@@ -22,6 +22,15 @@ layout(std430, binding = 1) buffer IndirectBuffer {
     DrawIndirectCommand drawCmd;
 };
 
+layout(binding = 2) uniform GrassUniforms {
+    vec4 cameraPosition;
+    vec4 frustumPlanes[6];
+    float maxDrawDistance;
+    float lodTransitionStart;
+    float lodTransitionEnd;
+    float padding;
+} uniforms;
+
 layout(push_constant) uniform PushConstants {
     float time;
 } push;
@@ -65,9 +74,24 @@ void main() {
     x += (h1 - 0.5) * spacing * 0.8;
     z += (hash(cell + vec2(100.0, 0.0)) - 0.5) * spacing * 0.8;
 
-    // Only place grass within disc radius (50 units)
-    float distSq = x * x + z * z;
-    if (distSq > 50.0 * 50.0) return;
+    vec3 worldPos = vec3(x, 0.0, z);
+
+    // Distance culling (relative to camera)
+    float distToCamera = length(worldPos - uniforms.cameraPosition.xyz);
+    if (distToCamera > uniforms.maxDrawDistance) return;
+
+    // Frustum culling - check against all 6 planes
+    vec4 posW = vec4(worldPos, 1.0);
+    for (int i = 0; i < 6; i++) {
+        // If position is behind any plane (with small margin for blade height), cull it
+        if (dot(posW, uniforms.frustumPlanes[i]) < -1.0) return;
+    }
+
+    // LOD blade dropping - probabilistically drop blades at distance
+    float lodFactor = smoothstep(uniforms.lodTransitionStart,
+                                 uniforms.lodTransitionEnd, distToCamera);
+    float dropThreshold = lodFactor * 0.75; // Drop up to 75% at max LOD distance
+    if (hash(cell + vec2(500.0, 500.0)) < dropThreshold) return;
 
     // Atomically increment instance count and get our slot
     uint slot = atomicAdd(drawCmd.instanceCount, 1);
@@ -79,6 +103,6 @@ void main() {
     float tilt = (hash(cell + vec2(50.0, 50.0)) - 0.5) * 0.3;  // Slight tilt
 
     // Write instance data
-    instances[slot].positionAndFacing = vec4(x, 0.0, z, facing);
+    instances[slot].positionAndFacing = vec4(worldPos, facing);
     instances[slot].heightHashTilt = vec4(height, bladeHash, tilt, 0.0);
 }

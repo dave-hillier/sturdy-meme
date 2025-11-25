@@ -1,6 +1,7 @@
 #include "GrassSystem.h"
 #include "ShaderLoader.h"
 #include <SDL3/SDL.h>
+#include <cstring>
 
 // Forward declare UniformBufferObject size (needed for descriptor set update)
 struct UniformBufferObject;
@@ -35,6 +36,7 @@ void GrassSystem::destroy(VkDevice dev, VmaAllocator alloc) {
     for (size_t i = 0; i < framesInFlight; i++) {
         vmaDestroyBuffer(alloc, instanceBuffers[i], instanceAllocations[i]);
         vmaDestroyBuffer(alloc, indirectBuffers[i], indirectAllocations[i]);
+        vmaDestroyBuffer(alloc, uniformBuffers[i], uniformAllocations[i]);
     }
 }
 
@@ -43,9 +45,13 @@ bool GrassSystem::createBuffers() {
     instanceAllocations.resize(framesInFlight);
     indirectBuffers.resize(framesInFlight);
     indirectAllocations.resize(framesInFlight);
+    uniformBuffers.resize(framesInFlight);
+    uniformAllocations.resize(framesInFlight);
+    uniformMappedPtrs.resize(framesInFlight);
 
     VkDeviceSize instanceBufferSize = sizeof(GrassInstance) * MAX_INSTANCES;
     VkDeviceSize indirectBufferSize = sizeof(VkDrawIndirectCommand);
+    VkDeviceSize uniformBufferSize = sizeof(GrassUniforms);
 
     for (size_t i = 0; i < framesInFlight; i++) {
         // Instance buffer - written by compute, read by vertex shader
@@ -78,13 +84,34 @@ bool GrassSystem::createBuffers() {
             SDL_Log("Failed to create grass indirect buffer");
             return false;
         }
+
+        // Uniform buffer - CPU-written culling parameters, persistently mapped
+        VkBufferCreateInfo uniformBufferInfo{};
+        uniformBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        uniformBufferInfo.size = uniformBufferSize;
+        uniformBufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+        uniformBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        VmaAllocationCreateInfo uniformAllocInfo{};
+        uniformAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        uniformAllocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+                                 VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+        VmaAllocationInfo uniformAllocInfoResult;
+        if (vmaCreateBuffer(allocator, &uniformBufferInfo, &uniformAllocInfo,
+                           &uniformBuffers[i], &uniformAllocations[i],
+                           &uniformAllocInfoResult) != VK_SUCCESS) {
+            SDL_Log("Failed to create grass uniform buffer");
+            return false;
+        }
+        uniformMappedPtrs[i] = uniformAllocInfoResult.pMappedData;
     }
 
     return true;
 }
 
 bool GrassSystem::createComputeDescriptorSetLayout() {
-    std::array<VkDescriptorSetLayoutBinding, 2> bindings{};
+    std::array<VkDescriptorSetLayoutBinding, 3> bindings{};
 
     // Instance buffer (output)
     bindings[0].binding = 0;
@@ -97,6 +124,12 @@ bool GrassSystem::createComputeDescriptorSetLayout() {
     bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     bindings[1].descriptorCount = 1;
     bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+    // Grass uniforms (culling parameters)
+    bindings[2].binding = 2;
+    bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    bindings[2].descriptorCount = 1;
+    bindings[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -367,7 +400,7 @@ bool GrassSystem::createDescriptorSets() {
         return false;
     }
 
-    // Update compute descriptor sets (instance and indirect buffers)
+    // Update compute descriptor sets (instance, indirect, and uniform buffers)
     for (size_t i = 0; i < framesInFlight; i++) {
         VkDescriptorBufferInfo instanceBufferInfo{};
         instanceBufferInfo.buffer = instanceBuffers[i];
@@ -379,7 +412,12 @@ bool GrassSystem::createDescriptorSets() {
         indirectBufferInfo.offset = 0;
         indirectBufferInfo.range = sizeof(VkDrawIndirectCommand);
 
-        std::array<VkWriteDescriptorSet, 2> computeWrites{};
+        VkDescriptorBufferInfo uniformBufferInfo{};
+        uniformBufferInfo.buffer = uniformBuffers[i];
+        uniformBufferInfo.offset = 0;
+        uniformBufferInfo.range = sizeof(GrassUniforms);
+
+        std::array<VkWriteDescriptorSet, 3> computeWrites{};
 
         computeWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         computeWrites[0].dstSet = computeDescriptorSets[i];
@@ -396,6 +434,14 @@ bool GrassSystem::createDescriptorSets() {
         computeWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         computeWrites[1].descriptorCount = 1;
         computeWrites[1].pBufferInfo = &indirectBufferInfo;
+
+        computeWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        computeWrites[2].dstSet = computeDescriptorSets[i];
+        computeWrites[2].dstBinding = 2;
+        computeWrites[2].dstArrayElement = 0;
+        computeWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        computeWrites[2].descriptorCount = 1;
+        computeWrites[2].pBufferInfo = &uniformBufferInfo;
 
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(computeWrites.size()),
                                computeWrites.data(), 0, nullptr);
@@ -438,6 +484,48 @@ void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>
         vkUpdateDescriptorSets(dev, static_cast<uint32_t>(graphicsWrites.size()),
                                graphicsWrites.data(), 0, nullptr);
     }
+}
+
+void GrassSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos, const glm::mat4& viewProj) {
+    GrassUniforms uniforms{};
+
+    // Camera position
+    uniforms.cameraPosition = glm::vec4(cameraPos, 1.0f);
+
+    // Extract frustum planes from view-projection matrix
+    // Each plane equation: ax + by + cz + d = 0
+    // Using row-major extraction (GLM is column-major, so we transpose conceptually)
+    glm::mat4 m = glm::transpose(viewProj);
+
+    // Left:   row3 + row0
+    uniforms.frustumPlanes[0] = m[3] + m[0];
+    // Right:  row3 - row0
+    uniforms.frustumPlanes[1] = m[3] - m[0];
+    // Bottom: row3 + row1
+    uniforms.frustumPlanes[2] = m[3] + m[1];
+    // Top:    row3 - row1
+    uniforms.frustumPlanes[3] = m[3] - m[1];
+    // Near:   row3 + row2
+    uniforms.frustumPlanes[4] = m[3] + m[2];
+    // Far:    row3 - row2
+    uniforms.frustumPlanes[5] = m[3] - m[2];
+
+    // Normalize planes
+    for (int i = 0; i < 6; i++) {
+        float len = glm::length(glm::vec3(uniforms.frustumPlanes[i]));
+        if (len > 0.0001f) {
+            uniforms.frustumPlanes[i] /= len;
+        }
+    }
+
+    // Distance thresholds
+    uniforms.maxDrawDistance = 50.0f;
+    uniforms.lodTransitionStart = 30.0f;
+    uniforms.lodTransitionEnd = 50.0f;
+    uniforms.padding = 0.0f;
+
+    // Copy to mapped buffer
+    memcpy(uniformMappedPtrs[frameIndex], &uniforms, sizeof(GrassUniforms));
 }
 
 void GrassSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex, float time) {
