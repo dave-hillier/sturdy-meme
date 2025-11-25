@@ -12,6 +12,8 @@ layout(binding = 0) uniform UniformBufferObject {
     vec4 sunColor;
     vec4 ambientColor;
     vec4 cameraPosition;
+    vec4 pointLightPosition;  // xyz = position, w = intensity
+    vec4 pointLightColor;     // rgb = color, a = radius
     float timeOfDay;
     float shadowMapSize;
 } ubo;
