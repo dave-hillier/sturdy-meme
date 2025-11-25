@@ -1,6 +1,7 @@
 #version 450
 
 const float PI = 3.14159265359;
+const int NUM_CASCADES = 4;
 
 // Atmospheric parameters (matched with main shader)
 const float PLANET_RADIUS = 6371.0;
@@ -19,7 +20,8 @@ layout(binding = 0) uniform UniformBufferObject {
     mat4 model;
     mat4 view;
     mat4 proj;
-    mat4 lightSpaceMatrix;
+    mat4 cascadeViewProj[NUM_CASCADES];  // Per-cascade light matrices
+    vec4 cascadeSplits;                   // View-space split depths
     vec4 sunDirection;
     vec4 moonDirection;
     vec4 sunColor;
@@ -29,9 +31,11 @@ layout(binding = 0) uniform UniformBufferObject {
     vec4 pointLightColor;     // rgb = color, a = radius
     float timeOfDay;
     float shadowMapSize;
+    float debugCascades;
+    float padding;
 } ubo;
 
-layout(binding = 2) uniform sampler2DShadow shadowMap;
+layout(binding = 2) uniform sampler2DArrayShadow shadowMapArray;  // Changed to array for CSM
 
 layout(location = 0) in vec3 fragColor;
 layout(location = 1) in vec3 fragNormal;
@@ -49,10 +53,21 @@ const float GRASS_SPECULAR_STRENGTH = 0.15;  // Subtle specular highlights
 // Clump color variation parameters
 const float CLUMP_COLOR_INFLUENCE = 0.15;  // Subtle color variation (0-1)
 
-// Shadow calculation with PCF
-float calculateShadow(vec3 worldPos, vec3 normal, vec3 lightDir) {
-    // Transform to light space
-    vec4 lightSpacePos = ubo.lightSpaceMatrix * vec4(worldPos, 1.0);
+// Select cascade based on view-space depth
+int selectCascade(float viewDepth) {
+    int cascade = 0;
+    for (int i = 0; i < NUM_CASCADES - 1; i++) {
+        if (viewDepth > ubo.cascadeSplits[i]) {
+            cascade = i + 1;
+        }
+    }
+    return cascade;
+}
+
+// Sample shadow for a specific cascade
+float sampleShadowForCascade(vec3 worldPos, vec3 normal, vec3 lightDir, int cascade) {
+    // Transform to light space for this cascade
+    vec4 lightSpacePos = ubo.cascadeViewProj[cascade] * vec4(worldPos, 1.0);
     vec3 projCoords = lightSpacePos.xyz / lightSpacePos.w;
 
     // Transform to [0,1] range for UV coordinates
@@ -61,23 +76,25 @@ float calculateShadow(vec3 worldPos, vec3 normal, vec3 lightDir) {
     // Check if outside shadow map
     if (projCoords.x < 0.0 || projCoords.x > 1.0 ||
         projCoords.y < 0.0 || projCoords.y > 1.0 ||
-        projCoords.z > 1.0) {
+        projCoords.z < 0.0 || projCoords.z > 1.0) {
         return 1.0;  // No shadow outside frustum
     }
 
-    // Bias to reduce shadow acne - grass needs less bias due to thin geometry
+    // Bias - grass needs less bias due to thin geometry, adjust per cascade
     float cosTheta = max(dot(normal, lightDir), 0.0);
-    float bias = 0.003 * tan(acos(cosTheta));
-    bias = clamp(bias, 0.0, 0.008);
+    float baseBias = 0.0003;
+    float cascadeBias = baseBias * (1.0 + float(cascade) * 0.5);
+    float slopeBias = cascadeBias * tan(acos(cosTheta));
+    float bias = clamp(slopeBias, 0.0, 0.005);
 
-    // PCF 3x3
+    // PCF 3x3 from array texture
     float shadow = 0.0;
     float texelSize = 1.0 / ubo.shadowMapSize;
 
     for (int x = -1; x <= 1; x++) {
         for (int y = -1; y <= 1; y++) {
             vec2 offset = vec2(x, y) * texelSize;
-            shadow += texture(shadowMap, vec3(projCoords.xy + offset, projCoords.z - bias));
+            shadow += texture(shadowMapArray, vec4(projCoords.xy + offset, float(cascade), projCoords.z - bias));
         }
     }
     shadow /= 9.0;
@@ -242,6 +259,34 @@ vec3 calculatePointLight(vec3 N, vec3 V, vec3 worldPos, vec3 albedo) {
     vec3 sss = calculateSSS(L, V, N, lightColor, albedo);
 
     return (albedo * diffuse + sss) * lightColor * lightIntensity * attenuation;
+}
+
+// Cascaded shadow calculation with blending
+float calculateShadow(vec3 worldPos, vec3 normal, vec3 lightDir) {
+    // Calculate view-space depth
+    vec4 viewPos = ubo.view * vec4(worldPos, 1.0);
+    float viewDepth = -viewPos.z;
+
+    // Select cascade
+    int cascade = selectCascade(viewDepth);
+
+    // Sample shadow
+    float shadow = sampleShadowForCascade(worldPos, normal, lightDir, cascade);
+
+    // Blend near cascade boundaries
+    float blendDistance = 5.0;
+    if (cascade < NUM_CASCADES - 1) {
+        float splitDepth = ubo.cascadeSplits[cascade];
+        float distToSplit = splitDepth - viewDepth;
+
+        if (distToSplit < blendDistance && distToSplit > 0.0) {
+            float nextShadow = sampleShadowForCascade(worldPos, normal, lightDir, cascade + 1);
+            float blendFactor = smoothstep(0.0, blendDistance, distToSplit);
+            shadow = mix(nextShadow, shadow, blendFactor);
+        }
+    }
+
+    return shadow;
 }
 
 void main() {

@@ -1,10 +1,13 @@
 #version 450
 
+const int NUM_CASCADES = 4;
+
 layout(binding = 0) uniform UniformBufferObject {
     mat4 model;
     mat4 view;
     mat4 proj;
-    mat4 lightSpaceMatrix;
+    mat4 cascadeViewProj[NUM_CASCADES];  // Per-cascade light matrices
+    vec4 cascadeSplits;                   // View-space split depths
     vec4 sunDirection;
     vec4 moonDirection;
     vec4 sunColor;
@@ -14,10 +17,13 @@ layout(binding = 0) uniform UniformBufferObject {
     vec4 pointLightColor;     // rgb = color, a = radius
     float timeOfDay;
     float shadowMapSize;
+    float debugCascades;
+    float padding;
 } ubo;
 
 layout(push_constant) uniform PushConstants {
     mat4 model;
+    int cascadeIndex;  // Which cascade we're rendering
 } push;
 
 layout(location = 0) in vec3 inPosition;
@@ -25,5 +31,5 @@ layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec2 inTexCoord;
 
 void main() {
-    gl_Position = ubo.lightSpaceMatrix * push.model * vec4(inPosition, 1.0);
+    gl_Position = ubo.cascadeViewProj[push.cascadeIndex] * push.model * vec4(inPosition, 1.0);
 }

@@ -1,6 +1,7 @@
 #version 450
 
 const float PI = 3.14159265359;
+const int NUM_CASCADES = 4;
 
 // Atmospheric parameters (Phase 4 - scaled to kilometers for scene scale)
 const float PLANET_RADIUS = 6371.0;
@@ -22,7 +23,8 @@ layout(binding = 0) uniform UniformBufferObject {
     mat4 model;
     mat4 view;
     mat4 proj;
-    mat4 lightSpaceMatrix;
+    mat4 cascadeViewProj[NUM_CASCADES];  // Per-cascade light matrices
+    vec4 cascadeSplits;                   // View-space split depths
     vec4 sunDirection;
     vec4 moonDirection;
     vec4 sunColor;
@@ -32,10 +34,12 @@ layout(binding = 0) uniform UniformBufferObject {
     vec4 pointLightColor;     // rgb = color, a = radius
     float timeOfDay;
     float shadowMapSize;
+    float debugCascades;       // 1.0 = show cascade colors
+    float padding;
 } ubo;
 
 layout(binding = 1) uniform sampler2D texSampler;
-layout(binding = 2) uniform sampler2DShadow shadowMap;
+layout(binding = 2) uniform sampler2DArrayShadow shadowMapArray;  // Changed to array for CSM
 layout(binding = 3) uniform sampler2D normalMap;
 
 layout(push_constant) uniform PushConstants {
@@ -197,40 +201,100 @@ vec3 perturbNormal(vec3 N, vec3 V, vec2 texcoord, vec3 worldPos) {
     return normalize(TBN * normalSample);
 }
 
-// Shadow calculation with PCF
-float calculateShadow(vec3 worldPos, vec3 normal, vec3 lightDir) {
-    // Transform to light space
-    vec4 lightSpacePos = ubo.lightSpaceMatrix * vec4(worldPos, 1.0);
+// Cascade debug colors
+vec3 getCascadeDebugColor(int cascade) {
+    const vec3 colors[4] = vec3[](
+        vec3(1.0, 0.0, 0.0),  // Red - cascade 0 (closest)
+        vec3(0.0, 1.0, 0.0),  // Green - cascade 1
+        vec3(0.0, 0.0, 1.0),  // Blue - cascade 2
+        vec3(1.0, 1.0, 0.0)   // Yellow - cascade 3 (farthest)
+    );
+    return colors[cascade];
+}
+
+// Select cascade based on view-space depth
+int selectCascade(float viewDepth) {
+    int cascade = 0;
+    for (int i = 0; i < NUM_CASCADES - 1; i++) {
+        if (viewDepth > ubo.cascadeSplits[i]) {
+            cascade = i + 1;
+        }
+    }
+    return cascade;
+}
+
+// Sample shadow for a specific cascade
+float sampleShadowForCascade(vec3 worldPos, vec3 normal, vec3 lightDir, int cascade) {
+    // Transform to light space for this cascade
+    vec4 lightSpacePos = ubo.cascadeViewProj[cascade] * vec4(worldPos, 1.0);
     vec3 projCoords = lightSpacePos.xyz / lightSpacePos.w;
 
-    // Transform to [0,1] range for UV coordinates
+    // Transform XY to [0,1] range for texture UV (Z is already [0,1] from Vulkan matrix)
     projCoords.xy = projCoords.xy * 0.5 + 0.5;
 
     // Check if outside shadow map
     if (projCoords.x < 0.0 || projCoords.x > 1.0 ||
         projCoords.y < 0.0 || projCoords.y > 1.0 ||
-        projCoords.z > 1.0) {
+        projCoords.z < 0.0 || projCoords.z > 1.0) {
         return 1.0;  // No shadow outside frustum
     }
 
-    // Bias to reduce shadow acne
+    // Bias to reduce shadow acne (adjust per cascade - farther cascades need more bias)
     float cosTheta = max(dot(normal, lightDir), 0.0);
-    float bias = 0.005 * tan(acos(cosTheta));
-    bias = clamp(bias, 0.0, 0.01);
+    float baseBias = 0.0005;
+    float cascadeBias = baseBias * (1.0 + float(cascade) * 0.5);
+    float slopeBias = cascadeBias * tan(acos(cosTheta));
+    float bias = clamp(slopeBias, 0.0, 0.01);
 
-    // PCF 3x3
+    // PCF 3x3 sampling from array texture
     float shadow = 0.0;
     float texelSize = 1.0 / ubo.shadowMapSize;
 
     for (int x = -1; x <= 1; x++) {
         for (int y = -1; y <= 1; y++) {
             vec2 offset = vec2(x, y) * texelSize;
-            shadow += texture(shadowMap, vec3(projCoords.xy + offset, projCoords.z - bias));
+            // Sample from texture array: vec4(u, v, layer, depth_compare)
+            shadow += texture(shadowMapArray, vec4(projCoords.xy + offset, float(cascade), projCoords.z - bias));
         }
     }
     shadow /= 9.0;
 
     return shadow;
+}
+
+// Cascaded shadow calculation with blending between cascades
+float calculateShadow(vec3 worldPos, vec3 normal, vec3 lightDir) {
+    // Calculate view-space depth
+    vec4 viewPos = ubo.view * vec4(worldPos, 1.0);
+    float viewDepth = -viewPos.z;  // Negate because view space looks down -Z
+
+    // Select cascade based on depth
+    int cascade = selectCascade(viewDepth);
+
+    // Sample shadow from the selected cascade
+    float shadow = sampleShadowForCascade(worldPos, normal, lightDir, cascade);
+
+    // Blend near cascade boundaries to prevent visible seams
+    float blendDistance = 5.0;  // Blend over 5 units
+    if (cascade < NUM_CASCADES - 1) {
+        float splitDepth = ubo.cascadeSplits[cascade];
+        float distToSplit = splitDepth - viewDepth;
+
+        if (distToSplit < blendDistance && distToSplit > 0.0) {
+            float nextShadow = sampleShadowForCascade(worldPos, normal, lightDir, cascade + 1);
+            float blendFactor = smoothstep(0.0, blendDistance, distToSplit);
+            shadow = mix(nextShadow, shadow, blendFactor);
+        }
+    }
+
+    return shadow;
+}
+
+// Get cascade index for debug visualization (used in main)
+int getCascadeForDebug(vec3 worldPos) {
+    vec4 viewPos = ubo.view * vec4(worldPos, 1.0);
+    float viewDepth = -viewPos.z;
+    return selectCascade(viewDepth);
 }
 
 // Calculate PBR lighting for a single light
@@ -337,6 +401,13 @@ void main() {
 
     vec3 cameraToFrag = fragWorldPos - ubo.cameraPosition.xyz;
     vec3 atmosphericColor = applyAerialPerspective(finalColor, cameraToFrag, length(cameraToFrag));
+
+    // Debug cascade visualization overlay
+    if (ubo.debugCascades > 0.5) {
+        int cascade = getCascadeForDebug(fragWorldPos);
+        vec3 cascadeColor = getCascadeDebugColor(cascade);
+        atmosphericColor = mix(atmosphericColor, cascadeColor, 0.3);  // 30% tint
+    }
 
     outColor = vec4(atmosphericColor, texColor.a);
 }

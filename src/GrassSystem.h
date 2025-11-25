@@ -8,6 +8,7 @@
 
 struct GrassPushConstants {
     float time;
+    int cascadeIndex;  // For shadow pass: which cascade we're rendering
 };
 
 struct GrassUniforms {
@@ -51,7 +52,7 @@ public:
     void updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos, const glm::mat4& viewProj);
     void recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex, float time);
     void recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time);
-    void recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time);
+    void recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time, uint32_t cascadeIndex);
 
 private:
     bool createShadowPipeline();

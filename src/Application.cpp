@@ -128,6 +128,10 @@ void Application::processEvents() {
                     renderer.toggleShadowMode();
                     SDL_Log("Shadow mode: %s", renderer.isUsingFrustumFittedShadows() ? "Frustum-fitted" : "Fixed");
                 }
+                else if (event.key.scancode == SDL_SCANCODE_6) {
+                    renderer.toggleCascadeDebug();
+                    SDL_Log("Cascade debug visualization: %s", renderer.isShowingCascadeDebug() ? "ON" : "OFF");
+                }
                 break;
             case SDL_EVENT_GAMEPAD_ADDED:
                 if (!gamepad) {

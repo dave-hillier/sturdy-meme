@@ -842,7 +842,7 @@ void GrassSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float tim
     vkCmdDrawIndirect(cmd, indirectBuffers[frameIndex], 0, 1, sizeof(VkDrawIndirectCommand));
 }
 
-void GrassSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time) {
+void GrassSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time, uint32_t cascadeIndex) {
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                             shadowPipelineLayout, 0, 1,
@@ -850,6 +850,7 @@ void GrassSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex, flo
 
     GrassPushConstants grassPush{};
     grassPush.time = time;
+    grassPush.cascadeIndex = static_cast<int>(cascadeIndex);
     vkCmdPushConstants(cmd, shadowPipelineLayout,
                        VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GrassPushConstants), &grassPush);
 

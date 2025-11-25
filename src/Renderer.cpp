@@ -271,14 +271,23 @@ void Renderer::shutdown() {
         if (shadowPipelineLayout != VK_NULL_HANDLE) {
             vkDestroyPipelineLayout(device, shadowPipelineLayout, nullptr);
         }
-        if (shadowFramebuffer != VK_NULL_HANDLE) {
-            vkDestroyFramebuffer(device, shadowFramebuffer, nullptr);
+        // Destroy per-cascade framebuffers
+        for (uint32_t i = 0; i < NUM_SHADOW_CASCADES; i++) {
+            if (cascadeFramebuffers[i] != VK_NULL_HANDLE) {
+                vkDestroyFramebuffer(device, cascadeFramebuffers[i], nullptr);
+            }
         }
         if (shadowRenderPass != VK_NULL_HANDLE) {
             vkDestroyRenderPass(device, shadowRenderPass, nullptr);
         }
         if (shadowSampler != VK_NULL_HANDLE) {
             vkDestroySampler(device, shadowSampler, nullptr);
+        }
+        // Destroy per-cascade image views
+        for (uint32_t i = 0; i < NUM_SHADOW_CASCADES; i++) {
+            if (cascadeImageViews[i] != VK_NULL_HANDLE) {
+                vkDestroyImageView(device, cascadeImageViews[i], nullptr);
+            }
         }
         if (shadowImageView != VK_NULL_HANDLE) {
             vkDestroyImageView(device, shadowImageView, nullptr);
@@ -463,7 +472,7 @@ bool Renderer::createDepthResources() {
 }
 
 bool Renderer::createShadowResources() {
-    // Create shadow map depth image
+    // Create shadow map depth image array (NUM_SHADOW_CASCADES layers)
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     imageInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -471,7 +480,7 @@ bool Renderer::createShadowResources() {
     imageInfo.extent.height = SHADOW_MAP_SIZE;
     imageInfo.extent.depth = 1;
     imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
+    imageInfo.arrayLayers = NUM_SHADOW_CASCADES;  // 4 layers for CSM
     imageInfo.format = VK_FORMAT_D32_SFLOAT;
     imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
     imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -483,25 +492,44 @@ bool Renderer::createShadowResources() {
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
 
     if (vmaCreateImage(allocator, &imageInfo, &allocInfo, &shadowImage, &shadowImageAllocation, nullptr) != VK_SUCCESS) {
-        SDL_Log("Failed to create shadow map image");
+        SDL_Log("Failed to create shadow map image array");
         return false;
     }
 
-    // Create shadow map image view
+    // Create shadow map array view (for sampling all cascades)
     VkImageViewCreateInfo viewInfo{};
     viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     viewInfo.image = shadowImage;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;  // Array view for shader sampling
     viewInfo.format = VK_FORMAT_D32_SFLOAT;
     viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
     viewInfo.subresourceRange.baseMipLevel = 0;
     viewInfo.subresourceRange.levelCount = 1;
     viewInfo.subresourceRange.baseArrayLayer = 0;
-    viewInfo.subresourceRange.layerCount = 1;
+    viewInfo.subresourceRange.layerCount = NUM_SHADOW_CASCADES;
 
     if (vkCreateImageView(device, &viewInfo, nullptr, &shadowImageView) != VK_SUCCESS) {
-        SDL_Log("Failed to create shadow map image view");
+        SDL_Log("Failed to create shadow map array view");
         return false;
+    }
+
+    // Create per-cascade image views (for rendering to individual layers)
+    for (uint32_t i = 0; i < NUM_SHADOW_CASCADES; i++) {
+        VkImageViewCreateInfo cascadeViewInfo{};
+        cascadeViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        cascadeViewInfo.image = shadowImage;
+        cascadeViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;  // Single layer view
+        cascadeViewInfo.format = VK_FORMAT_D32_SFLOAT;
+        cascadeViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        cascadeViewInfo.subresourceRange.baseMipLevel = 0;
+        cascadeViewInfo.subresourceRange.levelCount = 1;
+        cascadeViewInfo.subresourceRange.baseArrayLayer = i;  // Layer for this cascade
+        cascadeViewInfo.subresourceRange.layerCount = 1;
+
+        if (vkCreateImageView(device, &cascadeViewInfo, nullptr, &cascadeImageViews[i]) != VK_SUCCESS) {
+            SDL_Log("Failed to create cascade image view %u", i);
+            return false;
+        }
     }
 
     // Create shadow sampler with depth comparison
@@ -567,19 +595,21 @@ bool Renderer::createShadowRenderPass() {
         return false;
     }
 
-    // Create shadow framebuffer
-    VkFramebufferCreateInfo framebufferInfo{};
-    framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-    framebufferInfo.renderPass = shadowRenderPass;
-    framebufferInfo.attachmentCount = 1;
-    framebufferInfo.pAttachments = &shadowImageView;
-    framebufferInfo.width = SHADOW_MAP_SIZE;
-    framebufferInfo.height = SHADOW_MAP_SIZE;
-    framebufferInfo.layers = 1;
+    // Create per-cascade framebuffers
+    for (uint32_t i = 0; i < NUM_SHADOW_CASCADES; i++) {
+        VkFramebufferCreateInfo framebufferInfo{};
+        framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        framebufferInfo.renderPass = shadowRenderPass;
+        framebufferInfo.attachmentCount = 1;
+        framebufferInfo.pAttachments = &cascadeImageViews[i];  // Per-cascade view
+        framebufferInfo.width = SHADOW_MAP_SIZE;
+        framebufferInfo.height = SHADOW_MAP_SIZE;
+        framebufferInfo.layers = 1;
 
-    if (vkCreateFramebuffer(device, &framebufferInfo, nullptr, &shadowFramebuffer) != VK_SUCCESS) {
-        SDL_Log("Failed to create shadow framebuffer");
-        return false;
+        if (vkCreateFramebuffer(device, &framebufferInfo, nullptr, &cascadeFramebuffers[i]) != VK_SUCCESS) {
+            SDL_Log("Failed to create cascade framebuffer %u", i);
+            return false;
+        }
     }
 
     return true;
@@ -722,72 +752,126 @@ bool Renderer::createShadowPipeline() {
     return true;
 }
 
-glm::mat4 Renderer::calculateLightSpaceMatrix(const glm::vec3& lightDir, const Camera& camera) {
+void Renderer::calculateCascadeSplits(float nearClip, float farClip, float lambda, std::vector<float>& splits) {
+    // PSSM - Parallel Split Shadow Maps
+    // Blend between logarithmic and uniform distribution
+    splits.resize(NUM_SHADOW_CASCADES + 1);
+    splits[0] = nearClip;
+
+    float clipRange = farClip - nearClip;
+    float ratio = farClip / nearClip;
+
+    for (uint32_t i = 1; i <= NUM_SHADOW_CASCADES; i++) {
+        float p = static_cast<float>(i) / NUM_SHADOW_CASCADES;
+
+        // Logarithmic split (better near distribution)
+        float logSplit = nearClip * std::pow(ratio, p);
+
+        // Uniform split
+        float uniformSplit = nearClip + clipRange * p;
+
+        // Blend between log and uniform using lambda
+        splits[i] = lambda * logSplit + (1.0f - lambda) * uniformSplit;
+    }
+}
+
+glm::mat4 Renderer::calculateCascadeMatrix(const glm::vec3& lightDir, const Camera& camera, float nearSplit, float farSplit) {
     glm::vec3 lightDirNorm = glm::normalize(lightDir);
     if (glm::length(lightDirNorm) < std::numeric_limits<float>::epsilon()) {
         lightDirNorm = glm::vec3(0.0f, -1.0f, 0.0f);
     }
 
-    glm::mat4 lightView;
-    glm::mat4 lightProjection;
+    // Get camera's projection matrix (which has Vulkan Y-flip) and undo the flip for frustum calculation
+    glm::mat4 cameraProj = camera.getProjectionMatrix();
+    cameraProj[1][1] *= -1.0f;  // Undo Vulkan Y-flip for standard frustum corners
 
-    if (useFrustumFittedShadows) {
-        // Frustum-fitted shadows: uses a sphere-based approach for uniform coverage
-        const float shadowNear = 0.1f;
-        const float shadowFar = 50.0f;
+    // Extract frustum parameters from the camera's projection matrix
+    // For perspective: proj[0][0] = 1/(aspect*tan(fov/2)), proj[1][1] = 1/tan(fov/2)
+    float tanHalfFov = 1.0f / cameraProj[1][1];
+    float aspect = cameraProj[1][1] / cameraProj[0][0];
 
-        glm::mat4 view = camera.getViewMatrix();
-        glm::mat4 shadowProj = glm::perspective(glm::radians(45.0f), 16.0f/9.0f, shadowNear, shadowFar);
-        glm::mat4 invViewProj = glm::inverse(shadowProj * view);
+    // Calculate frustum corners at near and far split distances
+    float nearHeight = nearSplit * tanHalfFov;
+    float nearWidth = nearHeight * aspect;
+    float farHeight = farSplit * tanHalfFov;
+    float farWidth = farHeight * aspect;
 
-        std::array<glm::vec3, 8> frustumCorners{};
-        int cornerIndex = 0;
-        for (int x = -1; x <= 1; x += 2) {
-            for (int y = -1; y <= 1; y += 2) {
-                for (int z = -1; z <= 1; z += 2) {
-                    glm::vec4 corner = invViewProj * glm::vec4(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z), 1.0f);
-                    frustumCorners[cornerIndex++] = glm::vec3(corner) / corner.w;
-                }
-            }
-        }
+    // Get camera vectors from inverse view matrix
+    glm::mat4 view = camera.getViewMatrix();
+    glm::mat4 invView = glm::inverse(view);
+    glm::vec3 camPos = glm::vec3(invView[3]);
+    glm::vec3 camForward = -glm::vec3(invView[2]);  // Camera looks down -Z
+    glm::vec3 camRight = glm::vec3(invView[0]);
+    glm::vec3 camUp = glm::vec3(invView[1]);
 
-        glm::vec3 center(0.0f);
-        for (const auto& corner : frustumCorners) {
-            center += corner;
-        }
-        center /= static_cast<float>(frustumCorners.size());
+    // Calculate frustum corners in world space
+    glm::vec3 nearCenter = camPos + camForward * nearSplit;
+    glm::vec3 farCenter = camPos + camForward * farSplit;
 
-        // Use bounding sphere for uniform shadow map coverage
-        float radius = 0.0f;
-        for (const auto& corner : frustumCorners) {
-            radius = std::max(radius, glm::length(corner - center));
-        }
+    std::array<glm::vec3, 8> frustumCorners{
+        // Near plane corners
+        nearCenter - camRight * nearWidth - camUp * nearHeight,
+        nearCenter + camRight * nearWidth - camUp * nearHeight,
+        nearCenter + camRight * nearWidth + camUp * nearHeight,
+        nearCenter - camRight * nearWidth + camUp * nearHeight,
+        // Far plane corners
+        farCenter - camRight * farWidth - camUp * farHeight,
+        farCenter + camRight * farWidth - camUp * farHeight,
+        farCenter + camRight * farWidth + camUp * farHeight,
+        farCenter - camRight * farWidth + camUp * farHeight,
+    };
 
-        // Position light far enough to avoid near-plane clipping
-        glm::vec3 lightPos = center + lightDirNorm * (radius + 50.0f);
-        glm::vec3 up = (std::abs(lightDirNorm.y) > 0.99f) ? glm::vec3(0.0f, 0.0f, 1.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
-        lightView = glm::lookAt(lightPos, center, up);
+    // Calculate frustum center
+    glm::vec3 center(0.0f);
+    for (const auto& corner : frustumCorners) {
+        center += corner;
+    }
+    center /= static_cast<float>(frustumCorners.size());
 
-        // Use sphere-based ortho projection for uniform texel density
-        // This avoids the tight-fitting issues that cause light leaking at contact edges
-        float orthoSize = radius * 1.1f;  // Small margin for safety
-        float zPadding = 50.0f;
-
-        lightProjection = glm::ortho(-orthoSize, orthoSize, -orthoSize, orthoSize, 0.1f, radius * 2.0f + zPadding * 2.0f);
-    } else {
-        // Fixed shadows: centered at origin, fixed size (crisp, but limited range)
-        glm::vec3 lightPos = lightDirNorm * 50.0f;
-        glm::vec3 up = (std::abs(lightDirNorm.y) > 0.99f) ? glm::vec3(0.0f, 0.0f, 1.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
-        lightView = glm::lookAt(lightPos, glm::vec3(0.0f), up);
-        lightProjection = glm::ortho(-15.0f, 15.0f, -15.0f, 15.0f, 0.1f, 100.0f);
+    // Use bounding sphere for uniform shadow map coverage (like the original working code)
+    float radius = 0.0f;
+    for (const auto& corner : frustumCorners) {
+        radius = std::max(radius, glm::length(corner - center));
     }
 
+    // Position light far enough to avoid near-plane clipping
+    glm::vec3 up = (std::abs(lightDirNorm.y) > 0.99f) ? glm::vec3(0.0f, 0.0f, 1.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
+    glm::vec3 lightPos = center + lightDirNorm * (radius + 50.0f);
+    glm::mat4 lightView = glm::lookAt(lightPos, center, up);
+
+    // Use sphere-based ortho projection for uniform texel density
+    float orthoSize = radius * 1.1f;  // Small margin for safety
+    float zRange = radius * 2.0f + 100.0f;  // Cover the full sphere plus padding
+
+    glm::mat4 lightProjection = glm::ortho(-orthoSize, orthoSize, -orthoSize, orthoSize, 0.1f, zRange);
+
     // Vulkan corrections:
+    // 1. Flip Y (Vulkan has inverted Y compared to OpenGL)
     lightProjection[1][1] *= -1.0f;
+    // 2. Transform Z from [-1,1] (OpenGL) to [0,1] (Vulkan)
+    //    new_z = old_z * 0.5 + 0.5
     lightProjection[2][2] = lightProjection[2][2] * 0.5f;
     lightProjection[3][2] = lightProjection[3][2] * 0.5f + 0.5f;
 
     return lightProjection * lightView;
+}
+
+void Renderer::updateCascadeMatrices(const glm::vec3& lightDir, const Camera& camera) {
+    // Calculate cascade splits using PSSM
+    const float shadowNear = 0.1f;
+    const float shadowFar = 150.0f;  // Extended range for cascades
+    const float lambda = 0.5f;  // 0.5 is good balance between log and uniform
+
+    calculateCascadeSplits(shadowNear, shadowFar, lambda, cascadeSplitDepths);
+
+    // Calculate light space matrix for each cascade
+    for (uint32_t i = 0; i < NUM_SHADOW_CASCADES; i++) {
+        cascadeMatrices[i] = calculateCascadeMatrix(
+            lightDir, camera,
+            cascadeSplitDepths[i],
+            cascadeSplitDepths[i + 1]
+        );
+    }
 }
 
 bool Renderer::createFramebuffers() {
@@ -1384,11 +1468,27 @@ void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera& camera) 
     glm::vec3 sunColor = celestialCalculator.getSunColor(sunPos.altitude);
     glm::vec3 ambientColor = celestialCalculator.getAmbientColor(sunPos.altitude);
 
+    // Update cascade matrices for CSM
+    updateCascadeMatrices(sunDir, camera);
+
     UniformBufferObject ubo{};
     ubo.model = glm::mat4(1.0f);
     ubo.view = camera.getViewMatrix();
     ubo.proj = camera.getProjectionMatrix();
-    ubo.lightSpaceMatrix = calculateLightSpaceMatrix(sunDir, camera);
+
+    // Copy cascade matrices
+    for (uint32_t i = 0; i < NUM_SHADOW_CASCADES; i++) {
+        ubo.cascadeViewProj[i] = cascadeMatrices[i];
+    }
+
+    // Store view-space split depths (skip first which is near plane)
+    ubo.cascadeSplits = glm::vec4(
+        cascadeSplitDepths[1],
+        cascadeSplitDepths[2],
+        cascadeSplitDepths[3],
+        cascadeSplitDepths[4]
+    );
+
     ubo.sunDirection = glm::vec4(sunDir, sunIntensity);
     ubo.moonDirection = glm::vec4(moonDir, moonIntensity);
     ubo.sunColor = glm::vec4(sunColor, 1.0f);
@@ -1405,6 +1505,7 @@ void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera& camera) 
 
     ubo.timeOfDay = currentTimeOfDay;
     ubo.shadowMapSize = static_cast<float>(SHADOW_MAP_SIZE);
+    ubo.debugCascades = showCascadeDebug ? 1.0f : 0.0f;
 
     lastSunIntensity = sunIntensity;
 
@@ -1450,45 +1551,49 @@ void Renderer::render(const Camera& camera) {
     grassSystem.updateUniforms(currentFrame, camera.getPosition(), viewProj);
     grassSystem.recordResetAndCompute(commandBuffers[currentFrame], currentFrame, grassTime);
 
-    // Shadow pass (skip when the sun is effectively below the horizon to avoid invalid light POV)
+    // Shadow pass - render all cascades (skip when the sun is effectively below the horizon)
     if (lastSunIntensity > 0.001f) {
-        VkRenderPassBeginInfo shadowPassInfo{};
-        shadowPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        shadowPassInfo.renderPass = shadowRenderPass;
-        shadowPassInfo.framebuffer = shadowFramebuffer;
-        shadowPassInfo.renderArea.offset = {0, 0};
-        shadowPassInfo.renderArea.extent = {SHADOW_MAP_SIZE, SHADOW_MAP_SIZE};
+        // Render each cascade to its own framebuffer/layer
+        for (uint32_t cascade = 0; cascade < NUM_SHADOW_CASCADES; cascade++) {
+            VkRenderPassBeginInfo shadowPassInfo{};
+            shadowPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            shadowPassInfo.renderPass = shadowRenderPass;
+            shadowPassInfo.framebuffer = cascadeFramebuffers[cascade];  // Per-cascade framebuffer
+            shadowPassInfo.renderArea.offset = {0, 0};
+            shadowPassInfo.renderArea.extent = {SHADOW_MAP_SIZE, SHADOW_MAP_SIZE};
 
-        VkClearValue shadowClear{};
-        shadowClear.depthStencil = {1.0f, 0};
-        shadowPassInfo.clearValueCount = 1;
-        shadowPassInfo.pClearValues = &shadowClear;
+            VkClearValue shadowClear{};
+            shadowClear.depthStencil = {1.0f, 0};
+            shadowPassInfo.clearValueCount = 1;
+            shadowPassInfo.pClearValues = &shadowClear;
 
-        vkCmdBeginRenderPass(commandBuffers[currentFrame], &shadowPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+            vkCmdBeginRenderPass(commandBuffers[currentFrame], &shadowPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-        vkCmdBindPipeline(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipeline);
-        vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                shadowPipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);
+            vkCmdBindPipeline(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipeline);
+            vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                    shadowPipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);
 
-        for (const auto& obj : sceneObjects) {
-            if (!obj.castsShadow) continue;
+            for (const auto& obj : sceneObjects) {
+                if (!obj.castsShadow) continue;
 
-            ShadowPushConstants shadowPush{};
-            shadowPush.model = obj.transform;
-            vkCmdPushConstants(commandBuffers[currentFrame], shadowPipelineLayout,
-                              VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(ShadowPushConstants), &shadowPush);
+                ShadowPushConstants shadowPush{};
+                shadowPush.model = obj.transform;
+                shadowPush.cascadeIndex = static_cast<int>(cascade);
+                vkCmdPushConstants(commandBuffers[currentFrame], shadowPipelineLayout,
+                                  VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(ShadowPushConstants), &shadowPush);
 
-            VkBuffer vertexBuffers[] = {obj.mesh->getVertexBuffer()};
-            VkDeviceSize offsets[] = {0};
-            vkCmdBindVertexBuffers(commandBuffers[currentFrame], 0, 1, vertexBuffers, offsets);
-            vkCmdBindIndexBuffer(commandBuffers[currentFrame], obj.mesh->getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
-            vkCmdDrawIndexed(commandBuffers[currentFrame], obj.mesh->getIndexCount(), 1, 0, 0, 0);
+                VkBuffer vertexBuffers[] = {obj.mesh->getVertexBuffer()};
+                VkDeviceSize offsets[] = {0};
+                vkCmdBindVertexBuffers(commandBuffers[currentFrame], 0, 1, vertexBuffers, offsets);
+                vkCmdBindIndexBuffer(commandBuffers[currentFrame], obj.mesh->getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+                vkCmdDrawIndexed(commandBuffers[currentFrame], obj.mesh->getIndexCount(), 1, 0, 0, 0);
+            }
+
+            // Draw grass shadows (with dithering for soft shadows)
+            grassSystem.recordShadowDraw(commandBuffers[currentFrame], currentFrame, grassTime, cascade);
+
+            vkCmdEndRenderPass(commandBuffers[currentFrame]);
         }
-
-        // Draw grass shadows (with dithering for soft shadows)
-        grassSystem.recordShadowDraw(commandBuffers[currentFrame], currentFrame, grassTime);
-
-        vkCmdEndRenderPass(commandBuffers[currentFrame]);
     }
 
     // HDR render pass - render scene to HDR target

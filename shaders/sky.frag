@@ -1,12 +1,14 @@
 #version 450
 
 const float PI = 3.14159265359;
+const int NUM_CASCADES = 4;
 
 layout(binding = 0) uniform UniformBufferObject {
     mat4 model;
     mat4 view;
     mat4 proj;
-    mat4 lightSpaceMatrix;
+    mat4 cascadeViewProj[NUM_CASCADES];  // Per-cascade light matrices
+    vec4 cascadeSplits;                   // View-space split depths
     vec4 sunDirection;
     vec4 moonDirection;
     vec4 sunColor;
@@ -16,6 +18,8 @@ layout(binding = 0) uniform UniformBufferObject {
     vec4 pointLightColor;     // rgb = color, a = radius
     float timeOfDay;
     float shadowMapSize;
+    float debugCascades;
+    float padding;
 } ubo;
 
 layout(location = 0) in vec3 rayDir;
