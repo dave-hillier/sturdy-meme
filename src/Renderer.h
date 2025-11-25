@@ -12,6 +12,7 @@
 #include "Texture.h"
 #include "Camera.h"
 #include "GrassSystem.h"
+#include "WindSystem.h"
 #include "PostProcessSystem.h"
 
 struct UniformBufferObject {
@@ -122,6 +123,7 @@ private:
     VkPipeline skyPipeline = VK_NULL_HANDLE;
 
     GrassSystem grassSystem;
+    WindSystem windSystem;
     PostProcessSystem postProcessSystem;
 
     std::vector<VkFramebuffer> framebuffers;
