@@ -86,11 +86,14 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     if (!createSwapchain()) return false;
     if (!createRenderPass()) return false;
     if (!createDepthResources()) return false;
+    if (!createShadowResources()) return false;
+    if (!createShadowRenderPass()) return false;
     if (!createFramebuffers()) return false;
     if (!createCommandPool()) return false;
     if (!createDescriptorSetLayout()) return false;
     if (!createGraphicsPipeline()) return false;
     if (!createSkyPipeline()) return false;
+    if (!createShadowPipeline()) return false;
     if (!createCommandBuffers()) return false;
     if (!createUniformBuffers()) return false;
 
@@ -115,7 +118,10 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
 
     sceneObjects.push_back({glm::mat4(1.0f), &groundMesh, &groundTexture});
     sceneObjects.push_back({glm::translate(glm::mat4(1.0f), glm::vec3(2.0f, 0.5f, 0.0f)), &cubeMesh, &crateTexture});
-    sceneObjects.push_back({glm::translate(glm::mat4(1.0f), glm::vec3(-1.5f, 0.5f, 1.0f)), &cubeMesh, &crateTexture});
+    // Rotate second cube 30 degrees around Y axis
+    glm::mat4 rotatedCube = glm::translate(glm::mat4(1.0f), glm::vec3(-1.5f, 0.5f, 1.0f));
+    rotatedCube = glm::rotate(rotatedCube, glm::radians(30.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    sceneObjects.push_back({rotatedCube, &cubeMesh, &crateTexture});
 
     if (!createDescriptorPool()) return false;
     if (!createDescriptorSets()) return false;
@@ -166,6 +172,29 @@ void Renderer::shutdown() {
         vkDestroyPipeline(device, graphicsPipeline, nullptr);
         vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
         vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+
+        // Shadow cleanup
+        if (shadowPipeline != VK_NULL_HANDLE) {
+            vkDestroyPipeline(device, shadowPipeline, nullptr);
+        }
+        if (shadowPipelineLayout != VK_NULL_HANDLE) {
+            vkDestroyPipelineLayout(device, shadowPipelineLayout, nullptr);
+        }
+        if (shadowFramebuffer != VK_NULL_HANDLE) {
+            vkDestroyFramebuffer(device, shadowFramebuffer, nullptr);
+        }
+        if (shadowRenderPass != VK_NULL_HANDLE) {
+            vkDestroyRenderPass(device, shadowRenderPass, nullptr);
+        }
+        if (shadowSampler != VK_NULL_HANDLE) {
+            vkDestroySampler(device, shadowSampler, nullptr);
+        }
+        if (shadowImageView != VK_NULL_HANDLE) {
+            vkDestroyImageView(device, shadowImageView, nullptr);
+        }
+        if (shadowImage != VK_NULL_HANDLE) {
+            vmaDestroyImage(allocator, shadowImage, shadowImageAllocation);
+        }
 
         vkDestroyCommandPool(device, commandPool, nullptr);
 
@@ -342,6 +371,294 @@ bool Renderer::createDepthResources() {
     return true;
 }
 
+bool Renderer::createShadowResources() {
+    // Create shadow map depth image
+    VkImageCreateInfo imageInfo{};
+    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    imageInfo.imageType = VK_IMAGE_TYPE_2D;
+    imageInfo.extent.width = SHADOW_MAP_SIZE;
+    imageInfo.extent.height = SHADOW_MAP_SIZE;
+    imageInfo.extent.depth = 1;
+    imageInfo.mipLevels = 1;
+    imageInfo.arrayLayers = 1;
+    imageInfo.format = VK_FORMAT_D32_SFLOAT;
+    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    imageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+
+    if (vmaCreateImage(allocator, &imageInfo, &allocInfo, &shadowImage, &shadowImageAllocation, nullptr) != VK_SUCCESS) {
+        SDL_Log("Failed to create shadow map image");
+        return false;
+    }
+
+    // Create shadow map image view
+    VkImageViewCreateInfo viewInfo{};
+    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewInfo.image = shadowImage;
+    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format = VK_FORMAT_D32_SFLOAT;
+    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    viewInfo.subresourceRange.baseMipLevel = 0;
+    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.baseArrayLayer = 0;
+    viewInfo.subresourceRange.layerCount = 1;
+
+    if (vkCreateImageView(device, &viewInfo, nullptr, &shadowImageView) != VK_SUCCESS) {
+        SDL_Log("Failed to create shadow map image view");
+        return false;
+    }
+
+    // Create shadow sampler with depth comparison
+    VkSamplerCreateInfo samplerInfo{};
+    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    samplerInfo.magFilter = VK_FILTER_LINEAR;
+    samplerInfo.minFilter = VK_FILTER_LINEAR;
+    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+    samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+    samplerInfo.compareEnable = VK_TRUE;
+    samplerInfo.compareOp = VK_COMPARE_OP_LESS;
+    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+
+    if (vkCreateSampler(device, &samplerInfo, nullptr, &shadowSampler) != VK_SUCCESS) {
+        SDL_Log("Failed to create shadow sampler");
+        return false;
+    }
+
+    return true;
+}
+
+bool Renderer::createShadowRenderPass() {
+    VkAttachmentDescription depthAttachment{};
+    depthAttachment.format = VK_FORMAT_D32_SFLOAT;
+    depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    depthAttachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    VkAttachmentReference depthAttachmentRef{};
+    depthAttachmentRef.attachment = 0;
+    depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = 0;
+    subpass.pDepthStencilAttachment = &depthAttachmentRef;
+
+    VkSubpassDependency dependency{};
+    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+    dependency.dstSubpass = 0;
+    dependency.srcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    dependency.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    dependency.dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    dependency.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+    VkRenderPassCreateInfo renderPassInfo{};
+    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    renderPassInfo.attachmentCount = 1;
+    renderPassInfo.pAttachments = &depthAttachment;
+    renderPassInfo.subpassCount = 1;
+    renderPassInfo.pSubpasses = &subpass;
+    renderPassInfo.dependencyCount = 1;
+    renderPassInfo.pDependencies = &dependency;
+
+    if (vkCreateRenderPass(device, &renderPassInfo, nullptr, &shadowRenderPass) != VK_SUCCESS) {
+        SDL_Log("Failed to create shadow render pass");
+        return false;
+    }
+
+    // Create shadow framebuffer
+    VkFramebufferCreateInfo framebufferInfo{};
+    framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+    framebufferInfo.renderPass = shadowRenderPass;
+    framebufferInfo.attachmentCount = 1;
+    framebufferInfo.pAttachments = &shadowImageView;
+    framebufferInfo.width = SHADOW_MAP_SIZE;
+    framebufferInfo.height = SHADOW_MAP_SIZE;
+    framebufferInfo.layers = 1;
+
+    if (vkCreateFramebuffer(device, &framebufferInfo, nullptr, &shadowFramebuffer) != VK_SUCCESS) {
+        SDL_Log("Failed to create shadow framebuffer");
+        return false;
+    }
+
+    return true;
+}
+
+bool Renderer::createShadowPipeline() {
+    auto vertShaderCode = ShaderLoader::readFile(resourcePath + "/shaders/shadow.vert.spv");
+    auto fragShaderCode = ShaderLoader::readFile(resourcePath + "/shaders/shadow.frag.spv");
+
+    if (vertShaderCode.empty() || fragShaderCode.empty()) {
+        SDL_Log("Failed to load shadow shaders");
+        return false;
+    }
+
+    VkShaderModule vertShaderModule = ShaderLoader::createShaderModule(device, vertShaderCode);
+    VkShaderModule fragShaderModule = ShaderLoader::createShaderModule(device, fragShaderCode);
+
+    VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
+    vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+    vertShaderStageInfo.module = vertShaderModule;
+    vertShaderStageInfo.pName = "main";
+
+    VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
+    fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    fragShaderStageInfo.module = fragShaderModule;
+    fragShaderStageInfo.pName = "main";
+
+    VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
+
+    // Use the same vertex input as main pipeline
+    auto bindingDescription = Vertex::getBindingDescription();
+    auto attributeDescriptions = Vertex::getAttributeDescriptions();
+
+    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
+    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    vertexInputInfo.vertexBindingDescriptionCount = 1;
+    vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
+    vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
+    vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
+
+    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    inputAssembly.primitiveRestartEnable = VK_FALSE;
+
+    VkViewport viewport{};
+    viewport.x = 0.0f;
+    viewport.y = 0.0f;
+    viewport.width = static_cast<float>(SHADOW_MAP_SIZE);
+    viewport.height = static_cast<float>(SHADOW_MAP_SIZE);
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+
+    VkRect2D scissor{};
+    scissor.offset = {0, 0};
+    scissor.extent = {SHADOW_MAP_SIZE, SHADOW_MAP_SIZE};
+
+    VkPipelineViewportStateCreateInfo viewportState{};
+    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewportState.viewportCount = 1;
+    viewportState.pViewports = &viewport;
+    viewportState.scissorCount = 1;
+    viewportState.pScissors = &scissor;
+
+    VkPipelineRasterizationStateCreateInfo rasterizer{};
+    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    rasterizer.depthClampEnable = VK_FALSE;
+    rasterizer.rasterizerDiscardEnable = VK_FALSE;
+    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+    rasterizer.lineWidth = 1.0f;
+    rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    rasterizer.depthBiasEnable = VK_TRUE;
+    rasterizer.depthBiasConstantFactor = 1.25f;
+    rasterizer.depthBiasSlopeFactor = 1.75f;
+
+    VkPipelineMultisampleStateCreateInfo multisampling{};
+    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    multisampling.sampleShadingEnable = VK_FALSE;
+    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    VkPipelineDepthStencilStateCreateInfo depthStencil{};
+    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    depthStencil.depthTestEnable = VK_TRUE;
+    depthStencil.depthWriteEnable = VK_TRUE;
+    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+    depthStencil.depthBoundsTestEnable = VK_FALSE;
+    depthStencil.stencilTestEnable = VK_FALSE;
+
+    VkPipelineColorBlendStateCreateInfo colorBlending{};
+    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    colorBlending.attachmentCount = 0;  // No color attachments
+
+    // Shadow pipeline layout - reuse the main descriptor set layout for compatibility
+    // (shadow shader only uses binding 0, but the descriptor sets have all 3 bindings)
+    VkPushConstantRange pushConstantRange{};
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = sizeof(ShadowPushConstants);
+
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipelineLayoutInfo.setLayoutCount = 1;
+    pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;  // Use main layout for compatibility
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
+
+    if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &shadowPipelineLayout) != VK_SUCCESS) {
+        SDL_Log("Failed to create shadow pipeline layout");
+        return false;
+    }
+
+    VkGraphicsPipelineCreateInfo pipelineInfo{};
+    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pipelineInfo.stageCount = 2;
+    pipelineInfo.pStages = shaderStages;
+    pipelineInfo.pVertexInputState = &vertexInputInfo;
+    pipelineInfo.pInputAssemblyState = &inputAssembly;
+    pipelineInfo.pViewportState = &viewportState;
+    pipelineInfo.pRasterizationState = &rasterizer;
+    pipelineInfo.pMultisampleState = &multisampling;
+    pipelineInfo.pDepthStencilState = &depthStencil;
+    pipelineInfo.pColorBlendState = &colorBlending;
+    pipelineInfo.layout = shadowPipelineLayout;
+    pipelineInfo.renderPass = shadowRenderPass;
+    pipelineInfo.subpass = 0;
+
+    if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &shadowPipeline) != VK_SUCCESS) {
+        SDL_Log("Failed to create shadow pipeline");
+        vkDestroyShaderModule(device, fragShaderModule, nullptr);
+        vkDestroyShaderModule(device, vertShaderModule, nullptr);
+        return false;
+    }
+
+    vkDestroyShaderModule(device, fragShaderModule, nullptr);
+    vkDestroyShaderModule(device, vertShaderModule, nullptr);
+
+    return true;
+}
+
+glm::mat4 Renderer::calculateLightSpaceMatrix(const glm::vec3& lightDir, const Camera& camera) {
+    // Orthographic projection - tighter frustum for better shadow resolution
+    // Scene objects are within ~10 units of origin, so 20 units coverage is enough
+    float orthoSize = 15.0f;
+    float nearPlane = 0.1f;
+    float farPlane = 100.0f;
+
+    // Light view matrix - looking from the sun position toward the scene center
+    // lightDir points toward where the sun is, so lightPos should be along lightDir
+    glm::vec3 lightPos = lightDir * 75.0f;  // Position light at the sun's location
+
+    // Use a stable up vector - avoid issues when light is nearly vertical
+    glm::vec3 up = (abs(lightDir.y) > 0.99f) ? glm::vec3(0.0f, 0.0f, 1.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
+    glm::mat4 lightView = glm::lookAt(lightPos, glm::vec3(0.0f), up);
+
+    // Orthographic projection - GLM uses OpenGL conventions
+    glm::mat4 lightProjection = glm::ortho(-orthoSize, orthoSize, -orthoSize, orthoSize, nearPlane, farPlane);
+
+    // Vulkan corrections:
+    // 1. Flip Y axis (Vulkan Y is inverted compared to OpenGL)
+    lightProjection[1][1] *= -1.0f;
+    // 2. Convert depth from [-1,1] to [0,1]
+    lightProjection[2][2] = lightProjection[2][2] * 0.5f;
+    lightProjection[3][2] = lightProjection[3][2] * 0.5f + 0.5f;
+
+    return lightProjection * lightView;
+}
+
 bool Renderer::createFramebuffers() {
     framebuffers.resize(swapchainImageViews.size());
 
@@ -441,7 +758,14 @@ bool Renderer::createDescriptorSetLayout() {
     samplerLayoutBinding.pImmutableSamplers = nullptr;
     samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-    std::array<VkDescriptorSetLayoutBinding, 2> bindings = {uboLayoutBinding, samplerLayoutBinding};
+    VkDescriptorSetLayoutBinding shadowSamplerBinding{};
+    shadowSamplerBinding.binding = 2;
+    shadowSamplerBinding.descriptorCount = 1;
+    shadowSamplerBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    shadowSamplerBinding.pImmutableSamplers = nullptr;
+    shadowSamplerBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    std::array<VkDescriptorSetLayoutBinding, 3> bindings = {uboLayoutBinding, samplerLayoutBinding, shadowSamplerBinding};
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -551,7 +875,7 @@ bool Renderer::createGraphicsPipeline() {
     colorBlending.pAttachments = &colorBlendAttachment;
 
     VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     pushConstantRange.offset = 0;
     pushConstantRange.size = sizeof(PushConstants);
 
@@ -746,7 +1070,7 @@ bool Renderer::createDescriptorPool() {
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 4);
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 2);
+    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 4);  // +2 for shadow map
     poolSizes[2].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     poolSizes[2].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 6);
 
@@ -796,7 +1120,12 @@ bool Renderer::createDescriptorSets() {
         crateImageInfo.imageView = crateTexture.getImageView();
         crateImageInfo.sampler = crateTexture.getSampler();
 
-        std::array<VkWriteDescriptorSet, 2> descriptorWrites{};
+        VkDescriptorImageInfo shadowImageInfo{};
+        shadowImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        shadowImageInfo.imageView = shadowImageView;
+        shadowImageInfo.sampler = shadowSampler;
+
+        std::array<VkWriteDescriptorSet, 3> descriptorWrites{};
 
         descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         descriptorWrites[0].dstSet = descriptorSets[i];
@@ -814,6 +1143,14 @@ bool Renderer::createDescriptorSets() {
         descriptorWrites[1].descriptorCount = 1;
         descriptorWrites[1].pImageInfo = &crateImageInfo;
 
+        descriptorWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[2].dstSet = descriptorSets[i];
+        descriptorWrites[2].dstBinding = 2;
+        descriptorWrites[2].dstArrayElement = 0;
+        descriptorWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[2].descriptorCount = 1;
+        descriptorWrites[2].pImageInfo = &shadowImageInfo;
+
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                descriptorWrites.data(), 0, nullptr);
 
@@ -825,6 +1162,7 @@ bool Renderer::createDescriptorSets() {
         descriptorWrites[0].dstSet = groundDescriptorSets[i];
         descriptorWrites[1].dstSet = groundDescriptorSets[i];
         descriptorWrites[1].pImageInfo = &groundImageInfo;
+        descriptorWrites[2].dstSet = groundDescriptorSets[i];
 
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                descriptorWrites.data(), 0, nullptr);
@@ -862,12 +1200,14 @@ void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera& camera) 
     ubo.model = glm::mat4(1.0f);
     ubo.view = camera.getViewMatrix();
     ubo.proj = camera.getProjectionMatrix();
+    ubo.lightSpaceMatrix = calculateLightSpaceMatrix(sunDir, camera);
     ubo.sunDirection = glm::vec4(sunDir, sunIntensity);
     ubo.moonDirection = glm::vec4(moonDir, moonIntensity);
     ubo.sunColor = glm::vec4(sunColor, 1.0f);
     ubo.ambientColor = glm::vec4(ambientColor, 1.0f);
     ubo.cameraPosition = glm::vec4(camera.getPosition(), 1.0f);
     ubo.timeOfDay = timeOfDay;
+    ubo.shadowMapSize = static_cast<float>(SHADOW_MAP_SIZE);
 
     memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
 }
@@ -904,6 +1244,43 @@ void Renderer::render(const Camera& camera) {
     grassSystem.updateUniforms(currentFrame, camera.getPosition(), viewProj);
     grassSystem.recordResetAndCompute(commandBuffers[currentFrame], currentFrame, grassTime);
 
+    // Shadow pass
+    {
+        VkRenderPassBeginInfo shadowPassInfo{};
+        shadowPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        shadowPassInfo.renderPass = shadowRenderPass;
+        shadowPassInfo.framebuffer = shadowFramebuffer;
+        shadowPassInfo.renderArea.offset = {0, 0};
+        shadowPassInfo.renderArea.extent = {SHADOW_MAP_SIZE, SHADOW_MAP_SIZE};
+
+        VkClearValue shadowClear{};
+        shadowClear.depthStencil = {1.0f, 0};
+        shadowPassInfo.clearValueCount = 1;
+        shadowPassInfo.pClearValues = &shadowClear;
+
+        vkCmdBeginRenderPass(commandBuffers[currentFrame], &shadowPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+        vkCmdBindPipeline(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipeline);
+        vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                shadowPipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);
+
+        for (const auto& obj : sceneObjects) {
+            ShadowPushConstants shadowPush{};
+            shadowPush.model = obj.transform;
+            vkCmdPushConstants(commandBuffers[currentFrame], shadowPipelineLayout,
+                              VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(ShadowPushConstants), &shadowPush);
+
+            VkBuffer vertexBuffers[] = {obj.mesh->getVertexBuffer()};
+            VkDeviceSize offsets[] = {0};
+            vkCmdBindVertexBuffers(commandBuffers[currentFrame], 0, 1, vertexBuffers, offsets);
+            vkCmdBindIndexBuffer(commandBuffers[currentFrame], obj.mesh->getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+            vkCmdDrawIndexed(commandBuffers[currentFrame], obj.mesh->getIndexCount(), 1, 0, 0, 0);
+        }
+
+        vkCmdEndRenderPass(commandBuffers[currentFrame]);
+    }
+
+    // Main render pass
     VkRenderPassBeginInfo renderPassInfo{};
     renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     renderPassInfo.renderPass = renderPass;
@@ -930,8 +1307,19 @@ void Renderer::render(const Camera& camera) {
     for (const auto& obj : sceneObjects) {
         PushConstants push{};
         push.model = obj.transform;
+
+        // Set material properties per object
+        if (obj.texture == &groundTexture) {
+            push.roughness = 0.8f;  // Rough grass/dirt
+            push.metallic = 0.0f;
+        } else {
+            push.roughness = 0.4f;  // Slightly shiny wood crate
+            push.metallic = 0.0f;
+        }
+
         vkCmdPushConstants(commandBuffers[currentFrame], pipelineLayout,
-                          VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &push);
+                          VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                          0, sizeof(PushConstants), &push);
 
         VkDescriptorSet* descSet = (obj.texture == &groundTexture)
             ? &groundDescriptorSets[currentFrame]

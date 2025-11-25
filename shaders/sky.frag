@@ -4,12 +4,14 @@ layout(binding = 0) uniform UniformBufferObject {
     mat4 model;
     mat4 view;
     mat4 proj;
+    mat4 lightSpaceMatrix;
     vec4 sunDirection;
     vec4 moonDirection;
     vec4 sunColor;
     vec4 ambientColor;
     vec4 cameraPosition;
     float timeOfDay;
+    float shadowMapSize;
 } ubo;
 
 layout(location = 0) in vec3 rayDir;
