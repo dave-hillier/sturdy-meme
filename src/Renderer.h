@@ -16,6 +16,23 @@ struct UniformBufferObject {
     glm::mat4 model;
     glm::mat4 view;
     glm::mat4 proj;
+    glm::vec4 sunDirection;
+    glm::vec4 moonDirection;
+    glm::vec4 sunColor;
+    glm::vec4 ambientColor;
+    glm::vec4 cameraPosition;
+    float timeOfDay;
+    float padding[3];
+};
+
+struct PushConstants {
+    glm::mat4 model;
+};
+
+struct SceneObject {
+    glm::mat4 transform;
+    Mesh* mesh;
+    Texture* texture;
 };
 
 class Renderer {
@@ -32,6 +49,11 @@ public:
     uint32_t getWidth() const { return swapchainExtent.width; }
     uint32_t getHeight() const { return swapchainExtent.height; }
 
+    void setTimeScale(float scale) { timeScale = scale; }
+    float getTimeScale() const { return timeScale; }
+    void setTimeOfDay(float time) { manualTime = time; useManualTime = true; }
+    void resumeAutoTime() { useManualTime = false; }
+
 private:
     bool createSwapchain();
     void destroySwapchain();
@@ -42,6 +64,7 @@ private:
     bool createSyncObjects();
     bool createDescriptorSetLayout();
     bool createGraphicsPipeline();
+    bool createSkyPipeline();
     bool createUniformBuffers();
     bool createDescriptorPool();
     bool createDescriptorSets();
@@ -75,6 +98,7 @@ private:
     VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
     VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
     VkPipeline graphicsPipeline = VK_NULL_HANDLE;
+    VkPipeline skyPipeline = VK_NULL_HANDLE;
 
     std::vector<VkFramebuffer> framebuffers;
     VkCommandPool commandPool = VK_NULL_HANDLE;
@@ -91,14 +115,23 @@ private:
 
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
     std::vector<VkDescriptorSet> descriptorSets;
+    std::vector<VkDescriptorSet> groundDescriptorSets;
 
     std::vector<VkSemaphore> imageAvailableSemaphores;
     std::vector<VkSemaphore> renderFinishedSemaphores;
     std::vector<VkFence> inFlightFences;
 
-    Mesh mesh;
-    Texture texture;
+    Mesh groundMesh;
+    Mesh cubeMesh;
+    Texture crateTexture;
+    Texture groundTexture;
+
+    std::vector<SceneObject> sceneObjects;
 
     uint32_t currentFrame = 0;
     static constexpr int MAX_FRAMES_IN_FLIGHT = 2;
+
+    float timeScale = 1.0f;
+    float manualTime = 0.0f;
+    bool useManualTime = false;
 };

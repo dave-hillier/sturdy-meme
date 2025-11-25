@@ -73,6 +73,28 @@ void Application::processEvents() {
                 if (event.key.scancode == SDL_SCANCODE_ESCAPE) {
                     running = false;
                 }
+                else if (event.key.scancode == SDL_SCANCODE_1) {
+                    renderer.setTimeOfDay(0.25f);
+                }
+                else if (event.key.scancode == SDL_SCANCODE_2) {
+                    renderer.setTimeOfDay(0.5f);
+                }
+                else if (event.key.scancode == SDL_SCANCODE_3) {
+                    renderer.setTimeOfDay(0.75f);
+                }
+                else if (event.key.scancode == SDL_SCANCODE_4) {
+                    renderer.setTimeOfDay(0.0f);
+                }
+                else if (event.key.scancode == SDL_SCANCODE_EQUALS) {
+                    renderer.setTimeScale(renderer.getTimeScale() * 2.0f);
+                }
+                else if (event.key.scancode == SDL_SCANCODE_MINUS) {
+                    renderer.setTimeScale(renderer.getTimeScale() * 0.5f);
+                }
+                else if (event.key.scancode == SDL_SCANCODE_SPACE) {
+                    renderer.resumeAutoTime();
+                    renderer.setTimeScale(1.0f);
+                }
                 break;
             default:
                 break;

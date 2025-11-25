@@ -47,6 +47,7 @@ public:
     ~Mesh() = default;
 
     void createCube();
+    void createPlane(float width, float depth);
     void upload(VmaAllocator allocator, VkDevice device, VkCommandPool commandPool, VkQueue queue);
     void destroy(VmaAllocator allocator);
 
