@@ -12,6 +12,40 @@ A step-by-step guide to implementing cinematic lighting inspired by Ghost of Tsu
 
 ---
 
+## Phase Dependencies & Alternatives
+
+Not all phases are equally essential. Here's how they relate:
+
+**Required foundation:**
+- **Phase 1** (PBR lighting) and **Phase 2** (shadows) are foundational for any modern look
+
+**Optional enhancements:**
+- **Phase 3** (probes) and **Phase 4** (atmosphere) add polish but are more independent of each other
+
+### Recommended Implementation Order
+
+1. **Phase 1** - PBR with simple hemisphere ambient
+2. **Phase 2** - Shadows (even basic shadow mapping transforms a scene)
+3. **Phase 4** - Atmospheric scattering (big visual impact, independent of probes)
+4. **Phase 3** - Add probes later if needed for cinematic quality
+
+### Phase 3 Alternatives (Lighter-Weight Options)
+
+The SH probe system provides high-quality indirect lighting but requires offline baking and assumes static geometry. If this complexity isn't needed, consider these alternatives:
+
+| Instead of... | Use... | Quality |
+|---------------|--------|---------|
+| SH irradiance probes | Constant ambient + AO | Acceptable for stylized |
+| SH irradiance probes | Hemisphere lighting (sky vs ground color) | Better, still cheap |
+| Reflection probes | Single skybox cubemap | Flat but functional |
+| Reflection probes | Screen-space reflections | Good for planar surfaces |
+
+The atmospheric sky model from Phase 4 can serve as a cheap ambient source - sampling the sky LUT provides some directional fill light without full probe baking.
+
+Many shipped games use "PBR + shadows + atmosphere + simple ambient" and achieve good results. Probes push from "good game lighting" toward "cinematic rendering" but aren't strictly required.
+
+---
+
 ## Phase 1: Foundation - Proper Lighting System
 
 ### 1.1 Light Data Structures
