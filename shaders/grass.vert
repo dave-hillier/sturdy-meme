@@ -106,10 +106,25 @@ void main() {
     // Rotate by facing angle around Y axis
     float cs = cos(facing);
     float sn = sin(facing);
+
+    // Blade's right vector (perpendicular to facing direction in XZ plane)
+    vec3 bladeRight = vec3(cs, 0.0, sn);
+
+    // View-facing thickening: widen blade when viewed edge-on
+    // Calculate view direction to blade base
+    vec3 viewDir = normalize(ubo.cameraPosition.xyz - basePos);
+
+    // How much we're viewing edge-on (0 = face-on, 1 = edge-on)
+    float edgeFactor = abs(dot(viewDir, bladeRight));
+
+    // Thicken by up to 3x when viewed edge-on
+    float thickenAmount = 1.0 + edgeFactor * 2.0;
+    vec3 thickenedPos = vec3(localPos.x * thickenAmount, localPos.y, localPos.z);
+
     vec3 rotatedPos;
-    rotatedPos.x = localPos.x * cs - localPos.z * sn;
-    rotatedPos.y = localPos.y;
-    rotatedPos.z = localPos.x * sn + localPos.z * cs;
+    rotatedPos.x = thickenedPos.x * cs - thickenedPos.z * sn;
+    rotatedPos.y = thickenedPos.y;
+    rotatedPos.z = thickenedPos.x * sn + thickenedPos.z * cs;
 
     // Final world position
     vec3 worldPos = basePos + rotatedPos;
@@ -118,7 +133,6 @@ void main() {
 
     // Calculate normal (perpendicular to blade surface)
     vec3 tangent = normalize(bezierDerivative(p0, p1, p2, t));
-    vec3 bladeRight = vec3(cs, 0.0, sn);
     vec3 normal = normalize(cross(tangent, bladeRight));
 
     // Color gradient: darker at base, lighter at tip
