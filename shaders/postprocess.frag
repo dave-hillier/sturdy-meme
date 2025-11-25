@@ -94,41 +94,41 @@ vec3 extractBright(vec3 color, float threshold) {
     return color * max(contribution, 0.0);
 }
 
-vec3 bloomBlur(vec2 uv, vec2 texelSize, float radius) {
-    vec2 offsets[9] = vec2[](
-        vec2(-1.0, -1.0), vec2(0.0, -1.0), vec2(1.0, -1.0),
-        vec2(-1.0, 0.0),  vec2(0.0, 0.0),  vec2(1.0, 0.0),
-        vec2(-1.0, 1.0),  vec2(0.0, 1.0),  vec2(1.0, 1.0)
+// Poisson disc taps spread energy smoothly instead of replicating highlights
+vec3 bloomMultiTap(vec2 uv, float radiusPixels) {
+    const vec2 poisson[12] = vec2[](
+        vec2(-0.326, -0.406), vec2(-0.840, -0.074), vec2(-0.696, 0.457),
+        vec2(-0.203, 0.621),  vec2(0.962, -0.195), vec2(0.473, -0.480),
+        vec2(0.519, 0.767),   vec2(0.185, -0.893), vec2(0.507, 0.064),
+        vec2(0.896, 0.412),   vec2(-0.322, -0.933), vec2(-0.792, -0.598)
     );
-    float weights[9] = float[](0.05, 0.09, 0.05, 0.09, 0.16, 0.09, 0.05, 0.09, 0.05);
 
-    vec3 accum = vec3(0.0);
-    float total = 0.0;
-    for (int i = 0; i < 9; i++) {
-        vec2 sampleUV = uv + offsets[i] * texelSize * radius;
-        vec3 sampleColor = texture(hdrInput, sampleUV).rgb;
-        vec3 bright = extractBright(sampleColor, ubo.bloomParams.x);
-        accum += bright * weights[i];
-        total += weights[i];
+    vec2 texelSize = radiusPixels / vec2(textureSize(hdrInput, 0));
+
+    vec3 center = extractBright(texture(hdrInput, uv).rgb, ubo.bloomParams.x);
+    vec3 accum = center * 0.35;
+    float weightSum = 0.35;
+
+    for (int i = 0; i < 12; i++) {
+        vec2 offset = poisson[i] * texelSize;
+        float w = exp(-dot(poisson[i], poisson[i]) * 2.5);
+        vec3 bright = extractBright(texture(hdrInput, uv + offset).rgb, ubo.bloomParams.x);
+        accum += bright * w;
+        weightSum += w;
     }
-    return accum / max(total, 0.0001);
+
+    return accum / max(weightSum, 0.0001);
 }
 
 vec3 bloomChain(vec2 uv) {
-    vec2 texelSize = 1.0 / vec2(textureSize(hdrInput, 0));
+    float baseRadius = max(ubo.bloomParams.z, 0.5);
 
-    // Downsample and blur at progressively larger footprints
-    vec3 level0 = bloomBlur(uv, texelSize, ubo.bloomParams.z * 0.5);
-    vec3 level1 = bloomBlur(uv, texelSize * 2.0, ubo.bloomParams.z * 1.0);
-    vec3 level2 = bloomBlur(uv, texelSize * 4.0, ubo.bloomParams.z * 1.5);
-    vec3 level3 = bloomBlur(uv, texelSize * 8.0, ubo.bloomParams.z * 2.5);
+    // Blend a few radii to build a soft falloff without large spaced kernels
+    vec3 small = bloomMultiTap(uv, baseRadius * 0.6);
+    vec3 medium = bloomMultiTap(uv, baseRadius);
+    vec3 large = bloomMultiTap(uv, baseRadius * 1.8);
 
-    // Upsample and accumulate
-    vec3 up2 = level3;
-    vec3 up1 = level2 + up2 * 0.6;
-    vec3 up0 = level1 + up1 * 0.6;
-
-    vec3 bloom = level0 + up0 * 0.6;
+    vec3 bloom = small * 0.4 + medium * 0.35 + large * 0.25;
     return bloom * ubo.bloomParams.y;
 }
 
