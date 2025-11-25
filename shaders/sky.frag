@@ -47,8 +47,9 @@ float starField(vec3 dir) {
     float nightFactor = 1.0 - smoothstep(-0.1, 0.2, ubo.sunDirection.y);
     if (nightFactor < 0.01) return 0.0;
 
-    // Use spherical coordinates for stable star positions when panning
+    // Only show stars above the horizon
     dir = normalize(dir);
+    if (dir.y < 0.0) return 0.0;
     float theta = atan(dir.z, dir.x);  // Azimuth angle [-PI, PI]
     float phi = asin(clamp(dir.y, -1.0, 1.0));  // Elevation angle [-PI/2, PI/2]
 
