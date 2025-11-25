@@ -65,10 +65,27 @@ void main() {
     float windPhase = bladeHash * 6.28318;
     float windOffset = sin(push.time * windFreq + windPhase + basePos.x * 0.3 + basePos.z * 0.2) * windStrength;
 
+    // Blade folding for short grass
+    // Shorter blades fold over more (like real lawn grass bending under weight)
+    // Height range is ~0.3-0.7, normalize to 0-1 for folding calculation
+    float normalizedHeight = clamp((height - 0.3) / 0.4, 0.0, 1.0);
+
+    // Fold amount: short grass (0) folds a lot, tall grass (1) stays upright
+    // foldAmount ranges from 0.6 (short) to 0.1 (tall)
+    float foldAmount = mix(0.6, 0.1, normalizedHeight);
+
+    // Add per-blade variation to fold direction using hash
+    float foldDirection = (bladeHash - 0.5) * 2.0;  // -1 to 1
+    float foldX = foldDirection * foldAmount * height;
+
+    // Short grass also droops more - tip ends up lower relative to height
+    float droopFactor = mix(0.3, 0.0, normalizedHeight);  // 30% droop for shortest
+    float effectiveHeight = height * (1.0 - droopFactor);
+
     // Bezier control points (in local blade space)
     vec3 p0 = vec3(0.0, 0.0, 0.0);  // Base
-    vec3 p1 = vec3(windOffset * 0.3 + tilt * 0.5, height * 0.5, 0.0);  // Mid control
-    vec3 p2 = vec3(windOffset + tilt, height, 0.0);  // Tip
+    vec3 p1 = vec3(windOffset * 0.3 + tilt * 0.5 + foldX * 0.5, height * 0.6, 0.0);  // Mid control - higher for fold
+    vec3 p2 = vec3(windOffset + tilt + foldX, effectiveHeight, 0.0);  // Tip - with fold and droop
 
     // Triangle strip blade geometry: 15 vertices = 7 segments (8 height levels)
     // Even vertices (0,2,4,6,8,10,12,14) are left side
