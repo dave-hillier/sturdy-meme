@@ -1,14 +1,28 @@
 #include "Application.h"
 #include <chrono>
+#include <cmath>
 
 #ifdef __APPLE__
 #include <CoreFoundation/CoreFoundation.h>
 #endif
 
 bool Application::init(const std::string& title, int width, int height) {
-    if (!SDL_Init(SDL_INIT_VIDEO)) {
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
         SDL_Log("Failed to initialize SDL: %s", SDL_GetError());
         return false;
+    }
+
+    // Try to open the first available gamepad
+    int numJoysticks = 0;
+    SDL_JoystickID* joysticks = SDL_GetJoysticks(&numJoysticks);
+    if (joysticks) {
+        for (int i = 0; i < numJoysticks; i++) {
+            if (SDL_IsGamepad(joysticks[i])) {
+                openGamepad(joysticks[i]);
+                break;
+            }
+        }
+        SDL_free(joysticks);
     }
 
     window = SDL_CreateWindow(title.c_str(), width, height, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
@@ -42,6 +56,7 @@ void Application::run() {
 
         processEvents();
         handleInput(deltaTime);
+        handleGamepadInput(deltaTime);
 
         camera.setAspectRatio(static_cast<float>(renderer.getWidth()) / static_cast<float>(renderer.getHeight()));
 
@@ -53,6 +68,7 @@ void Application::run() {
 
 void Application::shutdown() {
     renderer.shutdown();
+    closeGamepad();
 
     if (window) {
         SDL_DestroyWindow(window);
@@ -91,9 +107,40 @@ void Application::processEvents() {
                 else if (event.key.scancode == SDL_SCANCODE_MINUS) {
                     renderer.setTimeScale(renderer.getTimeScale() * 0.5f);
                 }
-                else if (event.key.scancode == SDL_SCANCODE_SPACE) {
+                else if (event.key.scancode == SDL_SCANCODE_R) {
                     renderer.resumeAutoTime();
                     renderer.setTimeScale(1.0f);
+                }
+                break;
+            case SDL_EVENT_GAMEPAD_ADDED:
+                if (!gamepad) {
+                    openGamepad(event.gdevice.which);
+                }
+                break;
+            case SDL_EVENT_GAMEPAD_REMOVED:
+                if (gamepad && SDL_GetGamepadID(gamepad) == event.gdevice.which) {
+                    closeGamepad();
+                }
+                break;
+            case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+                if (event.gbutton.button == SDL_GAMEPAD_BUTTON_SOUTH) {
+                    renderer.setTimeOfDay(0.25f);  // Sunrise
+                }
+                else if (event.gbutton.button == SDL_GAMEPAD_BUTTON_EAST) {
+                    renderer.setTimeOfDay(0.5f);   // Noon
+                }
+                else if (event.gbutton.button == SDL_GAMEPAD_BUTTON_WEST) {
+                    renderer.setTimeOfDay(0.75f);  // Sunset
+                }
+                else if (event.gbutton.button == SDL_GAMEPAD_BUTTON_NORTH) {
+                    renderer.setTimeOfDay(0.0f);   // Midnight
+                }
+                else if (event.gbutton.button == SDL_GAMEPAD_BUTTON_START) {
+                    renderer.resumeAutoTime();
+                    renderer.setTimeScale(1.0f);
+                }
+                else if (event.gbutton.button == SDL_GAMEPAD_BUTTON_BACK) {
+                    running = false;
                 }
                 break;
             default:
@@ -105,40 +152,102 @@ void Application::processEvents() {
 void Application::handleInput(float deltaTime) {
     const bool* keyState = SDL_GetKeyboardState(nullptr);
 
-    // Arrow keys for movement
-    if (keyState[SDL_SCANCODE_UP]) {
+    // WASD for movement (standard FPS controls)
+    if (keyState[SDL_SCANCODE_W]) {
         camera.moveForward(moveSpeed * deltaTime);
     }
-    if (keyState[SDL_SCANCODE_DOWN]) {
+    if (keyState[SDL_SCANCODE_S]) {
         camera.moveForward(-moveSpeed * deltaTime);
     }
-    if (keyState[SDL_SCANCODE_LEFT]) {
+    if (keyState[SDL_SCANCODE_A]) {
         camera.moveRight(-moveSpeed * deltaTime);
     }
-    if (keyState[SDL_SCANCODE_RIGHT]) {
+    if (keyState[SDL_SCANCODE_D]) {
         camera.moveRight(moveSpeed * deltaTime);
     }
 
-    // WASD for rotation
-    if (keyState[SDL_SCANCODE_W]) {
+    // Arrow keys for camera rotation
+    if (keyState[SDL_SCANCODE_UP]) {
         camera.rotatePitch(rotateSpeed * deltaTime);
     }
-    if (keyState[SDL_SCANCODE_S]) {
+    if (keyState[SDL_SCANCODE_DOWN]) {
         camera.rotatePitch(-rotateSpeed * deltaTime);
     }
-    if (keyState[SDL_SCANCODE_A]) {
+    if (keyState[SDL_SCANCODE_LEFT]) {
         camera.rotateYaw(-rotateSpeed * deltaTime);
     }
-    if (keyState[SDL_SCANCODE_D]) {
+    if (keyState[SDL_SCANCODE_RIGHT]) {
         camera.rotateYaw(rotateSpeed * deltaTime);
     }
 
-    // Page Up/Down for vertical movement
-    if (keyState[SDL_SCANCODE_PAGEUP]) {
+    // Space/E for up, C/Q for down (fly camera)
+    if (keyState[SDL_SCANCODE_SPACE] || keyState[SDL_SCANCODE_E]) {
         camera.moveUp(moveSpeed * deltaTime);
     }
-    if (keyState[SDL_SCANCODE_PAGEDOWN]) {
+    if (keyState[SDL_SCANCODE_C] || keyState[SDL_SCANCODE_Q]) {
         camera.moveUp(-moveSpeed * deltaTime);
+    }
+}
+
+void Application::handleGamepadInput(float deltaTime) {
+    if (!gamepad) return;
+
+    // Left stick for movement
+    float leftX = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX) / 32767.0f;
+    float leftY = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTY) / 32767.0f;
+
+    // Apply deadzone
+    if (std::abs(leftX) < stickDeadzone) leftX = 0.0f;
+    if (std::abs(leftY) < stickDeadzone) leftY = 0.0f;
+
+    // Left stick controls movement (Y is inverted - up is negative)
+    camera.moveForward(-leftY * moveSpeed * deltaTime);
+    camera.moveRight(leftX * moveSpeed * deltaTime);
+
+    // Right stick for camera rotation
+    float rightX = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTX) / 32767.0f;
+    float rightY = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTY) / 32767.0f;
+
+    // Apply deadzone
+    if (std::abs(rightX) < stickDeadzone) rightX = 0.0f;
+    if (std::abs(rightY) < stickDeadzone) rightY = 0.0f;
+
+    // Right stick controls camera look (Y inverted for natural feel)
+    camera.rotateYaw(rightX * gamepadLookSpeed * deltaTime);
+    camera.rotatePitch(-rightY * gamepadLookSpeed * deltaTime);
+
+    // Bumpers for vertical movement
+    if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER)) {
+        camera.moveUp(moveSpeed * deltaTime);
+    }
+    if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)) {
+        camera.moveUp(-moveSpeed * deltaTime);
+    }
+
+    // Triggers for time scale
+    float leftTrigger = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) / 32767.0f;
+    float rightTrigger = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) / 32767.0f;
+
+    if (rightTrigger > 0.5f) {
+        renderer.setTimeScale(renderer.getTimeScale() * (1.0f + deltaTime));
+    }
+    if (leftTrigger > 0.5f) {
+        renderer.setTimeScale(renderer.getTimeScale() * (1.0f - deltaTime * 0.5f));
+    }
+}
+
+void Application::openGamepad(SDL_JoystickID id) {
+    gamepad = SDL_OpenGamepad(id);
+    if (gamepad) {
+        SDL_Log("Gamepad connected: %s", SDL_GetGamepadName(gamepad));
+    }
+}
+
+void Application::closeGamepad() {
+    if (gamepad) {
+        SDL_Log("Gamepad disconnected");
+        SDL_CloseGamepad(gamepad);
+        gamepad = nullptr;
     }
 }
 
