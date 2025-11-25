@@ -107,21 +107,39 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     sphereMesh.createSphere(0.5f, 32, 32);
     sphereMesh.upload(allocator, device, commandPool, graphicsQueue);
 
-    std::string texturePath = resourcePath + "/textures/crate.png";
+    std::string texturePath = resourcePath + "/textures/crates/crate1/crate1_diffuse.png";
     if (!crateTexture.load(texturePath, allocator, device, commandPool, graphicsQueue, physicalDevice)) {
         SDL_Log("Failed to load texture: %s", texturePath.c_str());
         return false;
     }
 
-    std::string grassTexturePath = resourcePath + "/textures/grass.png";
+    std::string crateNormalPath = resourcePath + "/textures/crates/crate1/crate1_normal.png";
+    if (!crateNormalMap.load(crateNormalPath, allocator, device, commandPool, graphicsQueue, physicalDevice)) {
+        SDL_Log("Failed to load crate normal map: %s", crateNormalPath.c_str());
+        return false;
+    }
+
+    std::string grassTexturePath = resourcePath + "/textures/grass/grass/grass01.jpg";
     if (!groundTexture.load(grassTexturePath, allocator, device, commandPool, graphicsQueue, physicalDevice)) {
         SDL_Log("Failed to load grass texture: %s", grassTexturePath.c_str());
         return false;
     }
 
-    std::string metalTexturePath = resourcePath + "/textures/metal.png";
+    std::string grassNormalPath = resourcePath + "/textures/grass/grass/grass01_n.jpg";
+    if (!groundNormalMap.load(grassNormalPath, allocator, device, commandPool, graphicsQueue, physicalDevice)) {
+        SDL_Log("Failed to load grass normal map: %s", grassNormalPath.c_str());
+        return false;
+    }
+
+    std::string metalTexturePath = resourcePath + "/textures/industrial/metal_1.jpg";
     if (!metalTexture.load(metalTexturePath, allocator, device, commandPool, graphicsQueue, physicalDevice)) {
         SDL_Log("Failed to load metal texture: %s", metalTexturePath.c_str());
+        return false;
+    }
+
+    std::string metalNormalPath = resourcePath + "/textures/industrial/metal_1_norm.jpg";
+    if (!metalNormalMap.load(metalNormalPath, allocator, device, commandPool, graphicsQueue, physicalDevice)) {
+        SDL_Log("Failed to load metal normal map: %s", metalNormalPath.c_str());
         return false;
     }
 
@@ -182,8 +200,11 @@ void Renderer::shutdown() {
         }
 
         crateTexture.destroy(allocator, device);
+        crateNormalMap.destroy(allocator, device);
         groundTexture.destroy(allocator, device);
+        groundNormalMap.destroy(allocator, device);
         metalTexture.destroy(allocator, device);
+        metalNormalMap.destroy(allocator, device);
         cubeMesh.destroy(allocator);
         sphereMesh.destroy(allocator);
         groundMesh.destroy(allocator);
@@ -794,7 +815,14 @@ bool Renderer::createDescriptorSetLayout() {
     shadowSamplerBinding.pImmutableSamplers = nullptr;
     shadowSamplerBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-    std::array<VkDescriptorSetLayoutBinding, 3> bindings = {uboLayoutBinding, samplerLayoutBinding, shadowSamplerBinding};
+    VkDescriptorSetLayoutBinding normalMapBinding{};
+    normalMapBinding.binding = 3;
+    normalMapBinding.descriptorCount = 1;
+    normalMapBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    normalMapBinding.pImmutableSamplers = nullptr;
+    normalMapBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    std::array<VkDescriptorSetLayoutBinding, 4> bindings = {uboLayoutBinding, samplerLayoutBinding, shadowSamplerBinding, normalMapBinding};
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -1099,7 +1127,7 @@ bool Renderer::createDescriptorPool() {
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 4);
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 4);  // +2 for shadow map
+    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 12);  // diffuse + shadow + normal per set
     poolSizes[2].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     poolSizes[2].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 6);
 
@@ -1160,7 +1188,12 @@ bool Renderer::createDescriptorSets() {
         shadowImageInfo.imageView = shadowImageView;
         shadowImageInfo.sampler = shadowSampler;
 
-        std::array<VkWriteDescriptorSet, 3> descriptorWrites{};
+        VkDescriptorImageInfo crateNormalImageInfo{};
+        crateNormalImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        crateNormalImageInfo.imageView = crateNormalMap.getImageView();
+        crateNormalImageInfo.sampler = crateNormalMap.getSampler();
+
+        std::array<VkWriteDescriptorSet, 4> descriptorWrites{};
 
         descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         descriptorWrites[0].dstSet = descriptorSets[i];
@@ -1186,18 +1219,34 @@ bool Renderer::createDescriptorSets() {
         descriptorWrites[2].descriptorCount = 1;
         descriptorWrites[2].pImageInfo = &shadowImageInfo;
 
+        descriptorWrites[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[3].dstSet = descriptorSets[i];
+        descriptorWrites[3].dstBinding = 3;
+        descriptorWrites[3].dstArrayElement = 0;
+        descriptorWrites[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[3].descriptorCount = 1;
+        descriptorWrites[3].pImageInfo = &crateNormalImageInfo;
+
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                descriptorWrites.data(), 0, nullptr);
 
+        // Ground descriptor sets
         VkDescriptorImageInfo groundImageInfo{};
         groundImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         groundImageInfo.imageView = groundTexture.getImageView();
         groundImageInfo.sampler = groundTexture.getSampler();
 
+        VkDescriptorImageInfo groundNormalImageInfo{};
+        groundNormalImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        groundNormalImageInfo.imageView = groundNormalMap.getImageView();
+        groundNormalImageInfo.sampler = groundNormalMap.getSampler();
+
         descriptorWrites[0].dstSet = groundDescriptorSets[i];
         descriptorWrites[1].dstSet = groundDescriptorSets[i];
         descriptorWrites[1].pImageInfo = &groundImageInfo;
         descriptorWrites[2].dstSet = groundDescriptorSets[i];
+        descriptorWrites[3].dstSet = groundDescriptorSets[i];
+        descriptorWrites[3].pImageInfo = &groundNormalImageInfo;
 
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                descriptorWrites.data(), 0, nullptr);
@@ -1208,10 +1257,17 @@ bool Renderer::createDescriptorSets() {
         metalImageInfo.imageView = metalTexture.getImageView();
         metalImageInfo.sampler = metalTexture.getSampler();
 
+        VkDescriptorImageInfo metalNormalImageInfo{};
+        metalNormalImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        metalNormalImageInfo.imageView = metalNormalMap.getImageView();
+        metalNormalImageInfo.sampler = metalNormalMap.getSampler();
+
         descriptorWrites[0].dstSet = metalDescriptorSets[i];
         descriptorWrites[1].dstSet = metalDescriptorSets[i];
         descriptorWrites[1].pImageInfo = &metalImageInfo;
         descriptorWrites[2].dstSet = metalDescriptorSets[i];
+        descriptorWrites[3].dstSet = metalDescriptorSets[i];
+        descriptorWrites[3].pImageInfo = &metalNormalImageInfo;
 
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                descriptorWrites.data(), 0, nullptr);

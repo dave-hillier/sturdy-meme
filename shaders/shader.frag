@@ -18,6 +18,7 @@ layout(binding = 0) uniform UniformBufferObject {
 
 layout(binding = 1) uniform sampler2D texSampler;
 layout(binding = 2) uniform sampler2DShadow shadowMap;
+layout(binding = 3) uniform sampler2D normalMap;
 
 layout(push_constant) uniform PushConstants {
     mat4 model;
@@ -54,6 +55,30 @@ float V_SmithGGX(float NoV, float NoL, float roughness) {
 // Schlick Fresnel approximation
 vec3 F_Schlick(float VoH, vec3 F0) {
     return F0 + (1.0 - F0) * pow(1.0 - VoH, 5.0);
+}
+
+// Compute TBN matrix from derivatives (cotangent frame)
+mat3 cotangentFrame(vec3 N, vec3 p, vec2 uv) {
+    vec3 dp1 = dFdx(p);
+    vec3 dp2 = dFdy(p);
+    vec2 duv1 = dFdx(uv);
+    vec2 duv2 = dFdy(uv);
+
+    vec3 dp2perp = cross(dp2, N);
+    vec3 dp1perp = cross(N, dp1);
+    vec3 T = dp2perp * duv1.x + dp1perp * duv2.x;
+    vec3 B = dp2perp * duv1.y + dp1perp * duv2.y;
+
+    float invmax = inversesqrt(max(dot(T, T), dot(B, B)));
+    return mat3(T * invmax, B * invmax, N);
+}
+
+// Apply normal map to get perturbed normal
+vec3 perturbNormal(vec3 N, vec3 V, vec2 texcoord, vec3 worldPos) {
+    vec3 normalSample = texture(normalMap, texcoord).rgb;
+    normalSample = normalSample * 2.0 - 1.0;
+    mat3 TBN = cotangentFrame(N, worldPos, texcoord);
+    return normalize(TBN * normalSample);
 }
 
 // Shadow calculation with PCF
@@ -119,8 +144,11 @@ vec3 calculatePBR(vec3 N, vec3 V, vec3 L, vec3 lightColor, float lightIntensity,
 }
 
 void main() {
-    vec3 N = normalize(fragNormal);
+    vec3 geometricN = normalize(fragNormal);
     vec3 V = normalize(ubo.cameraPosition.xyz - fragWorldPos);
+
+    // Apply normal mapping
+    vec3 N = perturbNormal(geometricN, V, fragTexCoord, fragWorldPos);
 
     vec4 texColor = texture(texSampler, fragTexCoord);
     vec3 albedo = texColor.rgb;

@@ -154,8 +154,11 @@ private:
     Mesh cubeMesh;
     Mesh sphereMesh;
     Texture crateTexture;
+    Texture crateNormalMap;
     Texture groundTexture;
+    Texture groundNormalMap;
     Texture metalTexture;
+    Texture metalNormalMap;
 
     std::vector<SceneObject> sceneObjects;
     std::vector<VkDescriptorSet> metalDescriptorSets;
