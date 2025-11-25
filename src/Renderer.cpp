@@ -1322,16 +1322,19 @@ void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera& camera) 
         currentTimeOfDay = fmod((time * timeScale) / cycleDuration, 1.0f);
     }
 
-    float sunAngle = currentTimeOfDay * 2.0f * 3.14159265f - 3.14159265f * 0.5f;
-    glm::vec3 sunDir = glm::normalize(glm::vec3(cos(sunAngle), sin(sunAngle), 0.3f));
-    glm::vec3 moonDir = -sunDir;
+    // Calculate celestial positions using astronomical model
+    DateTime dateTime = DateTime::fromTimeOfDay(currentTimeOfDay, currentYear, currentMonth, currentDay);
+    CelestialPosition sunPos = celestialCalculator.calculateSunPosition(dateTime);
+    MoonPosition moonPos = celestialCalculator.calculateMoonPosition(dateTime);
 
-    float sunIntensity = glm::max(0.0f, sunDir.y);
-    float moonIntensity = glm::max(0.0f, moonDir.y) * 0.3f;
+    glm::vec3 sunDir = sunPos.direction;
+    glm::vec3 moonDir = moonPos.direction;
 
-    float dayFactor = glm::smoothstep(-0.1f, 0.3f, sunDir.y);
-    glm::vec3 sunColor = glm::mix(glm::vec3(1.0f, 0.4f, 0.2f), glm::vec3(1.0f, 0.95f, 0.9f), dayFactor);
-    glm::vec3 ambientColor = glm::mix(glm::vec3(0.02f, 0.02f, 0.05f), glm::vec3(0.15f, 0.15f, 0.2f), dayFactor);
+    float sunIntensity = sunPos.intensity;
+    float moonIntensity = moonPos.intensity;
+
+    glm::vec3 sunColor = celestialCalculator.getSunColor(sunPos.altitude);
+    glm::vec3 ambientColor = celestialCalculator.getAmbientColor(sunPos.altitude);
 
     UniformBufferObject ubo{};
     ubo.model = glm::mat4(1.0f);

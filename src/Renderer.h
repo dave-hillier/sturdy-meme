@@ -12,6 +12,7 @@
 #include "Texture.h"
 #include "Camera.h"
 #include "GrassSystem.h"
+#include "CelestialCalculator.h"
 #include "WindSystem.h"
 #include "PostProcessSystem.h"
 
@@ -71,6 +72,15 @@ public:
     void setTimeOfDay(float time) { manualTime = time; useManualTime = true; }
     void resumeAutoTime() { useManualTime = false; }
     float getTimeOfDay() const { return currentTimeOfDay; }
+
+    // Celestial/astronomical settings
+    void setLocation(const GeographicLocation& location) { celestialCalculator.setLocation(location); }
+    const GeographicLocation& getLocation() const { return celestialCalculator.getLocation(); }
+    void setDate(int year, int month, int day) { currentYear = year; currentMonth = month; currentDay = day; }
+    int getCurrentYear() const { return currentYear; }
+    int getCurrentMonth() const { return currentMonth; }
+    int getCurrentDay() const { return currentDay; }
+    const CelestialCalculator& getCelestialCalculator() const { return celestialCalculator; }
 
 private:
     bool createSwapchain();
@@ -178,4 +188,10 @@ private:
     float manualTime = 0.0f;
     bool useManualTime = false;
     float currentTimeOfDay = 0.0f;
+
+    // Celestial calculations
+    CelestialCalculator celestialCalculator;
+    int currentYear = 2024;
+    int currentMonth = 6;
+    int currentDay = 21;  // Summer solstice by default
 };
