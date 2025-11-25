@@ -16,11 +16,14 @@
 #include "WindSystem.h"
 #include "PostProcessSystem.h"
 
+static constexpr uint32_t NUM_SHADOW_CASCADES = 4;
+
 struct UniformBufferObject {
     glm::mat4 model;
     glm::mat4 view;
     glm::mat4 proj;
-    glm::mat4 lightSpaceMatrix;
+    glm::mat4 cascadeViewProj[NUM_SHADOW_CASCADES];  // Per-cascade light matrices
+    glm::vec4 cascadeSplits;                          // View-space split depths
     glm::vec4 sunDirection;
     glm::vec4 moonDirection;
     glm::vec4 sunColor;
@@ -30,11 +33,14 @@ struct UniformBufferObject {
     glm::vec4 pointLightColor;     // rgb = color, a = radius
     float timeOfDay;
     float shadowMapSize;
-    float padding[2];
+    float debugCascades;           // 1.0 = show cascade colors
+    float padding;
 };
 
 struct ShadowPushConstants {
     glm::mat4 model;
+    int cascadeIndex;  // Which cascade we're rendering to
+    int padding[3];    // Padding to align
 };
 
 struct PushConstants {
@@ -77,6 +83,8 @@ public:
 
     void toggleShadowMode() { useFrustumFittedShadows = !useFrustumFittedShadows; }
     bool isUsingFrustumFittedShadows() const { return useFrustumFittedShadows; }
+    void toggleCascadeDebug() { showCascadeDebug = !showCascadeDebug; }
+    bool isShowingCascadeDebug() const { return showCascadeDebug; }
 
     // Celestial/astronomical settings
     void setLocation(const GeographicLocation& location) { celestialCalculator.setLocation(location); }
@@ -103,11 +111,13 @@ private:
     bool createDescriptorSets();
     bool createDepthResources();
 
-    // Shadow mapping
+    // Shadow mapping (CSM)
     bool createShadowResources();
     bool createShadowRenderPass();
     bool createShadowPipeline();
-    glm::mat4 calculateLightSpaceMatrix(const glm::vec3& lightDir, const Camera& camera);
+    void calculateCascadeSplits(float nearClip, float farClip, float lambda, std::vector<float>& splits);
+    glm::mat4 calculateCascadeMatrix(const glm::vec3& lightDir, const Camera& camera, float nearSplit, float farSplit);
+    void updateCascadeMatrices(const glm::vec3& lightDir, const Camera& camera);
 
     void updateUniformBuffer(uint32_t currentImage, const Camera& camera);
 
@@ -150,16 +160,21 @@ private:
     VkImageView depthImageView = VK_NULL_HANDLE;
     VkFormat depthFormat = VK_FORMAT_UNDEFINED;
 
-    // Shadow map resources
+    // Shadow map resources (CSM - texture array with NUM_SHADOW_CASCADES layers)
     static constexpr uint32_t SHADOW_MAP_SIZE = 2048;
     VkImage shadowImage = VK_NULL_HANDLE;
     VmaAllocation shadowImageAllocation = VK_NULL_HANDLE;
-    VkImageView shadowImageView = VK_NULL_HANDLE;
+    VkImageView shadowImageView = VK_NULL_HANDLE;  // Array view for sampling
+    std::array<VkImageView, NUM_SHADOW_CASCADES> cascadeImageViews{};  // Per-layer views for rendering
     VkSampler shadowSampler = VK_NULL_HANDLE;
     VkRenderPass shadowRenderPass = VK_NULL_HANDLE;
-    VkFramebuffer shadowFramebuffer = VK_NULL_HANDLE;
+    std::array<VkFramebuffer, NUM_SHADOW_CASCADES> cascadeFramebuffers{};  // Per-cascade framebuffers
     VkPipeline shadowPipeline = VK_NULL_HANDLE;
     VkPipelineLayout shadowPipelineLayout = VK_NULL_HANDLE;
+
+    // CSM cascade data
+    std::vector<float> cascadeSplitDepths;
+    std::array<glm::mat4, NUM_SHADOW_CASCADES> cascadeMatrices;
 
     std::vector<VkBuffer> uniformBuffers;
     std::vector<VmaAllocation> uniformBuffersAllocations;
@@ -202,4 +217,5 @@ private:
     int currentDay = 21;  // Summer solstice by default
 
     bool useFrustumFittedShadows = false;  // false = fixed shadows (crisp), true = frustum-fitted
+    bool showCascadeDebug = false;         // true = show cascade colors overlay
 };

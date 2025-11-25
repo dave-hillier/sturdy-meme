@@ -1,10 +1,13 @@
 #version 450
 
+const int NUM_CASCADES = 4;
+
 layout(binding = 0) uniform UniformBufferObject {
     mat4 model;
     mat4 view;
     mat4 proj;
-    mat4 lightSpaceMatrix;
+    mat4 cascadeViewProj[NUM_CASCADES];  // Per-cascade light matrices
+    vec4 cascadeSplits;                   // View-space split depths
     vec4 sunDirection;
     vec4 moonDirection;
     vec4 sunColor;
@@ -14,6 +17,7 @@ layout(binding = 0) uniform UniformBufferObject {
     vec4 pointLightColor;     // rgb = color, a = radius
     float timeOfDay;
     float shadowMapSize;
+    float debugCascades;
 } ubo;
 
 struct GrassInstance {
@@ -33,6 +37,7 @@ layout(binding = 2) uniform WindUniforms {
 
 layout(push_constant) uniform PushConstants {
     float time;
+    int cascadeIndex;  // Which cascade we're rendering
 } push;
 
 // Perlin noise implementation (same as grass.vert for consistent shadows)
@@ -212,8 +217,8 @@ void main() {
     // Final world position
     vec3 worldPos = basePos + rotatedPos;
 
-    // Transform to light space for shadow map
-    gl_Position = ubo.lightSpaceMatrix * vec4(worldPos, 1.0);
+    // Transform to light space for shadow map using cascade-specific matrix
+    gl_Position = ubo.cascadeViewProj[push.cascadeIndex] * vec4(worldPos, 1.0);
 
     // Pass height and hash for dithering in fragment shader
     fragHeight = t;
