@@ -12,6 +12,7 @@
 #include "Texture.h"
 #include "Camera.h"
 #include "GrassSystem.h"
+#include "WindSystem.h"
 
 struct UniformBufferObject {
     glm::mat4 model;
@@ -118,6 +119,7 @@ private:
     VkPipeline skyPipeline = VK_NULL_HANDLE;
 
     GrassSystem grassSystem;
+    WindSystem windSystem;
 
     std::vector<VkFramebuffer> framebuffers;
     VkCommandPool commandPool = VK_NULL_HANDLE;

@@ -205,7 +205,7 @@ bool GrassSystem::createComputePipeline() {
 }
 
 bool GrassSystem::createGraphicsDescriptorSetLayout() {
-    std::array<VkDescriptorSetLayoutBinding, 3> bindings{};
+    std::array<VkDescriptorSetLayoutBinding, 4> bindings{};
 
     // UBO (same as main pipeline)
     bindings[0].binding = 0;
@@ -225,6 +225,12 @@ bool GrassSystem::createGraphicsDescriptorSetLayout() {
     bindings[2].descriptorCount = 1;
     bindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     bindings[2].pImmutableSamplers = nullptr;
+
+    // Wind uniform buffer (for vertex shader wind animation)
+    bindings[3].binding = 3;
+    bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    bindings[3].descriptorCount = 1;
+    bindings[3].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -383,8 +389,8 @@ bool GrassSystem::createGraphicsPipeline() {
 }
 
 bool GrassSystem::createShadowPipeline() {
-    // Shadow descriptor set layout: UBO (binding 0) + instance buffer (binding 1)
-    std::array<VkDescriptorSetLayoutBinding, 2> shadowBindings{};
+    // Shadow descriptor set layout: UBO (binding 0) + instance buffer (binding 1) + wind (binding 2)
+    std::array<VkDescriptorSetLayoutBinding, 3> shadowBindings{};
 
     // UBO for light space matrix
     shadowBindings[0].binding = 0;
@@ -397,6 +403,12 @@ bool GrassSystem::createShadowPipeline() {
     shadowBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     shadowBindings[1].descriptorCount = 1;
     shadowBindings[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
+    // Wind uniform buffer (for consistent wind animation in shadows)
+    shadowBindings[2].binding = 2;
+    shadowBindings[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    shadowBindings[2].descriptorCount = 1;
+    shadowBindings[2].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 
     VkDescriptorSetLayoutCreateInfo shadowLayoutInfo{};
     shadowLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -641,8 +653,9 @@ bool GrassSystem::createDescriptorSets() {
 }
 
 void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>& uniformBuffers,
-                                        VkImageView shadowMapView, VkSampler shadowSampler) {
-    // Update graphics descriptor sets with UBO, instance buffers, and shadow map
+                                        VkImageView shadowMapView, VkSampler shadowSampler,
+                                        const std::vector<VkBuffer>& windBuffers) {
+    // Update graphics descriptor sets with UBO, instance buffers, shadow map, and wind buffers
     for (size_t i = 0; i < framesInFlight; i++) {
         VkDescriptorBufferInfo uboInfo{};
         uboInfo.buffer = uniformBuffers[i];
@@ -659,7 +672,12 @@ void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>
         shadowImageInfo.imageView = shadowMapView;
         shadowImageInfo.sampler = shadowSampler;
 
-        std::array<VkWriteDescriptorSet, 3> graphicsWrites{};
+        VkDescriptorBufferInfo windBufferInfo{};
+        windBufferInfo.buffer = windBuffers[i];
+        windBufferInfo.offset = 0;
+        windBufferInfo.range = 32;  // sizeof(WindUniforms) - 2 vec4s
+
+        std::array<VkWriteDescriptorSet, 4> graphicsWrites{};
 
         graphicsWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         graphicsWrites[0].dstSet = graphicsDescriptorSets[i];
@@ -685,11 +703,19 @@ void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>
         graphicsWrites[2].descriptorCount = 1;
         graphicsWrites[2].pImageInfo = &shadowImageInfo;
 
+        graphicsWrites[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        graphicsWrites[3].dstSet = graphicsDescriptorSets[i];
+        graphicsWrites[3].dstBinding = 3;
+        graphicsWrites[3].dstArrayElement = 0;
+        graphicsWrites[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        graphicsWrites[3].descriptorCount = 1;
+        graphicsWrites[3].pBufferInfo = &windBufferInfo;
+
         vkUpdateDescriptorSets(dev, static_cast<uint32_t>(graphicsWrites.size()),
                                graphicsWrites.data(), 0, nullptr);
 
-        // Update shadow descriptor sets (UBO + instance buffer)
-        std::array<VkWriteDescriptorSet, 2> shadowWrites{};
+        // Update shadow descriptor sets (UBO + instance buffer + wind buffer)
+        std::array<VkWriteDescriptorSet, 3> shadowWrites{};
 
         shadowWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         shadowWrites[0].dstSet = shadowDescriptorSets[i];
@@ -706,6 +732,14 @@ void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>
         shadowWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         shadowWrites[1].descriptorCount = 1;
         shadowWrites[1].pBufferInfo = &instanceBufferInfo;
+
+        shadowWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        shadowWrites[2].dstSet = shadowDescriptorSets[i];
+        shadowWrites[2].dstBinding = 2;
+        shadowWrites[2].dstArrayElement = 0;
+        shadowWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        shadowWrites[2].descriptorCount = 1;
+        shadowWrites[2].pBufferInfo = &windBufferInfo;
 
         vkUpdateDescriptorSets(dev, static_cast<uint32_t>(shadowWrites.size()),
                                shadowWrites.data(), 0, nullptr);

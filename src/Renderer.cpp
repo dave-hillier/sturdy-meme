@@ -184,7 +184,22 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     grassInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
 
     if (!grassSystem.init(grassInfo)) return false;
-    grassSystem.updateDescriptorSets(device, uniformBuffers, shadowImageView, shadowSampler);
+
+    // Initialize wind system
+    WindSystem::InitInfo windInfo{};
+    windInfo.device = device;
+    windInfo.allocator = allocator;
+    windInfo.descriptorPool = descriptorPool;
+    windInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+
+    if (!windSystem.init(windInfo)) return false;
+
+    // Get wind buffers for grass descriptor sets
+    std::vector<VkBuffer> windBuffers(MAX_FRAMES_IN_FLIGHT);
+    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        windBuffers[i] = windSystem.getBufferInfo(i).buffer;
+    }
+    grassSystem.updateDescriptorSets(device, uniformBuffers, shadowImageView, shadowSampler, windBuffers);
 
     if (!createSyncObjects()) return false;
 
@@ -219,6 +234,7 @@ void Renderer::shutdown() {
         }
 
         grassSystem.destroy(device, allocator);
+        windSystem.destroy(device, allocator);
 
         vkDestroyPipeline(device, skyPipeline, nullptr);
         vkDestroyPipeline(device, graphicsPipeline, nullptr);
@@ -1342,8 +1358,15 @@ void Renderer::render(const Camera& camera) {
 
     // Get time for grass animation
     static auto startTime = std::chrono::high_resolution_clock::now();
+    static auto lastTime = startTime;
     auto currentTime = std::chrono::high_resolution_clock::now();
     float grassTime = std::chrono::duration<float>(currentTime - startTime).count();
+    float deltaTime = std::chrono::duration<float>(currentTime - lastTime).count();
+    lastTime = currentTime;
+
+    // Update wind system (handles time accumulation internally)
+    windSystem.update(deltaTime);
+    windSystem.updateUniforms(currentFrame);
 
     // Update grass culling uniforms and run compute shader
     glm::mat4 viewProj = camera.getProjectionMatrix() * camera.getViewMatrix();

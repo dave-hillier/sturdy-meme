@@ -21,6 +21,7 @@ set(SOURCES
     src/Texture.cpp
     src/ShaderLoader.cpp
     src/GrassSystem.cpp
+    src/WindSystem.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
