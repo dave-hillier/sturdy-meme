@@ -1,0 +1,495 @@
+#include "GrassSystem.h"
+#include "ShaderLoader.h"
+#include <SDL3/SDL.h>
+
+// Forward declare UniformBufferObject size (needed for descriptor set update)
+struct UniformBufferObject;
+
+bool GrassSystem::init(const InitInfo& info) {
+    device = info.device;
+    allocator = info.allocator;
+    renderPass = info.renderPass;
+    descriptorPool = info.descriptorPool;
+    extent = info.extent;
+    shaderPath = info.shaderPath;
+    framesInFlight = info.framesInFlight;
+
+    if (!createBuffers()) return false;
+    if (!createComputeDescriptorSetLayout()) return false;
+    if (!createComputePipeline()) return false;
+    if (!createGraphicsDescriptorSetLayout()) return false;
+    if (!createGraphicsPipeline()) return false;
+    if (!createDescriptorSets()) return false;
+
+    return true;
+}
+
+void GrassSystem::destroy(VkDevice dev, VmaAllocator alloc) {
+    vkDestroyPipeline(dev, graphicsPipeline, nullptr);
+    vkDestroyPipelineLayout(dev, graphicsPipelineLayout, nullptr);
+    vkDestroyDescriptorSetLayout(dev, graphicsDescriptorSetLayout, nullptr);
+    vkDestroyPipeline(dev, computePipeline, nullptr);
+    vkDestroyPipelineLayout(dev, computePipelineLayout, nullptr);
+    vkDestroyDescriptorSetLayout(dev, computeDescriptorSetLayout, nullptr);
+
+    for (size_t i = 0; i < framesInFlight; i++) {
+        vmaDestroyBuffer(alloc, instanceBuffers[i], instanceAllocations[i]);
+        vmaDestroyBuffer(alloc, indirectBuffers[i], indirectAllocations[i]);
+    }
+}
+
+bool GrassSystem::createBuffers() {
+    instanceBuffers.resize(framesInFlight);
+    instanceAllocations.resize(framesInFlight);
+    indirectBuffers.resize(framesInFlight);
+    indirectAllocations.resize(framesInFlight);
+
+    VkDeviceSize instanceBufferSize = sizeof(GrassInstance) * MAX_INSTANCES;
+    VkDeviceSize indirectBufferSize = sizeof(VkDrawIndirectCommand);
+
+    for (size_t i = 0; i < framesInFlight; i++) {
+        // Instance buffer - written by compute, read by vertex shader
+        VkBufferCreateInfo instanceBufferInfo{};
+        instanceBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        instanceBufferInfo.size = instanceBufferSize;
+        instanceBufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+        instanceBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+
+        if (vmaCreateBuffer(allocator, &instanceBufferInfo, &allocInfo,
+                           &instanceBuffers[i], &instanceAllocations[i],
+                           nullptr) != VK_SUCCESS) {
+            SDL_Log("Failed to create grass instance buffer");
+            return false;
+        }
+
+        // Indirect buffer - written by compute, read by vkCmdDrawIndirect, cleared by vkCmdFillBuffer
+        VkBufferCreateInfo indirectBufferInfo{};
+        indirectBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        indirectBufferInfo.size = indirectBufferSize;
+        indirectBufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        indirectBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        if (vmaCreateBuffer(allocator, &indirectBufferInfo, &allocInfo,
+                           &indirectBuffers[i], &indirectAllocations[i],
+                           nullptr) != VK_SUCCESS) {
+            SDL_Log("Failed to create grass indirect buffer");
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool GrassSystem::createComputeDescriptorSetLayout() {
+    std::array<VkDescriptorSetLayoutBinding, 2> bindings{};
+
+    // Instance buffer (output)
+    bindings[0].binding = 0;
+    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    bindings[0].descriptorCount = 1;
+    bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+    // Indirect buffer (output)
+    bindings[1].binding = 1;
+    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    bindings[1].descriptorCount = 1;
+    bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+    VkDescriptorSetLayoutCreateInfo layoutInfo{};
+    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
+    layoutInfo.pBindings = bindings.data();
+
+    if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr,
+                                    &computeDescriptorSetLayout) != VK_SUCCESS) {
+        SDL_Log("Failed to create grass compute descriptor set layout");
+        return false;
+    }
+
+    return true;
+}
+
+bool GrassSystem::createComputePipeline() {
+    auto compShaderCode = ShaderLoader::readFile(shaderPath + "/grass.comp.spv");
+    if (compShaderCode.empty()) {
+        SDL_Log("Failed to load grass compute shader");
+        return false;
+    }
+
+    VkShaderModule compShaderModule = ShaderLoader::createShaderModule(device, compShaderCode);
+
+    VkPipelineShaderStageCreateInfo shaderStageInfo{};
+    shaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    shaderStageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    shaderStageInfo.module = compShaderModule;
+    shaderStageInfo.pName = "main";
+
+    VkPushConstantRange pushConstantRange{};
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = sizeof(GrassPushConstants);
+
+    VkPipelineLayoutCreateInfo layoutInfo{};
+    layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    layoutInfo.setLayoutCount = 1;
+    layoutInfo.pSetLayouts = &computeDescriptorSetLayout;
+    layoutInfo.pushConstantRangeCount = 1;
+    layoutInfo.pPushConstantRanges = &pushConstantRange;
+
+    if (vkCreatePipelineLayout(device, &layoutInfo, nullptr,
+                               &computePipelineLayout) != VK_SUCCESS) {
+        SDL_Log("Failed to create grass compute pipeline layout");
+        vkDestroyShaderModule(device, compShaderModule, nullptr);
+        return false;
+    }
+
+    VkComputePipelineCreateInfo pipelineInfo{};
+    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    pipelineInfo.stage = shaderStageInfo;
+    pipelineInfo.layout = computePipelineLayout;
+
+    VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1,
+                                               &pipelineInfo, nullptr,
+                                               &computePipeline);
+
+    vkDestroyShaderModule(device, compShaderModule, nullptr);
+
+    if (result != VK_SUCCESS) {
+        SDL_Log("Failed to create grass compute pipeline");
+        return false;
+    }
+
+    return true;
+}
+
+bool GrassSystem::createGraphicsDescriptorSetLayout() {
+    std::array<VkDescriptorSetLayoutBinding, 2> bindings{};
+
+    // UBO (same as main pipeline)
+    bindings[0].binding = 0;
+    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    bindings[0].descriptorCount = 1;
+    bindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    // Instance buffer (read-only in vertex shader)
+    bindings[1].binding = 1;
+    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    bindings[1].descriptorCount = 1;
+    bindings[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
+    VkDescriptorSetLayoutCreateInfo layoutInfo{};
+    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
+    layoutInfo.pBindings = bindings.data();
+
+    if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr,
+                                    &graphicsDescriptorSetLayout) != VK_SUCCESS) {
+        SDL_Log("Failed to create grass graphics descriptor set layout");
+        return false;
+    }
+
+    return true;
+}
+
+bool GrassSystem::createGraphicsPipeline() {
+    auto vertShaderCode = ShaderLoader::readFile(shaderPath + "/grass.vert.spv");
+    auto fragShaderCode = ShaderLoader::readFile(shaderPath + "/grass.frag.spv");
+
+    if (vertShaderCode.empty() || fragShaderCode.empty()) {
+        SDL_Log("Failed to load grass shader files");
+        return false;
+    }
+
+    VkShaderModule vertShaderModule = ShaderLoader::createShaderModule(device, vertShaderCode);
+    VkShaderModule fragShaderModule = ShaderLoader::createShaderModule(device, fragShaderCode);
+
+    VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
+    vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+    vertShaderStageInfo.module = vertShaderModule;
+    vertShaderStageInfo.pName = "main";
+
+    VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
+    fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    fragShaderStageInfo.module = fragShaderModule;
+    fragShaderStageInfo.pName = "main";
+
+    VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
+
+    // No vertex input - procedural geometry from instance buffer
+    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
+    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    vertexInputInfo.vertexBindingDescriptionCount = 0;
+    vertexInputInfo.pVertexBindingDescriptions = nullptr;
+    vertexInputInfo.vertexAttributeDescriptionCount = 0;
+    vertexInputInfo.pVertexAttributeDescriptions = nullptr;
+
+    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    inputAssembly.primitiveRestartEnable = VK_FALSE;
+
+    VkViewport viewport{};
+    viewport.x = 0.0f;
+    viewport.y = 0.0f;
+    viewport.width = static_cast<float>(extent.width);
+    viewport.height = static_cast<float>(extent.height);
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+
+    VkRect2D scissor{};
+    scissor.offset = {0, 0};
+    scissor.extent = extent;
+
+    VkPipelineViewportStateCreateInfo viewportState{};
+    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewportState.viewportCount = 1;
+    viewportState.pViewports = &viewport;
+    viewportState.scissorCount = 1;
+    viewportState.pScissors = &scissor;
+
+    VkPipelineRasterizationStateCreateInfo rasterizer{};
+    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    rasterizer.depthClampEnable = VK_FALSE;
+    rasterizer.rasterizerDiscardEnable = VK_FALSE;
+    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+    rasterizer.lineWidth = 1.0f;
+    rasterizer.cullMode = VK_CULL_MODE_NONE;  // No culling for grass
+    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    rasterizer.depthBiasEnable = VK_FALSE;
+
+    VkPipelineMultisampleStateCreateInfo multisampling{};
+    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    multisampling.sampleShadingEnable = VK_FALSE;
+    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    VkPipelineDepthStencilStateCreateInfo depthStencil{};
+    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    depthStencil.depthTestEnable = VK_TRUE;
+    depthStencil.depthWriteEnable = VK_TRUE;
+    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+    depthStencil.depthBoundsTestEnable = VK_FALSE;
+    depthStencil.stencilTestEnable = VK_FALSE;
+
+    VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+    colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                                          VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    colorBlendAttachment.blendEnable = VK_FALSE;
+
+    VkPipelineColorBlendStateCreateInfo colorBlending{};
+    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    colorBlending.logicOpEnable = VK_FALSE;
+    colorBlending.attachmentCount = 1;
+    colorBlending.pAttachments = &colorBlendAttachment;
+
+    VkPushConstantRange pushConstantRange{};
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = sizeof(GrassPushConstants);
+
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipelineLayoutInfo.setLayoutCount = 1;
+    pipelineLayoutInfo.pSetLayouts = &graphicsDescriptorSetLayout;
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
+
+    if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr,
+                               &graphicsPipelineLayout) != VK_SUCCESS) {
+        SDL_Log("Failed to create grass graphics pipeline layout");
+        vkDestroyShaderModule(device, fragShaderModule, nullptr);
+        vkDestroyShaderModule(device, vertShaderModule, nullptr);
+        return false;
+    }
+
+    VkGraphicsPipelineCreateInfo pipelineInfo{};
+    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pipelineInfo.stageCount = 2;
+    pipelineInfo.pStages = shaderStages;
+    pipelineInfo.pVertexInputState = &vertexInputInfo;
+    pipelineInfo.pInputAssemblyState = &inputAssembly;
+    pipelineInfo.pViewportState = &viewportState;
+    pipelineInfo.pRasterizationState = &rasterizer;
+    pipelineInfo.pMultisampleState = &multisampling;
+    pipelineInfo.pDepthStencilState = &depthStencil;
+    pipelineInfo.pColorBlendState = &colorBlending;
+    pipelineInfo.layout = graphicsPipelineLayout;
+    pipelineInfo.renderPass = renderPass;
+    pipelineInfo.subpass = 0;
+
+    VkResult result = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1,
+                                                &pipelineInfo, nullptr,
+                                                &graphicsPipeline);
+
+    vkDestroyShaderModule(device, fragShaderModule, nullptr);
+    vkDestroyShaderModule(device, vertShaderModule, nullptr);
+
+    if (result != VK_SUCCESS) {
+        SDL_Log("Failed to create grass graphics pipeline");
+        return false;
+    }
+
+    return true;
+}
+
+bool GrassSystem::createDescriptorSets() {
+    // Allocate compute descriptor sets
+    std::vector<VkDescriptorSetLayout> computeLayouts(framesInFlight, computeDescriptorSetLayout);
+
+    VkDescriptorSetAllocateInfo computeAllocInfo{};
+    computeAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    computeAllocInfo.descriptorPool = descriptorPool;
+    computeAllocInfo.descriptorSetCount = static_cast<uint32_t>(framesInFlight);
+    computeAllocInfo.pSetLayouts = computeLayouts.data();
+
+    computeDescriptorSets.resize(framesInFlight);
+    if (vkAllocateDescriptorSets(device, &computeAllocInfo, computeDescriptorSets.data()) != VK_SUCCESS) {
+        SDL_Log("Failed to allocate grass compute descriptor sets");
+        return false;
+    }
+
+    // Allocate graphics descriptor sets
+    std::vector<VkDescriptorSetLayout> graphicsLayouts(framesInFlight, graphicsDescriptorSetLayout);
+
+    VkDescriptorSetAllocateInfo graphicsAllocInfo{};
+    graphicsAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    graphicsAllocInfo.descriptorPool = descriptorPool;
+    graphicsAllocInfo.descriptorSetCount = static_cast<uint32_t>(framesInFlight);
+    graphicsAllocInfo.pSetLayouts = graphicsLayouts.data();
+
+    graphicsDescriptorSets.resize(framesInFlight);
+    if (vkAllocateDescriptorSets(device, &graphicsAllocInfo, graphicsDescriptorSets.data()) != VK_SUCCESS) {
+        SDL_Log("Failed to allocate grass graphics descriptor sets");
+        return false;
+    }
+
+    // Update compute descriptor sets (instance and indirect buffers)
+    for (size_t i = 0; i < framesInFlight; i++) {
+        VkDescriptorBufferInfo instanceBufferInfo{};
+        instanceBufferInfo.buffer = instanceBuffers[i];
+        instanceBufferInfo.offset = 0;
+        instanceBufferInfo.range = sizeof(GrassInstance) * MAX_INSTANCES;
+
+        VkDescriptorBufferInfo indirectBufferInfo{};
+        indirectBufferInfo.buffer = indirectBuffers[i];
+        indirectBufferInfo.offset = 0;
+        indirectBufferInfo.range = sizeof(VkDrawIndirectCommand);
+
+        std::array<VkWriteDescriptorSet, 2> computeWrites{};
+
+        computeWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        computeWrites[0].dstSet = computeDescriptorSets[i];
+        computeWrites[0].dstBinding = 0;
+        computeWrites[0].dstArrayElement = 0;
+        computeWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        computeWrites[0].descriptorCount = 1;
+        computeWrites[0].pBufferInfo = &instanceBufferInfo;
+
+        computeWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        computeWrites[1].dstSet = computeDescriptorSets[i];
+        computeWrites[1].dstBinding = 1;
+        computeWrites[1].dstArrayElement = 0;
+        computeWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        computeWrites[1].descriptorCount = 1;
+        computeWrites[1].pBufferInfo = &indirectBufferInfo;
+
+        vkUpdateDescriptorSets(device, static_cast<uint32_t>(computeWrites.size()),
+                               computeWrites.data(), 0, nullptr);
+    }
+
+    return true;
+}
+
+void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>& uniformBuffers) {
+    // Update graphics descriptor sets with UBO and instance buffers
+    for (size_t i = 0; i < framesInFlight; i++) {
+        VkDescriptorBufferInfo uboInfo{};
+        uboInfo.buffer = uniformBuffers[i];
+        uboInfo.offset = 0;
+        uboInfo.range = 160;  // sizeof(UniformBufferObject) - matches Renderer's UBO
+
+        VkDescriptorBufferInfo instanceBufferInfo{};
+        instanceBufferInfo.buffer = instanceBuffers[i];
+        instanceBufferInfo.offset = 0;
+        instanceBufferInfo.range = sizeof(GrassInstance) * MAX_INSTANCES;
+
+        std::array<VkWriteDescriptorSet, 2> graphicsWrites{};
+
+        graphicsWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        graphicsWrites[0].dstSet = graphicsDescriptorSets[i];
+        graphicsWrites[0].dstBinding = 0;
+        graphicsWrites[0].dstArrayElement = 0;
+        graphicsWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        graphicsWrites[0].descriptorCount = 1;
+        graphicsWrites[0].pBufferInfo = &uboInfo;
+
+        graphicsWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        graphicsWrites[1].dstSet = graphicsDescriptorSets[i];
+        graphicsWrites[1].dstBinding = 1;
+        graphicsWrites[1].dstArrayElement = 0;
+        graphicsWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        graphicsWrites[1].descriptorCount = 1;
+        graphicsWrites[1].pBufferInfo = &instanceBufferInfo;
+
+        vkUpdateDescriptorSets(dev, static_cast<uint32_t>(graphicsWrites.size()),
+                               graphicsWrites.data(), 0, nullptr);
+    }
+}
+
+void GrassSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex, float time) {
+    // Reset indirect buffer before compute dispatch to prevent accumulation
+    vkCmdFillBuffer(cmd, indirectBuffers[frameIndex], 0, sizeof(VkDrawIndirectCommand), 0);
+
+    // Barrier to ensure fill completes before compute shader runs
+    VkMemoryBarrier fillBarrier{};
+    fillBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    fillBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    fillBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    vkCmdPipelineBarrier(cmd,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         0, 1, &fillBarrier, 0, nullptr, 0, nullptr);
+
+    // Dispatch grass compute shader
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                            computePipelineLayout, 0, 1,
+                            &computeDescriptorSets[frameIndex], 0, nullptr);
+
+    GrassPushConstants grassPush{};
+    grassPush.time = time;
+    vkCmdPushConstants(cmd, computePipelineLayout,
+                       VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(GrassPushConstants), &grassPush);
+
+    // Dispatch: ceil(10000 / 64) = 157 workgroups
+    vkCmdDispatch(cmd, 157, 1, 1);
+
+    // Memory barrier: compute write -> vertex read and indirect read
+    VkMemoryBarrier memBarrier{};
+    memBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    memBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    memBarrier.dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
+
+    vkCmdPipelineBarrier(cmd,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
+                         0, 1, &memBarrier, 0, nullptr, 0, nullptr);
+}
+
+void GrassSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time) {
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            graphicsPipelineLayout, 0, 1,
+                            &graphicsDescriptorSets[frameIndex], 0, nullptr);
+
+    GrassPushConstants grassPush{};
+    grassPush.time = time;
+    vkCmdPushConstants(cmd, graphicsPipelineLayout,
+                       VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GrassPushConstants), &grassPush);
+
+    vkCmdDrawIndirect(cmd, indirectBuffers[frameIndex], 0, 1, sizeof(VkDrawIndirectCommand));
+}

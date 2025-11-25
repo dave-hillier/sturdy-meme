@@ -19,6 +19,8 @@ set(SOURCES
     src/Camera.cpp
     src/Mesh.cpp
     src/Texture.cpp
+    src/ShaderLoader.cpp
+    src/GrassSystem.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
