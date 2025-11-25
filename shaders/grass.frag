@@ -240,11 +240,14 @@ vec3 calculatePointLight(vec3 N, vec3 V, vec3 worldPos, vec3 albedo) {
     float distance = length(lightVec);
     vec3 L = normalize(lightVec);
 
-    // Windowed inverse-square falloff
+    // Smooth windowed inverse-square falloff
     float attenuation = 1.0;
     if (lightRadius > 0.0) {
+        // Smooth windowed falloff using saturate(1 - (d/r)^4)^2
+        // This provides a smooth transition to zero at the radius boundary
         float distRatio = distance / lightRadius;
-        float windowedFalloff = max(1.0 - distRatio * distRatio, 0.0);
+        float distRatio4 = distRatio * distRatio * distRatio * distRatio;
+        float windowedFalloff = max(1.0 - distRatio4, 0.0);
         windowedFalloff *= windowedFalloff;
         attenuation = windowedFalloff / (distance * distance + 0.01);
     } else {

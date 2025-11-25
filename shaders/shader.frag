@@ -341,11 +341,13 @@ vec3 calculatePointLight(vec3 N, vec3 V, vec3 worldPos, vec3 albedo) {
     // Smooth attenuation that reaches zero at lightRadius
     float attenuation = 1.0;
     if (lightRadius > 0.0) {
-        // Windowed inverse-square falloff
+        // Smooth windowed falloff using saturate(1 - (d/r)^4)^2
+        // This provides a smooth transition to zero at the radius boundary
         float distRatio = distance / lightRadius;
-        float windowedFalloff = max(1.0 - distRatio * distRatio, 0.0);
+        float distRatio4 = distRatio * distRatio * distRatio * distRatio;
+        float windowedFalloff = max(1.0 - distRatio4, 0.0);
         windowedFalloff *= windowedFalloff;
-        // Inverse square with distance clamped to avoid division by near-zero
+        // Inverse square with smooth window
         attenuation = windowedFalloff / (distance * distance + 0.01);
     } else {
         // No radius specified, use simple inverse square
