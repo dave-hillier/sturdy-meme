@@ -15,11 +15,30 @@ layout(binding = 0) uniform UniformBufferObject {
 layout(location = 0) in vec3 fragColor;
 layout(location = 1) in vec3 fragNormal;
 layout(location = 2) in float fragHeight;
+layout(location = 3) in float fragClumpId;
 
 layout(location = 0) out vec4 outColor;
 
+// Clump color variation parameters
+const float CLUMP_COLOR_INFLUENCE = 0.15;  // Subtle color variation (0-1)
+
 void main() {
     vec3 normal = normalize(fragNormal);
+
+    // Apply subtle clump-based color variation
+    // Different clumps have slightly different hue/saturation
+    vec3 color = fragColor;
+
+    // Subtle hue shift based on clumpId (shift toward yellow or blue-green)
+    float hueShift = (fragClumpId - 0.5) * 2.0;  // -1 to 1
+    vec3 warmShift = vec3(0.05, 0.03, -0.02);    // Slightly warmer/yellower
+    vec3 coolShift = vec3(-0.02, 0.02, 0.03);    // Slightly cooler/bluer
+    vec3 colorShift = mix(coolShift, warmShift, fragClumpId);
+    color += colorShift * CLUMP_COLOR_INFLUENCE;
+
+    // Subtle brightness variation per clump
+    float brightnessVar = 0.9 + fragClumpId * 0.2;  // 0.9 to 1.1
+    color *= mix(1.0, brightnessVar, CLUMP_COLOR_INFLUENCE);
 
     // Two-sided lighting (grass blades are thin)
     float sunDot = dot(normal, ubo.sunDirection.xyz);
@@ -36,5 +55,5 @@ void main() {
     // Final lighting
     vec3 lighting = (ubo.ambientColor.rgb + sunLight + moonLight) * ao;
 
-    outColor = vec4(fragColor * lighting, 1.0);
+    outColor = vec4(color * lighting, 1.0);
 }

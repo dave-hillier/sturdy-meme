@@ -28,6 +28,7 @@ layout(push_constant) uniform PushConstants {
 layout(location = 0) out vec3 fragColor;
 layout(location = 1) out vec3 fragNormal;
 layout(location = 2) out float fragHeight;
+layout(location = 3) out float fragClumpId;
 
 // Quadratic Bezier evaluation
 vec3 bezier(vec3 p0, vec3 p1, vec3 p2, float t) {
@@ -53,6 +54,7 @@ void main() {
     float height = inst.heightHashTilt.x;
     float bladeHash = inst.heightHashTilt.y;
     float tilt = inst.heightHashTilt.z;
+    float clumpId = inst.heightHashTilt.w;
 
     // Wind animation
     float windStrength = 0.2;
@@ -123,4 +125,5 @@ void main() {
 
     fragNormal = normal;
     fragHeight = t;
+    fragClumpId = clumpId;
 }

@@ -44,6 +44,51 @@ float hash2(vec2 p) {
     return fract(sin(dot(p, vec2(269.5, 183.3))) * 43758.5453);
 }
 
+// Returns vec2 hash for a cell
+vec2 hash2v(vec2 p) {
+    return vec2(hash(p), hash(p + vec2(47.0, 13.0)));
+}
+
+// Clumping parameters
+const float CLUMP_SCALE = 2.0;          // Size of clumps in world units
+const float CLUMP_HEIGHT_INFLUENCE = 0.4;  // How much clump affects height (0-1)
+const float CLUMP_FACING_INFLUENCE = 0.3;  // How much blades face toward/away from clump center
+
+// Voronoi-based clump calculation
+// Returns clumpId (0-1), clumpDistance, and clumpCenter
+void calculateClump(vec2 worldPos, float clumpScale,
+                    out float clumpId, out float clumpDist, out vec2 clumpCenter) {
+    // Scale position to clump space
+    vec2 scaledPos = worldPos / clumpScale;
+    vec2 cellId = floor(scaledPos);
+
+    float minDist = 10.0;
+    vec2 nearestPoint = vec2(0.0);
+    float nearestId = 0.0;
+
+    // Check 3x3 neighborhood (9 potential clump centers)
+    for (int y = -1; y <= 1; y++) {
+        for (int x = -1; x <= 1; x++) {
+            vec2 neighborCell = cellId + vec2(float(x), float(y));
+
+            // Each cell's clump point is jittered based on hash
+            vec2 jitter = hash2v(neighborCell) * 0.8 + 0.1;
+            vec2 clumpPoint = (neighborCell + jitter) * clumpScale;
+
+            float dist = length(worldPos - clumpPoint);
+            if (dist < minDist) {
+                minDist = dist;
+                nearestPoint = clumpPoint;
+                nearestId = hash(neighborCell);  // Unique ID per clump (0-1)
+            }
+        }
+    }
+
+    clumpId = nearestId;
+    clumpDist = minDist;
+    clumpCenter = nearestPoint;
+}
+
 void main() {
     uint idx = gl_GlobalInvocationID.x;
 
@@ -55,14 +100,15 @@ void main() {
 
     // Generate grass positions in a grid pattern
     // Grid: 100x100 = 10000 potential blades
+    // With 0.15m spacing = 15m x 15m area = ~44 blades per square meter
     uint gridSize = 100;
     if (idx >= gridSize * gridSize) return;
 
     uint gridX = idx % gridSize;
     uint gridZ = idx / gridSize;
 
-    // Map to world space (-25 to +25, centered on origin)
-    float spacing = 0.5;
+    // Map to world space (centered on origin)
+    float spacing = 0.15;  // Dense grass
     float x = (float(gridX) - float(gridSize) / 2.0) * spacing;
     float z = (float(gridZ) - float(gridSize) / 2.0) * spacing;
 
@@ -96,13 +142,48 @@ void main() {
     // Atomically increment instance count and get our slot
     uint slot = atomicAdd(drawCmd.instanceCount, 1);
 
-    // Generate varied instance properties
-    float facing = h1 * 6.28318;           // Random facing direction
-    float height = 0.3 + h2 * 0.4;         // Height between 0.3 and 0.7
-    float bladeHash = h1;                  // For wind animation
-    float tilt = (hash(cell + vec2(50.0, 50.0)) - 0.5) * 0.3;  // Slight tilt
+    // Calculate clumping
+    float clumpId, clumpDist;
+    vec2 clumpCenter;
+    calculateClump(vec2(x, z), CLUMP_SCALE, clumpId, clumpDist, clumpCenter);
 
-    // Write instance data
+    // Base random properties
+    float randomFacing = h1 * 6.28318;     // Random facing direction
+    float baseHeight = 0.3 + h2 * 0.4;     // Height between 0.3 and 0.7
+    float bladeHash = h1;                  // For wind animation
+    float baseTilt = (hash(cell + vec2(50.0, 50.0)) - 0.5) * 0.3;  // Slight tilt
+
+    // Apply clump height influence
+    // Blades in the same clump have similar heights
+    // clumpId varies 0-1, so we map it to a height multiplier
+    float clumpHeightMod = mix(1.0, 0.6 + clumpId * 0.8, CLUMP_HEIGHT_INFLUENCE);
+    float height = baseHeight * clumpHeightMod;
+
+    // Apply clump facing influence
+    // Blades lean toward or away from clump center
+    vec2 toClumpCenter = clumpCenter - vec2(x, z);
+    float distToClump = length(toClumpCenter);
+    if (distToClump > 0.01) {
+        toClumpCenter = normalize(toClumpCenter);
+    } else {
+        toClumpCenter = vec2(0.0, 1.0);
+    }
+
+    // Calculate facing angle that points toward clump center
+    float clumpFacingAngle = atan(toClumpCenter.y, toClumpCenter.x);
+
+    // Blend between random facing and clump-oriented facing
+    // Use clumpId to determine if blades face toward (clumpId < 0.5) or away (clumpId > 0.5)
+    float facingTarget = clumpId < 0.5 ? clumpFacingAngle : clumpFacingAngle + 3.14159;
+
+    // Smooth blend between random and clump-oriented facing
+    float facing = mix(randomFacing, facingTarget, CLUMP_FACING_INFLUENCE);
+
+    // Tilt also influenced by distance to clump center (blades closer lean more)
+    float clumpTiltMod = (1.0 - clumpDist / CLUMP_SCALE) * 0.15;
+    float tilt = baseTilt + clumpTiltMod;
+
+    // Write instance data (clumpId stored in w for fragment shader color variation)
     instances[slot].positionAndFacing = vec4(worldPos, facing);
-    instances[slot].heightHashTilt = vec4(height, bladeHash, tilt, 0.0);
+    instances[slot].heightHashTilt = vec4(height, bladeHash, tilt, clumpId);
 }
