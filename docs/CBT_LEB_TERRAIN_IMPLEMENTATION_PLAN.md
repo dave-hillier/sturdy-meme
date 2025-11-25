@@ -1188,74 +1188,32 @@ void Camera::update() {
 
 ## Implementation Milestones
 
-### Milestone 1: CBT Data Structure (Foundation)
+### Milestone 1: Adaptive Wireframe (Core System)
 
-**Goal**: CBT buffer created and initialized with 2 root triangles.
-
-**Deliverables**:
-- `CBT.h/cpp` - CBT buffer management
-- `cbt.glsl` - GLSL CBT library port
-- Unit tests verifying bit manipulation
-
-**Verification**: Print leaf count (should be 2).
-
----
-
-### Milestone 2: Sum Reduction Pipeline
-
-**Goal**: Sum reduction rebuilds correctly after manual bit changes.
+**Goal**: See adaptive wireframe - dense near camera, coarse far. This is the first meaningful visual that proves the entire CBT/LEB pipeline works.
 
 **Deliverables**:
-- `cbt_sum_reduction.comp` - Optimized sum reduction shader
-- Multiple dispatch passes wired up
-- Correct synchronization barriers
-
-**Verification**: Manually set bits, rebuild, verify root = correct count.
-
----
-
-### Milestone 3: Basic Triangle Rendering
-
-**Goal**: See two triangles covering the terrain area.
-
-**Deliverables**:
+- `CBT.h/cpp` - CBT buffer management and initialization
+- `cbt.glsl` - GLSL CBT library (heap operations, bit manipulation)
+- `leb.glsl` - LEB library (triangle decode, conforming split/merge)
+- `cbt_dispatcher.comp` - Read root node, set indirect args
+- `cbt_subdivision.comp` - Per-leaf LOD evaluation, split/merge with atomics
+- `cbt_sum_reduction.comp` - Rebuild sum tree (basic version first)
 - `terrain.vert` - Vertex shader with LEB decode
-- `terrain.frag` - Simple solid color
-- Dispatcher shader setting draw args
-- Indirect draw call
-
-**Verification**: Two triangles visible on screen, flat colored.
-
----
-
-### Milestone 4: Subdivision Update (No Visuals Yet)
-
-**Goal**: CBT subdivides based on distance to camera.
-
-**Deliverables**:
-- `cbt_subdivision.comp` - Subdivision update shader
-- `leb.glsl` - LEB library port
-- Distance-based split/merge logic
+- `terrain_wireframe.frag` - Wireframe visualization
 - Full frame loop: dispatch → subdivide → sum reduce → render
-
-**Verification**: Leaf count changes as camera moves. Print to console.
-
----
-
-### Milestone 5: Adaptive Tessellation Visible
-
-**Goal**: See adaptive wireframe - dense near camera, coarse far.
-
-**Deliverables**:
-- Wireframe rendering mode
-- Screen-space edge length LOD
+- Screen-space edge length LOD criterion
 - Hysteresis to prevent popping
 
-**Verification**: Wireframe shows smooth LOD transitions.
+**Verification**:
+- Wireframe shows smooth LOD transitions as camera moves
+- Dense triangles near camera, coarse triangles at distance
+- Leaf count displayed on screen changes dynamically
+- No visible cracks or T-junctions
 
 ---
 
-### Milestone 6: Height Map Integration
+### Milestone 2: Height Map Integration
 
 **Goal**: Terrain follows a height map.
 
@@ -1268,7 +1226,7 @@ void Camera::update() {
 
 ---
 
-### Milestone 7: Basic Texturing
+### Milestone 3: Basic Texturing
 
 **Goal**: Terrain has a texture instead of solid color.
 
@@ -1281,7 +1239,7 @@ void Camera::update() {
 
 ---
 
-### Milestone 8: Meshlet Enhancement
+### Milestone 4: Meshlet Enhancement
 
 **Goal**: Higher resolution without increasing CBT depth.
 
@@ -1294,7 +1252,7 @@ void Camera::update() {
 
 ---
 
-### Milestone 9: Material Splatting
+### Milestone 5: Material Splatting
 
 **Goal**: Multiple terrain materials blended.
 
@@ -1307,7 +1265,7 @@ void Camera::update() {
 
 ---
 
-### Milestone 10: Shadow Integration
+### Milestone 6: Shadow Integration
 
 **Goal**: Terrain casts and receives shadows.
 
@@ -1320,7 +1278,7 @@ void Camera::update() {
 
 ---
 
-### Milestone 11: Grass Integration
+### Milestone 7: Grass Integration
 
 **Goal**: Grass grows on terrain.
 
@@ -1333,7 +1291,7 @@ void Camera::update() {
 
 ---
 
-### Milestone 12: Performance Optimization
+### Milestone 8: Performance Optimization
 
 **Goal**: Stable frame rate with target geometry.
 
