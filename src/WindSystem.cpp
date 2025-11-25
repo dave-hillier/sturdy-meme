@@ -191,28 +191,27 @@ float WindSystem::perlinNoise(float x, float y) const {
 }
 
 float WindSystem::sampleWindAtPosition(const glm::vec2& worldPos) const {
-    // Scroll the sampling position based on wind direction and time
-    glm::vec2 scrolledPos = worldPos - windDirection * totalTime * windSpeed;
+    // Project world position onto wind direction for wave propagation
+    float windDist = glm::dot(worldPos, windDirection);
 
-    // Sample multi-octave noise
-    float noise = 0.0f;
-    float amplitude = 1.0f;
-    float frequency = noiseScale;
-    float maxAmplitude = 0.0f;
+    // Primary motion: smooth traveling sine wave
+    float primaryWave = std::sin((windDist * noiseScale - totalTime * windSpeed) * 0.5f) * 0.5f + 0.5f;
 
-    // Two octaves for natural variation
-    for (int i = 0; i < 2; i++) {
-        noise += perlinNoise(scrolledPos.x * frequency, scrolledPos.y * frequency) * amplitude;
-        maxAmplitude += amplitude;
-        amplitude *= 0.5f;
-        frequency *= 2.0f;
-    }
+    // Secondary wave at different frequency for gentle variation
+    float secondaryWave = std::sin((windDist * noiseScale * 0.7f - totalTime * windSpeed * 0.8f) * 0.3f) * 0.5f + 0.5f;
 
-    // Normalize and apply base strength
-    float normalizedNoise = noise / maxAmplitude;
+    // Combine waves (primary dominant, secondary adds subtle variation)
+    float waveMotion = primaryWave * 0.7f + secondaryWave * 0.3f;
 
-    // Add gust variation (time-based sine wave)
-    float gust = (std::sin(totalTime * gustFrequency * 6.28318f) * 0.5f + 0.5f) * gustAmplitude;
+    // Subtle noise for spatial variation (very gentle, not dominant)
+    glm::vec2 scrolledPos = worldPos - windDirection * totalTime * windSpeed * 0.5f;
+    float noise = perlinNoise(scrolledPos.x * noiseScale * 0.3f, scrolledPos.y * noiseScale * 0.3f);
 
-    return (normalizedNoise + gust) * windStrength;
+    // Noise modulates the wave amplitude slightly (10% influence)
+    float noiseModulation = 0.9f + noise * 0.2f;
+
+    // Global gust variation (time-based intensity changes)
+    float gust = 1.0f + (std::sin(totalTime * gustFrequency * 6.28318f) * 0.5f + 0.5f) * gustAmplitude;
+
+    return waveMotion * noiseModulation * gust * windStrength;
 }

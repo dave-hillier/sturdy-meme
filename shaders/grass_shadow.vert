@@ -110,6 +110,8 @@ float perlinNoise(float x, float y) {
     return (res + 1.0) * 0.5;
 }
 
+// Sample wind at a world position with smooth sine wave + subtle noise modulation
+// Must match grass.vert for consistent shadows
 float sampleWind(vec2 worldPos) {
     vec2 windDir = wind.windDirectionAndStrength.xy;
     float windStrength = wind.windDirectionAndStrength.z;
@@ -119,24 +121,29 @@ float sampleWind(vec2 worldPos) {
     float gustFreq = wind.windParams.x;
     float gustAmp = wind.windParams.y;
 
-    vec2 scrolledPos = worldPos - windDir * windTime * windSpeed;
+    // Project world position onto wind direction for wave propagation
+    float windDist = dot(worldPos, windDir);
 
-    float noise = 0.0;
-    float amplitude = 1.0;
-    float frequency = noiseScale;
-    float maxAmp = 0.0;
+    // Primary motion: smooth traveling sine wave
+    float primaryWave = sin((windDist * noiseScale - windTime * windSpeed) * 0.5) * 0.5 + 0.5;
 
-    for (int i = 0; i < 2; i++) {
-        noise += perlinNoise(scrolledPos.x * frequency, scrolledPos.y * frequency) * amplitude;
-        maxAmp += amplitude;
-        amplitude *= 0.5;
-        frequency *= 2.0;
-    }
+    // Secondary wave at different frequency for gentle variation
+    float secondaryWave = sin((windDist * noiseScale * 0.7 - windTime * windSpeed * 0.8) * 0.3) * 0.5 + 0.5;
 
-    noise /= maxAmp;
-    float gust = (sin(windTime * gustFreq * 6.28318) * 0.5 + 0.5) * gustAmp;
+    // Combine waves (primary dominant, secondary adds subtle variation)
+    float waveMotion = primaryWave * 0.7 + secondaryWave * 0.3;
 
-    return (noise + gust) * windStrength;
+    // Subtle noise for spatial variation (very gentle, not dominant)
+    vec2 scrolledPos = worldPos - windDir * windTime * windSpeed * 0.5;
+    float noise = perlinNoise(scrolledPos.x * noiseScale * 0.3, scrolledPos.y * noiseScale * 0.3);
+
+    // Noise modulates the wave amplitude slightly (10% influence)
+    float noiseModulation = 0.9 + noise * 0.2;
+
+    // Global gust variation (time-based intensity changes)
+    float gust = 1.0 + (sin(windTime * gustFreq * 6.28318) * 0.5 + 0.5) * gustAmp;
+
+    return waveMotion * noiseModulation * gust * windStrength;
 }
 
 layout(location = 0) out float fragHeight;
