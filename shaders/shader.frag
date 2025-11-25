@@ -33,7 +33,9 @@ layout(location = 0) out vec4 outColor;
 
 // GGX Normal Distribution Function
 float D_GGX(float NoH, float roughness) {
-    float a = roughness * roughness;
+    // Clamp minimum roughness to prevent infinitely tight highlights
+    float r = max(roughness, 0.04);
+    float a = r * r;
     float a2 = a * a;
     float NoH2 = NoH * NoH;
     float denom = NoH2 * (a2 - 1.0) + 1.0;
@@ -42,7 +44,8 @@ float D_GGX(float NoH, float roughness) {
 
 // Smith Visibility Function (height-correlated)
 float V_SmithGGX(float NoV, float NoL, float roughness) {
-    float a = roughness * roughness;
+    float r = max(roughness, 0.04);
+    float a = r * r;
     float GGXV = NoL * sqrt(NoV * NoV * (1.0 - a) + a);
     float GGXL = NoV * sqrt(NoL * NoL * (1.0 - a) + a);
     return 0.5 / (GGXV + GGXL + 0.0001);
@@ -135,8 +138,16 @@ void main() {
     float moonIntensity = ubo.moonDirection.w;
     vec3 moonLight = calculatePBR(N, V, moonL, vec3(0.3, 0.35, 0.5), moonIntensity, albedo, 1.0);
 
-    // Ambient (simple hemisphere approximation)
-    vec3 ambient = ubo.ambientColor.rgb * albedo;
+    // Ambient lighting
+    // For dielectrics: diffuse ambient from all directions
+    // For metals: specular ambient (environment reflection approximation)
+    vec3 F0 = mix(vec3(0.04), albedo, material.metallic);
+    vec3 ambientDiffuse = ubo.ambientColor.rgb * albedo * (1.0 - material.metallic);
+    // Metals need higher ambient to simulate environment reflections
+    // Rougher metals get more ambient, smoother metals rely more on direct specular
+    float envReflection = mix(0.3, 1.0, material.roughness);
+    vec3 ambientSpecular = ubo.ambientColor.rgb * F0 * material.metallic * envReflection;
+    vec3 ambient = ambientDiffuse + ambientSpecular;
 
     vec3 finalColor = ambient + sunLight + moonLight;
 

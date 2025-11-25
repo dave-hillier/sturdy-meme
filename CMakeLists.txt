@@ -50,6 +50,7 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 set(RESOURCE_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/textures/crate.png
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/textures/grass.png
+    ${CMAKE_CURRENT_SOURCE_DIR}/assets/textures/metal.png
 )
 
 set(SHADER_FILES

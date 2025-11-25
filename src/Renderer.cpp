@@ -104,6 +104,9 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     cubeMesh.createCube();
     cubeMesh.upload(allocator, device, commandPool, graphicsQueue);
 
+    sphereMesh.createSphere(0.5f, 32, 32);
+    sphereMesh.upload(allocator, device, commandPool, graphicsQueue);
+
     std::string texturePath = resourcePath + "/textures/crate.png";
     if (!crateTexture.load(texturePath, allocator, device, commandPool, graphicsQueue, physicalDevice)) {
         SDL_Log("Failed to load texture: %s", texturePath.c_str());
@@ -116,12 +119,36 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
         return false;
     }
 
-    sceneObjects.push_back({glm::mat4(1.0f), &groundMesh, &groundTexture});
-    sceneObjects.push_back({glm::translate(glm::mat4(1.0f), glm::vec3(2.0f, 0.5f, 0.0f)), &cubeMesh, &crateTexture});
-    // Rotate second cube 30 degrees around Y axis
+    std::string metalTexturePath = resourcePath + "/textures/metal.png";
+    if (!metalTexture.load(metalTexturePath, allocator, device, commandPool, graphicsQueue, physicalDevice)) {
+        SDL_Log("Failed to load metal texture: %s", metalTexturePath.c_str());
+        return false;
+    }
+
+    // Ground - rough, non-metallic
+    sceneObjects.push_back({glm::mat4(1.0f), &groundMesh, &groundTexture, 0.8f, 0.0f});
+
+    // Wooden crate - slightly shiny, non-metallic
+    sceneObjects.push_back({glm::translate(glm::mat4(1.0f), glm::vec3(2.0f, 0.5f, 0.0f)), &cubeMesh, &crateTexture, 0.4f, 0.0f});
+
+    // Rotated wooden crate
     glm::mat4 rotatedCube = glm::translate(glm::mat4(1.0f), glm::vec3(-1.5f, 0.5f, 1.0f));
     rotatedCube = glm::rotate(rotatedCube, glm::radians(30.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-    sceneObjects.push_back({rotatedCube, &cubeMesh, &crateTexture});
+    sceneObjects.push_back({rotatedCube, &cubeMesh, &crateTexture, 0.4f, 0.0f});
+
+    // Polished metal sphere - smooth, fully metallic
+    sceneObjects.push_back({glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.5f, -2.0f)), &sphereMesh, &metalTexture, 0.1f, 1.0f});
+
+    // Rough/brushed metal sphere - moderately rough, metallic
+    sceneObjects.push_back({glm::translate(glm::mat4(1.0f), glm::vec3(-3.0f, 0.5f, -1.0f)), &sphereMesh, &metalTexture, 0.5f, 1.0f});
+
+    // Polished metal cube - smooth, fully metallic
+    sceneObjects.push_back({glm::translate(glm::mat4(1.0f), glm::vec3(3.0f, 0.5f, -2.0f)), &cubeMesh, &metalTexture, 0.1f, 1.0f});
+
+    // Brushed metal cube - rough, metallic
+    glm::mat4 brushedCube = glm::translate(glm::mat4(1.0f), glm::vec3(-3.0f, 0.5f, -3.0f));
+    brushedCube = glm::rotate(brushedCube, glm::radians(45.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    sceneObjects.push_back({brushedCube, &cubeMesh, &metalTexture, 0.6f, 1.0f});
 
     if (!createDescriptorPool()) return false;
     if (!createDescriptorSets()) return false;
@@ -156,7 +183,9 @@ void Renderer::shutdown() {
 
         crateTexture.destroy(allocator, device);
         groundTexture.destroy(allocator, device);
+        metalTexture.destroy(allocator, device);
         cubeMesh.destroy(allocator);
+        sphereMesh.destroy(allocator);
         groundMesh.destroy(allocator);
         sceneObjects.clear();
 
@@ -1109,6 +1138,12 @@ bool Renderer::createDescriptorSets() {
         return false;
     }
 
+    metalDescriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
+    if (vkAllocateDescriptorSets(device, &allocInfo, metalDescriptorSets.data()) != VK_SUCCESS) {
+        SDL_Log("Failed to allocate metal descriptor sets");
+        return false;
+    }
+
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         VkDescriptorBufferInfo bufferInfo{};
         bufferInfo.buffer = uniformBuffers[i];
@@ -1163,6 +1198,20 @@ bool Renderer::createDescriptorSets() {
         descriptorWrites[1].dstSet = groundDescriptorSets[i];
         descriptorWrites[1].pImageInfo = &groundImageInfo;
         descriptorWrites[2].dstSet = groundDescriptorSets[i];
+
+        vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
+                               descriptorWrites.data(), 0, nullptr);
+
+        // Metal texture descriptor sets
+        VkDescriptorImageInfo metalImageInfo{};
+        metalImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        metalImageInfo.imageView = metalTexture.getImageView();
+        metalImageInfo.sampler = metalTexture.getSampler();
+
+        descriptorWrites[0].dstSet = metalDescriptorSets[i];
+        descriptorWrites[1].dstSet = metalDescriptorSets[i];
+        descriptorWrites[1].pImageInfo = &metalImageInfo;
+        descriptorWrites[2].dstSet = metalDescriptorSets[i];
 
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                descriptorWrites.data(), 0, nullptr);
@@ -1307,23 +1356,22 @@ void Renderer::render(const Camera& camera) {
     for (const auto& obj : sceneObjects) {
         PushConstants push{};
         push.model = obj.transform;
-
-        // Set material properties per object
-        if (obj.texture == &groundTexture) {
-            push.roughness = 0.8f;  // Rough grass/dirt
-            push.metallic = 0.0f;
-        } else {
-            push.roughness = 0.4f;  // Slightly shiny wood crate
-            push.metallic = 0.0f;
-        }
+        push.roughness = obj.roughness;
+        push.metallic = obj.metallic;
 
         vkCmdPushConstants(commandBuffers[currentFrame], pipelineLayout,
                           VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                           0, sizeof(PushConstants), &push);
 
-        VkDescriptorSet* descSet = (obj.texture == &groundTexture)
-            ? &groundDescriptorSets[currentFrame]
-            : &descriptorSets[currentFrame];
+        // Select descriptor set based on texture
+        VkDescriptorSet* descSet;
+        if (obj.texture == &groundTexture) {
+            descSet = &groundDescriptorSets[currentFrame];
+        } else if (obj.texture == &metalTexture) {
+            descSet = &metalDescriptorSets[currentFrame];
+        } else {
+            descSet = &descriptorSets[currentFrame];
+        }
         vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS,
                                 pipelineLayout, 0, 1, descSet, 0, nullptr);
 

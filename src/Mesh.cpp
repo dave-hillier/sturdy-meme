@@ -49,6 +49,48 @@ void Mesh::createDisc(float radius, int segments, float uvScale) {
     }
 }
 
+void Mesh::createSphere(float radius, int stacks, int slices) {
+    vertices.clear();
+    indices.clear();
+
+    // Generate vertices
+    for (int i = 0; i <= stacks; ++i) {
+        float phi = (float)M_PI * (float)i / (float)stacks;
+        float y = radius * std::cos(phi);
+        float ringRadius = radius * std::sin(phi);
+
+        for (int j = 0; j <= slices; ++j) {
+            float theta = 2.0f * (float)M_PI * (float)j / (float)slices;
+            float x = ringRadius * std::cos(theta);
+            float z = ringRadius * std::sin(theta);
+
+            glm::vec3 pos(x, y, z);
+            glm::vec3 normal = glm::normalize(pos);
+            glm::vec2 uv((float)j / (float)slices, (float)i / (float)stacks);
+
+            vertices.push_back({pos, normal, uv});
+        }
+    }
+
+    // Generate indices (counter-clockwise winding for front faces)
+    for (int i = 0; i < stacks; ++i) {
+        for (int j = 0; j < slices; ++j) {
+            int first = i * (slices + 1) + j;
+            int second = first + slices + 1;
+
+            // First triangle (reversed winding)
+            indices.push_back(first);
+            indices.push_back(first + 1);
+            indices.push_back(second);
+
+            // Second triangle (reversed winding)
+            indices.push_back(second);
+            indices.push_back(first + 1);
+            indices.push_back(second + 1);
+        }
+    }
+}
+
 void Mesh::createCube() {
     vertices = {
         // Front face (Z+)

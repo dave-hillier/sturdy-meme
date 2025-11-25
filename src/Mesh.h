@@ -49,6 +49,7 @@ public:
     void createCube();
     void createPlane(float width, float depth);
     void createDisc(float radius, int segments, float uvScale = 1.0f);
+    void createSphere(float radius, int stacks, int slices);
     void upload(VmaAllocator allocator, VkDevice device, VkCommandPool commandPool, VkQueue queue);
     void destroy(VmaAllocator allocator);
 

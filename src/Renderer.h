@@ -43,6 +43,8 @@ struct SceneObject {
     glm::mat4 transform;
     Mesh* mesh;
     Texture* texture;
+    float roughness = 0.5f;
+    float metallic = 0.0f;
 };
 
 class Renderer {
@@ -150,10 +152,13 @@ private:
 
     Mesh groundMesh;
     Mesh cubeMesh;
+    Mesh sphereMesh;
     Texture crateTexture;
     Texture groundTexture;
+    Texture metalTexture;
 
     std::vector<SceneObject> sceneObjects;
+    std::vector<VkDescriptorSet> metalDescriptorSets;
 
     uint32_t currentFrame = 0;
     static constexpr int MAX_FRAMES_IN_FLIGHT = 2;
