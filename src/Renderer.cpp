@@ -176,8 +176,10 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     grassInfo.device = device;
     grassInfo.allocator = allocator;
     grassInfo.renderPass = renderPass;
+    grassInfo.shadowRenderPass = shadowRenderPass;
     grassInfo.descriptorPool = descriptorPool;
     grassInfo.extent = swapchainExtent;
+    grassInfo.shadowMapSize = SHADOW_MAP_SIZE;
     grassInfo.shaderPath = resourcePath + "/shaders";
     grassInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
 
@@ -1381,6 +1383,9 @@ void Renderer::render(const Camera& camera) {
             vkCmdBindIndexBuffer(commandBuffers[currentFrame], obj.mesh->getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
             vkCmdDrawIndexed(commandBuffers[currentFrame], obj.mesh->getIndexCount(), 1, 0, 0, 0);
         }
+
+        // Draw grass shadows (with dithering for soft shadows)
+        grassSystem.recordShadowDraw(commandBuffers[currentFrame], currentFrame, grassTime);
 
         vkCmdEndRenderPass(commandBuffers[currentFrame]);
     }

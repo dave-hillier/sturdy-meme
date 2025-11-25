@@ -30,8 +30,10 @@ public:
         VkDevice device;
         VmaAllocator allocator;
         VkRenderPass renderPass;
+        VkRenderPass shadowRenderPass;
         VkDescriptorPool descriptorPool;
         VkExtent2D extent;
+        uint32_t shadowMapSize;
         std::string shaderPath;
         uint32_t framesInFlight;
     };
@@ -48,8 +50,10 @@ public:
     void updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos, const glm::mat4& viewProj);
     void recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex, float time);
     void recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time);
+    void recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time);
 
 private:
+    bool createShadowPipeline();
     bool createBuffers();
     bool createComputeDescriptorSetLayout();
     bool createComputePipeline();
@@ -60,8 +64,10 @@ private:
     VkDevice device = VK_NULL_HANDLE;
     VmaAllocator allocator = VK_NULL_HANDLE;
     VkRenderPass renderPass = VK_NULL_HANDLE;
+    VkRenderPass shadowRenderPass = VK_NULL_HANDLE;
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
     VkExtent2D extent = {0, 0};
+    uint32_t shadowMapSize = 0;
     std::string shaderPath;
     uint32_t framesInFlight = 0;
 
@@ -74,6 +80,12 @@ private:
     VkDescriptorSetLayout graphicsDescriptorSetLayout = VK_NULL_HANDLE;
     VkPipelineLayout graphicsPipelineLayout = VK_NULL_HANDLE;
     VkPipeline graphicsPipeline = VK_NULL_HANDLE;
+
+    // Shadow pipeline (for casting shadows)
+    VkDescriptorSetLayout shadowDescriptorSetLayout = VK_NULL_HANDLE;
+    VkPipelineLayout shadowPipelineLayout = VK_NULL_HANDLE;
+    VkPipeline shadowPipeline = VK_NULL_HANDLE;
+    std::vector<VkDescriptorSet> shadowDescriptorSets;
 
     // Storage buffers (per frame)
     std::vector<VkBuffer> instanceBuffers;

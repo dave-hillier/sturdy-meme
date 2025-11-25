@@ -10,8 +10,10 @@ bool GrassSystem::init(const InitInfo& info) {
     device = info.device;
     allocator = info.allocator;
     renderPass = info.renderPass;
+    shadowRenderPass = info.shadowRenderPass;
     descriptorPool = info.descriptorPool;
     extent = info.extent;
+    shadowMapSize = info.shadowMapSize;
     shaderPath = info.shaderPath;
     framesInFlight = info.framesInFlight;
 
@@ -20,12 +22,16 @@ bool GrassSystem::init(const InitInfo& info) {
     if (!createComputePipeline()) return false;
     if (!createGraphicsDescriptorSetLayout()) return false;
     if (!createGraphicsPipeline()) return false;
+    if (!createShadowPipeline()) return false;
     if (!createDescriptorSets()) return false;
 
     return true;
 }
 
 void GrassSystem::destroy(VkDevice dev, VmaAllocator alloc) {
+    vkDestroyPipeline(dev, shadowPipeline, nullptr);
+    vkDestroyPipelineLayout(dev, shadowPipelineLayout, nullptr);
+    vkDestroyDescriptorSetLayout(dev, shadowDescriptorSetLayout, nullptr);
     vkDestroyPipeline(dev, graphicsPipeline, nullptr);
     vkDestroyPipelineLayout(dev, graphicsPipelineLayout, nullptr);
     vkDestroyDescriptorSetLayout(dev, graphicsDescriptorSetLayout, nullptr);
@@ -376,6 +382,168 @@ bool GrassSystem::createGraphicsPipeline() {
     return true;
 }
 
+bool GrassSystem::createShadowPipeline() {
+    // Shadow descriptor set layout: UBO (binding 0) + instance buffer (binding 1)
+    std::array<VkDescriptorSetLayoutBinding, 2> shadowBindings{};
+
+    // UBO for light space matrix
+    shadowBindings[0].binding = 0;
+    shadowBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    shadowBindings[0].descriptorCount = 1;
+    shadowBindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
+    // Instance buffer
+    shadowBindings[1].binding = 1;
+    shadowBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    shadowBindings[1].descriptorCount = 1;
+    shadowBindings[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
+    VkDescriptorSetLayoutCreateInfo shadowLayoutInfo{};
+    shadowLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    shadowLayoutInfo.bindingCount = static_cast<uint32_t>(shadowBindings.size());
+    shadowLayoutInfo.pBindings = shadowBindings.data();
+
+    if (vkCreateDescriptorSetLayout(device, &shadowLayoutInfo, nullptr,
+                                    &shadowDescriptorSetLayout) != VK_SUCCESS) {
+        SDL_Log("Failed to create grass shadow descriptor set layout");
+        return false;
+    }
+
+    // Load shadow shaders
+    auto vertShaderCode = ShaderLoader::readFile(shaderPath + "/grass_shadow.vert.spv");
+    auto fragShaderCode = ShaderLoader::readFile(shaderPath + "/grass_shadow.frag.spv");
+
+    if (vertShaderCode.empty() || fragShaderCode.empty()) {
+        SDL_Log("Failed to load grass shadow shader files");
+        return false;
+    }
+
+    VkShaderModule vertShaderModule = ShaderLoader::createShaderModule(device, vertShaderCode);
+    VkShaderModule fragShaderModule = ShaderLoader::createShaderModule(device, fragShaderCode);
+
+    VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
+    vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+    vertShaderStageInfo.module = vertShaderModule;
+    vertShaderStageInfo.pName = "main";
+
+    VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
+    fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    fragShaderStageInfo.module = fragShaderModule;
+    fragShaderStageInfo.pName = "main";
+
+    VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
+
+    // No vertex input - procedural geometry from instance buffer
+    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
+    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+
+    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+    inputAssembly.primitiveRestartEnable = VK_FALSE;
+
+    VkViewport viewport{};
+    viewport.x = 0.0f;
+    viewport.y = 0.0f;
+    viewport.width = static_cast<float>(shadowMapSize);
+    viewport.height = static_cast<float>(shadowMapSize);
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+
+    VkRect2D scissor{};
+    scissor.offset = {0, 0};
+    scissor.extent = {shadowMapSize, shadowMapSize};
+
+    VkPipelineViewportStateCreateInfo viewportState{};
+    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewportState.viewportCount = 1;
+    viewportState.pViewports = &viewport;
+    viewportState.scissorCount = 1;
+    viewportState.pScissors = &scissor;
+
+    VkPipelineRasterizationStateCreateInfo rasterizer{};
+    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    rasterizer.depthClampEnable = VK_FALSE;
+    rasterizer.rasterizerDiscardEnable = VK_FALSE;
+    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+    rasterizer.lineWidth = 1.0f;
+    rasterizer.cullMode = VK_CULL_MODE_NONE;  // No culling for grass
+    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    rasterizer.depthBiasEnable = VK_TRUE;
+    rasterizer.depthBiasConstantFactor = 1.0f;
+    rasterizer.depthBiasSlopeFactor = 1.5f;
+
+    VkPipelineMultisampleStateCreateInfo multisampling{};
+    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    multisampling.sampleShadingEnable = VK_FALSE;
+    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    VkPipelineDepthStencilStateCreateInfo depthStencil{};
+    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    depthStencil.depthTestEnable = VK_TRUE;
+    depthStencil.depthWriteEnable = VK_TRUE;
+    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+    depthStencil.depthBoundsTestEnable = VK_FALSE;
+    depthStencil.stencilTestEnable = VK_FALSE;
+
+    // No color attachment for shadow pass
+    VkPipelineColorBlendStateCreateInfo colorBlending{};
+    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    colorBlending.logicOpEnable = VK_FALSE;
+    colorBlending.attachmentCount = 0;
+
+    VkPushConstantRange pushConstantRange{};
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = sizeof(GrassPushConstants);
+
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipelineLayoutInfo.setLayoutCount = 1;
+    pipelineLayoutInfo.pSetLayouts = &shadowDescriptorSetLayout;
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
+
+    if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr,
+                               &shadowPipelineLayout) != VK_SUCCESS) {
+        SDL_Log("Failed to create grass shadow pipeline layout");
+        vkDestroyShaderModule(device, fragShaderModule, nullptr);
+        vkDestroyShaderModule(device, vertShaderModule, nullptr);
+        return false;
+    }
+
+    VkGraphicsPipelineCreateInfo pipelineInfo{};
+    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pipelineInfo.stageCount = 2;
+    pipelineInfo.pStages = shaderStages;
+    pipelineInfo.pVertexInputState = &vertexInputInfo;
+    pipelineInfo.pInputAssemblyState = &inputAssembly;
+    pipelineInfo.pViewportState = &viewportState;
+    pipelineInfo.pRasterizationState = &rasterizer;
+    pipelineInfo.pMultisampleState = &multisampling;
+    pipelineInfo.pDepthStencilState = &depthStencil;
+    pipelineInfo.pColorBlendState = &colorBlending;
+    pipelineInfo.layout = shadowPipelineLayout;
+    pipelineInfo.renderPass = shadowRenderPass;
+    pipelineInfo.subpass = 0;
+
+    VkResult result = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1,
+                                                &pipelineInfo, nullptr,
+                                                &shadowPipeline);
+
+    vkDestroyShaderModule(device, fragShaderModule, nullptr);
+    vkDestroyShaderModule(device, vertShaderModule, nullptr);
+
+    if (result != VK_SUCCESS) {
+        SDL_Log("Failed to create grass shadow pipeline");
+        return false;
+    }
+
+    return true;
+}
+
 bool GrassSystem::createDescriptorSets() {
     // Allocate compute descriptor sets
     std::vector<VkDescriptorSetLayout> computeLayouts(framesInFlight, computeDescriptorSetLayout);
@@ -404,6 +572,21 @@ bool GrassSystem::createDescriptorSets() {
     graphicsDescriptorSets.resize(framesInFlight);
     if (vkAllocateDescriptorSets(device, &graphicsAllocInfo, graphicsDescriptorSets.data()) != VK_SUCCESS) {
         SDL_Log("Failed to allocate grass graphics descriptor sets");
+        return false;
+    }
+
+    // Allocate shadow descriptor sets
+    std::vector<VkDescriptorSetLayout> shadowLayouts(framesInFlight, shadowDescriptorSetLayout);
+
+    VkDescriptorSetAllocateInfo shadowAllocInfo{};
+    shadowAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    shadowAllocInfo.descriptorPool = descriptorPool;
+    shadowAllocInfo.descriptorSetCount = static_cast<uint32_t>(framesInFlight);
+    shadowAllocInfo.pSetLayouts = shadowLayouts.data();
+
+    shadowDescriptorSets.resize(framesInFlight);
+    if (vkAllocateDescriptorSets(device, &shadowAllocInfo, shadowDescriptorSets.data()) != VK_SUCCESS) {
+        SDL_Log("Failed to allocate grass shadow descriptor sets");
         return false;
     }
 
@@ -504,6 +687,28 @@ void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>
 
         vkUpdateDescriptorSets(dev, static_cast<uint32_t>(graphicsWrites.size()),
                                graphicsWrites.data(), 0, nullptr);
+
+        // Update shadow descriptor sets (UBO + instance buffer)
+        std::array<VkWriteDescriptorSet, 2> shadowWrites{};
+
+        shadowWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        shadowWrites[0].dstSet = shadowDescriptorSets[i];
+        shadowWrites[0].dstBinding = 0;
+        shadowWrites[0].dstArrayElement = 0;
+        shadowWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        shadowWrites[0].descriptorCount = 1;
+        shadowWrites[0].pBufferInfo = &uboInfo;
+
+        shadowWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        shadowWrites[1].dstSet = shadowDescriptorSets[i];
+        shadowWrites[1].dstBinding = 1;
+        shadowWrites[1].dstArrayElement = 0;
+        shadowWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        shadowWrites[1].descriptorCount = 1;
+        shadowWrites[1].pBufferInfo = &instanceBufferInfo;
+
+        vkUpdateDescriptorSets(dev, static_cast<uint32_t>(shadowWrites.size()),
+                               shadowWrites.data(), 0, nullptr);
     }
 }
 
@@ -598,6 +803,20 @@ void GrassSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float tim
     GrassPushConstants grassPush{};
     grassPush.time = time;
     vkCmdPushConstants(cmd, graphicsPipelineLayout,
+                       VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GrassPushConstants), &grassPush);
+
+    vkCmdDrawIndirect(cmd, indirectBuffers[frameIndex], 0, 1, sizeof(VkDrawIndirectCommand));
+}
+
+void GrassSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time) {
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipeline);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            shadowPipelineLayout, 0, 1,
+                            &shadowDescriptorSets[frameIndex], 0, nullptr);
+
+    GrassPushConstants grassPush{};
+    grassPush.time = time;
+    vkCmdPushConstants(cmd, shadowPipelineLayout,
                        VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GrassPushConstants), &grassPush);
 
     vkCmdDrawIndirect(cmd, indirectBuffers[frameIndex], 0, 1, sizeof(VkDrawIndirectCommand));
