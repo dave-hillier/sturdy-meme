@@ -10,6 +10,10 @@ layout(binding = 0) uniform UniformBufferObject {
     vec4 sunColor;
     vec4 ambientColor;
     vec4 cameraPosition;
+    vec4 rayleighScattering;
+    vec4 mieScattering;
+    vec4 absorptionExtinction;
+    vec4 atmosphereParams;
     float timeOfDay;
     float shadowMapSize;
 } ubo;

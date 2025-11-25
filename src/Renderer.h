@@ -26,6 +26,10 @@ struct UniformBufferObject {
     glm::vec4 sunColor;
     glm::vec4 ambientColor;
     glm::vec4 cameraPosition;
+    glm::vec4 rayleighScattering;   // rgb = scattering, a = scale height
+    glm::vec4 mieScattering;        // rgb = scattering, a = scale height
+    glm::vec4 absorptionExtinction; // rgb = absorption, a = scale height
+    glm::vec4 atmosphereParams;     // x = planet radius, y = atmosphere height, z = mie g, w = max view distance
     float timeOfDay;
     float shadowMapSize;
     float padding[2];
@@ -93,10 +97,14 @@ private:
     bool createDescriptorSetLayout();
     bool createGraphicsPipeline();
     bool createSkyPipeline();
+    bool createAtmosphereResources();
+    bool createAtmosphereComputePipelines();
     bool createUniformBuffers();
     bool createDescriptorPool();
     bool createDescriptorSets();
     bool createDepthResources();
+
+    void recordAtmosphereComputes(VkCommandBuffer cmd, uint32_t frameIndex);
 
     // Shadow mapping
     bool createShadowResources();
@@ -131,6 +139,27 @@ private:
     VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
     VkPipeline graphicsPipeline = VK_NULL_HANDLE;
     VkPipeline skyPipeline = VK_NULL_HANDLE;
+
+    // Atmospheric LUTs and compute pipelines
+    struct AtmosphereLUT {
+        VkImage image = VK_NULL_HANDLE;
+        VmaAllocation allocation = VK_NULL_HANDLE;
+        VkImageView view = VK_NULL_HANDLE;
+    };
+
+    AtmosphereLUT transmittanceLUT;
+    AtmosphereLUT multiScatterLUT;
+    AtmosphereLUT skyViewLUT;
+    AtmosphereLUT aerialPerspectiveLUT;
+
+    VkSampler atmosphereSampler = VK_NULL_HANDLE;
+    VkDescriptorSetLayout atmosphereComputeSetLayout = VK_NULL_HANDLE;
+    VkPipelineLayout atmosphereComputePipelineLayout = VK_NULL_HANDLE;
+    VkPipeline transmittancePipeline = VK_NULL_HANDLE;
+    VkPipeline multiScatterPipeline = VK_NULL_HANDLE;
+    VkPipeline skyViewPipeline = VK_NULL_HANDLE;
+    VkPipeline aerialPerspectivePipeline = VK_NULL_HANDLE;
+    std::vector<VkDescriptorSet> atmosphereComputeDescriptorSets;
 
     GrassSystem grassSystem;
     WindSystem windSystem;

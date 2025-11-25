@@ -1,0 +1,41 @@
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(binding = 0) uniform UniformBufferObject {
+    mat4 model;
+    mat4 view;
+    mat4 proj;
+    mat4 lightSpaceMatrix;
+    vec4 sunDirection;
+    vec4 moonDirection;
+    vec4 sunColor;
+    vec4 ambientColor;
+    vec4 cameraPosition;
+    vec4 rayleighScattering;
+    vec4 mieScattering;
+    vec4 absorptionExtinction;
+    vec4 atmosphereParams;
+    float timeOfDay;
+    float shadowMapSize;
+} ubo;
+
+layout(binding = 1, rgba16f) uniform readonly image2D transmittanceImage;
+layout(binding = 2, rgba16f) uniform writeonly image2D multiScatterImage;
+
+void main() {
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(multiScatterImage);
+    if (pixel.x >= size.x || pixel.y >= size.y) return;
+
+    ivec2 transSize = imageSize(transmittanceImage);
+    vec2 sampleUV = (vec2(pixel) + 0.5) / vec2(size);
+    vec2 transUV = vec2(sampleUV.x, clamp(sampleUV.y, 0.0, 1.0));
+    ivec2 transCoord = ivec2(clamp(transUV * (vec2(transSize) - 1.0), vec2(0.0), vec2(transSize - 1)));
+    vec3 transmittance = imageLoad(transmittanceImage, transCoord).rgb;
+
+    vec3 scatterStrength = (vec3(1.0) - transmittance) * 0.5;
+    vec3 multiScatter = scatterStrength * (ubo.sunColor.rgb * 0.5 + ubo.ambientColor.rgb * 0.5);
+
+    imageStore(multiScatterImage, pixel, vec4(multiScatter, 1.0));
+}

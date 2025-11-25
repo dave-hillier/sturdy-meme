@@ -12,6 +12,10 @@ layout(binding = 0) uniform UniformBufferObject {
     vec4 sunColor;
     vec4 ambientColor;
     vec4 cameraPosition;
+    vec4 rayleighScattering;
+    vec4 mieScattering;
+    vec4 absorptionExtinction;
+    vec4 atmosphereParams;
     float timeOfDay;
     float shadowMapSize;
 } ubo;
@@ -19,6 +23,10 @@ layout(binding = 0) uniform UniformBufferObject {
 layout(binding = 1) uniform sampler2D texSampler;
 layout(binding = 2) uniform sampler2DShadow shadowMap;
 layout(binding = 3) uniform sampler2D normalMap;
+layout(binding = 4) uniform sampler2D transmittanceLUT;
+layout(binding = 5) uniform sampler2D multiScatterLUT;
+layout(binding = 6) uniform sampler2D skyViewLUT;
+layout(binding = 7) uniform sampler2D aerialPerspectiveLUT;
 
 layout(push_constant) uniform PushConstants {
     mat4 model;
@@ -144,6 +152,22 @@ vec3 calculatePBR(vec3 N, vec3 V, vec3 L, vec3 lightColor, float lightIntensity,
     return (diffuse + specular) * lightColor * lightIntensity * NoL * shadow;
 }
 
+vec3 sampleTransmittance(vec3 viewDir, float heightT) {
+    float horizon = clamp(dot(viewDir, vec3(0.0, 1.0, 0.0)) * 0.5 + 0.5, 0.0, 1.0);
+    return texture(transmittanceLUT, vec2(horizon, heightT)).rgb;
+}
+
+vec4 sampleAerialPerspective(vec3 worldPos, vec3 viewDir) {
+    float distanceToCamera = length(worldPos - ubo.cameraPosition.xyz);
+    float maxDistance = max(ubo.atmosphereParams.w, 0.001);
+    float heightT = clamp(ubo.cameraPosition.y / ubo.atmosphereParams.y, 0.0, 1.0);
+    vec2 uv = vec2(clamp(distanceToCamera / maxDistance, 0.0, 1.0), heightT);
+
+    vec4 aerial = texture(aerialPerspectiveLUT, uv);
+    vec3 scattered = aerial.rgb * ubo.sunColor.rgb;
+    return vec4(scattered, aerial.a);
+}
+
 void main() {
     vec3 geometricN = normalize(fragNormal);
     vec3 V = normalize(ubo.cameraPosition.xyz - fragWorldPos);
@@ -153,6 +177,8 @@ void main() {
 
     vec4 texColor = texture(texSampler, fragTexCoord);
     vec3 albedo = texColor.rgb;
+
+    float heightT = clamp(fragWorldPos.y / ubo.atmosphereParams.y, 0.0, 1.0);
 
     // Calculate shadow for sun
     vec3 sunL = normalize(ubo.sunDirection.xyz);
@@ -167,6 +193,10 @@ void main() {
     float moonIntensity = ubo.moonDirection.w;
     vec3 moonLight = calculatePBR(N, V, moonL, vec3(0.3, 0.35, 0.5), moonIntensity, albedo, 1.0);
 
+    vec3 directTransmittance = sampleTransmittance(-V, heightT);
+    sunLight *= directTransmittance;
+    moonLight *= directTransmittance;
+
     // Ambient lighting
     // For dielectrics: diffuse ambient from all directions
     // For metals: specular ambient (environment reflection approximation)
@@ -176,13 +206,18 @@ void main() {
     // Rougher metals get more ambient, smoother metals rely more on direct specular
     float envReflection = mix(0.3, 1.0, material.roughness);
     vec3 ambientSpecular = ubo.ambientColor.rgb * F0 * material.metallic * envReflection;
+    vec3 horizonBounce = texture(multiScatterLUT, vec2(clamp(dot(V, sunL) * 0.5 + 0.5, 0.0, 1.0), heightT)).rgb;
     vec3 ambient = ambientDiffuse + ambientSpecular;
+    ambient += horizonBounce * 0.25;
 
     vec3 finalColor = ambient + sunLight + moonLight;
 
     // Add emissive glow
     vec3 emissive = albedo * material.emissiveIntensity;
     finalColor += emissive;
+
+    vec4 aerial = sampleAerialPerspective(fragWorldPos, V);
+    finalColor = finalColor * aerial.a + aerial.rgb;
 
     outColor = vec4(finalColor, texColor.a);
 }

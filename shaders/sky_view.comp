@@ -1,0 +1,60 @@
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(binding = 0) uniform UniformBufferObject {
+    mat4 model;
+    mat4 view;
+    mat4 proj;
+    mat4 lightSpaceMatrix;
+    vec4 sunDirection;
+    vec4 moonDirection;
+    vec4 sunColor;
+    vec4 ambientColor;
+    vec4 cameraPosition;
+    vec4 rayleighScattering;
+    vec4 mieScattering;
+    vec4 absorptionExtinction;
+    vec4 atmosphereParams;
+    float timeOfDay;
+    float shadowMapSize;
+} ubo;
+
+layout(binding = 1, rgba16f) uniform readonly image2D transmittanceImage;
+layout(binding = 2, rgba16f) uniform readonly image2D multiScatterImage;
+layout(binding = 3, rgba16f) uniform writeonly image2D skyViewImage;
+
+const float PI = 3.14159265359;
+
+vec2 directionToUV(vec3 dir) {
+    dir = normalize(dir);
+    float u = atan(dir.z, dir.x) / (2.0 * PI) + 0.5;
+    float v = clamp(dir.y * 0.5 + 0.5, 0.0, 1.0);
+    return vec2(u, v);
+}
+
+void main() {
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(skyViewImage);
+    if (pixel.x >= size.x || pixel.y >= size.y) return;
+
+    vec2 uv = (vec2(pixel) + 0.5) / vec2(size);
+    float azimuth = (uv.x - 0.5) * 2.0 * PI;
+    float elevation = clamp(uv.y * PI - PI * 0.5, -PI * 0.5, PI * 0.5);
+    vec3 dir = normalize(vec3(cos(elevation) * cos(azimuth), sin(elevation), cos(elevation) * sin(azimuth)));
+
+    ivec2 transSize = imageSize(transmittanceImage);
+    vec2 transUV = vec2(uv.y, clamp((dir.y * 0.5 + 0.5), 0.0, 1.0));
+    ivec2 transCoord = ivec2(clamp(transUV * (vec2(transSize) - 1.0), vec2(0.0), vec2(transSize - 1)));
+    vec3 transmittance = imageLoad(transmittanceImage, transCoord).rgb;
+
+    ivec2 multiSize = imageSize(multiScatterImage);
+    vec2 multiUV = vec2(clamp(dot(dir, normalize(ubo.sunDirection.xyz)) * 0.5 + 0.5, 0.0, 1.0), uv.y);
+    ivec2 multiCoord = ivec2(clamp(multiUV * (vec2(multiSize) - 1.0), vec2(0.0), vec2(multiSize - 1)));
+    vec3 multiScatter = imageLoad(multiScatterImage, multiCoord).rgb;
+
+    vec3 sky = mix(ubo.ambientColor.rgb, ubo.sunColor.rgb, clamp(ubo.sunDirection.y * 0.5 + 0.5, 0.0, 1.0));
+    vec3 skyColor = sky * transmittance + multiScatter;
+
+    imageStore(skyViewImage, pixel, vec4(skyColor, 1.0));
+}

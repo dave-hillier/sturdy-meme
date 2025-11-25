@@ -1,0 +1,59 @@
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(binding = 0) uniform UniformBufferObject {
+    mat4 model;
+    mat4 view;
+    mat4 proj;
+    mat4 lightSpaceMatrix;
+    vec4 sunDirection;
+    vec4 moonDirection;
+    vec4 sunColor;
+    vec4 ambientColor;
+    vec4 cameraPosition;
+    vec4 rayleighScattering;
+    vec4 mieScattering;
+    vec4 absorptionExtinction;
+    vec4 atmosphereParams;
+    float timeOfDay;
+    float shadowMapSize;
+} ubo;
+
+layout(binding = 1, rgba16f) uniform readonly image2D transmittanceImage;
+layout(binding = 2, rgba16f) uniform readonly image2D multiScatterImage;
+layout(binding = 4, rgba16f) uniform writeonly image2D aerialImage;
+
+float densityFalloff(float height, float scaleHeight) {
+    return exp(-height / max(scaleHeight, 0.001));
+}
+
+void main() {
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(aerialImage);
+    if (pixel.x >= size.x || pixel.y >= size.y) return;
+
+    vec2 uv = (vec2(pixel) + 0.5) / vec2(size);
+    float maxDistance = max(ubo.atmosphereParams.w, 0.001);
+    float viewDistance = uv.x * maxDistance;
+    float viewHeight = uv.y * ubo.atmosphereParams.y;
+
+    vec3 opticalDepth = ubo.rayleighScattering.rgb * densityFalloff(viewHeight, ubo.rayleighScattering.w);
+    opticalDepth += ubo.mieScattering.rgb * densityFalloff(viewHeight, ubo.mieScattering.w);
+    opticalDepth += ubo.absorptionExtinction.rgb * densityFalloff(viewHeight, ubo.absorptionExtinction.w);
+
+    vec3 transmittance = exp(-opticalDepth * (1.0 + viewDistance * 0.01));
+
+    ivec2 transSize = imageSize(transmittanceImage);
+    ivec2 transCoord = ivec2(clamp(vec2(0.5, uv.y) * (vec2(transSize) - 1.0), vec2(0.0), vec2(transSize - 1)));
+    vec3 baseTrans = imageLoad(transmittanceImage, transCoord).rgb;
+    transmittance = mix(transmittance, baseTrans, 0.5);
+
+    ivec2 multiSize = imageSize(multiScatterImage);
+    ivec2 multiCoord = ivec2(clamp(vec2(uv.x, uv.y) * (vec2(multiSize) - 1.0), vec2(0.0), vec2(multiSize - 1)));
+    vec3 multi = imageLoad(multiScatterImage, multiCoord).rgb;
+
+    vec3 aerial = (vec3(1.0) - transmittance) * (ubo.sunColor.rgb * 0.35) + multi * 0.5;
+    float visibility = clamp(transmittance.r, 0.0, 1.0);
+    imageStore(aerialImage, pixel, vec4(aerial, visibility));
+}

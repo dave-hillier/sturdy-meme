@@ -70,6 +70,10 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow.frag.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.frag.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/multi_scatter.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky_view.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/aerial_perspective.comp.spv
 )
 
 set_source_files_properties(${RESOURCE_FILES} PROPERTIES
@@ -170,6 +174,30 @@ if(SHADER_COMPILE_CMD)
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.frag
         COMMENT "Compiling postprocess fragment shader"
     )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance.comp.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance.comp
+        COMMENT "Compiling transmittance compute shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/multi_scatter.comp.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/multi_scatter.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/multi_scatter.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/multi_scatter.comp
+        COMMENT "Compiling multi-scatter compute shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky_view.comp.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky_view.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky_view.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky_view.comp
+        COMMENT "Compiling sky view compute shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/aerial_perspective.comp.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/aerial_perspective.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/aerial_perspective.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/aerial_perspective.comp
+        COMMENT "Compiling aerial perspective compute shader"
+    )
     add_custom_target(shaders DEPENDS
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.frag.spv
@@ -184,6 +212,10 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow.frag.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.frag.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/multi_scatter.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky_view.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/aerial_perspective.comp.spv
     )
     add_dependencies(${PROJECT_NAME} shaders)
 else()

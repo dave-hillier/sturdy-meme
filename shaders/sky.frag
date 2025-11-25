@@ -10,39 +10,43 @@ layout(binding = 0) uniform UniformBufferObject {
     vec4 sunColor;
     vec4 ambientColor;
     vec4 cameraPosition;
+    vec4 rayleighScattering;
+    vec4 mieScattering;
+    vec4 absorptionExtinction;
+    vec4 atmosphereParams;
     float timeOfDay;
     float shadowMapSize;
 } ubo;
 
+layout(binding = 4) uniform sampler2D transmittanceLUT;
+layout(binding = 5) uniform sampler2D multiScatterLUT;
+layout(binding = 6) uniform sampler2D skyViewLUT;
+
 layout(location = 0) in vec3 rayDir;
 layout(location = 0) out vec4 outColor;
+
+const float PI = 3.14159265359;
 
 float hash(vec3 p) {
     return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453);
 }
 
+vec2 directionToUV(vec3 dir) {
+    dir = normalize(dir);
+    float u = atan(dir.z, dir.x) / (2.0 * PI) + 0.5;
+    float v = clamp(dir.y * 0.5 + 0.5, 0.0, 1.0);
+    return vec2(u, v);
+}
+
 vec3 getSkyColor(vec3 dir) {
-    float y = max(dir.y, 0.0);
+    vec2 uv = directionToUV(dir);
+    vec3 baseSky = texture(skyViewLUT, uv).rgb;
 
-    vec3 dayHorizon = vec3(0.7, 0.85, 1.0);
-    vec3 dayZenith = vec3(0.25, 0.55, 0.95);
+    float sunCos = clamp(dot(normalize(dir), normalize(ubo.sunDirection.xyz)) * 0.5 + 0.5, 0.0, 1.0);
+    vec3 multi = texture(multiScatterLUT, vec2(sunCos, uv.y)).rgb;
+    vec3 transmit = texture(transmittanceLUT, vec2(uv.y, clamp(ubo.cameraPosition.y / ubo.atmosphereParams.y, 0.0, 1.0))).rgb;
 
-    vec3 nightHorizon = vec3(0.05, 0.05, 0.12);
-    vec3 nightZenith = vec3(0.01, 0.01, 0.03);
-
-    vec3 sunsetHorizon = vec3(1.0, 0.5, 0.2);
-
-    float dayFactor = smoothstep(-0.1, 0.3, ubo.sunDirection.y);
-    float sunsetFactor = smoothstep(0.0, 0.2, ubo.sunDirection.y) *
-                         (1.0 - smoothstep(0.2, 0.5, ubo.sunDirection.y));
-
-    vec3 horizon = mix(nightHorizon, dayHorizon, dayFactor);
-    horizon = mix(horizon, sunsetHorizon, sunsetFactor * 0.8);
-
-    vec3 zenith = mix(nightZenith, dayZenith, dayFactor);
-
-    float gradientT = pow(y, 0.4);
-    return mix(horizon, zenith, gradientT);
+    return baseSky + multi * ubo.sunColor.rgb * transmit;
 }
 
 float starField(vec3 dir) {
