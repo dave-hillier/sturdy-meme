@@ -18,6 +18,7 @@ layout(binding = 0) uniform UniformBufferObject {
     float timeOfDay;
     float shadowMapSize;
     float debugCascades;
+    float padding;
 } ubo;
 
 layout(location = 0) out vec3 rayDir;
