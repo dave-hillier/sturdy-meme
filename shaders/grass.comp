@@ -99,16 +99,17 @@ void main() {
     }
 
     // Generate grass positions in a grid pattern
-    // Grid: 100x100 = 10000 potential blades
-    // With 0.15m spacing = 15m x 15m area = ~44 blades per square meter
-    uint gridSize = 100;
+    // Grid: 1000x1000 = 1,000,000 potential blades (matching Ghost of Tsushima target)
+    // With 0.2m spacing = 200m x 200m area = 25 blades per square meter
+    // Culling systems (distance, frustum, LOD) will reduce to ~100k rendered
+    uint gridSize = 1000;
     if (idx >= gridSize * gridSize) return;
 
     uint gridX = idx % gridSize;
     uint gridZ = idx / gridSize;
 
     // Map to world space (centered on origin)
-    float spacing = 0.15;  // Dense grass
+    float spacing = 0.2;  // 200m x 200m coverage
     float x = (float(gridX) - float(gridSize) / 2.0) * spacing;
     float z = (float(gridZ) - float(gridSize) / 2.0) * spacing;
 
