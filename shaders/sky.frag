@@ -163,11 +163,12 @@ float hgPhase(float cosTheta, float g) {
     return (1.0 - g2) / (4.0 * PI * pow(denom, 1.5));
 }
 
-// Cloud phase function with depth-dependent scattering (Phase 4.2.4)
+// Cloud phase function with depth-dependent scattering (Ghost of Tsushima technique)
 float cloudPhase(float cosTheta, float transmittanceToLight, float segmentTransmittance) {
     float opticalDepthFactor = transmittanceToLight * segmentTransmittance;
 
     // Lerp between back-scatter (dense) and forward-scatter (wispy)
+    // Forward scattering dominates in wispy/thin areas, back-scatter in dense areas
     float gForward = 0.8;
     float gBack = -0.15;
     float g = mix(gBack, gForward, opticalDepthFactor);
@@ -175,8 +176,9 @@ float cloudPhase(float cosTheta, float transmittanceToLight, float segmentTransm
     float phase = hgPhase(cosTheta, abs(g));
 
     // Boost back-scatter for multi-scattering approximation
+    // Value of 2.16 from Ghost of Tsushima - simulating dense Mie layer with 0.9 albedo
     if (g < 0.0) {
-        phase *= 2.0;
+        phase *= 2.16;
     }
 
     return phase;
@@ -254,10 +256,24 @@ CloudResult marchClouds(vec3 origin, vec3 dir) {
     float cosTheta = dot(dir, sunDir);
     vec3 sunLight = ubo.sunColor.rgb * ubo.sunDirection.w;
 
-    // Ambient sky light for cloud shading (boosted for visibility)
+    // Approximate sky irradiance at cloud altitude (Ghost of Tsushima approach)
+    // In a full implementation, this would come from precomputed irradiance LUTs
+    // Here we approximate based on sun position and Rayleigh scattering color
     float sunAltitude = ubo.sunDirection.y;
-    vec3 ambientLight = mix(vec3(0.4, 0.5, 0.6), vec3(0.15, 0.2, 0.25),
-                            1.0 - smoothstep(-0.1, 0.3, sunAltitude)) * 0.5;
+
+    // Sky color varies with sun altitude - bluer overhead, warmer at horizon
+    vec3 zenithColor = vec3(0.3, 0.5, 0.9);   // Blue zenith
+    vec3 horizonColor = vec3(0.7, 0.6, 0.5);  // Warm horizon
+    float sunInfluence = smoothstep(-0.1, 0.5, sunAltitude);
+
+    // Base ambient from sky hemisphere
+    vec3 skyAmbient = mix(horizonColor * 0.3, zenithColor * 0.5, sunInfluence);
+
+    // Add ground bounce contribution (important for cloud undersides)
+    vec3 groundBounce = vec3(0.15, 0.12, 0.08) * max(sunAltitude, 0.0);
+
+    // Combined ambient light - brighter overall to match proper irradiance
+    vec3 ambientLight = (skyAmbient + groundBounce) * 0.8;
 
     for (int i = 0; i < CLOUD_MARCH_STEPS; i++) {
         if (result.transmittance < 0.01) break;
@@ -484,17 +500,23 @@ vec3 renderAtmosphere(vec3 dir) {
     // Render volumetric clouds (Phase 4.2)
     CloudResult clouds = marchClouds(origin, normDir);
 
-    // Composite clouds over sky
-    // Apply softer atmospheric influence on clouds - don't fully darken horizon clouds
-    // Use sqrt of transmittance for gentler falloff, and clamp minimum
-    vec3 cloudTransmittance = sqrt(max(result.transmittance, vec3(0.3)));
-    vec3 cloudColor = clouds.scattering * cloudTransmittance;
+    // Composite clouds over sky (Ghost of Tsushima technique)
+    // Clouds are lit by sky irradiance at their altitude - NOT darkened by atmospheric transmittance
+    // The atmospheric transmittance only affects what's BEHIND the clouds (the sky), not the clouds themselves
+    // Atmospheric haze is then added between camera and clouds
 
-    // Add atmospheric scattering to clouds (haze effect without darkening)
-    vec3 horizonHaze = (1.0 - cloudTransmittance) * sunLight * 0.15;
-    cloudColor += horizonHaze * (1.0 - clouds.transmittance);
+    // Cloud color is their own scattering (already lit during ray march)
+    vec3 cloudColor = clouds.scattering;
 
-    sky = sky * clouds.transmittance + cloudColor;
+    // The sky behind clouds IS attenuated by atmosphere
+    vec3 skyBehindClouds = sky * clouds.transmittance;
+
+    // Add atmospheric in-scattering between camera and clouds (haze in front of clouds)
+    // This uses the inscatter we already computed, scaled by how much cloud is visible
+    vec3 hazeInFront = result.inscatter * sunLight * (1.0 - clouds.transmittance) * 0.3;
+
+    // Final composite: sky behind clouds + cloud color + haze in front
+    sky = skyBehindClouds + cloudColor + hazeInFront;
 
     // Sun and moon discs (rendered behind clouds)
     // Only show sun/moon if clouds don't fully occlude them
