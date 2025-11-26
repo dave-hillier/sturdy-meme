@@ -12,6 +12,7 @@
 #include "GrassSystem.h"
 #include "CelestialCalculator.h"
 #include "WindSystem.h"
+#include "WeatherSystem.h"
 #include "PostProcessSystem.h"
 #include "FroxelSystem.h"
 #include "SceneBuilder.h"
@@ -162,6 +163,7 @@ private:
 
     GrassSystem grassSystem;
     WindSystem windSystem;
+    WeatherSystem weatherSystem;
     PostProcessSystem postProcessSystem;
     FroxelSystem froxelSystem;
 

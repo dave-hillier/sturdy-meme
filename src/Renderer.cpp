@@ -162,6 +162,21 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     }
     grassSystem.updateDescriptorSets(device, uniformBuffers, shadowImageView, shadowSampler, windBuffers, lightBuffers);
 
+    // Initialize weather particle system (rain/snow)
+    WeatherSystem::InitInfo weatherInfo{};
+    weatherInfo.device = device;
+    weatherInfo.allocator = allocator;
+    weatherInfo.renderPass = postProcessSystem.getHDRRenderPass();
+    weatherInfo.descriptorPool = descriptorPool;
+    weatherInfo.extent = swapchainExtent;
+    weatherInfo.shaderPath = resourcePath + "/shaders";
+    weatherInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+
+    if (!weatherSystem.init(weatherInfo)) return false;
+
+    // Update weather system descriptor sets with wind buffers
+    weatherSystem.updateDescriptorSets(device, uniformBuffers, windBuffers, depthImageView, shadowSampler);
+
     // Initialize froxel volumetric fog system (Phase 4.3)
     FroxelSystem::InitInfo froxelInfo{};
     froxelInfo.device = device;
@@ -216,6 +231,7 @@ void Renderer::shutdown() {
 
         grassSystem.destroy(device, allocator);
         windSystem.destroy(device, allocator);
+        weatherSystem.destroy(device, allocator);
         froxelSystem.destroy(device, allocator);
         postProcessSystem.destroy(device, allocator);
 
@@ -1340,17 +1356,17 @@ void Renderer::updateLightBuffer(uint32_t currentImage, const glm::vec3& cameraP
 bool Renderer::createDescriptorPool() {
     std::array<VkDescriptorPoolSize, 3> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 8);  // +2 for post-process, +2 for grass double-buffer
+    poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 12);  // +2 for post-process, +2 for grass, +4 for weather
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 20);  // diffuse + shadow + normal + emissive + HDR sampler + grass double-buffer
+    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 24);  // diffuse + shadow + normal + emissive + HDR + grass + weather
     poolSizes[2].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    poolSizes[2].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 18);  // +6 for grass double-buffer, +6 for light buffers (3 descriptor sets * 2 frames)
+    poolSizes[2].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 28);  // +6 grass, +6 light, +10 weather (5 compute + 2 graphics × 2 sets)
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
     poolInfo.pPoolSizes = poolSizes.data();
-    poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 14);  // +6 for grass double-buffer (2 sets * 3 descriptor set types)
+    poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 18);  // +6 grass, +4 weather
 
     if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS) {
         SDL_Log("Failed to create descriptor pool");
@@ -1587,6 +1603,7 @@ void Renderer::render(const Camera& camera) {
 
     glm::mat4 viewProj = camera.getProjectionMatrix() * camera.getViewMatrix();
     grassSystem.updateUniforms(currentFrame, camera.getPosition(), viewProj);
+    weatherSystem.updateUniforms(currentFrame, camera.getPosition(), viewProj, deltaTime, grassTime);
 
     // Begin command buffer recording
     vkResetCommandBuffer(commandBuffers[currentFrame], 0);
@@ -1599,6 +1616,9 @@ void Renderer::render(const Camera& camera) {
 
     // Grass compute pass
     grassSystem.recordResetAndCompute(cmd, currentFrame, grassTime);
+
+    // Weather particle compute pass
+    weatherSystem.recordResetAndCompute(cmd, currentFrame, grassTime, deltaTime);
 
     // Shadow pass (skip when sun is below horizon)
     if (lastSunIntensity > 0.001f) {
@@ -1664,6 +1684,7 @@ void Renderer::render(const Camera& camera) {
     // - Next frame's compute writes to what was the render set
     // - Next frame's render reads from what was the compute set (now contains fresh data)
     grassSystem.advanceBufferSet();
+    weatherSystem.advanceBufferSet();
 
     currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 }
@@ -1859,6 +1880,9 @@ void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float gra
 
     // Draw grass
     grassSystem.recordDraw(cmd, frameIndex, grassTime);
+
+    // Draw weather particles (rain/snow) - after opaque geometry
+    weatherSystem.recordDraw(cmd, frameIndex, grassTime);
 
     vkCmdEndRenderPass(cmd);
 }

@@ -25,6 +25,7 @@ set(SOURCES
     src/GrassSystem.cpp
     src/CelestialCalculator.cpp
     src/WindSystem.cpp
+    src/WeatherSystem.cpp
     src/PostProcessSystem.cpp
     src/FroxelSystem.cpp
     src/Player.cpp
@@ -77,6 +78,9 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.frag.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_update.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_integrate.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.vert.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.frag.spv
 )
 
 set_source_files_properties(${RESOURCE_FILES} PROPERTIES
@@ -189,6 +193,24 @@ if(SHADER_COMPILE_CMD)
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_integrate.comp
         COMMENT "Compiling froxel integration compute shader"
     )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.comp.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.comp
+        COMMENT "Compiling weather compute shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.vert.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.vert.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.vert
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.vert
+        COMMENT "Compiling weather vertex shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.frag.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.frag.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.frag
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.frag
+        COMMENT "Compiling weather fragment shader"
+    )
     add_custom_target(shaders DEPENDS
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.frag.spv
@@ -205,6 +227,9 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.frag.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_update.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_integrate.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.vert.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.frag.spv
     )
     add_dependencies(${PROJECT_NAME} shaders)
 else()
