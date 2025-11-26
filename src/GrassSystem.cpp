@@ -42,10 +42,8 @@ void GrassSystem::destroy(VkDevice dev, VmaAllocator alloc) {
 
     // Destroy double-buffered instance and indirect buffers
     for (uint32_t set = 0; set < BUFFER_SET_COUNT; set++) {
-        for (size_t i = 0; i < framesInFlight; i++) {
-            vmaDestroyBuffer(alloc, instanceBuffers[set][i], instanceAllocations[set][i]);
-            vmaDestroyBuffer(alloc, indirectBuffers[set][i], indirectAllocations[set][i]);
-        }
+        vmaDestroyBuffer(alloc, instanceBuffers[set], instanceAllocations[set]);
+        vmaDestroyBuffer(alloc, indirectBuffers[set], indirectAllocations[set]);
     }
 
     // Destroy uniform buffers (not double-buffered)
@@ -55,15 +53,7 @@ void GrassSystem::destroy(VkDevice dev, VmaAllocator alloc) {
 }
 
 bool GrassSystem::createBuffers() {
-    // Double-buffered instance and indirect buffers (A/B sets)
-    for (uint32_t set = 0; set < BUFFER_SET_COUNT; set++) {
-        instanceBuffers[set].resize(framesInFlight);
-        instanceAllocations[set].resize(framesInFlight);
-        indirectBuffers[set].resize(framesInFlight);
-        indirectAllocations[set].resize(framesInFlight);
-    }
-
-    // Uniform buffers (not double-buffered, culling params are same for both sets)
+    // Uniform buffers (per-frame, for culling params that change each frame)
     uniformBuffers.resize(framesInFlight);
     uniformAllocations.resize(framesInFlight);
     uniformMappedPtrs.resize(framesInFlight);
@@ -75,36 +65,35 @@ bool GrassSystem::createBuffers() {
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
 
-    // Create double-buffered instance and indirect buffers
+    // Create double-buffered instance and indirect buffers (one per set, not per frame)
+    // The set alternation provides isolation: compute writes to A while graphics reads from B
     for (uint32_t set = 0; set < BUFFER_SET_COUNT; set++) {
-        for (size_t i = 0; i < framesInFlight; i++) {
-            // Instance buffer - written by compute, read by vertex shader
-            VkBufferCreateInfo instanceBufferInfo{};
-            instanceBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-            instanceBufferInfo.size = instanceBufferSize;
-            instanceBufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-            instanceBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        // Instance buffer - written by compute, read by vertex shader
+        VkBufferCreateInfo instanceBufferInfo{};
+        instanceBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        instanceBufferInfo.size = instanceBufferSize;
+        instanceBufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+        instanceBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-            if (vmaCreateBuffer(allocator, &instanceBufferInfo, &allocInfo,
-                               &instanceBuffers[set][i], &instanceAllocations[set][i],
-                               nullptr) != VK_SUCCESS) {
-                SDL_Log("Failed to create grass instance buffer (set %u, frame %zu)", set, i);
-                return false;
-            }
+        if (vmaCreateBuffer(allocator, &instanceBufferInfo, &allocInfo,
+                           &instanceBuffers[set], &instanceAllocations[set],
+                           nullptr) != VK_SUCCESS) {
+            SDL_Log("Failed to create grass instance buffer (set %u)", set);
+            return false;
+        }
 
-            // Indirect buffer - written by compute, read by vkCmdDrawIndirect, cleared by vkCmdFillBuffer
-            VkBufferCreateInfo indirectBufferInfo{};
-            indirectBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-            indirectBufferInfo.size = indirectBufferSize;
-            indirectBufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-            indirectBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        // Indirect buffer - written by compute, read by vkCmdDrawIndirect, cleared by vkCmdFillBuffer
+        VkBufferCreateInfo indirectBufferInfo{};
+        indirectBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        indirectBufferInfo.size = indirectBufferSize;
+        indirectBufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        indirectBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-            if (vmaCreateBuffer(allocator, &indirectBufferInfo, &allocInfo,
-                               &indirectBuffers[set][i], &indirectAllocations[set][i],
-                               nullptr) != VK_SUCCESS) {
-                SDL_Log("Failed to create grass indirect buffer (set %u, frame %zu)", set, i);
-                return false;
-            }
+        if (vmaCreateBuffer(allocator, &indirectBufferInfo, &allocInfo,
+                           &indirectBuffers[set], &indirectAllocations[set],
+                           nullptr) != VK_SUCCESS) {
+            SDL_Log("Failed to create grass indirect buffer (set %u)", set);
+            return false;
         }
     }
 
@@ -575,195 +564,191 @@ bool GrassSystem::createShadowPipeline() {
 }
 
 bool GrassSystem::createDescriptorSets() {
-    std::vector<VkDescriptorSetLayout> computeLayouts(framesInFlight, computeDescriptorSetLayout);
-    std::vector<VkDescriptorSetLayout> graphicsLayouts(framesInFlight, graphicsDescriptorSetLayout);
-    std::vector<VkDescriptorSetLayout> shadowLayouts(framesInFlight, shadowDescriptorSetLayout);
-
     // Allocate and update descriptor sets for both buffer sets (A and B)
+    // We only need one descriptor set per buffer set for compute (no per-frame needed)
+    // The uniform buffer binding will use dynamic offset or be updated each frame
     for (uint32_t set = 0; set < BUFFER_SET_COUNT; set++) {
-        // Allocate compute descriptor sets for this buffer set
+        // Allocate compute descriptor set for this buffer set
         VkDescriptorSetAllocateInfo computeAllocInfo{};
         computeAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
         computeAllocInfo.descriptorPool = descriptorPool;
-        computeAllocInfo.descriptorSetCount = static_cast<uint32_t>(framesInFlight);
-        computeAllocInfo.pSetLayouts = computeLayouts.data();
+        computeAllocInfo.descriptorSetCount = 1;
+        computeAllocInfo.pSetLayouts = &computeDescriptorSetLayout;
 
-        computeDescriptorSets[set].resize(framesInFlight);
-        if (vkAllocateDescriptorSets(device, &computeAllocInfo, computeDescriptorSets[set].data()) != VK_SUCCESS) {
-            SDL_Log("Failed to allocate grass compute descriptor sets (set %u)", set);
+        if (vkAllocateDescriptorSets(device, &computeAllocInfo, &computeDescriptorSets[set]) != VK_SUCCESS) {
+            SDL_Log("Failed to allocate grass compute descriptor set (set %u)", set);
             return false;
         }
 
-        // Allocate graphics descriptor sets for this buffer set
+        // Allocate graphics descriptor set for this buffer set
         VkDescriptorSetAllocateInfo graphicsAllocInfo{};
         graphicsAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
         graphicsAllocInfo.descriptorPool = descriptorPool;
-        graphicsAllocInfo.descriptorSetCount = static_cast<uint32_t>(framesInFlight);
-        graphicsAllocInfo.pSetLayouts = graphicsLayouts.data();
+        graphicsAllocInfo.descriptorSetCount = 1;
+        graphicsAllocInfo.pSetLayouts = &graphicsDescriptorSetLayout;
 
-        graphicsDescriptorSets[set].resize(framesInFlight);
-        if (vkAllocateDescriptorSets(device, &graphicsAllocInfo, graphicsDescriptorSets[set].data()) != VK_SUCCESS) {
-            SDL_Log("Failed to allocate grass graphics descriptor sets (set %u)", set);
+        if (vkAllocateDescriptorSets(device, &graphicsAllocInfo, &graphicsDescriptorSets[set]) != VK_SUCCESS) {
+            SDL_Log("Failed to allocate grass graphics descriptor set (set %u)", set);
             return false;
         }
 
-        // Allocate shadow descriptor sets for this buffer set
+        // Allocate shadow descriptor set for this buffer set
         VkDescriptorSetAllocateInfo shadowAllocInfo{};
         shadowAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
         shadowAllocInfo.descriptorPool = descriptorPool;
-        shadowAllocInfo.descriptorSetCount = static_cast<uint32_t>(framesInFlight);
-        shadowAllocInfo.pSetLayouts = shadowLayouts.data();
+        shadowAllocInfo.descriptorSetCount = 1;
+        shadowAllocInfo.pSetLayouts = &shadowDescriptorSetLayout;
 
-        shadowDescriptorSetsDB[set].resize(framesInFlight);
-        if (vkAllocateDescriptorSets(device, &shadowAllocInfo, shadowDescriptorSetsDB[set].data()) != VK_SUCCESS) {
-            SDL_Log("Failed to allocate grass shadow descriptor sets (set %u)", set);
+        if (vkAllocateDescriptorSets(device, &shadowAllocInfo, &shadowDescriptorSetsDB[set]) != VK_SUCCESS) {
+            SDL_Log("Failed to allocate grass shadow descriptor set (set %u)", set);
             return false;
         }
 
-        // Update compute descriptor sets (instance, indirect, and uniform buffers)
-        for (size_t i = 0; i < framesInFlight; i++) {
-            VkDescriptorBufferInfo instanceBufferInfo{};
-            instanceBufferInfo.buffer = instanceBuffers[set][i];
-            instanceBufferInfo.offset = 0;
-            instanceBufferInfo.range = sizeof(GrassInstance) * MAX_INSTANCES;
+        // Update compute descriptor sets (instance and indirect buffers only)
+        // Uniform buffer will be updated in updateDescriptorSets with the right frame's buffer
+        VkDescriptorBufferInfo instanceBufferInfo{};
+        instanceBufferInfo.buffer = instanceBuffers[set];
+        instanceBufferInfo.offset = 0;
+        instanceBufferInfo.range = sizeof(GrassInstance) * MAX_INSTANCES;
 
-            VkDescriptorBufferInfo indirectBufferInfo{};
-            indirectBufferInfo.buffer = indirectBuffers[set][i];
-            indirectBufferInfo.offset = 0;
-            indirectBufferInfo.range = sizeof(VkDrawIndirectCommand);
+        VkDescriptorBufferInfo indirectBufferInfo{};
+        indirectBufferInfo.buffer = indirectBuffers[set];
+        indirectBufferInfo.offset = 0;
+        indirectBufferInfo.range = sizeof(VkDrawIndirectCommand);
 
-            VkDescriptorBufferInfo uniformBufferInfo{};
-            uniformBufferInfo.buffer = uniformBuffers[i];  // Uniform buffer is not double-buffered
-            uniformBufferInfo.offset = 0;
-            uniformBufferInfo.range = sizeof(GrassUniforms);
+        // Use first frame's uniform buffer initially; will be updated per-frame
+        VkDescriptorBufferInfo uniformBufferInfo{};
+        uniformBufferInfo.buffer = uniformBuffers[0];
+        uniformBufferInfo.offset = 0;
+        uniformBufferInfo.range = sizeof(GrassUniforms);
 
-            std::array<VkWriteDescriptorSet, 3> computeWrites{};
+        std::array<VkWriteDescriptorSet, 3> computeWrites{};
 
-            computeWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            computeWrites[0].dstSet = computeDescriptorSets[set][i];
-            computeWrites[0].dstBinding = 0;
-            computeWrites[0].dstArrayElement = 0;
-            computeWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-            computeWrites[0].descriptorCount = 1;
-            computeWrites[0].pBufferInfo = &instanceBufferInfo;
+        computeWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        computeWrites[0].dstSet = computeDescriptorSets[set];
+        computeWrites[0].dstBinding = 0;
+        computeWrites[0].dstArrayElement = 0;
+        computeWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        computeWrites[0].descriptorCount = 1;
+        computeWrites[0].pBufferInfo = &instanceBufferInfo;
 
-            computeWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            computeWrites[1].dstSet = computeDescriptorSets[set][i];
-            computeWrites[1].dstBinding = 1;
-            computeWrites[1].dstArrayElement = 0;
-            computeWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-            computeWrites[1].descriptorCount = 1;
-            computeWrites[1].pBufferInfo = &indirectBufferInfo;
+        computeWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        computeWrites[1].dstSet = computeDescriptorSets[set];
+        computeWrites[1].dstBinding = 1;
+        computeWrites[1].dstArrayElement = 0;
+        computeWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        computeWrites[1].descriptorCount = 1;
+        computeWrites[1].pBufferInfo = &indirectBufferInfo;
 
-            computeWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            computeWrites[2].dstSet = computeDescriptorSets[set][i];
-            computeWrites[2].dstBinding = 2;
-            computeWrites[2].dstArrayElement = 0;
-            computeWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            computeWrites[2].descriptorCount = 1;
-            computeWrites[2].pBufferInfo = &uniformBufferInfo;
+        computeWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        computeWrites[2].dstSet = computeDescriptorSets[set];
+        computeWrites[2].dstBinding = 2;
+        computeWrites[2].dstArrayElement = 0;
+        computeWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        computeWrites[2].descriptorCount = 1;
+        computeWrites[2].pBufferInfo = &uniformBufferInfo;
 
-            vkUpdateDescriptorSets(device, static_cast<uint32_t>(computeWrites.size()),
-                                   computeWrites.data(), 0, nullptr);
-        }
+        vkUpdateDescriptorSets(device, static_cast<uint32_t>(computeWrites.size()),
+                               computeWrites.data(), 0, nullptr);
     }
 
     return true;
 }
 
-void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>& uniformBuffers,
+void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>& rendererUniformBuffers,
                                         VkImageView shadowMapView, VkSampler shadowSampler,
                                         const std::vector<VkBuffer>& windBuffers) {
     // Update graphics and shadow descriptor sets for both buffer sets (A and B)
+    // Note: We use the first frame's UBO/wind buffer since they're updated each frame anyway
+    // For proper per-frame handling, we'd need dynamic offsets or per-frame descriptor sets
     for (uint32_t set = 0; set < BUFFER_SET_COUNT; set++) {
-        for (size_t i = 0; i < framesInFlight; i++) {
-            VkDescriptorBufferInfo uboInfo{};
-            uboInfo.buffer = uniformBuffers[i];
-            uboInfo.offset = 0;
-            uboInfo.range = 160;  // sizeof(UniformBufferObject) - matches Renderer's UBO
+        // Use first frame's uniform buffers (they're updated before each draw anyway)
+        VkDescriptorBufferInfo uboInfo{};
+        uboInfo.buffer = rendererUniformBuffers[0];
+        uboInfo.offset = 0;
+        uboInfo.range = 160;  // sizeof(UniformBufferObject) - matches Renderer's UBO
 
-            VkDescriptorBufferInfo instanceBufferInfo{};
-            instanceBufferInfo.buffer = instanceBuffers[set][i];
-            instanceBufferInfo.offset = 0;
-            instanceBufferInfo.range = sizeof(GrassInstance) * MAX_INSTANCES;
+        VkDescriptorBufferInfo instanceBufferInfo{};
+        instanceBufferInfo.buffer = instanceBuffers[set];
+        instanceBufferInfo.offset = 0;
+        instanceBufferInfo.range = sizeof(GrassInstance) * MAX_INSTANCES;
 
-            VkDescriptorImageInfo shadowImageInfo{};
-            shadowImageInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
-            shadowImageInfo.imageView = shadowMapView;
-            shadowImageInfo.sampler = shadowSampler;
+        VkDescriptorImageInfo shadowImageInfo{};
+        shadowImageInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+        shadowImageInfo.imageView = shadowMapView;
+        shadowImageInfo.sampler = shadowSampler;
 
-            VkDescriptorBufferInfo windBufferInfo{};
-            windBufferInfo.buffer = windBuffers[i];
-            windBufferInfo.offset = 0;
-            windBufferInfo.range = 32;  // sizeof(WindUniforms) - 2 vec4s
+        VkDescriptorBufferInfo windBufferInfo{};
+        windBufferInfo.buffer = windBuffers[0];
+        windBufferInfo.offset = 0;
+        windBufferInfo.range = 32;  // sizeof(WindUniforms) - 2 vec4s
 
-            std::array<VkWriteDescriptorSet, 4> graphicsWrites{};
+        std::array<VkWriteDescriptorSet, 4> graphicsWrites{};
 
-            graphicsWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            graphicsWrites[0].dstSet = graphicsDescriptorSets[set][i];
-            graphicsWrites[0].dstBinding = 0;
-            graphicsWrites[0].dstArrayElement = 0;
-            graphicsWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            graphicsWrites[0].descriptorCount = 1;
-            graphicsWrites[0].pBufferInfo = &uboInfo;
+        graphicsWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        graphicsWrites[0].dstSet = graphicsDescriptorSets[set];
+        graphicsWrites[0].dstBinding = 0;
+        graphicsWrites[0].dstArrayElement = 0;
+        graphicsWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        graphicsWrites[0].descriptorCount = 1;
+        graphicsWrites[0].pBufferInfo = &uboInfo;
 
-            graphicsWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            graphicsWrites[1].dstSet = graphicsDescriptorSets[set][i];
-            graphicsWrites[1].dstBinding = 1;
-            graphicsWrites[1].dstArrayElement = 0;
-            graphicsWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-            graphicsWrites[1].descriptorCount = 1;
-            graphicsWrites[1].pBufferInfo = &instanceBufferInfo;
+        graphicsWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        graphicsWrites[1].dstSet = graphicsDescriptorSets[set];
+        graphicsWrites[1].dstBinding = 1;
+        graphicsWrites[1].dstArrayElement = 0;
+        graphicsWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        graphicsWrites[1].descriptorCount = 1;
+        graphicsWrites[1].pBufferInfo = &instanceBufferInfo;
 
-            graphicsWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            graphicsWrites[2].dstSet = graphicsDescriptorSets[set][i];
-            graphicsWrites[2].dstBinding = 2;
-            graphicsWrites[2].dstArrayElement = 0;
-            graphicsWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            graphicsWrites[2].descriptorCount = 1;
-            graphicsWrites[2].pImageInfo = &shadowImageInfo;
+        graphicsWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        graphicsWrites[2].dstSet = graphicsDescriptorSets[set];
+        graphicsWrites[2].dstBinding = 2;
+        graphicsWrites[2].dstArrayElement = 0;
+        graphicsWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        graphicsWrites[2].descriptorCount = 1;
+        graphicsWrites[2].pImageInfo = &shadowImageInfo;
 
-            graphicsWrites[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            graphicsWrites[3].dstSet = graphicsDescriptorSets[set][i];
-            graphicsWrites[3].dstBinding = 3;
-            graphicsWrites[3].dstArrayElement = 0;
-            graphicsWrites[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            graphicsWrites[3].descriptorCount = 1;
-            graphicsWrites[3].pBufferInfo = &windBufferInfo;
+        graphicsWrites[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        graphicsWrites[3].dstSet = graphicsDescriptorSets[set];
+        graphicsWrites[3].dstBinding = 3;
+        graphicsWrites[3].dstArrayElement = 0;
+        graphicsWrites[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        graphicsWrites[3].descriptorCount = 1;
+        graphicsWrites[3].pBufferInfo = &windBufferInfo;
 
-            vkUpdateDescriptorSets(dev, static_cast<uint32_t>(graphicsWrites.size()),
-                                   graphicsWrites.data(), 0, nullptr);
+        vkUpdateDescriptorSets(dev, static_cast<uint32_t>(graphicsWrites.size()),
+                               graphicsWrites.data(), 0, nullptr);
 
-            // Update shadow descriptor sets (UBO + instance buffer + wind buffer)
-            std::array<VkWriteDescriptorSet, 3> shadowWrites{};
+        // Update shadow descriptor sets (UBO + instance buffer + wind buffer)
+        std::array<VkWriteDescriptorSet, 3> shadowWrites{};
 
-            shadowWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            shadowWrites[0].dstSet = shadowDescriptorSetsDB[set][i];
-            shadowWrites[0].dstBinding = 0;
-            shadowWrites[0].dstArrayElement = 0;
-            shadowWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            shadowWrites[0].descriptorCount = 1;
-            shadowWrites[0].pBufferInfo = &uboInfo;
+        shadowWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        shadowWrites[0].dstSet = shadowDescriptorSetsDB[set];
+        shadowWrites[0].dstBinding = 0;
+        shadowWrites[0].dstArrayElement = 0;
+        shadowWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        shadowWrites[0].descriptorCount = 1;
+        shadowWrites[0].pBufferInfo = &uboInfo;
 
-            shadowWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            shadowWrites[1].dstSet = shadowDescriptorSetsDB[set][i];
-            shadowWrites[1].dstBinding = 1;
-            shadowWrites[1].dstArrayElement = 0;
-            shadowWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-            shadowWrites[1].descriptorCount = 1;
-            shadowWrites[1].pBufferInfo = &instanceBufferInfo;
+        shadowWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        shadowWrites[1].dstSet = shadowDescriptorSetsDB[set];
+        shadowWrites[1].dstBinding = 1;
+        shadowWrites[1].dstArrayElement = 0;
+        shadowWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        shadowWrites[1].descriptorCount = 1;
+        shadowWrites[1].pBufferInfo = &instanceBufferInfo;
 
-            shadowWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            shadowWrites[2].dstSet = shadowDescriptorSetsDB[set][i];
-            shadowWrites[2].dstBinding = 2;
-            shadowWrites[2].dstArrayElement = 0;
-            shadowWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            shadowWrites[2].descriptorCount = 1;
-            shadowWrites[2].pBufferInfo = &windBufferInfo;
+        shadowWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        shadowWrites[2].dstSet = shadowDescriptorSetsDB[set];
+        shadowWrites[2].dstBinding = 2;
+        shadowWrites[2].dstArrayElement = 0;
+        shadowWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        shadowWrites[2].descriptorCount = 1;
+        shadowWrites[2].pBufferInfo = &windBufferInfo;
 
-            vkUpdateDescriptorSets(dev, static_cast<uint32_t>(shadowWrites.size()),
-                                   shadowWrites.data(), 0, nullptr);
-        }
+        vkUpdateDescriptorSets(dev, static_cast<uint32_t>(shadowWrites.size()),
+                               shadowWrites.data(), 0, nullptr);
     }
 }
 
@@ -813,8 +798,26 @@ void GrassSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex
     // Double-buffer: compute writes to computeBufferSet
     uint32_t writeSet = computeBufferSet;
 
+    // Update compute descriptor set to use this frame's uniform buffer
+    // (uniforms contain per-frame camera/frustum data)
+    VkDescriptorBufferInfo uniformBufferInfo{};
+    uniformBufferInfo.buffer = uniformBuffers[frameIndex];
+    uniformBufferInfo.offset = 0;
+    uniformBufferInfo.range = sizeof(GrassUniforms);
+
+    VkWriteDescriptorSet uniformWrite{};
+    uniformWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    uniformWrite.dstSet = computeDescriptorSets[writeSet];
+    uniformWrite.dstBinding = 2;
+    uniformWrite.dstArrayElement = 0;
+    uniformWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    uniformWrite.descriptorCount = 1;
+    uniformWrite.pBufferInfo = &uniformBufferInfo;
+
+    vkUpdateDescriptorSets(device, 1, &uniformWrite, 0, nullptr);
+
     // Reset indirect buffer before compute dispatch to prevent accumulation
-    vkCmdFillBuffer(cmd, indirectBuffers[writeSet][frameIndex], 0, sizeof(VkDrawIndirectCommand), 0);
+    vkCmdFillBuffer(cmd, indirectBuffers[writeSet], 0, sizeof(VkDrawIndirectCommand), 0);
 
     // Barrier to ensure fill completes before compute shader runs
     VkMemoryBarrier fillBarrier{};
@@ -830,7 +833,7 @@ void GrassSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
                             computePipelineLayout, 0, 1,
-                            &computeDescriptorSets[writeSet][frameIndex], 0, nullptr);
+                            &computeDescriptorSets[writeSet], 0, nullptr);
 
     GrassPushConstants grassPush{};
     grassPush.time = time;
@@ -856,7 +859,7 @@ void GrassSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex
 
 void GrassSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time) {
     // Double-buffer: graphics reads from renderBufferSet
-    // On first few frames before double-buffering kicks in, read from compute set
+    // On first frame before double-buffering kicks in, read from compute set (same as renderBufferSet)
     uint32_t readSet = renderBufferSet;
 
     // Bootstrap: if we haven't diverged yet, read from what we just computed
@@ -867,14 +870,14 @@ void GrassSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float tim
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                             graphicsPipelineLayout, 0, 1,
-                            &graphicsDescriptorSets[readSet][frameIndex], 0, nullptr);
+                            &graphicsDescriptorSets[readSet], 0, nullptr);
 
     GrassPushConstants grassPush{};
     grassPush.time = time;
     vkCmdPushConstants(cmd, graphicsPipelineLayout,
                        VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GrassPushConstants), &grassPush);
 
-    vkCmdDrawIndirect(cmd, indirectBuffers[readSet][frameIndex], 0, 1, sizeof(VkDrawIndirectCommand));
+    vkCmdDrawIndirect(cmd, indirectBuffers[readSet], 0, 1, sizeof(VkDrawIndirectCommand));
 }
 
 void GrassSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time, uint32_t cascadeIndex) {
@@ -889,7 +892,7 @@ void GrassSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex, flo
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                             shadowPipelineLayout, 0, 1,
-                            &shadowDescriptorSetsDB[readSet][frameIndex], 0, nullptr);
+                            &shadowDescriptorSetsDB[readSet], 0, nullptr);
 
     GrassPushConstants grassPush{};
     grassPush.time = time;
@@ -897,7 +900,7 @@ void GrassSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex, flo
     vkCmdPushConstants(cmd, shadowPipelineLayout,
                        VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GrassPushConstants), &grassPush);
 
-    vkCmdDrawIndirect(cmd, indirectBuffers[readSet][frameIndex], 0, 1, sizeof(VkDrawIndirectCommand));
+    vkCmdDrawIndirect(cmd, indirectBuffers[readSet], 0, 1, sizeof(VkDrawIndirectCommand));
 }
 
 void GrassSystem::advanceBufferSet() {
