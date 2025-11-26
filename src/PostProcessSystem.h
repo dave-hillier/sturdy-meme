@@ -151,8 +151,8 @@ private:
 
     // God ray parameters (Phase 4.4)
     glm::vec2 sunScreenPos = glm::vec2(0.5f, 0.5f);  // Default to center
-    float godRayIntensity = 0.5f;  // God ray strength
-    float godRayDecay = 0.96f;     // Falloff per sample
+    float godRayIntensity = 0.25f;  // God ray strength (subtle)
+    float godRayDecay = 0.92f;      // Falloff per sample (faster falloff = less extreme)
 
     // Froxel volumetrics (Phase 4.3)
     VkImageView froxelVolumeView = VK_NULL_HANDLE;
