@@ -85,6 +85,9 @@ public:
     void toggleCascadeDebug() { showCascadeDebug = !showCascadeDebug; }
     bool isShowingCascadeDebug() const { return showCascadeDebug; }
 
+    // Player rendering
+    void updatePlayerTransform(const glm::mat4& transform);
+
     // Celestial/astronomical settings
     void setLocation(const GeographicLocation& location) { celestialCalculator.setLocation(location); }
     const GeographicLocation& getLocation() const { return celestialCalculator.getLocation(); }
@@ -191,6 +194,7 @@ private:
     Mesh groundMesh;
     Mesh cubeMesh;
     Mesh sphereMesh;
+    Mesh capsuleMesh;
     Texture crateTexture;
     Texture crateNormalMap;
     Texture groundTexture;
@@ -200,6 +204,7 @@ private:
 
     std::vector<SceneObject> sceneObjects;
     std::vector<VkDescriptorSet> metalDescriptorSets;
+    size_t playerObjectIndex = 0;  // Index of the player in sceneObjects
 
     uint32_t currentFrame = 0;
     static constexpr int MAX_FRAMES_IN_FLIGHT = 2;

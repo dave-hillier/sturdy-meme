@@ -10,6 +10,10 @@ Camera::Camera()
     , aspectRatio(16.0f / 9.0f)
     , nearPlane(0.1f)
     , farPlane(100.0f)
+    , thirdPersonTarget(0.0f, 1.5f, 0.0f)
+    , thirdPersonDistance(5.0f)
+    , thirdPersonMinDistance(2.0f)
+    , thirdPersonMaxDistance(15.0f)
 {
     updateVectors();
 }
@@ -57,6 +61,47 @@ void Camera::updateVectors() {
     newFront.y = sin(glm::radians(pitch));
     newFront.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
     front = glm::normalize(newFront);
+    right = glm::normalize(glm::cross(front, worldUp));
+    up = glm::normalize(glm::cross(right, front));
+}
+
+void Camera::setThirdPersonTarget(const glm::vec3& target) {
+    thirdPersonTarget = target;
+}
+
+void Camera::orbitYaw(float delta) {
+    yaw += delta;
+    updateVectors();
+}
+
+void Camera::orbitPitch(float delta) {
+    pitch += delta;
+    // Clamp pitch to avoid flipping (more restricted for third-person)
+    pitch = std::clamp(pitch, -60.0f, 60.0f);
+    updateVectors();
+}
+
+void Camera::adjustDistance(float delta) {
+    thirdPersonDistance = std::clamp(thirdPersonDistance + delta, thirdPersonMinDistance, thirdPersonMaxDistance);
+}
+
+void Camera::setDistance(float dist) {
+    thirdPersonDistance = std::clamp(dist, thirdPersonMinDistance, thirdPersonMaxDistance);
+}
+
+void Camera::updateThirdPerson() {
+    // Calculate camera position based on spherical coordinates around target
+    // Camera is behind and above the target, looking at the target
+    float horizontalDist = thirdPersonDistance * cos(glm::radians(pitch));
+    float verticalOffset = thirdPersonDistance * sin(glm::radians(pitch));
+
+    // Position camera behind the target based on yaw
+    position.x = thirdPersonTarget.x - horizontalDist * cos(glm::radians(yaw));
+    position.y = thirdPersonTarget.y + verticalOffset;
+    position.z = thirdPersonTarget.z - horizontalDist * sin(glm::radians(yaw));
+
+    // Update front vector to look at target
+    front = glm::normalize(thirdPersonTarget - position);
     right = glm::normalize(glm::cross(front, worldUp));
     up = glm::normalize(glm::cross(right, front));
 }

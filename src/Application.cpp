@@ -60,19 +60,28 @@ void Application::run() {
         handleInput(deltaTime);
         handleGamepadInput(deltaTime);
 
+        // Update camera and player based on mode
+        if (thirdPersonMode) {
+            camera.setThirdPersonTarget(player.getFocusPoint());
+            camera.updateThirdPerson();
+            renderer.updatePlayerTransform(player.getModelMatrix());
+        }
+
         camera.setAspectRatio(static_cast<float>(renderer.getWidth()) / static_cast<float>(renderer.getHeight()));
 
         renderer.render(camera);
 
-        // Update window title with FPS and time of day
+        // Update window title with FPS, time of day, and camera mode
         if (deltaTime > 0.0f) {
             smoothedFps = smoothedFps * 0.95f + (1.0f / deltaTime) * 0.05f;
         }
         float timeOfDay = renderer.getTimeOfDay();
         int hours = static_cast<int>(timeOfDay * 24.0f);
         int minutes = static_cast<int>((timeOfDay * 24.0f - hours) * 60.0f);
-        char title[64];
-        snprintf(title, sizeof(title), "Vulkan Game - FPS: %.0f | Time: %02d:%02d", smoothedFps, hours, minutes);
+        char title[96];
+        const char* modeStr = thirdPersonMode ? "3rd Person" : "Free Cam";
+        snprintf(title, sizeof(title), "Vulkan Game - FPS: %.0f | Time: %02d:%02d | %s (Tab to toggle)",
+                 smoothedFps, hours, minutes, modeStr);
         SDL_SetWindowTitle(window, title);
     }
 
@@ -128,6 +137,14 @@ void Application::processEvents() {
                     renderer.toggleCascadeDebug();
                     SDL_Log("Cascade debug visualization: %s", renderer.isShowingCascadeDebug() ? "ON" : "OFF");
                 }
+                else if (event.key.scancode == SDL_SCANCODE_TAB) {
+                    thirdPersonMode = !thirdPersonMode;
+                    SDL_Log("Camera mode: %s", thirdPersonMode ? "Third Person" : "Free Camera");
+                    if (thirdPersonMode) {
+                        // Initialize third-person camera with reasonable angle
+                        camera.orbitPitch(15.0f);  // Look down slightly
+                    }
+                }
                 break;
             case SDL_EVENT_GAMEPAD_ADDED:
                 if (!gamepad) {
@@ -159,6 +176,14 @@ void Application::processEvents() {
                 else if (event.gbutton.button == SDL_GAMEPAD_BUTTON_BACK) {
                     running = false;
                 }
+                else if (event.gbutton.button == SDL_GAMEPAD_BUTTON_LEFT_STICK) {
+                    // Left stick click toggles camera mode
+                    thirdPersonMode = !thirdPersonMode;
+                    SDL_Log("Camera mode: %s", thirdPersonMode ? "Third Person" : "Free Camera");
+                    if (thirdPersonMode) {
+                        camera.orbitPitch(15.0f);
+                    }
+                }
                 break;
             default:
                 break;
@@ -169,6 +194,14 @@ void Application::processEvents() {
 void Application::handleInput(float deltaTime) {
     const bool* keyState = SDL_GetKeyboardState(nullptr);
 
+    if (thirdPersonMode) {
+        handleThirdPersonInput(deltaTime, keyState);
+    } else {
+        handleFreeCameraInput(deltaTime, keyState);
+    }
+}
+
+void Application::handleFreeCameraInput(float deltaTime, const bool* keyState) {
     // WASD for movement (standard FPS controls)
     if (keyState[SDL_SCANCODE_W]) {
         camera.moveForward(moveSpeed * deltaTime);
@@ -206,9 +239,98 @@ void Application::handleInput(float deltaTime) {
     }
 }
 
+void Application::handleThirdPersonInput(float deltaTime, const bool* keyState) {
+    // WASD moves the player in the direction the camera is facing
+    // Get camera yaw for movement direction
+    float cameraYaw = camera.getYaw();
+
+    // Calculate movement direction based on camera facing
+    float moveX = 0.0f;
+    float moveZ = 0.0f;
+
+    if (keyState[SDL_SCANCODE_W]) {
+        moveX += cos(glm::radians(cameraYaw));
+        moveZ += sin(glm::radians(cameraYaw));
+    }
+    if (keyState[SDL_SCANCODE_S]) {
+        moveX -= cos(glm::radians(cameraYaw));
+        moveZ -= sin(glm::radians(cameraYaw));
+    }
+    if (keyState[SDL_SCANCODE_A]) {
+        moveX += cos(glm::radians(cameraYaw - 90.0f));
+        moveZ += sin(glm::radians(cameraYaw - 90.0f));
+    }
+    if (keyState[SDL_SCANCODE_D]) {
+        moveX += cos(glm::radians(cameraYaw + 90.0f));
+        moveZ += sin(glm::radians(cameraYaw + 90.0f));
+    }
+
+    // Apply movement if any input
+    if (moveX != 0.0f || moveZ != 0.0f) {
+        glm::vec3 moveDir = glm::normalize(glm::vec3(moveX, 0.0f, moveZ));
+        glm::vec3 newPos = player.getPosition() + moveDir * moveSpeed * deltaTime;
+        player.setPosition(newPos);
+
+        // Rotate player to face movement direction
+        float targetYaw = glm::degrees(atan2(moveDir.z, moveDir.x));
+        player.rotate(0.0f);  // Reset
+        player.setPosition(newPos);
+        // Calculate target yaw and smoothly rotate player
+        float newYaw = glm::degrees(atan2(moveDir.x, moveDir.z));
+        // Set player yaw directly for now (could smooth this later)
+        float currentYaw = player.getYaw();
+        float yawDiff = newYaw - currentYaw;
+        // Normalize yaw difference
+        while (yawDiff > 180.0f) yawDiff -= 360.0f;
+        while (yawDiff < -180.0f) yawDiff += 360.0f;
+        player.rotate(yawDiff * 10.0f * deltaTime);  // Smooth rotation
+    }
+
+    // Arrow keys orbit the camera around the player
+    if (keyState[SDL_SCANCODE_UP]) {
+        camera.orbitPitch(rotateSpeed * deltaTime);
+    }
+    if (keyState[SDL_SCANCODE_DOWN]) {
+        camera.orbitPitch(-rotateSpeed * deltaTime);
+    }
+    if (keyState[SDL_SCANCODE_LEFT]) {
+        camera.orbitYaw(-rotateSpeed * deltaTime);
+    }
+    if (keyState[SDL_SCANCODE_RIGHT]) {
+        camera.orbitYaw(rotateSpeed * deltaTime);
+    }
+
+    // Q/E to zoom in/out
+    if (keyState[SDL_SCANCODE_Q]) {
+        camera.adjustDistance(-moveSpeed * deltaTime);
+    }
+    if (keyState[SDL_SCANCODE_E]) {
+        camera.adjustDistance(moveSpeed * deltaTime);
+    }
+}
+
 void Application::handleGamepadInput(float deltaTime) {
     if (!gamepad) return;
 
+    if (thirdPersonMode) {
+        handleThirdPersonGamepadInput(deltaTime);
+    } else {
+        handleFreeCameraGamepadInput(deltaTime);
+    }
+
+    // Triggers for time scale (works in both modes)
+    float leftTrigger = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) / 32767.0f;
+    float rightTrigger = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) / 32767.0f;
+
+    if (rightTrigger > 0.5f) {
+        renderer.setTimeScale(renderer.getTimeScale() * (1.0f + deltaTime));
+    }
+    if (leftTrigger > 0.5f) {
+        renderer.setTimeScale(renderer.getTimeScale() * (1.0f - deltaTime * 0.5f));
+    }
+}
+
+void Application::handleFreeCameraGamepadInput(float deltaTime) {
     // Left stick for movement
     float leftX = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX) / 32767.0f;
     float leftY = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTY) / 32767.0f;
@@ -240,16 +362,54 @@ void Application::handleGamepadInput(float deltaTime) {
     if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)) {
         camera.moveUp(-moveSpeed * deltaTime);
     }
+}
 
-    // Triggers for time scale
-    float leftTrigger = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) / 32767.0f;
-    float rightTrigger = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) / 32767.0f;
+void Application::handleThirdPersonGamepadInput(float deltaTime) {
+    // Left stick moves player relative to camera facing
+    float leftX = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX) / 32767.0f;
+    float leftY = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTY) / 32767.0f;
 
-    if (rightTrigger > 0.5f) {
-        renderer.setTimeScale(renderer.getTimeScale() * (1.0f + deltaTime));
+    // Apply deadzone
+    if (std::abs(leftX) < stickDeadzone) leftX = 0.0f;
+    if (std::abs(leftY) < stickDeadzone) leftY = 0.0f;
+
+    if (leftX != 0.0f || leftY != 0.0f) {
+        float cameraYaw = camera.getYaw();
+
+        // Calculate movement direction based on camera facing
+        float moveX = -leftY * cos(glm::radians(cameraYaw)) + leftX * cos(glm::radians(cameraYaw + 90.0f));
+        float moveZ = -leftY * sin(glm::radians(cameraYaw)) + leftX * sin(glm::radians(cameraYaw + 90.0f));
+
+        glm::vec3 moveDir = glm::normalize(glm::vec3(moveX, 0.0f, moveZ));
+        glm::vec3 newPos = player.getPosition() + moveDir * moveSpeed * deltaTime;
+        player.setPosition(newPos);
+
+        // Rotate player to face movement direction
+        float newYaw = glm::degrees(atan2(moveDir.x, moveDir.z));
+        float currentYaw = player.getYaw();
+        float yawDiff = newYaw - currentYaw;
+        while (yawDiff > 180.0f) yawDiff -= 360.0f;
+        while (yawDiff < -180.0f) yawDiff += 360.0f;
+        player.rotate(yawDiff * 10.0f * deltaTime);
     }
-    if (leftTrigger > 0.5f) {
-        renderer.setTimeScale(renderer.getTimeScale() * (1.0f - deltaTime * 0.5f));
+
+    // Right stick orbits camera around player
+    float rightX = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTX) / 32767.0f;
+    float rightY = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTY) / 32767.0f;
+
+    // Apply deadzone
+    if (std::abs(rightX) < stickDeadzone) rightX = 0.0f;
+    if (std::abs(rightY) < stickDeadzone) rightY = 0.0f;
+
+    camera.orbitYaw(rightX * gamepadLookSpeed * deltaTime);
+    camera.orbitPitch(-rightY * gamepadLookSpeed * deltaTime);
+
+    // Bumpers for camera distance
+    if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER)) {
+        camera.adjustDistance(moveSpeed * deltaTime);
+    }
+    if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)) {
+        camera.adjustDistance(-moveSpeed * deltaTime);
     }
 }
 

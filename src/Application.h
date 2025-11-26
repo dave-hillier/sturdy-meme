@@ -4,6 +4,7 @@
 #include <string>
 #include "Renderer.h"
 #include "Camera.h"
+#include "Player.h"
 
 class Application {
 public:
@@ -17,6 +18,10 @@ public:
 private:
     void handleInput(float deltaTime);
     void handleGamepadInput(float deltaTime);
+    void handleFreeCameraInput(float deltaTime, const bool* keyState);
+    void handleThirdPersonInput(float deltaTime, const bool* keyState);
+    void handleFreeCameraGamepadInput(float deltaTime);
+    void handleThirdPersonGamepadInput(float deltaTime);
     void processEvents();
     void openGamepad(SDL_JoystickID id);
     void closeGamepad();
@@ -26,8 +31,10 @@ private:
     SDL_Gamepad* gamepad = nullptr;
     Renderer renderer;
     Camera camera;
+    Player player;
 
     bool running = false;
+    bool thirdPersonMode = false;  // Toggle between free camera and third-person
     float moveSpeed = 3.0f;
     float rotateSpeed = 60.0f;
 

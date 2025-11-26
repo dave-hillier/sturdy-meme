@@ -102,6 +102,107 @@ void Mesh::createSphere(float radius, int stacks, int slices) {
     }
 }
 
+void Mesh::createCapsule(float radius, float height, int stacks, int slices) {
+    vertices.clear();
+    indices.clear();
+
+    // A capsule is a cylinder with two hemisphere caps
+    // Height is the total height including caps
+    // The cylindrical part height is: height - 2*radius
+    float cylinderHeight = height - 2.0f * radius;
+    if (cylinderHeight < 0.0f) cylinderHeight = 0.0f;
+
+    int halfStacks = stacks / 2;
+
+    // Generate top hemisphere (from top pole down to equator)
+    for (int i = 0; i <= halfStacks; ++i) {
+        float phi = (float)M_PI * 0.5f * (1.0f - (float)i / (float)halfStacks);  // PI/2 to 0
+        float y = radius * std::sin(phi) + cylinderHeight * 0.5f;
+        float ringRadius = radius * std::cos(phi);
+
+        for (int j = 0; j <= slices; ++j) {
+            float theta = 2.0f * (float)M_PI * (float)j / (float)slices;
+            float x = ringRadius * std::cos(theta);
+            float z = ringRadius * std::sin(theta);
+
+            glm::vec3 pos(x, y, z);
+            // Normal for hemisphere points outward from sphere center (offset for top hemisphere)
+            glm::vec3 sphereCenter(0.0f, cylinderHeight * 0.5f, 0.0f);
+            glm::vec3 normal = glm::normalize(pos - sphereCenter);
+            glm::vec2 uv((float)j / (float)slices, (float)i / (float)(stacks + 1));
+
+            glm::vec3 tangentDir(-std::sin(theta), 0.0f, std::cos(theta));
+            glm::vec4 tangent(glm::normalize(tangentDir), 1.0f);
+
+            vertices.push_back({pos, normal, uv, tangent});
+        }
+    }
+
+    // Generate cylinder body
+    int cylinderRings = stacks / 2;
+    for (int i = 0; i <= cylinderRings; ++i) {
+        float t = (float)i / (float)cylinderRings;
+        float y = cylinderHeight * 0.5f - t * cylinderHeight;
+
+        for (int j = 0; j <= slices; ++j) {
+            float theta = 2.0f * (float)M_PI * (float)j / (float)slices;
+            float x = radius * std::cos(theta);
+            float z = radius * std::sin(theta);
+
+            glm::vec3 pos(x, y, z);
+            glm::vec3 normal = glm::normalize(glm::vec3(x, 0.0f, z));
+            glm::vec2 uv((float)j / (float)slices, (float)(halfStacks + i) / (float)(stacks + 1));
+
+            glm::vec3 tangentDir(-std::sin(theta), 0.0f, std::cos(theta));
+            glm::vec4 tangent(glm::normalize(tangentDir), 1.0f);
+
+            vertices.push_back({pos, normal, uv, tangent});
+        }
+    }
+
+    // Generate bottom hemisphere (from equator down to bottom pole)
+    for (int i = 1; i <= halfStacks; ++i) {
+        float phi = (float)M_PI * 0.5f * (float)i / (float)halfStacks;  // 0 to PI/2
+        float y = -radius * std::sin(phi) - cylinderHeight * 0.5f;
+        float ringRadius = radius * std::cos(phi);
+
+        for (int j = 0; j <= slices; ++j) {
+            float theta = 2.0f * (float)M_PI * (float)j / (float)slices;
+            float x = ringRadius * std::cos(theta);
+            float z = ringRadius * std::sin(theta);
+
+            glm::vec3 pos(x, y, z);
+            // Normal for hemisphere points outward from sphere center (offset for bottom hemisphere)
+            glm::vec3 sphereCenter(0.0f, -cylinderHeight * 0.5f, 0.0f);
+            glm::vec3 normal = glm::normalize(pos - sphereCenter);
+            glm::vec2 uv((float)j / (float)slices, (float)(halfStacks + cylinderRings + i) / (float)(stacks + 1));
+
+            glm::vec3 tangentDir(-std::sin(theta), 0.0f, std::cos(theta));
+            glm::vec4 tangent(glm::normalize(tangentDir), 1.0f);
+
+            vertices.push_back({pos, normal, uv, tangent});
+        }
+    }
+
+    // Generate indices
+    // Total rings: halfStacks + 1 (top hemi) + cylinderRings + 1 (cylinder) + halfStacks (bottom hemi)
+    int totalRings = halfStacks + 1 + cylinderRings + 1 + halfStacks;
+    for (int i = 0; i < totalRings - 1; ++i) {
+        for (int j = 0; j < slices; ++j) {
+            int first = i * (slices + 1) + j;
+            int second = first + slices + 1;
+
+            indices.push_back(first);
+            indices.push_back(first + 1);
+            indices.push_back(second);
+
+            indices.push_back(second);
+            indices.push_back(first + 1);
+            indices.push_back(second + 1);
+        }
+    }
+}
+
 void Mesh::createCube() {
     // Tangents are computed based on UV layout - tangent points in +U direction
     glm::vec4 tangentPosX( 0.0f,  0.0f, -1.0f, 1.0f);  // Front face: +U is +X, tangent is +X

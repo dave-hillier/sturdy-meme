@@ -125,6 +125,10 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     sphereMesh.createSphere(0.5f, 32, 32);
     sphereMesh.upload(allocator, device, commandPool, graphicsQueue);
 
+    // Player capsule mesh (1.8m tall, 0.3m radius)
+    capsuleMesh.createCapsule(0.3f, 1.8f, 16, 16);
+    capsuleMesh.upload(allocator, device, commandPool, graphicsQueue);
+
     std::string texturePath = resourcePath + "/textures/crates/crate1/crate1_diffuse.png";
     if (!crateTexture.load(texturePath, allocator, device, commandPool, graphicsQueue, physicalDevice)) {
         SDL_Log("Failed to load texture: %s", texturePath.c_str());
@@ -191,6 +195,11 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     glowingSphereTransform = glm::scale(glowingSphereTransform, glm::vec3(0.3f));
     sceneObjects.push_back({glowingSphereTransform, &sphereMesh, &metalTexture, 0.2f, 0.0f, 25.0f, false});
 
+    // Player capsule - centered at origin, uses metal texture for visibility
+    playerObjectIndex = sceneObjects.size();
+    glm::mat4 playerTransform = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.9f, 0.0f));
+    sceneObjects.push_back({playerTransform, &capsuleMesh, &metalTexture, 0.3f, 0.8f, 0.0f, true});
+
     if (!createDescriptorSets()) return false;
 
     // Initialize grass system using HDR render pass
@@ -246,6 +255,12 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     return true;
 }
 
+void Renderer::updatePlayerTransform(const glm::mat4& transform) {
+    if (playerObjectIndex < sceneObjects.size()) {
+        sceneObjects[playerObjectIndex].transform = transform;
+    }
+}
+
 void Renderer::shutdown() {
     if (device != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(device);
@@ -264,6 +279,7 @@ void Renderer::shutdown() {
         metalNormalMap.destroy(allocator, device);
         cubeMesh.destroy(allocator);
         sphereMesh.destroy(allocator);
+        capsuleMesh.destroy(allocator);
         groundMesh.destroy(allocator);
         sceneObjects.clear();
 
