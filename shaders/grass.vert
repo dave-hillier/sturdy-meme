@@ -112,8 +112,8 @@ float perlinNoise(float x, float y) {
     return (res + 1.0) * 0.5;
 }
 
-// Sample wind using low-frequency turbulence (absolute value of Perlin noise)
-// Creates billowy, flowing patterns with soft creases
+// Sample wind using traveling sine wave modulated by low-frequency turbulence
+// Sine wave creates visible traveling waves, turbulence adds organic amplitude variation
 float sampleWind(vec2 worldPos) {
     vec2 windDir = wind.windDirectionAndStrength.xy;
     float windStrength = wind.windDirectionAndStrength.z;
@@ -123,24 +123,26 @@ float sampleWind(vec2 worldPos) {
     float gustFreq = wind.windParams.x;
     float gustAmp = wind.windParams.y;
 
-    // Scroll position in wind direction
-    vec2 scrolledPos = worldPos - windDir * windTime * windSpeed;
+    // Primary motion: sine wave traveling in wind direction
+    // This creates the visible wave fronts moving through the grass
+    float windDist = dot(worldPos, windDir);
+    float wave = sin((windDist * noiseScale * 0.5 - windTime * windSpeed) * 0.8) * 0.5 + 0.5;
 
-    // Low-frequency turbulence: sum of |noise| at multiple octaves
-    // Using very low base frequency for broad, smooth wind waves
+    // Low-frequency turbulence for spatial amplitude variation
+    // Slowly scrolling so different areas have different wind intensity
+    vec2 scrolledPos = worldPos - windDir * windTime * windSpeed * 0.3;
     float baseFreq = noiseScale * 0.08;
-
-    // Perlin noise returns [0,1] after our normalization, remap to [-1,1] for abs()
     float n1 = perlinNoise(scrolledPos.x * baseFreq, scrolledPos.y * baseFreq) * 2.0 - 1.0;
     float n2 = perlinNoise(scrolledPos.x * baseFreq * 2.0, scrolledPos.y * baseFreq * 2.0) * 2.0 - 1.0;
-
-    // Turbulence: absolute value creates the characteristic billowy creases
     float turbulence = abs(n1) * 0.7 + abs(n2) * 0.3;
+
+    // Turbulence modulates the wave amplitude (0.5 to 1.0 range)
+    float amplitudeModulation = 0.5 + turbulence * 0.5;
 
     // Add time-varying gust
     float gust = (sin(windTime * gustFreq * 6.28318) * 0.5 + 0.5) * gustAmp;
 
-    return (turbulence + gust) * windStrength;
+    return (wave * amplitudeModulation + gust) * windStrength;
 }
 
 layout(location = 0) out vec3 fragColor;
