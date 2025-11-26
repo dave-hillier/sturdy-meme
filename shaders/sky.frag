@@ -153,14 +153,27 @@ float sampleCloudDensity(vec3 worldPos) {
     return density * CLOUD_DENSITY;
 }
 
-// Henyey-Greenstein phase function for cloud scattering
+// Henyey-Greenstein phase function (normalized to 4π solid angle)
+// Used for back-scatter approximation in clouds
 float hgPhase(float cosTheta, float g) {
     float g2 = g * g;
     float denom = 1.0 + g2 - 2.0 * g * cosTheta;
     return (1.0 - g2) / (4.0 * PI * pow(denom, 1.5));
 }
 
+// Cornette-Shanks phase function for Mie scattering (normalized to 4π solid angle)
+// More physically accurate than HG, includes polarization term (1+cos²θ)
+// Used for forward-scatter to be consistent with atmospheric Mie phase
+float cornetteShanksPhaseCloud(float cosTheta, float g) {
+    float g2 = g * g;
+    float num = 3.0 * (1.0 - g2) * (1.0 + cosTheta * cosTheta);
+    float denom = 8.0 * PI * (2.0 + g2) * pow(1.0 + g2 - 2.0 * g * cosTheta, 1.5);
+    return num / denom;
+}
+
 // Cloud phase function with depth-dependent scattering (Ghost of Tsushima technique)
+// Uses Cornette-Shanks for forward scatter (consistent with atmospheric Mie)
+// and Henyey-Greenstein for back scatter (multi-scattering approximation)
 float cloudPhase(float cosTheta, float transmittanceToLight, float segmentTransmittance) {
     float opticalDepthFactor = transmittanceToLight * segmentTransmittance;
 
@@ -170,11 +183,15 @@ float cloudPhase(float cosTheta, float transmittanceToLight, float segmentTransm
     float gBack = -0.15;
     float g = mix(gBack, gForward, opticalDepthFactor);
 
-    float phase = hgPhase(cosTheta, abs(g));
-
-    // Boost back-scatter for multi-scattering approximation
-    // Value of 2.16 from Ghost of Tsushima - simulating dense Mie layer with 0.9 albedo
-    if (g < 0.0) {
+    float phase;
+    if (g >= 0.0) {
+        // Forward scatter: use Cornette-Shanks for consistency with atmospheric Mie
+        phase = cornetteShanksPhaseCloud(cosTheta, g);
+    } else {
+        // Back scatter: use HG with multi-scattering boost
+        phase = hgPhase(cosTheta, -g);
+        // Value of 2.16 from Ghost of Tsushima - simulating dense Mie layer with 0.9 albedo
+        // This approximates multiple scattering in optically thick regions
         phase *= 2.16;
     }
 
@@ -229,115 +246,11 @@ vec2 intersectCloudLayer(vec3 origin, vec3 dir) {
     return vec2(tEnter, tExit);
 }
 
-// March through cloud layer
+// Cloud result structure for volumetric cloud rendering
 struct CloudResult {
     vec3 scattering;
     float transmittance;
 };
-
-CloudResult marchClouds(vec3 origin, vec3 dir) {
-    CloudResult result;
-    result.scattering = vec3(0.0);
-    result.transmittance = 1.0;
-
-    // Find intersection with cloud layer
-    vec2 cloudHit = intersectCloudLayer(origin, dir);
-    if (cloudHit.x >= cloudHit.y || cloudHit.y < 0.0) {
-        return result;
-    }
-
-    float tStart = cloudHit.x;
-    float tEnd = cloudHit.y;
-    float stepSize = (tEnd - tStart) / float(CLOUD_MARCH_STEPS);
-
-    // Add jitter to reduce banding (screen-space dither based on ray direction)
-    float jitter = hash(dir * 1000.0 + vec3(ubo.timeOfDay * 0.1));
-    tStart += stepSize * jitter * 0.5;
-
-    vec3 sunDir = normalize(ubo.sunDirection.xyz);
-    vec3 moonDir = normalize(ubo.moonDirection.xyz);
-    float cosThetaSun = dot(dir, sunDir);
-    float cosThetaMoon = dot(dir, moonDir);
-    vec3 sunLight = ubo.sunColor.rgb * ubo.sunDirection.w;
-    vec3 moonLight = ubo.moonColor.rgb * ubo.moonDirection.w;
-
-    // Approximate sky irradiance at cloud altitude (Ghost of Tsushima approach)
-    // In a full implementation, this would come from precomputed irradiance LUTs
-    // Here we approximate based on sun position and Rayleigh scattering color
-    float sunAltitude = ubo.sunDirection.y;
-    float moonAltitude = ubo.moonDirection.y;
-
-    // Smooth twilight transition factor - moon fades in as sun approaches/passes horizon
-    // At sun altitude 0.17 (10°): twilightFactor = 0 (no moon contribution to clouds)
-    // At sun altitude -0.1 (-6°): twilightFactor = 1 (full moon contribution)
-    float twilightFactor = smoothstep(0.17, -0.1, sunAltitude);
-    // Also require moon to be reasonably above horizon
-    float moonVisibility = smoothstep(-0.09, 0.1, moonAltitude);
-    float moonContribution = twilightFactor * moonVisibility;
-
-    // Sky color varies with sun altitude - bluer overhead, warmer at horizon
-    vec3 zenithColor = vec3(0.3, 0.5, 0.9);   // Blue zenith
-    vec3 horizonColor = vec3(0.7, 0.6, 0.5);  // Warm horizon
-    float sunInfluence = smoothstep(-0.1, 0.5, sunAltitude);
-
-    // Base ambient from sky hemisphere
-    vec3 skyAmbient = mix(horizonColor * 0.3, zenithColor * 0.5, sunInfluence);
-
-    // Add ground bounce contribution (important for cloud undersides)
-    vec3 groundBounce = vec3(0.15, 0.12, 0.08) * max(sunAltitude, 0.0);
-
-    // Gradually blend in moonlit ambient during twilight (cooler blue-grey tones)
-    if (moonContribution > 0.01) {
-        vec3 moonAmbient = ubo.moonColor.rgb * ubo.moonDirection.w * 0.15;
-        skyAmbient = mix(skyAmbient, moonAmbient, moonContribution);
-        groundBounce = mix(groundBounce, moonAmbient * 0.3, moonContribution);
-    }
-
-    // Combined ambient light - brighter overall to match proper irradiance
-    vec3 ambientLight = (skyAmbient + groundBounce) * 0.8;
-
-    for (int i = 0; i < CLOUD_MARCH_STEPS; i++) {
-        if (result.transmittance < 0.01) break;
-
-        float t = tStart + (float(i) + 0.5) * stepSize;
-        vec3 pos = origin + dir * t;
-
-        float density = sampleCloudDensity(pos);
-
-        if (density > 0.005) {  // Skip very thin cloud regions
-            // Sample transmittance to sun
-            float transmittanceToSun = sampleCloudTransmittanceToSun(pos, sunDir);
-
-            // Phase function for sun
-            float phaseSun = cloudPhase(cosThetaSun, transmittanceToSun, result.transmittance);
-
-            // In-scattering from sun
-            vec3 sunScatter = sunLight * transmittanceToSun * phaseSun;
-
-            // Add moon scattering - scales smoothly with twilight transition
-            vec3 moonScatter = vec3(0.0);
-            if (moonContribution > 0.01) {
-                float transmittanceToMoon = sampleCloudTransmittanceToSun(pos, moonDir);
-                float phaseMoon = cloudPhase(cosThetaMoon, transmittanceToMoon, result.transmittance);
-                moonScatter = moonLight * transmittanceToMoon * phaseMoon * moonContribution;
-            }
-
-            // Add ambient scattering
-            vec3 totalScatter = sunScatter + moonScatter + ambientLight;
-
-            // Beer-Lambert extinction
-            float extinction = density * stepSize * 10.0;
-            float segmentTransmittance = exp(-extinction);
-
-            // Energy-conserving integration
-            vec3 integScatter = totalScatter * (1.0 - segmentTransmittance);
-            result.scattering += result.transmittance * integScatter;
-            result.transmittance *= segmentTransmittance;
-        }
-    }
-
-    return result;
-}
 
 float rayleighPhase(float cosTheta) {
     return 3.0 / (16.0 * PI) * (1.0 + cosTheta * cosTheta);
@@ -353,6 +266,43 @@ float cornetteShanksPhase(float cosTheta, float g) {
 float ozoneDensity(float altitude) {
     float z = (altitude - OZONE_LAYER_CENTER) / OZONE_LAYER_WIDTH;
     return exp(-0.5 * z * z);
+}
+
+// Compute atmospheric transmittance from a point toward a light direction
+// This integrates optical depth through the atmosphere to properly attenuate direct light
+vec3 computeAtmosphericTransmittance(vec3 worldPos, vec3 lightDir, int samples) {
+    // Find intersection with atmosphere boundary
+    vec2 atmo = raySphereIntersect(worldPos, lightDir, ATMOSPHERE_RADIUS);
+    if (atmo.y <= 0.0) return vec3(1.0);  // No intersection
+
+    float pathLength = atmo.y;
+    float stepSize = pathLength / float(samples);
+
+    vec3 opticalDepth = vec3(0.0);
+
+    for (int i = 0; i < samples; i++) {
+        float t = (float(i) + 0.5) * stepSize;
+        vec3 samplePos = worldPos + lightDir * t;
+        float altitude = max(length(samplePos) - PLANET_RADIUS, 0.0);
+
+        // Accumulate optical depth from all scattering/absorption sources
+        float rayleighDensity = exp(-altitude / RAYLEIGH_SCALE_HEIGHT);
+        float mieDensity = exp(-altitude / MIE_SCALE_HEIGHT);
+        float ozone = ozoneDensity(altitude);
+
+        vec3 extinction = rayleighDensity * RAYLEIGH_SCATTERING_BASE +
+                          mieDensity * vec3(MIE_SCATTERING_BASE + MIE_ABSORPTION_BASE) +
+                          ozone * OZONE_ABSORPTION;
+
+        opticalDepth += extinction * stepSize;
+    }
+
+    return exp(-opticalDepth);
+}
+
+// Simplified transmittance for cloud lighting (fewer samples for performance)
+vec3 computeTransmittanceToLight(vec3 cloudPos, vec3 lightDir) {
+    return computeAtmosphericTransmittance(cloudPos, lightDir, 8);
 }
 
 // Earth shadow at sunrise/sunset (Phase 4.1.8)
@@ -489,8 +439,209 @@ ScatteringResult integrateAtmosphere(vec3 origin, vec3 dir, int sampleCount) {
     return ScatteringResult(inscatter, transmittance);
 }
 
+// Compute sky irradiance by sampling the atmosphere in multiple directions
+// This replaces hardcoded ambient colors with physically-based values
+struct SkyIrradiance {
+    vec3 skyIrradiance;     // Hemisphere irradiance from sky
+    vec3 groundIrradiance;  // Ground bounce irradiance (for cloud undersides)
+};
+
+SkyIrradiance computeSkyIrradiance(vec3 position, vec3 sunDir, vec3 moonDir,
+                                   vec3 sunLight, vec3 moonLight,
+                                   float sunAltitude, float moonContribution) {
+    SkyIrradiance result;
+    result.skyIrradiance = vec3(0.0);
+    result.groundIrradiance = vec3(0.0);
+
+    // Sample directions for hemisphere integration (cosine-weighted)
+    // Using 6 directions for performance (up, and 5 around horizon)
+    const int NUM_SAMPLES = 6;
+    vec3 sampleDirs[NUM_SAMPLES];
+    sampleDirs[0] = vec3(0.0, 1.0, 0.0);    // Zenith
+    sampleDirs[1] = vec3(1.0, 0.3, 0.0);    // East elevated
+    sampleDirs[2] = vec3(-1.0, 0.3, 0.0);   // West elevated
+    sampleDirs[3] = vec3(0.0, 0.3, 1.0);    // North elevated
+    sampleDirs[4] = vec3(0.0, 0.3, -1.0);   // South elevated
+    sampleDirs[5] = vec3(0.707, 0.1, 0.707); // Horizon diagonal
+
+    float weights[NUM_SAMPLES];
+    weights[0] = 0.30;  // Zenith has highest weight
+    weights[1] = 0.14;
+    weights[2] = 0.14;
+    weights[3] = 0.14;
+    weights[4] = 0.14;
+    weights[5] = 0.14;
+
+    float totalWeight = 0.0;
+
+    for (int i = 0; i < NUM_SAMPLES; i++) {
+        vec3 dir = normalize(sampleDirs[i]);
+
+        // Simple atmospheric scattering sample (reduced quality for irradiance)
+        ScatteringResult scatter = integrateAtmosphere(position, dir, 8);
+
+        // Apply sun and moon light
+        vec3 skyColor = scatter.inscatter * sunLight;
+        if (moonContribution > 0.01) {
+            skyColor += scatter.inscatter * moonLight * 0.5 * moonContribution;
+        }
+
+        // Night minimum to prevent total darkness
+        float night = 1.0 - smoothstep(-0.05, 0.08, sunAltitude);
+        skyColor += night * vec3(0.01, 0.015, 0.03);
+
+        // Weight by cosine and sample weight
+        float cosWeight = max(dir.y, 0.0);
+        float weight = weights[i] * (0.2 + 0.8 * cosWeight);
+        result.skyIrradiance += skyColor * weight;
+        totalWeight += weight;
+    }
+
+    result.skyIrradiance /= totalWeight;
+
+    // Compute ground bounce from transmittance toward ground
+    // Ground reflects sunlight with albedo ~0.2 (typical terrain)
+    vec3 groundDir = vec3(0.0, -1.0, 0.0);
+    float groundSunDot = max(dot(-groundDir, sunDir), 0.0);
+    float groundMoonDot = max(dot(-groundDir, moonDir), 0.0);
+
+    // Ground albedo with slight color (brownish terrain)
+    vec3 groundAlbedo = vec3(0.18, 0.15, 0.12);
+
+    // Sun contribution to ground, attenuated by atmosphere
+    vec3 sunTransmittance = computeTransmittanceToLight(vec3(0.0, PLANET_RADIUS, 0.0), sunDir);
+    result.groundIrradiance = groundAlbedo * sunLight * sunTransmittance * groundSunDot;
+
+    // Moon contribution to ground
+    if (moonContribution > 0.01) {
+        vec3 moonTransmittance = computeTransmittanceToLight(vec3(0.0, PLANET_RADIUS, 0.0), moonDir);
+        result.groundIrradiance += groundAlbedo * moonLight * moonTransmittance * groundMoonDot * moonContribution;
+    }
+
+    // Scale ground irradiance by hemisphere solid angle factor
+    result.groundIrradiance *= 0.5;
+
+    return result;
+}
+
+// March through cloud layer with physically-based lighting
+// Uses atmospheric transmittance and computed sky irradiance for accurate results
+CloudResult marchClouds(vec3 origin, vec3 dir) {
+    CloudResult result;
+    result.scattering = vec3(0.0);
+    result.transmittance = 1.0;
+
+    // Find intersection with cloud layer
+    vec2 cloudHit = intersectCloudLayer(origin, dir);
+    if (cloudHit.x >= cloudHit.y || cloudHit.y < 0.0) {
+        return result;
+    }
+
+    float tStart = cloudHit.x;
+    float tEnd = cloudHit.y;
+    float stepSize = (tEnd - tStart) / float(CLOUD_MARCH_STEPS);
+
+    // Add jitter to reduce banding (screen-space dither based on ray direction)
+    float jitter = hash(dir * 1000.0 + vec3(ubo.timeOfDay * 0.1));
+    tStart += stepSize * jitter * 0.5;
+
+    vec3 sunDir = normalize(ubo.sunDirection.xyz);
+    vec3 moonDir = normalize(ubo.moonDirection.xyz);
+    float cosThetaSun = dot(dir, sunDir);
+    float cosThetaMoon = dot(dir, moonDir);
+    vec3 sunLight = ubo.sunColor.rgb * ubo.sunDirection.w;
+    vec3 moonLight = ubo.moonColor.rgb * ubo.moonDirection.w;
+
+    float sunAltitude = ubo.sunDirection.y;
+    float moonAltitude = ubo.moonDirection.y;
+
+    // Smooth twilight transition factor - moon fades in as sun approaches/passes horizon
+    float twilightFactor = smoothstep(0.17, -0.1, sunAltitude);
+    float moonVisibility = smoothstep(-0.09, 0.1, moonAltitude);
+    float moonContribution = twilightFactor * moonVisibility;
+
+    // Compute physically-based sky irradiance at cloud altitude
+    // Sample position in middle of cloud layer for irradiance calculation
+    vec3 cloudSamplePos = vec3(0.0, PLANET_RADIUS + (CLOUD_LAYER_BOTTOM + CLOUD_LAYER_TOP) * 0.5, 0.0);
+    SkyIrradiance skyIrrad = computeSkyIrradiance(cloudSamplePos, sunDir, moonDir,
+                                                   sunLight, moonLight,
+                                                   sunAltitude, moonContribution);
+
+    // Cloud scattering albedo (single-scattering albedo for water droplets)
+    const float CLOUD_ALBEDO = 0.99;  // High albedo for water droplets
+
+    // Compute atmospheric transmittance from cloud layer to sun/moon
+    // This attenuates direct light reaching the clouds
+    vec3 cloudLayerPos = vec3(0.0, PLANET_RADIUS + CLOUD_LAYER_BOTTOM, 0.0);
+    vec3 sunAtmoTransmittance = computeTransmittanceToLight(cloudLayerPos, sunDir);
+    vec3 moonAtmoTransmittance = computeTransmittanceToLight(cloudLayerPos, moonDir);
+
+    // Attenuate direct light by atmospheric transmittance
+    vec3 attenuatedSunLight = sunLight * sunAtmoTransmittance;
+    vec3 attenuatedMoonLight = moonLight * moonAtmoTransmittance;
+
+    for (int i = 0; i < CLOUD_MARCH_STEPS; i++) {
+        if (result.transmittance < 0.01) break;
+
+        float t = tStart + (float(i) + 0.5) * stepSize;
+        vec3 pos = origin + dir * t;
+
+        float density = sampleCloudDensity(pos);
+
+        if (density > 0.005) {  // Skip very thin cloud regions
+            // Sample transmittance to sun through clouds
+            float cloudTransmittanceToSun = sampleCloudTransmittanceToSun(pos, sunDir);
+
+            // Phase function for sun using Cornette-Shanks for consistency with atmosphere
+            // Use depth-dependent phase for multi-scattering approximation
+            float phaseSun = cloudPhase(cosThetaSun, cloudTransmittanceToSun, result.transmittance);
+
+            // In-scattering from sun (with atmospheric transmittance)
+            vec3 sunScatter = attenuatedSunLight * cloudTransmittanceToSun * phaseSun;
+
+            // Add moon scattering - scales smoothly with twilight transition
+            vec3 moonScatter = vec3(0.0);
+            if (moonContribution > 0.01) {
+                float cloudTransmittanceToMoon = sampleCloudTransmittanceToSun(pos, moonDir);
+                float phaseMoon = cloudPhase(cosThetaMoon, cloudTransmittanceToMoon, result.transmittance);
+                moonScatter = attenuatedMoonLight * cloudTransmittanceToMoon * phaseMoon * moonContribution;
+            }
+
+            // Compute height fraction for ambient weighting
+            float altitude = length(pos) - PLANET_RADIUS;
+            float heightFraction = clamp((altitude - CLOUD_LAYER_BOTTOM) / (CLOUD_LAYER_TOP - CLOUD_LAYER_BOTTOM), 0.0, 1.0);
+
+            // Blend between sky and ground irradiance based on height in cloud
+            // Top of cloud gets more sky, bottom gets more ground bounce
+            vec3 ambientIrradiance = mix(skyIrrad.groundIrradiance, skyIrrad.skyIrradiance, heightFraction);
+
+            // Apply isotropic phase for ambient (1/4π for sphere, but we use hemisphere factor)
+            float ambientPhase = 0.25 / PI;
+            vec3 ambientScatter = ambientIrradiance * ambientPhase;
+
+            // Total in-scattering with energy conservation
+            // Direct light uses phase function, ambient is isotropic
+            vec3 totalScatter = (sunScatter + moonScatter + ambientScatter) * CLOUD_ALBEDO;
+
+            // Beer-Lambert extinction
+            float extinction = density * stepSize * 10.0;
+            float segmentTransmittance = exp(-extinction);
+
+            // Energy-conserving integration (scattered + transmitted = 1)
+            // The (1 - segmentTransmittance) factor ensures energy conservation
+            vec3 integScatter = totalScatter * (1.0 - segmentTransmittance);
+            result.scattering += result.transmittance * integScatter;
+            result.transmittance *= segmentTransmittance;
+        }
+    }
+
+    return result;
+}
+
 float starField(vec3 dir) {
-    float nightFactor = 1.0 - smoothstep(-0.1, 0.2, ubo.sunDirection.y);
+    // Stars appear as sun goes below horizon - consistent with twilight transition
+    float sunAltitude = ubo.sunDirection.y;
+    float nightFactor = 1.0 - smoothstep(-0.1, 0.08, sunAltitude);
     if (nightFactor < 0.01) return 0.0;
 
     dir = normalize(dir);
@@ -541,23 +692,27 @@ vec3 renderAtmosphere(vec3 dir) {
 
         vec3 sunLight = ubo.sunColor.rgb * ubo.sunDirection.w;
         vec3 moonLight = ubo.moonColor.rgb * ubo.moonDirection.w;
+
+        // Sun contribution to horizon
         vec3 horizonColor = horizonResult.inscatter * sunLight;
 
-        // Add moon contribution - fades in smoothly during twilight
+        // Moon contribution - fades in smoothly during twilight
         if (moonSkyContribution > 0.01) {
-            horizonColor += horizonResult.inscatter * moonLight * 0.5 * moonSkyContribution;
+            horizonColor += horizonResult.inscatter * moonLight * moonSkyContribution;
         }
 
-        // Add multiple scattering compensation
-        horizonColor += sunLight * 0.1 * (1.0 - horizonResult.transmittance);
+        // Multiple scattering compensation (energy-conserving)
+        vec3 horizonTransmittance = horizonResult.transmittance;
+        horizonColor += sunLight * 0.08 * (1.0 - horizonTransmittance);
         if (moonSkyContribution > 0.01) {
-            horizonColor += moonLight * 0.05 * (1.0 - horizonResult.transmittance) * moonSkyContribution;
+            horizonColor += moonLight * 0.04 * (1.0 - horizonTransmittance) * moonSkyContribution;
         }
 
-        // Night fallback
-        float night = 1.0 - smoothstep(-0.05, 0.08, sunAltitude);
-        vec3 nightTint = mix(vec3(0.01, 0.015, 0.03), vec3(0.03, 0.05, 0.08), horizonResult.transmittance.y);
-        horizonColor += night * nightTint;
+        // Night sky floor (energy-conserving blend, not additive)
+        float nightFactor = 1.0 - smoothstep(-0.1, 0.08, sunAltitude);
+        vec3 nightHorizonRadiance = vec3(0.008, 0.012, 0.02);
+        float nightBlend = nightFactor * (1.0 - moonSkyContribution * 0.5);
+        horizonColor = mix(horizonColor, max(horizonColor, nightHorizonRadiance), nightBlend);
 
         // Blend from horizon color to slightly darker fog as we go further below horizon
         // This creates a smooth transition and disguises the world boundary
@@ -575,25 +730,37 @@ vec3 renderAtmosphere(vec3 dir) {
     vec3 sunLight = ubo.sunColor.rgb * ubo.sunDirection.w;
     vec3 moonLight = ubo.moonColor.rgb * ubo.moonDirection.w;
 
-    // Sky inscatter is modulated by both sun and moon light
-    // The integrateAtmosphere function now handles moon contribution internally
-    vec3 sky = result.inscatter * sunLight;
+    // Compute atmospheric transmittance from viewer to sky (for energy conservation)
+    vec3 skyTransmittance = result.transmittance;
 
-    // Add moon-based atmospheric scattering - fades in smoothly during twilight
+    // Sky inscatter from sun - primary contribution during day
+    vec3 sunSkyContrib = result.inscatter * sunLight;
+
+    // Moon sky contribution - fades in smoothly during twilight
+    // Use consistent twilight factor from above (moonSkyContribution)
+    vec3 moonSkyContrib = vec3(0.0);
     if (moonSkyContribution > 0.01) {
-        sky += result.inscatter * moonLight * 0.5 * moonSkyContribution;
+        // Moon illuminates the atmosphere similar to sun but dimmer
+        moonSkyContrib = result.inscatter * moonLight * moonSkyContribution;
     }
 
-    // Add simple multiple scattering compensation to keep horizon bright
-    sky += sunLight * 0.1 * (1.0 - result.transmittance);
-    if (moonSkyContribution > 0.01) {
-        sky += moonLight * 0.05 * (1.0 - result.transmittance) * moonSkyContribution;
-    }
+    // Multiple scattering compensation (approximates light scattered more than once)
+    // This is energy-conserving: based on what wasn't transmitted
+    vec3 multiScatterSun = sunLight * 0.08 * (1.0 - skyTransmittance);
+    vec3 multiScatterMoon = moonLight * 0.04 * (1.0 - skyTransmittance) * moonSkyContribution;
 
-    // Night fallback color when sun is below the horizon
-    float night = 1.0 - smoothstep(-0.05, 0.08, sunAltitude);
-    vec3 nightTint = mix(vec3(0.01, 0.015, 0.03), vec3(0.03, 0.05, 0.08), result.transmittance.y);
-    sky += night * nightTint;
+    // Combine all sky contributions
+    vec3 sky = sunSkyContrib + moonSkyContrib + multiScatterSun + multiScatterMoon;
+
+    // Night sky radiance - represents the dark sky with slight airglow
+    // This is a minimum floor, not additive, to prevent color shifts
+    float nightFactor = 1.0 - smoothstep(-0.1, 0.08, sunAltitude);
+    vec3 nightSkyRadiance = mix(vec3(0.005, 0.008, 0.015), vec3(0.015, 0.02, 0.035), normDir.y * 0.5 + 0.5);
+
+    // Blend toward night sky when transitioning - energy conserving blend
+    // During twilight, the sky naturally transitions; at deep night, use floor radiance
+    float nightBlend = nightFactor * (1.0 - moonSkyContribution * 0.5);
+    sky = mix(sky, max(sky, nightSkyRadiance), nightBlend);
 
     // Render volumetric clouds (Phase 4.2)
     CloudResult clouds = marchClouds(origin, normDir);
@@ -630,8 +797,9 @@ vec3 renderAtmosphere(vec3 dir) {
            clamp(result.transmittance, vec3(0.2), vec3(1.0)) * clouds.transmittance;
 
     // Star field blended over the atmospheric tint (also behind clouds)
+    // Stars are already modulated by nightFactor inside starField()
     float stars = starField(dir);
-    sky += vec3(stars) * (0.5 + 0.5 * night) * clouds.transmittance;
+    sky += vec3(stars) * clouds.transmittance;
 
     return sky;
 }
