@@ -28,8 +28,6 @@ private:
     void openGamepad(SDL_JoystickID id);
     void closeGamepad();
     std::string getResourcePath();
-    void initPhysics();
-    void updatePhysicsToScene();
 
     SDL_Window* window = nullptr;
     SDL_Gamepad* gamepad = nullptr;
@@ -37,9 +35,6 @@ private:
     Camera camera;
     Player player;
     PhysicsWorld physics;
-
-    // Physics body IDs for scene objects (mapped to scene object indices)
-    std::vector<PhysicsBodyID> scenePhysicsBodies;
 
     bool running = false;
     bool thirdPersonMode = false;  // Toggle between free camera and third-person

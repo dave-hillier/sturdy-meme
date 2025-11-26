@@ -43,8 +43,19 @@ bool Application::init(const std::string& title, int width, int height) {
 
     camera.setAspectRatio(static_cast<float>(width) / static_cast<float>(height));
 
-    // Initialize physics
-    initPhysics();
+    // Initialize physics system
+    if (!physics.init()) {
+        SDL_Log("Failed to initialize physics system");
+        return false;
+    }
+
+    // Initialize scene physics (terrain and scene objects)
+    renderer.getSceneManager().initPhysics(physics);
+
+    // Create character controller for player
+    physics.createCharacter(glm::vec3(0.0f, 0.1f, 0.0f), Player::CAPSULE_HEIGHT, Player::CAPSULE_RADIUS);
+
+    SDL_Log("Physics initialized with %d active bodies", physics.getActiveBodyCount());
 
     running = true;
     return true;
@@ -92,13 +103,13 @@ void Application::run() {
         player.setPosition(physicsPos);
 
         // Update scene object transforms from physics
-        updatePhysicsToScene();
+        renderer.getSceneManager().update(physics);
 
         // Update camera and player based on mode
         if (thirdPersonMode) {
             camera.setThirdPersonTarget(player.getFocusPoint());
             camera.updateThirdPerson();
-            renderer.updatePlayerTransform(player.getModelMatrix());
+            renderer.getSceneManager().updatePlayerTransform(player.getModelMatrix());
         }
 
         camera.setAspectRatio(static_cast<float>(renderer.getWidth()) / static_cast<float>(renderer.getHeight()));
@@ -513,101 +524,4 @@ std::string Application::getResourcePath() {
 #else
     return ".";
 #endif
-}
-
-void Application::initPhysics() {
-    if (!physics.init()) {
-        SDL_Log("Failed to initialize physics system");
-        return;
-    }
-
-    // Create terrain ground plane (radius 50)
-    physics.createTerrainDisc(50.0f, 0.0f);
-
-    // Scene object layout from SceneBuilder (after multi-lights update):
-    // 0: Ground disc (static terrain - already created above)
-    // 1: Wooden crate 1 at (2.0, 0.5, 0.0) - unit cube
-    // 2: Rotated wooden crate at (-1.5, 0.5, 1.0)
-    // 3: Polished metal sphere at (0.0, 0.5, -2.0) - radius 0.5
-    // 4: Rough metal sphere at (-3.0, 0.5, -1.0) - radius 0.5
-    // 5: Polished metal cube at (3.0, 0.5, -2.0)
-    // 6: Brushed metal cube at (-3.0, 0.5, -3.0)
-    // 7: Emissive sphere at (2.0, 1.3, 0.0) - scaled 0.3, visual radius 0.15
-    // 8: Blue light at (-3.0, 2.0, 2.0) - fixed, no physics
-    // 9: Green light at (4.0, 1.5, -2.0) - fixed, no physics
-    // 10: Player capsule (handled by character controller)
-
-    const size_t numSceneObjects = 11;
-    scenePhysicsBodies.resize(numSceneObjects, INVALID_BODY_ID);
-
-    // Box half-extent for unit cube
-    glm::vec3 cubeHalfExtents(0.5f, 0.5f, 0.5f);
-    float boxMass = 10.0f;
-    float sphereMass = 5.0f;
-
-    // Spawn objects slightly above ground to let them settle
-    const float spawnOffset = 0.1f;
-
-    // Index 1: Wooden crate 1
-    scenePhysicsBodies[1] = physics.createBox(glm::vec3(2.0f, 0.5f + spawnOffset, 0.0f), cubeHalfExtents, boxMass);
-
-    // Index 2: Rotated wooden crate
-    scenePhysicsBodies[2] = physics.createBox(glm::vec3(-1.5f, 0.5f + spawnOffset, 1.0f), cubeHalfExtents, boxMass);
-
-    // Index 3: Polished metal sphere (mesh radius 0.5)
-    scenePhysicsBodies[3] = physics.createSphere(glm::vec3(0.0f, 0.5f + spawnOffset, -2.0f), 0.5f, sphereMass);
-
-    // Index 4: Rough metal sphere (mesh radius 0.5)
-    scenePhysicsBodies[4] = physics.createSphere(glm::vec3(-3.0f, 0.5f + spawnOffset, -1.0f), 0.5f, sphereMass);
-
-    // Index 5: Polished metal cube
-    scenePhysicsBodies[5] = physics.createBox(glm::vec3(3.0f, 0.5f + spawnOffset, -2.0f), cubeHalfExtents, boxMass);
-
-    // Index 6: Brushed metal cube
-    scenePhysicsBodies[6] = physics.createBox(glm::vec3(-3.0f, 0.5f + spawnOffset, -3.0f), cubeHalfExtents, boxMass);
-
-    // Index 7: Emissive sphere - mesh radius 0.5, scaled 0.3 = visual radius 0.15
-    scenePhysicsBodies[7] = physics.createSphere(glm::vec3(2.0f, 1.3f + spawnOffset, 0.0f), 0.5f * 0.3f, 1.0f);
-
-    // Index 8 & 9: Blue and green lights - NO PHYSICS (fixed light indicators)
-    // scenePhysicsBodies[8] and [9] remain INVALID_BODY_ID
-
-    // Create character controller for player slightly above ground
-    physics.createCharacter(glm::vec3(0.0f, spawnOffset, 0.0f), Player::CAPSULE_HEIGHT, Player::CAPSULE_RADIUS);
-
-    SDL_Log("Physics initialized with %d active bodies", physics.getActiveBodyCount());
-}
-
-void Application::updatePhysicsToScene() {
-    // Update scene object transforms from physics simulation
-    auto& sceneObjects = renderer.getSceneObjects();
-
-    for (size_t i = 1; i < scenePhysicsBodies.size() && i < sceneObjects.size(); i++) {
-        PhysicsBodyID bodyID = scenePhysicsBodies[i];
-        if (bodyID == INVALID_BODY_ID) continue;
-
-        // Skip player object (handled separately)
-        if (i == renderer.getPlayerObjectIndex()) continue;
-
-        // Get transform from physics (position and rotation only)
-        glm::mat4 physicsTransform = physics.getBodyTransform(bodyID);
-
-        // Extract scale from current transform to preserve it
-        glm::vec3 scale;
-        scale.x = glm::length(glm::vec3(sceneObjects[i].transform[0]));
-        scale.y = glm::length(glm::vec3(sceneObjects[i].transform[1]));
-        scale.z = glm::length(glm::vec3(sceneObjects[i].transform[2]));
-
-        // Apply scale to physics transform
-        physicsTransform = glm::scale(physicsTransform, scale);
-
-        // Update scene object transform
-        sceneObjects[i].transform = physicsTransform;
-
-        // Update orb light position to follow the emissive sphere (index 7)
-        if (i == 7) {
-            glm::vec3 orbPosition = glm::vec3(physicsTransform[3]);
-            renderer.setOrbLightPosition(orbPosition);
-        }
-    }
 }

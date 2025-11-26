@@ -17,8 +17,7 @@
 #include "PostProcessSystem.h"
 #include "FroxelSystem.h"
 #include "AtmosphereLUTSystem.h"
-#include "SceneBuilder.h"
-#include "Light.h"
+#include "SceneManager.h"
 
 static constexpr uint32_t NUM_SHADOW_CASCADES = 4;
 
@@ -94,16 +93,9 @@ public:
         leafSystem.spawnConfetti(position, velocity, count, coneAngle);
     }
 
-    // Player rendering
-    void updatePlayerTransform(const glm::mat4& transform);
-
-    // Update orb light position (follows physics object)
-    void setOrbLightPosition(const glm::vec3& position) { orbLightPosition = position; }
-
-    // Scene object access for physics integration
-    std::vector<SceneObject>& getSceneObjects() { return sceneBuilder.getSceneObjects(); }
-    const std::vector<SceneObject>& getSceneObjects() const { return sceneBuilder.getSceneObjects(); }
-    size_t getPlayerObjectIndex() const { return sceneBuilder.getPlayerObjectIndex(); }
+    // Scene access
+    SceneManager& getSceneManager() { return sceneManager; }
+    const SceneManager& getSceneManager() const { return sceneManager; }
 
     // Celestial/astronomical settings
     void setLocation(const GeographicLocation& location) { celestialCalculator.setLocation(location); }
@@ -269,8 +261,8 @@ private:
     std::vector<VkSemaphore> renderFinishedSemaphores;
     std::vector<VkFence> inFlightFences;
 
-    // Scene resources (meshes, textures, objects)
-    SceneBuilder sceneBuilder;
+    // Scene management (meshes, textures, objects, lights, physics)
+    SceneManager sceneManager;
     std::vector<VkDescriptorSet> metalDescriptorSets;
 
     uint32_t currentFrame = 0;
@@ -291,11 +283,8 @@ private:
     bool showCascadeDebug = false;         // true = show cascade colors overlay
 
     // Dynamic lights
-    LightManager lightManager;
     float lightCullRadius = 100.0f;        // Radius from camera for light culling
-    glm::vec3 orbLightPosition = glm::vec3(2.0f, 1.3f, 0.0f);  // Orb light position (updated by physics)
 
     bool createLightBuffers();
     void updateLightBuffer(uint32_t currentImage, const Camera& camera);
-    void setupSceneLights();               // Initialize default scene lights
 };
