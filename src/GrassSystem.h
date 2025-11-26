@@ -54,6 +54,9 @@ public:
     void recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time);
     void recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time, uint32_t cascadeIndex);
 
+    // Double-buffer management: call at frame start to swap compute/render buffer sets
+    void advanceBufferSet();
+
 private:
     bool createShadowPipeline();
     bool createBuffers();
@@ -87,22 +90,30 @@ private:
     VkDescriptorSetLayout shadowDescriptorSetLayout = VK_NULL_HANDLE;
     VkPipelineLayout shadowPipelineLayout = VK_NULL_HANDLE;
     VkPipeline shadowPipeline = VK_NULL_HANDLE;
-    std::vector<VkDescriptorSet> shadowDescriptorSets;
 
-    // Storage buffers (per frame)
-    std::vector<VkBuffer> instanceBuffers;
-    std::vector<VmaAllocation> instanceAllocations;
-    std::vector<VkBuffer> indirectBuffers;
-    std::vector<VmaAllocation> indirectAllocations;
+    // Double-buffered storage buffers: [2] for A/B sets, then per frame-in-flight
+    // Set A and Set B alternate: compute writes to one while graphics reads from other
+    static constexpr uint32_t BUFFER_SET_COUNT = 2;
+    std::vector<VkBuffer> instanceBuffers[BUFFER_SET_COUNT];      // [setIndex][frameIndex]
+    std::vector<VmaAllocation> instanceAllocations[BUFFER_SET_COUNT];
+    std::vector<VkBuffer> indirectBuffers[BUFFER_SET_COUNT];
+    std::vector<VmaAllocation> indirectAllocations[BUFFER_SET_COUNT];
 
-    // Uniform buffers for culling (per frame)
+    // Uniform buffers for culling (per frame, not double-buffered)
     std::vector<VkBuffer> uniformBuffers;
     std::vector<VmaAllocation> uniformAllocations;
     std::vector<void*> uniformMappedPtrs;
 
-    // Descriptor sets
-    std::vector<VkDescriptorSet> computeDescriptorSets;
-    std::vector<VkDescriptorSet> graphicsDescriptorSets;
+    // Descriptor sets: [2] for A/B sets
+    std::vector<VkDescriptorSet> computeDescriptorSets[BUFFER_SET_COUNT];
+    std::vector<VkDescriptorSet> graphicsDescriptorSets[BUFFER_SET_COUNT];
+    std::vector<VkDescriptorSet> shadowDescriptorSetsDB[BUFFER_SET_COUNT];  // Renamed to avoid conflict
+
+    // Double-buffer state: which set is being computed vs rendered
+    // Both start at 0 for bootstrap (first frame uses same buffer for compute+render)
+    // After first advanceBufferSet(), they diverge for true double-buffering
+    uint32_t computeBufferSet = 0;  // Set being written by compute
+    uint32_t renderBufferSet = 0;   // Set being read by graphics
 
     static constexpr uint32_t MAX_INSTANCES = 100000;  // ~100k rendered after culling
 };
