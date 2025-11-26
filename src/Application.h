@@ -44,6 +44,7 @@ private:
     bool running = false;
     bool thirdPersonMode = false;  // Toggle between free camera and third-person
     bool wantsJump = false;        // Jump input flag
+    glm::vec3 accumulatedMoveDir{0.0f};  // Combined movement direction from all inputs
     float moveSpeed = 3.0f;
     float rotateSpeed = 60.0f;
 
