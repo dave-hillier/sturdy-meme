@@ -190,7 +190,7 @@ bool AtmosphereLUTSystem::createComputePipelines() {
 
 bool AtmosphereLUTSystem::createTransmittancePipeline() {
     // Load compute shader
-    auto shaderCode = loadShaderFile(shaderPath + "/transmittance_lut.comp.spv");
+    auto shaderCode = ShaderLoader::readFile(shaderPath + "/transmittance_lut.comp.spv");
     if (shaderCode.empty()) {
         SDL_Log("Failed to load transmittance_lut.comp.spv");
         return false;
@@ -290,7 +290,7 @@ bool AtmosphereLUTSystem::createTransmittancePipeline() {
 
 bool AtmosphereLUTSystem::createMultiScatterPipeline() {
     // Load compute shader
-    auto shaderCode = loadShaderFile(shaderPath + "/multiscatter_lut.comp.spv");
+    auto shaderCode = ShaderLoader::readFile(shaderPath + "/multiscatter_lut.comp.spv");
     if (shaderCode.empty()) {
         SDL_Log("Failed to load multiscatter_lut.comp.spv");
         return false;
