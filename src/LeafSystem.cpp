@@ -578,6 +578,11 @@ void LeafSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos,
     uniforms.spawnRegionMin = glm::vec4(spawnRegionMin, 0.0f);
     uniforms.spawnRegionMax = glm::vec4(spawnRegionMax, 0.0f);
 
+    // Confetti spawn parameters
+    uniforms.confettiSpawnPos = glm::vec4(confettiSpawnPosition, confettiConeAngle);
+    uniforms.confettiSpawnCount = confettiToSpawn;
+    uniforms.confettiVelocity = confettiSpawnVelocity;
+
     // General parameters
     uniforms.groundLevel = groundLevel;
     uniforms.deltaTime = deltaTime;
@@ -594,6 +599,9 @@ void LeafSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos,
     uniforms.targetGroundedCount = leafIntensity * 20000.0f; // 0-20000 grounded leaves
 
     memcpy(uniformMappedPtrs[frameIndex], &uniforms, sizeof(LeafUniforms));
+
+    // Reset confetti spawn count after it's been sent to GPU
+    confettiToSpawn = 0.0f;
 }
 
 void LeafSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex, float time, float deltaTime) {

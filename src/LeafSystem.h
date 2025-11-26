@@ -37,6 +37,7 @@ struct LeafUniforms {
     glm::vec4 playerVelocity;           // xyz = player velocity, w = speed magnitude
     glm::vec4 spawnRegionMin;           // xyz = AABB minimum
     glm::vec4 spawnRegionMax;           // xyz = AABB maximum
+    glm::vec4 confettiSpawnPos;         // xyz = confetti spawn position, w = cone angle
     float groundLevel;                  // Y coordinate of ground plane
     float deltaTime;                    // Frame delta time
     float time;                         // Accumulated time
@@ -46,7 +47,9 @@ struct LeafUniforms {
     float gustThreshold;                // Wind strength to lift grounded leaves
     float targetFallingCount;           // Target number of falling leaves
     float targetGroundedCount;          // Target number of grounded leaves
-    float padding[3];                   // Alignment padding
+    float confettiSpawnCount;           // Number of confetti to spawn this frame
+    float confettiVelocity;             // Initial upward velocity for confetti
+    float padding[1];                   // Alignment padding
 };
 
 // Push constants for leaf rendering
@@ -101,6 +104,14 @@ public:
         spawnRegionMax = maxBounds;
     }
 
+    // Confetti control
+    void spawnConfetti(const glm::vec3& position, float velocity = 8.0f, float count = 100.0f, float coneAngle = 0.5f) {
+        confettiSpawnPosition = position;
+        confettiSpawnVelocity = velocity;
+        confettiToSpawn = count;
+        confettiConeAngle = coneAngle;
+    }
+
 private:
     bool createBuffers();
     bool createComputeDescriptorSetLayout();
@@ -152,6 +163,12 @@ private:
     float groundLevel = 0.0f;           // Ground plane Y coordinate
     glm::vec3 spawnRegionMin = glm::vec3(-50.0f, 10.0f, -50.0f);
     glm::vec3 spawnRegionMax = glm::vec3(50.0f, 20.0f, 50.0f);
+
+    // Confetti parameters
+    glm::vec3 confettiSpawnPosition = glm::vec3(0.0f);
+    float confettiSpawnVelocity = 0.0f;
+    float confettiToSpawn = 0.0f;
+    float confettiConeAngle = 0.5f;
 
     // Particle counts
     static constexpr uint32_t MAX_PARTICLES = 100000;
