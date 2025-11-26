@@ -4,6 +4,8 @@
 Player::Player()
     : position(0.0f, 0.0f, 0.0f)
     , yaw(0.0f)
+    , verticalVelocity(0.0f)
+    , onGround(true)
 {
 }
 
@@ -20,6 +22,30 @@ void Player::rotate(float yawDelta) {
     // Keep yaw in reasonable range
     while (yaw > 360.0f) yaw -= 360.0f;
     while (yaw < 0.0f) yaw += 360.0f;
+}
+
+void Player::update(float deltaTime) {
+    // Apply gravity
+    verticalVelocity -= GRAVITY * deltaTime;
+
+    // Update vertical position
+    position.y += verticalVelocity * deltaTime;
+
+    // Ground collision
+    if (position.y <= GROUND_LEVEL) {
+        position.y = GROUND_LEVEL;
+        verticalVelocity = 0.0f;
+        onGround = true;
+    } else {
+        onGround = false;
+    }
+}
+
+void Player::jump() {
+    if (onGround) {
+        verticalVelocity = JUMP_VELOCITY;
+        onGround = false;
+    }
 }
 
 glm::vec3 Player::getFocusPoint() const {

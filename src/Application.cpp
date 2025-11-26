@@ -60,6 +60,9 @@ void Application::run() {
         handleInput(deltaTime);
         handleGamepadInput(deltaTime);
 
+        // Update player physics
+        player.update(deltaTime);
+
         // Update camera and player based on mode
         if (thirdPersonMode) {
             camera.setThirdPersonTarget(player.getFocusPoint());
@@ -307,6 +310,11 @@ void Application::handleThirdPersonInput(float deltaTime, const bool* keyState) 
     if (keyState[SDL_SCANCODE_E]) {
         camera.adjustDistance(moveSpeed * deltaTime);
     }
+
+    // Space to jump
+    if (keyState[SDL_SCANCODE_SPACE]) {
+        player.jump();
+    }
 }
 
 void Application::handleGamepadInput(float deltaTime) {
@@ -410,6 +418,11 @@ void Application::handleThirdPersonGamepadInput(float deltaTime) {
     }
     if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)) {
         camera.adjustDistance(-moveSpeed * deltaTime);
+    }
+
+    // A button (South) to jump
+    if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_SOUTH)) {
+        player.jump();
     }
 }
 
