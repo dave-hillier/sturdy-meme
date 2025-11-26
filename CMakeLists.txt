@@ -28,6 +28,7 @@ set(SOURCES
     src/PostProcessSystem.cpp
     src/FroxelSystem.cpp
     src/Player.cpp
+    src/PhysicsSystem.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})

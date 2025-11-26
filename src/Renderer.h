@@ -80,6 +80,11 @@ public:
     // Player rendering
     void updatePlayerTransform(const glm::mat4& transform);
 
+    // Scene object access for physics integration
+    std::vector<SceneObject>& getSceneObjects() { return sceneBuilder.getSceneObjects(); }
+    const std::vector<SceneObject>& getSceneObjects() const { return sceneBuilder.getSceneObjects(); }
+    size_t getPlayerObjectIndex() const { return sceneBuilder.getPlayerObjectIndex(); }
+
     // Celestial/astronomical settings
     void setLocation(const GeographicLocation& location) { celestialCalculator.setLocation(location); }
     const GeographicLocation& getLocation() const { return celestialCalculator.getLocation(); }

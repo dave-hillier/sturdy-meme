@@ -1,0 +1,106 @@
+#pragma once
+
+#include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <vector>
+#include <memory>
+#include <cstdint>
+
+// Forward declarations for Jolt types
+namespace JPH {
+    class PhysicsSystem;
+    class TempAllocatorImpl;
+    class JobSystemThreadPool;
+    class BodyInterface;
+    class Body;
+    class Character;
+    class CharacterVirtual;
+}
+
+// Physics body handle
+using PhysicsBodyID = uint32_t;
+constexpr PhysicsBodyID INVALID_BODY_ID = 0xFFFFFFFF;
+
+// Collision layers
+namespace PhysicsLayers {
+    constexpr uint8_t NON_MOVING = 0;
+    constexpr uint8_t MOVING = 1;
+    constexpr uint8_t CHARACTER = 2;
+    constexpr uint8_t NUM_LAYERS = 3;
+}
+
+// Broad phase layers
+namespace BroadPhaseLayers {
+    constexpr uint8_t NON_MOVING = 0;
+    constexpr uint8_t MOVING = 1;
+    constexpr uint8_t NUM_LAYERS = 2;
+}
+
+struct PhysicsBodyInfo {
+    PhysicsBodyID bodyID = INVALID_BODY_ID;
+    glm::vec3 position{0.0f};
+    glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
+    glm::vec3 linearVelocity{0.0f};
+    bool isAwake = false;
+};
+
+class PhysicsWorld {
+public:
+    PhysicsWorld();
+    ~PhysicsWorld();
+
+    bool init();
+    void shutdown();
+
+    // Simulation
+    void update(float deltaTime);
+
+    // Terrain - creates a heightfield from the disc
+    PhysicsBodyID createTerrainDisc(float radius, float heightOffset = 0.0f);
+
+    // Dynamic rigid bodies
+    PhysicsBodyID createBox(const glm::vec3& position, const glm::vec3& halfExtents,
+                            float mass = 1.0f, float friction = 0.5f, float restitution = 0.3f);
+    PhysicsBodyID createSphere(const glm::vec3& position, float radius,
+                               float mass = 1.0f, float friction = 0.5f, float restitution = 0.3f);
+
+    // Static rigid bodies
+    PhysicsBodyID createStaticBox(const glm::vec3& position, const glm::vec3& halfExtents,
+                                  const glm::quat& rotation = glm::quat(1, 0, 0, 0));
+
+    // Character controller
+    bool createCharacter(const glm::vec3& position, float height, float radius);
+    void updateCharacter(float deltaTime, const glm::vec3& desiredVelocity, bool jump);
+    glm::vec3 getCharacterPosition() const;
+    glm::vec3 getCharacterVelocity() const;
+    bool isCharacterOnGround() const;
+
+    // Body queries
+    PhysicsBodyInfo getBodyInfo(PhysicsBodyID bodyID) const;
+    void setBodyPosition(PhysicsBodyID bodyID, const glm::vec3& position);
+    void setBodyVelocity(PhysicsBodyID bodyID, const glm::vec3& velocity);
+    void applyImpulse(PhysicsBodyID bodyID, const glm::vec3& impulse);
+
+    // Convert between GLM and physics transforms
+    glm::mat4 getBodyTransform(PhysicsBodyID bodyID) const;
+
+    // Debug
+    int getActiveBodyCount() const;
+
+private:
+    std::unique_ptr<JPH::TempAllocatorImpl> tempAllocator;
+    std::unique_ptr<JPH::JobSystemThreadPool> jobSystem;
+    std::unique_ptr<JPH::PhysicsSystem> physicsSystem;
+
+    // Character
+    std::unique_ptr<JPH::CharacterVirtual> character;
+    float characterHeight = 1.8f;
+    float characterRadius = 0.3f;
+
+    // Accumulated time for fixed timestep
+    float accumulatedTime = 0.0f;
+    static constexpr float FIXED_TIMESTEP = 1.0f / 60.0f;
+    static constexpr int MAX_SUBSTEPS = 4;
+
+    bool initialized = false;
+};

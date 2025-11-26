@@ -2,9 +2,11 @@
 
 #include <SDL3/SDL.h>
 #include <string>
+#include <vector>
 #include "Renderer.h"
 #include "Camera.h"
 #include "Player.h"
+#include "PhysicsSystem.h"
 
 class Application {
 public:
@@ -26,15 +28,22 @@ private:
     void openGamepad(SDL_JoystickID id);
     void closeGamepad();
     std::string getResourcePath();
+    void initPhysics();
+    void updatePhysicsToScene();
 
     SDL_Window* window = nullptr;
     SDL_Gamepad* gamepad = nullptr;
     Renderer renderer;
     Camera camera;
     Player player;
+    PhysicsWorld physics;
+
+    // Physics body IDs for scene objects (mapped to scene object indices)
+    std::vector<PhysicsBodyID> scenePhysicsBodies;
 
     bool running = false;
     bool thirdPersonMode = false;  // Toggle between free camera and third-person
+    bool wantsJump = false;        // Jump input flag
     float moveSpeed = 3.0f;
     float rotateSpeed = 60.0f;
 
