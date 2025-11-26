@@ -1,0 +1,384 @@
+#version 450
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+// Weather particle structure (32 bytes)
+struct WeatherParticle {
+    vec3 position;
+    float lifetime;
+    vec3 velocity;
+    float size;
+    float rotation;
+    float hash;
+    uint type;      // 0 = rain, 1 = snow, 2 = splash
+    uint flags;     // bit 0 = active
+};
+
+struct DrawIndirectCommand {
+    uint vertexCount;
+    uint instanceCount;
+    uint firstVertex;
+    uint firstInstance;
+};
+
+// Input particle buffer (previous frame)
+layout(std430, binding = 0) readonly buffer InputParticleBuffer {
+    WeatherParticle inputParticles[];
+};
+
+// Output particle buffer (current frame)
+layout(std430, binding = 1) buffer OutputParticleBuffer {
+    WeatherParticle outputParticles[];
+};
+
+// Indirect draw command buffer
+layout(std430, binding = 2) buffer IndirectBuffer {
+    DrawIndirectCommand drawCmd;
+};
+
+// Weather uniforms
+layout(binding = 3) uniform WeatherUniforms {
+    vec4 cameraPosition;
+    vec4 frustumPlanes[6];
+    vec4 windDirectionStrength;     // xy = direction, z = strength, w = turbulence
+    vec4 gravity;                   // xyz = gravity vector, w = terminal velocity
+    vec4 spawnRegion;               // xyz = center, w = radius
+    float spawnHeight;
+    float groundLevel;
+    float particleDensity;
+    float maxDrawDistance;
+    float time;
+    float deltaTime;
+    uint weatherType;               // 0 = rain, 1 = snow
+    float intensity;
+    float nearZoneRadius;
+    float padding[3];
+} uniforms;
+
+// Wind uniforms
+layout(binding = 4) uniform WindUniforms {
+    vec4 windDirectionAndStrength;  // xy = normalized direction, z = strength, w = speed
+    vec4 windParams;                // x = gustFrequency, y = gustAmplitude, z = noiseScale, w = time
+} wind;
+
+layout(push_constant) uniform PushConstants {
+    float time;
+    float deltaTime;
+    int cascadeIndex;
+    int padding;
+} push;
+
+const uint MAX_PARTICLES = 150000;
+const float PARTICLE_LIFETIME_RAIN = 5.0;
+const float PARTICLE_LIFETIME_SNOW = 15.0;
+
+// Flag bits
+const uint FLAG_ACTIVE = 1u;
+
+// Hash functions for randomization
+float hash(float n) {
+    return fract(sin(n) * 43758.5453);
+}
+
+float hash2(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+vec3 hash3(vec3 p) {
+    p = vec3(dot(p, vec3(127.1, 311.7, 74.7)),
+             dot(p, vec3(269.5, 183.3, 246.1)),
+             dot(p, vec3(113.5, 271.9, 124.6)));
+    return fract(sin(p) * 43758.5453);
+}
+
+// Perlin noise for turbulence
+const int perm[512] = int[512](
+    151,160,137,91,90,15,131,13,201,95,96,53,194,233,7,225,
+    140,36,103,30,69,142,8,99,37,240,21,10,23,190,6,148,
+    247,120,234,75,0,26,197,62,94,252,219,203,117,35,11,32,
+    57,177,33,88,237,149,56,87,174,20,125,136,171,168,68,175,
+    74,165,71,134,139,48,27,166,77,146,158,231,83,111,229,122,
+    60,211,133,230,220,105,92,41,55,46,245,40,244,102,143,54,
+    65,25,63,161,1,216,80,73,209,76,132,187,208,89,18,169,
+    200,196,135,130,116,188,159,86,164,100,109,198,173,186,3,64,
+    52,217,226,250,124,123,5,202,38,147,118,126,255,82,85,212,
+    207,206,59,227,47,16,58,17,182,189,28,42,223,183,170,213,
+    119,248,152,2,44,154,163,70,221,153,101,155,167,43,172,9,
+    129,22,39,253,19,98,108,110,79,113,224,232,178,185,112,104,
+    218,246,97,228,251,34,242,193,238,210,144,12,191,179,162,241,
+    81,51,145,235,249,14,239,107,49,192,214,31,181,199,106,157,
+    184,84,204,176,115,121,50,45,127,4,150,254,138,236,205,93,
+    222,114,67,29,24,72,243,141,128,195,78,66,215,61,156,180,
+    // Repeat
+    151,160,137,91,90,15,131,13,201,95,96,53,194,233,7,225,
+    140,36,103,30,69,142,8,99,37,240,21,10,23,190,6,148,
+    247,120,234,75,0,26,197,62,94,252,219,203,117,35,11,32,
+    57,177,33,88,237,149,56,87,174,20,125,136,171,168,68,175,
+    74,165,71,134,139,48,27,166,77,146,158,231,83,111,229,122,
+    60,211,133,230,220,105,92,41,55,46,245,40,244,102,143,54,
+    65,25,63,161,1,216,80,73,209,76,132,187,208,89,18,169,
+    200,196,135,130,116,188,159,86,164,100,109,198,173,186,3,64,
+    52,217,226,250,124,123,5,202,38,147,118,126,255,82,85,212,
+    207,206,59,227,47,16,58,17,182,189,28,42,223,183,170,213,
+    119,248,152,2,44,154,163,70,221,153,101,155,167,43,172,9,
+    129,22,39,253,19,98,108,110,79,113,224,232,178,185,112,104,
+    218,246,97,228,251,34,242,193,238,210,144,12,191,179,162,241,
+    81,51,145,235,249,14,239,107,49,192,214,31,181,199,106,157,
+    184,84,204,176,115,121,50,45,127,4,150,254,138,236,205,93,
+    222,114,67,29,24,72,243,141,128,195,78,66,215,61,156,180
+);
+
+float fade(float t) {
+    return t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+}
+
+float grad(int hash, float x, float y) {
+    int h = hash & 7;
+    float u = h < 4 ? x : y;
+    float v = h < 4 ? y : x;
+    return ((h & 1) != 0 ? -u : u) + ((h & 2) != 0 ? -2.0 * v : 2.0 * v);
+}
+
+float perlinNoise(float x, float y) {
+    int X = int(floor(x)) & 255;
+    int Y = int(floor(y)) & 255;
+
+    x -= floor(x);
+    y -= floor(y);
+
+    float u = fade(x);
+    float v = fade(y);
+
+    int A = perm[X] + Y;
+    int AA = perm[A];
+    int AB = perm[A + 1];
+    int B = perm[X + 1] + Y;
+    int BA = perm[B];
+    int BB = perm[B + 1];
+
+    float res = mix(
+        mix(grad(perm[AA], x, y),
+            grad(perm[BA], x - 1.0, y), u),
+        mix(grad(perm[AB], x, y - 1.0),
+            grad(perm[BB], x - 1.0, y - 1.0), u),
+        v
+    );
+
+    return (res + 1.0) * 0.5;
+}
+
+// Sample wind with turbulence
+vec3 sampleWind(vec3 worldPos) {
+    vec2 windDir = wind.windDirectionAndStrength.xy;
+    float windStrength = wind.windDirectionAndStrength.z;
+    float windSpeed = wind.windDirectionAndStrength.w;
+    float windTime = wind.windParams.w;
+
+    // Scroll position in wind direction
+    vec2 scrolledPos = worldPos.xz - windDir * windTime * windSpeed * 0.4;
+
+    // Multi-octave noise for turbulence
+    float baseFreq = 0.05;
+    float n1 = perlinNoise(scrolledPos.x * baseFreq, scrolledPos.y * baseFreq);
+    float n2 = perlinNoise(scrolledPos.x * baseFreq * 2.0, scrolledPos.y * baseFreq * 2.0);
+    float turbulence = n1 * 0.7 + n2 * 0.3;
+
+    // Base wind direction in 3D (horizontal)
+    vec3 windDir3D = normalize(vec3(windDir.x, 0.0, windDir.y));
+
+    // Add turbulence variation
+    float turbulenceAngle = (turbulence - 0.5) * 0.5;
+    vec3 perpWind = vec3(-windDir3D.z, 0.0, windDir3D.x);
+
+    return (windDir3D + perpWind * turbulenceAngle) * windStrength;
+}
+
+// Check if particle is inside frustum
+bool isInFrustum(vec3 pos, float margin) {
+    vec4 posW = vec4(pos, 1.0);
+    for (int i = 0; i < 6; i++) {
+        if (dot(posW, uniforms.frustumPlanes[i]) < -margin) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Spawn a new particle at the given index
+void spawnParticle(uint idx, vec3 spawnCenter) {
+    // Use index and time for reproducible randomness
+    float seed = float(idx) * 0.001 + uniforms.time * 0.1;
+    vec3 rnd = hash3(vec3(seed, seed * 1.7, seed * 2.3));
+
+    // Determine if this is a near-zone or frustum particle
+    float distFromCenter = rnd.x * uniforms.spawnRegion.w;
+    bool isNearZone = distFromCenter < uniforms.nearZoneRadius;
+
+    // Spawn position: circular distribution around camera
+    float angle = rnd.y * 6.28318;
+    float radius = isNearZone ? rnd.x * uniforms.nearZoneRadius : distFromCenter;
+
+    vec3 pos;
+    pos.x = spawnCenter.x + cos(angle) * radius;
+    pos.z = spawnCenter.z + sin(angle) * radius;
+    pos.y = spawnCenter.y + uniforms.spawnHeight + (rnd.z - 0.5) * 20.0;
+
+    // Initial velocity based on weather type
+    vec3 velocity;
+    float size;
+    float lifetime;
+
+    if (uniforms.weatherType == 0) {
+        // Rain: fast falling, slight horizontal
+        float terminalVel = uniforms.gravity.w * (0.8 + rnd.x * 0.4);  // 80-120% of terminal
+        velocity = vec3(0.0, -terminalVel, 0.0);
+        size = 0.002 + rnd.y * 0.001;  // 2-3mm width
+        lifetime = PARTICLE_LIFETIME_RAIN * (0.8 + rnd.z * 0.4);
+    } else {
+        // Snow: slow falling, more horizontal drift
+        float terminalVel = 1.5 + rnd.x * 1.5;  // 1.5-3 m/s
+        velocity = vec3((rnd.y - 0.5) * 0.5, -terminalVel, (rnd.z - 0.5) * 0.5);
+        size = 0.005 + rnd.y * 0.015;  // 5-20mm
+        lifetime = PARTICLE_LIFETIME_SNOW * (0.8 + rnd.z * 0.4);
+    }
+
+    // Store particle
+    outputParticles[idx].position = pos;
+    outputParticles[idx].velocity = velocity;
+    outputParticles[idx].lifetime = lifetime;
+    outputParticles[idx].size = size;
+    outputParticles[idx].rotation = rnd.x * 6.28318;
+    outputParticles[idx].hash = hash(float(idx) + uniforms.time);
+    outputParticles[idx].type = uniforms.weatherType;
+    outputParticles[idx].flags = FLAG_ACTIVE;
+}
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= MAX_PARTICLES) return;
+
+    // Set vertex count for quad (4 vertices for triangle strip)
+    if (idx == 0) {
+        atomicMax(drawCmd.vertexCount, 4);
+    }
+
+    // Calculate target particle count based on intensity
+    uint targetParticles;
+    if (uniforms.weatherType == 0) {
+        // Rain: 10k-150k based on intensity
+        targetParticles = uint(mix(10000.0, 150000.0, uniforms.intensity));
+    } else {
+        // Snow: 5k-75k based on intensity
+        targetParticles = uint(mix(5000.0, 75000.0, uniforms.intensity));
+    }
+
+    // Only process particles up to target count
+    if (idx >= targetParticles) {
+        outputParticles[idx].flags = 0u;
+        return;
+    }
+
+    vec3 spawnCenter = uniforms.cameraPosition.xyz;
+
+    // Read previous particle state
+    WeatherParticle p = inputParticles[idx];
+
+    // Check if particle needs respawn
+    bool needsRespawn = (p.flags & FLAG_ACTIVE) == 0 ||
+                        p.lifetime <= 0.0 ||
+                        p.position.y < uniforms.groundLevel;
+
+    if (needsRespawn) {
+        spawnParticle(idx, spawnCenter);
+        p = outputParticles[idx];
+    } else {
+        // === PHYSICS SIMULATION ===
+
+        // Apply gravity
+        vec3 gravityForce = uniforms.gravity.xyz;
+        float terminalVelocity = uniforms.gravity.w;
+
+        // Sample wind at particle position
+        vec3 windForce = sampleWind(p.position);
+
+        // Different physics for rain vs snow
+        float dt = push.deltaTime;
+
+        if (uniforms.weatherType == 0) {
+            // Rain: high terminal velocity, strong downward, moderate wind
+            p.velocity.y += gravityForce.y * dt;
+            p.velocity.y = max(p.velocity.y, -terminalVelocity);
+
+            // Wind affects horizontal velocity
+            p.velocity.xz += windForce.xz * dt * 2.0;
+
+            // Drag on horizontal
+            p.velocity.xz *= 0.98;
+        } else {
+            // Snow: low terminal velocity, high wind susceptibility, tumbling
+            p.velocity.y += gravityForce.y * dt * 0.3;  // Slower gravity effect
+            p.velocity.y = max(p.velocity.y, -3.0);     // Lower terminal for snow
+
+            // Wind affects snow more
+            p.velocity.xz += windForce.xz * dt * 5.0;
+
+            // Stronger drag for floaty feel
+            p.velocity.xz *= 0.95;
+
+            // Tumble rotation
+            p.rotation += dt * (1.0 + p.hash * 2.0);
+        }
+
+        // Update position
+        p.position += p.velocity * dt;
+
+        // Update lifetime
+        p.lifetime -= dt;
+
+        // Distance culling - respawn if too far
+        float distToCamera = length(p.position - spawnCenter);
+        if (distToCamera > uniforms.maxDrawDistance * 1.2) {
+            spawnParticle(idx, spawnCenter);
+            p = outputParticles[idx];
+        } else {
+            // Write updated particle
+            outputParticles[idx] = p;
+        }
+    }
+
+    // === VISIBILITY FLAG UPDATE ===
+    // Update visibility flags for vertex shader culling
+    float distToCamera = length(p.position - spawnCenter);
+    bool visible = true;
+
+    // Distance culling
+    if (distToCamera > uniforms.maxDrawDistance) {
+        visible = false;
+    }
+
+    // Frustum culling with margin
+    float cullMargin = uniforms.weatherType == 0 ? 1.0 : 2.0;
+    if (visible && !isInFrustum(p.position, cullMargin)) {
+        visible = false;
+    }
+
+    // LOD particle dropping at distance
+    if (visible) {
+        float lodFactor = smoothstep(uniforms.maxDrawDistance * 0.5, uniforms.maxDrawDistance, distToCamera);
+        float dropThreshold = lodFactor * 0.8;  // Drop up to 80% at max distance
+        if (p.hash < dropThreshold) {
+            visible = false;
+        }
+    }
+
+    // Update visibility flag (bit 1 = visible)
+    if (visible) {
+        outputParticles[idx].flags |= 2u;  // Set visible bit
+    } else {
+        outputParticles[idx].flags &= ~2u;  // Clear visible bit
+    }
+
+    // Set instance count to target particles (all active particles get processed)
+    // Use atomicMax to ensure it's set to targetParticles
+    atomicMax(drawCmd.instanceCount, targetParticles);
+}
