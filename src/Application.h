@@ -44,6 +44,8 @@ private:
     bool running = false;
     bool thirdPersonMode = false;  // Toggle between free camera and third-person
     bool wantsJump = false;        // Jump input flag
+    bool jumpHeld = false;         // Track if keyboard jump was held last frame
+    bool gamepadJumpHeld = false;  // Track if gamepad jump was held last frame
     glm::vec3 accumulatedMoveDir{0.0f};  // Combined movement direction from all inputs
     float moveSpeed = 3.0f;
     float rotateSpeed = 60.0f;

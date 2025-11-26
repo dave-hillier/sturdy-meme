@@ -348,10 +348,12 @@ void Application::handleThirdPersonInput(float deltaTime, const bool* keyState) 
         accumulatedMoveDir += glm::vec3(moveX, 0.0f, moveZ);
     }
 
-    // Space to jump
-    if (keyState[SDL_SCANCODE_SPACE]) {
+    // Space to jump (only on initial press, not while held)
+    bool spacePressed = keyState[SDL_SCANCODE_SPACE];
+    if (spacePressed && !jumpHeld) {
         wantsJump = true;
     }
+    jumpHeld = spacePressed;
 
     // Arrow keys orbit the camera around the player
     if (keyState[SDL_SCANCODE_UP]) {
@@ -451,10 +453,12 @@ void Application::handleThirdPersonGamepadInput(float deltaTime) {
         accumulatedMoveDir += glm::vec3(moveX, 0.0f, moveZ);
     }
 
-    // A button (South) to jump
-    if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_SOUTH)) {
+    // A button (South) to jump (only on initial press)
+    bool aButtonPressed = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_SOUTH);
+    if (aButtonPressed && !gamepadJumpHeld) {
         wantsJump = true;
     }
+    gamepadJumpHeld = aButtonPressed;
 
     // Right stick orbits camera around player
     float rightX = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTX) / 32767.0f;
