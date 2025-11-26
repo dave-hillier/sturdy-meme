@@ -65,8 +65,8 @@ const float CLOUD_LAYER_BOTTOM = 1.5;     // km above surface
 const float CLOUD_LAYER_TOP = 4.0;        // km above surface
 const float CLOUD_COVERAGE = 0.5;         // 0-1 coverage amount
 const float CLOUD_DENSITY = 0.3;          // Base density multiplier
-const int CLOUD_MARCH_STEPS = 16;         // Ray march samples
-const int CLOUD_LIGHT_STEPS = 4;          // Light sampling steps
+const int CLOUD_MARCH_STEPS = 32;         // Ray march samples (increased to reduce banding)
+const int CLOUD_LIGHT_STEPS = 6;          // Light sampling steps
 
 float hash(vec3 p) {
     return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453);
@@ -134,19 +134,23 @@ float sampleCloudDensity(vec3 worldPos) {
     // Sample noise at different scales for shape and detail
     vec3 samplePos = worldPos * 0.5 + windOffset;  // Base scale
 
-    // Large-scale shape noise
-    float baseNoise = fbm(samplePos * 0.3, 4);
+    // Large-scale shape noise (increased octaves for smoother appearance)
+    float baseNoise = fbm(samplePos * 0.25, 6);
 
-    // Apply coverage (remap noise based on coverage)
+    // Add medium-scale variation to break up regular patterns
+    float mediumNoise = fbm(samplePos * 0.6 + vec3(50.0), 4);
+    baseNoise = baseNoise * 0.7 + mediumNoise * 0.3;
+
+    // Apply coverage with softer transition (wider smoothstep range)
     float coverageThreshold = 1.0 - CLOUD_COVERAGE;
-    float density = smoothstep(coverageThreshold, coverageThreshold + 0.3, baseNoise);
+    float density = smoothstep(coverageThreshold - 0.1, coverageThreshold + 0.4, baseNoise);
 
     // Apply height gradient
     density *= heightGradient;
 
-    // Add detail erosion
-    float detailNoise = fbm(samplePos * 1.5 + vec3(100.0), 3);
-    density -= detailNoise * 0.3 * (1.0 - heightFraction);
+    // Add detail erosion with more octaves
+    float detailNoise = fbm(samplePos * 1.2 + vec3(100.0), 4);
+    density -= detailNoise * 0.25 * (1.0 - heightFraction);
     density = max(density, 0.0);
 
     return density * CLOUD_DENSITY;
@@ -242,6 +246,10 @@ CloudResult marchClouds(vec3 origin, vec3 dir) {
     float tEnd = cloudHit.y;
     float stepSize = (tEnd - tStart) / float(CLOUD_MARCH_STEPS);
 
+    // Add jitter to reduce banding (screen-space dither based on ray direction)
+    float jitter = hash(dir * 1000.0 + vec3(ubo.timeOfDay * 0.1));
+    tStart += stepSize * jitter * 0.5;
+
     vec3 sunDir = normalize(ubo.sunDirection.xyz);
     float cosTheta = dot(dir, sunDir);
     vec3 sunLight = ubo.sunColor.rgb * ubo.sunDirection.w;
@@ -334,11 +342,20 @@ struct ScatteringResult {
     vec3 transmittance;
 };
 
-// Compute Rayleigh scattering in LMS space for accurate sunset colors
-vec3 computeRayleighScatteringLMS(float density, float phase) {
-    // Work in LMS space for spectral accuracy
+// Compute Rayleigh scattering with blended LMS for accurate sunset colors
+// Uses LMS primarily at low sun angles for better sunsets, standard RGB otherwise
+vec3 computeRayleighScatteringBlended(float density, float phase, float sunAltitude) {
+    // Standard RGB Rayleigh
+    vec3 scatterRGB = density * RAYLEIGH_SCATTERING_BASE * phase;
+
+    // LMS-space Rayleigh for more accurate sunsets
     vec3 scatterLMS = density * RAYLEIGH_LMS * phase;
-    return LMS_TO_RGB * scatterLMS;
+    vec3 lmsInRGB = LMS_TO_RGB * scatterLMS;
+
+    // Blend: use LMS more when sun is near horizon (better sunset colors)
+    // and standard RGB when sun is high (cleaner blue sky)
+    float lmsBlend = smoothstep(0.3, -0.1, sunAltitude);  // 0 at high sun, 1 at sunset
+    return mix(scatterRGB, lmsInRGB, lmsBlend * 0.7);  // Max 70% LMS contribution
 }
 
 ScatteringResult integrateAtmosphere(vec3 origin, vec3 dir, int sampleCount) {
@@ -364,6 +381,8 @@ ScatteringResult integrateAtmosphere(vec3 origin, vec3 dir, int sampleCount) {
     float rayleighP = rayleighPhase(cosViewSun);
     float mieP = cornetteShanksPhase(cosViewSun, MIE_ANISOTROPY);
 
+    float sunAltitude = sunDir.y;
+
     for (int i = 0; i < sampleCount; i++) {
         float t = start + (float(i) + 0.5) * stepSize;
         vec3 pos = origin + dir * t;
@@ -373,8 +392,8 @@ ScatteringResult integrateAtmosphere(vec3 origin, vec3 dir, int sampleCount) {
         float mieDensity = exp(-altitude / MIE_SCALE_HEIGHT);
         float ozone = ozoneDensity(altitude);
 
-        // Use LMS-based Rayleigh for more accurate sunset colors
-        vec3 rayleighScatterLMS = computeRayleighScatteringLMS(rayleighDensity, rayleighP);
+        // Use blended LMS/RGB Rayleigh for accurate sunset colors without purple bias
+        vec3 rayleighScatter = computeRayleighScatteringBlended(rayleighDensity, rayleighP, sunAltitude);
 
         // Mie scattering (grey, so no LMS conversion needed)
         vec3 mieScatter = mieDensity * vec3(MIE_SCATTERING_BASE);
@@ -389,8 +408,8 @@ ScatteringResult integrateAtmosphere(vec3 origin, vec3 dir, int sampleCount) {
         // Points in Earth's shadow don't receive direct sunlight
         float earthShadow = computeEarthShadow(pos, sunDir);
 
-        // Combine LMS Rayleigh with RGB Mie for scattering, modulated by shadow
-        vec3 segmentScatter = (rayleighScatterLMS + mieScatter * mieP) * earthShadow;
+        // Combine Rayleigh with Mie for scattering, modulated by shadow
+        vec3 segmentScatter = (rayleighScatter + mieScatter * mieP) * earthShadow;
 
         vec3 attenuation = exp(-extinction * stepSize);
         inscatter += transmittance * segmentScatter * stepSize;
