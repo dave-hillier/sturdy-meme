@@ -787,7 +787,8 @@ void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>
 }
 
 void GrassSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos, const glm::mat4& viewProj,
-                                  float terrainSize, float terrainHeightScale) {
+                                  float terrainSize, float terrainHeightScale,
+                                  const glm::vec3& playerPos, float playerRadius) {
     GrassUniforms uniforms{};
 
     // Camera position
@@ -818,6 +819,14 @@ void GrassSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos
             uniforms.frustumPlanes[i] /= len;
         }
     }
+
+    // Player capsule for grass displacement
+    // xyz = base position (foot position), w = capsule radius
+    uniforms.playerCapsule = glm::vec4(playerPos, playerRadius);
+
+    // Displacement parameters
+    // x = strength (how much grass bends), y = decay falloff, z = max tilt, w = unused
+    uniforms.displacementParams = glm::vec4(1.0f, 2.0f, 0.6f, 0.0f);
 
     // Distance thresholds
     uniforms.maxDrawDistance = 50.0f;

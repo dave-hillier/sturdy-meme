@@ -307,6 +307,11 @@ void Renderer::setWeatherType(uint32_t type) {
     weatherSystem.setWeatherType(type);
 }
 
+void Renderer::setPlayerPosition(const glm::vec3& position, float radius) {
+    playerPosition = position;
+    playerCapsuleRadius = radius;
+}
+
 void Renderer::shutdown() {
     if (device != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(device);
@@ -2175,7 +2180,8 @@ void Renderer::render(const Camera& camera) {
     glm::mat4 viewProj = camera.getProjectionMatrix() * camera.getViewMatrix();
     const auto& terrainConfig = terrainSystem.getConfig();
     grassSystem.updateUniforms(currentFrame, camera.getPosition(), viewProj,
-                               terrainConfig.size, terrainConfig.heightScale);
+                               terrainConfig.size, terrainConfig.heightScale,
+                               playerPosition, playerCapsuleRadius);
     weatherSystem.updateUniforms(currentFrame, camera.getPosition(), viewProj, deltaTime, grassTime, windSystem);
     terrainSystem.updateUniforms(currentFrame, camera.getPosition(), camera.getViewMatrix(), camera.getProjectionMatrix());
 

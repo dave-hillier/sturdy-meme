@@ -25,6 +25,8 @@ layout(std430, binding = 1) buffer IndirectBuffer {
 layout(binding = 2) uniform GrassUniforms {
     vec4 cameraPosition;
     vec4 frustumPlanes[6];
+    vec4 playerCapsule;       // xyz = base position, w = radius
+    vec4 displacementParams;  // x = strength, y = decay falloff, z = max tilt, w = unused
     float maxDrawDistance;
     float lodTransitionStart;
     float lodTransitionEnd;
@@ -58,6 +60,52 @@ vec2 hash2v(vec2 p) {
 const float CLUMP_SCALE = 2.0;          // Size of clumps in world units
 const float CLUMP_HEIGHT_INFLUENCE = 0.4;  // How much clump affects height (0-1)
 const float CLUMP_FACING_INFLUENCE = 0.3;  // How much blades face toward/away from clump center
+
+// Calculate displacement from player capsule
+// Returns: xyz = push direction in XZ plane, w = displacement amount (0-1)
+vec4 calculatePlayerDisplacement(vec3 bladePos) {
+    vec3 capsuleBase = uniforms.playerCapsule.xyz;
+    float capsuleRadius = uniforms.playerCapsule.w;
+    float strength = uniforms.displacementParams.x;
+    float falloff = uniforms.displacementParams.y;
+
+    // Player capsule height (approximate - grass interacts with lower portion)
+    float capsuleHeight = 1.8;
+
+    // Find closest point on capsule axis to blade base
+    // Capsule axis goes from capsuleBase to capsuleBase + (0, capsuleHeight, 0)
+    float bladeY = bladePos.y;
+    float clampedY = clamp(bladeY, capsuleBase.y, capsuleBase.y + capsuleHeight);
+
+    // Closest point on capsule axis
+    vec3 closestOnAxis = vec3(capsuleBase.x, clampedY, capsuleBase.z);
+
+    // Vector from capsule axis to blade (in XZ plane primarily)
+    vec3 toBladeVec = bladePos - closestOnAxis;
+    vec2 toBladeXZ = vec2(toBladeVec.x, toBladeVec.z);
+    float distXZ = length(toBladeXZ);
+
+    // If blade is outside capsule influence radius, no displacement
+    float influenceRadius = capsuleRadius * 2.0;  // Extend influence beyond physical capsule
+    if (distXZ > influenceRadius || distXZ < 0.001) {
+        return vec4(0.0, 0.0, 0.0, 0.0);
+    }
+
+    // Normalize push direction (away from capsule center in XZ plane)
+    vec2 pushDir = toBladeXZ / distXZ;
+
+    // Calculate displacement amount with smooth falloff
+    // Quadratic falloff: stronger near center, smooth transition at edge
+    float normalizedDist = distXZ / influenceRadius;
+    float displacementAmount = (1.0 - normalizedDist * normalizedDist) * strength;
+
+    // Blades very close to capsule get maximum displacement
+    if (distXZ < capsuleRadius) {
+        displacementAmount = strength;
+    }
+
+    return vec4(pushDir.x, 0.0, pushDir.y, displacementAmount);
+}
 
 // Voronoi-based clump calculation
 // Returns clumpId (0-1), clumpDistance, and clumpCenter
@@ -202,6 +250,28 @@ void main() {
     // Tilt also influenced by distance to clump center (blades closer lean more)
     float clumpTiltMod = (1.0 - clumpDist / CLUMP_SCALE) * 0.15;
     float tilt = baseTilt + clumpTiltMod;
+
+    // Apply player displacement - grass bends away from player capsule
+    vec4 displacement = calculatePlayerDisplacement(worldPos);
+    float dispAmount = displacement.w;
+
+    if (dispAmount > 0.01) {
+        // Get push direction in XZ plane
+        vec2 pushDir = vec2(displacement.x, displacement.z);
+
+        // Calculate the angle of the push direction
+        float pushAngle = atan(pushDir.y, pushDir.x);
+
+        // Blend facing toward push direction based on displacement amount
+        // Strong displacement = blade faces away from player
+        float maxDispInfluence = uniforms.displacementParams.z;  // max tilt
+        float facingBlend = dispAmount * 0.7;  // How much to rotate toward push direction
+        facing = mix(facing, pushAngle, facingBlend);
+
+        // Increase tilt based on displacement - grass bends over when pushed
+        float dispTilt = dispAmount * maxDispInfluence;
+        tilt += dispTilt;
+    }
 
     // Write instance data (clumpId stored in w for fragment shader color variation)
     instances[slot].positionAndFacing = vec4(worldPos, facing);

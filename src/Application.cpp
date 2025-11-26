@@ -116,6 +116,9 @@ void Application::run() {
         // Update scene object transforms from physics
         renderer.getSceneManager().update(physics);
 
+        // Update player position for grass interaction (always, regardless of camera mode)
+        renderer.setPlayerPosition(player.getPosition(), Player::CAPSULE_RADIUS);
+
         // Update camera and player based on mode
         if (thirdPersonMode) {
             camera.setThirdPersonTarget(player.getFocusPoint());

@@ -14,6 +14,8 @@ struct GrassPushConstants {
 struct GrassUniforms {
     glm::vec4 cameraPosition;      // xyz = position, w = unused
     glm::vec4 frustumPlanes[6];    // 6 frustum planes (ax+by+cz+d form)
+    glm::vec4 playerCapsule;       // xyz = base position, w = radius
+    glm::vec4 displacementParams;  // x = strength, y = decay falloff, z = max displacement, w = unused
     float maxDrawDistance;          // Max distance for grass rendering
     float lodTransitionStart;       // Distance where LOD transition begins
     float lodTransitionEnd;         // Distance where LOD transition ends
@@ -54,7 +56,8 @@ public:
                               VkImageView terrainHeightMapView, VkSampler terrainHeightMapSampler);
 
     void updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos, const glm::mat4& viewProj,
-                        float terrainSize, float terrainHeightScale);
+                        float terrainSize, float terrainHeightScale,
+                        const glm::vec3& playerPos, float playerRadius);
     void recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex, float time);
     void recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time);
     void recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time, uint32_t cascadeIndex);
