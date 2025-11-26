@@ -666,13 +666,13 @@ float starField(vec3 dir) {
     vec2 delta = cellFrac - starPos;
     float dist = length(delta);
 
-    // Create tiny, intense point - very sharp falloff
-    // Stars should be sub-pixel sized to create intense dots
-    float starSize = 0.008; // Very small angular size
-    float star = smoothstep(starSize, 0.0, dist);
+    // Create small, intense point with softer falloff for visibility
+    // Small but visible dots that trigger bloom
+    float starSize = 0.04; // Small angular size, visible but still point-like
+    float star = smoothstep(starSize * 1.5, starSize * 0.3, dist);
 
     // High intensity to trigger bloom (3-8x brighter)
-    float brightness = (hash(p + vec3(3.0)) * 0.6 + 0.4) * 5.0;
+    float brightness = (hash(p + vec3(3.0)) * 0.6 + 0.4) * 6.0;
 
     return star * brightness * nightFactor;
 }
