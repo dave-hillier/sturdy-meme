@@ -13,6 +13,7 @@
 #include "CelestialCalculator.h"
 #include "WindSystem.h"
 #include "WeatherSystem.h"
+#include "LeafSystem.h"
 #include "PostProcessSystem.h"
 #include "FroxelSystem.h"
 #include "AtmosphereLUTSystem.h"
@@ -84,6 +85,10 @@ public:
     void setWeatherType(uint32_t type);
     uint32_t getWeatherType() const { return weatherSystem.getWeatherType(); }
     float getIntensity() const { return weatherSystem.getIntensity(); }
+
+    // Leaf control
+    void setLeafIntensity(float intensity) { leafSystem.setIntensity(intensity); }
+    float getLeafIntensity() const { return leafSystem.getIntensity(); }
 
     // Player rendering
     void updatePlayerTransform(const glm::mat4& transform);
@@ -183,6 +188,7 @@ private:
     GrassSystem grassSystem;
     WindSystem windSystem;
     WeatherSystem weatherSystem;
+    LeafSystem leafSystem;
     PostProcessSystem postProcessSystem;
     FroxelSystem froxelSystem;
     AtmosphereLUTSystem atmosphereLUTSystem;

@@ -26,6 +26,7 @@ set(SOURCES
     src/CelestialCalculator.cpp
     src/WindSystem.cpp
     src/WeatherSystem.cpp
+    src/LeafSystem.cpp
     src/PostProcessSystem.cpp
     src/FroxelSystem.cpp
     src/AtmosphereLUTSystem.cpp
@@ -83,6 +84,9 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.frag.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/leaf.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/leaf.vert.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/leaf.frag.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/multiscatter_lut.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/skyview_lut.comp.spv
@@ -217,6 +221,22 @@ if(SHADER_COMPILE_CMD)
         COMMENT "Compiling weather fragment shader"
     )
     add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/leaf.comp.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/leaf.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/leaf.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/leaf.comp
+        COMMENT "Compiling leaf compute shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/leaf.vert.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/leaf.vert.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/leaf.vert
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/leaf.vert
+        COMMENT "Compiling leaf vertex shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/leaf.frag.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/leaf.frag.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/leaf.frag
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/leaf.frag
+        COMMENT "Compiling leaf fragment shader"
         OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp.spv
         COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp ${CMAKE_CURRENT_SOURCE_DIR}/shaders/atmosphere_common.glsl
@@ -253,6 +273,9 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.frag.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/leaf.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/leaf.vert.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/leaf.frag.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/multiscatter_lut.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/skyview_lut.comp.spv

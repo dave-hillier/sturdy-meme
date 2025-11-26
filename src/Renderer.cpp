@@ -180,6 +180,24 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     // Update weather system descriptor sets with wind buffers
     weatherSystem.updateDescriptorSets(device, uniformBuffers, windBuffers, depthImageView, shadowSampler);
 
+    // Initialize leaf particle system
+    LeafSystem::InitInfo leafInfo{};
+    leafInfo.device = device;
+    leafInfo.allocator = allocator;
+    leafInfo.renderPass = postProcessSystem.getHDRRenderPass();
+    leafInfo.descriptorPool = descriptorPool;
+    leafInfo.extent = swapchainExtent;
+    leafInfo.shaderPath = resourcePath + "/shaders";
+    leafInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+
+    if (!leafSystem.init(leafInfo)) return false;
+
+    // Update leaf system descriptor sets with wind buffers
+    leafSystem.updateDescriptorSets(device, uniformBuffers, windBuffers);
+
+    // Set default leaf intensity (autumn scene)
+    leafSystem.setIntensity(0.5f);
+
     // Initialize froxel volumetric fog system (Phase 4.3)
     FroxelSystem::InitInfo froxelInfo{};
     froxelInfo.device = device;
@@ -292,6 +310,7 @@ void Renderer::shutdown() {
         grassSystem.destroy(device, allocator);
         windSystem.destroy(device, allocator);
         weatherSystem.destroy(device, allocator);
+        leafSystem.destroy(device, allocator);
         froxelSystem.destroy(device, allocator);
         atmosphereLUTSystem.destroy(device, allocator);
         postProcessSystem.destroy(device, allocator);
@@ -2165,6 +2184,12 @@ void Renderer::render(const Camera& camera) {
     grassSystem.updateUniforms(currentFrame, camera.getPosition(), viewProj);
     weatherSystem.updateUniforms(currentFrame, camera.getPosition(), viewProj, deltaTime, grassTime, windSystem);
 
+    // Update leaf system with player position (using camera as player proxy)
+    // TODO: Integrate actual player velocity from Player class for proper disruption
+    glm::vec3 playerPos = camera.getPosition();
+    glm::vec3 playerVel = glm::vec3(0.0f);  // Will be updated when player movement tracking is added
+    leafSystem.updateUniforms(currentFrame, camera.getPosition(), viewProj, playerPos, playerVel, deltaTime, grassTime);
+
     // Begin command buffer recording
     vkResetCommandBuffer(commandBuffers[currentFrame], 0);
 
@@ -2179,6 +2204,9 @@ void Renderer::render(const Camera& camera) {
 
     // Weather particle compute pass
     weatherSystem.recordResetAndCompute(cmd, currentFrame, grassTime, deltaTime);
+
+    // Leaf particle compute pass
+    leafSystem.recordResetAndCompute(cmd, currentFrame, grassTime, deltaTime);
 
     // Shadow pass (skip when sun is below horizon)
     if (lastSunIntensity > 0.001f) {
@@ -2245,6 +2273,7 @@ void Renderer::render(const Camera& camera) {
     // - Next frame's render reads from what was the compute set (now contains fresh data)
     grassSystem.advanceBufferSet();
     weatherSystem.advanceBufferSet();
+    leafSystem.advanceBufferSet();
 
     currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 }
@@ -2440,6 +2469,9 @@ void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float gra
 
     // Draw grass
     grassSystem.recordDraw(cmd, frameIndex, grassTime);
+
+    // Draw falling leaves - after grass, before weather
+    leafSystem.recordDraw(cmd, frameIndex, grassTime);
 
     // Draw weather particles (rain/snow) - after opaque geometry
     weatherSystem.recordDraw(cmd, frameIndex, grassTime);
