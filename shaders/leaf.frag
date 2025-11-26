@@ -16,10 +16,11 @@ layout(binding = 0) uniform UniformBufferObject {
     vec4 cameraPosition;
     vec4 pointLightPosition;
     vec4 pointLightColor;
+    vec4 windDirectionAndSpeed;           // xy = direction, z = speed, w = time
     float timeOfDay;
     float shadowMapSize;
     float debugCascades;
-    float padding;
+    float julianDay;                       // Julian day for sidereal rotation
 } ubo;
 
 // Leaf states

@@ -11,14 +11,16 @@ layout(binding = 0) uniform UniformBufferObject {
     vec4 sunDirection;
     vec4 moonDirection;
     vec4 sunColor;
+    vec4 moonColor;                       // rgb = moon color
     vec4 ambientColor;
     vec4 cameraPosition;
     vec4 pointLightPosition;  // xyz = position, w = intensity
     vec4 pointLightColor;     // rgb = color, a = radius
+    vec4 windDirectionAndSpeed;           // xy = direction, z = speed, w = time
     float timeOfDay;
     float shadowMapSize;
     float debugCascades;
-    float padding;
+    float julianDay;           // Julian day for sidereal rotation
 } ubo;
 
 layout(location = 0) out vec3 rayDir;

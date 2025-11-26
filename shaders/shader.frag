@@ -40,10 +40,11 @@ layout(binding = 0) uniform UniformBufferObject {
     vec4 cameraPosition;
     vec4 pointLightPosition;  // xyz = position, w = intensity
     vec4 pointLightColor;     // rgb = color, a = radius
+    vec4 windDirectionAndSpeed;           // xy = direction, z = speed, w = time
     float timeOfDay;
     float shadowMapSize;
     float debugCascades;       // 1.0 = show cascade colors
-    float padding;
+    float julianDay;           // Julian day for sidereal rotation
 } ubo;
 
 layout(binding = 1) uniform sampler2D texSampler;
