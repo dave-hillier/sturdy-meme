@@ -270,13 +270,13 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
         return false;
     }
 
-    // Configure terrain - large procedural terrain
-    terrainCBT.setTerrainSize(500.0f);  // 500 unit terrain (5x larger)
-    terrainCBT.setHeightScale(50.0f);   // More dramatic height variation
-    terrainCBT.setMaxDepth(10);         // 2^10 = 1024 max triangles per base
+    // Configure terrain - massive terrain extending to horizon
+    terrainCBT.setTerrainSize(4000.0f);  // 4000 unit terrain - extends well past horizon
+    terrainCBT.setHeightScale(200.0f);   // Taller mountains for the larger scale
+    terrainCBT.setMaxDepth(12);          // 2^12 = 4096 max triangles per base for detail
 
-    // Generate procedural heightmap using Perlin noise
-    if (!terrainCBT.generateProceduralHeightMap(1024, 42)) {
+    // Generate procedural heightmap using Perlin noise (2048x2048 for detail at large scale)
+    if (!terrainCBT.generateProceduralHeightMap(2048, 42)) {
         SDL_Log("Failed to generate procedural heightmap, using flat terrain");
     }
 
