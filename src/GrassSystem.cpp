@@ -212,7 +212,7 @@ bool GrassSystem::createComputePipeline() {
 }
 
 bool GrassSystem::createGraphicsDescriptorSetLayout() {
-    std::array<VkDescriptorSetLayoutBinding, 4> bindings{};
+    std::array<VkDescriptorSetLayoutBinding, 5> bindings{};
 
     // UBO (same as main pipeline)
     bindings[0].binding = 0;
@@ -238,6 +238,13 @@ bool GrassSystem::createGraphicsDescriptorSetLayout() {
     bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     bindings[3].descriptorCount = 1;
     bindings[3].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
+    // Light buffer SSBO (for dynamic lights)
+    bindings[4].binding = 4;
+    bindings[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    bindings[4].descriptorCount = 1;
+    bindings[4].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    bindings[4].pImmutableSamplers = nullptr;
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -657,7 +664,8 @@ bool GrassSystem::createDescriptorSets() {
 
 void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>& rendererUniformBuffers,
                                         VkImageView shadowMapView, VkSampler shadowSampler,
-                                        const std::vector<VkBuffer>& windBuffers) {
+                                        const std::vector<VkBuffer>& windBuffers,
+                                        const std::vector<VkBuffer>& lightBuffersParam) {
     // Update graphics and shadow descriptor sets for both buffer sets (A and B)
     // Note: We use the first frame's UBO/wind buffer since they're updated each frame anyway
     // For proper per-frame handling, we'd need dynamic offsets or per-frame descriptor sets
@@ -683,7 +691,12 @@ void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>
         windBufferInfo.offset = 0;
         windBufferInfo.range = 32;  // sizeof(WindUniforms) - 2 vec4s
 
-        std::array<VkWriteDescriptorSet, 4> graphicsWrites{};
+        VkDescriptorBufferInfo lightBufferInfo{};
+        lightBufferInfo.buffer = lightBuffersParam[0];
+        lightBufferInfo.offset = 0;
+        lightBufferInfo.range = VK_WHOLE_SIZE;  // sizeof(LightBuffer)
+
+        std::array<VkWriteDescriptorSet, 5> graphicsWrites{};
 
         graphicsWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         graphicsWrites[0].dstSet = graphicsDescriptorSets[set];
@@ -716,6 +729,14 @@ void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>
         graphicsWrites[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         graphicsWrites[3].descriptorCount = 1;
         graphicsWrites[3].pBufferInfo = &windBufferInfo;
+
+        graphicsWrites[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        graphicsWrites[4].dstSet = graphicsDescriptorSets[set];
+        graphicsWrites[4].dstBinding = 4;
+        graphicsWrites[4].dstArrayElement = 0;
+        graphicsWrites[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        graphicsWrites[4].descriptorCount = 1;
+        graphicsWrites[4].pBufferInfo = &lightBufferInfo;
 
         vkUpdateDescriptorSets(dev, static_cast<uint32_t>(graphicsWrites.size()),
                                graphicsWrites.data(), 0, nullptr);

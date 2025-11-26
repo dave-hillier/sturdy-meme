@@ -47,7 +47,8 @@ public:
 
     void updateDescriptorSets(VkDevice device, const std::vector<VkBuffer>& uniformBuffers,
                               VkImageView shadowMapView, VkSampler shadowSampler,
-                              const std::vector<VkBuffer>& windBuffers);
+                              const std::vector<VkBuffer>& windBuffers,
+                              const std::vector<VkBuffer>& lightBuffers);
 
     void updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos, const glm::mat4& viewProj);
     void recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex, float time);

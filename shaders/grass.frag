@@ -45,6 +45,27 @@ layout(binding = 0) uniform UniformBufferObject {
 
 layout(binding = 2) uniform sampler2DArrayShadow shadowMapArray;  // Changed to array for CSM
 
+// Light types
+const uint LIGHT_TYPE_POINT = 0;
+const uint LIGHT_TYPE_SPOT = 1;
+
+// Maximum lights (must match CPU side)
+const uint MAX_LIGHTS = 16;
+
+// GPU light structure (must match CPU GPULight struct)
+struct GPULight {
+    vec4 positionAndType;    // xyz = position, w = type (0=point, 1=spot)
+    vec4 directionAndCone;   // xyz = direction (for spot), w = outer cone angle (cos)
+    vec4 colorAndIntensity;  // rgb = color, a = intensity
+    vec4 radiusAndInnerCone; // x = radius, y = inner cone angle (cos), zw = padding
+};
+
+// Light buffer SSBO
+layout(std430, binding = 4) readonly buffer LightBuffer {
+    uvec4 lightCount;        // x = active light count
+    GPULight lights[MAX_LIGHTS];
+} lightBuffer;
+
 layout(location = 0) in vec3 fragColor;
 layout(location = 1) in vec3 fragNormal;
 layout(location = 2) in float fragHeight;
@@ -332,12 +353,31 @@ vec3 calculateSSS(vec3 lightDir, vec3 viewDir, vec3 normal, vec3 lightColor, vec
     return sssColor * lightColor * sssAmount * GRASS_SSS_STRENGTH;
 }
 
-// Calculate point light contribution
-vec3 calculatePointLight(vec3 N, vec3 V, vec3 worldPos, vec3 albedo) {
-    vec3 lightPos = ubo.pointLightPosition.xyz;
-    float lightIntensity = ubo.pointLightPosition.w;
-    vec3 lightColor = ubo.pointLightColor.rgb;
-    float lightRadius = ubo.pointLightColor.a;
+// Calculate attenuation for a light with windowed falloff
+float calculateAttenuation(float distance, float radius) {
+    if (radius > 0.0) {
+        float distRatio = distance / radius;
+        float windowedFalloff = max(1.0 - distRatio * distRatio, 0.0);
+        windowedFalloff *= windowedFalloff;
+        return windowedFalloff / (distance * distance + 0.01);
+    } else {
+        return 1.0 / (distance * distance + 0.01);
+    }
+}
+
+// Calculate spot light cone falloff
+float calculateSpotFalloff(vec3 L, vec3 spotDir, float innerCone, float outerCone) {
+    float cosAngle = dot(-L, spotDir);
+    return smoothstep(outerCone, innerCone, cosAngle);
+}
+
+// Calculate contribution from a single dynamic light for grass
+vec3 calculateDynamicLightGrass(GPULight light, vec3 N, vec3 V, vec3 worldPos, vec3 albedo) {
+    vec3 lightPos = light.positionAndType.xyz;
+    uint lightType = uint(light.positionAndType.w);
+    vec3 lightColor = light.colorAndIntensity.rgb;
+    float lightIntensity = light.colorAndIntensity.a;
+    float lightRadius = light.radiusAndInnerCone.x;
 
     if (lightIntensity <= 0.0) return vec3(0.0);
 
@@ -345,25 +385,41 @@ vec3 calculatePointLight(vec3 N, vec3 V, vec3 worldPos, vec3 albedo) {
     float distance = length(lightVec);
     vec3 L = normalize(lightVec);
 
-    // Windowed inverse-square falloff
-    float attenuation = 1.0;
-    if (lightRadius > 0.0) {
-        float distRatio = distance / lightRadius;
-        float windowedFalloff = max(1.0 - distRatio * distRatio, 0.0);
-        windowedFalloff *= windowedFalloff;
-        attenuation = windowedFalloff / (distance * distance + 0.01);
-    } else {
-        attenuation = 1.0 / (distance * distance + 0.01);
+    // Early out if beyond radius
+    if (lightRadius > 0.0 && distance > lightRadius) return vec3(0.0);
+
+    // Calculate attenuation
+    float attenuation = calculateAttenuation(distance, lightRadius);
+
+    // For spot lights, apply cone falloff
+    if (lightType == LIGHT_TYPE_SPOT) {
+        vec3 spotDir = normalize(light.directionAndCone.xyz);
+        float outerCone = light.directionAndCone.w;
+        float innerCone = light.radiusAndInnerCone.y;
+        float spotFalloff = calculateSpotFalloff(L, spotDir, innerCone, outerCone);
+        attenuation *= spotFalloff;
     }
 
     // Two-sided diffuse for grass
     float NdotL = dot(N, L);
     float diffuse = max(NdotL, 0.0) + max(-NdotL, 0.0) * 0.6;
 
-    // Add SSS for point light
+    // Add SSS for dynamic light
     vec3 sss = calculateSSS(L, V, N, lightColor, albedo);
 
     return (albedo * diffuse + sss) * lightColor * lightIntensity * attenuation;
+}
+
+// Calculate contribution from all dynamic lights for grass
+vec3 calculateAllDynamicLightsGrass(vec3 N, vec3 V, vec3 worldPos, vec3 albedo) {
+    vec3 totalLight = vec3(0.0);
+    uint numLights = min(lightBuffer.lightCount.x, MAX_LIGHTS);
+
+    for (uint i = 0; i < numLights; i++) {
+        totalLight += calculateDynamicLightGrass(lightBuffer.lights[i], N, V, worldPos, albedo);
+    }
+
+    return totalLight;
 }
 
 // Cascaded shadow calculation with blending
@@ -448,8 +504,8 @@ void main() {
 
     vec3 moonLight = (albedo * moonDiffuse + moonSss) * ubo.moonColor.rgb * ubo.moonDirection.w;
 
-    // === POINT LIGHT ===
-    vec3 pointLight = calculatePointLight(N, V, fragWorldPos, albedo);
+    // === DYNAMIC LIGHTS (multiple point and spot lights) ===
+    vec3 dynamicLights = calculateAllDynamicLightsGrass(N, V, fragWorldPos, albedo);
 
     // === FRESNEL RIM LIGHTING ===
     // Grass blades catch light at grazing angles
@@ -469,7 +525,7 @@ void main() {
     vec3 ambient = albedo * mix(ambientBase, ambientTip, fragHeight);
 
     // === COMBINE LIGHTING ===
-    vec3 finalColor = (ambient + sunLight + moonLight + pointLight + rimLight) * ao;
+    vec3 finalColor = (ambient + sunLight + moonLight + dynamicLights + rimLight) * ao;
 
     // === AERIAL PERSPECTIVE ===
     vec3 cameraToFrag = fragWorldPos - ubo.cameraPosition.xyz;
