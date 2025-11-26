@@ -2305,6 +2305,7 @@ Renderer::LightingParams Renderer::calculateLightingParams(float timeOfDay) cons
     params.sunColor = celestialCalculator.getSunColor(sunPos.altitude);
     params.moonColor = celestialCalculator.getMoonColor(moonPos.altitude, moonPos.illumination);
     params.ambientColor = celestialCalculator.getAmbientColor(sunPos.altitude);
+    params.julianDay = dateTime.toJulianDay();
 
     return params;
 }
@@ -2345,6 +2346,7 @@ UniformBufferObject Renderer::buildUniformBufferData(const Camera& camera, const
     ubo.timeOfDay = timeOfDay;
     ubo.shadowMapSize = static_cast<float>(SHADOW_MAP_SIZE);
     ubo.debugCascades = showCascadeDebug ? 1.0f : 0.0f;
+    ubo.julianDay = static_cast<float>(lighting.julianDay);
 
     return ubo;
 }
