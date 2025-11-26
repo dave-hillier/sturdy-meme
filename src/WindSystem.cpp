@@ -191,19 +191,20 @@ float WindSystem::perlinNoise(float x, float y) const {
 }
 
 float WindSystem::sampleWindAtPosition(const glm::vec2& worldPos) const {
-    // Scroll position in wind direction (scaled down for gentler motion)
+    // Scroll position in wind direction
     glm::vec2 scrolledPos = worldPos - windDirection * totalTime * windSpeed * 0.4f;
 
-    // Frequency for ~7m wavelength: 1/7 ≈ 0.14
-    float baseFreq = 0.14f;
-    float n1 = perlinNoise(scrolledPos.x * baseFreq, scrolledPos.y * baseFreq) * 2.0f - 1.0f;
-    float n2 = perlinNoise(scrolledPos.x * baseFreq * 2.0f, scrolledPos.y * baseFreq * 2.0f) * 2.0f - 1.0f;
+    // Three octaves: ~10m, ~5m, ~2.5m wavelengths
+    float baseFreq = 0.1f;
+    float n1 = perlinNoise(scrolledPos.x * baseFreq, scrolledPos.y * baseFreq);
+    float n2 = perlinNoise(scrolledPos.x * baseFreq * 2.0f, scrolledPos.y * baseFreq * 2.0f);
+    float n3 = perlinNoise(scrolledPos.x * baseFreq * 4.0f, scrolledPos.y * baseFreq * 4.0f);
 
-    // Turbulence: absolute value creates billowy wave patterns
-    float turbulence = std::abs(n1) * 0.7f + std::abs(n2) * 0.3f;
+    // Weighted sum dominated by first octave (like 0.7 + 0.2 + 0.1)
+    float noise = n1 * 0.7f + n2 * 0.2f + n3 * 0.1f;
 
     // Add gust variation (time-based sine wave)
     float gust = (std::sin(totalTime * gustFrequency * 6.28318f) * 0.5f + 0.5f) * gustAmplitude;
 
-    return (turbulence + gust) * windStrength;
+    return (noise + gust) * windStrength;
 }

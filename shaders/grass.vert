@@ -112,8 +112,9 @@ float perlinNoise(float x, float y) {
     return (res + 1.0) * 0.5;
 }
 
-// Sample wind using scrolling Perlin noise turbulence
-// Frequency tuned for ~5-10m wavelength waves
+// Sample wind using scrolling Perlin noise
+// Multi-octave like: 0.7*sin(x/10) + 0.2*sin(x/5) + 0.1*sin(x/2.5)
+// Perlin noise approximates this - sampled at blade position, scrolls with wind
 float sampleWind(vec2 worldPos) {
     vec2 windDir = wind.windDirectionAndStrength.xy;
     float windStrength = wind.windDirectionAndStrength.z;
@@ -122,22 +123,23 @@ float sampleWind(vec2 worldPos) {
     float gustFreq = wind.windParams.x;
     float gustAmp = wind.windParams.y;
 
-    // Scroll position in wind direction (scaled down for gentler motion)
+    // Scroll position in wind direction
     vec2 scrolledPos = worldPos - windDir * windTime * windSpeed * 0.4;
 
-    // Frequency for ~7m wavelength: 1/7 ≈ 0.14
-    // Two octaves of turbulence for organic variation
-    float baseFreq = 0.14;
-    float n1 = perlinNoise(scrolledPos.x * baseFreq, scrolledPos.y * baseFreq) * 2.0 - 1.0;
-    float n2 = perlinNoise(scrolledPos.x * baseFreq * 2.0, scrolledPos.y * baseFreq * 2.0) * 2.0 - 1.0;
+    // Three octaves: ~10m, ~5m, ~2.5m wavelengths
+    // baseFreq = 0.1 gives ~10m wavelength
+    float baseFreq = 0.1;
+    float n1 = perlinNoise(scrolledPos.x * baseFreq, scrolledPos.y * baseFreq);
+    float n2 = perlinNoise(scrolledPos.x * baseFreq * 2.0, scrolledPos.y * baseFreq * 2.0);
+    float n3 = perlinNoise(scrolledPos.x * baseFreq * 4.0, scrolledPos.y * baseFreq * 4.0);
 
-    // Turbulence: absolute value creates billowy wave patterns
-    float turbulence = abs(n1) * 0.7 + abs(n2) * 0.3;
+    // Weighted sum dominated by first octave (like 0.7 + 0.2 + 0.1)
+    float noise = n1 * 0.7 + n2 * 0.2 + n3 * 0.1;
 
     // Add time-varying gust
     float gust = (sin(windTime * gustFreq * 6.28318) * 0.5 + 0.5) * gustAmp;
 
-    return (turbulence + gust) * windStrength;
+    return (noise + gust) * windStrength;
 }
 
 layout(location = 0) out vec3 fragColor;
