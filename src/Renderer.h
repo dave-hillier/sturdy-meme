@@ -16,6 +16,7 @@
 #include "LeafSystem.h"
 #include "PostProcessSystem.h"
 #include "FroxelSystem.h"
+#include "AtmosphereLUTSystem.h"
 #include "SceneBuilder.h"
 #include "Light.h"
 
@@ -130,6 +131,13 @@ private:
     glm::mat4 calculateCascadeMatrix(const glm::vec3& lightDir, const Camera& camera, float nearSplit, float farSplit);
     void updateCascadeMatrices(const glm::vec3& lightDir, const Camera& camera);
 
+    // Dynamic light shadow mapping
+    bool createDynamicShadowResources();
+    bool createDynamicShadowRenderPass();
+    bool createDynamicShadowPipeline();
+    void destroyDynamicShadowResources();
+    void renderDynamicShadows(VkCommandBuffer cmd, uint32_t frameIndex);
+
     void updateUniformBuffer(uint32_t currentImage, const Camera& camera);
 
     // Render pass recording helpers (pure - only record commands, no state mutation)
@@ -183,6 +191,7 @@ private:
     LeafSystem leafSystem;
     PostProcessSystem postProcessSystem;
     FroxelSystem froxelSystem;
+    AtmosphereLUTSystem atmosphereLUTSystem;
 
     std::vector<VkFramebuffer> framebuffers;
     VkCommandPool commandPool = VK_NULL_HANDLE;
@@ -208,6 +217,31 @@ private:
     // CSM cascade data
     std::vector<float> cascadeSplitDepths;
     std::array<glm::mat4, NUM_SHADOW_CASCADES> cascadeMatrices;
+
+    // Dynamic light shadow maps
+    static constexpr uint32_t DYNAMIC_SHADOW_MAP_SIZE = 1024;
+    static constexpr uint32_t MAX_SHADOW_CASTING_LIGHTS = 8;  // Max lights that can cast shadows per frame
+
+    // Point light shadows (cube maps)
+    std::vector<VkImage> pointShadowImages;              // Per-frame cube map arrays
+    std::vector<VmaAllocation> pointShadowAllocations;
+    std::vector<VkImageView> pointShadowArrayViews;      // Array view for all cube maps
+    std::vector<std::array<VkImageView, 6>> pointShadowFaceViews;  // Per-face views for rendering [frame][light][face]
+    VkSampler pointShadowSampler = VK_NULL_HANDLE;
+
+    // Spot light shadows (2D depth textures)
+    std::vector<VkImage> spotShadowImages;               // Per-frame texture arrays
+    std::vector<VmaAllocation> spotShadowAllocations;
+    std::vector<VkImageView> spotShadowArrayViews;       // Array view for all textures
+    std::vector<std::vector<VkImageView>> spotShadowLayerViews;  // Per-layer views [frame][light]
+    VkSampler spotShadowSampler = VK_NULL_HANDLE;
+
+    VkRenderPass shadowRenderPassDynamic = VK_NULL_HANDLE;  // Render pass for dynamic shadows
+    std::vector<std::vector<VkFramebuffer>> pointShadowFramebuffers;  // [frame][light*6+face]
+    std::vector<std::vector<VkFramebuffer>> spotShadowFramebuffers;   // [frame][light]
+
+    VkPipeline dynamicShadowPipeline = VK_NULL_HANDLE;
+    VkPipelineLayout dynamicShadowPipelineLayout = VK_NULL_HANDLE;
 
     std::vector<VkBuffer> uniformBuffers;
     std::vector<VmaAllocation> uniformBuffersAllocations;
@@ -252,6 +286,6 @@ private:
     float lightCullRadius = 100.0f;        // Radius from camera for light culling
 
     bool createLightBuffers();
-    void updateLightBuffer(uint32_t currentImage, const glm::vec3& cameraPos);
+    void updateLightBuffer(uint32_t currentImage, const Camera& camera);
     void setupSceneLights();               // Initialize default scene lights
 };

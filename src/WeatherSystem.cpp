@@ -1,8 +1,10 @@
 #include "WeatherSystem.h"
+#include "WindSystem.h"
 #include "ShaderLoader.h"
 #include <SDL3/SDL.h>
 #include <cstring>
 #include <algorithm>
+#include <array>
 
 bool WeatherSystem::init(const InitInfo& info) {
     device = info.device;
@@ -429,6 +431,10 @@ bool WeatherSystem::createDescriptorSets() {
 void WeatherSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>& rendererUniformBuffers,
                                           const std::vector<VkBuffer>& windBuffers,
                                           VkImageView depthImageView, VkSampler depthSampler) {
+    // Store external buffer references for per-frame descriptor updates
+    externalWindBuffers = windBuffers;
+    externalRendererUniformBuffers = rendererUniformBuffers;
+
     // Update compute and graphics descriptor sets for both buffer sets
     for (uint32_t set = 0; set < BUFFER_SET_COUNT; set++) {
         uint32_t inputSet = (set == 0) ? 1 : 0;  // Read from opposite buffer
@@ -553,7 +559,8 @@ void WeatherSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffe
 }
 
 void WeatherSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos,
-                                    const glm::mat4& viewProj, float deltaTime, float totalTime) {
+                                    const glm::mat4& viewProj, float deltaTime, float totalTime,
+                                    const WindSystem& windSystem) {
     WeatherUniforms uniforms{};
 
     uniforms.cameraPosition = glm::vec4(cameraPos, 1.0f);
@@ -575,8 +582,11 @@ void WeatherSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraP
         }
     }
 
-    // Wind will be sampled from wind system, set defaults here
-    uniforms.windDirectionStrength = glm::vec4(1.0f, 0.0f, 1.0f, 0.5f);
+    // Sample wind parameters from wind system
+    glm::vec2 windDir = windSystem.getWindDirection();
+    float windStr = windSystem.getWindStrength();
+    float turbulence = windSystem.getGustAmplitude();
+    uniforms.windDirectionStrength = glm::vec4(windDir.x, windDir.y, windStr, turbulence);
 
     // Gravity for rain (downward with terminal velocity)
     uniforms.gravity = glm::vec4(0.0f, -9.8f, 0.0f, 11.0f);  // Terminal velocity ~11 m/s for rain
@@ -599,22 +609,36 @@ void WeatherSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraP
 void WeatherSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex, float time, float deltaTime) {
     uint32_t writeSet = computeBufferSet;
 
-    // Update compute descriptor set to use this frame's uniform buffer
+    // Update compute descriptor set to use this frame's uniform buffers
     VkDescriptorBufferInfo uniformBufferInfo{};
     uniformBufferInfo.buffer = uniformBuffers[frameIndex];
     uniformBufferInfo.offset = 0;
     uniformBufferInfo.range = sizeof(WeatherUniforms);
 
-    VkWriteDescriptorSet uniformWrite{};
-    uniformWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    uniformWrite.dstSet = computeDescriptorSets[writeSet];
-    uniformWrite.dstBinding = 3;
-    uniformWrite.dstArrayElement = 0;
-    uniformWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    uniformWrite.descriptorCount = 1;
-    uniformWrite.pBufferInfo = &uniformBufferInfo;
+    VkDescriptorBufferInfo windBufferInfo{};
+    windBufferInfo.buffer = externalWindBuffers[frameIndex];
+    windBufferInfo.offset = 0;
+    windBufferInfo.range = 32;  // sizeof(WindUniforms)
 
-    vkUpdateDescriptorSets(device, 1, &uniformWrite, 0, nullptr);
+    std::array<VkWriteDescriptorSet, 2> computeWrites{};
+
+    computeWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    computeWrites[0].dstSet = computeDescriptorSets[writeSet];
+    computeWrites[0].dstBinding = 3;
+    computeWrites[0].dstArrayElement = 0;
+    computeWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    computeWrites[0].descriptorCount = 1;
+    computeWrites[0].pBufferInfo = &uniformBufferInfo;
+
+    computeWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    computeWrites[1].dstSet = computeDescriptorSets[writeSet];
+    computeWrites[1].dstBinding = 4;
+    computeWrites[1].dstArrayElement = 0;
+    computeWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    computeWrites[1].descriptorCount = 1;
+    computeWrites[1].pBufferInfo = &windBufferInfo;
+
+    vkUpdateDescriptorSets(device, static_cast<uint32_t>(computeWrites.size()), computeWrites.data(), 0, nullptr);
 
     // Reset indirect buffer before compute dispatch
     vkCmdFillBuffer(cmd, indirectBuffers[writeSet], 0, sizeof(VkDrawIndirectCommand), 0);
@@ -664,6 +688,23 @@ void WeatherSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float t
     if (computeBufferSet == renderBufferSet) {
         readSet = computeBufferSet;
     }
+
+    // Update graphics descriptor set to use this frame's renderer UBO
+    VkDescriptorBufferInfo uboInfo{};
+    uboInfo.buffer = externalRendererUniformBuffers[frameIndex];
+    uboInfo.offset = 0;
+    uboInfo.range = 320;  // sizeof(UniformBufferObject)
+
+    VkWriteDescriptorSet uboWrite{};
+    uboWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    uboWrite.dstSet = graphicsDescriptorSets[readSet];
+    uboWrite.dstBinding = 0;
+    uboWrite.dstArrayElement = 0;
+    uboWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    uboWrite.descriptorCount = 1;
+    uboWrite.pBufferInfo = &uboInfo;
+
+    vkUpdateDescriptorSets(device, 1, &uboWrite, 0, nullptr);
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
