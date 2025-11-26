@@ -35,6 +35,7 @@ layout(binding = 0) uniform UniformBufferObject {
     vec4 sunDirection;
     vec4 moonDirection;
     vec4 sunColor;
+    vec4 moonColor;                       // rgb = moon color
     vec4 ambientColor;
     vec4 cameraPosition;
     vec4 pointLightPosition;  // xyz = position, w = intensity
@@ -476,10 +477,10 @@ void main() {
     float sunIntensity = ubo.sunDirection.w;
     vec3 sunLight = calculatePBR(N, V, sunL, ubo.sunColor.rgb, sunIntensity, albedo, shadow);
 
-    // Moon lighting (no shadow - moon is soft fill light)
+    // Moon lighting (no shadow - moon is soft fill light but becomes primary light at night)
     vec3 moonL = normalize(ubo.moonDirection.xyz);
     float moonIntensity = ubo.moonDirection.w;
-    vec3 moonLight = calculatePBR(N, V, moonL, vec3(0.3, 0.35, 0.5), moonIntensity, albedo, 1.0);
+    vec3 moonLight = calculatePBR(N, V, moonL, ubo.moonColor.rgb, moonIntensity, albedo, 1.0);
 
     // Ambient lighting
     // For dielectrics: diffuse ambient from all directions
