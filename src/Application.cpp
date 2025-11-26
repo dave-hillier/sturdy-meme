@@ -499,29 +499,32 @@ void Application::initPhysics() {
     float sphereMass = 5.0f;
 
     // Create physics bodies for dynamic objects
+    // Spawn objects slightly above ground (Y offset +0.1) to let them settle
+    const float spawnOffset = 0.1f;
+
     // Index 1: Wooden crate 1
-    scenePhysicsBodies[1] = physics.createBox(glm::vec3(2.0f, 0.5f, 0.0f), cubeHalfExtents, boxMass);
+    scenePhysicsBodies[1] = physics.createBox(glm::vec3(2.0f, 0.5f + spawnOffset, 0.0f), cubeHalfExtents, boxMass);
 
     // Index 2: Rotated wooden crate
-    scenePhysicsBodies[2] = physics.createBox(glm::vec3(-1.5f, 0.5f, 1.0f), cubeHalfExtents, boxMass);
+    scenePhysicsBodies[2] = physics.createBox(glm::vec3(-1.5f, 0.5f + spawnOffset, 1.0f), cubeHalfExtents, boxMass);
 
     // Index 3: Polished metal sphere (radius 0.5)
-    scenePhysicsBodies[3] = physics.createSphere(glm::vec3(0.0f, 0.5f, -2.0f), 0.5f, sphereMass);
+    scenePhysicsBodies[3] = physics.createSphere(glm::vec3(0.0f, 0.5f + spawnOffset, -2.0f), 0.5f, sphereMass);
 
     // Index 4: Rough metal sphere
-    scenePhysicsBodies[4] = physics.createSphere(glm::vec3(-3.0f, 0.5f, -1.0f), 0.5f, sphereMass);
+    scenePhysicsBodies[4] = physics.createSphere(glm::vec3(-3.0f, 0.5f + spawnOffset, -1.0f), 0.5f, sphereMass);
 
     // Index 5: Polished metal cube
-    scenePhysicsBodies[5] = physics.createBox(glm::vec3(3.0f, 0.5f, -2.0f), cubeHalfExtents, boxMass);
+    scenePhysicsBodies[5] = physics.createBox(glm::vec3(3.0f, 0.5f + spawnOffset, -2.0f), cubeHalfExtents, boxMass);
 
     // Index 6: Brushed metal cube
-    scenePhysicsBodies[6] = physics.createBox(glm::vec3(-3.0f, 0.5f, -3.0f), cubeHalfExtents, boxMass);
+    scenePhysicsBodies[6] = physics.createBox(glm::vec3(-3.0f, 0.5f + spawnOffset, -3.0f), cubeHalfExtents, boxMass);
 
     // Index 7: Small emissive sphere (scaled 0.3, so radius ~0.15)
-    scenePhysicsBodies[7] = physics.createSphere(glm::vec3(2.0f, 1.3f, 0.0f), 0.15f, 1.0f);
+    scenePhysicsBodies[7] = physics.createSphere(glm::vec3(2.0f, 1.3f + spawnOffset, 0.0f), 0.15f, 1.0f);
 
-    // Create character controller for player at origin
-    physics.createCharacter(glm::vec3(0.0f, 0.0f, 0.0f), Player::CAPSULE_HEIGHT, Player::CAPSULE_RADIUS);
+    // Create character controller for player slightly above ground
+    physics.createCharacter(glm::vec3(0.0f, spawnOffset, 0.0f), Player::CAPSULE_HEIGHT, Player::CAPSULE_RADIUS);
 
     SDL_Log("Physics initialized with %d active bodies", physics.getActiveBodyCount());
 }

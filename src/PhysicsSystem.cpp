@@ -85,7 +85,7 @@ public:
             case PhysicsLayers::NON_MOVING:
                 return inObject2 == PhysicsLayers::MOVING || inObject2 == PhysicsLayers::CHARACTER;
             case PhysicsLayers::MOVING:
-                return inObject2 != PhysicsLayers::NON_MOVING || inObject2 == PhysicsLayers::CHARACTER;
+                return true; // Moving objects collide with everything
             case PhysicsLayers::CHARACTER:
                 return true; // Character collides with everything
             default:
@@ -281,47 +281,21 @@ PhysicsBodyID PhysicsWorld::createTerrainDisc(float radius, float heightOffset) 
 
     JPH::BodyInterface& bodyInterface = physicsSystem->GetBodyInterface();
 
-    // Create a flat heightfield to represent the disc terrain
-    // Use a simple grid that covers the disc area
-    const int gridSize = 65;  // Must be power of 2 + 1 for HeightFieldShape
-    const float cellSize = (radius * 2.0f) / (gridSize - 1);
+    // Create a large flat box as the ground plane
+    // Box is centered at Y = heightOffset - 0.5 so the top surface is at heightOffset
+    const float groundThickness = 1.0f;
+    JPH::BoxShapeSettings boxSettings(JPH::Vec3(radius, groundThickness * 0.5f, radius));
 
-    std::vector<float> heights(gridSize * gridSize, heightOffset);
-
-    // Create height samples - flat terrain for now
-    // Can be modified later to have actual height variation
-    for (int z = 0; z < gridSize; z++) {
-        for (int x = 0; x < gridSize; x++) {
-            float worldX = (x - gridSize / 2) * cellSize;
-            float worldZ = (z - gridSize / 2) * cellSize;
-
-            // Check if within disc radius
-            float distFromCenter = std::sqrt(worldX * worldX + worldZ * worldZ);
-            if (distFromCenter <= radius) {
-                heights[z * gridSize + x] = heightOffset;
-            } else {
-                // Outside disc - make it lower so things fall off
-                heights[z * gridSize + x] = heightOffset - 10.0f;
-            }
-        }
-    }
-
-    JPH::HeightFieldShapeSettings heightFieldSettings(
-        heights.data(),
-        JPH::Vec3(-radius, 0.0f, -radius),  // Offset to center the heightfield
-        JPH::Vec3(cellSize, 1.0f, cellSize),  // Scale
-        gridSize
-    );
-
-    JPH::ShapeSettings::ShapeResult shapeResult = heightFieldSettings.Create();
+    JPH::ShapeSettings::ShapeResult shapeResult = boxSettings.Create();
     if (!shapeResult.IsValid()) {
-        SDL_Log("Failed to create terrain heightfield shape: %s", shapeResult.GetError().c_str());
+        SDL_Log("Failed to create terrain box shape: %s", shapeResult.GetError().c_str());
         return INVALID_BODY_ID;
     }
 
+    // Position so the top of the box is at heightOffset
     JPH::BodyCreationSettings bodySettings(
         shapeResult.Get(),
-        JPH::RVec3(0.0, 0.0, 0.0),
+        JPH::RVec3(0.0, heightOffset - groundThickness * 0.5f, 0.0),
         JPH::Quat::sIdentity(),
         JPH::EMotionType::Static,
         PhysicsLayers::NON_MOVING
@@ -337,7 +311,7 @@ PhysicsBodyID PhysicsWorld::createTerrainDisc(float radius, float heightOffset) 
 
     bodyInterface.AddBody(body->GetID(), JPH::EActivation::DontActivate);
 
-    SDL_Log("Created terrain disc with radius %.1f", radius);
+    SDL_Log("Created terrain ground plane with radius %.1f at Y=%.1f", radius, heightOffset);
     return body->GetID().GetIndexAndSequenceNumber();
 }
 
@@ -485,15 +459,22 @@ bool PhysicsWorld::createCharacter(const glm::vec3& position, float height, floa
 void PhysicsWorld::updateCharacter(float deltaTime, const glm::vec3& desiredVelocity, bool jump) {
     if (!character || !initialized) return;
 
+    JPH::Vec3 currentVelocity = character->GetLinearVelocity();
     JPH::Vec3 velocity = toJolt(desiredVelocity);
 
-    // Handle jumping
-    if (jump && isCharacterOnGround()) {
-        // Jump velocity
+    // Handle jumping - only allow jump if on ground and not already moving upward significantly
+    bool onGround = isCharacterOnGround();
+    bool canJump = onGround && currentVelocity.GetY() < 0.5f;  // Not already jumping
+
+    if (jump && canJump) {
+        // Apply jump impulse
         velocity.SetY(5.0f);
+    } else if (onGround && currentVelocity.GetY() <= 0.0f) {
+        // On ground and not jumping - zero out vertical velocity
+        velocity.SetY(0.0f);
     } else {
-        // Preserve current vertical velocity (gravity is applied by ExtendedUpdate)
-        velocity.SetY(character->GetLinearVelocity().GetY());
+        // In air - preserve current vertical velocity (gravity is applied by ExtendedUpdate)
+        velocity.SetY(currentVelocity.GetY());
     }
 
     character->SetLinearVelocity(velocity);
