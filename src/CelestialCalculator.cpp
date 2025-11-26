@@ -340,3 +340,16 @@ glm::vec3 CelestialCalculator::getAmbientColor(float sunAltitude) const {
 
     return glm::mix(nightAmbient, dayAmbient, t);
 }
+
+glm::vec3 CelestialCalculator::getMoonColor(float moonAltitude, float illumination) const {
+    // Moon light is reflected sunlight - cool blue-white color
+    // At horizon it gets slightly warmer due to atmospheric scattering
+    float t = glm::smoothstep(-5.0f, 30.0f, moonAltitude);
+
+    // Warmer, dimmer color at horizon (atmospheric reddening)
+    glm::vec3 horizonColor(0.6f, 0.6f, 0.7f);
+    // Cool blue-white at higher altitudes (typical moonlight appearance)
+    glm::vec3 zenithColor(0.7f, 0.75f, 0.9f);
+
+    return glm::mix(horizonColor, zenithColor, t);
+}

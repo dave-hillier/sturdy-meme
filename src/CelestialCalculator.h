@@ -68,6 +68,9 @@ public:
     // Convenience: get ambient light based on sun altitude
     glm::vec3 getAmbientColor(float sunAltitude) const;
 
+    // Convenience: get moon color based on altitude and illumination
+    glm::vec3 getMoonColor(float moonAltitude, float illumination) const;
+
 private:
     GeographicLocation location_;
 

@@ -32,6 +32,7 @@ layout(binding = 0) uniform UniformBufferObject {
     vec4 sunDirection;
     vec4 moonDirection;
     vec4 sunColor;
+    vec4 moonColor;                       // rgb = moon color
     vec4 ambientColor;
     vec4 cameraPosition;
     vec4 pointLightPosition;  // xyz = position, w = intensity
@@ -437,8 +438,14 @@ void main() {
     vec3 moonL = normalize(ubo.moonDirection.xyz);
     float moonNdotL = dot(N, moonL);
     float moonDiffuse = max(moonNdotL, 0.0) + max(-moonNdotL, 0.0) * 0.6;
-    vec3 moonColor = vec3(0.3, 0.35, 0.5);
-    vec3 moonLight = albedo * moonColor * moonDiffuse * ubo.moonDirection.w;
+
+    // Add subsurface scattering for moonlight when it's the primary light source
+    vec3 moonSss = vec3(0.0);
+    if (ubo.sunDirection.y < 0.0 && ubo.moonDirection.y > 0.0) {
+        moonSss = calculateSSS(moonL, V, N, ubo.moonColor.rgb, albedo) * 0.5;
+    }
+
+    vec3 moonLight = (albedo * moonDiffuse + moonSss) * ubo.moonColor.rgb * ubo.moonDirection.w;
 
     // === POINT LIGHT ===
     vec3 pointLight = calculatePointLight(N, V, fragWorldPos, albedo);
