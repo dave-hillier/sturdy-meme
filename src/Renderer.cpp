@@ -2374,7 +2374,7 @@ void Renderer::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float 
 }
 
 void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
-    for (const auto& obj : sceneBuilder.getSceneObjects()) {
+    for (const auto& obj : sceneManager.getSceneObjects()) {
         PushConstants push{};
         push.model = obj.transform;
         push.roughness = obj.roughness;
