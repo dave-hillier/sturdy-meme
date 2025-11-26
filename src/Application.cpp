@@ -202,7 +202,7 @@ void Application::processEvents() {
                         renderer.setWeatherType(0); // Set to rain type, but intensity 0
                         renderer.setWeatherIntensity(0.0f); // Clear
                     }
-                    
+
                     std::string weatherStatus = "Clear";
                     if (renderer.getIntensity() > 0.0f) {
                         if (renderer.getWeatherType() == 0) {
@@ -212,6 +212,12 @@ void Application::processEvents() {
                         }
                     }
                     SDL_Log("Weather type: %s, Intensity: %.1f", weatherStatus.c_str(), renderer.getIntensity());
+                }
+                else if (event.key.scancode == SDL_SCANCODE_F) {
+                    // Spawn confetti from player's location
+                    glm::vec3 playerPos = player.getPosition();
+                    renderer.spawnConfetti(playerPos, 8.0f, 100.0f, 0.5f);
+                    SDL_Log("Confetti! 🎉");
                 }
                 break;
             case SDL_EVENT_GAMEPAD_ADDED:
