@@ -252,6 +252,7 @@ void main() {
     float tilt = baseTilt + clumpTiltMod;
 
     // Apply player displacement - grass bends away from player capsule
+    // Only affects facing angle (rotation), not tilt (which would stretch the blade)
     vec4 displacement = calculatePlayerDisplacement(worldPos);
     float dispAmount = displacement.w;
 
@@ -264,13 +265,8 @@ void main() {
 
         // Blend facing toward push direction based on displacement amount
         // Strong displacement = blade faces away from player
-        float maxDispInfluence = uniforms.displacementParams.z;  // max tilt
-        float facingBlend = dispAmount * 0.7;  // How much to rotate toward push direction
+        float facingBlend = dispAmount * 0.9;  // Strong rotation toward push direction
         facing = mix(facing, pushAngle, facingBlend);
-
-        // Increase tilt based on displacement - grass bends over when pushed
-        float dispTilt = dispAmount * maxDispInfluence;
-        tilt += dispTilt;
     }
 
     // Write instance data (clumpId stored in w for fragment shader color variation)
