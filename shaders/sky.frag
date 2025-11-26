@@ -719,13 +719,13 @@ float celestialDisc(vec3 dir, vec3 celestialDir, float size) {
     return smoothstep(1.0 - size, 1.0 - size * 0.3, d);
 }
 
-// Lunar phase mask - simulates the moon's illumination based on phase
-// Treats the moon as a 3D sphere lit from different angles
-// phase: 0 = new moon, 0.25 = first quarter, 0.5 = full moon, 0.75 = last quarter, 1 = new moon
+// Lunar phase mask - simulates the moon's illumination based on sun position
+// Treats the moon as a 3D sphere lit by the sun
 // dir: viewing direction to the point on moon disc
 // moonDir: direction to moon center
+// sunDir: direction to sun
 // returns: 0-1 illumination factor (0 = shadowed, 1 = fully lit)
-float lunarPhaseMask(vec3 dir, vec3 moonDir, float phase, float discSize) {
+float lunarPhaseMask(vec3 dir, vec3 moonDir, vec3 sunDir, float discSize) {
     // Get normalized directions
     vec3 viewDir = normalize(dir);
     vec3 moonCenter = normalize(moonDir);
@@ -751,32 +751,32 @@ float lunarPhaseMask(vec3 dir, vec3 moonDir, float phase, float discSize) {
     float y = dot(toPoint, tangentUp);
 
     // Normalize to disc coordinates (-1 to 1)
-    float normalizedDist = angularDist / discSize;
     x = x / (sin(discSize) + 0.001);
     y = y / (sin(discSize) + 0.001);
 
-    // Calculate 3D position on sphere
+    // Calculate 3D position on sphere (surface normal)
     float r2 = x * x + y * y;
     if (r2 > 1.0) return 0.0;
 
     float z = sqrt(1.0 - r2);
-    vec3 spherePos = vec3(x, y, z);
+    vec3 sphereNormal = vec3(x, y, z);
 
-    // Calculate light direction based on phase
-    // Phase 0.0 (new moon): sun is in front (same direction as viewer), moon fully dark
-    // Phase 0.5 (full moon): sun is behind viewer, moon fully lit
-    // Phase 1.0 (new moon): sun is in front again
-    float phaseAngle = phase * 2.0 * PI;
-    vec3 lightDir = vec3(-sin(phaseAngle), 0.0, cos(phaseAngle));
+    // Transform sun direction to moon's local coordinate system
+    vec3 sunDirNorm = normalize(sunDir);
+    vec3 localSunDir = vec3(
+        dot(sunDirNorm, right),
+        dot(sunDirNorm, tangentUp),
+        dot(sunDirNorm, moonCenter)
+    );
 
     // Calculate lighting (Lambertian)
-    float lighting = dot(spherePos, lightDir);
+    float lighting = dot(sphereNormal, localSunDir);
 
-    // Smooth transition at the terminator
-    float lit = smoothstep(-0.08, 0.08, lighting);
+    // Smooth transition at the terminator (day/night boundary)
+    float lit = smoothstep(-0.05, 0.05, lighting);
 
-    // Add subtle earthshine on dark side (about 5% brightness)
-    lit = max(lit, 0.05);
+    // Add subtle earthshine on dark side (about 10% brightness)
+    lit = max(lit, 0.1);
 
     return lit;
 }
@@ -910,8 +910,9 @@ vec3 renderAtmosphere(vec3 dir) {
     // Moon disc with lunar phase simulation
     const float MOON_DISC_SIZE = 0.012;
     float moonDisc = celestialDisc(dir, ubo.moonDirection.xyz, MOON_DISC_SIZE);
-    float moonPhase = ubo.moonColor.a;  // Phase value (0 = new moon, 0.5 = full moon, 1 = new moon)
-    float phaseMask = lunarPhaseMask(dir, ubo.moonDirection.xyz, moonPhase, MOON_DISC_SIZE);
+
+    // Calculate phase mask using actual sun position for accurate lunar phases
+    float phaseMask = lunarPhaseMask(dir, ubo.moonDirection.xyz, ubo.sunDirection.xyz, MOON_DISC_SIZE);
 
     // Apply phase mask to create emissive moon with shadow
     sky += ubo.moonColor.rgb * moonDisc * phaseMask * 2.0 * ubo.moonDirection.w *
