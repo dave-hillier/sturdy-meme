@@ -44,9 +44,11 @@ const float OZONE_LAYER_CENTER = 25.0;        // km
 const float OZONE_LAYER_WIDTH = 15.0;
 
 const float SUN_ANGULAR_RADIUS = 0.00935 / 2.0;  // radians (produces ~180px disc)
-// Moon needs two different size parameters due to different function interpretations:
-const float MOON_DISC_SIZE = 0.003;              // For celestialDisc (smaller = larger disc, ~300px)
-const float MOON_MASK_RADIUS = 0.025;            // For lunarPhaseMask (actual angular radius)
+// Moon should be same apparent size as sun (both ~0.5 degrees in reality)
+// The celestialDisc function produces a visual disc of radius acos(1.0 - size) radians
+// For size = SUN_ANGULAR_RADIUS, visual radius ≈ 0.097 radians ≈ 5.5 degrees
+const float MOON_DISC_SIZE = SUN_ANGULAR_RADIUS; // Same visual size as sun
+const float MOON_MASK_RADIUS = 0.097;            // Visual disc radius for phase mask alignment
 
 // LMS color space for accurate Rayleigh scattering (Phase 4.1.7)
 // Standard Rec709 Rayleigh produces greenish sunsets; LMS primaries are more accurate
