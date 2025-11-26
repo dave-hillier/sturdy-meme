@@ -50,6 +50,27 @@ layout(binding = 1) uniform sampler2D texSampler;
 layout(binding = 2) uniform sampler2DArrayShadow shadowMapArray;  // Changed to array for CSM
 layout(binding = 3) uniform sampler2D normalMap;
 
+// Light types
+const uint LIGHT_TYPE_POINT = 0;
+const uint LIGHT_TYPE_SPOT = 1;
+
+// Maximum lights (must match CPU side)
+const uint MAX_LIGHTS = 16;
+
+// GPU light structure (must match CPU GPULight struct)
+struct GPULight {
+    vec4 positionAndType;    // xyz = position, w = type (0=point, 1=spot)
+    vec4 directionAndCone;   // xyz = direction (for spot), w = outer cone angle (cos)
+    vec4 colorAndIntensity;  // rgb = color, a = intensity
+    vec4 radiusAndInnerCone; // x = radius, y = inner cone angle (cos), zw = padding
+};
+
+// Light buffer SSBO
+layout(std430, binding = 4) readonly buffer LightBuffer {
+    uvec4 lightCount;        // x = active light count
+    GPULight lights[MAX_LIGHTS];
+} lightBuffer;
+
 layout(push_constant) uniform PushConstants {
     mat4 model;
     float roughness;
@@ -426,14 +447,35 @@ vec3 calculatePBR(vec3 N, vec3 V, vec3 L, vec3 lightColor, float lightIntensity,
     return (diffuse + specular) * lightColor * lightIntensity * NoL * shadow;
 }
 
-// Calculate point light contribution with distance attenuation
-vec3 calculatePointLight(vec3 N, vec3 V, vec3 worldPos, vec3 albedo) {
-    vec3 lightPos = ubo.pointLightPosition.xyz;
-    float lightIntensity = ubo.pointLightPosition.w;
-    vec3 lightColor = ubo.pointLightColor.rgb;
-    float lightRadius = ubo.pointLightColor.a;
+// Calculate attenuation for a light with windowed falloff
+float calculateAttenuation(float distance, float radius) {
+    if (radius > 0.0) {
+        // Windowed inverse-square falloff
+        float distRatio = distance / radius;
+        float windowedFalloff = max(1.0 - distRatio * distRatio, 0.0);
+        windowedFalloff *= windowedFalloff;
+        return windowedFalloff / (distance * distance + 0.01);
+    } else {
+        return 1.0 / (distance * distance + 0.01);
+    }
+}
 
-    // Skip if light is disabled (zero intensity)
+// Calculate spot light cone falloff
+float calculateSpotFalloff(vec3 L, vec3 spotDir, float innerCone, float outerCone) {
+    float cosAngle = dot(-L, spotDir);
+    // Smooth falloff between inner and outer cone
+    return smoothstep(outerCone, innerCone, cosAngle);
+}
+
+// Calculate contribution from a single dynamic light (point or spot)
+vec3 calculateDynamicLight(GPULight light, vec3 N, vec3 V, vec3 worldPos, vec3 albedo) {
+    vec3 lightPos = light.positionAndType.xyz;
+    uint lightType = uint(light.positionAndType.w);
+    vec3 lightColor = light.colorAndIntensity.rgb;
+    float lightIntensity = light.colorAndIntensity.a;
+    float lightRadius = light.radiusAndInnerCone.x;
+
+    // Skip if light is disabled
     if (lightIntensity <= 0.0) return vec3(0.0);
 
     // Calculate light direction and distance
@@ -441,22 +483,35 @@ vec3 calculatePointLight(vec3 N, vec3 V, vec3 worldPos, vec3 albedo) {
     float distance = length(lightVec);
     vec3 L = normalize(lightVec);
 
-    // Smooth attenuation that reaches zero at lightRadius
-    float attenuation = 1.0;
-    if (lightRadius > 0.0) {
-        // Windowed inverse-square falloff
-        float distRatio = distance / lightRadius;
-        float windowedFalloff = max(1.0 - distRatio * distRatio, 0.0);
-        windowedFalloff *= windowedFalloff;
-        // Inverse square with distance clamped to avoid division by near-zero
-        attenuation = windowedFalloff / (distance * distance + 0.01);
-    } else {
-        // No radius specified, use simple inverse square
-        attenuation = 1.0 / (distance * distance + 0.01);
+    // Early out if beyond radius
+    if (lightRadius > 0.0 && distance > lightRadius) return vec3(0.0);
+
+    // Calculate attenuation
+    float attenuation = calculateAttenuation(distance, lightRadius);
+
+    // For spot lights, apply cone falloff
+    if (lightType == LIGHT_TYPE_SPOT) {
+        vec3 spotDir = normalize(light.directionAndCone.xyz);
+        float outerCone = light.directionAndCone.w;
+        float innerCone = light.radiusAndInnerCone.y;
+        float spotFalloff = calculateSpotFalloff(L, spotDir, innerCone, outerCone);
+        attenuation *= spotFalloff;
     }
 
-    // Calculate PBR lighting contribution (no shadow for point light)
+    // Calculate PBR lighting contribution (no shadow for dynamic lights)
     return calculatePBR(N, V, L, lightColor, lightIntensity * attenuation, albedo, 1.0);
+}
+
+// Calculate contribution from all dynamic lights
+vec3 calculateAllDynamicLights(vec3 N, vec3 V, vec3 worldPos, vec3 albedo) {
+    vec3 totalLight = vec3(0.0);
+    uint numLights = min(lightBuffer.lightCount.x, MAX_LIGHTS);
+
+    for (uint i = 0; i < numLights; i++) {
+        totalLight += calculateDynamicLight(lightBuffer.lights[i], N, V, worldPos, albedo);
+    }
+
+    return totalLight;
 }
 
 void main() {
@@ -493,10 +548,10 @@ void main() {
     vec3 ambientSpecular = ubo.ambientColor.rgb * F0 * material.metallic * envReflection;
     vec3 ambient = ambientDiffuse + ambientSpecular;
 
-    // Point light contribution
-    vec3 pointLight = calculatePointLight(N, V, fragWorldPos, albedo);
+    // Dynamic lights contribution (multiple point and spot lights)
+    vec3 dynamicLights = calculateAllDynamicLights(N, V, fragWorldPos, albedo);
 
-    vec3 finalColor = ambient + sunLight + moonLight + pointLight;
+    vec3 finalColor = ambient + sunLight + moonLight + dynamicLights;
 
     // Add emissive glow
     vec3 emissive = albedo * material.emissiveIntensity;

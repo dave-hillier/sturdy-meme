@@ -15,6 +15,7 @@
 #include "PostProcessSystem.h"
 #include "FroxelSystem.h"
 #include "SceneBuilder.h"
+#include "Light.h"
 
 static constexpr uint32_t NUM_SHADOW_CASCADES = 4;
 
@@ -192,6 +193,11 @@ private:
     std::vector<VmaAllocation> uniformBuffersAllocations;
     std::vector<void*> uniformBuffersMapped;
 
+    // Light buffer SSBO (per frame)
+    std::vector<VkBuffer> lightBuffers;
+    std::vector<VmaAllocation> lightBufferAllocations;
+    std::vector<void*> lightBuffersMapped;
+
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
     std::vector<VkDescriptorSet> descriptorSets;
     std::vector<VkDescriptorSet> groundDescriptorSets;
@@ -220,4 +226,12 @@ private:
     int currentDay = 21;  // Summer solstice by default
 
     bool showCascadeDebug = false;         // true = show cascade colors overlay
+
+    // Dynamic lights
+    LightManager lightManager;
+    float lightCullRadius = 100.0f;        // Radius from camera for light culling
+
+    bool createLightBuffers();
+    void updateLightBuffer(uint32_t currentImage, const glm::vec3& cameraPos);
+    void setupSceneLights();               // Initialize default scene lights
 };

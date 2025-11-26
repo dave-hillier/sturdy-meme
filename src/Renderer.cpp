@@ -114,6 +114,10 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     if (!createShadowPipeline()) return false;
     if (!createCommandBuffers()) return false;
     if (!createUniformBuffers()) return false;
+    if (!createLightBuffers()) return false;
+
+    // Initialize scene lights
+    setupSceneLights();
 
     // Initialize scene (meshes, textures, objects)
     SceneBuilder::InitInfo sceneInfo{};
@@ -156,7 +160,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         windBuffers[i] = windSystem.getBufferInfo(i).buffer;
     }
-    grassSystem.updateDescriptorSets(device, uniformBuffers, shadowImageView, shadowSampler, windBuffers);
+    grassSystem.updateDescriptorSets(device, uniformBuffers, shadowImageView, shadowSampler, windBuffers, lightBuffers);
 
     // Initialize froxel volumetric fog system (Phase 4.3)
     FroxelSystem::InitInfo froxelInfo{};
@@ -201,6 +205,13 @@ void Renderer::shutdown() {
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             vmaDestroyBuffer(allocator, uniformBuffers[i], uniformBuffersAllocations[i]);
+        }
+
+        // Clean up light buffers
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            if (lightBuffers.size() > i && lightBuffers[i] != VK_NULL_HANDLE) {
+                vmaDestroyBuffer(allocator, lightBuffers[i], lightBufferAllocations[i]);
+            }
         }
 
         grassSystem.destroy(device, allocator);
@@ -936,7 +947,14 @@ bool Renderer::createDescriptorSetLayout() {
     normalMapBinding.pImmutableSamplers = nullptr;
     normalMapBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-    std::array<VkDescriptorSetLayoutBinding, 4> bindings = {uboLayoutBinding, samplerLayoutBinding, shadowSamplerBinding, normalMapBinding};
+    VkDescriptorSetLayoutBinding lightBufferBinding{};
+    lightBufferBinding.binding = 4;
+    lightBufferBinding.descriptorCount = 1;
+    lightBufferBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    lightBufferBinding.pImmutableSamplers = nullptr;
+    lightBufferBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    std::array<VkDescriptorSetLayoutBinding, 5> bindings = {uboLayoutBinding, samplerLayoutBinding, shadowSamplerBinding, normalMapBinding, lightBufferBinding};
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -1236,6 +1254,82 @@ bool Renderer::createUniformBuffers() {
     return true;
 }
 
+bool Renderer::createLightBuffers() {
+    VkDeviceSize bufferSize = sizeof(LightBuffer);
+
+    lightBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+    lightBufferAllocations.resize(MAX_FRAMES_IN_FLIGHT);
+    lightBuffersMapped.resize(MAX_FRAMES_IN_FLIGHT);
+
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.size = bufferSize;
+        bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+        VmaAllocationInfo allocationInfo;
+        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &lightBuffers[i],
+                            &lightBufferAllocations[i], &allocationInfo) != VK_SUCCESS) {
+            SDL_Log("Failed to create light buffer");
+            return false;
+        }
+
+        lightBuffersMapped[i] = allocationInfo.pMappedData;
+
+        // Initialize with empty light buffer
+        LightBuffer emptyBuffer{};
+        emptyBuffer.lightCount = glm::uvec4(0, 0, 0, 0);
+        memcpy(lightBuffersMapped[i], &emptyBuffer, sizeof(LightBuffer));
+    }
+
+    return true;
+}
+
+void Renderer::setupSceneLights() {
+    // Clear any existing lights
+    lightManager.clear();
+
+    // Add the glowing orb point light (same as the hardcoded one)
+    Light orbLight;
+    orbLight.type = LightType::Point;
+    orbLight.position = glm::vec3(2.0f, 1.3f, 0.0f);
+    orbLight.color = glm::vec3(1.0f, 0.9f, 0.7f);  // Warm white
+    orbLight.intensity = 5.0f;
+    orbLight.radius = 8.0f;
+    orbLight.priority = 10.0f;  // High priority - always visible
+    lightManager.addLight(orbLight);
+
+    // Add a few more example lights for testing
+    Light blueLight;
+    blueLight.type = LightType::Point;
+    blueLight.position = glm::vec3(-3.0f, 2.0f, 2.0f);
+    blueLight.color = glm::vec3(0.3f, 0.5f, 1.0f);  // Blue
+    blueLight.intensity = 3.0f;
+    blueLight.radius = 6.0f;
+    blueLight.priority = 5.0f;
+    lightManager.addLight(blueLight);
+
+    Light greenLight;
+    greenLight.type = LightType::Point;
+    greenLight.position = glm::vec3(4.0f, 1.5f, -2.0f);
+    greenLight.color = glm::vec3(0.4f, 1.0f, 0.4f);  // Green
+    greenLight.intensity = 2.5f;
+    greenLight.radius = 5.0f;
+    greenLight.priority = 5.0f;
+    lightManager.addLight(greenLight);
+}
+
+void Renderer::updateLightBuffer(uint32_t currentImage, const glm::vec3& cameraPos) {
+    LightBuffer buffer{};
+    lightManager.buildLightBuffer(buffer, cameraPos, lightCullRadius);
+    memcpy(lightBuffersMapped[currentImage], &buffer, sizeof(LightBuffer));
+}
+
 bool Renderer::createDescriptorPool() {
     std::array<VkDescriptorPoolSize, 3> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -1243,7 +1337,7 @@ bool Renderer::createDescriptorPool() {
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 16);  // diffuse + shadow + normal + HDR sampler + grass double-buffer
     poolSizes[2].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    poolSizes[2].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 12);  // +6 for grass double-buffer (2x instance/indirect per set)
+    poolSizes[2].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 18);  // +6 for grass double-buffer, +6 for light buffers (3 descriptor sets * 2 frames)
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -1307,7 +1401,12 @@ bool Renderer::createDescriptorSets() {
         crateNormalImageInfo.imageView = sceneBuilder.getCrateNormalMap().getImageView();
         crateNormalImageInfo.sampler = sceneBuilder.getCrateNormalMap().getSampler();
 
-        std::array<VkWriteDescriptorSet, 4> descriptorWrites{};
+        VkDescriptorBufferInfo lightBufferInfo{};
+        lightBufferInfo.buffer = lightBuffers[i];
+        lightBufferInfo.offset = 0;
+        lightBufferInfo.range = sizeof(LightBuffer);
+
+        std::array<VkWriteDescriptorSet, 5> descriptorWrites{};
 
         descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         descriptorWrites[0].dstSet = descriptorSets[i];
@@ -1341,6 +1440,14 @@ bool Renderer::createDescriptorSets() {
         descriptorWrites[3].descriptorCount = 1;
         descriptorWrites[3].pImageInfo = &crateNormalImageInfo;
 
+        descriptorWrites[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[4].dstSet = descriptorSets[i];
+        descriptorWrites[4].dstBinding = 4;
+        descriptorWrites[4].dstArrayElement = 0;
+        descriptorWrites[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        descriptorWrites[4].descriptorCount = 1;
+        descriptorWrites[4].pBufferInfo = &lightBufferInfo;
+
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                descriptorWrites.data(), 0, nullptr);
 
@@ -1361,6 +1468,7 @@ bool Renderer::createDescriptorSets() {
         descriptorWrites[2].dstSet = groundDescriptorSets[i];
         descriptorWrites[3].dstSet = groundDescriptorSets[i];
         descriptorWrites[3].pImageInfo = &groundNormalImageInfo;
+        descriptorWrites[4].dstSet = groundDescriptorSets[i];
 
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                descriptorWrites.data(), 0, nullptr);
@@ -1382,6 +1490,7 @@ bool Renderer::createDescriptorSets() {
         descriptorWrites[2].dstSet = metalDescriptorSets[i];
         descriptorWrites[3].dstSet = metalDescriptorSets[i];
         descriptorWrites[3].pImageInfo = &metalNormalImageInfo;
+        descriptorWrites[4].dstSet = metalDescriptorSets[i];
 
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                descriptorWrites.data(), 0, nullptr);
@@ -1416,6 +1525,9 @@ void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera& camera) 
     // State mutations
     lastSunIntensity = lighting.sunIntensity;
     memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
+
+    // Update light buffer with camera-based culling
+    updateLightBuffer(currentImage, camera.getPosition());
 
     // Calculate sun screen position (pure) and update post-process (state mutation)
     glm::vec2 sunScreenPos = calculateSunScreenPos(camera, lighting.sunDir);
