@@ -462,15 +462,16 @@ void PhysicsWorld::updateCharacter(float deltaTime, const glm::vec3& desiredVelo
     JPH::Vec3 currentVelocity = character->GetLinearVelocity();
     JPH::Vec3 velocity = toJolt(desiredVelocity);
 
-    // Handle jumping - only allow jump if on ground and not already moving upward significantly
-    bool onGround = isCharacterOnGround();
-    bool canJump = onGround && currentVelocity.GetY() < 0.5f;  // Not already jumping
+    // Handle jumping - only allow jump if on ground
+    JPH::CharacterVirtual::EGroundState groundState = character->GetGroundState();
+    bool onGround = groundState == JPH::CharacterVirtual::EGroundState::OnGround;
+    bool onSteepGround = groundState == JPH::CharacterVirtual::EGroundState::OnSteepGround;
 
-    if (jump && canJump) {
+    if (jump && onGround) {
         // Apply jump impulse
         velocity.SetY(5.0f);
-    } else if (onGround && currentVelocity.GetY() <= 0.0f) {
-        // On ground and not jumping - zero out vertical velocity
+    } else if (onGround || onSteepGround) {
+        // On ground - zero out vertical velocity to prevent accumulation
         velocity.SetY(0.0f);
     } else {
         // In air - preserve current vertical velocity (gravity is applied by ExtendedUpdate)

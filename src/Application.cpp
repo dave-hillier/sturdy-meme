@@ -64,8 +64,8 @@ void Application::run() {
         handleGamepadInput(deltaTime);
 
         // Process accumulated input for third-person mode
+        glm::vec3 desiredVelocity(0.0f);
         if (thirdPersonMode) {
-            glm::vec3 desiredVelocity(0.0f);
             if (glm::length(accumulatedMoveDir) > 0.001f) {
                 glm::vec3 moveDir = glm::normalize(accumulatedMoveDir);
                 desiredVelocity = moveDir * moveSpeed;
@@ -79,10 +79,10 @@ void Application::run() {
                 while (yawDiff < -180.0f) yawDiff += 360.0f;
                 player.rotate(yawDiff * 10.0f * deltaTime);  // Smooth rotation
             }
-
-            // Update physics character controller with combined input
-            physics.updateCharacter(deltaTime, desiredVelocity, wantsJump);
         }
+
+        // Always update physics character controller (handles gravity, jumping, and movement)
+        physics.updateCharacter(deltaTime, desiredVelocity, wantsJump);
 
         // Update physics simulation
         physics.update(deltaTime);
