@@ -57,7 +57,7 @@ struct GPULight {
     vec4 positionAndType;    // xyz = position, w = type (0=point, 1=spot)
     vec4 directionAndCone;   // xyz = direction (for spot), w = outer cone angle (cos)
     vec4 colorAndIntensity;  // rgb = color, a = intensity
-    vec4 radiusAndInnerCone; // x = radius, y = inner cone angle (cos), zw = padding
+    vec4 radiusAndInnerCone; // x = radius, y = inner cone angle (cos), z = shadow map index (-1 = no shadow), w = padding
 };
 
 // Light buffer SSBO

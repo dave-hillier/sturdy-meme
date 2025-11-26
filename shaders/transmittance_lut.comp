@@ -1,0 +1,79 @@
+#version 450
+
+#extension GL_GOOGLE_include_directive : require
+
+#include "atmosphere_common.glsl"
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(binding = 0, rgba16f) writeonly uniform image2D transmittanceLUT;
+
+layout(binding = 1) uniform AtmosphereUniforms {
+    AtmosphereParams params;
+    vec4 sunDirection;
+    vec4 cameraPosition;
+    float padding[2];
+} uAtmosphere;
+
+const int TRANSMITTANCE_STEPS = 40;
+
+// Compute transmittance along ray from (r, mu) to atmosphere boundary
+vec3 ComputeTransmittance(float r, float mu) {
+    // Distance to atmosphere boundary
+    float distance = DistanceToAtmosphereBoundary(r, mu, uAtmosphere.params.atmosphereRadius);
+
+    // Step size for integration
+    float dx = distance / float(TRANSMITTANCE_STEPS);
+
+    // Accumulated optical depth (Rayleigh, Mie, Ozone)
+    vec3 opticalDepth = vec3(0.0);
+
+    // Trapezoidal integration
+    for (int i = 0; i <= TRANSMITTANCE_STEPS; i++) {
+        float t = float(i) * dx;
+
+        // Current distance from planet center
+        float ri = sqrt(r * r + t * t + 2.0 * r * mu * t);
+        float altitude = ri - uAtmosphere.params.planetRadius;
+
+        // Get density at this point
+        vec3 density = GetAtmosphereDensity(altitude, uAtmosphere.params);
+
+        // Compute extinction coefficients
+        vec3 rayleighExtinction = density.x * uAtmosphere.params.rayleighScatteringBase;
+        float mieExtinction = density.y * (uAtmosphere.params.mieScatteringBase + uAtmosphere.params.mieAbsorptionBase);
+        vec3 ozoneExtinction = density.z * uAtmosphere.params.ozoneAbsorption;
+
+        vec3 extinction = rayleighExtinction + vec3(mieExtinction) + ozoneExtinction;
+
+        // Trapezoidal rule weights
+        float weight = (i == 0 || i == TRANSMITTANCE_STEPS) ? 0.5 : 1.0;
+
+        opticalDepth += extinction * weight * dx;
+    }
+
+    // Transmittance = exp(-optical depth)
+    return exp(-opticalDepth);
+}
+
+void main() {
+    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 lutSize = imageSize(transmittanceLUT);
+
+    if (texel.x >= lutSize.x || texel.y >= lutSize.y) {
+        return;
+    }
+
+    // UV coordinates [0, 1]
+    vec2 uv = (vec2(texel) + 0.5) / vec2(lutSize);
+
+    // Decode altitude and view zenith angle from UV
+    float r, mu;
+    UVToTransmittanceLUTParams(uv, r, mu, uAtmosphere.params);
+
+    // Compute transmittance
+    vec3 transmittance = ComputeTransmittance(r, mu);
+
+    // Store result
+    imageStore(transmittanceLUT, texel, vec4(transmittance, 1.0));
+}
