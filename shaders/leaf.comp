@@ -1,0 +1,517 @@
+#version 450
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+// Leaf particle states
+const uint STATE_INACTIVE = 0;
+const uint STATE_FALLING = 1;
+const uint STATE_GROUNDED = 2;
+const uint STATE_DISTURBED = 3;
+
+// Flag bits
+const uint FLAG_ACTIVE = 1u;
+const uint FLAG_VISIBLE = 2u;
+
+// Leaf particle structure (80 bytes)
+struct LeafParticle {
+    vec3 position;          // 12 bytes
+    uint state;             // 4 bytes
+    vec3 velocity;          // 12 bytes
+    float groundTime;       // 4 bytes
+    vec4 orientation;       // 16 bytes (quaternion)
+    vec3 angularVelocity;   // 12 bytes
+    float size;             // 4 bytes
+    float hash;             // 4 bytes
+    uint leafType;          // 4 bytes
+    uint flags;             // 4 bytes
+    float padding;          // 4 bytes
+};
+
+struct DrawIndirectCommand {
+    uint vertexCount;
+    uint instanceCount;
+    uint firstVertex;
+    uint firstInstance;
+};
+
+// Input particle buffer (previous frame)
+layout(std430, binding = 0) readonly buffer InputParticleBuffer {
+    LeafParticle inputParticles[];
+};
+
+// Output particle buffer (current frame)
+layout(std430, binding = 1) buffer OutputParticleBuffer {
+    LeafParticle outputParticles[];
+};
+
+// Indirect draw command buffer
+layout(std430, binding = 2) buffer IndirectBuffer {
+    DrawIndirectCommand drawCmd;
+};
+
+// Leaf uniforms
+layout(binding = 3) uniform LeafUniforms {
+    vec4 cameraPosition;
+    vec4 frustumPlanes[6];
+    vec4 playerPosition;        // xyz = position, w = radius
+    vec4 playerVelocity;        // xyz = velocity, w = speed
+    vec4 spawnRegionMin;
+    vec4 spawnRegionMax;
+    float groundLevel;
+    float deltaTime;
+    float time;
+    float maxDrawDistance;
+    float disruptionRadius;
+    float disruptionStrength;
+    float gustThreshold;
+    float targetFallingCount;
+    float targetGroundedCount;
+    float padding[3];
+} uniforms;
+
+// Wind uniforms
+layout(binding = 4) uniform WindUniforms {
+    vec4 windDirectionAndStrength;  // xy = normalized direction, z = strength, w = speed
+    vec4 windParams;                // x = gustFrequency, y = gustAmplitude, z = noiseScale, w = time
+} wind;
+
+layout(push_constant) uniform PushConstants {
+    float time;
+    float deltaTime;
+    int padding[2];
+} push;
+
+const uint MAX_PARTICLES = 100000;
+const float GRAVITY = 4.0;  // Reduced gravity for floaty descent
+const float TERMINAL_VELOCITY_FLAT = 1.0;
+const float TERMINAL_VELOCITY_EDGE = 2.5;
+
+// Perlin noise permutation table
+const int perm[512] = int[512](
+    151,160,137,91,90,15,131,13,201,95,96,53,194,233,7,225,
+    140,36,103,30,69,142,8,99,37,240,21,10,23,190,6,148,
+    247,120,234,75,0,26,197,62,94,252,219,203,117,35,11,32,
+    57,177,33,88,237,149,56,87,174,20,125,136,171,168,68,175,
+    74,165,71,134,139,48,27,166,77,146,158,231,83,111,229,122,
+    60,211,133,230,220,105,92,41,55,46,245,40,244,102,143,54,
+    65,25,63,161,1,216,80,73,209,76,132,187,208,89,18,169,
+    200,196,135,130,116,188,159,86,164,100,109,198,173,186,3,64,
+    52,217,226,250,124,123,5,202,38,147,118,126,255,82,85,212,
+    207,206,59,227,47,16,58,17,182,189,28,42,223,183,170,213,
+    119,248,152,2,44,154,163,70,221,153,101,155,167,43,172,9,
+    129,22,39,253,19,98,108,110,79,113,224,232,178,185,112,104,
+    218,246,97,228,251,34,242,193,238,210,144,12,191,179,162,241,
+    81,51,145,235,249,14,239,107,49,192,214,31,181,199,106,157,
+    184,84,204,176,115,121,50,45,127,4,150,254,138,236,205,93,
+    222,114,67,29,24,72,243,141,128,195,78,66,215,61,156,180,
+    // Repeat
+    151,160,137,91,90,15,131,13,201,95,96,53,194,233,7,225,
+    140,36,103,30,69,142,8,99,37,240,21,10,23,190,6,148,
+    247,120,234,75,0,26,197,62,94,252,219,203,117,35,11,32,
+    57,177,33,88,237,149,56,87,174,20,125,136,171,168,68,175,
+    74,165,71,134,139,48,27,166,77,146,158,231,83,111,229,122,
+    60,211,133,230,220,105,92,41,55,46,245,40,244,102,143,54,
+    65,25,63,161,1,216,80,73,209,76,132,187,208,89,18,169,
+    200,196,135,130,116,188,159,86,164,100,109,198,173,186,3,64,
+    52,217,226,250,124,123,5,202,38,147,118,126,255,82,85,212,
+    207,206,59,227,47,16,58,17,182,189,28,42,223,183,170,213,
+    119,248,152,2,44,154,163,70,221,153,101,155,167,43,172,9,
+    129,22,39,253,19,98,108,110,79,113,224,232,178,185,112,104,
+    218,246,97,228,251,34,242,193,238,210,144,12,191,179,162,241,
+    81,51,145,235,249,14,239,107,49,192,214,31,181,199,106,157,
+    184,84,204,176,115,121,50,45,127,4,150,254,138,236,205,93,
+    222,114,67,29,24,72,243,141,128,195,78,66,215,61,156,180
+);
+
+// Hash functions
+float hash(float n) {
+    return fract(sin(n) * 43758.5453);
+}
+
+vec3 hash3(vec3 p) {
+    p = vec3(dot(p, vec3(127.1, 311.7, 74.7)),
+             dot(p, vec3(269.5, 183.3, 246.1)),
+             dot(p, vec3(113.5, 271.9, 124.6)));
+    return fract(sin(p) * 43758.5453);
+}
+
+float fade(float t) {
+    return t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+}
+
+float grad(int hash, float x, float y) {
+    int h = hash & 7;
+    float u = h < 4 ? x : y;
+    float v = h < 4 ? y : x;
+    return ((h & 1) != 0 ? -u : u) + ((h & 2) != 0 ? -2.0 * v : 2.0 * v);
+}
+
+float perlinNoise(float x, float y) {
+    int X = int(floor(x)) & 255;
+    int Y = int(floor(y)) & 255;
+    x -= floor(x);
+    y -= floor(y);
+    float u = fade(x);
+    float v = fade(y);
+    int A = perm[X] + Y;
+    int AA = perm[A];
+    int AB = perm[A + 1];
+    int B = perm[X + 1] + Y;
+    int BA = perm[B];
+    int BB = perm[B + 1];
+    float res = mix(
+        mix(grad(perm[AA], x, y), grad(perm[BA], x - 1.0, y), u),
+        mix(grad(perm[AB], x, y - 1.0), grad(perm[BB], x - 1.0, y - 1.0), u),
+        v
+    );
+    return (res + 1.0) * 0.5;
+}
+
+// Sample wind with turbulence
+vec3 sampleWind(vec3 worldPos) {
+    vec2 windDir = wind.windDirectionAndStrength.xy;
+    float windStrength = wind.windDirectionAndStrength.z;
+    float windSpeed = wind.windDirectionAndStrength.w;
+    float windTime = wind.windParams.w;
+
+    vec2 scrolledPos = worldPos.xz - windDir * windTime * windSpeed * 0.4;
+    float baseFreq = 0.05;
+    float n1 = perlinNoise(scrolledPos.x * baseFreq, scrolledPos.y * baseFreq);
+    float n2 = perlinNoise(scrolledPos.x * baseFreq * 2.0, scrolledPos.y * baseFreq * 2.0);
+    float turbulence = n1 * 0.7 + n2 * 0.3;
+
+    vec3 windDir3D = normalize(vec3(windDir.x, 0.0, windDir.y));
+    float turbulenceAngle = (turbulence - 0.5) * 0.5;
+    vec3 perpWind = vec3(-windDir3D.z, 0.0, windDir3D.x);
+
+    // Add vertical component for leaf lift
+    float lift = turbulence * 0.3;
+    vec3 windVec = (windDir3D + perpWind * turbulenceAngle) * windStrength;
+    windVec.y = lift * windStrength * 0.5;
+
+    return windVec;
+}
+
+// Quaternion multiplication
+vec4 qmul(vec4 q1, vec4 q2) {
+    return vec4(
+        q1.w * q2.x + q1.x * q2.w + q1.y * q2.z - q1.z * q2.y,
+        q1.w * q2.y - q1.x * q2.z + q1.y * q2.w + q1.z * q2.x,
+        q1.w * q2.z + q1.x * q2.y - q1.y * q2.x + q1.z * q2.w,
+        q1.w * q2.w - q1.x * q2.x - q1.y * q2.y - q1.z * q2.z
+    );
+}
+
+// Create quaternion from axis-angle
+vec4 quatFromAxisAngle(vec3 axis, float angle) {
+    float halfAngle = angle * 0.5;
+    float s = sin(halfAngle);
+    return vec4(axis * s, cos(halfAngle));
+}
+
+// Check if particle is inside frustum
+bool isInFrustum(vec3 pos, float margin) {
+    vec4 posW = vec4(pos, 1.0);
+    for (int i = 0; i < 6; i++) {
+        if (dot(posW, uniforms.frustumPlanes[i]) < -margin) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Spawn a new falling leaf
+void spawnFallingLeaf(uint idx) {
+    float seed = float(idx) * 0.001 + uniforms.time * 0.1;
+    vec3 rnd = hash3(vec3(seed, seed * 1.7, seed * 2.3));
+    vec3 rnd2 = hash3(vec3(seed * 3.1, seed * 2.3, seed * 1.5));
+
+    // Random position within spawn region
+    vec3 pos;
+    pos.x = mix(uniforms.spawnRegionMin.x, uniforms.spawnRegionMax.x, rnd.x);
+    pos.y = mix(uniforms.spawnRegionMin.y, uniforms.spawnRegionMax.y, rnd.y);
+    pos.z = mix(uniforms.spawnRegionMin.z, uniforms.spawnRegionMax.z, rnd.z);
+
+    // Initial velocity - slight horizontal drift
+    vec3 velocity = vec3((rnd2.x - 0.5) * 0.5, -0.5, (rnd2.y - 0.5) * 0.5);
+
+    // Random initial orientation (quaternion)
+    vec3 axis = normalize(vec3(rnd.x - 0.5, rnd.y - 0.5, rnd.z - 0.5));
+    float angle = rnd2.z * 6.28318;
+    vec4 orientation = quatFromAxisAngle(axis, angle);
+
+    // Random angular velocity for tumbling
+    vec3 angularVel = (rnd2 - 0.5) * 4.0;  // 0-2 rad/s per axis
+
+    // Random size (0.03-0.07m)
+    float size = 0.03 + rnd.x * 0.04;
+
+    // Random leaf type (0-3)
+    uint leafType = uint(rnd.y * 4.0) % 4u;
+
+    outputParticles[idx].position = pos;
+    outputParticles[idx].state = STATE_FALLING;
+    outputParticles[idx].velocity = velocity;
+    outputParticles[idx].groundTime = 0.0;
+    outputParticles[idx].orientation = orientation;
+    outputParticles[idx].angularVelocity = angularVel;
+    outputParticles[idx].size = size;
+    outputParticles[idx].hash = hash(float(idx) + uniforms.time);
+    outputParticles[idx].leafType = leafType;
+    outputParticles[idx].flags = FLAG_ACTIVE;
+}
+
+// Spawn a grounded leaf
+void spawnGroundedLeaf(uint idx) {
+    float seed = float(idx) * 0.002 + uniforms.time * 0.05;
+    vec3 rnd = hash3(vec3(seed, seed * 1.7, seed * 2.3));
+
+    // Random position on ground within spawn region
+    vec3 pos;
+    pos.x = mix(uniforms.spawnRegionMin.x, uniforms.spawnRegionMax.x, rnd.x);
+    pos.z = mix(uniforms.spawnRegionMin.z, uniforms.spawnRegionMax.z, rnd.z);
+    pos.y = uniforms.groundLevel + 0.01;  // Slightly above ground
+
+    // Flat orientation with random yaw
+    float yaw = rnd.y * 6.28318;
+    vec4 orientation = quatFromAxisAngle(vec3(0.0, 1.0, 0.0), yaw);
+    // Add slight tilt
+    float tiltAngle = (rnd.z - 0.5) * 0.3;
+    vec4 tiltQuat = quatFromAxisAngle(vec3(1.0, 0.0, 0.0), tiltAngle);
+    orientation = qmul(orientation, tiltQuat);
+
+    float size = 0.03 + rnd.x * 0.04;
+    uint leafType = uint(rnd.y * 4.0) % 4u;
+
+    outputParticles[idx].position = pos;
+    outputParticles[idx].state = STATE_GROUNDED;
+    outputParticles[idx].velocity = vec3(0.0);
+    outputParticles[idx].groundTime = rnd.z * 10.0;  // Random initial ground time
+    outputParticles[idx].orientation = orientation;
+    outputParticles[idx].angularVelocity = vec3(0.0);
+    outputParticles[idx].size = size;
+    outputParticles[idx].hash = hash(float(idx) + uniforms.time * 0.5);
+    outputParticles[idx].leafType = leafType;
+    outputParticles[idx].flags = FLAG_ACTIVE;
+}
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= MAX_PARTICLES) return;
+
+    // Set vertex count for quad (4 vertices for triangle strip)
+    if (idx == 0) {
+        atomicMax(drawCmd.vertexCount, 4);
+    }
+
+    float dt = push.deltaTime;
+    vec3 cameraPos = uniforms.cameraPosition.xyz;
+    vec3 playerPos = uniforms.playerPosition.xyz;
+    float playerSpeed = uniforms.playerVelocity.w;
+
+    // Determine target counts
+    uint targetFalling = uint(uniforms.targetFallingCount);
+    uint targetGrounded = uint(uniforms.targetGroundedCount);
+    uint totalTarget = targetFalling + targetGrounded;
+
+    // Only process particles up to total target
+    if (idx >= totalTarget) {
+        outputParticles[idx].flags = 0u;
+        outputParticles[idx].state = STATE_INACTIVE;
+        return;
+    }
+
+    // Read previous particle state
+    LeafParticle p = inputParticles[idx];
+
+    // Determine if this slot should be falling or grounded
+    bool shouldBeFalling = idx < targetFalling;
+
+    // Check if particle needs respawn
+    bool needsRespawn = (p.flags & FLAG_ACTIVE) == 0 || p.state == STATE_INACTIVE;
+
+    // Also respawn if too far from camera
+    float distToCamera = length(p.position - cameraPos);
+    if (distToCamera > uniforms.maxDrawDistance * 1.5) {
+        needsRespawn = true;
+    }
+
+    if (needsRespawn) {
+        if (shouldBeFalling) {
+            spawnFallingLeaf(idx);
+        } else {
+            spawnGroundedLeaf(idx);
+        }
+        p = outputParticles[idx];
+    } else {
+        // === PHYSICS SIMULATION ===
+
+        // Sample wind at particle position
+        vec3 windForce = sampleWind(p.position);
+        float windStrength = wind.windDirectionAndStrength.z;
+
+        if (p.state == STATE_FALLING) {
+            // Apply gravity
+            p.velocity.y -= GRAVITY * dt;
+
+            // Apply wind force (leaves are very wind-susceptible)
+            p.velocity += windForce * dt * 3.0;
+
+            // Drag - different horizontal vs vertical
+            float dragH = 0.92;  // High horizontal drag
+            float dragV = 0.96;  // Lower vertical drag
+            p.velocity.x *= pow(dragH, dt * 60.0);
+            p.velocity.z *= pow(dragH, dt * 60.0);
+            p.velocity.y *= pow(dragV, dt * 60.0);
+
+            // Terminal velocity (depends on orientation - flat falls slower)
+            vec3 up = vec3(0.0, 1.0, 0.0);
+            // Get leaf normal from orientation
+            vec4 q = p.orientation;
+            vec3 leafNormal = vec3(
+                2.0 * (q.x * q.z + q.w * q.y),
+                1.0 - 2.0 * (q.x * q.x + q.z * q.z),
+                2.0 * (q.y * q.z - q.w * q.x)
+            );
+            float flatness = abs(dot(leafNormal, up));
+            float terminalVel = mix(TERMINAL_VELOCITY_EDGE, TERMINAL_VELOCITY_FLAT, flatness);
+            p.velocity.y = max(p.velocity.y, -terminalVel);
+
+            // Apply angular velocity (tumbling)
+            if (length(p.angularVelocity) > 0.01) {
+                vec3 axis = normalize(p.angularVelocity);
+                float angle = length(p.angularVelocity) * dt;
+                vec4 rotDelta = quatFromAxisAngle(axis, angle);
+                p.orientation = normalize(qmul(rotDelta, p.orientation));
+            }
+
+            // Angular drag
+            p.angularVelocity *= pow(0.95, dt * 60.0);
+
+            // Wind applies torque
+            vec3 windTorque = cross(leafNormal, windForce) * 0.5;
+            p.angularVelocity += windTorque * dt;
+
+            // Update position
+            p.position += p.velocity * dt;
+
+            // Ground collision
+            if (p.position.y <= uniforms.groundLevel + p.size * 0.5) {
+                p.position.y = uniforms.groundLevel + 0.01;
+                p.velocity = vec3(0.0);
+                p.angularVelocity = vec3(0.0);
+                p.state = STATE_GROUNDED;
+                p.groundTime = 0.0;
+            }
+
+        } else if (p.state == STATE_GROUNDED) {
+            // Check for player disruption
+            float distToPlayer = length(p.position.xz - playerPos.xz);
+
+            if (distToPlayer < uniforms.disruptionRadius && playerSpeed > 0.5) {
+                // Player is nearby and moving - disturb the leaf
+                vec3 awayDir = normalize(p.position - playerPos);
+                awayDir.y = 0.5;  // Add upward component
+                awayDir = normalize(awayDir);
+
+                // Add swirl based on player velocity direction
+                vec3 playerVelDir = normalize(uniforms.playerVelocity.xyz);
+                vec3 swirl = cross(vec3(0.0, 1.0, 0.0), playerVelDir);
+
+                float disruptForce = uniforms.disruptionStrength * (1.0 - distToPlayer / uniforms.disruptionRadius);
+                disruptForce *= (0.7 + p.hash * 0.6);  // Random variation
+
+                p.velocity = awayDir * disruptForce + swirl * disruptForce * 0.3;
+                p.angularVelocity = (hash3(vec3(p.hash, uniforms.time, float(idx))) - 0.5) * 8.0;
+                p.state = STATE_DISTURBED;
+
+            } else if (windStrength > uniforms.gustThreshold) {
+                // Strong gust - lift off
+                float liftChance = (windStrength - uniforms.gustThreshold) * 0.5;
+                if (p.hash < liftChance) {
+                    p.velocity = windForce + vec3(0.0, 2.0 + p.hash * 2.0, 0.0);
+                    p.angularVelocity = (hash3(vec3(p.hash * 2.0, uniforms.time, float(idx))) - 0.5) * 6.0;
+                    p.state = STATE_FALLING;
+                }
+            }
+
+            p.groundTime += dt;
+
+        } else if (p.state == STATE_DISTURBED) {
+            // Apply reduced gravity
+            p.velocity.y -= GRAVITY * 0.5 * dt;
+
+            // Apply wind
+            p.velocity += windForce * dt * 2.0;
+
+            // Strong drag to slow down
+            p.velocity *= pow(0.9, dt * 60.0);
+
+            // Apply angular velocity
+            if (length(p.angularVelocity) > 0.01) {
+                vec3 axis = normalize(p.angularVelocity);
+                float angle = length(p.angularVelocity) * dt;
+                vec4 rotDelta = quatFromAxisAngle(axis, angle);
+                p.orientation = normalize(qmul(rotDelta, p.orientation));
+            }
+            p.angularVelocity *= pow(0.92, dt * 60.0);
+
+            // Update position
+            p.position += p.velocity * dt;
+
+            // Check if settled
+            float speed = length(p.velocity);
+            if (speed < 0.1 && p.position.y <= uniforms.groundLevel + p.size) {
+                p.position.y = uniforms.groundLevel + 0.01;
+                p.velocity = vec3(0.0);
+                p.angularVelocity = vec3(0.0);
+                p.state = STATE_GROUNDED;
+                p.groundTime = 0.0;
+            }
+
+            // Ground collision
+            if (p.position.y <= uniforms.groundLevel + 0.01) {
+                p.position.y = uniforms.groundLevel + 0.01;
+                if (p.velocity.y < 0.0) p.velocity.y *= -0.3;  // Small bounce
+            }
+        }
+
+        // Write updated particle
+        outputParticles[idx] = p;
+    }
+
+    // === VISIBILITY FLAG UPDATE ===
+    p = outputParticles[idx];
+    distToCamera = length(p.position - cameraPos);
+    bool visible = true;
+
+    // Distance culling (grounded leaves cull closer)
+    float maxDist = (p.state == STATE_GROUNDED) ? uniforms.maxDrawDistance * 0.6 : uniforms.maxDrawDistance;
+    if (distToCamera > maxDist) {
+        visible = false;
+    }
+
+    // Frustum culling
+    if (visible && !isInFrustum(p.position, p.size * 2.0)) {
+        visible = false;
+    }
+
+    // LOD particle dropping at distance
+    if (visible) {
+        float lodFactor = smoothstep(maxDist * 0.5, maxDist, distToCamera);
+        float dropThreshold = lodFactor * 0.7;
+        if (p.hash < dropThreshold) {
+            visible = false;
+        }
+    }
+
+    // Update visibility flag
+    if (visible) {
+        outputParticles[idx].flags |= FLAG_VISIBLE;
+    } else {
+        outputParticles[idx].flags &= ~FLAG_VISIBLE;
+    }
+
+    // Update instance count
+    atomicMax(drawCmd.instanceCount, totalTarget);
+}
