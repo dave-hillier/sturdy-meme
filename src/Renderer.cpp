@@ -119,10 +119,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     if (!createUniformBuffers()) return false;
     if (!createLightBuffers()) return false;
 
-    // Initialize scene lights
-    setupSceneLights();
-
-    // Initialize scene (meshes, textures, objects)
+    // Initialize scene (meshes, textures, objects, lights)
     SceneBuilder::InitInfo sceneInfo{};
     sceneInfo.allocator = allocator;
     sceneInfo.device = device;
@@ -131,7 +128,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     sceneInfo.physicalDevice = physicalDevice;
     sceneInfo.resourcePath = resourcePath;
 
-    if (!sceneBuilder.init(sceneInfo)) return false;
+    if (!sceneManager.init(sceneInfo)) return false;
 
     if (!createDescriptorSets()) return false;
 
@@ -278,10 +275,6 @@ void Renderer::setWeatherType(uint32_t type) {
     weatherSystem.setWeatherType(type);
 }
 
-void Renderer::updatePlayerTransform(const glm::mat4& transform) {
-    sceneBuilder.updatePlayerTransform(transform);
-}
-
 void Renderer::shutdown() {
     if (device != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(device);
@@ -292,7 +285,7 @@ void Renderer::shutdown() {
             vkDestroyFence(device, inFlightFences[i], nullptr);
         }
 
-        sceneBuilder.destroy(allocator, device);
+        sceneManager.destroy(allocator, device);
 
         vkDestroyDescriptorPool(device, descriptorPool, nullptr);
 
@@ -1861,49 +1854,10 @@ bool Renderer::createLightBuffers() {
     return true;
 }
 
-void Renderer::setupSceneLights() {
-    // Clear any existing lights
-    lightManager.clear();
-
-    // Add the glowing orb point light (same as the hardcoded one)
-    Light orbLight;
-    orbLight.type = LightType::Point;
-    orbLight.position = glm::vec3(2.0f, 1.3f, 0.0f);
-    orbLight.color = glm::vec3(1.0f, 0.9f, 0.7f);  // Warm white
-    orbLight.intensity = 5.0f;
-    orbLight.radius = 8.0f;
-    orbLight.priority = 10.0f;  // High priority - always visible
-    lightManager.addLight(orbLight);
-
-    // Add a few more example lights for testing
-    Light blueLight;
-    blueLight.type = LightType::Point;
-    blueLight.position = glm::vec3(-3.0f, 2.0f, 2.0f);
-    blueLight.color = glm::vec3(0.3f, 0.5f, 1.0f);  // Blue
-    blueLight.intensity = 3.0f;
-    blueLight.radius = 6.0f;
-    blueLight.priority = 5.0f;
-    lightManager.addLight(blueLight);
-
-    Light greenLight;
-    greenLight.type = LightType::Point;
-    greenLight.position = glm::vec3(4.0f, 1.5f, -2.0f);
-    greenLight.color = glm::vec3(0.4f, 1.0f, 0.4f);  // Green
-    greenLight.intensity = 2.5f;
-    greenLight.radius = 5.0f;
-    greenLight.priority = 5.0f;
-    lightManager.addLight(greenLight);
-}
-
 void Renderer::updateLightBuffer(uint32_t currentImage, const Camera& camera) {
-    // Update orb light position (light index 0 is the orb)
-    if (lightManager.getLightCount() > 0) {
-        lightManager.getLight(0).position = orbLightPosition;
-    }
-
     LightBuffer buffer{};
     glm::mat4 viewProj = camera.getProjectionMatrix() * camera.getViewMatrix();
-    lightManager.buildLightBuffer(buffer, camera.getPosition(), camera.getFront(), viewProj, lightCullRadius);
+    sceneManager.getLightManager().buildLightBuffer(buffer, camera.getPosition(), camera.getFront(), viewProj, lightCullRadius);
     memcpy(lightBuffersMapped[currentImage], &buffer, sizeof(LightBuffer));
 }
 
@@ -1965,8 +1919,8 @@ bool Renderer::createDescriptorSets() {
 
         VkDescriptorImageInfo crateImageInfo{};
         crateImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        crateImageInfo.imageView = sceneBuilder.getCrateTexture().getImageView();
-        crateImageInfo.sampler = sceneBuilder.getCrateTexture().getSampler();
+        crateImageInfo.imageView = sceneManager.getSceneBuilder().getCrateTexture().getImageView();
+        crateImageInfo.sampler = sceneManager.getSceneBuilder().getCrateTexture().getSampler();
 
         VkDescriptorImageInfo shadowImageInfo{};
         shadowImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -1975,8 +1929,8 @@ bool Renderer::createDescriptorSets() {
 
         VkDescriptorImageInfo crateNormalImageInfo{};
         crateNormalImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        crateNormalImageInfo.imageView = sceneBuilder.getCrateNormalMap().getImageView();
-        crateNormalImageInfo.sampler = sceneBuilder.getCrateNormalMap().getSampler();
+        crateNormalImageInfo.imageView = sceneManager.getSceneBuilder().getCrateNormalMap().getImageView();
+        crateNormalImageInfo.sampler = sceneManager.getSceneBuilder().getCrateNormalMap().getSampler();
 
         VkDescriptorBufferInfo lightBufferInfo{};
         lightBufferInfo.buffer = lightBuffers[i];
@@ -1985,8 +1939,8 @@ bool Renderer::createDescriptorSets() {
 
         VkDescriptorImageInfo emissiveImageInfo{};
         emissiveImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        emissiveImageInfo.imageView = sceneBuilder.getDefaultEmissiveMap().getImageView();
-        emissiveImageInfo.sampler = sceneBuilder.getDefaultEmissiveMap().getSampler();
+        emissiveImageInfo.imageView = sceneManager.getSceneBuilder().getDefaultEmissiveMap().getImageView();
+        emissiveImageInfo.sampler = sceneManager.getSceneBuilder().getDefaultEmissiveMap().getSampler();
 
         VkDescriptorImageInfo pointShadowImageInfo{};
         pointShadowImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -2070,13 +2024,13 @@ bool Renderer::createDescriptorSets() {
         // Ground descriptor sets
         VkDescriptorImageInfo groundImageInfo{};
         groundImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        groundImageInfo.imageView = sceneBuilder.getGroundTexture().getImageView();
-        groundImageInfo.sampler = sceneBuilder.getGroundTexture().getSampler();
+        groundImageInfo.imageView = sceneManager.getSceneBuilder().getGroundTexture().getImageView();
+        groundImageInfo.sampler = sceneManager.getSceneBuilder().getGroundTexture().getSampler();
 
         VkDescriptorImageInfo groundNormalImageInfo{};
         groundNormalImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        groundNormalImageInfo.imageView = sceneBuilder.getGroundNormalMap().getImageView();
-        groundNormalImageInfo.sampler = sceneBuilder.getGroundNormalMap().getSampler();
+        groundNormalImageInfo.imageView = sceneManager.getSceneBuilder().getGroundNormalMap().getImageView();
+        groundNormalImageInfo.sampler = sceneManager.getSceneBuilder().getGroundNormalMap().getSampler();
 
         descriptorWrites[0].dstSet = groundDescriptorSets[i];
         descriptorWrites[1].dstSet = groundDescriptorSets[i];
@@ -2095,13 +2049,13 @@ bool Renderer::createDescriptorSets() {
         // Metal texture descriptor sets
         VkDescriptorImageInfo metalImageInfo{};
         metalImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        metalImageInfo.imageView = sceneBuilder.getMetalTexture().getImageView();
-        metalImageInfo.sampler = sceneBuilder.getMetalTexture().getSampler();
+        metalImageInfo.imageView = sceneManager.getSceneBuilder().getMetalTexture().getImageView();
+        metalImageInfo.sampler = sceneManager.getSceneBuilder().getMetalTexture().getSampler();
 
         VkDescriptorImageInfo metalNormalImageInfo{};
         metalNormalImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        metalNormalImageInfo.imageView = sceneBuilder.getMetalNormalMap().getImageView();
-        metalNormalImageInfo.sampler = sceneBuilder.getMetalNormalMap().getSampler();
+        metalNormalImageInfo.imageView = sceneManager.getSceneBuilder().getMetalNormalMap().getImageView();
+        metalNormalImageInfo.sampler = sceneManager.getSceneBuilder().getMetalNormalMap().getSampler();
 
         descriptorWrites[0].dstSet = metalDescriptorSets[i];
         descriptorWrites[1].dstSet = metalDescriptorSets[i];
@@ -2345,7 +2299,7 @@ UniformBufferObject Renderer::buildUniformBufferData(const Camera& camera, const
     // Point light from the glowing sphere (position updated by physics)
     float pointLightIntensity = 5.0f;
     float pointLightRadius = 8.0f;
-    ubo.pointLightPosition = glm::vec4(orbLightPosition, pointLightIntensity);
+    ubo.pointLightPosition = glm::vec4(sceneManager.getOrbLightPosition(), pointLightIntensity);
     ubo.pointLightColor = glm::vec4(1.0f, 0.9f, 0.7f, pointLightRadius);
 
     // Wind parameters for cloud animation
@@ -2397,7 +2351,7 @@ void Renderer::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float 
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                 shadowPipelineLayout, 0, 1, &descriptorSets[frameIndex], 0, nullptr);
 
-        for (const auto& obj : sceneBuilder.getSceneObjects()) {
+        for (const auto& obj : sceneManager.getSceneObjects()) {
             if (!obj.castsShadow) continue;
 
             ShadowPushConstants shadowPush{};
@@ -2420,7 +2374,7 @@ void Renderer::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float 
 }
 
 void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
-    for (const auto& obj : sceneBuilder.getSceneObjects()) {
+    for (const auto& obj : sceneManager.getSceneObjects()) {
         PushConstants push{};
         push.model = obj.transform;
         push.roughness = obj.roughness;
@@ -2434,9 +2388,9 @@ void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
 
         // Select descriptor set based on texture
         VkDescriptorSet* descSet;
-        if (obj.texture == &sceneBuilder.getGroundTexture()) {
+        if (obj.texture == &sceneManager.getSceneBuilder().getGroundTexture()) {
             descSet = &groundDescriptorSets[frameIndex];
-        } else if (obj.texture == &sceneBuilder.getMetalTexture()) {
+        } else if (obj.texture == &sceneManager.getSceneBuilder().getMetalTexture()) {
             descSet = &metalDescriptorSets[frameIndex];
         } else {
             descSet = &descriptorSets[frameIndex];
