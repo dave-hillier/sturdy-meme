@@ -57,7 +57,7 @@ const mat3 LMS_TO_RGB = mat3(
    -0.0041960863, -0.7034186147, 1.7076147010
 );
 
-// Optimized Rayleigh coefficients for LMS space (Ghost of Tsushima technique)
+// Optimized Rayleigh coefficients for LMS space 
 const vec3 RAYLEIGH_LMS = vec3(6.95e-3, 12.28e-3, 28.44e-3);
 
 // Cloud parameters (Phase 4.2 - Volumetric Clouds)
@@ -65,8 +65,8 @@ const float CLOUD_LAYER_BOTTOM = 1.5;     // km above surface
 const float CLOUD_LAYER_TOP = 4.0;        // km above surface
 const float CLOUD_COVERAGE = 0.5;         // 0-1 coverage amount
 const float CLOUD_DENSITY = 0.3;          // Base density multiplier
-const int CLOUD_MARCH_STEPS = 16;         // Ray march samples (reduced for performance)
-const int CLOUD_LIGHT_STEPS = 3;          // Light sampling steps (reduced for performance)
+const int CLOUD_MARCH_STEPS = 32;         // Ray march samples
+const int CLOUD_LIGHT_STEPS = 6;          // Light sampling steps
 
 float hash(vec3 p) {
     return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453);
