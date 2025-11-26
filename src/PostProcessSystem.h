@@ -15,6 +15,19 @@ struct PostProcessUniforms {
     float deltaTime;
     float adaptationSpeed;
     float bloomRadius;
+    // God rays parameters (Phase 4.4)
+    glm::vec2 sunScreenPos;   // Sun position in screen space [0,1]
+    float godRayIntensity;    // God ray strength
+    float godRayDecay;        // Falloff from sun position
+    // Froxel volumetrics (Phase 4.3)
+    float froxelEnabled;      // 1.0 = enabled, 0.0 = disabled
+    float froxelFarPlane;     // Volumetric far plane
+    float froxelDepthDist;    // Depth distribution factor
+    float nearPlane;          // Camera near plane for depth linearization
+    float farPlane;           // Camera far plane for depth linearization
+    float padding1;
+    float padding2;
+    float padding3;
 };
 
 class PostProcessSystem {
@@ -57,6 +70,24 @@ public:
     float getBloomIntensity() const { return bloomIntensity; }
     void setBloomRadius(float r) { bloomRadius = r; }
     float getBloomRadius() const { return bloomRadius; }
+
+    // God rays (Phase 4.4)
+    void setSunScreenPos(glm::vec2 pos) { sunScreenPos = pos; }
+    glm::vec2 getSunScreenPos() const { return sunScreenPos; }
+    void setGodRayIntensity(float i) { godRayIntensity = i; }
+    float getGodRayIntensity() const { return godRayIntensity; }
+    void setGodRayDecay(float d) { godRayDecay = d; }
+    float getGodRayDecay() const { return godRayDecay; }
+
+    // Froxel volumetrics (Phase 4.3)
+    void setFroxelVolume(VkImageView volumeView, VkSampler volumeSampler);
+    void setFroxelEnabled(bool enabled) { froxelEnabled = enabled; }
+    bool isFroxelEnabled() const { return froxelEnabled; }
+    void setFroxelParams(float farPlane, float depthDist) {
+        froxelFarPlane = farPlane;
+        froxelDepthDist = depthDist;
+    }
+    void setCameraPlanes(float near, float far) { nearPlane = near; farPlane = far; }
 
 private:
     bool createHDRRenderTarget();
@@ -117,6 +148,20 @@ private:
     float bloomThreshold = 1.0f;   // Brightness threshold for bloom
     float bloomIntensity = 0.3f;   // Bloom strength
     float bloomRadius = 4.0f;      // Bloom sample radius
+
+    // God ray parameters (Phase 4.4)
+    glm::vec2 sunScreenPos = glm::vec2(0.5f, 0.5f);  // Default to center
+    float godRayIntensity = 0.5f;  // God ray strength
+    float godRayDecay = 0.96f;     // Falloff per sample
+
+    // Froxel volumetrics (Phase 4.3)
+    VkImageView froxelVolumeView = VK_NULL_HANDLE;
+    VkSampler froxelSampler = VK_NULL_HANDLE;
+    bool froxelEnabled = false;
+    float froxelFarPlane = 200.0f;
+    float froxelDepthDist = 1.2f;
+    float nearPlane = 0.1f;
+    float farPlane = 1000.0f;
 
     // Auto-exposure parameters
     static constexpr float MIN_EXPOSURE = -4.0f;  // EV

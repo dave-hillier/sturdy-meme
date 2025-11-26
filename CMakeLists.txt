@@ -24,6 +24,7 @@ set(SOURCES
     src/CelestialCalculator.cpp
     src/WindSystem.cpp
     src/PostProcessSystem.cpp
+    src/FroxelSystem.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
@@ -70,6 +71,8 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow.frag.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.frag.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_update.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_integrate.comp.spv
 )
 
 set_source_files_properties(${RESOURCE_FILES} PROPERTIES
@@ -170,6 +173,18 @@ if(SHADER_COMPILE_CMD)
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.frag
         COMMENT "Compiling postprocess fragment shader"
     )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_update.comp.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_update.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_update.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_update.comp
+        COMMENT "Compiling froxel update compute shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_integrate.comp.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_integrate.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_integrate.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_integrate.comp
+        COMMENT "Compiling froxel integration compute shader"
+    )
     add_custom_target(shaders DEPENDS
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.frag.spv
@@ -184,6 +199,8 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow.frag.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.frag.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_update.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_integrate.comp.spv
     )
     add_dependencies(${PROJECT_NAME} shaders)
 else()

@@ -223,6 +223,24 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     }
     grassSystem.updateDescriptorSets(device, uniformBuffers, shadowImageView, shadowSampler, windBuffers);
 
+    // Initialize froxel volumetric fog system (Phase 4.3)
+    FroxelSystem::InitInfo froxelInfo{};
+    froxelInfo.device = device;
+    froxelInfo.allocator = allocator;
+    froxelInfo.descriptorPool = descriptorPool;
+    froxelInfo.extent = swapchainExtent;
+    froxelInfo.shaderPath = resourcePath + "/shaders";
+    froxelInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+    froxelInfo.shadowMapView = shadowImageView;
+    froxelInfo.shadowSampler = shadowSampler;
+
+    if (!froxelSystem.init(froxelInfo)) return false;
+
+    // Connect froxel volume to post-process system for compositing
+    postProcessSystem.setFroxelVolume(froxelSystem.getScatteringVolumeView(), froxelSystem.getVolumeSampler());
+    postProcessSystem.setFroxelParams(froxelSystem.getVolumetricFarPlane(), FroxelSystem::DEPTH_DISTRIBUTION);
+    postProcessSystem.setFroxelEnabled(true);
+
     if (!createSyncObjects()) return false;
 
     return true;
@@ -257,6 +275,7 @@ void Renderer::shutdown() {
 
         grassSystem.destroy(device, allocator);
         windSystem.destroy(device, allocator);
+        froxelSystem.destroy(device, allocator);
         postProcessSystem.destroy(device, allocator);
 
         vkDestroyPipeline(device, skyPipeline, nullptr);
@@ -1510,6 +1529,22 @@ void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera& camera) 
     lastSunIntensity = sunIntensity;
 
     memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
+
+    // Calculate sun screen position for god rays (Phase 4.4)
+    // Place sun at a far distance along sun direction vector
+    glm::vec3 sunWorldPos = camera.getPosition() + sunDir * 1000.0f;
+    glm::vec4 sunClipPos = ubo.proj * ubo.view * glm::vec4(sunWorldPos, 1.0f);
+
+    // Perspective divide to get NDC
+    glm::vec2 sunScreenPos(0.5f, 0.5f);  // Default to center if behind camera
+    if (sunClipPos.w > 0.0f) {
+        glm::vec3 sunNDC = glm::vec3(sunClipPos) / sunClipPos.w;
+        // Convert from NDC [-1,1] to screen space [0,1]
+        sunScreenPos = glm::vec2(sunNDC.x * 0.5f + 0.5f, sunNDC.y * 0.5f + 0.5f);
+        // Flip Y for Vulkan coordinate system
+        sunScreenPos.y = 1.0f - sunScreenPos.y;
+    }
+    postProcessSystem.setSunScreenPos(sunScreenPos);
 }
 
 void Renderer::render(const Camera& camera) {
@@ -1594,6 +1629,24 @@ void Renderer::render(const Camera& camera) {
 
             vkCmdEndRenderPass(commandBuffers[currentFrame]);
         }
+    }
+
+    // Update froxel volumetric fog (Phase 4.3)
+    // Compute pass runs before HDR scene rendering
+    {
+        // Get sun direction and color from uniform data
+        UniformBufferObject* ubo = static_cast<UniformBufferObject*>(uniformBuffersMapped[currentFrame]);
+        glm::vec3 sunDir = glm::normalize(glm::vec3(ubo->sunDirection));
+        float sunIntensity = ubo->sunDirection.w;
+        glm::vec3 sunColor = glm::vec3(ubo->sunColor);
+
+        froxelSystem.recordFroxelUpdate(commandBuffers[currentFrame], currentFrame,
+                                        camera.getViewMatrix(), camera.getProjectionMatrix(),
+                                        camera.getPosition(),
+                                        sunDir, sunIntensity, sunColor);
+
+        // Update post-process with camera planes for depth linearization
+        postProcessSystem.setCameraPlanes(camera.getNearPlane(), camera.getFarPlane());
     }
 
     // HDR render pass - render scene to HDR target

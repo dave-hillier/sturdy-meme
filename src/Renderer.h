@@ -15,6 +15,7 @@
 #include "CelestialCalculator.h"
 #include "WindSystem.h"
 #include "PostProcessSystem.h"
+#include "FroxelSystem.h"
 
 static constexpr uint32_t NUM_SHADOW_CASCADES = 4;
 
@@ -148,6 +149,7 @@ private:
     GrassSystem grassSystem;
     WindSystem windSystem;
     PostProcessSystem postProcessSystem;
+    FroxelSystem froxelSystem;
 
     std::vector<VkFramebuffer> framebuffers;
     VkCommandPool commandPool = VK_NULL_HANDLE;

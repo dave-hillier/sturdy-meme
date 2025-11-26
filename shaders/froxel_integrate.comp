@@ -1,0 +1,92 @@
+#version 450
+
+// Froxel Integration Compute Shader (Phase 4.3)
+// Performs front-to-back integration of scattering along each view ray
+// Uses L/alpha storage for anti-aliased compositing
+
+layout(local_size_x = 4, local_size_y = 4, local_size_z = 1) in;
+
+layout(binding = 0, rgba16f) readonly uniform image3D scatteringVolume;
+layout(binding = 1, rgba16f) writeonly uniform image3D integratedVolume;
+
+layout(binding = 2) uniform FroxelUniforms {
+    mat4 invViewProj;
+    mat4 prevViewProj;
+    vec4 cameraPosition;
+    vec4 sunDirection;
+    vec4 sunColor;
+    vec4 fogParams;
+    vec4 layerParams;
+    vec4 gridParams;        // x = volumetric far, y = depth distribution
+    vec4 shadowParams;
+} ubo;
+
+// Froxel grid constants
+const uint FROXEL_WIDTH = 128;
+const uint FROXEL_HEIGHT = 64;
+const uint FROXEL_DEPTH = 64;
+
+// Convert slice index to linear depth
+float sliceToDepth(float slice) {
+    float depthDist = ubo.gridParams.y;
+    float volumetricFar = ubo.gridParams.x;
+    return volumetricFar * (pow(depthDist, slice) - 1.0) / (pow(depthDist, float(FROXEL_DEPTH)) - 1.0);
+}
+
+void main() {
+    ivec2 xyTexel = ivec2(gl_GlobalInvocationID.xy);
+
+    // Bounds check
+    if (xyTexel.x >= FROXEL_WIDTH || xyTexel.y >= FROXEL_HEIGHT) {
+        return;
+    }
+
+    // Integrate front-to-back along the Z axis
+    vec3 accumulatedScatter = vec3(0.0);
+    float accumulatedTransmittance = 1.0;
+
+    // Absorption coefficient from fog parameters
+    float absorption = ubo.fogParams.w;
+
+    for (int z = 0; z < FROXEL_DEPTH; z++) {
+        // Calculate slice thickness
+        float sliceDepth = sliceToDepth(float(z));
+        float nextSliceDepth = sliceToDepth(float(z + 1));
+        float sliceThickness = nextSliceDepth - sliceDepth;
+
+        // Load in-scattering and density from update pass
+        vec4 sliceData = imageLoad(scatteringVolume, ivec3(xyTexel, z));
+        vec3 inScatter = sliceData.rgb;
+        float density = sliceData.a;
+
+        if (density > 0.0001) {
+            // Beer-Lambert extinction
+            float extinction = density * (1.0 + absorption) * sliceThickness;
+            float segmentTransmittance = exp(-extinction);
+
+            // Energy-conserving integration
+            // Using the formula: L_out = L_in * T + L_scatter * (1 - T) / extinction
+            vec3 segmentScatter = inScatter * sliceThickness;
+
+            // Integrate scattering with current transmittance
+            accumulatedScatter += accumulatedTransmittance * segmentScatter;
+            accumulatedTransmittance *= segmentTransmittance;
+        }
+
+        // Store integrated result at this slice
+        // Format: RGB = L / alpha (normalized scatter), A = alpha (1 - transmittance)
+        float alpha = 1.0 - accumulatedTransmittance;
+        vec3 normalizedScatter = accumulatedScatter / max(alpha, 0.0001);
+
+        imageStore(integratedVolume, ivec3(xyTexel, z), vec4(normalizedScatter, alpha));
+
+        // Early termination if fully opaque
+        if (accumulatedTransmittance < 0.01) {
+            // Fill remaining slices with final values
+            for (int zFill = z + 1; zFill < FROXEL_DEPTH; zFill++) {
+                imageStore(integratedVolume, ivec3(xyTexel, zFill), vec4(normalizedScatter, alpha));
+            }
+            break;
+        }
+    }
+}

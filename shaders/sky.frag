@@ -43,8 +43,272 @@ const float OZONE_LAYER_WIDTH = 15.0;
 
 const float SUN_ANGULAR_RADIUS = 0.00935 / 2.0;  // radians
 
+// LMS color space for accurate Rayleigh scattering (Phase 4.1.7)
+// Standard Rec709 Rayleigh produces greenish sunsets; LMS primaries are more accurate
+const mat3 RGB_TO_LMS = mat3(
+    0.4122214708, 0.5363325363, 0.0514459929,
+    0.2119034982, 0.6806995451, 0.1073969566,
+    0.0883024619, 0.2817188376, 0.6299787005
+);
+
+const mat3 LMS_TO_RGB = mat3(
+    4.0767416621, -3.3077115913, 0.2309699292,
+   -1.2684380046,  2.6097574011, -0.3413193965,
+   -0.0041960863, -0.7034186147, 1.7076147010
+);
+
+// Optimized Rayleigh coefficients for LMS space (Ghost of Tsushima technique)
+const vec3 RAYLEIGH_LMS = vec3(6.95e-3, 12.28e-3, 28.44e-3);
+
+// Cloud parameters (Phase 4.2 - Volumetric Clouds)
+const float CLOUD_LAYER_BOTTOM = 1.5;     // km above surface
+const float CLOUD_LAYER_TOP = 4.0;        // km above surface
+const float CLOUD_COVERAGE = 0.5;         // 0-1 coverage amount
+const float CLOUD_DENSITY = 0.3;          // Base density multiplier
+const int CLOUD_MARCH_STEPS = 16;         // Ray march samples (reduced for performance)
+const int CLOUD_LIGHT_STEPS = 3;          // Light sampling steps (reduced for performance)
+
 float hash(vec3 p) {
     return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453);
+}
+
+// 3D value noise for cloud shapes
+float noise3D(vec3 p) {
+    vec3 i = floor(p);
+    vec3 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);  // Smoothstep
+
+    return mix(
+        mix(mix(hash(i + vec3(0, 0, 0)), hash(i + vec3(1, 0, 0)), f.x),
+            mix(hash(i + vec3(0, 1, 0)), hash(i + vec3(1, 1, 0)), f.x), f.y),
+        mix(mix(hash(i + vec3(0, 0, 1)), hash(i + vec3(1, 0, 1)), f.x),
+            mix(hash(i + vec3(0, 1, 1)), hash(i + vec3(1, 1, 1)), f.x), f.y),
+        f.z
+    );
+}
+
+// Fractal Brownian Motion for cloud detail
+float fbm(vec3 p, int octaves) {
+    float value = 0.0;
+    float amplitude = 0.5;
+    float frequency = 1.0;
+    float maxValue = 0.0;
+
+    for (int i = 0; i < octaves; i++) {
+        value += amplitude * noise3D(p * frequency);
+        maxValue += amplitude;
+        amplitude *= 0.5;
+        frequency *= 2.0;
+    }
+
+    return value / maxValue;
+}
+
+// Cloud height gradient (cumulus shape - rounded bottom, flat top)
+float cloudHeightGradient(float heightFraction) {
+    // Remap to create rounded cumulus shape
+    float gradient = smoothstep(0.0, 0.2, heightFraction) *
+                     smoothstep(1.0, 0.7, heightFraction);
+    return gradient;
+}
+
+// Sample cloud density at a point
+float sampleCloudDensity(vec3 worldPos) {
+    float altitude = length(worldPos) - PLANET_RADIUS;
+
+    // Check if within cloud layer
+    if (altitude < CLOUD_LAYER_BOTTOM || altitude > CLOUD_LAYER_TOP) {
+        return 0.0;
+    }
+
+    // Height fraction within cloud layer
+    float heightFraction = (altitude - CLOUD_LAYER_BOTTOM) /
+                           (CLOUD_LAYER_TOP - CLOUD_LAYER_BOTTOM);
+
+    // Cloud shape based on height
+    float heightGradient = cloudHeightGradient(heightFraction);
+
+    // Wind offset for animation (use timeOfDay for slow drift)
+    vec3 windOffset = vec3(ubo.timeOfDay * 50.0, 0.0, ubo.timeOfDay * 20.0);
+
+    // Sample noise at different scales for shape and detail
+    vec3 samplePos = worldPos * 0.5 + windOffset;  // Base scale
+
+    // Large-scale shape noise (4 octaves for good quality/perf balance)
+    float baseNoise = fbm(samplePos * 0.25, 4);
+
+    // Apply coverage with softer transition
+    float coverageThreshold = 1.0 - CLOUD_COVERAGE;
+    float density = smoothstep(coverageThreshold, coverageThreshold + 0.35, baseNoise);
+
+    // Apply height gradient
+    density *= heightGradient;
+
+    // Detail erosion (2 octaves - cheaper but still effective)
+    float detailNoise = fbm(samplePos * 1.0 + vec3(100.0), 2);
+    density -= detailNoise * 0.2 * (1.0 - heightFraction);
+    density = max(density, 0.0);
+
+    return density * CLOUD_DENSITY;
+}
+
+// Henyey-Greenstein phase function for cloud scattering
+float hgPhase(float cosTheta, float g) {
+    float g2 = g * g;
+    float denom = 1.0 + g2 - 2.0 * g * cosTheta;
+    return (1.0 - g2) / (4.0 * PI * pow(denom, 1.5));
+}
+
+// Cloud phase function with depth-dependent scattering (Ghost of Tsushima technique)
+float cloudPhase(float cosTheta, float transmittanceToLight, float segmentTransmittance) {
+    float opticalDepthFactor = transmittanceToLight * segmentTransmittance;
+
+    // Lerp between back-scatter (dense) and forward-scatter (wispy)
+    // Forward scattering dominates in wispy/thin areas, back-scatter in dense areas
+    float gForward = 0.8;
+    float gBack = -0.15;
+    float g = mix(gBack, gForward, opticalDepthFactor);
+
+    float phase = hgPhase(cosTheta, abs(g));
+
+    // Boost back-scatter for multi-scattering approximation
+    // Value of 2.16 from Ghost of Tsushima - simulating dense Mie layer with 0.9 albedo
+    if (g < 0.0) {
+        phase *= 2.16;
+    }
+
+    return phase;
+}
+
+// Sample light transmittance to sun through clouds (optimized)
+float sampleCloudTransmittanceToSun(vec3 pos, vec3 sunDir) {
+    float opticalDepth = 0.0;
+    float stepSize = (CLOUD_LAYER_TOP - CLOUD_LAYER_BOTTOM) / float(CLOUD_LIGHT_STEPS);
+
+    for (int i = 0; i < CLOUD_LIGHT_STEPS; i++) {
+        float t = stepSize * (float(i) + 0.5);
+        vec3 samplePos = pos + sunDir * t;
+
+        // Quick altitude check before expensive density sample
+        float alt = length(samplePos) - PLANET_RADIUS;
+        if (alt < CLOUD_LAYER_BOTTOM || alt > CLOUD_LAYER_TOP) continue;
+
+        float density = sampleCloudDensity(samplePos);
+        opticalDepth += density * stepSize * 10.0;
+
+        if (opticalDepth > 4.0) break;  // Early out when heavily shadowed
+    }
+
+    return exp(-opticalDepth);
+}
+
+vec2 raySphereIntersect(vec3 origin, vec3 dir, float radius) {
+    float b = dot(origin, dir);
+    float c = dot(origin, origin) - radius * radius;
+    float h = b * b - c;
+    if (h < 0.0) return vec2(1e9, -1e9);
+    h = sqrt(h);
+    return vec2(-b - h, -b + h);
+}
+
+// Ray-plane intersection for cloud layer bounds
+vec2 intersectCloudLayer(vec3 origin, vec3 dir) {
+    // Intersect with spherical shells at cloud layer boundaries
+    vec2 bottomHit = raySphereIntersect(origin, dir, PLANET_RADIUS + CLOUD_LAYER_BOTTOM);
+    vec2 topHit = raySphereIntersect(origin, dir, PLANET_RADIUS + CLOUD_LAYER_TOP);
+
+    float tEnter = max(bottomHit.x, 0.0);
+    float tExit = topHit.y;
+
+    // Handle case where we're inside the layer
+    if (bottomHit.x < 0.0 && bottomHit.y > 0.0) {
+        tEnter = 0.0;
+    }
+
+    return vec2(tEnter, tExit);
+}
+
+// March through cloud layer
+struct CloudResult {
+    vec3 scattering;
+    float transmittance;
+};
+
+CloudResult marchClouds(vec3 origin, vec3 dir) {
+    CloudResult result;
+    result.scattering = vec3(0.0);
+    result.transmittance = 1.0;
+
+    // Find intersection with cloud layer
+    vec2 cloudHit = intersectCloudLayer(origin, dir);
+    if (cloudHit.x >= cloudHit.y || cloudHit.y < 0.0) {
+        return result;
+    }
+
+    float tStart = cloudHit.x;
+    float tEnd = cloudHit.y;
+    float stepSize = (tEnd - tStart) / float(CLOUD_MARCH_STEPS);
+
+    // Add jitter to reduce banding (screen-space dither based on ray direction)
+    float jitter = hash(dir * 1000.0 + vec3(ubo.timeOfDay * 0.1));
+    tStart += stepSize * jitter * 0.5;
+
+    vec3 sunDir = normalize(ubo.sunDirection.xyz);
+    float cosTheta = dot(dir, sunDir);
+    vec3 sunLight = ubo.sunColor.rgb * ubo.sunDirection.w;
+
+    // Approximate sky irradiance at cloud altitude (Ghost of Tsushima approach)
+    // In a full implementation, this would come from precomputed irradiance LUTs
+    // Here we approximate based on sun position and Rayleigh scattering color
+    float sunAltitude = ubo.sunDirection.y;
+
+    // Sky color varies with sun altitude - bluer overhead, warmer at horizon
+    vec3 zenithColor = vec3(0.3, 0.5, 0.9);   // Blue zenith
+    vec3 horizonColor = vec3(0.7, 0.6, 0.5);  // Warm horizon
+    float sunInfluence = smoothstep(-0.1, 0.5, sunAltitude);
+
+    // Base ambient from sky hemisphere
+    vec3 skyAmbient = mix(horizonColor * 0.3, zenithColor * 0.5, sunInfluence);
+
+    // Add ground bounce contribution (important for cloud undersides)
+    vec3 groundBounce = vec3(0.15, 0.12, 0.08) * max(sunAltitude, 0.0);
+
+    // Combined ambient light - brighter overall to match proper irradiance
+    vec3 ambientLight = (skyAmbient + groundBounce) * 0.8;
+
+    for (int i = 0; i < CLOUD_MARCH_STEPS; i++) {
+        if (result.transmittance < 0.01) break;
+
+        float t = tStart + (float(i) + 0.5) * stepSize;
+        vec3 pos = origin + dir * t;
+
+        float density = sampleCloudDensity(pos);
+
+        if (density > 0.005) {  // Skip very thin cloud regions
+            // Sample transmittance to sun
+            float transmittanceToSun = sampleCloudTransmittanceToSun(pos, sunDir);
+
+            // Phase function
+            float phase = cloudPhase(cosTheta, transmittanceToSun, result.transmittance);
+
+            // In-scattering from sun
+            vec3 sunScatter = sunLight * transmittanceToSun * phase;
+
+            // Add ambient scattering
+            vec3 totalScatter = sunScatter + ambientLight;
+
+            // Beer-Lambert extinction
+            float extinction = density * stepSize * 10.0;
+            float segmentTransmittance = exp(-extinction);
+
+            // Energy-conserving integration
+            vec3 integScatter = totalScatter * (1.0 - segmentTransmittance);
+            result.scattering += result.transmittance * integScatter;
+            result.transmittance *= segmentTransmittance;
+        }
+    }
+
+    return result;
 }
 
 float rayleighPhase(float cosTheta) {
@@ -58,24 +322,60 @@ float cornetteShanksPhase(float cosTheta, float g) {
     return num / denom;
 }
 
-vec2 raySphereIntersect(vec3 origin, vec3 dir, float radius) {
-    float b = dot(origin, dir);
-    float c = dot(origin, origin) - radius * radius;
-    float h = b * b - c;
-    if (h < 0.0) return vec2(1e9, -1e9);
-    h = sqrt(h);
-    return vec2(-b - h, -b + h);
-}
-
 float ozoneDensity(float altitude) {
     float z = (altitude - OZONE_LAYER_CENTER) / OZONE_LAYER_WIDTH;
     return exp(-0.5 * z * z);
+}
+
+// Earth shadow at sunrise/sunset (Phase 4.1.8)
+// Computes shadow factor for a point in the atmosphere
+float computeEarthShadow(vec3 worldPos, vec3 sunDir) {
+    // worldPos is relative to planet center (origin at planet center)
+    float altitude = length(worldPos) - PLANET_RADIUS;
+
+    // Project position onto sun direction
+    float sunDist = dot(worldPos, sunDir);
+
+    // Check if behind planet relative to sun (in shadow cone)
+    if (sunDist < 0.0) {
+        // Calculate perpendicular distance from sun ray through planet center
+        float perpDist = length(worldPos - sunDir * sunDist);
+
+        // Shadow radius decreases with altitude (cone shape)
+        float shadowRadius = PLANET_RADIUS * (1.0 - altitude / (ATMOSPHERE_RADIUS - PLANET_RADIUS));
+
+        if (perpDist < shadowRadius) {
+            // In umbra/penumbra region - wider penumbra for softer shadows
+            float penumbraWidth = (ATMOSPHERE_RADIUS - PLANET_RADIUS) * 0.25;
+            float shadow = smoothstep(shadowRadius - penumbraWidth, shadowRadius, perpDist);
+            // Don't fully darken - keep minimum light for atmosphere scattering
+            return mix(0.15, 1.0, shadow);
+        }
+    }
+
+    return 1.0;  // Fully lit
 }
 
 struct ScatteringResult {
     vec3 inscatter;
     vec3 transmittance;
 };
+
+// Compute Rayleigh scattering with blended LMS for accurate sunset colors
+// Uses LMS primarily at low sun angles for better sunsets, standard RGB otherwise
+vec3 computeRayleighScatteringBlended(float density, float phase, float sunAltitude) {
+    // Standard RGB Rayleigh
+    vec3 scatterRGB = density * RAYLEIGH_SCATTERING_BASE * phase;
+
+    // LMS-space Rayleigh for more accurate sunsets
+    vec3 scatterLMS = density * RAYLEIGH_LMS * phase;
+    vec3 lmsInRGB = LMS_TO_RGB * scatterLMS;
+
+    // Blend: use LMS more when sun is near horizon (better sunset colors)
+    // and standard RGB when sun is high (cleaner blue sky)
+    float lmsBlend = smoothstep(0.3, -0.1, sunAltitude);  // 0 at high sun, 1 at sunset
+    return mix(scatterRGB, lmsInRGB, lmsBlend * 0.7);  // Max 70% LMS contribution
+}
 
 ScatteringResult integrateAtmosphere(vec3 origin, vec3 dir, int sampleCount) {
     vec2 atmo = raySphereIntersect(origin, dir, ATMOSPHERE_RADIUS);
@@ -100,6 +400,8 @@ ScatteringResult integrateAtmosphere(vec3 origin, vec3 dir, int sampleCount) {
     float rayleighP = rayleighPhase(cosViewSun);
     float mieP = cornetteShanksPhase(cosViewSun, MIE_ANISOTROPY);
 
+    float sunAltitude = sunDir.y;
+
     for (int i = 0; i < sampleCount; i++) {
         float t = start + (float(i) + 0.5) * stepSize;
         vec3 pos = origin + dir * t;
@@ -109,14 +411,24 @@ ScatteringResult integrateAtmosphere(vec3 origin, vec3 dir, int sampleCount) {
         float mieDensity = exp(-altitude / MIE_SCALE_HEIGHT);
         float ozone = ozoneDensity(altitude);
 
-        vec3 rayleighScatter = rayleighDensity * RAYLEIGH_SCATTERING_BASE;
+        // Use blended LMS/RGB Rayleigh for accurate sunset colors without purple bias
+        vec3 rayleighScatter = computeRayleighScatteringBlended(rayleighDensity, rayleighP, sunAltitude);
+
+        // Mie scattering (grey, so no LMS conversion needed)
         vec3 mieScatter = mieDensity * vec3(MIE_SCATTERING_BASE);
 
-        vec3 extinction = rayleighScatter + mieScatter +
+        // Extinction uses standard RGB coefficients
+        vec3 rayleighScatterRGB = rayleighDensity * RAYLEIGH_SCATTERING_BASE;
+        vec3 extinction = rayleighScatterRGB + mieScatter +
                           mieDensity * vec3(MIE_ABSORPTION_BASE) +
                           ozone * OZONE_ABSORPTION;
 
-        vec3 segmentScatter = rayleighScatter * rayleighP + mieScatter * mieP;
+        // Earth shadow modulates in-scattering (Phase 4.1.8)
+        // Points in Earth's shadow don't receive direct sunlight
+        float earthShadow = computeEarthShadow(pos, sunDir);
+
+        // Combine Rayleigh with Mie for scattering, modulated by shadow
+        vec3 segmentScatter = (rayleighScatter + mieScatter * mieP) * earthShadow;
 
         vec3 attenuation = exp(-extinction * stepSize);
         inscatter += transmittance * segmentScatter * stepSize;
@@ -186,17 +498,39 @@ vec3 renderAtmosphere(vec3 dir) {
     vec3 nightTint = mix(vec3(0.01, 0.015, 0.03), vec3(0.03, 0.05, 0.08), result.transmittance.y);
     sky += night * nightTint;
 
-    // Sun and moon discs
+    // Render volumetric clouds (Phase 4.2)
+    CloudResult clouds = marchClouds(origin, normDir);
+
+    // Composite clouds over sky (Ghost of Tsushima technique)
+    // Clouds are lit by sky irradiance at their altitude - NOT darkened by atmospheric transmittance
+    // The atmospheric transmittance only affects what's BEHIND the clouds (the sky), not the clouds themselves
+    // Atmospheric haze is then added between camera and clouds
+
+    // Cloud color is their own scattering (already lit during ray march)
+    vec3 cloudColor = clouds.scattering;
+
+    // The sky behind clouds IS attenuated by atmosphere
+    vec3 skyBehindClouds = sky * clouds.transmittance;
+
+    // Add atmospheric in-scattering between camera and clouds (haze in front of clouds)
+    // This uses the inscatter we already computed, scaled by how much cloud is visible
+    vec3 hazeInFront = result.inscatter * sunLight * (1.0 - clouds.transmittance) * 0.3;
+
+    // Final composite: sky behind clouds + cloud color + haze in front
+    sky = skyBehindClouds + cloudColor + hazeInFront;
+
+    // Sun and moon discs (rendered behind clouds)
+    // Only show sun/moon if clouds don't fully occlude them
     float sunDisc = celestialDisc(dir, ubo.sunDirection.xyz, SUN_ANGULAR_RADIUS);
-    sky += sunLight * sunDisc * 20.0 * result.transmittance;
+    sky += sunLight * sunDisc * 20.0 * result.transmittance * clouds.transmittance;
 
     float moonDisc = celestialDisc(dir, ubo.moonDirection.xyz, 0.012);
     sky += vec3(0.95, 0.95, 1.0) * moonDisc * 1.5 * ubo.moonDirection.w *
-           clamp(result.transmittance, vec3(0.2), vec3(1.0));
+           clamp(result.transmittance, vec3(0.2), vec3(1.0)) * clouds.transmittance;
 
-    // Star field blended over the atmospheric tint
+    // Star field blended over the atmospheric tint (also behind clouds)
     float stars = starField(dir);
-    sky += vec3(stars) * (0.5 + 0.5 * night);
+    sky += vec3(stars) * (0.5 + 0.5 * night) * clouds.transmittance;
 
     return sky;
 }

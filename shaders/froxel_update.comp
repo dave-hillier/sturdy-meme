@@ -1,0 +1,154 @@
+#version 450
+
+// Froxel Update Compute Shader (Phase 4.3)
+// Calculates fog density and in-scattered light for each froxel
+
+layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
+
+layout(binding = 0, rgba16f) writeonly uniform image3D scatteringVolume;
+layout(binding = 1, rgba16f) uniform image3D integratedVolume;  // Previous frame for temporal
+
+layout(binding = 2) uniform FroxelUniforms {
+    mat4 invViewProj;
+    mat4 prevViewProj;
+    vec4 cameraPosition;
+    vec4 sunDirection;      // xyz = direction, w = intensity
+    vec4 sunColor;
+    vec4 fogParams;         // x = base height, y = scale height, z = density, w = absorption
+    vec4 layerParams;       // x = layer height, y = layer thickness, z = layer density
+    vec4 gridParams;        // x = volumetric far, y = depth distribution, z = frame index
+    vec4 shadowParams;      // x = shadow map size
+} ubo;
+
+layout(binding = 3) uniform sampler2DArrayShadow shadowMap;
+
+// Froxel grid constants
+const uint FROXEL_WIDTH = 128;
+const uint FROXEL_HEIGHT = 64;
+const uint FROXEL_DEPTH = 64;
+
+const float PI = 3.14159265359;
+
+// Convert slice index to linear depth using exponential distribution
+float sliceToDepth(float slice) {
+    float depthDist = ubo.gridParams.y;  // Depth distribution factor
+    float volumetricFar = ubo.gridParams.x;
+    return volumetricFar * (pow(depthDist, slice) - 1.0) / (pow(depthDist, float(FROXEL_DEPTH)) - 1.0);
+}
+
+// Exponential height density (general atmospheric haze)
+float exponentialHeightDensity(float height) {
+    float baseHeight = ubo.fogParams.x;
+    float scaleHeight = ubo.fogParams.y;
+    float density = ubo.fogParams.z;
+    float relHeight = height - baseHeight;
+    return density * exp(-max(relHeight, 0.0) / scaleHeight);
+}
+
+// Sigmoidal layer density (ground fog layer)
+float sigmoidalLayerDensity(float height) {
+    float layerHeight = ubo.layerParams.x;
+    float layerThickness = ubo.layerParams.y;
+    float layerDensity = ubo.layerParams.z;
+    float t = (height - layerHeight) / max(layerThickness, 0.001);
+    return layerDensity / (1.0 + exp(t * 2.0));
+}
+
+// Combined fog density at height
+float getHazeDensity(vec3 worldPos) {
+    float height = worldPos.y;
+    return exponentialHeightDensity(height) + sigmoidalLayerDensity(height);
+}
+
+// Henyey-Greenstein phase function
+float henyeyGreenstein(float cosTheta, float g) {
+    float g2 = g * g;
+    float denom = 1.0 + g2 - 2.0 * g * cosTheta;
+    return (1.0 - g2) / (4.0 * PI * pow(denom, 1.5));
+}
+
+// Simple hash for temporal jittering
+float hash(vec3 p) {
+    return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453);
+}
+
+// Blue noise approximation for jittering
+vec2 blueNoise2D(ivec2 texel, float frame) {
+    vec2 r = vec2(hash(vec3(texel, frame)),
+                  hash(vec3(texel + ivec2(100, 200), frame + 0.5)));
+    return r;
+}
+
+void main() {
+    ivec3 texel = ivec3(gl_GlobalInvocationID);
+
+    // Bounds check
+    if (texel.x >= FROXEL_WIDTH || texel.y >= FROXEL_HEIGHT || texel.z >= FROXEL_DEPTH) {
+        return;
+    }
+
+    // Convert froxel coordinates to UVW
+    vec3 uvw = (vec3(texel) + 0.5) / vec3(FROXEL_WIDTH, FROXEL_HEIGHT, FROXEL_DEPTH);
+
+    // Get linear depth for this slice
+    float linearDepth = sliceToDepth(uvw.z * float(FROXEL_DEPTH));
+
+    // Convert to NDC (note: Vulkan NDC has Y down, Z 0-1)
+    vec2 ndc = uvw.xy * 2.0 - 1.0;
+
+    // Reconstruct world position using inverse view-proj
+    // First convert linear depth to NDC depth
+    // Approximate: assume near=0.1, far=volumetricFar
+    float ndcDepth = linearDepth / ubo.gridParams.x;  // Simplified
+
+    vec4 clipPos = vec4(ndc.x, ndc.y, ndcDepth, 1.0);
+    vec4 worldPos4 = ubo.invViewProj * clipPos;
+    vec3 worldPos = worldPos4.xyz / worldPos4.w;
+
+    // Sample fog density
+    float density = getHazeDensity(worldPos);
+
+    // Early out if no density
+    if (density < 0.0001) {
+        imageStore(scatteringVolume, texel, vec4(0.0));
+        return;
+    }
+
+    // Jitter for temporal stability
+    vec2 jitter = blueNoise2D(texel.xy, ubo.gridParams.z) * 0.5 - 0.25;
+
+    // Sun direction and lighting
+    vec3 sunDir = normalize(ubo.sunDirection.xyz);
+    float sunIntensity = ubo.sunDirection.w;
+    vec3 sunLight = ubo.sunColor.rgb * sunIntensity;
+
+    // View direction (from camera to froxel)
+    vec3 viewDir = normalize(worldPos - ubo.cameraPosition.xyz);
+
+    // Phase function for forward/back scattering
+    float cosTheta = dot(viewDir, sunDir);
+    float phase = henyeyGreenstein(cosTheta, 0.7);  // Slightly forward scattering for haze
+
+    // Shadow sampling (simplified - would need cascade selection)
+    // For now, assume sun visibility based on height above horizon
+    float sunVisibility = smoothstep(-0.1, 0.2, sunDir.y);
+
+    // Simple shadow approximation based on sun angle
+    // Full shadow sampling would require cascade matrix transforms
+    float shadow = sunVisibility;
+
+    // In-scattering from sun
+    vec3 sunInScatter = sunLight * phase * shadow * density;
+
+    // Ambient sky contribution (isotropic)
+    float night = 1.0 - smoothstep(-0.05, 0.08, sunDir.y);
+    vec3 skyColor = mix(vec3(0.4, 0.5, 0.7), vec3(0.02, 0.03, 0.05), night);
+    vec3 skyInScatter = skyColor * density * 0.15;  // Ambient scatter
+
+    // Total in-scattering
+    vec3 totalInScatter = sunInScatter + skyInScatter;
+
+    // Store L / alpha for anti-aliased compositing (Ghost of Tsushima technique)
+    // Alpha will be computed during integration
+    imageStore(scatteringVolume, texel, vec4(totalInScatter, density));
+}

@@ -325,7 +325,21 @@ bool PostProcessSystem::createDescriptorSetLayout() {
     uboBinding.descriptorCount = 1;
     uboBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-    std::array<VkDescriptorSetLayoutBinding, 2> bindings = {hdrBinding, uboBinding};
+    // Binding 2: Depth texture (for froxel compositing)
+    VkDescriptorSetLayoutBinding depthBinding{};
+    depthBinding.binding = 2;
+    depthBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    depthBinding.descriptorCount = 1;
+    depthBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    // Binding 3: Froxel volume (3D texture for volumetric fog)
+    VkDescriptorSetLayoutBinding froxelBinding{};
+    froxelBinding.binding = 3;
+    froxelBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    froxelBinding.descriptorCount = 1;
+    froxelBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    std::array<VkDescriptorSetLayoutBinding, 4> bindings = {hdrBinding, uboBinding, depthBinding, froxelBinding};
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -402,7 +416,20 @@ bool PostProcessSystem::createDescriptorSets() {
         bufferInfo.offset = 0;
         bufferInfo.range = sizeof(PostProcessUniforms);
 
-        std::array<VkWriteDescriptorSet, 2> descriptorWrites{};
+        // Depth texture (initially bound to hdrDepthView, uses same sampler)
+        VkDescriptorImageInfo depthImageInfo{};
+        depthImageInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+        depthImageInfo.imageView = hdrDepthView;
+        depthImageInfo.sampler = hdrSampler;
+
+        // Froxel volume (placeholder - will be updated when froxel system is initialized)
+        // Initially bound to HDR color as placeholder to avoid null binding
+        VkDescriptorImageInfo froxelImageInfo{};
+        froxelImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        froxelImageInfo.imageView = hdrColorView;  // Placeholder
+        froxelImageInfo.sampler = hdrSampler;
+
+        std::array<VkWriteDescriptorSet, 4> descriptorWrites{};
 
         descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         descriptorWrites[0].dstSet = compositeDescriptorSets[i];
@@ -419,6 +446,22 @@ bool PostProcessSystem::createDescriptorSets() {
         descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         descriptorWrites[1].descriptorCount = 1;
         descriptorWrites[1].pBufferInfo = &bufferInfo;
+
+        descriptorWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[2].dstSet = compositeDescriptorSets[i];
+        descriptorWrites[2].dstBinding = 2;
+        descriptorWrites[2].dstArrayElement = 0;
+        descriptorWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[2].descriptorCount = 1;
+        descriptorWrites[2].pImageInfo = &depthImageInfo;
+
+        descriptorWrites[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[3].dstSet = compositeDescriptorSets[i];
+        descriptorWrites[3].dstBinding = 3;
+        descriptorWrites[3].dstArrayElement = 0;
+        descriptorWrites[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[3].descriptorCount = 1;
+        descriptorWrites[3].pImageInfo = &froxelImageInfo;
 
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                descriptorWrites.data(), 0, nullptr);
@@ -562,6 +605,16 @@ void PostProcessSystem::recordPostProcess(VkCommandBuffer cmd, uint32_t frameInd
     ubo->bloomThreshold = bloomThreshold;
     ubo->bloomIntensity = bloomIntensity;
     ubo->bloomRadius = bloomRadius;
+    // God rays (Phase 4.4)
+    ubo->sunScreenPos = sunScreenPos;
+    ubo->godRayIntensity = godRayIntensity;
+    ubo->godRayDecay = godRayDecay;
+    // Froxel volumetrics (Phase 4.3)
+    ubo->froxelEnabled = froxelEnabled ? 1.0f : 0.0f;
+    ubo->froxelFarPlane = froxelFarPlane;
+    ubo->froxelDepthDist = froxelDepthDist;
+    ubo->nearPlane = nearPlane;
+    ubo->farPlane = farPlane;
 
     // No GPU readback: just keep CPU-side exposure as the last value we sent so
     // subsequent frames have a stable starting point for manual mode.
@@ -605,4 +658,28 @@ void PostProcessSystem::recordPostProcess(VkCommandBuffer cmd, uint32_t frameInd
     vkCmdDraw(cmd, 3, 1, 0, 0);
 
     vkCmdEndRenderPass(cmd);
+}
+
+void PostProcessSystem::setFroxelVolume(VkImageView volumeView, VkSampler volumeSampler) {
+    froxelVolumeView = volumeView;
+    froxelSampler = volumeSampler;
+
+    // Update descriptor sets with the froxel volume
+    for (size_t i = 0; i < framesInFlight; i++) {
+        VkDescriptorImageInfo froxelImageInfo{};
+        froxelImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        froxelImageInfo.imageView = volumeView;
+        froxelImageInfo.sampler = volumeSampler;
+
+        VkWriteDescriptorSet descriptorWrite{};
+        descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrite.dstSet = compositeDescriptorSets[i];
+        descriptorWrite.dstBinding = 3;
+        descriptorWrite.dstArrayElement = 0;
+        descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrite.descriptorCount = 1;
+        descriptorWrite.pImageInfo = &froxelImageInfo;
+
+        vkUpdateDescriptorSets(device, 1, &descriptorWrite, 0, nullptr);
+    }
 }
