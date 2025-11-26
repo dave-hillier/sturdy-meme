@@ -68,23 +68,64 @@ A GPU-driven particle system for rendering rain and snow effects, inspired by th
 | cascadeIndex | int | For shadow rendering |
 | padding | int | Alignment |
 
+### WetnessUniforms (32 bytes)
+
+Bound by all material shaders for wet surface rendering:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| wetnessIntensity | float | Current global wetness 0.0-1.0 |
+| rainIntensity | float | Current precipitation rate |
+| timeSinceRainStopped | float | Seconds since rain ended |
+| dryingRate | float | Evaporation speed multiplier |
+| puddleThreshold | float | Wetness level for puddle formation |
+| rippleIntensity | float | Strength of puddle ripples |
+| rippleSpeed | float | Animation speed for ripples |
+| padding | float | Alignment |
+
 ---
 
 ## Particle Simulation
 
 ### Spawning Strategy
 
-Unlike grass which uses a fixed grid, weather particles spawn in a **cylindrical volume** centered on the camera:
+Following the grass system approach, particles spawn within the **camera frustum** with density prioritization for near-field detail:
 
-**Spawn Region**
-- Horizontal: Cylinder with radius matching draw distance (50m)
-- Vertical: Spawn at fixed height above camera (100-200m)
-- Density: Controlled by intensity parameter (light drizzle to heavy storm)
+**Dual-Zone Spawn System**
+
+The spawn region is divided into two zones to ensure both visual coverage and near-field detail:
+
+| Zone | Radius | Density | Purpose |
+|------|--------|---------|---------|
+| Near Zone | 0-8m | 100% density | Guaranteed detail around player/focus |
+| Frustum Zone | 8m-max | Distance-scaled | Fill visible area efficiently |
+
+**Near Zone (Player Bubble)**
+- Spherical region centered on camera/player position
+- Always spawns at full density regardless of view direction
+- Ensures rain/snow visibly falls on and around the player character
+- Particles here are never LOD-culled
+- Critical for first-person and third-person camera perspectives
+
+**Frustum Zone**
+- Particles spawn within expanded camera frustum (add margin for wind drift)
+- Spawn plane positioned at configurable height above camera (100-200m)
+- Density falls off with distance from camera using smoothstep
+- Frustum culling applied during simulation, not just rendering
 
 **Spawn Distribution**
-- Use hash-based pseudo-random distribution across spawn region
-- Maintain particle pool with recycling (particles respawn when hitting ground or leaving volume)
+- Hash-based pseudo-random distribution seeded by grid cell and frame
+- Particle pool recycling: particles respawn when hitting ground or exiting frustum
+- Hybrid grid approach: subdivide frustum into cells, spawn N particles per visible cell
 - Stagger spawning across frames to avoid burst patterns
+- Wind prediction: offset spawn positions to account for horizontal drift during fall time
+
+**Frustum-Aware Spawning Algorithm**
+1. Project spawn plane (at spawn height) onto camera frustum
+2. Divide projected area into grid cells
+3. For each cell, determine visibility and distance from camera
+4. Spawn particles proportional to cell's density weight
+5. Near zone particles spawned separately with guaranteed allocation
 
 **Target Particle Counts**
 
@@ -92,6 +133,14 @@ Unlike grass which uses a fixed grid, weather particles spawn in a **cylindrical
 |---------|-------|--------|-------|
 | Rain | 10,000 | 50,000 | 150,000 |
 | Snow | 5,000 | 25,000 | 75,000 |
+
+**Particle Budget Allocation**
+
+| Zone | Budget % | Notes |
+|------|----------|-------|
+| Near Zone | 15-20% | Fixed allocation, never reduced |
+| Frustum Near (8-30m) | 40-50% | High detail, moderate LOD |
+| Frustum Far (30m+) | 30-40% | Heavy LOD, fills background |
 
 ### Physics Simulation
 
@@ -364,6 +413,141 @@ Reuse WindSystem uniforms and Perlin noise approach from grass:
 
 ---
 
+## Wet Surfaces System
+
+Rain should affect surface appearance throughout the scene. This requires coordination between the weather system and material shaders.
+
+### Wetness Data Flow
+
+**WeatherSystem outputs:**
+- Global wetness intensity (0.0-1.0) based on rain duration and intensity
+- Exposed vs sheltered factor available to shaders
+- Time since rain stopped (for drying)
+
+**Uniform Buffer Addition (WetnessUniforms)**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| wetnessIntensity | float | Current global wetness 0.0-1.0 |
+| rainIntensity | float | Current rain rate (for active drips) |
+| timeSinceRainStopped | float | Seconds since rain ended (for drying) |
+| dryingRate | float | How fast surfaces dry |
+| puddleThreshold | float | Wetness level where puddles form |
+
+### Surface Wetness Effects
+
+**Roughness Modification**
+- Wet surfaces become smoother/more reflective
+- Interpolate material roughness toward lower value based on wetness
+- Typical range: dry roughness → wet roughness of 0.1-0.3
+- PBR formula: effectiveRoughness = mix(baseRoughness, wetRoughness, wetnessIntensity)
+
+**Darkening**
+- Wet surfaces appear darker due to light absorption
+- Multiply albedo by darkening factor (0.5-0.8) based on wetness
+- More porous materials darken more (concrete > metal)
+- Material-dependent darkening intensity stored in texture or material parameter
+
+**Specular/Reflection Enhancement**
+- Increase fresnel effect on wet surfaces
+- Water film creates mirror-like reflections at grazing angles
+- Blend toward higher F0 value when wet
+
+**Normal Map Dampening**
+- Water fills micro-surface details
+- Reduce normal map intensity when wet
+- effectiveNormal = mix(normalMapSample, vec3(0,0,1), wetnessIntensity * 0.5)
+
+### Material Integration
+
+**Per-Material Wetness Parameters**
+
+| Parameter | Range | Description |
+|-----------|-------|-------------|
+| wetnessAbsorption | 0.0-1.0 | How much material absorbs water (concrete=0.8, metal=0.1) |
+| wetDarkening | 0.0-1.0 | Albedo darkening multiplier when wet |
+| wetRoughness | 0.0-1.0 | Target roughness when fully wet |
+| porosity | 0.0-1.0 | Affects drying time and puddle formation |
+
+**Shader Modification Pattern**
+1. Sample wetness uniforms
+2. Calculate local wetness based on surface normal (upward-facing = more wet)
+3. Modify roughness, albedo, and fresnel based on wetness
+4. Apply to existing PBR lighting calculation
+
+### Puddle Rendering
+
+**Puddle Formation**
+- Form in areas where wetness exceeds threshold
+- Prefer concave geometry (use world-space Y gradient or heightmap)
+- Puddles have near-zero roughness (mirror-like)
+- Render as modified material, not separate geometry
+
+**Puddle Identification**
+- Option A: Procedural based on world position noise and height
+- Option B: Baked puddle mask texture for terrain
+- Option C: Runtime accumulation in screen-space or world-space buffer
+
+**Puddle Surface Effects**
+- Ripples from falling raindrops (animated normal perturbation)
+- Ripple intensity based on current rain rate
+- Multiple overlapping ripple rings using procedural noise
+- Reflection of sky and nearby objects
+
+### Drip and Streak Effects
+
+**Vertical Surface Drips**
+- Surfaces with normal facing sideways show water streaks
+- Animated UV distortion creating downward flow
+- Concentrated along edges and protrusions
+- Can be procedural (noise-based) or texture-driven
+
+**Drip Spawning from Edges**
+- Detect geometry edges (silhouette or marked in mesh data)
+- Spawn drip particles that fall from overhangs
+- Lower particle count than main rain, but visually important
+
+### Drying Simulation
+
+**Drying Behavior**
+- When rain stops, wetness gradually decreases
+- Drying rate affected by:
+  - Material porosity (porous dries slower initially, faster later)
+  - Surface orientation (horizontal dries slower - puddles)
+  - Wind speed (increases evaporation)
+  - Time of day/temperature (optional complexity)
+
+**Drying Formula**
+- wetnessIntensity decreases over time when rainIntensity = 0
+- Sheltered areas dry slower (under overhangs)
+- Puddles persist longer than surface wetness
+
+### Implementation Approach
+
+**Shared Uniform Buffer**
+- WeatherSystem maintains wetness uniforms
+- All material shaders bind this buffer
+- Single update per frame from CPU
+
+**Shader Modifications**
+- Add wetness calculation function to common shader include
+- Modify existing PBR shaders to call wetness functions
+- Wetness affects final surface parameters before lighting
+
+**Texture Requirements**
+- Optional: Porosity/absorption map per material
+- Optional: Puddle mask for terrain
+- Ripple normal map (tileable, animated via UV offset)
+
+### Performance Considerations
+
+- Wetness calculation is cheap (few ALU ops per fragment)
+- Puddle ripples add one texture sample + normal blend
+- No additional render passes required
+- Memory: One small uniform buffer shared across all materials
+
+---
+
 ## Future Enhancements
 
 ### Collision Detection
@@ -397,13 +581,20 @@ Reuse WindSystem uniforms and Perlin noise approach from grass:
 
 ```
 src/
-├── WeatherSystem.h          # Class declaration
-├── WeatherSystem.cpp        # Implementation
+├── WeatherSystem.h          # Class declaration, uniforms, particle structs
+├── WeatherSystem.cpp        # Particle system, wetness state management
 └── shaders/
-    ├── weather.comp         # Simulation compute shader
+    ├── weather.comp         # Particle simulation compute shader
     ├── weather.vert         # Particle vertex shader
-    └── weather.frag         # Particle fragment shader
+    ├── weather.frag         # Particle fragment shader
+    ├── wetness_common.glsl  # Shared wetness functions (include file)
+    └── ripple.glsl          # Puddle ripple generation functions
 ```
+
+**Modified Existing Shaders**
+- scene.frag - Include wetness_common.glsl, apply to surface materials
+- terrain.frag - Wetness + puddle rendering for ground surfaces
+- Any PBR material shaders - Wetness parameter integration
 
 ---
 
@@ -413,25 +604,44 @@ src/
 - Particle buffer and compute simulation
 - Gravity and terminal velocity
 - Simple billboard rendering
-- Distance culling
+- Frustum culling with near-zone prioritization
 
 ### Phase 2: Wind Integration
 - Bind WindSystem uniforms
 - Apply wind force in compute
 - Perlin noise turbulence
+- Wind-predicted spawn positions
 
 ### Phase 3: Snow Support
 - Second particle type with different physics
 - Tumbling animation
 - Slower, more wind-reactive movement
 
-### Phase 4: Visual Polish
-- Proper lighting integration
-- Splash particles for rain
-- Soft particle depth fading
-- Weather transitions
+### Phase 4: Wet Surfaces (Basic)
+- Wetness uniform buffer
+- Surface darkening based on wetness
+- Roughness reduction when wet
+- Global wetness ramp-up during rain
 
-### Phase 5: Optimization
-- LOD particle dropping
-- Full frustum culling
+### Phase 5: Visual Polish
+- Proper lighting integration for particles
+- Splash particles for rain ground collision
+- Soft particle depth fading
+- Weather transitions (rain ↔ snow)
+
+### Phase 6: Puddles and Ripples
+- Procedural puddle identification
+- Puddle surface rendering (low roughness, reflective)
+- Animated ripple normals from rain impact
+- Ripple intensity tied to rain rate
+
+### Phase 7: Drying and Drips
+- Drying simulation when rain stops
+- Per-material drying rates
+- Vertical surface drip/streak effects
+- Edge drip particle spawning
+
+### Phase 8: Optimization
+- LOD particle dropping at distance
 - Performance profiling and tuning
+- Quality tier presets
