@@ -91,23 +91,25 @@ private:
     VkPipelineLayout shadowPipelineLayout = VK_NULL_HANDLE;
     VkPipeline shadowPipeline = VK_NULL_HANDLE;
 
-    // Double-buffered storage buffers: [2] for A/B sets, then per frame-in-flight
+    // Double-buffered storage buffers: A/B sets that alternate each frame
     // Set A and Set B alternate: compute writes to one while graphics reads from other
+    // Note: We don't need per-frame copies since the set alternation provides isolation
     static constexpr uint32_t BUFFER_SET_COUNT = 2;
-    std::vector<VkBuffer> instanceBuffers[BUFFER_SET_COUNT];      // [setIndex][frameIndex]
-    std::vector<VmaAllocation> instanceAllocations[BUFFER_SET_COUNT];
-    std::vector<VkBuffer> indirectBuffers[BUFFER_SET_COUNT];
-    std::vector<VmaAllocation> indirectAllocations[BUFFER_SET_COUNT];
+    VkBuffer instanceBuffers[BUFFER_SET_COUNT];      // [setIndex]
+    VmaAllocation instanceAllocations[BUFFER_SET_COUNT];
+    VkBuffer indirectBuffers[BUFFER_SET_COUNT];
+    VmaAllocation indirectAllocations[BUFFER_SET_COUNT];
 
     // Uniform buffers for culling (per frame, not double-buffered)
     std::vector<VkBuffer> uniformBuffers;
     std::vector<VmaAllocation> uniformAllocations;
     std::vector<void*> uniformMappedPtrs;
 
-    // Descriptor sets: [2] for A/B sets
-    std::vector<VkDescriptorSet> computeDescriptorSets[BUFFER_SET_COUNT];
-    std::vector<VkDescriptorSet> graphicsDescriptorSets[BUFFER_SET_COUNT];
-    std::vector<VkDescriptorSet> shadowDescriptorSetsDB[BUFFER_SET_COUNT];  // Renamed to avoid conflict
+    // Descriptor sets: [2] for A/B buffer sets, one per set
+    // Per-frame descriptor sets for uniform buffers that DO need per-frame copies
+    VkDescriptorSet computeDescriptorSets[BUFFER_SET_COUNT];
+    VkDescriptorSet graphicsDescriptorSets[BUFFER_SET_COUNT];
+    VkDescriptorSet shadowDescriptorSetsDB[BUFFER_SET_COUNT];
 
     // Double-buffer state: which set is being computed vs rendered
     // Both start at 0 for bootstrap (first frame uses same buffer for compute+render)
