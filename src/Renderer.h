@@ -16,6 +16,7 @@
 #include "FroxelSystem.h"
 #include "SceneBuilder.h"
 #include "Light.h"
+#include "AtmosphereLUTSystem.h"
 
 static constexpr uint32_t NUM_SHADOW_CASCADES = 4;
 
@@ -164,6 +165,7 @@ private:
     WindSystem windSystem;
     PostProcessSystem postProcessSystem;
     FroxelSystem froxelSystem;
+    AtmosphereLUTSystem atmosphereLUTSystem;
 
     std::vector<VkFramebuffer> framebuffers;
     VkCommandPool commandPool = VK_NULL_HANDLE;

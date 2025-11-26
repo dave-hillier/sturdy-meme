@@ -23,6 +23,10 @@ layout(binding = 0) uniform UniformBufferObject {
     float padding;
 } ubo;
 
+// Atmosphere LUTs (Phase 4.1)
+layout(binding = 6) uniform sampler2D transmittanceLUT;
+layout(binding = 7) uniform sampler2D multiScatterLUT;
+
 layout(location = 0) in vec3 rayDir;
 layout(location = 0) out vec4 outColor;
 
@@ -201,6 +205,48 @@ float sampleCloudTransmittanceToSun(vec3 pos, vec3 sunDir) {
     }
 
     return exp(-opticalDepth);
+}
+
+// ============================================================================
+// Atmosphere LUT sampling functions (Phase 4.1)
+// ============================================================================
+
+// Convert altitude and view zenith angle to transmittance LUT UV
+vec2 transmittanceLUTParams(float r, float mu) {
+    float H = ATMOSPHERE_RADIUS - PLANET_RADIUS;
+    float altitude = r - PLANET_RADIUS;
+
+    // Altitude mapping (squared for precision near surface)
+    float xR = sqrt(clamp(altitude / H, 0.0, 1.0));
+
+    // Angle mapping
+    float discriminant = r * r - PLANET_RADIUS * PLANET_RADIUS;
+    float H_at_r = sqrt(max(0.0, discriminant));
+
+    float xMu = clamp((mu + H_at_r) / (2.0 * H_at_r), 0.0, 1.0);
+
+    return vec2(xMu, xR);
+}
+
+// Sample transmittance LUT
+vec3 sampleTransmittanceLUT(float r, float mu) {
+    vec2 uv = transmittanceLUTParams(r, mu);
+    return texture(transmittanceLUT, uv).rgb;
+}
+
+// Sample multi-scatter LUT
+vec3 sampleMultiScatterLUT(float r, float sunCosZenith) {
+    float H = ATMOSPHERE_RADIUS - PLANET_RADIUS;
+    float altitude = r - PLANET_RADIUS;
+
+    // X: sun zenith angle (-1 to 1)
+    float xSun = (sunCosZenith + 1.0) * 0.5;
+
+    // Y: altitude (0 to 1)
+    float xAlt = clamp(altitude / H, 0.0, 1.0);
+
+    vec2 uv = vec2(xSun, xAlt);
+    return texture(multiScatterLUT, uv).rgb;
 }
 
 vec2 raySphereIntersect(vec3 origin, vec3 dir, float radius) {
@@ -485,6 +531,15 @@ ScatteringResult integrateAtmosphere(vec3 origin, vec3 dir, int sampleCount) {
         inscatter += transmittance * segmentScatter * stepSize;
         transmittance *= attenuation;
     }
+
+    // Add multi-scatter contribution for increased brightness (Phase 4.1.4)
+    // Sample at middle altitude for approximation
+    float sampleAltitude = 4.0;  // km - middle of atmosphere
+    float sampleR = PLANET_RADIUS + sampleAltitude;
+    vec3 multiScatter = sampleMultiScatterLUT(sampleR, sunDir.y);
+
+    // Multi-scatter adds secondary bounced light
+    inscatter += multiScatter * 0.3;
 
     return ScatteringResult(inscatter, transmittance);
 }

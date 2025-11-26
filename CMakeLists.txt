@@ -27,6 +27,7 @@ set(SOURCES
     src/WindSystem.cpp
     src/PostProcessSystem.cpp
     src/FroxelSystem.cpp
+    src/AtmosphereLUTSystem.cpp
     src/Player.cpp
 )
 
@@ -77,6 +78,8 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.frag.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_update.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_integrate.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/multiscatter_lut.comp.spv
 )
 
 set_source_files_properties(${RESOURCE_FILES} PROPERTIES
@@ -189,6 +192,18 @@ if(SHADER_COMPILE_CMD)
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_integrate.comp
         COMMENT "Compiling froxel integration compute shader"
     )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp
+        COMMENT "Compiling transmittance LUT compute shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/multiscatter_lut.comp.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/multiscatter_lut.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/multiscatter_lut.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/multiscatter_lut.comp
+        COMMENT "Compiling multi-scatter LUT compute shader"
+    )
     add_custom_target(shaders DEPENDS
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.frag.spv
@@ -205,6 +220,8 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.frag.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_update.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_integrate.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/multiscatter_lut.comp.spv
     )
     add_dependencies(${PROJECT_NAME} shaders)
 else()

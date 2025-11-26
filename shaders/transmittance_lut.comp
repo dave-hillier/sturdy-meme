@@ -1,0 +1,134 @@
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(rgba16f, binding = 0) writeonly uniform image2D transmittanceLUT;
+
+const float PI = 3.14159265359;
+
+// Atmospheric parameters (same as sky.frag, in kilometers)
+const float PLANET_RADIUS = 6371.0;
+const float ATMOSPHERE_RADIUS = 6471.0;
+const float ATMOSPHERE_HEIGHT = 100.0;  // ATMOSPHERE_RADIUS - PLANET_RADIUS
+
+const vec3 RAYLEIGH_SCATTERING = vec3(5.802e-3, 13.558e-3, 33.1e-3);
+const float RAYLEIGH_SCALE_HEIGHT = 8.0;
+
+const float MIE_SCATTERING = 3.996e-3;
+const float MIE_ABSORPTION = 4.4e-3;
+const float MIE_EXTINCTION = MIE_SCATTERING + MIE_ABSORPTION;
+const float MIE_SCALE_HEIGHT = 1.2;
+
+const vec3 OZONE_ABSORPTION = vec3(0.65e-3, 1.881e-3, 0.085e-3);
+const float OZONE_LAYER_CENTER = 25.0;
+const float OZONE_LAYER_WIDTH = 15.0;
+
+const int TRANSMITTANCE_STEPS = 40;
+
+// Get atmospheric density at altitude
+vec3 getAtmosphereDensity(float altitude) {
+    // Rayleigh density (air molecules)
+    float rayleighDensity = exp(-altitude / RAYLEIGH_SCALE_HEIGHT);
+
+    // Mie density (aerosols)
+    float mieDensity = exp(-altitude / MIE_SCALE_HEIGHT);
+
+    // Ozone absorption (peaks around 25km)
+    float ozoneHeight = max(0.0, altitude - OZONE_LAYER_CENTER);
+    float ozoneDensity = max(0.0, 1.0 - abs(ozoneHeight) / OZONE_LAYER_WIDTH);
+
+    // Combined extinction coefficient
+    vec3 rayleigh = RAYLEIGH_SCATTERING * rayleighDensity;
+    vec3 mie = vec3(MIE_EXTINCTION) * mieDensity;
+    vec3 ozone = OZONE_ABSORPTION * ozoneDensity;
+
+    return rayleigh + mie + ozone;
+}
+
+// Distance to atmosphere boundary
+float distanceToAtmosphereBoundary(float r, float mu) {
+    float discriminant = r * r * (mu * mu - 1.0) + ATMOSPHERE_RADIUS * ATMOSPHERE_RADIUS;
+    return max(0.0, -r * mu + sqrt(max(0.0, discriminant)));
+}
+
+// Distance to ground
+float distanceToGround(float r, float mu) {
+    float discriminant = r * r * (mu * mu - 1.0) + PLANET_RADIUS * PLANET_RADIUS;
+    if (discriminant < 0.0) return -1.0;  // No intersection
+    return max(0.0, -r * mu - sqrt(discriminant));
+}
+
+// Convert UV to transmittance parameters
+void uvToTransmittanceParams(vec2 uv, out float r, out float mu) {
+    // Altitude mapping: non-linear to get more precision near ground
+    float H = ATMOSPHERE_HEIGHT;
+    float xR = uv.y;
+    float altitude = xR * xR * H;  // Squared for better precision near surface
+    r = PLANET_RADIUS + altitude;
+
+    // Angle mapping
+    float xMu = uv.x;
+    float discriminant = r * r - PLANET_RADIUS * PLANET_RADIUS;
+    float H_at_r = sqrt(max(0.0, discriminant));
+
+    // Map to cosine of zenith angle
+    // xMu = 0: looking at horizon (mu = 0 or slightly negative)
+    // xMu = 1: looking up (mu = 1)
+    mu = -H_at_r + xMu * (H_at_r + H_at_r);
+    mu = clamp(mu, -1.0, 1.0);
+}
+
+// Compute transmittance by integrating optical depth
+vec3 computeTransmittance(float r, float mu) {
+    // Determine ray length
+    float rayLength;
+    float groundDist = distanceToGround(r, mu);
+
+    if (groundDist > 0.0) {
+        // Ray hits ground
+        rayLength = groundDist;
+    } else {
+        // Ray escapes to space
+        rayLength = distanceToAtmosphereBoundary(r, mu);
+    }
+
+    float dx = rayLength / float(TRANSMITTANCE_STEPS);
+
+    // Trapezoidal integration of optical depth
+    vec3 opticalDepth = vec3(0.0);
+
+    for (int i = 0; i <= TRANSMITTANCE_STEPS; i++) {
+        float t = float(i) * dx;
+
+        // Current position along ray
+        float altitude = sqrt(r * r + t * t + 2.0 * r * mu * t) - PLANET_RADIUS;
+        altitude = max(0.0, altitude);
+
+        // Sample density
+        vec3 density = getAtmosphereDensity(altitude);
+
+        // Trapezoidal rule weights
+        float weight = (i == 0 || i == TRANSMITTANCE_STEPS) ? 0.5 : 1.0;
+        opticalDepth += density * weight * dx;
+    }
+
+    // Beer-Lambert law
+    return exp(-opticalDepth);
+}
+
+void main() {
+    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 lutSize = imageSize(transmittanceLUT);
+
+    if (texel.x >= lutSize.x || texel.y >= lutSize.y) {
+        return;
+    }
+
+    vec2 uv = (vec2(texel) + 0.5) / vec2(lutSize);
+
+    float r, mu;
+    uvToTransmittanceParams(uv, r, mu);
+
+    vec3 transmittance = computeTransmittance(r, mu);
+
+    imageStore(transmittanceLUT, texel, vec4(transmittance, 1.0));
+}

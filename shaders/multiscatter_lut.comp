@@ -1,0 +1,150 @@
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(rgba16f, binding = 0) writeonly uniform image2D multiScatterLUT;
+layout(rgba16f, binding = 1) readonly uniform image2D transmittanceLUT;
+
+const float PI = 3.14159265359;
+
+// Atmospheric parameters (same as transmittance shader)
+const float PLANET_RADIUS = 6371.0;
+const float ATMOSPHERE_RADIUS = 6471.0;
+const float ATMOSPHERE_HEIGHT = 100.0;
+
+const vec3 RAYLEIGH_SCATTERING = vec3(5.802e-3, 13.558e-3, 33.1e-3);
+const float RAYLEIGH_SCALE_HEIGHT = 8.0;
+
+const float MIE_SCATTERING = 3.996e-3;
+const float MIE_SCALE_HEIGHT = 1.2;
+
+const int MULTISCATTER_SAMPLES = 64;
+const int MULTISCATTER_SPHERE_SAMPLES = 16;
+
+// Sample transmittance LUT
+vec3 sampleTransmittanceLUT(float r, float mu) {
+    float H = ATMOSPHERE_HEIGHT;
+    float altitude = r - PLANET_RADIUS;
+
+    // Inverse of UV mapping from transmittance shader
+    float xR = sqrt(clamp(altitude / H, 0.0, 1.0));
+
+    float discriminant = r * r - PLANET_RADIUS * PLANET_RADIUS;
+    float H_at_r = sqrt(max(0.0, discriminant));
+
+    float xMu = clamp((mu + H_at_r) / (2.0 * H_at_r), 0.0, 1.0);
+
+    vec2 uv = vec2(xMu, xR);
+    ivec2 lutSize = imageSize(transmittanceLUT);
+    ivec2 texel = ivec2(uv * vec2(lutSize));
+    texel = clamp(texel, ivec2(0), lutSize - 1);
+
+    return imageLoad(transmittanceLUT, texel).rgb;
+}
+
+// Get scattering coefficient at altitude
+vec3 getScatteringCoeff(float altitude) {
+    float rayleighDensity = exp(-altitude / RAYLEIGH_SCALE_HEIGHT);
+    float mieDensity = exp(-altitude / MIE_SCALE_HEIGHT);
+
+    return RAYLEIGH_SCATTERING * rayleighDensity + vec3(MIE_SCATTERING) * mieDensity;
+}
+
+// Distance to atmosphere boundary
+float distanceToAtmosphereBoundary(float r, float mu) {
+    float discriminant = r * r * (mu * mu - 1.0) + ATMOSPHERE_RADIUS * ATMOSPHERE_RADIUS;
+    return max(0.0, -r * mu + sqrt(max(0.0, discriminant)));
+}
+
+// Hammersley sequence for uniform sampling
+vec2 hammersley(uint i, uint N) {
+    uint bits = i;
+    bits = (bits << 16u) | (bits >> 16u);
+    bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
+    bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
+    bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
+    bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
+    float rdi = float(bits) * 2.3283064365386963e-10;
+    return vec2(float(i) / float(N), rdi);
+}
+
+// Map Hammersley point to sphere direction
+vec3 uniformSphere(vec2 xi) {
+    float z = 1.0 - 2.0 * xi.x;
+    float r = sqrt(max(0.0, 1.0 - z * z));
+    float phi = 2.0 * PI * xi.y;
+    return vec3(r * cos(phi), r * sin(phi), z);
+}
+
+// Compute second-order scattering (simplified approximation)
+vec3 computeMultipleScattering(float r, float sunCosZenith) {
+    vec3 sunDir = vec3(0.0, sunCosZenith, sqrt(max(0.0, 1.0 - sunCosZenith * sunCosZenith)));
+
+    // Integrate scattering over sphere
+    vec3 multiScatter = vec3(0.0);
+    float totalWeight = 0.0;
+
+    for (uint i = 0; i < MULTISCATTER_SAMPLES; i++) {
+        vec2 xi = hammersley(i, MULTISCATTER_SAMPLES);
+        vec3 viewDir = uniformSphere(xi);
+
+        // Compute in-scattering along this ray
+        float rayLength = distanceToAtmosphereBoundary(r, viewDir.y);
+        float dt = rayLength / float(MULTISCATTER_SPHERE_SAMPLES);
+
+        vec3 inscatter = vec3(0.0);
+
+        for (int j = 0; j < MULTISCATTER_SPHERE_SAMPLES; j++) {
+            float t = (float(j) + 0.5) * dt;
+            float sampleAlt = sqrt(r * r + t * t + 2.0 * r * viewDir.y * t) - PLANET_RADIUS;
+            sampleAlt = max(0.0, sampleAlt);
+
+            float sampleR = PLANET_RADIUS + sampleAlt;
+            vec3 samplePos = vec3(0, r, 0) + viewDir * t;
+            float sampleMu = dot(normalize(samplePos), sunDir);
+
+            // Scattering coefficient
+            vec3 scattering = getScatteringCoeff(sampleAlt);
+
+            // Transmittance from sun to sample point
+            vec3 sunTransmittance = sampleTransmittanceLUT(sampleR, sampleMu);
+
+            // Transmittance from sample to view point
+            vec3 viewTransmittance = sampleTransmittanceLUT(sampleR, viewDir.y);
+
+            inscatter += scattering * sunTransmittance * viewTransmittance * dt;
+        }
+
+        multiScatter += inscatter;
+        totalWeight += 1.0;
+    }
+
+    if (totalWeight > 0.0) {
+        multiScatter /= totalWeight;
+    }
+
+    return multiScatter;
+}
+
+void main() {
+    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 lutSize = imageSize(multiScatterLUT);
+
+    if (texel.x >= lutSize.x || texel.y >= lutSize.y) {
+        return;
+    }
+
+    vec2 uv = (vec2(texel) + 0.5) / vec2(lutSize);
+
+    // X axis: sun zenith angle (cosine)
+    float sunCosZenith = uv.x * 2.0 - 1.0;
+
+    // Y axis: altitude
+    float altitude = uv.y * ATMOSPHERE_HEIGHT;
+    float r = PLANET_RADIUS + altitude;
+
+    // Compute multiple scattering contribution
+    vec3 multiScatter = computeMultipleScattering(r, sunCosZenith);
+
+    // Store as multiplier (this represents approximately 30% additional brightness)
+    imageStore(multiScatterLUT, texel, vec4(multiScatter, 1.0));
+}

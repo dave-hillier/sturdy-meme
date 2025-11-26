@@ -96,6 +96,21 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     if (!createDescriptorSetLayout()) return false;
     if (!createDescriptorPool()) return false;
 
+    // Initialize atmosphere LUT system early (before descriptor sets)
+    AtmosphereLUTSystem::InitInfo lutInfo{};
+    lutInfo.device = device;
+    lutInfo.allocator = allocator;
+    lutInfo.descriptorPool = descriptorPool;
+    lutInfo.shaderPath = resourcePath + "/shaders";
+    lutInfo.commandPool = commandPool;
+    lutInfo.graphicsQueue = graphicsQueue;
+
+    if (!atmosphereLUTSystem.init(lutInfo)) return false;
+    if (!atmosphereLUTSystem.generateLUTs()) return false;
+
+    // Save LUTs to disk for visualization
+    atmosphereLUTSystem.saveLUTsToDisk(resourcePath);
+
     // Initialize post-process system early to get HDR render pass
     PostProcessSystem::InitInfo postProcessInfo{};
     postProcessInfo.device = device;
@@ -218,6 +233,7 @@ void Renderer::shutdown() {
         windSystem.destroy(device, allocator);
         froxelSystem.destroy(device, allocator);
         postProcessSystem.destroy(device, allocator);
+        atmosphereLUTSystem.destroy();
 
         vkDestroyPipeline(device, skyPipeline, nullptr);
         vkDestroyPipeline(device, graphicsPipeline, nullptr);
@@ -961,7 +977,22 @@ bool Renderer::createDescriptorSetLayout() {
     emissiveMapBinding.pImmutableSamplers = nullptr;
     emissiveMapBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-    std::array<VkDescriptorSetLayoutBinding, 6> bindings = {uboLayoutBinding, samplerLayoutBinding, shadowSamplerBinding, normalMapBinding, lightBufferBinding, emissiveMapBinding};
+    // Atmosphere LUTs (bindings 6 and 7)
+    VkDescriptorSetLayoutBinding transmittanceLUTBinding{};
+    transmittanceLUTBinding.binding = 6;
+    transmittanceLUTBinding.descriptorCount = 1;
+    transmittanceLUTBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    transmittanceLUTBinding.pImmutableSamplers = nullptr;
+    transmittanceLUTBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    VkDescriptorSetLayoutBinding multiScatterLUTBinding{};
+    multiScatterLUTBinding.binding = 7;
+    multiScatterLUTBinding.descriptorCount = 1;
+    multiScatterLUTBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    multiScatterLUTBinding.pImmutableSamplers = nullptr;
+    multiScatterLUTBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    std::array<VkDescriptorSetLayoutBinding, 8> bindings = {uboLayoutBinding, samplerLayoutBinding, shadowSamplerBinding, normalMapBinding, lightBufferBinding, emissiveMapBinding, transmittanceLUTBinding, multiScatterLUTBinding};
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -1338,19 +1369,21 @@ void Renderer::updateLightBuffer(uint32_t currentImage, const glm::vec3& cameraP
 }
 
 bool Renderer::createDescriptorPool() {
-    std::array<VkDescriptorPoolSize, 3> poolSizes{};
+    std::array<VkDescriptorPoolSize, 4> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 8);  // +2 for post-process, +2 for grass double-buffer
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 20);  // diffuse + shadow + normal + emissive + HDR sampler + grass double-buffer
+    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 25);  // diffuse + shadow + normal + emissive + HDR sampler + grass double-buffer + 2 atmosphere LUTs
     poolSizes[2].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     poolSizes[2].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 18);  // +6 for grass double-buffer, +6 for light buffers (3 descriptor sets * 2 frames)
+    poolSizes[3].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    poolSizes[3].descriptorCount = 10;  // For atmosphere LUT compute shaders
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
     poolInfo.pPoolSizes = poolSizes.data();
-    poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 14);  // +6 for grass double-buffer (2 sets * 3 descriptor set types)
+    poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 14 + 5);  // +6 for grass double-buffer (2 sets * 3 descriptor set types), +5 for atmosphere LUT compute
 
     if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS) {
         SDL_Log("Failed to create descriptor pool");
@@ -1418,7 +1451,17 @@ bool Renderer::createDescriptorSets() {
         emissiveImageInfo.imageView = sceneBuilder.getDefaultEmissiveMap().getImageView();
         emissiveImageInfo.sampler = sceneBuilder.getDefaultEmissiveMap().getSampler();
 
-        std::array<VkWriteDescriptorSet, 6> descriptorWrites{};
+        VkDescriptorImageInfo transmittanceLUTInfo{};
+        transmittanceLUTInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        transmittanceLUTInfo.imageView = atmosphereLUTSystem.getTransmittanceLUTView();
+        transmittanceLUTInfo.sampler = atmosphereLUTSystem.getLUTSampler();
+
+        VkDescriptorImageInfo multiScatterLUTInfo{};
+        multiScatterLUTInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        multiScatterLUTInfo.imageView = atmosphereLUTSystem.getMultiScatterLUTView();
+        multiScatterLUTInfo.sampler = atmosphereLUTSystem.getLUTSampler();
+
+        std::array<VkWriteDescriptorSet, 8> descriptorWrites{};
 
         descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         descriptorWrites[0].dstSet = descriptorSets[i];
@@ -1468,6 +1511,22 @@ bool Renderer::createDescriptorSets() {
         descriptorWrites[5].descriptorCount = 1;
         descriptorWrites[5].pImageInfo = &emissiveImageInfo;
 
+        descriptorWrites[6].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[6].dstSet = descriptorSets[i];
+        descriptorWrites[6].dstBinding = 6;
+        descriptorWrites[6].dstArrayElement = 0;
+        descriptorWrites[6].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[6].descriptorCount = 1;
+        descriptorWrites[6].pImageInfo = &transmittanceLUTInfo;
+
+        descriptorWrites[7].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[7].dstSet = descriptorSets[i];
+        descriptorWrites[7].dstBinding = 7;
+        descriptorWrites[7].dstArrayElement = 0;
+        descriptorWrites[7].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[7].descriptorCount = 1;
+        descriptorWrites[7].pImageInfo = &multiScatterLUTInfo;
+
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                descriptorWrites.data(), 0, nullptr);
 
@@ -1490,6 +1549,8 @@ bool Renderer::createDescriptorSets() {
         descriptorWrites[3].pImageInfo = &groundNormalImageInfo;
         descriptorWrites[4].dstSet = groundDescriptorSets[i];
         descriptorWrites[5].dstSet = groundDescriptorSets[i];
+        descriptorWrites[6].dstSet = groundDescriptorSets[i];
+        descriptorWrites[7].dstSet = groundDescriptorSets[i];
 
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                descriptorWrites.data(), 0, nullptr);
@@ -1513,6 +1574,8 @@ bool Renderer::createDescriptorSets() {
         descriptorWrites[3].pImageInfo = &metalNormalImageInfo;
         descriptorWrites[4].dstSet = metalDescriptorSets[i];
         descriptorWrites[5].dstSet = metalDescriptorSets[i];
+        descriptorWrites[6].dstSet = metalDescriptorSets[i];
+        descriptorWrites[7].dstSet = metalDescriptorSets[i];
 
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                descriptorWrites.data(), 0, nullptr);
