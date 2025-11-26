@@ -28,6 +28,7 @@ set(SOURCES
     src/WeatherSystem.cpp
     src/PostProcessSystem.cpp
     src/FroxelSystem.cpp
+    src/AtmosphereLUTSystem.cpp
     src/Player.cpp
     src/PhysicsSystem.cpp
 )
@@ -82,6 +83,9 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.frag.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/multiscatter_lut.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/skyview_lut.comp.spv
 )
 
 set_source_files_properties(${RESOURCE_FILES} PROPERTIES
@@ -212,6 +216,24 @@ if(SHADER_COMPILE_CMD)
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.frag
         COMMENT "Compiling weather fragment shader"
     )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp ${CMAKE_CURRENT_SOURCE_DIR}/shaders/atmosphere_common.glsl
+        COMMENT "Compiling transmittance LUT compute shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/multiscatter_lut.comp.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/multiscatter_lut.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/multiscatter_lut.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/multiscatter_lut.comp ${CMAKE_CURRENT_SOURCE_DIR}/shaders/atmosphere_common.glsl
+        COMMENT "Compiling multi-scatter LUT compute shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/skyview_lut.comp.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/skyview_lut.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/skyview_lut.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/skyview_lut.comp ${CMAKE_CURRENT_SOURCE_DIR}/shaders/atmosphere_common.glsl
+        COMMENT "Compiling sky-view LUT compute shader"
+    )
     add_custom_target(shaders DEPENDS
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.frag.spv
@@ -231,6 +253,9 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.frag.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/multiscatter_lut.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/skyview_lut.comp.spv
     )
     add_dependencies(${PROJECT_NAME} shaders)
 else()

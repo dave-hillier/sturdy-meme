@@ -15,6 +15,7 @@
 #include "WeatherSystem.h"
 #include "PostProcessSystem.h"
 #include "FroxelSystem.h"
+#include "AtmosphereLUTSystem.h"
 #include "SceneBuilder.h"
 #include "Light.h"
 
@@ -177,6 +178,7 @@ private:
     WeatherSystem weatherSystem;
     PostProcessSystem postProcessSystem;
     FroxelSystem froxelSystem;
+    AtmosphereLUTSystem atmosphereLUTSystem;
 
     std::vector<VkFramebuffer> framebuffers;
     VkCommandPool commandPool = VK_NULL_HANDLE;
