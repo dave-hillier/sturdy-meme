@@ -63,6 +63,27 @@ void Application::run() {
         handleInput(deltaTime);
         handleGamepadInput(deltaTime);
 
+        // Process accumulated input for third-person mode
+        if (thirdPersonMode) {
+            glm::vec3 desiredVelocity(0.0f);
+            if (glm::length(accumulatedMoveDir) > 0.001f) {
+                glm::vec3 moveDir = glm::normalize(accumulatedMoveDir);
+                desiredVelocity = moveDir * moveSpeed;
+
+                // Rotate player to face movement direction
+                float newYaw = glm::degrees(atan2(moveDir.x, moveDir.z));
+                float currentYaw = player.getYaw();
+                float yawDiff = newYaw - currentYaw;
+                // Normalize yaw difference
+                while (yawDiff > 180.0f) yawDiff -= 360.0f;
+                while (yawDiff < -180.0f) yawDiff += 360.0f;
+                player.rotate(yawDiff * 10.0f * deltaTime);  // Smooth rotation
+            }
+
+            // Update physics character controller with combined input
+            physics.updateCharacter(deltaTime, desiredVelocity, wantsJump);
+        }
+
         // Update physics simulation
         physics.update(deltaTime);
 
@@ -208,6 +229,10 @@ void Application::processEvents() {
 void Application::handleInput(float deltaTime) {
     const bool* keyState = SDL_GetKeyboardState(nullptr);
 
+    // Reset movement accumulator at start of input handling
+    accumulatedMoveDir = glm::vec3(0.0f);
+    wantsJump = false;
+
     if (thirdPersonMode) {
         handleThirdPersonInput(deltaTime, keyState);
     } else {
@@ -279,27 +304,15 @@ void Application::handleThirdPersonInput(float deltaTime, const bool* keyState) 
         moveZ += sin(glm::radians(cameraYaw + 90.0f));
     }
 
-    // Calculate desired velocity for physics character controller
-    glm::vec3 desiredVelocity(0.0f);
+    // Accumulate movement direction for keyboard input
     if (moveX != 0.0f || moveZ != 0.0f) {
-        glm::vec3 moveDir = glm::normalize(glm::vec3(moveX, 0.0f, moveZ));
-        desiredVelocity = moveDir * moveSpeed;
-
-        // Rotate player to face movement direction
-        float newYaw = glm::degrees(atan2(moveDir.x, moveDir.z));
-        float currentYaw = player.getYaw();
-        float yawDiff = newYaw - currentYaw;
-        // Normalize yaw difference
-        while (yawDiff > 180.0f) yawDiff -= 360.0f;
-        while (yawDiff < -180.0f) yawDiff += 360.0f;
-        player.rotate(yawDiff * 10.0f * deltaTime);  // Smooth rotation
+        accumulatedMoveDir += glm::vec3(moveX, 0.0f, moveZ);
     }
 
     // Space to jump
-    wantsJump = keyState[SDL_SCANCODE_SPACE];
-
-    // Update physics character controller
-    physics.updateCharacter(deltaTime, desiredVelocity, wantsJump);
+    if (keyState[SDL_SCANCODE_SPACE]) {
+        wantsJump = true;
+    }
 
     // Arrow keys orbit the camera around the player
     if (keyState[SDL_SCANCODE_UP]) {
@@ -388,7 +401,7 @@ void Application::handleThirdPersonGamepadInput(float deltaTime) {
     if (std::abs(leftX) < stickDeadzone) leftX = 0.0f;
     if (std::abs(leftY) < stickDeadzone) leftY = 0.0f;
 
-    glm::vec3 desiredVelocity(0.0f);
+    // Accumulate movement direction from gamepad
     if (leftX != 0.0f || leftY != 0.0f) {
         float cameraYaw = camera.getYaw();
 
@@ -396,23 +409,13 @@ void Application::handleThirdPersonGamepadInput(float deltaTime) {
         float moveX = -leftY * cos(glm::radians(cameraYaw)) + leftX * cos(glm::radians(cameraYaw + 90.0f));
         float moveZ = -leftY * sin(glm::radians(cameraYaw)) + leftX * sin(glm::radians(cameraYaw + 90.0f));
 
-        glm::vec3 moveDir = glm::normalize(glm::vec3(moveX, 0.0f, moveZ));
-        desiredVelocity = moveDir * moveSpeed;
-
-        // Rotate player to face movement direction
-        float newYaw = glm::degrees(atan2(moveDir.x, moveDir.z));
-        float currentYaw = player.getYaw();
-        float yawDiff = newYaw - currentYaw;
-        while (yawDiff > 180.0f) yawDiff -= 360.0f;
-        while (yawDiff < -180.0f) yawDiff += 360.0f;
-        player.rotate(yawDiff * 10.0f * deltaTime);
+        accumulatedMoveDir += glm::vec3(moveX, 0.0f, moveZ);
     }
 
     // A button (South) to jump
-    bool gamepadJump = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_SOUTH);
-
-    // Update physics character controller
-    physics.updateCharacter(deltaTime, desiredVelocity, gamepadJump);
+    if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_SOUTH)) {
+        wantsJump = true;
+    }
 
     // Right stick orbits camera around player
     float rightX = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTX) / 32767.0f;
@@ -475,22 +478,23 @@ void Application::initPhysics() {
         return;
     }
 
-    // Create terrain heightmap for the ground disc (radius 50)
+    // Create terrain ground plane (radius 50)
     physics.createTerrainDisc(50.0f, 0.0f);
 
-    // Get scene objects from renderer to create physics bodies
-    // Scene object layout from SceneBuilder:
+    // Scene object layout from SceneBuilder (after multi-lights update):
     // 0: Ground disc (static terrain - already created above)
-    // 1: Wooden crate 1 at (2.0, 0.5, 0.0) - unit cube (half extents 0.5)
+    // 1: Wooden crate 1 at (2.0, 0.5, 0.0) - unit cube
     // 2: Rotated wooden crate at (-1.5, 0.5, 1.0)
     // 3: Polished metal sphere at (0.0, 0.5, -2.0) - radius 0.5
-    // 4: Rough metal sphere at (-3.0, 0.5, -1.0)
+    // 4: Rough metal sphere at (-3.0, 0.5, -1.0) - radius 0.5
     // 5: Polished metal cube at (3.0, 0.5, -2.0)
     // 6: Brushed metal cube at (-3.0, 0.5, -3.0)
-    // 7: Emissive sphere at (2.0, 1.3, 0.0) - small, scaled 0.3 (radius ~0.15)
-    // 8: Player capsule (handled by character controller)
+    // 7: Emissive sphere at (2.0, 1.3, 0.0) - scaled 0.3, visual radius 0.15
+    // 8: Blue light at (-3.0, 2.0, 2.0) - fixed, no physics
+    // 9: Green light at (4.0, 1.5, -2.0) - fixed, no physics
+    // 10: Player capsule (handled by character controller)
 
-    const size_t numSceneObjects = 9;  // Including ground and player
+    const size_t numSceneObjects = 11;
     scenePhysicsBodies.resize(numSceneObjects, INVALID_BODY_ID);
 
     // Box half-extent for unit cube
@@ -498,8 +502,7 @@ void Application::initPhysics() {
     float boxMass = 10.0f;
     float sphereMass = 5.0f;
 
-    // Create physics bodies for dynamic objects
-    // Spawn objects slightly above ground (Y offset +0.1) to let them settle
+    // Spawn objects slightly above ground to let them settle
     const float spawnOffset = 0.1f;
 
     // Index 1: Wooden crate 1
@@ -508,10 +511,10 @@ void Application::initPhysics() {
     // Index 2: Rotated wooden crate
     scenePhysicsBodies[2] = physics.createBox(glm::vec3(-1.5f, 0.5f + spawnOffset, 1.0f), cubeHalfExtents, boxMass);
 
-    // Index 3: Polished metal sphere (radius 0.5)
+    // Index 3: Polished metal sphere (mesh radius 0.5)
     scenePhysicsBodies[3] = physics.createSphere(glm::vec3(0.0f, 0.5f + spawnOffset, -2.0f), 0.5f, sphereMass);
 
-    // Index 4: Rough metal sphere
+    // Index 4: Rough metal sphere (mesh radius 0.5)
     scenePhysicsBodies[4] = physics.createSphere(glm::vec3(-3.0f, 0.5f + spawnOffset, -1.0f), 0.5f, sphereMass);
 
     // Index 5: Polished metal cube
@@ -520,8 +523,11 @@ void Application::initPhysics() {
     // Index 6: Brushed metal cube
     scenePhysicsBodies[6] = physics.createBox(glm::vec3(-3.0f, 0.5f + spawnOffset, -3.0f), cubeHalfExtents, boxMass);
 
-    // Index 7: Small emissive sphere (scaled 0.3, so radius ~0.15)
-    scenePhysicsBodies[7] = physics.createSphere(glm::vec3(2.0f, 1.3f + spawnOffset, 0.0f), 0.15f, 1.0f);
+    // Index 7: Emissive sphere - mesh radius 0.5, scaled 0.3 = visual radius 0.15
+    scenePhysicsBodies[7] = physics.createSphere(glm::vec3(2.0f, 1.3f + spawnOffset, 0.0f), 0.5f * 0.3f, 1.0f);
+
+    // Index 8 & 9: Blue and green lights - NO PHYSICS (fixed light indicators)
+    // scenePhysicsBodies[8] and [9] remain INVALID_BODY_ID
 
     // Create character controller for player slightly above ground
     physics.createCharacter(glm::vec3(0.0f, spawnOffset, 0.0f), Player::CAPSULE_HEIGHT, Player::CAPSULE_RADIUS);
