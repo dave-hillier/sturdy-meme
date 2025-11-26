@@ -113,29 +113,31 @@ LEBTriangle leb_decodeTriangle(uint heapIndex) {
 
     // Determine base triangle based on path from root
     // Base triangles cover the unit square [0,1]^2
+    // Winding order is counter-clockwise when viewed from above (Y+)
     if (heapIndex == 1u) {
-        // First base triangle: bottom-left
+        // First base triangle: bottom-left (swap v1/v2 for CCW winding)
         v0 = vec2(0.0, 0.0);
-        v1 = vec2(1.0, 0.0);
-        v2 = vec2(0.0, 1.0);
-    } else if (heapIndex == 2u) {
-        // Second base triangle: top-right
-        v0 = vec2(1.0, 1.0);
         v1 = vec2(0.0, 1.0);
         v2 = vec2(1.0, 0.0);
+    } else if (heapIndex == 2u) {
+        // Second base triangle: top-right (swap v1/v2 for CCW winding)
+        v0 = vec2(1.0, 1.0);
+        v1 = vec2(1.0, 0.0);
+        v2 = vec2(0.0, 1.0);
     } else {
         // Start from base and subdivide
         uint topBit = 1u << (depth - 1u);
         bool isSecondBase = (heapIndex & topBit) != 0u;
 
+        // Swap v1/v2 for CCW winding when viewed from above (Y+)
         if (!isSecondBase) {
             v0 = vec2(0.0, 0.0);
-            v1 = vec2(1.0, 0.0);
-            v2 = vec2(0.0, 1.0);
-        } else {
-            v0 = vec2(1.0, 1.0);
             v1 = vec2(0.0, 1.0);
             v2 = vec2(1.0, 0.0);
+        } else {
+            v0 = vec2(1.0, 1.0);
+            v1 = vec2(1.0, 0.0);
+            v2 = vec2(0.0, 1.0);
         }
 
         // Apply subdivision for each level

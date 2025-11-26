@@ -129,9 +129,31 @@ void main() {
     vec3 N = normalize(fragNormal);
     vec3 V = normalize(ubo.cameraPosition.xyz - fragWorldPos);
 
-    // Sample terrain albedo - tile the texture
-    float textureScale = 10.0;  // Tile the texture across terrain
-    vec3 albedo = texture(albedoMap, fragTexCoord * textureScale).rgb;
+    // Procedural terrain color based on height and slope
+    // Sample height from the albedo texture (which is the heightmap, single-channel)
+    float heightSample = texture(albedoMap, fragTexCoord).r;
+
+    // Slope factor: steeper = more rocky
+    float slope = 1.0 - abs(N.y);
+
+    // Base colors for terrain blending
+    vec3 grassColor = vec3(0.25, 0.45, 0.15);  // Green grass
+    vec3 dirtColor = vec3(0.4, 0.3, 0.2);      // Brown dirt
+    vec3 rockColor = vec3(0.45, 0.42, 0.4);    // Gray rock
+
+    // Blend based on slope: grass on flat, rock on steep
+    float slopeBlend = smoothstep(0.2, 0.6, slope);
+    vec3 baseColor = mix(grassColor, rockColor, slopeBlend);
+
+    // Add height variation: lower = more grass, higher = more dirt/rock
+    float heightBlend = smoothstep(0.3, 0.7, heightSample);
+    baseColor = mix(baseColor, mix(dirtColor, rockColor, slopeBlend * 0.5), heightBlend * 0.4);
+
+    // Add subtle noise variation based on world position
+    float noiseX = fract(sin(dot(fragWorldPos.xz * 0.1, vec2(12.9898, 78.233))) * 43758.5453);
+    baseColor *= 0.9 + noiseX * 0.2;
+
+    vec3 albedo = baseColor;
 
     // Material properties for terrain
     float roughness = 0.8;
