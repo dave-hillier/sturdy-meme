@@ -135,7 +135,7 @@ private:
     uint32_t renderBufferSet = 0;
 
     // Weather parameters
-    float weatherIntensity = 0.5f;      // 0.0-1.0 intensity
+    float weatherIntensity = 0.0f;      // 0.0-1.0 intensity
     uint32_t weatherType = 0;           // 0 = rain, 1 = snow
     float groundLevel = 0.0f;           // Ground plane Y coordinate
 

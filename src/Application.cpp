@@ -148,6 +148,39 @@ void Application::processEvents() {
                         camera.orbitPitch(15.0f);  // Look down slightly
                     }
                 }
+                else if (event.key.scancode == SDL_SCANCODE_Z) {
+                    float currentIntensity = renderer.getIntensity();
+                    renderer.setWeatherIntensity(std::max(0.0f, currentIntensity - 0.1f));
+                    SDL_Log("Weather intensity: %.1f", renderer.getIntensity());
+                }
+                else if (event.key.scancode == SDL_SCANCODE_X) {
+                    float currentIntensity = renderer.getIntensity();
+                    renderer.setWeatherIntensity(std::min(1.0f, currentIntensity + 0.1f));
+                    SDL_Log("Weather intensity: %.1f", renderer.getIntensity());
+                }
+                else if (event.key.scancode == SDL_SCANCODE_C) {
+                    uint32_t currentType = renderer.getWeatherType();
+                    if (renderer.getIntensity() == 0.0f && currentType == 0) { // If it's clear, make it rain
+                        renderer.setWeatherType(0); // Rain
+                        renderer.setWeatherIntensity(0.5f); // Default rain intensity
+                    } else if (currentType == 0) { // If it's raining, make it snow
+                        renderer.setWeatherType(1); // Snow
+                        renderer.setWeatherIntensity(0.5f); // Default snow intensity
+                    } else if (currentType == 1) { // If it's snowing, make it clear
+                        renderer.setWeatherType(0); // Set to rain type, but intensity 0
+                        renderer.setWeatherIntensity(0.0f); // Clear
+                    }
+                    
+                    std::string weatherStatus = "Clear";
+                    if (renderer.getIntensity() > 0.0f) {
+                        if (renderer.getWeatherType() == 0) {
+                            weatherStatus = "Rain";
+                        } else if (renderer.getWeatherType() == 1) {
+                            weatherStatus = "Snow";
+                        }
+                    }
+                    SDL_Log("Weather type: %s, Intensity: %.1f", weatherStatus.c_str(), renderer.getIntensity());
+                }
                 break;
             case SDL_EVENT_GAMEPAD_ADDED:
                 if (!gamepad) {
@@ -233,11 +266,11 @@ void Application::handleFreeCameraInput(float deltaTime, const bool* keyState) {
         camera.rotateYaw(rotateSpeed * deltaTime);
     }
 
-    // Space/E for up, C/Q for down (fly camera)
-    if (keyState[SDL_SCANCODE_SPACE] || keyState[SDL_SCANCODE_E]) {
+    // Space for up, Left Ctrl/Q for down (fly camera)
+    if (keyState[SDL_SCANCODE_SPACE]) {
         camera.moveUp(moveSpeed * deltaTime);
     }
-    if (keyState[SDL_SCANCODE_C] || keyState[SDL_SCANCODE_Q]) {
+    if (keyState[SDL_SCANCODE_LCTRL] || keyState[SDL_SCANCODE_Q]) {
         camera.moveUp(-moveSpeed * deltaTime);
     }
 }

@@ -265,11 +265,11 @@ void main() {
     // Calculate target particle count based on intensity
     uint targetParticles;
     if (uniforms.weatherType == 0) {
-        // Rain: 10k-150k based on intensity
-        targetParticles = uint(mix(10000.0, 150000.0, uniforms.intensity));
+        // Rain: 0-50k based on intensity
+        targetParticles = uint(mix(0.0, 50000.0, uniforms.intensity));
     } else {
-        // Snow: 5k-75k based on intensity
-        targetParticles = uint(mix(5000.0, 75000.0, uniforms.intensity));
+        // Snow: 0-75k based on intensity
+        targetParticles = uint(mix(0.0, 75000.0, uniforms.intensity));
     }
 
     // Only process particles up to target count

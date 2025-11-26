@@ -582,8 +582,8 @@ void WeatherSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraP
     uniforms.gravity = glm::vec4(0.0f, -9.8f, 0.0f, 11.0f);  // Terminal velocity ~11 m/s for rain
 
     // Spawn region centered on camera
-    uniforms.spawnRegion = glm::vec4(cameraPos.x, cameraPos.y + 100.0f, cameraPos.z, 80.0f);
-    uniforms.spawnHeight = 100.0f;
+    uniforms.spawnRegion = glm::vec4(cameraPos.x, cameraPos.y + 10.0f, cameraPos.z, 80.0f);
+    uniforms.spawnHeight = 10.0f;
     uniforms.groundLevel = groundLevel;
     uniforms.particleDensity = 1.0f;
     uniforms.maxDrawDistance = 100.0f;

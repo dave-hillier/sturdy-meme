@@ -200,6 +200,14 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     return true;
 }
 
+void Renderer::setWeatherIntensity(float intensity) {
+    weatherSystem.setIntensity(intensity);
+}
+
+void Renderer::setWeatherType(uint32_t type) {
+    weatherSystem.setWeatherType(type);
+}
+
 void Renderer::updatePlayerTransform(const glm::mat4& transform) {
     sceneBuilder.updatePlayerTransform(transform);
 }

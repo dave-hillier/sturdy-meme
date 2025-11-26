@@ -78,6 +78,12 @@ public:
     void toggleCascadeDebug() { showCascadeDebug = !showCascadeDebug; }
     bool isShowingCascadeDebug() const { return showCascadeDebug; }
 
+    // Weather control
+    void setWeatherIntensity(float intensity);
+    void setWeatherType(uint32_t type);
+    uint32_t getWeatherType() const { return weatherSystem.getWeatherType(); }
+    float getIntensity() const { return weatherSystem.getIntensity(); }
+
     // Player rendering
     void updatePlayerTransform(const glm::mat4& transform);
 
