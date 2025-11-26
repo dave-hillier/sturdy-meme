@@ -183,6 +183,9 @@ vec3 computeGodRays(vec2 uv, vec2 sunPos) {
     float weight = 1.0;
     vec2 sampleUV = uv;
 
+    // Sky depth threshold - pixels at or near far plane are sky
+    const float SKY_DEPTH_THRESHOLD = 0.9999;
+
     // Accumulate samples along ray toward sun
     for (int i = 0; i < GOD_RAY_SAMPLES; i++) {
         sampleUV += delta;
@@ -190,6 +193,14 @@ vec3 computeGodRays(vec2 uv, vec2 sunPos) {
         // Check bounds
         if (sampleUV.x < 0.0 || sampleUV.x > 1.0 || sampleUV.y < 0.0 || sampleUV.y > 1.0) {
             break;
+        }
+
+        // Only accumulate from sky pixels (not geometry like point lights)
+        float sampleDepth = texture(depthInput, sampleUV).r;
+        if (sampleDepth < SKY_DEPTH_THRESHOLD) {
+            // This is geometry, not sky - skip it
+            weight *= ubo.godRayDecay;
+            continue;
         }
 
         // Sample brightness at this point
