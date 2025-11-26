@@ -139,6 +139,10 @@ private:
     uint32_t weatherType = 0;           // 0 = rain, 1 = snow
     float groundLevel = 0.0f;           // Ground plane Y coordinate
 
+    // External buffer references for per-frame descriptor updates
+    std::vector<VkBuffer> externalWindBuffers;
+    std::vector<VkBuffer> externalRendererUniformBuffers;
+
     // Particle counts based on intensity
     static constexpr uint32_t MAX_PARTICLES = 150000;
     static constexpr uint32_t WORKGROUP_SIZE = 256;
