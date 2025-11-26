@@ -44,6 +44,7 @@ const float OZONE_LAYER_CENTER = 25.0;        // km
 const float OZONE_LAYER_WIDTH = 15.0;
 
 const float SUN_ANGULAR_RADIUS = 0.00935 / 2.0;  // radians
+const float MOON_ANGULAR_RADIUS = 0.00935 / 2.0; // Moon same size as sun (~0.5° from Earth)
 
 // LMS color space for accurate Rayleigh scattering (Phase 4.1.7)
 // Standard Rec709 Rayleigh produces greenish sunsets; LMS primaries are more accurate
@@ -901,14 +902,15 @@ vec3 renderAtmosphere(vec3 dir) {
     sky += sunLight * sunDisc * 20.0 * result.transmittance * clouds.transmittance;
 
     // Moon disc with lunar phase simulation
-    const float MOON_DISC_SIZE = 0.018;  // Larger, more visible moon
-    float moonDisc = celestialDisc(dir, ubo.moonDirection.xyz, MOON_DISC_SIZE);
+    float moonDisc = celestialDisc(dir, ubo.moonDirection.xyz, MOON_ANGULAR_RADIUS);
     float moonPhase = ubo.moonColor.a;  // Phase: 0 = new, 0.5 = full, 1 = new
-    float phaseMask = lunarPhaseMask(dir, ubo.moonDirection.xyz, moonPhase, MOON_DISC_SIZE);
+    float phaseMask = lunarPhaseMask(dir, ubo.moonDirection.xyz, moonPhase, MOON_ANGULAR_RADIUS);
 
-    // Apply phase mask with high intensity to trigger bloom
-    // Brightness scaled up to 8x for bloom effect (similar to bright stars)
-    sky += ubo.moonColor.rgb * moonDisc * phaseMask * 8.0 * ubo.moonDirection.w *
+    // Apply phase mask with very high intensity to ensure bloom triggers
+    // Moon surface is highly reflective (albedo ~0.12), but we boost for visual impact
+    // During full moon, this should create a strong bloom halo
+    float moonIntensity = 25.0 * phaseMask;  // Higher than sun (20.0) when fully lit
+    sky += ubo.moonColor.rgb * moonDisc * moonIntensity * ubo.moonDirection.w *
            clamp(result.transmittance, vec3(0.2), vec3(1.0)) * clouds.transmittance;
 
     // Star field blended over the atmospheric tint (also behind clouds)
