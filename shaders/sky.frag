@@ -43,8 +43,8 @@ const vec3 OZONE_ABSORPTION = vec3(0.65e-3, 1.881e-3, 0.085e-3);
 const float OZONE_LAYER_CENTER = 25.0;        // km
 const float OZONE_LAYER_WIDTH = 15.0;
 
-const float SUN_ANGULAR_RADIUS = 0.00935 / 2.0;  // radians
-const float MOON_ANGULAR_RADIUS = 0.025;          // Larger than realistic for visual impact (~5x sun)
+const float SUN_ANGULAR_RADIUS = 0.00935 / 2.0;  // radians (produces ~180px disc)
+const float MOON_ANGULAR_RADIUS = SUN_ANGULAR_RADIUS * 0.8;  // Slightly larger than sun due to inverse celestialDisc function
 
 // LMS color space for accurate Rayleigh scattering (Phase 4.1.7)
 // Standard Rec709 Rayleigh produces greenish sunsets; LMS primaries are more accurate
