@@ -31,7 +31,7 @@ struct UniformBufferObject {
     glm::vec4 sunDirection;
     glm::vec4 moonDirection;
     glm::vec4 sunColor;
-    glm::vec4 moonColor;                              // rgb = moon color, a = unused
+    glm::vec4 moonColor;                              // rgb = moon color, a = moon phase (0-1)
     glm::vec4 ambientColor;
     glm::vec4 cameraPosition;
     glm::vec4 pointLightPosition;  // xyz = position, w = intensity
@@ -161,6 +161,7 @@ private:
         glm::vec3 sunColor;
         glm::vec3 moonColor;
         glm::vec3 ambientColor;
+        float moonPhase;       // Moon phase (0 = new moon, 0.5 = full moon, 1 = new moon)
         double julianDay;
     };
     LightingParams calculateLightingParams(float timeOfDay) const;

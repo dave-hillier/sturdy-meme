@@ -12,7 +12,7 @@ layout(binding = 0) uniform UniformBufferObject {
     vec4 sunDirection;
     vec4 moonDirection;
     vec4 sunColor;
-    vec4 moonColor;                       // rgb = moon color
+    vec4 moonColor;                       // rgb = moon color, a = moon phase (0-1)
     vec4 ambientColor;
     vec4 cameraPosition;
     vec4 pointLightPosition;  // xyz = position, w = intensity
@@ -43,7 +43,10 @@ const vec3 OZONE_ABSORPTION = vec3(0.65e-3, 1.881e-3, 0.085e-3);
 const float OZONE_LAYER_CENTER = 25.0;        // km
 const float OZONE_LAYER_WIDTH = 15.0;
 
-const float SUN_ANGULAR_RADIUS = 0.00935 / 2.0;  // radians
+const float SUN_ANGULAR_RADIUS = 0.00935 / 2.0;  // radians (produces ~180px disc)
+// Moon needs two different size parameters due to different function interpretations:
+const float MOON_DISC_SIZE = 0.003;              // For celestialDisc (smaller = larger disc, ~300px)
+const float MOON_MASK_RADIUS = 0.025;            // For lunarPhaseMask (actual angular radius)
 
 // LMS color space for accurate Rayleigh scattering (Phase 4.1.7)
 // Standard Rec709 Rayleigh produces greenish sunsets; LMS primaries are more accurate
@@ -719,6 +722,61 @@ float celestialDisc(vec3 dir, vec3 celestialDir, float size) {
     return smoothstep(1.0 - size, 1.0 - size * 0.3, d);
 }
 
+// Lunar phase mask - creates moon phases using a simple 2D approach
+// phase: 0 = new moon, 0.25 = first quarter, 0.5 = full moon, 0.75 = last quarter, 1 = new moon
+// Returns 0-1 illumination factor
+float lunarPhaseMask(vec3 dir, vec3 moonDir, float phase, float discSize) {
+    vec3 viewDir = normalize(dir);
+    vec3 moonCenter = normalize(moonDir);
+
+    // Calculate angular distance from moon center
+    float centerDot = dot(viewDir, moonCenter);
+    float angularDist = acos(clamp(centerDot, -1.0, 1.0));
+
+    // Outside the disc
+    if (angularDist > discSize) return 0.0;
+
+    // Create coordinate system on moon disc
+    vec3 up = abs(moonCenter.y) < 0.999 ? vec3(0, 1, 0) : vec3(1, 0, 0);
+    vec3 right = normalize(cross(up, moonCenter));
+    vec3 tangentUp = normalize(cross(moonCenter, right));
+
+    // Project view direction onto disc
+    vec3 toPoint = viewDir - moonCenter * centerDot;
+    float x = dot(toPoint, right) / (sin(discSize) + 0.001);
+    float y = dot(toPoint, tangentUp) / (sin(discSize) + 0.001);
+
+    // Distance from center in disc coordinates
+    float r = sqrt(x * x + y * y);
+    if (r > 1.0) return 0.0;
+
+    // Calculate 3D sphere normal (z points toward viewer)
+    float z = sqrt(max(0.0, 1.0 - r * r));
+
+    // Phase angle determines terminator position
+    // phase 0.0: new moon (terminator at center, facing viewer)
+    // phase 0.5: full moon (terminator behind moon, all visible)
+    // phase 1.0: new moon again
+    float phaseAngle = (phase - 0.5) * 2.0 * PI;
+
+    // Terminator moves across the disc based on phase
+    // For crescent, we need to consider the sphere curvature
+    float sunAngle = phaseAngle;
+    vec3 sunLocalDir = vec3(sin(sunAngle), 0.0, cos(sunAngle));
+
+    // Surface normal at this point
+    vec3 normal = normalize(vec3(x, y, z));
+
+    // Lambertian lighting
+    float lighting = dot(normal, sunLocalDir);
+
+    // Smooth terminator
+    float lit = smoothstep(-0.1, 0.1, lighting);
+
+    // Earthshine (subtle light on dark side, reduced for better contrast)
+    return max(lit, 0.05);
+}
+
 vec3 renderAtmosphere(vec3 dir) {
     vec3 normDir = normalize(dir);
 
@@ -845,8 +903,18 @@ vec3 renderAtmosphere(vec3 dir) {
     float sunDisc = celestialDisc(dir, ubo.sunDirection.xyz, SUN_ANGULAR_RADIUS);
     sky += sunLight * sunDisc * 20.0 * result.transmittance * clouds.transmittance;
 
-    float moonDisc = celestialDisc(dir, ubo.moonDirection.xyz, 0.012);
-    sky += ubo.moonColor.rgb * moonDisc * 2.0 * ubo.moonDirection.w *
+    // Moon disc with lunar phase simulation
+    // Use MOON_DISC_SIZE for celestialDisc (creates visible disc)
+    // Use MOON_MASK_RADIUS for lunarPhaseMask (angular radius for phase calculation)
+    float moonDisc = celestialDisc(dir, ubo.moonDirection.xyz, MOON_DISC_SIZE);
+    float moonPhase = ubo.moonColor.a;  // Phase: 0 = new, 0.5 = full, 1 = new
+    float phaseMask = lunarPhaseMask(dir, ubo.moonDirection.xyz, moonPhase, MOON_MASK_RADIUS);
+
+    // Apply phase mask with very high intensity to ensure bloom triggers
+    // Moon surface is highly reflective (albedo ~0.12), but we boost for visual impact
+    // During full moon, this should create a strong bloom halo
+    float moonIntensity = 25.0 * phaseMask;  // Higher than sun (20.0) when fully lit
+    sky += ubo.moonColor.rgb * moonDisc * moonIntensity * ubo.moonDirection.w *
            clamp(result.transmittance, vec3(0.2), vec3(1.0)) * clouds.transmittance;
 
     // Star field blended over the atmospheric tint (also behind clouds)

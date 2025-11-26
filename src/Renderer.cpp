@@ -2310,6 +2310,7 @@ Renderer::LightingParams Renderer::calculateLightingParams(float timeOfDay) cons
     params.sunColor = celestialCalculator.getSunColor(sunPos.altitude);
     params.moonColor = celestialCalculator.getMoonColor(moonPos.altitude, moonPos.illumination);
     params.ambientColor = celestialCalculator.getAmbientColor(sunPos.altitude);
+    params.moonPhase = moonPos.phase;  // Moon phase for lunar cycle simulation
     params.julianDay = dateTime.toJulianDay();
 
     return params;
@@ -2337,7 +2338,7 @@ UniformBufferObject Renderer::buildUniformBufferData(const Camera& camera, const
     ubo.sunDirection = glm::vec4(lighting.sunDir, lighting.sunIntensity);
     ubo.moonDirection = glm::vec4(lighting.moonDir, lighting.moonIntensity);
     ubo.sunColor = glm::vec4(lighting.sunColor, 1.0f);
-    ubo.moonColor = glm::vec4(lighting.moonColor, 1.0f);
+    ubo.moonColor = glm::vec4(lighting.moonColor, lighting.moonPhase);  // Pass moon phase in alpha channel
     ubo.ambientColor = glm::vec4(lighting.ambientColor, 1.0f);
     ubo.cameraPosition = glm::vec4(camera.getPosition(), 1.0f);
 
