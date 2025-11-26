@@ -17,6 +17,7 @@ layout(binding = 0) uniform UniformBufferObject {
     vec4 cameraPosition;
     vec4 pointLightPosition;  // xyz = position, w = intensity
     vec4 pointLightColor;     // rgb = color, a = radius
+    vec4 windDirectionAndSpeed;           // xy = direction, z = speed, w = time
     float timeOfDay;
     float shadowMapSize;
     float debugCascades;
@@ -129,8 +130,17 @@ float sampleCloudDensity(vec3 worldPos) {
     // Cloud shape based on height
     float heightGradient = cloudHeightGradient(heightFraction);
 
-    // Wind offset for animation (use timeOfDay for slow drift)
-    vec3 windOffset = vec3(ubo.timeOfDay * 50.0, 0.0, ubo.timeOfDay * 20.0);
+    // Wind offset for animation - driven by wind system
+    // Extract wind parameters from uniform
+    vec2 windDir = ubo.windDirectionAndSpeed.xy;
+    float windSpeed = ubo.windDirectionAndSpeed.z;
+    float windTime = ubo.windDirectionAndSpeed.w;
+
+    // Scroll clouds in wind direction at wind speed
+    // Use 3D wind offset with vertical component for natural cloud evolution
+    vec3 windOffset = vec3(windDir.x * windSpeed * windTime,
+                           windTime * 0.1,  // Slow vertical evolution
+                           windDir.y * windSpeed * windTime);
 
     // Sample noise at different scales for shape and detail
     vec3 samplePos = worldPos * 0.5 + windOffset;  // Base scale

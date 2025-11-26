@@ -2347,6 +2347,12 @@ UniformBufferObject Renderer::buildUniformBufferData(const Camera& camera, const
     ubo.pointLightPosition = glm::vec4(orbLightPosition, pointLightIntensity);
     ubo.pointLightColor = glm::vec4(1.0f, 0.9f, 0.7f, pointLightRadius);
 
+    // Wind parameters for cloud animation
+    glm::vec2 windDir = windSystem.getWindDirection();
+    float windSpeed = windSystem.getWindSpeed();
+    float windTime = windSystem.getTime();
+    ubo.windDirectionAndSpeed = glm::vec4(windDir.x, windDir.y, windSpeed, windTime);
+
     ubo.timeOfDay = timeOfDay;
     ubo.shadowMapSize = static_cast<float>(SHADOW_MAP_SIZE);
     ubo.debugCascades = showCascadeDebug ? 1.0f : 0.0f;

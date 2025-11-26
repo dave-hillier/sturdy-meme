@@ -36,6 +36,7 @@ struct UniformBufferObject {
     glm::vec4 cameraPosition;
     glm::vec4 pointLightPosition;  // xyz = position, w = intensity
     glm::vec4 pointLightColor;     // rgb = color, a = radius
+    glm::vec4 windDirectionAndSpeed;                  // xy = direction, z = speed, w = time
     float timeOfDay;
     float shadowMapSize;
     float debugCascades;           // 1.0 = show cascade colors
