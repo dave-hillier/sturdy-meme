@@ -39,7 +39,7 @@ struct UniformBufferObject {
     float timeOfDay;
     float shadowMapSize;
     float debugCascades;           // 1.0 = show cascade colors
-    float padding;
+    float julianDay;               // Julian day for sidereal rotation
 };
 
 struct ShadowPushConstants {
@@ -157,6 +157,7 @@ private:
         glm::vec3 sunColor;
         glm::vec3 moonColor;
         glm::vec3 ambientColor;
+        double julianDay;
     };
     LightingParams calculateLightingParams(float timeOfDay) const;
     UniformBufferObject buildUniformBufferData(const Camera& camera, const LightingParams& lighting, float timeOfDay) const;

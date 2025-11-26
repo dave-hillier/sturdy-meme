@@ -20,7 +20,7 @@ layout(binding = 0) uniform UniformBufferObject {
     float timeOfDay;
     float shadowMapSize;
     float debugCascades;
-    float padding;
+    float julianDay;               // Julian day for sidereal rotation
 } ubo;
 
 layout(location = 0) in vec3 rayDir;
@@ -638,6 +638,29 @@ CloudResult marchClouds(vec3 origin, vec3 dir) {
     return result;
 }
 
+// Rotate vector around Y-axis (celestial pole) for sidereal rotation
+vec3 rotateSidereal(vec3 dir, float julianDay) {
+    // Sidereal rotation: 360.9856 degrees per day (one sidereal day = 0.99726958 solar days)
+    // Use J2000.0 (JD 2451545.0) as reference epoch
+    const float J2000 = 2451545.0;
+    const float SIDEREAL_RATE = 360.9856;  // degrees per day
+
+    float daysSinceJ2000 = julianDay - J2000;
+    float rotationAngle = daysSinceJ2000 * SIDEREAL_RATE;
+    float angleRad = radians(rotationAngle);
+
+    // Rotation matrix around Y-axis
+    float c = cos(angleRad);
+    float s = sin(angleRad);
+    mat3 rotation = mat3(
+        c,  0.0, s,
+        0.0, 1.0, 0.0,
+        -s, 0.0, c
+    );
+
+    return rotation * dir;
+}
+
 float starField(vec3 dir) {
     // Stars appear as sun goes below horizon - consistent with twilight transition
     float sunAltitude = ubo.sunDirection.y;
@@ -646,6 +669,10 @@ float starField(vec3 dir) {
 
     dir = normalize(dir);
     if (dir.y < 0.0) return 0.0;
+
+    // Apply sidereal rotation based on Julian day
+    dir = rotateSidereal(dir, ubo.julianDay);
+
     float theta = atan(dir.z, dir.x);
     float phi = asin(clamp(dir.y, -1.0, 1.0));
 
