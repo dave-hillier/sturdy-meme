@@ -191,21 +191,22 @@ float WindSystem::perlinNoise(float x, float y) const {
 }
 
 float WindSystem::sampleWindAtPosition(const glm::vec2& worldPos) const {
-    // Scroll the sampling position based on wind direction and time
-    glm::vec2 scrolledPos = worldPos - windDirection * totalTime * windSpeed;
+    // Primary motion: sine wave traveling in wind direction
+    float windDist = glm::dot(worldPos, windDirection);
+    float wave = std::sin((windDist * noiseScale * 0.5f - totalTime * windSpeed) * 0.8f) * 0.5f + 0.5f;
 
-    // Low-frequency turbulence: sum of |noise| at multiple octaves
+    // Low-frequency turbulence for spatial amplitude variation
+    glm::vec2 scrolledPos = worldPos - windDirection * totalTime * windSpeed * 0.3f;
     float baseFreq = noiseScale * 0.08f;
-
-    // Perlin noise returns [0,1], remap to [-1,1] for abs()
     float n1 = perlinNoise(scrolledPos.x * baseFreq, scrolledPos.y * baseFreq) * 2.0f - 1.0f;
     float n2 = perlinNoise(scrolledPos.x * baseFreq * 2.0f, scrolledPos.y * baseFreq * 2.0f) * 2.0f - 1.0f;
-
-    // Turbulence: absolute value creates the characteristic billowy creases
     float turbulence = std::abs(n1) * 0.7f + std::abs(n2) * 0.3f;
+
+    // Turbulence modulates the wave amplitude (0.5 to 1.0 range)
+    float amplitudeModulation = 0.5f + turbulence * 0.5f;
 
     // Add gust variation (time-based sine wave)
     float gust = (std::sin(totalTime * gustFrequency * 6.28318f) * 0.5f + 0.5f) * gustAmplitude;
 
-    return (turbulence + gust) * windStrength;
+    return (wave * amplitudeModulation + gust) * windStrength;
 }
