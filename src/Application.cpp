@@ -585,8 +585,17 @@ void Application::updatePhysicsToScene() {
         // Skip player object (handled separately)
         if (i == renderer.getPlayerObjectIndex()) continue;
 
-        // Get transform from physics
+        // Get transform from physics (position and rotation only)
         glm::mat4 physicsTransform = physics.getBodyTransform(bodyID);
+
+        // Extract scale from current transform to preserve it
+        glm::vec3 scale;
+        scale.x = glm::length(glm::vec3(sceneObjects[i].transform[0]));
+        scale.y = glm::length(glm::vec3(sceneObjects[i].transform[1]));
+        scale.z = glm::length(glm::vec3(sceneObjects[i].transform[2]));
+
+        // Apply scale to physics transform
+        physicsTransform = glm::scale(physicsTransform, scale);
 
         // Update scene object transform
         sceneObjects[i].transform = physicsTransform;
