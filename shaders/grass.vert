@@ -117,33 +117,29 @@ float perlinNoise(float x, float y) {
     return (res + 1.0) * 0.5;
 }
 
-// Sample wind at a world position with scrolling noise
+// Sample wind using scrolling Perlin noise
+// Multi-octave like: 0.7*sin(x/10) + 0.2*sin(x/5) + 0.1*sin(x/2.5)
+// Perlin noise approximates this - sampled at blade position, scrolls with wind
 float sampleWind(vec2 worldPos) {
     vec2 windDir = wind.windDirectionAndStrength.xy;
     float windStrength = wind.windDirectionAndStrength.z;
     float windSpeed = wind.windDirectionAndStrength.w;
-    float noiseScale = wind.windParams.z;
     float windTime = wind.windParams.w;
     float gustFreq = wind.windParams.x;
     float gustAmp = wind.windParams.y;
 
     // Scroll position in wind direction
-    vec2 scrolledPos = worldPos - windDir * windTime * windSpeed;
+    vec2 scrolledPos = worldPos - windDir * windTime * windSpeed * 0.4;
 
-    // Multi-octave noise for natural variation
-    float noise = 0.0;
-    float amplitude = 1.0;
-    float frequency = noiseScale;
-    float maxAmp = 0.0;
+    // Three octaves: ~10m, ~5m, ~2.5m wavelengths
+    // baseFreq = 0.1 gives ~10m wavelength
+    float baseFreq = 0.1;
+    float n1 = perlinNoise(scrolledPos.x * baseFreq, scrolledPos.y * baseFreq);
+    float n2 = perlinNoise(scrolledPos.x * baseFreq * 2.0, scrolledPos.y * baseFreq * 2.0);
+    float n3 = perlinNoise(scrolledPos.x * baseFreq * 4.0, scrolledPos.y * baseFreq * 4.0);
 
-    for (int i = 0; i < 2; i++) {
-        noise += perlinNoise(scrolledPos.x * frequency, scrolledPos.y * frequency) * amplitude;
-        maxAmp += amplitude;
-        amplitude *= 0.5;
-        frequency *= 2.0;
-    }
-
-    noise /= maxAmp;
+    // Weighted sum dominated by first octave (like 0.7 + 0.2 + 0.1)
+    float noise = n1 * 0.7 + n2 * 0.2 + n3 * 0.1;
 
     // Add time-varying gust
     float gust = (sin(windTime * gustFreq * 6.28318) * 0.5 + 0.5) * gustAmp;
@@ -201,7 +197,7 @@ void main() {
 
     // Wind effect is stronger when wind is perpendicular to blade facing
     // This creates more natural bending
-    float windEffect = (windSample + phaseOffset) * 0.4;
+    float windEffect = (windSample + phaseOffset) * 0.25;
     float windOffset = windEffect * cos(relativeWindAngle);
 
     // Blade folding for short grass

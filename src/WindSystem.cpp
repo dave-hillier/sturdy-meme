@@ -191,28 +191,20 @@ float WindSystem::perlinNoise(float x, float y) const {
 }
 
 float WindSystem::sampleWindAtPosition(const glm::vec2& worldPos) const {
-    // Scroll the sampling position based on wind direction and time
-    glm::vec2 scrolledPos = worldPos - windDirection * totalTime * windSpeed;
+    // Scroll position in wind direction
+    glm::vec2 scrolledPos = worldPos - windDirection * totalTime * windSpeed * 0.4f;
 
-    // Sample multi-octave noise
-    float noise = 0.0f;
-    float amplitude = 1.0f;
-    float frequency = noiseScale;
-    float maxAmplitude = 0.0f;
+    // Three octaves: ~10m, ~5m, ~2.5m wavelengths
+    float baseFreq = 0.1f;
+    float n1 = perlinNoise(scrolledPos.x * baseFreq, scrolledPos.y * baseFreq);
+    float n2 = perlinNoise(scrolledPos.x * baseFreq * 2.0f, scrolledPos.y * baseFreq * 2.0f);
+    float n3 = perlinNoise(scrolledPos.x * baseFreq * 4.0f, scrolledPos.y * baseFreq * 4.0f);
 
-    // Two octaves for natural variation
-    for (int i = 0; i < 2; i++) {
-        noise += perlinNoise(scrolledPos.x * frequency, scrolledPos.y * frequency) * amplitude;
-        maxAmplitude += amplitude;
-        amplitude *= 0.5f;
-        frequency *= 2.0f;
-    }
-
-    // Normalize and apply base strength
-    float normalizedNoise = noise / maxAmplitude;
+    // Weighted sum dominated by first octave (like 0.7 + 0.2 + 0.1)
+    float noise = n1 * 0.7f + n2 * 0.2f + n3 * 0.1f;
 
     // Add gust variation (time-based sine wave)
     float gust = (std::sin(totalTime * gustFrequency * 6.28318f) * 0.5f + 0.5f) * gustAmplitude;
 
-    return (normalizedNoise + gust) * windStrength;
+    return (noise + gust) * windStrength;
 }
