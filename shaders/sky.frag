@@ -770,8 +770,8 @@ float lunarPhaseMask(vec3 dir, vec3 moonDir, float phase, float discSize) {
     // Smooth terminator
     float lit = smoothstep(-0.1, 0.1, lighting);
 
-    // Earthshine (dim light on dark side)
-    return max(lit, 0.1);
+    // Earthshine (subtle light on dark side, reduced for better contrast)
+    return max(lit, 0.05);
 }
 
 vec3 renderAtmosphere(vec3 dir) {
@@ -901,13 +901,14 @@ vec3 renderAtmosphere(vec3 dir) {
     sky += sunLight * sunDisc * 20.0 * result.transmittance * clouds.transmittance;
 
     // Moon disc with lunar phase simulation
-    const float MOON_DISC_SIZE = 0.012;
+    const float MOON_DISC_SIZE = 0.018;  // Larger, more visible moon
     float moonDisc = celestialDisc(dir, ubo.moonDirection.xyz, MOON_DISC_SIZE);
     float moonPhase = ubo.moonColor.a;  // Phase: 0 = new, 0.5 = full, 1 = new
     float phaseMask = lunarPhaseMask(dir, ubo.moonDirection.xyz, moonPhase, MOON_DISC_SIZE);
 
-    // Apply phase mask to create emissive moon with phases
-    sky += ubo.moonColor.rgb * moonDisc * phaseMask * 2.0 * ubo.moonDirection.w *
+    // Apply phase mask with high intensity to trigger bloom
+    // Brightness scaled up to 8x for bloom effect (similar to bright stars)
+    sky += ubo.moonColor.rgb * moonDisc * phaseMask * 8.0 * ubo.moonDirection.w *
            clamp(result.transmittance, vec3(0.2), vec3(1.0)) * clouds.transmittance;
 
     // Star field blended over the atmospheric tint (also behind clouds)
