@@ -246,6 +246,6 @@ private:
     float lightCullRadius = 100.0f;        // Radius from camera for light culling
 
     bool createLightBuffers();
-    void updateLightBuffer(uint32_t currentImage, const glm::vec3& cameraPos);
+    void updateLightBuffer(uint32_t currentImage, const Camera& camera);
     void setupSceneLights();               // Initialize default scene lights
 };

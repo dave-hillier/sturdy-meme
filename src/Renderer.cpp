@@ -1355,9 +1355,10 @@ void Renderer::setupSceneLights() {
     lightManager.addLight(greenLight);
 }
 
-void Renderer::updateLightBuffer(uint32_t currentImage, const glm::vec3& cameraPos) {
+void Renderer::updateLightBuffer(uint32_t currentImage, const Camera& camera) {
     LightBuffer buffer{};
-    lightManager.buildLightBuffer(buffer, cameraPos, lightCullRadius);
+    glm::mat4 viewProj = camera.getProjectionMatrix() * camera.getViewMatrix();
+    lightManager.buildLightBuffer(buffer, camera.getPosition(), camera.getFront(), viewProj, lightCullRadius);
     memcpy(lightBuffersMapped[currentImage], &buffer, sizeof(LightBuffer));
 }
 
@@ -1573,7 +1574,7 @@ void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera& camera) 
     memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
 
     // Update light buffer with camera-based culling
-    updateLightBuffer(currentImage, camera.getPosition());
+    updateLightBuffer(currentImage, camera);
 
     // Calculate sun screen position (pure) and update post-process (state mutation)
     glm::vec2 sunScreenPos = calculateSunScreenPos(camera, lighting.sunDir);
