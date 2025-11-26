@@ -1,0 +1,134 @@
+#version 450
+
+// CBT Sum Reduction Compute Shader
+// Rebuilds the sum reduction tree after subdivision updates
+// This shader processes the bitfield and builds progressive sums
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(std430, binding = 0) buffer CBTBuffer {
+    uint cbtData[];
+};
+
+layout(push_constant) uniform PushConstants {
+    uint passIndex;     // Which pass we're running (0 = first/bitfield, 1+ = upper levels)
+    uint maxDepth;
+    uint numWorkgroups; // Total workgroups for this pass
+    uint padding;
+} pc;
+
+shared uint localSums[256];
+
+// Bitfield starts at offset 16
+const uint BITFIELD_OFFSET = 16u;
+
+// Sum reduction tree layout:
+// Level 0 (index 0): root - total leaf count
+// Level 1 (indices 1-2): 2 values
+// Level 2 (indices 3-6): 4 values
+// etc.
+
+uint getSumTreeOffset(uint level) {
+    // Sum tree is stored before the bitfield
+    // Level 0 at index 0, level 1 at indices 1-2, etc.
+    return (1u << level) - 1u;
+}
+
+void main() {
+    uint threadId = gl_LocalInvocationIndex;
+    uint groupId = gl_WorkGroupID.x;
+    uint globalId = gl_GlobalInvocationID.x;
+
+    if (pc.passIndex == 0u) {
+        // First pass: count set bits in the bitfield
+        // Each thread processes one 32-bit word
+
+        uint wordIndex = globalId;
+
+        // Check if we're reading existing leaf nodes
+        // In the bitfield, a bit is set if that node exists
+        // A leaf is a node with no children set
+
+        // For simplicity in pass 0, we count all set bits
+        // Then refine in subsequent passes
+
+        uint bits = 0u;
+        if (wordIndex < ((1u << pc.maxDepth) / 32u)) {
+            bits = cbtData[BITFIELD_OFFSET + wordIndex];
+        }
+
+        // Count set bits
+        uint count = bitCount(bits);
+
+        // Store in shared memory
+        localSums[threadId] = count;
+        barrier();
+
+        // Parallel reduction within workgroup
+        for (uint stride = 128u; stride > 0u; stride >>= 1u) {
+            if (threadId < stride) {
+                localSums[threadId] += localSums[threadId + stride];
+            }
+            barrier();
+        }
+
+        // Thread 0 writes result for this workgroup
+        if (threadId == 0u) {
+            // Write to intermediate storage (level based on maxDepth)
+            // For now, use a simple scheme where each workgroup writes its sum
+            uint outputIdx = groupId;
+            if (pc.numWorkgroups <= 256u) {
+                // Small enough to store directly
+                cbtData[1u + outputIdx] = localSums[0];
+            } else {
+                // Store in intermediate buffer region
+                cbtData[BITFIELD_OFFSET - 256u + outputIdx] = localSums[0];
+            }
+        }
+
+    } else {
+        // Subsequent passes: reduce the intermediate sums
+        // Each thread reads two values and sums them
+
+        uint inputOffset = (pc.passIndex == 1u) ? 1u : getSumTreeOffset(pc.passIndex);
+        uint outputOffset = getSumTreeOffset(pc.passIndex - 1u);
+
+        uint inputIdx = globalId * 2u;
+
+        uint left = 0u;
+        uint right = 0u;
+
+        // Read two children
+        uint maxInputIdx = (1u << (pc.maxDepth - pc.passIndex + 1u));
+        if (inputIdx < maxInputIdx) {
+            left = cbtData[inputOffset + inputIdx];
+        }
+        if (inputIdx + 1u < maxInputIdx) {
+            right = cbtData[inputOffset + inputIdx + 1u];
+        }
+
+        uint sum = left + right;
+
+        // Store in shared memory for reduction
+        localSums[threadId] = sum;
+        barrier();
+
+        // Parallel reduction
+        for (uint stride = 128u; stride > 0u; stride >>= 1u) {
+            if (threadId < stride) {
+                localSums[threadId] += localSums[threadId + stride];
+            }
+            barrier();
+        }
+
+        // Write output
+        if (threadId == 0u) {
+            // For the final pass, write to root
+            if (pc.passIndex >= pc.maxDepth - 1u) {
+                cbtData[0] = localSums[0];
+            } else {
+                cbtData[outputOffset + groupId] = localSums[0];
+            }
+        }
+    }
+}

@@ -165,8 +165,8 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
         return false;
     }
 
-    // Ground - rough, non-metallic
-    sceneObjects.push_back({glm::mat4(1.0f), &groundMesh, &groundTexture, 0.8f, 0.0f});
+    // Ground - now replaced by CBT/LEB terrain system
+    // sceneObjects.push_back({glm::mat4(1.0f), &groundMesh, &groundTexture, 0.8f, 0.0f});
 
     // Wooden crate - slightly shiny, non-metallic
     sceneObjects.push_back({glm::translate(glm::mat4(1.0f), glm::vec3(2.0f, 0.5f, 0.0f)), &cubeMesh, &crateTexture, 0.4f, 0.0f});
@@ -250,6 +250,40 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     postProcessSystem.setFroxelParams(froxelSystem.getVolumetricFarPlane(), FroxelSystem::DEPTH_DISTRIBUTION);
     postProcessSystem.setFroxelEnabled(true);
 
+    // Initialize CBT/LEB terrain system
+    TerrainCBT::InitInfo terrainInfo{};
+    terrainInfo.device = device;
+    terrainInfo.physicalDevice = physicalDevice;
+    terrainInfo.allocator = allocator;
+    terrainInfo.renderPass = postProcessSystem.getHDRRenderPass();
+    terrainInfo.shadowRenderPass = shadowRenderPass;
+    terrainInfo.descriptorPool = descriptorPool;
+    terrainInfo.extent = swapchainExtent;
+    terrainInfo.shadowMapSize = SHADOW_MAP_SIZE;
+    terrainInfo.shaderPath = resourcePath + "/shaders";
+    terrainInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+    terrainInfo.commandPool = commandPool;
+    terrainInfo.graphicsQueue = graphicsQueue;
+
+    if (!terrainCBT.init(terrainInfo)) {
+        SDL_Log("Failed to initialize TerrainCBT");
+        return false;
+    }
+
+    // Configure terrain
+    terrainCBT.setTerrainSize(100.0f);  // 100 unit terrain
+    terrainCBT.setHeightScale(10.0f);   // Max height variation
+    terrainCBT.setMaxDepth(8);          // 2^8 = 256 max triangles per base
+
+    // Load terrain heightmap (Milestone 2)
+    std::string heightmapPath = resourcePath + "/textures/terrain/heightmap.jpg";
+    if (!terrainCBT.loadHeightMap(heightmapPath)) {
+        SDL_Log("Failed to load terrain heightmap, using flat terrain");
+    }
+
+    // Update terrain descriptor sets with shared resources
+    terrainCBT.updateDescriptorSets(uniformBuffers, shadowImageView, shadowSampler);
+
     if (!createSyncObjects()) return false;
 
     return true;
@@ -293,6 +327,7 @@ void Renderer::shutdown() {
         windSystem.destroy(device, allocator);
         froxelSystem.destroy(device, allocator);
         postProcessSystem.destroy(device, allocator);
+        terrainCBT.destroy();
 
         vkDestroyPipeline(device, skyPipeline, nullptr);
         vkDestroyPipeline(device, graphicsPipeline, nullptr);
@@ -1602,6 +1637,12 @@ void Renderer::render(const Camera& camera) {
     grassSystem.updateUniforms(currentFrame, camera.getPosition(), viewProj);
     grassSystem.recordResetAndCompute(commandBuffers[currentFrame], currentFrame, grassTime);
 
+    // Run terrain CBT compute pass (dispatcher + optional subdivision)
+    terrainCBT.recordComputePass(commandBuffers[currentFrame], currentFrame,
+                                  viewProj, camera.getPosition(),
+                                  static_cast<float>(swapchainExtent.width),
+                                  static_cast<float>(swapchainExtent.height));
+
     // Shadow pass - render all cascades (skip when the sun is effectively below the horizon)
     if (lastSunIntensity > 0.001f) {
         // Render each cascade to its own framebuffer/layer
@@ -1642,6 +1683,10 @@ void Renderer::render(const Camera& camera) {
 
             // Draw grass shadows (with dithering for soft shadows)
             grassSystem.recordShadowDraw(commandBuffers[currentFrame], currentFrame, grassTime, cascade);
+
+            // Draw terrain shadows
+            terrainCBT.recordShadowDraw(commandBuffers[currentFrame], currentFrame,
+                                        cascadeMatrices[cascade], cascade);
 
             vkCmdEndRenderPass(commandBuffers[currentFrame]);
         }
@@ -1719,6 +1764,24 @@ void Renderer::render(const Camera& camera) {
 
         vkCmdDrawIndexed(commandBuffers[currentFrame], obj.mesh->getIndexCount(), 1, 0, 0, 0);
     }
+
+    // Draw CBT/LEB terrain (replaces the disc ground mesh)
+    // Set viewport and scissor for terrain
+    VkViewport terrainViewport{};
+    terrainViewport.x = 0.0f;
+    terrainViewport.y = 0.0f;
+    terrainViewport.width = static_cast<float>(swapchainExtent.width);
+    terrainViewport.height = static_cast<float>(swapchainExtent.height);
+    terrainViewport.minDepth = 0.0f;
+    terrainViewport.maxDepth = 1.0f;
+    vkCmdSetViewport(commandBuffers[currentFrame], 0, 1, &terrainViewport);
+
+    VkRect2D terrainScissor{};
+    terrainScissor.offset = {0, 0};
+    terrainScissor.extent = swapchainExtent;
+    vkCmdSetScissor(commandBuffers[currentFrame], 0, 1, &terrainScissor);
+
+    terrainCBT.recordDraw(commandBuffers[currentFrame], currentFrame, false);
 
     // Draw grass
     grassSystem.recordDraw(commandBuffers[currentFrame], currentFrame, grassTime);

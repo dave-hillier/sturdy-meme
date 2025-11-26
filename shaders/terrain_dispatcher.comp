@@ -1,0 +1,42 @@
+#version 450
+
+// CBT Dispatcher Compute Shader
+// Reads leaf count from CBT root and sets indirect dispatch/draw arguments
+
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+layout(std430, binding = 0) buffer CBTBuffer {
+    uint cbtData[];
+};
+
+layout(std430, binding = 1) buffer IndirectDispatch {
+    uint dispatchX;
+    uint dispatchY;
+    uint dispatchZ;
+};
+
+layout(std430, binding = 2) buffer IndirectDraw {
+    uint vertexCount;
+    uint instanceCount;
+    uint firstVertex;
+    uint firstInstance;
+};
+
+void main() {
+    // Read leaf count from the root of the sum reduction tree
+    uint leafCount = cbtData[0];
+
+    // Clamp to reasonable bounds
+    leafCount = clamp(leafCount, 2u, 100000u);
+
+    // Set subdivision dispatch args (one thread per leaf)
+    dispatchX = (leafCount + 63u) / 64u;
+    dispatchY = 1u;
+    dispatchZ = 1u;
+
+    // Set draw args (3 vertices per triangle)
+    vertexCount = leafCount * 3u;
+    instanceCount = 1u;
+    firstVertex = 0u;
+    firstInstance = 0u;
+}

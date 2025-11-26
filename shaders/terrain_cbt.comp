@@ -1,0 +1,356 @@
+#version 450
+
+// CBT/LEB Terrain Subdivision Compute Shader
+// Implements the core subdivision update pass for Concurrent Binary Trees
+// Based on the HPG 2020 paper by Jonathan Dupuy (Unity Labs)
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+// CBT Data buffer layout:
+// [0]: maxDepth (uint32)
+// [1]: reserved
+// [2..N]: sum reduction tree + bitfield
+layout(std430, binding = 0) buffer CBTBuffer {
+    uint cbtData[];
+};
+
+layout(std430, binding = 1) buffer IndirectDispatch {
+    uint dispatchX;
+    uint dispatchY;
+    uint dispatchZ;
+};
+
+layout(std430, binding = 2) buffer IndirectDraw {
+    uint vertexCount;
+    uint instanceCount;
+    uint firstVertex;
+    uint firstInstance;
+};
+
+layout(binding = 3) uniform sampler2D heightMap;
+
+layout(push_constant) uniform PushConstants {
+    mat4 viewProj;
+    vec4 cameraPos;
+    vec4 terrainParams;  // x = terrainSize, y = heightScale, z = splitThreshold, w = mergeThreshold
+    vec4 screenParams;   // x = width, y = height, z = maxDepth, w = unused
+} pc;
+
+// ============== CBT Library Functions ==============
+
+uint cbt_maxDepth() {
+    return uint(pc.screenParams.z);
+}
+
+// Get the number of bits required to store values at a given level
+uint cbt_bitsPerNode(uint depth) {
+    // At depth d, each node stores values 0 to 2^(maxDepth-d)
+    // Level 0 (root): stores total leaf count
+    // Level maxDepth-1: stores 0 or 1 (is leaf or not)
+    return cbt_maxDepth() - depth + 1;
+}
+
+// Calculate the bit index for a heap index's leaf status in the bitfield
+uint cbt_heapIndexToBitIndex(uint heapIndex) {
+    // The bitfield stores leaf status for all possible nodes
+    // Heap indices start at 1, so we subtract 1 for 0-based indexing
+    return heapIndex - 1;
+}
+
+// Get the word and bit offset for a given bit index
+void cbt_bitIndexToWordAndBit(uint bitIndex, out uint wordIndex, out uint bitOffset) {
+    wordIndex = bitIndex / 32u;
+    bitOffset = bitIndex % 32u;
+}
+
+// Get the start offset of the bitfield in the cbtData buffer
+uint cbt_bitfieldOffset() {
+    // The bitfield starts after the sum reduction tree
+    // For simplicity, we'll place the bitfield starting at index 16
+    // (leaving room for sum reduction levels 0-3, each taking ~1-8 uints)
+    return 16u;
+}
+
+// Check if a node is a leaf by reading the bitfield
+bool cbt_isLeaf(uint heapIndex) {
+    uint maxD = cbt_maxDepth();
+    uint depth = findMSB(heapIndex);
+
+    if (depth >= maxD) return true;  // At max depth, always a leaf
+
+    // A node is a leaf if its bit is set in the bitfield AND
+    // neither of its children have their bits set
+    uint leftChild = heapIndex * 2u;
+    uint rightChild = heapIndex * 2u + 1u;
+
+    // For simplicity in this initial version:
+    // Check if this node's descendants exist in the tree
+    // Read from sum reduction - a node is a leaf if it contributes 1 to the count
+
+    // Alternative: Check both children bits
+    uint bitOffset = cbt_bitfieldOffset();
+    uint wordIdx, bitPos;
+
+    // Check if left child bit is set
+    cbt_bitIndexToWordAndBit(cbt_heapIndexToBitIndex(leftChild), wordIdx, bitPos);
+    bool leftExists = (cbtData[bitOffset + wordIdx] & (1u << bitPos)) != 0u;
+
+    cbt_bitIndexToWordAndBit(cbt_heapIndexToBitIndex(rightChild), wordIdx, bitPos);
+    bool rightExists = (cbtData[bitOffset + wordIdx] & (1u << bitPos)) != 0u;
+
+    return !leftExists && !rightExists;
+}
+
+// Set a node as existing (has been split)
+void cbt_setBit(uint heapIndex, bool value) {
+    uint bitOffset = cbt_bitfieldOffset();
+    uint wordIdx, bitPos;
+    cbt_bitIndexToWordAndBit(cbt_heapIndexToBitIndex(heapIndex), wordIdx, bitPos);
+
+    if (value) {
+        atomicOr(cbtData[bitOffset + wordIdx], 1u << bitPos);
+    } else {
+        atomicAnd(cbtData[bitOffset + wordIdx], ~(1u << bitPos));
+    }
+}
+
+bool cbt_getBit(uint heapIndex) {
+    uint bitOffset = cbt_bitfieldOffset();
+    uint wordIdx, bitPos;
+    cbt_bitIndexToWordAndBit(cbt_heapIndexToBitIndex(heapIndex), wordIdx, bitPos);
+    return (cbtData[bitOffset + wordIdx] & (1u << bitPos)) != 0u;
+}
+
+// Get leaf count from root of sum reduction tree
+uint cbt_leafCount() {
+    return cbtData[0];
+}
+
+// Tree navigation
+uint cbt_parent(uint heapIndex) {
+    return heapIndex / 2u;
+}
+
+uint cbt_sibling(uint heapIndex) {
+    return heapIndex ^ 1u;
+}
+
+uint cbt_leftChild(uint heapIndex) {
+    return heapIndex * 2u;
+}
+
+uint cbt_rightChild(uint heapIndex) {
+    return heapIndex * 2u + 1u;
+}
+
+uint cbt_depth(uint heapIndex) {
+    return findMSB(heapIndex);
+}
+
+// Map leaf index (0 to leafCount-1) to heap index
+// This requires traversing the sum reduction tree
+uint cbt_leafIndexToHeapIndex(uint leafIndex) {
+    uint heapIndex = 1u;
+    uint maxD = cbt_maxDepth();
+
+    // Binary search down the tree using sum reduction values
+    // For now, use a simpler linear approach with the bitfield
+
+    // Simple approach: enumerate leaves
+    uint count = 0u;
+    uint bitOffset = cbt_bitfieldOffset();
+
+    // Start from heap index 1, traverse in order
+    // This is O(n) but simple - can optimize later
+    for (uint h = 1u; h < (1u << maxD); h++) {
+        if (cbt_getBit(h) && cbt_isLeaf(h)) {
+            if (count == leafIndex) {
+                return h;
+            }
+            count++;
+        }
+    }
+
+    // Fallback
+    return 1u;
+}
+
+// ============== LEB Library Functions ==============
+
+struct LEBTriangle {
+    vec2 v0, v1, v2;
+};
+
+// Decode a triangle from its heap index
+// The two base triangles form a unit square:
+// Triangle 1 (heapIndex starting with MSB=0): vertices (0,0), (1,0), (0,1)
+// Triangle 2 (heapIndex starting with MSB=1): vertices (1,1), (0,1), (1,0)
+LEBTriangle leb_decodeTriangle(uint heapIndex) {
+    uint depth = cbt_depth(heapIndex);
+
+    // Determine base triangle
+    // The MSB tells us which base triangle (after the leading 1 bit)
+    uint baseBit = (heapIndex >> (depth - 1)) & 1u;
+
+    vec2 v0, v1, v2;
+
+    if (depth == 1) {
+        // Base triangles
+        if (heapIndex == 1u) {
+            v0 = vec2(0.0, 0.0);
+            v1 = vec2(1.0, 0.0);
+            v2 = vec2(0.0, 1.0);
+        } else {
+            v0 = vec2(1.0, 1.0);
+            v1 = vec2(0.0, 1.0);
+            v2 = vec2(1.0, 0.0);
+        }
+    } else {
+        // Start with base triangle and subdivide
+        if (baseBit == 0u) {
+            v0 = vec2(0.0, 0.0);
+            v1 = vec2(1.0, 0.0);
+            v2 = vec2(0.0, 1.0);
+        } else {
+            v0 = vec2(1.0, 1.0);
+            v1 = vec2(0.0, 1.0);
+            v2 = vec2(1.0, 0.0);
+        }
+
+        // Trace subdivision path
+        for (uint d = 1u; d < depth; d++) {
+            uint bit = (heapIndex >> (depth - 1u - d)) & 1u;
+
+            // Bisect along edge v1-v2 (longest edge in LEB)
+            vec2 midpoint = (v1 + v2) * 0.5;
+
+            if (bit == 0u) {
+                // Left child: v0 stays, v1 becomes midpoint, v2 stays
+                v2 = v1;
+                v1 = midpoint;
+            } else {
+                // Right child: v0 stays, v1 stays, v2 becomes midpoint
+                v1 = v2;
+                v2 = midpoint;
+            }
+
+            // Rotate to maintain winding order
+            vec2 temp = v0;
+            v0 = v1;
+            v1 = v2;
+            v2 = temp;
+        }
+    }
+
+    return LEBTriangle(v0, v1, v2);
+}
+
+// Find the edge neighbor across the longest edge (v1-v2)
+uint leb_edgeNeighbor(uint heapIndex) {
+    uint depth = cbt_depth(heapIndex);
+    if (depth <= 1u) return 0u;  // Base triangles neighbor each other
+
+    // The neighbor shares the same parent's sibling
+    uint parent = cbt_parent(heapIndex);
+    uint sibling = cbt_sibling(parent);
+
+    // Navigate down to the same child position in the sibling subtree
+    uint childBit = heapIndex & 1u;
+    return cbt_leftChild(sibling) + (1u - childBit);  // Opposite child
+}
+
+// ============== LOD Functions ==============
+
+float computeLongestEdgeScreenLength(vec3 p0, vec3 p1, vec3 p2) {
+    mat4 viewProj = pc.viewProj;
+    vec2 screenSize = pc.screenParams.xy;
+
+    vec4 c0 = viewProj * vec4(p0, 1.0);
+    vec4 c1 = viewProj * vec4(p1, 1.0);
+    vec4 c2 = viewProj * vec4(p2, 1.0);
+
+    // Handle behind-camera cases
+    if (c0.w <= 0.0 || c1.w <= 0.0 || c2.w <= 0.0) {
+        return 10000.0;  // Large value to trigger split
+    }
+
+    vec2 ndc0 = c0.xy / c0.w;
+    vec2 ndc1 = c1.xy / c1.w;
+    vec2 ndc2 = c2.xy / c2.w;
+
+    vec2 s0 = (ndc0 * 0.5 + 0.5) * screenSize;
+    vec2 s1 = (ndc1 * 0.5 + 0.5) * screenSize;
+    vec2 s2 = (ndc2 * 0.5 + 0.5) * screenSize;
+
+    float e01 = length(s1 - s0);
+    float e12 = length(s2 - s1);
+    float e20 = length(s0 - s2);
+
+    return max(max(e01, e12), e20);
+}
+
+float sampleHeight(vec2 uv) {
+    return texture(heightMap, uv).r * pc.terrainParams.y;
+}
+
+vec3 uvToWorldPos(vec2 uv) {
+    float terrainSize = pc.terrainParams.x;
+    float height = sampleHeight(uv);
+    // Center terrain on origin
+    return vec3((uv.x - 0.5) * terrainSize, height, (uv.y - 0.5) * terrainSize);
+}
+
+// ============== Main ==============
+
+void main() {
+    uint leafIndex = gl_GlobalInvocationID.x;
+    uint totalLeaves = cbt_leafCount();
+
+    if (leafIndex >= totalLeaves) return;
+
+    // Map leaf index to heap index
+    uint heapIndex = cbt_leafIndexToHeapIndex(leafIndex);
+
+    // Decode triangle
+    LEBTriangle tri = leb_decodeTriangle(heapIndex);
+
+    // Get world positions
+    vec3 p0 = uvToWorldPos(tri.v0);
+    vec3 p1 = uvToWorldPos(tri.v1);
+    vec3 p2 = uvToWorldPos(tri.v2);
+
+    // Compute screen-space edge length
+    float edgeLength = computeLongestEdgeScreenLength(p0, p1, p2);
+
+    // LOD thresholds
+    float splitThreshold = pc.terrainParams.z;
+    float mergeThreshold = pc.terrainParams.w;
+    uint maxDepth = uint(pc.screenParams.z);
+    uint depth = cbt_depth(heapIndex);
+
+    // LOD decision
+    if (edgeLength > splitThreshold && depth < maxDepth) {
+        // Split: create children
+        uint leftChild = cbt_leftChild(heapIndex);
+        uint rightChild = cbt_rightChild(heapIndex);
+        cbt_setBit(leftChild, true);
+        cbt_setBit(rightChild, true);
+
+        // Also split edge neighbor to maintain conforming mesh
+        uint neighbor = leb_edgeNeighbor(heapIndex);
+        if (neighbor != 0u && cbt_getBit(neighbor)) {
+            uint nLeft = cbt_leftChild(neighbor);
+            uint nRight = cbt_rightChild(neighbor);
+            cbt_setBit(nLeft, true);
+            cbt_setBit(nRight, true);
+        }
+    } else if (edgeLength < mergeThreshold && depth > 1u) {
+        // Merge: check if we can merge (both siblings must be leaves)
+        uint sibling = cbt_sibling(heapIndex);
+        if (cbt_getBit(sibling) && cbt_isLeaf(sibling)) {
+            // Remove both children bits (current node and sibling)
+            cbt_setBit(heapIndex, false);
+            cbt_setBit(sibling, false);
+        }
+    }
+}

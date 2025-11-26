@@ -16,6 +16,7 @@
 #include "WindSystem.h"
 #include "PostProcessSystem.h"
 #include "FroxelSystem.h"
+#include "TerrainCBT.h"
 
 static constexpr uint32_t NUM_SHADOW_CASCADES = 4;
 
@@ -153,6 +154,7 @@ private:
     WindSystem windSystem;
     PostProcessSystem postProcessSystem;
     FroxelSystem froxelSystem;
+    TerrainCBT terrainCBT;
 
     std::vector<VkFramebuffer> framebuffers;
     VkCommandPool commandPool = VK_NULL_HANDLE;

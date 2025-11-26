@@ -26,6 +26,7 @@ set(SOURCES
     src/PostProcessSystem.cpp
     src/FroxelSystem.cpp
     src/Player.cpp
+    src/TerrainCBT.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
@@ -74,6 +75,13 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.frag.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_update.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_integrate.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain.vert.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain.frag.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain_shadow.vert.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain_shadow.frag.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain_dispatcher.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain_cbt.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain_sum_reduction.comp.spv
 )
 
 set_source_files_properties(${RESOURCE_FILES} PROPERTIES
@@ -186,6 +194,48 @@ if(SHADER_COMPILE_CMD)
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_integrate.comp
         COMMENT "Compiling froxel integration compute shader"
     )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain.vert.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain.vert.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain.vert
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain.vert
+        COMMENT "Compiling terrain vertex shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain.frag.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain.frag.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain.frag
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain.frag
+        COMMENT "Compiling terrain fragment shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain_shadow.vert.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain_shadow.vert.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain_shadow.vert
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain_shadow.vert
+        COMMENT "Compiling terrain shadow vertex shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain_shadow.frag.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain_shadow.frag.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain_shadow.frag
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain_shadow.frag
+        COMMENT "Compiling terrain shadow fragment shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain_dispatcher.comp.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain_dispatcher.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain_dispatcher.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain_dispatcher.comp
+        COMMENT "Compiling terrain dispatcher compute shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain_cbt.comp.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain_cbt.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain_cbt.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain_cbt.comp
+        COMMENT "Compiling terrain CBT subdivision compute shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain_sum_reduction.comp.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain_sum_reduction.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain_sum_reduction.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain_sum_reduction.comp
+        COMMENT "Compiling terrain sum reduction compute shader"
+    )
     add_custom_target(shaders DEPENDS
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.frag.spv
@@ -202,6 +252,13 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.frag.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_update.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_integrate.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain.vert.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain.frag.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain_shadow.vert.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain_shadow.frag.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain_dispatcher.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain_cbt.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain_sum_reduction.comp.spv
     )
     add_dependencies(${PROJECT_NAME} shaders)
 else()
