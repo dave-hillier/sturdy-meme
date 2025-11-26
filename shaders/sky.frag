@@ -651,12 +651,28 @@ float starField(vec3 dir) {
 
     vec2 gridCoord = vec2(theta * 200.0, phi * 200.0);
     vec2 cell = floor(gridCoord);
+    vec2 cellFrac = fract(gridCoord);
 
     vec3 p = vec3(cell, 0.0);
     float h = hash(p);
 
-    float star = step(0.992, h);
-    float brightness = hash(p + vec3(1.0)) * 0.5 + 0.5;
+    // Only generate star if hash is high enough
+    if (h < 0.992) return 0.0;
+
+    // Get random position within the cell for this star
+    vec2 starPos = vec2(hash(p + vec3(1.0)), hash(p + vec3(2.0)));
+
+    // Calculate distance from current pixel to star center
+    vec2 delta = cellFrac - starPos;
+    float dist = length(delta);
+
+    // Create tiny, intense point - very sharp falloff
+    // Stars should be sub-pixel sized to create intense dots
+    float starSize = 0.008; // Very small angular size
+    float star = smoothstep(starSize, 0.0, dist);
+
+    // High intensity to trigger bloom (3-8x brighter)
+    float brightness = (hash(p + vec3(3.0)) * 0.6 + 0.4) * 5.0;
 
     return star * brightness * nightFactor;
 }
