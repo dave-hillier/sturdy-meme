@@ -57,6 +57,7 @@ layout(binding = 3) uniform LeafUniforms {
     vec4 playerVelocity;        // xyz = velocity, w = speed
     vec4 spawnRegionMin;
     vec4 spawnRegionMax;
+    vec4 confettiSpawnPos;      // xyz = spawn position, w = cone angle
     float groundLevel;
     float deltaTime;
     float time;
@@ -66,7 +67,9 @@ layout(binding = 3) uniform LeafUniforms {
     float gustThreshold;
     float targetFallingCount;
     float targetGroundedCount;
-    float padding[3];
+    float confettiSpawnCount;
+    float confettiVelocity;
+    float padding[1];
 } uniforms;
 
 // Wind uniforms
@@ -296,6 +299,62 @@ void spawnGroundedLeaf(uint idx) {
     outputParticles[idx].flags = FLAG_ACTIVE;
 }
 
+// Spawn confetti (small colorful particles in an upward cone)
+void spawnConfettiLeaf(uint idx) {
+    float seed = float(idx) * 0.003 + uniforms.time * 0.2;
+    vec3 rnd = hash3(vec3(seed, seed * 1.3, seed * 2.7));
+    vec3 rnd2 = hash3(vec3(seed * 2.1, seed * 3.3, seed * 1.9));
+
+    // Spawn from confetti spawn position
+    vec3 pos = uniforms.confettiSpawnPos.xyz;
+
+    // Randomize spawn position slightly (small radius around spawn point)
+    float spawnRadius = 0.3;
+    pos.x += (rnd.x - 0.5) * spawnRadius;
+    pos.z += (rnd.y - 0.5) * spawnRadius;
+
+    // Initial velocity in upward cone
+    float coneAngle = uniforms.confettiSpawnPos.w;  // Cone angle from uniforms
+
+    // Generate random direction within cone
+    float theta = rnd2.x * 6.28318;  // Random angle around Y axis
+    float phi = rnd2.y * coneAngle;  // Random angle from vertical (cone spread)
+
+    // Convert spherical to cartesian (upward cone)
+    vec3 direction;
+    direction.y = cos(phi);  // Vertical component (always positive = upward)
+    float r = sin(phi);
+    direction.x = r * cos(theta);
+    direction.z = r * sin(theta);
+
+    vec3 velocity = direction * uniforms.confettiVelocity;
+
+    // Random initial orientation
+    vec3 axis = normalize(vec3(rnd.x - 0.5, rnd.y - 0.5, rnd.z - 0.5));
+    float angle = rnd2.z * 6.28318;
+    vec4 orientation = quatFromAxisAngle(axis, angle);
+
+    // High angular velocity for spinning confetti
+    vec3 angularVel = (rnd2 - 0.5) * 12.0;  // Fast spinning
+
+    // Small size for confetti (3cm = 0.03m)
+    float size = 0.03;
+
+    // Random leaf type for colorful confetti
+    uint leafType = uint(rnd.z * 4.0) % 4u;
+
+    outputParticles[idx].position = pos;
+    outputParticles[idx].state = STATE_FALLING;
+    outputParticles[idx].velocity = velocity;
+    outputParticles[idx].groundTime = 0.0;
+    outputParticles[idx].orientation = orientation;
+    outputParticles[idx].angularVelocity = angularVel;
+    outputParticles[idx].size = size;
+    outputParticles[idx].hash = hash(float(idx) + uniforms.time * 2.0);
+    outputParticles[idx].leafType = leafType;
+    outputParticles[idx].flags = FLAG_ACTIVE;
+}
+
 void main() {
     uint idx = gl_GlobalInvocationID.x;
     if (idx >= MAX_PARTICLES) return;
@@ -313,6 +372,7 @@ void main() {
     // Determine target counts
     uint targetFalling = uint(uniforms.targetFallingCount);
     uint targetGrounded = uint(uniforms.targetGroundedCount);
+    uint confettiCount = uint(uniforms.confettiSpawnCount);
     uint totalTarget = targetFalling + targetGrounded;
 
     // Only process particles up to total target
@@ -325,20 +385,30 @@ void main() {
     // Read previous particle state
     LeafParticle p = inputParticles[idx];
 
+    // Check if this particle should be confetti
+    bool shouldBeConfetti = (idx < confettiCount) && (confettiCount > 0);
+
     // Determine if this slot should be falling or grounded
     bool shouldBeFalling = idx < targetFalling;
 
     // Check if particle needs respawn
     bool needsRespawn = (p.flags & FLAG_ACTIVE) == 0 || p.state == STATE_INACTIVE;
 
-    // Also respawn if too far from camera
+    // Force respawn for confetti particles
+    if (shouldBeConfetti) {
+        needsRespawn = true;
+    }
+
+    // Also respawn if too far from camera (but not for confetti)
     float distToCamera = length(p.position - cameraPos);
-    if (distToCamera > uniforms.maxDrawDistance * 1.5) {
+    if (!shouldBeConfetti && distToCamera > uniforms.maxDrawDistance * 1.5) {
         needsRespawn = true;
     }
 
     if (needsRespawn) {
-        if (shouldBeFalling) {
+        if (shouldBeConfetti) {
+            spawnConfettiLeaf(idx);
+        } else if (shouldBeFalling) {
             spawnFallingLeaf(idx);
         } else {
             spawnGroundedLeaf(idx);

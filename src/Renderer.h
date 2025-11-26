@@ -89,6 +89,9 @@ public:
     // Leaf control
     void setLeafIntensity(float intensity) { leafSystem.setIntensity(intensity); }
     float getLeafIntensity() const { return leafSystem.getIntensity(); }
+    void spawnConfetti(const glm::vec3& position, float velocity = 8.0f, float count = 100.0f, float coneAngle = 0.5f) {
+        leafSystem.spawnConfetti(position, velocity, count, coneAngle);
+    }
 
     // Player rendering
     void updatePlayerTransform(const glm::mat4& transform);
