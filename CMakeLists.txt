@@ -16,6 +16,7 @@ set(SOURCES
     src/main.cpp
     src/Application.cpp
     src/Renderer.cpp
+    src/SceneBuilder.cpp
     src/Camera.cpp
     src/Mesh.cpp
     src/Texture.cpp

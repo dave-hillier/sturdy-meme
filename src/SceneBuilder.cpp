@@ -1,0 +1,146 @@
+#include "SceneBuilder.h"
+#include <SDL3/SDL_log.h>
+
+bool SceneBuilder::init(const InitInfo& info) {
+    if (!createMeshes(info)) return false;
+    if (!loadTextures(info)) return false;
+    createSceneObjects();
+    return true;
+}
+
+void SceneBuilder::destroy(VmaAllocator allocator, VkDevice device) {
+    crateTexture.destroy(allocator, device);
+    crateNormalMap.destroy(allocator, device);
+    groundTexture.destroy(allocator, device);
+    groundNormalMap.destroy(allocator, device);
+    metalTexture.destroy(allocator, device);
+    metalNormalMap.destroy(allocator, device);
+
+    cubeMesh.destroy(allocator);
+    sphereMesh.destroy(allocator);
+    capsuleMesh.destroy(allocator);
+    groundMesh.destroy(allocator);
+
+    sceneObjects.clear();
+}
+
+bool SceneBuilder::createMeshes(const InitInfo& info) {
+    // Create disc ground mesh with radius 50, 64 segments, UV tiling of 10x
+    groundMesh.createDisc(50.0f, 64, 10.0f);
+    groundMesh.upload(info.allocator, info.device, info.commandPool, info.graphicsQueue);
+
+    cubeMesh.createCube();
+    cubeMesh.upload(info.allocator, info.device, info.commandPool, info.graphicsQueue);
+
+    sphereMesh.createSphere(0.5f, 32, 32);
+    sphereMesh.upload(info.allocator, info.device, info.commandPool, info.graphicsQueue);
+
+    // Player capsule mesh (1.8m tall, 0.3m radius)
+    capsuleMesh.createCapsule(0.3f, 1.8f, 16, 16);
+    capsuleMesh.upload(info.allocator, info.device, info.commandPool, info.graphicsQueue);
+
+    return true;
+}
+
+bool SceneBuilder::loadTextures(const InitInfo& info) {
+    std::string texturePath = info.resourcePath + "/textures/crates/crate1/crate1_diffuse.png";
+    if (!crateTexture.load(texturePath, info.allocator, info.device, info.commandPool,
+                           info.graphicsQueue, info.physicalDevice)) {
+        SDL_Log("Failed to load texture: %s", texturePath.c_str());
+        return false;
+    }
+
+    std::string crateNormalPath = info.resourcePath + "/textures/crates/crate1/crate1_normal.png";
+    if (!crateNormalMap.load(crateNormalPath, info.allocator, info.device, info.commandPool,
+                              info.graphicsQueue, info.physicalDevice, false)) {
+        SDL_Log("Failed to load crate normal map: %s", crateNormalPath.c_str());
+        return false;
+    }
+
+    std::string grassTexturePath = info.resourcePath + "/textures/grass/grass/grass01.jpg";
+    if (!groundTexture.load(grassTexturePath, info.allocator, info.device, info.commandPool,
+                            info.graphicsQueue, info.physicalDevice)) {
+        SDL_Log("Failed to load grass texture: %s", grassTexturePath.c_str());
+        return false;
+    }
+
+    std::string grassNormalPath = info.resourcePath + "/textures/grass/grass/grass01_n.jpg";
+    if (!groundNormalMap.load(grassNormalPath, info.allocator, info.device, info.commandPool,
+                               info.graphicsQueue, info.physicalDevice, false)) {
+        SDL_Log("Failed to load grass normal map: %s", grassNormalPath.c_str());
+        return false;
+    }
+
+    std::string metalTexturePath = info.resourcePath + "/textures/industrial/metal_1.jpg";
+    if (!metalTexture.load(metalTexturePath, info.allocator, info.device, info.commandPool,
+                           info.graphicsQueue, info.physicalDevice)) {
+        SDL_Log("Failed to load metal texture: %s", metalTexturePath.c_str());
+        return false;
+    }
+
+    std::string metalNormalPath = info.resourcePath + "/textures/industrial/metal_1_norm.jpg";
+    if (!metalNormalMap.load(metalNormalPath, info.allocator, info.device, info.commandPool,
+                              info.graphicsQueue, info.physicalDevice, false)) {
+        SDL_Log("Failed to load metal normal map: %s", metalNormalPath.c_str());
+        return false;
+    }
+
+    return true;
+}
+
+void SceneBuilder::createSceneObjects() {
+    sceneObjects.clear();
+
+    // Ground - rough, non-metallic
+    sceneObjects.push_back({glm::mat4(1.0f), &groundMesh, &groundTexture, 0.8f, 0.0f});
+
+    // Wooden crate - slightly shiny, non-metallic
+    sceneObjects.push_back({
+        glm::translate(glm::mat4(1.0f), glm::vec3(2.0f, 0.5f, 0.0f)),
+        &cubeMesh, &crateTexture, 0.4f, 0.0f
+    });
+
+    // Rotated wooden crate
+    glm::mat4 rotatedCube = glm::translate(glm::mat4(1.0f), glm::vec3(-1.5f, 0.5f, 1.0f));
+    rotatedCube = glm::rotate(rotatedCube, glm::radians(30.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    sceneObjects.push_back({rotatedCube, &cubeMesh, &crateTexture, 0.4f, 0.0f});
+
+    // Polished metal sphere - smooth, fully metallic
+    sceneObjects.push_back({
+        glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.5f, -2.0f)),
+        &sphereMesh, &metalTexture, 0.1f, 1.0f
+    });
+
+    // Rough/brushed metal sphere - moderately rough, metallic
+    sceneObjects.push_back({
+        glm::translate(glm::mat4(1.0f), glm::vec3(-3.0f, 0.5f, -1.0f)),
+        &sphereMesh, &metalTexture, 0.5f, 1.0f
+    });
+
+    // Polished metal cube - smooth, fully metallic
+    sceneObjects.push_back({
+        glm::translate(glm::mat4(1.0f), glm::vec3(3.0f, 0.5f, -2.0f)),
+        &cubeMesh, &metalTexture, 0.1f, 1.0f
+    });
+
+    // Brushed metal cube - rough, metallic
+    glm::mat4 brushedCube = glm::translate(glm::mat4(1.0f), glm::vec3(-3.0f, 0.5f, -3.0f));
+    brushedCube = glm::rotate(brushedCube, glm::radians(45.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    sceneObjects.push_back({brushedCube, &cubeMesh, &metalTexture, 0.6f, 1.0f});
+
+    // Glowing emissive sphere on top of the first crate - demonstrates bloom effect
+    glm::mat4 glowingSphereTransform = glm::translate(glm::mat4(1.0f), glm::vec3(2.0f, 1.3f, 0.0f));
+    glowingSphereTransform = glm::scale(glowingSphereTransform, glm::vec3(0.3f));
+    sceneObjects.push_back({glowingSphereTransform, &sphereMesh, &metalTexture, 0.2f, 0.0f, 25.0f, false});
+
+    // Player capsule - centered at origin, uses metal texture for visibility
+    playerObjectIndex = sceneObjects.size();
+    glm::mat4 playerTransform = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.9f, 0.0f));
+    sceneObjects.push_back({playerTransform, &capsuleMesh, &metalTexture, 0.3f, 0.8f, 0.0f, true});
+}
+
+void SceneBuilder::updatePlayerTransform(const glm::mat4& transform) {
+    if (playerObjectIndex < sceneObjects.size()) {
+        sceneObjects[playerObjectIndex].transform = transform;
+    }
+}
