@@ -65,8 +65,8 @@ const float CLOUD_LAYER_BOTTOM = 1.5;     // km above surface
 const float CLOUD_LAYER_TOP = 4.0;        // km above surface
 const float CLOUD_COVERAGE = 0.5;         // 0-1 coverage amount
 const float CLOUD_DENSITY = 0.3;          // Base density multiplier
-const int CLOUD_MARCH_STEPS = 32;         // Ray march samples (increased to reduce banding)
-const int CLOUD_LIGHT_STEPS = 6;          // Light sampling steps
+const int CLOUD_MARCH_STEPS = 16;         // Ray march samples (reduced for performance)
+const int CLOUD_LIGHT_STEPS = 3;          // Light sampling steps (reduced for performance)
 
 float hash(vec3 p) {
     return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453);
@@ -134,23 +134,19 @@ float sampleCloudDensity(vec3 worldPos) {
     // Sample noise at different scales for shape and detail
     vec3 samplePos = worldPos * 0.5 + windOffset;  // Base scale
 
-    // Large-scale shape noise (increased octaves for smoother appearance)
-    float baseNoise = fbm(samplePos * 0.25, 6);
+    // Large-scale shape noise (4 octaves for good quality/perf balance)
+    float baseNoise = fbm(samplePos * 0.25, 4);
 
-    // Add medium-scale variation to break up regular patterns
-    float mediumNoise = fbm(samplePos * 0.6 + vec3(50.0), 4);
-    baseNoise = baseNoise * 0.7 + mediumNoise * 0.3;
-
-    // Apply coverage with softer transition (wider smoothstep range)
+    // Apply coverage with softer transition
     float coverageThreshold = 1.0 - CLOUD_COVERAGE;
-    float density = smoothstep(coverageThreshold - 0.1, coverageThreshold + 0.4, baseNoise);
+    float density = smoothstep(coverageThreshold, coverageThreshold + 0.35, baseNoise);
 
     // Apply height gradient
     density *= heightGradient;
 
-    // Add detail erosion with more octaves
-    float detailNoise = fbm(samplePos * 1.2 + vec3(100.0), 4);
-    density -= detailNoise * 0.25 * (1.0 - heightFraction);
+    // Detail erosion (2 octaves - cheaper but still effective)
+    float detailNoise = fbm(samplePos * 1.0 + vec3(100.0), 2);
+    density -= detailNoise * 0.2 * (1.0 - heightFraction);
     density = max(density, 0.0);
 
     return density * CLOUD_DENSITY;
@@ -184,21 +180,26 @@ float cloudPhase(float cosTheta, float transmittanceToLight, float segmentTransm
     return phase;
 }
 
-// Sample light transmittance to sun through clouds
+// Sample light transmittance to sun through clouds (optimized)
 float sampleCloudTransmittanceToSun(vec3 pos, vec3 sunDir) {
-    float transmittance = 1.0;
+    float opticalDepth = 0.0;
     float stepSize = (CLOUD_LAYER_TOP - CLOUD_LAYER_BOTTOM) / float(CLOUD_LIGHT_STEPS);
 
     for (int i = 0; i < CLOUD_LIGHT_STEPS; i++) {
         float t = stepSize * (float(i) + 0.5);
         vec3 samplePos = pos + sunDir * t;
-        float density = sampleCloudDensity(samplePos);
-        transmittance *= exp(-density * stepSize * 10.0);
 
-        if (transmittance < 0.01) break;
+        // Quick altitude check before expensive density sample
+        float alt = length(samplePos) - PLANET_RADIUS;
+        if (alt < CLOUD_LAYER_BOTTOM || alt > CLOUD_LAYER_TOP) continue;
+
+        float density = sampleCloudDensity(samplePos);
+        opticalDepth += density * stepSize * 10.0;
+
+        if (opticalDepth > 4.0) break;  // Early out when heavily shadowed
     }
 
-    return transmittance;
+    return exp(-opticalDepth);
 }
 
 vec2 raySphereIntersect(vec3 origin, vec3 dir, float radius) {
@@ -283,7 +284,7 @@ CloudResult marchClouds(vec3 origin, vec3 dir) {
 
         float density = sampleCloudDensity(pos);
 
-        if (density > 0.001) {
+        if (density > 0.005) {  // Skip very thin cloud regions
             // Sample transmittance to sun
             float transmittanceToSun = sampleCloudTransmittanceToSun(pos, sunDir);
 
