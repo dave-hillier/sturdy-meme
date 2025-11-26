@@ -267,9 +267,13 @@ CloudResult marchClouds(vec3 origin, vec3 dir) {
     float sunAltitude = ubo.sunDirection.y;
     float moonAltitude = ubo.moonDirection.y;
 
-    // Determine if moon is the primary light source
-    bool sunBelowHorizon = sunAltitude < 0.0;
-    bool moonAboveHorizon = moonAltitude > 0.0;
+    // Smooth twilight transition factor - moon fades in as sun approaches/passes horizon
+    // At sun altitude 0.17 (10°): twilightFactor = 0 (no moon contribution to clouds)
+    // At sun altitude -0.1 (-6°): twilightFactor = 1 (full moon contribution)
+    float twilightFactor = smoothstep(0.17, -0.1, sunAltitude);
+    // Also require moon to be reasonably above horizon
+    float moonVisibility = smoothstep(-0.09, 0.1, moonAltitude);
+    float moonContribution = twilightFactor * moonVisibility;
 
     // Sky color varies with sun altitude - bluer overhead, warmer at horizon
     vec3 zenithColor = vec3(0.3, 0.5, 0.9);   // Blue zenith
@@ -282,12 +286,11 @@ CloudResult marchClouds(vec3 origin, vec3 dir) {
     // Add ground bounce contribution (important for cloud undersides)
     vec3 groundBounce = vec3(0.15, 0.12, 0.08) * max(sunAltitude, 0.0);
 
-    // At night, add moonlit ambient (cooler blue-grey tones)
-    if (sunBelowHorizon && moonAboveHorizon) {
-        float nightFactor = smoothstep(0.0, -0.1, sunAltitude);
+    // Gradually blend in moonlit ambient during twilight (cooler blue-grey tones)
+    if (moonContribution > 0.01) {
         vec3 moonAmbient = ubo.moonColor.rgb * ubo.moonDirection.w * 0.15;
-        skyAmbient = mix(skyAmbient, moonAmbient, nightFactor);
-        groundBounce = mix(groundBounce, moonAmbient * 0.3, nightFactor);
+        skyAmbient = mix(skyAmbient, moonAmbient, moonContribution);
+        groundBounce = mix(groundBounce, moonAmbient * 0.3, moonContribution);
     }
 
     // Combined ambient light - brighter overall to match proper irradiance
@@ -311,12 +314,12 @@ CloudResult marchClouds(vec3 origin, vec3 dir) {
             // In-scattering from sun
             vec3 sunScatter = sunLight * transmittanceToSun * phaseSun;
 
-            // Add moon scattering when moon is primary light source
+            // Add moon scattering - scales smoothly with twilight transition
             vec3 moonScatter = vec3(0.0);
-            if (sunBelowHorizon && moonAboveHorizon) {
+            if (moonContribution > 0.01) {
                 float transmittanceToMoon = sampleCloudTransmittanceToSun(pos, moonDir);
                 float phaseMoon = cloudPhase(cosThetaMoon, transmittanceToMoon, result.transmittance);
-                moonScatter = moonLight * transmittanceToMoon * phaseMoon;
+                moonScatter = moonLight * transmittanceToMoon * phaseMoon * moonContribution;
             }
 
             // Add ambient scattering
@@ -433,10 +436,12 @@ ScatteringResult integrateAtmosphere(vec3 origin, vec3 dir, int sampleCount) {
     float moonAltitude = moonDir.y;
     float moonIntensity = ubo.moonDirection.w;
 
-    // Calculate how much the moon contributes as a light source
-    // Moon becomes the primary light source when sun is below horizon
-    bool sunBelowHorizon = sunAltitude < 0.0;
-    bool moonAboveHorizon = moonAltitude > 0.0;
+    // Smooth twilight transition - moon scattering fades in during sunset
+    // At sun altitude 0.17 (10°): no moon atmospheric scattering
+    // At sun altitude -0.1 (-6°): full moon atmospheric scattering
+    float twilightFactor = smoothstep(0.17, -0.1, sunAltitude);
+    float moonVisibility = smoothstep(-0.09, 0.1, moonAltitude);
+    float moonAtmoContribution = twilightFactor * moonVisibility;
 
     for (int i = 0; i < sampleCount; i++) {
         float t = start + (float(i) + 0.5) * stepSize;
@@ -468,10 +473,10 @@ ScatteringResult integrateAtmosphere(vec3 origin, vec3 dir, int sampleCount) {
         // Combine sun scattering
         vec3 segmentScatterSun = (rayleighScatterSun + mieScatterSun * miePSun) * earthShadowSun;
 
-        // Add moon scattering when moon is above horizon
+        // Add moon scattering - scales smoothly with twilight transition
         vec3 segmentScatterMoon = vec3(0.0);
-        if (moonAboveHorizon) {
-            segmentScatterMoon = (rayleighScatterMoon + mieScatterMoon * miePMoon) * earthShadowMoon * moonIntensity;
+        if (moonAtmoContribution > 0.01) {
+            segmentScatterMoon = (rayleighScatterMoon + mieScatterMoon * miePMoon) * earthShadowMoon * moonIntensity * moonAtmoContribution;
         }
 
         vec3 segmentScatter = segmentScatterSun + segmentScatterMoon;
@@ -520,8 +525,11 @@ vec3 renderAtmosphere(vec3 dir) {
 
     float sunAltitude = ubo.sunDirection.y;
     float moonAltitude = ubo.moonDirection.y;
-    bool sunBelowHorizon = sunAltitude < 0.0;
-    bool moonAboveHorizon = moonAltitude > 0.0;
+
+    // Smooth twilight transition factor for sky rendering
+    float twilightFactor = smoothstep(0.17, -0.1, sunAltitude);
+    float moonVisibility = smoothstep(-0.09, 0.1, moonAltitude);
+    float moonSkyContribution = twilightFactor * moonVisibility;
 
     // Remap the ray direction for atmosphere calculation:
     // - Rays with Y >= 0 use their actual direction
@@ -535,15 +543,15 @@ vec3 renderAtmosphere(vec3 dir) {
         vec3 moonLight = ubo.moonColor.rgb * ubo.moonDirection.w;
         vec3 horizonColor = horizonResult.inscatter * sunLight;
 
-        // Add moon contribution at night
-        if (sunBelowHorizon && moonAboveHorizon) {
-            horizonColor += horizonResult.inscatter * moonLight * 0.5;
+        // Add moon contribution - fades in smoothly during twilight
+        if (moonSkyContribution > 0.01) {
+            horizonColor += horizonResult.inscatter * moonLight * 0.5 * moonSkyContribution;
         }
 
         // Add multiple scattering compensation
         horizonColor += sunLight * 0.1 * (1.0 - horizonResult.transmittance);
-        if (sunBelowHorizon && moonAboveHorizon) {
-            horizonColor += moonLight * 0.05 * (1.0 - horizonResult.transmittance);
+        if (moonSkyContribution > 0.01) {
+            horizonColor += moonLight * 0.05 * (1.0 - horizonResult.transmittance) * moonSkyContribution;
         }
 
         // Night fallback
@@ -571,15 +579,15 @@ vec3 renderAtmosphere(vec3 dir) {
     // The integrateAtmosphere function now handles moon contribution internally
     vec3 sky = result.inscatter * sunLight;
 
-    // Add moon-based atmospheric scattering when sun is below horizon
-    if (sunBelowHorizon && moonAboveHorizon) {
-        sky += result.inscatter * moonLight * 0.5;  // Moon scattering is more subtle
+    // Add moon-based atmospheric scattering - fades in smoothly during twilight
+    if (moonSkyContribution > 0.01) {
+        sky += result.inscatter * moonLight * 0.5 * moonSkyContribution;
     }
 
     // Add simple multiple scattering compensation to keep horizon bright
     sky += sunLight * 0.1 * (1.0 - result.transmittance);
-    if (sunBelowHorizon && moonAboveHorizon) {
-        sky += moonLight * 0.05 * (1.0 - result.transmittance);
+    if (moonSkyContribution > 0.01) {
+        sky += moonLight * 0.05 * (1.0 - result.transmittance) * moonSkyContribution;
     }
 
     // Night fallback color when sun is below the horizon
@@ -604,8 +612,8 @@ vec3 renderAtmosphere(vec3 dir) {
     // Add atmospheric in-scattering between camera and clouds (haze in front of clouds)
     // This uses the inscatter we already computed, scaled by how much cloud is visible
     vec3 hazeLight = sunLight;
-    if (sunBelowHorizon && moonAboveHorizon) {
-        hazeLight += moonLight * 0.3;
+    if (moonSkyContribution > 0.01) {
+        hazeLight += moonLight * 0.3 * moonSkyContribution;
     }
     vec3 hazeInFront = result.inscatter * hazeLight * (1.0 - clouds.transmittance) * 0.3;
 

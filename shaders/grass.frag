@@ -439,11 +439,12 @@ void main() {
     float moonNdotL = dot(N, moonL);
     float moonDiffuse = max(moonNdotL, 0.0) + max(-moonNdotL, 0.0) * 0.6;
 
-    // Add subsurface scattering for moonlight when it's the primary light source
-    vec3 moonSss = vec3(0.0);
-    if (ubo.sunDirection.y < 0.0 && ubo.moonDirection.y > 0.0) {
-        moonSss = calculateSSS(moonL, V, N, ubo.moonColor.rgb, albedo) * 0.5;
-    }
+    // Add subsurface scattering for moonlight - fades in smoothly during twilight
+    // Smooth transition: starts at sun altitude 10°, full effect at -6°
+    float twilightFactor = smoothstep(0.17, -0.1, ubo.sunDirection.y);
+    float moonVisibility = smoothstep(-0.09, 0.1, ubo.moonDirection.y);
+    float moonSssFactor = twilightFactor * moonVisibility;
+    vec3 moonSss = calculateSSS(moonL, V, N, ubo.moonColor.rgb, albedo) * 0.5 * moonSssFactor;
 
     vec3 moonLight = (albedo * moonDiffuse + moonSss) * ubo.moonColor.rgb * ubo.moonDirection.w;
 

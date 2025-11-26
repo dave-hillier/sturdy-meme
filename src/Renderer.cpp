@@ -1500,17 +1500,15 @@ void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera& camera) 
     float sunIntensity = sunPos.intensity;
     float moonIntensity = moonPos.intensity;
 
-    // When sun is below horizon and moon is above, boost moon as primary light source
-    // Sun is below horizon when altitude < 0, moon above when altitude > 0
-    bool sunBelowHorizon = sunPos.altitude < 0.0f;
-    bool moonAboveHorizon = moonPos.altitude > 0.0f;
-
-    if (sunBelowHorizon && moonAboveHorizon) {
-        // Boost moon intensity when it's the primary light source
-        // Scale based on how far below the horizon the sun is (civil twilight ends at -6 degrees)
-        float nightFactor = glm::smoothstep(0.0f, -6.0f, sunPos.altitude);
-        // Boost moon intensity up to 3x when sun is well below horizon
-        moonIntensity *= (1.0f + nightFactor * 2.0f);
+    // Smooth transition for moon as light source during twilight
+    // Moon gradually becomes more prominent as sun approaches and goes below horizon
+    // Transition starts when sun is at 10° above horizon, fully active at -6° (end of civil twilight)
+    if (moonPos.altitude > -5.0f) {  // Moon needs to be reasonably above horizon
+        // Calculate how much to boost moon based on sun altitude
+        // At sun altitude 10°: no boost (factor = 1)
+        // At sun altitude -6°: full boost (factor = 3)
+        float twilightFactor = glm::smoothstep(10.0f, -6.0f, sunPos.altitude);
+        moonIntensity *= (1.0f + twilightFactor * 2.0f);
     }
 
     glm::vec3 sunColor = celestialCalculator.getSunColor(sunPos.altitude);
