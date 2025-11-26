@@ -599,5 +599,11 @@ void Application::updatePhysicsToScene() {
 
         // Update scene object transform
         sceneObjects[i].transform = physicsTransform;
+
+        // Update orb light position to follow the emissive sphere (index 7)
+        if (i == 7) {
+            glm::vec3 orbPosition = glm::vec3(physicsTransform[3]);
+            renderer.setOrbLightPosition(orbPosition);
+        }
     }
 }

@@ -96,6 +96,9 @@ public:
     // Player rendering
     void updatePlayerTransform(const glm::mat4& transform);
 
+    // Update orb light position (follows physics object)
+    void setOrbLightPosition(const glm::vec3& position) { orbLightPosition = position; }
+
     // Scene object access for physics integration
     std::vector<SceneObject>& getSceneObjects() { return sceneBuilder.getSceneObjects(); }
     const std::vector<SceneObject>& getSceneObjects() const { return sceneBuilder.getSceneObjects(); }
@@ -288,6 +291,7 @@ private:
     // Dynamic lights
     LightManager lightManager;
     float lightCullRadius = 100.0f;        // Radius from camera for light culling
+    glm::vec3 orbLightPosition = glm::vec3(2.0f, 1.3f, 0.0f);  // Orb light position (updated by physics)
 
     bool createLightBuffers();
     void updateLightBuffer(uint32_t currentImage, const Camera& camera);

@@ -1896,6 +1896,11 @@ void Renderer::setupSceneLights() {
 }
 
 void Renderer::updateLightBuffer(uint32_t currentImage, const Camera& camera) {
+    // Update orb light position (light index 0 is the orb)
+    if (lightManager.getLightCount() > 0) {
+        lightManager.getLight(0).position = orbLightPosition;
+    }
+
     LightBuffer buffer{};
     glm::mat4 viewProj = camera.getProjectionMatrix() * camera.getViewMatrix();
     lightManager.buildLightBuffer(buffer, camera.getPosition(), camera.getFront(), viewProj, lightCullRadius);
@@ -2336,11 +2341,10 @@ UniformBufferObject Renderer::buildUniformBufferData(const Camera& camera, const
     ubo.ambientColor = glm::vec4(lighting.ambientColor, 1.0f);
     ubo.cameraPosition = glm::vec4(camera.getPosition(), 1.0f);
 
-    // Point light from the glowing sphere
-    glm::vec3 pointLightPos = glm::vec3(2.0f, 1.3f, 0.0f);
+    // Point light from the glowing sphere (position updated by physics)
     float pointLightIntensity = 5.0f;
     float pointLightRadius = 8.0f;
-    ubo.pointLightPosition = glm::vec4(pointLightPos, pointLightIntensity);
+    ubo.pointLightPosition = glm::vec4(orbLightPosition, pointLightIntensity);
     ubo.pointLightColor = glm::vec4(1.0f, 0.9f, 0.7f, pointLightRadius);
 
     ubo.timeOfDay = timeOfDay;
