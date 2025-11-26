@@ -1611,7 +1611,7 @@ void Renderer::render(const Camera& camera) {
 
     glm::mat4 viewProj = camera.getProjectionMatrix() * camera.getViewMatrix();
     grassSystem.updateUniforms(currentFrame, camera.getPosition(), viewProj);
-    weatherSystem.updateUniforms(currentFrame, camera.getPosition(), viewProj, deltaTime, grassTime);
+    weatherSystem.updateUniforms(currentFrame, camera.getPosition(), viewProj, deltaTime, grassTime, windSystem);
 
     // Begin command buffer recording
     vkResetCommandBuffer(commandBuffers[currentFrame], 0);

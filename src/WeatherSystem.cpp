@@ -1,4 +1,5 @@
 #include "WeatherSystem.h"
+#include "WindSystem.h"
 #include "ShaderLoader.h"
 #include <SDL3/SDL.h>
 #include <cstring>
@@ -553,7 +554,8 @@ void WeatherSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffe
 }
 
 void WeatherSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos,
-                                    const glm::mat4& viewProj, float deltaTime, float totalTime) {
+                                    const glm::mat4& viewProj, float deltaTime, float totalTime,
+                                    const WindSystem& windSystem) {
     WeatherUniforms uniforms{};
 
     uniforms.cameraPosition = glm::vec4(cameraPos, 1.0f);
@@ -575,8 +577,11 @@ void WeatherSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraP
         }
     }
 
-    // Wind will be sampled from wind system, set defaults here
-    uniforms.windDirectionStrength = glm::vec4(1.0f, 0.0f, 1.0f, 0.5f);
+    // Sample wind parameters from wind system
+    glm::vec2 windDir = windSystem.getWindDirection();
+    float windStr = windSystem.getWindStrength();
+    float turbulence = windSystem.getGustAmplitude();
+    uniforms.windDirectionStrength = glm::vec4(windDir.x, windDir.y, windStr, turbulence);
 
     // Gravity for rain (downward with terminal velocity)
     uniforms.gravity = glm::vec4(0.0f, -9.8f, 0.0f, 11.0f);  // Terminal velocity ~11 m/s for rain

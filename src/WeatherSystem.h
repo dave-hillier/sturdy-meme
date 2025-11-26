@@ -6,6 +6,9 @@
 #include <vector>
 #include <string>
 
+// Forward declaration
+class WindSystem;
+
 // Weather particle data (32 bytes, matches GPU struct)
 struct WeatherParticle {
     glm::vec3 position;     // World-space position
@@ -70,7 +73,8 @@ public:
 
     // Update weather uniforms each frame
     void updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos,
-                        const glm::mat4& viewProj, float deltaTime, float totalTime);
+                        const glm::mat4& viewProj, float deltaTime, float totalTime,
+                        const WindSystem& windSystem);
 
     // Record compute dispatch for particle simulation
     void recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex, float time, float deltaTime);
