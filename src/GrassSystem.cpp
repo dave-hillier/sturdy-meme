@@ -2,6 +2,7 @@
 #include "ShaderLoader.h"
 #include <SDL3/SDL.h>
 #include <cstring>
+#include <algorithm>  // for std::swap
 
 // Forward declare UniformBufferObject size (needed for descriptor set update)
 struct UniformBufferObject;
@@ -854,8 +855,14 @@ void GrassSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex
 }
 
 void GrassSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time) {
-    // Double-buffer: graphics reads from renderBufferSet (computed in previous frame)
+    // Double-buffer: graphics reads from renderBufferSet
+    // On first few frames before double-buffering kicks in, read from compute set
     uint32_t readSet = renderBufferSet;
+
+    // Bootstrap: if we haven't diverged yet, read from what we just computed
+    if (computeBufferSet == renderBufferSet) {
+        readSet = computeBufferSet;
+    }
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -873,6 +880,11 @@ void GrassSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float tim
 void GrassSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time, uint32_t cascadeIndex) {
     // Double-buffer: shadow pass reads from renderBufferSet (same as main draw)
     uint32_t readSet = renderBufferSet;
+
+    // Bootstrap: if we haven't diverged yet, read from what we just computed
+    if (computeBufferSet == renderBufferSet) {
+        readSet = computeBufferSet;
+    }
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
