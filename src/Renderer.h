@@ -51,6 +51,7 @@ struct PushConstants {
     float metallic;
     float emissiveIntensity;
     float padding;
+    glm::vec4 emissiveColor;  // rgb = color, a unused
 };
 
 class Renderer {

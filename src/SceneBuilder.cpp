@@ -15,6 +15,7 @@ void SceneBuilder::destroy(VmaAllocator allocator, VkDevice device) {
     groundNormalMap.destroy(allocator, device);
     metalTexture.destroy(allocator, device);
     metalNormalMap.destroy(allocator, device);
+    defaultEmissiveMap.destroy(allocator, device);
 
     cubeMesh.destroy(allocator);
     sphereMesh.destroy(allocator);
@@ -85,6 +86,13 @@ bool SceneBuilder::loadTextures(const InitInfo& info) {
         return false;
     }
 
+    // Create default black emissive map for objects without emissive textures
+    if (!defaultEmissiveMap.createSolidColor(0, 0, 0, 255, info.allocator, info.device,
+                                              info.commandPool, info.graphicsQueue)) {
+        SDL_Log("Failed to create default emissive map");
+        return false;
+    }
+
     return true;
 }
 
@@ -131,12 +139,22 @@ void SceneBuilder::createSceneObjects() {
     // Glowing emissive sphere on top of the first crate - demonstrates bloom effect
     glm::mat4 glowingSphereTransform = glm::translate(glm::mat4(1.0f), glm::vec3(2.0f, 1.3f, 0.0f));
     glowingSphereTransform = glm::scale(glowingSphereTransform, glm::vec3(0.3f));
-    sceneObjects.push_back({glowingSphereTransform, &sphereMesh, &metalTexture, 0.2f, 0.0f, 25.0f, false});
+    sceneObjects.push_back({glowingSphereTransform, &sphereMesh, &metalTexture, 0.2f, 0.0f, 25.0f, glm::vec3(1.0f, 0.9f, 0.7f), false});
+
+    // Blue light indicator sphere - saturated blue, lower intensity to preserve color
+    glm::mat4 blueLightTransform = glm::translate(glm::mat4(1.0f), glm::vec3(-3.0f, 2.0f, 2.0f));
+    blueLightTransform = glm::scale(blueLightTransform, glm::vec3(0.2f));
+    sceneObjects.push_back({blueLightTransform, &sphereMesh, &metalTexture, 0.2f, 0.0f, 4.0f, glm::vec3(0.0f, 0.3f, 1.0f), false});
+
+    // Green light indicator sphere - saturated green, lower intensity to preserve color
+    glm::mat4 greenLightTransform = glm::translate(glm::mat4(1.0f), glm::vec3(4.0f, 1.5f, -2.0f));
+    greenLightTransform = glm::scale(greenLightTransform, glm::vec3(0.2f));
+    sceneObjects.push_back({greenLightTransform, &sphereMesh, &metalTexture, 0.2f, 0.0f, 3.0f, glm::vec3(0.0f, 1.0f, 0.2f), false});
 
     // Player capsule - centered at origin, uses metal texture for visibility
     playerObjectIndex = sceneObjects.size();
     glm::mat4 playerTransform = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.9f, 0.0f));
-    sceneObjects.push_back({playerTransform, &capsuleMesh, &metalTexture, 0.3f, 0.8f, 0.0f, true});
+    sceneObjects.push_back({playerTransform, &capsuleMesh, &metalTexture, 0.3f, 0.8f, 0.0f, glm::vec3(1.0f), true});
 }
 
 void SceneBuilder::updatePlayerTransform(const glm::mat4& transform) {

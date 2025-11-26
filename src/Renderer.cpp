@@ -954,7 +954,14 @@ bool Renderer::createDescriptorSetLayout() {
     lightBufferBinding.pImmutableSamplers = nullptr;
     lightBufferBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-    std::array<VkDescriptorSetLayoutBinding, 5> bindings = {uboLayoutBinding, samplerLayoutBinding, shadowSamplerBinding, normalMapBinding, lightBufferBinding};
+    VkDescriptorSetLayoutBinding emissiveMapBinding{};
+    emissiveMapBinding.binding = 5;
+    emissiveMapBinding.descriptorCount = 1;
+    emissiveMapBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    emissiveMapBinding.pImmutableSamplers = nullptr;
+    emissiveMapBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    std::array<VkDescriptorSetLayoutBinding, 6> bindings = {uboLayoutBinding, samplerLayoutBinding, shadowSamplerBinding, normalMapBinding, lightBufferBinding, emissiveMapBinding};
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -1335,7 +1342,7 @@ bool Renderer::createDescriptorPool() {
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 8);  // +2 for post-process, +2 for grass double-buffer
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 16);  // diffuse + shadow + normal + HDR sampler + grass double-buffer
+    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 20);  // diffuse + shadow + normal + emissive + HDR sampler + grass double-buffer
     poolSizes[2].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     poolSizes[2].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 18);  // +6 for grass double-buffer, +6 for light buffers (3 descriptor sets * 2 frames)
 
@@ -1406,7 +1413,12 @@ bool Renderer::createDescriptorSets() {
         lightBufferInfo.offset = 0;
         lightBufferInfo.range = sizeof(LightBuffer);
 
-        std::array<VkWriteDescriptorSet, 5> descriptorWrites{};
+        VkDescriptorImageInfo emissiveImageInfo{};
+        emissiveImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        emissiveImageInfo.imageView = sceneBuilder.getDefaultEmissiveMap().getImageView();
+        emissiveImageInfo.sampler = sceneBuilder.getDefaultEmissiveMap().getSampler();
+
+        std::array<VkWriteDescriptorSet, 6> descriptorWrites{};
 
         descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         descriptorWrites[0].dstSet = descriptorSets[i];
@@ -1448,6 +1460,14 @@ bool Renderer::createDescriptorSets() {
         descriptorWrites[4].descriptorCount = 1;
         descriptorWrites[4].pBufferInfo = &lightBufferInfo;
 
+        descriptorWrites[5].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[5].dstSet = descriptorSets[i];
+        descriptorWrites[5].dstBinding = 5;
+        descriptorWrites[5].dstArrayElement = 0;
+        descriptorWrites[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[5].descriptorCount = 1;
+        descriptorWrites[5].pImageInfo = &emissiveImageInfo;
+
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                descriptorWrites.data(), 0, nullptr);
 
@@ -1469,6 +1489,7 @@ bool Renderer::createDescriptorSets() {
         descriptorWrites[3].dstSet = groundDescriptorSets[i];
         descriptorWrites[3].pImageInfo = &groundNormalImageInfo;
         descriptorWrites[4].dstSet = groundDescriptorSets[i];
+        descriptorWrites[5].dstSet = groundDescriptorSets[i];
 
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                descriptorWrites.data(), 0, nullptr);
@@ -1491,6 +1512,7 @@ bool Renderer::createDescriptorSets() {
         descriptorWrites[3].dstSet = metalDescriptorSets[i];
         descriptorWrites[3].pImageInfo = &metalNormalImageInfo;
         descriptorWrites[4].dstSet = metalDescriptorSets[i];
+        descriptorWrites[5].dstSet = metalDescriptorSets[i];
 
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                descriptorWrites.data(), 0, nullptr);
@@ -1781,6 +1803,7 @@ void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
         push.roughness = obj.roughness;
         push.metallic = obj.metallic;
         push.emissiveIntensity = obj.emissiveIntensity;
+        push.emissiveColor = glm::vec4(obj.emissiveColor, 1.0f);  // alpha=1 uses emissive color
 
         vkCmdPushConstants(cmd, pipelineLayout,
                           VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
