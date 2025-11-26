@@ -44,7 +44,7 @@ const float OZONE_LAYER_CENTER = 25.0;        // km
 const float OZONE_LAYER_WIDTH = 15.0;
 
 const float SUN_ANGULAR_RADIUS = 0.00935 / 2.0;  // radians
-const float MOON_ANGULAR_RADIUS = 0.00935 / 2.0; // Moon same size as sun (~0.5° from Earth)
+const float MOON_ANGULAR_RADIUS = 0.025;          // Larger than realistic for visual impact (~5x sun)
 
 // LMS color space for accurate Rayleigh scattering (Phase 4.1.7)
 // Standard Rec709 Rayleigh produces greenish sunsets; LMS primaries are more accurate
