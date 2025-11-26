@@ -12,6 +12,7 @@ layout(binding = 0) uniform UniformBufferObject {
     vec4 sunDirection;
     vec4 moonDirection;
     vec4 sunColor;
+    vec4 moonColor;                       // rgb = moon color
     vec4 ambientColor;
     vec4 cameraPosition;
     vec4 pointLightPosition;  // xyz = position, w = intensity
@@ -254,13 +255,25 @@ CloudResult marchClouds(vec3 origin, vec3 dir) {
     tStart += stepSize * jitter * 0.5;
 
     vec3 sunDir = normalize(ubo.sunDirection.xyz);
-    float cosTheta = dot(dir, sunDir);
+    vec3 moonDir = normalize(ubo.moonDirection.xyz);
+    float cosThetaSun = dot(dir, sunDir);
+    float cosThetaMoon = dot(dir, moonDir);
     vec3 sunLight = ubo.sunColor.rgb * ubo.sunDirection.w;
+    vec3 moonLight = ubo.moonColor.rgb * ubo.moonDirection.w;
 
     // Approximate sky irradiance at cloud altitude (Ghost of Tsushima approach)
     // In a full implementation, this would come from precomputed irradiance LUTs
     // Here we approximate based on sun position and Rayleigh scattering color
     float sunAltitude = ubo.sunDirection.y;
+    float moonAltitude = ubo.moonDirection.y;
+
+    // Smooth twilight transition factor - moon fades in as sun approaches/passes horizon
+    // At sun altitude 0.17 (10°): twilightFactor = 0 (no moon contribution to clouds)
+    // At sun altitude -0.1 (-6°): twilightFactor = 1 (full moon contribution)
+    float twilightFactor = smoothstep(0.17, -0.1, sunAltitude);
+    // Also require moon to be reasonably above horizon
+    float moonVisibility = smoothstep(-0.09, 0.1, moonAltitude);
+    float moonContribution = twilightFactor * moonVisibility;
 
     // Sky color varies with sun altitude - bluer overhead, warmer at horizon
     vec3 zenithColor = vec3(0.3, 0.5, 0.9);   // Blue zenith
@@ -272,6 +285,13 @@ CloudResult marchClouds(vec3 origin, vec3 dir) {
 
     // Add ground bounce contribution (important for cloud undersides)
     vec3 groundBounce = vec3(0.15, 0.12, 0.08) * max(sunAltitude, 0.0);
+
+    // Gradually blend in moonlit ambient during twilight (cooler blue-grey tones)
+    if (moonContribution > 0.01) {
+        vec3 moonAmbient = ubo.moonColor.rgb * ubo.moonDirection.w * 0.15;
+        skyAmbient = mix(skyAmbient, moonAmbient, moonContribution);
+        groundBounce = mix(groundBounce, moonAmbient * 0.3, moonContribution);
+    }
 
     // Combined ambient light - brighter overall to match proper irradiance
     vec3 ambientLight = (skyAmbient + groundBounce) * 0.8;
@@ -288,14 +308,22 @@ CloudResult marchClouds(vec3 origin, vec3 dir) {
             // Sample transmittance to sun
             float transmittanceToSun = sampleCloudTransmittanceToSun(pos, sunDir);
 
-            // Phase function
-            float phase = cloudPhase(cosTheta, transmittanceToSun, result.transmittance);
+            // Phase function for sun
+            float phaseSun = cloudPhase(cosThetaSun, transmittanceToSun, result.transmittance);
 
             // In-scattering from sun
-            vec3 sunScatter = sunLight * transmittanceToSun * phase;
+            vec3 sunScatter = sunLight * transmittanceToSun * phaseSun;
+
+            // Add moon scattering - scales smoothly with twilight transition
+            vec3 moonScatter = vec3(0.0);
+            if (moonContribution > 0.01) {
+                float transmittanceToMoon = sampleCloudTransmittanceToSun(pos, moonDir);
+                float phaseMoon = cloudPhase(cosThetaMoon, transmittanceToMoon, result.transmittance);
+                moonScatter = moonLight * transmittanceToMoon * phaseMoon * moonContribution;
+            }
 
             // Add ambient scattering
-            vec3 totalScatter = sunScatter + ambientLight;
+            vec3 totalScatter = sunScatter + moonScatter + ambientLight;
 
             // Beer-Lambert extinction
             float extinction = density * stepSize * 10.0;
@@ -396,11 +424,24 @@ ScatteringResult integrateAtmosphere(vec3 origin, vec3 dir, int sampleCount) {
     vec3 inscatter = vec3(0.0);
 
     vec3 sunDir = normalize(ubo.sunDirection.xyz);
+    vec3 moonDir = normalize(ubo.moonDirection.xyz);
     float cosViewSun = dot(dir, sunDir);
-    float rayleighP = rayleighPhase(cosViewSun);
-    float mieP = cornetteShanksPhase(cosViewSun, MIE_ANISOTROPY);
+    float cosViewMoon = dot(dir, moonDir);
+    float rayleighPSun = rayleighPhase(cosViewSun);
+    float rayleighPMoon = rayleighPhase(cosViewMoon);
+    float miePSun = cornetteShanksPhase(cosViewSun, MIE_ANISOTROPY);
+    float miePMoon = cornetteShanksPhase(cosViewMoon, MIE_ANISOTROPY);
 
     float sunAltitude = sunDir.y;
+    float moonAltitude = moonDir.y;
+    float moonIntensity = ubo.moonDirection.w;
+
+    // Smooth twilight transition - moon scattering fades in during sunset
+    // At sun altitude 0.17 (10°): no moon atmospheric scattering
+    // At sun altitude -0.1 (-6°): full moon atmospheric scattering
+    float twilightFactor = smoothstep(0.17, -0.1, sunAltitude);
+    float moonVisibility = smoothstep(-0.09, 0.1, moonAltitude);
+    float moonAtmoContribution = twilightFactor * moonVisibility;
 
     for (int i = 0; i < sampleCount; i++) {
         float t = start + (float(i) + 0.5) * stepSize;
@@ -411,24 +452,34 @@ ScatteringResult integrateAtmosphere(vec3 origin, vec3 dir, int sampleCount) {
         float mieDensity = exp(-altitude / MIE_SCALE_HEIGHT);
         float ozone = ozoneDensity(altitude);
 
-        // Use blended LMS/RGB Rayleigh for accurate sunset colors without purple bias
-        vec3 rayleighScatter = computeRayleighScatteringBlended(rayleighDensity, rayleighP, sunAltitude);
+        // Sun contribution: Use blended LMS/RGB Rayleigh for accurate sunset colors
+        vec3 rayleighScatterSun = computeRayleighScatteringBlended(rayleighDensity, rayleighPSun, sunAltitude);
+        vec3 mieScatterSun = mieDensity * vec3(MIE_SCATTERING_BASE);
 
-        // Mie scattering (grey, so no LMS conversion needed)
-        vec3 mieScatter = mieDensity * vec3(MIE_SCATTERING_BASE);
+        // Moon contribution: simpler Rayleigh scattering (moonlight is dimmer, less color sensitivity needed)
+        vec3 rayleighScatterMoon = rayleighDensity * RAYLEIGH_SCATTERING_BASE * rayleighPMoon;
+        vec3 mieScatterMoon = mieDensity * vec3(MIE_SCATTERING_BASE);
 
         // Extinction uses standard RGB coefficients
         vec3 rayleighScatterRGB = rayleighDensity * RAYLEIGH_SCATTERING_BASE;
-        vec3 extinction = rayleighScatterRGB + mieScatter +
+        vec3 extinction = rayleighScatterRGB + mieScatterSun +
                           mieDensity * vec3(MIE_ABSORPTION_BASE) +
                           ozone * OZONE_ABSORPTION;
 
         // Earth shadow modulates in-scattering (Phase 4.1.8)
-        // Points in Earth's shadow don't receive direct sunlight
-        float earthShadow = computeEarthShadow(pos, sunDir);
+        float earthShadowSun = computeEarthShadow(pos, sunDir);
+        float earthShadowMoon = computeEarthShadow(pos, moonDir);
 
-        // Combine Rayleigh with Mie for scattering, modulated by shadow
-        vec3 segmentScatter = (rayleighScatter + mieScatter * mieP) * earthShadow;
+        // Combine sun scattering
+        vec3 segmentScatterSun = (rayleighScatterSun + mieScatterSun * miePSun) * earthShadowSun;
+
+        // Add moon scattering - scales smoothly with twilight transition
+        vec3 segmentScatterMoon = vec3(0.0);
+        if (moonAtmoContribution > 0.01) {
+            segmentScatterMoon = (rayleighScatterMoon + mieScatterMoon * miePMoon) * earthShadowMoon * moonIntensity * moonAtmoContribution;
+        }
+
+        vec3 segmentScatter = segmentScatterSun + segmentScatterMoon;
 
         vec3 attenuation = exp(-extinction * stepSize);
         inscatter += transmittance * segmentScatter * stepSize;
@@ -472,6 +523,14 @@ vec3 renderAtmosphere(vec3 dir) {
     // We still do atmospheric scattering for rays near the horizon to get the
     // characteristic horizon glow, but clamp the minimum elevation angle.
 
+    float sunAltitude = ubo.sunDirection.y;
+    float moonAltitude = ubo.moonDirection.y;
+
+    // Smooth twilight transition factor for sky rendering
+    float twilightFactor = smoothstep(0.17, -0.1, sunAltitude);
+    float moonVisibility = smoothstep(-0.09, 0.1, moonAltitude);
+    float moonSkyContribution = twilightFactor * moonVisibility;
+
     // Remap the ray direction for atmosphere calculation:
     // - Rays with Y >= 0 use their actual direction
     // - Rays with Y < 0 blend to fog/horizon color to disguise the end of the world
@@ -481,13 +540,22 @@ vec3 renderAtmosphere(vec3 dir) {
         ScatteringResult horizonResult = integrateAtmosphere(vec3(0.0, PLANET_RADIUS + 0.001, 0.0), horizonDir, 16);
 
         vec3 sunLight = ubo.sunColor.rgb * ubo.sunDirection.w;
+        vec3 moonLight = ubo.moonColor.rgb * ubo.moonDirection.w;
         vec3 horizonColor = horizonResult.inscatter * sunLight;
+
+        // Add moon contribution - fades in smoothly during twilight
+        if (moonSkyContribution > 0.01) {
+            horizonColor += horizonResult.inscatter * moonLight * 0.5 * moonSkyContribution;
+        }
 
         // Add multiple scattering compensation
         horizonColor += sunLight * 0.1 * (1.0 - horizonResult.transmittance);
+        if (moonSkyContribution > 0.01) {
+            horizonColor += moonLight * 0.05 * (1.0 - horizonResult.transmittance) * moonSkyContribution;
+        }
 
         // Night fallback
-        float night = 1.0 - smoothstep(-0.05, 0.08, ubo.sunDirection.y);
+        float night = 1.0 - smoothstep(-0.05, 0.08, sunAltitude);
         vec3 nightTint = mix(vec3(0.01, 0.015, 0.03), vec3(0.03, 0.05, 0.08), horizonResult.transmittance.y);
         horizonColor += night * nightTint;
 
@@ -505,13 +573,25 @@ vec3 renderAtmosphere(vec3 dir) {
     ScatteringResult result = integrateAtmosphere(origin, normDir, 24);
 
     vec3 sunLight = ubo.sunColor.rgb * ubo.sunDirection.w;
+    vec3 moonLight = ubo.moonColor.rgb * ubo.moonDirection.w;
+
+    // Sky inscatter is modulated by both sun and moon light
+    // The integrateAtmosphere function now handles moon contribution internally
     vec3 sky = result.inscatter * sunLight;
+
+    // Add moon-based atmospheric scattering - fades in smoothly during twilight
+    if (moonSkyContribution > 0.01) {
+        sky += result.inscatter * moonLight * 0.5 * moonSkyContribution;
+    }
 
     // Add simple multiple scattering compensation to keep horizon bright
     sky += sunLight * 0.1 * (1.0 - result.transmittance);
+    if (moonSkyContribution > 0.01) {
+        sky += moonLight * 0.05 * (1.0 - result.transmittance) * moonSkyContribution;
+    }
 
     // Night fallback color when sun is below the horizon
-    float night = 1.0 - smoothstep(-0.05, 0.08, ubo.sunDirection.y);
+    float night = 1.0 - smoothstep(-0.05, 0.08, sunAltitude);
     vec3 nightTint = mix(vec3(0.01, 0.015, 0.03), vec3(0.03, 0.05, 0.08), result.transmittance.y);
     sky += night * nightTint;
 
@@ -531,7 +611,11 @@ vec3 renderAtmosphere(vec3 dir) {
 
     // Add atmospheric in-scattering between camera and clouds (haze in front of clouds)
     // This uses the inscatter we already computed, scaled by how much cloud is visible
-    vec3 hazeInFront = result.inscatter * sunLight * (1.0 - clouds.transmittance) * 0.3;
+    vec3 hazeLight = sunLight;
+    if (moonSkyContribution > 0.01) {
+        hazeLight += moonLight * 0.3 * moonSkyContribution;
+    }
+    vec3 hazeInFront = result.inscatter * hazeLight * (1.0 - clouds.transmittance) * 0.3;
 
     // Final composite: sky behind clouds + cloud color + haze in front
     sky = skyBehindClouds + cloudColor + hazeInFront;
@@ -542,7 +626,7 @@ vec3 renderAtmosphere(vec3 dir) {
     sky += sunLight * sunDisc * 20.0 * result.transmittance * clouds.transmittance;
 
     float moonDisc = celestialDisc(dir, ubo.moonDirection.xyz, 0.012);
-    sky += vec3(0.95, 0.95, 1.0) * moonDisc * 1.5 * ubo.moonDirection.w *
+    sky += ubo.moonColor.rgb * moonDisc * 2.0 * ubo.moonDirection.w *
            clamp(result.transmittance, vec3(0.2), vec3(1.0)) * clouds.transmittance;
 
     // Star field blended over the atmospheric tint (also behind clouds)

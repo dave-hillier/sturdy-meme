@@ -1500,7 +1500,19 @@ void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera& camera) 
     float sunIntensity = sunPos.intensity;
     float moonIntensity = moonPos.intensity;
 
+    // Smooth transition for moon as light source during twilight
+    // Moon gradually becomes more prominent as sun approaches and goes below horizon
+    // Transition starts when sun is at 10° above horizon, fully active at -6° (end of civil twilight)
+    if (moonPos.altitude > -5.0f) {  // Moon needs to be reasonably above horizon
+        // Calculate how much to boost moon based on sun altitude
+        // At sun altitude 10°: no boost (factor = 1)
+        // At sun altitude -6°: full boost (factor = 2)
+        float twilightFactor = glm::smoothstep(10.0f, -6.0f, sunPos.altitude);
+        moonIntensity *= (1.0f + twilightFactor * 1.0f);
+    }
+
     glm::vec3 sunColor = celestialCalculator.getSunColor(sunPos.altitude);
+    glm::vec3 moonColor = celestialCalculator.getMoonColor(moonPos.altitude, moonPos.illumination);
     glm::vec3 ambientColor = celestialCalculator.getAmbientColor(sunPos.altitude);
 
     // Update cascade matrices for CSM
@@ -1527,6 +1539,7 @@ void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera& camera) 
     ubo.sunDirection = glm::vec4(sunDir, sunIntensity);
     ubo.moonDirection = glm::vec4(moonDir, moonIntensity);
     ubo.sunColor = glm::vec4(sunColor, 1.0f);
+    ubo.moonColor = glm::vec4(moonColor, 1.0f);
     ubo.ambientColor = glm::vec4(ambientColor, 1.0f);
     ubo.cameraPosition = glm::vec4(camera.getPosition(), 1.0f);
 

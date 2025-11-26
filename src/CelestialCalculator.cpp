@@ -311,11 +311,11 @@ MoonPosition CelestialCalculator::calculateMoonPosition(const DateTime& dateTime
     result.illumination = (1.0f - std::cos(result.phase * 2.0f * glm::pi<float>())) * 0.5f;
 
     // Intensity based on altitude and illumination
-    // Allow useful moon light sooner after rise and push it a bit brighter overall.
+    // Moon is much dimmer than sun - keep it subtle but visible
     float altFactor = glm::clamp((result.altitude + 2.0f) / 12.0f, 0.0f, 1.0f);
-    float baseMoon = altFactor * result.illumination * 0.5f;  // Boosted to ~50% of sun for visibility
+    float baseMoon = altFactor * result.illumination * 0.12f;  // ~12% of sun for subtle moonlight
     // Keep a small floor so nights aren't pitch black even with a low moon.
-    float minMoon = result.illumination * 0.05f;
+    float minMoon = result.illumination * 0.02f;
     result.intensity = glm::max(baseMoon, minMoon);
 
     return result;
@@ -339,4 +339,17 @@ glm::vec3 CelestialCalculator::getAmbientColor(float sunAltitude) const {
     glm::vec3 dayAmbient(0.15f, 0.15f, 0.20f);    // Keep daytime ambient lower for stronger shadow contrast
 
     return glm::mix(nightAmbient, dayAmbient, t);
+}
+
+glm::vec3 CelestialCalculator::getMoonColor(float moonAltitude, float illumination) const {
+    // Moon light is reflected sunlight - cool blue-white color
+    // At horizon it gets slightly warmer due to atmospheric scattering
+    float t = glm::smoothstep(-5.0f, 30.0f, moonAltitude);
+
+    // Warmer, dimmer color at horizon (atmospheric reddening)
+    glm::vec3 horizonColor(0.6f, 0.6f, 0.7f);
+    // Cool blue-white at higher altitudes (typical moonlight appearance)
+    glm::vec3 zenithColor(0.7f, 0.75f, 0.9f);
+
+    return glm::mix(horizonColor, zenithColor, t);
 }
