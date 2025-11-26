@@ -124,6 +124,25 @@ private:
 
     void updateUniformBuffer(uint32_t currentImage, const Camera& camera);
 
+    // Render pass recording helpers (pure - only record commands, no state mutation)
+    void recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float grassTime);
+    void recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float grassTime);
+    void recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex);
+
+    // Pure calculation helpers (no state mutation)
+    struct LightingParams {
+        glm::vec3 sunDir;
+        glm::vec3 moonDir;
+        float sunIntensity;
+        float moonIntensity;
+        glm::vec3 sunColor;
+        glm::vec3 moonColor;
+        glm::vec3 ambientColor;
+    };
+    LightingParams calculateLightingParams(float timeOfDay) const;
+    UniformBufferObject buildUniformBufferData(const Camera& camera, const LightingParams& lighting, float timeOfDay) const;
+    glm::vec2 calculateSunScreenPos(const Camera& camera, const glm::vec3& sunDir) const;
+
     SDL_Window* window = nullptr;
     std::string resourcePath;
 

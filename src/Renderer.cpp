@@ -1478,6 +1478,7 @@ bool Renderer::createDescriptorSets() {
 
 
 void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera& camera) {
+    // Update time of day (state mutation)
     static auto startTime = std::chrono::high_resolution_clock::now();
     auto currentTime = std::chrono::high_resolution_clock::now();
     float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
@@ -1489,94 +1490,26 @@ void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera& camera) 
         currentTimeOfDay = fmod((time * timeScale) / cycleDuration, 1.0f);
     }
 
-    // Calculate celestial positions using astronomical model
-    DateTime dateTime = DateTime::fromTimeOfDay(currentTimeOfDay, currentYear, currentMonth, currentDay);
-    CelestialPosition sunPos = celestialCalculator.calculateSunPosition(dateTime);
-    MoonPosition moonPos = celestialCalculator.calculateMoonPosition(dateTime);
+    // Pure calculations
+    LightingParams lighting = calculateLightingParams(currentTimeOfDay);
 
-    glm::vec3 sunDir = sunPos.direction;
-    glm::vec3 moonDir = moonPos.direction;
+    // Update cascade matrices (state mutation - modifies cascadeMatrices and cascadeSplitDepths)
+    updateCascadeMatrices(lighting.sunDir, camera);
 
-    float sunIntensity = sunPos.intensity;
-    float moonIntensity = moonPos.intensity;
+    // Build UBO data (pure calculation)
+    UniformBufferObject ubo = buildUniformBufferData(camera, lighting, currentTimeOfDay);
 
-    // Smooth transition for moon as light source during twilight
-    // Moon gradually becomes more prominent as sun approaches and goes below horizon
-    // Transition starts when sun is at 10° above horizon, fully active at -6° (end of civil twilight)
-    if (moonPos.altitude > -5.0f) {  // Moon needs to be reasonably above horizon
-        // Calculate how much to boost moon based on sun altitude
-        // At sun altitude 10°: no boost (factor = 1)
-        // At sun altitude -6°: full boost (factor = 2)
-        float twilightFactor = glm::smoothstep(10.0f, -6.0f, sunPos.altitude);
-        moonIntensity *= (1.0f + twilightFactor * 1.0f);
-    }
-
-    glm::vec3 sunColor = celestialCalculator.getSunColor(sunPos.altitude);
-    glm::vec3 moonColor = celestialCalculator.getMoonColor(moonPos.altitude, moonPos.illumination);
-    glm::vec3 ambientColor = celestialCalculator.getAmbientColor(sunPos.altitude);
-
-    // Update cascade matrices for CSM
-    updateCascadeMatrices(sunDir, camera);
-
-    UniformBufferObject ubo{};
-    ubo.model = glm::mat4(1.0f);
-    ubo.view = camera.getViewMatrix();
-    ubo.proj = camera.getProjectionMatrix();
-
-    // Copy cascade matrices
-    for (uint32_t i = 0; i < NUM_SHADOW_CASCADES; i++) {
-        ubo.cascadeViewProj[i] = cascadeMatrices[i];
-    }
-
-    // Store view-space split depths (skip first which is near plane)
-    ubo.cascadeSplits = glm::vec4(
-        cascadeSplitDepths[1],
-        cascadeSplitDepths[2],
-        cascadeSplitDepths[3],
-        cascadeSplitDepths[4]
-    );
-
-    ubo.sunDirection = glm::vec4(sunDir, sunIntensity);
-    ubo.moonDirection = glm::vec4(moonDir, moonIntensity);
-    ubo.sunColor = glm::vec4(sunColor, 1.0f);
-    ubo.moonColor = glm::vec4(moonColor, 1.0f);
-    ubo.ambientColor = glm::vec4(ambientColor, 1.0f);
-    ubo.cameraPosition = glm::vec4(camera.getPosition(), 1.0f);
-
-    // Point light from the glowing sphere
-    // Position matches the emissive sphere transform in init()
-    glm::vec3 pointLightPos = glm::vec3(2.0f, 1.3f, 0.0f);
-    float pointLightIntensity = 5.0f;  // Bright enough to illuminate nearby objects
-    float pointLightRadius = 8.0f;     // Light falloff radius in world units
-    ubo.pointLightPosition = glm::vec4(pointLightPos, pointLightIntensity);
-    ubo.pointLightColor = glm::vec4(1.0f, 0.9f, 0.7f, pointLightRadius);  // Warm white color
-
-    ubo.timeOfDay = currentTimeOfDay;
-    ubo.shadowMapSize = static_cast<float>(SHADOW_MAP_SIZE);
-    ubo.debugCascades = showCascadeDebug ? 1.0f : 0.0f;
-
-    lastSunIntensity = sunIntensity;
-
+    // State mutations
+    lastSunIntensity = lighting.sunIntensity;
     memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
 
-    // Calculate sun screen position for god rays (Phase 4.4)
-    // Place sun at a far distance along sun direction vector
-    glm::vec3 sunWorldPos = camera.getPosition() + sunDir * 1000.0f;
-    glm::vec4 sunClipPos = ubo.proj * ubo.view * glm::vec4(sunWorldPos, 1.0f);
-
-    // Perspective divide to get NDC
-    glm::vec2 sunScreenPos(0.5f, 0.5f);  // Default to center if behind camera
-    if (sunClipPos.w > 0.0f) {
-        glm::vec3 sunNDC = glm::vec3(sunClipPos) / sunClipPos.w;
-        // Convert from NDC [-1,1] to screen space [0,1]
-        sunScreenPos = glm::vec2(sunNDC.x * 0.5f + 0.5f, sunNDC.y * 0.5f + 0.5f);
-        // Flip Y for Vulkan coordinate system
-        sunScreenPos.y = 1.0f - sunScreenPos.y;
-    }
+    // Calculate sun screen position (pure) and update post-process (state mutation)
+    glm::vec2 sunScreenPos = calculateSunScreenPos(camera, lighting.sunDir);
     postProcessSystem.setSunScreenPos(sunScreenPos);
 }
 
 void Renderer::render(const Camera& camera) {
+    // Frame synchronization
     vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
 
     uint32_t imageIndex;
@@ -1589,16 +1522,10 @@ void Renderer::render(const Camera& camera) {
 
     vkResetFences(device, 1, &inFlightFences[currentFrame]);
 
+    // Update uniform buffer data
     updateUniformBuffer(currentFrame, camera);
 
-    vkResetCommandBuffer(commandBuffers[currentFrame], 0);
-
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-
-    vkBeginCommandBuffer(commandBuffers[currentFrame], &beginInfo);
-
-    // Get time for grass animation
+    // Calculate frame timing
     static auto startTime = std::chrono::high_resolution_clock::now();
     static auto lastTime = startTime;
     auto currentTime = std::chrono::high_resolution_clock::now();
@@ -1606,144 +1533,54 @@ void Renderer::render(const Camera& camera) {
     float deltaTime = std::chrono::duration<float>(currentTime - lastTime).count();
     lastTime = currentTime;
 
-    // Update wind system (handles time accumulation internally)
+    // Update subsystems (state mutations)
     windSystem.update(deltaTime);
     windSystem.updateUniforms(currentFrame);
 
-    // Update grass culling uniforms and run compute shader
     glm::mat4 viewProj = camera.getProjectionMatrix() * camera.getViewMatrix();
     grassSystem.updateUniforms(currentFrame, camera.getPosition(), viewProj);
-    grassSystem.recordResetAndCompute(commandBuffers[currentFrame], currentFrame, grassTime);
 
-    // Shadow pass - render all cascades (skip when the sun is effectively below the horizon)
+    // Begin command buffer recording
+    vkResetCommandBuffer(commandBuffers[currentFrame], 0);
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    vkBeginCommandBuffer(commandBuffers[currentFrame], &beginInfo);
+
+    VkCommandBuffer cmd = commandBuffers[currentFrame];
+
+    // Grass compute pass
+    grassSystem.recordResetAndCompute(cmd, currentFrame, grassTime);
+
+    // Shadow pass (skip when sun is below horizon)
     if (lastSunIntensity > 0.001f) {
-        // Render each cascade to its own framebuffer/layer
-        for (uint32_t cascade = 0; cascade < NUM_SHADOW_CASCADES; cascade++) {
-            VkRenderPassBeginInfo shadowPassInfo{};
-            shadowPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-            shadowPassInfo.renderPass = shadowRenderPass;
-            shadowPassInfo.framebuffer = cascadeFramebuffers[cascade];  // Per-cascade framebuffer
-            shadowPassInfo.renderArea.offset = {0, 0};
-            shadowPassInfo.renderArea.extent = {SHADOW_MAP_SIZE, SHADOW_MAP_SIZE};
-
-            VkClearValue shadowClear{};
-            shadowClear.depthStencil = {1.0f, 0};
-            shadowPassInfo.clearValueCount = 1;
-            shadowPassInfo.pClearValues = &shadowClear;
-
-            vkCmdBeginRenderPass(commandBuffers[currentFrame], &shadowPassInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-            vkCmdBindPipeline(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipeline);
-            vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                    shadowPipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);
-
-            for (const auto& obj : sceneObjects) {
-                if (!obj.castsShadow) continue;
-
-                ShadowPushConstants shadowPush{};
-                shadowPush.model = obj.transform;
-                shadowPush.cascadeIndex = static_cast<int>(cascade);
-                vkCmdPushConstants(commandBuffers[currentFrame], shadowPipelineLayout,
-                                  VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(ShadowPushConstants), &shadowPush);
-
-                VkBuffer vertexBuffers[] = {obj.mesh->getVertexBuffer()};
-                VkDeviceSize offsets[] = {0};
-                vkCmdBindVertexBuffers(commandBuffers[currentFrame], 0, 1, vertexBuffers, offsets);
-                vkCmdBindIndexBuffer(commandBuffers[currentFrame], obj.mesh->getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
-                vkCmdDrawIndexed(commandBuffers[currentFrame], obj.mesh->getIndexCount(), 1, 0, 0, 0);
-            }
-
-            // Draw grass shadows (with dithering for soft shadows)
-            grassSystem.recordShadowDraw(commandBuffers[currentFrame], currentFrame, grassTime, cascade);
-
-            vkCmdEndRenderPass(commandBuffers[currentFrame]);
-        }
+        recordShadowPass(cmd, currentFrame, grassTime);
     }
 
-    // Update froxel volumetric fog (Phase 4.3)
-    // Compute pass runs before HDR scene rendering
+    // Froxel volumetric fog compute pass
     {
-        // Get sun direction and color from uniform data
         UniformBufferObject* ubo = static_cast<UniformBufferObject*>(uniformBuffersMapped[currentFrame]);
         glm::vec3 sunDir = glm::normalize(glm::vec3(ubo->sunDirection));
         float sunIntensity = ubo->sunDirection.w;
         glm::vec3 sunColor = glm::vec3(ubo->sunColor);
 
-        froxelSystem.recordFroxelUpdate(commandBuffers[currentFrame], currentFrame,
+        froxelSystem.recordFroxelUpdate(cmd, currentFrame,
                                         camera.getViewMatrix(), camera.getProjectionMatrix(),
                                         camera.getPosition(),
                                         sunDir, sunIntensity, sunColor);
 
-        // Update post-process with camera planes for depth linearization
         postProcessSystem.setCameraPlanes(camera.getNearPlane(), camera.getFarPlane());
     }
 
-    // HDR render pass - render scene to HDR target
-    VkRenderPassBeginInfo hdrPassInfo{};
-    hdrPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    hdrPassInfo.renderPass = postProcessSystem.getHDRRenderPass();
-    hdrPassInfo.framebuffer = postProcessSystem.getHDRFramebuffer();
-    hdrPassInfo.renderArea.offset = {0, 0};
-    hdrPassInfo.renderArea.extent = postProcessSystem.getExtent();
+    // HDR scene render pass
+    recordHDRPass(cmd, currentFrame, grassTime);
 
-    std::array<VkClearValue, 2> clearValues{};
-    clearValues[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
-    clearValues[1].depthStencil = {1.0f, 0};
+    // Post-process pass
+    postProcessSystem.recordPostProcess(cmd, currentFrame, framebuffers[imageIndex], deltaTime);
 
-    hdrPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
-    hdrPassInfo.pClearValues = clearValues.data();
+    vkEndCommandBuffer(cmd);
 
-    vkCmdBeginRenderPass(commandBuffers[currentFrame], &hdrPassInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-    vkCmdBindPipeline(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, skyPipeline);
-    vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            pipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);
-    vkCmdDraw(commandBuffers[currentFrame], 3, 1, 0, 0);
-
-    vkCmdBindPipeline(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
-
-    for (const auto& obj : sceneObjects) {
-        PushConstants push{};
-        push.model = obj.transform;
-        push.roughness = obj.roughness;
-        push.metallic = obj.metallic;
-        push.emissiveIntensity = obj.emissiveIntensity;
-
-        vkCmdPushConstants(commandBuffers[currentFrame], pipelineLayout,
-                          VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                          0, sizeof(PushConstants), &push);
-
-        // Select descriptor set based on texture
-        VkDescriptorSet* descSet;
-        if (obj.texture == &groundTexture) {
-            descSet = &groundDescriptorSets[currentFrame];
-        } else if (obj.texture == &metalTexture) {
-            descSet = &metalDescriptorSets[currentFrame];
-        } else {
-            descSet = &descriptorSets[currentFrame];
-        }
-        vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                pipelineLayout, 0, 1, descSet, 0, nullptr);
-
-        VkBuffer vertexBuffers[] = {obj.mesh->getVertexBuffer()};
-        VkDeviceSize offsets[] = {0};
-        vkCmdBindVertexBuffers(commandBuffers[currentFrame], 0, 1, vertexBuffers, offsets);
-        vkCmdBindIndexBuffer(commandBuffers[currentFrame], obj.mesh->getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
-
-        vkCmdDrawIndexed(commandBuffers[currentFrame], obj.mesh->getIndexCount(), 1, 0, 0, 0);
-    }
-
-    // Draw grass
-    grassSystem.recordDraw(commandBuffers[currentFrame], currentFrame, grassTime);
-
-    vkCmdEndRenderPass(commandBuffers[currentFrame]);
-
-    // Post-process pass - tone map HDR to LDR swapchain
-    postProcessSystem.recordPostProcess(commandBuffers[currentFrame], currentFrame,
-                                         framebuffers[imageIndex], deltaTime);
-
-    vkEndCommandBuffer(commandBuffers[currentFrame]);
-
+    // Queue submission
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
@@ -1753,7 +1590,7 @@ void Renderer::render(const Camera& camera) {
     submitInfo.pWaitSemaphores = waitSemaphores;
     submitInfo.pWaitDstStageMask = waitStages;
     submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &commandBuffers[currentFrame];
+    submitInfo.pCommandBuffers = &cmd;
 
     VkSemaphore signalSemaphores[] = {renderFinishedSemaphores[currentFrame]};
     submitInfo.signalSemaphoreCount = 1;
@@ -1761,6 +1598,7 @@ void Renderer::render(const Camera& camera) {
 
     vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]);
 
+    // Present
     VkPresentInfoKHR presentInfo{};
     presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     presentInfo.waitSemaphoreCount = 1;
@@ -1778,4 +1616,194 @@ void Renderer::render(const Camera& camera) {
 
 void Renderer::waitIdle() {
     vkDeviceWaitIdle(device);
+}
+
+// Pure calculation helpers - no state mutation
+
+Renderer::LightingParams Renderer::calculateLightingParams(float timeOfDay) const {
+    LightingParams params{};
+
+    DateTime dateTime = DateTime::fromTimeOfDay(timeOfDay, currentYear, currentMonth, currentDay);
+    CelestialPosition sunPos = celestialCalculator.calculateSunPosition(dateTime);
+    MoonPosition moonPos = celestialCalculator.calculateMoonPosition(dateTime);
+
+    params.sunDir = sunPos.direction;
+    params.moonDir = moonPos.direction;
+    params.sunIntensity = sunPos.intensity;
+    params.moonIntensity = moonPos.intensity;
+
+    // Smooth transition for moon as light source during twilight
+    if (moonPos.altitude > -5.0f) {
+        float twilightFactor = glm::smoothstep(10.0f, -6.0f, sunPos.altitude);
+        params.moonIntensity *= (1.0f + twilightFactor * 1.0f);
+    }
+
+    params.sunColor = celestialCalculator.getSunColor(sunPos.altitude);
+    params.moonColor = celestialCalculator.getMoonColor(moonPos.altitude, moonPos.illumination);
+    params.ambientColor = celestialCalculator.getAmbientColor(sunPos.altitude);
+
+    return params;
+}
+
+UniformBufferObject Renderer::buildUniformBufferData(const Camera& camera, const LightingParams& lighting, float timeOfDay) const {
+    UniformBufferObject ubo{};
+    ubo.model = glm::mat4(1.0f);
+    ubo.view = camera.getViewMatrix();
+    ubo.proj = camera.getProjectionMatrix();
+
+    // Copy cascade matrices
+    for (uint32_t i = 0; i < NUM_SHADOW_CASCADES; i++) {
+        ubo.cascadeViewProj[i] = cascadeMatrices[i];
+    }
+
+    // Store view-space split depths
+    ubo.cascadeSplits = glm::vec4(
+        cascadeSplitDepths[1],
+        cascadeSplitDepths[2],
+        cascadeSplitDepths[3],
+        cascadeSplitDepths[4]
+    );
+
+    ubo.sunDirection = glm::vec4(lighting.sunDir, lighting.sunIntensity);
+    ubo.moonDirection = glm::vec4(lighting.moonDir, lighting.moonIntensity);
+    ubo.sunColor = glm::vec4(lighting.sunColor, 1.0f);
+    ubo.moonColor = glm::vec4(lighting.moonColor, 1.0f);
+    ubo.ambientColor = glm::vec4(lighting.ambientColor, 1.0f);
+    ubo.cameraPosition = glm::vec4(camera.getPosition(), 1.0f);
+
+    // Point light from the glowing sphere
+    glm::vec3 pointLightPos = glm::vec3(2.0f, 1.3f, 0.0f);
+    float pointLightIntensity = 5.0f;
+    float pointLightRadius = 8.0f;
+    ubo.pointLightPosition = glm::vec4(pointLightPos, pointLightIntensity);
+    ubo.pointLightColor = glm::vec4(1.0f, 0.9f, 0.7f, pointLightRadius);
+
+    ubo.timeOfDay = timeOfDay;
+    ubo.shadowMapSize = static_cast<float>(SHADOW_MAP_SIZE);
+    ubo.debugCascades = showCascadeDebug ? 1.0f : 0.0f;
+
+    return ubo;
+}
+
+glm::vec2 Renderer::calculateSunScreenPos(const Camera& camera, const glm::vec3& sunDir) const {
+    glm::vec3 sunWorldPos = camera.getPosition() + sunDir * 1000.0f;
+    glm::vec4 sunClipPos = camera.getProjectionMatrix() * camera.getViewMatrix() * glm::vec4(sunWorldPos, 1.0f);
+
+    glm::vec2 sunScreenPos(0.5f, 0.5f);
+    if (sunClipPos.w > 0.0f) {
+        glm::vec3 sunNDC = glm::vec3(sunClipPos) / sunClipPos.w;
+        sunScreenPos = glm::vec2(sunNDC.x * 0.5f + 0.5f, sunNDC.y * 0.5f + 0.5f);
+        sunScreenPos.y = 1.0f - sunScreenPos.y;
+    }
+    return sunScreenPos;
+}
+
+// Render pass recording helpers - pure command recording, no state mutation
+
+void Renderer::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float grassTime) {
+    for (uint32_t cascade = 0; cascade < NUM_SHADOW_CASCADES; cascade++) {
+        VkRenderPassBeginInfo shadowPassInfo{};
+        shadowPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        shadowPassInfo.renderPass = shadowRenderPass;
+        shadowPassInfo.framebuffer = cascadeFramebuffers[cascade];
+        shadowPassInfo.renderArea.offset = {0, 0};
+        shadowPassInfo.renderArea.extent = {SHADOW_MAP_SIZE, SHADOW_MAP_SIZE};
+
+        VkClearValue shadowClear{};
+        shadowClear.depthStencil = {1.0f, 0};
+        shadowPassInfo.clearValueCount = 1;
+        shadowPassInfo.pClearValues = &shadowClear;
+
+        vkCmdBeginRenderPass(cmd, &shadowPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipeline);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                shadowPipelineLayout, 0, 1, &descriptorSets[frameIndex], 0, nullptr);
+
+        for (const auto& obj : sceneObjects) {
+            if (!obj.castsShadow) continue;
+
+            ShadowPushConstants shadowPush{};
+            shadowPush.model = obj.transform;
+            shadowPush.cascadeIndex = static_cast<int>(cascade);
+            vkCmdPushConstants(cmd, shadowPipelineLayout,
+                              VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(ShadowPushConstants), &shadowPush);
+
+            VkBuffer vertexBuffers[] = {obj.mesh->getVertexBuffer()};
+            VkDeviceSize offsets[] = {0};
+            vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
+            vkCmdBindIndexBuffer(cmd, obj.mesh->getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+            vkCmdDrawIndexed(cmd, obj.mesh->getIndexCount(), 1, 0, 0, 0);
+        }
+
+        grassSystem.recordShadowDraw(cmd, frameIndex, grassTime, cascade);
+
+        vkCmdEndRenderPass(cmd);
+    }
+}
+
+void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
+    for (const auto& obj : sceneObjects) {
+        PushConstants push{};
+        push.model = obj.transform;
+        push.roughness = obj.roughness;
+        push.metallic = obj.metallic;
+        push.emissiveIntensity = obj.emissiveIntensity;
+
+        vkCmdPushConstants(cmd, pipelineLayout,
+                          VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                          0, sizeof(PushConstants), &push);
+
+        // Select descriptor set based on texture
+        VkDescriptorSet* descSet;
+        if (obj.texture == &groundTexture) {
+            descSet = &groundDescriptorSets[frameIndex];
+        } else if (obj.texture == &metalTexture) {
+            descSet = &metalDescriptorSets[frameIndex];
+        } else {
+            descSet = &descriptorSets[frameIndex];
+        }
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                pipelineLayout, 0, 1, descSet, 0, nullptr);
+
+        VkBuffer vertexBuffers[] = {obj.mesh->getVertexBuffer()};
+        VkDeviceSize offsets[] = {0};
+        vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
+        vkCmdBindIndexBuffer(cmd, obj.mesh->getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+
+        vkCmdDrawIndexed(cmd, obj.mesh->getIndexCount(), 1, 0, 0, 0);
+    }
+}
+
+void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float grassTime) {
+    VkRenderPassBeginInfo hdrPassInfo{};
+    hdrPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    hdrPassInfo.renderPass = postProcessSystem.getHDRRenderPass();
+    hdrPassInfo.framebuffer = postProcessSystem.getHDRFramebuffer();
+    hdrPassInfo.renderArea.offset = {0, 0};
+    hdrPassInfo.renderArea.extent = postProcessSystem.getExtent();
+
+    std::array<VkClearValue, 2> clearValues{};
+    clearValues[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
+    clearValues[1].depthStencil = {1.0f, 0};
+
+    hdrPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
+    hdrPassInfo.pClearValues = clearValues.data();
+
+    vkCmdBeginRenderPass(cmd, &hdrPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+    // Draw sky
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, skyPipeline);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            pipelineLayout, 0, 1, &descriptorSets[frameIndex], 0, nullptr);
+    vkCmdDraw(cmd, 3, 1, 0, 0);
+
+    // Draw scene objects
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+    recordSceneObjects(cmd, frameIndex);
+
+    // Draw grass
+    grassSystem.recordDraw(cmd, frameIndex, grassTime);
+
+    vkCmdEndRenderPass(cmd);
 }
