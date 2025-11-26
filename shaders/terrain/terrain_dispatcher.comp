@@ -1,0 +1,56 @@
+#version 450
+
+/*
+ * terrain_dispatcher.comp - Sets up indirect dispatch and draw arguments
+ * This shader reads the leaf count from the CBT and configures:
+ *  - Indirect dispatch args for subdivision compute shader
+ *  - Indirect draw args for terrain rendering
+ */
+
+#define CBT_BUFFER_BINDING 0
+#include "cbt.glsl"
+
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+// Indirect dispatch arguments for subdivision compute shader
+layout(std430, binding = 1) buffer DispatchIndirect {
+    uint dispatchX;
+    uint dispatchY;
+    uint dispatchZ;
+};
+
+// Indirect draw arguments for terrain rendering
+layout(std430, binding = 2) buffer DrawIndirect {
+    uint vertexCount;
+    uint instanceCount;
+    uint firstVertex;
+    uint firstInstance;
+};
+
+// Push constants for configuration
+layout(push_constant) uniform PushConstants {
+    uint subdivisionWorkgroupSize;  // Threads per workgroup in subdivision shader
+    uint meshletVertexCount;        // Vertices per meshlet (0 = no meshlets, just triangles)
+};
+
+void main() {
+    uint leafCount = cbt_NodeCount();
+
+    // Set up subdivision dispatch (one thread per leaf)
+    dispatchX = (leafCount + subdivisionWorkgroupSize - 1u) / subdivisionWorkgroupSize;
+    dispatchY = 1u;
+    dispatchZ = 1u;
+
+    // Set up draw arguments
+    if (meshletVertexCount > 0u) {
+        // Instanced meshlet rendering: one instance per leaf
+        vertexCount = meshletVertexCount;
+        instanceCount = leafCount;
+    } else {
+        // Direct triangle rendering: 3 vertices per leaf
+        vertexCount = leafCount * 3u;
+        instanceCount = 1u;
+    }
+    firstVertex = 0u;
+    firstInstance = 0u;
+}

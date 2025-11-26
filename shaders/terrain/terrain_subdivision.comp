@@ -1,0 +1,158 @@
+#version 450
+
+/*
+ * terrain_subdivision.comp - LOD evaluation and adaptive subdivision
+ * Each thread processes one leaf triangle and decides whether to split or merge
+ */
+
+#define CBT_BUFFER_BINDING 0
+#include "cbt.glsl"
+#include "leb.glsl"
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+// Height map sampler
+layout(binding = 3) uniform sampler2D heightMap;
+
+// Uniform buffer with camera and terrain parameters
+layout(std140, binding = 4) uniform TerrainUniforms {
+    mat4 viewMatrix;
+    mat4 projMatrix;
+    mat4 viewProjMatrix;
+    vec4 frustumPlanes[6];
+    vec4 cameraPosition;
+    vec4 terrainParams;   // x = size, y = height scale, z = target edge pixels, w = max depth
+    vec4 lodParams;       // x = split threshold, y = merge threshold, z = min depth, w = unused
+    vec2 screenSize;
+    float lodFactor;
+    float padding;
+};
+
+// Extract parameters
+#define TERRAIN_SIZE (terrainParams.x)
+#define HEIGHT_SCALE (terrainParams.y)
+#define TARGET_EDGE_PIXELS (terrainParams.z)
+#define MAX_DEPTH (int(terrainParams.w))
+#define SPLIT_THRESHOLD (lodParams.x)
+#define MERGE_THRESHOLD (lodParams.y)
+#define MIN_DEPTH (int(lodParams.z))
+
+// Sample terrain height at UV coordinate
+float sampleHeight(vec2 uv) {
+    return texture(heightMap, uv).r * HEIGHT_SCALE;
+}
+
+// Transform UV to world position
+vec3 uvToWorldPos(vec2 uv) {
+    float height = sampleHeight(uv);
+    return vec3(
+        (uv.x - 0.5) * TERRAIN_SIZE,
+        height,
+        (uv.y - 0.5) * TERRAIN_SIZE
+    );
+}
+
+// Frustum culling test for AABB
+bool frustumCullAABB(vec3 minBound, vec3 maxBound) {
+    for (int i = 0; i < 6; i++) {
+        vec4 plane = frustumPlanes[i];
+        vec3 pVertex = vec3(
+            plane.x > 0.0 ? maxBound.x : minBound.x,
+            plane.y > 0.0 ? maxBound.y : minBound.y,
+            plane.z > 0.0 ? maxBound.z : minBound.z
+        );
+        if (dot(vec4(pVertex, 1.0), plane) < 0.0) {
+            return true; // Culled
+        }
+    }
+    return false; // Visible
+}
+
+// Compute screen-space edge length
+float computeScreenSpaceEdgeLength(vec3 p0, vec3 p1) {
+    // Project both points to clip space
+    vec4 c0 = viewProjMatrix * vec4(p0, 1.0);
+    vec4 c1 = viewProjMatrix * vec4(p1, 1.0);
+
+    // Handle behind-camera cases
+    if (c0.w <= 0.0 || c1.w <= 0.0) {
+        return 1e6; // Force split for edges behind camera
+    }
+
+    // Perspective divide to NDC
+    vec2 ndc0 = c0.xy / c0.w;
+    vec2 ndc1 = c1.xy / c1.w;
+
+    // Convert to pixels
+    vec2 s0 = (ndc0 * 0.5 + 0.5) * screenSize;
+    vec2 s1 = (ndc1 * 0.5 + 0.5) * screenSize;
+
+    return length(s1 - s0);
+}
+
+// Compute LOD for a triangle - returns longest edge length in pixels
+float computeTriangleLOD(vec2 v0, vec2 v1, vec2 v2) {
+    vec3 p0 = uvToWorldPos(v0);
+    vec3 p1 = uvToWorldPos(v1);
+    vec3 p2 = uvToWorldPos(v2);
+
+    // Find longest edge (in LEB, the longest edge is always between v1 and v2)
+    float e12 = computeScreenSpaceEdgeLength(p1, p2);
+
+    return e12;
+}
+
+void main() {
+    uint leafIndex = gl_GlobalInvocationID.x;
+    uint totalLeaves = cbt_NodeCount();
+
+    if (leafIndex >= totalLeaves) {
+        return;
+    }
+
+    // Decode leaf index to heap index
+    cbt_Node node = cbt_DecodeNode(leafIndex);
+    int depth = node.depth;
+
+    // Decode triangle vertices
+    vec2 v0, v1, v2;
+    leb_DecodeTriangleVertices(node, v0, v1, v2);
+
+    // Get world positions for frustum culling
+    vec3 p0 = uvToWorldPos(v0);
+    vec3 p1 = uvToWorldPos(v1);
+    vec3 p2 = uvToWorldPos(v2);
+
+    // Compute AABB with height margin
+    vec3 minBound = min(min(p0, p1), p2);
+    vec3 maxBound = max(max(p0, p1), p2);
+    // Add height margin for terrain that might be displaced
+    minBound.y -= HEIGHT_SCALE * 0.1;
+    maxBound.y += HEIGHT_SCALE * 0.1;
+
+    // Frustum culling
+    bool culled = frustumCullAABB(minBound, maxBound);
+
+    if (culled) {
+        // If culled and not at minimum depth, try to merge
+        if (depth > MIN_DEPTH) {
+            leb_DiamondParent diamond = leb_DecodeDiamondParent_Square(node);
+            leb_MergeNode_Square(node, diamond);
+        }
+        return;
+    }
+
+    // Compute screen-space edge length
+    float edgeLengthPixels = computeTriangleLOD(v0, v1, v2);
+
+    // LOD decision with hysteresis
+    if (edgeLengthPixels > SPLIT_THRESHOLD && depth < MAX_DEPTH) {
+        // Split: create two child leaves
+        leb_SplitNode_Square(node);
+    } else if (edgeLengthPixels < MERGE_THRESHOLD && depth > MIN_DEPTH) {
+        // Merge: combine with sibling
+        leb_DiamondParent diamond = leb_DecodeDiamondParent_Square(node);
+        leb_MergeNode_Square(node, diamond);
+    }
+    // else: keep current state
+}

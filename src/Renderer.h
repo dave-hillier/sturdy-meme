@@ -18,6 +18,7 @@
 #include "FroxelSystem.h"
 #include "AtmosphereLUTSystem.h"
 #include "SceneManager.h"
+#include "TerrainSystem.h"
 
 static constexpr uint32_t NUM_SHADOW_CASCADES = 4;
 
@@ -79,6 +80,12 @@ public:
 
     void toggleCascadeDebug() { showCascadeDebug = !showCascadeDebug; }
     bool isShowingCascadeDebug() const { return showCascadeDebug; }
+
+    // Terrain control
+    void toggleTerrainWireframe() { terrainSystem.setWireframeMode(!terrainSystem.isWireframeMode()); }
+    bool isTerrainWireframeMode() const { return terrainSystem.isWireframeMode(); }
+    float getTerrainHeightAt(float x, float z) const { return terrainSystem.getHeightAt(x, z); }
+    uint32_t getTerrainNodeCount() const { return terrainSystem.getNodeCount(); }
 
     // Weather control
     void setWeatherIntensity(float intensity);
@@ -193,6 +200,7 @@ private:
     PostProcessSystem postProcessSystem;
     FroxelSystem froxelSystem;
     AtmosphereLUTSystem atmosphereLUTSystem;
+    TerrainSystem terrainSystem;
 
     std::vector<VkFramebuffer> framebuffers;
     VkCommandPool commandPool = VK_NULL_HANDLE;
