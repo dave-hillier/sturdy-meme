@@ -17,6 +17,7 @@ struct SceneObject {
     float roughness = 0.5f;
     float metallic = 0.0f;
     float emissiveIntensity = 0.0f;
+    glm::vec3 emissiveColor = glm::vec3(1.0f);  // Default white (uses texture color)
     bool castsShadow = true;
 };
 
@@ -50,6 +51,7 @@ public:
     Texture& getCrateNormalMap() { return crateNormalMap; }
     Texture& getMetalTexture() { return metalTexture; }
     Texture& getMetalNormalMap() { return metalNormalMap; }
+    Texture& getDefaultEmissiveMap() { return defaultEmissiveMap; }
 
     // Update player transform
     void updatePlayerTransform(const glm::mat4& transform);
@@ -72,6 +74,7 @@ private:
     Texture groundNormalMap;
     Texture metalTexture;
     Texture metalNormalMap;
+    Texture defaultEmissiveMap;  // Black texture for objects without emissive
 
     // Scene objects
     std::vector<SceneObject> sceneObjects;

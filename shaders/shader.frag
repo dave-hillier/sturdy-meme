@@ -49,6 +49,7 @@ layout(binding = 0) uniform UniformBufferObject {
 layout(binding = 1) uniform sampler2D texSampler;
 layout(binding = 2) uniform sampler2DArrayShadow shadowMapArray;  // Changed to array for CSM
 layout(binding = 3) uniform sampler2D normalMap;
+layout(binding = 5) uniform sampler2D emissiveMap;
 
 // Light types
 const uint LIGHT_TYPE_POINT = 0;
@@ -76,6 +77,8 @@ layout(push_constant) uniform PushConstants {
     float roughness;
     float metallic;
     float emissiveIntensity;
+    float padding;
+    vec4 emissiveColor;
 } material;
 
 layout(location = 0) in vec3 fragNormal;
@@ -553,8 +556,14 @@ void main() {
 
     vec3 finalColor = ambient + sunLight + moonLight + dynamicLights;
 
-    // Add emissive glow
-    vec3 emissive = albedo * material.emissiveIntensity;
+    // Add emissive glow from emissive map + material emissive color
+    vec3 emissiveMapSample = texture(emissiveMap, fragTexCoord).rgb;
+    float emissiveMapLum = dot(emissiveMapSample, vec3(0.299, 0.587, 0.114));
+    // Use emissive map color if present, otherwise use material emissive color
+    vec3 emissiveColor = emissiveMapLum > 0.01
+        ? emissiveMapSample * material.emissiveColor.rgb
+        : mix(albedo, material.emissiveColor.rgb, material.emissiveColor.a);
+    vec3 emissive = emissiveColor * material.emissiveIntensity;
     finalColor += emissive;
 
     vec3 cameraToFrag = fragWorldPos - ubo.cameraPosition.xyz;
