@@ -50,6 +50,8 @@ layout(binding = 1) uniform sampler2D texSampler;
 layout(binding = 2) uniform sampler2DArrayShadow shadowMapArray;  // Changed to array for CSM
 layout(binding = 3) uniform sampler2D normalMap;
 layout(binding = 5) uniform sampler2D emissiveMap;
+layout(binding = 6) uniform samplerCubeArrayShadow pointShadowMaps;  // Point light cube shadow maps
+layout(binding = 7) uniform sampler2DArrayShadow spotShadowMaps;     // Spot light shadow maps
 
 // Light types
 const uint LIGHT_TYPE_POINT = 0;
@@ -63,7 +65,7 @@ struct GPULight {
     vec4 positionAndType;    // xyz = position, w = type (0=point, 1=spot)
     vec4 directionAndCone;   // xyz = direction (for spot), w = outer cone angle (cos)
     vec4 colorAndIntensity;  // rgb = color, a = intensity
-    vec4 radiusAndInnerCone; // x = radius, y = inner cone angle (cos), zw = padding
+    vec4 radiusAndInnerCone; // x = radius, y = inner cone angle (cos), z = shadow map index (-1 = no shadow), w = padding
 };
 
 // Light buffer SSBO
@@ -471,6 +473,91 @@ float calculateSpotFalloff(vec3 L, vec3 spotDir, float innerCone, float outerCon
 }
 
 // Calculate contribution from a single dynamic light (point or spot)
+// Helper function to create a look-at matrix
+mat4 lookAt(vec3 eye, vec3 center, vec3 up) {
+    vec3 f = normalize(center - eye);
+    vec3 s = normalize(cross(f, up));
+    vec3 u = cross(s, f);
+
+    mat4 result = mat4(1.0);
+    result[0][0] = s.x;
+    result[1][0] = s.y;
+    result[2][0] = s.z;
+    result[0][1] = u.x;
+    result[1][1] = u.y;
+    result[2][1] = u.z;
+    result[0][2] = -f.x;
+    result[1][2] = -f.y;
+    result[2][2] = -f.z;
+    result[3][0] = -dot(s, eye);
+    result[3][1] = -dot(u, eye);
+    result[3][2] = dot(f, eye);
+    return result;
+}
+
+// Helper function to create a perspective matrix
+mat4 perspective(float fovy, float aspect, float near, float far) {
+    float tanHalfFovy = tan(fovy / 2.0);
+
+    mat4 result = mat4(0.0);
+    result[0][0] = 1.0 / (aspect * tanHalfFovy);
+    result[1][1] = 1.0 / tanHalfFovy;
+    result[2][2] = -(far + near) / (far - near);
+    result[2][3] = -1.0;
+    result[3][2] = -(2.0 * far * near) / (far - near);
+    return result;
+}
+
+// Sample dynamic light shadow map
+float sampleDynamicShadow(GPULight light, vec3 worldPos) {
+    int shadowIndex = int(light.radiusAndInnerCone.z);
+
+    // No shadow if index is -1
+    if (shadowIndex < 0) return 1.0;
+
+    uint lightType = uint(light.positionAndType.w);
+    vec3 lightPos = light.positionAndType.xyz;
+
+    if (lightType == LIGHT_TYPE_POINT) {
+        // Point light - sample cube map
+        vec3 fragToLight = worldPos - lightPos;
+        float currentDepth = length(fragToLight);
+        float radius = light.radiusAndInnerCone.x;
+
+        // Normalize depth to [0,1] range based on light radius
+        float normalizedDepth = currentDepth / radius;
+
+        // Sample cube shadow map
+        vec4 shadowCoord = vec4(normalize(fragToLight), float(shadowIndex));
+        float shadow = texture(pointShadowMaps, shadowCoord, normalizedDepth);
+
+        return shadow;
+    }
+    else {  // LIGHT_TYPE_SPOT
+        // Spot light - sample 2D shadow map
+        vec3 spotDir = normalize(light.directionAndCone.xyz);
+
+        // Create light view-projection matrix
+        mat4 lightView = lookAt(lightPos, lightPos + spotDir, vec3(0.0, 1.0, 0.0));
+        float outerCone = light.directionAndCone.w;
+        float fov = acos(outerCone) * 2.0;
+        mat4 lightProj = perspective(fov, 1.0, 0.1, light.radiusAndInnerCone.x);
+
+        // Transform world position to light clip space
+        vec4 lightSpacePos = lightProj * lightView * vec4(worldPos, 1.0);
+        vec3 projCoords = lightSpacePos.xyz / lightSpacePos.w;
+
+        // Transform to [0,1] range
+        projCoords = projCoords * 0.5 + 0.5;
+
+        // Sample shadow map
+        vec4 shadowCoord = vec4(projCoords.xy, float(shadowIndex), projCoords.z);
+        float shadow = texture(spotShadowMaps, shadowCoord);
+
+        return shadow;
+    }
+}
+
 vec3 calculateDynamicLight(GPULight light, vec3 N, vec3 V, vec3 worldPos, vec3 albedo) {
     vec3 lightPos = light.positionAndType.xyz;
     uint lightType = uint(light.positionAndType.w);
@@ -501,7 +588,11 @@ vec3 calculateDynamicLight(GPULight light, vec3 N, vec3 V, vec3 worldPos, vec3 a
         attenuation *= spotFalloff;
     }
 
-    // Calculate PBR lighting contribution (no shadow for dynamic lights)
+    // Sample shadow map
+    float shadow = sampleDynamicShadow(light, worldPos);
+    attenuation *= shadow;
+
+    // Calculate PBR lighting contribution with shadow
     return calculatePBR(N, V, L, lightColor, lightIntensity * attenuation, albedo, 1.0);
 }
 

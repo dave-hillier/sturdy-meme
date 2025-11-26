@@ -20,7 +20,7 @@ struct GPULight {
     glm::vec4 positionAndType;    // xyz = position, w = type (0=point, 1=spot)
     glm::vec4 directionAndCone;   // xyz = direction (for spot), w = outer cone angle (cos)
     glm::vec4 colorAndIntensity;  // rgb = color, a = intensity
-    glm::vec4 radiusAndInnerCone; // x = radius, y = inner cone angle (cos), zw = padding
+    glm::vec4 radiusAndInnerCone; // x = radius, y = inner cone angle (cos), z = shadow map index (-1 = no shadow), w = padding
 };
 
 // Light buffer sent to GPU (header + array)
@@ -40,6 +40,10 @@ struct Light {
     float innerConeAngle = 30.0f; // Degrees, for spots
     float outerConeAngle = 45.0f; // Degrees, for spots
 
+    // Shadow mapping
+    int32_t shadowMapIndex = -1;  // -1 = no shadow, >= 0 = index in shadow map array
+    bool castsShadows = true;     // Whether this light should cast shadows
+
     // Priority/culling metadata
     float priority = 1.0f;        // Higher = more important, less likely to be culled
     bool enabled = true;
@@ -56,7 +60,8 @@ struct Light {
         gpu.radiusAndInnerCone = glm::vec4(
             radius,
             glm::cos(glm::radians(innerConeAngle)),
-            0.0f, 0.0f
+            static_cast<float>(shadowMapIndex),
+            0.0f
         );
         return gpu;
     }
