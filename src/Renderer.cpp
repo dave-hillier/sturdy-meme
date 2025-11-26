@@ -198,6 +198,55 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     postProcessSystem.setFroxelParams(froxelSystem.getVolumetricFarPlane(), FroxelSystem::DEPTH_DISTRIBUTION);
     postProcessSystem.setFroxelEnabled(true);
 
+    // Initialize atmosphere LUT system (Phase 4.1)
+    AtmosphereLUTSystem::InitInfo atmosphereInfo{};
+    atmosphereInfo.device = device;
+    atmosphereInfo.allocator = allocator;
+    atmosphereInfo.descriptorPool = descriptorPool;
+    atmosphereInfo.shaderPath = resourcePath + "/shaders";
+    atmosphereInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+
+    if (!atmosphereLUTSystem.init(atmosphereInfo)) return false;
+
+    // Compute atmosphere LUTs at startup
+    VkCommandBuffer cmdBuffer;
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.commandPool = commandPool;
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandBufferCount = 1;
+    vkAllocateCommandBuffers(device, &allocInfo, &cmdBuffer);
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cmdBuffer, &beginInfo);
+
+    // Compute transmittance and multi-scatter LUTs (once at startup)
+    atmosphereLUTSystem.computeTransmittanceLUT(cmdBuffer);
+    atmosphereLUTSystem.computeMultiScatterLUT(cmdBuffer);
+
+    // Compute sky-view LUT for current sun direction
+    glm::vec3 sunDir = glm::vec3(0.0f, 0.707f, 0.707f);  // Default 45 degree sun
+    atmosphereLUTSystem.computeSkyViewLUT(cmdBuffer, sunDir, glm::vec3(0.0f), 0.0f);
+
+    vkEndCommandBuffer(cmdBuffer);
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &cmdBuffer;
+
+    vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+    vkQueueWaitIdle(graphicsQueue);
+    vkFreeCommandBuffers(device, commandPool, 1, &cmdBuffer);
+
+    SDL_Log("Atmosphere LUTs computed successfully");
+
+    // Export LUTs as PNG files for visualization
+    atmosphereLUTSystem.exportLUTsAsPNG(resourcePath);
+    SDL_Log("Atmosphere LUTs exported as PNG to: %s", resourcePath.c_str());
+
     if (!createSyncObjects()) return false;
 
     return true;
@@ -244,6 +293,7 @@ void Renderer::shutdown() {
         windSystem.destroy(device, allocator);
         weatherSystem.destroy(device, allocator);
         froxelSystem.destroy(device, allocator);
+        atmosphereLUTSystem.destroy(device, allocator);
         postProcessSystem.destroy(device, allocator);
 
         vkDestroyPipeline(device, skyPipeline, nullptr);
