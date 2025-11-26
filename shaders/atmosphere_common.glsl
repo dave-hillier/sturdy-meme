@@ -58,7 +58,7 @@ vec3 GetAtmosphereDensity(float altitude, AtmosphereParams params) {
     float mieDensity = exp(-altitude / params.mieScaleHeight);
 
     // Ozone absorption (peak at ozoneLayerCenter)
-    float ozoneHeight = max(0.0, ozoneLayerCenter - abs(altitude - params.ozoneLayerCenter));
+    float ozoneHeight = max(0.0, params.ozoneLayerWidth - abs(altitude - params.ozoneLayerCenter));
     float ozoneDensity = ozoneHeight / params.ozoneLayerWidth;
 
     return vec3(rayleighDensity, mieDensity, ozoneDensity);

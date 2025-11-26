@@ -584,7 +584,7 @@ bool AtmosphereLUTSystem::createComputePipelines() {
     // Create transmittance pipeline
     {
         std::string shaderFile = shaderPath + "/transmittance_lut.comp.spv";
-        std::vector<char> shaderCode = loadShaderFile(shaderFile);
+        std::vector<char> shaderCode = ShaderLoader::readFile(shaderFile);
 
         VkShaderModuleCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -620,7 +620,7 @@ bool AtmosphereLUTSystem::createComputePipelines() {
     // Create multi-scatter pipeline
     {
         std::string shaderFile = shaderPath + "/multiscatter_lut.comp.spv";
-        std::vector<char> shaderCode = loadShaderFile(shaderFile);
+        std::vector<char> shaderCode = ShaderLoader::readFile(shaderFile);
 
         VkShaderModuleCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -656,7 +656,7 @@ bool AtmosphereLUTSystem::createComputePipelines() {
     // Create sky-view pipeline
     {
         std::string shaderFile = shaderPath + "/skyview_lut.comp.spv";
-        std::vector<char> shaderCode = loadShaderFile(shaderFile);
+        std::vector<char> shaderCode = ShaderLoader::readFile(shaderFile);
 
         VkShaderModuleCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
