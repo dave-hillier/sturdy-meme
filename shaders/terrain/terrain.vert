@@ -1,5 +1,7 @@
 #version 450
 
+#extension GL_GOOGLE_include_directive : require
+
 /*
  * terrain.vert - Terrain vertex shader
  * Decodes triangle vertices from CBT/LEB and samples height map
