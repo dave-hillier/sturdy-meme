@@ -270,10 +270,10 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
         return false;
     }
 
-    // Configure terrain - massive terrain extending to horizon
-    terrainCBT.setTerrainSize(4000.0f);  // 4000 unit terrain - extends well past horizon
-    terrainCBT.setHeightScale(200.0f);   // Taller mountains for the larger scale
-    terrainCBT.setMaxDepth(12);          // 2^12 = 4096 max triangles per base for detail
+    // Configure terrain - small terrain for testing height
+    terrainCBT.setTerrainSize(100.0f);   // Small terrain
+    terrainCBT.setHeightScale(20.0f);    // Moderate height
+    terrainCBT.setMaxDepth(4);           // 16 triangles
 
     // Generate procedural heightmap using Perlin noise (2048x2048 for detail at large scale)
     if (!terrainCBT.generateProceduralHeightMap(2048, 42)) {
@@ -903,16 +903,24 @@ glm::mat4 Renderer::calculateCascadeMatrix(const glm::vec3& lightDir, const Came
         radius = std::max(radius, glm::length(corner - center));
     }
 
-    // Position light far enough to avoid near-plane clipping
+    // For directional light (sun), position is arbitrary but must be far enough
+    // to include all shadow casters. We place it along the light direction from
+    // the frustum center, far enough to cover the entire scene depth.
     glm::vec3 up = (std::abs(lightDirNorm.y) > 0.99f) ? glm::vec3(0.0f, 0.0f, 1.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
-    glm::vec3 lightPos = center + lightDirNorm * (radius + 50.0f);
+
+    // Place light far away - this is just for the view matrix origin
+    // The orthographic projection makes the actual distance irrelevant for rendering
+    float lightDistance = 10000.0f;  // Far away like the sun
+    glm::vec3 lightPos = center + lightDirNorm * lightDistance;
     glm::mat4 lightView = glm::lookAt(lightPos, center, up);
 
     // Use sphere-based ortho projection for uniform texel density
     float orthoSize = radius * 1.1f;  // Small margin for safety
-    float zRange = radius * 2.0f + 100.0f;  // Cover the full sphere plus padding
+    // Z range needs to cover from light position through the entire frustum
+    float zNear = lightDistance - radius * 2.0f;  // Start before the frustum
+    float zFar = lightDistance + radius * 2.0f;   // End after the frustum
 
-    glm::mat4 lightProjection = glm::ortho(-orthoSize, orthoSize, -orthoSize, orthoSize, 0.1f, zRange);
+    glm::mat4 lightProjection = glm::ortho(-orthoSize, orthoSize, -orthoSize, orthoSize, zNear, zFar);
 
     // Vulkan corrections:
     // 1. Flip Y (Vulkan has inverted Y compared to OpenGL)
@@ -928,7 +936,7 @@ glm::mat4 Renderer::calculateCascadeMatrix(const glm::vec3& lightDir, const Came
 void Renderer::updateCascadeMatrices(const glm::vec3& lightDir, const Camera& camera) {
     // Calculate cascade splits using PSSM
     const float shadowNear = 0.1f;
-    const float shadowFar = 150.0f;  // Extended range for cascades
+    const float shadowFar = 2000.0f;  // Extended range for large terrain
     const float lambda = 0.5f;  // 0.5 is good balance between log and uniform
 
     calculateCascadeSplits(shadowNear, shadowFar, lambda, cascadeSplitDepths);

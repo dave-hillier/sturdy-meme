@@ -1,8 +1,8 @@
 #version 450
 
 // CBT Sum Reduction Compute Shader
-// Rebuilds the sum reduction tree after subdivision updates
-// This shader processes the bitfield and builds progressive sums
+// Counts leaf nodes in the CBT bitfield
+// A leaf is a node with its bit set AND neither child has its bit set
 
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
@@ -11,9 +11,9 @@ layout(std430, binding = 0) buffer CBTBuffer {
 };
 
 layout(push_constant) uniform PushConstants {
-    uint passIndex;     // Which pass we're running (0 = first/bitfield, 1+ = upper levels)
+    uint passIndex;     // Currently unused - single pass design
     uint maxDepth;
-    uint numWorkgroups; // Total workgroups for this pass
+    uint numWorkgroups;
     uint padding;
 } pc;
 
@@ -22,113 +22,77 @@ shared uint localSums[256];
 // Bitfield starts at offset 16
 const uint BITFIELD_OFFSET = 16u;
 
-// Sum reduction tree layout:
-// Level 0 (index 0): root - total leaf count
-// Level 1 (indices 1-2): 2 values
-// Level 2 (indices 3-6): 4 values
-// etc.
+// Check if a heap index is a leaf (has bit set but no children have bits set)
+bool isLeaf(uint heapIndex) {
+    uint maxD = pc.maxDepth;
+    uint depth = findMSB(heapIndex);
 
-uint getSumTreeOffset(uint level) {
-    // Sum tree is stored before the bitfield
-    // Level 0 at index 0, level 1 at indices 1-2, etc.
-    return (1u << level) - 1u;
+    // At max depth, always a leaf if bit is set
+    if (depth >= maxD) return true;
+
+    // Check if children have bits set
+    uint leftChild = heapIndex * 2u;
+    uint rightChild = heapIndex * 2u + 1u;
+
+    uint leftBitIdx = leftChild - 1u;
+    uint rightBitIdx = rightChild - 1u;
+
+    uint leftWordIdx = leftBitIdx / 32u;
+    uint leftBitPos = leftBitIdx % 32u;
+    uint rightWordIdx = rightBitIdx / 32u;
+    uint rightBitPos = rightBitIdx % 32u;
+
+    bool leftExists = (cbtData[BITFIELD_OFFSET + leftWordIdx] & (1u << leftBitPos)) != 0u;
+    bool rightExists = (cbtData[BITFIELD_OFFSET + rightWordIdx] & (1u << rightBitPos)) != 0u;
+
+    return !leftExists && !rightExists;
 }
 
 void main() {
     uint threadId = gl_LocalInvocationIndex;
-    uint groupId = gl_WorkGroupID.x;
-    uint globalId = gl_GlobalInvocationID.x;
 
-    if (pc.passIndex == 0u) {
-        // First pass: count set bits in the bitfield
-        // Each thread processes one 32-bit word
+    // Count leaves in a range of heap indices
+    // Heap index 1 is virtual root, actual nodes start at 2
+    // With maxDepth=10, valid heap indices are 2 to 2^11 - 1 = 2047
 
-        uint wordIndex = globalId;
+    uint maxHeapIndex = (1u << (pc.maxDepth + 1u)) - 1u;
+    uint numValidIndices = maxHeapIndex - 1u;  // exclude heap index 1
+    uint indicesPerThread = (numValidIndices + 255u) / 256u;
 
-        // Check if we're reading existing leaf nodes
-        // In the bitfield, a bit is set if that node exists
-        // A leaf is a node with no children set
+    uint startIdx = threadId * indicesPerThread + 2u;  // heap indices start at 2
+    uint endIdx = min(startIdx + indicesPerThread, maxHeapIndex + 1u);
 
-        // For simplicity in pass 0, we count all set bits
-        // Then refine in subsequent passes
+    uint leafCount = 0u;
 
-        uint bits = 0u;
-        if (wordIndex < ((1u << pc.maxDepth) / 32u)) {
-            bits = cbtData[BITFIELD_OFFSET + wordIndex];
+    for (uint heapIdx = startIdx; heapIdx < endIdx; heapIdx++) {
+        // Check if this node's bit is set
+        uint bitIdx = heapIdx - 1u;
+        uint wordIdx = bitIdx / 32u;
+        uint bitPos = bitIdx % 32u;
+
+        bool bitSet = (cbtData[BITFIELD_OFFSET + wordIdx] & (1u << bitPos)) != 0u;
+
+        if (bitSet && isLeaf(heapIdx)) {
+            leafCount++;
         }
+    }
 
-        // Count set bits
-        uint count = bitCount(bits);
+    // Store in shared memory
+    localSums[threadId] = leafCount;
+    barrier();
 
-        // Store in shared memory
-        localSums[threadId] = count;
+    // Parallel reduction within workgroup
+    for (uint stride = 128u; stride > 0u; stride >>= 1u) {
+        if (threadId < stride) {
+            localSums[threadId] += localSums[threadId + stride];
+        }
         barrier();
+    }
 
-        // Parallel reduction within workgroup
-        for (uint stride = 128u; stride > 0u; stride >>= 1u) {
-            if (threadId < stride) {
-                localSums[threadId] += localSums[threadId + stride];
-            }
-            barrier();
-        }
-
-        // Thread 0 writes result for this workgroup
-        if (threadId == 0u) {
-            // Write to intermediate storage (level based on maxDepth)
-            // For now, use a simple scheme where each workgroup writes its sum
-            uint outputIdx = groupId;
-            if (pc.numWorkgroups <= 256u) {
-                // Small enough to store directly
-                cbtData[1u + outputIdx] = localSums[0];
-            } else {
-                // Store in intermediate buffer region
-                cbtData[BITFIELD_OFFSET - 256u + outputIdx] = localSums[0];
-            }
-        }
-
-    } else {
-        // Subsequent passes: reduce the intermediate sums
-        // Each thread reads two values and sums them
-
-        uint inputOffset = (pc.passIndex == 1u) ? 1u : getSumTreeOffset(pc.passIndex);
-        uint outputOffset = getSumTreeOffset(pc.passIndex - 1u);
-
-        uint inputIdx = globalId * 2u;
-
-        uint left = 0u;
-        uint right = 0u;
-
-        // Read two children
-        uint maxInputIdx = (1u << (pc.maxDepth - pc.passIndex + 1u));
-        if (inputIdx < maxInputIdx) {
-            left = cbtData[inputOffset + inputIdx];
-        }
-        if (inputIdx + 1u < maxInputIdx) {
-            right = cbtData[inputOffset + inputIdx + 1u];
-        }
-
-        uint sum = left + right;
-
-        // Store in shared memory for reduction
-        localSums[threadId] = sum;
-        barrier();
-
-        // Parallel reduction
-        for (uint stride = 128u; stride > 0u; stride >>= 1u) {
-            if (threadId < stride) {
-                localSums[threadId] += localSums[threadId + stride];
-            }
-            barrier();
-        }
-
-        // Write output
-        if (threadId == 0u) {
-            // For the final pass, write to root
-            if (pc.passIndex >= pc.maxDepth - 1u) {
-                cbtData[0] = localSums[0];
-            } else {
-                cbtData[outputOffset + groupId] = localSums[0];
-            }
-        }
+    // Thread 0 writes final result to root
+    if (threadId == 0u) {
+        // Ensure we have at least 2 leaves (the base triangles)
+        uint total = max(localSums[0], 2u);
+        cbtData[0] = total;
     }
 }

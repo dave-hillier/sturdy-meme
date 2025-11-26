@@ -90,6 +90,10 @@ public:
     uint32_t getMaxDepth() const { return maxDepth; }
     uint32_t getLeafCount() const;
 
+    // Sample terrain height at world position (x, z)
+    // Returns the height in world units, or 0 if no heightmap loaded
+    float sampleHeightAtWorldPos(float worldX, float worldZ) const;
+
     // Height map
     bool loadHeightMap(const std::string& path);
     bool generateProceduralHeightMap(uint32_t resolution, uint32_t seed = 12345);
@@ -175,4 +179,8 @@ private:
 
     // Default placeholder height map (flat)
     static constexpr uint32_t DEFAULT_HEIGHTMAP_SIZE = 256;
+
+    // CPU-side copy of height data for sampling
+    std::vector<uint8_t> cpuHeightData;
+    uint32_t heightMapResolution = 0;
 };

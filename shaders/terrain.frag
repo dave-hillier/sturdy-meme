@@ -126,6 +126,10 @@ float wireframeEdge(vec3 bary) {
 // ============== Main ==============
 
 void main() {
+    // DEBUG: Simple UV-based coloring to verify triangles are rendering
+    outColor = vec4(fragTexCoord.x, fragTexCoord.y, 0.5, 1.0);
+    return;
+
     vec3 N = normalize(fragNormal);
     vec3 V = normalize(ubo.cameraPosition.xyz - fragWorldPos);
 
@@ -163,7 +167,7 @@ void main() {
     // Sun lighting
     vec3 sunL = normalize(ubo.sunDirection.xyz);
     float sunIntensity = ubo.sunDirection.w;
-    float shadow = calculateShadow(fragWorldPos, N, sunL);
+    float shadow = 1.0;  // Disable shadows for debugging
 
     vec3 H = normalize(V + sunL);
     float NoL = max(dot(N, sunL), 0.0);

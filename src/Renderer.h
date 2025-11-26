@@ -89,6 +89,9 @@ public:
     // Player rendering
     void updatePlayerTransform(const glm::mat4& transform);
 
+    // Terrain height sampling (for placing camera, etc.)
+    float getTerrainHeightAt(float worldX, float worldZ) const { return terrainCBT.sampleHeightAtWorldPos(worldX, worldZ); }
+
     // Celestial/astronomical settings
     void setLocation(const GeographicLocation& location) { celestialCalculator.setLocation(location); }
     const GeographicLocation& getLocation() const { return celestialCalculator.getLocation(); }

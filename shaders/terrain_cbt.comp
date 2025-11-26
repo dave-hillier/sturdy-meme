@@ -148,21 +148,12 @@ uint cbt_depth(uint heapIndex) {
 }
 
 // Map leaf index (0 to leafCount-1) to heap index
-// This requires traversing the sum reduction tree
 uint cbt_leafIndexToHeapIndex(uint leafIndex) {
-    uint heapIndex = 1u;
     uint maxD = cbt_maxDepth();
-
-    // Binary search down the tree using sum reduction values
-    // For now, use a simpler linear approach with the bitfield
-
-    // Simple approach: enumerate leaves
     uint count = 0u;
-    uint bitOffset = cbt_bitfieldOffset();
 
-    // Start from heap index 1, traverse in order
-    // This is O(n) but simple - can optimize later
-    for (uint h = 1u; h < (1u << maxD); h++) {
+    // Linear scan starting at heap index 2 (heap index 1 is virtual root)
+    for (uint h = 2u; h < (1u << (maxD + 1u)); h++) {
         if (cbt_getBit(h) && cbt_isLeaf(h)) {
             if (count == leafIndex) {
                 return h;
@@ -171,8 +162,8 @@ uint cbt_leafIndexToHeapIndex(uint leafIndex) {
         }
     }
 
-    // Fallback
-    return 1u;
+    // Fallback to base triangles
+    return (leafIndex == 0u) ? 2u : 3u;
 }
 
 // ============== LEB Library Functions ==============
@@ -182,63 +173,70 @@ struct LEBTriangle {
 };
 
 // Decode a triangle from its heap index
-// The two base triangles form a unit square:
-// Triangle 1 (heapIndex starting with MSB=0): vertices (0,0), (1,0), (0,1)
-// Triangle 2 (heapIndex starting with MSB=1): vertices (1,1), (0,1), (1,0)
+// CBT structure:
+// - Heap index 1: virtual root (not used for rendering)
+// - Heap index 2: base triangle 1 (bottom-left of unit square)
+// - Heap index 3: base triangle 2 (top-right of unit square)
+// - Heap index 4+: subdivided triangles
 LEBTriangle leb_decodeTriangle(uint heapIndex) {
-    uint depth = cbt_depth(heapIndex);
-
-    // Determine base triangle
-    // The MSB tells us which base triangle (after the leading 1 bit)
-    uint baseBit = (heapIndex >> (depth - 1)) & 1u;
-
     vec2 v0, v1, v2;
 
-    if (depth == 1) {
-        // Base triangles
-        if (heapIndex == 1u) {
-            v0 = vec2(0.0, 0.0);
-            v1 = vec2(1.0, 0.0);
-            v2 = vec2(0.0, 1.0);
-        } else {
-            v0 = vec2(1.0, 1.0);
-            v1 = vec2(0.0, 1.0);
-            v2 = vec2(1.0, 0.0);
-        }
+    // Handle invalid/edge cases
+    if (heapIndex < 2u) {
+        heapIndex = 2u;
+    }
+
+    // Find which base triangle this node descends from
+    // by walking up the tree until we hit node 2 or 3
+    uint ancestor = heapIndex;
+    while (ancestor > 3u) {
+        ancestor = ancestor / 2u;  // parent
+    }
+    bool isBase2 = (ancestor == 3u);
+
+    // Set up base triangle vertices
+    // Both triangles share the diagonal edge. For LEB to work correctly,
+    // the shared edge (v1-v2) must be oriented consistently.
+    // Triangle 1: v1=(1,0), v2=(0,1) - diagonal goes bottom-right to top-left
+    // Triangle 2: v1=(0,1), v2=(1,0) - diagonal goes top-left to bottom-right (OPPOSITE)
+    // This is correct for LEB - neighbors have opposite edge orientation
+    if (!isBase2) {
+        // Base triangle 1: bottom-left half
+        v0 = vec2(0.0, 0.0);
+        v1 = vec2(1.0, 0.0);
+        v2 = vec2(0.0, 1.0);
     } else {
-        // Start with base triangle and subdivide
-        if (baseBit == 0u) {
-            v0 = vec2(0.0, 0.0);
-            v1 = vec2(1.0, 0.0);
-            v2 = vec2(0.0, 1.0);
+        // Base triangle 2: top-right half (same winding direction)
+        v0 = vec2(1.0, 1.0);
+        v1 = vec2(0.0, 1.0);
+        v2 = vec2(1.0, 0.0);
+    }
+
+    // If this is a base triangle (heap index 2 or 3), we're done
+    if (heapIndex <= 3u) {
+        return LEBTriangle(v0, v1, v2);
+    }
+
+    // Apply subdivision by following the path from the base triangle to this node
+    uint depth = cbt_depth(heapIndex);
+
+    // Apply subdivision for each level after the base (depth 1)
+    // LEB subdivision: bisect the edge opposite to v0 (edge v1-v2)
+    for (uint d = 2u; d <= depth; d++) {
+        uint bitPos = depth - d;
+        uint bit = (heapIndex >> bitPos) & 1u;
+
+        // Bisect: midpoint of edge v1-v2 (the edge opposite to v0)
+        vec2 midpoint = (v1 + v2) * 0.5;
+
+        if (bit == 0u) {
+            // Left child: new triangle is (midpoint, v0, v1)
+            v2 = v0;
+            v0 = midpoint;
         } else {
-            v0 = vec2(1.0, 1.0);
-            v1 = vec2(0.0, 1.0);
-            v2 = vec2(1.0, 0.0);
-        }
-
-        // Trace subdivision path
-        for (uint d = 1u; d < depth; d++) {
-            uint bit = (heapIndex >> (depth - 1u - d)) & 1u;
-
-            // Bisect along edge v1-v2 (longest edge in LEB)
-            vec2 midpoint = (v1 + v2) * 0.5;
-
-            if (bit == 0u) {
-                // Left child: v0 stays, v1 becomes midpoint, v2 stays
-                v2 = v1;
-                v1 = midpoint;
-            } else {
-                // Right child: v0 stays, v1 stays, v2 becomes midpoint
-                v1 = v2;
-                v2 = midpoint;
-            }
-
-            // Rotate to maintain winding order
-            vec2 temp = v0;
-            v0 = v1;
-            v1 = v2;
-            v2 = temp;
+            // Right child: new triangle is (midpoint, v2, v0)
+            v1 = v0;
+            v0 = midpoint;
         }
     }
 
@@ -246,17 +244,29 @@ LEBTriangle leb_decodeTriangle(uint heapIndex) {
 }
 
 // Find the edge neighbor across the longest edge (v1-v2)
+// For LEB, neighbors share the edge that gets bisected during subdivision
 uint leb_edgeNeighbor(uint heapIndex) {
     uint depth = cbt_depth(heapIndex);
-    if (depth <= 1u) return 0u;  // Base triangles neighbor each other
 
-    // The neighbor shares the same parent's sibling
+    // Base triangles (heap indices 2 and 3) are neighbors across the diagonal
+    if (depth == 1u) {
+        return cbt_sibling(heapIndex);  // 2 <-> 3
+    }
+
+    // For subdivided triangles, the neighbor algorithm is more complex
+    // We need to find the triangle that shares our longest edge
+    // This is the "opposite" child of our parent's sibling
     uint parent = cbt_parent(heapIndex);
-    uint sibling = cbt_sibling(parent);
+    uint parentSibling = cbt_sibling(parent);
 
-    // Navigate down to the same child position in the sibling subtree
+    // Check if parent's sibling exists in the tree
+    if (!cbt_getBit(parentSibling)) {
+        return 0u;  // No neighbor at this level
+    }
+
+    // The neighbor is the opposite child of parent's sibling
     uint childBit = heapIndex & 1u;
-    return cbt_leftChild(sibling) + (1u - childBit);  // Opposite child
+    return cbt_leftChild(parentSibling) + (1u - childBit);
 }
 
 // ============== LOD Functions ==============

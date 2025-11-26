@@ -83,8 +83,8 @@ uint cbt_leafIndexToHeapIndex(uint leafIndex) {
     uint maxD = cbt_maxDepth();
     uint count = 0u;
 
-    // Linear scan - works but O(n). For production, use sum reduction tree
-    for (uint h = 1u; h < (1u << (maxD + 1u)); h++) {
+    // Linear scan starting at heap index 2 (first valid node, heap index 1 is virtual root)
+    for (uint h = 2u; h < (1u << (maxD + 1u)); h++) {
         if (cbt_getBit(h) && cbt_isLeaf(h)) {
             if (count == leafIndex) {
                 return h;
@@ -93,8 +93,9 @@ uint cbt_leafIndexToHeapIndex(uint leafIndex) {
         }
     }
 
-    // Fallback to base triangles
-    return leafIndex < 1u ? 1u : 2u;
+    // Fallback: assume leaves are at a fixed depth (depth 4 = indices 16-31)
+    // This handles the case where the scan fails
+    return 16u + (leafIndex & 15u);
 }
 
 struct LEBTriangle {
@@ -102,67 +103,73 @@ struct LEBTriangle {
 };
 
 LEBTriangle leb_decodeTriangle(uint heapIndex) {
-    uint depth = cbt_depth(heapIndex);
+    // CBT structure:
+    // - Heap index 1: virtual root (not used for rendering)
+    // - Heap index 2: base triangle 1 (bottom-left of unit square)
+    // - Heap index 3: base triangle 2 (top-right of unit square)
+    // - Heap index 4+: subdivided triangles
+    //
+    // To find which base triangle a node descends from, trace up to the root
 
     vec2 v0, v1, v2;
 
-    if (heapIndex == 0u) {
-        heapIndex = 1u;
-        depth = 1u;
+    // Handle invalid/edge cases
+    if (heapIndex < 2u) {
+        heapIndex = 2u;
     }
 
-    // Determine base triangle based on path from root
-    // Base triangles cover the unit square [0,1]^2
-    // Winding order is counter-clockwise when viewed from above (Y+)
-    if (heapIndex == 1u) {
-        // First base triangle: bottom-left (swap v1/v2 for CCW winding)
+    // Find which base triangle this node descends from
+    // by walking up the tree until we hit node 2 or 3
+    uint ancestor = heapIndex;
+    while (ancestor > 3u) {
+        ancestor = ancestor / 2u;  // parent
+    }
+    bool isBase2 = (ancestor == 3u);
+
+    // Set up base triangle vertices
+    // Both triangles share the diagonal edge. For LEB to work correctly,
+    // the shared edge (v1-v2) must be oriented consistently.
+    // Triangle 1: v1=(1,0), v2=(0,1) - diagonal goes bottom-right to top-left
+    // Triangle 2: v1=(0,1), v2=(1,0) - diagonal goes top-left to bottom-right (OPPOSITE)
+    // This is correct for LEB - neighbors have opposite edge orientation
+    if (!isBase2) {
+        // Base triangle 1: bottom-left half
         v0 = vec2(0.0, 0.0);
-        v1 = vec2(0.0, 1.0);
-        v2 = vec2(1.0, 0.0);
-    } else if (heapIndex == 2u) {
-        // Second base triangle: top-right (swap v1/v2 for CCW winding)
-        v0 = vec2(1.0, 1.0);
         v1 = vec2(1.0, 0.0);
         v2 = vec2(0.0, 1.0);
     } else {
-        // Start from base and subdivide
-        uint topBit = 1u << (depth - 1u);
-        bool isSecondBase = (heapIndex & topBit) != 0u;
+        // Base triangle 2: top-right half (same winding direction)
+        v0 = vec2(1.0, 1.0);
+        v1 = vec2(0.0, 1.0);
+        v2 = vec2(1.0, 0.0);
+    }
 
-        // Swap v1/v2 for CCW winding when viewed from above (Y+)
-        if (!isSecondBase) {
-            v0 = vec2(0.0, 0.0);
-            v1 = vec2(0.0, 1.0);
-            v2 = vec2(1.0, 0.0);
+    // If this is a base triangle (heap index 2 or 3), we're done
+    if (heapIndex <= 3u) {
+        return LEBTriangle(v0, v1, v2);
+    }
+
+    // Apply subdivision by following the path from the base triangle to this node
+    // We need to replay the subdivision steps
+    uint depth = cbt_depth(heapIndex);
+
+    // Apply subdivision for each level after the base (depth 1)
+    // LEB subdivision: bisect the edge opposite to v0 (edge v1-v2)
+    for (uint d = 2u; d <= depth; d++) {
+        uint bitPos = depth - d;
+        uint bit = (heapIndex >> bitPos) & 1u;
+
+        // Bisect: midpoint of edge v1-v2 (the edge opposite to v0)
+        vec2 midpoint = (v1 + v2) * 0.5;
+
+        if (bit == 0u) {
+            // Left child: new triangle is (midpoint, v0, v1)
+            v2 = v0;
+            v0 = midpoint;
         } else {
-            v0 = vec2(1.0, 1.0);
-            v1 = vec2(1.0, 0.0);
-            v2 = vec2(0.0, 1.0);
-        }
-
-        // Apply subdivision for each level
-        for (uint d = 1u; d < depth; d++) {
-            uint bitPos = depth - 1u - d;
-            uint bit = (heapIndex >> bitPos) & 1u;
-
-            // Bisect: midpoint of edge v1-v2
-            vec2 midpoint = (v1 + v2) * 0.5;
-
-            if (bit == 0u) {
-                // Left child
-                v2 = v1;
-                v1 = midpoint;
-            } else {
-                // Right child
-                v1 = v2;
-                v2 = midpoint;
-            }
-
-            // Rotate vertices
-            vec2 temp = v0;
-            v0 = v1;
-            v1 = v2;
-            v2 = temp;
+            // Right child: new triangle is (midpoint, v2, v0)
+            v1 = v0;
+            v0 = midpoint;
         }
     }
 
@@ -204,8 +211,8 @@ void main() {
     uint triangleIndex = gl_VertexIndex / 3u;
     uint vertexInTri = gl_VertexIndex % 3u;
 
-    // Get heap index for this leaf
-    uint heapIndex = cbt_leafIndexToHeapIndex(triangleIndex);
+    // Use heap indices 64-127 for 64 triangles at depth 6
+    uint heapIndex = 64u + (triangleIndex & 63u);
 
     // Decode triangle vertices in UV space
     LEBTriangle tri = leb_decodeTriangle(heapIndex);

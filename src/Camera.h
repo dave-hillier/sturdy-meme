@@ -30,11 +30,14 @@ public:
     glm::mat4 getViewMatrix() const;
     glm::mat4 getProjectionMatrix() const;
     glm::vec3 getPosition() const { return position; }
+    void setPosition(const glm::vec3& pos) { position = pos; }
+    glm::vec3 getFront() const { return front; }
     float getNearPlane() const { return nearPlane; }
     float getFarPlane() const { return farPlane; }
 
-    // Get the yaw for player rotation in third-person mode
+    // Get the yaw/pitch for player rotation in third-person mode
     float getYaw() const { return yaw; }
+    float getPitch() const { return pitch; }
 
 private:
     void updateVectors();

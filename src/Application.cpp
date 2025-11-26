@@ -43,6 +43,10 @@ bool Application::init(const std::string& title, int width, int height) {
 
     camera.setAspectRatio(static_cast<float>(width) / static_cast<float>(height));
 
+    // Position camera on the terrain (at origin, looking across terrain)
+    float terrainHeight = renderer.getTerrainHeightAt(0.0f, 0.0f);
+    camera.setPosition(glm::vec3(0.0f, terrainHeight + 10.0f, 0.0f));
+
     running = true;
     return true;
 }

@@ -111,21 +111,23 @@ void TerrainCBT::destroy() {
 
 bool TerrainCBT::createCBTBuffer() {
     // Calculate buffer size
-    // CBT layout: [sum reduction tree] [bitfield]
-    // Bitfield size: 2^(maxDepth) bits = 2^(maxDepth-3) bytes
-    // Sum reduction: ~maxDepth levels of progressively smaller arrays
+    // CBT layout: [header] [bitfield]
+    // The bitfield stores one bit per possible heap node
+    // For maxDepth d, nodes can have heap indices from 1 to 2^(d+1) - 1
+    // So we need 2^(d+1) - 1 bits, which we round up to 2^(d+1) for simplicity
 
     // For maxDepth = 10:
-    // Bitfield: 2^10 = 1024 bits = 128 bytes = 32 uints
-    // Sum reduction: header + levels
+    // Max heap index = 2^11 - 1 = 2047
+    // Bitfield: 2^11 = 2048 bits = 256 bytes = 64 uints
 
     // Simplified layout:
     // [0]: leaf count (root of sum tree)
-    // [1-15]: reserved/sum tree intermediate
-    // [16+]: bitfield
+    // [1-15]: reserved
+    // [16+]: bitfield (one bit per possible heap index)
 
-    uint64_t bitfieldBits = 1ull << maxDepth;
-    uint64_t bitfieldUints = (bitfieldBits + 31) / 32;
+    uint64_t maxHeapIndex = (1ull << (maxDepth + 1)) - 1;  // 2047 for maxDepth=10
+    uint64_t bitfieldBits = 1ull << (maxDepth + 1);       // 2048 for maxDepth=10 (rounded up)
+    uint64_t bitfieldUints = (bitfieldBits + 31) / 32;     // 64 uints
     uint64_t headerUints = 16;  // Reserved for sum reduction tree
 
     cbtBufferSize = (headerUints + bitfieldUints) * sizeof(uint32_t);
@@ -153,25 +155,40 @@ bool TerrainCBT::createCBTBuffer() {
 }
 
 bool TerrainCBT::initializeCBT() {
-    // Initialize CBT with two base triangles
-    // Header: [leafCount=2, reserved...]
-    // Bitfield: bits 0 and 1 set (heap indices 1 and 2)
+    // Initialize CBT with pre-subdivided triangles
+    //
+    // CBT structure:
+    // - Heap index 1 is a virtual root (not rendered)
+    // - Heap indices 2 and 3 are the two base triangles forming the unit square
+    // - At depth d, heap indices range from 2^d to 2^(d+1) - 1
+    //
+    // A node is a LEAF if its bit is set AND neither child has its bit set
 
-    uint64_t bitfieldUints = (1ull << maxDepth) / 32;
+    uint64_t bitfieldUints = (1ull << (maxDepth + 1)) / 32;
     uint64_t totalUints = 16 + bitfieldUints;
 
     std::vector<uint32_t> initData(totalUints, 0);
 
-    // Set leaf count
-    initData[0] = 2;
+    // Start with 64 triangles at depth 6 (heap indices 64-127)
+    const uint32_t initialDepth = 6;
+    uint32_t leafCount = 1u << initialDepth;  // 64 triangles
 
-    // Set bits for base triangles (heap indices 1 and 2)
-    // Bit index = heapIndex - 1
-    // Heap index 1 -> bit 0 -> word 0, bit 0
-    // Heap index 2 -> bit 1 -> word 0, bit 1
-    initData[16] = 0x3;  // bits 0 and 1 set
+    // Set leaf count in header
+    initData[0] = leafCount;
+
+    // Set bits for leaves at depth 6 (heap indices 64-127)
+    uint32_t startIdx = 1u << initialDepth;      // 64
+    uint32_t endIdx = 1u << (initialDepth + 1);  // 128
+    for (uint32_t heapIdx = startIdx; heapIdx < endIdx; heapIdx++) {
+        uint32_t bitIdx = heapIdx - 1;  // bit index in bitfield
+        uint32_t wordIdx = bitIdx / 32;
+        uint32_t bitInWord = bitIdx % 32;
+        initData[16 + wordIdx] |= (1u << bitInWord);
+    }
 
     uploadBufferData(cbtBuffer, initData.data(), initData.size() * sizeof(uint32_t));
+
+    SDL_Log("CBT initialized with %u triangles at depth %u", leafCount, initialDepth);
 
     return true;
 }
@@ -276,8 +293,8 @@ bool TerrainCBT::createIndirectBuffers() {
             return false;
         }
 
-        // Initialize with 2 triangles * 3 vertices
-        uint32_t initDraw[4] = {6, 1, 0, 0};
+        // Initialize with 64 triangles * 3 vertices = 192 vertices
+        uint32_t initDraw[4] = {192, 1, 0, 0};
         uploadBufferData(indirectDrawBuffers[i], initDraw, sizeof(initDraw));
     }
 
@@ -722,6 +739,10 @@ bool TerrainCBT::generateProceduralHeightMap(uint32_t resolution, uint32_t seed)
         }
     }
 
+    // Keep a CPU-side copy for height sampling
+    cpuHeightData = heightData;
+    heightMapResolution = resolution;
+
     // Destroy old resources if they exist
     if (heightMapView) {
         vkDestroyImageView(device, heightMapView, nullptr);
@@ -1158,7 +1179,7 @@ bool TerrainCBT::createGraphicsPipeline() {
     rasterizer.rasterizerDiscardEnable = VK_FALSE;
     rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
     rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+    rasterizer.cullMode = VK_CULL_MODE_NONE;  // Disable culling for LEB terrain
     rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     rasterizer.depthBiasEnable = VK_FALSE;
 
@@ -1604,31 +1625,70 @@ void TerrainCBT::updateDescriptorSets(const std::vector<VkBuffer>& uniformBuffer
 void TerrainCBT::recordComputePass(VkCommandBuffer cmd, uint32_t frameIndex,
                                     const glm::mat4& viewProj, const glm::vec3& cameraPos,
                                     float screenWidth, float screenHeight) {
-    // Run dispatcher to set indirect args
+    VkMemoryBarrier memoryBarrier{};
+    memoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    memoryBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    memoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
+
+    // Step 1: Run dispatcher to set subdivision dispatch count based on current leaf count
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, dispatcherPipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayout,
                             0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
 
     vkCmdDispatch(cmd, 1, 1, 1);
 
-    // Barrier after dispatcher
-    VkMemoryBarrier memoryBarrier{};
-    memoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-    memoryBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    memoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
-
     vkCmdPipelineBarrier(cmd,
                          VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                          VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
                          0, 1, &memoryBarrier, 0, nullptr, 0, nullptr);
 
-    // Skip subdivision for now - just use fixed 2-triangle base
-    // This simplifies initial testing
+    // Step 2: Run subdivision shader to split/merge triangles
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, subdivisionPipeline);
 
-    // Note: For full adaptive subdivision, we would:
-    // 1. Run subdivision shader with indirect dispatch
-    // 2. Run sum reduction to rebuild the tree
-    // For Milestone 1, we start with a simpler static mesh
+    CBTComputePushConstants pc{};
+    pc.viewProj = viewProj;
+    pc.cameraPos = glm::vec4(cameraPos, 1.0f);
+    pc.terrainParams = glm::vec4(terrainSize, heightScale, splitThreshold, mergeThreshold);
+    pc.screenParams = glm::vec4(screenWidth, screenHeight, static_cast<float>(maxDepth), 0.0f);
+
+    vkCmdPushConstants(cmd, computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT,
+                       0, sizeof(CBTComputePushConstants), &pc);
+
+    vkCmdDispatchIndirect(cmd, indirectDispatchBuffers[frameIndex], 0);
+
+    vkCmdPipelineBarrier(cmd,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         0, 1, &memoryBarrier, 0, nullptr, 0, nullptr);
+
+    // Step 3: Run sum reduction to count new leaf count after subdivision
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, sumReductionPipeline);
+
+    SumReductionPushConstants sumPc{};
+    sumPc.passIndex = 0;
+    sumPc.maxDepth = maxDepth;
+    sumPc.numWorkgroups = 1;
+
+    vkCmdPushConstants(cmd, computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT,
+                       0, sizeof(SumReductionPushConstants), &sumPc);
+
+    vkCmdDispatch(cmd, 1, 1, 1);
+
+    vkCmdPipelineBarrier(cmd,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         0, 1, &memoryBarrier, 0, nullptr, 0, nullptr);
+
+    // Step 4: Run dispatcher again to set DRAW count based on updated leaf count
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, dispatcherPipeline);
+
+    vkCmdDispatch(cmd, 1, 1, 1);
+
+    // Final barrier before draw
+    vkCmdPipelineBarrier(cmd,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
+                         0, 1, &memoryBarrier, 0, nullptr, 0, nullptr);
 }
 
 void TerrainCBT::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, bool wireframeDebug) {
@@ -1672,4 +1732,46 @@ void TerrainCBT::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex,
 
 uint32_t TerrainCBT::getLeafCount() const {
     return cachedLeafCount;
+}
+
+float TerrainCBT::sampleHeightAtWorldPos(float worldX, float worldZ) const {
+    if (cpuHeightData.empty() || heightMapResolution == 0) {
+        return 0.0f;
+    }
+
+    // Convert world position to UV coordinates
+    // World coords: X and Z range from -terrainSize/2 to +terrainSize/2
+    float halfSize = terrainSize * 0.5f;
+    float u = (worldX + halfSize) / terrainSize;
+    float v = (worldZ + halfSize) / terrainSize;
+
+    // Clamp to valid range
+    u = std::max(0.0f, std::min(1.0f, u));
+    v = std::max(0.0f, std::min(1.0f, v));
+
+    // Convert to texel coordinates with bilinear interpolation
+    float texX = u * (heightMapResolution - 1);
+    float texY = v * (heightMapResolution - 1);
+
+    int x0 = static_cast<int>(texX);
+    int y0 = static_cast<int>(texY);
+    int x1 = std::min(x0 + 1, static_cast<int>(heightMapResolution - 1));
+    int y1 = std::min(y0 + 1, static_cast<int>(heightMapResolution - 1));
+
+    float fx = texX - x0;
+    float fy = texY - y0;
+
+    // Sample 4 corners
+    float h00 = cpuHeightData[y0 * heightMapResolution + x0] / 255.0f;
+    float h10 = cpuHeightData[y0 * heightMapResolution + x1] / 255.0f;
+    float h01 = cpuHeightData[y1 * heightMapResolution + x0] / 255.0f;
+    float h11 = cpuHeightData[y1 * heightMapResolution + x1] / 255.0f;
+
+    // Bilinear interpolation
+    float h0 = h00 * (1.0f - fx) + h10 * fx;
+    float h1 = h01 * (1.0f - fx) + h11 * fx;
+    float height = h0 * (1.0f - fy) + h1 * fy;
+
+    // Scale to world height
+    return height * heightScale;
 }

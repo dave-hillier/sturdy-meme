@@ -6,4 +6,5 @@
 - always ensure that the build both compiles and runs without crashing before considering it done
 - shaders can be compiled by running cmake
 - compile with `cmake --preset debug && cmake --build build/debug`
-- run with `./run-debug.sh`
+- run with `./run-debug.sh` do not add timers or kill to this, you run it for the logs, but let the user close the app
+
