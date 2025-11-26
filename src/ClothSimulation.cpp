@@ -188,7 +188,9 @@ void ClothSimulation::generateMeshData(std::vector<Vertex>& vertices, std::vecto
     vertices.clear();
     indices.clear();
 
-    // Create vertices from particles
+    int vertexCount = width * height;
+
+    // Create vertices from particles (front side)
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
             int idx = getParticleIndex(x, y);
@@ -207,7 +209,7 @@ void ClothSimulation::generateMeshData(std::vector<Vertex>& vertices, std::vecto
         }
     }
 
-    // Create indices for triangles
+    // Create indices for front-facing triangles
     for (int y = 0; y < height - 1; ++y) {
         for (int x = 0; x < width - 1; ++x) {
             int topLeft = y * width + x;
@@ -227,8 +229,8 @@ void ClothSimulation::generateMeshData(std::vector<Vertex>& vertices, std::vecto
         }
     }
 
-    // Compute normals
-    std::vector<glm::vec3> normals(vertices.size(), glm::vec3(0.0f));
+    // Compute normals for front side
+    std::vector<glm::vec3> normals(vertexCount, glm::vec3(0.0f));
 
     for (size_t i = 0; i < indices.size(); i += 3) {
         uint32_t i0 = indices[i];
@@ -248,16 +250,16 @@ void ClothSimulation::generateMeshData(std::vector<Vertex>& vertices, std::vecto
         normals[i2] += normal;
     }
 
-    // Normalize accumulated normals
-    for (size_t i = 0; i < vertices.size(); ++i) {
+    // Normalize accumulated normals for front side
+    for (int i = 0; i < vertexCount; ++i) {
         if (glm::length(normals[i]) > 0.0001f) {
             vertices[i].normal = glm::normalize(normals[i]);
         }
     }
 
-    // Compute tangents
-    std::vector<glm::vec3> tangents(vertices.size(), glm::vec3(0.0f));
-    std::vector<glm::vec3> bitangents(vertices.size(), glm::vec3(0.0f));
+    // Compute tangents for front side
+    std::vector<glm::vec3> tangents(vertexCount, glm::vec3(0.0f));
+    std::vector<glm::vec3> bitangents(vertexCount, glm::vec3(0.0f));
 
     for (size_t i = 0; i < indices.size(); i += 3) {
         uint32_t i0 = indices[i];
@@ -290,21 +292,30 @@ void ClothSimulation::generateMeshData(std::vector<Vertex>& vertices, std::vecto
         tangents[i2] += tangent;
     }
 
-    // Orthogonalize and store tangents
-    for (size_t i = 0; i < vertices.size(); ++i) {
+    // Orthogonalize and store tangents for front side
+    for (int i = 0; i < vertexCount; ++i) {
         const glm::vec3& n = vertices[i].normal;
         const glm::vec3& t = tangents[i];
 
-        // Gram-Schmidt orthogonalization
         glm::vec3 tangent = glm::normalize(t - n * glm::dot(n, t));
-
-        // Calculate handedness
         float handedness = (glm::dot(glm::cross(n, t), bitangents[i]) < 0.0f) ? -1.0f : 1.0f;
 
         vertices[i].tangent = glm::vec4(tangent, handedness);
     }
 
-    // Note: This is a simplified approach. In a real implementation, you'd need
-    // a way to update the mesh buffers. For now, we'll need to add a method to Mesh
-    // that allows updating from external vertex/index data.
+    // Create back side vertices (duplicates with flipped normals)
+    size_t frontIndexCount = indices.size();
+    for (int i = 0; i < vertexCount; ++i) {
+        Vertex v = vertices[i];
+        v.normal = -v.normal;
+        v.tangent = glm::vec4(-glm::vec3(v.tangent), v.tangent.w);
+        vertices.push_back(v);
+    }
+
+    // Create back-facing triangles (reversed winding)
+    for (size_t i = 0; i < frontIndexCount; i += 3) {
+        indices.push_back(indices[i] + vertexCount);
+        indices.push_back(indices[i + 2] + vertexCount);  // Swap i+1 and i+2 to reverse winding
+        indices.push_back(indices[i + 1] + vertexCount);
+    }
 }

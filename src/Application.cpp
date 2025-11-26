@@ -681,10 +681,7 @@ void Application::updateFlag(float deltaTime) {
     // Update cloth simulation with wind
     clothSim.update(deltaTime, &renderer.getWindSystem());
 
-    // Update the mesh vertices from cloth particles
+    // Update the mesh vertices from cloth particles and re-upload to GPU
     clothSim.updateMesh(renderer.getFlagClothMesh());
-
-    // Note: For a proper implementation, we'd want to update the GPU buffer here
-    // For now, this will update the CPU-side mesh data
-    // The mesh will need to be re-uploaded to GPU, which is inefficient but works for initial version
+    renderer.uploadFlagClothMesh();
 }
