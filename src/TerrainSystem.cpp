@@ -1593,5 +1593,6 @@ float TerrainSystem::getHeightAt(float x, float z) const {
     float h1 = h01 * (1.0f - tx) + h11 * tx;
     float h = h0 * (1.0f - ty) + h1 * ty;
 
-    return h * config.heightScale;
+    // Match shader: (h - 0.5) * heightScale, centers height around Y=0
+    return (h - 0.5f) * config.heightScale;
 }

@@ -329,27 +329,14 @@ PhysicsBodyID PhysicsWorld::createTerrainHeightfield(const float* samples, uint3
     // The terrain uses normalized [0,1] heights, we need to convert
     // Jolt expects samples in row-major order with Y up
 
-    // Calculate the offset and scale for height values
-    // Find min/max to determine the range
-    float minHeight = samples[0];
-    float maxHeight = samples[0];
-    for (uint32_t i = 1; i < sampleCount * sampleCount; i++) {
-        minHeight = std::min(minHeight, samples[i]);
-        maxHeight = std::max(maxHeight, samples[i]);
-    }
-
-    // Scale factor: terrain samples are in [0,1], we want world units
-    // The heightScale parameter gives the max height in world units
-    float joltScale = heightScale;
-
-    // Offset so that minimum height is at Y=0
-    float joltOffset = minHeight * heightScale;
-
-    // Create height samples for Jolt (it wants the raw height values)
+    // Create height samples for Jolt
+    // The terrain shader centers heights: (h - 0.5) * heightScale
+    // So heights range from -0.5*heightScale to +0.5*heightScale
+    // We need to match this in physics
     std::vector<float> joltSamples(sampleCount * sampleCount);
     for (uint32_t i = 0; i < sampleCount * sampleCount; i++) {
-        // Jolt stores heights relative to the base offset, scaled
-        joltSamples[i] = samples[i] * heightScale;
+        // Match shader: (sample - 0.5) * heightScale
+        joltSamples[i] = (samples[i] - 0.5f) * heightScale;
     }
 
     // HeightFieldShapeSettings
