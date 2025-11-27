@@ -38,6 +38,7 @@ void LeafSystem::destroy(VkDevice dev, VmaAllocator alloc) {
 
     for (size_t i = 0; i < framesInFlight; i++) {
         vmaDestroyBuffer(alloc, uniformBuffers[i], uniformAllocations[i]);
+        vmaDestroyBuffer(alloc, displacementRegionBuffers[i], displacementRegionAllocations[i]);
     }
 }
 
@@ -107,11 +108,40 @@ bool LeafSystem::createBuffers() {
         uniformMappedPtrs[i] = uniformAllocInfoResult.pMappedData;
     }
 
+    // Create displacement region uniform buffers (per-frame)
+    displacementRegionBuffers.resize(framesInFlight);
+    displacementRegionAllocations.resize(framesInFlight);
+    displacementRegionMappedPtrs.resize(framesInFlight);
+
+    VkDeviceSize dispRegionBufferSize = sizeof(glm::vec4);  // regionCenterAndSize
+
+    for (size_t i = 0; i < framesInFlight; i++) {
+        VkBufferCreateInfo dispRegionBufferInfo{};
+        dispRegionBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        dispRegionBufferInfo.size = dispRegionBufferSize;
+        dispRegionBufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+        dispRegionBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        VmaAllocationCreateInfo dispRegionAllocInfo{};
+        dispRegionAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        dispRegionAllocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+                                   VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+        VmaAllocationInfo dispRegionAllocResult;
+        if (vmaCreateBuffer(allocator, &dispRegionBufferInfo, &dispRegionAllocInfo,
+                           &displacementRegionBuffers[i], &displacementRegionAllocations[i],
+                           &dispRegionAllocResult) != VK_SUCCESS) {
+            SDL_Log("Failed to create leaf displacement region buffer");
+            return false;
+        }
+        displacementRegionMappedPtrs[i] = dispRegionAllocResult.pMappedData;
+    }
+
     return true;
 }
 
 bool LeafSystem::createComputeDescriptorSetLayout() {
-    std::array<VkDescriptorSetLayoutBinding, 6> bindings{};
+    std::array<VkDescriptorSetLayoutBinding, 8> bindings{};
 
     // Particle buffer input (previous frame state)
     bindings[0].binding = 0;
@@ -148,6 +178,18 @@ bool LeafSystem::createComputeDescriptorSetLayout() {
     bindings[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     bindings[5].descriptorCount = 1;
     bindings[5].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+    // Displacement map (shared with grass system for player interaction)
+    bindings[6].binding = 6;
+    bindings[6].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[6].descriptorCount = 1;
+    bindings[6].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+    // Displacement region uniform buffer
+    bindings[7].binding = 7;
+    bindings[7].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    bindings[7].descriptorCount = 1;
+    bindings[7].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -434,7 +476,13 @@ bool LeafSystem::createDescriptorSets() {
 void LeafSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>& rendererUniformBuffers,
                                        const std::vector<VkBuffer>& windBuffers,
                                        VkImageView terrainHeightMapView,
-                                       VkSampler terrainHeightMapSampler) {
+                                       VkSampler terrainHeightMapSampler,
+                                       VkImageView displacementMapViewParam,
+                                       VkSampler displacementMapSamplerParam) {
+    // Store displacement texture references
+    this->displacementMapView = displacementMapViewParam;
+    this->displacementMapSampler = displacementMapSamplerParam;
+
     // Update compute and graphics descriptor sets for both buffer sets
     for (uint32_t set = 0; set < BUFFER_SET_COUNT; set++) {
         uint32_t inputSet = (set == 0) ? 1 : 0;  // Read from opposite buffer
@@ -471,7 +519,17 @@ void LeafSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>&
         heightMapInfo.imageView = terrainHeightMapView;
         heightMapInfo.sampler = terrainHeightMapSampler;
 
-        std::array<VkWriteDescriptorSet, 6> computeWrites{};
+        VkDescriptorImageInfo displacementMapInfo{};
+        displacementMapInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        displacementMapInfo.imageView = displacementMapViewParam;
+        displacementMapInfo.sampler = displacementMapSamplerParam;
+
+        VkDescriptorBufferInfo dispRegionInfo{};
+        dispRegionInfo.buffer = displacementRegionBuffers[0];
+        dispRegionInfo.offset = 0;
+        dispRegionInfo.range = sizeof(glm::vec4);
+
+        std::array<VkWriteDescriptorSet, 8> computeWrites{};
 
         computeWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         computeWrites[0].dstSet = computeDescriptorSets[set];
@@ -520,6 +578,22 @@ void LeafSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>&
         computeWrites[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         computeWrites[5].descriptorCount = 1;
         computeWrites[5].pImageInfo = &heightMapInfo;
+
+        computeWrites[6].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        computeWrites[6].dstSet = computeDescriptorSets[set];
+        computeWrites[6].dstBinding = 6;
+        computeWrites[6].dstArrayElement = 0;
+        computeWrites[6].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        computeWrites[6].descriptorCount = 1;
+        computeWrites[6].pImageInfo = &displacementMapInfo;
+
+        computeWrites[7].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        computeWrites[7].dstSet = computeDescriptorSets[set];
+        computeWrites[7].dstBinding = 7;
+        computeWrites[7].dstArrayElement = 0;
+        computeWrites[7].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        computeWrites[7].descriptorCount = 1;
+        computeWrites[7].pBufferInfo = &dispRegionInfo;
 
         vkUpdateDescriptorSets(dev, static_cast<uint32_t>(computeWrites.size()),
                                computeWrites.data(), 0, nullptr);
@@ -626,6 +700,14 @@ void LeafSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos,
 
     memcpy(uniformMappedPtrs[frameIndex], &uniforms, sizeof(LeafUniforms));
 
+    // Update displacement region to follow camera (same as grass system)
+    displacementRegionCenter = glm::vec2(cameraPos.x, cameraPos.z);
+
+    // Update displacement region uniform buffer
+    glm::vec4 dispRegionData(displacementRegionCenter.x, displacementRegionCenter.y,
+                             DISPLACEMENT_REGION_SIZE, 0.0f);
+    memcpy(displacementRegionMappedPtrs[frameIndex], &dispRegionData, sizeof(glm::vec4));
+
     // Reset confetti spawn count after it's been sent to GPU
     confettiToSpawn = 0.0f;
 }
@@ -633,22 +715,36 @@ void LeafSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos,
 void LeafSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex, float time, float deltaTime) {
     uint32_t writeSet = computeBufferSet;
 
-    // Update compute descriptor set to use this frame's uniform buffer
+    // Update compute descriptor set to use this frame's uniform and displacement region buffers
     VkDescriptorBufferInfo uniformBufferInfo{};
     uniformBufferInfo.buffer = uniformBuffers[frameIndex];
     uniformBufferInfo.offset = 0;
     uniformBufferInfo.range = sizeof(LeafUniforms);
 
-    VkWriteDescriptorSet uniformWrite{};
-    uniformWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    uniformWrite.dstSet = computeDescriptorSets[writeSet];
-    uniformWrite.dstBinding = 3;
-    uniformWrite.dstArrayElement = 0;
-    uniformWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    uniformWrite.descriptorCount = 1;
-    uniformWrite.pBufferInfo = &uniformBufferInfo;
+    VkDescriptorBufferInfo dispRegionBufferInfo{};
+    dispRegionBufferInfo.buffer = displacementRegionBuffers[frameIndex];
+    dispRegionBufferInfo.offset = 0;
+    dispRegionBufferInfo.range = sizeof(glm::vec4);
 
-    vkUpdateDescriptorSets(device, 1, &uniformWrite, 0, nullptr);
+    std::array<VkWriteDescriptorSet, 2> writes{};
+
+    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[0].dstSet = computeDescriptorSets[writeSet];
+    writes[0].dstBinding = 3;
+    writes[0].dstArrayElement = 0;
+    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    writes[0].descriptorCount = 1;
+    writes[0].pBufferInfo = &uniformBufferInfo;
+
+    writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[1].dstSet = computeDescriptorSets[writeSet];
+    writes[1].dstBinding = 7;
+    writes[1].dstArrayElement = 0;
+    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    writes[1].descriptorCount = 1;
+    writes[1].pBufferInfo = &dispRegionBufferInfo;
+
+    vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 
     // Reset indirect buffer before compute dispatch
     vkCmdFillBuffer(cmd, indirectBuffers[writeSet], 0, sizeof(VkDrawIndirectCommand), 0);

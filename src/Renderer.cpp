@@ -220,9 +220,10 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
 
     if (!leafSystem.init(leafInfo)) return false;
 
-    // Update leaf system descriptor sets with wind buffers and terrain heightmap
+    // Update leaf system descriptor sets with wind buffers, terrain heightmap, and displacement map
     leafSystem.updateDescriptorSets(device, uniformBuffers, windBuffers,
-                                     terrainSystem.getHeightMapView(), terrainSystem.getHeightMapSampler());
+                                     terrainSystem.getHeightMapView(), terrainSystem.getHeightMapSampler(),
+                                     grassSystem.getDisplacementImageView(), grassSystem.getDisplacementSampler());
 
     // Set default leaf intensity (autumn scene)
     leafSystem.setIntensity(0.5f);
