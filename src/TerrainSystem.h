@@ -186,6 +186,12 @@ private:
     VkImageView terrainAlbedoView = VK_NULL_HANDLE;
     VkSampler terrainAlbedoSampler = VK_NULL_HANDLE;
 
+    // Grass far LOD texture (for terrain blending at distance)
+    VkImage grassFarLODImage = VK_NULL_HANDLE;
+    VmaAllocation grassFarLODAllocation = VK_NULL_HANDLE;
+    VkImageView grassFarLODView = VK_NULL_HANDLE;
+    VkSampler grassFarLODSampler = VK_NULL_HANDLE;
+
     // Indirect dispatch/draw buffers
     VkBuffer indirectDispatchBuffer = VK_NULL_HANDLE;
     VmaAllocation indirectDispatchAllocation = VK_NULL_HANDLE;

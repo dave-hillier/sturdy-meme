@@ -105,6 +105,10 @@ void TerrainSystem::destroy(VkDevice device, VmaAllocator allocator) {
     if (terrainAlbedoSampler) vkDestroySampler(device, terrainAlbedoSampler, nullptr);
     if (terrainAlbedoView) vkDestroyImageView(device, terrainAlbedoView, nullptr);
     if (terrainAlbedoImage) vmaDestroyImage(allocator, terrainAlbedoImage, terrainAlbedoAllocation);
+
+    if (grassFarLODSampler) vkDestroySampler(device, grassFarLODSampler, nullptr);
+    if (grassFarLODView) vkDestroyImageView(device, grassFarLODView, nullptr);
+    if (grassFarLODImage) vmaDestroyImage(allocator, grassFarLODImage, grassFarLODAllocation);
 }
 
 uint32_t TerrainSystem::calculateCBTBufferSize(int maxDepth) {
@@ -462,6 +466,98 @@ bool TerrainSystem::createTerrainTexture() {
     }
 
     std::cout << "Terrain albedo texture uploaded: " << texSize << "x" << texSize << std::endl;
+
+    // === Create Grass Far LOD Texture ===
+    // This texture represents how grass looks from a distance (blended into terrain)
+    const uint32_t grassTexSize = 256;
+    std::vector<uint8_t> grassTexData(grassTexSize * grassTexSize * 4);
+
+    for (uint32_t y = 0; y < grassTexSize; y++) {
+        for (uint32_t x = 0; x < grassTexSize; x++) {
+            float fx = static_cast<float>(x) / grassTexSize;
+            float fy = static_cast<float>(y) / grassTexSize;
+
+            // Grass-like color with subtle variation (matches grass blade colors)
+            // Base grass color (darker green)
+            float noise = 0.5f + 0.3f * sin(fx * 80.0f) * sin(fy * 80.0f);
+            noise += 0.15f * sin(fx * 160.0f + 0.5f) * sin(fy * 160.0f + 0.3f);
+
+            // Match grass blade colors from grass.vert (baseColor to tipColor blend)
+            // baseColor = vec3(0.08, 0.22, 0.04), tipColor = vec3(0.35, 0.65, 0.18)
+            // Average grass field appearance
+            uint8_t r = static_cast<uint8_t>(std::clamp((60 + 30 * noise), 0.0f, 255.0f));
+            uint8_t g = static_cast<uint8_t>(std::clamp((130 + 50 * noise), 0.0f, 255.0f));
+            uint8_t b = static_cast<uint8_t>(std::clamp((40 + 25 * noise), 0.0f, 255.0f));
+
+            size_t idx = (y * grassTexSize + x) * 4;
+            grassTexData[idx + 0] = r;
+            grassTexData[idx + 1] = g;
+            grassTexData[idx + 2] = b;
+            grassTexData[idx + 3] = 255;
+        }
+    }
+
+    // Create Vulkan image for grass far LOD
+    VkImageCreateInfo grassImageInfo{};
+    grassImageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    grassImageInfo.imageType = VK_IMAGE_TYPE_2D;
+    grassImageInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
+    grassImageInfo.extent = {grassTexSize, grassTexSize, 1};
+    grassImageInfo.mipLevels = 1;
+    grassImageInfo.arrayLayers = 1;
+    grassImageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    grassImageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    grassImageInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    grassImageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    grassImageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    VmaAllocationCreateInfo grassAllocInfo{};
+    grassAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+
+    if (vmaCreateImage(allocator, &grassImageInfo, &grassAllocInfo, &grassFarLODImage, &grassFarLODAllocation, nullptr) != VK_SUCCESS) {
+        return false;
+    }
+
+    // Create image view for grass far LOD
+    VkImageViewCreateInfo grassViewInfo{};
+    grassViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    grassViewInfo.image = grassFarLODImage;
+    grassViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    grassViewInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
+    grassViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    grassViewInfo.subresourceRange.baseMipLevel = 0;
+    grassViewInfo.subresourceRange.levelCount = 1;
+    grassViewInfo.subresourceRange.baseArrayLayer = 0;
+    grassViewInfo.subresourceRange.layerCount = 1;
+
+    if (vkCreateImageView(device, &grassViewInfo, nullptr, &grassFarLODView) != VK_SUCCESS) {
+        return false;
+    }
+
+    // Create sampler for grass far LOD (same as terrain albedo)
+    VkSamplerCreateInfo grassSamplerInfo{};
+    grassSamplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    grassSamplerInfo.magFilter = VK_FILTER_LINEAR;
+    grassSamplerInfo.minFilter = VK_FILTER_LINEAR;
+    grassSamplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    grassSamplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    grassSamplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    grassSamplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    grassSamplerInfo.anisotropyEnable = VK_TRUE;
+    grassSamplerInfo.maxAnisotropy = 16.0f;
+
+    if (vkCreateSampler(device, &grassSamplerInfo, nullptr, &grassFarLODSampler) != VK_SUCCESS) {
+        return false;
+    }
+
+    // Upload grass far LOD texture to GPU
+    if (!uploadImageData(grassFarLODImage, grassTexData.data(), grassTexSize, grassTexSize,
+                         VK_FORMAT_R8G8B8A8_SRGB, 4)) {
+        std::cerr << "Failed to upload grass far LOD texture to GPU" << std::endl;
+        return false;
+    }
+
+    std::cout << "Grass far LOD texture uploaded: " << grassTexSize << "x" << grassTexSize << std::endl;
     return true;
 }
 
@@ -585,7 +681,7 @@ bool TerrainSystem::createComputeDescriptorSetLayout() {
 }
 
 bool TerrainSystem::createRenderDescriptorSetLayout() {
-    std::array<VkDescriptorSetLayoutBinding, 8> bindings{};
+    std::array<VkDescriptorSetLayoutBinding, 7> bindings{};
 
     // Binding 0: CBT buffer (storage, read-only in vertex shader)
     bindings[0].binding = 0;
@@ -623,9 +719,15 @@ bool TerrainSystem::createRenderDescriptorSetLayout() {
     bindings[5].descriptorCount = 1;
     bindings[5].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
+    // Binding 8: Grass far LOD texture
+    bindings[6].binding = 8;
+    bindings[6].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[6].descriptorCount = 1;
+    bindings[6].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layoutInfo.bindingCount = 6;  // Only use the first 6 bindings
+    layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
     layoutInfo.pBindings = bindings.data();
 
     if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &renderDescriptorSetLayout) != VK_SUCCESS) {
@@ -1374,6 +1476,19 @@ void TerrainSystem::updateDescriptorSets(VkDevice device,
             shadowWrite.descriptorCount = 1;
             shadowWrite.pImageInfo = &shadowInfo;
             writes.push_back(shadowWrite);
+        }
+
+        // Grass far LOD texture
+        if (grassFarLODView != VK_NULL_HANDLE) {
+            VkDescriptorImageInfo grassFarLODInfo{grassFarLODSampler, grassFarLODView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+            VkWriteDescriptorSet grassFarLODWrite{};
+            grassFarLODWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            grassFarLODWrite.dstSet = renderDescriptorSets[i];
+            grassFarLODWrite.dstBinding = 8;
+            grassFarLODWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            grassFarLODWrite.descriptorCount = 1;
+            grassFarLODWrite.pImageInfo = &grassFarLODInfo;
+            writes.push_back(grassFarLODWrite);
         }
 
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
