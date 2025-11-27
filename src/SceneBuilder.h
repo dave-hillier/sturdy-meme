@@ -53,8 +53,17 @@ public:
     Texture& getMetalNormalMap() { return metalNormalMap; }
     Texture& getDefaultEmissiveMap() { return defaultEmissiveMap; }
 
+    // Access to meshes for dynamic updates (e.g., cloth)
+    Mesh& getFlagClothMesh() { return flagClothMesh; }
+    Mesh& getFlagPoleMesh() { return flagPoleMesh; }
+    size_t getFlagClothIndex() const { return flagClothIndex; }
+    size_t getFlagPoleIndex() const { return flagPoleIndex; }
+
     // Update player transform
     void updatePlayerTransform(const glm::mat4& transform);
+
+    // Upload flag cloth mesh (for dynamic updates)
+    void uploadFlagClothMesh(VmaAllocator allocator, VkDevice device, VkCommandPool commandPool, VkQueue queue);
 
 private:
     bool createMeshes(const InitInfo& info);
@@ -66,6 +75,8 @@ private:
     Mesh cubeMesh;
     Mesh sphereMesh;
     Mesh capsuleMesh;
+    Mesh flagPoleMesh;
+    Mesh flagClothMesh;
 
     // Textures
     Texture crateTexture;
@@ -79,4 +90,6 @@ private:
     // Scene objects
     std::vector<SceneObject> sceneObjects;
     size_t playerObjectIndex = 0;
+    size_t flagPoleIndex = 0;
+    size_t flagClothIndex = 0;
 };

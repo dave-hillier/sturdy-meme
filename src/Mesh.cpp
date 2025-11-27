@@ -260,6 +260,93 @@ void Mesh::createCube() {
     };
 }
 
+void Mesh::setCustomGeometry(const std::vector<Vertex>& verts, const std::vector<uint32_t>& inds) {
+    vertices = verts;
+    indices = inds;
+}
+
+void Mesh::createCylinder(float radius, float height, int segments) {
+    vertices.clear();
+    indices.clear();
+
+    float halfHeight = height * 0.5f;
+
+    // Create vertices for the cylinder body (two rings of vertices)
+    for (int ring = 0; ring <= 1; ++ring) {
+        float y = ring == 0 ? halfHeight : -halfHeight;
+
+        for (int i = 0; i <= segments; ++i) {
+            float theta = 2.0f * (float)M_PI * (float)i / (float)segments;
+            float x = radius * std::cos(theta);
+            float z = radius * std::sin(theta);
+
+            glm::vec3 pos(x, y, z);
+            glm::vec3 normal = glm::normalize(glm::vec3(x, 0.0f, z));
+            glm::vec2 uv((float)i / (float)segments, (float)ring);
+
+            // Tangent points in the direction of theta increase
+            glm::vec3 tangentDir(-std::sin(theta), 0.0f, std::cos(theta));
+            glm::vec4 tangent(glm::normalize(tangentDir), 1.0f);
+
+            vertices.push_back({pos, normal, uv, tangent});
+        }
+    }
+
+    // Create indices for cylinder body
+    for (int i = 0; i < segments; ++i) {
+        int topLeft = i;
+        int topRight = i + 1;
+        int bottomLeft = (segments + 1) + i;
+        int bottomRight = (segments + 1) + i + 1;
+
+        // First triangle
+        indices.push_back(topLeft);
+        indices.push_back(topRight);
+        indices.push_back(bottomLeft);
+
+        // Second triangle
+        indices.push_back(bottomLeft);
+        indices.push_back(topRight);
+        indices.push_back(bottomRight);
+    }
+
+    // Add top cap
+    int topCenterIdx = vertices.size();
+    vertices.push_back({{0.0f, halfHeight, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.5f, 0.5f}, {1.0f, 0.0f, 0.0f, 1.0f}});
+
+    for (int i = 0; i < segments; ++i) {
+        float theta = 2.0f * (float)M_PI * (float)i / (float)segments;
+        float x = radius * std::cos(theta);
+        float z = radius * std::sin(theta);
+        glm::vec2 uv((std::cos(theta) + 1.0f) * 0.5f, (std::sin(theta) + 1.0f) * 0.5f);
+        vertices.push_back({{x, halfHeight, z}, {0.0f, 1.0f, 0.0f}, uv, {1.0f, 0.0f, 0.0f, 1.0f}});
+    }
+
+    for (int i = 0; i < segments; ++i) {
+        indices.push_back(topCenterIdx);
+        indices.push_back(topCenterIdx + i + 1);
+        indices.push_back(topCenterIdx + ((i + 1) % segments) + 1);
+    }
+
+    // Add bottom cap
+    int bottomCenterIdx = vertices.size();
+    vertices.push_back({{0.0f, -halfHeight, 0.0f}, {0.0f, -1.0f, 0.0f}, {0.5f, 0.5f}, {1.0f, 0.0f, 0.0f, 1.0f}});
+
+    for (int i = 0; i < segments; ++i) {
+        float theta = 2.0f * (float)M_PI * (float)i / (float)segments;
+        float x = radius * std::cos(theta);
+        float z = radius * std::sin(theta);
+        glm::vec2 uv((std::cos(theta) + 1.0f) * 0.5f, (std::sin(theta) + 1.0f) * 0.5f);
+        vertices.push_back({{x, -halfHeight, z}, {0.0f, -1.0f, 0.0f}, uv, {1.0f, 0.0f, 0.0f, 1.0f}});
+    }
+
+    for (int i = 0; i < segments; ++i) {
+        indices.push_back(bottomCenterIdx);
+        indices.push_back(bottomCenterIdx + ((i + 1) % segments) + 1);
+        indices.push_back(bottomCenterIdx + i + 1);
+    }
+}
+
 void Mesh::upload(VmaAllocator allocator, VkDevice device, VkCommandPool commandPool, VkQueue queue) {
     VkDeviceSize vertexBufferSize = sizeof(vertices[0]) * vertices.size();
     VkDeviceSize indexBufferSize = sizeof(indices[0]) * indices.size();

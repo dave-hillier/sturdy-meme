@@ -34,6 +34,7 @@ set(SOURCES
     src/Player.cpp
     src/PhysicsSystem.cpp
     src/TerrainSystem.cpp
+    src/ClothSimulation.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})

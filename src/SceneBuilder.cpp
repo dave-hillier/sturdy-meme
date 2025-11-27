@@ -21,6 +21,8 @@ void SceneBuilder::destroy(VmaAllocator allocator, VkDevice device) {
     sphereMesh.destroy(allocator);
     capsuleMesh.destroy(allocator);
     groundMesh.destroy(allocator);
+    flagPoleMesh.destroy(allocator);
+    flagClothMesh.destroy(allocator);
 
     sceneObjects.clear();
 }
@@ -39,6 +41,13 @@ bool SceneBuilder::createMeshes(const InitInfo& info) {
     // Player capsule mesh (1.8m tall, 0.3m radius)
     capsuleMesh.createCapsule(0.3f, 1.8f, 16, 16);
     capsuleMesh.upload(info.allocator, info.device, info.commandPool, info.graphicsQueue);
+
+    // Flag pole mesh (cylinder: 0.05m radius, 3m height)
+    flagPoleMesh.createCylinder(0.05f, 3.0f, 16);
+    flagPoleMesh.upload(info.allocator, info.device, info.commandPool, info.graphicsQueue);
+
+    // Flag cloth mesh will be initialized later by ClothSimulation
+    // (it's dynamic and will be updated each frame)
 
     return true;
 }
@@ -154,6 +163,21 @@ void SceneBuilder::createSceneObjects() {
     playerObjectIndex = sceneObjects.size();
     glm::mat4 playerTransform = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.9f, 0.0f));
     sceneObjects.push_back({playerTransform, &capsuleMesh, &metalTexture, 0.3f, 0.8f, 0.0f, glm::vec3(1.0f), true});
+
+    // Flag pole - positioned at (5, 1.5, 0) so the 3m pole sits on the ground
+    flagPoleIndex = sceneObjects.size();
+    glm::mat4 flagPoleTransform = glm::translate(glm::mat4(1.0f), glm::vec3(5.0f, 1.5f, 0.0f));
+    sceneObjects.push_back({flagPoleTransform, &flagPoleMesh, &metalTexture, 0.4f, 0.9f, 0.0f, glm::vec3(1.0f), true});
+
+    // Flag cloth - will be positioned and updated by ClothSimulation
+    flagClothIndex = sceneObjects.size();
+    glm::mat4 flagClothTransform = glm::mat4(1.0f);  // Identity, will be handled differently
+    sceneObjects.push_back({flagClothTransform, &flagClothMesh, &crateTexture, 0.6f, 0.0f, 0.0f, glm::vec3(1.0f), true});
+}
+
+void SceneBuilder::uploadFlagClothMesh(VmaAllocator allocator, VkDevice device, VkCommandPool commandPool, VkQueue queue) {
+    flagClothMesh.destroy(allocator);
+    flagClothMesh.upload(allocator, device, commandPool, queue);
 }
 
 void SceneBuilder::updatePlayerTransform(const glm::mat4& transform) {

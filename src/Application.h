@@ -7,6 +7,7 @@
 #include "Camera.h"
 #include "Player.h"
 #include "PhysicsSystem.h"
+#include "ClothSimulation.h"
 
 class Application {
 public:
@@ -28,6 +29,10 @@ private:
     void openGamepad(SDL_JoystickID id);
     void closeGamepad();
     std::string getResourcePath();
+    void initPhysics();
+    void updatePhysicsToScene();
+    void initFlag();
+    void updateFlag(float deltaTime);
 
     SDL_Window* window = nullptr;
     SDL_Gamepad* gamepad = nullptr;
@@ -35,6 +40,14 @@ private:
     Camera camera;
     Player player;
     PhysicsWorld physics;
+
+    // Physics body IDs for scene objects (mapped to scene object indices)
+    std::vector<PhysicsBodyID> scenePhysicsBodies;
+
+    // Flag simulation
+    ClothSimulation clothSim;
+    size_t flagClothSceneIndex = 0;
+    size_t flagPoleSceneIndex = 0;
 
     bool running = false;
     bool thirdPersonMode = false;  // Toggle between free camera and third-person

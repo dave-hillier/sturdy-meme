@@ -57,6 +57,8 @@ public:
     void createDisc(float radius, int segments, float uvScale = 1.0f);
     void createSphere(float radius, int stacks, int slices);
     void createCapsule(float radius, float height, int stacks, int slices);
+    void createCylinder(float radius, float height, int segments);
+    void setCustomGeometry(const std::vector<Vertex>& verts, const std::vector<uint32_t>& inds);
     void upload(VmaAllocator allocator, VkDevice device, VkCommandPool commandPool, VkQueue queue);
     void destroy(VmaAllocator allocator);
 

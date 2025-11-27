@@ -68,6 +68,9 @@ bool Application::init(const std::string& title, int width, int height) {
 
     SDL_Log("Physics initialized with %d active bodies", physics.getActiveBodyCount());
 
+    // Initialize flag simulation
+    initFlag();
+
     running = true;
     return true;
 }
@@ -118,6 +121,9 @@ void Application::run() {
 
         // Update player position for grass interaction (always, regardless of camera mode)
         renderer.setPlayerPosition(player.getPosition(), Player::CAPSULE_RADIUS);
+
+        // Update flag cloth simulation
+        updateFlag(deltaTime);
 
         // Update camera and player based on mode
         if (thirdPersonMode) {
@@ -538,4 +544,172 @@ std::string Application::getResourcePath() {
 #else
     return ".";
 #endif
+}
+
+void Application::initPhysics() {
+    if (!physics.init()) {
+        SDL_Log("Failed to initialize physics system");
+        return;
+    }
+
+    // Create terrain ground plane (radius 50)
+    physics.createTerrainDisc(50.0f, 0.0f);
+
+    // Scene object layout from SceneBuilder (after multi-lights update):
+    // 0: Ground disc (static terrain - already created above)
+    // 1: Wooden crate 1 at (2.0, 0.5, 0.0) - unit cube
+    // 2: Rotated wooden crate at (-1.5, 0.5, 1.0)
+    // 3: Polished metal sphere at (0.0, 0.5, -2.0) - radius 0.5
+    // 4: Rough metal sphere at (-3.0, 0.5, -1.0) - radius 0.5
+    // 5: Polished metal cube at (3.0, 0.5, -2.0)
+    // 6: Brushed metal cube at (-3.0, 0.5, -3.0)
+    // 7: Emissive sphere at (2.0, 1.3, 0.0) - scaled 0.3, visual radius 0.15
+    // 8: Blue light at (-3.0, 2.0, 2.0) - fixed, no physics
+    // 9: Green light at (4.0, 1.5, -2.0) - fixed, no physics
+    // 10: Player capsule (handled by character controller)
+    // 11: Flag pole at (5.0, 1.5, 0.0) - static physics
+    // 12: Flag cloth - no physics (soft body simulation handles it)
+
+    const size_t numSceneObjects = 13;
+    scenePhysicsBodies.resize(numSceneObjects, INVALID_BODY_ID);
+
+    // Box half-extent for unit cube
+    glm::vec3 cubeHalfExtents(0.5f, 0.5f, 0.5f);
+    float boxMass = 10.0f;
+    float sphereMass = 5.0f;
+
+    // Spawn objects slightly above ground to let them settle
+    const float spawnOffset = 0.1f;
+
+    // Index 1: Wooden crate 1
+    scenePhysicsBodies[1] = physics.createBox(glm::vec3(2.0f, 0.5f + spawnOffset, 0.0f), cubeHalfExtents, boxMass);
+
+    // Index 2: Rotated wooden crate
+    scenePhysicsBodies[2] = physics.createBox(glm::vec3(-1.5f, 0.5f + spawnOffset, 1.0f), cubeHalfExtents, boxMass);
+
+    // Index 3: Polished metal sphere (mesh radius 0.5)
+    scenePhysicsBodies[3] = physics.createSphere(glm::vec3(0.0f, 0.5f + spawnOffset, -2.0f), 0.5f, sphereMass);
+
+    // Index 4: Rough metal sphere (mesh radius 0.5)
+    scenePhysicsBodies[4] = physics.createSphere(glm::vec3(-3.0f, 0.5f + spawnOffset, -1.0f), 0.5f, sphereMass);
+
+    // Index 5: Polished metal cube
+    scenePhysicsBodies[5] = physics.createBox(glm::vec3(3.0f, 0.5f + spawnOffset, -2.0f), cubeHalfExtents, boxMass);
+
+    // Index 6: Brushed metal cube
+    scenePhysicsBodies[6] = physics.createBox(glm::vec3(-3.0f, 0.5f + spawnOffset, -3.0f), cubeHalfExtents, boxMass);
+
+    // Index 7: Emissive sphere - mesh radius 0.5, scaled 0.3 = visual radius 0.15
+    scenePhysicsBodies[7] = physics.createSphere(glm::vec3(2.0f, 1.3f + spawnOffset, 0.0f), 0.5f * 0.3f, 1.0f);
+
+    // Index 8 & 9: Blue and green lights - NO PHYSICS (fixed light indicators)
+    // scenePhysicsBodies[8] and [9] remain INVALID_BODY_ID
+
+    // Index 11: Flag pole - static cylinder (radius 0.05m, height 3m)
+    // Create as a static box approximation for simplicity
+    glm::vec3 poleHalfExtents(0.05f, 1.5f, 0.05f);  // Half of 3m height
+    scenePhysicsBodies[11] = physics.createStaticBox(glm::vec3(5.0f, 1.5f, 0.0f), poleHalfExtents);
+
+    // Index 12: Flag cloth - NO PHYSICS (soft body simulation)
+    // scenePhysicsBodies[12] remains INVALID_BODY_ID
+
+    // Create character controller for player slightly above ground
+    physics.createCharacter(glm::vec3(0.0f, spawnOffset, 0.0f), Player::CAPSULE_HEIGHT, Player::CAPSULE_RADIUS);
+
+    SDL_Log("Physics initialized with %d active bodies", physics.getActiveBodyCount());
+}
+
+void Application::updatePhysicsToScene() {
+    // Update scene object transforms from physics simulation
+    auto& sceneObjects = renderer.getSceneManager().getSceneObjects();
+
+    for (size_t i = 1; i < scenePhysicsBodies.size() && i < sceneObjects.size(); i++) {
+        PhysicsBodyID bodyID = scenePhysicsBodies[i];
+        if (bodyID == INVALID_BODY_ID) continue;
+
+        // Skip player object (handled separately)
+        if (i == renderer.getSceneManager().getPlayerObjectIndex()) continue;
+
+        // Get transform from physics (position and rotation only)
+        glm::mat4 physicsTransform = physics.getBodyTransform(bodyID);
+
+        // Extract scale from current transform to preserve it
+        glm::vec3 scale;
+        scale.x = glm::length(glm::vec3(sceneObjects[i].transform[0]));
+        scale.y = glm::length(glm::vec3(sceneObjects[i].transform[1]));
+        scale.z = glm::length(glm::vec3(sceneObjects[i].transform[2]));
+
+        // Apply scale to physics transform
+        physicsTransform = glm::scale(physicsTransform, scale);
+
+        // Update scene object transform
+        sceneObjects[i].transform = physicsTransform;
+
+        // Update orb light position to follow the emissive sphere (index 7)
+        if (i == 7) {
+            glm::vec3 orbPosition = glm::vec3(physicsTransform[3]);
+            renderer.getSceneManager().setOrbLightPosition(orbPosition);
+        }
+    }
+}
+
+void Application::initFlag() {
+    // Create cloth simulation: 20x15 grid, 0.15m spacing
+    const int clothWidth = 20;
+    const int clothHeight = 15;
+    const float particleSpacing = 0.15f;
+
+    // Position the cloth at the top of the pole (pole is at 5, 1.5, 0 with height 3m)
+    // Top of pole is at y = 1.5 + 1.5 = 3.0
+    glm::vec3 clothTopLeft(5.0f - 0.1f, 3.0f, 0.0f);  // Slightly to the left of pole center
+
+    clothSim.create(clothWidth, clothHeight, particleSpacing, clothTopLeft);
+
+    // Pin the left edge of the cloth to the pole
+    for (int y = 0; y < clothHeight; ++y) {
+        clothSim.pinParticle(0, y);  // Pin left edge
+    }
+
+    // Create initial mesh geometry and upload to GPU
+    clothSim.createMesh(renderer.getFlagClothMesh());
+    renderer.uploadFlagClothMesh();
+
+    SDL_Log("Flag initialized with %dx%d cloth simulation", clothWidth, clothHeight);
+}
+
+void Application::updateFlag(float deltaTime) {
+    // Clear previous frame collisions
+    clothSim.clearCollisions();
+
+    // Add player collision sphere
+    glm::vec3 playerPos = physics.getCharacterPosition();
+    float playerRadius = Player::CAPSULE_RADIUS;
+    float playerHeight = Player::CAPSULE_HEIGHT;
+
+    // Add collision spheres for the player capsule (one at bottom, middle, and top)
+    clothSim.addSphereCollision(playerPos + glm::vec3(0, playerRadius, 0), playerRadius);
+    clothSim.addSphereCollision(playerPos + glm::vec3(0, playerHeight * 0.5f, 0), playerRadius);
+    clothSim.addSphereCollision(playerPos + glm::vec3(0, playerHeight - playerRadius, 0), playerRadius);
+
+    // Add collision spheres for dynamic physics objects
+    auto& sceneObjects = renderer.getSceneManager().getSceneObjects();
+    for (size_t i = 1; i < scenePhysicsBodies.size() && i < sceneObjects.size(); i++) {
+        PhysicsBodyID bodyID = scenePhysicsBodies[i];
+        if (bodyID == INVALID_BODY_ID) continue;
+        if (i == renderer.getSceneManager().getPlayerObjectIndex()) continue; // Skip player (already handled)
+        if (i == 11 || i == 12) continue; // Skip flag pole and cloth itself
+
+        PhysicsBodyInfo info = physics.getBodyInfo(bodyID);
+
+        // Add approximate collision spheres for physics objects
+        // For simplicity, use a sphere of radius 0.5 for all objects
+        clothSim.addSphereCollision(info.position, 0.5f);
+    }
+
+    // Update cloth simulation with wind
+    clothSim.update(deltaTime, &renderer.getWindSystem());
+
+    // Update the mesh vertices from cloth particles and re-upload to GPU
+    clothSim.updateMesh(renderer.getFlagClothMesh());
+    renderer.uploadFlagClothMesh();
 }
