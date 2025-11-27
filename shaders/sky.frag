@@ -64,8 +64,13 @@ const mat3 LMS_TO_RGB = mat3(
    -0.0041960863, -0.7034186147, 1.7076147010
 );
 
-// Optimized Rayleigh coefficients for LMS space 
+// Optimized Rayleigh coefficients for LMS space
 const vec3 RAYLEIGH_LMS = vec3(6.95e-3, 12.28e-3, 28.44e-3);
+
+// Solar irradiance at top of atmosphere (Phase 4.1 - physically-based values)
+// These values represent the sun's spectral power and are essential for
+// producing a bright blue sky during the day
+const vec3 SOLAR_IRRADIANCE = vec3(1.474, 1.8504, 1.91198);
 
 // Cloud parameters (Phase 4.2 - Volumetric Clouds)
 const float CLOUD_LAYER_BOTTOM = 1.5;     // km above surface
@@ -450,6 +455,9 @@ ScatteringResult integrateAtmosphere(vec3 origin, vec3 dir, int sampleCount) {
         inscatter += transmittance * segmentScatter * stepSize;
         transmittance *= attenuation;
     }
+
+    // Apply solar irradiance to produce physically-correct sky brightness
+    inscatter *= SOLAR_IRRADIANCE;
 
     return ScatteringResult(inscatter, transmittance);
 }
