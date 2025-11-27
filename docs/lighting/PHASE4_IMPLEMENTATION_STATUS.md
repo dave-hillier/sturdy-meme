@@ -134,7 +134,7 @@ This is simpler than the documented paraboloid approach but:
 
 | Feature | Doc Section | Implementation | Issue |
 |---------|-------------|----------------|-------|
-| Shadow Map Integration | 4.3.4 | `shaders/froxel_update.comp:133-138` | **Sampler bound but NOT used** - uses sun altitude approximation |
+| Shadow Map Integration | 4.3.4 | `shaders/froxel_update.comp:87-143` | **FIXED** - Full cascade shadow sampling with PCF |
 | Temporal Filtering | 4.3.4 | `src/FroxelSystem.h:153` | `prevViewProj` stored but reprojection not implemented |
 
 ### Not Implemented
@@ -145,21 +145,26 @@ This is simpler than the documented paraboloid approach but:
 | Local Light Contribution | 4.3.8 | No point/spot light scattering in froxels |
 | Fog Particle Lighting | 4.3.9 | Weather particles don't sample froxel lighting |
 
-### Integration Gap: Froxel Shadows
+### Integration Status: Froxel Shadows (FIXED)
 
-The froxel update shader has a shadow map sampler bound but doesn't use it:
+The froxel update shader now properly samples the cascaded shadow map:
 
 ```glsl
-// shaders/froxel_update.comp:23
-layout(binding = 3) uniform sampler2DArrayShadow shadowMap;
+// shaders/froxel_update.comp - cascade matrices in UBO
+mat4 cascadeViewProj[NUM_CASCADES];  // Light-space matrices
+vec4 cascadeSplits;                   // View-space split depths
 
-// Lines 132-138 - simplified shadow:
-float sunVisibility = smoothstep(-0.1, 0.2, sunDir.y);
-// Full shadow sampling would require cascade matrix transforms
-float shadow = sunVisibility;  // SIMPLIFIED - NOT ACTUAL CASCADE SHADOWS
+// Shadow sampling functions:
+// - selectCascade(viewSpaceDepth) - selects appropriate cascade
+// - sampleShadowPCF(worldPos, cascade) - 2x2 PCF sampling
+// - sampleCascadeShadow(worldPos, viewSpaceDepth) - full pipeline
 ```
 
-**To fix:** Add cascade view-projection matrices to uniforms and implement proper shadow sampling with cascade selection.
+**Implementation details:**
+- Cascade selection based on view-space depth using `cascadeSplits`
+- 2x2 PCF kernel for soft shadow edges (lighter than scene shadows)
+- Configurable shadow bias and PCF radius via `shadowParams`
+- Bounds checking to handle positions outside shadow map
 
 ---
 

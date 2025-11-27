@@ -435,7 +435,9 @@ void FroxelSystem::recordFroxelUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
                                        const glm::mat4& view, const glm::mat4& proj,
                                        const glm::vec3& cameraPos,
                                        const glm::vec3& sunDir, float sunIntensity,
-                                       const glm::vec3& sunColor) {
+                                       const glm::vec3& sunColor,
+                                       const glm::mat4* cascadeMatrices,
+                                       const glm::vec4& cascadeSplits) {
     if (!enabled) return;
 
     // Update uniform buffer
@@ -443,6 +445,13 @@ void FroxelSystem::recordFroxelUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
     FroxelUniforms* ubo = static_cast<FroxelUniforms*>(uniformMappedPtrs[frameIndex]);
     ubo->invViewProj = glm::inverse(viewProj);
     ubo->prevViewProj = prevViewProj;
+
+    // Copy cascade matrices for shadow sampling
+    for (uint32_t i = 0; i < FROXEL_NUM_CASCADES; i++) {
+        ubo->cascadeViewProj[i] = cascadeMatrices[i];
+    }
+    ubo->cascadeSplits = cascadeSplits;
+
     ubo->cameraPosition = glm::vec4(cameraPos, 1.0f);
     ubo->sunDirection = glm::vec4(sunDir, sunIntensity);
     ubo->sunColor = glm::vec4(sunColor, 1.0f);
@@ -450,7 +459,7 @@ void FroxelSystem::recordFroxelUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
     ubo->layerParams = glm::vec4(layerHeight, layerThickness, layerDensity, 0.0f);
     ubo->gridParams = glm::vec4(volumetricFarPlane, DEPTH_DISTRIBUTION,
                                  static_cast<float>(frameCounter), 0.0f);
-    ubo->shadowParams = glm::vec4(2048.0f, 0.0f, 0.0f, 0.0f);  // Shadow map size
+    ubo->shadowParams = glm::vec4(2048.0f, 0.001f, 1.0f, 0.0f);  // Shadow map size, bias, pcf radius
 
     // Store for next frame's temporal reprojection
     prevViewProj = viewProj;

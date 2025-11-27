@@ -9,16 +9,20 @@
 // Froxel-based volumetric fog system (Phase 4.3)
 // Implements frustum-aligned voxel grid for efficient volumetric rendering
 
+static constexpr uint32_t FROXEL_NUM_CASCADES = 4;
+
 struct FroxelUniforms {
     glm::mat4 invViewProj;        // Inverse view-projection for world pos reconstruction
     glm::mat4 prevViewProj;       // Previous frame's view-proj for temporal reprojection
+    glm::mat4 cascadeViewProj[FROXEL_NUM_CASCADES];  // Light-space matrices for shadow cascades
+    glm::vec4 cascadeSplits;      // View-space split depths for cascade selection
     glm::vec4 cameraPosition;     // xyz = camera pos, w = unused
     glm::vec4 sunDirection;       // xyz = sun dir, w = sun intensity
     glm::vec4 sunColor;           // rgb = sun color
     glm::vec4 fogParams;          // x = base height, y = scale height, z = density, w = absorption
     glm::vec4 layerParams;        // x = layer height, y = layer thickness, z = layer density, w = unused
     glm::vec4 gridParams;         // x = volumetric far plane, y = depth distribution, z = frame index, w = unused
-    glm::vec4 shadowParams;       // x = shadow map size, y-w = unused
+    glm::vec4 shadowParams;       // x = shadow map size, y = shadow bias, z = pcf radius, w = unused
 };
 
 class FroxelSystem {
@@ -54,7 +58,9 @@ public:
                            const glm::mat4& view, const glm::mat4& proj,
                            const glm::vec3& cameraPos,
                            const glm::vec3& sunDir, float sunIntensity,
-                           const glm::vec3& sunColor);
+                           const glm::vec3& sunColor,
+                           const glm::mat4* cascadeMatrices,
+                           const glm::vec4& cascadeSplits);
 
     // Get the scattering volume for compositing
     VkImageView getScatteringVolumeView() const { return scatteringVolumeView; }

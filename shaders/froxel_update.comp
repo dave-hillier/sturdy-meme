@@ -2,22 +2,27 @@
 
 // Froxel Update Compute Shader (Phase 4.3)
 // Calculates fog density and in-scattered light for each froxel
+// Now with proper cascade shadow map sampling
 
 layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
 
 layout(binding = 0, rgba16f) writeonly uniform image3D scatteringVolume;
 layout(binding = 1, rgba16f) uniform image3D integratedVolume;  // Previous frame for temporal
 
+const int NUM_CASCADES = 4;
+
 layout(binding = 2) uniform FroxelUniforms {
     mat4 invViewProj;
     mat4 prevViewProj;
+    mat4 cascadeViewProj[NUM_CASCADES];  // Light-space matrices for shadow cascades
+    vec4 cascadeSplits;                   // View-space split depths
     vec4 cameraPosition;
     vec4 sunDirection;      // xyz = direction, w = intensity
     vec4 sunColor;
     vec4 fogParams;         // x = base height, y = scale height, z = density, w = absorption
     vec4 layerParams;       // x = layer height, y = layer thickness, z = layer density
     vec4 gridParams;        // x = volumetric far, y = depth distribution, z = frame index
-    vec4 shadowParams;      // x = shadow map size
+    vec4 shadowParams;      // x = shadow map size, y = shadow bias, z = pcf radius
 } ubo;
 
 layout(binding = 3) uniform sampler2DArrayShadow shadowMap;
@@ -79,6 +84,64 @@ vec2 blueNoise2D(ivec2 texel, float frame) {
     return r;
 }
 
+// ============================================================================
+// Cascade Shadow Map Sampling
+// ============================================================================
+
+// Select which cascade to use based on view-space depth
+int selectCascade(float viewSpaceDepth) {
+    for (int i = 0; i < NUM_CASCADES; i++) {
+        if (viewSpaceDepth < ubo.cascadeSplits[i]) {
+            return i;
+        }
+    }
+    return NUM_CASCADES - 1;
+}
+
+// Sample shadow map with PCF (Percentage Closer Filtering)
+float sampleShadowPCF(vec3 worldPos, int cascade) {
+    // Transform world position to light space
+    vec4 lightSpacePos = ubo.cascadeViewProj[cascade] * vec4(worldPos, 1.0);
+    vec3 projCoords = lightSpacePos.xyz / lightSpacePos.w;
+
+    // Convert from [-1,1] to [0,1] for UV coordinates (Vulkan NDC)
+    vec2 shadowUV = projCoords.xy * 0.5 + 0.5;
+
+    // Check if position is outside shadow map bounds
+    if (shadowUV.x < 0.0 || shadowUV.x > 1.0 || shadowUV.y < 0.0 || shadowUV.y > 1.0) {
+        return 1.0;  // Outside shadow map = lit
+    }
+
+    // Shadow bias to prevent acne (smaller for volumetrics)
+    float bias = ubo.shadowParams.y;
+    float compareDepth = projCoords.z - bias;
+
+    // Simple PCF with 4 samples for volumetrics (lighter weight than scene shadows)
+    float shadow = 0.0;
+    float texelSize = 1.0 / ubo.shadowParams.x;
+    float pcfRadius = ubo.shadowParams.z;
+
+    // 2x2 PCF kernel
+    for (int x = -1; x <= 0; x++) {
+        for (int y = -1; y <= 0; y++) {
+            vec2 offset = vec2(float(x) + 0.5, float(y) + 0.5) * texelSize * pcfRadius;
+            // texture() with sampler2DArrayShadow returns comparison result
+            shadow += texture(shadowMap, vec4(shadowUV + offset, float(cascade), compareDepth));
+        }
+    }
+
+    return shadow / 4.0;
+}
+
+// Sample shadow for a world position (full cascade selection + PCF)
+float sampleCascadeShadow(vec3 worldPos, float viewSpaceDepth) {
+    // Select appropriate cascade
+    int cascade = selectCascade(viewSpaceDepth);
+
+    // Sample shadow with PCF
+    return sampleShadowPCF(worldPos, cascade);
+}
+
 void main() {
     ivec3 texel = ivec3(gl_GlobalInvocationID);
 
@@ -129,16 +192,21 @@ void main() {
     float cosTheta = dot(viewDir, sunDir);
     float phase = henyeyGreenstein(cosTheta, 0.7);  // Slightly forward scattering for haze
 
-    // Shadow sampling (simplified - would need cascade selection)
-    // For now, assume sun visibility based on height above horizon
+    // Sun visibility based on sun angle (day/night)
     float sunVisibility = smoothstep(-0.1, 0.2, sunDir.y);
 
-    // Simple shadow approximation based on sun angle
-    // Full shadow sampling would require cascade matrix transforms
-    float shadow = sunVisibility;
+    // Sample cascade shadow map for this froxel position
+    // Use linear depth as view-space depth approximation for cascade selection
+    float shadow = 1.0;
+    if (sunVisibility > 0.01) {
+        shadow = sampleCascadeShadow(worldPos, linearDepth);
+    }
 
-    // In-scattering from sun
-    vec3 sunInScatter = sunLight * phase * shadow * density;
+    // Combine sun visibility with shadow
+    float totalShadow = sunVisibility * shadow;
+
+    // In-scattering from sun (attenuated by shadow)
+    vec3 sunInScatter = sunLight * phase * totalShadow * density;
 
     // Ambient sky contribution (isotropic)
     float night = 1.0 - smoothstep(-0.05, 0.08, sunDir.y);

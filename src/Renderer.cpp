@@ -2367,10 +2367,13 @@ void Renderer::render(const Camera& camera) {
         float sunIntensity = ubo->sunDirection.w;
         glm::vec3 sunColor = glm::vec3(ubo->sunColor);
 
+        // Pass cascade matrices for volumetric shadow sampling
         froxelSystem.recordFroxelUpdate(cmd, currentFrame,
                                         camera.getViewMatrix(), camera.getProjectionMatrix(),
                                         camera.getPosition(),
-                                        sunDir, sunIntensity, sunColor);
+                                        sunDir, sunIntensity, sunColor,
+                                        cascadeMatrices.data(),
+                                        ubo->cascadeSplits);
 
         postProcessSystem.setCameraPlanes(camera.getNearPlane(), camera.getFarPlane());
     }
