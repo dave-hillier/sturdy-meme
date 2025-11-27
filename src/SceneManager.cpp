@@ -51,19 +51,18 @@ void SceneManager::initializeScenePhysics(PhysicsWorld& physics) {
     // which creates a heightfield from the TerrainSystem's height data
 
     // Scene object layout from SceneBuilder:
-    // 0: Ground disc (static terrain - already created above)
-    // 1: Wooden crate 1 at (2.0, 0.5, 0.0) - unit cube
-    // 2: Rotated wooden crate at (-1.5, 0.5, 1.0)
-    // 3: Polished metal sphere at (0.0, 0.5, -2.0) - radius 0.5
-    // 4: Rough metal sphere at (-3.0, 0.5, -1.0) - radius 0.5
-    // 5: Polished metal cube at (3.0, 0.5, -2.0)
-    // 6: Brushed metal cube at (-3.0, 0.5, -3.0)
-    // 7: Emissive sphere at (2.0, 1.3, 0.0) - scaled 0.3, visual radius 0.15
-    // 8: Blue light indicator sphere (index 8) - fixed, no physics
-    // 9: Green light indicator sphere (index 9) - fixed, no physics
-    // 10: Player capsule (index 10, tracked by playerObjectIndex)
+    // 0: Wooden crate 1 at (2.0, 0.5, 0.0) - unit cube
+    // 1: Rotated wooden crate at (-1.5, 0.5, 1.0)
+    // 2: Polished metal sphere at (0.0, 0.5, -2.0) - radius 0.5
+    // 3: Rough metal sphere at (-3.0, 0.5, -1.0) - radius 0.5
+    // 4: Polished metal cube at (3.0, 0.5, -2.0)
+    // 5: Brushed metal cube at (-3.0, 0.5, -3.0)
+    // 6: Emissive sphere at (2.0, 1.3, 0.0) - scaled 0.3, visual radius 0.15
+    // 7: Blue light indicator sphere (index 7) - fixed, no physics
+    // 8: Green light indicator sphere (index 8) - fixed, no physics
+    // 9: Player capsule (index 9, tracked by playerObjectIndex)
 
-    const size_t numSceneObjects = 11;
+    const size_t numSceneObjects = 10;
     scenePhysicsBodies.resize(numSceneObjects, INVALID_BODY_ID);
 
     // Box half-extent for unit cube
@@ -74,29 +73,30 @@ void SceneManager::initializeScenePhysics(PhysicsWorld& physics) {
     // Spawn objects slightly above ground to let them settle
     const float spawnOffset = 0.1f;
 
-    // Index 1: Wooden crate 1
-    scenePhysicsBodies[1] = physics.createBox(glm::vec3(2.0f, 0.5f + spawnOffset, 0.0f), cubeHalfExtents, boxMass);
+    // Index 0: Wooden crate 1
+    scenePhysicsBodies[0] = physics.createBox(glm::vec3(2.0f, 0.5f + spawnOffset, 0.0f), cubeHalfExtents, boxMass);
 
-    // Index 2: Rotated wooden crate
-    scenePhysicsBodies[2] = physics.createBox(glm::vec3(-1.5f, 0.5f + spawnOffset, 1.0f), cubeHalfExtents, boxMass);
+    // Index 1: Rotated wooden crate
+    scenePhysicsBodies[1] = physics.createBox(glm::vec3(-1.5f, 0.5f + spawnOffset, 1.0f), cubeHalfExtents, boxMass);
 
-    // Index 3: Polished metal sphere (mesh radius 0.5)
-    scenePhysicsBodies[3] = physics.createSphere(glm::vec3(0.0f, 0.5f + spawnOffset, -2.0f), 0.5f, sphereMass);
+    // Index 2: Polished metal sphere (mesh radius 0.5)
+    scenePhysicsBodies[2] = physics.createSphere(glm::vec3(0.0f, 0.5f + spawnOffset, -2.0f), 0.5f, sphereMass);
 
-    // Index 4: Rough metal sphere (mesh radius 0.5)
-    scenePhysicsBodies[4] = physics.createSphere(glm::vec3(-3.0f, 0.5f + spawnOffset, -1.0f), 0.5f, sphereMass);
+    // Index 3: Rough metal sphere (mesh radius 0.5)
+    scenePhysicsBodies[3] = physics.createSphere(glm::vec3(-3.0f, 0.5f + spawnOffset, -1.0f), 0.5f, sphereMass);
 
-    // Index 5: Polished metal cube
-    scenePhysicsBodies[5] = physics.createBox(glm::vec3(3.0f, 0.5f + spawnOffset, -2.0f), cubeHalfExtents, boxMass);
+    // Index 4: Polished metal cube
+    scenePhysicsBodies[4] = physics.createBox(glm::vec3(3.0f, 0.5f + spawnOffset, -2.0f), cubeHalfExtents, boxMass);
 
-    // Index 6: Brushed metal cube
-    scenePhysicsBodies[6] = physics.createBox(glm::vec3(-3.0f, 0.5f + spawnOffset, -3.0f), cubeHalfExtents, boxMass);
+    // Index 5: Brushed metal cube
+    scenePhysicsBodies[5] = physics.createBox(glm::vec3(-3.0f, 0.5f + spawnOffset, -3.0f), cubeHalfExtents, boxMass);
 
-    // Index 7: Emissive sphere - mesh radius 0.5, scaled 0.3 = visual radius 0.15
-    scenePhysicsBodies[7] = physics.createSphere(glm::vec3(2.0f, 1.3f + spawnOffset, 0.0f), 0.5f * 0.3f, 1.0f);
+    // Index 6: Emissive sphere - mesh radius 0.5, scaled 0.3 = visual radius 0.15
+    // Sphere center should be at radius height (0.15) to sit on ground
+    scenePhysicsBodies[6] = physics.createSphere(glm::vec3(2.0f, 0.15f + spawnOffset, 0.0f), 0.5f * 0.3f, 1.0f);
 
-    // Index 8 & 9: Blue and green lights - NO PHYSICS (fixed light indicators)
-    // scenePhysicsBodies[8] and [9] remain INVALID_BODY_ID
+    // Index 7 & 8: Blue and green lights - NO PHYSICS (fixed light indicators)
+    // scenePhysicsBodies[7] and [8] remain INVALID_BODY_ID
 
     SDL_Log("Scene physics initialized with static terrain and dynamic objects");
 }
@@ -142,7 +142,7 @@ void SceneManager::updatePhysicsToScene(PhysicsWorld& physics) {
     // Update scene object transforms from physics simulation
     auto& sceneObjects = sceneBuilder.getSceneObjects();
 
-    for (size_t i = 1; i < scenePhysicsBodies.size() && i < sceneObjects.size(); i++) {
+    for (size_t i = 0; i < scenePhysicsBodies.size() && i < sceneObjects.size(); i++) {
         PhysicsBodyID bodyID = scenePhysicsBodies[i];
         if (bodyID == INVALID_BODY_ID) continue;
 
