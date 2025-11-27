@@ -829,8 +829,25 @@ void AtmosphereLUTSystem::computeSkyViewLUT(VkCommandBuffer cmd, const glm::vec3
 }
 
 bool AtmosphereLUTSystem::exportImageToPNG(VkImage image, VkFormat format, uint32_t width, uint32_t height, const std::string& filename) {
-    // Create staging buffer
-    VkDeviceSize imageSize = width * height * 4 * sizeof(uint16_t); // RGBA16F
+    // Determine channel count from format
+    uint32_t channelCount = 0;
+    switch (format) {
+        case VK_FORMAT_R16G16B16A16_SFLOAT:
+            channelCount = 4;
+            break;
+        case VK_FORMAT_R16G16_SFLOAT:
+            channelCount = 2;
+            break;
+        case VK_FORMAT_R16_SFLOAT:
+            channelCount = 1;
+            break;
+        default:
+            SDL_Log("Unsupported format for PNG export: %d", format);
+            return false;
+    }
+
+    // Create staging buffer with correct size based on actual format
+    VkDeviceSize imageSize = width * height * channelCount * sizeof(uint16_t);
 
     VkBuffer stagingBuffer;
     VmaAllocation stagingAllocation;
@@ -929,6 +946,39 @@ bool AtmosphereLUTSystem::exportImageToPNG(VkImage image, VkFormat format, uint3
     vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
     vkQueueWaitIdle(graphicsQueue);
 
+    // Helper lambda to convert FP16 to float32
+    auto fp16ToFloat = [](uint16_t h) -> float {
+        uint32_t sign = (h & 0x8000) << 16;
+        uint32_t exponent = (h & 0x7C00) >> 10;
+        uint32_t mantissa = (h & 0x03FF);
+
+        if (exponent == 0) {
+            if (mantissa == 0) {
+                // Zero
+                uint32_t f = sign;
+                return *reinterpret_cast<float*>(&f);
+            } else {
+                // Denormalized
+                exponent = 1;
+                while ((mantissa & 0x0400) == 0) {
+                    mantissa <<= 1;
+                    exponent--;
+                }
+                mantissa &= 0x03FF;
+            }
+        } else if (exponent == 0x1F) {
+            // Infinity or NaN
+            uint32_t f = sign | 0x7F800000 | (mantissa << 13);
+            return *reinterpret_cast<float*>(&f);
+        }
+
+        // Normalized
+        exponent = exponent + (127 - 15);
+        mantissa = mantissa << 13;
+        uint32_t f = sign | (exponent << 23) | mantissa;
+        return *reinterpret_cast<float*>(&f);
+    };
+
     // Map and convert to 8-bit RGBA for PNG
     void* data;
     vmaMapMemory(allocator, stagingAllocation, &data);
@@ -936,12 +986,37 @@ bool AtmosphereLUTSystem::exportImageToPNG(VkImage image, VkFormat format, uint3
     std::vector<uint8_t> rgba8(width * height * 4);
     uint16_t* src = static_cast<uint16_t*>(data);
 
-    for (uint32_t i = 0; i < width * height * 4; i++) {
-        // Convert float16 to float32 to uint8 (simple conversion)
-        // For proper conversion, we'd need a float16 library
-        // For now, just copy the lower 8 bits scaled
-        float val = static_cast<float>(src[i]) / 65535.0f * 255.0f;
-        rgba8[i] = static_cast<uint8_t>(glm::clamp(val * 10.0f, 0.0f, 255.0f)); // Scale up for visibility
+    // Convert with proper FP16 decoding and per-format stride
+    for (uint32_t y = 0; y < height; y++) {
+        for (uint32_t x = 0; x < width; x++) {
+            uint32_t srcIdx = (y * width + x) * channelCount;
+            uint32_t dstIdx = (y * width + x) * 4;
+
+            // Read available channels and convert from FP16 to float
+            float channels[4] = {0.0f, 0.0f, 0.0f, 1.0f}; // Default: black with alpha=1
+            for (uint32_t c = 0; c < channelCount; c++) {
+                channels[c] = fp16ToFloat(src[srcIdx + c]);
+            }
+
+            // For RG formats, copy R to all RGB channels for grayscale visualization
+            if (channelCount == 2) {
+                // Use R for luminance, G for alpha (common for multi-scatter LUT)
+                channels[2] = channels[0]; // B = R
+                channels[3] = channels[1]; // A = G
+                channels[1] = channels[0]; // G = R
+            } else if (channelCount == 1) {
+                channels[1] = channels[0];
+                channels[2] = channels[0];
+                channels[3] = 1.0f;
+            }
+
+            // Simple tonemapping: clamp to [0,1] and convert to 8-bit
+            // No arbitrary scaling - the LUT values are already in the correct range
+            for (uint32_t c = 0; c < 4; c++) {
+                float val = glm::clamp(channels[c], 0.0f, 1.0f);
+                rgba8[dstIdx + c] = static_cast<uint8_t>(val * 255.0f);
+            }
+        }
     }
 
     vmaUnmapMemory(allocator, stagingAllocation);
@@ -958,7 +1033,7 @@ bool AtmosphereLUTSystem::exportImageToPNG(VkImage image, VkFormat format, uint3
         return false;
     }
 
-    SDL_Log("Exported LUT to: %s", filename.c_str());
+    SDL_Log("Exported LUT to: %s (%d channels)", filename.c_str(), channelCount);
     return true;
 }
 
