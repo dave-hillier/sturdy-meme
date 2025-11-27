@@ -191,15 +191,29 @@ mat3 leb__SplittingMatrix(uint splitBit) {
 }
 
 // Square mapping matrix
+// Produces two triangles covering the unit square with CONSISTENT winding order.
+// quadBit=0: lower-left triangle, quadBit=1: upper-right triangle (with v0/v2 swapped for consistent CW winding)
 mat3 leb__SquareMatrix(uint quadBit) {
     float b = float(quadBit);
     float c = 1.0f - b;
 
-    return transpose(mat3(
+    mat3 square = transpose(mat3(
         c, 0.0f, b,
         b, c   , b,
         b, 0.0f, c
     ));
+
+    // The base square matrix produces triangles with opposite winding.
+    // For quadBit=1, pre-apply a v0/v2 swap to get consistent winding with quadBit=0.
+    if (quadBit == 1u) {
+        mat3 windingFix = mat3(
+            0.0f, 0.0f, 1.0f,
+            0.0f, 1.0f, 0.0f,
+            1.0f, 0.0f, 0.0f
+        );
+        return windingFix * square;
+    }
+    return square;
 }
 
 // Winding correction matrix
@@ -226,17 +240,14 @@ mat3 leb__DecodeTransformationMatrix(in const cbt_Node node) {
 
 mat3 leb__DecodeTransformationMatrix_Square(in const cbt_Node node) {
     int bitID = max(0, node.depth - 1);
-    uint quadBit = leb__GetBitValue(node.id, bitID);
-    mat3 xf = leb__SquareMatrix(quadBit);
+    mat3 xf = leb__SquareMatrix(leb__GetBitValue(node.id, bitID));
 
     for (bitID = node.depth - 2; bitID >= 0; --bitID) {
         xf = leb__SplittingMatrix(leb__GetBitValue(node.id, bitID)) * xf;
     }
 
-    // Winding correction: account for which root triangle (quadBit) the node descended from.
-    // The two root triangles from leb__SquareMatrix have opposite winding, so we XOR with quadBit
-    // to flip the parity for the quadBit=1 half while preserving the original behavior for quadBit=0.
-    return leb__WindingMatrix((uint(node.depth) ^ quadBit ^ 1u) & 1u) * xf;
+    // Match reference: https://github.com/jdupuy/libleb
+    return leb__WindingMatrix((uint(node.depth) ^ 1u) & 1u) * xf;
 }
 
 vec3 leb_DecodeNodeAttributeArray(in const cbt_Node node, in const vec3 data) {
