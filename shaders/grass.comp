@@ -25,8 +25,7 @@ layout(std430, binding = 1) buffer IndirectBuffer {
 layout(binding = 2) uniform GrassUniforms {
     vec4 cameraPosition;
     vec4 frustumPlanes[6];
-    vec4 playerCapsule;       // xyz = base position, w = radius
-    vec4 displacementParams;  // x = strength, y = decay falloff, z = max tilt, w = unused
+    vec4 displacementRegion;  // xy = world center, z = region size, w = texel size
     float maxDrawDistance;
     float lodTransitionStart;
     float lodTransitionEnd;
@@ -37,6 +36,9 @@ layout(binding = 2) uniform GrassUniforms {
 
 // Terrain heightmap for grass placement on terrain
 layout(binding = 3) uniform sampler2D terrainHeightMap;
+
+// Displacement map for player/NPC grass interaction (RG16F - XZ displacement)
+layout(binding = 4) uniform sampler2D displacementMap;
 
 layout(push_constant) uniform PushConstants {
     float time;
@@ -61,50 +63,30 @@ const float CLUMP_SCALE = 2.0;          // Size of clumps in world units
 const float CLUMP_HEIGHT_INFLUENCE = 0.4;  // How much clump affects height (0-1)
 const float CLUMP_FACING_INFLUENCE = 0.3;  // How much blades face toward/away from clump center
 
-// Calculate displacement from player capsule
-// Returns: xyz = push direction in XZ plane, w = displacement amount (0-1)
-vec4 calculatePlayerDisplacement(vec3 bladePos) {
-    vec3 capsuleBase = uniforms.playerCapsule.xyz;
-    float capsuleRadius = uniforms.playerCapsule.w;
-    float strength = uniforms.displacementParams.x;
-    float falloff = uniforms.displacementParams.y;
+// Convert world position to displacement map UV coordinates
+vec2 worldPosToDispUV(vec2 worldPos) {
+    vec2 regionCenter = uniforms.displacementRegion.xy;
+    float regionSize = uniforms.displacementRegion.z;
 
-    // Player capsule height (approximate - grass interacts with lower portion)
-    float capsuleHeight = 1.8;
+    // Convert world pos to UV: center of region maps to UV(0.5, 0.5)
+    vec2 offset = worldPos - regionCenter;
+    vec2 uv = offset / regionSize + 0.5;
 
-    // Find closest point on capsule axis to blade base
-    // Capsule axis goes from capsuleBase to capsuleBase + (0, capsuleHeight, 0)
-    float bladeY = bladePos.y;
-    float clampedY = clamp(bladeY, capsuleBase.y, capsuleBase.y + capsuleHeight);
+    return uv;
+}
 
-    // Closest point on capsule axis
-    vec3 closestOnAxis = vec3(capsuleBase.x, clampedY, capsuleBase.z);
+// Sample displacement from the displacement buffer texture
+// Returns: xy = displacement direction in XZ plane
+vec2 sampleDisplacement(vec2 worldPos) {
+    vec2 uv = worldPosToDispUV(worldPos);
 
-    // Vector from capsule axis to blade (in XZ plane primarily)
-    vec3 toBladeVec = bladePos - closestOnAxis;
-    vec2 toBladeXZ = vec2(toBladeVec.x, toBladeVec.z);
-    float distXZ = length(toBladeXZ);
-
-    // If blade is outside capsule influence radius, no displacement
-    float influenceRadius = capsuleRadius * 2.0;  // Extend influence beyond physical capsule
-    if (distXZ > influenceRadius || distXZ < 0.001) {
-        return vec4(0.0, 0.0, 0.0, 0.0);
+    // Check if within displacement region bounds
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+        return vec2(0.0);
     }
 
-    // Normalize push direction (away from capsule center in XZ plane)
-    vec2 pushDir = toBladeXZ / distXZ;
-
-    // Calculate displacement amount with smooth falloff
-    // Quadratic falloff: stronger near center, smooth transition at edge
-    float normalizedDist = distXZ / influenceRadius;
-    float displacementAmount = (1.0 - normalizedDist * normalizedDist) * strength;
-
-    // Blades very close to capsule get maximum displacement
-    if (distXZ < capsuleRadius) {
-        displacementAmount = strength;
-    }
-
-    return vec4(pushDir.x, 0.0, pushDir.y, displacementAmount);
+    // Sample displacement (RG = XZ displacement)
+    return texture(displacementMap, uv).rg;
 }
 
 // Voronoi-based clump calculation
@@ -251,22 +233,22 @@ void main() {
     float clumpTiltMod = (1.0 - clumpDist / CLUMP_SCALE) * 0.15;
     float tilt = baseTilt + clumpTiltMod;
 
-    // Apply player displacement - grass bends away from player capsule
-    // Only affects facing angle (rotation), not tilt (which would stretch the blade)
-    vec4 displacement = calculatePlayerDisplacement(worldPos);
-    float dispAmount = displacement.w;
+    // Apply displacement from displacement buffer (player/NPC interaction)
+    // Sample the displacement texture to get push direction
+    vec2 displacement = sampleDisplacement(vec2(x, z));
+    float dispMagnitude = length(displacement);
 
-    if (dispAmount > 0.01) {
-        // Get push direction in XZ plane
-        vec2 pushDir = vec2(displacement.x, displacement.z);
+    if (dispMagnitude > 0.01) {
+        // Normalize displacement direction
+        vec2 dispDir = displacement / dispMagnitude;
 
-        // Calculate the angle of the push direction
-        float pushAngle = atan(pushDir.y, pushDir.x);
+        // Calculate the angle of the displacement direction
+        float dispAngle = atan(dispDir.y, dispDir.x);
 
-        // Blend facing toward push direction based on displacement amount
-        // Strong displacement = blade faces away from player
-        float facingBlend = dispAmount * 0.9;  // Strong rotation toward push direction
-        facing = mix(facing, pushAngle, facingBlend);
+        // Blend facing toward displacement direction based on magnitude
+        // Stronger displacement = blade faces more in push direction
+        float facingBlend = clamp(dispMagnitude * 0.9, 0.0, 0.9);
+        facing = mix(facing, dispAngle, facingBlend);
     }
 
     // Write instance data (clumpId stored in w for fragment shader color variation)

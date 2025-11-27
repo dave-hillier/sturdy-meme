@@ -2180,8 +2180,8 @@ void Renderer::render(const Camera& camera) {
     glm::mat4 viewProj = camera.getProjectionMatrix() * camera.getViewMatrix();
     const auto& terrainConfig = terrainSystem.getConfig();
     grassSystem.updateUniforms(currentFrame, camera.getPosition(), viewProj,
-                               terrainConfig.size, terrainConfig.heightScale,
-                               playerPosition, playerCapsuleRadius);
+                               terrainConfig.size, terrainConfig.heightScale);
+    grassSystem.updateDisplacementSources(playerPosition, playerCapsuleRadius, deltaTime);
     weatherSystem.updateUniforms(currentFrame, camera.getPosition(), viewProj, deltaTime, grassTime, windSystem);
     terrainSystem.updateUniforms(currentFrame, camera.getPosition(), camera.getViewMatrix(), camera.getProjectionMatrix());
 
@@ -2203,6 +2203,9 @@ void Renderer::render(const Camera& camera) {
 
     // Terrain compute pass (adaptive subdivision)
     terrainSystem.recordCompute(cmd, currentFrame);
+
+    // Grass displacement update (player/NPC interaction)
+    grassSystem.recordDisplacementUpdate(cmd, currentFrame);
 
     // Grass compute pass
     grassSystem.recordResetAndCompute(cmd, currentFrame, grassTime);

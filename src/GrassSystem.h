@@ -14,14 +14,25 @@ struct GrassPushConstants {
 struct GrassUniforms {
     glm::vec4 cameraPosition;      // xyz = position, w = unused
     glm::vec4 frustumPlanes[6];    // 6 frustum planes (ax+by+cz+d form)
-    glm::vec4 playerCapsule;       // xyz = base position, w = radius
-    glm::vec4 displacementParams;  // x = strength, y = decay falloff, z = max displacement, w = unused
+    glm::vec4 displacementRegion;  // xy = world center, z = region size (50m), w = texel size
     float maxDrawDistance;          // Max distance for grass rendering
     float lodTransitionStart;       // Distance where LOD transition begins
     float lodTransitionEnd;         // Distance where LOD transition ends
     float terrainSize;              // Terrain size for heightmap UV calculation
     float terrainHeightScale;       // Terrain height scale
     float padding[3];
+};
+
+// Displacement source for grass interaction (player, NPCs, etc.)
+struct DisplacementSource {
+    glm::vec4 positionAndRadius;   // xyz = world position, w = radius
+    glm::vec4 strengthAndVelocity; // x = strength, yzw = velocity (for directional push)
+};
+
+// Uniforms for displacement update compute shader
+struct DisplacementUniforms {
+    glm::vec4 regionCenter;        // xy = world center, z = region size, w = texel size
+    glm::vec4 params;              // x = decay rate, y = max displacement, z = delta time, w = num sources
 };
 
 struct GrassInstance {
@@ -56,8 +67,9 @@ public:
                               VkImageView terrainHeightMapView, VkSampler terrainHeightMapSampler);
 
     void updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos, const glm::mat4& viewProj,
-                        float terrainSize, float terrainHeightScale,
-                        const glm::vec3& playerPos, float playerRadius);
+                        float terrainSize, float terrainHeightScale);
+    void updateDisplacementSources(const glm::vec3& playerPos, float playerRadius, float deltaTime);
+    void recordDisplacementUpdate(VkCommandBuffer cmd, uint32_t frameIndex);
     void recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex, float time);
     void recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time);
     void recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time, uint32_t cascadeIndex);
@@ -68,6 +80,8 @@ public:
 private:
     bool createShadowPipeline();
     bool createBuffers();
+    bool createDisplacementResources();
+    bool createDisplacementPipeline();
     bool createComputeDescriptorSetLayout();
     bool createComputePipeline();
     bool createGraphicsDescriptorSetLayout();
@@ -98,6 +112,40 @@ private:
     VkDescriptorSetLayout shadowDescriptorSetLayout = VK_NULL_HANDLE;
     VkPipelineLayout shadowPipelineLayout = VK_NULL_HANDLE;
     VkPipeline shadowPipeline = VK_NULL_HANDLE;
+
+    // Displacement texture resources (for player/NPC grass interaction)
+    static constexpr uint32_t DISPLACEMENT_TEXTURE_SIZE = 512;  // 512x512 texels
+    static constexpr float DISPLACEMENT_REGION_SIZE = 50.0f;    // 50m x 50m coverage
+    static constexpr uint32_t MAX_DISPLACEMENT_SOURCES = 16;    // Max sources per frame
+
+    VkImage displacementImage = VK_NULL_HANDLE;
+    VmaAllocation displacementAllocation = VK_NULL_HANDLE;
+    VkImageView displacementImageView = VK_NULL_HANDLE;
+    VkSampler displacementSampler = VK_NULL_HANDLE;
+
+    // Displacement update compute pipeline
+    VkDescriptorSetLayout displacementDescriptorSetLayout = VK_NULL_HANDLE;
+    VkPipelineLayout displacementPipelineLayout = VK_NULL_HANDLE;
+    VkPipeline displacementPipeline = VK_NULL_HANDLE;
+    VkDescriptorSet displacementDescriptorSet = VK_NULL_HANDLE;
+
+    // Displacement sources buffer (per-frame)
+    std::vector<VkBuffer> displacementSourceBuffers;
+    std::vector<VmaAllocation> displacementSourceAllocations;
+    std::vector<void*> displacementSourceMappedPtrs;
+
+    // Displacement uniforms buffer (per-frame)
+    std::vector<VkBuffer> displacementUniformBuffers;
+    std::vector<VmaAllocation> displacementUniformAllocations;
+    std::vector<void*> displacementUniformMappedPtrs;
+
+    // Current displacement region center (follows camera)
+    glm::vec2 displacementRegionCenter = glm::vec2(0.0f);
+
+    // Displacement source data for current frame
+    std::vector<DisplacementSource> currentDisplacementSources;
+    float displacementDecayRate = 0.92f;   // Grass springs back over time
+    float maxDisplacement = 1.0f;          // Maximum displacement magnitude
 
     // Double-buffered storage buffers: A/B sets that alternate each frame
     // Set A and Set B alternate: compute writes to one while graphics reads from other

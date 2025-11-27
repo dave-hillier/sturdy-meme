@@ -1,0 +1,86 @@
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+// Displacement texture (RG16F - X and Z displacement)
+layout(binding = 0, rg16f) uniform image2D displacementMap;
+
+// Displacement source (player, NPCs, etc.)
+struct DisplacementSource {
+    vec4 positionAndRadius;   // xyz = world position, w = radius
+    vec4 strengthAndVelocity; // x = strength, yzw = velocity (for directional push)
+};
+
+layout(std430, binding = 1) readonly buffer SourceBuffer {
+    DisplacementSource sources[];
+};
+
+layout(binding = 2) uniform DisplacementUniforms {
+    vec4 regionCenter;  // xy = world center, z = region size, w = texel size
+    vec4 params;        // x = decay rate, y = max displacement, z = delta time, w = num sources
+} uniforms;
+
+// Convert texel coordinate to world position
+vec2 texelToWorld(ivec2 texCoord) {
+    vec2 texSize = vec2(imageSize(displacementMap));
+    vec2 uv = (vec2(texCoord) + 0.5) / texSize;  // Center of texel
+    vec2 regionSize = vec2(uniforms.regionCenter.z);
+    vec2 worldPos = uniforms.regionCenter.xy + (uv - 0.5) * regionSize;
+    return worldPos;
+}
+
+void main() {
+    ivec2 texCoord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 texSize = imageSize(displacementMap);
+
+    // Bounds check
+    if (texCoord.x >= texSize.x || texCoord.y >= texSize.y) {
+        return;
+    }
+
+    vec2 worldPos = texelToWorld(texCoord);
+
+    float decay = uniforms.params.x;
+    float maxDisp = uniforms.params.y;
+    float deltaTime = uniforms.params.z;
+    uint numSources = uint(uniforms.params.w);
+
+    // Load and decay existing displacement (grass springs back)
+    vec2 currentDisp = imageLoad(displacementMap, texCoord).rg * decay;
+
+    // Apply each displacement source
+    for (uint i = 0; i < numSources && i < 16; i++) {
+        vec3 sourcePos = sources[i].positionAndRadius.xyz;
+        float radius = sources[i].positionAndRadius.w;
+        float strength = sources[i].strengthAndVelocity.x;
+        vec3 velocity = sources[i].strengthAndVelocity.yzw;
+
+        // Distance from source in XZ plane
+        vec2 toWorld = worldPos - sourcePos.xz;
+        float dist = length(toWorld);
+
+        if (dist < radius && dist > 0.001) {
+            // Quadratic falloff from center
+            float normalizedDist = dist / radius;
+            float falloff = 1.0 - normalizedDist * normalizedDist;
+
+            // Push direction (away from source center)
+            vec2 pushDir = normalize(toWorld);
+
+            // Add velocity influence for directional push
+            vec2 velInfluence = vec2(velocity.x, velocity.z) * 0.5;
+            pushDir = normalize(pushDir + velInfluence);
+
+            // Accumulate displacement
+            currentDisp += pushDir * strength * falloff;
+        }
+    }
+
+    // Clamp maximum displacement magnitude
+    float mag = length(currentDisp);
+    if (mag > maxDisp) {
+        currentDisp = currentDisp / mag * maxDisp;
+    }
+
+    imageStore(displacementMap, texCoord, vec4(currentDisp, 0.0, 0.0));
+}

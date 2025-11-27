@@ -20,6 +20,8 @@ bool GrassSystem::init(const InitInfo& info) {
     framesInFlight = info.framesInFlight;
 
     if (!createBuffers()) return false;
+    if (!createDisplacementResources()) return false;
+    if (!createDisplacementPipeline()) return false;
     if (!createComputeDescriptorSetLayout()) return false;
     if (!createComputePipeline()) return false;
     if (!createGraphicsDescriptorSetLayout()) return false;
@@ -40,6 +42,19 @@ void GrassSystem::destroy(VkDevice dev, VmaAllocator alloc) {
     vkDestroyPipeline(dev, computePipeline, nullptr);
     vkDestroyPipelineLayout(dev, computePipelineLayout, nullptr);
     vkDestroyDescriptorSetLayout(dev, computeDescriptorSetLayout, nullptr);
+
+    // Destroy displacement resources
+    vkDestroyPipeline(dev, displacementPipeline, nullptr);
+    vkDestroyPipelineLayout(dev, displacementPipelineLayout, nullptr);
+    vkDestroyDescriptorSetLayout(dev, displacementDescriptorSetLayout, nullptr);
+    vkDestroySampler(dev, displacementSampler, nullptr);
+    vkDestroyImageView(dev, displacementImageView, nullptr);
+    vmaDestroyImage(alloc, displacementImage, displacementAllocation);
+
+    for (size_t i = 0; i < framesInFlight; i++) {
+        vmaDestroyBuffer(alloc, displacementSourceBuffers[i], displacementSourceAllocations[i]);
+        vmaDestroyBuffer(alloc, displacementUniformBuffers[i], displacementUniformAllocations[i]);
+    }
 
     // Destroy double-buffered instance and indirect buffers
     for (uint32_t set = 0; set < BUFFER_SET_COUNT; set++) {
@@ -124,8 +139,240 @@ bool GrassSystem::createBuffers() {
     return true;
 }
 
+bool GrassSystem::createDisplacementResources() {
+    // Create displacement texture (RG16F, 512x512)
+    VkImageCreateInfo imageInfo{};
+    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    imageInfo.imageType = VK_IMAGE_TYPE_2D;
+    imageInfo.extent.width = DISPLACEMENT_TEXTURE_SIZE;
+    imageInfo.extent.height = DISPLACEMENT_TEXTURE_SIZE;
+    imageInfo.extent.depth = 1;
+    imageInfo.mipLevels = 1;
+    imageInfo.arrayLayers = 1;
+    imageInfo.format = VK_FORMAT_R16G16_SFLOAT;  // RG16F for XZ displacement
+    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    imageInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+
+    if (vmaCreateImage(allocator, &imageInfo, &allocInfo,
+                       &displacementImage, &displacementAllocation, nullptr) != VK_SUCCESS) {
+        SDL_Log("Failed to create displacement image");
+        return false;
+    }
+
+    // Create image view
+    VkImageViewCreateInfo viewInfo{};
+    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewInfo.image = displacementImage;
+    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format = VK_FORMAT_R16G16_SFLOAT;
+    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.subresourceRange.baseMipLevel = 0;
+    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.baseArrayLayer = 0;
+    viewInfo.subresourceRange.layerCount = 1;
+
+    if (vkCreateImageView(device, &viewInfo, nullptr, &displacementImageView) != VK_SUCCESS) {
+        SDL_Log("Failed to create displacement image view");
+        return false;
+    }
+
+    // Create sampler for grass compute shader to sample displacement
+    VkSamplerCreateInfo samplerInfo{};
+    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    samplerInfo.magFilter = VK_FILTER_LINEAR;
+    samplerInfo.minFilter = VK_FILTER_LINEAR;
+    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.anisotropyEnable = VK_FALSE;
+    samplerInfo.maxAnisotropy = 1.0f;
+    samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
+    samplerInfo.unnormalizedCoordinates = VK_FALSE;
+    samplerInfo.compareEnable = VK_FALSE;
+    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    samplerInfo.mipLodBias = 0.0f;
+    samplerInfo.minLod = 0.0f;
+    samplerInfo.maxLod = 0.0f;
+
+    if (vkCreateSampler(device, &samplerInfo, nullptr, &displacementSampler) != VK_SUCCESS) {
+        SDL_Log("Failed to create displacement sampler");
+        return false;
+    }
+
+    // Create displacement source buffers (per-frame)
+    displacementSourceBuffers.resize(framesInFlight);
+    displacementSourceAllocations.resize(framesInFlight);
+    displacementSourceMappedPtrs.resize(framesInFlight);
+
+    displacementUniformBuffers.resize(framesInFlight);
+    displacementUniformAllocations.resize(framesInFlight);
+    displacementUniformMappedPtrs.resize(framesInFlight);
+
+    VkDeviceSize sourceBufferSize = sizeof(DisplacementSource) * MAX_DISPLACEMENT_SOURCES;
+    VkDeviceSize uniformBufferSize = sizeof(DisplacementUniforms);
+
+    for (size_t i = 0; i < framesInFlight; i++) {
+        // Source buffer
+        VkBufferCreateInfo sourceBufferInfo{};
+        sourceBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        sourceBufferInfo.size = sourceBufferSize;
+        sourceBufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+        sourceBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        VmaAllocationCreateInfo sourceAllocInfo{};
+        sourceAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        sourceAllocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+                               VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+        VmaAllocationInfo sourceAllocResult;
+        if (vmaCreateBuffer(allocator, &sourceBufferInfo, &sourceAllocInfo,
+                           &displacementSourceBuffers[i], &displacementSourceAllocations[i],
+                           &sourceAllocResult) != VK_SUCCESS) {
+            SDL_Log("Failed to create displacement source buffer");
+            return false;
+        }
+        displacementSourceMappedPtrs[i] = sourceAllocResult.pMappedData;
+
+        // Uniform buffer
+        VkBufferCreateInfo uniformBufferInfo{};
+        uniformBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        uniformBufferInfo.size = uniformBufferSize;
+        uniformBufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+        uniformBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        VmaAllocationCreateInfo uniformAllocInfo{};
+        uniformAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        uniformAllocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+                                VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+        VmaAllocationInfo uniformAllocResult;
+        if (vmaCreateBuffer(allocator, &uniformBufferInfo, &uniformAllocInfo,
+                           &displacementUniformBuffers[i], &displacementUniformAllocations[i],
+                           &uniformAllocResult) != VK_SUCCESS) {
+            SDL_Log("Failed to create displacement uniform buffer");
+            return false;
+        }
+        displacementUniformMappedPtrs[i] = uniformAllocResult.pMappedData;
+    }
+
+    return true;
+}
+
+bool GrassSystem::createDisplacementPipeline() {
+    // Create descriptor set layout for displacement update compute shader
+    std::array<VkDescriptorSetLayoutBinding, 3> bindings{};
+
+    // Displacement map (storage image, read-write)
+    bindings[0].binding = 0;
+    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    bindings[0].descriptorCount = 1;
+    bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+    // Source buffer (SSBO)
+    bindings[1].binding = 1;
+    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    bindings[1].descriptorCount = 1;
+    bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+    // Displacement uniforms
+    bindings[2].binding = 2;
+    bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    bindings[2].descriptorCount = 1;
+    bindings[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+    VkDescriptorSetLayoutCreateInfo layoutInfo{};
+    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
+    layoutInfo.pBindings = bindings.data();
+
+    if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr,
+                                    &displacementDescriptorSetLayout) != VK_SUCCESS) {
+        SDL_Log("Failed to create displacement descriptor set layout");
+        return false;
+    }
+
+    // Create pipeline layout
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipelineLayoutInfo.setLayoutCount = 1;
+    pipelineLayoutInfo.pSetLayouts = &displacementDescriptorSetLayout;
+
+    if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr,
+                               &displacementPipelineLayout) != VK_SUCCESS) {
+        SDL_Log("Failed to create displacement pipeline layout");
+        return false;
+    }
+
+    // Load compute shader
+    auto compShaderCode = ShaderLoader::readFile(shaderPath + "/grass_displacement.comp.spv");
+    if (compShaderCode.empty()) {
+        SDL_Log("Failed to load displacement compute shader");
+        return false;
+    }
+
+    VkShaderModule compShaderModule = ShaderLoader::createShaderModule(device, compShaderCode);
+
+    VkPipelineShaderStageCreateInfo shaderStageInfo{};
+    shaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    shaderStageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    shaderStageInfo.module = compShaderModule;
+    shaderStageInfo.pName = "main";
+
+    VkComputePipelineCreateInfo pipelineInfo{};
+    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    pipelineInfo.stage = shaderStageInfo;
+    pipelineInfo.layout = displacementPipelineLayout;
+
+    VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1,
+                                               &pipelineInfo, nullptr,
+                                               &displacementPipeline);
+
+    vkDestroyShaderModule(device, compShaderModule, nullptr);
+
+    if (result != VK_SUCCESS) {
+        SDL_Log("Failed to create displacement compute pipeline");
+        return false;
+    }
+
+    // Allocate displacement descriptor set
+    VkDescriptorSetAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocInfo.descriptorPool = descriptorPool;
+    allocInfo.descriptorSetCount = 1;
+    allocInfo.pSetLayouts = &displacementDescriptorSetLayout;
+
+    if (vkAllocateDescriptorSets(device, &allocInfo, &displacementDescriptorSet) != VK_SUCCESS) {
+        SDL_Log("Failed to allocate displacement descriptor set");
+        return false;
+    }
+
+    // Update displacement descriptor set (image binding only - buffers updated per frame)
+    VkDescriptorImageInfo imageInfo{};
+    imageInfo.imageView = displacementImageView;
+    imageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+    VkWriteDescriptorSet imageWrite{};
+    imageWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    imageWrite.dstSet = displacementDescriptorSet;
+    imageWrite.dstBinding = 0;
+    imageWrite.dstArrayElement = 0;
+    imageWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    imageWrite.descriptorCount = 1;
+    imageWrite.pImageInfo = &imageInfo;
+
+    vkUpdateDescriptorSets(device, 1, &imageWrite, 0, nullptr);
+
+    return true;
+}
+
 bool GrassSystem::createComputeDescriptorSetLayout() {
-    std::array<VkDescriptorSetLayoutBinding, 4> bindings{};
+    std::array<VkDescriptorSetLayoutBinding, 5> bindings{};
 
     // Instance buffer (output)
     bindings[0].binding = 0;
@@ -151,6 +398,13 @@ bool GrassSystem::createComputeDescriptorSetLayout() {
     bindings[3].descriptorCount = 1;
     bindings[3].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
     bindings[3].pImmutableSamplers = nullptr;
+
+    // Displacement map sampler (for player/NPC grass interaction)
+    bindings[4].binding = 4;
+    bindings[4].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[4].descriptorCount = 1;
+    bindings[4].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    bindings[4].pImmutableSamplers = nullptr;
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -787,8 +1041,7 @@ void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>
 }
 
 void GrassSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos, const glm::mat4& viewProj,
-                                  float terrainSize, float terrainHeightScale,
-                                  const glm::vec3& playerPos, float playerRadius) {
+                                  float terrainSize, float terrainHeightScale) {
     GrassUniforms uniforms{};
 
     // Camera position
@@ -820,13 +1073,14 @@ void GrassSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos
         }
     }
 
-    // Player capsule for grass displacement
-    // xyz = base position (foot position), w = capsule radius
-    uniforms.playerCapsule = glm::vec4(playerPos, playerRadius);
+    // Update displacement region to follow camera
+    displacementRegionCenter = glm::vec2(cameraPos.x, cameraPos.z);
 
-    // Displacement parameters
-    // x = strength (how much grass bends), y = decay falloff, z = max tilt, w = unused
-    uniforms.displacementParams = glm::vec4(1.0f, 2.0f, 0.6f, 0.0f);
+    // Displacement region info for grass compute shader
+    // xy = world center, z = region size (50m), w = texel size
+    float texelSize = DISPLACEMENT_REGION_SIZE / static_cast<float>(DISPLACEMENT_TEXTURE_SIZE);
+    uniforms.displacementRegion = glm::vec4(displacementRegionCenter.x, displacementRegionCenter.y,
+                                            DISPLACEMENT_REGION_SIZE, texelSize);
 
     // Distance thresholds
     uniforms.maxDrawDistance = 50.0f;
@@ -841,11 +1095,122 @@ void GrassSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos
     memcpy(uniformMappedPtrs[frameIndex], &uniforms, sizeof(GrassUniforms));
 }
 
+void GrassSystem::updateDisplacementSources(const glm::vec3& playerPos, float playerRadius, float deltaTime) {
+    // Clear previous sources
+    currentDisplacementSources.clear();
+
+    // Add player as displacement source
+    DisplacementSource playerSource;
+    playerSource.positionAndRadius = glm::vec4(playerPos, playerRadius * 2.0f);  // Influence radius larger than capsule
+    playerSource.strengthAndVelocity = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f);  // Full strength, no velocity for now
+    currentDisplacementSources.push_back(playerSource);
+
+    // Future: Add NPCs, projectiles, etc. here
+}
+
+void GrassSystem::recordDisplacementUpdate(VkCommandBuffer cmd, uint32_t frameIndex) {
+    // Update displacement descriptor set with current frame's buffers
+    VkDescriptorBufferInfo sourceBufferInfo{};
+    sourceBufferInfo.buffer = displacementSourceBuffers[frameIndex];
+    sourceBufferInfo.offset = 0;
+    sourceBufferInfo.range = sizeof(DisplacementSource) * MAX_DISPLACEMENT_SOURCES;
+
+    VkDescriptorBufferInfo uniformBufferInfo{};
+    uniformBufferInfo.buffer = displacementUniformBuffers[frameIndex];
+    uniformBufferInfo.offset = 0;
+    uniformBufferInfo.range = sizeof(DisplacementUniforms);
+
+    std::array<VkWriteDescriptorSet, 2> writes{};
+
+    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[0].dstSet = displacementDescriptorSet;
+    writes[0].dstBinding = 1;
+    writes[0].dstArrayElement = 0;
+    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writes[0].descriptorCount = 1;
+    writes[0].pBufferInfo = &sourceBufferInfo;
+
+    writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[1].dstSet = displacementDescriptorSet;
+    writes[1].dstBinding = 2;
+    writes[1].dstArrayElement = 0;
+    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    writes[1].descriptorCount = 1;
+    writes[1].pBufferInfo = &uniformBufferInfo;
+
+    vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+
+    // Copy displacement sources to buffer
+    memcpy(displacementSourceMappedPtrs[frameIndex], currentDisplacementSources.data(),
+           sizeof(DisplacementSource) * currentDisplacementSources.size());
+
+    // Update displacement uniforms
+    float texelSize = DISPLACEMENT_REGION_SIZE / static_cast<float>(DISPLACEMENT_TEXTURE_SIZE);
+    DisplacementUniforms dispUniforms;
+    dispUniforms.regionCenter = glm::vec4(displacementRegionCenter.x, displacementRegionCenter.y,
+                                          DISPLACEMENT_REGION_SIZE, texelSize);
+    dispUniforms.params = glm::vec4(displacementDecayRate, maxDisplacement, 1.0f / 60.0f,
+                                    static_cast<float>(currentDisplacementSources.size()));
+    memcpy(displacementUniformMappedPtrs[frameIndex], &dispUniforms, sizeof(DisplacementUniforms));
+
+    // Transition displacement image to general layout if needed (first frame)
+    // For subsequent frames, it should already be in GENERAL layout
+    VkImageMemoryBarrier imageBarrier{};
+    imageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    imageBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;  // Don't care about old contents
+    imageBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    imageBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    imageBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    imageBarrier.image = displacementImage;
+    imageBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    imageBarrier.subresourceRange.baseMipLevel = 0;
+    imageBarrier.subresourceRange.levelCount = 1;
+    imageBarrier.subresourceRange.baseArrayLayer = 0;
+    imageBarrier.subresourceRange.layerCount = 1;
+    imageBarrier.srcAccessMask = 0;
+    imageBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+
+    vkCmdPipelineBarrier(cmd,
+                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &imageBarrier);
+
+    // Dispatch displacement update compute shader
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, displacementPipeline);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                            displacementPipelineLayout, 0, 1,
+                            &displacementDescriptorSet, 0, nullptr);
+
+    // Dispatch: 512x512 / 16x16 = 32x32 workgroups
+    vkCmdDispatch(cmd, 32, 32, 1);
+
+    // Barrier: displacement compute write -> grass compute read
+    VkImageMemoryBarrier readBarrier{};
+    readBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    readBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    readBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    readBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    readBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    readBarrier.image = displacementImage;
+    readBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    readBarrier.subresourceRange.baseMipLevel = 0;
+    readBarrier.subresourceRange.levelCount = 1;
+    readBarrier.subresourceRange.baseArrayLayer = 0;
+    readBarrier.subresourceRange.layerCount = 1;
+    readBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    readBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(cmd,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &readBarrier);
+}
+
 void GrassSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex, float time) {
     // Double-buffer: compute writes to computeBufferSet
     uint32_t writeSet = computeBufferSet;
 
-    // Update compute descriptor set to use this frame's uniform buffer and terrain heightmap
+    // Update compute descriptor set to use this frame's uniform buffer, terrain heightmap, and displacement map
     // (uniforms contain per-frame camera/frustum data)
     VkDescriptorBufferInfo uniformBufferInfo{};
     uniformBufferInfo.buffer = uniformBuffers[frameIndex];
@@ -857,7 +1222,12 @@ void GrassSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex
     heightMapInfo.imageView = terrainHeightMapView;
     heightMapInfo.sampler = terrainHeightMapSampler;
 
-    std::array<VkWriteDescriptorSet, 2> writes{};
+    VkDescriptorImageInfo displacementMapInfo{};
+    displacementMapInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    displacementMapInfo.imageView = displacementImageView;
+    displacementMapInfo.sampler = displacementSampler;
+
+    std::array<VkWriteDescriptorSet, 3> writes{};
 
     writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writes[0].dstSet = computeDescriptorSets[writeSet];
@@ -874,6 +1244,14 @@ void GrassSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex
     writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     writes[1].descriptorCount = 1;
     writes[1].pImageInfo = &heightMapInfo;
+
+    writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[2].dstSet = computeDescriptorSets[writeSet];
+    writes[2].dstBinding = 4;
+    writes[2].dstArrayElement = 0;
+    writes[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[2].descriptorCount = 1;
+    writes[2].pImageInfo = &displacementMapInfo;
 
     vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 
