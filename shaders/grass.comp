@@ -28,8 +28,13 @@ layout(binding = 2) uniform GrassUniforms {
     float maxDrawDistance;
     float lodTransitionStart;
     float lodTransitionEnd;
-    float padding;
+    float terrainSize;
+    float terrainHeightScale;
+    float padding[3];
 } uniforms;
+
+// Terrain heightmap for grass placement on terrain
+layout(binding = 3) uniform sampler2D terrainHeightMap;
 
 layout(push_constant) uniform PushConstants {
     float time;
@@ -121,7 +126,20 @@ void main() {
     x += (h1 - 0.5) * spacing * 0.8;
     z += (hash(cell + vec2(100.0, 0.0)) - 0.5) * spacing * 0.8;
 
-    vec3 worldPos = vec3(x, 0.0, z);
+    // Sample terrain heightmap to get Y position
+    // Convert world XZ to heightmap UV: terrain is centered at origin with size = terrainSize
+    vec2 terrainUV = vec2(x, z) / uniforms.terrainSize + 0.5;
+
+    // Check if grass is within terrain bounds
+    if (terrainUV.x < 0.0 || terrainUV.x > 1.0 || terrainUV.y < 0.0 || terrainUV.y > 1.0) return;
+
+    // Sample heightmap (R32_SFLOAT format, values in [0,1])
+    float heightSample = texture(terrainHeightMap, terrainUV).r;
+
+    // Convert to world Y using same formula as terrain shader: (h - 0.5) * heightScale
+    float terrainY = (heightSample - 0.5) * uniforms.terrainHeightScale;
+
+    vec3 worldPos = vec3(x, terrainY, z);
 
     // Distance culling (relative to camera)
     float distToCamera = length(worldPos - uniforms.cameraPosition.xyz);

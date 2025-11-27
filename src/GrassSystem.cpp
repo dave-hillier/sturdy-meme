@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 #include <cstring>
 #include <algorithm>  // for std::swap
+#include <array>
 
 // Forward declare UniformBufferObject size (needed for descriptor set update)
 struct UniformBufferObject;
@@ -124,7 +125,7 @@ bool GrassSystem::createBuffers() {
 }
 
 bool GrassSystem::createComputeDescriptorSetLayout() {
-    std::array<VkDescriptorSetLayoutBinding, 3> bindings{};
+    std::array<VkDescriptorSetLayoutBinding, 4> bindings{};
 
     // Instance buffer (output)
     bindings[0].binding = 0;
@@ -143,6 +144,13 @@ bool GrassSystem::createComputeDescriptorSetLayout() {
     bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     bindings[2].descriptorCount = 1;
     bindings[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+    // Terrain heightmap sampler (for grass placement)
+    bindings[3].binding = 3;
+    bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[3].descriptorCount = 1;
+    bindings[3].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    bindings[3].pImmutableSamplers = nullptr;
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -665,7 +673,12 @@ bool GrassSystem::createDescriptorSets() {
 void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>& rendererUniformBuffers,
                                         VkImageView shadowMapView, VkSampler shadowSampler,
                                         const std::vector<VkBuffer>& windBuffers,
-                                        const std::vector<VkBuffer>& lightBuffersParam) {
+                                        const std::vector<VkBuffer>& lightBuffersParam,
+                                        VkImageView terrainHeightMapView, VkSampler terrainHeightMapSampler) {
+    // Store terrain heightmap info for compute descriptor set updates
+    this->terrainHeightMapView = terrainHeightMapView;
+    this->terrainHeightMapSampler = terrainHeightMapSampler;
+
     // Update graphics and shadow descriptor sets for both buffer sets (A and B)
     // Note: We use the first frame's UBO/wind buffer since they're updated each frame anyway
     // For proper per-frame handling, we'd need dynamic offsets or per-frame descriptor sets
@@ -773,7 +786,8 @@ void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>
     }
 }
 
-void GrassSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos, const glm::mat4& viewProj) {
+void GrassSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos, const glm::mat4& viewProj,
+                                  float terrainSize, float terrainHeightScale) {
     GrassUniforms uniforms{};
 
     // Camera position
@@ -809,7 +823,10 @@ void GrassSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos
     uniforms.maxDrawDistance = 50.0f;
     uniforms.lodTransitionStart = 30.0f;
     uniforms.lodTransitionEnd = 50.0f;
-    uniforms.padding = 0.0f;
+
+    // Terrain parameters for heightmap sampling
+    uniforms.terrainSize = terrainSize;
+    uniforms.terrainHeightScale = terrainHeightScale;
 
     // Copy to mapped buffer
     memcpy(uniformMappedPtrs[frameIndex], &uniforms, sizeof(GrassUniforms));
@@ -819,23 +836,37 @@ void GrassSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex
     // Double-buffer: compute writes to computeBufferSet
     uint32_t writeSet = computeBufferSet;
 
-    // Update compute descriptor set to use this frame's uniform buffer
+    // Update compute descriptor set to use this frame's uniform buffer and terrain heightmap
     // (uniforms contain per-frame camera/frustum data)
     VkDescriptorBufferInfo uniformBufferInfo{};
     uniformBufferInfo.buffer = uniformBuffers[frameIndex];
     uniformBufferInfo.offset = 0;
     uniformBufferInfo.range = sizeof(GrassUniforms);
 
-    VkWriteDescriptorSet uniformWrite{};
-    uniformWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    uniformWrite.dstSet = computeDescriptorSets[writeSet];
-    uniformWrite.dstBinding = 2;
-    uniformWrite.dstArrayElement = 0;
-    uniformWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    uniformWrite.descriptorCount = 1;
-    uniformWrite.pBufferInfo = &uniformBufferInfo;
+    VkDescriptorImageInfo heightMapInfo{};
+    heightMapInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    heightMapInfo.imageView = terrainHeightMapView;
+    heightMapInfo.sampler = terrainHeightMapSampler;
 
-    vkUpdateDescriptorSets(device, 1, &uniformWrite, 0, nullptr);
+    std::array<VkWriteDescriptorSet, 2> writes{};
+
+    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[0].dstSet = computeDescriptorSets[writeSet];
+    writes[0].dstBinding = 2;
+    writes[0].dstArrayElement = 0;
+    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    writes[0].descriptorCount = 1;
+    writes[0].pBufferInfo = &uniformBufferInfo;
+
+    writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[1].dstSet = computeDescriptorSets[writeSet];
+    writes[1].dstBinding = 3;
+    writes[1].dstArrayElement = 0;
+    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[1].descriptorCount = 1;
+    writes[1].pImageInfo = &heightMapInfo;
+
+    vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 
     // Reset indirect buffer before compute dispatch to prevent accumulation
     vkCmdFillBuffer(cmd, indirectBuffers[writeSet], 0, sizeof(VkDrawIndirectCommand), 0);

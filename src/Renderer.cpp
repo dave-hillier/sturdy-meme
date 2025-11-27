@@ -187,7 +187,8 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         windBuffers[i] = windSystem.getBufferInfo(i).buffer;
     }
-    grassSystem.updateDescriptorSets(device, uniformBuffers, shadowImageView, shadowSampler, windBuffers, lightBuffers);
+    grassSystem.updateDescriptorSets(device, uniformBuffers, shadowImageView, shadowSampler, windBuffers, lightBuffers,
+                                      terrainSystem.getHeightMapView(), terrainSystem.getHeightMapSampler());
 
     // Update terrain descriptor sets with shared resources
     terrainSystem.updateDescriptorSets(device, uniformBuffers, shadowImageView, shadowSampler);
@@ -2171,7 +2172,9 @@ void Renderer::render(const Camera& camera) {
     windSystem.updateUniforms(currentFrame);
 
     glm::mat4 viewProj = camera.getProjectionMatrix() * camera.getViewMatrix();
-    grassSystem.updateUniforms(currentFrame, camera.getPosition(), viewProj);
+    const auto& terrainConfig = terrainSystem.getConfig();
+    grassSystem.updateUniforms(currentFrame, camera.getPosition(), viewProj,
+                               terrainConfig.size, terrainConfig.heightScale);
     weatherSystem.updateUniforms(currentFrame, camera.getPosition(), viewProj, deltaTime, grassTime, windSystem);
     terrainSystem.updateUniforms(currentFrame, camera.getPosition(), camera.getViewMatrix(), camera.getProjectionMatrix());
 

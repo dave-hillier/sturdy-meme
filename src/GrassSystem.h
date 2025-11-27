@@ -17,7 +17,9 @@ struct GrassUniforms {
     float maxDrawDistance;          // Max distance for grass rendering
     float lodTransitionStart;       // Distance where LOD transition begins
     float lodTransitionEnd;         // Distance where LOD transition ends
-    float padding;
+    float terrainSize;              // Terrain size for heightmap UV calculation
+    float terrainHeightScale;       // Terrain height scale
+    float padding[3];
 };
 
 struct GrassInstance {
@@ -48,9 +50,11 @@ public:
     void updateDescriptorSets(VkDevice device, const std::vector<VkBuffer>& uniformBuffers,
                               VkImageView shadowMapView, VkSampler shadowSampler,
                               const std::vector<VkBuffer>& windBuffers,
-                              const std::vector<VkBuffer>& lightBuffers);
+                              const std::vector<VkBuffer>& lightBuffers,
+                              VkImageView terrainHeightMapView, VkSampler terrainHeightMapSampler);
 
-    void updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos, const glm::mat4& viewProj);
+    void updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos, const glm::mat4& viewProj,
+                        float terrainSize, float terrainHeightScale);
     void recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex, float time);
     void recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time);
     void recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time, uint32_t cascadeIndex);
@@ -117,6 +121,10 @@ private:
     // After first advanceBufferSet(), they diverge for true double-buffering
     uint32_t computeBufferSet = 0;  // Set being written by compute
     uint32_t renderBufferSet = 0;   // Set being read by graphics
+
+    // Terrain heightmap for grass placement (stored for compute descriptor updates)
+    VkImageView terrainHeightMapView = VK_NULL_HANDLE;
+    VkSampler terrainHeightMapSampler = VK_NULL_HANDLE;
 
     static constexpr uint32_t MAX_INSTANCES = 100000;  // ~100k rendered after culling
 };

@@ -115,6 +115,10 @@ public:
     const TerrainConfig& getConfig() const { return config; }
     void setConfig(const TerrainConfig& newConfig) { config = newConfig; }
 
+    // Heightmap accessors for grass integration
+    VkImageView getHeightMapView() const { return heightMapView; }
+    VkSampler getHeightMapSampler() const { return heightMapSampler; }
+
     // Toggle wireframe mode for debugging
     void setWireframeMode(bool enabled) { wireframeMode = enabled; }
     bool isWireframeMode() const { return wireframeMode; }
