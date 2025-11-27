@@ -692,11 +692,11 @@ void Application::updateFlag(float deltaTime) {
     clothSim.addSphereCollision(playerPos + glm::vec3(0, playerHeight - playerRadius, 0), playerRadius);
 
     // Add collision spheres for dynamic physics objects
-    auto& sceneObjects = renderer.getSceneObjects();
+    auto& sceneObjects = renderer.getSceneManager().getSceneObjects();
     for (size_t i = 1; i < scenePhysicsBodies.size() && i < sceneObjects.size(); i++) {
         PhysicsBodyID bodyID = scenePhysicsBodies[i];
         if (bodyID == INVALID_BODY_ID) continue;
-        if (i == renderer.getPlayerObjectIndex()) continue; // Skip player (already handled)
+        if (i == renderer.getSceneManager().getPlayerObjectIndex()) continue; // Skip player (already handled)
         if (i == 11 || i == 12) continue; // Skip flag pole and cloth itself
 
         PhysicsBodyInfo info = physics.getBodyInfo(bodyID);
