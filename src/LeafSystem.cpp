@@ -111,7 +111,7 @@ bool LeafSystem::createBuffers() {
 }
 
 bool LeafSystem::createComputeDescriptorSetLayout() {
-    std::array<VkDescriptorSetLayoutBinding, 5> bindings{};
+    std::array<VkDescriptorSetLayoutBinding, 6> bindings{};
 
     // Particle buffer input (previous frame state)
     bindings[0].binding = 0;
@@ -142,6 +142,12 @@ bool LeafSystem::createComputeDescriptorSetLayout() {
     bindings[4].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     bindings[4].descriptorCount = 1;
     bindings[4].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+    // Terrain heightmap
+    bindings[5].binding = 5;
+    bindings[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[5].descriptorCount = 1;
+    bindings[5].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -426,7 +432,9 @@ bool LeafSystem::createDescriptorSets() {
 }
 
 void LeafSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>& rendererUniformBuffers,
-                                       const std::vector<VkBuffer>& windBuffers) {
+                                       const std::vector<VkBuffer>& windBuffers,
+                                       VkImageView terrainHeightMapView,
+                                       VkSampler terrainHeightMapSampler) {
     // Update compute and graphics descriptor sets for both buffer sets
     for (uint32_t set = 0; set < BUFFER_SET_COUNT; set++) {
         uint32_t inputSet = (set == 0) ? 1 : 0;  // Read from opposite buffer
@@ -458,7 +466,12 @@ void LeafSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>&
         windBufferInfo.offset = 0;
         windBufferInfo.range = 32;  // sizeof(WindUniforms)
 
-        std::array<VkWriteDescriptorSet, 5> computeWrites{};
+        VkDescriptorImageInfo heightMapInfo{};
+        heightMapInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        heightMapInfo.imageView = terrainHeightMapView;
+        heightMapInfo.sampler = terrainHeightMapSampler;
+
+        std::array<VkWriteDescriptorSet, 6> computeWrites{};
 
         computeWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         computeWrites[0].dstSet = computeDescriptorSets[set];
@@ -499,6 +512,14 @@ void LeafSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>&
         computeWrites[4].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         computeWrites[4].descriptorCount = 1;
         computeWrites[4].pBufferInfo = &windBufferInfo;
+
+        computeWrites[5].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        computeWrites[5].dstSet = computeDescriptorSets[set];
+        computeWrites[5].dstBinding = 5;
+        computeWrites[5].dstArrayElement = 0;
+        computeWrites[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        computeWrites[5].descriptorCount = 1;
+        computeWrites[5].pImageInfo = &heightMapInfo;
 
         vkUpdateDescriptorSets(dev, static_cast<uint32_t>(computeWrites.size()),
                                computeWrites.data(), 0, nullptr);
@@ -547,7 +568,8 @@ void LeafSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>&
 
 void LeafSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos,
                                  const glm::mat4& viewProj, const glm::vec3& playerPos,
-                                 const glm::vec3& playerVel, float deltaTime, float totalTime) {
+                                 const glm::vec3& playerVel, float deltaTime, float totalTime,
+                                 float terrainSize, float terrainHeightScale) {
     LeafUniforms uniforms{};
 
     uniforms.cameraPosition = glm::vec4(cameraPos, 1.0f);
@@ -597,6 +619,10 @@ void LeafSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos,
     // Target counts based on intensity
     uniforms.targetFallingCount = leafIntensity * 5000.0f;   // 0-5000 falling leaves
     uniforms.targetGroundedCount = leafIntensity * 20000.0f; // 0-20000 grounded leaves
+
+    // Terrain parameters
+    uniforms.terrainSize = terrainSize;
+    uniforms.terrainHeightScale = terrainHeightScale;
 
     memcpy(uniformMappedPtrs[frameIndex], &uniforms, sizeof(LeafUniforms));
 
