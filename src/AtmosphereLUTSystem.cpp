@@ -739,6 +739,11 @@ void AtmosphereLUTSystem::computeTransmittanceLUT(VkCommandBuffer cmd) {
 }
 
 void AtmosphereLUTSystem::computeMultiScatterLUT(VkCommandBuffer cmd) {
+    // Update uniform buffer with atmosphere params
+    AtmosphereLUTUniforms uniforms{};
+    uniforms.params = atmosphereParams;
+    memcpy(uniformMappedPtr, &uniforms, sizeof(AtmosphereLUTUniforms));
+
     // Transition to GENERAL layout for compute write
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
