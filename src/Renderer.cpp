@@ -159,6 +159,8 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     terrainInfo.shaderPath = resourcePath + "/shaders";
     terrainInfo.texturePath = resourcePath + "/textures";
     terrainInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+    terrainInfo.graphicsQueue = graphicsQueue;
+    terrainInfo.commandPool = commandPool;
 
     TerrainConfig terrainConfig{};
     terrainConfig.size = 500.0f;

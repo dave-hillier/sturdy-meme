@@ -99,8 +99,7 @@ bool SceneBuilder::loadTextures(const InitInfo& info) {
 void SceneBuilder::createSceneObjects() {
     sceneObjects.clear();
 
-    // Ground - rough, non-metallic
-    sceneObjects.push_back({glm::mat4(1.0f), &groundMesh, &groundTexture, 0.8f, 0.0f});
+    // Ground disc removed - terrain system provides the ground now
 
     // Wooden crate - slightly shiny, non-metallic
     sceneObjects.push_back({

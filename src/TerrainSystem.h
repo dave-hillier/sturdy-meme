@@ -71,6 +71,8 @@ public:
         std::string shaderPath;
         std::string texturePath;
         uint32_t framesInFlight;
+        VkQueue graphicsQueue;
+        VkCommandPool commandPool;
     };
 
     TerrainSystem() = default;
@@ -139,6 +141,8 @@ private:
     // Utility functions
     void extractFrustumPlanes(const glm::mat4& viewProj, glm::vec4 planes[6]);
     uint32_t calculateCBTBufferSize(int maxDepth);
+    bool uploadImageData(VkImage image, const void* data, uint32_t width, uint32_t height,
+                         VkFormat format, uint32_t bytesPerPixel);
 
     // Vulkan resources
     VkDevice device = VK_NULL_HANDLE;
@@ -152,6 +156,8 @@ private:
     std::string shaderPath;
     std::string texturePath;
     uint32_t framesInFlight = 0;
+    VkQueue graphicsQueue = VK_NULL_HANDLE;
+    VkCommandPool commandPool = VK_NULL_HANDLE;
 
     // CBT (Concurrent Binary Tree) buffer
     VkBuffer cbtBuffer = VK_NULL_HANDLE;

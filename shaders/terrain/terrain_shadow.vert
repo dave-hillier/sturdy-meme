@@ -45,8 +45,8 @@ void main() {
         uv = v2;
     }
 
-    // Sample height
-    float height = texture(heightMap, uv).r * heightScale;
+    // Sample height (center around y=0)
+    float height = (texture(heightMap, uv).r - 0.5) * heightScale;
 
     // Compute world position
     vec3 worldPos = vec3(

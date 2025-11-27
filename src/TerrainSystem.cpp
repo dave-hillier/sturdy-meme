@@ -40,6 +40,8 @@ bool TerrainSystem::init(const InitInfo& info, const TerrainConfig& cfg) {
     shaderPath = info.shaderPath;
     texturePath = info.texturePath;
     framesInFlight = info.framesInFlight;
+    graphicsQueue = info.graphicsQueue;
+    commandPool = info.commandPool;
     config = cfg;
 
     // Create all resources
@@ -136,47 +138,136 @@ bool TerrainSystem::createCBTBuffer() {
     return true;
 }
 
+// Helper functions for CBT bit-level operations (CPU side, matching GLSL and libcbt)
+namespace {
+    // Get bit field offset for a node at ceiling (maxDepth) level
+    uint32_t cbt_NodeBitID_BitField_CPU(uint32_t nodeId, int nodeDepth, int maxDepth) {
+        // Ceiling node ID = nodeId << (maxDepth - nodeDepth)
+        uint32_t ceilNodeId = nodeId << (maxDepth - nodeDepth);
+        // BitField starts at bit offset 2^(maxDepth+1)
+        return (2u << maxDepth) + ceilNodeId;
+    }
+
+    // Set a single bit in the bitfield (leaf node marker)
+    void cbt_HeapWrite_BitField_CPU(std::vector<uint32_t>& heap, uint32_t nodeId, int nodeDepth, int maxDepth) {
+        uint32_t bitID = cbt_NodeBitID_BitField_CPU(nodeId, nodeDepth, maxDepth);
+        uint32_t heapIndex = bitID >> 5;
+        uint32_t localBit = bitID & 31u;
+        if (heapIndex < heap.size()) {
+            heap[heapIndex] |= (1u << localBit);
+        }
+    }
+
+    // Node bit ID for sum reduction tree
+    uint32_t cbt_NodeBitID_CPU(uint32_t id, int depth, int maxDepth) {
+        uint32_t tmp1 = 2u << depth;
+        uint32_t tmp2 = uint32_t(1 + maxDepth - depth);
+        return tmp1 + id * tmp2;
+    }
+
+    int cbt_NodeBitSize_CPU(int depth, int maxDepth) {
+        return maxDepth - depth + 1;
+    }
+
+    // Read a value from the heap at a specific node position
+    uint32_t cbt_HeapRead_CPU(const std::vector<uint32_t>& heap, uint32_t id, int depth, int maxDepth) {
+        uint32_t bitOffset = cbt_NodeBitID_CPU(id, depth, maxDepth);
+        int bitCount = cbt_NodeBitSize_CPU(depth, maxDepth);
+
+        uint32_t heapIndex = bitOffset >> 5;
+        uint32_t localBitOffset = bitOffset & 31u;
+
+        uint32_t bitCountLSB = std::min(32u - localBitOffset, (uint32_t)bitCount);
+        uint32_t bitCountMSB = (uint32_t)bitCount - bitCountLSB;
+
+        uint32_t maskLSB = (1u << bitCountLSB) - 1u;
+        uint32_t lsb = (heap[heapIndex] >> localBitOffset) & maskLSB;
+
+        uint32_t msb = 0;
+        if (bitCountMSB > 0 && heapIndex + 1 < heap.size()) {
+            uint32_t maskMSB = (1u << bitCountMSB) - 1u;
+            msb = heap[heapIndex + 1] & maskMSB;
+        }
+
+        return lsb | (msb << bitCountLSB);
+    }
+
+    // Write a value to the heap at a specific node position
+    void cbt_HeapWrite_CPU(std::vector<uint32_t>& heap, uint32_t id, int depth, int maxDepth, uint32_t value) {
+        uint32_t bitOffset = cbt_NodeBitID_CPU(id, depth, maxDepth);
+        int bitCount = cbt_NodeBitSize_CPU(depth, maxDepth);
+
+        uint32_t heapIndex = bitOffset >> 5;
+        uint32_t localBitOffset = bitOffset & 31u;
+
+        uint32_t bitCountLSB = std::min(32u - localBitOffset, (uint32_t)bitCount);
+        uint32_t bitCountMSB = (uint32_t)bitCount - bitCountLSB;
+
+        // Clear and set LSB part
+        uint32_t maskLSB = ~(((1u << bitCountLSB) - 1u) << localBitOffset);
+        heap[heapIndex] = (heap[heapIndex] & maskLSB) | ((value & ((1u << bitCountLSB) - 1u)) << localBitOffset);
+
+        // If value spans two words, write MSB part
+        if (bitCountMSB > 0 && heapIndex + 1 < heap.size()) {
+            uint32_t maskMSB = ~((1u << bitCountMSB) - 1u);
+            heap[heapIndex + 1] = (heap[heapIndex + 1] & maskMSB) | (value >> bitCountLSB);
+        }
+    }
+
+    // Compute sum reduction from leaf nodes up to root
+    void cbt_ComputeSumReduction_CPU(std::vector<uint32_t>& heap, int maxDepth, int leafDepth) {
+        // Start from leafDepth-1 and work up to depth 0
+        for (int depth = leafDepth - 1; depth >= 0; --depth) {
+            uint32_t minNodeID = 1u << depth;
+            uint32_t maxNodeID = 2u << depth;
+
+            for (uint32_t nodeID = minNodeID; nodeID < maxNodeID; ++nodeID) {
+                // Left child = nodeID * 2, Right child = nodeID * 2 + 1
+                uint32_t leftChild = nodeID << 1;
+                uint32_t rightChild = leftChild | 1u;
+
+                uint32_t leftValue = cbt_HeapRead_CPU(heap, leftChild, depth + 1, maxDepth);
+                uint32_t rightValue = cbt_HeapRead_CPU(heap, rightChild, depth + 1, maxDepth);
+
+                cbt_HeapWrite_CPU(heap, nodeID, depth, maxDepth, leftValue + rightValue);
+            }
+        }
+    }
+}
+
 bool TerrainSystem::initializeCBT() {
     // Initialize CBT with 2 root triangles covering the terrain quad
-    // This requires setting up the initial bitfield state
+    // Following libcbt's cbt_ResetToDepth pattern
 
-    // Create initialization data
     std::vector<uint32_t> initData(cbtBufferSize / sizeof(uint32_t), 0);
+    int maxDepth = config.maxDepth;
+    int initDepth = 1;  // Start with 2 triangles at depth 1
 
-    // The CBT buffer layout:
-    // - heap[0] stores (1 << maxDepth) as a marker for the max depth
-    // - The sum reduction tree occupies indices 1 to 2^maxDepth - 1
-    // - The bitfield for leaf nodes starts at index 2^(maxDepth-1)
+    // heap[0] stores (1 << maxDepth) as a marker for the max depth
+    initData[0] = (1u << maxDepth);
 
-    // For max depth D, we need to set up initial triangles
-    // We start with 2 triangles at depth 1 (heap indices 2 and 3)
-    initData[0] = (1u << config.maxDepth);  // Max depth marker
+    // Step 1: Set bitfield bits for all leaf nodes at initDepth
+    // At depth 1, we have nodes with IDs 2 and 3
+    uint32_t minNodeID = 1u << initDepth;  // 2
+    uint32_t maxNodeID = 2u << initDepth;  // 4
 
-    // Initialize sum reduction tree
-    // Node at index 1 (root) should have count = 2 (two initial triangles)
-    initData[1] = 2;
-
-    // Nodes at depth 1 (indices 2 and 3) each have count = 1
-    initData[2] = 1;
-    initData[3] = 1;
-
-    // Set the leaf bits in the bitfield
-    // For a CBT with max depth D, the bitfield starts at offset 2^(D-1)
-    // But for initial triangles at depth 1, we mark them as active
-    uint32_t bitfieldOffset = 1u << (config.maxDepth - 1);
-
-    // Set bits for the two initial triangles (indices 2 and 3 in heap)
-    // In the bitfield, bit position corresponds to heap index - bitfield offset
-    if (bitfieldOffset < initData.size()) {
-        // Mark triangle at heap index 2 as a leaf
-        initData[bitfieldOffset] = 1;  // First leaf bit
-    }
-    if (bitfieldOffset + 1 < initData.size()) {
-        // Mark triangle at heap index 3 as a leaf
-        initData[bitfieldOffset + 1] = 1;  // Second leaf bit
+    for (uint32_t nodeID = minNodeID; nodeID < maxNodeID; ++nodeID) {
+        cbt_HeapWrite_BitField_CPU(initData, nodeID, initDepth, maxDepth);
     }
 
-    // Map the CBT buffer directly and write initialization data
+    // Step 2: Initialize leaf node counts to 1
+    for (uint32_t nodeID = minNodeID; nodeID < maxNodeID; ++nodeID) {
+        cbt_HeapWrite_CPU(initData, nodeID, initDepth, maxDepth, 1);
+    }
+
+    // Step 3: Compute sum reduction upward from initDepth to depth 0
+    cbt_ComputeSumReduction_CPU(initData, maxDepth, initDepth);
+
+    // Verify: root should have count = 2
+    uint32_t rootCount = cbt_HeapRead_CPU(initData, 1, 0, maxDepth);
+    std::cout << "CBT root count after init: " << rootCount << std::endl;
+
+    // Map the CBT buffer and write initialization data
     void* data;
     if (vmaMapMemory(allocator, cbtAllocation, &data) != VK_SUCCESS) {
         std::cerr << "Failed to map CBT buffer for initialization" << std::endl;
@@ -185,7 +276,7 @@ bool TerrainSystem::initializeCBT() {
     memcpy(data, initData.data(), cbtBufferSize);
     vmaUnmapMemory(allocator, cbtAllocation);
 
-    std::cout << "CBT initialized with 2 root triangles, max depth " << config.maxDepth << std::endl;
+    std::cout << "CBT initialized with " << (maxNodeID - minNodeID) << " triangles at depth " << initDepth << ", max depth " << maxDepth << std::endl;
 
     return true;
 }
@@ -200,6 +291,11 @@ bool TerrainSystem::createHeightMap() {
             float fx = static_cast<float>(x) / heightMapResolution;
             float fy = static_cast<float>(y) / heightMapResolution;
 
+            // Distance from center (0.5, 0.5)
+            float dx = fx - 0.5f;
+            float dy = fy - 0.5f;
+            float dist = sqrt(dx * dx + dy * dy);
+
             // Multiple octaves of sine-based noise for hills
             float height = 0.0f;
             height += 0.5f * sin(fx * 3.14159f * 2.0f) * sin(fy * 3.14159f * 2.0f);
@@ -207,11 +303,9 @@ bool TerrainSystem::createHeightMap() {
             height += 0.125f * sin(fx * 3.14159f * 8.0f + 1.0f) * sin(fy * 3.14159f * 8.0f + 0.7f);
             height += 0.0625f * sin(fx * 3.14159f * 16.0f + 2.0f) * sin(fy * 3.14159f * 16.0f + 1.5f);
 
-            // Add a central mountain
-            float dx = fx - 0.5f;
-            float dy = fy - 0.5f;
-            float dist = sqrt(dx * dx + dy * dy);
-            height += 0.5f * std::max(0.0f, 1.0f - dist * 3.0f);
+            // Flatten center area where scene objects are (dist < 0.08 = ~40 world units from center)
+            float flattenFactor = glm::smoothstep(0.02f, 0.08f, dist);
+            height *= flattenFactor;
 
             // Normalize to [0, 1]
             height = (height + 1.0f) * 0.5f;
@@ -270,6 +364,14 @@ bool TerrainSystem::createHeightMap() {
         return false;
     }
 
+    // Upload height map data to GPU
+    if (!uploadImageData(heightMapImage, cpuHeightMap.data(), heightMapResolution, heightMapResolution,
+                         VK_FORMAT_R32_SFLOAT, sizeof(float))) {
+        std::cerr << "Failed to upload height map to GPU" << std::endl;
+        return false;
+    }
+
+    std::cout << "Height map uploaded: " << heightMapResolution << "x" << heightMapResolution << std::endl;
     return true;
 }
 
@@ -352,6 +454,14 @@ bool TerrainSystem::createTerrainTexture() {
         return false;
     }
 
+    // Upload terrain albedo texture to GPU
+    if (!uploadImageData(terrainAlbedoImage, texData.data(), texSize, texSize,
+                         VK_FORMAT_R8G8B8A8_SRGB, 4)) {
+        std::cerr << "Failed to upload terrain albedo texture to GPU" << std::endl;
+        return false;
+    }
+
+    std::cout << "Terrain albedo texture uploaded: " << texSize << "x" << texSize << std::endl;
     return true;
 }
 
@@ -411,11 +521,19 @@ bool TerrainSystem::createIndirectBuffers() {
 
         VmaAllocationCreateInfo allocInfo{};
         allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
 
         if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &indirectDrawBuffer,
                            &indirectDrawAllocation, nullptr) != VK_SUCCESS) {
             return false;
         }
+
+        // Initialize with default values (2 triangles = 6 vertices)
+        uint32_t drawArgs[4] = {6, 1, 0, 0};  // vertexCount, instanceCount, firstVertex, firstInstance
+        void* mapped;
+        vmaMapMemory(allocator, indirectDrawAllocation, &mapped);
+        memcpy(mapped, drawArgs, sizeof(drawArgs));
+        vmaUnmapMemory(allocator, indirectDrawAllocation);
     }
 
     return true;
@@ -766,7 +884,7 @@ bool TerrainSystem::createRenderPipeline() {
     rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
     rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
     rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+    rasterizer.cullMode = VK_CULL_MODE_NONE;  // DEBUG: disabled culling
     rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 
     VkPipelineMultisampleStateCreateInfo multisampling{};
@@ -1074,6 +1192,112 @@ void TerrainSystem::extractFrustumPlanes(const glm::mat4& viewProj, glm::vec4 pl
     }
 }
 
+bool TerrainSystem::uploadImageData(VkImage image, const void* data, uint32_t width, uint32_t height,
+                                     VkFormat format, uint32_t bytesPerPixel) {
+    VkDeviceSize imageSize = width * height * bytesPerPixel;
+
+    // Create staging buffer
+    VkBuffer stagingBuffer;
+    VmaAllocation stagingAllocation;
+
+    VkBufferCreateInfo bufferInfo{};
+    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferInfo.size = imageSize;
+    bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+    allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+
+    if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &stagingBuffer, &stagingAllocation, nullptr) != VK_SUCCESS) {
+        std::cerr << "Failed to create staging buffer for image upload" << std::endl;
+        return false;
+    }
+
+    // Copy data to staging buffer
+    void* mappedData;
+    vmaMapMemory(allocator, stagingAllocation, &mappedData);
+    memcpy(mappedData, data, imageSize);
+    vmaUnmapMemory(allocator, stagingAllocation);
+
+    // Allocate command buffer
+    VkCommandBufferAllocateInfo cmdAllocInfo{};
+    cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cmdAllocInfo.commandPool = commandPool;
+    cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cmdAllocInfo.commandBufferCount = 1;
+
+    VkCommandBuffer cmd;
+    vkAllocateCommandBuffers(device, &cmdAllocInfo, &cmd);
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cmd, &beginInfo);
+
+    // Transition image to transfer destination
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = image;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+    barrier.srcAccessMask = 0;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+    vkCmdPipelineBarrier(cmd,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    // Copy buffer to image
+    VkBufferImageCopy region{};
+    region.bufferOffset = 0;
+    region.bufferRowLength = 0;
+    region.bufferImageHeight = 0;
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.mipLevel = 0;
+    region.imageSubresource.baseArrayLayer = 0;
+    region.imageSubresource.layerCount = 1;
+    region.imageOffset = {0, 0, 0};
+    region.imageExtent = {width, height, 1};
+
+    vkCmdCopyBufferToImage(cmd, stagingBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+    // Transition image to shader read
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(cmd,
+        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    vkEndCommandBuffer(cmd);
+
+    // Submit and wait
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &cmd;
+
+    vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+    vkQueueWaitIdle(graphicsQueue);
+
+    // Cleanup
+    vkFreeCommandBuffers(device, commandPool, 1, &cmd);
+    vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
+
+    return true;
+}
+
 void TerrainSystem::updateDescriptorSets(VkDevice device,
                                           const std::vector<VkBuffer>& sceneUniformBuffers,
                                           VkImageView shadowMapView,
@@ -1299,7 +1523,7 @@ void TerrainSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
     scissor.extent = extent;
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    // Indirect draw
+    // Indirect draw using CBT node count
     vkCmdDrawIndirect(cmd, indirectDrawBuffer, 0, 1, sizeof(VkDrawIndirectCommand));
 }
 
