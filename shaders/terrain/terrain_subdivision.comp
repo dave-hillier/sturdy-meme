@@ -39,9 +39,9 @@ layout(std140, binding = 4) uniform TerrainUniforms {
 #define MERGE_THRESHOLD (lodParams.y)
 #define MIN_DEPTH (int(lodParams.z))
 
-// Sample terrain height at UV coordinate
+// Sample terrain height at UV coordinate (centered around y=0)
 float sampleHeight(vec2 uv) {
-    return texture(heightMap, uv).r * HEIGHT_SCALE;
+    return (texture(heightMap, uv).r - 0.5) * HEIGHT_SCALE;
 }
 
 // Transform UV to world position
