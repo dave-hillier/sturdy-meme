@@ -410,7 +410,6 @@ PhysicsBodyID PhysicsWorld::createBox(const glm::vec3& position, const glm::vec3
     );
     bodySettings.mFriction = friction;
     bodySettings.mRestitution = restitution;
-    bodySettings.mAngularDamping = 0.2f;  // Add resistance to rotation to prevent excessive rolling
     bodySettings.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
     bodySettings.mMassPropertiesOverride.mMass = mass;
 

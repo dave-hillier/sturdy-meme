@@ -59,9 +59,9 @@ private:
     // Physics body tracking (mapped to scene object indices)
     std::vector<PhysicsBodyID> scenePhysicsBodies;
 
-    // Orb light position (follows physics object 7)
+    // Orb light position (follows physics object 6)
     glm::vec3 orbLightPosition = glm::vec3(2.0f, 1.3f, 0.0f);
 
     // Scene object indices (for clarity)
-    static constexpr size_t ORB_LIGHT_OBJECT_INDEX = 7;
+    static constexpr size_t ORB_LIGHT_OBJECT_INDEX = 6;
 };
