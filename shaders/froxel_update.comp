@@ -333,14 +333,17 @@ void main() {
     // Convert to NDC (note: Vulkan NDC has Y down, Z 0-1)
     vec2 ndc = uvw.xy * 2.0 - 1.0;
 
-    // Reconstruct world position using inverse view-proj
-    // First convert linear depth to NDC depth
-    // Approximate: assume near=0.1, far=volumetricFar
-    float ndcDepth = linearDepth / ubo.gridParams.x;  // Simplified
+    // Reconstruct world position by creating a ray from camera through this screen position
+    // Project the far plane point to get the ray direction
+    vec4 farPoint = vec4(ndc.x, ndc.y, 1.0, 1.0);  // Far plane in NDC
+    vec4 farWorld = ubo.invViewProj * farPoint;
+    farWorld.xyz /= farWorld.w;
 
-    vec4 clipPos = vec4(ndc.x, ndc.y, ndcDepth, 1.0);
-    vec4 worldPos4 = ubo.invViewProj * clipPos;
-    vec3 worldPos = worldPos4.xyz / worldPos4.w;
+    // Ray from camera to far plane
+    vec3 worldDir = normalize(farWorld.xyz - ubo.cameraPosition.xyz);
+
+    // World position at the linear depth along the ray
+    vec3 worldPos = ubo.cameraPosition.xyz + worldDir * linearDepth;
 
     // Sample fog density
     float density = getHazeDensity(worldPos);
