@@ -83,6 +83,14 @@ layout(binding = 4) uniform WindUniforms {
 // Terrain heightmap for leaf placement on terrain
 layout(binding = 5) uniform sampler2D terrainHeightMap;
 
+// Displacement map for player/NPC interaction (shared with grass system)
+layout(binding = 6) uniform sampler2D displacementMap;
+
+// Displacement region uniforms (matching grass system)
+layout(binding = 7) uniform DisplacementRegion {
+    vec4 regionCenterAndSize;  // xy = world center, z = region size (50m), w = unused
+} dispRegion;
+
 layout(push_constant) uniform PushConstants {
     float time;
     float deltaTime;
@@ -173,6 +181,25 @@ float perlinNoise(float x, float y) {
         v
     );
     return (res + 1.0) * 0.5;
+}
+
+// Sample displacement from displacement buffer (shared with grass system)
+// Returns: xy = displacement direction in XZ plane, magnitude indicates disruption strength
+vec2 sampleDisplacement(vec2 worldXZ) {
+    vec2 regionCenter = dispRegion.regionCenterAndSize.xy;
+    float regionSize = dispRegion.regionCenterAndSize.z;
+
+    // Convert world pos to UV: center of region maps to UV(0.5, 0.5)
+    vec2 offset = worldXZ - regionCenter;
+    vec2 uv = offset / regionSize + 0.5;
+
+    // Check if within displacement region bounds
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+        return vec2(0.0);
+    }
+
+    // Sample displacement (RG = XZ displacement)
+    return texture(displacementMap, uv).rg;
 }
 
 // Sample terrain height at world XZ position
@@ -500,20 +527,41 @@ void main() {
             }
 
         } else if (p.state == STATE_GROUNDED) {
-            // Check for player disruption
+            // Check for disruption from displacement buffer (player, NPCs, etc.)
+            vec2 displacement = sampleDisplacement(p.position.xz);
+            float dispMagnitude = length(displacement);
+
+            // Also check direct player proximity as fallback
             float distToPlayer = length(p.position.xz - playerPos.xz);
+            bool playerNearby = distToPlayer < uniforms.disruptionRadius && playerSpeed > 0.5;
 
-            if (distToPlayer < uniforms.disruptionRadius && playerSpeed > 0.5) {
-                // Player is nearby and moving - disturb the leaf
-                vec3 awayDir = normalize(p.position - playerPos);
-                awayDir.y = 0.5;  // Add upward component
-                awayDir = normalize(awayDir);
+            // Disturb leaf if there's displacement or player is nearby
+            if (dispMagnitude > 0.1 || playerNearby) {
+                vec3 awayDir;
 
-                // Add swirl based on player velocity direction
-                vec3 playerVelDir = normalize(uniforms.playerVelocity.xyz);
-                vec3 swirl = cross(vec3(0.0, 1.0, 0.0), playerVelDir);
+                if (dispMagnitude > 0.1) {
+                    // Use displacement direction from buffer (grass was pushed this way)
+                    awayDir = normalize(vec3(displacement.x, 0.5, displacement.y));
+                } else {
+                    // Fallback to player position
+                    awayDir = normalize(p.position - playerPos);
+                    awayDir.y = 0.5;
+                    awayDir = normalize(awayDir);
+                }
 
-                float disruptForce = uniforms.disruptionStrength * (1.0 - distToPlayer / uniforms.disruptionRadius);
+                // Add swirl based on displacement direction or player velocity
+                vec3 swirlDir = (dispMagnitude > 0.1)
+                    ? vec3(displacement.x, 0.0, displacement.y)
+                    : normalize(uniforms.playerVelocity.xyz);
+                vec3 swirl = cross(vec3(0.0, 1.0, 0.0), swirlDir);
+
+                // Disruption force based on displacement magnitude or player proximity
+                float disruptForce;
+                if (dispMagnitude > 0.1) {
+                    disruptForce = uniforms.disruptionStrength * dispMagnitude * 2.0;
+                } else {
+                    disruptForce = uniforms.disruptionStrength * (1.0 - distToPlayer / uniforms.disruptionRadius);
+                }
                 disruptForce *= (0.7 + p.hash * 0.6);  // Random variation
 
                 p.velocity = awayDir * disruptForce + swirl * disruptForce * 0.3;

@@ -77,6 +77,10 @@ public:
     // Double-buffer management: call at frame start to swap compute/render buffer sets
     void advanceBufferSet();
 
+    // Displacement texture accessors (for sharing with LeafSystem)
+    VkImageView getDisplacementImageView() const { return displacementImageView; }
+    VkSampler getDisplacementSampler() const { return displacementSampler; }
+
 private:
     bool createShadowPipeline();
     bool createBuffers();

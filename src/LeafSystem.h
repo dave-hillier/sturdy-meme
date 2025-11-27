@@ -79,11 +79,13 @@ public:
     bool init(const InitInfo& info);
     void destroy(VkDevice device, VmaAllocator allocator);
 
-    // Update descriptor sets with external resources (UBO, wind buffer, heightmap)
+    // Update descriptor sets with external resources (UBO, wind buffer, heightmap, displacement)
     void updateDescriptorSets(VkDevice device, const std::vector<VkBuffer>& uniformBuffers,
                               const std::vector<VkBuffer>& windBuffers,
                               VkImageView terrainHeightMapView,
-                              VkSampler terrainHeightMapSampler);
+                              VkSampler terrainHeightMapSampler,
+                              VkImageView displacementMapView,
+                              VkSampler displacementMapSampler);
 
     // Update leaf uniforms each frame
     void updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos,
@@ -174,6 +176,19 @@ private:
     float confettiSpawnVelocity = 0.0f;
     float confettiToSpawn = 0.0f;
     float confettiConeAngle = 0.5f;
+
+    // Displacement texture (shared from GrassSystem)
+    VkImageView displacementMapView = VK_NULL_HANDLE;
+    VkSampler displacementMapSampler = VK_NULL_HANDLE;
+
+    // Displacement region uniform buffer (per-frame)
+    std::vector<VkBuffer> displacementRegionBuffers;
+    std::vector<VmaAllocation> displacementRegionAllocations;
+    std::vector<void*> displacementRegionMappedPtrs;
+
+    // Displacement region center (updated from camera position)
+    glm::vec2 displacementRegionCenter = glm::vec2(0.0f);
+    static constexpr float DISPLACEMENT_REGION_SIZE = 50.0f;
 
     // Particle counts
     static constexpr uint32_t MAX_PARTICLES = 100000;
