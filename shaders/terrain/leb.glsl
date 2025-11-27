@@ -234,8 +234,9 @@ mat3 leb__DecodeTransformationMatrix_Square(in const cbt_Node node) {
     }
 
     // Winding correction: account for which root triangle (quadBit) the node descended from.
-    // The two root triangles from leb__SquareMatrix have opposite winding, so we XOR with quadBit.
-    return leb__WindingMatrix((uint(node.depth) ^ quadBit) & 1u) * xf;
+    // The two root triangles from leb__SquareMatrix have opposite winding, so we XOR with quadBit
+    // to flip the parity for the quadBit=1 half while preserving the original behavior for quadBit=0.
+    return leb__WindingMatrix((uint(node.depth) ^ quadBit ^ 1u) & 1u) * xf;
 }
 
 vec3 leb_DecodeNodeAttributeArray(in const cbt_Node node, in const vec3 data) {
