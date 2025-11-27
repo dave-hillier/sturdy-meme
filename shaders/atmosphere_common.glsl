@@ -4,7 +4,7 @@
 #ifndef ATMOSPHERE_COMMON_GLSL
 #define ATMOSPHERE_COMMON_GLSL
 
-const float PI = 3.14159265359;
+#include "constants_common.glsl"
 
 // Atmosphere parameters structure (must match C++ struct)
 struct AtmosphereParams {
@@ -166,6 +166,198 @@ vec3 CosineHemisphere(vec2 xi) {
     float sinTheta = sqrt(xi.y);
 
     return vec3(cos(phi) * sinTheta, cosTheta, sin(phi) * sinTheta);
+}
+
+// ============================================================================
+// Simplified Atmospheric Scattering (used in fragment shaders)
+// ============================================================================
+
+// Result structure for scattering calculations
+struct ScatteringResult {
+    vec3 inscatter;
+    vec3 transmittance;
+};
+
+// Simplified ray-sphere intersection
+vec2 raySphereIntersect(vec3 origin, vec3 dir, float radius) {
+    float b = dot(origin, dir);
+    float c = dot(origin, origin) - radius * radius;
+    float h = b * b - c;
+    if (h < 0.0) return vec2(1e9, -1e9);
+    h = sqrt(h);
+    return vec2(-b - h, -b + h);
+}
+
+// Simplified ozone density
+float ozoneDensity(float altitude) {
+    float z = (altitude - OZONE_LAYER_CENTER) / OZONE_LAYER_WIDTH;
+    return exp(-0.5 * z * z);
+}
+
+// Integrate atmospheric scattering along a ray
+ScatteringResult integrateAtmosphere(vec3 origin, vec3 dir, float maxDistance, int sampleCount, vec3 sunDirection) {
+    vec2 atmo = raySphereIntersect(origin, dir, ATMOSPHERE_RADIUS);
+    float start = max(atmo.x, 0.0);
+    float end = min(atmo.y, maxDistance);
+
+    if (end <= 0.0) {
+        return ScatteringResult(vec3(0.0), vec3(1.0));
+    }
+
+    vec2 planet = raySphereIntersect(origin, dir, PLANET_RADIUS);
+    if (planet.x > 0.0) {
+        end = min(end, planet.x);
+    }
+
+    if (end <= start) {
+        return ScatteringResult(vec3(0.0), vec3(1.0));
+    }
+
+    float stepSize = (end - start) / float(sampleCount);
+    vec3 transmittance = vec3(1.0);
+    vec3 inscatter = vec3(0.0);
+
+    vec3 sunDir = normalize(sunDirection);
+    float cosViewSun = dot(dir, sunDir);
+    float rayleighP = RayleighPhase(cosViewSun);
+    float mieP = CornetteShanksMiePhase(cosViewSun, MIE_ANISOTROPY);
+
+    for (int i = 0; i < sampleCount; i++) {
+        float t = start + (float(i) + 0.5) * stepSize;
+        vec3 pos = origin + dir * t;
+        float altitude = max(length(pos) - PLANET_RADIUS, 0.0);
+
+        float rayleighDensity = exp(-altitude / RAYLEIGH_SCALE_HEIGHT);
+        float mieDensity = exp(-altitude / MIE_SCALE_HEIGHT);
+        float ozone = ozoneDensity(altitude);
+
+        vec3 rayleighScatter = rayleighDensity * RAYLEIGH_SCATTERING_BASE;
+        vec3 mieScatter = mieDensity * vec3(MIE_SCATTERING_BASE);
+
+        vec3 extinction = rayleighScatter + mieScatter +
+                          mieDensity * vec3(MIE_ABSORPTION_BASE) +
+                          ozone * OZONE_ABSORPTION;
+
+        vec3 segmentScatter = rayleighScatter * rayleighP + mieScatter * mieP;
+
+        vec3 attenuation = exp(-extinction * stepSize);
+        inscatter += transmittance * segmentScatter * stepSize;
+        transmittance *= attenuation;
+    }
+
+    return ScatteringResult(inscatter, transmittance);
+}
+
+// ============================================================================
+// Height Fog Functions (Phase 4.3 - Volumetric Haze)
+// ============================================================================
+
+// Exponential height falloff - good for general atmospheric haze
+float exponentialHeightDensity(float height) {
+    float relativeHeight = height - FOG_BASE_HEIGHT;
+    return FOG_DENSITY * exp(-max(relativeHeight, 0.0) / FOG_SCALE_HEIGHT);
+}
+
+// Sigmoidal layer density - good for low-lying ground fog
+float sigmoidalLayerDensity(float height) {
+    float t = (height - FOG_BASE_HEIGHT) / FOG_LAYER_THICKNESS;
+    // Smooth transition from full density below to zero above
+    return FOG_LAYER_DENSITY / (1.0 + exp(t * 2.0));
+}
+
+// Combined fog density at a given height
+float getHeightFogDensity(float height) {
+    return exponentialHeightDensity(height) + sigmoidalLayerDensity(height);
+}
+
+// Analytically integrate exponential fog density along a ray
+// Returns optical depth (for transmittance calculation)
+float integrateExponentialFog(vec3 startPos, vec3 endPos) {
+    float h0 = startPos.y;
+    float h1 = endPos.y;
+    float distance = length(endPos - startPos);
+
+    if (distance < 0.001) return 0.0;
+
+    float deltaH = h1 - h0;
+
+    // For nearly horizontal rays, use simple density * distance
+    if (abs(deltaH) < 0.01) {
+        float avgHeight = (h0 + h1) * 0.5;
+        return getHeightFogDensity(avgHeight) * distance;
+    }
+
+    // Analytical integration of exponential density along ray
+    float invScaleHeight = 1.0 / FOG_SCALE_HEIGHT;
+
+    // Exponential fog component
+    float expIntegral = FOG_DENSITY * FOG_SCALE_HEIGHT *
+        abs(exp(-(max(h0 - FOG_BASE_HEIGHT, 0.0)) * invScaleHeight) -
+            exp(-(max(h1 - FOG_BASE_HEIGHT, 0.0)) * invScaleHeight)) /
+        max(abs(deltaH / distance), 0.001);
+
+    // Sigmoidal component (approximate with average)
+    float avgSigmoidal = (sigmoidalLayerDensity(h0) + sigmoidalLayerDensity(h1)) * 0.5;
+    float sigIntegral = avgSigmoidal * distance;
+
+    return expIntegral + sigIntegral;
+}
+
+// Apply height fog with in-scattering
+vec3 applyHeightFog(vec3 color, vec3 cameraPos, vec3 fragPos, vec3 sunDir, vec3 sunColor) {
+    vec3 viewDir = fragPos - cameraPos;
+    float viewDistance = length(viewDir);
+    viewDir = normalize(viewDir);
+
+    // Calculate fog optical depth along the view ray
+    float opticalDepth = integrateExponentialFog(cameraPos, fragPos);
+
+    // Beer-Lambert transmittance
+    float transmittance = exp(-opticalDepth);
+
+    // In-scattering from sun (with Mie-like phase function for forward scattering)
+    float cosTheta = dot(viewDir, sunDir);
+    float phase = CornetteShanksMiePhase(cosTheta, 0.6);  // Slightly lower g for fog
+
+    // Sun visibility (above horizon and not blocked by terrain)
+    float sunVisibility = smoothstep(-0.1, 0.1, sunDir.y);
+
+    // Fog color: blend between sun-lit and ambient based on sun angle
+    vec3 fogSunColor = sunColor * phase * sunVisibility;
+
+    // Ambient sky light contribution (approximate hemisphere irradiance)
+    float night = 1.0 - smoothstep(-0.05, 0.08, sunDir.y);
+    vec3 ambientFog = mix(vec3(0.4, 0.5, 0.6), vec3(0.02, 0.03, 0.05), night);
+
+    // Combined in-scatter (energy conserving)
+    vec3 inScatter = (fogSunColor + ambientFog * 0.3) * (1.0 - transmittance);
+
+    return color * transmittance + inScatter;
+}
+
+// Apply aerial perspective (combined height fog + atmospheric scattering)
+vec3 applyAerialPerspective(vec3 color, vec3 cameraPos, vec3 viewDir, float viewDistance, vec3 sunDir, vec3 sunColor) {
+    // Reconstruct fragment position from normalized view direction and distance
+    vec3 fragPos = cameraPos + viewDir * viewDistance;
+
+    // Apply local height fog first (scene scale)
+    vec3 fogged = applyHeightFog(color, cameraPos, fragPos, sunDir, sunColor);
+
+    // Then apply large-scale atmospheric scattering (km scale)
+    vec3 origin = vec3(0.0, PLANET_RADIUS + max(cameraPos.y, 0.0), 0.0);
+    ScatteringResult result = integrateAtmosphere(origin, normalize(viewDir), viewDistance, 8, sunDir);
+
+    vec3 scatterLight = result.inscatter * (sunColor + vec3(0.02));
+
+    float night = 1.0 - smoothstep(-0.05, 0.08, sunDir.y);
+    scatterLight += night * vec3(0.01, 0.015, 0.03) * (1.0 - result.transmittance);
+
+    // Combine: atmospheric scattering adds to fogged scene
+    // Use reduced atmospheric effect since we're at scene scale
+    float atmoBlend = clamp(viewDistance * 0.001, 0.0, 0.3);
+    vec3 finalColor = mix(fogged, fogged * result.transmittance + scatterLight, atmoBlend);
+
+    return finalColor;
 }
 
 #endif // ATMOSPHERE_COMMON_GLSL
