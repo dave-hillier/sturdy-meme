@@ -298,9 +298,9 @@ private:
     static constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 
     float timeScale = 1.0f;
-    float manualTime = 0.0f;
-    bool useManualTime = false;
-    float currentTimeOfDay = 0.0f;
+    float manualTime = 0.5f;  // Noon
+    bool useManualTime = true;  // Start with manual time
+    float currentTimeOfDay = 0.5f;  // Noon
     float lastSunIntensity = 1.0f;
 
     // Celestial calculations

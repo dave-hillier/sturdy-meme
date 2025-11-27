@@ -532,6 +532,11 @@ ScatteringResult integrateAtmosphere(vec3 origin, vec3 dir, int sampleCount) {
         float mieDensity = exp(-altitude / MIE_SCALE_HEIGHT);
         float ozone = ozoneDensity(altitude);
 
+        // Sample transmittance LUT for sunlight reaching this point
+        float posR = length(pos);
+        float muSun = dot(normalize(pos), sunDir);
+        vec3 sunTransmittance = sampleTransmittanceLUT(posR, muSun);
+
         // Sun contribution: Use blended LMS/RGB Rayleigh for accurate sunset colors
         vec3 rayleighScatterSun = computeRayleighScatteringBlended(rayleighDensity, rayleighPSun, sunAltitude);
         vec3 mieScatterSun = mieDensity * vec3(MIE_SCATTERING_BASE);
@@ -550,8 +555,8 @@ ScatteringResult integrateAtmosphere(vec3 origin, vec3 dir, int sampleCount) {
         float earthShadowSun = computeEarthShadow(pos, sunDir);
         float earthShadowMoon = computeEarthShadow(pos, moonDir);
 
-        // Combine sun scattering
-        vec3 segmentScatterSun = (rayleighScatterSun + mieScatterSun * miePSun) * earthShadowSun;
+        // Combine sun scattering - multiply by sun transmittance (light reaching this point)
+        vec3 segmentScatterSun = sunTransmittance * (rayleighScatterSun + mieScatterSun * miePSun) * earthShadowSun;
 
         // Add moon scattering - scales smoothly with twilight transition
         vec3 segmentScatterMoon = vec3(0.0);

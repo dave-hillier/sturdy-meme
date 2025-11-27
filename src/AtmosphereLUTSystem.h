@@ -9,29 +9,33 @@
 // Atmosphere LUT system for physically-based sky rendering (Phase 4.1)
 // Precomputes transmittance and multi-scatter LUTs for efficient atmospheric scattering
 
+// Atmosphere parameters - layout must match GLSL std140 (see atmosphere_common.glsl)
 struct AtmosphereParams {
-    // Planet geometry
-    float planetRadius = 6371000.0f;       // Earth radius in meters
-    float atmosphereRadius = 6471000.0f;   // Top of atmosphere
+    // Planet geometry (in kilometers to match sky.frag)
+    float planetRadius = 6371.0f;          // Earth radius in km
+    float atmosphereRadius = 6471.0f;      // Top of atmosphere in km
+    float pad1 = 0.0f, pad2 = 0.0f;        // Padding to align vec3 to 16 bytes
 
-    // Rayleigh scattering (air molecules)
-    glm::vec3 rayleighScatteringBase = glm::vec3(5.802e-6f, 13.558e-6f, 33.1e-6f);
-    float rayleighScaleHeight = 8000.0f;   // Density falloff
+    // Rayleigh scattering (air molecules) - per km coefficients
+    glm::vec3 rayleighScatteringBase = glm::vec3(5.802e-3f, 13.558e-3f, 33.1e-3f);
+    float rayleighScaleHeight = 8.0f;      // km
 
-    // Mie scattering (aerosols/haze)
-    float mieScatteringBase = 3.996e-6f;
-    float mieAbsorptionBase = 4.4e-6f;
-    float mieScaleHeight = 1200.0f;
+    // Mie scattering (aerosols/haze) - per km coefficients
+    float mieScatteringBase = 3.996e-3f;
+    float mieAbsorptionBase = 4.4e-3f;
+    float mieScaleHeight = 1.2f;           // km
     float mieAnisotropy = 0.8f;            // Phase function asymmetry
 
-    // Ozone absorption (affects blue channel at horizon)
-    glm::vec3 ozoneAbsorption = glm::vec3(0.65e-6f, 1.881e-6f, 0.085e-6f);
-    float ozoneLayerCenter = 25000.0f;     // meters
-    float ozoneLayerWidth = 15000.0f;
+    // Ozone absorption (affects blue channel at horizon) - per km
+    glm::vec3 ozoneAbsorption = glm::vec3(0.65e-3f, 1.881e-3f, 0.085e-3f);
+    float ozoneLayerCenter = 25.0f;        // km
 
-    // Sun
+    float ozoneLayerWidth = 15.0f;         // km
     float sunAngularRadius = 0.00935f / 2.0f;  // radians
-    glm::vec3 solarIrradiance = glm::vec3(1.474f, 1.8504f, 1.91198f);  // W/m²
+    float pad3 = 0.0f, pad4 = 0.0f;        // Padding to align vec3 to 16 bytes
+
+    glm::vec3 solarIrradiance = glm::vec3(1.474f, 1.8504f, 1.91198f);
+    float pad5 = 0.0f;                     // Padding for struct alignment
 };
 
 struct AtmosphereLUTUniforms {

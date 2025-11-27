@@ -86,56 +86,47 @@ void main() {
         return;
     }
 
-    // Ray march through atmosphere
+    // Ray march through atmosphere (simplified integration matching sky.frag)
     float stepSize = rayLength / float(SKY_VIEW_STEPS);
     vec3 inscatter = vec3(0.0);
     vec3 transmittance = vec3(1.0);
+
+    // Phase functions (constant for the ray)
+    float cosTheta = dot(viewDir, sunDir);
+    float rayleighPhase = RayleighPhase(cosTheta);
+    float miePhase = CornetteShanksMiePhase(cosTheta, uAtmosphere.params.mieAnisotropy);
 
     for (int i = 0; i < SKY_VIEW_STEPS; i++) {
         float t = (float(i) + 0.5) * stepSize;
         vec3 pos = cameraPos + viewDir * t;
         float posR = length(pos);
-        float altitude = posR - uAtmosphere.params.planetRadius;
+        float altitude = max(posR - uAtmosphere.params.planetRadius, 0.0);
 
         // Get atmospheric density at this point
-        vec3 density = GetAtmosphereDensity(altitude, uAtmosphere.params);
+        float rayleighDensity = exp(-altitude / uAtmosphere.params.rayleighScaleHeight);
+        float mieDensity = exp(-altitude / uAtmosphere.params.mieScaleHeight);
 
-        // Get transmittance to sun
+        // Get transmittance to sun (light reaching this point)
         float muS = dot(normalize(pos), sunDir);
         vec3 sunTransmittance = SampleTransmittance(posR, muS);
 
-        // Local scattering coefficients
-        vec3 rayleighScatter = density.x * uAtmosphere.params.rayleighScatteringBase;
-        float mieScatter = density.y * uAtmosphere.params.mieScatteringBase;
+        // Local scattering with phase functions
+        vec3 rayleighScatter = rayleighDensity * uAtmosphere.params.rayleighScatteringBase * rayleighPhase;
+        vec3 mieScatter = mieDensity * vec3(uAtmosphere.params.mieScatteringBase) * miePhase;
 
-        // Phase functions
-        float cosTheta = dot(viewDir, sunDir);
-        float rayleighPhase = RayleighPhase(cosTheta);
-        float miePhase = HenyeyGreensteinPhase(cosTheta, uAtmosphere.params.mieAnisotropy);
+        // Total segment scattering (attenuated by sunlight reaching this point)
+        vec3 segmentScatter = sunTransmittance * (rayleighScatter + mieScatter);
 
-        // Single scattering
-        vec3 singleScatter = sunTransmittance * (rayleighScatter * rayleighPhase + vec3(mieScatter * miePhase));
-
-        // Multi-scattering contribution
-        vec2 multiScatter = SampleMultiScatter(altitude, muS);
-        vec3 multiScatterContrib = multiScatter.x * rayleighScatter + multiScatter.y * vec3(mieScatter);
-
-        // Total in-scattering
-        vec3 totalScatter = singleScatter + multiScatterContrib;
-
-        // Extinction
-        vec3 rayleighExtinction = rayleighScatter;
-        float mieExtinction = mieScatter + density.y * uAtmosphere.params.mieAbsorptionBase;
-        vec3 ozoneExtinction = density.z * uAtmosphere.params.ozoneAbsorption;
-        vec3 extinction = rayleighExtinction + vec3(mieExtinction) + ozoneExtinction;
+        // Extinction coefficients
+        vec3 rayleighExt = rayleighDensity * uAtmosphere.params.rayleighScatteringBase;
+        float mieExt = mieDensity * (uAtmosphere.params.mieScatteringBase + uAtmosphere.params.mieAbsorptionBase);
+        vec3 extinction = rayleighExt + vec3(mieExt);
 
         // Segment transmittance
         vec3 segmentTransmittance = exp(-extinction * stepSize);
 
-        // Energy-conserving integration
-        vec3 scatterIntegral = totalScatter * (1.0 - segmentTransmittance) / max(extinction, vec3(0.0001));
-
-        inscatter += transmittance * scatterIntegral;
+        // Simple integration (matching sky.frag approach)
+        inscatter += transmittance * segmentScatter * stepSize;
         transmittance *= segmentTransmittance;
 
         // Early exit if transmittance is very low
@@ -144,7 +135,7 @@ void main() {
         }
     }
 
-    // Apply solar irradiance
+    // Apply solar irradiance to match sky.frag integrateAtmosphere output
     inscatter *= uAtmosphere.params.solarIrradiance;
 
     // Store result

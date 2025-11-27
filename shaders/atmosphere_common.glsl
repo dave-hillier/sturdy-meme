@@ -49,7 +49,7 @@ float CornetteShanksMiePhase(float cosTheta, float g) {
     return num / denom;
 }
 
-// Atmosphere density at altitude (in meters above planet surface)
+// Atmosphere density at altitude (in same units as params - typically km)
 vec3 GetAtmosphereDensity(float altitude, AtmosphereParams params) {
     // Rayleigh density (exponential falloff)
     float rayleighDensity = exp(-altitude / params.rayleighScaleHeight);
