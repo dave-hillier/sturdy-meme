@@ -36,6 +36,7 @@ public:
         uint32_t framesInFlight;
         VkImageView shadowMapView;       // Cascaded shadow map array view
         VkSampler shadowSampler;         // Shadow sampler with comparison
+        std::vector<VkBuffer> lightBuffers;  // Per-frame light buffers for local light contribution
     };
 
     // Froxel grid dimensions (from Phase 4.3)
@@ -131,6 +132,7 @@ private:
     // External resources (not owned)
     VkImageView shadowMapView = VK_NULL_HANDLE;
     VkSampler shadowSampler = VK_NULL_HANDLE;
+    std::vector<VkBuffer> lightBuffers;  // Per-frame light buffers
 
     // Scattering volume (stores in-scattered light / opacity)
     // Format: RGB11F - L/alpha for anti-aliasing

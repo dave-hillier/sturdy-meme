@@ -213,7 +213,7 @@ bool WeatherSystem::createComputePipeline() {
 }
 
 bool WeatherSystem::createGraphicsDescriptorSetLayout() {
-    std::array<VkDescriptorSetLayoutBinding, 3> bindings{};
+    std::array<VkDescriptorSetLayoutBinding, 4> bindings{};
 
     // UBO (scene uniforms)
     bindings[0].binding = 0;
@@ -233,6 +233,13 @@ bool WeatherSystem::createGraphicsDescriptorSetLayout() {
     bindings[2].descriptorCount = 1;
     bindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     bindings[2].pImmutableSamplers = nullptr;
+
+    // Froxel volume for volumetric fog lighting (Phase 4.3.9)
+    bindings[3].binding = 3;
+    bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[3].descriptorCount = 1;
+    bindings[3].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    bindings[3].pImmutableSamplers = nullptr;
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -728,5 +735,34 @@ void WeatherSystem::advanceBufferSet() {
         computeBufferSet = 1;
     } else {
         std::swap(computeBufferSet, renderBufferSet);
+    }
+}
+
+void WeatherSystem::setFroxelVolume(VkImageView volumeView, VkSampler volumeSampler,
+                                     float farPlane, float depthDist) {
+    froxelVolumeView = volumeView;
+    froxelVolumeSampler = volumeSampler;
+    froxelFarPlane = farPlane;
+    froxelDepthDist = depthDist;
+
+    // Update graphics descriptor sets with froxel volume
+    if (froxelVolumeView != VK_NULL_HANDLE && froxelVolumeSampler != VK_NULL_HANDLE) {
+        for (uint32_t set = 0; set < BUFFER_SET_COUNT; set++) {
+            VkDescriptorImageInfo froxelImageInfo{};
+            froxelImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            froxelImageInfo.imageView = froxelVolumeView;
+            froxelImageInfo.sampler = froxelVolumeSampler;
+
+            VkWriteDescriptorSet froxelWrite{};
+            froxelWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            froxelWrite.dstSet = graphicsDescriptorSets[set];
+            froxelWrite.dstBinding = 3;
+            froxelWrite.dstArrayElement = 0;
+            froxelWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            froxelWrite.descriptorCount = 1;
+            froxelWrite.pImageInfo = &froxelImageInfo;
+
+            vkUpdateDescriptorSets(device, 1, &froxelWrite, 0, nullptr);
+        }
     }
 }

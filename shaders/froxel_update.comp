@@ -31,6 +31,25 @@ const float TEMPORAL_BLEND_MAX = 0.97;  // Maximum history weight (high stabilit
 
 layout(binding = 3) uniform sampler2DArrayShadow shadowMap;
 
+// Light types (must match Light.h)
+const uint LIGHT_TYPE_POINT = 0;
+const uint LIGHT_TYPE_SPOT = 1;
+const uint MAX_LIGHTS = 16;
+
+// GPU light structure (must match Light.h)
+struct GPULight {
+    vec4 positionAndType;    // xyz = position, w = type (0=point, 1=spot)
+    vec4 directionAndCone;   // xyz = direction (for spot), w = outer cone angle (cos)
+    vec4 colorAndIntensity;  // rgb = color, a = intensity
+    vec4 radiusAndInnerCone; // x = radius, y = inner cone angle (cos), z = shadow map index, w = padding
+};
+
+// Light buffer SSBO
+layout(std430, binding = 4) readonly buffer LightBuffer {
+    uvec4 lightCount;        // x = active light count
+    GPULight lights[MAX_LIGHTS];
+} lightBuffer;
+
 // Froxel grid constants
 const uint FROXEL_WIDTH = 128;
 const uint FROXEL_HEIGHT = 64;
@@ -227,6 +246,76 @@ float sampleCascadeShadow(vec3 worldPos, float viewSpaceDepth) {
     return sampleShadowPCF(worldPos, cascade);
 }
 
+// ============================================================================
+// Local Light Contribution (Phase 4.3.8)
+// Point and spot lights contribute to volumetric scattering
+// ============================================================================
+
+// Calculate point light attenuation (smooth falloff)
+float pointLightAttenuation(float distance, float radius) {
+    // Smooth attenuation with quadratic falloff
+    float att = 1.0 / (1.0 + distance * distance / (radius * radius * 0.25));
+    // Smooth fade at edge of radius
+    float fadeOut = 1.0 - smoothstep(radius * 0.5, radius, distance);
+    return att * fadeOut;
+}
+
+// Calculate spot light cone attenuation
+float spotLightAttenuation(vec3 lightDir, vec3 spotDir, float innerCos, float outerCos) {
+    float theta = dot(-lightDir, spotDir);
+    // Smooth falloff between inner and outer cone
+    return smoothstep(outerCos, innerCos, theta);
+}
+
+// Compute in-scattering from local lights at a world position
+vec3 computeLocalLightScatter(vec3 worldPos, vec3 viewDir, float density) {
+    vec3 totalScatter = vec3(0.0);
+
+    uint numLights = lightBuffer.lightCount.x;
+    numLights = min(numLights, MAX_LIGHTS);
+
+    for (uint i = 0; i < numLights; i++) {
+        GPULight light = lightBuffer.lights[i];
+
+        vec3 lightPos = light.positionAndType.xyz;
+        uint lightType = uint(light.positionAndType.w);
+        vec3 lightColor = light.colorAndIntensity.rgb;
+        float intensity = light.colorAndIntensity.a;
+        float radius = light.radiusAndInnerCone.x;
+
+        // Vector from froxel to light
+        vec3 toLight = lightPos - worldPos;
+        float dist = length(toLight);
+
+        // Skip if outside light radius
+        if (dist > radius) continue;
+
+        vec3 lightDir = toLight / dist;
+
+        // Calculate attenuation based on light type
+        float attenuation = pointLightAttenuation(dist, radius);
+
+        if (lightType == LIGHT_TYPE_SPOT) {
+            vec3 spotDir = normalize(light.directionAndCone.xyz);
+            float outerCos = light.directionAndCone.w;
+            float innerCos = light.radiusAndInnerCone.y;
+            attenuation *= spotLightAttenuation(lightDir, spotDir, innerCos, outerCos);
+        }
+
+        // Skip if attenuation is negligible
+        if (attenuation < 0.001) continue;
+
+        // Phase function (Henyey-Greenstein) for light direction
+        float cosTheta = dot(viewDir, lightDir);
+        float phase = henyeyGreenstein(cosTheta, 0.6);  // Moderate forward scattering
+
+        // Accumulate in-scattering
+        totalScatter += lightColor * intensity * attenuation * phase * density;
+    }
+
+    return totalScatter;
+}
+
 void main() {
     ivec3 texel = ivec3(gl_GlobalInvocationID);
 
@@ -298,8 +387,11 @@ void main() {
     vec3 skyColor = mix(vec3(0.4, 0.5, 0.7), vec3(0.02, 0.03, 0.05), night);
     vec3 skyInScatter = skyColor * density * 0.15;  // Ambient scatter
 
+    // Local light contribution (point and spot lights)
+    vec3 localLightScatter = computeLocalLightScatter(worldPos, viewDir, density);
+
     // Total in-scattering
-    vec3 totalInScatter = sunInScatter + skyInScatter;
+    vec3 totalInScatter = sunInScatter + skyInScatter + localLightScatter;
 
     // =========================================================================
     // Temporal Reprojection

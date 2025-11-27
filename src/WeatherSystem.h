@@ -71,6 +71,10 @@ public:
                               const std::vector<VkBuffer>& windBuffers,
                               VkImageView depthImageView, VkSampler depthSampler);
 
+    // Set froxel volume for fog lighting on particles (Phase 4.3.9)
+    void setFroxelVolume(VkImageView volumeView, VkSampler volumeSampler,
+                         float farPlane, float depthDist);
+
     // Update weather uniforms each frame
     void updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos,
                         const glm::mat4& viewProj, float deltaTime, float totalTime,
@@ -146,6 +150,12 @@ private:
     // External buffer references for per-frame descriptor updates
     std::vector<VkBuffer> externalWindBuffers;
     std::vector<VkBuffer> externalRendererUniformBuffers;
+
+    // Froxel volume for fog particle lighting (Phase 4.3.9)
+    VkImageView froxelVolumeView = VK_NULL_HANDLE;
+    VkSampler froxelVolumeSampler = VK_NULL_HANDLE;
+    float froxelFarPlane = 200.0f;
+    float froxelDepthDist = 1.2f;
 
     // Particle counts based on intensity
     static constexpr uint32_t MAX_PARTICLES = 150000;

@@ -239,6 +239,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     froxelInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
     froxelInfo.shadowMapView = shadowImageView;
     froxelInfo.shadowSampler = shadowSampler;
+    froxelInfo.lightBuffers = lightBuffers;  // For local light contribution in fog
 
     if (!froxelSystem.init(froxelInfo)) return false;
 
@@ -246,6 +247,10 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     postProcessSystem.setFroxelVolume(froxelSystem.getScatteringVolumeView(), froxelSystem.getVolumeSampler());
     postProcessSystem.setFroxelParams(froxelSystem.getVolumetricFarPlane(), FroxelSystem::DEPTH_DISTRIBUTION);
     postProcessSystem.setFroxelEnabled(true);
+
+    // Connect froxel volume to weather system for fog particle lighting (Phase 4.3.9)
+    weatherSystem.setFroxelVolume(froxelSystem.getScatteringVolumeView(), froxelSystem.getVolumeSampler(),
+                                   froxelSystem.getVolumetricFarPlane(), FroxelSystem::DEPTH_DISTRIBUTION);
 
     // Initialize atmosphere LUT system (Phase 4.1)
     AtmosphereLUTSystem::InitInfo atmosphereInfo{};

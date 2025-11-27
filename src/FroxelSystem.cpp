@@ -14,6 +14,7 @@ bool FroxelSystem::init(const InitInfo& info) {
     framesInFlight = info.framesInFlight;
     shadowMapView = info.shadowMapView;
     shadowSampler = info.shadowSampler;
+    lightBuffers = info.lightBuffers;
 
     if (!createScatteringVolume()) return false;
     if (!createIntegratedVolume()) return false;
@@ -200,7 +201,7 @@ bool FroxelSystem::createSampler() {
 }
 
 bool FroxelSystem::createDescriptorSetLayout() {
-    std::array<VkDescriptorSetLayoutBinding, 4> bindings{};
+    std::array<VkDescriptorSetLayoutBinding, 5> bindings{};
 
     // Binding 0: Scattering volume (storage image, read/write)
     bindings[0].binding = 0;
@@ -225,6 +226,12 @@ bool FroxelSystem::createDescriptorSetLayout() {
     bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     bindings[3].descriptorCount = 1;
     bindings[3].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+    // Binding 4: Light buffer (SSBO for local lights)
+    bindings[4].binding = 4;
+    bindings[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    bindings[4].descriptorCount = 1;
+    bindings[4].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -297,7 +304,7 @@ bool FroxelSystem::createDescriptorSets() {
     }
 
     for (uint32_t i = 0; i < framesInFlight; i++) {
-        std::array<VkWriteDescriptorSet, 4> writes{};
+        std::array<VkWriteDescriptorSet, 5> writes{};
 
         // Scattering volume
         VkDescriptorImageInfo scatteringInfo{};
@@ -352,6 +359,20 @@ bool FroxelSystem::createDescriptorSets() {
         writes[3].descriptorCount = 1;
         writes[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         writes[3].pImageInfo = &shadowInfo;
+
+        // Light buffer (SSBO)
+        VkDescriptorBufferInfo lightBufferInfo{};
+        lightBufferInfo.buffer = lightBuffers[i];
+        lightBufferInfo.offset = 0;
+        lightBufferInfo.range = VK_WHOLE_SIZE;
+
+        writes[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[4].dstSet = froxelDescriptorSets[i];
+        writes[4].dstBinding = 4;
+        writes[4].dstArrayElement = 0;
+        writes[4].descriptorCount = 1;
+        writes[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[4].pBufferInfo = &lightBufferInfo;
 
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
     }

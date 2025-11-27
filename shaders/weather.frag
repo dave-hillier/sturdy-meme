@@ -1,5 +1,8 @@
 #version 450
 
+// Weather Particle Fragment Shader (Phase 4.3.9)
+// With volumetric fog lighting integration
+
 const int NUM_CASCADES = 4;
 
 layout(binding = 0) uniform UniformBufferObject {
@@ -23,12 +26,56 @@ layout(binding = 0) uniform UniformBufferObject {
     float julianDay;                       // Julian day for sidereal rotation
 } ubo;
 
+// Froxel volume for fog lighting (Phase 4.3.9)
+layout(binding = 3) uniform sampler3D froxelVolume;
+
 layout(location = 0) in vec2 fragUV;
 layout(location = 1) in float fragAlpha;
 layout(location = 2) in vec3 fragWorldPos;
 layout(location = 3) flat in uint fragType;
 
 layout(location = 0) out vec4 outColor;
+
+// Froxel parameters (must match FroxelSystem)
+const uint FROXEL_DEPTH = 64;
+const float FROXEL_FAR_PLANE = 200.0;
+const float FROXEL_DEPTH_DIST = 1.2;
+
+// Convert linear depth to froxel slice index
+float depthToSlice(float linearDepth) {
+    float normalized = clamp(linearDepth / FROXEL_FAR_PLANE, 0.0, 1.0);
+    return log(1.0 + normalized * (pow(FROXEL_DEPTH_DIST, float(FROXEL_DEPTH)) - 1.0)) /
+           log(FROXEL_DEPTH_DIST);
+}
+
+// Sample froxel fog lighting at world position
+// Returns the in-scattered light from fog at this location
+vec3 sampleFroxelFogLighting(vec3 worldPos) {
+    // Transform to view space to get linear depth
+    vec4 viewPos = ubo.view * vec4(worldPos, 1.0);
+    float linearDepth = -viewPos.z;  // View space Z is negative
+
+    // Skip if outside froxel range
+    if (linearDepth > FROXEL_FAR_PLANE || linearDepth < 0.0) {
+        return vec3(0.0);
+    }
+
+    // Transform to clip space for screen UV
+    vec4 clipPos = ubo.proj * viewPos;
+    vec2 ndc = clipPos.xy / clipPos.w;
+    vec2 uv = ndc * 0.5 + 0.5;
+
+    // Compute froxel W coordinate
+    float sliceIndex = depthToSlice(linearDepth);
+    float w = sliceIndex / float(FROXEL_DEPTH);
+
+    // Sample froxel volume
+    vec4 fogData = texture(froxelVolume, vec3(uv, w));
+
+    // fogData format: RGB = L/alpha, A = alpha
+    // Return the in-scattered light (normalized scatter * alpha)
+    return fogData.rgb * fogData.a;
+}
 
 void main() {
     // Early discard for zero alpha
@@ -38,6 +85,9 @@ void main() {
 
     vec3 color;
     float alpha;
+
+    // Sample fog lighting at particle position
+    vec3 fogLight = sampleFroxelFogLighting(fragWorldPos);
 
     if (fragType == 0u) {
         // RAIN: Blue-white streak
@@ -74,6 +124,9 @@ void main() {
         // Add ambient contribution
         color += ubo.ambientColor.rgb * 0.2;
 
+        // Add fog lighting contribution (rain scatters fog light)
+        color += fogLight * 0.5;
+
         // Boost brightness slightly for visibility
         color *= 1.2;
 
@@ -105,6 +158,9 @@ void main() {
         // Moon contribution at night
         float moonIntensity = ubo.moonDirection.w;
         color += baseColor * ubo.moonColor.rgb * moonIntensity * 0.15;
+
+        // Add fog lighting contribution (snow scatters fog light more diffusely)
+        color += fogLight * 0.3;
 
         // Subtle sparkle effect (based on viewing angle and time)
         vec3 viewDir = normalize(ubo.cameraPosition.xyz - fragWorldPos);
