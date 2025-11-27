@@ -49,6 +49,8 @@ struct LeafUniforms {
     float targetGroundedCount;          // Target number of grounded leaves
     float confettiSpawnCount;           // Number of confetti to spawn this frame
     float confettiVelocity;             // Initial upward velocity for confetti
+    float terrainSize;                  // Terrain size for heightmap UV calculation
+    float terrainHeightScale;           // Terrain height scale
     float padding[1];                   // Alignment padding
 };
 
@@ -77,14 +79,17 @@ public:
     bool init(const InitInfo& info);
     void destroy(VkDevice device, VmaAllocator allocator);
 
-    // Update descriptor sets with external resources (UBO, wind buffer)
+    // Update descriptor sets with external resources (UBO, wind buffer, heightmap)
     void updateDescriptorSets(VkDevice device, const std::vector<VkBuffer>& uniformBuffers,
-                              const std::vector<VkBuffer>& windBuffers);
+                              const std::vector<VkBuffer>& windBuffers,
+                              VkImageView terrainHeightMapView,
+                              VkSampler terrainHeightMapSampler);
 
     // Update leaf uniforms each frame
     void updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos,
                         const glm::mat4& viewProj, const glm::vec3& playerPos,
-                        const glm::vec3& playerVel, float deltaTime, float totalTime);
+                        const glm::vec3& playerVel, float deltaTime, float totalTime,
+                        float terrainSize, float terrainHeightScale);
 
     // Record compute dispatch for particle simulation
     void recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex, float time, float deltaTime);

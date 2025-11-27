@@ -220,8 +220,9 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
 
     if (!leafSystem.init(leafInfo)) return false;
 
-    // Update leaf system descriptor sets with wind buffers
-    leafSystem.updateDescriptorSets(device, uniformBuffers, windBuffers);
+    // Update leaf system descriptor sets with wind buffers and terrain heightmap
+    leafSystem.updateDescriptorSets(device, uniformBuffers, windBuffers,
+                                     terrainSystem.getHeightMapView(), terrainSystem.getHeightMapSampler());
 
     // Set default leaf intensity (autumn scene)
     leafSystem.setIntensity(0.5f);
@@ -2182,7 +2183,8 @@ void Renderer::render(const Camera& camera) {
     // TODO: Integrate actual player velocity from Player class for proper disruption
     glm::vec3 playerPos = camera.getPosition();
     glm::vec3 playerVel = glm::vec3(0.0f);  // Will be updated when player movement tracking is added
-    leafSystem.updateUniforms(currentFrame, camera.getPosition(), viewProj, playerPos, playerVel, deltaTime, grassTime);
+    leafSystem.updateUniforms(currentFrame, camera.getPosition(), viewProj, playerPos, playerVel, deltaTime, grassTime,
+                               terrainConfig.size, terrainConfig.heightScale);
 
     // Begin command buffer recording
     vkResetCommandBuffer(commandBuffers[currentFrame], 0);

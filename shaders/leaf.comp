@@ -69,6 +69,8 @@ layout(binding = 3) uniform LeafUniforms {
     float targetGroundedCount;
     float confettiSpawnCount;
     float confettiVelocity;
+    float terrainSize;
+    float terrainHeightScale;
     float padding[1];
 } uniforms;
 
@@ -77,6 +79,9 @@ layout(binding = 4) uniform WindUniforms {
     vec4 windDirectionAndStrength;  // xy = normalized direction, z = strength, w = speed
     vec4 windParams;                // x = gustFrequency, y = gustAmplitude, z = noiseScale, w = time
 } wind;
+
+// Terrain heightmap for leaf placement on terrain
+layout(binding = 5) uniform sampler2D terrainHeightMap;
 
 layout(push_constant) uniform PushConstants {
     float time;
@@ -168,6 +173,23 @@ float perlinNoise(float x, float y) {
         v
     );
     return (res + 1.0) * 0.5;
+}
+
+// Sample terrain height at world XZ position
+float sampleTerrainHeight(vec2 worldXZ) {
+    // Convert world XZ to heightmap UV: terrain is centered at origin
+    vec2 terrainUV = worldXZ / uniforms.terrainSize + 0.5;
+
+    // Check if within terrain bounds
+    if (terrainUV.x < 0.0 || terrainUV.x > 1.0 || terrainUV.y < 0.0 || terrainUV.y > 1.0) {
+        return uniforms.groundLevel;  // Fall back to flat ground level outside terrain
+    }
+
+    // Sample heightmap (R32_SFLOAT format, values in [0,1])
+    float heightSample = texture(terrainHeightMap, terrainUV).r;
+
+    // Convert to world Y using same formula as terrain shader
+    return (heightSample - 0.5) * uniforms.terrainHeightScale;
 }
 
 // Sample wind with turbulence
@@ -273,7 +295,8 @@ void spawnGroundedLeaf(uint idx) {
     vec3 pos;
     pos.x = mix(uniforms.spawnRegionMin.x, uniforms.spawnRegionMax.x, rnd.x);
     pos.z = mix(uniforms.spawnRegionMin.z, uniforms.spawnRegionMax.z, rnd.z);
-    pos.y = uniforms.groundLevel + 0.01;  // Slightly above ground
+    float terrainY = sampleTerrainHeight(vec2(pos.x, pos.z));
+    pos.y = terrainY + 0.01;  // Slightly above terrain
 
     // Flat orientation with random yaw
     float yaw = rnd.y * 6.28318;
@@ -466,9 +489,10 @@ void main() {
             // Update position
             p.position += p.velocity * dt;
 
-            // Ground collision
-            if (p.position.y <= uniforms.groundLevel + p.size * 0.5) {
-                p.position.y = uniforms.groundLevel + 0.01;
+            // Ground collision - sample terrain at current position
+            float terrainY = sampleTerrainHeight(p.position.xz);
+            if (p.position.y <= terrainY + p.size * 0.5) {
+                p.position.y = terrainY + 0.01;
                 p.velocity = vec3(0.0);
                 p.angularVelocity = vec3(0.0);
                 p.state = STATE_GROUNDED;
@@ -530,10 +554,13 @@ void main() {
             // Update position
             p.position += p.velocity * dt;
 
+            // Sample terrain at current position
+            float terrainY = sampleTerrainHeight(p.position.xz);
+
             // Check if settled
             float speed = length(p.velocity);
-            if (speed < 0.1 && p.position.y <= uniforms.groundLevel + p.size) {
-                p.position.y = uniforms.groundLevel + 0.01;
+            if (speed < 0.1 && p.position.y <= terrainY + p.size) {
+                p.position.y = terrainY + 0.01;
                 p.velocity = vec3(0.0);
                 p.angularVelocity = vec3(0.0);
                 p.state = STATE_GROUNDED;
@@ -541,8 +568,8 @@ void main() {
             }
 
             // Ground collision
-            if (p.position.y <= uniforms.groundLevel + 0.01) {
-                p.position.y = uniforms.groundLevel + 0.01;
+            if (p.position.y <= terrainY + 0.01) {
+                p.position.y = terrainY + 0.01;
                 if (p.velocity.y < 0.0) p.velocity.y *= -0.3;  // Small bounce
             }
         }
