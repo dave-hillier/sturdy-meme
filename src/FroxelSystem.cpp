@@ -458,7 +458,7 @@ void FroxelSystem::recordFroxelUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
     ubo->fogParams = glm::vec4(fogBaseHeight, fogScaleHeight, fogDensity, fogAbsorption);
     ubo->layerParams = glm::vec4(layerHeight, layerThickness, layerDensity, 0.0f);
     ubo->gridParams = glm::vec4(volumetricFarPlane, DEPTH_DISTRIBUTION,
-                                 static_cast<float>(frameCounter), 0.0f);
+                                 static_cast<float>(frameCounter), temporalBlend);
     ubo->shadowParams = glm::vec4(2048.0f, 0.001f, 1.0f, 0.0f);  // Shadow map size, bias, pcf radius
 
     // Store for next frame's temporal reprojection

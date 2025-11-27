@@ -87,6 +87,10 @@ public:
     void setVolumetricFarPlane(float f) { volumetricFarPlane = f; }
     float getVolumetricFarPlane() const { return volumetricFarPlane; }
 
+    // Temporal filtering
+    void setTemporalBlend(float b) { temporalBlend = b; }
+    float getTemporalBlend() const { return temporalBlend; }
+
     // Is the system enabled?
     void setEnabled(bool e) { enabled = e; }
     bool isEnabled() const { return enabled; }
@@ -172,6 +176,9 @@ private:
 
     // Volumetric range
     float volumetricFarPlane = 200.0f;
+
+    // Temporal filtering (0 = disabled, 0.9 = typical value for stable fog)
+    float temporalBlend = 0.9f;
 
     bool enabled = true;
 };

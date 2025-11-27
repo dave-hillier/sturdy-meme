@@ -10,7 +10,7 @@ This document tracks the implementation status of features described in [LIGHTIN
 |----------|-------------|----------------------|---------|
 | Sky Model (4.1) | 8 | 2 | 2 |
 | Volumetric Clouds (4.2) | 5 | 0 | 5 |
-| Volumetric Haze/Fog (4.3) | 7 | 2 | 3 |
+| Volumetric Haze/Fog (4.3) | 9 | 1 | 2 |
 | Light Shafts (4.4) | 1 | 0 | 0 |
 
 ---
@@ -134,14 +134,19 @@ This is simpler than the documented paraboloid approach but:
 
 | Feature | Doc Section | Implementation | Issue |
 |---------|-------------|----------------|-------|
-| Shadow Map Integration | 4.3.4 | `shaders/froxel_update.comp:87-143` | **FIXED** - Full cascade shadow sampling with PCF |
-| Temporal Filtering | 4.3.4 | `src/FroxelSystem.h:153` | `prevViewProj` stored but reprojection not implemented |
+| Shadow Map Integration | 4.3.4 | `shaders/froxel_update.comp:172-227` | **FIXED** - Full cascade shadow sampling with PCF |
+
+### Fully Implemented (Recently Added)
+
+| Feature | Doc Section | Implementation | Notes |
+|---------|-------------|----------------|-------|
+| Temporal Filtering | 4.3.4 | `shaders/froxel_update.comp:91-170, 304-342` | **FIXED** - Reprojection with adaptive blend and ghosting rejection |
+| Tricubic Filtering | 4.3.7 | `shaders/postprocess.frag:45-127` | **FIXED** - 8-tap B-spline optimization |
 
 ### Not Implemented
 
 | Feature | Doc Section | Notes |
 |---------|-------------|-------|
-| Tricubic Filtering | 4.3.7 | Uses trilinear; no 8-tap B-spline implementation |
 | Local Light Contribution | 4.3.8 | No point/spot light scattering in froxels |
 | Fog Particle Lighting | 4.3.9 | Weather particles don't sample froxel lighting |
 

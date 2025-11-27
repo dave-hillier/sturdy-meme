@@ -2,11 +2,11 @@
 
 // Froxel Update Compute Shader (Phase 4.3)
 // Calculates fog density and in-scattered light for each froxel
-// Now with proper cascade shadow map sampling
+// Features: cascade shadow map sampling, temporal reprojection
 
 layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
 
-layout(binding = 0, rgba16f) writeonly uniform image3D scatteringVolume;
+layout(binding = 0, rgba16f) uniform image3D scatteringVolume;  // Current frame (read/write for temporal)
 layout(binding = 1, rgba16f) uniform image3D integratedVolume;  // Previous frame for temporal
 
 const int NUM_CASCADES = 4;
@@ -21,9 +21,13 @@ layout(binding = 2) uniform FroxelUniforms {
     vec4 sunColor;
     vec4 fogParams;         // x = base height, y = scale height, z = density, w = absorption
     vec4 layerParams;       // x = layer height, y = layer thickness, z = layer density
-    vec4 gridParams;        // x = volumetric far, y = depth distribution, z = frame index
+    vec4 gridParams;        // x = volumetric far, y = depth distribution, z = frame index, w = temporal blend
     vec4 shadowParams;      // x = shadow map size, y = shadow bias, z = pcf radius
 } ubo;
+
+// Temporal reprojection blend factor
+const float TEMPORAL_BLEND_MIN = 0.85;  // Minimum history weight (fast adaptation)
+const float TEMPORAL_BLEND_MAX = 0.97;  // Maximum history weight (high stability)
 
 layout(binding = 3) uniform sampler2DArrayShadow shadowMap;
 
@@ -82,6 +86,87 @@ vec2 blueNoise2D(ivec2 texel, float frame) {
     vec2 r = vec2(hash(vec3(texel, frame)),
                   hash(vec3(texel + ivec2(100, 200), frame + 0.5)));
     return r;
+}
+
+// ============================================================================
+// Temporal Reprojection
+// ============================================================================
+
+// Convert depth slice to linear depth
+float sliceToLinearDepth(float slice) {
+    float depthDist = ubo.gridParams.y;
+    float volumetricFar = ubo.gridParams.x;
+    return volumetricFar * (pow(depthDist, slice) - 1.0) / (pow(depthDist, float(FROXEL_DEPTH)) - 1.0);
+}
+
+// Convert linear depth to slice index
+float linearDepthToSlice(float linearDepth) {
+    float volumetricFar = ubo.gridParams.x;
+    float depthDist = ubo.gridParams.y;
+    float normalized = clamp(linearDepth / volumetricFar, 0.0, 1.0);
+    return log(1.0 + normalized * (pow(depthDist, float(FROXEL_DEPTH)) - 1.0)) / log(depthDist);
+}
+
+// Reproject current world position to previous frame's froxel UVW
+vec3 reprojectToPrevFrame(vec3 worldPos) {
+    // Transform to previous frame's clip space
+    vec4 prevClip = ubo.prevViewProj * vec4(worldPos, 1.0);
+    vec3 prevNDC = prevClip.xyz / prevClip.w;
+
+    // Convert NDC to UV (Vulkan: Y is already correct, Z is 0-1)
+    vec2 prevUV = prevNDC.xy * 0.5 + 0.5;
+
+    // Estimate previous depth (approximate - assume static fog)
+    // For moving fog particles, this would need velocity vectors
+    float prevLinearDepth = abs(prevClip.w);  // View-space depth
+    float prevSlice = linearDepthToSlice(prevLinearDepth);
+    float prevW = prevSlice / float(FROXEL_DEPTH);
+
+    return vec3(prevUV, prevW);
+}
+
+// Check if reprojected coordinates are valid
+bool isReprojectionValid(vec3 prevUVW) {
+    // Check bounds
+    if (prevUVW.x < 0.0 || prevUVW.x > 1.0 ||
+        prevUVW.y < 0.0 || prevUVW.y > 1.0 ||
+        prevUVW.z < 0.0 || prevUVW.z > 1.0) {
+        return false;
+    }
+    return true;
+}
+
+// Sample history with bilinear interpolation
+vec4 sampleHistory(vec3 uvw) {
+    // Convert UVW to texel coordinates
+    vec3 texelCoord = uvw * vec3(float(FROXEL_WIDTH), float(FROXEL_HEIGHT), float(FROXEL_DEPTH)) - 0.5;
+    ivec3 texel0 = ivec3(floor(texelCoord));
+    vec3 frac = fract(texelCoord);
+
+    // Clamp to valid range
+    texel0 = clamp(texel0, ivec3(0), ivec3(FROXEL_WIDTH - 1, FROXEL_HEIGHT - 1, FROXEL_DEPTH - 1));
+    ivec3 texel1 = min(texel0 + 1, ivec3(FROXEL_WIDTH - 1, FROXEL_HEIGHT - 1, FROXEL_DEPTH - 1));
+
+    // 8-tap trilinear sampling from scattering volume (which holds previous frame's data)
+    vec4 c000 = imageLoad(scatteringVolume, ivec3(texel0.x, texel0.y, texel0.z));
+    vec4 c100 = imageLoad(scatteringVolume, ivec3(texel1.x, texel0.y, texel0.z));
+    vec4 c010 = imageLoad(scatteringVolume, ivec3(texel0.x, texel1.y, texel0.z));
+    vec4 c110 = imageLoad(scatteringVolume, ivec3(texel1.x, texel1.y, texel0.z));
+    vec4 c001 = imageLoad(scatteringVolume, ivec3(texel0.x, texel0.y, texel1.z));
+    vec4 c101 = imageLoad(scatteringVolume, ivec3(texel1.x, texel0.y, texel1.z));
+    vec4 c011 = imageLoad(scatteringVolume, ivec3(texel0.x, texel1.y, texel1.z));
+    vec4 c111 = imageLoad(scatteringVolume, ivec3(texel1.x, texel1.y, texel1.z));
+
+    // Trilinear interpolation
+    vec4 c00 = mix(c000, c100, frac.x);
+    vec4 c10 = mix(c010, c110, frac.x);
+    vec4 c01 = mix(c001, c101, frac.x);
+    vec4 c11 = mix(c011, c111, frac.x);
+
+    vec4 c0 = mix(c00, c10, frac.y);
+    vec4 c1 = mix(c01, c11, frac.y);
+
+    return mix(c0, c1, frac.z);
 }
 
 // ============================================================================
@@ -216,7 +301,43 @@ void main() {
     // Total in-scattering
     vec3 totalInScatter = sunInScatter + skyInScatter;
 
+    // =========================================================================
+    // Temporal Reprojection
+    // =========================================================================
+    vec4 currentData = vec4(totalInScatter, density);
+
+    // Get temporal blend factor from gridParams.w (0 = no temporal, higher = more stable)
+    float temporalBlend = ubo.gridParams.w;
+
+    // Only apply temporal filtering if enabled (temporalBlend > 0)
+    if (temporalBlend > 0.01) {
+        // Reproject current position to previous frame
+        vec3 prevUVW = reprojectToPrevFrame(worldPos);
+
+        if (isReprojectionValid(prevUVW)) {
+            // Sample history from previous frame
+            vec4 historyData = sampleHistory(prevUVW);
+
+            // Neighborhood clamping to prevent ghosting
+            // Simple approach: clamp history to reasonable range around current value
+            float densityDiff = abs(historyData.a - currentData.a);
+            float colorDiff = length(historyData.rgb - currentData.rgb);
+
+            // Adaptive blend factor: reduce history weight when data changes significantly
+            // This prevents ghosting when fog conditions change rapidly
+            float adaptiveBlend = temporalBlend;
+            adaptiveBlend *= smoothstep(0.5, 0.0, densityDiff);  // Reject on large density change
+            adaptiveBlend *= smoothstep(2.0, 0.0, colorDiff);     // Reject on large color change
+
+            // Clamp blend factor to reasonable range
+            adaptiveBlend = clamp(adaptiveBlend, 1.0 - TEMPORAL_BLEND_MAX, 1.0 - TEMPORAL_BLEND_MIN);
+
+            // Blend current with history
+            currentData = mix(currentData, historyData, 1.0 - adaptiveBlend);
+        }
+    }
+
     // Store L / alpha for anti-aliased compositing (Ghost of Tsushima technique)
     // Alpha will be computed during integration
-    imageStore(scatteringVolume, texel, vec4(totalInScatter, density));
+    imageStore(scatteringVolume, texel, currentData);
 }

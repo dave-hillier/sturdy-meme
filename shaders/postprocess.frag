@@ -33,11 +33,97 @@ layout(location = 0) in vec2 fragTexCoord;
 layout(location = 0) out vec4 outColor;
 
 // Froxel grid constants (must match FroxelSystem.h)
+const uint FROXEL_WIDTH = 128;
+const uint FROXEL_HEIGHT = 64;
 const uint FROXEL_DEPTH = 64;
 
 // Linearize depth from NDC (Vulkan: 0-1 range)
 float linearizeDepth(float depth) {
     return ubo.nearPlane * ubo.farPlane / (ubo.farPlane - depth * (ubo.farPlane - ubo.nearPlane));
+}
+
+// ============================================================================
+// Tricubic B-Spline Filtering (Phase 4.3.7)
+// Provides smoother fog gradients than trilinear filtering
+// ============================================================================
+
+// Cubic B-spline weight function
+// Returns (w0, w1, w2, w3) weights and optimized texture offsets
+vec4 bsplineWeights(float t) {
+    float t2 = t * t;
+    float t3 = t2 * t;
+    float invT = 1.0 - t;
+    float invT2 = invT * invT;
+    float invT3 = invT2 * invT;
+
+    // Cubic B-spline basis functions
+    float w0 = invT3 / 6.0;
+    float w1 = (4.0 - 6.0 * t2 + 3.0 * t3) / 6.0;
+    float w2 = (1.0 + 3.0 * t + 3.0 * t2 - 3.0 * t3) / 6.0;
+    float w3 = t3 / 6.0;
+
+    return vec4(w0, w1, w2, w3);
+}
+
+// Optimized tricubic using 8 bilinear samples instead of 64 point samples
+// Based on GPU Gems 2, Chapter 20: Fast Third-Order Texture Filtering
+vec4 sampleFroxelTricubic(vec3 uvw) {
+    vec3 texSize = vec3(float(FROXEL_WIDTH), float(FROXEL_HEIGHT), float(FROXEL_DEPTH));
+    vec3 invTexSize = 1.0 / texSize;
+
+    // Convert to texel coordinates
+    vec3 texCoord = uvw * texSize - 0.5;
+    vec3 texCoordFloor = floor(texCoord);
+    vec3 frac = texCoord - texCoordFloor;
+
+    // Calculate B-spline weights for each axis
+    vec4 xWeights = bsplineWeights(frac.x);
+    vec4 yWeights = bsplineWeights(frac.y);
+    vec4 zWeights = bsplineWeights(frac.z);
+
+    // Combine adjacent weights for bilinear optimization
+    // g0 = w0 + w1, g1 = w2 + w3
+    vec2 gX = vec2(xWeights.x + xWeights.y, xWeights.z + xWeights.w);
+    vec2 gY = vec2(yWeights.x + yWeights.y, yWeights.z + yWeights.w);
+    vec2 gZ = vec2(zWeights.x + zWeights.y, zWeights.z + zWeights.w);
+
+    // Calculate bilinear sample offsets
+    // h0 = w1 / g0 - 1, h1 = w3 / g1 + 1
+    vec2 hX = vec2(xWeights.y / gX.x - 1.0, xWeights.w / gX.y + 1.0);
+    vec2 hY = vec2(yWeights.y / gY.x - 1.0, yWeights.w / gY.y + 1.0);
+    vec2 hZ = vec2(zWeights.y / gZ.x - 1.0, zWeights.w / gZ.y + 1.0);
+
+    // Base texel position
+    vec3 baseUV = (texCoordFloor + 0.5) * invTexSize;
+
+    // Sample 8 bilinear taps (2x2x2 grid)
+    vec4 c000 = texture(froxelVolume, baseUV + vec3(hX.x, hY.x, hZ.x) * invTexSize);
+    vec4 c100 = texture(froxelVolume, baseUV + vec3(hX.y, hY.x, hZ.x) * invTexSize);
+    vec4 c010 = texture(froxelVolume, baseUV + vec3(hX.x, hY.y, hZ.x) * invTexSize);
+    vec4 c110 = texture(froxelVolume, baseUV + vec3(hX.y, hY.y, hZ.x) * invTexSize);
+    vec4 c001 = texture(froxelVolume, baseUV + vec3(hX.x, hY.x, hZ.y) * invTexSize);
+    vec4 c101 = texture(froxelVolume, baseUV + vec3(hX.y, hY.x, hZ.y) * invTexSize);
+    vec4 c011 = texture(froxelVolume, baseUV + vec3(hX.x, hY.y, hZ.y) * invTexSize);
+    vec4 c111 = texture(froxelVolume, baseUV + vec3(hX.y, hY.y, hZ.y) * invTexSize);
+
+    // Blend in X
+    vec4 c00 = mix(c000 * gX.x, c100 * gX.y, 0.5) * 2.0;  // Normalized blend
+    vec4 c10 = mix(c010 * gX.x, c110 * gX.y, 0.5) * 2.0;
+    vec4 c01 = mix(c001 * gX.x, c101 * gX.y, 0.5) * 2.0;
+    vec4 c11 = mix(c011 * gX.x, c111 * gX.y, 0.5) * 2.0;
+
+    // Proper weighted blend
+    c00 = c000 * gX.x + c100 * gX.y;
+    c10 = c010 * gX.x + c110 * gX.y;
+    c01 = c001 * gX.x + c101 * gX.y;
+    c11 = c011 * gX.x + c111 * gX.y;
+
+    // Blend in Y
+    vec4 c0 = c00 * gY.x + c10 * gY.y;
+    vec4 c1 = c01 * gY.x + c11 * gY.y;
+
+    // Blend in Z
+    return c0 * gZ.x + c1 * gZ.y;
 }
 
 // Convert linear depth to froxel slice index
@@ -49,6 +135,7 @@ float depthToSlice(float linearDepth) {
 }
 
 // Sample froxel volume for volumetric fog (Phase 4.3)
+// Uses tricubic B-spline filtering for smoother gradients
 vec4 sampleFroxelFog(vec2 uv, float linearDepth) {
     // Clamp to volumetric range
     float clampedDepth = min(linearDepth, ubo.froxelFarPlane);
@@ -57,8 +144,8 @@ vec4 sampleFroxelFog(vec2 uv, float linearDepth) {
     float sliceIndex = depthToSlice(clampedDepth);
     float w = sliceIndex / float(FROXEL_DEPTH);
 
-    // Sample with trilinear filtering
-    vec4 fogData = texture(froxelVolume, vec3(uv, w));
+    // Sample with tricubic B-spline filtering for smoother fog gradients
+    vec4 fogData = sampleFroxelTricubic(vec3(uv, w));
 
     // fogData format: RGB = L/alpha (normalized scatter), A = alpha
     // Recover actual scattering: L = (L/alpha) * alpha
