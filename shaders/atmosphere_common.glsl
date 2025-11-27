@@ -292,8 +292,8 @@ float integrateExponentialFog(vec3 startPos, vec3 endPos) {
 
     // Exponential fog component
     float expIntegral = FOG_DENSITY * FOG_SCALE_HEIGHT *
-        abs(exp(-(max(h0 - FOG_BASE_HEIGHT, 0.0)) * invScaleHeight) -
-            exp(-(max(h1 - FOG_BASE_HEIGHT, 0.0)) * invScaleHeight)) /
+        abs(exp(-((h0 - FOG_BASE_HEIGHT)) * invScaleHeight) -
+            exp(-((h1 - FOG_BASE_HEIGHT)) * invScaleHeight)) /
         max(abs(deltaH / distance), 0.001);
 
     // Sigmoidal component (approximate with average)
