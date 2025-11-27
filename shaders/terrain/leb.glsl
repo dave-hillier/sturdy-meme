@@ -226,7 +226,7 @@ mat3 leb__DecodeTransformationMatrix(in const cbt_Node node) {
 
 mat3 leb__DecodeTransformationMatrix_Square(in const cbt_Node node) {
     int bitID = max(0, node.depth - 1);
-    uint quadBit = leb__GetBitValue(node.id, uint(bitID));
+    uint quadBit = leb__GetBitValue(node.id, bitID);
     mat3 xf = leb__SquareMatrix(quadBit);
 
     for (bitID = node.depth - 2; bitID >= 0; --bitID) {
