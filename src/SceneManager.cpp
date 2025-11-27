@@ -93,7 +93,8 @@ void SceneManager::initializeScenePhysics(PhysicsWorld& physics) {
     scenePhysicsBodies[6] = physics.createBox(glm::vec3(-3.0f, 0.5f + spawnOffset, -3.0f), cubeHalfExtents, boxMass);
 
     // Index 7: Emissive sphere - mesh radius 0.5, scaled 0.3 = visual radius 0.15
-    scenePhysicsBodies[7] = physics.createSphere(glm::vec3(2.0f, 1.3f + spawnOffset, 0.0f), 0.5f * 0.3f, 1.0f);
+    // Sphere center should be at radius height (0.15) to sit on ground
+    scenePhysicsBodies[7] = physics.createSphere(glm::vec3(2.0f, 0.15f + spawnOffset, 0.0f), 0.5f * 0.3f, 1.0f);
 
     // Index 8 & 9: Blue and green lights - NO PHYSICS (fixed light indicators)
     // scenePhysicsBodies[8] and [9] remain INVALID_BODY_ID
