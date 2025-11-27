@@ -210,18 +210,16 @@ void spawnParticle(uint idx, vec3 spawnCenter) {
     float seed = float(idx) * 0.001 + uniforms.time * 0.1;
     vec3 rnd = hash3(vec3(seed, seed * 1.7, seed * 2.3));
 
-    // Determine if this is a near-zone or frustum particle
-    float distFromCenter = rnd.x * uniforms.spawnRegion.w;
-    bool isNearZone = distFromCenter < uniforms.nearZoneRadius;
-
-    // Spawn position: circular distribution around camera
-    float angle = rnd.y * 6.28318;
-    float radius = isNearZone ? rnd.x * uniforms.nearZoneRadius : distFromCenter;
-
+    // Spawn position: uniform box distribution around camera
+    // Box distribution is cheaper than circular (no sqrt/cos/sin) and visually equivalent
     vec3 pos;
-    pos.x = spawnCenter.x + cos(angle) * radius;
-    pos.z = spawnCenter.z + sin(angle) * radius;
+    pos.x = spawnCenter.x + (rnd.x - 0.5) * 2.0 * uniforms.spawnRegion.w;
+    pos.z = spawnCenter.z + (rnd.y - 0.5) * 2.0 * uniforms.spawnRegion.w;
     pos.y = spawnCenter.y + uniforms.spawnHeight + (rnd.z - 0.5) * 20.0;
+
+    // Check if this particle is in the near zone (close to player)
+    float distFromCenter = length(pos.xz - spawnCenter.xz);
+    bool isNearZone = distFromCenter < uniforms.nearZoneRadius;
 
     // Initial velocity based on weather type
     vec3 velocity;
