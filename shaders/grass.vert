@@ -25,7 +25,8 @@ layout(binding = 0) uniform UniformBufferObject {
 
 struct GrassInstance {
     vec4 positionAndFacing;  // xyz = position, w = facing angle
-    vec4 heightHashTilt;     // x = height, y = hash, z = tilt, w = unused
+    vec4 heightHashTilt;     // x = height, y = hash, z = tilt, w = clumpId
+    vec4 terrainNormal;      // xyz = terrain normal (for tangent alignment), w = unused
 };
 
 layout(std430, binding = 1) readonly buffer InstanceBuffer {
@@ -167,6 +168,31 @@ vec3 bezierDerivative(vec3 p0, vec3 p1, vec3 p2, float t) {
     return 2.0 * u * (p1 - p0) + 2.0 * t * (p2 - p1);
 }
 
+// Build orthonormal basis from terrain normal
+// Returns tangent (T) and bitangent (B) vectors
+void buildTerrainBasis(vec3 N, float facing, out vec3 T, out vec3 B) {
+    // Start with world up, but handle edge case where N is nearly vertical
+    vec3 up = vec3(0.0, 1.0, 0.0);
+    vec3 right = vec3(1.0, 0.0, 0.0);
+
+    // Choose a reference vector that's not parallel to N
+    vec3 ref = abs(N.y) < 0.99 ? up : right;
+
+    // First tangent perpendicular to N
+    T = normalize(cross(N, ref));
+    // Second tangent perpendicular to both
+    B = normalize(cross(N, T));
+
+    // Rotate tangent basis by facing angle around N
+    float cs = cos(facing);
+    float sn = sin(facing);
+    vec3 T_rotated = T * cs + B * sn;
+    vec3 B_rotated = -T * sn + B * cs;
+
+    T = T_rotated;
+    B = B_rotated;
+}
+
 void main() {
     // With indirect draw:
     // - gl_InstanceIndex = which blade (0 to instanceCount-1)
@@ -180,6 +206,14 @@ void main() {
     float bladeHash = inst.heightHashTilt.y;
     float tilt = inst.heightHashTilt.z;
     float clumpId = inst.heightHashTilt.w;
+    vec3 terrainNormal = normalize(inst.terrainNormal.xyz);
+
+    // Build coordinate frame aligned to terrain surface
+    // T = tangent (facing direction on terrain surface)
+    // B = bitangent (perpendicular to T on terrain surface)
+    // N = terrain normal (grass "up" direction)
+    vec3 T, B;
+    buildTerrainBasis(terrainNormal, facing, T, B);
 
     // Wind animation using noise-based wind system
     vec2 windDir = wind.windDirectionAndStrength.xy;
@@ -257,12 +291,8 @@ void main() {
     vec3 curvePos = bezier(p0, p1, p2, t);
     vec3 localPos = curvePos + vec3(xOffset, 0.0, 0.0);
 
-    // Rotate by facing angle around Y axis
-    float cs = cos(facing);
-    float sn = sin(facing);
-
-    // Blade's right vector (perpendicular to facing direction in XZ plane)
-    vec3 bladeRight = vec3(cs, 0.0, sn);
+    // Blade's right vector (B - bitangent, perpendicular to facing in terrain plane)
+    vec3 bladeRight = B;
 
     // View-facing thickening: widen blade when viewed edge-on
     // Calculate view direction to blade base
@@ -275,19 +305,30 @@ void main() {
     float thickenAmount = 1.0 + edgeFactor * 2.0;
     vec3 thickenedPos = vec3(localPos.x * thickenAmount, localPos.y, localPos.z);
 
-    vec3 rotatedPos;
-    rotatedPos.x = thickenedPos.x * cs - thickenedPos.z * sn;
-    rotatedPos.y = thickenedPos.y;
-    rotatedPos.z = thickenedPos.x * sn + thickenedPos.z * cs;
+    // Transform from local blade space to world space using terrain basis
+    // Local X = blade width direction (bitangent B)
+    // Local Y = blade up direction (terrain normal N)
+    // Local Z = blade facing direction (tangent T)
+    vec3 worldOffset = B * thickenedPos.x +
+                       terrainNormal * thickenedPos.y +
+                       T * thickenedPos.z;
 
     // Final world position
-    vec3 worldPos = basePos + rotatedPos;
+    vec3 worldPos = basePos + worldOffset;
 
     gl_Position = ubo.proj * ubo.view * vec4(worldPos, 1.0);
 
     // Calculate normal (perpendicular to blade surface)
-    vec3 tangent = normalize(bezierDerivative(p0, p1, p2, t));
-    vec3 normal = normalize(cross(tangent, bladeRight));
+    // Bezier tangent is in local space (X=width, Y=up, Z=forward)
+    vec3 localTangent = normalize(bezierDerivative(p0, p1, p2, t));
+
+    // Transform tangent to world space using terrain basis
+    vec3 worldTangent = B * localTangent.x +
+                        terrainNormal * localTangent.y +
+                        T * localTangent.z;
+
+    // Normal is perpendicular to both tangent and blade width direction
+    vec3 normal = normalize(cross(worldTangent, bladeRight));
 
     // Color gradient: darker at base, lighter at tip
     vec3 baseColor = vec3(0.08, 0.22, 0.04);
