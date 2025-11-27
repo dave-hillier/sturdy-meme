@@ -41,8 +41,8 @@ float sliceToDepth(float slice) {
     return volumetricFar * (pow(depthDist, slice) - 1.0) / (pow(depthDist, float(FROXEL_DEPTH)) - 1.0);
 }
 
-// Exponential height density (general atmospheric haze)
-float exponentialHeightDensity(float height) {
+// Exponential height density (general atmospheric haze) - uses UBO parameters
+float froxelExponentialDensity(float height) {
     float baseHeight = ubo.fogParams.x;
     float scaleHeight = ubo.fogParams.y;
     float density = ubo.fogParams.z;
@@ -50,8 +50,8 @@ float exponentialHeightDensity(float height) {
     return density * exp(-max(relHeight, 0.0) / scaleHeight);
 }
 
-// Sigmoidal layer density (ground fog layer)
-float sigmoidalLayerDensity(float height) {
+// Sigmoidal layer density (ground fog layer) - uses UBO parameters
+float froxelSigmoidalDensity(float height) {
     float layerHeight = ubo.layerParams.x;
     float layerThickness = ubo.layerParams.y;
     float layerDensity = ubo.layerParams.z;
@@ -62,7 +62,7 @@ float sigmoidalLayerDensity(float height) {
 // Combined fog density at height
 float getHazeDensity(vec3 worldPos) {
     float height = worldPos.y;
-    return exponentialHeightDensity(height) + sigmoidalLayerDensity(height);
+    return froxelExponentialDensity(height) + froxelSigmoidalDensity(height);
 }
 
 // Henyey-Greenstein phase function
