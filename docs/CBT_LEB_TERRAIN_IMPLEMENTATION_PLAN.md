@@ -2,6 +2,9 @@
 
 A comprehensive implementation plan for GPU-driven adaptive terrain tessellation using Concurrent Binary Trees (CBT) and Longest Edge Bisection (LEB), based on the Unity Labs research and HPG paper by Jonathan Dupuy.
 
+Use this as a reference implementation:
+https://github.com/jdupuy/LongestEdgeBisection2D
+
 ## Table of Contents
 
 1. [Overview](#overview)

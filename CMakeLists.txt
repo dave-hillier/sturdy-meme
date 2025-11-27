@@ -33,6 +33,7 @@ set(SOURCES
     src/AtmosphereLUTSystem.cpp
     src/Player.cpp
     src/PhysicsSystem.cpp
+    src/TerrainSystem.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
@@ -93,6 +94,18 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/skyview_lut.comp.spv
 )
 
+set(TERRAIN_SHADER_FILES
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_dispatcher.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_subdivision.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_sum_reduction_prepass.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_sum_reduction.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain.vert.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain.frag.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_shadow.vert.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_shadow.frag.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_wireframe.frag.spv
+)
+
 set_source_files_properties(${RESOURCE_FILES} PROPERTIES
     MACOSX_PACKAGE_LOCATION "Resources/textures"
 )
@@ -101,7 +114,11 @@ set_source_files_properties(${SHADER_FILES} PROPERTIES
     MACOSX_PACKAGE_LOCATION "Resources/shaders"
 )
 
-target_sources(${PROJECT_NAME} PRIVATE ${RESOURCE_FILES} ${SHADER_FILES})
+set_source_files_properties(${TERRAIN_SHADER_FILES} PROPERTIES
+    MACOSX_PACKAGE_LOCATION "Resources/shaders/terrain"
+)
+
+target_sources(${PROJECT_NAME} PRIVATE ${RESOURCE_FILES} ${SHADER_FILES} ${TERRAIN_SHADER_FILES})
 
 find_program(GLSLC glslc HINTS $ENV{VULKAN_SDK}/bin)
 find_program(GLSLANG_VALIDATOR glslangValidator HINTS $ENV{VULKAN_SDK}/bin)
@@ -255,6 +272,70 @@ if(SHADER_COMPILE_CMD)
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/skyview_lut.comp ${CMAKE_CURRENT_SOURCE_DIR}/shaders/atmosphere_common.glsl
         COMMENT "Compiling sky-view LUT compute shader"
     )
+    # Terrain shaders (LEB terrain system)
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_dispatcher.comp.spv
+        COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_dispatcher.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_dispatcher.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_dispatcher.comp
+                ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/cbt.glsl
+        COMMENT "Compiling terrain dispatcher compute shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_subdivision.comp.spv
+        COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_subdivision.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_subdivision.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_subdivision.comp
+                ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/cbt.glsl
+                ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/leb.glsl
+        COMMENT "Compiling terrain subdivision compute shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_sum_reduction_prepass.comp.spv
+        COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_sum_reduction_prepass.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_sum_reduction_prepass.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_sum_reduction_prepass.comp
+                ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/cbt.glsl
+        COMMENT "Compiling terrain sum reduction prepass compute shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_sum_reduction.comp.spv
+        COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_sum_reduction.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_sum_reduction.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_sum_reduction.comp
+                ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/cbt.glsl
+        COMMENT "Compiling terrain sum reduction compute shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain.vert.spv
+        COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain.vert.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain.vert
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain.vert
+                ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/cbt.glsl
+                ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/leb.glsl
+        COMMENT "Compiling terrain vertex shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain.frag.spv
+        COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain.frag.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain.frag
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain.frag
+        COMMENT "Compiling terrain fragment shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_shadow.vert.spv
+        COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_shadow.vert.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_shadow.vert
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_shadow.vert
+                ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/cbt.glsl
+                ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/leb.glsl
+        COMMENT "Compiling terrain shadow vertex shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_shadow.frag.spv
+        COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_shadow.frag.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_shadow.frag
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_shadow.frag
+        COMMENT "Compiling terrain shadow fragment shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_wireframe.frag.spv
+        COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_wireframe.frag.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_wireframe.frag
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_wireframe.frag
+        COMMENT "Compiling terrain wireframe fragment shader"
+    )
     add_custom_target(shaders DEPENDS
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.frag.spv
@@ -280,6 +361,15 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/multiscatter_lut.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/skyview_lut.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_dispatcher.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_subdivision.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_sum_reduction_prepass.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_sum_reduction.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain.vert.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain.frag.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_shadow.vert.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_shadow.frag.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_wireframe.frag.spv
     )
     add_dependencies(${PROJECT_NAME} shaders)
 else()

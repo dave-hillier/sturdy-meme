@@ -146,6 +146,33 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
 
     if (!grassSystem.init(grassInfo)) return false;
 
+    // Initialize terrain system (LEB/CBT adaptive terrain)
+    TerrainSystem::InitInfo terrainInfo{};
+    terrainInfo.device = device;
+    terrainInfo.physicalDevice = physicalDevice;
+    terrainInfo.allocator = allocator;
+    terrainInfo.renderPass = postProcessSystem.getHDRRenderPass();
+    terrainInfo.shadowRenderPass = shadowRenderPass;
+    terrainInfo.descriptorPool = descriptorPool;
+    terrainInfo.extent = swapchainExtent;
+    terrainInfo.shadowMapSize = SHADOW_MAP_SIZE;
+    terrainInfo.shaderPath = resourcePath + "/shaders";
+    terrainInfo.texturePath = resourcePath + "/textures";
+    terrainInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+    terrainInfo.graphicsQueue = graphicsQueue;
+    terrainInfo.commandPool = commandPool;
+
+    TerrainConfig terrainConfig{};
+    terrainConfig.size = 500.0f;
+    terrainConfig.heightScale = 50.0f;
+    terrainConfig.maxDepth = 18;  // Reasonable depth for testing
+    terrainConfig.minDepth = 2;
+    terrainConfig.targetEdgePixels = 16.0f;
+    terrainConfig.splitThreshold = 24.0f;
+    terrainConfig.mergeThreshold = 8.0f;
+
+    if (!terrainSystem.init(terrainInfo, terrainConfig)) return false;
+
     // Initialize wind system
     WindSystem::InitInfo windInfo{};
     windInfo.device = device;
@@ -161,6 +188,9 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
         windBuffers[i] = windSystem.getBufferInfo(i).buffer;
     }
     grassSystem.updateDescriptorSets(device, uniformBuffers, shadowImageView, shadowSampler, windBuffers, lightBuffers);
+
+    // Update terrain descriptor sets with shared resources
+    terrainSystem.updateDescriptorSets(device, uniformBuffers, shadowImageView, shadowSampler);
 
     // Initialize weather particle system (rain/snow)
     WeatherSystem::InitInfo weatherInfo{};
@@ -301,6 +331,7 @@ void Renderer::shutdown() {
         }
 
         grassSystem.destroy(device, allocator);
+        terrainSystem.destroy(device, allocator);
         windSystem.destroy(device, allocator);
         weatherSystem.destroy(device, allocator);
         leafSystem.destroy(device, allocator);
@@ -2142,6 +2173,7 @@ void Renderer::render(const Camera& camera) {
     glm::mat4 viewProj = camera.getProjectionMatrix() * camera.getViewMatrix();
     grassSystem.updateUniforms(currentFrame, camera.getPosition(), viewProj);
     weatherSystem.updateUniforms(currentFrame, camera.getPosition(), viewProj, deltaTime, grassTime, windSystem);
+    terrainSystem.updateUniforms(currentFrame, camera.getPosition(), camera.getViewMatrix(), camera.getProjectionMatrix());
 
     // Update leaf system with player position (using camera as player proxy)
     // TODO: Integrate actual player velocity from Player class for proper disruption
@@ -2157,6 +2189,9 @@ void Renderer::render(const Camera& camera) {
     vkBeginCommandBuffer(commandBuffers[currentFrame], &beginInfo);
 
     VkCommandBuffer cmd = commandBuffers[currentFrame];
+
+    // Terrain compute pass (adaptive subdivision)
+    terrainSystem.recordCompute(cmd, currentFrame);
 
     // Grass compute pass
     grassSystem.recordResetAndCompute(cmd, currentFrame, grassTime);
@@ -2367,6 +2402,9 @@ void Renderer::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float 
             vkCmdDrawIndexed(cmd, obj.mesh->getIndexCount(), 1, 0, 0, 0);
         }
 
+        // Terrain shadows
+        terrainSystem.recordShadowDraw(cmd, frameIndex, cascadeMatrices[cascade], cascade);
+
         grassSystem.recordShadowDraw(cmd, frameIndex, grassTime, cascade);
 
         vkCmdEndRenderPass(cmd);
@@ -2429,6 +2467,9 @@ void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float gra
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                             pipelineLayout, 0, 1, &descriptorSets[frameIndex], 0, nullptr);
     vkCmdDraw(cmd, 3, 1, 0, 0);
+
+    // Draw terrain (LEB adaptive tessellation)
+    terrainSystem.recordDraw(cmd, frameIndex);
 
     // Draw scene objects
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);

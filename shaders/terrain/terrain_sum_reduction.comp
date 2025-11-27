@@ -1,0 +1,33 @@
+#version 450
+
+#extension GL_GOOGLE_include_directive : require
+
+/*
+ * terrain_sum_reduction.comp - Sum reduction pass
+ * Each pass combines pairs of values at level N to produce values at level N-1
+ */
+
+#define CBT_BUFFER_BINDING 0
+#include "cbt.glsl"
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(push_constant) uniform PushConstants {
+    int passID;  // Which depth level to process
+};
+
+void main() {
+    uint cnt = (1u << passID);
+    uint threadID = gl_GlobalInvocationID.x;
+
+    if (threadID < cnt) {
+        uint nodeID = threadID + cnt;
+
+        // Read left and right children
+        uint x0 = cbt_HeapRead(cbt_CreateNode_Explicit(nodeID << 1u, passID + 1));
+        uint x1 = cbt_HeapRead(cbt_CreateNode_Explicit((nodeID << 1u) | 1u, passID + 1));
+
+        // Write sum to parent
+        cbt__HeapWrite(cbt_CreateNode_Explicit(nodeID, passID), x0 + x1);
+    }
+}
