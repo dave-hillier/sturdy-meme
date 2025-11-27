@@ -34,8 +34,8 @@ This document tracks the implementation status of features described in [LIGHTIN
 
 | Feature | Doc Section | Implementation | Issue |
 |---------|-------------|----------------|-------|
-| Transmittance LUT | 4.1.3 | `src/AtmosphereLUTSystem.cpp`, `shaders/transmittance_lut.comp` | **LUT computed but NOT sampled** - sky.frag recalculates via ray marching |
-| Multi-Scatter LUT | 4.1.4 | `src/AtmosphereLUTSystem.cpp`, `shaders/multiscatter_lut.comp` | **LUT computed but NOT sampled** - approximation used instead |
+| Transmittance LUT | 4.1.3 | `src/AtmosphereLUTSystem.cpp`, `shaders/transmittance_lut.comp`, `shaders/sky.frag` | **FIXED** - LUT now sampled via `sampleTransmittanceLUT()` |
+| Multi-Scatter LUT | 4.1.4 | `src/AtmosphereLUTSystem.cpp`, `shaders/multiscatter_lut.comp`, `shaders/sky.frag` | **FIXED** - LUT now sampled via `sampleMultiScatterLUT()` |
 
 ### Not Implemented
 
@@ -44,29 +44,31 @@ This document tracks the implementation status of features described in [LIGHTIN
 | Sky-View LUT Runtime Updates | 4.1.5 | LUT exists but not updated per-frame with sun angle changes |
 | Irradiance LUTs | 4.1.9 | No separate Rayleigh/Mie irradiance textures for cloud/haze lighting |
 
-### Integration Gap: Atmosphere LUTs
+### Integration Status: Atmosphere LUTs (FIXED)
 
-The `AtmosphereLUTSystem` (`src/AtmosphereLUTSystem.h`) creates three LUTs at startup:
+The `AtmosphereLUTSystem` (`src/AtmosphereLUTSystem.h`) creates three LUTs at startup and they are now properly integrated:
 
 ```cpp
-// From Renderer.cpp:274-279
+// From Renderer.cpp - LUTs computed at startup
 atmosphereLUTSystem.computeTransmittanceLUT(cmdBuffer);
 atmosphereLUTSystem.computeMultiScatterLUT(cmdBuffer);
 atmosphereLUTSystem.computeSkyViewLUT(cmdBuffer, sunDir, glm::vec3(0.0f), 0.0f);
 ```
 
-However, `shaders/sky.frag` has **no sampler bindings** for these LUTs:
+The sky shader now has proper sampler bindings:
 
 ```glsl
-// sky.frag only has:
+// shaders/sky.frag bindings
 layout(binding = 0) uniform UniformBufferObject { ... };
-// NO: layout(binding = 1) uniform sampler2D transmittanceLUT;
-// NO: layout(binding = 2) uniform sampler2D multiScatterLUT;
+layout(binding = 1) uniform sampler2D transmittanceLUT;  // 256x64, RGBA16F
+layout(binding = 2) uniform sampler2D multiScatterLUT;   // 32x32, RG16F
 ```
 
-**Result:** The sky shader performs full ray-marching integration every frame instead of sampling pre-computed LUTs. This works correctly but is less efficient than the documented approach.
-
-**To fix:** Add sampler bindings to sky.frag and replace `computeAtmosphericTransmittance()` calls with LUT lookups.
+**Implementation details:**
+- `sampleTransmittanceLUT(r, mu)` - samples transmittance for altitude r and zenith angle mu
+- `sampleMultiScatterLUT(altitude, cosSunZenith)` - samples multi-scatter approximation
+- `getTransmittanceToSunLUT(worldPos, sunDir)` - fast path for sun visibility
+- `computeTransmittanceToLight()` now uses LUT instead of ray marching
 
 ---
 

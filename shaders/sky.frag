@@ -3,6 +3,10 @@
 const float PI = 3.14159265359;
 const int NUM_CASCADES = 4;
 
+// LUT dimensions (must match AtmosphereLUTSystem)
+const int TRANSMITTANCE_WIDTH = 256;
+const int TRANSMITTANCE_HEIGHT = 64;
+
 layout(binding = 0) uniform UniformBufferObject {
     mat4 model;
     mat4 view;
@@ -23,6 +27,10 @@ layout(binding = 0) uniform UniformBufferObject {
     float debugCascades;
     float julianDay;               // Julian day for sidereal rotation
 } ubo;
+
+// Atmosphere LUTs (Phase 4.1 - precomputed for efficiency)
+layout(binding = 1) uniform sampler2D transmittanceLUT;  // 256x64, RGBA16F
+layout(binding = 2) uniform sampler2D multiScatterLUT;   // 32x32, RG16F
 
 layout(location = 0) in vec3 rayDir;
 layout(location = 0) out vec4 outColor;
@@ -288,6 +296,74 @@ float ozoneDensity(float altitude) {
     return exp(-0.5 * z * z);
 }
 
+// ============================================================================
+// Transmittance LUT Sampling (Phase 4.1.3)
+// ============================================================================
+
+// Convert (r, mu) parameters to transmittance LUT UV coordinates
+// r = distance from planet center (in km)
+// mu = cosine of zenith angle (dot(up, direction))
+vec2 transmittanceLUTParamsToUV(float r, float mu) {
+    float H = sqrt(ATMOSPHERE_RADIUS * ATMOSPHERE_RADIUS - PLANET_RADIUS * PLANET_RADIUS);
+    float rho = sqrt(max(0.0, r * r - PLANET_RADIUS * PLANET_RADIUS));
+
+    // Distance to atmosphere boundary
+    float discriminant = r * r * (mu * mu - 1.0) + ATMOSPHERE_RADIUS * ATMOSPHERE_RADIUS;
+    float d = max(0.0, -r * mu + sqrt(max(0.0, discriminant)));
+
+    float dMin = ATMOSPHERE_RADIUS - r;
+    float dMax = rho + H;
+
+    float xMu = (d - dMin) / (dMax - dMin);
+    float xR = rho / H;
+
+    return vec2(xMu, xR);
+}
+
+// Sample transmittance LUT for a ray from altitude r with zenith angle mu
+// Returns transmittance (0-1) for each wavelength
+vec3 sampleTransmittanceLUT(float r, float mu) {
+    vec2 uv = transmittanceLUTParamsToUV(r, mu);
+    return texture(transmittanceLUT, uv).rgb;
+}
+
+// Sample transmittance from a world position toward a direction
+// worldPos should be relative to planet center (Y=0 is planet surface)
+vec3 sampleTransmittanceFromPos(vec3 worldPos, vec3 direction) {
+    float r = length(worldPos);
+    float mu = dot(normalize(worldPos), direction);
+    return sampleTransmittanceLUT(r, mu);
+}
+
+// ============================================================================
+// Multi-Scatter LUT Sampling (Phase 4.1.4)
+// ============================================================================
+
+// Sample multi-scatter LUT for second-order scattering approximation
+// altitude = height above planet surface (km)
+// cosSunZenith = cosine of angle between up and sun direction
+vec2 sampleMultiScatterLUT(float altitude, float cosSunZenith) {
+    // UV mapping: x = cosSunZenith remapped to [0,1], y = normalized altitude
+    float u = cosSunZenith * 0.5 + 0.5;
+    float v = altitude / (ATMOSPHERE_RADIUS - PLANET_RADIUS);
+    return texture(multiScatterLUT, vec2(u, v)).rg;
+}
+
+// ============================================================================
+// LUT-Based Atmospheric Transmittance
+// ============================================================================
+
+// Get transmittance from a point to the sun using LUT (fast path)
+// This replaces the expensive ray-marched computeAtmosphericTransmittance for sun visibility
+vec3 getTransmittanceToSunLUT(vec3 worldPos, vec3 sunDir) {
+    float r = length(worldPos);
+    if (r < PLANET_RADIUS) {
+        r = PLANET_RADIUS + 0.001;  // Clamp to surface
+    }
+    float mu = dot(normalize(worldPos), sunDir);
+    return sampleTransmittanceLUT(r, mu);
+}
+
 // Compute atmospheric transmittance from a point toward a light direction
 // This integrates optical depth through the atmosphere to properly attenuate direct light
 vec3 computeAtmosphericTransmittance(vec3 worldPos, vec3 lightDir, int samples) {
@@ -320,9 +396,10 @@ vec3 computeAtmosphericTransmittance(vec3 worldPos, vec3 lightDir, int samples) 
     return exp(-opticalDepth);
 }
 
-// Simplified transmittance for cloud lighting (fewer samples for performance)
+// Simplified transmittance for cloud lighting - now uses LUT for efficiency
 vec3 computeTransmittanceToLight(vec3 cloudPos, vec3 lightDir) {
-    return computeAtmosphericTransmittance(cloudPos, lightDir, 8);
+    // Use LUT-based transmittance (fast path)
+    return getTransmittanceToSunLUT(cloudPos, lightDir);
 }
 
 // Earth shadow at sunrise/sunset (Phase 4.1.8)

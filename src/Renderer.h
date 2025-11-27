@@ -136,6 +136,8 @@ private:
     bool createCommandBuffers();
     bool createSyncObjects();
     bool createDescriptorSetLayout();
+    bool createSkyDescriptorSetLayout();
+    bool createSkyDescriptorSets();
     bool createGraphicsPipeline();
     bool createSkyPipeline();
     bool createUniformBuffers();
@@ -206,6 +208,11 @@ private:
     VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
     VkPipeline graphicsPipeline = VK_NULL_HANDLE;
     VkPipeline skyPipeline = VK_NULL_HANDLE;
+
+    // Sky-specific descriptor set layout and pipeline layout (for atmosphere LUTs)
+    VkDescriptorSetLayout skyDescriptorSetLayout = VK_NULL_HANDLE;
+    VkPipelineLayout skyPipelineLayout = VK_NULL_HANDLE;
+    std::vector<VkDescriptorSet> skyDescriptorSets;
 
     GrassSystem grassSystem;
     WindSystem windSystem;

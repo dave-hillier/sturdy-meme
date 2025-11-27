@@ -112,6 +112,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     if (!postProcessSystem.init(postProcessInfo)) return false;
 
     if (!createGraphicsPipeline()) return false;
+    if (!createSkyDescriptorSetLayout()) return false;  // Create sky layout before sky pipeline
     if (!createSkyPipeline()) return false;
     if (!createShadowPipeline()) return false;
     if (!createDynamicShadowPipeline()) return false;
@@ -295,6 +296,9 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     atmosphereLUTSystem.exportLUTsAsPNG(resourcePath);
     SDL_Log("Atmosphere LUTs exported as PNG to: %s", resourcePath.c_str());
 
+    // Create sky descriptor sets now that uniform buffers and LUTs are ready
+    if (!createSkyDescriptorSets()) return false;
+
     if (!createSyncObjects()) return false;
 
     return true;
@@ -350,7 +354,9 @@ void Renderer::shutdown() {
         vkDestroyPipeline(device, skyPipeline, nullptr);
         vkDestroyPipeline(device, graphicsPipeline, nullptr);
         vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+        vkDestroyPipelineLayout(device, skyPipelineLayout, nullptr);
         vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+        vkDestroyDescriptorSetLayout(device, skyDescriptorSetLayout, nullptr);
 
         // Shadow cleanup
         if (shadowPipeline != VK_NULL_HANDLE) {
@@ -1572,6 +1578,138 @@ bool Renderer::createDescriptorSetLayout() {
     return true;
 }
 
+bool Renderer::createSkyDescriptorSetLayout() {
+    // Sky shader bindings:
+    // 0: UBO (same as main shader)
+    // 1: Transmittance LUT sampler
+    // 2: Multi-scatter LUT sampler
+
+    VkDescriptorSetLayoutBinding uboBinding{};
+    uboBinding.binding = 0;
+    uboBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    uboBinding.descriptorCount = 1;
+    uboBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    uboBinding.pImmutableSamplers = nullptr;
+
+    VkDescriptorSetLayoutBinding transmittanceLUTBinding{};
+    transmittanceLUTBinding.binding = 1;
+    transmittanceLUTBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    transmittanceLUTBinding.descriptorCount = 1;
+    transmittanceLUTBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    transmittanceLUTBinding.pImmutableSamplers = nullptr;
+
+    VkDescriptorSetLayoutBinding multiScatterLUTBinding{};
+    multiScatterLUTBinding.binding = 2;
+    multiScatterLUTBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    multiScatterLUTBinding.descriptorCount = 1;
+    multiScatterLUTBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    multiScatterLUTBinding.pImmutableSamplers = nullptr;
+
+    std::array<VkDescriptorSetLayoutBinding, 3> bindings = {
+        uboBinding, transmittanceLUTBinding, multiScatterLUTBinding
+    };
+
+    VkDescriptorSetLayoutCreateInfo layoutInfo{};
+    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
+    layoutInfo.pBindings = bindings.data();
+
+    if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &skyDescriptorSetLayout) != VK_SUCCESS) {
+        SDL_Log("Failed to create sky descriptor set layout");
+        return false;
+    }
+
+    // Create pipeline layout for sky shader
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipelineLayoutInfo.setLayoutCount = 1;
+    pipelineLayoutInfo.pSetLayouts = &skyDescriptorSetLayout;
+    pipelineLayoutInfo.pushConstantRangeCount = 0;
+    pipelineLayoutInfo.pPushConstantRanges = nullptr;
+
+    if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &skyPipelineLayout) != VK_SUCCESS) {
+        SDL_Log("Failed to create sky pipeline layout");
+        return false;
+    }
+
+    return true;
+}
+
+bool Renderer::createSkyDescriptorSets() {
+    // Allocate sky descriptor sets (one per frame in flight)
+    std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, skyDescriptorSetLayout);
+
+    VkDescriptorSetAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocInfo.descriptorPool = descriptorPool;
+    allocInfo.descriptorSetCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+    allocInfo.pSetLayouts = layouts.data();
+
+    skyDescriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
+    if (vkAllocateDescriptorSets(device, &allocInfo, skyDescriptorSets.data()) != VK_SUCCESS) {
+        SDL_Log("Failed to allocate sky descriptor sets");
+        return false;
+    }
+
+    // Get LUT views and sampler from atmosphere system
+    VkImageView transmittanceLUTView = atmosphereLUTSystem.getTransmittanceLUTView();
+    VkImageView multiScatterLUTView = atmosphereLUTSystem.getMultiScatterLUTView();
+    VkSampler lutSampler = atmosphereLUTSystem.getLUTSampler();
+
+    // Update each descriptor set
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        // UBO binding
+        VkDescriptorBufferInfo bufferInfo{};
+        bufferInfo.buffer = uniformBuffers[i];
+        bufferInfo.offset = 0;
+        bufferInfo.range = sizeof(UniformBufferObject);
+
+        // Transmittance LUT binding
+        VkDescriptorImageInfo transmittanceInfo{};
+        transmittanceInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        transmittanceInfo.imageView = transmittanceLUTView;
+        transmittanceInfo.sampler = lutSampler;
+
+        // Multi-scatter LUT binding
+        VkDescriptorImageInfo multiScatterInfo{};
+        multiScatterInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        multiScatterInfo.imageView = multiScatterLUTView;
+        multiScatterInfo.sampler = lutSampler;
+
+        std::array<VkWriteDescriptorSet, 3> descriptorWrites{};
+
+        descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[0].dstSet = skyDescriptorSets[i];
+        descriptorWrites[0].dstBinding = 0;
+        descriptorWrites[0].dstArrayElement = 0;
+        descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        descriptorWrites[0].descriptorCount = 1;
+        descriptorWrites[0].pBufferInfo = &bufferInfo;
+
+        descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[1].dstSet = skyDescriptorSets[i];
+        descriptorWrites[1].dstBinding = 1;
+        descriptorWrites[1].dstArrayElement = 0;
+        descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[1].descriptorCount = 1;
+        descriptorWrites[1].pImageInfo = &transmittanceInfo;
+
+        descriptorWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[2].dstSet = skyDescriptorSets[i];
+        descriptorWrites[2].dstBinding = 2;
+        descriptorWrites[2].dstArrayElement = 0;
+        descriptorWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[2].descriptorCount = 1;
+        descriptorWrites[2].pImageInfo = &multiScatterInfo;
+
+        vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
+                               descriptorWrites.data(), 0, nullptr);
+    }
+
+    SDL_Log("Sky descriptor sets created with atmosphere LUTs");
+    return true;
+}
+
 bool Renderer::createGraphicsPipeline() {
     auto vertShaderCode = ShaderLoader::readFile(resourcePath + "/shaders/shader.vert.spv");
     auto fragShaderCode = ShaderLoader::readFile(resourcePath + "/shaders/shader.frag.spv");
@@ -1811,7 +1949,7 @@ bool Renderer::createSkyPipeline() {
     pipelineInfo.pMultisampleState = &multisampling;
     pipelineInfo.pDepthStencilState = &depthStencil;
     pipelineInfo.pColorBlendState = &colorBlending;
-    pipelineInfo.layout = pipelineLayout;
+    pipelineInfo.layout = skyPipelineLayout;  // Use dedicated sky pipeline layout with LUT bindings
     pipelineInfo.renderPass = postProcessSystem.getHDRRenderPass();
     pipelineInfo.subpass = 0;
 
@@ -1903,9 +2041,9 @@ void Renderer::updateLightBuffer(uint32_t currentImage, const Camera& camera) {
 bool Renderer::createDescriptorPool() {
     std::array<VkDescriptorPoolSize, 3> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 12);  // +2 for post-process, +2 for grass, +4 for weather
+    poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 14);  // +2 for post-process, +2 for grass, +4 for weather, +2 for sky
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 26);  // diffuse + shadow + normal + emissive + HDR + grass + weather + dynamic point shadow + dynamic spot shadow
+    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 30);  // diffuse + shadow + normal + emissive + HDR + grass + weather + dynamic shadows + sky LUTs
     poolSizes[2].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     poolSizes[2].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 28);  // +6 grass, +6 light, +10 weather (5 compute + 2 graphics × 2 sets)
 
@@ -1913,7 +2051,7 @@ bool Renderer::createDescriptorPool() {
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
     poolInfo.pPoolSizes = poolSizes.data();
-    poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 18);  // +6 grass, +4 weather
+    poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 20);  // +6 grass, +4 weather, +2 sky
 
     if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS) {
         SDL_Log("Failed to create descriptor pool");
@@ -2477,10 +2615,10 @@ void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float gra
 
     vkCmdBeginRenderPass(cmd, &hdrPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-    // Draw sky
+    // Draw sky (with atmosphere LUT bindings)
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, skyPipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            pipelineLayout, 0, 1, &descriptorSets[frameIndex], 0, nullptr);
+                            skyPipelineLayout, 0, 1, &skyDescriptorSets[frameIndex], 0, nullptr);
     vkCmdDraw(cmd, 3, 1, 0, 0);
 
     // Draw terrain (LEB adaptive tessellation)
