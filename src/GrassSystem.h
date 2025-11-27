@@ -148,7 +148,7 @@ private:
 
     // Displacement source data for current frame
     std::vector<DisplacementSource> currentDisplacementSources;
-    float displacementDecayRate = 0.92f;   // Grass springs back over time
+    float displacementDecayRate = 0.97f;   // Grass springs back over time (slower = closer to 1.0)
     float maxDisplacement = 1.0f;          // Maximum displacement magnitude
 
     // Double-buffered storage buffers: A/B sets that alternate each frame
