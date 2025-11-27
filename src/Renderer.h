@@ -107,6 +107,9 @@ public:
     SceneManager& getSceneManager() { return sceneManager; }
     const SceneManager& getSceneManager() const { return sceneManager; }
 
+    // Player position for grass interaction (xyz = position, w = capsule radius)
+    void setPlayerPosition(const glm::vec3& position, float radius);
+
     // Celestial/astronomical settings
     void setLocation(const GeographicLocation& location) { celestialCalculator.setLocation(location); }
     const GeographicLocation& getLocation() const { return celestialCalculator.getLocation(); }
@@ -292,6 +295,10 @@ private:
     int currentDay = 21;  // Summer solstice by default
 
     bool showCascadeDebug = false;         // true = show cascade colors overlay
+
+    // Player position for grass displacement
+    glm::vec3 playerPosition = glm::vec3(0.0f);
+    float playerCapsuleRadius = 0.3f;      // Default capsule radius
 
     // Dynamic lights
     float lightCullRadius = 100.0f;        // Radius from camera for light culling

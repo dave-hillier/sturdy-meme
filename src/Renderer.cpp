@@ -220,9 +220,10 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
 
     if (!leafSystem.init(leafInfo)) return false;
 
-    // Update leaf system descriptor sets with wind buffers and terrain heightmap
+    // Update leaf system descriptor sets with wind buffers, terrain heightmap, and displacement map
     leafSystem.updateDescriptorSets(device, uniformBuffers, windBuffers,
-                                     terrainSystem.getHeightMapView(), terrainSystem.getHeightMapSampler());
+                                     terrainSystem.getHeightMapView(), terrainSystem.getHeightMapSampler(),
+                                     grassSystem.getDisplacementImageView(), grassSystem.getDisplacementSampler());
 
     // Set default leaf intensity (autumn scene)
     leafSystem.setIntensity(0.5f);
@@ -305,6 +306,11 @@ void Renderer::setWeatherIntensity(float intensity) {
 
 void Renderer::setWeatherType(uint32_t type) {
     weatherSystem.setWeatherType(type);
+}
+
+void Renderer::setPlayerPosition(const glm::vec3& position, float radius) {
+    playerPosition = position;
+    playerCapsuleRadius = radius;
 }
 
 void Renderer::shutdown() {
@@ -2176,6 +2182,7 @@ void Renderer::render(const Camera& camera) {
     const auto& terrainConfig = terrainSystem.getConfig();
     grassSystem.updateUniforms(currentFrame, camera.getPosition(), viewProj,
                                terrainConfig.size, terrainConfig.heightScale);
+    grassSystem.updateDisplacementSources(playerPosition, playerCapsuleRadius, deltaTime);
     weatherSystem.updateUniforms(currentFrame, camera.getPosition(), viewProj, deltaTime, grassTime, windSystem);
     terrainSystem.updateUniforms(currentFrame, camera.getPosition(), camera.getViewMatrix(), camera.getProjectionMatrix());
 
@@ -2197,6 +2204,9 @@ void Renderer::render(const Camera& camera) {
 
     // Terrain compute pass (adaptive subdivision)
     terrainSystem.recordCompute(cmd, currentFrame);
+
+    // Grass displacement update (player/NPC interaction)
+    grassSystem.recordDisplacementUpdate(cmd, currentFrame);
 
     // Grass compute pass
     grassSystem.recordResetAndCompute(cmd, currentFrame, grassTime);

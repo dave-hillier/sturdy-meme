@@ -26,6 +26,7 @@ layout(std430, binding = 1) buffer IndirectBuffer {
 layout(binding = 2) uniform GrassUniforms {
     vec4 cameraPosition;
     vec4 frustumPlanes[6];
+    vec4 displacementRegion;  // xy = world center, z = region size, w = texel size
     float maxDrawDistance;
     float lodTransitionStart;
     float lodTransitionEnd;
@@ -36,6 +37,9 @@ layout(binding = 2) uniform GrassUniforms {
 
 // Terrain heightmap for grass placement on terrain
 layout(binding = 3) uniform sampler2D terrainHeightMap;
+
+// Displacement map for player/NPC grass interaction (RG16F - XZ displacement)
+layout(binding = 4) uniform sampler2D displacementMap;
 
 layout(push_constant) uniform PushConstants {
     float time;
@@ -77,6 +81,32 @@ vec3 calculateTerrainNormal(vec2 uv) {
 const float CLUMP_SCALE = 2.0;          // Size of clumps in world units
 const float CLUMP_HEIGHT_INFLUENCE = 0.4;  // How much clump affects height (0-1)
 const float CLUMP_FACING_INFLUENCE = 0.3;  // How much blades face toward/away from clump center
+
+// Convert world position to displacement map UV coordinates
+vec2 worldPosToDispUV(vec2 worldPos) {
+    vec2 regionCenter = uniforms.displacementRegion.xy;
+    float regionSize = uniforms.displacementRegion.z;
+
+    // Convert world pos to UV: center of region maps to UV(0.5, 0.5)
+    vec2 offset = worldPos - regionCenter;
+    vec2 uv = offset / regionSize + 0.5;
+
+    return uv;
+}
+
+// Sample displacement from the displacement buffer texture
+// Returns: xy = displacement direction in XZ plane
+vec2 sampleDisplacement(vec2 worldPos) {
+    vec2 uv = worldPosToDispUV(worldPos);
+
+    // Check if within displacement region bounds
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+        return vec2(0.0);
+    }
+
+    // Sample displacement (RG = XZ displacement)
+    return texture(displacementMap, uv).rg;
+}
 
 // Voronoi-based clump calculation
 // Returns clumpId (0-1), clumpDistance, and clumpCenter
@@ -224,6 +254,24 @@ void main() {
     // Tilt also influenced by distance to clump center (blades closer lean more)
     float clumpTiltMod = (1.0 - clumpDist / CLUMP_SCALE) * 0.15;
     float tilt = baseTilt + clumpTiltMod;
+
+    // Apply displacement from displacement buffer (player/NPC interaction)
+    // Sample the displacement texture to get push direction
+    vec2 displacement = sampleDisplacement(vec2(x, z));
+    float dispMagnitude = length(displacement);
+
+    if (dispMagnitude > 0.01) {
+        // Normalize displacement direction
+        vec2 dispDir = displacement / dispMagnitude;
+
+        // Calculate the angle of the displacement direction
+        float dispAngle = atan(dispDir.y, dispDir.x);
+
+        // Blend facing toward displacement direction based on magnitude
+        // Stronger displacement = blade faces more in push direction
+        float facingBlend = clamp(dispMagnitude * 0.9, 0.0, 0.9);
+        facing = mix(facing, dispAngle, facingBlend);
+    }
 
     // Write instance data (clumpId stored in w for fragment shader color variation)
     instances[slot].positionAndFacing = vec4(worldPos, facing);

@@ -73,6 +73,7 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.frag.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass_displacement.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.frag.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass_shadow.vert.spv
@@ -159,6 +160,12 @@ if(SHADER_COMPILE_CMD)
         COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.comp
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.comp
         COMMENT "Compiling grass compute shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass_displacement.comp.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass_displacement.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass_displacement.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass_displacement.comp
+        COMMENT "Compiling grass displacement compute shader"
     )
     add_custom_command(
         OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.vert.spv
@@ -342,6 +349,7 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.frag.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass_displacement.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.frag.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass_shadow.vert.spv
