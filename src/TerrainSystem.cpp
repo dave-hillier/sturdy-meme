@@ -236,12 +236,12 @@ namespace {
 }
 
 bool TerrainSystem::initializeCBT() {
-    // Initialize CBT with 2 root triangles covering the terrain quad
+    // Initialize CBT with triangles covering the terrain quad
     // Following libcbt's cbt_ResetToDepth pattern
 
     std::vector<uint32_t> initData(cbtBufferSize / sizeof(uint32_t), 0);
     int maxDepth = config.maxDepth;
-    int initDepth = 1;  // Start with 2 triangles at depth 1
+    int initDepth = 6;  // Start with more triangles for initial coverage (2^6 = 64 triangles)
 
     // heap[0] stores (1 << maxDepth) as a marker for the max depth
     initData[0] = (1u << maxDepth);
@@ -884,8 +884,8 @@ bool TerrainSystem::createRenderPipeline() {
     rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
     rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
     rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_NONE;  // DEBUG: disabled culling
-    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+    rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
 
     VkPipelineMultisampleStateCreateInfo multisampling{};
     multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
