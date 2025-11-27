@@ -61,6 +61,10 @@ public:
     static constexpr uint32_t MULTISCATTER_SIZE = 32;
     static constexpr uint32_t SKYVIEW_WIDTH = 192;
     static constexpr uint32_t SKYVIEW_HEIGHT = 108;
+    // Irradiance LUT dimensions (Phase 4.1.9)
+    // Indexed by: altitude (Y) and sun zenith cosine (X)
+    static constexpr uint32_t IRRADIANCE_WIDTH = 64;   // cos(sun zenith)
+    static constexpr uint32_t IRRADIANCE_HEIGHT = 16;  // altitude
 
     AtmosphereLUTSystem() = default;
     ~AtmosphereLUTSystem() = default;
@@ -71,6 +75,7 @@ public:
     // Compute LUTs (called at startup and when atmosphere parameters change)
     void computeTransmittanceLUT(VkCommandBuffer cmd);
     void computeMultiScatterLUT(VkCommandBuffer cmd);
+    void computeIrradianceLUT(VkCommandBuffer cmd);
     void computeSkyViewLUT(VkCommandBuffer cmd, const glm::vec3& sunDir, const glm::vec3& cameraPos, float cameraAltitude);
 
     // Update sky-view LUT per frame (uses SHADER_READ_ONLY_OPTIMAL as old layout since LUT was already computed)
@@ -80,6 +85,8 @@ public:
     VkImageView getTransmittanceLUTView() const { return transmittanceLUTView; }
     VkImageView getMultiScatterLUTView() const { return multiScatterLUTView; }
     VkImageView getSkyViewLUTView() const { return skyViewLUTView; }
+    VkImageView getRayleighIrradianceLUTView() const { return rayleighIrradianceLUTView; }
+    VkImageView getMieIrradianceLUTView() const { return mieIrradianceLUTView; }
     VkSampler getLUTSampler() const { return lutSampler; }
 
     // Export LUTs as PNG files (for debugging/visualization)
@@ -93,6 +100,7 @@ private:
     bool createTransmittanceLUT();
     bool createMultiScatterLUT();
     bool createSkyViewLUT();
+    bool createIrradianceLUTs();
     bool createLUTSampler();
     bool createDescriptorSetLayouts();
     bool createDescriptorSets();
@@ -125,6 +133,18 @@ private:
     VmaAllocation skyViewLUTAllocation = VK_NULL_HANDLE;
     VkImageView skyViewLUTView = VK_NULL_HANDLE;
 
+    // Rayleigh Irradiance LUT (64×16, RGBA16F) - Phase 4.1.9
+    // Stores scattered Rayleigh light *before* phase function multiplication
+    VkImage rayleighIrradianceLUT = VK_NULL_HANDLE;
+    VmaAllocation rayleighIrradianceLUTAllocation = VK_NULL_HANDLE;
+    VkImageView rayleighIrradianceLUTView = VK_NULL_HANDLE;
+
+    // Mie Irradiance LUT (64×16, RGBA16F) - Phase 4.1.9
+    // Stores scattered Mie light *before* phase function multiplication
+    VkImage mieIrradianceLUT = VK_NULL_HANDLE;
+    VmaAllocation mieIrradianceLUTAllocation = VK_NULL_HANDLE;
+    VkImageView mieIrradianceLUTView = VK_NULL_HANDLE;
+
     // LUT sampler (bilinear filtering, clamp to edge)
     VkSampler lutSampler = VK_NULL_HANDLE;
 
@@ -132,18 +152,22 @@ private:
     VkDescriptorSetLayout transmittanceDescriptorSetLayout = VK_NULL_HANDLE;
     VkDescriptorSetLayout multiScatterDescriptorSetLayout = VK_NULL_HANDLE;
     VkDescriptorSetLayout skyViewDescriptorSetLayout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout irradianceDescriptorSetLayout = VK_NULL_HANDLE;
 
     VkPipelineLayout transmittancePipelineLayout = VK_NULL_HANDLE;
     VkPipelineLayout multiScatterPipelineLayout = VK_NULL_HANDLE;
     VkPipelineLayout skyViewPipelineLayout = VK_NULL_HANDLE;
+    VkPipelineLayout irradiancePipelineLayout = VK_NULL_HANDLE;
 
     VkPipeline transmittancePipeline = VK_NULL_HANDLE;
     VkPipeline multiScatterPipeline = VK_NULL_HANDLE;
     VkPipeline skyViewPipeline = VK_NULL_HANDLE;
+    VkPipeline irradiancePipeline = VK_NULL_HANDLE;
 
     VkDescriptorSet transmittanceDescriptorSet = VK_NULL_HANDLE;
     VkDescriptorSet multiScatterDescriptorSet = VK_NULL_HANDLE;
     VkDescriptorSet skyViewDescriptorSet = VK_NULL_HANDLE;
+    VkDescriptorSet irradianceDescriptorSet = VK_NULL_HANDLE;
 
     // Uniform buffer
     VkBuffer uniformBuffer = VK_NULL_HANDLE;

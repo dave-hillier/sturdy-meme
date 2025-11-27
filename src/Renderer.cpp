@@ -279,6 +279,8 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     // Compute transmittance and multi-scatter LUTs (once at startup)
     atmosphereLUTSystem.computeTransmittanceLUT(cmdBuffer);
     atmosphereLUTSystem.computeMultiScatterLUT(cmdBuffer);
+    // Compute irradiance LUTs after transmittance (Phase 4.1.9)
+    atmosphereLUTSystem.computeIrradianceLUT(cmdBuffer);
 
     // Compute sky-view LUT for current sun direction
     glm::vec3 sunDir = glm::vec3(0.0f, 0.707f, 0.707f);  // Default 45 degree sun
@@ -1589,6 +1591,8 @@ bool Renderer::createSkyDescriptorSetLayout() {
     // 1: Transmittance LUT sampler
     // 2: Multi-scatter LUT sampler
     // 3: Sky-view LUT sampler (updated per-frame)
+    // 4: Rayleigh Irradiance LUT sampler (Phase 4.1.9)
+    // 5: Mie Irradiance LUT sampler (Phase 4.1.9)
 
     VkDescriptorSetLayoutBinding uboBinding{};
     uboBinding.binding = 0;
@@ -1618,8 +1622,23 @@ bool Renderer::createSkyDescriptorSetLayout() {
     skyViewLUTBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     skyViewLUTBinding.pImmutableSamplers = nullptr;
 
-    std::array<VkDescriptorSetLayoutBinding, 4> bindings = {
-        uboBinding, transmittanceLUTBinding, multiScatterLUTBinding, skyViewLUTBinding
+    VkDescriptorSetLayoutBinding rayleighIrradianceLUTBinding{};
+    rayleighIrradianceLUTBinding.binding = 4;
+    rayleighIrradianceLUTBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    rayleighIrradianceLUTBinding.descriptorCount = 1;
+    rayleighIrradianceLUTBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    rayleighIrradianceLUTBinding.pImmutableSamplers = nullptr;
+
+    VkDescriptorSetLayoutBinding mieIrradianceLUTBinding{};
+    mieIrradianceLUTBinding.binding = 5;
+    mieIrradianceLUTBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    mieIrradianceLUTBinding.descriptorCount = 1;
+    mieIrradianceLUTBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    mieIrradianceLUTBinding.pImmutableSamplers = nullptr;
+
+    std::array<VkDescriptorSetLayoutBinding, 6> bindings = {
+        uboBinding, transmittanceLUTBinding, multiScatterLUTBinding, skyViewLUTBinding,
+        rayleighIrradianceLUTBinding, mieIrradianceLUTBinding
     };
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
@@ -1668,6 +1687,8 @@ bool Renderer::createSkyDescriptorSets() {
     VkImageView transmittanceLUTView = atmosphereLUTSystem.getTransmittanceLUTView();
     VkImageView multiScatterLUTView = atmosphereLUTSystem.getMultiScatterLUTView();
     VkImageView skyViewLUTView = atmosphereLUTSystem.getSkyViewLUTView();
+    VkImageView rayleighIrradianceLUTView = atmosphereLUTSystem.getRayleighIrradianceLUTView();
+    VkImageView mieIrradianceLUTView = atmosphereLUTSystem.getMieIrradianceLUTView();
     VkSampler lutSampler = atmosphereLUTSystem.getLUTSampler();
 
     // Update each descriptor set
@@ -1696,7 +1717,19 @@ bool Renderer::createSkyDescriptorSets() {
         skyViewInfo.imageView = skyViewLUTView;
         skyViewInfo.sampler = lutSampler;
 
-        std::array<VkWriteDescriptorSet, 4> descriptorWrites{};
+        // Rayleigh Irradiance LUT binding (Phase 4.1.9)
+        VkDescriptorImageInfo rayleighIrradianceInfo{};
+        rayleighIrradianceInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        rayleighIrradianceInfo.imageView = rayleighIrradianceLUTView;
+        rayleighIrradianceInfo.sampler = lutSampler;
+
+        // Mie Irradiance LUT binding (Phase 4.1.9)
+        VkDescriptorImageInfo mieIrradianceInfo{};
+        mieIrradianceInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        mieIrradianceInfo.imageView = mieIrradianceLUTView;
+        mieIrradianceInfo.sampler = lutSampler;
+
+        std::array<VkWriteDescriptorSet, 6> descriptorWrites{};
 
         descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         descriptorWrites[0].dstSet = skyDescriptorSets[i];
@@ -1730,11 +1763,27 @@ bool Renderer::createSkyDescriptorSets() {
         descriptorWrites[3].descriptorCount = 1;
         descriptorWrites[3].pImageInfo = &skyViewInfo;
 
+        descriptorWrites[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[4].dstSet = skyDescriptorSets[i];
+        descriptorWrites[4].dstBinding = 4;
+        descriptorWrites[4].dstArrayElement = 0;
+        descriptorWrites[4].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[4].descriptorCount = 1;
+        descriptorWrites[4].pImageInfo = &rayleighIrradianceInfo;
+
+        descriptorWrites[5].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[5].dstSet = skyDescriptorSets[i];
+        descriptorWrites[5].dstBinding = 5;
+        descriptorWrites[5].dstArrayElement = 0;
+        descriptorWrites[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[5].descriptorCount = 1;
+        descriptorWrites[5].pImageInfo = &mieIrradianceInfo;
+
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                descriptorWrites.data(), 0, nullptr);
     }
 
-    SDL_Log("Sky descriptor sets created with atmosphere LUTs (including sky-view)");
+    SDL_Log("Sky descriptor sets created with atmosphere LUTs (including irradiance LUTs)");
     return true;
 }
 

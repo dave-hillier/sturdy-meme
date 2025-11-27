@@ -32,6 +32,9 @@ layout(binding = 0) uniform UniformBufferObject {
 layout(binding = 1) uniform sampler2D transmittanceLUT;  // 256x64, RGBA16F
 layout(binding = 2) uniform sampler2D multiScatterLUT;   // 32x32, RG16F
 layout(binding = 3) uniform sampler2D skyViewLUT;        // 192x108, RGBA16F (updated per-frame)
+// Irradiance LUTs for cloud/haze lighting (Phase 4.1.9)
+layout(binding = 4) uniform sampler2D rayleighIrradianceLUT;  // 64x16, RGBA16F
+layout(binding = 5) uniform sampler2D mieIrradianceLUT;       // 64x16, RGBA16F
 
 layout(location = 0) in vec3 rayDir;
 layout(location = 0) out vec4 outColor;
@@ -92,6 +95,10 @@ const int CLOUD_LIGHT_STEPS = 6;          // Light sampling steps
 // Sky-view LUT dimensions (must match AtmosphereLUTSystem)
 const int SKYVIEW_WIDTH = 192;
 const int SKYVIEW_HEIGHT = 108;
+
+// Irradiance LUT dimensions (Phase 4.1.9)
+const int IRRADIANCE_WIDTH = 64;
+const int IRRADIANCE_HEIGHT = 16;
 
 // Convert view direction to sky-view LUT UV coordinates
 // This is the inverse of SkyViewUVToDirection in skyview_lut.comp
@@ -385,6 +392,53 @@ vec2 sampleMultiScatterLUT(float altitude, float cosSunZenith) {
 }
 
 // ============================================================================
+// Irradiance LUT Sampling (Phase 4.1.9)
+// ============================================================================
+
+// Encode altitude and sun zenith angle to irradiance LUT UV
+vec2 irradianceLUTParamsToUV(float altitude, float cosSunZenith) {
+    // UV mapping: x = cosSunZenith remapped from [-1,1] to [0,1]
+    //             y = normalized altitude [0, atmosphere height]
+    float u = cosSunZenith * 0.5 + 0.5;
+    float v = clamp(altitude / (ATMOSPHERE_RADIUS - PLANET_RADIUS), 0.0, 1.0);
+    return vec2(u, v);
+}
+
+// Sample atmospheric irradiance for lighting clouds and haze
+// Returns separate Rayleigh and Mie irradiance (without phase function)
+// This allows clouds to apply their own phase function when using the irradiance
+struct AtmosphericIrradiance {
+    vec3 rayleigh;  // Rayleigh scattered irradiance
+    vec3 mie;       // Mie scattered irradiance
+};
+
+AtmosphericIrradiance sampleAtmosphericIrradiance(vec3 worldPos, vec3 sunDir) {
+    AtmosphericIrradiance result;
+
+    float altitude = max(length(worldPos) - PLANET_RADIUS, 0.0);
+    float cosSunZenith = dot(normalize(worldPos), sunDir);
+
+    vec2 uv = irradianceLUTParamsToUV(altitude, cosSunZenith);
+
+    result.rayleigh = texture(rayleighIrradianceLUT, uv).rgb;
+    result.mie = texture(mieIrradianceLUT, uv).rgb;
+
+    return result;
+}
+
+// Combined irradiance with phase functions applied
+// Use Rayleigh phase for diffuse ambient, Mie phase for specular highlights
+vec3 sampleAtmosphericIrradianceWithPhase(vec3 worldPos, vec3 sunDir, vec3 viewDir, float mieG) {
+    AtmosphericIrradiance irr = sampleAtmosphericIrradiance(worldPos, sunDir);
+
+    float cosTheta = dot(viewDir, sunDir);
+    float rayleighP = rayleighPhase(cosTheta);
+    float mieP = cornetteShanksPhase(cosTheta, mieG);
+
+    return irr.rayleigh * rayleighP + irr.mie * mieP;
+}
+
+// ============================================================================
 // LUT-Based Atmospheric Transmittance
 // ============================================================================
 
@@ -582,8 +636,8 @@ ScatteringResult integrateAtmosphere(vec3 origin, vec3 dir, int sampleCount) {
     return ScatteringResult(inscatter, transmittance);
 }
 
-// Compute sky irradiance by sampling the atmosphere in multiple directions
-// This replaces hardcoded ambient colors with physically-based values
+// Compute sky irradiance using precomputed irradiance LUTs (Phase 4.1.9)
+// Much faster than the previous hemisphere sampling approach
 struct SkyIrradiance {
     vec3 skyIrradiance;     // Hemisphere irradiance from sky
     vec3 groundIrradiance;  // Ground bounce irradiance (for cloud undersides)
@@ -596,51 +650,29 @@ SkyIrradiance computeSkyIrradiance(vec3 position, vec3 sunDir, vec3 moonDir,
     result.skyIrradiance = vec3(0.0);
     result.groundIrradiance = vec3(0.0);
 
-    // Sample directions for hemisphere integration (cosine-weighted)
-    // Using 6 directions for performance (up, and 5 around horizon)
-    const int NUM_SAMPLES = 6;
-    vec3 sampleDirs[NUM_SAMPLES];
-    sampleDirs[0] = vec3(0.0, 1.0, 0.0);    // Zenith
-    sampleDirs[1] = vec3(1.0, 0.3, 0.0);    // East elevated
-    sampleDirs[2] = vec3(-1.0, 0.3, 0.0);   // West elevated
-    sampleDirs[3] = vec3(0.0, 0.3, 1.0);    // North elevated
-    sampleDirs[4] = vec3(0.0, 0.3, -1.0);   // South elevated
-    sampleDirs[5] = vec3(0.707, 0.1, 0.707); // Horizon diagonal
+    // Sample irradiance LUTs for this position (Phase 4.1.9)
+    // These LUTs store precomputed Rayleigh and Mie scattered irradiance
+    AtmosphericIrradiance irr = sampleAtmosphericIrradiance(position, sunDir);
 
-    float weights[NUM_SAMPLES];
-    weights[0] = 0.30;  // Zenith has highest weight
-    weights[1] = 0.14;
-    weights[2] = 0.14;
-    weights[3] = 0.14;
-    weights[4] = 0.14;
-    weights[5] = 0.14;
+    // For hemisphere irradiance, use isotropic phase (averaged over all view directions)
+    // Rayleigh isotropic: integrate RayleighPhase over sphere = 1/(4*PI) * 4*PI = 1
+    // Mie isotropic: for g=0.8, integrate HG over sphere ≈ 0.25 (heavily forward-peaked)
+    const float RAYLEIGH_ISO = 1.0;
+    const float MIE_ISO = 0.25;
 
-    float totalWeight = 0.0;
+    // Sun contribution to sky irradiance
+    result.skyIrradiance = sunLight * (irr.rayleigh * RAYLEIGH_ISO + irr.mie * MIE_ISO);
 
-    for (int i = 0; i < NUM_SAMPLES; i++) {
-        vec3 dir = normalize(sampleDirs[i]);
-
-        // Simple atmospheric scattering sample (reduced quality for irradiance)
-        ScatteringResult scatter = integrateAtmosphere(position, dir, 8);
-
-        // Apply sun and moon light
-        vec3 skyColor = scatter.inscatter * sunLight;
-        if (moonContribution > 0.01) {
-            skyColor += scatter.inscatter * moonLight * 0.5 * moonContribution;
-        }
-
-        // Night minimum to prevent total darkness
-        float night = 1.0 - smoothstep(-0.05, 0.08, sunAltitude);
-        skyColor += night * vec3(0.01, 0.015, 0.03);
-
-        // Weight by cosine and sample weight
-        float cosWeight = max(dir.y, 0.0);
-        float weight = weights[i] * (0.2 + 0.8 * cosWeight);
-        result.skyIrradiance += skyColor * weight;
-        totalWeight += weight;
+    // Moon contribution - use same LUT approach but with reduced intensity
+    if (moonContribution > 0.01) {
+        AtmosphericIrradiance moonIrr = sampleAtmosphericIrradiance(position, moonDir);
+        result.skyIrradiance += moonLight * (moonIrr.rayleigh * RAYLEIGH_ISO + moonIrr.mie * MIE_ISO) *
+                                0.5 * moonContribution;
     }
 
-    result.skyIrradiance /= totalWeight;
+    // Night sky floor to prevent total darkness
+    float night = 1.0 - smoothstep(-0.05, 0.08, sunAltitude);
+    result.skyIrradiance += night * vec3(0.01, 0.015, 0.03);
 
     // Compute ground bounce from transmittance toward ground
     // Ground reflects sunlight with albedo ~0.2 (typical terrain)

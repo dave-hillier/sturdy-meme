@@ -18,6 +18,7 @@ bool AtmosphereLUTSystem::init(const InitInfo& info) {
     if (!createTransmittanceLUT()) return false;
     if (!createMultiScatterLUT()) return false;
     if (!createSkyViewLUT()) return false;
+    if (!createIrradianceLUTs()) return false;
     if (!createLUTSampler()) return false;
     if (!createUniformBuffer()) return false;
     if (!createDescriptorSetLayouts()) return false;
@@ -48,6 +49,10 @@ void AtmosphereLUTSystem::destroy(VkDevice device, VmaAllocator allocator) {
         vkDestroyPipeline(device, skyViewPipeline, nullptr);
         skyViewPipeline = VK_NULL_HANDLE;
     }
+    if (irradiancePipeline != VK_NULL_HANDLE) {
+        vkDestroyPipeline(device, irradiancePipeline, nullptr);
+        irradiancePipeline = VK_NULL_HANDLE;
+    }
 
     if (transmittancePipelineLayout != VK_NULL_HANDLE) {
         vkDestroyPipelineLayout(device, transmittancePipelineLayout, nullptr);
@@ -61,6 +66,10 @@ void AtmosphereLUTSystem::destroy(VkDevice device, VmaAllocator allocator) {
         vkDestroyPipelineLayout(device, skyViewPipelineLayout, nullptr);
         skyViewPipelineLayout = VK_NULL_HANDLE;
     }
+    if (irradiancePipelineLayout != VK_NULL_HANDLE) {
+        vkDestroyPipelineLayout(device, irradiancePipelineLayout, nullptr);
+        irradiancePipelineLayout = VK_NULL_HANDLE;
+    }
 
     if (transmittanceDescriptorSetLayout != VK_NULL_HANDLE) {
         vkDestroyDescriptorSetLayout(device, transmittanceDescriptorSetLayout, nullptr);
@@ -73,6 +82,10 @@ void AtmosphereLUTSystem::destroy(VkDevice device, VmaAllocator allocator) {
     if (skyViewDescriptorSetLayout != VK_NULL_HANDLE) {
         vkDestroyDescriptorSetLayout(device, skyViewDescriptorSetLayout, nullptr);
         skyViewDescriptorSetLayout = VK_NULL_HANDLE;
+    }
+    if (irradianceDescriptorSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(device, irradianceDescriptorSetLayout, nullptr);
+        irradianceDescriptorSetLayout = VK_NULL_HANDLE;
     }
 
     if (lutSampler != VK_NULL_HANDLE) {
@@ -107,6 +120,24 @@ void AtmosphereLUTSystem::destroyLUTResources() {
     if (skyViewLUT != VK_NULL_HANDLE) {
         vmaDestroyImage(allocator, skyViewLUT, skyViewLUTAllocation);
         skyViewLUT = VK_NULL_HANDLE;
+    }
+
+    if (rayleighIrradianceLUTView != VK_NULL_HANDLE) {
+        vkDestroyImageView(device, rayleighIrradianceLUTView, nullptr);
+        rayleighIrradianceLUTView = VK_NULL_HANDLE;
+    }
+    if (rayleighIrradianceLUT != VK_NULL_HANDLE) {
+        vmaDestroyImage(allocator, rayleighIrradianceLUT, rayleighIrradianceLUTAllocation);
+        rayleighIrradianceLUT = VK_NULL_HANDLE;
+    }
+
+    if (mieIrradianceLUTView != VK_NULL_HANDLE) {
+        vkDestroyImageView(device, mieIrradianceLUTView, nullptr);
+        mieIrradianceLUTView = VK_NULL_HANDLE;
+    }
+    if (mieIrradianceLUT != VK_NULL_HANDLE) {
+        vmaDestroyImage(allocator, mieIrradianceLUT, mieIrradianceLUTAllocation);
+        mieIrradianceLUT = VK_NULL_HANDLE;
     }
 }
 
@@ -230,6 +261,62 @@ bool AtmosphereLUTSystem::createSkyViewLUT() {
 
     if (vkCreateImageView(device, &viewInfo, nullptr, &skyViewLUTView) != VK_SUCCESS) {
         SDL_Log("Failed to create sky-view LUT view");
+        return false;
+    }
+
+    return true;
+}
+
+bool AtmosphereLUTSystem::createIrradianceLUTs() {
+    // Create Rayleigh Irradiance LUT (64×16, RGBA16F)
+    VkImageCreateInfo imageInfo{};
+    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    imageInfo.imageType = VK_IMAGE_TYPE_2D;
+    imageInfo.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    imageInfo.extent = {IRRADIANCE_WIDTH, IRRADIANCE_HEIGHT, 1};
+    imageInfo.mipLevels = 1;
+    imageInfo.arrayLayers = 1;
+    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imageInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+
+    if (vmaCreateImage(allocator, &imageInfo, &allocInfo,
+                       &rayleighIrradianceLUT, &rayleighIrradianceLUTAllocation, nullptr) != VK_SUCCESS) {
+        SDL_Log("Failed to create Rayleigh irradiance LUT");
+        return false;
+    }
+
+    VkImageViewCreateInfo viewInfo{};
+    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewInfo.image = rayleighIrradianceLUT;
+    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.subresourceRange.baseMipLevel = 0;
+    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.baseArrayLayer = 0;
+    viewInfo.subresourceRange.layerCount = 1;
+
+    if (vkCreateImageView(device, &viewInfo, nullptr, &rayleighIrradianceLUTView) != VK_SUCCESS) {
+        SDL_Log("Failed to create Rayleigh irradiance LUT view");
+        return false;
+    }
+
+    // Create Mie Irradiance LUT (same dimensions and format)
+    if (vmaCreateImage(allocator, &imageInfo, &allocInfo,
+                       &mieIrradianceLUT, &mieIrradianceLUTAllocation, nullptr) != VK_SUCCESS) {
+        SDL_Log("Failed to create Mie irradiance LUT");
+        return false;
+    }
+
+    viewInfo.image = mieIrradianceLUT;
+    if (vkCreateImageView(device, &viewInfo, nullptr, &mieIrradianceLUTView) != VK_SUCCESS) {
+        SDL_Log("Failed to create Mie irradiance LUT view");
         return false;
     }
 
@@ -401,6 +488,52 @@ bool AtmosphereLUTSystem::createDescriptorSetLayouts() {
 
         if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &skyViewPipelineLayout) != VK_SUCCESS) {
             SDL_Log("Failed to create sky-view pipeline layout");
+            return false;
+        }
+    }
+
+    // Irradiance LUT descriptor set layout (Phase 4.1.9)
+    // Two output images (Rayleigh and Mie), transmittance input, uniform buffer
+    {
+        std::array<VkDescriptorSetLayoutBinding, 4> bindings{};
+
+        bindings[0].binding = 0;
+        bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        bindings[0].descriptorCount = 1;
+        bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+        bindings[1].binding = 1;
+        bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        bindings[1].descriptorCount = 1;
+        bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+        bindings[2].binding = 2;
+        bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        bindings[2].descriptorCount = 1;
+        bindings[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+        bindings[3].binding = 3;
+        bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        bindings[3].descriptorCount = 1;
+        bindings[3].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+        VkDescriptorSetLayoutCreateInfo layoutInfo{};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
+        layoutInfo.pBindings = bindings.data();
+
+        if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &irradianceDescriptorSetLayout) != VK_SUCCESS) {
+            SDL_Log("Failed to create irradiance descriptor set layout");
+            return false;
+        }
+
+        VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+        pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        pipelineLayoutInfo.setLayoutCount = 1;
+        pipelineLayoutInfo.pSetLayouts = &irradianceDescriptorSetLayout;
+
+        if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &irradiancePipelineLayout) != VK_SUCCESS) {
+            SDL_Log("Failed to create irradiance pipeline layout");
             return false;
         }
     }
@@ -577,6 +710,74 @@ bool AtmosphereLUTSystem::createDescriptorSets() {
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
     }
 
+    // Allocate irradiance descriptor set
+    {
+        VkDescriptorSetAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        allocInfo.descriptorPool = descriptorPool;
+        allocInfo.descriptorSetCount = 1;
+        allocInfo.pSetLayouts = &irradianceDescriptorSetLayout;
+
+        if (vkAllocateDescriptorSets(device, &allocInfo, &irradianceDescriptorSet) != VK_SUCCESS) {
+            SDL_Log("Failed to allocate irradiance descriptor set");
+            return false;
+        }
+
+        std::array<VkWriteDescriptorSet, 4> writes{};
+
+        VkDescriptorImageInfo rayleighImageInfo{};
+        rayleighImageInfo.imageView = rayleighIrradianceLUTView;
+        rayleighImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+        writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[0].dstSet = irradianceDescriptorSet;
+        writes[0].dstBinding = 0;
+        writes[0].dstArrayElement = 0;
+        writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        writes[0].descriptorCount = 1;
+        writes[0].pImageInfo = &rayleighImageInfo;
+
+        VkDescriptorImageInfo mieImageInfo{};
+        mieImageInfo.imageView = mieIrradianceLUTView;
+        mieImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+        writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[1].dstSet = irradianceDescriptorSet;
+        writes[1].dstBinding = 1;
+        writes[1].dstArrayElement = 0;
+        writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        writes[1].descriptorCount = 1;
+        writes[1].pImageInfo = &mieImageInfo;
+
+        VkDescriptorImageInfo transmittanceImageInfo{};
+        transmittanceImageInfo.imageView = transmittanceLUTView;
+        transmittanceImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        transmittanceImageInfo.sampler = lutSampler;
+
+        writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[2].dstSet = irradianceDescriptorSet;
+        writes[2].dstBinding = 2;
+        writes[2].dstArrayElement = 0;
+        writes[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        writes[2].descriptorCount = 1;
+        writes[2].pImageInfo = &transmittanceImageInfo;
+
+        VkDescriptorBufferInfo bufferInfo{};
+        bufferInfo.buffer = uniformBuffer;
+        bufferInfo.offset = 0;
+        bufferInfo.range = sizeof(AtmosphereLUTUniforms);
+
+        writes[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[3].dstSet = irradianceDescriptorSet;
+        writes[3].dstBinding = 3;
+        writes[3].dstArrayElement = 0;
+        writes[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        writes[3].descriptorCount = 1;
+        writes[3].pBufferInfo = &bufferInfo;
+
+        vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+    }
+
     return true;
 }
 
@@ -689,6 +890,42 @@ bool AtmosphereLUTSystem::createComputePipelines() {
         vkDestroyShaderModule(device, shaderModule, nullptr);
     }
 
+    // Create irradiance pipeline
+    {
+        std::string shaderFile = shaderPath + "/irradiance_lut.comp.spv";
+        std::vector<char> shaderCode = ShaderLoader::readFile(shaderFile);
+
+        VkShaderModuleCreateInfo createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+        createInfo.codeSize = shaderCode.size();
+        createInfo.pCode = reinterpret_cast<const uint32_t*>(shaderCode.data());
+
+        VkShaderModule shaderModule;
+        if (vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
+            SDL_Log("Failed to create irradiance shader module");
+            return false;
+        }
+
+        VkPipelineShaderStageCreateInfo shaderStageInfo{};
+        shaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        shaderStageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+        shaderStageInfo.module = shaderModule;
+        shaderStageInfo.pName = "main";
+
+        VkComputePipelineCreateInfo pipelineInfo{};
+        pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+        pipelineInfo.stage = shaderStageInfo;
+        pipelineInfo.layout = irradiancePipelineLayout;
+
+        if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &irradiancePipeline) != VK_SUCCESS) {
+            SDL_Log("Failed to create irradiance pipeline");
+            vkDestroyShaderModule(device, shaderModule, nullptr);
+            return false;
+        }
+
+        vkDestroyShaderModule(device, shaderModule, nullptr);
+    }
+
     return true;
 }
 
@@ -782,6 +1019,60 @@ void AtmosphereLUTSystem::computeMultiScatterLUT(VkCommandBuffer cmd) {
                          0, 0, nullptr, 0, nullptr, 1, &barrier);
 
     SDL_Log("Computed multi-scatter LUT (%dx%d)", MULTISCATTER_SIZE, MULTISCATTER_SIZE);
+}
+
+void AtmosphereLUTSystem::computeIrradianceLUT(VkCommandBuffer cmd) {
+    // Update uniform buffer with atmosphere params
+    AtmosphereLUTUniforms uniforms{};
+    uniforms.params = atmosphereParams;
+    memcpy(uniformMappedPtr, &uniforms, sizeof(AtmosphereLUTUniforms));
+
+    // Transition both irradiance LUTs to GENERAL layout for compute write
+    std::array<VkImageMemoryBarrier, 2> barriers{};
+
+    barriers[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barriers[0].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barriers[0].newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    barriers[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barriers[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barriers[0].image = rayleighIrradianceLUT;
+    barriers[0].subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barriers[0].subresourceRange.baseMipLevel = 0;
+    barriers[0].subresourceRange.levelCount = 1;
+    barriers[0].subresourceRange.baseArrayLayer = 0;
+    barriers[0].subresourceRange.layerCount = 1;
+    barriers[0].srcAccessMask = 0;
+    barriers[0].dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+
+    barriers[1] = barriers[0];
+    barriers[1].image = mieIrradianceLUT;
+
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         0, 0, nullptr, 0, nullptr, static_cast<uint32_t>(barriers.size()), barriers.data());
+
+    // Bind pipeline and dispatch
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, irradiancePipeline);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, irradiancePipelineLayout,
+                           0, 1, &irradianceDescriptorSet, 0, nullptr);
+
+    uint32_t groupCountX = (IRRADIANCE_WIDTH + 7) / 8;
+    uint32_t groupCountY = (IRRADIANCE_HEIGHT + 7) / 8;
+    vkCmdDispatch(cmd, groupCountX, groupCountY, 1);
+
+    // Transition both LUTs to SHADER_READ for sampling
+    barriers[0].oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    barriers[0].newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barriers[0].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    barriers[0].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    barriers[0].image = rayleighIrradianceLUT;
+
+    barriers[1] = barriers[0];
+    barriers[1].image = mieIrradianceLUT;
+
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                         0, 0, nullptr, 0, nullptr, static_cast<uint32_t>(barriers.size()), barriers.data());
+
+    SDL_Log("Computed irradiance LUTs (%dx%d)", IRRADIANCE_WIDTH, IRRADIANCE_HEIGHT);
 }
 
 void AtmosphereLUTSystem::computeSkyViewLUT(VkCommandBuffer cmd, const glm::vec3& sunDir,
