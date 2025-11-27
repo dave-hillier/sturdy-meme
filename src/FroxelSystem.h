@@ -65,6 +65,7 @@ public:
 
     // Get the scattering volume for compositing
     VkImageView getScatteringVolumeView() const { return scatteringVolumeView; }
+    VkImageView getIntegratedVolumeView() const { return integratedVolumeView; }
     VkSampler getVolumeSampler() const { return volumeSampler; }
 
     // Fog parameters
