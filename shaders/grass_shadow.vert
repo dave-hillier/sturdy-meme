@@ -26,6 +26,7 @@ layout(binding = 0) uniform UniformBufferObject {
 struct GrassInstance {
     vec4 positionAndFacing;  // xyz = position, w = facing angle
     vec4 heightHashTilt;     // x = height, y = hash, z = tilt, w = clumpId
+    vec4 terrainNormal;      // xyz = terrain normal (for tangent alignment), w = unused
 };
 
 layout(std430, binding = 1) readonly buffer InstanceBuffer {
@@ -155,6 +156,24 @@ vec3 bezier(vec3 p0, vec3 p1, vec3 p2, float t) {
     return u * u * p0 + 2.0 * u * t * p1 + t * t * p2;
 }
 
+// Build orthonormal basis from terrain normal (same as grass.vert)
+void buildTerrainBasis(vec3 N, float facing, out vec3 T, out vec3 B) {
+    vec3 up = vec3(0.0, 1.0, 0.0);
+    vec3 right = vec3(1.0, 0.0, 0.0);
+    vec3 ref = abs(N.y) < 0.99 ? up : right;
+
+    T = normalize(cross(N, ref));
+    B = normalize(cross(N, T));
+
+    float cs = cos(facing);
+    float sn = sin(facing);
+    vec3 T_rotated = T * cs + B * sn;
+    vec3 B_rotated = -T * sn + B * cs;
+
+    T = T_rotated;
+    B = B_rotated;
+}
+
 void main() {
     // Get instance data using gl_InstanceIndex
     GrassInstance inst = instances[gl_InstanceIndex];
@@ -163,6 +182,11 @@ void main() {
     float height = inst.heightHashTilt.x;
     float bladeHash = inst.heightHashTilt.y;
     float tilt = inst.heightHashTilt.z;
+    vec3 terrainNormal = normalize(inst.terrainNormal.xyz);
+
+    // Build coordinate frame aligned to terrain surface
+    vec3 T, B;
+    buildTerrainBasis(terrainNormal, facing, T, B);
 
     // Wind animation using noise-based wind system (must match grass.vert for consistent shadows)
     vec2 windDir = wind.windDirectionAndStrength.xy;
@@ -208,16 +232,16 @@ void main() {
     vec3 curvePos = bezier(p0, p1, p2, t);
     vec3 localPos = curvePos + vec3(xOffset, 0.0, 0.0);
 
-    // Rotate by facing angle around Y axis
-    float cs = cos(facing);
-    float sn = sin(facing);
-    vec3 rotatedPos;
-    rotatedPos.x = localPos.x * cs - localPos.z * sn;
-    rotatedPos.y = localPos.y;
-    rotatedPos.z = localPos.x * sn + localPos.z * cs;
+    // Transform from local blade space to world space using terrain basis
+    // Local X = blade width direction (bitangent B)
+    // Local Y = blade up direction (terrain normal N)
+    // Local Z = blade facing direction (tangent T)
+    vec3 worldOffset = B * localPos.x +
+                       terrainNormal * localPos.y +
+                       T * localPos.z;
 
     // Final world position
-    vec3 worldPos = basePos + rotatedPos;
+    vec3 worldPos = basePos + worldOffset;
 
     // Transform to light space for shadow map using cascade-specific matrix
     gl_Position = ubo.cascadeViewProj[push.cascadeIndex] * vec4(worldPos, 1.0);

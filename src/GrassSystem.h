@@ -24,7 +24,8 @@ struct GrassUniforms {
 
 struct GrassInstance {
     glm::vec4 positionAndFacing;  // xyz = position, w = facing angle
-    glm::vec4 heightHashTilt;     // x = height, y = hash, z = tilt, w = unused
+    glm::vec4 heightHashTilt;     // x = height, y = hash, z = tilt, w = clumpId
+    glm::vec4 terrainNormal;      // xyz = terrain normal (for tangent alignment), w = unused
 };
 
 class GrassSystem {
