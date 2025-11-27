@@ -103,10 +103,11 @@ void ClothSimulation::applyForces(const WindSystem* windSystem) {
                 float windFactor = windSystem->sampleWindAtPosition(worldPos2D);
 
                 // Apply wind force in wind direction
+                // Increased force multiplier for more visible movement
                 glm::vec3 windForce = glm::vec3(
-                    windDir.x * windStrength * windFactor * 5.0f,
+                    windDir.x * windStrength * windFactor * 15.0f,
                     0.0f,
-                    windDir.y * windStrength * windFactor * 5.0f
+                    windDir.y * windStrength * windFactor * 15.0f
                 );
 
                 p.acceleration += windForce;
@@ -129,15 +130,17 @@ void ClothSimulation::satisfyConstraints() {
             if (currentLength < 0.0001f) continue;  // Avoid division by zero
 
             float difference = (currentLength - constraint.restLength) / currentLength;
-            glm::vec3 correction = delta * 0.5f * difference;
+            // Reduce stiffness factor from 0.5 to 0.3 for more flexibility
+            glm::vec3 correction = delta * 0.3f * difference;
 
             if (!pA.pinned && !pB.pinned) {
                 pA.position += correction;
                 pB.position -= correction;
             } else if (!pA.pinned) {
-                pA.position += correction * 2.0f;
+                // Reduce correction multiplier for pinned constraints
+                pA.position += correction * 1.5f;
             } else if (!pB.pinned) {
-                pB.position -= correction * 2.0f;
+                pB.position -= correction * 1.5f;
             }
         }
     }
@@ -163,8 +166,41 @@ void ClothSimulation::update(float deltaTime, const WindSystem* windSystem) {
     while (accumulator >= fixedDt) {
         applyForces(windSystem);
         updatePositions(fixedDt);
+        handleCollisions();
         satisfyConstraints();
         accumulator -= fixedDt;
+    }
+}
+
+void ClothSimulation::addSphereCollision(const glm::vec3& center, float radius) {
+    sphereColliders.push_back({center, radius});
+}
+
+void ClothSimulation::clearCollisions() {
+    sphereColliders.clear();
+}
+
+void ClothSimulation::handleCollisions() {
+    // Handle sphere collisions
+    for (const auto& sphere : sphereColliders) {
+        for (auto& p : particles) {
+            if (p.pinned) continue;
+
+            glm::vec3 toParticle = p.position - sphere.center;
+            float dist = glm::length(toParticle);
+
+            // If particle is inside the sphere, push it out
+            if (dist < sphere.radius) {
+                if (dist < 0.0001f) {
+                    // Particle exactly at center, push in arbitrary direction
+                    p.position = sphere.center + glm::vec3(sphere.radius, 0.0f, 0.0f);
+                } else {
+                    // Push particle to surface of sphere
+                    glm::vec3 normal = toParticle / dist;
+                    p.position = sphere.center + normal * sphere.radius;
+                }
+            }
+        }
     }
 }
 

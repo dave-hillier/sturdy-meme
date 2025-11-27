@@ -35,6 +35,10 @@ public:
     // Simulation step
     void update(float deltaTime, const WindSystem* windSystem = nullptr);
 
+    // Collision detection
+    void addSphereCollision(const glm::vec3& center, float radius);
+    void clearCollisions();
+
     // Update mesh vertices from particle positions
     void updateMesh(Mesh& mesh) const;
 
@@ -45,10 +49,16 @@ public:
     int getWidth() const { return width; }
     int getHeight() const { return height; }
 
+    struct SphereCollider {
+        glm::vec3 center;
+        float radius;
+    };
+
 private:
     void applyForces(const WindSystem* windSystem);
     void satisfyConstraints();
     void updatePositions(float deltaTime);
+    void handleCollisions();
     void generateMeshData(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices) const;
 
     int getParticleIndex(int x, int y) const { return y * width + x; }
@@ -56,6 +66,7 @@ private:
 
     std::vector<Particle> particles;
     std::vector<DistanceConstraint> constraints;
+    std::vector<SphereCollider> sphereColliders;
 
     int width = 0;
     int height = 0;

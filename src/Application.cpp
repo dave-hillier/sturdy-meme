@@ -678,6 +678,34 @@ void Application::initFlag() {
 }
 
 void Application::updateFlag(float deltaTime) {
+    // Clear previous frame collisions
+    clothSim.clearCollisions();
+
+    // Add player collision sphere
+    glm::vec3 playerPos = physics.getCharacterPosition();
+    float playerRadius = Player::CAPSULE_RADIUS;
+    float playerHeight = Player::CAPSULE_HEIGHT;
+
+    // Add collision spheres for the player capsule (one at bottom, middle, and top)
+    clothSim.addSphereCollision(playerPos + glm::vec3(0, playerRadius, 0), playerRadius);
+    clothSim.addSphereCollision(playerPos + glm::vec3(0, playerHeight * 0.5f, 0), playerRadius);
+    clothSim.addSphereCollision(playerPos + glm::vec3(0, playerHeight - playerRadius, 0), playerRadius);
+
+    // Add collision spheres for dynamic physics objects
+    auto& sceneObjects = renderer.getSceneObjects();
+    for (size_t i = 1; i < scenePhysicsBodies.size() && i < sceneObjects.size(); i++) {
+        PhysicsBodyID bodyID = scenePhysicsBodies[i];
+        if (bodyID == INVALID_BODY_ID) continue;
+        if (i == renderer.getPlayerObjectIndex()) continue; // Skip player (already handled)
+        if (i == 11 || i == 12) continue; // Skip flag pole and cloth itself
+
+        PhysicsBodyInfo info = physics.getBodyInfo(bodyID);
+
+        // Add approximate collision spheres for physics objects
+        // For simplicity, use a sphere of radius 0.5 for all objects
+        clothSim.addSphereCollision(info.position, 0.5f);
+    }
+
     // Update cloth simulation with wind
     clothSim.update(deltaTime, &renderer.getWindSystem());
 
