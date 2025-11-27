@@ -25,7 +25,8 @@ layout(binding = 0) uniform UniformBufferObject {
     float timeOfDay;
     float shadowMapSize;
     float debugCascades;
-    float julianDay;                       // Julian day for sidereal rotation
+    float julianDay;
+    float antiAliasStrength;   // Strength for cloud aliasing suppression
 } ubo;
 
 layout(binding = 2) uniform sampler2DArrayShadow shadowMapArray;  // Changed to array for CSM

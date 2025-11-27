@@ -22,6 +22,7 @@ layout(binding = 0) uniform UniformBufferObject {
     float shadowMapSize;
     float debugCascades;
     float julianDay;               // Julian day for sidereal rotation
+    float antiAliasStrength;   // Strength for cloud aliasing suppression
 } ubo;
 
 layout(location = 0) in vec3 rayDir;
@@ -264,6 +265,26 @@ vec2 intersectCloudLayer(vec3 origin, vec3 dir) {
     }
 
     return vec2(tEnter, tExit);
+}
+
+vec2 computeCloudPolarUV(vec3 position) {
+    float radial = length(position.xz);
+    float azimuth = atan(position.z, position.x);
+    return vec2(radial, azimuth);
+}
+
+float computeCloudDerivativeScale(vec3 origin, vec3 dir, float sampleT) {
+    vec3 samplePos = origin + dir * sampleT;
+    vec2 cloudUV = computeCloudPolarUV(samplePos);
+
+    vec2 dUVdx = vec2(dFdx(cloudUV.x), dFdx(cloudUV.y));
+    vec2 dUVdy = vec2(dFdy(cloudUV.x), dFdy(cloudUV.y));
+
+    float radialDerivative = max(abs(dUVdx.x), abs(dUVdy.x));
+    float azimuthDerivative = max(abs(dUVdx.y), abs(dUVdy.y));
+    float maxDerivative = max(radialDerivative, azimuthDerivative);
+
+    return clamp(1.0 / (1.0 + maxDerivative * ubo.antiAliasStrength), 0.0, 1.0);
 }
 
 // Cloud result structure for volumetric cloud rendering
@@ -564,6 +585,8 @@ CloudResult marchClouds(vec3 origin, vec3 dir) {
     float tEnd = cloudHit.y;
     float stepSize = (tEnd - tStart) / float(CLOUD_MARCH_STEPS);
 
+    float aliasingScale = computeCloudDerivativeScale(origin, dir, tStart + (tEnd - tStart) * 0.5);
+
     // Add jitter to reduce banding (screen-space dither based on ray direction)
     float jitter = hash(dir * 1000.0 + vec3(ubo.timeOfDay * 0.1));
     tStart += stepSize * jitter * 0.5;
@@ -609,7 +632,8 @@ CloudResult marchClouds(vec3 origin, vec3 dir) {
         float t = tStart + (float(i) + 0.5) * stepSize;
         vec3 pos = origin + dir * t;
 
-        float density = sampleCloudDensity(pos);
+        float baseDensity = sampleCloudDensity(pos);
+        float density = baseDensity * aliasingScale;
 
         if (density > 0.005) {  // Skip very thin cloud regions
             // Sample transmittance to sun through clouds

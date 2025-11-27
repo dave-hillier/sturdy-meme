@@ -515,7 +515,7 @@ void WeatherSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffe
         VkDescriptorBufferInfo uboInfo{};
         uboInfo.buffer = rendererUniformBuffers[0];
         uboInfo.offset = 0;
-        uboInfo.range = 320;  // sizeof(UniformBufferObject)
+        uboInfo.range = VK_WHOLE_SIZE;  // sizeof(UniformBufferObject)
 
         VkDescriptorBufferInfo particleBufferInfo{};
         particleBufferInfo.buffer = particleBuffers[set];
@@ -693,7 +693,7 @@ void WeatherSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float t
     VkDescriptorBufferInfo uboInfo{};
     uboInfo.buffer = externalRendererUniformBuffers[frameIndex];
     uboInfo.offset = 0;
-    uboInfo.range = 320;  // sizeof(UniformBufferObject)
+    uboInfo.range = VK_WHOLE_SIZE;  // sizeof(UniformBufferObject)
 
     VkWriteDescriptorSet uboWrite{};
     uboWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;

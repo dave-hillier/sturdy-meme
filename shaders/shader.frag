@@ -25,7 +25,8 @@ layout(binding = 0) uniform UniformBufferObject {
     float timeOfDay;
     float shadowMapSize;
     float debugCascades;       // 1.0 = show cascade colors
-    float julianDay;           // Julian day for sidereal rotation
+    float julianDay;
+    float antiAliasStrength;   // Strength for cloud aliasing suppression
 } ubo;
 
 layout(binding = 1) uniform sampler2D texSampler;

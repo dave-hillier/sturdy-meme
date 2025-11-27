@@ -21,6 +21,7 @@ layout(binding = 0) uniform UniformBufferObject {
     float shadowMapSize;
     float debugCascades;
     float julianDay;           // Julian day for sidereal rotation
+    float antiAliasStrength;   // Strength for cloud aliasing suppression
 } ubo;
 
 layout(location = 0) out vec3 rayDir;

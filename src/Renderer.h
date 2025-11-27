@@ -41,6 +41,7 @@ struct UniformBufferObject {
     float shadowMapSize;
     float debugCascades;           // 1.0 = show cascade colors
     float julianDay;               // Julian day for sidereal rotation
+    float antiAliasStrength;       // Strength for cloud aliasing suppression
 };
 
 struct ShadowPushConstants {
@@ -80,6 +81,9 @@ public:
 
     void toggleCascadeDebug() { showCascadeDebug = !showCascadeDebug; }
     bool isShowingCascadeDebug() const { return showCascadeDebug; }
+
+    void setCloudAntiAliasStrength(float strength) { cloudAntiAliasStrength = strength; }
+    float getCloudAntiAliasStrength() const { return cloudAntiAliasStrength; }
 
     // Terrain control
     void toggleTerrainWireframe() { terrainSystem.setWireframeMode(!terrainSystem.isWireframeMode()); }
@@ -287,6 +291,7 @@ private:
     bool useManualTime = false;
     float currentTimeOfDay = 0.0f;
     float lastSunIntensity = 1.0f;
+    float cloudAntiAliasStrength = 1.0f;  // Strength for cloud aliasing suppression
 
     // Celestial calculations
     CelestialCalculator celestialCalculator;

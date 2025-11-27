@@ -602,7 +602,7 @@ void LeafSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>&
         VkDescriptorBufferInfo uboInfo{};
         uboInfo.buffer = rendererUniformBuffers[0];
         uboInfo.offset = 0;
-        uboInfo.range = 320;  // sizeof(UniformBufferObject)
+        uboInfo.range = VK_WHOLE_SIZE;  // sizeof(UniformBufferObject)
 
         VkDescriptorBufferInfo particleBufferInfo{};
         particleBufferInfo.buffer = particleBuffers[set];

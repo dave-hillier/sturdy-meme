@@ -31,7 +31,8 @@ layout(binding = 5) uniform UniformBufferObject {
     float timeOfDay;
     float shadowMapSize;
     float debugCascades;
-    float julianDay;             // Julian day for sidereal rotation
+    float julianDay;
+    float antiAliasStrength;   // Strength for cloud aliasing suppression
 } ubo;
 
 // Terrain-specific uniforms
