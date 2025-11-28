@@ -149,7 +149,14 @@ void main() {
     float snowAffinity = fragHeight;  // Tips catch more snow
     float snowCoverage = calculateVegetationSnowCoverage(ubo.snowAmount, snowMaskCoverage, N, snowAffinity);
 
-    // Apply snow to grass albedo
+    // Hide grass under snow - grass gets progressively covered as snow accumulates
+    // Use a threshold based on height: lower parts of grass get hidden first
+    float snowHideThreshold = mix(0.3, 0.7, fragHeight);  // Base hidden at 30% coverage, tips at 70%
+    if (snowCoverage > snowHideThreshold) {
+        discard;  // Grass is completely covered by snow
+    }
+
+    // Apply snow to grass albedo for remaining visible parts
     if (snowCoverage > 0.01) {
         albedo = snowyVegetationColor(albedo, ubo.snowColor.rgb, snowCoverage);
     }
