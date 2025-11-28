@@ -1,5 +1,6 @@
 #include "LeafSystem.h"
 #include "ShaderLoader.h"
+#include "BindingBuilder.h"
 #include <SDL3/SDL.h>
 #include <cstring>
 #include <algorithm>
@@ -98,55 +99,66 @@ bool LeafSystem::createBuffers() {
 }
 
 bool LeafSystem::createComputeDescriptorSetLayout() {
-    std::array<VkDescriptorSetLayoutBinding, 8> bindings{};
-
     // Particle buffer input (previous frame state)
-    bindings[0].binding = 0;
-    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bindings[0].descriptorCount = 1;
-    bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    auto particleBufferInput = BindingBuilder()
+        .setBinding(0)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+        .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
+        .build();
 
     // Particle buffer output (current frame result)
-    bindings[1].binding = 1;
-    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bindings[1].descriptorCount = 1;
-    bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    auto particleBufferOutput = BindingBuilder()
+        .setBinding(1)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+        .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
+        .build();
 
     // Indirect buffer (output)
-    bindings[2].binding = 2;
-    bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bindings[2].descriptorCount = 1;
-    bindings[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    auto indirectBuffer = BindingBuilder()
+        .setBinding(2)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+        .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
+        .build();
 
     // Leaf uniforms
-    bindings[3].binding = 3;
-    bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    bindings[3].descriptorCount = 1;
-    bindings[3].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    auto leafUniforms = BindingBuilder()
+        .setBinding(3)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+        .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
+        .build();
 
     // Wind uniforms
-    bindings[4].binding = 4;
-    bindings[4].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    bindings[4].descriptorCount = 1;
-    bindings[4].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    auto windUniforms = BindingBuilder()
+        .setBinding(4)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+        .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
+        .build();
 
     // Terrain heightmap
-    bindings[5].binding = 5;
-    bindings[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    bindings[5].descriptorCount = 1;
-    bindings[5].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    auto terrainHeightmap = BindingBuilder()
+        .setBinding(5)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
+        .build();
 
     // Displacement map (shared with grass system for player interaction)
-    bindings[6].binding = 6;
-    bindings[6].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    bindings[6].descriptorCount = 1;
-    bindings[6].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    auto displacementMap = BindingBuilder()
+        .setBinding(6)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
+        .build();
 
     // Displacement region uniform buffer
-    bindings[7].binding = 7;
-    bindings[7].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    bindings[7].descriptorCount = 1;
-    bindings[7].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    auto displacementRegion = BindingBuilder()
+        .setBinding(7)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+        .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
+        .build();
+
+    std::array<VkDescriptorSetLayoutBinding, 8> bindings = {
+        particleBufferInput, particleBufferOutput, indirectBuffer,
+        leafUniforms, windUniforms, terrainHeightmap, displacementMap, displacementRegion
+    };
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -216,25 +228,28 @@ bool LeafSystem::createComputePipeline() {
 }
 
 bool LeafSystem::createGraphicsDescriptorSetLayout() {
-    std::array<VkDescriptorSetLayoutBinding, 3> bindings{};
-
     // UBO (scene uniforms)
-    bindings[0].binding = 0;
-    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    bindings[0].descriptorCount = 1;
-    bindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    auto uboBinding = BindingBuilder()
+        .setBinding(0)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+        .setStageFlags(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
+        .build();
 
     // Particle buffer (read-only in vertex shader)
-    bindings[1].binding = 1;
-    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bindings[1].descriptorCount = 1;
-    bindings[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    auto particleBuffer = BindingBuilder()
+        .setBinding(1)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+        .setStageFlags(VK_SHADER_STAGE_VERTEX_BIT)
+        .build();
 
     // Wind uniforms (for consistent animation)
-    bindings[2].binding = 2;
-    bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    bindings[2].descriptorCount = 1;
-    bindings[2].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    auto windUniforms = BindingBuilder()
+        .setBinding(2)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+        .setStageFlags(VK_SHADER_STAGE_VERTEX_BIT)
+        .build();
+
+    std::array<VkDescriptorSetLayoutBinding, 3> bindings = {uboBinding, particleBuffer, windUniforms};
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
