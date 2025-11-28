@@ -3,7 +3,6 @@
 #include "PipelineBuilder.h"
 #include <SDL3/SDL.h>
 #include <cstring>
-#include <algorithm>  // for std::swap
 #include <array>
 
 // Forward declare UniformBufferObject size (needed for descriptor set update)
@@ -23,7 +22,7 @@ bool GrassSystem::init(const InitInfo& info) {
     hooks.createDescriptorSets = [this]() { return createDescriptorSets(); };
     hooks.destroyBuffers = [this](VmaAllocator allocator) { destroyBuffers(allocator); };
 
-    return lifecycle.init(info, hooks);
+    return particleSystem.init(info, hooks, BUFFER_SET_COUNT);
 }
 
 void GrassSystem::destroy(VkDevice dev, VmaAllocator alloc) {
@@ -38,7 +37,7 @@ void GrassSystem::destroy(VkDevice dev, VmaAllocator alloc) {
     vkDestroyImageView(dev, displacementImageView, nullptr);
     vmaDestroyImage(alloc, displacementImage, displacementAllocation);
 
-    lifecycle.destroy(dev, alloc);
+    particleSystem.destroy(dev, alloc);
 }
 
 void GrassSystem::destroyBuffers(VmaAllocator alloc) {
@@ -516,10 +515,12 @@ bool GrassSystem::createDescriptorSets() {
         computeAllocInfo.descriptorSetCount = 1;
         computeAllocInfo.pSetLayouts = &getComputePipelineHandles().descriptorSetLayout;
 
-        if (vkAllocateDescriptorSets(getDevice(), &computeAllocInfo, &computeDescriptorSets[set]) != VK_SUCCESS) {
+        VkDescriptorSet computeSet = VK_NULL_HANDLE;
+        if (vkAllocateDescriptorSets(getDevice(), &computeAllocInfo, &computeSet) != VK_SUCCESS) {
             SDL_Log("Failed to allocate grass compute descriptor set (set %u)", set);
             return false;
         }
+        particleSystem.setComputeDescriptorSet(set, computeSet);
 
         // Allocate graphics descriptor set for this buffer set
         VkDescriptorSetAllocateInfo graphicsAllocInfo{};
@@ -528,10 +529,12 @@ bool GrassSystem::createDescriptorSets() {
         graphicsAllocInfo.descriptorSetCount = 1;
         graphicsAllocInfo.pSetLayouts = &getGraphicsPipelineHandles().descriptorSetLayout;
 
-        if (vkAllocateDescriptorSets(getDevice(), &graphicsAllocInfo, &graphicsDescriptorSets[set]) != VK_SUCCESS) {
+        VkDescriptorSet graphicsSet = VK_NULL_HANDLE;
+        if (vkAllocateDescriptorSets(getDevice(), &graphicsAllocInfo, &graphicsSet) != VK_SUCCESS) {
             SDL_Log("Failed to allocate grass graphics descriptor set (set %u)", set);
             return false;
         }
+        particleSystem.setGraphicsDescriptorSet(set, graphicsSet);
 
         // Allocate shadow descriptor set for this buffer set
         VkDescriptorSetAllocateInfo shadowAllocInfo{};
@@ -566,7 +569,7 @@ bool GrassSystem::createDescriptorSets() {
         std::array<VkWriteDescriptorSet, 3> computeWrites{};
 
         computeWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        computeWrites[0].dstSet = computeDescriptorSets[set];
+        computeWrites[0].dstSet = particleSystem.getComputeDescriptorSet(set);
         computeWrites[0].dstBinding = 0;
         computeWrites[0].dstArrayElement = 0;
         computeWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -574,7 +577,7 @@ bool GrassSystem::createDescriptorSets() {
         computeWrites[0].pBufferInfo = &instanceBufferInfo;
 
         computeWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        computeWrites[1].dstSet = computeDescriptorSets[set];
+        computeWrites[1].dstSet = particleSystem.getComputeDescriptorSet(set);
         computeWrites[1].dstBinding = 1;
         computeWrites[1].dstArrayElement = 0;
         computeWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -582,7 +585,7 @@ bool GrassSystem::createDescriptorSets() {
         computeWrites[1].pBufferInfo = &indirectBufferInfo;
 
         computeWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        computeWrites[2].dstSet = computeDescriptorSets[set];
+        computeWrites[2].dstSet = particleSystem.getComputeDescriptorSet(set);
         computeWrites[2].dstBinding = 2;
         computeWrites[2].dstArrayElement = 0;
         computeWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -644,7 +647,7 @@ void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>
         std::array<VkWriteDescriptorSet, 5> graphicsWrites{};
 
         graphicsWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        graphicsWrites[0].dstSet = graphicsDescriptorSets[set];
+        graphicsWrites[0].dstSet = particleSystem.getGraphicsDescriptorSet(set);
         graphicsWrites[0].dstBinding = 0;
         graphicsWrites[0].dstArrayElement = 0;
         graphicsWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -652,7 +655,7 @@ void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>
         graphicsWrites[0].pBufferInfo = &uboInfo;
 
         graphicsWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        graphicsWrites[1].dstSet = graphicsDescriptorSets[set];
+        graphicsWrites[1].dstSet = particleSystem.getGraphicsDescriptorSet(set);
         graphicsWrites[1].dstBinding = 1;
         graphicsWrites[1].dstArrayElement = 0;
         graphicsWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -660,7 +663,7 @@ void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>
         graphicsWrites[1].pBufferInfo = &instanceBufferInfo;
 
         graphicsWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        graphicsWrites[2].dstSet = graphicsDescriptorSets[set];
+        graphicsWrites[2].dstSet = particleSystem.getGraphicsDescriptorSet(set);
         graphicsWrites[2].dstBinding = 2;
         graphicsWrites[2].dstArrayElement = 0;
         graphicsWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -668,7 +671,7 @@ void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>
         graphicsWrites[2].pImageInfo = &shadowImageInfo;
 
         graphicsWrites[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        graphicsWrites[3].dstSet = graphicsDescriptorSets[set];
+        graphicsWrites[3].dstSet = particleSystem.getGraphicsDescriptorSet(set);
         graphicsWrites[3].dstBinding = 3;
         graphicsWrites[3].dstArrayElement = 0;
         graphicsWrites[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -676,7 +679,7 @@ void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>
         graphicsWrites[3].pBufferInfo = &windBufferInfo;
 
         graphicsWrites[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        graphicsWrites[4].dstSet = graphicsDescriptorSets[set];
+        graphicsWrites[4].dstSet = particleSystem.getGraphicsDescriptorSet(set);
         graphicsWrites[4].dstBinding = 4;
         graphicsWrites[4].dstArrayElement = 0;
         graphicsWrites[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -888,7 +891,7 @@ void GrassSystem::recordDisplacementUpdate(VkCommandBuffer cmd, uint32_t frameIn
 
 void GrassSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex, float time) {
     // Double-buffer: compute writes to computeBufferSet
-    uint32_t writeSet = computeBufferSet;
+    uint32_t writeSet = particleSystem.getComputeBufferSet();
 
     // Update compute descriptor set to use this frame's uniform buffer, terrain heightmap, and displacement map
     // (uniforms contain per-frame camera/frustum data)
@@ -910,7 +913,7 @@ void GrassSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex
     std::array<VkWriteDescriptorSet, 3> writes{};
 
     writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[0].dstSet = computeDescriptorSets[writeSet];
+    writes[0].dstSet = particleSystem.getComputeDescriptorSet(writeSet);
     writes[0].dstBinding = 2;
     writes[0].dstArrayElement = 0;
     writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -918,7 +921,7 @@ void GrassSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex
     writes[0].pBufferInfo = &uniformBufferInfo;
 
     writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[1].dstSet = computeDescriptorSets[writeSet];
+    writes[1].dstSet = particleSystem.getComputeDescriptorSet(writeSet);
     writes[1].dstBinding = 3;
     writes[1].dstArrayElement = 0;
     writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -926,7 +929,7 @@ void GrassSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex
     writes[1].pImageInfo = &heightMapInfo;
 
     writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[2].dstSet = computeDescriptorSets[writeSet];
+    writes[2].dstSet = particleSystem.getComputeDescriptorSet(writeSet);
     writes[2].dstBinding = 4;
     writes[2].dstArrayElement = 0;
     writes[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -950,9 +953,10 @@ void GrassSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex
 
     // Dispatch grass compute shader using the compute buffer set
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, getComputePipelineHandles().pipeline);
+    VkDescriptorSet computeSet = particleSystem.getComputeDescriptorSet(writeSet);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
                             getComputePipelineHandles().pipelineLayout, 0, 1,
-                            &computeDescriptorSets[writeSet], 0, nullptr);
+                            &computeSet, 0, nullptr);
 
     GrassPushConstants grassPush{};
     grassPush.time = time;
@@ -979,17 +983,18 @@ void GrassSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex
 void GrassSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time) {
     // Double-buffer: graphics reads from renderBufferSet
     // On first frame before double-buffering kicks in, read from compute set (same as renderBufferSet)
-    uint32_t readSet = renderBufferSet;
+    uint32_t readSet = particleSystem.getRenderBufferSet();
 
     // Bootstrap: if we haven't diverged yet, read from what we just computed
-    if (computeBufferSet == renderBufferSet) {
-        readSet = computeBufferSet;
+    if (particleSystem.getComputeBufferSet() == particleSystem.getRenderBufferSet()) {
+        readSet = particleSystem.getComputeBufferSet();
     }
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, getGraphicsPipelineHandles().pipeline);
+    VkDescriptorSet graphicsSet = particleSystem.getGraphicsDescriptorSet(readSet);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                             getGraphicsPipelineHandles().pipelineLayout, 0, 1,
-                            &graphicsDescriptorSets[readSet], 0, nullptr);
+                            &graphicsSet, 0, nullptr);
 
     GrassPushConstants grassPush{};
     grassPush.time = time;
@@ -1001,11 +1006,11 @@ void GrassSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float tim
 
 void GrassSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time, uint32_t cascadeIndex) {
     // Double-buffer: shadow pass reads from renderBufferSet (same as main draw)
-    uint32_t readSet = renderBufferSet;
+    uint32_t readSet = particleSystem.getRenderBufferSet();
 
     // Bootstrap: if we haven't diverged yet, read from what we just computed
-    if (computeBufferSet == renderBufferSet) {
-        readSet = computeBufferSet;
+    if (particleSystem.getComputeBufferSet() == particleSystem.getRenderBufferSet()) {
+        readSet = particleSystem.getComputeBufferSet();
     }
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipeline);
@@ -1023,19 +1028,5 @@ void GrassSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex, flo
 }
 
 void GrassSystem::advanceBufferSet() {
-    // Swap compute and render buffer sets for next frame
-    // After this call:
-    // - computeBufferSet points to what was the render set (now safe to overwrite)
-    // - renderBufferSet points to what was the compute set (now contains fresh data)
-    //
-    // Bootstrap case: on frame 0, both are 0 (same buffer used sequentially)
-    // After first call, we diverge to true double-buffering
-    if (computeBufferSet == renderBufferSet) {
-        // First frame done - set up for double buffering
-        // renderBufferSet stays at 0 (what we just computed)
-        // computeBufferSet moves to 1 (next frame will compute here)
-        computeBufferSet = 1;
-    } else {
-        std::swap(computeBufferSet, renderBufferSet);
-    }
+    particleSystem.advanceBufferSet();
 }
