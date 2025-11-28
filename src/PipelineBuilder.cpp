@@ -1,5 +1,6 @@
 #include "PipelineBuilder.h"
 #include "ShaderLoader.h"
+#include "BindingBuilder.h"
 #include <SDL3/SDL.h>
 
 PipelineBuilder::PipelineBuilder(VkDevice device) : device(device) {}
@@ -16,12 +17,13 @@ PipelineBuilder& PipelineBuilder::reset() {
 
 PipelineBuilder& PipelineBuilder::addDescriptorBinding(uint32_t binding, VkDescriptorType type, uint32_t count,
                                                        VkShaderStageFlags stageFlags, const VkSampler* immutableSamplers) {
-    VkDescriptorSetLayoutBinding layoutBinding{};
-    layoutBinding.binding = binding;
-    layoutBinding.descriptorType = type;
-    layoutBinding.descriptorCount = count;
-    layoutBinding.stageFlags = stageFlags;
-    layoutBinding.pImmutableSamplers = immutableSamplers;
+    VkDescriptorSetLayoutBinding layoutBinding = BindingBuilder()
+                                                     .setBinding(binding)
+                                                     .setDescriptorType(type)
+                                                     .setDescriptorCount(count)
+                                                     .setStageFlags(stageFlags)
+                                                     .setImmutableSamplers(immutableSamplers)
+                                                     .build();
     descriptorBindings.push_back(layoutBinding);
     return *this;
 }

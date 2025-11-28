@@ -1,5 +1,6 @@
 #include "FroxelSystem.h"
 #include "ShaderLoader.h"
+#include "BindingBuilder.h"
 #include <SDL3/SDL_log.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <array>
@@ -207,43 +208,21 @@ bool FroxelSystem::createSampler() {
 }
 
 bool FroxelSystem::createDescriptorSetLayout() {
-    std::array<VkDescriptorSetLayoutBinding, 6> bindings{};
+    auto makeComputeBinding = [](uint32_t binding, VkDescriptorType type) {
+        return BindingBuilder()
+            .setBinding(binding)
+            .setDescriptorType(type)
+            .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
+            .build();
+    };
 
-    // Binding 0: Current scattering volume (storage image, write)
-    bindings[0].binding = 0;
-    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    bindings[0].descriptorCount = 1;
-    bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-    // Binding 1: Integrated volume (storage image, read/write)
-    bindings[1].binding = 1;
-    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    bindings[1].descriptorCount = 1;
-    bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-    // Binding 2: Uniform buffer
-    bindings[2].binding = 2;
-    bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    bindings[2].descriptorCount = 1;
-    bindings[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-    // Binding 3: Shadow map (sampled image with sampler)
-    bindings[3].binding = 3;
-    bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    bindings[3].descriptorCount = 1;
-    bindings[3].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-    // Binding 4: Light buffer (SSBO for local lights)
-    bindings[4].binding = 4;
-    bindings[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bindings[4].descriptorCount = 1;
-    bindings[4].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-    // Binding 5: History scattering volume (storage image, read-only for temporal)
-    bindings[5].binding = 5;
-    bindings[5].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    bindings[5].descriptorCount = 1;
-    bindings[5].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    std::array<VkDescriptorSetLayoutBinding, 6> bindings = {
+        makeComputeBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE),
+        makeComputeBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE),
+        makeComputeBinding(2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER),
+        makeComputeBinding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+        makeComputeBinding(4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
+        makeComputeBinding(5, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)};
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;

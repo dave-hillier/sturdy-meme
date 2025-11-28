@@ -1,5 +1,6 @@
 #include "PostProcessSystem.h"
 #include "ShaderLoader.h"
+#include "BindingBuilder.h"
 #include <SDL3/SDL.h>
 #include <array>
 
@@ -317,42 +318,20 @@ bool PostProcessSystem::createSampler() {
 }
 
 bool PostProcessSystem::createDescriptorSetLayout() {
-    // Binding 0: HDR input texture
-    VkDescriptorSetLayoutBinding hdrBinding{};
-    hdrBinding.binding = 0;
-    hdrBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    hdrBinding.descriptorCount = 1;
-    hdrBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    auto makeBinding = [](uint32_t binding, VkDescriptorType type) {
+        return BindingBuilder()
+            .setBinding(binding)
+            .setDescriptorType(type)
+            .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
+            .build();
+    };
 
-    // Binding 1: Uniform buffer
-    VkDescriptorSetLayoutBinding uboBinding{};
-    uboBinding.binding = 1;
-    uboBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    uboBinding.descriptorCount = 1;
-    uboBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-
-    // Binding 2: Depth texture (for froxel compositing)
-    VkDescriptorSetLayoutBinding depthBinding{};
-    depthBinding.binding = 2;
-    depthBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    depthBinding.descriptorCount = 1;
-    depthBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-
-    // Binding 3: Froxel volume (3D texture for volumetric fog)
-    VkDescriptorSetLayoutBinding froxelBinding{};
-    froxelBinding.binding = 3;
-    froxelBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    froxelBinding.descriptorCount = 1;
-    froxelBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-
-    // Binding 4: Bloom texture (from multi-pass bloom system)
-    VkDescriptorSetLayoutBinding bloomBinding{};
-    bloomBinding.binding = 4;
-    bloomBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    bloomBinding.descriptorCount = 1;
-    bloomBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-
-    std::array<VkDescriptorSetLayoutBinding, 5> bindings = {hdrBinding, uboBinding, depthBinding, froxelBinding, bloomBinding};
+    std::array<VkDescriptorSetLayoutBinding, 5> bindings = {
+        makeBinding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+        makeBinding(1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER),
+        makeBinding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+        makeBinding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+        makeBinding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)};
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -792,30 +771,24 @@ bool PostProcessSystem::createHistogramResources() {
 }
 
 bool PostProcessSystem::createHistogramPipelines() {
+    auto makeComputeBinding = [](uint32_t binding, VkDescriptorType type) {
+        return BindingBuilder()
+            .setBinding(binding)
+            .setDescriptorType(type)
+            .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
+            .build();
+    };
+
     // ============================================
     // Histogram Build Pipeline
     // ============================================
     {
         // Descriptor set layout for histogram build
-        std::array<VkDescriptorSetLayoutBinding, 3> buildBindings{};
 
-        // Binding 0: HDR image (storage image for compute read)
-        buildBindings[0].binding = 0;
-        buildBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        buildBindings[0].descriptorCount = 1;
-        buildBindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-        // Binding 1: Histogram buffer
-        buildBindings[1].binding = 1;
-        buildBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        buildBindings[1].descriptorCount = 1;
-        buildBindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-        // Binding 2: Parameters uniform buffer
-        buildBindings[2].binding = 2;
-        buildBindings[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        buildBindings[2].descriptorCount = 1;
-        buildBindings[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        std::array<VkDescriptorSetLayoutBinding, 3> buildBindings = {
+            makeComputeBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE),
+            makeComputeBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
+            makeComputeBinding(2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)};
 
         VkDescriptorSetLayoutCreateInfo buildLayoutInfo{};
         buildLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -876,25 +849,10 @@ bool PostProcessSystem::createHistogramPipelines() {
     // ============================================
     {
         // Descriptor set layout for histogram reduce
-        std::array<VkDescriptorSetLayoutBinding, 3> reduceBindings{};
-
-        // Binding 0: Histogram buffer (read-only)
-        reduceBindings[0].binding = 0;
-        reduceBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        reduceBindings[0].descriptorCount = 1;
-        reduceBindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-        // Binding 1: Exposure output buffer
-        reduceBindings[1].binding = 1;
-        reduceBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        reduceBindings[1].descriptorCount = 1;
-        reduceBindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-        // Binding 2: Parameters uniform buffer
-        reduceBindings[2].binding = 2;
-        reduceBindings[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        reduceBindings[2].descriptorCount = 1;
-        reduceBindings[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        std::array<VkDescriptorSetLayoutBinding, 3> reduceBindings = {
+            makeComputeBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
+            makeComputeBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
+            makeComputeBinding(2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)};
 
         VkDescriptorSetLayoutCreateInfo reduceLayoutInfo{};
         reduceLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
