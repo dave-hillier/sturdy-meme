@@ -2496,7 +2496,8 @@ void Renderer::render(const Camera& camera) {
                                terrainConfig.size, terrainConfig.heightScale);
     grassSystem.updateDisplacementSources(playerPosition, playerCapsuleRadius, deltaTime);
     weatherSystem.updateUniforms(currentFrame, camera.getPosition(), viewProj, deltaTime, grassTime, windSystem);
-    terrainSystem.updateUniforms(currentFrame, camera.getPosition(), camera.getViewMatrix(), camera.getProjectionMatrix());
+    terrainSystem.updateUniforms(currentFrame, camera.getPosition(), camera.getViewMatrix(), camera.getProjectionMatrix(),
+                                  volumetricSnowSystem.getCascadeParams(), useVolumetricSnow, MAX_SNOW_HEIGHT);
 
     // Update snow mask system - accumulation/melting based on weather type
     bool isSnowing = (weatherSystem.getWeatherType() == 1);  // 1 = snow
@@ -2743,7 +2744,7 @@ UniformBufferObject Renderer::buildUniformBufferData(const Camera& camera, const
     ubo.snowCascade2Params = cascadeParams[2];
     ubo.useVolumetricSnow = useVolumetricSnow ? 1.0f : 0.0f;
     ubo.snowMaxHeight = MAX_SNOW_HEIGHT;
-    ubo.snowPadding1 = 0.0f;
+    ubo.debugSnowDepth = showSnowDepthDebug ? 1.0f : 0.0f;
     ubo.snowPadding2 = 0.0f;
 
     return ubo;

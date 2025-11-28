@@ -65,6 +65,9 @@ public:
     void toggleCascadeDebug() { showCascadeDebug = !showCascadeDebug; }
     bool isShowingCascadeDebug() const { return showCascadeDebug; }
 
+    void toggleSnowDepthDebug() { showSnowDepthDebug = !showSnowDepthDebug; }
+    bool isShowingSnowDepthDebug() const { return showSnowDepthDebug; }
+
     // Cloud style toggle (procedural vs paraboloid LUT hybrid)
     void toggleCloudStyle() { useParaboloidClouds = !useParaboloidClouds; }
     bool isUsingParaboloidClouds() const { return useParaboloidClouds; }
@@ -319,6 +322,7 @@ private:
     int currentDay = 21;  // Summer solstice by default
 
     bool showCascadeDebug = false;         // true = show cascade colors overlay
+    bool showSnowDepthDebug = false;       // true = show snow depth heat map overlay
     bool useParaboloidClouds = true;       // true = paraboloid LUT hybrid, false = procedural
 
     // Player position for grass displacement

@@ -45,7 +45,7 @@ layout(binding = 5) uniform UniformBufferObject {
     vec4 snowCascade2Params;     // xy = origin, z = size, w = texel size
     float useVolumetricSnow;     // 1.0 = use cascades, 0.0 = use legacy mask
     float snowMaxHeight;         // Maximum snow height in meters
-    float snowPadding1;
+    float debugSnowDepth;        // 1.0 = show depth visualization
     float snowPadding2;
 } ubo;
 
@@ -293,6 +293,31 @@ void main() {
     vec3 sunDir = normalize(ubo.sunDirection.xyz);
     vec3 sunColor = ubo.sunColor.rgb * ubo.sunDirection.w;
     vec3 atmosphericColor = applyAerialPerspective(color, ubo.cameraPosition.xyz, normalize(cameraToFrag), viewDistance, sunDir, sunColor);
+
+    // Debug snow depth visualization
+    if (ubo.debugSnowDepth > 0.5 && ubo.useVolumetricSnow > 0.5) {
+        // Color code snow depth: blue (0m) -> cyan -> green -> yellow -> red (max)
+        float normalizedDepth = clamp(snowHeight / ubo.snowMaxHeight, 0.0, 1.0);
+
+        // Heat map colors
+        vec3 depthColor;
+        if (normalizedDepth < 0.25) {
+            // Blue to cyan (0-25%)
+            depthColor = mix(vec3(0.0, 0.0, 0.5), vec3(0.0, 0.5, 1.0), normalizedDepth * 4.0);
+        } else if (normalizedDepth < 0.5) {
+            // Cyan to green (25-50%)
+            depthColor = mix(vec3(0.0, 0.5, 1.0), vec3(0.0, 1.0, 0.0), (normalizedDepth - 0.25) * 4.0);
+        } else if (normalizedDepth < 0.75) {
+            // Green to yellow (50-75%)
+            depthColor = mix(vec3(0.0, 1.0, 0.0), vec3(1.0, 1.0, 0.0), (normalizedDepth - 0.5) * 4.0);
+        } else {
+            // Yellow to red (75-100%)
+            depthColor = mix(vec3(1.0, 1.0, 0.0), vec3(1.0, 0.0, 0.0), (normalizedDepth - 0.75) * 4.0);
+        }
+
+        // Overlay depth color (70% blend)
+        atmosphericColor = mix(atmosphericColor, depthColor, 0.7);
+    }
 
     // Output
     outColor = vec4(atmosphericColor, 1.0);
