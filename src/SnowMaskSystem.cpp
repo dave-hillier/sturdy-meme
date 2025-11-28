@@ -1,0 +1,344 @@
+#include "SnowMaskSystem.h"
+#include "ShaderLoader.h"
+#include "PipelineBuilder.h"
+#include <SDL3/SDL.h>
+#include <cstring>
+#include <array>
+
+bool SnowMaskSystem::init(const InitInfo& info) {
+    SystemLifecycleHelper::Hooks hooks{};
+    hooks.createBuffers = [this]() { return createBuffers(); };
+    hooks.createComputeDescriptorSetLayout = [this]() { return createComputeDescriptorSetLayout(); };
+    hooks.createComputePipeline = [this]() { return createComputePipeline(); };
+    hooks.createGraphicsDescriptorSetLayout = []() { return true; };  // No graphics pipeline
+    hooks.createGraphicsPipeline = []() { return true; };             // No graphics pipeline
+    hooks.createDescriptorSets = [this]() { return createDescriptorSets(); };
+    hooks.destroyBuffers = [this](VmaAllocator allocator) { destroyBuffers(allocator); };
+    hooks.usesGraphicsPipeline = []() { return false; };  // Compute-only system
+
+    return lifecycle.init(info, hooks);
+}
+
+void SnowMaskSystem::destroy(VkDevice dev, VmaAllocator alloc) {
+    vkDestroySampler(dev, snowMaskSampler, nullptr);
+    vkDestroyImageView(dev, snowMaskView, nullptr);
+    vmaDestroyImage(alloc, snowMaskImage, snowMaskAllocation);
+
+    lifecycle.destroy(dev, alloc);
+}
+
+void SnowMaskSystem::destroyBuffers(VmaAllocator alloc) {
+    BufferUtils::destroyBuffers(alloc, uniformBuffers);
+    BufferUtils::destroyBuffers(alloc, interactionBuffers);
+}
+
+bool SnowMaskSystem::createBuffers() {
+    VkDeviceSize uniformBufferSize = sizeof(SnowMaskUniforms);
+    VkDeviceSize interactionBufferSize = sizeof(SnowInteractionSource) * MAX_INTERACTIONS;
+
+    BufferUtils::PerFrameBufferBuilder uniformBuilder;
+    if (!uniformBuilder.setAllocator(getAllocator())
+             .setFrameCount(getFramesInFlight())
+             .setSize(uniformBufferSize)
+             .build(uniformBuffers)) {
+        SDL_Log("Failed to create snow mask uniform buffers");
+        return false;
+    }
+
+    BufferUtils::PerFrameBufferBuilder interactionBuilder;
+    if (!interactionBuilder.setAllocator(getAllocator())
+             .setFrameCount(getFramesInFlight())
+             .setSize(interactionBufferSize)
+             .setUsage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+             .build(interactionBuffers)) {
+        SDL_Log("Failed to create snow interaction buffers");
+        return false;
+    }
+
+    return createSnowMaskTexture();
+}
+
+bool SnowMaskSystem::createSnowMaskTexture() {
+    // Create snow mask texture (R16F, single channel for coverage 0-1)
+    VkImageCreateInfo imageInfo{};
+    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    imageInfo.imageType = VK_IMAGE_TYPE_2D;
+    imageInfo.extent.width = SNOW_MASK_SIZE;
+    imageInfo.extent.height = SNOW_MASK_SIZE;
+    imageInfo.extent.depth = 1;
+    imageInfo.mipLevels = 1;
+    imageInfo.arrayLayers = 1;
+    imageInfo.format = VK_FORMAT_R16_SFLOAT;  // R16F for coverage value
+    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    imageInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+
+    if (vmaCreateImage(getAllocator(), &imageInfo, &allocInfo,
+                       &snowMaskImage, &snowMaskAllocation, nullptr) != VK_SUCCESS) {
+        SDL_Log("Failed to create snow mask image");
+        return false;
+    }
+
+    // Create image view
+    VkImageViewCreateInfo viewInfo{};
+    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewInfo.image = snowMaskImage;
+    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format = VK_FORMAT_R16_SFLOAT;
+    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.subresourceRange.baseMipLevel = 0;
+    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.baseArrayLayer = 0;
+    viewInfo.subresourceRange.layerCount = 1;
+
+    if (vkCreateImageView(getDevice(), &viewInfo, nullptr, &snowMaskView) != VK_SUCCESS) {
+        SDL_Log("Failed to create snow mask image view");
+        return false;
+    }
+
+    // Create sampler for other systems to sample the snow mask
+    VkSamplerCreateInfo samplerInfo{};
+    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    samplerInfo.magFilter = VK_FILTER_LINEAR;
+    samplerInfo.minFilter = VK_FILTER_LINEAR;
+    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.anisotropyEnable = VK_FALSE;
+    samplerInfo.maxAnisotropy = 1.0f;
+    samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
+    samplerInfo.unnormalizedCoordinates = VK_FALSE;
+    samplerInfo.compareEnable = VK_FALSE;
+    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    samplerInfo.mipLodBias = 0.0f;
+    samplerInfo.minLod = 0.0f;
+    samplerInfo.maxLod = 0.0f;
+
+    if (vkCreateSampler(getDevice(), &samplerInfo, nullptr, &snowMaskSampler) != VK_SUCCESS) {
+        SDL_Log("Failed to create snow mask sampler");
+        return false;
+    }
+
+    return true;
+}
+
+bool SnowMaskSystem::createComputeDescriptorSetLayout() {
+    PipelineBuilder builder(getDevice());
+    // binding 0: snow mask storage image (read/write)
+    builder.addDescriptorBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT)
+    // binding 1: uniform buffer
+           .addDescriptorBinding(1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT)
+    // binding 2: interaction sources SSBO
+           .addDescriptorBinding(2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT);
+
+    return builder.buildDescriptorSetLayout(getComputePipelineHandles().descriptorSetLayout);
+}
+
+bool SnowMaskSystem::createComputePipeline() {
+    PipelineBuilder builder(getDevice());
+    builder.addShaderStage(getShaderPath() + "/snow_accumulation.comp.spv", VK_SHADER_STAGE_COMPUTE_BIT);
+
+    if (!builder.buildPipelineLayout({getComputePipelineHandles().descriptorSetLayout},
+                                      getComputePipelineHandles().pipelineLayout)) {
+        return false;
+    }
+
+    return builder.buildComputePipeline(getComputePipelineHandles().pipelineLayout,
+                                         getComputePipelineHandles().pipeline);
+}
+
+bool SnowMaskSystem::createDescriptorSets() {
+    computeDescriptorSets.resize(getFramesInFlight());
+
+    std::vector<VkDescriptorSetLayout> layouts(getFramesInFlight(),
+                                                getComputePipelineHandles().descriptorSetLayout);
+
+    VkDescriptorSetAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocInfo.descriptorPool = getDescriptorPool();
+    allocInfo.descriptorSetCount = static_cast<uint32_t>(layouts.size());
+    allocInfo.pSetLayouts = layouts.data();
+
+    if (vkAllocateDescriptorSets(getDevice(), &allocInfo, computeDescriptorSets.data()) != VK_SUCCESS) {
+        SDL_Log("Failed to allocate snow mask descriptor sets");
+        return false;
+    }
+
+    // Update descriptor sets with image binding (same image for all frames)
+    VkDescriptorImageInfo imageInfo{};
+    imageInfo.imageView = snowMaskView;
+    imageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+    for (uint32_t i = 0; i < getFramesInFlight(); i++) {
+        VkDescriptorBufferInfo uniformInfo{};
+        uniformInfo.buffer = uniformBuffers.buffers[i];
+        uniformInfo.offset = 0;
+        uniformInfo.range = sizeof(SnowMaskUniforms);
+
+        VkDescriptorBufferInfo interactionInfo{};
+        interactionInfo.buffer = interactionBuffers.buffers[i];
+        interactionInfo.offset = 0;
+        interactionInfo.range = sizeof(SnowInteractionSource) * MAX_INTERACTIONS;
+
+        std::array<VkWriteDescriptorSet, 3> writes{};
+
+        // Snow mask storage image
+        writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[0].dstSet = computeDescriptorSets[i];
+        writes[0].dstBinding = 0;
+        writes[0].dstArrayElement = 0;
+        writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        writes[0].descriptorCount = 1;
+        writes[0].pImageInfo = &imageInfo;
+
+        // Uniform buffer
+        writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[1].dstSet = computeDescriptorSets[i];
+        writes[1].dstBinding = 1;
+        writes[1].dstArrayElement = 0;
+        writes[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        writes[1].descriptorCount = 1;
+        writes[1].pBufferInfo = &uniformInfo;
+
+        // Interaction sources buffer
+        writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[2].dstSet = computeDescriptorSets[i];
+        writes[2].dstBinding = 2;
+        writes[2].dstArrayElement = 0;
+        writes[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[2].descriptorCount = 1;
+        writes[2].pBufferInfo = &interactionInfo;
+
+        vkUpdateDescriptorSets(getDevice(), static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+    }
+
+    return true;
+}
+
+void SnowMaskSystem::updateUniforms(uint32_t frameIndex, float deltaTime, bool isSnowing,
+                                     float weatherIntensity, const EnvironmentSettings& settings) {
+    maskSize = settings.snowMaskSize;
+
+    float texelSize = maskSize / static_cast<float>(SNOW_MASK_SIZE);
+
+    SnowMaskUniforms uniforms{};
+    uniforms.maskRegion = glm::vec4(maskOrigin.x, maskOrigin.y, maskSize, texelSize);
+    uniforms.accumulationParams = glm::vec4(
+        settings.snowAccumulationRate,
+        settings.snowMeltRate,
+        deltaTime,
+        isSnowing ? 1.0f : 0.0f
+    );
+    uniforms.snowParams = glm::vec4(
+        settings.snowAmount,
+        weatherIntensity,
+        static_cast<float>(currentInteractions.size()),
+        0.0f
+    );
+
+    memcpy(uniformBuffers.mappedPointers[frameIndex], &uniforms, sizeof(SnowMaskUniforms));
+
+    // Copy interaction sources to buffer
+    if (!currentInteractions.empty()) {
+        size_t copySize = sizeof(SnowInteractionSource) * std::min(currentInteractions.size(),
+                                                                    static_cast<size_t>(MAX_INTERACTIONS));
+        memcpy(interactionBuffers.mappedPointers[frameIndex], currentInteractions.data(), copySize);
+    }
+}
+
+void SnowMaskSystem::addInteraction(const glm::vec3& position, float radius, float strength) {
+    if (currentInteractions.size() >= MAX_INTERACTIONS) {
+        return;
+    }
+
+    SnowInteractionSource source{};
+    source.positionAndRadius = glm::vec4(position, radius);
+    source.strengthAndShape = glm::vec4(strength, 0.0f, 0.0f, 0.0f);  // Circle shape
+
+    currentInteractions.push_back(source);
+}
+
+void SnowMaskSystem::clearInteractions() {
+    currentInteractions.clear();
+}
+
+void SnowMaskSystem::setMaskCenter(const glm::vec3& worldPos) {
+    // Center the mask on the world position
+    maskOrigin = glm::vec2(worldPos.x - maskSize * 0.5f, worldPos.z - maskSize * 0.5f);
+}
+
+void SnowMaskSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) {
+    // Transition snow mask image to general layout for compute write
+    VkImageMemoryBarrier imageBarrier{};
+    imageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    imageBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    imageBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    imageBarrier.image = snowMaskImage;
+    imageBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    imageBarrier.subresourceRange.baseMipLevel = 0;
+    imageBarrier.subresourceRange.levelCount = 1;
+    imageBarrier.subresourceRange.baseArrayLayer = 0;
+    imageBarrier.subresourceRange.layerCount = 1;
+    imageBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    imageBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+
+    VkPipelineStageFlags srcStage;
+    if (isFirstFrame) {
+        // First frame: image is in undefined state
+        imageBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        imageBarrier.srcAccessMask = 0;
+        srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+    } else {
+        // Subsequent frames: image was left in SHADER_READ_ONLY_OPTIMAL
+        imageBarrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        imageBarrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        srcStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    }
+
+    vkCmdPipelineBarrier(cmd,
+                         srcStage,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &imageBarrier);
+
+    // Bind compute pipeline and descriptor set
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, getComputePipelineHandles().pipeline);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                            getComputePipelineHandles().pipelineLayout, 0, 1,
+                            &computeDescriptorSets[frameIndex], 0, nullptr);
+
+    // Dispatch: 512x512 / 16x16 = 32x32 workgroups
+    uint32_t workgroupCount = SNOW_MASK_SIZE / WORKGROUP_SIZE;
+    vkCmdDispatch(cmd, workgroupCount, workgroupCount, 1);
+
+    // Transition snow mask to shader read optimal for fragment shaders
+    VkImageMemoryBarrier readBarrier{};
+    readBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    readBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    readBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    readBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    readBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    readBarrier.image = snowMaskImage;
+    readBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    readBarrier.subresourceRange.baseMipLevel = 0;
+    readBarrier.subresourceRange.levelCount = 1;
+    readBarrier.subresourceRange.baseArrayLayer = 0;
+    readBarrier.subresourceRange.layerCount = 1;
+    readBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    readBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(cmd,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &readBarrier);
+
+    // Mark first frame as done
+    isFirstFrame = false;
+
+    // Clear interactions for next frame
+    clearInteractions();
+}

@@ -6,6 +6,7 @@
 #include "lighting_common.glsl"
 #include "shadow_common.glsl"
 #include "atmosphere_common.glsl"
+#include "snow_common.glsl"
 
 layout(binding = 0) uniform UniformBufferObject {
     mat4 model;
@@ -26,6 +27,12 @@ layout(binding = 0) uniform UniformBufferObject {
     float shadowMapSize;
     float debugCascades;
     float julianDay;                       // Julian day for sidereal rotation
+    float cloudStyle;
+    float snowAmount;            // Global snow intensity (0-1)
+    float snowRoughness;         // Snow surface roughness
+    float snowTexScale;          // World-space snow texture scale
+    vec4 snowColor;              // rgb = snow color, a = unused
+    vec4 snowMaskParams;         // xy = mask origin, z = mask size, w = unused
 } ubo;
 
 layout(binding = 2) uniform sampler2DArrayShadow shadowMapArray;  // Changed to array for CSM
@@ -43,6 +50,9 @@ layout(std430, binding = 4) readonly buffer LightBuffer {
     uvec4 lightCount;        // x = active light count
     GPULight lights[MAX_LIGHTS];
 } lightBuffer;
+
+// Snow mask texture (world-space coverage)
+layout(binding = 5) uniform sampler2D snowMaskTexture;
 
 layout(location = 0) in vec3 fragColor;
 layout(location = 1) in vec3 fragNormal;
@@ -128,6 +138,21 @@ void main() {
     // Subtle brightness variation per clump
     float brightnessVar = 0.9 + fragClumpId * 0.2;  // 0.9 to 1.1
     albedo *= mix(1.0, brightnessVar, CLUMP_COLOR_INFLUENCE);
+
+    // === SNOW LAYER ===
+    // Sample snow mask at world position
+    float snowMaskCoverage = sampleSnowMask(snowMaskTexture, fragWorldPos,
+                                             ubo.snowMaskParams.xy, ubo.snowMaskParams.z);
+
+    // Calculate vegetation snow coverage - tips catch more snow than stems
+    // fragHeight: 0 at base, 1 at tip
+    float snowAffinity = fragHeight;  // Tips catch more snow
+    float snowCoverage = calculateVegetationSnowCoverage(ubo.snowAmount, snowMaskCoverage, N, snowAffinity);
+
+    // Apply snow to grass albedo
+    if (snowCoverage > 0.01) {
+        albedo = snowyVegetationColor(albedo, ubo.snowColor.rgb, snowCoverage);
+    }
 
     // === SUN LIGHTING ===
     vec3 sunL = normalize(ubo.sunDirection.xyz);

@@ -6,5 +6,5 @@
 - always ensure that the build both compiles and runs without crashing before considering it done
 - shaders can be compiled by running cmake
 - compile with `cmake --preset debug && cmake --build build/debug`
-- run with `./run-debug.sh`
+- run with `./run-debug.sh` do not attempt to combine with timeouts or sleeps
 - Prefer composition over inheritance - assume pretty much all of the time you want to use inheritance you are wrong.

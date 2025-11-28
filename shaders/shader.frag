@@ -6,6 +6,7 @@
 #include "lighting_common.glsl"
 #include "shadow_common.glsl"
 #include "atmosphere_common.glsl"
+#include "snow_common.glsl"
 
 layout(binding = 0) uniform UniformBufferObject {
     mat4 model;
@@ -26,6 +27,12 @@ layout(binding = 0) uniform UniformBufferObject {
     float shadowMapSize;
     float debugCascades;       // 1.0 = show cascade colors
     float julianDay;           // Julian day for sidereal rotation
+    float cloudStyle;
+    float snowAmount;            // Global snow intensity (0-1)
+    float snowRoughness;         // Snow surface roughness
+    float snowTexScale;          // World-space snow texture scale
+    vec4 snowColor;              // rgb = snow color, a = unused
+    vec4 snowMaskParams;         // xy = mask origin, z = mask size, w = unused
 } ubo;
 
 layout(binding = 1) uniform sampler2D texSampler;
@@ -34,6 +41,7 @@ layout(binding = 3) uniform sampler2D normalMap;
 layout(binding = 5) uniform sampler2D emissiveMap;
 layout(binding = 6) uniform samplerCubeArrayShadow pointShadowMaps;  // Point light cube shadow maps
 layout(binding = 7) uniform sampler2DArrayShadow spotShadowMaps;     // Spot light shadow maps
+layout(binding = 8) uniform sampler2D snowMaskTexture;               // World-space snow coverage
 
 // GPU light structure (must match CPU GPULight struct)
 struct GPULight {
@@ -252,6 +260,20 @@ void main() {
 
     vec4 texColor = texture(texSampler, fragTexCoord);
     vec3 albedo = texColor.rgb;
+
+    // === SNOW LAYER ===
+    // Sample snow mask at world position
+    float snowMaskCoverage = sampleSnowMask(snowMaskTexture, fragWorldPos,
+                                             ubo.snowMaskParams.xy, ubo.snowMaskParams.z);
+
+    // Calculate snow coverage based on global amount, mask, and surface orientation
+    float snowCoverage = calculateSnowCoverage(ubo.snowAmount, snowMaskCoverage, N);
+
+    // Apply snow layer to albedo
+    // Snow primarily affects visual appearance through color blending
+    if (snowCoverage > 0.01) {
+        albedo = blendSnowAlbedo(albedo, ubo.snowColor.rgb, snowCoverage);
+    }
 
     // Calculate shadow for sun
     vec3 sunL = normalize(ubo.sunDirection.xyz);

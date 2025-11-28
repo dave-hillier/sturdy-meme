@@ -81,6 +81,9 @@ public:
 
     void setEnvironmentSettings(const EnvironmentSettings* settings) { environmentSettings = settings; }
 
+    // Set snow mask texture for snow on grass blades
+    void setSnowMask(VkDevice device, VkImageView snowMaskView, VkSampler snowMaskSampler);
+
 private:
     bool createShadowPipeline();
     bool createBuffers();

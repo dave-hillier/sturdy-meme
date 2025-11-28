@@ -145,6 +145,18 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
 
     if (!sceneManager.init(sceneInfo)) return false;
 
+    // Initialize snow mask system early (before createDescriptorSets, since shader.frag needs binding 8)
+    SnowMaskSystem::InitInfo snowMaskInfo{};
+    snowMaskInfo.device = device;
+    snowMaskInfo.allocator = allocator;
+    snowMaskInfo.renderPass = postProcessSystem.getHDRRenderPass();
+    snowMaskInfo.descriptorPool = descriptorPool;
+    snowMaskInfo.extent = swapchainExtent;
+    snowMaskInfo.shaderPath = resourcePath + "/shaders";
+    snowMaskInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+
+    if (!snowMaskSystem.init(snowMaskInfo)) return false;
+
     if (!createDescriptorSets()) return false;
 
     // Initialize grass system using HDR render pass
@@ -226,6 +238,15 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
 
     // Update weather system descriptor sets with wind buffers
     weatherSystem.updateDescriptorSets(device, uniformBuffers, windBuffers, depthImageView, shadowSampler);
+
+    // Connect snow mask to environment settings (already initialized above)
+    snowMaskSystem.setEnvironmentSettings(environmentSettings);
+
+    // Connect snow mask to terrain system
+    terrainSystem.setSnowMask(device, snowMaskSystem.getSnowMaskView(), snowMaskSystem.getSnowMaskSampler());
+
+    // Connect snow mask to grass system
+    grassSystem.setSnowMask(device, snowMaskSystem.getSnowMaskView(), snowMaskSystem.getSnowMaskSampler());
 
     // Initialize leaf particle system
     LeafSystem::InitInfo leafInfo{};
@@ -374,6 +395,7 @@ void Renderer::shutdown() {
         terrainSystem.destroy(device, allocator);
         windSystem.destroy(device, allocator);
         weatherSystem.destroy(device, allocator);
+        snowMaskSystem.destroy(device, allocator);
         leafSystem.destroy(device, allocator);
         froxelSystem.destroy(device, allocator);
         atmosphereLUTSystem.destroy(device, allocator);
@@ -1584,7 +1606,14 @@ bool Renderer::createDescriptorSetLayout() {
         .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
         .build();
 
-    std::array<VkDescriptorSetLayoutBinding, 8> bindings = {uboLayoutBinding, samplerLayoutBinding, shadowSamplerBinding, normalMapBinding, lightBufferBinding, emissiveMapBinding, pointShadowBinding, spotShadowBinding};
+    VkDescriptorSetLayoutBinding snowMaskBinding{};
+    snowMaskBinding.binding = 8;
+    snowMaskBinding.descriptorCount = 1;
+    snowMaskBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    snowMaskBinding.pImmutableSamplers = nullptr;
+    snowMaskBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    std::array<VkDescriptorSetLayoutBinding, 9> bindings = {uboLayoutBinding, samplerLayoutBinding, shadowSamplerBinding, normalMapBinding, lightBufferBinding, emissiveMapBinding, pointShadowBinding, spotShadowBinding, snowMaskBinding};
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -2238,7 +2267,12 @@ bool Renderer::createDescriptorSets() {
         spotShadowImageInfo.imageView = spotShadowArrayViews[i];
         spotShadowImageInfo.sampler = spotShadowSampler;
 
-        std::array<VkWriteDescriptorSet, 8> descriptorWrites{};
+        VkDescriptorImageInfo snowMaskImageInfo{};
+        snowMaskImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        snowMaskImageInfo.imageView = snowMaskSystem.getSnowMaskView();
+        snowMaskImageInfo.sampler = snowMaskSystem.getSnowMaskSampler();
+
+        std::array<VkWriteDescriptorSet, 9> descriptorWrites{};
 
         descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         descriptorWrites[0].dstSet = descriptorSets[i];
@@ -2304,6 +2338,14 @@ bool Renderer::createDescriptorSets() {
         descriptorWrites[7].descriptorCount = 1;
         descriptorWrites[7].pImageInfo = &spotShadowImageInfo;
 
+        descriptorWrites[8].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[8].dstSet = descriptorSets[i];
+        descriptorWrites[8].dstBinding = 8;
+        descriptorWrites[8].dstArrayElement = 0;
+        descriptorWrites[8].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[8].descriptorCount = 1;
+        descriptorWrites[8].pImageInfo = &snowMaskImageInfo;
+
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                descriptorWrites.data(), 0, nullptr);
 
@@ -2328,6 +2370,7 @@ bool Renderer::createDescriptorSets() {
         descriptorWrites[5].dstSet = groundDescriptorSets[i];
         descriptorWrites[6].dstSet = groundDescriptorSets[i];
         descriptorWrites[7].dstSet = groundDescriptorSets[i];
+        descriptorWrites[8].dstSet = groundDescriptorSets[i];
 
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                descriptorWrites.data(), 0, nullptr);
@@ -2353,6 +2396,7 @@ bool Renderer::createDescriptorSets() {
         descriptorWrites[5].dstSet = metalDescriptorSets[i];
         descriptorWrites[6].dstSet = metalDescriptorSets[i];
         descriptorWrites[7].dstSet = metalDescriptorSets[i];
+        descriptorWrites[8].dstSet = metalDescriptorSets[i];
 
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                descriptorWrites.data(), 0, nullptr);
@@ -2433,6 +2477,22 @@ void Renderer::render(const Camera& camera) {
     weatherSystem.updateUniforms(currentFrame, camera.getPosition(), viewProj, deltaTime, grassTime, windSystem);
     terrainSystem.updateUniforms(currentFrame, camera.getPosition(), camera.getViewMatrix(), camera.getProjectionMatrix());
 
+    // Update snow mask system - accumulation/melting based on weather type
+    bool isSnowing = (weatherSystem.getWeatherType() == 1);  // 1 = snow
+    float weatherIntensity = weatherSystem.getIntensity();
+    // Auto-adjust snow amount based on weather state
+    if (isSnowing && weatherIntensity > 0.0f) {
+        environmentSettings.snowAmount = glm::min(environmentSettings.snowAmount + environmentSettings.snowAccumulationRate * deltaTime, 1.0f);
+    } else if (environmentSettings.snowAmount > 0.0f) {
+        environmentSettings.snowAmount = glm::max(environmentSettings.snowAmount - environmentSettings.snowMeltRate * deltaTime, 0.0f);
+    }
+    snowMaskSystem.setMaskCenter(camera.getPosition());
+    snowMaskSystem.updateUniforms(currentFrame, deltaTime, isSnowing, weatherIntensity, environmentSettings);
+    // Add player footprint interaction with snow
+    if (environmentSettings.snowAmount > 0.1f) {
+        snowMaskSystem.addInteraction(playerPosition, playerCapsuleRadius * 1.5f, 0.3f);
+    }
+
     // Update leaf system with player position (using camera as player proxy)
     // TODO: Integrate actual player velocity from Player class for proper disruption
     glm::vec3 playerPos = camera.getPosition();
@@ -2460,6 +2520,9 @@ void Renderer::render(const Camera& camera) {
 
     // Weather particle compute pass
     weatherSystem.recordResetAndCompute(cmd, currentFrame, grassTime, deltaTime);
+
+    // Snow mask accumulation compute pass
+    snowMaskSystem.recordCompute(cmd, currentFrame);
 
     // Leaf particle compute pass
     leafSystem.recordResetAndCompute(cmd, currentFrame, grassTime, deltaTime);
@@ -2632,6 +2695,13 @@ UniformBufferObject Renderer::buildUniformBufferData(const Camera& camera, const
     ubo.debugCascades = showCascadeDebug ? 1.0f : 0.0f;
     ubo.julianDay = static_cast<float>(lighting.julianDay);
     ubo.cloudStyle = useParaboloidClouds ? 1.0f : 0.0f;
+
+    // Snow parameters
+    ubo.snowAmount = environmentSettings.snowAmount;
+    ubo.snowRoughness = environmentSettings.snowRoughness;
+    ubo.snowTexScale = environmentSettings.snowTexScale;
+    ubo.snowColor = glm::vec4(environmentSettings.snowColor, 1.0f);
+    ubo.snowMaskParams = glm::vec4(snowMaskSystem.getMaskOrigin(), snowMaskSystem.getMaskSize(), 0.0f);
 
     return ubo;
 }

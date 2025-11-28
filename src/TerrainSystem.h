@@ -87,6 +87,9 @@ public:
                               VkImageView shadowMapView,
                               VkSampler shadowSampler);
 
+    // Set snow mask texture for snow accumulation rendering
+    void setSnowMask(VkDevice device, VkImageView snowMaskView, VkSampler snowMaskSampler);
+
     // Update terrain uniforms for a frame
     void updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos,
                         const glm::mat4& view, const glm::mat4& proj);
