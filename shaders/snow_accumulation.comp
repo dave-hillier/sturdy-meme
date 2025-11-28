@@ -71,6 +71,13 @@ void main() {
     // Load current snow coverage
     float currentCoverage = imageLoad(snowMask, texCoord).r;
 
+    // === INSTANT FILL FOR PREVIEW ===
+    // If snow target is set but mask is empty, instantly fill to enable preview
+    // This happens when user presses key to set snow amount manually
+    if (targetSnowAmount > 0.01 && currentCoverage < 0.01) {
+        currentCoverage = targetSnowAmount;
+    }
+
     // === ACCUMULATION ===
     // When snowing, snow accumulates toward target amount
     if (isSnowing && weatherIntensity > 0.0) {
@@ -85,11 +92,17 @@ void main() {
         }
     }
     // === MELTING ===
-    // When not snowing, snow gradually melts
-    else if (!isSnowing || targetSnowAmount < 0.01) {
-        float effectiveMeltRate = meltRate * deltaTime;
-        currentCoverage -= effectiveMeltRate;
-        currentCoverage = max(currentCoverage, 0.0);
+    // When not snowing or target is low, snow melts toward target
+    if (!isSnowing || targetSnowAmount < currentCoverage) {
+        // If target is 0, melt faster for quick preview
+        float meltMultiplier = (targetSnowAmount < 0.01) ? 10.0 : 1.0;
+        float effectiveMeltRate = meltRate * deltaTime * meltMultiplier;
+
+        // Melt toward target
+        float diff = currentCoverage - targetSnowAmount;
+        if (diff > 0.0) {
+            currentCoverage -= min(effectiveMeltRate, diff);
+        }
     }
 
     // === INTERACTION CLEARING ===

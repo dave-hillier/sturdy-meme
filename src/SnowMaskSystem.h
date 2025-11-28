@@ -106,4 +106,6 @@ private:
     const EnvironmentSettings* environmentSettings = nullptr;
 
     static constexpr uint32_t WORKGROUP_SIZE = 16;  // 16x16 workgroups
+
+    bool isFirstFrame = true;  // Track first frame for layout transitions
 };

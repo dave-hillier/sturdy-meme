@@ -276,8 +276,6 @@ void SnowMaskSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) {
     // Transition snow mask image to general layout for compute write
     VkImageMemoryBarrier imageBarrier{};
     imageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    imageBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    imageBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
     imageBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     imageBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     imageBarrier.image = snowMaskImage;
@@ -286,11 +284,24 @@ void SnowMaskSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) {
     imageBarrier.subresourceRange.levelCount = 1;
     imageBarrier.subresourceRange.baseArrayLayer = 0;
     imageBarrier.subresourceRange.layerCount = 1;
-    imageBarrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    imageBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
     imageBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
 
+    VkPipelineStageFlags srcStage;
+    if (isFirstFrame) {
+        // First frame: image is in undefined state
+        imageBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        imageBarrier.srcAccessMask = 0;
+        srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+    } else {
+        // Subsequent frames: image was left in SHADER_READ_ONLY_OPTIMAL
+        imageBarrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        imageBarrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        srcStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    }
+
     vkCmdPipelineBarrier(cmd,
-                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                         srcStage,
                          VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                          0, 0, nullptr, 0, nullptr, 1, &imageBarrier);
 
@@ -324,6 +335,9 @@ void SnowMaskSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) {
                          VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                          VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
                          0, 0, nullptr, 0, nullptr, 1, &readBarrier);
+
+    // Mark first frame as done
+    isFirstFrame = false;
 
     // Clear interactions for next frame
     clearInteractions();
