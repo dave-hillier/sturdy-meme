@@ -111,68 +111,137 @@ void SceneBuilder::createSceneObjects() {
     // Ground disc removed - terrain system provides the ground now
 
     // Wooden crate - slightly shiny, non-metallic
-    sceneObjects.push_back({
-        glm::translate(glm::mat4(1.0f), glm::vec3(2.0f, 0.5f, 0.0f)),
-        &cubeMesh, &crateTexture, 0.4f, 0.0f
-    });
+    sceneObjects.push_back(RenderableBuilder()
+        .atPosition(glm::vec3(2.0f, 0.5f, 0.0f))
+        .withMesh(&cubeMesh)
+        .withTexture(&crateTexture)
+        .withRoughness(0.4f)
+        .withMetallic(0.0f)
+        .build());
 
     // Rotated wooden crate
     glm::mat4 rotatedCube = glm::translate(glm::mat4(1.0f), glm::vec3(-1.5f, 0.5f, 1.0f));
     rotatedCube = glm::rotate(rotatedCube, glm::radians(30.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-    sceneObjects.push_back({rotatedCube, &cubeMesh, &crateTexture, 0.4f, 0.0f});
+    sceneObjects.push_back(RenderableBuilder()
+        .withTransform(rotatedCube)
+        .withMesh(&cubeMesh)
+        .withTexture(&crateTexture)
+        .withRoughness(0.4f)
+        .withMetallic(0.0f)
+        .build());
 
     // Polished metal sphere - smooth, fully metallic
-    sceneObjects.push_back({
-        glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.5f, -2.0f)),
-        &sphereMesh, &metalTexture, 0.1f, 1.0f
-    });
+    sceneObjects.push_back(RenderableBuilder()
+        .atPosition(glm::vec3(0.0f, 0.5f, -2.0f))
+        .withMesh(&sphereMesh)
+        .withTexture(&metalTexture)
+        .withRoughness(0.1f)
+        .withMetallic(1.0f)
+        .build());
 
     // Rough/brushed metal sphere - moderately rough, metallic
-    sceneObjects.push_back({
-        glm::translate(glm::mat4(1.0f), glm::vec3(-3.0f, 0.5f, -1.0f)),
-        &sphereMesh, &metalTexture, 0.5f, 1.0f
-    });
+    sceneObjects.push_back(RenderableBuilder()
+        .atPosition(glm::vec3(-3.0f, 0.5f, -1.0f))
+        .withMesh(&sphereMesh)
+        .withTexture(&metalTexture)
+        .withRoughness(0.5f)
+        .withMetallic(1.0f)
+        .build());
 
     // Polished metal cube - smooth, fully metallic
-    sceneObjects.push_back({
-        glm::translate(glm::mat4(1.0f), glm::vec3(3.0f, 0.5f, -2.0f)),
-        &cubeMesh, &metalTexture, 0.1f, 1.0f
-    });
+    sceneObjects.push_back(RenderableBuilder()
+        .atPosition(glm::vec3(3.0f, 0.5f, -2.0f))
+        .withMesh(&cubeMesh)
+        .withTexture(&metalTexture)
+        .withRoughness(0.1f)
+        .withMetallic(1.0f)
+        .build());
 
     // Brushed metal cube - rough, metallic
     glm::mat4 brushedCube = glm::translate(glm::mat4(1.0f), glm::vec3(-3.0f, 0.5f, -3.0f));
     brushedCube = glm::rotate(brushedCube, glm::radians(45.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-    sceneObjects.push_back({brushedCube, &cubeMesh, &metalTexture, 0.6f, 1.0f});
+    sceneObjects.push_back(RenderableBuilder()
+        .withTransform(brushedCube)
+        .withMesh(&cubeMesh)
+        .withTexture(&metalTexture)
+        .withRoughness(0.6f)
+        .withMetallic(1.0f)
+        .build());
 
     // Glowing emissive sphere on top of the first crate - demonstrates bloom effect
     glm::mat4 glowingSphereTransform = glm::translate(glm::mat4(1.0f), glm::vec3(2.0f, 1.3f, 0.0f));
     glowingSphereTransform = glm::scale(glowingSphereTransform, glm::vec3(0.3f));
-    sceneObjects.push_back({glowingSphereTransform, &sphereMesh, &metalTexture, 0.2f, 0.0f, 25.0f, glm::vec3(1.0f, 0.9f, 0.7f), false});
+    sceneObjects.push_back(RenderableBuilder()
+        .withTransform(glowingSphereTransform)
+        .withMesh(&sphereMesh)
+        .withTexture(&metalTexture)
+        .withRoughness(0.2f)
+        .withMetallic(0.0f)
+        .withEmissiveIntensity(25.0f)
+        .withEmissiveColor(glm::vec3(1.0f, 0.9f, 0.7f))
+        .withCastsShadow(false)
+        .build());
 
     // Blue light indicator sphere - saturated blue, lower intensity to preserve color
     glm::mat4 blueLightTransform = glm::translate(glm::mat4(1.0f), glm::vec3(-3.0f, 2.0f, 2.0f));
     blueLightTransform = glm::scale(blueLightTransform, glm::vec3(0.2f));
-    sceneObjects.push_back({blueLightTransform, &sphereMesh, &metalTexture, 0.2f, 0.0f, 4.0f, glm::vec3(0.0f, 0.3f, 1.0f), false});
+    sceneObjects.push_back(RenderableBuilder()
+        .withTransform(blueLightTransform)
+        .withMesh(&sphereMesh)
+        .withTexture(&metalTexture)
+        .withRoughness(0.2f)
+        .withMetallic(0.0f)
+        .withEmissiveIntensity(4.0f)
+        .withEmissiveColor(glm::vec3(0.0f, 0.3f, 1.0f))
+        .withCastsShadow(false)
+        .build());
 
     // Green light indicator sphere - saturated green, lower intensity to preserve color
     glm::mat4 greenLightTransform = glm::translate(glm::mat4(1.0f), glm::vec3(4.0f, 1.5f, -2.0f));
     greenLightTransform = glm::scale(greenLightTransform, glm::vec3(0.2f));
-    sceneObjects.push_back({greenLightTransform, &sphereMesh, &metalTexture, 0.2f, 0.0f, 3.0f, glm::vec3(0.0f, 1.0f, 0.2f), false});
+    sceneObjects.push_back(RenderableBuilder()
+        .withTransform(greenLightTransform)
+        .withMesh(&sphereMesh)
+        .withTexture(&metalTexture)
+        .withRoughness(0.2f)
+        .withMetallic(0.0f)
+        .withEmissiveIntensity(3.0f)
+        .withEmissiveColor(glm::vec3(0.0f, 1.0f, 0.2f))
+        .withCastsShadow(false)
+        .build());
 
     // Player capsule - centered at origin, uses metal texture for visibility
     playerObjectIndex = sceneObjects.size();
-    glm::mat4 playerTransform = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.9f, 0.0f));
-    sceneObjects.push_back({playerTransform, &capsuleMesh, &metalTexture, 0.3f, 0.8f, 0.0f, glm::vec3(1.0f), true});
+    sceneObjects.push_back(RenderableBuilder()
+        .atPosition(glm::vec3(0.0f, 0.9f, 0.0f))
+        .withMesh(&capsuleMesh)
+        .withTexture(&metalTexture)
+        .withRoughness(0.3f)
+        .withMetallic(0.8f)
+        .withCastsShadow(true)
+        .build());
 
     // Flag pole - positioned at (5, 1.5, 0) so the 3m pole sits on the ground
     flagPoleIndex = sceneObjects.size();
-    glm::mat4 flagPoleTransform = glm::translate(glm::mat4(1.0f), glm::vec3(5.0f, 1.5f, 0.0f));
-    sceneObjects.push_back({flagPoleTransform, &flagPoleMesh, &metalTexture, 0.4f, 0.9f, 0.0f, glm::vec3(1.0f), true});
+    sceneObjects.push_back(RenderableBuilder()
+        .atPosition(glm::vec3(5.0f, 1.5f, 0.0f))
+        .withMesh(&flagPoleMesh)
+        .withTexture(&metalTexture)
+        .withRoughness(0.4f)
+        .withMetallic(0.9f)
+        .withCastsShadow(true)
+        .build());
 
     // Flag cloth - will be positioned and updated by ClothSimulation
     flagClothIndex = sceneObjects.size();
-    glm::mat4 flagClothTransform = glm::mat4(1.0f);  // Identity, will be handled differently
-    sceneObjects.push_back({flagClothTransform, &flagClothMesh, &crateTexture, 0.6f, 0.0f, 0.0f, glm::vec3(1.0f), true});
+    sceneObjects.push_back(RenderableBuilder()
+        .withTransform(glm::mat4(1.0f))  // Identity, will be handled differently
+        .withMesh(&flagClothMesh)
+        .withTexture(&crateTexture)
+        .withRoughness(0.6f)
+        .withMetallic(0.0f)
+        .withCastsShadow(true)
+        .build());
 }
 
 void SceneBuilder::uploadFlagClothMesh(VmaAllocator allocator, VkDevice device, VkCommandPool commandPool, VkQueue queue) {

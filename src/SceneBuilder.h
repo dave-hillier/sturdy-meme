@@ -9,17 +9,10 @@
 
 #include "Mesh.h"
 #include "Texture.h"
+#include "RenderableBuilder.h"
 
-struct SceneObject {
-    glm::mat4 transform;
-    Mesh* mesh;
-    Texture* texture;
-    float roughness = 0.5f;
-    float metallic = 0.0f;
-    float emissiveIntensity = 0.0f;
-    glm::vec3 emissiveColor = glm::vec3(1.0f);  // Default white (uses texture color)
-    bool castsShadow = true;
-};
+// Backward compatibility alias - Renderable is the canonical type
+using SceneObject = Renderable;
 
 // Holds all scene resources (meshes, textures) and provides scene objects
 class SceneBuilder {
