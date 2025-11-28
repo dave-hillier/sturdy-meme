@@ -9,9 +9,13 @@ layout(local_size_x = 4, local_size_y = 4, local_size_z = 1) in;
 layout(binding = 0, rgba16f) readonly uniform image3D scatteringVolume;
 layout(binding = 1, rgba16f) writeonly uniform image3D integratedVolume;
 
+const int NUM_CASCADES = 4;
+
 layout(binding = 2) uniform FroxelUniforms {
     mat4 invViewProj;
     mat4 prevViewProj;
+    mat4 cascadeViewProj[NUM_CASCADES];  // Light-space matrices for shadow cascades
+    vec4 cascadeSplits;                   // View-space split depths
     vec4 cameraPosition;
     vec4 sunDirection;
     vec4 sunColor;
