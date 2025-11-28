@@ -6,27 +6,7 @@
 #include <stdexcept>
 #include <iostream>
 
-// Helper to load shader module
-static VkShaderModule loadShaderModule(VkDevice device, const std::string& path) {
-    auto code = ShaderLoader::readFile(path);
-    if (code.empty()) {
-        std::cerr << "Failed to load shader: " << path << std::endl;
-        return VK_NULL_HANDLE;
-    }
-
-    VkShaderModuleCreateInfo createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    createInfo.codeSize = code.size();
-    createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
-
-    VkShaderModule shaderModule;
-    if (vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
-        std::cerr << "Failed to create shader module: " << path << std::endl;
-        return VK_NULL_HANDLE;
-    }
-
-    return shaderModule;
-}
+using ShaderLoader::loadShaderModule;
 
 bool TerrainSystem::init(const InitInfo& info, const TerrainConfig& cfg) {
     device = info.device;

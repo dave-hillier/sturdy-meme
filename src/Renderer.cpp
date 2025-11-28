@@ -111,6 +111,19 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
 
     if (!postProcessSystem.init(postProcessInfo)) return false;
 
+    // Initialize bloom system
+    BloomSystem::InitInfo bloomInfo{};
+    bloomInfo.device = device;
+    bloomInfo.allocator = allocator;
+    bloomInfo.descriptorPool = descriptorPool;
+    bloomInfo.extent = swapchainExtent;
+    bloomInfo.shaderPath = resourcePath + "/shaders";
+
+    if (!bloomSystem.init(bloomInfo)) return false;
+
+    // Bind bloom texture to post-process system
+    postProcessSystem.setBloomTexture(bloomSystem.getBloomOutput(), bloomSystem.getBloomSampler());
+
     if (!createGraphicsPipeline()) return false;
     if (!createSkyDescriptorSetLayout()) return false;  // Create sky layout before sky pipeline
     if (!createSkyPipeline()) return false;
@@ -360,6 +373,7 @@ void Renderer::shutdown() {
         froxelSystem.destroy(device, allocator);
         atmosphereLUTSystem.destroy(device, allocator);
         postProcessSystem.destroy(device, allocator);
+        bloomSystem.destroy(device, allocator);
 
         vkDestroyPipeline(device, skyPipeline, nullptr);
         vkDestroyPipeline(device, graphicsPipeline, nullptr);
@@ -2500,6 +2514,10 @@ void Renderer::render(const Camera& camera) {
 
     // HDR scene render pass
     recordHDRPass(cmd, currentFrame, grassTime);
+
+    // Multi-pass bloom
+    bloomSystem.setThreshold(postProcessSystem.getBloomThreshold());
+    bloomSystem.recordBloomPass(cmd, postProcessSystem.getHDRColorView());
 
     // Post-process pass
     postProcessSystem.recordPostProcess(cmd, currentFrame, framebuffers[imageIndex], deltaTime);

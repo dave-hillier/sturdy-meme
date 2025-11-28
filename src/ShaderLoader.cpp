@@ -36,4 +36,12 @@ VkShaderModule createShaderModule(VkDevice device, const std::vector<char>& code
     return shaderModule;
 }
 
+VkShaderModule loadShaderModule(VkDevice device, const std::string& path) {
+    auto code = readFile(path);
+    if (code.empty()) {
+        return VK_NULL_HANDLE;
+    }
+    return createShaderModule(device, code);
+}
+
 }

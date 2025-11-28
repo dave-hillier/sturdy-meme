@@ -15,6 +15,7 @@
 #include "WeatherSystem.h"
 #include "LeafSystem.h"
 #include "PostProcessSystem.h"
+#include "BloomSystem.h"
 #include "FroxelSystem.h"
 #include "AtmosphereLUTSystem.h"
 #include "SceneManager.h"
@@ -225,6 +226,7 @@ private:
     WeatherSystem weatherSystem;
     LeafSystem leafSystem;
     PostProcessSystem postProcessSystem;
+    BloomSystem bloomSystem;
     FroxelSystem froxelSystem;
     AtmosphereLUTSystem atmosphereLUTSystem;
     TerrainSystem terrainSystem;
