@@ -268,6 +268,22 @@ void Application::processEvents() {
                     renderer.setFogEnabled(!renderer.isFogEnabled());
                     SDL_Log("Fog: %s", renderer.isFogEnabled() ? "ON" : "OFF");
                 }
+                else if (event.key.scancode == SDL_SCANCODE_COMMA) {
+                    float snow = renderer.getSnowAmount();
+                    renderer.setSnowAmount(std::max(0.0f, snow - 0.1f));
+                    SDL_Log("Snow amount: %.1f", renderer.getSnowAmount());
+                }
+                else if (event.key.scancode == SDL_SCANCODE_PERIOD) {
+                    float snow = renderer.getSnowAmount();
+                    renderer.setSnowAmount(std::min(1.0f, snow + 0.1f));
+                    SDL_Log("Snow amount: %.1f", renderer.getSnowAmount());
+                }
+                else if (event.key.scancode == SDL_SCANCODE_SLASH) {
+                    // Toggle instant snow (full or none)
+                    float snow = renderer.getSnowAmount();
+                    renderer.setSnowAmount(snow < 0.5f ? 1.0f : 0.0f);
+                    SDL_Log("Snow amount: %.1f", renderer.getSnowAmount());
+                }
                 break;
             case SDL_EVENT_GAMEPAD_ADDED:
                 if (!gamepad) {
