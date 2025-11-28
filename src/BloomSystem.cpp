@@ -3,6 +3,9 @@
 #include <array>
 #include <algorithm>
 #include <cmath>
+#include <SDL3/SDL.h>
+
+using ShaderLoader::loadShaderModule;
 
 bool BloomSystem::init(const InitInfo& info) {
     device = info.device;
@@ -11,8 +14,8 @@ bool BloomSystem::init(const InitInfo& info) {
     extent = info.extent;
     shaderPath = info.shaderPath;
 
-    if (!createMipChain()) return false;
     if (!createRenderPass()) return false;
+    if (!createMipChain()) return false;
     if (!createSampler()) return false;
     if (!createDescriptorSetLayouts()) return false;
     if (!createPipelines()) return false;
@@ -33,7 +36,8 @@ void BloomSystem::destroy(VkDevice device, VmaAllocator allocator) {
     if (upsampleDescSetLayout) vkDestroyDescriptorSetLayout(device, upsampleDescSetLayout, nullptr);
 
     if (sampler) vkDestroySampler(device, sampler, nullptr);
-    if (renderPass) vkDestroyRenderPass(device, renderPass, nullptr);
+    if (downsampleRenderPass) vkDestroyRenderPass(device, downsampleRenderPass, nullptr);
+    if (upsampleRenderPass) vkDestroyRenderPass(device, upsampleRenderPass, nullptr);
 
     downsampleDescSets.clear();
     upsampleDescSets.clear();
@@ -104,11 +108,17 @@ bool BloomSystem::createMipChain() {
         mipChain.push_back(mip);
     }
 
+    SDL_Log("BloomSystem: Created %zu mip levels, first mip: %ux%u",
+            mipChain.size(),
+            mipChain.empty() ? 0 : mipChain[0].extent.width,
+            mipChain.empty() ? 0 : mipChain[0].extent.height);
+
     // Create framebuffers for each mip level
+    // Use downsampleRenderPass - both render passes have compatible attachments
     for (auto& mip : mipChain) {
         VkFramebufferCreateInfo fbInfo = {};
         fbInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-        fbInfo.renderPass = renderPass;
+        fbInfo.renderPass = downsampleRenderPass;
         fbInfo.attachmentCount = 1;
         fbInfo.pAttachments = &mip.imageView;
         fbInfo.width = mip.extent.width;
@@ -124,16 +134,6 @@ bool BloomSystem::createMipChain() {
 }
 
 bool BloomSystem::createRenderPass() {
-    VkAttachmentDescription colorAttachment = {};
-    colorAttachment.format = BLOOM_FORMAT;
-    colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
     VkAttachmentReference colorRef = {};
     colorRef.attachment = 0;
     colorRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
@@ -143,7 +143,6 @@ bool BloomSystem::createRenderPass() {
     subpass.colorAttachmentCount = 1;
     subpass.pColorAttachments = &colorRef;
 
-    // Dependency to ensure previous pass has finished writing
     VkSubpassDependency dependency = {};
     dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
     dependency.dstSubpass = 0;
@@ -152,16 +151,59 @@ bool BloomSystem::createRenderPass() {
     dependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
     dependency.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
-    VkRenderPassCreateInfo renderPassInfo = {};
-    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    renderPassInfo.attachmentCount = 1;
-    renderPassInfo.pAttachments = &colorAttachment;
-    renderPassInfo.subpassCount = 1;
-    renderPassInfo.pSubpasses = &subpass;
-    renderPassInfo.dependencyCount = 1;
-    renderPassInfo.pDependencies = &dependency;
+    // Downsample render pass - DONT_CARE since we're writing fresh data
+    {
+        VkAttachmentDescription colorAttachment = {};
+        colorAttachment.format = BLOOM_FORMAT;
+        colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+        colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        colorAttachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-    return vkCreateRenderPass(device, &renderPassInfo, nullptr, &renderPass) == VK_SUCCESS;
+        VkRenderPassCreateInfo renderPassInfo = {};
+        renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+        renderPassInfo.attachmentCount = 1;
+        renderPassInfo.pAttachments = &colorAttachment;
+        renderPassInfo.subpassCount = 1;
+        renderPassInfo.pSubpasses = &subpass;
+        renderPassInfo.dependencyCount = 1;
+        renderPassInfo.pDependencies = &dependency;
+
+        if (vkCreateRenderPass(device, &renderPassInfo, nullptr, &downsampleRenderPass) != VK_SUCCESS) {
+            return false;
+        }
+    }
+
+    // Upsample render pass - LOAD to preserve downsampled content for additive blending
+    {
+        VkAttachmentDescription colorAttachment = {};
+        colorAttachment.format = BLOOM_FORMAT;
+        colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+        colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+        colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        colorAttachment.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        colorAttachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+        VkRenderPassCreateInfo renderPassInfo = {};
+        renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+        renderPassInfo.attachmentCount = 1;
+        renderPassInfo.pAttachments = &colorAttachment;
+        renderPassInfo.subpassCount = 1;
+        renderPassInfo.pSubpasses = &subpass;
+        renderPassInfo.dependencyCount = 1;
+        renderPassInfo.pDependencies = &dependency;
+
+        if (vkCreateRenderPass(device, &renderPassInfo, nullptr, &upsampleRenderPass) != VK_SUCCESS) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 bool BloomSystem::createSampler() {
@@ -346,7 +388,7 @@ bool BloomSystem::createPipelines() {
     downsamplePipelineInfo.pColorBlendState = &colorBlending;
     downsamplePipelineInfo.pDynamicState = &dynamicState;
     downsamplePipelineInfo.layout = downsamplePipelineLayout;
-    downsamplePipelineInfo.renderPass = renderPass;
+    downsamplePipelineInfo.renderPass = downsampleRenderPass;
     downsamplePipelineInfo.subpass = 0;
 
     if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &downsamplePipelineInfo, nullptr, &downsamplePipeline) != VK_SUCCESS) {
@@ -374,7 +416,7 @@ bool BloomSystem::createPipelines() {
     upsamplePipelineInfo.pColorBlendState = &colorBlending;
     upsamplePipelineInfo.pDynamicState = &dynamicState;
     upsamplePipelineInfo.layout = upsamplePipelineLayout;
-    upsamplePipelineInfo.renderPass = renderPass;
+    upsamplePipelineInfo.renderPass = upsampleRenderPass;
     upsamplePipelineInfo.subpass = 0;
 
     if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &upsamplePipelineInfo, nullptr, &upsamplePipeline) != VK_SUCCESS) {
@@ -478,7 +520,7 @@ void BloomSystem::recordBloomPass(VkCommandBuffer cmd, VkImageView hdrInput) {
         // Begin render pass
         VkRenderPassBeginInfo renderPassInfo = {};
         renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        renderPassInfo.renderPass = renderPass;
+        renderPassInfo.renderPass = downsampleRenderPass;
         renderPassInfo.framebuffer = mipChain[i].framebuffer;
         renderPassInfo.renderArea.offset = {0, 0};
         renderPassInfo.renderArea.extent = mipChain[i].extent;
@@ -505,10 +547,17 @@ void BloomSystem::recordBloomPass(VkCommandBuffer cmd, VkImageView hdrInput) {
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, downsamplePipelineLayout,
                                0, 1, &downsampleDescSets[i], 0, nullptr);
 
-        // Push constants
+        // Push constants - use SOURCE resolution for texel size calculation
         DownsamplePushConstants pushConstants = {};
-        pushConstants.resolutionX = static_cast<float>(mipChain[i].extent.width);
-        pushConstants.resolutionY = static_cast<float>(mipChain[i].extent.height);
+        if (i == 0) {
+            // First pass samples from HDR input at full resolution
+            pushConstants.resolutionX = static_cast<float>(extent.width);
+            pushConstants.resolutionY = static_cast<float>(extent.height);
+        } else {
+            // Subsequent passes sample from previous mip level
+            pushConstants.resolutionX = static_cast<float>(mipChain[i - 1].extent.width);
+            pushConstants.resolutionY = static_cast<float>(mipChain[i - 1].extent.height);
+        }
         pushConstants.threshold = threshold;
         pushConstants.isFirstPass = (i == 0) ? 1 : 0;
 
@@ -565,13 +614,10 @@ void BloomSystem::recordBloomPass(VkCommandBuffer cmd, VkImageView hdrInput) {
         // Begin render pass with LOAD operation to preserve downsampled content
         VkRenderPassBeginInfo renderPassInfo = {};
         renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        renderPassInfo.renderPass = renderPass;
+        renderPassInfo.renderPass = upsampleRenderPass;
         renderPassInfo.framebuffer = mipChain[i].framebuffer;
         renderPassInfo.renderArea.offset = {0, 0};
         renderPassInfo.renderArea.extent = mipChain[i].extent;
-
-        // Need to modify render pass to use LOAD instead of DONT_CARE for upsample
-        // For now, the blend mode will handle accumulation
 
         vkCmdBeginRenderPass(cmd, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
@@ -595,10 +641,10 @@ void BloomSystem::recordBloomPass(VkCommandBuffer cmd, VkImageView hdrInput) {
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, upsamplePipelineLayout,
                                0, 1, &upsampleDescSets[i], 0, nullptr);
 
-        // Push constants
+        // Push constants - use SOURCE resolution (the smaller mip being sampled)
         UpsamplePushConstants pushConstants = {};
-        pushConstants.resolutionX = static_cast<float>(mipChain[i].extent.width);
-        pushConstants.resolutionY = static_cast<float>(mipChain[i].extent.height);
+        pushConstants.resolutionX = static_cast<float>(mipChain[i + 1].extent.width);
+        pushConstants.resolutionY = static_cast<float>(mipChain[i + 1].extent.height);
         pushConstants.filterRadius = 1.0f;
 
         vkCmdPushConstants(cmd, upsamplePipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT,

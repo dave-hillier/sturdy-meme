@@ -61,7 +61,8 @@ private:
 
     std::vector<MipLevel> mipChain;
 
-    VkRenderPass renderPass = VK_NULL_HANDLE;
+    VkRenderPass downsampleRenderPass = VK_NULL_HANDLE;
+    VkRenderPass upsampleRenderPass = VK_NULL_HANDLE;
     VkSampler sampler = VK_NULL_HANDLE;
 
     // Downsample pipeline

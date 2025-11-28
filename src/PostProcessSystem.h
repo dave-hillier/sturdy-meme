@@ -149,8 +149,8 @@ private:
     float adaptedLuminance = 0.18f;  // Middle gray target
 
     // Bloom parameters
-    float bloomThreshold = 1.0f;   // Brightness threshold for bloom
-    float bloomIntensity = 0.3f;   // Bloom strength
+    float bloomThreshold = 0.8f;   // Brightness threshold for bloom
+    float bloomIntensity = 0.7f;   // Bloom strength
     float bloomRadius = 4.0f;      // Bloom sample radius
 
     // God ray parameters (Phase 4.4)
