@@ -2158,19 +2158,19 @@ void Renderer::updateLightBuffer(uint32_t currentImage, const Camera& camera) {
 bool Renderer::createDescriptorPool() {
     std::array<VkDescriptorPoolSize, 4> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 16);  // +2 for post-process, +2 for grass, +4 for weather, +2 for sky, +2 for cloud map
+    poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 18);  // +2 for post-process, +2 for grass, +4 for weather, +2 for sky, +2 for cloud map, +2 histogram
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 35);  // diffuse + shadow + normal + emissive + HDR + grass + weather + dynamic shadows + sky LUTs + cloud map
     poolSizes[2].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    poolSizes[2].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 28);  // +6 grass, +6 light, +10 weather (5 compute + 2 graphics × 2 sets)
+    poolSizes[2].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 32);  // +6 grass, +6 light, +10 weather, +4 histogram (histogram + exposure buffers)
     poolSizes[3].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    poolSizes[3].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 10);  // atmosphere LUTs compute shaders + cloud map
+    poolSizes[3].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 12);  // atmosphere LUTs compute shaders + cloud map + histogram HDR input
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
     poolInfo.pPoolSizes = poolSizes.data();
-    poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 25);  // +6 grass, +4 weather, +2 sky, +5 atmosphere LUTs
+    poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 29);  // +6 grass, +4 weather, +2 sky, +5 atmosphere LUTs, +4 histogram
 
     if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS) {
         SDL_Log("Failed to create descriptor pool");

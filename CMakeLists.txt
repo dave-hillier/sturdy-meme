@@ -99,6 +99,8 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/multiscatter_lut.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/skyview_lut.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cloudmap_lut.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_build.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_reduce.comp.spv
 )
 
 set(TERRAIN_SHADER_FILES
@@ -286,6 +288,20 @@ if(SHADER_COMPILE_CMD)
         COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/leaf.frag.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/leaf.frag
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/leaf.frag
         COMMENT "Compiling leaf fragment shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_build.comp.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_build.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_build.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_build.comp
+        COMMENT "Compiling histogram build compute shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_reduce.comp.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_reduce.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_reduce.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_reduce.comp
+        COMMENT "Compiling histogram reduce compute shader"
+    )
+    add_custom_command(
         OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp.spv
         COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp ${CMAKE_CURRENT_SOURCE_DIR}/shaders/atmosphere_common.glsl
@@ -402,6 +418,8 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/multiscatter_lut.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/skyview_lut.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_build.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_reduce.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_dispatcher.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_subdivision.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_sum_reduction_prepass.comp.spv

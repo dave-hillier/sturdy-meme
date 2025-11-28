@@ -1,0 +1,81 @@
+#version 450
+
+// Histogram Build Compute Shader
+// Builds a 256-bin luminance histogram from the HDR image
+// Uses log-space binning for better HDR coverage
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+// HDR input image
+layout(binding = 0, rgba16f) uniform readonly image2D hdrImage;
+
+// Histogram buffer (256 bins)
+layout(std430, binding = 1) buffer HistogramBuffer {
+    uint histogram[256];
+};
+
+// Parameters
+layout(binding = 2) uniform HistogramParams {
+    float minLogLum;      // Minimum log luminance (e.g., -8.0)
+    float maxLogLum;      // Maximum log luminance (e.g., 4.0)
+    float invLogLumRange; // 1.0 / (maxLogLum - minLogLum)
+    uint pixelCount;      // Total pixel count for normalization
+};
+
+// Shared memory for local histogram accumulation
+shared uint localHistogram[256];
+
+// Compute luminance using standard Rec. 709 coefficients
+float getLuminance(vec3 color) {
+    return dot(color, vec3(0.2126, 0.7152, 0.0722));
+}
+
+// Map luminance to histogram bin (0-255)
+uint luminanceToBin(float luminance) {
+    if (luminance < 0.001) {
+        return 0;  // Very dark pixels go to bin 0
+    }
+
+    // Log-space mapping for better HDR coverage
+    float logLum = log2(luminance);
+
+    // Normalize to [0, 1] range
+    float normalized = (logLum - minLogLum) * invLogLumRange;
+    normalized = clamp(normalized, 0.0, 1.0);
+
+    // Map to bin index (0-255)
+    return uint(normalized * 255.0);
+}
+
+void main() {
+    // Initialize shared memory histogram
+    uint localIndex = gl_LocalInvocationIndex;
+    if (localIndex < 256) {
+        localHistogram[localIndex] = 0;
+    }
+    barrier();
+
+    // Get image dimensions
+    ivec2 imageSize = imageSize(hdrImage);
+    ivec2 pixelCoord = ivec2(gl_GlobalInvocationID.xy);
+
+    // Process pixel if within bounds
+    if (pixelCoord.x < imageSize.x && pixelCoord.y < imageSize.y) {
+        vec4 hdrColor = imageLoad(hdrImage, pixelCoord);
+        float luminance = getLuminance(hdrColor.rgb);
+
+        // Get histogram bin and increment local histogram
+        uint bin = luminanceToBin(luminance);
+        atomicAdd(localHistogram[bin], 1);
+    }
+
+    // Wait for all threads to finish
+    barrier();
+
+    // Merge local histogram into global histogram
+    if (localIndex < 256) {
+        if (localHistogram[localIndex] > 0) {
+            atomicAdd(histogram[localIndex], localHistogram[localIndex]);
+        }
+    }
+}

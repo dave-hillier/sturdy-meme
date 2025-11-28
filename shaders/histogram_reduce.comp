@@ -1,0 +1,166 @@
+#version 450
+
+// Histogram Reduce Compute Shader
+// Reduces the 256-bin histogram to compute average luminance
+// Uses percentile clamping to ignore extreme values for stable exposure
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+// Histogram input (256 bins)
+layout(std430, binding = 0) readonly buffer HistogramBuffer {
+    uint histogram[256];
+};
+
+// Output: computed exposure value
+layout(std430, binding = 1) buffer ExposureBuffer {
+    float averageLuminance;    // Computed average luminance (geometric mean)
+    float exposureValue;       // Computed exposure EV
+    float previousExposure;    // Previous frame's exposure for smoothing
+    float adaptedExposure;     // Temporally adapted exposure
+};
+
+// Parameters
+layout(binding = 2) uniform HistogramParams {
+    float minLogLum;      // Minimum log luminance (e.g., -8.0)
+    float maxLogLum;      // Maximum log luminance (e.g., 4.0)
+    float invLogLumRange; // 1.0 / (maxLogLum - minLogLum)
+    uint pixelCount;      // Total pixel count
+    float lowPercentile;  // Ignore darkest N% (e.g., 0.4 = 40%)
+    float highPercentile; // Ignore brightest N% (e.g., 0.95 = keep up to 95%)
+    float targetLuminance;// Target middle gray (0.18)
+    float deltaTime;      // Frame delta time for temporal adaptation
+    float adaptSpeedUp;   // Adaptation speed when brightening
+    float adaptSpeedDown; // Adaptation speed when darkening
+    float minExposure;    // Minimum exposure EV
+    float maxExposure;    // Maximum exposure EV
+};
+
+// Shared memory for parallel reduction
+shared uint sharedHistogram[256];
+shared float sharedWeightedSum[256];
+shared float sharedWeight[256];
+
+// Convert bin index to log luminance value
+float binToLogLuminance(uint bin) {
+    float normalized = float(bin) / 255.0;
+    return minLogLum + normalized * (maxLogLum - minLogLum);
+}
+
+void main() {
+    uint bin = gl_LocalInvocationIndex;
+
+    // Step 1: Load histogram and compute prefix sum
+    sharedHistogram[bin] = histogram[bin];
+    barrier();
+
+    // Parallel prefix sum (Blelloch scan - up-sweep)
+    for (uint stride = 1; stride < 256; stride *= 2) {
+        uint idx = (bin + 1) * stride * 2 - 1;
+        if (idx < 256) {
+            sharedHistogram[idx] += sharedHistogram[idx - stride];
+        }
+        barrier();
+    }
+
+    // Clear last element for down-sweep
+    if (bin == 0) {
+        sharedHistogram[255] = 0;
+    }
+    barrier();
+
+    // Swap values for exclusive scan (we need inclusive, so we'll adjust)
+    // Actually, let's use a simpler inclusive scan approach
+
+    // Reset and do inclusive scan (Hillis-Steele)
+    sharedHistogram[bin] = histogram[bin];
+    barrier();
+
+    for (uint offset = 1; offset < 256; offset *= 2) {
+        uint val = 0;
+        if (bin >= offset) {
+            val = sharedHistogram[bin - offset];
+        }
+        barrier();
+        sharedHistogram[bin] += val;
+        barrier();
+    }
+
+    // Step 2: Determine percentile thresholds
+    uint lowThreshold = uint(float(pixelCount) * lowPercentile);
+    uint highThreshold = uint(float(pixelCount) * highPercentile);
+
+    // Step 3: Each thread computes contribution for its bin
+    uint cumCount = sharedHistogram[bin];
+    uint prevCumCount = (bin > 0) ? sharedHistogram[bin - 1] : 0;
+    uint binCount = histogram[bin];
+
+    // Check if this bin overlaps with the valid percentile range
+    bool binInRange = (cumCount > lowThreshold) && (prevCumCount < highThreshold);
+
+    float contribution = 0.0;
+    float weight = 0.0;
+
+    if (binInRange && binCount > 0) {
+        // Calculate how many pixels from this bin are in the valid range
+        uint startCount = max(prevCumCount, lowThreshold);
+        uint endCount = min(cumCount, highThreshold);
+        uint validPixels = endCount - startCount;
+
+        if (validPixels > 0) {
+            float logLum = binToLogLuminance(bin);
+            contribution = logLum * float(validPixels);
+            weight = float(validPixels);
+        }
+    }
+
+    // Store local values for reduction
+    sharedWeightedSum[bin] = contribution;
+    sharedWeight[bin] = weight;
+    barrier();
+
+    // Step 4: Parallel reduction to sum all contributions
+    for (uint stride = 128; stride > 0; stride >>= 1) {
+        if (bin < stride) {
+            sharedWeightedSum[bin] += sharedWeightedSum[bin + stride];
+            sharedWeight[bin] += sharedWeight[bin + stride];
+        }
+        barrier();
+    }
+
+    // Step 5: First thread computes final exposure
+    if (bin == 0) {
+        float totalWeightedSum = sharedWeightedSum[0];
+        float totalWeight = sharedWeight[0];
+
+        float avgLogLum;
+        if (totalWeight > 0.0) {
+            avgLogLum = totalWeightedSum / totalWeight;
+        } else {
+            // Fallback: use middle of range if no valid pixels
+            avgLogLum = (minLogLum + maxLogLum) * 0.5;
+        }
+
+        // Convert from log luminance to linear luminance
+        float avgLum = exp2(avgLogLum);
+        averageLuminance = avgLum;
+
+        // Compute target exposure
+        // exposure = log2(targetLum / avgLum) = log2(targetLum) - avgLogLum
+        float targetExp = log2(targetLuminance) - avgLogLum;
+        targetExp = clamp(targetExp, minExposure, maxExposure);
+        exposureValue = targetExp;
+
+        // Temporal adaptation (smooth transition)
+        float prevExp = previousExposure;
+        float adaptSpeed = (targetExp > prevExp) ? adaptSpeedUp : adaptSpeedDown;
+
+        // Exponential smoothing
+        float alpha = 1.0 - exp(-deltaTime * adaptSpeed);
+        float adapted = mix(prevExp, targetExp, alpha);
+
+        adaptedExposure = adapted;
+
+        // Store current as previous for next frame
+        previousExposure = adapted;
+    }
+}

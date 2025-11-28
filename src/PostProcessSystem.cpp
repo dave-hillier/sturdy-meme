@@ -22,11 +22,17 @@ bool PostProcessSystem::init(const InitInfo& info) {
     if (!createDescriptorSets()) return false;
     if (!createCompositePipeline()) return false;
 
+    // Histogram-based auto-exposure
+    if (!createHistogramResources()) return false;
+    if (!createHistogramPipelines()) return false;
+    if (!createHistogramDescriptorSets()) return false;
+
     return true;
 }
 
 void PostProcessSystem::destroy(VkDevice device, VmaAllocator allocator) {
     destroyHDRResources();
+    destroyHistogramResources();
 
     for (size_t i = 0; i < uniformBuffers.size(); i++) {
         if (uniformBuffers[i] != VK_NULL_HANDLE) {
@@ -616,10 +622,28 @@ bool PostProcessSystem::createCompositePipeline() {
 
 void PostProcessSystem::recordPostProcess(VkCommandBuffer cmd, uint32_t frameIndex,
                                           VkFramebuffer swapchainFB, float deltaTime) {
+    // Run histogram compute pass for auto-exposure (if enabled)
+    recordHistogramCompute(cmd, frameIndex, deltaTime);
+
+    // Read computed exposure from previous frame's buffer (to avoid GPU stall)
+    // Use a different frame index for reading to ensure the data is ready
+    uint32_t readFrameIndex = (frameIndex + framesInFlight - 1) % framesInFlight;
+    float computedExposure = manualExposure;
+
+    if (autoExposureEnabled && exposureMappedPtrs.size() > readFrameIndex) {
+        // Invalidate to ensure CPU sees GPU writes
+        vmaInvalidateAllocation(allocator, exposureAllocations[readFrameIndex], 0, sizeof(ExposureData));
+
+        ExposureData* exposureData = static_cast<ExposureData*>(exposureMappedPtrs[readFrameIndex]);
+        computedExposure = exposureData->adaptedExposure;
+        currentExposure = computedExposure;
+        adaptedLuminance = exposureData->averageLuminance;
+    }
+
     // Update uniform buffer
     PostProcessUniforms* ubo = static_cast<PostProcessUniforms*>(uniformMappedPtrs[frameIndex]);
-    ubo->exposure = manualExposure;
-    ubo->autoExposure = autoExposureEnabled ? 1.0f : 0.0f;
+    ubo->exposure = autoExposureEnabled ? computedExposure : manualExposure;
+    ubo->autoExposure = 0.0f;  // Disable fragment shader auto-exposure (now using compute)
     ubo->previousExposure = lastAutoExposure;
     ubo->deltaTime = deltaTime;
     ubo->adaptationSpeed = 2.0f;  // Smooth adaptation over ~0.5 seconds
@@ -637,9 +661,8 @@ void PostProcessSystem::recordPostProcess(VkCommandBuffer cmd, uint32_t frameInd
     ubo->nearPlane = nearPlane;
     ubo->farPlane = farPlane;
 
-    // No GPU readback: just keep CPU-side exposure as the last value we sent so
-    // subsequent frames have a stable starting point for manual mode.
-    lastAutoExposure = ubo->autoExposure > 0.5f ? ubo->previousExposure : manualExposure;
+    // Store computed exposure for next frame
+    lastAutoExposure = autoExposureEnabled ? computedExposure : manualExposure;
 
     // Begin swapchain render pass for final composite
     VkRenderPassBeginInfo renderPassInfo{};
@@ -679,6 +702,533 @@ void PostProcessSystem::recordPostProcess(VkCommandBuffer cmd, uint32_t frameInd
     vkCmdDraw(cmd, 3, 1, 0, 0);
 
     vkCmdEndRenderPass(cmd);
+}
+
+bool PostProcessSystem::createHistogramResources() {
+    // Create histogram buffer (256 uint values)
+    VkBufferCreateInfo histogramBufferInfo{};
+    histogramBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    histogramBufferInfo.size = HISTOGRAM_BINS * sizeof(uint32_t);
+    histogramBufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    histogramBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VmaAllocationCreateInfo histogramAllocInfo{};
+    histogramAllocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+
+    if (vmaCreateBuffer(allocator, &histogramBufferInfo, &histogramAllocInfo,
+                        &histogramBuffer, &histogramAllocation, nullptr) != VK_SUCCESS) {
+        SDL_Log("Failed to create histogram buffer");
+        return false;
+    }
+
+    // Create per-frame exposure buffers (readable from CPU for debugging, writable from GPU)
+    exposureBuffers.resize(framesInFlight);
+    exposureAllocations.resize(framesInFlight);
+    exposureMappedPtrs.resize(framesInFlight);
+
+    VkBufferCreateInfo exposureBufferInfo{};
+    exposureBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    exposureBufferInfo.size = sizeof(ExposureData);
+    exposureBufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+    exposureBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VmaAllocationCreateInfo exposureAllocInfo{};
+    exposureAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+    exposureAllocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
+                              VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+    for (uint32_t i = 0; i < framesInFlight; i++) {
+        VmaAllocationInfo allocationInfo{};
+        if (vmaCreateBuffer(allocator, &exposureBufferInfo, &exposureAllocInfo,
+                            &exposureBuffers[i], &exposureAllocations[i], &allocationInfo) != VK_SUCCESS) {
+            SDL_Log("Failed to create exposure buffer");
+            return false;
+        }
+        exposureMappedPtrs[i] = allocationInfo.pMappedData;
+
+        // Initialize exposure data
+        ExposureData* data = static_cast<ExposureData*>(exposureMappedPtrs[i]);
+        data->averageLuminance = 0.18f;
+        data->exposureValue = 0.0f;
+        data->previousExposure = 0.0f;
+        data->adaptedExposure = 0.0f;
+
+        // Flush to ensure initial values are visible to GPU
+        vmaFlushAllocation(allocator, exposureAllocations[i], 0, sizeof(ExposureData));
+    }
+
+    // Create per-frame histogram params buffers
+    histogramParamsBuffers.resize(framesInFlight);
+    histogramParamsAllocations.resize(framesInFlight);
+    histogramParamsMappedPtrs.resize(framesInFlight);
+
+    VkBufferCreateInfo paramsBufferInfo{};
+    paramsBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    paramsBufferInfo.size = sizeof(HistogramReduceParams);  // Larger of the two
+    paramsBufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+    paramsBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VmaAllocationCreateInfo paramsAllocInfo{};
+    paramsAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+    paramsAllocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+                            VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+    for (uint32_t i = 0; i < framesInFlight; i++) {
+        VmaAllocationInfo allocationInfo{};
+        if (vmaCreateBuffer(allocator, &paramsBufferInfo, &paramsAllocInfo,
+                            &histogramParamsBuffers[i], &histogramParamsAllocations[i], &allocationInfo) != VK_SUCCESS) {
+            SDL_Log("Failed to create histogram params buffer");
+            return false;
+        }
+        histogramParamsMappedPtrs[i] = allocationInfo.pMappedData;
+    }
+
+    return true;
+}
+
+bool PostProcessSystem::createHistogramPipelines() {
+    // ============================================
+    // Histogram Build Pipeline
+    // ============================================
+    {
+        // Descriptor set layout for histogram build
+        std::array<VkDescriptorSetLayoutBinding, 3> buildBindings{};
+
+        // Binding 0: HDR image (storage image for compute read)
+        buildBindings[0].binding = 0;
+        buildBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        buildBindings[0].descriptorCount = 1;
+        buildBindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+        // Binding 1: Histogram buffer
+        buildBindings[1].binding = 1;
+        buildBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        buildBindings[1].descriptorCount = 1;
+        buildBindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+        // Binding 2: Parameters uniform buffer
+        buildBindings[2].binding = 2;
+        buildBindings[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        buildBindings[2].descriptorCount = 1;
+        buildBindings[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+        VkDescriptorSetLayoutCreateInfo buildLayoutInfo{};
+        buildLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        buildLayoutInfo.bindingCount = static_cast<uint32_t>(buildBindings.size());
+        buildLayoutInfo.pBindings = buildBindings.data();
+
+        if (vkCreateDescriptorSetLayout(device, &buildLayoutInfo, nullptr, &histogramBuildDescLayout) != VK_SUCCESS) {
+            SDL_Log("Failed to create histogram build descriptor set layout");
+            return false;
+        }
+
+        // Pipeline layout
+        VkPipelineLayoutCreateInfo buildPipelineLayoutInfo{};
+        buildPipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        buildPipelineLayoutInfo.setLayoutCount = 1;
+        buildPipelineLayoutInfo.pSetLayouts = &histogramBuildDescLayout;
+
+        if (vkCreatePipelineLayout(device, &buildPipelineLayoutInfo, nullptr, &histogramBuildPipelineLayout) != VK_SUCCESS) {
+            SDL_Log("Failed to create histogram build pipeline layout");
+            return false;
+        }
+
+        // Load shader
+        auto shaderCode = ShaderLoader::readFile(shaderPath + "/histogram_build.comp.spv");
+        if (shaderCode.empty()) {
+            SDL_Log("Failed to load histogram build shader");
+            return false;
+        }
+
+        VkShaderModule shaderModule = ShaderLoader::createShaderModule(device, shaderCode);
+        if (shaderModule == VK_NULL_HANDLE) {
+            SDL_Log("Failed to create histogram build shader module");
+            return false;
+        }
+
+        VkPipelineShaderStageCreateInfo stageInfo{};
+        stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+        stageInfo.module = shaderModule;
+        stageInfo.pName = "main";
+
+        VkComputePipelineCreateInfo pipelineInfo{};
+        pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+        pipelineInfo.stage = stageInfo;
+        pipelineInfo.layout = histogramBuildPipelineLayout;
+
+        VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &histogramBuildPipeline);
+        vkDestroyShaderModule(device, shaderModule, nullptr);
+
+        if (result != VK_SUCCESS) {
+            SDL_Log("Failed to create histogram build pipeline");
+            return false;
+        }
+    }
+
+    // ============================================
+    // Histogram Reduce Pipeline
+    // ============================================
+    {
+        // Descriptor set layout for histogram reduce
+        std::array<VkDescriptorSetLayoutBinding, 3> reduceBindings{};
+
+        // Binding 0: Histogram buffer (read-only)
+        reduceBindings[0].binding = 0;
+        reduceBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        reduceBindings[0].descriptorCount = 1;
+        reduceBindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+        // Binding 1: Exposure output buffer
+        reduceBindings[1].binding = 1;
+        reduceBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        reduceBindings[1].descriptorCount = 1;
+        reduceBindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+        // Binding 2: Parameters uniform buffer
+        reduceBindings[2].binding = 2;
+        reduceBindings[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        reduceBindings[2].descriptorCount = 1;
+        reduceBindings[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+        VkDescriptorSetLayoutCreateInfo reduceLayoutInfo{};
+        reduceLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        reduceLayoutInfo.bindingCount = static_cast<uint32_t>(reduceBindings.size());
+        reduceLayoutInfo.pBindings = reduceBindings.data();
+
+        if (vkCreateDescriptorSetLayout(device, &reduceLayoutInfo, nullptr, &histogramReduceDescLayout) != VK_SUCCESS) {
+            SDL_Log("Failed to create histogram reduce descriptor set layout");
+            return false;
+        }
+
+        // Pipeline layout
+        VkPipelineLayoutCreateInfo reducePipelineLayoutInfo{};
+        reducePipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        reducePipelineLayoutInfo.setLayoutCount = 1;
+        reducePipelineLayoutInfo.pSetLayouts = &histogramReduceDescLayout;
+
+        if (vkCreatePipelineLayout(device, &reducePipelineLayoutInfo, nullptr, &histogramReducePipelineLayout) != VK_SUCCESS) {
+            SDL_Log("Failed to create histogram reduce pipeline layout");
+            return false;
+        }
+
+        // Load shader
+        auto shaderCode = ShaderLoader::readFile(shaderPath + "/histogram_reduce.comp.spv");
+        if (shaderCode.empty()) {
+            SDL_Log("Failed to load histogram reduce shader");
+            return false;
+        }
+
+        VkShaderModule shaderModule = ShaderLoader::createShaderModule(device, shaderCode);
+        if (shaderModule == VK_NULL_HANDLE) {
+            SDL_Log("Failed to create histogram reduce shader module");
+            return false;
+        }
+
+        VkPipelineShaderStageCreateInfo stageInfo{};
+        stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+        stageInfo.module = shaderModule;
+        stageInfo.pName = "main";
+
+        VkComputePipelineCreateInfo pipelineInfo{};
+        pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+        pipelineInfo.stage = stageInfo;
+        pipelineInfo.layout = histogramReducePipelineLayout;
+
+        VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &histogramReducePipeline);
+        vkDestroyShaderModule(device, shaderModule, nullptr);
+
+        if (result != VK_SUCCESS) {
+            SDL_Log("Failed to create histogram reduce pipeline");
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool PostProcessSystem::createHistogramDescriptorSets() {
+    // Allocate histogram build descriptor sets
+    std::vector<VkDescriptorSetLayout> buildLayouts(framesInFlight, histogramBuildDescLayout);
+    VkDescriptorSetAllocateInfo buildAllocInfo{};
+    buildAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    buildAllocInfo.descriptorPool = descriptorPool;
+    buildAllocInfo.descriptorSetCount = framesInFlight;
+    buildAllocInfo.pSetLayouts = buildLayouts.data();
+
+    histogramBuildDescSets.resize(framesInFlight);
+    if (vkAllocateDescriptorSets(device, &buildAllocInfo, histogramBuildDescSets.data()) != VK_SUCCESS) {
+        SDL_Log("Failed to allocate histogram build descriptor sets");
+        return false;
+    }
+
+    // Allocate histogram reduce descriptor sets
+    std::vector<VkDescriptorSetLayout> reduceLayouts(framesInFlight, histogramReduceDescLayout);
+    VkDescriptorSetAllocateInfo reduceAllocInfo{};
+    reduceAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    reduceAllocInfo.descriptorPool = descriptorPool;
+    reduceAllocInfo.descriptorSetCount = framesInFlight;
+    reduceAllocInfo.pSetLayouts = reduceLayouts.data();
+
+    histogramReduceDescSets.resize(framesInFlight);
+    if (vkAllocateDescriptorSets(device, &reduceAllocInfo, histogramReduceDescSets.data()) != VK_SUCCESS) {
+        SDL_Log("Failed to allocate histogram reduce descriptor sets");
+        return false;
+    }
+
+    // Update descriptor sets
+    for (uint32_t i = 0; i < framesInFlight; i++) {
+        // Build descriptor set
+        {
+            VkDescriptorImageInfo hdrImageInfo{};
+            hdrImageInfo.imageView = hdrColorView;
+            hdrImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+            VkDescriptorBufferInfo histogramInfo{};
+            histogramInfo.buffer = histogramBuffer;
+            histogramInfo.offset = 0;
+            histogramInfo.range = HISTOGRAM_BINS * sizeof(uint32_t);
+
+            VkDescriptorBufferInfo paramsInfo{};
+            paramsInfo.buffer = histogramParamsBuffers[i];
+            paramsInfo.offset = 0;
+            paramsInfo.range = sizeof(HistogramBuildParams);
+
+            std::array<VkWriteDescriptorSet, 3> writes{};
+
+            writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[0].dstSet = histogramBuildDescSets[i];
+            writes[0].dstBinding = 0;
+            writes[0].descriptorCount = 1;
+            writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            writes[0].pImageInfo = &hdrImageInfo;
+
+            writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[1].dstSet = histogramBuildDescSets[i];
+            writes[1].dstBinding = 1;
+            writes[1].descriptorCount = 1;
+            writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            writes[1].pBufferInfo = &histogramInfo;
+
+            writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[2].dstSet = histogramBuildDescSets[i];
+            writes[2].dstBinding = 2;
+            writes[2].descriptorCount = 1;
+            writes[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            writes[2].pBufferInfo = &paramsInfo;
+
+            vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+        }
+
+        // Reduce descriptor set
+        {
+            VkDescriptorBufferInfo histogramInfo{};
+            histogramInfo.buffer = histogramBuffer;
+            histogramInfo.offset = 0;
+            histogramInfo.range = HISTOGRAM_BINS * sizeof(uint32_t);
+
+            VkDescriptorBufferInfo exposureInfo{};
+            exposureInfo.buffer = exposureBuffers[i];
+            exposureInfo.offset = 0;
+            exposureInfo.range = sizeof(ExposureData);
+
+            VkDescriptorBufferInfo paramsInfo{};
+            paramsInfo.buffer = histogramParamsBuffers[i];
+            paramsInfo.offset = 0;
+            paramsInfo.range = sizeof(HistogramReduceParams);
+
+            std::array<VkWriteDescriptorSet, 3> writes{};
+
+            writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[0].dstSet = histogramReduceDescSets[i];
+            writes[0].dstBinding = 0;
+            writes[0].descriptorCount = 1;
+            writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            writes[0].pBufferInfo = &histogramInfo;
+
+            writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[1].dstSet = histogramReduceDescSets[i];
+            writes[1].dstBinding = 1;
+            writes[1].descriptorCount = 1;
+            writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            writes[1].pBufferInfo = &exposureInfo;
+
+            writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[2].dstSet = histogramReduceDescSets[i];
+            writes[2].dstBinding = 2;
+            writes[2].descriptorCount = 1;
+            writes[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            writes[2].pBufferInfo = &paramsInfo;
+
+            vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+        }
+    }
+
+    return true;
+}
+
+void PostProcessSystem::destroyHistogramResources() {
+    if (histogramBuffer != VK_NULL_HANDLE) {
+        vmaDestroyBuffer(allocator, histogramBuffer, histogramAllocation);
+        histogramBuffer = VK_NULL_HANDLE;
+    }
+
+    for (size_t i = 0; i < exposureBuffers.size(); i++) {
+        if (exposureBuffers[i] != VK_NULL_HANDLE) {
+            vmaDestroyBuffer(allocator, exposureBuffers[i], exposureAllocations[i]);
+        }
+    }
+    exposureBuffers.clear();
+    exposureAllocations.clear();
+    exposureMappedPtrs.clear();
+
+    for (size_t i = 0; i < histogramParamsBuffers.size(); i++) {
+        if (histogramParamsBuffers[i] != VK_NULL_HANDLE) {
+            vmaDestroyBuffer(allocator, histogramParamsBuffers[i], histogramParamsAllocations[i]);
+        }
+    }
+    histogramParamsBuffers.clear();
+    histogramParamsAllocations.clear();
+    histogramParamsMappedPtrs.clear();
+
+    if (histogramBuildPipeline != VK_NULL_HANDLE) {
+        vkDestroyPipeline(device, histogramBuildPipeline, nullptr);
+        histogramBuildPipeline = VK_NULL_HANDLE;
+    }
+    if (histogramReducePipeline != VK_NULL_HANDLE) {
+        vkDestroyPipeline(device, histogramReducePipeline, nullptr);
+        histogramReducePipeline = VK_NULL_HANDLE;
+    }
+
+    if (histogramBuildPipelineLayout != VK_NULL_HANDLE) {
+        vkDestroyPipelineLayout(device, histogramBuildPipelineLayout, nullptr);
+        histogramBuildPipelineLayout = VK_NULL_HANDLE;
+    }
+    if (histogramReducePipelineLayout != VK_NULL_HANDLE) {
+        vkDestroyPipelineLayout(device, histogramReducePipelineLayout, nullptr);
+        histogramReducePipelineLayout = VK_NULL_HANDLE;
+    }
+
+    if (histogramBuildDescLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(device, histogramBuildDescLayout, nullptr);
+        histogramBuildDescLayout = VK_NULL_HANDLE;
+    }
+    if (histogramReduceDescLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(device, histogramReduceDescLayout, nullptr);
+        histogramReduceDescLayout = VK_NULL_HANDLE;
+    }
+}
+
+void PostProcessSystem::recordHistogramCompute(VkCommandBuffer cmd, uint32_t frameIndex, float deltaTime) {
+    if (!autoExposureEnabled) return;
+
+    // Update histogram parameters (HistogramReduceParams is a superset of HistogramBuildParams)
+    // Both shaders read from the same buffer, so we only need to write once
+    float logRange = MAX_LOG_LUMINANCE - MIN_LOG_LUMINANCE;
+    HistogramReduceParams* params = static_cast<HistogramReduceParams*>(histogramParamsMappedPtrs[frameIndex]);
+    params->minLogLum = MIN_LOG_LUMINANCE;
+    params->maxLogLum = MAX_LOG_LUMINANCE;
+    params->invLogLumRange = 1.0f / logRange;
+    params->pixelCount = extent.width * extent.height;
+    params->lowPercentile = LOW_PERCENTILE;
+    params->highPercentile = HIGH_PERCENTILE;
+    params->targetLuminance = TARGET_LUMINANCE;
+    params->deltaTime = deltaTime;
+    params->adaptSpeedUp = ADAPTATION_SPEED_UP;
+    params->adaptSpeedDown = ADAPTATION_SPEED_DOWN;
+    params->minExposure = MIN_EXPOSURE;
+    params->maxExposure = MAX_EXPOSURE;
+
+    // Flush mapped memory to ensure CPU writes are visible to GPU
+    // (required if memory is not HOST_COHERENT)
+    vmaFlushAllocation(allocator, histogramParamsAllocations[frameIndex], 0, sizeof(HistogramReduceParams));
+
+    // Transition HDR image to general layout for compute access
+    VkImageMemoryBarrier hdrBarrier{};
+    hdrBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    hdrBarrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    hdrBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    hdrBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    hdrBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    hdrBarrier.image = hdrColorImage;
+    hdrBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    hdrBarrier.subresourceRange.baseMipLevel = 0;
+    hdrBarrier.subresourceRange.levelCount = 1;
+    hdrBarrier.subresourceRange.baseArrayLayer = 0;
+    hdrBarrier.subresourceRange.layerCount = 1;
+    hdrBarrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    hdrBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(cmd,
+                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &hdrBarrier);
+
+    // Clear histogram buffer
+    vkCmdFillBuffer(cmd, histogramBuffer, 0, HISTOGRAM_BINS * sizeof(uint32_t), 0);
+
+    // Barrier after clear
+    VkBufferMemoryBarrier histClearBarrier{};
+    histClearBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    histClearBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    histClearBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    histClearBarrier.buffer = histogramBuffer;
+    histClearBarrier.offset = 0;
+    histClearBarrier.size = HISTOGRAM_BINS * sizeof(uint32_t);
+
+    vkCmdPipelineBarrier(cmd,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         0, 0, nullptr, 1, &histClearBarrier, 0, nullptr);
+
+    // Dispatch histogram build
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, histogramBuildPipeline);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, histogramBuildPipelineLayout,
+                            0, 1, &histogramBuildDescSets[frameIndex], 0, nullptr);
+
+    uint32_t groupsX = (extent.width + 15) / 16;
+    uint32_t groupsY = (extent.height + 15) / 16;
+    vkCmdDispatch(cmd, groupsX, groupsY, 1);
+
+    // Barrier between build and reduce
+    VkBufferMemoryBarrier histBuildBarrier{};
+    histBuildBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    histBuildBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    histBuildBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    histBuildBarrier.buffer = histogramBuffer;
+    histBuildBarrier.offset = 0;
+    histBuildBarrier.size = HISTOGRAM_BINS * sizeof(uint32_t);
+
+    vkCmdPipelineBarrier(cmd,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         0, 0, nullptr, 1, &histBuildBarrier, 0, nullptr);
+
+    // Dispatch histogram reduce (single workgroup of 256 threads)
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, histogramReducePipeline);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, histogramReducePipelineLayout,
+                            0, 1, &histogramReduceDescSets[frameIndex], 0, nullptr);
+    vkCmdDispatch(cmd, 1, 1, 1);
+
+    // Barrier: exposure buffer ready for CPU read, HDR image back to shader read
+    VkBufferMemoryBarrier exposureBarrier{};
+    exposureBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    exposureBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    exposureBarrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+    exposureBarrier.buffer = exposureBuffers[frameIndex];
+    exposureBarrier.offset = 0;
+    exposureBarrier.size = sizeof(ExposureData);
+
+    hdrBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    hdrBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    hdrBarrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    hdrBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(cmd,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         VK_PIPELINE_STAGE_HOST_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                         0, 0, nullptr, 1, &exposureBarrier, 1, &hdrBarrier);
 }
 
 void PostProcessSystem::setFroxelVolume(VkImageView volumeView, VkSampler volumeSampler) {

@@ -10,7 +10,7 @@ struct PostProcessUniforms {
     float exposure;
     float bloomThreshold;
     float bloomIntensity;
-    float autoExposure;  // 0 = manual, 1 = auto
+    float autoExposure;  // 0 = manual, 1 = auto (histogram-based)
     float previousExposure;
     float deltaTime;
     float adaptationSpeed;
@@ -28,6 +28,38 @@ struct PostProcessUniforms {
     float padding1;
     float padding2;
     float padding3;
+};
+
+// Histogram build compute shader parameters
+struct HistogramBuildParams {
+    float minLogLum;      // Minimum log luminance (e.g., -8.0)
+    float maxLogLum;      // Maximum log luminance (e.g., 4.0)
+    float invLogLumRange; // 1.0 / (maxLogLum - minLogLum)
+    uint32_t pixelCount;  // Total pixel count for normalization
+};
+
+// Histogram reduce compute shader parameters
+struct HistogramReduceParams {
+    float minLogLum;      // Minimum log luminance
+    float maxLogLum;      // Maximum log luminance
+    float invLogLumRange; // 1.0 / (maxLogLum - minLogLum)
+    uint32_t pixelCount;  // Total pixel count
+    float lowPercentile;  // Ignore darkest N% (e.g., 0.4 = 40%)
+    float highPercentile; // Ignore brightest N% (e.g., 0.95 = keep up to 95%)
+    float targetLuminance;// Target middle gray (0.18)
+    float deltaTime;      // Frame delta time for temporal adaptation
+    float adaptSpeedUp;   // Adaptation speed when brightening
+    float adaptSpeedDown; // Adaptation speed when darkening
+    float minExposure;    // Minimum exposure EV
+    float maxExposure;    // Maximum exposure EV
+};
+
+// Exposure buffer structure (matches shader)
+struct ExposureData {
+    float averageLuminance;
+    float exposureValue;
+    float previousExposure;
+    float adaptedExposure;
 };
 
 class PostProcessSystem {
@@ -103,6 +135,13 @@ private:
     bool createUniformBuffers();
     bool createCompositePipeline();
 
+    // Histogram-based exposure
+    bool createHistogramResources();
+    bool createHistogramPipelines();
+    bool createHistogramDescriptorSets();
+    void destroyHistogramResources();
+    void recordHistogramCompute(VkCommandBuffer cmd, uint32_t frameIndex, float deltaTime);
+
     void destroyHDRResources();
 
     VkDevice device = VK_NULL_HANDLE;
@@ -143,7 +182,7 @@ private:
 
     // Exposure control
     float manualExposure = 0.0f;
-    bool autoExposureEnabled = false;  // Disabled - fragment shader approach causes flickering
+    bool autoExposureEnabled = true;  // Enabled - histogram compute shader approach is stable
     float currentExposure = 0.0f;
     float lastAutoExposure = 0.0f;  // For temporal smoothing
     float adaptedLuminance = 0.18f;  // Middle gray target
@@ -169,10 +208,38 @@ private:
 
     // Auto-exposure parameters
     static constexpr float MIN_EXPOSURE = -4.0f;  // EV
-    static constexpr float MAX_EXPOSURE = 4.0f;   // EV
+    static constexpr float MAX_EXPOSURE = 0.0f;   // EV (no auto-brightening - preserve dark nights)
     static constexpr float ADAPTATION_SPEED_UP = 2.0f;    // Faster brightening
     static constexpr float ADAPTATION_SPEED_DOWN = 1.0f;  // Slower darkening
-    static constexpr float TARGET_LUMINANCE = 0.18f;      // Middle gray
+    static constexpr float TARGET_LUMINANCE = 0.05f;      // Dark target - preserve night atmosphere
+    static constexpr float MIN_LOG_LUMINANCE = -8.0f;     // Log2 of minimum luminance
+    static constexpr float MAX_LOG_LUMINANCE = 4.0f;      // Log2 of maximum luminance
+    static constexpr float LOW_PERCENTILE = 0.05f;        // Include most dark pixels (only ignore 5%)
+    static constexpr float HIGH_PERCENTILE = 0.95f;       // Ignore brightest 5%
+    static constexpr uint32_t HISTOGRAM_BINS = 256;
+
+    // Histogram-based exposure resources
+    VkBuffer histogramBuffer = VK_NULL_HANDLE;
+    VmaAllocation histogramAllocation = VK_NULL_HANDLE;
+
+    std::vector<VkBuffer> exposureBuffers;          // Per-frame exposure output
+    std::vector<VmaAllocation> exposureAllocations;
+    std::vector<void*> exposureMappedPtrs;
+
+    std::vector<VkBuffer> histogramParamsBuffers;     // Per-frame histogram params
+    std::vector<VmaAllocation> histogramParamsAllocations;
+    std::vector<void*> histogramParamsMappedPtrs;
+
+    // Histogram compute pipelines
+    VkDescriptorSetLayout histogramBuildDescLayout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout histogramReduceDescLayout = VK_NULL_HANDLE;
+    VkPipelineLayout histogramBuildPipelineLayout = VK_NULL_HANDLE;
+    VkPipelineLayout histogramReducePipelineLayout = VK_NULL_HANDLE;
+    VkPipeline histogramBuildPipeline = VK_NULL_HANDLE;
+    VkPipeline histogramReducePipeline = VK_NULL_HANDLE;
+
+    std::vector<VkDescriptorSet> histogramBuildDescSets;
+    std::vector<VkDescriptorSet> histogramReduceDescSets;
 
     float calculateAverageLuminance();
 };
