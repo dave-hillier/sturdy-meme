@@ -653,7 +653,7 @@ bool TerrainSystem::createRenderDescriptorSetLayout() {
             .build();
     };
 
-    std::array<VkDescriptorSetLayoutBinding, 8> bindings = {
+    std::array<VkDescriptorSetLayoutBinding, 11> bindings = {
         makeGraphicsBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT),
         makeGraphicsBinding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT),
@@ -663,7 +663,11 @@ bool TerrainSystem::createRenderDescriptorSetLayout() {
         makeGraphicsBinding(6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
         makeGraphicsBinding(7, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
         makeGraphicsBinding(8, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
-        makeGraphicsBinding(9, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)};
+        makeGraphicsBinding(9, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
+        // Volumetric snow cascade textures
+        makeGraphicsBinding(10, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
+        makeGraphicsBinding(11, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
+        makeGraphicsBinding(12, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)};
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -1448,6 +1452,42 @@ void TerrainSystem::setSnowMask(VkDevice device, VkImageView snowMaskView, VkSam
         snowMaskWrite.pImageInfo = &snowMaskInfo;
 
         vkUpdateDescriptorSets(device, 1, &snowMaskWrite, 0, nullptr);
+    }
+}
+
+void TerrainSystem::setVolumetricSnowCascades(VkDevice device,
+                                               VkImageView cascade0View, VkImageView cascade1View, VkImageView cascade2View,
+                                               VkSampler cascadeSampler) {
+    // Update render descriptor sets with volumetric snow cascade textures
+    for (uint32_t i = 0; i < framesInFlight; i++) {
+        VkDescriptorImageInfo cascade0Info{cascadeSampler, cascade0View, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkDescriptorImageInfo cascade1Info{cascadeSampler, cascade1View, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkDescriptorImageInfo cascade2Info{cascadeSampler, cascade2View, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+
+        std::array<VkWriteDescriptorSet, 3> writes{};
+
+        writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[0].dstSet = renderDescriptorSets[i];
+        writes[0].dstBinding = 10;
+        writes[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        writes[0].descriptorCount = 1;
+        writes[0].pImageInfo = &cascade0Info;
+
+        writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[1].dstSet = renderDescriptorSets[i];
+        writes[1].dstBinding = 11;
+        writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        writes[1].descriptorCount = 1;
+        writes[1].pImageInfo = &cascade1Info;
+
+        writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[2].dstSet = renderDescriptorSets[i];
+        writes[2].dstBinding = 12;
+        writes[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        writes[2].descriptorCount = 1;
+        writes[2].pImageInfo = &cascade2Info;
+
+        vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
     }
 }
 

@@ -74,8 +74,13 @@ public:
                               VkImageView shadowMapView,
                               VkSampler shadowSampler);
 
-    // Set snow mask texture for snow accumulation rendering
+    // Set snow mask texture for snow accumulation rendering (legacy)
     void setSnowMask(VkDevice device, VkImageView snowMaskView, VkSampler snowMaskSampler);
+
+    // Set volumetric snow cascade textures
+    void setVolumetricSnowCascades(VkDevice device,
+                                    VkImageView cascade0View, VkImageView cascade1View, VkImageView cascade2View,
+                                    VkSampler cascadeSampler);
 
     // Update terrain uniforms for a frame
     void updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos,

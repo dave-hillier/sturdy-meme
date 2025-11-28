@@ -21,10 +21,12 @@
 #include "SceneManager.h"
 #include "TerrainSystem.h"
 #include "SnowMaskSystem.h"
+#include "VolumetricSnowSystem.h"
 #include "EnvironmentSettings.h"
 #include "UBOs.h"
 
 static constexpr uint32_t NUM_SHADOW_CASCADES = 4;
+
 struct ShadowPushConstants {
     glm::mat4 model;
     int cascadeIndex;  // Which cascade we're rendering to
@@ -226,7 +228,9 @@ private:
     AtmosphereLUTSystem atmosphereLUTSystem;
     TerrainSystem terrainSystem;
     SnowMaskSystem snowMaskSystem;
+    VolumetricSnowSystem volumetricSnowSystem;
     EnvironmentSettings environmentSettings;
+    bool useVolumetricSnow = true;  // Use new volumetric system by default
 
     std::vector<VkFramebuffer> framebuffers;
     VkCommandPool commandPool = VK_NULL_HANDLE;

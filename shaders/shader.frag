@@ -33,6 +33,14 @@ layout(binding = 0) uniform UniformBufferObject {
     float snowTexScale;          // World-space snow texture scale
     vec4 snowColor;              // rgb = snow color, a = unused
     vec4 snowMaskParams;         // xy = mask origin, z = mask size, w = unused
+    // Volumetric snow cascade parameters
+    vec4 snowCascade0Params;     // xy = origin, z = size, w = texel size
+    vec4 snowCascade1Params;     // xy = origin, z = size, w = texel size
+    vec4 snowCascade2Params;     // xy = origin, z = size, w = texel size
+    float useVolumetricSnow;     // 1.0 = use cascades, 0.0 = use legacy mask
+    float snowMaxHeight;         // Maximum snow height in meters
+    float snowPadding1;
+    float snowPadding2;
 } ubo;
 
 layout(binding = 1) uniform sampler2D texSampler;

@@ -1,0 +1,222 @@
+#version 450
+
+/*
+ * volumetric_snow.comp - Cascaded heightfield snow accumulation compute shader
+ *
+ * Updates 3 cascaded world-space snow height textures:
+ * - Cascade 0: Near (256m coverage, 1m/texel)
+ * - Cascade 1: Mid  (1024m coverage, 4m/texel)
+ * - Cascade 2: Far  (4096m coverage, 16m/texel)
+ *
+ * Features:
+ * - Height-based accumulation (meters, 0 to max height)
+ * - Wind-driven drift accumulation
+ * - Interaction clearing (footprints, vehicles)
+ * - Smooth cascade transitions
+ */
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+// Snow height textures (R16F - height in meters)
+layout(binding = 0, r16f) uniform image2D snowCascade0;  // Near
+layout(binding = 1, r16f) uniform image2D snowCascade1;  // Mid
+layout(binding = 2, r16f) uniform image2D snowCascade2;  // Far
+
+// Uniforms
+layout(binding = 3) uniform VolumetricSnowUniforms {
+    vec4 cascade0Region;       // xy = world origin, z = size, w = texel size
+    vec4 cascade1Region;       // xy = world origin, z = size, w = texel size
+    vec4 cascade2Region;       // xy = world origin, z = size, w = texel size
+    vec4 accumulationParams;   // x = height accumulation rate, y = melt rate, z = delta time, w = is snowing (0/1)
+    vec4 snowParams;           // x = target height, y = weather intensity, z = num interactions, w = max height
+    vec4 windParams;           // xy = wind direction, z = wind strength, w = drift rate
+    vec4 cameraPosition;       // xyz = position, w = unused
+} uniforms;
+
+// Interaction source for snow clearing
+struct SnowInteraction {
+    vec4 positionAndRadius;    // xyz = world position, w = radius
+    vec4 strengthAndDepth;     // x = clearing strength, y = depth factor, z = shape, w = unused
+};
+
+layout(std430, binding = 4) readonly buffer InteractionBuffer {
+    SnowInteraction interactions[];
+};
+
+// Get cascade region for current z-layer
+vec4 getCascadeRegion(uint cascadeIdx) {
+    if (cascadeIdx == 0) return uniforms.cascade0Region;
+    if (cascadeIdx == 1) return uniforms.cascade1Region;
+    return uniforms.cascade2Region;
+}
+
+// Convert texel coordinate to world position for a given cascade
+vec2 texelToWorld(ivec2 texCoord, vec4 cascadeRegion) {
+    vec2 texSize = vec2(imageSize(snowCascade0));  // All cascades same resolution
+    vec2 uv = (vec2(texCoord) + 0.5) / texSize;    // Center of texel
+    float regionSize = cascadeRegion.z;
+    vec2 worldPos = cascadeRegion.xy + uv * regionSize;
+    return worldPos;
+}
+
+// Smooth circular falloff
+float circularFalloff(float dist, float radius) {
+    float normalizedDist = dist / radius;
+    return 1.0 - smoothstep(0.0, 1.0, normalizedDist);
+}
+
+// Simple noise function for variation
+float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+
+    float a = hash(i);
+    float b = hash(i + vec2(1.0, 0.0));
+    float c = hash(i + vec2(0.0, 1.0));
+    float d = hash(i + vec2(1.0, 1.0));
+
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+// Load height from appropriate cascade image
+float loadHeight(ivec2 texCoord, uint cascadeIdx) {
+    if (cascadeIdx == 0) return imageLoad(snowCascade0, texCoord).r;
+    if (cascadeIdx == 1) return imageLoad(snowCascade1, texCoord).r;
+    return imageLoad(snowCascade2, texCoord).r;
+}
+
+// Store height to appropriate cascade image
+void storeHeight(ivec2 texCoord, uint cascadeIdx, float height) {
+    vec4 value = vec4(height, 0.0, 0.0, 0.0);
+    if (cascadeIdx == 0) imageStore(snowCascade0, texCoord, value);
+    else if (cascadeIdx == 1) imageStore(snowCascade1, texCoord, value);
+    else imageStore(snowCascade2, texCoord, value);
+}
+
+void main() {
+    ivec2 texCoord = ivec2(gl_GlobalInvocationID.xy);
+    uint cascadeIdx = gl_GlobalInvocationID.z;
+
+    ivec2 texSize = imageSize(snowCascade0);  // All cascades same resolution
+
+    // Bounds check
+    if (texCoord.x >= texSize.x || texCoord.y >= texSize.y || cascadeIdx >= 3) {
+        return;
+    }
+
+    // Get cascade region
+    vec4 cascadeRegion = getCascadeRegion(cascadeIdx);
+    vec2 worldPos = texelToWorld(texCoord, cascadeRegion);
+
+    // Extract parameters
+    float accumulationRate = uniforms.accumulationParams.x;
+    float meltRate = uniforms.accumulationParams.y;
+    float deltaTime = uniforms.accumulationParams.z;
+    bool isSnowing = uniforms.accumulationParams.w > 0.5;
+
+    float targetHeight = uniforms.snowParams.x;
+    float weatherIntensity = uniforms.snowParams.y;
+    uint numInteractions = uint(uniforms.snowParams.z);
+    float maxHeight = uniforms.snowParams.w;
+
+    vec2 windDir = uniforms.windParams.xy;
+    float windStrength = uniforms.windParams.z;
+    float driftRate = uniforms.windParams.w;
+
+    // Load current snow height
+    float currentHeight = loadHeight(texCoord, cascadeIdx);
+
+    // === INSTANT FILL FOR PREVIEW ===
+    // If snow target is set but height is empty, instantly fill to enable preview
+    if (targetHeight > 0.01 && currentHeight < 0.01) {
+        currentHeight = targetHeight;
+    }
+
+    // === WIND DRIFT ===
+    // Snow drifts in wind direction, creating accumulation on leeward side
+    if (windStrength > 0.01 && currentHeight > 0.01) {
+        float texelSize = cascadeRegion.w;
+
+        // Sample upwind neighbor
+        vec2 upwindOffset = -windDir * texelSize;
+        ivec2 upwindTexel = texCoord + ivec2(round(upwindOffset / texelSize));
+        upwindTexel = clamp(upwindTexel, ivec2(0), texSize - 1);
+
+        float upwindHeight = loadHeight(upwindTexel, cascadeIdx);
+
+        // Transfer snow from upwind to current position
+        float transfer = (upwindHeight - currentHeight) * driftRate * windStrength * deltaTime;
+        transfer = max(transfer, 0.0);  // Only accumulate, don't remove
+
+        // Add noise variation to drift
+        float driftNoise = noise(worldPos * 0.1 + vec2(deltaTime * 0.5));
+        transfer *= mix(0.5, 1.5, driftNoise);
+
+        currentHeight += transfer;
+    }
+
+    // === ACCUMULATION ===
+    // When snowing, snow accumulates toward target height
+    if (isSnowing && weatherIntensity > 0.0) {
+        // Rate scales with weather intensity
+        float effectiveRate = accumulationRate * weatherIntensity * deltaTime;
+
+        // Add subtle variation based on world position
+        float noiseVal = noise(worldPos * 0.05);
+        effectiveRate *= mix(0.8, 1.2, noiseVal);
+
+        // Accumulate toward target (asymptotic approach)
+        if (currentHeight < targetHeight) {
+            currentHeight += effectiveRate * (targetHeight - currentHeight + 0.1);
+            currentHeight = min(currentHeight, targetHeight);
+        }
+    }
+
+    // === MELTING ===
+    // When not snowing or target is low, snow melts toward target
+    if (!isSnowing || targetHeight < currentHeight) {
+        // If target is 0, melt faster for quick preview
+        float meltMultiplier = (targetHeight < 0.01) ? 10.0 : 1.0;
+        float effectiveMeltRate = meltRate * deltaTime * meltMultiplier;
+
+        // Melt toward target
+        float diff = currentHeight - targetHeight;
+        if (diff > 0.0) {
+            currentHeight -= min(effectiveMeltRate, diff);
+        }
+    }
+
+    // === INTERACTION CLEARING ===
+    // Apply interaction sources (footprints, vehicles, etc.)
+    for (uint i = 0; i < numInteractions && i < 32; i++) {
+        vec3 sourcePos = interactions[i].positionAndRadius.xyz;
+        float radius = interactions[i].positionAndRadius.w;
+        float strength = interactions[i].strengthAndDepth.x;
+        float depthFactor = interactions[i].strengthAndDepth.y;
+
+        // Distance from source in XZ plane
+        vec2 toWorld = worldPos - sourcePos.xz;
+        float dist = length(toWorld);
+
+        if (dist < radius) {
+            // Smooth circular clearing
+            float clearFactor = circularFalloff(dist, radius) * strength;
+
+            // Clear snow (subtract from height)
+            // depthFactor controls how deep the clearing goes (footprint depth)
+            float clearAmount = clearFactor * depthFactor * maxHeight;
+            currentHeight -= clearAmount;
+        }
+    }
+
+    // Clamp to valid range
+    currentHeight = clamp(currentHeight, 0.0, maxHeight);
+
+    // Store updated height
+    storeHeight(texCoord, cascadeIdx, currentHeight);
+}

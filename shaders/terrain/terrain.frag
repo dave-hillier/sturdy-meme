@@ -39,6 +39,14 @@ layout(binding = 5) uniform UniformBufferObject {
     float snowTexScale;          // World-space snow texture scale
     vec4 snowColor;              // rgb = snow color, a = unused
     vec4 snowMaskParams;         // xy = mask origin, z = mask size, w = unused
+    // Volumetric snow cascade parameters
+    vec4 snowCascade0Params;     // xy = origin, z = size, w = texel size
+    vec4 snowCascade1Params;     // xy = origin, z = size, w = texel size
+    vec4 snowCascade2Params;     // xy = origin, z = size, w = texel size
+    float useVolumetricSnow;     // 1.0 = use cascades, 0.0 = use legacy mask
+    float snowMaxHeight;         // Maximum snow height in meters
+    float snowPadding1;
+    float snowPadding2;
 } ubo;
 
 // Terrain-specific uniforms
@@ -60,7 +68,12 @@ layout(binding = 3) uniform sampler2D heightMap;
 layout(binding = 6) uniform sampler2D terrainAlbedo;
 layout(binding = 7) uniform sampler2DArrayShadow shadowMapArray;
 layout(binding = 8) uniform sampler2D grassFarLODTexture;  // Far LOD grass texture
-layout(binding = 9) uniform sampler2D snowMaskTexture;     // World-space snow coverage
+layout(binding = 9) uniform sampler2D snowMaskTexture;     // World-space snow coverage (legacy)
+
+// Volumetric snow cascade textures (height in meters)
+layout(binding = 10) uniform sampler2D snowCascade0;  // Near cascade (256m)
+layout(binding = 11) uniform sampler2D snowCascade1;  // Mid cascade (1024m)
+layout(binding = 12) uniform sampler2D snowCascade2;  // Far cascade (4096m)
 
 // Far LOD grass parameters (where to start/end grass-to-terrain transition)
 const float GRASS_RENDER_DISTANCE = 60.0;     // Should match grass system maxDrawDistance
@@ -129,12 +142,49 @@ void main() {
     float metallic = 0.0;  // Terrain is non-metallic
 
     // === SNOW LAYER ===
-    // Sample snow mask at world position
-    float snowMaskCoverage = sampleSnowMask(snowMaskTexture, fragWorldPos,
-                                             ubo.snowMaskParams.xy, ubo.snowMaskParams.z);
+    float snowCoverage = 0.0;
+    float snowHeight = 0.0;
 
-    // Calculate snow coverage based on global amount, mask, and slope
-    float snowCoverage = calculateSnowCoverage(ubo.snowAmount, snowMaskCoverage, normal);
+    if (ubo.useVolumetricSnow > 0.5) {
+        // Volumetric snow: sample from cascaded heightfield
+        snowHeight = sampleVolumetricSnowHeight(
+            snowCascade0, snowCascade1, snowCascade2,
+            fragWorldPos, ubo.cameraPosition.xyz,
+            ubo.snowCascade0Params, ubo.snowCascade1Params, ubo.snowCascade2Params
+        );
+
+        // Convert height to coverage
+        snowCoverage = snowHeightToCoverage(snowHeight, ubo.snowAmount, normal);
+
+        // Calculate snow normal from heightfield for better surface detail
+        if (snowCoverage > 0.1) {
+            uint cascadeIdx;
+            float blendFactor;
+            selectSnowCascade(distToCamera, cascadeIdx, blendFactor);
+
+            vec3 snowNormal;
+            float texelSize = 1.0 / 256.0;  // CASCADE_SIZE
+
+            if (cascadeIdx == 0) {
+                vec2 snowUV = worldToSnowCascadeUV(fragWorldPos, ubo.snowCascade0Params);
+                snowNormal = calculateSnowNormalFromHeight(snowCascade0, snowUV, texelSize, ubo.snowMaxHeight);
+            } else if (cascadeIdx == 1) {
+                vec2 snowUV = worldToSnowCascadeUV(fragWorldPos, ubo.snowCascade1Params);
+                snowNormal = calculateSnowNormalFromHeight(snowCascade1, snowUV, texelSize, ubo.snowMaxHeight);
+            } else {
+                vec2 snowUV = worldToSnowCascadeUV(fragWorldPos, ubo.snowCascade2Params);
+                snowNormal = calculateSnowNormalFromHeight(snowCascade2, snowUV, texelSize, ubo.snowMaxHeight);
+            }
+
+            // Blend normals based on coverage
+            normal = blendSnowNormal(normal, snowNormal, snowCoverage * 0.5);
+        }
+    } else {
+        // Legacy: sample snow mask at world position
+        float snowMaskCoverage = sampleSnowMask(snowMaskTexture, fragWorldPos,
+                                                 ubo.snowMaskParams.xy, ubo.snowMaskParams.z);
+        snowCoverage = calculateSnowCoverage(ubo.snowAmount, snowMaskCoverage, normal);
+    }
 
     // Apply snow layer to albedo and roughness
     if (snowCoverage > 0.01) {
