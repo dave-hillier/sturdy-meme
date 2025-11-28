@@ -631,6 +631,9 @@ void PostProcessSystem::recordPostProcess(VkCommandBuffer cmd, uint32_t frameInd
     float computedExposure = manualExposure;
 
     if (autoExposureEnabled && exposureMappedPtrs.size() > readFrameIndex) {
+        // Invalidate to ensure CPU sees GPU writes
+        vmaInvalidateAllocation(allocator, exposureAllocations[readFrameIndex], 0, sizeof(ExposureData));
+
         ExposureData* exposureData = static_cast<ExposureData*>(exposureMappedPtrs[readFrameIndex]);
         computedExposure = exposureData->adaptedExposure;
         currentExposure = computedExposure;
