@@ -1013,7 +1013,7 @@ void GrassSystem::setSnowMask(VkDevice device, VkImageView snowMaskView, VkSampl
         VkDescriptorImageInfo snowMaskInfo{snowMaskSampler, snowMaskView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkWriteDescriptorSet snowMaskWrite{};
         snowMaskWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        snowMaskWrite.dstSet = graphicsDescriptorSets[setIndex];
+        snowMaskWrite.dstSet = particleSystem.getGraphicsDescriptorSet(setIndex);
         snowMaskWrite.dstBinding = 5;
         snowMaskWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         snowMaskWrite.descriptorCount = 1;
