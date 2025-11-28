@@ -254,6 +254,20 @@ void Application::processEvents() {
                     renderer.toggleCloudStyle();
                     SDL_Log("Cloud style: %s", renderer.isUsingParaboloidClouds() ? "Paraboloid LUT Hybrid" : "Procedural");
                 }
+                else if (event.key.scancode == SDL_SCANCODE_LEFTBRACKET) {
+                    float density = renderer.getFogDensity();
+                    renderer.setFogDensity(std::max(0.0f, density - 0.005f));
+                    SDL_Log("Fog density: %.3f", renderer.getFogDensity());
+                }
+                else if (event.key.scancode == SDL_SCANCODE_RIGHTBRACKET) {
+                    float density = renderer.getFogDensity();
+                    renderer.setFogDensity(std::min(0.2f, density + 0.005f));
+                    SDL_Log("Fog density: %.3f", renderer.getFogDensity());
+                }
+                else if (event.key.scancode == SDL_SCANCODE_BACKSLASH) {
+                    renderer.setFogEnabled(!renderer.isFogEnabled());
+                    SDL_Log("Fog: %s", renderer.isFogEnabled() ? "ON" : "OFF");
+                }
                 break;
             case SDL_EVENT_GAMEPAD_ADDED:
                 if (!gamepad) {

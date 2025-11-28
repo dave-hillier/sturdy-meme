@@ -103,6 +103,12 @@ public:
     uint32_t getWeatherType() const { return weatherSystem.getWeatherType(); }
     float getIntensity() const { return weatherSystem.getIntensity(); }
 
+    // Fog control
+    void setFogDensity(float density) { froxelSystem.setFogDensity(density); }
+    float getFogDensity() const { return froxelSystem.getFogDensity(); }
+    void setFogEnabled(bool enabled) { froxelSystem.setEnabled(enabled); postProcessSystem.setFroxelEnabled(enabled); }
+    bool isFogEnabled() const { return froxelSystem.isEnabled(); }
+
     // Leaf control
     void setLeafIntensity(float intensity) { leafSystem.setIntensity(intensity); }
     float getLeafIntensity() const { return leafSystem.getIntensity(); }
