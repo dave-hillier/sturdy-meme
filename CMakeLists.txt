@@ -13,6 +13,9 @@ find_package(Jolt CONFIG REQUIRED)
 
 find_path(STB_INCLUDE_DIRS "stb_image.h")
 
+# Add tools subdirectory for shader reflection
+add_subdirectory(tools)
+
 set(SOURCES
     src/main.cpp
     src/Application.cpp
@@ -444,7 +447,35 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_shadow.frag.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_wireframe.frag.spv
     )
-    add_dependencies(${PROJECT_NAME} shaders)
+
+    # Generate UBO headers from SPIR-V reflection
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/src/GeneratedUBOs.h
+        COMMAND shader_reflect
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/GeneratedUBOs.h
+            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.vert.spv
+            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.frag.spv
+            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.vert.spv
+            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.comp.spv
+            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.frag.spv
+            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_update.comp.spv
+            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.comp.spv
+            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/leaf.comp.spv
+            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain.vert.spv
+            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain.frag.spv
+            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_subdivision.comp.spv
+            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_build.comp.spv
+            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_reduce.comp.spv
+            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp.spv
+        DEPENDS shaders shader_reflect
+        COMMENT "Generating UBO headers from SPIR-V reflection"
+    )
+
+    add_custom_target(generated_headers DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/GeneratedUBOs.h
+    )
+
+    add_dependencies(${PROJECT_NAME} shaders generated_headers)
 else()
     message(WARNING "glslc/glslangValidator not found. Shaders must be compiled manually.")
 endif()

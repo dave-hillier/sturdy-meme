@@ -12,6 +12,7 @@
     "stb",
     "vk-bootstrap",
     "vulkan-memory-allocator",
-    "joltphysics"
+    "joltphysics",
+    "spirv-reflect"
   ]
 }
