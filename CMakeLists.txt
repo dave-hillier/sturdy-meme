@@ -43,6 +43,9 @@ set(SOURCES
     src/PhysicsSystem.cpp
     src/ParticleSystem.cpp
     src/TerrainSystem.cpp
+    src/TerrainHeightMap.cpp
+    src/TerrainTextures.cpp
+    src/TerrainCBT.cpp
     src/ClothSimulation.cpp
     src/SnowMaskSystem.cpp
     src/VolumetricSnowSystem.cpp

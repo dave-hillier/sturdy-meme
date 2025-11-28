@@ -7,6 +7,9 @@
 #include <string>
 #include <array>
 #include "UBOs.h"
+#include "TerrainHeightMap.h"
+#include "TerrainTextures.h"
+#include "TerrainCBT.h"
 
 // Push constants for terrain rendering
 struct TerrainPushConstants {
@@ -103,8 +106,8 @@ public:
     float getHeightAt(float x, float z) const;
 
     // Get raw heightmap data for physics integration
-    const float* getHeightMapData() const { return cpuHeightMap.data(); }
-    uint32_t getHeightMapResolution() const { return heightMapResolution; }
+    const float* getHeightMapData() const { return heightMap.getData(); }
+    uint32_t getHeightMapResolution() const { return heightMap.getResolution(); }
 
     // Get current node count (for debugging/display)
     uint32_t getNodeCount() const { return currentNodeCount; }
@@ -114,8 +117,8 @@ public:
     void setConfig(const TerrainConfig& newConfig) { config = newConfig; }
 
     // Heightmap accessors for grass integration
-    VkImageView getHeightMapView() const { return heightMapView; }
-    VkSampler getHeightMapSampler() const { return heightMapSampler; }
+    VkImageView getHeightMapView() const { return heightMap.getView(); }
+    VkSampler getHeightMapSampler() const { return heightMap.getSampler(); }
 
     // Toggle wireframe mode for debugging
     void setWireframeMode(bool enabled) { wireframeMode = enabled; }
@@ -123,11 +126,6 @@ public:
 
 private:
     // Initialization helpers
-    bool createCBTBuffer();
-    bool initializeCBT();
-    bool createHeightMap();
-    bool createTerrainTexture();
-    bool loadOrGenerateHeightMap();
     bool createUniformBuffers();
     bool createIndirectBuffers();
 
@@ -146,9 +144,6 @@ private:
 
     // Utility functions
     void extractFrustumPlanes(const glm::mat4& viewProj, glm::vec4 planes[6]);
-    uint32_t calculateCBTBufferSize(int maxDepth);
-    bool uploadImageData(VkImage image, const void* data, uint32_t width, uint32_t height,
-                         VkFormat format, uint32_t bytesPerPixel);
 
     // Vulkan resources
     VkDevice device = VK_NULL_HANDLE;
@@ -165,30 +160,10 @@ private:
     VkQueue graphicsQueue = VK_NULL_HANDLE;
     VkCommandPool commandPool = VK_NULL_HANDLE;
 
-    // CBT (Concurrent Binary Tree) buffer
-    VkBuffer cbtBuffer = VK_NULL_HANDLE;
-    VmaAllocation cbtAllocation = VK_NULL_HANDLE;
-    uint32_t cbtBufferSize = 0;
-
-    // Height map texture
-    VkImage heightMapImage = VK_NULL_HANDLE;
-    VmaAllocation heightMapAllocation = VK_NULL_HANDLE;
-    VkImageView heightMapView = VK_NULL_HANDLE;
-    VkSampler heightMapSampler = VK_NULL_HANDLE;
-    std::vector<float> cpuHeightMap;  // CPU-side copy for collision queries
-    uint32_t heightMapResolution = 512;
-
-    // Terrain albedo texture
-    VkImage terrainAlbedoImage = VK_NULL_HANDLE;
-    VmaAllocation terrainAlbedoAllocation = VK_NULL_HANDLE;
-    VkImageView terrainAlbedoView = VK_NULL_HANDLE;
-    VkSampler terrainAlbedoSampler = VK_NULL_HANDLE;
-
-    // Grass far LOD texture (for terrain blending at distance)
-    VkImage grassFarLODImage = VK_NULL_HANDLE;
-    VmaAllocation grassFarLODAllocation = VK_NULL_HANDLE;
-    VkImageView grassFarLODView = VK_NULL_HANDLE;
-    VkSampler grassFarLODSampler = VK_NULL_HANDLE;
+    // Composed subsystems
+    TerrainHeightMap heightMap;
+    TerrainTextures textures;
+    TerrainCBT cbt;
 
     // Indirect dispatch/draw buffers
     VkBuffer indirectDispatchBuffer = VK_NULL_HANDLE;
