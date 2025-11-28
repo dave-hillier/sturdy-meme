@@ -18,5 +18,15 @@ struct EnvironmentSettings {
     float leafGustLiftThreshold = 1.5f;
     float grassDisplacementDecay = 0.97f;
     float grassMaxDisplacement = 1.0f;
+
+    // Snow accumulation parameters
+    float snowAmount = 0.0f;                             // Global snow intensity (0-1)
+    glm::vec3 snowColor = glm::vec3(0.95f, 0.97f, 1.0f); // Slightly blue-white snow
+    float snowRoughness = 0.7f;                          // Snow surface roughness
+    float snowTexScale = 0.1f;                           // World-space snow texture scale
+    float snowNoiseScale = 0.02f;                        // Noise variation scale
+    float snowAccumulationRate = 0.01f;                  // Rate of snow buildup per second
+    float snowMeltRate = 0.005f;                         // Rate of snow melting per second
+    float snowMaskSize = 500.0f;                         // World-space size of snow mask coverage
 };
 

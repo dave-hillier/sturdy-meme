@@ -20,6 +20,8 @@
 #include "AtmosphereLUTSystem.h"
 #include "SceneManager.h"
 #include "TerrainSystem.h"
+#include "SnowMaskSystem.h"
+#include "EnvironmentSettings.h"
 
 static constexpr uint32_t NUM_SHADOW_CASCADES = 4;
 
@@ -43,7 +45,11 @@ struct UniformBufferObject {
     float debugCascades;           // 1.0 = show cascade colors
     float julianDay;               // Julian day for sidereal rotation
     float cloudStyle;              // 0.0 = procedural, 1.0 = paraboloid LUT hybrid
-    float padding1, padding2, padding3;  // Align to 16 bytes
+    float snowAmount;              // Global snow intensity (0-1)
+    float snowRoughness;           // Snow surface roughness
+    float snowTexScale;            // World-space snow texture scale
+    glm::vec4 snowColor;           // rgb = snow color, a = unused
+    glm::vec4 snowMaskParams;      // xy = mask origin, z = mask size, w = unused
 };
 
 struct ShadowPushConstants {
@@ -115,6 +121,16 @@ public:
     void spawnConfetti(const glm::vec3& position, float velocity = 8.0f, float count = 100.0f, float coneAngle = 0.5f) {
         leafSystem.spawnConfetti(position, velocity, count, coneAngle);
     }
+
+    // Snow control
+    void setSnowAmount(float amount) { environmentSettings.snowAmount = glm::clamp(amount, 0.0f, 1.0f); }
+    float getSnowAmount() const { return environmentSettings.snowAmount; }
+    void setSnowColor(const glm::vec3& color) { environmentSettings.snowColor = color; }
+    const glm::vec3& getSnowColor() const { return environmentSettings.snowColor; }
+    void addSnowInteraction(const glm::vec3& position, float radius, float strength) {
+        snowMaskSystem.addInteraction(position, radius, strength);
+    }
+    EnvironmentSettings& getEnvironmentSettings() { return environmentSettings; }
 
     // Scene access
     SceneManager& getSceneManager() { return sceneManager; }
@@ -236,6 +252,8 @@ private:
     FroxelSystem froxelSystem;
     AtmosphereLUTSystem atmosphereLUTSystem;
     TerrainSystem terrainSystem;
+    SnowMaskSystem snowMaskSystem;
+    EnvironmentSettings environmentSettings;
 
     std::vector<VkFramebuffer> framebuffers;
     VkCommandPool commandPool = VK_NULL_HANDLE;

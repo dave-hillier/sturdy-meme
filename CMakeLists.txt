@@ -39,6 +39,7 @@ set(SOURCES
     src/PhysicsSystem.cpp
     src/TerrainSystem.cpp
     src/ClothSimulation.cpp
+    src/SnowMaskSystem.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
@@ -104,6 +105,7 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cloudmap_lut.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_build.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_reduce.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/snow_accumulation.comp.spv
 )
 
 set(TERRAIN_SHADER_FILES
@@ -305,6 +307,12 @@ if(SHADER_COMPILE_CMD)
         COMMENT "Compiling histogram reduce compute shader"
     )
     add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/snow_accumulation.comp.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/snow_accumulation.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/snow_accumulation.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/snow_accumulation.comp
+        COMMENT "Compiling snow accumulation compute shader"
+    )
+    add_custom_command(
         OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp.spv
         COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp ${CMAKE_CURRENT_SOURCE_DIR}/shaders/atmosphere_common.glsl
@@ -423,6 +431,7 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/skyview_lut.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_build.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_reduce.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/snow_accumulation.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_dispatcher.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_subdivision.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_sum_reduction_prepass.comp.spv

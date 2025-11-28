@@ -11,6 +11,7 @@
 #include "../lighting_common.glsl"
 #include "../shadow_common.glsl"
 #include "../atmosphere_common.glsl"
+#include "../snow_common.glsl"
 
 // Use the same UBO as main scene for consistent lighting
 layout(binding = 5) uniform UniformBufferObject {
@@ -32,6 +33,12 @@ layout(binding = 5) uniform UniformBufferObject {
     float shadowMapSize;
     float debugCascades;
     float julianDay;             // Julian day for sidereal rotation
+    float cloudStyle;
+    float snowAmount;            // Global snow intensity (0-1)
+    float snowRoughness;         // Snow surface roughness
+    float snowTexScale;          // World-space snow texture scale
+    vec4 snowColor;              // rgb = snow color, a = unused
+    vec4 snowMaskParams;         // xy = mask origin, z = mask size, w = unused
 } ubo;
 
 // Terrain-specific uniforms
@@ -53,6 +60,7 @@ layout(binding = 3) uniform sampler2D heightMap;
 layout(binding = 6) uniform sampler2D terrainAlbedo;
 layout(binding = 7) uniform sampler2DArrayShadow shadowMapArray;
 layout(binding = 8) uniform sampler2D grassFarLODTexture;  // Far LOD grass texture
+layout(binding = 9) uniform sampler2D snowMaskTexture;     // World-space snow coverage
 
 // Far LOD grass parameters (where to start/end grass-to-terrain transition)
 const float GRASS_RENDER_DISTANCE = 60.0;     // Should match grass system maxDrawDistance
@@ -119,6 +127,22 @@ void main() {
     // Material properties
     float roughness = mix(0.8, 0.95, slope);  // Rougher on slopes
     float metallic = 0.0;  // Terrain is non-metallic
+
+    // === SNOW LAYER ===
+    // Sample snow mask at world position
+    float snowMaskCoverage = sampleSnowMask(snowMaskTexture, fragWorldPos,
+                                             ubo.snowMaskParams.xy, ubo.snowMaskParams.z);
+
+    // Calculate snow coverage based on global amount, mask, and slope
+    float snowCoverage = calculateSnowCoverage(ubo.snowAmount, snowMaskCoverage, normal);
+
+    // Apply snow layer to albedo and roughness
+    if (snowCoverage > 0.01) {
+        // Blend albedo with snow color
+        albedo = blendSnowAlbedo(albedo, ubo.snowColor.rgb, snowCoverage);
+        // Snow is rougher than most terrain
+        roughness = mix(roughness, ubo.snowRoughness, snowCoverage);
+    }
 
     // View direction
     vec3 V = normalize(ubo.cameraPosition.xyz - fragWorldPos);

@@ -1,0 +1,120 @@
+#version 450
+
+/*
+ * snow_accumulation.comp - Snow mask accumulation compute shader
+ *
+ * Updates a world-space snow coverage texture:
+ * - Accumulates snow when snowing
+ * - Melts/decays snow over time
+ * - Clears snow based on interaction sources (footprints, vehicles, etc.)
+ */
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+// Snow mask texture (R16F - coverage 0-1)
+layout(binding = 0, r16f) uniform image2D snowMask;
+
+// Uniforms
+layout(binding = 1) uniform SnowMaskUniforms {
+    vec4 maskRegion;           // xy = world origin, z = size, w = texel size
+    vec4 accumulationParams;   // x = accumulation rate, y = melt rate, z = delta time, w = is snowing (0/1)
+    vec4 snowParams;           // x = snow amount, y = weather intensity, z = num interactions, w = unused
+} uniforms;
+
+// Interaction source for snow clearing
+struct SnowInteractionSource {
+    vec4 positionAndRadius;    // xyz = world position, w = radius
+    vec4 strengthAndShape;     // x = clearing strength, y = shape (0=circle), zw = unused
+};
+
+layout(std430, binding = 2) readonly buffer InteractionBuffer {
+    SnowInteractionSource interactions[];
+};
+
+// Convert texel coordinate to world position
+vec2 texelToWorld(ivec2 texCoord) {
+    vec2 texSize = vec2(imageSize(snowMask));
+    vec2 uv = (vec2(texCoord) + 0.5) / texSize;  // Center of texel
+    float regionSize = uniforms.maskRegion.z;
+    vec2 worldPos = uniforms.maskRegion.xy + uv * regionSize;
+    return worldPos;
+}
+
+// Smooth circular falloff
+float circularFalloff(float dist, float radius) {
+    float normalizedDist = dist / radius;
+    // Smooth falloff: 1 at center, 0 at edge
+    return 1.0 - smoothstep(0.0, 1.0, normalizedDist);
+}
+
+void main() {
+    ivec2 texCoord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 texSize = imageSize(snowMask);
+
+    // Bounds check
+    if (texCoord.x >= texSize.x || texCoord.y >= texSize.y) {
+        return;
+    }
+
+    vec2 worldPos = texelToWorld(texCoord);
+
+    // Extract parameters
+    float accumulationRate = uniforms.accumulationParams.x;
+    float meltRate = uniforms.accumulationParams.y;
+    float deltaTime = uniforms.accumulationParams.z;
+    bool isSnowing = uniforms.accumulationParams.w > 0.5;
+
+    float targetSnowAmount = uniforms.snowParams.x;
+    float weatherIntensity = uniforms.snowParams.y;
+    uint numInteractions = uint(uniforms.snowParams.z);
+
+    // Load current snow coverage
+    float currentCoverage = imageLoad(snowMask, texCoord).r;
+
+    // === ACCUMULATION ===
+    // When snowing, snow accumulates toward target amount
+    if (isSnowing && weatherIntensity > 0.0) {
+        // Rate scales with weather intensity
+        float effectiveRate = accumulationRate * weatherIntensity * deltaTime;
+
+        // Accumulate toward target (asymptotic approach)
+        float targetCoverage = targetSnowAmount;
+        if (currentCoverage < targetCoverage) {
+            currentCoverage += effectiveRate * (targetCoverage - currentCoverage + 0.1);
+            currentCoverage = min(currentCoverage, targetCoverage);
+        }
+    }
+    // === MELTING ===
+    // When not snowing, snow gradually melts
+    else if (!isSnowing || targetSnowAmount < 0.01) {
+        float effectiveMeltRate = meltRate * deltaTime;
+        currentCoverage -= effectiveMeltRate;
+        currentCoverage = max(currentCoverage, 0.0);
+    }
+
+    // === INTERACTION CLEARING ===
+    // Apply interaction sources (footprints, vehicles, etc.)
+    for (uint i = 0; i < numInteractions && i < 32; i++) {
+        vec3 sourcePos = interactions[i].positionAndRadius.xyz;
+        float radius = interactions[i].positionAndRadius.w;
+        float strength = interactions[i].strengthAndShape.x;
+
+        // Distance from source in XZ plane
+        vec2 toWorld = worldPos - sourcePos.xz;
+        float dist = length(toWorld);
+
+        if (dist < radius) {
+            // Smooth circular clearing
+            float clearFactor = circularFalloff(dist, radius) * strength;
+
+            // Clear snow (subtract from coverage)
+            currentCoverage -= clearFactor;
+        }
+    }
+
+    // Clamp to valid range
+    currentCoverage = clamp(currentCoverage, 0.0, 1.0);
+
+    // Store updated coverage
+    imageStore(snowMask, texCoord, vec4(currentCoverage, 0.0, 0.0, 0.0));
+}
