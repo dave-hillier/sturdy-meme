@@ -63,8 +63,8 @@ public:
                            const glm::mat4* cascadeMatrices,
                            const glm::vec4& cascadeSplits);
 
-    // Get the scattering volume (raw, pre-integration)
-    VkImageView getScatteringVolumeView() const { return scatteringVolumeView; }
+    // Get the scattering volume (raw, pre-integration) - returns current frame's output
+    VkImageView getScatteringVolumeView() const { return scatteringVolumeViews[frameCounter % 2]; }
     // Get the integrated volume for compositing (front-to-back integrated result)
     VkImageView getIntegratedVolumeView() const { return integratedVolumeView; }
     VkSampler getVolumeSampler() const { return volumeSampler; }
@@ -136,11 +136,12 @@ private:
     VkSampler shadowSampler = VK_NULL_HANDLE;
     std::vector<VkBuffer> lightBuffers;  // Per-frame light buffers
 
-    // Scattering volume (stores in-scattered light / opacity)
-    // Format: RGB11F - L/alpha for anti-aliasing
-    VkImage scatteringVolume = VK_NULL_HANDLE;
-    VmaAllocation scatteringAllocation = VK_NULL_HANDLE;
-    VkImageView scatteringVolumeView = VK_NULL_HANDLE;
+    // Double-buffered scattering volumes for temporal reprojection (ping-pong)
+    // Format: RGBA16F - stores in-scattered light / opacity
+    // [0] = current write target, [1] = previous frame history (swapped each frame)
+    VkImage scatteringVolumes[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
+    VmaAllocation scatteringAllocations[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
+    VkImageView scatteringVolumeViews[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
 
     // Integrated scattering volume (front-to-back integrated)
     VkImage integratedVolume = VK_NULL_HANDLE;

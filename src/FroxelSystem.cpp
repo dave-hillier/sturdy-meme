@@ -65,13 +65,16 @@ void FroxelSystem::destroy(VkDevice device, VmaAllocator allocator) {
 }
 
 void FroxelSystem::destroyVolumeResources() {
-    if (scatteringVolumeView != VK_NULL_HANDLE) {
-        vkDestroyImageView(device, scatteringVolumeView, nullptr);
-        scatteringVolumeView = VK_NULL_HANDLE;
-    }
-    if (scatteringVolume != VK_NULL_HANDLE) {
-        vmaDestroyImage(allocator, scatteringVolume, scatteringAllocation);
-        scatteringVolume = VK_NULL_HANDLE;
+    // Destroy both double-buffered scattering volumes
+    for (int i = 0; i < 2; i++) {
+        if (scatteringVolumeViews[i] != VK_NULL_HANDLE) {
+            vkDestroyImageView(device, scatteringVolumeViews[i], nullptr);
+            scatteringVolumeViews[i] = VK_NULL_HANDLE;
+        }
+        if (scatteringVolumes[i] != VK_NULL_HANDLE) {
+            vmaDestroyImage(allocator, scatteringVolumes[i], scatteringAllocations[i]);
+            scatteringVolumes[i] = VK_NULL_HANDLE;
+        }
     }
 
     if (integratedVolumeView != VK_NULL_HANDLE) {
@@ -90,7 +93,7 @@ void FroxelSystem::resize(VkDevice device, VmaAllocator allocator, VkExtent2D ne
 }
 
 bool FroxelSystem::createScatteringVolume() {
-    // Create 3D image for storing scattering data
+    // Create two 3D images for double-buffered scattering data (ping-pong for temporal)
     // Format: R16G16B16A16_SFLOAT for in-scatter RGB and opacity
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -108,15 +111,8 @@ bool FroxelSystem::createScatteringVolume() {
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
-    if (vmaCreateImage(allocator, &imageInfo, &allocInfo,
-                       &scatteringVolume, &scatteringAllocation, nullptr) != VK_SUCCESS) {
-        SDL_Log("Failed to create scattering volume");
-        return false;
-    }
-
     VkImageViewCreateInfo viewInfo{};
     viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.image = scatteringVolume;
     viewInfo.viewType = VK_IMAGE_VIEW_TYPE_3D;
     viewInfo.format = VK_FORMAT_R16G16B16A16_SFLOAT;
     viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -125,9 +121,19 @@ bool FroxelSystem::createScatteringVolume() {
     viewInfo.subresourceRange.baseArrayLayer = 0;
     viewInfo.subresourceRange.layerCount = 1;
 
-    if (vkCreateImageView(device, &viewInfo, nullptr, &scatteringVolumeView) != VK_SUCCESS) {
-        SDL_Log("Failed to create scattering volume view");
-        return false;
+    // Create both buffers for ping-pong
+    for (int i = 0; i < 2; i++) {
+        if (vmaCreateImage(allocator, &imageInfo, &allocInfo,
+                           &scatteringVolumes[i], &scatteringAllocations[i], nullptr) != VK_SUCCESS) {
+            SDL_Log("Failed to create scattering volume %d", i);
+            return false;
+        }
+
+        viewInfo.image = scatteringVolumes[i];
+        if (vkCreateImageView(device, &viewInfo, nullptr, &scatteringVolumeViews[i]) != VK_SUCCESS) {
+            SDL_Log("Failed to create scattering volume view %d", i);
+            return false;
+        }
     }
 
     return true;
@@ -201,9 +207,9 @@ bool FroxelSystem::createSampler() {
 }
 
 bool FroxelSystem::createDescriptorSetLayout() {
-    std::array<VkDescriptorSetLayoutBinding, 5> bindings{};
+    std::array<VkDescriptorSetLayoutBinding, 6> bindings{};
 
-    // Binding 0: Scattering volume (storage image, read/write)
+    // Binding 0: Current scattering volume (storage image, write)
     bindings[0].binding = 0;
     bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     bindings[0].descriptorCount = 1;
@@ -232,6 +238,12 @@ bool FroxelSystem::createDescriptorSetLayout() {
     bindings[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     bindings[4].descriptorCount = 1;
     bindings[4].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+    // Binding 5: History scattering volume (storage image, read-only for temporal)
+    bindings[5].binding = 5;
+    bindings[5].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    bindings[5].descriptorCount = 1;
+    bindings[5].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -304,11 +316,11 @@ bool FroxelSystem::createDescriptorSets() {
     }
 
     for (uint32_t i = 0; i < framesInFlight; i++) {
-        std::array<VkWriteDescriptorSet, 5> writes{};
+        std::array<VkWriteDescriptorSet, 6> writes{};
 
-        // Scattering volume
+        // Current scattering volume (write target) - initially volume 0
         VkDescriptorImageInfo scatteringInfo{};
-        scatteringInfo.imageView = scatteringVolumeView;
+        scatteringInfo.imageView = scatteringVolumeViews[0];
         scatteringInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
         writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -373,6 +385,19 @@ bool FroxelSystem::createDescriptorSets() {
         writes[4].descriptorCount = 1;
         writes[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         writes[4].pBufferInfo = &lightBufferInfo;
+
+        // History scattering volume (read for temporal) - initially volume 1
+        VkDescriptorImageInfo historyInfo{};
+        historyInfo.imageView = scatteringVolumeViews[1];
+        historyInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+        writes[5].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[5].dstSet = froxelDescriptorSets[i];
+        writes[5].dstBinding = 5;
+        writes[5].dstArrayElement = 0;
+        writes[5].descriptorCount = 1;
+        writes[5].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        writes[5].pImageInfo = &historyInfo;
 
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
     }
@@ -484,21 +509,60 @@ void FroxelSystem::recordFroxelUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
 
     // Store for next frame's temporal reprojection
     prevViewProj = viewProj;
+
+    // Double-buffering: determine which volume is current (write) and which is history (read)
+    // frameCounter starts at 0, so frame 0 writes to volume[0], reads history from volume[1]
+    uint32_t currentVolumeIdx = frameCounter % 2;
+    uint32_t historyVolumeIdx = (frameCounter + 1) % 2;
+
     frameCounter++;
 
-    // Transition scattering volume to general layout for compute write
+    // Update descriptor sets with correct volume bindings for this frame
+    std::array<VkWriteDescriptorSet, 2> volumeWrites{};
+    VkDescriptorImageInfo currentInfo{};
+    currentInfo.imageView = scatteringVolumeViews[currentVolumeIdx];
+    currentInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+    volumeWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    volumeWrites[0].dstSet = froxelDescriptorSets[frameIndex];
+    volumeWrites[0].dstBinding = 0;  // Current scattering volume (write)
+    volumeWrites[0].dstArrayElement = 0;
+    volumeWrites[0].descriptorCount = 1;
+    volumeWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    volumeWrites[0].pImageInfo = &currentInfo;
+
+    VkDescriptorImageInfo historyInfo{};
+    historyInfo.imageView = scatteringVolumeViews[historyVolumeIdx];
+    historyInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+    volumeWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    volumeWrites[1].dstSet = froxelDescriptorSets[frameIndex];
+    volumeWrites[1].dstBinding = 5;  // History scattering volume (read)
+    volumeWrites[1].dstArrayElement = 0;
+    volumeWrites[1].descriptorCount = 1;
+    volumeWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    volumeWrites[1].pImageInfo = &historyInfo;
+
+    vkUpdateDescriptorSets(device, static_cast<uint32_t>(volumeWrites.size()), volumeWrites.data(), 0, nullptr);
+
+    // Transition volumes to GENERAL layout for compute
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
     barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.image = scatteringVolume;
     barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     barrier.subresourceRange.baseMipLevel = 0;
     barrier.subresourceRange.levelCount = 1;
     barrier.subresourceRange.baseArrayLayer = 0;
     barrier.subresourceRange.layerCount = 1;
+
+    // Note: frameCounter was already incremented above, so first frame is frameCounter == 1
+    bool isFirstFrame = (frameCounter == 1);
+
+    // Current scattering volume (write target) - can discard previous contents
+    barrier.image = scatteringVolumes[currentVolumeIdx];
+    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;  // Don't care about previous contents
+    barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
     barrier.srcAccessMask = 0;
     barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
 
@@ -507,10 +571,41 @@ void FroxelSystem::recordFroxelUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
                          VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                          0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    // Same for integrated volume
-    barrier.image = integratedVolume;
+    // History scattering volume (read source) - preserve data from previous frame
+    barrier.image = scatteringVolumes[historyVolumeIdx];
+    if (isFirstFrame) {
+        // First frame: no valid history yet, transition from UNDEFINED
+        barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        barrier.srcAccessMask = 0;
+    } else {
+        // Subsequent frames: history volume was written in previous frame
+        barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+        barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    }
+    barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
     vkCmdPipelineBarrier(cmd,
-                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         isFirstFrame ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT : VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    // Integrated volume: transitions between GENERAL (for compute) and SHADER_READ_ONLY (for fragment)
+    barrier.image = integratedVolume;
+    if (isFirstFrame) {
+        // First frame: transition from UNDEFINED (image just created)
+        barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        barrier.srcAccessMask = 0;
+    } else {
+        // Subsequent frames: transition from SHADER_READ_ONLY_OPTIMAL (set at end of previous frame)
+        barrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    }
+    barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+
+    vkCmdPipelineBarrier(cmd,
+                         isFirstFrame ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT : VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
                          VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                          0, 0, nullptr, 0, nullptr, 1, &barrier);
 
@@ -525,8 +620,8 @@ void FroxelSystem::recordFroxelUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
     uint32_t groupsZ = (FROXEL_DEPTH + 3) / 4;
     vkCmdDispatch(cmd, groupsX, groupsY, groupsZ);
 
-    // Barrier between update and integration
-    barrier.image = scatteringVolume;
+    // Barrier between update and integration - wait for current volume write
+    barrier.image = scatteringVolumes[currentVolumeIdx];
     barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
     barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
 

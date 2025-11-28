@@ -6,8 +6,9 @@
 
 layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
 
-layout(binding = 0, rgba16f) uniform image3D scatteringVolume;  // Current frame (read/write for temporal)
-layout(binding = 1, rgba16f) uniform image3D integratedVolume;  // Previous frame for temporal
+layout(binding = 0, rgba16f) uniform image3D scatteringVolume;  // Current frame output (write only)
+layout(binding = 1, rgba16f) uniform image3D integratedVolume;  // Integrated volume (used by integration pass)
+layout(binding = 5, rgba16f) uniform readonly image3D historyVolume;  // Previous frame for temporal reprojection
 
 const int NUM_CASCADES = 4;
 
@@ -155,7 +156,7 @@ bool isReprojectionValid(vec3 prevUVW) {
     return true;
 }
 
-// Sample history with bilinear interpolation
+// Sample history with bilinear interpolation from the history volume (previous frame)
 vec4 sampleHistory(vec3 uvw) {
     // Convert UVW to texel coordinates
     vec3 texelCoord = uvw * vec3(float(FROXEL_WIDTH), float(FROXEL_HEIGHT), float(FROXEL_DEPTH)) - 0.5;
@@ -166,15 +167,15 @@ vec4 sampleHistory(vec3 uvw) {
     texel0 = clamp(texel0, ivec3(0), ivec3(FROXEL_WIDTH - 1, FROXEL_HEIGHT - 1, FROXEL_DEPTH - 1));
     ivec3 texel1 = min(texel0 + 1, ivec3(FROXEL_WIDTH - 1, FROXEL_HEIGHT - 1, FROXEL_DEPTH - 1));
 
-    // 8-tap trilinear sampling from scattering volume (which holds previous frame's data)
-    vec4 c000 = imageLoad(scatteringVolume, ivec3(texel0.x, texel0.y, texel0.z));
-    vec4 c100 = imageLoad(scatteringVolume, ivec3(texel1.x, texel0.y, texel0.z));
-    vec4 c010 = imageLoad(scatteringVolume, ivec3(texel0.x, texel1.y, texel0.z));
-    vec4 c110 = imageLoad(scatteringVolume, ivec3(texel1.x, texel1.y, texel0.z));
-    vec4 c001 = imageLoad(scatteringVolume, ivec3(texel0.x, texel0.y, texel1.z));
-    vec4 c101 = imageLoad(scatteringVolume, ivec3(texel1.x, texel0.y, texel1.z));
-    vec4 c011 = imageLoad(scatteringVolume, ivec3(texel0.x, texel1.y, texel1.z));
-    vec4 c111 = imageLoad(scatteringVolume, ivec3(texel1.x, texel1.y, texel1.z));
+    // 8-tap trilinear sampling from history volume (double-buffered previous frame)
+    vec4 c000 = imageLoad(historyVolume, ivec3(texel0.x, texel0.y, texel0.z));
+    vec4 c100 = imageLoad(historyVolume, ivec3(texel1.x, texel0.y, texel0.z));
+    vec4 c010 = imageLoad(historyVolume, ivec3(texel0.x, texel1.y, texel0.z));
+    vec4 c110 = imageLoad(historyVolume, ivec3(texel1.x, texel1.y, texel0.z));
+    vec4 c001 = imageLoad(historyVolume, ivec3(texel0.x, texel0.y, texel1.z));
+    vec4 c101 = imageLoad(historyVolume, ivec3(texel1.x, texel0.y, texel1.z));
+    vec4 c011 = imageLoad(historyVolume, ivec3(texel0.x, texel1.y, texel1.z));
+    vec4 c111 = imageLoad(historyVolume, ivec3(texel1.x, texel1.y, texel1.z));
 
     // Trilinear interpolation
     vec4 c00 = mix(c000, c100, frac.x);
