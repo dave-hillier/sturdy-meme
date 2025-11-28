@@ -171,37 +171,9 @@ float getLuminance(vec3 color) {
     return dot(color, vec3(0.2126, 0.7152, 0.0722));
 }
 
-// Sample luminance at multiple points for auto-exposure
-float computeAverageLuminance() {
-    const float minLum = 0.001;
-    const float maxLum = 10.0;
-
-    // Sample a 5x5 grid across the image (center-weighted)
-    float totalLogLum = 0.0;
-    float totalWeight = 0.0;
-
-    // Center-weighted sampling pattern
-    for (int y = 0; y < 5; y++) {
-        for (int x = 0; x < 5; x++) {
-            vec2 uv = vec2(0.1 + 0.2 * float(x), 0.1 + 0.2 * float(y));
-
-            // Center-weighted bias
-            vec2 center = vec2(0.5, 0.5);
-            float dist = length(uv - center);
-            float weight = 1.0 - dist * 0.5;
-
-            vec3 color = texture(hdrInput, uv).rgb;
-            float lum = clamp(getLuminance(color), minLum, maxLum);
-
-            // Log-average for geometric mean
-            totalLogLum += log(lum) * weight;
-            totalWeight += weight;
-        }
-    }
-
-    // Convert back from log space (geometric mean)
-    return exp(totalLogLum / totalWeight);
-}
+// NOTE: Auto-exposure is now computed via histogram compute shaders
+// (histogram_build.comp and histogram_reduce.comp)
+// The computed exposure is passed through ubo.exposure from the CPU
 
 // God rays / Light shafts (Phase 4.4)
 // Screen-space radial blur from sun position
@@ -283,20 +255,8 @@ void main() {
         hdr = hdr * transmittance + inScatter;
     }
 
+    // Exposure is computed by histogram compute shaders and passed via uniform
     float finalExposure = ubo.exposure;
-
-    // Auto-exposure: compute target exposure from scene luminance
-    if (ubo.autoExposure > 0.5) {
-        float avgLum = computeAverageLuminance();
-
-        // Target middle gray (0.18) for average luminance
-        // exposure = log2(targetLum / avgLum)
-        const float targetLum = 0.18;
-        float targetExp = log2(targetLum / max(avgLum, 0.001));
-
-        // Clamp to reasonable range
-        finalExposure = clamp(targetExp, -4.0, 4.0);
-    }
 
     // Sample bloom from multi-pass bloom texture
     vec3 bloom = texture(bloomTexture, fragTexCoord).rgb;
