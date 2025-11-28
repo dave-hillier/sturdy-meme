@@ -333,7 +333,7 @@ bool LeafSystem::createGraphicsPipeline() {
 
     VkRect2D scissor{};
     scissor.offset = {0, 0};
-    scissor.getExtent() = getExtent();
+    scissor.extent = getExtent();
 
     VkPipelineViewportStateCreateInfo viewportState{};
     viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
@@ -415,7 +415,7 @@ bool LeafSystem::createGraphicsPipeline() {
     pipelineInfo.pDepthStencilState = &depthStencil;
     pipelineInfo.pColorBlendState = &colorBlending;
     pipelineInfo.layout = getGraphicsPipelineHandles().pipelineLayout;
-    pipelineInfo.getRenderPass() = getRenderPass();
+    pipelineInfo.renderPass = getRenderPass();
     pipelineInfo.subpass = 0;
 
     VkResult result = vkCreateGraphicsPipelines(getDevice(), VK_NULL_HANDLE, 1,
@@ -439,7 +439,7 @@ bool LeafSystem::createDescriptorSets() {
         // Compute descriptor set
         VkDescriptorSetAllocateInfo computeAllocInfo{};
         computeAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        computeAllocInfo.getDescriptorPool() = getDescriptorPool();
+        computeAllocInfo.descriptorPool = getDescriptorPool();
         computeAllocInfo.descriptorSetCount = 1;
         computeAllocInfo.pSetLayouts = &getComputePipelineHandles().descriptorSetLayout;
 
@@ -451,7 +451,7 @@ bool LeafSystem::createDescriptorSets() {
         // Graphics descriptor set
         VkDescriptorSetAllocateInfo graphicsAllocInfo{};
         graphicsAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        graphicsAllocInfo.getDescriptorPool() = getDescriptorPool();
+        graphicsAllocInfo.descriptorPool = getDescriptorPool();
         graphicsAllocInfo.descriptorSetCount = 1;
         graphicsAllocInfo.pSetLayouts = &getGraphicsPipelineHandles().descriptorSetLayout;
 
