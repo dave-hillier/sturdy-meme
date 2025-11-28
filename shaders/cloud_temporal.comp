@@ -1,0 +1,514 @@
+#version 450
+
+// Cloud Temporal Reprojection Compute Shader (Phase 4.2.7)
+// Renders clouds to a paraboloid map with temporal blending from previous frame
+//
+// Key features:
+// - Ray marches clouds for each paraboloid direction
+// - Reprojects previous frame based on wind motion
+// - Blends with history using adaptive rejection
+// - Stores RGB = in-scattered light, A = transmittance
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+// Uniforms
+layout(binding = 0) uniform CloudTemporalUBO {
+    mat4 invViewProj;           // Current frame inverse view-projection
+    mat4 prevViewProj;          // Previous frame view-projection
+    vec4 cameraPosition;        // xyz = camera pos, w = camera altitude
+    vec4 sunDirection;          // xyz = sun dir, w = sun intensity
+    vec4 sunColor;              // rgb = sun color, w = unused
+    vec4 moonDirection;         // xyz = moon dir, w = moon intensity
+    vec4 moonColor;             // rgb = moon color, a = moon phase
+    vec4 windParams;            // xy = wind direction, z = wind speed, w = time
+    vec4 cloudParams;           // x = coverage, y = density, z = blend factor, w = frame index
+    vec4 atmosphereParams;      // x = planet radius, y = atmosphere radius, z = cloud bottom, w = cloud top
+} ubo;
+
+// Output: current frame cloud map (RGB = scattered light, A = transmittance)
+layout(binding = 1, rgba16f) uniform image2D currentCloudMap;
+
+// Input: previous frame cloud map for temporal blending
+layout(binding = 2) uniform sampler2D historyCloudMap;
+
+// Atmosphere LUTs for accurate lighting
+layout(binding = 3) uniform sampler2D transmittanceLUT;
+layout(binding = 4) uniform sampler2D multiScatterLUT;
+
+// Constants
+const float PI = 3.14159265359;
+const int CLOUD_MARCH_STEPS = 24;      // Reduced for compute efficiency (temporal will fill in detail)
+const int CLOUD_LIGHT_STEPS = 4;       // Light samples toward sun
+
+// Transmittance LUT dimensions (must match AtmosphereLUTSystem)
+const int TRANSMITTANCE_WIDTH = 256;
+const int TRANSMITTANCE_HEIGHT = 64;
+
+// Cloud map size (must match CloudTemporalSystem)
+const int CLOUD_MAP_SIZE = 512;
+
+// ============================================================================
+// Hash and Noise Functions
+// ============================================================================
+
+float hash(vec3 p) {
+    return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453);
+}
+
+float noise3D(vec3 p) {
+    vec3 i = floor(p);
+    vec3 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+
+    return mix(
+        mix(mix(hash(i + vec3(0, 0, 0)), hash(i + vec3(1, 0, 0)), f.x),
+            mix(hash(i + vec3(0, 1, 0)), hash(i + vec3(1, 1, 0)), f.x), f.y),
+        mix(mix(hash(i + vec3(0, 0, 1)), hash(i + vec3(1, 0, 1)), f.x),
+            mix(hash(i + vec3(0, 1, 1)), hash(i + vec3(1, 1, 1)), f.x), f.y),
+        f.z
+    );
+}
+
+float fbm(vec3 p, int octaves) {
+    float value = 0.0;
+    float amplitude = 0.5;
+    float frequency = 1.0;
+    float maxValue = 0.0;
+
+    for (int i = 0; i < octaves; i++) {
+        value += amplitude * noise3D(p * frequency);
+        maxValue += amplitude;
+        amplitude *= 0.5;
+        frequency *= 2.0;
+    }
+
+    return value / maxValue;
+}
+
+// ============================================================================
+// Paraboloid Projection
+// ============================================================================
+
+// Convert UV to paraboloid direction (inverse mapping)
+// Returns normalized direction on upper hemisphere (Y-up)
+vec3 paraboloidUVToDirection(vec2 uv) {
+    vec2 p = uv * 2.0 - 1.0;
+    float r2 = dot(p, p);
+
+    if (r2 > 1.0) {
+        vec2 normalized = normalize(p);
+        return vec3(normalized.x, 0.001, normalized.y);  // Horizon
+    }
+
+    float z = (1.0 - r2) / (1.0 + r2);
+    float denom = 1.0 + z;
+    float x = p.x * denom;
+    float y = p.y * denom;
+
+    return normalize(vec3(x, z, y));  // Y-up convention
+}
+
+// Convert direction to paraboloid UV coordinates
+vec2 directionToParaboloidUV(vec3 dir) {
+    dir = normalize(dir);
+    float denom = 1.0 + max(dir.y, 0.001);
+    float u = 0.5 + (dir.x / denom) * 0.5;
+    float v = 0.5 + (dir.z / denom) * 0.5;
+    return vec2(u, v);
+}
+
+// ============================================================================
+// Transmittance LUT Sampling
+// ============================================================================
+
+vec2 transmittanceLUTParamsToUV(float r, float mu) {
+    float planetRadius = ubo.atmosphereParams.x;
+    float atmosphereRadius = ubo.atmosphereParams.y;
+
+    float H = sqrt(atmosphereRadius * atmosphereRadius - planetRadius * planetRadius);
+    float rho = sqrt(max(0.0, r * r - planetRadius * planetRadius));
+
+    float discriminant = r * r * (mu * mu - 1.0) + atmosphereRadius * atmosphereRadius;
+    float d = max(0.0, -r * mu + sqrt(max(0.0, discriminant)));
+
+    float dMin = atmosphereRadius - r;
+    float dMax = rho + H;
+
+    float xMu = (d - dMin) / (dMax - dMin);
+    float xR = rho / H;
+
+    return vec2(xMu, xR);
+}
+
+vec3 sampleTransmittanceLUT(float r, float mu) {
+    vec2 uv = transmittanceLUTParamsToUV(r, mu);
+    return texture(transmittanceLUT, uv).rgb;
+}
+
+vec3 getTransmittanceToSun(vec3 worldPos, vec3 sunDir) {
+    float r = length(worldPos);
+    float planetRadius = ubo.atmosphereParams.x;
+    if (r < planetRadius) {
+        r = planetRadius + 0.001;
+    }
+    float mu = dot(normalize(worldPos), sunDir);
+    return sampleTransmittanceLUT(r, mu);
+}
+
+// ============================================================================
+// Cloud Density Sampling
+// ============================================================================
+
+float cloudHeightGradient(float heightFraction) {
+    return smoothstep(0.0, 0.2, heightFraction) *
+           smoothstep(1.0, 0.7, heightFraction);
+}
+
+float sampleCloudDensity(vec3 worldPos, vec3 dir) {
+    float planetRadius = ubo.atmosphereParams.x;
+    float cloudBottom = ubo.atmosphereParams.z;
+    float cloudTop = ubo.atmosphereParams.w;
+
+    float altitude = length(worldPos) - planetRadius;
+
+    if (altitude < cloudBottom || altitude > cloudTop) {
+        return 0.0;
+    }
+
+    float heightFraction = (altitude - cloudBottom) / (cloudTop - cloudBottom);
+    float heightGradient = cloudHeightGradient(heightFraction);
+
+    // Wind animation
+    vec2 windDir = ubo.windParams.xy;
+    float windSpeed = ubo.windParams.z;
+    float windTime = ubo.windParams.w;
+
+    // Slow time scale for cloud evolution
+    float timeScale = 0.02;
+    vec3 windOffset = vec3(windDir.x * windSpeed * windTime * timeScale,
+                           windTime * 0.002,
+                           windDir.y * windSpeed * windTime * timeScale);
+
+    vec3 samplePos = worldPos * 0.5 + windOffset;
+
+    // Large-scale shape noise
+    float baseNoise = fbm(samplePos * 0.25, 4);
+
+    // Coverage threshold
+    float coverage = ubo.cloudParams.x;
+    float coverageThreshold = 1.0 - coverage;
+    float density = smoothstep(coverageThreshold, coverageThreshold + 0.35, baseNoise);
+
+    density *= heightGradient;
+
+    // Detail erosion
+    float detailNoise = fbm(samplePos * 1.0 + vec3(100.0), 2);
+    density -= detailNoise * 0.2 * (1.0 - heightFraction);
+    density = max(density, 0.0);
+
+    return density * ubo.cloudParams.y;  // Apply density multiplier
+}
+
+// ============================================================================
+// Phase Functions
+// ============================================================================
+
+float hgPhase(float cosTheta, float g) {
+    float g2 = g * g;
+    float denom = 1.0 + g2 - 2.0 * g * cosTheta;
+    return (1.0 - g2) / (4.0 * PI * pow(denom, 1.5));
+}
+
+float cornetteShanksPhase(float cosTheta, float g) {
+    float g2 = g * g;
+    float num = 3.0 * (1.0 - g2) * (1.0 + cosTheta * cosTheta);
+    float denom = 8.0 * PI * (2.0 + g2) * pow(1.0 + g2 - 2.0 * g * cosTheta, 1.5);
+    return num / denom;
+}
+
+float cloudPhase(float cosTheta, float transmittanceToLight, float segmentTransmittance) {
+    float opticalDepthFactor = transmittanceToLight * segmentTransmittance;
+    float gForward = 0.8;
+    float gBack = -0.15;
+    float g = mix(gBack, gForward, opticalDepthFactor);
+
+    float phase;
+    if (g >= 0.0) {
+        phase = cornetteShanksPhase(cosTheta, g);
+    } else {
+        phase = hgPhase(cosTheta, -g) * 2.16;  // Multi-scatter boost
+    }
+
+    return phase;
+}
+
+// ============================================================================
+// Light Sampling
+// ============================================================================
+
+float sampleCloudTransmittanceToSun(vec3 pos, vec3 sunDir, vec3 rayDir) {
+    float cloudBottom = ubo.atmosphereParams.z;
+    float cloudTop = ubo.atmosphereParams.w;
+
+    float opticalDepth = 0.0;
+    float stepSize = (cloudTop - cloudBottom) / float(CLOUD_LIGHT_STEPS);
+
+    for (int i = 0; i < CLOUD_LIGHT_STEPS; i++) {
+        float t = stepSize * (float(i) + 0.5);
+        vec3 samplePos = pos + sunDir * t;
+
+        float planetRadius = ubo.atmosphereParams.x;
+        float alt = length(samplePos) - planetRadius;
+        if (alt < cloudBottom || alt > cloudTop) continue;
+
+        float density = sampleCloudDensity(samplePos, rayDir);
+        opticalDepth += density * stepSize * 10.0;
+
+        if (opticalDepth > 4.0) break;
+    }
+
+    return exp(-opticalDepth);
+}
+
+// ============================================================================
+// Ray-Sphere Intersection
+// ============================================================================
+
+vec2 raySphereIntersect(vec3 origin, vec3 dir, float radius) {
+    float b = dot(origin, dir);
+    float c = dot(origin, origin) - radius * radius;
+    float h = b * b - c;
+    if (h < 0.0) return vec2(1e9, -1e9);
+    h = sqrt(h);
+    return vec2(-b - h, -b + h);
+}
+
+vec2 intersectCloudLayer(vec3 origin, vec3 dir) {
+    float planetRadius = ubo.atmosphereParams.x;
+    float cloudBottom = ubo.atmosphereParams.z;
+    float cloudTop = ubo.atmosphereParams.w;
+
+    vec2 bottomHit = raySphereIntersect(origin, dir, planetRadius + cloudBottom);
+    vec2 topHit = raySphereIntersect(origin, dir, planetRadius + cloudTop);
+
+    float tEnter = max(bottomHit.x, 0.0);
+    float tExit = topHit.y;
+
+    if (bottomHit.x < 0.0 && bottomHit.y > 0.0) {
+        tEnter = 0.0;
+    }
+
+    return vec2(tEnter, tExit);
+}
+
+// ============================================================================
+// Cloud Ray Marching
+// ============================================================================
+
+struct CloudResult {
+    vec3 scattering;
+    float transmittance;
+};
+
+CloudResult marchClouds(vec3 origin, vec3 dir) {
+    CloudResult result;
+    result.scattering = vec3(0.0);
+    result.transmittance = 1.0;
+
+    vec2 cloudHit = intersectCloudLayer(origin, dir);
+    if (cloudHit.x >= cloudHit.y || cloudHit.y < 0.0) {
+        return result;
+    }
+
+    float tStart = cloudHit.x;
+    float tEnd = cloudHit.y;
+    float stepSize = (tEnd - tStart) / float(CLOUD_MARCH_STEPS);
+
+    // Jitter for temporal anti-aliasing
+    float frameIndex = ubo.cloudParams.w;
+    float jitter = hash(dir * 1000.0 + vec3(frameIndex * 0.1));
+    tStart += stepSize * jitter * 0.5;
+
+    vec3 sunDir = normalize(ubo.sunDirection.xyz);
+    float sunIntensity = ubo.sunDirection.w;
+    vec3 sunLight = ubo.sunColor.rgb * sunIntensity;
+
+    vec3 moonDir = normalize(ubo.moonDirection.xyz);
+    float moonIntensity = ubo.moonDirection.w;
+    vec3 moonLight = ubo.moonColor.rgb * moonIntensity;
+
+    float cosThetaSun = dot(dir, sunDir);
+    float cosThetaMoon = dot(dir, moonDir);
+
+    // Twilight factor for moon contribution
+    float sunAltitude = ubo.sunDirection.y;
+    float moonAltitude = ubo.moonDirection.y;
+    float twilightFactor = smoothstep(0.17, -0.1, sunAltitude);
+    float moonVisibility = smoothstep(-0.09, 0.1, moonAltitude);
+    float moonContribution = twilightFactor * moonVisibility;
+
+    // Cloud scattering albedo
+    const float CLOUD_ALBEDO = 0.99;
+
+    // Get atmospheric transmittance from cloud layer to sun
+    float planetRadius = ubo.atmosphereParams.x;
+    float cloudBottom = ubo.atmosphereParams.z;
+    vec3 cloudLayerPos = vec3(0.0, planetRadius + cloudBottom, 0.0);
+    vec3 sunAtmoTransmittance = getTransmittanceToSun(cloudLayerPos, sunDir);
+    vec3 moonAtmoTransmittance = getTransmittanceToSun(cloudLayerPos, moonDir);
+
+    vec3 attenuatedSunLight = sunLight * sunAtmoTransmittance;
+    vec3 attenuatedMoonLight = moonLight * moonAtmoTransmittance;
+
+    // Simple ambient sky irradiance
+    vec3 skyIrradiance = sunLight * 0.1 + vec3(0.02, 0.03, 0.05);
+    if (moonContribution > 0.01) {
+        skyIrradiance += moonLight * 0.05 * moonContribution;
+    }
+
+    for (int i = 0; i < CLOUD_MARCH_STEPS; i++) {
+        if (result.transmittance < 0.01) break;
+
+        float t = tStart + (float(i) + 0.5) * stepSize;
+        vec3 pos = origin + dir * t;
+
+        float density = sampleCloudDensity(pos, dir);
+
+        if (density > 0.005) {
+            float cloudTransmittanceToSun = sampleCloudTransmittanceToSun(pos, sunDir, dir);
+            float phaseSun = cloudPhase(cosThetaSun, cloudTransmittanceToSun, result.transmittance);
+
+            vec3 sunScatter = attenuatedSunLight * cloudTransmittanceToSun * phaseSun;
+
+            vec3 moonScatter = vec3(0.0);
+            if (moonContribution > 0.01) {
+                float cloudTransmittanceToMoon = sampleCloudTransmittanceToSun(pos, moonDir, dir);
+                float phaseMoon = cloudPhase(cosThetaMoon, cloudTransmittanceToMoon, result.transmittance);
+                moonScatter = attenuatedMoonLight * cloudTransmittanceToMoon * phaseMoon * moonContribution;
+            }
+
+            // Height-based ambient blend
+            float altitude = length(pos) - planetRadius;
+            float cloudTop = ubo.atmosphereParams.w;
+            float heightFraction = clamp((altitude - cloudBottom) / (cloudTop - cloudBottom), 0.0, 1.0);
+            vec3 ambientScatter = skyIrradiance * 0.08 * (0.5 + 0.5 * heightFraction);
+
+            vec3 totalScatter = (sunScatter + moonScatter + ambientScatter) * CLOUD_ALBEDO;
+
+            // Beer-Lambert extinction
+            float extinction = density * stepSize * 10.0;
+            float segmentTransmittance = exp(-extinction);
+
+            vec3 integScatter = totalScatter * (1.0 - segmentTransmittance);
+            result.scattering += result.transmittance * integScatter;
+            result.transmittance *= segmentTransmittance;
+        }
+    }
+
+    return result;
+}
+
+// ============================================================================
+// Temporal Reprojection
+// ============================================================================
+
+// Compute motion vector for cloud reprojection based on wind
+vec2 computeCloudMotionVector(vec3 dir) {
+    // Clouds move with wind - compute how the paraboloid UV has shifted
+    vec2 windDir = ubo.windParams.xy;
+    float windSpeed = ubo.windParams.z;
+
+    // Project wind motion to paraboloid space
+    // This is approximate - clouds at different distances move differently in screen space
+    // For paraboloid projection, we use a simplified model based on direction
+    float motionScale = 0.0002 * windSpeed;  // Tune this for visual stability
+
+    // Wind affects horizontal movement more at horizon, less at zenith
+    float horizonFactor = 1.0 - abs(dir.y);
+
+    vec2 motion = windDir * motionScale * horizonFactor;
+
+    return motion;
+}
+
+vec4 sampleHistoryWithReprojection(vec2 currentUV, vec3 dir, float currentTransmittance) {
+    // Compute reprojected UV based on wind motion
+    vec2 motionVector = computeCloudMotionVector(dir);
+    vec2 historyUV = currentUV - motionVector;
+
+    // Check if reprojected UV is valid
+    bool valid = historyUV.x >= 0.0 && historyUV.x <= 1.0 &&
+                 historyUV.y >= 0.0 && historyUV.y <= 1.0;
+
+    if (!valid) {
+        return vec4(0.0);  // Invalid - will use current frame only
+    }
+
+    // Sample history
+    vec4 history = texture(historyCloudMap, historyUV);
+
+    // Reject history if transmittance differs significantly (cloud appeared/disappeared)
+    float transmittanceDiff = abs(history.a - currentTransmittance);
+    if (transmittanceDiff > 0.3) {
+        return vec4(0.0);  // Reject - significant change in cloud coverage
+    }
+
+    return history;
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+void main() {
+    ivec2 pixelCoord = ivec2(gl_GlobalInvocationID.xy);
+
+    if (pixelCoord.x >= CLOUD_MAP_SIZE || pixelCoord.y >= CLOUD_MAP_SIZE) {
+        return;
+    }
+
+    // Convert pixel to UV (center of pixel)
+    vec2 uv = (vec2(pixelCoord) + 0.5) / float(CLOUD_MAP_SIZE);
+
+    // Convert UV to hemisphere direction using paraboloid projection
+    vec3 dir = paraboloidUVToDirection(uv);
+
+    // Only render clouds for upper hemisphere
+    if (dir.y < 0.001) {
+        imageStore(currentCloudMap, pixelCoord, vec4(0.0, 0.0, 0.0, 1.0));
+        return;
+    }
+
+    // Ray origin at planet surface
+    float planetRadius = ubo.atmosphereParams.x;
+    vec3 origin = vec3(0.0, planetRadius + 0.001, 0.0);
+
+    // March clouds for this direction
+    CloudResult clouds = marchClouds(origin, dir);
+
+    // Current frame result
+    vec4 currentResult = vec4(clouds.scattering, clouds.transmittance);
+
+    // Temporal blending
+    float blendFactor = ubo.cloudParams.z;  // 0 = no temporal, 0.9 = strong temporal
+
+    if (blendFactor > 0.01) {
+        // Sample history with reprojection
+        vec4 history = sampleHistoryWithReprojection(uv, dir, clouds.transmittance);
+
+        if (history.a > 0.0) {
+            // Blend current with history
+            // Use higher blend for stable areas, lower for changing areas
+            float adaptiveBlend = blendFactor;
+
+            // Reduce blend near screen edges (more disocclusion)
+            float edgeFactor = min(uv.x, min(1.0 - uv.x, min(uv.y, 1.0 - uv.y)));
+            edgeFactor = smoothstep(0.0, 0.1, edgeFactor);
+            adaptiveBlend *= edgeFactor;
+
+            currentResult = mix(currentResult, history, adaptiveBlend);
+        }
+    }
+
+    imageStore(currentCloudMap, pixelCoord, currentResult);
+}

@@ -365,6 +365,24 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     atmosphereLUTSystem.exportLUTsAsPNG(resourcePath);
     SDL_Log("Atmosphere LUTs exported as PNG to: %s", resourcePath.c_str());
 
+    // Initialize cloud temporal reprojection system (Phase 4.2.7)
+    CloudTemporalSystem::InitInfo cloudTemporalInfo{};
+    cloudTemporalInfo.device = device;
+    cloudTemporalInfo.allocator = allocator;
+    cloudTemporalInfo.descriptorPool = descriptorPool;
+    cloudTemporalInfo.shaderPath = resourcePath + "/shaders";
+    cloudTemporalInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+    cloudTemporalInfo.transmittanceLUTView = atmosphereLUTSystem.getTransmittanceLUTView();
+    cloudTemporalInfo.multiScatterLUTView = atmosphereLUTSystem.getMultiScatterLUTView();
+    cloudTemporalInfo.lutSampler = atmosphereLUTSystem.getLUTSampler();
+
+    if (!cloudTemporalSystem.init(cloudTemporalInfo)) {
+        SDL_Log("Warning: Cloud temporal system initialization failed, continuing without temporal reprojection");
+        // Don't fail - we can fall back to non-temporal cloud rendering
+    } else {
+        SDL_Log("Cloud temporal reprojection system initialized");
+    }
+
     // Create sky descriptor sets now that uniform buffers and LUTs are ready
     if (!createSkyDescriptorSets()) return false;
 
@@ -420,6 +438,7 @@ void Renderer::shutdown() {
         leafSystem.destroy(device, allocator);
         froxelSystem.destroy(device, allocator);
         atmosphereLUTSystem.destroy(device, allocator);
+        cloudTemporalSystem.destroy(device, allocator);
         postProcessSystem.destroy(device, allocator);
         bloomSystem.destroy(device, allocator);
 
@@ -1701,9 +1720,17 @@ bool Renderer::createSkyDescriptorSetLayout() {
         .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
         .build();
 
-    std::array<VkDescriptorSetLayoutBinding, 7> bindings = {
+    // Cloud temporal buffer (binding 7) - pre-rendered clouds with temporal reprojection
+    VkDescriptorSetLayoutBinding cloudTemporalBinding{};
+    cloudTemporalBinding.binding = 7;
+    cloudTemporalBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    cloudTemporalBinding.descriptorCount = 1;
+    cloudTemporalBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    cloudTemporalBinding.pImmutableSamplers = nullptr;
+
+    std::array<VkDescriptorSetLayoutBinding, 8> bindings = {
         uboBinding, transmittanceLUTBinding, multiScatterLUTBinding, skyViewLUTBinding,
-        rayleighIrradianceLUTBinding, mieIrradianceLUTBinding, cloudMapLUTBinding
+        rayleighIrradianceLUTBinding, mieIrradianceLUTBinding, cloudMapLUTBinding, cloudTemporalBinding
     };
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
@@ -1801,7 +1828,13 @@ bool Renderer::createSkyDescriptorSets() {
         cloudMapInfo.imageView = cloudMapLUTView;
         cloudMapInfo.sampler = lutSampler;
 
-        std::array<VkWriteDescriptorSet, 7> descriptorWrites{};
+        // Cloud temporal buffer binding (pre-rendered clouds with temporal reprojection)
+        VkDescriptorImageInfo cloudTemporalInfo{};
+        cloudTemporalInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        cloudTemporalInfo.imageView = cloudTemporalSystem.getCloudMapView();
+        cloudTemporalInfo.sampler = cloudTemporalSystem.getCloudMapSampler();
+
+        std::array<VkWriteDescriptorSet, 8> descriptorWrites{};
 
         descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         descriptorWrites[0].dstSet = skyDescriptorSets[i];
@@ -1858,6 +1891,14 @@ bool Renderer::createSkyDescriptorSets() {
         descriptorWrites[6].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         descriptorWrites[6].descriptorCount = 1;
         descriptorWrites[6].pImageInfo = &cloudMapInfo;
+
+        descriptorWrites[7].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[7].dstSet = skyDescriptorSets[i];
+        descriptorWrites[7].dstBinding = 7;
+        descriptorWrites[7].dstArrayElement = 0;
+        descriptorWrites[7].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[7].descriptorCount = 1;
+        descriptorWrites[7].pImageInfo = &cloudTemporalInfo;
 
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                descriptorWrites.data(), 0, nullptr);
@@ -2597,6 +2638,24 @@ void Renderer::render(const Camera& camera) {
                                           windTime * 0.002f,  // Slow vertical evolution
                                           windDir.y * windSpeed * windTime * cloudTimeScale);
         atmosphereLUTSystem.updateCloudMapLUT(cmd, windOffset, windTime * cloudTimeScale);
+
+        // Cloud temporal reprojection compute pass (Phase 4.2.7)
+        // Pre-renders clouds with temporal blending for stable, flicker-free output
+        if (cloudTemporalSystem.isTemporalEnabled()) {
+            // Get moon parameters
+            UniformBufferObject* ubo = static_cast<UniformBufferObject*>(uniformBuffersMapped[currentFrame]);
+            glm::vec3 moonDir = glm::normalize(glm::vec3(ubo->moonDirection));
+            float moonIntensity = ubo->moonDirection.w;
+            glm::vec3 moonColor = glm::vec3(ubo->moonColor);
+            float moonPhase = ubo->moonColor.a;
+
+            cloudTemporalSystem.recordCloudUpdate(cmd, currentFrame,
+                                                  camera.getViewMatrix(), camera.getProjectionMatrix(),
+                                                  camera.getPosition(),
+                                                  sunDir, sunIntensity, sunColor,
+                                                  moonDir, moonIntensity, moonColor, moonPhase,
+                                                  windDir, windSpeed, windTime);
+        }
     }
 
     // HDR scene render pass
@@ -2729,6 +2788,7 @@ UniformBufferObject Renderer::buildUniformBufferData(const Camera& camera, const
     ubo.debugCascades = showCascadeDebug ? 1.0f : 0.0f;
     ubo.julianDay = static_cast<float>(lighting.julianDay);
     ubo.cloudStyle = useParaboloidClouds ? 1.0f : 0.0f;
+    ubo.cloudTemporal = cloudTemporalSystem.isTemporalEnabled() ? 1.0f : 0.0f;
 
     // Snow parameters
     ubo.snowAmount = environmentSettings.snowAmount;

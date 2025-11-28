@@ -18,14 +18,38 @@
 #include "BloomSystem.h"
 #include "FroxelSystem.h"
 #include "AtmosphereLUTSystem.h"
+#include "CloudTemporalSystem.h"
 #include "SceneManager.h"
 #include "TerrainSystem.h"
 #include "SnowMaskSystem.h"
 #include "VolumetricSnowSystem.h"
 #include "EnvironmentSettings.h"
-#include "UBOs.h"
 
 static constexpr uint32_t NUM_SHADOW_CASCADES = 4;
+
+struct UniformBufferObject {
+    glm::mat4 model;
+    glm::mat4 view;
+    glm::mat4 proj;
+    glm::mat4 cascadeViewProj[NUM_SHADOW_CASCADES];  // Per-cascade light matrices
+    glm::vec4 cascadeSplits;                          // View-space split depths
+    glm::vec4 sunDirection;
+    glm::vec4 moonDirection;
+    glm::vec4 sunColor;
+    glm::vec4 moonColor;                              // rgb = moon color, a = moon phase (0-1)
+    glm::vec4 ambientColor;
+    glm::vec4 cameraPosition;
+    glm::vec4 pointLightPosition;  // xyz = position, w = intensity
+    glm::vec4 pointLightColor;     // rgb = color, a = radius
+    glm::vec4 windDirectionAndSpeed;                  // xy = direction, z = speed, w = time
+    float timeOfDay;
+    float shadowMapSize;
+    float debugCascades;           // 1.0 = show cascade colors
+    float julianDay;               // Julian day for sidereal rotation
+    float cloudStyle;              // 0.0 = procedural, 1.0 = paraboloid LUT hybrid
+    float cloudTemporal;           // 1.0 = use temporal reprojection buffer
+    float padding2, padding3;      // Align to 16 bytes
+};
 
 struct ShadowPushConstants {
     glm::mat4 model;
@@ -71,6 +95,12 @@ public:
     // Cloud style toggle (procedural vs paraboloid LUT hybrid)
     void toggleCloudStyle() { useParaboloidClouds = !useParaboloidClouds; }
     bool isUsingParaboloidClouds() const { return useParaboloidClouds; }
+
+    // Cloud temporal reprojection control
+    void toggleCloudTemporal() { cloudTemporalSystem.setTemporalEnabled(!cloudTemporalSystem.isTemporalEnabled()); }
+    bool isCloudTemporalEnabled() const { return cloudTemporalSystem.isTemporalEnabled(); }
+    void setCloudTemporalBlend(float blend) { cloudTemporalSystem.setTemporalBlend(blend); }
+    float getCloudTemporalBlend() const { return cloudTemporalSystem.getTemporalBlend(); }
 
     // Terrain control
     void toggleTerrainWireframe() { terrainSystem.setWireframeMode(!terrainSystem.isWireframeMode()); }
@@ -229,6 +259,7 @@ private:
     BloomSystem bloomSystem;
     FroxelSystem froxelSystem;
     AtmosphereLUTSystem atmosphereLUTSystem;
+    CloudTemporalSystem cloudTemporalSystem;
     TerrainSystem terrainSystem;
     SnowMaskSystem snowMaskSystem;
     VolumetricSnowSystem volumetricSnowSystem;

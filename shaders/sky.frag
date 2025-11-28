@@ -27,7 +27,8 @@ layout(binding = 0) uniform UniformBufferObject {
     float debugCascades;
     float julianDay;               // Julian day for sidereal rotation
     float cloudStyle;              // 0.0 = procedural, 1.0 = paraboloid LUT hybrid
-    float padding1, padding2, padding3;
+    float cloudTemporal;           // 1.0 = use temporal reprojection buffer
+    float padding2, padding3;
 } ubo;
 
 // Atmosphere LUTs (Phase 4.1 - precomputed for efficiency)
@@ -39,6 +40,9 @@ layout(binding = 4) uniform sampler2D rayleighIrradianceLUT;  // 64x16, RGBA16F
 layout(binding = 5) uniform sampler2D mieIrradianceLUT;       // 64x16, RGBA16F
 // Cloud Map LUT (Paraboloid projection, updated per-frame with wind animation)
 layout(binding = 6) uniform sampler2D cloudMapLUT;            // 256x256, RGBA16F
+// Cloud Temporal Buffer (Phase 4.2.7 - pre-rendered clouds with temporal reprojection)
+// RGB = in-scattered light, A = transmittance
+layout(binding = 7) uniform sampler2D cloudTemporalMap;       // 512x512, RGBA16F
 
 layout(location = 0) in vec3 rayDir;
 layout(location = 0) out vec4 outColor;
@@ -770,6 +774,36 @@ SkyIrradiance computeSkyIrradiance(vec3 position, vec3 sunDir, vec3 moonDir,
     return result;
 }
 
+// Sample clouds from temporal reprojection buffer (Phase 4.2.7)
+// The buffer contains pre-rendered clouds with temporal blending for stability
+CloudResult sampleTemporalClouds(vec3 dir) {
+    CloudResult result;
+    result.scattering = vec3(0.0);
+    result.transmittance = 1.0;
+
+    // Only render clouds in upper hemisphere
+    if (dir.y < 0.001) {
+        return result;
+    }
+
+    // Convert direction to paraboloid UV coordinates
+    // This matches the projection used in cloud_temporal.comp
+    vec3 normDir = normalize(dir);
+    float denom = 1.0 + max(normDir.y, 0.001);
+    float u = 0.5 + (normDir.x / denom) * 0.5;
+    float v = 0.5 + (normDir.z / denom) * 0.5;
+    vec2 uv = vec2(u, v);
+
+    // Sample the temporal cloud buffer
+    // RGB = in-scattered light, A = transmittance
+    vec4 cloudData = texture(cloudTemporalMap, uv);
+
+    result.scattering = cloudData.rgb;
+    result.transmittance = cloudData.a;
+
+    return result;
+}
+
 // March through cloud layer with physically-based lighting
 // Uses atmospheric transmittance and computed sky irradiance for accurate results
 CloudResult marchClouds(vec3 origin, vec3 dir) {
@@ -1145,7 +1179,13 @@ vec3 renderAtmosphere(vec3 dir) {
     sky = mix(sky, max(sky, nightSkyRadiance), nightBlend);
 
     // Render volumetric clouds (Phase 4.2)
-    CloudResult clouds = marchClouds(origin, normDir);
+    // Use temporal reprojection buffer for stable, flicker-free clouds (Phase 4.2.7)
+    CloudResult clouds;
+    if (ubo.cloudTemporal > 0.5) {
+        clouds = sampleTemporalClouds(normDir);
+    } else {
+        clouds = marchClouds(origin, normDir);
+    }
 
     // Composite clouds over sky (Ghost of Tsushima technique)
     // Clouds are lit by sky irradiance at their altitude - NOT darkened by atmospheric transmittance
