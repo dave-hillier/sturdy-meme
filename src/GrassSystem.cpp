@@ -92,9 +92,9 @@ bool GrassSystem::createDisplacementResources() {
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.getExtent().width = DISPLACEMENT_TEXTURE_SIZE;
-    imageInfo.getExtent().height = DISPLACEMENT_TEXTURE_SIZE;
-    imageInfo.getExtent().depth = 1;
+    imageInfo.extent.width = DISPLACEMENT_TEXTURE_SIZE;
+    imageInfo.extent.height = DISPLACEMENT_TEXTURE_SIZE;
+    imageInfo.extent.depth = 1;
     imageInfo.mipLevels = 1;
     imageInfo.arrayLayers = 1;
     imageInfo.format = VK_FORMAT_R16G16_SFLOAT;  // RG16F for XZ displacement
@@ -257,7 +257,7 @@ bool GrassSystem::createDisplacementPipeline() {
     // Allocate displacement descriptor set
     VkDescriptorSetAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.getDescriptorPool() = getDescriptorPool();
+    allocInfo.descriptorPool = getDescriptorPool();
     allocInfo.descriptorSetCount = 1;
     allocInfo.pSetLayouts = &displacementDescriptorSetLayout;
 
@@ -349,7 +349,7 @@ bool GrassSystem::createGraphicsPipeline() {
 
     VkRect2D scissor{};
     scissor.offset = {0, 0};
-    scissor.getExtent() = getExtent();
+    scissor.extent = getExtent();
 
     VkPipelineViewportStateCreateInfo viewportState{};
     viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
@@ -405,7 +405,7 @@ bool GrassSystem::createGraphicsPipeline() {
     pipelineInfo.pMultisampleState = &multisampling;
     pipelineInfo.pDepthStencilState = &depthStencil;
     pipelineInfo.pColorBlendState = &colorBlending;
-    pipelineInfo.getRenderPass() = getRenderPass();
+    pipelineInfo.renderPass = getRenderPass();
     pipelineInfo.subpass = 0;
 
     return builder.buildGraphicsPipeline(pipelineInfo, getGraphicsPipelineHandles().pipelineLayout, getGraphicsPipelineHandles().pipeline);
@@ -445,7 +445,7 @@ bool GrassSystem::createShadowPipeline() {
 
     VkRect2D scissor{};
     scissor.offset = {0, 0};
-    scissor.getExtent() = {shadowMapSize, shadowMapSize};
+    scissor.extent = {shadowMapSize, shadowMapSize};
 
     VkPipelineViewportStateCreateInfo viewportState{};
     viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
@@ -498,7 +498,7 @@ bool GrassSystem::createShadowPipeline() {
     pipelineInfo.pMultisampleState = &multisampling;
     pipelineInfo.pDepthStencilState = &depthStencil;
     pipelineInfo.pColorBlendState = &colorBlending;
-    pipelineInfo.getRenderPass() = shadowRenderPass;
+    pipelineInfo.renderPass = shadowRenderPass;
     pipelineInfo.subpass = 0;
 
     return builder.buildGraphicsPipeline(pipelineInfo, shadowPipelineLayout, shadowPipeline);
@@ -512,7 +512,7 @@ bool GrassSystem::createDescriptorSets() {
         // Allocate compute descriptor set for this buffer set
         VkDescriptorSetAllocateInfo computeAllocInfo{};
         computeAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        computeAllocInfo.getDescriptorPool() = getDescriptorPool();
+        computeAllocInfo.descriptorPool = getDescriptorPool();
         computeAllocInfo.descriptorSetCount = 1;
         computeAllocInfo.pSetLayouts = &getComputePipelineHandles().descriptorSetLayout;
 
@@ -524,7 +524,7 @@ bool GrassSystem::createDescriptorSets() {
         // Allocate graphics descriptor set for this buffer set
         VkDescriptorSetAllocateInfo graphicsAllocInfo{};
         graphicsAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        graphicsAllocInfo.getDescriptorPool() = getDescriptorPool();
+        graphicsAllocInfo.descriptorPool = getDescriptorPool();
         graphicsAllocInfo.descriptorSetCount = 1;
         graphicsAllocInfo.pSetLayouts = &getGraphicsPipelineHandles().descriptorSetLayout;
 
@@ -536,7 +536,7 @@ bool GrassSystem::createDescriptorSets() {
         // Allocate shadow descriptor set for this buffer set
         VkDescriptorSetAllocateInfo shadowAllocInfo{};
         shadowAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        shadowAllocInfo.getDescriptorPool() = getDescriptorPool();
+        shadowAllocInfo.descriptorPool = getDescriptorPool();
         shadowAllocInfo.descriptorSetCount = 1;
         shadowAllocInfo.pSetLayouts = &shadowDescriptorSetLayout;
 
