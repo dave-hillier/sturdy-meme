@@ -10,9 +10,15 @@
 #define CBT_BUFFER_BINDING 0
 #include "cbt.glsl"
 #include "leb.glsl"
+#include "../snow_common.glsl"
 
 // Height map
 layout(binding = 3) uniform sampler2D heightMap;
+
+// Volumetric snow cascades
+layout(binding = 10) uniform sampler2D snowCascade0;
+layout(binding = 11) uniform sampler2D snowCascade1;
+layout(binding = 12) uniform sampler2D snowCascade2;
 
 // Uniform buffer
 layout(std140, binding = 4) uniform TerrainUniforms {
@@ -26,6 +32,14 @@ layout(std140, binding = 4) uniform TerrainUniforms {
     vec2 screenSize;
     float lodFactor;
     float padding;
+    // Volumetric snow parameters
+    vec4 snowCascade0Params;  // xy = origin, z = size, w = texel size
+    vec4 snowCascade1Params;  // xy = origin, z = size, w = texel size
+    vec4 snowCascade2Params;  // xy = origin, z = size, w = texel size
+    float useVolumetricSnow;  // 1.0 = enabled
+    float snowMaxHeight;      // Maximum snow height in meters
+    float snowPadding1;
+    float snowPadding2;
 };
 
 #define TERRAIN_SIZE (terrainParams.x)
@@ -87,6 +101,25 @@ void main() {
 
     // Calculate normal
     vec3 normal = calculateNormal(uv);
+
+    // Apply volumetric snow displacement
+    if (useVolumetricSnow > 0.5) {
+        // Sample snow height from cascades
+        float snowHeight = sampleVolumetricSnowHeight(
+            snowCascade0, snowCascade1, snowCascade2,
+            worldPos, cameraPosition.xyz,
+            snowCascade0Params, snowCascade1Params, snowCascade2Params
+        );
+
+        // Calculate snow coverage based on height and slope
+        // Only displace when there's actual visible snow (coverage threshold)
+        float snowCoverage = snowHeightToCoverage(snowHeight, 1.0, normal);
+
+        // Only displace if coverage is significant (threshold at ~50% coverage)
+        if (snowCoverage > 0.5) {
+            worldPos = displaceVertexBySnow(worldPos, snowHeight, normal);
+        }
+    }
 
     // Transform to clip space
     vec4 clipPos = viewProjMatrix * vec4(worldPos, 1.0);

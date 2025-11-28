@@ -39,7 +39,7 @@ layout(binding = 0) uniform UniformBufferObject {
     vec4 snowCascade2Params;     // xy = origin, z = size, w = texel size
     float useVolumetricSnow;     // 1.0 = use cascades, 0.0 = use legacy mask
     float snowMaxHeight;         // Maximum snow height in meters
-    float snowPadding1;
+    float debugSnowDepth;        // 1.0 = show depth visualization
     float snowPadding2;
 } ubo;
 

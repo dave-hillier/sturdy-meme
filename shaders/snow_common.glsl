@@ -19,7 +19,7 @@ const float SNOW_BACKSCATTER_STRENGTH = 0.3;
 
 // Volumetric snow cascade parameters
 const uint NUM_SNOW_CASCADES = 3;
-const float MAX_SNOW_HEIGHT_M = 2.0;  // Maximum snow height in meters
+const float MAX_SNOW_HEIGHT_M = 0.2;  // Maximum snow height in meters
 
 // Cascade coverage distances (should match VolumetricSnowSystem.h)
 const float SNOW_CASCADE_COVERAGE_0 = 256.0;   // Near cascade

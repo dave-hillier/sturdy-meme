@@ -38,7 +38,7 @@ static constexpr float SNOW_CASCADE_COVERAGE[NUM_SNOW_CASCADES] = {
 };
 
 // Maximum snow height in meters
-static constexpr float MAX_SNOW_HEIGHT = 2.0f;
+static constexpr float MAX_SNOW_HEIGHT = 0.2f;
 
 // Uniforms for volumetric snow compute shader
 struct VolumetricSnowUniforms {

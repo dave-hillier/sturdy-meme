@@ -203,6 +203,10 @@ void Application::processEvents() {
                     renderer.toggleCascadeDebug();
                     SDL_Log("Cascade debug visualization: %s", renderer.isShowingCascadeDebug() ? "ON" : "OFF");
                 }
+                else if (event.key.scancode == SDL_SCANCODE_7) {
+                    renderer.toggleSnowDepthDebug();
+                    SDL_Log("Snow depth debug visualization: %s", renderer.isShowingSnowDepthDebug() ? "ON" : "OFF");
+                }
                 else if (event.key.scancode == SDL_SCANCODE_TAB) {
                     thirdPersonMode = !thirdPersonMode;
                     SDL_Log("Camera mode: %s", thirdPersonMode ? "Third Person" : "Free Camera");

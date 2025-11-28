@@ -84,7 +84,10 @@ public:
 
     // Update terrain uniforms for a frame
     void updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos,
-                        const glm::mat4& view, const glm::mat4& proj);
+                        const glm::mat4& view, const glm::mat4& proj,
+                        const std::array<glm::vec4, 3>& snowCascadeParams = {},
+                        bool useVolumetricSnow = false,
+                        float snowMaxHeight = 10.0f);
 
     // Record compute commands (subdivision update)
     void recordCompute(VkCommandBuffer cmd, uint32_t frameIndex);

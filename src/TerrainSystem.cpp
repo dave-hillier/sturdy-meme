@@ -1492,7 +1492,10 @@ void TerrainSystem::setVolumetricSnowCascades(VkDevice device,
 }
 
 void TerrainSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos,
-                                    const glm::mat4& view, const glm::mat4& proj) {
+                                    const glm::mat4& view, const glm::mat4& proj,
+                                    const std::array<glm::vec4, 3>& snowCascadeParams,
+                                    bool useVolumetricSnow,
+                                    float snowMaxHeight) {
     TerrainUniforms uniforms{};
     uniforms.viewMatrix = view;
     uniforms.projMatrix = proj;
@@ -1521,6 +1524,15 @@ void TerrainSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraP
 
     // Extract frustum planes
     extractFrustumPlanes(uniforms.viewProjMatrix, uniforms.frustumPlanes);
+
+    // Volumetric snow parameters
+    uniforms.snowCascade0Params = snowCascadeParams[0];
+    uniforms.snowCascade1Params = snowCascadeParams[1];
+    uniforms.snowCascade2Params = snowCascadeParams[2];
+    uniforms.useVolumetricSnow = useVolumetricSnow ? 1.0f : 0.0f;
+    uniforms.snowMaxHeight = snowMaxHeight;
+    uniforms.snowPadding1 = 0.0f;
+    uniforms.snowPadding2 = 0.0f;
 
     memcpy(uniformMappedPtrs[frameIndex], &uniforms, sizeof(TerrainUniforms));
 }
