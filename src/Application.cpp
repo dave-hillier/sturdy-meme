@@ -284,6 +284,10 @@ void Application::processEvents() {
                     renderer.setSnowAmount(snow < 0.5f ? 1.0f : 0.0f);
                     SDL_Log("Snow amount: %.1f", renderer.getSnowAmount());
                 }
+                else if (event.key.scancode == SDL_SCANCODE_T) {
+                    renderer.toggleTerrainWireframe();
+                    SDL_Log("Terrain wireframe: %s", renderer.isTerrainWireframeMode() ? "ON" : "OFF");
+                }
                 break;
             case SDL_EVENT_GAMEPAD_ADDED:
                 if (!gamepad) {
