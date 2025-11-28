@@ -14,11 +14,11 @@ bool LeafSystem::init(const InitInfo& info) {
     hooks.createDescriptorSets = [this]() { return createDescriptorSets(); };
     hooks.destroyBuffers = [this](VmaAllocator allocator) { destroyBuffers(allocator); };
 
-    return lifecycle.init(info, hooks);
+    return particleSystem.init(info, hooks, BUFFER_SET_COUNT);
 }
 
 void LeafSystem::destroy(VkDevice dev, VmaAllocator alloc) {
-    lifecycle.destroy(dev, alloc);
+    particleSystem.destroy(dev, alloc);
 }
 
 void LeafSystem::destroyBuffers(VmaAllocator alloc) {
@@ -443,10 +443,12 @@ bool LeafSystem::createDescriptorSets() {
         computeAllocInfo.descriptorSetCount = 1;
         computeAllocInfo.pSetLayouts = &getComputePipelineHandles().descriptorSetLayout;
 
-        if (vkAllocateDescriptorSets(getDevice(), &computeAllocInfo, &computeDescriptorSets[set]) != VK_SUCCESS) {
+        VkDescriptorSet computeSet = VK_NULL_HANDLE;
+        if (vkAllocateDescriptorSets(getDevice(), &computeAllocInfo, &computeSet) != VK_SUCCESS) {
             SDL_Log("Failed to allocate leaf compute descriptor set (set %u)", set);
             return false;
         }
+        particleSystem.setComputeDescriptorSet(set, computeSet);
 
         // Graphics descriptor set
         VkDescriptorSetAllocateInfo graphicsAllocInfo{};
@@ -455,10 +457,12 @@ bool LeafSystem::createDescriptorSets() {
         graphicsAllocInfo.descriptorSetCount = 1;
         graphicsAllocInfo.pSetLayouts = &getGraphicsPipelineHandles().descriptorSetLayout;
 
-        if (vkAllocateDescriptorSets(getDevice(), &graphicsAllocInfo, &graphicsDescriptorSets[set]) != VK_SUCCESS) {
+        VkDescriptorSet graphicsSet = VK_NULL_HANDLE;
+        if (vkAllocateDescriptorSets(getDevice(), &graphicsAllocInfo, &graphicsSet) != VK_SUCCESS) {
             SDL_Log("Failed to allocate leaf graphics descriptor set (set %u)", set);
             return false;
         }
+        particleSystem.setGraphicsDescriptorSet(set, graphicsSet);
     }
 
     return true;
@@ -523,7 +527,7 @@ void LeafSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>&
         std::array<VkWriteDescriptorSet, 8> computeWrites{};
 
         computeWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        computeWrites[0].dstSet = computeDescriptorSets[set];
+        computeWrites[0].dstSet = particleSystem.getComputeDescriptorSet(set);
         computeWrites[0].dstBinding = 0;
         computeWrites[0].dstArrayElement = 0;
         computeWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -531,7 +535,7 @@ void LeafSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>&
         computeWrites[0].pBufferInfo = &inputParticleBufferInfo;
 
         computeWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        computeWrites[1].dstSet = computeDescriptorSets[set];
+        computeWrites[1].dstSet = particleSystem.getComputeDescriptorSet(set);
         computeWrites[1].dstBinding = 1;
         computeWrites[1].dstArrayElement = 0;
         computeWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -539,7 +543,7 @@ void LeafSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>&
         computeWrites[1].pBufferInfo = &outputParticleBufferInfo;
 
         computeWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        computeWrites[2].dstSet = computeDescriptorSets[set];
+        computeWrites[2].dstSet = particleSystem.getComputeDescriptorSet(set);
         computeWrites[2].dstBinding = 2;
         computeWrites[2].dstArrayElement = 0;
         computeWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -547,7 +551,7 @@ void LeafSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>&
         computeWrites[2].pBufferInfo = &indirectBufferInfo;
 
         computeWrites[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        computeWrites[3].dstSet = computeDescriptorSets[set];
+        computeWrites[3].dstSet = particleSystem.getComputeDescriptorSet(set);
         computeWrites[3].dstBinding = 3;
         computeWrites[3].dstArrayElement = 0;
         computeWrites[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -555,7 +559,7 @@ void LeafSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>&
         computeWrites[3].pBufferInfo = &leafUniformInfo;
 
         computeWrites[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        computeWrites[4].dstSet = computeDescriptorSets[set];
+        computeWrites[4].dstSet = particleSystem.getComputeDescriptorSet(set);
         computeWrites[4].dstBinding = 4;
         computeWrites[4].dstArrayElement = 0;
         computeWrites[4].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -563,7 +567,7 @@ void LeafSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>&
         computeWrites[4].pBufferInfo = &windBufferInfo;
 
         computeWrites[5].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        computeWrites[5].dstSet = computeDescriptorSets[set];
+        computeWrites[5].dstSet = particleSystem.getComputeDescriptorSet(set);
         computeWrites[5].dstBinding = 5;
         computeWrites[5].dstArrayElement = 0;
         computeWrites[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -571,7 +575,7 @@ void LeafSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>&
         computeWrites[5].pImageInfo = &heightMapInfo;
 
         computeWrites[6].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        computeWrites[6].dstSet = computeDescriptorSets[set];
+        computeWrites[6].dstSet = particleSystem.getComputeDescriptorSet(set);
         computeWrites[6].dstBinding = 6;
         computeWrites[6].dstArrayElement = 0;
         computeWrites[6].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -579,7 +583,7 @@ void LeafSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>&
         computeWrites[6].pImageInfo = &displacementMapInfo;
 
         computeWrites[7].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        computeWrites[7].dstSet = computeDescriptorSets[set];
+        computeWrites[7].dstSet = particleSystem.getComputeDescriptorSet(set);
         computeWrites[7].dstBinding = 7;
         computeWrites[7].dstArrayElement = 0;
         computeWrites[7].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -603,7 +607,7 @@ void LeafSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>&
         std::array<VkWriteDescriptorSet, 3> graphicsWrites{};
 
         graphicsWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        graphicsWrites[0].dstSet = graphicsDescriptorSets[set];
+        graphicsWrites[0].dstSet = particleSystem.getGraphicsDescriptorSet(set);
         graphicsWrites[0].dstBinding = 0;
         graphicsWrites[0].dstArrayElement = 0;
         graphicsWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -611,7 +615,7 @@ void LeafSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>&
         graphicsWrites[0].pBufferInfo = &uboInfo;
 
         graphicsWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        graphicsWrites[1].dstSet = graphicsDescriptorSets[set];
+        graphicsWrites[1].dstSet = particleSystem.getGraphicsDescriptorSet(set);
         graphicsWrites[1].dstBinding = 1;
         graphicsWrites[1].dstArrayElement = 0;
         graphicsWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -619,7 +623,7 @@ void LeafSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>&
         graphicsWrites[1].pBufferInfo = &particleBufferInfo;
 
         graphicsWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        graphicsWrites[2].dstSet = graphicsDescriptorSets[set];
+        graphicsWrites[2].dstSet = particleSystem.getGraphicsDescriptorSet(set);
         graphicsWrites[2].dstBinding = 2;
         graphicsWrites[2].dstArrayElement = 0;
         graphicsWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -706,7 +710,7 @@ void LeafSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos,
 }
 
 void LeafSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex, float time, float deltaTime) {
-    uint32_t writeSet = computeBufferSet;
+    uint32_t writeSet = particleSystem.getComputeBufferSet();
 
     // Update compute descriptor set to use this frame's uniform and displacement region buffers
     VkDescriptorBufferInfo uniformBufferInfo{};
@@ -722,7 +726,7 @@ void LeafSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex,
     std::array<VkWriteDescriptorSet, 2> writes{};
 
     writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[0].dstSet = computeDescriptorSets[writeSet];
+    writes[0].dstSet = particleSystem.getComputeDescriptorSet(writeSet);
     writes[0].dstBinding = 3;
     writes[0].dstArrayElement = 0;
     writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -730,7 +734,7 @@ void LeafSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex,
     writes[0].pBufferInfo = &uniformBufferInfo;
 
     writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[1].dstSet = computeDescriptorSets[writeSet];
+    writes[1].dstSet = particleSystem.getComputeDescriptorSet(writeSet);
     writes[1].dstBinding = 7;
     writes[1].dstArrayElement = 0;
     writes[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -754,9 +758,10 @@ void LeafSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex,
 
     // Dispatch leaf compute shader
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, getComputePipelineHandles().pipeline);
+    VkDescriptorSet computeSet = particleSystem.getComputeDescriptorSet(writeSet);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
                             getComputePipelineHandles().pipelineLayout, 0, 1,
-                            &computeDescriptorSets[writeSet], 0, nullptr);
+                            &computeSet, 0, nullptr);
 
     LeafPushConstants pushConstants{};
     pushConstants.time = time;
@@ -781,17 +786,18 @@ void LeafSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex,
 }
 
 void LeafSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time) {
-    uint32_t readSet = renderBufferSet;
+    uint32_t readSet = particleSystem.getRenderBufferSet();
 
     // Bootstrap: if we haven't diverged yet, read from compute set
-    if (computeBufferSet == renderBufferSet) {
-        readSet = computeBufferSet;
+    if (particleSystem.getComputeBufferSet() == particleSystem.getRenderBufferSet()) {
+        readSet = particleSystem.getComputeBufferSet();
     }
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, getGraphicsPipelineHandles().pipeline);
+    VkDescriptorSet graphicsSet = particleSystem.getGraphicsDescriptorSet(readSet);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                             getGraphicsPipelineHandles().pipelineLayout, 0, 1,
-                            &graphicsDescriptorSets[readSet], 0, nullptr);
+                            &graphicsSet, 0, nullptr);
 
     LeafPushConstants pushConstants{};
     pushConstants.time = time;
@@ -804,11 +810,4 @@ void LeafSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time
     vkCmdDrawIndirect(cmd, indirectBuffers[readSet], 0, 1, sizeof(VkDrawIndirectCommand));
 }
 
-void LeafSystem::advanceBufferSet() {
-    if (computeBufferSet == renderBufferSet) {
-        // First frame done - set up for double buffering
-        computeBufferSet = 1;
-    } else {
-        std::swap(computeBufferSet, renderBufferSet);
-    }
-}
+void LeafSystem::advanceBufferSet() { particleSystem.advanceBufferSet(); }

@@ -8,7 +8,7 @@
 #include <string>
 
 #include "BufferUtils.h"
-#include "SystemLifecycleHelper.h"
+#include "ParticleSystem.h"
 
 struct GrassPushConstants {
     float time;
@@ -47,7 +47,7 @@ struct GrassInstance {
 
 class GrassSystem {
 public:
-    struct InitInfo : public SystemLifecycleHelper::InitInfo {
+    struct InitInfo : public ParticleSystem::InitInfo {
         VkRenderPass shadowRenderPass;
         uint32_t shadowMapSize;
     };
@@ -94,18 +94,18 @@ private:
     bool createExtraPipelines();
     void destroyBuffers(VmaAllocator allocator);
 
-    VkDevice getDevice() const { return lifecycle.getDevice(); }
-    VmaAllocator getAllocator() const { return lifecycle.getAllocator(); }
-    VkRenderPass getRenderPass() const { return lifecycle.getRenderPass(); }
-    VkDescriptorPool getDescriptorPool() const { return lifecycle.getDescriptorPool(); }
-    const VkExtent2D& getExtent() const { return lifecycle.getExtent(); }
-    const std::string& getShaderPath() const { return lifecycle.getShaderPath(); }
-    uint32_t getFramesInFlight() const { return lifecycle.getFramesInFlight(); }
+    VkDevice getDevice() const { return particleSystem.getDevice(); }
+    VmaAllocator getAllocator() const { return particleSystem.getAllocator(); }
+    VkRenderPass getRenderPass() const { return particleSystem.getRenderPass(); }
+    VkDescriptorPool getDescriptorPool() const { return particleSystem.getDescriptorPool(); }
+    const VkExtent2D& getExtent() const { return particleSystem.getExtent(); }
+    const std::string& getShaderPath() const { return particleSystem.getShaderPath(); }
+    uint32_t getFramesInFlight() const { return particleSystem.getFramesInFlight(); }
 
-    SystemLifecycleHelper::PipelineHandles& getComputePipelineHandles() { return lifecycle.getComputePipeline(); }
-    SystemLifecycleHelper::PipelineHandles& getGraphicsPipelineHandles() { return lifecycle.getGraphicsPipeline(); }
+    SystemLifecycleHelper::PipelineHandles& getComputePipelineHandles() { return particleSystem.getComputePipelineHandles(); }
+    SystemLifecycleHelper::PipelineHandles& getGraphicsPipelineHandles() { return particleSystem.getGraphicsPipelineHandles(); }
 
-    SystemLifecycleHelper lifecycle;
+    ParticleSystem particleSystem;
 
     VkRenderPass shadowRenderPass = VK_NULL_HANDLE;
     uint32_t shadowMapSize = 0;
@@ -155,15 +155,7 @@ private:
 
     // Descriptor sets: [2] for A/B buffer sets, one per set
     // Per-frame descriptor sets for uniform buffers that DO need per-frame copies
-    VkDescriptorSet computeDescriptorSets[BUFFER_SET_COUNT];
-    VkDescriptorSet graphicsDescriptorSets[BUFFER_SET_COUNT];
     VkDescriptorSet shadowDescriptorSetsDB[BUFFER_SET_COUNT];
-
-    // Double-buffer state: which set is being computed vs rendered
-    // Both start at 0 for bootstrap (first frame uses same buffer for compute+render)
-    // After first advanceBufferSet(), they diverge for true double-buffering
-    uint32_t computeBufferSet = 0;  // Set being written by compute
-    uint32_t renderBufferSet = 0;   // Set being read by graphics
 
     // Terrain heightmap for grass placement (stored for compute descriptor updates)
     VkImageView terrainHeightMapView = VK_NULL_HANDLE;

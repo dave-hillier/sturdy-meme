@@ -7,7 +7,7 @@
 #include <vector>
 #include <string>
 
-#include "SystemLifecycleHelper.h"
+#include "ParticleSystem.h"
 
 // Leaf particle states
 enum class LeafState : uint32_t {
@@ -66,7 +66,7 @@ struct LeafPushConstants {
 
 class LeafSystem {
 public:
-    using InitInfo = SystemLifecycleHelper::InitInfo;
+    using InitInfo = ParticleSystem::InitInfo;
 
     LeafSystem() = default;
     ~LeafSystem() = default;
@@ -125,18 +125,18 @@ private:
     bool createDescriptorSets();
     void destroyBuffers(VmaAllocator allocator);
 
-    VkDevice getDevice() const { return lifecycle.getDevice(); }
-    VmaAllocator getAllocator() const { return lifecycle.getAllocator(); }
-    VkRenderPass getRenderPass() const { return lifecycle.getRenderPass(); }
-    VkDescriptorPool getDescriptorPool() const { return lifecycle.getDescriptorPool(); }
-    const VkExtent2D& getExtent() const { return lifecycle.getExtent(); }
-    const std::string& getShaderPath() const { return lifecycle.getShaderPath(); }
-    uint32_t getFramesInFlight() const { return lifecycle.getFramesInFlight(); }
+    VkDevice getDevice() const { return particleSystem.getDevice(); }
+    VmaAllocator getAllocator() const { return particleSystem.getAllocator(); }
+    VkRenderPass getRenderPass() const { return particleSystem.getRenderPass(); }
+    VkDescriptorPool getDescriptorPool() const { return particleSystem.getDescriptorPool(); }
+    const VkExtent2D& getExtent() const { return particleSystem.getExtent(); }
+    const std::string& getShaderPath() const { return particleSystem.getShaderPath(); }
+    uint32_t getFramesInFlight() const { return particleSystem.getFramesInFlight(); }
 
-    SystemLifecycleHelper::PipelineHandles& getComputePipelineHandles() { return lifecycle.getComputePipeline(); }
-    SystemLifecycleHelper::PipelineHandles& getGraphicsPipelineHandles() { return lifecycle.getGraphicsPipeline(); }
+    SystemLifecycleHelper::PipelineHandles& getComputePipelineHandles() { return particleSystem.getComputePipelineHandles(); }
+    SystemLifecycleHelper::PipelineHandles& getGraphicsPipelineHandles() { return particleSystem.getGraphicsPipelineHandles(); }
 
-    SystemLifecycleHelper lifecycle;
+    ParticleSystem particleSystem;
 
     // Double-buffered storage buffers
     static constexpr uint32_t BUFFER_SET_COUNT = 2;
@@ -151,12 +151,7 @@ private:
     std::vector<void*> uniformMappedPtrs;
 
     // Descriptor sets
-    VkDescriptorSet computeDescriptorSets[BUFFER_SET_COUNT];
-    VkDescriptorSet graphicsDescriptorSets[BUFFER_SET_COUNT];
-
-    // Double-buffer state
-    uint32_t computeBufferSet = 0;
-    uint32_t renderBufferSet = 0;
+    // Descriptor sets managed through ParticleSystem helper
 
     // Leaf parameters
     float leafIntensity = 0.5f;         // 0.0-1.0 intensity

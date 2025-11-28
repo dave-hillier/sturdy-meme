@@ -17,11 +17,11 @@ bool WeatherSystem::init(const InitInfo& info) {
     hooks.createDescriptorSets = [this]() { return createDescriptorSets(); };
     hooks.destroyBuffers = [this](VmaAllocator allocator) { destroyBuffers(allocator); };
 
-    return lifecycle.init(info, hooks);
+    return particleSystem.init(info, hooks, BUFFER_SET_COUNT);
 }
 
 void WeatherSystem::destroy(VkDevice dev, VmaAllocator alloc) {
-    lifecycle.destroy(dev, alloc);
+    particleSystem.destroy(dev, alloc);
 }
 
 void WeatherSystem::destroyBuffers(VmaAllocator alloc) {
@@ -214,10 +214,12 @@ bool WeatherSystem::createDescriptorSets() {
         computeAllocInfo.descriptorSetCount = 1;
         computeAllocInfo.pSetLayouts = &getComputePipelineHandles().descriptorSetLayout;
 
-        if (vkAllocateDescriptorSets(getDevice(), &computeAllocInfo, &computeDescriptorSets[set]) != VK_SUCCESS) {
+        VkDescriptorSet computeSet = VK_NULL_HANDLE;
+        if (vkAllocateDescriptorSets(getDevice(), &computeAllocInfo, &computeSet) != VK_SUCCESS) {
             SDL_Log("Failed to allocate weather compute descriptor set (set %u)", set);
             return false;
         }
+        particleSystem.setComputeDescriptorSet(set, computeSet);
 
         // Graphics descriptor set
         VkDescriptorSetAllocateInfo graphicsAllocInfo{};
@@ -226,10 +228,12 @@ bool WeatherSystem::createDescriptorSets() {
         graphicsAllocInfo.descriptorSetCount = 1;
         graphicsAllocInfo.pSetLayouts = &getGraphicsPipelineHandles().descriptorSetLayout;
 
-        if (vkAllocateDescriptorSets(getDevice(), &graphicsAllocInfo, &graphicsDescriptorSets[set]) != VK_SUCCESS) {
+        VkDescriptorSet graphicsSet = VK_NULL_HANDLE;
+        if (vkAllocateDescriptorSets(getDevice(), &graphicsAllocInfo, &graphicsSet) != VK_SUCCESS) {
             SDL_Log("Failed to allocate weather graphics descriptor set (set %u)", set);
             return false;
         }
+        particleSystem.setGraphicsDescriptorSet(set, graphicsSet);
     }
 
     return true;
@@ -276,7 +280,7 @@ void WeatherSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffe
         std::array<VkWriteDescriptorSet, 5> computeWrites{};
 
         computeWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        computeWrites[0].dstSet = computeDescriptorSets[set];
+        computeWrites[0].dstSet = particleSystem.getComputeDescriptorSet(set);
         computeWrites[0].dstBinding = 0;
         computeWrites[0].dstArrayElement = 0;
         computeWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -284,7 +288,7 @@ void WeatherSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffe
         computeWrites[0].pBufferInfo = &inputParticleBufferInfo;
 
         computeWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        computeWrites[1].dstSet = computeDescriptorSets[set];
+        computeWrites[1].dstSet = particleSystem.getComputeDescriptorSet(set);
         computeWrites[1].dstBinding = 1;
         computeWrites[1].dstArrayElement = 0;
         computeWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -292,7 +296,7 @@ void WeatherSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffe
         computeWrites[1].pBufferInfo = &outputParticleBufferInfo;
 
         computeWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        computeWrites[2].dstSet = computeDescriptorSets[set];
+        computeWrites[2].dstSet = particleSystem.getComputeDescriptorSet(set);
         computeWrites[2].dstBinding = 2;
         computeWrites[2].dstArrayElement = 0;
         computeWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -300,7 +304,7 @@ void WeatherSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffe
         computeWrites[2].pBufferInfo = &indirectBufferInfo;
 
         computeWrites[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        computeWrites[3].dstSet = computeDescriptorSets[set];
+        computeWrites[3].dstSet = particleSystem.getComputeDescriptorSet(set);
         computeWrites[3].dstBinding = 3;
         computeWrites[3].dstArrayElement = 0;
         computeWrites[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -308,7 +312,7 @@ void WeatherSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffe
         computeWrites[3].pBufferInfo = &weatherUniformInfo;
 
         computeWrites[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        computeWrites[4].dstSet = computeDescriptorSets[set];
+        computeWrites[4].dstSet = particleSystem.getComputeDescriptorSet(set);
         computeWrites[4].dstBinding = 4;
         computeWrites[4].dstArrayElement = 0;
         computeWrites[4].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -337,7 +341,7 @@ void WeatherSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffe
         std::array<VkWriteDescriptorSet, 3> graphicsWrites{};
 
         graphicsWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        graphicsWrites[0].dstSet = graphicsDescriptorSets[set];
+        graphicsWrites[0].dstSet = particleSystem.getGraphicsDescriptorSet(set);
         graphicsWrites[0].dstBinding = 0;
         graphicsWrites[0].dstArrayElement = 0;
         graphicsWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -345,7 +349,7 @@ void WeatherSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffe
         graphicsWrites[0].pBufferInfo = &uboInfo;
 
         graphicsWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        graphicsWrites[1].dstSet = graphicsDescriptorSets[set];
+        graphicsWrites[1].dstSet = particleSystem.getGraphicsDescriptorSet(set);
         graphicsWrites[1].dstBinding = 1;
         graphicsWrites[1].dstArrayElement = 0;
         graphicsWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -353,7 +357,7 @@ void WeatherSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffe
         graphicsWrites[1].pBufferInfo = &particleBufferInfo;
 
         graphicsWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        graphicsWrites[2].dstSet = graphicsDescriptorSets[set];
+        graphicsWrites[2].dstSet = particleSystem.getGraphicsDescriptorSet(set);
         graphicsWrites[2].dstBinding = 2;
         graphicsWrites[2].dstArrayElement = 0;
         graphicsWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -414,7 +418,7 @@ void WeatherSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraP
 }
 
 void WeatherSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex, float time, float deltaTime) {
-    uint32_t writeSet = computeBufferSet;
+    uint32_t writeSet = particleSystem.getComputeBufferSet();
 
     // Update compute descriptor set to use this frame's uniform buffers
     VkDescriptorBufferInfo uniformBufferInfo{};
@@ -430,7 +434,7 @@ void WeatherSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameInd
     std::array<VkWriteDescriptorSet, 2> computeWrites{};
 
     computeWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    computeWrites[0].dstSet = computeDescriptorSets[writeSet];
+    computeWrites[0].dstSet = particleSystem.getComputeDescriptorSet(writeSet);
     computeWrites[0].dstBinding = 3;
     computeWrites[0].dstArrayElement = 0;
     computeWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -438,7 +442,7 @@ void WeatherSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameInd
     computeWrites[0].pBufferInfo = &uniformBufferInfo;
 
     computeWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    computeWrites[1].dstSet = computeDescriptorSets[writeSet];
+    computeWrites[1].dstSet = particleSystem.getComputeDescriptorSet(writeSet);
     computeWrites[1].dstBinding = 4;
     computeWrites[1].dstArrayElement = 0;
     computeWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -463,9 +467,10 @@ void WeatherSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameInd
     // Dispatch weather compute shader
     auto& computePipeline = getComputePipelineHandles();
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline.pipeline);
+    VkDescriptorSet computeSet = particleSystem.getComputeDescriptorSet(writeSet);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
                             computePipeline.pipelineLayout, 0, 1,
-                            &computeDescriptorSets[writeSet], 0, nullptr);
+                            &computeSet, 0, nullptr);
 
     WeatherPushConstants pushConstants{};
     pushConstants.time = time;
@@ -490,11 +495,11 @@ void WeatherSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameInd
 }
 
 void WeatherSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time) {
-    uint32_t readSet = renderBufferSet;
+    uint32_t readSet = particleSystem.getRenderBufferSet();
 
     // Bootstrap: if we haven't diverged yet, read from compute set
-    if (computeBufferSet == renderBufferSet) {
-        readSet = computeBufferSet;
+    if (particleSystem.getComputeBufferSet() == particleSystem.getRenderBufferSet()) {
+        readSet = particleSystem.getComputeBufferSet();
     }
 
     // Update graphics descriptor set to use this frame's renderer UBO
@@ -505,7 +510,7 @@ void WeatherSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float t
 
     VkWriteDescriptorSet uboWrite{};
     uboWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    uboWrite.dstSet = graphicsDescriptorSets[readSet];
+    uboWrite.dstSet = particleSystem.getGraphicsDescriptorSet(readSet);
     uboWrite.dstBinding = 0;
     uboWrite.dstArrayElement = 0;
     uboWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -516,9 +521,10 @@ void WeatherSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float t
 
     auto& graphicsPipeline = getGraphicsPipelineHandles();
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline.pipeline);
+    VkDescriptorSet graphicsSet = particleSystem.getGraphicsDescriptorSet(readSet);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                             graphicsPipeline.pipelineLayout, 0, 1,
-                            &graphicsDescriptorSets[readSet], 0, nullptr);
+                            &graphicsSet, 0, nullptr);
 
     WeatherPushConstants pushConstants{};
     pushConstants.time = time;
@@ -531,14 +537,7 @@ void WeatherSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float t
     vkCmdDrawIndirect(cmd, indirectBuffers.buffers[readSet], 0, 1, sizeof(VkDrawIndirectCommand));
 }
 
-void WeatherSystem::advanceBufferSet() {
-    if (computeBufferSet == renderBufferSet) {
-        // First frame done - set up for double buffering
-        computeBufferSet = 1;
-    } else {
-        std::swap(computeBufferSet, renderBufferSet);
-    }
-}
+void WeatherSystem::advanceBufferSet() { particleSystem.advanceBufferSet(); }
 
 void WeatherSystem::setFroxelVolume(VkImageView volumeView, VkSampler volumeSampler,
                                      float farPlane, float depthDist) {
@@ -557,7 +556,7 @@ void WeatherSystem::setFroxelVolume(VkImageView volumeView, VkSampler volumeSamp
 
             VkWriteDescriptorSet froxelWrite{};
             froxelWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            froxelWrite.dstSet = graphicsDescriptorSets[set];
+            froxelWrite.dstSet = particleSystem.getGraphicsDescriptorSet(set);
             froxelWrite.dstBinding = 3;
             froxelWrite.dstArrayElement = 0;
             froxelWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;

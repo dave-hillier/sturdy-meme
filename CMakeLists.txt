@@ -36,6 +36,7 @@ set(SOURCES
     src/AtmosphereLUTSystem.cpp
     src/Player.cpp
     src/PhysicsSystem.cpp
+    src/ParticleSystem.cpp
     src/TerrainSystem.cpp
     src/ClothSimulation.cpp
 )
