@@ -798,8 +798,20 @@ CloudResult marchClouds(vec3 origin, vec3 dir) {
     vec3 moonDir = normalize(ubo.moonDirection.xyz);
     float cosThetaSun = dot(dir, sunDir);
     float cosThetaMoon = dot(dir, moonDir);
-    vec3 sunLight = ubo.sunColor.rgb * ubo.sunDirection.w;
-    vec3 moonLight = ubo.moonColor.rgb * ubo.moonDirection.w;
+
+    // Cloud lighting must use the same brightness scale as the sky
+    // The sky uses SOLAR_IRRADIANCE * SKY_EXPOSURE (see integrateAtmosphereWithLUT)
+    // Without this scaling, clouds appear ~5x darker than the sky behind them
+    const float SKY_EXPOSURE = 5.0;
+
+    // Base sun/moon color with intensity (for ambient via irradiance LUT)
+    // The irradiance LUT already includes solarIrradiance, so we only add SKY_EXPOSURE here
+    vec3 sunLightBase = ubo.sunColor.rgb * ubo.sunDirection.w;
+    vec3 moonLightBase = ubo.moonColor.rgb * ubo.moonDirection.w;
+
+    // Full brightness for direct cloud lighting (includes SOLAR_IRRADIANCE for physical correctness)
+    vec3 sunLight = sunLightBase * SOLAR_IRRADIANCE * SKY_EXPOSURE;
+    vec3 moonLight = moonLightBase * SOLAR_IRRADIANCE * SKY_EXPOSURE;
 
     float sunAltitude = ubo.sunDirection.y;
     float moonAltitude = ubo.moonDirection.y;
@@ -811,9 +823,10 @@ CloudResult marchClouds(vec3 origin, vec3 dir) {
 
     // Compute physically-based sky irradiance at cloud altitude
     // Sample position in middle of cloud layer for irradiance calculation
+    // Use sunLightBase * SKY_EXPOSURE (not sunLight) because irradiance LUT already has solarIrradiance
     vec3 cloudSamplePos = vec3(0.0, PLANET_RADIUS + (CLOUD_LAYER_BOTTOM + CLOUD_LAYER_TOP) * 0.5, 0.0);
     SkyIrradiance skyIrrad = computeSkyIrradiance(cloudSamplePos, sunDir, moonDir,
-                                                   sunLight, moonLight,
+                                                   sunLightBase * SKY_EXPOSURE, moonLightBase * SKY_EXPOSURE,
                                                    sunAltitude, moonContribution);
 
     // Cloud scattering albedo (single-scattering albedo for water droplets)
