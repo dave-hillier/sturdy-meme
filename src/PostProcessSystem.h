@@ -52,6 +52,7 @@ public:
 
     VkRenderPass getHDRRenderPass() const { return hdrRenderPass; }
     VkFramebuffer getHDRFramebuffer() const { return hdrFramebuffer; }
+    VkImageView getHDRColorView() const { return hdrColorView; }
     VkImageView getHDRDepthView() const { return hdrDepthView; }
     VkExtent2D getExtent() const { return extent; }
 
@@ -82,6 +83,9 @@ public:
     // Froxel volumetrics (Phase 4.3)
     void setFroxelVolume(VkImageView volumeView, VkSampler volumeSampler);
     void setFroxelEnabled(bool enabled) { froxelEnabled = enabled; }
+
+    // Bloom (multi-pass)
+    void setBloomTexture(VkImageView bloomView, VkSampler bloomSampler);
     bool isFroxelEnabled() const { return froxelEnabled; }
     void setFroxelParams(float farPlane, float depthDist) {
         froxelFarPlane = farPlane;

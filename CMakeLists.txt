@@ -29,6 +29,7 @@ set(SOURCES
     src/WeatherSystem.cpp
     src/LeafSystem.cpp
     src/PostProcessSystem.cpp
+    src/BloomSystem.cpp
     src/FroxelSystem.cpp
     src/AtmosphereLUTSystem.cpp
     src/Player.cpp
@@ -83,6 +84,9 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow.frag.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.frag.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_downsample.frag.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_upsample.frag.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_composite.frag.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_update.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_integrate.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.comp.spv
@@ -216,6 +220,24 @@ if(SHADER_COMPILE_CMD)
         COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.frag.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.frag
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.frag
         COMMENT "Compiling postprocess fragment shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_downsample.frag.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_downsample.frag.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_downsample.frag
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_downsample.frag
+        COMMENT "Compiling bloom downsample fragment shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_upsample.frag.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_upsample.frag.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_upsample.frag
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_upsample.frag
+        COMMENT "Compiling bloom upsample fragment shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_composite.frag.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_composite.frag.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_composite.frag
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_composite.frag
+        COMMENT "Compiling bloom composite fragment shader"
     )
     add_custom_command(
         OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_update.comp.spv
@@ -366,6 +388,9 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow.frag.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.frag.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_downsample.frag.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_upsample.frag.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_composite.frag.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_update.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_integrate.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.comp.spv

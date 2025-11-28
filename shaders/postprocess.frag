@@ -28,6 +28,7 @@ layout(binding = 1) uniform PostProcessUniforms {
 
 layout(binding = 2) uniform sampler2D depthInput;
 layout(binding = 3) uniform sampler3D froxelVolume;
+layout(binding = 4) uniform sampler2D bloomTexture;
 
 layout(location = 0) in vec2 fragTexCoord;
 layout(location = 0) out vec4 outColor;
@@ -202,56 +203,6 @@ float computeAverageLuminance() {
     return exp(totalLogLum / totalWeight);
 }
 
-// Extract bright pixels for bloom with soft knee
-vec3 extractBright(vec3 color, float threshold) {
-    float brightness = getLuminance(color);
-    // Soft knee for smoother transition
-    float knee = threshold * 0.5;
-    float soft = brightness - threshold + knee;
-    soft = clamp(soft, 0.0, 2.0 * knee);
-    soft = soft * soft / (4.0 * knee + 0.0001);
-    float contribution = max(soft, brightness - threshold) / max(brightness, 0.0001);
-    return color * max(contribution, 0.0);
-}
-
-// Poisson disc bloom - samples spread energy smoothly
-vec3 bloomMultiTap(vec2 uv, float radiusPixels) {
-    const vec2 poisson[12] = vec2[](
-        vec2(-0.326, -0.406), vec2(-0.840, -0.074), vec2(-0.696, 0.457),
-        vec2(-0.203, 0.621),  vec2(0.962, -0.195), vec2(0.473, -0.480),
-        vec2(0.519, 0.767),   vec2(0.185, -0.893), vec2(0.507, 0.064),
-        vec2(0.896, 0.412),   vec2(-0.322, -0.933), vec2(-0.792, -0.598)
-    );
-
-    vec2 texelSize = radiusPixels / vec2(textureSize(hdrInput, 0));
-
-    vec3 center = extractBright(texture(hdrInput, uv).rgb, ubo.bloomThreshold);
-    vec3 accum = center * 0.35;
-    float weightSum = 0.35;
-
-    for (int i = 0; i < 12; i++) {
-        vec2 offset = poisson[i] * texelSize;
-        float w = exp(-dot(poisson[i], poisson[i]) * 2.5);
-        vec3 bright = extractBright(texture(hdrInput, uv + offset).rgb, ubo.bloomThreshold);
-        accum += bright * w;
-        weightSum += w;
-    }
-
-    return accum / max(weightSum, 0.0001);
-}
-
-// Chain multiple radii for smooth falloff
-vec3 sampleBloom(vec2 uv, float radius) {
-    float baseRadius = max(radius, 0.5);
-
-    // Blend a few radii to build a soft falloff without large spaced kernels
-    vec3 small = bloomMultiTap(uv, baseRadius * 0.6);
-    vec3 medium = bloomMultiTap(uv, baseRadius);
-    vec3 large = bloomMultiTap(uv, baseRadius * 1.8);
-
-    return small * 0.4 + medium * 0.35 + large * 0.25;
-}
-
 // God rays / Light shafts (Phase 4.4)
 // Screen-space radial blur from sun position
 const int GOD_RAY_SAMPLES = 64;
@@ -347,11 +298,8 @@ void main() {
         finalExposure = clamp(targetExp, -4.0, 4.0);
     }
 
-    // Compute bloom
-    vec3 bloom = vec3(0.0);
-    if (ubo.bloomIntensity > 0.0) {
-        bloom = sampleBloom(fragTexCoord, ubo.bloomRadius);
-    }
+    // Sample bloom from multi-pass bloom texture
+    vec3 bloom = texture(bloomTexture, fragTexCoord).rgb;
 
     // Compute god rays (Phase 4.4)
     vec3 godRays = vec3(0.0);
