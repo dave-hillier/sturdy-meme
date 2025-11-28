@@ -15,7 +15,9 @@ void ClothSimulation::create(int w, int h, float spacing, const glm::vec3& topLe
         for (int x = 0; x < width; ++x) {
             Particle p;
             p.position = topLeftPosition + glm::vec3(x * spacing, -y * spacing, 0.0f);
-            p.oldPosition = p.position;
+            // Give particles a small initial velocity by offsetting oldPosition slightly
+            // This prevents the cloth from appearing "frozen" until something collides with it
+            p.oldPosition = p.position - glm::vec3(0.0f, 0.001f, 0.0f);
             p.acceleration = glm::vec3(0.0f);
             p.mass = 1.0f;
             p.pinned = false;
