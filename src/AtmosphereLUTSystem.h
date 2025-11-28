@@ -45,6 +45,15 @@ struct AtmosphereLUTUniforms {
     float padding[2];
 };
 
+// Cloud map uniform parameters (must match GLSL layout)
+struct CloudMapUniforms {
+    glm::vec4 windOffset;    // xyz = wind offset for animation, w = time
+    float coverage;          // 0-1 cloud coverage amount
+    float density;           // Base density multiplier
+    float sharpness;         // Coverage threshold sharpness
+    float detailScale;       // Scale for detail noise
+};
+
 class AtmosphereLUTSystem {
 public:
     struct InitInfo {
@@ -66,6 +75,10 @@ public:
     static constexpr uint32_t IRRADIANCE_WIDTH = 64;   // cos(sun zenith)
     static constexpr uint32_t IRRADIANCE_HEIGHT = 16;  // altitude
 
+    // Cloud Map LUT dimensions (Paraboloid projection)
+    // Stores procedural cloud density mapped to hemisphere directions
+    static constexpr uint32_t CLOUDMAP_SIZE = 256;     // Square texture for paraboloid map
+
     AtmosphereLUTSystem() = default;
     ~AtmosphereLUTSystem() = default;
 
@@ -77,9 +90,11 @@ public:
     void computeMultiScatterLUT(VkCommandBuffer cmd);
     void computeIrradianceLUT(VkCommandBuffer cmd);
     void computeSkyViewLUT(VkCommandBuffer cmd, const glm::vec3& sunDir, const glm::vec3& cameraPos, float cameraAltitude);
+    void computeCloudMapLUT(VkCommandBuffer cmd, const glm::vec3& windOffset, float time);
 
     // Update sky-view LUT per frame (uses SHADER_READ_ONLY_OPTIMAL as old layout since LUT was already computed)
     void updateSkyViewLUT(VkCommandBuffer cmd, const glm::vec3& sunDir, const glm::vec3& cameraPos, float cameraAltitude);
+    void updateCloudMapLUT(VkCommandBuffer cmd, const glm::vec3& windOffset, float time);
 
     // Get LUT views for sampling in shaders
     VkImageView getTransmittanceLUTView() const { return transmittanceLUTView; }
@@ -87,6 +102,7 @@ public:
     VkImageView getSkyViewLUTView() const { return skyViewLUTView; }
     VkImageView getRayleighIrradianceLUTView() const { return rayleighIrradianceLUTView; }
     VkImageView getMieIrradianceLUTView() const { return mieIrradianceLUTView; }
+    VkImageView getCloudMapLUTView() const { return cloudMapLUTView; }
     VkSampler getLUTSampler() const { return lutSampler; }
 
     // Export LUTs as PNG files (for debugging/visualization)
@@ -101,6 +117,7 @@ private:
     bool createMultiScatterLUT();
     bool createSkyViewLUT();
     bool createIrradianceLUTs();
+    bool createCloudMapLUT();
     bool createLUTSampler();
     bool createDescriptorSetLayouts();
     bool createDescriptorSets();
@@ -145,6 +162,12 @@ private:
     VmaAllocation mieIrradianceLUTAllocation = VK_NULL_HANDLE;
     VkImageView mieIrradianceLUTView = VK_NULL_HANDLE;
 
+    // Cloud Map LUT (256×256, RGBA16F) - Paraboloid projection
+    // R = base density, G = detail noise, B = coverage mask, A = height gradient
+    VkImage cloudMapLUT = VK_NULL_HANDLE;
+    VmaAllocation cloudMapLUTAllocation = VK_NULL_HANDLE;
+    VkImageView cloudMapLUTView = VK_NULL_HANDLE;
+
     // LUT sampler (bilinear filtering, clamp to edge)
     VkSampler lutSampler = VK_NULL_HANDLE;
 
@@ -153,26 +176,35 @@ private:
     VkDescriptorSetLayout multiScatterDescriptorSetLayout = VK_NULL_HANDLE;
     VkDescriptorSetLayout skyViewDescriptorSetLayout = VK_NULL_HANDLE;
     VkDescriptorSetLayout irradianceDescriptorSetLayout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout cloudMapDescriptorSetLayout = VK_NULL_HANDLE;
 
     VkPipelineLayout transmittancePipelineLayout = VK_NULL_HANDLE;
     VkPipelineLayout multiScatterPipelineLayout = VK_NULL_HANDLE;
     VkPipelineLayout skyViewPipelineLayout = VK_NULL_HANDLE;
     VkPipelineLayout irradiancePipelineLayout = VK_NULL_HANDLE;
+    VkPipelineLayout cloudMapPipelineLayout = VK_NULL_HANDLE;
 
     VkPipeline transmittancePipeline = VK_NULL_HANDLE;
     VkPipeline multiScatterPipeline = VK_NULL_HANDLE;
     VkPipeline skyViewPipeline = VK_NULL_HANDLE;
     VkPipeline irradiancePipeline = VK_NULL_HANDLE;
+    VkPipeline cloudMapPipeline = VK_NULL_HANDLE;
 
     VkDescriptorSet transmittanceDescriptorSet = VK_NULL_HANDLE;
     VkDescriptorSet multiScatterDescriptorSet = VK_NULL_HANDLE;
     VkDescriptorSet skyViewDescriptorSet = VK_NULL_HANDLE;
     VkDescriptorSet irradianceDescriptorSet = VK_NULL_HANDLE;
+    VkDescriptorSet cloudMapDescriptorSet = VK_NULL_HANDLE;
 
-    // Uniform buffer
+    // Uniform buffer for atmosphere LUTs
     VkBuffer uniformBuffer = VK_NULL_HANDLE;
     VmaAllocation uniformAllocation = VK_NULL_HANDLE;
     void* uniformMappedPtr = nullptr;
+
+    // Uniform buffer for cloud map
+    VkBuffer cloudMapUniformBuffer = VK_NULL_HANDLE;
+    VmaAllocation cloudMapUniformAllocation = VK_NULL_HANDLE;
+    void* cloudMapUniformMappedPtr = nullptr;
 
     // Atmosphere parameters
     AtmosphereParams atmosphereParams;

@@ -41,6 +41,8 @@ struct UniformBufferObject {
     float shadowMapSize;
     float debugCascades;           // 1.0 = show cascade colors
     float julianDay;               // Julian day for sidereal rotation
+    float cloudStyle;              // 0.0 = procedural, 1.0 = paraboloid LUT hybrid
+    float padding1, padding2, padding3;  // Align to 16 bytes
 };
 
 struct ShadowPushConstants {
@@ -80,6 +82,10 @@ public:
 
     void toggleCascadeDebug() { showCascadeDebug = !showCascadeDebug; }
     bool isShowingCascadeDebug() const { return showCascadeDebug; }
+
+    // Cloud style toggle (procedural vs paraboloid LUT hybrid)
+    void toggleCloudStyle() { useParaboloidClouds = !useParaboloidClouds; }
+    bool isUsingParaboloidClouds() const { return useParaboloidClouds; }
 
     // Terrain control
     void toggleTerrainWireframe() { terrainSystem.setWireframeMode(!terrainSystem.isWireframeMode()); }
@@ -310,6 +316,7 @@ private:
     int currentDay = 21;  // Summer solstice by default
 
     bool showCascadeDebug = false;         // true = show cascade colors overlay
+    bool useParaboloidClouds = true;       // true = paraboloid LUT hybrid, false = procedural
 
     // Player position for grass displacement
     glm::vec3 playerPosition = glm::vec3(0.0f);

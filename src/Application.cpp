@@ -250,6 +250,10 @@ void Application::processEvents() {
                     renderer.spawnConfetti(playerPos, 8.0f, 100.0f, 0.5f);
                     SDL_Log("Confetti! 🎉");
                 }
+                else if (event.key.scancode == SDL_SCANCODE_V) {
+                    renderer.toggleCloudStyle();
+                    SDL_Log("Cloud style: %s", renderer.isUsingParaboloidClouds() ? "Paraboloid LUT Hybrid" : "Procedural");
+                }
                 break;
             case SDL_EVENT_GAMEPAD_ADDED:
                 if (!gamepad) {

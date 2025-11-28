@@ -19,6 +19,7 @@ bool AtmosphereLUTSystem::init(const InitInfo& info) {
     if (!createMultiScatterLUT()) return false;
     if (!createSkyViewLUT()) return false;
     if (!createIrradianceLUTs()) return false;
+    if (!createCloudMapLUT()) return false;
     if (!createLUTSampler()) return false;
     if (!createUniformBuffer()) return false;
     if (!createDescriptorSetLayouts()) return false;
@@ -35,6 +36,10 @@ void AtmosphereLUTSystem::destroy(VkDevice device, VmaAllocator allocator) {
     if (uniformBuffer != VK_NULL_HANDLE) {
         vmaDestroyBuffer(allocator, uniformBuffer, uniformAllocation);
         uniformBuffer = VK_NULL_HANDLE;
+    }
+    if (cloudMapUniformBuffer != VK_NULL_HANDLE) {
+        vmaDestroyBuffer(allocator, cloudMapUniformBuffer, cloudMapUniformAllocation);
+        cloudMapUniformBuffer = VK_NULL_HANDLE;
     }
 
     if (transmittancePipeline != VK_NULL_HANDLE) {
@@ -53,6 +58,10 @@ void AtmosphereLUTSystem::destroy(VkDevice device, VmaAllocator allocator) {
         vkDestroyPipeline(device, irradiancePipeline, nullptr);
         irradiancePipeline = VK_NULL_HANDLE;
     }
+    if (cloudMapPipeline != VK_NULL_HANDLE) {
+        vkDestroyPipeline(device, cloudMapPipeline, nullptr);
+        cloudMapPipeline = VK_NULL_HANDLE;
+    }
 
     if (transmittancePipelineLayout != VK_NULL_HANDLE) {
         vkDestroyPipelineLayout(device, transmittancePipelineLayout, nullptr);
@@ -70,6 +79,10 @@ void AtmosphereLUTSystem::destroy(VkDevice device, VmaAllocator allocator) {
         vkDestroyPipelineLayout(device, irradiancePipelineLayout, nullptr);
         irradiancePipelineLayout = VK_NULL_HANDLE;
     }
+    if (cloudMapPipelineLayout != VK_NULL_HANDLE) {
+        vkDestroyPipelineLayout(device, cloudMapPipelineLayout, nullptr);
+        cloudMapPipelineLayout = VK_NULL_HANDLE;
+    }
 
     if (transmittanceDescriptorSetLayout != VK_NULL_HANDLE) {
         vkDestroyDescriptorSetLayout(device, transmittanceDescriptorSetLayout, nullptr);
@@ -86,6 +99,10 @@ void AtmosphereLUTSystem::destroy(VkDevice device, VmaAllocator allocator) {
     if (irradianceDescriptorSetLayout != VK_NULL_HANDLE) {
         vkDestroyDescriptorSetLayout(device, irradianceDescriptorSetLayout, nullptr);
         irradianceDescriptorSetLayout = VK_NULL_HANDLE;
+    }
+    if (cloudMapDescriptorSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(device, cloudMapDescriptorSetLayout, nullptr);
+        cloudMapDescriptorSetLayout = VK_NULL_HANDLE;
     }
 
     if (lutSampler != VK_NULL_HANDLE) {
@@ -138,6 +155,15 @@ void AtmosphereLUTSystem::destroyLUTResources() {
     if (mieIrradianceLUT != VK_NULL_HANDLE) {
         vmaDestroyImage(allocator, mieIrradianceLUT, mieIrradianceLUTAllocation);
         mieIrradianceLUT = VK_NULL_HANDLE;
+    }
+
+    if (cloudMapLUTView != VK_NULL_HANDLE) {
+        vkDestroyImageView(device, cloudMapLUTView, nullptr);
+        cloudMapLUTView = VK_NULL_HANDLE;
+    }
+    if (cloudMapLUT != VK_NULL_HANDLE) {
+        vmaDestroyImage(allocator, cloudMapLUT, cloudMapLUTAllocation);
+        cloudMapLUT = VK_NULL_HANDLE;
     }
 }
 
@@ -323,6 +349,49 @@ bool AtmosphereLUTSystem::createIrradianceLUTs() {
     return true;
 }
 
+bool AtmosphereLUTSystem::createCloudMapLUT() {
+    // Cloud Map LUT (256×256, RGBA16F) - Paraboloid projection
+    VkImageCreateInfo imageInfo{};
+    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    imageInfo.imageType = VK_IMAGE_TYPE_2D;
+    imageInfo.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    imageInfo.extent = {CLOUDMAP_SIZE, CLOUDMAP_SIZE, 1};
+    imageInfo.mipLevels = 1;
+    imageInfo.arrayLayers = 1;
+    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imageInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+
+    if (vmaCreateImage(allocator, &imageInfo, &allocInfo,
+                       &cloudMapLUT, &cloudMapLUTAllocation, nullptr) != VK_SUCCESS) {
+        SDL_Log("Failed to create cloud map LUT");
+        return false;
+    }
+
+    VkImageViewCreateInfo viewInfo{};
+    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewInfo.image = cloudMapLUT;
+    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.subresourceRange.baseMipLevel = 0;
+    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.baseArrayLayer = 0;
+    viewInfo.subresourceRange.layerCount = 1;
+
+    if (vkCreateImageView(device, &viewInfo, nullptr, &cloudMapLUTView) != VK_SUCCESS) {
+        SDL_Log("Failed to create cloud map LUT view");
+        return false;
+    }
+
+    return true;
+}
+
 bool AtmosphereLUTSystem::createLUTSampler() {
     VkSamplerCreateInfo samplerInfo{};
     samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
@@ -348,6 +417,7 @@ bool AtmosphereLUTSystem::createLUTSampler() {
 }
 
 bool AtmosphereLUTSystem::createUniformBuffer() {
+    // Create atmosphere LUT uniform buffer
     VkDeviceSize bufferSize = sizeof(AtmosphereLUTUniforms);
 
     VkBufferCreateInfo bufferInfo{};
@@ -368,6 +438,17 @@ bool AtmosphereLUTSystem::createUniformBuffer() {
     }
 
     uniformMappedPtr = allocResult.pMappedData;
+
+    // Create cloud map uniform buffer
+    bufferInfo.size = sizeof(CloudMapUniforms);
+    if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo,
+                        &cloudMapUniformBuffer, &cloudMapUniformAllocation, &allocResult) != VK_SUCCESS) {
+        SDL_Log("Failed to create cloud map uniform buffer");
+        return false;
+    }
+
+    cloudMapUniformMappedPtr = allocResult.pMappedData;
+
     return true;
 }
 
@@ -534,6 +615,41 @@ bool AtmosphereLUTSystem::createDescriptorSetLayouts() {
 
         if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &irradiancePipelineLayout) != VK_SUCCESS) {
             SDL_Log("Failed to create irradiance pipeline layout");
+            return false;
+        }
+    }
+
+    // Cloud Map LUT descriptor set layout (output image, uniform buffer)
+    {
+        std::array<VkDescriptorSetLayoutBinding, 2> bindings{};
+
+        bindings[0].binding = 0;
+        bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        bindings[0].descriptorCount = 1;
+        bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+        bindings[1].binding = 1;
+        bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        bindings[1].descriptorCount = 1;
+        bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+        VkDescriptorSetLayoutCreateInfo layoutInfo{};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
+        layoutInfo.pBindings = bindings.data();
+
+        if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &cloudMapDescriptorSetLayout) != VK_SUCCESS) {
+            SDL_Log("Failed to create cloud map descriptor set layout");
+            return false;
+        }
+
+        VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+        pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        pipelineLayoutInfo.setLayoutCount = 1;
+        pipelineLayoutInfo.pSetLayouts = &cloudMapDescriptorSetLayout;
+
+        if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &cloudMapPipelineLayout) != VK_SUCCESS) {
+            SDL_Log("Failed to create cloud map pipeline layout");
             return false;
         }
     }
@@ -778,6 +894,49 @@ bool AtmosphereLUTSystem::createDescriptorSets() {
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
     }
 
+    // Allocate cloud map descriptor set
+    {
+        VkDescriptorSetAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        allocInfo.descriptorPool = descriptorPool;
+        allocInfo.descriptorSetCount = 1;
+        allocInfo.pSetLayouts = &cloudMapDescriptorSetLayout;
+
+        if (vkAllocateDescriptorSets(device, &allocInfo, &cloudMapDescriptorSet) != VK_SUCCESS) {
+            SDL_Log("Failed to allocate cloud map descriptor set");
+            return false;
+        }
+
+        std::array<VkWriteDescriptorSet, 2> writes{};
+
+        VkDescriptorImageInfo imageInfo{};
+        imageInfo.imageView = cloudMapLUTView;
+        imageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+        writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[0].dstSet = cloudMapDescriptorSet;
+        writes[0].dstBinding = 0;
+        writes[0].dstArrayElement = 0;
+        writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        writes[0].descriptorCount = 1;
+        writes[0].pImageInfo = &imageInfo;
+
+        VkDescriptorBufferInfo bufferInfo{};
+        bufferInfo.buffer = cloudMapUniformBuffer;
+        bufferInfo.offset = 0;
+        bufferInfo.range = sizeof(CloudMapUniforms);
+
+        writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[1].dstSet = cloudMapDescriptorSet;
+        writes[1].dstBinding = 1;
+        writes[1].dstArrayElement = 0;
+        writes[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        writes[1].descriptorCount = 1;
+        writes[1].pBufferInfo = &bufferInfo;
+
+        vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+    }
+
     return true;
 }
 
@@ -919,6 +1078,42 @@ bool AtmosphereLUTSystem::createComputePipelines() {
 
         if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &irradiancePipeline) != VK_SUCCESS) {
             SDL_Log("Failed to create irradiance pipeline");
+            vkDestroyShaderModule(device, shaderModule, nullptr);
+            return false;
+        }
+
+        vkDestroyShaderModule(device, shaderModule, nullptr);
+    }
+
+    // Create cloud map pipeline
+    {
+        std::string shaderFile = shaderPath + "/cloudmap_lut.comp.spv";
+        std::vector<char> shaderCode = ShaderLoader::readFile(shaderFile);
+
+        VkShaderModuleCreateInfo createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+        createInfo.codeSize = shaderCode.size();
+        createInfo.pCode = reinterpret_cast<const uint32_t*>(shaderCode.data());
+
+        VkShaderModule shaderModule;
+        if (vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
+            SDL_Log("Failed to create cloud map shader module");
+            return false;
+        }
+
+        VkPipelineShaderStageCreateInfo shaderStageInfo{};
+        shaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        shaderStageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+        shaderStageInfo.module = shaderModule;
+        shaderStageInfo.pName = "main";
+
+        VkComputePipelineCreateInfo pipelineInfo{};
+        pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+        pipelineInfo.stage = shaderStageInfo;
+        pipelineInfo.layout = cloudMapPipelineLayout;
+
+        if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &cloudMapPipeline) != VK_SUCCESS) {
+            SDL_Log("Failed to create cloud map pipeline");
             vkDestroyShaderModule(device, shaderModule, nullptr);
             return false;
         }
@@ -1172,6 +1367,104 @@ void AtmosphereLUTSystem::updateSkyViewLUT(VkCommandBuffer cmd, const glm::vec3&
                          0, 0, nullptr, 0, nullptr, 1, &barrier);
 }
 
+void AtmosphereLUTSystem::computeCloudMapLUT(VkCommandBuffer cmd, const glm::vec3& windOffset, float time) {
+    // Update cloud map uniform buffer
+    CloudMapUniforms uniforms{};
+    uniforms.windOffset = glm::vec4(windOffset, time);
+    uniforms.coverage = 0.6f;      // 60% cloud coverage
+    uniforms.density = 1.0f;       // Full density multiplier
+    uniforms.sharpness = 0.3f;     // Coverage transition sharpness
+    uniforms.detailScale = 2.5f;   // Detail noise scale
+    memcpy(cloudMapUniformMappedPtr, &uniforms, sizeof(CloudMapUniforms));
+
+    // Transition to GENERAL layout for compute write
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = cloudMapLUT;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+    barrier.srcAccessMask = 0;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    // Bind pipeline and dispatch
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cloudMapPipeline);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cloudMapPipelineLayout,
+                           0, 1, &cloudMapDescriptorSet, 0, nullptr);
+
+    uint32_t groupCountX = (CLOUDMAP_SIZE + 15) / 16;
+    uint32_t groupCountY = (CLOUDMAP_SIZE + 15) / 16;
+    vkCmdDispatch(cmd, groupCountX, groupCountY, 1);
+
+    // Transition to SHADER_READ for sampling in sky.frag
+    barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    SDL_Log("Computed cloud map LUT (%dx%d)", CLOUDMAP_SIZE, CLOUDMAP_SIZE);
+}
+
+void AtmosphereLUTSystem::updateCloudMapLUT(VkCommandBuffer cmd, const glm::vec3& windOffset, float time) {
+    // Update cloud map uniform buffer
+    CloudMapUniforms uniforms{};
+    uniforms.windOffset = glm::vec4(windOffset, time);
+    uniforms.coverage = 0.6f;      // 60% cloud coverage
+    uniforms.density = 1.0f;       // Full density multiplier
+    uniforms.sharpness = 0.3f;     // Coverage transition sharpness
+    uniforms.detailScale = 2.5f;   // Detail noise scale
+    memcpy(cloudMapUniformMappedPtr, &uniforms, sizeof(CloudMapUniforms));
+
+    // Transition from SHADER_READ_ONLY to GENERAL for compute write
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = cloudMapLUT;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+    barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    // Bind pipeline and dispatch
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cloudMapPipeline);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cloudMapPipelineLayout,
+                           0, 1, &cloudMapDescriptorSet, 0, nullptr);
+
+    uint32_t groupCountX = (CLOUDMAP_SIZE + 15) / 16;
+    uint32_t groupCountY = (CLOUDMAP_SIZE + 15) / 16;
+    vkCmdDispatch(cmd, groupCountX, groupCountY, 1);
+
+    // Transition back to SHADER_READ for sampling in sky.frag
+    barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &barrier);
+}
+
 bool AtmosphereLUTSystem::exportImageToPNG(VkImage image, VkFormat format, uint32_t width, uint32_t height, const std::string& filename) {
     // Determine channel count from format
     uint32_t channelCount = 0;
@@ -1396,6 +1689,10 @@ bool AtmosphereLUTSystem::exportLUTsAsPNG(const std::string& outputDir) {
     success &= exportImageToPNG(skyViewLUT, VK_FORMAT_R16G16B16A16_SFLOAT,
                                 SKYVIEW_WIDTH, SKYVIEW_HEIGHT,
                                 outputDir + "/skyview_lut.png");
+
+    success &= exportImageToPNG(cloudMapLUT, VK_FORMAT_R16G16B16A16_SFLOAT,
+                                CLOUDMAP_SIZE, CLOUDMAP_SIZE,
+                                outputDir + "/cloudmap_lut.png");
 
     return success;
 }

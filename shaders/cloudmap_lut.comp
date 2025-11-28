@@ -1,0 +1,155 @@
+#version 450
+
+// Cloud Map LUT Compute Shader
+// Generates a paraboloid-projected cloud density map for efficient hemisphere lookup
+//
+// Paraboloid projection maps a hemisphere direction to 2D UV:
+//   u = 0.5 + (dir.x / (1 + dir.z)) * 0.5
+//   v = 0.5 + (dir.y / (1 + dir.z)) * 0.5
+//
+// This allows single-texture-lookup cloud coverage for any sky direction
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(binding = 0, rgba16f) uniform image2D cloudMapLUT;
+
+layout(binding = 1) uniform CloudMapUniforms {
+    vec4 windOffset;        // xyz = wind offset for animation, w = time
+    float coverage;         // 0-1 cloud coverage amount
+    float density;          // Base density multiplier
+    float sharpness;        // Coverage threshold sharpness
+    float detailScale;      // Scale for detail noise
+};
+
+// Simple hash for noise
+float hash(vec3 p) {
+    return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453);
+}
+
+// 3D value noise
+float noise3D(vec3 p) {
+    vec3 i = floor(p);
+    vec3 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);  // Smoothstep
+
+    return mix(
+        mix(mix(hash(i + vec3(0, 0, 0)), hash(i + vec3(1, 0, 0)), f.x),
+            mix(hash(i + vec3(0, 1, 0)), hash(i + vec3(1, 1, 0)), f.x), f.y),
+        mix(mix(hash(i + vec3(0, 0, 1)), hash(i + vec3(1, 0, 1)), f.x),
+            mix(hash(i + vec3(0, 1, 1)), hash(i + vec3(1, 1, 1)), f.x), f.y),
+        f.z
+    );
+}
+
+// Fractal Brownian Motion for cloud shapes
+float fbm(vec3 p, int octaves) {
+    float value = 0.0;
+    float amplitude = 0.5;
+    float frequency = 1.0;
+    float maxValue = 0.0;
+
+    for (int i = 0; i < octaves; i++) {
+        value += amplitude * noise3D(p * frequency);
+        maxValue += amplitude;
+        amplitude *= 0.5;
+        frequency *= 2.0;
+    }
+
+    return value / maxValue;
+}
+
+// Convert UV to paraboloid direction (inverse mapping)
+// Returns normalized direction on upper hemisphere (z >= 0)
+vec3 paraboloidUVToDirection(vec2 uv) {
+    // Map UV from [0,1] to [-1,1]
+    vec2 p = uv * 2.0 - 1.0;
+
+    // Paraboloid: z = 1 - (x^2 + y^2)
+    // For unit sphere projection: x = p.x*(1+z), y = p.y*(1+z)
+    // Solving: z = (1 - x^2 - y^2) / (1 + x^2 + y^2)
+    float r2 = dot(p, p);
+
+    // Outside the paraboloid disc - return horizon direction
+    if (r2 > 1.0) {
+        vec2 normalized = normalize(p);
+        return vec3(normalized.x, 0.0, normalized.y);
+    }
+
+    // Compute z from paraboloid equation
+    float z = (1.0 - r2) / (1.0 + r2);
+
+    // Reconstruct x,y from the projection
+    float denom = 1.0 + z;
+    float x = p.x * denom;
+    float y = p.y * denom;
+
+    return normalize(vec3(x, z, y));  // Y-up convention: (x, elevation, z)
+}
+
+// Sample cloud density for a sky direction
+// Returns: R = base density, G = detail density, B = coverage mask, A = height gradient
+vec4 sampleCloudForDirection(vec3 dir) {
+    // Only generate clouds for upper hemisphere
+    if (dir.y < 0.0) {
+        return vec4(0.0);
+    }
+
+    // Project direction to a virtual cloud plane
+    // Use a dome projection: clouds at higher elevations are "closer" to viewer
+    float elevationFactor = dir.y;  // 0 at horizon, 1 at zenith
+
+    // 3D position for noise sampling - creates hemisphere-mapped cloud field
+    // Scale by inverse elevation to create more clouds near horizon
+    float horizonStretch = mix(3.0, 1.0, elevationFactor);
+    vec3 samplePos = vec3(dir.x * horizonStretch, dir.y * 0.5, dir.z * horizonStretch);
+
+    // Apply wind offset for animation
+    samplePos += windOffset.xyz;
+
+    // Large-scale cloud shape (4 octaves)
+    float baseNoise = fbm(samplePos * 0.8, 4);
+
+    // Coverage threshold with adjustable sharpness
+    float coverageThreshold = 1.0 - coverage;
+    float baseDensity = smoothstep(coverageThreshold, coverageThreshold + sharpness, baseNoise);
+
+    // Detail noise for erosion (2 octaves, finer scale)
+    float detailNoise = fbm(samplePos * detailScale + vec3(100.0), 2);
+
+    // Height-based gradient: allow clouds across all elevations
+    // Slight falloff at extreme horizon and zenith for natural look
+    float heightGradient = smoothstep(0.0, 0.1, elevationFactor) *
+                           smoothstep(1.0, 0.85, elevationFactor);
+    // Ensure minimum gradient so clouds are visible everywhere
+    heightGradient = max(heightGradient, 0.3);
+
+    // Final density with detail erosion
+    float finalDensity = baseDensity * heightGradient;
+    finalDensity -= detailNoise * 0.25 * (1.0 - elevationFactor);
+    finalDensity = max(finalDensity, 0.0) * density;
+
+    // Coverage mask (binary cloud/no-cloud for shadow calculations)
+    float coverageMask = step(0.01, finalDensity);
+
+    return vec4(finalDensity, detailNoise, coverageMask, heightGradient);
+}
+
+void main() {
+    ivec2 pixelCoord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 lutSize = imageSize(cloudMapLUT);
+
+    if (pixelCoord.x >= lutSize.x || pixelCoord.y >= lutSize.y) {
+        return;
+    }
+
+    // Convert pixel to UV (center of pixel)
+    vec2 uv = (vec2(pixelCoord) + 0.5) / vec2(lutSize);
+
+    // Convert UV to hemisphere direction using paraboloid projection
+    vec3 dir = paraboloidUVToDirection(uv);
+
+    // Sample cloud density for this direction
+    vec4 cloudData = sampleCloudForDirection(dir);
+
+    imageStore(cloudMapLUT, pixelCoord, cloudData);
+}

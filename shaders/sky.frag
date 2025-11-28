@@ -26,6 +26,8 @@ layout(binding = 0) uniform UniformBufferObject {
     float shadowMapSize;
     float debugCascades;
     float julianDay;               // Julian day for sidereal rotation
+    float cloudStyle;              // 0.0 = procedural, 1.0 = paraboloid LUT hybrid
+    float padding1, padding2, padding3;
 } ubo;
 
 // Atmosphere LUTs (Phase 4.1 - precomputed for efficiency)
@@ -35,6 +37,8 @@ layout(binding = 3) uniform sampler2D skyViewLUT;        // 192x108, RGBA16F (up
 // Irradiance LUTs for cloud/haze lighting (Phase 4.1.9)
 layout(binding = 4) uniform sampler2D rayleighIrradianceLUT;  // 64x16, RGBA16F
 layout(binding = 5) uniform sampler2D mieIrradianceLUT;       // 64x16, RGBA16F
+// Cloud Map LUT (Paraboloid projection, updated per-frame with wind animation)
+layout(binding = 6) uniform sampler2D cloudMapLUT;            // 256x256, RGBA16F
 
 layout(location = 0) in vec3 rayDir;
 layout(location = 0) out vec4 outColor;
@@ -174,7 +178,43 @@ float cloudHeightGradient(float heightFraction) {
     return gradient;
 }
 
+// ============================================================================
+// Paraboloid Cloud Map Sampling
+// ============================================================================
+
+// Convert direction to paraboloid UV coordinates
+// Maps upper hemisphere direction to [0,1]^2 UV space
+vec2 directionToParaboloidUV(vec3 dir) {
+    dir = normalize(dir);
+
+    // For Y-up convention, use Y as the vertical component
+    // Paraboloid projection: UV = 0.5 + (XZ / (1 + Y)) * 0.5
+    float denom = 1.0 + max(dir.y, 0.001);  // Avoid division by zero at horizon
+    float u = 0.5 + (dir.x / denom) * 0.5;
+    float v = 0.5 + (dir.z / denom) * 0.5;
+
+    return vec2(u, v);
+}
+
+// Sample cloud density from paraboloid cloud map LUT
+// Returns: vec4(baseDensity, detailNoise, coverageMask, heightGradient)
+vec4 sampleCloudMapLUT(vec3 dir) {
+    // Only sample for upper hemisphere
+    if (dir.y < 0.0) {
+        return vec4(0.0);
+    }
+
+    vec2 uv = directionToParaboloidUV(dir);
+    return texture(cloudMapLUT, uv);
+}
+
 // Sample cloud density at a point
+// Cloud style is controlled by ubo.cloudStyle uniform:
+// 0.0 = original procedural noise, 1.0 = paraboloid LUT hybrid
+
+// Global ray direction for paraboloid cloud lookup (set by caller)
+vec3 g_cloudRayDir = vec3(0.0, 1.0, 0.0);
+
 float sampleCloudDensity(vec3 worldPos) {
     float altitude = length(worldPos) - PLANET_RADIUS;
 
@@ -190,37 +230,68 @@ float sampleCloudDensity(vec3 worldPos) {
     // Cloud shape based on height
     float heightGradient = cloudHeightGradient(heightFraction);
 
-    // Wind offset for animation - driven by wind system
-    // Extract wind parameters from uniform
+    // Wind parameters (shared by both methods)
     vec2 windDir = ubo.windDirectionAndSpeed.xy;
     float windSpeed = ubo.windDirectionAndSpeed.z;
     float windTime = ubo.windDirectionAndSpeed.w;
 
-    // Scroll clouds in wind direction at wind speed
-    // Use 3D wind offset with vertical component for natural cloud evolution
-    vec3 windOffset = vec3(windDir.x * windSpeed * windTime,
-                           windTime * 0.1,  // Slow vertical evolution
-                           windDir.y * windSpeed * windTime);
+    if (ubo.cloudStyle > 0.5) {
+        // Paraboloid LUT hybrid approach: Use paraboloid LUT for large-scale coverage,
+        // but add 3D procedural detail for volumetric structure
 
-    // Sample noise at different scales for shape and detail
-    vec3 samplePos = worldPos * 0.5 + windOffset;  // Base scale
+        // Get coverage from paraboloid map (indexed by view direction)
+        vec4 cloudData = sampleCloudMapLUT(g_cloudRayDir);
+        float coverage = cloudData.r;  // Large-scale cloud presence
 
-    // Large-scale shape noise (4 octaves for good quality/perf balance)
-    float baseNoise = fbm(samplePos * 0.25, 4);
+        // Early out if no cloud coverage in this direction
+        if (coverage < 0.01) {
+            return 0.0;
+        }
 
-    // Apply coverage with softer transition
-    float coverageThreshold = 1.0 - CLOUD_COVERAGE;
-    float density = smoothstep(coverageThreshold, coverageThreshold + 0.35, baseNoise);
+        // Add 3D procedural detail based on world position for volumetric structure
+        // This gives depth and variation within the cloud volume
 
-    // Apply height gradient
-    density *= heightGradient;
+        // Slow down detail noise animation (0.02x speed for realistic cloud evolution)
+        float detailTimeScale = 0.02;
+        vec3 windOffset = vec3(windDir.x * windSpeed * windTime * detailTimeScale,
+                               windTime * 0.002,  // Very slow vertical evolution
+                               windDir.y * windSpeed * windTime * detailTimeScale);
 
-    // Detail erosion (2 octaves - cheaper but still effective)
-    float detailNoise = fbm(samplePos * 1.0 + vec3(100.0), 2);
-    density -= detailNoise * 0.2 * (1.0 - heightFraction);
-    density = max(density, 0.0);
+        vec3 detailPos = worldPos * 0.8 + windOffset;
+        float detailNoise = fbm(detailPos * 0.5, 2);  // 2 octaves for detail
 
-    return density * CLOUD_DENSITY;
+        // Combine LUT coverage with 3D detail
+        float density = coverage * heightGradient;
+        density *= smoothstep(0.3, 0.7, detailNoise);  // Carve detail into cloud
+        density -= (1.0 - detailNoise) * 0.15 * (1.0 - heightFraction);
+        density = max(density, 0.0);
+
+        return density * CLOUD_DENSITY;
+    } else {
+        // Original procedural noise implementation
+        // Wind offset for animation - driven by wind system
+        vec3 windOffset = vec3(windDir.x * windSpeed * windTime,
+                               windTime * 0.1,
+                               windDir.y * windSpeed * windTime);
+
+        vec3 samplePos = worldPos * 0.5 + windOffset;
+
+        // Large-scale shape noise
+        float baseNoise = fbm(samplePos * 0.25, 4);
+
+        // Apply coverage with softer transition
+        float coverageThreshold = 1.0 - CLOUD_COVERAGE;
+        float density = smoothstep(coverageThreshold, coverageThreshold + 0.35, baseNoise);
+
+        density *= heightGradient;
+
+        // Detail erosion
+        float detailNoise = fbm(samplePos * 1.0 + vec3(100.0), 2);
+        density -= detailNoise * 0.2 * (1.0 - heightFraction);
+        density = max(density, 0.0);
+
+        return density * CLOUD_DENSITY;
+    }
 }
 
 // Henyey-Greenstein phase function (normalized to 4π solid angle)
@@ -702,6 +773,9 @@ SkyIrradiance computeSkyIrradiance(vec3 position, vec3 sunDir, vec3 moonDir,
 // March through cloud layer with physically-based lighting
 // Uses atmospheric transmittance and computed sky irradiance for accurate results
 CloudResult marchClouds(vec3 origin, vec3 dir) {
+    // Set global ray direction for paraboloid cloud map lookup
+    g_cloudRayDir = dir;
+
     CloudResult result;
     result.scattering = vec3(0.0);
     result.transmittance = 1.0;

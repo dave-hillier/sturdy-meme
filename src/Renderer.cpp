@@ -286,6 +286,9 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     glm::vec3 sunDir = glm::vec3(0.0f, 0.707f, 0.707f);  // Default 45 degree sun
     atmosphereLUTSystem.computeSkyViewLUT(cmdBuffer, sunDir, glm::vec3(0.0f), 0.0f);
 
+    // Compute cloud map LUT (paraboloid projection)
+    atmosphereLUTSystem.computeCloudMapLUT(cmdBuffer, glm::vec3(0.0f), 0.0f);
+
     vkEndCommandBuffer(cmdBuffer);
 
     VkSubmitInfo submitInfo{};
@@ -1593,6 +1596,7 @@ bool Renderer::createSkyDescriptorSetLayout() {
     // 3: Sky-view LUT sampler (updated per-frame)
     // 4: Rayleigh Irradiance LUT sampler (Phase 4.1.9)
     // 5: Mie Irradiance LUT sampler (Phase 4.1.9)
+    // 6: Cloud Map LUT sampler (Paraboloid projection, updated per-frame)
 
     VkDescriptorSetLayoutBinding uboBinding{};
     uboBinding.binding = 0;
@@ -1636,9 +1640,16 @@ bool Renderer::createSkyDescriptorSetLayout() {
     mieIrradianceLUTBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     mieIrradianceLUTBinding.pImmutableSamplers = nullptr;
 
-    std::array<VkDescriptorSetLayoutBinding, 6> bindings = {
+    VkDescriptorSetLayoutBinding cloudMapLUTBinding{};
+    cloudMapLUTBinding.binding = 6;
+    cloudMapLUTBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    cloudMapLUTBinding.descriptorCount = 1;
+    cloudMapLUTBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    cloudMapLUTBinding.pImmutableSamplers = nullptr;
+
+    std::array<VkDescriptorSetLayoutBinding, 7> bindings = {
         uboBinding, transmittanceLUTBinding, multiScatterLUTBinding, skyViewLUTBinding,
-        rayleighIrradianceLUTBinding, mieIrradianceLUTBinding
+        rayleighIrradianceLUTBinding, mieIrradianceLUTBinding, cloudMapLUTBinding
     };
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
@@ -1689,6 +1700,7 @@ bool Renderer::createSkyDescriptorSets() {
     VkImageView skyViewLUTView = atmosphereLUTSystem.getSkyViewLUTView();
     VkImageView rayleighIrradianceLUTView = atmosphereLUTSystem.getRayleighIrradianceLUTView();
     VkImageView mieIrradianceLUTView = atmosphereLUTSystem.getMieIrradianceLUTView();
+    VkImageView cloudMapLUTView = atmosphereLUTSystem.getCloudMapLUTView();
     VkSampler lutSampler = atmosphereLUTSystem.getLUTSampler();
 
     // Update each descriptor set
@@ -1729,7 +1741,13 @@ bool Renderer::createSkyDescriptorSets() {
         mieIrradianceInfo.imageView = mieIrradianceLUTView;
         mieIrradianceInfo.sampler = lutSampler;
 
-        std::array<VkWriteDescriptorSet, 6> descriptorWrites{};
+        // Cloud Map LUT binding (Paraboloid projection)
+        VkDescriptorImageInfo cloudMapInfo{};
+        cloudMapInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        cloudMapInfo.imageView = cloudMapLUTView;
+        cloudMapInfo.sampler = lutSampler;
+
+        std::array<VkWriteDescriptorSet, 7> descriptorWrites{};
 
         descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         descriptorWrites[0].dstSet = skyDescriptorSets[i];
@@ -1779,11 +1797,19 @@ bool Renderer::createSkyDescriptorSets() {
         descriptorWrites[5].descriptorCount = 1;
         descriptorWrites[5].pImageInfo = &mieIrradianceInfo;
 
+        descriptorWrites[6].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[6].dstSet = skyDescriptorSets[i];
+        descriptorWrites[6].dstBinding = 6;
+        descriptorWrites[6].dstArrayElement = 0;
+        descriptorWrites[6].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[6].descriptorCount = 1;
+        descriptorWrites[6].pImageInfo = &cloudMapInfo;
+
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                descriptorWrites.data(), 0, nullptr);
     }
 
-    SDL_Log("Sky descriptor sets created with atmosphere LUTs (including irradiance LUTs)");
+    SDL_Log("Sky descriptor sets created with atmosphere LUTs (including cloud map)");
     return true;
 }
 
@@ -2116,19 +2142,21 @@ void Renderer::updateLightBuffer(uint32_t currentImage, const Camera& camera) {
 }
 
 bool Renderer::createDescriptorPool() {
-    std::array<VkDescriptorPoolSize, 3> poolSizes{};
+    std::array<VkDescriptorPoolSize, 4> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 14);  // +2 for post-process, +2 for grass, +4 for weather, +2 for sky
+    poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 16);  // +2 for post-process, +2 for grass, +4 for weather, +2 for sky, +2 for cloud map
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 30);  // diffuse + shadow + normal + emissive + HDR + grass + weather + dynamic shadows + sky LUTs
+    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 35);  // diffuse + shadow + normal + emissive + HDR + grass + weather + dynamic shadows + sky LUTs + cloud map
     poolSizes[2].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     poolSizes[2].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 28);  // +6 grass, +6 light, +10 weather (5 compute + 2 graphics × 2 sets)
+    poolSizes[3].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    poolSizes[3].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 10);  // atmosphere LUTs compute shaders + cloud map
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
     poolInfo.pPoolSizes = poolSizes.data();
-    poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 20);  // +6 grass, +4 weather, +2 sky
+    poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 25);  // +6 grass, +4 weather, +2 sky, +5 atmosphere LUTs
 
     if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS) {
         SDL_Log("Failed to create descriptor pool");
@@ -2457,6 +2485,17 @@ void Renderer::render(const Camera& camera) {
         // Update sky-view LUT with current sun direction (Phase 4.1.5)
         // This precomputes atmospheric scattering for all view directions
         atmosphereLUTSystem.updateSkyViewLUT(cmd, sunDir, camera.getPosition(), 0.0f);
+
+        // Update cloud map LUT with wind animation (Paraboloid projection)
+        glm::vec2 windDir = windSystem.getWindDirection();
+        float windSpeed = windSystem.getWindSpeed();
+        float windTime = windSystem.getTime();
+        // Slow down cloud animation for realistic drift (0.02x speed)
+        float cloudTimeScale = 0.02f;
+        glm::vec3 windOffset = glm::vec3(windDir.x * windSpeed * windTime * cloudTimeScale,
+                                          windTime * 0.002f,  // Slow vertical evolution
+                                          windDir.y * windSpeed * windTime * cloudTimeScale);
+        atmosphereLUTSystem.updateCloudMapLUT(cmd, windOffset, windTime * cloudTimeScale);
     }
 
     // HDR scene render pass
@@ -2584,6 +2623,7 @@ UniformBufferObject Renderer::buildUniformBufferData(const Camera& camera, const
     ubo.shadowMapSize = static_cast<float>(SHADOW_MAP_SIZE);
     ubo.debugCascades = showCascadeDebug ? 1.0f : 0.0f;
     ubo.julianDay = static_cast<float>(lighting.julianDay);
+    ubo.cloudStyle = useParaboloidClouds ? 1.0f : 0.0f;
 
     return ubo;
 }
