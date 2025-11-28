@@ -25,7 +25,8 @@ struct PostProcessUniforms {
     float froxelDepthDist;    // Depth distribution factor
     float nearPlane;          // Camera near plane for depth linearization
     float farPlane;           // Camera far plane for depth linearization
-    float padding1;
+    // Purkinje effect (Phase 5.6)
+    float sceneIlluminance;   // Scene illuminance in lux for Purkinje effect
     float padding2;
     float padding3;
 };
