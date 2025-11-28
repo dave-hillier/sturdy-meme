@@ -208,13 +208,13 @@ private:
 
     // Auto-exposure parameters
     static constexpr float MIN_EXPOSURE = -4.0f;  // EV
-    static constexpr float MAX_EXPOSURE = 4.0f;   // EV
+    static constexpr float MAX_EXPOSURE = 2.0f;   // EV (limit brightening for night scenes)
     static constexpr float ADAPTATION_SPEED_UP = 2.0f;    // Faster brightening
     static constexpr float ADAPTATION_SPEED_DOWN = 1.0f;  // Slower darkening
-    static constexpr float TARGET_LUMINANCE = 0.18f;      // Middle gray
+    static constexpr float TARGET_LUMINANCE = 0.12f;      // Slightly darker than middle gray
     static constexpr float MIN_LOG_LUMINANCE = -8.0f;     // Log2 of minimum luminance
     static constexpr float MAX_LOG_LUMINANCE = 4.0f;      // Log2 of maximum luminance
-    static constexpr float LOW_PERCENTILE = 0.4f;         // Ignore darkest 40%
+    static constexpr float LOW_PERCENTILE = 0.05f;        // Include most dark pixels (only ignore 5%)
     static constexpr float HIGH_PERCENTILE = 0.95f;       // Ignore brightest 5%
     static constexpr uint32_t HISTOGRAM_BINS = 256;
 
