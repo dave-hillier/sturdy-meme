@@ -334,15 +334,24 @@ void main() {
     vec2 ndc = uvw.xy * 2.0 - 1.0;
 
     // Reconstruct world position by shooting a ray from camera through this pixel
-    // Get world position at far plane (NDC z=1) and near plane (NDC z=0)
-    vec4 farWorld4 = ubo.invViewProj * vec4(ndc, 1.0, 1.0);
-    vec4 nearWorld4 = ubo.invViewProj * vec4(ndc, 0.0, 1.0);
-    vec3 farWorld = farWorld4.xyz / farWorld4.w;
-    vec3 nearWorld = nearWorld4.xyz / nearWorld4.w;
+    vec3 cameraPos = ubo.cameraPosition.xyz;
 
-    // Interpolate along the ray based on normalized linear depth
-    float t = linearDepth / ubo.gridParams.x;  // Normalized depth [0, 1]
-    vec3 worldPos = mix(nearWorld, farWorld, t);
+    // Get world position at far plane for this pixel's ray direction
+    vec4 farWorld4 = ubo.invViewProj * vec4(ndc, 1.0, 1.0);
+    vec3 farWorld = farWorld4.xyz / farWorld4.w;
+    vec3 rayDir = normalize(farWorld - cameraPos);
+
+    // Get view forward direction (ray through screen center)
+    vec4 centerFar4 = ubo.invViewProj * vec4(0.0, 0.0, 1.0, 1.0);
+    vec3 centerFar = centerFar4.xyz / centerFar4.w;
+    vec3 viewForward = normalize(centerFar - cameraPos);
+
+    // linearDepth is view-space Z (distance along view forward direction)
+    // The ray goes at angle θ to view forward, so ray distance = linearDepth / cos(θ)
+    float cosAngle = dot(rayDir, viewForward);
+    float rayDist = linearDepth / max(cosAngle, 0.0001);
+
+    vec3 worldPos = cameraPos + rayDir * rayDist;
 
     // Sample fog density
     float density = getHazeDensity(worldPos);
