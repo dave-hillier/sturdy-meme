@@ -21,7 +21,8 @@ layout(binding = 1) uniform PostProcessUniforms {
     float froxelDepthDist; // Depth distribution factor
     float nearPlane;       // Camera near plane
     float farPlane;        // Camera far plane
-    float padding1;
+    // Purkinje effect (Phase 5.6)
+    float sceneIlluminance; // Scene illuminance in lux
     float padding2;
     float padding3;
 } ubo;
@@ -171,6 +172,37 @@ float getLuminance(vec3 color) {
     return dot(color, vec3(0.2126, 0.7152, 0.0722));
 }
 
+// ============================================================================
+// Purkinje Effect - Night Vision Enhancement (Phase 5.6)
+// Simulates human mesopic/scotopic vision for convincing night scenes
+// At night, rods take over from cones causing:
+// - Loss of color perception (desaturation)
+// - Blue shift (rods more sensitive to blue)
+// - Brightening of dark areas (rod sensitivity)
+// ============================================================================
+vec3 SimplePurkinje(vec3 color, float illuminance) {
+    // Skip effect in bright conditions (above 10 lux)
+    if (illuminance > 10.0) {
+        return color;
+    }
+
+    // Desaturate in low light (rods are monochromatic)
+    float desat = smoothstep(10.0, 0.01, illuminance) * 0.7;
+    float lum = getLuminance(color);
+    vec3 desaturated = mix(color, vec3(lum), desat);
+
+    // Blue shift in low light (rods are more sensitive to shorter wavelengths)
+    float blueShift = smoothstep(5.0, 0.01, illuminance) * 0.3;
+    desaturated.b = mix(desaturated.b, lum * 1.2, blueShift);
+    desaturated.r = mix(desaturated.r, lum * 0.9, blueShift);
+
+    // Brighten dark areas (rod sensitivity boost)
+    float boost = smoothstep(1.0, 0.001, illuminance) * 0.5;
+    desaturated += vec3(lum * boost);
+
+    return desaturated;
+}
+
 // NOTE: Auto-exposure is now computed via histogram compute shaders
 // (histogram_build.comp and histogram_reduce.comp)
 // The computed exposure is passed through ubo.exposure from the CPU
@@ -276,5 +308,9 @@ void main() {
     // Apply ACES tone mapping
     vec3 mapped = ACESFilmic(exposed);
 
-    outColor = vec4(mapped, 1.0);
+    // Apply Purkinje effect for night vision (Phase 5.6)
+    // Applied after tone mapping but before final output
+    vec3 purkinje = SimplePurkinje(mapped, ubo.sceneIlluminance);
+
+    outColor = vec4(purkinje, 1.0);
 }

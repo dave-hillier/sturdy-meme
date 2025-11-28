@@ -660,6 +660,11 @@ void PostProcessSystem::recordPostProcess(VkCommandBuffer cmd, uint32_t frameInd
     ubo->froxelDepthDist = froxelDepthDist;
     ubo->nearPlane = nearPlane;
     ubo->farPlane = farPlane;
+    // Purkinje effect (Phase 5.6)
+    // Convert adapted luminance to approximate scene illuminance in lux
+    // Mapping: adaptedLuminance * 200 gives reasonable lux-like values
+    // where target luminance 0.05 → 10 lux (Purkinje activation threshold)
+    ubo->sceneIlluminance = adaptedLuminance * 200.0f;
 
     // Store computed exposure for next frame
     lastAutoExposure = autoExposureEnabled ? computedExposure : manualExposure;
