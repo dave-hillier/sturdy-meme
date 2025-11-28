@@ -244,12 +244,14 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     if (!froxelSystem.init(froxelInfo)) return false;
 
     // Connect froxel volume to post-process system for compositing
-    postProcessSystem.setFroxelVolume(froxelSystem.getScatteringVolumeView(), froxelSystem.getVolumeSampler());
+    // Use integrated volume (L/alpha format) not raw scattering volume
+    postProcessSystem.setFroxelVolume(froxelSystem.getIntegratedVolumeView(), froxelSystem.getVolumeSampler());
     postProcessSystem.setFroxelParams(froxelSystem.getVolumetricFarPlane(), FroxelSystem::DEPTH_DISTRIBUTION);
     postProcessSystem.setFroxelEnabled(true);
 
     // Connect froxel volume to weather system for fog particle lighting (Phase 4.3.9)
-    weatherSystem.setFroxelVolume(froxelSystem.getScatteringVolumeView(), froxelSystem.getVolumeSampler(),
+    // Use integrated volume (L/alpha format) for proper fog compositing
+    weatherSystem.setFroxelVolume(froxelSystem.getIntegratedVolumeView(), froxelSystem.getVolumeSampler(),
                                    froxelSystem.getVolumetricFarPlane(), FroxelSystem::DEPTH_DISTRIBUTION);
 
     // Initialize atmosphere LUT system (Phase 4.1)
