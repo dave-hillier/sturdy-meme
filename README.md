@@ -56,7 +56,29 @@ open build/release/vulkan-game.app
 
 ## Controls
 
-### Keyboard
+The game supports two camera modes: **Free Camera** and **Third Person**. Press **Tab** (keyboard) or **Left Stick Click** (gamepad) to toggle between them.
+
+### Keyboard - Global Controls
+
+| Key | Action |
+|-----|--------|
+| Escape | Quit |
+| Tab | Toggle camera mode (Free Cam ↔ Third Person) |
+| 1 | Set time to sunrise |
+| 2 | Set time to noon |
+| 3 | Set time to sunset |
+| 4 | Set time to midnight |
+| + | Speed up time (2x) |
+| - | Slow down time (0.5x) |
+| R | Reset to real-time |
+| 6 | Toggle cascade debug visualization |
+| Z | Decrease weather intensity |
+| X | Increase weather intensity |
+| C | Cycle weather (Clear → Rain → Snow) |
+| F | Spawn confetti at player location |
+| V | Toggle cloud style (Procedural ↔ Paraboloid LUT) |
+
+### Keyboard - Free Camera Mode
 
 | Key | Action |
 |-----|--------|
@@ -68,25 +90,30 @@ open build/release/vulkan-game.app
 | Arrow Down | Look down (pitch) |
 | Arrow Left | Look left (yaw) |
 | Arrow Right | Look right (yaw) |
-| Space / E | Move up |
-| C / Q | Move down |
-| 1 | Set time to sunrise |
-| 2 | Set time to noon |
-| 3 | Set time to sunset |
-| 4 | Set time to midnight |
-| + | Speed up time (2x) |
-| - | Slow down time (0.5x) |
-| R | Reset to real-time |
-| Escape | Quit |
+| Space | Move up (fly) |
+| Left Ctrl / Q | Move down (fly) |
 
-### Gamepad (SDL3)
+### Keyboard - Third Person Mode
+
+| Key | Action |
+|-----|--------|
+| W | Move player forward (relative to camera) |
+| S | Move player backward (relative to camera) |
+| A | Move player left (relative to camera) |
+| D | Move player right (relative to camera) |
+| Space | Jump |
+| Arrow Up | Orbit camera up |
+| Arrow Down | Orbit camera down |
+| Arrow Left | Orbit camera left |
+| Arrow Right | Orbit camera right |
+| Q | Zoom camera in |
+| E | Zoom camera out |
+
+### Gamepad (SDL3) - Global Controls
 
 | Input | Action |
 |-------|--------|
-| Left Stick | Movement |
-| Right Stick | Camera look |
-| Right Bumper (RB/R1) | Move up |
-| Left Bumper (LB/L1) | Move down |
+| Left Stick Click | Toggle camera mode (Free Cam ↔ Third Person) |
 | A / Cross | Set time to sunrise |
 | B / Circle | Set time to noon |
 | X / Square | Set time to sunset |
@@ -95,6 +122,25 @@ open build/release/vulkan-game.app
 | Left Trigger | Slow down time |
 | Start | Reset to real-time |
 | Back / Select | Quit |
+
+### Gamepad - Free Camera Mode
+
+| Input | Action |
+|-------|--------|
+| Left Stick | Movement (forward/backward, strafe) |
+| Right Stick | Camera look (pitch/yaw) |
+| Right Bumper (RB/R1) | Move up |
+| Left Bumper (LB/L1) | Move down |
+
+### Gamepad - Third Person Mode
+
+| Input | Action |
+|-------|--------|
+| Left Stick | Player movement (relative to camera) |
+| Right Stick | Orbit camera around player |
+| A / Cross | Jump |
+| Right Bumper (RB/R1) | Zoom camera out |
+| Left Bumper (LB/L1) | Zoom camera in |
 
 Gamepads are automatically detected when connected (hot-plug supported).
 
