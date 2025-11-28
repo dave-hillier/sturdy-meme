@@ -80,6 +80,7 @@ layout(binding = 2) uniform sampler2D multiScatterLUT;   // 32x32, RG16F
 | Depth-Dependent Phase | 4.2.4 | `shaders/sky.frag:194-219` | Ghost of Tsushima technique - g varies with optical depth |
 | Cloud Ray Marching | 4.2.5 | `shaders/sky.frag:552-662` | 32 steps with energy-conserving integration |
 | Light Transmittance Sampling | 4.2.6 | `shaders/sky.frag:222-241` | 6 samples toward sun with early-out |
+| Temporal Reprojection | 4.2.7 | `src/CloudTemporalSystem.cpp` | Double-buffered cloud render with history blending |
 
 ### Not Implemented
 
@@ -89,27 +90,33 @@ layout(binding = 2) uniform sampler2D multiScatterLUT;   // 32x32, RG16F
 | Density Anti-Aliasing | 4.2.2 | No derivative-based density reduction for low-res textures |
 | Perlin-Worley Noise | 4.2.3 | Uses FBM value noise instead of proper Perlin-Worley 3D textures |
 | Curl Noise | 4.2.3 | No wispy detail distortion texture |
-| Temporal Reprojection | 4.2.7 | No cloud history blending or time-sliced updates |
 
 ### Current Cloud Rendering Approach
 
-Clouds are ray-marched directly in `sky.frag`:
+Two rendering modes available, controlled by `Renderer::toggleCloudTemporal()`:
+
+**Temporal Mode (default, cloudTemporal=1.0):**
+- Pre-renders clouds to 512x512 paraboloid buffer in compute shader
+- Double-buffered ping-pong for temporal blending (90% history, 10% current)
+- Wind-based motion vector reprojection
+- Transmittance-based rejection for disoccluded regions
+- Reduces flickering significantly, amortizes cost over frames
+
+**Direct Mode (cloudTemporal=0.0):**
+- Ray marches clouds directly in `sky.frag` per pixel
+- 32 steps through cloud layer with FBM noise
+- Full cost every frame, no temporal stability
+- Useful for comparison/debugging
 
 ```glsl
-// shaders/sky.frag:552-662
-CloudResult marchClouds(vec3 origin, vec3 dir) {
-    // 32 steps through cloud layer
-    for (int i = 0; i < CLOUD_MARCH_STEPS; i++) {
-        float density = sampleCloudDensity(pos);  // FBM noise
-        // ... lighting calculations
-    }
+// shaders/sky.frag - conditional temporal sampling
+CloudResult clouds;
+if (ubo.cloudTemporal > 0.5) {
+    clouds = sampleTemporalClouds(normDir);  // From pre-rendered buffer
+} else {
+    clouds = marchClouds(origin, normDir);   // Full ray march
 }
 ```
-
-This is simpler than the documented paraboloid approach but:
-- Cannot amortize cost over multiple frames
-- No temporal stability/reprojection
-- Full cost every frame regardless of camera motion
 
 ---
 
