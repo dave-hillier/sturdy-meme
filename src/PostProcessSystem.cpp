@@ -749,6 +749,9 @@ bool PostProcessSystem::createHistogramResources() {
         data->exposureValue = 0.0f;
         data->previousExposure = 0.0f;
         data->adaptedExposure = 0.0f;
+
+        // Flush to ensure initial values are visible to GPU
+        vmaFlushAllocation(allocator, exposureAllocations[i], 0, sizeof(ExposureData));
     }
 
     // Create per-frame histogram params buffers
