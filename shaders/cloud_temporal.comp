@@ -325,9 +325,11 @@ CloudResult marchClouds(vec3 origin, vec3 dir) {
     float stepSize = (tEnd - tStart) / float(CLOUD_MARCH_STEPS);
 
     // Jitter for temporal anti-aliasing
+    // Reduce jitter near horizon to minimize scintillation
     float frameIndex = ubo.cloudParams.w;
     float jitter = hash(dir * 1000.0 + vec3(frameIndex * 0.1));
-    tStart += stepSize * jitter * 0.5;
+    float jitterScale = smoothstep(0.02, 0.2, dir.y);  // Less jitter at horizon
+    tStart += stepSize * jitter * 0.5 * jitterScale;
 
     vec3 sunDir = normalize(ubo.sunDirection.xyz);
     float sunIntensity = ubo.sunDirection.w;
@@ -486,6 +488,14 @@ void main() {
     // March clouds for this direction
     CloudResult clouds = marchClouds(origin, dir);
 
+    // Horizon fade - reduce cloud contribution near horizon to avoid scintillation
+    // The paraboloid projection has high UV gradients at low elevations
+    float horizonFade = smoothstep(0.02, 0.15, dir.y);
+
+    // Apply horizon fade to cloud result
+    clouds.scattering *= horizonFade;
+    clouds.transmittance = mix(1.0, clouds.transmittance, horizonFade);
+
     // Current frame result
     vec4 currentResult = vec4(clouds.scattering, clouds.transmittance);
 
@@ -505,6 +515,11 @@ void main() {
             float edgeFactor = min(uv.x, min(1.0 - uv.x, min(uv.y, 1.0 - uv.y)));
             edgeFactor = smoothstep(0.0, 0.1, edgeFactor);
             adaptiveBlend *= edgeFactor;
+
+            // Increase blend near horizon to stabilize flickering
+            // Higher blend = more history = more stable
+            float horizonStabilize = 1.0 - smoothstep(0.05, 0.25, dir.y);
+            adaptiveBlend = mix(adaptiveBlend, min(adaptiveBlend + 0.05, 0.95), horizonStabilize);
 
             currentResult = mix(currentResult, history, adaptiveBlend);
         }
