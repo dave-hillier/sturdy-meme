@@ -196,6 +196,10 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
 
     if (!windSystem.init(windInfo)) return false;
 
+    const EnvironmentSettings* environmentSettings = &windSystem.getEnvironmentSettings();
+    grassSystem.setEnvironmentSettings(environmentSettings);
+    leafSystem.setEnvironmentSettings(environmentSettings);
+
     // Get wind buffers for grass descriptor sets
     std::vector<VkBuffer> windBuffers(MAX_FRAMES_IN_FLIGHT);
     for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {

@@ -1149,7 +1149,9 @@ void GrassSystem::recordDisplacementUpdate(VkCommandBuffer cmd, uint32_t frameIn
     DisplacementUniforms dispUniforms;
     dispUniforms.regionCenter = glm::vec4(displacementRegionCenter.x, displacementRegionCenter.y,
                                           DISPLACEMENT_REGION_SIZE, texelSize);
-    dispUniforms.params = glm::vec4(displacementDecayRate, maxDisplacement, 1.0f / 60.0f,
+    const EnvironmentSettings fallbackSettings{};
+    const EnvironmentSettings& settings = environmentSettings ? *environmentSettings : fallbackSettings;
+    dispUniforms.params = glm::vec4(settings.grassDisplacementDecay, settings.grassMaxDisplacement, 1.0f / 60.0f,
                                     static_cast<float>(currentDisplacementSources.size()));
     memcpy(displacementUniformMappedPtrs[frameIndex], &dispUniforms, sizeof(DisplacementUniforms));
 

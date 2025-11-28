@@ -645,6 +645,8 @@ void LeafSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos,
                                  const glm::vec3& playerVel, float deltaTime, float totalTime,
                                  float terrainSize, float terrainHeightScale) {
     LeafUniforms uniforms{};
+    const EnvironmentSettings fallbackSettings{};
+    const EnvironmentSettings& settings = environmentSettings ? *environmentSettings : fallbackSettings;
 
     uniforms.cameraPosition = glm::vec4(cameraPos, 1.0f);
 
@@ -686,9 +688,9 @@ void LeafSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos,
     uniforms.maxDrawDistance = 60.0f;
 
     // Disruption parameters
-    uniforms.disruptionRadius = 2.0f;
-    uniforms.disruptionStrength = 5.0f;
-    uniforms.gustThreshold = 1.5f;
+    uniforms.disruptionRadius = settings.leafDisruptionRadius;
+    uniforms.disruptionStrength = settings.leafDisruptionStrength;
+    uniforms.gustThreshold = settings.leafGustLiftThreshold;
 
     // Target counts based on intensity
     uniforms.targetFallingCount = leafIntensity * 5000.0f;   // 0-5000 falling leaves

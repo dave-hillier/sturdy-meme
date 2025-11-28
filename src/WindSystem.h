@@ -1,5 +1,6 @@
 #pragma once
 
+#include "EnvironmentSettings.h"
 #include <glm/glm.hpp>
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
@@ -39,27 +40,30 @@ public:
     // Get descriptor buffer info for binding
     VkDescriptorBufferInfo getBufferInfo(uint32_t frameIndex) const;
 
+    // Shared environment settings
+    const EnvironmentSettings& getEnvironmentSettings() const { return environmentSettings; }
+
     // Wind direction control (normalized 2D direction)
     void setWindDirection(const glm::vec2& direction);
-    glm::vec2 getWindDirection() const { return windDirection; }
+    glm::vec2 getWindDirection() const { return environmentSettings.windDirection; }
 
     // Wind strength (0 = calm, 1 = normal, 2+ = storm)
     void setWindStrength(float strength);
-    float getWindStrength() const { return windStrength; }
+    float getWindStrength() const { return environmentSettings.windStrength; }
 
     // Wind speed (how fast the noise pattern scrolls in the wind direction)
     void setWindSpeed(float speed);
-    float getWindSpeed() const { return windSpeed; }
+    float getWindSpeed() const { return environmentSettings.windSpeed; }
 
     // Gust parameters
     void setGustFrequency(float frequency);
     void setGustAmplitude(float amplitude);
-    float getGustFrequency() const { return gustFrequency; }
-    float getGustAmplitude() const { return gustAmplitude; }
+    float getGustFrequency() const { return environmentSettings.gustFrequency; }
+    float getGustAmplitude() const { return environmentSettings.gustAmplitude; }
 
     // Noise scale (controls the size of wind waves in world units)
     void setNoiseScale(float scale);
-    float getNoiseScale() const { return noiseScale; }
+    float getNoiseScale() const { return environmentSettings.noiseScale; }
 
     // Sample wind strength at a world position (for CPU-side gameplay)
     // Returns wind strength multiplier at that position
@@ -76,12 +80,7 @@ private:
     float grad(int hash, float x, float y) const;
 
     // Wind parameters
-    glm::vec2 windDirection = glm::vec2(1.0f, 0.0f);  // Default: blowing in +X direction
-    float windStrength = 1.0f;                          // Base wind strength multiplier
-    float windSpeed = 5.0f;                             // Speed of noise scroll (world units/sec)
-    float gustFrequency = 0.5f;                         // Frequency of gusts
-    float gustAmplitude = 0.3f;                         // Additional amplitude from gusts
-    float noiseScale = 0.1f;                            // Noise sampling scale (1/wavelength)
+    EnvironmentSettings environmentSettings{};
 
     // Time tracking
     float totalTime = 0.0f;

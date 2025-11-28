@@ -1,5 +1,6 @@
 #pragma once
 
+#include "EnvironmentSettings.h"
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
@@ -82,6 +83,8 @@ public:
     VkImageView getDisplacementImageView() const { return displacementImageView; }
     VkSampler getDisplacementSampler() const { return displacementSampler; }
 
+    void setEnvironmentSettings(const EnvironmentSettings* settings) { environmentSettings = settings; }
+
 private:
     bool createShadowPipeline();
     bool createBuffers();
@@ -149,8 +152,6 @@ private:
 
     // Displacement source data for current frame
     std::vector<DisplacementSource> currentDisplacementSources;
-    float displacementDecayRate = 0.97f;   // Grass springs back over time (slower = closer to 1.0)
-    float maxDisplacement = 1.0f;          // Maximum displacement magnitude
 
     // Double-buffered storage buffers: A/B sets that alternate each frame
     // Set A and Set B alternate: compute writes to one while graphics reads from other
@@ -183,4 +184,6 @@ private:
     VkSampler terrainHeightMapSampler = VK_NULL_HANDLE;
 
     static constexpr uint32_t MAX_INSTANCES = 100000;  // ~100k rendered after culling
+
+    const EnvironmentSettings* environmentSettings = nullptr;
 };

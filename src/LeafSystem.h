@@ -1,5 +1,6 @@
 #pragma once
 
+#include "EnvironmentSettings.h"
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
@@ -119,6 +120,8 @@ public:
         confettiConeAngle = coneAngle;
     }
 
+    void setEnvironmentSettings(const EnvironmentSettings* settings) { environmentSettings = settings; }
+
 private:
     bool createBuffers();
     bool createComputeDescriptorSetLayout();
@@ -189,6 +192,8 @@ private:
     // Displacement region center (updated from camera position)
     glm::vec2 displacementRegionCenter = glm::vec2(0.0f);
     static constexpr float DISPLACEMENT_REGION_SIZE = 50.0f;
+
+    const EnvironmentSettings* environmentSettings = nullptr;
 
     // Particle counts
     static constexpr uint32_t MAX_PARTICLES = 100000;

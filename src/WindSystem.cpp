@@ -87,17 +87,17 @@ void WindSystem::updateUniforms(uint32_t frameIndex) {
 
     // Pack direction (xy), strength (z), and speed (w)
     uniforms.windDirectionAndStrength = glm::vec4(
-        windDirection.x,
-        windDirection.y,
-        windStrength,
-        windSpeed
+        environmentSettings.windDirection.x,
+        environmentSettings.windDirection.y,
+        environmentSettings.windStrength,
+        environmentSettings.windSpeed
     );
 
     // Pack gust parameters, noise scale, and time
     uniforms.windParams = glm::vec4(
-        gustFrequency,
-        gustAmplitude,
-        noiseScale,
+        environmentSettings.gustFrequency,
+        environmentSettings.gustAmplitude,
+        environmentSettings.noiseScale,
         totalTime
     );
 
@@ -115,28 +115,28 @@ VkDescriptorBufferInfo WindSystem::getBufferInfo(uint32_t frameIndex) const {
 void WindSystem::setWindDirection(const glm::vec2& direction) {
     float len = glm::length(direction);
     if (len > 0.0001f) {
-        windDirection = direction / len;
+        environmentSettings.windDirection = direction / len;
     }
 }
 
 void WindSystem::setWindStrength(float strength) {
-    windStrength = glm::max(0.0f, strength);
+    environmentSettings.windStrength = glm::max(0.0f, strength);
 }
 
 void WindSystem::setWindSpeed(float speed) {
-    windSpeed = glm::max(0.0f, speed);
+    environmentSettings.windSpeed = glm::max(0.0f, speed);
 }
 
 void WindSystem::setGustFrequency(float frequency) {
-    gustFrequency = glm::max(0.0f, frequency);
+    environmentSettings.gustFrequency = glm::max(0.0f, frequency);
 }
 
 void WindSystem::setGustAmplitude(float amplitude) {
-    gustAmplitude = glm::max(0.0f, amplitude);
+    environmentSettings.gustAmplitude = glm::max(0.0f, amplitude);
 }
 
 void WindSystem::setNoiseScale(float scale) {
-    noiseScale = glm::max(0.001f, scale);
+    environmentSettings.noiseScale = glm::max(0.001f, scale);
 }
 
 float WindSystem::fade(float t) const {
@@ -192,7 +192,7 @@ float WindSystem::perlinNoise(float x, float y) const {
 
 float WindSystem::sampleWindAtPosition(const glm::vec2& worldPos) const {
     // Scroll position in wind direction
-    glm::vec2 scrolledPos = worldPos - windDirection * totalTime * windSpeed * 0.4f;
+    glm::vec2 scrolledPos = worldPos - environmentSettings.windDirection * totalTime * environmentSettings.windSpeed * 0.4f;
 
     // Three octaves: ~10m, ~5m, ~2.5m wavelengths
     float baseFreq = 0.1f;
@@ -204,7 +204,7 @@ float WindSystem::sampleWindAtPosition(const glm::vec2& worldPos) const {
     float noise = n1 * 0.7f + n2 * 0.2f + n3 * 0.1f;
 
     // Add gust variation (time-based sine wave)
-    float gust = (std::sin(totalTime * gustFrequency * 6.28318f) * 0.5f + 0.5f) * gustAmplitude;
+    float gust = (std::sin(totalTime * environmentSettings.gustFrequency * 6.28318f) * 0.5f + 0.5f) * environmentSettings.gustAmplitude;
 
-    return (noise + gust) * windStrength;
+    return (noise + gust) * environmentSettings.windStrength;
 }
