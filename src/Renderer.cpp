@@ -1,6 +1,7 @@
 #define VMA_IMPLEMENTATION
 #include "Renderer.h"
 #include "ShaderLoader.h"
+#include "BindingBuilder.h"
 #include <SDL3/SDL_vulkan.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <stdexcept>
@@ -1535,61 +1536,53 @@ bool Renderer::createSyncObjects() {
 }
 
 bool Renderer::createDescriptorSetLayout() {
-    VkDescriptorSetLayoutBinding uboLayoutBinding{};
-    uboLayoutBinding.binding = 0;
-    uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    uboLayoutBinding.descriptorCount = 1;
-    uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-    uboLayoutBinding.pImmutableSamplers = nullptr;
+    auto uboLayoutBinding = BindingBuilder()
+        .setBinding(0)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+        .setStageFlags(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
+        .build();
 
-    VkDescriptorSetLayoutBinding samplerLayoutBinding{};
-    samplerLayoutBinding.binding = 1;
-    samplerLayoutBinding.descriptorCount = 1;
-    samplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    samplerLayoutBinding.pImmutableSamplers = nullptr;
-    samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    auto samplerLayoutBinding = BindingBuilder()
+        .setBinding(1)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
+        .build();
 
-    VkDescriptorSetLayoutBinding shadowSamplerBinding{};
-    shadowSamplerBinding.binding = 2;
-    shadowSamplerBinding.descriptorCount = 1;
-    shadowSamplerBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    shadowSamplerBinding.pImmutableSamplers = nullptr;
-    shadowSamplerBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    auto shadowSamplerBinding = BindingBuilder()
+        .setBinding(2)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
+        .build();
 
-    VkDescriptorSetLayoutBinding normalMapBinding{};
-    normalMapBinding.binding = 3;
-    normalMapBinding.descriptorCount = 1;
-    normalMapBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    normalMapBinding.pImmutableSamplers = nullptr;
-    normalMapBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    auto normalMapBinding = BindingBuilder()
+        .setBinding(3)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
+        .build();
 
-    VkDescriptorSetLayoutBinding lightBufferBinding{};
-    lightBufferBinding.binding = 4;
-    lightBufferBinding.descriptorCount = 1;
-    lightBufferBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    lightBufferBinding.pImmutableSamplers = nullptr;
-    lightBufferBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    auto lightBufferBinding = BindingBuilder()
+        .setBinding(4)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
+        .build();
 
-    VkDescriptorSetLayoutBinding emissiveMapBinding{};
-    emissiveMapBinding.binding = 5;
-    emissiveMapBinding.descriptorCount = 1;
-    emissiveMapBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    emissiveMapBinding.pImmutableSamplers = nullptr;
-    emissiveMapBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    auto emissiveMapBinding = BindingBuilder()
+        .setBinding(5)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
+        .build();
 
-    VkDescriptorSetLayoutBinding pointShadowBinding{};
-    pointShadowBinding.binding = 6;
-    pointShadowBinding.descriptorCount = 1;
-    pointShadowBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    pointShadowBinding.pImmutableSamplers = nullptr;
-    pointShadowBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    auto pointShadowBinding = BindingBuilder()
+        .setBinding(6)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
+        .build();
 
-    VkDescriptorSetLayoutBinding spotShadowBinding{};
-    spotShadowBinding.binding = 7;
-    spotShadowBinding.descriptorCount = 1;
-    spotShadowBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    spotShadowBinding.pImmutableSamplers = nullptr;
-    spotShadowBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    auto spotShadowBinding = BindingBuilder()
+        .setBinding(7)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
+        .build();
 
     std::array<VkDescriptorSetLayoutBinding, 8> bindings = {uboLayoutBinding, samplerLayoutBinding, shadowSamplerBinding, normalMapBinding, lightBufferBinding, emissiveMapBinding, pointShadowBinding, spotShadowBinding};
 
@@ -1616,54 +1609,47 @@ bool Renderer::createSkyDescriptorSetLayout() {
     // 5: Mie Irradiance LUT sampler (Phase 4.1.9)
     // 6: Cloud Map LUT sampler (Paraboloid projection, updated per-frame)
 
-    VkDescriptorSetLayoutBinding uboBinding{};
-    uboBinding.binding = 0;
-    uboBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    uboBinding.descriptorCount = 1;
-    uboBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-    uboBinding.pImmutableSamplers = nullptr;
+    auto uboBinding = BindingBuilder()
+        .setBinding(0)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+        .setStageFlags(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
+        .build();
 
-    VkDescriptorSetLayoutBinding transmittanceLUTBinding{};
-    transmittanceLUTBinding.binding = 1;
-    transmittanceLUTBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    transmittanceLUTBinding.descriptorCount = 1;
-    transmittanceLUTBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    transmittanceLUTBinding.pImmutableSamplers = nullptr;
+    auto transmittanceLUTBinding = BindingBuilder()
+        .setBinding(1)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
+        .build();
 
-    VkDescriptorSetLayoutBinding multiScatterLUTBinding{};
-    multiScatterLUTBinding.binding = 2;
-    multiScatterLUTBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    multiScatterLUTBinding.descriptorCount = 1;
-    multiScatterLUTBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    multiScatterLUTBinding.pImmutableSamplers = nullptr;
+    auto multiScatterLUTBinding = BindingBuilder()
+        .setBinding(2)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
+        .build();
 
-    VkDescriptorSetLayoutBinding skyViewLUTBinding{};
-    skyViewLUTBinding.binding = 3;
-    skyViewLUTBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    skyViewLUTBinding.descriptorCount = 1;
-    skyViewLUTBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    skyViewLUTBinding.pImmutableSamplers = nullptr;
+    auto skyViewLUTBinding = BindingBuilder()
+        .setBinding(3)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
+        .build();
 
-    VkDescriptorSetLayoutBinding rayleighIrradianceLUTBinding{};
-    rayleighIrradianceLUTBinding.binding = 4;
-    rayleighIrradianceLUTBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    rayleighIrradianceLUTBinding.descriptorCount = 1;
-    rayleighIrradianceLUTBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    rayleighIrradianceLUTBinding.pImmutableSamplers = nullptr;
+    auto rayleighIrradianceLUTBinding = BindingBuilder()
+        .setBinding(4)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
+        .build();
 
-    VkDescriptorSetLayoutBinding mieIrradianceLUTBinding{};
-    mieIrradianceLUTBinding.binding = 5;
-    mieIrradianceLUTBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    mieIrradianceLUTBinding.descriptorCount = 1;
-    mieIrradianceLUTBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    mieIrradianceLUTBinding.pImmutableSamplers = nullptr;
+    auto mieIrradianceLUTBinding = BindingBuilder()
+        .setBinding(5)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
+        .build();
 
-    VkDescriptorSetLayoutBinding cloudMapLUTBinding{};
-    cloudMapLUTBinding.binding = 6;
-    cloudMapLUTBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    cloudMapLUTBinding.descriptorCount = 1;
-    cloudMapLUTBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    cloudMapLUTBinding.pImmutableSamplers = nullptr;
+    auto cloudMapLUTBinding = BindingBuilder()
+        .setBinding(6)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
+        .build();
 
     std::array<VkDescriptorSetLayoutBinding, 7> bindings = {
         uboBinding, transmittanceLUTBinding, multiScatterLUTBinding, skyViewLUTBinding,
