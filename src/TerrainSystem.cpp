@@ -25,11 +25,33 @@ bool TerrainSystem::init(const InitInfo& info, const TerrainConfig& cfg) {
     commandPool = info.commandPool;
     config = cfg;
 
-    // Create all resources
-    if (!createCBTBuffer()) return false;
-    if (!initializeCBT()) return false;
-    if (!createHeightMap()) return false;
-    if (!createTerrainTexture()) return false;
+    // Initialize height map
+    TerrainHeightMap::InitInfo heightMapInfo{};
+    heightMapInfo.device = device;
+    heightMapInfo.allocator = allocator;
+    heightMapInfo.graphicsQueue = graphicsQueue;
+    heightMapInfo.commandPool = commandPool;
+    heightMapInfo.resolution = 512;
+    heightMapInfo.terrainSize = config.size;
+    heightMapInfo.heightScale = config.heightScale;
+    if (!heightMap.init(heightMapInfo)) return false;
+
+    // Initialize textures
+    TerrainTextures::InitInfo texturesInfo{};
+    texturesInfo.device = device;
+    texturesInfo.allocator = allocator;
+    texturesInfo.graphicsQueue = graphicsQueue;
+    texturesInfo.commandPool = commandPool;
+    if (!textures.init(texturesInfo)) return false;
+
+    // Initialize CBT
+    TerrainCBT::InitInfo cbtInfo{};
+    cbtInfo.allocator = allocator;
+    cbtInfo.maxDepth = config.maxDepth;
+    cbtInfo.initDepth = 6;  // Start with 64 triangles
+    if (!cbt.init(cbtInfo)) return false;
+
+    // Create remaining resources
     if (!createUniformBuffers()) return false;
     if (!createIndirectBuffers()) return false;
     if (!createComputeDescriptorSetLayout()) return false;
@@ -69,506 +91,19 @@ void TerrainSystem::destroy(VkDevice device, VmaAllocator allocator) {
     if (computeDescriptorSetLayout) vkDestroyDescriptorSetLayout(device, computeDescriptorSetLayout, nullptr);
     if (renderDescriptorSetLayout) vkDestroyDescriptorSetLayout(device, renderDescriptorSetLayout, nullptr);
 
-    // Destroy buffers
-    if (cbtBuffer) vmaDestroyBuffer(allocator, cbtBuffer, cbtAllocation);
+    // Destroy indirect buffers
     if (indirectDispatchBuffer) vmaDestroyBuffer(allocator, indirectDispatchBuffer, indirectDispatchAllocation);
     if (indirectDrawBuffer) vmaDestroyBuffer(allocator, indirectDrawBuffer, indirectDrawAllocation);
 
+    // Destroy uniform buffers
     for (size_t i = 0; i < uniformBuffers.size(); i++) {
         vmaDestroyBuffer(allocator, uniformBuffers[i], uniformAllocations[i]);
     }
 
-    // Destroy textures
-    if (heightMapSampler) vkDestroySampler(device, heightMapSampler, nullptr);
-    if (heightMapView) vkDestroyImageView(device, heightMapView, nullptr);
-    if (heightMapImage) vmaDestroyImage(allocator, heightMapImage, heightMapAllocation);
-
-    if (terrainAlbedoSampler) vkDestroySampler(device, terrainAlbedoSampler, nullptr);
-    if (terrainAlbedoView) vkDestroyImageView(device, terrainAlbedoView, nullptr);
-    if (terrainAlbedoImage) vmaDestroyImage(allocator, terrainAlbedoImage, terrainAlbedoAllocation);
-
-    if (grassFarLODSampler) vkDestroySampler(device, grassFarLODSampler, nullptr);
-    if (grassFarLODView) vkDestroyImageView(device, grassFarLODView, nullptr);
-    if (grassFarLODImage) vmaDestroyImage(allocator, grassFarLODImage, grassFarLODAllocation);
-}
-
-uint32_t TerrainSystem::calculateCBTBufferSize(int maxDepth) {
-    // For max depth D, the bitfield needs 2^(D-1) bits = 2^(D-4) bytes
-    // Plus the sum reduction tree overhead
-    // Total approximately 2^(D-1) bytes
-    uint64_t bitfieldBytes = 1ull << (maxDepth - 1);
-    // Add some extra for alignment and sum reduction
-    return static_cast<uint32_t>(std::min(bitfieldBytes * 2, (uint64_t)64 * 1024 * 1024)); // Cap at 64MB
-}
-
-bool TerrainSystem::createCBTBuffer() {
-    cbtBufferSize = calculateCBTBufferSize(config.maxDepth);
-
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = cbtBufferSize;
-    bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    VmaAllocationCreateInfo allocInfo{};
-    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-    // Allow host access for initialization
-    allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
-
-    if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &cbtBuffer, &cbtAllocation, nullptr) != VK_SUCCESS) {
-        std::cerr << "Failed to create CBT buffer" << std::endl;
-        return false;
-    }
-
-    return true;
-}
-
-// Helper functions for CBT bit-level operations (CPU side, matching GLSL and libcbt)
-namespace {
-    // Get bit field offset for a node at ceiling (maxDepth) level
-    uint32_t cbt_NodeBitID_BitField_CPU(uint32_t nodeId, int nodeDepth, int maxDepth) {
-        // Ceiling node ID = nodeId << (maxDepth - nodeDepth)
-        uint32_t ceilNodeId = nodeId << (maxDepth - nodeDepth);
-        // BitField starts at bit offset 2^(maxDepth+1)
-        return (2u << maxDepth) + ceilNodeId;
-    }
-
-    // Set a single bit in the bitfield (leaf node marker)
-    void cbt_HeapWrite_BitField_CPU(std::vector<uint32_t>& heap, uint32_t nodeId, int nodeDepth, int maxDepth) {
-        uint32_t bitID = cbt_NodeBitID_BitField_CPU(nodeId, nodeDepth, maxDepth);
-        uint32_t heapIndex = bitID >> 5;
-        uint32_t localBit = bitID & 31u;
-        if (heapIndex < heap.size()) {
-            heap[heapIndex] |= (1u << localBit);
-        }
-    }
-
-    // Node bit ID for sum reduction tree
-    uint32_t cbt_NodeBitID_CPU(uint32_t id, int depth, int maxDepth) {
-        uint32_t tmp1 = 2u << depth;
-        uint32_t tmp2 = uint32_t(1 + maxDepth - depth);
-        return tmp1 + id * tmp2;
-    }
-
-    int cbt_NodeBitSize_CPU(int depth, int maxDepth) {
-        return maxDepth - depth + 1;
-    }
-
-    // Read a value from the heap at a specific node position
-    uint32_t cbt_HeapRead_CPU(const std::vector<uint32_t>& heap, uint32_t id, int depth, int maxDepth) {
-        uint32_t bitOffset = cbt_NodeBitID_CPU(id, depth, maxDepth);
-        int bitCount = cbt_NodeBitSize_CPU(depth, maxDepth);
-
-        uint32_t heapIndex = bitOffset >> 5;
-        uint32_t localBitOffset = bitOffset & 31u;
-
-        uint32_t bitCountLSB = std::min(32u - localBitOffset, (uint32_t)bitCount);
-        uint32_t bitCountMSB = (uint32_t)bitCount - bitCountLSB;
-
-        uint32_t maskLSB = (1u << bitCountLSB) - 1u;
-        uint32_t lsb = (heap[heapIndex] >> localBitOffset) & maskLSB;
-
-        uint32_t msb = 0;
-        if (bitCountMSB > 0 && heapIndex + 1 < heap.size()) {
-            uint32_t maskMSB = (1u << bitCountMSB) - 1u;
-            msb = heap[heapIndex + 1] & maskMSB;
-        }
-
-        return lsb | (msb << bitCountLSB);
-    }
-
-    // Write a value to the heap at a specific node position
-    void cbt_HeapWrite_CPU(std::vector<uint32_t>& heap, uint32_t id, int depth, int maxDepth, uint32_t value) {
-        uint32_t bitOffset = cbt_NodeBitID_CPU(id, depth, maxDepth);
-        int bitCount = cbt_NodeBitSize_CPU(depth, maxDepth);
-
-        uint32_t heapIndex = bitOffset >> 5;
-        uint32_t localBitOffset = bitOffset & 31u;
-
-        uint32_t bitCountLSB = std::min(32u - localBitOffset, (uint32_t)bitCount);
-        uint32_t bitCountMSB = (uint32_t)bitCount - bitCountLSB;
-
-        // Clear and set LSB part
-        uint32_t maskLSB = ~(((1u << bitCountLSB) - 1u) << localBitOffset);
-        heap[heapIndex] = (heap[heapIndex] & maskLSB) | ((value & ((1u << bitCountLSB) - 1u)) << localBitOffset);
-
-        // If value spans two words, write MSB part
-        if (bitCountMSB > 0 && heapIndex + 1 < heap.size()) {
-            uint32_t maskMSB = ~((1u << bitCountMSB) - 1u);
-            heap[heapIndex + 1] = (heap[heapIndex + 1] & maskMSB) | (value >> bitCountLSB);
-        }
-    }
-
-    // Compute sum reduction from leaf nodes up to root
-    void cbt_ComputeSumReduction_CPU(std::vector<uint32_t>& heap, int maxDepth, int leafDepth) {
-        // Start from leafDepth-1 and work up to depth 0
-        for (int depth = leafDepth - 1; depth >= 0; --depth) {
-            uint32_t minNodeID = 1u << depth;
-            uint32_t maxNodeID = 2u << depth;
-
-            for (uint32_t nodeID = minNodeID; nodeID < maxNodeID; ++nodeID) {
-                // Left child = nodeID * 2, Right child = nodeID * 2 + 1
-                uint32_t leftChild = nodeID << 1;
-                uint32_t rightChild = leftChild | 1u;
-
-                uint32_t leftValue = cbt_HeapRead_CPU(heap, leftChild, depth + 1, maxDepth);
-                uint32_t rightValue = cbt_HeapRead_CPU(heap, rightChild, depth + 1, maxDepth);
-
-                cbt_HeapWrite_CPU(heap, nodeID, depth, maxDepth, leftValue + rightValue);
-            }
-        }
-    }
-}
-
-bool TerrainSystem::initializeCBT() {
-    // Initialize CBT with triangles covering the terrain quad
-    // Following libcbt's cbt_ResetToDepth pattern
-
-    std::vector<uint32_t> initData(cbtBufferSize / sizeof(uint32_t), 0);
-    int maxDepth = config.maxDepth;
-    int initDepth = 6;  // Start with more triangles for initial coverage (2^6 = 64 triangles)
-
-    // heap[0] stores (1 << maxDepth) as a marker for the max depth
-    initData[0] = (1u << maxDepth);
-
-    // Step 1: Set bitfield bits for all leaf nodes at initDepth
-    // At depth 1, we have nodes with IDs 2 and 3
-    uint32_t minNodeID = 1u << initDepth;  // 2
-    uint32_t maxNodeID = 2u << initDepth;  // 4
-
-    for (uint32_t nodeID = minNodeID; nodeID < maxNodeID; ++nodeID) {
-        cbt_HeapWrite_BitField_CPU(initData, nodeID, initDepth, maxDepth);
-    }
-
-    // Step 2: Initialize leaf node counts to 1
-    for (uint32_t nodeID = minNodeID; nodeID < maxNodeID; ++nodeID) {
-        cbt_HeapWrite_CPU(initData, nodeID, initDepth, maxDepth, 1);
-    }
-
-    // Step 3: Compute sum reduction upward from initDepth to depth 0
-    cbt_ComputeSumReduction_CPU(initData, maxDepth, initDepth);
-
-    // Verify: root should have count = 2
-    uint32_t rootCount = cbt_HeapRead_CPU(initData, 1, 0, maxDepth);
-    std::cout << "CBT root count after init: " << rootCount << std::endl;
-
-    // Map the CBT buffer and write initialization data
-    void* data;
-    if (vmaMapMemory(allocator, cbtAllocation, &data) != VK_SUCCESS) {
-        std::cerr << "Failed to map CBT buffer for initialization" << std::endl;
-        return false;
-    }
-    memcpy(data, initData.data(), cbtBufferSize);
-    vmaUnmapMemory(allocator, cbtAllocation);
-
-    std::cout << "CBT initialized with " << (maxNodeID - minNodeID) << " triangles at depth " << initDepth << ", max depth " << maxDepth << std::endl;
-
-    return true;
-}
-
-bool TerrainSystem::createHeightMap() {
-    // Generate a procedural height map
-    cpuHeightMap.resize(heightMapResolution * heightMapResolution);
-
-    // Generate simple procedural terrain using multiple octaves of noise
-    for (uint32_t y = 0; y < heightMapResolution; y++) {
-        for (uint32_t x = 0; x < heightMapResolution; x++) {
-            float fx = static_cast<float>(x) / heightMapResolution;
-            float fy = static_cast<float>(y) / heightMapResolution;
-
-            // Distance from center (0.5, 0.5)
-            float dx = fx - 0.5f;
-            float dy = fy - 0.5f;
-            float dist = sqrt(dx * dx + dy * dy);
-
-            // Multiple octaves of sine-based noise for hills
-            float height = 0.0f;
-            height += 0.5f * sin(fx * 3.14159f * 2.0f) * sin(fy * 3.14159f * 2.0f);
-            height += 0.25f * sin(fx * 3.14159f * 4.0f + 0.5f) * sin(fy * 3.14159f * 4.0f + 0.3f);
-            height += 0.125f * sin(fx * 3.14159f * 8.0f + 1.0f) * sin(fy * 3.14159f * 8.0f + 0.7f);
-            height += 0.0625f * sin(fx * 3.14159f * 16.0f + 2.0f) * sin(fy * 3.14159f * 16.0f + 1.5f);
-
-            // Flatten center area where scene objects are (dist < 0.08 = ~40 world units from center)
-            float flattenFactor = glm::smoothstep(0.02f, 0.08f, dist);
-            height *= flattenFactor;
-
-            // Add steep cliff area for testing triplanar mapping
-            // Create a cliff ridge running diagonally at normalized position (0.65-0.75, 0.65-0.75)
-            // This creates a steep gradient that will showcase triplanar mapping
-            float cliffCenterX = 0.70f;
-            float cliffCenterY = 0.70f;
-            float distToCliffCenter = sqrt((fx - cliffCenterX) * (fx - cliffCenterX) +
-                                           (fy - cliffCenterY) * (fy - cliffCenterY));
-
-            // Create a sharp step function with a very narrow transition for steep cliff
-            // The cliff rises about 0.8 (80% of height scale) over a very short distance
-            float cliffRadius = 0.08f;  // Size of the cliff plateau
-            float cliffTransition = 0.015f;  // Very narrow transition = very steep
-            float cliffHeight = 0.8f;  // How high the cliff rises
-
-            // Smoothstep creates the steep cliff face
-            float cliffFactor = 1.0f - glm::smoothstep(cliffRadius - cliffTransition,
-                                                        cliffRadius + cliffTransition,
-                                                        distToCliffCenter);
-            height += cliffFactor * cliffHeight;
-
-            // Add a second smaller cliff area on the opposite side for variety
-            float cliff2CenterX = 0.25f;
-            float cliff2CenterY = 0.30f;
-            float distToCliff2 = sqrt((fx - cliff2CenterX) * (fx - cliff2CenterX) +
-                                      (fy - cliff2CenterY) * (fy - cliff2CenterY));
-            float cliff2Factor = 1.0f - glm::smoothstep(0.05f - 0.01f, 0.05f + 0.01f, distToCliff2);
-            height += cliff2Factor * 0.6f;
-
-            // Normalize to [0, 1] - clamp since cliffs can exceed base range
-            height = (height + 1.0f) * 0.5f;
-            height = std::clamp(height, 0.0f, 1.0f);
-            cpuHeightMap[y * heightMapResolution + x] = height;
-        }
-    }
-
-    // Create Vulkan image
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.format = VK_FORMAT_R32_SFLOAT;
-    imageInfo.extent = {heightMapResolution, heightMapResolution, 1};
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-
-    VmaAllocationCreateInfo allocInfo{};
-    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-
-    if (vmaCreateImage(allocator, &imageInfo, &allocInfo, &heightMapImage, &heightMapAllocation, nullptr) != VK_SUCCESS) {
-        return false;
-    }
-
-    // Create image view
-    VkImageViewCreateInfo viewInfo{};
-    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.image = heightMapImage;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format = VK_FORMAT_R32_SFLOAT;
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = 1;
-    viewInfo.subresourceRange.baseArrayLayer = 0;
-    viewInfo.subresourceRange.layerCount = 1;
-
-    if (vkCreateImageView(device, &viewInfo, nullptr, &heightMapView) != VK_SUCCESS) {
-        return false;
-    }
-
-    // Create sampler
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-
-    if (vkCreateSampler(device, &samplerInfo, nullptr, &heightMapSampler) != VK_SUCCESS) {
-        return false;
-    }
-
-    // Upload height map data to GPU
-    if (!uploadImageData(heightMapImage, cpuHeightMap.data(), heightMapResolution, heightMapResolution,
-                         VK_FORMAT_R32_SFLOAT, sizeof(float))) {
-        std::cerr << "Failed to upload height map to GPU" << std::endl;
-        return false;
-    }
-
-    std::cout << "Height map uploaded: " << heightMapResolution << "x" << heightMapResolution << std::endl;
-    return true;
-}
-
-bool TerrainSystem::createTerrainTexture() {
-    // Create a simple procedural grass texture
-    const uint32_t texSize = 256;
-    std::vector<uint8_t> texData(texSize * texSize * 4);
-
-    for (uint32_t y = 0; y < texSize; y++) {
-        for (uint32_t x = 0; x < texSize; x++) {
-            float fx = static_cast<float>(x) / texSize;
-            float fy = static_cast<float>(y) / texSize;
-
-            // Green grass base color with variation
-            float noise = 0.5f + 0.5f * sin(fx * 50.0f) * sin(fy * 50.0f);
-            noise += 0.25f * sin(fx * 100.0f + 1.0f) * sin(fy * 100.0f + 0.5f);
-
-            uint8_t r = static_cast<uint8_t>(std::clamp((80 + 40 * noise), 0.0f, 255.0f));
-            uint8_t g = static_cast<uint8_t>(std::clamp((120 + 60 * noise), 0.0f, 255.0f));
-            uint8_t b = static_cast<uint8_t>(std::clamp((60 + 30 * noise), 0.0f, 255.0f));
-
-            size_t idx = (y * texSize + x) * 4;
-            texData[idx + 0] = r;
-            texData[idx + 1] = g;
-            texData[idx + 2] = b;
-            texData[idx + 3] = 255;
-        }
-    }
-
-    // Create Vulkan image
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
-    imageInfo.extent = {texSize, texSize, 1};
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-
-    VmaAllocationCreateInfo allocInfo{};
-    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-
-    if (vmaCreateImage(allocator, &imageInfo, &allocInfo, &terrainAlbedoImage, &terrainAlbedoAllocation, nullptr) != VK_SUCCESS) {
-        return false;
-    }
-
-    // Create image view
-    VkImageViewCreateInfo viewInfo{};
-    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.image = terrainAlbedoImage;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = 1;
-    viewInfo.subresourceRange.baseArrayLayer = 0;
-    viewInfo.subresourceRange.layerCount = 1;
-
-    if (vkCreateImageView(device, &viewInfo, nullptr, &terrainAlbedoView) != VK_SUCCESS) {
-        return false;
-    }
-
-    // Create sampler
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.anisotropyEnable = VK_TRUE;
-    samplerInfo.maxAnisotropy = 16.0f;
-
-    if (vkCreateSampler(device, &samplerInfo, nullptr, &terrainAlbedoSampler) != VK_SUCCESS) {
-        return false;
-    }
-
-    // Upload terrain albedo texture to GPU
-    if (!uploadImageData(terrainAlbedoImage, texData.data(), texSize, texSize,
-                         VK_FORMAT_R8G8B8A8_SRGB, 4)) {
-        std::cerr << "Failed to upload terrain albedo texture to GPU" << std::endl;
-        return false;
-    }
-
-    std::cout << "Terrain albedo texture uploaded: " << texSize << "x" << texSize << std::endl;
-
-    // === Create Grass Far LOD Texture ===
-    // This texture represents how grass looks from a distance (blended into terrain)
-    const uint32_t grassTexSize = 256;
-    std::vector<uint8_t> grassTexData(grassTexSize * grassTexSize * 4);
-
-    for (uint32_t y = 0; y < grassTexSize; y++) {
-        for (uint32_t x = 0; x < grassTexSize; x++) {
-            float fx = static_cast<float>(x) / grassTexSize;
-            float fy = static_cast<float>(y) / grassTexSize;
-
-            // Grass-like color with subtle variation (matches grass blade colors)
-            // Base grass color (darker green)
-            float noise = 0.5f + 0.3f * sin(fx * 80.0f) * sin(fy * 80.0f);
-            noise += 0.15f * sin(fx * 160.0f + 0.5f) * sin(fy * 160.0f + 0.3f);
-
-            // Match grass blade colors from grass.vert (baseColor to tipColor blend)
-            // baseColor = vec3(0.08, 0.22, 0.04), tipColor = vec3(0.35, 0.65, 0.18)
-            // Average grass field appearance
-            uint8_t r = static_cast<uint8_t>(std::clamp((60 + 30 * noise), 0.0f, 255.0f));
-            uint8_t g = static_cast<uint8_t>(std::clamp((130 + 50 * noise), 0.0f, 255.0f));
-            uint8_t b = static_cast<uint8_t>(std::clamp((40 + 25 * noise), 0.0f, 255.0f));
-
-            size_t idx = (y * grassTexSize + x) * 4;
-            grassTexData[idx + 0] = r;
-            grassTexData[idx + 1] = g;
-            grassTexData[idx + 2] = b;
-            grassTexData[idx + 3] = 255;
-        }
-    }
-
-    // Create Vulkan image for grass far LOD
-    VkImageCreateInfo grassImageInfo{};
-    grassImageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    grassImageInfo.imageType = VK_IMAGE_TYPE_2D;
-    grassImageInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
-    grassImageInfo.extent = {grassTexSize, grassTexSize, 1};
-    grassImageInfo.mipLevels = 1;
-    grassImageInfo.arrayLayers = 1;
-    grassImageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    grassImageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    grassImageInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    grassImageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    grassImageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-
-    VmaAllocationCreateInfo grassAllocInfo{};
-    grassAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-
-    if (vmaCreateImage(allocator, &grassImageInfo, &grassAllocInfo, &grassFarLODImage, &grassFarLODAllocation, nullptr) != VK_SUCCESS) {
-        return false;
-    }
-
-    // Create image view for grass far LOD
-    VkImageViewCreateInfo grassViewInfo{};
-    grassViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    grassViewInfo.image = grassFarLODImage;
-    grassViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    grassViewInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
-    grassViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    grassViewInfo.subresourceRange.baseMipLevel = 0;
-    grassViewInfo.subresourceRange.levelCount = 1;
-    grassViewInfo.subresourceRange.baseArrayLayer = 0;
-    grassViewInfo.subresourceRange.layerCount = 1;
-
-    if (vkCreateImageView(device, &grassViewInfo, nullptr, &grassFarLODView) != VK_SUCCESS) {
-        return false;
-    }
-
-    // Create sampler for grass far LOD (same as terrain albedo)
-    VkSamplerCreateInfo grassSamplerInfo{};
-    grassSamplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    grassSamplerInfo.magFilter = VK_FILTER_LINEAR;
-    grassSamplerInfo.minFilter = VK_FILTER_LINEAR;
-    grassSamplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    grassSamplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    grassSamplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    grassSamplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    grassSamplerInfo.anisotropyEnable = VK_TRUE;
-    grassSamplerInfo.maxAnisotropy = 16.0f;
-
-    if (vkCreateSampler(device, &grassSamplerInfo, nullptr, &grassFarLODSampler) != VK_SUCCESS) {
-        return false;
-    }
-
-    // Upload grass far LOD texture to GPU
-    if (!uploadImageData(grassFarLODImage, grassTexData.data(), grassTexSize, grassTexSize,
-                         VK_FORMAT_R8G8B8A8_SRGB, 4)) {
-        std::cerr << "Failed to upload grass far LOD texture to GPU" << std::endl;
-        return false;
-    }
-
-    std::cout << "Grass far LOD texture uploaded: " << grassTexSize << "x" << grassTexSize << std::endl;
-    return true;
+    // Destroy composed subsystems
+    cbt.destroy(allocator);
+    textures.destroy(device, allocator);
+    heightMap.destroy(device, allocator);
 }
 
 bool TerrainSystem::createUniformBuffers() {
@@ -635,7 +170,7 @@ bool TerrainSystem::createIndirectBuffers() {
         }
 
         // Initialize with default values (2 triangles = 6 vertices)
-        uint32_t drawArgs[4] = {6, 1, 0, 0};  // vertexCount, instanceCount, firstVertex, firstInstance
+        uint32_t drawArgs[4] = {6, 1, 0, 0};
         void* mapped;
         vmaMapMemory(allocator, indirectDrawAllocation, &mapped);
         memcpy(mapped, drawArgs, sizeof(drawArgs));
@@ -745,7 +280,7 @@ bool TerrainSystem::createDescriptorSets() {
     for (uint32_t i = 0; i < framesInFlight; i++) {
         std::array<VkWriteDescriptorSet, 5> writes{};
 
-        VkDescriptorBufferInfo cbtInfo{cbtBuffer, 0, cbtBufferSize};
+        VkDescriptorBufferInfo cbtInfo{cbt.getBuffer(), 0, cbt.getBufferSize()};
         writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[0].dstSet = computeDescriptorSets[i];
         writes[0].dstBinding = 0;
@@ -769,7 +304,7 @@ bool TerrainSystem::createDescriptorSets() {
         writes[2].descriptorCount = 1;
         writes[2].pBufferInfo = &drawInfo;
 
-        VkDescriptorImageInfo heightMapInfo{heightMapSampler, heightMapView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkDescriptorImageInfo heightMapInfo{heightMap.getSampler(), heightMap.getView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         writes[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[3].dstSet = computeDescriptorSets[i];
         writes[3].dstBinding = 3;
@@ -942,7 +477,6 @@ bool TerrainSystem::createRenderPipeline() {
     shaderStages[1].module = fragModule;
     shaderStages[1].pName = "main";
 
-    // No vertex input - vertices generated procedurally
     VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
     vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
 
@@ -1056,9 +590,9 @@ bool TerrainSystem::createWireframePipeline() {
 
     VkPipelineRasterizationStateCreateInfo rasterizer{};
     rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rasterizer.polygonMode = VK_POLYGON_MODE_LINE;  // Wireframe
+    rasterizer.polygonMode = VK_POLYGON_MODE_LINE;
     rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_NONE;  // No culling for wireframe
+    rasterizer.cullMode = VK_CULL_MODE_NONE;
 
     VkPipelineMultisampleStateCreateInfo multisampling{};
     multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
@@ -1145,7 +679,7 @@ bool TerrainSystem::createShadowPipeline() {
     rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
     rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
     rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_FRONT_BIT;  // Front-face culling for shadow maps
+    rasterizer.cullMode = VK_CULL_MODE_FRONT_BIT;
     rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     rasterizer.depthBiasEnable = VK_TRUE;
 
@@ -1161,7 +695,7 @@ bool TerrainSystem::createShadowPipeline() {
 
     VkPipelineColorBlendStateCreateInfo colorBlending{};
     colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    colorBlending.attachmentCount = 0;  // No color attachments for shadow pass
+    colorBlending.attachmentCount = 0;
 
     std::array<VkDynamicState, 3> dynamicStates = {
         VK_DYNAMIC_STATE_VIEWPORT,
@@ -1216,7 +750,6 @@ bool TerrainSystem::createShadowPipeline() {
 }
 
 void TerrainSystem::extractFrustumPlanes(const glm::mat4& viewProj, glm::vec4 planes[6]) {
-    // Extract frustum planes from view-projection matrix
     // Left plane
     planes[0] = glm::vec4(
         viewProj[0][3] + viewProj[0][0],
@@ -1267,122 +800,15 @@ void TerrainSystem::extractFrustumPlanes(const glm::mat4& viewProj, glm::vec4 pl
     }
 }
 
-bool TerrainSystem::uploadImageData(VkImage image, const void* data, uint32_t width, uint32_t height,
-                                     VkFormat format, uint32_t bytesPerPixel) {
-    VkDeviceSize imageSize = width * height * bytesPerPixel;
-
-    // Create staging buffer
-    VkBuffer stagingBuffer;
-    VmaAllocation stagingAllocation;
-
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = imageSize;
-    bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    VmaAllocationCreateInfo allocInfo{};
-    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-    allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
-
-    if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &stagingBuffer, &stagingAllocation, nullptr) != VK_SUCCESS) {
-        std::cerr << "Failed to create staging buffer for image upload" << std::endl;
-        return false;
-    }
-
-    // Copy data to staging buffer
-    void* mappedData;
-    vmaMapMemory(allocator, stagingAllocation, &mappedData);
-    memcpy(mappedData, data, imageSize);
-    vmaUnmapMemory(allocator, stagingAllocation);
-
-    // Allocate command buffer
-    VkCommandBufferAllocateInfo cmdAllocInfo{};
-    cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    cmdAllocInfo.commandPool = commandPool;
-    cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    cmdAllocInfo.commandBufferCount = 1;
-
-    VkCommandBuffer cmd;
-    vkAllocateCommandBuffers(device, &cmdAllocInfo, &cmd);
-
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(cmd, &beginInfo);
-
-    // Transition image to transfer destination
-    VkImageMemoryBarrier barrier{};
-    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.image = image;
-    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    barrier.subresourceRange.baseMipLevel = 0;
-    barrier.subresourceRange.levelCount = 1;
-    barrier.subresourceRange.baseArrayLayer = 0;
-    barrier.subresourceRange.layerCount = 1;
-    barrier.srcAccessMask = 0;
-    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-
-    vkCmdPipelineBarrier(cmd,
-        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-        0, 0, nullptr, 0, nullptr, 1, &barrier);
-
-    // Copy buffer to image
-    VkBufferImageCopy region{};
-    region.bufferOffset = 0;
-    region.bufferRowLength = 0;
-    region.bufferImageHeight = 0;
-    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    region.imageSubresource.mipLevel = 0;
-    region.imageSubresource.baseArrayLayer = 0;
-    region.imageSubresource.layerCount = 1;
-    region.imageOffset = {0, 0, 0};
-    region.imageExtent = {width, height, 1};
-
-    vkCmdCopyBufferToImage(cmd, stagingBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-
-    // Transition image to shader read
-    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-    vkCmdPipelineBarrier(cmd,
-        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-        0, 0, nullptr, 0, nullptr, 1, &barrier);
-
-    vkEndCommandBuffer(cmd);
-
-    // Submit and wait
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &cmd;
-
-    vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-    vkQueueWaitIdle(graphicsQueue);
-
-    // Cleanup
-    vkFreeCommandBuffers(device, commandPool, 1, &cmd);
-    vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
-
-    return true;
-}
-
 void TerrainSystem::updateDescriptorSets(VkDevice device,
                                           const std::vector<VkBuffer>& sceneUniformBuffers,
                                           VkImageView shadowMapView,
                                           VkSampler shadowSampler) {
-    // Update render descriptor sets with scene resources
     for (uint32_t i = 0; i < framesInFlight; i++) {
         std::vector<VkWriteDescriptorSet> writes;
 
         // CBT buffer
-        VkDescriptorBufferInfo cbtInfo{cbtBuffer, 0, cbtBufferSize};
+        VkDescriptorBufferInfo cbtInfo{cbt.getBuffer(), 0, cbt.getBufferSize()};
         VkWriteDescriptorSet cbtWrite{};
         cbtWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         cbtWrite.dstSet = renderDescriptorSets[i];
@@ -1393,7 +819,7 @@ void TerrainSystem::updateDescriptorSets(VkDevice device,
         writes.push_back(cbtWrite);
 
         // Height map
-        VkDescriptorImageInfo heightMapInfo{heightMapSampler, heightMapView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkDescriptorImageInfo heightMapInfo{heightMap.getSampler(), heightMap.getView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkWriteDescriptorSet heightMapWrite{};
         heightMapWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         heightMapWrite.dstSet = renderDescriptorSets[i];
@@ -1428,7 +854,7 @@ void TerrainSystem::updateDescriptorSets(VkDevice device,
         }
 
         // Terrain albedo
-        VkDescriptorImageInfo albedoInfo{terrainAlbedoSampler, terrainAlbedoView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkDescriptorImageInfo albedoInfo{textures.getAlbedoSampler(), textures.getAlbedoView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkWriteDescriptorSet albedoWrite{};
         albedoWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         albedoWrite.dstSet = renderDescriptorSets[i];
@@ -1452,8 +878,8 @@ void TerrainSystem::updateDescriptorSets(VkDevice device,
         }
 
         // Grass far LOD texture
-        if (grassFarLODView != VK_NULL_HANDLE) {
-            VkDescriptorImageInfo grassFarLODInfo{grassFarLODSampler, grassFarLODView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        if (textures.getGrassFarLODView() != VK_NULL_HANDLE) {
+            VkDescriptorImageInfo grassFarLODInfo{textures.getGrassFarLODSampler(), textures.getGrassFarLODView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
             VkWriteDescriptorSet grassFarLODWrite{};
             grassFarLODWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             grassFarLODWrite.dstSet = renderDescriptorSets[i];
@@ -1469,7 +895,6 @@ void TerrainSystem::updateDescriptorSets(VkDevice device,
 }
 
 void TerrainSystem::setSnowMask(VkDevice device, VkImageView snowMaskView, VkSampler snowMaskSampler) {
-    // Update render descriptor sets with snow mask texture
     for (uint32_t i = 0; i < framesInFlight; i++) {
         VkDescriptorImageInfo snowMaskInfo{snowMaskSampler, snowMaskView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkWriteDescriptorSet snowMaskWrite{};
@@ -1487,7 +912,6 @@ void TerrainSystem::setSnowMask(VkDevice device, VkImageView snowMaskView, VkSam
 void TerrainSystem::setVolumetricSnowCascades(VkDevice device,
                                                VkImageView cascade0View, VkImageView cascade1View, VkImageView cascade2View,
                                                VkSampler cascadeSampler) {
-    // Update render descriptor sets with volumetric snow cascade textures
     for (uint32_t i = 0; i < framesInFlight; i++) {
         VkDescriptorImageInfo cascade0Info{cascadeSampler, cascade0View, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkDescriptorImageInfo cascade1Info{cascadeSampler, cascade1View, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
@@ -1567,7 +991,6 @@ void TerrainSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraP
 }
 
 void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) {
-    // Memory barrier before compute
     VkMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
     barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
@@ -1580,13 +1003,12 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) {
 
     TerrainDispatcherPushConstants dispatcherPC{};
     dispatcherPC.subdivisionWorkgroupSize = SUBDIVISION_WORKGROUP_SIZE;
-    dispatcherPC.meshletVertexCount = 0;  // Direct triangle rendering
+    dispatcherPC.meshletVertexCount = 0;
     vkCmdPushConstants(cmd, dispatcherPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
                       sizeof(dispatcherPC), &dispatcherPC);
 
     vkCmdDispatch(cmd, 1, 1, 1);
 
-    // Barrier after dispatcher
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                         0, 1, &barrier, 0, nullptr, 0, nullptr);
 
@@ -1596,12 +1018,10 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) {
                            0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
     vkCmdDispatchIndirect(cmd, indirectDispatchBuffer, 0);
 
-    // Barrier after subdivision
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                         0, 1, &barrier, 0, nullptr, 0, nullptr);
 
     // 3. Sum reduction - rebuild the sum tree
-    // First prepass
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, sumReductionPrepassPipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, sumReductionPipelineLayout,
                            0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
@@ -1614,7 +1034,6 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) {
     uint32_t workgroups = std::max(1u, (1u << (config.maxDepth - 5)) / SUM_REDUCTION_WORKGROUP_SIZE);
     vkCmdDispatch(cmd, workgroups, 1, 1);
 
-    // Barrier
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                         0, 1, &barrier, 0, nullptr, 0, nullptr);
 
@@ -1629,7 +1048,6 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) {
         workgroups = std::max(1u, (1u << pass) / SUM_REDUCTION_WORKGROUP_SIZE);
         vkCmdDispatch(cmd, std::max(1u, workgroups), 1, 1);
 
-        // Barrier between passes
         vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                             0, 1, &barrier, 0, nullptr, 0, nullptr);
     }
@@ -1652,15 +1070,12 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) {
 }
 
 void TerrainSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
-    // Bind pipeline
     VkPipeline pipeline = wireframeMode ? wireframePipeline : renderPipeline;
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 
-    // Bind descriptor set
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, renderPipelineLayout,
                            0, 1, &renderDescriptorSets[frameIndex], 0, nullptr);
 
-    // Set viewport and scissor
     VkViewport viewport{};
     viewport.x = 0.0f;
     viewport.y = 0.0f;
@@ -1675,7 +1090,6 @@ void TerrainSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
     scissor.extent = extent;
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    // Indirect draw using CBT node count
     vkCmdDrawIndirect(cmd, indirectDrawBuffer, 0, 1, sizeof(VkDrawIndirectCommand));
 }
 
@@ -1685,7 +1099,6 @@ void TerrainSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex,
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipelineLayout,
                            0, 1, &renderDescriptorSets[frameIndex], 0, nullptr);
 
-    // Set viewport and scissor for shadow map
     VkViewport viewport{};
     viewport.x = 0.0f;
     viewport.y = 0.0f;
@@ -1700,10 +1113,8 @@ void TerrainSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex,
     scissor.extent = {shadowMapSize, shadowMapSize};
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    // Depth bias for shadow acne prevention
     vkCmdSetDepthBias(cmd, 1.25f, 0.0f, 1.75f);
 
-    // Push constants
     TerrainShadowPushConstants pc{};
     pc.lightViewProj = lightViewProj;
     pc.terrainSize = config.size;
@@ -1711,40 +1122,9 @@ void TerrainSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex,
     pc.cascadeIndex = cascadeIndex;
     vkCmdPushConstants(cmd, shadowPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pc), &pc);
 
-    // Indirect draw
     vkCmdDrawIndirect(cmd, indirectDrawBuffer, 0, 1, sizeof(VkDrawIndirectCommand));
 }
 
 float TerrainSystem::getHeightAt(float x, float z) const {
-    // Convert world position to UV coordinates
-    float u = (x / config.size) + 0.5f;
-    float v = (z / config.size) + 0.5f;
-
-    // Clamp to valid range
-    u = std::clamp(u, 0.0f, 1.0f);
-    v = std::clamp(v, 0.0f, 1.0f);
-
-    // Sample height map with bilinear interpolation
-    float fx = u * (heightMapResolution - 1);
-    float fy = v * (heightMapResolution - 1);
-
-    int x0 = static_cast<int>(fx);
-    int y0 = static_cast<int>(fy);
-    int x1 = std::min(x0 + 1, static_cast<int>(heightMapResolution - 1));
-    int y1 = std::min(y0 + 1, static_cast<int>(heightMapResolution - 1));
-
-    float tx = fx - x0;
-    float ty = fy - y0;
-
-    float h00 = cpuHeightMap[y0 * heightMapResolution + x0];
-    float h10 = cpuHeightMap[y0 * heightMapResolution + x1];
-    float h01 = cpuHeightMap[y1 * heightMapResolution + x0];
-    float h11 = cpuHeightMap[y1 * heightMapResolution + x1];
-
-    float h0 = h00 * (1.0f - tx) + h10 * tx;
-    float h1 = h01 * (1.0f - tx) + h11 * tx;
-    float h = h0 * (1.0f - ty) + h1 * ty;
-
-    // Match shader: (h - 0.5) * heightScale, centers height around Y=0
-    return (h - 0.5f) * config.heightScale;
+    return heightMap.getHeightAt(x, z);
 }
