@@ -21,6 +21,7 @@ set(SOURCES
     src/SceneManager.cpp
     src/Camera.cpp
     src/Mesh.cpp
+    src/BufferUtils.cpp
     src/Texture.cpp
     src/ShaderLoader.cpp
     src/GrassSystem.cpp

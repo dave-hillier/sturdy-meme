@@ -6,6 +6,8 @@
 #include <vector>
 #include <string>
 
+#include "BufferUtils.h"
+
 struct GrassPushConstants {
     float time;
     int cascadeIndex;  // For shadow pass: which cascade we're rendering
@@ -135,14 +137,10 @@ private:
     VkDescriptorSet displacementDescriptorSet = VK_NULL_HANDLE;
 
     // Displacement sources buffer (per-frame)
-    std::vector<VkBuffer> displacementSourceBuffers;
-    std::vector<VmaAllocation> displacementSourceAllocations;
-    std::vector<void*> displacementSourceMappedPtrs;
+    BufferUtils::PerFrameBufferSet displacementSourceBuffers;
 
     // Displacement uniforms buffer (per-frame)
-    std::vector<VkBuffer> displacementUniformBuffers;
-    std::vector<VmaAllocation> displacementUniformAllocations;
-    std::vector<void*> displacementUniformMappedPtrs;
+    BufferUtils::PerFrameBufferSet displacementUniformBuffers;
 
     // Current displacement region center (follows camera)
     glm::vec2 displacementRegionCenter = glm::vec2(0.0f);
@@ -156,15 +154,11 @@ private:
     // Set A and Set B alternate: compute writes to one while graphics reads from other
     // Note: We don't need per-frame copies since the set alternation provides isolation
     static constexpr uint32_t BUFFER_SET_COUNT = 2;
-    VkBuffer instanceBuffers[BUFFER_SET_COUNT];      // [setIndex]
-    VmaAllocation instanceAllocations[BUFFER_SET_COUNT];
-    VkBuffer indirectBuffers[BUFFER_SET_COUNT];
-    VmaAllocation indirectAllocations[BUFFER_SET_COUNT];
+    BufferUtils::DoubleBufferedBufferSet instanceBuffers;      // [setIndex]
+    BufferUtils::DoubleBufferedBufferSet indirectBuffers;
 
     // Uniform buffers for culling (per frame, not double-buffered)
-    std::vector<VkBuffer> uniformBuffers;
-    std::vector<VmaAllocation> uniformAllocations;
-    std::vector<void*> uniformMappedPtrs;
+    BufferUtils::PerFrameBufferSet uniformBuffers;
 
     // Descriptor sets: [2] for A/B buffer sets, one per set
     // Per-frame descriptor sets for uniform buffers that DO need per-frame copies

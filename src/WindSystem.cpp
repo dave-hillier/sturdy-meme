@@ -1,4 +1,5 @@
 #include "WindSystem.h"
+#include "BufferUtils.h"
 #include <SDL3/SDL.h>
 #include <cstring>
 #include <cmath>
@@ -6,32 +7,12 @@
 bool WindSystem::init(const InitInfo& info) {
     framesInFlight = info.framesInFlight;
 
-    uniformBuffers.resize(framesInFlight);
-    uniformAllocations.resize(framesInFlight);
-    uniformMappedPtrs.resize(framesInFlight);
-
-    VkDeviceSize bufferSize = sizeof(WindUniforms);
-
-    for (size_t i = 0; i < framesInFlight; i++) {
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = bufferSize;
-        bufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
-                          VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
-        VmaAllocationInfo allocResult;
-        if (vmaCreateBuffer(info.allocator, &bufferInfo, &allocInfo,
-                           &uniformBuffers[i], &uniformAllocations[i],
-                           &allocResult) != VK_SUCCESS) {
-            SDL_Log("Failed to create wind uniform buffer");
-            return false;
-        }
-        uniformMappedPtrs[i] = allocResult.pMappedData;
+    BufferUtils::PerFrameBufferBuilder builder;
+    if (!builder.setAllocator(info.allocator)
+             .setFrameCount(framesInFlight)
+             .setSize(sizeof(WindUniforms))
+             .build(uniformBuffers)) {
+        return false;
     }
 
     // Initialize permutation table for Perlin noise
@@ -42,12 +23,8 @@ bool WindSystem::init(const InitInfo& info) {
 }
 
 void WindSystem::destroy(VkDevice device, VmaAllocator allocator) {
-    for (size_t i = 0; i < framesInFlight; i++) {
-        vmaDestroyBuffer(allocator, uniformBuffers[i], uniformAllocations[i]);
-    }
-    uniformBuffers.clear();
-    uniformAllocations.clear();
-    uniformMappedPtrs.clear();
+    BufferUtils::destroyBuffers(allocator, uniformBuffers);
+    uniformBuffers = {};
 }
 
 void WindSystem::initPermutationTable() {
@@ -101,12 +78,12 @@ void WindSystem::updateUniforms(uint32_t frameIndex) {
         totalTime
     );
 
-    memcpy(uniformMappedPtrs[frameIndex], &uniforms, sizeof(WindUniforms));
+    memcpy(uniformBuffers.mappedPointers[frameIndex], &uniforms, sizeof(WindUniforms));
 }
 
 VkDescriptorBufferInfo WindSystem::getBufferInfo(uint32_t frameIndex) const {
     VkDescriptorBufferInfo info{};
-    info.buffer = uniformBuffers[frameIndex];
+    info.buffer = uniformBuffers.buffers[frameIndex];
     info.offset = 0;
     info.range = sizeof(WindUniforms);
     return info;

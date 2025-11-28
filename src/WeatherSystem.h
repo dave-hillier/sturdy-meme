@@ -6,6 +6,8 @@
 #include <vector>
 #include <string>
 
+#include "BufferUtils.h"
+
 // Forward declaration
 class WindSystem;
 
@@ -124,15 +126,11 @@ private:
 
     // Double-buffered storage buffers
     static constexpr uint32_t BUFFER_SET_COUNT = 2;
-    VkBuffer particleBuffers[BUFFER_SET_COUNT];
-    VmaAllocation particleAllocations[BUFFER_SET_COUNT];
-    VkBuffer indirectBuffers[BUFFER_SET_COUNT];
-    VmaAllocation indirectAllocations[BUFFER_SET_COUNT];
+    BufferUtils::DoubleBufferedBufferSet particleBuffers;
+    BufferUtils::DoubleBufferedBufferSet indirectBuffers;
 
     // Uniform buffers (per frame)
-    std::vector<VkBuffer> uniformBuffers;
-    std::vector<VmaAllocation> uniformAllocations;
-    std::vector<void*> uniformMappedPtrs;
+    BufferUtils::PerFrameBufferSet uniformBuffers;
 
     // Descriptor sets
     VkDescriptorSet computeDescriptorSets[BUFFER_SET_COUNT];

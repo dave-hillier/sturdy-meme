@@ -51,89 +51,49 @@ void GrassSystem::destroy(VkDevice dev, VmaAllocator alloc) {
     vkDestroyImageView(dev, displacementImageView, nullptr);
     vmaDestroyImage(alloc, displacementImage, displacementAllocation);
 
-    for (size_t i = 0; i < framesInFlight; i++) {
-        vmaDestroyBuffer(alloc, displacementSourceBuffers[i], displacementSourceAllocations[i]);
-        vmaDestroyBuffer(alloc, displacementUniformBuffers[i], displacementUniformAllocations[i]);
-    }
+    BufferUtils::destroyBuffers(alloc, displacementSourceBuffers);
+    BufferUtils::destroyBuffers(alloc, displacementUniformBuffers);
 
     // Destroy double-buffered instance and indirect buffers
-    for (uint32_t set = 0; set < BUFFER_SET_COUNT; set++) {
-        vmaDestroyBuffer(alloc, instanceBuffers[set], instanceAllocations[set]);
-        vmaDestroyBuffer(alloc, indirectBuffers[set], indirectAllocations[set]);
-    }
+    BufferUtils::destroyBuffers(alloc, instanceBuffers);
+    BufferUtils::destroyBuffers(alloc, indirectBuffers);
 
     // Destroy uniform buffers (not double-buffered)
-    for (size_t i = 0; i < framesInFlight; i++) {
-        vmaDestroyBuffer(alloc, uniformBuffers[i], uniformAllocations[i]);
-    }
+    BufferUtils::destroyBuffers(alloc, uniformBuffers);
 }
 
 bool GrassSystem::createBuffers() {
-    // Uniform buffers (per-frame, for culling params that change each frame)
-    uniformBuffers.resize(framesInFlight);
-    uniformAllocations.resize(framesInFlight);
-    uniformMappedPtrs.resize(framesInFlight);
-
     VkDeviceSize instanceBufferSize = sizeof(GrassInstance) * MAX_INSTANCES;
     VkDeviceSize indirectBufferSize = sizeof(VkDrawIndirectCommand);
     VkDeviceSize uniformBufferSize = sizeof(GrassUniforms);
 
-    VmaAllocationCreateInfo allocInfo{};
-    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-
-    // Create double-buffered instance and indirect buffers (one per set, not per frame)
-    // The set alternation provides isolation: compute writes to A while graphics reads from B
-    for (uint32_t set = 0; set < BUFFER_SET_COUNT; set++) {
-        // Instance buffer - written by compute, read by vertex shader
-        VkBufferCreateInfo instanceBufferInfo{};
-        instanceBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        instanceBufferInfo.size = instanceBufferSize;
-        instanceBufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-        instanceBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        if (vmaCreateBuffer(allocator, &instanceBufferInfo, &allocInfo,
-                           &instanceBuffers[set], &instanceAllocations[set],
-                           nullptr) != VK_SUCCESS) {
-            SDL_Log("Failed to create grass instance buffer (set %u)", set);
-            return false;
-        }
-
-        // Indirect buffer - written by compute, read by vkCmdDrawIndirect, cleared by vkCmdFillBuffer
-        VkBufferCreateInfo indirectBufferInfo{};
-        indirectBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        indirectBufferInfo.size = indirectBufferSize;
-        indirectBufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-        indirectBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        if (vmaCreateBuffer(allocator, &indirectBufferInfo, &allocInfo,
-                           &indirectBuffers[set], &indirectAllocations[set],
-                           nullptr) != VK_SUCCESS) {
-            SDL_Log("Failed to create grass indirect buffer (set %u)", set);
-            return false;
-        }
+    BufferUtils::DoubleBufferedBufferBuilder instanceBuilder;
+    if (!instanceBuilder.setAllocator(allocator)
+             .setSetCount(BUFFER_SET_COUNT)
+             .setSize(instanceBufferSize)
+             .setUsage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)
+             .build(instanceBuffers)) {
+        SDL_Log("Failed to create grass instance buffers");
+        return false;
     }
 
-    // Create uniform buffers (not double-buffered)
-    for (size_t i = 0; i < framesInFlight; i++) {
-        VkBufferCreateInfo uniformBufferInfo{};
-        uniformBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        uniformBufferInfo.size = uniformBufferSize;
-        uniformBufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-        uniformBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    BufferUtils::DoubleBufferedBufferBuilder indirectBuilder;
+    if (!indirectBuilder.setAllocator(allocator)
+             .setSetCount(BUFFER_SET_COUNT)
+             .setSize(indirectBufferSize)
+             .setUsage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)
+             .build(indirectBuffers)) {
+        SDL_Log("Failed to create grass indirect buffers");
+        return false;
+    }
 
-        VmaAllocationCreateInfo uniformAllocInfo{};
-        uniformAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-        uniformAllocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
-                                 VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
-        VmaAllocationInfo uniformAllocInfoResult;
-        if (vmaCreateBuffer(allocator, &uniformBufferInfo, &uniformAllocInfo,
-                           &uniformBuffers[i], &uniformAllocations[i],
-                           &uniformAllocInfoResult) != VK_SUCCESS) {
-            SDL_Log("Failed to create grass uniform buffer");
-            return false;
-        }
-        uniformMappedPtrs[i] = uniformAllocInfoResult.pMappedData;
+    BufferUtils::PerFrameBufferBuilder uniformBuilder;
+    if (!uniformBuilder.setAllocator(allocator)
+             .setFrameCount(framesInFlight)
+             .setSize(uniformBufferSize)
+             .build(uniformBuffers)) {
+        SDL_Log("Failed to create grass uniform buffers");
+        return false;
     }
 
     return true;
@@ -205,60 +165,26 @@ bool GrassSystem::createDisplacementResources() {
         return false;
     }
 
-    // Create displacement source buffers (per-frame)
-    displacementSourceBuffers.resize(framesInFlight);
-    displacementSourceAllocations.resize(framesInFlight);
-    displacementSourceMappedPtrs.resize(framesInFlight);
-
-    displacementUniformBuffers.resize(framesInFlight);
-    displacementUniformAllocations.resize(framesInFlight);
-    displacementUniformMappedPtrs.resize(framesInFlight);
-
     VkDeviceSize sourceBufferSize = sizeof(DisplacementSource) * MAX_DISPLACEMENT_SOURCES;
     VkDeviceSize uniformBufferSize = sizeof(DisplacementUniforms);
 
-    for (size_t i = 0; i < framesInFlight; i++) {
-        // Source buffer
-        VkBufferCreateInfo sourceBufferInfo{};
-        sourceBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        sourceBufferInfo.size = sourceBufferSize;
-        sourceBufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-        sourceBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    BufferUtils::PerFrameBufferBuilder sourceBuilder;
+    if (!sourceBuilder.setAllocator(allocator)
+             .setFrameCount(framesInFlight)
+             .setSize(sourceBufferSize)
+             .setUsage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+             .build(displacementSourceBuffers)) {
+        SDL_Log("Failed to create displacement source buffers");
+        return false;
+    }
 
-        VmaAllocationCreateInfo sourceAllocInfo{};
-        sourceAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-        sourceAllocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
-                               VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
-        VmaAllocationInfo sourceAllocResult;
-        if (vmaCreateBuffer(allocator, &sourceBufferInfo, &sourceAllocInfo,
-                           &displacementSourceBuffers[i], &displacementSourceAllocations[i],
-                           &sourceAllocResult) != VK_SUCCESS) {
-            SDL_Log("Failed to create displacement source buffer");
-            return false;
-        }
-        displacementSourceMappedPtrs[i] = sourceAllocResult.pMappedData;
-
-        // Uniform buffer
-        VkBufferCreateInfo uniformBufferInfo{};
-        uniformBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        uniformBufferInfo.size = uniformBufferSize;
-        uniformBufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-        uniformBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        VmaAllocationCreateInfo uniformAllocInfo{};
-        uniformAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-        uniformAllocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
-                                VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
-        VmaAllocationInfo uniformAllocResult;
-        if (vmaCreateBuffer(allocator, &uniformBufferInfo, &uniformAllocInfo,
-                           &displacementUniformBuffers[i], &displacementUniformAllocations[i],
-                           &uniformAllocResult) != VK_SUCCESS) {
-            SDL_Log("Failed to create displacement uniform buffer");
-            return false;
-        }
-        displacementUniformMappedPtrs[i] = uniformAllocResult.pMappedData;
+    BufferUtils::PerFrameBufferBuilder uniformBuilder;
+    if (!uniformBuilder.setAllocator(allocator)
+             .setFrameCount(framesInFlight)
+             .setSize(uniformBufferSize)
+             .build(displacementUniformBuffers)) {
+        SDL_Log("Failed to create displacement uniform buffers");
+        return false;
     }
 
     return true;
@@ -876,18 +802,18 @@ bool GrassSystem::createDescriptorSets() {
         // Update compute descriptor sets (instance and indirect buffers only)
         // Uniform buffer will be updated in updateDescriptorSets with the right frame's buffer
         VkDescriptorBufferInfo instanceBufferInfo{};
-        instanceBufferInfo.buffer = instanceBuffers[set];
+        instanceBufferInfo.buffer = instanceBuffers.buffers[set];
         instanceBufferInfo.offset = 0;
         instanceBufferInfo.range = sizeof(GrassInstance) * MAX_INSTANCES;
 
         VkDescriptorBufferInfo indirectBufferInfo{};
-        indirectBufferInfo.buffer = indirectBuffers[set];
+        indirectBufferInfo.buffer = indirectBuffers.buffers[set];
         indirectBufferInfo.offset = 0;
         indirectBufferInfo.range = sizeof(VkDrawIndirectCommand);
 
         // Use first frame's uniform buffer initially; will be updated per-frame
         VkDescriptorBufferInfo uniformBufferInfo{};
-        uniformBufferInfo.buffer = uniformBuffers[0];
+        uniformBufferInfo.buffer = uniformBuffers.buffers[0];
         uniformBufferInfo.offset = 0;
         uniformBufferInfo.range = sizeof(GrassUniforms);
 
@@ -944,7 +870,7 @@ void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>
         uboInfo.range = 160;  // sizeof(UniformBufferObject) - matches Renderer's UBO
 
         VkDescriptorBufferInfo instanceBufferInfo{};
-        instanceBufferInfo.buffer = instanceBuffers[set];
+        instanceBufferInfo.buffer = instanceBuffers.buffers[set];
         instanceBufferInfo.offset = 0;
         instanceBufferInfo.range = sizeof(GrassInstance) * MAX_INSTANCES;
 
@@ -1092,7 +1018,7 @@ void GrassSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos
     uniforms.terrainHeightScale = terrainHeightScale;
 
     // Copy to mapped buffer
-    memcpy(uniformMappedPtrs[frameIndex], &uniforms, sizeof(GrassUniforms));
+    memcpy(uniformBuffers.mappedPointers[frameIndex], &uniforms, sizeof(GrassUniforms));
 }
 
 void GrassSystem::updateDisplacementSources(const glm::vec3& playerPos, float playerRadius, float deltaTime) {
@@ -1111,12 +1037,12 @@ void GrassSystem::updateDisplacementSources(const glm::vec3& playerPos, float pl
 void GrassSystem::recordDisplacementUpdate(VkCommandBuffer cmd, uint32_t frameIndex) {
     // Update displacement descriptor set with current frame's buffers
     VkDescriptorBufferInfo sourceBufferInfo{};
-    sourceBufferInfo.buffer = displacementSourceBuffers[frameIndex];
+    sourceBufferInfo.buffer = displacementSourceBuffers.buffers[frameIndex];
     sourceBufferInfo.offset = 0;
     sourceBufferInfo.range = sizeof(DisplacementSource) * MAX_DISPLACEMENT_SOURCES;
 
     VkDescriptorBufferInfo uniformBufferInfo{};
-    uniformBufferInfo.buffer = displacementUniformBuffers[frameIndex];
+    uniformBufferInfo.buffer = displacementUniformBuffers.buffers[frameIndex];
     uniformBufferInfo.offset = 0;
     uniformBufferInfo.range = sizeof(DisplacementUniforms);
 
@@ -1141,7 +1067,7 @@ void GrassSystem::recordDisplacementUpdate(VkCommandBuffer cmd, uint32_t frameIn
     vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 
     // Copy displacement sources to buffer
-    memcpy(displacementSourceMappedPtrs[frameIndex], currentDisplacementSources.data(),
+    memcpy(displacementSourceBuffers.mappedPointers[frameIndex], currentDisplacementSources.data(),
            sizeof(DisplacementSource) * currentDisplacementSources.size());
 
     // Update displacement uniforms
@@ -1151,7 +1077,7 @@ void GrassSystem::recordDisplacementUpdate(VkCommandBuffer cmd, uint32_t frameIn
                                           DISPLACEMENT_REGION_SIZE, texelSize);
     dispUniforms.params = glm::vec4(displacementDecayRate, maxDisplacement, 1.0f / 60.0f,
                                     static_cast<float>(currentDisplacementSources.size()));
-    memcpy(displacementUniformMappedPtrs[frameIndex], &dispUniforms, sizeof(DisplacementUniforms));
+    memcpy(displacementUniformBuffers.mappedPointers[frameIndex], &dispUniforms, sizeof(DisplacementUniforms));
 
     // Transition displacement image to general layout if needed (first frame)
     // For subsequent frames, it should already be in GENERAL layout
@@ -1213,7 +1139,7 @@ void GrassSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex
     // Update compute descriptor set to use this frame's uniform buffer, terrain heightmap, and displacement map
     // (uniforms contain per-frame camera/frustum data)
     VkDescriptorBufferInfo uniformBufferInfo{};
-    uniformBufferInfo.buffer = uniformBuffers[frameIndex];
+    uniformBufferInfo.buffer = uniformBuffers.buffers[frameIndex];
     uniformBufferInfo.offset = 0;
     uniformBufferInfo.range = sizeof(GrassUniforms);
 
@@ -1256,7 +1182,7 @@ void GrassSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex
     vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 
     // Reset indirect buffer before compute dispatch to prevent accumulation
-    vkCmdFillBuffer(cmd, indirectBuffers[writeSet], 0, sizeof(VkDrawIndirectCommand), 0);
+    vkCmdFillBuffer(cmd, indirectBuffers.buffers[writeSet], 0, sizeof(VkDrawIndirectCommand), 0);
 
     // Barrier to ensure fill completes before compute shader runs
     VkMemoryBarrier fillBarrier{};
@@ -1316,7 +1242,7 @@ void GrassSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float tim
     vkCmdPushConstants(cmd, graphicsPipelineLayout,
                        VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GrassPushConstants), &grassPush);
 
-    vkCmdDrawIndirect(cmd, indirectBuffers[readSet], 0, 1, sizeof(VkDrawIndirectCommand));
+    vkCmdDrawIndirect(cmd, indirectBuffers.buffers[readSet], 0, 1, sizeof(VkDrawIndirectCommand));
 }
 
 void GrassSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time, uint32_t cascadeIndex) {
@@ -1339,7 +1265,7 @@ void GrassSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex, flo
     vkCmdPushConstants(cmd, shadowPipelineLayout,
                        VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GrassPushConstants), &grassPush);
 
-    vkCmdDrawIndirect(cmd, indirectBuffers[readSet], 0, 1, sizeof(VkDrawIndirectCommand));
+    vkCmdDrawIndirect(cmd, indirectBuffers.buffers[readSet], 0, 1, sizeof(VkDrawIndirectCommand));
 }
 
 void GrassSystem::advanceBufferSet() {

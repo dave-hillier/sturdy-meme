@@ -5,6 +5,8 @@
 #include <vk_mem_alloc.h>
 #include <vector>
 
+#include "BufferUtils.h"
+
 // Wind uniform data passed to GPU shaders
 // Must match the GLSL WindUniforms struct exactly
 struct WindUniforms {
@@ -87,9 +89,7 @@ private:
     float totalTime = 0.0f;
 
     // Vulkan resources
-    std::vector<VkBuffer> uniformBuffers;
-    std::vector<VmaAllocation> uniformAllocations;
-    std::vector<void*> uniformMappedPtrs;
+    BufferUtils::PerFrameBufferSet uniformBuffers;
     uint32_t framesInFlight = 0;
 
     // Pre-computed gradient table for Perlin noise (same seed as GPU)
