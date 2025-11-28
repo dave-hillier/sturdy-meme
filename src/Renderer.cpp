@@ -144,6 +144,18 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
 
     if (!sceneManager.init(sceneInfo)) return false;
 
+    // Initialize snow mask system early (before createDescriptorSets, since shader.frag needs binding 8)
+    SnowMaskSystem::InitInfo snowMaskInfo{};
+    snowMaskInfo.device = device;
+    snowMaskInfo.allocator = allocator;
+    snowMaskInfo.renderPass = postProcessSystem.getHDRRenderPass();
+    snowMaskInfo.descriptorPool = descriptorPool;
+    snowMaskInfo.extent = swapchainExtent;
+    snowMaskInfo.shaderPath = resourcePath + "/shaders";
+    snowMaskInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+
+    if (!snowMaskSystem.init(snowMaskInfo)) return false;
+
     if (!createDescriptorSets()) return false;
 
     // Initialize grass system using HDR render pass
@@ -226,18 +238,8 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     // Update weather system descriptor sets with wind buffers
     weatherSystem.updateDescriptorSets(device, uniformBuffers, windBuffers, depthImageView, shadowSampler);
 
-    // Initialize snow mask system (snow accumulation on terrain/meshes)
-    SnowMaskSystem::InitInfo snowMaskInfo{};
-    snowMaskInfo.device = device;
-    snowMaskInfo.allocator = allocator;
-    snowMaskInfo.renderPass = postProcessSystem.getHDRRenderPass();
-    snowMaskInfo.descriptorPool = descriptorPool;
-    snowMaskInfo.extent = swapchainExtent;
-    snowMaskInfo.shaderPath = resourcePath + "/shaders";
-    snowMaskInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
-
-    if (!snowMaskSystem.init(snowMaskInfo)) return false;
-    snowMaskSystem.setEnvironmentSettings(&environmentSettings);
+    // Connect snow mask to environment settings (already initialized above)
+    snowMaskSystem.setEnvironmentSettings(environmentSettings);
 
     // Connect snow mask to terrain system
     terrainSystem.setSnowMask(device, snowMaskSystem.getSnowMaskView(), snowMaskSystem.getSnowMaskSampler());
@@ -1611,7 +1613,14 @@ bool Renderer::createDescriptorSetLayout() {
     spotShadowBinding.pImmutableSamplers = nullptr;
     spotShadowBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-    std::array<VkDescriptorSetLayoutBinding, 8> bindings = {uboLayoutBinding, samplerLayoutBinding, shadowSamplerBinding, normalMapBinding, lightBufferBinding, emissiveMapBinding, pointShadowBinding, spotShadowBinding};
+    VkDescriptorSetLayoutBinding snowMaskBinding{};
+    snowMaskBinding.binding = 8;
+    snowMaskBinding.descriptorCount = 1;
+    snowMaskBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    snowMaskBinding.pImmutableSamplers = nullptr;
+    snowMaskBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    std::array<VkDescriptorSetLayoutBinding, 9> bindings = {uboLayoutBinding, samplerLayoutBinding, shadowSamplerBinding, normalMapBinding, lightBufferBinding, emissiveMapBinding, pointShadowBinding, spotShadowBinding, snowMaskBinding};
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -2272,7 +2281,12 @@ bool Renderer::createDescriptorSets() {
         spotShadowImageInfo.imageView = spotShadowArrayViews[i];
         spotShadowImageInfo.sampler = spotShadowSampler;
 
-        std::array<VkWriteDescriptorSet, 8> descriptorWrites{};
+        VkDescriptorImageInfo snowMaskImageInfo{};
+        snowMaskImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        snowMaskImageInfo.imageView = snowMaskSystem.getSnowMaskView();
+        snowMaskImageInfo.sampler = snowMaskSystem.getSnowMaskSampler();
+
+        std::array<VkWriteDescriptorSet, 9> descriptorWrites{};
 
         descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         descriptorWrites[0].dstSet = descriptorSets[i];
@@ -2338,6 +2352,14 @@ bool Renderer::createDescriptorSets() {
         descriptorWrites[7].descriptorCount = 1;
         descriptorWrites[7].pImageInfo = &spotShadowImageInfo;
 
+        descriptorWrites[8].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[8].dstSet = descriptorSets[i];
+        descriptorWrites[8].dstBinding = 8;
+        descriptorWrites[8].dstArrayElement = 0;
+        descriptorWrites[8].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[8].descriptorCount = 1;
+        descriptorWrites[8].pImageInfo = &snowMaskImageInfo;
+
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                descriptorWrites.data(), 0, nullptr);
 
@@ -2362,6 +2384,7 @@ bool Renderer::createDescriptorSets() {
         descriptorWrites[5].dstSet = groundDescriptorSets[i];
         descriptorWrites[6].dstSet = groundDescriptorSets[i];
         descriptorWrites[7].dstSet = groundDescriptorSets[i];
+        descriptorWrites[8].dstSet = groundDescriptorSets[i];
 
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                descriptorWrites.data(), 0, nullptr);
@@ -2387,6 +2410,7 @@ bool Renderer::createDescriptorSets() {
         descriptorWrites[5].dstSet = metalDescriptorSets[i];
         descriptorWrites[6].dstSet = metalDescriptorSets[i];
         descriptorWrites[7].dstSet = metalDescriptorSets[i];
+        descriptorWrites[8].dstSet = metalDescriptorSets[i];
 
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                descriptorWrites.data(), 0, nullptr);

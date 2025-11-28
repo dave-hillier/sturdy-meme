@@ -3,6 +3,11 @@
 #ifndef SNOW_COMMON_GLSL
 #define SNOW_COMMON_GLSL
 
+// GLSL doesn't have saturate like HLSL - define it
+#ifndef saturate
+#define saturate(x) clamp(x, 0.0, 1.0)
+#endif
+
 // Snow material properties
 const vec3 SNOW_UP_DIR = vec3(0.0, 1.0, 0.0);
 const float SNOW_ROUGHNESS_DEFAULT = 0.7;
