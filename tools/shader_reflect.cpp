@@ -11,11 +11,22 @@
 
 namespace fs = std::filesystem;
 
+struct UBOMember {
+    std::string name;
+    std::string type;
+    std::string arraySpec;
+    uint32_t offset;
+    uint32_t size;
+};
+
 struct UBODefinition {
     std::string name;
+    std::string structName;
     uint32_t binding;
     uint32_t set;
-    std::string structDef;
+    uint32_t totalSize;
+    bool hasNestedStructs;
+    std::vector<UBOMember> members;
 };
 
 std::string getGLMType(const SpvReflectTypeDescription* typeDesc) {
@@ -62,68 +73,49 @@ std::string getGLMType(const SpvReflectTypeDescription* typeDesc) {
     return baseType;
 }
 
-std::string generateStructMember(const SpvReflectBlockVariable* member, int indent = 1) {
-    std::ostringstream oss;
-    std::string indentStr(indent * 4, ' ');
-
-    std::string type = getGLMType(member->type_description);
+UBOMember extractMember(const SpvReflectBlockVariable* member) {
+    UBOMember m;
+    m.name = member->name;
+    m.type = getGLMType(member->type_description);
+    m.offset = member->offset;
+    m.size = member->size;
 
     // Handle arrays
-    std::string arraySpec;
     if (member->array.dims_count > 0) {
         for (uint32_t i = 0; i < member->array.dims_count; i++) {
-            arraySpec += "[" + std::to_string(member->array.dims[i]) + "]";
+            m.arraySpec += "[" + std::to_string(member->array.dims[i]) + "]";
         }
     }
 
     // Handle structs (nested)
     if (member->type_description->type_flags & SPV_REFLECT_TYPE_FLAG_STRUCT) {
-        // For nested structs, we'd need to recurse, but for now keep it simple
-        type = member->type_description->type_name;
+        m.type = member->type_description->type_name;
     }
 
-    oss << indentStr << type << " " << member->name << arraySpec << ";";
-
-    return oss.str();
+    return m;
 }
 
 UBODefinition reflectUBO(const SpvReflectDescriptorBinding* binding) {
     UBODefinition ubo;
     ubo.name = binding->name;
+    ubo.structName = binding->type_description->type_name;
     ubo.binding = binding->binding;
     ubo.set = binding->set;
+    ubo.totalSize = binding->block.size;
+    ubo.hasNestedStructs = false;
 
-    // Check if this UBO contains nested struct types
-    bool hasNestedStructs = false;
+    // Extract all members
     for (uint32_t i = 0; i < binding->block.member_count; i++) {
         const SpvReflectBlockVariable& member = binding->block.members[i];
+
+        // Check for nested structs
         if (member.type_description->type_flags & SPV_REFLECT_TYPE_FLAG_STRUCT) {
-            hasNestedStructs = true;
-            break;
-        }
-    }
-
-    std::ostringstream structDef;
-
-    // If it has nested structs, comment it out and add a note
-    if (hasNestedStructs) {
-        structDef << "// SKIPPED: " << binding->type_description->type_name
-                  << " (contains nested struct types - define manually)\n";
-        structDef << "// This struct is defined in its corresponding system header file\n";
-        structDef << "// Binding: " << binding->binding << ", Set: " << binding->set;
-    } else {
-        structDef << "struct " << binding->type_description->type_name << " {\n";
-
-        // Generate members
-        for (uint32_t i = 0; i < binding->block.member_count; i++) {
-            const SpvReflectBlockVariable& member = binding->block.members[i];
-            structDef << generateStructMember(&member) << "\n";
+            ubo.hasNestedStructs = true;
         }
 
-        structDef << "};";
+        ubo.members.push_back(extractMember(&member));
     }
 
-    ubo.structDef = structDef.str();
     return ubo;
 }
 
@@ -183,6 +175,35 @@ std::vector<UBODefinition> reflectSPIRV(const std::string& filepath) {
     return ubos;
 }
 
+std::string generateStructDef(const UBODefinition& ubo) {
+    std::ostringstream structDef;
+
+    if (ubo.hasNestedStructs) {
+        structDef << "// SKIPPED: " << ubo.structName
+                  << " (contains nested struct types - define manually)\n";
+        structDef << "// This struct is defined in its corresponding system header file\n";
+        structDef << "// Binding: " << ubo.binding << ", Set: " << ubo.set;
+    } else {
+        structDef << "struct " << ubo.structName << " {\n";
+
+        // Sort members by offset to ensure correct order
+        std::vector<UBOMember> sortedMembers = ubo.members;
+        std::sort(sortedMembers.begin(), sortedMembers.end(),
+            [](const UBOMember& a, const UBOMember& b) {
+                return a.offset < b.offset;
+            });
+
+        // Generate members
+        for (const auto& member : sortedMembers) {
+            structDef << "    " << member.type << " " << member.name << member.arraySpec << ";\n";
+        }
+
+        structDef << "};";
+    }
+
+    return structDef.str();
+}
+
 std::string generateHeader(const std::map<std::string, UBODefinition>& uniqueUBOs) {
     std::ostringstream header;
 
@@ -196,7 +217,7 @@ std::string generateHeader(const std::map<std::string, UBODefinition>& uniqueUBO
 
     for (const auto& [name, ubo] : uniqueUBOs) {
         header << "// Binding: " << ubo.binding << ", Set: " << ubo.set << "\n";
-        header << ubo.structDef << "\n\n";
+        header << generateStructDef(ubo) << "\n\n";
     }
 
     return header.str();
@@ -217,16 +238,24 @@ int main(int argc, char** argv) {
 
         auto ubos = reflectSPIRV(spirvPath);
 
-        // Deduplicate UBOs by struct name
+        // Merge UBOs by struct name - keep the one with most members (largest definition)
         for (const auto& ubo : ubos) {
-            std::string structName = ubo.structDef.substr(
-                ubo.structDef.find("struct ") + 7,
-                ubo.structDef.find(" {") - 7
-            );
+            const std::string& structName = ubo.structName;
 
-            // Only add if we haven't seen this struct name before
-            if (uniqueUBOs.find(structName) == uniqueUBOs.end()) {
+            auto it = uniqueUBOs.find(structName);
+            if (it == uniqueUBOs.end()) {
+                // First time seeing this struct
                 uniqueUBOs[structName] = ubo;
+            } else {
+                // Keep the definition with more members (more complete)
+                if (ubo.members.size() > it->second.members.size()) {
+                    it->second = ubo;
+                }
+                // If same member count, keep the one with larger total size
+                else if (ubo.members.size() == it->second.members.size() &&
+                         ubo.totalSize > it->second.totalSize) {
+                    it->second = ubo;
+                }
             }
         }
     }

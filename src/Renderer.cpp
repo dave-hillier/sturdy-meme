@@ -157,6 +157,18 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
 
     if (!snowMaskSystem.init(snowMaskInfo)) return false;
 
+    // Initialize volumetric snow system (cascaded heightfield)
+    VolumetricSnowSystem::InitInfo volumetricSnowInfo{};
+    volumetricSnowInfo.device = device;
+    volumetricSnowInfo.allocator = allocator;
+    volumetricSnowInfo.renderPass = postProcessSystem.getHDRRenderPass();
+    volumetricSnowInfo.descriptorPool = descriptorPool;
+    volumetricSnowInfo.extent = swapchainExtent;
+    volumetricSnowInfo.shaderPath = resourcePath + "/shaders";
+    volumetricSnowInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+
+    if (!volumetricSnowSystem.init(volumetricSnowInfo)) return false;
+
     if (!createDescriptorSets()) return false;
 
     // Initialize grass system using HDR render pass
@@ -241,9 +253,17 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
 
     // Connect snow mask to environment settings (already initialized above)
     snowMaskSystem.setEnvironmentSettings(environmentSettings);
+    volumetricSnowSystem.setEnvironmentSettings(environmentSettings);
 
-    // Connect snow mask to terrain system
+    // Connect snow mask to terrain system (legacy)
     terrainSystem.setSnowMask(device, snowMaskSystem.getSnowMaskView(), snowMaskSystem.getSnowMaskSampler());
+
+    // Connect volumetric snow cascades to terrain system
+    terrainSystem.setVolumetricSnowCascades(device,
+        volumetricSnowSystem.getCascadeView(0),
+        volumetricSnowSystem.getCascadeView(1),
+        volumetricSnowSystem.getCascadeView(2),
+        volumetricSnowSystem.getCascadeSampler());
 
     // Connect snow mask to grass system
     grassSystem.setSnowMask(device, snowMaskSystem.getSnowMaskView(), snowMaskSystem.getSnowMaskSampler());
@@ -396,6 +416,7 @@ void Renderer::shutdown() {
         windSystem.destroy(device, allocator);
         weatherSystem.destroy(device, allocator);
         snowMaskSystem.destroy(device, allocator);
+        volumetricSnowSystem.destroy(device, allocator);
         leafSystem.destroy(device, allocator);
         froxelSystem.destroy(device, allocator);
         atmosphereLUTSystem.destroy(device, allocator);
@@ -2488,9 +2509,18 @@ void Renderer::render(const Camera& camera) {
     }
     snowMaskSystem.setMaskCenter(camera.getPosition());
     snowMaskSystem.updateUniforms(currentFrame, deltaTime, isSnowing, weatherIntensity, environmentSettings);
+
+    // Update volumetric snow system
+    volumetricSnowSystem.setCameraPosition(camera.getPosition());
+    volumetricSnowSystem.setWindDirection(glm::vec2(windSystem.getEnvironmentSettings().windDirection.x,
+                                                     windSystem.getEnvironmentSettings().windDirection.y));
+    volumetricSnowSystem.setWindStrength(windSystem.getEnvironmentSettings().windStrength);
+    volumetricSnowSystem.updateUniforms(currentFrame, deltaTime, isSnowing, weatherIntensity, environmentSettings);
+
     // Add player footprint interaction with snow
     if (environmentSettings.snowAmount > 0.1f) {
         snowMaskSystem.addInteraction(playerPosition, playerCapsuleRadius * 1.5f, 0.3f);
+        volumetricSnowSystem.addInteraction(playerPosition, playerCapsuleRadius * 1.5f, 0.3f);
     }
 
     // Update leaf system with player position (using camera as player proxy)
@@ -2523,6 +2553,9 @@ void Renderer::render(const Camera& camera) {
 
     // Snow mask accumulation compute pass
     snowMaskSystem.recordCompute(cmd, currentFrame);
+
+    // Volumetric snow cascade compute pass
+    volumetricSnowSystem.recordCompute(cmd, currentFrame);
 
     // Leaf particle compute pass
     leafSystem.recordResetAndCompute(cmd, currentFrame, grassTime, deltaTime);
@@ -2694,15 +2727,24 @@ UniformBufferObject Renderer::buildUniformBufferData(const Camera& camera, const
     ubo.shadowMapSize = static_cast<float>(SHADOW_MAP_SIZE);
     ubo.debugCascades = showCascadeDebug ? 1.0f : 0.0f;
     ubo.julianDay = static_cast<float>(lighting.julianDay);
-    // Note: cloudStyle was removed from shader UBO
-    // ubo.cloudStyle = useParaboloidClouds ? 1.0f : 0.0f;
+    ubo.cloudStyle = useParaboloidClouds ? 1.0f : 0.0f;
 
-    // Note: Snow parameters not yet added to shader UBO - need to update shaders first
-    // ubo.snowAmount = environmentSettings.snowAmount;
-    // ubo.snowRoughness = environmentSettings.snowRoughness;
-    // ubo.snowTexScale = environmentSettings.snowTexScale;
-    // ubo.snowColor = glm::vec4(environmentSettings.snowColor, 1.0f);
-    // ubo.snowMaskParams = glm::vec4(snowMaskSystem.getMaskOrigin(), snowMaskSystem.getMaskSize(), 0.0f);
+    // Snow parameters
+    ubo.snowAmount = environmentSettings.snowAmount;
+    ubo.snowRoughness = environmentSettings.snowRoughness;
+    ubo.snowTexScale = environmentSettings.snowTexScale;
+    ubo.snowColor = glm::vec4(environmentSettings.snowColor, 1.0f);
+    ubo.snowMaskParams = glm::vec4(snowMaskSystem.getMaskOrigin(), snowMaskSystem.getMaskSize(), 0.0f);
+
+    // Volumetric snow cascade parameters
+    auto cascadeParams = volumetricSnowSystem.getCascadeParams();
+    ubo.snowCascade0Params = cascadeParams[0];
+    ubo.snowCascade1Params = cascadeParams[1];
+    ubo.snowCascade2Params = cascadeParams[2];
+    ubo.useVolumetricSnow = useVolumetricSnow ? 1.0f : 0.0f;
+    ubo.snowMaxHeight = MAX_SNOW_HEIGHT;
+    ubo.snowPadding1 = 0.0f;
+    ubo.snowPadding2 = 0.0f;
 
     return ubo;
 }
