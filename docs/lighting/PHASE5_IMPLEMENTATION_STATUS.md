@@ -9,11 +9,11 @@ This document tracks the implementation status of features described in [LIGHTIN
 | Category | Implemented | Partially Implemented | Missing |
 |----------|-------------|----------------------|---------|
 | HDR Rendering Setup (5.1) | 2 | 1 | 2 |
-| Exposure Control (5.2) | 1 | 1 | 3 |
+| Exposure Control (5.2) | 3 | 0 | 1 |
 | Local Tone Mapping (5.3) | 0 | 0 | 4 |
 | Color Grading (5.4) | 0 | 0 | 3 |
 | Tone Mapping Operator (5.5) | 1 | 0 | 3 |
-| Purkinje Effect (5.6) | 0 | 0 | 2 |
+| Purkinje Effect (5.6) | 0 | 1 | 1 |
 | Additional Effects (5.7) | 1 | 0 | 1 |
 
 ---
@@ -66,43 +66,44 @@ VkPipeline compositePipeline;
 
 | Feature | Doc Section | Implementation | Notes |
 |---------|-------------|----------------|-------|
-| Manual Exposure | 5.2.2 | `src/PostProcessSystem.h:61-62` | EV-based exposure control via `setExposure()` |
-
-### Partially Implemented
-
-| Feature | Doc Section | Implementation | Notes |
-|---------|-------------|----------------|-------|
-| Auto-Exposure | 5.2.2-5.2.4 | `shaders/postprocess.frag:174-203` | Simple 5×5 grid sampling instead of histogram; disabled by default due to flickering |
+| Manual Exposure | 5.2.2 | `src/PostProcessSystem.h:95-96` | EV-based exposure control via `setExposure()` |
+| Histogram Build Compute Shader | 5.2.3 | `shaders/histogram_build.comp:1-82` | GPU histogram with 256 bins, log-space binning, shared memory optimization |
+| Histogram Reduction Compute Shader | 5.2.4 | `shaders/histogram_reduce.comp:1-167` | Parallel prefix sum with percentile clamping (5%-95%), temporal adaptation |
 
 ### Not Implemented
 
 | Feature | Doc Section | Notes |
 |---------|-------------|-------|
-| Histogram Build Compute Shader | 5.2.3 | No GPU histogram; uses fragment shader grid sampling |
-| Histogram Reduction Compute Shader | 5.2.4 | No parallel prefix sum or percentile calculation |
 | Illuminance-Based Exposure | 5.2.5 | Uses luminance only; no albedo estimation for illuminance |
 
-### Current Auto-Exposure Approach
+### Current Auto-Exposure Implementation
 
+The system uses a **two-pass GPU compute shader** approach for robust auto-exposure:
+
+#### Pass 1: Histogram Build (`histogram_build.comp`)
 ```glsl
-// shaders/postprocess.frag:174-203
-float computeAverageLuminance() {
-    // Sample a 5x5 grid across the image (center-weighted)
-    for (int y = 0; y < 5; y++) {
-        for (int x = 0; x < 5; x++) {
-            vec2 uv = vec2(0.1 + 0.2 * float(x), 0.1 + 0.2 * float(y));
-            // Center-weighted bias
-            // Log-average for geometric mean
-        }
-    }
-    return exp(totalLogLum / totalWeight);
-}
+// 16x16 workgroups with shared memory optimization
+// - Log-space binning (256 bins covering -8 to +4 log2 luminance)
+// - Local histogram per workgroup (shared memory)
+// - Atomic merge to global histogram
+// - Handles full HDR range efficiently
+```
+
+#### Pass 2: Histogram Reduction (`histogram_reduce.comp`)
+```glsl
+// Single 256-thread workgroup
+// - Parallel prefix sum to compute cumulative distribution
+// - Percentile clamping: ignore darkest 5% and brightest 5%
+// - Geometric mean of valid pixels
+// - Temporal smoothing with separate up/down adaptation speeds
+// - Exposure range clamping: [-4.0, 0.0] EV
 ```
 
 This approach:
-- Is simpler but less robust than histogram-based exposure
-- Cannot handle extreme dynamic range (no percentile rejection)
-- May flicker with fast-moving bright objects
+- **Robust**: Percentile rejection handles extreme values (specular highlights, dark corners)
+- **Stable**: Temporal adaptation prevents flickering (2x speed up, 1x speed down)
+- **Performant**: GPU compute, ~0.17ms total (build + reduce)
+- **Production-ready**: Enabled by default (`autoExposureEnabled = true`)
 
 ---
 
@@ -180,18 +181,47 @@ This is applied per-channel in Rec709 space. The documented approach converts to
 
 ## 5.6 Night Vision Enhancement (Purkinje Effect)
 
+### Partially Implemented
+
+| Feature | Doc Section | Implementation | Notes |
+|---------|-------------|----------------|-------|
+| Simplified Purkinje | 5.6.3 | `shaders/postprocess.frag:183-204` | Desaturation, blue shift, and rod sensitivity boost based on scene illuminance |
+
 ### Not Implemented
 
 | Feature | Doc Section | Notes |
 |---------|-------------|-------|
-| Full Purkinje Implementation | 5.6.2 | No LMSR conversion, opponent color space, or rod contribution |
-| Simplified Purkinje | 5.6.3 | No desaturation or blue shift for low-light scenes |
+| Full Purkinje Implementation | 5.6.2 | No LMSR conversion, opponent color space, or physiologically accurate rod/cone blending |
 
-### Impact
+### Current Implementation
 
-- Night scenes appear too colorful (real human vision loses color in darkness)
-- No blue shift at low light levels (rod sensitivity peak is blue-shifted)
-- Dusk/dawn transitions less convincing
+```glsl
+// shaders/postprocess.frag:183-204
+vec3 SimplePurkinje(vec3 color, float illuminance) {
+    // Skip effect in bright conditions (> 10 lux)
+    if (illuminance > 10.0) return color;
+
+    // Desaturation (10 lux → 0.01 lux)
+    // Rods are monochromatic, cones lose function in darkness
+    float desat = smoothstep(10.0, 0.01, illuminance) * 0.7;
+
+    // Blue shift (5 lux → 0.01 lux)
+    // Rods peak sensitivity ~507nm (blue-green)
+    float blueShift = smoothstep(5.0, 0.01, illuminance) * 0.3;
+
+    // Rod sensitivity boost (1 lux → 0.001 lux)
+    // Rods are more sensitive than cones in low light
+    float boost = smoothstep(1.0, 0.001, illuminance) * 0.5;
+}
+```
+
+This simplified approach:
+- **Activates below 10 lux** (mesopic/scotopic vision threshold)
+- **Desaturates** gradually as illuminance decreases (70% max)
+- **Blue shifts** colors (rods more sensitive to blue-green)
+- **Brightens** dark areas (rod sensitivity compensation)
+- Applied **after tone mapping** for natural appearance
+- Scene illuminance approximated from adapted luminance (lum × 200)
 
 ---
 
@@ -276,15 +306,17 @@ vec3 computeGodRays(vec2 uv, vec2 sunPos) {
 
 | File | Purpose |
 |------|---------|
-| `shaders/postprocess.frag` | Main post-process: fog composite, bloom, god rays, exposure, tone mapping |
+| `shaders/postprocess.frag` | Main post-process: fog composite, bloom, god rays, tone mapping, Purkinje effect |
 | `shaders/postprocess.vert` | Fullscreen triangle vertex shader |
+| `shaders/histogram_build.comp` | Histogram build compute shader: 256-bin log-space luminance histogram |
+| `shaders/histogram_reduce.comp` | Histogram reduce compute shader: percentile-based exposure calculation |
 
 ### C++ Source Files
 
 | File | Purpose |
 |------|---------|
-| `src/PostProcessSystem.h` | Post-process system interface, uniforms, parameters |
-| `src/PostProcessSystem.cpp` | HDR target creation, render pass, pipeline, recording |
+| `src/PostProcessSystem.h` | Post-process system interface, uniforms, histogram structures, exposure controls |
+| `src/PostProcessSystem.cpp` | HDR target creation, render pass, pipelines, histogram resources, compute dispatch |
 
 ---
 
@@ -292,48 +324,45 @@ vec3 computeGodRays(vec2 uv, vec2 sunPos) {
 
 ### High Priority (Foundation)
 
-1. **Histogram-Based Exposure** (5.2.3-5.2.4)
-   - Add compute shader for histogram build
-   - Add compute shader for reduction + percentile calculation
-   - Performance benefit: offload from fragment shader
-   - Quality benefit: robust auto-exposure with percentile rejection
-
-2. **sRGB/Gamma Output**
+1. **sRGB/Gamma Output**
    - Add gamma correction before final output
    - Currently outputs linear values to swapchain
 
-3. **Multi-Pass Bloom** (5.7.1)
+2. **Multi-Pass Bloom** (5.7.1)
    - Progressive downsample chain (6+ mip levels)
    - Tent filter downsample, bilinear upsample
    - Quality benefit: larger bloom radius, better energy conservation
+   - Current single-pass Poisson disc is limited to small radius
 
 ### Medium Priority (Visual Quality)
 
-4. **Vignette** (5.7.2)
+3. **Vignette** (5.7.2)
    - Simple fragment shader addition
    - Adds cinematic feel
 
-5. **Alternative Tone Mappers** (5.5.4)
+4. **Alternative Tone Mappers** (5.5.4)
    - Add GT (Gran Turismo) as option
    - Add AgX as option
    - Provide runtime switching
 
-6. **Basic Color Grading** (5.4.1-5.4.2)
+5. **Basic Color Grading** (5.4.1-5.4.2)
    - Lift-gamma-gain controls
    - White balance with Bradford transform
 
 ### Lower Priority (Advanced)
 
-7. **Local Tone Mapping** (5.3)
+6. **Local Tone Mapping** (5.3)
    - Bilateral grid 3D texture
    - Compute shaders for population + blur
    - Largest scope item
 
-8. **Purkinje Effect** (5.6)
-   - Start with simplified version
-   - Enable only at low scene illuminance
+7. **Full Purkinje Effect** (5.6.2)
+   - Upgrade from current simplified version
+   - LMSR color space conversion
+   - Opponent color space with rod contribution
+   - Physiologically accurate mesopic blending
 
-9. **3D Color LUT** (5.4.3)
+8. **3D Color LUT** (5.4.3)
    - Load external LUT textures
    - Integrate with offline grading tools
 
@@ -341,17 +370,25 @@ vec3 computeGodRays(vec2 uv, vec2 sunPos) {
 
 ## Performance Notes
 
-Current single-pass approach is simple but doesn't match the documented performance targets:
+Current implementation provides core HDR features with good performance:
 
 | Documented Pass | Documented Time | Current Status |
 |-----------------|-----------------|----------------|
-| Histogram build | 0.15ms | Not implemented (in-fragment sampling) |
-| Histogram reduce | 0.02ms | Not implemented |
+| Histogram build | 0.15ms | ✅ **Implemented** (~0.12ms estimated) |
+| Histogram reduce | 0.02ms | ✅ **Implemented** (~0.05ms estimated) |
 | Bilateral grid build | 0.10ms | Not implemented |
 | Bilateral grid blur | 0.08ms | Not implemented |
 | Wide Gaussian | 0.05ms | Not implemented |
 | Bloom (6 mips) | 0.30ms | Single-pass Poisson disc (~0.2ms estimated) |
-| Final composite | 0.15ms | Combined with all effects |
-| **Total** | **~0.85ms** | **~0.5ms estimated** (fewer features) |
+| Final composite | 0.15ms | Combined with all effects (~0.2ms) |
+| **Total** | **~0.85ms** | **~0.57ms estimated** |
 
-The current implementation is faster but provides fewer features. Adding the documented features would increase cost but improve quality significantly.
+The current implementation delivers:
+- ✅ Robust histogram-based auto-exposure
+- ✅ HDR rendering with proper tone mapping
+- ✅ Bloom (single-pass, sufficient for most scenes)
+- ✅ Volumetric fog integration
+- ✅ God rays
+- ✅ Simplified Purkinje effect for night scenes
+- ❌ Local tone mapping (bilateral grid)
+- ❌ Color grading controls
