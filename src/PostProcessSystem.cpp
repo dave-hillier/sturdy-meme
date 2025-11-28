@@ -1117,28 +1117,26 @@ void PostProcessSystem::destroyHistogramResources() {
 void PostProcessSystem::recordHistogramCompute(VkCommandBuffer cmd, uint32_t frameIndex, float deltaTime) {
     if (!autoExposureEnabled) return;
 
-    // Update histogram build parameters
+    // Update histogram parameters (HistogramReduceParams is a superset of HistogramBuildParams)
+    // Both shaders read from the same buffer, so we only need to write once
     float logRange = MAX_LOG_LUMINANCE - MIN_LOG_LUMINANCE;
-    HistogramBuildParams* buildParams = static_cast<HistogramBuildParams*>(histogramParamsMappedPtrs[frameIndex]);
-    buildParams->minLogLum = MIN_LOG_LUMINANCE;
-    buildParams->maxLogLum = MAX_LOG_LUMINANCE;
-    buildParams->invLogLumRange = 1.0f / logRange;
-    buildParams->pixelCount = extent.width * extent.height;
+    HistogramReduceParams* params = static_cast<HistogramReduceParams*>(histogramParamsMappedPtrs[frameIndex]);
+    params->minLogLum = MIN_LOG_LUMINANCE;
+    params->maxLogLum = MAX_LOG_LUMINANCE;
+    params->invLogLumRange = 1.0f / logRange;
+    params->pixelCount = extent.width * extent.height;
+    params->lowPercentile = LOW_PERCENTILE;
+    params->highPercentile = HIGH_PERCENTILE;
+    params->targetLuminance = TARGET_LUMINANCE;
+    params->deltaTime = deltaTime;
+    params->adaptSpeedUp = ADAPTATION_SPEED_UP;
+    params->adaptSpeedDown = ADAPTATION_SPEED_DOWN;
+    params->minExposure = MIN_EXPOSURE;
+    params->maxExposure = MAX_EXPOSURE;
 
-    // Update histogram reduce parameters (reuse same buffer, just write full struct)
-    HistogramReduceParams* reduceParams = static_cast<HistogramReduceParams*>(histogramParamsMappedPtrs[frameIndex]);
-    reduceParams->minLogLum = MIN_LOG_LUMINANCE;
-    reduceParams->maxLogLum = MAX_LOG_LUMINANCE;
-    reduceParams->invLogLumRange = 1.0f / logRange;
-    reduceParams->pixelCount = extent.width * extent.height;
-    reduceParams->lowPercentile = LOW_PERCENTILE;
-    reduceParams->highPercentile = HIGH_PERCENTILE;
-    reduceParams->targetLuminance = TARGET_LUMINANCE;
-    reduceParams->deltaTime = deltaTime;
-    reduceParams->adaptSpeedUp = ADAPTATION_SPEED_UP;
-    reduceParams->adaptSpeedDown = ADAPTATION_SPEED_DOWN;
-    reduceParams->minExposure = MIN_EXPOSURE;
-    reduceParams->maxExposure = MAX_EXPOSURE;
+    // Flush mapped memory to ensure CPU writes are visible to GPU
+    // (required if memory is not HOST_COHERENT)
+    vmaFlushAllocation(allocator, histogramParamsAllocations[frameIndex], 0, sizeof(HistogramReduceParams));
 
     // Transition HDR image to general layout for compute access
     VkImageMemoryBarrier hdrBarrier{};
