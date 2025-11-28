@@ -256,8 +256,8 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
 
     if (!froxelSystem.init(froxelInfo)) return false;
 
-    // Connect froxel volume to post-process system for compositing
-    postProcessSystem.setFroxelVolume(froxelSystem.getScatteringVolumeView(), froxelSystem.getVolumeSampler());
+    // Connect froxel volume to post-process system for compositing (use integrated volume)
+    postProcessSystem.setFroxelVolume(froxelSystem.getIntegratedVolumeView(), froxelSystem.getVolumeSampler());
     postProcessSystem.setFroxelParams(froxelSystem.getVolumetricFarPlane(), FroxelSystem::DEPTH_DISTRIBUTION);
     postProcessSystem.setFroxelEnabled(true);
 
@@ -2164,7 +2164,7 @@ bool Renderer::createDescriptorPool() {
     poolSizes[2].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     poolSizes[2].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 32);  // +6 grass, +6 light, +10 weather, +4 histogram (histogram + exposure buffers)
     poolSizes[3].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    poolSizes[3].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 12);  // atmosphere LUTs compute shaders + cloud map + histogram HDR input
+    poolSizes[3].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 16);  // atmosphere LUTs compute shaders + cloud map + histogram HDR input + froxel (3 per set)
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
