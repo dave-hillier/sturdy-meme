@@ -149,7 +149,16 @@ void main() {
     float snowAffinity = fragHeight;  // Tips catch more snow
     float snowCoverage = calculateVegetationSnowCoverage(ubo.snowAmount, snowMaskCoverage, N, snowAffinity);
 
-    // Apply snow to grass albedo
+    // Hide grass under snow - grass gets progressively buried from bottom to top
+    // Only discard fragments that are below the snow accumulation level
+    // This allows grass tips to poke through snow, creating a realistic effect
+    // Snow coverage of 0.5 means bottom 50% of grass is buried, etc.
+    float snowBurialLevel = snowCoverage * 1.2;  // Slightly more aggressive burial
+    if (fragHeight < snowBurialLevel) {
+        discard;  // This part of the grass blade is buried under snow
+    }
+
+    // Apply snow to grass albedo for remaining visible parts
     if (snowCoverage > 0.01) {
         albedo = snowyVegetationColor(albedo, ubo.snowColor.rgb, snowCoverage);
     }
