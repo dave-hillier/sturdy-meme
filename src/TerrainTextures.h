@@ -2,6 +2,7 @@
 
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
+#include <string>
 
 // Terrain textures - albedo and grass far LOD textures
 class TerrainTextures {
@@ -11,6 +12,7 @@ public:
         VmaAllocator allocator;
         VkQueue graphicsQueue;
         VkCommandPool commandPool;
+        std::string resourcePath;
     };
 
     TerrainTextures() = default;
@@ -38,6 +40,7 @@ private:
     VmaAllocator allocator = VK_NULL_HANDLE;
     VkQueue graphicsQueue = VK_NULL_HANDLE;
     VkCommandPool commandPool = VK_NULL_HANDLE;
+    std::string resourcePath;
 
     // Terrain albedo texture
     VkImage albedoImage = VK_NULL_HANDLE;

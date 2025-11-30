@@ -42,6 +42,7 @@ bool TerrainSystem::init(const InitInfo& info, const TerrainConfig& cfg) {
     texturesInfo.allocator = allocator;
     texturesInfo.graphicsQueue = graphicsQueue;
     texturesInfo.commandPool = commandPool;
+    texturesInfo.resourcePath = texturePath;
     if (!textures.init(texturesInfo)) return false;
 
     // Initialize CBT
