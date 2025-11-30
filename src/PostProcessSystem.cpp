@@ -600,7 +600,8 @@ bool PostProcessSystem::createCompositePipeline() {
 }
 
 void PostProcessSystem::recordPostProcess(VkCommandBuffer cmd, uint32_t frameIndex,
-                                          VkFramebuffer swapchainFB, float deltaTime) {
+                                          VkFramebuffer swapchainFB, float deltaTime,
+                                          PreEndCallback preEndCallback) {
     // Run histogram compute pass for auto-exposure (if enabled)
     recordHistogramCompute(cmd, frameIndex, deltaTime);
 
@@ -684,6 +685,11 @@ void PostProcessSystem::recordPostProcess(VkCommandBuffer cmd, uint32_t frameInd
 
     // Draw fullscreen triangle
     vkCmdDraw(cmd, 3, 1, 0, 0);
+
+    // Call pre-end callback (e.g., for GUI rendering)
+    if (preEndCallback) {
+        preEndCallback(cmd);
+    }
 
     vkCmdEndRenderPass(cmd);
 }

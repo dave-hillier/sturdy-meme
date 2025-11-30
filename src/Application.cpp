@@ -71,6 +71,20 @@ bool Application::init(const std::string& title, int width, int height) {
     // Initialize flag simulation
     initFlag();
 
+    // Initialize GUI system
+    if (!gui.init(window, renderer.getInstance(), renderer.getPhysicalDevice(),
+                  renderer.getDevice(), renderer.getGraphicsQueueFamily(),
+                  renderer.getGraphicsQueue(), renderer.getSwapchainRenderPass(),
+                  renderer.getSwapchainImageCount())) {
+        SDL_Log("Failed to initialize GUI system");
+        return false;
+    }
+
+    // Set GUI render callback
+    renderer.setGuiRenderCallback([this](VkCommandBuffer cmd) {
+        gui.endFrame(cmd);
+    });
+
     running = true;
     return true;
 }
@@ -84,7 +98,18 @@ void Application::run() {
         float deltaTime = std::chrono::duration<float>(currentTime - lastTime).count();
         lastTime = currentTime;
 
+        // Store for GUI
+        lastDeltaTime = deltaTime;
+        if (deltaTime > 0.0f) {
+            currentFps = currentFps * 0.95f + (1.0f / deltaTime) * 0.05f;
+        }
+
         processEvents();
+
+        // Begin GUI frame
+        gui.beginFrame();
+        gui.render(renderer, lastDeltaTime, currentFps);
+
         handleInput(deltaTime);
         handleGamepadInput(deltaTime);
 
@@ -154,6 +179,8 @@ void Application::run() {
 }
 
 void Application::shutdown() {
+    renderer.waitIdle();
+    gui.shutdown();
     physics.shutdown();
     renderer.shutdown();
     closeGamepad();
@@ -169,6 +196,9 @@ void Application::shutdown() {
 void Application::processEvents() {
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
+        // Pass events to GUI first
+        gui.processEvent(event);
+
         switch (event.type) {
             case SDL_EVENT_QUIT:
                 running = false;
@@ -176,6 +206,9 @@ void Application::processEvents() {
             case SDL_EVENT_KEY_DOWN:
                 if (event.key.scancode == SDL_SCANCODE_ESCAPE) {
                     running = false;
+                }
+                else if (event.key.scancode == SDL_SCANCODE_F1) {
+                    gui.toggleVisibility();
                 }
                 else if (event.key.scancode == SDL_SCANCODE_1) {
                     renderer.setTimeOfDay(0.25f);
@@ -339,11 +372,16 @@ void Application::processEvents() {
 }
 
 void Application::handleInput(float deltaTime) {
-    const bool* keyState = SDL_GetKeyboardState(nullptr);
-
     // Reset movement accumulator at start of input handling
     accumulatedMoveDir = glm::vec3(0.0f);
     wantsJump = false;
+
+    // Skip game input if GUI wants it
+    if (gui.wantsInput()) {
+        return;
+    }
+
+    const bool* keyState = SDL_GetKeyboardState(nullptr);
 
     if (thirdPersonMode) {
         handleThirdPersonInput(deltaTime, keyState);
