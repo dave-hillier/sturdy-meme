@@ -103,6 +103,8 @@ private:
     std::unique_ptr<JPH::CharacterVirtual> character;
     float characterHeight = 1.8f;
     float characterRadius = 0.3f;
+    glm::vec3 characterDesiredVelocity{0.0f};
+    bool characterWantsJump = false;
 
     // Accumulated time for fixed timestep
     float accumulatedTime = 0.0f;
