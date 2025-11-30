@@ -8,6 +8,7 @@
 #include "Player.h"
 #include "PhysicsSystem.h"
 #include "ClothSimulation.h"
+#include "GuiSystem.h"
 
 class Application {
 public:
@@ -48,6 +49,11 @@ private:
     ClothSimulation clothSim;
     size_t flagClothSceneIndex = 0;
     size_t flagPoleSceneIndex = 0;
+
+    // GUI system
+    GuiSystem gui;
+    float currentFps = 60.0f;
+    float lastDeltaTime = 0.016f;
 
     bool running = false;
     bool thirdPersonMode = false;  // Toggle between free camera and third-person

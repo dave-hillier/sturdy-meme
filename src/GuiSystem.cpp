@@ -1,0 +1,785 @@
+#include "GuiSystem.h"
+#include "Renderer.h"
+
+#include <imgui.h>
+#include <imgui_impl_sdl3.h>
+#include <imgui_impl_vulkan.h>
+
+#include <cmath>
+#include <algorithm>
+
+static void checkVkResult(VkResult err) {
+    if (err != VK_SUCCESS) {
+        SDL_Log("ImGui Vulkan Error: VkResult = %d", err);
+    }
+}
+
+bool GuiSystem::init(SDL_Window* window, VkInstance instance, VkPhysicalDevice physicalDevice,
+                     VkDevice device, uint32_t graphicsQueueFamily, VkQueue graphicsQueue,
+                     VkRenderPass renderPass, uint32_t imageCount) {
+
+    // Create descriptor pool for ImGui
+    VkDescriptorPoolSize poolSizes[] = {
+        { VK_DESCRIPTOR_TYPE_SAMPLER, 1000 },
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000 },
+        { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000 },
+        { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000 },
+        { VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000 },
+        { VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000 },
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000 },
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000 },
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000 },
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000 },
+        { VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000 }
+    };
+
+    VkDescriptorPoolCreateInfo poolInfo = {};
+    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+    poolInfo.maxSets = 1000;
+    poolInfo.poolSizeCount = std::size(poolSizes);
+    poolInfo.pPoolSizes = poolSizes;
+
+    if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &imguiPool) != VK_SUCCESS) {
+        SDL_Log("Failed to create ImGui descriptor pool");
+        return false;
+    }
+
+    // Initialize ImGui context
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+
+    // Setup Platform/Renderer backends
+    ImGui_ImplSDL3_InitForVulkan(window);
+
+    ImGui_ImplVulkan_InitInfo initInfo = {};
+    initInfo.Instance = instance;
+    initInfo.PhysicalDevice = physicalDevice;
+    initInfo.Device = device;
+    initInfo.QueueFamily = graphicsQueueFamily;
+    initInfo.Queue = graphicsQueue;
+    initInfo.DescriptorPool = imguiPool;
+    initInfo.MinImageCount = imageCount;
+    initInfo.ImageCount = imageCount;
+    initInfo.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+    initInfo.RenderPass = renderPass;
+    initInfo.CheckVkResultFn = checkVkResult;
+
+    if (!ImGui_ImplVulkan_Init(&initInfo)) {
+        SDL_Log("Failed to initialize ImGui Vulkan backend");
+        return false;
+    }
+
+    // Setup custom style
+    setupStyle();
+
+    SDL_Log("ImGui initialized successfully");
+    return true;
+}
+
+void GuiSystem::shutdown() {
+    ImGui_ImplVulkan_Shutdown();
+    ImGui_ImplSDL3_Shutdown();
+    ImGui::DestroyContext();
+
+    if (imguiPool != VK_NULL_HANDLE) {
+        // Note: Pool is destroyed with device
+        imguiPool = VK_NULL_HANDLE;
+    }
+}
+
+void GuiSystem::setupStyle() {
+    ImGuiStyle& style = ImGui::GetStyle();
+    ImVec4* colors = style.Colors;
+
+    // Modern dark theme with blue accent
+    ImVec4 bgDark = ImVec4(0.08f, 0.08f, 0.10f, 0.95f);
+    ImVec4 bgMid = ImVec4(0.12f, 0.12f, 0.14f, 1.0f);
+    ImVec4 bgLight = ImVec4(0.18f, 0.18f, 0.22f, 1.0f);
+    ImVec4 accent = ImVec4(0.26f, 0.59f, 0.98f, 1.0f);
+    ImVec4 accentHover = ImVec4(0.36f, 0.69f, 1.0f, 1.0f);
+    ImVec4 accentActive = ImVec4(0.16f, 0.49f, 0.88f, 1.0f);
+    ImVec4 textBright = ImVec4(0.95f, 0.95f, 0.97f, 1.0f);
+    ImVec4 textDim = ImVec4(0.60f, 0.60f, 0.65f, 1.0f);
+
+    colors[ImGuiCol_WindowBg] = bgDark;
+    colors[ImGuiCol_PopupBg] = bgMid;
+    colors[ImGuiCol_Border] = ImVec4(0.25f, 0.25f, 0.30f, 0.50f);
+    colors[ImGuiCol_BorderShadow] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
+
+    colors[ImGuiCol_FrameBg] = bgMid;
+    colors[ImGuiCol_FrameBgHovered] = bgLight;
+    colors[ImGuiCol_FrameBgActive] = ImVec4(0.22f, 0.22f, 0.28f, 1.0f);
+
+    colors[ImGuiCol_TitleBg] = bgDark;
+    colors[ImGuiCol_TitleBgActive] = bgMid;
+    colors[ImGuiCol_TitleBgCollapsed] = bgDark;
+
+    colors[ImGuiCol_MenuBarBg] = bgMid;
+    colors[ImGuiCol_ScrollbarBg] = bgDark;
+    colors[ImGuiCol_ScrollbarGrab] = bgLight;
+    colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.28f, 0.28f, 0.34f, 1.0f);
+    colors[ImGuiCol_ScrollbarGrabActive] = accent;
+
+    colors[ImGuiCol_CheckMark] = accent;
+    colors[ImGuiCol_SliderGrab] = accent;
+    colors[ImGuiCol_SliderGrabActive] = accentActive;
+
+    colors[ImGuiCol_Button] = bgLight;
+    colors[ImGuiCol_ButtonHovered] = ImVec4(0.28f, 0.28f, 0.34f, 1.0f);
+    colors[ImGuiCol_ButtonActive] = accent;
+
+    colors[ImGuiCol_Header] = ImVec4(0.20f, 0.20f, 0.24f, 1.0f);
+    colors[ImGuiCol_HeaderHovered] = ImVec4(0.26f, 0.26f, 0.32f, 1.0f);
+    colors[ImGuiCol_HeaderActive] = accent;
+
+    colors[ImGuiCol_Separator] = ImVec4(0.25f, 0.25f, 0.30f, 0.50f);
+    colors[ImGuiCol_SeparatorHovered] = accent;
+    colors[ImGuiCol_SeparatorActive] = accentActive;
+
+    colors[ImGuiCol_ResizeGrip] = ImVec4(0.26f, 0.59f, 0.98f, 0.20f);
+    colors[ImGuiCol_ResizeGripHovered] = accentHover;
+    colors[ImGuiCol_ResizeGripActive] = accentActive;
+
+    colors[ImGuiCol_Tab] = bgLight;
+    colors[ImGuiCol_TabHovered] = accentHover;
+    colors[ImGuiCol_TabSelected] = accent;
+    colors[ImGuiCol_TabDimmed] = bgMid;
+    colors[ImGuiCol_TabDimmedSelected] = bgLight;
+
+    colors[ImGuiCol_PlotLines] = accent;
+    colors[ImGuiCol_PlotLinesHovered] = accentHover;
+    colors[ImGuiCol_PlotHistogram] = accent;
+    colors[ImGuiCol_PlotHistogramHovered] = accentHover;
+
+    colors[ImGuiCol_TableHeaderBg] = bgMid;
+    colors[ImGuiCol_TableBorderStrong] = ImVec4(0.25f, 0.25f, 0.30f, 1.0f);
+    colors[ImGuiCol_TableBorderLight] = ImVec4(0.20f, 0.20f, 0.24f, 1.0f);
+    colors[ImGuiCol_TableRowBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
+    colors[ImGuiCol_TableRowBgAlt] = ImVec4(1.0f, 1.0f, 1.0f, 0.02f);
+
+    colors[ImGuiCol_Text] = textBright;
+    colors[ImGuiCol_TextDisabled] = textDim;
+    colors[ImGuiCol_TextSelectedBg] = ImVec4(0.26f, 0.59f, 0.98f, 0.35f);
+
+    colors[ImGuiCol_DragDropTarget] = accentHover;
+    colors[ImGuiCol_NavHighlight] = accent;
+
+    // Rounding and spacing for modern look
+    style.WindowRounding = 8.0f;
+    style.ChildRounding = 6.0f;
+    style.FrameRounding = 4.0f;
+    style.PopupRounding = 6.0f;
+    style.ScrollbarRounding = 8.0f;
+    style.GrabRounding = 4.0f;
+    style.TabRounding = 4.0f;
+
+    style.WindowPadding = ImVec2(12, 12);
+    style.FramePadding = ImVec2(8, 4);
+    style.ItemSpacing = ImVec2(8, 6);
+    style.ItemInnerSpacing = ImVec2(6, 4);
+    style.IndentSpacing = 20.0f;
+
+    style.ScrollbarSize = 12.0f;
+    style.GrabMinSize = 10.0f;
+
+    style.WindowBorderSize = 1.0f;
+    style.ChildBorderSize = 1.0f;
+    style.PopupBorderSize = 1.0f;
+    style.FrameBorderSize = 0.0f;
+    style.TabBorderSize = 0.0f;
+
+    style.WindowTitleAlign = ImVec2(0.5f, 0.5f);
+    style.WindowMenuButtonPosition = ImGuiDir_None;
+
+    // Scale for high DPI
+    style.ScaleAllSizes(1.0f);
+}
+
+void GuiSystem::processEvent(const SDL_Event& event) {
+    ImGui_ImplSDL3_ProcessEvent(&event);
+}
+
+void GuiSystem::beginFrame() {
+    ImGui_ImplVulkan_NewFrame();
+    ImGui_ImplSDL3_NewFrame();
+    ImGui::NewFrame();
+}
+
+void GuiSystem::render(Renderer& renderer, float deltaTime, float fps) {
+    if (!visible) return;
+
+    // Update frame time history
+    frameTimeHistory[frameTimeIndex] = deltaTime * 1000.0f;
+    frameTimeIndex = (frameTimeIndex + 1) % 120;
+
+    // Calculate average
+    float sum = 0.0f;
+    for (int i = 0; i < 120; i++) {
+        sum += frameTimeHistory[i];
+    }
+    avgFrameTime = sum / 120.0f;
+
+    // Main control panel
+    ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoCollapse;
+
+    ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(340, 680), ImGuiCond_FirstUseEver);
+
+    if (ImGui::Begin("Engine Controls", &visible, windowFlags)) {
+        renderDashboard(renderer, fps);
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (ImGui::BeginTabBar("ControlTabs")) {
+            if (ImGui::BeginTabItem("Time")) {
+                renderTimeSection(renderer);
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Weather")) {
+                renderWeatherSection(renderer);
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Environment")) {
+                renderEnvironmentSection(renderer);
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Post FX")) {
+                renderPostProcessSection(renderer);
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Terrain")) {
+                renderTerrainSection(renderer);
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Debug")) {
+                renderDebugSection(renderer);
+                ImGui::EndTabItem();
+            }
+            ImGui::EndTabBar();
+        }
+    }
+    ImGui::End();
+
+    // Help overlay
+    if (showHelp) {
+        renderHelpOverlay();
+    }
+}
+
+void GuiSystem::endFrame(VkCommandBuffer cmd) {
+    ImGui::Render();
+    ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
+}
+
+bool GuiSystem::wantsInput() const {
+    ImGuiIO& io = ImGui::GetIO();
+    return io.WantCaptureMouse || io.WantCaptureKeyboard;
+}
+
+void GuiSystem::renderDashboard(Renderer& renderer, float fps) {
+    // Performance metrics header
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.8f, 1.0f, 1.0f));
+    ImGui::Text("PERFORMANCE");
+    ImGui::PopStyleColor();
+
+    ImGui::Separator();
+
+    // FPS and frame time in columns
+    ImGui::Columns(2, nullptr, false);
+    ImGui::SetColumnWidth(0, 160);
+
+    ImGui::Text("FPS");
+    ImGui::PushStyleColor(ImGuiCol_Text, fps > 55.0f ? ImVec4(0.4f, 0.9f, 0.4f, 1.0f) :
+                                          fps > 30.0f ? ImVec4(0.9f, 0.9f, 0.4f, 1.0f) :
+                                                        ImVec4(0.9f, 0.4f, 0.4f, 1.0f));
+    ImGui::SameLine(80);
+    ImGui::Text("%.0f", fps);
+    ImGui::PopStyleColor();
+
+    ImGui::NextColumn();
+
+    ImGui::Text("Frame Time");
+    ImGui::SameLine(80);
+    ImGui::Text("%.2f ms", avgFrameTime);
+
+    ImGui::Columns(1);
+
+    // Frame time graph
+    ImGui::PlotLines("##frametime", frameTimeHistory, 120, frameTimeIndex,
+                     nullptr, 0.0f, 33.3f, ImVec2(-1, 40));
+
+    // Quick stats
+    ImGui::Spacing();
+    ImGui::Columns(2, nullptr, false);
+    ImGui::SetColumnWidth(0, 160);
+
+    ImGui::Text("Terrain Nodes");
+    ImGui::SameLine(100);
+    ImGui::Text("%u", renderer.getTerrainNodeCount());
+
+    ImGui::NextColumn();
+
+    float tod = renderer.getTimeOfDay();
+    int h = static_cast<int>(tod * 24.0f);
+    int m = static_cast<int>((tod * 24.0f - h) * 60.0f);
+    ImGui::Text("Time");
+    ImGui::SameLine(60);
+    ImGui::Text("%02d:%02d", h, m);
+
+    ImGui::Columns(1);
+
+    // Help toggle
+    ImGui::Spacing();
+    if (ImGui::Button(showHelp ? "Hide Help (H)" : "Show Help (H)", ImVec2(-1, 0))) {
+        showHelp = !showHelp;
+    }
+}
+
+void GuiSystem::renderTimeSection(Renderer& renderer) {
+    ImGui::Spacing();
+
+    // Time of day slider
+    float timeOfDay = renderer.getTimeOfDay();
+    if (ImGui::SliderFloat("Time of Day", &timeOfDay, 0.0f, 1.0f, "%.3f")) {
+        renderer.setTimeOfDay(timeOfDay);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("0.0 = Midnight, 0.25 = Sunrise, 0.5 = Noon, 0.75 = Sunset");
+    }
+
+    // Quick time buttons
+    ImGui::Text("Presets:");
+    ImGui::SameLine();
+    if (ImGui::Button("Dawn")) renderer.setTimeOfDay(0.25f);
+    ImGui::SameLine();
+    if (ImGui::Button("Noon")) renderer.setTimeOfDay(0.5f);
+    ImGui::SameLine();
+    if (ImGui::Button("Dusk")) renderer.setTimeOfDay(0.75f);
+    ImGui::SameLine();
+    if (ImGui::Button("Night")) renderer.setTimeOfDay(0.0f);
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Time scale
+    float timeScale = renderer.getTimeScale();
+    if (ImGui::SliderFloat("Time Scale", &timeScale, 0.0f, 100.0f, "%.1fx", ImGuiSliderFlags_Logarithmic)) {
+        renderer.setTimeScale(timeScale);
+    }
+
+    if (ImGui::Button("Resume Real-Time")) {
+        renderer.resumeAutoTime();
+        renderer.setTimeScale(1.0f);
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Date controls
+    ImGui::Text("Date (affects sun position):");
+    int year = renderer.getCurrentYear();
+    int month = renderer.getCurrentMonth();
+    int day = renderer.getCurrentDay();
+
+    bool dateChanged = false;
+    ImGui::SetNextItemWidth(80);
+    if (ImGui::InputInt("Year", &year, 1, 10)) dateChanged = true;
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(60);
+    if (ImGui::InputInt("Month", &month, 1, 1)) dateChanged = true;
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(60);
+    if (ImGui::InputInt("Day", &day, 1, 1)) dateChanged = true;
+
+    if (dateChanged) {
+        month = std::clamp(month, 1, 12);
+        day = std::clamp(day, 1, 31);
+        renderer.setDate(year, month, day);
+    }
+
+    // Season presets
+    ImGui::Text("Season:");
+    ImGui::SameLine();
+    if (ImGui::Button("Spring")) renderer.setDate(renderer.getCurrentYear(), 3, 20);
+    ImGui::SameLine();
+    if (ImGui::Button("Summer")) renderer.setDate(renderer.getCurrentYear(), 6, 21);
+    ImGui::SameLine();
+    if (ImGui::Button("Autumn")) renderer.setDate(renderer.getCurrentYear(), 9, 22);
+    ImGui::SameLine();
+    if (ImGui::Button("Winter")) renderer.setDate(renderer.getCurrentYear(), 12, 21);
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Location
+    GeographicLocation loc = renderer.getLocation();
+    float lat = static_cast<float>(loc.latitude);
+    float lon = static_cast<float>(loc.longitude);
+    bool locChanged = false;
+
+    if (ImGui::SliderFloat("Latitude", &lat, -90.0f, 90.0f, "%.1f")) locChanged = true;
+    if (ImGui::SliderFloat("Longitude", &lon, -180.0f, 180.0f, "%.1f")) locChanged = true;
+
+    if (locChanged) {
+        renderer.setLocation({static_cast<double>(lat), static_cast<double>(lon)});
+    }
+
+    // Location presets
+    ImGui::Text("Location:");
+    if (ImGui::Button("London")) {
+        renderer.setLocation({51.5f, -0.1f});
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("New York")) {
+        renderer.setLocation({40.7f, -74.0f});
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Tokyo")) {
+        renderer.setLocation({35.7f, 139.7f});
+    }
+    if (ImGui::Button("Sydney")) {
+        renderer.setLocation({-33.9f, 151.2f});
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Arctic")) {
+        renderer.setLocation({71.0f, 25.0f});
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Equator")) {
+        renderer.setLocation({0.0f, 0.0f});
+    }
+}
+
+void GuiSystem::renderWeatherSection(Renderer& renderer) {
+    ImGui::Spacing();
+
+    // Weather type
+    const char* weatherTypes[] = { "Rain", "Snow" };
+    int weatherType = static_cast<int>(renderer.getWeatherType());
+    if (ImGui::Combo("Weather Type", &weatherType, weatherTypes, 2)) {
+        renderer.setWeatherType(static_cast<uint32_t>(weatherType));
+    }
+
+    // Intensity
+    float intensity = renderer.getIntensity();
+    if (ImGui::SliderFloat("Intensity", &intensity, 0.0f, 1.0f)) {
+        renderer.setWeatherIntensity(intensity);
+    }
+
+    // Quick intensity buttons
+    ImGui::Text("Presets:");
+    ImGui::SameLine();
+    if (ImGui::Button("Clear")) renderer.setWeatherIntensity(0.0f);
+    ImGui::SameLine();
+    if (ImGui::Button("Light")) renderer.setWeatherIntensity(0.3f);
+    ImGui::SameLine();
+    if (ImGui::Button("Medium")) renderer.setWeatherIntensity(0.6f);
+    ImGui::SameLine();
+    if (ImGui::Button("Heavy")) renderer.setWeatherIntensity(1.0f);
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Snow coverage
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.7f, 0.85f, 1.0f, 1.0f));
+    ImGui::Text("SNOW COVERAGE");
+    ImGui::PopStyleColor();
+
+    float snowAmount = renderer.getSnowAmount();
+    if (ImGui::SliderFloat("Snow Amount", &snowAmount, 0.0f, 1.0f)) {
+        renderer.setSnowAmount(snowAmount);
+    }
+
+    glm::vec3 snowColor = renderer.getSnowColor();
+    float sc[3] = {snowColor.r, snowColor.g, snowColor.b};
+    if (ImGui::ColorEdit3("Snow Color", sc)) {
+        renderer.setSnowColor(glm::vec3(sc[0], sc[1], sc[2]));
+    }
+
+    // Environment settings for snow
+    auto& env = renderer.getEnvironmentSettings();
+
+    if (ImGui::SliderFloat("Snow Roughness", &env.snowRoughness, 0.0f, 1.0f)) {}
+    if (ImGui::SliderFloat("Accumulation Rate", &env.snowAccumulationRate, 0.0f, 1.0f)) {}
+    if (ImGui::SliderFloat("Melt Rate", &env.snowMeltRate, 0.0f, 1.0f)) {}
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Wind settings
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.6f, 0.9f, 0.7f, 1.0f));
+    ImGui::Text("WIND");
+    ImGui::PopStyleColor();
+
+    float windDir[2] = {env.windDirection.x, env.windDirection.y};
+    if (ImGui::SliderFloat2("Direction", windDir, -1.0f, 1.0f)) {
+        env.windDirection = glm::vec2(windDir[0], windDir[1]);
+    }
+
+    if (ImGui::SliderFloat("Strength", &env.windStrength, 0.0f, 3.0f)) {}
+    if (ImGui::SliderFloat("Speed", &env.windSpeed, 0.0f, 5.0f)) {}
+    if (ImGui::SliderFloat("Gust Frequency", &env.gustFrequency, 0.0f, 2.0f)) {}
+    if (ImGui::SliderFloat("Gust Amplitude", &env.gustAmplitude, 0.0f, 2.0f)) {}
+}
+
+void GuiSystem::renderEnvironmentSection(Renderer& renderer) {
+    ImGui::Spacing();
+
+    // Fog controls
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.7f, 0.7f, 0.9f, 1.0f));
+    ImGui::Text("VOLUMETRIC FOG");
+    ImGui::PopStyleColor();
+
+    bool fogEnabled = renderer.isFogEnabled();
+    if (ImGui::Checkbox("Enable Fog", &fogEnabled)) {
+        renderer.setFogEnabled(fogEnabled);
+    }
+
+    if (fogEnabled) {
+        float fogDensity = renderer.getFogDensity();
+        if (ImGui::SliderFloat("Fog Density", &fogDensity, 0.0f, 0.1f, "%.4f")) {
+            renderer.setFogDensity(fogDensity);
+        }
+
+        // Fog presets
+        ImGui::Text("Presets:");
+        ImGui::SameLine();
+        if (ImGui::Button("None##fog")) renderer.setFogDensity(0.0f);
+        ImGui::SameLine();
+        if (ImGui::Button("Light##fog")) renderer.setFogDensity(0.005f);
+        ImGui::SameLine();
+        if (ImGui::Button("Dense##fog")) renderer.setFogDensity(0.02f);
+        ImGui::SameLine();
+        if (ImGui::Button("Thick##fog")) renderer.setFogDensity(0.05f);
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Leaf system
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.9f, 0.7f, 0.5f, 1.0f));
+    ImGui::Text("FALLING LEAVES");
+    ImGui::PopStyleColor();
+
+    float leafIntensity = renderer.getLeafIntensity();
+    if (ImGui::SliderFloat("Leaf Intensity", &leafIntensity, 0.0f, 1.0f)) {
+        renderer.setLeafIntensity(leafIntensity);
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Cloud style
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.9f, 0.9f, 0.7f, 1.0f));
+    ImGui::Text("CLOUDS");
+    ImGui::PopStyleColor();
+
+    bool paraboloid = renderer.isUsingParaboloidClouds();
+    if (ImGui::Checkbox("Paraboloid LUT Clouds", &paraboloid)) {
+        renderer.toggleCloudStyle();
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Toggle between procedural and paraboloid LUT hybrid cloud rendering");
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Grass interaction
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.9f, 0.5f, 1.0f));
+    ImGui::Text("GRASS INTERACTION");
+    ImGui::PopStyleColor();
+
+    auto& env = renderer.getEnvironmentSettings();
+    if (ImGui::SliderFloat("Displacement Decay", &env.grassDisplacementDecay, 0.1f, 5.0f)) {}
+    if (ImGui::SliderFloat("Max Displacement", &env.grassMaxDisplacement, 0.0f, 2.0f)) {}
+}
+
+void GuiSystem::renderPostProcessSection(Renderer& renderer) {
+    ImGui::Spacing();
+
+    // Note: We would need to add getters/setters to PostProcessSystem
+    // For now, show placeholders or use environment settings
+
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.8f, 0.5f, 1.0f));
+    ImGui::Text("BLOOM");
+    ImGui::PopStyleColor();
+
+    ImGui::Text("(Controls require PostProcessSystem exposure)");
+    ImGui::TextDisabled("Bloom is enabled by default");
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.9f, 0.6f, 1.0f));
+    ImGui::Text("GOD RAYS");
+    ImGui::PopStyleColor();
+
+    ImGui::TextDisabled("God rays follow sun position");
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.8f, 1.0f, 1.0f));
+    ImGui::Text("EXPOSURE");
+    ImGui::PopStyleColor();
+
+    ImGui::TextDisabled("Auto-exposure is active");
+    ImGui::TextDisabled("Histogram-based adaptation");
+}
+
+void GuiSystem::renderTerrainSection(Renderer& renderer) {
+    ImGui::Spacing();
+
+    // Terrain info
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.6f, 0.8f, 0.6f, 1.0f));
+    ImGui::Text("TERRAIN SYSTEM");
+    ImGui::PopStyleColor();
+
+    const auto& terrain = renderer.getTerrainSystem();
+    const auto& config = terrain.getConfig();
+
+    ImGui::Text("Size: %.0f x %.0f meters", config.size, config.size);
+    ImGui::Text("Height Scale: %.1f", config.heightScale);
+    ImGui::Text("Active Nodes: %u", renderer.getTerrainNodeCount());
+    ImGui::Text("Max Depth: %d", config.maxDepth);
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Wireframe toggle
+    bool wireframe = renderer.isTerrainWireframeMode();
+    if (ImGui::Checkbox("Wireframe Mode", &wireframe)) {
+        renderer.toggleTerrainWireframe();
+    }
+
+    ImGui::Spacing();
+
+    // Height query demo
+    ImGui::Text("Height at origin: %.2f", renderer.getTerrainHeightAt(0.0f, 0.0f));
+}
+
+void GuiSystem::renderDebugSection(Renderer& renderer) {
+    ImGui::Spacing();
+
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.6f, 0.6f, 1.0f));
+    ImGui::Text("DEBUG VISUALIZATIONS");
+    ImGui::PopStyleColor();
+
+    bool cascadeDebug = renderer.isShowingCascadeDebug();
+    if (ImGui::Checkbox("Shadow Cascade Debug", &cascadeDebug)) {
+        renderer.toggleCascadeDebug();
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Shows colored overlay for each shadow cascade");
+    }
+
+    bool snowDepthDebug = renderer.isShowingSnowDepthDebug();
+    if (ImGui::Checkbox("Snow Depth Debug", &snowDepthDebug)) {
+        renderer.toggleSnowDepthDebug();
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Shows snow accumulation depth as heat map");
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.8f, 0.5f, 1.0f));
+    ImGui::Text("SYSTEM INFO");
+    ImGui::PopStyleColor();
+
+    ImGui::Text("Renderer: Vulkan");
+    ImGui::Text("Shadow Cascades: 4");
+    ImGui::Text("Shadow Map Size: 2048");
+    ImGui::Text("Max Frames in Flight: 2");
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Keyboard shortcuts reference
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.7f, 0.7f, 0.7f, 1.0f));
+    ImGui::Text("KEYBOARD SHORTCUTS");
+    ImGui::PopStyleColor();
+
+    ImGui::BulletText("F1 - Toggle GUI");
+    ImGui::BulletText("Tab - Toggle camera mode");
+    ImGui::BulletText("1-4 - Time presets");
+    ImGui::BulletText("+/- - Time scale");
+    ImGui::BulletText("C - Cycle weather");
+    ImGui::BulletText("Z/X - Weather intensity");
+    ImGui::BulletText(",/. - Snow amount");
+    ImGui::BulletText("T - Terrain wireframe");
+    ImGui::BulletText("6 - Cascade debug");
+    ImGui::BulletText("7 - Snow depth debug");
+    ImGui::BulletText("[ ] - Fog density");
+    ImGui::BulletText("\\ - Toggle fog");
+    ImGui::BulletText("F - Spawn confetti");
+}
+
+void GuiSystem::renderHelpOverlay() {
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration |
+                             ImGuiWindowFlags_AlwaysAutoResize |
+                             ImGuiWindowFlags_NoSavedSettings |
+                             ImGuiWindowFlags_NoFocusOnAppearing |
+                             ImGuiWindowFlags_NoNav |
+                             ImGuiWindowFlags_NoMove;
+
+    ImGui::SetNextWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x * 0.5f,
+                                   ImGui::GetIO().DisplaySize.y * 0.5f),
+                            ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowBgAlpha(0.9f);
+
+    if (ImGui::Begin("Help", &showHelp, flags)) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 0.8f, 1.0f, 1.0f));
+        ImGui::Text("VULKAN GAME ENGINE");
+        ImGui::PopStyleColor();
+
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        ImGui::Text("CAMERA CONTROLS");
+        ImGui::BulletText("Free Camera: WASD + Arrow keys");
+        ImGui::BulletText("Third Person: WASD moves player");
+        ImGui::BulletText("Space: Jump (3rd person) / Up (free cam)");
+        ImGui::BulletText("Tab: Switch camera mode");
+
+        ImGui::Spacing();
+        ImGui::Text("GAMEPAD CONTROLS");
+        ImGui::BulletText("Left Stick: Move");
+        ImGui::BulletText("Right Stick: Look / Orbit");
+        ImGui::BulletText("A/B/X/Y: Time presets");
+        ImGui::BulletText("Bumpers: Up/Down or Zoom");
+
+        ImGui::Spacing();
+        ImGui::Text("GUI");
+        ImGui::BulletText("F1: Toggle this panel");
+        ImGui::BulletText("Click and drag sliders");
+        ImGui::BulletText("Ctrl+Click for precise input");
+
+        ImGui::Spacing();
+        if (ImGui::Button("Close (H)", ImVec2(-1, 0))) {
+            showHelp = false;
+        }
+    }
+    ImGui::End();
+}

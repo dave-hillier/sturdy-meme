@@ -13,6 +13,10 @@
     "vk-bootstrap",
     "vulkan-memory-allocator",
     "joltphysics",
-    "spirv-reflect"
+    "spirv-reflect",
+    {
+      "name": "imgui",
+      "features": ["sdl3-binding", "vulkan-binding", "docking-experimental"]
+    }
   ]
 }

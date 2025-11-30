@@ -10,6 +10,7 @@ find_package(glm CONFIG REQUIRED)
 find_package(vk-bootstrap CONFIG REQUIRED)
 find_package(VulkanMemoryAllocator CONFIG REQUIRED)
 find_package(Jolt CONFIG REQUIRED)
+find_package(imgui CONFIG REQUIRED)
 
 find_path(STB_INCLUDE_DIRS "stb_image.h")
 
@@ -49,6 +50,7 @@ set(SOURCES
     src/ClothSimulation.cpp
     src/SnowMaskSystem.cpp
     src/VolumetricSnowSystem.cpp
+    src/GuiSystem.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
@@ -66,6 +68,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     vk-bootstrap::vk-bootstrap
     GPUOpen::VulkanMemoryAllocator
     Jolt::Jolt
+    imgui::imgui
 )
 
 set_target_properties(${PROJECT_NAME} PROPERTIES

@@ -386,6 +386,10 @@ void Renderer::setPlayerPosition(const glm::vec3& position, float radius) {
     playerCapsuleRadius = radius;
 }
 
+uint32_t Renderer::getGraphicsQueueFamily() const {
+    return vkbDevice.get_queue_index(vkb::QueueType::graphics).value();
+}
+
 void Renderer::shutdown() {
     if (device != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(device);
@@ -2606,8 +2610,8 @@ void Renderer::render(const Camera& camera) {
     bloomSystem.setThreshold(postProcessSystem.getBloomThreshold());
     bloomSystem.recordBloomPass(cmd, postProcessSystem.getHDRColorView());
 
-    // Post-process pass
-    postProcessSystem.recordPostProcess(cmd, currentFrame, framebuffers[imageIndex], deltaTime);
+    // Post-process pass (with optional GUI overlay callback)
+    postProcessSystem.recordPostProcess(cmd, currentFrame, framebuffers[imageIndex], deltaTime, guiRenderCallback);
 
     vkEndCommandBuffer(cmd);
 

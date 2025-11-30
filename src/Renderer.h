@@ -7,6 +7,7 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
+#include <functional>
 
 #include "Camera.h"
 #include "GrassSystem.h"
@@ -55,6 +56,19 @@ public:
 
     uint32_t getWidth() const { return swapchainExtent.width; }
     uint32_t getHeight() const { return swapchainExtent.height; }
+
+    // Vulkan handle getters for GUI integration
+    VkInstance getInstance() const { return instance; }
+    VkPhysicalDevice getPhysicalDevice() const { return physicalDevice; }
+    VkDevice getDevice() const { return device; }
+    VkQueue getGraphicsQueue() const { return graphicsQueue; }
+    uint32_t getGraphicsQueueFamily() const;
+    VkRenderPass getSwapchainRenderPass() const { return renderPass; }
+    uint32_t getSwapchainImageCount() const { return static_cast<uint32_t>(swapchainImages.size()); }
+
+    // GUI rendering callback (called during swapchain render pass)
+    using GuiRenderCallback = std::function<void(VkCommandBuffer)>;
+    void setGuiRenderCallback(GuiRenderCallback callback) { guiRenderCallback = callback; }
 
     void setTimeScale(float scale) { timeScale = scale; }
     float getTimeScale() const { return timeScale; }
@@ -331,6 +345,9 @@ private:
 
     // Dynamic lights
     float lightCullRadius = 100.0f;        // Radius from camera for light culling
+
+    // GUI rendering callback
+    GuiRenderCallback guiRenderCallback;
 
     bool createLightBuffers();
     void updateLightBuffer(uint32_t currentImage, const Camera& camera);

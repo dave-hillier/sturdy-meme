@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
+#include <functional>
 #include "UBOs.h"
 
 // Alias for compatibility with existing code
@@ -60,8 +61,11 @@ public:
     VkImageView getHDRDepthView() const { return hdrDepthView; }
     VkExtent2D getExtent() const { return extent; }
 
+    // Pre-end callback is called after post-process draw but before ending render pass (for GUI overlay)
+    using PreEndCallback = std::function<void(VkCommandBuffer)>;
     void recordPostProcess(VkCommandBuffer cmd, uint32_t frameIndex,
-                          VkFramebuffer swapchainFB, float deltaTime);
+                          VkFramebuffer swapchainFB, float deltaTime,
+                          PreEndCallback preEndCallback = nullptr);
 
     void setExposure(float ev) { manualExposure = ev; }
     float getExposure() const { return manualExposure; }
