@@ -121,7 +121,7 @@ public:
                                  JPH::RVec3Arg inContactPosition,
                                  JPH::Vec3Arg inContactNormal,
                                  JPH::CharacterContactSettings& ioSettings) override {
-        // Allow sliding on all surfaces
+        // Allow character to be pushed and to push objects
         ioSettings.mCanPushCharacter = true;
         ioSettings.mCanReceiveImpulses = true;
     }
@@ -244,32 +244,44 @@ void PhysicsWorld::update(float deltaTime) {
     while (accumulatedTime >= FIXED_TIMESTEP && numSteps < MAX_SUBSTEPS) {
         // Update character if exists
         if (character) {
-            // Apply character input
+            // Apply character input following Jolt's CharacterVirtual documentation exactly
             JPH::Vec3 currentVelocity = character->GetLinearVelocity();
             JPH::CharacterVirtual::EGroundState groundState = character->GetGroundState();
             bool onGround = groundState == JPH::CharacterVirtual::EGroundState::OnGround;
 
             JPH::Vec3 newVelocity;
+
+            // Horizontal velocity from input
             newVelocity.SetX(characterDesiredVelocity.x);
             newVelocity.SetZ(characterDesiredVelocity.z);
 
-            // Handle vertical velocity
-            if (characterWantsJump && onGround) {
-                // Apply jump impulse
-                newVelocity.SetY(5.0f);
-                characterWantsJump = false;  // Consume jump request
+            // Vertical velocity per Jolt docs:
+            // OnGround: groundVelocity + horizontal + optional jump + dt*gravity
+            // Else: currentVertical + horizontal + dt*gravity
+            if (onGround) {
+                JPH::Vec3 groundVelocity = character->GetGroundVelocity();
+                float verticalVelocity = groundVelocity.GetY();
+
+                if (characterWantsJump) {
+                    verticalVelocity += 5.0f;
+                    characterWantsJump = false;
+                }
+
+                newVelocity.SetY(verticalVelocity);
             } else {
-                // Preserve current vertical velocity
                 newVelocity.SetY(currentVelocity.GetY());
             }
 
-            // Apply gravity
+            // Always apply gravity as per docs
             newVelocity += physicsSystem->GetGravity() * FIXED_TIMESTEP;
 
             character->SetLinearVelocity(newVelocity);
 
-            // Update character physics
+            // ExtendedUpdate - use zero gravity to avoid applying extra downward force
             JPH::CharacterVirtual::ExtendedUpdateSettings updateSettings;
+            updateSettings.mStickToFloorStepDown = JPH::Vec3(0, -0.5f, 0);
+            updateSettings.mWalkStairsStepUp = JPH::Vec3(0, 0.4f, 0);
+
             JPH::DefaultBroadPhaseLayerFilter broadPhaseFilter(objectVsBroadPhaseLayerFilter, PhysicsLayers::CHARACTER);
             JPH::DefaultObjectLayerFilter objectLayerFilter(objectLayerPairFilter, PhysicsLayers::CHARACTER);
             JPH::BodyFilter bodyFilter;
@@ -277,7 +289,7 @@ void PhysicsWorld::update(float deltaTime) {
 
             character->ExtendedUpdate(
                 FIXED_TIMESTEP,
-                physicsSystem->GetGravity(),
+                JPH::Vec3::sZero(),  // No extra gravity - we already applied it above
                 updateSettings,
                 broadPhaseFilter,
                 objectLayerFilter,
@@ -436,6 +448,8 @@ PhysicsBodyID PhysicsWorld::createBox(const glm::vec3& position, const glm::vec3
     bodySettings.mRestitution = restitution;
     bodySettings.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
     bodySettings.mMassPropertiesOverride.mMass = mass;
+    bodySettings.mLinearDamping = 0.05f;  // Add slight damping to reduce jitter
+    bodySettings.mAngularDamping = 0.05f;
 
     JPH::Body* body = bodyInterface.CreateBody(bodySettings);
     if (!body) {
@@ -471,6 +485,8 @@ PhysicsBodyID PhysicsWorld::createSphere(const glm::vec3& position, float radius
     bodySettings.mRestitution = restitution;
     bodySettings.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
     bodySettings.mMassPropertiesOverride.mMass = mass;
+    bodySettings.mLinearDamping = 0.05f;  // Add slight damping to reduce jitter
+    bodySettings.mAngularDamping = 0.05f;
 
     JPH::Body* body = bodyInterface.CreateBody(bodySettings);
     if (!body) {
@@ -530,12 +546,13 @@ bool PhysicsWorld::createCharacter(const glm::vec3& position, float height, floa
     JPH::CharacterVirtualSettings settings;
     settings.mShape = standingShape;
     settings.mMaxSlopeAngle = JPH::DegreesToRadians(45.0f);
-    settings.mMaxStrength = 100.0f;
+    settings.mMaxStrength = 25.0f;  // Further reduced to minimize impulses
     settings.mBackFaceMode = JPH::EBackFaceMode::CollideWithBackFaces;
-    settings.mCharacterPadding = 0.02f;
-    settings.mPenetrationRecoverySpeed = 1.0f;
+    settings.mCharacterPadding = 0.05f;  // Increased from 0.02 for better stability
+    settings.mPenetrationRecoverySpeed = 0.4f;  // Further reduced for gentler contact resolution
     settings.mPredictiveContactDistance = 0.1f;
     settings.mSupportingVolume = JPH::Plane(JPH::Vec3::sAxisY(), -radius);
+    settings.mMass = 70.0f;  // Reduced mass to lessen impact on light objects
 
     // Position the character so feet are at the given Y
     JPH::RVec3 characterPos(position.x, position.y + height * 0.5f, position.z);
