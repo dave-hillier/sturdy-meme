@@ -244,8 +244,32 @@ void PhysicsWorld::update(float deltaTime) {
     while (accumulatedTime >= FIXED_TIMESTEP && numSteps < MAX_SUBSTEPS) {
         // Update character if exists
         if (character) {
+            // Apply character input
+            JPH::Vec3 currentVelocity = character->GetLinearVelocity();
+            JPH::CharacterVirtual::EGroundState groundState = character->GetGroundState();
+            bool onGround = groundState == JPH::CharacterVirtual::EGroundState::OnGround;
+
+            JPH::Vec3 newVelocity;
+            newVelocity.SetX(characterDesiredVelocity.x);
+            newVelocity.SetZ(characterDesiredVelocity.z);
+
+            // Handle vertical velocity
+            if (characterWantsJump && onGround) {
+                // Apply jump impulse
+                newVelocity.SetY(5.0f);
+                characterWantsJump = false;  // Consume jump request
+            } else {
+                // Preserve current vertical velocity
+                newVelocity.SetY(currentVelocity.GetY());
+            }
+
+            // Apply gravity
+            newVelocity += physicsSystem->GetGravity() * FIXED_TIMESTEP;
+
+            character->SetLinearVelocity(newVelocity);
+
+            // Update character physics
             JPH::CharacterVirtual::ExtendedUpdateSettings updateSettings;
-            // Use default filters that accept all collisions
             JPH::DefaultBroadPhaseLayerFilter broadPhaseFilter(objectVsBroadPhaseLayerFilter, PhysicsLayers::CHARACTER);
             JPH::DefaultObjectLayerFilter objectLayerFilter(objectLayerPairFilter, PhysicsLayers::CHARACTER);
             JPH::BodyFilter bodyFilter;
@@ -532,26 +556,9 @@ bool PhysicsWorld::createCharacter(const glm::vec3& position, float height, floa
 void PhysicsWorld::updateCharacter(float deltaTime, const glm::vec3& desiredVelocity, bool jump) {
     if (!character || !initialized) return;
 
-    JPH::Vec3 currentVelocity = character->GetLinearVelocity();
-    JPH::Vec3 velocity = toJolt(desiredVelocity);
-
-    // Handle jumping - only allow jump if on ground
-    JPH::CharacterVirtual::EGroundState groundState = character->GetGroundState();
-    bool onGround = groundState == JPH::CharacterVirtual::EGroundState::OnGround;
-    bool onSteepGround = groundState == JPH::CharacterVirtual::EGroundState::OnSteepGround;
-
-    if (jump && onGround) {
-        // Apply jump impulse
-        velocity.SetY(5.0f);
-    } else if (onGround || onSteepGround) {
-        // On ground - zero out vertical velocity to prevent accumulation
-        velocity.SetY(0.0f);
-    } else {
-        // In air - preserve current vertical velocity (gravity is applied by ExtendedUpdate)
-        velocity.SetY(currentVelocity.GetY());
-    }
-
-    character->SetLinearVelocity(velocity);
+    // Store the desired velocity and jump request for the fixed timestep update
+    characterDesiredVelocity = desiredVelocity;
+    characterWantsJump = jump;
 }
 
 glm::vec3 PhysicsWorld::getCharacterPosition() const {
