@@ -49,6 +49,7 @@ set(SOURCES
     src/ClothSimulation.cpp
     src/SnowMaskSystem.cpp
     src/VolumetricSnowSystem.cpp
+    src/TreeSystem.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
@@ -117,6 +118,11 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_reduce.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/snow_accumulation.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/volumetric_snow.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_branch.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_branch.vert.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_branch.frag.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_shadow.vert.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_shadow.frag.spv
 )
 
 set(TERRAIN_SHADER_FILES
@@ -330,6 +336,36 @@ if(SHADER_COMPILE_CMD)
         COMMENT "Compiling volumetric snow compute shader"
     )
     add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_branch.comp.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_branch.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_branch.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_branch.comp
+        COMMENT "Compiling tree branch compute shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_branch.vert.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_branch.vert.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_branch.vert
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_branch.vert
+        COMMENT "Compiling tree branch vertex shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_branch.frag.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_branch.frag.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_branch.frag
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_branch.frag
+        COMMENT "Compiling tree branch fragment shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_shadow.vert.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_shadow.vert.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_shadow.vert
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_shadow.vert
+        COMMENT "Compiling tree shadow vertex shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_shadow.frag.spv
+        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_shadow.frag.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_shadow.frag
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_shadow.frag
+        COMMENT "Compiling tree shadow fragment shader"
+    )
+    add_custom_command(
         OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp.spv
         COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp ${CMAKE_CURRENT_SOURCE_DIR}/shaders/atmosphere_common.glsl
@@ -450,6 +486,11 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_reduce.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/snow_accumulation.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/volumetric_snow.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_branch.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_branch.vert.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_branch.frag.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_shadow.vert.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_shadow.frag.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_dispatcher.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_subdivision.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_sum_reduction_prepass.comp.spv

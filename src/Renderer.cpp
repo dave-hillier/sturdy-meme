@@ -233,6 +233,31 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     grassSystem.updateDescriptorSets(device, uniformBuffers, shadowImageView, shadowSampler, windBuffers, lightBuffers,
                                       terrainSystem.getHeightMapView(), terrainSystem.getHeightMapSampler());
 
+    // Initialize tree system
+    TreeSystem::InitInfo treeInfo{};
+    treeInfo.device = device;
+    treeInfo.allocator = allocator;
+    treeInfo.renderPass = postProcessSystem.getHDRRenderPass();
+    treeInfo.shadowRenderPass = shadowRenderPass;
+    treeInfo.descriptorPool = descriptorPool;
+    treeInfo.extent = swapchainExtent;
+    treeInfo.shadowMapSize = SHADOW_MAP_SIZE;
+    treeInfo.shaderPath = resourcePath + "/shaders";
+    treeInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+
+    if (!treeSystem.init(treeInfo)) return false;
+
+    treeSystem.setEnvironmentSettings(environmentSettings);
+    treeSystem.updateDescriptorSets(device, uniformBuffers, shadowImageView, shadowSampler, windBuffers, lightBuffers,
+                                     terrainSystem.getHeightMapView(), terrainSystem.getHeightMapSampler());
+
+    // Add some default trees to the scene
+    treeSystem.addTree(glm::vec3(5.0f, 0.0f, 5.0f), 0.0f, 1.0f);
+    treeSystem.addTree(glm::vec3(-8.0f, 0.0f, 10.0f), 0.5f, 0.8f);
+    treeSystem.addTree(glm::vec3(12.0f, 0.0f, -5.0f), 1.2f, 1.2f);
+    treeSystem.addTree(glm::vec3(-3.0f, 0.0f, -12.0f), 2.0f, 0.9f);
+    treeSystem.addTree(glm::vec3(20.0f, 0.0f, 15.0f), 0.8f, 1.1f);
+
     // Update terrain descriptor sets with shared resources
     terrainSystem.updateDescriptorSets(device, uniformBuffers, shadowImageView, shadowSampler);
 
@@ -412,6 +437,7 @@ void Renderer::shutdown() {
         }
 
         grassSystem.destroy(device, allocator);
+        treeSystem.destroy(device, allocator);
         terrainSystem.destroy(device, allocator);
         windSystem.destroy(device, allocator);
         weatherSystem.destroy(device, allocator);
@@ -2495,6 +2521,8 @@ void Renderer::render(const Camera& camera) {
     grassSystem.updateUniforms(currentFrame, camera.getPosition(), viewProj,
                                terrainConfig.size, terrainConfig.heightScale);
     grassSystem.updateDisplacementSources(playerPosition, playerCapsuleRadius, deltaTime);
+    treeSystem.updateUniforms(currentFrame, camera.getPosition(), viewProj,
+                              terrainConfig.size, terrainConfig.heightScale, grassTime);
     weatherSystem.updateUniforms(currentFrame, camera.getPosition(), viewProj, deltaTime, grassTime, windSystem);
     terrainSystem.updateUniforms(currentFrame, camera.getPosition(), camera.getViewMatrix(), camera.getProjectionMatrix(),
                                   volumetricSnowSystem.getCascadeParams(), useVolumetricSnow, MAX_SNOW_HEIGHT);
@@ -2548,6 +2576,9 @@ void Renderer::render(const Camera& camera) {
 
     // Grass compute pass
     grassSystem.recordResetAndCompute(cmd, currentFrame, grassTime);
+
+    // Tree compute pass
+    treeSystem.recordResetAndCompute(cmd, currentFrame, grassTime);
 
     // Weather particle compute pass
     weatherSystem.recordResetAndCompute(cmd, currentFrame, grassTime, deltaTime);
@@ -2647,6 +2678,7 @@ void Renderer::render(const Camera& camera) {
     // - Next frame's compute writes to what was the render set
     // - Next frame's render reads from what was the compute set (now contains fresh data)
     grassSystem.advanceBufferSet();
+    treeSystem.advanceBufferSet();
     weatherSystem.advanceBufferSet();
     leafSystem.advanceBufferSet();
 
@@ -2804,6 +2836,9 @@ void Renderer::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float 
         // Terrain shadows
         terrainSystem.recordShadowDraw(cmd, frameIndex, cascadeMatrices[cascade], cascade);
 
+        // Tree shadows
+        treeSystem.recordShadowDraw(cmd, frameIndex, grassTime, cascade);
+
         grassSystem.recordShadowDraw(cmd, frameIndex, grassTime, cascade);
 
         vkCmdEndRenderPass(cmd);
@@ -2873,6 +2908,9 @@ void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float gra
     // Draw scene objects
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
     recordSceneObjects(cmd, frameIndex);
+
+    // Draw trees (before grass)
+    treeSystem.recordDraw(cmd, frameIndex, grassTime);
 
     // Draw grass
     grassSystem.recordDraw(cmd, frameIndex, grassTime);

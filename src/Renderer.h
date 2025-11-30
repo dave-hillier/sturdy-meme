@@ -22,6 +22,7 @@
 #include "TerrainSystem.h"
 #include "SnowMaskSystem.h"
 #include "VolumetricSnowSystem.h"
+#include "TreeSystem.h"
 #include "EnvironmentSettings.h"
 #include "UBOs.h"
 
@@ -98,6 +99,13 @@ public:
     float getLeafIntensity() const { return leafSystem.getIntensity(); }
     void spawnConfetti(const glm::vec3& position, float velocity = 8.0f, float count = 100.0f, float coneAngle = 0.5f) {
         leafSystem.spawnConfetti(position, velocity, count, coneAngle);
+    }
+
+    // Tree control
+    TreeSystem& getTreeSystem() { return treeSystem; }
+    const TreeSystem& getTreeSystem() const { return treeSystem; }
+    void addTree(const glm::vec3& position, float rotation = 0.0f, float scale = 1.0f) {
+        treeSystem.addTree(position, rotation, scale);
     }
 
     // Snow control
@@ -232,6 +240,7 @@ private:
     TerrainSystem terrainSystem;
     SnowMaskSystem snowMaskSystem;
     VolumetricSnowSystem volumetricSnowSystem;
+    TreeSystem treeSystem;
     EnvironmentSettings environmentSettings;
     bool useVolumetricSnow = true;  // Use new volumetric system by default
 

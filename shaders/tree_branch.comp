@@ -1,0 +1,254 @@
+#version 450
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+// Branch instance output - matches C++ struct
+struct BranchInstance {
+    vec4 basePosition;      // xyz = base position, w = base radius
+    vec4 tipPosition;       // xyz = tip position, w = tip radius
+    vec4 controlPoint1;     // xyz = bezier control point 1, w = hash
+    vec4 controlPoint2;     // xyz = bezier control point 2, w = unused
+    uvec4 metadata;         // x = parent index, y = depth, z = tree index, w = flags
+};
+
+struct DrawIndirectCommand {
+    uint vertexCount;
+    uint instanceCount;
+    uint firstVertex;
+    uint firstInstance;
+};
+
+// Tree definition - matches C++ struct
+struct TreeDefinition {
+    float trunkHeight;
+    float trunkRadius;
+    float trunkTaper;
+    float trunkBend;
+
+    uint branchLevels;
+    float branchAngle;
+    float branchSpread;
+    float branchLengthRatio;
+    float branchRadiusRatio;
+    uint branchesPerLevel;
+
+    vec3 canopyCenter;
+    vec3 canopyExtent;
+    float leafDensity;
+    float leafSize;
+    float leafSizeVariance;
+
+    float windInfluence;
+    float branchStiffness;
+
+    uint leafPaletteIndex;
+    uint barkTextureIndex;
+
+    float padding[2];
+};
+
+// Tree instance - matches C++ struct
+struct TreeInstance {
+    vec3 position;
+    float rotation;
+    float scale;
+    float age;
+    uint definitionIndex;
+    float hash;
+};
+
+layout(std430, binding = 0) buffer BranchBuffer {
+    BranchInstance branches[];
+};
+
+layout(std430, binding = 1) buffer IndirectBuffer {
+    DrawIndirectCommand drawCmd;
+};
+
+layout(binding = 2) uniform TreeUniforms {
+    vec4 cameraPosition;
+    vec4 frustumPlanes[6];
+    float maxDrawDistance;
+    float lodTransitionStart;
+    float lodTransitionEnd;
+    float terrainSize;
+    float terrainHeightScale;
+    float time;
+    uint treeCount;
+    float padding;
+} uniforms;
+
+layout(std430, binding = 3) buffer DefinitionBuffer {
+    TreeDefinition definitions[];
+};
+
+layout(std430, binding = 4) buffer TreeInstanceBuffer {
+    TreeInstance trees[];
+};
+
+layout(binding = 5) uniform sampler2D terrainHeightMap;
+
+layout(push_constant) uniform PushConstants {
+    float time;
+    int cascadeIndex;
+    float padding[2];
+} push;
+
+// Hash functions
+float hash(float p) {
+    return fract(sin(p * 127.1) * 43758.5453);
+}
+
+vec3 hash3(float p) {
+    return vec3(
+        hash(p),
+        hash(p + 47.0),
+        hash(p + 103.0)
+    );
+}
+
+vec3 hash3v(vec3 p) {
+    return vec3(
+        fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453),
+        fract(sin(dot(p, vec3(269.5, 183.3, 246.1))) * 43758.5453),
+        fract(sin(dot(p, vec3(113.5, 271.9, 124.6))) * 43758.5453)
+    );
+}
+
+// Sample terrain height at world position
+float sampleTerrainHeight(vec2 worldXZ) {
+    vec2 uv = worldXZ / uniforms.terrainSize + 0.5;
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+        return 0.0;
+    }
+    float h = texture(terrainHeightMap, uv).r;
+    return (h - 0.5) * uniforms.terrainHeightScale;
+}
+
+// Generate a single trunk for a tree
+void generateTrunk(uint treeIndex) {
+    TreeInstance tree = trees[treeIndex];
+    TreeDefinition def = definitions[tree.definitionIndex];
+
+    // Apply scale and age
+    float effectiveHeight = def.trunkHeight * tree.scale * tree.age;
+    float effectiveRadius = def.trunkRadius * tree.scale;
+
+    // Get terrain height at tree position
+    float terrainY = sampleTerrainHeight(tree.position.xz);
+    vec3 basePos = vec3(tree.position.x, terrainY, tree.position.z);
+
+    // Tip position (with natural bend)
+    vec3 bendDir = hash3(tree.hash) * 2.0 - 1.0;
+    bendDir.y = 0.0;
+    bendDir = normalize(bendDir) * def.trunkBend * tree.scale;
+
+    vec3 tipPos = basePos + vec3(bendDir.x, effectiveHeight, bendDir.z);
+
+    // Control points for bezier curve
+    vec3 ctrl1 = mix(basePos, tipPos, 0.33) + vec3(bendDir.x * 0.5, 0.0, bendDir.z * 0.5);
+    vec3 ctrl2 = mix(basePos, tipPos, 0.66) + vec3(bendDir.x * 0.8, 0.0, bendDir.z * 0.8);
+
+    // Allocate branch slot
+    uint slot = atomicAdd(drawCmd.instanceCount, 1);
+
+    // Write branch data
+    branches[slot].basePosition = vec4(basePos, effectiveRadius);
+    branches[slot].tipPosition = vec4(tipPos, effectiveRadius * def.trunkTaper);
+    branches[slot].controlPoint1 = vec4(ctrl1, tree.hash);
+    branches[slot].controlPoint2 = vec4(ctrl2, 0.0);
+    branches[slot].metadata = uvec4(0xFFFFFFFF, 0, treeIndex, 0);  // Trunk has no parent, depth 0
+}
+
+// Generate primary branches from trunk
+void generatePrimaryBranches(uint treeIndex, uint trunkSlot) {
+    TreeInstance tree = trees[treeIndex];
+    TreeDefinition def = definitions[tree.definitionIndex];
+
+    if (def.branchLevels < 1) return;
+
+    BranchInstance trunk = branches[trunkSlot];
+    vec3 trunkBase = trunk.basePosition.xyz;
+    vec3 trunkTip = trunk.tipPosition.xyz;
+    vec3 trunkDir = normalize(trunkTip - trunkBase);
+
+    float trunkLength = length(trunkTip - trunkBase);
+    float branchLength = trunkLength * def.branchLengthRatio;
+
+    // Generate branches around the trunk
+    for (uint i = 0; i < def.branchesPerLevel; i++) {
+        // Position along trunk (30% to 80%)
+        float t = 0.3 + hash(tree.hash + float(i) * 0.1) * 0.5;
+
+        // Evaluate bezier to get attachment point
+        vec3 ctrl1 = trunk.controlPoint1.xyz;
+        vec3 ctrl2 = trunk.controlPoint2.xyz;
+        float u = 1.0 - t;
+        vec3 attachPoint = u*u*u*trunkBase + 3.0*u*u*t*ctrl1 + 3.0*u*t*t*ctrl2 + t*t*t*trunkTip;
+
+        // Branch direction: outward from trunk with some upward component
+        float angle = (float(i) / float(def.branchesPerLevel)) * 6.28318 + tree.rotation;
+        angle += (hash(tree.hash + float(i) * 0.2) - 0.5) * def.branchSpread;
+
+        vec3 outDir = vec3(cos(angle), 0.0, sin(angle));
+
+        // Mix outward direction with upward
+        float upwardFactor = 0.3 + hash(tree.hash + float(i) * 0.3) * 0.4;
+        vec3 branchDir = normalize(mix(outDir, vec3(0.0, 1.0, 0.0), upwardFactor));
+
+        // Apply branch angle from definition
+        branchDir = normalize(mix(trunkDir, branchDir, sin(def.branchAngle)));
+
+        vec3 branchTip = attachPoint + branchDir * branchLength;
+
+        // Control points for branch curve
+        vec3 branchCtrl1 = mix(attachPoint, branchTip, 0.33) + outDir * branchLength * 0.1;
+        vec3 branchCtrl2 = mix(attachPoint, branchTip, 0.66);
+
+        // Radius
+        float branchBaseRadius = trunk.basePosition.w * def.branchRadiusRatio * (1.0 - t * 0.3);
+        float branchTipRadius = branchBaseRadius * 0.3;
+
+        // Allocate branch slot
+        uint slot = atomicAdd(drawCmd.instanceCount, 1);
+
+        branches[slot].basePosition = vec4(attachPoint, branchBaseRadius);
+        branches[slot].tipPosition = vec4(branchTip, branchTipRadius);
+        branches[slot].controlPoint1 = vec4(branchCtrl1, hash(tree.hash + float(i)));
+        branches[slot].controlPoint2 = vec4(branchCtrl2, 0.0);
+        branches[slot].metadata = uvec4(trunkSlot, 1, treeIndex, 0);  // Primary branch, depth 1
+    }
+}
+
+void main() {
+    uint treeIndex = gl_GlobalInvocationID.x;
+
+    // Set vertex count (32 vertices per branch segment)
+    if (treeIndex == 0) {
+        atomicMax(drawCmd.vertexCount, 32);  // 8 segments * 4 vertices per ring (triangle strip)
+    }
+
+    if (treeIndex >= uniforms.treeCount) return;
+
+    TreeInstance tree = trees[treeIndex];
+
+    // Distance culling
+    float distToCamera = length(vec3(tree.position.x, tree.position.y, tree.position.z) - uniforms.cameraPosition.xyz);
+    if (distToCamera > uniforms.maxDrawDistance) return;
+
+    // Frustum culling (approximate - use tree position with bounding sphere)
+    TreeDefinition def = definitions[tree.definitionIndex];
+    float boundingRadius = def.trunkHeight * tree.scale;
+    vec4 treeCenter = vec4(tree.position.x, tree.position.y + boundingRadius * 0.5, tree.position.z, 1.0);
+
+    for (int i = 0; i < 6; i++) {
+        if (dot(treeCenter, uniforms.frustumPlanes[i]) < -boundingRadius) return;
+    }
+
+    // Generate trunk (stores its slot for branch generation)
+    uint trunkSlot = atomicAdd(drawCmd.instanceCount, 0);  // Get current count before incrementing
+    generateTrunk(treeIndex);
+
+    // Generate primary branches
+    generatePrimaryBranches(treeIndex, trunkSlot);
+}
