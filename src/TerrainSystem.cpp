@@ -966,8 +966,11 @@ void TerrainSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraP
         config.splitThreshold,
         config.mergeThreshold,
         static_cast<float>(config.minDepth),
-        0.0f
+        static_cast<float>(subdivisionPhase)  // 0 = split phase, 1 = merge phase
     );
+
+    // Toggle phase for next frame (ping-pong)
+    subdivisionPhase = 1 - subdivisionPhase;
 
     uniforms.screenSize = glm::vec2(extent.width, extent.height);
 

@@ -207,6 +207,7 @@ private:
 
     // Runtime state
     uint32_t currentNodeCount = 2;  // Start with 2 root triangles
+    int subdivisionPhase = 0;       // Ping-pong: 0 = split, 1 = merge
 
     // Constants
     static constexpr uint32_t SUBDIVISION_WORKGROUP_SIZE = 64;
