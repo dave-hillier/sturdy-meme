@@ -29,11 +29,14 @@ layout(std140, binding = 4) uniform TerrainUniforms {
     vec4 frustumPlanes[6];
     vec4 cameraPosition;
     vec4 terrainParams;   // x = size, y = height scale, z = target edge pixels, w = max depth
-    vec4 lodParams;       // x = split threshold, y = merge threshold, z = min depth, w = unused
+    vec4 lodParams;       // x = split threshold, y = merge threshold, z = min depth, w = subdivisionPhase (0=split, 1=merge)
     vec2 screenSize;
     float lodFactor;
     float padding;
 };
+
+// Subdivision phase: 0 = split only, 1 = merge only
+#define SUBDIVISION_PHASE (int(lodParams.w))
 
 // Extract parameters
 #define TERRAIN_SIZE (terrainParams.x)

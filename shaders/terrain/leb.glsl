@@ -173,6 +173,8 @@ void leb_MergeNode(in const cbt_Node node, in const leb_DiamondParent diamondPar
 }
 
 void leb_MergeNode_Square(in const cbt_Node node, in const leb_DiamondParent diamondParent) {
+    // Frame ping-pong ensures merges never happen in the same frame as splits,
+    // avoiding race conditions between concurrent subdivision operations.
     if ((node.depth > 1) && leb__HasDiamondParent(diamondParent)) {
         cbt_MergeNode(node);
     }
