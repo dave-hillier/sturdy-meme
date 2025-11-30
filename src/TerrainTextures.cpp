@@ -1,15 +1,14 @@
 #include "TerrainTextures.h"
+#include <stb_image.h>
 #include <cstring>
-#include <cmath>
-#include <algorithm>
 #include <iostream>
-#include <vector>
 
 bool TerrainTextures::init(const InitInfo& info) {
     device = info.device;
     allocator = info.allocator;
     graphicsQueue = info.graphicsQueue;
     commandPool = info.commandPool;
+    resourcePath = info.resourcePath;
 
     if (!createAlbedoTexture()) return false;
     if (!createGrassFarLODTexture()) return false;
@@ -36,36 +35,25 @@ void TerrainTextures::destroy(VkDevice device, VmaAllocator allocator) {
 }
 
 bool TerrainTextures::createAlbedoTexture() {
-    const uint32_t texSize = 256;
-    std::vector<uint8_t> texData(texSize * texSize * 4);
+    std::string texturePath = resourcePath + "/grass/grass/grass01.jpg";
 
-    for (uint32_t y = 0; y < texSize; y++) {
-        for (uint32_t x = 0; x < texSize; x++) {
-            float fx = static_cast<float>(x) / texSize;
-            float fy = static_cast<float>(y) / texSize;
+    int texWidth, texHeight, channels;
+    stbi_uc* pixels = stbi_load(texturePath.c_str(), &texWidth, &texHeight, &channels, STBI_rgb_alpha);
 
-            // Green grass base color with variation
-            float noise = 0.5f + 0.5f * sin(fx * 50.0f) * sin(fy * 50.0f);
-            noise += 0.25f * sin(fx * 100.0f + 1.0f) * sin(fy * 100.0f + 0.5f);
-
-            uint8_t r = static_cast<uint8_t>(std::clamp((80 + 40 * noise), 0.0f, 255.0f));
-            uint8_t g = static_cast<uint8_t>(std::clamp((120 + 60 * noise), 0.0f, 255.0f));
-            uint8_t b = static_cast<uint8_t>(std::clamp((60 + 30 * noise), 0.0f, 255.0f));
-
-            size_t idx = (y * texSize + x) * 4;
-            texData[idx + 0] = r;
-            texData[idx + 1] = g;
-            texData[idx + 2] = b;
-            texData[idx + 3] = 255;
-        }
+    if (!pixels) {
+        std::cerr << "Failed to load terrain albedo texture: " << texturePath << std::endl;
+        return false;
     }
+
+    uint32_t width = static_cast<uint32_t>(texWidth);
+    uint32_t height = static_cast<uint32_t>(texHeight);
 
     // Create Vulkan image
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     imageInfo.imageType = VK_IMAGE_TYPE_2D;
     imageInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
-    imageInfo.extent = {texSize, texSize, 1};
+    imageInfo.extent = {width, height, 1};
     imageInfo.mipLevels = 1;
     imageInfo.arrayLayers = 1;
     imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -79,6 +67,7 @@ bool TerrainTextures::createAlbedoTexture() {
 
     if (vmaCreateImage(allocator, &imageInfo, &allocInfo, &albedoImage, &albedoAllocation, nullptr) != VK_SUCCESS) {
         std::cerr << "Failed to create terrain albedo image" << std::endl;
+        stbi_image_free(pixels);
         return false;
     }
 
@@ -96,6 +85,7 @@ bool TerrainTextures::createAlbedoTexture() {
 
     if (vkCreateImageView(device, &viewInfo, nullptr, &albedoView) != VK_SUCCESS) {
         std::cerr << "Failed to create terrain albedo image view" << std::endl;
+        stbi_image_free(pixels);
         return false;
     }
 
@@ -113,51 +103,42 @@ bool TerrainTextures::createAlbedoTexture() {
 
     if (vkCreateSampler(device, &samplerInfo, nullptr, &albedoSampler) != VK_SUCCESS) {
         std::cerr << "Failed to create terrain albedo sampler" << std::endl;
+        stbi_image_free(pixels);
         return false;
     }
 
     // Upload texture to GPU
-    if (!uploadImageData(albedoImage, texData.data(), texSize, texSize, VK_FORMAT_R8G8B8A8_SRGB, 4)) {
+    if (!uploadImageData(albedoImage, pixels, width, height, VK_FORMAT_R8G8B8A8_SRGB, 4)) {
         std::cerr << "Failed to upload terrain albedo texture to GPU" << std::endl;
+        stbi_image_free(pixels);
         return false;
     }
 
-    std::cout << "Terrain albedo texture uploaded: " << texSize << "x" << texSize << std::endl;
+    stbi_image_free(pixels);
+    std::cout << "Terrain albedo texture loaded: " << texturePath << " (" << width << "x" << height << ")" << std::endl;
     return true;
 }
 
 bool TerrainTextures::createGrassFarLODTexture() {
-    const uint32_t texSize = 256;
-    std::vector<uint8_t> texData(texSize * texSize * 4);
+    std::string texturePath = resourcePath + "/grass/grass/grass01.jpg";
 
-    for (uint32_t y = 0; y < texSize; y++) {
-        for (uint32_t x = 0; x < texSize; x++) {
-            float fx = static_cast<float>(x) / texSize;
-            float fy = static_cast<float>(y) / texSize;
+    int texWidth, texHeight, channels;
+    stbi_uc* pixels = stbi_load(texturePath.c_str(), &texWidth, &texHeight, &channels, STBI_rgb_alpha);
 
-            // Grass-like color with subtle variation (matches grass blade colors)
-            float noise = 0.5f + 0.3f * sin(fx * 80.0f) * sin(fy * 80.0f);
-            noise += 0.15f * sin(fx * 160.0f + 0.5f) * sin(fy * 160.0f + 0.3f);
-
-            // Match grass blade colors from grass.vert
-            uint8_t r = static_cast<uint8_t>(std::clamp((60 + 30 * noise), 0.0f, 255.0f));
-            uint8_t g = static_cast<uint8_t>(std::clamp((130 + 50 * noise), 0.0f, 255.0f));
-            uint8_t b = static_cast<uint8_t>(std::clamp((40 + 25 * noise), 0.0f, 255.0f));
-
-            size_t idx = (y * texSize + x) * 4;
-            texData[idx + 0] = r;
-            texData[idx + 1] = g;
-            texData[idx + 2] = b;
-            texData[idx + 3] = 255;
-        }
+    if (!pixels) {
+        std::cerr << "Failed to load grass far LOD texture: " << texturePath << std::endl;
+        return false;
     }
+
+    uint32_t width = static_cast<uint32_t>(texWidth);
+    uint32_t height = static_cast<uint32_t>(texHeight);
 
     // Create Vulkan image
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     imageInfo.imageType = VK_IMAGE_TYPE_2D;
     imageInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
-    imageInfo.extent = {texSize, texSize, 1};
+    imageInfo.extent = {width, height, 1};
     imageInfo.mipLevels = 1;
     imageInfo.arrayLayers = 1;
     imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -171,6 +152,7 @@ bool TerrainTextures::createGrassFarLODTexture() {
 
     if (vmaCreateImage(allocator, &imageInfo, &allocInfo, &grassFarLODImage, &grassFarLODAllocation, nullptr) != VK_SUCCESS) {
         std::cerr << "Failed to create grass far LOD image" << std::endl;
+        stbi_image_free(pixels);
         return false;
     }
 
@@ -188,6 +170,7 @@ bool TerrainTextures::createGrassFarLODTexture() {
 
     if (vkCreateImageView(device, &viewInfo, nullptr, &grassFarLODView) != VK_SUCCESS) {
         std::cerr << "Failed to create grass far LOD image view" << std::endl;
+        stbi_image_free(pixels);
         return false;
     }
 
@@ -205,16 +188,19 @@ bool TerrainTextures::createGrassFarLODTexture() {
 
     if (vkCreateSampler(device, &samplerInfo, nullptr, &grassFarLODSampler) != VK_SUCCESS) {
         std::cerr << "Failed to create grass far LOD sampler" << std::endl;
+        stbi_image_free(pixels);
         return false;
     }
 
     // Upload texture to GPU
-    if (!uploadImageData(grassFarLODImage, texData.data(), texSize, texSize, VK_FORMAT_R8G8B8A8_SRGB, 4)) {
+    if (!uploadImageData(grassFarLODImage, pixels, width, height, VK_FORMAT_R8G8B8A8_SRGB, 4)) {
         std::cerr << "Failed to upload grass far LOD texture to GPU" << std::endl;
+        stbi_image_free(pixels);
         return false;
     }
 
-    std::cout << "Grass far LOD texture uploaded: " << texSize << "x" << texSize << std::endl;
+    stbi_image_free(pixels);
+    std::cout << "Grass far LOD texture loaded: " << texturePath << " (" << width << "x" << height << ")" << std::endl;
     return true;
 }
 

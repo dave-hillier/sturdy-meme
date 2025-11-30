@@ -237,7 +237,7 @@ void SceneBuilder::createSceneObjects() {
     sceneObjects.push_back(RenderableBuilder()
         .withTransform(glm::mat4(1.0f))  // Identity, will be handled differently
         .withMesh(&flagClothMesh)
-        .withTexture(&crateTexture)
+        .withTexture(&crateTexture)  // Using crate texture for now
         .withRoughness(0.6f)
         .withMetallic(0.0f)
         .withCastsShadow(true)
