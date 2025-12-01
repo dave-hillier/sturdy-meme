@@ -1,7 +1,7 @@
 #pragma once
 
 #include "BuildingModules.h"
-#include "Vertex.h"
+#include "Mesh.h"
 #include <vector>
 
 // Generates meshes for individual building modules
