@@ -180,280 +180,142 @@ elseif(GLSLANG_VALIDATOR)
 endif()
 
 if(SHADER_COMPILE_CMD)
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.vert.spv
-        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.vert.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.vert
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.vert
-        COMMENT "Compiling vertex shader"
+    # Simple shaders using SHADER_COMPILE_CMD
+    set(SIMPLE_SHADERS
+        shader.vert shader.frag
+        sky.vert sky.frag
+        grass.comp grass_displacement.comp grass.vert grass.frag
+        shadow.vert shadow.frag
+        grass_shadow.vert grass_shadow.frag
+        postprocess.vert postprocess.frag
+        bloom_downsample.frag bloom_upsample.frag bloom_composite.frag
+        froxel_update.comp froxel_integrate.comp
+        weather.comp weather.vert weather.frag
+        leaf.comp leaf.vert leaf.frag
+        histogram_build.comp histogram_reduce.comp
+        snow_accumulation.comp
     )
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.frag.spv
-        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.frag.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.frag
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.frag
-        COMMENT "Compiling fragment shader"
+
+    foreach(SHADER ${SIMPLE_SHADERS})
+        add_custom_command(
+            OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}.spv
+            COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}
+            DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}
+            COMMENT "Compiling shader: ${SHADER}"
+        )
+    endforeach()
+
+    # Shaders requiring glslangValidator with specific flags
+    set(ATMOSPHERE_SHADERS
+        transmittance_lut.comp
+        multiscatter_lut.comp
+        skyview_lut.comp
+        irradiance_lut.comp
     )
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.vert.spv
-        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.vert.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.vert
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.vert
-        COMMENT "Compiling sky vertex shader"
-    )
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.frag.spv
-        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.frag.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.frag
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.frag
-        COMMENT "Compiling sky fragment shader"
-    )
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.comp.spv
-        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.comp
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.comp
-        COMMENT "Compiling grass compute shader"
-    )
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass_displacement.comp.spv
-        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass_displacement.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass_displacement.comp
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass_displacement.comp
-        COMMENT "Compiling grass displacement compute shader"
-    )
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.vert.spv
-        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.vert.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.vert
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.vert
-        COMMENT "Compiling grass vertex shader"
-    )
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.frag.spv
-        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.frag.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.frag
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.frag
-        COMMENT "Compiling grass fragment shader"
-    )
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow.vert.spv
-        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow.vert.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow.vert
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow.vert
-        COMMENT "Compiling shadow vertex shader"
-    )
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow.frag.spv
-        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow.frag.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow.frag
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow.frag
-        COMMENT "Compiling shadow fragment shader"
-    )
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass_shadow.vert.spv
-        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass_shadow.vert.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass_shadow.vert
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass_shadow.vert
-        COMMENT "Compiling grass shadow vertex shader"
-    )
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass_shadow.frag.spv
-        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass_shadow.frag.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass_shadow.frag
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass_shadow.frag
-        COMMENT "Compiling grass shadow fragment shader"
-    )
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.vert.spv
-        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.vert.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.vert
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.vert
-        COMMENT "Compiling postprocess vertex shader"
-    )
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.frag.spv
-        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.frag.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.frag
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.frag
-        COMMENT "Compiling postprocess fragment shader"
-    )
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_downsample.frag.spv
-        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_downsample.frag.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_downsample.frag
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_downsample.frag
-        COMMENT "Compiling bloom downsample fragment shader"
-    )
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_upsample.frag.spv
-        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_upsample.frag.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_upsample.frag
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_upsample.frag
-        COMMENT "Compiling bloom upsample fragment shader"
-    )
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_composite.frag.spv
-        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_composite.frag.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_composite.frag
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_composite.frag
-        COMMENT "Compiling bloom composite fragment shader"
-    )
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_update.comp.spv
-        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_update.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_update.comp
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_update.comp
-        COMMENT "Compiling froxel update compute shader"
-    )
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_integrate.comp.spv
-        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_integrate.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_integrate.comp
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_integrate.comp
-        COMMENT "Compiling froxel integration compute shader"
-    )
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.comp.spv
-        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.comp
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.comp
-        COMMENT "Compiling weather compute shader"
-    )
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.vert.spv
-        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.vert.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.vert
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.vert
-        COMMENT "Compiling weather vertex shader"
-    )
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.frag.spv
-        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.frag.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.frag
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.frag
-        COMMENT "Compiling weather fragment shader"
-    )
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/leaf.comp.spv
-        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/leaf.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/leaf.comp
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/leaf.comp
-        COMMENT "Compiling leaf compute shader"
-    )
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/leaf.vert.spv
-        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/leaf.vert.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/leaf.vert
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/leaf.vert
-        COMMENT "Compiling leaf vertex shader"
-    )
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/leaf.frag.spv
-        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/leaf.frag.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/leaf.frag
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/leaf.frag
-        COMMENT "Compiling leaf fragment shader"
-    )
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_build.comp.spv
-        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_build.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_build.comp
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_build.comp
-        COMMENT "Compiling histogram build compute shader"
-    )
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_reduce.comp.spv
-        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_reduce.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_reduce.comp
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_reduce.comp
-        COMMENT "Compiling histogram reduce compute shader"
-    )
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/snow_accumulation.comp.spv
-        COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/snow_accumulation.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/snow_accumulation.comp
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/snow_accumulation.comp
-        COMMENT "Compiling snow accumulation compute shader"
-    )
+
+    foreach(SHADER ${ATMOSPHERE_SHADERS})
+        add_custom_command(
+            OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}.spv
+            COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}
+            DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/atmosphere_common.glsl
+            COMMENT "Compiling atmosphere shader: ${SHADER}"
+        )
+    endforeach()
+
+    # Special compute shaders with includes
     add_custom_command(
         OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/volumetric_snow.comp.spv
         COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/volumetric_snow.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/volumetric_snow.comp
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/volumetric_snow.comp
         COMMENT "Compiling volumetric snow compute shader"
     )
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp.spv
-        COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp ${CMAKE_CURRENT_SOURCE_DIR}/shaders/atmosphere_common.glsl
-        COMMENT "Compiling transmittance LUT compute shader"
-    )
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/multiscatter_lut.comp.spv
-        COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/multiscatter_lut.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/multiscatter_lut.comp
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/multiscatter_lut.comp ${CMAKE_CURRENT_SOURCE_DIR}/shaders/atmosphere_common.glsl
-        COMMENT "Compiling multi-scatter LUT compute shader"
-    )
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/skyview_lut.comp.spv
-        COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/skyview_lut.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/skyview_lut.comp
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/skyview_lut.comp ${CMAKE_CURRENT_SOURCE_DIR}/shaders/atmosphere_common.glsl
-        COMMENT "Compiling sky-view LUT compute shader"
-    )
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/irradiance_lut.comp.spv
-        COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/irradiance_lut.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/irradiance_lut.comp
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/irradiance_lut.comp ${CMAKE_CURRENT_SOURCE_DIR}/shaders/atmosphere_common.glsl
-        COMMENT "Compiling irradiance LUT compute shader"
-    )
+
     add_custom_command(
         OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cloudmap_lut.comp.spv
         COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cloudmap_lut.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cloudmap_lut.comp
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cloudmap_lut.comp
         COMMENT "Compiling cloud map LUT compute shader"
     )
+
     add_custom_command(
         OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cloud_shadow.comp.spv
         COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cloud_shadow.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cloud_shadow.comp
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cloud_shadow.comp
         COMMENT "Compiling cloud shadow compute shader"
     )
+
     # Terrain shaders (LEB terrain system)
+    set(TERRAIN_CBT_DEPS
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/cbt.glsl
+    )
+    set(TERRAIN_LEB_DEPS
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/cbt.glsl
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/leb.glsl
+    )
+
     add_custom_command(
         OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_dispatcher.comp.spv
         COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_dispatcher.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_dispatcher.comp
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_dispatcher.comp
-                ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/cbt.glsl
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_dispatcher.comp ${TERRAIN_CBT_DEPS}
         COMMENT "Compiling terrain dispatcher compute shader"
     )
+
     add_custom_command(
         OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_subdivision.comp.spv
         COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_subdivision.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_subdivision.comp
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_subdivision.comp
-                ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/cbt.glsl
-                ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/leb.glsl
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_subdivision.comp ${TERRAIN_LEB_DEPS}
         COMMENT "Compiling terrain subdivision compute shader"
     )
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_sum_reduction_prepass.comp.spv
-        COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_sum_reduction_prepass.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_sum_reduction_prepass.comp
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_sum_reduction_prepass.comp
-                ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/cbt.glsl
-        COMMENT "Compiling terrain sum reduction prepass compute shader"
+
+    set(TERRAIN_REDUCTION_SHADERS
+        terrain_sum_reduction_prepass.comp
+        terrain_sum_reduction.comp
     )
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_sum_reduction.comp.spv
-        COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_sum_reduction.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_sum_reduction.comp
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_sum_reduction.comp
-                ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/cbt.glsl
-        COMMENT "Compiling terrain sum reduction compute shader"
-    )
+
+    foreach(SHADER ${TERRAIN_REDUCTION_SHADERS})
+        add_custom_command(
+            OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/${SHADER}.spv
+            COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/${SHADER}.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/${SHADER}
+            DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/${SHADER} ${TERRAIN_CBT_DEPS}
+            COMMENT "Compiling terrain shader: ${SHADER}"
+        )
+    endforeach()
+
     add_custom_command(
         OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain.vert.spv
         COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain.vert.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain.vert
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain.vert
-                ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/cbt.glsl
-                ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/leb.glsl
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain.vert ${TERRAIN_LEB_DEPS}
         COMMENT "Compiling terrain vertex shader"
     )
+
     add_custom_command(
         OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain.frag.spv
         COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain.frag.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain.frag
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain.frag
         COMMENT "Compiling terrain fragment shader"
     )
+
     add_custom_command(
         OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_shadow.vert.spv
         COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_shadow.vert.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_shadow.vert
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_shadow.vert
-                ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/cbt.glsl
-                ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/leb.glsl
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_shadow.vert ${TERRAIN_LEB_DEPS}
         COMMENT "Compiling terrain shadow vertex shader"
     )
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_shadow.frag.spv
-        COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_shadow.frag.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_shadow.frag
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_shadow.frag
-        COMMENT "Compiling terrain shadow fragment shader"
+
+    set(TERRAIN_SIMPLE_SHADERS
+        terrain_shadow.frag
+        terrain_wireframe.frag
     )
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_wireframe.frag.spv
-        COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_wireframe.frag.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_wireframe.frag
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_wireframe.frag
-        COMMENT "Compiling terrain wireframe fragment shader"
-    )
+
+    foreach(SHADER ${TERRAIN_SIMPLE_SHADERS})
+        add_custom_command(
+            OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/${SHADER}.spv
+            COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/${SHADER}.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/${SHADER}
+            DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/${SHADER}
+            COMMENT "Compiling terrain shader: ${SHADER}"
+        )
+    endforeach()
+
     # Catmull-Clark subdivision shaders
     add_custom_command(
         OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_subdivision.comp.spv
@@ -461,6 +323,7 @@ if(SHADER_COMPILE_CMD)
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_subdivision.comp.glsl
         COMMENT "Compiling Catmull-Clark subdivision compute shader"
     )
+
     add_custom_command(
         OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_render.vert.spv
         COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_render.vert.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_render.vert.glsl
@@ -470,6 +333,7 @@ if(SHADER_COMPILE_CMD)
                 ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_tessellation.glsl
         COMMENT "Compiling Catmull-Clark vertex shader"
     )
+
     add_custom_command(
         OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_render.frag.spv
         COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_render.frag.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_render.frag.glsl
