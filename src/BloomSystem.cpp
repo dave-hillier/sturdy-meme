@@ -1,12 +1,10 @@
 #include "BloomSystem.h"
-#include "ShaderLoader.h"
+#include "GraphicsPipelineFactory.h"
 #include "BindingBuilder.h"
 #include <array>
 #include <algorithm>
 #include <cmath>
 #include <SDL3/SDL.h>
-
-using ShaderLoader::loadShaderModule;
 
 bool BloomSystem::init(const InitInfo& info) {
     device = info.device;
@@ -253,100 +251,12 @@ bool BloomSystem::createDescriptorSetLayouts() {
 }
 
 bool BloomSystem::createPipelines() {
-    // Load shaders
-    auto downsampleVert = loadShaderModule(device, shaderPath + "/postprocess.vert.spv");
-    auto downsampleFrag = loadShaderModule(device, shaderPath + "/bloom_downsample.frag.spv");
-    auto upsampleVert = loadShaderModule(device, shaderPath + "/postprocess.vert.spv");
-    auto upsampleFrag = loadShaderModule(device, shaderPath + "/bloom_upsample.frag.spv");
-
-    if (!downsampleVert || !downsampleFrag || !upsampleVert || !upsampleFrag) {
-        return false;
-    }
-
-    // Shader stages
-    std::array<VkPipelineShaderStageCreateInfo, 2> downsampleStages = {};
-    downsampleStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    downsampleStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-    downsampleStages[0].module = downsampleVert;
-    downsampleStages[0].pName = "main";
-    downsampleStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    downsampleStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    downsampleStages[1].module = downsampleFrag;
-    downsampleStages[1].pName = "main";
-
-    std::array<VkPipelineShaderStageCreateInfo, 2> upsampleStages = {};
-    upsampleStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    upsampleStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-    upsampleStages[0].module = upsampleVert;
-    upsampleStages[0].pName = "main";
-    upsampleStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    upsampleStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    upsampleStages[1].module = upsampleFrag;
-    upsampleStages[1].pName = "main";
-
-    // Vertex input (empty - fullscreen triangle)
-    VkPipelineVertexInputStateCreateInfo vertexInputInfo = {};
-    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-
-    // Input assembly
-    VkPipelineInputAssemblyStateCreateInfo inputAssembly = {};
-    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    inputAssembly.primitiveRestartEnable = VK_FALSE;
-
-    // Viewport and scissor (dynamic)
-    VkPipelineViewportStateCreateInfo viewportState = {};
-    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewportState.viewportCount = 1;
-    viewportState.scissorCount = 1;
-
-    // Rasterization
-    VkPipelineRasterizationStateCreateInfo rasterizer = {};
-    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rasterizer.depthClampEnable = VK_FALSE;
-    rasterizer.rasterizerDiscardEnable = VK_FALSE;
-    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-    rasterizer.cullMode = VK_CULL_MODE_NONE;
-    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    rasterizer.depthBiasEnable = VK_FALSE;
-    rasterizer.lineWidth = 1.0f;
-
-    // Multisampling
-    VkPipelineMultisampleStateCreateInfo multisampling = {};
-    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-    multisampling.sampleShadingEnable = VK_FALSE;
-
-    // Color blending (no blending, just replace)
-    VkPipelineColorBlendAttachmentState colorBlendAttachment = {};
-    colorBlendAttachment.blendEnable = VK_FALSE;
-    colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-                                          VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-
-    VkPipelineColorBlendStateCreateInfo colorBlending = {};
-    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    colorBlending.logicOpEnable = VK_FALSE;
-    colorBlending.attachmentCount = 1;
-    colorBlending.pAttachments = &colorBlendAttachment;
-
-    // Dynamic states
-    std::array<VkDynamicState, 2> dynamicStates = {
-        VK_DYNAMIC_STATE_VIEWPORT,
-        VK_DYNAMIC_STATE_SCISSOR
-    };
-
-    VkPipelineDynamicStateCreateInfo dynamicState = {};
-    dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
-    dynamicState.pDynamicStates = dynamicStates.data();
-
-    // Push constants for downsample
+    // Create pipeline layouts with push constants
     VkPushConstantRange downsamplePushConstantRange = {};
     downsamplePushConstantRange.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     downsamplePushConstantRange.offset = 0;
     downsamplePushConstantRange.size = sizeof(DownsamplePushConstants);
 
-    // Downsample pipeline layout
     VkPipelineLayoutCreateInfo downsampleLayoutInfo = {};
     downsampleLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     downsampleLayoutInfo.setLayoutCount = 1;
@@ -358,13 +268,11 @@ bool BloomSystem::createPipelines() {
         return false;
     }
 
-    // Push constants for upsample
     VkPushConstantRange upsamplePushConstantRange = {};
     upsamplePushConstantRange.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     upsamplePushConstantRange.offset = 0;
     upsamplePushConstantRange.size = sizeof(UpsamplePushConstants);
 
-    // Upsample pipeline layout
     VkPipelineLayoutCreateInfo upsampleLayoutInfo = {};
     upsampleLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     upsampleLayoutInfo.setLayoutCount = 1;
@@ -376,59 +284,34 @@ bool BloomSystem::createPipelines() {
         return false;
     }
 
-    // Create downsample pipeline
-    VkGraphicsPipelineCreateInfo downsamplePipelineInfo = {};
-    downsamplePipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    downsamplePipelineInfo.stageCount = static_cast<uint32_t>(downsampleStages.size());
-    downsamplePipelineInfo.pStages = downsampleStages.data();
-    downsamplePipelineInfo.pVertexInputState = &vertexInputInfo;
-    downsamplePipelineInfo.pInputAssemblyState = &inputAssembly;
-    downsamplePipelineInfo.pViewportState = &viewportState;
-    downsamplePipelineInfo.pRasterizationState = &rasterizer;
-    downsamplePipelineInfo.pMultisampleState = &multisampling;
-    downsamplePipelineInfo.pColorBlendState = &colorBlending;
-    downsamplePipelineInfo.pDynamicState = &dynamicState;
-    downsamplePipelineInfo.layout = downsamplePipelineLayout;
-    downsamplePipelineInfo.renderPass = downsampleRenderPass;
-    downsamplePipelineInfo.subpass = 0;
+    // Create downsample pipeline using factory
+    GraphicsPipelineFactory factory(device);
 
-    if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &downsamplePipelineInfo, nullptr, &downsamplePipeline) != VK_SUCCESS) {
+    bool success = factory
+        .applyPreset(GraphicsPipelineFactory::Preset::FullscreenQuad)
+        .setShaders(shaderPath + "/postprocess.vert.spv", shaderPath + "/bloom_downsample.frag.spv")
+        .setRenderPass(downsampleRenderPass)
+        .setPipelineLayout(downsamplePipelineLayout)
+        .setDynamicViewport(true)
+        .build(downsamplePipeline);
+
+    if (!success) {
         return false;
     }
 
-    // Create upsample pipeline (additive blending for accumulation)
-    colorBlendAttachment.blendEnable = VK_TRUE;
-    colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
-    colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
-    colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
-    colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-    colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-    colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+    // Create upsample pipeline with additive blending
+    success = factory.reset()
+        .applyPreset(GraphicsPipelineFactory::Preset::FullscreenQuad)
+        .setShaders(shaderPath + "/postprocess.vert.spv", shaderPath + "/bloom_upsample.frag.spv")
+        .setRenderPass(upsampleRenderPass)
+        .setPipelineLayout(upsamplePipelineLayout)
+        .setDynamicViewport(true)
+        .setBlendMode(GraphicsPipelineFactory::BlendMode::Additive)
+        .build(upsamplePipeline);
 
-    VkGraphicsPipelineCreateInfo upsamplePipelineInfo = {};
-    upsamplePipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    upsamplePipelineInfo.stageCount = static_cast<uint32_t>(upsampleStages.size());
-    upsamplePipelineInfo.pStages = upsampleStages.data();
-    upsamplePipelineInfo.pVertexInputState = &vertexInputInfo;
-    upsamplePipelineInfo.pInputAssemblyState = &inputAssembly;
-    upsamplePipelineInfo.pViewportState = &viewportState;
-    upsamplePipelineInfo.pRasterizationState = &rasterizer;
-    upsamplePipelineInfo.pMultisampleState = &multisampling;
-    upsamplePipelineInfo.pColorBlendState = &colorBlending;
-    upsamplePipelineInfo.pDynamicState = &dynamicState;
-    upsamplePipelineInfo.layout = upsamplePipelineLayout;
-    upsamplePipelineInfo.renderPass = upsampleRenderPass;
-    upsamplePipelineInfo.subpass = 0;
-
-    if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &upsamplePipelineInfo, nullptr, &upsamplePipeline) != VK_SUCCESS) {
+    if (!success) {
         return false;
     }
-
-    // Cleanup shader modules
-    vkDestroyShaderModule(device, downsampleVert, nullptr);
-    vkDestroyShaderModule(device, downsampleFrag, nullptr);
-    vkDestroyShaderModule(device, upsampleVert, nullptr);
-    vkDestroyShaderModule(device, upsampleFrag, nullptr);
 
     return true;
 }
