@@ -292,13 +292,40 @@ void generateLeavesForTree(uint treeIndex) {
     float canopyRadius = max(canopyExtent.x, max(canopyExtent.y, canopyExtent.z));
     if (!isInFrustum(canopyCenter, canopyRadius)) return;
 
-    // LOD - reduce leaf count at distance
+    // LOD - reduce leaf count at distance (Milestone 8)
     float lodFactor = smoothstep(uniforms.lodTransitionStart, uniforms.lodTransitionEnd, distToCamera);
-    float baseDensityMult = 1.0 - lodFactor * 0.8;  // Keep 20% at max distance
+
+    // Multi-tier LOD with smooth probability transitions
+    // Near (0-50m): Full density, small leaves
+    // Medium (50-150m): 60% density, medium leaves
+    // Far (150-300m): 30% density, large leaves
+    float densityMult = 1.0;
+    float sizeMult = 1.0;
+
+    if (distToCamera > 150.0) {
+        densityMult = 0.3;
+        sizeMult = 2.0;
+    } else if (distToCamera > 50.0) {
+        float t = smoothstep(50.0, 150.0, distToCamera);
+        densityMult = mix(0.6, 0.3, t);
+        sizeMult = mix(1.3, 2.0, t);
+    } else {
+        float t = smoothstep(0.0, 50.0, distToCamera);
+        densityMult = mix(1.0, 0.6, t);
+        sizeMult = mix(1.0, 1.3, t);
+    }
+
+    // Screen-space size culling - approximate projected leaf size
+    // Assumes ~60 degree FOV, 1080p resolution
+    float screenLeafSize = (def.leafSize * tree.scale * sizeMult) / distToCamera * 1000.0;
+    const float MIN_SCREEN_PIXELS = 1.5;  // Skip if less than 1.5 pixels
+
+    // Skip entire tree if leaves would be sub-pixel
+    if (screenLeafSize < MIN_SCREEN_PIXELS) return;
 
     // Number of leaves based on density and canopy volume
     float canopyVolume = canopyExtent.x * canopyExtent.y * canopyExtent.z * 4.19; // ~4/3 pi
-    uint maxLeaves = uint(def.leafDensity * canopyVolume * baseDensityMult);
+    uint maxLeaves = uint(def.leafDensity * canopyVolume * densityMult);
     maxLeaves = min(maxLeaves, 500u);  // Cap per tree
 
     // Generate leaves using golden ratio spiral for even distribution
@@ -348,14 +375,14 @@ void generateLeavesForTree(uint treeIndex) {
         vec3 clumpInfluencedFacing = normalize(mix(randomFacing, -toClumpCenter, 0.4));
         vec2 facingDir = normalize(clumpInfluencedFacing.xz);
 
-        // Leaf size with clump-based variation
+        // Leaf size with clump-based variation (Milestone 8)
         float baseSize = def.leafSize * tree.scale;
         float clumpSizeMod = 0.8 + clump.mediumClumpId * 0.4;  // Clumps have similar sizes
         float individualVar = 1.0 + (leafHash - 0.5) * def.leafSizeVariance * 0.5;
         float leafSize = baseSize * clumpSizeMod * individualVar;
 
-        // Increase leaf size at distance to maintain coverage
-        leafSize *= 1.0 + lodFactor * 0.5;
+        // Apply LOD size multiplier to maintain screen coverage at distance
+        leafSize *= sizeMult;
 
         // Color from clump system
         float depthInCanopy = 1.0 - radiusFactor;

@@ -43,6 +43,10 @@ void TreeSystem::destroy(VkDevice dev, VmaAllocator alloc) {
     vkDestroyPipelineLayout(dev, leafGraphicsPipelineLayout, nullptr);
     vkDestroyDescriptorSetLayout(dev, leafGraphicsDescriptorSetLayout, nullptr);
 
+    vkDestroyPipeline(dev, leafShadowPipeline, nullptr);
+    vkDestroyPipelineLayout(dev, leafShadowPipelineLayout, nullptr);
+    vkDestroyDescriptorSetLayout(dev, leafShadowDescriptorSetLayout, nullptr);
+
     if (definitionBuffer != VK_NULL_HANDLE) {
         vmaDestroyBuffer(alloc, definitionBuffer, definitionAllocation);
     }
@@ -529,6 +533,101 @@ bool TreeSystem::createShadowPipeline() {
     return builder.buildGraphicsPipeline(pipelineInfo, shadowPipelineLayout, shadowPipeline);
 }
 
+bool TreeSystem::createLeafShadowPipeline() {
+    // Create descriptor set layout for leaf shadow (same bindings as leaf graphics shadow path)
+    // binding 0: renderer UBO (uniform) - for cascadeViewProj
+    // binding 1: leaf buffer (storage)
+    // binding 2: wind uniforms (uniform)
+    PipelineBuilder layoutBuilder(getDevice());
+    layoutBuilder.addDescriptorBinding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT)
+        .addDescriptorBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT)
+        .addDescriptorBinding(2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT);
+
+    if (!layoutBuilder.buildDescriptorSetLayout(leafShadowDescriptorSetLayout)) {
+        return false;
+    }
+
+    PipelineBuilder builder(getDevice());
+    builder.addShaderStage(getShaderPath() + "/tree_leaf_shadow.vert.spv", VK_SHADER_STAGE_VERTEX_BIT)
+        .addShaderStage(getShaderPath() + "/tree_leaf_shadow.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT)
+        .addPushConstantRange(VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(TreePushConstants));
+
+    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
+    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+
+    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    inputAssembly.primitiveRestartEnable = VK_FALSE;
+
+    VkViewport viewport{};
+    viewport.x = 0.0f;
+    viewport.y = 0.0f;
+    viewport.width = static_cast<float>(shadowMapSize);
+    viewport.height = static_cast<float>(shadowMapSize);
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+
+    VkRect2D scissor{};
+    scissor.offset = {0, 0};
+    scissor.extent = {shadowMapSize, shadowMapSize};
+
+    VkPipelineViewportStateCreateInfo viewportState{};
+    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewportState.viewportCount = 1;
+    viewportState.pViewports = &viewport;
+    viewportState.scissorCount = 1;
+    viewportState.pScissors = &scissor;
+
+    VkPipelineRasterizationStateCreateInfo rasterizer{};
+    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    rasterizer.depthClampEnable = VK_FALSE;
+    rasterizer.rasterizerDiscardEnable = VK_FALSE;
+    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+    rasterizer.lineWidth = 1.0f;
+    rasterizer.cullMode = VK_CULL_MODE_NONE;  // Two-sided for leaves
+    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    rasterizer.depthBiasEnable = VK_TRUE;
+    rasterizer.depthBiasConstantFactor = 0.5f;
+    rasterizer.depthBiasSlopeFactor = 1.0f;
+
+    VkPipelineMultisampleStateCreateInfo multisampling{};
+    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    multisampling.sampleShadingEnable = VK_FALSE;
+    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    VkPipelineDepthStencilStateCreateInfo depthStencil{};
+    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    depthStencil.depthTestEnable = VK_TRUE;
+    depthStencil.depthWriteEnable = VK_TRUE;
+    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+    depthStencil.depthBoundsTestEnable = VK_FALSE;
+    depthStencil.stencilTestEnable = VK_FALSE;
+
+    VkPipelineColorBlendStateCreateInfo colorBlending{};
+    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    colorBlending.logicOpEnable = VK_FALSE;
+    colorBlending.attachmentCount = 0;
+
+    if (!builder.buildPipelineLayout({leafShadowDescriptorSetLayout}, leafShadowPipelineLayout)) {
+        return false;
+    }
+
+    VkGraphicsPipelineCreateInfo pipelineInfo{};
+    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pipelineInfo.pVertexInputState = &vertexInputInfo;
+    pipelineInfo.pInputAssemblyState = &inputAssembly;
+    pipelineInfo.pViewportState = &viewportState;
+    pipelineInfo.pRasterizationState = &rasterizer;
+    pipelineInfo.pMultisampleState = &multisampling;
+    pipelineInfo.pDepthStencilState = &depthStencil;
+    pipelineInfo.pColorBlendState = &colorBlending;
+    pipelineInfo.renderPass = shadowRenderPass;
+    pipelineInfo.subpass = 0;
+
+    return builder.buildGraphicsPipeline(pipelineInfo, leafShadowPipelineLayout, leafShadowPipeline);
+}
+
 bool TreeSystem::createDescriptorSets() {
     if (!particleSystem.createStandardDescriptorSets()) {
         return false;
@@ -568,6 +667,18 @@ bool TreeSystem::createDescriptorSets() {
 
         if (vkAllocateDescriptorSets(getDevice(), &leafGraphicsAllocInfo, &leafGraphicsDescriptorSetsDB[set]) != VK_SUCCESS) {
             SDL_Log("Failed to allocate tree leaf graphics descriptor set (set %u)", set);
+            return false;
+        }
+
+        // Allocate leaf shadow descriptor sets (Milestone 7)
+        VkDescriptorSetAllocateInfo leafShadowAllocInfo{};
+        leafShadowAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        leafShadowAllocInfo.descriptorPool = getDescriptorPool();
+        leafShadowAllocInfo.descriptorSetCount = 1;
+        leafShadowAllocInfo.pSetLayouts = &leafShadowDescriptorSetLayout;
+
+        if (vkAllocateDescriptorSets(getDevice(), &leafShadowAllocInfo, &leafShadowDescriptorSetsDB[set]) != VK_SUCCESS) {
+            SDL_Log("Failed to allocate tree leaf shadow descriptor set (set %u)", set);
             return false;
         }
 
@@ -704,6 +815,9 @@ bool TreeSystem::createDescriptorSets() {
 
 bool TreeSystem::createExtraPipelines() {
     if (!createShadowPipeline()) {
+        return false;
+    }
+    if (!createLeafShadowPipeline()) {
         return false;
     }
     if (!createLeafComputePipeline()) {
@@ -874,6 +988,36 @@ void TreeSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>&
 
         vkUpdateDescriptorSets(dev, static_cast<uint32_t>(leafGraphicsWrites.size()),
                                leafGraphicsWrites.data(), 0, nullptr);
+
+        // Update leaf shadow descriptor sets (Milestone 7)
+        std::array<VkWriteDescriptorSet, 3> leafShadowWrites{};
+
+        leafShadowWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        leafShadowWrites[0].dstSet = leafShadowDescriptorSetsDB[set];
+        leafShadowWrites[0].dstBinding = 0;
+        leafShadowWrites[0].dstArrayElement = 0;
+        leafShadowWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        leafShadowWrites[0].descriptorCount = 1;
+        leafShadowWrites[0].pBufferInfo = &uboInfo;
+
+        leafShadowWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        leafShadowWrites[1].dstSet = leafShadowDescriptorSetsDB[set];
+        leafShadowWrites[1].dstBinding = 1;
+        leafShadowWrites[1].dstArrayElement = 0;
+        leafShadowWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        leafShadowWrites[1].descriptorCount = 1;
+        leafShadowWrites[1].pBufferInfo = &leafBufferInfo;
+
+        leafShadowWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        leafShadowWrites[2].dstSet = leafShadowDescriptorSetsDB[set];
+        leafShadowWrites[2].dstBinding = 2;
+        leafShadowWrites[2].dstArrayElement = 0;
+        leafShadowWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        leafShadowWrites[2].descriptorCount = 1;
+        leafShadowWrites[2].pBufferInfo = &windBufferInfo;
+
+        vkUpdateDescriptorSets(dev, static_cast<uint32_t>(leafShadowWrites.size()),
+                               leafShadowWrites.data(), 0, nullptr);
     }
 }
 
@@ -1076,18 +1220,31 @@ void TreeSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex, floa
         readSet = particleSystem.getComputeBufferSet();
     }
 
+    TreePushConstants treePush{};
+    treePush.time = time;
+    treePush.cascadeIndex = static_cast<int>(cascadeIndex);
+
+    // Draw branch shadows
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                             shadowPipelineLayout, 0, 1,
                             &shadowDescriptorSetsDB[readSet], 0, nullptr);
 
-    TreePushConstants treePush{};
-    treePush.time = time;
-    treePush.cascadeIndex = static_cast<int>(cascadeIndex);
     vkCmdPushConstants(cmd, shadowPipelineLayout,
                        VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(TreePushConstants), &treePush);
 
     vkCmdDrawIndirect(cmd, indirectBuffers.buffers[readSet], 0, 1, sizeof(VkDrawIndirectCommand));
+
+    // Draw leaf shadows (Milestone 7)
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, leafShadowPipeline);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            leafShadowPipelineLayout, 0, 1,
+                            &leafShadowDescriptorSetsDB[readSet], 0, nullptr);
+
+    vkCmdPushConstants(cmd, leafShadowPipelineLayout,
+                       VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(TreePushConstants), &treePush);
+
+    vkCmdDrawIndirect(cmd, leafIndirectBuffers.buffers[readSet], 0, 1, sizeof(VkDrawIndirectCommand));
 }
 
 void TreeSystem::advanceBufferSet() {
@@ -1167,6 +1324,148 @@ void TreeSystem::setDefaultTreeDefinition() {
     def.barkTextureIndex = 0;
 
     addTreeDefinition(def);
+}
+
+// ============================================================================
+// Milestone 9: Forest Rendering - Tree Placement
+// ============================================================================
+
+// Simple hash function for placement randomness
+static float hashFloat(uint32_t seed) {
+    seed = (seed ^ 61) ^ (seed >> 16);
+    seed = seed + (seed << 3);
+    seed = seed ^ (seed >> 4);
+    seed = seed * 0x27d4eb2d;
+    seed = seed ^ (seed >> 15);
+    return static_cast<float>(seed) / static_cast<float>(0xFFFFFFFF);
+}
+
+void TreeSystem::populateForest(const glm::vec3& center, const glm::vec2& extent, float density,
+                                 float minScale, float maxScale, uint32_t seed) {
+    // Calculate number of trees based on area and density
+    float area = extent.x * extent.y * 4.0f;  // extent is half-size
+    uint32_t targetTrees = static_cast<uint32_t>(area * density);
+
+    // Limit to max trees minus current count
+    uint32_t availableSlots = MAX_TREES - static_cast<uint32_t>(trees.size());
+    targetTrees = std::min(targetTrees, availableSlots);
+
+    if (targetTrees == 0) return;
+
+    // Use Poisson disk-like distribution for natural spacing
+    // Grid-based approach with jitter for efficiency
+    float cellSize = std::sqrt(area / targetTrees) * 0.8f;
+    uint32_t gridX = static_cast<uint32_t>(std::ceil(extent.x * 2.0f / cellSize));
+    uint32_t gridZ = static_cast<uint32_t>(std::ceil(extent.y * 2.0f / cellSize));
+
+    uint32_t treesAdded = 0;
+    uint32_t hashSeed = seed;
+
+    for (uint32_t gz = 0; gz < gridZ && treesAdded < targetTrees; ++gz) {
+        for (uint32_t gx = 0; gx < gridX && treesAdded < targetTrees; ++gx) {
+            // Cell position
+            float cellX = center.x - extent.x + (gx + 0.5f) * cellSize;
+            float cellZ = center.z - extent.y + (gz + 0.5f) * cellSize;
+
+            // Random jitter within cell
+            hashSeed = hashSeed * 1664525u + 1013904223u;
+            float jitterX = (hashFloat(hashSeed) - 0.5f) * cellSize * 0.8f;
+            hashSeed = hashSeed * 1664525u + 1013904223u;
+            float jitterZ = (hashFloat(hashSeed) - 0.5f) * cellSize * 0.8f;
+
+            glm::vec3 position(cellX + jitterX, center.y, cellZ + jitterZ);
+
+            // Check bounds
+            if (position.x < center.x - extent.x || position.x > center.x + extent.x ||
+                position.z < center.z - extent.y || position.z > center.z + extent.y) {
+                continue;
+            }
+
+            // Random rotation
+            hashSeed = hashSeed * 1664525u + 1013904223u;
+            float rotation = hashFloat(hashSeed) * 6.28318f;
+
+            // Random scale
+            hashSeed = hashSeed * 1664525u + 1013904223u;
+            float scale = minScale + hashFloat(hashSeed) * (maxScale - minScale);
+
+            // Random definition (if multiple exist)
+            uint32_t defIndex = 0;
+            if (definitions.size() > 1) {
+                hashSeed = hashSeed * 1664525u + 1013904223u;
+                defIndex = hashSeed % static_cast<uint32_t>(definitions.size());
+            }
+
+            addTree(position, rotation, scale, defIndex);
+            ++treesAdded;
+        }
+    }
+
+    SDL_Log("Forest populated: %u trees in %.0f x %.0f area (density %.3f)",
+            treesAdded, extent.x * 2.0f, extent.y * 2.0f, density);
+}
+
+void TreeSystem::populateForestFromDensityMap(const glm::vec3& center, const glm::vec2& extent,
+                                               const float* densityData, uint32_t width, uint32_t height,
+                                               float maxDensity, float minScale, float maxScale,
+                                               uint32_t seed) {
+    if (!densityData || width == 0 || height == 0) return;
+
+    // Cell size in world space
+    float cellWidth = (extent.x * 2.0f) / static_cast<float>(width);
+    float cellHeight = (extent.y * 2.0f) / static_cast<float>(height);
+
+    uint32_t hashSeed = seed;
+    uint32_t treesAdded = 0;
+    uint32_t availableSlots = MAX_TREES - static_cast<uint32_t>(trees.size());
+
+    for (uint32_t y = 0; y < height && treesAdded < availableSlots; ++y) {
+        for (uint32_t x = 0; x < width && treesAdded < availableSlots; ++x) {
+            // Get density at this cell
+            float cellDensity = densityData[y * width + x];
+            if (cellDensity <= 0.0f) continue;
+
+            // Probability of placing a tree in this cell
+            float placementProbability = cellDensity * maxDensity * cellWidth * cellHeight;
+
+            // Random test
+            hashSeed = hashSeed * 1664525u + 1013904223u;
+            if (hashFloat(hashSeed) > placementProbability) continue;
+
+            // Cell center position
+            float worldX = center.x - extent.x + (x + 0.5f) * cellWidth;
+            float worldZ = center.z - extent.y + (y + 0.5f) * cellHeight;
+
+            // Jitter within cell
+            hashSeed = hashSeed * 1664525u + 1013904223u;
+            float jitterX = (hashFloat(hashSeed) - 0.5f) * cellWidth * 0.8f;
+            hashSeed = hashSeed * 1664525u + 1013904223u;
+            float jitterZ = (hashFloat(hashSeed) - 0.5f) * cellHeight * 0.8f;
+
+            glm::vec3 position(worldX + jitterX, center.y, worldZ + jitterZ);
+
+            // Random rotation
+            hashSeed = hashSeed * 1664525u + 1013904223u;
+            float rotation = hashFloat(hashSeed) * 6.28318f;
+
+            // Random scale (density can influence scale - denser areas = smaller trees)
+            hashSeed = hashSeed * 1664525u + 1013904223u;
+            float baseScale = minScale + hashFloat(hashSeed) * (maxScale - minScale);
+            float scale = baseScale * (0.8f + 0.4f * (1.0f - cellDensity));
+
+            // Random definition
+            uint32_t defIndex = 0;
+            if (definitions.size() > 1) {
+                hashSeed = hashSeed * 1664525u + 1013904223u;
+                defIndex = hashSeed % static_cast<uint32_t>(definitions.size());
+            }
+
+            addTree(position, rotation, scale, defIndex);
+            ++treesAdded;
+        }
+    }
+
+    SDL_Log("Forest from density map: %u trees in %ux%u grid", treesAdded, width, height);
 }
 
 void TreeSystem::uploadTreeData() {

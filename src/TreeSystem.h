@@ -134,6 +134,18 @@ public:
     void clearTrees();
     uint32_t getTreeCount() const { return static_cast<uint32_t>(trees.size()); }
 
+    // Forest placement (Milestone 9)
+    // Populates trees in a region with given density (trees per square unit)
+    void populateForest(const glm::vec3& center, const glm::vec2& extent, float density,
+                        float minScale = 0.8f, float maxScale = 1.2f, uint32_t seed = 12345);
+
+    // Populates trees from a density texture (0-1 values, sampled at grid positions)
+    // densityData is row-major, width x height pixels, each float is 0-1 density
+    void populateForestFromDensityMap(const glm::vec3& center, const glm::vec2& extent,
+                                       const float* densityData, uint32_t width, uint32_t height,
+                                       float maxDensity = 0.1f, float minScale = 0.8f, float maxScale = 1.2f,
+                                       uint32_t seed = 12345);
+
     // Tree definition management
     void addTreeDefinition(const TreeDefinition& def);
     void setDefaultTreeDefinition();
@@ -149,6 +161,7 @@ private:
     bool createGraphicsPipeline();
     bool createLeafGraphicsPipeline();
     bool createShadowPipeline();
+    bool createLeafShadowPipeline();
     bool createDescriptorSets();
     bool createExtraPipelines();
     void destroyBuffers(VmaAllocator allocator);
@@ -185,6 +198,11 @@ private:
     VkPipelineLayout leafGraphicsPipelineLayout = VK_NULL_HANDLE;
     VkPipeline leafGraphicsPipeline = VK_NULL_HANDLE;
 
+    // Leaf shadow pipeline (Milestone 7)
+    VkDescriptorSetLayout leafShadowDescriptorSetLayout = VK_NULL_HANDLE;
+    VkPipelineLayout leafShadowPipelineLayout = VK_NULL_HANDLE;
+    VkPipeline leafShadowPipeline = VK_NULL_HANDLE;
+
     // Tree definition buffer (uploaded once, read by compute)
     VkBuffer definitionBuffer = VK_NULL_HANDLE;
     VmaAllocation definitionAllocation = VK_NULL_HANDLE;
@@ -213,6 +231,9 @@ private:
     // Descriptor sets for leaf compute and graphics
     VkDescriptorSet leafComputeDescriptorSetsDB[BUFFER_SET_COUNT];
     VkDescriptorSet leafGraphicsDescriptorSetsDB[BUFFER_SET_COUNT];
+
+    // Descriptor sets for leaf shadow (Milestone 7)
+    VkDescriptorSet leafShadowDescriptorSetsDB[BUFFER_SET_COUNT];
 
     // Terrain heightmap (for tree placement on terrain)
     VkImageView terrainHeightMapView = VK_NULL_HANDLE;
