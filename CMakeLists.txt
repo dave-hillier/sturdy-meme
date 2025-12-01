@@ -21,6 +21,7 @@ set(SOURCES
     src/main.cpp
     src/Application.cpp
     src/Renderer.cpp
+    src/VulkanContext.cpp
     src/SceneBuilder.cpp
     src/SceneManager.cpp
     src/Camera.cpp
