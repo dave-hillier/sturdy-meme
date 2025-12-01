@@ -52,6 +52,7 @@ set(SOURCES
     src/SnowMaskSystem.cpp
     src/VolumetricSnowSystem.cpp
     src/SkySystem.cpp
+    src/ShadowSystem.cpp
     src/GuiSystem.cpp
     src/InputSystem.cpp
 )
