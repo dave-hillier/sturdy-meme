@@ -1,5 +1,7 @@
 #version 450
 
+#extension GL_GOOGLE_include_directive : require
+
 // Catmull-Clark subdivision surface rendering - Vertex Shader
 
 layout(location = 0) out vec3 fragWorldPos;

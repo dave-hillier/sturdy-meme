@@ -92,18 +92,29 @@ void CatmullClarkSystem::destroy(VkDevice device, VmaAllocator allocator) {
 }
 
 bool CatmullClarkSystem::createUniformBuffers() {
-    VkDeviceSize bufferSize = sizeof(SceneUBO);
-
     uniformBuffers.resize(framesInFlight);
     uniformAllocations.resize(framesInFlight);
     uniformMappedPtrs.resize(framesInFlight);
 
     for (uint32_t i = 0; i < framesInFlight; ++i) {
-        if (!createUniformBuffer(allocator, bufferSize, uniformBuffers[i],
-                                  uniformAllocations[i], uniformMappedPtrs[i])) {
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.size = sizeof(UniformBufferObject);
+        bufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+                         VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+        VmaAllocationInfo allocationInfo{};
+        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &uniformBuffers[i],
+                           &uniformAllocations[i], &allocationInfo) != VK_SUCCESS) {
             std::cerr << "Failed to create Catmull-Clark uniform buffer " << i << std::endl;
             return false;
         }
+        uniformMappedPtrs[i] = allocationInfo.pMappedData;
     }
 
     return true;
@@ -286,7 +297,7 @@ void CatmullClarkSystem::updateDescriptorSets(VkDevice device, const std::vector
             VkDescriptorBufferInfo sceneBufferInfo{};
             sceneBufferInfo.buffer = sceneUniformBuffers[i];
             sceneBufferInfo.offset = 0;
-            sceneBufferInfo.range = sizeof(SceneUBO);
+            sceneBufferInfo.range = sizeof(UniformBufferObject);
 
             VkDescriptorBufferInfo cbtBufferInfo{};
             cbtBufferInfo.buffer = cbt.getBuffer();
@@ -361,7 +372,7 @@ void CatmullClarkSystem::updateDescriptorSets(VkDevice device, const std::vector
             VkDescriptorBufferInfo sceneBufferInfo{};
             sceneBufferInfo.buffer = sceneUniformBuffers[i];
             sceneBufferInfo.offset = 0;
-            sceneBufferInfo.range = sizeof(SceneUBO);
+            sceneBufferInfo.range = sizeof(UniformBufferObject);
 
             VkDescriptorBufferInfo cbtBufferInfo{};
             cbtBufferInfo.buffer = cbt.getBuffer();
