@@ -9,6 +9,7 @@
 #include "PhysicsSystem.h"
 #include "ClothSimulation.h"
 #include "GuiSystem.h"
+#include "InputSystem.h"
 
 class Application {
 public:
@@ -20,15 +21,8 @@ public:
     void shutdown();
 
 private:
-    void handleInput(float deltaTime);
-    void handleGamepadInput(float deltaTime);
-    void handleFreeCameraInput(float deltaTime, const bool* keyState);
-    void handleThirdPersonInput(float deltaTime, const bool* keyState);
-    void handleFreeCameraGamepadInput(float deltaTime);
-    void handleThirdPersonGamepadInput(float deltaTime);
     void processEvents();
-    void openGamepad(SDL_JoystickID id);
-    void closeGamepad();
+    void applyInputToCamera();
     std::string getResourcePath();
     void initPhysics();
     void updatePhysicsToScene();
@@ -36,11 +30,13 @@ private:
     void updateFlag(float deltaTime);
 
     SDL_Window* window = nullptr;
-    SDL_Gamepad* gamepad = nullptr;
     Renderer renderer;
     Camera camera;
     Player player;
     PhysicsWorld physics;
+
+    // Input system
+    InputSystem input;
 
     // Physics body IDs for scene objects (mapped to scene object indices)
     std::vector<PhysicsBodyID> scenePhysicsBodies;
@@ -56,14 +52,5 @@ private:
     float lastDeltaTime = 0.016f;
 
     bool running = false;
-    bool thirdPersonMode = false;  // Toggle between free camera and third-person
-    bool wantsJump = false;        // Jump input flag
-    bool jumpHeld = false;         // Track if keyboard jump was held last frame
-    bool gamepadJumpHeld = false;  // Track if gamepad jump was held last frame
-    glm::vec3 accumulatedMoveDir{0.0f};  // Combined movement direction from all inputs
     float moveSpeed = 3.0f;
-    float rotateSpeed = 60.0f;
-
-    static constexpr float stickDeadzone = 0.15f;
-    static constexpr float gamepadLookSpeed = 120.0f;
 };
