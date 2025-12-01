@@ -13,6 +13,11 @@
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
+// Push constants for update mode
+layout(push_constant) uniform PushConstants {
+    uint updateMode;  // 0 = split only, 1 = merge only
+};
+
 // Height map sampler
 layout(binding = 3) uniform sampler2D heightMap;
 
@@ -186,26 +191,29 @@ void main() {
     // Frustum culling
     bool culled = frustumCullAABB(minBound, maxBound);
 
-    if (culled) {
-        // If culled and not at minimum depth, try to merge
-        if (depth > MIN_DEPTH) {
+    // Compute screen-space edge length (needed for both modes)
+    float edgeLengthPixels = computeTriangleLOD(v0, v1, v2);
+
+    // Ping-pong between split and merge frames to avoid race conditions
+    // This ensures that multiple threads don't simultaneously try to split and merge
+    // related nodes, which could create inconsistent tree states
+    if (updateMode == 0u) {
+        // Split-only frame
+        if (!culled && edgeLengthPixels > SPLIT_THRESHOLD && depth < MAX_DEPTH) {
+            leb_SplitNode_Square(node);
+        }
+    } else {
+        // Merge-only frame
+        if (culled) {
+            // If culled and not at minimum depth, merge
+            if (depth > MIN_DEPTH) {
+                leb_DiamondParent diamond = leb_DecodeDiamondParent_Square(node);
+                leb_MergeNode_Square(node, diamond);
+            }
+        } else if (edgeLengthPixels < MERGE_THRESHOLD && depth > MIN_DEPTH) {
+            // Merge: combine with sibling
             leb_DiamondParent diamond = leb_DecodeDiamondParent_Square(node);
             leb_MergeNode_Square(node, diamond);
         }
-        return;
     }
-
-    // Compute screen-space edge length
-    float edgeLengthPixels = computeTriangleLOD(v0, v1, v2);
-
-    // LOD decision with hysteresis
-    if (edgeLengthPixels > SPLIT_THRESHOLD && depth < MAX_DEPTH) {
-        // Split: create two child leaves
-        leb_SplitNode_Square(node);
-    } else if (edgeLengthPixels < MERGE_THRESHOLD && depth > MIN_DEPTH) {
-        // Merge: combine with sibling
-        leb_DiamondParent diamond = leb_DecodeDiamondParent_Square(node);
-        leb_MergeNode_Square(node, diamond);
-    }
-    // else: keep current state
 }
