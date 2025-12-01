@@ -421,12 +421,15 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     catmullClarkInfo.commandPool = commandPool;
 
     CatmullClarkConfig catmullClarkConfig{};
-    catmullClarkConfig.position = glm::vec3(0.0f, 5.0f, -10.0f);  // Position in front of camera
-    catmullClarkConfig.scale = glm::vec3(3.0f);
+    float suzanneX = 5.0f, suzanneZ = -5.0f;
+    float terrainY = terrainSystem.getHeightAt(suzanneX, suzanneZ);
+    catmullClarkConfig.position = glm::vec3(suzanneX, terrainY + 2.0f, suzanneZ);
+    catmullClarkConfig.scale = glm::vec3(2.0f);
     catmullClarkConfig.targetEdgePixels = 12.0f;
     catmullClarkConfig.maxDepth = 16;
     catmullClarkConfig.splitThreshold = 18.0f;
     catmullClarkConfig.mergeThreshold = 6.0f;
+    catmullClarkConfig.objPath = resourcePath + "/assets/suzanne.obj";
 
     if (!catmullClarkSystem.init(catmullClarkInfo, catmullClarkConfig)) return false;
 

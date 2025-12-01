@@ -60,6 +60,7 @@ set(SOURCES
     src/CatmullClarkCBT.cpp
     src/CatmullClarkMesh.cpp
     src/CatmullClarkSystem.cpp
+    src/OBJLoader.cpp
     src/RockSystem.cpp
     src/CloudShadowSystem.cpp
 )
@@ -98,6 +99,15 @@ add_custom_command(
         ${CMAKE_CURRENT_SOURCE_DIR}/textures
         $<TARGET_BUNDLE_CONTENT_DIR:${PROJECT_NAME}>/Resources/textures
     COMMENT "Copying textures to app bundle"
+)
+
+# Copy assets directory to app bundle
+add_custom_command(
+    TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_CURRENT_SOURCE_DIR}/assets
+        $<TARGET_BUNDLE_CONTENT_DIR:${PROJECT_NAME}>/Resources/assets
+    COMMENT "Copying assets to app bundle"
 )
 
 set(SHADER_FILES

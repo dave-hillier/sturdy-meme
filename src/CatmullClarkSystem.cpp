@@ -1,4 +1,5 @@
 #include "CatmullClarkSystem.h"
+#include "OBJLoader.h"
 #include "ShaderLoader.h"
 #include "BufferUtils.h"
 #include <iostream>
@@ -20,8 +21,16 @@ bool CatmullClarkSystem::init(const InitInfo& info, const CatmullClarkConfig& cf
     commandPool = info.commandPool;
     config = cfg;
 
-    // Create base mesh (cube for now)
-    mesh = CatmullClarkMesh::createCube();
+    // Create base mesh
+    if (!config.objPath.empty()) {
+        mesh = OBJLoader::loadQuadMesh(config.objPath);
+        if (mesh.vertices.empty()) {
+            std::cerr << "Failed to load OBJ, falling back to cube" << std::endl;
+            mesh = CatmullClarkMesh::createCube();
+        }
+    } else {
+        mesh = CatmullClarkMesh::createCube();
+    }
     if (!mesh.uploadToGPU(allocator)) {
         std::cerr << "Failed to upload Catmull-Clark mesh to GPU" << std::endl;
         return false;

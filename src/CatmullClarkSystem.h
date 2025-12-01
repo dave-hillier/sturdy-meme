@@ -30,6 +30,7 @@ struct CatmullClarkConfig {
     int maxDepth = 16;                                  // Maximum subdivision depth
     float splitThreshold = 18.0f;                       // Screen pixels to trigger split
     float mergeThreshold = 6.0f;                        // Screen pixels to trigger merge
+    std::string objPath;                                // Optional OBJ file path (empty = use cube)
 };
 
 class CatmullClarkSystem {
