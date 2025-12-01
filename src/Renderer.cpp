@@ -14,80 +14,19 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     window = win;
     resourcePath = resPath;
 
-    vkb::InstanceBuilder builder;
-    auto instRet = builder.set_app_name("Vulkan Game")
-        .request_validation_layers(true)
-        .use_default_debug_messenger()
-        .require_api_version(1, 2, 0)
-        .build();
-
-    if (!instRet) {
-        SDL_Log("Failed to create Vulkan instance: %s", instRet.error().message().c_str());
+    // Initialize Vulkan context (instance, device, queues, allocator, swapchain)
+    if (!vulkanContext.init(window)) {
+        SDL_Log("Failed to initialize Vulkan context");
         return false;
     }
 
-    vkbInstance = instRet.value();
-    instance = vkbInstance.instance;
-
-    if (!SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface)) {
-        SDL_Log("Failed to create Vulkan surface: %s", SDL_GetError());
-        return false;
-    }
-
-    VkPhysicalDeviceFeatures features{};
-    features.samplerAnisotropy = VK_FALSE;
-
-    vkb::PhysicalDeviceSelector selector{vkbInstance};
-    auto physRet = selector.set_minimum_version(1, 2)
-        .set_surface(surface)
-        .set_required_features(features)
-        .select();
-
-    if (!physRet) {
-        SDL_Log("Failed to select physical device: %s", physRet.error().message().c_str());
-        return false;
-    }
-
-    vkb::PhysicalDevice vkbPhysicalDevice = physRet.value();
-    physicalDevice = vkbPhysicalDevice.physical_device;
-
-    vkb::DeviceBuilder deviceBuilder{vkbPhysicalDevice};
-    auto devRet = deviceBuilder.build();
-
-    if (!devRet) {
-        SDL_Log("Failed to create logical device: %s", devRet.error().message().c_str());
-        return false;
-    }
-
-    vkbDevice = devRet.value();
-    device = vkbDevice.device;
-
-    auto graphicsQueueRet = vkbDevice.get_queue(vkb::QueueType::graphics);
-    if (!graphicsQueueRet) {
-        SDL_Log("Failed to get graphics queue");
-        return false;
-    }
-    graphicsQueue = graphicsQueueRet.value();
-
-    auto presentQueueRet = vkbDevice.get_queue(vkb::QueueType::present);
-    if (!presentQueueRet) {
-        SDL_Log("Failed to get present queue");
-        return false;
-    }
-    presentQueue = presentQueueRet.value();
-
-    VmaAllocatorCreateInfo allocatorInfo{};
-    allocatorInfo.physicalDevice = physicalDevice;
-    allocatorInfo.device = device;
-    allocatorInfo.instance = instance;
-    allocatorInfo.vulkanApiVersion = VK_API_VERSION_1_2;
-
-    if (vmaCreateAllocator(&allocatorInfo, &allocator) != VK_SUCCESS) {
-        SDL_Log("Failed to create VMA allocator");
-        return false;
-    }
-
-    if (!createSwapchain()) return false;
+    // Get convenience references for the rest of initialization
+    VkDevice device = vulkanContext.getDevice();
+    VmaAllocator allocator = vulkanContext.getAllocator();
+    VkPhysicalDevice physicalDevice = vulkanContext.getPhysicalDevice();
+    VkQueue graphicsQueue = vulkanContext.getGraphicsQueue();
+    VkExtent2D swapchainExtent = vulkanContext.getSwapchainExtent();
+    VkFormat swapchainImageFormat = vulkanContext.getSwapchainImageFormat();
     if (!createRenderPass()) return false;
     if (!createDepthResources()) return false;
     if (!createFramebuffers()) return false;
@@ -402,11 +341,10 @@ void Renderer::setPlayerPosition(const glm::vec3& position, float radius) {
     playerCapsuleRadius = radius;
 }
 
-uint32_t Renderer::getGraphicsQueueFamily() const {
-    return vkbDevice.get_queue_index(vkb::QueueType::graphics).value();
-}
-
 void Renderer::shutdown() {
+    VkDevice device = vulkanContext.getDevice();
+    VmaAllocator allocator = vulkanContext.getAllocator();
+
     if (device != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(device);
 
@@ -459,46 +397,17 @@ void Renderer::shutdown() {
 
         vkDestroyCommandPool(device, commandPool, nullptr);
 
-        destroySwapchain();
-
-        vmaDestroyAllocator(allocator);
-        vkb::destroy_device(vkbDevice);
+        // Clean up Renderer-specific resources (depth, framebuffers, renderPass)
+        destroyRenderResources();
     }
 
-    if (surface != VK_NULL_HANDLE) {
-        vkDestroySurfaceKHR(instance, surface, nullptr);
-    }
-
-    vkb::destroy_instance(vkbInstance);
+    vulkanContext.shutdown();
 }
 
-bool Renderer::createSwapchain() {
-    int w, h;
-    SDL_GetWindowSize(window, &w, &h);
+void Renderer::destroyRenderResources() {
+    VkDevice device = vulkanContext.getDevice();
+    VmaAllocator allocator = vulkanContext.getAllocator();
 
-    vkb::SwapchainBuilder swapchainBuilder{vkbDevice};
-    auto swapRet = swapchainBuilder
-        .set_desired_format({VK_FORMAT_B8G8R8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR})
-        .set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR)
-        .set_desired_extent(w, h)
-        .build();
-
-    if (!swapRet) {
-        SDL_Log("Failed to create swapchain: %s", swapRet.error().message().c_str());
-        return false;
-    }
-
-    vkb::Swapchain vkbSwapchain = swapRet.value();
-    swapchain = vkbSwapchain.swapchain;
-    swapchainImages = vkbSwapchain.get_images().value();
-    swapchainImageViews = vkbSwapchain.get_image_views().value();
-    swapchainImageFormat = vkbSwapchain.image_format;
-    swapchainExtent = vkbSwapchain.extent;
-
-    return true;
-}
-
-void Renderer::destroySwapchain() {
     if (depthImageView != VK_NULL_HANDLE) {
         vkDestroyImageView(device, depthImageView, nullptr);
         depthImageView = VK_NULL_HANDLE;
@@ -513,19 +422,16 @@ void Renderer::destroySwapchain() {
     }
     framebuffers.clear();
 
-    vkDestroyRenderPass(device, renderPass, nullptr);
-    renderPass = VK_NULL_HANDLE;
-
-    for (auto imageView : swapchainImageViews) {
-        vkDestroyImageView(device, imageView, nullptr);
+    if (renderPass != VK_NULL_HANDLE) {
+        vkDestroyRenderPass(device, renderPass, nullptr);
+        renderPass = VK_NULL_HANDLE;
     }
-    swapchainImageViews.clear();
-
-    vkDestroySwapchainKHR(device, swapchain, nullptr);
-    swapchain = VK_NULL_HANDLE;
 }
 
 bool Renderer::createRenderPass() {
+    VkDevice device = vulkanContext.getDevice();
+    VkFormat swapchainImageFormat = vulkanContext.getSwapchainImageFormat();
+
     VkAttachmentDescription colorAttachment{};
     colorAttachment.format = swapchainImageFormat;
     colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -590,6 +496,10 @@ bool Renderer::createRenderPass() {
 }
 
 bool Renderer::createDepthResources() {
+    VkDevice device = vulkanContext.getDevice();
+    VmaAllocator allocator = vulkanContext.getAllocator();
+    VkExtent2D swapchainExtent = vulkanContext.getSwapchainExtent();
+
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     imageInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -633,6 +543,10 @@ bool Renderer::createDepthResources() {
 }
 
 bool Renderer::createFramebuffers() {
+    VkDevice device = vulkanContext.getDevice();
+    const auto& swapchainImageViews = vulkanContext.getSwapchainImageViews();
+    VkExtent2D swapchainExtent = vulkanContext.getSwapchainExtent();
+
     framebuffers.resize(swapchainImageViews.size());
 
     for (size_t i = 0; i < swapchainImageViews.size(); i++) {
@@ -660,7 +574,8 @@ bool Renderer::createFramebuffers() {
 }
 
 bool Renderer::createCommandPool() {
-    auto queueFamilyIndex = vkbDevice.get_queue_index(vkb::QueueType::graphics).value();
+    VkDevice device = vulkanContext.getDevice();
+    uint32_t queueFamilyIndex = vulkanContext.getGraphicsQueueFamily();
 
     VkCommandPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -676,6 +591,8 @@ bool Renderer::createCommandPool() {
 }
 
 bool Renderer::createCommandBuffers() {
+    VkDevice device = vulkanContext.getDevice();
+
     commandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
 
     VkCommandBufferAllocateInfo allocInfo{};
@@ -693,6 +610,8 @@ bool Renderer::createCommandBuffers() {
 }
 
 bool Renderer::createSyncObjects() {
+    VkDevice device = vulkanContext.getDevice();
+
     imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
     renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
     inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
@@ -717,6 +636,8 @@ bool Renderer::createSyncObjects() {
 }
 
 bool Renderer::createDescriptorSetLayout() {
+    VkDevice device = vulkanContext.getDevice();
+
     // Main scene descriptor set layout:
     // 0: UBO (camera/view data)
     // 1: Diffuse texture sampler
@@ -748,6 +669,9 @@ bool Renderer::createDescriptorSetLayout() {
 }
 
 bool Renderer::createGraphicsPipeline() {
+    VkDevice device = vulkanContext.getDevice();
+    VkExtent2D swapchainExtent = vulkanContext.getSwapchainExtent();
+
     auto vertShaderCode = ShaderLoader::readFile(resourcePath + "/shaders/shader.vert.spv");
     auto fragShaderCode = ShaderLoader::readFile(resourcePath + "/shaders/shader.frag.spv");
 
@@ -885,6 +809,7 @@ bool Renderer::createGraphicsPipeline() {
 }
 
 bool Renderer::createUniformBuffers() {
+    VmaAllocator allocator = vulkanContext.getAllocator();
     VkDeviceSize bufferSize = sizeof(UniformBufferObject);
 
     uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
@@ -916,6 +841,7 @@ bool Renderer::createUniformBuffers() {
 }
 
 bool Renderer::createLightBuffers() {
+    VmaAllocator allocator = vulkanContext.getAllocator();
     VkDeviceSize bufferSize = sizeof(LightBuffer);
 
     lightBuffers.resize(MAX_FRAMES_IN_FLIGHT);
@@ -959,6 +885,8 @@ void Renderer::updateLightBuffer(uint32_t currentImage, const Camera& camera) {
 }
 
 bool Renderer::createDescriptorPool() {
+    VkDevice device = vulkanContext.getDevice();
+
     // Create the new auto-growing descriptor pool
     // Initial capacity of 64 sets per pool, will automatically grow if exhausted
     descriptorManagerPool.emplace(device, 64);
@@ -990,6 +918,8 @@ bool Renderer::createDescriptorPool() {
 }
 
 bool Renderer::createDescriptorSets() {
+    VkDevice device = vulkanContext.getDevice();
+
     // Allocate descriptor sets using the new pool manager
     descriptorSets = descriptorManagerPool->allocate(descriptorSetLayout, MAX_FRAMES_IN_FLIGHT);
     if (descriptorSets.empty()) {
@@ -1100,6 +1030,11 @@ void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera& camera) 
 }
 
 void Renderer::render(const Camera& camera) {
+    VkDevice device = vulkanContext.getDevice();
+    VkSwapchainKHR swapchain = vulkanContext.getSwapchain();
+    VkQueue graphicsQueue = vulkanContext.getGraphicsQueue();
+    VkQueue presentQueue = vulkanContext.getPresentQueue();
+
     // Frame synchronization
     vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
 
@@ -1292,7 +1227,7 @@ void Renderer::render(const Camera& camera) {
 }
 
 void Renderer::waitIdle() {
-    vkDeviceWaitIdle(device);
+    vulkanContext.waitIdle();
 }
 
 // Pure calculation helpers - no state mutation
