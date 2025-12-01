@@ -30,6 +30,7 @@ set(SOURCES
     src/Texture.cpp
     src/ShaderLoader.cpp
     src/PipelineBuilder.cpp
+    src/GraphicsPipelineFactory.cpp
     src/BindingBuilder.cpp
     src/DescriptorManager.cpp
     src/RenderableBuilder.cpp
