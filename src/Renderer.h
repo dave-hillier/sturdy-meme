@@ -19,6 +19,7 @@
 #include "BloomSystem.h"
 #include "FroxelSystem.h"
 #include "AtmosphereLUTSystem.h"
+#include "SkySystem.h"
 #include "SceneManager.h"
 #include "TerrainSystem.h"
 #include "SnowMaskSystem.h"
@@ -157,10 +158,7 @@ private:
     bool createCommandBuffers();
     bool createSyncObjects();
     bool createDescriptorSetLayout();
-    bool createSkyDescriptorSetLayout();
-    bool createSkyDescriptorSets();
     bool createGraphicsPipeline();
-    bool createSkyPipeline();
     bool createUniformBuffers();
     bool createDescriptorPool();
     bool createDescriptorSets();
@@ -228,13 +226,8 @@ private:
     VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
     VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
     VkPipeline graphicsPipeline = VK_NULL_HANDLE;
-    VkPipeline skyPipeline = VK_NULL_HANDLE;
 
-    // Sky-specific descriptor set layout and pipeline layout (for atmosphere LUTs)
-    VkDescriptorSetLayout skyDescriptorSetLayout = VK_NULL_HANDLE;
-    VkPipelineLayout skyPipelineLayout = VK_NULL_HANDLE;
-    std::vector<VkDescriptorSet> skyDescriptorSets;
-
+    SkySystem skySystem;
     GrassSystem grassSystem;
     WindSystem windSystem;
     WeatherSystem weatherSystem;

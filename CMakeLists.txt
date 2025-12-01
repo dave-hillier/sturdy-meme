@@ -50,6 +50,7 @@ set(SOURCES
     src/ClothSimulation.cpp
     src/SnowMaskSystem.cpp
     src/VolumetricSnowSystem.cpp
+    src/SkySystem.cpp
     src/GuiSystem.cpp
     src/InputSystem.cpp
 )
