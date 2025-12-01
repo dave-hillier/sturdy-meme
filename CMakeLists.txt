@@ -131,6 +131,7 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/skyview_lut.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/irradiance_lut.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cloudmap_lut.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cloud_shadow.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_build.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_reduce.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/snow_accumulation.comp.spv
@@ -236,6 +237,12 @@ if(SHADER_COMPILE_CMD)
         COMMENT "Compiling cloud map LUT compute shader"
     )
 
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cloud_shadow.comp.spv
+        COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cloud_shadow.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cloud_shadow.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cloud_shadow.comp
+        COMMENT "Compiling cloud shadow compute shader"
+    )
     # Terrain shaders (LEB terrain system)
     set(TERRAIN_CBT_DEPS
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/cbt.glsl
@@ -362,6 +369,8 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/multiscatter_lut.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/skyview_lut.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/irradiance_lut.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cloudmap_lut.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cloud_shadow.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_build.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_reduce.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/snow_accumulation.comp.spv
