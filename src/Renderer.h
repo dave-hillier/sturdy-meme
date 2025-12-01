@@ -31,6 +31,7 @@
 #include "ShadowSystem.h"
 #include "VulkanContext.h"
 #include "UBOs.h"
+#include "RockSystem.h"
 
 struct PushConstants {
     glm::mat4 model;
@@ -216,6 +217,7 @@ private:
     CatmullClarkSystem catmullClarkSystem;
     SnowMaskSystem snowMaskSystem;
     VolumetricSnowSystem volumetricSnowSystem;
+    RockSystem rockSystem;
     EnvironmentSettings environmentSettings;
     bool useVolumetricSnow = true;  // Use new volumetric system by default
 
@@ -252,6 +254,7 @@ private:
     // Scene management (meshes, textures, objects, lights, physics)
     SceneManager sceneManager;
     std::vector<VkDescriptorSet> metalDescriptorSets;
+    std::vector<VkDescriptorSet> rockDescriptorSets;
 
     uint32_t currentFrame = 0;
     static constexpr int MAX_FRAMES_IN_FLIGHT = 2;

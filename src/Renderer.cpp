@@ -191,6 +191,54 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     // Update terrain descriptor sets with shared resources
     terrainSystem.updateDescriptorSets(device, uniformBuffers, shadowSystem.getShadowImageView(), shadowSystem.getShadowSampler());
 
+    // Initialize rock system (uses terrain for height queries)
+    RockSystem::InitInfo rockInfo{};
+    rockInfo.device = device;
+    rockInfo.allocator = allocator;
+    rockInfo.commandPool = commandPool;
+    rockInfo.graphicsQueue = graphicsQueue;
+    rockInfo.physicalDevice = physicalDevice;
+    rockInfo.resourcePath = resourcePath;
+    rockInfo.terrainSize = terrainConfig.size;
+    rockInfo.getTerrainHeight = [this](float x, float z) {
+        return terrainSystem.getHeightAt(x, z);
+    };
+
+    RockConfig rockConfig{};
+    rockConfig.rockVariations = 6;
+    rockConfig.rocksPerVariation = 10;
+    rockConfig.minRadius = 0.4f;
+    rockConfig.maxRadius = 2.0f;
+    rockConfig.placementRadius = 100.0f;
+    rockConfig.minDistanceBetween = 4.0f;
+    rockConfig.roughness = 0.35f;
+    rockConfig.asymmetry = 0.3f;
+    rockConfig.subdivisions = 3;
+    rockConfig.materialRoughness = 0.75f;
+    rockConfig.materialMetallic = 0.0f;
+
+    if (!rockSystem.init(rockInfo, rockConfig)) return false;
+
+    // Update rock descriptor sets now that rock textures are loaded
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        DescriptorManager::SetWriter writer(device, rockDescriptorSets[i]);
+        writer
+            .writeBuffer(0, uniformBuffers[i], 0, sizeof(UniformBufferObject))
+            .writeImage(1, rockSystem.getRockTexture().getImageView(),
+                       rockSystem.getRockTexture().getSampler())
+            .writeImage(2, shadowSystem.getShadowImageView(), shadowSystem.getShadowSampler())
+            .writeImage(3, rockSystem.getRockNormalMap().getImageView(),
+                       rockSystem.getRockNormalMap().getSampler())
+            .writeBuffer(4, lightBuffers[i], 0, sizeof(LightBuffer),
+                        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+            .writeImage(5, sceneManager.getSceneBuilder().getDefaultEmissiveMap().getImageView(),
+                       sceneManager.getSceneBuilder().getDefaultEmissiveMap().getSampler())
+            .writeImage(6, shadowSystem.getPointShadowArrayView(i), shadowSystem.getPointShadowSampler())
+            .writeImage(7, shadowSystem.getSpotShadowArrayView(i), shadowSystem.getSpotShadowSampler())
+            .writeImage(8, snowMaskSystem.getSnowMaskView(), snowMaskSystem.getSnowMaskSampler())
+            .update();
+    }
+
     // Initialize weather particle system (rain/snow)
     WeatherSystem::InitInfo weatherInfo{};
     weatherInfo.device = device;
@@ -403,6 +451,8 @@ void Renderer::shutdown() {
 
         grassSystem.destroy(device, allocator);
         terrainSystem.destroy(device, allocator);
+        catmullClarkSystem.destroy(device, allocator);
+        rockSystem.destroy(allocator, device);
         windSystem.destroy(device, allocator);
         weatherSystem.destroy(device, allocator);
         snowMaskSystem.destroy(device, allocator);
@@ -965,6 +1015,12 @@ bool Renderer::createDescriptorSets() {
         return false;
     }
 
+    rockDescriptorSets = descriptorManagerPool->allocate(descriptorSetLayout, MAX_FRAMES_IN_FLIGHT);
+    if (rockDescriptorSets.empty()) {
+        SDL_Log("Failed to allocate rock descriptor sets");
+        return false;
+    }
+
     // Helper lambda to write common bindings shared across all material sets
     auto writeCommonBindings = [this](DescriptorManager::SetWriter& writer, size_t frameIndex) {
         writer
@@ -1380,33 +1436,31 @@ void Renderer::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float 
         grassSystem.recordShadowDraw(cb, frameIndex, grassTime, cascade);
     };
 
+    // Combine scene objects and rock objects for shadow rendering
+    std::vector<Renderable> allObjects;
+    allObjects.reserve(sceneManager.getSceneObjects().size() + rockSystem.getSceneObjects().size());
+    allObjects.insert(allObjects.end(), sceneManager.getSceneObjects().begin(), sceneManager.getSceneObjects().end());
+    allObjects.insert(allObjects.end(), rockSystem.getSceneObjects().begin(), rockSystem.getSceneObjects().end());
+
     shadowSystem.recordShadowPass(cmd, frameIndex, descriptorSets[frameIndex],
-                                   sceneManager.getSceneObjects(),
+                                   allObjects,
                                    terrainCallback, grassCallback);
 }
 
 void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
-    for (const auto& obj : sceneManager.getSceneObjects()) {
+    // Helper lambda to render a scene object
+    auto renderObject = [&](const Renderable& obj, VkDescriptorSet* descSet) {
         PushConstants push{};
         push.model = obj.transform;
         push.roughness = obj.roughness;
         push.metallic = obj.metallic;
         push.emissiveIntensity = obj.emissiveIntensity;
-        push.emissiveColor = glm::vec4(obj.emissiveColor, 1.0f);  // alpha=1 uses emissive color
+        push.emissiveColor = glm::vec4(obj.emissiveColor, 1.0f);
 
         vkCmdPushConstants(cmd, pipelineLayout,
                           VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                           0, sizeof(PushConstants), &push);
 
-        // Select descriptor set based on texture
-        VkDescriptorSet* descSet;
-        if (obj.texture == &sceneManager.getSceneBuilder().getGroundTexture()) {
-            descSet = &groundDescriptorSets[frameIndex];
-        } else if (obj.texture == &sceneManager.getSceneBuilder().getMetalTexture()) {
-            descSet = &metalDescriptorSets[frameIndex];
-        } else {
-            descSet = &descriptorSets[frameIndex];
-        }
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                 pipelineLayout, 0, 1, descSet, 0, nullptr);
 
@@ -1416,6 +1470,24 @@ void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
         vkCmdBindIndexBuffer(cmd, obj.mesh->getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
 
         vkCmdDrawIndexed(cmd, obj.mesh->getIndexCount(), 1, 0, 0, 0);
+    };
+
+    // Render scene manager objects
+    for (const auto& obj : sceneManager.getSceneObjects()) {
+        VkDescriptorSet* descSet;
+        if (obj.texture == &sceneManager.getSceneBuilder().getGroundTexture()) {
+            descSet = &groundDescriptorSets[frameIndex];
+        } else if (obj.texture == &sceneManager.getSceneBuilder().getMetalTexture()) {
+            descSet = &metalDescriptorSets[frameIndex];
+        } else {
+            descSet = &descriptorSets[frameIndex];
+        }
+        renderObject(obj, descSet);
+    }
+
+    // Render procedural rocks
+    for (const auto& rock : rockSystem.getSceneObjects()) {
+        renderObject(rock, &rockDescriptorSets[frameIndex]);
     }
 }
 
