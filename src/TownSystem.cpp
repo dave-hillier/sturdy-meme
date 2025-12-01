@@ -2,9 +2,12 @@
 #include "DescriptorManager.h"
 #include "GraphicsPipelineFactory.h"
 #include "ShaderLoader.h"
+#include <glm/gtc/matrix_transform.hpp>
 #include <stdexcept>
 #include <cstring>
 #include <iostream>
+
+using ShaderLoader::loadShaderModule;
 
 bool TownSystem::init(const InitInfo& info) {
     device = info.device;
@@ -395,15 +398,6 @@ bool TownSystem::createDescriptorSetLayout() {
 }
 
 bool TownSystem::createGraphicsPipeline() {
-    // Load shaders
-    auto vertShader = ShaderLoader::loadShader(device, shaderPath + "/town.vert.spv");
-    auto fragShader = ShaderLoader::loadShader(device, shaderPath + "/town.frag.spv");
-
-    if (vertShader == VK_NULL_HANDLE || fragShader == VK_NULL_HANDLE) {
-        std::cerr << "TownSystem: Failed to load shaders" << std::endl;
-        return false;
-    }
-
     // Push constant range
     VkPushConstantRange pushRange{};
     pushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
@@ -418,36 +412,44 @@ bool TownSystem::createGraphicsPipeline() {
     layoutInfo.pPushConstantRanges = &pushRange;
 
     if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
-        vkDestroyShaderModule(device, vertShader, nullptr);
-        vkDestroyShaderModule(device, fragShader, nullptr);
         return false;
     }
+
+    // Vertex input setup
+    auto bindingDesc = Vertex::getBindingDescription();
+    auto attrDescs = Vertex::getAttributeDescriptions();
+    std::vector<VkVertexInputBindingDescription> bindings = {bindingDesc};
+    std::vector<VkVertexInputAttributeDescription> attributes(attrDescs.begin(), attrDescs.end());
 
     // Use GraphicsPipelineFactory
     GraphicsPipelineFactory factory(device);
 
-    factory.setShaders(vertShader, fragShader)
-           .setVertexInput(Vertex::getBindingDescription(), Vertex::getAttributeDescriptions())
-           .setInputAssembly(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
-           .setViewport(extent)
-           .setRasterizer(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE)
-           .setMultisampling(VK_SAMPLE_COUNT_1_BIT)
-           .setDepthStencil(true, true, VK_COMPARE_OP_LESS)
-           .setColorBlending(false)
+    factory.setShaders(shaderPath + "/town.vert.spv", shaderPath + "/town.frag.spv")
+           .setVertexInput(bindings, attributes)
+           .setTopology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
+           .setExtent(extent)
+           .setPolygonMode(VK_POLYGON_MODE_FILL)
+           .setCullMode(VK_CULL_MODE_BACK_BIT)
+           .setFrontFace(VK_FRONT_FACE_COUNTER_CLOCKWISE)
+           .setSampleCount(VK_SAMPLE_COUNT_1_BIT)
+           .setDepthTest(true)
+           .setDepthWrite(true)
+           .setDepthCompareOp(VK_COMPARE_OP_LESS)
+           .setBlendMode(GraphicsPipelineFactory::BlendMode::None)
            .setPipelineLayout(pipelineLayout)
            .setRenderPass(renderPass, 0);
 
-    graphicsPipeline = factory.build();
+    if (!factory.build(graphicsPipeline)) {
+        std::cerr << "TownSystem: Failed to build graphics pipeline" << std::endl;
+        return false;
+    }
 
-    vkDestroyShaderModule(device, vertShader, nullptr);
-    vkDestroyShaderModule(device, fragShader, nullptr);
-
-    return graphicsPipeline != VK_NULL_HANDLE;
+    return true;
 }
 
 bool TownSystem::createShadowPipeline() {
     // Load shadow shader
-    auto vertShader = ShaderLoader::loadShader(device, shaderPath + "/town_shadow.vert.spv");
+    auto vertShader = loadShaderModule(device, shaderPath + "/town_shadow.vert.spv");
 
     if (vertShader == VK_NULL_HANDLE) {
         std::cerr << "TownSystem: Failed to load shadow vertex shader" << std::endl;
