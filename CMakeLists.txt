@@ -85,10 +85,13 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
     MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in"
 )
 
-set(RESOURCE_FILES
-    ${CMAKE_CURRENT_SOURCE_DIR}/assets/textures/crate.png
-    ${CMAKE_CURRENT_SOURCE_DIR}/assets/textures/grass.png
-    ${CMAKE_CURRENT_SOURCE_DIR}/assets/textures/metal.png
+# Copy entire textures directory to app bundle
+add_custom_command(
+    TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_CURRENT_SOURCE_DIR}/textures
+        $<TARGET_BUNDLE_CONTENT_DIR:${PROJECT_NAME}>/Resources/textures
+    COMMENT "Copying textures to app bundle"
 )
 
 set(SHADER_FILES
@@ -120,6 +123,7 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/multiscatter_lut.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/skyview_lut.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/irradiance_lut.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cloudmap_lut.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_build.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_reduce.comp.spv
@@ -139,9 +143,6 @@ set(TERRAIN_SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_wireframe.frag.spv
 )
 
-set_source_files_properties(${RESOURCE_FILES} PROPERTIES
-    MACOSX_PACKAGE_LOCATION "Resources/textures"
-)
 
 set_source_files_properties(${SHADER_FILES} PROPERTIES
     MACOSX_PACKAGE_LOCATION "Resources/shaders"
@@ -151,7 +152,7 @@ set_source_files_properties(${TERRAIN_SHADER_FILES} PROPERTIES
     MACOSX_PACKAGE_LOCATION "Resources/shaders/terrain"
 )
 
-target_sources(${PROJECT_NAME} PRIVATE ${RESOURCE_FILES} ${SHADER_FILES} ${TERRAIN_SHADER_FILES})
+target_sources(${PROJECT_NAME} PRIVATE ${SHADER_FILES} ${TERRAIN_SHADER_FILES})
 
 find_program(GLSLC glslc HINTS $ENV{VULKAN_SDK}/bin)
 find_program(GLSLANG_VALIDATOR glslangValidator HINTS $ENV{VULKAN_SDK}/bin)
@@ -356,6 +357,12 @@ if(SHADER_COMPILE_CMD)
         COMMENT "Compiling sky-view LUT compute shader"
     )
     add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/irradiance_lut.comp.spv
+        COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/irradiance_lut.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/irradiance_lut.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/irradiance_lut.comp ${CMAKE_CURRENT_SOURCE_DIR}/shaders/atmosphere_common.glsl
+        COMMENT "Compiling irradiance LUT compute shader"
+    )
+    add_custom_command(
         OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cloudmap_lut.comp.spv
         COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cloudmap_lut.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cloudmap_lut.comp
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cloudmap_lut.comp
@@ -454,6 +461,7 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/multiscatter_lut.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/skyview_lut.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/irradiance_lut.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_build.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_reduce.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/snow_accumulation.comp.spv
