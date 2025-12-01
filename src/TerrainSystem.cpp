@@ -368,10 +368,17 @@ bool TerrainSystem::createSubdivisionPipeline() {
     VkShaderModule shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_subdivision.comp.spv");
     if (!shaderModule) return false;
 
+    VkPushConstantRange pushConstantRange{};
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = sizeof(TerrainSubdivisionPushConstants);
+
     VkPipelineLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     layoutInfo.setLayoutCount = 1;
     layoutInfo.pSetLayouts = &computeDescriptorSetLayout;
+    layoutInfo.pushConstantRangeCount = 1;
+    layoutInfo.pPushConstantRanges = &pushConstantRange;
 
     if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &subdivisionPipelineLayout) != VK_SUCCESS) {
         vkDestroyShaderModule(device, shaderModule, nullptr);
@@ -1013,10 +1020,20 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) {
                         0, 1, &barrier, 0, nullptr, 0, nullptr);
 
     // 2. Subdivision - LOD update (indirect dispatch)
+    // Ping-pong between split and merge to avoid race conditions
+    // Even frames: split only, Odd frames: merge only
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, subdivisionPipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, subdivisionPipelineLayout,
                            0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
+
+    TerrainSubdivisionPushConstants subdivPC{};
+    subdivPC.updateMode = subdivisionFrameCount & 1;  // 0 = split, 1 = merge
+    vkCmdPushConstants(cmd, subdivisionPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                      sizeof(subdivPC), &subdivPC);
+
     vkCmdDispatchIndirect(cmd, indirectDispatchBuffer, 0);
+
+    subdivisionFrameCount++;
 
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                         0, 1, &barrier, 0, nullptr, 0, nullptr);

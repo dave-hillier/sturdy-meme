@@ -36,6 +36,11 @@ struct TerrainSumReductionPushConstants {
     int passID;
 };
 
+// Push constants for subdivision compute shader
+struct TerrainSubdivisionPushConstants {
+    uint32_t updateMode;  // 0 = split only, 1 = merge only
+};
+
 // Terrain configuration (outside class to avoid C++17 default argument issues)
 struct TerrainConfig {
     float size = 500.0f;              // Terrain size in world units
@@ -207,6 +212,7 @@ private:
 
     // Runtime state
     uint32_t currentNodeCount = 2;  // Start with 2 root triangles
+    uint32_t subdivisionFrameCount = 0;  // Frame counter for split/merge ping-pong
 
     // Constants
     static constexpr uint32_t SUBDIVISION_WORKGROUP_SIZE = 64;
