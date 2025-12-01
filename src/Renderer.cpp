@@ -451,6 +451,7 @@ void Renderer::shutdown() {
 
         grassSystem.destroy(device, allocator);
         terrainSystem.destroy(device, allocator);
+        catmullClarkSystem.destroy(device, allocator);
         rockSystem.destroy(allocator, device);
         windSystem.destroy(device, allocator);
         weatherSystem.destroy(device, allocator);
