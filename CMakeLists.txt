@@ -61,6 +61,7 @@ set(SOURCES
     src/CatmullClarkMesh.cpp
     src/CatmullClarkSystem.cpp
     src/RockSystem.cpp
+    src/CloudShadowSystem.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
