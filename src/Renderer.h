@@ -23,6 +23,7 @@
 #include "SkySystem.h"
 #include "SceneManager.h"
 #include "TerrainSystem.h"
+#include "CatmullClarkSystem.h"
 #include "SnowMaskSystem.h"
 #include "VolumetricSnowSystem.h"
 #include "EnvironmentSettings.h"
@@ -95,6 +96,11 @@ public:
 
     // Terrain data access for physics integration
     const TerrainSystem& getTerrainSystem() const { return terrainSystem; }
+
+    // Catmull-Clark subdivision control
+    void toggleCatmullClarkWireframe() { catmullClarkSystem.setWireframeMode(!catmullClarkSystem.isWireframeMode()); }
+    bool isCatmullClarkWireframeMode() const { return catmullClarkSystem.isWireframeMode(); }
+    CatmullClarkSystem& getCatmullClarkSystem() { return catmullClarkSystem; }
 
     // Weather control
     void setWeatherIntensity(float intensity);
@@ -207,6 +213,7 @@ private:
     FroxelSystem froxelSystem;
     AtmosphereLUTSystem atmosphereLUTSystem;
     TerrainSystem terrainSystem;
+    CatmullClarkSystem catmullClarkSystem;
     SnowMaskSystem snowMaskSystem;
     VolumetricSnowSystem volumetricSnowSystem;
     EnvironmentSettings environmentSettings;
