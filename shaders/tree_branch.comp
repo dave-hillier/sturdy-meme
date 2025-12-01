@@ -160,12 +160,12 @@ void generateTrunk(uint treeIndex) {
     branches[slot].metadata = uvec4(0xFFFFFFFF, 0, treeIndex, 0);  // Trunk has no parent, depth 0
 }
 
-// Generate primary branches from trunk
-void generatePrimaryBranches(uint treeIndex, uint trunkSlot) {
+// Generate primary branches from trunk with LOD support
+void generatePrimaryBranchesLOD(uint treeIndex, uint trunkSlot, uint numBranches) {
     TreeInstance tree = trees[treeIndex];
     TreeDefinition def = definitions[tree.definitionIndex];
 
-    if (def.branchLevels < 1) return;
+    if (def.branchLevels < 1 || numBranches == 0u) return;
 
     BranchInstance trunk = branches[trunkSlot];
     vec3 trunkBase = trunk.basePosition.xyz;
@@ -175,8 +175,9 @@ void generatePrimaryBranches(uint treeIndex, uint trunkSlot) {
     float trunkLength = length(trunkTip - trunkBase);
     float branchLength = trunkLength * def.branchLengthRatio;
 
-    // Generate branches around the trunk
-    for (uint i = 0; i < def.branchesPerLevel; i++) {
+    // Generate branches around the trunk (limited by LOD)
+    uint actualBranches = min(numBranches, def.branchesPerLevel);
+    for (uint i = 0; i < actualBranches; i++) {
         // Position along trunk (30% to 80%)
         float t = 0.3 + hash(tree.hash + float(i) * 0.1) * 0.5;
 
@@ -232,7 +233,7 @@ void main() {
 
     TreeInstance tree = trees[treeIndex];
 
-    // Distance culling
+    // Distance culling - very far trees are culled entirely
     float distToCamera = length(vec3(tree.position.x, tree.position.y, tree.position.z) - uniforms.cameraPosition.xyz);
     if (distToCamera > uniforms.maxDrawDistance) return;
 
@@ -245,10 +246,23 @@ void main() {
         if (dot(treeCenter, uniforms.frustumPlanes[i]) < -boundingRadius) return;
     }
 
-    // Generate trunk (stores its slot for branch generation)
+    // Generate trunk (always rendered if tree is visible)
     uint trunkSlot = atomicAdd(drawCmd.instanceCount, 0);  // Get current count before incrementing
     generateTrunk(treeIndex);
 
-    // Generate primary branches
-    generatePrimaryBranches(treeIndex, trunkSlot);
+    // LOD for branches - gradual reduction based on distance
+    // Close: all branches, Medium: half branches, Far: trunk only
+    float lodFactor = smoothstep(uniforms.lodTransitionStart, uniforms.lodTransitionEnd, distToCamera);
+
+    // Generate primary branches based on LOD
+    // At close range (lodFactor = 0): all branches
+    // At far range (lodFactor = 1): no branches (trunk only)
+    if (lodFactor < 0.95) {
+        // Reduce number of branches based on distance
+        uint maxBranches = def.branchesPerLevel;
+        uint branchesToGenerate = uint(float(maxBranches) * (1.0 - lodFactor * 0.8));  // Keep at least 20% at medium range
+        branchesToGenerate = max(branchesToGenerate, 1u);  // Always at least 1 branch until fully LOD'd out
+
+        generatePrimaryBranchesLOD(treeIndex, trunkSlot, branchesToGenerate);
+    }
 }

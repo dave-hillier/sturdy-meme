@@ -184,9 +184,9 @@ void main() {
     uint vertInQuad = vertInRingPair % (TRIS_PER_QUAD * VERTS_PER_TRI);  // 0-5
 
     // Decode quad vertex to ring indices
-    // Quad vertices (two triangles forming a quad):
-    // Triangle 1: (ring0, v0), (ring1, v0), (ring0, v1)  -> vertices 0, 1, 2
-    // Triangle 2: (ring0, v1), (ring1, v0), (ring1, v1)  -> vertices 3, 4, 5
+    // Quad vertices (two triangles forming a quad) - CCW winding when viewed from outside:
+    // Triangle 1: (ring0, v0), (ring1, v0), (ring1, v1)  -> vertices 0, 1, 2  (A, B, D)
+    // Triangle 2: (ring0, v0), (ring1, v1), (ring0, v1)  -> vertices 3, 4, 5  (A, D, C)
     uint ring0 = ringPairIndex;
     uint ring1 = ringPairIndex + 1u;
 
@@ -197,17 +197,17 @@ void main() {
     uint ringVertIdx;
 
     if (vertInQuad == 0u) {
-        segmentIdx = ring0; ringVertIdx = v0;
+        segmentIdx = ring0; ringVertIdx = v0;  // A
     } else if (vertInQuad == 1u) {
-        segmentIdx = ring1; ringVertIdx = v0;
+        segmentIdx = ring1; ringVertIdx = v0;  // B
     } else if (vertInQuad == 2u) {
-        segmentIdx = ring0; ringVertIdx = v1;
+        segmentIdx = ring1; ringVertIdx = v1;  // D
     } else if (vertInQuad == 3u) {
-        segmentIdx = ring0; ringVertIdx = v1;
+        segmentIdx = ring0; ringVertIdx = v0;  // A
     } else if (vertInQuad == 4u) {
-        segmentIdx = ring1; ringVertIdx = v0;
+        segmentIdx = ring1; ringVertIdx = v1;  // D
     } else {  // vertInQuad == 5
-        segmentIdx = ring1; ringVertIdx = v1;
+        segmentIdx = ring0; ringVertIdx = v1;  // C
     }
 
     // Position along branch (0 = base, 1 = tip)

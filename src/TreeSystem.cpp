@@ -590,9 +590,9 @@ void TreeSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos,
         }
     }
 
-    uniforms.maxDrawDistance = 200.0f;
-    uniforms.lodTransitionStart = 100.0f;
-    uniforms.lodTransitionEnd = 200.0f;
+    uniforms.maxDrawDistance = 500.0f;       // Trees visible up to 500m
+    uniforms.lodTransitionStart = 150.0f;   // Start reducing branches at 150m
+    uniforms.lodTransitionEnd = 400.0f;     // Trunk-only at 400m, fully culled at 500m
     uniforms.terrainSize = terrainSize;
     uniforms.terrainHeightScale = terrainHeightScale;
     uniforms.time = time;

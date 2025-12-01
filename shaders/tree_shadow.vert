@@ -115,6 +115,7 @@ void main() {
     uint quadIndex = vertInRingPair / (TRIS_PER_QUAD * VERTS_PER_TRI);
     uint vertInQuad = vertInRingPair % (TRIS_PER_QUAD * VERTS_PER_TRI);
 
+    // CCW winding when viewed from outside - must match main shader
     uint ring0 = ringPairIndex;
     uint ring1 = ringPairIndex + 1u;
 
@@ -125,17 +126,17 @@ void main() {
     uint ringVertIdx;
 
     if (vertInQuad == 0u) {
-        segmentIdx = ring0; ringVertIdx = v0;
+        segmentIdx = ring0; ringVertIdx = v0;  // A
     } else if (vertInQuad == 1u) {
-        segmentIdx = ring1; ringVertIdx = v0;
+        segmentIdx = ring1; ringVertIdx = v0;  // B
     } else if (vertInQuad == 2u) {
-        segmentIdx = ring0; ringVertIdx = v1;
+        segmentIdx = ring1; ringVertIdx = v1;  // D
     } else if (vertInQuad == 3u) {
-        segmentIdx = ring0; ringVertIdx = v1;
+        segmentIdx = ring0; ringVertIdx = v0;  // A
     } else if (vertInQuad == 4u) {
-        segmentIdx = ring1; ringVertIdx = v0;
+        segmentIdx = ring1; ringVertIdx = v1;  // D
     } else {
-        segmentIdx = ring1; ringVertIdx = v1;
+        segmentIdx = ring0; ringVertIdx = v1;  // C
     }
 
     float t = float(segmentIdx) / float(NUM_SEGMENTS - 1u);
