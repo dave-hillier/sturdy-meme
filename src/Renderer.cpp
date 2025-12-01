@@ -414,6 +414,12 @@ void Renderer::shutdown() {
 
         vkDestroyDescriptorPool(device, descriptorPool, nullptr);
 
+        // Clean up the auto-growing descriptor pool
+        if (descriptorManagerPool.has_value()) {
+            descriptorManagerPool->destroy();
+            descriptorManagerPool.reset();
+        }
+
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             vmaDestroyBuffer(allocator, uniformBuffers[i], uniformBuffersAllocations[i]);
         }
@@ -1591,69 +1597,29 @@ bool Renderer::createSyncObjects() {
 }
 
 bool Renderer::createDescriptorSetLayout() {
-    auto uboLayoutBinding = BindingBuilder()
-        .setBinding(0)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
-        .setStageFlags(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
+    // Main scene descriptor set layout:
+    // 0: UBO (camera/view data)
+    // 1: Diffuse texture sampler
+    // 2: Shadow map sampler (CSM cascade array)
+    // 3: Normal map sampler
+    // 4: Light buffer (SSBO for dynamic lights)
+    // 5: Emissive map sampler
+    // 6: Point shadow cube maps
+    // 7: Spot shadow depth maps
+    // 8: Snow mask texture
+    descriptorSetLayout = DescriptorManager::LayoutBuilder(device)
+        .addUniformBuffer(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)  // 0: UBO
+        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 1: diffuse
+        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 2: shadow
+        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 3: normal
+        .addStorageBuffer(VK_SHADER_STAGE_FRAGMENT_BIT)         // 4: lights
+        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 5: emissive
+        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 6: point shadow
+        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 7: spot shadow
+        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 8: snow mask
         .build();
 
-    auto samplerLayoutBinding = BindingBuilder()
-        .setBinding(1)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
-        .build();
-
-    auto shadowSamplerBinding = BindingBuilder()
-        .setBinding(2)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
-        .build();
-
-    auto normalMapBinding = BindingBuilder()
-        .setBinding(3)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
-        .build();
-
-    auto lightBufferBinding = BindingBuilder()
-        .setBinding(4)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
-        .build();
-
-    auto emissiveMapBinding = BindingBuilder()
-        .setBinding(5)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
-        .build();
-
-    auto pointShadowBinding = BindingBuilder()
-        .setBinding(6)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
-        .build();
-
-    auto spotShadowBinding = BindingBuilder()
-        .setBinding(7)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
-        .build();
-
-    VkDescriptorSetLayoutBinding snowMaskBinding{};
-    snowMaskBinding.binding = 8;
-    snowMaskBinding.descriptorCount = 1;
-    snowMaskBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    snowMaskBinding.pImmutableSamplers = nullptr;
-    snowMaskBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-
-    std::array<VkDescriptorSetLayoutBinding, 9> bindings = {uboLayoutBinding, samplerLayoutBinding, shadowSamplerBinding, normalMapBinding, lightBufferBinding, emissiveMapBinding, pointShadowBinding, spotShadowBinding, snowMaskBinding};
-
-    VkDescriptorSetLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
-    layoutInfo.pBindings = bindings.data();
-
-    if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &descriptorSetLayout) != VK_SUCCESS) {
+    if (descriptorSetLayout == VK_NULL_HANDLE) {
         SDL_Log("Failed to create descriptor set layout");
         return false;
     }
@@ -1873,24 +1839,30 @@ void Renderer::updateLightBuffer(uint32_t currentImage, const Camera& camera) {
 }
 
 bool Renderer::createDescriptorPool() {
+    // Create the new auto-growing descriptor pool
+    // Initial capacity of 64 sets per pool, will automatically grow if exhausted
+    descriptorManagerPool.emplace(device, 64);
+
+    // Legacy pool for systems not yet migrated to DescriptorManager
+    // This pool is still needed for: GrassSystem, WeatherSystem, LeafSystem, etc.
     std::array<VkDescriptorPoolSize, 4> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 18);  // +2 for post-process, +2 for grass, +4 for weather, +2 for sky, +2 for cloud map, +2 histogram
+    poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 18);
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 35);  // diffuse + shadow + normal + emissive + HDR + grass + weather + dynamic shadows + sky LUTs + cloud map
+    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 35);
     poolSizes[2].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    poolSizes[2].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 32);  // +6 grass, +6 light, +10 weather, +4 histogram (histogram + exposure buffers)
+    poolSizes[2].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 32);
     poolSizes[3].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    poolSizes[3].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 16);  // atmosphere LUTs compute shaders + cloud map + histogram HDR input + froxel (3 per set)
+    poolSizes[3].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 16);
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
     poolInfo.pPoolSizes = poolSizes.data();
-    poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 29);  // +6 grass, +4 weather, +2 sky, +5 atmosphere LUTs, +4 histogram
+    poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 29);
 
     if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS) {
-        SDL_Log("Failed to create descriptor pool");
+        SDL_Log("Failed to create legacy descriptor pool");
         return false;
     }
 
@@ -1898,206 +1870,75 @@ bool Renderer::createDescriptorPool() {
 }
 
 bool Renderer::createDescriptorSets() {
-    std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, descriptorSetLayout);
-
-    VkDescriptorSetAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = descriptorPool;
-    allocInfo.descriptorSetCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
-    allocInfo.pSetLayouts = layouts.data();
-
-    descriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
-    if (vkAllocateDescriptorSets(device, &allocInfo, descriptorSets.data()) != VK_SUCCESS) {
+    // Allocate descriptor sets using the new pool manager
+    descriptorSets = descriptorManagerPool->allocate(descriptorSetLayout, MAX_FRAMES_IN_FLIGHT);
+    if (descriptorSets.empty()) {
         SDL_Log("Failed to allocate descriptor sets");
         return false;
     }
 
-    groundDescriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
-    if (vkAllocateDescriptorSets(device, &allocInfo, groundDescriptorSets.data()) != VK_SUCCESS) {
+    groundDescriptorSets = descriptorManagerPool->allocate(descriptorSetLayout, MAX_FRAMES_IN_FLIGHT);
+    if (groundDescriptorSets.empty()) {
         SDL_Log("Failed to allocate ground descriptor sets");
         return false;
     }
 
-    metalDescriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
-    if (vkAllocateDescriptorSets(device, &allocInfo, metalDescriptorSets.data()) != VK_SUCCESS) {
+    metalDescriptorSets = descriptorManagerPool->allocate(descriptorSetLayout, MAX_FRAMES_IN_FLIGHT);
+    if (metalDescriptorSets.empty()) {
         SDL_Log("Failed to allocate metal descriptor sets");
         return false;
     }
 
+    // Helper lambda to write common bindings shared across all material sets
+    auto writeCommonBindings = [this](DescriptorManager::SetWriter& writer, size_t frameIndex) {
+        writer
+            .writeBuffer(0, uniformBuffers[frameIndex], 0, sizeof(UniformBufferObject))
+            .writeImage(2, shadowImageView, shadowSampler)
+            .writeBuffer(4, lightBuffers[frameIndex], 0, sizeof(LightBuffer),
+                        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+            .writeImage(5, sceneManager.getSceneBuilder().getDefaultEmissiveMap().getImageView(),
+                       sceneManager.getSceneBuilder().getDefaultEmissiveMap().getSampler())
+            .writeImage(6, pointShadowArrayViews[frameIndex], pointShadowSampler)
+            .writeImage(7, spotShadowArrayViews[frameIndex], spotShadowSampler)
+            .writeImage(8, snowMaskSystem.getSnowMaskView(), snowMaskSystem.getSnowMaskSampler());
+    };
+
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        VkDescriptorBufferInfo bufferInfo{};
-        bufferInfo.buffer = uniformBuffers[i];
-        bufferInfo.offset = 0;
-        bufferInfo.range = sizeof(UniformBufferObject);
+        // Crate material descriptor sets
+        {
+            DescriptorManager::SetWriter writer(device, descriptorSets[i]);
+            writeCommonBindings(writer, i);
+            writer
+                .writeImage(1, sceneManager.getSceneBuilder().getCrateTexture().getImageView(),
+                           sceneManager.getSceneBuilder().getCrateTexture().getSampler())
+                .writeImage(3, sceneManager.getSceneBuilder().getCrateNormalMap().getImageView(),
+                           sceneManager.getSceneBuilder().getCrateNormalMap().getSampler())
+                .update();
+        }
 
-        VkDescriptorImageInfo crateImageInfo{};
-        crateImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        crateImageInfo.imageView = sceneManager.getSceneBuilder().getCrateTexture().getImageView();
-        crateImageInfo.sampler = sceneManager.getSceneBuilder().getCrateTexture().getSampler();
+        // Ground material descriptor sets
+        {
+            DescriptorManager::SetWriter writer(device, groundDescriptorSets[i]);
+            writeCommonBindings(writer, i);
+            writer
+                .writeImage(1, sceneManager.getSceneBuilder().getGroundTexture().getImageView(),
+                           sceneManager.getSceneBuilder().getGroundTexture().getSampler())
+                .writeImage(3, sceneManager.getSceneBuilder().getGroundNormalMap().getImageView(),
+                           sceneManager.getSceneBuilder().getGroundNormalMap().getSampler())
+                .update();
+        }
 
-        VkDescriptorImageInfo shadowImageInfo{};
-        shadowImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        shadowImageInfo.imageView = shadowImageView;
-        shadowImageInfo.sampler = shadowSampler;
-
-        VkDescriptorImageInfo crateNormalImageInfo{};
-        crateNormalImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        crateNormalImageInfo.imageView = sceneManager.getSceneBuilder().getCrateNormalMap().getImageView();
-        crateNormalImageInfo.sampler = sceneManager.getSceneBuilder().getCrateNormalMap().getSampler();
-
-        VkDescriptorBufferInfo lightBufferInfo{};
-        lightBufferInfo.buffer = lightBuffers[i];
-        lightBufferInfo.offset = 0;
-        lightBufferInfo.range = sizeof(LightBuffer);
-
-        VkDescriptorImageInfo emissiveImageInfo{};
-        emissiveImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        emissiveImageInfo.imageView = sceneManager.getSceneBuilder().getDefaultEmissiveMap().getImageView();
-        emissiveImageInfo.sampler = sceneManager.getSceneBuilder().getDefaultEmissiveMap().getSampler();
-
-        VkDescriptorImageInfo pointShadowImageInfo{};
-        pointShadowImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        pointShadowImageInfo.imageView = pointShadowArrayViews[i];
-        pointShadowImageInfo.sampler = pointShadowSampler;
-
-        VkDescriptorImageInfo spotShadowImageInfo{};
-        spotShadowImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        spotShadowImageInfo.imageView = spotShadowArrayViews[i];
-        spotShadowImageInfo.sampler = spotShadowSampler;
-
-        VkDescriptorImageInfo snowMaskImageInfo{};
-        snowMaskImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        snowMaskImageInfo.imageView = snowMaskSystem.getSnowMaskView();
-        snowMaskImageInfo.sampler = snowMaskSystem.getSnowMaskSampler();
-
-        std::array<VkWriteDescriptorSet, 9> descriptorWrites{};
-
-        descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[0].dstSet = descriptorSets[i];
-        descriptorWrites[0].dstBinding = 0;
-        descriptorWrites[0].dstArrayElement = 0;
-        descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        descriptorWrites[0].descriptorCount = 1;
-        descriptorWrites[0].pBufferInfo = &bufferInfo;
-
-        descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[1].dstSet = descriptorSets[i];
-        descriptorWrites[1].dstBinding = 1;
-        descriptorWrites[1].dstArrayElement = 0;
-        descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        descriptorWrites[1].descriptorCount = 1;
-        descriptorWrites[1].pImageInfo = &crateImageInfo;
-
-        descriptorWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[2].dstSet = descriptorSets[i];
-        descriptorWrites[2].dstBinding = 2;
-        descriptorWrites[2].dstArrayElement = 0;
-        descriptorWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        descriptorWrites[2].descriptorCount = 1;
-        descriptorWrites[2].pImageInfo = &shadowImageInfo;
-
-        descriptorWrites[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[3].dstSet = descriptorSets[i];
-        descriptorWrites[3].dstBinding = 3;
-        descriptorWrites[3].dstArrayElement = 0;
-        descriptorWrites[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        descriptorWrites[3].descriptorCount = 1;
-        descriptorWrites[3].pImageInfo = &crateNormalImageInfo;
-
-        descriptorWrites[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[4].dstSet = descriptorSets[i];
-        descriptorWrites[4].dstBinding = 4;
-        descriptorWrites[4].dstArrayElement = 0;
-        descriptorWrites[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        descriptorWrites[4].descriptorCount = 1;
-        descriptorWrites[4].pBufferInfo = &lightBufferInfo;
-
-        descriptorWrites[5].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[5].dstSet = descriptorSets[i];
-        descriptorWrites[5].dstBinding = 5;
-        descriptorWrites[5].dstArrayElement = 0;
-        descriptorWrites[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        descriptorWrites[5].descriptorCount = 1;
-        descriptorWrites[5].pImageInfo = &emissiveImageInfo;
-
-        descriptorWrites[6].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[6].dstSet = descriptorSets[i];
-        descriptorWrites[6].dstBinding = 6;
-        descriptorWrites[6].dstArrayElement = 0;
-        descriptorWrites[6].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        descriptorWrites[6].descriptorCount = 1;
-        descriptorWrites[6].pImageInfo = &pointShadowImageInfo;
-
-        descriptorWrites[7].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[7].dstSet = descriptorSets[i];
-        descriptorWrites[7].dstBinding = 7;
-        descriptorWrites[7].dstArrayElement = 0;
-        descriptorWrites[7].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        descriptorWrites[7].descriptorCount = 1;
-        descriptorWrites[7].pImageInfo = &spotShadowImageInfo;
-
-        descriptorWrites[8].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[8].dstSet = descriptorSets[i];
-        descriptorWrites[8].dstBinding = 8;
-        descriptorWrites[8].dstArrayElement = 0;
-        descriptorWrites[8].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        descriptorWrites[8].descriptorCount = 1;
-        descriptorWrites[8].pImageInfo = &snowMaskImageInfo;
-
-        vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
-                               descriptorWrites.data(), 0, nullptr);
-
-        // Ground descriptor sets
-        VkDescriptorImageInfo groundImageInfo{};
-        groundImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        groundImageInfo.imageView = sceneManager.getSceneBuilder().getGroundTexture().getImageView();
-        groundImageInfo.sampler = sceneManager.getSceneBuilder().getGroundTexture().getSampler();
-
-        VkDescriptorImageInfo groundNormalImageInfo{};
-        groundNormalImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        groundNormalImageInfo.imageView = sceneManager.getSceneBuilder().getGroundNormalMap().getImageView();
-        groundNormalImageInfo.sampler = sceneManager.getSceneBuilder().getGroundNormalMap().getSampler();
-
-        descriptorWrites[0].dstSet = groundDescriptorSets[i];
-        descriptorWrites[1].dstSet = groundDescriptorSets[i];
-        descriptorWrites[1].pImageInfo = &groundImageInfo;
-        descriptorWrites[2].dstSet = groundDescriptorSets[i];
-        descriptorWrites[3].dstSet = groundDescriptorSets[i];
-        descriptorWrites[3].pImageInfo = &groundNormalImageInfo;
-        descriptorWrites[4].dstSet = groundDescriptorSets[i];
-        descriptorWrites[5].dstSet = groundDescriptorSets[i];
-        descriptorWrites[6].dstSet = groundDescriptorSets[i];
-        descriptorWrites[7].dstSet = groundDescriptorSets[i];
-        descriptorWrites[8].dstSet = groundDescriptorSets[i];
-
-        vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
-                               descriptorWrites.data(), 0, nullptr);
-
-        // Metal texture descriptor sets
-        VkDescriptorImageInfo metalImageInfo{};
-        metalImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        metalImageInfo.imageView = sceneManager.getSceneBuilder().getMetalTexture().getImageView();
-        metalImageInfo.sampler = sceneManager.getSceneBuilder().getMetalTexture().getSampler();
-
-        VkDescriptorImageInfo metalNormalImageInfo{};
-        metalNormalImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        metalNormalImageInfo.imageView = sceneManager.getSceneBuilder().getMetalNormalMap().getImageView();
-        metalNormalImageInfo.sampler = sceneManager.getSceneBuilder().getMetalNormalMap().getSampler();
-
-        descriptorWrites[0].dstSet = metalDescriptorSets[i];
-        descriptorWrites[1].dstSet = metalDescriptorSets[i];
-        descriptorWrites[1].pImageInfo = &metalImageInfo;
-        descriptorWrites[2].dstSet = metalDescriptorSets[i];
-        descriptorWrites[3].dstSet = metalDescriptorSets[i];
-        descriptorWrites[3].pImageInfo = &metalNormalImageInfo;
-        descriptorWrites[4].dstSet = metalDescriptorSets[i];
-        descriptorWrites[5].dstSet = metalDescriptorSets[i];
-        descriptorWrites[6].dstSet = metalDescriptorSets[i];
-        descriptorWrites[7].dstSet = metalDescriptorSets[i];
-        descriptorWrites[8].dstSet = metalDescriptorSets[i];
-
-        vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
-                               descriptorWrites.data(), 0, nullptr);
+        // Metal material descriptor sets
+        {
+            DescriptorManager::SetWriter writer(device, metalDescriptorSets[i]);
+            writeCommonBindings(writer, i);
+            writer
+                .writeImage(1, sceneManager.getSceneBuilder().getMetalTexture().getImageView(),
+                           sceneManager.getSceneBuilder().getMetalTexture().getSampler())
+                .writeImage(3, sceneManager.getSceneBuilder().getMetalNormalMap().getImageView(),
+                           sceneManager.getSceneBuilder().getMetalNormalMap().getSampler())
+                .update();
+        }
     }
 
     return true;

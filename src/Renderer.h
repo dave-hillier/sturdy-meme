@@ -8,6 +8,7 @@
 #include <vector>
 #include <string>
 #include <functional>
+#include <optional>
 
 #include "Camera.h"
 #include "GrassSystem.h"
@@ -25,6 +26,7 @@
 #include "SnowMaskSystem.h"
 #include "VolumetricSnowSystem.h"
 #include "EnvironmentSettings.h"
+#include "DescriptorManager.h"
 #include "UBOs.h"
 
 static constexpr uint32_t NUM_SHADOW_CASCADES = 4;
@@ -301,7 +303,8 @@ private:
     std::vector<VmaAllocation> lightBufferAllocations;
     std::vector<void*> lightBuffersMapped;
 
-    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
+    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;  // Legacy pool (for systems not yet migrated)
+    std::optional<DescriptorManager::Pool> descriptorManagerPool;
     std::vector<VkDescriptorSet> descriptorSets;
     std::vector<VkDescriptorSet> groundDescriptorSets;
 
