@@ -1,0 +1,133 @@
+#pragma once
+
+#include <vulkan/vulkan.h>
+#include <vk_mem_alloc.h>
+#include <glm/glm.hpp>
+#include <vector>
+#include <string>
+
+// Cloud Shadow System
+// Generates a world-space cloud shadow map by ray-marching through the cloud layer
+// from the sun's perspective. This provides high-fidelity, animated cloud shadows
+// that properly account for cloud density, height, and movement.
+
+// Uniforms for cloud shadow compute shader (must match GLSL layout)
+struct CloudShadowUniforms {
+    glm::mat4 worldToShadowUV;   // Transform world XZ to shadow map UV
+    glm::vec4 sunDirection;      // xyz = sun direction, w = intensity
+    glm::vec4 windOffset;        // xyz = wind offset for cloud animation, w = time
+    glm::vec4 shadowParams;      // x = shadow intensity, y = softness, z = cloud height, w = cloud thickness
+    glm::vec4 worldBounds;       // xy = world min XZ, zw = world size XZ
+    float cloudCoverage;         // Cloud coverage amount
+    float cloudDensity;          // Cloud density multiplier
+    float shadowBias;            // Shadow bias to prevent acne
+    float padding;
+};
+
+class CloudShadowSystem {
+public:
+    struct InitInfo {
+        VkDevice device;
+        VmaAllocator allocator;
+        VkDescriptorPool descriptorPool;
+        std::string shaderPath;
+        uint32_t framesInFlight;
+        VkImageView cloudMapLUTView;  // From AtmosphereLUTSystem
+        VkSampler cloudMapLUTSampler; // From AtmosphereLUTSystem
+    };
+
+    // Cloud shadow map dimensions
+    // 1024x1024 provides good balance of quality and performance
+    // Covers a 500m x 500m world area (matching terrain size)
+    static constexpr uint32_t SHADOW_MAP_SIZE = 1024;
+
+    // World coverage (should match terrain size)
+    static constexpr float WORLD_SIZE = 500.0f;
+
+    // Cloud layer parameters (matching sky.frag)
+    static constexpr float CLOUD_LAYER_BOTTOM = 1500.0f;  // 1.5km in world units = 1500m
+    static constexpr float CLOUD_LAYER_TOP = 4000.0f;     // 4.0km in world units = 4000m
+
+    CloudShadowSystem() = default;
+    ~CloudShadowSystem() = default;
+
+    bool init(const InitInfo& info);
+    void destroy();
+
+    // Update cloud shadow map (call before scene rendering)
+    void recordUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
+                      const glm::vec3& sunDir, float sunIntensity,
+                      const glm::vec3& windOffset, float windTime,
+                      const glm::vec3& cameraPos);
+
+    // Accessors for shader binding
+    VkImageView getShadowMapView() const { return shadowMapView; }
+    VkSampler getShadowMapSampler() const { return shadowMapSampler; }
+
+    // Get the world-to-shadow-UV matrix for sampling in fragment shaders
+    const glm::mat4& getWorldToShadowUV() const { return worldToShadowUV; }
+
+    // Control parameters
+    void setShadowIntensity(float intensity) { shadowIntensity = glm::clamp(intensity, 0.0f, 1.0f); }
+    float getShadowIntensity() const { return shadowIntensity; }
+
+    void setShadowSoftness(float softness) { shadowSoftness = glm::clamp(softness, 0.0f, 1.0f); }
+    float getShadowSoftness() const { return shadowSoftness; }
+
+    void setCloudCoverage(float coverage) { cloudCoverage = glm::clamp(coverage, 0.0f, 1.0f); }
+    float getCloudCoverage() const { return cloudCoverage; }
+
+    void setCloudDensity(float density) { cloudDensity = glm::clamp(density, 0.0f, 2.0f); }
+    float getCloudDensity() const { return cloudDensity; }
+
+    void setEnabled(bool e) { enabled = e; }
+    bool isEnabled() const { return enabled; }
+
+private:
+    bool createShadowMap();
+    bool createSampler();
+    bool createDescriptorSetLayout();
+    bool createDescriptorSets();
+    bool createUniformBuffers();
+    bool createComputePipeline();
+
+    void updateWorldToShadowMatrix(const glm::vec3& sunDir, const glm::vec3& cameraPos);
+
+    VkDevice device = VK_NULL_HANDLE;
+    VmaAllocator allocator = VK_NULL_HANDLE;
+    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
+    std::string shaderPath;
+    uint32_t framesInFlight = 0;
+
+    // External resources (not owned)
+    VkImageView cloudMapLUTView = VK_NULL_HANDLE;
+    VkSampler cloudMapLUTSampler = VK_NULL_HANDLE;
+
+    // Cloud shadow map (R16F - stores shadow attenuation 0=full shadow, 1=no shadow)
+    VkImage shadowMap = VK_NULL_HANDLE;
+    VmaAllocation shadowMapAllocation = VK_NULL_HANDLE;
+    VkImageView shadowMapView = VK_NULL_HANDLE;
+    VkSampler shadowMapSampler = VK_NULL_HANDLE;
+
+    // Compute pipeline
+    VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
+    VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
+    VkPipeline computePipeline = VK_NULL_HANDLE;
+    std::vector<VkDescriptorSet> descriptorSets;
+
+    // Uniform buffers (per frame)
+    std::vector<VkBuffer> uniformBuffers;
+    std::vector<VmaAllocation> uniformAllocations;
+    std::vector<void*> uniformMappedPtrs;
+
+    // World to shadow UV matrix
+    glm::mat4 worldToShadowUV = glm::mat4(1.0f);
+
+    // Control parameters
+    float shadowIntensity = 0.7f;   // How dark the shadows are
+    float shadowSoftness = 0.3f;    // Shadow edge softness
+    float cloudCoverage = 0.5f;     // Matches CLOUD_COVERAGE in sky.frag
+    float cloudDensity = 0.3f;      // Matches CLOUD_DENSITY in sky.frag
+
+    bool enabled = true;
+};

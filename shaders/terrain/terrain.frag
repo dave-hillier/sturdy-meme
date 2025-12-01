@@ -12,6 +12,7 @@
 #include "../shadow_common.glsl"
 #include "../atmosphere_common.glsl"
 #include "../snow_common.glsl"
+#include "../cloud_shadow_common.glsl"
 
 // Use the same UBO as main scene for consistent lighting
 layout(binding = 5) uniform UniformBufferObject {
@@ -47,6 +48,12 @@ layout(binding = 5) uniform UniformBufferObject {
     float snowMaxHeight;         // Maximum snow height in meters
     float debugSnowDepth;        // 1.0 = show depth visualization
     float snowPadding2;
+    // Cloud shadow parameters
+    mat4 cloudShadowMatrix;      // World XZ to cloud shadow UV transform
+    float cloudShadowIntensity;  // How dark cloud shadows are (0-1)
+    float cloudShadowEnabled;    // 1.0 = enabled, 0.0 = disabled
+    float cloudShadowPadding1;
+    float cloudShadowPadding2;
 } ubo;
 
 // Terrain-specific uniforms
@@ -74,6 +81,9 @@ layout(binding = 9) uniform sampler2D snowMaskTexture;     // World-space snow c
 layout(binding = 10) uniform sampler2D snowCascade0;  // Near cascade (256m)
 layout(binding = 11) uniform sampler2D snowCascade1;  // Mid cascade (1024m)
 layout(binding = 12) uniform sampler2D snowCascade2;  // Far cascade (4096m)
+
+// Cloud shadow map (R16F: 0=shadow, 1=no shadow)
+layout(binding = 13) uniform sampler2D cloudShadowMap;
 
 // Far LOD grass parameters (where to start/end grass-to-terrain transition)
 const float GRASS_RENDER_DISTANCE = 60.0;     // Should match grass system maxDrawDistance
@@ -251,8 +261,17 @@ void main() {
     vec3 radiance = ubo.sunColor.rgb * ubo.sunDirection.w;
     vec3 sunLight = (kD * albedo / PI + specular) * radiance * NdotL;
 
-    // Shadow
-    float shadow = getShadowFactor(fragWorldPos);
+    // Shadow (terrain + cloud shadows combined)
+    float terrainShadow = getShadowFactor(fragWorldPos);
+
+    // Cloud shadows - sample from cloud shadow map
+    float cloudShadow = 1.0;
+    if (ubo.cloudShadowEnabled > 0.5) {
+        cloudShadow = sampleCloudShadowSoft(cloudShadowMap, fragWorldPos, ubo.cloudShadowMatrix);
+    }
+
+    // Combine terrain and cloud shadows
+    float shadow = combineShadows(terrainShadow, cloudShadow);
 
     // === MOON LIGHTING ===
     vec3 moonL = normalize(ubo.moonDirection.xyz);

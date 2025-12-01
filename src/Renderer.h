@@ -32,6 +32,7 @@
 #include "VulkanContext.h"
 #include "UBOs.h"
 #include "RockSystem.h"
+#include "CloudShadowSystem.h"
 
 struct PushConstants {
     glm::mat4 model;
@@ -88,6 +89,12 @@ public:
     // Cloud style toggle (procedural vs paraboloid LUT hybrid)
     void toggleCloudStyle() { useParaboloidClouds = !useParaboloidClouds; }
     bool isUsingParaboloidClouds() const { return useParaboloidClouds; }
+
+    // Cloud shadow control
+    void setCloudShadowEnabled(bool enabled) { cloudShadowSystem.setEnabled(enabled); }
+    bool isCloudShadowEnabled() const { return cloudShadowSystem.isEnabled(); }
+    void setCloudShadowIntensity(float intensity) { cloudShadowSystem.setShadowIntensity(intensity); }
+    float getCloudShadowIntensity() const { return cloudShadowSystem.getShadowIntensity(); }
 
     // Terrain control
     void toggleTerrainWireframe() { terrainSystem.setWireframeMode(!terrainSystem.isWireframeMode()); }
@@ -218,6 +225,7 @@ private:
     SnowMaskSystem snowMaskSystem;
     VolumetricSnowSystem volumetricSnowSystem;
     RockSystem rockSystem;
+    CloudShadowSystem cloudShadowSystem;
     EnvironmentSettings environmentSettings;
     bool useVolumetricSnow = true;  // Use new volumetric system by default
 
