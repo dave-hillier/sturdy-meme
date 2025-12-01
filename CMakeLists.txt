@@ -57,6 +57,9 @@ set(SOURCES
     src/ShadowSystem.cpp
     src/GuiSystem.cpp
     src/InputSystem.cpp
+    src/CatmullClarkCBT.cpp
+    src/CatmullClarkMesh.cpp
+    src/CatmullClarkSystem.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
@@ -144,6 +147,11 @@ set(TERRAIN_SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_wireframe.frag.spv
 )
 
+set(CATMULLCLARK_SHADER_FILES
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_subdivision.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_render.vert.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_render.frag.spv
+)
 
 set_source_files_properties(${SHADER_FILES} PROPERTIES
     MACOSX_PACKAGE_LOCATION "Resources/shaders"
@@ -153,7 +161,11 @@ set_source_files_properties(${TERRAIN_SHADER_FILES} PROPERTIES
     MACOSX_PACKAGE_LOCATION "Resources/shaders/terrain"
 )
 
-target_sources(${PROJECT_NAME} PRIVATE ${SHADER_FILES} ${TERRAIN_SHADER_FILES})
+set_source_files_properties(${CATMULLCLARK_SHADER_FILES} PROPERTIES
+    MACOSX_PACKAGE_LOCATION "Resources/shaders"
+)
+
+target_sources(${PROJECT_NAME} PRIVATE ${SHADER_FILES} ${TERRAIN_SHADER_FILES} ${CATMULLCLARK_SHADER_FILES})
 
 find_program(GLSLC glslc HINTS $ENV{VULKAN_SDK}/bin)
 find_program(GLSLANG_VALIDATOR glslangValidator HINTS $ENV{VULKAN_SDK}/bin)
@@ -433,6 +445,28 @@ if(SHADER_COMPILE_CMD)
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_wireframe.frag
         COMMENT "Compiling terrain wireframe fragment shader"
     )
+    # Catmull-Clark subdivision shaders
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_subdivision.comp.spv
+        COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_subdivision.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_subdivision.comp.glsl
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_subdivision.comp.glsl
+        COMMENT "Compiling Catmull-Clark subdivision compute shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_render.vert.spv
+        COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_render.vert.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_render.vert.glsl
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_render.vert.glsl
+                ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cbt_common.glsl
+                ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_mesh.glsl
+                ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_tessellation.glsl
+        COMMENT "Compiling Catmull-Clark vertex shader"
+    )
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_render.frag.spv
+        COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_render.frag.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_render.frag.glsl
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_render.frag.glsl
+        COMMENT "Compiling Catmull-Clark fragment shader"
+    )
     add_custom_target(shaders DEPENDS
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.frag.spv
@@ -476,6 +510,9 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_shadow.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_shadow.frag.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_wireframe.frag.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_subdivision.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_render.vert.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_render.frag.spv
     )
 
     # Generate UBO headers from SPIR-V reflection

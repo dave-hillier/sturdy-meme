@@ -320,6 +320,32 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     atmosphereLUTSystem.exportLUTsAsPNG(resourcePath);
     SDL_Log("Atmosphere LUTs exported as PNG to: %s", resourcePath.c_str());
 
+    // Initialize Catmull-Clark subdivision system
+    CatmullClarkSystem::InitInfo catmullClarkInfo{};
+    catmullClarkInfo.device = device;
+    catmullClarkInfo.physicalDevice = physicalDevice;
+    catmullClarkInfo.allocator = allocator;
+    catmullClarkInfo.renderPass = postProcessSystem.getHDRRenderPass();
+    catmullClarkInfo.descriptorPool = descriptorPool;
+    catmullClarkInfo.extent = swapchainExtent;
+    catmullClarkInfo.shaderPath = resourcePath + "/shaders";
+    catmullClarkInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+    catmullClarkInfo.graphicsQueue = graphicsQueue;
+    catmullClarkInfo.commandPool = commandPool;
+
+    CatmullClarkConfig catmullClarkConfig{};
+    catmullClarkConfig.position = glm::vec3(0.0f, 5.0f, -10.0f);  // Position in front of camera
+    catmullClarkConfig.scale = glm::vec3(3.0f);
+    catmullClarkConfig.targetEdgePixels = 12.0f;
+    catmullClarkConfig.maxDepth = 16;
+    catmullClarkConfig.splitThreshold = 18.0f;
+    catmullClarkConfig.mergeThreshold = 6.0f;
+
+    if (!catmullClarkSystem.init(catmullClarkInfo, catmullClarkConfig)) return false;
+
+    // Update Catmull-Clark descriptor sets with shared resources
+    catmullClarkSystem.updateDescriptorSets(device, uniformBuffers);
+
     // Create sky descriptor sets now that uniform buffers and LUTs are ready
     if (!skySystem.createDescriptorSets(uniformBuffers, sizeof(UniformBufferObject), atmosphereLUTSystem)) return false;
 
@@ -1116,6 +1142,9 @@ void Renderer::render(const Camera& camera) {
     // Terrain compute pass (adaptive subdivision)
     terrainSystem.recordCompute(cmd, currentFrame);
 
+    // Catmull-Clark subdivision compute pass
+    catmullClarkSystem.recordCompute(cmd, currentFrame);
+
     // Grass displacement update (player/NPC interaction)
     grassSystem.recordDisplacementUpdate(cmd, currentFrame);
 
@@ -1412,6 +1441,9 @@ void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float gra
 
     // Draw terrain (LEB adaptive tessellation)
     terrainSystem.recordDraw(cmd, frameIndex);
+
+    // Draw Catmull-Clark subdivision surfaces
+    catmullClarkSystem.recordDraw(cmd, frameIndex);
 
     // Draw scene objects
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
