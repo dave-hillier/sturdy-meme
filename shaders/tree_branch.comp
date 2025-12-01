@@ -18,13 +18,15 @@ struct DrawIndirectCommand {
     uint firstInstance;
 };
 
-// Tree definition - matches C++ struct
+// Tree definition - matches C++ struct (std430 layout)
 struct TreeDefinition {
+    // Trunk parameters (offset 0-15)
     float trunkHeight;
     float trunkRadius;
     float trunkTaper;
     float trunkBend;
 
+    // Branching parameters (offset 16-39)
     uint branchLevels;
     float branchAngle;
     float branchSpread;
@@ -32,18 +34,26 @@ struct TreeDefinition {
     float branchRadiusRatio;
     uint branchesPerLevel;
 
-    vec3 canopyCenter;
-    vec3 canopyExtent;
-    float leafDensity;
-    float leafSize;
-    float leafSizeVariance;
+    // Padding to align vec3 to 16-byte boundary (offset 40-47)
+    float _padding1[2];
 
+    // Canopy parameters (vec3 aligned to 16 bytes)
+    vec3 canopyCenter;      // offset 48
+    float _padding2;        // offset 60
+    vec3 canopyExtent;      // offset 64
+    float leafDensity;      // offset 76
+    float leafSize;         // offset 80
+    float leafSizeVariance; // offset 84
+
+    // Animation parameters (offset 88-95)
     float windInfluence;
     float branchStiffness;
 
+    // Visual parameters (offset 96-103)
     uint leafPaletteIndex;
     uint barkTextureIndex;
 
+    // Final padding (offset 104-111)
     float padding[2];
 };
 

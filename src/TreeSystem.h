@@ -12,14 +12,15 @@
 #include "UBOs.h"
 
 // Parametric tree definition - describes a tree type via parameters
+// NOTE: Must match std430 layout in tree_branch.comp and tree_leaf.comp
 struct TreeDefinition {
-    // Trunk parameters
+    // Trunk parameters (offset 0-15)
     float trunkHeight;          // Height of trunk
     float trunkRadius;          // Base radius of trunk
     float trunkTaper;           // How much trunk narrows toward top (0-1)
     float trunkBend;            // Natural lean/curve amount
 
-    // Branching parameters
+    // Branching parameters (offset 16-39)
     uint32_t branchLevels;      // 0 = trunk only, 1 = primary branches, etc.
     float branchAngle;          // Angle from parent (radians)
     float branchSpread;         // Angular spread around parent
@@ -27,22 +28,27 @@ struct TreeDefinition {
     float branchRadiusRatio;    // Radius relative to parent
     uint32_t branchesPerLevel;  // How many branches at each level
 
-    // Canopy parameters
-    glm::vec3 canopyCenter;     // Offset from trunk top
-    glm::vec3 canopyExtent;     // Ellipsoid radii
-    float leafDensity;          // Leaves per cubic meter
-    float leafSize;             // Base leaf size
-    float leafSizeVariance;     // Variation in leaf size
+    // Padding to align vec3 to 16-byte boundary (std430 requirement)
+    float _padding1[2];         // offset 40-47
 
-    // Animation parameters
+    // Canopy parameters - vec3 aligned to 16 bytes in std430
+    glm::vec3 canopyCenter;     // offset 48: Offset from trunk top
+    float _padding2;            // offset 60: padding to align next vec3
+    glm::vec3 canopyExtent;     // offset 64: Ellipsoid radii
+    float leafDensity;          // offset 76: Leaves per cubic meter (fits after vec3)
+    float leafSize;             // offset 80: Base leaf size
+    float leafSizeVariance;     // offset 84: Variation in leaf size
+
+    // Animation parameters (offset 88-95)
     float windInfluence;        // How much wind affects this tree
     float branchStiffness;      // Resistance to wind
 
-    // Visual parameters
+    // Visual parameters (offset 96-103)
     uint32_t leafPaletteIndex;  // Index into color palette
     uint32_t barkTextureIndex;  // Bark texture index
 
-    float padding[2];           // Padding for alignment
+    float padding[2];           // Padding for alignment (offset 104-111)
+    // Total: 112 bytes
 };
 
 // Per-tree instance data

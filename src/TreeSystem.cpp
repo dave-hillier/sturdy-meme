@@ -727,7 +727,7 @@ void TreeSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>&
         VkDescriptorBufferInfo uboInfo{};
         uboInfo.buffer = rendererUniformBuffers[0];
         uboInfo.offset = 0;
-        uboInfo.range = 160;
+        uboInfo.range = 320;  // sizeof(UniformBufferObject) - full UBO needed for shadow cascades
 
         VkDescriptorBufferInfo branchBufferInfo{};
         branchBufferInfo.buffer = branchBuffers.buffers[set];
