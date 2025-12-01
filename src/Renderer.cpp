@@ -1013,13 +1013,13 @@ bool Renderer::createDescriptorSets() {
     auto writeCommonBindings = [this](DescriptorManager::SetWriter& writer, size_t frameIndex) {
         writer
             .writeBuffer(0, uniformBuffers[frameIndex], 0, sizeof(UniformBufferObject))
-            .writeImage(2, shadowImageView, shadowSampler)
+            .writeImage(2, shadowSystem.getShadowImageView(), shadowSystem.getShadowSampler())
             .writeBuffer(4, lightBuffers[frameIndex], 0, sizeof(LightBuffer),
                         VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
             .writeImage(5, sceneManager.getSceneBuilder().getDefaultEmissiveMap().getImageView(),
                        sceneManager.getSceneBuilder().getDefaultEmissiveMap().getSampler())
-            .writeImage(6, pointShadowArrayViews[frameIndex], pointShadowSampler)
-            .writeImage(7, spotShadowArrayViews[frameIndex], spotShadowSampler)
+            .writeImage(6, shadowSystem.getPointShadowArrayView(frameIndex), shadowSystem.getPointShadowSampler())
+            .writeImage(7, shadowSystem.getSpotShadowArrayView(frameIndex), shadowSystem.getSpotShadowSampler())
             .writeImage(8, snowMaskSystem.getSnowMaskView(), snowMaskSystem.getSnowMaskSampler());
     };
 
@@ -1365,7 +1365,7 @@ UniformBufferObject Renderer::buildUniformBufferData(const Camera& camera, const
     ubo.windDirectionAndSpeed = glm::vec4(windDir.x, windDir.y, windSpeed, windTime);
 
     ubo.timeOfDay = timeOfDay;
-    ubo.shadowMapSize = static_cast<float>(SHADOW_MAP_SIZE);
+    ubo.shadowMapSize = static_cast<float>(shadowSystem.getShadowMapSize());
     ubo.debugCascades = showCascadeDebug ? 1.0f : 0.0f;
     ubo.julianDay = static_cast<float>(lighting.julianDay);
     ubo.cloudStyle = useParaboloidClouds ? 1.0f : 0.0f;
