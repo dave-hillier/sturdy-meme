@@ -28,6 +28,7 @@
 #include "EnvironmentSettings.h"
 #include "DescriptorManager.h"
 #include "ShadowSystem.h"
+#include "VulkanContext.h"
 #include "UBOs.h"
 
 struct PushConstants {
@@ -50,17 +51,21 @@ public:
     void render(const Camera& camera);
     void waitIdle();
 
-    uint32_t getWidth() const { return swapchainExtent.width; }
-    uint32_t getHeight() const { return swapchainExtent.height; }
+    uint32_t getWidth() const { return vulkanContext.getWidth(); }
+    uint32_t getHeight() const { return vulkanContext.getHeight(); }
 
     // Vulkan handle getters for GUI integration
-    VkInstance getInstance() const { return instance; }
-    VkPhysicalDevice getPhysicalDevice() const { return physicalDevice; }
-    VkDevice getDevice() const { return device; }
-    VkQueue getGraphicsQueue() const { return graphicsQueue; }
-    uint32_t getGraphicsQueueFamily() const;
+    VkInstance getInstance() const { return vulkanContext.getInstance(); }
+    VkPhysicalDevice getPhysicalDevice() const { return vulkanContext.getPhysicalDevice(); }
+    VkDevice getDevice() const { return vulkanContext.getDevice(); }
+    VkQueue getGraphicsQueue() const { return vulkanContext.getGraphicsQueue(); }
+    uint32_t getGraphicsQueueFamily() const { return vulkanContext.getGraphicsQueueFamily(); }
     VkRenderPass getSwapchainRenderPass() const { return renderPass; }
-    uint32_t getSwapchainImageCount() const { return static_cast<uint32_t>(swapchainImages.size()); }
+    uint32_t getSwapchainImageCount() const { return vulkanContext.getSwapchainImageCount(); }
+
+    // Access to VulkanContext
+    VulkanContext& getVulkanContext() { return vulkanContext; }
+    const VulkanContext& getVulkanContext() const { return vulkanContext; }
 
     // GUI rendering callback (called during swapchain render pass)
     using GuiRenderCallback = std::function<void(VkCommandBuffer)>;
@@ -133,7 +138,7 @@ public:
     SceneBuilder& getSceneBuilder() { return sceneManager.getSceneBuilder(); }
     Mesh& getFlagClothMesh() { return sceneManager.getSceneBuilder().getFlagClothMesh(); }
     Mesh& getFlagPoleMesh() { return sceneManager.getSceneBuilder().getFlagPoleMesh(); }
-    void uploadFlagClothMesh() { sceneManager.getSceneBuilder().uploadFlagClothMesh(allocator, device, commandPool, graphicsQueue); }
+    void uploadFlagClothMesh() { sceneManager.getSceneBuilder().uploadFlagClothMesh(vulkanContext.getAllocator(), vulkanContext.getDevice(), commandPool, vulkanContext.getGraphicsQueue()); }
 
     // Celestial/astronomical settings
     void setLocation(const GeographicLocation& location) { celestialCalculator.setLocation(location); }
@@ -145,9 +150,8 @@ public:
     const CelestialCalculator& getCelestialCalculator() const { return celestialCalculator; }
 
 private:
-    bool createSwapchain();
-    void destroySwapchain();
     bool createRenderPass();
+    void destroyRenderResources();
     bool createFramebuffers();
     bool createCommandPool();
     bool createCommandBuffers();
@@ -186,22 +190,7 @@ private:
     SDL_Window* window = nullptr;
     std::string resourcePath;
 
-    vkb::Instance vkbInstance;
-    vkb::Device vkbDevice;
-    VkInstance instance = VK_NULL_HANDLE;
-    VkSurfaceKHR surface = VK_NULL_HANDLE;
-    VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
-    VkDevice device = VK_NULL_HANDLE;
-    VkQueue graphicsQueue = VK_NULL_HANDLE;
-    VkQueue presentQueue = VK_NULL_HANDLE;
-
-    VmaAllocator allocator = VK_NULL_HANDLE;
-
-    VkSwapchainKHR swapchain = VK_NULL_HANDLE;
-    std::vector<VkImage> swapchainImages;
-    std::vector<VkImageView> swapchainImageViews;
-    VkFormat swapchainImageFormat = VK_FORMAT_UNDEFINED;
-    VkExtent2D swapchainExtent = {0, 0};
+    VulkanContext vulkanContext;
 
     VkRenderPass renderPass = VK_NULL_HANDLE;
     VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
