@@ -9,6 +9,7 @@
 
 #include "TownGenerator.h"
 #include "BuildingMeshGenerator.h"
+#include "ModuleMeshGenerator.h"
 #include "Mesh.h"
 #include "UBOs.h"
 
@@ -107,10 +108,13 @@ private:
     VkQueue graphicsQueue = VK_NULL_HANDLE;
     VkCommandPool commandPool = VK_NULL_HANDLE;
 
-    // Building meshes (one per building type)
+    // Building mesh - single combined mesh for all buildings
+    Mesh buildingsMesh;
+    Mesh roadMesh;
+
+    // Building meshes (one per building type) - kept for fallback
     static constexpr size_t NUM_BUILDING_TYPES = 10;
     std::array<Mesh, NUM_BUILDING_TYPES> buildingMeshes;
-    Mesh roadMesh;
 
     // Textures
     VkImage buildingTexture = VK_NULL_HANDLE;
@@ -156,7 +160,11 @@ private:
     // Generation
     TownGenerator generator;
     BuildingMeshGenerator meshGenerator;
+    ModuleMeshGenerator moduleMeshGenerator;
     bool generated = false;
+
+    // Generate combined mesh for all buildings using modular system
+    void generateCombinedBuildingMesh();
 
     // Debug
     bool showVoronoi = false;

@@ -63,6 +63,8 @@ set(SOURCES
     src/VoronoiDiagram.cpp
     src/TownGenerator.cpp
     src/BuildingMeshGenerator.cpp
+    src/BuildingModules.cpp
+    src/ModuleMeshGenerator.cpp
     src/TownSystem.cpp
 )
 

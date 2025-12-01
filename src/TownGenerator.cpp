@@ -2,6 +2,10 @@
 #include <algorithm>
 #include <cmath>
 
+TownGenerator::TownGenerator() {
+    moduleLibrary.init();
+}
+
 float TownGenerator::hash(const glm::vec2& p) const {
     glm::vec2 offset(static_cast<float>(config.seed), static_cast<float>(config.seed * 7));
     return glm::fract(std::sin(glm::dot(p + offset, glm::vec2(127.1f, 311.7f))) * 43758.5453f);
@@ -206,6 +210,10 @@ void TownGenerator::placeBuildings() {
             building.rotation = hash(pos) * 6.28318f;
             building.scale = 0.9f + hash(pos + glm::vec2(50.0f)) * 0.2f;
 
+            // Generate modular building structure using WFC
+            uint32_t buildingSeed = static_cast<uint32_t>(pos.x * 1000 + pos.y * 1000000) ^ config.seed;
+            generateModularBuilding(building, buildingSeed);
+
             buildings.push_back(building);
             placedBuildingBounds.push_back(glm::vec4(pos.x, pos.y,
                                                      building.dimensions.x * 0.5f,
@@ -254,6 +262,10 @@ void TownGenerator::placeBuildings() {
             building.position = glm::vec3(pos.x, getTerrainHeight(pos), pos.y);
             building.rotation = hash(pos + glm::vec2(400.0f)) * 6.28318f;
             building.scale = 0.85f + hash(pos + glm::vec2(600.0f)) * 0.3f;
+
+            // Generate modular building structure using WFC
+            uint32_t buildingSeed = static_cast<uint32_t>(pos.x * 1000 + pos.y * 1000000) ^ config.seed;
+            generateModularBuilding(building, buildingSeed);
 
             buildings.push_back(building);
             placedBuildingBounds.push_back(glm::vec4(pos.x, pos.y, dims.x * 0.5f, dims.z * 0.5f));
@@ -342,19 +354,97 @@ BuildingType TownGenerator::selectBuildingType(ZoneType zone, float random) cons
 }
 
 glm::vec3 TownGenerator::getBuildingDimensions(BuildingType type) const {
-    // Returns width (X), height (Y), depth (Z)
+    // Returns width (X), height (Y), depth (Z) based on grid size and module size
+    glm::ivec3 grid = getBuildingGridSize(type);
+    float moduleSize = 2.0f;  // MODULE_SIZE from ModuleMeshGenerator
+    return glm::vec3(grid) * moduleSize;
+}
+
+glm::ivec3 TownGenerator::getBuildingGridSize(BuildingType type) const {
+    // Returns grid dimensions in modules (X, Y, Z)
     switch (type) {
-        case BuildingType::SmallHouse:   return glm::vec3(4.0f, 3.5f, 5.0f);
-        case BuildingType::MediumHouse:  return glm::vec3(6.0f, 4.5f, 7.0f);
-        case BuildingType::Tavern:       return glm::vec3(8.0f, 5.0f, 10.0f);
-        case BuildingType::Workshop:     return glm::vec3(6.0f, 4.0f, 8.0f);
-        case BuildingType::Church:       return glm::vec3(8.0f, 10.0f, 14.0f);
-        case BuildingType::WatchTower:   return glm::vec3(4.0f, 12.0f, 4.0f);
-        case BuildingType::Well:         return glm::vec3(2.0f, 2.5f, 2.0f);
-        case BuildingType::Market:       return glm::vec3(5.0f, 3.0f, 5.0f);
-        case BuildingType::Barn:         return glm::vec3(8.0f, 5.0f, 12.0f);
-        case BuildingType::Windmill:     return glm::vec3(5.0f, 10.0f, 5.0f);
-        default:                         return glm::vec3(4.0f, 3.0f, 4.0f);
+        case BuildingType::SmallHouse:   return glm::ivec3(2, 2, 2);   // 4x4x4m
+        case BuildingType::MediumHouse:  return glm::ivec3(3, 2, 3);   // 6x4x6m
+        case BuildingType::Tavern:       return glm::ivec3(4, 3, 4);   // 8x6x8m
+        case BuildingType::Workshop:     return glm::ivec3(3, 2, 3);   // 6x4x6m
+        case BuildingType::Church:       return glm::ivec3(4, 4, 5);   // 8x8x10m
+        case BuildingType::WatchTower:   return glm::ivec3(2, 5, 2);   // 4x10x4m
+        case BuildingType::Well:         return glm::ivec3(1, 1, 1);   // 2x2x2m
+        case BuildingType::Market:       return glm::ivec3(2, 2, 2);   // 4x4x4m
+        case BuildingType::Barn:         return glm::ivec3(4, 2, 5);   // 8x4x10m
+        case BuildingType::Windmill:     return glm::ivec3(2, 4, 2);   // 4x8x4m
+        default:                         return glm::ivec3(2, 2, 2);
+    }
+}
+
+void TownGenerator::generateModularBuilding(BuildingPlacement& building, uint32_t seed) {
+    glm::ivec3 gridSize = getBuildingGridSize(building.type);
+    building.gridSize = gridSize;
+
+    // Create WFC solver for this building
+    BuildingWFC wfc;
+    wfc.init(moduleLibrary, gridSize.x, gridSize.y, gridSize.z);
+
+    // Create footprint (all cells in XZ plane)
+    std::vector<glm::ivec2> footprint;
+    for (int z = 0; z < gridSize.z; ++z) {
+        for (int x = 0; x < gridSize.x; ++x) {
+            footprint.push_back(glm::ivec2(x, z));
+        }
+    }
+    wfc.setFootprint(footprint);
+    wfc.setHeight(1, gridSize.y);
+
+    // Solve WFC
+    if (wfc.solve(seed)) {
+        // Store the result in the building
+        building.moduleGrid.resize(gridSize.x * gridSize.y * gridSize.z);
+        for (int z = 0; z < gridSize.z; ++z) {
+            for (int y = 0; y < gridSize.y; ++y) {
+                for (int x = 0; x < gridSize.x; ++x) {
+                    const WFCCell& cell = wfc.getCell(x, y, z);
+                    size_t idx = x + y * gridSize.x + z * gridSize.x * gridSize.y;
+                    building.moduleGrid[idx] = cell.collapsed ? cell.chosenModule : 0;
+                }
+            }
+        }
+    } else {
+        // Fallback: fill with simple default modules
+        building.moduleGrid.resize(gridSize.x * gridSize.y * gridSize.z);
+        for (int z = 0; z < gridSize.z; ++z) {
+            for (int y = 0; y < gridSize.y; ++y) {
+                for (int x = 0; x < gridSize.x; ++x) {
+                    size_t idx = x + y * gridSize.x + z * gridSize.x * gridSize.y;
+
+                    // Simple fallback: foundation at y=0, walls above, roof at top
+                    if (y == 0) {
+                        // Ground level - foundation
+                        bool isCorner = (x == 0 || x == gridSize.x - 1) &&
+                                       (z == 0 || z == gridSize.z - 1);
+                        bool isEdge = (x == 0 || x == gridSize.x - 1 || z == 0 || z == gridSize.z - 1);
+
+                        if (isCorner) {
+                            building.moduleGrid[idx] = static_cast<size_t>(ModuleType::FoundationCorner);
+                        } else if (isEdge) {
+                            building.moduleGrid[idx] = static_cast<size_t>(ModuleType::FoundationWall);
+                        } else {
+                            building.moduleGrid[idx] = static_cast<size_t>(ModuleType::FloorPlain);
+                        }
+                    } else if (y == gridSize.y - 1) {
+                        // Top level - roof
+                        building.moduleGrid[idx] = static_cast<size_t>(ModuleType::RoofFlat);
+                    } else {
+                        // Middle levels - walls
+                        bool isEdge = (x == 0 || x == gridSize.x - 1 || z == 0 || z == gridSize.z - 1);
+                        if (isEdge) {
+                            building.moduleGrid[idx] = static_cast<size_t>(ModuleType::WallPlain);
+                        } else {
+                            building.moduleGrid[idx] = static_cast<size_t>(ModuleType::FloorPlain);
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

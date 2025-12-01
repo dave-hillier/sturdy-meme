@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <functional>
 #include "VoronoiDiagram.h"
+#include "BuildingModules.h"
 
 // Types of zones in the settlement
 enum class ZoneType {
@@ -30,7 +31,7 @@ enum class BuildingType {
     Windmill         // Grain mill
 };
 
-// A building placement in the town
+// A building placement in the town - now includes modular building data
 struct BuildingPlacement {
     BuildingType type;
     glm::vec3 position;       // World position (including terrain height)
@@ -38,6 +39,13 @@ struct BuildingPlacement {
     float scale;              // Uniform scale factor
     glm::vec3 dimensions;     // Width, height, depth of building
     uint32_t cellIndex;       // Which Voronoi cell it belongs to
+
+    // Modular building grid dimensions (in modules)
+    glm::ivec3 gridSize{2, 2, 2};
+
+    // WFC result - indices of chosen modules for each grid cell
+    // Stored as a flat array: [x + y * gridSize.x + z * gridSize.x * gridSize.y]
+    std::vector<size_t> moduleGrid;
 };
 
 // A road segment connecting points
@@ -74,7 +82,7 @@ using TerrainHeightFunc = std::function<float(float x, float z)>;
 
 class TownGenerator {
 public:
-    TownGenerator() = default;
+    TownGenerator();
     ~TownGenerator() = default;
 
     // Generate a town layout
@@ -86,6 +94,7 @@ public:
     const std::vector<RoadSegment>& getRoads() const { return roads; }
     const VoronoiDiagram& getVoronoi() const { return voronoi; }
     const std::vector<ZoneAssignment>& getZones() const { return zones; }
+    const ModuleLibrary& getModuleLibrary() const { return moduleLibrary; }
 
     // Get zone type at a world position
     ZoneType getZoneAt(const glm::vec2& worldPos) const;
@@ -107,6 +116,10 @@ private:
     bool canPlaceBuilding(const glm::vec2& pos, const glm::vec2& size) const;
     BuildingType selectBuildingType(ZoneType zone, float random) const;
     glm::vec3 getBuildingDimensions(BuildingType type) const;
+    glm::ivec3 getBuildingGridSize(BuildingType type) const;
+
+    // Generate modular building using WFC
+    void generateModularBuilding(BuildingPlacement& building, uint32_t seed);
 
     // Hash functions for deterministic randomness
     float hash(const glm::vec2& p) const;
@@ -122,4 +135,7 @@ private:
 
     // Building placement tracking (to prevent overlaps)
     std::vector<glm::vec4> placedBuildingBounds;  // xy = center, zw = half-extents
+
+    // Module library for WFC building generation
+    ModuleLibrary moduleLibrary;
 };

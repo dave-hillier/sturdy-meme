@@ -127,6 +127,7 @@ void TownSystem::destroy(VkDevice dev, VmaAllocator alloc) {
     }
 
     // Destroy meshes
+    buildingsMesh.destroy(alloc);
     for (auto& mesh : buildingMeshes) {
         mesh.destroy(alloc);
     }
@@ -589,7 +590,89 @@ void TownSystem::generate(const TownConfig& config, std::function<float(float, f
     generator.generate(config, heightFunc);
     generated = true;
 
+    // Generate combined building mesh from modular system
+    generateCombinedBuildingMesh();
+
     updateInstanceData();
+}
+
+void TownSystem::generateCombinedBuildingMesh() {
+    const auto& buildings = generator.getBuildings();
+    const auto& library = generator.getModuleLibrary();
+
+    std::vector<Vertex> allVertices;
+    std::vector<uint32_t> allIndices;
+
+    for (const auto& building : buildings) {
+        if (building.moduleGrid.empty()) continue;
+
+        // Calculate world offset for this building
+        // Building position is at center of footprint, so offset by half dimensions
+        glm::vec3 buildingOffset = building.position;
+        buildingOffset.x -= building.dimensions.x * 0.5f;
+        buildingOffset.z -= building.dimensions.z * 0.5f;
+
+        // Apply rotation around building center
+        glm::mat4 rotationMatrix = glm::rotate(glm::mat4(1.0f), building.rotation, glm::vec3(0, 1, 0));
+        glm::vec3 buildingCenter = building.position;
+
+        uint32_t baseVertex = static_cast<uint32_t>(allVertices.size());
+
+        // Generate mesh for each module in the building grid
+        for (int z = 0; z < building.gridSize.z; ++z) {
+            for (int y = 0; y < building.gridSize.y; ++y) {
+                for (int x = 0; x < building.gridSize.x; ++x) {
+                    size_t gridIdx = x + y * building.gridSize.x + z * building.gridSize.x * building.gridSize.y;
+                    size_t moduleIdx = building.moduleGrid[gridIdx];
+
+                    if (moduleIdx >= library.getModuleCount()) continue;
+                    const BuildingModule& mod = library.getModule(moduleIdx);
+                    if (mod.type == ModuleType::Air) continue;
+
+                    // Calculate module position in local space
+                    glm::vec3 moduleLocalPos = glm::vec3(x, y, z) * ModuleMeshGenerator::MODULE_SIZE;
+
+                    // Generate module mesh
+                    std::vector<Vertex> moduleVerts;
+                    std::vector<uint32_t> moduleInds;
+                    moduleMeshGenerator.generateModuleMesh(mod.type, moduleVerts, moduleInds);
+
+                    // Transform vertices to world space with rotation
+                    for (auto& v : moduleVerts) {
+                        // Offset by module position in local building space
+                        glm::vec3 localPos = v.position + moduleLocalPos;
+
+                        // Apply rotation around building center
+                        glm::vec3 relativePos = localPos + buildingOffset - buildingCenter;
+                        relativePos = glm::vec3(rotationMatrix * glm::vec4(relativePos, 1.0f));
+                        v.position = relativePos + buildingCenter;
+
+                        // Rotate normal
+                        v.normal = glm::vec3(rotationMatrix * glm::vec4(v.normal, 0.0f));
+
+                        // Rotate tangent
+                        glm::vec3 tangent3 = glm::vec3(v.tangent);
+                        tangent3 = glm::vec3(rotationMatrix * glm::vec4(tangent3, 0.0f));
+                        v.tangent = glm::vec4(tangent3, v.tangent.w);
+
+                        allVertices.push_back(v);
+                    }
+
+                    // Add indices with offset
+                    for (uint32_t idx : moduleInds) {
+                        allIndices.push_back(baseVertex + idx);
+                    }
+                    baseVertex = static_cast<uint32_t>(allVertices.size());
+                }
+            }
+        }
+    }
+
+    // Upload combined mesh
+    if (!allVertices.empty() && !allIndices.empty()) {
+        buildingsMesh.setCustomGeometry(allVertices, allIndices);
+        buildingsMesh.upload(allocator, device, commandPool, graphicsQueue);
+    }
 }
 
 void TownSystem::updateInstanceData() {
@@ -690,37 +773,30 @@ void TownSystem::updateDescriptorSets(VkDevice dev,
 }
 
 void TownSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
-    if (!generated || totalBuildingInstances == 0) return;
+    if (!generated) return;
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1,
                             &descriptorSets[frameIndex], 0, nullptr);
 
-    // Draw buildings by type
-    for (size_t typeIdx = 0; typeIdx < NUM_BUILDING_TYPES; ++typeIdx) {
-        if (buildingInstanceCounts[typeIdx] == 0) continue;
-
-        const Mesh& mesh = buildingMeshes[typeIdx];
-        if (mesh.getIndexCount() == 0) continue;
-
-        VkBuffer vertexBuffers[] = {mesh.getVertexBuffer()};
+    // Draw combined buildings mesh (already in world space)
+    if (buildingsMesh.getIndexCount() > 0) {
+        VkBuffer vertexBuffers[] = {buildingsMesh.getVertexBuffer()};
         VkDeviceSize offsets[] = {0};
         vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
-        vkCmdBindIndexBuffer(cmd, mesh.getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+        vkCmdBindIndexBuffer(cmd, buildingsMesh.getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
 
-        // Draw each instance
-        for (const auto& instance : buildingInstances[typeIdx]) {
-            TownPushConstants push;
-            push.model = instance.modelMatrix;
-            push.roughness = instance.colorTint.w;
-            push.metallic = instance.params.x;
+        // Identity transform - mesh is already in world space
+        TownPushConstants push;
+        push.model = glm::mat4(1.0f);
+        push.roughness = 0.7f;
+        push.metallic = 0.0f;
 
-            vkCmdPushConstants(cmd, pipelineLayout,
-                              VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                              0, sizeof(TownPushConstants), &push);
+        vkCmdPushConstants(cmd, pipelineLayout,
+                          VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                          0, sizeof(TownPushConstants), &push);
 
-            vkCmdDrawIndexed(cmd, mesh.getIndexCount(), 1, 0, 0, 0);
-        }
+        vkCmdDrawIndexed(cmd, buildingsMesh.getIndexCount(), 1, 0, 0, 0);
     }
 
     // Draw roads
@@ -747,7 +823,7 @@ void TownSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
 
 void TownSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex,
                                    const glm::mat4& lightViewProj, int cascadeIndex) {
-    if (!generated || totalBuildingInstances == 0) return;
+    if (!generated) return;
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipelineLayout, 0, 1,
@@ -761,25 +837,18 @@ void TownSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex,
 
     shadowPush.lightViewProj = lightViewProj;
 
-    // Draw building shadows
-    for (size_t typeIdx = 0; typeIdx < NUM_BUILDING_TYPES; ++typeIdx) {
-        if (buildingInstanceCounts[typeIdx] == 0) continue;
-
-        const Mesh& mesh = buildingMeshes[typeIdx];
-        if (mesh.getIndexCount() == 0) continue;
-
-        VkBuffer vertexBuffers[] = {mesh.getVertexBuffer()};
+    // Draw combined buildings mesh shadow
+    if (buildingsMesh.getIndexCount() > 0) {
+        VkBuffer vertexBuffers[] = {buildingsMesh.getVertexBuffer()};
         VkDeviceSize offsets[] = {0};
         vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
-        vkCmdBindIndexBuffer(cmd, mesh.getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+        vkCmdBindIndexBuffer(cmd, buildingsMesh.getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
 
-        for (const auto& instance : buildingInstances[typeIdx]) {
-            shadowPush.model = instance.modelMatrix;
+        shadowPush.model = glm::mat4(1.0f);  // Identity - mesh is in world space
 
-            vkCmdPushConstants(cmd, shadowPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT,
-                              0, sizeof(ShadowPush), &shadowPush);
+        vkCmdPushConstants(cmd, shadowPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT,
+                          0, sizeof(ShadowPush), &shadowPush);
 
-            vkCmdDrawIndexed(cmd, mesh.getIndexCount(), 1, 0, 0, 0);
-        }
+        vkCmdDrawIndexed(cmd, buildingsMesh.getIndexCount(), 1, 0, 0, 0);
     }
 }
