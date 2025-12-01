@@ -51,6 +51,7 @@ set(SOURCES
     src/SnowMaskSystem.cpp
     src/VolumetricSnowSystem.cpp
     src/GuiSystem.cpp
+    src/InputSystem.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})

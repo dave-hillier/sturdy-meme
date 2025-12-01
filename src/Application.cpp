@@ -13,17 +13,10 @@ bool Application::init(const std::string& title, int width, int height) {
         return false;
     }
 
-    // Try to open the first available gamepad
-    int numJoysticks = 0;
-    SDL_JoystickID* joysticks = SDL_GetJoysticks(&numJoysticks);
-    if (joysticks) {
-        for (int i = 0; i < numJoysticks; i++) {
-            if (SDL_IsGamepad(joysticks[i])) {
-                openGamepad(joysticks[i]);
-                break;
-            }
-        }
-        SDL_free(joysticks);
+    // Initialize input system (handles gamepad detection)
+    if (!input.init()) {
+        SDL_Log("Failed to initialize input system");
+        return false;
     }
 
     window = SDL_CreateWindow(title.c_str(), width, height, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
@@ -85,6 +78,10 @@ bool Application::init(const std::string& title, int width, int height) {
         gui.endFrame(cmd);
     });
 
+    // Set up input system with GUI reference for input blocking
+    input.setGuiSystem(&gui);
+    input.setMoveSpeed(moveSpeed);
+
     running = true;
     return true;
 }
@@ -110,14 +107,18 @@ void Application::run() {
         gui.beginFrame();
         gui.render(renderer, lastDeltaTime, currentFps);
 
-        handleInput(deltaTime);
-        handleGamepadInput(deltaTime);
+        // Update input system
+        input.update(deltaTime, camera.getYaw());
 
-        // Process accumulated input for third-person mode
+        // Apply input to camera
+        applyInputToCamera();
+
+        // Process movement input for third-person mode
         glm::vec3 desiredVelocity(0.0f);
-        if (thirdPersonMode) {
-            if (glm::length(accumulatedMoveDir) > 0.001f) {
-                glm::vec3 moveDir = glm::normalize(accumulatedMoveDir);
+        if (input.isThirdPersonMode()) {
+            glm::vec3 moveDir = input.getMovementDirection();
+            if (glm::length(moveDir) > 0.001f) {
+                moveDir = glm::normalize(moveDir);
                 desiredVelocity = moveDir * moveSpeed;
 
                 // Rotate player to face movement direction
@@ -132,7 +133,7 @@ void Application::run() {
         }
 
         // Always update physics character controller (handles gravity, jumping, and movement)
-        physics.updateCharacter(deltaTime, desiredVelocity, wantsJump);
+        physics.updateCharacter(deltaTime, desiredVelocity, input.wantsJump());
 
         // Update physics simulation
         physics.update(deltaTime);
@@ -151,7 +152,7 @@ void Application::run() {
         updateFlag(deltaTime);
 
         // Update camera and player based on mode
-        if (thirdPersonMode) {
+        if (input.isThirdPersonMode()) {
             camera.setThirdPersonTarget(player.getFocusPoint());
             camera.updateThirdPerson();
             renderer.getSceneManager().updatePlayerTransform(player.getModelMatrix());
@@ -169,7 +170,7 @@ void Application::run() {
         int hours = static_cast<int>(timeOfDay * 24.0f);
         int minutes = static_cast<int>((timeOfDay * 24.0f - hours) * 60.0f);
         char title[96];
-        const char* modeStr = thirdPersonMode ? "3rd Person" : "Free Cam";
+        const char* modeStr = input.isThirdPersonMode() ? "3rd Person" : "Free Cam";
         snprintf(title, sizeof(title), "Vulkan Game - FPS: %.0f | Time: %02d:%02d | %s (Tab to toggle)",
                  smoothedFps, hours, minutes, modeStr);
         SDL_SetWindowTitle(window, title);
@@ -181,9 +182,9 @@ void Application::run() {
 void Application::shutdown() {
     renderer.waitIdle();
     gui.shutdown();
+    input.shutdown();
     physics.shutdown();
     renderer.shutdown();
-    closeGamepad();
 
     if (window) {
         SDL_DestroyWindow(window);
@@ -198,6 +199,9 @@ void Application::processEvents() {
     while (SDL_PollEvent(&event)) {
         // Pass events to GUI first
         gui.processEvent(event);
+
+        // Pass events to input system
+        input.processEvent(event);
 
         switch (event.type) {
             case SDL_EVENT_QUIT:
@@ -240,14 +244,6 @@ void Application::processEvents() {
                     renderer.toggleSnowDepthDebug();
                     SDL_Log("Snow depth debug visualization: %s", renderer.isShowingSnowDepthDebug() ? "ON" : "OFF");
                 }
-                else if (event.key.scancode == SDL_SCANCODE_TAB) {
-                    thirdPersonMode = !thirdPersonMode;
-                    SDL_Log("Camera mode: %s", thirdPersonMode ? "Third Person" : "Free Camera");
-                    if (thirdPersonMode) {
-                        // Initialize third-person camera with reasonable angle
-                        camera.orbitPitch(15.0f);  // Look down slightly
-                    }
-                }
                 else if (event.key.scancode == SDL_SCANCODE_Z) {
                     float currentIntensity = renderer.getIntensity();
                     renderer.setWeatherIntensity(std::max(0.0f, currentIntensity - 0.1f));
@@ -260,15 +256,15 @@ void Application::processEvents() {
                 }
                 else if (event.key.scancode == SDL_SCANCODE_C) {
                     uint32_t currentType = renderer.getWeatherType();
-                    if (renderer.getIntensity() == 0.0f && currentType == 0) { // If it's clear, make it rain
-                        renderer.setWeatherType(0); // Rain
-                        renderer.setWeatherIntensity(0.5f); // Default rain intensity
-                    } else if (currentType == 0) { // If it's raining, make it snow
-                        renderer.setWeatherType(1); // Snow
-                        renderer.setWeatherIntensity(0.5f); // Default snow intensity
-                    } else if (currentType == 1) { // If it's snowing, make it clear
-                        renderer.setWeatherType(0); // Set to rain type, but intensity 0
-                        renderer.setWeatherIntensity(0.0f); // Clear
+                    if (renderer.getIntensity() == 0.0f && currentType == 0) {
+                        renderer.setWeatherType(0);
+                        renderer.setWeatherIntensity(0.5f);
+                    } else if (currentType == 0) {
+                        renderer.setWeatherType(1);
+                        renderer.setWeatherIntensity(0.5f);
+                    } else if (currentType == 1) {
+                        renderer.setWeatherType(0);
+                        renderer.setWeatherIntensity(0.0f);
                     }
 
                     std::string weatherStatus = "Clear";
@@ -282,10 +278,9 @@ void Application::processEvents() {
                     SDL_Log("Weather type: %s, Intensity: %.1f", weatherStatus.c_str(), renderer.getIntensity());
                 }
                 else if (event.key.scancode == SDL_SCANCODE_F) {
-                    // Spawn confetti from player's location
                     glm::vec3 playerPos = player.getPosition();
                     renderer.spawnConfetti(playerPos, 8.0f, 100.0f, 0.5f);
-                    SDL_Log("Confetti! 🎉");
+                    SDL_Log("Confetti!");
                 }
                 else if (event.key.scancode == SDL_SCANCODE_V) {
                     renderer.toggleCloudStyle();
@@ -316,7 +311,6 @@ void Application::processEvents() {
                     SDL_Log("Snow amount: %.1f", renderer.getSnowAmount());
                 }
                 else if (event.key.scancode == SDL_SCANCODE_SLASH) {
-                    // Toggle instant snow (full or none)
                     float snow = renderer.getSnowAmount();
                     renderer.setSnowAmount(snow < 0.5f ? 1.0f : 0.0f);
                     SDL_Log("Snow amount: %.1f", renderer.getSnowAmount());
@@ -326,28 +320,18 @@ void Application::processEvents() {
                     SDL_Log("Terrain wireframe: %s", renderer.isTerrainWireframeMode() ? "ON" : "OFF");
                 }
                 break;
-            case SDL_EVENT_GAMEPAD_ADDED:
-                if (!gamepad) {
-                    openGamepad(event.gdevice.which);
-                }
-                break;
-            case SDL_EVENT_GAMEPAD_REMOVED:
-                if (gamepad && SDL_GetGamepadID(gamepad) == event.gdevice.which) {
-                    closeGamepad();
-                }
-                break;
             case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
                 if (event.gbutton.button == SDL_GAMEPAD_BUTTON_SOUTH) {
-                    renderer.setTimeOfDay(0.25f);  // Sunrise
+                    renderer.setTimeOfDay(0.25f);
                 }
                 else if (event.gbutton.button == SDL_GAMEPAD_BUTTON_EAST) {
-                    renderer.setTimeOfDay(0.5f);   // Noon
+                    renderer.setTimeOfDay(0.5f);
                 }
                 else if (event.gbutton.button == SDL_GAMEPAD_BUTTON_WEST) {
-                    renderer.setTimeOfDay(0.75f);  // Sunset
+                    renderer.setTimeOfDay(0.75f);
                 }
                 else if (event.gbutton.button == SDL_GAMEPAD_BUTTON_NORTH) {
-                    renderer.setTimeOfDay(0.0f);   // Midnight
+                    renderer.setTimeOfDay(0.0f);
                 }
                 else if (event.gbutton.button == SDL_GAMEPAD_BUTTON_START) {
                     renderer.resumeAutoTime();
@@ -356,253 +340,37 @@ void Application::processEvents() {
                 else if (event.gbutton.button == SDL_GAMEPAD_BUTTON_BACK) {
                     running = false;
                 }
-                else if (event.gbutton.button == SDL_GAMEPAD_BUTTON_LEFT_STICK) {
-                    // Left stick click toggles camera mode
-                    thirdPersonMode = !thirdPersonMode;
-                    SDL_Log("Camera mode: %s", thirdPersonMode ? "Third Person" : "Free Camera");
-                    if (thirdPersonMode) {
-                        camera.orbitPitch(15.0f);
-                    }
-                }
                 break;
             default:
                 break;
         }
     }
+
+    // Handle camera mode switch initialization
+    if (input.wasModeSwitchedThisFrame() && input.isThirdPersonMode()) {
+        camera.orbitPitch(15.0f);
+    }
 }
 
-void Application::handleInput(float deltaTime) {
-    // Reset movement accumulator at start of input handling
-    accumulatedMoveDir = glm::vec3(0.0f);
-    wantsJump = false;
-
-    // Skip game input if GUI wants it
-    if (gui.wantsInput()) {
-        return;
-    }
-
-    const bool* keyState = SDL_GetKeyboardState(nullptr);
-
-    if (thirdPersonMode) {
-        handleThirdPersonInput(deltaTime, keyState);
+void Application::applyInputToCamera() {
+    if (input.isThirdPersonMode()) {
+        // Third-person: orbit camera around player
+        camera.orbitYaw(input.getCameraYawInput());
+        camera.orbitPitch(input.getCameraPitchInput());
+        camera.adjustDistance(input.getCameraZoomInput());
     } else {
-        handleFreeCameraInput(deltaTime, keyState);
-    }
-}
-
-void Application::handleFreeCameraInput(float deltaTime, const bool* keyState) {
-    // WASD for movement (standard FPS controls)
-    if (keyState[SDL_SCANCODE_W]) {
-        camera.moveForward(moveSpeed * deltaTime);
-    }
-    if (keyState[SDL_SCANCODE_S]) {
-        camera.moveForward(-moveSpeed * deltaTime);
-    }
-    if (keyState[SDL_SCANCODE_A]) {
-        camera.moveRight(-moveSpeed * deltaTime);
-    }
-    if (keyState[SDL_SCANCODE_D]) {
-        camera.moveRight(moveSpeed * deltaTime);
+        // Free camera: direct movement and rotation
+        camera.moveForward(input.getFreeCameraForward());
+        camera.moveRight(input.getFreeCameraRight());
+        camera.moveUp(input.getFreeCameraUp());
+        camera.rotateYaw(input.getCameraYawInput());
+        camera.rotatePitch(input.getCameraPitchInput());
     }
 
-    // Arrow keys for camera rotation
-    if (keyState[SDL_SCANCODE_UP]) {
-        camera.rotatePitch(rotateSpeed * deltaTime);
-    }
-    if (keyState[SDL_SCANCODE_DOWN]) {
-        camera.rotatePitch(-rotateSpeed * deltaTime);
-    }
-    if (keyState[SDL_SCANCODE_LEFT]) {
-        camera.rotateYaw(-rotateSpeed * deltaTime);
-    }
-    if (keyState[SDL_SCANCODE_RIGHT]) {
-        camera.rotateYaw(rotateSpeed * deltaTime);
-    }
-
-    // Space for up, Left Ctrl/Q for down (fly camera)
-    if (keyState[SDL_SCANCODE_SPACE]) {
-        camera.moveUp(moveSpeed * deltaTime);
-    }
-    if (keyState[SDL_SCANCODE_LCTRL] || keyState[SDL_SCANCODE_Q]) {
-        camera.moveUp(-moveSpeed * deltaTime);
-    }
-}
-
-void Application::handleThirdPersonInput(float deltaTime, const bool* keyState) {
-    // WASD moves the player in the direction the camera is facing
-    // Get camera yaw for movement direction
-    float cameraYaw = camera.getYaw();
-
-    // Calculate movement direction based on camera facing
-    float moveX = 0.0f;
-    float moveZ = 0.0f;
-
-    if (keyState[SDL_SCANCODE_W]) {
-        moveX += cos(glm::radians(cameraYaw));
-        moveZ += sin(glm::radians(cameraYaw));
-    }
-    if (keyState[SDL_SCANCODE_S]) {
-        moveX -= cos(glm::radians(cameraYaw));
-        moveZ -= sin(glm::radians(cameraYaw));
-    }
-    if (keyState[SDL_SCANCODE_A]) {
-        moveX += cos(glm::radians(cameraYaw - 90.0f));
-        moveZ += sin(glm::radians(cameraYaw - 90.0f));
-    }
-    if (keyState[SDL_SCANCODE_D]) {
-        moveX += cos(glm::radians(cameraYaw + 90.0f));
-        moveZ += sin(glm::radians(cameraYaw + 90.0f));
-    }
-
-    // Accumulate movement direction for keyboard input
-    if (moveX != 0.0f || moveZ != 0.0f) {
-        accumulatedMoveDir += glm::vec3(moveX, 0.0f, moveZ);
-    }
-
-    // Space to jump (only on initial press, not while held)
-    bool spacePressed = keyState[SDL_SCANCODE_SPACE];
-    if (spacePressed && !jumpHeld) {
-        wantsJump = true;
-    }
-    jumpHeld = spacePressed;
-
-    // Arrow keys orbit the camera around the player
-    if (keyState[SDL_SCANCODE_UP]) {
-        camera.orbitPitch(rotateSpeed * deltaTime);
-    }
-    if (keyState[SDL_SCANCODE_DOWN]) {
-        camera.orbitPitch(-rotateSpeed * deltaTime);
-    }
-    if (keyState[SDL_SCANCODE_LEFT]) {
-        camera.orbitYaw(-rotateSpeed * deltaTime);
-    }
-    if (keyState[SDL_SCANCODE_RIGHT]) {
-        camera.orbitYaw(rotateSpeed * deltaTime);
-    }
-
-    // Q/E to zoom in/out
-    if (keyState[SDL_SCANCODE_Q]) {
-        camera.adjustDistance(-moveSpeed * deltaTime);
-    }
-    if (keyState[SDL_SCANCODE_E]) {
-        camera.adjustDistance(moveSpeed * deltaTime);
-    }
-}
-
-void Application::handleGamepadInput(float deltaTime) {
-    if (!gamepad) return;
-
-    if (thirdPersonMode) {
-        handleThirdPersonGamepadInput(deltaTime);
-    } else {
-        handleFreeCameraGamepadInput(deltaTime);
-    }
-
-    // Triggers for time scale (works in both modes)
-    float leftTrigger = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) / 32767.0f;
-    float rightTrigger = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) / 32767.0f;
-
-    if (rightTrigger > 0.5f) {
-        renderer.setTimeScale(renderer.getTimeScale() * (1.0f + deltaTime));
-    }
-    if (leftTrigger > 0.5f) {
-        renderer.setTimeScale(renderer.getTimeScale() * (1.0f - deltaTime * 0.5f));
-    }
-}
-
-void Application::handleFreeCameraGamepadInput(float deltaTime) {
-    // Left stick for movement
-    float leftX = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX) / 32767.0f;
-    float leftY = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTY) / 32767.0f;
-
-    // Apply deadzone
-    if (std::abs(leftX) < stickDeadzone) leftX = 0.0f;
-    if (std::abs(leftY) < stickDeadzone) leftY = 0.0f;
-
-    // Left stick controls movement (Y is inverted - up is negative)
-    camera.moveForward(-leftY * moveSpeed * deltaTime);
-    camera.moveRight(leftX * moveSpeed * deltaTime);
-
-    // Right stick for camera rotation
-    float rightX = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTX) / 32767.0f;
-    float rightY = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTY) / 32767.0f;
-
-    // Apply deadzone
-    if (std::abs(rightX) < stickDeadzone) rightX = 0.0f;
-    if (std::abs(rightY) < stickDeadzone) rightY = 0.0f;
-
-    // Right stick controls camera look (Y inverted for natural feel)
-    camera.rotateYaw(rightX * gamepadLookSpeed * deltaTime);
-    camera.rotatePitch(-rightY * gamepadLookSpeed * deltaTime);
-
-    // Bumpers for vertical movement
-    if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER)) {
-        camera.moveUp(moveSpeed * deltaTime);
-    }
-    if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)) {
-        camera.moveUp(-moveSpeed * deltaTime);
-    }
-}
-
-void Application::handleThirdPersonGamepadInput(float deltaTime) {
-    // Left stick moves player relative to camera facing
-    float leftX = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX) / 32767.0f;
-    float leftY = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTY) / 32767.0f;
-
-    // Apply deadzone
-    if (std::abs(leftX) < stickDeadzone) leftX = 0.0f;
-    if (std::abs(leftY) < stickDeadzone) leftY = 0.0f;
-
-    // Accumulate movement direction from gamepad
-    if (leftX != 0.0f || leftY != 0.0f) {
-        float cameraYaw = camera.getYaw();
-
-        // Calculate movement direction based on camera facing
-        float moveX = -leftY * cos(glm::radians(cameraYaw)) + leftX * cos(glm::radians(cameraYaw + 90.0f));
-        float moveZ = -leftY * sin(glm::radians(cameraYaw)) + leftX * sin(glm::radians(cameraYaw + 90.0f));
-
-        accumulatedMoveDir += glm::vec3(moveX, 0.0f, moveZ);
-    }
-
-    // A button (South) to jump (only on initial press)
-    bool aButtonPressed = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_SOUTH);
-    if (aButtonPressed && !gamepadJumpHeld) {
-        wantsJump = true;
-    }
-    gamepadJumpHeld = aButtonPressed;
-
-    // Right stick orbits camera around player
-    float rightX = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTX) / 32767.0f;
-    float rightY = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTY) / 32767.0f;
-
-    // Apply deadzone
-    if (std::abs(rightX) < stickDeadzone) rightX = 0.0f;
-    if (std::abs(rightY) < stickDeadzone) rightY = 0.0f;
-
-    camera.orbitYaw(rightX * gamepadLookSpeed * deltaTime);
-    camera.orbitPitch(-rightY * gamepadLookSpeed * deltaTime);
-
-    // Bumpers for camera distance
-    if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER)) {
-        camera.adjustDistance(moveSpeed * deltaTime);
-    }
-    if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)) {
-        camera.adjustDistance(-moveSpeed * deltaTime);
-    }
-}
-
-void Application::openGamepad(SDL_JoystickID id) {
-    gamepad = SDL_OpenGamepad(id);
-    if (gamepad) {
-        SDL_Log("Gamepad connected: %s", SDL_GetGamepadName(gamepad));
-    }
-}
-
-void Application::closeGamepad() {
-    if (gamepad) {
-        SDL_Log("Gamepad disconnected");
-        SDL_CloseGamepad(gamepad);
-        gamepad = nullptr;
+    // Handle gamepad time scale input
+    float timeScaleInput = input.getTimeScaleInput();
+    if (timeScaleInput != 0.0f) {
+        renderer.setTimeScale(renderer.getTimeScale() * timeScaleInput);
     }
 }
 
