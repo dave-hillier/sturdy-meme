@@ -7,6 +7,7 @@
 #include "shadow_common.glsl"
 #include "atmosphere_common.glsl"
 #include "snow_common.glsl"
+#include "cloud_shadow_common.glsl"
 
 layout(binding = 0) uniform UniformBufferObject {
     mat4 model;
@@ -41,6 +42,12 @@ layout(binding = 0) uniform UniformBufferObject {
     float snowMaxHeight;         // Maximum snow height in meters
     float debugSnowDepth;        // 1.0 = show depth visualization
     float snowPadding2;
+    // Cloud shadow parameters
+    mat4 cloudShadowMatrix;      // World XZ to cloud shadow UV transform
+    float cloudShadowIntensity;  // How dark cloud shadows are (0-1)
+    float cloudShadowEnabled;    // 1.0 = enabled, 0.0 = disabled
+    float cloudShadowPadding1;
+    float cloudShadowPadding2;
 } ubo;
 
 layout(binding = 1) uniform sampler2D texSampler;
@@ -50,6 +57,7 @@ layout(binding = 5) uniform sampler2D emissiveMap;
 layout(binding = 6) uniform samplerCubeArrayShadow pointShadowMaps;  // Point light cube shadow maps
 layout(binding = 7) uniform sampler2DArrayShadow spotShadowMaps;     // Spot light shadow maps
 layout(binding = 8) uniform sampler2D snowMaskTexture;               // World-space snow coverage
+layout(binding = 9) uniform sampler2D cloudShadowMap;                // Cloud shadow map (R16F)
 
 // GPU light structure (must match CPU GPULight struct)
 struct GPULight {
@@ -283,13 +291,22 @@ void main() {
         albedo = blendSnowAlbedo(albedo, ubo.snowColor.rgb, snowCoverage);
     }
 
-    // Calculate shadow for sun
+    // Calculate shadow for sun (terrain + cloud shadows combined)
     vec3 sunL = normalize(ubo.sunDirection.xyz);
-    float shadow = calculateCascadedShadow(
+    float terrainShadow = calculateCascadedShadow(
         fragWorldPos, N, sunL,
         ubo.view, ubo.cascadeSplits, ubo.cascadeViewProj,
         ubo.shadowMapSize, shadowMapArray
     );
+
+    // Cloud shadows - sample from cloud shadow map
+    float cloudShadow = 1.0;
+    if (ubo.cloudShadowEnabled > 0.5) {
+        cloudShadow = sampleCloudShadowSoft(cloudShadowMap, fragWorldPos, ubo.cloudShadowMatrix);
+    }
+
+    // Combine terrain and cloud shadows
+    float shadow = combineShadows(terrainShadow, cloudShadow);
 
     // Sun lighting with shadow
     float sunIntensity = ubo.sunDirection.w;
