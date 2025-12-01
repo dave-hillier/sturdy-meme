@@ -148,6 +148,7 @@ set(TERRAIN_SHADER_FILES
 )
 
 set(CATMULLCLARK_SHADER_FILES
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_subdivision.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_render.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_render.frag.spv
 )
@@ -446,6 +447,12 @@ if(SHADER_COMPILE_CMD)
     )
     # Catmull-Clark subdivision shaders
     add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_subdivision.comp.spv
+        COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_subdivision.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_subdivision.comp.glsl
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_subdivision.comp.glsl
+        COMMENT "Compiling Catmull-Clark subdivision compute shader"
+    )
+    add_custom_command(
         OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_render.vert.spv
         COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_render.vert.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_render.vert.glsl
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_render.vert.glsl
@@ -503,6 +510,7 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_shadow.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_shadow.frag.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_wireframe.frag.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_subdivision.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_render.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_render.frag.spv
     )
