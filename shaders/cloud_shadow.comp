@@ -1,0 +1,232 @@
+#version 450
+
+// Cloud Shadow Compute Shader
+// Generates a world-space cloud shadow map by ray-marching through the volumetric cloud layer
+// Uses the paraboloid cloud map LUT for cloud density sampling
+// Produces soft, animated shadows that follow cloud movement
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+// Output shadow map (R16F: 0 = full shadow, 1 = no shadow)
+layout(binding = 0, r16f) uniform image2D cloudShadowMap;
+
+// Cloud map LUT from atmosphere system (paraboloid projection)
+layout(binding = 1) uniform sampler2D cloudMapLUT;
+
+// Uniform buffer
+layout(binding = 2) uniform CloudShadowUniforms {
+    mat4 worldToShadowUV;      // Transform world XZ to shadow map UV
+    vec4 sunDirection;          // xyz = sun direction (toward sun), w = intensity
+    vec4 windOffset;            // xyz = wind offset for cloud animation, w = time
+    vec4 shadowParams;          // x = intensity, y = softness, z = cloud height, w = cloud thickness
+    vec4 worldBounds;           // xy = world min XZ, zw = world size XZ
+    float cloudCoverage;        // Cloud coverage amount
+    float cloudDensity;         // Cloud density multiplier
+    float shadowBias;           // Shadow bias
+    float padding;
+};
+
+const float PI = 3.14159265359;
+
+// Cloud layer parameters (matching sky.frag, in km for atmosphere calculations)
+const float PLANET_RADIUS = 6371.0;          // Earth radius in km
+const float CLOUD_LAYER_BOTTOM_KM = 1.5;     // Cloud layer bottom in km
+const float CLOUD_LAYER_TOP_KM = 4.0;        // Cloud layer top in km
+
+// Ray march parameters
+const int MARCH_STEPS = 16;                   // Number of samples through cloud layer
+const int LIGHT_SAMPLES = 4;                  // Light sampling steps for soft shadows
+
+// Simple hash for noise
+float hash(vec3 p) {
+    return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453);
+}
+
+// 3D value noise
+float noise3D(vec3 p) {
+    vec3 i = floor(p);
+    vec3 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);  // Smoothstep
+
+    return mix(
+        mix(mix(hash(i + vec3(0, 0, 0)), hash(i + vec3(1, 0, 0)), f.x),
+            mix(hash(i + vec3(0, 1, 0)), hash(i + vec3(1, 1, 0)), f.x), f.y),
+        mix(mix(hash(i + vec3(0, 0, 1)), hash(i + vec3(1, 0, 1)), f.x),
+            mix(hash(i + vec3(0, 1, 1)), hash(i + vec3(1, 1, 1)), f.x), f.y),
+        f.z
+    );
+}
+
+// Fractal Brownian Motion
+float fbm(vec3 p, int octaves) {
+    float value = 0.0;
+    float amplitude = 0.5;
+    float frequency = 1.0;
+    float maxValue = 0.0;
+
+    for (int i = 0; i < octaves; i++) {
+        value += amplitude * noise3D(p * frequency);
+        maxValue += amplitude;
+        amplitude *= 0.5;
+        frequency *= 2.0;
+    }
+
+    return value / maxValue;
+}
+
+// Convert direction to paraboloid UV (matching sky.frag)
+vec2 directionToParaboloidUV(vec3 dir) {
+    dir = normalize(dir);
+    float denom = 1.0 + max(dir.y, 0.001);
+    float u = 0.5 + (dir.x / denom) * 0.5;
+    float v = 0.5 + (dir.z / denom) * 0.5;
+    return vec2(u, v);
+}
+
+// Sample cloud density from paraboloid LUT
+float sampleCloudMapDensity(vec3 dir) {
+    if (dir.y < 0.0) return 0.0;
+    vec2 uv = directionToParaboloidUV(dir);
+    return texture(cloudMapLUT, uv).r;
+}
+
+// Cloud height gradient (cumulus shape)
+float cloudHeightGradient(float heightFraction) {
+    float gradient = smoothstep(0.0, 0.2, heightFraction) *
+                     smoothstep(1.0, 0.7, heightFraction);
+    return gradient;
+}
+
+// Sample cloud density at a world position
+// worldPos is in world units (meters), we convert to atmosphere units (km) for consistency
+float sampleCloudDensity(vec3 worldPos, vec3 sunDir) {
+    // Convert world position to atmosphere coordinates
+    // Terrain is at Y=0, cloud layer is at CLOUD_LAYER_BOTTOM_KM to CLOUD_LAYER_TOP_KM above that
+    // Scale: 1 world unit = 1 meter, 1000 meters = 1 km
+    float altitudeKm = worldPos.y * 0.001;  // Convert to km
+
+    // Check if within cloud layer
+    if (altitudeKm < CLOUD_LAYER_BOTTOM_KM || altitudeKm > CLOUD_LAYER_TOP_KM) {
+        return 0.0;
+    }
+
+    // Height fraction within cloud layer
+    float heightFraction = (altitudeKm - CLOUD_LAYER_BOTTOM_KM) /
+                           (CLOUD_LAYER_TOP_KM - CLOUD_LAYER_BOTTOM_KM);
+
+    // Get direction from ground point toward sun to index cloud map
+    // Use the horizontal position to determine which "column" of clouds we're in
+    vec3 groundPos = vec3(worldPos.x, 0.0, worldPos.z);
+    vec3 cloudDir = normalize(vec3(groundPos.x * 0.0001, 1.0, groundPos.z * 0.0001));
+
+    // Sample base cloud coverage from LUT
+    float baseCoverage = sampleCloudMapDensity(cloudDir);
+
+    // Early out if no cloud coverage
+    if (baseCoverage < 0.01) return 0.0;
+
+    // Add volumetric detail using 3D noise
+    vec3 windOff = windOffset.xyz;
+    float windTime = windOffset.w;
+
+    // Slow down detail noise animation for realistic cloud evolution
+    float detailTimeScale = 0.02;
+    vec3 detailWindOffset = vec3(windOff.x * windTime * detailTimeScale,
+                                  windTime * 0.002,
+                                  windOff.z * windTime * detailTimeScale);
+
+    vec3 detailPos = worldPos * 0.001 + detailWindOffset;  // Scale to km
+    float detailNoise = fbm(detailPos * 0.8, 2);
+
+    // Combine coverage with height gradient
+    float heightGrad = cloudHeightGradient(heightFraction);
+    float density = baseCoverage * heightGrad;
+
+    // Carve detail into cloud
+    density *= smoothstep(0.3, 0.7, detailNoise);
+    density -= (1.0 - detailNoise) * 0.15 * (1.0 - heightFraction);
+    density = max(density, 0.0);
+
+    return density * cloudDensity;
+}
+
+// Ray march through cloud layer to compute shadow attenuation
+float computeCloudShadow(vec3 worldPos, vec3 sunDir) {
+    // Skip if sun is below horizon
+    if (sunDir.y < 0.01) return 1.0;
+
+    // Calculate ray march parameters
+    // Start from ground position and march toward sun through cloud layer
+    float cloudBottomM = CLOUD_LAYER_BOTTOM_KM * 1000.0;  // Convert to meters
+    float cloudTopM = CLOUD_LAYER_TOP_KM * 1000.0;
+
+    // Calculate entry and exit points for ray through cloud layer
+    // Ray starts at worldPos.y (ground level) and goes toward sun
+    float tBottom = (cloudBottomM - worldPos.y) / max(sunDir.y, 0.001);
+    float tTop = (cloudTopM - worldPos.y) / max(sunDir.y, 0.001);
+
+    // Skip if ray doesn't hit cloud layer from below
+    if (tBottom < 0.0 && tTop < 0.0) return 1.0;
+
+    float tStart = max(tBottom, 0.0);
+    float tEnd = max(tTop, 0.0);
+
+    if (tStart >= tEnd) return 1.0;
+
+    // Ray march through cloud layer
+    float stepSize = (tEnd - tStart) / float(MARCH_STEPS);
+    float opticalDepth = 0.0;
+
+    // Add jitter to reduce banding
+    float jitter = hash(worldPos * 0.1 + vec3(windOffset.w)) * 0.5;
+
+    for (int i = 0; i < MARCH_STEPS; i++) {
+        float t = tStart + (float(i) + jitter) * stepSize;
+        vec3 samplePos = worldPos + sunDir * t;
+
+        float density = sampleCloudDensity(samplePos, sunDir);
+        opticalDepth += density * stepSize * 0.01;  // Scale factor for visual adjustment
+
+        // Early out for performance
+        if (opticalDepth > 4.0) break;
+    }
+
+    // Beer-Lambert extinction
+    float transmittance = exp(-opticalDepth);
+
+    // Apply shadow intensity control
+    // shadowParams.x = intensity (how dark shadows are)
+    // shadowParams.y = softness (controls edge smoothness)
+    float shadowIntensity = shadowParams.x;
+
+    // Lerp between no shadow (1.0) and full shadow (1.0 - intensity)
+    float shadow = mix(1.0, 1.0 - shadowIntensity, 1.0 - transmittance);
+
+    return shadow;
+}
+
+void main() {
+    ivec2 pixelCoord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 mapSize = imageSize(cloudShadowMap);
+
+    if (pixelCoord.x >= mapSize.x || pixelCoord.y >= mapSize.y) {
+        return;
+    }
+
+    // Convert pixel coordinate to UV [0, 1]
+    vec2 uv = (vec2(pixelCoord) + 0.5) / vec2(mapSize);
+
+    // Convert UV to world position
+    // worldBounds: xy = min XZ, zw = size XZ
+    vec2 worldXZ = worldBounds.xy + uv * worldBounds.zw;
+    vec3 worldPos = vec3(worldXZ.x, 0.0, worldXZ.y);  // Ground level
+
+    // Get sun direction (toward sun)
+    vec3 sunDir = normalize(sunDirection.xyz);
+
+    // Compute cloud shadow at this position
+    float shadow = computeCloudShadow(worldPos, sunDir);
+
+    // Store shadow value (0 = full shadow, 1 = no shadow)
+    imageStore(cloudShadowMap, pixelCoord, vec4(shadow, 0.0, 0.0, 1.0));
+}

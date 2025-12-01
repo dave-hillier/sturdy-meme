@@ -90,6 +90,9 @@ public:
                                     VkImageView cascade0View, VkImageView cascade1View, VkImageView cascade2View,
                                     VkSampler cascadeSampler);
 
+    // Set cloud shadow map texture
+    void setCloudShadowMap(VkDevice device, VkImageView cloudShadowView, VkSampler cloudShadowSampler);
+
     // Update terrain uniforms for a frame
     void updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos,
                         const glm::mat4& view, const glm::mat4& proj,

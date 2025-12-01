@@ -368,6 +368,45 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     atmosphereLUTSystem.exportLUTsAsPNG(resourcePath);
     SDL_Log("Atmosphere LUTs exported as PNG to: %s", resourcePath.c_str());
 
+    // Initialize cloud shadow system
+    CloudShadowSystem::InitInfo cloudShadowInfo{};
+    cloudShadowInfo.device = device;
+    cloudShadowInfo.allocator = allocator;
+    cloudShadowInfo.descriptorPool = descriptorPool;
+    cloudShadowInfo.shaderPath = resourcePath + "/shaders";
+    cloudShadowInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+    cloudShadowInfo.cloudMapLUTView = atmosphereLUTSystem.getCloudMapLUTView();
+    cloudShadowInfo.cloudMapLUTSampler = atmosphereLUTSystem.getLUTSampler();
+
+    if (!cloudShadowSystem.init(cloudShadowInfo)) return false;
+
+    // Connect cloud shadow map to terrain system
+    terrainSystem.setCloudShadowMap(device,
+        cloudShadowSystem.getShadowMapView(),
+        cloudShadowSystem.getShadowMapSampler());
+
+    // Update main descriptor sets with cloud shadow map (binding 9)
+    // This is done here because cloudShadowSystem is initialized after createDescriptorSets
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        VkDescriptorImageInfo cloudShadowInfo{};
+        cloudShadowInfo.sampler = cloudShadowSystem.getShadowMapSampler();
+        cloudShadowInfo.imageView = cloudShadowSystem.getShadowMapView();
+        cloudShadowInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+        std::array<VkWriteDescriptorSet, 4> writes{};
+        // Update all material descriptor sets
+        VkDescriptorSet sets[] = {descriptorSets[i], groundDescriptorSets[i], metalDescriptorSets[i], rockDescriptorSets[i]};
+        for (size_t j = 0; j < 4; j++) {
+            writes[j].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[j].dstSet = sets[j];
+            writes[j].dstBinding = 9;
+            writes[j].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            writes[j].descriptorCount = 1;
+            writes[j].pImageInfo = &cloudShadowInfo;
+        }
+        vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+    }
+
     // Initialize Catmull-Clark subdivision system
     CatmullClarkSystem::InitInfo catmullClarkInfo{};
     catmullClarkInfo.device = device;
@@ -459,6 +498,7 @@ void Renderer::shutdown() {
         volumetricSnowSystem.destroy(device, allocator);
         leafSystem.destroy(device, allocator);
         froxelSystem.destroy(device, allocator);
+        cloudShadowSystem.destroy();
         atmosphereLUTSystem.destroy(device, allocator);
         skySystem.destroy(device, allocator);
         postProcessSystem.destroy(device, allocator);
@@ -724,6 +764,7 @@ bool Renderer::createDescriptorSetLayout() {
     // 6: Point shadow cube maps
     // 7: Spot shadow depth maps
     // 8: Snow mask texture
+    // 9: Cloud shadow map
     descriptorSetLayout = DescriptorManager::LayoutBuilder(device)
         .addUniformBuffer(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)  // 0: UBO
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 1: diffuse
@@ -734,6 +775,7 @@ bool Renderer::createDescriptorSetLayout() {
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 6: point shadow
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 7: spot shadow
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 8: snow mask
+        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 9: cloud shadow map
         .build();
 
     if (descriptorSetLayout == VK_NULL_HANDLE) {
@@ -1219,6 +1261,25 @@ void Renderer::render(const Camera& camera) {
     // Leaf particle compute pass
     leafSystem.recordResetAndCompute(cmd, currentFrame, grassTime, deltaTime);
 
+    // Cloud shadow map compute pass
+    if (cloudShadowSystem.isEnabled()) {
+        UniformBufferObject* ubo = static_cast<UniformBufferObject*>(uniformBuffersMapped[currentFrame]);
+        glm::vec3 sunDir = glm::normalize(glm::vec3(ubo->sunDirection));
+        float sunIntensity = ubo->sunDirection.w;
+
+        // Wind offset for cloud animation (matching cloud LUT animation)
+        glm::vec2 windDir = windSystem.getWindDirection();
+        float windSpeed = windSystem.getWindSpeed();
+        float windTime = windSystem.getTime();
+        float cloudTimeScale = 0.02f;  // Match cloud map LUT speed
+        glm::vec3 windOffset = glm::vec3(windDir.x * windSpeed * windTime * cloudTimeScale,
+                                          windTime * 0.002f,
+                                          windDir.y * windSpeed * windTime * cloudTimeScale);
+
+        cloudShadowSystem.recordUpdate(cmd, currentFrame, sunDir, sunIntensity,
+                                        windOffset, windTime * cloudTimeScale, camera.getPosition());
+    }
+
     // Shadow pass (skip when sun is below horizon)
     if (lastSunIntensity > 0.001f) {
         recordShadowPass(cmd, currentFrame, grassTime);
@@ -1406,6 +1467,13 @@ UniformBufferObject Renderer::buildUniformBufferData(const Camera& camera, const
     ubo.snowMaxHeight = MAX_SNOW_HEIGHT;
     ubo.debugSnowDepth = showSnowDepthDebug ? 1.0f : 0.0f;
     ubo.snowPadding2 = 0.0f;
+
+    // Cloud shadow parameters
+    ubo.cloudShadowMatrix = cloudShadowSystem.getWorldToShadowUV();
+    ubo.cloudShadowIntensity = cloudShadowSystem.getShadowIntensity();
+    ubo.cloudShadowEnabled = cloudShadowSystem.isEnabled() ? 1.0f : 0.0f;
+    ubo.cloudShadowPadding1 = 0.0f;
+    ubo.cloudShadowPadding2 = 0.0f;
 
     return ubo;
 }
