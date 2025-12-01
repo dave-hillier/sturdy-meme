@@ -243,6 +243,7 @@ if(SHADER_COMPILE_CMD)
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cloud_shadow.comp
         COMMENT "Compiling cloud shadow compute shader"
     )
+
     # Terrain shaders (LEB terrain system)
     set(TERRAIN_CBT_DEPS
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/cbt.glsl
