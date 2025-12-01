@@ -2,10 +2,132 @@
 #include <cstring>
 #include <stdexcept>
 #include <cmath>
+#include <map>
+#include <unordered_map>
+#include <functional>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
+
+namespace {
+    // Simple hash-based 3D noise for procedural rock generation
+    inline float hash1(uint32_t n) {
+        n = (n << 13U) ^ n;
+        n = n * (n * n * 15731U + 789221U) + 1376312589U;
+        return float(n & 0x7fffffffU) / float(0x7fffffff);
+    }
+
+    inline float hash3to1(float x, float y, float z, uint32_t seed) {
+        uint32_t ix = *reinterpret_cast<uint32_t*>(&x);
+        uint32_t iy = *reinterpret_cast<uint32_t*>(&y);
+        uint32_t iz = *reinterpret_cast<uint32_t*>(&z);
+        return hash1(ix ^ (iy * 1597334673U) ^ (iz * 3812015801U) ^ seed);
+    }
+
+    // Gradient noise for smooth displacement
+    float gradientNoise3D(float x, float y, float z, uint32_t seed) {
+        int ix = static_cast<int>(std::floor(x));
+        int iy = static_cast<int>(std::floor(y));
+        int iz = static_cast<int>(std::floor(z));
+
+        float fx = x - ix;
+        float fy = y - iy;
+        float fz = z - iz;
+
+        // Smoothstep interpolation
+        auto smoothstep = [](float t) { return t * t * (3.0f - 2.0f * t); };
+        float sx = smoothstep(fx);
+        float sy = smoothstep(fy);
+        float sz = smoothstep(fz);
+
+        // Hash at corners
+        auto cornerHash = [seed](int cx, int cy, int cz) {
+            uint32_t n = cx + cy * 57 + cz * 113 + seed;
+            return hash1(n) * 2.0f - 1.0f;
+        };
+
+        // Trilinear interpolation
+        float n000 = cornerHash(ix, iy, iz);
+        float n100 = cornerHash(ix + 1, iy, iz);
+        float n010 = cornerHash(ix, iy + 1, iz);
+        float n110 = cornerHash(ix + 1, iy + 1, iz);
+        float n001 = cornerHash(ix, iy, iz + 1);
+        float n101 = cornerHash(ix + 1, iy, iz + 1);
+        float n011 = cornerHash(ix, iy + 1, iz + 1);
+        float n111 = cornerHash(ix + 1, iy + 1, iz + 1);
+
+        float nx00 = n000 + sx * (n100 - n000);
+        float nx10 = n010 + sx * (n110 - n010);
+        float nx01 = n001 + sx * (n101 - n001);
+        float nx11 = n011 + sx * (n111 - n011);
+
+        float nxy0 = nx00 + sy * (nx10 - nx00);
+        float nxy1 = nx01 + sy * (nx11 - nx01);
+
+        return nxy0 + sz * (nxy1 - nxy0);
+    }
+
+    // Fractal Brownian Motion for natural rock displacement
+    float fbm3D(float x, float y, float z, int octaves, float lacunarity, float persistence, uint32_t seed) {
+        float value = 0.0f;
+        float amplitude = 1.0f;
+        float frequency = 1.0f;
+        float maxValue = 0.0f;
+
+        for (int i = 0; i < octaves; ++i) {
+            value += amplitude * gradientNoise3D(x * frequency, y * frequency, z * frequency, seed + i * 1000);
+            maxValue += amplitude;
+            amplitude *= persistence;
+            frequency *= lacunarity;
+        }
+
+        return value / maxValue;
+    }
+
+    // Voronoi noise for angular rock features
+    float voronoi3D(float x, float y, float z, uint32_t seed) {
+        int ix = static_cast<int>(std::floor(x));
+        int iy = static_cast<int>(std::floor(y));
+        int iz = static_cast<int>(std::floor(z));
+
+        float minDist = 10.0f;
+
+        for (int dx = -1; dx <= 1; ++dx) {
+            for (int dy = -1; dy <= 1; ++dy) {
+                for (int dz = -1; dz <= 1; ++dz) {
+                    int cx = ix + dx;
+                    int cy = iy + dy;
+                    int cz = iz + dz;
+
+                    // Random point in cell
+                    float px = cx + hash1(cx + cy * 57 + cz * 113 + seed);
+                    float py = cy + hash1(cx * 31 + cy * 17 + cz * 89 + seed + 1000);
+                    float pz = cz + hash1(cx * 73 + cy * 23 + cz * 47 + seed + 2000);
+
+                    float dist = (x - px) * (x - px) + (y - py) * (y - py) + (z - pz) * (z - pz);
+                    minDist = std::min(minDist, dist);
+                }
+            }
+        }
+
+        return std::sqrt(minDist);
+    }
+
+    // Edge pair for icosphere subdivision
+    struct EdgeKey {
+        uint32_t v0, v1;
+        bool operator==(const EdgeKey& other) const {
+            return v0 == other.v0 && v1 == other.v1;
+        }
+    };
+
+    struct EdgeKeyHash {
+        size_t operator()(const EdgeKey& k) const {
+            return std::hash<uint64_t>()(static_cast<uint64_t>(k.v0) << 32 | k.v1);
+        }
+    };
+}
 
 void Mesh::createPlane(float width, float depth) {
     float hw = width * 0.5f;
@@ -345,6 +467,177 @@ void Mesh::createCylinder(float radius, float height, int segments) {
         indices.push_back(bottomCenterIdx + ((i + 1) % segments) + 1);
         indices.push_back(bottomCenterIdx + i + 1);
     }
+}
+
+void Mesh::createRock(float baseRadius, int subdivisions, uint32_t seed, float roughness, float asymmetry) {
+    vertices.clear();
+    indices.clear();
+
+    // Start with an icosahedron
+    const float t = (1.0f + std::sqrt(5.0f)) / 2.0f;
+
+    std::vector<glm::vec3> positions = {
+        glm::normalize(glm::vec3(-1,  t,  0)),
+        glm::normalize(glm::vec3( 1,  t,  0)),
+        glm::normalize(glm::vec3(-1, -t,  0)),
+        glm::normalize(glm::vec3( 1, -t,  0)),
+        glm::normalize(glm::vec3( 0, -1,  t)),
+        glm::normalize(glm::vec3( 0,  1,  t)),
+        glm::normalize(glm::vec3( 0, -1, -t)),
+        glm::normalize(glm::vec3( 0,  1, -t)),
+        glm::normalize(glm::vec3( t,  0, -1)),
+        glm::normalize(glm::vec3( t,  0,  1)),
+        glm::normalize(glm::vec3(-t,  0, -1)),
+        glm::normalize(glm::vec3(-t,  0,  1))
+    };
+
+    std::vector<uint32_t> tempIndices = {
+        0, 11, 5,  0, 5, 1,  0, 1, 7,  0, 7, 10,  0, 10, 11,
+        1, 5, 9,  5, 11, 4,  11, 10, 2,  10, 7, 6,  7, 1, 8,
+        3, 9, 4,  3, 4, 2,  3, 2, 6,  3, 6, 8,  3, 8, 9,
+        4, 9, 5,  2, 4, 11,  6, 2, 10,  8, 6, 7,  9, 8, 1
+    };
+
+    // Subdivide the icosahedron
+    for (int i = 0; i < subdivisions; ++i) {
+        std::unordered_map<EdgeKey, uint32_t, EdgeKeyHash> edgeMidpoints;
+        std::vector<uint32_t> newIndices;
+
+        auto getMidpoint = [&](uint32_t v0, uint32_t v1) -> uint32_t {
+            EdgeKey key = v0 < v1 ? EdgeKey{v0, v1} : EdgeKey{v1, v0};
+            auto it = edgeMidpoints.find(key);
+            if (it != edgeMidpoints.end()) {
+                return it->second;
+            }
+
+            glm::vec3 mid = glm::normalize((positions[v0] + positions[v1]) * 0.5f);
+            uint32_t idx = static_cast<uint32_t>(positions.size());
+            positions.push_back(mid);
+            edgeMidpoints[key] = idx;
+            return idx;
+        };
+
+        for (size_t j = 0; j < tempIndices.size(); j += 3) {
+            uint32_t v0 = tempIndices[j];
+            uint32_t v1 = tempIndices[j + 1];
+            uint32_t v2 = tempIndices[j + 2];
+
+            uint32_t m01 = getMidpoint(v0, v1);
+            uint32_t m12 = getMidpoint(v1, v2);
+            uint32_t m20 = getMidpoint(v2, v0);
+
+            newIndices.push_back(v0);  newIndices.push_back(m01); newIndices.push_back(m20);
+            newIndices.push_back(v1);  newIndices.push_back(m12); newIndices.push_back(m01);
+            newIndices.push_back(v2);  newIndices.push_back(m20); newIndices.push_back(m12);
+            newIndices.push_back(m01); newIndices.push_back(m12); newIndices.push_back(m20);
+        }
+
+        tempIndices = std::move(newIndices);
+    }
+
+    // Apply asymmetry scaling to create non-spherical base shape
+    glm::vec3 scaleFactors(
+        1.0f + asymmetry * (hash1(seed) * 2.0f - 1.0f),
+        1.0f + asymmetry * (hash1(seed + 100) * 2.0f - 1.0f) * 0.5f,  // Less vertical stretch
+        1.0f + asymmetry * (hash1(seed + 200) * 2.0f - 1.0f)
+    );
+
+    // Apply noise displacement to each vertex
+    float noiseScale = 2.0f;  // Controls frequency of noise
+    for (auto& pos : positions) {
+        // Scale for asymmetry first
+        glm::vec3 scaledPos = pos * scaleFactors;
+        float len = glm::length(scaledPos);
+        glm::vec3 dir = scaledPos / len;
+
+        // Sample position for noise (use original direction for consistent noise)
+        glm::vec3 samplePos = pos * noiseScale;
+
+        // FBM displacement - creates natural rock surface
+        float fbmDisp = fbm3D(samplePos.x, samplePos.y, samplePos.z, 5, 2.0f, 0.5f, seed);
+
+        // Voronoi displacement - creates angular features
+        float voronoiDisp = voronoi3D(samplePos.x * 1.5f, samplePos.y * 1.5f, samplePos.z * 1.5f, seed + 5000);
+        voronoiDisp = 1.0f - voronoiDisp;  // Invert for convex features
+
+        // Combine displacements
+        float displacement = roughness * (fbmDisp * 0.7f + voronoiDisp * 0.3f);
+
+        // Apply displacement along direction
+        pos = dir * baseRadius * (1.0f + displacement);
+    }
+
+    // Flatten bottom slightly to make rocks sit better
+    float minY = 0.0f;
+    for (const auto& pos : positions) {
+        minY = std::min(minY, pos.y);
+    }
+    float flattenThreshold = minY + baseRadius * 0.15f;
+    for (auto& pos : positions) {
+        if (pos.y < flattenThreshold) {
+            float t = (flattenThreshold - pos.y) / (flattenThreshold - minY);
+            pos.y = minY + (pos.y - minY) * (1.0f - t * 0.7f);
+        }
+    }
+
+    // Calculate normals by averaging face normals at each vertex
+    std::vector<glm::vec3> normals(positions.size(), glm::vec3(0.0f));
+    for (size_t i = 0; i < tempIndices.size(); i += 3) {
+        const glm::vec3& p0 = positions[tempIndices[i]];
+        const glm::vec3& p1 = positions[tempIndices[i + 1]];
+        const glm::vec3& p2 = positions[tempIndices[i + 2]];
+
+        glm::vec3 faceNormal = glm::cross(p1 - p0, p2 - p0);
+        float area = glm::length(faceNormal);
+        if (area > 0.0001f) {
+            faceNormal /= area;  // Normalize
+            normals[tempIndices[i]] += faceNormal;
+            normals[tempIndices[i + 1]] += faceNormal;
+            normals[tempIndices[i + 2]] += faceNormal;
+        }
+    }
+
+    for (auto& n : normals) {
+        float len = glm::length(n);
+        if (len > 0.0001f) {
+            n /= len;
+        } else {
+            n = glm::vec3(0.0f, 1.0f, 0.0f);
+        }
+    }
+
+    // Create vertices with proper attributes
+    vertices.reserve(positions.size());
+    for (size_t i = 0; i < positions.size(); ++i) {
+        const glm::vec3& pos = positions[i];
+        const glm::vec3& normal = normals[i];
+
+        // Triplanar UV projection for rock texturing
+        glm::vec3 absNormal = glm::abs(normal);
+        glm::vec2 uv;
+        if (absNormal.y > absNormal.x && absNormal.y > absNormal.z) {
+            // Y-dominant: project from top/bottom
+            uv = glm::vec2(pos.x, pos.z) * 0.5f;
+        } else if (absNormal.x > absNormal.z) {
+            // X-dominant: project from sides
+            uv = glm::vec2(pos.z, pos.y) * 0.5f;
+        } else {
+            // Z-dominant: project from front/back
+            uv = glm::vec2(pos.x, pos.y) * 0.5f;
+        }
+
+        // Compute tangent (perpendicular to normal, in dominant plane)
+        glm::vec3 tangent;
+        if (std::abs(normal.y) > 0.99f) {
+            tangent = glm::vec3(1.0f, 0.0f, 0.0f);
+        } else {
+            tangent = glm::normalize(glm::cross(glm::vec3(0.0f, 1.0f, 0.0f), normal));
+        }
+
+        vertices.push_back({pos, normal, uv, glm::vec4(tangent, 1.0f)});
+    }
+
+    indices = std::move(tempIndices);
 }
 
 void Mesh::upload(VmaAllocator allocator, VkDevice device, VkCommandPool commandPool, VkQueue queue) {
