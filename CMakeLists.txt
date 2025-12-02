@@ -65,6 +65,10 @@ set(SOURCES
     src/RockSystem.cpp
     src/CloudShadowSystem.cpp
     src/GLTFLoader.cpp
+    src/SkinnedMesh.cpp
+    src/Animation.cpp
+    src/AnimatedCharacter.cpp
+    src/AnimationStateMachine.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
@@ -116,6 +120,8 @@ add_custom_command(
 set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.frag.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/skinned.vert.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/skinned_shadow.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.frag.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.comp.spv
@@ -196,6 +202,7 @@ if(SHADER_COMPILE_CMD)
     # Simple shaders using SHADER_COMPILE_CMD
     set(SIMPLE_SHADERS
         shader.vert shader.frag
+        skinned.vert skinned_shadow.vert
         sky.vert sky.frag
         grass.comp grass_displacement.comp grass.vert grass.frag
         shadow.vert shadow.frag
@@ -342,6 +349,8 @@ if(SHADER_COMPILE_CMD)
     add_custom_target(shaders DEPENDS
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.frag.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/skinned.vert.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/skinned_shadow.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.frag.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.comp.spv

@@ -9,20 +9,56 @@ Replace the player capsule with an animated humanoid character supporting idle, 
 
 ## Character Asset
 
-**Source**: [RancidMilk Free Character Animations](https://rancidmilk.itch.io/free-character-animations)
-- 2,000+ mocap animations with CC0 Quaternius character model
-- Already in glTF format (no conversion needed)
-- License: Free to use/modify/redistribute
-- Based on CMU Motion Capture Database
+**Model Source**: [Quaternius Universal Base Characters](https://quaternius.itch.io/universal-base-characters) or [Poly.Pizza Animated Human](https://poly.pizza/m/c3Ibh9I3udk)
+- Low-poly humanoid character in glTF format
+- CC0 license (public domain)
+- Compatible with Universal Animation Library
 
-**Download**: Get the full pack (958 MB) which includes character + animations, or "Anims_Only_glTF_V1.zip" (764 MB) for animations only.
+**Animation Source**: [Quaternius Universal Animation Library](https://quaternius.itch.io/universal-animation-library)
+- 120+ animations including locomotion (walk, run, jump, idle)
+- CC0 license
+- Compatible with Universal Base Characters rig
 
 **Setup**:
-1. Download from itch.io
-2. Extract needed animations (idle, walk, run, jump) to `assets/characters/`
+1. Download character model from Quaternius or Poly.Pizza
+2. Download animation library from Quaternius
 3. Place character model as `assets/characters/player.glb`
+4. Place animation files in `assets/characters/animations/`
 
-**Note**: Animations include root motion - the animation state machine will need to handle this (either extract root motion for movement or use in-place versions if available).
+**Known Issues**:
+- Quaternius models are very small (~8cm tall), require ~20x scale to be human-sized
+- Some models may need Y-axis rotation to face correct direction
+
+## Progress
+
+### Phase 1: COMPLETE
+- glTF loader implemented using fastgltf library
+- Mesh extraction working (positions, normals, UVs, tangents)
+- Skeleton data structures defined (Joint, Skeleton)
+- Character renders in T-pose at player position
+- 20x scale applied to compensate for small model size
+
+### Phases 2-4: COMPLETE
+- SkinnedVertex format with bone indices and weights
+- SkinnedMesh class for GPU-ready skinned meshes
+- Skinned vertex shader and shadow shader created
+- Animation data loading from glTF (8 animations: Idle, Walk, Run, Jump, Punch, Death, Working)
+- AnimationPlayer class for playback with looping
+- AnimatedCharacter class combining mesh + skeleton + animations
+- CPU skinning implemented and working
+- Character animates with Idle animation by default
+- Fixed bind pose reset issue (limbs were knotted into body)
+
+### Phase 5: COMPLETE
+- AnimationStateMachine class for state-based animation selection
+- Crossfade blending between animation states (0.15-0.25s transitions)
+- Automatic state transitions based on movement speed:
+  - idle when speed < 0.1
+  - walk when speed 0.1-3.0
+  - run when speed > 3.0
+  - jump when jumping (non-looping, returns to locomotion on land)
+- Connected to player physics system for ground detection
+- Character smoothly transitions between idle/walk/run/jump based on player input
 
 ## Implementation Phases
 
@@ -30,7 +66,7 @@ Each phase results in a working, renderable state.
 
 ---
 
-### Phase 1: glTF Static Mesh Loading
+### Phase 1: glTF Static Mesh Loading (COMPLETE)
 
 **Goal**: Load and display character model in T-pose using existing PBR pipeline.
 

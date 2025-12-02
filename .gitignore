@@ -17,3 +17,5 @@ generated/
 # Compiled shaders (regenerated during build)
 *.spv
 vcpkg_installed/
+
+downloads/

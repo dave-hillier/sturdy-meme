@@ -181,6 +181,13 @@ void Application::run() {
         // Update flag cloth simulation
         updateFlag(deltaTime);
 
+        // Update animated character (skeletal animation)
+        // Calculate movement speed from desired velocity for animation state machine
+        float movementSpeed = glm::length(glm::vec2(desiredVelocity.x, desiredVelocity.z));
+        bool isGrounded = physics.isCharacterOnGround();
+        bool isJumping = input.wantsJump() && isGrounded;
+        renderer.updateAnimatedCharacter(deltaTime, movementSpeed, isGrounded, isJumping);
+
         // Update camera and player based on mode
         if (input.isThirdPersonMode()) {
             camera.setThirdPersonTarget(player.getFocusPoint());

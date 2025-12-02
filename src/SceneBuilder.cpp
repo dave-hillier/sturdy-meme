@@ -23,8 +23,8 @@ void SceneBuilder::destroy(VmaAllocator allocator, VkDevice device) {
     groundMesh.destroy(allocator);
     flagPoleMesh.destroy(allocator);
     flagClothMesh.destroy(allocator);
-    if (hasCharacterMesh) {
-        characterMesh.destroy(allocator);
+    if (hasAnimatedCharacter) {
+        animatedCharacter.destroy(allocator);
     }
 
     sceneObjects.clear();
@@ -52,17 +52,17 @@ bool SceneBuilder::createMeshes(const InitInfo& info) {
     // Flag cloth mesh will be initialized later by ClothSimulation
     // (it's dynamic and will be updated each frame)
 
-    // Try to load character model from glTF
+    // Try to load animated character from glTF
     std::string characterPath = info.resourcePath + "/assets/characters/player.glb";
-    auto gltfResult = GLTFLoader::load(characterPath);
-    if (gltfResult) {
-        characterMesh.setCustomGeometry(gltfResult->vertices, gltfResult->indices);
-        characterMesh.upload(info.allocator, info.device, info.commandPool, info.graphicsQueue);
-        hasCharacterMesh = true;
-        SDL_Log("SceneBuilder: Loaded character mesh with %zu vertices", gltfResult->vertices.size());
+    if (animatedCharacter.load(characterPath, info.allocator, info.device, info.commandPool, info.graphicsQueue)) {
+        hasAnimatedCharacter = true;
+        SDL_Log("SceneBuilder: Loaded animated character with %zu animations",
+                animatedCharacter.getAnimationCount());
+        // Start with idle animation
+        animatedCharacter.playAnimation("Idle");
     } else {
         SDL_Log("SceneBuilder: Character model not found at %s, using capsule fallback", characterPath.c_str());
-        hasCharacterMesh = false;
+        hasAnimatedCharacter = false;
     }
 
     return true;
@@ -237,14 +237,16 @@ void SceneBuilder::createSceneObjects() {
         .withEmissiveColor(glm::vec3(1.0f, 0.0f, 0.0f))
         .build());
 
-    // Player character - uses character mesh if loaded, otherwise capsule
+    // Player character - uses animated character if loaded, otherwise capsule
     playerObjectIndex = sceneObjects.size();
-    if (hasCharacterMesh) {
-        // Character mesh loaded from glTF - position at origin
-        // Note: Character models often have their pivot at the feet, so no Y offset needed
+    if (hasAnimatedCharacter) {
+        // Animated character loaded from glTF - scale up (model is very small ~8cm)
+        // Scale by ~20x to make it human-sized (~1.6m tall)
+        glm::mat4 characterTransform = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 0.0f));
+        characterTransform = glm::scale(characterTransform, glm::vec3(20.0f));
         sceneObjects.push_back(RenderableBuilder()
-            .atPosition(glm::vec3(0.0f, 0.0f, 0.0f))
-            .withMesh(&characterMesh)
+            .withTransform(characterTransform)
+            .withMesh(&animatedCharacter.getMesh())
             .withTexture(&metalTexture)
             .withRoughness(0.5f)
             .withMetallic(0.0f)
@@ -292,6 +294,36 @@ void SceneBuilder::uploadFlagClothMesh(VmaAllocator allocator, VkDevice device, 
 
 void SceneBuilder::updatePlayerTransform(const glm::mat4& transform) {
     if (playerObjectIndex < sceneObjects.size()) {
-        sceneObjects[playerObjectIndex].transform = transform;
+        if (hasAnimatedCharacter) {
+            // For animated character:
+            // 1. The transform from Player includes a Y offset of CAPSULE_HEIGHT*0.5 for capsule center
+            // 2. But the character model's origin is at its feet, so we need to remove that offset
+            // 3. Apply 20x scale to compensate for small model size
+            // Extract position from transform and adjust Y
+            glm::vec3 pos = glm::vec3(transform[3]);
+            pos.y -= 0.9f;  // Remove capsule center offset (CAPSULE_HEIGHT * 0.5 = 1.8 * 0.5)
+
+            // Build new transform with corrected position
+            glm::mat4 correctedTransform = transform;
+            correctedTransform[3] = glm::vec4(pos, 1.0f);
+
+            sceneObjects[playerObjectIndex].transform = glm::scale(correctedTransform, glm::vec3(20.0f));
+        } else {
+            sceneObjects[playerObjectIndex].transform = transform;
+        }
+    }
+}
+
+void SceneBuilder::updateAnimatedCharacter(float deltaTime, VmaAllocator allocator, VkDevice device,
+                                            VkCommandPool commandPool, VkQueue queue,
+                                            float movementSpeed, bool isGrounded, bool isJumping) {
+    if (!hasAnimatedCharacter) return;
+
+    animatedCharacter.update(deltaTime, allocator, device, commandPool, queue,
+                             movementSpeed, isGrounded, isJumping);
+
+    // Update the mesh pointer in the renderable (in case it was re-created)
+    if (playerObjectIndex < sceneObjects.size()) {
+        sceneObjects[playerObjectIndex].mesh = &animatedCharacter.getMesh();
     }
 }

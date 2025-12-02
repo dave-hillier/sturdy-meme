@@ -157,6 +157,14 @@ public:
     Mesh& getFlagPoleMesh() { return sceneManager.getSceneBuilder().getFlagPoleMesh(); }
     void uploadFlagClothMesh() { sceneManager.getSceneBuilder().uploadFlagClothMesh(vulkanContext.getAllocator(), vulkanContext.getDevice(), commandPool, vulkanContext.getGraphicsQueue()); }
 
+    // Animated character update
+    // movementSpeed: horizontal speed for animation state selection
+    // isGrounded: whether on the ground
+    // isJumping: whether just started jumping
+    void updateAnimatedCharacter(float deltaTime, float movementSpeed = 0.0f, bool isGrounded = true, bool isJumping = false) {
+        sceneManager.getSceneBuilder().updateAnimatedCharacter(deltaTime, vulkanContext.getAllocator(), vulkanContext.getDevice(), commandPool, vulkanContext.getGraphicsQueue(), movementSpeed, isGrounded, isJumping);
+    }
+
     // Celestial/astronomical settings
     void setLocation(const GeographicLocation& location) { celestialCalculator.setLocation(location); }
     const GeographicLocation& getLocation() const { return celestialCalculator.getLocation(); }

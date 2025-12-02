@@ -11,6 +11,7 @@
 #include "Texture.h"
 #include "RenderableBuilder.h"
 #include "GLTFLoader.h"
+#include "AnimatedCharacter.h"
 
 // Backward compatibility alias - Renderable is the canonical type
 using SceneObject = Renderable;
@@ -59,6 +60,19 @@ public:
     // Upload flag cloth mesh (for dynamic updates)
     void uploadFlagClothMesh(VmaAllocator allocator, VkDevice device, VkCommandPool commandPool, VkQueue queue);
 
+    // Animated character access
+    AnimatedCharacter& getAnimatedCharacter() { return animatedCharacter; }
+    const AnimatedCharacter& getAnimatedCharacter() const { return animatedCharacter; }
+    bool hasCharacter() const { return hasAnimatedCharacter; }
+
+    // Update animated character (call each frame)
+    // movementSpeed: horizontal speed for animation state selection
+    // isGrounded: whether on the ground
+    // isJumping: whether just started jumping
+    void updateAnimatedCharacter(float deltaTime, VmaAllocator allocator, VkDevice device,
+                                  VkCommandPool commandPool, VkQueue queue,
+                                  float movementSpeed = 0.0f, bool isGrounded = true, bool isJumping = false);
+
 private:
     bool createMeshes(const InitInfo& info);
     bool loadTextures(const InitInfo& info);
@@ -71,8 +85,8 @@ private:
     Mesh capsuleMesh;
     Mesh flagPoleMesh;
     Mesh flagClothMesh;
-    Mesh characterMesh;  // Player character mesh (loaded from glTF)
-    bool hasCharacterMesh = false;  // True if glTF character was loaded successfully
+    AnimatedCharacter animatedCharacter;  // Player character (animated from glTF)
+    bool hasAnimatedCharacter = false;  // True if animated character was loaded successfully
 
     // Textures
     Texture crateTexture;
