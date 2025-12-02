@@ -1,5 +1,6 @@
 # Claude
 
+- See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for rendering architecture overview
 - dont include estimates, either time or lines of code, in any plans
 - use opengameart.org for texture asset placeholders
 - keep an emphasis when planning on incremental progress, each state should be working and look decent when rendered
