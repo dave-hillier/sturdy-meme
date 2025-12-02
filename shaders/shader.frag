@@ -86,6 +86,7 @@ layout(location = 0) in vec3 fragNormal;
 layout(location = 1) in vec2 fragTexCoord;
 layout(location = 2) in vec3 fragWorldPos;
 layout(location = 3) in vec4 fragTangent;
+layout(location = 4) in vec4 fragColor;
 
 layout(location = 0) out vec4 outColor;
 
@@ -275,7 +276,8 @@ void main() {
     vec3 N = perturbNormal(geometricN, fragTangent, fragTexCoord);
 
     vec4 texColor = texture(texSampler, fragTexCoord);
-    vec3 albedo = texColor.rgb;
+    // Multiply texture color with vertex color (for glTF material baseColorFactor)
+    vec3 albedo = texColor.rgb * fragColor.rgb;
 
     // === SNOW LAYER ===
     // Sample snow mask at world position

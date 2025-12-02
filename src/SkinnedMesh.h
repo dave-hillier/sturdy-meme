@@ -16,6 +16,7 @@ struct SkinnedVertex {
     glm::vec4 tangent;      // location 3 (xyz = direction, w = handedness)
     glm::uvec4 boneIndices; // location 4 (4 bone influences)
     glm::vec4 boneWeights;  // location 5
+    glm::vec4 color;        // location 6 (material base color from glTF)
 
     static VkVertexInputBindingDescription getBindingDescription() {
         VkVertexInputBindingDescription bindingDescription{};
@@ -25,8 +26,8 @@ struct SkinnedVertex {
         return bindingDescription;
     }
 
-    static std::array<VkVertexInputAttributeDescription, 6> getAttributeDescriptions() {
-        std::array<VkVertexInputAttributeDescription, 6> attributeDescriptions{};
+    static std::array<VkVertexInputAttributeDescription, 7> getAttributeDescriptions() {
+        std::array<VkVertexInputAttributeDescription, 7> attributeDescriptions{};
 
         attributeDescriptions[0].binding = 0;
         attributeDescriptions[0].location = 0;
@@ -57,6 +58,11 @@ struct SkinnedVertex {
         attributeDescriptions[5].location = 5;
         attributeDescriptions[5].format = VK_FORMAT_R32G32B32A32_SFLOAT;
         attributeDescriptions[5].offset = offsetof(SkinnedVertex, boneWeights);
+
+        attributeDescriptions[6].binding = 0;
+        attributeDescriptions[6].location = 6;
+        attributeDescriptions[6].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+        attributeDescriptions[6].offset = offsetof(SkinnedVertex, color);
 
         return attributeDescriptions;
     }

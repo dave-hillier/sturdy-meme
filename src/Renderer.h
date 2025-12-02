@@ -274,6 +274,7 @@ private:
     SceneManager sceneManager;
     std::vector<VkDescriptorSet> metalDescriptorSets;
     std::vector<VkDescriptorSet> rockDescriptorSets;
+    std::vector<VkDescriptorSet> characterDescriptorSets;  // For vertex-colored character
 
     uint32_t currentFrame = 0;
     static constexpr int MAX_FRAMES_IN_FLIGHT = 2;

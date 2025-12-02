@@ -377,10 +377,24 @@ std::optional<GLTFSkinnedLoadResult> loadSkinned(const std::string& path) {
             // Reserve space for new vertices
             result.vertices.resize(vertexOffset + vertexCount);
 
+            // Get material base color for this primitive
+            glm::vec4 baseColor(1.0f);  // Default white
+            if (primitive.materialIndex.has_value()) {
+                const auto& material = asset->materials[primitive.materialIndex.value()];
+                const auto& pbr = material.pbrData;
+                baseColor = glm::vec4(
+                    pbr.baseColorFactor[0],
+                    pbr.baseColorFactor[1],
+                    pbr.baseColorFactor[2],
+                    pbr.baseColorFactor[3]
+                );
+            }
+
             // Initialize all vertices with default values
             for (size_t i = 0; i < vertexCount; ++i) {
                 result.vertices[vertexOffset + i].boneIndices = glm::uvec4(0);
                 result.vertices[vertexOffset + i].boneWeights = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f);
+                result.vertices[vertexOffset + i].color = baseColor;
             }
 
             // Load positions

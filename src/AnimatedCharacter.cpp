@@ -30,6 +30,7 @@ bool AnimatedCharacter::load(const std::string& path, VmaAllocator allocator, Vk
         skinnedVertices[i].normal = bindPoseVertices[i].normal;
         skinnedVertices[i].texCoord = bindPoseVertices[i].texCoord;
         skinnedVertices[i].tangent = bindPoseVertices[i].tangent;
+        skinnedVertices[i].color = bindPoseVertices[i].color;
     }
 
     // Create render mesh

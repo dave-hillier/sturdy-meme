@@ -16,6 +16,7 @@ void SceneBuilder::destroy(VmaAllocator allocator, VkDevice device) {
     metalTexture.destroy(allocator, device);
     metalNormalMap.destroy(allocator, device);
     defaultEmissiveMap.destroy(allocator, device);
+    whiteTexture.destroy(allocator, device);
 
     cubeMesh.destroy(allocator);
     sphereMesh.destroy(allocator);
@@ -53,7 +54,7 @@ bool SceneBuilder::createMeshes(const InitInfo& info) {
     // (it's dynamic and will be updated each frame)
 
     // Try to load animated character from glTF
-    std::string characterPath = info.resourcePath + "/assets/characters/player.glb";
+    std::string characterPath = info.resourcePath + "/assets/characters/character_animated.glb";
     if (animatedCharacter.load(characterPath, info.allocator, info.device, info.commandPool, info.graphicsQueue)) {
         hasAnimatedCharacter = true;
         SDL_Log("SceneBuilder: Loaded animated character with %zu animations",
@@ -115,6 +116,13 @@ bool SceneBuilder::loadTextures(const InitInfo& info) {
     if (!defaultEmissiveMap.createSolidColor(0, 0, 0, 255, info.allocator, info.device,
                                               info.commandPool, info.graphicsQueue)) {
         SDL_Log("Failed to create default emissive map");
+        return false;
+    }
+
+    // Create white texture for vertex-colored objects (like glTF characters)
+    if (!whiteTexture.createSolidColor(255, 255, 255, 255, info.allocator, info.device,
+                                        info.commandPool, info.graphicsQueue)) {
+        SDL_Log("Failed to create white texture");
         return false;
     }
 
@@ -240,15 +248,11 @@ void SceneBuilder::createSceneObjects() {
     // Player character - uses animated character if loaded, otherwise capsule
     playerObjectIndex = sceneObjects.size();
     if (hasAnimatedCharacter) {
-        // Animated character loaded from glTF - scale up (model is very small ~8cm)
-        // Scale by ~20x to make it human-sized (~1.6m tall)
-        glm::mat4 characterTransform = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 0.0f));
-        characterTransform = glm::scale(characterTransform, glm::vec3(20.0f));
         sceneObjects.push_back(RenderableBuilder()
-            .withTransform(characterTransform)
+            .withTransform(buildCharacterTransform(glm::vec3(0.0f), 0.0f))
             .withMesh(&animatedCharacter.getMesh())
-            .withTexture(&metalTexture)
-            .withRoughness(0.5f)
+            .withTexture(&whiteTexture)  // White texture so vertex colors show through
+            .withRoughness(0.7f)
             .withMetallic(0.0f)
             .withCastsShadow(true)
             .build());
@@ -292,22 +296,30 @@ void SceneBuilder::uploadFlagClothMesh(VmaAllocator allocator, VkDevice device, 
     flagClothMesh.upload(allocator, device, commandPool, queue);
 }
 
+glm::mat4 SceneBuilder::buildCharacterTransform(const glm::vec3& position, float yRotation) const {
+    // Character model transform:
+    // 1. Translate to world position
+    // 2. Apply Y rotation (facing direction)
+    // 3. Rotate -90 degrees around X to stand upright (model exported lying down)
+    // 4. Scale up (model is very small ~2cm)
+    glm::mat4 transform = glm::translate(glm::mat4(1.0f), position);
+    transform = glm::rotate(transform, yRotation, glm::vec3(0.0f, 1.0f, 0.0f));
+    transform = glm::rotate(transform, glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+    transform = glm::scale(transform, glm::vec3(CHARACTER_SCALE));
+    return transform;
+}
+
 void SceneBuilder::updatePlayerTransform(const glm::mat4& transform) {
     if (playerObjectIndex < sceneObjects.size()) {
         if (hasAnimatedCharacter) {
-            // For animated character:
-            // 1. The transform from Player includes a Y offset of CAPSULE_HEIGHT*0.5 for capsule center
-            // 2. But the character model's origin is at its feet, so we need to remove that offset
-            // 3. Apply 20x scale to compensate for small model size
-            // Extract position from transform and adjust Y
+            // Extract position and adjust Y (remove capsule center offset)
             glm::vec3 pos = glm::vec3(transform[3]);
-            pos.y -= 0.9f;  // Remove capsule center offset (CAPSULE_HEIGHT * 0.5 = 1.8 * 0.5)
+            pos.y -= 0.9f;  // CAPSULE_HEIGHT * 0.5 = 1.8 * 0.5
 
-            // Build new transform with corrected position
-            glm::mat4 correctedTransform = transform;
-            correctedTransform[3] = glm::vec4(pos, 1.0f);
+            // Extract Y rotation from the transform matrix
+            float yRotation = atan2(transform[0][2], transform[0][0]);
 
-            sceneObjects[playerObjectIndex].transform = glm::scale(correctedTransform, glm::vec3(20.0f));
+            sceneObjects[playerObjectIndex].transform = buildCharacterTransform(pos, yRotation);
         } else {
             sceneObjects[playerObjectIndex].transform = transform;
         }

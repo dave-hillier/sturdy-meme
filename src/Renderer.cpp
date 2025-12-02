@@ -1066,6 +1066,12 @@ bool Renderer::createDescriptorSets() {
         return false;
     }
 
+    characterDescriptorSets = descriptorManagerPool->allocate(descriptorSetLayout, MAX_FRAMES_IN_FLIGHT);
+    if (characterDescriptorSets.empty()) {
+        SDL_Log("Failed to allocate character descriptor sets");
+        return false;
+    }
+
     // Helper lambda to write common bindings shared across all material sets
     auto writeCommonBindings = [this](DescriptorManager::SetWriter& writer, size_t frameIndex) {
         writer
@@ -1114,6 +1120,18 @@ bool Renderer::createDescriptorSets() {
                            sceneManager.getSceneBuilder().getMetalTexture().getSampler())
                 .writeImage(3, sceneManager.getSceneBuilder().getMetalNormalMap().getImageView(),
                            sceneManager.getSceneBuilder().getMetalNormalMap().getSampler())
+                .update();
+        }
+
+        // Character material descriptor sets (white texture for vertex colors)
+        {
+            DescriptorManager::SetWriter writer(device, characterDescriptorSets[i]);
+            writeCommonBindings(writer, i);
+            writer
+                .writeImage(1, sceneManager.getSceneBuilder().getWhiteTexture().getImageView(),
+                           sceneManager.getSceneBuilder().getWhiteTexture().getSampler())
+                .writeImage(3, sceneManager.getSceneBuilder().getWhiteTexture().getImageView(),
+                           sceneManager.getSceneBuilder().getWhiteTexture().getSampler())  // No normal map, use white
                 .update();
         }
     }
@@ -1550,6 +1568,8 @@ void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
             descSet = &groundDescriptorSets[frameIndex];
         } else if (obj.texture == &sceneManager.getSceneBuilder().getMetalTexture()) {
             descSet = &metalDescriptorSets[frameIndex];
+        } else if (obj.texture == &sceneManager.getSceneBuilder().getWhiteTexture()) {
+            descSet = &characterDescriptorSets[frameIndex];
         } else {
             descSet = &descriptorSets[frameIndex];
         }

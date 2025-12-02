@@ -47,6 +47,7 @@ public:
     Texture& getMetalTexture() { return metalTexture; }
     Texture& getMetalNormalMap() { return metalNormalMap; }
     Texture& getDefaultEmissiveMap() { return defaultEmissiveMap; }
+    Texture& getWhiteTexture() { return whiteTexture; }
 
     // Access to meshes for dynamic updates (e.g., cloth)
     Mesh& getFlagClothMesh() { return flagClothMesh; }
@@ -78,6 +79,12 @@ private:
     bool loadTextures(const InitInfo& info);
     void createSceneObjects();
 
+    // Build character model transform from world position and rotation
+    glm::mat4 buildCharacterTransform(const glm::vec3& position, float yRotation) const;
+
+    // Character model constants
+    static constexpr float CHARACTER_SCALE = 80.0f;  // Model is ~2cm, scale to ~1.6m
+
     // Meshes
     Mesh groundMesh;
     Mesh cubeMesh;
@@ -96,6 +103,7 @@ private:
     Texture metalTexture;
     Texture metalNormalMap;
     Texture defaultEmissiveMap;  // Black texture for objects without emissive
+    Texture whiteTexture;        // White texture for vertex-colored objects
 
     // Scene objects
     std::vector<SceneObject> sceneObjects;
