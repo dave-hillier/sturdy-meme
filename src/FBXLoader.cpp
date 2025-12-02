@@ -206,7 +206,7 @@ MaterialInfo extractMaterialInfo(const ofbx::Material* mat, const std::string& f
     }
 
     // Name
-    if (mat->name) {
+    if (mat->name[0] != '\0') {
         info.name = mat->name;
     }
 
@@ -216,11 +216,25 @@ MaterialInfo extractMaterialInfo(const ofbx::Material* mat, const std::string& f
     info.emissiveColor = convertColor(mat->getEmissiveColor());
 
     // PBR properties
-    // Convert shininess to roughness (shininess 0-1000 -> roughness 1-0)
+    // Convert shininess to roughness - use a sensible default for characters
+    // Most FBX files from older software don't have proper PBR values
+    // Typical Blinn-Phong shininess range: 10-1000 for meaningful specular
     double shininess = mat->getShininess();
-    if (shininess > 0) {
-        // Approximate conversion: higher shininess = lower roughness
-        info.roughness = 1.0f - std::min(1.0f, static_cast<float>(shininess) / 100.0f);
+    if (shininess > 10.0) {
+        // Meaningful shininess value - convert to roughness
+        // Map shininess 10-500 to roughness 0.7-0.1
+        float normalizedShininess = std::min(1.0f, static_cast<float>(shininess - 10.0) / 490.0f);
+        info.roughness = std::max(0.1f, 0.7f - normalizedShininess * 0.6f);
+    } else {
+        // Low or no shininess data - use a reasonable default (slightly glossy skin/plastic look)
+        info.roughness = 0.5f;
+    }
+
+    // Derive metallic from specular color intensity
+    float specularIntensity = (info.specularColor.r + info.specularColor.g + info.specularColor.b) / 3.0f;
+    if (specularIntensity > 0.3f) {
+        // Moderate specular suggests some metallic quality
+        info.metallic = std::min(0.5f, (specularIntensity - 0.3f));
     }
 
     // OpenFBX doesn't expose opacity directly, default to 1.0
@@ -407,10 +421,10 @@ std::optional<GLTFSkinnedLoadResult> loadSkinned(const std::string& path) {
             MaterialInfo matInfo = extractMaterialInfo(mat, fbxDirectory);
             meshMaterials.push_back(matInfo);
 
-            SDL_Log("FBXLoader: Material %d '%s': diffuse=(%.2f, %.2f, %.2f) roughness=%.2f",
+            SDL_Log("FBXLoader: Material %d '%s': diffuse=(%.2f, %.2f, %.2f) roughness=%.2f shininess=%.1f",
                     matIdx, matInfo.name.c_str(),
                     matInfo.diffuseColor.r, matInfo.diffuseColor.g, matInfo.diffuseColor.b,
-                    matInfo.roughness);
+                    matInfo.roughness, mat ? mat->getShininess() : 0.0);
 
             if (!matInfo.diffuseTexturePath.empty()) {
                 SDL_Log("FBXLoader:   Diffuse texture: %s", matInfo.diffuseTexturePath.c_str());

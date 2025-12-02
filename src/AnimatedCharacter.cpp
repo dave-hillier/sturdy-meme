@@ -32,6 +32,16 @@ bool AnimatedCharacter::load(const std::string& path, VmaAllocator allocator, Vk
     indices = std::move(result->indices);
     skeleton = std::move(result->skeleton);
     animations = std::move(result->animations);
+    materials = std::move(result->materials);
+
+    // Log loaded materials
+    if (!materials.empty()) {
+        SDL_Log("AnimatedCharacter: Loaded %zu materials", materials.size());
+        for (const auto& mat : materials) {
+            SDL_Log("  Material '%s': roughness=%.2f metallic=%.2f",
+                    mat.name.c_str(), mat.roughness, mat.metallic);
+        }
+    }
 
     // Store bind pose local transforms so we can reset before each animation sample
     bindPoseLocalTransforms.resize(skeleton.joints.size());

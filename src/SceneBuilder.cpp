@@ -254,12 +254,32 @@ void SceneBuilder::createSceneObjects() {
     // Player character - uses animated character if loaded, otherwise capsule
     playerObjectIndex = sceneObjects.size();
     if (hasAnimatedCharacter) {
+        // Use materials from FBX if available, otherwise use defaults
+        float charRoughness = 0.5f;  // Default roughness for more specular highlights
+        float charMetallic = 0.0f;
+        glm::vec3 charEmissiveColor = glm::vec3(0.0f);
+        float charEmissiveIntensity = 0.0f;
+
+        const auto& materials = animatedCharacter.getMaterials();
+        if (!materials.empty()) {
+            // Use first material's properties (most characters have a primary material)
+            const auto& mat = materials[0];
+            charRoughness = mat.roughness;
+            charMetallic = mat.metallic;
+            charEmissiveColor = mat.emissiveColor;
+            charEmissiveIntensity = mat.emissiveFactor;
+            SDL_Log("SceneBuilder: Using FBX material '%s' - roughness=%.2f metallic=%.2f",
+                    mat.name.c_str(), charRoughness, charMetallic);
+        }
+
         sceneObjects.push_back(RenderableBuilder()
             .withTransform(buildCharacterTransform(glm::vec3(0.0f), 0.0f))
             .withMesh(&animatedCharacter.getMesh())
             .withTexture(&whiteTexture)  // White texture so vertex colors show through
-            .withRoughness(0.7f)
-            .withMetallic(0.0f)
+            .withRoughness(charRoughness)
+            .withMetallic(charMetallic)
+            .withEmissiveColor(charEmissiveColor)
+            .withEmissiveIntensity(charEmissiveIntensity)
             .withCastsShadow(true)
             .build());
     } else {
