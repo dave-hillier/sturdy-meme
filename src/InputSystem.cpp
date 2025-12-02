@@ -85,6 +85,7 @@ void InputSystem::update(float deltaTime, float cameraYaw) {
     freeCameraRight = 0.0f;
     freeCameraUp = 0.0f;
     timeScaleInput = 0.0f;
+    orientationLockToggleRequested = false;
 
     // Skip game input if GUI wants it
     if (isGuiBlocking()) {
@@ -219,6 +220,17 @@ void InputSystem::processThirdPersonKeyboard(float deltaTime, float cameraYaw, c
 
     // Left Shift to sprint (held)
     sprinting = keyState[SDL_SCANCODE_LSHIFT] || gamepadSprintToggle;
+
+    // Caps Lock to toggle orientation lock (only on initial press)
+    bool capsPressed = keyState[SDL_SCANCODE_CAPSLOCK];
+    if (capsPressed && !keyboardLockHeld) {
+        orientationLockToggleRequested = true;
+    }
+    keyboardLockHeld = capsPressed;
+
+    // Middle mouse button to hold orientation lock
+    Uint32 mouseState = SDL_GetMouseState(nullptr, nullptr);
+    orientationLockHeld = (mouseState & SDL_BUTTON_MMASK) != 0;
 }
 
 void InputSystem::processGamepadInput(float deltaTime, float cameraYaw) {
@@ -319,6 +331,19 @@ void InputSystem::processThirdPersonGamepad(float deltaTime, float cameraYaw) {
     if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)) {
         cameraZoomInput -= moveSpeed * deltaTime;
     }
+
+    // Left trigger to hold orientation lock
+    float leftTrigger = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) / 32767.0f;
+    if (leftTrigger > 0.5f) {
+        orientationLockHeld = true;
+    }
+
+    // B button (East) to toggle orientation lock (only on initial press)
+    bool bButtonPressed = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_EAST);
+    if (bButtonPressed && !gamepadLockToggleHeld) {
+        orientationLockToggleRequested = true;
+    }
+    gamepadLockToggleHeld = bButtonPressed;
 }
 
 void InputSystem::openGamepad(SDL_JoystickID id) {

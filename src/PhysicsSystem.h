@@ -44,6 +44,14 @@ struct PhysicsBodyInfo {
     bool isAwake = false;
 };
 
+struct RaycastHit {
+    bool hit = false;
+    float distance = 0.0f;
+    PhysicsBodyID bodyId = INVALID_BODY_ID;
+    glm::vec3 position{0.0f};
+    glm::vec3 normal{0.0f, 1.0f, 0.0f};
+};
+
 class PhysicsWorld {
 public:
     PhysicsWorld();
@@ -96,6 +104,9 @@ public:
 
     // Convert between GLM and physics transforms
     glm::mat4 getBodyTransform(PhysicsBodyID bodyID) const;
+
+    // Raycast queries
+    std::vector<RaycastHit> castRayAllHits(const glm::vec3& from, const glm::vec3& to) const;
 
     // Debug
     int getActiveBodyCount() const;
