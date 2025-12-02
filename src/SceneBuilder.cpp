@@ -23,6 +23,9 @@ void SceneBuilder::destroy(VmaAllocator allocator, VkDevice device) {
     groundMesh.destroy(allocator);
     flagPoleMesh.destroy(allocator);
     flagClothMesh.destroy(allocator);
+    if (hasCharacterMesh) {
+        characterMesh.destroy(allocator);
+    }
 
     sceneObjects.clear();
 }
@@ -48,6 +51,19 @@ bool SceneBuilder::createMeshes(const InitInfo& info) {
 
     // Flag cloth mesh will be initialized later by ClothSimulation
     // (it's dynamic and will be updated each frame)
+
+    // Try to load character model from glTF
+    std::string characterPath = info.resourcePath + "/assets/characters/player.glb";
+    auto gltfResult = GLTFLoader::load(characterPath);
+    if (gltfResult) {
+        characterMesh.setCustomGeometry(gltfResult->vertices, gltfResult->indices);
+        characterMesh.upload(info.allocator, info.device, info.commandPool, info.graphicsQueue);
+        hasCharacterMesh = true;
+        SDL_Log("SceneBuilder: Loaded character mesh with %zu vertices", gltfResult->vertices.size());
+    } else {
+        SDL_Log("SceneBuilder: Character model not found at %s, using capsule fallback", characterPath.c_str());
+        hasCharacterMesh = false;
+    }
 
     return true;
 }
@@ -221,16 +237,30 @@ void SceneBuilder::createSceneObjects() {
         .withEmissiveColor(glm::vec3(1.0f, 0.0f, 0.0f))
         .build());
 
-    // Player capsule - centered at origin, uses metal texture for visibility
+    // Player character - uses character mesh if loaded, otherwise capsule
     playerObjectIndex = sceneObjects.size();
-    sceneObjects.push_back(RenderableBuilder()
-        .atPosition(glm::vec3(0.0f, 0.9f, 0.0f))
-        .withMesh(&capsuleMesh)
-        .withTexture(&metalTexture)
-        .withRoughness(0.3f)
-        .withMetallic(0.8f)
-        .withCastsShadow(true)
-        .build());
+    if (hasCharacterMesh) {
+        // Character mesh loaded from glTF - position at origin
+        // Note: Character models often have their pivot at the feet, so no Y offset needed
+        sceneObjects.push_back(RenderableBuilder()
+            .atPosition(glm::vec3(0.0f, 0.0f, 0.0f))
+            .withMesh(&characterMesh)
+            .withTexture(&metalTexture)
+            .withRoughness(0.5f)
+            .withMetallic(0.0f)
+            .withCastsShadow(true)
+            .build());
+    } else {
+        // Capsule fallback - centered at origin, uses metal texture for visibility
+        sceneObjects.push_back(RenderableBuilder()
+            .atPosition(glm::vec3(0.0f, 0.9f, 0.0f))
+            .withMesh(&capsuleMesh)
+            .withTexture(&metalTexture)
+            .withRoughness(0.3f)
+            .withMetallic(0.8f)
+            .withCastsShadow(true)
+            .build());
+    }
 
     // Flag pole - positioned at (5, 1.5, 0) so the 3m pole sits on the ground
     flagPoleIndex = sceneObjects.size();

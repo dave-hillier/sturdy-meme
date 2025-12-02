@@ -10,6 +10,7 @@
 #include "Mesh.h"
 #include "Texture.h"
 #include "RenderableBuilder.h"
+#include "GLTFLoader.h"
 
 // Backward compatibility alias - Renderable is the canonical type
 using SceneObject = Renderable;
@@ -70,6 +71,8 @@ private:
     Mesh capsuleMesh;
     Mesh flagPoleMesh;
     Mesh flagClothMesh;
+    Mesh characterMesh;  // Player character mesh (loaded from glTF)
+    bool hasCharacterMesh = false;  // True if glTF character was loaded successfully
 
     // Textures
     Texture crateTexture;
