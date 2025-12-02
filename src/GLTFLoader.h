@@ -7,6 +7,32 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+// Material properties extracted from FBX/glTF files
+struct MaterialInfo {
+    std::string name;
+
+    // Colors
+    glm::vec3 diffuseColor = glm::vec3(1.0f);
+    glm::vec3 specularColor = glm::vec3(0.0f);
+    glm::vec3 emissiveColor = glm::vec3(0.0f);
+
+    // PBR properties
+    float roughness = 0.5f;      // Derived from shininess
+    float metallic = 0.0f;
+    float opacity = 1.0f;
+    float emissiveFactor = 0.0f;
+
+    // Texture paths (relative to FBX file or absolute)
+    std::string diffuseTexturePath;
+    std::string normalTexturePath;
+    std::string specularTexturePath;
+    std::string emissiveTexturePath;
+
+    // Index range in the mesh (which vertices/indices use this material)
+    uint32_t startIndex = 0;
+    uint32_t indexCount = 0;
+};
+
 // Forward declarations for skeleton and animation (Phase 2+)
 struct Joint {
     std::string name;
@@ -29,7 +55,10 @@ struct GLTFLoadResult {
     std::vector<uint32_t> indices;
     Skeleton skeleton;
 
-    // Material info (for future use)
+    // Materials extracted from the file
+    std::vector<MaterialInfo> materials;
+
+    // Legacy: first material texture paths (for backward compatibility)
     std::string baseColorTexturePath;
     std::string normalTexturePath;
 };
@@ -47,7 +76,10 @@ struct GLTFSkinnedLoadResult {
     Skeleton skeleton;
     std::vector<AnimationClip> animations;
 
-    // Material info (for future use)
+    // Materials extracted from the file
+    std::vector<MaterialInfo> materials;
+
+    // Legacy: first material texture paths (for backward compatibility)
     std::string baseColorTexturePath;
     std::string normalTexturePath;
 };
