@@ -57,8 +57,9 @@ glm::mat4 Player::getModelMatrix() const {
     glm::mat4 model = glm::mat4(1.0f);
     // Translate to position (capsule center is at ground level, so offset up by half height)
     model = glm::translate(model, position + glm::vec3(0.0f, CAPSULE_HEIGHT * 0.5f, 0.0f));
-    // Rotate around Y axis based on yaw
-    model = glm::rotate(model, glm::radians(yaw), glm::vec3(0.0f, 1.0f, 0.0f));
+    // Rotate around Y axis based on yaw (use locked yaw if orientation locked)
+    float effectiveYaw = orientationLocked ? lockedYaw : yaw;
+    model = glm::rotate(model, glm::radians(effectiveYaw), glm::vec3(0.0f, 1.0f, 0.0f));
     return model;
 }
 
@@ -70,4 +71,20 @@ glm::vec3 Player::getForward() const {
 glm::vec3 Player::getRight() const {
     float radYaw = glm::radians(yaw + 90.0f);
     return glm::vec3(sin(radYaw), 0.0f, cos(radYaw));
+}
+
+void Player::setOrientationLock(bool locked) {
+    orientationLocked = locked;
+    if (locked) {
+        lockedYaw = yaw;
+    }
+}
+
+void Player::toggleOrientationLock() {
+    setOrientationLock(!orientationLocked);
+}
+
+void Player::lockToCurrentOrientation() {
+    lockedYaw = yaw;
+    orientationLocked = true;
 }

@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 #include <string>
 #include <vector>
+#include <unordered_set>
 #include "Renderer.h"
 #include "Camera.h"
 #include "Player.h"
@@ -28,6 +29,7 @@ private:
     void updatePhysicsToScene();
     void initFlag();
     void updateFlag(float deltaTime);
+    void updateCameraOcclusion(float deltaTime);
 
     SDL_Window* window = nullptr;
     Renderer renderer;
@@ -50,6 +52,11 @@ private:
     GuiSystem gui;
     float currentFps = 60.0f;
     float lastDeltaTime = 0.016f;
+
+    // Camera occlusion tracking
+    std::unordered_set<PhysicsBodyID> occludingBodies;
+    static constexpr float occlusionFadeSpeed = 8.0f;
+    static constexpr float occludedOpacity = 0.3f;
 
     bool running = false;
     // Walk speed matches animation root motion: 158.42 cm / 1.10s * 0.01 scale = 1.44 m/s

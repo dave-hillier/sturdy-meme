@@ -18,6 +18,7 @@ struct Renderable {
     float emissiveIntensity = 0.0f;
     glm::vec3 emissiveColor = glm::vec3(1.0f);
     bool castsShadow = true;
+    float opacity = 1.0f;  // For camera occlusion fading (1.0 = fully visible)
 
 private:
     friend class RenderableBuilder;

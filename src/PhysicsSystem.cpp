@@ -20,11 +20,15 @@
 #include <Jolt/Physics/Character/CharacterVirtual.h>
 #include <Jolt/Physics/Collision/BroadPhase/BroadPhaseQuery.h>
 #include <Jolt/Physics/Collision/ObjectLayer.h>
+#include <Jolt/Physics/Collision/RayCast.h>
+#include <Jolt/Physics/Collision/CastResult.h>
+#include <Jolt/Physics/Collision/CollisionCollectorImpl.h>
 
 #include <SDL3/SDL_log.h>
 #include <cstdarg>
 #include <thread>
 #include <cmath>
+#include <algorithm>
 
 // Memory allocation hooks for Jolt
 JPH_SUPPRESS_WARNINGS
@@ -720,4 +724,47 @@ glm::mat4 PhysicsWorld::getBodyTransform(PhysicsBodyID bodyID) const {
 int PhysicsWorld::getActiveBodyCount() const {
     if (!initialized) return 0;
     return static_cast<int>(physicsSystem->GetNumActiveBodies(JPH::EBodyType::RigidBody));
+}
+
+std::vector<RaycastHit> PhysicsWorld::castRayAllHits(const glm::vec3& from, const glm::vec3& to) const {
+    std::vector<RaycastHit> results;
+    if (!initialized) return results;
+
+    // Calculate ray direction and length
+    glm::vec3 direction = to - from;
+    float rayLength = glm::length(direction);
+    if (rayLength < 0.001f) return results;
+
+    direction = glm::normalize(direction);
+
+    // Create Jolt ray
+    JPH::RRayCast ray;
+    ray.mOrigin = JPH::RVec3(from.x, from.y, from.z);
+    ray.mDirection = JPH::Vec3(direction.x * rayLength, direction.y * rayLength, direction.z * rayLength);
+
+    // Use a collector to gather all hits
+    JPH::AllHitCollisionCollector<JPH::RayCastBodyCollector> collector;
+
+    // Cast the ray through broad phase
+    JPH::DefaultBroadPhaseLayerFilter broadPhaseFilter(objectVsBroadPhaseLayerFilter, PhysicsLayers::MOVING);
+    JPH::DefaultObjectLayerFilter objectLayerFilter(objectLayerPairFilter, PhysicsLayers::MOVING);
+
+    physicsSystem->GetBroadPhaseQuery().CastRay(ray, collector, broadPhaseFilter, objectLayerFilter);
+
+    // Convert results
+    for (const auto& hit : collector.mHits) {
+        RaycastHit result;
+        result.hit = true;
+        result.distance = hit.mFraction * rayLength;
+        result.bodyId = hit.mBodyID.GetIndexAndSequenceNumber();
+        result.position = from + direction * result.distance;
+        results.push_back(result);
+    }
+
+    // Sort by distance
+    std::sort(results.begin(), results.end(), [](const RaycastHit& a, const RaycastHit& b) {
+        return a.distance < b.distance;
+    });
+
+    return results;
 }

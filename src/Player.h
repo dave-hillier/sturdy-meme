@@ -41,11 +41,22 @@ public:
     // Set position directly
     void setPosition(const glm::vec3& pos) { position = pos; }
 
+    // Orientation lock (strafe mode)
+    bool isOrientationLocked() const { return orientationLocked; }
+    void setOrientationLock(bool locked);
+    void toggleOrientationLock();
+    void lockToCurrentOrientation();
+    float getLockedYaw() const { return lockedYaw; }
+
 private:
     glm::vec3 position;
     float yaw;  // Horizontal rotation in degrees
     float verticalVelocity;
     bool onGround;
+
+    // Orientation lock state
+    bool orientationLocked = false;
+    float lockedYaw = 0.0f;
 
     // Get forward direction based on yaw
     glm::vec3 getForward() const;

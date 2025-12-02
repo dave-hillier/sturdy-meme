@@ -2,6 +2,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <unordered_set>
 
 #ifdef __APPLE__
 #include <CoreFoundation/CoreFoundation.h>
@@ -146,20 +147,31 @@ void Application::run() {
         // Process movement input for third-person mode
         glm::vec3 desiredVelocity(0.0f);
         if (input.isThirdPersonMode()) {
+            // Handle orientation lock toggle
+            if (input.wantsOrientationLockToggle()) {
+                player.toggleOrientationLock();
+                SDL_Log("Orientation lock: %s", player.isOrientationLocked() ? "ON" : "OFF");
+            }
+
+            // Temporarily lock orientation if holding trigger/middle mouse
+            bool effectiveLock = player.isOrientationLocked() || input.isOrientationLockHeld();
+
             glm::vec3 moveDir = input.getMovementDirection();
             if (glm::length(moveDir) > 0.001f) {
                 moveDir = glm::normalize(moveDir);
                 float currentSpeed = input.isSprinting() ? sprintSpeed : moveSpeed;
                 desiredVelocity = moveDir * currentSpeed;
 
-                // Rotate player to face movement direction
-                float newYaw = glm::degrees(atan2(moveDir.x, moveDir.z));
-                float currentYaw = player.getYaw();
-                float yawDiff = newYaw - currentYaw;
-                // Normalize yaw difference
-                while (yawDiff > 180.0f) yawDiff -= 360.0f;
-                while (yawDiff < -180.0f) yawDiff += 360.0f;
-                player.rotate(yawDiff * 10.0f * deltaTime);  // Smooth rotation
+                // Only rotate player to face movement direction if not locked
+                if (!effectiveLock) {
+                    float newYaw = glm::degrees(atan2(moveDir.x, moveDir.z));
+                    float currentYaw = player.getYaw();
+                    float yawDiff = newYaw - currentYaw;
+                    // Normalize yaw difference
+                    while (yawDiff > 180.0f) yawDiff -= 360.0f;
+                    while (yawDiff < -180.0f) yawDiff += 360.0f;
+                    player.rotate(yawDiff * 10.0f * deltaTime);  // Smooth rotation
+                }
             }
         }
 
@@ -196,8 +208,18 @@ void Application::run() {
         // Update camera and player based on mode
         if (input.isThirdPersonMode()) {
             camera.setThirdPersonTarget(player.getFocusPoint());
-            camera.updateThirdPerson();
+            camera.updateThirdPerson(deltaTime);
             renderer.getSceneManager().updatePlayerTransform(player.getModelMatrix());
+
+            // Dynamic FOV: widen during sprinting for sense of speed
+            float targetFov = 45.0f;  // Base FOV
+            if (input.isSprinting() && glm::length(desiredVelocity) > 0.1f) {
+                targetFov = 55.0f;  // Sprint FOV
+            }
+            camera.setTargetFov(targetFov);
+
+            // Update camera occlusion (fade objects between camera and player)
+            updateCameraOcclusion(deltaTime);
         }
 
         camera.setAspectRatio(static_cast<float>(renderer.getWidth()) / static_cast<float>(renderer.getHeight()));
@@ -389,8 +411,11 @@ void Application::processEvents() {
     }
 
     // Handle camera mode switch initialization
-    if (input.wasModeSwitchedThisFrame() && input.isThirdPersonMode()) {
-        camera.orbitPitch(15.0f);
+    if (input.wasModeSwitchedThisFrame()) {
+        camera.resetSmoothing();
+        if (input.isThirdPersonMode()) {
+            camera.orbitPitch(15.0f);
+        }
     }
 }
 
@@ -565,6 +590,43 @@ void Application::initFlag() {
     renderer.uploadFlagClothMesh();
 
     SDL_Log("Flag initialized with %dx%d cloth simulation", clothWidth, clothHeight);
+}
+
+void Application::updateCameraOcclusion(float deltaTime) {
+    // Only in third-person mode
+    if (!input.isThirdPersonMode()) return;
+
+    // Raycast from player focus point to camera position
+    glm::vec3 playerFocus = player.getFocusPoint();
+    glm::vec3 cameraPos = camera.getPosition();
+
+    std::vector<RaycastHit> hits = physics.castRayAllHits(playerFocus, cameraPos);
+
+    // Build set of currently occluding body IDs
+    std::unordered_set<PhysicsBodyID> currentlyOccluding;
+    for (const auto& hit : hits) {
+        currentlyOccluding.insert(hit.bodyId);
+    }
+
+    // Update opacities for all scene objects
+    auto& sceneObjects = renderer.getSceneManager().getSceneObjects();
+    for (size_t i = 0; i < scenePhysicsBodies.size() && i < sceneObjects.size(); i++) {
+        PhysicsBodyID bodyID = scenePhysicsBodies[i];
+        if (bodyID == INVALID_BODY_ID) continue;
+
+        // Skip player (handled separately)
+        if (i == renderer.getSceneManager().getPlayerObjectIndex()) continue;
+
+        bool isOccluding = currentlyOccluding.count(bodyID) > 0;
+        float targetOpacity = isOccluding ? occludedOpacity : 1.0f;
+
+        // Smooth fade
+        float fadeFactor = 1.0f - std::exp(-occlusionFadeSpeed * deltaTime);
+        sceneObjects[i].opacity += (targetOpacity - sceneObjects[i].opacity) * fadeFactor;
+    }
+
+    // Update tracking set
+    occludingBodies = std::move(currentlyOccluding);
 }
 
 void Application::updateFlag(float deltaTime) {

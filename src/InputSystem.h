@@ -69,6 +69,10 @@ public:
     // Access to raw keyboard state for special cases
     bool isKeyPressed(SDL_Scancode scancode) const;
 
+    // Orientation lock input (for strafe mode)
+    bool wantsOrientationLockToggle() const { return orientationLockToggleRequested; }
+    bool isOrientationLockHeld() const { return orientationLockHeld; }
+
     // Settings
     void setMoveSpeed(float speed) { moveSpeed = speed; }
     void setRotateSpeed(float speed) { rotateSpeed = speed; }
@@ -129,6 +133,12 @@ private:
 
     // Time scale input
     float timeScaleInput = 0.0f;
+
+    // Orientation lock input state
+    bool orientationLockToggleRequested = false;
+    bool orientationLockHeld = false;
+    bool keyboardLockHeld = false;
+    bool gamepadLockToggleHeld = false;
 
     // Input settings
     float moveSpeed = 3.0f;
