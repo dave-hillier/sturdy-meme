@@ -355,6 +355,80 @@ std::optional<GLTFSkinnedLoadResult> loadSkinned(const std::string& path) {
 
     GLTFSkinnedLoadResult result;
 
+    // Load skeleton data FIRST (needed to bind non-skinned primitives to head bone)
+    if (!asset->skins.empty()) {
+        const auto& skin = asset->skins[0];
+
+        result.skeleton.joints.reserve(skin.joints.size());
+
+        for (size_t i = 0; i < skin.joints.size(); ++i) {
+            size_t nodeIndex = skin.joints[i];
+            const auto& node = asset->nodes[nodeIndex];
+
+            Joint joint;
+            joint.name = std::string(node.name);
+            joint.parentIndex = -1;
+
+            // Get inverse bind matrix
+            if (skin.inverseBindMatrices.has_value()) {
+                const auto& ibmAccessor = asset->accessors[skin.inverseBindMatrices.value()];
+                std::vector<glm::mat4> ibms(ibmAccessor.count);
+                fastgltf::copyFromAccessor<glm::mat4>(asset.get(), ibmAccessor, ibms.data());
+                if (i < ibms.size()) {
+                    joint.inverseBindMatrix = ibms[i];
+                } else {
+                    joint.inverseBindMatrix = glm::mat4(1.0f);
+                }
+            } else {
+                joint.inverseBindMatrix = glm::mat4(1.0f);
+            }
+
+            // Get local transform
+            std::visit(fastgltf::visitor{
+                [&](const fastgltf::TRS& trs) {
+                    glm::mat4 T = glm::translate(glm::mat4(1.0f),
+                        glm::vec3(trs.translation[0], trs.translation[1], trs.translation[2]));
+                    glm::quat R(trs.rotation[3], trs.rotation[0], trs.rotation[1], trs.rotation[2]);
+                    glm::mat4 S = glm::scale(glm::mat4(1.0f),
+                        glm::vec3(trs.scale[0], trs.scale[1], trs.scale[2]));
+                    joint.localTransform = T * glm::mat4_cast(R) * S;
+                },
+                [&](const fastgltf::math::fmat4x4& matrix) {
+                    joint.localTransform = toMat4({
+                        matrix[0][0], matrix[0][1], matrix[0][2], matrix[0][3],
+                        matrix[1][0], matrix[1][1], matrix[1][2], matrix[1][3],
+                        matrix[2][0], matrix[2][1], matrix[2][2], matrix[2][3],
+                        matrix[3][0], matrix[3][1], matrix[3][2], matrix[3][3]
+                    });
+                }
+            }, node.transform);
+
+            result.skeleton.joints.push_back(joint);
+        }
+
+        // Compute parent indices by traversing node hierarchy
+        for (size_t i = 0; i < skin.joints.size(); ++i) {
+            size_t nodeIndex = skin.joints[i];
+
+            for (size_t parentNodeIdx = 0; parentNodeIdx < asset->nodes.size(); ++parentNodeIdx) {
+                const auto& parentNode = asset->nodes[parentNodeIdx];
+                for (size_t childIdx : parentNode.children) {
+                    if (childIdx == nodeIndex) {
+                        for (size_t j = 0; j < skin.joints.size(); ++j) {
+                            if (skin.joints[j] == parentNodeIdx) {
+                                result.skeleton.joints[i].parentIndex = static_cast<int32_t>(j);
+                                break;
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
+        SDL_Log("GLTFLoader: Loaded skinned mesh with %zu joints", result.skeleton.joints.size());
+    }
+
     // Process meshes - for now, combine all primitives into one mesh
     for (const auto& mesh : asset->meshes) {
         for (const auto& primitive : mesh.primitives) {
@@ -391,9 +465,11 @@ std::optional<GLTFSkinnedLoadResult> loadSkinned(const std::string& path) {
             }
 
             // Initialize all vertices with default values
+            // Non-skinned primitives (like hair) use bone 0 (root) with a negative weight marker
+            // The negative weight signals applySkinning to use global transform only (no inverse bind matrix)
             for (size_t i = 0; i < vertexCount; ++i) {
                 result.vertices[vertexOffset + i].boneIndices = glm::uvec4(0);
-                result.vertices[vertexOffset + i].boneWeights = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f);
+                result.vertices[vertexOffset + i].boneWeights = glm::vec4(-1.0f, 0.0f, 0.0f, 0.0f);  // Negative = no IBM
                 result.vertices[vertexOffset + i].color = baseColor;
             }
 
@@ -546,80 +622,6 @@ std::optional<GLTFSkinnedLoadResult> loadSkinned(const std::string& path) {
                 v.tangent = glm::vec4(glm::normalize(glm::cross(up, v.normal)), 1.0f);
             }
         }
-    }
-
-    // Load skeleton data (joints and inverse bind matrices)
-    if (!asset->skins.empty()) {
-        const auto& skin = asset->skins[0];
-
-        result.skeleton.joints.reserve(skin.joints.size());
-
-        for (size_t i = 0; i < skin.joints.size(); ++i) {
-            size_t nodeIndex = skin.joints[i];
-            const auto& node = asset->nodes[nodeIndex];
-
-            Joint joint;
-            joint.name = std::string(node.name);
-            joint.parentIndex = -1;
-
-            // Get inverse bind matrix
-            if (skin.inverseBindMatrices.has_value()) {
-                const auto& ibmAccessor = asset->accessors[skin.inverseBindMatrices.value()];
-                std::vector<glm::mat4> ibms(ibmAccessor.count);
-                fastgltf::copyFromAccessor<glm::mat4>(asset.get(), ibmAccessor, ibms.data());
-                if (i < ibms.size()) {
-                    joint.inverseBindMatrix = ibms[i];
-                } else {
-                    joint.inverseBindMatrix = glm::mat4(1.0f);
-                }
-            } else {
-                joint.inverseBindMatrix = glm::mat4(1.0f);
-            }
-
-            // Get local transform
-            std::visit(fastgltf::visitor{
-                [&](const fastgltf::TRS& trs) {
-                    glm::mat4 T = glm::translate(glm::mat4(1.0f),
-                        glm::vec3(trs.translation[0], trs.translation[1], trs.translation[2]));
-                    glm::quat R(trs.rotation[3], trs.rotation[0], trs.rotation[1], trs.rotation[2]);
-                    glm::mat4 S = glm::scale(glm::mat4(1.0f),
-                        glm::vec3(trs.scale[0], trs.scale[1], trs.scale[2]));
-                    joint.localTransform = T * glm::mat4_cast(R) * S;
-                },
-                [&](const fastgltf::math::fmat4x4& matrix) {
-                    joint.localTransform = toMat4({
-                        matrix[0][0], matrix[0][1], matrix[0][2], matrix[0][3],
-                        matrix[1][0], matrix[1][1], matrix[1][2], matrix[1][3],
-                        matrix[2][0], matrix[2][1], matrix[2][2], matrix[2][3],
-                        matrix[3][0], matrix[3][1], matrix[3][2], matrix[3][3]
-                    });
-                }
-            }, node.transform);
-
-            result.skeleton.joints.push_back(joint);
-        }
-
-        // Compute parent indices by traversing node hierarchy
-        for (size_t i = 0; i < skin.joints.size(); ++i) {
-            size_t nodeIndex = skin.joints[i];
-
-            for (size_t parentNodeIdx = 0; parentNodeIdx < asset->nodes.size(); ++parentNodeIdx) {
-                const auto& parentNode = asset->nodes[parentNodeIdx];
-                for (size_t childIdx : parentNode.children) {
-                    if (childIdx == nodeIndex) {
-                        for (size_t j = 0; j < skin.joints.size(); ++j) {
-                            if (skin.joints[j] == parentNodeIdx) {
-                                result.skeleton.joints[i].parentIndex = static_cast<int32_t>(j);
-                                break;
-                            }
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-
-        SDL_Log("GLTFLoader: Loaded skinned mesh with %zu joints", result.skeleton.joints.size());
     }
 
     // Load animations

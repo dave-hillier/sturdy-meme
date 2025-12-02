@@ -53,18 +53,10 @@ bool SceneBuilder::createMeshes(const InitInfo& info) {
     // Flag cloth mesh will be initialized later by ClothSimulation
     // (it's dynamic and will be updated each frame)
 
-    // Try to load animated character from glTF
-    std::string characterPath = info.resourcePath + "/assets/characters/character_animated.glb";
-    if (animatedCharacter.load(characterPath, info.allocator, info.device, info.commandPool, info.graphicsQueue)) {
-        hasAnimatedCharacter = true;
-        SDL_Log("SceneBuilder: Loaded animated character with %zu animations",
-                animatedCharacter.getAnimationCount());
-        // Start with idle animation
-        animatedCharacter.playAnimation("Idle");
-    } else {
-        SDL_Log("SceneBuilder: Character model not found at %s, using capsule fallback", characterPath.c_str());
-        hasAnimatedCharacter = false;
-    }
+    // Animated character disabled - using capsule fallback
+    // TODO: Re-enable when glTF character animation issues are resolved
+    hasAnimatedCharacter = false;
+    SDL_Log("SceneBuilder: Using capsule for player character");
 
     return true;
 }
@@ -316,10 +308,15 @@ void SceneBuilder::updatePlayerTransform(const glm::mat4& transform) {
             glm::vec3 pos = glm::vec3(transform[3]);
             pos.y -= 0.9f;  // CAPSULE_HEIGHT * 0.5 = 1.8 * 0.5
 
-            // Extract Y rotation from the transform matrix
-            float yRotation = atan2(transform[0][2], transform[0][0]);
+            // Use the player transform's rotation directly, just adjust position and add model corrections
+            glm::mat4 result = transform;
+            result[3] = glm::vec4(pos, 1.0f);
 
-            sceneObjects[playerObjectIndex].transform = buildCharacterTransform(pos, yRotation);
+            // Apply model-specific rotation (stand upright) and scale
+            result = glm::rotate(result, glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+            result = glm::scale(result, glm::vec3(CHARACTER_SCALE));
+
+            sceneObjects[playerObjectIndex].transform = result;
         } else {
             sceneObjects[playerObjectIndex].transform = transform;
         }

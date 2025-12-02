@@ -184,29 +184,42 @@ void AnimatedCharacter::computeBoneMatrices(std::vector<glm::mat4>& outBoneMatri
 }
 
 void AnimatedCharacter::applySkinning() {
-    // Compute bone matrices
+    // Compute bone matrices (globalTransform * inverseBindMatrix)
     std::vector<glm::mat4> boneMatrices;
     computeBoneMatrices(boneMatrices);
+
+    // Also compute global transforms alone (for non-skinned primitives)
+    std::vector<glm::mat4> globalTransforms;
+    skeleton.computeGlobalTransforms(globalTransforms);
 
     // Apply skinning to each vertex
     for (size_t i = 0; i < bindPoseVertices.size(); ++i) {
         const SkinnedVertex& bindVert = bindPoseVertices[i];
         Vertex& skinnedVert = skinnedVertices[i];
 
-        // Build skin matrix from weighted bone matrices
-        glm::mat4 skinMatrix(0.0f);
+        glm::mat4 skinMatrix;
 
-        if (bindVert.boneIndices.x < boneMatrices.size()) {
-            skinMatrix += boneMatrices[bindVert.boneIndices.x] * bindVert.boneWeights.x;
-        }
-        if (bindVert.boneIndices.y < boneMatrices.size()) {
-            skinMatrix += boneMatrices[bindVert.boneIndices.y] * bindVert.boneWeights.y;
-        }
-        if (bindVert.boneIndices.z < boneMatrices.size()) {
-            skinMatrix += boneMatrices[bindVert.boneIndices.z] * bindVert.boneWeights.z;
-        }
-        if (bindVert.boneIndices.w < boneMatrices.size()) {
-            skinMatrix += boneMatrices[bindVert.boneIndices.w] * bindVert.boneWeights.w;
+        // Negative weight on x indicates non-skinned primitive - no transformation needed
+        // These vertices are already in model space and should stay there
+        if (bindVert.boneWeights.x < 0.0f) {
+            // Identity matrix - keep vertices in their original position
+            skinMatrix = glm::mat4(1.0f);
+        } else {
+            // Build skin matrix from weighted bone matrices (normal skinning path)
+            skinMatrix = glm::mat4(0.0f);
+
+            if (bindVert.boneIndices.x < boneMatrices.size()) {
+                skinMatrix += boneMatrices[bindVert.boneIndices.x] * bindVert.boneWeights.x;
+            }
+            if (bindVert.boneIndices.y < boneMatrices.size()) {
+                skinMatrix += boneMatrices[bindVert.boneIndices.y] * bindVert.boneWeights.y;
+            }
+            if (bindVert.boneIndices.z < boneMatrices.size()) {
+                skinMatrix += boneMatrices[bindVert.boneIndices.z] * bindVert.boneWeights.z;
+            }
+            if (bindVert.boneIndices.w < boneMatrices.size()) {
+                skinMatrix += boneMatrices[bindVert.boneIndices.w] * bindVert.boneWeights.w;
+            }
         }
 
         // Transform position
