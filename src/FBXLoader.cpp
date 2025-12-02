@@ -189,11 +189,16 @@ std::optional<GLTFSkinnedLoadResult> loadSkinned(const std::string& path) {
     }
 
     // Build skeleton from collected bones
-    result.skeleton.joints.reserve(boneObjects.size());
+    // We'll fill in the transforms later from cluster data
+    result.skeleton.joints.resize(boneObjects.size());
+
+    // Store global bind pose transforms (will compute local from these)
+    std::vector<glm::mat4> globalBindPose(boneObjects.size(), glm::mat4(1.0f));
+
     for (size_t i = 0; i < boneObjects.size(); ++i) {
         const ofbx::Object* bone = boneObjects[i];
 
-        Joint joint;
+        Joint& joint = result.skeleton.joints[i];
         joint.name = normalizeBoneName(bone->name);
         joint.parentIndex = -1;
 
@@ -206,13 +211,9 @@ std::optional<GLTFSkinnedLoadResult> loadSkinned(const std::string& path) {
             }
         }
 
-        // Get local transform
-        joint.localTransform = convertMatrix(bone->getLocalTransform());
-
-        // Inverse bind matrix will be set when processing skin clusters
+        // Initialize with identity - will be set from cluster data
+        joint.localTransform = glm::mat4(1.0f);
         joint.inverseBindMatrix = glm::mat4(1.0f);
-
-        result.skeleton.joints.push_back(joint);
     }
 
     SDL_Log("FBXLoader: Found %zu bones", boneObjects.size());
@@ -223,7 +224,6 @@ std::optional<GLTFSkinnedLoadResult> loadSkinned(const std::string& path) {
         const ofbx::GeometryData& geomData = mesh->getGeometryData();
 
         if (!geomData.hasVertices()) {
-            SDL_Log("FBXLoader: Mesh %d has no vertices, skipping", meshIdx);
             continue;
         }
 
@@ -235,7 +235,6 @@ std::optional<GLTFSkinnedLoadResult> loadSkinned(const std::string& path) {
 
         int partitionCount = geomData.getPartitionCount();
         if (partitionCount == 0) {
-            SDL_Log("FBXLoader: Mesh %d has no partitions, skipping", meshIdx);
             continue;
         }
 
@@ -257,10 +256,12 @@ std::optional<GLTFSkinnedLoadResult> loadSkinned(const std::string& path) {
 
                 int32_t boneIndex = boneIt->second;
 
-                // Get inverse bind matrix from cluster
+                // Get bind pose transforms from cluster
+                // TransformLinkMatrix is the global transform of the bone at bind time
                 ofbx::DMatrix transformLink = cluster->getTransformLinkMatrix();
-                result.skeleton.joints[boneIndex].inverseBindMatrix =
-                    glm::inverse(convertMatrix(transformLink));
+                glm::mat4 globalBind = convertMatrix(transformLink);
+                globalBindPose[boneIndex] = globalBind;
+                result.skeleton.joints[boneIndex].inverseBindMatrix = glm::inverse(globalBind);
 
                 // Get weights
                 int weightCount = cluster->getIndicesCount();
@@ -294,20 +295,35 @@ std::optional<GLTFSkinnedLoadResult> loadSkinned(const std::string& path) {
             for (int polyIdx = 0; polyIdx < partition.polygon_count; ++polyIdx) {
                 const ofbx::GeometryPartition::Polygon& polygon = partition.polygons[polyIdx];
 
-                // Triangulate the polygon
-                std::vector<int> triIndices(polygon.vertex_count);
+                // Allocate enough space for triangulated indices
+                // max_polygon_triangles gives us the max triangles, each needs 3 indices
+                std::vector<int> triIndices(partition.max_polygon_triangles * 3);
                 ofbx::u32 numTriangles = ofbx::triangulate(geomData, polygon, triIndices.data());
 
+                // triangulate returns the number of indices, not triangles
+                // For a quad it returns 6 (2 triangles * 3 vertices each)
+                ofbx::u32 numIndices = numTriangles;
+                ofbx::u32 numTris = numIndices / 3;
+
                 // Each triangle has 3 vertices
-                for (ofbx::u32 tri = 0; tri < numTriangles; ++tri) {
+                for (ofbx::u32 tri = 0; tri < numTris; ++tri) {
                     for (int v = 0; v < 3; ++v) {
-                        int vertexIndex = polygon.from_vertex + triIndices[tri * 3 + v];
+                        // triIndices already contains absolute vertex indices (from_vertex is added by triangulate)
+                        int vertexIndex = triIndices[tri * 3 + v];
+
+                        // Bounds check
+                        if (vertexIndex < 0 || vertexIndex >= positions.count) {
+                            SDL_Log("FBXLoader: Invalid vertex index %d (max %d)", vertexIndex, positions.count);
+                            continue;
+                        }
 
                         SkinnedVertex vertex{};
 
-                        // Position - get the actual position index
+                        // Position - use the .get() accessor which handles indexed vs direct
+                        vertex.position = convertVec3(positions.get(vertexIndex));
+
+                        // Get position index for bone weight lookup
                         int posIdx = positions.indices ? positions.indices[vertexIndex] : vertexIndex;
-                        vertex.position = convertVec3(positions.values[posIdx]);
 
                         // Normal
                         if (normals.values && normals.count > 0) {
@@ -365,14 +381,25 @@ std::optional<GLTFSkinnedLoadResult> loadSkinned(const std::string& path) {
                 }
             }
         }
-
-        SDL_Log("FBXLoader: Processed mesh %d, total vertices so far: %zu",
-                meshIdx, result.vertices.size());
     }
 
     if (result.vertices.empty()) {
         SDL_Log("FBXLoader: No vertices loaded from %s", path.c_str());
         return std::nullopt;
+    }
+
+    // Compute local transforms from global bind poses
+    // Local = Parent^-1 * Global
+    for (size_t i = 0; i < result.skeleton.joints.size(); ++i) {
+        Joint& joint = result.skeleton.joints[i];
+        if (joint.parentIndex >= 0 && joint.parentIndex < static_cast<int32_t>(globalBindPose.size())) {
+            glm::mat4 parentGlobal = globalBindPose[joint.parentIndex];
+            glm::mat4 parentInverse = glm::inverse(parentGlobal);
+            joint.localTransform = parentInverse * globalBindPose[i];
+        } else {
+            // Root bone - global is local
+            joint.localTransform = globalBindPose[i];
+        }
     }
 
     // Calculate tangents if not present

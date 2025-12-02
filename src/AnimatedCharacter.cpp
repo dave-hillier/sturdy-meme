@@ -1,11 +1,27 @@
 #include "AnimatedCharacter.h"
 #include "GLTFLoader.h"
+#include "FBXLoader.h"
 #include <SDL3/SDL_log.h>
 #include <glm/gtc/matrix_transform.hpp>
 
+namespace {
+bool endsWith(const std::string& str, const std::string& suffix) {
+    if (suffix.size() > str.size()) return false;
+    return str.compare(str.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+}
+
 bool AnimatedCharacter::load(const std::string& path, VmaAllocator allocator, VkDevice device,
                               VkCommandPool commandPool, VkQueue queue) {
-    auto result = GLTFLoader::loadSkinned(path);
+    std::optional<GLTFSkinnedLoadResult> result;
+
+    // Detect file format and use appropriate loader
+    if (endsWith(path, ".fbx") || endsWith(path, ".FBX")) {
+        result = FBXLoader::loadSkinned(path);
+    } else {
+        result = GLTFLoader::loadSkinned(path);
+    }
+
     if (!result) {
         SDL_Log("AnimatedCharacter: Failed to load %s", path.c_str());
         return false;
@@ -23,19 +39,28 @@ bool AnimatedCharacter::load(const std::string& path, VmaAllocator allocator, Vk
         bindPoseLocalTransforms[i] = skeleton.joints[i].localTransform;
     }
 
-    // Initialize skinned vertices (same count as bind pose)
-    skinnedVertices.resize(bindPoseVertices.size());
-    for (size_t i = 0; i < bindPoseVertices.size(); ++i) {
-        skinnedVertices[i].position = bindPoseVertices[i].position;
-        skinnedVertices[i].normal = bindPoseVertices[i].normal;
-        skinnedVertices[i].texCoord = bindPoseVertices[i].texCoord;
-        skinnedVertices[i].tangent = bindPoseVertices[i].tangent;
-        skinnedVertices[i].color = bindPoseVertices[i].color;
-    }
+    // GPU skinning: Upload skinned mesh with original bind pose vertices
+    // The GPU will apply bone matrices in the vertex shader
+    SkinnedMeshData meshData;
+    meshData.vertices = bindPoseVertices;
+    meshData.indices = indices;
+    meshData.skeleton = skeleton;
+    skinnedMesh.setData(meshData);
+    skinnedMesh.upload(allocator, device, commandPool, queue);
 
-    // Create render mesh
-    renderMesh.setCustomGeometry(skinnedVertices, indices);
-    renderMesh.upload(allocator, device, commandPool, queue);
+    // CPU skinning fallback (kept for compatibility, but not used with GPU skinning)
+    if (!useGPUSkinning) {
+        skinnedVertices.resize(bindPoseVertices.size());
+        for (size_t i = 0; i < bindPoseVertices.size(); ++i) {
+            skinnedVertices[i].position = bindPoseVertices[i].position;
+            skinnedVertices[i].normal = bindPoseVertices[i].normal;
+            skinnedVertices[i].texCoord = bindPoseVertices[i].texCoord;
+            skinnedVertices[i].tangent = bindPoseVertices[i].tangent;
+            skinnedVertices[i].color = bindPoseVertices[i].color;
+        }
+        renderMesh.setCustomGeometry(skinnedVertices, indices);
+        renderMesh.upload(allocator, device, commandPool, queue);
+    }
 
     // Set up default animation (play first one if available)
     if (!animations.empty()) {
@@ -99,6 +124,7 @@ bool AnimatedCharacter::load(const std::string& path, VmaAllocator allocator, Vk
 }
 
 void AnimatedCharacter::destroy(VmaAllocator allocator) {
+    skinnedMesh.destroy(allocator);
     renderMesh.destroy(allocator);
     bindPoseVertices.clear();
     indices.clear();
@@ -164,10 +190,14 @@ void AnimatedCharacter::update(float deltaTime, VmaAllocator allocator, VkDevice
         animationPlayer.applyToSkeleton(skeleton);
     }
 
-    // Apply CPU skinning
-    applySkinning();
+    // GPU skinning: Bone matrices are computed and uploaded by Renderer each frame
+    // No mesh re-upload needed - the vertex shader applies skinning
+    if (useGPUSkinning) {
+        return;  // Bone matrices updated externally via computeBoneMatrices()
+    }
 
-    // Re-upload mesh
+    // CPU skinning fallback (deprecated path)
+    applySkinning();
     uploadMesh(allocator, device, commandPool, queue);
 }
 

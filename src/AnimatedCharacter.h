@@ -11,7 +11,7 @@
 
 // High-level animated character class
 // Combines: skinned mesh, skeleton, animations, and animation player
-// Provides CPU skinning for testing (GPU skinning can be added later)
+// Uses GPU skinning for performance (bone matrices uploaded to UBO each frame)
 class AnimatedCharacter {
 public:
     AnimatedCharacter() = default;
@@ -37,9 +37,16 @@ public:
                 VkCommandPool commandPool, VkQueue queue,
                 float movementSpeed = 0.0f, bool isGrounded = true, bool isJumping = false);
 
-    // Get the skinned mesh for rendering (uses standard Vertex format)
+    // Get the skinned mesh for rendering (uses SkinnedVertex format for GPU skinning)
+    SkinnedMesh& getSkinnedMesh() { return skinnedMesh; }
+    const SkinnedMesh& getSkinnedMesh() const { return skinnedMesh; }
+
+    // Legacy: Get render mesh for CPU skinning fallback
     Mesh& getMesh() { return renderMesh; }
     const Mesh& getMesh() const { return renderMesh; }
+
+    // Check if GPU skinning is enabled
+    bool isGPUSkinningEnabled() const { return useGPUSkinning; }
 
     // Get skeleton for external use
     const Skeleton& getSkeleton() const { return skeleton; }
@@ -77,10 +84,12 @@ private:
     AnimationStateMachine stateMachine;
     bool useStateMachine = false;  // Set true after state machine is initialized
 
-    // Skinned output vertices (standard Vertex format for rendering)
-    std::vector<Vertex> skinnedVertices;
+    // GPU skinning: SkinnedMesh keeps original vertex data, bone matrices are updated each frame
+    SkinnedMesh skinnedMesh;
+    bool useGPUSkinning = true;  // Enable GPU skinning by default
 
-    // Mesh for rendering (uses standard Vertex format, compatible with existing pipeline)
+    // CPU skinning fallback (deprecated, kept for compatibility)
+    std::vector<Vertex> skinnedVertices;
     Mesh renderMesh;
 
     bool loaded = false;

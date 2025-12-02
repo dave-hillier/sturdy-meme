@@ -33,6 +33,7 @@
 #include "UBOs.h"
 #include "RockSystem.h"
 #include "CloudShadowSystem.h"
+#include "SkinnedMesh.h"
 
 struct PushConstants {
     glm::mat4 model;
@@ -222,6 +223,15 @@ private:
     VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
     VkPipeline graphicsPipeline = VK_NULL_HANDLE;
 
+    // Skinned mesh rendering (GPU skinning)
+    VkDescriptorSetLayout skinnedDescriptorSetLayout = VK_NULL_HANDLE;
+    VkPipelineLayout skinnedPipelineLayout = VK_NULL_HANDLE;
+    VkPipeline skinnedGraphicsPipeline = VK_NULL_HANDLE;
+    std::vector<VkDescriptorSet> skinnedDescriptorSets;
+    std::vector<VkBuffer> boneMatricesBuffers;
+    std::vector<VmaAllocation> boneMatricesAllocations;
+    std::vector<void*> boneMatricesMapped;
+
     SkySystem skySystem;
     GrassSystem grassSystem;
     WindSystem windSystem;
@@ -307,4 +317,12 @@ private:
 
     bool createLightBuffers();
     void updateLightBuffer(uint32_t currentImage, const Camera& camera);
+
+    // Skinned mesh rendering
+    bool createSkinnedDescriptorSetLayout();
+    bool createSkinnedGraphicsPipeline();
+    bool createBoneMatricesBuffers();
+    bool createSkinnedDescriptorSets();
+    void updateBoneMatrices(uint32_t currentImage);
+    void recordSkinnedCharacter(VkCommandBuffer cmd, uint32_t frameIndex);
 };

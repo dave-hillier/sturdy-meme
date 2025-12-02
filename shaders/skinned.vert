@@ -40,11 +40,13 @@ layout(location = 2) in vec2 inTexCoord;
 layout(location = 3) in vec4 inTangent;
 layout(location = 4) in uvec4 inBoneIndices;
 layout(location = 5) in vec4 inBoneWeights;
+layout(location = 6) in vec4 inColor;
 
 layout(location = 0) out vec3 fragNormal;
 layout(location = 1) out vec2 fragTexCoord;
 layout(location = 2) out vec3 fragWorldPos;
 layout(location = 3) out vec4 fragTangent;
+layout(location = 4) out vec4 fragColor;
 
 void main() {
     // Compute skinned position and normal
@@ -65,4 +67,5 @@ void main() {
     fragWorldPos = worldPos.xyz;
     // Transform tangent direction by model matrix, preserve handedness in w
     fragTangent = vec4(mat3(push.model) * skinnedTangent, inTangent.w);
+    fragColor = inColor;
 }

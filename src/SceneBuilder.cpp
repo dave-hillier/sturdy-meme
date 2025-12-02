@@ -53,10 +53,15 @@ bool SceneBuilder::createMeshes(const InitInfo& info) {
     // Flag cloth mesh will be initialized later by ClothSimulation
     // (it's dynamic and will be updated each frame)
 
-    // Animated character disabled - using capsule fallback
-    // TODO: Re-enable when glTF character animation issues are resolved
-    hasAnimatedCharacter = false;
-    SDL_Log("SceneBuilder: Using capsule for player character");
+    // Load animated character from FBX
+    std::string characterPath = info.resourcePath + "/assets/characters/fbx/Y Bot.fbx";
+    if (animatedCharacter.load(characterPath, info.allocator, info.device, info.commandPool, info.graphicsQueue)) {
+        hasAnimatedCharacter = true;
+        SDL_Log("SceneBuilder: Loaded FBX animated character");
+    } else {
+        hasAnimatedCharacter = false;
+        SDL_Log("SceneBuilder: Failed to load FBX character, using capsule fallback");
+    }
 
     return true;
 }
@@ -292,11 +297,9 @@ glm::mat4 SceneBuilder::buildCharacterTransform(const glm::vec3& position, float
     // Character model transform:
     // 1. Translate to world position
     // 2. Apply Y rotation (facing direction)
-    // 3. Rotate -90 degrees around X to stand upright (model exported lying down)
-    // 4. Scale up (model is very small ~2cm)
+    // 3. Scale down (Mixamo FBX uses cm, convert to meters)
     glm::mat4 transform = glm::translate(glm::mat4(1.0f), position);
     transform = glm::rotate(transform, yRotation, glm::vec3(0.0f, 1.0f, 0.0f));
-    transform = glm::rotate(transform, glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
     transform = glm::scale(transform, glm::vec3(CHARACTER_SCALE));
     return transform;
 }
@@ -312,8 +315,7 @@ void SceneBuilder::updatePlayerTransform(const glm::mat4& transform) {
             glm::mat4 result = transform;
             result[3] = glm::vec4(pos, 1.0f);
 
-            // Apply model-specific rotation (stand upright) and scale
-            result = glm::rotate(result, glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+            // Apply scale (Mixamo FBX uses cm, convert to meters)
             result = glm::scale(result, glm::vec3(CHARACTER_SCALE));
 
             sceneObjects[playerObjectIndex].transform = result;

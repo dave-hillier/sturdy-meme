@@ -62,6 +62,11 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
 
     if (!createGraphicsPipeline()) return false;
 
+    // Initialize skinned mesh rendering (GPU skinning for animated characters)
+    if (!createSkinnedDescriptorSetLayout()) return false;
+    if (!createSkinnedGraphicsPipeline()) return false;
+    if (!createBoneMatricesBuffers()) return false;
+
     // Initialize sky system (needs HDR render pass from postProcessSystem)
     SkySystem::InitInfo skyInfo{};
     skyInfo.device = device;
@@ -125,6 +130,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     if (!volumetricSnowSystem.init(volumetricSnowInfo)) return false;
 
     if (!createDescriptorSets()) return false;
+    if (!createSkinnedDescriptorSets()) return false;
 
     // Initialize grass system using HDR render pass
     GrassSystem::InitInfo grassInfo{};
@@ -510,6 +516,22 @@ void Renderer::shutdown() {
         vkDestroyPipeline(device, graphicsPipeline, nullptr);
         vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
         vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+
+        // Clean up skinned mesh resources
+        if (skinnedGraphicsPipeline != VK_NULL_HANDLE) {
+            vkDestroyPipeline(device, skinnedGraphicsPipeline, nullptr);
+        }
+        if (skinnedPipelineLayout != VK_NULL_HANDLE) {
+            vkDestroyPipelineLayout(device, skinnedPipelineLayout, nullptr);
+        }
+        if (skinnedDescriptorSetLayout != VK_NULL_HANDLE) {
+            vkDestroyDescriptorSetLayout(device, skinnedDescriptorSetLayout, nullptr);
+        }
+        for (size_t i = 0; i < boneMatricesBuffers.size(); ++i) {
+            if (boneMatricesBuffers[i] != VK_NULL_HANDLE) {
+                vmaDestroyBuffer(allocator, boneMatricesBuffers[i], boneMatricesAllocations[i]);
+            }
+        }
 
         // Shadow system cleanup
         shadowSystem.destroy();
@@ -1196,6 +1218,9 @@ void Renderer::render(const Camera& camera) {
     // Update uniform buffer data
     updateUniformBuffer(currentFrame, camera);
 
+    // Update bone matrices for GPU skinning
+    updateBoneMatrices(currentFrame);
+
     // Calculate frame timing
     static auto startTime = std::chrono::high_resolution_clock::now();
     static auto lastTime = startTime;
@@ -1526,9 +1551,21 @@ void Renderer::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float 
     };
 
     // Combine scene objects and rock objects for shadow rendering
+    // Skip player character if using GPU skinning (skinned shadow pass not implemented yet)
     std::vector<Renderable> allObjects;
-    allObjects.reserve(sceneManager.getSceneObjects().size() + rockSystem.getSceneObjects().size());
-    allObjects.insert(allObjects.end(), sceneManager.getSceneObjects().begin(), sceneManager.getSceneObjects().end());
+    const auto& sceneObjects = sceneManager.getSceneObjects();
+    size_t playerIndex = sceneManager.getSceneBuilder().getPlayerObjectIndex();
+    bool hasCharacter = sceneManager.getSceneBuilder().hasCharacter();
+    bool useGPUSkinning = hasCharacter && sceneManager.getSceneBuilder().getAnimatedCharacter().isGPUSkinningEnabled();
+
+    allObjects.reserve(sceneObjects.size() + rockSystem.getSceneObjects().size());
+    for (size_t i = 0; i < sceneObjects.size(); ++i) {
+        // Skip player character if using GPU skinning
+        if (useGPUSkinning && i == playerIndex && hasCharacter) {
+            continue;
+        }
+        allObjects.push_back(sceneObjects[i]);
+    }
     allObjects.insert(allObjects.end(), rockSystem.getSceneObjects().begin(), rockSystem.getSceneObjects().end());
 
     shadowSystem.recordShadowPass(cmd, frameIndex, descriptorSets[frameIndex],
@@ -1562,7 +1599,18 @@ void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
     };
 
     // Render scene manager objects
-    for (const auto& obj : sceneManager.getSceneObjects()) {
+    const auto& sceneObjects = sceneManager.getSceneObjects();
+    size_t playerIndex = sceneManager.getSceneBuilder().getPlayerObjectIndex();
+    bool hasCharacter = sceneManager.getSceneBuilder().hasCharacter();
+    bool useGPUSkinning = hasCharacter && sceneManager.getSceneBuilder().getAnimatedCharacter().isGPUSkinningEnabled();
+
+    for (size_t i = 0; i < sceneObjects.size(); ++i) {
+        // Skip player character if using GPU skinning (rendered separately)
+        if (useGPUSkinning && i == playerIndex && hasCharacter) {
+            continue;
+        }
+
+        const auto& obj = sceneObjects[i];
         VkDescriptorSet* descSet;
         if (obj.texture == &sceneManager.getSceneBuilder().getGroundTexture()) {
             descSet = &groundDescriptorSets[frameIndex];
@@ -1608,9 +1656,12 @@ void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float gra
     // Draw Catmull-Clark subdivision surfaces
     catmullClarkSystem.recordDraw(cmd, frameIndex);
 
-    // Draw scene objects
+    // Draw scene objects (static meshes)
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
     recordSceneObjects(cmd, frameIndex);
+
+    // Draw skinned character with GPU skinning
+    recordSkinnedCharacter(cmd, frameIndex);
 
     // Draw grass
     grassSystem.recordDraw(cmd, frameIndex, grassTime);
@@ -1622,4 +1673,480 @@ void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float gra
     weatherSystem.recordDraw(cmd, frameIndex, grassTime);
 
     vkCmdEndRenderPass(cmd);
+}
+
+// ===== GPU Skinning Implementation =====
+
+bool Renderer::createSkinnedDescriptorSetLayout() {
+    VkDevice device = vulkanContext.getDevice();
+
+    // Skinned descriptor set layout:
+    // Same as main layout but with binding 10 for bone matrices UBO
+    // 0: UBO (camera/view data)
+    // 1: Diffuse texture sampler
+    // 2: Shadow map sampler (CSM cascade array)
+    // 3: Normal map sampler
+    // 4: Light buffer (SSBO for dynamic lights)
+    // 5: Emissive map sampler
+    // 6: Point shadow cube maps
+    // 7: Spot shadow depth maps
+    // 8: Snow mask texture
+    // 9: Cloud shadow map
+    // 10: Bone matrices UBO
+    skinnedDescriptorSetLayout = DescriptorManager::LayoutBuilder(device)
+        .addUniformBuffer(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)  // 0: UBO
+        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 1: diffuse
+        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 2: shadow
+        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 3: normal
+        .addStorageBuffer(VK_SHADER_STAGE_FRAGMENT_BIT)         // 4: lights
+        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 5: emissive
+        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 6: point shadow
+        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 7: spot shadow
+        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 8: snow mask
+        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 9: cloud shadow map
+        .addUniformBuffer(VK_SHADER_STAGE_VERTEX_BIT)           // 10: bone matrices
+        .build();
+
+    if (skinnedDescriptorSetLayout == VK_NULL_HANDLE) {
+        SDL_Log("Failed to create skinned descriptor set layout");
+        return false;
+    }
+
+    return true;
+}
+
+bool Renderer::createSkinnedGraphicsPipeline() {
+    VkDevice device = vulkanContext.getDevice();
+    VkExtent2D swapchainExtent = vulkanContext.getSwapchainExtent();
+
+    auto vertShaderCode = ShaderLoader::readFile(resourcePath + "/shaders/skinned.vert.spv");
+    auto fragShaderCode = ShaderLoader::readFile(resourcePath + "/shaders/shader.frag.spv");
+
+    if (vertShaderCode.empty() || fragShaderCode.empty()) {
+        SDL_Log("Failed to load skinned shader files");
+        return false;
+    }
+
+    VkShaderModule vertShaderModule = ShaderLoader::createShaderModule(device, vertShaderCode);
+    VkShaderModule fragShaderModule = ShaderLoader::createShaderModule(device, fragShaderCode);
+
+    VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
+    vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+    vertShaderStageInfo.module = vertShaderModule;
+    vertShaderStageInfo.pName = "main";
+
+    VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
+    fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    fragShaderStageInfo.module = fragShaderModule;
+    fragShaderStageInfo.pName = "main";
+
+    VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
+
+    // Use SkinnedVertex input layout
+    auto bindingDescription = SkinnedVertex::getBindingDescription();
+    auto attributeDescriptions = SkinnedVertex::getAttributeDescriptions();
+
+    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
+    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    vertexInputInfo.vertexBindingDescriptionCount = 1;
+    vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
+    vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
+    vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
+
+    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    inputAssembly.primitiveRestartEnable = VK_FALSE;
+
+    VkViewport viewport{};
+    viewport.x = 0.0f;
+    viewport.y = 0.0f;
+    viewport.width = static_cast<float>(swapchainExtent.width);
+    viewport.height = static_cast<float>(swapchainExtent.height);
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+
+    VkRect2D scissor{};
+    scissor.offset = {0, 0};
+    scissor.extent = swapchainExtent;
+
+    VkPipelineViewportStateCreateInfo viewportState{};
+    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewportState.viewportCount = 1;
+    viewportState.pViewports = &viewport;
+    viewportState.scissorCount = 1;
+    viewportState.pScissors = &scissor;
+
+    VkPipelineRasterizationStateCreateInfo rasterizer{};
+    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    rasterizer.depthClampEnable = VK_FALSE;
+    rasterizer.rasterizerDiscardEnable = VK_FALSE;
+    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+    rasterizer.lineWidth = 1.0f;
+    rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    rasterizer.depthBiasEnable = VK_FALSE;
+
+    VkPipelineMultisampleStateCreateInfo multisampling{};
+    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    multisampling.sampleShadingEnable = VK_FALSE;
+    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    VkPipelineDepthStencilStateCreateInfo depthStencil{};
+    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    depthStencil.depthTestEnable = VK_TRUE;
+    depthStencil.depthWriteEnable = VK_TRUE;
+    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+    depthStencil.depthBoundsTestEnable = VK_FALSE;
+    depthStencil.stencilTestEnable = VK_FALSE;
+
+    VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+    colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                                          VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    colorBlendAttachment.blendEnable = VK_FALSE;
+
+    VkPipelineColorBlendStateCreateInfo colorBlending{};
+    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    colorBlending.logicOpEnable = VK_FALSE;
+    colorBlending.attachmentCount = 1;
+    colorBlending.pAttachments = &colorBlendAttachment;
+
+    VkPushConstantRange pushConstantRange{};
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = sizeof(PushConstants);
+
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipelineLayoutInfo.setLayoutCount = 1;
+    pipelineLayoutInfo.pSetLayouts = &skinnedDescriptorSetLayout;
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
+
+    if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &skinnedPipelineLayout) != VK_SUCCESS) {
+        SDL_Log("Failed to create skinned pipeline layout");
+        return false;
+    }
+
+    VkGraphicsPipelineCreateInfo pipelineInfo{};
+    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pipelineInfo.stageCount = 2;
+    pipelineInfo.pStages = shaderStages;
+    pipelineInfo.pVertexInputState = &vertexInputInfo;
+    pipelineInfo.pInputAssemblyState = &inputAssembly;
+    pipelineInfo.pViewportState = &viewportState;
+    pipelineInfo.pRasterizationState = &rasterizer;
+    pipelineInfo.pMultisampleState = &multisampling;
+    pipelineInfo.pDepthStencilState = &depthStencil;
+    pipelineInfo.pColorBlendState = &colorBlending;
+    pipelineInfo.layout = skinnedPipelineLayout;
+    pipelineInfo.renderPass = postProcessSystem.getHDRRenderPass();
+    pipelineInfo.subpass = 0;
+
+    if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &skinnedGraphicsPipeline) != VK_SUCCESS) {
+        SDL_Log("Failed to create skinned graphics pipeline");
+        vkDestroyShaderModule(device, fragShaderModule, nullptr);
+        vkDestroyShaderModule(device, vertShaderModule, nullptr);
+        return false;
+    }
+
+    vkDestroyShaderModule(device, fragShaderModule, nullptr);
+    vkDestroyShaderModule(device, vertShaderModule, nullptr);
+
+    SDL_Log("Created skinned graphics pipeline for GPU skinning");
+    return true;
+}
+
+bool Renderer::createBoneMatricesBuffers() {
+    VmaAllocator allocator = vulkanContext.getAllocator();
+    VkDeviceSize bufferSize = sizeof(BoneMatricesUBO);
+
+    boneMatricesBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+    boneMatricesAllocations.resize(MAX_FRAMES_IN_FLIGHT);
+    boneMatricesMapped.resize(MAX_FRAMES_IN_FLIGHT);
+
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.size = bufferSize;
+        bufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+        VmaAllocationInfo allocationInfo;
+        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &boneMatricesBuffers[i],
+                            &boneMatricesAllocations[i], &allocationInfo) != VK_SUCCESS) {
+            SDL_Log("Failed to create bone matrices buffer");
+            return false;
+        }
+
+        boneMatricesMapped[i] = allocationInfo.pMappedData;
+
+        // Initialize with identity matrices
+        BoneMatricesUBO* ubo = static_cast<BoneMatricesUBO*>(boneMatricesMapped[i]);
+        for (uint32_t j = 0; j < MAX_BONES; j++) {
+            ubo->bones[j] = glm::mat4(1.0f);
+        }
+    }
+
+    SDL_Log("Created bone matrices buffers for GPU skinning");
+    return true;
+}
+
+bool Renderer::createSkinnedDescriptorSets() {
+    VkDevice device = vulkanContext.getDevice();
+
+    // Allocate skinned descriptor sets
+    std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, skinnedDescriptorSetLayout);
+    VkDescriptorSetAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocInfo.descriptorPool = descriptorPool;
+    allocInfo.descriptorSetCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+    allocInfo.pSetLayouts = layouts.data();
+
+    skinnedDescriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
+    if (vkAllocateDescriptorSets(device, &allocInfo, skinnedDescriptorSets.data()) != VK_SUCCESS) {
+        SDL_Log("Failed to allocate skinned descriptor sets");
+        return false;
+    }
+
+    // Update skinned descriptor sets
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        std::vector<VkWriteDescriptorSet> descriptorWrites;
+
+        // Binding 0: UBO (same as regular pipeline)
+        VkDescriptorBufferInfo bufferInfo{};
+        bufferInfo.buffer = uniformBuffers[i];
+        bufferInfo.offset = 0;
+        bufferInfo.range = sizeof(UniformBufferObject);
+
+        VkWriteDescriptorSet uboWrite{};
+        uboWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        uboWrite.dstSet = skinnedDescriptorSets[i];
+        uboWrite.dstBinding = 0;
+        uboWrite.dstArrayElement = 0;
+        uboWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        uboWrite.descriptorCount = 1;
+        uboWrite.pBufferInfo = &bufferInfo;
+        descriptorWrites.push_back(uboWrite);
+
+        // Binding 1: Diffuse texture (white texture for vertex colors)
+        VkDescriptorImageInfo diffuseInfo{};
+        diffuseInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        diffuseInfo.imageView = sceneManager.getSceneBuilder().getWhiteTexture().getImageView();
+        diffuseInfo.sampler = sceneManager.getSceneBuilder().getWhiteTexture().getSampler();
+
+        VkWriteDescriptorSet diffuseWrite{};
+        diffuseWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        diffuseWrite.dstSet = skinnedDescriptorSets[i];
+        diffuseWrite.dstBinding = 1;
+        diffuseWrite.dstArrayElement = 0;
+        diffuseWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        diffuseWrite.descriptorCount = 1;
+        diffuseWrite.pImageInfo = &diffuseInfo;
+        descriptorWrites.push_back(diffuseWrite);
+
+        // Binding 2: Shadow map
+        VkDescriptorImageInfo shadowInfo{};
+        shadowInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+        shadowInfo.imageView = shadowSystem.getShadowImageView();
+        shadowInfo.sampler = shadowSystem.getShadowSampler();
+
+        VkWriteDescriptorSet shadowWrite{};
+        shadowWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        shadowWrite.dstSet = skinnedDescriptorSets[i];
+        shadowWrite.dstBinding = 2;
+        shadowWrite.dstArrayElement = 0;
+        shadowWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        shadowWrite.descriptorCount = 1;
+        shadowWrite.pImageInfo = &shadowInfo;
+        descriptorWrites.push_back(shadowWrite);
+
+        // Binding 3: Normal map (use white texture as dummy)
+        VkDescriptorImageInfo normalInfo{};
+        normalInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        normalInfo.imageView = sceneManager.getSceneBuilder().getWhiteTexture().getImageView();
+        normalInfo.sampler = sceneManager.getSceneBuilder().getWhiteTexture().getSampler();
+
+        VkWriteDescriptorSet normalWrite{};
+        normalWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        normalWrite.dstSet = skinnedDescriptorSets[i];
+        normalWrite.dstBinding = 3;
+        normalWrite.dstArrayElement = 0;
+        normalWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        normalWrite.descriptorCount = 1;
+        normalWrite.pImageInfo = &normalInfo;
+        descriptorWrites.push_back(normalWrite);
+
+        // Binding 4: Light buffer
+        VkDescriptorBufferInfo lightBufferInfo{};
+        lightBufferInfo.buffer = lightBuffers[i];
+        lightBufferInfo.offset = 0;
+        lightBufferInfo.range = VK_WHOLE_SIZE;
+
+        VkWriteDescriptorSet lightWrite{};
+        lightWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        lightWrite.dstSet = skinnedDescriptorSets[i];
+        lightWrite.dstBinding = 4;
+        lightWrite.dstArrayElement = 0;
+        lightWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        lightWrite.descriptorCount = 1;
+        lightWrite.pBufferInfo = &lightBufferInfo;
+        descriptorWrites.push_back(lightWrite);
+
+        // Binding 5: Emissive map (black)
+        VkDescriptorImageInfo emissiveInfo{};
+        emissiveInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        emissiveInfo.imageView = sceneManager.getSceneBuilder().getDefaultEmissiveMap().getImageView();
+        emissiveInfo.sampler = sceneManager.getSceneBuilder().getDefaultEmissiveMap().getSampler();
+
+        VkWriteDescriptorSet emissiveWrite{};
+        emissiveWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        emissiveWrite.dstSet = skinnedDescriptorSets[i];
+        emissiveWrite.dstBinding = 5;
+        emissiveWrite.dstArrayElement = 0;
+        emissiveWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        emissiveWrite.descriptorCount = 1;
+        emissiveWrite.pImageInfo = &emissiveInfo;
+        descriptorWrites.push_back(emissiveWrite);
+
+        // Binding 6: Point shadow (use default emissive as dummy)
+        VkWriteDescriptorSet pointShadowWrite{};
+        pointShadowWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        pointShadowWrite.dstSet = skinnedDescriptorSets[i];
+        pointShadowWrite.dstBinding = 6;
+        pointShadowWrite.dstArrayElement = 0;
+        pointShadowWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        pointShadowWrite.descriptorCount = 1;
+        pointShadowWrite.pImageInfo = &emissiveInfo;
+        descriptorWrites.push_back(pointShadowWrite);
+
+        // Binding 7: Spot shadow (use default emissive as dummy)
+        VkWriteDescriptorSet spotShadowWrite{};
+        spotShadowWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        spotShadowWrite.dstSet = skinnedDescriptorSets[i];
+        spotShadowWrite.dstBinding = 7;
+        spotShadowWrite.dstArrayElement = 0;
+        spotShadowWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        spotShadowWrite.descriptorCount = 1;
+        spotShadowWrite.pImageInfo = &emissiveInfo;
+        descriptorWrites.push_back(spotShadowWrite);
+
+        // Binding 8: Snow mask
+        VkDescriptorImageInfo snowMaskInfo{};
+        snowMaskInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        snowMaskInfo.imageView = snowMaskSystem.getSnowMaskView();
+        snowMaskInfo.sampler = snowMaskSystem.getSnowMaskSampler();
+
+        VkWriteDescriptorSet snowMaskWrite{};
+        snowMaskWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        snowMaskWrite.dstSet = skinnedDescriptorSets[i];
+        snowMaskWrite.dstBinding = 8;
+        snowMaskWrite.dstArrayElement = 0;
+        snowMaskWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        snowMaskWrite.descriptorCount = 1;
+        snowMaskWrite.pImageInfo = &snowMaskInfo;
+        descriptorWrites.push_back(snowMaskWrite);
+
+        // Binding 9: Cloud shadow map
+        VkDescriptorImageInfo cloudShadowInfo{};
+        cloudShadowInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        cloudShadowInfo.imageView = cloudShadowSystem.getShadowMapView();
+        cloudShadowInfo.sampler = cloudShadowSystem.getShadowMapSampler();
+
+        VkWriteDescriptorSet cloudShadowWrite{};
+        cloudShadowWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        cloudShadowWrite.dstSet = skinnedDescriptorSets[i];
+        cloudShadowWrite.dstBinding = 9;
+        cloudShadowWrite.dstArrayElement = 0;
+        cloudShadowWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        cloudShadowWrite.descriptorCount = 1;
+        cloudShadowWrite.pImageInfo = &cloudShadowInfo;
+        descriptorWrites.push_back(cloudShadowWrite);
+
+        // Binding 10: Bone matrices UBO
+        VkDescriptorBufferInfo boneInfo{};
+        boneInfo.buffer = boneMatricesBuffers[i];
+        boneInfo.offset = 0;
+        boneInfo.range = sizeof(BoneMatricesUBO);
+
+        VkWriteDescriptorSet boneWrite{};
+        boneWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        boneWrite.dstSet = skinnedDescriptorSets[i];
+        boneWrite.dstBinding = 10;
+        boneWrite.dstArrayElement = 0;
+        boneWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        boneWrite.descriptorCount = 1;
+        boneWrite.pBufferInfo = &boneInfo;
+        descriptorWrites.push_back(boneWrite);
+
+        vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
+                               descriptorWrites.data(), 0, nullptr);
+    }
+
+    SDL_Log("Created skinned descriptor sets for GPU skinning");
+    return true;
+}
+
+void Renderer::updateBoneMatrices(uint32_t currentImage) {
+    SceneBuilder& sceneBuilder = sceneManager.getSceneBuilder();
+    if (!sceneBuilder.hasCharacter()) return;
+
+    // Get bone matrices from animated character
+    std::vector<glm::mat4> boneMatrices;
+    sceneBuilder.getAnimatedCharacter().computeBoneMatrices(boneMatrices);
+
+    // Copy to mapped buffer
+    BoneMatricesUBO* ubo = static_cast<BoneMatricesUBO*>(boneMatricesMapped[currentImage]);
+    size_t numBones = std::min(boneMatrices.size(), static_cast<size_t>(MAX_BONES));
+    for (size_t i = 0; i < numBones; i++) {
+        ubo->bones[i] = boneMatrices[i];
+    }
+}
+
+void Renderer::recordSkinnedCharacter(VkCommandBuffer cmd, uint32_t frameIndex) {
+    SceneBuilder& sceneBuilder = sceneManager.getSceneBuilder();
+    if (!sceneBuilder.hasCharacter()) return;
+
+    // Bind skinned pipeline
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, skinnedGraphicsPipeline);
+
+    // Bind skinned descriptor set
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            skinnedPipelineLayout, 0, 1, &skinnedDescriptorSets[frameIndex], 0, nullptr);
+
+    // Get the player object to get transform
+    const auto& sceneObjects = sceneBuilder.getSceneObjects();
+    size_t playerIndex = sceneBuilder.getPlayerObjectIndex();
+    if (playerIndex >= sceneObjects.size()) return;
+
+    const Renderable& playerObj = sceneObjects[playerIndex];
+
+    // Push constants
+    PushConstants push{};
+    push.model = playerObj.transform;
+    push.roughness = playerObj.roughness;
+    push.metallic = playerObj.metallic;
+    push.emissiveIntensity = playerObj.emissiveIntensity;
+    push.emissiveColor = glm::vec4(playerObj.emissiveColor, 1.0f);
+
+    vkCmdPushConstants(cmd, skinnedPipelineLayout,
+                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                       0, sizeof(PushConstants), &push);
+
+    // Bind skinned mesh vertex and index buffers
+    AnimatedCharacter& character = sceneBuilder.getAnimatedCharacter();
+    SkinnedMesh& skinnedMesh = character.getSkinnedMesh();
+
+    VkBuffer vertexBuffers[] = {skinnedMesh.getVertexBuffer()};
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
+    vkCmdBindIndexBuffer(cmd, skinnedMesh.getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+
+    vkCmdDrawIndexed(cmd, skinnedMesh.getIndexCount(), 1, 0, 0, 0);
 }
