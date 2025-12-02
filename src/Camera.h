@@ -49,6 +49,10 @@ public:
     // Get the third-person target position (for occlusion detection)
     glm::vec3 getThirdPersonTarget() const { return smoothedTarget; }
 
+    // Camera collision - adjust distance to avoid clipping through geometry
+    void applyCollisionDistance(float collisionDistance);
+    float getSmoothedDistance() const { return smoothedDistance; }
+
 private:
     void updateVectors();
 
@@ -92,4 +96,7 @@ private:
     float currentFov;
     float targetFov;
     static constexpr float fovSmoothSpeed = 4.0f;
+
+    // Camera collision
+    float collisionAdjustedDistance = -1.0f;  // -1 means no collision adjustment
 };

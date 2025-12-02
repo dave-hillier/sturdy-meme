@@ -602,7 +602,14 @@ void Application::updateCameraOcclusion(float deltaTime) {
 
     std::vector<RaycastHit> hits = physics.castRayAllHits(playerFocus, cameraPos);
 
-    // Build set of currently occluding body IDs
+    // If there are any hits, apply camera collision to pull camera closer
+    if (!hits.empty()) {
+        // Use the closest hit for camera collision
+        float closestHitDistance = hits[0].distance;
+        camera.applyCollisionDistance(closestHitDistance);
+    }
+
+    // Build set of currently occluding body IDs (for opacity fading)
     std::unordered_set<PhysicsBodyID> currentlyOccluding;
     for (const auto& hit : hits) {
         currentlyOccluding.insert(hit.bodyId);

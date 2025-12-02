@@ -99,6 +99,9 @@ void Camera::setDistance(float dist) {
 }
 
 void Camera::updateThirdPerson(float deltaTime) {
+    // Reset collision adjustment - will be set by applyCollisionDistance if needed
+    collisionAdjustedDistance = -1.0f;
+
     // Exponential smoothing formula: smoothed += (target - smoothed) * (1 - exp(-speed * deltaTime))
     float positionFactor = 1.0f - std::exp(-positionSmoothSpeed * deltaTime);
     float rotationFactor = 1.0f - std::exp(-rotationSmoothSpeed * deltaTime);
@@ -126,9 +129,12 @@ void Camera::updateThirdPerson(float deltaTime) {
     pitch = smoothedPitch;
     thirdPersonDistance = smoothedDistance;
 
+    // Use collision-adjusted distance if set, otherwise use smoothed distance
+    float effectiveDistance = smoothedDistance;
+
     // Calculate camera position based on smoothed spherical coordinates around target
-    float horizontalDist = smoothedDistance * cos(glm::radians(smoothedPitch));
-    float verticalOffset = smoothedDistance * sin(glm::radians(smoothedPitch));
+    float horizontalDist = effectiveDistance * cos(glm::radians(smoothedPitch));
+    float verticalOffset = effectiveDistance * sin(glm::radians(smoothedPitch));
 
     // Position camera behind the target based on smoothed yaw
     position.x = smoothedTarget.x - horizontalDist * cos(glm::radians(smoothedYaw));
@@ -139,6 +145,27 @@ void Camera::updateThirdPerson(float deltaTime) {
     front = glm::normalize(smoothedTarget - position);
     right = glm::normalize(glm::cross(front, worldUp));
     up = glm::normalize(glm::cross(right, front));
+}
+
+void Camera::applyCollisionDistance(float distance) {
+    // Apply collision adjustment - pull camera closer to avoid clipping
+    if (distance > 0.0f && distance < smoothedDistance) {
+        collisionAdjustedDistance = distance;
+
+        // Recalculate position with adjusted distance
+        float effectiveDistance = std::max(thirdPersonMinDistance, distance - 0.2f);  // Small offset to avoid clipping
+        float horizontalDist = effectiveDistance * cos(glm::radians(smoothedPitch));
+        float verticalOffset = effectiveDistance * sin(glm::radians(smoothedPitch));
+
+        position.x = smoothedTarget.x - horizontalDist * cos(glm::radians(smoothedYaw));
+        position.y = smoothedTarget.y + verticalOffset;
+        position.z = smoothedTarget.z - horizontalDist * sin(glm::radians(smoothedYaw));
+
+        // Update front vector
+        front = glm::normalize(smoothedTarget - position);
+        right = glm::normalize(glm::cross(front, worldUp));
+        up = glm::normalize(glm::cross(right, front));
+    }
 }
 
 void Camera::resetSmoothing() {

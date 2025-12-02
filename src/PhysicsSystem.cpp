@@ -745,11 +745,9 @@ std::vector<RaycastHit> PhysicsWorld::castRayAllHits(const glm::vec3& from, cons
     // Use a collector to gather all hits
     JPH::AllHitCollisionCollector<JPH::RayCastBodyCollector> collector;
 
-    // Cast the ray through broad phase
-    JPH::DefaultBroadPhaseLayerFilter broadPhaseFilter(objectVsBroadPhaseLayerFilter, PhysicsLayers::MOVING);
-    JPH::DefaultObjectLayerFilter objectLayerFilter(objectLayerPairFilter, PhysicsLayers::MOVING);
-
-    physicsSystem->GetBroadPhaseQuery().CastRay(static_cast<JPH::RayCast>(ray), collector, broadPhaseFilter, objectLayerFilter);
+    // Cast the ray - use no filters to detect all object layers
+    // We want to detect both MOVING objects and NON_MOVING (terrain, static objects)
+    physicsSystem->GetBroadPhaseQuery().CastRay(static_cast<JPH::RayCast>(ray), collector);
 
     // Convert results
     for (const auto& hit : collector.mHits) {
