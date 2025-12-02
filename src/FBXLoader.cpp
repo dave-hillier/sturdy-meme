@@ -206,7 +206,7 @@ MaterialInfo extractMaterialInfo(const ofbx::Material* mat, const std::string& f
     }
 
     // Name
-    if (mat->name) {
+    if (mat->name[0] != '\0') {
         info.name = mat->name;
     }
 
