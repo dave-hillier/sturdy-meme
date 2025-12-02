@@ -54,5 +54,6 @@ private:
     bool running = false;
     // Walk speed matches animation root motion: 158.42 cm / 1.10s * 0.01 scale = 1.44 m/s
     float moveSpeed = 1.44f;
-    float sprintSpeed = 4.5f;
+    // Run speed matches animation root motion: 278.32 cm / 0.70s * 0.01 scale = 3.98 m/s
+    float sprintSpeed = 3.98f;
 };

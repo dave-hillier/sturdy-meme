@@ -59,11 +59,12 @@ bool SceneBuilder::createMeshes(const InitInfo& info) {
         hasAnimatedCharacter = true;
         SDL_Log("SceneBuilder: Loaded FBX animated character");
 
-        // Load additional animations (idle, walk, jump, etc.)
+        // Load additional animations (sword and shield locomotion set)
         std::vector<std::string> additionalAnimations = {
-            info.resourcePath + "/assets/characters/fbx/idle.fbx",
-            info.resourcePath + "/assets/characters/fbx/walk.fbx",
-            info.resourcePath + "/assets/characters/fbx/jump.fbx"
+            info.resourcePath + "/assets/characters/fbx/ss_idle.fbx",
+            info.resourcePath + "/assets/characters/fbx/ss_walk.fbx",
+            info.resourcePath + "/assets/characters/fbx/ss_run.fbx",
+            info.resourcePath + "/assets/characters/fbx/ss_jump.fbx"
         };
         animatedCharacter.loadAdditionalAnimations(additionalAnimations);
     } else {
