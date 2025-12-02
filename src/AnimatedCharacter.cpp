@@ -155,6 +155,9 @@ void AnimatedCharacter::loadAdditionalAnimations(const std::vector<std::string>&
     const AnimationClip* walkClip = nullptr;
     const AnimationClip* runClip = nullptr;
     const AnimationClip* jumpClip = nullptr;
+    const AnimationClip* turnLeftClip = nullptr;
+    const AnimationClip* turnRightClip = nullptr;
+    const AnimationClip* turn180Clip = nullptr;
 
     for (const auto& clip : animations) {
         std::string lowerName = clip.name;
@@ -162,6 +165,12 @@ void AnimatedCharacter::loadAdditionalAnimations(const std::vector<std::string>&
 
         if (lowerName.find("idle") != std::string::npos) {
             idleClip = &clip;
+        } else if (lowerName.find("turn_180") != std::string::npos || lowerName.find("turn180") != std::string::npos) {
+            turn180Clip = &clip;
+        } else if (lowerName.find("turn_left") != std::string::npos || lowerName.find("turnleft") != std::string::npos) {
+            turnLeftClip = &clip;
+        } else if (lowerName.find("turn_right") != std::string::npos || lowerName.find("turnright") != std::string::npos) {
+            turnRightClip = &clip;
         } else if (lowerName.find("walk") != std::string::npos) {
             walkClip = &clip;
         } else if (lowerName.find("run") != std::string::npos) {
@@ -186,6 +195,18 @@ void AnimatedCharacter::loadAdditionalAnimations(const std::vector<std::string>&
     if (jumpClip) {
         stateMachine.addState("jump", jumpClip, false);
         SDL_Log("AnimatedCharacter: Added 'jump' state");
+    }
+    if (turnLeftClip) {
+        stateMachine.addState("turn_left", turnLeftClip, false);
+        SDL_Log("AnimatedCharacter: Added 'turn_left' state");
+    }
+    if (turnRightClip) {
+        stateMachine.addState("turn_right", turnRightClip, false);
+        SDL_Log("AnimatedCharacter: Added 'turn_right' state");
+    }
+    if (turn180Clip) {
+        stateMachine.addState("turn_180", turn180Clip, false);
+        SDL_Log("AnimatedCharacter: Added 'turn_180' state");
     }
 
     if (idleClip) {
@@ -232,7 +253,8 @@ const AnimationClip* AnimatedCharacter::getCurrentAnimation() const {
 
 void AnimatedCharacter::update(float deltaTime, VmaAllocator allocator, VkDevice device,
                                 VkCommandPool commandPool, VkQueue queue,
-                                float movementSpeed, bool isGrounded, bool isJumping) {
+                                float movementSpeed, bool isGrounded, bool isJumping,
+                                float turnAngle) {
     if (!loaded) return;
 
     // Reset skeleton to bind pose before applying animation
@@ -243,7 +265,7 @@ void AnimatedCharacter::update(float deltaTime, VmaAllocator allocator, VkDevice
 
     if (useStateMachine) {
         // Use state machine for animation selection and blending
-        stateMachine.update(deltaTime, movementSpeed, isGrounded, isJumping);
+        stateMachine.update(deltaTime, movementSpeed, isGrounded, isJumping, turnAngle);
         stateMachine.applyToSkeleton(skeleton);
     } else {
         // Fallback to simple animation player

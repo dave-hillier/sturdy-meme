@@ -145,6 +145,7 @@ void Application::run() {
 
         // Process movement input for third-person mode
         glm::vec3 desiredVelocity(0.0f);
+        float turnAngle = 0.0f;  // Angle difference for turn animations
         if (input.isThirdPersonMode()) {
             glm::vec3 moveDir = input.getMovementDirection();
             if (glm::length(moveDir) > 0.001f) {
@@ -159,6 +160,10 @@ void Application::run() {
                 // Normalize yaw difference
                 while (yawDiff > 180.0f) yawDiff -= 360.0f;
                 while (yawDiff < -180.0f) yawDiff += 360.0f;
+
+                // Store turn angle for animation before applying smoothing
+                turnAngle = yawDiff;
+
                 player.rotate(yawDiff * 10.0f * deltaTime);  // Smooth rotation
             }
         }
@@ -191,7 +196,7 @@ void Application::run() {
         // Calculate movement speed from desired velocity for animation state machine
         float movementSpeed = glm::length(glm::vec2(desiredVelocity.x, desiredVelocity.z));
         bool isGrounded = physics.isCharacterOnGround();
-        renderer.updateAnimatedCharacter(deltaTime, movementSpeed, isGrounded, isJumping);
+        renderer.updateAnimatedCharacter(deltaTime, movementSpeed, isGrounded, isJumping, turnAngle);
 
         // Update camera and player based on mode
         if (input.isThirdPersonMode()) {

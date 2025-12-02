@@ -70,9 +70,11 @@ public:
     // movementSpeed: horizontal speed for animation state selection
     // isGrounded: whether on the ground
     // isJumping: whether just started jumping
+    // turnAngle: angle difference between target direction and current facing (degrees)
     void updateAnimatedCharacter(float deltaTime, VmaAllocator allocator, VkDevice device,
                                   VkCommandPool commandPool, VkQueue queue,
-                                  float movementSpeed = 0.0f, bool isGrounded = true, bool isJumping = false);
+                                  float movementSpeed = 0.0f, bool isGrounded = true, bool isJumping = false,
+                                  float turnAngle = 0.0f);
 
 private:
     bool createMeshes(const InitInfo& info);

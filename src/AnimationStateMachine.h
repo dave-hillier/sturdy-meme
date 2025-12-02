@@ -23,7 +23,8 @@ public:
     // movementSpeed: horizontal movement speed of the character
     // isGrounded: whether the character is on the ground
     // isJumping: whether the character just started a jump
-    void update(float deltaTime, float movementSpeed, bool isGrounded, bool isJumping);
+    // turnAngle: instantaneous angle difference between target direction and current facing (degrees)
+    void update(float deltaTime, float movementSpeed, bool isGrounded, bool isJumping, float turnAngle = 0.0f);
 
     // Apply the current animation state to a skeleton
     void applyToSkeleton(Skeleton& skeleton) const;
@@ -57,4 +58,11 @@ private:
     // Thresholds for state transitions
     static constexpr float WALK_THRESHOLD = 0.1f;
     static constexpr float RUN_THRESHOLD = 2.5f;  // Between walk (1.44 m/s) and run (3.98 m/s) animation speeds
+
+    // Turn thresholds (degrees)
+    static constexpr float TURN_THRESHOLD = 60.0f;        // Angle to trigger turn animation
+    static constexpr float TURN_180_THRESHOLD = 135.0f;   // Angle to trigger 180 turn
+
+    // Track if we're in a turn animation
+    bool isTurning = false;
 };

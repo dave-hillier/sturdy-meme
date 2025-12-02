@@ -59,12 +59,15 @@ bool SceneBuilder::createMeshes(const InitInfo& info) {
         hasAnimatedCharacter = true;
         SDL_Log("SceneBuilder: Loaded FBX animated character");
 
-        // Load additional animations (sword and shield locomotion set)
+        // Load additional animations (sword and shield locomotion set + turn animations)
         std::vector<std::string> additionalAnimations = {
             info.resourcePath + "/assets/characters/fbx/ss_idle.fbx",
             info.resourcePath + "/assets/characters/fbx/ss_walk.fbx",
             info.resourcePath + "/assets/characters/fbx/ss_run.fbx",
-            info.resourcePath + "/assets/characters/fbx/ss_jump.fbx"
+            info.resourcePath + "/assets/characters/fbx/ss_jump.fbx",
+            info.resourcePath + "/assets/characters/fbx/ss_turn_left.fbx",
+            info.resourcePath + "/assets/characters/fbx/ss_turn_right.fbx",
+            info.resourcePath + "/assets/characters/fbx/ss_turn_180.fbx"
         };
         animatedCharacter.loadAdditionalAnimations(additionalAnimations);
     } else {
@@ -336,11 +339,12 @@ void SceneBuilder::updatePlayerTransform(const glm::mat4& transform) {
 
 void SceneBuilder::updateAnimatedCharacter(float deltaTime, VmaAllocator allocator, VkDevice device,
                                             VkCommandPool commandPool, VkQueue queue,
-                                            float movementSpeed, bool isGrounded, bool isJumping) {
+                                            float movementSpeed, bool isGrounded, bool isJumping,
+                                            float turnAngle) {
     if (!hasAnimatedCharacter) return;
 
     animatedCharacter.update(deltaTime, allocator, device, commandPool, queue,
-                             movementSpeed, isGrounded, isJumping);
+                             movementSpeed, isGrounded, isJumping, turnAngle);
 
     // Update the mesh pointer in the renderable (in case it was re-created)
     if (playerObjectIndex < sceneObjects.size()) {

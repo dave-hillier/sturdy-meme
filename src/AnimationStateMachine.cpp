@@ -1,6 +1,7 @@
 #include "AnimationStateMachine.h"
 #include <SDL3/SDL_log.h>
 #include <glm/gtc/matrix_transform.hpp>
+#include <cmath>
 
 void AnimationStateMachine::addState(const std::string& name, const AnimationClip* clip, bool looping) {
     State state;
@@ -51,7 +52,7 @@ void AnimationStateMachine::transitionTo(const std::string& name, float duration
     blending = true;
 }
 
-void AnimationStateMachine::update(float deltaTime, float movementSpeed, bool isGrounded, bool isJumping) {
+void AnimationStateMachine::update(float deltaTime, float movementSpeed, bool isGrounded, bool isJumping, float turnAngle) {
     // Update blend factor if blending
     if (blending) {
         blendTime += deltaTime;
@@ -94,9 +95,49 @@ void AnimationStateMachine::update(float deltaTime, float movementSpeed, bool is
                 transitionTo("idle", 0.2f);
             }
         }
+    } else if (currentState == "turn_left" || currentState == "turn_right" || currentState == "turn_180") {
+        // Check if turn animation is complete
+        if (current && current->clip && current->time >= current->clip->duration * 0.8f) {
+            isTurning = false;
+            // Transition back to locomotion based on movement
+            if (movementSpeed > RUN_THRESHOLD) {
+                transitionTo("run", 0.15f);
+            } else if (movementSpeed > WALK_THRESHOLD) {
+                transitionTo("walk", 0.15f);
+            } else {
+                transitionTo("idle", 0.2f);
+            }
+        }
     } else if (isJumping) {
         // Started jumping (isJumping is already gated by isGrounded in Application.cpp)
+        isTurning = false;
         transitionTo("jump", 0.1f);
+    } else if (movementSpeed > WALK_THRESHOLD && !isTurning) {
+        // Check for turn while moving (only trigger if not already turning)
+        float absTurnAngle = std::abs(turnAngle);
+        if (absTurnAngle > TURN_180_THRESHOLD && findState("turn_180")) {
+            isTurning = true;
+            transitionTo("turn_180", 0.1f);
+        } else if (absTurnAngle > TURN_THRESHOLD) {
+            if (turnAngle > 0 && findState("turn_right")) {
+                isTurning = true;
+                transitionTo("turn_right", 0.1f);
+            } else if (turnAngle < 0 && findState("turn_left")) {
+                isTurning = true;
+                transitionTo("turn_left", 0.1f);
+            }
+        } else {
+            // Normal locomotion transition
+            if (movementSpeed > RUN_THRESHOLD) {
+                if (currentState != "run") {
+                    transitionTo("run", 0.2f);
+                }
+            } else {
+                if (currentState != "walk") {
+                    transitionTo("walk", 0.2f);
+                }
+            }
+        }
     } else if (movementSpeed > RUN_THRESHOLD) {
         if (currentState != "run") {
             transitionTo("run", 0.2f);
@@ -107,6 +148,7 @@ void AnimationStateMachine::update(float deltaTime, float movementSpeed, bool is
         }
     } else {
         if (currentState != "idle") {
+            isTurning = false;
             transitionTo("idle", 0.25f);
         }
     }
