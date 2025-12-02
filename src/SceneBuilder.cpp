@@ -58,6 +58,14 @@ bool SceneBuilder::createMeshes(const InitInfo& info) {
     if (animatedCharacter.load(characterPath, info.allocator, info.device, info.commandPool, info.graphicsQueue)) {
         hasAnimatedCharacter = true;
         SDL_Log("SceneBuilder: Loaded FBX animated character");
+
+        // Load additional animations (idle, walk, jump, etc.)
+        std::vector<std::string> additionalAnimations = {
+            info.resourcePath + "/assets/characters/fbx/idle.fbx",
+            info.resourcePath + "/assets/characters/fbx/walk.fbx",
+            info.resourcePath + "/assets/characters/fbx/jump.fbx"
+        };
+        animatedCharacter.loadAdditionalAnimations(additionalAnimations);
     } else {
         hasAnimatedCharacter = false;
         SDL_Log("SceneBuilder: Failed to load FBX character, using capsule fallback");

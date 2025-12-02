@@ -13,6 +13,7 @@ struct Joint {
     int32_t parentIndex;  // -1 for root
     glm::mat4 inverseBindMatrix;
     glm::mat4 localTransform;
+    glm::quat preRotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);  // FBX pre-rotation (identity by default)
 };
 
 struct Skeleton {

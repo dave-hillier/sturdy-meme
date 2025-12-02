@@ -20,6 +20,10 @@ public:
     // Load character from glTF file
     bool load(const std::string& path, VmaAllocator allocator, VkDevice device,
               VkCommandPool commandPool, VkQueue queue);
+
+    // Load additional animations from separate FBX files
+    void loadAdditionalAnimations(const std::vector<std::string>& paths);
+
     void destroy(VmaAllocator allocator);
 
     // Animation control

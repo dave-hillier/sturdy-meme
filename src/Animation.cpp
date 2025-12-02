@@ -36,12 +36,14 @@ void AnimationClip::sample(float time, Skeleton& skeleton) const {
             scale = channel.scale.sample(time);
         }
 
-        // Build local transform matrix: T * R * S
+        // Build local transform matrix: T * Rpre * R * S
+        // FBX pre-rotation is applied before the animated rotation
         glm::mat4 T = glm::translate(glm::mat4(1.0f), translation);
+        glm::mat4 Rpre = glm::mat4_cast(joint.preRotation);
         glm::mat4 R = glm::mat4_cast(rotation);
         glm::mat4 S = glm::scale(glm::mat4(1.0f), scale);
 
-        joint.localTransform = T * R * S;
+        joint.localTransform = T * Rpre * R * S;
     }
 }
 

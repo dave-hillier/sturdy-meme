@@ -51,11 +51,15 @@ glm::vec2 convertVec2(const ofbx::Vec2& v) {
 }
 
 // Convert Euler angles (degrees) to quaternion
-// FBX uses XYZ rotation order by default
+// FBX uses XYZ intrinsic rotation order (rotate X, then Y, then Z in local space)
+// This is equivalent to ZYX extrinsic rotation order
 glm::quat eulerToQuat(const glm::vec3& eulerDeg) {
     glm::vec3 eulerRad = glm::radians(eulerDeg);
-    // XYZ rotation order
-    return glm::quat(eulerRad);
+    // Build quaternion with XYZ intrinsic order: Q = Qz * Qy * Qx
+    glm::quat qX = glm::angleAxis(eulerRad.x, glm::vec3(1.0f, 0.0f, 0.0f));
+    glm::quat qY = glm::angleAxis(eulerRad.y, glm::vec3(0.0f, 1.0f, 0.0f));
+    glm::quat qZ = glm::angleAxis(eulerRad.z, glm::vec3(0.0f, 0.0f, 1.0f));
+    return qZ * qY * qX;
 }
 
 // Strip Mixamo bone name prefix
@@ -210,6 +214,11 @@ std::optional<GLTFSkinnedLoadResult> loadSkinned(const std::string& path) {
                 joint.parentIndex = it->second;
             }
         }
+
+        // Get FBX pre-rotation (affects how animated rotations are applied)
+        ofbx::DVec3 preRotDeg = bone->getPreRotation();
+        glm::vec3 preRotVec = convertVec3(preRotDeg);
+        joint.preRotation = eulerToQuat(preRotVec);
 
         // Initialize with identity - will be set from cluster data
         joint.localTransform = glm::mat4(1.0f);
@@ -400,6 +409,18 @@ std::optional<GLTFSkinnedLoadResult> loadSkinned(const std::string& path) {
             // Root bone - global is local
             joint.localTransform = globalBindPose[i];
         }
+
+        // Debug: Print transforms and preRotation for first bones and arm-related bones
+        bool isArmBone = joint.name.find("Shoulder") != std::string::npos ||
+                         joint.name.find("Arm") != std::string::npos ||
+                         joint.name.find("UpLeg") != std::string::npos;
+        if (i < 5 || isArmBone) {
+            glm::vec3 pos = glm::vec3(joint.localTransform[3]);
+            glm::vec3 preRotEuler = glm::degrees(glm::eulerAngles(joint.preRotation));
+            SDL_Log("FBXLoader: Bone %zu '%s' parent=%d local pos=(%.2f, %.2f, %.2f) preRot=(%.1f, %.1f, %.1f)",
+                    i, joint.name.c_str(), joint.parentIndex, pos.x, pos.y, pos.z,
+                    preRotEuler.x, preRotEuler.y, preRotEuler.z);
+        }
     }
 
     // Calculate tangents if not present
@@ -565,6 +586,258 @@ std::optional<GLTFLoadResult> load(const std::string& path) {
 
     result.indices = std::move(skinned->indices);
     result.skeleton = std::move(skinned->skeleton);
+
+    return result;
+}
+
+std::vector<AnimationClip> loadAnimations(const std::string& path, const Skeleton& skeleton) {
+    std::vector<AnimationClip> result;
+
+    auto fileData = readFile(path);
+    if (fileData.empty()) {
+        SDL_Log("FBXLoader: Failed to read animation file: %s", path.c_str());
+        return result;
+    }
+
+    ScenePtr scene(ofbx::load(
+        fileData.data(),
+        static_cast<ofbx::usize>(fileData.size()),
+        static_cast<ofbx::u16>(ofbx::LoadFlags::NONE)
+    ));
+
+    if (!scene) {
+        SDL_Log("FBXLoader: Failed to parse animation FBX: %s", path.c_str());
+        return result;
+    }
+
+    // Build bone name to index mapping from skeleton
+    std::unordered_map<std::string, int32_t> boneNameToIndex;
+    for (size_t i = 0; i < skeleton.joints.size(); ++i) {
+        boneNameToIndex[skeleton.joints[i].name] = static_cast<int32_t>(i);
+    }
+
+    // Collect bones from the animation file
+    // First try via skin clusters (works for full character FBX)
+    // Then fallback to getAllObjects for animation-only FBX files
+    std::vector<const ofbx::Object*> boneObjects;
+    std::unordered_map<const ofbx::Object*, int32_t> boneToIndex;
+
+    int meshCount = scene->getMeshCount();
+    for (int meshIdx = 0; meshIdx < meshCount; ++meshIdx) {
+        const ofbx::Mesh* mesh = scene->getMesh(meshIdx);
+        const ofbx::Skin* skin = mesh->getSkin();
+        if (!skin) continue;
+
+        int clusterCount = skin->getClusterCount();
+        for (int i = 0; i < clusterCount; ++i) {
+            const ofbx::Cluster* cluster = skin->getCluster(i);
+            const ofbx::Object* bone = cluster->getLink();
+            if (!bone || boneToIndex.find(bone) != boneToIndex.end()) continue;
+
+            std::string boneName = normalizeBoneName(bone->name);
+            auto it = boneNameToIndex.find(boneName);
+            if (it != boneNameToIndex.end()) {
+                boneToIndex[bone] = it->second;
+                boneObjects.push_back(bone);
+            }
+        }
+    }
+
+    // Fallback: scan all objects for LIMB_NODE types (for animation-only FBX files)
+    if (boneObjects.empty()) {
+        const ofbx::Object* const* allObjects = scene->getAllObjects();
+        int objectCount = scene->getAllObjectCount();
+
+        for (int i = 0; i < objectCount; ++i) {
+            const ofbx::Object* obj = allObjects[i];
+            if (!obj) continue;
+
+            // Check if it's a limb node or null node (bones can be either)
+            if (obj->getType() == ofbx::Object::Type::LIMB_NODE ||
+                obj->getType() == ofbx::Object::Type::NULL_NODE) {
+
+                std::string boneName = normalizeBoneName(obj->name);
+                auto it = boneNameToIndex.find(boneName);
+                if (it != boneNameToIndex.end() && boneToIndex.find(obj) == boneToIndex.end()) {
+                    boneToIndex[obj] = it->second;
+                    boneObjects.push_back(obj);
+                }
+            }
+        }
+    }
+
+    SDL_Log("FBXLoader: Found %zu matching bones in animation file", boneObjects.size());
+
+    // Load animations
+    int animStackCount = scene->getAnimationStackCount();
+    SDL_Log("FBXLoader: Found %d animation stacks in %s", animStackCount, path.c_str());
+
+    for (int stackIdx = 0; stackIdx < animStackCount; ++stackIdx) {
+        const ofbx::AnimationStack* stack = scene->getAnimationStack(stackIdx);
+        if (!stack) continue;
+
+        const ofbx::AnimationLayer* layer = stack->getLayer(0);
+        if (!layer) continue;
+
+        AnimationClip clip;
+        clip.name = stack->name;
+        clip.duration = 0.0f;
+
+        const ofbx::TakeInfo* takeInfo = scene->getTakeInfo(stack->name);
+        double localTimeFrom = 0.0;
+        double localTimeTo = 0.0;
+        if (takeInfo) {
+            localTimeFrom = fbxTimeToSeconds(static_cast<ofbx::i64>(takeInfo->local_time_from));
+            localTimeTo = fbxTimeToSeconds(static_cast<ofbx::i64>(takeInfo->local_time_to));
+        }
+
+        // Always scan animation curves to find duration - TakeInfo is often unreliable
+        {
+            double curveTimeFrom = 0.0;
+            double curveTimeTo = 0.0;
+
+            // Iterate layer's curve nodes to find time range
+            for (int i = 0; ; ++i) {
+                const ofbx::AnimationCurveNode* curveNode = layer->getCurveNode(i);
+                if (!curveNode) break;
+
+                for (int axis = 0; axis < 3; ++axis) {
+                    const ofbx::AnimationCurve* curve = curveNode->getCurve(axis);
+                    if (!curve) continue;
+
+                    int keyCount = curve->getKeyCount();
+                    const ofbx::i64* keyTimes = curve->getKeyTime();
+                    if (keyCount > 0 && keyTimes) {
+                        double firstKey = fbxTimeToSeconds(keyTimes[0]);
+                        double lastKey = fbxTimeToSeconds(keyTimes[keyCount - 1]);
+                        if (firstKey < curveTimeFrom || curveTimeFrom == 0.0) curveTimeFrom = firstKey;
+                        if (lastKey > curveTimeTo) curveTimeTo = lastKey;
+                    }
+                }
+            }
+
+            // Fallback: try getting curves through bones if layer iteration failed
+            if (curveTimeTo <= curveTimeFrom) {
+                for (const ofbx::Object* bone : boneObjects) {
+                    const char* properties[] = {"Lcl Translation", "Lcl Rotation", "Lcl Scaling"};
+                    for (const char* prop : properties) {
+                        const ofbx::AnimationCurveNode* curveNode = layer->getCurveNode(*bone, prop);
+                        if (!curveNode) continue;
+
+                        for (int axis = 0; axis < 3; ++axis) {
+                            const ofbx::AnimationCurve* curve = curveNode->getCurve(axis);
+                            if (!curve) continue;
+
+                            int keyCount = curve->getKeyCount();
+                            const ofbx::i64* keyTimes = curve->getKeyTime();
+                            if (keyCount > 0 && keyTimes) {
+                                double firstKey = fbxTimeToSeconds(keyTimes[0]);
+                                double lastKey = fbxTimeToSeconds(keyTimes[keyCount - 1]);
+                                if (firstKey < curveTimeFrom || curveTimeFrom == 0.0) curveTimeFrom = firstKey;
+                                if (lastKey > curveTimeTo) curveTimeTo = lastKey;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Use curve times if they're better than TakeInfo
+            if (curveTimeTo > curveTimeFrom && curveTimeTo > (localTimeTo - localTimeFrom)) {
+                localTimeFrom = curveTimeFrom;
+                localTimeTo = curveTimeTo;
+            }
+
+            // Final fallback: use default duration
+            if (localTimeTo <= localTimeFrom) {
+                localTimeTo = 1.0;
+            }
+        }
+
+        const double fps = 30.0;
+        const double frameTime = 1.0 / fps;
+
+        for (const ofbx::Object* bone : boneObjects) {
+            auto boneIt = boneToIndex.find(bone);
+            if (boneIt == boneToIndex.end()) continue;
+
+            const ofbx::AnimationCurveNode* transNode = layer->getCurveNode(*bone, "Lcl Translation");
+            const ofbx::AnimationCurveNode* rotNode = layer->getCurveNode(*bone, "Lcl Rotation");
+            const ofbx::AnimationCurveNode* scaleNode = layer->getCurveNode(*bone, "Lcl Scaling");
+
+            if (!transNode && !rotNode && !scaleNode) continue;
+
+            AnimationChannel channel;
+            channel.jointIndex = boneIt->second;
+
+            double duration = localTimeTo - localTimeFrom;
+            if (duration <= 0) duration = 1.0;
+
+            int numSamples = static_cast<int>(duration * fps) + 1;
+            numSamples = std::max(2, std::min(numSamples, 1000));
+
+            for (int s = 0; s < numSamples; ++s) {
+                double t = localTimeFrom + (s * frameTime);
+                float time = static_cast<float>(s * frameTime);
+
+                if (transNode) {
+                    ofbx::DVec3 trans = transNode->getNodeLocalTransform(t);
+                    if (s == 0) {
+                        channel.translation.times.reserve(numSamples);
+                        channel.translation.values.reserve(numSamples);
+                    }
+                    channel.translation.times.push_back(time);
+                    channel.translation.values.push_back(convertVec3(trans));
+                }
+
+                if (rotNode) {
+                    ofbx::DVec3 rot = rotNode->getNodeLocalTransform(t);
+                    glm::vec3 eulerDeg = convertVec3(rot);
+                    glm::quat quat = eulerToQuat(eulerDeg);
+                    if (s == 0) {
+                        channel.rotation.times.reserve(numSamples);
+                        channel.rotation.values.reserve(numSamples);
+                    }
+                    channel.rotation.times.push_back(time);
+                    channel.rotation.values.push_back(quat);
+                }
+
+                if (scaleNode) {
+                    ofbx::DVec3 scale = scaleNode->getNodeLocalTransform(t);
+                    if (s == 0) {
+                        channel.scale.times.reserve(numSamples);
+                        channel.scale.values.reserve(numSamples);
+                    }
+                    channel.scale.times.push_back(time);
+                    channel.scale.values.push_back(convertVec3(scale));
+                }
+
+                if (time > clip.duration) {
+                    clip.duration = time;
+                }
+            }
+
+            if (channel.hasTranslation() || channel.hasRotation() || channel.hasScale()) {
+                clip.channels.push_back(channel);
+            }
+        }
+
+        if (!clip.channels.empty()) {
+            // Derive animation name from filename if stack name is generic
+            std::string lowerName = clip.name;
+            for (char& c : lowerName) c = std::tolower(c);
+            if (lowerName.find("mixamo") != std::string::npos) {
+                // Extract meaningful name from file path
+                size_t lastSlash = path.find_last_of("/\\");
+                size_t lastDot = path.find_last_of('.');
+                if (lastSlash != std::string::npos && lastDot != std::string::npos && lastDot > lastSlash) {
+                    clip.name = path.substr(lastSlash + 1, lastDot - lastSlash - 1);
+                }
+            }
+            SDL_Log("FBXLoader: Loaded animation '%s' with %zu channels, duration %.2fs",
+                    clip.name.c_str(), clip.channels.size(), clip.duration);
+            result.push_back(std::move(clip));
+        }
+    }
 
     return result;
 }

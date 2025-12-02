@@ -17,4 +17,8 @@ namespace FBXLoader {
 
     // Load static mesh without skeleton or animations
     std::optional<GLTFLoadResult> load(const std::string& path);
+
+    // Load only animations from an FBX file (for additional animation files)
+    // Uses the provided skeleton for bone name mapping
+    std::vector<AnimationClip> loadAnimations(const std::string& path, const Skeleton& skeleton);
 }

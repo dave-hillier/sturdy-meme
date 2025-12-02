@@ -135,6 +135,67 @@ void AnimatedCharacter::destroy(VmaAllocator allocator) {
     loaded = false;
 }
 
+void AnimatedCharacter::loadAdditionalAnimations(const std::vector<std::string>& paths) {
+    if (!loaded) {
+        SDL_Log("AnimatedCharacter: Cannot load animations before loading character");
+        return;
+    }
+
+    for (const auto& path : paths) {
+        auto newAnims = FBXLoader::loadAnimations(path, skeleton);
+        for (auto& anim : newAnims) {
+            animations.push_back(std::move(anim));
+        }
+    }
+
+    // Re-setup state machine with all animations
+    stateMachine = AnimationStateMachine();  // Reset
+
+    const AnimationClip* idleClip = nullptr;
+    const AnimationClip* walkClip = nullptr;
+    const AnimationClip* runClip = nullptr;
+    const AnimationClip* jumpClip = nullptr;
+
+    for (const auto& clip : animations) {
+        std::string lowerName = clip.name;
+        for (char& c : lowerName) c = std::tolower(c);
+
+        if (lowerName.find("idle") != std::string::npos) {
+            idleClip = &clip;
+        } else if (lowerName.find("walk") != std::string::npos) {
+            walkClip = &clip;
+        } else if (lowerName.find("run") != std::string::npos) {
+            runClip = &clip;
+        } else if (lowerName.find("jump") != std::string::npos) {
+            jumpClip = &clip;
+        }
+    }
+
+    if (idleClip) {
+        stateMachine.addState("idle", idleClip, true);
+        SDL_Log("AnimatedCharacter: Added 'idle' state");
+    }
+    if (walkClip) {
+        stateMachine.addState("walk", walkClip, true);
+        SDL_Log("AnimatedCharacter: Added 'walk' state");
+    }
+    if (runClip) {
+        stateMachine.addState("run", runClip, true);
+        SDL_Log("AnimatedCharacter: Added 'run' state");
+    }
+    if (jumpClip) {
+        stateMachine.addState("jump", jumpClip, false);
+        SDL_Log("AnimatedCharacter: Added 'jump' state");
+    }
+
+    if (idleClip) {
+        stateMachine.setState("idle");
+        useStateMachine = true;
+        SDL_Log("AnimatedCharacter: State machine refreshed with %zu total animations",
+                animations.size());
+    }
+}
+
 void AnimatedCharacter::playAnimation(const std::string& name) {
     for (size_t i = 0; i < animations.size(); ++i) {
         if (animations[i].name == name || animations[i].name.find(name) != std::string::npos) {
