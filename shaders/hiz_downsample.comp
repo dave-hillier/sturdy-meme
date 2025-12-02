@@ -1,0 +1,91 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Hi-Z Pyramid Downsample Compute Shader
+// Generates a hierarchical depth buffer by taking the maximum depth of 2x2 regions
+// Uses max instead of min because we use reversed-Z depth (0 = far, 1 = near)
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+// Push constants for mip level info
+layout(push_constant) uniform PushConstants {
+    uvec2 srcSize;      // Size of source mip level
+    uvec2 dstSize;      // Size of destination mip level
+    uint srcMipLevel;   // Source mip level (0 = original depth buffer)
+    uint isFirstPass;   // 1 if reading from depth buffer, 0 if reading from previous mip
+} pc;
+
+// Source textures
+layout(binding = 0) uniform sampler2D srcDepthBuffer;   // Original depth buffer (for first pass)
+layout(binding = 1) uniform sampler2D srcHiZMip;        // Previous Hi-Z mip level
+
+// Destination storage image
+layout(binding = 2, r32f) uniform writeonly image2D dstHiZMip;
+
+void main() {
+    ivec2 dstCoord = ivec2(gl_GlobalInvocationID.xy);
+
+    // Early out if outside destination bounds
+    if (dstCoord.x >= int(pc.dstSize.x) || dstCoord.y >= int(pc.dstSize.y)) {
+        return;
+    }
+
+    // Calculate source coordinates (2x2 region in source maps to 1 pixel in dest)
+    ivec2 srcCoord = dstCoord * 2;
+
+    float maxDepth;
+
+    if (pc.isFirstPass == 1) {
+        // Reading from original depth buffer
+        // Sample 2x2 region and take maximum (for reversed-Z, max = closest)
+        vec2 srcTexelSize = 1.0 / vec2(pc.srcSize);
+        vec2 srcUV = (vec2(srcCoord) + 0.5) * srcTexelSize;
+
+        // Sample all 4 texels in the 2x2 region
+        float d00 = texture(srcDepthBuffer, srcUV).r;
+        float d10 = texture(srcDepthBuffer, srcUV + vec2(srcTexelSize.x, 0.0)).r;
+        float d01 = texture(srcDepthBuffer, srcUV + vec2(0.0, srcTexelSize.y)).r;
+        float d11 = texture(srcDepthBuffer, srcUV + srcTexelSize).r;
+
+        // Take minimum for standard depth, maximum for reversed-Z
+        // We use MIN here because we want the CLOSEST depth (largest value in reversed-Z = closest)
+        // Actually for occlusion culling we want the FARTHEST depth in the region
+        // If any pixel is farther than the object, the object might be visible
+        // So we take MIN (farthest in reversed-Z)
+        maxDepth = min(min(d00, d10), min(d01, d11));
+    } else {
+        // Reading from previous Hi-Z mip level
+        vec2 srcTexelSize = 1.0 / vec2(pc.srcSize);
+        vec2 srcUV = (vec2(srcCoord) + 0.5) * srcTexelSize;
+
+        float d00 = texture(srcHiZMip, srcUV).r;
+        float d10 = texture(srcHiZMip, srcUV + vec2(srcTexelSize.x, 0.0)).r;
+        float d01 = texture(srcHiZMip, srcUV + vec2(0.0, srcTexelSize.y)).r;
+        float d11 = texture(srcHiZMip, srcUV + srcTexelSize).r;
+
+        // Same logic: min for farthest depth
+        maxDepth = min(min(d00, d10), min(d01, d11));
+    }
+
+    // Handle edge cases where source is odd-sized (extra row/column)
+    if (srcCoord.x + 1 >= int(pc.srcSize.x)) {
+        // Only one column to sample
+        if (pc.isFirstPass == 1) {
+            vec2 srcTexelSize = 1.0 / vec2(pc.srcSize);
+            float d0 = texture(srcDepthBuffer, (vec2(srcCoord) + 0.5) * srcTexelSize).r;
+            float d1 = texture(srcDepthBuffer, (vec2(srcCoord) + vec2(0.5, 1.5)) * srcTexelSize).r;
+            maxDepth = min(d0, d1);
+        }
+    }
+    if (srcCoord.y + 1 >= int(pc.srcSize.y)) {
+        // Only one row to sample
+        if (pc.isFirstPass == 1) {
+            vec2 srcTexelSize = 1.0 / vec2(pc.srcSize);
+            float d0 = texture(srcDepthBuffer, (vec2(srcCoord) + 0.5) * srcTexelSize).r;
+            float d1 = texture(srcDepthBuffer, (vec2(srcCoord) + vec2(1.5, 0.5)) * srcTexelSize).r;
+            maxDepth = min(d0, d1);
+        }
+    }
+
+    imageStore(dstHiZMip, dstCoord, vec4(maxDepth, 0.0, 0.0, 0.0));
+}

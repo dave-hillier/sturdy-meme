@@ -34,6 +34,7 @@
 #include "RockSystem.h"
 #include "CloudShadowSystem.h"
 #include "SkinnedMesh.h"
+#include "HiZSystem.h"
 
 struct PushConstants {
     glm::mat4 model;
@@ -175,6 +176,12 @@ public:
     int getCurrentDay() const { return currentDay; }
     const CelestialCalculator& getCelestialCalculator() const { return celestialCalculator; }
 
+    // Hi-Z occlusion culling control
+    void setHiZCullingEnabled(bool enabled) { hiZSystem.setHiZEnabled(enabled); }
+    bool isHiZCullingEnabled() const { return hiZSystem.isHiZEnabled(); }
+    HiZSystem::CullingStats getHiZCullingStats() const { return hiZSystem.getStats(); }
+    uint32_t getVisibleObjectCount() const { return hiZSystem.getVisibleCount(currentFrame); }
+
 private:
     bool createRenderPass();
     void destroyRenderResources();
@@ -247,6 +254,7 @@ private:
     VolumetricSnowSystem volumetricSnowSystem;
     RockSystem rockSystem;
     CloudShadowSystem cloudShadowSystem;
+    HiZSystem hiZSystem;
     EnvironmentSettings environmentSettings;
     bool useVolumetricSnow = true;  // Use new volumetric system by default
 
@@ -257,6 +265,7 @@ private:
     VkImage depthImage = VK_NULL_HANDLE;
     VmaAllocation depthImageAllocation = VK_NULL_HANDLE;
     VkImageView depthImageView = VK_NULL_HANDLE;
+    VkSampler depthSampler = VK_NULL_HANDLE;  // For Hi-Z pyramid generation
     VkFormat depthFormat = VK_FORMAT_UNDEFINED;
 
     // Shadow system (CSM + dynamic shadows)
@@ -325,4 +334,7 @@ private:
     bool createSkinnedDescriptorSets();
     void updateBoneMatrices(uint32_t currentImage);
     void recordSkinnedCharacter(VkCommandBuffer cmd, uint32_t frameIndex);
+
+    // Hi-Z occlusion culling
+    void updateHiZObjectData();
 };

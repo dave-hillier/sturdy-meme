@@ -71,6 +71,7 @@ set(SOURCES
     src/AnimatedCharacter.cpp
     src/AnimationStateMachine.cpp
     src/FBXLoader.cpp
+    src/HiZSystem.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
@@ -158,6 +159,8 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_reduce.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/snow_accumulation.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/volumetric_snow.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/hiz_downsample.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/hiz_culling.comp.spv
 )
 
 set(TERRAIN_SHADER_FILES
@@ -217,6 +220,7 @@ if(SHADER_COMPILE_CMD)
         leaf.comp leaf.vert leaf.frag
         histogram_build.comp histogram_reduce.comp
         snow_accumulation.comp
+        hiz_downsample.comp hiz_culling.comp
     )
 
     foreach(SHADER ${SIMPLE_SHADERS})
@@ -387,6 +391,8 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_reduce.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/snow_accumulation.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/volumetric_snow.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/hiz_downsample.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/hiz_culling.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_dispatcher.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_subdivision.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_sum_reduction_prepass.comp.spv

@@ -129,6 +129,13 @@ namespace {
     };
 }
 
+void Mesh::calculateBounds() {
+    bounds = AABB();  // Reset to default
+    for (const auto& vertex : vertices) {
+        bounds.expand(vertex.position);
+    }
+}
+
 void Mesh::createPlane(float width, float depth) {
     float hw = width * 0.5f;
     float hd = depth * 0.5f;
@@ -144,6 +151,7 @@ void Mesh::createPlane(float width, float depth) {
     };
 
     indices = {0, 1, 2, 2, 3, 0};
+    calculateBounds();
 }
 
 void Mesh::createDisc(float radius, int segments, float uvScale) {
@@ -175,6 +183,7 @@ void Mesh::createDisc(float radius, int segments, float uvScale) {
         indices.push_back(i + 1);       // Next edge vertex
         indices.push_back(i);           // Current edge vertex
     }
+    calculateBounds();
 }
 
 void Mesh::createSphere(float radius, int stacks, int slices) {
@@ -222,6 +231,7 @@ void Mesh::createSphere(float radius, int stacks, int slices) {
             indices.push_back(second + 1);
         }
     }
+    calculateBounds();
 }
 
 void Mesh::createCapsule(float radius, float height, int stacks, int slices) {
@@ -323,6 +333,7 @@ void Mesh::createCapsule(float radius, float height, int stacks, int slices) {
             indices.push_back(second + 1);
         }
     }
+    calculateBounds();
 }
 
 void Mesh::createCube() {
@@ -380,11 +391,13 @@ void Mesh::createCube() {
         16, 17, 18, 18, 19, 16,  // Right
         20, 21, 22, 22, 23, 20   // Left
     };
+    calculateBounds();
 }
 
 void Mesh::setCustomGeometry(const std::vector<Vertex>& verts, const std::vector<uint32_t>& inds) {
     vertices = verts;
     indices = inds;
+    calculateBounds();
 }
 
 void Mesh::createCylinder(float radius, float height, int segments) {
@@ -467,6 +480,7 @@ void Mesh::createCylinder(float radius, float height, int segments) {
         indices.push_back(bottomCenterIdx + ((i + 1) % segments) + 1);
         indices.push_back(bottomCenterIdx + i + 1);
     }
+    calculateBounds();
 }
 
 void Mesh::createRock(float baseRadius, int subdivisions, uint32_t seed, float roughness, float asymmetry) {
@@ -638,6 +652,7 @@ void Mesh::createRock(float baseRadius, int subdivisions, uint32_t seed, float r
     }
 
     indices = std::move(tempIndices);
+    calculateBounds();
 }
 
 void Mesh::upload(VmaAllocator allocator, VkDevice device, VkCommandPool commandPool, VkQueue queue) {

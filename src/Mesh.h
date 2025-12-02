@@ -5,6 +5,55 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include <array>
+#include <limits>
+
+// Axis-Aligned Bounding Box for culling
+struct AABB {
+    glm::vec3 min = glm::vec3(std::numeric_limits<float>::max());
+    glm::vec3 max = glm::vec3(std::numeric_limits<float>::lowest());
+
+    // Expand bounds to include a point
+    void expand(const glm::vec3& point) {
+        min = glm::min(min, point);
+        max = glm::max(max, point);
+    }
+
+    // Get center of the bounding box
+    glm::vec3 getCenter() const {
+        return (min + max) * 0.5f;
+    }
+
+    // Get half-extents (for OBB tests)
+    glm::vec3 getExtents() const {
+        return (max - min) * 0.5f;
+    }
+
+    // Check if AABB is valid (has been expanded at least once)
+    bool isValid() const {
+        return min.x <= max.x && min.y <= max.y && min.z <= max.z;
+    }
+
+    // Transform AABB by a matrix (returns axis-aligned bounds of transformed box)
+    AABB transformed(const glm::mat4& transform) const {
+        AABB result;
+        // Transform all 8 corners and expand result bounds
+        glm::vec3 corners[8] = {
+            glm::vec3(min.x, min.y, min.z),
+            glm::vec3(max.x, min.y, min.z),
+            glm::vec3(min.x, max.y, min.z),
+            glm::vec3(max.x, max.y, min.z),
+            glm::vec3(min.x, min.y, max.z),
+            glm::vec3(max.x, min.y, max.z),
+            glm::vec3(min.x, max.y, max.z),
+            glm::vec3(max.x, max.y, max.z)
+        };
+        for (int i = 0; i < 8; ++i) {
+            glm::vec4 transformed = transform * glm::vec4(corners[i], 1.0f);
+            result.expand(glm::vec3(transformed));
+        }
+        return result;
+    }
+};
 
 struct Vertex {
     glm::vec3 position;
@@ -77,9 +126,16 @@ public:
     // Access to vertex data for physics collision shapes
     const std::vector<Vertex>& getVertices() const { return vertices; }
 
+    // Get local-space bounding box
+    const AABB& getBounds() const { return bounds; }
+
 private:
+    // Recalculate bounding box from vertices
+    void calculateBounds();
+
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
+    AABB bounds;  // Local-space bounding box
 
     VkBuffer vertexBuffer = VK_NULL_HANDLE;
     VmaAllocation vertexAllocation = VK_NULL_HANDLE;
