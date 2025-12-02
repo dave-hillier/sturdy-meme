@@ -52,6 +52,7 @@ private:
     float lastDeltaTime = 0.016f;
 
     bool running = false;
-    float moveSpeed = 3.0f;
-    float sprintSpeed = 6.0f;
+    // Walk speed matches animation root motion: 158.42 cm / 1.10s * 0.01 scale = 1.44 m/s
+    float moveSpeed = 1.44f;
+    float sprintSpeed = 4.5f;
 };

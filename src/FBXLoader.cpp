@@ -535,8 +535,26 @@ std::optional<GLTFSkinnedLoadResult> loadSkinned(const std::string& path) {
         }
 
         if (!clip.channels.empty()) {
-            SDL_Log("FBXLoader: Loaded animation '%s' with %zu channels, duration %.2fs",
-                    clip.name.c_str(), clip.channels.size(), clip.duration);
+            // Find root bone index (usually "Hips" for Mixamo)
+            clip.rootBoneIndex = result.skeleton.findJointIndex("Hips");
+            if (clip.rootBoneIndex < 0) {
+                // Try alternative names
+                clip.rootBoneIndex = result.skeleton.findJointIndex("Root");
+            }
+
+            // Calculate root motion per cycle from the root bone's translation channel
+            if (clip.rootBoneIndex >= 0) {
+                const AnimationChannel* rootChannel = clip.getChannelForJoint(clip.rootBoneIndex);
+                if (rootChannel && rootChannel->hasTranslation() && !rootChannel->translation.values.empty()) {
+                    glm::vec3 startPos = rootChannel->translation.values.front();
+                    glm::vec3 endPos = rootChannel->translation.values.back();
+                    clip.rootMotionPerCycle = endPos - startPos;
+                }
+            }
+
+            SDL_Log("FBXLoader: Loaded animation '%s' with %zu channels, duration %.2fs, rootBone=%d, rootMotion=(%.2f, %.2f, %.2f)",
+                    clip.name.c_str(), clip.channels.size(), clip.duration, clip.rootBoneIndex,
+                    clip.rootMotionPerCycle.x, clip.rootMotionPerCycle.y, clip.rootMotionPerCycle.z);
             result.animations.push_back(std::move(clip));
         }
     }
@@ -833,8 +851,26 @@ std::vector<AnimationClip> loadAnimations(const std::string& path, const Skeleto
                     clip.name = path.substr(lastSlash + 1, lastDot - lastSlash - 1);
                 }
             }
-            SDL_Log("FBXLoader: Loaded animation '%s' with %zu channels, duration %.2fs",
-                    clip.name.c_str(), clip.channels.size(), clip.duration);
+
+            // Find root bone index (usually "Hips" for Mixamo)
+            clip.rootBoneIndex = skeleton.findJointIndex("Hips");
+            if (clip.rootBoneIndex < 0) {
+                clip.rootBoneIndex = skeleton.findJointIndex("Root");
+            }
+
+            // Calculate root motion per cycle from the root bone's translation channel
+            if (clip.rootBoneIndex >= 0) {
+                const AnimationChannel* rootChannel = clip.getChannelForJoint(clip.rootBoneIndex);
+                if (rootChannel && rootChannel->hasTranslation() && !rootChannel->translation.values.empty()) {
+                    glm::vec3 startPos = rootChannel->translation.values.front();
+                    glm::vec3 endPos = rootChannel->translation.values.back();
+                    clip.rootMotionPerCycle = endPos - startPos;
+                }
+            }
+
+            SDL_Log("FBXLoader: Loaded animation '%s' with %zu channels, duration %.2fs, rootMotion=(%.2f, %.2f, %.2f)",
+                    clip.name.c_str(), clip.channels.size(), clip.duration,
+                    clip.rootMotionPerCycle.x, clip.rootMotionPerCycle.y, clip.rootMotionPerCycle.z);
             result.push_back(std::move(clip));
         }
     }
