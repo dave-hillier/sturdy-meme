@@ -445,6 +445,27 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     // Create sky descriptor sets now that uniform buffers and LUTs are ready
     if (!skySystem.createDescriptorSets(uniformBuffers, sizeof(UniformBufferObject), atmosphereLUTSystem)) return false;
 
+    // Initialize Hi-Z occlusion culling system
+    HiZSystem::InitInfo hiZInfo{};
+    hiZInfo.device = device;
+    hiZInfo.allocator = allocator;
+    hiZInfo.descriptorPool = descriptorPool;
+    hiZInfo.extent = swapchainExtent;
+    hiZInfo.shaderPath = resourcePath + "/shaders";
+    hiZInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+    hiZInfo.depthFormat = depthFormat;
+
+    if (!hiZSystem.init(hiZInfo)) {
+        SDL_Log("Warning: Hi-Z system initialization failed, occlusion culling disabled");
+        // Continue without Hi-Z - it's an optional optimization
+    } else {
+        // Connect depth buffer to Hi-Z system
+        hiZSystem.setDepthBuffer(depthImageView, depthSampler);
+
+        // Initialize object data for culling
+        updateHiZObjectData();
+    }
+
     if (!createSyncObjects()) return false;
 
     return true;
@@ -508,6 +529,7 @@ void Renderer::shutdown() {
         leafSystem.destroy(device, allocator);
         froxelSystem.destroy(device, allocator);
         cloudShadowSystem.destroy();
+        hiZSystem.destroy();
         atmosphereLUTSystem.destroy(device, allocator);
         skySystem.destroy(device, allocator);
         postProcessSystem.destroy(device, allocator);
@@ -549,6 +571,10 @@ void Renderer::destroyRenderResources() {
     VkDevice device = vulkanContext.getDevice();
     VmaAllocator allocator = vulkanContext.getAllocator();
 
+    if (depthSampler != VK_NULL_HANDLE) {
+        vkDestroySampler(device, depthSampler, nullptr);
+        depthSampler = VK_NULL_HANDLE;
+    }
     if (depthImageView != VK_NULL_HANDLE) {
         vkDestroyImageView(device, depthImageView, nullptr);
         depthImageView = VK_NULL_HANDLE;
@@ -587,11 +613,13 @@ bool Renderer::createRenderPass() {
     depthAttachment.format = VK_FORMAT_D32_SFLOAT;
     depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
     depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    // Store depth for Hi-Z pyramid generation
+    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    // Transition to shader read for Hi-Z
+    depthAttachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
     depthFormat = VK_FORMAT_D32_SFLOAT;
 
@@ -652,7 +680,8 @@ bool Renderer::createDepthResources() {
     imageInfo.format = depthFormat;
     imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
     imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    imageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    // Add SAMPLED_BIT for Hi-Z pyramid generation
+    imageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
     imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
     imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
@@ -677,6 +706,24 @@ bool Renderer::createDepthResources() {
 
     if (vkCreateImageView(device, &viewInfo, nullptr, &depthImageView) != VK_SUCCESS) {
         SDL_Log("Failed to create depth image view");
+        return false;
+    }
+
+    // Create depth sampler for Hi-Z pyramid generation
+    VkSamplerCreateInfo samplerInfo{};
+    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    samplerInfo.magFilter = VK_FILTER_NEAREST;
+    samplerInfo.minFilter = VK_FILTER_NEAREST;
+    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.minLod = 0.0f;
+    samplerInfo.maxLod = 0.0f;
+    samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+
+    if (vkCreateSampler(device, &samplerInfo, nullptr, &depthSampler) != VK_SUCCESS) {
+        SDL_Log("Failed to create depth sampler");
         return false;
     }
 
@@ -2149,4 +2196,63 @@ void Renderer::recordSkinnedCharacter(VkCommandBuffer cmd, uint32_t frameIndex) 
     vkCmdBindIndexBuffer(cmd, skinnedMesh.getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
 
     vkCmdDrawIndexed(cmd, skinnedMesh.getIndexCount(), 1, 0, 0, 0);
+}
+
+void Renderer::updateHiZObjectData() {
+    std::vector<CullObjectData> cullObjects;
+
+    // Gather scene objects for culling
+    const auto& sceneObjects = sceneManager.getSceneObjects();
+    for (size_t i = 0; i < sceneObjects.size(); ++i) {
+        const auto& obj = sceneObjects[i];
+        if (obj.mesh == nullptr) continue;
+
+        // Get local AABB and transform to world space
+        const AABB& localBounds = obj.mesh->getBounds();
+        AABB worldBounds = localBounds.transformed(obj.transform);
+
+        CullObjectData cullData{};
+
+        // Calculate bounding sphere from transformed AABB
+        glm::vec3 center = worldBounds.getCenter();
+        glm::vec3 extents = worldBounds.getExtents();
+        float radius = glm::length(extents);
+
+        cullData.boundingSphere = glm::vec4(center, radius);
+        cullData.aabbMin = glm::vec4(worldBounds.min, 0.0f);
+        cullData.aabbMax = glm::vec4(worldBounds.max, 0.0f);
+        cullData.meshIndex = static_cast<uint32_t>(i);
+        cullData.firstIndex = 0;  // Single mesh per object
+        cullData.indexCount = obj.mesh->getIndexCount();
+        cullData.vertexOffset = 0;
+
+        cullObjects.push_back(cullData);
+    }
+
+    // Also add procedural rocks
+    const auto& rockObjects = rockSystem.getSceneObjects();
+    for (size_t i = 0; i < rockObjects.size(); ++i) {
+        const auto& obj = rockObjects[i];
+        if (obj.mesh == nullptr) continue;
+
+        const AABB& localBounds = obj.mesh->getBounds();
+        AABB worldBounds = localBounds.transformed(obj.transform);
+
+        CullObjectData cullData{};
+        glm::vec3 center = worldBounds.getCenter();
+        glm::vec3 extents = worldBounds.getExtents();
+        float radius = glm::length(extents);
+
+        cullData.boundingSphere = glm::vec4(center, radius);
+        cullData.aabbMin = glm::vec4(worldBounds.min, 0.0f);
+        cullData.aabbMax = glm::vec4(worldBounds.max, 0.0f);
+        cullData.meshIndex = static_cast<uint32_t>(sceneObjects.size() + i);
+        cullData.firstIndex = 0;
+        cullData.indexCount = obj.mesh->getIndexCount();
+        cullData.vertexOffset = 0;
+
+        cullObjects.push_back(cullData);
+    }
+
+    hiZSystem.updateObjectData(cullObjects);
 }
