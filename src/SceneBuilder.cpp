@@ -210,6 +210,17 @@ void SceneBuilder::createSceneObjects() {
         .withCastsShadow(false)
         .build());
 
+    // Debug cube at Suzanne position for visibility test
+    sceneObjects.push_back(RenderableBuilder()
+        .atPosition(glm::vec3(5.0f, 5.0f, -5.0f))
+        .withMesh(&cubeMesh)
+        .withTexture(&crateTexture)
+        .withRoughness(0.3f)
+        .withMetallic(0.0f)
+        .withEmissiveIntensity(5.0f)
+        .withEmissiveColor(glm::vec3(1.0f, 0.0f, 0.0f))
+        .build());
+
     // Player capsule - centered at origin, uses metal texture for visibility
     playerObjectIndex = sceneObjects.size();
     sceneObjects.push_back(RenderableBuilder()

@@ -2,6 +2,8 @@
 #include "OBJLoader.h"
 #include "ShaderLoader.h"
 #include "BufferUtils.h"
+#include <glm/gtc/matrix_transform.hpp>
+#include <algorithm>
 #include <iostream>
 #include <array>
 #include <cstring>
@@ -714,15 +716,76 @@ bool CatmullClarkSystem::createWireframePipeline() {
 
 void CatmullClarkSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos,
                                          const glm::mat4& view, const glm::mat4& proj) {
-    // Currently a stub - uniforms will be updated when rendering is implemented
+    // The CatmullClarkSystem uses the shared scene UBO which is updated by the main renderer.
+    // This method is provided for API consistency and future Catmull-Clark specific uniforms.
+    // Currently no additional uniforms need updating here.
 }
 
 void CatmullClarkSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) {
-    // TODO: Record subdivision compute pass
-    // For now, this is a stub
+    // Bind the subdivision compute pipeline
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, subdivisionPipeline);
+
+    // Bind the compute descriptor set
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, subdivisionPipelineLayout,
+                           0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
+
+    // Push subdivision parameters
+    CatmullClarkSubdivisionPushConstants pc{};
+    pc.targetEdgePixels = config.targetEdgePixels;
+    pc.splitThreshold = config.splitThreshold;
+    pc.mergeThreshold = config.mergeThreshold;
+    pc.padding = 0;
+    vkCmdPushConstants(cmd, subdivisionPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT,
+                      0, sizeof(CatmullClarkSubdivisionPushConstants), &pc);
+
+    // Dispatch compute shader - one workgroup per face at base level
+    uint32_t workgroupCount = (cbt.getFaceCount() + SUBDIVISION_WORKGROUP_SIZE - 1) / SUBDIVISION_WORKGROUP_SIZE;
+    vkCmdDispatch(cmd, std::max(1u, workgroupCount), 1, 1);
+
+    // Memory barrier: compute shader writes -> graphics shader reads
+    VkMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
+
+    vkCmdPipelineBarrier(cmd,
+                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                        VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
+                        0, 1, &barrier, 0, nullptr, 0, nullptr);
 }
 
 void CatmullClarkSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
-    // TODO: Record rendering commands
-    // For now, this is a stub
+    // Select pipeline based on wireframe mode
+    VkPipeline pipeline = wireframeMode ? wireframePipeline : renderPipeline;
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+
+    // Bind descriptor set for this frame
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, renderPipelineLayout,
+                           0, 1, &renderDescriptorSets[frameIndex], 0, nullptr);
+
+    // Set dynamic viewport
+    VkViewport viewport{};
+    viewport.x = 0.0f;
+    viewport.y = 0.0f;
+    viewport.width = static_cast<float>(extent.width);
+    viewport.height = static_cast<float>(extent.height);
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+    // Set dynamic scissor
+    VkRect2D scissor{};
+    scissor.offset = {0, 0};
+    scissor.extent = extent;
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+    // Push model matrix
+    CatmullClarkPushConstants pc{};
+    pc.model = glm::translate(glm::mat4(1.0f), config.position) *
+               glm::scale(glm::mat4(1.0f), config.scale);
+    vkCmdPushConstants(cmd, renderPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT,
+                      0, sizeof(CatmullClarkPushConstants), &pc);
+
+    // Indirect draw - vertex count populated by subdivision compute shader
+    vkCmdDrawIndirect(cmd, indirectDrawBuffer, 0, 1, sizeof(VkDrawIndirectCommand));
 }
