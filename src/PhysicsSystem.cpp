@@ -749,7 +749,7 @@ std::vector<RaycastHit> PhysicsWorld::castRayAllHits(const glm::vec3& from, cons
     JPH::DefaultBroadPhaseLayerFilter broadPhaseFilter(objectVsBroadPhaseLayerFilter, PhysicsLayers::MOVING);
     JPH::DefaultObjectLayerFilter objectLayerFilter(objectLayerPairFilter, PhysicsLayers::MOVING);
 
-    physicsSystem->GetBroadPhaseQuery().CastRay(ray, collector, broadPhaseFilter, objectLayerFilter);
+    physicsSystem->GetBroadPhaseQuery().CastRay(static_cast<JPH::RayCast>(ray), collector, broadPhaseFilter, objectLayerFilter);
 
     // Convert results
     for (const auto& hit : collector.mHits) {
