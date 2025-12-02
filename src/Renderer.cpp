@@ -1088,22 +1088,27 @@ bool Renderer::createDescriptorPool() {
     descriptorManagerPool.emplace(device, 64);
 
     // Legacy pool for systems not yet migrated to DescriptorManager
-    // This pool is still needed for: GrassSystem, WeatherSystem, LeafSystem, etc.
+    // This pool is still needed for: GrassSystem, WeatherSystem, LeafSystem, HiZSystem, etc.
+    // HiZ system needs: ~11 pyramid descriptor sets (one per mip level) + 2 culling sets
+    //   - Combined image samplers: 2 per pyramid set + 1 per culling set = ~24
+    //   - Storage images: 1 per pyramid set = ~11
+    //   - Storage buffers: 3 per culling set = ~6
+    //   - Uniform buffers: 1 per culling set = ~2
     std::array<VkDescriptorPoolSize, 4> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 18);
+    poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 20);
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 35);
+    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 50);
     poolSizes[2].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    poolSizes[2].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 32);
+    poolSizes[2].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 40);
     poolSizes[3].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    poolSizes[3].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 16);
+    poolSizes[3].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 24);
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
     poolInfo.pPoolSizes = poolSizes.data();
-    poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 29);
+    poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 42);
 
     if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS) {
         SDL_Log("Failed to create legacy descriptor pool");
