@@ -34,12 +34,21 @@ struct AnimationClip {
     std::string name;
     float duration;
     std::vector<AnimationChannel> channels;
+    int32_t rootBoneIndex = -1;  // Index of root bone for root motion extraction
+    glm::vec3 rootMotionPerCycle = glm::vec3(0.0f);  // Total root displacement over one cycle
 
     // Sample all channels at a given time and apply to skeleton
-    void sample(float time, Skeleton& skeleton) const;
+    // If stripRootMotion is true, horizontal (XZ) translation is removed from the root bone
+    void sample(float time, Skeleton& skeleton, bool stripRootMotion = true) const;
 
     // Get the channel for a specific joint (or nullptr if none)
     const AnimationChannel* getChannelForJoint(int32_t jointIndex) const;
+
+    // Calculate root motion speed (units per second)
+    float getRootMotionSpeed() const {
+        if (duration <= 0.0f) return 0.0f;
+        return glm::length(glm::vec2(rootMotionPerCycle.x, rootMotionPerCycle.z)) / duration;
+    }
 };
 
 // Simple animation player for a single clip

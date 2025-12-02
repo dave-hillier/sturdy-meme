@@ -1,7 +1,7 @@
 #include "Animation.h"
 #include <glm/gtc/matrix_transform.hpp>
 
-void AnimationClip::sample(float time, Skeleton& skeleton) const {
+void AnimationClip::sample(float time, Skeleton& skeleton, bool stripRootMotion) const {
     for (const auto& channel : channels) {
         if (channel.jointIndex < 0 || channel.jointIndex >= static_cast<int32_t>(skeleton.joints.size())) {
             continue;
@@ -34,6 +34,13 @@ void AnimationClip::sample(float time, Skeleton& skeleton) const {
         }
         if (channel.hasScale()) {
             scale = channel.scale.sample(time);
+        }
+
+        // Strip root motion: zero out horizontal translation for root bone
+        // This prevents the animation from moving the character - locomotion handles that
+        if (stripRootMotion && channel.jointIndex == rootBoneIndex) {
+            translation.x = 0.0f;
+            translation.z = 0.0f;
         }
 
         // Build local transform matrix: T * Rpre * R * S
