@@ -56,5 +56,5 @@ private:
 
     // Thresholds for state transitions
     static constexpr float WALK_THRESHOLD = 0.1f;
-    static constexpr float RUN_THRESHOLD = 5.0f;  // Above normal move speed (3.0) so walking doesn't trigger run
+    static constexpr float RUN_THRESHOLD = 2.5f;  // Between walk (1.44 m/s) and run (3.98 m/s) animation speeds
 };
