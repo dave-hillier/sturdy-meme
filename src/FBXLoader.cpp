@@ -217,10 +217,21 @@ MaterialInfo extractMaterialInfo(const ofbx::Material* mat, const std::string& f
 
     // PBR properties
     // Convert shininess to roughness (shininess 0-1000 -> roughness 1-0)
+    // Use a more gradual conversion for better visual results
     double shininess = mat->getShininess();
     if (shininess > 0) {
         // Approximate conversion: higher shininess = lower roughness
-        info.roughness = 1.0f - std::min(1.0f, static_cast<float>(shininess) / 100.0f);
+        // Use sqrt for a more perceptually linear mapping
+        float normalizedShininess = std::min(1.0f, static_cast<float>(shininess) / 128.0f);
+        info.roughness = 1.0f - std::sqrt(normalizedShininess);
+    }
+
+    // Derive metallic from specular color intensity
+    // High specular intensity with colored specular suggests metallic materials
+    float specularIntensity = (info.specularColor.r + info.specularColor.g + info.specularColor.b) / 3.0f;
+    if (specularIntensity > 0.5f) {
+        // Strong specular suggests metallic material
+        info.metallic = std::min(1.0f, (specularIntensity - 0.5f) * 2.0f);
     }
 
     // OpenFBX doesn't expose opacity directly, default to 1.0

@@ -3,6 +3,7 @@
 #include "SkinnedMesh.h"
 #include "Animation.h"
 #include "AnimationStateMachine.h"
+#include "GLTFLoader.h"
 #include "Mesh.h"
 #include <vk_mem_alloc.h>
 #include <string>
@@ -63,6 +64,10 @@ public:
     float getCurrentTime() const { return animationPlayer.getCurrentTime(); }
     float getCurrentDuration() const { return animationPlayer.getDuration(); }
 
+    // Material info
+    const std::vector<MaterialInfo>& getMaterials() const { return materials; }
+    bool hasMaterials() const { return !materials.empty(); }
+
     // Get bone matrices for GPU skinning
     void computeBoneMatrices(std::vector<glm::mat4>& outBoneMatrices) const;
 
@@ -87,6 +92,9 @@ private:
     AnimationPlayer animationPlayer;
     AnimationStateMachine stateMachine;
     bool useStateMachine = false;  // Set true after state machine is initialized
+
+    // Materials loaded from FBX/glTF
+    std::vector<MaterialInfo> materials;
 
     // GPU skinning: SkinnedMesh keeps original vertex data, bone matrices are updated each frame
     SkinnedMesh skinnedMesh;
