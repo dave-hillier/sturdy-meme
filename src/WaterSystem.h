@@ -23,6 +23,7 @@ public:
         VkExtent2D extent;
         VkCommandPool commandPool;
         VkQueue graphicsQueue;
+        float waterSize = 100.0f;  // Size of water plane in world units
     };
 
     // Water uniforms - must match shader layout
@@ -82,6 +83,7 @@ private:
     VkExtent2D extent = {0, 0};
     VkCommandPool commandPool = VK_NULL_HANDLE;
     VkQueue graphicsQueue = VK_NULL_HANDLE;
+    float waterSize = 100.0f;
 
     // Pipeline resources
     VkPipeline pipeline = VK_NULL_HANDLE;

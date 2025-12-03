@@ -17,6 +17,7 @@ bool WaterSystem::init(const InitInfo& info) {
     extent = info.extent;
     commandPool = info.commandPool;
     graphicsQueue = info.graphicsQueue;
+    waterSize = info.waterSize;
 
     // Initialize default water parameters
     waterUniforms.waterColor = glm::vec4(0.1f, 0.3f, 0.5f, 0.85f);  // Blue-green, semi-transparent
@@ -159,8 +160,9 @@ bool WaterSystem::createPipeline() {
 bool WaterSystem::createWaterMesh() {
     // Create a subdivided plane for the water surface
     // More subdivisions = smoother wave animation
-    const int gridSize = 64;  // 64x64 grid
-    const float size = waterUniforms.waterExtent.z;
+    // Scale grid resolution based on water size for better wave detail
+    const int gridSize = (waterSize > 1000.0f) ? 256 : 64;
+    const float size = waterSize;
 
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;

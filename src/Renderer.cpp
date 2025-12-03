@@ -518,7 +518,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
         // Continue without profiling - it's optional
     }
 
-    // Initialize water system
+    // Initialize water system - sea covering terrain areas below sea level
     WaterSystem::InitInfo waterInfo{};
     waterInfo.device = device;
     waterInfo.physicalDevice = physicalDevice;
@@ -530,17 +530,18 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     waterInfo.extent = swapchainExtent;
     waterInfo.commandPool = commandPool;
     waterInfo.graphicsQueue = graphicsQueue;
+    waterInfo.waterSize = 16384.0f;  // Cover full terrain
 
     if (!waterSystem.init(waterInfo)) return false;
 
-    // Configure water surface - positioned at a low area
-    waterSystem.setWaterLevel(-2.0f);  // Below terrain level for a lake
-    waterSystem.setWaterExtent(glm::vec2(0.0f, 0.0f), glm::vec2(200.0f, 200.0f));
-    waterSystem.setWaterColor(glm::vec4(0.05f, 0.15f, 0.25f, 0.9f));
-    waterSystem.setWaveAmplitude(0.3f);
-    waterSystem.setWaveLength(6.0f);
-    waterSystem.setWaveSteepness(0.3f);
-    waterSystem.setWaveSpeed(1.0f);
+    // Configure water surface - sea level at 0
+    waterSystem.setWaterLevel(0.0f);  // Sea level
+    waterSystem.setWaterExtent(glm::vec2(0.0f, 0.0f), glm::vec2(16384.0f, 16384.0f));
+    waterSystem.setWaterColor(glm::vec4(0.02f, 0.08f, 0.15f, 0.95f));  // Deep ocean blue
+    waterSystem.setWaveAmplitude(1.5f);   // Ocean-scale waves
+    waterSystem.setWaveLength(30.0f);     // Longer wavelengths for open sea
+    waterSystem.setWaveSteepness(0.4f);
+    waterSystem.setWaveSpeed(0.8f);
 
     // Create water descriptor sets
     if (!waterSystem.createDescriptorSets(uniformBuffers, sizeof(UniformBufferObject), shadowSystem)) return false;
