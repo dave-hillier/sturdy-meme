@@ -7,33 +7,7 @@
 #include "shadow_common.glsl"
 #include "atmosphere_common.glsl"
 #include "snow_common.glsl"
-
-layout(binding = 0) uniform UniformBufferObject {
-    mat4 model;
-    mat4 view;
-    mat4 proj;
-    mat4 cascadeViewProj[NUM_CASCADES];  // Per-cascade light matrices
-    vec4 cascadeSplits;                   // View-space split depths
-    vec4 sunDirection;
-    vec4 moonDirection;
-    vec4 sunColor;
-    vec4 moonColor;                       // rgb = moon color
-    vec4 ambientColor;
-    vec4 cameraPosition;
-    vec4 pointLightPosition;  // xyz = position, w = intensity
-    vec4 pointLightColor;     // rgb = color, a = radius
-    vec4 windDirectionAndSpeed;           // xy = direction, z = speed, w = time
-    float timeOfDay;
-    float shadowMapSize;
-    float debugCascades;
-    float julianDay;                       // Julian day for sidereal rotation
-    float cloudStyle;
-    float snowAmount;            // Global snow intensity (0-1)
-    float snowRoughness;         // Snow surface roughness
-    float snowTexScale;          // World-space snow texture scale
-    vec4 snowColor;              // rgb = snow color, a = unused
-    vec4 snowMaskParams;         // xy = mask origin, z = mask size, w = unused
-} ubo;
+#include "ubo_common.glsl"
 
 layout(binding = 2) uniform sampler2DArrayShadow shadowMapArray;  // Changed to array for CSM
 

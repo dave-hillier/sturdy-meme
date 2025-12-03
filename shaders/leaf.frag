@@ -1,27 +1,10 @@
 #version 450
 
+#extension GL_GOOGLE_include_directive : require
+
 const int NUM_CASCADES = 4;
 
-layout(binding = 0) uniform UniformBufferObject {
-    mat4 model;
-    mat4 view;
-    mat4 proj;
-    mat4 cascadeViewProj[NUM_CASCADES];
-    vec4 cascadeSplits;
-    vec4 sunDirection;
-    vec4 moonDirection;
-    vec4 sunColor;
-    vec4 moonColor;
-    vec4 ambientColor;
-    vec4 cameraPosition;
-    vec4 pointLightPosition;
-    vec4 pointLightColor;
-    vec4 windDirectionAndSpeed;           // xy = direction, z = speed, w = time
-    float timeOfDay;
-    float shadowMapSize;
-    float debugCascades;
-    float julianDay;                       // Julian day for sidereal rotation
-} ubo;
+#include "ubo_common.glsl"
 
 // Leaf states
 const uint STATE_FALLING = 1;
