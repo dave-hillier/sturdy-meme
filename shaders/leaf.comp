@@ -1,5 +1,9 @@
 #version 450
 
+#extension GL_GOOGLE_include_directive : require
+
+#include "terrain_height_common.glsl"
+
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
 // Leaf particle states
@@ -202,21 +206,16 @@ vec2 sampleDisplacement(vec2 worldXZ) {
     return texture(displacementMap, uv).rg;
 }
 
-// Sample terrain height at world XZ position
-float sampleTerrainHeight(vec2 worldXZ) {
-    // Convert world XZ to heightmap UV: terrain is centered at origin
-    vec2 terrainUV = worldXZ / uniforms.terrainSize + 0.5;
+// Sample terrain height at world XZ position (uses shared terrain_height_common.glsl)
+float sampleLeafTerrainHeight(vec2 worldXZ) {
+    vec2 terrainUV = worldPosToTerrainUV(worldXZ, uniforms.terrainSize);
 
     // Check if within terrain bounds
     if (terrainUV.x < 0.0 || terrainUV.x > 1.0 || terrainUV.y < 0.0 || terrainUV.y > 1.0) {
         return uniforms.groundLevel;  // Fall back to flat ground level outside terrain
     }
 
-    // Sample heightmap (R32_SFLOAT format, values in [0,1])
-    float heightSample = texture(terrainHeightMap, terrainUV).r;
-
-    // Convert to world Y using same formula as terrain shader
-    return (heightSample - 0.5) * uniforms.terrainHeightScale;
+    return sampleTerrainHeight(terrainHeightMap, terrainUV, uniforms.terrainHeightScale);
 }
 
 // Sample wind with turbulence
@@ -322,7 +321,7 @@ void spawnGroundedLeaf(uint idx) {
     vec3 pos;
     pos.x = mix(uniforms.spawnRegionMin.x, uniforms.spawnRegionMax.x, rnd.x);
     pos.z = mix(uniforms.spawnRegionMin.z, uniforms.spawnRegionMax.z, rnd.z);
-    float terrainY = sampleTerrainHeight(vec2(pos.x, pos.z));
+    float terrainY = sampleLeafTerrainHeight(vec2(pos.x, pos.z));
     pos.y = terrainY + 0.01;  // Slightly above terrain
 
     // Flat orientation with random yaw
@@ -517,7 +516,7 @@ void main() {
             p.position += p.velocity * dt;
 
             // Ground collision - sample terrain at current position
-            float terrainY = sampleTerrainHeight(p.position.xz);
+            float terrainY = sampleLeafTerrainHeight(p.position.xz);
             if (p.position.y <= terrainY + p.size * 0.5) {
                 p.position.y = terrainY + 0.01;
                 p.velocity = vec3(0.0);
@@ -603,7 +602,7 @@ void main() {
             p.position += p.velocity * dt;
 
             // Sample terrain at current position
-            float terrainY = sampleTerrainHeight(p.position.xz);
+            float terrainY = sampleLeafTerrainHeight(p.position.xz);
 
             // Check if settled
             float speed = length(p.velocity);

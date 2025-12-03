@@ -5,11 +5,13 @@
 /*
  * terrain_shadow.vert - Terrain shadow pass vertex shader
  * Simplified version for shadow map rendering
+ * Height convention: see terrain_height_common.glsl
  */
 
 #define CBT_BUFFER_BINDING 0
 #include "cbt.glsl"
 #include "leb.glsl"
+#include "../terrain_height_common.glsl"
 
 // Height map
 layout(binding = 3) uniform sampler2D heightMap;
@@ -45,8 +47,8 @@ void main() {
         uv = v2;
     }
 
-    // Sample height (center around y=0)
-    float height = (texture(heightMap, uv).r - 0.5) * heightScale;
+    // Sample height using shared function (terrain_height_common.glsl)
+    float height = sampleTerrainHeight(heightMap, uv, heightScale);
 
     // Compute world position
     vec3 worldPos = vec3(

@@ -2,6 +2,9 @@
 #include <SDL3/SDL.h>
 
 bool SceneManager::init(SceneBuilder::InitInfo& builderInfo) {
+    // Store terrain height function for physics placement
+    terrainHeightFunc = builderInfo.getTerrainHeight;
+
     // Initialize scene builder (meshes, textures, objects)
     if (!sceneBuilder.init(builderInfo)) {
         SDL_Log("Failed to initialize SceneBuilder");
@@ -13,6 +16,13 @@ bool SceneManager::init(SceneBuilder::InitInfo& builderInfo) {
 
     SDL_Log("SceneManager initialized successfully");
     return true;
+}
+
+float SceneManager::getTerrainHeight(float x, float z) const {
+    if (terrainHeightFunc) {
+        return terrainHeightFunc(x, z);
+    }
+    return 0.0f;
 }
 
 void SceneManager::initPhysics(PhysicsWorld& physics) {
@@ -51,18 +61,19 @@ void SceneManager::initializeScenePhysics(PhysicsWorld& physics) {
     // which creates a heightfield from the TerrainSystem's height data
 
     // Scene object layout from SceneBuilder:
-    // 0: Wooden crate 1 at (2.0, 0.5, 0.0) - unit cube
-    // 1: Rotated wooden crate at (-1.5, 0.5, 1.0)
-    // 2: Polished metal sphere at (0.0, 0.5, -2.0) - radius 0.5
-    // 3: Rough metal sphere at (-3.0, 0.5, -1.0) - radius 0.5
-    // 4: Polished metal cube at (3.0, 0.5, -2.0)
-    // 5: Brushed metal cube at (-3.0, 0.5, -3.0)
-    // 6: Emissive sphere at (2.0, 1.3, 0.0) - scaled 0.3, visual radius 0.15
-    // 7: Blue light indicator sphere (index 7) - fixed, no physics
-    // 8: Green light indicator sphere (index 8) - fixed, no physics
-    // 9: Player capsule (index 9, tracked by playerObjectIndex)
+    // 0: Wooden crate 1 - unit cube
+    // 1: Rotated wooden crate
+    // 2: Polished metal sphere - radius 0.5
+    // 3: Rough metal sphere - radius 0.5
+    // 4: Polished metal cube
+    // 5: Brushed metal cube
+    // 6: Emissive sphere - scaled 0.3, visual radius 0.15
+    // 7: Blue light indicator sphere - fixed, no physics
+    // 8: Green light indicator sphere - fixed, no physics
+    // 9: Debug cube - no physics
+    // 10: Player capsule (tracked by playerObjectIndex)
 
-    const size_t numSceneObjects = 10;
+    const size_t numSceneObjects = 11;
     scenePhysicsBodies.resize(numSceneObjects, INVALID_BODY_ID);
 
     // Box half-extent for unit cube
@@ -70,35 +81,61 @@ void SceneManager::initializeScenePhysics(PhysicsWorld& physics) {
     float boxMass = 10.0f;
     float sphereMass = 5.0f;
 
-    // Spawn objects slightly above ground to let them settle
+    // Spawn objects slightly above terrain to let them settle
     const float spawnOffset = 0.1f;
 
-    // Index 0: Wooden crate 1
-    scenePhysicsBodies[0] = physics.createBox(glm::vec3(2.0f, 0.5f + spawnOffset, 0.0f), cubeHalfExtents, boxMass);
+    // Helper to get spawn Y position on terrain
+    auto getSpawnY = [this, spawnOffset](float x, float z, float objectHeight) {
+        return getTerrainHeight(x, z) + objectHeight + spawnOffset;
+    };
 
-    // Index 1: Rotated wooden crate
-    scenePhysicsBodies[1] = physics.createBox(glm::vec3(-1.5f, 0.5f + spawnOffset, 1.0f), cubeHalfExtents, boxMass);
+    // Index 0: Wooden crate 1 at (2.0, terrain+0.5, 0.0)
+    float crate1X = 2.0f, crate1Z = 0.0f;
+    scenePhysicsBodies[0] = physics.createBox(
+        glm::vec3(crate1X, getSpawnY(crate1X, crate1Z, 0.5f), crate1Z),
+        cubeHalfExtents, boxMass);
 
-    // Index 2: Polished metal sphere (mesh radius 0.5)
-    scenePhysicsBodies[2] = physics.createSphere(glm::vec3(0.0f, 0.5f + spawnOffset, -2.0f), 0.5f, sphereMass);
+    // Index 1: Rotated wooden crate at (-1.5, terrain+0.5, 1.0)
+    float crate2X = -1.5f, crate2Z = 1.0f;
+    scenePhysicsBodies[1] = physics.createBox(
+        glm::vec3(crate2X, getSpawnY(crate2X, crate2Z, 0.5f), crate2Z),
+        cubeHalfExtents, boxMass);
 
-    // Index 3: Rough metal sphere (mesh radius 0.5)
-    scenePhysicsBodies[3] = physics.createSphere(glm::vec3(-3.0f, 0.5f + spawnOffset, -1.0f), 0.5f, sphereMass);
+    // Index 2: Polished metal sphere at (0.0, terrain+0.5, -2.0)
+    float sphere1X = 0.0f, sphere1Z = -2.0f;
+    scenePhysicsBodies[2] = physics.createSphere(
+        glm::vec3(sphere1X, getSpawnY(sphere1X, sphere1Z, 0.5f), sphere1Z),
+        0.5f, sphereMass);
 
-    // Index 4: Polished metal cube
-    scenePhysicsBodies[4] = physics.createBox(glm::vec3(3.0f, 0.5f + spawnOffset, -2.0f), cubeHalfExtents, boxMass);
+    // Index 3: Rough metal sphere at (-3.0, terrain+0.5, -1.0)
+    float sphere2X = -3.0f, sphere2Z = -1.0f;
+    scenePhysicsBodies[3] = physics.createSphere(
+        glm::vec3(sphere2X, getSpawnY(sphere2X, sphere2Z, 0.5f), sphere2Z),
+        0.5f, sphereMass);
 
-    // Index 5: Brushed metal cube
-    scenePhysicsBodies[5] = physics.createBox(glm::vec3(-3.0f, 0.5f + spawnOffset, -3.0f), cubeHalfExtents, boxMass);
+    // Index 4: Polished metal cube at (3.0, terrain+0.5, -2.0)
+    float cube1X = 3.0f, cube1Z = -2.0f;
+    scenePhysicsBodies[4] = physics.createBox(
+        glm::vec3(cube1X, getSpawnY(cube1X, cube1Z, 0.5f), cube1Z),
+        cubeHalfExtents, boxMass);
 
-    // Index 6: Emissive sphere - mesh radius 0.5, scaled 0.3 = visual radius 0.15
-    // Sphere center should be at radius height (0.15) to sit on ground
-    scenePhysicsBodies[6] = physics.createSphere(glm::vec3(2.0f, 0.15f + spawnOffset, 0.0f), 0.5f * 0.3f, 1.0f);
+    // Index 5: Brushed metal cube at (-3.0, terrain+0.5, -3.0)
+    float cube2X = -3.0f, cube2Z = -3.0f;
+    scenePhysicsBodies[5] = physics.createBox(
+        glm::vec3(cube2X, getSpawnY(cube2X, cube2Z, 0.5f), cube2Z),
+        cubeHalfExtents, boxMass);
+
+    // Index 6: Emissive sphere - sits on top of crate 1, mesh radius 0.5 * 0.3 = 0.15
+    // On top of crate (terrain + 1.0m) + sphere center (0.15m)
+    scenePhysicsBodies[6] = physics.createSphere(
+        glm::vec3(crate1X, getTerrainHeight(crate1X, crate1Z) + 1.0f + 0.15f + spawnOffset, crate1Z),
+        0.5f * 0.3f, 1.0f);
 
     // Index 7 & 8: Blue and green lights - NO PHYSICS (fixed light indicators)
-    // scenePhysicsBodies[7] and [8] remain INVALID_BODY_ID
+    // Index 9: Debug cube - NO PHYSICS
+    // scenePhysicsBodies[7], [8], [9] remain INVALID_BODY_ID
 
-    SDL_Log("Scene physics initialized with static terrain and dynamic objects");
+    SDL_Log("Scene physics initialized with terrain-aware spawn positions");
 }
 
 void SceneManager::initializeSceneLights() {
@@ -164,7 +201,7 @@ void SceneManager::updatePhysicsToScene(PhysicsWorld& physics) {
         // Update scene object transform
         sceneObjects[i].transform = physicsTransform;
 
-        // Update orb light position to follow the emissive sphere (index 7)
+        // Update orb light position to follow the emissive sphere (index 6)
         if (i == ORB_LIGHT_OBJECT_INDEX) {
             glm::vec3 orbPosition = glm::vec3(physicsTransform[3]);
             orbLightPosition = orbPosition;

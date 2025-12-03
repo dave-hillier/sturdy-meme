@@ -5,11 +5,13 @@
 /*
  * terrain_subdivision.comp - LOD evaluation and adaptive subdivision
  * Each thread processes one leaf triangle and decides whether to split or merge
+ * Height convention: see terrain_height_common.glsl
  */
 
 #define CBT_BUFFER_BINDING 0
 #include "cbt.glsl"
 #include "leb.glsl"
+#include "../terrain_height_common.glsl"
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
@@ -47,9 +49,9 @@ layout(std140, binding = 4) uniform TerrainUniforms {
 #define MERGE_THRESHOLD (lodParams.y)
 #define MIN_DEPTH (int(lodParams.z))
 
-// Sample terrain height at UV coordinate (centered around y=0)
+// Sample terrain height at UV coordinate (uses shared terrain_height_common.glsl)
 float sampleHeight(vec2 uv) {
-    return (texture(heightMap, uv).r - 0.5) * HEIGHT_SCALE;
+    return sampleTerrainHeight(heightMap, uv, HEIGHT_SCALE);
 }
 
 // Compute heightmap gradient (direction of steepest ascent in UV space)

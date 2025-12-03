@@ -25,6 +25,9 @@ bool TerrainSystem::init(const InitInfo& info, const TerrainConfig& cfg) {
     commandPool = info.commandPool;
     config = cfg;
 
+    // Compute heightScale from altitude range
+    config.heightScale = config.maxAltitude - config.minAltitude;
+
     // Initialize height map
     TerrainHeightMap::InitInfo heightMapInfo{};
     heightMapInfo.device = device;
@@ -34,6 +37,9 @@ bool TerrainSystem::init(const InitInfo& info, const TerrainConfig& cfg) {
     heightMapInfo.resolution = 512;
     heightMapInfo.terrainSize = config.size;
     heightMapInfo.heightScale = config.heightScale;
+    heightMapInfo.heightmapPath = config.heightmapPath;
+    heightMapInfo.minAltitude = config.minAltitude;
+    heightMapInfo.maxAltitude = config.maxAltitude;
     if (!heightMap.init(heightMapInfo)) return false;
 
     // Initialize textures
