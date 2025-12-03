@@ -10,6 +10,9 @@ public:
     void setAspectRatio(float aspect);
 
     // Free camera movement
+    void setPosition(const glm::vec3& pos);
+    void setYaw(float newYaw);
+    void setPitch(float newPitch);
     void moveForward(float delta);
     void moveRight(float delta);
     void moveUp(float delta);

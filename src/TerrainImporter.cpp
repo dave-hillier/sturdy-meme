@@ -1,6 +1,6 @@
 #include <stb_image.h>
 #include "TerrainImporter.h"
-#include <SDL.h>
+#include <SDL3/SDL_log.h>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -48,6 +48,7 @@ bool TerrainImporter::loadAndValidateMetadata(const TerrainImportConfig& config)
     std::string metaPath = getMetadataPath(config.cacheDirectory);
     std::ifstream file(metaPath);
     if (!file.is_open()) {
+        SDL_Log("Terrain cache: metadata file not found at %s", metaPath.c_str());
         return false;
     }
 
@@ -55,6 +56,7 @@ bool TerrainImporter::loadAndValidateMetadata(const TerrainImportConfig& config)
     std::string cachedSourcePath;
     float cachedMinAlt = 0, cachedMaxAlt = 0, cachedMpp = 0;
     uint32_t cachedTileRes = 0, cachedLODLevels = 0;
+    uintmax_t cachedSourceSize = 0;
 
     while (std::getline(file, line)) {
         std::istringstream iss(line);
@@ -69,27 +71,64 @@ bool TerrainImporter::loadAndValidateMetadata(const TerrainImportConfig& config)
             else if (key == "metersPerPixel") cachedMpp = std::stof(value);
             else if (key == "tileResolution") cachedTileRes = std::stoul(value);
             else if (key == "numLODLevels") cachedLODLevels = std::stoul(value);
+            else if (key == "sourceFileSize") cachedSourceSize = std::stoull(value);
         }
     }
 
-    // Validate config matches
-    if (cachedSourcePath != config.sourceHeightmapPath) return false;
-    if (std::abs(cachedMinAlt - config.minAltitude) > 0.01f) return false;
-    if (std::abs(cachedMaxAlt - config.maxAltitude) > 0.01f) return false;
-    if (std::abs(cachedMpp - config.metersPerPixel) > 0.001f) return false;
-    if (cachedTileRes != config.tileResolution) return false;
-    if (cachedLODLevels != config.numLODLevels) return false;
-
-    // Check source file modification time vs cache
-    if (!fs::exists(config.sourceHeightmapPath)) return false;
-
-    auto sourceTime = fs::last_write_time(config.sourceHeightmapPath);
-    auto cacheTime = fs::last_write_time(metaPath);
-
-    if (sourceTime > cacheTime) {
-        return false;  // Source is newer than cache
+    // Validate config matches - use canonical paths for comparison
+    std::error_code ec;
+    fs::path cachedCanonical = fs::canonical(cachedSourcePath, ec);
+    if (ec) {
+        SDL_Log("Terrain cache: cached source path invalid: %s", cachedSourcePath.c_str());
+        return false;
+    }
+    fs::path configCanonical = fs::canonical(config.sourceHeightmapPath, ec);
+    if (ec) {
+        SDL_Log("Terrain cache: config source path invalid: %s", config.sourceHeightmapPath.c_str());
+        return false;
+    }
+    if (cachedCanonical != configCanonical) {
+        SDL_Log("Terrain cache: source path mismatch");
+        SDL_Log("  Cached: %s", cachedCanonical.c_str());
+        SDL_Log("  Config: %s", configCanonical.c_str());
+        return false;
+    }
+    if (std::abs(cachedMinAlt - config.minAltitude) > 0.01f) {
+        SDL_Log("Terrain cache: minAltitude mismatch (cached=%f, config=%f)", cachedMinAlt, config.minAltitude);
+        return false;
+    }
+    if (std::abs(cachedMaxAlt - config.maxAltitude) > 0.01f) {
+        SDL_Log("Terrain cache: maxAltitude mismatch (cached=%f, config=%f)", cachedMaxAlt, config.maxAltitude);
+        return false;
+    }
+    if (std::abs(cachedMpp - config.metersPerPixel) > 0.001f) {
+        SDL_Log("Terrain cache: metersPerPixel mismatch (cached=%f, config=%f)", cachedMpp, config.metersPerPixel);
+        return false;
+    }
+    if (cachedTileRes != config.tileResolution) {
+        SDL_Log("Terrain cache: tileResolution mismatch (cached=%u, config=%u)", cachedTileRes, config.tileResolution);
+        return false;
+    }
+    if (cachedLODLevels != config.numLODLevels) {
+        SDL_Log("Terrain cache: numLODLevels mismatch (cached=%u, config=%u)", cachedLODLevels, config.numLODLevels);
+        return false;
     }
 
+    // Check source file size to detect content changes (timestamps are unreliable with file copies)
+    std::error_code sizeEc;
+    uintmax_t currentSourceSize = fs::file_size(config.sourceHeightmapPath, sizeEc);
+    if (sizeEc) {
+        SDL_Log("Terrain cache: cannot read source file size");
+        return false;
+    }
+    if (cachedSourceSize != currentSourceSize) {
+        SDL_Log("Terrain cache: source file size changed (cached=%llu, current=%llu)",
+                static_cast<unsigned long long>(cachedSourceSize),
+                static_cast<unsigned long long>(currentSourceSize));
+        return false;
+    }
+
+    SDL_Log("Terrain cache: valid cache found at %s", fs::canonical(config.cacheDirectory).c_str());
     return true;
 }
 
@@ -100,7 +139,16 @@ bool TerrainImporter::saveMetadata(const TerrainImportConfig& config) const {
         return false;
     }
 
+    // Get source file size for cache validation
+    std::error_code ec;
+    uintmax_t sourceFileSize = fs::file_size(config.sourceHeightmapPath, ec);
+    if (ec) {
+        SDL_Log("Terrain cache: cannot read source file size for metadata");
+        return false;
+    }
+
     file << "source=" << config.sourceHeightmapPath << "\n";
+    file << "sourceFileSize=" << sourceFileSize << "\n";
     file << "minAltitude=" << config.minAltitude << "\n";
     file << "maxAltitude=" << config.maxAltitude << "\n";
     file << "metersPerPixel=" << config.metersPerPixel << "\n";
@@ -150,6 +198,7 @@ bool TerrainImporter::import(const TerrainImportConfig& config, ImportProgressCa
 
     // Create cache directory
     fs::create_directories(config.cacheDirectory);
+    SDL_Log("Terrain cache: writing tiles to %s", fs::canonical(config.cacheDirectory).c_str());
 
     // Calculate world dimensions
     worldWidth = sourceWidth * config.metersPerPixel;

@@ -33,6 +33,24 @@ void Camera::setAspectRatio(float aspect) {
     aspectRatio = aspect;
 }
 
+void Camera::setPosition(const glm::vec3& pos) {
+    position = pos;
+}
+
+void Camera::setYaw(float newYaw) {
+    yaw = newYaw;
+    targetYaw = newYaw;
+    smoothedYaw = newYaw;
+    updateVectors();
+}
+
+void Camera::setPitch(float newPitch) {
+    pitch = std::clamp(newPitch, -89.0f, 89.0f);
+    targetPitch = pitch;
+    smoothedPitch = pitch;
+    updateVectors();
+}
+
 void Camera::moveForward(float delta) {
     position += front * delta;
 }
