@@ -788,6 +788,31 @@ void GuiSystem::renderTerrainSection(Renderer& renderer) {
     }
 
     ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Optimization toggles
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.6f, 0.8f, 1.0f));
+    ImGui::Text("OPTIMIZATIONS");
+    ImGui::PopStyleColor();
+
+    bool skipFrameOpt = terrainMut.isSkipFrameOptimizationEnabled();
+    if (ImGui::Checkbox("Skip-Frame (Camera Still)", &skipFrameOpt)) {
+        terrainMut.setSkipFrameOptimization(skipFrameOpt);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Skip subdivision compute when camera is stationary");
+    }
+
+    bool gpuCulling = terrainMut.isGpuCullingEnabled();
+    if (ImGui::Checkbox("GPU Frustum Culling", &gpuCulling)) {
+        terrainMut.setGpuCulling(gpuCulling);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Use GPU frustum culling with stream compaction for split phase");
+    }
+
+    ImGui::Spacing();
 
     // Height query demo
     ImGui::Text("Height at origin: %.2f", renderer.getTerrainHeightAt(0.0f, 0.0f));

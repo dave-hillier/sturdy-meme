@@ -17,9 +17,10 @@ layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
 // Push constants for update mode and temporal spreading
 layout(push_constant) uniform PushConstants {
-    uint updateMode;    // 0 = split only, 1 = merge only
-    uint frameIndex;    // For temporal spreading
-    uint spreadFactor;  // Process 1/N triangles per frame (1 = all)
+    uint updateMode;       // 0 = split only, 1 = merge only
+    uint frameIndex;       // For temporal spreading
+    uint spreadFactor;     // Process 1/N triangles per frame (1 = all)
+    uint useCompactBuffer; // 1 = read from compact buffer (GPU culling enabled)
 };
 
 // Height map sampler
@@ -37,6 +38,14 @@ layout(std140, binding = 4) uniform TerrainUniforms {
     vec2 screenSize;
     float lodFactor;
     float padding;
+};
+
+// Visible indices buffer for stream compaction (split phase only)
+// When updateMode == 0 (split), gl_GlobalInvocationID.x indexes into this buffer
+// When updateMode == 1 (merge), we use gl_GlobalInvocationID.x directly as leafIndex
+layout(std430, binding = 5) readonly buffer VisibleIndices {
+    uint visibleCount;
+    uint visibleIndices[];
 };
 
 // Subdivision phase: 0 = split only, 1 = merge only
@@ -118,11 +127,25 @@ float computeTriangleLOD(vec3 p0, vec3 p1, vec3 p2) {
 }
 
 void main() {
-    uint leafIndex = gl_GlobalInvocationID.x;
-    uint totalLeaves = cbt_NodeCount();
+    uint threadIndex = gl_GlobalInvocationID.x;
+    uint leafIndex;
 
-    if (leafIndex >= totalLeaves) {
-        return;
+    // Determine leaf index based on compact buffer mode
+    // useCompactBuffer == 1: read from stream compaction buffer (GPU culling enabled)
+    // useCompactBuffer == 0: direct index (GPU culling disabled or merge phase)
+    if (useCompactBuffer != 0u) {
+        // Stream compaction mode: thread index maps to visible indices buffer
+        if (threadIndex >= visibleCount) {
+            return;  // Beyond visible count
+        }
+        leafIndex = visibleIndices[threadIndex];
+    } else {
+        // Direct mode: thread index is the leaf index
+        uint totalLeaves = cbt_NodeCount();
+        if (threadIndex >= totalLeaves) {
+            return;
+        }
+        leafIndex = threadIndex;
     }
 
     // Phase 1: Decode node (unavoidable - needed for depth check)
@@ -130,7 +153,6 @@ void main() {
     int depth = node.depth;
 
     // Phase 2: Early-out on depth limits (before any expensive work)
-    // Ping-pong between split and merge frames to avoid race conditions
     if (updateMode == 0u) {
         // Split phase: cannot split triangles already at max depth
         if (depth >= MAX_DEPTH) {
@@ -171,13 +193,8 @@ void main() {
 
     // Phase 5: Phase-specific logic with optimized ordering
     if (updateMode == 0u) {
-        // Split phase: frustum cull BEFORE expensive LOD calculation
-        if (frustumCullAABB(minBound, maxBound)) {
-            return;  // EARLY-OUT: triangle culled, no need to compute LOD
-        }
-
-        // Only compute LOD for visible triangles that could potentially split
-        // Reuse pre-computed world positions (p0, p1, p2) - no extra heightmap samples
+        // Split phase: triangles already passed frustum culling in stream compaction
+        // Just compute LOD for visible triangles that could potentially split
         float edgeLengthPixels = computeTriangleLOD(p0, p1, p2);
         if (edgeLengthPixels > SPLIT_THRESHOLD) {
             leb_SplitNode_Square(node);

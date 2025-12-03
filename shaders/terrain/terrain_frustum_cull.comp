@@ -1,0 +1,112 @@
+#version 450
+
+#extension GL_GOOGLE_include_directive : require
+
+/*
+ * terrain_frustum_cull.comp - GPU frustum culling with stream compaction
+ *
+ * Culls triangles against the view frustum and writes visible indices
+ * to a compact buffer for reduced subdivision dispatch size.
+ */
+
+#define CBT_BUFFER_BINDING 0
+#include "cbt.glsl"
+#include "leb.glsl"
+#include "../terrain_height_common.glsl"
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+// Height map sampler
+layout(binding = 3) uniform sampler2D heightMap;
+
+// Uniform buffer with camera and terrain parameters
+layout(std140, binding = 4) uniform TerrainUniforms {
+    mat4 viewMatrix;
+    mat4 projMatrix;
+    mat4 viewProjMatrix;
+    vec4 frustumPlanes[6];
+    vec4 cameraPosition;
+    vec4 terrainParams;   // x = size, y = height scale, z = target edge pixels, w = max depth
+    vec4 lodParams;       // x = split threshold, y = merge threshold, z = min depth, w = subdivisionPhase
+    vec2 screenSize;
+    float lodFactor;
+    float padding;
+};
+
+// Visible indices buffer: [count, index0, index1, ...]
+layout(std430, binding = 5) buffer VisibleIndices {
+    uint visibleCount;
+    uint indices[];
+};
+
+#define TERRAIN_SIZE (terrainParams.x)
+#define HEIGHT_SCALE (terrainParams.y)
+
+// Sample terrain height at UV coordinate
+float sampleHeight(vec2 uv) {
+    return sampleTerrainHeight(heightMap, uv, HEIGHT_SCALE);
+}
+
+// Transform UV to world position
+vec3 uvToWorldPos(vec2 uv) {
+    float height = sampleHeight(uv);
+    return vec3(
+        (uv.x - 0.5) * TERRAIN_SIZE,
+        height,
+        (uv.y - 0.5) * TERRAIN_SIZE
+    );
+}
+
+// Frustum culling test for AABB
+// Returns true if the AABB is completely outside the frustum
+bool frustumCullAABB(vec3 minBound, vec3 maxBound) {
+    for (int i = 0; i < 6; i++) {
+        vec4 plane = frustumPlanes[i];
+        // Find the p-vertex (the vertex most in the direction of the plane normal)
+        vec3 pVertex = vec3(
+            plane.x > 0.0 ? maxBound.x : minBound.x,
+            plane.y > 0.0 ? maxBound.y : minBound.y,
+            plane.z > 0.0 ? maxBound.z : minBound.z
+        );
+        // If p-vertex is behind plane, AABB is completely outside
+        if (dot(vec4(pVertex, 1.0), plane) < 0.0) {
+            return true; // Culled
+        }
+    }
+    return false; // Visible
+}
+
+void main() {
+    uint leafIndex = gl_GlobalInvocationID.x;
+    uint totalLeaves = cbt_NodeCount();
+
+    if (leafIndex >= totalLeaves) {
+        return;
+    }
+
+    // Decode node and triangle vertices
+    cbt_Node node = cbt_DecodeNode(leafIndex);
+    vec2 v0, v1, v2;
+    leb_DecodeTriangleVertices(node, v0, v1, v2);
+
+    // Compute world positions for AABB
+    vec3 p0 = uvToWorldPos(v0);
+    vec3 p1 = uvToWorldPos(v1);
+    vec3 p2 = uvToWorldPos(v2);
+
+    // Build AABB
+    vec3 minBound = min(min(p0, p1), p2);
+    vec3 maxBound = max(max(p0, p1), p2);
+    // Add height margin for potential terrain displacement
+    minBound.y -= HEIGHT_SCALE * 0.1;
+    maxBound.y += HEIGHT_SCALE * 0.1;
+
+    // Test frustum culling
+    bool culled = frustumCullAABB(minBound, maxBound);
+
+    // If visible, atomically append to the compact buffer
+    if (!culled) {
+        uint slot = atomicAdd(visibleCount, 1u);
+        indices[slot] = leafIndex;
+    }
+}

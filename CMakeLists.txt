@@ -171,6 +171,8 @@ set(SHADER_FILES
 set(TERRAIN_SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_dispatcher.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_subdivision.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_frustum_cull.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_prepare_cull_dispatch.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_sum_reduction_prepass.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_sum_reduction_prepass_subgroup.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_sum_reduction.comp.spv
@@ -302,6 +304,7 @@ if(SHADER_COMPILE_CMD)
     # Terrain shaders with LEB dependencies
     set(TERRAIN_LEB_SHADERS
         terrain_subdivision.comp
+        terrain_frustum_cull.comp
         terrain.vert
         terrain_shadow.vert
     )
@@ -320,6 +323,7 @@ if(SHADER_COMPILE_CMD)
         terrain.frag
         terrain_shadow.frag
         terrain_wireframe.frag
+        terrain_prepare_cull_dispatch.comp
     )
 
     foreach(SHADER ${TERRAIN_SIMPLE_SHADERS})

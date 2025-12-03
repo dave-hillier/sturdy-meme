@@ -71,6 +71,7 @@ bool TerrainSystem::init(const InitInfo& info, const TerrainConfig& cfg) {
     if (!createDispatcherPipeline()) return false;
     if (!createSubdivisionPipeline()) return false;
     if (!createSumReductionPipelines()) return false;
+    if (!createFrustumCullPipelines()) return false;
     if (!createRenderPipeline()) return false;
     if (!createWireframePipeline()) return false;
     if (!createShadowPipeline()) return false;
@@ -89,6 +90,8 @@ void TerrainSystem::destroy(VkDevice device, VmaAllocator allocator) {
     if (sumReductionPrepassSubgroupPipeline) vkDestroyPipeline(device, sumReductionPrepassSubgroupPipeline, nullptr);
     if (sumReductionPipeline) vkDestroyPipeline(device, sumReductionPipeline, nullptr);
     if (sumReductionBatchedPipeline) vkDestroyPipeline(device, sumReductionBatchedPipeline, nullptr);
+    if (frustumCullPipeline) vkDestroyPipeline(device, frustumCullPipeline, nullptr);
+    if (prepareDispatchPipeline) vkDestroyPipeline(device, prepareDispatchPipeline, nullptr);
     if (renderPipeline) vkDestroyPipeline(device, renderPipeline, nullptr);
     if (wireframePipeline) vkDestroyPipeline(device, wireframePipeline, nullptr);
     if (shadowPipeline) vkDestroyPipeline(device, shadowPipeline, nullptr);
@@ -98,6 +101,8 @@ void TerrainSystem::destroy(VkDevice device, VmaAllocator allocator) {
     if (subdivisionPipelineLayout) vkDestroyPipelineLayout(device, subdivisionPipelineLayout, nullptr);
     if (sumReductionPipelineLayout) vkDestroyPipelineLayout(device, sumReductionPipelineLayout, nullptr);
     if (sumReductionBatchedPipelineLayout) vkDestroyPipelineLayout(device, sumReductionBatchedPipelineLayout, nullptr);
+    if (frustumCullPipelineLayout) vkDestroyPipelineLayout(device, frustumCullPipelineLayout, nullptr);
+    if (prepareDispatchPipelineLayout) vkDestroyPipelineLayout(device, prepareDispatchPipelineLayout, nullptr);
     if (renderPipelineLayout) vkDestroyPipelineLayout(device, renderPipelineLayout, nullptr);
     if (shadowPipelineLayout) vkDestroyPipelineLayout(device, shadowPipelineLayout, nullptr);
 
@@ -108,6 +113,8 @@ void TerrainSystem::destroy(VkDevice device, VmaAllocator allocator) {
     // Destroy indirect buffers
     if (indirectDispatchBuffer) vmaDestroyBuffer(allocator, indirectDispatchBuffer, indirectDispatchAllocation);
     if (indirectDrawBuffer) vmaDestroyBuffer(allocator, indirectDrawBuffer, indirectDrawAllocation);
+    if (visibleIndicesBuffer) vmaDestroyBuffer(allocator, visibleIndicesBuffer, visibleIndicesAllocation);
+    if (cullIndirectDispatchBuffer) vmaDestroyBuffer(allocator, cullIndirectDispatchBuffer, cullIndirectDispatchAllocation);
 
     // Destroy uniform buffers
     for (size_t i = 0; i < uniformBuffers.size(); i++) {
@@ -193,6 +200,43 @@ bool TerrainSystem::createIndirectBuffers() {
         memcpy(indirectDrawMappedPtr, drawArgs, sizeof(drawArgs));
     }
 
+    // Visible indices buffer for stream compaction: [count, index0, index1, ...]
+    {
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        // Size: 1 uint for count + MAX_VISIBLE_TRIANGLES uints for indices
+        bufferInfo.size = sizeof(uint32_t) * (1 + MAX_VISIBLE_TRIANGLES);
+        bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+
+        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &visibleIndicesBuffer,
+                           &visibleIndicesAllocation, nullptr) != VK_SUCCESS) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create visible indices buffer");
+            return false;
+        }
+    }
+
+    // Cull indirect dispatch buffer (3 uints: x, y, z for vkCmdDispatchIndirect)
+    {
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.size = sizeof(uint32_t) * 3;
+        bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+
+        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &cullIndirectDispatchBuffer,
+                           &cullIndirectDispatchAllocation, nullptr) != VK_SUCCESS) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create cull indirect dispatch buffer");
+            return false;
+        }
+    }
+
     return true;
 }
 
@@ -215,12 +259,14 @@ bool TerrainSystem::createComputeDescriptorSetLayout() {
             .build();
     };
 
-    std::array<VkDescriptorSetLayoutBinding, 5> bindings = {
-        makeComputeBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
-        makeComputeBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
-        makeComputeBinding(2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
-        makeComputeBinding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
-        makeComputeBinding(4, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)};
+    std::array<VkDescriptorSetLayoutBinding, 7> bindings = {
+        makeComputeBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),   // CBT buffer
+        makeComputeBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),   // indirect dispatch
+        makeComputeBinding(2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),   // indirect draw
+        makeComputeBinding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER), // height map
+        makeComputeBinding(4, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER),   // terrain uniforms
+        makeComputeBinding(5, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),   // visible indices (stream compaction)
+        makeComputeBinding(6, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)};  // cull indirect dispatch
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -306,7 +352,7 @@ bool TerrainSystem::createDescriptorSets() {
 
     // Update compute descriptor sets
     for (uint32_t i = 0; i < framesInFlight; i++) {
-        std::array<VkWriteDescriptorSet, 5> writes{};
+        std::array<VkWriteDescriptorSet, 7> writes{};
 
         VkDescriptorBufferInfo cbtInfo{cbt.getBuffer(), 0, cbt.getBufferSize()};
         writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -347,6 +393,22 @@ bool TerrainSystem::createDescriptorSets() {
         writes[4].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         writes[4].descriptorCount = 1;
         writes[4].pBufferInfo = &uniformInfo;
+
+        VkDescriptorBufferInfo visibleIndicesInfo{visibleIndicesBuffer, 0, sizeof(uint32_t) * (1 + MAX_VISIBLE_TRIANGLES)};
+        writes[5].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[5].dstSet = computeDescriptorSets[i];
+        writes[5].dstBinding = 5;
+        writes[5].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[5].descriptorCount = 1;
+        writes[5].pBufferInfo = &visibleIndicesInfo;
+
+        VkDescriptorBufferInfo cullDispatchInfo{cullIndirectDispatchBuffer, 0, sizeof(uint32_t) * 3};
+        writes[6].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[6].dstSet = computeDescriptorSets[i];
+        writes[6].dstBinding = 6;
+        writes[6].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[6].descriptorCount = 1;
+        writes[6].pBufferInfo = &cullDispatchInfo;
 
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
     }
@@ -548,6 +610,80 @@ bool TerrainSystem::createSumReductionPipelines() {
         pipelineInfo.layout = sumReductionBatchedPipelineLayout;
 
         VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &sumReductionBatchedPipeline);
+        vkDestroyShaderModule(device, shaderModule, nullptr);
+        if (result != VK_SUCCESS) return false;
+    }
+
+    return true;
+}
+
+bool TerrainSystem::createFrustumCullPipelines() {
+    // Frustum cull pipeline (no push constants needed)
+    {
+        VkShaderModule shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_frustum_cull.comp.spv");
+        if (!shaderModule) return false;
+
+        VkPipelineLayoutCreateInfo layoutInfo{};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        layoutInfo.setLayoutCount = 1;
+        layoutInfo.pSetLayouts = &computeDescriptorSetLayout;
+        layoutInfo.pushConstantRangeCount = 0;
+
+        if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &frustumCullPipelineLayout) != VK_SUCCESS) {
+            vkDestroyShaderModule(device, shaderModule, nullptr);
+            return false;
+        }
+
+        VkPipelineShaderStageCreateInfo stageInfo{};
+        stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+        stageInfo.module = shaderModule;
+        stageInfo.pName = "main";
+
+        VkComputePipelineCreateInfo pipelineInfo{};
+        pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+        pipelineInfo.stage = stageInfo;
+        pipelineInfo.layout = frustumCullPipelineLayout;
+
+        VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &frustumCullPipeline);
+        vkDestroyShaderModule(device, shaderModule, nullptr);
+        if (result != VK_SUCCESS) return false;
+    }
+
+    // Prepare cull dispatch pipeline
+    {
+        VkShaderModule shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_prepare_cull_dispatch.comp.spv");
+        if (!shaderModule) return false;
+
+        VkPushConstantRange pushConstantRange{};
+        pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        pushConstantRange.offset = 0;
+        pushConstantRange.size = sizeof(TerrainPrepareCullDispatchPushConstants);
+
+        VkPipelineLayoutCreateInfo layoutInfo{};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        layoutInfo.setLayoutCount = 1;
+        layoutInfo.pSetLayouts = &computeDescriptorSetLayout;
+        layoutInfo.pushConstantRangeCount = 1;
+        layoutInfo.pPushConstantRanges = &pushConstantRange;
+
+        if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &prepareDispatchPipelineLayout) != VK_SUCCESS) {
+            vkDestroyShaderModule(device, shaderModule, nullptr);
+            return false;
+        }
+
+        VkPipelineShaderStageCreateInfo stageInfo{};
+        stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+        stageInfo.module = shaderModule;
+        stageInfo.pName = "main";
+
+        VkComputePipelineCreateInfo pipelineInfo{};
+        pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+        pipelineInfo.stage = stageInfo;
+        pipelineInfo.layout = prepareDispatchPipelineLayout;
+
+        VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &prepareDispatchPipeline);
         vkDestroyShaderModule(device, shaderModule, nullptr);
         if (result != VK_SUCCESS) return false;
     }
@@ -1165,7 +1301,7 @@ void TerrainSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraP
 void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuProfiler* profiler) {
     // Skip-frame optimization: skip compute when camera is stationary and terrain has converged
     bool shouldSkip = false;
-    if (!forceNextCompute && staticFrameCount > CONVERGENCE_FRAMES) {
+    if (skipFrameOptimizationEnabled && !forceNextCompute && staticFrameCount > CONVERGENCE_FRAMES) {
         if (framesSinceLastCompute < MAX_SKIP_FRAMES) {
             shouldSkip = true;
         }
@@ -1215,27 +1351,117 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                         0, 1, &barrier, 0, nullptr, 0, nullptr);
 
-    // 2. Subdivision - LOD update (indirect dispatch)
+    // 2. Subdivision - LOD update (with GPU culling for split phase)
     // Ping-pong between split and merge to avoid race conditions
-    // Even frames: split only, Odd frames: merge only
-    if (profiler) profiler->beginZone(cmd, "Terrain:Subdivision");
+    // Even frames: split only (with stream compaction), Odd frames: merge only
+    uint32_t updateMode = subdivisionFrameCount & 1;  // 0 = split, 1 = merge
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, subdivisionPipeline);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, subdivisionPipelineLayout,
-                           0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
+    if (updateMode == 0) {
+        // Split phase
+        if (gpuCullingEnabled) {
+            // Use stream compaction to reduce dispatch size
+            // 2a. Reset visible count to 0
+            vkCmdFillBuffer(cmd, visibleIndicesBuffer, 0, sizeof(uint32_t), 0);
+            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                0, 1, &barrier, 0, nullptr, 0, nullptr);
 
-    TerrainSubdivisionPushConstants subdivPC{};
-    subdivPC.updateMode = subdivisionFrameCount & 1;  // 0 = split, 1 = merge
-    subdivPC.frameIndex = subdivisionFrameCount;
-    subdivPC.spreadFactor = 4;  // Process 1/4 of deep triangles per frame
-    vkCmdPushConstants(cmd, subdivisionPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
-                      sizeof(subdivPC), &subdivPC);
+            // 2b. Frustum culling pass - writes visible indices to compact buffer
+            if (profiler) profiler->beginZone(cmd, "Terrain:FrustumCull");
 
-    vkCmdDispatchIndirect(cmd, indirectDispatchBuffer, 0);
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, frustumCullPipeline);
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, frustumCullPipelineLayout,
+                                   0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
+
+            // Dispatch based on total triangle count (from dispatcher's indirect buffer)
+            vkCmdDispatchIndirect(cmd, indirectDispatchBuffer, 0);
+
+            if (profiler) profiler->endZone(cmd, "Terrain:FrustumCull");
+
+            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                0, 1, &barrier, 0, nullptr, 0, nullptr);
+
+            // 2c. Prepare cull dispatch - convert visible count to dispatch args
+            if (profiler) profiler->beginZone(cmd, "Terrain:PrepareDispatch");
+
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, prepareDispatchPipeline);
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, prepareDispatchPipelineLayout,
+                                   0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
+
+            TerrainPrepareCullDispatchPushConstants preparePC{};
+            preparePC.workgroupSize = SUBDIVISION_WORKGROUP_SIZE;
+            vkCmdPushConstants(cmd, prepareDispatchPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                              sizeof(preparePC), &preparePC);
+
+            vkCmdDispatch(cmd, 1, 1, 1);
+
+            if (profiler) profiler->endZone(cmd, "Terrain:PrepareDispatch");
+
+            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                0, 1, &barrier, 0, nullptr, 0, nullptr);
+
+            // 2d. Subdivision split pass - indirect dispatch based on visible count
+            if (profiler) profiler->beginZone(cmd, "Terrain:Subdivision");
+
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, subdivisionPipeline);
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, subdivisionPipelineLayout,
+                                   0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
+
+            TerrainSubdivisionPushConstants subdivPC{};
+            subdivPC.updateMode = 0;  // Split
+            subdivPC.frameIndex = subdivisionFrameCount;
+            subdivPC.spreadFactor = 4;
+            subdivPC.useCompactBuffer = 1;  // Use stream compaction buffer
+            vkCmdPushConstants(cmd, subdivisionPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                              sizeof(subdivPC), &subdivPC);
+
+            // Use the cull indirect dispatch buffer (reduced dispatch size)
+            vkCmdDispatchIndirect(cmd, cullIndirectDispatchBuffer, 0);
+
+            if (profiler) profiler->endZone(cmd, "Terrain:Subdivision");
+        } else {
+            // GPU culling disabled - direct split without stream compaction
+            if (profiler) profiler->beginZone(cmd, "Terrain:Subdivision");
+
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, subdivisionPipeline);
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, subdivisionPipelineLayout,
+                                   0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
+
+            TerrainSubdivisionPushConstants subdivPC{};
+            subdivPC.updateMode = 0;  // Split
+            subdivPC.frameIndex = subdivisionFrameCount;
+            subdivPC.spreadFactor = 4;
+            subdivPC.useCompactBuffer = 0;  // Direct indexing (no stream compaction)
+            vkCmdPushConstants(cmd, subdivisionPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                              sizeof(subdivPC), &subdivPC);
+
+            // Use original indirect dispatch (all triangles)
+            vkCmdDispatchIndirect(cmd, indirectDispatchBuffer, 0);
+
+            if (profiler) profiler->endZone(cmd, "Terrain:Subdivision");
+        }
+    } else {
+        // Merge phase: process all triangles directly (no culling)
+        if (profiler) profiler->beginZone(cmd, "Terrain:Subdivision");
+
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, subdivisionPipeline);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, subdivisionPipelineLayout,
+                               0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
+
+        TerrainSubdivisionPushConstants subdivPC{};
+        subdivPC.updateMode = 1;  // Merge
+        subdivPC.frameIndex = subdivisionFrameCount;
+        subdivPC.spreadFactor = 4;
+        subdivPC.useCompactBuffer = 0;  // Direct indexing (merge always processes all)
+        vkCmdPushConstants(cmd, subdivisionPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                          sizeof(subdivPC), &subdivPC);
+
+        // Use the original indirect dispatch (all triangles)
+        vkCmdDispatchIndirect(cmd, indirectDispatchBuffer, 0);
+
+        if (profiler) profiler->endZone(cmd, "Terrain:Subdivision");
+    }
 
     subdivisionFrameCount++;
-
-    if (profiler) profiler->endZone(cmd, "Terrain:Subdivision");
 
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                         0, 1, &barrier, 0, nullptr, 0, nullptr);

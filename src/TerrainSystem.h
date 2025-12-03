@@ -52,9 +52,15 @@ struct SubgroupCapabilities {
 
 // Push constants for subdivision compute shader
 struct TerrainSubdivisionPushConstants {
-    uint32_t updateMode;    // 0 = split only, 1 = merge only
-    uint32_t frameIndex;    // For temporal spreading
-    uint32_t spreadFactor;  // Process 1/N triangles per frame (1 = all)
+    uint32_t updateMode;       // 0 = split only, 1 = merge only
+    uint32_t frameIndex;       // For temporal spreading
+    uint32_t spreadFactor;     // Process 1/N triangles per frame (1 = all)
+    uint32_t useCompactBuffer; // 1 = read from compact buffer (GPU culling enabled)
+};
+
+// Push constants for prepare cull dispatch
+struct TerrainPrepareCullDispatchPushConstants {
+    uint32_t workgroupSize;  // Subdivision workgroup size
 };
 
 // Terrain configuration (outside class to avoid C++17 default argument issues)
@@ -142,6 +148,12 @@ public:
     // Get current triangle count from GPU (for debugging/display)
     uint32_t getTriangleCount() const;
 
+    // Optimization toggles
+    void setSkipFrameOptimization(bool enabled) { skipFrameOptimizationEnabled = enabled; forceNextCompute = true; }
+    bool isSkipFrameOptimizationEnabled() const { return skipFrameOptimizationEnabled; }
+    void setGpuCulling(bool enabled) { gpuCullingEnabled = enabled; }
+    bool isGpuCullingEnabled() const { return gpuCullingEnabled; }
+
     // Legacy method - prefer getTriangleCount()
     uint32_t getNodeCount() const { return getTriangleCount(); }
 
@@ -171,6 +183,7 @@ private:
     bool createDispatcherPipeline();
     bool createSubdivisionPipeline();
     bool createSumReductionPipelines();
+    bool createFrustumCullPipelines();
     bool createRenderPipeline();
     bool createWireframePipeline();
     bool createShadowPipeline();
@@ -206,6 +219,12 @@ private:
     VmaAllocation indirectDrawAllocation = VK_NULL_HANDLE;
     void* indirectDrawMappedPtr = nullptr;  // Persistently mapped for readback
 
+    // Stream compaction buffers for GPU culling
+    VkBuffer visibleIndicesBuffer = VK_NULL_HANDLE;  // [count, index0, index1, ...]
+    VmaAllocation visibleIndicesAllocation = VK_NULL_HANDLE;
+    VkBuffer cullIndirectDispatchBuffer = VK_NULL_HANDLE;  // Indirect dispatch for subdivision after cull
+    VmaAllocation cullIndirectDispatchAllocation = VK_NULL_HANDLE;
+
     // Uniform buffers (per frame in flight)
     std::vector<VkBuffer> uniformBuffers;
     std::vector<VmaAllocation> uniformAllocations;
@@ -226,6 +245,12 @@ private:
     VkPipelineLayout sumReductionBatchedPipelineLayout = VK_NULL_HANDLE;
     VkPipeline sumReductionBatchedPipeline = VK_NULL_HANDLE;
 
+    // GPU culling pipelines (stream compaction)
+    VkPipelineLayout frustumCullPipelineLayout = VK_NULL_HANDLE;
+    VkPipeline frustumCullPipeline = VK_NULL_HANDLE;
+    VkPipelineLayout prepareDispatchPipelineLayout = VK_NULL_HANDLE;
+    VkPipeline prepareDispatchPipeline = VK_NULL_HANDLE;
+
     // Render pipelines
     VkDescriptorSetLayout renderDescriptorSetLayout = VK_NULL_HANDLE;
     VkPipelineLayout renderPipelineLayout = VK_NULL_HANDLE;
@@ -244,6 +269,8 @@ private:
     // Configuration
     TerrainConfig config;
     bool wireframeMode = false;
+    bool skipFrameOptimizationEnabled = true;  // Camera-still skip optimization
+    bool gpuCullingEnabled = true;             // GPU frustum culling for split phase
 
     // Runtime state
     uint32_t currentNodeCount = 2;  // Start with 2 root triangles
@@ -273,4 +300,6 @@ private:
     // Constants
     static constexpr uint32_t SUBDIVISION_WORKGROUP_SIZE = 64;
     static constexpr uint32_t SUM_REDUCTION_WORKGROUP_SIZE = 256;
+    static constexpr uint32_t FRUSTUM_CULL_WORKGROUP_SIZE = 256;
+    static constexpr uint32_t MAX_VISIBLE_TRIANGLES = 4 * 1024 * 1024;  // 4M triangles max
 };
