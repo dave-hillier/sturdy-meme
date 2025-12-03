@@ -75,6 +75,8 @@ set(SOURCES
     src/AnimationStateMachine.cpp
     src/FBXLoader.cpp
     src/HiZSystem.cpp
+    src/GpuProfiler.cpp
+    src/CpuProfiler.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})

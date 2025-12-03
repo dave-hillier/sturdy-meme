@@ -40,6 +40,7 @@
 #include "RenderContext.h"
 #include "RenderPipeline.h"
 #include "GlobalBufferManager.h"
+#include "Profiler.h"
 
 struct PushConstants {
     glm::mat4 model;
@@ -187,6 +188,12 @@ public:
     HiZSystem::CullingStats getHiZCullingStats() const { return hiZSystem.getStats(); }
     uint32_t getVisibleObjectCount() const { return hiZSystem.getVisibleCount(currentFrame); }
 
+    // Profiling access
+    Profiler& getProfiler() { return profiler; }
+    const Profiler& getProfiler() const { return profiler; }
+    void setProfilingEnabled(bool enabled) { profiler.setEnabled(enabled); }
+    bool isProfilingEnabled() const { return profiler.isEnabled(); }
+
 private:
     bool createRenderPass();
     void destroyRenderResources();
@@ -267,6 +274,7 @@ private:
     CloudShadowSystem cloudShadowSystem;
     HiZSystem hiZSystem;
     EnvironmentSettings environmentSettings;
+    Profiler profiler;
     bool useVolumetricSnow = true;  // Use new volumetric system by default
 
     // Render pipeline (stages abstraction - for future refactoring)

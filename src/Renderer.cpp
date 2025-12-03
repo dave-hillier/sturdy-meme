@@ -510,6 +510,12 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
         updateHiZObjectData();
     }
 
+    // Initialize profiler for GPU and CPU timing
+    if (!profiler.init(device, physicalDevice, MAX_FRAMES_IN_FLIGHT)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Profiler initialization failed - profiling disabled");
+        // Continue without profiling - it's optional
+    }
+
     if (!createSyncObjects()) return false;
 
     return true;
@@ -574,6 +580,7 @@ void Renderer::shutdown() {
         froxelSystem.destroy(device, allocator);
         cloudShadowSystem.destroy();
         hiZSystem.destroy();
+        profiler.shutdown();
         atmosphereLUTSystem.destroy(device, allocator);
         skySystem.destroy(device, allocator);
         postProcessSystem.destroy(device, allocator);
@@ -1217,11 +1224,16 @@ void Renderer::render(const Camera& camera) {
 
     vkResetFences(device, 1, &inFlightFences[currentFrame]);
 
+    // Begin CPU profiling for this frame
+    profiler.beginCpuZone("UniformUpdates");
+
     // Update uniform buffer data
     updateUniformBuffer(currentFrame, camera);
 
     // Update bone matrices for GPU skinning
     updateBoneMatrices(currentFrame);
+
+    profiler.endCpuZone("UniformUpdates");
 
     // Calculate frame timing
     static auto startTime = std::chrono::high_resolution_clock::now();
@@ -1235,6 +1247,8 @@ void Renderer::render(const Camera& camera) {
     FrameData frame = buildFrameData(camera, deltaTime, grassTime);
 
     // Update subsystems (state mutations)
+    profiler.beginCpuZone("SystemUpdates");
+
     windSystem.update(frame.deltaTime);
     windSystem.updateUniforms(frame.frameIndex);
 
@@ -1276,6 +1290,8 @@ void Renderer::render(const Camera& camera) {
     leafSystem.updateUniforms(frame.frameIndex, frame.cameraPosition, frame.viewProj, frame.cameraPosition, playerVel, frame.deltaTime, frame.time,
                                frame.terrainSize, frame.heightScale);
 
+    profiler.endCpuZone("SystemUpdates");
+
     // Begin command buffer recording
     vkResetCommandBuffer(commandBuffers[frame.frameIndex], 0);
 
@@ -1285,32 +1301,48 @@ void Renderer::render(const Camera& camera) {
 
     VkCommandBuffer cmd = commandBuffers[frame.frameIndex];
 
+    // Begin GPU profiling frame
+    profiler.beginFrame(cmd, frame.frameIndex);
+
     // Terrain compute pass (adaptive subdivision)
+    profiler.beginGpuZone(cmd, "TerrainCompute");
     terrainSystem.recordCompute(cmd, frame.frameIndex);
+    profiler.endGpuZone(cmd, "TerrainCompute");
 
     // Catmull-Clark subdivision compute pass
+    profiler.beginGpuZone(cmd, "SubdivisionCompute");
     catmullClarkSystem.recordCompute(cmd, frame.frameIndex);
+    profiler.endGpuZone(cmd, "SubdivisionCompute");
 
     // Grass displacement update (player/NPC interaction)
+    profiler.beginGpuZone(cmd, "GrassCompute");
     grassSystem.recordDisplacementUpdate(cmd, frame.frameIndex);
 
     // Grass compute pass
     grassSystem.recordResetAndCompute(cmd, frame.frameIndex, frame.time);
+    profiler.endGpuZone(cmd, "GrassCompute");
 
     // Weather particle compute pass
+    profiler.beginGpuZone(cmd, "WeatherCompute");
     weatherSystem.recordResetAndCompute(cmd, frame.frameIndex, frame.time, frame.deltaTime);
+    profiler.endGpuZone(cmd, "WeatherCompute");
 
     // Snow mask accumulation compute pass
+    profiler.beginGpuZone(cmd, "SnowCompute");
     snowMaskSystem.recordCompute(cmd, frame.frameIndex);
 
     // Volumetric snow cascade compute pass
     volumetricSnowSystem.recordCompute(cmd, frame.frameIndex);
+    profiler.endGpuZone(cmd, "SnowCompute");
 
     // Leaf particle compute pass
+    profiler.beginGpuZone(cmd, "LeafCompute");
     leafSystem.recordResetAndCompute(cmd, frame.frameIndex, frame.time, frame.deltaTime);
+    profiler.endGpuZone(cmd, "LeafCompute");
 
     // Cloud shadow map compute pass
     if (cloudShadowSystem.isEnabled()) {
+        profiler.beginGpuZone(cmd, "CloudShadow");
         // Wind offset for cloud animation (matching cloud LUT animation)
         glm::vec2 windDir = windSystem.getWindDirection();
         float windSpeed = windSystem.getWindSpeed();
@@ -1322,15 +1354,19 @@ void Renderer::render(const Camera& camera) {
 
         cloudShadowSystem.recordUpdate(cmd, frame.frameIndex, frame.sunDirection, frame.sunIntensity,
                                         windOffset, windTime * cloudTimeScale, frame.cameraPosition);
+        profiler.endGpuZone(cmd, "CloudShadow");
     }
 
     // Shadow pass (skip when sun is below horizon)
     if (lastSunIntensity > 0.001f) {
+        profiler.beginGpuZone(cmd, "ShadowPass");
         recordShadowPass(cmd, frame.frameIndex, frame.time);
+        profiler.endGpuZone(cmd, "ShadowPass");
     }
 
     // Froxel volumetric fog compute pass
     {
+        profiler.beginGpuZone(cmd, "Atmosphere");
         UniformBufferObject* ubo = static_cast<UniformBufferObject*>(uniformBuffersMapped[frame.frameIndex]);
         glm::vec3 sunColor = glm::vec3(ubo->sunColor);
 
@@ -1358,20 +1394,32 @@ void Renderer::render(const Camera& camera) {
                                           windTime * 0.002f,  // Slow vertical evolution
                                           windDir.y * windSpeed * windTime * cloudTimeScale);
         atmosphereLUTSystem.updateCloudMapLUT(cmd, windOffset, windTime * cloudTimeScale);
+        profiler.endGpuZone(cmd, "Atmosphere");
     }
 
     // HDR scene render pass
+    profiler.beginGpuZone(cmd, "HDRPass");
     recordHDRPass(cmd, frame.frameIndex, frame.time);
+    profiler.endGpuZone(cmd, "HDRPass");
 
     // Generate Hi-Z pyramid from scene depth (before bloom to ensure bloom doesn't affect it)
+    profiler.beginGpuZone(cmd, "HiZPyramid");
     hiZSystem.recordPyramidGeneration(cmd, frame.frameIndex);
+    profiler.endGpuZone(cmd, "HiZPyramid");
 
     // Multi-pass bloom
+    profiler.beginGpuZone(cmd, "Bloom");
     bloomSystem.setThreshold(postProcessSystem.getBloomThreshold());
     bloomSystem.recordBloomPass(cmd, postProcessSystem.getHDRColorView());
+    profiler.endGpuZone(cmd, "Bloom");
 
     // Post-process pass (with optional GUI overlay callback)
+    profiler.beginGpuZone(cmd, "PostProcess");
     postProcessSystem.recordPostProcess(cmd, frame.frameIndex, framebuffers[imageIndex], frame.deltaTime, guiRenderCallback);
+    profiler.endGpuZone(cmd, "PostProcess");
+
+    // End GPU profiling frame
+    profiler.endFrame(cmd, frame.frameIndex);
 
     vkEndCommandBuffer(cmd);
 

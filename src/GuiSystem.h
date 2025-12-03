@@ -36,6 +36,7 @@ private:
     void renderPostProcessSection(Renderer& renderer);
     void renderTerrainSection(Renderer& renderer);
     void renderDebugSection(Renderer& renderer);
+    void renderProfilerSection(Renderer& renderer);
     void renderHelpOverlay();
 
     VkDescriptorPool imguiPool = VK_NULL_HANDLE;
