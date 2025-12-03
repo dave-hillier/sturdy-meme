@@ -1,0 +1,192 @@
+#version 450
+
+#extension GL_GOOGLE_include_directive : require
+#extension GL_KHR_shader_subgroup_arithmetic : require
+#extension GL_KHR_shader_subgroup_shuffle : require
+#extension GL_KHR_shader_subgroup_basic : require
+
+/*
+ * terrain_sum_reduction_prepass_subgroup.comp - Optimized first pass with subgroup operations
+ *
+ * Processes 13 levels in a single dispatch:
+ * - SWAR popcount: 5 levels (32 bits -> 6-bit sum)
+ * - Subgroup shuffle: 5 levels (combines 32 threads -> 11-bit sum)
+ * - Shared memory: 3 levels (combines 8 subgroups -> 14-bit sum)
+ *
+ * Node ID calculation key insight:
+ * - At level L, nodes have heap IDs [2^L, 2^(L+1)-1]
+ * - After SWAR, gl_GlobalInvocationID.x corresponds to heap node (2^(passID-5) + gl_GlobalInvocationID.x)
+ * - When combining threads at subgroup level N, the parent heap ID is:
+ *   (2^(passID-5-N) + (gl_GlobalInvocationID.x >> N))
+ */
+
+#define CBT_BUFFER_BINDING 0
+#include "cbt.glsl"
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(push_constant) uniform PushConstants {
+    int passID;  // Which depth level to start from (maxDepth)
+};
+
+// Shared memory for workgroup-level reduction (256 threads = 8 subgroups of 32)
+shared uint sharedSums[8];
+
+void main() {
+    uint cnt = (1u << passID);
+    uint threadID = gl_GlobalInvocationID.x << 5;  // Each thread handles 32 bits
+
+    // Early exit for threads beyond valid range
+    if (threadID >= cnt) {
+        return;
+    }
+
+    uint nodeID = threadID + cnt;
+    cbt_Node node = cbt_CreateNode_Explicit(nodeID, passID);
+    uint alignedBitOffset = cbt__NodeBitID(node);
+    uint bitField = cbtBuffer.heap[alignedBitOffset >> 5u];
+    uint bitData = 0u;
+
+    // ========== PHASE 1: SWAR Popcount (5 levels) ==========
+    // Level maxDepth-1: 2-bits - count pairs of bits
+    bitField = (bitField & 0x55555555u) + ((bitField >> 1u) & 0x55555555u);
+    bitData = bitField;
+    cbtBuffer.heap[(alignedBitOffset - cnt) >> 5u] = bitData;
+
+    // Level maxDepth-2: 3-bits - pack 8 x 3-bit values
+    bitField = (bitField & 0x33333333u) + ((bitField >> 2u) & 0x33333333u);
+    bitData = ((bitField >> 0u) & (7u <<  0u))
+            | ((bitField >> 1u) & (7u <<  3u))
+            | ((bitField >> 2u) & (7u <<  6u))
+            | ((bitField >> 3u) & (7u <<  9u))
+            | ((bitField >> 4u) & (7u << 12u))
+            | ((bitField >> 5u) & (7u << 15u))
+            | ((bitField >> 6u) & (7u << 18u))
+            | ((bitField >> 7u) & (7u << 21u));
+    cbt__HeapWriteExplicit(cbt_CreateNode_Explicit(nodeID >> 2u, passID - 2), 24, bitData);
+
+    // Level maxDepth-3: 4-bits - pack 4 x 4-bit values
+    bitField = (bitField & 0x0F0F0F0Fu) + ((bitField >> 4u) & 0x0F0F0F0Fu);
+    bitData = ((bitField >>  0u) & (15u <<  0u))
+            | ((bitField >>  4u) & (15u <<  4u))
+            | ((bitField >>  8u) & (15u <<  8u))
+            | ((bitField >> 12u) & (15u << 12u));
+    cbt__HeapWriteExplicit(cbt_CreateNode_Explicit(nodeID >> 3u, passID - 3), 16, bitData);
+
+    // Level maxDepth-4: 5-bits - pack 2 x 5-bit values
+    bitField = (bitField & 0x00FF00FFu) + ((bitField >> 8u) & 0x00FF00FFu);
+    bitData = ((bitField >> 0u) & (31u << 0u))
+            | ((bitField >> 11u) & (31u << 5u));
+    cbt__HeapWriteExplicit(cbt_CreateNode_Explicit(nodeID >> 4u, passID - 4), 10, bitData);
+
+    // Level maxDepth-5: 6-bits - single 6-bit value (sum of 32 bits)
+    uint sum = (bitField & 0x0000FFFFu) + ((bitField >> 16u) & 0x0000FFFFu);
+    cbt__HeapWriteExplicit(cbt_CreateNode_Explicit(nodeID >> 5u, passID - 5), 6, sum);
+
+    // ========== PHASE 2: Subgroup Reduction (5 levels) ==========
+    // After SWAR, this thread's sum corresponds to heap node:
+    //   heapID = (1 << (passID-5)) + gl_GlobalInvocationID.x
+    // at depth (passID-5)
+
+    uint subgroupLane = gl_SubgroupInvocationID;
+    uint globalThreadID = gl_GlobalInvocationID.x;
+
+    // Level maxDepth-6: combine pairs (threads 0+1, 2+3, etc.)
+    if (passID >= 6) {
+        uint partner = subgroupShuffleXor(sum, 1u);
+        sum = sum + partner;
+        // Thread with even lane writes the result
+        if ((subgroupLane & 1u) == 0u) {
+            uint parentHeapID = (1u << (passID - 6)) + (globalThreadID >> 1u);
+            cbt__HeapWriteExplicit(cbt_CreateNode_Explicit(parentHeapID, passID - 6), 7, sum);
+        }
+    }
+
+    // Level maxDepth-7: combine quads (threads 0+2, 1+3, etc. already combined to 0,1)
+    if (passID >= 7) {
+        uint partner = subgroupShuffleXor(sum, 2u);
+        sum = sum + partner;
+        if ((subgroupLane & 3u) == 0u) {
+            uint parentHeapID = (1u << (passID - 7)) + (globalThreadID >> 2u);
+            cbt__HeapWriteExplicit(cbt_CreateNode_Explicit(parentHeapID, passID - 7), 8, sum);
+        }
+    }
+
+    // Level maxDepth-8: combine groups of 8
+    if (passID >= 8) {
+        uint partner = subgroupShuffleXor(sum, 4u);
+        sum = sum + partner;
+        if ((subgroupLane & 7u) == 0u) {
+            uint parentHeapID = (1u << (passID - 8)) + (globalThreadID >> 3u);
+            cbt__HeapWriteExplicit(cbt_CreateNode_Explicit(parentHeapID, passID - 8), 9, sum);
+        }
+    }
+
+    // Level maxDepth-9: combine groups of 16
+    if (passID >= 9) {
+        uint partner = subgroupShuffleXor(sum, 8u);
+        sum = sum + partner;
+        if ((subgroupLane & 15u) == 0u) {
+            uint parentHeapID = (1u << (passID - 9)) + (globalThreadID >> 4u);
+            cbt__HeapWriteExplicit(cbt_CreateNode_Explicit(parentHeapID, passID - 9), 10, sum);
+        }
+    }
+
+    // Level maxDepth-10: combine full subgroup (32 threads)
+    if (passID >= 10) {
+        uint partner = subgroupShuffleXor(sum, 16u);
+        sum = sum + partner;
+        if (subgroupLane == 0u) {
+            uint parentHeapID = (1u << (passID - 10)) + (globalThreadID >> 5u);
+            cbt__HeapWriteExplicit(cbt_CreateNode_Explicit(parentHeapID, passID - 10), 11, sum);
+        }
+    }
+
+    // ========== PHASE 3: Shared Memory Reduction (3 levels) ==========
+    // Each subgroup's lane 0 has the sum for 32 threads (1024 leaf bits)
+    // With 256 threads = 8 subgroups, we can reduce 3 more levels
+
+    uint subgroupID = gl_SubgroupID;  // 0-7 for 256 threads with subgroup size 32
+
+    // Store subgroup results to shared memory
+    if (subgroupLane == 0u && passID >= 10) {
+        sharedSums[subgroupID] = sum;
+    }
+    barrier();
+
+    // Level maxDepth-11: combine pairs of subgroups (0+1, 2+3, 4+5, 6+7)
+    if (passID >= 11 && gl_LocalInvocationIndex < 4u) {
+        uint idx = gl_LocalInvocationIndex;
+        uint combined = sharedSums[idx * 2u] + sharedSums[idx * 2u + 1u];
+        sharedSums[idx] = combined;
+
+        // Calculate which workgroup this is and which pair within it
+        uint workgroupID = gl_WorkGroupID.x;
+        uint pairID = workgroupID * 4u + idx;  // Each workgroup produces 4 results
+        uint parentHeapID = (1u << (passID - 11)) + pairID;
+        cbt__HeapWriteExplicit(cbt_CreateNode_Explicit(parentHeapID, passID - 11), 12, combined);
+    }
+    barrier();
+
+    // Level maxDepth-12: combine quads of subgroups
+    if (passID >= 12 && gl_LocalInvocationIndex < 2u) {
+        uint idx = gl_LocalInvocationIndex;
+        uint combined = sharedSums[idx * 2u] + sharedSums[idx * 2u + 1u];
+        sharedSums[idx] = combined;
+
+        uint workgroupID = gl_WorkGroupID.x;
+        uint quadID = workgroupID * 2u + idx;
+        uint parentHeapID = (1u << (passID - 12)) + quadID;
+        cbt__HeapWriteExplicit(cbt_CreateNode_Explicit(parentHeapID, passID - 12), 13, combined);
+    }
+    barrier();
+
+    // Level maxDepth-13: combine all 8 subgroups in workgroup
+    if (passID >= 13 && gl_LocalInvocationIndex == 0u) {
+        uint combined = sharedSums[0] + sharedSums[1];
+
+        uint workgroupID = gl_WorkGroupID.x;
+        uint parentHeapID = (1u << (passID - 13)) + workgroupID;
+        cbt__HeapWriteExplicit(cbt_CreateNode_Explicit(parentHeapID, passID - 13), 14, combined);
+    }
+}

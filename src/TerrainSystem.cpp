@@ -85,6 +85,7 @@ void TerrainSystem::destroy(VkDevice device, VmaAllocator allocator) {
     if (dispatcherPipeline) vkDestroyPipeline(device, dispatcherPipeline, nullptr);
     if (subdivisionPipeline) vkDestroyPipeline(device, subdivisionPipeline, nullptr);
     if (sumReductionPrepassPipeline) vkDestroyPipeline(device, sumReductionPrepassPipeline, nullptr);
+    if (sumReductionPrepassSubgroupPipeline) vkDestroyPipeline(device, sumReductionPrepassSubgroupPipeline, nullptr);
     if (sumReductionPipeline) vkDestroyPipeline(device, sumReductionPipeline, nullptr);
     if (sumReductionBatchedPipeline) vkDestroyPipeline(device, sumReductionBatchedPipeline, nullptr);
     if (renderPipeline) vkDestroyPipeline(device, renderPipeline, nullptr);
@@ -464,6 +465,31 @@ bool TerrainSystem::createSumReductionPipelines() {
         VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &sumReductionPrepassPipeline);
         vkDestroyShaderModule(device, shaderModule, nullptr);
         if (result != VK_SUCCESS) return false;
+    }
+
+    // Subgroup-optimized prepass pipeline (processes 13 levels instead of 5)
+    if (subgroupCaps.hasSubgroupArithmetic) {
+        VkShaderModule shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_sum_reduction_prepass_subgroup.comp.spv");
+        if (shaderModule) {
+            VkPipelineShaderStageCreateInfo stageInfo{};
+            stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+            stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+            stageInfo.module = shaderModule;
+            stageInfo.pName = "main";
+
+            VkComputePipelineCreateInfo pipelineInfo{};
+            pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+            pipelineInfo.stage = stageInfo;
+            pipelineInfo.layout = sumReductionPipelineLayout;
+
+            VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &sumReductionPrepassSubgroupPipeline);
+            vkDestroyShaderModule(device, shaderModule, nullptr);
+            if (result != VK_SUCCESS) {
+                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to create subgroup prepass pipeline, using fallback");
+            } else {
+                SDL_Log("TerrainSystem: Using subgroup-optimized sum reduction prepass");
+            }
+        }
     }
 
     // Regular sum reduction pipeline (legacy single-level per dispatch)
@@ -1138,38 +1164,68 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) {
                         0, 1, &barrier, 0, nullptr, 0, nullptr);
 
     // 3. Sum reduction - rebuild the sum tree
-    // Phase 1: Prepass handles bottom 5 levels using SWAR popcount (maxDepth to maxDepth-5)
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, sumReductionPrepassPipeline);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, sumReductionPipelineLayout,
-                           0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
-
+    // Choose optimized or fallback path based on subgroup support
     TerrainSumReductionPushConstants sumPC{};
     sumPC.passID = config.maxDepth;
-    vkCmdPushConstants(cmd, sumReductionPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
-                      sizeof(sumPC), &sumPC);
 
-    uint32_t workgroups = std::max(1u, (1u << (config.maxDepth - 5)) / SUM_REDUCTION_WORKGROUP_SIZE);
-    vkCmdDispatch(cmd, workgroups, 1, 1);
+    int levelsFromPrepass;
 
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                        0, 1, &barrier, 0, nullptr, 0, nullptr);
+    if (sumReductionPrepassSubgroupPipeline) {
+        // Subgroup prepass - processes 13 levels:
+        // - SWAR popcount: 5 levels (32 bits -> 6-bit sum)
+        // - Subgroup shuffle: 5 levels (32 threads -> 11-bit sum)
+        // - Shared memory: 3 levels (8 subgroups -> 14-bit sum)
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, sumReductionPrepassSubgroupPipeline);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, sumReductionPipelineLayout,
+                               0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
 
-    // Phase 2: Standard sum reduction for remaining levels (one dispatch per level)
-    // This is required because each level depends on the previous level's results
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, sumReductionPipeline);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, sumReductionPipelineLayout,
-                           0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
-
-    for (int depth = config.maxDepth - 6; depth >= 0; --depth) {
-        sumPC.passID = depth;
         vkCmdPushConstants(cmd, sumReductionPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
                           sizeof(sumPC), &sumPC);
 
-        workgroups = std::max(1u, (1u << depth) / SUM_REDUCTION_WORKGROUP_SIZE);
+        uint32_t workgroups = std::max(1u, (1u << (config.maxDepth - 5)) / SUM_REDUCTION_WORKGROUP_SIZE);
         vkCmdDispatch(cmd, workgroups, 1, 1);
 
         vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                             0, 1, &barrier, 0, nullptr, 0, nullptr);
+
+        levelsFromPrepass = 13;  // SWAR (5) + subgroup (5) + shared memory (3)
+    } else {
+        // Fallback path: standard prepass handles 5 levels
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, sumReductionPrepassPipeline);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, sumReductionPipelineLayout,
+                               0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
+
+        vkCmdPushConstants(cmd, sumReductionPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                          sizeof(sumPC), &sumPC);
+
+        uint32_t workgroups = std::max(1u, (1u << (config.maxDepth - 5)) / SUM_REDUCTION_WORKGROUP_SIZE);
+        vkCmdDispatch(cmd, workgroups, 1, 1);
+
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                            0, 1, &barrier, 0, nullptr, 0, nullptr);
+
+        levelsFromPrepass = 5;
+    }
+
+    // Phase 2: Standard sum reduction for remaining levels (one dispatch per level)
+    // Start from level (maxDepth - levelsFromPrepass - 1) down to 0
+    int startDepth = config.maxDepth - levelsFromPrepass - 1;
+    if (startDepth >= 0) {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, sumReductionPipeline);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, sumReductionPipelineLayout,
+                               0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
+
+        for (int depth = startDepth; depth >= 0; --depth) {
+            sumPC.passID = depth;
+            vkCmdPushConstants(cmd, sumReductionPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                              sizeof(sumPC), &sumPC);
+
+            uint32_t workgroups = std::max(1u, (1u << depth) / SUM_REDUCTION_WORKGROUP_SIZE);
+            vkCmdDispatch(cmd, workgroups, 1, 1);
+
+            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                0, 1, &barrier, 0, nullptr, 0, nullptr);
+        }
     }
 
     // 4. Final dispatcher pass to update draw args

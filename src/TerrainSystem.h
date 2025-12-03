@@ -214,6 +214,7 @@ private:
     VkPipeline subdivisionPipeline = VK_NULL_HANDLE;
     VkPipelineLayout sumReductionPipelineLayout = VK_NULL_HANDLE;
     VkPipeline sumReductionPrepassPipeline = VK_NULL_HANDLE;
+    VkPipeline sumReductionPrepassSubgroupPipeline = VK_NULL_HANDLE;  // Subgroup-optimized version
     VkPipeline sumReductionPipeline = VK_NULL_HANDLE;
 
     // Optimized sum reduction pipelines (batched multi-level)
