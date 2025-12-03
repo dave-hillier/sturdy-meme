@@ -703,6 +703,29 @@ void GuiSystem::renderDebugSection(Renderer& renderer) {
     ImGui::Separator();
     ImGui::Spacing();
 
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.6f, 0.8f, 1.0f, 1.0f));
+    ImGui::Text("OCCLUSION CULLING");
+    ImGui::PopStyleColor();
+
+    bool hiZEnabled = renderer.isHiZCullingEnabled();
+    if (ImGui::Checkbox("Hi-Z Occlusion Culling", &hiZEnabled)) {
+        renderer.setHiZCullingEnabled(hiZEnabled);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Enable/disable hierarchical Z-buffer occlusion culling (8 key)");
+    }
+
+    // Display culling statistics
+    auto stats = renderer.getHiZCullingStats();
+    ImGui::Text("Total Objects: %u", stats.totalObjects);
+    ImGui::Text("Visible: %u", stats.visibleObjects);
+    ImGui::Text("Frustum Culled: %u", stats.frustumCulled);
+    ImGui::Text("Occlusion Culled: %u", stats.occlusionCulled);
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.8f, 0.5f, 1.0f));
     ImGui::Text("SYSTEM INFO");
     ImGui::PopStyleColor();
@@ -731,6 +754,7 @@ void GuiSystem::renderDebugSection(Renderer& renderer) {
     ImGui::BulletText("T - Terrain wireframe");
     ImGui::BulletText("6 - Cascade debug");
     ImGui::BulletText("7 - Snow depth debug");
+    ImGui::BulletText("8 - Hi-Z culling toggle");
     ImGui::BulletText("[ ] - Fog density");
     ImGui::BulletText("\\ - Toggle fog");
     ImGui::BulletText("F - Spawn confetti");

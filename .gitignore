@@ -19,3 +19,4 @@ generated/
 vcpkg_installed/
 
 downloads/
+assets/terrain/*
