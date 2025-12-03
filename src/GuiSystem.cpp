@@ -812,6 +812,11 @@ void GuiSystem::renderTerrainSection(Renderer& renderer) {
         ImGui::SetTooltip("Use GPU frustum culling with stream compaction for split phase");
     }
 
+    // Debug status
+    ImGui::Text("Status: %s, Phase: %s",
+        terrainMut.isCurrentlySkipping() ? "SKIPPING" : "COMPUTING",
+        terrainMut.getCurrentPhase() == 0 ? "SPLIT" : "MERGE");
+
     ImGui::Spacing();
 
     // Height query demo
