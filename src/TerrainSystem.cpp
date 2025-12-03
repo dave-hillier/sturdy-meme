@@ -1309,6 +1309,7 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
 
     if (shouldSkip) {
         framesSinceLastCompute++;
+        lastFrameWasSkipped = true;
 
         // Still need the final barrier for rendering (CBT state unchanged but GPU needs it)
         VkMemoryBarrier renderBarrier{};
@@ -1325,6 +1326,7 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
     // Reset skip tracking
     forceNextCompute = false;
     framesSinceLastCompute = 0;
+    lastFrameWasSkipped = false;
 
     VkMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;

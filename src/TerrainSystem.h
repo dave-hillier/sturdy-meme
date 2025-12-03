@@ -154,6 +154,10 @@ public:
     void setGpuCulling(bool enabled) { gpuCullingEnabled = enabled; }
     bool isGpuCullingEnabled() const { return gpuCullingEnabled; }
 
+    // Debug info
+    bool isCurrentlySkipping() const { return lastFrameWasSkipped; }
+    uint32_t getCurrentPhase() const { return subdivisionFrameCount & 1; }  // 0 = split, 1 = merge
+
     // Legacy method - prefer getTriangleCount()
     uint32_t getNodeCount() const { return getTriangleCount(); }
 
@@ -287,6 +291,7 @@ private:
     uint32_t staticFrameCount = 0;       // Consecutive frames camera hasn't moved
     uint32_t framesSinceLastCompute = 0; // Frames since last subdivision compute
     bool forceNextCompute = true;        // Force compute on next frame
+    bool lastFrameWasSkipped = false;    // Debug: was last frame skipped?
 
     // Skip-frame thresholds
     static constexpr float POSITION_THRESHOLD = 0.1f;    // World units
