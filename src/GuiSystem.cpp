@@ -231,7 +231,7 @@ void GuiSystem::render(Renderer& renderer, const Camera& camera, float deltaTime
     ImGui::SetNextWindowSize(ImVec2(340, 680), ImGuiCond_FirstUseEver);
 
     if (ImGui::Begin("Engine Controls", &visible, windowFlags)) {
-        renderDashboard(renderer, fps);
+        renderDashboard(renderer, camera, fps);
 
         ImGui::Spacing();
         ImGui::Separator();
@@ -290,7 +290,7 @@ bool GuiSystem::wantsInput() const {
     return io.WantCaptureMouse || io.WantCaptureKeyboard;
 }
 
-void GuiSystem::renderDashboard(Renderer& renderer, float fps) {
+void GuiSystem::renderDashboard(Renderer& renderer, const Camera& camera, float fps) {
     // Performance metrics header
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.8f, 1.0f, 1.0f));
     ImGui::Text("PERFORMANCE");
@@ -348,6 +348,11 @@ void GuiSystem::renderDashboard(Renderer& renderer, float fps) {
     ImGui::Text("%02d:%02d", h, m);
 
     ImGui::Columns(1);
+
+    // Camera position
+    ImGui::Spacing();
+    glm::vec3 pos = camera.getPosition();
+    ImGui::Text("Camera: X %.1f  Y %.1f  Z %.1f", pos.x, pos.y, pos.z);
 
     // Help toggle
     ImGui::Spacing();
