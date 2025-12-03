@@ -35,6 +35,7 @@ set(SOURCES
     src/GraphicsPipelineFactory.cpp
     src/BindingBuilder.cpp
     src/DescriptorManager.cpp
+    src/MaterialDescriptorFactory.cpp
     src/RenderableBuilder.cpp
     src/GrassSystem.cpp
     src/CelestialCalculator.cpp

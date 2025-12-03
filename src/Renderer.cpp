@@ -3,6 +3,7 @@
 #include "ShaderLoader.h"
 #include "BindingBuilder.h"
 #include "GraphicsPipelineFactory.h"
+#include "MaterialDescriptorFactory.h"
 #include <SDL3/SDL_vulkan.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <stdexcept>
@@ -263,23 +264,32 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     if (!rockSystem.init(rockInfo, rockConfig)) return false;
 
     // Update rock descriptor sets now that rock textures are loaded
-    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        DescriptorManager::SetWriter writer(device, rockDescriptorSets[i]);
-        writer
-            .writeBuffer(0, uniformBuffers[i], 0, sizeof(UniformBufferObject))
-            .writeImage(1, rockSystem.getRockTexture().getImageView(),
-                       rockSystem.getRockTexture().getSampler())
-            .writeImage(2, shadowSystem.getShadowImageView(), shadowSystem.getShadowSampler())
-            .writeImage(3, rockSystem.getRockNormalMap().getImageView(),
-                       rockSystem.getRockNormalMap().getSampler())
-            .writeBuffer(4, lightBuffers[i], 0, sizeof(LightBuffer),
-                        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeImage(5, sceneManager.getSceneBuilder().getDefaultEmissiveMap().getImageView(),
-                       sceneManager.getSceneBuilder().getDefaultEmissiveMap().getSampler())
-            .writeImage(6, shadowSystem.getPointShadowArrayView(i), shadowSystem.getPointShadowSampler())
-            .writeImage(7, shadowSystem.getSpotShadowArrayView(i), shadowSystem.getSpotShadowSampler())
-            .writeImage(8, snowMaskSystem.getSnowMaskView(), snowMaskSystem.getSnowMaskSampler())
-            .update();
+    {
+        MaterialDescriptorFactory factory(device);
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            MaterialDescriptorFactory::CommonBindings common{};
+            common.uniformBuffer = uniformBuffers[i];
+            common.uniformBufferSize = sizeof(UniformBufferObject);
+            common.shadowMapView = shadowSystem.getShadowImageView();
+            common.shadowMapSampler = shadowSystem.getShadowSampler();
+            common.lightBuffer = lightBuffers[i];
+            common.lightBufferSize = sizeof(LightBuffer);
+            common.emissiveMapView = sceneManager.getSceneBuilder().getDefaultEmissiveMap().getImageView();
+            common.emissiveMapSampler = sceneManager.getSceneBuilder().getDefaultEmissiveMap().getSampler();
+            common.pointShadowView = shadowSystem.getPointShadowArrayView(i);
+            common.pointShadowSampler = shadowSystem.getPointShadowSampler();
+            common.spotShadowView = shadowSystem.getSpotShadowArrayView(i);
+            common.spotShadowSampler = shadowSystem.getSpotShadowSampler();
+            common.snowMaskView = snowMaskSystem.getSnowMaskView();
+            common.snowMaskSampler = snowMaskSystem.getSnowMaskSampler();
+
+            MaterialDescriptorFactory::MaterialTextures mat{};
+            mat.diffuseView = rockSystem.getRockTexture().getImageView();
+            mat.diffuseSampler = rockSystem.getRockTexture().getSampler();
+            mat.normalView = rockSystem.getRockNormalMap().getImageView();
+            mat.normalSampler = rockSystem.getRockNormalMap().getSampler();
+            factory.writeDescriptorSet(rockDescriptorSets[i], common, mat);
+        }
     }
 
     // Initialize weather particle system (rain/snow)
@@ -430,24 +440,20 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
 
     // Update main descriptor sets with cloud shadow map (binding 9)
     // This is done here because cloudShadowSystem is initialized after createDescriptorSets
-    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        VkDescriptorImageInfo cloudShadowInfo{};
-        cloudShadowInfo.sampler = cloudShadowSystem.getShadowMapSampler();
-        cloudShadowInfo.imageView = cloudShadowSystem.getShadowMapView();
-        cloudShadowInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-        std::array<VkWriteDescriptorSet, 4> writes{};
-        // Update all material descriptor sets
-        VkDescriptorSet sets[] = {descriptorSets[i], groundDescriptorSets[i], metalDescriptorSets[i], rockDescriptorSets[i]};
-        for (size_t j = 0; j < 4; j++) {
-            writes[j].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            writes[j].dstSet = sets[j];
-            writes[j].dstBinding = 9;
-            writes[j].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            writes[j].descriptorCount = 1;
-            writes[j].pImageInfo = &cloudShadowInfo;
+    {
+        MaterialDescriptorFactory factory(device);
+        VkDescriptorSet allSets[] = {
+            descriptorSets[0], descriptorSets[1],
+            groundDescriptorSets[0], groundDescriptorSets[1],
+            metalDescriptorSets[0], metalDescriptorSets[1],
+            rockDescriptorSets[0], rockDescriptorSets[1],
+            characterDescriptorSets[0], characterDescriptorSets[1]
+        };
+        for (auto set : allSets) {
+            factory.updateCloudShadowBinding(set,
+                cloudShadowSystem.getShadowMapView(),
+                cloudShadowSystem.getShadowMapSampler());
         }
-        vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
     }
 
     // Initialize Catmull-Clark subdivision system
@@ -1059,7 +1065,7 @@ bool Renderer::createDescriptorPool() {
 bool Renderer::createDescriptorSets() {
     VkDevice device = vulkanContext.getDevice();
 
-    // Allocate descriptor sets using the new pool manager
+    // Allocate descriptor sets using the pool manager
     descriptorSets = descriptorManagerPool->allocate(descriptorSetLayout, MAX_FRAMES_IN_FLIGHT);
     if (descriptorSets.empty()) {
         SDL_Log("Failed to allocate descriptor sets");
@@ -1090,67 +1096,66 @@ bool Renderer::createDescriptorSets() {
         return false;
     }
 
-    // Helper lambda to write common bindings shared across all material sets
-    auto writeCommonBindings = [this](DescriptorManager::SetWriter& writer, size_t frameIndex) {
-        writer
-            .writeBuffer(0, uniformBuffers[frameIndex], 0, sizeof(UniformBufferObject))
-            .writeImage(2, shadowSystem.getShadowImageView(), shadowSystem.getShadowSampler())
-            .writeBuffer(4, lightBuffers[frameIndex], 0, sizeof(LightBuffer),
-                        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeImage(5, sceneManager.getSceneBuilder().getDefaultEmissiveMap().getImageView(),
-                       sceneManager.getSceneBuilder().getDefaultEmissiveMap().getSampler())
-            .writeImage(6, shadowSystem.getPointShadowArrayView(frameIndex), shadowSystem.getPointShadowSampler())
-            .writeImage(7, shadowSystem.getSpotShadowArrayView(frameIndex), shadowSystem.getSpotShadowSampler())
-            .writeImage(8, snowMaskSystem.getSnowMaskView(), snowMaskSystem.getSnowMaskSampler());
-    };
+    // Use factory to write descriptor sets with proper image layouts
+    MaterialDescriptorFactory factory(device);
 
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        // Crate material descriptor sets
+        // Build common bindings for this frame
+        MaterialDescriptorFactory::CommonBindings common{};
+        common.uniformBuffer = uniformBuffers[i];
+        common.uniformBufferSize = sizeof(UniformBufferObject);
+        common.shadowMapView = shadowSystem.getShadowImageView();
+        common.shadowMapSampler = shadowSystem.getShadowSampler();
+        common.lightBuffer = lightBuffers[i];
+        common.lightBufferSize = sizeof(LightBuffer);
+        common.emissiveMapView = sceneManager.getSceneBuilder().getDefaultEmissiveMap().getImageView();
+        common.emissiveMapSampler = sceneManager.getSceneBuilder().getDefaultEmissiveMap().getSampler();
+        common.pointShadowView = shadowSystem.getPointShadowArrayView(i);
+        common.pointShadowSampler = shadowSystem.getPointShadowSampler();
+        common.spotShadowView = shadowSystem.getSpotShadowArrayView(i);
+        common.spotShadowSampler = shadowSystem.getSpotShadowSampler();
+        common.snowMaskView = snowMaskSystem.getSnowMaskView();
+        common.snowMaskSampler = snowMaskSystem.getSnowMaskSampler();
+        // Cloud shadow is added later in init() after cloudShadowSystem is initialized
+
+        // Crate material
         {
-            DescriptorManager::SetWriter writer(device, descriptorSets[i]);
-            writeCommonBindings(writer, i);
-            writer
-                .writeImage(1, sceneManager.getSceneBuilder().getCrateTexture().getImageView(),
-                           sceneManager.getSceneBuilder().getCrateTexture().getSampler())
-                .writeImage(3, sceneManager.getSceneBuilder().getCrateNormalMap().getImageView(),
-                           sceneManager.getSceneBuilder().getCrateNormalMap().getSampler())
-                .update();
+            MaterialDescriptorFactory::MaterialTextures mat{};
+            mat.diffuseView = sceneManager.getSceneBuilder().getCrateTexture().getImageView();
+            mat.diffuseSampler = sceneManager.getSceneBuilder().getCrateTexture().getSampler();
+            mat.normalView = sceneManager.getSceneBuilder().getCrateNormalMap().getImageView();
+            mat.normalSampler = sceneManager.getSceneBuilder().getCrateNormalMap().getSampler();
+            factory.writeDescriptorSet(descriptorSets[i], common, mat);
         }
 
-        // Ground material descriptor sets
+        // Ground material
         {
-            DescriptorManager::SetWriter writer(device, groundDescriptorSets[i]);
-            writeCommonBindings(writer, i);
-            writer
-                .writeImage(1, sceneManager.getSceneBuilder().getGroundTexture().getImageView(),
-                           sceneManager.getSceneBuilder().getGroundTexture().getSampler())
-                .writeImage(3, sceneManager.getSceneBuilder().getGroundNormalMap().getImageView(),
-                           sceneManager.getSceneBuilder().getGroundNormalMap().getSampler())
-                .update();
+            MaterialDescriptorFactory::MaterialTextures mat{};
+            mat.diffuseView = sceneManager.getSceneBuilder().getGroundTexture().getImageView();
+            mat.diffuseSampler = sceneManager.getSceneBuilder().getGroundTexture().getSampler();
+            mat.normalView = sceneManager.getSceneBuilder().getGroundNormalMap().getImageView();
+            mat.normalSampler = sceneManager.getSceneBuilder().getGroundNormalMap().getSampler();
+            factory.writeDescriptorSet(groundDescriptorSets[i], common, mat);
         }
 
-        // Metal material descriptor sets
+        // Metal material
         {
-            DescriptorManager::SetWriter writer(device, metalDescriptorSets[i]);
-            writeCommonBindings(writer, i);
-            writer
-                .writeImage(1, sceneManager.getSceneBuilder().getMetalTexture().getImageView(),
-                           sceneManager.getSceneBuilder().getMetalTexture().getSampler())
-                .writeImage(3, sceneManager.getSceneBuilder().getMetalNormalMap().getImageView(),
-                           sceneManager.getSceneBuilder().getMetalNormalMap().getSampler())
-                .update();
+            MaterialDescriptorFactory::MaterialTextures mat{};
+            mat.diffuseView = sceneManager.getSceneBuilder().getMetalTexture().getImageView();
+            mat.diffuseSampler = sceneManager.getSceneBuilder().getMetalTexture().getSampler();
+            mat.normalView = sceneManager.getSceneBuilder().getMetalNormalMap().getImageView();
+            mat.normalSampler = sceneManager.getSceneBuilder().getMetalNormalMap().getSampler();
+            factory.writeDescriptorSet(metalDescriptorSets[i], common, mat);
         }
 
-        // Character material descriptor sets (white texture for vertex colors)
+        // Character material (white texture for vertex colors)
         {
-            DescriptorManager::SetWriter writer(device, characterDescriptorSets[i]);
-            writeCommonBindings(writer, i);
-            writer
-                .writeImage(1, sceneManager.getSceneBuilder().getWhiteTexture().getImageView(),
-                           sceneManager.getSceneBuilder().getWhiteTexture().getSampler())
-                .writeImage(3, sceneManager.getSceneBuilder().getWhiteTexture().getImageView(),
-                           sceneManager.getSceneBuilder().getWhiteTexture().getSampler())  // No normal map, use white
-                .update();
+            MaterialDescriptorFactory::MaterialTextures mat{};
+            mat.diffuseView = sceneManager.getSceneBuilder().getWhiteTexture().getImageView();
+            mat.diffuseSampler = sceneManager.getSceneBuilder().getWhiteTexture().getSampler();
+            mat.normalView = sceneManager.getSceneBuilder().getWhiteTexture().getImageView();  // No normal map
+            mat.normalSampler = sceneManager.getSceneBuilder().getWhiteTexture().getSampler();
+            factory.writeDescriptorSet(characterDescriptorSets[i], common, mat);
         }
     }
 
@@ -1805,192 +1810,46 @@ bool Renderer::createBoneMatricesBuffers() {
 bool Renderer::createSkinnedDescriptorSets() {
     VkDevice device = vulkanContext.getDevice();
 
-    // Allocate skinned descriptor sets
-    std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, skinnedDescriptorSetLayout);
-    VkDescriptorSetAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = descriptorPool;
-    allocInfo.descriptorSetCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
-    allocInfo.pSetLayouts = layouts.data();
-
-    skinnedDescriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
-    if (vkAllocateDescriptorSets(device, &allocInfo, skinnedDescriptorSets.data()) != VK_SUCCESS) {
+    // Allocate skinned descriptor sets using the pool manager
+    skinnedDescriptorSets = descriptorManagerPool->allocate(skinnedDescriptorSetLayout, MAX_FRAMES_IN_FLIGHT);
+    if (skinnedDescriptorSets.empty()) {
         SDL_Log("Failed to allocate skinned descriptor sets");
         return false;
     }
 
-    // Update skinned descriptor sets
+    // Use factory to write skinned descriptor sets
+    MaterialDescriptorFactory factory(device);
+    const auto& whiteTexture = sceneManager.getSceneBuilder().getWhiteTexture();
+    const auto& emissiveMap = sceneManager.getSceneBuilder().getDefaultEmissiveMap();
+
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        std::vector<VkWriteDescriptorSet> descriptorWrites;
+        MaterialDescriptorFactory::CommonBindings common{};
+        common.uniformBuffer = uniformBuffers[i];
+        common.uniformBufferSize = sizeof(UniformBufferObject);
+        common.shadowMapView = shadowSystem.getShadowImageView();
+        common.shadowMapSampler = shadowSystem.getShadowSampler();
+        common.lightBuffer = lightBuffers[i];
+        common.lightBufferSize = sizeof(LightBuffer);
+        common.emissiveMapView = emissiveMap.getImageView();
+        common.emissiveMapSampler = emissiveMap.getSampler();
+        // Skinned meshes use dummy textures for point/spot shadows
+        common.pointShadowView = emissiveMap.getImageView();
+        common.pointShadowSampler = emissiveMap.getSampler();
+        common.spotShadowView = emissiveMap.getImageView();
+        common.spotShadowSampler = emissiveMap.getSampler();
+        common.snowMaskView = snowMaskSystem.getSnowMaskView();
+        common.snowMaskSampler = snowMaskSystem.getSnowMaskSampler();
+        common.cloudShadowView = cloudShadowSystem.getShadowMapView();
+        common.cloudShadowSampler = cloudShadowSystem.getShadowMapSampler();
+        common.boneMatricesBuffer = boneMatricesBuffers[i];
+        common.boneMatricesBufferSize = sizeof(BoneMatricesUBO);
 
-        // Binding 0: UBO (same as regular pipeline)
-        VkDescriptorBufferInfo bufferInfo{};
-        bufferInfo.buffer = uniformBuffers[i];
-        bufferInfo.offset = 0;
-        bufferInfo.range = sizeof(UniformBufferObject);
-
-        VkWriteDescriptorSet uboWrite{};
-        uboWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        uboWrite.dstSet = skinnedDescriptorSets[i];
-        uboWrite.dstBinding = 0;
-        uboWrite.dstArrayElement = 0;
-        uboWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        uboWrite.descriptorCount = 1;
-        uboWrite.pBufferInfo = &bufferInfo;
-        descriptorWrites.push_back(uboWrite);
-
-        // Binding 1: Diffuse texture (white texture for vertex colors)
-        VkDescriptorImageInfo diffuseInfo{};
-        diffuseInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        diffuseInfo.imageView = sceneManager.getSceneBuilder().getWhiteTexture().getImageView();
-        diffuseInfo.sampler = sceneManager.getSceneBuilder().getWhiteTexture().getSampler();
-
-        VkWriteDescriptorSet diffuseWrite{};
-        diffuseWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        diffuseWrite.dstSet = skinnedDescriptorSets[i];
-        diffuseWrite.dstBinding = 1;
-        diffuseWrite.dstArrayElement = 0;
-        diffuseWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        diffuseWrite.descriptorCount = 1;
-        diffuseWrite.pImageInfo = &diffuseInfo;
-        descriptorWrites.push_back(diffuseWrite);
-
-        // Binding 2: Shadow map
-        VkDescriptorImageInfo shadowInfo{};
-        shadowInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
-        shadowInfo.imageView = shadowSystem.getShadowImageView();
-        shadowInfo.sampler = shadowSystem.getShadowSampler();
-
-        VkWriteDescriptorSet shadowWrite{};
-        shadowWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        shadowWrite.dstSet = skinnedDescriptorSets[i];
-        shadowWrite.dstBinding = 2;
-        shadowWrite.dstArrayElement = 0;
-        shadowWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        shadowWrite.descriptorCount = 1;
-        shadowWrite.pImageInfo = &shadowInfo;
-        descriptorWrites.push_back(shadowWrite);
-
-        // Binding 3: Normal map (use white texture as dummy)
-        VkDescriptorImageInfo normalInfo{};
-        normalInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        normalInfo.imageView = sceneManager.getSceneBuilder().getWhiteTexture().getImageView();
-        normalInfo.sampler = sceneManager.getSceneBuilder().getWhiteTexture().getSampler();
-
-        VkWriteDescriptorSet normalWrite{};
-        normalWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        normalWrite.dstSet = skinnedDescriptorSets[i];
-        normalWrite.dstBinding = 3;
-        normalWrite.dstArrayElement = 0;
-        normalWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        normalWrite.descriptorCount = 1;
-        normalWrite.pImageInfo = &normalInfo;
-        descriptorWrites.push_back(normalWrite);
-
-        // Binding 4: Light buffer
-        VkDescriptorBufferInfo lightBufferInfo{};
-        lightBufferInfo.buffer = lightBuffers[i];
-        lightBufferInfo.offset = 0;
-        lightBufferInfo.range = VK_WHOLE_SIZE;
-
-        VkWriteDescriptorSet lightWrite{};
-        lightWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        lightWrite.dstSet = skinnedDescriptorSets[i];
-        lightWrite.dstBinding = 4;
-        lightWrite.dstArrayElement = 0;
-        lightWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        lightWrite.descriptorCount = 1;
-        lightWrite.pBufferInfo = &lightBufferInfo;
-        descriptorWrites.push_back(lightWrite);
-
-        // Binding 5: Emissive map (black)
-        VkDescriptorImageInfo emissiveInfo{};
-        emissiveInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        emissiveInfo.imageView = sceneManager.getSceneBuilder().getDefaultEmissiveMap().getImageView();
-        emissiveInfo.sampler = sceneManager.getSceneBuilder().getDefaultEmissiveMap().getSampler();
-
-        VkWriteDescriptorSet emissiveWrite{};
-        emissiveWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        emissiveWrite.dstSet = skinnedDescriptorSets[i];
-        emissiveWrite.dstBinding = 5;
-        emissiveWrite.dstArrayElement = 0;
-        emissiveWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        emissiveWrite.descriptorCount = 1;
-        emissiveWrite.pImageInfo = &emissiveInfo;
-        descriptorWrites.push_back(emissiveWrite);
-
-        // Binding 6: Point shadow (use default emissive as dummy)
-        VkWriteDescriptorSet pointShadowWrite{};
-        pointShadowWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        pointShadowWrite.dstSet = skinnedDescriptorSets[i];
-        pointShadowWrite.dstBinding = 6;
-        pointShadowWrite.dstArrayElement = 0;
-        pointShadowWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        pointShadowWrite.descriptorCount = 1;
-        pointShadowWrite.pImageInfo = &emissiveInfo;
-        descriptorWrites.push_back(pointShadowWrite);
-
-        // Binding 7: Spot shadow (use default emissive as dummy)
-        VkWriteDescriptorSet spotShadowWrite{};
-        spotShadowWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        spotShadowWrite.dstSet = skinnedDescriptorSets[i];
-        spotShadowWrite.dstBinding = 7;
-        spotShadowWrite.dstArrayElement = 0;
-        spotShadowWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        spotShadowWrite.descriptorCount = 1;
-        spotShadowWrite.pImageInfo = &emissiveInfo;
-        descriptorWrites.push_back(spotShadowWrite);
-
-        // Binding 8: Snow mask
-        VkDescriptorImageInfo snowMaskInfo{};
-        snowMaskInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        snowMaskInfo.imageView = snowMaskSystem.getSnowMaskView();
-        snowMaskInfo.sampler = snowMaskSystem.getSnowMaskSampler();
-
-        VkWriteDescriptorSet snowMaskWrite{};
-        snowMaskWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        snowMaskWrite.dstSet = skinnedDescriptorSets[i];
-        snowMaskWrite.dstBinding = 8;
-        snowMaskWrite.dstArrayElement = 0;
-        snowMaskWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        snowMaskWrite.descriptorCount = 1;
-        snowMaskWrite.pImageInfo = &snowMaskInfo;
-        descriptorWrites.push_back(snowMaskWrite);
-
-        // Binding 9: Cloud shadow map
-        VkDescriptorImageInfo cloudShadowInfo{};
-        cloudShadowInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        cloudShadowInfo.imageView = cloudShadowSystem.getShadowMapView();
-        cloudShadowInfo.sampler = cloudShadowSystem.getShadowMapSampler();
-
-        VkWriteDescriptorSet cloudShadowWrite{};
-        cloudShadowWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        cloudShadowWrite.dstSet = skinnedDescriptorSets[i];
-        cloudShadowWrite.dstBinding = 9;
-        cloudShadowWrite.dstArrayElement = 0;
-        cloudShadowWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        cloudShadowWrite.descriptorCount = 1;
-        cloudShadowWrite.pImageInfo = &cloudShadowInfo;
-        descriptorWrites.push_back(cloudShadowWrite);
-
-        // Binding 10: Bone matrices UBO
-        VkDescriptorBufferInfo boneInfo{};
-        boneInfo.buffer = boneMatricesBuffers[i];
-        boneInfo.offset = 0;
-        boneInfo.range = sizeof(BoneMatricesUBO);
-
-        VkWriteDescriptorSet boneWrite{};
-        boneWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        boneWrite.dstSet = skinnedDescriptorSets[i];
-        boneWrite.dstBinding = 10;
-        boneWrite.dstArrayElement = 0;
-        boneWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        boneWrite.descriptorCount = 1;
-        boneWrite.pBufferInfo = &boneInfo;
-        descriptorWrites.push_back(boneWrite);
-
-        vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
-                               descriptorWrites.data(), 0, nullptr);
+        MaterialDescriptorFactory::MaterialTextures mat{};
+        mat.diffuseView = whiteTexture.getImageView();
+        mat.diffuseSampler = whiteTexture.getSampler();
+        mat.normalView = whiteTexture.getImageView();
+        mat.normalSampler = whiteTexture.getSampler();
+        factory.writeSkinnedDescriptorSet(skinnedDescriptorSets[i], common, mat);
     }
 
     SDL_Log("Created skinned descriptor sets for GPU skinning");
