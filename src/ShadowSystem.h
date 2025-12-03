@@ -10,6 +10,7 @@
 
 #include "Camera.h"
 #include "RenderableBuilder.h"
+#include "SkinnedMesh.h"
 
 // Number of cascades for CSM
 static constexpr uint32_t NUM_SHADOW_CASCADES = 4;
@@ -30,6 +31,7 @@ public:
         VmaAllocator allocator;
         VkDescriptorPool descriptorPool;
         VkDescriptorSetLayout mainDescriptorSetLayout;  // For pipeline compatibility
+        VkDescriptorSetLayout skinnedDescriptorSetLayout = VK_NULL_HANDLE;  // For skinned shadow pipeline (optional)
         std::string shaderPath;
         uint32_t framesInFlight;
     };
@@ -50,7 +52,16 @@ public:
                           VkDescriptorSet descriptorSet,
                           const std::vector<Renderable>& sceneObjects,
                           const DrawCallback& terrainDrawCallback,
-                          const DrawCallback& grassDrawCallback);
+                          const DrawCallback& grassDrawCallback,
+                          const DrawCallback& skinnedDrawCallback = nullptr);
+
+    // Record skinned mesh shadow for a single cascade (called after bindSkinnedShadowPipeline)
+    void recordSkinnedMeshShadow(VkCommandBuffer cmd, uint32_t cascade,
+                                  const glm::mat4& modelMatrix,
+                                  const SkinnedMesh& mesh);
+
+    // Bind the skinned shadow pipeline (call once, then record multiple skinned meshes)
+    void bindSkinnedShadowPipeline(VkCommandBuffer cmd, VkDescriptorSet descriptorSet);
 
     // CSM resource accessors (for binding in main shader)
     VkImageView getShadowImageView() const { return shadowImageView; }
@@ -58,6 +69,8 @@ public:
     VkRenderPass getShadowRenderPass() const { return shadowRenderPass; }
     VkPipeline getShadowPipeline() const { return shadowPipeline; }
     VkPipelineLayout getShadowPipelineLayout() const { return shadowPipelineLayout; }
+    VkPipeline getSkinnedShadowPipeline() const { return skinnedShadowPipeline; }
+    VkPipelineLayout getSkinnedShadowPipelineLayout() const { return skinnedShadowPipelineLayout; }
 
     // Cascade data accessors
     const std::array<glm::mat4, NUM_SHADOW_CASCADES>& getCascadeMatrices() const { return cascadeMatrices; }
@@ -78,6 +91,7 @@ private:
     bool createShadowResources();
     bool createShadowRenderPass();
     bool createShadowPipeline();
+    bool createSkinnedShadowPipeline();
 
     // Dynamic shadow creation methods
     bool createDynamicShadowResources();
@@ -95,6 +109,7 @@ private:
     VmaAllocator allocator = VK_NULL_HANDLE;
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
     VkDescriptorSetLayout mainDescriptorSetLayout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout skinnedDescriptorSetLayout = VK_NULL_HANDLE;
     std::string shaderPath;
     uint32_t framesInFlight = 0;
 
@@ -138,4 +153,8 @@ private:
 
     VkPipeline dynamicShadowPipeline = VK_NULL_HANDLE;
     VkPipelineLayout dynamicShadowPipelineLayout = VK_NULL_HANDLE;
+
+    // Skinned mesh shadow pipeline (for GPU-skinned characters)
+    VkPipeline skinnedShadowPipeline = VK_NULL_HANDLE;
+    VkPipelineLayout skinnedShadowPipelineLayout = VK_NULL_HANDLE;
 };
