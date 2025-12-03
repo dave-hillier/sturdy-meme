@@ -13,6 +13,7 @@
 #include "RenderableBuilder.h"
 #include "GLTFLoader.h"
 #include "AnimatedCharacter.h"
+#include "MaterialRegistry.h"
 
 // Backward compatibility alias - Renderable is the canonical type
 using SceneObject = Renderable;
@@ -43,6 +44,10 @@ public:
     const std::vector<SceneObject>& getSceneObjects() const { return sceneObjects; }
     std::vector<SceneObject>& getSceneObjects() { return sceneObjects; }
     size_t getPlayerObjectIndex() const { return playerObjectIndex; }
+
+    // Material registry - call registerMaterials() after init(), before Renderer creates descriptor sets
+    MaterialRegistry& getMaterialRegistry() { return materialRegistry; }
+    const MaterialRegistry& getMaterialRegistry() const { return materialRegistry; }
 
     // Access to textures for descriptor set creation
     Texture& getGroundTexture() { return groundTexture; }
@@ -82,6 +87,7 @@ public:
 private:
     bool createMeshes(const InitInfo& info);
     bool loadTextures(const InitInfo& info);
+    void registerMaterials();
     void createSceneObjects();
 
     // Get terrain height at (x, z), returns 0 if no terrain function available
@@ -121,4 +127,12 @@ private:
     size_t playerObjectIndex = 0;
     size_t flagPoleIndex = 0;
     size_t flagClothIndex = 0;
+
+    // Material registry for data-driven material management
+    MaterialRegistry materialRegistry;
+
+    // Material IDs cached for use in createSceneObjects
+    MaterialId crateMaterialId = INVALID_MATERIAL_ID;
+    MaterialId metalMaterialId = INVALID_MATERIAL_ID;
+    MaterialId whiteMaterialId = INVALID_MATERIAL_ID;
 };

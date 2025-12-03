@@ -36,6 +36,7 @@
 #include "CloudShadowSystem.h"
 #include "SkinnedMesh.h"
 #include "HiZSystem.h"
+#include "FrameData.h"
 
 struct PushConstants {
     glm::mat4 model;
@@ -220,6 +221,9 @@ private:
     LightingParams calculateLightingParams(float timeOfDay) const;
     UniformBufferObject buildUniformBufferData(const Camera& camera, const LightingParams& lighting, float timeOfDay) const;
     glm::vec2 calculateSunScreenPos(const Camera& camera, const glm::vec3& sunDir) const;
+
+    // Build per-frame shared state from camera and timing
+    FrameData buildFrameData(const Camera& camera, float deltaTime, float time) const;
 
     SDL_Window* window = nullptr;
     std::string resourcePath;
