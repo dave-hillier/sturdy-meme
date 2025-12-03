@@ -184,6 +184,13 @@ public:
     void setWireframeMode(bool enabled) { wireframeMode = enabled; }
     bool isWireframeMode() const { return wireframeMode; }
 
+    // Meshlet control
+    void setMeshletsEnabled(bool enabled) { config.useMeshlets = enabled; }
+    bool isMeshletsEnabled() const { return config.useMeshlets; }
+    uint32_t getMeshletTriangleCount() const { return meshlet.getTriangleCount(); }
+    int getMeshletSubdivisionLevel() const { return config.meshletSubdivisionLevel; }
+    bool setMeshletSubdivisionLevel(int level);  // Returns true if successful, reinitializes meshlet
+
 private:
     // Initialization helpers
     bool createUniformBuffers();
