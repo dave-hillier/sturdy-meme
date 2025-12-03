@@ -353,8 +353,10 @@ vec3 applyAerialPerspective(vec3 color, vec3 cameraPos, vec3 viewDir, float view
     scatterLight += night * vec3(0.01, 0.015, 0.03) * (1.0 - result.transmittance);
 
     // Combine: atmospheric scattering adds to fogged scene
-    // Use reduced atmospheric effect since we're at scene scale
-    float atmoBlend = clamp(viewDistance * 0.001, 0.0, 0.3);
+    // Scale for large world: gradual ramp over long distances (reaches 0.5 at ~5000 units)
+    float atmoBlend = clamp(viewDistance * 0.0001, 0.0, 0.7);
+    // Smooth the blend curve for more natural transition
+    atmoBlend = atmoBlend * atmoBlend * (3.0 - 2.0 * atmoBlend);  // Smoothstep-like
     vec3 finalColor = mix(fogged, fogged * result.transmittance + scatterLight, atmoBlend);
 
     return finalColor;
