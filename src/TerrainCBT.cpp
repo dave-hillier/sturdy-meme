@@ -101,8 +101,9 @@ uint32_t TerrainCBT::calculateBufferSize(int maxDepth) {
     // For max depth D, the bitfield needs 2^(D-1) bits = 2^(D-4) bytes
     // Plus the sum reduction tree overhead
     uint64_t bitfieldBytes = 1ull << (maxDepth - 1);
-    // Add some extra for alignment and sum reduction, cap at 64MB
-    return static_cast<uint32_t>(std::min(bitfieldBytes * 2, (uint64_t)64 * 1024 * 1024));
+    // Add some extra for alignment and sum reduction, cap at 256MB
+    // (maxDepth 28 requires ~128MB for 1m resolution on 16km terrain)
+    return static_cast<uint32_t>(std::min(bitfieldBytes * 2, (uint64_t)256 * 1024 * 1024));
 }
 
 bool TerrainCBT::init(const InitInfo& info) {
