@@ -4,8 +4,10 @@
 #ifndef UBO_CLOUD_SHADOW_GLSL
 #define UBO_CLOUD_SHADOW_GLSL
 
+#include "bindings.glsl"
+
 #ifndef CLOUD_SHADOW_UBO_BINDING
-#define CLOUD_SHADOW_UBO_BINDING 11
+#define CLOUD_SHADOW_UBO_BINDING BINDING_CLOUD_SHADOW_UBO
 #endif
 
 layout(binding = CLOUD_SHADOW_UBO_BINDING) uniform CloudShadowUBO {

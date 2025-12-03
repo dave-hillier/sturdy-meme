@@ -1,18 +1,20 @@
 // Common UBO definition - include this in all shaders that need core rendering data
 // This ensures the struct stays in sync between vertex and fragment shaders
 //
-// For snow uniforms, include ubo_snow.glsl (binding 14)
-// For cloud shadow uniforms, include ubo_cloud_shadow.glsl (binding 15)
+// For snow uniforms, include ubo_snow.glsl (binding 10)
+// For cloud shadow uniforms, include ubo_cloud_shadow.glsl (binding 11)
 
 #ifndef UBO_COMMON_GLSL
 #define UBO_COMMON_GLSL
+
+#include "bindings.glsl"
 
 #ifndef NUM_CASCADES
 #define NUM_CASCADES 4
 #endif
 
 #ifndef UBO_BINDING
-#define UBO_BINDING 0
+#define UBO_BINDING BINDING_UBO
 #endif
 
 layout(binding = UBO_BINDING) uniform UniformBufferObject {

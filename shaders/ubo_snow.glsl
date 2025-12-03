@@ -4,8 +4,10 @@
 #ifndef UBO_SNOW_GLSL
 #define UBO_SNOW_GLSL
 
+#include "bindings.glsl"
+
 #ifndef SNOW_UBO_BINDING
-#define SNOW_UBO_BINDING 10
+#define SNOW_UBO_BINDING BINDING_SNOW_UBO
 #endif
 
 layout(binding = SNOW_UBO_BINDING) uniform SnowUBO {
