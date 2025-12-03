@@ -40,6 +40,12 @@ public:
         VkImageView cloudShadowView = VK_NULL_HANDLE;
         VkSampler cloudShadowSampler = VK_NULL_HANDLE;
 
+        // Snow and cloud shadow UBOs (binding 10 and 11)
+        VkBuffer snowUboBuffer = VK_NULL_HANDLE;
+        VkDeviceSize snowUboBufferSize = 0;
+        VkBuffer cloudShadowUboBuffer = VK_NULL_HANDLE;
+        VkDeviceSize cloudShadowUboBufferSize = 0;
+
         // Optional: bone matrices for skinned meshes
         VkBuffer boneMatricesBuffer = VK_NULL_HANDLE;
         VkDeviceSize boneMatricesBufferSize = 0;

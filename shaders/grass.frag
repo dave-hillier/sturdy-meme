@@ -2,14 +2,33 @@
 
 #extension GL_GOOGLE_include_directive : require
 
+// Grass system uses its own descriptor set layout with custom bindings.
+// Override the UBO bindings before including the shared headers.
+#define SNOW_UBO_BINDING 10
+#define CLOUD_SHADOW_UBO_BINDING 11
+
 #include "constants_common.glsl"
 #include "lighting_common.glsl"
 #include "shadow_common.glsl"
 #include "atmosphere_common.glsl"
 #include "snow_common.glsl"
+#include "cloud_shadow_common.glsl"
 #include "ubo_common.glsl"
+#include "ubo_snow.glsl"
+#include "ubo_cloud_shadow.glsl"
 
-layout(binding = 2) uniform sampler2DArrayShadow shadowMapArray;  // Changed to array for CSM
+// Grass system descriptor set layout:
+// binding 0: UBO (main rendering uniforms)
+// binding 1: instance buffer (SSBO) - vertex shader only
+// binding 2: shadow map (sampler)
+// binding 3: wind UBO - vertex shader only
+// binding 4: light buffer (SSBO)
+// binding 5: snow mask texture (sampler)
+// binding 6: cloud shadow map (sampler)
+// binding 10: snow UBO
+// binding 11: cloud shadow UBO
+
+layout(binding = 2) uniform sampler2DArrayShadow shadowMapArray;  // CSM shadow map
 
 // GPU light structure (must match CPU GPULight struct)
 struct GPULight {
@@ -27,6 +46,9 @@ layout(std430, binding = 4) readonly buffer LightBuffer {
 
 // Snow mask texture (world-space coverage)
 layout(binding = 5) uniform sampler2D snowMaskTexture;
+
+// Cloud shadow map (R16F: 0=shadow, 1=no shadow)
+layout(binding = 6) uniform sampler2D cloudShadowMap;
 
 layout(location = 0) in vec3 fragColor;
 layout(location = 1) in vec3 fragNormal;
@@ -116,25 +138,34 @@ void main() {
     // === SNOW LAYER ===
     // Sample snow mask at world position
     float snowMaskCoverage = sampleSnowMask(snowMaskTexture, fragWorldPos,
-                                             ubo.snowMaskParams.xy, ubo.snowMaskParams.z);
+                                             snow.snowMaskParams.xy, snow.snowMaskParams.z);
 
     // Calculate vegetation snow coverage - tips catch more snow than stems
     // fragHeight: 0 at base, 1 at tip
     float snowAffinity = fragHeight;  // Tips catch more snow
-    float snowCoverage = calculateVegetationSnowCoverage(ubo.snowAmount, snowMaskCoverage, N, snowAffinity);
+    float snowCoverage = calculateVegetationSnowCoverage(snow.snowAmount, snowMaskCoverage, N, snowAffinity);
 
     // Apply snow to grass albedo
     if (snowCoverage > 0.01) {
-        albedo = snowyVegetationColor(albedo, ubo.snowColor.rgb, snowCoverage);
+        albedo = snowyVegetationColor(albedo, snow.snowColor.rgb, snowCoverage);
     }
 
     // === SUN LIGHTING ===
     vec3 sunL = normalize(ubo.sunDirection.xyz);
-    float shadow = calculateCascadedShadow(
+    float terrainShadow = calculateCascadedShadow(
         fragWorldPos, N, sunL,
         ubo.view, ubo.cascadeSplits, ubo.cascadeViewProj,
         ubo.shadowMapSize, shadowMapArray
     );
+
+    // Cloud shadows - sample from cloud shadow map
+    float cloudShadowFactor = 1.0;
+    if (cloudShadow.cloudShadowEnabled > 0.5) {
+        cloudShadowFactor = sampleCloudShadowSoft(cloudShadowMap, fragWorldPos, cloudShadow.cloudShadowMatrix);
+    }
+
+    // Combine terrain and cloud shadows
+    float shadow = combineShadows(terrainShadow, cloudShadowFactor);
 
     // Two-sided diffuse (grass blades are thin)
     float sunNdotL = dot(N, sunL);
