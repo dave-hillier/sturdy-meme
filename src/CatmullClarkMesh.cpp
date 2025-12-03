@@ -1,5 +1,5 @@
 #include "CatmullClarkMesh.h"
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <cstring>
 
 bool CatmullClarkMesh::uploadToGPU(VmaAllocator allocator) {

@@ -1,7 +1,7 @@
 #include "TerrainSystem.h"
 #include "ShaderLoader.h"
 #include "BindingBuilder.h"
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <cstring>
 #include <cmath>
 #include <algorithm>

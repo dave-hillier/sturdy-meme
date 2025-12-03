@@ -2,7 +2,7 @@
 #include "OBJLoader.h"
 #include "ShaderLoader.h"
 #include "BufferUtils.h"
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
 #include <array>

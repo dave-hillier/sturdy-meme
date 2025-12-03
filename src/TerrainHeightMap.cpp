@@ -1,6 +1,6 @@
 #include "TerrainHeightMap.h"
 #include "TerrainHeight.h"
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <cstring>
 #include <cmath>
 #include <algorithm>
