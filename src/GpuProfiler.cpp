@@ -191,6 +191,9 @@ void GpuProfiler::collectResults(uint32_t frameIndex) {
         queryIdx += 2;  // Each zone has start + end query
     }
 
+    // Update smoothed frame time
+    smoothedFrameTimeMs = SMOOTHING_FACTOR * smoothedFrameTimeMs + (1.0f - SMOOTHING_FACTOR) * frameTimeMs;
+
     // Update smoothed stats using exponential moving average
     // Track which zones were seen this frame
     std::unordered_map<std::string, bool> seenThisFrame;
@@ -226,13 +229,20 @@ void GpuProfiler::collectResults(uint32_t frameIndex) {
         }
     }
 
-    // Build smoothed stats from the map
-    float totalSmoothedMs = 0.0f;
+    // Compute TerrainCompute as sum of Terrain:* sub-zones (since nested zones don't work)
+    float terrainTotal = 0.0f;
     for (const auto& [name, time] : smoothedZoneTimes) {
-        totalSmoothedMs += time;
+        if (name.rfind("Terrain:", 0) == 0) {
+            terrainTotal += time;
+        }
+    }
+    // Replace the broken TerrainCompute measurement with the computed sum
+    if (terrainTotal > 0.0f) {
+        smoothedZoneTimes["TerrainCompute"] = terrainTotal;
     }
 
-    smoothedStats.totalGpuTimeMs = totalSmoothedMs;
+    // Build smoothed stats from the map
+    smoothedStats.totalGpuTimeMs = smoothedFrameTimeMs;
     smoothedStats.zones.clear();
 
     // Sort by time descending for stable display order
@@ -240,11 +250,31 @@ void GpuProfiler::collectResults(uint32_t frameIndex) {
     std::sort(sortedZones.begin(), sortedZones.end(),
               [](const auto& a, const auto& b) { return a.second > b.second; });
 
+    // Calculate sum of measured zones (excluding Terrain:* sub-zones if TerrainCompute is present)
+    float measuredTotal = 0.0f;
+    bool hasTerrainCompute = smoothedZoneTimes.count("TerrainCompute") > 0;
+
     for (const auto& [name, time] : sortedZones) {
+        // Skip Terrain:* sub-zones if we have the aggregated TerrainCompute
+        if (hasTerrainCompute && name.rfind("Terrain:", 0) == 0) {
+            continue;
+        }
+
         TimingResult result;
         result.name = name;
         result.gpuTimeMs = time;
-        result.percentOfFrame = (totalSmoothedMs > 0.0f) ? (time / totalSmoothedMs * 100.0f) : 0.0f;
+        result.percentOfFrame = (smoothedFrameTimeMs > 0.0f) ? (time / smoothedFrameTimeMs * 100.0f) : 0.0f;
         smoothedStats.zones.push_back(result);
+        measuredTotal += time;
+    }
+
+    // Add "Other" zone for unaccounted time
+    float otherTime = smoothedFrameTimeMs - measuredTotal;
+    if (otherTime > 0.01f) {  // Only show if > 0.01ms
+        TimingResult other;
+        other.name = "Other";
+        other.gpuTimeMs = otherTime;
+        other.percentOfFrame = (smoothedFrameTimeMs > 0.0f) ? (otherTime / smoothedFrameTimeMs * 100.0f) : 0.0f;
+        smoothedStats.zones.push_back(other);
     }
 }

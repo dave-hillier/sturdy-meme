@@ -132,6 +132,7 @@ private:
 
     // Smoothing factor (0.0 = no smoothing, 1.0 = infinite smoothing)
     static constexpr float SMOOTHING_FACTOR = 0.9f;
+    float smoothedFrameTimeMs = 0.0f;
 
     // Frame start/end query indices
     uint32_t frameStartQuery = 0;
