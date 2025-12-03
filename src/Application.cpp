@@ -590,9 +590,14 @@ void Application::initFlag() {
     const int clothHeight = 15;
     const float particleSpacing = 0.15f;
 
-    // Position the cloth at the top of the pole (pole is at 5, 1.5, 0 with height 3m)
-    // Top of pole is at y = 1.5 + 1.5 = 3.0
-    glm::vec3 clothTopLeft(5.0f - 0.1f, 3.0f, 0.0f);  // Slightly to the left of pole center
+    // Position the cloth at the top of the pole
+    // Flag pole is at (5, 0) with center at terrain + 1.5m (3m tall pole)
+    // Top of pole is at terrain height + 1.5 + 1.5 = terrain + 3.0
+    const float flagPoleX = 5.0f;
+    const float flagPoleZ = 0.0f;
+    float terrainHeight = renderer.getTerrainHeightAt(flagPoleX, flagPoleZ);
+    float poleTopY = terrainHeight + 3.0f;  // Pole center is 1.5m above terrain, pole is 3m tall
+    glm::vec3 clothTopLeft(flagPoleX - 0.1f, poleTopY, flagPoleZ);  // Slightly to the left of pole center
 
     clothSim.create(clothWidth, clothHeight, particleSpacing, clothTopLeft);
 
