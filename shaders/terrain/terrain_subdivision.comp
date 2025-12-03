@@ -84,8 +84,9 @@ vec3 uvToWorldPos(vec2 uv) {
     );
 }
 
-// Frustum culling test for AABB
-bool frustumCullAABB(vec3 minBound, vec3 maxBound) {
+// Frustum culling test for AABB with optional margin
+// margin > 0 expands the frustum outward (triangle must be further outside to be culled)
+bool frustumCullAABB(vec3 minBound, vec3 maxBound, float margin) {
     for (int i = 0; i < 6; i++) {
         vec4 plane = frustumPlanes[i];
         vec3 pVertex = vec3(
@@ -93,11 +94,16 @@ bool frustumCullAABB(vec3 minBound, vec3 maxBound) {
             plane.y > 0.0 ? maxBound.y : minBound.y,
             plane.z > 0.0 ? maxBound.z : minBound.z
         );
-        if (dot(vec4(pVertex, 1.0), plane) < 0.0) {
+        // Offset the plane by margin (planes are normalized, so margin is in world units)
+        if (dot(vec4(pVertex, 1.0), plane) < -margin) {
             return true; // Culled
         }
     }
     return false; // Visible
+}
+
+bool frustumCullAABB(vec3 minBound, vec3 maxBound) {
+    return frustumCullAABB(minBound, maxBound, 0.0);
 }
 
 // Compute screen-space edge length
@@ -193,8 +199,19 @@ void main() {
     minBound.y -= HEIGHT_SCALE * 0.1;
     maxBound.y += HEIGHT_SCALE * 0.1;
 
-    // Frustum culling
-    bool culled = frustumCullAABB(minBound, maxBound);
+    // Compute AABB diagonal for frustum margin calculation
+    // This provides hysteresis for culling decisions near frustum boundaries
+    vec3 aabbDiag = maxBound - minBound;
+    float aabbDiagonal = length(aabbDiag);
+
+    // Frustum culling for split decisions (exact frustum)
+    bool culledForSplit = frustumCullAABB(minBound, maxBound);
+
+    // Frustum culling for merge decisions (expanded frustum with margin)
+    // Triangle must be at least half its diagonal outside the frustum before merge-culling
+    // This prevents flickering when triangles are right at the frustum boundary
+    float mergeCullMargin = aabbDiagonal * 0.5;
+    bool culledForMerge = frustumCullAABB(minBound, maxBound, mergeCullMargin);
 
     // Compute screen-space edge length (needed for both modes)
     float edgeLengthPixels = computeTriangleLOD(v0, v1, v2);
@@ -204,13 +221,14 @@ void main() {
     // related nodes, which could create inconsistent tree states
     if (updateMode == 0u) {
         // Split-only frame
-        if (!culled && edgeLengthPixels > SPLIT_THRESHOLD && depth < MAX_DEPTH) {
+        if (!culledForSplit && edgeLengthPixels > SPLIT_THRESHOLD && depth < MAX_DEPTH) {
             leb_SplitNode_Square(node);
         }
     } else {
         // Merge-only frame
-        if (culled) {
-            // If culled and not at minimum depth, merge
+        // Use culledForMerge (with margin) to prevent flickering at frustum boundaries
+        if (culledForMerge) {
+            // If well outside frustum and not at minimum depth, merge
             if (depth > MIN_DEPTH) {
                 leb_DiamondParent diamond = leb_DecodeDiamondParent_Square(node);
                 leb_MergeNode_Square(node, diamond);
