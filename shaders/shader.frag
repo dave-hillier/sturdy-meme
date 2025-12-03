@@ -9,6 +9,8 @@
 #include "snow_common.glsl"
 #include "cloud_shadow_common.glsl"
 #include "ubo_common.glsl"
+#include "ubo_snow.glsl"
+#include "ubo_cloud_shadow.glsl"
 #include "push_constants_common.glsl"
 
 layout(binding = 1) uniform sampler2D texSampler;
@@ -234,15 +236,15 @@ void main() {
     // === SNOW LAYER ===
     // Sample snow mask at world position
     float snowMaskCoverage = sampleSnowMask(snowMaskTexture, fragWorldPos,
-                                             ubo.snowMaskParams.xy, ubo.snowMaskParams.z);
+                                             snow.snowMaskParams.xy, snow.snowMaskParams.z);
 
     // Calculate snow coverage based on global amount, mask, and surface orientation
-    float snowCoverage = calculateSnowCoverage(ubo.snowAmount, snowMaskCoverage, N);
+    float snowCoverage = calculateSnowCoverage(snow.snowAmount, snowMaskCoverage, N);
 
     // Apply snow layer to albedo
     // Snow primarily affects visual appearance through color blending
     if (snowCoverage > 0.01) {
-        albedo = blendSnowAlbedo(albedo, ubo.snowColor.rgb, snowCoverage);
+        albedo = blendSnowAlbedo(albedo, snow.snowColor.rgb, snowCoverage);
     }
 
     // Calculate shadow for sun (terrain + cloud shadows combined)
@@ -254,13 +256,13 @@ void main() {
     );
 
     // Cloud shadows - sample from cloud shadow map
-    float cloudShadow = 1.0;
-    if (ubo.cloudShadowEnabled > 0.5) {
-        cloudShadow = sampleCloudShadowSoft(cloudShadowMap, fragWorldPos, ubo.cloudShadowMatrix);
+    float cloudShadowFactor = 1.0;
+    if (cloudShadow.cloudShadowEnabled > 0.5) {
+        cloudShadowFactor = sampleCloudShadowSoft(cloudShadowMap, fragWorldPos, cloudShadow.cloudShadowMatrix);
     }
 
     // Combine terrain and cloud shadows
-    float shadow = combineShadows(terrainShadow, cloudShadow);
+    float shadow = combineShadows(terrainShadow, cloudShadowFactor);
 
     // Sun lighting with shadow
     float sunIntensity = ubo.sunDirection.w;

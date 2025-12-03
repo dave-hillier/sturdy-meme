@@ -7,7 +7,10 @@
 #include "shadow_common.glsl"
 #include "atmosphere_common.glsl"
 #include "snow_common.glsl"
+#include "cloud_shadow_common.glsl"
 #include "ubo_common.glsl"
+#include "ubo_snow.glsl"
+#include "ubo_cloud_shadow.glsl"
 
 layout(binding = 2) uniform sampler2DArrayShadow shadowMapArray;  // Changed to array for CSM
 
@@ -27,6 +30,9 @@ layout(std430, binding = 4) readonly buffer LightBuffer {
 
 // Snow mask texture (world-space coverage)
 layout(binding = 5) uniform sampler2D snowMaskTexture;
+
+// Cloud shadow map (R16F: 0=shadow, 1=no shadow)
+layout(binding = 6) uniform sampler2D cloudShadowMap;
 
 layout(location = 0) in vec3 fragColor;
 layout(location = 1) in vec3 fragNormal;
@@ -116,25 +122,34 @@ void main() {
     // === SNOW LAYER ===
     // Sample snow mask at world position
     float snowMaskCoverage = sampleSnowMask(snowMaskTexture, fragWorldPos,
-                                             ubo.snowMaskParams.xy, ubo.snowMaskParams.z);
+                                             snow.snowMaskParams.xy, snow.snowMaskParams.z);
 
     // Calculate vegetation snow coverage - tips catch more snow than stems
     // fragHeight: 0 at base, 1 at tip
     float snowAffinity = fragHeight;  // Tips catch more snow
-    float snowCoverage = calculateVegetationSnowCoverage(ubo.snowAmount, snowMaskCoverage, N, snowAffinity);
+    float snowCoverage = calculateVegetationSnowCoverage(snow.snowAmount, snowMaskCoverage, N, snowAffinity);
 
     // Apply snow to grass albedo
     if (snowCoverage > 0.01) {
-        albedo = snowyVegetationColor(albedo, ubo.snowColor.rgb, snowCoverage);
+        albedo = snowyVegetationColor(albedo, snow.snowColor.rgb, snowCoverage);
     }
 
     // === SUN LIGHTING ===
     vec3 sunL = normalize(ubo.sunDirection.xyz);
-    float shadow = calculateCascadedShadow(
+    float terrainShadow = calculateCascadedShadow(
         fragWorldPos, N, sunL,
         ubo.view, ubo.cascadeSplits, ubo.cascadeViewProj,
         ubo.shadowMapSize, shadowMapArray
     );
+
+    // Cloud shadows - sample from cloud shadow map
+    float cloudShadowFactor = 1.0;
+    if (cloudShadow.cloudShadowEnabled > 0.5) {
+        cloudShadowFactor = sampleCloudShadowSoft(cloudShadowMap, fragWorldPos, cloudShadow.cloudShadowMatrix);
+    }
+
+    // Combine terrain and cloud shadows
+    float shadow = combineShadows(terrainShadow, cloudShadowFactor);
 
     // Two-sided diffuse (grass blades are thin)
     float sunNdotL = dot(N, sunL);

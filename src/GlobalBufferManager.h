@@ -8,6 +8,8 @@
 
 #include "BufferUtils.h"
 #include "Light.h"
+#include "SnowUBO.h"
+#include "CloudShadowUBO.h"
 
 // Forward declarations
 struct UniformBufferObject;
@@ -25,6 +27,8 @@ struct GlobalBufferManager {
     BufferUtils::PerFrameBufferSet uniformBuffers;
     BufferUtils::PerFrameBufferSet lightBuffers;
     BufferUtils::PerFrameBufferSet boneMatricesBuffers;
+    BufferUtils::PerFrameBufferSet snowBuffers;         // Snow UBO (binding 14)
+    BufferUtils::PerFrameBufferSet cloudShadowBuffers;  // Cloud shadow UBO (binding 15)
 
     // Configuration
     uint32_t framesInFlight = 0;
@@ -73,6 +77,37 @@ struct GlobalBufferManager {
             return false;
         }
 
+        // Create snow UBO buffers (binding 14)
+        success = BufferUtils::PerFrameBufferBuilder()
+            .setAllocator(allocator)
+            .setFrameCount(frameCount)
+            .setSize(sizeof(SnowUBO))
+            .setUsage(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT)
+            .build(snowBuffers);
+
+        if (!success) {
+            BufferUtils::destroyBuffers(allocator, uniformBuffers);
+            BufferUtils::destroyBuffers(allocator, lightBuffers);
+            BufferUtils::destroyBuffers(allocator, boneMatricesBuffers);
+            return false;
+        }
+
+        // Create cloud shadow UBO buffers (binding 15)
+        success = BufferUtils::PerFrameBufferBuilder()
+            .setAllocator(allocator)
+            .setFrameCount(frameCount)
+            .setSize(sizeof(CloudShadowUBO))
+            .setUsage(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT)
+            .build(cloudShadowBuffers);
+
+        if (!success) {
+            BufferUtils::destroyBuffers(allocator, uniformBuffers);
+            BufferUtils::destroyBuffers(allocator, lightBuffers);
+            BufferUtils::destroyBuffers(allocator, boneMatricesBuffers);
+            BufferUtils::destroyBuffers(allocator, snowBuffers);
+            return false;
+        }
+
         return true;
     }
 
@@ -80,6 +115,8 @@ struct GlobalBufferManager {
         BufferUtils::destroyBuffers(allocator, uniformBuffers);
         BufferUtils::destroyBuffers(allocator, lightBuffers);
         BufferUtils::destroyBuffers(allocator, boneMatricesBuffers);
+        BufferUtils::destroyBuffers(allocator, snowBuffers);
+        BufferUtils::destroyBuffers(allocator, cloudShadowBuffers);
     }
 
     // Update the main UBO for a frame
@@ -101,6 +138,20 @@ struct GlobalBufferManager {
         if (frameIndex < boneMatricesBuffers.mappedPointers.size() && !matrices.empty()) {
             size_t copySize = std::min(matrices.size(), static_cast<size_t>(maxBoneMatrices)) * sizeof(glm::mat4);
             std::memcpy(boneMatricesBuffers.mappedPointers[frameIndex], matrices.data(), copySize);
+        }
+    }
+
+    // Update snow UBO for a frame
+    void updateSnowBuffer(uint32_t frameIndex, const SnowUBO& snowUbo) {
+        if (frameIndex < snowBuffers.mappedPointers.size()) {
+            std::memcpy(snowBuffers.mappedPointers[frameIndex], &snowUbo, sizeof(snowUbo));
+        }
+    }
+
+    // Update cloud shadow UBO for a frame
+    void updateCloudShadowBuffer(uint32_t frameIndex, const CloudShadowUBO& cloudShadowUbo) {
+        if (frameIndex < cloudShadowBuffers.mappedPointers.size()) {
+            std::memcpy(cloudShadowBuffers.mappedPointers[frameIndex], &cloudShadowUbo, sizeof(cloudShadowUbo));
         }
     }
 
@@ -135,6 +186,26 @@ struct GlobalBufferManager {
         return info;
     }
 
+    VkDescriptorBufferInfo getSnowBufferInfo(uint32_t frameIndex) const {
+        VkDescriptorBufferInfo info{};
+        if (frameIndex < snowBuffers.buffers.size()) {
+            info.buffer = snowBuffers.buffers[frameIndex];
+            info.offset = 0;
+            info.range = sizeof(SnowUBO);
+        }
+        return info;
+    }
+
+    VkDescriptorBufferInfo getCloudShadowBufferInfo(uint32_t frameIndex) const {
+        VkDescriptorBufferInfo info{};
+        if (frameIndex < cloudShadowBuffers.buffers.size()) {
+            info.buffer = cloudShadowBuffers.buffers[frameIndex];
+            info.offset = 0;
+            info.range = sizeof(CloudShadowUBO);
+        }
+        return info;
+    }
+
     // Direct buffer accessors (for legacy code that needs VkBuffer directly)
     VkBuffer getUniformBuffer(uint32_t frameIndex) const {
         return frameIndex < uniformBuffers.buffers.size() ? uniformBuffers.buffers[frameIndex] : VK_NULL_HANDLE;
@@ -146,5 +217,13 @@ struct GlobalBufferManager {
 
     VkBuffer getBoneMatricesBuffer(uint32_t frameIndex) const {
         return frameIndex < boneMatricesBuffers.buffers.size() ? boneMatricesBuffers.buffers[frameIndex] : VK_NULL_HANDLE;
+    }
+
+    VkBuffer getSnowBuffer(uint32_t frameIndex) const {
+        return frameIndex < snowBuffers.buffers.size() ? snowBuffers.buffers[frameIndex] : VK_NULL_HANDLE;
+    }
+
+    VkBuffer getCloudShadowBuffer(uint32_t frameIndex) const {
+        return frameIndex < cloudShadowBuffers.buffers.size() ? cloudShadowBuffers.buffers[frameIndex] : VK_NULL_HANDLE;
     }
 };

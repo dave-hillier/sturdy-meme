@@ -554,6 +554,20 @@ void Renderer::shutdown() {
             vmaDestroyBuffer(allocator, uniformBuffers[i], uniformBuffersAllocations[i]);
         }
 
+        // Clean up snow UBO buffers
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            if (snowBuffers.size() > i && snowBuffers[i] != VK_NULL_HANDLE) {
+                vmaDestroyBuffer(allocator, snowBuffers[i], snowBuffersAllocations[i]);
+            }
+        }
+
+        // Clean up cloud shadow UBO buffers
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            if (cloudShadowBuffers.size() > i && cloudShadowBuffers[i] != VK_NULL_HANDLE) {
+                vmaDestroyBuffer(allocator, cloudShadowBuffers[i], cloudShadowBuffersAllocations[i]);
+            }
+        }
+
         // Clean up light buffers
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             if (lightBuffers.size() > i && lightBuffers[i] != VK_NULL_HANDLE) {
@@ -880,6 +894,8 @@ bool Renderer::createDescriptorSetLayout() {
     // 7: Spot shadow depth maps
     // 8: Snow mask texture
     // 9: Cloud shadow map
+    // 10: Snow UBO
+    // 11: Cloud shadow UBO
     descriptorSetLayout = DescriptorManager::LayoutBuilder(device)
         .addUniformBuffer(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)  // 0: UBO
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 1: diffuse
@@ -891,6 +907,8 @@ bool Renderer::createDescriptorSetLayout() {
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 7: spot shadow
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 8: snow mask
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 9: cloud shadow map
+        .addUniformBuffer(VK_SHADER_STAGE_FRAGMENT_BIT)         // 10: Snow UBO
+        .addUniformBuffer(VK_SHADER_STAGE_FRAGMENT_BIT)         // 11: Cloud shadow UBO
         .build();
 
     if (descriptorSetLayout == VK_NULL_HANDLE) {
@@ -975,6 +993,58 @@ bool Renderer::createUniformBuffers() {
         }
 
         uniformBuffersMapped[i] = allocationInfo.pMappedData;
+    }
+
+    // Create snow UBO buffers (binding 14)
+    snowBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+    snowBuffersAllocations.resize(MAX_FRAMES_IN_FLIGHT);
+    snowBuffersMapped.resize(MAX_FRAMES_IN_FLIGHT);
+
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.size = sizeof(SnowUBO);
+        bufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+        VmaAllocationInfo allocationInfo;
+        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &snowBuffers[i],
+                            &snowBuffersAllocations[i], &allocationInfo) != VK_SUCCESS) {
+            SDL_Log("Failed to create snow UBO buffer");
+            return false;
+        }
+
+        snowBuffersMapped[i] = allocationInfo.pMappedData;
+    }
+
+    // Create cloud shadow UBO buffers (binding 15)
+    cloudShadowBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+    cloudShadowBuffersAllocations.resize(MAX_FRAMES_IN_FLIGHT);
+    cloudShadowBuffersMapped.resize(MAX_FRAMES_IN_FLIGHT);
+
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.size = sizeof(CloudShadowUBO);
+        bufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+        VmaAllocationInfo allocationInfo;
+        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &cloudShadowBuffers[i],
+                            &cloudShadowBuffersAllocations[i], &allocationInfo) != VK_SUCCESS) {
+            SDL_Log("Failed to create cloud shadow UBO buffer");
+            return false;
+        }
+
+        cloudShadowBuffersMapped[i] = allocationInfo.pMappedData;
     }
 
     return true;
@@ -1116,7 +1186,12 @@ bool Renderer::createDescriptorSets() {
         common.spotShadowSampler = shadowSystem.getSpotShadowSampler();
         common.snowMaskView = snowMaskSystem.getSnowMaskView();
         common.snowMaskSampler = snowMaskSystem.getSnowMaskSampler();
-        // Cloud shadow is added later in init() after cloudShadowSystem is initialized
+        // Snow and cloud shadow UBOs (bindings 10 and 11)
+        common.snowUboBuffer = snowBuffers[i];
+        common.snowUboBufferSize = sizeof(SnowUBO);
+        common.cloudShadowUboBuffer = cloudShadowBuffers[i];
+        common.cloudShadowUboBufferSize = sizeof(CloudShadowUBO);
+        // Cloud shadow texture is added later in init() after cloudShadowSystem is initialized
 
         // Crate material
         {
@@ -1184,10 +1259,14 @@ void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera& camera) 
 
     // Build UBO data (pure calculation)
     UniformBufferObject ubo = buildUniformBufferData(camera, lighting, currentTimeOfDay);
+    SnowUBO snowUbo = buildSnowUBOData();
+    CloudShadowUBO cloudShadowUbo = buildCloudShadowUBOData();
 
     // State mutations
     lastSunIntensity = lighting.sunIntensity;
     memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
+    memcpy(snowBuffersMapped[currentImage], &snowUbo, sizeof(snowUbo));
+    memcpy(cloudShadowBuffersMapped[currentImage], &cloudShadowUbo, sizeof(cloudShadowUbo));
 
     // Update light buffer with camera-based culling
     updateLightBuffer(currentImage, camera);
@@ -1494,32 +1573,42 @@ UniformBufferObject Renderer::buildUniformBufferData(const Camera& camera, const
     ubo.debugCascades = showCascadeDebug ? 1.0f : 0.0f;
     ubo.julianDay = static_cast<float>(lighting.julianDay);
     ubo.cloudStyle = useParaboloidClouds ? 1.0f : 0.0f;
+    ubo.uboPadding = glm::vec3(0.0f);
 
-    // Snow parameters
-    ubo.snowAmount = environmentSettings.snowAmount;
-    ubo.snowRoughness = environmentSettings.snowRoughness;
-    ubo.snowTexScale = environmentSettings.snowTexScale;
-    ubo.snowColor = glm::vec4(environmentSettings.snowColor, 1.0f);
-    ubo.snowMaskParams = glm::vec4(snowMaskSystem.getMaskOrigin(), snowMaskSystem.getMaskSize(), 0.0f);
+    return ubo;
+}
+
+SnowUBO Renderer::buildSnowUBOData() const {
+    SnowUBO snow{};
+
+    snow.snowAmount = environmentSettings.snowAmount;
+    snow.snowRoughness = environmentSettings.snowRoughness;
+    snow.snowTexScale = environmentSettings.snowTexScale;
+    snow.useVolumetricSnow = useVolumetricSnow ? 1.0f : 0.0f;
+    snow.snowColor = glm::vec4(environmentSettings.snowColor, 1.0f);
+    snow.snowMaskParams = glm::vec4(snowMaskSystem.getMaskOrigin(), snowMaskSystem.getMaskSize(), 0.0f);
 
     // Volumetric snow cascade parameters
     auto cascadeParams = volumetricSnowSystem.getCascadeParams();
-    ubo.snowCascade0Params = cascadeParams[0];
-    ubo.snowCascade1Params = cascadeParams[1];
-    ubo.snowCascade2Params = cascadeParams[2];
-    ubo.useVolumetricSnow = useVolumetricSnow ? 1.0f : 0.0f;
-    ubo.snowMaxHeight = MAX_SNOW_HEIGHT;
-    ubo.debugSnowDepth = showSnowDepthDebug ? 1.0f : 0.0f;
-    ubo.snowPadding2 = 0.0f;
+    snow.snowCascade0Params = cascadeParams[0];
+    snow.snowCascade1Params = cascadeParams[1];
+    snow.snowCascade2Params = cascadeParams[2];
+    snow.snowMaxHeight = MAX_SNOW_HEIGHT;
+    snow.debugSnowDepth = showSnowDepthDebug ? 1.0f : 0.0f;
+    snow.snowPadding = glm::vec2(0.0f);
 
-    // Cloud shadow parameters
-    ubo.cloudShadowMatrix = cloudShadowSystem.getWorldToShadowUV();
-    ubo.cloudShadowIntensity = cloudShadowSystem.getShadowIntensity();
-    ubo.cloudShadowEnabled = cloudShadowSystem.isEnabled() ? 1.0f : 0.0f;
-    ubo.cloudShadowPadding1 = 0.0f;
-    ubo.cloudShadowPadding2 = 0.0f;
+    return snow;
+}
 
-    return ubo;
+CloudShadowUBO Renderer::buildCloudShadowUBOData() const {
+    CloudShadowUBO cloudShadowUbo{};
+
+    cloudShadowUbo.cloudShadowMatrix = cloudShadowSystem.getWorldToShadowUV();
+    cloudShadowUbo.cloudShadowIntensity = cloudShadowSystem.getShadowIntensity();
+    cloudShadowUbo.cloudShadowEnabled = cloudShadowSystem.isEnabled() ? 1.0f : 0.0f;
+    cloudShadowUbo.cloudShadowPadding = glm::vec2(0.0f);
+
+    return cloudShadowUbo;
 }
 
 glm::vec2 Renderer::calculateSunScreenPos(const Camera& camera, const glm::vec3& sunDir) const {
