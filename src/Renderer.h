@@ -114,6 +114,7 @@ public:
 
     // Terrain data access for physics integration
     const TerrainSystem& getTerrainSystem() const { return terrainSystem; }
+    TerrainSystem& getTerrainSystem() { return terrainSystem; }
 
     // Catmull-Clark subdivision control
     void toggleCatmullClarkWireframe() { catmullClarkSystem.setWireframeMode(!catmullClarkSystem.isWireframeMode()); }
