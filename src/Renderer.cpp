@@ -143,8 +143,8 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     TerrainConfig terrainConfig{};
     // Use world size based on imported terrain (or default if import failed)
     terrainConfig.size = importer.getWorldWidth() > 0 ? importer.getWorldWidth() : 16384.0f;
-    terrainConfig.maxDepth = 20;  // Higher depth for larger terrain
-    terrainConfig.minDepth = 2;
+    terrainConfig.maxDepth = 29;  // 0.5m resolution at max depth
+    terrainConfig.minDepth = 5;
     terrainConfig.targetEdgePixels = 16.0f;
     terrainConfig.splitThreshold = 24.0f;
     terrainConfig.mergeThreshold = 8.0f;
