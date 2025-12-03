@@ -46,7 +46,7 @@ struct TerrainConfig {
     float size = 16384.0f;              // Terrain size in world units (matches 16384x16384 heightmap)
     float targetEdgePixels = 16.0f;   // Target triangle edge length in pixels
     int maxDepth = 28;                // Maximum CBT subdivision depth (28 gives ~1m resolution for 16km terrain)
-    int minDepth = 2;                 // Minimum subdivision depth
+    int minDepth = 6;                 // Minimum subdivision depth (64 triangles, ~4km edges)
     float splitThreshold = 24.0f;     // Screen pixels to trigger split (with hysteresis)
     float mergeThreshold = 8.0f;      // Screen pixels to trigger merge
     std::string heightmapPath;        // Optional: path to 16-bit PNG heightmap
