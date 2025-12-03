@@ -516,7 +516,7 @@ void HiZSystem::setDepthBuffer(VkImageView depthView, VkSampler depthSampler) {
         VkDescriptorImageInfo srcDepthInfo{};
         srcDepthInfo.sampler = sourceDepthSampler;
         srcDepthInfo.imageView = sourceDepthView;
-        srcDepthInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        srcDepthInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
 
         VkDescriptorImageInfo srcMipInfo{};
         srcMipInfo.sampler = hiZSampler;
