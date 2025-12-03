@@ -87,8 +87,10 @@ bool Application::init(const std::string& title, int width, int height) {
     }
     SDL_Log("Created %zu rock convex hull colliders", rockInstances.size());
 
-    // Create character controller for player
-    physics.createCharacter(glm::vec3(0.0f, 0.1f, 0.0f), Player::CAPSULE_HEIGHT, Player::CAPSULE_RADIUS);
+    // Create character controller for player at terrain height
+    float playerSpawnX = 0.0f, playerSpawnZ = 0.0f;
+    float playerSpawnY = terrain.getHeightAt(playerSpawnX, playerSpawnZ) + 0.1f;
+    physics.createCharacter(glm::vec3(playerSpawnX, playerSpawnY, playerSpawnZ), Player::CAPSULE_HEIGHT, Player::CAPSULE_RADIUS);
 
     SDL_Log("Physics initialized with %d active bodies", physics.getActiveBodyCount());
 

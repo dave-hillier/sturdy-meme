@@ -5,11 +5,17 @@
 /*
  * terrain.vert - Terrain vertex shader
  * Decodes triangle vertices from CBT/LEB and samples height map
+ *
+ * TERRAIN HEIGHT CONVENTION (Authoritative Source):
+ * Height formula: worldY = h * heightScale
+ * Where h is normalized [0,1] and heightScale is max height in meters.
+ * See terrain_height_common.glsl for shared implementation.
  */
 
 #define CBT_BUFFER_BINDING 0
 #include "cbt.glsl"
 #include "leb.glsl"
+#include "../terrain_height_common.glsl"
 #include "../snow_common.glsl"
 
 // Height map
@@ -51,20 +57,9 @@ layout(location = 1) out vec3 fragNormal;
 layout(location = 2) out vec3 fragWorldPos;
 layout(location = 3) out float fragDepth;
 
-// Calculate normal from height map gradient
+// Calculate normal from height map gradient (uses shared terrain_height_common.glsl)
 vec3 calculateNormal(vec2 uv) {
-    vec2 texelSize = 1.0 / vec2(textureSize(heightMap, 0));
-
-    float hL = texture(heightMap, uv + vec2(-texelSize.x, 0.0)).r * HEIGHT_SCALE;
-    float hR = texture(heightMap, uv + vec2(texelSize.x, 0.0)).r * HEIGHT_SCALE;
-    float hD = texture(heightMap, uv + vec2(0.0, -texelSize.y)).r * HEIGHT_SCALE;
-    float hU = texture(heightMap, uv + vec2(0.0, texelSize.y)).r * HEIGHT_SCALE;
-
-    // Approximate gradient
-    float dx = (hR - hL) / (2.0 * texelSize.x * TERRAIN_SIZE);
-    float dz = (hU - hD) / (2.0 * texelSize.y * TERRAIN_SIZE);
-
-    return normalize(vec3(-dx, 1.0, -dz));
+    return calculateTerrainNormalFromHeightmap(heightMap, uv, TERRAIN_SIZE, HEIGHT_SCALE);
 }
 
 void main() {
@@ -89,8 +84,8 @@ void main() {
         uv = v2;
     }
 
-    // Sample height (center around y=0)
-    float height = (texture(heightMap, uv).r - 0.5) * HEIGHT_SCALE;
+    // Sample height using shared function (terrain_height_common.glsl)
+    float height = sampleTerrainHeight(heightMap, uv, HEIGHT_SCALE);
 
     // Compute world position
     vec3 worldPos = vec3(

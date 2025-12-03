@@ -94,7 +94,67 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
 
     if (!shadowSystem.init(shadowInfo)) return false;
 
+    // Initialize terrain system BEFORE scene so scene objects can query terrain height
+    std::string heightmapPath = resourcePath + "/assets/terrain/isleofwight-0m-200m.png";
+    std::string terrainCachePath = resourcePath + "/terrain_cache";
+
+    // Import heightmap into tile cache if needed (for future streaming support)
+    TerrainImportConfig importConfig{};
+    importConfig.sourceHeightmapPath = heightmapPath;
+    importConfig.cacheDirectory = terrainCachePath;
+    importConfig.minAltitude = 0.0f;
+    importConfig.maxAltitude = 200.0f;
+    importConfig.metersPerPixel = 1.0f;  // Treating 3m/px data as 1m/px for more dramatic terrain
+    importConfig.tileResolution = 512;
+    importConfig.numLODLevels = 4;
+
+    TerrainImporter importer;
+    if (!importer.isCacheValid(importConfig)) {
+        SDL_Log("Importing terrain heightmap: %s", heightmapPath.c_str());
+        if (importer.import(importConfig, [](float progress, const std::string& status) {
+            SDL_Log("Terrain import: %.0f%% - %s", progress * 100.0f, status.c_str());
+        })) {
+            SDL_Log("Terrain cache created: %zu x %zu tiles",
+                    importer.getTilesX(), importer.getTilesZ());
+        }
+    } else {
+        SDL_Log("Using existing terrain cache");
+    }
+
+    // Initialize terrain system with CBT (loads heightmap directly for now)
+    TerrainSystem::InitInfo terrainInfo{};
+    terrainInfo.device = device;
+    terrainInfo.physicalDevice = physicalDevice;
+    terrainInfo.allocator = allocator;
+    terrainInfo.renderPass = postProcessSystem.getHDRRenderPass();
+    terrainInfo.shadowRenderPass = shadowSystem.getShadowRenderPass();
+    terrainInfo.descriptorPool = descriptorPool;
+    terrainInfo.extent = swapchainExtent;
+    terrainInfo.shadowMapSize = shadowSystem.getShadowMapSize();
+    terrainInfo.shaderPath = resourcePath + "/shaders";
+    terrainInfo.texturePath = resourcePath + "/textures";
+    terrainInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+    terrainInfo.graphicsQueue = graphicsQueue;
+    terrainInfo.commandPool = commandPool;
+
+    TerrainConfig terrainConfig{};
+    // Use world size based on imported terrain (or default if import failed)
+    terrainConfig.size = importer.getWorldWidth() > 0 ? importer.getWorldWidth() : 16384.0f;
+    terrainConfig.maxDepth = 20;  // Higher depth for larger terrain
+    terrainConfig.minDepth = 2;
+    terrainConfig.targetEdgePixels = 16.0f;
+    terrainConfig.splitThreshold = 24.0f;
+    terrainConfig.mergeThreshold = 8.0f;
+    // Load Isle of Wight heightmap (-15m to 200m altitude range, includes beaches below sea level)
+    terrainConfig.heightmapPath = resourcePath + "/assets/terrain/isleofwight-0m-200m.png";
+    terrainConfig.minAltitude = -15.0f;
+    terrainConfig.maxAltitude = 200.0f;
+    // heightScale is computed from minAltitude/maxAltitude during init
+
+    if (!terrainSystem.init(terrainInfo, terrainConfig)) return false;
+
     // Initialize scene (meshes, textures, objects, lights)
+    // Pass terrain height function so objects can be placed on terrain
     SceneBuilder::InitInfo sceneInfo{};
     sceneInfo.allocator = allocator;
     sceneInfo.device = device;
@@ -102,6 +162,9 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     sceneInfo.graphicsQueue = graphicsQueue;
     sceneInfo.physicalDevice = physicalDevice;
     sceneInfo.resourcePath = resourcePath;
+    sceneInfo.getTerrainHeight = [this](float x, float z) {
+        return terrainSystem.getHeightAt(x, z);
+    };
 
     if (!sceneManager.init(sceneInfo)) return false;
 
@@ -145,33 +208,6 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     grassInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
 
     if (!grassSystem.init(grassInfo)) return false;
-
-    // Initialize terrain system (LEB/CBT adaptive terrain)
-    TerrainSystem::InitInfo terrainInfo{};
-    terrainInfo.device = device;
-    terrainInfo.physicalDevice = physicalDevice;
-    terrainInfo.allocator = allocator;
-    terrainInfo.renderPass = postProcessSystem.getHDRRenderPass();
-    terrainInfo.shadowRenderPass = shadowSystem.getShadowRenderPass();
-    terrainInfo.descriptorPool = descriptorPool;
-    terrainInfo.extent = swapchainExtent;
-    terrainInfo.shadowMapSize = shadowSystem.getShadowMapSize();
-    terrainInfo.shaderPath = resourcePath + "/shaders";
-    terrainInfo.texturePath = resourcePath + "/textures";
-    terrainInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
-    terrainInfo.graphicsQueue = graphicsQueue;
-    terrainInfo.commandPool = commandPool;
-
-    TerrainConfig terrainConfig{};
-    terrainConfig.size = 500.0f;
-    terrainConfig.heightScale = 50.0f;
-    terrainConfig.maxDepth = 18;  // Reasonable depth for testing
-    terrainConfig.minDepth = 2;
-    terrainConfig.targetEdgePixels = 16.0f;
-    terrainConfig.splitThreshold = 24.0f;
-    terrainConfig.mergeThreshold = 8.0f;
-
-    if (!terrainSystem.init(terrainInfo, terrainConfig)) return false;
 
     // Initialize wind system
     WindSystem::InitInfo windInfo{};

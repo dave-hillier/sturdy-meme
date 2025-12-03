@@ -11,3 +11,4 @@
 - run with `./run-debug.sh` do not attempt to combine with timeouts or sleeps
 - Prefer composition over inheritance - assume pretty much all of the time you want to use inheritance you are wrong.
 - ShaderLoader API: use `ShaderLoader::loadShaderModule(device, path)` or the two-step `readFile` + `createShaderModule`. There is NO `loadShader` method.
+- Terrain height uses `h * heightScale` where h is normalized [0,1]. Use functions from `shaders/terrain_height_common.glsl` (shaders) or `src/TerrainHeight.h` (C++). Do NOT duplicate the formula.

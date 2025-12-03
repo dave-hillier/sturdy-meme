@@ -2,10 +2,20 @@
 #include <SDL3/SDL_log.h>
 
 bool SceneBuilder::init(const InitInfo& info) {
+    // Store terrain height function for object placement
+    terrainHeightFunc = info.getTerrainHeight;
+
     if (!createMeshes(info)) return false;
     if (!loadTextures(info)) return false;
     createSceneObjects();
     return true;
+}
+
+float SceneBuilder::getTerrainHeight(float x, float z) const {
+    if (terrainHeightFunc) {
+        return terrainHeightFunc(x, z);
+    }
+    return 0.0f;  // Default to ground level if no terrain
 }
 
 void SceneBuilder::destroy(VmaAllocator allocator, VkDevice device) {
@@ -140,9 +150,16 @@ void SceneBuilder::createSceneObjects() {
 
     // Ground disc removed - terrain system provides the ground now
 
-    // Wooden crate - slightly shiny, non-metallic
+    // Helper: get Y position for object sitting on terrain
+    // objectHeight is the distance from object origin to its bottom
+    auto getGroundY = [this](float x, float z, float objectHeight) {
+        return getTerrainHeight(x, z) + objectHeight;
+    };
+
+    // Wooden crate - slightly shiny, non-metallic (unit cube, half-extent 0.5)
+    float crateX = 2.0f, crateZ = 0.0f;
     sceneObjects.push_back(RenderableBuilder()
-        .atPosition(glm::vec3(2.0f, 0.5f, 0.0f))
+        .atPosition(glm::vec3(crateX, getGroundY(crateX, crateZ, 0.5f), crateZ))
         .withMesh(&cubeMesh)
         .withTexture(&crateTexture)
         .withRoughness(0.4f)
@@ -150,7 +167,9 @@ void SceneBuilder::createSceneObjects() {
         .build());
 
     // Rotated wooden crate
-    glm::mat4 rotatedCube = glm::translate(glm::mat4(1.0f), glm::vec3(-1.5f, 0.5f, 1.0f));
+    float rotatedCrateX = -1.5f, rotatedCrateZ = 1.0f;
+    glm::mat4 rotatedCube = glm::translate(glm::mat4(1.0f),
+        glm::vec3(rotatedCrateX, getGroundY(rotatedCrateX, rotatedCrateZ, 0.5f), rotatedCrateZ));
     rotatedCube = glm::rotate(rotatedCube, glm::radians(30.0f), glm::vec3(0.0f, 1.0f, 0.0f));
     sceneObjects.push_back(RenderableBuilder()
         .withTransform(rotatedCube)
@@ -160,27 +179,30 @@ void SceneBuilder::createSceneObjects() {
         .withMetallic(0.0f)
         .build());
 
-    // Polished metal sphere - smooth, fully metallic
+    // Polished metal sphere - smooth, fully metallic (radius 0.5)
+    float polishedSphereX = 0.0f, polishedSphereZ = -2.0f;
     sceneObjects.push_back(RenderableBuilder()
-        .atPosition(glm::vec3(0.0f, 0.5f, -2.0f))
+        .atPosition(glm::vec3(polishedSphereX, getGroundY(polishedSphereX, polishedSphereZ, 0.5f), polishedSphereZ))
         .withMesh(&sphereMesh)
         .withTexture(&metalTexture)
         .withRoughness(0.1f)
         .withMetallic(1.0f)
         .build());
 
-    // Rough/brushed metal sphere - moderately rough, metallic
+    // Rough/brushed metal sphere - moderately rough, metallic (radius 0.5)
+    float roughSphereX = -3.0f, roughSphereZ = -1.0f;
     sceneObjects.push_back(RenderableBuilder()
-        .atPosition(glm::vec3(-3.0f, 0.5f, -1.0f))
+        .atPosition(glm::vec3(roughSphereX, getGroundY(roughSphereX, roughSphereZ, 0.5f), roughSphereZ))
         .withMesh(&sphereMesh)
         .withTexture(&metalTexture)
         .withRoughness(0.5f)
         .withMetallic(1.0f)
         .build());
 
-    // Polished metal cube - smooth, fully metallic
+    // Polished metal cube - smooth, fully metallic (half-extent 0.5)
+    float polishedCubeX = 3.0f, polishedCubeZ = -2.0f;
     sceneObjects.push_back(RenderableBuilder()
-        .atPosition(glm::vec3(3.0f, 0.5f, -2.0f))
+        .atPosition(glm::vec3(polishedCubeX, getGroundY(polishedCubeX, polishedCubeZ, 0.5f), polishedCubeZ))
         .withMesh(&cubeMesh)
         .withTexture(&metalTexture)
         .withRoughness(0.1f)
@@ -188,7 +210,9 @@ void SceneBuilder::createSceneObjects() {
         .build());
 
     // Brushed metal cube - rough, metallic
-    glm::mat4 brushedCube = glm::translate(glm::mat4(1.0f), glm::vec3(-3.0f, 0.5f, -3.0f));
+    float brushedCubeX = -3.0f, brushedCubeZ = -3.0f;
+    glm::mat4 brushedCube = glm::translate(glm::mat4(1.0f),
+        glm::vec3(brushedCubeX, getGroundY(brushedCubeX, brushedCubeZ, 0.5f), brushedCubeZ));
     brushedCube = glm::rotate(brushedCube, glm::radians(45.0f), glm::vec3(0.0f, 1.0f, 0.0f));
     sceneObjects.push_back(RenderableBuilder()
         .withTransform(brushedCube)
@@ -199,8 +223,11 @@ void SceneBuilder::createSceneObjects() {
         .build());
 
     // Glowing emissive sphere on top of the first crate - demonstrates bloom effect
-    glm::mat4 glowingSphereTransform = glm::translate(glm::mat4(1.0f), glm::vec3(2.0f, 1.3f, 0.0f));
-    glowingSphereTransform = glm::scale(glowingSphereTransform, glm::vec3(0.3f));
+    // Sits 0.8m above crate (crate top at terrain+1.0, sphere center at terrain+1.0+0.3)
+    float glowSphereScale = 0.3f;
+    glm::mat4 glowingSphereTransform = glm::translate(glm::mat4(1.0f),
+        glm::vec3(crateX, getGroundY(crateX, crateZ, 1.0f + glowSphereScale), crateZ));
+    glowingSphereTransform = glm::scale(glowingSphereTransform, glm::vec3(glowSphereScale));
     sceneObjects.push_back(RenderableBuilder()
         .withTransform(glowingSphereTransform)
         .withMesh(&sphereMesh)
@@ -212,8 +239,10 @@ void SceneBuilder::createSceneObjects() {
         .withCastsShadow(false)
         .build());
 
-    // Blue light indicator sphere - saturated blue, lower intensity to preserve color
-    glm::mat4 blueLightTransform = glm::translate(glm::mat4(1.0f), glm::vec3(-3.0f, 2.0f, 2.0f));
+    // Blue light indicator sphere - saturated blue, floating above terrain
+    float blueLightX = -3.0f, blueLightZ = 2.0f;
+    glm::mat4 blueLightTransform = glm::translate(glm::mat4(1.0f),
+        glm::vec3(blueLightX, getGroundY(blueLightX, blueLightZ, 2.0f), blueLightZ));
     blueLightTransform = glm::scale(blueLightTransform, glm::vec3(0.2f));
     sceneObjects.push_back(RenderableBuilder()
         .withTransform(blueLightTransform)
@@ -226,8 +255,10 @@ void SceneBuilder::createSceneObjects() {
         .withCastsShadow(false)
         .build());
 
-    // Green light indicator sphere - saturated green, lower intensity to preserve color
-    glm::mat4 greenLightTransform = glm::translate(glm::mat4(1.0f), glm::vec3(4.0f, 1.5f, -2.0f));
+    // Green light indicator sphere - saturated green, floating above terrain
+    float greenLightX = 4.0f, greenLightZ = -2.0f;
+    glm::mat4 greenLightTransform = glm::translate(glm::mat4(1.0f),
+        glm::vec3(greenLightX, getGroundY(greenLightX, greenLightZ, 1.5f), greenLightZ));
     greenLightTransform = glm::scale(greenLightTransform, glm::vec3(0.2f));
     sceneObjects.push_back(RenderableBuilder()
         .withTransform(greenLightTransform)
@@ -240,9 +271,10 @@ void SceneBuilder::createSceneObjects() {
         .withCastsShadow(false)
         .build());
 
-    // Debug cube at Suzanne position for visibility test
+    // Debug cube at elevated position
+    float debugCubeX = 5.0f, debugCubeZ = -5.0f;
     sceneObjects.push_back(RenderableBuilder()
-        .atPosition(glm::vec3(5.0f, 5.0f, -5.0f))
+        .atPosition(glm::vec3(debugCubeX, getGroundY(debugCubeX, debugCubeZ, 5.0f), debugCubeZ))
         .withMesh(&cubeMesh)
         .withTexture(&crateTexture)
         .withRoughness(0.3f)
@@ -252,6 +284,9 @@ void SceneBuilder::createSceneObjects() {
         .build());
 
     // Player character - uses animated character if loaded, otherwise capsule
+    // Player position is controlled by physics, so we place at origin on terrain
+    float playerX = 0.0f, playerZ = 0.0f;
+    float playerTerrainY = getTerrainHeight(playerX, playerZ);
     playerObjectIndex = sceneObjects.size();
     if (hasAnimatedCharacter) {
         // Use materials from FBX if available, otherwise use defaults
@@ -273,7 +308,7 @@ void SceneBuilder::createSceneObjects() {
         }
 
         sceneObjects.push_back(RenderableBuilder()
-            .withTransform(buildCharacterTransform(glm::vec3(0.0f), 0.0f))
+            .withTransform(buildCharacterTransform(glm::vec3(playerX, playerTerrainY, playerZ), 0.0f))
             .withMesh(&animatedCharacter.getMesh())
             .withTexture(&whiteTexture)  // White texture so vertex colors show through
             .withRoughness(charRoughness)
@@ -283,9 +318,9 @@ void SceneBuilder::createSceneObjects() {
             .withCastsShadow(true)
             .build());
     } else {
-        // Capsule fallback - centered at origin, uses metal texture for visibility
+        // Capsule fallback - capsule height 1.8m, center at 0.9m above ground
         sceneObjects.push_back(RenderableBuilder()
-            .atPosition(glm::vec3(0.0f, 0.9f, 0.0f))
+            .atPosition(glm::vec3(playerX, playerTerrainY + 0.9f, playerZ))
             .withMesh(&capsuleMesh)
             .withTexture(&metalTexture)
             .withRoughness(0.3f)
@@ -294,10 +329,11 @@ void SceneBuilder::createSceneObjects() {
             .build());
     }
 
-    // Flag pole - positioned at (5, 1.5, 0) so the 3m pole sits on the ground
+    // Flag pole - 3m pole, center at 1.5m above ground
+    float flagPoleX = 5.0f, flagPoleZ = 0.0f;
     flagPoleIndex = sceneObjects.size();
     sceneObjects.push_back(RenderableBuilder()
-        .atPosition(glm::vec3(5.0f, 1.5f, 0.0f))
+        .atPosition(glm::vec3(flagPoleX, getGroundY(flagPoleX, flagPoleZ, 1.5f), flagPoleZ))
         .withMesh(&flagPoleMesh)
         .withTexture(&metalTexture)
         .withRoughness(0.4f)

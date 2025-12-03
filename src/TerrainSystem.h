@@ -43,13 +43,18 @@ struct TerrainSubdivisionPushConstants {
 
 // Terrain configuration (outside class to avoid C++17 default argument issues)
 struct TerrainConfig {
-    float size = 500.0f;              // Terrain size in world units
-    float heightScale = 50.0f;        // Maximum height
+    float size = 16384.0f;              // Terrain size in world units (matches 16384x16384 heightmap)
     float targetEdgePixels = 16.0f;   // Target triangle edge length in pixels
     int maxDepth = 20;                // Maximum CBT subdivision depth
     int minDepth = 2;                 // Minimum subdivision depth
     float splitThreshold = 24.0f;     // Screen pixels to trigger split (with hysteresis)
     float mergeThreshold = 8.0f;      // Screen pixels to trigger merge
+    std::string heightmapPath;        // Optional: path to 16-bit PNG heightmap
+    float minAltitude = 0.0f;         // Altitude for height value 0 (when loading from file)
+    float maxAltitude = 200.0f;       // Altitude for height value 65535 (when loading from file)
+
+    // Computed height scale (maxAltitude - minAltitude), set during init
+    float heightScale = 0.0f;
 };
 
 class TerrainSystem {
