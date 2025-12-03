@@ -32,6 +32,9 @@ layout(push_constant) uniform PushConstants {
     mat4 model;
     float roughness;
     float metallic;
+    float emissiveIntensity;
+    float opacity;  // For camera occlusion fading (1.0 = fully visible)
+    vec4 emissiveColor;
 } push;
 
 layout(location = 0) in vec3 inPosition;
