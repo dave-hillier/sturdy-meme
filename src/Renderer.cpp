@@ -114,7 +114,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
         if (importer.import(importConfig, [](float progress, const std::string& status) {
             SDL_Log("Terrain import: %.0f%% - %s", progress * 100.0f, status.c_str());
         })) {
-            SDL_Log("Terrain cache created: %zu x %zu tiles",
+            SDL_Log("Terrain cache created: %u x %u tiles",
                     importer.getTilesX(), importer.getTilesZ());
         }
     } else {
