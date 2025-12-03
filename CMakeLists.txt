@@ -84,12 +84,11 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
     Vulkan::Vulkan
-    SDL3::SDL3
     glm::glm
     vk-bootstrap::vk-bootstrap
     GPUOpen::VulkanMemoryAllocator
     Jolt::Jolt
-    imgui::imgui
+    imgui::imgui  # Provides SDL3 transitively via SDL3 backend
     fastgltf::fastgltf
     unoffical::openfbx::openfbx
 )
