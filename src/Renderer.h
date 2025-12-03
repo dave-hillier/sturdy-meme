@@ -31,7 +31,9 @@
 #include "DescriptorManager.h"
 #include "ShadowSystem.h"
 #include "VulkanContext.h"
-#include "UBOs.h"  // Contains UniformBufferObject, SnowUBO, and CloudShadowUBO
+#include "UBOs.h"
+#include "SnowUBO.h"
+#include "CloudShadowUBO.h"
 #include "RockSystem.h"
 #include "CloudShadowSystem.h"
 #include "SkinnedMesh.h"

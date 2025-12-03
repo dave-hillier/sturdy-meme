@@ -11,6 +11,14 @@
 
 namespace fs = std::filesystem;
 
+// UBO struct names that are manually defined in separate header files
+// These modular UBOs are split from the main UniformBufferObject for cleaner organization
+// The manual definitions are used instead of auto-generated to support bootstrapping
+const std::set<std::string> MANUALLY_DEFINED_UBOS = {
+    "SnowUBO",           // Defined in src/SnowUBO.h (binding 10)
+    "CloudShadowUBO",    // Defined in src/CloudShadowUBO.h (binding 11)
+};
+
 struct UBOMember {
     std::string name;
     std::string type;
@@ -178,7 +186,12 @@ std::vector<UBODefinition> reflectSPIRV(const std::string& filepath) {
 std::string generateStructDef(const UBODefinition& ubo) {
     std::ostringstream structDef;
 
-    if (ubo.hasNestedStructs) {
+    // Check if this UBO is manually defined in a separate header file
+    if (MANUALLY_DEFINED_UBOS.find(ubo.structName) != MANUALLY_DEFINED_UBOS.end()) {
+        structDef << "// " << ubo.structName << " - defined in src/" << ubo.structName << ".h\n";
+        structDef << "// This modular UBO is part of the split UBO architecture\n";
+        structDef << "// Binding: " << ubo.binding << ", Set: " << ubo.set << ", Size: " << ubo.totalSize << " bytes";
+    } else if (ubo.hasNestedStructs) {
         structDef << "// SKIPPED: " << ubo.structName
                   << " (contains nested struct types - define manually)\n";
         structDef << "// This struct is defined in its corresponding system header file\n";
