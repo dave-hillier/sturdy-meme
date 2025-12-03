@@ -30,7 +30,7 @@ public:
 
 private:
     void setupStyle();
-    void renderDashboard(Renderer& renderer, float fps);
+    void renderDashboard(Renderer& renderer, const Camera& camera, float fps);
     void renderTimeSection(Renderer& renderer);
     void renderWeatherSection(Renderer& renderer);
     void renderEnvironmentSection(Renderer& renderer);
