@@ -45,7 +45,7 @@ struct TerrainSubdivisionPushConstants {
 struct TerrainConfig {
     float size = 16384.0f;              // Terrain size in world units (matches 16384x16384 heightmap)
     float targetEdgePixels = 16.0f;   // Target triangle edge length in pixels
-    int maxDepth = 20;                // Maximum CBT subdivision depth
+    int maxDepth = 26;                // Maximum CBT subdivision depth (26 gives ~2m resolution for 16km terrain)
     int minDepth = 2;                 // Minimum subdivision depth
     float splitThreshold = 24.0f;     // Screen pixels to trigger split (with hysteresis)
     float mergeThreshold = 8.0f;      // Screen pixels to trigger merge
