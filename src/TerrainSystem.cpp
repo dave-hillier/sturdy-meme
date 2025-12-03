@@ -58,6 +58,9 @@ bool TerrainSystem::init(const InitInfo& info, const TerrainConfig& cfg) {
     cbtInfo.initDepth = 6;  // Start with 64 triangles
     if (!cbt.init(cbtInfo)) return false;
 
+    // Query GPU subgroup capabilities for optimized compute paths
+    querySubgroupCapabilities();
+
     // Create remaining resources
     if (!createUniformBuffers()) return false;
     if (!createIndirectBuffers()) return false;
@@ -83,6 +86,7 @@ void TerrainSystem::destroy(VkDevice device, VmaAllocator allocator) {
     if (subdivisionPipeline) vkDestroyPipeline(device, subdivisionPipeline, nullptr);
     if (sumReductionPrepassPipeline) vkDestroyPipeline(device, sumReductionPrepassPipeline, nullptr);
     if (sumReductionPipeline) vkDestroyPipeline(device, sumReductionPipeline, nullptr);
+    if (sumReductionBatchedPipeline) vkDestroyPipeline(device, sumReductionBatchedPipeline, nullptr);
     if (renderPipeline) vkDestroyPipeline(device, renderPipeline, nullptr);
     if (wireframePipeline) vkDestroyPipeline(device, wireframePipeline, nullptr);
     if (shadowPipeline) vkDestroyPipeline(device, shadowPipeline, nullptr);
@@ -91,6 +95,7 @@ void TerrainSystem::destroy(VkDevice device, VmaAllocator allocator) {
     if (dispatcherPipelineLayout) vkDestroyPipelineLayout(device, dispatcherPipelineLayout, nullptr);
     if (subdivisionPipelineLayout) vkDestroyPipelineLayout(device, subdivisionPipelineLayout, nullptr);
     if (sumReductionPipelineLayout) vkDestroyPipelineLayout(device, sumReductionPipelineLayout, nullptr);
+    if (sumReductionBatchedPipelineLayout) vkDestroyPipelineLayout(device, sumReductionBatchedPipelineLayout, nullptr);
     if (renderPipelineLayout) vkDestroyPipelineLayout(device, renderPipelineLayout, nullptr);
     if (shadowPipelineLayout) vkDestroyPipelineLayout(device, shadowPipelineLayout, nullptr);
 
@@ -461,7 +466,7 @@ bool TerrainSystem::createSumReductionPipelines() {
         if (result != VK_SUCCESS) return false;
     }
 
-    // Regular sum reduction pipeline
+    // Regular sum reduction pipeline (legacy single-level per dispatch)
     {
         VkShaderModule shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_sum_reduction.comp.spv");
         if (!shaderModule) return false;
@@ -478,6 +483,44 @@ bool TerrainSystem::createSumReductionPipelines() {
         pipelineInfo.layout = sumReductionPipelineLayout;
 
         VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &sumReductionPipeline);
+        vkDestroyShaderModule(device, shaderModule, nullptr);
+        if (result != VK_SUCCESS) return false;
+    }
+
+    // Batched sum reduction pipeline (multi-level per dispatch using shared memory)
+    {
+        // Create pipeline layout for batched push constants
+        VkPushConstantRange batchedPushConstantRange{};
+        batchedPushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        batchedPushConstantRange.offset = 0;
+        batchedPushConstantRange.size = sizeof(TerrainSumReductionBatchedPushConstants);
+
+        VkPipelineLayoutCreateInfo batchedLayoutInfo{};
+        batchedLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        batchedLayoutInfo.setLayoutCount = 1;
+        batchedLayoutInfo.pSetLayouts = &computeDescriptorSetLayout;
+        batchedLayoutInfo.pushConstantRangeCount = 1;
+        batchedLayoutInfo.pPushConstantRanges = &batchedPushConstantRange;
+
+        if (vkCreatePipelineLayout(device, &batchedLayoutInfo, nullptr, &sumReductionBatchedPipelineLayout) != VK_SUCCESS) {
+            return false;
+        }
+
+        VkShaderModule shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_sum_reduction_batched.comp.spv");
+        if (!shaderModule) return false;
+
+        VkPipelineShaderStageCreateInfo stageInfo{};
+        stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+        stageInfo.module = shaderModule;
+        stageInfo.pName = "main";
+
+        VkComputePipelineCreateInfo pipelineInfo{};
+        pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+        pipelineInfo.stage = stageInfo;
+        pipelineInfo.layout = sumReductionBatchedPipelineLayout;
+
+        VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &sumReductionBatchedPipeline);
         vkDestroyShaderModule(device, shaderModule, nullptr);
         if (result != VK_SUCCESS) return false;
     }
@@ -775,6 +818,25 @@ bool TerrainSystem::createShadowPipeline() {
     vkDestroyShaderModule(device, fragModule, nullptr);
 
     return result == VK_SUCCESS;
+}
+
+void TerrainSystem::querySubgroupCapabilities() {
+    VkPhysicalDeviceSubgroupProperties subgroupProps{};
+    subgroupProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
+
+    VkPhysicalDeviceProperties2 deviceProps2{};
+    deviceProps2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    deviceProps2.pNext = &subgroupProps;
+
+    vkGetPhysicalDeviceProperties2(physicalDevice, &deviceProps2);
+
+    subgroupCaps.subgroupSize = subgroupProps.subgroupSize;
+    subgroupCaps.hasSubgroupArithmetic =
+        (subgroupProps.supportedOperations & VK_SUBGROUP_FEATURE_ARITHMETIC_BIT) != 0;
+
+    SDL_Log("TerrainSystem: Subgroup size=%u, arithmetic=%s",
+            subgroupCaps.subgroupSize,
+            subgroupCaps.hasSubgroupArithmetic ? "yes" : "no");
 }
 
 void TerrainSystem::extractFrustumPlanes(const glm::mat4& viewProj, glm::vec4 planes[6]) {
@@ -1076,6 +1138,7 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) {
                         0, 1, &barrier, 0, nullptr, 0, nullptr);
 
     // 3. Sum reduction - rebuild the sum tree
+    // Phase 1: Prepass handles bottom 5 levels using SWAR popcount (maxDepth to maxDepth-5)
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, sumReductionPrepassPipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, sumReductionPipelineLayout,
                            0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
@@ -1091,16 +1154,19 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) {
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                         0, 1, &barrier, 0, nullptr, 0, nullptr);
 
-    // Subsequent reduction passes
+    // Phase 2: Standard sum reduction for remaining levels (one dispatch per level)
+    // This is required because each level depends on the previous level's results
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, sumReductionPipeline);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, sumReductionPipelineLayout,
+                           0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
 
-    for (int pass = config.maxDepth - 6; pass >= 0; pass--) {
-        sumPC.passID = pass;
+    for (int depth = config.maxDepth - 6; depth >= 0; --depth) {
+        sumPC.passID = depth;
         vkCmdPushConstants(cmd, sumReductionPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
                           sizeof(sumPC), &sumPC);
 
-        workgroups = std::max(1u, (1u << pass) / SUM_REDUCTION_WORKGROUP_SIZE);
-        vkCmdDispatch(cmd, std::max(1u, workgroups), 1, 1);
+        workgroups = std::max(1u, (1u << depth) / SUM_REDUCTION_WORKGROUP_SIZE);
+        vkCmdDispatch(cmd, workgroups, 1, 1);
 
         vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                             0, 1, &barrier, 0, nullptr, 0, nullptr);

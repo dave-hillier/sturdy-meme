@@ -126,74 +126,73 @@ void main() {
         return;
     }
 
-    // Decode leaf index to heap index
+    // Phase 1: Decode node (unavoidable - needed for depth check)
     cbt_Node node = cbt_DecodeNode(leafIndex);
     int depth = node.depth;
 
-    // Decode triangle vertices
+    // Phase 2: Early-out on depth limits (before any expensive work)
+    // Ping-pong between split and merge frames to avoid race conditions
+    if (updateMode == 0u) {
+        // Split phase: cannot split triangles already at max depth
+        if (depth >= MAX_DEPTH) {
+            return;  // EARLY-OUT: max depth reached
+        }
+    } else {
+        // Merge phase: cannot merge triangles at min depth
+        if (depth <= MIN_DEPTH) {
+            return;  // EARLY-OUT: min depth reached
+        }
+    }
+
+    // Phase 3: Decode triangle vertices
     vec2 v0, v1, v2;
     leb_DecodeTriangleVertices(node, v0, v1, v2);
 
-    // Get world positions for frustum culling
+    // Phase 4: Get world positions and compute AABB
     vec3 p0 = uvToWorldPos(v0);
     vec3 p1 = uvToWorldPos(v1);
     vec3 p2 = uvToWorldPos(v2);
 
-    // Compute AABB with height margin
     vec3 minBound = min(min(p0, p1), p2);
     vec3 maxBound = max(max(p0, p1), p2);
     // Add height margin for terrain that might be displaced
     minBound.y -= HEIGHT_SCALE * 0.1;
     maxBound.y += HEIGHT_SCALE * 0.1;
 
-    // Compute AABB diagonal for frustum margin calculation
-    // This provides hysteresis for culling decisions near frustum boundaries
-    vec3 aabbDiag = maxBound - minBound;
-    float aabbDiagonal = length(aabbDiag);
-
-    // Frustum culling for split decisions (exact frustum)
-    bool culledForSplit = frustumCullAABB(minBound, maxBound);
-
-    // Frustum culling for merge decisions (expanded frustum with margin)
-    // Triangle must be at least half its diagonal outside the frustum before merge-culling
-    // This prevents flickering when triangles are right at the frustum boundary
-    float mergeCullMargin = aabbDiagonal * 0.5;
-    bool culledForMerge = frustumCullAABB(minBound, maxBound, mergeCullMargin);
-
-    // Ping-pong between split and merge frames to avoid race conditions
-    // This ensures that multiple threads don't simultaneously try to split and merge
-    // related nodes, which could create inconsistent tree states
+    // Phase 5: Phase-specific logic with optimized ordering
     if (updateMode == 0u) {
-        // Split-only frame: check if THIS triangle needs more detail
+        // Split phase: frustum cull BEFORE expensive LOD calculation
+        if (frustumCullAABB(minBound, maxBound)) {
+            return;  // EARLY-OUT: triangle culled, no need to compute LOD
+        }
+
+        // Only compute LOD for visible triangles that could potentially split
         float edgeLengthPixels = computeTriangleLOD(v0, v1, v2);
-        if (!culledForSplit && edgeLengthPixels > SPLIT_THRESHOLD && depth < MAX_DEPTH) {
+        if (edgeLengthPixels > SPLIT_THRESHOLD) {
             leb_SplitNode_Square(node);
         }
     } else {
-        // Merge-only frame
-        if (depth > MIN_DEPTH) {
-            leb_DiamondParent diamond = leb_DecodeDiamondParent_Square(node);
+        // Merge phase: need diamond parent for merge operation
+        leb_DiamondParent diamond = leb_DecodeDiamondParent_Square(node);
 
-            // Use culledForMerge (with margin) to prevent flickering at frustum boundaries
-            if (culledForMerge) {
-                // If well outside frustum, merge
+        // Compute AABB diagonal for frustum margin (hysteresis)
+        vec3 aabbDiag = maxBound - minBound;
+        float aabbDiagonal = length(aabbDiag);
+        float mergeCullMargin = aabbDiagonal * 0.5;
+
+        // Use expanded frustum for merge decisions to prevent flickering
+        if (frustumCullAABB(minBound, maxBound, mergeCullMargin)) {
+            // Well outside frustum - merge without LOD check
+            leb_MergeNode_Square(node, diamond);
+        } else {
+            // Visible: check if parent would have acceptable LOD before merging
+            // This prevents oscillation (merge then immediate re-split)
+            vec2 pv0, pv1, pv2;
+            leb_DecodeTriangleVertices(diamond.base, pv0, pv1, pv2);
+            float parentLOD = computeTriangleLOD(pv0, pv1, pv2);
+
+            if (parentLOD < SPLIT_THRESHOLD) {
                 leb_MergeNode_Square(node, diamond);
-            } else {
-                // Key insight from reference implementation:
-                // Check if the PARENT triangle (after merge) would have acceptable LOD,
-                // not whether the current children have low LOD.
-                // This prevents oscillation: we only merge if the result won't immediately split.
-
-                // Decode parent triangle vertices
-                vec2 pv0, pv1, pv2;
-                leb_DecodeTriangleVertices(diamond.base, pv0, pv1, pv2);
-                float parentLOD = computeTriangleLOD(pv0, pv1, pv2);
-
-                // Only merge if the parent's LOD is below split threshold
-                // This ensures the merged triangle won't immediately split on the next frame
-                if (parentLOD < SPLIT_THRESHOLD) {
-                    leb_MergeNode_Square(node, diamond);
-                }
             }
         }
     }
