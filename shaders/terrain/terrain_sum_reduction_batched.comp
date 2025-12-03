@@ -1,0 +1,101 @@
+#version 450
+
+#extension GL_GOOGLE_include_directive : require
+
+/*
+ * terrain_sum_reduction_batched.comp - Multi-level sum reduction using shared memory
+ * Processes multiple tree levels per dispatch to reduce total dispatch count.
+ * Each workgroup handles a contiguous section of the tree and reduces it
+ * using shared memory, writing results to all intermediate levels.
+ */
+
+#define CBT_BUFFER_BINDING 0
+#include "cbt.glsl"
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(push_constant) uniform PushConstants {
+    int startLevel;       // Starting depth level to read from
+    int levelsToProcess;  // Number of levels to reduce (max 8)
+};
+
+// Shared memory for workgroup-local reduction
+// Double-buffered for ping-pong between levels
+shared uint sharedData[512];
+
+void main() {
+    uint tid = gl_LocalInvocationIndex;  // 0-255
+    uint gid = gl_WorkGroupID.x;
+
+    // Each workgroup processes 512 consecutive nodes at startLevel
+    // (256 threads each handle 2 nodes)
+    uint nodesAtStartLevel = 1u << startLevel;
+    uint baseNodeID = gid * 512u;
+
+    // Bounds check: don't read beyond valid nodes
+    if (baseNodeID >= nodesAtStartLevel) {
+        return;
+    }
+
+    // Load 2 values per thread from the heap
+    uint heapOffset = nodesAtStartLevel;  // Nodes at level L start at heap index 2^L
+    uint nodeID0 = baseNodeID + tid * 2u;
+    uint nodeID1 = nodeID0 + 1u;
+
+    // Read values (with bounds check)
+    uint val0 = 0u;
+    uint val1 = 0u;
+
+    if (nodeID0 < nodesAtStartLevel) {
+        cbt_Node node0 = cbt_CreateNode_Explicit(heapOffset + nodeID0, startLevel);
+        val0 = cbt_HeapRead(node0);
+    }
+    if (nodeID1 < nodesAtStartLevel) {
+        cbt_Node node1 = cbt_CreateNode_Explicit(heapOffset + nodeID1, startLevel);
+        val1 = cbt_HeapRead(node1);
+    }
+
+    // Store in shared memory
+    sharedData[tid * 2u] = val0;
+    sharedData[tid * 2u + 1u] = val1;
+    barrier();
+
+    // Iteratively reduce through levels
+    uint readOffset = 0u;
+    uint writeOffset = 256u;  // Second half of shared memory
+    uint elementsThisLevel = 512u;
+
+    for (int level = 0; level < levelsToProcess && elementsThisLevel > 1u; level++) {
+        uint parentCount = elementsThisLevel >> 1u;
+        int outputDepth = startLevel - level - 1;
+
+        if (tid < parentCount) {
+            // Sum two children
+            uint left = sharedData[readOffset + tid * 2u];
+            uint right = sharedData[readOffset + tid * 2u + 1u];
+            uint sum = left + right;
+
+            // Store in shared memory for next iteration
+            sharedData[writeOffset + tid] = sum;
+
+            // Write to heap at this level
+            if (outputDepth >= 0) {
+                uint parentNodeID = (baseNodeID >> (level + 1u)) + tid;
+                uint parentHeapOffset = 1u << outputDepth;
+
+                // Only write if this parent is valid
+                if (parentNodeID < (1u << outputDepth)) {
+                    cbt_Node parentNode = cbt_CreateNode_Explicit(parentHeapOffset + parentNodeID, outputDepth);
+                    cbt__HeapWrite(parentNode, sum);
+                }
+            }
+        }
+        barrier();
+
+        // Swap read/write buffers (ping-pong)
+        uint temp = readOffset;
+        readOffset = writeOffset;
+        writeOffset = temp;
+        elementsThisLevel = parentCount;
+    }
+}

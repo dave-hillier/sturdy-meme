@@ -31,9 +31,21 @@ struct TerrainDispatcherPushConstants {
     uint32_t meshletVertexCount;
 };
 
-// Push constants for sum reduction
+// Push constants for sum reduction (legacy single-pass)
 struct TerrainSumReductionPushConstants {
     int passID;
+};
+
+// Push constants for batched sum reduction (multi-level)
+struct TerrainSumReductionBatchedPushConstants {
+    int startLevel;       // Starting depth level
+    int levelsToProcess;  // Number of levels to process in this dispatch
+};
+
+// Subgroup capabilities for runtime feature detection
+struct SubgroupCapabilities {
+    bool hasSubgroupArithmetic = false;
+    uint32_t subgroupSize = 0;
 };
 
 // Push constants for subdivision compute shader
@@ -160,6 +172,7 @@ private:
 
     // Utility functions
     void extractFrustumPlanes(const glm::mat4& viewProj, glm::vec4 planes[6]);
+    void querySubgroupCapabilities();
 
     // Vulkan resources
     VkDevice device = VK_NULL_HANDLE;
@@ -203,6 +216,10 @@ private:
     VkPipeline sumReductionPrepassPipeline = VK_NULL_HANDLE;
     VkPipeline sumReductionPipeline = VK_NULL_HANDLE;
 
+    // Optimized sum reduction pipelines (batched multi-level)
+    VkPipelineLayout sumReductionBatchedPipelineLayout = VK_NULL_HANDLE;
+    VkPipeline sumReductionBatchedPipeline = VK_NULL_HANDLE;
+
     // Render pipelines
     VkDescriptorSetLayout renderDescriptorSetLayout = VK_NULL_HANDLE;
     VkPipelineLayout renderPipelineLayout = VK_NULL_HANDLE;
@@ -225,6 +242,7 @@ private:
     // Runtime state
     uint32_t currentNodeCount = 2;  // Start with 2 root triangles
     uint32_t subdivisionFrameCount = 0;  // Frame counter for split/merge ping-pong
+    SubgroupCapabilities subgroupCaps;  // GPU subgroup feature support
 
     // Constants
     static constexpr uint32_t SUBDIVISION_WORKGROUP_SIZE = 64;

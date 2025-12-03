@@ -173,6 +173,7 @@ set(TERRAIN_SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_subdivision.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_sum_reduction_prepass.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_sum_reduction.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_sum_reduction_batched.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain.frag.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_shadow.vert.spv
@@ -284,6 +285,7 @@ if(SHADER_COMPILE_CMD)
         terrain_dispatcher.comp
         terrain_sum_reduction_prepass.comp
         terrain_sum_reduction.comp
+        terrain_sum_reduction_batched.comp
     )
 
     foreach(SHADER ${TERRAIN_CBT_SHADERS})
@@ -402,6 +404,7 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_subdivision.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_sum_reduction_prepass.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_sum_reduction.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_sum_reduction_batched.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain.frag.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_shadow.vert.spv
