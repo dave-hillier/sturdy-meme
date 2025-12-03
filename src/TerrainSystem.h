@@ -52,7 +52,9 @@ struct SubgroupCapabilities {
 
 // Push constants for subdivision compute shader
 struct TerrainSubdivisionPushConstants {
-    uint32_t updateMode;  // 0 = split only, 1 = merge only
+    uint32_t updateMode;    // 0 = split only, 1 = merge only
+    uint32_t frameIndex;    // For temporal spreading
+    uint32_t spreadFactor;  // Process 1/N triangles per frame (1 = all)
 };
 
 // Terrain configuration (outside class to avoid C++17 default argument issues)

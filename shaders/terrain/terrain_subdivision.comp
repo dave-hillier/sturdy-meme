@@ -15,9 +15,11 @@
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
-// Push constants for update mode
+// Push constants for update mode and temporal spreading
 layout(push_constant) uniform PushConstants {
-    uint updateMode;  // 0 = split only, 1 = merge only
+    uint updateMode;    // 0 = split only, 1 = merge only
+    uint frameIndex;    // For temporal spreading
+    uint spreadFactor;  // Process 1/N triangles per frame (1 = all)
 };
 
 // Height map sampler
@@ -138,6 +140,17 @@ void main() {
         // Merge phase: cannot merge triangles at min depth
         if (depth <= MIN_DEPTH) {
             return;  // EARLY-OUT: min depth reached
+        }
+    }
+
+    // Phase 2b: Temporal spreading - process only 1/N triangles per frame
+    // Skip deep triangles (far from camera) to spread work over frames
+    // Shallow triangles (large, near camera) always update for responsiveness
+    if (spreadFactor > 1u && depth > MIN_DEPTH + 4) {
+        // For merge phase, use leafIndex/2 to keep diamond sibling pairs synchronized
+        uint spreadIndex = (updateMode == 1u) ? leafIndex / 2u : leafIndex;
+        if ((spreadIndex + frameIndex) % spreadFactor != 0u) {
+            return;  // EARLY-OUT: not our turn this frame
         }
     }
 

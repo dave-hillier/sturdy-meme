@@ -1226,6 +1226,8 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
 
     TerrainSubdivisionPushConstants subdivPC{};
     subdivPC.updateMode = subdivisionFrameCount & 1;  // 0 = split, 1 = merge
+    subdivPC.frameIndex = subdivisionFrameCount;
+    subdivPC.spreadFactor = 4;  // Process 1/4 of deep triangles per frame
     vkCmdPushConstants(cmd, subdivisionPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
                       sizeof(subdivPC), &subdivPC);
 
