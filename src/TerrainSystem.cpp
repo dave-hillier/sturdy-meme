@@ -618,16 +618,22 @@ bool TerrainSystem::createSumReductionPipelines() {
 }
 
 bool TerrainSystem::createFrustumCullPipelines() {
-    // Frustum cull pipeline (no push constants needed)
+    // Frustum cull pipeline (with push constants for dispatch calculation)
     {
         VkShaderModule shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_frustum_cull.comp.spv");
         if (!shaderModule) return false;
+
+        VkPushConstantRange pushConstantRange{};
+        pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        pushConstantRange.offset = 0;
+        pushConstantRange.size = sizeof(TerrainFrustumCullPushConstants);
 
         VkPipelineLayoutCreateInfo layoutInfo{};
         layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         layoutInfo.setLayoutCount = 1;
         layoutInfo.pSetLayouts = &computeDescriptorSetLayout;
-        layoutInfo.pushConstantRangeCount = 0;
+        layoutInfo.pushConstantRangeCount = 1;
+        layoutInfo.pPushConstantRanges = &pushConstantRange;
 
         if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &frustumCullPipelineLayout) != VK_SUCCESS) {
             vkDestroyShaderModule(device, shaderModule, nullptr);
@@ -1353,94 +1359,33 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                         0, 1, &barrier, 0, nullptr, 0, nullptr);
 
-    // 2. Subdivision - LOD update (with GPU culling for split phase)
+    // 2. Subdivision - LOD update with inline frustum culling
     // Ping-pong between split and merge to avoid race conditions
-    // Even frames: split only (with stream compaction), Odd frames: merge only
+    // Even frames: split only, Odd frames: merge only
+    // Note: Frustum culling is now inline in subdivision shader (no separate pass)
     uint32_t updateMode = subdivisionFrameCount & 1;  // 0 = split, 1 = merge
 
     if (updateMode == 0) {
-        // Split phase
-        if (gpuCullingEnabled) {
-            // Use stream compaction to reduce dispatch size
-            // 2a. Reset visible count to 0
-            vkCmdFillBuffer(cmd, visibleIndicesBuffer, 0, sizeof(uint32_t), 0);
-            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                                0, 1, &barrier, 0, nullptr, 0, nullptr);
+        // Split phase with inline frustum culling
+        // No separate frustum cull pass - culling happens inside subdivision shader
+        if (profiler) profiler->beginZone(cmd, "Terrain:Subdivision");
 
-            // 2b. Frustum culling pass - writes visible indices to compact buffer
-            if (profiler) profiler->beginZone(cmd, "Terrain:FrustumCull");
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, subdivisionPipeline);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, subdivisionPipelineLayout,
+                               0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
 
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, frustumCullPipeline);
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, frustumCullPipelineLayout,
-                                   0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
+        TerrainSubdivisionPushConstants subdivPC{};
+        subdivPC.updateMode = 0;  // Split
+        subdivPC.frameIndex = subdivisionFrameCount;
+        subdivPC.spreadFactor = config.spreadFactor;
+        subdivPC.reserved = 0;
+        vkCmdPushConstants(cmd, subdivisionPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                          sizeof(subdivPC), &subdivPC);
 
-            // Dispatch based on total triangle count (from dispatcher's indirect buffer)
-            vkCmdDispatchIndirect(cmd, indirectDispatchBuffer, 0);
+        // Dispatch all triangles - inline frustum culling handles early-out
+        vkCmdDispatchIndirect(cmd, indirectDispatchBuffer, 0);
 
-            if (profiler) profiler->endZone(cmd, "Terrain:FrustumCull");
-
-            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                                0, 1, &barrier, 0, nullptr, 0, nullptr);
-
-            // 2c. Prepare cull dispatch - convert visible count to dispatch args
-            if (profiler) profiler->beginZone(cmd, "Terrain:PrepareDispatch");
-
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, prepareDispatchPipeline);
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, prepareDispatchPipelineLayout,
-                                   0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
-
-            TerrainPrepareCullDispatchPushConstants preparePC{};
-            preparePC.workgroupSize = SUBDIVISION_WORKGROUP_SIZE;
-            vkCmdPushConstants(cmd, prepareDispatchPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
-                              sizeof(preparePC), &preparePC);
-
-            vkCmdDispatch(cmd, 1, 1, 1);
-
-            if (profiler) profiler->endZone(cmd, "Terrain:PrepareDispatch");
-
-            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                                0, 1, &barrier, 0, nullptr, 0, nullptr);
-
-            // 2d. Subdivision split pass - indirect dispatch based on visible count
-            if (profiler) profiler->beginZone(cmd, "Terrain:Subdivision");
-
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, subdivisionPipeline);
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, subdivisionPipelineLayout,
-                                   0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
-
-            TerrainSubdivisionPushConstants subdivPC{};
-            subdivPC.updateMode = 0;  // Split
-            subdivPC.frameIndex = subdivisionFrameCount;
-            subdivPC.spreadFactor = config.spreadFactor;
-            subdivPC.useCompactBuffer = 1;  // Use stream compaction buffer
-            vkCmdPushConstants(cmd, subdivisionPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
-                              sizeof(subdivPC), &subdivPC);
-
-            // Use the cull indirect dispatch buffer (reduced dispatch size)
-            vkCmdDispatchIndirect(cmd, cullIndirectDispatchBuffer, 0);
-
-            if (profiler) profiler->endZone(cmd, "Terrain:Subdivision");
-        } else {
-            // GPU culling disabled - direct split without stream compaction
-            if (profiler) profiler->beginZone(cmd, "Terrain:Subdivision");
-
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, subdivisionPipeline);
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, subdivisionPipelineLayout,
-                                   0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
-
-            TerrainSubdivisionPushConstants subdivPC{};
-            subdivPC.updateMode = 0;  // Split
-            subdivPC.frameIndex = subdivisionFrameCount;
-            subdivPC.spreadFactor = config.spreadFactor;
-            subdivPC.useCompactBuffer = 0;  // Direct indexing (no stream compaction)
-            vkCmdPushConstants(cmd, subdivisionPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
-                              sizeof(subdivPC), &subdivPC);
-
-            // Use original indirect dispatch (all triangles)
-            vkCmdDispatchIndirect(cmd, indirectDispatchBuffer, 0);
-
-            if (profiler) profiler->endZone(cmd, "Terrain:Subdivision");
-        }
+        if (profiler) profiler->endZone(cmd, "Terrain:Subdivision");
     } else {
         // Merge phase: process all triangles directly (no culling)
         if (profiler) profiler->beginZone(cmd, "Terrain:Subdivision");
@@ -1453,7 +1398,7 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
         subdivPC.updateMode = 1;  // Merge
         subdivPC.frameIndex = subdivisionFrameCount;
         subdivPC.spreadFactor = config.spreadFactor;
-        subdivPC.useCompactBuffer = 0;  // Direct indexing (merge always processes all)
+        subdivPC.reserved = 0;
         vkCmdPushConstants(cmd, subdivisionPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
                           sizeof(subdivPC), &subdivPC);
 

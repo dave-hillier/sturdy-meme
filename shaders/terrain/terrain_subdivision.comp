@@ -6,6 +6,8 @@
  * terrain_subdivision.comp - LOD evaluation and adaptive subdivision
  * Each thread processes one leaf triangle and decides whether to split or merge
  * Height convention: see terrain_height_common.glsl
+ *
+ * Optimization: Inline frustum culling eliminates separate cull pass
  */
 
 #define CBT_BUFFER_BINDING 0
@@ -20,7 +22,7 @@ layout(push_constant) uniform PushConstants {
     uint updateMode;       // 0 = split only, 1 = merge only
     uint frameIndex;       // For temporal spreading
     uint spreadFactor;     // Process 1/N triangles per frame (1 = all)
-    uint useCompactBuffer; // 1 = read from compact buffer (GPU culling enabled)
+    uint reserved;         // Padding (was useCompactBuffer, now unused)
 };
 
 // Height map sampler
@@ -38,14 +40,6 @@ layout(std140, binding = 4) uniform TerrainUniforms {
     vec2 screenSize;
     float lodFactor;
     float padding;
-};
-
-// Visible indices buffer for stream compaction (split phase only)
-// When updateMode == 0 (split), gl_GlobalInvocationID.x indexes into this buffer
-// When updateMode == 1 (merge), we use gl_GlobalInvocationID.x directly as leafIndex
-layout(std430, binding = 5) readonly buffer VisibleIndices {
-    uint visibleCount;
-    uint visibleIndices[];
 };
 
 // Subdivision phase: 0 = split only, 1 = merge only
@@ -127,25 +121,12 @@ float computeTriangleLOD(vec3 p0, vec3 p1, vec3 p2) {
 }
 
 void main() {
-    uint threadIndex = gl_GlobalInvocationID.x;
-    uint leafIndex;
+    uint leafIndex = gl_GlobalInvocationID.x;
 
-    // Determine leaf index based on compact buffer mode
-    // useCompactBuffer == 1: read from stream compaction buffer (GPU culling enabled)
-    // useCompactBuffer == 0: direct index (GPU culling disabled or merge phase)
-    if (useCompactBuffer != 0u) {
-        // Stream compaction mode: thread index maps to visible indices buffer
-        if (threadIndex >= visibleCount) {
-            return;  // Beyond visible count
-        }
-        leafIndex = visibleIndices[threadIndex];
-    } else {
-        // Direct mode: thread index is the leaf index
-        uint totalLeaves = cbt_NodeCount();
-        if (threadIndex >= totalLeaves) {
-            return;
-        }
-        leafIndex = threadIndex;
+    // Direct indexing - inline frustum culling eliminates stream compaction
+    uint totalLeaves = cbt_NodeCount();
+    if (leafIndex >= totalLeaves) {
+        return;
     }
 
     // Phase 1: Decode node (unavoidable - needed for depth check)
@@ -193,8 +174,13 @@ void main() {
 
     // Phase 5: Phase-specific logic with optimized ordering
     if (updateMode == 0u) {
-        // Split phase: triangles already passed frustum culling in stream compaction
-        // Just compute LOD for visible triangles that could potentially split
+        // Split phase: inline frustum culling (eliminates separate cull pass)
+        // Early-out if triangle is outside frustum - no need to compute LOD
+        if (frustumCullAABB(minBound, maxBound)) {
+            return;  // EARLY-OUT: outside frustum, no split needed
+        }
+
+        // Visible triangle - compute LOD and split if needed
         float edgeLengthPixels = computeTriangleLOD(p0, p1, p2);
         if (edgeLengthPixels > SPLIT_THRESHOLD) {
             leb_SplitNode_Square(node);
