@@ -787,6 +787,16 @@ void GuiSystem::renderTerrainSection(Renderer& renderer) {
         renderer.toggleTerrainWireframe();
     }
 
+    // Meshlet mode toggle
+    bool meshletMode = renderer.isTerrainMeshletMode();
+    if (ImGui::Checkbox("Meshlet Mode", &meshletMode)) {
+        renderer.setTerrainMeshletMode(meshletMode);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Render pre-tessellated meshlets per CBT leaf (%ux triangles)",
+                         renderer.getTerrainMeshletMultiplier());
+    }
+
     ImGui::Spacing();
     ImGui::Separator();
     ImGui::Spacing();

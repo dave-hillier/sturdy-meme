@@ -59,8 +59,8 @@ bool TerrainSystem::init(const InitInfo& info, const TerrainConfig& cfg) {
     cbtInfo.initDepth = 6;  // Start with 64 triangles
     if (!cbt.init(cbtInfo)) return false;
 
-    // Initialize meshlet if enabled
-    if (config.useMeshlets) {
+    // Always initialize meshlets so they can be toggled at runtime
+    {
         TerrainMeshlet::InitInfo meshletInfo{};
         meshletInfo.allocator = allocator;
         meshletInfo.device = device;
@@ -68,7 +68,8 @@ bool TerrainSystem::init(const InitInfo& info, const TerrainConfig& cfg) {
         meshletInfo.commandPool = commandPool;
         meshletInfo.subdivisionLevel = config.meshletSubdivisionLevel;
         if (!meshlet.init(meshletInfo)) return false;
-        meshletMode = true;
+        // Start in meshlet mode if configured
+        meshletMode = config.useMeshlets;
     }
 
     // Query GPU subgroup capabilities for optimized compute paths
@@ -88,14 +89,12 @@ bool TerrainSystem::init(const InitInfo& info, const TerrainConfig& cfg) {
     if (!createWireframePipeline()) return false;
     if (!createShadowPipeline()) return false;
 
-    // Create meshlet pipelines if meshlets are enabled
-    if (meshletMode) {
-        if (!createMeshletRenderPipeline()) return false;
-        if (!createMeshletShadowPipeline()) return false;
-    }
+    // Always create meshlet pipelines so they can be toggled at runtime
+    if (!createMeshletRenderPipeline()) return false;
+    if (!createMeshletShadowPipeline()) return false;
 
-    SDL_Log("TerrainSystem initialized with CBT max depth %d%s", config.maxDepth,
-            meshletMode ? " (meshlet mode enabled)" : "");
+    SDL_Log("TerrainSystem initialized with CBT max depth %d, meshlets=%s (%ux)",
+            config.maxDepth, meshletMode ? "on" : "off", meshlet.getTriangleCount());
     return true;
 }
 

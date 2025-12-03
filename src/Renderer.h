@@ -113,6 +113,9 @@ public:
     // Terrain control
     void toggleTerrainWireframe() { terrainSystem.setWireframeMode(!terrainSystem.isWireframeMode()); }
     bool isTerrainWireframeMode() const { return terrainSystem.isWireframeMode(); }
+    void setTerrainMeshletMode(bool enabled) { terrainSystem.setMeshletMode(enabled); }
+    bool isTerrainMeshletMode() const { return terrainSystem.isMeshletMode(); }
+    uint32_t getTerrainMeshletMultiplier() const { return terrainSystem.getMeshletTriangleMultiplier(); }
     float getTerrainHeightAt(float x, float z) const { return terrainSystem.getHeightAt(x, z); }
     uint32_t getTerrainNodeCount() const { return terrainSystem.getNodeCount(); }
 
