@@ -3,6 +3,7 @@
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
 #include <vector>
+#include <string>
 
 // Height map for terrain - handles generation, GPU texture, and CPU queries
 class TerrainHeightMap {
@@ -15,6 +16,9 @@ public:
         uint32_t resolution;
         float terrainSize;
         float heightScale;
+        std::string heightmapPath;  // Optional: path to 16-bit PNG heightmap (empty = procedural)
+        float minAltitude = 0.0f;   // Altitude for height value 0 (when loading from file)
+        float maxAltitude = 200.0f; // Altitude for height value 65535 (when loading from file)
     };
 
     TerrainHeightMap() = default;
@@ -36,6 +40,7 @@ public:
 
 private:
     bool generateHeightData();
+    bool loadHeightDataFromFile(const std::string& path, float minAlt, float maxAlt);
     bool createGPUResources();
     bool uploadToGPU();
 

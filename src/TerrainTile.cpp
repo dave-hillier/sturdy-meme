@@ -66,6 +66,7 @@ bool TerrainTile::loadHeightData() {
 
     // Try to load from cache if available
     if (!config.cacheDirectory.empty()) {
+        std::cout << "TerrainTile: Loading from cache directory: " << config.cacheDirectory << std::endl;
         std::string tilePath = TerrainImporter::getTilePath(
             config.cacheDirectory, coord.x, coord.z, coord.lod);
 

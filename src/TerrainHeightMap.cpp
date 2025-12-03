@@ -5,6 +5,9 @@
 #include <iostream>
 #include <glm/glm.hpp>
 
+#define STB_IMAGE_IMPLEMENTATION_SKIP  // Already implemented elsewhere
+#include <stb_image.h>
+
 bool TerrainHeightMap::init(const InitInfo& info) {
     device = info.device;
     allocator = info.allocator;
@@ -14,7 +17,16 @@ bool TerrainHeightMap::init(const InitInfo& info) {
     terrainSize = info.terrainSize;
     heightScale = info.heightScale;
 
-    if (!generateHeightData()) return false;
+    // Either load from file or generate procedurally
+    if (!info.heightmapPath.empty()) {
+        if (!loadHeightDataFromFile(info.heightmapPath, info.minAltitude, info.maxAltitude)) {
+            std::cerr << "Failed to load heightmap from file, falling back to procedural" << std::endl;
+            if (!generateHeightData()) return false;
+        }
+    } else {
+        if (!generateHeightData()) return false;
+    }
+
     if (!createGPUResources()) return false;
     if (!uploadToGPU()) return false;
 
@@ -88,6 +100,108 @@ bool TerrainHeightMap::generateHeightData() {
     }
 
     return true;
+}
+
+bool TerrainHeightMap::loadHeightDataFromFile(const std::string& path, float minAlt, float maxAlt) {
+    int width, height, channels;
+
+    // Load as 16-bit if available
+    stbi_us* data16 = stbi_load_16(path.c_str(), &width, &height, &channels, 1);
+    if (data16) {
+        std::cout << "Loaded 16-bit heightmap: " << path << " (" << width << "x" << height << ")" << std::endl;
+
+        // The heightmap might be larger than our target resolution - resample if needed
+        uint32_t srcWidth = static_cast<uint32_t>(width);
+        uint32_t srcHeight = static_cast<uint32_t>(height);
+
+        cpuData.resize(resolution * resolution);
+
+        // Bilinear resampling from source to target resolution
+        for (uint32_t y = 0; y < resolution; y++) {
+            for (uint32_t x = 0; x < resolution; x++) {
+                // Map target pixel to source coordinates
+                float srcX = (static_cast<float>(x) / (resolution - 1)) * (srcWidth - 1);
+                float srcY = (static_cast<float>(y) / (resolution - 1)) * (srcHeight - 1);
+
+                int x0 = static_cast<int>(srcX);
+                int y0 = static_cast<int>(srcY);
+                int x1 = std::min(x0 + 1, static_cast<int>(srcWidth - 1));
+                int y1 = std::min(y0 + 1, static_cast<int>(srcHeight - 1));
+
+                float tx = srcX - x0;
+                float ty = srcY - y0;
+
+                // Sample 4 corners (16-bit values)
+                float h00 = static_cast<float>(data16[y0 * srcWidth + x0]) / 65535.0f;
+                float h10 = static_cast<float>(data16[y0 * srcWidth + x1]) / 65535.0f;
+                float h01 = static_cast<float>(data16[y1 * srcWidth + x0]) / 65535.0f;
+                float h11 = static_cast<float>(data16[y1 * srcWidth + x1]) / 65535.0f;
+
+                // Bilinear interpolation
+                float h0 = h00 * (1.0f - tx) + h10 * tx;
+                float h1 = h01 * (1.0f - tx) + h11 * tx;
+                float h = h0 * (1.0f - ty) + h1 * ty;
+
+                // Store as normalized [0,1] value
+                cpuData[y * resolution + x] = h;
+            }
+        }
+
+        stbi_image_free(data16);
+
+        // Update heightScale to match the altitude range from the file
+        heightScale = maxAlt - minAlt;
+        std::cout << "Height scale set to " << heightScale << "m (range: " << minAlt << "m - " << maxAlt << "m)" << std::endl;
+
+        return true;
+    }
+
+    // Fall back to 8-bit
+    stbi_uc* data8 = stbi_load(path.c_str(), &width, &height, &channels, 1);
+    if (data8) {
+        std::cout << "Loaded 8-bit heightmap: " << path << " (" << width << "x" << height << ")" << std::endl;
+
+        uint32_t srcWidth = static_cast<uint32_t>(width);
+        uint32_t srcHeight = static_cast<uint32_t>(height);
+
+        cpuData.resize(resolution * resolution);
+
+        for (uint32_t y = 0; y < resolution; y++) {
+            for (uint32_t x = 0; x < resolution; x++) {
+                float srcX = (static_cast<float>(x) / (resolution - 1)) * (srcWidth - 1);
+                float srcY = (static_cast<float>(y) / (resolution - 1)) * (srcHeight - 1);
+
+                int x0 = static_cast<int>(srcX);
+                int y0 = static_cast<int>(srcY);
+                int x1 = std::min(x0 + 1, static_cast<int>(srcWidth - 1));
+                int y1 = std::min(y0 + 1, static_cast<int>(srcHeight - 1));
+
+                float tx = srcX - x0;
+                float ty = srcY - y0;
+
+                float h00 = static_cast<float>(data8[y0 * srcWidth + x0]) / 255.0f;
+                float h10 = static_cast<float>(data8[y0 * srcWidth + x1]) / 255.0f;
+                float h01 = static_cast<float>(data8[y1 * srcWidth + x0]) / 255.0f;
+                float h11 = static_cast<float>(data8[y1 * srcWidth + x1]) / 255.0f;
+
+                float h0 = h00 * (1.0f - tx) + h10 * tx;
+                float h1 = h01 * (1.0f - tx) + h11 * tx;
+                float h = h0 * (1.0f - ty) + h1 * ty;
+
+                cpuData[y * resolution + x] = h;
+            }
+        }
+
+        stbi_image_free(data8);
+
+        heightScale = maxAlt - minAlt;
+        std::cout << "Height scale set to " << heightScale << "m (range: " << minAlt << "m - " << maxAlt << "m)" << std::endl;
+
+        return true;
+    }
+
+    std::cerr << "Failed to load heightmap: " << path << " - " << stbi_failure_reason() << std::endl;
+    return false;
 }
 
 bool TerrainHeightMap::createGPUResources() {

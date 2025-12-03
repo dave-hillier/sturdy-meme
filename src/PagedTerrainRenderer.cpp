@@ -622,7 +622,7 @@ void PagedTerrainRenderer::updateUniforms(uint32_t frameIndex, const glm::vec3& 
 
     // Terrain params - use base tile size (LOD 0); actual tile size passed via push constants
     float baseTileSize = config.streamingConfig.tileConfig.baseTileSize;
-    float heightScale = config.streamingConfig.tileConfig.heightScale;
+    float heightScale = config.streamingConfig.tileConfig.getHeightScale();
     uniforms.terrainParams = glm::vec4(baseTileSize, heightScale, config.targetEdgePixels,
                                         static_cast<float>(config.maxCBTDepth));
     uniforms.lodParams = glm::vec4(config.splitThreshold, config.mergeThreshold,
@@ -730,7 +730,7 @@ void PagedTerrainRenderer::recordTileDraw(VkCommandBuffer cmd, TerrainTile* tile
     TileRenderPushConstants pc{};
     pc.tileOffset = tile->getWorldMin();
     pc.tileSize = tile->getTileSize();  // Tile size varies by LOD level
-    pc.heightScale = config.streamingConfig.tileConfig.heightScale;
+    pc.heightScale = config.streamingConfig.tileConfig.getHeightScale();
 
     vkCmdPushConstants(cmd, renderPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pc), &pc);
 
@@ -776,7 +776,7 @@ void PagedTerrainRenderer::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameI
         pc.lightViewProj = lightViewProj;
         pc.tileOffset = tile->getWorldMin();
         pc.tileSize = tile->getTileSize();  // Tile size varies by LOD level
-        pc.heightScale = config.streamingConfig.tileConfig.heightScale;
+        pc.heightScale = config.streamingConfig.tileConfig.getHeightScale();
         pc.cascadeIndex = cascadeIndex;
 
         vkCmdPushConstants(cmd, shadowPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pc), &pc);
