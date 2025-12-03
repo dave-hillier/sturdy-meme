@@ -109,11 +109,8 @@ float computeScreenSpaceEdgeLength(vec3 p0, vec3 p1) {
 }
 
 // Compute LOD for a triangle - returns longest edge length in pixels
-float computeTriangleLOD(vec2 v0, vec2 v1, vec2 v2) {
-    vec3 p0 = uvToWorldPos(v0);
-    vec3 p1 = uvToWorldPos(v1);
-    vec3 p2 = uvToWorldPos(v2);
-
+// Takes pre-computed world positions to avoid redundant heightmap samples
+float computeTriangleLOD(vec3 p0, vec3 p1, vec3 p2) {
     // In LEB, the longest edge is always between v1 and v2
     return computeScreenSpaceEdgeLength(p1, p2);
 }
@@ -167,7 +164,8 @@ void main() {
         }
 
         // Only compute LOD for visible triangles that could potentially split
-        float edgeLengthPixels = computeTriangleLOD(v0, v1, v2);
+        // Reuse pre-computed world positions (p0, p1, p2) - no extra heightmap samples
+        float edgeLengthPixels = computeTriangleLOD(p0, p1, p2);
         if (edgeLengthPixels > SPLIT_THRESHOLD) {
             leb_SplitNode_Square(node);
         }
@@ -189,7 +187,12 @@ void main() {
             // This prevents oscillation (merge then immediate re-split)
             vec2 pv0, pv1, pv2;
             leb_DecodeTriangleVertices(diamond.base, pv0, pv1, pv2);
-            float parentLOD = computeTriangleLOD(pv0, pv1, pv2);
+
+            // Compute parent world positions (needed for LOD - can't reuse child positions)
+            vec3 pp0 = uvToWorldPos(pv0);
+            vec3 pp1 = uvToWorldPos(pv1);
+            vec3 pp2 = uvToWorldPos(pv2);
+            float parentLOD = computeTriangleLOD(pp0, pp1, pp2);
 
             if (parentLOD < SPLIT_THRESHOLD) {
                 leb_MergeNode_Square(node, diamond);
