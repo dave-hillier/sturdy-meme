@@ -12,6 +12,7 @@ bool ShadowSystem::init(const InitInfo& info) {
     allocator = info.allocator;
     descriptorPool = info.descriptorPool;
     mainDescriptorSetLayout = info.mainDescriptorSetLayout;
+    skinnedDescriptorSetLayout = info.skinnedDescriptorSetLayout;
     shaderPath = info.shaderPath;
     framesInFlight = info.framesInFlight;
 
@@ -361,6 +362,12 @@ bool ShadowSystem::createShadowPipeline() {
 }
 
 bool ShadowSystem::createSkinnedShadowPipeline() {
+    // Skip if no skinned descriptor set layout provided
+    if (skinnedDescriptorSetLayout == VK_NULL_HANDLE) {
+        SDL_Log("Skinned shadow pipeline skipped (no skinned descriptor set layout)");
+        return true;
+    }
+
     auto vertShaderCode = ShaderLoader::readFile(shaderPath + "/skinned_shadow.vert.spv");
     auto fragShaderCode = ShaderLoader::readFile(shaderPath + "/shadow.frag.spv");
 
@@ -450,7 +457,7 @@ bool ShadowSystem::createSkinnedShadowPipeline() {
     colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
     colorBlending.attachmentCount = 0;  // No color attachments
 
-    // Skinned shadow pipeline layout - reuse the main descriptor set layout for compatibility
+    // Skinned shadow pipeline layout - use skinned descriptor set layout (has binding 10 for bone matrices)
     VkPushConstantRange pushConstantRange{};
     pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
     pushConstantRange.offset = 0;
@@ -459,7 +466,7 @@ bool ShadowSystem::createSkinnedShadowPipeline() {
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.setLayoutCount = 1;
-    pipelineLayoutInfo.pSetLayouts = &mainDescriptorSetLayout;  // Use main layout for compatibility (has binding 10 for bones)
+    pipelineLayoutInfo.pSetLayouts = &skinnedDescriptorSetLayout;  // Use skinned layout (has binding 10 for bones)
     pipelineLayoutInfo.pushConstantRangeCount = 1;
     pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
 
@@ -1130,6 +1137,7 @@ void ShadowSystem::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex,
 }
 
 void ShadowSystem::bindSkinnedShadowPipeline(VkCommandBuffer cmd, VkDescriptorSet descriptorSet) {
+    if (skinnedShadowPipeline == VK_NULL_HANDLE) return;
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, skinnedShadowPipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                             skinnedShadowPipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
@@ -1138,6 +1146,8 @@ void ShadowSystem::bindSkinnedShadowPipeline(VkCommandBuffer cmd, VkDescriptorSe
 void ShadowSystem::recordSkinnedMeshShadow(VkCommandBuffer cmd, uint32_t cascade,
                                             const glm::mat4& modelMatrix,
                                             const SkinnedMesh& mesh) {
+    if (skinnedShadowPipelineLayout == VK_NULL_HANDLE) return;
+
     ShadowPushConstants shadowPush{};
     shadowPush.model = modelMatrix;
     shadowPush.cascadeIndex = static_cast<int>(cascade);
