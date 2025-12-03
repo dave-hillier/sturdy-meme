@@ -1642,7 +1642,7 @@ void Renderer::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float 
     };
 
     // Combine scene objects and rock objects for shadow rendering
-    // Skip player character if using GPU skinning (skinned shadow pass not implemented yet)
+    // Skip player character - it's rendered separately with skinned shadow pipeline
     std::vector<Renderable> allObjects;
     const auto& sceneObjects = sceneManager.getSceneObjects();
     size_t playerIndex = sceneManager.getSceneBuilder().getPlayerObjectIndex();
@@ -1651,7 +1651,7 @@ void Renderer::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float 
 
     allObjects.reserve(sceneObjects.size() + rockSystem.getSceneObjects().size());
     for (size_t i = 0; i < sceneObjects.size(); ++i) {
-        // Skip player character if using GPU skinning
+        // Skip player character - rendered with skinned shadow pipeline
         if (useGPUSkinning && i == playerIndex && hasCharacter) {
             continue;
         }
@@ -1659,9 +1659,30 @@ void Renderer::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float 
     }
     allObjects.insert(allObjects.end(), rockSystem.getSceneObjects().begin(), rockSystem.getSceneObjects().end());
 
+    // Skinned character shadow callback (renders with GPU skinning)
+    ShadowSystem::DrawCallback skinnedCallback = nullptr;
+    if (useGPUSkinning) {
+        skinnedCallback = [this, frameIndex, playerIndex](VkCommandBuffer cb, uint32_t cascade, const glm::mat4& lightMatrix) {
+            (void)lightMatrix;  // Not used, cascade matrices are in UBO
+            SceneBuilder& sceneBuilder = sceneManager.getSceneBuilder();
+            const auto& sceneObjs = sceneBuilder.getSceneObjects();
+            if (playerIndex >= sceneObjs.size()) return;
+
+            const Renderable& playerObj = sceneObjs[playerIndex];
+            AnimatedCharacter& character = sceneBuilder.getAnimatedCharacter();
+            SkinnedMesh& skinnedMesh = character.getSkinnedMesh();
+
+            // Bind skinned shadow pipeline with descriptor set that has bone matrices
+            shadowSystem.bindSkinnedShadowPipeline(cb, skinnedDescriptorSets[frameIndex]);
+
+            // Record the skinned mesh shadow
+            shadowSystem.recordSkinnedMeshShadow(cb, cascade, playerObj.transform, skinnedMesh);
+        };
+    }
+
     shadowSystem.recordShadowPass(cmd, frameIndex, descriptorSets[frameIndex],
                                    allObjects,
-                                   terrainCallback, grassCallback);
+                                   terrainCallback, grassCallback, skinnedCallback);
 }
 
 void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
