@@ -71,6 +71,7 @@ struct TerrainConfig {
     int minDepth = 6;                 // Minimum subdivision depth (64 triangles, ~4km edges)
     float splitThreshold = 24.0f;     // Screen pixels to trigger split (with hysteresis)
     float mergeThreshold = 8.0f;      // Screen pixels to trigger merge
+    uint32_t spreadFactor = 4;        // Temporal spreading: process 1/N triangles per frame (1 = all)
     std::string heightmapPath;        // Optional: path to 16-bit PNG heightmap
     float minAltitude = 0.0f;         // Altitude for height value 0 (when loading from file)
     float maxAltitude = 200.0f;       // Altitude for height value 65535 (when loading from file)

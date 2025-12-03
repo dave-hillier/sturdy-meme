@@ -756,7 +756,7 @@ void GuiSystem::renderTerrainSection(Renderer& renderer) {
     }
 
     int maxDepth = cfg.maxDepth;
-    if (ImGui::SliderInt("Max Depth", &maxDepth, 16, 28)) {
+    if (ImGui::SliderInt("Max Depth", &maxDepth, 16, 32)) {
         cfg.maxDepth = maxDepth;
         configChanged = true;
     }
@@ -771,6 +771,15 @@ void GuiSystem::renderTerrainSection(Renderer& renderer) {
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Minimum subdivision depth (base tessellation level)");
+    }
+
+    int spreadFactor = static_cast<int>(cfg.spreadFactor);
+    if (ImGui::SliderInt("Spread Factor", &spreadFactor, 1, 32)) {
+        cfg.spreadFactor = static_cast<uint32_t>(spreadFactor);
+        configChanged = true;
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Temporal spreading: process 1/N triangles per frame (1 = all, higher = less GPU work per frame)");
     }
 
     if (configChanged) {

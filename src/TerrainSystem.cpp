@@ -1411,7 +1411,7 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
             TerrainSubdivisionPushConstants subdivPC{};
             subdivPC.updateMode = 0;  // Split
             subdivPC.frameIndex = subdivisionFrameCount;
-            subdivPC.spreadFactor = 4;
+            subdivPC.spreadFactor = config.spreadFactor;
             subdivPC.useCompactBuffer = 1;  // Use stream compaction buffer
             vkCmdPushConstants(cmd, subdivisionPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
                               sizeof(subdivPC), &subdivPC);
@@ -1431,7 +1431,7 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
             TerrainSubdivisionPushConstants subdivPC{};
             subdivPC.updateMode = 0;  // Split
             subdivPC.frameIndex = subdivisionFrameCount;
-            subdivPC.spreadFactor = 4;
+            subdivPC.spreadFactor = config.spreadFactor;
             subdivPC.useCompactBuffer = 0;  // Direct indexing (no stream compaction)
             vkCmdPushConstants(cmd, subdivisionPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
                               sizeof(subdivPC), &subdivPC);
@@ -1452,7 +1452,7 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
         TerrainSubdivisionPushConstants subdivPC{};
         subdivPC.updateMode = 1;  // Merge
         subdivPC.frameIndex = subdivisionFrameCount;
-        subdivPC.spreadFactor = 4;
+        subdivPC.spreadFactor = config.spreadFactor;
         subdivPC.useCompactBuffer = 0;  // Direct indexing (merge always processes all)
         vkCmdPushConstants(cmd, subdivisionPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
                           sizeof(subdivPC), &subdivPC);
