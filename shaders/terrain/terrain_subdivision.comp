@@ -133,8 +133,9 @@ const float GRADIENT_ALIGNMENT_WEIGHT = 2.0;
 
 // Distance-based LOD parameters
 // Force high tessellation near the camera for player interaction
-const float NEAR_CAMERA_DISTANCE = 50.0;    // Within this distance, strongly boost tessellation
-const float NEAR_CAMERA_BOOST = 4.0;        // Multiplier for very close triangles
+const float NEAR_CAMERA_DISTANCE = 100.0;   // Within this distance, apply tessellation boost
+const float TARGET_EDGE_AT_CAMERA = 1.0;    // Target world-space edge length at distance 0 (1 meter)
+const float TARGET_EDGE_GROWTH = 0.5;       // Edge length grows by this much per unit of distance
 
 // Height error tolerance parameters
 // Within CLOSE_DISTANCE: use strict world-space error tolerance (for physics/collision)
@@ -157,18 +158,26 @@ float computeTriangleLOD(vec2 v0, vec2 v1, vec2 v2) {
     vec2 centerUV = (v0 + v1 + v2) / 3.0;
     vec3 centerWorld = (p0 + p1 + p2) / 3.0;
 
-    // === Distance-based LOD boost ===
-    // Prioritize high tessellation near the camera for player interaction
+    // === Distance-based LOD using world-space edge length ===
+    // Near the camera, enforce world-space edge length limits directly
+    // This guarantees fine tessellation regardless of screen-space calculations
     float distToCamera = distance(cameraPosition.xyz, centerWorld);
-    float distanceFactor = 1.0;
+
     if (distToCamera < NEAR_CAMERA_DISTANCE) {
-        // Smoothly boost tessellation as we get closer
-        // At distance 0: boost = NEAR_CAMERA_BOOST
-        // At NEAR_CAMERA_DISTANCE: boost = 1.0
-        float t = distToCamera / NEAR_CAMERA_DISTANCE;
-        distanceFactor = mix(NEAR_CAMERA_BOOST, 1.0, t * t);  // Quadratic falloff
+        // Compute actual world-space edge length
+        float worldEdgeLength = distance(p1, p2);
+
+        // Target edge length increases with distance from camera
+        // At distance 0: target = 1m, at distance 100: target = 51m
+        float targetEdgeLength = TARGET_EDGE_AT_CAMERA + distToCamera * TARGET_EDGE_GROWTH;
+
+        // If world edge exceeds target, force split by boosting LOD metric
+        if (worldEdgeLength > targetEdgeLength) {
+            float excessRatio = worldEdgeLength / targetEdgeLength;
+            // Ensure we exceed split threshold proportionally to how much we exceed target
+            e12 = max(e12, SPLIT_THRESHOLD * excessRatio * 2.0);
+        }
     }
-    e12 *= distanceFactor;
 
     // === Height error estimation ===
     // Check if the triangle's linear interpolation matches the actual heightmap
