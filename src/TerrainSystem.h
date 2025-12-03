@@ -122,8 +122,11 @@ public:
     const float* getHeightMapData() const { return heightMap.getData(); }
     uint32_t getHeightMapResolution() const { return heightMap.getResolution(); }
 
-    // Get current node count (for debugging/display)
-    uint32_t getNodeCount() const { return currentNodeCount; }
+    // Get current triangle count from GPU (for debugging/display)
+    uint32_t getTriangleCount() const;
+
+    // Legacy method - prefer getTriangleCount()
+    uint32_t getNodeCount() const { return getTriangleCount(); }
 
     // Config accessors
     const TerrainConfig& getConfig() const { return config; }
@@ -183,6 +186,7 @@ private:
     VmaAllocation indirectDispatchAllocation = VK_NULL_HANDLE;
     VkBuffer indirectDrawBuffer = VK_NULL_HANDLE;
     VmaAllocation indirectDrawAllocation = VK_NULL_HANDLE;
+    void* indirectDrawMappedPtr = nullptr;  // Persistently mapped for readback
 
     // Uniform buffers (per frame in flight)
     std::vector<VkBuffer> uniformBuffers;

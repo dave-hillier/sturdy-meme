@@ -323,9 +323,16 @@ void GuiSystem::renderDashboard(Renderer& renderer, float fps) {
     ImGui::Columns(2, nullptr, false);
     ImGui::SetColumnWidth(0, 160);
 
-    ImGui::Text("Terrain Nodes");
+    uint32_t triCount = renderer.getTerrainNodeCount();
+    ImGui::Text("Terrain Tris");
     ImGui::SameLine(100);
-    ImGui::Text("%u", renderer.getTerrainNodeCount());
+    if (triCount >= 1000000) {
+        ImGui::Text("%.2fM", triCount / 1000000.0f);
+    } else if (triCount >= 1000) {
+        ImGui::Text("%.0fK", triCount / 1000.0f);
+    } else {
+        ImGui::Text("%u", triCount);
+    }
 
     ImGui::NextColumn();
 
@@ -661,8 +668,77 @@ void GuiSystem::renderTerrainSection(Renderer& renderer) {
 
     ImGui::Text("Size: %.0f x %.0f meters", config.size, config.size);
     ImGui::Text("Height Scale: %.1f", config.heightScale);
-    ImGui::Text("Active Nodes: %u", renderer.getTerrainNodeCount());
-    ImGui::Text("Max Depth: %d", config.maxDepth);
+
+    // Triangle count with color coding
+    uint32_t triangleCount = renderer.getTerrainNodeCount();
+    ImVec4 triColor = triangleCount < 100000 ? ImVec4(0.4f, 0.9f, 0.4f, 1.0f) :
+                      triangleCount < 500000 ? ImVec4(0.9f, 0.9f, 0.4f, 1.0f) :
+                                               ImVec4(0.9f, 0.4f, 0.4f, 1.0f);
+    ImGui::Text("Triangles:");
+    ImGui::SameLine();
+    ImGui::PushStyleColor(ImGuiCol_Text, triColor);
+    if (triangleCount >= 1000000) {
+        ImGui::Text("%.2fM", triangleCount / 1000000.0f);
+    } else if (triangleCount >= 1000) {
+        ImGui::Text("%.1fK", triangleCount / 1000.0f);
+    } else {
+        ImGui::Text("%u", triangleCount);
+    }
+    ImGui::PopStyleColor();
+
+    // CBT depth info
+    ImGui::Text("Max Depth: %d (min edge: %.1fm)", config.maxDepth,
+                config.size / (1 << (config.maxDepth / 2)));
+    ImGui::Text("Min Depth: %d", config.minDepth);
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // LOD parameters (modifiable at runtime)
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.7f, 0.5f, 1.0f));
+    ImGui::Text("LOD PARAMETERS");
+    ImGui::PopStyleColor();
+
+    auto& terrainMut = renderer.getTerrainSystem();
+    TerrainConfig cfg = terrainMut.getConfig();
+    bool configChanged = false;
+
+    if (ImGui::SliderFloat("Split Threshold", &cfg.splitThreshold, 4.0f, 64.0f, "%.0f px")) {
+        configChanged = true;
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Screen-space edge length (pixels) to trigger subdivision");
+    }
+
+    if (ImGui::SliderFloat("Merge Threshold", &cfg.mergeThreshold, 2.0f, 32.0f, "%.0f px")) {
+        configChanged = true;
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Screen-space edge length (pixels) to trigger merge");
+    }
+
+    int maxDepth = cfg.maxDepth;
+    if (ImGui::SliderInt("Max Depth", &maxDepth, 16, 28)) {
+        cfg.maxDepth = maxDepth;
+        configChanged = true;
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Maximum subdivision depth (higher = finer detail, more triangles)");
+    }
+
+    int minDepth = cfg.minDepth;
+    if (ImGui::SliderInt("Min Depth", &minDepth, 1, 10)) {
+        cfg.minDepth = minDepth;
+        configChanged = true;
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Minimum subdivision depth (base tessellation level)");
+    }
+
+    if (configChanged) {
+        terrainMut.setConfig(cfg);
+    }
 
     ImGui::Spacing();
     ImGui::Separator();
