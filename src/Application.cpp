@@ -310,6 +310,10 @@ void Application::processEvents() {
                     renderer.toggleSnowDepthDebug();
                     SDL_Log("Snow depth debug visualization: %s", renderer.isShowingSnowDepthDebug() ? "ON" : "OFF");
                 }
+                else if (event.key.scancode == SDL_SCANCODE_8) {
+                    renderer.setHiZCullingEnabled(!renderer.isHiZCullingEnabled());
+                    SDL_Log("Hi-Z occlusion culling: %s", renderer.isHiZCullingEnabled() ? "ON" : "OFF");
+                }
                 else if (event.key.scancode == SDL_SCANCODE_Z) {
                     float currentIntensity = renderer.getIntensity();
                     renderer.setWeatherIntensity(std::max(0.0f, currentIntensity - 0.1f));
