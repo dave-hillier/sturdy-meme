@@ -518,6 +518,33 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
         // Continue without profiling - it's optional
     }
 
+    // Initialize water system
+    WaterSystem::InitInfo waterInfo{};
+    waterInfo.device = device;
+    waterInfo.physicalDevice = physicalDevice;
+    waterInfo.allocator = allocator;
+    waterInfo.descriptorPool = descriptorPool;
+    waterInfo.hdrRenderPass = postProcessSystem.getHDRRenderPass();
+    waterInfo.shaderPath = resourcePath + "/shaders";
+    waterInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+    waterInfo.extent = swapchainExtent;
+    waterInfo.commandPool = commandPool;
+    waterInfo.graphicsQueue = graphicsQueue;
+
+    if (!waterSystem.init(waterInfo)) return false;
+
+    // Configure water surface - positioned at a low area
+    waterSystem.setWaterLevel(-2.0f);  // Below terrain level for a lake
+    waterSystem.setWaterExtent(glm::vec2(0.0f, 0.0f), glm::vec2(200.0f, 200.0f));
+    waterSystem.setWaterColor(glm::vec4(0.05f, 0.15f, 0.25f, 0.9f));
+    waterSystem.setWaveAmplitude(0.3f);
+    waterSystem.setWaveLength(6.0f);
+    waterSystem.setWaveSteepness(0.3f);
+    waterSystem.setWaveSpeed(1.0f);
+
+    // Create water descriptor sets
+    if (!waterSystem.createDescriptorSets(uniformBuffers, sizeof(UniformBufferObject), shadowSystem)) return false;
+
     if (!createSyncObjects()) return false;
 
     return true;
@@ -597,6 +624,7 @@ void Renderer::shutdown() {
         cloudShadowSystem.destroy();
         hiZSystem.destroy();
         profiler.shutdown();
+        waterSystem.destroy(device, allocator);
         atmosphereLUTSystem.destroy(device, allocator);
         skySystem.destroy(device, allocator);
         postProcessSystem.destroy(device, allocator);
@@ -1374,6 +1402,9 @@ void Renderer::render(const Camera& camera) {
     leafSystem.updateUniforms(frame.frameIndex, frame.cameraPosition, frame.viewProj, frame.cameraPosition, playerVel, frame.deltaTime, frame.time,
                                frame.terrainSize, frame.heightScale);
 
+    // Update water system uniforms
+    waterSystem.updateUniforms(frame.frameIndex);
+
     profiler.endCpuZone("SystemUpdates");
 
     // Begin command buffer recording
@@ -1921,6 +1952,9 @@ void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float gra
 
     // Draw grass
     grassSystem.recordDraw(cmd, frameIndex, grassTime);
+
+    // Draw water surface (after opaque geometry, blended)
+    waterSystem.recordDraw(cmd, frameIndex);
 
     // Draw falling leaves - after grass, before weather
     leafSystem.recordDraw(cmd, frameIndex, grassTime);

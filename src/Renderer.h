@@ -43,6 +43,7 @@
 #include "RenderPipeline.h"
 #include "GlobalBufferManager.h"
 #include "Profiler.h"
+#include "WaterSystem.h"
 
 struct PushConstants {
     glm::mat4 model;
@@ -282,6 +283,7 @@ private:
     RockSystem rockSystem;
     CloudShadowSystem cloudShadowSystem;
     HiZSystem hiZSystem;
+    WaterSystem waterSystem;
     EnvironmentSettings environmentSettings;
     Profiler profiler;
     bool useVolumetricSnow = true;  // Use new volumetric system by default

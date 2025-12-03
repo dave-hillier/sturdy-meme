@@ -78,6 +78,7 @@ set(SOURCES
     src/HiZSystem.cpp
     src/GpuProfiler.cpp
     src/CpuProfiler.cpp
+    src/WaterSystem.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
@@ -232,6 +233,7 @@ if(SHADER_COMPILE_CMD)
         bloom_downsample.frag bloom_upsample.frag bloom_composite.frag
         histogram_build.comp histogram_reduce.comp
         hiz_downsample.comp hiz_culling.comp
+        water.vert water.frag
     )
 
     foreach(SHADER ${SIMPLE_SHADERS})
