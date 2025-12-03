@@ -7,6 +7,7 @@
  * This shader reads the leaf count from the CBT and configures:
  *  - Indirect dispatch args for subdivision compute shader
  *  - Indirect draw args for terrain rendering
+ *  - Resets visible count for stream compaction (optimization: avoids CPU fillBuffer)
  */
 
 #define CBT_BUFFER_BINDING 0
@@ -27,6 +28,12 @@ layout(std430, binding = 2) buffer DrawIndirect {
     uint instanceCount;
     uint firstVertex;
     uint firstInstance;
+};
+
+// Visible indices buffer for stream compaction - reset count here
+layout(std430, binding = 5) buffer VisibleIndices {
+    uint visibleCount;
+    // uint indices[]; // Not needed, just reset the count
 };
 
 // Push constants for configuration
@@ -55,4 +62,8 @@ void main() {
     }
     firstVertex = 0u;
     firstInstance = 0u;
+
+    // Reset visible count for next frame's stream compaction
+    // This replaces vkCmdFillBuffer on CPU side
+    visibleCount = 0u;
 }

@@ -618,16 +618,22 @@ bool TerrainSystem::createSumReductionPipelines() {
 }
 
 bool TerrainSystem::createFrustumCullPipelines() {
-    // Frustum cull pipeline (no push constants needed)
+    // Frustum cull pipeline (with push constants for dispatch calculation)
     {
         VkShaderModule shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_frustum_cull.comp.spv");
         if (!shaderModule) return false;
+
+        VkPushConstantRange pushConstantRange{};
+        pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        pushConstantRange.offset = 0;
+        pushConstantRange.size = sizeof(TerrainFrustumCullPushConstants);
 
         VkPipelineLayoutCreateInfo layoutInfo{};
         layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         layoutInfo.setLayoutCount = 1;
         layoutInfo.pSetLayouts = &computeDescriptorSetLayout;
-        layoutInfo.pushConstantRangeCount = 0;
+        layoutInfo.pushConstantRangeCount = 1;
+        layoutInfo.pPushConstantRanges = &pushConstantRange;
 
         if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &frustumCullPipelineLayout) != VK_SUCCESS) {
             vkDestroyShaderModule(device, shaderModule, nullptr);
@@ -1362,17 +1368,21 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
         // Split phase
         if (gpuCullingEnabled) {
             // Use stream compaction to reduce dispatch size
-            // 2a. Reset visible count to 0
-            vkCmdFillBuffer(cmd, visibleIndicesBuffer, 0, sizeof(uint32_t), 0);
-            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                                0, 1, &barrier, 0, nullptr, 0, nullptr);
+            // Note: visibleCount reset is now done in dispatcher shader (optimization #1)
 
-            // 2b. Frustum culling pass - writes visible indices to compact buffer
+            // 2a. Frustum culling pass - writes visible indices to compact buffer
+            //     Also computes dispatch args inline (optimization #2)
             if (profiler) profiler->beginZone(cmd, "Terrain:FrustumCull");
 
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, frustumCullPipeline);
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, frustumCullPipelineLayout,
                                    0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
+
+            // Push subdivision workgroup size for inline dispatch calculation
+            TerrainFrustumCullPushConstants cullPC{};
+            cullPC.subdivisionWorkgroupSize = SUBDIVISION_WORKGROUP_SIZE;
+            vkCmdPushConstants(cmd, frustumCullPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                              sizeof(cullPC), &cullPC);
 
             // Dispatch based on total triangle count (from dispatcher's indirect buffer)
             vkCmdDispatchIndirect(cmd, indirectDispatchBuffer, 0);
@@ -1382,26 +1392,8 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
             vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                                 0, 1, &barrier, 0, nullptr, 0, nullptr);
 
-            // 2c. Prepare cull dispatch - convert visible count to dispatch args
-            if (profiler) profiler->beginZone(cmd, "Terrain:PrepareDispatch");
-
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, prepareDispatchPipeline);
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, prepareDispatchPipelineLayout,
-                                   0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
-
-            TerrainPrepareCullDispatchPushConstants preparePC{};
-            preparePC.workgroupSize = SUBDIVISION_WORKGROUP_SIZE;
-            vkCmdPushConstants(cmd, prepareDispatchPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
-                              sizeof(preparePC), &preparePC);
-
-            vkCmdDispatch(cmd, 1, 1, 1);
-
-            if (profiler) profiler->endZone(cmd, "Terrain:PrepareDispatch");
-
-            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                                0, 1, &barrier, 0, nullptr, 0, nullptr);
-
-            // 2d. Subdivision split pass - indirect dispatch based on visible count
+            // 2b. Subdivision split pass - indirect dispatch based on visible count
+            //     Note: prepareDispatch pass eliminated - dispatch args computed in frustum cull shader
             if (profiler) profiler->beginZone(cmd, "Terrain:Subdivision");
 
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, subdivisionPipeline);

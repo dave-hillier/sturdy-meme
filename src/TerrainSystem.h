@@ -58,9 +58,14 @@ struct TerrainSubdivisionPushConstants {
     uint32_t useCompactBuffer; // 1 = read from compact buffer (GPU culling enabled)
 };
 
-// Push constants for prepare cull dispatch
+// Push constants for prepare cull dispatch (legacy, kept for compatibility)
 struct TerrainPrepareCullDispatchPushConstants {
     uint32_t workgroupSize;  // Subdivision workgroup size
+};
+
+// Push constants for frustum cull (now includes dispatch calculation)
+struct TerrainFrustumCullPushConstants {
+    uint32_t subdivisionWorkgroupSize;  // For computing dispatch args
 };
 
 // Terrain configuration (outside class to avoid C++17 default argument issues)
