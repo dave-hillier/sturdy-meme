@@ -37,6 +37,8 @@ public:
     // Raw data accessors
     const float* getData() const { return cpuData.data(); }
     uint32_t getResolution() const { return resolution; }
+    float getHeightScale() const { return heightScale; }
+    float getTerrainSize() const { return terrainSize; }
 
 private:
     bool generateHeightData();

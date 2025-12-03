@@ -94,59 +94,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
 
     if (!shadowSystem.init(shadowInfo)) return false;
 
-    // Initialize scene (meshes, textures, objects, lights)
-    SceneBuilder::InitInfo sceneInfo{};
-    sceneInfo.allocator = allocator;
-    sceneInfo.device = device;
-    sceneInfo.commandPool = commandPool;
-    sceneInfo.graphicsQueue = graphicsQueue;
-    sceneInfo.physicalDevice = physicalDevice;
-    sceneInfo.resourcePath = resourcePath;
-
-    if (!sceneManager.init(sceneInfo)) return false;
-
-    // Initialize snow mask system early (before createDescriptorSets, since shader.frag needs binding 8)
-    SnowMaskSystem::InitInfo snowMaskInfo{};
-    snowMaskInfo.device = device;
-    snowMaskInfo.allocator = allocator;
-    snowMaskInfo.renderPass = postProcessSystem.getHDRRenderPass();
-    snowMaskInfo.descriptorPool = descriptorPool;
-    snowMaskInfo.extent = swapchainExtent;
-    snowMaskInfo.shaderPath = resourcePath + "/shaders";
-    snowMaskInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
-
-    if (!snowMaskSystem.init(snowMaskInfo)) return false;
-
-    // Initialize volumetric snow system (cascaded heightfield)
-    VolumetricSnowSystem::InitInfo volumetricSnowInfo{};
-    volumetricSnowInfo.device = device;
-    volumetricSnowInfo.allocator = allocator;
-    volumetricSnowInfo.renderPass = postProcessSystem.getHDRRenderPass();
-    volumetricSnowInfo.descriptorPool = descriptorPool;
-    volumetricSnowInfo.extent = swapchainExtent;
-    volumetricSnowInfo.shaderPath = resourcePath + "/shaders";
-    volumetricSnowInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
-
-    if (!volumetricSnowSystem.init(volumetricSnowInfo)) return false;
-
-    if (!createDescriptorSets()) return false;
-    if (!createSkinnedDescriptorSets()) return false;
-
-    // Initialize grass system using HDR render pass
-    GrassSystem::InitInfo grassInfo{};
-    grassInfo.device = device;
-    grassInfo.allocator = allocator;
-    grassInfo.renderPass = postProcessSystem.getHDRRenderPass();
-    grassInfo.shadowRenderPass = shadowSystem.getShadowRenderPass();
-    grassInfo.descriptorPool = descriptorPool;
-    grassInfo.extent = swapchainExtent;
-    grassInfo.shadowMapSize = shadowSystem.getShadowMapSize();
-    grassInfo.shaderPath = resourcePath + "/shaders";
-    grassInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
-
-    if (!grassSystem.init(grassInfo)) return false;
-
-    // Initialize terrain system with Isle of Wight heightmap
+    // Initialize terrain system BEFORE scene so scene objects can query terrain height
     std::string heightmapPath = resourcePath + "/assets/terrain/isleofwight-0m-200m.png";
     std::string terrainCachePath = resourcePath + "/terrain_cache";
 
@@ -191,8 +139,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
 
     TerrainConfig terrainConfig{};
     // Use world size based on imported terrain (or default if import failed)
-    terrainConfig.size = importer.getWorldWidth() > 0 ? importer.getWorldWidth() : 16000.0f;
-    terrainConfig.heightScale = 200.0f;
+    terrainConfig.size = importer.getWorldWidth() > 0 ? importer.getWorldWidth() : 16384.0f;
     terrainConfig.maxDepth = 20;  // Higher depth for larger terrain
     terrainConfig.minDepth = 2;
     terrainConfig.targetEdgePixels = 16.0f;
@@ -202,8 +149,65 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     terrainConfig.heightmapPath = resourcePath + "/assets/terrain/isleofwight-0m-200m.png";
     terrainConfig.minAltitude = -15.0f;
     terrainConfig.maxAltitude = 200.0f;
+    // heightScale is computed from minAltitude/maxAltitude during init
 
     if (!terrainSystem.init(terrainInfo, terrainConfig)) return false;
+
+    // Initialize scene (meshes, textures, objects, lights)
+    // Pass terrain height function so objects can be placed on terrain
+    SceneBuilder::InitInfo sceneInfo{};
+    sceneInfo.allocator = allocator;
+    sceneInfo.device = device;
+    sceneInfo.commandPool = commandPool;
+    sceneInfo.graphicsQueue = graphicsQueue;
+    sceneInfo.physicalDevice = physicalDevice;
+    sceneInfo.resourcePath = resourcePath;
+    sceneInfo.getTerrainHeight = [this](float x, float z) {
+        return terrainSystem.getHeightAt(x, z);
+    };
+
+    if (!sceneManager.init(sceneInfo)) return false;
+
+    // Initialize snow mask system early (before createDescriptorSets, since shader.frag needs binding 8)
+    SnowMaskSystem::InitInfo snowMaskInfo{};
+    snowMaskInfo.device = device;
+    snowMaskInfo.allocator = allocator;
+    snowMaskInfo.renderPass = postProcessSystem.getHDRRenderPass();
+    snowMaskInfo.descriptorPool = descriptorPool;
+    snowMaskInfo.extent = swapchainExtent;
+    snowMaskInfo.shaderPath = resourcePath + "/shaders";
+    snowMaskInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+
+    if (!snowMaskSystem.init(snowMaskInfo)) return false;
+
+    // Initialize volumetric snow system (cascaded heightfield)
+    VolumetricSnowSystem::InitInfo volumetricSnowInfo{};
+    volumetricSnowInfo.device = device;
+    volumetricSnowInfo.allocator = allocator;
+    volumetricSnowInfo.renderPass = postProcessSystem.getHDRRenderPass();
+    volumetricSnowInfo.descriptorPool = descriptorPool;
+    volumetricSnowInfo.extent = swapchainExtent;
+    volumetricSnowInfo.shaderPath = resourcePath + "/shaders";
+    volumetricSnowInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+
+    if (!volumetricSnowSystem.init(volumetricSnowInfo)) return false;
+
+    if (!createDescriptorSets()) return false;
+    if (!createSkinnedDescriptorSets()) return false;
+
+    // Initialize grass system using HDR render pass
+    GrassSystem::InitInfo grassInfo{};
+    grassInfo.device = device;
+    grassInfo.allocator = allocator;
+    grassInfo.renderPass = postProcessSystem.getHDRRenderPass();
+    grassInfo.shadowRenderPass = shadowSystem.getShadowRenderPass();
+    grassInfo.descriptorPool = descriptorPool;
+    grassInfo.extent = swapchainExtent;
+    grassInfo.shadowMapSize = shadowSystem.getShadowMapSize();
+    grassInfo.shaderPath = resourcePath + "/shaders";
+    grassInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+
+    if (!grassSystem.init(grassInfo)) return false;
 
     // Initialize wind system
     WindSystem::InitInfo windInfo{};

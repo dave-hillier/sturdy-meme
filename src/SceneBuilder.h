@@ -6,6 +6,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <vector>
 #include <string>
+#include <functional>
 
 #include "Mesh.h"
 #include "Texture.h"
@@ -19,6 +20,9 @@ using SceneObject = Renderable;
 // Holds all scene resources (meshes, textures) and provides scene objects
 class SceneBuilder {
 public:
+    // Function type for querying terrain height at world position (x, z)
+    using HeightQueryFunc = std::function<float(float, float)>;
+
     struct InitInfo {
         VmaAllocator allocator;
         VkDevice device;
@@ -26,6 +30,7 @@ public:
         VkQueue graphicsQueue;
         VkPhysicalDevice physicalDevice;
         std::string resourcePath;
+        HeightQueryFunc getTerrainHeight;  // Optional: query terrain height for object placement
     };
 
     SceneBuilder() = default;
@@ -79,11 +84,17 @@ private:
     bool loadTextures(const InitInfo& info);
     void createSceneObjects();
 
+    // Get terrain height at (x, z), returns 0 if no terrain function available
+    float getTerrainHeight(float x, float z) const;
+
     // Build character model transform from world position and rotation
     glm::mat4 buildCharacterTransform(const glm::vec3& position, float yRotation) const;
 
     // Character model constants
     static constexpr float CHARACTER_SCALE = 0.01f;  // Mixamo FBX is in cm, scale to meters
+
+    // Terrain height query function
+    HeightQueryFunc terrainHeightFunc;
 
     // Meshes
     Mesh groundMesh;

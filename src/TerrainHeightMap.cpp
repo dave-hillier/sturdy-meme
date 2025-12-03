@@ -149,9 +149,7 @@ bool TerrainHeightMap::loadHeightDataFromFile(const std::string& path, float min
 
         stbi_image_free(data16);
 
-        // Update heightScale to match the altitude range from the file
-        heightScale = maxAlt - minAlt;
-        std::cout << "Height scale set to " << heightScale << "m (range: " << minAlt << "m - " << maxAlt << "m)" << std::endl;
+        std::cout << "Height scale: " << heightScale << "m (altitude range: " << minAlt << "m to " << maxAlt << "m)" << std::endl;
 
         return true;
     }
@@ -194,8 +192,7 @@ bool TerrainHeightMap::loadHeightDataFromFile(const std::string& path, float min
 
         stbi_image_free(data8);
 
-        heightScale = maxAlt - minAlt;
-        std::cout << "Height scale set to " << heightScale << "m (range: " << minAlt << "m - " << maxAlt << "m)" << std::endl;
+        std::cout << "Height scale: " << heightScale << "m (altitude range: " << minAlt << "m to " << maxAlt << "m)" << std::endl;
 
         return true;
     }
