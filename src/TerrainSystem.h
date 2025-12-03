@@ -11,6 +11,8 @@
 #include "TerrainTextures.h"
 #include "TerrainCBT.h"
 
+class GpuProfiler;
+
 // Push constants for terrain rendering
 struct TerrainPushConstants {
     glm::mat4 model;
@@ -118,7 +120,8 @@ public:
                         float snowMaxHeight = 10.0f);
 
     // Record compute commands (subdivision update)
-    void recordCompute(VkCommandBuffer cmd, uint32_t frameIndex);
+    // Pass optional GpuProfiler for detailed per-phase profiling
+    void recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuProfiler* profiler = nullptr);
 
     // Record terrain rendering
     void recordDraw(VkCommandBuffer cmd, uint32_t frameIndex);
@@ -244,6 +247,26 @@ private:
     uint32_t currentNodeCount = 2;  // Start with 2 root triangles
     uint32_t subdivisionFrameCount = 0;  // Frame counter for split/merge ping-pong
     SubgroupCapabilities subgroupCaps;  // GPU subgroup feature support
+
+    // Camera state tracking for skip-frame optimization
+    struct CameraState {
+        glm::vec3 position{0.0f};
+        glm::vec3 forward{0.0f, 0.0f, -1.0f};
+        bool valid = false;
+    };
+    CameraState previousCamera;
+    uint32_t staticFrameCount = 0;       // Consecutive frames camera hasn't moved
+    uint32_t framesSinceLastCompute = 0; // Frames since last subdivision compute
+    bool forceNextCompute = true;        // Force compute on next frame
+
+    // Skip-frame thresholds
+    static constexpr float POSITION_THRESHOLD = 0.1f;    // World units
+    static constexpr float ROTATION_THRESHOLD = 0.001f;  // Dot product threshold
+    static constexpr uint32_t MAX_SKIP_FRAMES = 30;      // Force update every N frames
+    static constexpr uint32_t CONVERGENCE_FRAMES = 4;    // Frames to converge after camera stops
+
+    // Helper to detect camera movement
+    bool cameraHasMoved(const glm::vec3& cameraPos, const glm::mat4& view);
 
     // Constants
     static constexpr uint32_t SUBDIVISION_WORKGROUP_SIZE = 64;

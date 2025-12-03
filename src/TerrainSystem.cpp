@@ -1,6 +1,7 @@
 #include "TerrainSystem.h"
 #include "ShaderLoader.h"
 #include "BindingBuilder.h"
+#include "GpuProfiler.h"
 #include <SDL3/SDL.h>
 #include <cstring>
 #include <cmath>
@@ -1076,11 +1077,50 @@ void TerrainSystem::setCloudShadowMap(VkDevice device, VkImageView cloudShadowVi
     }
 }
 
+bool TerrainSystem::cameraHasMoved(const glm::vec3& cameraPos, const glm::mat4& view) {
+    // Extract forward direction from view matrix (negated row 2)
+    glm::vec3 forward = -glm::vec3(view[0][2], view[1][2], view[2][2]);
+
+    // First frame - always consider moved
+    if (!previousCamera.valid) {
+        previousCamera.position = cameraPos;
+        previousCamera.forward = forward;
+        previousCamera.valid = true;
+        return true;
+    }
+
+    // Check position delta
+    float positionDelta = glm::length(cameraPos - previousCamera.position);
+    if (positionDelta > POSITION_THRESHOLD) {
+        previousCamera.position = cameraPos;
+        previousCamera.forward = forward;
+        return true;
+    }
+
+    // Check rotation delta (using dot product of forward vectors)
+    float forwardDot = glm::dot(forward, previousCamera.forward);
+    if (forwardDot < (1.0f - ROTATION_THRESHOLD)) {
+        previousCamera.position = cameraPos;
+        previousCamera.forward = forward;
+        return true;
+    }
+
+    // No significant change
+    return false;
+}
+
 void TerrainSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos,
                                     const glm::mat4& view, const glm::mat4& proj,
                                     const std::array<glm::vec4, 3>& snowCascadeParams,
                                     bool useVolumetricSnow,
                                     float snowMaxHeight) {
+    // Track camera movement for skip-frame optimization
+    if (cameraHasMoved(cameraPos, view)) {
+        staticFrameCount = 0;
+    } else {
+        staticFrameCount++;
+    }
+
     TerrainUniforms uniforms{};
     uniforms.viewMatrix = view;
     uniforms.projMatrix = proj;
@@ -1122,13 +1162,42 @@ void TerrainSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraP
     memcpy(uniformMappedPtrs[frameIndex], &uniforms, sizeof(TerrainUniforms));
 }
 
-void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) {
+void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuProfiler* profiler) {
+    // Skip-frame optimization: skip compute when camera is stationary and terrain has converged
+    bool shouldSkip = false;
+    if (!forceNextCompute && staticFrameCount > CONVERGENCE_FRAMES) {
+        if (framesSinceLastCompute < MAX_SKIP_FRAMES) {
+            shouldSkip = true;
+        }
+    }
+
+    if (shouldSkip) {
+        framesSinceLastCompute++;
+
+        // Still need the final barrier for rendering (CBT state unchanged but GPU needs it)
+        VkMemoryBarrier renderBarrier{};
+        renderBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        renderBarrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        renderBarrier.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
+
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                            VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
+                            0, 1, &renderBarrier, 0, nullptr, 0, nullptr);
+        return;
+    }
+
+    // Reset skip tracking
+    forceNextCompute = false;
+    framesSinceLastCompute = 0;
+
     VkMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
     barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
     barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
 
     // 1. Dispatcher - set up indirect args
+    if (profiler) profiler->beginZone(cmd, "Terrain:Dispatcher");
+
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, dispatcherPipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, dispatcherPipelineLayout,
                            0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
@@ -1141,12 +1210,16 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) {
 
     vkCmdDispatch(cmd, 1, 1, 1);
 
+    if (profiler) profiler->endZone(cmd, "Terrain:Dispatcher");
+
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                         0, 1, &barrier, 0, nullptr, 0, nullptr);
 
     // 2. Subdivision - LOD update (indirect dispatch)
     // Ping-pong between split and merge to avoid race conditions
     // Even frames: split only, Odd frames: merge only
+    if (profiler) profiler->beginZone(cmd, "Terrain:Subdivision");
+
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, subdivisionPipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, subdivisionPipelineLayout,
                            0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
@@ -1160,11 +1233,15 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) {
 
     subdivisionFrameCount++;
 
+    if (profiler) profiler->endZone(cmd, "Terrain:Subdivision");
+
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                         0, 1, &barrier, 0, nullptr, 0, nullptr);
 
     // 3. Sum reduction - rebuild the sum tree
     // Choose optimized or fallback path based on subgroup support
+    if (profiler) profiler->beginZone(cmd, "Terrain:SumReductionPrepass");
+
     TerrainSumReductionPushConstants sumPC{};
     sumPC.passID = config.maxDepth;
 
@@ -1207,10 +1284,14 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) {
         levelsFromPrepass = 5;
     }
 
+    if (profiler) profiler->endZone(cmd, "Terrain:SumReductionPrepass");
+
     // Phase 2: Standard sum reduction for remaining levels (one dispatch per level)
     // Start from level (maxDepth - levelsFromPrepass - 1) down to 0
     int startDepth = config.maxDepth - levelsFromPrepass - 1;
     if (startDepth >= 0) {
+        if (profiler) profiler->beginZone(cmd, "Terrain:SumReductionLevels");
+
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, sumReductionPipeline);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, sumReductionPipelineLayout,
                                0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
@@ -1226,13 +1307,19 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) {
             vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                                 0, 1, &barrier, 0, nullptr, 0, nullptr);
         }
+
+        if (profiler) profiler->endZone(cmd, "Terrain:SumReductionLevels");
     }
 
     // 4. Final dispatcher pass to update draw args
+    if (profiler) profiler->beginZone(cmd, "Terrain:FinalDispatch");
+
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, dispatcherPipeline);
     vkCmdPushConstants(cmd, dispatcherPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
                       sizeof(dispatcherPC), &dispatcherPC);
     vkCmdDispatch(cmd, 1, 1, 1);
+
+    if (profiler) profiler->endZone(cmd, "Terrain:FinalDispatch");
 
     // Final barrier before rendering
     VkMemoryBarrier renderBarrier{};
