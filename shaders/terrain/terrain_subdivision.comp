@@ -54,26 +54,6 @@ float sampleHeight(vec2 uv) {
     return sampleTerrainHeight(heightMap, uv, HEIGHT_SCALE);
 }
 
-// Compute heightmap gradient (direction of steepest ascent in UV space)
-vec2 computeGradient(vec2 uv) {
-    vec2 texelSize = 1.0 / vec2(textureSize(heightMap, 0));
-
-    float hL = texture(heightMap, uv + vec2(-texelSize.x, 0.0)).r;
-    float hR = texture(heightMap, uv + vec2(texelSize.x, 0.0)).r;
-    float hD = texture(heightMap, uv + vec2(0.0, -texelSize.y)).r;
-    float hU = texture(heightMap, uv + vec2(0.0, texelSize.y)).r;
-
-    // Gradient in UV space (pointing uphill)
-    return vec2(hR - hL, hU - hD) / (2.0 * texelSize);
-}
-
-// Compute slope magnitude (0 = flat, 1+ = steep)
-float computeSlopeMagnitude(vec2 gradient) {
-    // Scale gradient by terrain aspect ratio to get actual slope
-    float gradientMag = length(gradient) * HEIGHT_SCALE / TERRAIN_SIZE;
-    return gradientMag;
-}
-
 // Transform UV to world position
 vec3 uvToWorldPos(vec2 uv) {
     float height = sampleHeight(uv);
@@ -128,130 +108,14 @@ float computeScreenSpaceEdgeLength(vec3 p0, vec3 p1) {
     return length(s1 - s0);
 }
 
-// Gradient alignment weight - higher values = more subdivision on cliffs
-const float GRADIENT_ALIGNMENT_WEIGHT = 2.0;
-
-// Distance-based LOD parameters
-// Force high tessellation near the camera for player interaction
-const float NEAR_CAMERA_DISTANCE = 100.0;   // Within this distance, force maximum tessellation
-const float TARGET_EDGE_LENGTH = 1.0;       // Target world-space edge length within 100m (1 meter)
-
-// Height error tolerance parameters
-// Within CLOSE_DISTANCE: use strict world-space error tolerance (for physics/collision)
-// Beyond CLOSE_DISTANCE: use screen-space projected error (for visual quality)
-const float CLOSE_DISTANCE = 10.0;          // Distance within which world-space accuracy is critical
-const float BASE_ERROR_TOLERANCE = 0.1;     // Max allowed height error (in world units) near camera
-
 // Compute LOD for a triangle - returns longest edge length in pixels
-// Modified to penalize triangles stretched along the terrain gradient (perpendicular to contours)
-// Also includes camera distance priority and height error estimation
 float computeTriangleLOD(vec2 v0, vec2 v1, vec2 v2) {
     vec3 p0 = uvToWorldPos(v0);
     vec3 p1 = uvToWorldPos(v1);
     vec3 p2 = uvToWorldPos(v2);
 
-    // Find longest edge (in LEB, the longest edge is always between v1 and v2)
-    float e12 = computeScreenSpaceEdgeLength(p1, p2);
-
-    // Compute triangle center
-    vec2 centerUV = (v0 + v1 + v2) / 3.0;
-    vec3 centerWorld = (p0 + p1 + p2) / 3.0;
-
-    // === Distance-based LOD using world-space edge length ===
-    // Within 100m of camera, force maximum tessellation (1m edges)
-    // This guarantees fine tessellation for player interaction
-    float distToCamera = distance(cameraPosition.xyz, centerWorld);
-
-    if (distToCamera < NEAR_CAMERA_DISTANCE) {
-        // Compute actual world-space edge length
-        float worldEdgeLength = distance(p1, p2);
-
-        // Force split if edge exceeds 1m anywhere within 100m of camera
-        if (worldEdgeLength > TARGET_EDGE_LENGTH) {
-            // The more we exceed the target, the more aggressively we split
-            float excessRatio = worldEdgeLength / TARGET_EDGE_LENGTH;
-            e12 = max(e12, SPLIT_THRESHOLD * excessRatio * 4.0);
-        }
-    }
-
-    // === Height error estimation ===
-    // Check if the triangle's linear interpolation matches the actual heightmap
-    // This catches cases where terrain varies significantly within the triangle
-    float actualCenterHeight = sampleHeight(centerUV);
-    float interpolatedCenterHeight = (p0.y + p1.y + p2.y) / 3.0;
-    float heightError = abs(actualCenterHeight - interpolatedCenterHeight);
-
-    // Also sample edge midpoints for better error estimation
-    vec2 midUV01 = (v0 + v1) * 0.5;
-    vec2 midUV12 = (v1 + v2) * 0.5;
-    vec2 midUV20 = (v2 + v0) * 0.5;
-
-    float mid01Height = sampleHeight(midUV01);
-    float mid12Height = sampleHeight(midUV12);
-    float mid20Height = sampleHeight(midUV20);
-
-    float interp01 = (p0.y + p1.y) * 0.5;
-    float interp12 = (p1.y + p2.y) * 0.5;
-    float interp20 = (p2.y + p0.y) * 0.5;
-
-    heightError = max(heightError, abs(mid01Height - interp01));
-    heightError = max(heightError, abs(mid12Height - interp12));
-    heightError = max(heightError, abs(mid20Height - interp20));
-
-    // Height error handling depends on distance:
-    // - Near camera: use world-space error tolerance (for player interaction/physics)
-    // - Far from camera: use screen-space error (for visual quality)
-
-    if (distToCamera <= CLOSE_DISTANCE) {
-        // Near camera: strict world-space error tolerance
-        // Player needs accurate collision, so enforce tight error bounds
-        if (heightError > BASE_ERROR_TOLERANCE) {
-            float errorRatio = heightError / BASE_ERROR_TOLERANCE;
-            e12 = max(e12, SPLIT_THRESHOLD * errorRatio);
-        }
-    } else {
-        // Far from camera: screen-space error becomes more important
-        // Project height error to approximate screen pixels
-        // Height error at distance D subtends angle ≈ error/D radians
-        // Multiply by screen height to get pixel equivalent
-        float errorAngle = heightError / distToCamera;
-        float errorScreenPixels = errorAngle * screenSize.y * 0.5;
-
-        // If the projected error is significant on screen, force subdivision
-        // Use half the split threshold as our screen-space error target
-        float targetScreenError = SPLIT_THRESHOLD * 0.5;
-        if (errorScreenPixels > targetScreenError) {
-            e12 = max(e12, errorScreenPixels * 2.0);
-        }
-    }
-
-    // === Gradient-based refinement ===
-    vec2 gradient = computeGradient(centerUV);
-    float slopeMag = computeSlopeMagnitude(gradient);
-
-    // Only apply gradient penalty on steep slopes
-    if (slopeMag > 0.1) {
-        // Edge direction in UV space (longest edge v1->v2)
-        vec2 edgeDir = v2 - v1;
-        float edgeLen = length(edgeDir);
-
-        if (edgeLen > 0.0001) {
-            edgeDir /= edgeLen;
-
-            // How aligned is this edge with the gradient direction?
-            // 1.0 = edge runs along gradient (bad - stretched on cliff)
-            // 0.0 = edge runs along contour (good - aligned with cliff face)
-            vec2 gradientDir = normalize(gradient);
-            float gradientAlignment = abs(dot(edgeDir, gradientDir));
-
-            // Penalize edges that run along the gradient direction
-            // This encourages subdivision to create edges that run along contours
-            float stretchFactor = 1.0 + gradientAlignment * slopeMag * GRADIENT_ALIGNMENT_WEIGHT;
-            e12 *= stretchFactor;
-        }
-    }
-
-    return e12;
+    // In LEB, the longest edge is always between v1 and v2
+    return computeScreenSpaceEdgeLength(p1, p2);
 }
 
 void main() {
@@ -296,30 +160,41 @@ void main() {
     float mergeCullMargin = aabbDiagonal * 0.5;
     bool culledForMerge = frustumCullAABB(minBound, maxBound, mergeCullMargin);
 
-    // Compute screen-space edge length (needed for both modes)
-    float edgeLengthPixels = computeTriangleLOD(v0, v1, v2);
-
     // Ping-pong between split and merge frames to avoid race conditions
     // This ensures that multiple threads don't simultaneously try to split and merge
     // related nodes, which could create inconsistent tree states
     if (updateMode == 0u) {
-        // Split-only frame
+        // Split-only frame: check if THIS triangle needs more detail
+        float edgeLengthPixels = computeTriangleLOD(v0, v1, v2);
         if (!culledForSplit && edgeLengthPixels > SPLIT_THRESHOLD && depth < MAX_DEPTH) {
             leb_SplitNode_Square(node);
         }
     } else {
         // Merge-only frame
-        // Use culledForMerge (with margin) to prevent flickering at frustum boundaries
-        if (culledForMerge) {
-            // If well outside frustum and not at minimum depth, merge
-            if (depth > MIN_DEPTH) {
-                leb_DiamondParent diamond = leb_DecodeDiamondParent_Square(node);
-                leb_MergeNode_Square(node, diamond);
-            }
-        } else if (edgeLengthPixels < MERGE_THRESHOLD && depth > MIN_DEPTH) {
-            // Merge: combine with sibling
+        if (depth > MIN_DEPTH) {
             leb_DiamondParent diamond = leb_DecodeDiamondParent_Square(node);
-            leb_MergeNode_Square(node, diamond);
+
+            // Use culledForMerge (with margin) to prevent flickering at frustum boundaries
+            if (culledForMerge) {
+                // If well outside frustum, merge
+                leb_MergeNode_Square(node, diamond);
+            } else {
+                // Key insight from reference implementation:
+                // Check if the PARENT triangle (after merge) would have acceptable LOD,
+                // not whether the current children have low LOD.
+                // This prevents oscillation: we only merge if the result won't immediately split.
+
+                // Decode parent triangle vertices
+                vec2 pv0, pv1, pv2;
+                leb_DecodeTriangleVertices(diamond.base, pv0, pv1, pv2);
+                float parentLOD = computeTriangleLOD(pv0, pv1, pv2);
+
+                // Only merge if the parent's LOD is below split threshold
+                // This ensures the merged triangle won't immediately split on the next frame
+                if (parentLOD < SPLIT_THRESHOLD) {
+                    leb_MergeNode_Square(node, diamond);
+                }
+            }
         }
     }
 }
