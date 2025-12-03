@@ -14,47 +14,11 @@
 #include "../snow_common.glsl"
 #include "../cloud_shadow_common.glsl"
 
-// Use the same UBO as main scene for consistent lighting
-layout(binding = 5) uniform UniformBufferObject {
-    mat4 model;
-    mat4 view;
-    mat4 proj;
-    mat4 cascadeViewProj[NUM_CASCADES];
-    vec4 cascadeSplits;
-    vec4 sunDirection;
-    vec4 moonDirection;
-    vec4 sunColor;
-    vec4 moonColor;
-    vec4 ambientColor;
-    vec4 cameraPosition;
-    vec4 pointLightPosition;
-    vec4 pointLightColor;
-    vec4 windDirectionAndSpeed;  // xy = direction, z = speed, w = time
-    float timeOfDay;
-    float shadowMapSize;
-    float debugCascades;
-    float julianDay;             // Julian day for sidereal rotation
-    float cloudStyle;
-    float snowAmount;            // Global snow intensity (0-1)
-    float snowRoughness;         // Snow surface roughness
-    float snowTexScale;          // World-space snow texture scale
-    vec4 snowColor;              // rgb = snow color, a = unused
-    vec4 snowMaskParams;         // xy = mask origin, z = mask size, w = unused
-    // Volumetric snow cascade parameters
-    vec4 snowCascade0Params;     // xy = origin, z = size, w = texel size
-    vec4 snowCascade1Params;     // xy = origin, z = size, w = texel size
-    vec4 snowCascade2Params;     // xy = origin, z = size, w = texel size
-    float useVolumetricSnow;     // 1.0 = use cascades, 0.0 = use legacy mask
-    float snowMaxHeight;         // Maximum snow height in meters
-    float debugSnowDepth;        // 1.0 = show depth visualization
-    float snowPadding2;
-    // Cloud shadow parameters
-    mat4 cloudShadowMatrix;      // World XZ to cloud shadow UV transform
-    float cloudShadowIntensity;  // How dark cloud shadows are (0-1)
-    float cloudShadowEnabled;    // 1.0 = enabled, 0.0 = disabled
-    float cloudShadowPadding1;
-    float cloudShadowPadding2;
-} ubo;
+// Terrain uses binding 5 for the main UBO (different descriptor set layout)
+#define UBO_BINDING 5
+#include "../ubo_common.glsl"
+#include "../ubo_snow.glsl"
+#include "../ubo_cloud_shadow.glsl"
 
 // Terrain-specific uniforms
 layout(std140, binding = 4) uniform TerrainUniforms {
@@ -185,16 +149,16 @@ void main() {
     float snowCoverage = 0.0;
     float snowHeight = 0.0;
 
-    if (ubo.useVolumetricSnow > 0.5) {
+    if (snow.useVolumetricSnow > 0.5) {
         // Volumetric snow: sample from cascaded heightfield
         snowHeight = sampleVolumetricSnowHeight(
             snowCascade0, snowCascade1, snowCascade2,
             fragWorldPos, ubo.cameraPosition.xyz,
-            ubo.snowCascade0Params, ubo.snowCascade1Params, ubo.snowCascade2Params
+            snow.snowCascade0Params, snow.snowCascade1Params, snow.snowCascade2Params
         );
 
         // Convert height to coverage
-        snowCoverage = snowHeightToCoverage(snowHeight, ubo.snowAmount, normal);
+        snowCoverage = snowHeightToCoverage(snowHeight, snow.snowAmount, normal);
 
         // Calculate snow normal from heightfield for better surface detail
         if (snowCoverage > 0.1) {
@@ -206,14 +170,14 @@ void main() {
             float texelSize = 1.0 / 256.0;  // CASCADE_SIZE
 
             if (cascadeIdx == 0) {
-                vec2 snowUV = worldToSnowCascadeUV(fragWorldPos, ubo.snowCascade0Params);
-                snowNormal = calculateSnowNormalFromHeight(snowCascade0, snowUV, texelSize, ubo.snowMaxHeight);
+                vec2 snowUV = worldToSnowCascadeUV(fragWorldPos, snow.snowCascade0Params);
+                snowNormal = calculateSnowNormalFromHeight(snowCascade0, snowUV, texelSize, snow.snowMaxHeight);
             } else if (cascadeIdx == 1) {
-                vec2 snowUV = worldToSnowCascadeUV(fragWorldPos, ubo.snowCascade1Params);
-                snowNormal = calculateSnowNormalFromHeight(snowCascade1, snowUV, texelSize, ubo.snowMaxHeight);
+                vec2 snowUV = worldToSnowCascadeUV(fragWorldPos, snow.snowCascade1Params);
+                snowNormal = calculateSnowNormalFromHeight(snowCascade1, snowUV, texelSize, snow.snowMaxHeight);
             } else {
-                vec2 snowUV = worldToSnowCascadeUV(fragWorldPos, ubo.snowCascade2Params);
-                snowNormal = calculateSnowNormalFromHeight(snowCascade2, snowUV, texelSize, ubo.snowMaxHeight);
+                vec2 snowUV = worldToSnowCascadeUV(fragWorldPos, snow.snowCascade2Params);
+                snowNormal = calculateSnowNormalFromHeight(snowCascade2, snowUV, texelSize, snow.snowMaxHeight);
             }
 
             // Blend normals based on coverage
@@ -222,16 +186,16 @@ void main() {
     } else {
         // Legacy: sample snow mask at world position
         float snowMaskCoverage = sampleSnowMask(snowMaskTexture, fragWorldPos,
-                                                 ubo.snowMaskParams.xy, ubo.snowMaskParams.z);
-        snowCoverage = calculateSnowCoverage(ubo.snowAmount, snowMaskCoverage, normal);
+                                                 snow.snowMaskParams.xy, snow.snowMaskParams.z);
+        snowCoverage = calculateSnowCoverage(snow.snowAmount, snowMaskCoverage, normal);
     }
 
     // Apply snow layer to albedo and roughness
     if (snowCoverage > 0.01) {
         // Blend albedo with snow color
-        albedo = blendSnowAlbedo(albedo, ubo.snowColor.rgb, snowCoverage);
+        albedo = blendSnowAlbedo(albedo, snow.snowColor.rgb, snowCoverage);
         // Snow is rougher than most terrain
-        roughness = mix(roughness, ubo.snowRoughness, snowCoverage);
+        roughness = mix(roughness, snow.snowRoughness, snowCoverage);
     }
 
     // View direction
@@ -265,13 +229,13 @@ void main() {
     float terrainShadow = getShadowFactor(fragWorldPos);
 
     // Cloud shadows - sample from cloud shadow map
-    float cloudShadow = 1.0;
-    if (ubo.cloudShadowEnabled > 0.5) {
-        cloudShadow = sampleCloudShadowSoft(cloudShadowMap, fragWorldPos, ubo.cloudShadowMatrix);
+    float cloudShadowFactor = 1.0;
+    if (cloudShadow.cloudShadowEnabled > 0.5) {
+        cloudShadowFactor = sampleCloudShadowSoft(cloudShadowMap, fragWorldPos, cloudShadow.cloudShadowMatrix);
     }
 
     // Combine terrain and cloud shadows
-    float shadow = combineShadows(terrainShadow, cloudShadow);
+    float shadow = combineShadows(terrainShadow, cloudShadowFactor);
 
     // === MOON LIGHTING ===
     vec3 moonL = normalize(ubo.moonDirection.xyz);
@@ -314,9 +278,9 @@ void main() {
     vec3 atmosphericColor = applyAerialPerspective(color, ubo.cameraPosition.xyz, normalize(cameraToFrag), viewDistance, sunDir, sunColor);
 
     // Debug snow depth visualization
-    if (ubo.debugSnowDepth > 0.5 && ubo.useVolumetricSnow > 0.5) {
+    if (snow.debugSnowDepth > 0.5 && snow.useVolumetricSnow > 0.5) {
         // Color code snow depth: blue (0m) -> cyan -> green -> yellow -> red (max)
-        float normalizedDepth = clamp(snowHeight / ubo.snowMaxHeight, 0.0, 1.0);
+        float normalizedDepth = clamp(snowHeight / snow.snowMaxHeight, 0.0, 1.0);
 
         // Heat map colors
         vec3 depthColor;

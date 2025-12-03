@@ -32,6 +32,8 @@
 #include "ShadowSystem.h"
 #include "VulkanContext.h"
 #include "UBOs.h"
+#include "SnowUBO.h"
+#include "CloudShadowUBO.h"
 #include "RockSystem.h"
 #include "CloudShadowSystem.h"
 #include "SkinnedMesh.h"
@@ -223,6 +225,8 @@ private:
     };
     LightingParams calculateLightingParams(float timeOfDay) const;
     UniformBufferObject buildUniformBufferData(const Camera& camera, const LightingParams& lighting, float timeOfDay) const;
+    SnowUBO buildSnowUBOData() const;
+    CloudShadowUBO buildCloudShadowUBOData() const;
     glm::vec2 calculateSunScreenPos(const Camera& camera, const glm::vec3& sunDir) const;
 
     // Build per-frame shared state from camera and timing
@@ -288,6 +292,16 @@ private:
     std::vector<VkBuffer> uniformBuffers;
     std::vector<VmaAllocation> uniformBuffersAllocations;
     std::vector<void*> uniformBuffersMapped;
+
+    // Snow UBO buffers (binding 14)
+    std::vector<VkBuffer> snowBuffers;
+    std::vector<VmaAllocation> snowBuffersAllocations;
+    std::vector<void*> snowBuffersMapped;
+
+    // Cloud shadow UBO buffers (binding 15)
+    std::vector<VkBuffer> cloudShadowBuffers;
+    std::vector<VmaAllocation> cloudShadowBuffersAllocations;
+    std::vector<void*> cloudShadowBuffersMapped;
 
     // Light buffer SSBO (per frame)
     std::vector<VkBuffer> lightBuffers;

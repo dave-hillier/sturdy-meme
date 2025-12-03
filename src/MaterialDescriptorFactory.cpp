@@ -29,6 +29,16 @@ void MaterialDescriptorFactory::writeCommonBindings(
     if (common.cloudShadowView != VK_NULL_HANDLE) {
         writer.writeImage(9, common.cloudShadowView, common.cloudShadowSampler);
     }
+
+    // Binding 10: Snow UBO (optional, may be null during initial creation)
+    if (common.snowUboBuffer != VK_NULL_HANDLE) {
+        writer.writeBuffer(10, common.snowUboBuffer, 0, common.snowUboBufferSize);
+    }
+
+    // Binding 11: Cloud shadow UBO (optional, may be null during initial creation)
+    if (common.cloudShadowUboBuffer != VK_NULL_HANDLE) {
+        writer.writeBuffer(11, common.cloudShadowUboBuffer, 0, common.cloudShadowUboBufferSize);
+    }
 }
 
 void MaterialDescriptorFactory::writeDescriptorSet(
