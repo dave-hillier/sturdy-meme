@@ -91,6 +91,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     shadowInfo.allocator = allocator;
     shadowInfo.descriptorPool = descriptorPool;
     shadowInfo.mainDescriptorSetLayout = descriptorSetLayout;
+    shadowInfo.skinnedDescriptorSetLayout = skinnedDescriptorSetLayout;  // For skinned shadow pipeline
     shadowInfo.shaderPath = resourcePath + "/shaders";
     shadowInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
 

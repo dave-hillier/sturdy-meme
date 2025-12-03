@@ -31,6 +31,7 @@ public:
         VmaAllocator allocator;
         VkDescriptorPool descriptorPool;
         VkDescriptorSetLayout mainDescriptorSetLayout;  // For pipeline compatibility
+        VkDescriptorSetLayout skinnedDescriptorSetLayout = VK_NULL_HANDLE;  // For skinned shadow pipeline (optional)
         std::string shaderPath;
         uint32_t framesInFlight;
     };
@@ -108,6 +109,7 @@ private:
     VmaAllocator allocator = VK_NULL_HANDLE;
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
     VkDescriptorSetLayout mainDescriptorSetLayout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout skinnedDescriptorSetLayout = VK_NULL_HANDLE;
     std::string shaderPath;
     uint32_t framesInFlight = 0;
 
