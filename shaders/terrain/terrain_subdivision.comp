@@ -133,9 +133,8 @@ const float GRADIENT_ALIGNMENT_WEIGHT = 2.0;
 
 // Distance-based LOD parameters
 // Force high tessellation near the camera for player interaction
-const float NEAR_CAMERA_DISTANCE = 100.0;   // Within this distance, apply tessellation boost
-const float TARGET_EDGE_AT_CAMERA = 1.0;    // Target world-space edge length at distance 0 (1 meter)
-const float TARGET_EDGE_GROWTH = 0.5;       // Edge length grows by this much per unit of distance
+const float NEAR_CAMERA_DISTANCE = 100.0;   // Within this distance, force maximum tessellation
+const float TARGET_EDGE_LENGTH = 1.0;       // Target world-space edge length within 100m (1 meter)
 
 // Height error tolerance parameters
 // Within CLOSE_DISTANCE: use strict world-space error tolerance (for physics/collision)
@@ -159,23 +158,19 @@ float computeTriangleLOD(vec2 v0, vec2 v1, vec2 v2) {
     vec3 centerWorld = (p0 + p1 + p2) / 3.0;
 
     // === Distance-based LOD using world-space edge length ===
-    // Near the camera, enforce world-space edge length limits directly
-    // This guarantees fine tessellation regardless of screen-space calculations
+    // Within 100m of camera, force maximum tessellation (1m edges)
+    // This guarantees fine tessellation for player interaction
     float distToCamera = distance(cameraPosition.xyz, centerWorld);
 
     if (distToCamera < NEAR_CAMERA_DISTANCE) {
         // Compute actual world-space edge length
         float worldEdgeLength = distance(p1, p2);
 
-        // Target edge length increases with distance from camera
-        // At distance 0: target = 1m, at distance 100: target = 51m
-        float targetEdgeLength = TARGET_EDGE_AT_CAMERA + distToCamera * TARGET_EDGE_GROWTH;
-
-        // If world edge exceeds target, force split by boosting LOD metric
-        if (worldEdgeLength > targetEdgeLength) {
-            float excessRatio = worldEdgeLength / targetEdgeLength;
-            // Ensure we exceed split threshold proportionally to how much we exceed target
-            e12 = max(e12, SPLIT_THRESHOLD * excessRatio * 2.0);
+        // Force split if edge exceeds 1m anywhere within 100m of camera
+        if (worldEdgeLength > TARGET_EDGE_LENGTH) {
+            // The more we exceed the target, the more aggressively we split
+            float excessRatio = worldEdgeLength / TARGET_EDGE_LENGTH;
+            e12 = max(e12, SPLIT_THRESHOLD * excessRatio * 4.0);
         }
     }
 
