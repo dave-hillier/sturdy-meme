@@ -42,11 +42,9 @@ bool InputSystem::processEvent(const SDL_Event& event) {
 
         case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
             if (event.gbutton.button == SDL_GAMEPAD_BUTTON_LEFT_STICK) {
-                // Left stick click toggles sprint (in third person mode)
-                if (thirdPersonMode) {
-                    gamepadSprintToggle = !gamepadSprintToggle;
-                    SDL_Log("Sprint: %s", gamepadSprintToggle ? "ON" : "OFF");
-                }
+                // Left stick click toggles sprint (both modes)
+                gamepadSprintToggle = !gamepadSprintToggle;
+                SDL_Log("Sprint: %s", gamepadSprintToggle ? "ON" : "OFF");
                 return true;
             }
             if (event.gbutton.button == SDL_GAMEPAD_BUTTON_RIGHT_STICK) {
@@ -125,18 +123,22 @@ void InputSystem::processKeyboardInput(float deltaTime, float cameraYaw) {
 }
 
 void InputSystem::processFreeCameraKeyboard(float deltaTime, const bool* keyState) {
+    // Left Shift for sprint (10x speed)
+    sprinting = keyState[SDL_SCANCODE_LSHIFT];
+    float effectiveSpeed = sprinting ? moveSpeed * 10.0f : moveSpeed;
+
     // WASD for movement (standard FPS controls)
     if (keyState[SDL_SCANCODE_W]) {
-        freeCameraForward += moveSpeed * deltaTime;
+        freeCameraForward += effectiveSpeed * deltaTime;
     }
     if (keyState[SDL_SCANCODE_S]) {
-        freeCameraForward -= moveSpeed * deltaTime;
+        freeCameraForward -= effectiveSpeed * deltaTime;
     }
     if (keyState[SDL_SCANCODE_A]) {
-        freeCameraRight -= moveSpeed * deltaTime;
+        freeCameraRight -= effectiveSpeed * deltaTime;
     }
     if (keyState[SDL_SCANCODE_D]) {
-        freeCameraRight += moveSpeed * deltaTime;
+        freeCameraRight += effectiveSpeed * deltaTime;
     }
 
     // Arrow keys for camera rotation
@@ -155,10 +157,10 @@ void InputSystem::processFreeCameraKeyboard(float deltaTime, const bool* keyStat
 
     // Space for up, Left Ctrl/Q for down (fly camera)
     if (keyState[SDL_SCANCODE_SPACE]) {
-        freeCameraUp += moveSpeed * deltaTime;
+        freeCameraUp += effectiveSpeed * deltaTime;
     }
     if (keyState[SDL_SCANCODE_LCTRL] || keyState[SDL_SCANCODE_Q]) {
-        freeCameraUp -= moveSpeed * deltaTime;
+        freeCameraUp -= effectiveSpeed * deltaTime;
     }
 }
 
@@ -255,6 +257,10 @@ void InputSystem::processGamepadInput(float deltaTime, float cameraYaw) {
 }
 
 void InputSystem::processFreeCameraGamepad(float deltaTime) {
+    // Apply sprint from toggle (left stick click)
+    sprinting = gamepadSprintToggle;
+    float effectiveSpeed = sprinting ? moveSpeed * 10.0f : moveSpeed;
+
     // Left stick for movement
     float leftX = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX) / 32767.0f;
     float leftY = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTY) / 32767.0f;
@@ -264,8 +270,8 @@ void InputSystem::processFreeCameraGamepad(float deltaTime) {
     if (std::abs(leftY) < stickDeadzone) leftY = 0.0f;
 
     // Left stick controls movement (Y is inverted - up is negative)
-    freeCameraForward += -leftY * moveSpeed * deltaTime;
-    freeCameraRight += leftX * moveSpeed * deltaTime;
+    freeCameraForward += -leftY * effectiveSpeed * deltaTime;
+    freeCameraRight += leftX * effectiveSpeed * deltaTime;
 
     // Right stick for camera rotation
     float rightX = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTX) / 32767.0f;
@@ -281,10 +287,10 @@ void InputSystem::processFreeCameraGamepad(float deltaTime) {
 
     // Bumpers for vertical movement
     if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER)) {
-        freeCameraUp += moveSpeed * deltaTime;
+        freeCameraUp += effectiveSpeed * deltaTime;
     }
     if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)) {
-        freeCameraUp -= moveSpeed * deltaTime;
+        freeCameraUp -= effectiveSpeed * deltaTime;
     }
 }
 
