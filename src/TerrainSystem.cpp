@@ -1935,3 +1935,37 @@ void TerrainSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex,
 float TerrainSystem::getHeightAt(float x, float z) const {
     return heightMap.getHeightAt(x, z);
 }
+
+bool TerrainSystem::setMeshletSubdivisionLevel(int level) {
+    if (level < 0 || level > 6) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Meshlet subdivision level %d out of range [0-6], clamping", level);
+        level = std::clamp(level, 0, 6);
+    }
+
+    if (level == config.meshletSubdivisionLevel) {
+        return true;  // No change needed
+    }
+
+    // Destroy old meshlet and create new one
+    vkDeviceWaitIdle(device);
+    meshlet.destroy(allocator);
+
+    TerrainMeshlet::InitInfo meshletInfo{};
+    meshletInfo.allocator = allocator;
+    meshletInfo.subdivisionLevel = static_cast<uint32_t>(level);
+
+    if (!meshlet.init(meshletInfo)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "Failed to reinitialize meshlet at level %d", level);
+        // Try to restore previous level
+        meshletInfo.subdivisionLevel = static_cast<uint32_t>(config.meshletSubdivisionLevel);
+        meshlet.init(meshletInfo);
+        return false;
+    }
+
+    config.meshletSubdivisionLevel = level;
+    SDL_Log("Meshlet subdivision level changed to %d (%u triangles per leaf)",
+            level, meshlet.getTriangleCount());
+    return true;
+}

@@ -800,6 +800,36 @@ void GuiSystem::renderTerrainSection(Renderer& renderer) {
     ImGui::Separator();
     ImGui::Spacing();
 
+    // Meshlet rendering
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.8f, 0.9f, 1.0f));
+    ImGui::Text("MESHLET RENDERING");
+    ImGui::PopStyleColor();
+
+    bool meshletsEnabled = terrainMut.isMeshletsEnabled();
+    if (ImGui::Checkbox("Enable Meshlets", &meshletsEnabled)) {
+        terrainMut.setMeshletsEnabled(meshletsEnabled);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Use pre-tessellated meshlets per CBT leaf for higher resolution");
+    }
+
+    if (meshletsEnabled) {
+        int meshletLevel = terrainMut.getMeshletSubdivisionLevel();
+        if (ImGui::SliderInt("Meshlet Level", &meshletLevel, 0, 6)) {
+            terrainMut.setMeshletSubdivisionLevel(meshletLevel);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Subdivision level per meshlet (0=1, 1=4, 2=16, 3=64, 4=256 triangles)");
+        }
+
+        uint32_t meshletTris = terrainMut.getMeshletTriangleCount();
+        ImGui::Text("Triangles per leaf: %u", meshletTris);
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
     // Optimization toggles
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.6f, 0.8f, 1.0f));
     ImGui::Text("OPTIMIZATIONS");
