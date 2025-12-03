@@ -323,9 +323,16 @@ void GuiSystem::renderDashboard(Renderer& renderer, float fps) {
     ImGui::Columns(2, nullptr, false);
     ImGui::SetColumnWidth(0, 160);
 
-    ImGui::Text("Terrain Nodes");
+    uint32_t triCount = renderer.getTerrainNodeCount();
+    ImGui::Text("Terrain Tris");
     ImGui::SameLine(100);
-    ImGui::Text("%u", renderer.getTerrainNodeCount());
+    if (triCount >= 1000000) {
+        ImGui::Text("%.2fM", triCount / 1000000.0f);
+    } else if (triCount >= 1000) {
+        ImGui::Text("%.0fK", triCount / 1000.0f);
+    } else {
+        ImGui::Text("%u", triCount);
+    }
 
     ImGui::NextColumn();
 
@@ -661,8 +668,28 @@ void GuiSystem::renderTerrainSection(Renderer& renderer) {
 
     ImGui::Text("Size: %.0f x %.0f meters", config.size, config.size);
     ImGui::Text("Height Scale: %.1f", config.heightScale);
-    ImGui::Text("Active Nodes: %u", renderer.getTerrainNodeCount());
-    ImGui::Text("Max Depth: %d", config.maxDepth);
+
+    // Triangle count with color coding
+    uint32_t triangleCount = renderer.getTerrainNodeCount();
+    ImVec4 triColor = triangleCount < 100000 ? ImVec4(0.4f, 0.9f, 0.4f, 1.0f) :
+                      triangleCount < 500000 ? ImVec4(0.9f, 0.9f, 0.4f, 1.0f) :
+                                               ImVec4(0.9f, 0.4f, 0.4f, 1.0f);
+    ImGui::Text("Triangles:");
+    ImGui::SameLine();
+    ImGui::PushStyleColor(ImGuiCol_Text, triColor);
+    if (triangleCount >= 1000000) {
+        ImGui::Text("%.2fM", triangleCount / 1000000.0f);
+    } else if (triangleCount >= 1000) {
+        ImGui::Text("%.1fK", triangleCount / 1000.0f);
+    } else {
+        ImGui::Text("%u", triangleCount);
+    }
+    ImGui::PopStyleColor();
+
+    // CBT depth info
+    ImGui::Text("Max Depth: %d (min edge: %.1fm)", config.maxDepth,
+                config.size / (1 << (config.maxDepth / 2)));
+    ImGui::Text("Min Depth: %d", config.minDepth);
 
     ImGui::Spacing();
     ImGui::Separator();

@@ -169,22 +169,35 @@ bool TerrainSystem::createIndirectBuffers() {
 
         VmaAllocationCreateInfo allocInfo{};
         allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+                         VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
+                         VMA_ALLOCATION_CREATE_MAPPED_BIT;
 
+        VmaAllocationInfo allocationInfo{};
         if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &indirectDrawBuffer,
-                           &indirectDrawAllocation, nullptr) != VK_SUCCESS) {
+                           &indirectDrawAllocation, &allocationInfo) != VK_SUCCESS) {
             return false;
         }
 
+        // Store persistently mapped pointer for readback
+        indirectDrawMappedPtr = allocationInfo.pMappedData;
+
         // Initialize with default values (2 triangles = 6 vertices)
         uint32_t drawArgs[4] = {6, 1, 0, 0};
-        void* mapped;
-        vmaMapMemory(allocator, indirectDrawAllocation, &mapped);
-        memcpy(mapped, drawArgs, sizeof(drawArgs));
-        vmaUnmapMemory(allocator, indirectDrawAllocation);
+        memcpy(indirectDrawMappedPtr, drawArgs, sizeof(drawArgs));
     }
 
     return true;
+}
+
+uint32_t TerrainSystem::getTriangleCount() const {
+    if (!indirectDrawMappedPtr) {
+        return 0;
+    }
+    // Indirect draw buffer layout: {vertexCount, instanceCount, firstVertex, firstInstance}
+    // Triangle count = vertexCount / 3
+    const uint32_t* drawArgs = static_cast<const uint32_t*>(indirectDrawMappedPtr);
+    return drawArgs[0] / 3;
 }
 
 bool TerrainSystem::createComputeDescriptorSetLayout() {
