@@ -56,7 +56,7 @@ public:
     void recordDraw(VkCommandBuffer cmd, uint32_t frameIndex);
 
     // Configuration
-    void setWaterLevel(float level) { waterUniforms.waterLevel = level; }
+    void setWaterLevel(float level) { baseWaterLevel = level; waterUniforms.waterLevel = level; }
     void setWaterColor(const glm::vec4& color) { waterUniforms.waterColor = color; }
     void setWaveAmplitude(float amplitude) { waterUniforms.waveParams.x = amplitude; }
     void setWaveLength(float wavelength) { waterUniforms.waveParams.y = wavelength; }
@@ -64,7 +64,12 @@ public:
     void setWaveSpeed(float speed) { waterUniforms.waveParams.w = speed; }
     void setWaterExtent(const glm::vec2& position, const glm::vec2& size);
 
+    // Tidal configuration
+    void setTidalRange(float range) { tidalRange = range; }
+    void updateTide(float tideHeight);  // tideHeight is -1 to +1, scaled by tidalRange
+
     float getWaterLevel() const { return waterUniforms.waterLevel; }
+    float getBaseWaterLevel() const { return baseWaterLevel; }
 
 private:
     bool createDescriptorSetLayout();
@@ -100,4 +105,8 @@ private:
     std::vector<VkBuffer> waterUniformBuffers;
     std::vector<VmaAllocation> waterUniformAllocations;
     std::vector<void*> waterUniformMapped;
+
+    // Tidal parameters
+    float baseWaterLevel = 0.0f;  // Mean sea level
+    float tidalRange = 2.0f;      // Max tide height variation in meters
 };

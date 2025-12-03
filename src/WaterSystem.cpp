@@ -357,3 +357,9 @@ void WaterSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
     vkCmdBindIndexBuffer(cmd, waterMesh.getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
     vkCmdDrawIndexed(cmd, waterMesh.getIndexCount(), 1, 0, 0, 0);
 }
+
+void WaterSystem::updateTide(float tideHeight) {
+    // tideHeight is normalized -1 to +1 from CelestialCalculator::calculateTide()
+    // Scale by tidalRange and add to base water level
+    waterUniforms.waterLevel = baseWaterLevel + (tideHeight * tidalRange);
+}

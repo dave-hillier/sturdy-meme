@@ -535,13 +535,14 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     if (!waterSystem.init(waterInfo)) return false;
 
     // Configure water surface - sea level at 0
-    waterSystem.setWaterLevel(0.0f);  // Sea level
+    waterSystem.setWaterLevel(0.0f);  // Mean sea level
     waterSystem.setWaterExtent(glm::vec2(0.0f, 0.0f), glm::vec2(16384.0f, 16384.0f));
     waterSystem.setWaterColor(glm::vec4(0.02f, 0.08f, 0.15f, 0.95f));  // Deep ocean blue
     waterSystem.setWaveAmplitude(1.5f);   // Ocean-scale waves
     waterSystem.setWaveLength(30.0f);     // Longer wavelengths for open sea
     waterSystem.setWaveSteepness(0.4f);
     waterSystem.setWaveSpeed(0.8f);
+    waterSystem.setTidalRange(3.0f);      // 3m tidal range (spring tide: ±3m from mean)
 
     // Create water descriptor sets
     if (!waterSystem.createDescriptorSets(uniformBuffers, sizeof(UniformBufferObject), shadowSystem)) return false;
@@ -1292,6 +1293,11 @@ void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera& camera) 
 
     // Pure calculations
     LightingParams lighting = calculateLightingParams(currentTimeOfDay);
+
+    // Calculate and apply tide based on celestial positions
+    DateTime dateTime = DateTime::fromTimeOfDay(currentTimeOfDay, currentYear, currentMonth, currentDay);
+    TideInfo tide = celestialCalculator.calculateTide(dateTime);
+    waterSystem.updateTide(tide.height);
 
     // Update cascade matrices via shadow system
     shadowSystem.updateCascadeMatrices(lighting.sunDir, camera);
