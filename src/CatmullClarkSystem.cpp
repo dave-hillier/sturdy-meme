@@ -2,9 +2,9 @@
 #include "OBJLoader.h"
 #include "ShaderLoader.h"
 #include "BufferUtils.h"
+#include <SDL.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
-#include <iostream>
 #include <array>
 #include <cstring>
 
@@ -27,14 +27,14 @@ bool CatmullClarkSystem::init(const InitInfo& info, const CatmullClarkConfig& cf
     if (!config.objPath.empty()) {
         mesh = OBJLoader::loadQuadMesh(config.objPath);
         if (mesh.vertices.empty()) {
-            std::cerr << "Failed to load OBJ, falling back to cube" << std::endl;
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load OBJ, falling back to cube");
             mesh = CatmullClarkMesh::createCube();
         }
     } else {
         mesh = CatmullClarkMesh::createCube();
     }
     if (!mesh.uploadToGPU(allocator)) {
-        std::cerr << "Failed to upload Catmull-Clark mesh to GPU" << std::endl;
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to upload Catmull-Clark mesh to GPU");
         return false;
     }
 
@@ -45,7 +45,7 @@ bool CatmullClarkSystem::init(const InitInfo& info, const CatmullClarkConfig& cf
     cbtInfo.faceCount = static_cast<int>(mesh.faces.size());
 
     if (!cbt.init(cbtInfo)) {
-        std::cerr << "Failed to initialize Catmull-Clark CBT" << std::endl;
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize Catmull-Clark CBT");
         return false;
     }
 
@@ -59,7 +59,7 @@ bool CatmullClarkSystem::init(const InitInfo& info, const CatmullClarkConfig& cf
     if (!createRenderPipeline()) return false;
     if (!createWireframePipeline()) return false;
 
-    std::cout << "Catmull-Clark subdivision system initialized" << std::endl;
+    SDL_Log("Catmull-Clark subdivision system initialized");
     return true;
 }
 
@@ -122,7 +122,7 @@ bool CatmullClarkSystem::createUniformBuffers() {
         VmaAllocationInfo allocationInfo{};
         if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &uniformBuffers[i],
                            &uniformAllocations[i], &allocationInfo) != VK_SUCCESS) {
-            std::cerr << "Failed to create Catmull-Clark uniform buffer " << i << std::endl;
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create Catmull-Clark uniform buffer %u", i);
             return false;
         }
         uniformMappedPtrs[i] = allocationInfo.pMappedData;
@@ -145,7 +145,7 @@ bool CatmullClarkSystem::createIndirectBuffers() {
 
         if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &indirectDispatchBuffer,
                             &indirectDispatchAllocation, nullptr) != VK_SUCCESS) {
-            std::cerr << "Failed to create indirect dispatch buffer" << std::endl;
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create indirect dispatch buffer");
             return false;
         }
     }
@@ -163,7 +163,7 @@ bool CatmullClarkSystem::createIndirectBuffers() {
 
         if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &indirectDrawBuffer,
                             &indirectDrawAllocation, nullptr) != VK_SUCCESS) {
-            std::cerr << "Failed to create indirect draw buffer" << std::endl;
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create indirect draw buffer");
             return false;
         }
     }
@@ -210,7 +210,7 @@ bool CatmullClarkSystem::createComputeDescriptorSetLayout() {
     layoutInfo.pBindings = bindings.data();
 
     if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &computeDescriptorSetLayout) != VK_SUCCESS) {
-        std::cerr << "Failed to create compute descriptor set layout" << std::endl;
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create compute descriptor set layout");
         return false;
     }
 
@@ -256,7 +256,7 @@ bool CatmullClarkSystem::createRenderDescriptorSetLayout() {
     layoutInfo.pBindings = bindings.data();
 
     if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &renderDescriptorSetLayout) != VK_SUCCESS) {
-        std::cerr << "Failed to create render descriptor set layout" << std::endl;
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create render descriptor set layout");
         return false;
     }
 
@@ -275,7 +275,7 @@ bool CatmullClarkSystem::createDescriptorSets() {
 
         computeDescriptorSets.resize(framesInFlight);
         if (vkAllocateDescriptorSets(device, &allocInfo, computeDescriptorSets.data()) != VK_SUCCESS) {
-            std::cerr << "Failed to allocate compute descriptor sets" << std::endl;
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate compute descriptor sets");
             return false;
         }
     }
@@ -291,7 +291,7 @@ bool CatmullClarkSystem::createDescriptorSets() {
 
         renderDescriptorSets.resize(framesInFlight);
         if (vkAllocateDescriptorSets(device, &allocInfo, renderDescriptorSets.data()) != VK_SUCCESS) {
-            std::cerr << "Failed to allocate render descriptor sets" << std::endl;
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate render descriptor sets");
             return false;
         }
     }
@@ -458,7 +458,7 @@ void CatmullClarkSystem::updateDescriptorSets(VkDevice device, const std::vector
 bool CatmullClarkSystem::createSubdivisionPipeline() {
     VkShaderModule shaderModule = loadShaderModule(device, shaderPath + "/catmullclark_subdivision.comp.spv");
     if (!shaderModule) {
-        std::cerr << "Failed to load Catmull-Clark subdivision compute shader" << std::endl;
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load Catmull-Clark subdivision compute shader");
         return false;
     }
 
@@ -476,7 +476,7 @@ bool CatmullClarkSystem::createSubdivisionPipeline() {
     layoutInfo.pPushConstantRanges = &pushConstantRange;
 
     if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &subdivisionPipelineLayout) != VK_SUCCESS) {
-        std::cerr << "Failed to create subdivision pipeline layout" << std::endl;
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create subdivision pipeline layout");
         vkDestroyShaderModule(device, shaderModule, nullptr);
         return false;
     }
@@ -496,7 +496,7 @@ bool CatmullClarkSystem::createSubdivisionPipeline() {
     vkDestroyShaderModule(device, shaderModule, nullptr);
 
     if (result != VK_SUCCESS) {
-        std::cerr << "Failed to create subdivision compute pipeline" << std::endl;
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create subdivision compute pipeline");
         return false;
     }
 
@@ -507,7 +507,7 @@ bool CatmullClarkSystem::createRenderPipeline() {
     VkShaderModule vertModule = loadShaderModule(device, shaderPath + "/catmullclark_render.vert.spv");
     VkShaderModule fragModule = loadShaderModule(device, shaderPath + "/catmullclark_render.frag.spv");
     if (!vertModule || !fragModule) {
-        std::cerr << "Failed to load Catmull-Clark render shaders" << std::endl;
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load Catmull-Clark render shaders");
         if (vertModule) vkDestroyShaderModule(device, vertModule, nullptr);
         if (fragModule) vkDestroyShaderModule(device, fragModule, nullptr);
         return false;
@@ -583,7 +583,7 @@ bool CatmullClarkSystem::createRenderPipeline() {
     layoutInfo.pPushConstantRanges = &pushConstantRange;
 
     if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &renderPipelineLayout) != VK_SUCCESS) {
-        std::cerr << "Failed to create render pipeline layout" << std::endl;
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create render pipeline layout");
         vkDestroyShaderModule(device, vertModule, nullptr);
         vkDestroyShaderModule(device, fragModule, nullptr);
         return false;
@@ -611,7 +611,7 @@ bool CatmullClarkSystem::createRenderPipeline() {
     vkDestroyShaderModule(device, fragModule, nullptr);
 
     if (result != VK_SUCCESS) {
-        std::cerr << "Failed to create render graphics pipeline" << std::endl;
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create render graphics pipeline");
         return false;
     }
 
@@ -622,7 +622,7 @@ bool CatmullClarkSystem::createWireframePipeline() {
     VkShaderModule vertModule = loadShaderModule(device, shaderPath + "/catmullclark_render.vert.spv");
     VkShaderModule fragModule = loadShaderModule(device, shaderPath + "/catmullclark_render.frag.spv");
     if (!vertModule || !fragModule) {
-        std::cerr << "Failed to load Catmull-Clark wireframe shaders" << std::endl;
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load Catmull-Clark wireframe shaders");
         if (vertModule) vkDestroyShaderModule(device, vertModule, nullptr);
         if (fragModule) vkDestroyShaderModule(device, fragModule, nullptr);
         return false;
@@ -707,7 +707,7 @@ bool CatmullClarkSystem::createWireframePipeline() {
     vkDestroyShaderModule(device, fragModule, nullptr);
 
     if (result != VK_SUCCESS) {
-        std::cerr << "Failed to create wireframe graphics pipeline" << std::endl;
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create wireframe graphics pipeline");
         return false;
     }
 

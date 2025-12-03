@@ -1,7 +1,7 @@
 #include "TerrainTextures.h"
+#include <SDL.h>
 #include <stb_image.h>
 #include <cstring>
-#include <iostream>
 
 bool TerrainTextures::init(const InitInfo& info) {
     device = info.device;
@@ -13,7 +13,7 @@ bool TerrainTextures::init(const InitInfo& info) {
     if (!createAlbedoTexture()) return false;
     if (!createGrassFarLODTexture()) return false;
 
-    std::cout << "TerrainTextures initialized" << std::endl;
+    SDL_Log("TerrainTextures initialized");
     return true;
 }
 
@@ -41,7 +41,7 @@ bool TerrainTextures::createAlbedoTexture() {
     stbi_uc* pixels = stbi_load(texturePath.c_str(), &texWidth, &texHeight, &channels, STBI_rgb_alpha);
 
     if (!pixels) {
-        std::cerr << "Failed to load terrain albedo texture: " << texturePath << std::endl;
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load terrain albedo texture: %s", texturePath.c_str());
         return false;
     }
 
@@ -66,7 +66,7 @@ bool TerrainTextures::createAlbedoTexture() {
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
 
     if (vmaCreateImage(allocator, &imageInfo, &allocInfo, &albedoImage, &albedoAllocation, nullptr) != VK_SUCCESS) {
-        std::cerr << "Failed to create terrain albedo image" << std::endl;
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create terrain albedo image");
         stbi_image_free(pixels);
         return false;
     }
@@ -84,7 +84,7 @@ bool TerrainTextures::createAlbedoTexture() {
     viewInfo.subresourceRange.layerCount = 1;
 
     if (vkCreateImageView(device, &viewInfo, nullptr, &albedoView) != VK_SUCCESS) {
-        std::cerr << "Failed to create terrain albedo image view" << std::endl;
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create terrain albedo image view");
         stbi_image_free(pixels);
         return false;
     }
@@ -102,20 +102,20 @@ bool TerrainTextures::createAlbedoTexture() {
     samplerInfo.maxAnisotropy = 16.0f;
 
     if (vkCreateSampler(device, &samplerInfo, nullptr, &albedoSampler) != VK_SUCCESS) {
-        std::cerr << "Failed to create terrain albedo sampler" << std::endl;
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create terrain albedo sampler");
         stbi_image_free(pixels);
         return false;
     }
 
     // Upload texture to GPU
     if (!uploadImageData(albedoImage, pixels, width, height, VK_FORMAT_R8G8B8A8_SRGB, 4)) {
-        std::cerr << "Failed to upload terrain albedo texture to GPU" << std::endl;
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to upload terrain albedo texture to GPU");
         stbi_image_free(pixels);
         return false;
     }
 
     stbi_image_free(pixels);
-    std::cout << "Terrain albedo texture loaded: " << texturePath << " (" << width << "x" << height << ")" << std::endl;
+    SDL_Log("Terrain albedo texture loaded: %s (%ux%u)", texturePath.c_str(), width, height);
     return true;
 }
 
@@ -126,7 +126,7 @@ bool TerrainTextures::createGrassFarLODTexture() {
     stbi_uc* pixels = stbi_load(texturePath.c_str(), &texWidth, &texHeight, &channels, STBI_rgb_alpha);
 
     if (!pixels) {
-        std::cerr << "Failed to load grass far LOD texture: " << texturePath << std::endl;
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load grass far LOD texture: %s", texturePath.c_str());
         return false;
     }
 
@@ -151,7 +151,7 @@ bool TerrainTextures::createGrassFarLODTexture() {
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
 
     if (vmaCreateImage(allocator, &imageInfo, &allocInfo, &grassFarLODImage, &grassFarLODAllocation, nullptr) != VK_SUCCESS) {
-        std::cerr << "Failed to create grass far LOD image" << std::endl;
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create grass far LOD image");
         stbi_image_free(pixels);
         return false;
     }
@@ -169,7 +169,7 @@ bool TerrainTextures::createGrassFarLODTexture() {
     viewInfo.subresourceRange.layerCount = 1;
 
     if (vkCreateImageView(device, &viewInfo, nullptr, &grassFarLODView) != VK_SUCCESS) {
-        std::cerr << "Failed to create grass far LOD image view" << std::endl;
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create grass far LOD image view");
         stbi_image_free(pixels);
         return false;
     }
@@ -187,20 +187,20 @@ bool TerrainTextures::createGrassFarLODTexture() {
     samplerInfo.maxAnisotropy = 16.0f;
 
     if (vkCreateSampler(device, &samplerInfo, nullptr, &grassFarLODSampler) != VK_SUCCESS) {
-        std::cerr << "Failed to create grass far LOD sampler" << std::endl;
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create grass far LOD sampler");
         stbi_image_free(pixels);
         return false;
     }
 
     // Upload texture to GPU
     if (!uploadImageData(grassFarLODImage, pixels, width, height, VK_FORMAT_R8G8B8A8_SRGB, 4)) {
-        std::cerr << "Failed to upload grass far LOD texture to GPU" << std::endl;
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to upload grass far LOD texture to GPU");
         stbi_image_free(pixels);
         return false;
     }
 
     stbi_image_free(pixels);
-    std::cout << "Grass far LOD texture loaded: " << texturePath << " (" << width << "x" << height << ")" << std::endl;
+    SDL_Log("Grass far LOD texture loaded: %s (%ux%u)", texturePath.c_str(), width, height);
     return true;
 }
 
@@ -223,7 +223,7 @@ bool TerrainTextures::uploadImageData(VkImage image, const void* data, uint32_t 
     allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
 
     if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &stagingBuffer, &stagingAllocation, nullptr) != VK_SUCCESS) {
-        std::cerr << "Failed to create staging buffer for image upload" << std::endl;
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create staging buffer for image upload");
         return false;
     }
 

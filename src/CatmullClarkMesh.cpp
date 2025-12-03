@@ -1,5 +1,5 @@
 #include "CatmullClarkMesh.h"
-#include <iostream>
+#include <SDL.h>
 #include <cstring>
 
 bool CatmullClarkMesh::uploadToGPU(VmaAllocator allocator) {
@@ -16,7 +16,7 @@ bool CatmullClarkMesh::uploadToGPU(VmaAllocator allocator) {
         allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
 
         if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &vertexBuffer, &vertexAllocation, nullptr) != VK_SUCCESS) {
-            std::cerr << "Failed to create vertex buffer for Catmull-Clark mesh" << std::endl;
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create vertex buffer for Catmull-Clark mesh");
             return false;
         }
 
@@ -39,7 +39,7 @@ bool CatmullClarkMesh::uploadToGPU(VmaAllocator allocator) {
         allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
 
         if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &halfedgeBuffer, &halfedgeAllocation, nullptr) != VK_SUCCESS) {
-            std::cerr << "Failed to create halfedge buffer for Catmull-Clark mesh" << std::endl;
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create halfedge buffer for Catmull-Clark mesh");
             return false;
         }
 
@@ -62,7 +62,7 @@ bool CatmullClarkMesh::uploadToGPU(VmaAllocator allocator) {
         allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
 
         if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &faceBuffer, &faceAllocation, nullptr) != VK_SUCCESS) {
-            std::cerr << "Failed to create face buffer for Catmull-Clark mesh" << std::endl;
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create face buffer for Catmull-Clark mesh");
             return false;
         }
 
@@ -72,8 +72,8 @@ bool CatmullClarkMesh::uploadToGPU(VmaAllocator allocator) {
         vmaUnmapMemory(allocator, faceAllocation);
     }
 
-    std::cout << "Catmull-Clark mesh uploaded: " << vertices.size() << " vertices, "
-              << halfedges.size() << " halfedges, " << faces.size() << " faces" << std::endl;
+    SDL_Log("Catmull-Clark mesh uploaded: %zu vertices, %zu halfedges, %zu faces",
+            vertices.size(), halfedges.size(), faces.size());
 
     return true;
 }

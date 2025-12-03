@@ -1,12 +1,12 @@
 #include "PagedTerrainRenderer.h"
 #include "ShaderLoader.h"
 #include "BindingBuilder.h"
+#include <SDL.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <cstring>
 #include <cmath>
 #include <algorithm>
-#include <iostream>
 
 using ShaderLoader::loadShaderModule;
 
@@ -38,7 +38,7 @@ bool PagedTerrainRenderer::init(const InitInfo& info, const PagedTerrainConfig& 
     streamingBaseInfo.budget = config.streamingConfig.budget;
 
     if (!streamingManager->init(streamingBaseInfo, config.streamingConfig)) {
-        std::cerr << "Failed to initialize terrain streaming manager" << std::endl;
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize terrain streaming manager");
         return false;
     }
 
@@ -50,7 +50,7 @@ bool PagedTerrainRenderer::init(const InitInfo& info, const PagedTerrainConfig& 
     texturesInfo.commandPool = commandPool;
     texturesInfo.resourcePath = info.texturePath;
     if (!textures.init(texturesInfo)) {
-        std::cerr << "Failed to initialize terrain textures" << std::endl;
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize terrain textures");
         return false;
     }
 
@@ -65,9 +65,9 @@ bool PagedTerrainRenderer::init(const InitInfo& info, const PagedTerrainConfig& 
         frameSets.reserve(INITIAL_DESCRIPTOR_POOL_SIZE);
     }
 
-    std::cout << "PagedTerrainRenderer initialized with base tile size "
-              << config.streamingConfig.tileConfig.baseTileSize
-              << ", " << config.streamingConfig.lodLevels.size() << " LOD levels" << std::endl;
+    SDL_Log("PagedTerrainRenderer initialized with base tile size %.1f, %zu LOD levels",
+            config.streamingConfig.tileConfig.baseTileSize,
+            config.streamingConfig.lodLevels.size());
     return true;
 }
 

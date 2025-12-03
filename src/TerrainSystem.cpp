@@ -1,11 +1,11 @@
 #include "TerrainSystem.h"
 #include "ShaderLoader.h"
 #include "BindingBuilder.h"
+#include <SDL.h>
 #include <cstring>
 #include <cmath>
 #include <algorithm>
 #include <stdexcept>
-#include <iostream>
 
 using ShaderLoader::loadShaderModule;
 
@@ -71,7 +71,7 @@ bool TerrainSystem::init(const InitInfo& info, const TerrainConfig& cfg) {
     if (!createWireframePipeline()) return false;
     if (!createShadowPipeline()) return false;
 
-    std::cout << "TerrainSystem initialized with CBT max depth " << config.maxDepth << std::endl;
+    SDL_Log("TerrainSystem initialized with CBT max depth %d", config.maxDepth);
     return true;
 }
 

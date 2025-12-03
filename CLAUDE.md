@@ -12,3 +12,8 @@
 - Prefer composition over inheritance - assume pretty much all of the time you want to use inheritance you are wrong.
 - ShaderLoader API: use `ShaderLoader::loadShaderModule(device, path)` or the two-step `readFile` + `createShaderModule`. There is NO `loadShader` method.
 - Terrain height uses `h * heightScale` where h is normalized [0,1]. Use functions from `shaders/terrain_height_common.glsl` (shaders) or `src/TerrainHeight.h` (C++). Do NOT duplicate the formula.
+- Logging: Use SDL_Log consistently throughout the codebase. Do NOT use std::cout, std::cerr, printf, or fprintf for logging. Use the appropriate SDL log functions:
+  - `SDL_Log()` for general info messages
+  - `SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, ...)` for errors
+  - `SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, ...)` for warnings
+  - `SDL_LogDebug(SDL_LOG_CATEGORY_APPLICATION, ...)` for debug output

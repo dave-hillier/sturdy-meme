@@ -1,9 +1,9 @@
 #include "TerrainHeightMap.h"
 #include "TerrainHeight.h"
+#include <SDL.h>
 #include <cstring>
 #include <cmath>
 #include <algorithm>
-#include <iostream>
 #include <glm/glm.hpp>
 
 #define STB_IMAGE_IMPLEMENTATION_SKIP  // Already implemented elsewhere
@@ -21,7 +21,7 @@ bool TerrainHeightMap::init(const InitInfo& info) {
     // Either load from file or generate procedurally
     if (!info.heightmapPath.empty()) {
         if (!loadHeightDataFromFile(info.heightmapPath, info.minAltitude, info.maxAltitude)) {
-            std::cerr << "Failed to load heightmap from file, falling back to procedural" << std::endl;
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load heightmap from file, falling back to procedural");
             if (!generateHeightData()) return false;
         }
     } else {
@@ -31,7 +31,7 @@ bool TerrainHeightMap::init(const InitInfo& info) {
     if (!createGPUResources()) return false;
     if (!uploadToGPU()) return false;
 
-    std::cout << "TerrainHeightMap initialized: " << resolution << "x" << resolution << std::endl;
+    SDL_Log("TerrainHeightMap initialized: %ux%u", resolution, resolution);
     return true;
 }
 
@@ -109,7 +109,7 @@ bool TerrainHeightMap::loadHeightDataFromFile(const std::string& path, float min
     // Load as 16-bit if available
     stbi_us* data16 = stbi_load_16(path.c_str(), &width, &height, &channels, 1);
     if (data16) {
-        std::cout << "Loaded 16-bit heightmap: " << path << " (" << width << "x" << height << ")" << std::endl;
+        SDL_Log("Loaded 16-bit heightmap: %s (%dx%d)", path.c_str(), width, height);
 
         // The heightmap might be larger than our target resolution - resample if needed
         uint32_t srcWidth = static_cast<uint32_t>(width);
@@ -150,7 +150,7 @@ bool TerrainHeightMap::loadHeightDataFromFile(const std::string& path, float min
 
         stbi_image_free(data16);
 
-        std::cout << "Height scale: " << heightScale << "m (altitude range: " << minAlt << "m to " << maxAlt << "m)" << std::endl;
+        SDL_Log("Height scale: %.1fm (altitude range: %.1fm to %.1fm)", heightScale, minAlt, maxAlt);
 
         return true;
     }
@@ -158,7 +158,7 @@ bool TerrainHeightMap::loadHeightDataFromFile(const std::string& path, float min
     // Fall back to 8-bit
     stbi_uc* data8 = stbi_load(path.c_str(), &width, &height, &channels, 1);
     if (data8) {
-        std::cout << "Loaded 8-bit heightmap: " << path << " (" << width << "x" << height << ")" << std::endl;
+        SDL_Log("Loaded 8-bit heightmap: %s (%dx%d)", path.c_str(), width, height);
 
         uint32_t srcWidth = static_cast<uint32_t>(width);
         uint32_t srcHeight = static_cast<uint32_t>(height);
@@ -193,12 +193,12 @@ bool TerrainHeightMap::loadHeightDataFromFile(const std::string& path, float min
 
         stbi_image_free(data8);
 
-        std::cout << "Height scale: " << heightScale << "m (altitude range: " << minAlt << "m to " << maxAlt << "m)" << std::endl;
+        SDL_Log("Height scale: %.1fm (altitude range: %.1fm to %.1fm)", heightScale, minAlt, maxAlt);
 
         return true;
     }
 
-    std::cerr << "Failed to load heightmap: " << path << " - " << stbi_failure_reason() << std::endl;
+    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load heightmap: %s - %s", path.c_str(), stbi_failure_reason());
     return false;
 }
 
@@ -221,7 +221,7 @@ bool TerrainHeightMap::createGPUResources() {
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
 
     if (vmaCreateImage(allocator, &imageInfo, &allocInfo, &image, &allocation, nullptr) != VK_SUCCESS) {
-        std::cerr << "Failed to create height map image" << std::endl;
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create height map image");
         return false;
     }
 
@@ -238,7 +238,7 @@ bool TerrainHeightMap::createGPUResources() {
     viewInfo.subresourceRange.layerCount = 1;
 
     if (vkCreateImageView(device, &viewInfo, nullptr, &imageView) != VK_SUCCESS) {
-        std::cerr << "Failed to create height map image view" << std::endl;
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create height map image view");
         return false;
     }
 
@@ -253,7 +253,7 @@ bool TerrainHeightMap::createGPUResources() {
     samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
 
     if (vkCreateSampler(device, &samplerInfo, nullptr, &sampler) != VK_SUCCESS) {
-        std::cerr << "Failed to create height map sampler" << std::endl;
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create height map sampler");
         return false;
     }
 
@@ -278,7 +278,7 @@ bool TerrainHeightMap::uploadToGPU() {
     allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
 
     if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &stagingBuffer, &stagingAllocation, nullptr) != VK_SUCCESS) {
-        std::cerr << "Failed to create staging buffer for height map upload" << std::endl;
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create staging buffer for height map upload");
         return false;
     }
 

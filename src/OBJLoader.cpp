@@ -1,5 +1,5 @@
 #include "OBJLoader.h"
-#include <iostream>
+#include <SDL.h>
 #include <fstream>
 #include <sstream>
 #include <map>
@@ -12,7 +12,7 @@ CatmullClarkMesh loadQuadMesh(const std::string& path) {
 
     std::ifstream file(path);
     if (!file.is_open()) {
-        std::cerr << "Failed to open OBJ file: " << path << std::endl;
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to open OBJ file: %s", path.c_str());
         return mesh;
     }
 
@@ -152,9 +152,8 @@ CatmullClarkMesh loadQuadMesh(const std::string& path) {
         }
     }
 
-    std::cout << "Loaded OBJ: " << mesh.vertices.size() << " vertices, "
-              << mesh.halfedges.size() << " halfedges, "
-              << mesh.faces.size() << " faces from " << path << std::endl;
+    SDL_Log("Loaded OBJ: %zu vertices, %zu halfedges, %zu faces from %s",
+            mesh.vertices.size(), mesh.halfedges.size(), mesh.faces.size(), path.c_str());
 
     return mesh;
 }

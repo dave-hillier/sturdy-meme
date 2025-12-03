@@ -1,7 +1,7 @@
 #include "TerrainStreamingManager.h"
+#include <SDL.h>
 #include <algorithm>
 #include <cmath>
-#include <iostream>
 
 TerrainStreamingManager::~TerrainStreamingManager() {
     shutdown();
@@ -11,9 +11,8 @@ bool TerrainStreamingManager::init(const StreamingManager::InitInfo& baseInfo,
                                     const TerrainStreamingConfig& terrainConfig) {
     config = terrainConfig;
 
-    std::cout << "TerrainStreamingManager: Cache directory: "
-              << (config.tileConfig.cacheDirectory.empty() ? "(empty - procedural)" : config.tileConfig.cacheDirectory)
-              << std::endl;
+    SDL_Log("TerrainStreamingManager: Cache directory: %s",
+            config.tileConfig.cacheDirectory.empty() ? "(empty - procedural)" : config.tileConfig.cacheDirectory.c_str());
 
     // Ensure LOD levels match tile config
     config.tileConfig.numLODLevels = static_cast<uint32_t>(config.lodLevels.size());

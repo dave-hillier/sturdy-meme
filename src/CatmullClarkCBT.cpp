@@ -1,8 +1,8 @@
 #include "CatmullClarkCBT.h"
+#include <SDL.h>
 #include <cstring>
 #include <cmath>
 #include <algorithm>
-#include <iostream>
 #include <vector>
 
 namespace {
@@ -127,7 +127,7 @@ bool CatmullClarkCBT::init(const InitInfo& info) {
     allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
 
     if (vmaCreateBuffer(info.allocator, &bufferInfo, &allocInfo, &buffer, &allocation, nullptr) != VK_SUCCESS) {
-        std::cerr << "Failed to create Catmull-Clark CBT buffer" << std::endl;
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create Catmull-Clark CBT buffer");
         return false;
     }
 
@@ -160,14 +160,13 @@ bool CatmullClarkCBT::init(const InitInfo& info) {
     // Map the CBT buffer and write initialization data
     void* data;
     if (vmaMapMemory(info.allocator, allocation, &data) != VK_SUCCESS) {
-        std::cerr << "Failed to map Catmull-Clark CBT buffer for initialization" << std::endl;
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to map Catmull-Clark CBT buffer for initialization");
         return false;
     }
     memcpy(data, initData.data(), bufferSize);
     vmaUnmapMemory(info.allocator, allocation);
 
-    std::cout << "Catmull-Clark CBT initialized with " << faceCount << " base faces"
-              << ", max depth " << maxDepth << std::endl;
+    SDL_Log("Catmull-Clark CBT initialized with %d base faces, max depth %d", faceCount, maxDepth);
 
     return true;
 }

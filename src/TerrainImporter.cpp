@@ -1,9 +1,9 @@
 #include <stb_image.h>
 #include "TerrainImporter.h"
+#include <SDL.h>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
-#include <iostream>
 #include <algorithm>
 #include <cmath>
 
@@ -120,7 +120,7 @@ bool TerrainImporter::loadSourceHeightmap(const std::string& path) {
     // Load as 16-bit
     uint16_t* data = stbi_load_16(path.c_str(), &width, &height, &channels, 1);
     if (!data) {
-        std::cerr << "Failed to load heightmap: " << path << " - " << stbi_failure_reason() << std::endl;
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load heightmap: %s - %s", path.c_str(), stbi_failure_reason());
         return false;
     }
 
@@ -134,7 +134,7 @@ bool TerrainImporter::loadSourceHeightmap(const std::string& path) {
 
     stbi_image_free(data);
 
-    std::cout << "Loaded heightmap: " << sourceWidth << "x" << sourceHeight << " pixels" << std::endl;
+    SDL_Log("Loaded heightmap: %ux%u pixels", sourceWidth, sourceHeight);
     return true;
 }
 
@@ -160,9 +160,9 @@ bool TerrainImporter::import(const TerrainImportConfig& config, ImportProgressCa
     tilesX = (sourceWidth + config.tileResolution - 1) / config.tileResolution;
     tilesZ = (sourceHeight + config.tileResolution - 1) / config.tileResolution;
 
-    std::cout << "Source: " << sourceWidth << "x" << sourceHeight << " pixels" << std::endl;
-    std::cout << "World size: " << worldWidth << "m x " << worldHeight << "m" << std::endl;
-    std::cout << "LOD 0: " << tilesX << "x" << tilesZ << " tiles (" << config.tileResolution << "x" << config.tileResolution << " each)" << std::endl;
+    SDL_Log("Source: %ux%u pixels", sourceWidth, sourceHeight);
+    SDL_Log("World size: %.1fm x %.1fm", worldWidth, worldHeight);
+    SDL_Log("LOD 0: %ux%u tiles (%ux%u each)", tilesX, tilesZ, config.tileResolution, config.tileResolution);
 
     // Initialize LOD data with source
     lodData = sourceData;
@@ -193,7 +193,7 @@ bool TerrainImporter::import(const TerrainImportConfig& config, ImportProgressCa
 
     // Save metadata
     if (!saveMetadata(config)) {
-        std::cerr << "Failed to save cache metadata" << std::endl;
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to save cache metadata");
         return false;
     }
 
@@ -238,7 +238,7 @@ void TerrainImporter::downsampleForLOD(uint32_t lod) {
     lodWidth = newWidth;
     lodHeight = newHeight;
 
-    std::cout << "Downsampled to " << lodWidth << "x" << lodHeight << " for LOD " << lod << std::endl;
+    SDL_Log("Downsampled to %ux%u for LOD %u", lodWidth, lodHeight, lod);
 }
 
 bool TerrainImporter::generateLODLevel(const TerrainImportConfig& config, uint32_t lod,
@@ -254,8 +254,7 @@ bool TerrainImporter::generateLODLevel(const TerrainImportConfig& config, uint32
     uint32_t totalTiles = numTilesX * numTilesZ;
     uint32_t processedTiles = 0;
 
-    std::cout << "LOD " << lod << ": " << numTilesX << "x" << numTilesZ << " tiles from "
-              << lodWidth << "x" << lodHeight << " source" << std::endl;
+    SDL_Log("LOD %u: %ux%u tiles from %ux%u source", lod, numTilesX, numTilesZ, lodWidth, lodHeight);
 
     std::vector<uint16_t> tileData(tileRes * tileRes);
 
@@ -282,7 +281,7 @@ bool TerrainImporter::generateLODLevel(const TerrainImportConfig& config, uint32
             // Save tile
             std::string tilePath = getTilePath(config.cacheDirectory, tx, tz, lod);
             if (!saveTile(tilePath, tileData, tileRes)) {
-                std::cerr << "Failed to save tile: " << tilePath << std::endl;
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to save tile: %s", tilePath.c_str());
                 return false;
             }
 

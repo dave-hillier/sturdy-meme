@@ -1,8 +1,8 @@
 #include "TerrainCBT.h"
+#include <SDL.h>
 #include <cstring>
 #include <cmath>
 #include <algorithm>
-#include <iostream>
 #include <vector>
 
 namespace {
@@ -121,7 +121,7 @@ bool TerrainCBT::init(const InitInfo& info) {
     allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
 
     if (vmaCreateBuffer(info.allocator, &bufferInfo, &allocInfo, &buffer, &allocation, nullptr) != VK_SUCCESS) {
-        std::cerr << "Failed to create CBT buffer" << std::endl;
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create CBT buffer");
         return false;
     }
 
@@ -150,19 +150,19 @@ bool TerrainCBT::init(const InitInfo& info) {
 
     // Verify: root should have correct count
     uint32_t rootCount = cbt_HeapRead_CPU(initData, 1, 0, maxDepth);
-    std::cout << "CBT root count after init: " << rootCount << std::endl;
+    SDL_Log("CBT root count after init: %u", rootCount);
 
     // Map the CBT buffer and write initialization data
     void* data;
     if (vmaMapMemory(info.allocator, allocation, &data) != VK_SUCCESS) {
-        std::cerr << "Failed to map CBT buffer for initialization" << std::endl;
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to map CBT buffer for initialization");
         return false;
     }
     memcpy(data, initData.data(), bufferSize);
     vmaUnmapMemory(info.allocator, allocation);
 
-    std::cout << "CBT initialized with " << (maxNodeID - minNodeID) << " triangles at depth "
-              << initDepth << ", max depth " << maxDepth << std::endl;
+    SDL_Log("CBT initialized with %u triangles at depth %d, max depth %d",
+            (maxNodeID - minNodeID), initDepth, maxDepth);
 
     return true;
 }

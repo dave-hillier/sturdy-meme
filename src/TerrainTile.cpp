@@ -1,12 +1,12 @@
 #include "TerrainTile.h"
 #include "TerrainImporter.h"
+#include <SDL.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
 #include <cstring>
 #include <cmath>
 #include <algorithm>
 #include <fstream>
-#include <iostream>
 
 // Simple noise function for procedural terrain
 static float hash(float n) {
@@ -66,7 +66,7 @@ bool TerrainTile::loadHeightData() {
 
     // Try to load from cache if available
     if (!config.cacheDirectory.empty()) {
-        std::cout << "TerrainTile: Loading from cache directory: " << config.cacheDirectory << std::endl;
+        SDL_Log("TerrainTile: Loading from cache directory: %s", config.cacheDirectory.c_str());
         std::string tilePath = TerrainImporter::getTilePath(
             config.cacheDirectory, coord.x, coord.z, coord.lod);
 
@@ -92,7 +92,7 @@ bool TerrainTile::loadHeightData() {
                 }
             }
 
-            std::cerr << "Failed to load tile cache: " << tilePath << std::endl;
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load tile cache: %s", tilePath.c_str());
         }
         // Fall through to procedural if cache load fails
     }
