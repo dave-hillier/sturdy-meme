@@ -257,8 +257,8 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
 
     if (!weatherSystem.init(weatherInfo)) return false;
 
-    // Update weather system descriptor sets with wind buffers
-    weatherSystem.updateDescriptorSets(device, uniformBuffers, windBuffers, depthImageView, shadowSystem.getShadowSampler());
+    // Update weather system descriptor sets with wind buffers - use HDR depth where scene is rendered
+    weatherSystem.updateDescriptorSets(device, uniformBuffers, windBuffers, postProcessSystem.getHDRDepthView(), shadowSystem.getShadowSampler());
 
     // Connect snow mask to environment settings (already initialized above)
     snowMaskSystem.setEnvironmentSettings(environmentSettings);
