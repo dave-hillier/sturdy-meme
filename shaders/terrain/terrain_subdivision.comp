@@ -47,9 +47,9 @@ layout(std140, binding = 4) uniform TerrainUniforms {
 #define MERGE_THRESHOLD (lodParams.y)
 #define MIN_DEPTH (int(lodParams.z))
 
-// Sample terrain height at UV coordinate (centered around y=0)
+// Sample terrain height at UV coordinate (0 = ground level)
 float sampleHeight(vec2 uv) {
-    return (texture(heightMap, uv).r - 0.5) * HEIGHT_SCALE;
+    return texture(heightMap, uv).r * HEIGHT_SCALE;
 }
 
 // Compute heightmap gradient (direction of steepest ascent in UV space)

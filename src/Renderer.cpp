@@ -198,8 +198,9 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     terrainConfig.targetEdgePixels = 16.0f;
     terrainConfig.splitThreshold = 24.0f;
     terrainConfig.mergeThreshold = 8.0f;
-    terrainConfig.heightmapPath = heightmapPath;
-    terrainConfig.minAltitude = 0.0f;
+    // Load Isle of Wight heightmap (-15m to 200m altitude range, includes beaches below sea level)
+    terrainConfig.heightmapPath = resourcePath + "/assets/terrain/isleofwight-0m-200m.png";
+    terrainConfig.minAltitude = -15.0f;
     terrainConfig.maxAltitude = 200.0f;
 
     if (!terrainSystem.init(terrainInfo, terrainConfig)) return false;
