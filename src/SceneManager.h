@@ -52,8 +52,12 @@ private:
     void initializeSceneLights();
     void updatePhysicsToScene(PhysicsWorld& physics);
 
+    // Get terrain height at (x, z), returns 0 if no terrain function available
+    float getTerrainHeight(float x, float z) const;
+
     // Scene resources
     SceneBuilder sceneBuilder;
+    SceneBuilder::HeightQueryFunc terrainHeightFunc;
     LightManager lightManager;
 
     // Physics body tracking (mapped to scene object indices)
