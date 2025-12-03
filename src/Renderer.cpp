@@ -146,7 +146,34 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
 
     if (!grassSystem.init(grassInfo)) return false;
 
-    // Initialize terrain system (LEB/CBT adaptive terrain)
+    // Initialize terrain system with Isle of Wight heightmap
+    std::string heightmapPath = resourcePath + "/assets/terrain/isleofwight-0m-200m.png";
+    std::string terrainCachePath = resourcePath + "/terrain_cache";
+
+    // Import heightmap into tile cache if needed (for future streaming support)
+    TerrainImportConfig importConfig{};
+    importConfig.sourceHeightmapPath = heightmapPath;
+    importConfig.cacheDirectory = terrainCachePath;
+    importConfig.minAltitude = 0.0f;
+    importConfig.maxAltitude = 200.0f;
+    importConfig.metersPerPixel = 1.0f;  // Treating 3m/px data as 1m/px for more dramatic terrain
+    importConfig.tileResolution = 512;
+    importConfig.numLODLevels = 4;
+
+    TerrainImporter importer;
+    if (!importer.isCacheValid(importConfig)) {
+        SDL_Log("Importing terrain heightmap: %s", heightmapPath.c_str());
+        if (importer.import(importConfig, [](float progress, const std::string& status) {
+            SDL_Log("Terrain import: %.0f%% - %s", progress * 100.0f, status.c_str());
+        })) {
+            SDL_Log("Terrain cache created: %zu x %zu tiles",
+                    importer.getTilesX(), importer.getTilesZ());
+        }
+    } else {
+        SDL_Log("Using existing terrain cache");
+    }
+
+    // Initialize terrain system with CBT (loads heightmap directly for now)
     TerrainSystem::InitInfo terrainInfo{};
     terrainInfo.device = device;
     terrainInfo.physicalDevice = physicalDevice;
@@ -163,15 +190,15 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     terrainInfo.commandPool = commandPool;
 
     TerrainConfig terrainConfig{};
-    terrainConfig.size = 500.0f;
-    terrainConfig.heightScale = 200.0f;  // Will be overridden by heightmap if loaded
-    terrainConfig.maxDepth = 18;  // Reasonable depth for testing
+    // Use world size based on imported terrain (or default if import failed)
+    terrainConfig.size = importer.getWorldWidth() > 0 ? importer.getWorldWidth() : 16000.0f;
+    terrainConfig.heightScale = 200.0f;
+    terrainConfig.maxDepth = 20;  // Higher depth for larger terrain
     terrainConfig.minDepth = 2;
     terrainConfig.targetEdgePixels = 16.0f;
     terrainConfig.splitThreshold = 24.0f;
     terrainConfig.mergeThreshold = 8.0f;
-    // Load Isle of Wight heightmap (0-200m altitude range)
-    terrainConfig.heightmapPath = resourcePath + "/assets/terrain/isleofwight-0m-200m.png";
+    terrainConfig.heightmapPath = heightmapPath;
     terrainConfig.minAltitude = 0.0f;
     terrainConfig.maxAltitude = 200.0f;
 
