@@ -53,6 +53,7 @@ set(SOURCES
     src/TerrainTextures.cpp
     src/TerrainCBT.cpp
     src/TerrainTile.cpp
+    src/TerrainImporter.cpp
     src/StreamingManager.cpp
     src/TerrainStreamingManager.cpp
     src/PagedTerrainRenderer.cpp

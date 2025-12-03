@@ -1,9 +1,12 @@
 #include "TerrainTile.h"
+#include "TerrainImporter.h"
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
 #include <cstring>
 #include <cmath>
 #include <algorithm>
+#include <fstream>
+#include <iostream>
 
 // Simple noise function for procedural terrain
 static float hash(float n) {
@@ -59,10 +62,41 @@ void TerrainTile::init(const Coord& tileCoord, const TerrainTileConfig& cfg) {
 }
 
 bool TerrainTile::loadHeightData() {
-    // Generate procedural heightmap data
-    // This can be replaced with loading from file
-
     uint32_t res = config.heightmapResolution;
+
+    // Try to load from cache if available
+    if (!config.cacheDirectory.empty()) {
+        std::string tilePath = TerrainImporter::getTilePath(
+            config.cacheDirectory, coord.x, coord.z, coord.lod);
+
+        std::ifstream file(tilePath, std::ios::binary);
+        if (file.is_open()) {
+            // Read resolution header
+            uint32_t fileResX, fileResZ;
+            file.read(reinterpret_cast<char*>(&fileResX), sizeof(fileResX));
+            file.read(reinterpret_cast<char*>(&fileResZ), sizeof(fileResZ));
+
+            if (fileResX == res && fileResZ == res) {
+                // Read 16-bit height data
+                std::vector<uint16_t> rawData(res * res);
+                file.read(reinterpret_cast<char*>(rawData.data()), rawData.size() * sizeof(uint16_t));
+
+                if (file.good()) {
+                    // Convert 16-bit to normalized float [0, 1]
+                    float invMax = 1.0f / 65535.0f;
+                    for (uint32_t i = 0; i < res * res; i++) {
+                        cpuHeightData[i] = static_cast<float>(rawData[i]) * invMax;
+                    }
+                    return true;
+                }
+            }
+
+            std::cerr << "Failed to load tile cache: " << tilePath << std::endl;
+        }
+        // Fall through to procedural if cache load fails
+    }
+
+    // Generate procedural heightmap data as fallback
     float invRes = 1.0f / static_cast<float>(res - 1);
 
     for (uint32_t z = 0; z < res; z++) {
@@ -380,7 +414,9 @@ float TerrainTile::getHeightAt(float localX, float localZ) const {
     float h0 = glm::mix(h00, h10, tx);
     float h1 = glm::mix(h01, h11, tx);
 
-    return glm::mix(h0, h1, tz) * config.heightScale;
+    // Convert normalized [0,1] to actual altitude
+    float normalizedHeight = glm::mix(h0, h1, tz);
+    return config.minAltitude + normalizedHeight * config.getHeightScale();
 }
 
 size_t TerrainTile::getGPUMemoryUsage() const {

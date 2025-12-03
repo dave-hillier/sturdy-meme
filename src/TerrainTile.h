@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <vector>
 #include <atomic>
+#include <string>
 
 // Loading state for a terrain tile
 enum class TileLoadState {
@@ -17,12 +18,18 @@ enum class TileLoadState {
 
 // Configuration for terrain tiles
 struct TerrainTileConfig {
-    uint32_t heightmapResolution = 256;  // Per-tile heightmap resolution (same for all LODs)
-    float baseTileSize = 256.0f;          // World units for LOD 0 tiles
-    float heightScale = 50.0f;            // Maximum height
+    uint32_t heightmapResolution = 512;   // Per-tile heightmap resolution (same for all LODs)
+    float baseTileSize = 512.0f;          // World units for LOD 0 tiles
+    float minAltitude = 0.0f;             // Altitude in meters for height value 0
+    float maxAltitude = 200.0f;           // Altitude in meters for height value 65535
     int cbtMaxDepth = 16;                 // CBT depth per tile
     int cbtInitDepth = 4;                 // Initial CBT subdivision
     uint32_t numLODLevels = 4;            // Number of LOD levels (0 = highest detail)
+
+    std::string cacheDirectory;           // Path to terrain tile cache (empty = procedural)
+
+    // Computed height scale (maxAltitude - minAltitude)
+    float getHeightScale() const { return maxAltitude - minAltitude; }
 };
 
 // Represents a single terrain tile with its own heightmap and CBT
