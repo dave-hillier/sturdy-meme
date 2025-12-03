@@ -37,6 +37,16 @@ bool Application::init(const std::string& title, int width, int height) {
 
     camera.setAspectRatio(static_cast<float>(width) / static_cast<float>(height));
 
+    // Position camera at terrain height, looking at scene objects
+    {
+        const auto& terrain = renderer.getTerrainSystem();
+        float cameraX = 0.0f, cameraZ = 10.0f;  // Start behind the scene
+        float terrainY = terrain.getHeightAt(cameraX, cameraZ);
+        camera.setPosition(glm::vec3(cameraX, terrainY + 2.0f, cameraZ));
+        camera.setYaw(-90.0f);   // Look toward -Z (toward scene objects)
+        camera.setPitch(-10.0f); // Slight downward tilt
+    }
+
     // Initialize physics system
     if (!physics.init()) {
         SDL_Log("Failed to initialize physics system");
