@@ -55,12 +55,17 @@ struct TerrainSubdivisionPushConstants {
     uint32_t updateMode;       // 0 = split only, 1 = merge only
     uint32_t frameIndex;       // For temporal spreading
     uint32_t spreadFactor;     // Process 1/N triangles per frame (1 = all)
-    uint32_t useCompactBuffer; // 1 = read from compact buffer (GPU culling enabled)
+    uint32_t reserved;         // Reserved for future use (was useCompactBuffer)
 };
 
-// Push constants for prepare cull dispatch
+// Push constants for prepare cull dispatch (legacy, kept for compatibility)
 struct TerrainPrepareCullDispatchPushConstants {
     uint32_t workgroupSize;  // Subdivision workgroup size
+};
+
+// Push constants for frustum cull (now includes dispatch calculation)
+struct TerrainFrustumCullPushConstants {
+    uint32_t subdivisionWorkgroupSize;  // For computing dispatch args
 };
 
 // Terrain configuration (outside class to avoid C++17 default argument issues)
