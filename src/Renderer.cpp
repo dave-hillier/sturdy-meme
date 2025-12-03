@@ -1284,6 +1284,9 @@ void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera& camera) 
     // Calculate sun screen position (pure) and update post-process (state mutation)
     glm::vec2 sunScreenPos = calculateSunScreenPos(camera, lighting.sunDir);
     postProcessSystem.setSunScreenPos(sunScreenPos);
+
+    // Update HDR enabled state
+    postProcessSystem.setHDREnabled(hdrEnabled);
 }
 
 void Renderer::render(const Camera& camera) {
@@ -1386,8 +1389,9 @@ void Renderer::render(const Camera& camera) {
     profiler.beginFrame(cmd, frame.frameIndex);
 
     // Terrain compute pass (adaptive subdivision)
+    // Detailed per-phase profiling inside recordCompute
     profiler.beginGpuZone(cmd, "TerrainCompute");
-    terrainSystem.recordCompute(cmd, frame.frameIndex);
+    terrainSystem.recordCompute(cmd, frame.frameIndex, &profiler.getGpuProfiler());
     profiler.endGpuZone(cmd, "TerrainCompute");
 
     // Catmull-Clark subdivision compute pass

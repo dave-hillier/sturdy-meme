@@ -95,6 +95,10 @@ public:
     // Bloom (multi-pass)
     void setBloomTexture(VkImageView bloomView, VkSampler bloomSampler);
     bool isFroxelEnabled() const { return froxelEnabled; }
+
+    // HDR tonemapping bypass (for comparison/debugging)
+    void setHDREnabled(bool enabled) { hdrEnabled = enabled; }
+    bool isHDREnabled() const { return hdrEnabled; }
     void setFroxelParams(float farPlane, float depthDist) {
         froxelFarPlane = farPlane;
         froxelDepthDist = depthDist;
@@ -177,6 +181,7 @@ private:
     VkImageView froxelVolumeView = VK_NULL_HANDLE;
     VkSampler froxelSampler = VK_NULL_HANDLE;
     bool froxelEnabled = false;
+    bool hdrEnabled = true;  // HDR tonemapping enabled by default
     float froxelFarPlane = 200.0f;
     float froxelDepthDist = 1.2f;
     float nearPlane = 0.1f;

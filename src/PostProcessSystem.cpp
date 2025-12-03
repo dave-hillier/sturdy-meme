@@ -645,6 +645,8 @@ void PostProcessSystem::recordPostProcess(VkCommandBuffer cmd, uint32_t frameInd
     // Mapping: adaptedLuminance * 200 gives reasonable lux-like values
     // where target luminance 0.05 → 10 lux (Purkinje activation threshold)
     ubo->sceneIlluminance = adaptedLuminance * 200.0f;
+    // HDR tonemapping bypass toggle
+    ubo->hdrEnabled = hdrEnabled ? 1.0f : 0.0f;
 
     // Store computed exposure for next frame
     lastAutoExposure = autoExposureEnabled ? computedExposure : manualExposure;

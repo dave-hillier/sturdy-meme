@@ -623,14 +623,51 @@ void GuiSystem::renderEnvironmentSection(Renderer& renderer) {
 void GuiSystem::renderPostProcessSection(Renderer& renderer) {
     ImGui::Spacing();
 
-    // Note: We would need to add getters/setters to PostProcessSystem
-    // For now, show placeholders or use environment settings
+    // HDR Tonemapping toggle
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.7f, 0.4f, 1.0f));
+    ImGui::Text("HDR PIPELINE");
+    ImGui::PopStyleColor();
+
+    bool hdrEnabled = renderer.isHDREnabled();
+    if (ImGui::Checkbox("HDR Tonemapping", &hdrEnabled)) {
+        renderer.setHDREnabled(hdrEnabled);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Enable/disable ACES tonemapping and exposure control");
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Cloud shadows toggle
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.7f, 0.8f, 1.0f, 1.0f));
+    ImGui::Text("CLOUD SHADOWS");
+    ImGui::PopStyleColor();
+
+    bool cloudShadowEnabled = renderer.isCloudShadowEnabled();
+    if (ImGui::Checkbox("Cloud Shadows", &cloudShadowEnabled)) {
+        renderer.setCloudShadowEnabled(cloudShadowEnabled);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Enable/disable cloud shadow projection on terrain");
+    }
+
+    if (cloudShadowEnabled) {
+        float cloudShadowIntensity = renderer.getCloudShadowIntensity();
+        if (ImGui::SliderFloat("Shadow Intensity", &cloudShadowIntensity, 0.0f, 1.0f)) {
+            renderer.setCloudShadowIntensity(cloudShadowIntensity);
+        }
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
 
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.8f, 0.5f, 1.0f));
     ImGui::Text("BLOOM");
     ImGui::PopStyleColor();
 
-    ImGui::Text("(Controls require PostProcessSystem exposure)");
     ImGui::TextDisabled("Bloom is enabled by default");
 
     ImGui::Spacing();

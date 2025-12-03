@@ -23,7 +23,7 @@ layout(binding = 1) uniform PostProcessUniforms {
     float farPlane;        // Camera far plane
     // Purkinje effect (Phase 5.6)
     float sceneIlluminance; // Scene illuminance in lux
-    float padding2;
+    float hdrEnabled;       // 1.0 = HDR tonemapping, 0.0 = bypass
     float padding3;
 } ubo;
 
@@ -302,15 +302,21 @@ void main() {
     // Combine HDR with bloom and god rays
     vec3 combined = hdr + bloom * ubo.bloomIntensity + godRays;
 
-    // Apply exposure
-    vec3 exposed = combined * exp2(finalExposure);
+    vec3 finalColor;
+    if (ubo.hdrEnabled > 0.5) {
+        // Apply exposure
+        vec3 exposed = combined * exp2(finalExposure);
 
-    // Apply ACES tone mapping
-    vec3 mapped = ACESFilmic(exposed);
+        // Apply ACES tone mapping
+        vec3 mapped = ACESFilmic(exposed);
 
-    // Apply Purkinje effect for night vision (Phase 5.6)
-    // Applied after tone mapping but before final output
-    vec3 purkinje = SimplePurkinje(mapped, ubo.sceneIlluminance);
+        // Apply Purkinje effect for night vision (Phase 5.6)
+        // Applied after tone mapping but before final output
+        finalColor = SimplePurkinje(mapped, ubo.sceneIlluminance);
+    } else {
+        // HDR bypass - output raw HDR clamped to [0,1]
+        finalColor = clamp(combined, 0.0, 1.0);
+    }
 
-    outColor = vec4(purkinje, 1.0);
+    outColor = vec4(finalColor, 1.0);
 }

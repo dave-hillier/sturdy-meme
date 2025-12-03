@@ -103,6 +103,10 @@ public:
     // Cloud shadow control
     void setCloudShadowEnabled(bool enabled) { cloudShadowSystem.setEnabled(enabled); }
     bool isCloudShadowEnabled() const { return cloudShadowSystem.isEnabled(); }
+
+    // HDR/Post-processing control
+    void setHDREnabled(bool enabled) { hdrEnabled = enabled; }
+    bool isHDREnabled() const { return hdrEnabled; }
     void setCloudShadowIntensity(float intensity) { cloudShadowSystem.setShadowIntensity(intensity); }
     float getCloudShadowIntensity() const { return cloudShadowSystem.getShadowIntensity(); }
 
@@ -350,6 +354,7 @@ private:
     bool showCascadeDebug = false;         // true = show cascade colors overlay
     bool showSnowDepthDebug = false;       // true = show snow depth heat map overlay
     bool useParaboloidClouds = true;       // true = paraboloid LUT hybrid, false = procedural
+    bool hdrEnabled = true;                // true = HDR tonemapping/bloom, false = bypass
 
     // Player position for grass displacement
     glm::vec3 playerPosition = glm::vec3(0.0f);
