@@ -52,6 +52,12 @@ public:
     // Get metadata path
     static std::string getMetadataPath(const std::string& cacheDir);
 
+    // Calculate number of tiles at a given LOD level
+    // LOD 0 uses full resolution, each subsequent LOD has half the source pixels
+    static void getTileCountForLOD(uint32_t sourceWidth, uint32_t sourceHeight,
+                                   uint32_t tileResolution, uint32_t lod,
+                                   uint32_t& outTilesX, uint32_t& outTilesZ);
+
 private:
     // Load 16-bit PNG heightmap
     bool loadSourceHeightmap(const std::string& path);

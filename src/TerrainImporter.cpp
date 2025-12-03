@@ -24,6 +24,22 @@ std::string TerrainImporter::getMetadataPath(const std::string& cacheDir) {
     return cacheDir + "/terrain_cache.meta";
 }
 
+void TerrainImporter::getTileCountForLOD(uint32_t sourceWidth, uint32_t sourceHeight,
+                                          uint32_t tileResolution, uint32_t lod,
+                                          uint32_t& outTilesX, uint32_t& outTilesZ) {
+    // Each LOD level has half the pixels of the previous
+    uint32_t lodWidth = sourceWidth >> lod;
+    uint32_t lodHeight = sourceHeight >> lod;
+
+    // Minimum 1 pixel
+    if (lodWidth < 1) lodWidth = 1;
+    if (lodHeight < 1) lodHeight = 1;
+
+    // Ceiling division to get tile count
+    outTilesX = (lodWidth + tileResolution - 1) / tileResolution;
+    outTilesZ = (lodHeight + tileResolution - 1) / tileResolution;
+}
+
 bool TerrainImporter::isCacheValid(const TerrainImportConfig& config) const {
     return loadAndValidateMetadata(config);
 }
@@ -139,14 +155,14 @@ bool TerrainImporter::import(const TerrainImportConfig& config, ImportProgressCa
     worldWidth = sourceWidth * config.metersPerPixel;
     worldHeight = sourceHeight * config.metersPerPixel;
 
-    // Calculate tiles for LOD 0
-    // Tile size in world units at LOD 0 = tileResolution * metersPerPixel
-    float baseTileWorldSize = config.tileResolution * config.metersPerPixel;
-    tilesX = static_cast<uint32_t>(std::ceil(worldWidth / baseTileWorldSize));
-    tilesZ = static_cast<uint32_t>(std::ceil(worldHeight / baseTileWorldSize));
+    // Calculate tiles for LOD 0 based on pixel dimensions
+    // Each tile is exactly tileResolution x tileResolution pixels
+    tilesX = (sourceWidth + config.tileResolution - 1) / config.tileResolution;
+    tilesZ = (sourceHeight + config.tileResolution - 1) / config.tileResolution;
 
+    std::cout << "Source: " << sourceWidth << "x" << sourceHeight << " pixels" << std::endl;
     std::cout << "World size: " << worldWidth << "m x " << worldHeight << "m" << std::endl;
-    std::cout << "Generating " << tilesX << "x" << tilesZ << " tiles at LOD 0" << std::endl;
+    std::cout << "LOD 0: " << tilesX << "x" << tilesZ << " tiles (" << config.tileResolution << "x" << config.tileResolution << " each)" << std::endl;
 
     // Initialize LOD data with source
     lodData = sourceData;
@@ -228,23 +244,12 @@ void TerrainImporter::downsampleForLOD(uint32_t lod) {
 bool TerrainImporter::generateLODLevel(const TerrainImportConfig& config, uint32_t lod,
                                         ImportProgressCallback progressCallback,
                                         float progressBase, float progressRange) {
-    // Tile size in pixels for this LOD level
-    // LOD 0: tileResolution pixels = tileResolution meters
-    // LOD 1: tileResolution pixels = 2x meters (because source is downsampled)
-    // LOD 2: tileResolution pixels = 4x meters
-    // etc.
-
     uint32_t tileRes = config.tileResolution;
 
-    // Calculate how many tiles at this LOD level
-    // World is still the same size, but each tile covers more area
-    uint32_t lodTileWorldSize = tileRes * (1u << lod);  // World units per tile at this LOD
-    uint32_t numTilesX = static_cast<uint32_t>(std::ceil(worldWidth / (config.metersPerPixel * lodTileWorldSize)));
-    uint32_t numTilesZ = static_cast<uint32_t>(std::ceil(worldHeight / (config.metersPerPixel * lodTileWorldSize)));
-
-    // Pixels per tile in the current LOD source data
-    // At LOD 0: lodWidth = sourceWidth, pixels per world meter = 1/metersPerPixel
-    // At LOD 1: lodWidth = sourceWidth/2, so we need tileRes pixels but they cover 2x area
+    // Calculate number of tiles based on current LOD source dimensions
+    // Each tile is exactly tileRes x tileRes pixels extracted from lodData
+    uint32_t numTilesX = (lodWidth + tileRes - 1) / tileRes;  // Ceiling division
+    uint32_t numTilesZ = (lodHeight + tileRes - 1) / tileRes;
 
     uint32_t totalTiles = numTilesX * numTilesZ;
     uint32_t processedTiles = 0;
@@ -256,37 +261,21 @@ bool TerrainImporter::generateLODLevel(const TerrainImportConfig& config, uint32
 
     for (uint32_t tz = 0; tz < numTilesZ; tz++) {
         for (uint32_t tx = 0; tx < numTilesX; tx++) {
-            // Calculate source pixel coordinates for this tile
-            // Tile (tx, tz) at this LOD covers a specific region of the lodData
+            // Source pixel start for this tile
+            uint32_t srcStartX = tx * tileRes;
+            uint32_t srcStartZ = tz * tileRes;
 
-            float pixelsPerTile = static_cast<float>(tileRes);  // Output resolution
-            float srcPixelsPerTile = static_cast<float>(lodWidth) / numTilesX;
-
+            // Extract pixels directly - no resampling
             for (uint32_t py = 0; py < tileRes; py++) {
                 for (uint32_t px = 0; px < tileRes; px++) {
-                    // Map tile pixel to source pixel
-                    float srcX = (tx + static_cast<float>(px) / tileRes) * srcPixelsPerTile;
-                    float srcZ = (tz + static_cast<float>(py) / tileRes) * srcPixelsPerTile;
+                    uint32_t srcX = srcStartX + px;
+                    uint32_t srcZ = srcStartZ + py;
 
-                    // Bilinear interpolation
-                    uint32_t x0 = static_cast<uint32_t>(srcX);
-                    uint32_t z0 = static_cast<uint32_t>(srcZ);
-                    uint32_t x1 = std::min(x0 + 1, lodWidth - 1);
-                    uint32_t z1 = std::min(z0 + 1, lodHeight - 1);
+                    // Clamp to source bounds for edge tiles
+                    srcX = std::min(srcX, lodWidth - 1);
+                    srcZ = std::min(srcZ, lodHeight - 1);
 
-                    float fx = srcX - x0;
-                    float fz = srcZ - z0;
-
-                    float h00 = lodData[z0 * lodWidth + x0];
-                    float h10 = lodData[z0 * lodWidth + x1];
-                    float h01 = lodData[z1 * lodWidth + x0];
-                    float h11 = lodData[z1 * lodWidth + x1];
-
-                    float h0 = h00 * (1 - fx) + h10 * fx;
-                    float h1 = h01 * (1 - fx) + h11 * fx;
-                    float h = h0 * (1 - fz) + h1 * fz;
-
-                    tileData[py * tileRes + px] = static_cast<uint16_t>(std::clamp(h, 0.0f, 65535.0f));
+                    tileData[py * tileRes + px] = lodData[srcZ * lodWidth + srcX];
                 }
             }
 
