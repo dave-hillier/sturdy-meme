@@ -2,6 +2,8 @@
 #include "ShaderLoader.h"
 #include "PipelineBuilder.h"
 #include "BindingBuilder.h"
+#include "SnowUBO.h"
+#include "CloudShadowUBO.h"
 #include <SDL3/SDL.h>
 #include <cstring>
 #include <array>
@@ -313,13 +315,26 @@ bool GrassSystem::createComputePipeline() {
 
 bool GrassSystem::createGraphicsDescriptorSetLayout() {
     PipelineBuilder builder(getDevice());
+    // Grass system descriptor set layout:
+    // binding 0: UBO (main rendering uniforms)
+    // binding 1: instance buffer (SSBO) - vertex shader only
+    // binding 2: shadow map (sampler)
+    // binding 3: wind UBO - vertex shader only
+    // binding 4: light buffer (SSBO)
+    // binding 5: snow mask texture (sampler)
+    // binding 6: cloud shadow map (sampler)
+    // binding 10: snow UBO
+    // binding 11: cloud shadow UBO
     builder.addDescriptorBinding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1,
                                  VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
         .addDescriptorBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT)
         .addDescriptorBinding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT)
         .addDescriptorBinding(3, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT)
         .addDescriptorBinding(4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT)
-        .addDescriptorBinding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT);
+        .addDescriptorBinding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT)
+        .addDescriptorBinding(6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT)
+        .addDescriptorBinding(10, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT)
+        .addDescriptorBinding(11, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT);
 
     return builder.buildDescriptorSetLayout(getGraphicsPipelineHandles().descriptorSetLayout);
 }
@@ -589,7 +604,10 @@ void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>
                                         VkImageView shadowMapView, VkSampler shadowSampler,
                                         const std::vector<VkBuffer>& windBuffers,
                                         const std::vector<VkBuffer>& lightBuffersParam,
-                                        VkImageView terrainHeightMapView, VkSampler terrainHeightMapSampler) {
+                                        VkImageView terrainHeightMapView, VkSampler terrainHeightMapSampler,
+                                        const std::vector<VkBuffer>& snowBuffersParam,
+                                        const std::vector<VkBuffer>& cloudShadowBuffersParam,
+                                        VkImageView cloudShadowMapView, VkSampler cloudShadowMapSampler) {
     // Store terrain heightmap info for compute descriptor set updates
     this->terrainHeightMapView = terrainHeightMapView;
     this->terrainHeightMapSampler = terrainHeightMapSampler;
@@ -624,7 +642,25 @@ void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>
         lightBufferInfo.offset = 0;
         lightBufferInfo.range = VK_WHOLE_SIZE;  // sizeof(LightBuffer)
 
-        std::array<VkWriteDescriptorSet, 5> graphicsWrites{};
+        // Cloud shadow map (binding 6)
+        VkDescriptorImageInfo cloudShadowMapInfo{};
+        cloudShadowMapInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        cloudShadowMapInfo.imageView = cloudShadowMapView;
+        cloudShadowMapInfo.sampler = cloudShadowMapSampler;
+
+        // Snow UBO (binding 10)
+        VkDescriptorBufferInfo snowBufferInfo{};
+        snowBufferInfo.buffer = snowBuffersParam[0];
+        snowBufferInfo.offset = 0;
+        snowBufferInfo.range = sizeof(SnowUBO);
+
+        // Cloud shadow UBO (binding 11)
+        VkDescriptorBufferInfo cloudShadowBufferInfo{};
+        cloudShadowBufferInfo.buffer = cloudShadowBuffersParam[0];
+        cloudShadowBufferInfo.offset = 0;
+        cloudShadowBufferInfo.range = sizeof(CloudShadowUBO);
+
+        std::array<VkWriteDescriptorSet, 8> graphicsWrites{};
 
         graphicsWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         graphicsWrites[0].dstSet = particleSystem.getGraphicsDescriptorSet(set);
@@ -665,6 +701,33 @@ void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>
         graphicsWrites[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         graphicsWrites[4].descriptorCount = 1;
         graphicsWrites[4].pBufferInfo = &lightBufferInfo;
+
+        // binding 6: cloud shadow map
+        graphicsWrites[5].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        graphicsWrites[5].dstSet = particleSystem.getGraphicsDescriptorSet(set);
+        graphicsWrites[5].dstBinding = 6;
+        graphicsWrites[5].dstArrayElement = 0;
+        graphicsWrites[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        graphicsWrites[5].descriptorCount = 1;
+        graphicsWrites[5].pImageInfo = &cloudShadowMapInfo;
+
+        // binding 10: snow UBO
+        graphicsWrites[6].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        graphicsWrites[6].dstSet = particleSystem.getGraphicsDescriptorSet(set);
+        graphicsWrites[6].dstBinding = 10;
+        graphicsWrites[6].dstArrayElement = 0;
+        graphicsWrites[6].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        graphicsWrites[6].descriptorCount = 1;
+        graphicsWrites[6].pBufferInfo = &snowBufferInfo;
+
+        // binding 11: cloud shadow UBO
+        graphicsWrites[7].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        graphicsWrites[7].dstSet = particleSystem.getGraphicsDescriptorSet(set);
+        graphicsWrites[7].dstBinding = 11;
+        graphicsWrites[7].dstArrayElement = 0;
+        graphicsWrites[7].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        graphicsWrites[7].descriptorCount = 1;
+        graphicsWrites[7].pBufferInfo = &cloudShadowBufferInfo;
 
         vkUpdateDescriptorSets(dev, static_cast<uint32_t>(graphicsWrites.size()),
                                graphicsWrites.data(), 0, nullptr);

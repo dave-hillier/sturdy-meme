@@ -230,7 +230,9 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
         windBuffers[i] = windSystem.getBufferInfo(i).buffer;
     }
     grassSystem.updateDescriptorSets(device, uniformBuffers, shadowSystem.getShadowImageView(), shadowSystem.getShadowSampler(), windBuffers, lightBuffers,
-                                      terrainSystem.getHeightMapView(), terrainSystem.getHeightMapSampler());
+                                      terrainSystem.getHeightMapView(), terrainSystem.getHeightMapSampler(),
+                                      snowBuffers, cloudShadowBuffers,
+                                      cloudShadowSystem.getShadowMapView(), cloudShadowSystem.getShadowMapSampler());
 
     // Update terrain descriptor sets with shared resources
     terrainSystem.updateDescriptorSets(device, uniformBuffers, shadowSystem.getShadowImageView(), shadowSystem.getShadowSampler());
