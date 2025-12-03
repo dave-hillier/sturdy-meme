@@ -131,8 +131,20 @@ float computeScreenSpaceEdgeLength(vec3 p0, vec3 p1) {
 // Gradient alignment weight - higher values = more subdivision on cliffs
 const float GRADIENT_ALIGNMENT_WEIGHT = 2.0;
 
+// Distance-based LOD parameters
+// Force high tessellation near the camera for player interaction
+const float NEAR_CAMERA_DISTANCE = 50.0;    // Within this distance, strongly boost tessellation
+const float NEAR_CAMERA_BOOST = 4.0;        // Multiplier for very close triangles
+
+// Height error tolerance parameters
+// Within CLOSE_DISTANCE: use strict world-space error tolerance (for physics/collision)
+// Beyond CLOSE_DISTANCE: use screen-space projected error (for visual quality)
+const float CLOSE_DISTANCE = 10.0;          // Distance within which world-space accuracy is critical
+const float BASE_ERROR_TOLERANCE = 0.1;     // Max allowed height error (in world units) near camera
+
 // Compute LOD for a triangle - returns longest edge length in pixels
 // Modified to penalize triangles stretched along the terrain gradient (perpendicular to contours)
+// Also includes camera distance priority and height error estimation
 float computeTriangleLOD(vec2 v0, vec2 v1, vec2 v2) {
     vec3 p0 = uvToWorldPos(v0);
     vec3 p1 = uvToWorldPos(v1);
@@ -141,8 +153,75 @@ float computeTriangleLOD(vec2 v0, vec2 v1, vec2 v2) {
     // Find longest edge (in LEB, the longest edge is always between v1 and v2)
     float e12 = computeScreenSpaceEdgeLength(p1, p2);
 
-    // Compute gradient at triangle center
+    // Compute triangle center
     vec2 centerUV = (v0 + v1 + v2) / 3.0;
+    vec3 centerWorld = (p0 + p1 + p2) / 3.0;
+
+    // === Distance-based LOD boost ===
+    // Prioritize high tessellation near the camera for player interaction
+    float distToCamera = distance(cameraPosition.xyz, centerWorld);
+    float distanceFactor = 1.0;
+    if (distToCamera < NEAR_CAMERA_DISTANCE) {
+        // Smoothly boost tessellation as we get closer
+        // At distance 0: boost = NEAR_CAMERA_BOOST
+        // At NEAR_CAMERA_DISTANCE: boost = 1.0
+        float t = distToCamera / NEAR_CAMERA_DISTANCE;
+        distanceFactor = mix(NEAR_CAMERA_BOOST, 1.0, t * t);  // Quadratic falloff
+    }
+    e12 *= distanceFactor;
+
+    // === Height error estimation ===
+    // Check if the triangle's linear interpolation matches the actual heightmap
+    // This catches cases where terrain varies significantly within the triangle
+    float actualCenterHeight = sampleHeight(centerUV);
+    float interpolatedCenterHeight = (p0.y + p1.y + p2.y) / 3.0;
+    float heightError = abs(actualCenterHeight - interpolatedCenterHeight);
+
+    // Also sample edge midpoints for better error estimation
+    vec2 midUV01 = (v0 + v1) * 0.5;
+    vec2 midUV12 = (v1 + v2) * 0.5;
+    vec2 midUV20 = (v2 + v0) * 0.5;
+
+    float mid01Height = sampleHeight(midUV01);
+    float mid12Height = sampleHeight(midUV12);
+    float mid20Height = sampleHeight(midUV20);
+
+    float interp01 = (p0.y + p1.y) * 0.5;
+    float interp12 = (p1.y + p2.y) * 0.5;
+    float interp20 = (p2.y + p0.y) * 0.5;
+
+    heightError = max(heightError, abs(mid01Height - interp01));
+    heightError = max(heightError, abs(mid12Height - interp12));
+    heightError = max(heightError, abs(mid20Height - interp20));
+
+    // Height error handling depends on distance:
+    // - Near camera: use world-space error tolerance (for player interaction/physics)
+    // - Far from camera: use screen-space error (for visual quality)
+
+    if (distToCamera <= CLOSE_DISTANCE) {
+        // Near camera: strict world-space error tolerance
+        // Player needs accurate collision, so enforce tight error bounds
+        if (heightError > BASE_ERROR_TOLERANCE) {
+            float errorRatio = heightError / BASE_ERROR_TOLERANCE;
+            e12 = max(e12, SPLIT_THRESHOLD * errorRatio);
+        }
+    } else {
+        // Far from camera: screen-space error becomes more important
+        // Project height error to approximate screen pixels
+        // Height error at distance D subtends angle ≈ error/D radians
+        // Multiply by screen height to get pixel equivalent
+        float errorAngle = heightError / distToCamera;
+        float errorScreenPixels = errorAngle * screenSize.y * 0.5;
+
+        // If the projected error is significant on screen, force subdivision
+        // Use half the split threshold as our screen-space error target
+        float targetScreenError = SPLIT_THRESHOLD * 0.5;
+        if (errorScreenPixels > targetScreenError) {
+            e12 = max(e12, errorScreenPixels * 2.0);
+        }
+    }
+
+    // === Gradient-based refinement ===
     vec2 gradient = computeGradient(centerUV);
     float slopeMag = computeSlopeMagnitude(gradient);
 
