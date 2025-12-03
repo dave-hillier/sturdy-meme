@@ -4,15 +4,21 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <optional>
 #include <cassert>
+#include <cstdint>
 
 class Mesh;
 class Texture;
+
+// Material ID type - use MaterialRegistry to convert to descriptor sets
+using MaterialId = uint32_t;
+constexpr MaterialId INVALID_MATERIAL_ID = ~0u;
 
 // A fully-configured renderable object - can only be created via RenderableBuilder
 struct Renderable {
     glm::mat4 transform;
     Mesh* mesh;
-    Texture* texture;
+    Texture* texture;  // Kept for backwards compatibility, prefer materialId
+    MaterialId materialId = INVALID_MATERIAL_ID;
     float roughness = 0.5f;
     float metallic = 0.0f;
     float emissiveIntensity = 0.0f;
@@ -35,6 +41,9 @@ public:
 
     // Required: Set the texture for this renderable
     RenderableBuilder& withTexture(Texture* texture);
+
+    // Optional: Set material ID (for MaterialRegistry-based rendering)
+    RenderableBuilder& withMaterialId(MaterialId id);
 
     // Required: Set the world transform
     RenderableBuilder& withTransform(const glm::mat4& transform);
@@ -68,6 +77,7 @@ private:
     std::optional<glm::mat4> transform_;
     Mesh* mesh_ = nullptr;
     Texture* texture_ = nullptr;
+    MaterialId materialId_ = INVALID_MATERIAL_ID;
     float roughness_ = 0.5f;
     float metallic_ = 0.0f;
     float emissiveIntensity_ = 0.0f;

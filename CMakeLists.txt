@@ -36,6 +36,7 @@ set(SOURCES
     src/BindingBuilder.cpp
     src/DescriptorManager.cpp
     src/MaterialDescriptorFactory.cpp
+    src/MaterialRegistry.cpp
     src/RenderableBuilder.cpp
     src/GrassSystem.cpp
     src/CelestialCalculator.cpp

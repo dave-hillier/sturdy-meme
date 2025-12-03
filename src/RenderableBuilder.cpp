@@ -11,6 +11,11 @@ RenderableBuilder& RenderableBuilder::withTexture(Texture* texture) {
     return *this;
 }
 
+RenderableBuilder& RenderableBuilder::withMaterialId(MaterialId id) {
+    materialId_ = id;
+    return *this;
+}
+
 RenderableBuilder& RenderableBuilder::withTransform(const glm::mat4& transform) {
     transform_ = transform;
     return *this;
@@ -69,6 +74,7 @@ Renderable RenderableBuilder::build() const {
     renderable.transform = transform_.value();
     renderable.mesh = mesh_;
     renderable.texture = texture_;
+    renderable.materialId = materialId_;
     renderable.roughness = roughness_;
     renderable.metallic = metallic_;
     renderable.emissiveIntensity = emissiveIntensity_;
