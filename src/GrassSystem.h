@@ -51,7 +51,10 @@ public:
                               VkImageView shadowMapView, VkSampler shadowSampler,
                               const std::vector<VkBuffer>& windBuffers,
                               const std::vector<VkBuffer>& lightBuffers,
-                              VkImageView terrainHeightMapView, VkSampler terrainHeightMapSampler);
+                              VkImageView terrainHeightMapView, VkSampler terrainHeightMapSampler,
+                              const std::vector<VkBuffer>& snowBuffers,
+                              const std::vector<VkBuffer>& cloudShadowBuffers,
+                              VkImageView cloudShadowMapView, VkSampler cloudShadowMapSampler);
 
     void updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos, const glm::mat4& viewProj,
                         float terrainSize, float terrainHeightScale);
