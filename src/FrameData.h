@@ -34,7 +34,10 @@ struct FrameData {
 
     // Lighting
     glm::vec3 sunDirection = glm::vec3(0.0f, 1.0f, 0.0f);
+    glm::vec3 sunColor = glm::vec3(1.0f);
     float sunIntensity = 1.0f;
+    glm::vec3 moonDirection = glm::vec3(0.0f, 1.0f, 0.0f);
+    float moonIntensity = 0.0f;
 
     // Player (for interaction systems like grass displacement)
     glm::vec3 playerPosition = glm::vec3(0.0f);
@@ -43,4 +46,19 @@ struct FrameData {
     // Terrain parameters (for systems that need terrain info)
     float terrainSize = 1024.0f;
     float heightScale = 100.0f;
+
+    // Wind parameters (from WindSystem/EnvironmentSettings)
+    glm::vec2 windDirection = glm::vec2(1.0f, 0.0f);
+    float windStrength = 1.0f;
+    float windSpeed = 5.0f;
+    float gustFrequency = 0.5f;
+    float gustAmplitude = 0.3f;
+
+    // Weather state
+    uint32_t weatherType = 0;       // 0 = clear, 1 = rain, 2 = snow
+    float weatherIntensity = 0.0f;
+
+    // Snow parameters
+    float snowAmount = 0.0f;
+    glm::vec3 snowColor = glm::vec3(0.95f, 0.97f, 1.0f);
 };

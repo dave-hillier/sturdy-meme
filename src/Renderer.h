@@ -37,6 +37,9 @@
 #include "SkinnedMesh.h"
 #include "HiZSystem.h"
 #include "FrameData.h"
+#include "RenderContext.h"
+#include "RenderPipeline.h"
+#include "GlobalBufferManager.h"
 
 struct PushConstants {
     glm::mat4 model;
@@ -225,6 +228,9 @@ private:
     // Build per-frame shared state from camera and timing
     FrameData buildFrameData(const Camera& camera, float deltaTime, float time) const;
 
+    // Build render resources snapshot for pipeline stages
+    RenderResources buildRenderResources(uint32_t swapchainImageIndex) const;
+
     SDL_Window* window = nullptr;
     std::string resourcePath;
 
@@ -262,6 +268,9 @@ private:
     HiZSystem hiZSystem;
     EnvironmentSettings environmentSettings;
     bool useVolumetricSnow = true;  // Use new volumetric system by default
+
+    // Render pipeline (stages abstraction - for future refactoring)
+    RenderPipeline renderPipeline;
 
     std::vector<VkFramebuffer> framebuffers;
     VkCommandPool commandPool = VK_NULL_HANDLE;

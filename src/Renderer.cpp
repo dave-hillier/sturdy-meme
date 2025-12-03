@@ -1560,7 +1560,72 @@ FrameData Renderer::buildFrameData(const Camera& camera, float deltaTime, float 
     frame.terrainSize = terrainConfig.size;
     frame.heightScale = terrainConfig.heightScale;
 
+    // Populate wind/weather/snow data
+    const auto& envSettings = windSystem.getEnvironmentSettings();
+    frame.windDirection = envSettings.windDirection;
+    frame.windStrength = envSettings.windStrength;
+    frame.windSpeed = envSettings.windSpeed;
+    frame.gustFrequency = envSettings.gustFrequency;
+    frame.gustAmplitude = envSettings.gustAmplitude;
+
+    frame.weatherType = weatherSystem.getWeatherType();
+    frame.weatherIntensity = weatherSystem.getIntensity();
+
+    frame.snowAmount = environmentSettings.snowAmount;
+    frame.snowColor = environmentSettings.snowColor;
+
+    // Lighting data
+    frame.sunColor = glm::vec3(ubo->sunColor);
+    frame.moonDirection = glm::normalize(glm::vec3(ubo->moonDirection));
+    frame.moonIntensity = ubo->moonDirection.w;
+
     return frame;
+}
+
+RenderResources Renderer::buildRenderResources(uint32_t swapchainImageIndex) const {
+    RenderResources resources;
+
+    // HDR target (from PostProcessSystem)
+    resources.hdrRenderPass = postProcessSystem.getHDRRenderPass();
+    resources.hdrFramebuffer = postProcessSystem.getHDRFramebuffer();
+    resources.hdrExtent = postProcessSystem.getExtent();
+    resources.hdrColorView = postProcessSystem.getHDRColorView();
+    resources.hdrDepthView = postProcessSystem.getHDRDepthView();
+
+    // Shadow resources (from ShadowSystem)
+    resources.shadowRenderPass = shadowSystem.getShadowRenderPass();
+    resources.shadowMapView = shadowSystem.getShadowImageView();
+    resources.shadowSampler = shadowSystem.getShadowSampler();
+    resources.shadowPipeline = shadowSystem.getShadowPipeline();
+    resources.shadowPipelineLayout = shadowSystem.getShadowPipelineLayout();
+
+    // Copy cascade matrices
+    const auto& cascadeMatrices = shadowSystem.getCascadeMatrices();
+    for (size_t i = 0; i < cascadeMatrices.size(); ++i) {
+        resources.cascadeMatrices[i] = cascadeMatrices[i];
+    }
+
+    // Copy cascade split depths
+    const auto& splitDepths = shadowSystem.getCascadeSplitDepths();
+    for (size_t i = 0; i < std::min(splitDepths.size(), size_t(4)); ++i) {
+        resources.cascadeSplitDepths[i] = splitDepths[i];
+    }
+
+    // Bloom output (from BloomSystem)
+    resources.bloomOutput = bloomSystem.getBloomOutput();
+    resources.bloomSampler = bloomSystem.getBloomSampler();
+
+    // Swapchain target
+    resources.swapchainRenderPass = renderPass;
+    resources.swapchainFramebuffer = framebuffers[swapchainImageIndex];
+    resources.swapchainExtent = {vulkanContext.getWidth(), vulkanContext.getHeight()};
+
+    // Main scene pipeline
+    resources.graphicsPipeline = graphicsPipeline;
+    resources.pipelineLayout = pipelineLayout;
+    resources.descriptorSetLayout = descriptorSetLayout;
+
+    return resources;
 }
 
 // Render pass recording helpers - pure command recording, no state mutation
