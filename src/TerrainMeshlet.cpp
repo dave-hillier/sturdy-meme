@@ -37,14 +37,18 @@ void TerrainMeshlet::subdivideLEB(const glm::vec2& v0, const glm::vec2& v1, cons
         return;
     }
 
-    // LEB bisection: split along longest edge (always v1-v2 in our convention)
+    // LEB bisection: split the edge opposite to v0 (the edge v1-v2)
+    // This follows the LEB convention where:
+    // - v0 is the apex (opposite to the longest edge)
+    // - v1, v2 are the endpoints of the longest edge
     glm::vec2 midpoint = (v1 + v2) * 0.5f;
 
-    // Create two child triangles with proper winding
-    // Left child: (midpoint, v0, v1)
-    // Right child: (midpoint, v2, v0)
-    subdivideLEB(midpoint, v0, v1, depth + 1, targetDepth, vertices, indices, vertexMap);
-    subdivideLEB(midpoint, v2, v0, depth + 1, targetDepth, vertices, indices, vertexMap);
+    // Create two child triangles following LEB convention:
+    // Left child: apex=v1, longest edge endpoints=(v0, midpoint)
+    // Right child: apex=v2, longest edge endpoints=(midpoint, v0)
+    // This maintains proper winding and LEB structure
+    subdivideLEB(v1, v0, midpoint, depth + 1, targetDepth, vertices, indices, vertexMap);
+    subdivideLEB(v2, midpoint, v0, depth + 1, targetDepth, vertices, indices, vertexMap);
 }
 
 void TerrainMeshlet::generateMeshletGeometry(uint32_t level,
@@ -55,16 +59,64 @@ void TerrainMeshlet::generateMeshletGeometry(uint32_t level,
 
     std::unordered_map<uint64_t, uint16_t> vertexMap;
 
-    // Start with a unit right triangle in barycentric-like coordinates
-    // These vertices represent positions within the parent CBT triangle
-    // v0 = apex (opposite to longest edge)
-    // v1, v2 = endpoints of longest edge
-    glm::vec2 v0(0.0f, 0.0f);
-    glm::vec2 v1(1.0f, 0.0f);
-    glm::vec2 v2(0.0f, 1.0f);
+    // Generate a uniformly tessellated triangle using barycentric coordinates.
+    // The output (u, v) coordinates are interpreted in the shader as:
+    //   weight0 = 1 - u - v  (contribution from v0)
+    //   weight1 = u          (contribution from v1)
+    //   weight2 = v          (contribution from v2)
+    //
+    // So the triangle corners are:
+    //   (0, 0) -> 100% v0
+    //   (1, 0) -> 100% v1
+    //   (0, 1) -> 100% v2
+    //
+    // We use a regular grid subdivision for uniform tessellation.
+    // Each subdivision level doubles the edge resolution.
+    uint32_t edgeSubdivisions = 1u << level;  // 2^level subdivisions per edge
 
-    // Recursively subdivide
-    subdivideLEB(v0, v1, v2, 0, level, vertices, indices, vertexMap);
+    // Generate vertices as a grid in barycentric space
+    // For a triangle with n subdivisions per edge, we need vertices at
+    // (i/n, j/n) where i + j <= n
+    for (uint32_t i = 0; i <= edgeSubdivisions; ++i) {
+        for (uint32_t j = 0; j <= edgeSubdivisions - i; ++j) {
+            float u = static_cast<float>(i) / static_cast<float>(edgeSubdivisions);
+            float v = static_cast<float>(j) / static_cast<float>(edgeSubdivisions);
+            vertices.push_back(glm::vec2(u, v));
+        }
+    }
+
+    // Generate indices for the triangles
+    // We iterate through the grid and create triangles
+    auto getVertexIndex = [edgeSubdivisions](uint32_t i, uint32_t j) -> uint16_t {
+        // Vertices are stored row by row, where row i has (edgeSubdivisions - i + 1) vertices
+        // Index = sum of previous rows + j
+        // Sum of (n+1) + n + (n-1) + ... + (n-i+2) = i*(n+1) - i*(i-1)/2
+        uint32_t n = edgeSubdivisions;
+        uint32_t rowStart = i * (n + 1) - (i * (i - 1)) / 2;
+        return static_cast<uint16_t>(rowStart + j);
+    };
+
+    for (uint32_t i = 0; i < edgeSubdivisions; ++i) {
+        for (uint32_t j = 0; j < edgeSubdivisions - i; ++j) {
+            // Two triangles form a parallelogram (except at edges)
+            // Triangle 1: (i,j), (i+1,j), (i,j+1)
+            uint16_t idx00 = getVertexIndex(i, j);
+            uint16_t idx10 = getVertexIndex(i + 1, j);
+            uint16_t idx01 = getVertexIndex(i, j + 1);
+
+            indices.push_back(idx00);
+            indices.push_back(idx10);
+            indices.push_back(idx01);
+
+            // Triangle 2: (i+1,j), (i+1,j+1), (i,j+1) - only if not at the diagonal edge
+            if (j < edgeSubdivisions - i - 1) {
+                uint16_t idx11 = getVertexIndex(i + 1, j + 1);
+                indices.push_back(idx10);
+                indices.push_back(idx11);
+                indices.push_back(idx01);
+            }
+        }
+    }
 
     SDL_Log("TerrainMeshlet: Generated %zu vertices, %zu indices (%zu triangles) at level %u",
             vertices.size(), indices.size(), indices.size() / 3, level);
