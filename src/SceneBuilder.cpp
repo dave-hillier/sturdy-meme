@@ -7,8 +7,23 @@ bool SceneBuilder::init(const InitInfo& info) {
 
     if (!createMeshes(info)) return false;
     if (!loadTextures(info)) return false;
+    registerMaterials();
     createSceneObjects();
     return true;
+}
+
+void SceneBuilder::registerMaterials() {
+    // Register crate material
+    crateMaterialId = materialRegistry.registerMaterial("crate", crateTexture, crateNormalMap);
+
+    // Register metal material
+    metalMaterialId = materialRegistry.registerMaterial("metal", metalTexture, metalNormalMap);
+
+    // Register white material (for vertex-colored objects like animated characters)
+    // Uses white texture with a flat normal map
+    whiteMaterialId = materialRegistry.registerMaterial("white", whiteTexture, groundNormalMap);
+
+    SDL_Log("SceneBuilder: Registered %zu materials", materialRegistry.getMaterialCount());
 }
 
 float SceneBuilder::getTerrainHeight(float x, float z) const {
@@ -162,6 +177,7 @@ void SceneBuilder::createSceneObjects() {
         .atPosition(glm::vec3(crateX, getGroundY(crateX, crateZ, 0.5f), crateZ))
         .withMesh(&cubeMesh)
         .withTexture(&crateTexture)
+        .withMaterialId(crateMaterialId)
         .withRoughness(0.4f)
         .withMetallic(0.0f)
         .build());
@@ -175,6 +191,7 @@ void SceneBuilder::createSceneObjects() {
         .withTransform(rotatedCube)
         .withMesh(&cubeMesh)
         .withTexture(&crateTexture)
+        .withMaterialId(crateMaterialId)
         .withRoughness(0.4f)
         .withMetallic(0.0f)
         .build());
@@ -185,6 +202,7 @@ void SceneBuilder::createSceneObjects() {
         .atPosition(glm::vec3(polishedSphereX, getGroundY(polishedSphereX, polishedSphereZ, 0.5f), polishedSphereZ))
         .withMesh(&sphereMesh)
         .withTexture(&metalTexture)
+        .withMaterialId(metalMaterialId)
         .withRoughness(0.1f)
         .withMetallic(1.0f)
         .build());
@@ -195,6 +213,7 @@ void SceneBuilder::createSceneObjects() {
         .atPosition(glm::vec3(roughSphereX, getGroundY(roughSphereX, roughSphereZ, 0.5f), roughSphereZ))
         .withMesh(&sphereMesh)
         .withTexture(&metalTexture)
+        .withMaterialId(metalMaterialId)
         .withRoughness(0.5f)
         .withMetallic(1.0f)
         .build());
@@ -205,6 +224,7 @@ void SceneBuilder::createSceneObjects() {
         .atPosition(glm::vec3(polishedCubeX, getGroundY(polishedCubeX, polishedCubeZ, 0.5f), polishedCubeZ))
         .withMesh(&cubeMesh)
         .withTexture(&metalTexture)
+        .withMaterialId(metalMaterialId)
         .withRoughness(0.1f)
         .withMetallic(1.0f)
         .build());
@@ -218,6 +238,7 @@ void SceneBuilder::createSceneObjects() {
         .withTransform(brushedCube)
         .withMesh(&cubeMesh)
         .withTexture(&metalTexture)
+        .withMaterialId(metalMaterialId)
         .withRoughness(0.6f)
         .withMetallic(1.0f)
         .build());
@@ -232,6 +253,7 @@ void SceneBuilder::createSceneObjects() {
         .withTransform(glowingSphereTransform)
         .withMesh(&sphereMesh)
         .withTexture(&metalTexture)
+        .withMaterialId(metalMaterialId)
         .withRoughness(0.2f)
         .withMetallic(0.0f)
         .withEmissiveIntensity(25.0f)
@@ -248,6 +270,7 @@ void SceneBuilder::createSceneObjects() {
         .withTransform(blueLightTransform)
         .withMesh(&sphereMesh)
         .withTexture(&metalTexture)
+        .withMaterialId(metalMaterialId)
         .withRoughness(0.2f)
         .withMetallic(0.0f)
         .withEmissiveIntensity(4.0f)
@@ -264,6 +287,7 @@ void SceneBuilder::createSceneObjects() {
         .withTransform(greenLightTransform)
         .withMesh(&sphereMesh)
         .withTexture(&metalTexture)
+        .withMaterialId(metalMaterialId)
         .withRoughness(0.2f)
         .withMetallic(0.0f)
         .withEmissiveIntensity(3.0f)
@@ -277,6 +301,7 @@ void SceneBuilder::createSceneObjects() {
         .atPosition(glm::vec3(debugCubeX, getGroundY(debugCubeX, debugCubeZ, 5.0f), debugCubeZ))
         .withMesh(&cubeMesh)
         .withTexture(&crateTexture)
+        .withMaterialId(crateMaterialId)
         .withRoughness(0.3f)
         .withMetallic(0.0f)
         .withEmissiveIntensity(5.0f)
@@ -311,6 +336,7 @@ void SceneBuilder::createSceneObjects() {
             .withTransform(buildCharacterTransform(glm::vec3(playerX, playerTerrainY, playerZ), 0.0f))
             .withMesh(&animatedCharacter.getMesh())
             .withTexture(&whiteTexture)  // White texture so vertex colors show through
+            .withMaterialId(whiteMaterialId)
             .withRoughness(charRoughness)
             .withMetallic(charMetallic)
             .withEmissiveColor(charEmissiveColor)
@@ -323,6 +349,7 @@ void SceneBuilder::createSceneObjects() {
             .atPosition(glm::vec3(playerX, playerTerrainY + 0.9f, playerZ))
             .withMesh(&capsuleMesh)
             .withTexture(&metalTexture)
+            .withMaterialId(metalMaterialId)
             .withRoughness(0.3f)
             .withMetallic(0.8f)
             .withCastsShadow(true)
@@ -336,6 +363,7 @@ void SceneBuilder::createSceneObjects() {
         .atPosition(glm::vec3(flagPoleX, getGroundY(flagPoleX, flagPoleZ, 1.5f), flagPoleZ))
         .withMesh(&flagPoleMesh)
         .withTexture(&metalTexture)
+        .withMaterialId(metalMaterialId)
         .withRoughness(0.4f)
         .withMetallic(0.9f)
         .withCastsShadow(true)
@@ -347,6 +375,7 @@ void SceneBuilder::createSceneObjects() {
         .withTransform(glm::mat4(1.0f))  // Identity, will be handled differently
         .withMesh(&flagClothMesh)
         .withTexture(&crateTexture)  // Using crate texture for now
+        .withMaterialId(crateMaterialId)
         .withRoughness(0.6f)
         .withMetallic(0.0f)
         .withCastsShadow(true)

@@ -1230,17 +1230,18 @@ void Renderer::render(const Camera& camera) {
     float deltaTime = std::chrono::duration<float>(currentTime - lastTime).count();
     lastTime = currentTime;
 
-    // Update subsystems (state mutations)
-    windSystem.update(deltaTime);
-    windSystem.updateUniforms(currentFrame);
+    // Build per-frame shared state
+    FrameData frame = buildFrameData(camera, deltaTime, grassTime);
 
-    glm::mat4 viewProj = camera.getProjectionMatrix() * camera.getViewMatrix();
-    const auto& terrainConfig = terrainSystem.getConfig();
-    grassSystem.updateUniforms(currentFrame, camera.getPosition(), viewProj,
-                               terrainConfig.size, terrainConfig.heightScale);
-    grassSystem.updateDisplacementSources(playerPosition, playerCapsuleRadius, deltaTime);
-    weatherSystem.updateUniforms(currentFrame, camera.getPosition(), viewProj, deltaTime, grassTime, windSystem);
-    terrainSystem.updateUniforms(currentFrame, camera.getPosition(), camera.getViewMatrix(), camera.getProjectionMatrix(),
+    // Update subsystems (state mutations)
+    windSystem.update(frame.deltaTime);
+    windSystem.updateUniforms(frame.frameIndex);
+
+    grassSystem.updateUniforms(frame.frameIndex, frame.cameraPosition, frame.viewProj,
+                               frame.terrainSize, frame.heightScale);
+    grassSystem.updateDisplacementSources(frame.playerPosition, frame.playerCapsuleRadius, frame.deltaTime);
+    weatherSystem.updateUniforms(frame.frameIndex, frame.cameraPosition, frame.viewProj, frame.deltaTime, frame.time, windSystem);
+    terrainSystem.updateUniforms(frame.frameIndex, frame.cameraPosition, frame.view, frame.projection,
                                   volumetricSnowSystem.getCascadeParams(), useVolumetricSnow, MAX_SNOW_HEIGHT);
 
     // Update snow mask system - accumulation/melting based on weather type
@@ -1248,72 +1249,67 @@ void Renderer::render(const Camera& camera) {
     float weatherIntensity = weatherSystem.getIntensity();
     // Auto-adjust snow amount based on weather state
     if (isSnowing && weatherIntensity > 0.0f) {
-        environmentSettings.snowAmount = glm::min(environmentSettings.snowAmount + environmentSettings.snowAccumulationRate * deltaTime, 1.0f);
+        environmentSettings.snowAmount = glm::min(environmentSettings.snowAmount + environmentSettings.snowAccumulationRate * frame.deltaTime, 1.0f);
     } else if (environmentSettings.snowAmount > 0.0f) {
-        environmentSettings.snowAmount = glm::max(environmentSettings.snowAmount - environmentSettings.snowMeltRate * deltaTime, 0.0f);
+        environmentSettings.snowAmount = glm::max(environmentSettings.snowAmount - environmentSettings.snowMeltRate * frame.deltaTime, 0.0f);
     }
-    snowMaskSystem.setMaskCenter(camera.getPosition());
-    snowMaskSystem.updateUniforms(currentFrame, deltaTime, isSnowing, weatherIntensity, environmentSettings);
+    snowMaskSystem.setMaskCenter(frame.cameraPosition);
+    snowMaskSystem.updateUniforms(frame.frameIndex, frame.deltaTime, isSnowing, weatherIntensity, environmentSettings);
 
     // Update volumetric snow system
-    volumetricSnowSystem.setCameraPosition(camera.getPosition());
+    volumetricSnowSystem.setCameraPosition(frame.cameraPosition);
     volumetricSnowSystem.setWindDirection(glm::vec2(windSystem.getEnvironmentSettings().windDirection.x,
                                                      windSystem.getEnvironmentSettings().windDirection.y));
     volumetricSnowSystem.setWindStrength(windSystem.getEnvironmentSettings().windStrength);
-    volumetricSnowSystem.updateUniforms(currentFrame, deltaTime, isSnowing, weatherIntensity, environmentSettings);
+    volumetricSnowSystem.updateUniforms(frame.frameIndex, frame.deltaTime, isSnowing, weatherIntensity, environmentSettings);
 
     // Add player footprint interaction with snow
     if (environmentSettings.snowAmount > 0.1f) {
-        snowMaskSystem.addInteraction(playerPosition, playerCapsuleRadius * 1.5f, 0.3f);
-        volumetricSnowSystem.addInteraction(playerPosition, playerCapsuleRadius * 1.5f, 0.3f);
+        snowMaskSystem.addInteraction(frame.playerPosition, frame.playerCapsuleRadius * 1.5f, 0.3f);
+        volumetricSnowSystem.addInteraction(frame.playerPosition, frame.playerCapsuleRadius * 1.5f, 0.3f);
     }
 
     // Update leaf system with player position (using camera as player proxy)
     // TODO: Integrate actual player velocity from Player class for proper disruption
-    glm::vec3 playerPos = camera.getPosition();
     glm::vec3 playerVel = glm::vec3(0.0f);  // Will be updated when player movement tracking is added
-    leafSystem.updateUniforms(currentFrame, camera.getPosition(), viewProj, playerPos, playerVel, deltaTime, grassTime,
-                               terrainConfig.size, terrainConfig.heightScale);
+    leafSystem.updateUniforms(frame.frameIndex, frame.cameraPosition, frame.viewProj, frame.cameraPosition, playerVel, frame.deltaTime, frame.time,
+                               frame.terrainSize, frame.heightScale);
 
     // Begin command buffer recording
-    vkResetCommandBuffer(commandBuffers[currentFrame], 0);
+    vkResetCommandBuffer(commandBuffers[frame.frameIndex], 0);
 
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    vkBeginCommandBuffer(commandBuffers[currentFrame], &beginInfo);
+    vkBeginCommandBuffer(commandBuffers[frame.frameIndex], &beginInfo);
 
-    VkCommandBuffer cmd = commandBuffers[currentFrame];
+    VkCommandBuffer cmd = commandBuffers[frame.frameIndex];
 
     // Terrain compute pass (adaptive subdivision)
-    terrainSystem.recordCompute(cmd, currentFrame);
+    terrainSystem.recordCompute(cmd, frame.frameIndex);
 
     // Catmull-Clark subdivision compute pass
-    catmullClarkSystem.recordCompute(cmd, currentFrame);
+    catmullClarkSystem.recordCompute(cmd, frame.frameIndex);
 
     // Grass displacement update (player/NPC interaction)
-    grassSystem.recordDisplacementUpdate(cmd, currentFrame);
+    grassSystem.recordDisplacementUpdate(cmd, frame.frameIndex);
 
     // Grass compute pass
-    grassSystem.recordResetAndCompute(cmd, currentFrame, grassTime);
+    grassSystem.recordResetAndCompute(cmd, frame.frameIndex, frame.time);
 
     // Weather particle compute pass
-    weatherSystem.recordResetAndCompute(cmd, currentFrame, grassTime, deltaTime);
+    weatherSystem.recordResetAndCompute(cmd, frame.frameIndex, frame.time, frame.deltaTime);
 
     // Snow mask accumulation compute pass
-    snowMaskSystem.recordCompute(cmd, currentFrame);
+    snowMaskSystem.recordCompute(cmd, frame.frameIndex);
 
     // Volumetric snow cascade compute pass
-    volumetricSnowSystem.recordCompute(cmd, currentFrame);
+    volumetricSnowSystem.recordCompute(cmd, frame.frameIndex);
 
     // Leaf particle compute pass
-    leafSystem.recordResetAndCompute(cmd, currentFrame, grassTime, deltaTime);
+    leafSystem.recordResetAndCompute(cmd, frame.frameIndex, frame.time, frame.deltaTime);
 
     // Cloud shadow map compute pass
     if (cloudShadowSystem.isEnabled()) {
-        UniformBufferObject* ubo = static_cast<UniformBufferObject*>(uniformBuffersMapped[currentFrame]);
-        glm::vec3 sunDir = glm::normalize(glm::vec3(ubo->sunDirection));
-        float sunIntensity = ubo->sunDirection.w;
-
         // Wind offset for cloud animation (matching cloud LUT animation)
         glm::vec2 windDir = windSystem.getWindDirection();
         float windSpeed = windSystem.getWindSpeed();
@@ -1323,27 +1319,25 @@ void Renderer::render(const Camera& camera) {
                                           windTime * 0.002f,
                                           windDir.y * windSpeed * windTime * cloudTimeScale);
 
-        cloudShadowSystem.recordUpdate(cmd, currentFrame, sunDir, sunIntensity,
-                                        windOffset, windTime * cloudTimeScale, camera.getPosition());
+        cloudShadowSystem.recordUpdate(cmd, frame.frameIndex, frame.sunDirection, frame.sunIntensity,
+                                        windOffset, windTime * cloudTimeScale, frame.cameraPosition);
     }
 
     // Shadow pass (skip when sun is below horizon)
     if (lastSunIntensity > 0.001f) {
-        recordShadowPass(cmd, currentFrame, grassTime);
+        recordShadowPass(cmd, frame.frameIndex, frame.time);
     }
 
     // Froxel volumetric fog compute pass
     {
-        UniformBufferObject* ubo = static_cast<UniformBufferObject*>(uniformBuffersMapped[currentFrame]);
-        glm::vec3 sunDir = glm::normalize(glm::vec3(ubo->sunDirection));
-        float sunIntensity = ubo->sunDirection.w;
+        UniformBufferObject* ubo = static_cast<UniformBufferObject*>(uniformBuffersMapped[frame.frameIndex]);
         glm::vec3 sunColor = glm::vec3(ubo->sunColor);
 
         // Pass cascade matrices for volumetric shadow sampling
-        froxelSystem.recordFroxelUpdate(cmd, currentFrame,
-                                        camera.getViewMatrix(), camera.getProjectionMatrix(),
-                                        camera.getPosition(),
-                                        sunDir, sunIntensity, sunColor,
+        froxelSystem.recordFroxelUpdate(cmd, frame.frameIndex,
+                                        frame.view, frame.projection,
+                                        frame.cameraPosition,
+                                        frame.sunDirection, frame.sunIntensity, sunColor,
                                         shadowSystem.getCascadeMatrices().data(),
                                         ubo->cascadeSplits);
 
@@ -1351,7 +1345,7 @@ void Renderer::render(const Camera& camera) {
 
         // Update sky-view LUT with current sun direction (Phase 4.1.5)
         // This precomputes atmospheric scattering for all view directions
-        atmosphereLUTSystem.updateSkyViewLUT(cmd, sunDir, camera.getPosition(), 0.0f);
+        atmosphereLUTSystem.updateSkyViewLUT(cmd, frame.sunDirection, frame.cameraPosition, 0.0f);
 
         // Update cloud map LUT with wind animation (Paraboloid projection)
         glm::vec2 windDir = windSystem.getWindDirection();
@@ -1366,17 +1360,17 @@ void Renderer::render(const Camera& camera) {
     }
 
     // HDR scene render pass
-    recordHDRPass(cmd, currentFrame, grassTime);
+    recordHDRPass(cmd, frame.frameIndex, frame.time);
 
     // Generate Hi-Z pyramid from scene depth (before bloom to ensure bloom doesn't affect it)
-    hiZSystem.recordPyramidGeneration(cmd, currentFrame);
+    hiZSystem.recordPyramidGeneration(cmd, frame.frameIndex);
 
     // Multi-pass bloom
     bloomSystem.setThreshold(postProcessSystem.getBloomThreshold());
     bloomSystem.recordBloomPass(cmd, postProcessSystem.getHDRColorView());
 
     // Post-process pass (with optional GUI overlay callback)
-    postProcessSystem.recordPostProcess(cmd, currentFrame, framebuffers[imageIndex], deltaTime, guiRenderCallback);
+    postProcessSystem.recordPostProcess(cmd, frame.frameIndex, framebuffers[imageIndex], frame.deltaTime, guiRenderCallback);
 
     vkEndCommandBuffer(cmd);
 
@@ -1539,6 +1533,34 @@ glm::vec2 Renderer::calculateSunScreenPos(const Camera& camera, const glm::vec3&
         sunScreenPos.y = 1.0f - sunScreenPos.y;
     }
     return sunScreenPos;
+}
+
+FrameData Renderer::buildFrameData(const Camera& camera, float deltaTime, float time) const {
+    FrameData frame;
+
+    frame.frameIndex = currentFrame;
+    frame.deltaTime = deltaTime;
+    frame.time = time;
+    frame.timeOfDay = currentTimeOfDay;
+
+    frame.cameraPosition = camera.getPosition();
+    frame.view = camera.getViewMatrix();
+    frame.projection = camera.getProjectionMatrix();
+    frame.viewProj = frame.projection * frame.view;
+
+    // Get sun direction from last computed UBO (already computed in updateUniformBuffer)
+    UniformBufferObject* ubo = static_cast<UniformBufferObject*>(uniformBuffersMapped[currentFrame]);
+    frame.sunDirection = glm::normalize(glm::vec3(ubo->sunDirection));
+    frame.sunIntensity = ubo->sunDirection.w;
+
+    frame.playerPosition = playerPosition;
+    frame.playerCapsuleRadius = playerCapsuleRadius;
+
+    const auto& terrainConfig = terrainSystem.getConfig();
+    frame.terrainSize = terrainConfig.size;
+    frame.heightScale = terrainConfig.heightScale;
+
+    return frame;
 }
 
 // Render pass recording helpers - pure command recording, no state mutation
