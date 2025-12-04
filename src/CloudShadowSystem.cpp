@@ -201,17 +201,9 @@ bool CloudShadowSystem::createDescriptorSetLayout() {
 }
 
 bool CloudShadowSystem::createDescriptorSets() {
-    descriptorSets.resize(framesInFlight);
-
-    std::vector<VkDescriptorSetLayout> layouts(framesInFlight, descriptorSetLayout);
-
-    VkDescriptorSetAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = descriptorPool;
-    allocInfo.descriptorSetCount = framesInFlight;
-    allocInfo.pSetLayouts = layouts.data();
-
-    if (vkAllocateDescriptorSets(device, &allocInfo, descriptorSets.data()) != VK_SUCCESS) {
+    // Allocate descriptor sets using managed pool
+    descriptorSets = descriptorPool->allocate(descriptorSetLayout, framesInFlight);
+    if (descriptorSets.size() != framesInFlight) {
         SDL_Log("Failed to allocate cloud shadow descriptor sets");
         return false;
     }

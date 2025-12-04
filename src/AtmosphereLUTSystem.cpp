@@ -684,15 +684,10 @@ bool AtmosphereLUTSystem::createDescriptorSetLayouts() {
 }
 
 bool AtmosphereLUTSystem::createDescriptorSets() {
-    // Allocate transmittance descriptor set
+    // Allocate transmittance descriptor set using managed pool
     {
-        VkDescriptorSetAllocateInfo allocInfo{};
-        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        allocInfo.descriptorPool = descriptorPool;
-        allocInfo.descriptorSetCount = 1;
-        allocInfo.pSetLayouts = &transmittanceDescriptorSetLayout;
-
-        if (vkAllocateDescriptorSets(device, &allocInfo, &transmittanceDescriptorSet) != VK_SUCCESS) {
+        transmittanceDescriptorSet = descriptorPool->allocateSingle(transmittanceDescriptorSetLayout);
+        if (transmittanceDescriptorSet == VK_NULL_HANDLE) {
             SDL_Log("Failed to allocate transmittance descriptor set");
             return false;
         }
@@ -727,15 +722,10 @@ bool AtmosphereLUTSystem::createDescriptorSets() {
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
     }
 
-    // Allocate multi-scatter descriptor set
+    // Allocate multi-scatter descriptor set using managed pool
     {
-        VkDescriptorSetAllocateInfo allocInfo{};
-        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        allocInfo.descriptorPool = descriptorPool;
-        allocInfo.descriptorSetCount = 1;
-        allocInfo.pSetLayouts = &multiScatterDescriptorSetLayout;
-
-        if (vkAllocateDescriptorSets(device, &allocInfo, &multiScatterDescriptorSet) != VK_SUCCESS) {
+        multiScatterDescriptorSet = descriptorPool->allocateSingle(multiScatterDescriptorSetLayout);
+        if (multiScatterDescriptorSet == VK_NULL_HANDLE) {
             SDL_Log("Failed to allocate multi-scatter descriptor set");
             return false;
         }
@@ -783,18 +773,10 @@ bool AtmosphereLUTSystem::createDescriptorSets() {
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
     }
 
-    // Allocate per-frame sky-view descriptor sets (double-buffered)
+    // Allocate per-frame sky-view descriptor sets (double-buffered) using managed pool
     {
-        skyViewDescriptorSets.resize(framesInFlight);
-        std::vector<VkDescriptorSetLayout> layouts(framesInFlight, skyViewDescriptorSetLayout);
-
-        VkDescriptorSetAllocateInfo allocInfo{};
-        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        allocInfo.descriptorPool = descriptorPool;
-        allocInfo.descriptorSetCount = framesInFlight;
-        allocInfo.pSetLayouts = layouts.data();
-
-        if (vkAllocateDescriptorSets(device, &allocInfo, skyViewDescriptorSets.data()) != VK_SUCCESS) {
+        skyViewDescriptorSets = descriptorPool->allocate(skyViewDescriptorSetLayout, framesInFlight);
+        if (skyViewDescriptorSets.empty()) {
             SDL_Log("Failed to allocate sky-view descriptor sets");
             return false;
         }
@@ -858,15 +840,10 @@ bool AtmosphereLUTSystem::createDescriptorSets() {
         }
     }
 
-    // Allocate irradiance descriptor set
+    // Allocate irradiance descriptor set using managed pool
     {
-        VkDescriptorSetAllocateInfo allocInfo{};
-        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        allocInfo.descriptorPool = descriptorPool;
-        allocInfo.descriptorSetCount = 1;
-        allocInfo.pSetLayouts = &irradianceDescriptorSetLayout;
-
-        if (vkAllocateDescriptorSets(device, &allocInfo, &irradianceDescriptorSet) != VK_SUCCESS) {
+        irradianceDescriptorSet = descriptorPool->allocateSingle(irradianceDescriptorSetLayout);
+        if (irradianceDescriptorSet == VK_NULL_HANDLE) {
             SDL_Log("Failed to allocate irradiance descriptor set");
             return false;
         }
@@ -926,18 +903,10 @@ bool AtmosphereLUTSystem::createDescriptorSets() {
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
     }
 
-    // Allocate per-frame cloud map descriptor sets (double-buffered)
+    // Allocate per-frame cloud map descriptor sets (double-buffered) using managed pool
     {
-        cloudMapDescriptorSets.resize(framesInFlight);
-        std::vector<VkDescriptorSetLayout> layouts(framesInFlight, cloudMapDescriptorSetLayout);
-
-        VkDescriptorSetAllocateInfo allocInfo{};
-        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        allocInfo.descriptorPool = descriptorPool;
-        allocInfo.descriptorSetCount = framesInFlight;
-        allocInfo.pSetLayouts = layouts.data();
-
-        if (vkAllocateDescriptorSets(device, &allocInfo, cloudMapDescriptorSets.data()) != VK_SUCCESS) {
+        cloudMapDescriptorSets = descriptorPool->allocate(cloudMapDescriptorSetLayout, framesInFlight);
+        if (cloudMapDescriptorSets.empty()) {
             SDL_Log("Failed to allocate cloud map descriptor sets");
             return false;
         }

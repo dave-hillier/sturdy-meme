@@ -403,34 +403,18 @@ bool TerrainSystem::createRenderDescriptorSetLayout() {
 }
 
 bool TerrainSystem::createDescriptorSets() {
-    // Allocate compute descriptor sets
-    computeDescriptorSets.resize(framesInFlight);
-    {
-        std::vector<VkDescriptorSetLayout> layouts(framesInFlight, computeDescriptorSetLayout);
-        VkDescriptorSetAllocateInfo allocInfo{};
-        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        allocInfo.descriptorPool = descriptorPool;
-        allocInfo.descriptorSetCount = framesInFlight;
-        allocInfo.pSetLayouts = layouts.data();
-
-        if (vkAllocateDescriptorSets(device, &allocInfo, computeDescriptorSets.data()) != VK_SUCCESS) {
-            return false;
-        }
+    // Allocate compute descriptor sets using managed pool
+    computeDescriptorSets = descriptorPool->allocate(computeDescriptorSetLayout, framesInFlight);
+    if (computeDescriptorSets.size() != framesInFlight) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TerrainSystem: Failed to allocate compute descriptor sets");
+        return false;
     }
 
-    // Allocate render descriptor sets
-    renderDescriptorSets.resize(framesInFlight);
-    {
-        std::vector<VkDescriptorSetLayout> layouts(framesInFlight, renderDescriptorSetLayout);
-        VkDescriptorSetAllocateInfo allocInfo{};
-        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        allocInfo.descriptorPool = descriptorPool;
-        allocInfo.descriptorSetCount = framesInFlight;
-        allocInfo.pSetLayouts = layouts.data();
-
-        if (vkAllocateDescriptorSets(device, &allocInfo, renderDescriptorSets.data()) != VK_SUCCESS) {
-            return false;
-        }
+    // Allocate render descriptor sets using managed pool
+    renderDescriptorSets = descriptorPool->allocate(renderDescriptorSetLayout, framesInFlight);
+    if (renderDescriptorSets.size() != framesInFlight) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TerrainSystem: Failed to allocate render descriptor sets");
+        return false;
     }
 
     // Update compute descriptor sets

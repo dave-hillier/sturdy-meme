@@ -123,17 +123,9 @@ bool SkySystem::createDescriptorSetLayout() {
 bool SkySystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffers,
                                       VkDeviceSize uniformBufferSize,
                                       AtmosphereLUTSystem& atmosphereLUTSystem) {
-    // Allocate sky descriptor sets (one per frame in flight)
-    std::vector<VkDescriptorSetLayout> layouts(framesInFlight, descriptorSetLayout);
-
-    VkDescriptorSetAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = descriptorPool;
-    allocInfo.descriptorSetCount = framesInFlight;
-    allocInfo.pSetLayouts = layouts.data();
-
-    descriptorSets.resize(framesInFlight);
-    if (vkAllocateDescriptorSets(device, &allocInfo, descriptorSets.data()) != VK_SUCCESS) {
+    // Allocate sky descriptor sets using managed pool
+    descriptorSets = descriptorPool->allocate(descriptorSetLayout, framesInFlight);
+    if (descriptorSets.size() != framesInFlight) {
         SDL_Log("Failed to allocate sky descriptor sets");
         return false;
     }

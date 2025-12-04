@@ -129,7 +129,7 @@ private:
 
     VkDevice getDevice() const { return lifecycle.getDevice(); }
     VmaAllocator getAllocator() const { return lifecycle.getAllocator(); }
-    VkDescriptorPool getDescriptorPool() const { return lifecycle.getDescriptorPool(); }
+    DescriptorManager::Pool* getDescriptorPool() const { return lifecycle.getDescriptorPool(); }
     const std::string& getShaderPath() const { return lifecycle.getShaderPath(); }
     uint32_t getFramesInFlight() const { return lifecycle.getFramesInFlight(); }
 

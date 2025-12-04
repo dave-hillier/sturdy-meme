@@ -280,16 +280,9 @@ bool FroxelSystem::createUniformBuffers() {
 }
 
 bool FroxelSystem::createDescriptorSets() {
-    std::vector<VkDescriptorSetLayout> layouts(framesInFlight, froxelDescriptorSetLayout);
-
-    VkDescriptorSetAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = descriptorPool;
-    allocInfo.descriptorSetCount = framesInFlight;
-    allocInfo.pSetLayouts = layouts.data();
-
-    froxelDescriptorSets.resize(framesInFlight);
-    if (vkAllocateDescriptorSets(device, &allocInfo, froxelDescriptorSets.data()) != VK_SUCCESS) {
+    // Allocate froxel descriptor sets using managed pool
+    froxelDescriptorSets = descriptorPool->allocate(froxelDescriptorSetLayout, framesInFlight);
+    if (froxelDescriptorSets.size() != framesInFlight) {
         SDL_Log("Failed to allocate froxel descriptor sets");
         return false;
     }

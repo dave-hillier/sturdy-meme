@@ -20,7 +20,6 @@ public:
     struct InitInfo {
         VkDevice device;
         VmaAllocator allocator;
-        VkDescriptorPool descriptorPool;
         uint32_t framesInFlight;
     };
 

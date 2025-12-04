@@ -85,7 +85,7 @@ private:
     VkDevice getDevice() const { return particleSystem.getDevice(); }
     VmaAllocator getAllocator() const { return particleSystem.getAllocator(); }
     VkRenderPass getRenderPass() const { return particleSystem.getRenderPass(); }
-    VkDescriptorPool getDescriptorPool() const { return particleSystem.getDescriptorPool(); }
+    DescriptorManager::Pool* getDescriptorPool() const { return particleSystem.getDescriptorPool(); }
     const VkExtent2D& getExtent() const { return particleSystem.getExtent(); }
     const std::string& getShaderPath() const { return particleSystem.getShaderPath(); }
     uint32_t getFramesInFlight() const { return particleSystem.getFramesInFlight(); }

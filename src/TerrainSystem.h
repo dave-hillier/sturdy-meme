@@ -11,6 +11,7 @@
 #include "TerrainTextures.h"
 #include "TerrainCBT.h"
 #include "TerrainMeshlet.h"
+#include "DescriptorManager.h"
 
 class GpuProfiler;
 
@@ -111,7 +112,7 @@ public:
         VmaAllocator allocator;
         VkRenderPass renderPass;
         VkRenderPass shadowRenderPass;
-        VkDescriptorPool descriptorPool;
+        DescriptorManager::Pool* descriptorPool;  // Auto-growing pool
         VkExtent2D extent;
         uint32_t shadowMapSize;
         std::string shaderPath;
@@ -246,7 +247,7 @@ private:
     VmaAllocator allocator = VK_NULL_HANDLE;
     VkRenderPass renderPass = VK_NULL_HANDLE;
     VkRenderPass shadowRenderPass = VK_NULL_HANDLE;
-    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
+    DescriptorManager::Pool* descriptorPool = nullptr;
     VkExtent2D extent = {0, 0};
     uint32_t shadowMapSize = 0;
     std::string shaderPath;
