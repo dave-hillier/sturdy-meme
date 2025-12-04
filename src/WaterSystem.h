@@ -36,6 +36,10 @@ public:
         float waterLevel;          // Y height of water plane
         float foamThreshold;       // Wave height threshold for foam
         float fresnelPower;        // Fresnel reflection power
+        float terrainSize;         // Terrain size for UV calculation
+        float terrainHeightScale;  // Terrain height scale
+        float shoreBlendDistance;  // Distance over which shore fades (world units)
+        float shoreFoamWidth;      // Width of shore foam band (world units)
         float padding;
     };
 
@@ -51,7 +55,9 @@ public:
     // Create descriptor sets after main UBO is ready
     bool createDescriptorSets(const std::vector<VkBuffer>& uniformBuffers,
                               VkDeviceSize uniformBufferSize,
-                              ShadowSystem& shadowSystem);
+                              ShadowSystem& shadowSystem,
+                              VkImageView terrainHeightMapView,
+                              VkSampler terrainHeightMapSampler);
 
     // Update water uniforms (call each frame)
     void updateUniforms(uint32_t frameIndex);
@@ -86,6 +92,16 @@ public:
 
     void setFoamThreshold(float threshold) { waterUniforms.foamThreshold = threshold; }
     void setFresnelPower(float power) { waterUniforms.fresnelPower = power; }
+
+    // Terrain integration
+    void setTerrainParams(float size, float heightScale) {
+        waterUniforms.terrainSize = size;
+        waterUniforms.terrainHeightScale = heightScale;
+    }
+    void setShoreBlendDistance(float distance) { waterUniforms.shoreBlendDistance = distance; }
+    void setShoreFoamWidth(float width) { waterUniforms.shoreFoamWidth = width; }
+    float getShoreBlendDistance() const { return waterUniforms.shoreBlendDistance; }
+    float getShoreFoamWidth() const { return waterUniforms.shoreFoamWidth; }
 
 private:
     bool createDescriptorSetLayout();
