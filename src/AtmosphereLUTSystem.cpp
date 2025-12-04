@@ -1310,12 +1310,12 @@ void AtmosphereLUTSystem::computeIrradianceLUT(VkCommandBuffer cmd) {
 
 void AtmosphereLUTSystem::computeSkyViewLUT(VkCommandBuffer cmd, const glm::vec3& sunDir,
                                             const glm::vec3& cameraPos, float cameraAltitude) {
-    // Update uniform buffer
+    // Update uniform buffer (use frame 0's per-frame buffer for startup computation)
     AtmosphereLUTUniforms uniforms{};
     uniforms.params = atmosphereParams;
     uniforms.sunDirection = glm::vec4(sunDir, 0.0f);
     uniforms.cameraPosition = glm::vec4(cameraPos, cameraAltitude);
-    memcpy(uniformMappedPtr, &uniforms, sizeof(AtmosphereLUTUniforms));
+    memcpy(skyViewUniformBuffers.mappedPointers[0], &uniforms, sizeof(AtmosphereLUTUniforms));
 
     // Transition to GENERAL layout for compute write (from UNDEFINED at startup)
     VkImageMemoryBarrier barrier{};
@@ -1336,10 +1336,10 @@ void AtmosphereLUTSystem::computeSkyViewLUT(VkCommandBuffer cmd, const glm::vec3
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                          0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    // Bind pipeline and dispatch
+    // Bind pipeline and dispatch (use frame 0's descriptor set for startup computation)
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, skyViewPipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, skyViewPipelineLayout,
-                           0, 1, &skyViewDescriptorSet, 0, nullptr);
+                           0, 1, &skyViewDescriptorSets[0], 0, nullptr);
 
     uint32_t groupCountX = (SKYVIEW_WIDTH + 15) / 16;
     uint32_t groupCountY = (SKYVIEW_HEIGHT + 15) / 16;
@@ -1407,14 +1407,14 @@ void AtmosphereLUTSystem::updateSkyViewLUT(VkCommandBuffer cmd, uint32_t frameIn
 }
 
 void AtmosphereLUTSystem::computeCloudMapLUT(VkCommandBuffer cmd, const glm::vec3& windOffset, float time) {
-    // Update cloud map uniform buffer
+    // Update cloud map uniform buffer (use frame 0's per-frame buffer for startup computation)
     CloudMapUniforms uniforms{};
     uniforms.windOffset = glm::vec4(windOffset, time);
     uniforms.coverage = 0.6f;      // 60% cloud coverage
     uniforms.density = 1.0f;       // Full density multiplier
     uniforms.sharpness = 0.3f;     // Coverage transition sharpness
     uniforms.detailScale = 2.5f;   // Detail noise scale
-    memcpy(cloudMapUniformMappedPtr, &uniforms, sizeof(CloudMapUniforms));
+    memcpy(cloudMapUniformBuffers.mappedPointers[0], &uniforms, sizeof(CloudMapUniforms));
 
     // Transition to GENERAL layout for compute write
     VkImageMemoryBarrier barrier{};
@@ -1435,10 +1435,10 @@ void AtmosphereLUTSystem::computeCloudMapLUT(VkCommandBuffer cmd, const glm::vec
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                          0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    // Bind pipeline and dispatch
+    // Bind pipeline and dispatch (use frame 0's descriptor set for startup computation)
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cloudMapPipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cloudMapPipelineLayout,
-                           0, 1, &cloudMapDescriptorSet, 0, nullptr);
+                           0, 1, &cloudMapDescriptorSets[0], 0, nullptr);
 
     uint32_t groupCountX = (CLOUDMAP_SIZE + 15) / 16;
     uint32_t groupCountY = (CLOUDMAP_SIZE + 15) / 16;
