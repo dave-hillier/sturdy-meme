@@ -6,6 +6,7 @@
 #include <string>
 
 class Renderer;
+class Camera;
 
 class GuiSystem {
 public:
@@ -19,7 +20,7 @@ public:
 
     void processEvent(const SDL_Event& event);
     void beginFrame();
-    void render(Renderer& renderer, float deltaTime, float fps);
+    void render(Renderer& renderer, const Camera& camera, float deltaTime, float fps);
     void endFrame(VkCommandBuffer cmd);
 
     bool wantsInput() const;
@@ -38,6 +39,7 @@ private:
     void renderDebugSection(Renderer& renderer);
     void renderProfilerSection(Renderer& renderer);
     void renderHelpOverlay();
+    void renderPositionPanel(const Camera& camera);
 
     VkDescriptorPool imguiPool = VK_NULL_HANDLE;
     bool visible = true;
