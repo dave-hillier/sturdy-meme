@@ -1694,6 +1694,15 @@ bool Renderer::handleResize() {
     // Resize Hi-Z system (occlusion culling)
     hiZSystem.resize(newExtent);
 
+    // Update extent on all rendering subsystems for viewport/scissor
+    terrainSystem.setExtent(newExtent);
+    skySystem.setExtent(newExtent);
+    waterSystem.setExtent(newExtent);
+    grassSystem.setExtent(newExtent);
+    weatherSystem.setExtent(newExtent);
+    leafSystem.setExtent(newExtent);
+    catmullClarkSystem.setExtent(newExtent);
+
     framebufferResized = false;
     return true;
 }
