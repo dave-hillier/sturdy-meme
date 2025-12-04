@@ -40,6 +40,9 @@ public:
         float terrainHeightScale;  // Terrain height scale
         float shoreBlendDistance;  // Distance over which shore fades (world units)
         float shoreFoamWidth;      // Width of shore foam band (world units)
+        float flowStrength;        // How much flow affects UV offset (world units)
+        float flowSpeed;           // Flow animation speed multiplier
+        float flowFoamStrength;    // How much flow speed affects foam
         float padding;
     };
 
@@ -57,7 +60,9 @@ public:
                               VkDeviceSize uniformBufferSize,
                               ShadowSystem& shadowSystem,
                               VkImageView terrainHeightMapView,
-                              VkSampler terrainHeightMapSampler);
+                              VkSampler terrainHeightMapSampler,
+                              VkImageView flowMapView,
+                              VkSampler flowMapSampler);
 
     // Update water uniforms (call each frame)
     void updateUniforms(uint32_t frameIndex);
@@ -102,6 +107,14 @@ public:
     void setShoreFoamWidth(float width) { waterUniforms.shoreFoamWidth = width; }
     float getShoreBlendDistance() const { return waterUniforms.shoreBlendDistance; }
     float getShoreFoamWidth() const { return waterUniforms.shoreFoamWidth; }
+
+    // Flow map parameters
+    void setFlowStrength(float strength) { waterUniforms.flowStrength = strength; }
+    void setFlowSpeed(float speed) { waterUniforms.flowSpeed = speed; }
+    void setFlowFoamStrength(float strength) { waterUniforms.flowFoamStrength = strength; }
+    float getFlowStrength() const { return waterUniforms.flowStrength; }
+    float getFlowSpeed() const { return waterUniforms.flowSpeed; }
+    float getFlowFoamStrength() const { return waterUniforms.flowFoamStrength; }
 
 private:
     bool createDescriptorSetLayout();

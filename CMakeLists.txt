@@ -82,6 +82,7 @@ set(SOURCES
     src/GpuProfiler.cpp
     src/CpuProfiler.cpp
     src/WaterSystem.cpp
+    src/FlowMapGenerator.cpp
     src/TreeGenerator.cpp
     src/TreeEditSystem.cpp
     src/TreeEditorGui.cpp

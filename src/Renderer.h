@@ -44,6 +44,7 @@
 #include "GlobalBufferManager.h"
 #include "Profiler.h"
 #include "WaterSystem.h"
+#include "FlowMapGenerator.h"
 #include "TreeEditSystem.h"
 
 struct PushConstants {
@@ -333,6 +334,7 @@ private:
     CloudShadowSystem cloudShadowSystem;
     HiZSystem hiZSystem;
     WaterSystem waterSystem;
+    FlowMapGenerator flowMapGenerator;
     ErosionSimulator erosionSimulator;
     TreeEditSystem treeEditSystem;
     EnvironmentSettings environmentSettings;

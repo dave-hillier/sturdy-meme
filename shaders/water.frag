@@ -4,7 +4,8 @@
 
 /*
  * water.frag - Water surface fragment shader
- * Implements Fresnel reflections, specular highlights, and foam for realistic water
+ * Implements Fresnel reflections, specular highlights, foam, and flow-based animation.
+ * Flow map system based on Far Cry 5's water rendering (GDC 2018).
  */
 
 #include "constants_common.glsl"
@@ -13,6 +14,7 @@
 #include "ubo_common.glsl"
 #include "atmosphere_common.glsl"
 #include "terrain_height_common.glsl"
+#include "flow_common.glsl"
 
 // Water-specific uniforms
 layout(std140, binding = 1) uniform WaterUniforms {
@@ -27,11 +29,15 @@ layout(std140, binding = 1) uniform WaterUniforms {
     float terrainHeightScale;  // Terrain height scale
     float shoreBlendDistance;  // Distance over which shore fades (world units)
     float shoreFoamWidth;      // Width of shore foam band (world units)
+    float flowStrength;        // How much flow affects UV offset (world units)
+    float flowSpeed;           // Flow animation speed multiplier
+    float flowFoamStrength;    // How much flow speed affects foam
     float padding;
 };
 
 layout(binding = 2) uniform sampler2DArrayShadow shadowMapArray;
 layout(binding = 3) uniform sampler2D terrainHeightMap;
+layout(binding = 4) uniform sampler2D flowMap;
 
 layout(location = 0) in vec3 fragWorldPos;
 layout(location = 1) in vec3 fragNormal;
@@ -129,15 +135,34 @@ void main() {
     }
 
     // =========================================================================
-    // PROCEDURAL NORMAL DETAIL
+    // FLOW MAP SAMPLING
     // =========================================================================
-    vec2 detailUV = fragWorldPos.xz * 0.5;
-    float detail1 = fbm(detailUV + time * 0.3, 3) * 2.0 - 1.0;
-    float detail2 = fbm(detailUV * 1.7 - time * 0.2, 3) * 2.0 - 1.0;
+    // Sample flow map using world-space UV (flow map covers entire terrain)
+    vec2 flowUV = worldPosToTerrainUV(fragWorldPos.xz, terrainSize);
+    vec4 flowMapSample = texture(flowMap, flowUV);
+
+    // Calculate flow sample data with two-phase sampling to eliminate pulsing
+    FlowSample flowSample = calculateFlowSample(flowMapSample, fragWorldPos.xz * 0.1,
+                                                 time * flowSpeed, flowStrength);
+
+    // =========================================================================
+    // PROCEDURAL NORMAL DETAIL (Flow-Animated)
+    // =========================================================================
+    // Use flow-based UVs for normal detail to make waves follow water flow
+    float detail1_phase0 = fbm(flowSample.uv0 * 0.5 + time * 0.1, 3) * 2.0 - 1.0;
+    float detail1_phase1 = fbm(flowSample.uv1 * 0.5 + time * 0.1, 3) * 2.0 - 1.0;
+    float detail1 = blendFlowSamples(detail1_phase0, detail1_phase1, flowSample.blend);
+
+    float detail2_phase0 = fbm(flowSample.uv0 * 0.85 - time * 0.08, 3) * 2.0 - 1.0;
+    float detail2_phase1 = fbm(flowSample.uv1 * 0.85 - time * 0.08, 3) * 2.0 - 1.0;
+    float detail2 = blendFlowSamples(detail2_phase0, detail2_phase1, flowSample.blend);
 
     // Reduce wave detail in shallow water (calmer near shore)
     float shallowFactor = smoothstep(0.0, shoreFoamWidth * 2.0, waterDepth);
     float detailStrength = mix(0.05, 0.15, shallowFactor);
+
+    // Modulate detail strength by flow speed (faster water = more turbulent)
+    detailStrength *= mix(0.7, 1.3, flowSample.speed);
 
     vec3 detailNormal = normalize(N + vec3(detail1, 0.0, detail2) * detailStrength);
     N = normalize(mix(N, detailNormal, 0.5));
@@ -197,21 +222,45 @@ void main() {
     vec3 ambient = baseColor * ubo.ambientColor.rgb * 0.4;
 
     // =========================================================================
-    // FOAM - wave peaks + shore foam
+    // FOAM - wave peaks + shore foam + flow foam
     // =========================================================================
     vec3 foamColor = vec3(0.9, 0.95, 1.0);
 
     // Wave peak foam (existing)
     float waveFoamAmount = smoothstep(foamThreshold * 0.7, foamThreshold, fragWaveHeight);
-    float foamNoise = fbm(fragWorldPos.xz * 2.0 + time * 0.5, 4);
+
+    // Use flow-based UVs for foam noise (foam follows water flow)
+    float foamNoise_phase0 = fbm(flowSample.uv0 * 2.0 + time * 0.2, 4);
+    float foamNoise_phase1 = fbm(flowSample.uv1 * 2.0 + time * 0.2, 4);
+    float foamNoise = blendFlowSamples(foamNoise_phase0, foamNoise_phase1, flowSample.blend);
     waveFoamAmount *= smoothstep(0.3, 0.7, foamNoise);
+
+    // Flow-based foam - fast-flowing water generates foam
+    float flowFoamAmount = 0.0;
+    if (flowSample.speed > 0.2) {
+        // Flow noise that follows the flow direction
+        float flowFoamNoise = flowNoise(fragWorldPos.xz, flowSample.flowDir, time, 3.0);
+
+        // More foam in faster-flowing areas
+        flowFoamAmount = smoothstep(0.3, 0.8, flowSample.speed) * flowFoamStrength;
+        flowFoamAmount *= smoothstep(0.3, 0.6, flowFoamNoise);
+
+        // Extra foam where flow meets obstacles (low shore distance + high flow)
+        float obstacleProximity = 1.0 - smoothstep(0.0, 0.3, flowSample.shoreDist);
+        flowFoamAmount += obstacleProximity * flowSample.speed * 0.5;
+    }
 
     // Shore foam - where water is shallow
     float shoreFoamAmount = 0.0;
     if (insideTerrain && waterDepth > 0.0 && waterDepth < shoreFoamWidth) {
-        // Animated foam line that follows the shore
-        float shoreNoise = fbm(fragWorldPos.xz * 0.5 + time * 0.15, 3);
-        float shoreNoise2 = fbm(fragWorldPos.xz * 1.5 - time * 0.3, 2);
+        // Animated foam line that follows the shore (now flow-aware)
+        float shoreNoise_p0 = fbm(flowSample.uv0 * 0.5 + time * 0.1, 3);
+        float shoreNoise_p1 = fbm(flowSample.uv1 * 0.5 + time * 0.1, 3);
+        float shoreNoise = blendFlowSamples(shoreNoise_p0, shoreNoise_p1, flowSample.blend);
+
+        float shoreNoise2_p0 = fbm(flowSample.uv0 * 1.5 - time * 0.15, 2);
+        float shoreNoise2_p1 = fbm(flowSample.uv1 * 1.5 - time * 0.15, 2);
+        float shoreNoise2 = blendFlowSamples(shoreNoise2_p0, shoreNoise2_p1, flowSample.blend);
 
         // Create foam bands at different depths (scaled by shoreFoamWidth)
         float fw = shoreFoamWidth;
@@ -227,9 +276,13 @@ void main() {
         // Strong foam right at the waterline
         float waterlineIntensity = smoothstep(1.0, 0.0, waterDepth);
         shoreFoamAmount = max(shoreFoamAmount, waterlineIntensity);
+
+        // Boost shore foam in fast-flowing areas (rapids effect)
+        shoreFoamAmount *= mix(1.0, 1.5, flowSample.speed);
     }
 
-    float totalFoamAmount = max(waveFoamAmount, shoreFoamAmount);
+    float totalFoamAmount = max(max(waveFoamAmount, shoreFoamAmount), flowFoamAmount);
+    totalFoamAmount = clamp(totalFoamAmount, 0.0, 1.0);
 
     // =========================================================================
     // COMBINE LIGHTING
