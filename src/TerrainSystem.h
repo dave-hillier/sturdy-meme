@@ -10,6 +10,7 @@
 #include "TerrainHeightMap.h"
 #include "TerrainTextures.h"
 #include "TerrainCBT.h"
+#include "TerrainMeshlet.h"
 
 class GpuProfiler;
 
@@ -30,7 +31,7 @@ struct TerrainShadowPushConstants {
 // Push constants for dispatcher compute shader
 struct TerrainDispatcherPushConstants {
     uint32_t subdivisionWorkgroupSize;
-    uint32_t meshletVertexCount;
+    uint32_t meshletIndexCount;  // 0 = use direct triangles, >0 = use meshlet instancing
 };
 
 // Push constants for sum reduction (legacy single-pass)
@@ -83,6 +84,10 @@ struct TerrainConfig {
 
     // Computed height scale (maxAltitude - minAltitude), set during init
     float heightScale = 0.0f;
+
+    // Meshlet settings
+    bool useMeshlets = true;          // Enable meshlet-based rendering for higher detail
+    int meshletSubdivisionLevel = 4;  // LEB subdivision level per meshlet (4 = 16 triangles)
 };
 
 class TerrainSystem {
@@ -179,6 +184,13 @@ public:
     void setWireframeMode(bool enabled) { wireframeMode = enabled; }
     bool isWireframeMode() const { return wireframeMode; }
 
+    // Meshlet control
+    void setMeshletsEnabled(bool enabled) { config.useMeshlets = enabled; }
+    bool isMeshletsEnabled() const { return config.useMeshlets; }
+    uint32_t getMeshletTriangleCount() const { return meshlet.getTriangleCount(); }
+    int getMeshletSubdivisionLevel() const { return config.meshletSubdivisionLevel; }
+    bool setMeshletSubdivisionLevel(int level);  // Returns true if successful, reinitializes meshlet
+
 private:
     // Initialization helpers
     bool createUniformBuffers();
@@ -197,6 +209,9 @@ private:
     bool createRenderPipeline();
     bool createWireframePipeline();
     bool createShadowPipeline();
+    bool createMeshletRenderPipeline();
+    bool createMeshletWireframePipeline();
+    bool createMeshletShadowPipeline();
 
     // Utility functions
     void extractFrustumPlanes(const glm::mat4& viewProj, glm::vec4 planes[6]);
@@ -221,6 +236,7 @@ private:
     TerrainHeightMap heightMap;
     TerrainTextures textures;
     TerrainCBT cbt;
+    TerrainMeshlet meshlet;
 
     // Indirect dispatch/draw buffers
     VkBuffer indirectDispatchBuffer = VK_NULL_HANDLE;
@@ -267,9 +283,14 @@ private:
     VkPipeline renderPipeline = VK_NULL_HANDLE;
     VkPipeline wireframePipeline = VK_NULL_HANDLE;
 
+    // Meshlet render pipelines (uses same layout/descriptor sets)
+    VkPipeline meshletRenderPipeline = VK_NULL_HANDLE;
+    VkPipeline meshletWireframePipeline = VK_NULL_HANDLE;
+
     // Shadow pipeline
     VkPipelineLayout shadowPipelineLayout = VK_NULL_HANDLE;
     VkPipeline shadowPipeline = VK_NULL_HANDLE;
+    VkPipeline meshletShadowPipeline = VK_NULL_HANDLE;
 
     // Descriptor sets
     std::vector<VkDescriptorSet> computeDescriptorSets;  // Per frame

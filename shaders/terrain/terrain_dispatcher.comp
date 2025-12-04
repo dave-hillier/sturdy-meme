@@ -24,11 +24,12 @@ layout(std430, binding = BINDING_TERRAIN_DISPATCH) buffer DispatchIndirect {
     uint dispatchZ;
 };
 
-// Indirect draw arguments for terrain rendering
+// Indirect draw arguments for terrain rendering (indexed draw when using meshlets)
 layout(std430, binding = BINDING_TERRAIN_DRAW) buffer DrawIndirect {
-    uint vertexCount;
+    uint indexCount;       // For indexed: index count; for non-indexed: vertex count
     uint instanceCount;
-    uint firstVertex;
+    uint firstIndex;       // For indexed: first index; for non-indexed: first vertex
+    uint vertexOffset;     // For indexed only: vertex offset
     uint firstInstance;
 };
 
@@ -41,7 +42,7 @@ layout(std430, binding = BINDING_TERRAIN_VISIBLE_INDICES) buffer VisibleIndices 
 // Push constants for configuration
 layout(push_constant) uniform PushConstants {
     uint subdivisionWorkgroupSize;  // Threads per workgroup in subdivision shader
-    uint meshletVertexCount;        // Vertices per meshlet (0 = no meshlets, just triangles)
+    uint meshletIndexCount;         // Indices per meshlet (0 = no meshlets, just triangles)
 };
 
 void main() {
@@ -53,16 +54,19 @@ void main() {
     dispatchZ = 1u;
 
     // Set up draw arguments
-    if (meshletVertexCount > 0u) {
-        // Instanced meshlet rendering: one instance per leaf
-        vertexCount = meshletVertexCount;
+    if (meshletIndexCount > 0u) {
+        // Instanced indexed meshlet rendering: one instance per leaf
+        indexCount = meshletIndexCount;
         instanceCount = leafCount;
+        firstIndex = 0u;
+        vertexOffset = 0u;
     } else {
-        // Direct triangle rendering: 3 vertices per leaf
-        vertexCount = leafCount * 3u;
+        // Direct triangle rendering: 3 vertices per leaf (non-indexed)
+        indexCount = leafCount * 3u;  // Actually vertexCount for non-indexed
         instanceCount = 1u;
+        firstIndex = 0u;              // Actually firstVertex for non-indexed
+        vertexOffset = 0u;            // Unused for non-indexed
     }
-    firstVertex = 0u;
     firstInstance = 0u;
 
     // Reset visible count for next frame's stream compaction
