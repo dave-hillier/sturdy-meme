@@ -136,7 +136,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     erosionConfig.riverMaxWidth = 80.0f;
     erosionConfig.lakeMinArea = 500.0f;
     erosionConfig.lakeMinDepth = 2.0f;
-    erosionConfig.seaLevel = 25.0f;  // RGB (25,25,25) in heightmap (minAltitude offset not applied)
+    erosionConfig.seaLevel = 23.0f;  // RGB (25,25,25) in heightmap (minAltitude offset not applied)
     erosionConfig.terrainSize = 16384.0f;
     erosionConfig.minAltitude = -15.0f;
     erosionConfig.maxAltitude = 220.0f;
