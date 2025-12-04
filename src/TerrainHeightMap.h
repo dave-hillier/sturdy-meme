@@ -4,8 +4,11 @@
 #include <vk_mem_alloc.h>
 #include <vector>
 #include <string>
+#include <limits>
+#include <cstdint>
 
 // Height map for terrain - handles generation, GPU texture, and CPU queries
+// Also handles hole mask for caves/wells (areas with no collision/rendering)
 class TerrainHeightMap {
 public:
     struct InitInfo {
@@ -21,6 +24,9 @@ public:
         float maxAltitude = 200.0f; // Altitude for height value 65535 (when loading from file)
     };
 
+    // Special return value indicating a hole in terrain (no ground)
+    static constexpr float NO_GROUND = -std::numeric_limits<float>::infinity();
+
     TerrainHeightMap() = default;
     ~TerrainHeightMap() = default;
 
@@ -31,11 +37,23 @@ public:
     VkImageView getView() const { return imageView; }
     VkSampler getSampler() const { return sampler; }
 
+    // Hole mask GPU resource accessors
+    VkImageView getHoleMaskView() const { return holeMaskImageView; }
+    VkSampler getHoleMaskSampler() const { return holeMaskSampler; }
+
     // CPU-side height query (for physics/collision)
+    // Returns NO_GROUND if position is inside a hole
     float getHeightAt(float x, float z) const;
+
+    // Hole mask queries and modification
+    bool isHole(float x, float z) const;
+    void setHole(float x, float z, bool isHole);
+    void setHoleCircle(float centerX, float centerZ, float radius, bool isHole);
+    void uploadHoleMaskToGPU();  // Call after modifying holes to sync with GPU
 
     // Raw data accessors
     const float* getData() const { return cpuData.data(); }
+    const uint8_t* getHoleMaskData() const { return holeMaskCpuData.data(); }
     uint32_t getResolution() const { return resolution; }
     float getHeightScale() const { return heightScale; }
     float getTerrainSize() const { return terrainSize; }
@@ -44,7 +62,12 @@ private:
     bool generateHeightData();
     bool loadHeightDataFromFile(const std::string& path, float minAlt, float maxAlt);
     bool createGPUResources();
+    bool createHoleMaskResources();
     bool uploadToGPU();
+    bool uploadHoleMaskToGPUInternal();
+
+    // Helper to convert world coords to texel coords
+    void worldToTexel(float x, float z, int& texelX, int& texelY) const;
 
     // Init params (stored for queries)
     VkDevice device = VK_NULL_HANDLE;
@@ -55,12 +78,20 @@ private:
     float heightScale = 50.0f;
     uint32_t resolution = 512;
 
-    // GPU resources
+    // GPU resources for height map
     VkImage image = VK_NULL_HANDLE;
     VmaAllocation allocation = VK_NULL_HANDLE;
     VkImageView imageView = VK_NULL_HANDLE;
     VkSampler sampler = VK_NULL_HANDLE;
 
+    // GPU resources for hole mask (R8_UNORM: 0=solid, 255=hole)
+    VkImage holeMaskImage = VK_NULL_HANDLE;
+    VmaAllocation holeMaskAllocation = VK_NULL_HANDLE;
+    VkImageView holeMaskImageView = VK_NULL_HANDLE;
+    VkSampler holeMaskSampler = VK_NULL_HANDLE;
+
     // CPU-side data for collision queries
     std::vector<float> cpuData;
+    std::vector<uint8_t> holeMaskCpuData;  // 0 = solid, 255 = hole
+    bool holeMaskDirty = false;  // True if CPU data has been modified but not uploaded
 };

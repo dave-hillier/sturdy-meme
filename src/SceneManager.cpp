@@ -31,13 +31,20 @@ void SceneManager::initPhysics(PhysicsWorld& physics) {
 
 void SceneManager::initTerrainPhysics(PhysicsWorld& physics, const float* heightSamples,
                                        uint32_t sampleCount, float worldSize, float heightScale) {
-    // Create heightfield collision shape from terrain data
+    // Call overload with no hole mask
+    initTerrainPhysics(physics, heightSamples, nullptr, sampleCount, worldSize, heightScale);
+}
+
+void SceneManager::initTerrainPhysics(PhysicsWorld& physics, const float* heightSamples,
+                                       const uint8_t* holeMask, uint32_t sampleCount,
+                                       float worldSize, float heightScale) {
+    // Create heightfield collision shape from terrain data (with optional hole mask)
     PhysicsBodyID terrainBody = physics.createTerrainHeightfield(
-        heightSamples, sampleCount, worldSize, heightScale
+        heightSamples, holeMask, sampleCount, worldSize, heightScale
     );
 
     if (terrainBody != INVALID_BODY_ID) {
-        SDL_Log("Terrain heightfield physics initialized");
+        SDL_Log("Terrain heightfield physics initialized%s", holeMask ? " (with hole mask)" : "");
     } else {
         SDL_Log("Failed to create terrain heightfield, falling back to flat ground");
         physics.createTerrainDisc(worldSize * 0.5f, 0.0f);

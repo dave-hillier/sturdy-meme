@@ -50,6 +50,9 @@ layout(binding = BINDING_TERRAIN_SNOW_CASCADE_2) uniform sampler2D snowCascade2;
 // Cloud shadow map (R16F: 0=shadow, 1=no shadow)
 layout(binding = BINDING_TERRAIN_CLOUD_SHADOW) uniform sampler2D cloudShadowMap;
 
+// Hole mask for caves/wells (R8: 0=solid, 1=hole)
+layout(binding = BINDING_TERRAIN_HOLE_MASK) uniform sampler2D holeMask;
+
 // Far LOD grass parameters (where to start/end grass-to-terrain transition)
 const float GRASS_RENDER_DISTANCE = 60.0;     // Should match grass system maxDrawDistance
 const float FAR_LOD_TRANSITION_START = 50.0;  // Start blending far LOD
@@ -107,6 +110,12 @@ float getShadowFactor(vec3 worldPos) {
 }
 
 void main() {
+    // Check hole mask - discard fragment if in a hole (cave/well entrance)
+    float holeMaskValue = texture(holeMask, fragTexCoord).r;
+    if (holeMaskValue > 0.5) {
+        discard;
+    }
+
     // Normalize the surface normal
     vec3 normal = normalize(fragNormal);
     float slope = 1.0 - normal.y;

@@ -22,6 +22,11 @@ public:
     void initTerrainPhysics(PhysicsWorld& physics, const float* heightSamples,
                             uint32_t sampleCount, float worldSize, float heightScale);
 
+    // Initialize terrain physics with hole mask (for caves/wells)
+    void initTerrainPhysics(PhysicsWorld& physics, const float* heightSamples,
+                            const uint8_t* holeMask, uint32_t sampleCount,
+                            float worldSize, float heightScale);
+
     void destroy(VmaAllocator allocator, VkDevice device);
 
     // Update scene state (sync physics to visuals)

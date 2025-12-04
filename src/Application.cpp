@@ -54,11 +54,13 @@ bool Application::init(const std::string& title, int width, int height) {
     }
 
     // Initialize terrain physics using heightfield from terrain system
+    // Include hole mask for caves/wells (areas with no collision)
     const auto& terrain = renderer.getTerrainSystem();
     const auto& terrainConfig = terrain.getConfig();
     renderer.getSceneManager().initTerrainPhysics(
         physics,
         terrain.getHeightMapData(),
+        terrain.getHoleMaskData(),
         terrain.getHeightMapResolution(),
         terrainConfig.size,
         terrainConfig.heightScale

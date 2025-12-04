@@ -40,6 +40,9 @@ layout(push_constant) uniform PushConstants {
     int padding;
 };
 
+// Output UV for hole mask sampling in fragment shader
+layout(location = 0) out vec2 fragTexCoord;
+
 void main() {
     // gl_InstanceIndex is the index into the visible indices buffer
     uint visibleIndex = uint(gl_InstanceIndex);
@@ -81,4 +84,7 @@ void main() {
 
     // Transform to light space
     gl_Position = lightViewProj * vec4(worldPos, 1.0);
+
+    // Pass UV for hole mask sampling
+    fragTexCoord = uv;
 }

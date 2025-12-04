@@ -360,6 +360,12 @@ PhysicsBodyID PhysicsWorld::createTerrainDisc(float radius, float heightOffset) 
 
 PhysicsBodyID PhysicsWorld::createTerrainHeightfield(const float* samples, uint32_t sampleCount,
                                                       float worldSize, float heightScale) {
+    // Call the version with no hole mask
+    return createTerrainHeightfield(samples, nullptr, sampleCount, worldSize, heightScale);
+}
+
+PhysicsBodyID PhysicsWorld::createTerrainHeightfield(const float* samples, const uint8_t* holeMask,
+                                                      uint32_t sampleCount, float worldSize, float heightScale) {
     if (!initialized) return INVALID_BODY_ID;
     if (!samples || sampleCount < 2) {
         SDL_Log("Invalid heightfield parameters");
@@ -374,9 +380,15 @@ PhysicsBodyID PhysicsWorld::createTerrainHeightfield(const float* samples, uint3
 
     // Create height samples for Jolt using shared TerrainHeight functions
     // See TerrainHeight.h for authoritative height formula
+    // For holes, use JPH::HeightFieldShapeConstants::cNoCollisionValue
     std::vector<float> joltSamples(sampleCount * sampleCount);
     for (uint32_t i = 0; i < sampleCount * sampleCount; i++) {
-        joltSamples[i] = TerrainHeight::toWorld(samples[i], heightScale);
+        if (holeMask && holeMask[i] > 127) {
+            // This is a hole - no collision
+            joltSamples[i] = JPH::HeightFieldShapeConstants::cNoCollisionValue;
+        } else {
+            joltSamples[i] = TerrainHeight::toWorld(samples[i], heightScale);
+        }
     }
 
     // HeightFieldShapeSettings

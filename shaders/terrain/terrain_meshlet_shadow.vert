@@ -31,6 +31,9 @@ layout(push_constant) uniform PushConstants {
     int padding;
 };
 
+// Output UV for hole mask sampling in fragment shader
+layout(location = 0) out vec2 fragTexCoord;
+
 void main() {
     // gl_InstanceIndex tells us which CBT leaf node we're rendering
     uint cbtLeafIndex = uint(gl_InstanceIndex);
@@ -69,4 +72,7 @@ void main() {
 
     // Transform to light space
     gl_Position = lightViewProj * vec4(worldPos, 1.0);
+
+    // Pass UV for hole mask sampling
+    fragTexCoord = uv;
 }
