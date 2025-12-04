@@ -450,7 +450,8 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
             groundDescriptorSets[0], groundDescriptorSets[1],
             metalDescriptorSets[0], metalDescriptorSets[1],
             rockDescriptorSets[0], rockDescriptorSets[1],
-            characterDescriptorSets[0], characterDescriptorSets[1]
+            characterDescriptorSets[0], characterDescriptorSets[1],
+            skinnedDescriptorSets[0], skinnedDescriptorSets[1]
         };
         for (auto set : allSets) {
             factory.updateCloudShadowBinding(set,
@@ -2135,8 +2136,10 @@ bool Renderer::createSkinnedDescriptorSets() {
         common.spotShadowSampler = emissiveMap.getSampler();
         common.snowMaskView = snowMaskSystem.getSnowMaskView();
         common.snowMaskSampler = snowMaskSystem.getSnowMaskSampler();
-        common.cloudShadowView = cloudShadowSystem.getShadowMapView();
-        common.cloudShadowSampler = cloudShadowSystem.getShadowMapSampler();
+        // Cloud shadow system may not be initialized yet - use white texture as fallback
+        // The binding will be updated later in init() after cloudShadowSystem.init()
+        common.cloudShadowView = whiteTexture.getImageView();
+        common.cloudShadowSampler = whiteTexture.getSampler();
         // Snow and cloud shadow UBOs (bindings 10 and 11)
         common.snowUboBuffer = snowBuffers[i];
         common.snowUboBufferSize = sizeof(SnowUBO);

@@ -111,7 +111,7 @@ private:
 // Maximum number of bones supported in the shader
 constexpr uint32_t MAX_BONES = 128;
 
-// Bone matrices UBO (binding 10)
+// Bone matrices UBO (binding 12)
 struct BoneMatricesUBO {
     glm::mat4 bones[MAX_BONES];
 };
