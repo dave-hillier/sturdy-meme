@@ -23,7 +23,6 @@
 #include "SkySystem.h"
 #include "SceneManager.h"
 #include "TerrainSystem.h"
-#include "TerrainImporter.h"
 #include "ErosionSimulator.h"
 #include "CatmullClarkSystem.h"
 #include "SnowMaskSystem.h"
