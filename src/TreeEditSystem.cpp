@@ -308,6 +308,13 @@ void TreeEditSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
     if (!enabled || !meshesUploaded) return;
     if (branchMesh.getIndexCount() == 0) return;
 
+    // Additional safety check: ensure vertex buffer is valid
+    // This handles race conditions where buffers may be destroyed during frame recording
+    if (branchMesh.getVertexBuffer() == VK_NULL_HANDLE ||
+        branchMesh.getIndexBuffer() == VK_NULL_HANDLE) {
+        return;
+    }
+
     // Set viewport and scissor
     VkViewport viewport{};
     viewport.x = 0.0f;
@@ -347,7 +354,9 @@ void TreeEditSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
     vkCmdDrawIndexed(cmd, branchMesh.getIndexCount(), 1, 0, 0, 0);
 
     // Draw leaves
-    if (showLeaves && leafMesh.getIndexCount() > 0 && !wireframeMode) {
+    if (showLeaves && leafMesh.getIndexCount() > 0 && !wireframeMode &&
+        leafMesh.getVertexBuffer() != VK_NULL_HANDLE &&
+        leafMesh.getIndexBuffer() != VK_NULL_HANDLE) {
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, leafPipeline);
 
         // Adjust push constants for leaves
