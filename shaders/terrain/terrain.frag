@@ -11,12 +11,13 @@
 #include "../constants_common.glsl"
 #include "../lighting_common.glsl"
 #include "../shadow_common.glsl"
+
+// Terrain uses binding 5 for the main UBO (different descriptor set layout)
+// Must be defined before including atmosphere_common.glsl which includes ubo_common.glsl
+#define UBO_BINDING 5
 #include "../atmosphere_common.glsl"
 #include "../snow_common.glsl"
 #include "../cloud_shadow_common.glsl"
-
-// Terrain uses binding 5 for the main UBO (different descriptor set layout)
-#define UBO_BINDING 5
 #include "../ubo_common.glsl"
 #include "../ubo_snow.glsl"
 #include "../ubo_cloud_shadow.glsl"
