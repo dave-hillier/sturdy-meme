@@ -69,6 +69,16 @@ struct TerrainFrustumCullPushConstants {
     uint32_t subdivisionWorkgroupSize;  // For computing dispatch args
 };
 
+// Push constants for shadow cascade culling
+struct TerrainShadowCullPushConstants {
+    glm::mat4 lightViewProj;           // Light's view-projection matrix
+    glm::vec4 lightFrustumPlanes[6];   // Frustum planes from lightViewProj
+    float terrainSize;
+    float heightScale;
+    uint32_t cascadeIndex;
+    uint32_t padding;
+};
+
 // Terrain configuration (outside class to avoid C++17 default argument issues)
 struct TerrainConfig {
     float size = 16384.0f;              // Terrain size in world units (matches 16384x16384 heightmap)
@@ -149,6 +159,14 @@ public:
     void recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex,
                           const glm::mat4& lightViewProj, int cascadeIndex);
 
+    // Record shadow culling compute (call before recordShadowDraw for each cascade)
+    void recordShadowCull(VkCommandBuffer cmd, uint32_t frameIndex,
+                          const glm::mat4& lightViewProj, int cascadeIndex);
+
+    // Shadow culling toggle
+    void setShadowCulling(bool enabled) { shadowCullingEnabled = enabled; }
+    bool isShadowCullingEnabled() const { return shadowCullingEnabled; }
+
     // Get terrain height at world position (CPU-side, for collision)
     float getHeightAt(float x, float z) const;
 
@@ -212,6 +230,8 @@ private:
     bool createMeshletRenderPipeline();
     bool createMeshletWireframePipeline();
     bool createMeshletShadowPipeline();
+    bool createShadowCullPipelines();
+    bool createShadowCullingBuffers();
 
     // Utility functions
     void extractFrustumPlanes(const glm::mat4& viewProj, glm::vec4 planes[6]);
@@ -292,6 +312,18 @@ private:
     VkPipeline shadowPipeline = VK_NULL_HANDLE;
     VkPipeline meshletShadowPipeline = VK_NULL_HANDLE;
 
+    // Shadow culling pipeline and resources
+    VkPipelineLayout shadowCullPipelineLayout = VK_NULL_HANDLE;
+    VkPipeline shadowCullPipeline = VK_NULL_HANDLE;
+    VkPipeline shadowCulledPipeline = VK_NULL_HANDLE;           // Uses culled indices
+    VkPipeline meshletShadowCulledPipeline = VK_NULL_HANDLE;    // Meshlet version
+
+    // Shadow culling buffers (reused per cascade)
+    VkBuffer shadowVisibleBuffer = VK_NULL_HANDLE;       // [count, index0, index1, ...]
+    VmaAllocation shadowVisibleAllocation = VK_NULL_HANDLE;
+    VkBuffer shadowIndirectDrawBuffer = VK_NULL_HANDLE;  // VkDrawIndirectCommand or VkDrawIndexedIndirectCommand
+    VmaAllocation shadowIndirectDrawAllocation = VK_NULL_HANDLE;
+
     // Descriptor sets
     std::vector<VkDescriptorSet> computeDescriptorSets;  // Per frame
     std::vector<VkDescriptorSet> renderDescriptorSets;   // Per frame
@@ -302,6 +334,7 @@ private:
     bool wireframeMode = false;
     bool skipFrameOptimizationEnabled = true;  // Camera-still skip optimization
     bool gpuCullingEnabled = true;             // GPU frustum culling for split phase
+    bool shadowCullingEnabled = true;          // GPU frustum culling for shadow cascades
 
     // Runtime state
     uint32_t currentNodeCount = 2;  // Start with 2 root triangles

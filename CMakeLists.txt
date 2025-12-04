@@ -182,6 +182,9 @@ set(TERRAIN_SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain.frag.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_shadow.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_shadow.frag.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_shadow_cull.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_shadow_culled.vert.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_meshlet_shadow_culled.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_wireframe.frag.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_meshlet.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_meshlet_shadow.vert.spv
@@ -329,10 +332,13 @@ if(SHADER_COMPILE_CMD)
     set(TERRAIN_LEB_SHADERS
         terrain_subdivision.comp
         terrain_frustum_cull.comp
+        terrain_shadow_cull.comp
         terrain.vert
         terrain_shadow.vert
+        terrain_shadow_culled.vert
         terrain_meshlet.vert
         terrain_meshlet_shadow.vert
+        terrain_meshlet_shadow_culled.vert
     )
 
     foreach(SHADER ${TERRAIN_LEB_SHADERS})
@@ -444,6 +450,9 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain.frag.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_shadow.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_shadow.frag.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_shadow_cull.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_shadow_culled.vert.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_meshlet_shadow_culled.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_wireframe.frag.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_meshlet.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_meshlet_shadow.vert.spv

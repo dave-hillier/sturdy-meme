@@ -94,8 +94,12 @@ bool TerrainSystem::init(const InitInfo& info, const TerrainConfig& cfg) {
         if (!createMeshletShadowPipeline()) return false;
     }
 
-    SDL_Log("TerrainSystem initialized with CBT max depth %d, meshlets %s",
-            config.maxDepth, config.useMeshlets ? "enabled" : "disabled");
+    // Create shadow culling pipelines
+    if (!createShadowCullPipelines()) return false;
+
+    SDL_Log("TerrainSystem initialized with CBT max depth %d, meshlets %s, shadow culling %s",
+            config.maxDepth, config.useMeshlets ? "enabled" : "disabled",
+            shadowCullingEnabled ? "enabled" : "disabled");
     return true;
 }
 
@@ -118,6 +122,11 @@ void TerrainSystem::destroy(VkDevice device, VmaAllocator allocator) {
     if (meshletWireframePipeline) vkDestroyPipeline(device, meshletWireframePipeline, nullptr);
     if (meshletShadowPipeline) vkDestroyPipeline(device, meshletShadowPipeline, nullptr);
 
+    // Shadow culling pipelines
+    if (shadowCullPipeline) vkDestroyPipeline(device, shadowCullPipeline, nullptr);
+    if (shadowCulledPipeline) vkDestroyPipeline(device, shadowCulledPipeline, nullptr);
+    if (meshletShadowCulledPipeline) vkDestroyPipeline(device, meshletShadowCulledPipeline, nullptr);
+
     // Destroy pipeline layouts
     if (dispatcherPipelineLayout) vkDestroyPipelineLayout(device, dispatcherPipelineLayout, nullptr);
     if (subdivisionPipelineLayout) vkDestroyPipelineLayout(device, subdivisionPipelineLayout, nullptr);
@@ -127,6 +136,7 @@ void TerrainSystem::destroy(VkDevice device, VmaAllocator allocator) {
     if (prepareDispatchPipelineLayout) vkDestroyPipelineLayout(device, prepareDispatchPipelineLayout, nullptr);
     if (renderPipelineLayout) vkDestroyPipelineLayout(device, renderPipelineLayout, nullptr);
     if (shadowPipelineLayout) vkDestroyPipelineLayout(device, shadowPipelineLayout, nullptr);
+    if (shadowCullPipelineLayout) vkDestroyPipelineLayout(device, shadowCullPipelineLayout, nullptr);
 
     // Destroy descriptor set layouts
     if (computeDescriptorSetLayout) vkDestroyDescriptorSetLayout(device, computeDescriptorSetLayout, nullptr);
@@ -137,6 +147,10 @@ void TerrainSystem::destroy(VkDevice device, VmaAllocator allocator) {
     if (indirectDrawBuffer) vmaDestroyBuffer(allocator, indirectDrawBuffer, indirectDrawAllocation);
     if (visibleIndicesBuffer) vmaDestroyBuffer(allocator, visibleIndicesBuffer, visibleIndicesAllocation);
     if (cullIndirectDispatchBuffer) vmaDestroyBuffer(allocator, cullIndirectDispatchBuffer, cullIndirectDispatchAllocation);
+
+    // Destroy shadow culling buffers
+    if (shadowVisibleBuffer) vmaDestroyBuffer(allocator, shadowVisibleBuffer, shadowVisibleAllocation);
+    if (shadowIndirectDrawBuffer) vmaDestroyBuffer(allocator, shadowIndirectDrawBuffer, shadowIndirectDrawAllocation);
 
     // Destroy uniform buffers
     for (size_t i = 0; i < uniformBuffers.size(); i++) {
@@ -260,6 +274,42 @@ bool TerrainSystem::createIndirectBuffers() {
         }
     }
 
+    // Shadow visible indices buffer: [count, index0, index1, ...]
+    {
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.size = sizeof(uint32_t) * (1 + MAX_VISIBLE_TRIANGLES);
+        bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+
+        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &shadowVisibleBuffer,
+                           &shadowVisibleAllocation, nullptr) != VK_SUCCESS) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create shadow visible indices buffer");
+            return false;
+        }
+    }
+
+    // Shadow indirect draw buffer (5 uints for indexed draw)
+    {
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.size = sizeof(uint32_t) * 5;
+        bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+
+        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &shadowIndirectDrawBuffer,
+                           &shadowIndirectDrawAllocation, nullptr) != VK_SUCCESS) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create shadow indirect draw buffer");
+            return false;
+        }
+    }
+
     return true;
 }
 
@@ -288,14 +338,16 @@ bool TerrainSystem::createComputeDescriptorSetLayout() {
             .build();
     };
 
-    std::array<VkDescriptorSetLayoutBinding, 7> bindings = {
+    std::array<VkDescriptorSetLayoutBinding, 9> bindings = {
         makeComputeBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),   // CBT buffer
         makeComputeBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),   // indirect dispatch
         makeComputeBinding(2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),   // indirect draw
         makeComputeBinding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER), // height map
         makeComputeBinding(4, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER),   // terrain uniforms
         makeComputeBinding(5, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),   // visible indices (stream compaction)
-        makeComputeBinding(6, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)};  // cull indirect dispatch
+        makeComputeBinding(6, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),   // cull indirect dispatch
+        makeComputeBinding(14, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),  // shadow visible indices
+        makeComputeBinding(15, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)}; // shadow indirect draw
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -318,7 +370,7 @@ bool TerrainSystem::createRenderDescriptorSetLayout() {
             .build();
     };
 
-    std::array<VkDescriptorSetLayoutBinding, 12> bindings = {
+    std::array<VkDescriptorSetLayoutBinding, 13> bindings = {
         makeGraphicsBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT),
         makeGraphicsBinding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT),
@@ -334,7 +386,9 @@ bool TerrainSystem::createRenderDescriptorSetLayout() {
         makeGraphicsBinding(11, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
         makeGraphicsBinding(12, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
         // Cloud shadow map
-        makeGraphicsBinding(13, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)};
+        makeGraphicsBinding(13, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
+        // Shadow culled visible indices (for shadow culled vertex shaders)
+        makeGraphicsBinding(14, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT)};
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -381,7 +435,7 @@ bool TerrainSystem::createDescriptorSets() {
 
     // Update compute descriptor sets
     for (uint32_t i = 0; i < framesInFlight; i++) {
-        std::array<VkWriteDescriptorSet, 7> writes{};
+        std::array<VkWriteDescriptorSet, 9> writes{};
 
         VkDescriptorBufferInfo cbtInfo{cbt.getBuffer(), 0, cbt.getBufferSize()};
         writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -438,6 +492,23 @@ bool TerrainSystem::createDescriptorSets() {
         writes[6].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         writes[6].descriptorCount = 1;
         writes[6].pBufferInfo = &cullDispatchInfo;
+
+        // Shadow culling buffers
+        VkDescriptorBufferInfo shadowVisibleInfo{shadowVisibleBuffer, 0, sizeof(uint32_t) * (1 + MAX_VISIBLE_TRIANGLES)};
+        writes[7].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[7].dstSet = computeDescriptorSets[i];
+        writes[7].dstBinding = 14;  // BINDING_TERRAIN_SHADOW_VISIBLE
+        writes[7].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[7].descriptorCount = 1;
+        writes[7].pBufferInfo = &shadowVisibleInfo;
+
+        VkDescriptorBufferInfo shadowDrawInfo{shadowIndirectDrawBuffer, 0, sizeof(uint32_t) * 5};
+        writes[8].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[8].dstSet = computeDescriptorSets[i];
+        writes[8].dstBinding = 15;  // BINDING_TERRAIN_SHADOW_DRAW
+        writes[8].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[8].descriptorCount = 1;
+        writes[8].pBufferInfo = &shadowDrawInfo;
 
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
     }
@@ -1329,6 +1400,205 @@ bool TerrainSystem::createMeshletShadowPipeline() {
     return result == VK_SUCCESS;
 }
 
+bool TerrainSystem::createShadowCullPipelines() {
+    // Create shadow cull compute pipeline
+    VkShaderModule cullShaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_shadow_cull.comp.spv");
+    if (!cullShaderModule) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load shadow cull compute shader");
+        return false;
+    }
+
+    // Pipeline layout for shadow cull compute
+    VkPushConstantRange pushConstantRange{};
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = sizeof(TerrainShadowCullPushConstants);
+
+    VkPipelineLayoutCreateInfo layoutInfo{};
+    layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    layoutInfo.setLayoutCount = 1;
+    layoutInfo.pSetLayouts = &computeDescriptorSetLayout;
+    layoutInfo.pushConstantRangeCount = 1;
+    layoutInfo.pPushConstantRanges = &pushConstantRange;
+
+    if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &shadowCullPipelineLayout) != VK_SUCCESS) {
+        vkDestroyShaderModule(device, cullShaderModule, nullptr);
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create shadow cull pipeline layout");
+        return false;
+    }
+
+    // Create compute pipeline
+    VkPipelineShaderStageCreateInfo stageInfo{};
+    stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    stageInfo.module = cullShaderModule;
+    stageInfo.pName = "main";
+
+    // Specialization constant for meshlet index count
+    uint32_t meshletIndexCount = config.useMeshlets ? meshlet.getIndexCount() : 0;
+    VkSpecializationMapEntry specEntry{};
+    specEntry.constantID = 0;
+    specEntry.offset = 0;
+    specEntry.size = sizeof(uint32_t);
+
+    VkSpecializationInfo specInfo{};
+    specInfo.mapEntryCount = 1;
+    specInfo.pMapEntries = &specEntry;
+    specInfo.dataSize = sizeof(uint32_t);
+    specInfo.pData = &meshletIndexCount;
+    stageInfo.pSpecializationInfo = &specInfo;
+
+    VkComputePipelineCreateInfo pipelineInfo{};
+    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    pipelineInfo.stage = stageInfo;
+    pipelineInfo.layout = shadowCullPipelineLayout;
+
+    VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &shadowCullPipeline);
+    vkDestroyShaderModule(device, cullShaderModule, nullptr);
+
+    if (result != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create shadow cull compute pipeline");
+        return false;
+    }
+
+    // Create shadow culled graphics pipeline (non-meshlet)
+    VkShaderModule shadowCulledVertModule = loadShaderModule(device, shaderPath + "/terrain/terrain_shadow_culled.vert.spv");
+    VkShaderModule shadowFragModule = loadShaderModule(device, shaderPath + "/terrain/terrain_shadow.frag.spv");
+    if (!shadowCulledVertModule || !shadowFragModule) {
+        if (shadowCulledVertModule) vkDestroyShaderModule(device, shadowCulledVertModule, nullptr);
+        if (shadowFragModule) vkDestroyShaderModule(device, shadowFragModule, nullptr);
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load shadow culled shaders");
+        return false;
+    }
+
+    std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages{};
+    shaderStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    shaderStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+    shaderStages[0].module = shadowCulledVertModule;
+    shaderStages[0].pName = "main";
+
+    shaderStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    shaderStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    shaderStages[1].module = shadowFragModule;
+    shaderStages[1].pName = "main";
+
+    // No vertex input for non-meshlet (generated in shader)
+    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
+    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+
+    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+    VkPipelineViewportStateCreateInfo viewportState{};
+    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewportState.viewportCount = 1;
+    viewportState.scissorCount = 1;
+
+    VkPipelineRasterizationStateCreateInfo rasterizer{};
+    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+    rasterizer.lineWidth = 1.0f;
+    rasterizer.cullMode = VK_CULL_MODE_FRONT_BIT;
+    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    rasterizer.depthBiasEnable = VK_TRUE;
+
+    VkPipelineMultisampleStateCreateInfo multisampling{};
+    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    VkPipelineDepthStencilStateCreateInfo depthStencil{};
+    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    depthStencil.depthTestEnable = VK_TRUE;
+    depthStencil.depthWriteEnable = VK_TRUE;
+    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+
+    VkPipelineColorBlendStateCreateInfo colorBlending{};
+    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    colorBlending.attachmentCount = 0;
+
+    std::array<VkDynamicState, 3> dynamicStates = {
+        VK_DYNAMIC_STATE_VIEWPORT,
+        VK_DYNAMIC_STATE_SCISSOR,
+        VK_DYNAMIC_STATE_DEPTH_BIAS
+    };
+    VkPipelineDynamicStateCreateInfo dynamicState{};
+    dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
+    dynamicState.pDynamicStates = dynamicStates.data();
+
+    VkGraphicsPipelineCreateInfo gfxPipelineInfo{};
+    gfxPipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    gfxPipelineInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
+    gfxPipelineInfo.pStages = shaderStages.data();
+    gfxPipelineInfo.pVertexInputState = &vertexInputInfo;
+    gfxPipelineInfo.pInputAssemblyState = &inputAssembly;
+    gfxPipelineInfo.pViewportState = &viewportState;
+    gfxPipelineInfo.pRasterizationState = &rasterizer;
+    gfxPipelineInfo.pMultisampleState = &multisampling;
+    gfxPipelineInfo.pDepthStencilState = &depthStencil;
+    gfxPipelineInfo.pColorBlendState = &colorBlending;
+    gfxPipelineInfo.pDynamicState = &dynamicState;
+    gfxPipelineInfo.layout = shadowPipelineLayout;
+    gfxPipelineInfo.renderPass = shadowRenderPass;
+    gfxPipelineInfo.subpass = 0;
+
+    result = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &gfxPipelineInfo, nullptr, &shadowCulledPipeline);
+    vkDestroyShaderModule(device, shadowCulledVertModule, nullptr);
+    vkDestroyShaderModule(device, shadowFragModule, nullptr);
+
+    if (result != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create shadow culled graphics pipeline");
+        return false;
+    }
+
+    // Create meshlet shadow culled pipeline (if meshlets enabled)
+    if (config.useMeshlets) {
+        VkShaderModule meshletShadowCulledVertModule = loadShaderModule(device, shaderPath + "/terrain/terrain_meshlet_shadow_culled.vert.spv");
+        shadowFragModule = loadShaderModule(device, shaderPath + "/terrain/terrain_shadow.frag.spv");
+        if (!meshletShadowCulledVertModule || !shadowFragModule) {
+            if (meshletShadowCulledVertModule) vkDestroyShaderModule(device, meshletShadowCulledVertModule, nullptr);
+            if (shadowFragModule) vkDestroyShaderModule(device, shadowFragModule, nullptr);
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load meshlet shadow culled shaders");
+            return false;
+        }
+
+        shaderStages[0].module = meshletShadowCulledVertModule;
+        shaderStages[1].module = shadowFragModule;
+
+        // Meshlet vertex input: vec2 for local UV
+        VkVertexInputBindingDescription bindingDesc{};
+        bindingDesc.binding = 0;
+        bindingDesc.stride = sizeof(glm::vec2);
+        bindingDesc.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+        VkVertexInputAttributeDescription attrDesc{};
+        attrDesc.binding = 0;
+        attrDesc.location = 0;
+        attrDesc.format = VK_FORMAT_R32G32_SFLOAT;
+        attrDesc.offset = 0;
+
+        vertexInputInfo.vertexBindingDescriptionCount = 1;
+        vertexInputInfo.pVertexBindingDescriptions = &bindingDesc;
+        vertexInputInfo.vertexAttributeDescriptionCount = 1;
+        vertexInputInfo.pVertexAttributeDescriptions = &attrDesc;
+
+        gfxPipelineInfo.pStages = shaderStages.data();
+
+        result = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &gfxPipelineInfo, nullptr, &meshletShadowCulledPipeline);
+        vkDestroyShaderModule(device, meshletShadowCulledVertModule, nullptr);
+        vkDestroyShaderModule(device, shadowFragModule, nullptr);
+
+        if (result != VK_SUCCESS) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create meshlet shadow culled graphics pipeline");
+            return false;
+        }
+    }
+
+    SDL_Log("TerrainSystem: Shadow culling pipelines created successfully");
+    return true;
+}
+
 void TerrainSystem::querySubgroupCapabilities() {
     VkPhysicalDeviceSubgroupProperties subgroupProps{};
     subgroupProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
@@ -1487,6 +1757,19 @@ void TerrainSystem::updateDescriptorSets(VkDevice device,
             grassFarLODWrite.descriptorCount = 1;
             grassFarLODWrite.pImageInfo = &grassFarLODInfo;
             writes.push_back(grassFarLODWrite);
+        }
+
+        // Shadow visible indices (for shadow culled vertex shaders)
+        if (shadowVisibleBuffer != VK_NULL_HANDLE) {
+            VkDescriptorBufferInfo shadowVisibleInfo{shadowVisibleBuffer, 0, sizeof(uint32_t) * (1 + MAX_VISIBLE_TRIANGLES)};
+            VkWriteDescriptorSet shadowVisibleWrite{};
+            shadowVisibleWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            shadowVisibleWrite.dstSet = renderDescriptorSets[i];
+            shadowVisibleWrite.dstBinding = 14;
+            shadowVisibleWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            shadowVisibleWrite.descriptorCount = 1;
+            shadowVisibleWrite.pBufferInfo = &shadowVisibleInfo;
+            writes.push_back(shadowVisibleWrite);
         }
 
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
@@ -1888,9 +2171,66 @@ void TerrainSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
     }
 }
 
+void TerrainSystem::recordShadowCull(VkCommandBuffer cmd, uint32_t frameIndex,
+                                      const glm::mat4& lightViewProj, int cascadeIndex) {
+    if (!shadowCullingEnabled || shadowCullPipeline == VK_NULL_HANDLE) {
+        return;
+    }
+
+    // Clear the shadow visible count to 0
+    vkCmdFillBuffer(cmd, shadowVisibleBuffer, 0, sizeof(uint32_t), 0);
+
+    // Memory barrier before compute
+    VkMemoryBarrier clearBarrier{};
+    clearBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    clearBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    clearBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         0, 1, &clearBarrier, 0, nullptr, 0, nullptr);
+
+    // Bind shadow cull compute pipeline
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, shadowCullPipeline);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, shadowCullPipelineLayout,
+                           0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
+
+    // Set up push constants with frustum planes
+    TerrainShadowCullPushConstants pc{};
+    pc.lightViewProj = lightViewProj;
+    extractFrustumPlanes(lightViewProj, pc.lightFrustumPlanes);
+    pc.terrainSize = config.size;
+    pc.heightScale = config.heightScale;
+    pc.cascadeIndex = static_cast<uint32_t>(cascadeIndex);
+
+    vkCmdPushConstants(cmd, shadowCullPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT,
+                       0, sizeof(pc), &pc);
+
+    // Dispatch based on node count
+    uint32_t nodeCount = cbt.getNodeCount();
+    uint32_t workgroups = (nodeCount + FRUSTUM_CULL_WORKGROUP_SIZE - 1) / FRUSTUM_CULL_WORKGROUP_SIZE;
+    vkCmdDispatch(cmd, workgroups, 1, 1);
+
+    // Memory barrier to ensure shadow cull results are visible for draw
+    VkMemoryBarrier computeBarrier{};
+    computeBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    computeBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    computeBarrier.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_SHADER_READ_BIT;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+                         0, 1, &computeBarrier, 0, nullptr, 0, nullptr);
+}
+
 void TerrainSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex,
                                       const glm::mat4& lightViewProj, int cascadeIndex) {
-    VkPipeline pipeline = config.useMeshlets ? meshletShadowPipeline : shadowPipeline;
+    // Choose pipeline: culled vs non-culled, meshlet vs direct
+    VkPipeline pipeline;
+    bool useCulled = shadowCullingEnabled && shadowCulledPipeline != VK_NULL_HANDLE;
+
+    if (config.useMeshlets) {
+        pipeline = useCulled ? meshletShadowCulledPipeline : meshletShadowPipeline;
+    } else {
+        pipeline = useCulled ? shadowCulledPipeline : shadowPipeline;
+    }
+
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipelineLayout,
                            0, 1, &renderDescriptorSets[frameIndex], 0, nullptr);
@@ -1925,10 +2265,12 @@ void TerrainSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex,
         vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
         vkCmdBindIndexBuffer(cmd, meshlet.getIndexBuffer(), 0, VK_INDEX_TYPE_UINT16);
 
-        // Indexed instanced draw
-        vkCmdDrawIndexedIndirect(cmd, indirectDrawBuffer, 0, 1, sizeof(VkDrawIndexedIndirectCommand));
+        // Use shadow indirect draw buffer if culling, else main indirect buffer
+        VkBuffer drawBuffer = useCulled ? shadowIndirectDrawBuffer : indirectDrawBuffer;
+        vkCmdDrawIndexedIndirect(cmd, drawBuffer, 0, 1, sizeof(VkDrawIndexedIndirectCommand));
     } else {
-        vkCmdDrawIndirect(cmd, indirectDrawBuffer, 0, 1, sizeof(VkDrawIndirectCommand));
+        VkBuffer drawBuffer = useCulled ? shadowIndirectDrawBuffer : indirectDrawBuffer;
+        vkCmdDrawIndirect(cmd, drawBuffer, 0, 1, sizeof(VkDrawIndirectCommand));
     }
 }
 

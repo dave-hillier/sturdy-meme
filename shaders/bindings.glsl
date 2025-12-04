@@ -78,6 +78,10 @@
 #define BINDING_TERRAIN_SNOW_CASCADE_2 12   // Snow cascade 2
 #define BINDING_TERRAIN_CLOUD_SHADOW   13   // Cloud shadow map
 
+// Shadow culling (compute pass - uses terrain compute descriptor set)
+#define BINDING_TERRAIN_SHADOW_VISIBLE 14   // Shadow visible indices buffer
+#define BINDING_TERRAIN_SHADOW_DRAW    15   // Shadow indirect draw buffer
+
 // =============================================================================
 // Grass Compute Shader Descriptor Set
 // =============================================================================
