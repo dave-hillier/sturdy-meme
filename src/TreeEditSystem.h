@@ -9,6 +9,7 @@
 #include "TreeGenerator.h"
 #include "Mesh.h"
 #include "UBOs.h"
+#include "DescriptorManager.h"
 
 // Push constants for tree rendering
 struct TreePushConstants {
@@ -25,7 +26,7 @@ public:
         VkPhysicalDevice physicalDevice;
         VmaAllocator allocator;
         VkRenderPass renderPass;
-        VkDescriptorPool descriptorPool;
+        DescriptorManager::Pool* descriptorPool;
         VkExtent2D extent;
         std::string shaderPath;
         uint32_t framesInFlight;
@@ -93,7 +94,7 @@ private:
     VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
     VmaAllocator allocator = VK_NULL_HANDLE;
     VkRenderPass renderPass = VK_NULL_HANDLE;
-    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
+    DescriptorManager::Pool* descriptorPool = nullptr;
     VkExtent2D extent = {0, 0};
     std::string shaderPath;
     uint32_t framesInFlight = 0;

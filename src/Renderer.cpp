@@ -552,7 +552,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     treeEditInfo.physicalDevice = physicalDevice;
     treeEditInfo.allocator = allocator;
     treeEditInfo.renderPass = postProcessSystem.getHDRRenderPass();
-    treeEditInfo.descriptorPool = descriptorPool;
+    treeEditInfo.descriptorPool = &*descriptorManagerPool;
     treeEditInfo.extent = swapchainExtent;
     treeEditInfo.shaderPath = resourcePath + "/shaders";
     treeEditInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;

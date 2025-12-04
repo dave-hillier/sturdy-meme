@@ -33,6 +33,9 @@ public:
     void setPlaybackSpeed(float speed);
     void setLooping(bool loop);
 
+    // Start a jump with trajectory prediction for animation sync
+    void startJump(const glm::vec3& startPos, const glm::vec3& velocity, float gravity, const class PhysicsWorld* physics);
+
     // Update animation and re-skin mesh
     // deltaTime: time since last frame in seconds
     // movementSpeed: horizontal movement speed for animation state selection

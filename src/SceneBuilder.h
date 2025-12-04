@@ -84,6 +84,9 @@ public:
                                   VkCommandPool commandPool, VkQueue queue,
                                   float movementSpeed = 0.0f, bool isGrounded = true, bool isJumping = false);
 
+    // Start a jump with trajectory prediction
+    void startCharacterJump(const glm::vec3& startPos, const glm::vec3& velocity, float gravity, const class PhysicsWorld* physics);
+
 private:
     bool createMeshes(const InitInfo& info);
     bool loadTextures(const InitInfo& info);

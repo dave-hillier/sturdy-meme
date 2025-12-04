@@ -71,16 +71,13 @@ bool TreeEditSystem::createDescriptorSetLayout() {
 }
 
 bool TreeEditSystem::createDescriptorSets() {
-    std::vector<VkDescriptorSetLayout> layouts(framesInFlight, descriptorSetLayout);
+    if (!descriptorPool) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "No descriptor pool provided for tree edit system");
+        return false;
+    }
 
-    VkDescriptorSetAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = descriptorPool;
-    allocInfo.descriptorSetCount = framesInFlight;
-    allocInfo.pSetLayouts = layouts.data();
-
-    descriptorSets.resize(framesInFlight);
-    if (vkAllocateDescriptorSets(device, &allocInfo, descriptorSets.data()) != VK_SUCCESS) {
+    descriptorSets = descriptorPool->allocate(descriptorSetLayout, framesInFlight);
+    if (descriptorSets.size() != framesInFlight) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate tree descriptor sets");
         return false;
     }

@@ -192,6 +192,15 @@ void Application::run() {
         bool wantsJump = input.wantsJump();
         bool isJumping = wantsJump && wasGrounded;
 
+        // If starting a jump, compute trajectory for animation sync
+        if (isJumping) {
+            glm::vec3 startPos = physics.getCharacterPosition();
+            // Velocity: horizontal from input + jump impulse (5.0 m/s up, matching PhysicsSystem)
+            glm::vec3 jumpVelocity = desiredVelocity;
+            jumpVelocity.y = 5.0f;
+            renderer.startCharacterJump(startPos, jumpVelocity, 9.81f, &physics);
+        }
+
         // Always update physics character controller (handles gravity, jumping, and movement)
         physics.updateCharacter(deltaTime, desiredVelocity, wantsJump);
 

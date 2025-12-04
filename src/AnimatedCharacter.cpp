@@ -1,6 +1,7 @@
 #include "AnimatedCharacter.h"
 #include "GLTFLoader.h"
 #include "FBXLoader.h"
+#include "PhysicsSystem.h"
 #include <SDL3/SDL_log.h>
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -229,6 +230,12 @@ void AnimatedCharacter::setPlaybackSpeed(float speed) {
 
 void AnimatedCharacter::setLooping(bool loop) {
     animationPlayer.setLooping(loop);
+}
+
+void AnimatedCharacter::startJump(const glm::vec3& startPos, const glm::vec3& velocity, float gravity, const PhysicsWorld* physics) {
+    if (useStateMachine) {
+        stateMachine.startJump(startPos, velocity, gravity, physics);
+    }
 }
 
 const AnimationClip* AnimatedCharacter::getCurrentAnimation() const {

@@ -1,4 +1,5 @@
 #include "SceneBuilder.h"
+#include "PhysicsSystem.h"
 #include <SDL3/SDL_log.h>
 
 bool SceneBuilder::init(const InitInfo& info) {
@@ -431,4 +432,9 @@ void SceneBuilder::updateAnimatedCharacter(float deltaTime, VmaAllocator allocat
     if (playerObjectIndex < sceneObjects.size()) {
         sceneObjects[playerObjectIndex].mesh = &animatedCharacter.getMesh();
     }
+}
+
+void SceneBuilder::startCharacterJump(const glm::vec3& startPos, const glm::vec3& velocity, float gravity, const PhysicsWorld* physics) {
+    if (!hasAnimatedCharacter) return;
+    animatedCharacter.startJump(startPos, velocity, gravity, physics);
 }
