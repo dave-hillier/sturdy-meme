@@ -18,10 +18,12 @@ void MaterialDescriptorFactory::writeCommonBindings(
                     VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
         // Binding 5: Emissive map
         .writeImage(5, common.emissiveMapView, common.emissiveMapSampler)
-        // Binding 6: Point shadow maps
-        .writeImage(6, common.pointShadowView, common.pointShadowSampler)
-        // Binding 7: Spot shadow maps
-        .writeImage(7, common.spotShadowView, common.spotShadowSampler)
+        // Binding 6: Point shadow maps (depth format, needs correct layout)
+        .writeImage(6, common.pointShadowView, common.pointShadowSampler,
+                   VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL)
+        // Binding 7: Spot shadow maps (depth format, needs correct layout)
+        .writeImage(7, common.spotShadowView, common.spotShadowSampler,
+                   VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL)
         // Binding 8: Snow mask
         .writeImage(8, common.snowMaskView, common.snowMaskSampler);
 

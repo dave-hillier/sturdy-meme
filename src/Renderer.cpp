@@ -2129,11 +2129,11 @@ bool Renderer::createSkinnedDescriptorSets() {
         common.lightBufferSize = sizeof(LightBuffer);
         common.emissiveMapView = emissiveMap.getImageView();
         common.emissiveMapSampler = emissiveMap.getSampler();
-        // Skinned meshes use dummy textures for point/spot shadows
-        common.pointShadowView = emissiveMap.getImageView();
-        common.pointShadowSampler = emissiveMap.getSampler();
-        common.spotShadowView = emissiveMap.getImageView();
-        common.spotShadowSampler = emissiveMap.getSampler();
+        // Point/spot shadow maps need proper array/cube textures, not 2D emissive
+        common.pointShadowView = shadowSystem.getPointShadowArrayView(i);
+        common.pointShadowSampler = shadowSystem.getPointShadowSampler();
+        common.spotShadowView = shadowSystem.getSpotShadowArrayView(i);
+        common.spotShadowSampler = shadowSystem.getSpotShadowSampler();
         common.snowMaskView = snowMaskSystem.getSnowMaskView();
         common.snowMaskSampler = snowMaskSystem.getSnowMaskSampler();
         // Cloud shadow system may not be initialized yet - use white texture as fallback
@@ -2162,18 +2162,29 @@ bool Renderer::createSkinnedDescriptorSets() {
 }
 
 void Renderer::updateBoneMatrices(uint32_t currentImage) {
+    BoneMatricesUBO* ubo = static_cast<BoneMatricesUBO*>(boneMatricesMapped[currentImage]);
+
     SceneBuilder& sceneBuilder = sceneManager.getSceneBuilder();
-    if (!sceneBuilder.hasCharacter()) return;
+    if (!sceneBuilder.hasCharacter()) {
+        // Ensure identity matrices when no character to prevent garbage data
+        for (uint32_t i = 0; i < MAX_BONES; i++) {
+            ubo->bones[i] = glm::mat4(1.0f);
+        }
+        return;
+    }
 
     // Get bone matrices from animated character
     std::vector<glm::mat4> boneMatrices;
     sceneBuilder.getAnimatedCharacter().computeBoneMatrices(boneMatrices);
 
     // Copy to mapped buffer
-    BoneMatricesUBO* ubo = static_cast<BoneMatricesUBO*>(boneMatricesMapped[currentImage]);
     size_t numBones = std::min(boneMatrices.size(), static_cast<size_t>(MAX_BONES));
     for (size_t i = 0; i < numBones; i++) {
         ubo->bones[i] = boneMatrices[i];
+    }
+    // Fill remaining slots with identity to prevent garbage data in unused bones
+    for (size_t i = numBones; i < MAX_BONES; i++) {
+        ubo->bones[i] = glm::mat4(1.0f);
     }
 }
 
