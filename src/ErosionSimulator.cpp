@@ -361,7 +361,7 @@ void ErosionSimulator::simulateDroplets(const ErosionConfig& config, ErosionProg
 
     // Step 1: Build flow direction map
     // flowDir[i] = direction index (0-7) that water flows to, or -1 for outlet (sea/edge)
-    std::vector<int8_t> flowDir(flowWidth * flowHeight, -1);
+    flowDir.resize(flowWidth * flowHeight, -1);
 
     for (uint32_t y = 0; y < flowHeight; y++) {
         for (uint32_t x = 0; x < flowWidth; x++) {
@@ -892,7 +892,7 @@ void ErosionSimulator::detectLakes(const ErosionConfig& config, ErosionProgressC
 bool ErosionSimulator::saveToCache(const ErosionConfig& config) const {
     fs::create_directories(config.cacheDirectory);
 
-    // Save flow map
+    // Save flow map and direction
     {
         std::ofstream file(getFlowMapPath(config.cacheDirectory), std::ios::binary);
         if (!file.is_open()) return false;
@@ -901,6 +901,8 @@ bool ErosionSimulator::saveToCache(const ErosionConfig& config) const {
         file.write(reinterpret_cast<const char*>(&flowHeight), sizeof(flowHeight));
         file.write(reinterpret_cast<const char*>(flowAccum.data()),
                    flowAccum.size() * sizeof(float));
+        file.write(reinterpret_cast<const char*>(flowDir.data()),
+                   flowDir.size() * sizeof(int8_t));
     }
 
     // Save rivers
@@ -946,7 +948,7 @@ bool ErosionSimulator::saveToCache(const ErosionConfig& config) const {
 }
 
 bool ErosionSimulator::loadFromCache(const ErosionConfig& config) {
-    // Load flow map
+    // Load flow map and direction
     {
         std::ifstream file(getFlowMapPath(config.cacheDirectory), std::ios::binary);
         if (!file.is_open()) return false;
@@ -958,7 +960,13 @@ bool ErosionSimulator::loadFromCache(const ErosionConfig& config) {
         file.read(reinterpret_cast<char*>(flowAccum.data()),
                   flowAccum.size() * sizeof(float));
 
+        // Try to load flow direction (may not exist in older caches)
+        flowDir.resize(flowWidth * flowHeight, -1);
+        file.read(reinterpret_cast<char*>(flowDir.data()),
+                  flowDir.size() * sizeof(int8_t));
+
         waterData.flowAccumulation = flowAccum;
+        waterData.flowDirection = flowDir;
         waterData.flowMapWidth = flowWidth;
         waterData.flowMapHeight = flowHeight;
     }
@@ -1037,6 +1045,7 @@ bool ErosionSimulator::simulate(const ErosionConfig& config, ErosionProgressCall
 
     // Copy flow data to output
     waterData.flowAccumulation = flowAccum;
+    waterData.flowDirection = flowDir;
     waterData.flowMapWidth = flowWidth;
     waterData.flowMapHeight = flowHeight;
     waterData.seaLevel = config.seaLevel;

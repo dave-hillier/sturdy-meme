@@ -31,6 +31,8 @@ struct WaterPlacementData {
 
     // Flow accumulation data (normalized 0-1, can be used as texture)
     std::vector<float> flowAccumulation;
+    // D8 flow direction: 0-7 for 8 directions (E,SE,S,SW,W,NW,N,NE), -1 for outlet
+    std::vector<int8_t> flowDirection;
     uint32_t flowMapWidth = 0;
     uint32_t flowMapHeight = 0;
 
@@ -153,6 +155,7 @@ private:
 
     // Flow accumulation during simulation (at output resolution)
     std::vector<float> flowAccum;
+    std::vector<int8_t> flowDir;  // D8 flow direction: 0-7 for 8 neighbors, -1 for outlet
     uint32_t flowWidth = 0;
     uint32_t flowHeight = 0;
 
