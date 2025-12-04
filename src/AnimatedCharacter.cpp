@@ -268,6 +268,11 @@ void AnimatedCharacter::update(float deltaTime, VmaAllocator allocator, VkDevice
         animationPlayer.applyToSkeleton(skeleton);
     }
 
+    // Apply IK after animation sampling
+    if (ikSystem.hasEnabledChains()) {
+        ikSystem.solve(skeleton);
+    }
+
     // GPU skinning: Bone matrices are computed and uploaded by Renderer each frame
     // No mesh re-upload needed - the vertex shader applies skinning
     if (useGPUSkinning) {
@@ -352,4 +357,83 @@ void AnimatedCharacter::uploadMesh(VmaAllocator allocator, VkDevice device,
     renderMesh.destroy(allocator);
     renderMesh.setCustomGeometry(skinnedVertices, indices);
     renderMesh.upload(allocator, device, commandPool, queue);
+}
+
+void AnimatedCharacter::setupDefaultIKChains() {
+    if (!loaded) {
+        SDL_Log("AnimatedCharacter: Cannot setup IK chains before loading character");
+        return;
+    }
+
+    ikSystem.clear();
+
+    // Common bone name patterns for humanoid rigs
+    // Mixamo uses "mixamorig:" prefix, others may not
+    auto findBone = [this](const std::vector<std::string>& names) -> std::string {
+        for (const auto& name : names) {
+            if (skeleton.findJointIndex(name) >= 0) {
+                return name;
+            }
+            // Try with mixamorig prefix
+            std::string mixamoName = "mixamorig:" + name;
+            if (skeleton.findJointIndex(mixamoName) >= 0) {
+                return mixamoName;
+            }
+        }
+        return "";
+    };
+
+    // Left arm chain
+    std::string leftShoulder = findBone({"LeftArm", "LeftUpperArm", "L_UpperArm", "shoulder.L", "upperarm_l"});
+    std::string leftElbow = findBone({"LeftForeArm", "LeftLowerArm", "L_LowerArm", "forearm.L", "lowerarm_l"});
+    std::string leftHand = findBone({"LeftHand", "L_Hand", "hand.L", "hand_l"});
+
+    if (!leftShoulder.empty() && !leftElbow.empty() && !leftHand.empty()) {
+        if (ikSystem.addTwoBoneChain("LeftArm", skeleton, leftShoulder, leftElbow, leftHand)) {
+            SDL_Log("AnimatedCharacter: Setup left arm IK chain");
+        }
+    }
+
+    // Right arm chain
+    std::string rightShoulder = findBone({"RightArm", "RightUpperArm", "R_UpperArm", "shoulder.R", "upperarm_r"});
+    std::string rightElbow = findBone({"RightForeArm", "RightLowerArm", "R_LowerArm", "forearm.R", "lowerarm_r"});
+    std::string rightHand = findBone({"RightHand", "R_Hand", "hand.R", "hand_r"});
+
+    if (!rightShoulder.empty() && !rightElbow.empty() && !rightHand.empty()) {
+        if (ikSystem.addTwoBoneChain("RightArm", skeleton, rightShoulder, rightElbow, rightHand)) {
+            SDL_Log("AnimatedCharacter: Setup right arm IK chain");
+        }
+    }
+
+    // Left leg chain
+    std::string leftThigh = findBone({"LeftUpLeg", "LeftUpperLeg", "L_UpperLeg", "thigh.L", "thigh_l"});
+    std::string leftKnee = findBone({"LeftLeg", "LeftLowerLeg", "L_LowerLeg", "shin.L", "calf_l"});
+    std::string leftFoot = findBone({"LeftFoot", "L_Foot", "foot.L", "foot_l"});
+
+    if (!leftThigh.empty() && !leftKnee.empty() && !leftFoot.empty()) {
+        if (ikSystem.addTwoBoneChain("LeftLeg", skeleton, leftThigh, leftKnee, leftFoot)) {
+            // Set default pole vector for knee (forward)
+            if (auto* chain = ikSystem.getChain("LeftLeg")) {
+                chain->poleVector = glm::vec3(0, 0, 1);  // Knees bend forward
+            }
+            SDL_Log("AnimatedCharacter: Setup left leg IK chain");
+        }
+    }
+
+    // Right leg chain
+    std::string rightThigh = findBone({"RightUpLeg", "RightUpperLeg", "R_UpperLeg", "thigh.R", "thigh_r"});
+    std::string rightKnee = findBone({"RightLeg", "RightLowerLeg", "R_LowerLeg", "shin.R", "calf_r"});
+    std::string rightFoot = findBone({"RightFoot", "R_Foot", "foot.R", "foot_r"});
+
+    if (!rightThigh.empty() && !rightKnee.empty() && !rightFoot.empty()) {
+        if (ikSystem.addTwoBoneChain("RightLeg", skeleton, rightThigh, rightKnee, rightFoot)) {
+            // Set default pole vector for knee (forward)
+            if (auto* chain = ikSystem.getChain("RightLeg")) {
+                chain->poleVector = glm::vec3(0, 0, 1);  // Knees bend forward
+            }
+            SDL_Log("AnimatedCharacter: Setup right leg IK chain");
+        }
+    }
+
+    SDL_Log("AnimatedCharacter: IK setup complete");
 }
