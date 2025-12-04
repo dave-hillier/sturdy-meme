@@ -19,6 +19,8 @@ public:
     void toggleVisibility() { visible = !visible; }
 
 private:
+    void renderAlgorithmSection(Renderer& renderer);
+    void renderSpaceColonisationSection(Renderer& renderer);
     void renderTrunkSection(Renderer& renderer);
     void renderBranchSection(Renderer& renderer);
     void renderVariationSection(Renderer& renderer);

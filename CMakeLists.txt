@@ -107,32 +107,35 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     lodepng
 )
 
-set_target_properties(${PROJECT_NAME} PROPERTIES
-    MACOSX_BUNDLE TRUE
-    MACOSX_BUNDLE_BUNDLE_NAME "VulkanGame"
-    MACOSX_BUNDLE_GUI_IDENTIFIER "com.example.vulkangame"
-    MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
-    MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}"
-    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in"
-)
+# macOS app bundle configuration
+if(APPLE)
+    set_target_properties(${PROJECT_NAME} PROPERTIES
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_BUNDLE_NAME "VulkanGame"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "com.example.vulkangame"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}"
+        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in"
+    )
 
-# Copy entire textures directory to app bundle
-add_custom_command(
-    TARGET ${PROJECT_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        ${CMAKE_CURRENT_SOURCE_DIR}/textures
-        $<TARGET_BUNDLE_CONTENT_DIR:${PROJECT_NAME}>/Resources/textures
-    COMMENT "Copying textures to app bundle"
-)
+    # Copy entire textures directory to app bundle
+    add_custom_command(
+        TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_CURRENT_SOURCE_DIR}/textures
+            $<TARGET_BUNDLE_CONTENT_DIR:${PROJECT_NAME}>/Resources/textures
+        COMMENT "Copying textures to app bundle"
+    )
 
-# Copy assets directory to app bundle
-add_custom_command(
-    TARGET ${PROJECT_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        ${CMAKE_CURRENT_SOURCE_DIR}/assets
-        $<TARGET_BUNDLE_CONTENT_DIR:${PROJECT_NAME}>/Resources/assets
-    COMMENT "Copying assets to app bundle"
-)
+    # Copy assets directory to app bundle
+    add_custom_command(
+        TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_CURRENT_SOURCE_DIR}/assets
+            $<TARGET_BUNDLE_CONTENT_DIR:${PROJECT_NAME}>/Resources/assets
+        COMMENT "Copying assets to app bundle"
+    )
+endif()
 
 # Terrain preprocessing - runs tools to generate data if inputs changed
 set(TERRAIN_HEIGHTMAP ${CMAKE_CURRENT_SOURCE_DIR}/assets/terrain/isleofwight-0m-200m.png)
@@ -181,14 +184,16 @@ add_dependencies(terrain_preprocessing terrain_preprocess erosion_preprocess)
 # Main target depends on preprocessing
 add_dependencies(${PROJECT_NAME} terrain_preprocessing)
 
-# Copy terrain data to app bundle
-add_custom_command(
-    TARGET ${PROJECT_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        ${TERRAIN_DATA_DIR}
-        $<TARGET_BUNDLE_CONTENT_DIR:${PROJECT_NAME}>/Resources/terrain_data
-    COMMENT "Copying terrain data to app bundle"
-)
+# Copy terrain data to app bundle (macOS only)
+if(APPLE)
+    add_custom_command(
+        TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${TERRAIN_DATA_DIR}
+            $<TARGET_BUNDLE_CONTENT_DIR:${PROJECT_NAME}>/Resources/terrain_data
+        COMMENT "Copying terrain data to app bundle"
+    )
+endif()
 
 set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.vert.spv
