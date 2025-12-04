@@ -143,7 +143,7 @@ bool ErosionSimulator::savePreviewImage(const ErosionConfig& config) const {
     // Create a simple water placement preview showing actual water locations:
     // - Gray = land
     // - Blue = sea (below sea level)
-    // - Red = rivers (only the strongest streams)
+    // - Red = rivers (only the strongest streams, drawn on top)
 
     std::string previewPath = getPreviewPath(config.cacheDirectory);
 
@@ -155,15 +155,13 @@ bool ErosionSimulator::savePreviewImage(const ErosionConfig& config) const {
     float seaLevelNorm = (config.seaLevel - config.minAltitude) / heightScale;
 
     // Find threshold for top ~0.5% of flow values (strongest streams only)
-    // Sort a sample of flow values to find the percentile threshold
     std::vector<float> flowSample;
-    flowSample.reserve(flowAccum.size() / 16);  // Sample every 16th pixel
+    flowSample.reserve(flowAccum.size() / 16);
     for (size_t i = 0; i < flowAccum.size(); i += 16) {
         flowSample.push_back(flowAccum[i]);
     }
     std::sort(flowSample.begin(), flowSample.end());
 
-    // Get 99.5th percentile (top 0.5%)
     size_t percentileIdx = static_cast<size_t>(flowSample.size() * 0.995f);
     float riverThreshold = flowSample[std::min(percentileIdx, flowSample.size() - 1)];
 
@@ -171,44 +169,49 @@ bool ErosionSimulator::savePreviewImage(const ErosionConfig& config) const {
 
     std::vector<uint8_t> pixels(previewSize * previewSize * 3);
 
-    // Scale factors
     float heightToPreview = static_cast<float>(sourceWidth) / static_cast<float>(previewSize);
     float flowToPreview = static_cast<float>(flowWidth) / static_cast<float>(previewSize);
 
-    // Single pass: render terrain, sea, and rivers from flow accumulation
+    // First pass: render terrain and sea
     for (uint32_t y = 0; y < previewSize; y++) {
         for (uint32_t x = 0; x < previewSize; x++) {
             size_t idx = (y * previewSize + x) * 3;
 
-            // Sample height
             float srcX = x * heightToPreview;
             float srcY = y * heightToPreview;
             float h = getHeightAt(srcX, srcY);
-
-            // Sample flow accumulation
-            uint32_t flowX = static_cast<uint32_t>(x * flowToPreview);
-            uint32_t flowY = static_cast<uint32_t>(y * flowToPreview);
-            flowX = std::min(flowX, flowWidth - 1);
-            flowY = std::min(flowY, flowHeight - 1);
-            float flow = flowAccum[flowY * flowWidth + flowX];
 
             if (h <= seaLevelNorm) {
                 // Sea - blue
                 pixels[idx + 0] = 30;
                 pixels[idx + 1] = 100;
                 pixels[idx + 2] = 200;
-            } else if (flow >= riverThreshold) {
-                // River - red, brighter for stronger flow
-                float t = (flow - riverThreshold) / (1.0f - riverThreshold);
-                pixels[idx + 0] = static_cast<uint8_t>(180 + t * 75);
-                pixels[idx + 1] = static_cast<uint8_t>(30 + t * 30);
-                pixels[idx + 2] = static_cast<uint8_t>(30 + t * 30);
             } else {
                 // Land - grayscale based on height
                 uint8_t gray = static_cast<uint8_t>(60 + h * 120);
                 pixels[idx + 0] = gray;
                 pixels[idx + 1] = gray;
                 pixels[idx + 2] = gray;
+            }
+        }
+    }
+
+    // Second pass: overlay rivers on top (including where they meet the sea)
+    // Rivers are drawn ON TOP of everything so they visibly flow to the coast
+    for (uint32_t y = 0; y < previewSize; y++) {
+        for (uint32_t x = 0; x < previewSize; x++) {
+            uint32_t flowX = static_cast<uint32_t>(x * flowToPreview);
+            uint32_t flowY = static_cast<uint32_t>(y * flowToPreview);
+            flowX = std::min(flowX, flowWidth - 1);
+            flowY = std::min(flowY, flowHeight - 1);
+            float flow = flowAccum[flowY * flowWidth + flowX];
+
+            if (flow >= riverThreshold) {
+                size_t idx = (y * previewSize + x) * 3;
+                float t = (flow - riverThreshold) / (1.0f - riverThreshold);
+                pixels[idx + 0] = static_cast<uint8_t>(180 + t * 75);
+                pixels[idx + 1] = static_cast<uint8_t>(30 + t * 30);
+                pixels[idx + 2] = static_cast<uint8_t>(30 + t * 30);
             }
         }
     }
@@ -341,6 +344,10 @@ void ErosionSimulator::simulateDroplets(const ErosionConfig& config, ErosionProg
     float scaleX = static_cast<float>(sourceWidth) / static_cast<float>(flowWidth);
     float scaleY = static_cast<float>(sourceHeight_) / static_cast<float>(flowHeight);
 
+    // Sea level in normalized height space
+    float heightScale = config.maxAltitude - config.minAltitude;
+    float seaLevelNorm = (config.seaLevel - config.minAltitude) / heightScale;
+
     if (progressCallback) {
         progressCallback(0.1f, "Computing flow directions (D8)...");
     }
@@ -353,7 +360,7 @@ void ErosionSimulator::simulateDroplets(const ErosionConfig& config, ErosionProg
     const float dist[8] = {1.0f, 1.414f, 1.0f, 1.414f, 1.0f, 1.414f, 1.0f, 1.414f};
 
     // Step 1: Build flow direction map
-    // flowDir[i] = direction index (0-7) that water flows to, or -1 for sink/edge
+    // flowDir[i] = direction index (0-7) that water flows to, or -1 for outlet (sea/edge)
     std::vector<int8_t> flowDir(flowWidth * flowHeight, -1);
 
     for (uint32_t y = 0; y < flowHeight; y++) {
@@ -363,9 +370,17 @@ void ErosionSimulator::simulateDroplets(const ErosionConfig& config, ErosionProg
             float srcY = (y + 0.5f) * scaleY;
             float h = getHeightAt(srcX, srcY);
 
+            // Cells at or below sea level are outlets - no flow direction needed
+            if (h <= seaLevelNorm) {
+                flowDir[y * flowWidth + x] = -1;
+                continue;
+            }
+
             // Find steepest downhill neighbor
             float maxSlope = 0.0f;
             int bestDir = -1;
+            float lowestNeighborHeight = h;
+            int lowestNeighborDir = -1;
 
             for (int d = 0; d < 8; d++) {
                 int nx = static_cast<int>(x) + dx[d];
@@ -380,6 +395,12 @@ void ErosionSimulator::simulateDroplets(const ErosionConfig& config, ErosionProg
                 float nSrcY = (ny + 0.5f) * scaleY;
                 float nh = getHeightAt(nSrcX, nSrcY);
 
+                // Track lowest neighbor for pit-breaching
+                if (nh < lowestNeighborHeight) {
+                    lowestNeighborHeight = nh;
+                    lowestNeighborDir = d;
+                }
+
                 // Slope = drop / distance
                 float slope = (h - nh) / dist[d];
 
@@ -387,6 +408,12 @@ void ErosionSimulator::simulateDroplets(const ErosionConfig& config, ErosionProg
                     maxSlope = slope;
                     bestDir = d;
                 }
+            }
+
+            // If no downhill neighbor found (internal pit), breach to lowest neighbor
+            // This ensures water always flows toward lower areas eventually reaching sea
+            if (bestDir < 0 && lowestNeighborDir >= 0) {
+                bestDir = lowestNeighborDir;
             }
 
             flowDir[y * flowWidth + x] = static_cast<int8_t>(bestDir);
