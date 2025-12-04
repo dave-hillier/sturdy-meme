@@ -13,11 +13,9 @@
  * - Subgroup shuffle: 5 levels (combines 32 threads -> 11-bit sum)
  * - Shared memory: 3 levels (combines 8 subgroups -> 14-bit sum)
  *
- * Node ID calculation key insight:
- * - At level L, nodes have heap IDs [2^L, 2^(L+1)-1]
- * - After SWAR, gl_GlobalInvocationID.x corresponds to heap node (2^(passID-5) + gl_GlobalInvocationID.x)
- * - When combining threads at subgroup level N, the parent heap ID is:
- *   (2^(passID-5-N) + (gl_GlobalInvocationID.x >> N))
+ * OPTIMIZATION: Uses shared memory write coalescing for level maxDepth-5
+ * to eliminate atomic write contention at that level. The subgroup and
+ * workgroup levels already use efficient reduction patterns.
  */
 
 #define CBT_BUFFER_BINDING 0
@@ -31,6 +29,9 @@ layout(push_constant) uniform PushConstants {
 
 // Shared memory for workgroup-level reduction (256 threads = 8 subgroups of 32)
 shared uint sharedSums[8];
+
+// Shared memory for level maxDepth-5 write coalescing
+shared uint sharedL5Sums[256];
 
 void main() {
     uint cnt = (1u << passID);
@@ -80,8 +81,50 @@ void main() {
     cbt__HeapWriteExplicit(cbt_CreateNode_Explicit(nodeID >> 4u, passID - 4), 10, bitData);
 
     // Level maxDepth-5: 6-bits - single 6-bit value (sum of 32 bits)
+    // OPTIMIZED: Use shared memory coalescing instead of atomic writes
     uint sum = (bitField & 0x0000FFFFu) + ((bitField >> 16u) & 0x0000FFFFu);
-    cbt__HeapWriteExplicit(cbt_CreateNode_Explicit(nodeID >> 5u, passID - 5), 6, sum);
+
+    // Store to shared memory for coalesced write
+    sharedL5Sums[gl_LocalInvocationIndex] = sum & 0x3Fu;
+    barrier();
+
+    // Write coalescing: every 16th thread packs 16 x 6-bit values into 3 uints
+    if ((gl_LocalInvocationIndex & 15u) == 0u) {
+        uint groupIdx = gl_LocalInvocationIndex >> 4u;
+        uint baseSum = groupIdx * 16u;
+
+        #define S(i) (sharedL5Sums[baseSum + (i)])
+
+        uint u0 = (S(0) << 0u) | (S(1) << 6u) | (S(2) << 12u) | (S(3) << 18u)
+                | (S(4) << 24u) | ((S(5) & 0x3u) << 30u);
+
+        uint u1 = (S(5) >> 2u) | (S(6) << 4u) | (S(7) << 10u) | (S(8) << 16u)
+                | (S(9) << 22u) | ((S(10) & 0xFu) << 28u);
+
+        uint u2 = (S(10) >> 4u) | (S(11) << 2u) | (S(12) << 8u) | (S(13) << 14u)
+                | (S(14) << 20u) | (S(15) << 26u);
+
+        #undef S
+
+        uint levelDepth = uint(passID - 5);
+        uint baseNodeID = (1u << levelDepth) + gl_WorkGroupID.x * 256u + baseSum;
+        uint bitOffset = (2u << levelDepth) + baseNodeID * 6u;
+        uint heapUintIdx = bitOffset >> 5u;
+        uint bitWithinUint = bitOffset & 31u;
+
+        if (bitWithinUint == 0u) {
+            cbtBuffer.heap[heapUintIdx + 0u] = u0;
+            cbtBuffer.heap[heapUintIdx + 1u] = u1;
+            cbtBuffer.heap[heapUintIdx + 2u] = u2;
+        } else {
+            for (uint i = 0u; i < 16u; i++) {
+                uint sumNodeID = baseNodeID + i;
+                cbt_Node sumNode = cbt_CreateNode_Explicit(sumNodeID, int(levelDepth));
+                cbt__HeapWriteExplicit(sumNode, 6, sharedL5Sums[baseSum + i]);
+            }
+        }
+    }
+    barrier();
 
     // ========== PHASE 2: Subgroup Reduction (5 levels) ==========
     // After SWAR, this thread's sum corresponds to heap node:
