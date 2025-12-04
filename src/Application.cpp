@@ -148,7 +148,7 @@ void Application::run() {
 
         // Begin GUI frame
         gui.beginFrame();
-        gui.render(renderer, lastDeltaTime, currentFps);
+        gui.render(renderer, camera, lastDeltaTime, currentFps);
 
         // Update input system
         input.update(deltaTime, camera.getYaw());
