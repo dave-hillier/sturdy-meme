@@ -41,7 +41,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     postProcessInfo.device = device;
     postProcessInfo.allocator = allocator;
     postProcessInfo.outputRenderPass = renderPass;
-    postProcessInfo.descriptorPool = descriptorPool;
+    postProcessInfo.descriptorPool = &*descriptorManagerPool;
     postProcessInfo.extent = swapchainExtent;
     postProcessInfo.swapchainFormat = swapchainImageFormat;
     postProcessInfo.shaderPath = resourcePath + "/shaders";
@@ -53,7 +53,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     BloomSystem::InitInfo bloomInfo{};
     bloomInfo.device = device;
     bloomInfo.allocator = allocator;
-    bloomInfo.descriptorPool = descriptorPool;
+    bloomInfo.descriptorPool = &*descriptorManagerPool;
     bloomInfo.extent = swapchainExtent;
     bloomInfo.shaderPath = resourcePath + "/shaders";
 
@@ -73,7 +73,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     SkySystem::InitInfo skyInfo{};
     skyInfo.device = device;
     skyInfo.allocator = allocator;
-    skyInfo.descriptorPool = descriptorPool;
+    skyInfo.descriptorPool = &*descriptorManagerPool;
     skyInfo.shaderPath = resourcePath + "/shaders";
     skyInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
     skyInfo.extent = swapchainExtent;
@@ -89,7 +89,6 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     shadowInfo.device = device;
     shadowInfo.physicalDevice = physicalDevice;
     shadowInfo.allocator = allocator;
-    shadowInfo.descriptorPool = descriptorPool;
     shadowInfo.mainDescriptorSetLayout = descriptorSetLayout;
     shadowInfo.skinnedDescriptorSetLayout = skinnedDescriptorSetLayout;  // For skinned shadow pipeline
     shadowInfo.shaderPath = resourcePath + "/shaders";
@@ -167,7 +166,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     terrainInfo.allocator = allocator;
     terrainInfo.renderPass = postProcessSystem.getHDRRenderPass();
     terrainInfo.shadowRenderPass = shadowSystem.getShadowRenderPass();
-    terrainInfo.descriptorPool = descriptorPool;
+    terrainInfo.descriptorPool = &*descriptorManagerPool;
     terrainInfo.extent = swapchainExtent;
     terrainInfo.shadowMapSize = shadowSystem.getShadowMapSize();
     terrainInfo.shaderPath = resourcePath + "/shaders";
@@ -212,7 +211,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     snowMaskInfo.device = device;
     snowMaskInfo.allocator = allocator;
     snowMaskInfo.renderPass = postProcessSystem.getHDRRenderPass();
-    snowMaskInfo.descriptorPool = descriptorPool;
+    snowMaskInfo.descriptorPool = &*descriptorManagerPool;
     snowMaskInfo.extent = swapchainExtent;
     snowMaskInfo.shaderPath = resourcePath + "/shaders";
     snowMaskInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
@@ -224,7 +223,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     volumetricSnowInfo.device = device;
     volumetricSnowInfo.allocator = allocator;
     volumetricSnowInfo.renderPass = postProcessSystem.getHDRRenderPass();
-    volumetricSnowInfo.descriptorPool = descriptorPool;
+    volumetricSnowInfo.descriptorPool = &*descriptorManagerPool;
     volumetricSnowInfo.extent = swapchainExtent;
     volumetricSnowInfo.shaderPath = resourcePath + "/shaders";
     volumetricSnowInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
@@ -240,7 +239,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     grassInfo.allocator = allocator;
     grassInfo.renderPass = postProcessSystem.getHDRRenderPass();
     grassInfo.shadowRenderPass = shadowSystem.getShadowRenderPass();
-    grassInfo.descriptorPool = descriptorPool;
+    grassInfo.descriptorPool = &*descriptorManagerPool;
     grassInfo.extent = swapchainExtent;
     grassInfo.shadowMapSize = shadowSystem.getShadowMapSize();
     grassInfo.shaderPath = resourcePath + "/shaders";
@@ -252,7 +251,6 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     WindSystem::InitInfo windInfo{};
     windInfo.device = device;
     windInfo.allocator = allocator;
-    windInfo.descriptorPool = descriptorPool;
     windInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
 
     if (!windSystem.init(windInfo)) return false;
@@ -336,7 +334,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     weatherInfo.device = device;
     weatherInfo.allocator = allocator;
     weatherInfo.renderPass = postProcessSystem.getHDRRenderPass();
-    weatherInfo.descriptorPool = descriptorPool;
+    weatherInfo.descriptorPool = &*descriptorManagerPool;
     weatherInfo.extent = swapchainExtent;
     weatherInfo.shaderPath = resourcePath + "/shaders";
     weatherInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
@@ -368,7 +366,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     leafInfo.device = device;
     leafInfo.allocator = allocator;
     leafInfo.renderPass = postProcessSystem.getHDRRenderPass();
-    leafInfo.descriptorPool = descriptorPool;
+    leafInfo.descriptorPool = &*descriptorManagerPool;
     leafInfo.extent = swapchainExtent;
     leafInfo.shaderPath = resourcePath + "/shaders";
     leafInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
@@ -387,7 +385,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     FroxelSystem::InitInfo froxelInfo{};
     froxelInfo.device = device;
     froxelInfo.allocator = allocator;
-    froxelInfo.descriptorPool = descriptorPool;
+    froxelInfo.descriptorPool = &*descriptorManagerPool;
     froxelInfo.extent = swapchainExtent;
     froxelInfo.shaderPath = resourcePath + "/shaders";
     froxelInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
@@ -410,7 +408,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     AtmosphereLUTSystem::InitInfo atmosphereInfo{};
     atmosphereInfo.device = device;
     atmosphereInfo.allocator = allocator;
-    atmosphereInfo.descriptorPool = descriptorPool;
+    atmosphereInfo.descriptorPool = &*descriptorManagerPool;
     atmosphereInfo.shaderPath = resourcePath + "/shaders";
     atmosphereInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
 
@@ -464,7 +462,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     CloudShadowSystem::InitInfo cloudShadowInfo{};
     cloudShadowInfo.device = device;
     cloudShadowInfo.allocator = allocator;
-    cloudShadowInfo.descriptorPool = descriptorPool;
+    cloudShadowInfo.descriptorPool = &*descriptorManagerPool;
     cloudShadowInfo.shaderPath = resourcePath + "/shaders";
     cloudShadowInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
     cloudShadowInfo.cloudMapLUTView = atmosphereLUTSystem.getCloudMapLUTView();
@@ -502,7 +500,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     catmullClarkInfo.physicalDevice = physicalDevice;
     catmullClarkInfo.allocator = allocator;
     catmullClarkInfo.renderPass = postProcessSystem.getHDRRenderPass();
-    catmullClarkInfo.descriptorPool = descriptorPool;
+    catmullClarkInfo.descriptorPool = &*descriptorManagerPool;
     catmullClarkInfo.extent = swapchainExtent;
     catmullClarkInfo.shaderPath = resourcePath + "/shaders";
     catmullClarkInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
@@ -532,7 +530,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     HiZSystem::InitInfo hiZInfo{};
     hiZInfo.device = device;
     hiZInfo.allocator = allocator;
-    hiZInfo.descriptorPool = descriptorPool;
+    hiZInfo.descriptorPool = &*descriptorManagerPool;
     hiZInfo.extent = swapchainExtent;
     hiZInfo.shaderPath = resourcePath + "/shaders";
     hiZInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
@@ -560,7 +558,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     waterInfo.device = device;
     waterInfo.physicalDevice = physicalDevice;
     waterInfo.allocator = allocator;
-    waterInfo.descriptorPool = descriptorPool;
+    waterInfo.descriptorPool = &*descriptorManagerPool;
     waterInfo.hdrRenderPass = postProcessSystem.getHDRRenderPass();
     waterInfo.shaderPath = resourcePath + "/shaders";
     waterInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
@@ -583,6 +581,24 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
 
     // Create water descriptor sets
     if (!waterSystem.createDescriptorSets(uniformBuffers, sizeof(UniformBufferObject), shadowSystem)) return false;
+
+    // Initialize tree edit system
+    TreeEditSystem::InitInfo treeEditInfo{};
+    treeEditInfo.device = device;
+    treeEditInfo.physicalDevice = physicalDevice;
+    treeEditInfo.allocator = allocator;
+    treeEditInfo.renderPass = postProcessSystem.getHDRRenderPass();
+    treeEditInfo.descriptorPool = &*descriptorManagerPool;
+    treeEditInfo.extent = swapchainExtent;
+    treeEditInfo.shaderPath = resourcePath + "/shaders";
+    treeEditInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+    treeEditInfo.graphicsQueue = graphicsQueue;
+    treeEditInfo.commandPool = commandPool;
+
+    if (!treeEditSystem.init(treeEditInfo)) return false;
+
+    // Update tree edit system descriptor sets with scene UBOs
+    treeEditSystem.updateDescriptorSets(device, uniformBuffers);
 
     if (!createSyncObjects()) return false;
 
@@ -616,8 +632,6 @@ void Renderer::shutdown() {
         }
 
         sceneManager.destroy(allocator, device);
-
-        vkDestroyDescriptorPool(device, descriptorPool, nullptr);
 
         // Clean up the auto-growing descriptor pool
         if (descriptorManagerPool.has_value()) {
@@ -664,6 +678,7 @@ void Renderer::shutdown() {
         hiZSystem.destroy();
         profiler.shutdown();
         waterSystem.destroy(device, allocator);
+        treeEditSystem.destroy(device, allocator);
         atmosphereLUTSystem.destroy(device, allocator);
         skySystem.destroy(device, allocator);
         postProcessSystem.destroy(device, allocator);
@@ -1174,37 +1189,10 @@ void Renderer::updateLightBuffer(uint32_t currentImage, const Camera& camera) {
 bool Renderer::createDescriptorPool() {
     VkDevice device = vulkanContext.getDevice();
 
-    // Create the new auto-growing descriptor pool
+    // Create the auto-growing descriptor pool
     // Initial capacity of 64 sets per pool, will automatically grow if exhausted
+    // All subsystems now use this managed pool for consistent descriptor allocation
     descriptorManagerPool.emplace(device, 64);
-
-    // Legacy pool for systems not yet migrated to DescriptorManager
-    // This pool is still needed for: GrassSystem, WeatherSystem, LeafSystem, HiZSystem, etc.
-    // HiZ system needs: ~11 pyramid descriptor sets (one per mip level) + 2 culling sets
-    //   - Combined image samplers: 2 per pyramid set + 1 per culling set = ~24
-    //   - Storage images: 1 per pyramid set = ~11
-    //   - Storage buffers: 3 per culling set = ~6
-    //   - Uniform buffers: 1 per culling set = ~2
-    std::array<VkDescriptorPoolSize, 4> poolSizes{};
-    poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 20);
-    poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 50);
-    poolSizes[2].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    poolSizes[2].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 40);
-    poolSizes[3].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    poolSizes[3].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 24);
-
-    VkDescriptorPoolCreateInfo poolInfo{};
-    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
-    poolInfo.pPoolSizes = poolSizes.data();
-    poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 42);
-
-    if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS) {
-        SDL_Log("Failed to create legacy descriptor pool");
-        return false;
-    }
 
     return true;
 }
@@ -1367,6 +1355,18 @@ void Renderer::render(const Camera& camera) {
     VkQueue graphicsQueue = vulkanContext.getGraphicsQueue();
     VkQueue presentQueue = vulkanContext.getPresentQueue();
 
+    // Handle pending resize before acquiring next image
+    if (framebufferResized) {
+        handleResize();
+        swapchain = vulkanContext.getSwapchain();  // Update after resize
+    }
+
+    // Skip rendering if window is minimized
+    VkExtent2D extent = vulkanContext.getSwapchainExtent();
+    if (extent.width == 0 || extent.height == 0) {
+        return;
+    }
+
     // Frame synchronization
     vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
 
@@ -1375,6 +1375,10 @@ void Renderer::render(const Camera& camera) {
                                             imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+        handleResize();
+        return;
+    } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to acquire swapchain image");
         return;
     }
 
@@ -1542,7 +1546,7 @@ void Renderer::render(const Camera& camera) {
 
         // Update sky-view LUT with current sun direction (Phase 4.1.5)
         // This precomputes atmospheric scattering for all view directions
-        atmosphereLUTSystem.updateSkyViewLUT(cmd, frame.sunDirection, frame.cameraPosition, 0.0f);
+        atmosphereLUTSystem.updateSkyViewLUT(cmd, frame.frameIndex, frame.sunDirection, frame.cameraPosition, 0.0f);
 
         // Update cloud map LUT with wind animation (Paraboloid projection)
         glm::vec2 windDir = windSystem.getWindDirection();
@@ -1553,7 +1557,7 @@ void Renderer::render(const Camera& camera) {
         glm::vec3 windOffset = glm::vec3(windDir.x * windSpeed * windTime * cloudTimeScale,
                                           windTime * 0.002f,  // Slow vertical evolution
                                           windDir.y * windSpeed * windTime * cloudTimeScale);
-        atmosphereLUTSystem.updateCloudMapLUT(cmd, windOffset, windTime * cloudTimeScale);
+        atmosphereLUTSystem.updateCloudMapLUT(cmd, frame.frameIndex, windOffset, windTime * cloudTimeScale);
         profiler.endGpuZone(cmd, "Atmosphere");
     }
 
@@ -1612,7 +1616,13 @@ void Renderer::render(const Camera& camera) {
     presentInfo.pSwapchains = swapChains;
     presentInfo.pImageIndices = &imageIndex;
 
-    vkQueuePresentKHR(presentQueue, &presentInfo);
+    result = vkQueuePresentKHR(presentQueue, &presentInfo);
+
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+        framebufferResized = true;
+    } else if (result != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to present swapchain image");
+    }
 
     // Advance grass double-buffer sets after frame submission
     // This swaps compute/render buffer sets so next frame can overlap:
@@ -1627,6 +1637,129 @@ void Renderer::render(const Camera& camera) {
 
 void Renderer::waitIdle() {
     vulkanContext.waitIdle();
+}
+
+void Renderer::destroyDepthImageAndView() {
+    VkDevice device = vulkanContext.getDevice();
+    VmaAllocator allocator = vulkanContext.getAllocator();
+
+    if (depthImageView != VK_NULL_HANDLE) {
+        vkDestroyImageView(device, depthImageView, nullptr);
+        depthImageView = VK_NULL_HANDLE;
+    }
+    if (depthImage != VK_NULL_HANDLE) {
+        vmaDestroyImage(allocator, depthImage, depthImageAllocation);
+        depthImage = VK_NULL_HANDLE;
+        depthImageAllocation = VK_NULL_HANDLE;
+    }
+}
+
+void Renderer::destroyFramebuffers() {
+    VkDevice device = vulkanContext.getDevice();
+    for (auto framebuffer : framebuffers) {
+        vkDestroyFramebuffer(device, framebuffer, nullptr);
+    }
+    framebuffers.clear();
+}
+
+bool Renderer::handleResize() {
+    VkDevice device = vulkanContext.getDevice();
+    VmaAllocator allocator = vulkanContext.getAllocator();
+
+    // Wait for GPU to finish all work
+    vkDeviceWaitIdle(device);
+
+    // Recreate swapchain
+    if (!vulkanContext.recreateSwapchain()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to recreate swapchain");
+        return false;
+    }
+
+    VkExtent2D newExtent = vulkanContext.getSwapchainExtent();
+
+    // Handle minimized window (extent = 0)
+    if (newExtent.width == 0 || newExtent.height == 0) {
+        return true;  // Don't recreate resources for minimized window
+    }
+
+    SDL_Log("Window resized to %ux%u", newExtent.width, newExtent.height);
+
+    // Destroy and recreate depth resources (keep sampler)
+    destroyDepthImageAndView();
+
+    // Recreate depth image and view (reusing existing depthFormat and depthSampler)
+    VkImageCreateInfo imageInfo{};
+    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    imageInfo.imageType = VK_IMAGE_TYPE_2D;
+    imageInfo.extent.width = newExtent.width;
+    imageInfo.extent.height = newExtent.height;
+    imageInfo.extent.depth = 1;
+    imageInfo.mipLevels = 1;
+    imageInfo.arrayLayers = 1;
+    imageInfo.format = depthFormat;
+    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    imageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+
+    if (vmaCreateImage(allocator, &imageInfo, &allocInfo, &depthImage, &depthImageAllocation, nullptr) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create depth image during resize");
+        return false;
+    }
+
+    VkImageViewCreateInfo viewInfo{};
+    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewInfo.image = depthImage;
+    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format = depthFormat;
+    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    viewInfo.subresourceRange.baseMipLevel = 0;
+    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.baseArrayLayer = 0;
+    viewInfo.subresourceRange.layerCount = 1;
+
+    if (vkCreateImageView(device, &viewInfo, nullptr, &depthImageView) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create depth image view during resize");
+        return false;
+    }
+
+    // Destroy and recreate framebuffers
+    destroyFramebuffers();
+    if (!createFramebuffers()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to recreate framebuffers during resize");
+        return false;
+    }
+
+    // Resize post-process system (HDR render target)
+    postProcessSystem.resize(device, allocator, newExtent);
+
+    // Resize bloom system
+    bloomSystem.resize(device, allocator, newExtent);
+
+    // Rebind bloom texture to post-process system (bloom image views changed)
+    postProcessSystem.setBloomTexture(bloomSystem.getBloomOutput(), bloomSystem.getBloomSampler());
+
+    // Resize froxel system (volumetric fog)
+    froxelSystem.resize(device, allocator, newExtent);
+
+    // Resize Hi-Z system (occlusion culling)
+    hiZSystem.resize(newExtent);
+
+    // Update extent on all rendering subsystems for viewport/scissor
+    terrainSystem.setExtent(newExtent);
+    skySystem.setExtent(newExtent);
+    waterSystem.setExtent(newExtent);
+    grassSystem.setExtent(newExtent);
+    weatherSystem.setExtent(newExtent);
+    leafSystem.setExtent(newExtent);
+    catmullClarkSystem.setExtent(newExtent);
+
+    framebufferResized = false;
+    return true;
 }
 
 // Pure calculation helpers - no state mutation
@@ -1994,6 +2127,9 @@ void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float gra
     // Draw skinned character with GPU skinning
     recordSkinnedCharacter(cmd, frameIndex);
 
+    // Draw tree editor (when enabled)
+    treeEditSystem.recordDraw(cmd, frameIndex);
+
     // Draw grass
     grassSystem.recordDraw(cmd, frameIndex, grassTime);
 
@@ -2165,11 +2301,11 @@ bool Renderer::createSkinnedDescriptorSets() {
         common.lightBufferSize = sizeof(LightBuffer);
         common.emissiveMapView = emissiveMap.getImageView();
         common.emissiveMapSampler = emissiveMap.getSampler();
-        // Skinned meshes use dummy textures for point/spot shadows
-        common.pointShadowView = emissiveMap.getImageView();
-        common.pointShadowSampler = emissiveMap.getSampler();
-        common.spotShadowView = emissiveMap.getImageView();
-        common.spotShadowSampler = emissiveMap.getSampler();
+        // Point/spot shadow maps need proper array/cube textures, not 2D emissive
+        common.pointShadowView = shadowSystem.getPointShadowArrayView(i);
+        common.pointShadowSampler = shadowSystem.getPointShadowSampler();
+        common.spotShadowView = shadowSystem.getSpotShadowArrayView(i);
+        common.spotShadowSampler = shadowSystem.getSpotShadowSampler();
         common.snowMaskView = snowMaskSystem.getSnowMaskView();
         common.snowMaskSampler = snowMaskSystem.getSnowMaskSampler();
         // Cloud shadow system may not be initialized yet - use white texture as fallback
@@ -2198,18 +2334,29 @@ bool Renderer::createSkinnedDescriptorSets() {
 }
 
 void Renderer::updateBoneMatrices(uint32_t currentImage) {
+    BoneMatricesUBO* ubo = static_cast<BoneMatricesUBO*>(boneMatricesMapped[currentImage]);
+
     SceneBuilder& sceneBuilder = sceneManager.getSceneBuilder();
-    if (!sceneBuilder.hasCharacter()) return;
+    if (!sceneBuilder.hasCharacter()) {
+        // Ensure identity matrices when no character to prevent garbage data
+        for (uint32_t i = 0; i < MAX_BONES; i++) {
+            ubo->bones[i] = glm::mat4(1.0f);
+        }
+        return;
+    }
 
     // Get bone matrices from animated character
     std::vector<glm::mat4> boneMatrices;
     sceneBuilder.getAnimatedCharacter().computeBoneMatrices(boneMatrices);
 
     // Copy to mapped buffer
-    BoneMatricesUBO* ubo = static_cast<BoneMatricesUBO*>(boneMatricesMapped[currentImage]);
     size_t numBones = std::min(boneMatrices.size(), static_cast<size_t>(MAX_BONES));
     for (size_t i = 0; i < numBones; i++) {
         ubo->bones[i] = boneMatrices[i];
+    }
+    // Fill remaining slots with identity to prevent garbage data in unused bones
+    for (size_t i = numBones; i < MAX_BONES; i++) {
+        ubo->bones[i] = glm::mat4(1.0f);
     }
 }
 

@@ -192,9 +192,21 @@ std::string getDirectory(const std::string& path) {
     return ".";
 }
 
-// Convert ofbx::Color to glm::vec3
+// Sanitize float value - clamp to valid range and replace NaN/Inf
+float sanitizeFloat(float value, float defaultVal = 0.0f, float minVal = 0.0f, float maxVal = 1.0f) {
+    if (std::isnan(value) || std::isinf(value)) {
+        return defaultVal;
+    }
+    return std::clamp(value, minVal, maxVal);
+}
+
+// Convert ofbx::Color to glm::vec3, sanitizing values
 glm::vec3 convertColor(const ofbx::Color& c) {
-    return glm::vec3(c.r, c.g, c.b);
+    return glm::vec3(
+        sanitizeFloat(static_cast<float>(c.r), 0.0f, 0.0f, 1.0f),
+        sanitizeFloat(static_cast<float>(c.g), 0.0f, 0.0f, 1.0f),
+        sanitizeFloat(static_cast<float>(c.b), 0.0f, 0.0f, 1.0f)
+    );
 }
 
 // Extract material info from FBX material
@@ -220,6 +232,10 @@ MaterialInfo extractMaterialInfo(const ofbx::Material* mat, const std::string& f
     // Most FBX files from older software don't have proper PBR values
     // Typical Blinn-Phong shininess range: 10-1000 for meaningful specular
     double shininess = mat->getShininess();
+    // Sanitize shininess - some FBX files return garbage
+    if (std::isnan(shininess) || std::isinf(shininess) || shininess < 0.0) {
+        shininess = 0.0;
+    }
     if (shininess > 10.0) {
         // Meaningful shininess value - convert to roughness
         // Map shininess 10-500 to roughness 0.7-0.1
@@ -239,7 +255,14 @@ MaterialInfo extractMaterialInfo(const ofbx::Material* mat, const std::string& f
 
     // OpenFBX doesn't expose opacity directly, default to 1.0
     info.opacity = 1.0f;
-    info.emissiveFactor = static_cast<float>(mat->getEmissiveFactor());
+
+    // Sanitize emissive factor - some FBX files return garbage values
+    double rawEmissiveFactor = mat->getEmissiveFactor();
+    if (std::isnan(rawEmissiveFactor) || std::isinf(rawEmissiveFactor) || rawEmissiveFactor < 0.0) {
+        info.emissiveFactor = 0.0f;
+    } else {
+        info.emissiveFactor = std::min(static_cast<float>(rawEmissiveFactor), 100.0f);
+    }
 
     // Texture paths
     const ofbx::Texture* diffuseTex = mat->getTexture(ofbx::Texture::TextureType::DIFFUSE);

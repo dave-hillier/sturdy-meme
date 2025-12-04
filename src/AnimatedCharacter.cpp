@@ -1,6 +1,7 @@
 #include "AnimatedCharacter.h"
 #include "GLTFLoader.h"
 #include "FBXLoader.h"
+#include "PhysicsSystem.h"
 #include <SDL3/SDL_log.h>
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -58,19 +59,19 @@ bool AnimatedCharacter::load(const std::string& path, VmaAllocator allocator, Vk
     skinnedMesh.setData(meshData);
     skinnedMesh.upload(allocator, device, commandPool, queue);
 
-    // CPU skinning fallback (kept for compatibility, but not used with GPU skinning)
-    if (!useGPUSkinning) {
-        skinnedVertices.resize(bindPoseVertices.size());
-        for (size_t i = 0; i < bindPoseVertices.size(); ++i) {
-            skinnedVertices[i].position = bindPoseVertices[i].position;
-            skinnedVertices[i].normal = bindPoseVertices[i].normal;
-            skinnedVertices[i].texCoord = bindPoseVertices[i].texCoord;
-            skinnedVertices[i].tangent = bindPoseVertices[i].tangent;
-            skinnedVertices[i].color = bindPoseVertices[i].color;
-        }
-        renderMesh.setCustomGeometry(skinnedVertices, indices);
-        renderMesh.upload(allocator, device, commandPool, queue);
+    // Initialize renderMesh with bind pose for bounds/transform tracking
+    // This mesh is used by sceneObjects for Hi-Z culling and transform updates,
+    // but actual rendering is skipped (handled by recordSkinnedCharacter)
+    skinnedVertices.resize(bindPoseVertices.size());
+    for (size_t i = 0; i < bindPoseVertices.size(); ++i) {
+        skinnedVertices[i].position = bindPoseVertices[i].position;
+        skinnedVertices[i].normal = bindPoseVertices[i].normal;
+        skinnedVertices[i].texCoord = bindPoseVertices[i].texCoord;
+        skinnedVertices[i].tangent = bindPoseVertices[i].tangent;
+        skinnedVertices[i].color = bindPoseVertices[i].color;
     }
+    renderMesh.setCustomGeometry(skinnedVertices, indices);
+    renderMesh.upload(allocator, device, commandPool, queue);
 
     // Set up default animation (play first one if available)
     if (!animations.empty()) {
@@ -229,6 +230,12 @@ void AnimatedCharacter::setPlaybackSpeed(float speed) {
 
 void AnimatedCharacter::setLooping(bool loop) {
     animationPlayer.setLooping(loop);
+}
+
+void AnimatedCharacter::startJump(const glm::vec3& startPos, const glm::vec3& velocity, float gravity, const PhysicsWorld* physics) {
+    if (useStateMachine) {
+        stateMachine.startJump(startPos, velocity, gravity, physics);
+    }
 }
 
 const AnimationClip* AnimatedCharacter::getCurrentAnimation() const {

@@ -4,6 +4,7 @@
 #include <string>
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
+#include "DescriptorManager.h"
 
 class SystemLifecycleHelper {
 public:
@@ -11,7 +12,7 @@ public:
         VkDevice device;
         VmaAllocator allocator;
         VkRenderPass renderPass;
-        VkDescriptorPool descriptorPool;
+        DescriptorManager::Pool* descriptorPool;  // Auto-growing pool (preferred)
         VkExtent2D extent;
         std::string shaderPath;
         uint32_t framesInFlight;
@@ -88,8 +89,9 @@ public:
     VkDevice getDevice() const { return initInfo.device; }
     VmaAllocator getAllocator() const { return initInfo.allocator; }
     VkRenderPass getRenderPass() const { return initInfo.renderPass; }
-    VkDescriptorPool getDescriptorPool() const { return initInfo.descriptorPool; }
+    DescriptorManager::Pool* getDescriptorPool() const { return initInfo.descriptorPool; }
     const VkExtent2D& getExtent() const { return initInfo.extent; }
+    void setExtent(VkExtent2D newExtent) { initInfo.extent = newExtent; }
     const std::string& getShaderPath() const { return initInfo.shaderPath; }
     uint32_t getFramesInFlight() const { return initInfo.framesInFlight; }
 

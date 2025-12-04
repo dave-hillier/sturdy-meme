@@ -282,6 +282,9 @@ void GuiSystem::render(Renderer& renderer, const Camera& camera, float deltaTime
 
     // Position panel (separate window)
     renderPositionPanel(camera);
+
+    // Tree editor as separate window
+    treeEditorGui.render(renderer, camera);
 }
 
 void GuiSystem::endFrame(VkCommandBuffer cmd) {
@@ -362,6 +365,11 @@ void GuiSystem::renderDashboard(Renderer& renderer, const Camera& camera, float 
     ImGui::Spacing();
     if (ImGui::Button(showHelp ? "Hide Help (H)" : "Show Help (H)", ImVec2(-1, 0))) {
         showHelp = !showHelp;
+    }
+
+    // Tree Editor toggle
+    if (ImGui::Button(treeEditorGui.isVisible() ? "Hide Tree Editor (F2)" : "Show Tree Editor (F2)", ImVec2(-1, 0))) {
+        treeEditorGui.toggleVisibility();
     }
 }
 
@@ -1090,6 +1098,8 @@ void GuiSystem::renderDebugSection(Renderer& renderer) {
     ImGui::PopStyleColor();
 
     ImGui::BulletText("F1 - Toggle GUI");
+    ImGui::BulletText("F2 - Tree Editor");
+    ImGui::BulletText("P - Place tree at camera");
     ImGui::BulletText("Tab - Toggle camera mode");
     ImGui::BulletText("1-4 - Time presets");
     ImGui::BulletText("+/- - Time scale");

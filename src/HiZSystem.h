@@ -52,7 +52,7 @@ public:
     struct InitInfo {
         VkDevice device;
         VmaAllocator allocator;
-        VkDescriptorPool descriptorPool;
+        DescriptorManager::Pool* descriptorPool;  // Auto-growing pool
         VkExtent2D extent;
         std::string shaderPath;
         uint32_t framesInFlight;
@@ -143,7 +143,7 @@ private:
 
     VkDevice device = VK_NULL_HANDLE;
     VmaAllocator allocator = VK_NULL_HANDLE;
-    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
+    DescriptorManager::Pool* descriptorPool = nullptr;
     VkExtent2D extent = {0, 0};
     std::string shaderPath;
     uint32_t framesInFlight = 0;

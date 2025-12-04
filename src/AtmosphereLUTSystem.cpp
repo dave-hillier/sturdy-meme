@@ -38,10 +38,10 @@ void AtmosphereLUTSystem::destroy(VkDevice device, VmaAllocator allocator) {
         vmaDestroyBuffer(allocator, uniformBuffer, uniformAllocation);
         uniformBuffer = VK_NULL_HANDLE;
     }
-    if (cloudMapUniformBuffer != VK_NULL_HANDLE) {
-        vmaDestroyBuffer(allocator, cloudMapUniformBuffer, cloudMapUniformAllocation);
-        cloudMapUniformBuffer = VK_NULL_HANDLE;
-    }
+
+    // Destroy per-frame uniform buffers
+    BufferUtils::destroyBuffers(allocator, skyViewUniformBuffers);
+    BufferUtils::destroyBuffers(allocator, cloudMapUniformBuffers);
 
     if (transmittancePipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(device, transmittancePipeline, nullptr);
@@ -418,7 +418,7 @@ bool AtmosphereLUTSystem::createLUTSampler() {
 }
 
 bool AtmosphereLUTSystem::createUniformBuffer() {
-    // Create atmosphere LUT uniform buffer
+    // Create atmosphere LUT uniform buffer (single buffer for one-time LUT computations)
     VkDeviceSize bufferSize = sizeof(AtmosphereLUTUniforms);
 
     VkBufferCreateInfo bufferInfo{};
@@ -440,15 +440,25 @@ bool AtmosphereLUTSystem::createUniformBuffer() {
 
     uniformMappedPtr = allocResult.pMappedData;
 
-    // Create cloud map uniform buffer
-    bufferInfo.size = sizeof(CloudMapUniforms);
-    if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo,
-                        &cloudMapUniformBuffer, &cloudMapUniformAllocation, &allocResult) != VK_SUCCESS) {
-        SDL_Log("Failed to create cloud map uniform buffer");
+    // Create per-frame uniform buffers for sky view LUT updates (double-buffered)
+    BufferUtils::PerFrameBufferBuilder skyViewBuilder;
+    if (!skyViewBuilder.setAllocator(allocator)
+             .setFrameCount(framesInFlight)
+             .setSize(sizeof(AtmosphereLUTUniforms))
+             .build(skyViewUniformBuffers)) {
+        SDL_Log("Failed to create sky view per-frame uniform buffers");
         return false;
     }
 
-    cloudMapUniformMappedPtr = allocResult.pMappedData;
+    // Create per-frame uniform buffers for cloud map LUT updates (double-buffered)
+    BufferUtils::PerFrameBufferBuilder cloudMapBuilder;
+    if (!cloudMapBuilder.setAllocator(allocator)
+             .setFrameCount(framesInFlight)
+             .setSize(sizeof(CloudMapUniforms))
+             .build(cloudMapUniformBuffers)) {
+        SDL_Log("Failed to create cloud map per-frame uniform buffers");
+        return false;
+    }
 
     return true;
 }
@@ -674,15 +684,10 @@ bool AtmosphereLUTSystem::createDescriptorSetLayouts() {
 }
 
 bool AtmosphereLUTSystem::createDescriptorSets() {
-    // Allocate transmittance descriptor set
+    // Allocate transmittance descriptor set using managed pool
     {
-        VkDescriptorSetAllocateInfo allocInfo{};
-        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        allocInfo.descriptorPool = descriptorPool;
-        allocInfo.descriptorSetCount = 1;
-        allocInfo.pSetLayouts = &transmittanceDescriptorSetLayout;
-
-        if (vkAllocateDescriptorSets(device, &allocInfo, &transmittanceDescriptorSet) != VK_SUCCESS) {
+        transmittanceDescriptorSet = descriptorPool->allocateSingle(transmittanceDescriptorSetLayout);
+        if (transmittanceDescriptorSet == VK_NULL_HANDLE) {
             SDL_Log("Failed to allocate transmittance descriptor set");
             return false;
         }
@@ -717,15 +722,10 @@ bool AtmosphereLUTSystem::createDescriptorSets() {
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
     }
 
-    // Allocate multi-scatter descriptor set
+    // Allocate multi-scatter descriptor set using managed pool
     {
-        VkDescriptorSetAllocateInfo allocInfo{};
-        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        allocInfo.descriptorPool = descriptorPool;
-        allocInfo.descriptorSetCount = 1;
-        allocInfo.pSetLayouts = &multiScatterDescriptorSetLayout;
-
-        if (vkAllocateDescriptorSets(device, &allocInfo, &multiScatterDescriptorSet) != VK_SUCCESS) {
+        multiScatterDescriptorSet = descriptorPool->allocateSingle(multiScatterDescriptorSetLayout);
+        if (multiScatterDescriptorSet == VK_NULL_HANDLE) {
             SDL_Log("Failed to allocate multi-scatter descriptor set");
             return false;
         }
@@ -773,84 +773,77 @@ bool AtmosphereLUTSystem::createDescriptorSets() {
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
     }
 
-    // Allocate sky-view descriptor set
+    // Allocate per-frame sky-view descriptor sets (double-buffered) using managed pool
     {
-        VkDescriptorSetAllocateInfo allocInfo{};
-        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        allocInfo.descriptorPool = descriptorPool;
-        allocInfo.descriptorSetCount = 1;
-        allocInfo.pSetLayouts = &skyViewDescriptorSetLayout;
-
-        if (vkAllocateDescriptorSets(device, &allocInfo, &skyViewDescriptorSet) != VK_SUCCESS) {
-            SDL_Log("Failed to allocate sky-view descriptor set");
+        skyViewDescriptorSets = descriptorPool->allocate(skyViewDescriptorSetLayout, framesInFlight);
+        if (skyViewDescriptorSets.empty()) {
+            SDL_Log("Failed to allocate sky-view descriptor sets");
             return false;
         }
 
-        std::array<VkWriteDescriptorSet, 4> writes{};
+        // Update each per-frame descriptor set with its corresponding uniform buffer
+        for (uint32_t i = 0; i < framesInFlight; ++i) {
+            std::array<VkWriteDescriptorSet, 4> writes{};
 
-        VkDescriptorImageInfo outputImageInfo{};
-        outputImageInfo.imageView = skyViewLUTView;
-        outputImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+            VkDescriptorImageInfo outputImageInfo{};
+            outputImageInfo.imageView = skyViewLUTView;
+            outputImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
-        writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[0].dstSet = skyViewDescriptorSet;
-        writes[0].dstBinding = 0;
-        writes[0].dstArrayElement = 0;
-        writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        writes[0].descriptorCount = 1;
-        writes[0].pImageInfo = &outputImageInfo;
+            writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[0].dstSet = skyViewDescriptorSets[i];
+            writes[0].dstBinding = 0;
+            writes[0].dstArrayElement = 0;
+            writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            writes[0].descriptorCount = 1;
+            writes[0].pImageInfo = &outputImageInfo;
 
-        VkDescriptorImageInfo transmittanceImageInfo{};
-        transmittanceImageInfo.imageView = transmittanceLUTView;
-        transmittanceImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        transmittanceImageInfo.sampler = lutSampler;
+            VkDescriptorImageInfo transmittanceImageInfo{};
+            transmittanceImageInfo.imageView = transmittanceLUTView;
+            transmittanceImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            transmittanceImageInfo.sampler = lutSampler;
 
-        writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[1].dstSet = skyViewDescriptorSet;
-        writes[1].dstBinding = 1;
-        writes[1].dstArrayElement = 0;
-        writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        writes[1].descriptorCount = 1;
-        writes[1].pImageInfo = &transmittanceImageInfo;
+            writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[1].dstSet = skyViewDescriptorSets[i];
+            writes[1].dstBinding = 1;
+            writes[1].dstArrayElement = 0;
+            writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            writes[1].descriptorCount = 1;
+            writes[1].pImageInfo = &transmittanceImageInfo;
 
-        VkDescriptorImageInfo multiScatterImageInfo{};
-        multiScatterImageInfo.imageView = multiScatterLUTView;
-        multiScatterImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        multiScatterImageInfo.sampler = lutSampler;
+            VkDescriptorImageInfo multiScatterImageInfo{};
+            multiScatterImageInfo.imageView = multiScatterLUTView;
+            multiScatterImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            multiScatterImageInfo.sampler = lutSampler;
 
-        writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[2].dstSet = skyViewDescriptorSet;
-        writes[2].dstBinding = 2;
-        writes[2].dstArrayElement = 0;
-        writes[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        writes[2].descriptorCount = 1;
-        writes[2].pImageInfo = &multiScatterImageInfo;
+            writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[2].dstSet = skyViewDescriptorSets[i];
+            writes[2].dstBinding = 2;
+            writes[2].dstArrayElement = 0;
+            writes[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            writes[2].descriptorCount = 1;
+            writes[2].pImageInfo = &multiScatterImageInfo;
 
-        VkDescriptorBufferInfo bufferInfo{};
-        bufferInfo.buffer = uniformBuffer;
-        bufferInfo.offset = 0;
-        bufferInfo.range = sizeof(AtmosphereLUTUniforms);
+            VkDescriptorBufferInfo bufferInfo{};
+            bufferInfo.buffer = skyViewUniformBuffers.buffers[i];
+            bufferInfo.offset = 0;
+            bufferInfo.range = sizeof(AtmosphereLUTUniforms);
 
-        writes[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[3].dstSet = skyViewDescriptorSet;
-        writes[3].dstBinding = 3;
-        writes[3].dstArrayElement = 0;
-        writes[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        writes[3].descriptorCount = 1;
-        writes[3].pBufferInfo = &bufferInfo;
+            writes[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[3].dstSet = skyViewDescriptorSets[i];
+            writes[3].dstBinding = 3;
+            writes[3].dstArrayElement = 0;
+            writes[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            writes[3].descriptorCount = 1;
+            writes[3].pBufferInfo = &bufferInfo;
 
-        vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+            vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+        }
     }
 
-    // Allocate irradiance descriptor set
+    // Allocate irradiance descriptor set using managed pool
     {
-        VkDescriptorSetAllocateInfo allocInfo{};
-        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        allocInfo.descriptorPool = descriptorPool;
-        allocInfo.descriptorSetCount = 1;
-        allocInfo.pSetLayouts = &irradianceDescriptorSetLayout;
-
-        if (vkAllocateDescriptorSets(device, &allocInfo, &irradianceDescriptorSet) != VK_SUCCESS) {
+        irradianceDescriptorSet = descriptorPool->allocateSingle(irradianceDescriptorSetLayout);
+        if (irradianceDescriptorSet == VK_NULL_HANDLE) {
             SDL_Log("Failed to allocate irradiance descriptor set");
             return false;
         }
@@ -910,47 +903,45 @@ bool AtmosphereLUTSystem::createDescriptorSets() {
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
     }
 
-    // Allocate cloud map descriptor set
+    // Allocate per-frame cloud map descriptor sets (double-buffered) using managed pool
     {
-        VkDescriptorSetAllocateInfo allocInfo{};
-        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        allocInfo.descriptorPool = descriptorPool;
-        allocInfo.descriptorSetCount = 1;
-        allocInfo.pSetLayouts = &cloudMapDescriptorSetLayout;
-
-        if (vkAllocateDescriptorSets(device, &allocInfo, &cloudMapDescriptorSet) != VK_SUCCESS) {
-            SDL_Log("Failed to allocate cloud map descriptor set");
+        cloudMapDescriptorSets = descriptorPool->allocate(cloudMapDescriptorSetLayout, framesInFlight);
+        if (cloudMapDescriptorSets.empty()) {
+            SDL_Log("Failed to allocate cloud map descriptor sets");
             return false;
         }
 
-        std::array<VkWriteDescriptorSet, 2> writes{};
+        // Update each per-frame descriptor set with its corresponding uniform buffer
+        for (uint32_t i = 0; i < framesInFlight; ++i) {
+            std::array<VkWriteDescriptorSet, 2> writes{};
 
-        VkDescriptorImageInfo imageInfo{};
-        imageInfo.imageView = cloudMapLUTView;
-        imageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+            VkDescriptorImageInfo imageInfo{};
+            imageInfo.imageView = cloudMapLUTView;
+            imageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
-        writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[0].dstSet = cloudMapDescriptorSet;
-        writes[0].dstBinding = 0;
-        writes[0].dstArrayElement = 0;
-        writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        writes[0].descriptorCount = 1;
-        writes[0].pImageInfo = &imageInfo;
+            writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[0].dstSet = cloudMapDescriptorSets[i];
+            writes[0].dstBinding = 0;
+            writes[0].dstArrayElement = 0;
+            writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            writes[0].descriptorCount = 1;
+            writes[0].pImageInfo = &imageInfo;
 
-        VkDescriptorBufferInfo bufferInfo{};
-        bufferInfo.buffer = cloudMapUniformBuffer;
-        bufferInfo.offset = 0;
-        bufferInfo.range = sizeof(CloudMapUniforms);
+            VkDescriptorBufferInfo bufferInfo{};
+            bufferInfo.buffer = cloudMapUniformBuffers.buffers[i];
+            bufferInfo.offset = 0;
+            bufferInfo.range = sizeof(CloudMapUniforms);
 
-        writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[1].dstSet = cloudMapDescriptorSet;
-        writes[1].dstBinding = 1;
-        writes[1].dstArrayElement = 0;
-        writes[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        writes[1].descriptorCount = 1;
-        writes[1].pBufferInfo = &bufferInfo;
+            writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[1].dstSet = cloudMapDescriptorSets[i];
+            writes[1].dstBinding = 1;
+            writes[1].dstArrayElement = 0;
+            writes[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            writes[1].descriptorCount = 1;
+            writes[1].pBufferInfo = &bufferInfo;
 
-        vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+            vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+        }
     }
 
     return true;
@@ -1288,12 +1279,12 @@ void AtmosphereLUTSystem::computeIrradianceLUT(VkCommandBuffer cmd) {
 
 void AtmosphereLUTSystem::computeSkyViewLUT(VkCommandBuffer cmd, const glm::vec3& sunDir,
                                             const glm::vec3& cameraPos, float cameraAltitude) {
-    // Update uniform buffer
+    // Update uniform buffer (use frame 0's per-frame buffer for startup computation)
     AtmosphereLUTUniforms uniforms{};
     uniforms.params = atmosphereParams;
     uniforms.sunDirection = glm::vec4(sunDir, 0.0f);
     uniforms.cameraPosition = glm::vec4(cameraPos, cameraAltitude);
-    memcpy(uniformMappedPtr, &uniforms, sizeof(AtmosphereLUTUniforms));
+    memcpy(skyViewUniformBuffers.mappedPointers[0], &uniforms, sizeof(AtmosphereLUTUniforms));
 
     // Transition to GENERAL layout for compute write (from UNDEFINED at startup)
     VkImageMemoryBarrier barrier{};
@@ -1314,10 +1305,10 @@ void AtmosphereLUTSystem::computeSkyViewLUT(VkCommandBuffer cmd, const glm::vec3
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                          0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    // Bind pipeline and dispatch
+    // Bind pipeline and dispatch (use frame 0's descriptor set for startup computation)
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, skyViewPipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, skyViewPipelineLayout,
-                           0, 1, &skyViewDescriptorSet, 0, nullptr);
+                           0, 1, &skyViewDescriptorSets[0], 0, nullptr);
 
     uint32_t groupCountX = (SKYVIEW_WIDTH + 15) / 16;
     uint32_t groupCountY = (SKYVIEW_HEIGHT + 15) / 16;
@@ -1335,14 +1326,15 @@ void AtmosphereLUTSystem::computeSkyViewLUT(VkCommandBuffer cmd, const glm::vec3
     SDL_Log("Computed sky-view LUT (%dx%d)", SKYVIEW_WIDTH, SKYVIEW_HEIGHT);
 }
 
-void AtmosphereLUTSystem::updateSkyViewLUT(VkCommandBuffer cmd, const glm::vec3& sunDir,
+void AtmosphereLUTSystem::updateSkyViewLUT(VkCommandBuffer cmd, uint32_t frameIndex,
+                                           const glm::vec3& sunDir,
                                            const glm::vec3& cameraPos, float cameraAltitude) {
-    // Update uniform buffer with new sun direction
+    // Update per-frame uniform buffer with new sun direction (double-buffered)
     AtmosphereLUTUniforms uniforms{};
     uniforms.params = atmosphereParams;
     uniforms.sunDirection = glm::vec4(sunDir, 0.0f);
     uniforms.cameraPosition = glm::vec4(cameraPos, cameraAltitude);
-    memcpy(uniformMappedPtr, &uniforms, sizeof(AtmosphereLUTUniforms));
+    memcpy(skyViewUniformBuffers.mappedPointers[frameIndex], &uniforms, sizeof(AtmosphereLUTUniforms));
 
     // Transition from SHADER_READ_ONLY to GENERAL for compute write
     // (LUT was already in read-only from previous frame)
@@ -1364,10 +1356,10 @@ void AtmosphereLUTSystem::updateSkyViewLUT(VkCommandBuffer cmd, const glm::vec3&
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                          0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    // Bind pipeline and dispatch
+    // Bind pipeline and per-frame descriptor set (double-buffered)
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, skyViewPipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, skyViewPipelineLayout,
-                           0, 1, &skyViewDescriptorSet, 0, nullptr);
+                           0, 1, &skyViewDescriptorSets[frameIndex], 0, nullptr);
 
     uint32_t groupCountX = (SKYVIEW_WIDTH + 15) / 16;
     uint32_t groupCountY = (SKYVIEW_HEIGHT + 15) / 16;
@@ -1384,14 +1376,14 @@ void AtmosphereLUTSystem::updateSkyViewLUT(VkCommandBuffer cmd, const glm::vec3&
 }
 
 void AtmosphereLUTSystem::computeCloudMapLUT(VkCommandBuffer cmd, const glm::vec3& windOffset, float time) {
-    // Update cloud map uniform buffer
+    // Update cloud map uniform buffer (use frame 0's per-frame buffer for startup computation)
     CloudMapUniforms uniforms{};
     uniforms.windOffset = glm::vec4(windOffset, time);
     uniforms.coverage = 0.6f;      // 60% cloud coverage
     uniforms.density = 1.0f;       // Full density multiplier
     uniforms.sharpness = 0.3f;     // Coverage transition sharpness
     uniforms.detailScale = 2.5f;   // Detail noise scale
-    memcpy(cloudMapUniformMappedPtr, &uniforms, sizeof(CloudMapUniforms));
+    memcpy(cloudMapUniformBuffers.mappedPointers[0], &uniforms, sizeof(CloudMapUniforms));
 
     // Transition to GENERAL layout for compute write
     VkImageMemoryBarrier barrier{};
@@ -1412,10 +1404,10 @@ void AtmosphereLUTSystem::computeCloudMapLUT(VkCommandBuffer cmd, const glm::vec
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                          0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    // Bind pipeline and dispatch
+    // Bind pipeline and dispatch (use frame 0's descriptor set for startup computation)
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cloudMapPipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cloudMapPipelineLayout,
-                           0, 1, &cloudMapDescriptorSet, 0, nullptr);
+                           0, 1, &cloudMapDescriptorSets[0], 0, nullptr);
 
     uint32_t groupCountX = (CLOUDMAP_SIZE + 15) / 16;
     uint32_t groupCountY = (CLOUDMAP_SIZE + 15) / 16;
@@ -1433,15 +1425,16 @@ void AtmosphereLUTSystem::computeCloudMapLUT(VkCommandBuffer cmd, const glm::vec
     SDL_Log("Computed cloud map LUT (%dx%d)", CLOUDMAP_SIZE, CLOUDMAP_SIZE);
 }
 
-void AtmosphereLUTSystem::updateCloudMapLUT(VkCommandBuffer cmd, const glm::vec3& windOffset, float time) {
-    // Update cloud map uniform buffer
+void AtmosphereLUTSystem::updateCloudMapLUT(VkCommandBuffer cmd, uint32_t frameIndex,
+                                            const glm::vec3& windOffset, float time) {
+    // Update per-frame cloud map uniform buffer (double-buffered)
     CloudMapUniforms uniforms{};
     uniforms.windOffset = glm::vec4(windOffset, time);
     uniforms.coverage = 0.6f;      // 60% cloud coverage
     uniforms.density = 1.0f;       // Full density multiplier
     uniforms.sharpness = 0.3f;     // Coverage transition sharpness
     uniforms.detailScale = 2.5f;   // Detail noise scale
-    memcpy(cloudMapUniformMappedPtr, &uniforms, sizeof(CloudMapUniforms));
+    memcpy(cloudMapUniformBuffers.mappedPointers[frameIndex], &uniforms, sizeof(CloudMapUniforms));
 
     // Transition from SHADER_READ_ONLY to GENERAL for compute write
     VkImageMemoryBarrier barrier{};
@@ -1462,10 +1455,10 @@ void AtmosphereLUTSystem::updateCloudMapLUT(VkCommandBuffer cmd, const glm::vec3
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                          0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    // Bind pipeline and dispatch
+    // Bind pipeline and per-frame descriptor set (double-buffered)
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cloudMapPipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cloudMapPipelineLayout,
-                           0, 1, &cloudMapDescriptorSet, 0, nullptr);
+                           0, 1, &cloudMapDescriptorSets[frameIndex], 0, nullptr);
 
     uint32_t groupCountX = (CLOUDMAP_SIZE + 15) / 16;
     uint32_t groupCountY = (CLOUDMAP_SIZE + 15) / 16;

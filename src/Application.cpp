@@ -192,6 +192,15 @@ void Application::run() {
         bool wantsJump = input.wantsJump();
         bool isJumping = wantsJump && wasGrounded;
 
+        // If starting a jump, compute trajectory for animation sync
+        if (isJumping) {
+            glm::vec3 startPos = physics.getCharacterPosition();
+            // Velocity: horizontal from input + jump impulse (5.0 m/s up, matching PhysicsSystem)
+            glm::vec3 jumpVelocity = desiredVelocity;
+            jumpVelocity.y = 5.0f;
+            renderer.startCharacterJump(startPos, jumpVelocity, 9.81f, &physics);
+        }
+
         // Always update physics character controller (handles gravity, jumping, and movement)
         physics.updateCharacter(deltaTime, desiredVelocity, wantsJump);
 
@@ -283,12 +292,25 @@ void Application::processEvents() {
             case SDL_EVENT_QUIT:
                 running = false;
                 break;
+            case SDL_EVENT_WINDOW_RESIZED:
+            case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+                renderer.notifyWindowResized();
+                break;
             case SDL_EVENT_KEY_DOWN:
                 if (event.key.scancode == SDL_SCANCODE_ESCAPE) {
                     running = false;
                 }
                 else if (event.key.scancode == SDL_SCANCODE_F1) {
                     gui.toggleVisibility();
+                }
+                else if (event.key.scancode == SDL_SCANCODE_F2) {
+                    gui.getTreeEditorGui().toggleVisibility();
+                    SDL_Log("Tree Editor: %s", gui.getTreeEditorGui().isVisible() ? "ON" : "OFF");
+                }
+                else if (event.key.scancode == SDL_SCANCODE_P) {
+                    gui.getTreeEditorGui().placeTreeAtCamera(renderer, camera);
+                    gui.getTreeEditorGui().setVisible(true);
+                    SDL_Log("Tree placed at camera position");
                 }
                 else if (event.key.scancode == SDL_SCANCODE_1) {
                     renderer.setTimeOfDay(0.25f);

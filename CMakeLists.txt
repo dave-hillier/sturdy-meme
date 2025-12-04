@@ -80,6 +80,9 @@ set(SOURCES
     src/GpuProfiler.cpp
     src/CpuProfiler.cpp
     src/WaterSystem.cpp
+    src/TreeGenerator.cpp
+    src/TreeEditSystem.cpp
+    src/TreeEditorGui.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
@@ -171,6 +174,8 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/hiz_culling.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water.frag.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree.vert.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree.frag.spv
 )
 
 set(TERRAIN_SHADER_FILES
@@ -261,6 +266,7 @@ if(SHADER_COMPILE_CMD)
         weather.comp weather.vert weather.frag
         leaf.comp leaf.vert leaf.frag
         snow_accumulation.comp
+        tree.vert tree.frag
     )
 
     foreach(SHADER ${SHADERS_WITH_BINDINGS})
@@ -459,6 +465,8 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/hiz_culling.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water.frag.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree.vert.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree.frag.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_dispatcher.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_subdivision.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_frustum_cull.comp.spv

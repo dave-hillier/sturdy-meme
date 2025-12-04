@@ -1,4 +1,5 @@
 #include "SceneBuilder.h"
+#include "PhysicsSystem.h"
 #include <SDL3/SDL_log.h>
 
 bool SceneBuilder::init(const InitInfo& info) {
@@ -101,42 +102,42 @@ bool SceneBuilder::createMeshes(const InitInfo& info) {
 }
 
 bool SceneBuilder::loadTextures(const InitInfo& info) {
-    std::string texturePath = info.resourcePath + "/textures/crates/crate1/crate1_diffuse.png";
+    std::string texturePath = info.resourcePath + "/assets/textures/crates/crate1/crate1_diffuse.png";
     if (!crateTexture.load(texturePath, info.allocator, info.device, info.commandPool,
                            info.graphicsQueue, info.physicalDevice)) {
         SDL_Log("Failed to load texture: %s", texturePath.c_str());
         return false;
     }
 
-    std::string crateNormalPath = info.resourcePath + "/textures/crates/crate1/crate1_normal.png";
+    std::string crateNormalPath = info.resourcePath + "/assets/textures/crates/crate1/crate1_normal.png";
     if (!crateNormalMap.load(crateNormalPath, info.allocator, info.device, info.commandPool,
                               info.graphicsQueue, info.physicalDevice, false)) {
         SDL_Log("Failed to load crate normal map: %s", crateNormalPath.c_str());
         return false;
     }
 
-    std::string grassTexturePath = info.resourcePath + "/textures/grass/grass/grass01.jpg";
+    std::string grassTexturePath = info.resourcePath + "/assets/textures/grass/grass/grass01.jpg";
     if (!groundTexture.load(grassTexturePath, info.allocator, info.device, info.commandPool,
                             info.graphicsQueue, info.physicalDevice)) {
         SDL_Log("Failed to load grass texture: %s", grassTexturePath.c_str());
         return false;
     }
 
-    std::string grassNormalPath = info.resourcePath + "/textures/grass/grass/grass01_n.jpg";
+    std::string grassNormalPath = info.resourcePath + "/assets/textures/grass/grass/grass01_n.jpg";
     if (!groundNormalMap.load(grassNormalPath, info.allocator, info.device, info.commandPool,
                                info.graphicsQueue, info.physicalDevice, false)) {
         SDL_Log("Failed to load grass normal map: %s", grassNormalPath.c_str());
         return false;
     }
 
-    std::string metalTexturePath = info.resourcePath + "/textures/industrial/metal_1.jpg";
+    std::string metalTexturePath = info.resourcePath + "/assets/textures/industrial/metal_1.jpg";
     if (!metalTexture.load(metalTexturePath, info.allocator, info.device, info.commandPool,
                            info.graphicsQueue, info.physicalDevice)) {
         SDL_Log("Failed to load metal texture: %s", metalTexturePath.c_str());
         return false;
     }
 
-    std::string metalNormalPath = info.resourcePath + "/textures/industrial/metal_1_norm.jpg";
+    std::string metalNormalPath = info.resourcePath + "/assets/textures/industrial/metal_1_norm.jpg";
     if (!metalNormalMap.load(metalNormalPath, info.allocator, info.device, info.commandPool,
                               info.graphicsQueue, info.physicalDevice, false)) {
         SDL_Log("Failed to load metal normal map: %s", metalNormalPath.c_str());
@@ -431,4 +432,9 @@ void SceneBuilder::updateAnimatedCharacter(float deltaTime, VmaAllocator allocat
     if (playerObjectIndex < sceneObjects.size()) {
         sceneObjects[playerObjectIndex].mesh = &animatedCharacter.getMesh();
     }
+}
+
+void SceneBuilder::startCharacterJump(const glm::vec3& startPos, const glm::vec3& velocity, float gravity, const PhysicsWorld* physics) {
+    if (!hasAnimatedCharacter) return;
+    animatedCharacter.startJump(startPos, velocity, gravity, physics);
 }

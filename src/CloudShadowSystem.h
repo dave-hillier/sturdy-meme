@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
+#include "DescriptorManager.h"
 
 // Cloud Shadow System
 // Generates a world-space cloud shadow map by ray-marching through the cloud layer
@@ -29,7 +30,7 @@ public:
     struct InitInfo {
         VkDevice device;
         VmaAllocator allocator;
-        VkDescriptorPool descriptorPool;
+        DescriptorManager::Pool* descriptorPool;  // Auto-growing pool
         std::string shaderPath;
         uint32_t framesInFlight;
         VkImageView cloudMapLUTView;  // From AtmosphereLUTSystem
@@ -95,7 +96,7 @@ private:
 
     VkDevice device = VK_NULL_HANDLE;
     VmaAllocator allocator = VK_NULL_HANDLE;
-    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
+    DescriptorManager::Pool* descriptorPool = nullptr;
     std::string shaderPath;
     uint32_t framesInFlight = 0;
 
