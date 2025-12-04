@@ -1628,6 +1628,7 @@ void TerrainSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraP
     // Compute LOD factor for screen-space edge length calculation
     float fov = 2.0f * atan(1.0f / proj[1][1]);
     uniforms.lodFactor = 2.0f * log2(extent.height / (2.0f * tan(fov * 0.5f) * config.targetEdgePixels));
+    uniforms.padding = config.flatnessScale;  // flatnessScale in shader
 
     // Extract frustum planes
     extractFrustumPlanes(uniforms.viewProjMatrix, uniforms.frustumPlanes);

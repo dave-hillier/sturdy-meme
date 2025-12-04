@@ -41,7 +41,7 @@ layout(std140, binding = BINDING_TERRAIN_UBO) uniform TerrainUniforms {
     vec4 lodParams;       // x = split threshold, y = merge threshold, z = min depth, w = subdivisionPhase (0=split, 1=merge)
     vec2 screenSize;
     float lodFactor;
-    float padding;
+    float flatnessScale;  // How much flat areas reduce subdivision (0=disabled, 2=3x threshold for flat)
 };
 
 // Subdivision phase: 0 = split only, 1 = merge only
@@ -59,6 +59,36 @@ layout(std140, binding = BINDING_TERRAIN_UBO) uniform TerrainUniforms {
 // Sample terrain height at UV coordinate (uses shared terrain_height_common.glsl)
 float sampleHeight(vec2 uv) {
     return sampleTerrainHeight(heightMap, uv, HEIGHT_SCALE);
+}
+
+// Estimate curvature using Laplacian approximation (second derivative)
+// Returns normalized curvature in [0, 1] range
+float estimateCurvature(vec2 uv, float step) {
+    float h00 = sampleHeight(uv);
+    float h10 = sampleHeight(uv + vec2(step, 0.0));
+    float h01 = sampleHeight(uv + vec2(0.0, step));
+    float h11 = sampleHeight(uv + vec2(step, step));
+
+    // Mixed partial derivative approximation
+    float curvature = abs(h00 + h11 - h10 - h01);
+    return clamp(curvature / HEIGHT_SCALE, 0.0, 1.0);
+}
+
+// Compute curvature-adjusted threshold for a triangle
+float computeAdjustedThreshold(vec2 v0, vec2 v1, vec2 v2) {
+    vec2 triCenter = (v0 + v1 + v2) / 3.0;
+    vec2 longestEdge = v2 - v1;  // LEB property: longest edge is v1-v2
+    float triangleUVSize = length(longestEdge);
+
+    // Step size: fraction of triangle, but at least one texel
+    vec2 texelSize = 1.0 / vec2(textureSize(heightMap, 0));
+    float sampleStep = max(triangleUVSize * 0.25, max(texelSize.x, texelSize.y));
+
+    float curvature = estimateCurvature(triCenter, sampleStep);
+
+    // High curvature -> threshold stays near SPLIT_THRESHOLD
+    // Low curvature -> threshold increases (less subdivision)
+    return SPLIT_THRESHOLD * (1.0 + flatnessScale * (1.0 - curvature));
 }
 
 // Transform UV to world position
@@ -184,7 +214,8 @@ void main() {
 
         // Visible triangle - compute LOD and split if needed
         float edgeLengthPixels = computeTriangleLOD(p0, p1, p2);
-        if (edgeLengthPixels > SPLIT_THRESHOLD) {
+        float adjustedThreshold = computeAdjustedThreshold(v0, v1, v2);
+        if (edgeLengthPixels > adjustedThreshold) {
             leb_SplitNode_Square(node);
         }
     } else {
@@ -211,8 +242,9 @@ void main() {
             vec3 pp1 = uvToWorldPos(pv1);
             vec3 pp2 = uvToWorldPos(pv2);
             float parentLOD = computeTriangleLOD(pp0, pp1, pp2);
+            float adjustedThreshold = computeAdjustedThreshold(pv0, pv1, pv2);
 
-            if (parentLOD < SPLIT_THRESHOLD) {
+            if (parentLOD < adjustedThreshold) {
                 leb_MergeNode_Square(node, diamond);
             }
         }

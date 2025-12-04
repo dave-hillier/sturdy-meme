@@ -759,6 +759,13 @@ void GuiSystem::renderTerrainSection(Renderer& renderer) {
         ImGui::SetTooltip("Screen-space edge length (pixels) to trigger merge");
     }
 
+    if (ImGui::SliderFloat("Flatness Scale", &cfg.flatnessScale, 0.0f, 5.0f, "%.1f")) {
+        configChanged = true;
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Curvature LOD: 0=disabled, 2=flat areas use 3x threshold");
+    }
+
     int maxDepth = cfg.maxDepth;
     if (ImGui::SliderInt("Max Depth", &maxDepth, 16, 32)) {
         cfg.maxDepth = maxDepth;
