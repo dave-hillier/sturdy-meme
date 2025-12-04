@@ -81,6 +81,7 @@ set(SOURCES
     src/WaterSystem.cpp
     src/TreeGenerator.cpp
     src/TreeEditSystem.cpp
+    src/TreeEditorGui.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
