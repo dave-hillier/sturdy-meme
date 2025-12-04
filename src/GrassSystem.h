@@ -124,7 +124,8 @@ private:
     VkDescriptorSetLayout displacementDescriptorSetLayout = VK_NULL_HANDLE;
     VkPipelineLayout displacementPipelineLayout = VK_NULL_HANDLE;
     VkPipeline displacementPipeline = VK_NULL_HANDLE;
-    VkDescriptorSet displacementDescriptorSet = VK_NULL_HANDLE;
+    // Per-frame descriptor sets for displacement update (double-buffered)
+    std::vector<VkDescriptorSet> displacementDescriptorSets;
 
     // Displacement sources buffer (per-frame)
     BufferUtils::PerFrameBufferSet displacementSourceBuffers;

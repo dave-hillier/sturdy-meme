@@ -259,33 +259,65 @@ bool GrassSystem::createDisplacementPipeline() {
         return false;
     }
 
-    // Allocate displacement descriptor set
+    // Allocate per-frame displacement descriptor sets (double-buffered)
+    displacementDescriptorSets.resize(getFramesInFlight());
+    std::vector<VkDescriptorSetLayout> layouts(getFramesInFlight(), displacementDescriptorSetLayout);
+
     VkDescriptorSetAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     allocInfo.descriptorPool = getDescriptorPool();
-    allocInfo.descriptorSetCount = 1;
-    allocInfo.pSetLayouts = &displacementDescriptorSetLayout;
+    allocInfo.descriptorSetCount = getFramesInFlight();
+    allocInfo.pSetLayouts = layouts.data();
 
-    if (vkAllocateDescriptorSets(getDevice(), &allocInfo, &displacementDescriptorSet) != VK_SUCCESS) {
-        SDL_Log("Failed to allocate displacement descriptor set");
+    if (vkAllocateDescriptorSets(getDevice(), &allocInfo, displacementDescriptorSets.data()) != VK_SUCCESS) {
+        SDL_Log("Failed to allocate displacement descriptor sets");
         return false;
     }
 
-    // Update displacement descriptor set (image binding only - buffers updated per frame)
-    VkDescriptorImageInfo imageInfo{};
-    imageInfo.imageView = displacementImageView;
-    imageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    // Update each per-frame descriptor set with image and per-frame buffers
+    for (uint32_t i = 0; i < getFramesInFlight(); ++i) {
+        VkDescriptorImageInfo imageInfo{};
+        imageInfo.imageView = displacementImageView;
+        imageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
-    VkWriteDescriptorSet imageWrite{};
-    imageWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    imageWrite.dstSet = displacementDescriptorSet;
-    imageWrite.dstBinding = 0;
-    imageWrite.dstArrayElement = 0;
-    imageWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    imageWrite.descriptorCount = 1;
-    imageWrite.pImageInfo = &imageInfo;
+        VkDescriptorBufferInfo sourceBufferInfo{};
+        sourceBufferInfo.buffer = displacementSourceBuffers.buffers[i];
+        sourceBufferInfo.offset = 0;
+        sourceBufferInfo.range = sizeof(DisplacementSource) * MAX_DISPLACEMENT_SOURCES;
 
-    vkUpdateDescriptorSets(getDevice(), 1, &imageWrite, 0, nullptr);
+        VkDescriptorBufferInfo uniformBufferInfo{};
+        uniformBufferInfo.buffer = displacementUniformBuffers.buffers[i];
+        uniformBufferInfo.offset = 0;
+        uniformBufferInfo.range = sizeof(DisplacementUniforms);
+
+        std::array<VkWriteDescriptorSet, 3> writes{};
+
+        writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[0].dstSet = displacementDescriptorSets[i];
+        writes[0].dstBinding = 0;
+        writes[0].dstArrayElement = 0;
+        writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        writes[0].descriptorCount = 1;
+        writes[0].pImageInfo = &imageInfo;
+
+        writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[1].dstSet = displacementDescriptorSets[i];
+        writes[1].dstBinding = 1;
+        writes[1].dstArrayElement = 0;
+        writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[1].descriptorCount = 1;
+        writes[1].pBufferInfo = &sourceBufferInfo;
+
+        writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[2].dstSet = displacementDescriptorSets[i];
+        writes[2].dstBinding = 2;
+        writes[2].dstArrayElement = 0;
+        writes[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        writes[2].descriptorCount = 1;
+        writes[2].pBufferInfo = &uniformBufferInfo;
+
+        vkUpdateDescriptorSets(getDevice(), static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+    }
 
     return true;
 }
@@ -833,38 +865,7 @@ void GrassSystem::updateDisplacementSources(const glm::vec3& playerPos, float pl
 }
 
 void GrassSystem::recordDisplacementUpdate(VkCommandBuffer cmd, uint32_t frameIndex) {
-    // Update displacement descriptor set with current frame's buffers
-    VkDescriptorBufferInfo sourceBufferInfo{};
-    sourceBufferInfo.buffer = displacementSourceBuffers.buffers[frameIndex];
-    sourceBufferInfo.offset = 0;
-    sourceBufferInfo.range = sizeof(DisplacementSource) * MAX_DISPLACEMENT_SOURCES;
-
-    VkDescriptorBufferInfo uniformBufferInfo{};
-    uniformBufferInfo.buffer = displacementUniformBuffers.buffers[frameIndex];
-    uniformBufferInfo.offset = 0;
-    uniformBufferInfo.range = sizeof(DisplacementUniforms);
-
-    std::array<VkWriteDescriptorSet, 2> writes{};
-
-    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[0].dstSet = displacementDescriptorSet;
-    writes[0].dstBinding = 1;
-    writes[0].dstArrayElement = 0;
-    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    writes[0].descriptorCount = 1;
-    writes[0].pBufferInfo = &sourceBufferInfo;
-
-    writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[1].dstSet = displacementDescriptorSet;
-    writes[1].dstBinding = 2;
-    writes[1].dstArrayElement = 0;
-    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    writes[1].descriptorCount = 1;
-    writes[1].pBufferInfo = &uniformBufferInfo;
-
-    vkUpdateDescriptorSets(getDevice(), static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
-
-    // Copy displacement sources to buffer
+    // Copy displacement sources to per-frame buffer (double-buffered)
     memcpy(displacementSourceBuffers.mappedPointers[frameIndex], currentDisplacementSources.data(),
            sizeof(DisplacementSource) * currentDisplacementSources.size());
 
@@ -901,11 +902,11 @@ void GrassSystem::recordDisplacementUpdate(VkCommandBuffer cmd, uint32_t frameIn
                          VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                          0, 0, nullptr, 0, nullptr, 1, &imageBarrier);
 
-    // Dispatch displacement update compute shader
+    // Dispatch displacement update compute shader using per-frame descriptor set (double-buffered)
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, displacementPipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
                             displacementPipelineLayout, 0, 1,
-                            &displacementDescriptorSet, 0, nullptr);
+                            &displacementDescriptorSets[frameIndex], 0, nullptr);
 
     // Dispatch: 512x512 / 16x16 = 32x32 workgroups
     vkCmdDispatch(cmd, 32, 32, 1);

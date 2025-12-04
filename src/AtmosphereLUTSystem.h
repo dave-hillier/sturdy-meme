@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 #include "UBOs.h"
+#include "BufferUtils.h"
 
 // Atmosphere LUT system for physically-based sky rendering (Phase 4.1)
 // Precomputes transmittance and multi-scatter LUTs for efficient atmospheric scattering
@@ -98,8 +99,9 @@ public:
     void computeCloudMapLUT(VkCommandBuffer cmd, const glm::vec3& windOffset, float time);
 
     // Update sky-view LUT per frame (uses SHADER_READ_ONLY_OPTIMAL as old layout since LUT was already computed)
-    void updateSkyViewLUT(VkCommandBuffer cmd, const glm::vec3& sunDir, const glm::vec3& cameraPos, float cameraAltitude);
-    void updateCloudMapLUT(VkCommandBuffer cmd, const glm::vec3& windOffset, float time);
+    // frameIndex is required for proper double-buffering of uniform buffers and descriptor sets
+    void updateSkyViewLUT(VkCommandBuffer cmd, uint32_t frameIndex, const glm::vec3& sunDir, const glm::vec3& cameraPos, float cameraAltitude);
+    void updateCloudMapLUT(VkCommandBuffer cmd, uint32_t frameIndex, const glm::vec3& windOffset, float time);
 
     // Get LUT views for sampling in shaders
     VkImageView getTransmittanceLUTView() const { return transmittanceLUTView; }
@@ -195,21 +197,23 @@ private:
     VkPipeline irradiancePipeline = VK_NULL_HANDLE;
     VkPipeline cloudMapPipeline = VK_NULL_HANDLE;
 
+    // Single descriptor sets for one-time LUT computation (at startup)
     VkDescriptorSet transmittanceDescriptorSet = VK_NULL_HANDLE;
     VkDescriptorSet multiScatterDescriptorSet = VK_NULL_HANDLE;
-    VkDescriptorSet skyViewDescriptorSet = VK_NULL_HANDLE;
     VkDescriptorSet irradianceDescriptorSet = VK_NULL_HANDLE;
-    VkDescriptorSet cloudMapDescriptorSet = VK_NULL_HANDLE;
 
-    // Uniform buffer for atmosphere LUTs
+    // Per-frame descriptor sets for per-frame LUT updates (double-buffered)
+    std::vector<VkDescriptorSet> skyViewDescriptorSets;
+    std::vector<VkDescriptorSet> cloudMapDescriptorSets;
+
+    // Single uniform buffer for one-time LUT computation (at startup)
     VkBuffer uniformBuffer = VK_NULL_HANDLE;
     VmaAllocation uniformAllocation = VK_NULL_HANDLE;
     void* uniformMappedPtr = nullptr;
 
-    // Uniform buffer for cloud map
-    VkBuffer cloudMapUniformBuffer = VK_NULL_HANDLE;
-    VmaAllocation cloudMapUniformAllocation = VK_NULL_HANDLE;
-    void* cloudMapUniformMappedPtr = nullptr;
+    // Per-frame uniform buffers for per-frame updates (double-buffered)
+    BufferUtils::PerFrameBufferSet skyViewUniformBuffers;
+    BufferUtils::PerFrameBufferSet cloudMapUniformBuffers;
 
     // Atmosphere parameters
     AtmosphereParams atmosphereParams;
