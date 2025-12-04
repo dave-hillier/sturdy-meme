@@ -168,6 +168,8 @@ public:
     // Access to systems for simulation
     WindSystem& getWindSystem() { return windSystem; }
     const WindSystem& getWindSystem() const { return windSystem; }
+    WaterSystem& getWaterSystem() { return waterSystem; }
+    const WaterSystem& getWaterSystem() const { return waterSystem; }
     SceneBuilder& getSceneBuilder() { return sceneManager.getSceneBuilder(); }
     Mesh& getFlagClothMesh() { return sceneManager.getSceneBuilder().getFlagClothMesh(); }
     Mesh& getFlagPoleMesh() { return sceneManager.getSceneBuilder().getFlagPoleMesh(); }

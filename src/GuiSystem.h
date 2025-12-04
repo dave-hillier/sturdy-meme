@@ -36,6 +36,7 @@ private:
     void renderEnvironmentSection(Renderer& renderer);
     void renderPostProcessSection(Renderer& renderer);
     void renderTerrainSection(Renderer& renderer);
+    void renderWaterSection(Renderer& renderer);
     void renderDebugSection(Renderer& renderer);
     void renderProfilerSection(Renderer& renderer);
     void renderHelpOverlay();

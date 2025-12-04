@@ -68,8 +68,20 @@ public:
     void setTidalRange(float range) { tidalRange = range; }
     void updateTide(float tideHeight);  // tideHeight is -1 to +1, scaled by tidalRange
 
+    // Getters for UI
     float getWaterLevel() const { return waterUniforms.waterLevel; }
     float getBaseWaterLevel() const { return baseWaterLevel; }
+    float getTidalRange() const { return tidalRange; }
+    glm::vec4 getWaterColor() const { return waterUniforms.waterColor; }
+    float getWaveAmplitude() const { return waterUniforms.waveParams.x; }
+    float getWaveLength() const { return waterUniforms.waveParams.y; }
+    float getWaveSteepness() const { return waterUniforms.waveParams.z; }
+    float getWaveSpeed() const { return waterUniforms.waveParams.w; }
+    float getFoamThreshold() const { return waterUniforms.foamThreshold; }
+    float getFresnelPower() const { return waterUniforms.fresnelPower; }
+
+    void setFoamThreshold(float threshold) { waterUniforms.foamThreshold = threshold; }
+    void setFresnelPower(float power) { waterUniforms.fresnelPower = power; }
 
 private:
     bool createDescriptorSetLayout();
