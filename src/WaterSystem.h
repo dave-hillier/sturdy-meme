@@ -33,6 +33,7 @@ public:
         glm::vec4 waveParams;      // x = amplitude, y = wavelength, z = steepness, w = speed
         glm::vec4 waveParams2;     // Second wave layer parameters
         glm::vec4 waterExtent;     // xy = position offset, zw = size
+        glm::vec4 scatteringCoeffs; // rgb = absorption coefficients, a = turbidity
         float waterLevel;          // Y height of water plane
         float foamThreshold;       // Wave height threshold for foam
         float fresnelPower;        // Fresnel reflection power
@@ -45,6 +46,10 @@ public:
         float flowFoamStrength;    // How much flow speed affects foam
         float fbmNearDistance;     // Distance for max FBM detail (9 octaves)
         float fbmFarDistance;      // Distance for min FBM detail (3 octaves)
+        float specularRoughness;   // Base roughness for specular (0 = mirror, 1 = diffuse)
+        float absorptionScale;     // How quickly light is absorbed with depth
+        float scatteringScale;     // How much light scatters (turbidity multiplier)
+        float padding;
     };
 
     WaterSystem() = default;
@@ -124,6 +129,34 @@ public:
     }
     float getFBMNearDistance() const { return waterUniforms.fbmNearDistance; }
     float getFBMFarDistance() const { return waterUniforms.fbmFarDistance; }
+
+    // PBR Scattering parameters (Phase 8)
+    void setScatteringCoeffs(const glm::vec3& absorption, float turbidity) {
+        waterUniforms.scatteringCoeffs = glm::vec4(absorption, turbidity);
+    }
+    glm::vec3 getAbsorptionCoeffs() const { return glm::vec3(waterUniforms.scatteringCoeffs); }
+    float getTurbidity() const { return waterUniforms.scatteringCoeffs.a; }
+    void setAbsorptionScale(float scale) { waterUniforms.absorptionScale = scale; }
+    void setScatteringScale(float scale) { waterUniforms.scatteringScale = scale; }
+    float getAbsorptionScale() const { return waterUniforms.absorptionScale; }
+    float getScatteringScale() const { return waterUniforms.scatteringScale; }
+
+    // Specular parameters (Phase 6)
+    void setSpecularRoughness(float roughness) { waterUniforms.specularRoughness = roughness; }
+    float getSpecularRoughness() const { return waterUniforms.specularRoughness; }
+
+    // Water type presets (based on Far Cry 5 approach)
+    enum class WaterType {
+        Ocean,          // Deep blue, low turbidity, clear
+        CoastalOcean,   // Blue-green, medium turbidity
+        River,          // Green-blue, variable turbidity
+        MuddyRiver,     // Brown, high turbidity
+        ClearStream,    // Very clear, low absorption
+        Lake,           // Dark blue-green, medium
+        Swamp,          // Dark green-brown, high turbidity
+        Tropical        // Turquoise, very clear
+    };
+    void setWaterType(WaterType type);
 
 private:
     bool createDescriptorSetLayout();

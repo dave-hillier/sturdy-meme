@@ -23,6 +23,7 @@ layout(std140, binding = 1) uniform WaterUniforms {
     vec4 waveParams;           // x = amplitude, y = wavelength, z = steepness, w = speed
     vec4 waveParams2;          // Second wave layer parameters
     vec4 waterExtent;          // xy = position offset, zw = size
+    vec4 scatteringCoeffs;     // rgb = absorption coefficients, a = turbidity
     float waterLevel;          // Y height of water plane
     float foamThreshold;       // Wave height threshold for foam
     float fresnelPower;        // Fresnel reflection power
@@ -35,6 +36,10 @@ layout(std140, binding = 1) uniform WaterUniforms {
     float flowFoamStrength;    // How much flow speed affects foam
     float fbmNearDistance;     // Distance for max FBM detail (9 octaves)
     float fbmFarDistance;      // Distance for min FBM detail (3 octaves)
+    float specularRoughness;   // Base roughness for specular
+    float absorptionScale;     // How quickly light is absorbed with depth
+    float scatteringScale;     // Turbidity multiplier
+    float padding;
 };
 
 layout(binding = 2) uniform sampler2DArrayShadow shadowMapArray;
@@ -105,6 +110,80 @@ vec3 sampleReflection(vec3 reflectDir, vec3 sunDir, vec3 sunColor) {
     vec3 sunReflect = sunColor * pow(sunDot, 256.0) * 2.0;  // Tight specular
 
     return skyColor + sunReflect;
+}
+
+// =========================================================================
+// PBR LIGHT TRANSPORT (Phase 8)
+// Based on Far Cry 5's scattering coefficient approach
+// =========================================================================
+
+// Beer-Lambert law: light absorption through a medium
+// absorption: per-channel absorption coefficients (higher = faster absorption)
+// depth: path length through the medium
+vec3 beerLambertAbsorption(vec3 absorption, float depth) {
+    return exp(-absorption * depth);
+}
+
+// Calculate water color based on physical light transport
+// Using scattering coefficients instead of artist-picked colors
+vec3 calculateWaterTransmission(float depth, vec3 absorption, float turbidity, float scatterScale) {
+    // Apply Beer-Lambert absorption
+    vec3 transmitted = beerLambertAbsorption(absorption, depth);
+
+    // Turbidity causes scattering which adds a milky/hazy appearance
+    // Higher turbidity = more light scattered back toward viewer
+    float scatter = turbidity * scatterScale * (1.0 - exp(-depth * 0.5));
+
+    // Scattered light tends toward white/gray (all wavelengths equally)
+    vec3 scatteredColor = vec3(0.7, 0.75, 0.8) * scatter;
+
+    return transmitted + scatteredColor;
+}
+
+// GGX/Trowbridge-Reitz normal distribution function for specular
+float distributionGGX(float NdotH, float roughness) {
+    float a = roughness * roughness;
+    float a2 = a * a;
+    float NdotH2 = NdotH * NdotH;
+
+    float num = a2;
+    float denom = (NdotH2 * (a2 - 1.0) + 1.0);
+    denom = 3.14159265 * denom * denom;
+
+    return num / max(denom, 0.0001);
+}
+
+// Geometry function for specular (Smith's method)
+float geometrySchlickGGX(float NdotV, float roughness) {
+    float r = roughness + 1.0;
+    float k = (r * r) / 8.0;
+
+    return NdotV / (NdotV * (1.0 - k) + k);
+}
+
+float geometrySmith(float NdotV, float NdotL, float roughness) {
+    return geometrySchlickGGX(NdotV, roughness) * geometrySchlickGGX(NdotL, roughness);
+}
+
+// =========================================================================
+// VARIANCE-BASED SPECULAR FILTERING (Phase 6)
+// Reduces specular aliasing from high-frequency normal detail
+// =========================================================================
+
+// Calculate roughness adjustment based on normal variance
+// Higher variance = more roughness to reduce aliasing
+float calculateVarianceRoughness(vec3 normal, vec3 meshNormal, float baseRoughness) {
+    // Compute variance as deviation from mesh normal
+    float normalVariance = 1.0 - max(dot(normal, meshNormal), 0.0);
+
+    // Convert variance to roughness increase
+    // This follows the approach from "Filtering Distributions of Normals for Shading Antialiasing"
+    float varianceRoughness = sqrt(normalVariance * 0.5);
+
+    // Combine with base roughness (roughness adds in quadrature for Gaussian distributions)
+    float combinedRoughness = sqrt(baseRoughness * baseRoughness + varianceRoughness * varianceRoughness);
+
+    return clamp(combinedRoughness, 0.02, 1.0);
 }
 
 void main() {
@@ -197,43 +276,76 @@ void main() {
     );
 
     // =========================================================================
-    // WATER COLOR - depth-based tinting
+    // PBR WATER COLOR - Beer-Lambert absorption (Phase 8)
     // =========================================================================
-    vec3 baseColor = waterColor.rgb;
+    // Get physical scattering properties from uniforms
+    vec3 absorption = scatteringCoeffs.rgb * absorptionScale;
+    float turbidity = scatteringCoeffs.a;
 
-    // Shallow water is lighter/greener, deep water is darker/bluer
-    vec3 shallowColor = vec3(0.2, 0.5, 0.5);  // Stronger turquoise tint
-    float depthColorFactor = smoothstep(0.0, 15.0, waterDepth);  // Wider transition
-    baseColor = mix(shallowColor, baseColor, depthColorFactor);
+    // Calculate transmission through water using Beer-Lambert law
+    // This replaces artist-picked colors with physically-based light transport
+    vec3 waterTransmission = calculateWaterTransmission(waterDepth, absorption, turbidity, scatteringScale);
+
+    // Base water color is the inverse of absorption (what's NOT absorbed)
+    // Mix with white for scattered light in turbid water
+    vec3 baseColor = waterColor.rgb * waterTransmission;
+
+    // Add subsurface scattering contribution - light that bounces back
+    float sssDepth = min(waterDepth, 10.0);  // Cap for very deep water
+    vec3 sssColor = vec3(0.0, 0.3, 0.4) * (1.0 - exp(-sssDepth * 0.2)) * (1.0 - turbidity * 0.5);
+    baseColor += sssColor * 0.3;
 
     // Reflection color from environment
     vec3 sunColor = ubo.sunColor.rgb * ubo.sunDirection.w;
     vec3 reflectionColor = sampleReflection(R, sunDir, sunColor);
 
-    // Refraction color (simplified - just darkened water color)
-    vec3 refractionColor = baseColor * 0.7;
+    // Refraction color based on transmitted light
+    vec3 refractionColor = baseColor;
 
     // Blend reflection and refraction based on Fresnel
     vec3 waterSurfaceColor = mix(refractionColor, reflectionColor, fresnel);
 
     // =========================================================================
-    // SPECULAR HIGHLIGHTS
+    // GGX SPECULAR WITH VARIANCE FILTERING (Phase 6 & 8)
     // =========================================================================
+    // Store mesh normal before detail perturbation for variance calculation
+    vec3 meshNormal = normalize(fragNormal);
+
+    // Calculate variance-adjusted roughness to reduce specular aliasing
+    // Higher normal variance = more roughness = less aliasing
+    float adjustedRoughness = calculateVarianceRoughness(N, meshNormal, specularRoughness);
+
+    // Further increase roughness at distance to reduce shimmer
+    adjustedRoughness = mix(adjustedRoughness, adjustedRoughness + 0.1, fbmLodFactor);
+
+    // Sun specular using GGX distribution
     vec3 H = normalize(V + sunDir);
-    float spec = pow(max(dot(N, H), 0.0), 256.0);
-    vec3 sunSpecular = sunColor * spec * shadow;
-
-    vec3 moonH = normalize(V + moonDir);
-    float moonSpec = pow(max(dot(N, moonH), 0.0), 128.0);
-    vec3 moonColor = ubo.moonColor.rgb * ubo.moonDirection.w;
-    vec3 moonSpecular = moonColor * moonSpec * 0.5;
-
-    // Diffuse sun lighting on water (very subtle)
+    float NdotH = max(dot(N, H), 0.0);
     float NdotL = max(dot(N, sunDir), 0.0);
-    vec3 diffuse = baseColor * sunColor * NdotL * shadow * 0.3;
 
-    // Ambient lighting
-    vec3 ambient = baseColor * ubo.ambientColor.rgb * 0.4;
+    // GGX specular with Fresnel and geometry terms
+    float D = distributionGGX(NdotH, adjustedRoughness);
+    float G = geometrySmith(NdotV, NdotL, adjustedRoughness);
+    float F = fresnelSchlick(max(dot(H, V), 0.0), 0.02);
+
+    // Cook-Torrance BRDF
+    float specular = (D * G * F) / max(4.0 * NdotV * NdotL, 0.001);
+    vec3 sunSpecular = sunColor * specular * NdotL * shadow;
+
+    // Moon specular (simpler, less intense)
+    vec3 moonH = normalize(V + moonDir);
+    float moonNdotH = max(dot(N, moonH), 0.0);
+    float moonNdotL = max(dot(N, moonDir), 0.0);
+    float moonD = distributionGGX(moonNdotH, adjustedRoughness + 0.1);  // Slightly rougher
+    vec3 moonColor = ubo.moonColor.rgb * ubo.moonDirection.w;
+    vec3 moonSpecular = moonColor * moonD * moonNdotL * 0.02;  // Much dimmer than sun
+
+    // Diffuse sun lighting on water (very subtle for water)
+    vec3 diffuse = baseColor * sunColor * NdotL * shadow * 0.2;
+
+    // Ambient lighting with depth-based darkening
+    float depthDarkening = exp(-waterDepth * 0.05);  // Darker in deeper water
+    vec3 ambient = baseColor * ubo.ambientColor.rgb * 0.4 * depthDarkening;
 
     // =========================================================================
     // FOAM - wave peaks + shore foam + flow foam (LOD-Aware)
@@ -306,10 +418,10 @@ void main() {
     finalColor = mix(finalColor, foamColor, totalFoamAmount * 0.85);
 
     // Apply aerial perspective (atmospheric scattering)
-    vec3 cameraToFrag = fragWorldPos - ubo.cameraPosition.xyz;
-    float viewDistance = length(cameraToFrag);
+    // Note: viewDistance was already calculated for FBM LOD
+    vec3 viewDir = normalize(fragWorldPos - ubo.cameraPosition.xyz);
     finalColor = applyAerialPerspective(finalColor, ubo.cameraPosition.xyz,
-                                         normalize(cameraToFrag), viewDistance,
+                                         viewDir, viewDistance,
                                          sunDir, sunColor);
 
     // =========================================================================
