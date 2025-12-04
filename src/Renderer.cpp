@@ -143,15 +143,15 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     TerrainConfig terrainConfig{};
     // Use world size based on imported terrain (or default if import failed)
     terrainConfig.size = importer.getWorldWidth() > 0 ? importer.getWorldWidth() : 16384.0f;
-    terrainConfig.maxDepth = 29;  // 0.5m resolution at max depth
+    terrainConfig.maxDepth = 20;
     terrainConfig.minDepth = 5;
     terrainConfig.targetEdgePixels = 16.0f;
-    terrainConfig.splitThreshold = 24.0f;
-    terrainConfig.mergeThreshold = 8.0f;
+    terrainConfig.splitThreshold = 100.0f;
+    terrainConfig.mergeThreshold = 50.0f;
     // Load Isle of Wight heightmap (-15m to 200m altitude range, includes beaches below sea level)
     terrainConfig.heightmapPath = resourcePath + "/assets/terrain/isleofwight-0m-200m.png";
     terrainConfig.minAltitude = -15.0f;
-    terrainConfig.maxAltitude = 200.0f;
+    terrainConfig.maxAltitude = 220.0f;
     // heightScale is computed from minAltitude/maxAltitude during init
 
     if (!terrainSystem.init(terrainInfo, terrainConfig)) return false;

@@ -741,14 +741,14 @@ void GuiSystem::renderTerrainSection(Renderer& renderer) {
     TerrainConfig cfg = terrainMut.getConfig();
     bool configChanged = false;
 
-    if (ImGui::SliderFloat("Split Threshold", &cfg.splitThreshold, 4.0f, 64.0f, "%.0f px")) {
+    if (ImGui::SliderFloat("Split Threshold", &cfg.splitThreshold, 1.0f, 256.0f, "%.0f px")) {
         configChanged = true;
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Screen-space edge length (pixels) to trigger subdivision");
     }
 
-    if (ImGui::SliderFloat("Merge Threshold", &cfg.mergeThreshold, 2.0f, 32.0f, "%.0f px")) {
+    if (ImGui::SliderFloat("Merge Threshold", &cfg.mergeThreshold, 1.0f, 256.0f, "%.0f px")) {
         configChanged = true;
     }
     if (ImGui::IsItemHovered()) {
