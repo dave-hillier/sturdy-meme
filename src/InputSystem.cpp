@@ -123,9 +123,9 @@ void InputSystem::processKeyboardInput(float deltaTime, float cameraYaw) {
 }
 
 void InputSystem::processFreeCameraKeyboard(float deltaTime, const bool* keyState) {
-    // Left Shift for sprint (10x speed)
+    // Left Shift for sprint (20x speed)
     sprinting = keyState[SDL_SCANCODE_LSHIFT];
-    float effectiveSpeed = sprinting ? moveSpeed * 10.0f : moveSpeed;
+    float effectiveSpeed = sprinting ? moveSpeed * 1000.0f : moveSpeed;
 
     // WASD for movement (standard FPS controls)
     if (keyState[SDL_SCANCODE_W]) {

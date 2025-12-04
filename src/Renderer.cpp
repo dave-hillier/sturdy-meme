@@ -123,6 +123,42 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
         SDL_Log("Using existing terrain cache");
     }
 
+    // Run erosion simulation for water placement (rivers, lakes)
+    ErosionConfig erosionConfig{};
+    erosionConfig.sourceHeightmapPath = heightmapPath;
+    erosionConfig.cacheDirectory = terrainCachePath;
+    erosionConfig.numDroplets = 500000;
+    erosionConfig.maxDropletLifetime = 512;
+    erosionConfig.outputResolution = 4096;
+    erosionConfig.riverFlowThreshold = 0.15f;
+    erosionConfig.riverMinWidth = 5.0f;
+    erosionConfig.riverMaxWidth = 80.0f;
+    erosionConfig.lakeMinArea = 500.0f;
+    erosionConfig.lakeMinDepth = 2.0f;
+    erosionConfig.seaLevel = 23.0f;  // RGB (25,25,25) in heightmap (minAltitude offset not applied)
+    erosionConfig.terrainSize = 16384.0f;
+    erosionConfig.minAltitude = -15.0f;
+    erosionConfig.maxAltitude = 220.0f;
+
+    if (erosionSimulator.isCacheValid(erosionConfig)) {
+        SDL_Log("Loading erosion data from cache...");
+        if (!erosionSimulator.loadFromCache(erosionConfig)) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to load erosion cache, running simulation");
+            erosionSimulator.simulate(erosionConfig, [](float progress, const std::string& status) {
+                SDL_Log("Erosion: %.0f%% - %s", progress * 100.0f, status.c_str());
+            });
+        }
+    } else {
+        SDL_Log("Running erosion simulation...");
+        erosionSimulator.simulate(erosionConfig, [](float progress, const std::string& status) {
+            SDL_Log("Erosion: %.0f%% - %s", progress * 100.0f, status.c_str());
+        });
+    }
+
+    const auto& waterData = erosionSimulator.getWaterData();
+    SDL_Log("Water placement: %zu rivers, %zu lakes detected",
+            waterData.rivers.size(), waterData.lakes.size());
+
     // Initialize terrain system with CBT (loads heightmap directly for now)
     TerrainSystem::InitInfo terrainInfo{};
     terrainInfo.device = device;
@@ -533,15 +569,15 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
 
     if (!waterSystem.init(waterInfo)) return false;
 
-    // Configure water surface - sea level at 0
-    waterSystem.setWaterLevel(0.0f);  // Mean sea level
+    // Configure water surface - sea level matches erosion config
+    waterSystem.setWaterLevel(25.0f);  // RGB (25,25,25) in heightmap
     waterSystem.setWaterExtent(glm::vec2(0.0f, 0.0f), glm::vec2(16384.0f, 16384.0f));
     waterSystem.setWaterColor(glm::vec4(0.02f, 0.08f, 0.15f, 0.95f));  // Deep ocean blue
-    waterSystem.setWaveAmplitude(1.5f);   // Ocean-scale waves
+    waterSystem.setWaveAmplitude(0.5f);   // Ocean-scale waves
     waterSystem.setWaveLength(30.0f);     // Longer wavelengths for open sea
     waterSystem.setWaveSteepness(0.4f);
     waterSystem.setWaveSpeed(0.8f);
-    waterSystem.setTidalRange(3.0f);      // 3m tidal range (spring tide: ±3m from mean)
+    waterSystem.setTidalRange(1.0f);      // 3m tidal range (spring tide: ±3m from mean)
 
     // Create water descriptor sets
     if (!waterSystem.createDescriptorSets(uniformBuffers, sizeof(UniformBufferObject), shadowSystem)) return false;
