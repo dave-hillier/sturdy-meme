@@ -1,5 +1,6 @@
 #include "ErosionSimulator.h"
 #include <stb_image.h>
+#include <stb_image_write.h>
 #include <SDL3/SDL_log.h>
 #include <filesystem>
 #include <fstream>
@@ -27,6 +28,10 @@ std::string ErosionSimulator::getLakesPath(const std::string& cacheDir) {
 
 std::string ErosionSimulator::getMetadataPath(const std::string& cacheDir) {
     return cacheDir + "/erosion_cache.meta";
+}
+
+std::string ErosionSimulator::getPreviewPath(const std::string& cacheDir) {
+    return cacheDir + "/erosion_preview.png";
 }
 
 bool ErosionSimulator::isCacheValid(const ErosionConfig& config) const {
@@ -131,6 +136,132 @@ bool ErosionSimulator::saveMetadata(const ErosionConfig& config) const {
     file << "riverFlowThreshold=" << config.riverFlowThreshold << "\n";
     file << "sourceFileSize=" << sourceFileSize << "\n";
 
+    return true;
+}
+
+bool ErosionSimulator::savePreviewImage(const ErosionConfig& config) const {
+    // Create a color-coded preview image:
+    // - Blue gradient for flow accumulation (darker = more flow)
+    // - Cyan highlights for detected rivers
+    // - Green for detected lakes
+
+    std::string previewPath = getPreviewPath(config.cacheDirectory);
+
+    // Use a reasonable preview size (1024x1024 max to keep file size manageable)
+    uint32_t previewSize = std::min(flowWidth, 2048u);
+    float scale = static_cast<float>(flowWidth) / static_cast<float>(previewSize);
+
+    std::vector<uint8_t> pixels(previewSize * previewSize * 3);
+
+    // First pass: render flow accumulation as blue gradient
+    for (uint32_t y = 0; y < previewSize; y++) {
+        for (uint32_t x = 0; x < previewSize; x++) {
+            // Sample flow accumulation (with simple averaging for downscale)
+            uint32_t srcX = static_cast<uint32_t>(x * scale);
+            uint32_t srcY = static_cast<uint32_t>(y * scale);
+            srcX = std::min(srcX, flowWidth - 1);
+            srcY = std::min(srcY, flowHeight - 1);
+
+            float flow = flowAccum[srcY * flowWidth + srcX];
+
+            // Apply gamma for better visualization of low flow areas
+            float intensity = std::pow(flow, 0.4f);
+
+            // Blue gradient: low flow = dark blue, high flow = bright cyan
+            uint8_t r = static_cast<uint8_t>(intensity * 50);
+            uint8_t g = static_cast<uint8_t>(intensity * 150);
+            uint8_t b = static_cast<uint8_t>(50 + intensity * 205);
+
+            size_t idx = (y * previewSize + x) * 3;
+            pixels[idx + 0] = r;
+            pixels[idx + 1] = g;
+            pixels[idx + 2] = b;
+        }
+    }
+
+    // Second pass: overlay rivers in bright cyan/white
+    float srcToPreview = static_cast<float>(previewSize) / config.terrainSize;
+
+    for (const auto& river : waterData.rivers) {
+        for (size_t i = 0; i < river.controlPoints.size(); i++) {
+            const auto& pt = river.controlPoints[i];
+
+            // Convert world coords to preview coords
+            float worldX = pt.x;
+            float worldZ = pt.z;
+
+            // World to UV: (world / terrainSize) + 0.5
+            float u = (worldX / config.terrainSize) + 0.5f;
+            float v = (worldZ / config.terrainSize) + 0.5f;
+
+            int px = static_cast<int>(u * previewSize);
+            int py = static_cast<int>(v * previewSize);
+
+            // Draw a small circle based on river width
+            float width = river.widths[i];
+            int radius = std::max(1, static_cast<int>(width * srcToPreview * 0.5f));
+            radius = std::min(radius, 10);  // Cap radius for preview
+
+            for (int dy = -radius; dy <= radius; dy++) {
+                for (int dx = -radius; dx <= radius; dx++) {
+                    if (dx * dx + dy * dy <= radius * radius) {
+                        int nx = px + dx;
+                        int ny = py + dy;
+                        if (nx >= 0 && nx < static_cast<int>(previewSize) &&
+                            ny >= 0 && ny < static_cast<int>(previewSize)) {
+                            size_t idx = (ny * previewSize + nx) * 3;
+                            // Bright cyan for rivers
+                            pixels[idx + 0] = 100;
+                            pixels[idx + 1] = 255;
+                            pixels[idx + 2] = 255;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Third pass: overlay lakes in green
+    for (const auto& lake : waterData.lakes) {
+        float u = (lake.position.x / config.terrainSize) + 0.5f;
+        float v = (lake.position.y / config.terrainSize) + 0.5f;
+
+        int px = static_cast<int>(u * previewSize);
+        int py = static_cast<int>(v * previewSize);
+
+        // Draw lake as filled circle
+        int radius = std::max(3, static_cast<int>(lake.radius * srcToPreview));
+        radius = std::min(radius, 50);  // Cap radius
+
+        for (int dy = -radius; dy <= radius; dy++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                if (dx * dx + dy * dy <= radius * radius) {
+                    int nx = px + dx;
+                    int ny = py + dy;
+                    if (nx >= 0 && nx < static_cast<int>(previewSize) &&
+                        ny >= 0 && ny < static_cast<int>(previewSize)) {
+                        size_t idx = (ny * previewSize + nx) * 3;
+                        // Green for lakes
+                        pixels[idx + 0] = 50;
+                        pixels[idx + 1] = 200;
+                        pixels[idx + 2] = 100;
+                    }
+                }
+            }
+        }
+    }
+
+    // Write PNG
+    int result = stbi_write_png(previewPath.c_str(), previewSize, previewSize, 3,
+                                 pixels.data(), previewSize * 3);
+
+    if (result == 0) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to write erosion preview: %s",
+                     previewPath.c_str());
+        return false;
+    }
+
+    SDL_Log("Erosion preview saved: %s (%ux%u)", previewPath.c_str(), previewSize, previewSize);
     return true;
 }
 
@@ -763,6 +894,9 @@ bool ErosionSimulator::saveToCache(const ErosionConfig& config) const {
             file.write(reinterpret_cast<const char*>(&lake.depth), sizeof(float));
         }
     }
+
+    // Save preview image for visualization
+    savePreviewImage(config);
 
     return saveMetadata(config);
 }

@@ -102,6 +102,7 @@ public:
     static std::string getRiversPath(const std::string& cacheDir);
     static std::string getLakesPath(const std::string& cacheDir);
     static std::string getMetadataPath(const std::string& cacheDir);
+    static std::string getPreviewPath(const std::string& cacheDir);
 
 private:
     // Load source heightmap at full resolution
@@ -142,6 +143,7 @@ private:
     // Save/load cache
     bool saveToCache(const ErosionConfig& config) const;
     bool saveMetadata(const ErosionConfig& config) const;
+    bool savePreviewImage(const ErosionConfig& config) const;
     bool loadAndValidateMetadata(const ErosionConfig& config) const;
 
     // Source heightmap data (full resolution)
