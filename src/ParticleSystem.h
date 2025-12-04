@@ -37,6 +37,7 @@ public:
     VkRenderPass getRenderPass() const { return lifecycle.getRenderPass(); }
     DescriptorManager::Pool* getDescriptorPool() const { return lifecycle.getDescriptorPool(); }
     const VkExtent2D& getExtent() const { return lifecycle.getExtent(); }
+    void setExtent(VkExtent2D newExtent) { lifecycle.setExtent(newExtent); }
     const std::string& getShaderPath() const { return lifecycle.getShaderPath(); }
     uint32_t getFramesInFlight() const { return lifecycle.getFramesInFlight(); }
 

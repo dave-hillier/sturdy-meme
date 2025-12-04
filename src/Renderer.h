@@ -69,6 +69,12 @@ public:
     uint32_t getWidth() const { return vulkanContext.getWidth(); }
     uint32_t getHeight() const { return vulkanContext.getHeight(); }
 
+    // Handle window resize (recreate swapchain and dependent resources)
+    bool handleResize();
+
+    // Notify renderer that window was resized (will trigger resize on next render)
+    void notifyWindowResized() { framebufferResized = true; }
+
     // Vulkan handle getters for GUI integration
     VkInstance getInstance() const { return vulkanContext.getInstance(); }
     VkPhysicalDevice getPhysicalDevice() const { return vulkanContext.getPhysicalDevice(); }
@@ -220,6 +226,8 @@ public:
 private:
     bool createRenderPass();
     void destroyRenderResources();
+    void destroyDepthImageAndView();  // Helper for resize (keeps sampler)
+    void destroyFramebuffers();       // Helper for resize
     bool createFramebuffers();
     bool createCommandPool();
     bool createCommandBuffers();
@@ -372,6 +380,7 @@ private:
     bool showSnowDepthDebug = false;       // true = show snow depth heat map overlay
     bool useParaboloidClouds = true;       // true = paraboloid LUT hybrid, false = procedural
     bool hdrEnabled = true;                // true = HDR tonemapping/bloom, false = bypass
+    bool framebufferResized = false;       // true = window resized, need to recreate swapchain
 
     // Player position for grass displacement
     glm::vec3 playerPosition = glm::vec3(0.0f);

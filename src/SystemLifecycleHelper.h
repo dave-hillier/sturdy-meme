@@ -91,6 +91,7 @@ public:
     VkRenderPass getRenderPass() const { return initInfo.renderPass; }
     DescriptorManager::Pool* getDescriptorPool() const { return initInfo.descriptorPool; }
     const VkExtent2D& getExtent() const { return initInfo.extent; }
+    void setExtent(VkExtent2D newExtent) { initInfo.extent = newExtent; }
     const std::string& getShaderPath() const { return initInfo.shaderPath; }
     uint32_t getFramesInFlight() const { return initInfo.framesInFlight; }
 

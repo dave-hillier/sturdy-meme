@@ -128,6 +128,9 @@ public:
     bool init(const InitInfo& info, const TerrainConfig& config = {});
     void destroy(VkDevice device, VmaAllocator allocator);
 
+    // Update extent for viewport (on window resize)
+    void setExtent(VkExtent2D newExtent) { extent = newExtent; }
+
     // Update terrain descriptor sets with shared resources
     void updateDescriptorSets(VkDevice device,
                               const std::vector<VkBuffer>& sceneUniformBuffers,

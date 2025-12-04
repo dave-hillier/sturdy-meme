@@ -55,6 +55,9 @@ public:
     bool init(const InitInfo& info, const CatmullClarkConfig& config = {});
     void destroy(VkDevice device, VmaAllocator allocator);
 
+    // Update extent for viewport (on window resize)
+    void setExtent(VkExtent2D newExtent) { extent = newExtent; }
+
     // Update descriptor sets with shared resources
     void updateDescriptorSets(VkDevice device, const std::vector<VkBuffer>& sceneUniformBuffers);
 

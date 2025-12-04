@@ -26,6 +26,9 @@ public:
     bool init(const InitInfo& info);
     void destroy(VkDevice device, VmaAllocator allocator);
 
+    // Update extent for viewport (on window resize)
+    void setExtent(VkExtent2D newExtent) { extent = newExtent; }
+
     // Create descriptor sets after uniform buffers and LUTs are ready
     bool createDescriptorSets(const std::vector<VkBuffer>& uniformBuffers,
                               VkDeviceSize uniformBufferSize,

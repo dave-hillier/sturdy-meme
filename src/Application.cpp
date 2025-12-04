@@ -292,6 +292,10 @@ void Application::processEvents() {
             case SDL_EVENT_QUIT:
                 running = false;
                 break;
+            case SDL_EVENT_WINDOW_RESIZED:
+            case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+                renderer.notifyWindowResized();
+                break;
             case SDL_EVENT_KEY_DOWN:
                 if (event.key.scancode == SDL_SCANCODE_ESCAPE) {
                     running = false;
