@@ -271,8 +271,9 @@ bool TreeEditSystem::createPipelines() {
 }
 
 void TreeEditSystem::regenerateTree() {
-    // Destroy existing meshes
+    // Wait for GPU to finish any in-flight work before destroying buffers
     if (meshesUploaded) {
+        vkDeviceWaitIdle(device);
         branchMesh.destroy(allocator);
         leafMesh.destroy(allocator);
         meshesUploaded = false;
@@ -305,6 +306,7 @@ void TreeEditSystem::uploadTreeMesh() {
 
 void TreeEditSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
     if (!enabled || !meshesUploaded) return;
+    if (branchMesh.getIndexCount() == 0) return;
 
     // Set viewport and scissor
     VkViewport viewport{};
