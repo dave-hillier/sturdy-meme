@@ -68,7 +68,7 @@ public:
     // Well entrance position (for creating terrain hole)
     float getWellEntranceX() const { return wellEntranceX; }
     float getWellEntranceZ() const { return wellEntranceZ; }
-    static constexpr float WELL_HOLE_RADIUS = 3.0f;  // Radius of terrain hole (6m diameter well)
+    static constexpr float WELL_HOLE_RADIUS = 50.0f;  // Radius in meters (hole mask is ~32m/texel)
 
     // Update player transform
     void updatePlayerTransform(const glm::mat4& transform);
