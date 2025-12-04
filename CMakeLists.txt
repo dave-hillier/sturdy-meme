@@ -298,6 +298,8 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ubo_common.glsl
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ubo_snow.glsl
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ubo_cloud_shadow.glsl
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/atmosphere_common.glsl
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/constants_common.glsl
     )
 
     # Simple shaders using SHADER_COMPILE_CMD (no includes)
