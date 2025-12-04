@@ -5,6 +5,7 @@
 #include "AnimationStateMachine.h"
 #include "GLTFLoader.h"
 #include "Mesh.h"
+#include "IKSolver.h"
 #include <vk_mem_alloc.h>
 #include <string>
 #include <vector>
@@ -74,6 +75,16 @@ public:
     // Get bone matrices for GPU skinning
     void computeBoneMatrices(std::vector<glm::mat4>& outBoneMatrices) const;
 
+    // IK System access
+    IKSystem& getIKSystem() { return ikSystem; }
+    const IKSystem& getIKSystem() const { return ikSystem; }
+
+    // Setup common IK chains (arms, legs) by searching for standard bone names
+    void setupDefaultIKChains();
+
+    // Get IK debug visualization data
+    IKDebugData getIKDebugData() const { return ikSystem.getDebugData(skeleton); }
+
     bool isLoaded() const { return loaded; }
 
 private:
@@ -95,6 +106,9 @@ private:
     AnimationPlayer animationPlayer;
     AnimationStateMachine stateMachine;
     bool useStateMachine = false;  // Set true after state machine is initialized
+
+    // IK system for procedural adjustments
+    IKSystem ikSystem;
 
     // Materials loaded from FBX/glTF
     std::vector<MaterialInfo> materials;

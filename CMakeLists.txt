@@ -76,6 +76,7 @@ set(SOURCES
     src/Animation.cpp
     src/AnimatedCharacter.cpp
     src/AnimationStateMachine.cpp
+    src/IKSolver.cpp
     src/FBXLoader.cpp
     src/HiZSystem.cpp
     src/GpuProfiler.cpp
