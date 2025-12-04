@@ -384,8 +384,8 @@ void SceneBuilder::createSceneObjects() {
 
     // Well entrance - demonstrates terrain hole mask system
     // A stone-like cube marking a hole in the terrain (cave/well entrance)
-    wellEntranceX = 8.0f;
-    wellEntranceZ = 8.0f;
+    wellEntranceX = 5.0f;
+    wellEntranceZ = 5.0f;
     float wellY = getTerrainHeight(wellEntranceX, wellEntranceZ);
     // Scale the cube to 2x2x0.5 to look like a well opening frame
     glm::mat4 wellTransform = glm::translate(glm::mat4(1.0f),
