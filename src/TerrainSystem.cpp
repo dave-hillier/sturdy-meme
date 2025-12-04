@@ -2204,10 +2204,8 @@ void TerrainSystem::recordShadowCull(VkCommandBuffer cmd, uint32_t frameIndex,
     vkCmdPushConstants(cmd, shadowCullPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT,
                        0, sizeof(pc), &pc);
 
-    // Dispatch based on node count
-    uint32_t nodeCount = cbt.getNodeCount();
-    uint32_t workgroups = (nodeCount + FRUSTUM_CULL_WORKGROUP_SIZE - 1) / FRUSTUM_CULL_WORKGROUP_SIZE;
-    vkCmdDispatch(cmd, workgroups, 1, 1);
+    // Use indirect dispatch - the workgroup count is computed on GPU in terrain_dispatcher
+    vkCmdDispatchIndirect(cmd, indirectDispatchBuffer, 0);
 
     // Memory barrier to ensure shadow cull results are visible for draw
     VkMemoryBarrier computeBarrier{};
