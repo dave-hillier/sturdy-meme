@@ -31,6 +31,9 @@ bool WaterSystem::init(const InitInfo& info) {
     waterUniforms.terrainHeightScale = 220.0f; // Default height scale
     waterUniforms.shoreBlendDistance = 3.0f;   // 3m shore blend
     waterUniforms.shoreFoamWidth = 5.0f;       // 5m shore foam band
+    waterUniforms.flowStrength = 1.0f;         // 1m UV offset per flow cycle
+    waterUniforms.flowSpeed = 0.5f;            // Flow animation speed
+    waterUniforms.flowFoamStrength = 0.5f;     // Flow-based foam intensity
     waterUniforms.padding = 0.0f;
 
     if (!createDescriptorSetLayout()) return false;
@@ -77,6 +80,7 @@ bool WaterSystem::createDescriptorSetLayout() {
     // 1: Water uniforms
     // 2: Shadow map array (for shadow sampling)
     // 3: Terrain heightmap (for shore detection)
+    // 4: Flow map (for water flow direction and speed)
 
     auto uboBinding = BindingBuilder()
         .setBinding(0)
@@ -102,8 +106,14 @@ bool WaterSystem::createDescriptorSetLayout() {
         .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
         .build();
 
-    std::array<VkDescriptorSetLayoutBinding, 4> bindings = {
-        uboBinding, waterUniformBinding, shadowMapBinding, terrainHeightMapBinding
+    auto flowMapBinding = BindingBuilder()
+        .setBinding(4)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
+        .build();
+
+    std::array<VkDescriptorSetLayoutBinding, 5> bindings = {
+        uboBinding, waterUniformBinding, shadowMapBinding, terrainHeightMapBinding, flowMapBinding
     };
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
@@ -263,7 +273,9 @@ bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffe
                                         VkDeviceSize uniformBufferSize,
                                         ShadowSystem& shadowSystem,
                                         VkImageView terrainHeightMapView,
-                                        VkSampler terrainHeightMapSampler) {
+                                        VkSampler terrainHeightMapSampler,
+                                        VkImageView flowMapView,
+                                        VkSampler flowMapSampler) {
     // Allocate descriptor sets using managed pool
     descriptorSets = descriptorPool->allocate(descriptorSetLayout, framesInFlight);
     if (descriptorSets.size() != framesInFlight) {
@@ -301,7 +313,13 @@ bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffe
         terrainInfo.imageView = terrainHeightMapView;
         terrainInfo.sampler = terrainHeightMapSampler;
 
-        std::array<VkWriteDescriptorSet, 4> descriptorWrites{};
+        // Flow map binding
+        VkDescriptorImageInfo flowInfo{};
+        flowInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        flowInfo.imageView = flowMapView;
+        flowInfo.sampler = flowMapSampler;
+
+        std::array<VkWriteDescriptorSet, 5> descriptorWrites{};
 
         descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         descriptorWrites[0].dstSet = descriptorSets[i];
@@ -335,11 +353,19 @@ bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffe
         descriptorWrites[3].descriptorCount = 1;
         descriptorWrites[3].pImageInfo = &terrainInfo;
 
+        descriptorWrites[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[4].dstSet = descriptorSets[i];
+        descriptorWrites[4].dstBinding = 4;
+        descriptorWrites[4].dstArrayElement = 0;
+        descriptorWrites[4].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[4].descriptorCount = 1;
+        descriptorWrites[4].pImageInfo = &flowInfo;
+
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                descriptorWrites.data(), 0, nullptr);
     }
 
-    SDL_Log("Water descriptor sets created with terrain heightmap");
+    SDL_Log("Water descriptor sets created with terrain heightmap and flow map");
     return true;
 }
 
