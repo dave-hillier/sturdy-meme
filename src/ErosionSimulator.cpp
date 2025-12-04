@@ -143,7 +143,7 @@ bool ErosionSimulator::savePreviewImage(const ErosionConfig& config) const {
     // Create a simple water placement preview showing actual water locations:
     // - Gray = land
     // - Blue = sea (below sea level)
-    // - Red = rivers (from flow accumulation, follows terrain gradient)
+    // - Red = rivers (only the strongest streams)
 
     std::string previewPath = getPreviewPath(config.cacheDirectory);
 
@@ -152,9 +152,22 @@ bool ErosionSimulator::savePreviewImage(const ErosionConfig& config) const {
     float heightScale = config.maxAltitude - config.minAltitude;
 
     // Sea level in normalized height space [0,1]
-    // If minAltitude=-15, maxAltitude=220, seaLevel=0:
-    // seaLevelNorm = (0 - (-15)) / 235 = 15/235 ≈ 0.064
     float seaLevelNorm = (config.seaLevel - config.minAltitude) / heightScale;
+
+    // Find threshold for top ~0.5% of flow values (strongest streams only)
+    // Sort a sample of flow values to find the percentile threshold
+    std::vector<float> flowSample;
+    flowSample.reserve(flowAccum.size() / 16);  // Sample every 16th pixel
+    for (size_t i = 0; i < flowAccum.size(); i += 16) {
+        flowSample.push_back(flowAccum[i]);
+    }
+    std::sort(flowSample.begin(), flowSample.end());
+
+    // Get 99.5th percentile (top 0.5%)
+    size_t percentileIdx = static_cast<size_t>(flowSample.size() * 0.995f);
+    float riverThreshold = flowSample[std::min(percentileIdx, flowSample.size() - 1)];
+
+    SDL_Log("Erosion preview: river threshold = %.4f (99.5th percentile)", riverThreshold);
 
     std::vector<uint8_t> pixels(previewSize * previewSize * 3);
 
@@ -184,12 +197,12 @@ bool ErosionSimulator::savePreviewImage(const ErosionConfig& config) const {
                 pixels[idx + 0] = 30;
                 pixels[idx + 1] = 100;
                 pixels[idx + 2] = 200;
-            } else if (flow >= config.riverFlowThreshold) {
-                // River - red intensity based on flow
-                float intensity = std::min(1.0f, flow / (config.riverFlowThreshold * 3.0f));
-                pixels[idx + 0] = static_cast<uint8_t>(150 + intensity * 105);
-                pixels[idx + 1] = static_cast<uint8_t>(30 + intensity * 20);
-                pixels[idx + 2] = static_cast<uint8_t>(30 + intensity * 20);
+            } else if (flow >= riverThreshold) {
+                // River - red, brighter for stronger flow
+                float t = (flow - riverThreshold) / (1.0f - riverThreshold);
+                pixels[idx + 0] = static_cast<uint8_t>(180 + t * 75);
+                pixels[idx + 1] = static_cast<uint8_t>(30 + t * 30);
+                pixels[idx + 2] = static_cast<uint8_t>(30 + t * 30);
             } else {
                 // Land - grayscale based on height
                 uint8_t gray = static_cast<uint8_t>(60 + h * 120);
