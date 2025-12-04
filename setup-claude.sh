@@ -32,10 +32,42 @@ if [ -z "$VCPKG_ROOT" ] || [ ! -f "$VCPKG_ROOT/vcpkg" ]; then
         git clone https://github.com/microsoft/vcpkg.git "$VCPKG_DIR"
     fi
 
-    # Bootstrap vcpkg if not already done
+    # Bootstrap vcpkg if not already done - build from source
     if [ ! -f "$VCPKG_DIR/vcpkg" ]; then
-        echo "Bootstrapping vcpkg..."
-        "$VCPKG_DIR/bootstrap-vcpkg.sh" -disableMetrics
+        echo "Building vcpkg from source..."
+
+        # Read vcpkg-tool version info
+        . "$VCPKG_DIR/scripts/vcpkg-tool-metadata.txt"
+
+        downloadsDir="$VCPKG_DIR/downloads"
+        mkdir -p "$downloadsDir"
+
+        vcpkgToolReleaseArchive="$VCPKG_TOOL_RELEASE_TAG.tar.gz"
+        vcpkgToolUrl="https://github.com/microsoft/vcpkg-tool/archive/$vcpkgToolReleaseArchive"
+        baseBuildDir="$VCPKG_DIR/buildtrees/_vcpkg"
+        buildDir="$baseBuildDir/build"
+        archivePath="$downloadsDir/$vcpkgToolReleaseArchive"
+        srcBaseDir="$baseBuildDir/src"
+        srcDir="$srcBaseDir/vcpkg-tool-$VCPKG_TOOL_RELEASE_TAG"
+
+        echo "Downloading vcpkg-tool sources..."
+        curl -L -o "$archivePath" "$vcpkgToolUrl"
+
+        echo "Extracting..."
+        rm -rf "$baseBuildDir"
+        mkdir -p "$buildDir" "$srcBaseDir"
+        tar xzf "$archivePath" -C "$srcBaseDir"
+
+        echo "Configuring..."
+        cmake -S "$srcDir" -B "$buildDir" -DCMAKE_BUILD_TYPE=Release -G Ninja -DVCPKG_DEVELOPMENT_WARNINGS=OFF
+
+        echo "Building..."
+        cmake --build "$buildDir"
+
+        cp "$buildDir/vcpkg" "$VCPKG_DIR/"
+        touch "$VCPKG_DIR/vcpkg.disable-metrics"
+
+        echo "vcpkg built successfully!"
     fi
 
     export VCPKG_ROOT="$VCPKG_DIR"

@@ -42,6 +42,24 @@ cmake --preset release
 cmake --build build/release
 ```
 
+### Claude Build (self-bootstrapping)
+
+For environments without vcpkg pre-installed:
+
+```bash
+./build-claude.sh
+```
+
+This script:
+1. Clones and builds vcpkg from source if not present
+2. Uses a custom triplet optimized for restricted environments
+3. Configures and builds the project
+
+Requirements:
+- CMake 3.20+, Ninja, GCC/Clang
+- Network access to GitHub (for vcpkg and dependencies)
+- Network access to freedesktop.org (for dbus), gnu.org (for some tools)
+
 ## Running
 
 ```bash

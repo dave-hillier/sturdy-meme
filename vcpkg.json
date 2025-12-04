@@ -5,7 +5,20 @@
   "dependencies": [
     {
       "name": "sdl3",
-      "features": ["vulkan"]
+      "default-features": false,
+      "features": ["vulkan"],
+      "platform": "!linux"
+    },
+    {
+      "name": "sdl3",
+      "default-features": false,
+      "features": ["vulkan", "x11"],
+      "platform": "linux"
+    },
+    {
+      "name": "dbus",
+      "default-features": false,
+      "platform": "linux"
     },
     "vulkan",
     "glm",
