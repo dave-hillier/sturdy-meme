@@ -527,13 +527,14 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     waterInfo.extent = swapchainExtent;
     waterInfo.commandPool = commandPool;
     waterInfo.graphicsQueue = graphicsQueue;
-    waterInfo.waterSize = 16384.0f;  // Cover full terrain
+    waterInfo.waterSize = 65536.0f;  // Extend well beyond terrain for horizon
 
     if (!waterSystem.init(waterInfo)) return false;
 
+
     // Configure water surface - sea level matches erosion config
     waterSystem.setWaterLevel(25.0f);  // RGB (25,25,25) in heightmap
-    waterSystem.setWaterExtent(glm::vec2(0.0f, 0.0f), glm::vec2(16384.0f, 16384.0f));
+    waterSystem.setWaterExtent(glm::vec2(0.0f, 0.0f), glm::vec2(65536.0f, 65536.0f));
     waterSystem.setWaterColor(glm::vec4(0.02f, 0.08f, 0.15f, 0.95f));  // Deep ocean blue
     waterSystem.setWaveAmplitude(0.5f);   // Ocean-scale waves
     waterSystem.setWaveLength(30.0f);     // Longer wavelengths for open sea
@@ -541,8 +542,14 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     waterSystem.setWaveSpeed(0.8f);
     waterSystem.setTidalRange(1.0f);      // 3m tidal range (spring tide: ±3m from mean)
 
-    // Create water descriptor sets
-    if (!waterSystem.createDescriptorSets(uniformBuffers, sizeof(UniformBufferObject), shadowSystem)) return false;
+    // Set terrain params for shore detection
+    waterSystem.setTerrainParams(terrainConfig.size, terrainConfig.heightScale);
+    waterSystem.setShoreBlendDistance(3.0f);  // Soft edge over 3m
+    waterSystem.setShoreFoamWidth(8.0f);      // Shore foam band 8m wide
+
+    // Create water descriptor sets with terrain heightmap
+    if (!waterSystem.createDescriptorSets(uniformBuffers, sizeof(UniformBufferObject), shadowSystem,
+                                          terrainSystem.getHeightMapView(), terrainSystem.getHeightMapSampler())) return false;
 
     // Initialize tree edit system
     TreeEditSystem::InitInfo treeEditInfo{};

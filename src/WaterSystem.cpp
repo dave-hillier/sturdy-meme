@@ -27,6 +27,10 @@ bool WaterSystem::init(const InitInfo& info) {
     waterUniforms.waterLevel = 0.0f;
     waterUniforms.foamThreshold = 0.3f;
     waterUniforms.fresnelPower = 5.0f;
+    waterUniforms.terrainSize = 16384.0f;      // Default terrain size
+    waterUniforms.terrainHeightScale = 220.0f; // Default height scale
+    waterUniforms.shoreBlendDistance = 3.0f;   // 3m shore blend
+    waterUniforms.shoreFoamWidth = 5.0f;       // 5m shore foam band
     waterUniforms.padding = 0.0f;
 
     if (!createDescriptorSetLayout()) return false;
@@ -72,6 +76,7 @@ bool WaterSystem::createDescriptorSetLayout() {
     // 0: Main UBO (scene uniforms)
     // 1: Water uniforms
     // 2: Shadow map array (for shadow sampling)
+    // 3: Terrain heightmap (for shore detection)
 
     auto uboBinding = BindingBuilder()
         .setBinding(0)
@@ -91,8 +96,14 @@ bool WaterSystem::createDescriptorSetLayout() {
         .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
         .build();
 
-    std::array<VkDescriptorSetLayoutBinding, 3> bindings = {
-        uboBinding, waterUniformBinding, shadowMapBinding
+    auto terrainHeightMapBinding = BindingBuilder()
+        .setBinding(3)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
+        .build();
+
+    std::array<VkDescriptorSetLayoutBinding, 4> bindings = {
+        uboBinding, waterUniformBinding, shadowMapBinding, terrainHeightMapBinding
     };
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
@@ -161,7 +172,10 @@ bool WaterSystem::createWaterMesh() {
     // Create a subdivided plane for the water surface
     // More subdivisions = smoother wave animation
     // Scale grid resolution based on water size for better wave detail
-    const int gridSize = (waterSize > 1000.0f) ? 256 : 64;
+    // For large ocean planes, we need more vertices but there's a limit
+    int gridSize = 64;
+    if (waterSize > 1000.0f) gridSize = 256;
+    if (waterSize > 20000.0f) gridSize = 512;  // For horizon extension
     const float size = waterSize;
 
     std::vector<Vertex> vertices;
@@ -247,7 +261,9 @@ bool WaterSystem::createUniformBuffers() {
 
 bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffers,
                                         VkDeviceSize uniformBufferSize,
-                                        ShadowSystem& shadowSystem) {
+                                        ShadowSystem& shadowSystem,
+                                        VkImageView terrainHeightMapView,
+                                        VkSampler terrainHeightMapSampler) {
     // Allocate descriptor sets using managed pool
     descriptorSets = descriptorPool->allocate(descriptorSetLayout, framesInFlight);
     if (descriptorSets.size() != framesInFlight) {
@@ -279,7 +295,13 @@ bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffe
         shadowInfo.imageView = shadowView;
         shadowInfo.sampler = shadowSampler;
 
-        std::array<VkWriteDescriptorSet, 3> descriptorWrites{};
+        // Terrain heightmap binding
+        VkDescriptorImageInfo terrainInfo{};
+        terrainInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        terrainInfo.imageView = terrainHeightMapView;
+        terrainInfo.sampler = terrainHeightMapSampler;
+
+        std::array<VkWriteDescriptorSet, 4> descriptorWrites{};
 
         descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         descriptorWrites[0].dstSet = descriptorSets[i];
@@ -305,11 +327,19 @@ bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffe
         descriptorWrites[2].descriptorCount = 1;
         descriptorWrites[2].pImageInfo = &shadowInfo;
 
+        descriptorWrites[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[3].dstSet = descriptorSets[i];
+        descriptorWrites[3].dstBinding = 3;
+        descriptorWrites[3].dstArrayElement = 0;
+        descriptorWrites[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[3].descriptorCount = 1;
+        descriptorWrites[3].pImageInfo = &terrainInfo;
+
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                descriptorWrites.data(), 0, nullptr);
     }
 
-    SDL_Log("Water descriptor sets created");
+    SDL_Log("Water descriptor sets created with terrain heightmap");
     return true;
 }
 

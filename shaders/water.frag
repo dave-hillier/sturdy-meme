@@ -11,6 +11,7 @@
 #include "lighting_common.glsl"
 #include "shadow_common.glsl"
 #include "atmosphere_common.glsl"
+#include "terrain_height_common.glsl"
 
 layout(binding = 0) uniform UniformBufferObject {
     mat4 model;
@@ -42,10 +43,15 @@ layout(std140, binding = 1) uniform WaterUniforms {
     float waterLevel;          // Y height of water plane
     float foamThreshold;       // Wave height threshold for foam
     float fresnelPower;        // Fresnel reflection power
+    float terrainSize;         // Terrain size for UV calculation
+    float terrainHeightScale;  // Terrain height scale
+    float shoreBlendDistance;  // Distance over which shore fades (world units)
+    float shoreFoamWidth;      // Width of shore foam band (world units)
     float padding;
 };
 
 layout(binding = 2) uniform sampler2DArrayShadow shadowMapArray;
+layout(binding = 3) uniform sampler2D terrainHeightMap;
 
 layout(location = 0) in vec3 fragWorldPos;
 layout(location = 1) in vec3 fragNormal;
@@ -118,22 +124,50 @@ void main() {
     vec3 V = normalize(ubo.cameraPosition.xyz - fragWorldPos);
     vec3 sunDir = normalize(ubo.sunDirection.xyz);
     vec3 moonDir = normalize(ubo.moonDirection.xyz);
-
-    // Add procedural detail to normal
     float time = ubo.windDirectionAndSpeed.w;
+
+    // =========================================================================
+    // TERRAIN-AWARE SHORE DETECTION
+    // =========================================================================
+    // Sample terrain height at this fragment's world position
+    vec2 terrainUV = worldPosToTerrainUV(fragWorldPos.xz, terrainSize);
+    float terrainHeight = 0.0;
+    float waterDepth = 100.0;  // Default to deep water if outside terrain
+    bool insideTerrain = (terrainUV.x >= 0.0 && terrainUV.x <= 1.0 &&
+                          terrainUV.y >= 0.0 && terrainUV.y <= 1.0);
+
+    if (insideTerrain) {
+        terrainHeight = sampleTerrainHeight(terrainHeightMap, terrainUV, terrainHeightScale);
+        // Water depth = distance from water surface to terrain
+        // Positive = underwater terrain, Negative = terrain above water
+        waterDepth = fragWorldPos.y - terrainHeight;
+    }
+
+    // Discard fragments where terrain is above water (water shouldn't render there)
+    if (waterDepth < -0.1) {
+        discard;
+    }
+
+    // =========================================================================
+    // PROCEDURAL NORMAL DETAIL
+    // =========================================================================
     vec2 detailUV = fragWorldPos.xz * 0.5;
     float detail1 = fbm(detailUV + time * 0.3, 3) * 2.0 - 1.0;
     float detail2 = fbm(detailUV * 1.7 - time * 0.2, 3) * 2.0 - 1.0;
 
-    // Perturb normal with detail noise
-    vec3 detailNormal = normalize(N + vec3(detail1, 0.0, detail2) * 0.15);
+    // Reduce wave detail in shallow water (calmer near shore)
+    float shallowFactor = smoothstep(0.0, shoreFoamWidth * 2.0, waterDepth);
+    float detailStrength = mix(0.05, 0.15, shallowFactor);
+
+    vec3 detailNormal = normalize(N + vec3(detail1, 0.0, detail2) * detailStrength);
     N = normalize(mix(N, detailNormal, 0.5));
 
-    // Fresnel effect - more reflection at grazing angles
+    // =========================================================================
+    // FRESNEL & REFLECTION
+    // =========================================================================
     float NdotV = max(dot(N, V), 0.0);
     float fresnel = fresnelSchlick(NdotV, 0.02);  // Water F0 ~0.02
 
-    // Calculate reflection vector
     vec3 R = reflect(-V, N);
 
     // Shadow calculation
@@ -143,8 +177,15 @@ void main() {
         ubo.shadowMapSize, shadowMapArray
     );
 
-    // Base water color with depth-based absorption
+    // =========================================================================
+    // WATER COLOR - depth-based tinting
+    // =========================================================================
     vec3 baseColor = waterColor.rgb;
+
+    // Shallow water is lighter/greener, deep water is darker/bluer
+    vec3 shallowColor = vec3(0.15, 0.35, 0.4);  // Turquoise tint
+    float depthColorFactor = smoothstep(0.0, 10.0, waterDepth);
+    baseColor = mix(shallowColor, baseColor, depthColorFactor);
 
     // Reflection color from environment
     vec3 sunColor = ubo.sunColor.rgb * ubo.sunDirection.w;
@@ -156,12 +197,13 @@ void main() {
     // Blend reflection and refraction based on Fresnel
     vec3 waterSurfaceColor = mix(refractionColor, reflectionColor, fresnel);
 
-    // Sun specular highlight (Blinn-Phong for water)
+    // =========================================================================
+    // SPECULAR HIGHLIGHTS
+    // =========================================================================
     vec3 H = normalize(V + sunDir);
-    float spec = pow(max(dot(N, H), 0.0), 256.0);  // Very tight specular for water
+    float spec = pow(max(dot(N, H), 0.0), 256.0);
     vec3 sunSpecular = sunColor * spec * shadow;
 
-    // Moon specular (softer, dimmer)
     vec3 moonH = normalize(V + moonDir);
     float moonSpec = pow(max(dot(N, moonH), 0.0), 128.0);
     vec3 moonColor = ubo.moonColor.rgb * ubo.moonDirection.w;
@@ -174,18 +216,45 @@ void main() {
     // Ambient lighting
     vec3 ambient = baseColor * ubo.ambientColor.rgb * 0.4;
 
-    // Foam on wave peaks
-    float foamAmount = smoothstep(foamThreshold * 0.7, foamThreshold, fragWaveHeight);
-    // Add some noise to foam distribution
-    float foamNoise = fbm(fragWorldPos.xz * 2.0 + time * 0.5, 4);
-    foamAmount *= smoothstep(0.3, 0.7, foamNoise);
+    // =========================================================================
+    // FOAM - wave peaks + shore foam
+    // =========================================================================
     vec3 foamColor = vec3(0.9, 0.95, 1.0);
 
-    // Combine all lighting
-    vec3 finalColor = waterSurfaceColor + sunSpecular + moonSpecular + diffuse + ambient;
+    // Wave peak foam (existing)
+    float waveFoamAmount = smoothstep(foamThreshold * 0.7, foamThreshold, fragWaveHeight);
+    float foamNoise = fbm(fragWorldPos.xz * 2.0 + time * 0.5, 4);
+    waveFoamAmount *= smoothstep(0.3, 0.7, foamNoise);
 
-    // Mix in foam
-    finalColor = mix(finalColor, foamColor, foamAmount * 0.8);
+    // Shore foam - where water is shallow
+    float shoreFoamAmount = 0.0;
+    if (insideTerrain && waterDepth > 0.0 && waterDepth < shoreFoamWidth) {
+        // Animated foam line that follows the shore
+        float shoreNoise = fbm(fragWorldPos.xz * 0.8 + time * 0.2, 3);
+        float shoreNoise2 = fbm(fragWorldPos.xz * 2.5 - time * 0.4, 2);
+
+        // Create foam bands at different depths
+        float band1 = smoothstep(0.0, 1.5, waterDepth) * smoothstep(3.0, 1.0, waterDepth);
+        float band2 = smoothstep(2.0, 3.5, waterDepth) * smoothstep(5.0, 3.5, waterDepth);
+        float band3 = smoothstep(4.0, 5.5, waterDepth) * smoothstep(shoreFoamWidth, 5.5, waterDepth);
+
+        // Modulate bands with noise for organic look
+        shoreFoamAmount = band1 * smoothstep(0.35, 0.65, shoreNoise);
+        shoreFoamAmount += band2 * smoothstep(0.4, 0.7, shoreNoise2) * 0.7;
+        shoreFoamAmount += band3 * smoothstep(0.45, 0.7, shoreNoise) * 0.4;
+
+        // Extra foam right at the waterline
+        float waterlineIntensity = smoothstep(0.5, 0.0, waterDepth);
+        shoreFoamAmount = max(shoreFoamAmount, waterlineIntensity * 0.9);
+    }
+
+    float totalFoamAmount = max(waveFoamAmount, shoreFoamAmount);
+
+    // =========================================================================
+    // COMBINE LIGHTING
+    // =========================================================================
+    vec3 finalColor = waterSurfaceColor + sunSpecular + moonSpecular + diffuse + ambient;
+    finalColor = mix(finalColor, foamColor, totalFoamAmount * 0.85);
 
     // Apply aerial perspective (atmospheric scattering)
     vec3 cameraToFrag = fragWorldPos - ubo.cameraPosition.xyz;
@@ -194,8 +263,19 @@ void main() {
                                          normalize(cameraToFrag), viewDistance,
                                          sunDir, sunColor);
 
-    // Output with transparency
-    // Water is more opaque where foam is, and has base transparency
-    float alpha = mix(waterColor.a, 1.0, foamAmount);
+    // =========================================================================
+    // ALPHA - soft shore edges + foam opacity
+    // =========================================================================
+    float baseAlpha = waterColor.a;
+
+    // Soft edge near shore (fade out as water gets very shallow)
+    float shoreAlpha = smoothstep(0.0, shoreBlendDistance, waterDepth);
+
+    // Foam makes water more opaque
+    float foamOpacity = mix(baseAlpha, 1.0, totalFoamAmount);
+
+    // Final alpha combines shore fade and foam
+    float alpha = shoreAlpha * foamOpacity;
+
     outColor = vec4(finalColor, alpha);
 }

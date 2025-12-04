@@ -983,6 +983,26 @@ void GuiSystem::renderWaterSection(Renderer& renderer) {
         ImGui::SetTooltip("Controls reflection intensity at grazing angles");
     }
 
+    // Shore effects
+    ImGui::Spacing();
+    ImGui::Text("Shore Effects:");
+
+    float shoreBlend = water.getShoreBlendDistance();
+    if (ImGui::SliderFloat("Shore Blend", &shoreBlend, 0.5f, 10.0f, "%.1f m")) {
+        water.setShoreBlendDistance(shoreBlend);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Distance over which water fades near shore");
+    }
+
+    float shoreFoam = water.getShoreFoamWidth();
+    if (ImGui::SliderFloat("Shore Foam Width", &shoreFoam, 1.0f, 20.0f, "%.1f m")) {
+        water.setShoreFoamWidth(shoreFoam);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Width of foam bands along the shoreline");
+    }
+
     // Presets
     ImGui::Spacing();
     ImGui::Separator();
