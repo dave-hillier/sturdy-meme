@@ -1,5 +1,9 @@
 #version 450
 
+#extension GL_GOOGLE_include_directive : require
+
+#include "../bindings.glsl"
+
 /*
  * terrain_prepare_cull_dispatch.comp - Prepare indirect dispatch for subdivision after culling
  *
@@ -10,13 +14,13 @@
 layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
 
 // Visible indices buffer: [count, ...]
-layout(std430, binding = 5) readonly buffer VisibleIndices {
+layout(std430, binding = BINDING_TERRAIN_VISIBLE_INDICES) readonly buffer VisibleIndices {
     uint visibleCount;
     uint indices[];
 };
 
 // Indirect dispatch buffer for subdivision after culling
-layout(std430, binding = 6) writeonly buffer CullDispatchIndirect {
+layout(std430, binding = BINDING_TERRAIN_CULL_DISPATCH) writeonly buffer CullDispatchIndirect {
     uint dispatchX;
     uint dispatchY;
     uint dispatchZ;

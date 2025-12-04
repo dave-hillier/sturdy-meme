@@ -1,5 +1,9 @@
 #version 450
 
+#extension GL_GOOGLE_include_directive : require
+
+#include "bindings.glsl"
+
 /*
  * volumetric_snow.comp - Cascaded heightfield snow accumulation compute shader
  *
@@ -18,12 +22,12 @@
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
 // Snow height textures (R16F - height in meters)
-layout(binding = 0, r16f) uniform image2D snowCascade0;  // Near
-layout(binding = 1, r16f) uniform image2D snowCascade1;  // Mid
-layout(binding = 2, r16f) uniform image2D snowCascade2;  // Far
+layout(binding = BINDING_VOL_SNOW_CASCADE_0, r16f) uniform image2D snowCascade0;  // Near
+layout(binding = BINDING_VOL_SNOW_CASCADE_1, r16f) uniform image2D snowCascade1;  // Mid
+layout(binding = BINDING_VOL_SNOW_CASCADE_2, r16f) uniform image2D snowCascade2;  // Far
 
 // Uniforms
-layout(binding = 3) uniform VolumetricSnowUniforms {
+layout(binding = BINDING_VOL_SNOW_UNIFORMS) uniform VolumetricSnowUniforms {
     vec4 cascade0Region;       // xy = world origin, z = size, w = texel size
     vec4 cascade1Region;       // xy = world origin, z = size, w = texel size
     vec4 cascade2Region;       // xy = world origin, z = size, w = texel size
@@ -39,7 +43,7 @@ struct SnowInteraction {
     vec4 strengthAndDepth;     // x = clearing strength, y = depth factor, z = shape, w = unused
 };
 
-layout(std430, binding = 4) readonly buffer InteractionBuffer {
+layout(std430, binding = BINDING_VOL_SNOW_INTERACTIONS) readonly buffer InteractionBuffer {
     SnowInteraction interactions[];
 };
 

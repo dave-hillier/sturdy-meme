@@ -1,5 +1,9 @@
 #version 450
 
+#extension GL_GOOGLE_include_directive : require
+
+#include "bindings.glsl"
+
 /*
  * snow_accumulation.comp - Snow mask accumulation compute shader
  *
@@ -12,10 +16,10 @@
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
 // Snow mask texture (R16F - coverage 0-1)
-layout(binding = 0, r16f) uniform image2D snowMask;
+layout(binding = BINDING_SNOW_MASK_OUTPUT, r16f) uniform image2D snowMask;
 
 // Uniforms
-layout(binding = 1) uniform SnowMaskUniforms {
+layout(binding = BINDING_SNOW_MASK_UNIFORMS) uniform SnowMaskUniforms {
     vec4 maskRegion;           // xy = world origin, z = size, w = texel size
     vec4 accumulationParams;   // x = accumulation rate, y = melt rate, z = delta time, w = is snowing (0/1)
     vec4 snowParams;           // x = snow amount, y = weather intensity, z = num interactions, w = unused
@@ -27,7 +31,7 @@ struct SnowInteractionSource {
     vec4 strengthAndShape;     // x = clearing strength, y = shape (0=circle), zw = unused
 };
 
-layout(std430, binding = 2) readonly buffer InteractionBuffer {
+layout(std430, binding = BINDING_SNOW_MASK_INTERACTIONS) readonly buffer InteractionBuffer {
     SnowInteractionSource interactions[];
 };
 

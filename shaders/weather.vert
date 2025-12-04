@@ -2,6 +2,8 @@
 
 #extension GL_GOOGLE_include_directive : require
 
+#include "bindings.glsl"
+
 const int NUM_CASCADES = 4;
 
 #include "ubo_common.glsl"
@@ -18,7 +20,7 @@ struct WeatherParticle {
     uint flags;
 };
 
-layout(std430, binding = 1) readonly buffer ParticleBuffer {
+layout(std430, binding = BINDING_WEATHER_INDIRECT) readonly buffer ParticleBuffer {
     WeatherParticle particles[];
 };
 

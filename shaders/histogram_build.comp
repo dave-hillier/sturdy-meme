@@ -4,18 +4,22 @@
 // Builds a 256-bin luminance histogram from the HDR image
 // Uses log-space binning for better HDR coverage
 
+#extension GL_GOOGLE_include_directive : require
+
+#include "bindings.glsl"
+
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
 // HDR input image
-layout(binding = 0, rgba16f) uniform readonly image2D hdrImage;
+layout(binding = BINDING_HISTOGRAM_IMAGE, rgba16f) uniform readonly image2D hdrImage;
 
 // Histogram buffer (256 bins)
-layout(std430, binding = 1) buffer HistogramBuffer {
+layout(std430, binding = BINDING_HISTOGRAM_BUFFER) buffer HistogramBuffer {
     uint histogram[256];
 };
 
 // Parameters
-layout(binding = 2) uniform HistogramParams {
+layout(binding = BINDING_HISTOGRAM_PARAMS) uniform HistogramParams {
     float minLogLum;      // Minimum log luminance (e.g., -8.0)
     float maxLogLum;      // Maximum log luminance (e.g., 4.0)
     float invLogLumRange; // 1.0 / (maxLogLum - minLogLum)

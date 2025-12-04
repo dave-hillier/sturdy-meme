@@ -12,22 +12,24 @@
  * See terrain_height_common.glsl for shared implementation.
  */
 
-#define CBT_BUFFER_BINDING 0
+#include "../bindings.glsl"
+
+#define CBT_BUFFER_BINDING BINDING_TERRAIN_CBT_BUFFER
 #include "cbt.glsl"
 #include "leb.glsl"
 #include "../terrain_height_common.glsl"
 #include "../snow_common.glsl"
 
 // Height map
-layout(binding = 3) uniform sampler2D heightMap;
+layout(binding = BINDING_TERRAIN_HEIGHT_MAP) uniform sampler2D heightMap;
 
 // Volumetric snow cascades
-layout(binding = 10) uniform sampler2D snowCascade0;
-layout(binding = 11) uniform sampler2D snowCascade1;
-layout(binding = 12) uniform sampler2D snowCascade2;
+layout(binding = BINDING_TERRAIN_SNOW_CASCADE_0) uniform sampler2D snowCascade0;
+layout(binding = BINDING_TERRAIN_SNOW_CASCADE_1) uniform sampler2D snowCascade1;
+layout(binding = BINDING_TERRAIN_SNOW_CASCADE_2) uniform sampler2D snowCascade2;
 
 // Uniform buffer
-layout(std140, binding = 4) uniform TerrainUniforms {
+layout(std140, binding = BINDING_TERRAIN_UBO) uniform TerrainUniforms {
     mat4 viewMatrix;
     mat4 projMatrix;
     mat4 viewProjMatrix;

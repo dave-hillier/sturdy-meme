@@ -10,20 +10,22 @@
  *  - Resets visible count for stream compaction (optimization: avoids CPU fillBuffer)
  */
 
-#define CBT_BUFFER_BINDING 0
+#include "../bindings.glsl"
+
+#define CBT_BUFFER_BINDING BINDING_TERRAIN_CBT_BUFFER
 #include "cbt.glsl"
 
 layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
 
 // Indirect dispatch arguments for subdivision compute shader
-layout(std430, binding = 1) buffer DispatchIndirect {
+layout(std430, binding = BINDING_TERRAIN_DISPATCH) buffer DispatchIndirect {
     uint dispatchX;
     uint dispatchY;
     uint dispatchZ;
 };
 
 // Indirect draw arguments for terrain rendering
-layout(std430, binding = 2) buffer DrawIndirect {
+layout(std430, binding = BINDING_TERRAIN_DRAW) buffer DrawIndirect {
     uint vertexCount;
     uint instanceCount;
     uint firstVertex;
@@ -31,7 +33,7 @@ layout(std430, binding = 2) buffer DrawIndirect {
 };
 
 // Visible indices buffer for stream compaction - reset count here
-layout(std430, binding = 5) buffer VisibleIndices {
+layout(std430, binding = BINDING_TERRAIN_VISIBLE_INDICES) buffer VisibleIndices {
     uint visibleCount;
     // uint indices[]; // Not needed, just reset the count
 };

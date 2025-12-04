@@ -2,6 +2,7 @@
 
 #extension GL_GOOGLE_include_directive : require
 
+#include "bindings.glsl"
 #include "terrain_height_common.glsl"
 
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
@@ -39,22 +40,22 @@ struct DrawIndirectCommand {
 };
 
 // Input particle buffer (previous frame)
-layout(std430, binding = 0) readonly buffer InputParticleBuffer {
+layout(std430, binding = BINDING_LEAF_COMPUTE_INPUT) readonly buffer InputParticleBuffer {
     LeafParticle inputParticles[];
 };
 
 // Output particle buffer (current frame)
-layout(std430, binding = 1) buffer OutputParticleBuffer {
+layout(std430, binding = BINDING_LEAF_COMPUTE_OUTPUT) buffer OutputParticleBuffer {
     LeafParticle outputParticles[];
 };
 
 // Indirect draw command buffer
-layout(std430, binding = 2) buffer IndirectBuffer {
+layout(std430, binding = BINDING_LEAF_COMPUTE_INDIRECT) buffer IndirectBuffer {
     DrawIndirectCommand drawCmd;
 };
 
 // Leaf uniforms
-layout(binding = 3) uniform LeafUniforms {
+layout(binding = BINDING_LEAF_COMPUTE_UNIFORMS) uniform LeafUniforms {
     vec4 cameraPosition;
     vec4 frustumPlanes[6];
     vec4 playerPosition;        // xyz = position, w = radius
@@ -79,19 +80,19 @@ layout(binding = 3) uniform LeafUniforms {
 } uniforms;
 
 // Wind uniforms
-layout(binding = 4) uniform WindUniforms {
+layout(binding = BINDING_LEAF_COMPUTE_WIND) uniform WindUniforms {
     vec4 windDirectionAndStrength;  // xy = normalized direction, z = strength, w = speed
     vec4 windParams;                // x = gustFrequency, y = gustAmplitude, z = noiseScale, w = time
 } wind;
 
 // Terrain heightmap for leaf placement on terrain
-layout(binding = 5) uniform sampler2D terrainHeightMap;
+layout(binding = BINDING_LEAF_COMPUTE_HEIGHT_MAP) uniform sampler2D terrainHeightMap;
 
 // Displacement map for player/NPC interaction (shared with grass system)
-layout(binding = 6) uniform sampler2D displacementMap;
+layout(binding = BINDING_LEAF_COMPUTE_DISPLACEMENT) uniform sampler2D displacementMap;
 
 // Displacement region uniforms (matching grass system)
-layout(binding = 7) uniform DisplacementRegion {
+layout(binding = BINDING_LEAF_COMPUTE_DISP_REGION) uniform DisplacementRegion {
     vec4 regionCenterAndSize;  // xy = world center, z = region size (50m), w = unused
 } dispRegion;
 

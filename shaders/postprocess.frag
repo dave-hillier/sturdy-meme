@@ -1,8 +1,12 @@
 #version 450
 
-layout(binding = 0) uniform sampler2D hdrInput;
+#extension GL_GOOGLE_include_directive : require
 
-layout(binding = 1) uniform PostProcessUniforms {
+#include "bindings.glsl"
+
+layout(binding = BINDING_PP_HDR_INPUT) uniform sampler2D hdrInput;
+
+layout(binding = BINDING_PP_UNIFORMS) uniform PostProcessUniforms {
     float exposure;
     float bloomThreshold;
     float bloomIntensity;
@@ -27,9 +31,9 @@ layout(binding = 1) uniform PostProcessUniforms {
     float padding3;
 } ubo;
 
-layout(binding = 2) uniform sampler2D depthInput;
-layout(binding = 3) uniform sampler3D froxelVolume;
-layout(binding = 4) uniform sampler2D bloomTexture;
+layout(binding = BINDING_PP_DEPTH) uniform sampler2D depthInput;
+layout(binding = BINDING_PP_FROXEL) uniform sampler3D froxelVolume;
+layout(binding = BINDING_PP_BLOOM) uniform sampler2D bloomTexture;
 
 layout(location = 0) in vec2 fragTexCoord;
 layout(location = 0) out vec4 outColor;

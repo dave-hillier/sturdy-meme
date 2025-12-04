@@ -2,6 +2,7 @@
 
 #extension GL_GOOGLE_include_directive : require
 
+#include "bindings.glsl"
 #include "terrain_height_common.glsl"
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
@@ -19,15 +20,15 @@ struct DrawIndirectCommand {
     uint firstInstance;
 };
 
-layout(std430, binding = 0) buffer InstanceBuffer {
+layout(std430, binding = BINDING_GRASS_COMPUTE_INSTANCES) buffer InstanceBuffer {
     GrassInstance instances[];
 };
 
-layout(std430, binding = 1) buffer IndirectBuffer {
+layout(std430, binding = BINDING_GRASS_COMPUTE_INDIRECT) buffer IndirectBuffer {
     DrawIndirectCommand drawCmd;
 };
 
-layout(binding = 2) uniform GrassUniforms {
+layout(binding = BINDING_GRASS_COMPUTE_UNIFORMS) uniform GrassUniforms {
     vec4 cameraPosition;
     vec4 frustumPlanes[6];
     vec4 displacementRegion;  // xy = world center, z = region size, w = texel size
@@ -40,10 +41,10 @@ layout(binding = 2) uniform GrassUniforms {
 } uniforms;
 
 // Terrain heightmap for grass placement on terrain
-layout(binding = 3) uniform sampler2D terrainHeightMap;
+layout(binding = BINDING_GRASS_COMPUTE_HEIGHT_MAP) uniform sampler2D terrainHeightMap;
 
 // Displacement map for player/NPC grass interaction (RG16F - XZ displacement)
-layout(binding = 4) uniform sampler2D displacementMap;
+layout(binding = BINDING_GRASS_COMPUTE_DISPLACEMENT) uniform sampler2D displacementMap;
 
 layout(push_constant) uniform PushConstants {
     float time;

@@ -1,5 +1,9 @@
 #version 450
 
+#extension GL_GOOGLE_include_directive : require
+
+#include "bindings.glsl"
+
 // Histogram Reduce Compute Shader
 // Reduces the 256-bin histogram to compute average luminance
 // Uses percentile clamping to ignore extreme values for stable exposure
@@ -7,12 +11,12 @@
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
 // Histogram input (256 bins)
-layout(std430, binding = 0) readonly buffer HistogramBuffer {
+layout(std430, binding = BINDING_HISTOGRAM_BUFFER) readonly buffer HistogramBuffer {
     uint histogram[256];
 };
 
 // Output: computed exposure value
-layout(std430, binding = 1) buffer ExposureBuffer {
+layout(std430, binding = BINDING_HISTOGRAM_EXPOSURE) buffer ExposureBuffer {
     float averageLuminance;    // Computed average luminance (geometric mean)
     float exposureValue;       // Computed exposure EV
     float previousExposure;    // Previous frame's exposure for smoothing
@@ -20,7 +24,7 @@ layout(std430, binding = 1) buffer ExposureBuffer {
 };
 
 // Parameters
-layout(binding = 2) uniform HistogramParams {
+layout(binding = BINDING_HISTOGRAM_PARAMS) uniform HistogramParams {
     float minLogLum;      // Minimum log luminance (e.g., -8.0)
     float maxLogLum;      // Maximum log luminance (e.g., 4.0)
     float invLogLumRange; // 1.0 / (maxLogLum - minLogLum)

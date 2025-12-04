@@ -1,5 +1,9 @@
 #version 450
 
+#extension GL_GOOGLE_include_directive : require
+
+#include "bindings.glsl"
+
 // Cloud Map LUT Compute Shader
 // Generates a paraboloid-projected cloud density map for efficient hemisphere lookup
 //
@@ -11,9 +15,9 @@
 
 layout(local_size_x = 16, local_size_y = 16) in;
 
-layout(binding = 0, rgba16f) uniform image2D cloudMapLUT;
+layout(binding = BINDING_CLOUDMAP_OUTPUT, rgba16f) uniform image2D cloudMapLUT;
 
-layout(binding = 1) uniform CloudMapUniforms {
+layout(binding = BINDING_CLOUDMAP_UNIFORMS) uniform CloudMapUniforms {
     vec4 windOffset;        // xyz = wind offset for animation, w = time
     float coverage;         // 0-1 cloud coverage amount
     float density;          // Base density multiplier
