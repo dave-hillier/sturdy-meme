@@ -1685,6 +1685,9 @@ bool Renderer::handleResize() {
     // Resize bloom system
     bloomSystem.resize(device, allocator, newExtent);
 
+    // Rebind bloom texture to post-process system (bloom image views changed)
+    postProcessSystem.setBloomTexture(bloomSystem.getBloomOutput(), bloomSystem.getBloomSampler());
+
     // Resize froxel system (volumetric fog)
     froxelSystem.resize(device, allocator, newExtent);
 
