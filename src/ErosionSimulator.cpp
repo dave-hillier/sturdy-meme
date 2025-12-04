@@ -310,117 +310,172 @@ glm::vec2 ErosionSimulator::worldToPixel(float wx, float wy, float terrainSize) 
 }
 
 void ErosionSimulator::simulateDroplet(const ErosionConfig& config, uint32_t startX, uint32_t startY) {
-    float posX = static_cast<float>(startX);
-    float posY = static_cast<float>(startY);
-    float dirX = 0.0f;
-    float dirY = 0.0f;
-    float speed = 1.0f;
-    float water = 1.0f;
-
-    // Scale factor to map source coords to flow map coords
-    float flowScaleX = static_cast<float>(flowWidth) / static_cast<float>(sourceWidth);
-    float flowScaleY = static_cast<float>(flowHeight) / static_cast<float>(sourceHeight_);
-
-    for (uint32_t step = 0; step < config.maxDropletLifetime; step++) {
-        // Get gradient at current position
-        glm::vec2 grad = getGradientAt(posX, posY);
-
-        // Update direction with inertia
-        dirX = dirX * config.inertia - grad.x * (1.0f - config.inertia);
-        dirY = dirY * config.inertia - grad.y * (1.0f - config.inertia);
-
-        // Normalize direction
-        float len = std::sqrt(dirX * dirX + dirY * dirY);
-        if (len > 0.0001f) {
-            dirX /= len;
-            dirY /= len;
-        } else {
-            // Random direction if flat
-            float angle = static_cast<float>(rand()) / RAND_MAX * 2.0f * 3.14159f;
-            dirX = std::cos(angle);
-            dirY = std::sin(angle);
-        }
-
-        // Move droplet
-        float newPosX = posX + dirX * speed;
-        float newPosY = posY + dirY * speed;
-
-        // Check bounds
-        if (newPosX < 0 || newPosX >= sourceWidth - 1 ||
-            newPosY < 0 || newPosY >= sourceHeight_ - 1) {
-            break;
-        }
-
-        // Record flow at current position (in flow map resolution)
-        uint32_t flowX = static_cast<uint32_t>(posX * flowScaleX);
-        uint32_t flowY = static_cast<uint32_t>(posY * flowScaleY);
-        flowX = std::min(flowX, flowWidth - 1);
-        flowY = std::min(flowY, flowHeight - 1);
-        flowAccum[flowY * flowWidth + flowX] += water;
-
-        // Update speed based on height difference
-        float heightOld = getHeightAt(posX, posY);
-        float heightNew = getHeightAt(newPosX, newPosY);
-        float deltaH = heightOld - heightNew;
-
-        speed = std::sqrt(std::max(0.01f, speed * speed + deltaH * config.gravity));
-        speed = std::min(speed, 10.0f);  // Cap speed
-
-        // Evaporate water
-        water *= (1.0f - config.evaporationRate);
-        if (water < config.minWater) {
-            break;
-        }
-
-        posX = newPosX;
-        posY = newPosY;
-    }
+    // Not used - kept for interface compatibility
+    (void)config;
+    (void)startX;
+    (void)startY;
 }
 
 void ErosionSimulator::simulateDroplets(const ErosionConfig& config, ErosionProgressCallback progressCallback) {
-    // Initialize flow accumulation map
+    // Use D8 flow accumulation algorithm instead of random droplets
+    // This gives clean river networks by calculating upstream contributing area
+
     flowWidth = config.outputResolution;
     flowHeight = config.outputResolution;
     flowAccum.resize(flowWidth * flowHeight, 0.0f);
 
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<uint32_t> distX(0, sourceWidth - 1);
-    std::uniform_int_distribution<uint32_t> distY(0, sourceHeight_ - 1);
+    // Scale factor from source heightmap to flow map
+    float scaleX = static_cast<float>(sourceWidth) / static_cast<float>(flowWidth);
+    float scaleY = static_cast<float>(sourceHeight_) / static_cast<float>(flowHeight);
 
-    uint32_t reportInterval = config.numDroplets / 100;
-    if (reportInterval == 0) reportInterval = 1;
+    if (progressCallback) {
+        progressCallback(0.1f, "Computing flow directions (D8)...");
+    }
 
-    for (uint32_t i = 0; i < config.numDroplets; i++) {
-        uint32_t startX = distX(gen);
-        uint32_t startY = distY(gen);
+    // D8 direction offsets (8 neighbors)
+    // Index: 0=E, 1=SE, 2=S, 3=SW, 4=W, 5=NW, 6=N, 7=NE
+    const int dx[8] = {1, 1, 0, -1, -1, -1, 0, 1};
+    const int dy[8] = {0, 1, 1, 1, 0, -1, -1, -1};
+    // Distance weights (diagonal = sqrt(2))
+    const float dist[8] = {1.0f, 1.414f, 1.0f, 1.414f, 1.0f, 1.414f, 1.0f, 1.414f};
 
-        simulateDroplet(config, startX, startY);
+    // Step 1: Build flow direction map
+    // flowDir[i] = direction index (0-7) that water flows to, or -1 for sink/edge
+    std::vector<int8_t> flowDir(flowWidth * flowHeight, -1);
 
-        if (progressCallback && (i % reportInterval == 0)) {
-            float progress = 0.1f + (static_cast<float>(i) / config.numDroplets) * 0.5f;
-            std::ostringstream oss;
-            oss << "Simulating droplets: " << (i * 100 / config.numDroplets) << "%";
-            progressCallback(progress, oss.str());
+    for (uint32_t y = 0; y < flowHeight; y++) {
+        for (uint32_t x = 0; x < flowWidth; x++) {
+            // Sample height at this flow cell (use center of cell in source coords)
+            float srcX = (x + 0.5f) * scaleX;
+            float srcY = (y + 0.5f) * scaleY;
+            float h = getHeightAt(srcX, srcY);
+
+            // Find steepest downhill neighbor
+            float maxSlope = 0.0f;
+            int bestDir = -1;
+
+            for (int d = 0; d < 8; d++) {
+                int nx = static_cast<int>(x) + dx[d];
+                int ny = static_cast<int>(y) + dy[d];
+
+                if (nx < 0 || nx >= static_cast<int>(flowWidth) ||
+                    ny < 0 || ny >= static_cast<int>(flowHeight)) {
+                    continue;
+                }
+
+                float nSrcX = (nx + 0.5f) * scaleX;
+                float nSrcY = (ny + 0.5f) * scaleY;
+                float nh = getHeightAt(nSrcX, nSrcY);
+
+                // Slope = drop / distance
+                float slope = (h - nh) / dist[d];
+
+                if (slope > maxSlope) {
+                    maxSlope = slope;
+                    bestDir = d;
+                }
+            }
+
+            flowDir[y * flowWidth + x] = static_cast<int8_t>(bestDir);
+        }
+
+        if (progressCallback && (y % (flowHeight / 20) == 0)) {
+            float progress = 0.1f + (static_cast<float>(y) / flowHeight) * 0.3f;
+            progressCallback(progress, "Computing flow directions (D8)...");
         }
     }
 
-    // Normalize flow accumulation
+    if (progressCallback) {
+        progressCallback(0.4f, "Computing flow accumulation...");
+    }
+
+    // Step 2: Compute flow accumulation using recursive upstream counting
+    // Each cell starts with 1 (itself) and adds all upstream contributors
+
+    // First, count how many cells flow INTO each cell (in-degree)
+    std::vector<uint32_t> inDegree(flowWidth * flowHeight, 0);
+    for (uint32_t y = 0; y < flowHeight; y++) {
+        for (uint32_t x = 0; x < flowWidth; x++) {
+            int dir = flowDir[y * flowWidth + x];
+            if (dir >= 0) {
+                int nx = static_cast<int>(x) + dx[dir];
+                int ny = static_cast<int>(y) + dy[dir];
+                if (nx >= 0 && nx < static_cast<int>(flowWidth) &&
+                    ny >= 0 && ny < static_cast<int>(flowHeight)) {
+                    inDegree[ny * flowWidth + nx]++;
+                }
+            }
+        }
+    }
+
+    // Initialize flow accumulation to 1 for each cell
+    for (size_t i = 0; i < flowAccum.size(); i++) {
+        flowAccum[i] = 1.0f;
+    }
+
+    // Process cells in topological order (cells with no upstream first)
+    std::queue<std::pair<uint32_t, uint32_t>> toProcess;
+
+    // Start with cells that have no upstream (in-degree = 0)
+    for (uint32_t y = 0; y < flowHeight; y++) {
+        for (uint32_t x = 0; x < flowWidth; x++) {
+            if (inDegree[y * flowWidth + x] == 0) {
+                toProcess.push({x, y});
+            }
+        }
+    }
+
+    uint32_t processed = 0;
+    uint32_t totalCells = flowWidth * flowHeight;
+
+    while (!toProcess.empty()) {
+        auto [x, y] = toProcess.front();
+        toProcess.pop();
+        processed++;
+
+        int dir = flowDir[y * flowWidth + x];
+        if (dir >= 0) {
+            int nx = static_cast<int>(x) + dx[dir];
+            int ny = static_cast<int>(y) + dy[dir];
+
+            if (nx >= 0 && nx < static_cast<int>(flowWidth) &&
+                ny >= 0 && ny < static_cast<int>(flowHeight)) {
+                // Add this cell's accumulation to downstream cell
+                flowAccum[ny * flowWidth + nx] += flowAccum[y * flowWidth + x];
+
+                // Decrease in-degree of downstream cell
+                inDegree[ny * flowWidth + nx]--;
+
+                // If downstream cell has no more upstream to process, add to queue
+                if (inDegree[ny * flowWidth + nx] == 0) {
+                    toProcess.push({static_cast<uint32_t>(nx), static_cast<uint32_t>(ny)});
+                }
+            }
+        }
+
+        if (progressCallback && (processed % (totalCells / 20) == 0)) {
+            float progress = 0.4f + (static_cast<float>(processed) / totalCells) * 0.5f;
+            progressCallback(progress, "Computing flow accumulation...");
+        }
+    }
+
+    // Normalize flow accumulation (use log scale for better visualization)
     float maxFlow = 0.0f;
     for (float f : flowAccum) {
         maxFlow = std::max(maxFlow, f);
     }
 
     waterData.maxFlowValue = maxFlow;
-    SDL_Log("Erosion: max flow value = %.2f", maxFlow);
+    SDL_Log("Erosion: max flow accumulation = %.0f cells", maxFlow);
 
-    if (maxFlow > 0.0f) {
-        for (float& f : flowAccum) {
-            f /= maxFlow;
-        }
+    // Normalize using log scale to make rivers visible
+    // log(1) = 0, log(maxFlow) = max
+    float logMax = std::log(maxFlow + 1.0f);
+    for (float& f : flowAccum) {
+        f = std::log(f + 1.0f) / logMax;
     }
 
-    waterData.numDropletsSimulated = config.numDroplets;
+    waterData.numDropletsSimulated = totalCells;  // Not really droplets anymore
 }
 
 RiverSpline ErosionSimulator::traceRiver(uint32_t startX, uint32_t startY, const ErosionConfig& config) {
