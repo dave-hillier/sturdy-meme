@@ -1506,7 +1506,7 @@ void Renderer::render(const Camera& camera) {
 
         // Update sky-view LUT with current sun direction (Phase 4.1.5)
         // This precomputes atmospheric scattering for all view directions
-        atmosphereLUTSystem.updateSkyViewLUT(cmd, frame.sunDirection, frame.cameraPosition, 0.0f);
+        atmosphereLUTSystem.updateSkyViewLUT(cmd, frame.frameIndex, frame.sunDirection, frame.cameraPosition, 0.0f);
 
         // Update cloud map LUT with wind animation (Paraboloid projection)
         glm::vec2 windDir = windSystem.getWindDirection();
@@ -1517,7 +1517,7 @@ void Renderer::render(const Camera& camera) {
         glm::vec3 windOffset = glm::vec3(windDir.x * windSpeed * windTime * cloudTimeScale,
                                           windTime * 0.002f,  // Slow vertical evolution
                                           windDir.y * windSpeed * windTime * cloudTimeScale);
-        atmosphereLUTSystem.updateCloudMapLUT(cmd, windOffset, windTime * cloudTimeScale);
+        atmosphereLUTSystem.updateCloudMapLUT(cmd, frame.frameIndex, windOffset, windTime * cloudTimeScale);
         profiler.endGpuZone(cmd, "Atmosphere");
     }
 
