@@ -366,6 +366,11 @@ void GuiSystem::renderDashboard(Renderer& renderer, const Camera& camera, float 
     if (ImGui::Button(showHelp ? "Hide Help (H)" : "Show Help (H)", ImVec2(-1, 0))) {
         showHelp = !showHelp;
     }
+
+    // Tree Editor toggle
+    if (ImGui::Button(treeEditorGui.isVisible() ? "Hide Tree Editor (F2)" : "Show Tree Editor (F2)", ImVec2(-1, 0))) {
+        treeEditorGui.toggleVisibility();
+    }
 }
 
 void GuiSystem::renderTimeSection(Renderer& renderer) {
@@ -1093,6 +1098,7 @@ void GuiSystem::renderDebugSection(Renderer& renderer) {
     ImGui::PopStyleColor();
 
     ImGui::BulletText("F1 - Toggle GUI");
+    ImGui::BulletText("F2 - Tree Editor");
     ImGui::BulletText("Tab - Toggle camera mode");
     ImGui::BulletText("1-4 - Time presets");
     ImGui::BulletText("+/- - Time scale");

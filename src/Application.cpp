@@ -290,6 +290,10 @@ void Application::processEvents() {
                 else if (event.key.scancode == SDL_SCANCODE_F1) {
                     gui.toggleVisibility();
                 }
+                else if (event.key.scancode == SDL_SCANCODE_F2) {
+                    gui.getTreeEditorGui().toggleVisibility();
+                    SDL_Log("Tree Editor: %s", gui.getTreeEditorGui().isVisible() ? "ON" : "OFF");
+                }
                 else if (event.key.scancode == SDL_SCANCODE_1) {
                     renderer.setTimeOfDay(0.25f);
                 }
