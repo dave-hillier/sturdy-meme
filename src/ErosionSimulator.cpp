@@ -140,111 +140,119 @@ bool ErosionSimulator::saveMetadata(const ErosionConfig& config) const {
 }
 
 bool ErosionSimulator::savePreviewImage(const ErosionConfig& config) const {
-    // Create a color-coded preview image:
-    // - Blue gradient for flow accumulation (darker = more flow)
-    // - Cyan highlights for detected rivers
-    // - Green for detected lakes
+    // Create a simple water placement preview:
+    // - Dark gray/black = land
+    // - Blue = sea (below sea level)
+    // - Green = lakes
+    // - Red = rivers
 
     std::string previewPath = getPreviewPath(config.cacheDirectory);
 
-    // Use a reasonable preview size (1024x1024 max to keep file size manageable)
+    // Use flow map resolution for preview (or cap at 2048)
     uint32_t previewSize = std::min(flowWidth, 2048u);
-    float scale = static_cast<float>(flowWidth) / static_cast<float>(previewSize);
+    float scale = static_cast<float>(sourceWidth) / static_cast<float>(previewSize);
 
     std::vector<uint8_t> pixels(previewSize * previewSize * 3);
 
-    // First pass: render flow accumulation as blue gradient
+    float heightScale = config.maxAltitude - config.minAltitude;
+    float seaLevelNorm = config.seaLevel / heightScale;
+
+    // First pass: render terrain with sea level
     for (uint32_t y = 0; y < previewSize; y++) {
         for (uint32_t x = 0; x < previewSize; x++) {
-            // Sample flow accumulation (with simple averaging for downscale)
-            uint32_t srcX = static_cast<uint32_t>(x * scale);
-            uint32_t srcY = static_cast<uint32_t>(y * scale);
-            srcX = std::min(srcX, flowWidth - 1);
-            srcY = std::min(srcY, flowHeight - 1);
-
-            float flow = flowAccum[srcY * flowWidth + srcX];
-
-            // Apply gamma for better visualization of low flow areas
-            float intensity = std::pow(flow, 0.4f);
-
-            // Blue gradient: low flow = dark blue, high flow = bright cyan
-            uint8_t r = static_cast<uint8_t>(intensity * 50);
-            uint8_t g = static_cast<uint8_t>(intensity * 150);
-            uint8_t b = static_cast<uint8_t>(50 + intensity * 205);
+            // Sample height from source heightmap
+            float srcX = x * scale;
+            float srcY = y * scale;
+            float h = getHeightAt(srcX, srcY);
 
             size_t idx = (y * previewSize + x) * 3;
-            pixels[idx + 0] = r;
-            pixels[idx + 1] = g;
-            pixels[idx + 2] = b;
+
+            if (h <= seaLevelNorm) {
+                // Sea - blue
+                pixels[idx + 0] = 30;
+                pixels[idx + 1] = 100;
+                pixels[idx + 2] = 200;
+            } else {
+                // Land - dark grayscale based on height
+                uint8_t gray = static_cast<uint8_t>(40 + h * 80);
+                pixels[idx + 0] = gray;
+                pixels[idx + 1] = gray;
+                pixels[idx + 2] = gray;
+            }
         }
     }
 
-    // Second pass: overlay rivers in bright cyan/white
-    float srcToPreview = static_cast<float>(previewSize) / config.terrainSize;
+    // Helper to convert world coords to preview pixel coords
+    auto worldToPreview = [&](float worldX, float worldZ) -> std::pair<int, int> {
+        float u = (worldX / config.terrainSize) + 0.5f;
+        float v = (worldZ / config.terrainSize) + 0.5f;
+        int px = static_cast<int>(u * previewSize);
+        int py = static_cast<int>(v * previewSize);
+        return {px, py};
+    };
 
-    for (const auto& river : waterData.rivers) {
-        for (size_t i = 0; i < river.controlPoints.size(); i++) {
-            const auto& pt = river.controlPoints[i];
+    float worldToPixelScale = static_cast<float>(previewSize) / config.terrainSize;
 
-            // Convert world coords to preview coords
-            float worldX = pt.x;
-            float worldZ = pt.z;
+    // Second pass: draw lakes in green
+    for (const auto& lake : waterData.lakes) {
+        auto [cx, cy] = worldToPreview(lake.position.x, lake.position.y);
+        int radius = std::max(2, static_cast<int>(lake.radius * worldToPixelScale));
 
-            // World to UV: (world / terrainSize) + 0.5
-            float u = (worldX / config.terrainSize) + 0.5f;
-            float v = (worldZ / config.terrainSize) + 0.5f;
-
-            int px = static_cast<int>(u * previewSize);
-            int py = static_cast<int>(v * previewSize);
-
-            // Draw a small circle based on river width
-            float width = river.widths[i];
-            int radius = std::max(1, static_cast<int>(width * srcToPreview * 0.5f));
-            radius = std::min(radius, 10);  // Cap radius for preview
-
-            for (int dy = -radius; dy <= radius; dy++) {
-                for (int dx = -radius; dx <= radius; dx++) {
-                    if (dx * dx + dy * dy <= radius * radius) {
-                        int nx = px + dx;
-                        int ny = py + dy;
-                        if (nx >= 0 && nx < static_cast<int>(previewSize) &&
-                            ny >= 0 && ny < static_cast<int>(previewSize)) {
-                            size_t idx = (ny * previewSize + nx) * 3;
-                            // Bright cyan for rivers
-                            pixels[idx + 0] = 100;
-                            pixels[idx + 1] = 255;
-                            pixels[idx + 2] = 255;
-                        }
+        for (int dy = -radius; dy <= radius; dy++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                if (dx * dx + dy * dy <= radius * radius) {
+                    int nx = cx + dx;
+                    int ny = cy + dy;
+                    if (nx >= 0 && nx < static_cast<int>(previewSize) &&
+                        ny >= 0 && ny < static_cast<int>(previewSize)) {
+                        size_t idx = (ny * previewSize + nx) * 3;
+                        pixels[idx + 0] = 50;
+                        pixels[idx + 1] = 200;
+                        pixels[idx + 2] = 80;
                     }
                 }
             }
         }
     }
 
-    // Third pass: overlay lakes in green
-    for (const auto& lake : waterData.lakes) {
-        float u = (lake.position.x / config.terrainSize) + 0.5f;
-        float v = (lake.position.y / config.terrainSize) + 0.5f;
+    // Third pass: draw rivers in red (draw lines between control points)
+    for (const auto& river : waterData.rivers) {
+        for (size_t i = 0; i + 1 < river.controlPoints.size(); i++) {
+            const auto& p0 = river.controlPoints[i];
+            const auto& p1 = river.controlPoints[i + 1];
+            float w0 = river.widths[i];
+            float w1 = river.widths[i + 1];
 
-        int px = static_cast<int>(u * previewSize);
-        int py = static_cast<int>(v * previewSize);
+            auto [x0, y0] = worldToPreview(p0.x, p0.z);
+            auto [x1, y1] = worldToPreview(p1.x, p1.z);
 
-        // Draw lake as filled circle
-        int radius = std::max(3, static_cast<int>(lake.radius * srcToPreview));
-        radius = std::min(radius, 50);  // Cap radius
+            // Draw line from p0 to p1 with varying width
+            float dx = static_cast<float>(x1 - x0);
+            float dy = static_cast<float>(y1 - y0);
+            float len = std::sqrt(dx * dx + dy * dy);
+            if (len < 0.5f) continue;
 
-        for (int dy = -radius; dy <= radius; dy++) {
-            for (int dx = -radius; dx <= radius; dx++) {
-                if (dx * dx + dy * dy <= radius * radius) {
-                    int nx = px + dx;
-                    int ny = py + dy;
-                    if (nx >= 0 && nx < static_cast<int>(previewSize) &&
-                        ny >= 0 && ny < static_cast<int>(previewSize)) {
-                        size_t idx = (ny * previewSize + nx) * 3;
-                        // Green for lakes
-                        pixels[idx + 0] = 50;
-                        pixels[idx + 1] = 200;
-                        pixels[idx + 2] = 100;
+            int steps = static_cast<int>(len * 2) + 1;
+            for (int s = 0; s <= steps; s++) {
+                float t = static_cast<float>(s) / steps;
+                int px = static_cast<int>(x0 + dx * t);
+                int py = static_cast<int>(y0 + dy * t);
+                float width = w0 + (w1 - w0) * t;
+                int radius = std::max(1, static_cast<int>(width * worldToPixelScale * 0.5f));
+
+                for (int ry = -radius; ry <= radius; ry++) {
+                    for (int rx = -radius; rx <= radius; rx++) {
+                        if (rx * rx + ry * ry <= radius * radius) {
+                            int nx = px + rx;
+                            int ny = py + ry;
+                            if (nx >= 0 && nx < static_cast<int>(previewSize) &&
+                                ny >= 0 && ny < static_cast<int>(previewSize)) {
+                                size_t idx = (ny * previewSize + nx) * 3;
+                                pixels[idx + 0] = 220;
+                                pixels[idx + 1] = 50;
+                                pixels[idx + 2] = 50;
+                            }
+                        }
                     }
                 }
             }
