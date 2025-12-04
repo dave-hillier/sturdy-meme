@@ -6,8 +6,73 @@
 #include <vector>
 #include <random>
 
+// Algorithm selection
+enum class TreeAlgorithm {
+    Recursive,          // Original recursive branching algorithm
+    SpaceColonisation   // Space colonisation algorithm
+};
+
+// Volume shapes for space colonisation
+enum class VolumeShape {
+    Sphere,
+    Hemisphere,
+    Cone,
+    Cylinder,
+    Ellipsoid,
+    Box
+};
+
+// Space colonisation specific parameters
+struct SpaceColonisationParams {
+    // Crown volume shape and size
+    VolumeShape crownShape = VolumeShape::Sphere;
+    float crownRadius = 4.0f;           // Base radius of crown volume
+    float crownHeight = 5.0f;           // Height for non-spherical shapes
+    glm::vec3 crownOffset = glm::vec3(0.0f, 0.0f, 0.0f);  // Offset from trunk top
+    glm::vec3 crownScale = glm::vec3(1.0f, 1.0f, 1.0f);   // For ellipsoid scaling
+    float crownExclusionRadius = 0.0f;  // Inner hollow zone (no points here)
+
+    // Attraction point parameters
+    int attractionPointCount = 500;     // Number of attraction points
+    bool uniformDistribution = true;    // Uniform vs clustered distribution
+
+    // Algorithm parameters
+    float attractionDistance = 3.0f;    // Max distance for point to influence node (di)
+    float killDistance = 0.5f;          // Distance at which point is removed (dk)
+    float segmentLength = 0.3f;         // Length of each growth step (D)
+    int maxIterations = 200;            // Safety limit for iterations
+    float branchAngleLimit = 45.0f;     // Max angle change per segment (degrees)
+
+    // Tropism (directional growth influence)
+    glm::vec3 tropismDirection = glm::vec3(0.0f, 1.0f, 0.0f);
+    float tropismStrength = 0.1f;       // How much tropism affects growth
+
+    // Initial trunk before branching
+    float trunkSegments = 3;            // Number of trunk segments before crown
+    float trunkHeight = 3.0f;           // Height of trunk before crown starts
+
+    // Root system
+    bool generateRoots = false;
+    VolumeShape rootShape = VolumeShape::Hemisphere;
+    float rootRadius = 2.0f;
+    float rootDepth = 1.5f;
+    int rootAttractionPointCount = 200;
+    float rootTropismStrength = 0.3f;   // Downward tropism for roots
+
+    // Branch thickness calculation
+    float baseThickness = 0.3f;         // Trunk base thickness
+    float thicknessPower = 2.0f;        // Exponent for pipe model (da Vinci's rule)
+    float minThickness = 0.02f;         // Minimum branch thickness
+};
+
 // Tree generation parameters similar to ez-tree
 struct TreeParameters {
+    // Algorithm selection
+    TreeAlgorithm algorithm = TreeAlgorithm::Recursive;
+
+    // Space colonisation specific parameters
+    SpaceColonisationParams spaceColonisation;
+
     // Seed for reproducibility
     uint32_t seed = 12345;
 
@@ -68,6 +133,15 @@ struct LeafInstance {
     float rotation;         // Rotation around normal
 };
 
+// Node for space colonisation algorithm
+struct TreeNode {
+    glm::vec3 position;
+    int parentIndex;        // -1 for root
+    int childCount;         // Number of children (for thickness calculation)
+    float thickness;        // Calculated branch thickness
+    bool isTerminal;        // Is this a leaf node?
+};
+
 class TreeGenerator {
 public:
     TreeGenerator() = default;
@@ -115,6 +189,45 @@ private:
     // Random number generation
     float randomFloat(float min, float max);
     glm::vec3 randomOnSphere();
+
+    // Space colonisation algorithm
+    void generateSpaceColonisation(const TreeParameters& params);
+
+    // Generate points within a volume shape
+    void generateAttractionPoints(const SpaceColonisationParams& scParams,
+                                  const glm::vec3& center,
+                                  bool isRoot,
+                                  std::vector<glm::vec3>& outPoints);
+
+    // Check if point is inside volume
+    bool isPointInVolume(const glm::vec3& point,
+                        const glm::vec3& center,
+                        VolumeShape shape,
+                        float radius,
+                        float height,
+                        const glm::vec3& scale,
+                        float exclusionRadius);
+
+    // Generate random point in volume
+    glm::vec3 randomPointInVolume(VolumeShape shape,
+                                  float radius,
+                                  float height,
+                                  const glm::vec3& scale);
+
+    // Run space colonisation iteration
+    bool spaceColonisationStep(std::vector<TreeNode>& nodes,
+                               std::vector<glm::vec3>& attractionPoints,
+                               const SpaceColonisationParams& params,
+                               const glm::vec3& tropismDir,
+                               float tropismStrength);
+
+    // Calculate branch thicknesses using pipe model
+    void calculateBranchThickness(std::vector<TreeNode>& nodes,
+                                  const SpaceColonisationParams& params);
+
+    // Convert tree nodes to branch segments
+    void nodesToSegments(const std::vector<TreeNode>& nodes,
+                        const TreeParameters& params);
 
     std::vector<BranchSegment> segments;
     std::vector<Vertex> branchVertices;

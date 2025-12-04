@@ -17,18 +17,21 @@ void TreeGenerator::generate(const TreeParameters& params) {
     // Seed random generator
     rng.seed(params.seed);
 
-    // Start with trunk
-    glm::vec3 trunkStart(0.0f, 0.0f, 0.0f);
-    glm::quat trunkOrientation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+    if (params.algorithm == TreeAlgorithm::SpaceColonisation) {
+        generateSpaceColonisation(params);
+    } else {
+        // Original recursive algorithm
+        glm::vec3 trunkStart(0.0f, 0.0f, 0.0f);
+        glm::quat trunkOrientation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
 
-    // Generate trunk and all branches recursively
-    generateBranch(params,
-                   trunkStart,
-                   trunkOrientation,
-                   params.trunkHeight,
-                   params.trunkRadius,
-                   0,  // level 0 = trunk
-                   -1); // no parent
+        generateBranch(params,
+                       trunkStart,
+                       trunkOrientation,
+                       params.trunkHeight,
+                       params.trunkRadius,
+                       0,  // level 0 = trunk
+                       -1); // no parent
+    }
 
     // Generate geometry for all branch segments
     for (const auto& segment : segments) {
@@ -346,4 +349,435 @@ void TreeGenerator::buildLeafMesh(Mesh& outMesh) {
     }
 
     outMesh.setCustomGeometry(vertices, indices);
+}
+
+// =============================================================================
+// Space Colonisation Algorithm Implementation
+// =============================================================================
+
+glm::vec3 TreeGenerator::randomPointInVolume(VolumeShape shape,
+                                              float radius,
+                                              float height,
+                                              const glm::vec3& scale) {
+    glm::vec3 point;
+
+    switch (shape) {
+        case VolumeShape::Sphere: {
+            // Uniform distribution in sphere
+            float r = radius * std::cbrt(randomFloat(0.0f, 1.0f));
+            float theta = randomFloat(0.0f, 2.0f * static_cast<float>(M_PI));
+            float phi = std::acos(randomFloat(-1.0f, 1.0f));
+            point = glm::vec3(
+                r * std::sin(phi) * std::cos(theta),
+                r * std::cos(phi),
+                r * std::sin(phi) * std::sin(theta)
+            );
+            break;
+        }
+        case VolumeShape::Hemisphere: {
+            // Upper hemisphere
+            float r = radius * std::cbrt(randomFloat(0.0f, 1.0f));
+            float theta = randomFloat(0.0f, 2.0f * static_cast<float>(M_PI));
+            float phi = std::acos(randomFloat(0.0f, 1.0f));  // Only upper half
+            point = glm::vec3(
+                r * std::sin(phi) * std::cos(theta),
+                r * std::cos(phi),
+                r * std::sin(phi) * std::sin(theta)
+            );
+            break;
+        }
+        case VolumeShape::Cone: {
+            // Uniform in cone (apex at top)
+            float h = randomFloat(0.0f, 1.0f);
+            float r = radius * (1.0f - h) * std::sqrt(randomFloat(0.0f, 1.0f));
+            float theta = randomFloat(0.0f, 2.0f * static_cast<float>(M_PI));
+            point = glm::vec3(
+                r * std::cos(theta),
+                h * height,
+                r * std::sin(theta)
+            );
+            break;
+        }
+        case VolumeShape::Cylinder: {
+            float r = radius * std::sqrt(randomFloat(0.0f, 1.0f));
+            float theta = randomFloat(0.0f, 2.0f * static_cast<float>(M_PI));
+            float h = randomFloat(0.0f, height);
+            point = glm::vec3(
+                r * std::cos(theta),
+                h,
+                r * std::sin(theta)
+            );
+            break;
+        }
+        case VolumeShape::Ellipsoid: {
+            // Uniform in ellipsoid
+            float r = std::cbrt(randomFloat(0.0f, 1.0f));
+            float theta = randomFloat(0.0f, 2.0f * static_cast<float>(M_PI));
+            float phi = std::acos(randomFloat(-1.0f, 1.0f));
+            point = glm::vec3(
+                r * radius * scale.x * std::sin(phi) * std::cos(theta),
+                r * radius * scale.y * std::cos(phi),
+                r * radius * scale.z * std::sin(phi) * std::sin(theta)
+            );
+            break;
+        }
+        case VolumeShape::Box: {
+            point = glm::vec3(
+                randomFloat(-radius, radius) * scale.x,
+                randomFloat(0.0f, height) * scale.y,
+                randomFloat(-radius, radius) * scale.z
+            );
+            break;
+        }
+    }
+
+    return point;
+}
+
+bool TreeGenerator::isPointInVolume(const glm::vec3& point,
+                                    const glm::vec3& center,
+                                    VolumeShape shape,
+                                    float radius,
+                                    float height,
+                                    const glm::vec3& scale,
+                                    float exclusionRadius) {
+    glm::vec3 local = point - center;
+
+    // Check exclusion zone first
+    if (exclusionRadius > 0.0f && glm::length(local) < exclusionRadius) {
+        return false;
+    }
+
+    switch (shape) {
+        case VolumeShape::Sphere:
+            return glm::length(local) <= radius;
+
+        case VolumeShape::Hemisphere:
+            return glm::length(local) <= radius && local.y >= 0.0f;
+
+        case VolumeShape::Cone: {
+            if (local.y < 0.0f || local.y > height) return false;
+            float allowedRadius = radius * (1.0f - local.y / height);
+            float distXZ = std::sqrt(local.x * local.x + local.z * local.z);
+            return distXZ <= allowedRadius;
+        }
+
+        case VolumeShape::Cylinder: {
+            if (local.y < 0.0f || local.y > height) return false;
+            float distXZ = std::sqrt(local.x * local.x + local.z * local.z);
+            return distXZ <= radius;
+        }
+
+        case VolumeShape::Ellipsoid: {
+            glm::vec3 normalized = local / (radius * scale);
+            return glm::dot(normalized, normalized) <= 1.0f;
+        }
+
+        case VolumeShape::Box:
+            return std::abs(local.x) <= radius * scale.x &&
+                   local.y >= 0.0f && local.y <= height * scale.y &&
+                   std::abs(local.z) <= radius * scale.z;
+    }
+
+    return false;
+}
+
+void TreeGenerator::generateAttractionPoints(const SpaceColonisationParams& scParams,
+                                             const glm::vec3& center,
+                                             bool isRoot,
+                                             std::vector<glm::vec3>& outPoints) {
+    VolumeShape shape = isRoot ? scParams.rootShape : scParams.crownShape;
+    float radius = isRoot ? scParams.rootRadius : scParams.crownRadius;
+    float height = isRoot ? scParams.rootDepth : scParams.crownHeight;
+    int count = isRoot ? scParams.rootAttractionPointCount : scParams.attractionPointCount;
+    float exclusion = isRoot ? 0.0f : scParams.crownExclusionRadius;
+
+    outPoints.reserve(outPoints.size() + count);
+
+    int attempts = 0;
+    int maxAttempts = count * 10;
+
+    while (static_cast<int>(outPoints.size()) < count && attempts < maxAttempts) {
+        glm::vec3 localPoint = randomPointInVolume(shape, radius, height, scParams.crownScale);
+
+        // For roots, flip Y to go downward
+        if (isRoot) {
+            localPoint.y = -std::abs(localPoint.y);
+        }
+
+        glm::vec3 worldPoint = center + localPoint;
+
+        // Check exclusion zone
+        if (exclusion > 0.0f) {
+            glm::vec3 fromCenter = worldPoint - center;
+            if (glm::length(fromCenter) < exclusion) {
+                attempts++;
+                continue;
+            }
+        }
+
+        outPoints.push_back(worldPoint);
+        attempts++;
+    }
+}
+
+bool TreeGenerator::spaceColonisationStep(std::vector<TreeNode>& nodes,
+                                          std::vector<glm::vec3>& attractionPoints,
+                                          const SpaceColonisationParams& params,
+                                          const glm::vec3& tropismDir,
+                                          float tropismStrength) {
+    if (attractionPoints.empty() || nodes.empty()) {
+        return false;
+    }
+
+    // For each node, accumulate influence from nearby attraction points
+    std::vector<glm::vec3> growthDirections(nodes.size(), glm::vec3(0.0f));
+    std::vector<int> influenceCount(nodes.size(), 0);
+    std::vector<bool> pointsToRemove(attractionPoints.size(), false);
+
+    // Find closest node for each attraction point
+    for (size_t pi = 0; pi < attractionPoints.size(); ++pi) {
+        const glm::vec3& point = attractionPoints[pi];
+
+        int closestNode = -1;
+        float closestDist = params.attractionDistance;
+
+        for (size_t ni = 0; ni < nodes.size(); ++ni) {
+            float dist = glm::distance(nodes[ni].position, point);
+
+            // Check kill distance
+            if (dist < params.killDistance) {
+                pointsToRemove[pi] = true;
+                closestNode = -1;
+                break;
+            }
+
+            if (dist < closestDist) {
+                closestDist = dist;
+                closestNode = static_cast<int>(ni);
+            }
+        }
+
+        if (closestNode >= 0) {
+            glm::vec3 dir = glm::normalize(point - nodes[closestNode].position);
+            growthDirections[closestNode] += dir;
+            influenceCount[closestNode]++;
+        }
+    }
+
+    // Remove killed points
+    std::vector<glm::vec3> remainingPoints;
+    for (size_t i = 0; i < attractionPoints.size(); ++i) {
+        if (!pointsToRemove[i]) {
+            remainingPoints.push_back(attractionPoints[i]);
+        }
+    }
+    attractionPoints = std::move(remainingPoints);
+
+    // Grow new nodes
+    bool grewAny = false;
+    size_t originalNodeCount = nodes.size();
+
+    for (size_t i = 0; i < originalNodeCount; ++i) {
+        if (influenceCount[i] > 0) {
+            glm::vec3 avgDir = glm::normalize(growthDirections[i]);
+
+            // Apply tropism
+            if (tropismStrength > 0.0f) {
+                avgDir = glm::normalize(avgDir + tropismDir * tropismStrength);
+            }
+
+            // Create new node
+            TreeNode newNode;
+            newNode.position = nodes[i].position + avgDir * params.segmentLength;
+            newNode.parentIndex = static_cast<int>(i);
+            newNode.childCount = 0;
+            newNode.thickness = params.minThickness;
+            newNode.isTerminal = true;
+
+            // Update parent
+            nodes[i].childCount++;
+            nodes[i].isTerminal = false;
+
+            nodes.push_back(newNode);
+            grewAny = true;
+        }
+    }
+
+    return grewAny;
+}
+
+void TreeGenerator::calculateBranchThickness(std::vector<TreeNode>& nodes,
+                                              const SpaceColonisationParams& params) {
+    if (nodes.empty()) return;
+
+    // Calculate child count for each node by traversing from leaves to root
+    // First, find all terminal nodes and propagate thickness upward
+
+    // Using pipe model (da Vinci's rule):
+    // parent_area = sum of children_areas
+    // parent_radius^n = sum of children_radius^n
+
+    // Start from terminal nodes with minimum thickness
+    for (auto& node : nodes) {
+        if (node.isTerminal || node.childCount == 0) {
+            node.thickness = params.minThickness;
+        }
+    }
+
+    // Propagate thickness from leaves to root
+    // Process nodes in reverse order (children before parents)
+    for (int i = static_cast<int>(nodes.size()) - 1; i >= 0; --i) {
+        TreeNode& node = nodes[i];
+
+        if (node.parentIndex >= 0 && node.parentIndex < static_cast<int>(nodes.size())) {
+            TreeNode& parent = nodes[node.parentIndex];
+
+            // Accumulate thickness using pipe model
+            float childPow = std::pow(node.thickness, params.thicknessPower);
+            float parentPow = std::pow(parent.thickness, params.thicknessPower);
+            parent.thickness = std::pow(parentPow + childPow, 1.0f / params.thicknessPower);
+        }
+    }
+
+    // Clamp maximum thickness
+    for (auto& node : nodes) {
+        node.thickness = std::min(node.thickness, params.baseThickness);
+    }
+}
+
+void TreeGenerator::nodesToSegments(const std::vector<TreeNode>& nodes,
+                                    const TreeParameters& params) {
+    // Convert tree nodes to branch segments for rendering
+    for (size_t i = 0; i < nodes.size(); ++i) {
+        const TreeNode& node = nodes[i];
+
+        if (node.parentIndex >= 0) {
+            const TreeNode& parent = nodes[node.parentIndex];
+
+            BranchSegment segment;
+            segment.startPos = parent.position;
+            segment.endPos = node.position;
+            segment.startRadius = parent.thickness;
+            segment.endRadius = node.thickness;
+
+            // Calculate orientation from direction
+            glm::vec3 dir = glm::normalize(node.position - parent.position);
+            glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
+            if (std::abs(glm::dot(dir, up)) > 0.99f) {
+                up = glm::vec3(1.0f, 0.0f, 0.0f);
+            }
+            glm::vec3 right = glm::normalize(glm::cross(up, dir));
+            up = glm::cross(dir, right);
+            glm::mat3 rotMat(right, dir, up);
+            segment.orientation = glm::quat_cast(rotMat);
+
+            // Estimate level based on thickness
+            float thicknessRatio = node.thickness / params.spaceColonisation.baseThickness;
+            segment.level = static_cast<int>((1.0f - thicknessRatio) * params.branchLevels);
+            segment.level = std::max(0, std::min(segment.level, params.branchLevels));
+
+            segment.parentIndex = node.parentIndex;
+
+            segments.push_back(segment);
+        }
+    }
+}
+
+void TreeGenerator::generateSpaceColonisation(const TreeParameters& params) {
+    const auto& scParams = params.spaceColonisation;
+
+    std::vector<TreeNode> nodes;
+    std::vector<glm::vec3> attractionPoints;
+
+    // Create initial trunk nodes
+    glm::vec3 trunkBase(0.0f, 0.0f, 0.0f);
+    int trunkSegmentCount = static_cast<int>(scParams.trunkSegments);
+    float segmentHeight = scParams.trunkHeight / static_cast<float>(trunkSegmentCount);
+
+    for (int i = 0; i <= trunkSegmentCount; ++i) {
+        TreeNode node;
+        node.position = trunkBase + glm::vec3(0.0f, i * segmentHeight, 0.0f);
+        node.parentIndex = i > 0 ? i - 1 : -1;
+        node.childCount = (i < trunkSegmentCount) ? 1 : 0;
+        node.thickness = scParams.baseThickness;
+        node.isTerminal = (i == trunkSegmentCount);
+        nodes.push_back(node);
+    }
+
+    // Crown center is at top of trunk plus offset
+    glm::vec3 crownCenter = glm::vec3(0.0f, scParams.trunkHeight, 0.0f) + scParams.crownOffset;
+
+    // Generate attraction points for crown
+    generateAttractionPoints(scParams, crownCenter, false, attractionPoints);
+
+    SDL_Log("Space colonisation: Generated %zu attraction points for crown",
+            attractionPoints.size());
+
+    // Generate attraction points for roots if enabled
+    std::vector<glm::vec3> rootAttractionPoints;
+    if (scParams.generateRoots) {
+        generateAttractionPoints(scParams, trunkBase, true, rootAttractionPoints);
+        SDL_Log("Space colonisation: Generated %zu attraction points for roots",
+                rootAttractionPoints.size());
+    }
+
+    // Run space colonisation algorithm for crown
+    int iterations = 0;
+    while (iterations < scParams.maxIterations && !attractionPoints.empty()) {
+        bool grew = spaceColonisationStep(nodes, attractionPoints,
+                                          scParams,
+                                          scParams.tropismDirection,
+                                          scParams.tropismStrength);
+        if (!grew) break;
+        iterations++;
+    }
+
+    SDL_Log("Space colonisation: Crown completed in %d iterations, %zu nodes",
+            iterations, nodes.size());
+
+    // Run space colonisation for roots
+    if (scParams.generateRoots && !rootAttractionPoints.empty()) {
+        // Add root base node
+        TreeNode rootBase;
+        rootBase.position = trunkBase;
+        rootBase.parentIndex = 0;  // Connect to trunk base
+        rootBase.childCount = 0;
+        rootBase.thickness = scParams.baseThickness * 0.8f;
+        rootBase.isTerminal = true;
+        int rootBaseIdx = static_cast<int>(nodes.size());
+        nodes.push_back(rootBase);
+
+        // Create separate list for root nodes
+        std::vector<TreeNode> rootNodes;
+        rootNodes.push_back(rootBase);
+
+        int rootIterations = 0;
+        while (rootIterations < scParams.maxIterations / 2 && !rootAttractionPoints.empty()) {
+            bool grew = spaceColonisationStep(rootNodes, rootAttractionPoints,
+                                              scParams,
+                                              glm::vec3(0.0f, -1.0f, 0.0f),
+                                              scParams.rootTropismStrength);
+            if (!grew) break;
+            rootIterations++;
+        }
+
+        // Merge root nodes into main node list (adjusting parent indices)
+        for (size_t i = 1; i < rootNodes.size(); ++i) {
+            TreeNode node = rootNodes[i];
+            node.parentIndex += rootBaseIdx;
+            nodes.push_back(node);
+        }
+
+        SDL_Log("Space colonisation: Roots completed in %d iterations, %zu additional nodes",
+                rootIterations, rootNodes.size() - 1);
+    }
+
+    // Calculate branch thicknesses
+    calculateBranchThickness(nodes, scParams);
+
+    // Convert nodes to segments for rendering
+    nodesToSegments(nodes, params);
+
+    SDL_Log("Space colonisation: Total %zu segments generated", segments.size());
 }
