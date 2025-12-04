@@ -1,4 +1,5 @@
 #include <stb_image.h>
+#include <lodepng.h>
 #include "TerrainImporter.h"
 #include <SDL3/SDL_log.h>
 #include <filesystem>
@@ -16,7 +17,7 @@ TerrainImporter::~TerrainImporter() {
 
 std::string TerrainImporter::getTilePath(const std::string& cacheDir, int32_t x, int32_t z, uint32_t lod) {
     std::ostringstream oss;
-    oss << cacheDir << "/tile_" << x << "_" << z << "_lod" << lod << ".raw";
+    oss << cacheDir << "/tile_" << x << "_" << z << "_lod" << lod << ".png";
     return oss.str();
 }
 
@@ -349,18 +350,29 @@ bool TerrainImporter::generateLODLevel(const TerrainImportConfig& config, uint32
 }
 
 bool TerrainImporter::saveTile(const std::string& path, const std::vector<uint16_t>& data, uint32_t resolution) {
-    // Save as raw binary for 16-bit precision (stb_image_write doesn't support 16-bit PNG)
-    std::ofstream file(path, std::ios::binary);
-    if (!file.is_open()) {
+    // Convert to big-endian for PNG format (PNG uses network byte order)
+    std::vector<unsigned char> pngData(data.size() * 2);
+    for (size_t i = 0; i < data.size(); i++) {
+        uint16_t value = data[i];
+        pngData[i * 2] = static_cast<unsigned char>((value >> 8) & 0xFF);     // High byte first
+        pngData[i * 2 + 1] = static_cast<unsigned char>(value & 0xFF);        // Low byte second
+    }
+
+    // Encode as 16-bit grayscale PNG
+    std::vector<unsigned char> png;
+    unsigned error = lodepng::encode(png, pngData, resolution, resolution, LCT_GREY, 16);
+
+    if (error) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "PNG encoding error %u: %s", error, lodepng_error_text(error));
         return false;
     }
 
-    // Write resolution header
-    file.write(reinterpret_cast<const char*>(&resolution), sizeof(resolution));
-    file.write(reinterpret_cast<const char*>(&resolution), sizeof(resolution));
+    // Write PNG file
+    error = lodepng::save_file(png, path);
+    if (error) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to save PNG file: %s", lodepng_error_text(error));
+        return false;
+    }
 
-    // Write height data (16-bit per pixel)
-    file.write(reinterpret_cast<const char*>(data.data()), data.size() * sizeof(uint16_t));
-
-    return file.good();
+    return true;
 }
