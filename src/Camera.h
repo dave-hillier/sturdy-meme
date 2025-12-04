@@ -42,6 +42,7 @@ public:
 
     // Get the yaw for player rotation in third-person mode
     float getYaw() const { return yaw; }
+    float getPitch() const { return pitch; }
 
     // Get current FOV (for dynamic FOV feature)
     float getFov() const { return currentFov; }
