@@ -154,17 +154,7 @@ float distributionGGX(float NdotH, float roughness) {
     return num / max(denom, 0.0001);
 }
 
-// Geometry function for specular (Smith's method)
-float geometrySchlickGGX(float NdotV, float roughness) {
-    float r = roughness + 1.0;
-    float k = (r * r) / 8.0;
-
-    return NdotV / (NdotV * (1.0 - k) + k);
-}
-
-float geometrySmith(float NdotV, float NdotL, float roughness) {
-    return geometrySchlickGGX(NdotV, roughness) * geometrySchlickGGX(NdotL, roughness);
-}
+// Note: geometrySchlickGGX and geometrySmith are provided by lighting_common.glsl
 
 // =========================================================================
 // VARIANCE-BASED SPECULAR FILTERING (Phase 6)
@@ -326,7 +316,7 @@ void main() {
 
     // GGX specular with Fresnel and geometry terms
     float D = distributionGGX(NdotH, adjustedRoughness);
-    float G = geometrySmith(NdotV, NdotL, adjustedRoughness);
+    float G = geometrySmith(N, V, sunDir, adjustedRoughness);
     float F = fresnelSchlick(max(dot(H, V), 0.0), 0.02);
 
     // Cook-Torrance BRDF
