@@ -457,7 +457,7 @@ bool ShadowSystem::createSkinnedShadowPipeline() {
     colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
     colorBlending.attachmentCount = 0;  // No color attachments
 
-    // Skinned shadow pipeline layout - use skinned descriptor set layout (has binding 10 for bone matrices)
+    // Skinned shadow pipeline layout - use skinned descriptor set layout (has binding 12 for bone matrices)
     VkPushConstantRange pushConstantRange{};
     pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
     pushConstantRange.offset = 0;
@@ -466,7 +466,7 @@ bool ShadowSystem::createSkinnedShadowPipeline() {
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.setLayoutCount = 1;
-    pipelineLayoutInfo.pSetLayouts = &skinnedDescriptorSetLayout;  // Use skinned layout (has binding 10 for bones)
+    pipelineLayoutInfo.pSetLayouts = &skinnedDescriptorSetLayout;  // Use skinned layout (has binding 12 for bones)
     pipelineLayoutInfo.pushConstantRangeCount = 1;
     pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
 

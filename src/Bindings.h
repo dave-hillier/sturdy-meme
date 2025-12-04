@@ -30,8 +30,7 @@ constexpr uint32_t LIGHT_BUFFER           = 4;   // Point/spot light array
 // =============================================================================
 // Skinned Mesh Descriptor Set (extends main set)
 // =============================================================================
-constexpr uint32_t BONE_MATRICES          = 10;  // Note: Shares binding 10 with SNOW_UBO
-                                                  // but in a different descriptor set layout
+constexpr uint32_t BONE_MATRICES          = 12;  // Bone matrices for skinned meshes
 
 // =============================================================================
 // Terrain Descriptor Set
