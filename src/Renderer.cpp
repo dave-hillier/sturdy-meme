@@ -1300,6 +1300,18 @@ void Renderer::render(const Camera& camera) {
     VkQueue graphicsQueue = vulkanContext.getGraphicsQueue();
     VkQueue presentQueue = vulkanContext.getPresentQueue();
 
+    // Handle pending resize before acquiring next image
+    if (framebufferResized) {
+        handleResize();
+        swapchain = vulkanContext.getSwapchain();  // Update after resize
+    }
+
+    // Skip rendering if window is minimized
+    VkExtent2D extent = vulkanContext.getSwapchainExtent();
+    if (extent.width == 0 || extent.height == 0) {
+        return;
+    }
+
     // Frame synchronization
     vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
 
@@ -1308,6 +1320,10 @@ void Renderer::render(const Camera& camera) {
                                             imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+        handleResize();
+        return;
+    } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to acquire swapchain image");
         return;
     }
 
@@ -1545,7 +1561,13 @@ void Renderer::render(const Camera& camera) {
     presentInfo.pSwapchains = swapChains;
     presentInfo.pImageIndices = &imageIndex;
 
-    vkQueuePresentKHR(presentQueue, &presentInfo);
+    result = vkQueuePresentKHR(presentQueue, &presentInfo);
+
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+        framebufferResized = true;
+    } else if (result != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to present swapchain image");
+    }
 
     // Advance grass double-buffer sets after frame submission
     // This swaps compute/render buffer sets so next frame can overlap:
@@ -1560,6 +1582,117 @@ void Renderer::render(const Camera& camera) {
 
 void Renderer::waitIdle() {
     vulkanContext.waitIdle();
+}
+
+void Renderer::destroyDepthImageAndView() {
+    VkDevice device = vulkanContext.getDevice();
+    VmaAllocator allocator = vulkanContext.getAllocator();
+
+    if (depthImageView != VK_NULL_HANDLE) {
+        vkDestroyImageView(device, depthImageView, nullptr);
+        depthImageView = VK_NULL_HANDLE;
+    }
+    if (depthImage != VK_NULL_HANDLE) {
+        vmaDestroyImage(allocator, depthImage, depthImageAllocation);
+        depthImage = VK_NULL_HANDLE;
+        depthImageAllocation = VK_NULL_HANDLE;
+    }
+}
+
+void Renderer::destroyFramebuffers() {
+    VkDevice device = vulkanContext.getDevice();
+    for (auto framebuffer : framebuffers) {
+        vkDestroyFramebuffer(device, framebuffer, nullptr);
+    }
+    framebuffers.clear();
+}
+
+bool Renderer::handleResize() {
+    VkDevice device = vulkanContext.getDevice();
+    VmaAllocator allocator = vulkanContext.getAllocator();
+
+    // Wait for GPU to finish all work
+    vkDeviceWaitIdle(device);
+
+    // Recreate swapchain
+    if (!vulkanContext.recreateSwapchain()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to recreate swapchain");
+        return false;
+    }
+
+    VkExtent2D newExtent = vulkanContext.getSwapchainExtent();
+
+    // Handle minimized window (extent = 0)
+    if (newExtent.width == 0 || newExtent.height == 0) {
+        return true;  // Don't recreate resources for minimized window
+    }
+
+    SDL_Log("Window resized to %ux%u", newExtent.width, newExtent.height);
+
+    // Destroy and recreate depth resources (keep sampler)
+    destroyDepthImageAndView();
+
+    // Recreate depth image and view (reusing existing depthFormat and depthSampler)
+    VkImageCreateInfo imageInfo{};
+    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    imageInfo.imageType = VK_IMAGE_TYPE_2D;
+    imageInfo.extent.width = newExtent.width;
+    imageInfo.extent.height = newExtent.height;
+    imageInfo.extent.depth = 1;
+    imageInfo.mipLevels = 1;
+    imageInfo.arrayLayers = 1;
+    imageInfo.format = depthFormat;
+    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    imageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+
+    if (vmaCreateImage(allocator, &imageInfo, &allocInfo, &depthImage, &depthImageAllocation, nullptr) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create depth image during resize");
+        return false;
+    }
+
+    VkImageViewCreateInfo viewInfo{};
+    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewInfo.image = depthImage;
+    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format = depthFormat;
+    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    viewInfo.subresourceRange.baseMipLevel = 0;
+    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.baseArrayLayer = 0;
+    viewInfo.subresourceRange.layerCount = 1;
+
+    if (vkCreateImageView(device, &viewInfo, nullptr, &depthImageView) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create depth image view during resize");
+        return false;
+    }
+
+    // Destroy and recreate framebuffers
+    destroyFramebuffers();
+    if (!createFramebuffers()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to recreate framebuffers during resize");
+        return false;
+    }
+
+    // Resize post-process system (HDR render target)
+    postProcessSystem.resize(device, allocator, newExtent);
+
+    // Resize bloom system
+    bloomSystem.resize(device, allocator, newExtent);
+
+    // Resize froxel system (volumetric fog)
+    froxelSystem.resize(device, allocator, newExtent);
+
+    // Resize Hi-Z system (occlusion culling)
+    hiZSystem.resize(newExtent);
+
+    framebufferResized = false;
+    return true;
 }
 
 // Pure calculation helpers - no state mutation
