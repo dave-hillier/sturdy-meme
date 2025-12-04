@@ -362,8 +362,10 @@ vec3 applyAerialPerspective(vec3 color, vec3 cameraPos, vec3 viewDir, float view
     float night = 1.0 - smoothstep(-0.05, 0.08, sunDir.y);
 
     // Fog color - bluish haze during day, darker at night
-    vec3 fogColor = mix(vec3(0.5, 0.6, 0.8), vec3(0.05, 0.07, 0.1), night);
-    fogColor *= max(sunColor, vec3(0.1));
+    // Normalize sunColor to prevent HDR values washing out the blue tint
+    vec3 normalizedSun = sunColor / max(max(sunColor.r, sunColor.g), max(sunColor.b, 0.1));
+    vec3 baseFogColor = mix(vec3(0.5, 0.6, 0.85), vec3(0.02, 0.03, 0.05), night);
+    vec3 fogColor = baseFogColor * mix(vec3(1.0), normalizedSun, 0.3);  // Subtle sun tinting
 
     // Also compute atmospheric scattering for distant objects
     float cameraAltitudeKm = max(cameraPos.y, 0.0) * 0.001;
