@@ -46,7 +46,7 @@ public:
     float getWorldWidth() const { return worldWidth; }
     float getWorldHeight() const { return worldHeight; }
 
-    // Get the path to a cached tile (raw binary format for 16-bit precision)
+    // Get the path to a cached tile (16-bit PNG format)
     static std::string getTilePath(const std::string& cacheDir, int32_t x, int32_t z, uint32_t lod);
 
     // Get metadata path
@@ -69,7 +69,7 @@ private:
     // Downsample source data for LOD generation
     void downsampleForLOD(uint32_t lod);
 
-    // Save a single tile as 16-bit PNG
+    // Save a single tile as 16-bit grayscale PNG
     bool saveTile(const std::string& path, const std::vector<uint16_t>& data, uint32_t resolution);
 
     // Save/load cache metadata

@@ -13,6 +13,7 @@ find_package(Jolt CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
 find_package(fastgltf CONFIG REQUIRED)
 find_package(unofficial-openfbx CONFIG REQUIRED)
+find_package(lodepng CONFIG REQUIRED)
 
 find_path(STB_INCLUDE_DIRS "stb_image.h")
 
@@ -103,6 +104,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     imgui::imgui
     fastgltf::fastgltf
     unoffical::openfbx::openfbx
+    lodepng
 )
 
 set_target_properties(${PROJECT_NAME} PROPERTIES
@@ -130,6 +132,58 @@ add_custom_command(
         ${CMAKE_CURRENT_SOURCE_DIR}/assets
         $<TARGET_BUNDLE_CONTENT_DIR:${PROJECT_NAME}>/Resources/assets
     COMMENT "Copying assets to app bundle"
+)
+
+# Terrain preprocessing - runs tools to generate data if inputs changed
+set(TERRAIN_HEIGHTMAP ${CMAKE_CURRENT_SOURCE_DIR}/assets/terrain/isleofwight-0m-200m.png)
+set(TERRAIN_DATA_DIR ${CMAKE_BINARY_DIR}/terrain_data)
+set(TERRAIN_TILES_META ${TERRAIN_DATA_DIR}/terrain_tiles.meta)
+set(EROSION_DATA_META ${TERRAIN_DATA_DIR}/erosion_data.meta)
+
+# Create terrain data directory
+file(MAKE_DIRECTORY ${TERRAIN_DATA_DIR})
+
+# Run terrain_preprocess when heightmap changes
+add_custom_command(
+    OUTPUT ${TERRAIN_TILES_META}
+    COMMAND $<TARGET_FILE:terrain_preprocess>
+        ${TERRAIN_HEIGHTMAP}
+        ${TERRAIN_DATA_DIR}
+        --min-altitude -15
+        --max-altitude 220
+    DEPENDS terrain_preprocess ${TERRAIN_HEIGHTMAP}
+    COMMENT "Preprocessing terrain tiles"
+)
+
+# Run erosion_preprocess when heightmap changes
+add_custom_command(
+    OUTPUT ${EROSION_DATA_META}
+    COMMAND $<TARGET_FILE:erosion_preprocess>
+        ${TERRAIN_HEIGHTMAP}
+        ${TERRAIN_DATA_DIR}
+        --min-altitude -15
+        --max-altitude 220
+        --sea-level 23
+        --terrain-size 16384
+    DEPENDS erosion_preprocess ${TERRAIN_HEIGHTMAP}
+    COMMENT "Preprocessing erosion and water placement"
+)
+
+# Custom target that depends on both preprocessing outputs
+add_custom_target(terrain_preprocessing
+    DEPENDS ${TERRAIN_TILES_META} ${EROSION_DATA_META}
+)
+
+# Main target depends on preprocessing
+add_dependencies(${PROJECT_NAME} terrain_preprocessing)
+
+# Copy terrain data to app bundle
+add_custom_command(
+    TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${TERRAIN_DATA_DIR}
+        $<TARGET_BUNDLE_CONTENT_DIR:${PROJECT_NAME}>/Resources/terrain_data
+    COMMENT "Copying terrain data to app bundle"
 )
 
 set(SHADER_FILES

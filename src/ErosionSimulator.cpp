@@ -27,7 +27,7 @@ std::string ErosionSimulator::getLakesPath(const std::string& cacheDir) {
 }
 
 std::string ErosionSimulator::getMetadataPath(const std::string& cacheDir) {
-    return cacheDir + "/erosion_cache.meta";
+    return cacheDir + "/erosion_data.meta";
 }
 
 std::string ErosionSimulator::getPreviewPath(const std::string& cacheDir) {
@@ -68,40 +68,13 @@ bool ErosionSimulator::loadAndValidateMetadata(const ErosionConfig& config) cons
         }
     }
 
-    // Validate config matches
-    std::error_code ec;
-    fs::path cachedCanonical = fs::canonical(cachedSourcePath, ec);
-    if (ec) {
-        SDL_Log("Erosion cache: cached source path invalid");
-        return false;
-    }
-    fs::path configCanonical = fs::canonical(config.sourceHeightmapPath, ec);
-    if (ec) {
-        SDL_Log("Erosion cache: config source path invalid");
-        return false;
-    }
-    if (cachedCanonical != configCanonical) {
-        SDL_Log("Erosion cache: source path mismatch");
-        return false;
-    }
-    if (cachedNumDroplets != config.numDroplets) {
-        SDL_Log("Erosion cache: numDroplets mismatch");
-        return false;
-    }
-    if (cachedOutputRes != config.outputResolution) {
-        SDL_Log("Erosion cache: outputResolution mismatch");
-        return false;
-    }
-    if (std::abs(cachedRiverThreshold - config.riverFlowThreshold) > 0.001f) {
-        SDL_Log("Erosion cache: riverFlowThreshold mismatch");
-        return false;
-    }
-
-    // Check source file size
+    // Validate source file size matches (path may differ between preprocessing and runtime)
     std::error_code sizeEc;
     uintmax_t currentSourceSize = fs::file_size(config.sourceHeightmapPath, sizeEc);
     if (sizeEc || cachedSourceSize != currentSourceSize) {
-        SDL_Log("Erosion cache: source file changed");
+        SDL_Log("Erosion cache: source file size mismatch (cached: %ju, current: %ju)",
+                static_cast<uintmax_t>(cachedSourceSize),
+                sizeEc ? static_cast<uintmax_t>(0) : static_cast<uintmax_t>(currentSourceSize));
         return false;
     }
 
