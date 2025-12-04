@@ -339,33 +339,49 @@ vec3 applyHeightFog(vec3 color, vec3 cameraPos, vec3 fragPos, vec3 sunDir, vec3 
 // Apply aerial perspective (combined height fog + atmospheric scattering)
 // Uses ubo.aerialPerspectiveScale and ubo.aerialPerspectiveMaxBlend for configurable distance
 vec3 applyAerialPerspective(vec3 color, vec3 cameraPos, vec3 viewDir, float viewDistance, vec3 sunDir, vec3 sunColor) {
-    // Reconstruct fragment position from normalized view direction and distance
-    vec3 fragPos = cameraPos + viewDir * viewDistance;
+    // Simple exponential distance fog that directly uses UBO values
+    // This is more visible and helps debug if UBO values are being read
 
-    // Height fog disabled - froxel volumetric fog handles scene-scale fog now
-    vec3 fogged = color;
+    // Get scale and max blend from UBO, with fallback defaults if zero
+    float scale = ubo.aerialPerspectiveScale;
+    float maxBlend = ubo.aerialPerspectiveMaxBlend;
 
-    // Convert scene units (meters) to km for atmospheric calculations
+    // Use reasonable defaults if UBO values appear uninitialized (both near zero)
+    if (scale < 0.000001 && maxBlend < 0.01) {
+        scale = 0.0001;    // Default scale
+        maxBlend = 0.7;    // Default max blend
+    }
+
+    // Calculate fog factor based on distance
+    // fogDensity derived from scale (higher scale = denser fog)
+    float fogDensity = scale * 10.0;  // Amplify for visibility
+    float fogFactor = 1.0 - exp(-viewDistance * fogDensity);
+    fogFactor = clamp(fogFactor, 0.0, maxBlend);
+
+    // Night factor for color adjustment
+    float night = 1.0 - smoothstep(-0.05, 0.08, sunDir.y);
+
+    // Fog color - bluish haze during day, darker at night
+    vec3 fogColor = mix(vec3(0.5, 0.6, 0.8), vec3(0.05, 0.07, 0.1), night);
+    fogColor *= max(sunColor, vec3(0.1));
+
+    // Also compute atmospheric scattering for distant objects
     float cameraAltitudeKm = max(cameraPos.y, 0.0) * 0.001;
     float viewDistanceKm = viewDistance * 0.001;
-
-    // Apply large-scale atmospheric scattering (km scale)
     vec3 origin = vec3(0.0, PLANET_RADIUS + cameraAltitudeKm, 0.0);
     ScatteringResult result = integrateAtmosphere(origin, normalize(viewDir), viewDistanceKm, 8, sunDir);
 
     vec3 scatterLight = result.inscatter * (sunColor + vec3(0.02));
-
-    float night = 1.0 - smoothstep(-0.05, 0.08, sunDir.y);
     scatterLight += night * vec3(0.01, 0.015, 0.03) * (1.0 - result.transmittance);
 
-    // Combine: atmospheric scattering adds to fogged scene
-    // Uses configurable scale and max blend from UBO
-    float atmoBlend = clamp(viewDistance * ubo.aerialPerspectiveScale, 0.0, ubo.aerialPerspectiveMaxBlend);
-    // Smooth the blend curve for more natural transition
-    atmoBlend = atmoBlend * atmoBlend * (3.0 - 2.0 * atmoBlend);  // Smoothstep-like
-    vec3 finalColor = mix(fogged, fogged * result.transmittance + scatterLight, atmoBlend);
+    // Combine fog and scattering
+    // At close range: mostly simple fog color
+    // At far range: blend in atmospheric scattering
+    float scatterWeight = smoothstep(0.0, 0.5, fogFactor);
+    vec3 combinedFog = mix(fogColor, fogColor * result.transmittance + scatterLight, scatterWeight);
 
-    return finalColor;
+    // Final blend between original color and fog
+    return mix(color, combinedFog, fogFactor);
 }
 
 #endif // ATMOSPHERE_COMMON_GLSL
