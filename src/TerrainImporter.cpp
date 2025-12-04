@@ -21,7 +21,7 @@ std::string TerrainImporter::getTilePath(const std::string& cacheDir, int32_t x,
 }
 
 std::string TerrainImporter::getMetadataPath(const std::string& cacheDir) {
-    return cacheDir + "/terrain_cache.meta";
+    return cacheDir + "/terrain_tiles.meta";
 }
 
 void TerrainImporter::getTileCountForLOD(uint32_t sourceWidth, uint32_t sourceHeight,
