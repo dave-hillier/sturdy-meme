@@ -9,17 +9,18 @@ const int NUM_CASCADES = 4;
 const int TRANSMITTANCE_WIDTH = 256;
 const int TRANSMITTANCE_HEIGHT = 64;
 
+#include "bindings.glsl"
 #include "ubo_common.glsl"
 
 // Atmosphere LUTs (Phase 4.1 - precomputed for efficiency)
-layout(binding = 1) uniform sampler2D transmittanceLUT;  // 256x64, RGBA16F
-layout(binding = 2) uniform sampler2D multiScatterLUT;   // 32x32, RG16F
-layout(binding = 3) uniform sampler2D skyViewLUT;        // 192x108, RGBA16F (updated per-frame)
+layout(binding = BINDING_SKY_TRANSMITTANCE_LUT) uniform sampler2D transmittanceLUT;  // 256x64, RGBA16F
+layout(binding = BINDING_SKY_MULTISCATTER_LUT) uniform sampler2D multiScatterLUT;   // 32x32, RG16F
+layout(binding = BINDING_SKY_SKYVIEW_LUT) uniform sampler2D skyViewLUT;        // 192x108, RGBA16F (updated per-frame)
 // Irradiance LUTs for cloud/haze lighting (Phase 4.1.9)
-layout(binding = 4) uniform sampler2D rayleighIrradianceLUT;  // 64x16, RGBA16F
-layout(binding = 5) uniform sampler2D mieIrradianceLUT;       // 64x16, RGBA16F
+layout(binding = BINDING_SKY_RAYLEIGH_IRR_LUT) uniform sampler2D rayleighIrradianceLUT;  // 64x16, RGBA16F
+layout(binding = BINDING_SKY_MIE_IRR_LUT) uniform sampler2D mieIrradianceLUT;       // 64x16, RGBA16F
 // Cloud Map LUT (Paraboloid projection, updated per-frame with wind animation)
-layout(binding = 6) uniform sampler2D cloudMapLUT;            // 256x256, RGBA16F
+layout(binding = BINDING_SKY_CLOUDMAP_LUT) uniform sampler2D cloudMapLUT;            // 256x256, RGBA16F
 
 layout(location = 0) in vec3 rayDir;
 layout(location = 0) out vec4 outColor;

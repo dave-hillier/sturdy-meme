@@ -4,6 +4,7 @@
 
 const int NUM_CASCADES = 4;
 
+#include "bindings.glsl"
 #include "ubo_common.glsl"
 
 struct GrassInstance {
@@ -12,12 +13,12 @@ struct GrassInstance {
     vec4 terrainNormal;      // xyz = terrain normal (for tangent alignment), w = unused
 };
 
-layout(std430, binding = 1) readonly buffer InstanceBuffer {
+layout(std430, binding = BINDING_GRASS_INSTANCE_BUFFER) readonly buffer InstanceBuffer {
     GrassInstance instances[];
 };
 
 // Wind uniform buffer
-layout(binding = 3) uniform WindUniforms {
+layout(binding = BINDING_GRASS_WIND_UBO) uniform WindUniforms {
     vec4 windDirectionAndStrength;  // xy = normalized direction, z = strength, w = speed
     vec4 windParams;                 // x = gustFrequency, y = gustAmplitude, z = noiseScale, w = time
 } wind;

@@ -214,21 +214,20 @@ elseif(GLSLANG_VALIDATOR)
 endif()
 
 if(SHADER_COMPILE_CMD)
-    # Simple shaders using SHADER_COMPILE_CMD
+    # Common shader includes that many shaders depend on
+    set(BINDINGS_DEPS
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bindings.glsl
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ubo_common.glsl
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ubo_snow.glsl
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ubo_cloud_shadow.glsl
+    )
+
+    # Simple shaders using SHADER_COMPILE_CMD (no includes)
     set(SIMPLE_SHADERS
-        shader.vert shader.frag
-        skinned.vert skinned_shadow.vert
-        sky.vert sky.frag
-        grass.comp grass_displacement.comp grass.vert grass.frag
         shadow.vert shadow.frag
-        grass_shadow.vert grass_shadow.frag
         postprocess.vert postprocess.frag
         bloom_downsample.frag bloom_upsample.frag bloom_composite.frag
-        froxel_update.comp froxel_integrate.comp
-        weather.comp weather.vert weather.frag
-        leaf.comp leaf.vert leaf.frag
         histogram_build.comp histogram_reduce.comp
-        snow_accumulation.comp
         hiz_downsample.comp hiz_culling.comp
     )
 
@@ -238,6 +237,28 @@ if(SHADER_COMPILE_CMD)
             COMMAND ${SHADER_COMPILE_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}
             DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}
             COMMENT "Compiling shader: ${SHADER}"
+        )
+    endforeach()
+
+    # Shaders that use bindings.glsl and other includes
+    set(SHADERS_WITH_BINDINGS
+        shader.vert shader.frag
+        skinned.vert skinned_shadow.vert
+        sky.vert sky.frag
+        grass.comp grass_displacement.comp grass.vert grass.frag
+        grass_shadow.vert grass_shadow.frag
+        froxel_update.comp froxel_integrate.comp
+        weather.comp weather.vert weather.frag
+        leaf.comp leaf.vert leaf.frag
+        snow_accumulation.comp
+    )
+
+    foreach(SHADER ${SHADERS_WITH_BINDINGS})
+        add_custom_command(
+            OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}.spv
+            COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}
+            DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER} ${BINDINGS_DEPS}
+            COMMENT "Compiling shader with includes: ${SHADER}"
         )
     endforeach()
 

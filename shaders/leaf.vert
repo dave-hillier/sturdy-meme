@@ -4,6 +4,7 @@
 
 const int NUM_CASCADES = 4;
 
+#include "bindings.glsl"
 #include "ubo_common.glsl"
 
 // Leaf particle states
@@ -31,12 +32,12 @@ struct LeafParticle {
     float padding;
 };
 
-layout(std430, binding = 1) readonly buffer ParticleBuffer {
+layout(std430, binding = BINDING_LEAF_PARTICLE_BUFFER) readonly buffer ParticleBuffer {
     LeafParticle particles[];
 };
 
 // Wind uniforms
-layout(binding = 2) uniform WindUniforms {
+layout(binding = BINDING_LEAF_WIND_UBO) uniform WindUniforms {
     vec4 windDirectionAndStrength;
     vec4 windParams;
 } wind;

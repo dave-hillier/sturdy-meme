@@ -33,6 +33,31 @@
 #define BINDING_BONE_MATRICES          12   // Bone matrices for skinned meshes
 
 // =============================================================================
+// Grass/Leaf System Descriptor Set
+// Note: Grass/Leaf systems share bindings with main set for UBOs/textures
+// but have their own instance and wind buffers
+// =============================================================================
+#define BINDING_GRASS_INSTANCE_BUFFER   1   // Grass instance SSBO
+#define BINDING_GRASS_WIND_UBO          3   // Wind uniforms for grass (main pass)
+#define BINDING_GRASS_SHADOW_WIND_UBO   2   // Wind uniforms for grass (shadow pass)
+#define BINDING_GRASS_SNOW_MASK         5   // Snow mask (grass-specific binding)
+#define BINDING_GRASS_CLOUD_SHADOW      6   // Cloud shadow map (grass-specific binding)
+
+#define BINDING_LEAF_PARTICLE_BUFFER    1   // Leaf particle SSBO
+#define BINDING_LEAF_WIND_UBO           2   // Wind uniforms for leaves
+
+// =============================================================================
+// Sky Shader Descriptor Set
+// Note: Sky uses main UBO but has its own atmosphere LUT bindings
+// =============================================================================
+#define BINDING_SKY_TRANSMITTANCE_LUT   1   // Transmittance LUT 256x64
+#define BINDING_SKY_MULTISCATTER_LUT    2   // Multi-scatter LUT 32x32
+#define BINDING_SKY_SKYVIEW_LUT         3   // Sky-view LUT 192x108
+#define BINDING_SKY_RAYLEIGH_IRR_LUT    4   // Rayleigh irradiance LUT
+#define BINDING_SKY_MIE_IRR_LUT         5   // Mie irradiance LUT
+#define BINDING_SKY_CLOUDMAP_LUT        6   // Cloud map paraboloid LUT
+
+// =============================================================================
 // Terrain Descriptor Set
 // Note: Terrain uses a separate descriptor set with different layout
 // =============================================================================

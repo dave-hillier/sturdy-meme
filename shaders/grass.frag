@@ -2,6 +2,8 @@
 
 #extension GL_GOOGLE_include_directive : require
 
+#include "bindings.glsl"
+
 // Grass system uses its own descriptor set layout with custom bindings.
 // Override the UBO bindings before including the shared headers.
 #define SNOW_UBO_BINDING 10
@@ -28,7 +30,7 @@
 // binding 10: snow UBO
 // binding 11: cloud shadow UBO
 
-layout(binding = 2) uniform sampler2DArrayShadow shadowMapArray;  // CSM shadow map
+layout(binding = BINDING_SHADOW_MAP) uniform sampler2DArrayShadow shadowMapArray;  // CSM shadow map
 
 // GPU light structure (must match CPU GPULight struct)
 struct GPULight {
@@ -39,16 +41,16 @@ struct GPULight {
 };
 
 // Light buffer SSBO
-layout(std430, binding = 4) readonly buffer LightBuffer {
+layout(std430, binding = BINDING_LIGHT_BUFFER) readonly buffer LightBuffer {
     uvec4 lightCount;        // x = active light count
     GPULight lights[MAX_LIGHTS];
 } lightBuffer;
 
 // Snow mask texture (world-space coverage)
-layout(binding = 5) uniform sampler2D snowMaskTexture;
+layout(binding = BINDING_GRASS_SNOW_MASK) uniform sampler2D snowMaskTexture;
 
 // Cloud shadow map (R16F: 0=shadow, 1=no shadow)
-layout(binding = 6) uniform sampler2D cloudShadowMap;
+layout(binding = BINDING_GRASS_CLOUD_SHADOW) uniform sampler2D cloudShadowMap;
 
 layout(location = 0) in vec3 fragColor;
 layout(location = 1) in vec3 fragNormal;

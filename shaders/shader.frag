@@ -2,6 +2,7 @@
 
 #extension GL_GOOGLE_include_directive : require
 
+#include "bindings.glsl"
 #include "constants_common.glsl"
 #include "lighting_common.glsl"
 #include "shadow_common.glsl"
@@ -13,14 +14,14 @@
 #include "ubo_cloud_shadow.glsl"
 #include "push_constants_common.glsl"
 
-layout(binding = 1) uniform sampler2D texSampler;
-layout(binding = 2) uniform sampler2DArrayShadow shadowMapArray;  // Changed to array for CSM
-layout(binding = 3) uniform sampler2D normalMap;
-layout(binding = 5) uniform sampler2D emissiveMap;
-layout(binding = 6) uniform samplerCubeArrayShadow pointShadowMaps;  // Point light cube shadow maps
-layout(binding = 7) uniform sampler2DArrayShadow spotShadowMaps;     // Spot light shadow maps
-layout(binding = 8) uniform sampler2D snowMaskTexture;               // World-space snow coverage
-layout(binding = 9) uniform sampler2D cloudShadowMap;                // Cloud shadow map (R16F)
+layout(binding = BINDING_DIFFUSE_TEX) uniform sampler2D texSampler;
+layout(binding = BINDING_SHADOW_MAP) uniform sampler2DArrayShadow shadowMapArray;  // Changed to array for CSM
+layout(binding = BINDING_NORMAL_MAP) uniform sampler2D normalMap;
+layout(binding = BINDING_EMISSIVE_MAP) uniform sampler2D emissiveMap;
+layout(binding = BINDING_POINT_SHADOW_MAP) uniform samplerCubeArrayShadow pointShadowMaps;  // Point light cube shadow maps
+layout(binding = BINDING_SPOT_SHADOW_MAP) uniform sampler2DArrayShadow spotShadowMaps;     // Spot light shadow maps
+layout(binding = BINDING_SNOW_MASK) uniform sampler2D snowMaskTexture;               // World-space snow coverage
+layout(binding = BINDING_CLOUD_SHADOW_MAP) uniform sampler2D cloudShadowMap;                // Cloud shadow map (R16F)
 
 // GPU light structure (must match CPU GPULight struct)
 struct GPULight {
@@ -31,7 +32,7 @@ struct GPULight {
 };
 
 // Light buffer SSBO
-layout(std430, binding = 4) readonly buffer LightBuffer {
+layout(std430, binding = BINDING_LIGHT_BUFFER) readonly buffer LightBuffer {
     uvec4 lightCount;        // x = active light count
     GPULight lights[MAX_LIGHTS];
 } lightBuffer;
