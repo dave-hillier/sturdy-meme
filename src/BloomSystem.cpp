@@ -317,32 +317,18 @@ bool BloomSystem::createPipelines() {
 }
 
 bool BloomSystem::createDescriptorSets() {
-    // Allocate descriptor sets for downsample (one per mip level)
-    std::vector<VkDescriptorSetLayout> downsampleLayouts(mipChain.size(), downsampleDescSetLayout);
-
-    VkDescriptorSetAllocateInfo downsampleAllocInfo = {};
-    downsampleAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    downsampleAllocInfo.descriptorPool = descriptorPool;
-    downsampleAllocInfo.descriptorSetCount = static_cast<uint32_t>(downsampleLayouts.size());
-    downsampleAllocInfo.pSetLayouts = downsampleLayouts.data();
-
-    downsampleDescSets.resize(mipChain.size());
-    if (vkAllocateDescriptorSets(device, &downsampleAllocInfo, downsampleDescSets.data()) != VK_SUCCESS) {
+    // Allocate descriptor sets for downsample (one per mip level) using managed pool
+    downsampleDescSets = descriptorPool->allocate(downsampleDescSetLayout, static_cast<uint32_t>(mipChain.size()));
+    if (downsampleDescSets.size() != mipChain.size()) {
+        SDL_Log("BloomSystem: Failed to allocate downsample descriptor sets");
         return false;
     }
 
     // Allocate descriptor sets for upsample (one per mip level except the smallest)
     if (mipChain.size() > 1) {
-        std::vector<VkDescriptorSetLayout> upsampleLayouts(mipChain.size() - 1, upsampleDescSetLayout);
-
-        VkDescriptorSetAllocateInfo upsampleAllocInfo = {};
-        upsampleAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        upsampleAllocInfo.descriptorPool = descriptorPool;
-        upsampleAllocInfo.descriptorSetCount = static_cast<uint32_t>(upsampleLayouts.size());
-        upsampleAllocInfo.pSetLayouts = upsampleLayouts.data();
-
-        upsampleDescSets.resize(mipChain.size() - 1);
-        if (vkAllocateDescriptorSets(device, &upsampleAllocInfo, upsampleDescSets.data()) != VK_SUCCESS) {
+        upsampleDescSets = descriptorPool->allocate(upsampleDescSetLayout, static_cast<uint32_t>(mipChain.size() - 1));
+        if (upsampleDescSets.size() != mipChain.size() - 1) {
+            SDL_Log("BloomSystem: Failed to allocate upsample descriptor sets");
             return false;
         }
     }

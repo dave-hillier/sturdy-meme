@@ -7,6 +7,7 @@
 #include <string>
 #include "UBOs.h"
 #include "BufferUtils.h"
+#include "DescriptorManager.h"
 
 // Atmosphere LUT system for physically-based sky rendering (Phase 4.1)
 // Precomputes transmittance and multi-scatter LUTs for efficient atmospheric scattering
@@ -65,7 +66,7 @@ public:
     struct InitInfo {
         VkDevice device;
         VmaAllocator allocator;
-        VkDescriptorPool descriptorPool;
+        DescriptorManager::Pool* descriptorPool;  // Auto-growing pool
         std::string shaderPath;
         uint32_t framesInFlight;
     };
@@ -138,7 +139,7 @@ private:
 
     VkDevice device = VK_NULL_HANDLE;
     VmaAllocator allocator = VK_NULL_HANDLE;
-    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
+    DescriptorManager::Pool* descriptorPool = nullptr;
     std::string shaderPath;
     uint32_t framesInFlight = 0;
 

@@ -259,17 +259,9 @@ bool GrassSystem::createDisplacementPipeline() {
         return false;
     }
 
-    // Allocate per-frame displacement descriptor sets (double-buffered)
-    displacementDescriptorSets.resize(getFramesInFlight());
-    std::vector<VkDescriptorSetLayout> layouts(getFramesInFlight(), displacementDescriptorSetLayout);
-
-    VkDescriptorSetAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = getDescriptorPool();
-    allocInfo.descriptorSetCount = getFramesInFlight();
-    allocInfo.pSetLayouts = layouts.data();
-
-    if (vkAllocateDescriptorSets(getDevice(), &allocInfo, displacementDescriptorSets.data()) != VK_SUCCESS) {
+    // Allocate per-frame displacement descriptor sets (double-buffered) using managed pool
+    displacementDescriptorSets = getDescriptorPool()->allocate(displacementDescriptorSetLayout, getFramesInFlight());
+    if (displacementDescriptorSets.empty()) {
         SDL_Log("Failed to allocate displacement descriptor sets");
         return false;
     }
@@ -561,16 +553,10 @@ bool GrassSystem::createDescriptorSets() {
         return false;
     }
 
-    // Allocate shadow descriptor sets for both buffer sets
+    // Allocate shadow descriptor sets for both buffer sets using managed pool
     for (uint32_t set = 0; set < BUFFER_SET_COUNT; set++) {
-        // Allocate shadow descriptor set for this buffer set
-        VkDescriptorSetAllocateInfo shadowAllocInfo{};
-        shadowAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        shadowAllocInfo.descriptorPool = getDescriptorPool();
-        shadowAllocInfo.descriptorSetCount = 1;
-        shadowAllocInfo.pSetLayouts = &shadowDescriptorSetLayout;
-
-        if (vkAllocateDescriptorSets(getDevice(), &shadowAllocInfo, &shadowDescriptorSetsDB[set]) != VK_SUCCESS) {
+        shadowDescriptorSetsDB[set] = getDescriptorPool()->allocateSingle(shadowDescriptorSetLayout);
+        if (shadowDescriptorSetsDB[set] == VK_NULL_HANDLE) {
             SDL_Log("Failed to allocate grass shadow descriptor set (set %u)", set);
             return false;
         }

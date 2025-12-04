@@ -264,36 +264,18 @@ bool CatmullClarkSystem::createRenderDescriptorSetLayout() {
 }
 
 bool CatmullClarkSystem::createDescriptorSets() {
-    // Allocate compute descriptor sets
-    {
-        std::vector<VkDescriptorSetLayout> layouts(framesInFlight, computeDescriptorSetLayout);
-        VkDescriptorSetAllocateInfo allocInfo{};
-        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        allocInfo.descriptorPool = descriptorPool;
-        allocInfo.descriptorSetCount = framesInFlight;
-        allocInfo.pSetLayouts = layouts.data();
-
-        computeDescriptorSets.resize(framesInFlight);
-        if (vkAllocateDescriptorSets(device, &allocInfo, computeDescriptorSets.data()) != VK_SUCCESS) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate compute descriptor sets");
-            return false;
-        }
+    // Allocate compute descriptor sets using managed pool
+    computeDescriptorSets = descriptorPool->allocate(computeDescriptorSetLayout, framesInFlight);
+    if (computeDescriptorSets.size() != framesInFlight) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate compute descriptor sets");
+        return false;
     }
 
-    // Allocate render descriptor sets
-    {
-        std::vector<VkDescriptorSetLayout> layouts(framesInFlight, renderDescriptorSetLayout);
-        VkDescriptorSetAllocateInfo allocInfo{};
-        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        allocInfo.descriptorPool = descriptorPool;
-        allocInfo.descriptorSetCount = framesInFlight;
-        allocInfo.pSetLayouts = layouts.data();
-
-        renderDescriptorSets.resize(framesInFlight);
-        if (vkAllocateDescriptorSets(device, &allocInfo, renderDescriptorSets.data()) != VK_SUCCESS) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate render descriptor sets");
-            return false;
-        }
+    // Allocate render descriptor sets using managed pool
+    renderDescriptorSets = descriptorPool->allocate(renderDescriptorSetLayout, framesInFlight);
+    if (renderDescriptorSets.size() != framesInFlight) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate render descriptor sets");
+        return false;
     }
 
     return true;

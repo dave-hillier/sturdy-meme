@@ -325,7 +325,6 @@ private:
     std::vector<VmaAllocation> lightBufferAllocations;
     std::vector<void*> lightBuffersMapped;
 
-    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;  // Legacy pool (for systems not yet migrated)
     std::optional<DescriptorManager::Pool> descriptorManagerPool;
     std::vector<VkDescriptorSet> descriptorSets;
     std::vector<VkDescriptorSet> groundDescriptorSets;

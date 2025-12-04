@@ -41,7 +41,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     postProcessInfo.device = device;
     postProcessInfo.allocator = allocator;
     postProcessInfo.outputRenderPass = renderPass;
-    postProcessInfo.descriptorPool = descriptorPool;
+    postProcessInfo.descriptorPool = &*descriptorManagerPool;
     postProcessInfo.extent = swapchainExtent;
     postProcessInfo.swapchainFormat = swapchainImageFormat;
     postProcessInfo.shaderPath = resourcePath + "/shaders";
@@ -53,7 +53,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     BloomSystem::InitInfo bloomInfo{};
     bloomInfo.device = device;
     bloomInfo.allocator = allocator;
-    bloomInfo.descriptorPool = descriptorPool;
+    bloomInfo.descriptorPool = &*descriptorManagerPool;
     bloomInfo.extent = swapchainExtent;
     bloomInfo.shaderPath = resourcePath + "/shaders";
 
@@ -73,7 +73,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     SkySystem::InitInfo skyInfo{};
     skyInfo.device = device;
     skyInfo.allocator = allocator;
-    skyInfo.descriptorPool = descriptorPool;
+    skyInfo.descriptorPool = &*descriptorManagerPool;
     skyInfo.shaderPath = resourcePath + "/shaders";
     skyInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
     skyInfo.extent = swapchainExtent;
@@ -89,7 +89,6 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     shadowInfo.device = device;
     shadowInfo.physicalDevice = physicalDevice;
     shadowInfo.allocator = allocator;
-    shadowInfo.descriptorPool = descriptorPool;
     shadowInfo.mainDescriptorSetLayout = descriptorSetLayout;
     shadowInfo.skinnedDescriptorSetLayout = skinnedDescriptorSetLayout;  // For skinned shadow pipeline
     shadowInfo.shaderPath = resourcePath + "/shaders";
@@ -131,7 +130,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     terrainInfo.allocator = allocator;
     terrainInfo.renderPass = postProcessSystem.getHDRRenderPass();
     terrainInfo.shadowRenderPass = shadowSystem.getShadowRenderPass();
-    terrainInfo.descriptorPool = descriptorPool;
+    terrainInfo.descriptorPool = &*descriptorManagerPool;
     terrainInfo.extent = swapchainExtent;
     terrainInfo.shadowMapSize = shadowSystem.getShadowMapSize();
     terrainInfo.shaderPath = resourcePath + "/shaders";
@@ -176,7 +175,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     snowMaskInfo.device = device;
     snowMaskInfo.allocator = allocator;
     snowMaskInfo.renderPass = postProcessSystem.getHDRRenderPass();
-    snowMaskInfo.descriptorPool = descriptorPool;
+    snowMaskInfo.descriptorPool = &*descriptorManagerPool;
     snowMaskInfo.extent = swapchainExtent;
     snowMaskInfo.shaderPath = resourcePath + "/shaders";
     snowMaskInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
@@ -188,7 +187,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     volumetricSnowInfo.device = device;
     volumetricSnowInfo.allocator = allocator;
     volumetricSnowInfo.renderPass = postProcessSystem.getHDRRenderPass();
-    volumetricSnowInfo.descriptorPool = descriptorPool;
+    volumetricSnowInfo.descriptorPool = &*descriptorManagerPool;
     volumetricSnowInfo.extent = swapchainExtent;
     volumetricSnowInfo.shaderPath = resourcePath + "/shaders";
     volumetricSnowInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
@@ -204,7 +203,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     grassInfo.allocator = allocator;
     grassInfo.renderPass = postProcessSystem.getHDRRenderPass();
     grassInfo.shadowRenderPass = shadowSystem.getShadowRenderPass();
-    grassInfo.descriptorPool = descriptorPool;
+    grassInfo.descriptorPool = &*descriptorManagerPool;
     grassInfo.extent = swapchainExtent;
     grassInfo.shadowMapSize = shadowSystem.getShadowMapSize();
     grassInfo.shaderPath = resourcePath + "/shaders";
@@ -216,7 +215,6 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     WindSystem::InitInfo windInfo{};
     windInfo.device = device;
     windInfo.allocator = allocator;
-    windInfo.descriptorPool = descriptorPool;
     windInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
 
     if (!windSystem.init(windInfo)) return false;
@@ -300,7 +298,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     weatherInfo.device = device;
     weatherInfo.allocator = allocator;
     weatherInfo.renderPass = postProcessSystem.getHDRRenderPass();
-    weatherInfo.descriptorPool = descriptorPool;
+    weatherInfo.descriptorPool = &*descriptorManagerPool;
     weatherInfo.extent = swapchainExtent;
     weatherInfo.shaderPath = resourcePath + "/shaders";
     weatherInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
@@ -332,7 +330,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     leafInfo.device = device;
     leafInfo.allocator = allocator;
     leafInfo.renderPass = postProcessSystem.getHDRRenderPass();
-    leafInfo.descriptorPool = descriptorPool;
+    leafInfo.descriptorPool = &*descriptorManagerPool;
     leafInfo.extent = swapchainExtent;
     leafInfo.shaderPath = resourcePath + "/shaders";
     leafInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
@@ -351,7 +349,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     FroxelSystem::InitInfo froxelInfo{};
     froxelInfo.device = device;
     froxelInfo.allocator = allocator;
-    froxelInfo.descriptorPool = descriptorPool;
+    froxelInfo.descriptorPool = &*descriptorManagerPool;
     froxelInfo.extent = swapchainExtent;
     froxelInfo.shaderPath = resourcePath + "/shaders";
     froxelInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
@@ -374,7 +372,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     AtmosphereLUTSystem::InitInfo atmosphereInfo{};
     atmosphereInfo.device = device;
     atmosphereInfo.allocator = allocator;
-    atmosphereInfo.descriptorPool = descriptorPool;
+    atmosphereInfo.descriptorPool = &*descriptorManagerPool;
     atmosphereInfo.shaderPath = resourcePath + "/shaders";
     atmosphereInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
 
@@ -428,7 +426,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     CloudShadowSystem::InitInfo cloudShadowInfo{};
     cloudShadowInfo.device = device;
     cloudShadowInfo.allocator = allocator;
-    cloudShadowInfo.descriptorPool = descriptorPool;
+    cloudShadowInfo.descriptorPool = &*descriptorManagerPool;
     cloudShadowInfo.shaderPath = resourcePath + "/shaders";
     cloudShadowInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
     cloudShadowInfo.cloudMapLUTView = atmosphereLUTSystem.getCloudMapLUTView();
@@ -466,7 +464,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     catmullClarkInfo.physicalDevice = physicalDevice;
     catmullClarkInfo.allocator = allocator;
     catmullClarkInfo.renderPass = postProcessSystem.getHDRRenderPass();
-    catmullClarkInfo.descriptorPool = descriptorPool;
+    catmullClarkInfo.descriptorPool = &*descriptorManagerPool;
     catmullClarkInfo.extent = swapchainExtent;
     catmullClarkInfo.shaderPath = resourcePath + "/shaders";
     catmullClarkInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
@@ -496,7 +494,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     HiZSystem::InitInfo hiZInfo{};
     hiZInfo.device = device;
     hiZInfo.allocator = allocator;
-    hiZInfo.descriptorPool = descriptorPool;
+    hiZInfo.descriptorPool = &*descriptorManagerPool;
     hiZInfo.extent = swapchainExtent;
     hiZInfo.shaderPath = resourcePath + "/shaders";
     hiZInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
@@ -524,7 +522,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     waterInfo.device = device;
     waterInfo.physicalDevice = physicalDevice;
     waterInfo.allocator = allocator;
-    waterInfo.descriptorPool = descriptorPool;
+    waterInfo.descriptorPool = &*descriptorManagerPool;
     waterInfo.hdrRenderPass = postProcessSystem.getHDRRenderPass();
     waterInfo.shaderPath = resourcePath + "/shaders";
     waterInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
@@ -580,8 +578,6 @@ void Renderer::shutdown() {
         }
 
         sceneManager.destroy(allocator, device);
-
-        vkDestroyDescriptorPool(device, descriptorPool, nullptr);
 
         // Clean up the auto-growing descriptor pool
         if (descriptorManagerPool.has_value()) {
@@ -1138,37 +1134,10 @@ void Renderer::updateLightBuffer(uint32_t currentImage, const Camera& camera) {
 bool Renderer::createDescriptorPool() {
     VkDevice device = vulkanContext.getDevice();
 
-    // Create the new auto-growing descriptor pool
+    // Create the auto-growing descriptor pool
     // Initial capacity of 64 sets per pool, will automatically grow if exhausted
+    // All subsystems now use this managed pool for consistent descriptor allocation
     descriptorManagerPool.emplace(device, 64);
-
-    // Legacy pool for systems not yet migrated to DescriptorManager
-    // This pool is still needed for: GrassSystem, WeatherSystem, LeafSystem, HiZSystem, etc.
-    // HiZ system needs: ~11 pyramid descriptor sets (one per mip level) + 2 culling sets
-    //   - Combined image samplers: 2 per pyramid set + 1 per culling set = ~24
-    //   - Storage images: 1 per pyramid set = ~11
-    //   - Storage buffers: 3 per culling set = ~6
-    //   - Uniform buffers: 1 per culling set = ~2
-    std::array<VkDescriptorPoolSize, 4> poolSizes{};
-    poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 20);
-    poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 50);
-    poolSizes[2].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    poolSizes[2].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 40);
-    poolSizes[3].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    poolSizes[3].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 24);
-
-    VkDescriptorPoolCreateInfo poolInfo{};
-    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
-    poolInfo.pPoolSizes = poolSizes.data();
-    poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 42);
-
-    if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS) {
-        SDL_Log("Failed to create legacy descriptor pool");
-        return false;
-    }
 
     return true;
 }
