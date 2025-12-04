@@ -5,6 +5,8 @@
 #include <vk_mem_alloc.h>
 #include <string>
 
+#include "TreeEditorGui.h"
+
 class Renderer;
 class Camera;
 
@@ -46,8 +48,16 @@ private:
     bool visible = true;
     bool showHelp = false;
 
+    // Tree editor as separate window
+    TreeEditorGui treeEditorGui;
+
     // Cached performance metrics
     float frameTimeHistory[120] = {0};
     int frameTimeIndex = 0;
     float avgFrameTime = 0.0f;
+
+public:
+    // Access to tree editor GUI
+    TreeEditorGui& getTreeEditorGui() { return treeEditorGui; }
+    const TreeEditorGui& getTreeEditorGui() const { return treeEditorGui; }
 };

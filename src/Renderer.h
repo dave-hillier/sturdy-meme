@@ -44,6 +44,7 @@
 #include "GlobalBufferManager.h"
 #include "Profiler.h"
 #include "WaterSystem.h"
+#include "TreeEditSystem.h"
 
 struct PushConstants {
     glm::mat4 model;
@@ -204,6 +205,13 @@ public:
     void setProfilingEnabled(bool enabled) { profiler.setEnabled(enabled); }
     bool isProfilingEnabled() const { return profiler.isEnabled(); }
 
+    // Tree edit system access
+    TreeEditSystem& getTreeEditSystem() { return treeEditSystem; }
+    const TreeEditSystem& getTreeEditSystem() const { return treeEditSystem; }
+    bool isTreeEditMode() const { return treeEditSystem.isEnabled(); }
+    void setTreeEditMode(bool enabled) { treeEditSystem.setEnabled(enabled); }
+    void toggleTreeEditMode() { treeEditSystem.toggle(); }
+
 private:
     bool createRenderPass();
     void destroyRenderResources();
@@ -286,6 +294,7 @@ private:
     CloudShadowSystem cloudShadowSystem;
     HiZSystem hiZSystem;
     WaterSystem waterSystem;
+    TreeEditSystem treeEditSystem;
     EnvironmentSettings environmentSettings;
     Profiler profiler;
     bool useVolumetricSnow = true;  // Use new volumetric system by default

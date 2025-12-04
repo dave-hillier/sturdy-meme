@@ -546,6 +546,24 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     // Create water descriptor sets
     if (!waterSystem.createDescriptorSets(uniformBuffers, sizeof(UniformBufferObject), shadowSystem)) return false;
 
+    // Initialize tree edit system
+    TreeEditSystem::InitInfo treeEditInfo{};
+    treeEditInfo.device = device;
+    treeEditInfo.physicalDevice = physicalDevice;
+    treeEditInfo.allocator = allocator;
+    treeEditInfo.renderPass = postProcessSystem.getHDRRenderPass();
+    treeEditInfo.descriptorPool = descriptorPool;
+    treeEditInfo.extent = swapchainExtent;
+    treeEditInfo.shaderPath = resourcePath + "/shaders";
+    treeEditInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+    treeEditInfo.graphicsQueue = graphicsQueue;
+    treeEditInfo.commandPool = commandPool;
+
+    if (!treeEditSystem.init(treeEditInfo)) return false;
+
+    // Update tree edit system descriptor sets with scene UBOs
+    treeEditSystem.updateDescriptorSets(device, uniformBuffers);
+
     if (!createSyncObjects()) return false;
 
     return true;
@@ -624,6 +642,7 @@ void Renderer::shutdown() {
         hiZSystem.destroy();
         profiler.shutdown();
         waterSystem.destroy(device, allocator);
+        treeEditSystem.destroy(device, allocator);
         atmosphereLUTSystem.destroy(device, allocator);
         skySystem.destroy(device, allocator);
         postProcessSystem.destroy(device, allocator);
@@ -1926,6 +1945,9 @@ void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float gra
 
     // Draw skinned character with GPU skinning
     recordSkinnedCharacter(cmd, frameIndex);
+
+    // Draw tree editor (when enabled)
+    treeEditSystem.recordDraw(cmd, frameIndex);
 
     // Draw grass
     grassSystem.recordDraw(cmd, frameIndex, grassTime);
