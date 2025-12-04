@@ -34,7 +34,8 @@ bool WaterSystem::init(const InitInfo& info) {
     waterUniforms.flowStrength = 1.0f;         // 1m UV offset per flow cycle
     waterUniforms.flowSpeed = 0.5f;            // Flow animation speed
     waterUniforms.flowFoamStrength = 0.5f;     // Flow-based foam intensity
-    waterUniforms.padding = 0.0f;
+    waterUniforms.fbmNearDistance = 50.0f;     // Max detail within 50m
+    waterUniforms.fbmFarDistance = 500.0f;     // Min detail beyond 500m
 
     if (!createDescriptorSetLayout()) return false;
     if (!createPipeline()) return false;

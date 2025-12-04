@@ -15,6 +15,7 @@
 #include "atmosphere_common.glsl"
 #include "terrain_height_common.glsl"
 #include "flow_common.glsl"
+#include "fbm_common.glsl"
 
 // Water-specific uniforms
 layout(std140, binding = 1) uniform WaterUniforms {
@@ -32,7 +33,8 @@ layout(std140, binding = 1) uniform WaterUniforms {
     float flowStrength;        // How much flow affects UV offset (world units)
     float flowSpeed;           // Flow animation speed multiplier
     float flowFoamStrength;    // How much flow speed affects foam
-    float padding;
+    float fbmNearDistance;     // Distance for max FBM detail (9 octaves)
+    float fbmFarDistance;      // Distance for min FBM detail (3 octaves)
 };
 
 layout(binding = 2) uniform sampler2DArrayShadow shadowMapArray;
@@ -146,15 +148,24 @@ void main() {
                                                  time * flowSpeed, flowStrength);
 
     // =========================================================================
-    // PROCEDURAL NORMAL DETAIL (Flow-Animated)
+    // LOD CALCULATION FOR FBM
+    // =========================================================================
+    // Calculate view distance for LOD-based FBM octave selection
+    // Per Far Cry 5: 9 octaves close, 3 octaves far, never 0 (reflections need detail)
+    float viewDistance = length(ubo.cameraPosition.xyz - fragWorldPos);
+    float fbmLodFactor = calculateFBMLODFactor(viewDistance, fbmNearDistance, fbmFarDistance);
+
+    // =========================================================================
+    // PROCEDURAL NORMAL DETAIL (Flow-Animated, LOD-Aware)
     // =========================================================================
     // Use flow-based UVs for normal detail to make waves follow water flow
-    float detail1_phase0 = fbm(flowSample.uv0 * 0.5 + time * 0.1, 3) * 2.0 - 1.0;
-    float detail1_phase1 = fbm(flowSample.uv1 * 0.5 + time * 0.1, 3) * 2.0 - 1.0;
+    // LOD: 9 octaves close (high detail), 3 octaves far (preserve reflections)
+    float detail1_phase0 = fbmLOD(flowSample.uv0 * 0.5 + time * 0.1, fbmLodFactor, 3, 9) * 2.0 - 1.0;
+    float detail1_phase1 = fbmLOD(flowSample.uv1 * 0.5 + time * 0.1, fbmLodFactor, 3, 9) * 2.0 - 1.0;
     float detail1 = blendFlowSamples(detail1_phase0, detail1_phase1, flowSample.blend);
 
-    float detail2_phase0 = fbm(flowSample.uv0 * 0.85 - time * 0.08, 3) * 2.0 - 1.0;
-    float detail2_phase1 = fbm(flowSample.uv1 * 0.85 - time * 0.08, 3) * 2.0 - 1.0;
+    float detail2_phase0 = fbmLOD(flowSample.uv0 * 0.85 - time * 0.08, fbmLodFactor, 3, 9) * 2.0 - 1.0;
+    float detail2_phase1 = fbmLOD(flowSample.uv1 * 0.85 - time * 0.08, fbmLodFactor, 3, 9) * 2.0 - 1.0;
     float detail2 = blendFlowSamples(detail2_phase0, detail2_phase1, flowSample.blend);
 
     // Reduce wave detail in shallow water (calmer near shore)
@@ -163,6 +174,9 @@ void main() {
 
     // Modulate detail strength by flow speed (faster water = more turbulent)
     detailStrength *= mix(0.7, 1.3, flowSample.speed);
+
+    // Fade detail strength at distance to reduce aliasing
+    detailStrength *= mix(1.0, 0.5, fbmLodFactor);
 
     vec3 detailNormal = normalize(N + vec3(detail1, 0.0, detail2) * detailStrength);
     N = normalize(mix(N, detailNormal, 0.5));
@@ -222,7 +236,7 @@ void main() {
     vec3 ambient = baseColor * ubo.ambientColor.rgb * 0.4;
 
     // =========================================================================
-    // FOAM - wave peaks + shore foam + flow foam
+    // FOAM - wave peaks + shore foam + flow foam (LOD-Aware)
     // =========================================================================
     vec3 foamColor = vec3(0.9, 0.95, 1.0);
 
@@ -230,8 +244,9 @@ void main() {
     float waveFoamAmount = smoothstep(foamThreshold * 0.7, foamThreshold, fragWaveHeight);
 
     // Use flow-based UVs for foam noise (foam follows water flow)
-    float foamNoise_phase0 = fbm(flowSample.uv0 * 2.0 + time * 0.2, 4);
-    float foamNoise_phase1 = fbm(flowSample.uv1 * 2.0 + time * 0.2, 4);
+    // Foam uses 2-6 octaves based on distance (less critical than surface detail)
+    float foamNoise_phase0 = fbmLOD(flowSample.uv0 * 2.0 + time * 0.2, fbmLodFactor, 2, 6);
+    float foamNoise_phase1 = fbmLOD(flowSample.uv1 * 2.0 + time * 0.2, fbmLodFactor, 2, 6);
     float foamNoise = blendFlowSamples(foamNoise_phase0, foamNoise_phase1, flowSample.blend);
     waveFoamAmount *= smoothstep(0.3, 0.7, foamNoise);
 
@@ -253,13 +268,13 @@ void main() {
     // Shore foam - where water is shallow
     float shoreFoamAmount = 0.0;
     if (insideTerrain && waterDepth > 0.0 && waterDepth < shoreFoamWidth) {
-        // Animated foam line that follows the shore (now flow-aware)
-        float shoreNoise_p0 = fbm(flowSample.uv0 * 0.5 + time * 0.1, 3);
-        float shoreNoise_p1 = fbm(flowSample.uv1 * 0.5 + time * 0.1, 3);
+        // Animated foam line that follows the shore (now flow-aware, LOD-aware)
+        float shoreNoise_p0 = fbmLOD(flowSample.uv0 * 0.5 + time * 0.1, fbmLodFactor, 2, 5);
+        float shoreNoise_p1 = fbmLOD(flowSample.uv1 * 0.5 + time * 0.1, fbmLodFactor, 2, 5);
         float shoreNoise = blendFlowSamples(shoreNoise_p0, shoreNoise_p1, flowSample.blend);
 
-        float shoreNoise2_p0 = fbm(flowSample.uv0 * 1.5 - time * 0.15, 2);
-        float shoreNoise2_p1 = fbm(flowSample.uv1 * 1.5 - time * 0.15, 2);
+        float shoreNoise2_p0 = fbmLOD(flowSample.uv0 * 1.5 - time * 0.15, fbmLodFactor, 2, 4);
+        float shoreNoise2_p1 = fbmLOD(flowSample.uv1 * 1.5 - time * 0.15, fbmLodFactor, 2, 4);
         float shoreNoise2 = blendFlowSamples(shoreNoise2_p0, shoreNoise2_p1, flowSample.blend);
 
         // Create foam bands at different depths (scaled by shoreFoamWidth)

@@ -43,7 +43,8 @@ public:
         float flowStrength;        // How much flow affects UV offset (world units)
         float flowSpeed;           // Flow animation speed multiplier
         float flowFoamStrength;    // How much flow speed affects foam
-        float padding;
+        float fbmNearDistance;     // Distance for max FBM detail (9 octaves)
+        float fbmFarDistance;      // Distance for min FBM detail (3 octaves)
     };
 
     WaterSystem() = default;
@@ -115,6 +116,14 @@ public:
     float getFlowStrength() const { return waterUniforms.flowStrength; }
     float getFlowSpeed() const { return waterUniforms.flowSpeed; }
     float getFlowFoamStrength() const { return waterUniforms.flowFoamStrength; }
+
+    // FBM LOD parameters
+    void setFBMLODDistances(float nearDist, float farDist) {
+        waterUniforms.fbmNearDistance = nearDist;
+        waterUniforms.fbmFarDistance = farDist;
+    }
+    float getFBMNearDistance() const { return waterUniforms.fbmNearDistance; }
+    float getFBMFarDistance() const { return waterUniforms.fbmFarDistance; }
 
 private:
     bool createDescriptorSetLayout();
