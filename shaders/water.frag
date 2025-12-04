@@ -183,8 +183,8 @@ void main() {
     vec3 baseColor = waterColor.rgb;
 
     // Shallow water is lighter/greener, deep water is darker/bluer
-    vec3 shallowColor = vec3(0.15, 0.35, 0.4);  // Turquoise tint
-    float depthColorFactor = smoothstep(0.0, 10.0, waterDepth);
+    vec3 shallowColor = vec3(0.2, 0.5, 0.5);  // Stronger turquoise tint
+    float depthColorFactor = smoothstep(0.0, 15.0, waterDepth);  // Wider transition
     baseColor = mix(shallowColor, baseColor, depthColorFactor);
 
     // Reflection color from environment
@@ -230,22 +230,23 @@ void main() {
     float shoreFoamAmount = 0.0;
     if (insideTerrain && waterDepth > 0.0 && waterDepth < shoreFoamWidth) {
         // Animated foam line that follows the shore
-        float shoreNoise = fbm(fragWorldPos.xz * 0.8 + time * 0.2, 3);
-        float shoreNoise2 = fbm(fragWorldPos.xz * 2.5 - time * 0.4, 2);
+        float shoreNoise = fbm(fragWorldPos.xz * 0.5 + time * 0.15, 3);
+        float shoreNoise2 = fbm(fragWorldPos.xz * 1.5 - time * 0.3, 2);
 
-        // Create foam bands at different depths
-        float band1 = smoothstep(0.0, 1.5, waterDepth) * smoothstep(3.0, 1.0, waterDepth);
-        float band2 = smoothstep(2.0, 3.5, waterDepth) * smoothstep(5.0, 3.5, waterDepth);
-        float band3 = smoothstep(4.0, 5.5, waterDepth) * smoothstep(shoreFoamWidth, 5.5, waterDepth);
+        // Create foam bands at different depths (scaled by shoreFoamWidth)
+        float fw = shoreFoamWidth;
+        float band1 = smoothstep(0.0, fw * 0.15, waterDepth) * smoothstep(fw * 0.35, fw * 0.1, waterDepth);
+        float band2 = smoothstep(fw * 0.25, fw * 0.4, waterDepth) * smoothstep(fw * 0.6, fw * 0.4, waterDepth);
+        float band3 = smoothstep(fw * 0.5, fw * 0.7, waterDepth) * smoothstep(fw, fw * 0.7, waterDepth);
 
-        // Modulate bands with noise for organic look
-        shoreFoamAmount = band1 * smoothstep(0.35, 0.65, shoreNoise);
-        shoreFoamAmount += band2 * smoothstep(0.4, 0.7, shoreNoise2) * 0.7;
-        shoreFoamAmount += band3 * smoothstep(0.45, 0.7, shoreNoise) * 0.4;
+        // Modulate bands with noise for organic look (lower thresholds = more foam)
+        shoreFoamAmount = band1 * smoothstep(0.25, 0.55, shoreNoise);
+        shoreFoamAmount += band2 * smoothstep(0.3, 0.6, shoreNoise2) * 0.8;
+        shoreFoamAmount += band3 * smoothstep(0.35, 0.6, shoreNoise) * 0.5;
 
-        // Extra foam right at the waterline
-        float waterlineIntensity = smoothstep(0.5, 0.0, waterDepth);
-        shoreFoamAmount = max(shoreFoamAmount, waterlineIntensity * 0.9);
+        // Strong foam right at the waterline
+        float waterlineIntensity = smoothstep(1.0, 0.0, waterDepth);
+        shoreFoamAmount = max(shoreFoamAmount, waterlineIntensity);
     }
 
     float totalFoamAmount = max(waveFoamAmount, shoreFoamAmount);
@@ -276,6 +277,18 @@ void main() {
 
     // Final alpha combines shore fade and foam
     float alpha = shoreAlpha * foamOpacity;
+
+    // DEBUG: Visualize water depth as color gradient
+    // Uncomment to debug terrain sampling:
+    // Red = shallow (0-5m), Green = medium (5-20m), Blue = deep (20m+)
+    /*
+    vec3 debugColor = vec3(0.0);
+    debugColor.r = 1.0 - smoothstep(0.0, 5.0, waterDepth);
+    debugColor.g = smoothstep(0.0, 5.0, waterDepth) * (1.0 - smoothstep(5.0, 20.0, waterDepth));
+    debugColor.b = smoothstep(5.0, 20.0, waterDepth);
+    outColor = vec4(debugColor, 1.0);
+    return;
+    */
 
     outColor = vec4(finalColor, alpha);
 }
