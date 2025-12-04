@@ -383,14 +383,15 @@ void SceneBuilder::createSceneObjects() {
         .build());
 
     // Well entrance - demonstrates terrain hole mask system
-    // A stone-like cube marking a hole in the terrain (cave/well entrance)
-    wellEntranceX = 5.0f;
-    wellEntranceZ = 5.0f;
+    // A stone-like cube floating above the terrain hole (cave/well entrance)
+    wellEntranceX = 20.0f;
+    wellEntranceZ = 20.0f;
     float wellY = getTerrainHeight(wellEntranceX, wellEntranceZ);
-    // Scale the cube to 2x2x0.5 to look like a well opening frame
+    // Raise the cube 5m above terrain so hole is visible underneath
+    // Scale to match hole size (30m diameter = 15m radius)
     glm::mat4 wellTransform = glm::translate(glm::mat4(1.0f),
-        glm::vec3(wellEntranceX, wellY + 0.25f, wellEntranceZ));
-    wellTransform = glm::scale(wellTransform, glm::vec3(2.0f, 0.5f, 2.0f));
+        glm::vec3(wellEntranceX, wellY + 5.0f, wellEntranceZ));
+    wellTransform = glm::scale(wellTransform, glm::vec3(10.0f, 2.0f, 10.0f));
     wellEntranceIndex = sceneObjects.size();
     sceneObjects.push_back(RenderableBuilder()
         .withTransform(wellTransform)
