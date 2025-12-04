@@ -1,5 +1,9 @@
 #version 450
 
+#extension GL_GOOGLE_include_directive : require
+
+#include "bindings.glsl"
+
 // Cloud Shadow Compute Shader
 // Generates a world-space cloud shadow map by ray-marching through the volumetric cloud layer
 // Uses the paraboloid cloud map LUT for cloud density sampling
@@ -8,13 +12,13 @@
 layout(local_size_x = 16, local_size_y = 16) in;
 
 // Output shadow map (R16F: 0 = full shadow, 1 = no shadow)
-layout(binding = 0, r16f) uniform image2D cloudShadowMap;
+layout(binding = BINDING_CLOUD_SHADOW_OUTPUT, r16f) uniform image2D cloudShadowMap;
 
 // Cloud map LUT from atmosphere system (paraboloid projection)
-layout(binding = 1) uniform sampler2D cloudMapLUT;
+layout(binding = BINDING_CLOUD_SHADOW_CLOUDMAP) uniform sampler2D cloudMapLUT;
 
 // Uniform buffer
-layout(binding = 2) uniform CloudShadowUniforms {
+layout(binding = BINDING_CLOUD_SHADOW_UNIFORMS) uniform CloudShadowUniforms {
     mat4 worldToShadowUV;      // Transform world XZ to shadow map UV
     vec4 sunDirection;          // xyz = sun direction (toward sun), w = intensity
     vec4 windOffset;            // xyz = wind offset for cloud animation, w = time

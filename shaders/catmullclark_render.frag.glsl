@@ -1,5 +1,9 @@
 #version 450
 
+#extension GL_GOOGLE_include_directive : require
+
+#include "bindings.glsl"
+
 // Catmull-Clark subdivision surface rendering - Fragment Shader
 
 layout(location = 0) in vec3 fragWorldPos;
@@ -8,7 +12,7 @@ layout(location = 2) in vec2 fragUV;
 
 layout(location = 0) out vec4 outColor;
 
-layout(binding = 0) uniform SceneUBO {
+layout(binding = BINDING_CC_SCENE_UBO) uniform SceneUBO {
     mat4 view;
     mat4 proj;
     vec4 cameraPos;

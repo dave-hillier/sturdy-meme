@@ -14,18 +14,19 @@
 
 #extension GL_GOOGLE_include_directive : require
 
+#include "bindings.glsl"
 #include "atmosphere_common.glsl"
 
 layout(local_size_x = 8, local_size_y = 8) in;
 
 // Output images: separate Rayleigh and Mie irradiance LUTs
-layout(binding = 0, rgba16f) writeonly uniform image2D rayleighIrradianceLUT;
-layout(binding = 1, rgba16f) writeonly uniform image2D mieIrradianceLUT;
+layout(binding = BINDING_IRRADIANCE_RAYLEIGH_OUT, rgba16f) writeonly uniform image2D rayleighIrradianceLUT;
+layout(binding = BINDING_IRRADIANCE_MIE_OUT, rgba16f) writeonly uniform image2D mieIrradianceLUT;
 
 // Input: transmittance LUT for sun visibility
-layout(binding = 2) uniform sampler2D transmittanceLUT;
+layout(binding = BINDING_IRRADIANCE_TRANSMITTANCE) uniform sampler2D transmittanceLUT;
 
-layout(binding = 3) uniform AtmosphereUniforms {
+layout(binding = BINDING_IRRADIANCE_UNIFORMS) uniform AtmosphereUniforms {
     AtmosphereParams params;
     vec4 sunDirection;
     vec4 cameraPosition;

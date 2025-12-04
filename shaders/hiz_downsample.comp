@@ -1,6 +1,8 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
 
+#include "bindings.glsl"
+
 // Hi-Z Pyramid Downsample Compute Shader
 // Generates a hierarchical depth buffer by taking the maximum depth of 2x2 regions
 // Uses max instead of min because we use reversed-Z depth (0 = far, 1 = near)
@@ -16,11 +18,11 @@ layout(push_constant) uniform PushConstants {
 } pc;
 
 // Source textures
-layout(binding = 0) uniform sampler2D srcDepthBuffer;   // Original depth buffer (for first pass)
-layout(binding = 1) uniform sampler2D srcHiZMip;        // Previous Hi-Z mip level
+layout(binding = BINDING_HIZ_SRC_DEPTH) uniform sampler2D srcDepthBuffer;   // Original depth buffer (for first pass)
+layout(binding = BINDING_HIZ_SRC_MIP) uniform sampler2D srcHiZMip;        // Previous Hi-Z mip level
 
 // Destination storage image
-layout(binding = 2, r32f) uniform writeonly image2D dstHiZMip;
+layout(binding = BINDING_HIZ_DST_MIP, r32f) uniform writeonly image2D dstHiZMip;
 
 void main() {
     ivec2 dstCoord = ivec2(gl_GlobalInvocationID.xy);

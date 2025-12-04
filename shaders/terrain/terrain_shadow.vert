@@ -8,13 +8,15 @@
  * Height convention: see terrain_height_common.glsl
  */
 
-#define CBT_BUFFER_BINDING 0
+#include "../bindings.glsl"
+
+#define CBT_BUFFER_BINDING BINDING_TERRAIN_CBT_BUFFER
 #include "cbt.glsl"
 #include "leb.glsl"
 #include "../terrain_height_common.glsl"
 
 // Height map
-layout(binding = 3) uniform sampler2D heightMap;
+layout(binding = BINDING_TERRAIN_HEIGHT_MAP) uniform sampler2D heightMap;
 
 // Push constants for per-cascade matrix
 layout(push_constant) uniform PushConstants {

@@ -10,7 +10,9 @@
  * Optimization: Inline frustum culling eliminates separate cull pass
  */
 
-#define CBT_BUFFER_BINDING 0
+#include "../bindings.glsl"
+
+#define CBT_BUFFER_BINDING BINDING_TERRAIN_CBT_BUFFER
 #include "cbt.glsl"
 #include "leb.glsl"
 #include "../terrain_height_common.glsl"
@@ -26,10 +28,10 @@ layout(push_constant) uniform PushConstants {
 };
 
 // Height map sampler
-layout(binding = 3) uniform sampler2D heightMap;
+layout(binding = BINDING_TERRAIN_HEIGHT_MAP) uniform sampler2D heightMap;
 
 // Uniform buffer with camera and terrain parameters
-layout(std140, binding = 4) uniform TerrainUniforms {
+layout(std140, binding = BINDING_TERRAIN_UBO) uniform TerrainUniforms {
     mat4 viewMatrix;
     mat4 projMatrix;
     mat4 viewProjMatrix;

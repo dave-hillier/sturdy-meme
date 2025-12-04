@@ -7,10 +7,11 @@
 
 const int NUM_CASCADES = 4;
 
+#include "bindings.glsl"
 #include "ubo_common.glsl"
 
 // Froxel volume for fog lighting (Phase 4.3.9)
-layout(binding = 3) uniform sampler3D froxelVolume;
+layout(binding = BINDING_WEATHER_FROXEL) uniform sampler3D froxelVolume;
 
 layout(location = 0) in vec2 fragUV;
 layout(location = 1) in float fragAlpha;

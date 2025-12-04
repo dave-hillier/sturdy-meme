@@ -1,5 +1,9 @@
 #version 450
 
+#extension GL_GOOGLE_include_directive : require
+
+#include "bindings.glsl"
+
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
 // Weather particle structure (32 bytes)
@@ -22,22 +26,22 @@ struct DrawIndirectCommand {
 };
 
 // Input particle buffer (previous frame)
-layout(std430, binding = 0) readonly buffer InputParticleBuffer {
+layout(std430, binding = BINDING_WEATHER_PARTICLES) readonly buffer InputParticleBuffer {
     WeatherParticle inputParticles[];
 };
 
 // Output particle buffer (current frame)
-layout(std430, binding = 1) buffer OutputParticleBuffer {
+layout(std430, binding = BINDING_WEATHER_INDIRECT) buffer OutputParticleBuffer {
     WeatherParticle outputParticles[];
 };
 
 // Indirect draw command buffer
-layout(std430, binding = 2) buffer IndirectBuffer {
+layout(std430, binding = BINDING_WEATHER_UBO) buffer IndirectBuffer {
     DrawIndirectCommand drawCmd;
 };
 
 // Weather uniforms
-layout(binding = 3) uniform WeatherUniforms {
+layout(binding = BINDING_WEATHER_UNIFORMS) uniform WeatherUniforms {
     vec4 cameraPosition;
     vec4 frustumPlanes[6];
     vec4 windDirectionStrength;     // xy = direction, z = strength, w = turbulence
@@ -56,7 +60,7 @@ layout(binding = 3) uniform WeatherUniforms {
 } uniforms;
 
 // Wind uniforms
-layout(binding = 4) uniform WindUniforms {
+layout(binding = BINDING_WEATHER_WIND) uniform WindUniforms {
     vec4 windDirectionAndStrength;  // xy = normalized direction, z = strength, w = speed
     vec4 windParams;                // x = gustFrequency, y = gustAmplitude, z = noiseScale, w = time
 } wind;

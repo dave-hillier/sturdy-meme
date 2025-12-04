@@ -1,10 +1,14 @@
 #version 450
 
+#extension GL_GOOGLE_include_directive : require
+
+#include "bindings.glsl"
+
 layout(location = 0) in vec2 vUV;
 layout(location = 0) out vec4 outColor;
 
-layout(binding = 0) uniform sampler2D hdrTexture;
-layout(binding = 1) uniform sampler2D bloomTexture;
+layout(binding = BINDING_BLOOM_INPUT) uniform sampler2D hdrTexture;
+layout(binding = BINDING_BLOOM_SECONDARY) uniform sampler2D bloomTexture;
 
 layout(push_constant) uniform PushConstants {
     float bloomIntensity;

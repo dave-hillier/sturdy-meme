@@ -2,20 +2,22 @@
 
 #extension GL_GOOGLE_include_directive : require
 
+#include "bindings.glsl"
+
 // Catmull-Clark subdivision surface rendering - Vertex Shader
 
 layout(location = 0) out vec3 fragWorldPos;
 layout(location = 1) out vec3 fragNormal;
 layout(location = 2) out vec2 fragUV;
 
-layout(binding = 0) uniform SceneUBO {
+layout(binding = BINDING_CC_SCENE_UBO) uniform SceneUBO {
     mat4 view;
     mat4 proj;
     vec4 cameraPos;
     vec4 frustumPlanes[6];
 } scene;
 
-layout(std140, binding = 1) readonly buffer CBTBuffer {
+layout(std140, binding = BINDING_CC_CBT_BUFFER) readonly buffer CBTBuffer {
     uint cbtData[];
 };
 

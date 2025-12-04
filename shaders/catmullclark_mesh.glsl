@@ -1,5 +1,7 @@
 // Catmull-Clark mesh accessor functions
 
+#include "bindings.glsl"
+
 // Mesh data structures (matching CPU-side)
 struct CCVertex {
     vec3 position;
@@ -20,15 +22,15 @@ struct CCFace {
 };
 
 // Storage buffers (to be bound)
-layout(std140, binding = 2) readonly buffer VertexBuffer {
+layout(std140, binding = BINDING_CC_VERTEX_BUFFER) readonly buffer VertexBuffer {
     CCVertex vertices[];
 };
 
-layout(std140, binding = 3) readonly buffer HalfedgeBuffer {
+layout(std140, binding = BINDING_CC_HALFEDGE_BUFFER) readonly buffer HalfedgeBuffer {
     CCHalfedge halfedges[];
 };
 
-layout(std140, binding = 4) readonly buffer FaceBuffer {
+layout(std140, binding = BINDING_CC_FACE_BUFFER) readonly buffer FaceBuffer {
     CCFace faces[];
 };
 

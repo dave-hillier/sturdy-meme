@@ -2,13 +2,14 @@
 
 #extension GL_GOOGLE_include_directive : require
 
+#include "bindings.glsl"
 #include "atmosphere_common.glsl"
 
 layout(local_size_x = 16, local_size_y = 16) in;
 
-layout(binding = 0, rgba16f) writeonly uniform image2D transmittanceLUT;
+layout(binding = BINDING_ATMO_OUTPUT_LUT, rgba16f) writeonly uniform image2D transmittanceLUT;
 
-layout(binding = 1) uniform AtmosphereUniforms {
+layout(binding = BINDING_ATMO_TRANSMITTANCE) uniform AtmosphereUniforms {
     AtmosphereParams params;
     vec4 sunDirection;
     vec4 cameraPosition;

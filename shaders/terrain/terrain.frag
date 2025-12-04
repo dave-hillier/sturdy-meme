@@ -7,6 +7,7 @@
  * Simple PBR-based terrain rendering with shadow support
  */
 
+#include "../bindings.glsl"
 #include "../constants_common.glsl"
 #include "../lighting_common.glsl"
 #include "../shadow_common.glsl"
@@ -21,7 +22,7 @@
 #include "../ubo_cloud_shadow.glsl"
 
 // Terrain-specific uniforms
-layout(std140, binding = 4) uniform TerrainUniforms {
+layout(std140, binding = BINDING_TERRAIN_UBO) uniform TerrainUniforms {
     mat4 viewMatrix;
     mat4 projMatrix;
     mat4 viewProjMatrix;
@@ -35,19 +36,19 @@ layout(std140, binding = 4) uniform TerrainUniforms {
 };
 
 // Textures
-layout(binding = 3) uniform sampler2D heightMap;
-layout(binding = 6) uniform sampler2D terrainAlbedo;
-layout(binding = 7) uniform sampler2DArrayShadow shadowMapArray;
-layout(binding = 8) uniform sampler2D grassFarLODTexture;  // Far LOD grass texture
-layout(binding = 9) uniform sampler2D snowMaskTexture;     // World-space snow coverage (legacy)
+layout(binding = BINDING_TERRAIN_HEIGHT_MAP) uniform sampler2D heightMap;
+layout(binding = BINDING_TERRAIN_ALBEDO) uniform sampler2D terrainAlbedo;
+layout(binding = BINDING_TERRAIN_SHADOW_MAP) uniform sampler2DArrayShadow shadowMapArray;
+layout(binding = BINDING_TERRAIN_FAR_LOD_GRASS) uniform sampler2D grassFarLODTexture;  // Far LOD grass texture
+layout(binding = BINDING_TERRAIN_SNOW_MASK) uniform sampler2D snowMaskTexture;     // World-space snow coverage (legacy)
 
 // Volumetric snow cascade textures (height in meters)
-layout(binding = 10) uniform sampler2D snowCascade0;  // Near cascade (256m)
-layout(binding = 11) uniform sampler2D snowCascade1;  // Mid cascade (1024m)
-layout(binding = 12) uniform sampler2D snowCascade2;  // Far cascade (4096m)
+layout(binding = BINDING_TERRAIN_SNOW_CASCADE_0) uniform sampler2D snowCascade0;  // Near cascade (256m)
+layout(binding = BINDING_TERRAIN_SNOW_CASCADE_1) uniform sampler2D snowCascade1;  // Mid cascade (1024m)
+layout(binding = BINDING_TERRAIN_SNOW_CASCADE_2) uniform sampler2D snowCascade2;  // Far cascade (4096m)
 
 // Cloud shadow map (R16F: 0=shadow, 1=no shadow)
-layout(binding = 13) uniform sampler2D cloudShadowMap;
+layout(binding = BINDING_TERRAIN_CLOUD_SHADOW) uniform sampler2D cloudShadowMap;
 
 // Far LOD grass parameters (where to start/end grass-to-terrain transition)
 const float GRASS_RENDER_DISTANCE = 60.0;     // Should match grass system maxDrawDistance

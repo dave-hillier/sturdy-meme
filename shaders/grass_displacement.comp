@@ -1,9 +1,13 @@
 #version 450
 
+#extension GL_GOOGLE_include_directive : require
+
+#include "bindings.glsl"
+
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
 // Displacement texture (RG16F - X and Z displacement)
-layout(binding = 0, rg16f) uniform image2D displacementMap;
+layout(binding = BINDING_GRASS_DISP_OUTPUT, rg16f) uniform image2D displacementMap;
 
 // Displacement source (player, NPCs, etc.)
 struct DisplacementSource {
@@ -11,11 +15,11 @@ struct DisplacementSource {
     vec4 strengthAndVelocity; // x = strength, yzw = velocity (for directional push)
 };
 
-layout(std430, binding = 1) readonly buffer SourceBuffer {
+layout(std430, binding = BINDING_GRASS_DISP_SOURCE) readonly buffer SourceBuffer {
     DisplacementSource sources[];
 };
 
-layout(binding = 2) uniform DisplacementUniforms {
+layout(binding = BINDING_GRASS_DISP_UNIFORMS) uniform DisplacementUniforms {
     vec4 regionCenter;  // xy = world center, z = region size, w = texel size
     vec4 params;        // x = decay rate, y = max displacement, z = delta time, w = num sources
 } uniforms;

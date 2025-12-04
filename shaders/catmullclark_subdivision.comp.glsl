@@ -1,30 +1,34 @@
 #version 450
 
+#extension GL_GOOGLE_include_directive : require
+
+#include "bindings.glsl"
+
 // Simple Catmull-Clark subdivision compute shader (placeholder)
 // TODO: Implement full adaptive subdivision logic
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
-layout(binding = 0) uniform SceneUBO {
+layout(binding = BINDING_CC_SCENE_UBO) uniform SceneUBO {
     mat4 view;
     mat4 proj;
     vec4 cameraPos;
     vec4 frustumPlanes[6];
 } scene;
 
-layout(std140, binding = 1) buffer CBTBuffer {
+layout(std140, binding = BINDING_CC_CBT_BUFFER) buffer CBTBuffer {
     uint cbtData[];
 };
 
-layout(std140, binding = 2) readonly buffer VertexBuffer {
+layout(std140, binding = BINDING_CC_VERTEX_BUFFER) readonly buffer VertexBuffer {
     vec3 vertexPositions[];
 };
 
-layout(std140, binding = 3) readonly buffer HalfedgeBuffer {
+layout(std140, binding = BINDING_CC_HALFEDGE_BUFFER) readonly buffer HalfedgeBuffer {
     uvec4 halfedges[];  // {vertexID, nextID, twinID, faceID}
 };
 
-layout(std140, binding = 4) readonly buffer FaceBuffer {
+layout(std140, binding = BINDING_CC_FACE_BUFFER) readonly buffer FaceBuffer {
     uvec2 faces[];  // {halfedgeID, valence}
 };
 

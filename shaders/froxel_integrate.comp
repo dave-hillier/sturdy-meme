@@ -4,14 +4,18 @@
 // Performs front-to-back integration of scattering along each view ray
 // Uses L/alpha storage for anti-aliased compositing
 
+#extension GL_GOOGLE_include_directive : require
+
+#include "bindings.glsl"
+
 layout(local_size_x = 4, local_size_y = 4, local_size_z = 1) in;
 
-layout(binding = 0, rgba16f) readonly uniform image3D scatteringVolume;
-layout(binding = 1, rgba16f) writeonly uniform image3D integratedVolume;
+layout(binding = BINDING_FROXEL_SCATTERING, rgba16f) readonly uniform image3D scatteringVolume;
+layout(binding = BINDING_FROXEL_INTEGRATED, rgba16f) writeonly uniform image3D integratedVolume;
 
 const int NUM_CASCADES = 4;
 
-layout(binding = 2) uniform FroxelUniforms {
+layout(binding = BINDING_FROXEL_UNIFORMS) uniform FroxelUniforms {
     mat4 invViewProj;
     mat4 prevViewProj;
     mat4 cascadeViewProj[NUM_CASCADES];  // Light-space matrices for shadow cascades
