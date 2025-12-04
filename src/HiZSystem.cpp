@@ -403,30 +403,21 @@ void HiZSystem::destroyBuffers() {
 }
 
 bool HiZSystem::createDescriptorSets() {
-    // Allocate pyramid descriptor sets (one per mip level)
-    pyramidDescSets.resize(mipLevelCount);
-    VkDescriptorSetAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = descriptorPool;
-    allocInfo.descriptorSetCount = 1;
-    allocInfo.pSetLayouts = &pyramidDescSetLayout;
-
-    for (uint32_t i = 0; i < mipLevelCount; ++i) {
-        if (vkAllocateDescriptorSets(device, &allocInfo, &pyramidDescSets[i]) != VK_SUCCESS) {
-            SDL_Log("HiZSystem: Failed to allocate pyramid descriptor set %u", i);
-            return false;
-        }
+    // Allocate pyramid descriptor sets (one per mip level) using managed pool
+    pyramidDescSets = descriptorPool->allocate(pyramidDescSetLayout, mipLevelCount);
+    if (pyramidDescSets.size() != mipLevelCount) {
+        SDL_Log("HiZSystem: Failed to allocate pyramid descriptor sets");
+        return false;
     }
 
-    // Allocate culling descriptor sets (one per frame)
-    cullingDescSets.resize(framesInFlight);
-    allocInfo.pSetLayouts = &cullingDescSetLayout;
+    // Allocate culling descriptor sets (one per frame) using managed pool
+    cullingDescSets = descriptorPool->allocate(cullingDescSetLayout, framesInFlight);
+    if (cullingDescSets.size() != framesInFlight) {
+        SDL_Log("HiZSystem: Failed to allocate culling descriptor sets");
+        return false;
+    }
 
     for (uint32_t i = 0; i < framesInFlight; ++i) {
-        if (vkAllocateDescriptorSets(device, &allocInfo, &cullingDescSets[i]) != VK_SUCCESS) {
-            SDL_Log("HiZSystem: Failed to allocate culling descriptor set %u", i);
-            return false;
-        }
 
         // Update culling descriptor set
         VkDescriptorBufferInfo uniformInfo{};

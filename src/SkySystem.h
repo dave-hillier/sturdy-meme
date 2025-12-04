@@ -4,6 +4,7 @@
 #include <vk_mem_alloc.h>
 #include <vector>
 #include <string>
+#include "DescriptorManager.h"
 
 class AtmosphereLUTSystem;
 
@@ -12,7 +13,7 @@ public:
     struct InitInfo {
         VkDevice device;
         VmaAllocator allocator;
-        VkDescriptorPool descriptorPool;
+        DescriptorManager::Pool* descriptorPool;  // Auto-growing pool
         std::string shaderPath;
         uint32_t framesInFlight;
         VkExtent2D extent;
@@ -24,6 +25,9 @@ public:
 
     bool init(const InitInfo& info);
     void destroy(VkDevice device, VmaAllocator allocator);
+
+    // Update extent for viewport (on window resize)
+    void setExtent(VkExtent2D newExtent) { extent = newExtent; }
 
     // Create descriptor sets after uniform buffers and LUTs are ready
     bool createDescriptorSets(const std::vector<VkBuffer>& uniformBuffers,
@@ -38,7 +42,7 @@ private:
     bool createPipeline();
 
     VkDevice device = VK_NULL_HANDLE;
-    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
+    DescriptorManager::Pool* descriptorPool = nullptr;
     std::string shaderPath;
     uint32_t framesInFlight = 0;
     VkExtent2D extent = {0, 0};

@@ -10,7 +10,6 @@ bool ShadowSystem::init(const InitInfo& info) {
     device = info.device;
     physicalDevice = info.physicalDevice;
     allocator = info.allocator;
-    descriptorPool = info.descriptorPool;
     mainDescriptorSetLayout = info.mainDescriptorSetLayout;
     skinnedDescriptorSetLayout = info.skinnedDescriptorSetLayout;
     shaderPath = info.shaderPath;

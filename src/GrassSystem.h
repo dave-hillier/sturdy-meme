@@ -47,6 +47,9 @@ public:
     bool init(const InitInfo& info);
     void destroy(VkDevice device, VmaAllocator allocator);
 
+    // Update extent for viewport (on window resize)
+    void setExtent(VkExtent2D newExtent) { particleSystem.setExtent(newExtent); }
+
     void updateDescriptorSets(VkDevice device, const std::vector<VkBuffer>& uniformBuffers,
                               VkImageView shadowMapView, VkSampler shadowSampler,
                               const std::vector<VkBuffer>& windBuffers,
@@ -92,7 +95,7 @@ private:
     VkDevice getDevice() const { return particleSystem.getDevice(); }
     VmaAllocator getAllocator() const { return particleSystem.getAllocator(); }
     VkRenderPass getRenderPass() const { return particleSystem.getRenderPass(); }
-    VkDescriptorPool getDescriptorPool() const { return particleSystem.getDescriptorPool(); }
+    DescriptorManager::Pool* getDescriptorPool() const { return particleSystem.getDescriptorPool(); }
     const VkExtent2D& getExtent() const { return particleSystem.getExtent(); }
     const std::string& getShaderPath() const { return particleSystem.getShaderPath(); }
     uint32_t getFramesInFlight() const { return particleSystem.getFramesInFlight(); }
@@ -124,7 +127,8 @@ private:
     VkDescriptorSetLayout displacementDescriptorSetLayout = VK_NULL_HANDLE;
     VkPipelineLayout displacementPipelineLayout = VK_NULL_HANDLE;
     VkPipeline displacementPipeline = VK_NULL_HANDLE;
-    VkDescriptorSet displacementDescriptorSet = VK_NULL_HANDLE;
+    // Per-frame descriptor sets for displacement update (double-buffered)
+    std::vector<VkDescriptorSet> displacementDescriptorSets;
 
     // Displacement sources buffer (per-frame)
     BufferUtils::PerFrameBufferSet displacementSourceBuffers;

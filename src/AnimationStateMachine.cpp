@@ -1,6 +1,8 @@
 #include "AnimationStateMachine.h"
+#include "PhysicsSystem.h"
 #include <SDL3/SDL_log.h>
 #include <glm/gtc/matrix_transform.hpp>
+#include <algorithm>
 
 void AnimationStateMachine::addState(const std::string& name, const AnimationClip* clip, bool looping) {
     State state;
@@ -64,7 +66,20 @@ void AnimationStateMachine::update(float deltaTime, float movementSpeed, bool is
 
     // Update animation times for current (and previous if blending) states
     State* current = findState(currentState);
-    if (current && current->clip) {
+
+    // Special handling for jump animation - sync to trajectory
+    if (currentState == "jump" && jumpTrajectory.active && current && current->clip) {
+        jumpTrajectory.elapsedTime += deltaTime;
+
+        if (jumpTrajectory.predictedDuration > 0.0f && jumpTrajectory.animationDuration > 0.0f) {
+            // Map elapsed time to animation time based on predicted arc
+            float jumpProgress = std::clamp(jumpTrajectory.elapsedTime / jumpTrajectory.predictedDuration, 0.0f, 1.0f);
+            current->time = jumpProgress * jumpTrajectory.animationDuration;
+        } else {
+            // Fallback to normal time progression
+            current->time += deltaTime * current->speed;
+        }
+    } else if (current && current->clip) {
         current->time += deltaTime * current->speed;
         if (current->looping && current->clip->duration > 0.0f) {
             current->time = std::fmod(current->time, current->clip->duration);
@@ -83,19 +98,29 @@ void AnimationStateMachine::update(float deltaTime, float movementSpeed, bool is
 
     // Automatic state transitions based on movement
     if (currentState == "jump") {
-        // Wait for jump animation to finish or land
-        if (isGrounded && current && current->time > 0.3f) {
-            // Landed - transition based on movement
+        // Check for landing - either expected or early
+        if (isGrounded) {
+            // Landed - deactivate trajectory and transition based on movement
+            jumpTrajectory.active = false;
+
+            // Quick blend to landing animation if we landed early
+            float blendTime = 0.15f;
+            if (jumpTrajectory.elapsedTime < jumpTrajectory.predictedDuration * 0.8f) {
+                // Early landing - faster blend
+                blendTime = 0.1f;
+            }
+
             if (movementSpeed > RUN_THRESHOLD) {
-                transitionTo("run", 0.15f);
+                transitionTo("run", blendTime);
             } else if (movementSpeed > WALK_THRESHOLD) {
-                transitionTo("walk", 0.15f);
+                transitionTo("walk", blendTime);
             } else {
-                transitionTo("idle", 0.2f);
+                transitionTo("idle", blendTime + 0.05f);
             }
         }
     } else if (isJumping) {
         // Started jumping (isJumping is already gated by isGrounded in Application.cpp)
+        // Note: startJump() should be called before update() to set up trajectory
         transitionTo("jump", 0.1f);
     } else if (movementSpeed > RUN_THRESHOLD) {
         if (currentState != "run") {
@@ -196,4 +221,93 @@ const AnimationStateMachine::State* AnimationStateMachine::findState(const std::
         }
     }
     return nullptr;
+}
+
+void AnimationStateMachine::startJump(const glm::vec3& startPos, const glm::vec3& velocity, float gravity, const PhysicsWorld* physics) {
+    jumpTrajectory.active = true;
+    jumpTrajectory.startPosition = startPos;
+    jumpTrajectory.startVelocity = velocity;
+    jumpTrajectory.gravity = gravity;
+    jumpTrajectory.elapsedTime = 0.0f;
+
+    // Get the jump animation duration
+    const State* jumpState = findState("jump");
+    if (jumpState && jumpState->clip) {
+        jumpTrajectory.animationDuration = jumpState->clip->duration;
+    } else {
+        jumpTrajectory.animationDuration = 1.0f;  // Fallback
+    }
+
+    // Predict landing time
+    jumpTrajectory.predictedDuration = predictLandingTime(startPos, velocity, gravity, physics);
+
+    SDL_Log("Jump started: predicted duration=%.2fs, anim duration=%.2fs",
+            jumpTrajectory.predictedDuration, jumpTrajectory.animationDuration);
+}
+
+float AnimationStateMachine::predictLandingTime(const glm::vec3& startPos, const glm::vec3& velocity, float gravity, const PhysicsWorld* physics) const {
+    // Simple parabola calculation as baseline:
+    // y(t) = y0 + vy*t - 0.5*g*t^2
+    // Landing when y(t) = y0 (or hits ground)
+    // 0 = vy*t - 0.5*g*t^2
+    // t = 2*vy/g (time to return to starting height)
+    float simpleFlightTime = 2.0f * velocity.y / gravity;
+
+    if (!physics) {
+        return simpleFlightTime;
+    }
+
+    // Trace the parabolic arc to find actual landing point
+    // Sample points along the trajectory and raycast downward
+    constexpr int NUM_SAMPLES = 16;
+    constexpr float MAX_FLIGHT_TIME = 3.0f;  // Cap prediction to reasonable time
+    float searchTime = std::min(simpleFlightTime * 1.5f, MAX_FLIGHT_TIME);
+    float dt = searchTime / NUM_SAMPLES;
+
+    glm::vec3 prevPos = startPos;
+
+    for (int i = 1; i <= NUM_SAMPLES; ++i) {
+        float t = dt * i;
+
+        // Position at time t: p(t) = p0 + v*t + 0.5*a*t^2
+        glm::vec3 pos;
+        pos.x = startPos.x + velocity.x * t;
+        pos.y = startPos.y + velocity.y * t - 0.5f * gravity * t * t;
+        pos.z = startPos.z + velocity.z * t;
+
+        // Raycast from previous position to current position
+        auto hits = physics->castRayAllHits(prevPos, pos);
+
+        for (const auto& hit : hits) {
+            if (hit.hit) {
+                // Found collision - interpolate time
+                // hit.distance is fraction along the ray
+                float segmentTime = dt * hit.distance;
+                float landingTime = dt * (i - 1) + segmentTime;
+
+                // Ensure minimum flight time (don't land immediately)
+                return std::max(landingTime, 0.2f);
+            }
+        }
+
+        // Also check if we've gone below starting height without hitting anything
+        // (for flat ground case where we might miss the surface)
+        if (pos.y < startPos.y - 0.1f) {
+            // Raycast straight down from current position
+            glm::vec3 downTarget = pos - glm::vec3(0.0f, 2.0f, 0.0f);
+            auto downHits = physics->castRayAllHits(pos, downTarget);
+
+            for (const auto& hit : downHits) {
+                if (hit.hit && hit.distance < 1.0f) {
+                    // Ground is close below - estimate landing time
+                    return std::max(t + hit.distance * 0.1f, 0.2f);
+                }
+            }
+        }
+
+        prevPos = pos;
+    }
+
+    // No collision found - use simple parabola time
+    return std::max(simpleFlightTime, 0.3f);
 }

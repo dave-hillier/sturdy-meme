@@ -41,14 +41,14 @@ void RockSystem::destroy(VmaAllocator allocator, VkDevice device) {
 
 bool RockSystem::loadTextures(const InitInfo& info) {
     // Use concrete texture as a rock-like surface
-    std::string texturePath = info.resourcePath + "/textures/industrial/concrete_1.jpg";
+    std::string texturePath = info.resourcePath + "/assets/textures/industrial/concrete_1.jpg";
     if (!rockTexture.load(texturePath, info.allocator, info.device, info.commandPool,
                           info.graphicsQueue, info.physicalDevice)) {
         SDL_Log("RockSystem: Failed to load rock texture: %s", texturePath.c_str());
         return false;
     }
 
-    std::string normalPath = info.resourcePath + "/textures/industrial/concrete_1_norm.jpg";
+    std::string normalPath = info.resourcePath + "/assets/textures/industrial/concrete_1_norm.jpg";
     if (!rockNormalMap.load(normalPath, info.allocator, info.device, info.commandPool,
                             info.graphicsQueue, info.physicalDevice, false)) {
         SDL_Log("RockSystem: Failed to load rock normal map: %s", normalPath.c_str());

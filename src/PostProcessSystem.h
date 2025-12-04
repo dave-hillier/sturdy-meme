@@ -7,6 +7,7 @@
 #include <string>
 #include <functional>
 #include "UBOs.h"
+#include "DescriptorManager.h"
 
 // Alias for compatibility with existing code
 using HistogramBuildParams = HistogramParams;
@@ -41,7 +42,7 @@ public:
         VkDevice device;
         VmaAllocator allocator;
         VkRenderPass outputRenderPass;
-        VkDescriptorPool descriptorPool;
+        DescriptorManager::Pool* descriptorPool;  // Auto-growing pool
         VkExtent2D extent;
         VkFormat swapchainFormat;
         std::string shaderPath;
@@ -126,7 +127,7 @@ private:
 
     VkDevice device = VK_NULL_HANDLE;
     VmaAllocator allocator = VK_NULL_HANDLE;
-    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
+    DescriptorManager::Pool* descriptorPool = nullptr;
     VkRenderPass outputRenderPass = VK_NULL_HANDLE;
     VkExtent2D extent = {0, 0};
     VkFormat swapchainFormat = VK_FORMAT_UNDEFINED;

@@ -153,18 +153,10 @@ bool SnowMaskSystem::createComputePipeline() {
 }
 
 bool SnowMaskSystem::createDescriptorSets() {
-    computeDescriptorSets.resize(getFramesInFlight());
-
-    std::vector<VkDescriptorSetLayout> layouts(getFramesInFlight(),
-                                                getComputePipelineHandles().descriptorSetLayout);
-
-    VkDescriptorSetAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = getDescriptorPool();
-    allocInfo.descriptorSetCount = static_cast<uint32_t>(layouts.size());
-    allocInfo.pSetLayouts = layouts.data();
-
-    if (vkAllocateDescriptorSets(getDevice(), &allocInfo, computeDescriptorSets.data()) != VK_SUCCESS) {
+    // Allocate descriptor sets using managed pool
+    computeDescriptorSets = getDescriptorPool()->allocate(
+        getComputePipelineHandles().descriptorSetLayout, getFramesInFlight());
+    if (computeDescriptorSets.size() != getFramesInFlight()) {
         SDL_Log("Failed to allocate snow mask descriptor sets");
         return false;
     }

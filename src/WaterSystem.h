@@ -7,6 +7,7 @@
 #include <string>
 
 #include "Mesh.h"
+#include "DescriptorManager.h"
 
 class ShadowSystem;
 
@@ -16,7 +17,7 @@ public:
         VkDevice device;
         VkPhysicalDevice physicalDevice;
         VmaAllocator allocator;
-        VkDescriptorPool descriptorPool;
+        DescriptorManager::Pool* descriptorPool;  // Auto-growing pool
         VkRenderPass hdrRenderPass;
         std::string shaderPath;
         uint32_t framesInFlight;
@@ -43,6 +44,9 @@ public:
 
     bool init(const InitInfo& info);
     void destroy(VkDevice device, VmaAllocator allocator);
+
+    // Update extent for viewport (on window resize)
+    void setExtent(VkExtent2D newExtent) { extent = newExtent; }
 
     // Create descriptor sets after main UBO is ready
     bool createDescriptorSets(const std::vector<VkBuffer>& uniformBuffers,
@@ -93,7 +97,7 @@ private:
     VkDevice device = VK_NULL_HANDLE;
     VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
     VmaAllocator allocator = VK_NULL_HANDLE;
-    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
+    DescriptorManager::Pool* descriptorPool = nullptr;
     VkRenderPass hdrRenderPass = VK_NULL_HANDLE;
     std::string shaderPath;
     uint32_t framesInFlight = 0;

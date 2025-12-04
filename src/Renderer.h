@@ -45,6 +45,7 @@
 #include "GlobalBufferManager.h"
 #include "Profiler.h"
 #include "WaterSystem.h"
+#include "TreeEditSystem.h"
 
 struct PushConstants {
     glm::mat4 model;
@@ -68,6 +69,12 @@ public:
 
     uint32_t getWidth() const { return vulkanContext.getWidth(); }
     uint32_t getHeight() const { return vulkanContext.getHeight(); }
+
+    // Handle window resize (recreate swapchain and dependent resources)
+    bool handleResize();
+
+    // Notify renderer that window was resized (will trigger resize on next render)
+    void notifyWindowResized() { framebufferResized = true; }
 
     // Vulkan handle getters for GUI integration
     VkInstance getInstance() const { return vulkanContext.getInstance(); }
@@ -185,6 +192,11 @@ public:
         sceneManager.getSceneBuilder().updateAnimatedCharacter(deltaTime, vulkanContext.getAllocator(), vulkanContext.getDevice(), commandPool, vulkanContext.getGraphicsQueue(), movementSpeed, isGrounded, isJumping);
     }
 
+    // Start a jump with trajectory prediction for animation sync
+    void startCharacterJump(const glm::vec3& startPos, const glm::vec3& velocity, float gravity, const class PhysicsWorld* physics) {
+        sceneManager.getSceneBuilder().startCharacterJump(startPos, velocity, gravity, physics);
+    }
+
     // Celestial/astronomical settings
     void setLocation(const GeographicLocation& location) { celestialCalculator.setLocation(location); }
     const GeographicLocation& getLocation() const { return celestialCalculator.getLocation(); }
@@ -206,9 +218,18 @@ public:
     void setProfilingEnabled(bool enabled) { profiler.setEnabled(enabled); }
     bool isProfilingEnabled() const { return profiler.isEnabled(); }
 
+    // Tree edit system access
+    TreeEditSystem& getTreeEditSystem() { return treeEditSystem; }
+    const TreeEditSystem& getTreeEditSystem() const { return treeEditSystem; }
+    bool isTreeEditMode() const { return treeEditSystem.isEnabled(); }
+    void setTreeEditMode(bool enabled) { treeEditSystem.setEnabled(enabled); }
+    void toggleTreeEditMode() { treeEditSystem.toggle(); }
+
 private:
     bool createRenderPass();
     void destroyRenderResources();
+    void destroyDepthImageAndView();  // Helper for resize (keeps sampler)
+    void destroyFramebuffers();       // Helper for resize
     bool createFramebuffers();
     bool createCommandPool();
     bool createCommandBuffers();
@@ -289,6 +310,7 @@ private:
     HiZSystem hiZSystem;
     WaterSystem waterSystem;
     ErosionSimulator erosionSimulator;
+    TreeEditSystem treeEditSystem;
     EnvironmentSettings environmentSettings;
     Profiler profiler;
     bool useVolumetricSnow = true;  // Use new volumetric system by default
@@ -328,7 +350,6 @@ private:
     std::vector<VmaAllocation> lightBufferAllocations;
     std::vector<void*> lightBuffersMapped;
 
-    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;  // Legacy pool (for systems not yet migrated)
     std::optional<DescriptorManager::Pool> descriptorManagerPool;
     std::vector<VkDescriptorSet> descriptorSets;
     std::vector<VkDescriptorSet> groundDescriptorSets;
@@ -362,6 +383,7 @@ private:
     bool showSnowDepthDebug = false;       // true = show snow depth heat map overlay
     bool useParaboloidClouds = true;       // true = paraboloid LUT hybrid, false = procedural
     bool hdrEnabled = true;                // true = HDR tonemapping/bloom, false = bypass
+    bool framebufferResized = false;       // true = window resized, need to recreate swapchain
 
     // Player position for grass displacement
     glm::vec3 playerPosition = glm::vec3(0.0f);

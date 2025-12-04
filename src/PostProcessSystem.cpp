@@ -383,16 +383,9 @@ bool PostProcessSystem::createUniformBuffers() {
 }
 
 bool PostProcessSystem::createDescriptorSets() {
-    std::vector<VkDescriptorSetLayout> layouts(framesInFlight, compositeDescriptorSetLayout);
-
-    VkDescriptorSetAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = descriptorPool;
-    allocInfo.descriptorSetCount = framesInFlight;
-    allocInfo.pSetLayouts = layouts.data();
-
-    compositeDescriptorSets.resize(framesInFlight);
-    if (vkAllocateDescriptorSets(device, &allocInfo, compositeDescriptorSets.data()) != VK_SUCCESS) {
+    // Allocate composite descriptor sets using managed pool
+    compositeDescriptorSets = descriptorPool->allocate(compositeDescriptorSetLayout, framesInFlight);
+    if (compositeDescriptorSets.size() != framesInFlight) {
         SDL_Log("Failed to allocate composite descriptor sets");
         return false;
     }
@@ -920,30 +913,16 @@ bool PostProcessSystem::createHistogramPipelines() {
 }
 
 bool PostProcessSystem::createHistogramDescriptorSets() {
-    // Allocate histogram build descriptor sets
-    std::vector<VkDescriptorSetLayout> buildLayouts(framesInFlight, histogramBuildDescLayout);
-    VkDescriptorSetAllocateInfo buildAllocInfo{};
-    buildAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    buildAllocInfo.descriptorPool = descriptorPool;
-    buildAllocInfo.descriptorSetCount = framesInFlight;
-    buildAllocInfo.pSetLayouts = buildLayouts.data();
-
-    histogramBuildDescSets.resize(framesInFlight);
-    if (vkAllocateDescriptorSets(device, &buildAllocInfo, histogramBuildDescSets.data()) != VK_SUCCESS) {
+    // Allocate histogram build descriptor sets using managed pool
+    histogramBuildDescSets = descriptorPool->allocate(histogramBuildDescLayout, framesInFlight);
+    if (histogramBuildDescSets.size() != framesInFlight) {
         SDL_Log("Failed to allocate histogram build descriptor sets");
         return false;
     }
 
-    // Allocate histogram reduce descriptor sets
-    std::vector<VkDescriptorSetLayout> reduceLayouts(framesInFlight, histogramReduceDescLayout);
-    VkDescriptorSetAllocateInfo reduceAllocInfo{};
-    reduceAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    reduceAllocInfo.descriptorPool = descriptorPool;
-    reduceAllocInfo.descriptorSetCount = framesInFlight;
-    reduceAllocInfo.pSetLayouts = reduceLayouts.data();
-
-    histogramReduceDescSets.resize(framesInFlight);
-    if (vkAllocateDescriptorSets(device, &reduceAllocInfo, histogramReduceDescSets.data()) != VK_SUCCESS) {
+    // Allocate histogram reduce descriptor sets using managed pool
+    histogramReduceDescSets = descriptorPool->allocate(histogramReduceDescLayout, framesInFlight);
+    if (histogramReduceDescSets.size() != framesInFlight) {
         SDL_Log("Failed to allocate histogram reduce descriptor sets");
         return false;
     }

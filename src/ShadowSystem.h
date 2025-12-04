@@ -29,7 +29,6 @@ public:
         VkDevice device;
         VkPhysicalDevice physicalDevice;
         VmaAllocator allocator;
-        VkDescriptorPool descriptorPool;
         VkDescriptorSetLayout mainDescriptorSetLayout;  // For pipeline compatibility
         VkDescriptorSetLayout skinnedDescriptorSetLayout = VK_NULL_HANDLE;  // For skinned shadow pipeline (optional)
         std::string shaderPath;
@@ -107,7 +106,6 @@ private:
     VkDevice device = VK_NULL_HANDLE;
     VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
     VmaAllocator allocator = VK_NULL_HANDLE;
-    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
     VkDescriptorSetLayout mainDescriptorSetLayout = VK_NULL_HANDLE;
     VkDescriptorSetLayout skinnedDescriptorSetLayout = VK_NULL_HANDLE;
     std::string shaderPath;

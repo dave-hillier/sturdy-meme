@@ -8,6 +8,7 @@
 #include "UBOs.h"
 #include "CatmullClarkCBT.h"
 #include "CatmullClarkMesh.h"
+#include "DescriptorManager.h"
 
 // Push constants for rendering
 struct CatmullClarkPushConstants {
@@ -40,7 +41,7 @@ public:
         VkPhysicalDevice physicalDevice;
         VmaAllocator allocator;
         VkRenderPass renderPass;
-        VkDescriptorPool descriptorPool;
+        DescriptorManager::Pool* descriptorPool;  // Auto-growing pool
         VkExtent2D extent;
         std::string shaderPath;
         uint32_t framesInFlight;
@@ -53,6 +54,9 @@ public:
 
     bool init(const InitInfo& info, const CatmullClarkConfig& config = {});
     void destroy(VkDevice device, VmaAllocator allocator);
+
+    // Update extent for viewport (on window resize)
+    void setExtent(VkExtent2D newExtent) { extent = newExtent; }
 
     // Update descriptor sets with shared resources
     void updateDescriptorSets(VkDevice device, const std::vector<VkBuffer>& sceneUniformBuffers);
@@ -95,7 +99,7 @@ private:
     VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
     VmaAllocator allocator = VK_NULL_HANDLE;
     VkRenderPass renderPass = VK_NULL_HANDLE;
-    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
+    DescriptorManager::Pool* descriptorPool = nullptr;
     VkExtent2D extent = {0, 0};
     std::string shaderPath;
     uint32_t framesInFlight = 0;

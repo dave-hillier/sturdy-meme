@@ -4,7 +4,7 @@
 #define CONSTANTS_COMMON_GLSL
 
 const float PI = 3.14159265359;
-const int NUM_CASCADES = 4;
+#define NUM_CASCADES 4
 
 // Atmospheric parameters (Phase 4 - scaled to kilometers for scene scale)
 const float PLANET_RADIUS = 6371.0;

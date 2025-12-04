@@ -32,31 +32,21 @@ void ParticleSystem::setGraphicsDescriptorSet(uint32_t index, VkDescriptorSet se
 }
 
 bool ParticleSystem::createStandardDescriptorSets() {
-    // Allocate descriptor sets for both buffer sets
+    // Allocate descriptor sets for both buffer sets using managed pool
     for (uint32_t set = 0; set < bufferSetCount; set++) {
         // Compute descriptor set
-        VkDescriptorSetAllocateInfo computeAllocInfo{};
-        computeAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        computeAllocInfo.descriptorPool = getDescriptorPool();
-        computeAllocInfo.descriptorSetCount = 1;
-        computeAllocInfo.pSetLayouts = &getComputePipelineHandles().descriptorSetLayout;
-
-        VkDescriptorSet computeSet = VK_NULL_HANDLE;
-        if (vkAllocateDescriptorSets(getDevice(), &computeAllocInfo, &computeSet) != VK_SUCCESS) {
+        VkDescriptorSet computeSet = getDescriptorPool()->allocateSingle(
+            getComputePipelineHandles().descriptorSetLayout);
+        if (computeSet == VK_NULL_HANDLE) {
             SDL_Log("Failed to allocate particle system compute descriptor set (set %u)", set);
             return false;
         }
         setComputeDescriptorSet(set, computeSet);
 
         // Graphics descriptor set
-        VkDescriptorSetAllocateInfo graphicsAllocInfo{};
-        graphicsAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        graphicsAllocInfo.descriptorPool = getDescriptorPool();
-        graphicsAllocInfo.descriptorSetCount = 1;
-        graphicsAllocInfo.pSetLayouts = &getGraphicsPipelineHandles().descriptorSetLayout;
-
-        VkDescriptorSet graphicsSet = VK_NULL_HANDLE;
-        if (vkAllocateDescriptorSets(getDevice(), &graphicsAllocInfo, &graphicsSet) != VK_SUCCESS) {
+        VkDescriptorSet graphicsSet = getDescriptorPool()->allocateSingle(
+            getGraphicsPipelineHandles().descriptorSetLayout);
+        if (graphicsSet == VK_NULL_HANDLE) {
             SDL_Log("Failed to allocate particle system graphics descriptor set (set %u)", set);
             return false;
         }
