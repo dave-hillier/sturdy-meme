@@ -518,6 +518,35 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
         // Continue without profiling - it's optional
     }
 
+    // Initialize water system - sea covering terrain areas below sea level
+    WaterSystem::InitInfo waterInfo{};
+    waterInfo.device = device;
+    waterInfo.physicalDevice = physicalDevice;
+    waterInfo.allocator = allocator;
+    waterInfo.descriptorPool = descriptorPool;
+    waterInfo.hdrRenderPass = postProcessSystem.getHDRRenderPass();
+    waterInfo.shaderPath = resourcePath + "/shaders";
+    waterInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+    waterInfo.extent = swapchainExtent;
+    waterInfo.commandPool = commandPool;
+    waterInfo.graphicsQueue = graphicsQueue;
+    waterInfo.waterSize = 16384.0f;  // Cover full terrain
+
+    if (!waterSystem.init(waterInfo)) return false;
+
+    // Configure water surface - sea level at 0
+    waterSystem.setWaterLevel(0.0f);  // Mean sea level
+    waterSystem.setWaterExtent(glm::vec2(0.0f, 0.0f), glm::vec2(16384.0f, 16384.0f));
+    waterSystem.setWaterColor(glm::vec4(0.02f, 0.08f, 0.15f, 0.95f));  // Deep ocean blue
+    waterSystem.setWaveAmplitude(1.5f);   // Ocean-scale waves
+    waterSystem.setWaveLength(30.0f);     // Longer wavelengths for open sea
+    waterSystem.setWaveSteepness(0.4f);
+    waterSystem.setWaveSpeed(0.8f);
+    waterSystem.setTidalRange(3.0f);      // 3m tidal range (spring tide: ±3m from mean)
+
+    // Create water descriptor sets
+    if (!waterSystem.createDescriptorSets(uniformBuffers, sizeof(UniformBufferObject), shadowSystem)) return false;
+
     if (!createSyncObjects()) return false;
 
     return true;
@@ -597,6 +626,7 @@ void Renderer::shutdown() {
         cloudShadowSystem.destroy();
         hiZSystem.destroy();
         profiler.shutdown();
+        waterSystem.destroy(device, allocator);
         atmosphereLUTSystem.destroy(device, allocator);
         skySystem.destroy(device, allocator);
         postProcessSystem.destroy(device, allocator);
@@ -1264,6 +1294,11 @@ void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera& camera) 
     // Pure calculations
     LightingParams lighting = calculateLightingParams(currentTimeOfDay);
 
+    // Calculate and apply tide based on celestial positions
+    DateTime dateTime = DateTime::fromTimeOfDay(currentTimeOfDay, currentYear, currentMonth, currentDay);
+    TideInfo tide = celestialCalculator.calculateTide(dateTime);
+    waterSystem.updateTide(tide.height);
+
     // Update cascade matrices via shadow system
     shadowSystem.updateCascadeMatrices(lighting.sunDir, camera);
 
@@ -1373,6 +1408,9 @@ void Renderer::render(const Camera& camera) {
     glm::vec3 playerVel = glm::vec3(0.0f);  // Will be updated when player movement tracking is added
     leafSystem.updateUniforms(frame.frameIndex, frame.cameraPosition, frame.viewProj, frame.cameraPosition, playerVel, frame.deltaTime, frame.time,
                                frame.terrainSize, frame.heightScale);
+
+    // Update water system uniforms
+    waterSystem.updateUniforms(frame.frameIndex);
 
     profiler.endCpuZone("SystemUpdates");
 
@@ -1921,6 +1959,9 @@ void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float gra
 
     // Draw grass
     grassSystem.recordDraw(cmd, frameIndex, grassTime);
+
+    // Draw water surface (after opaque geometry, blended)
+    waterSystem.recordDraw(cmd, frameIndex);
 
     // Draw falling leaves - after grass, before weather
     leafSystem.recordDraw(cmd, frameIndex, grassTime);

@@ -78,6 +78,7 @@ set(SOURCES
     src/HiZSystem.cpp
     src/GpuProfiler.cpp
     src/CpuProfiler.cpp
+    src/WaterSystem.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
@@ -167,6 +168,8 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/volumetric_snow.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/hiz_downsample.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/hiz_culling.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water.vert.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water.frag.spv
 )
 
 set(TERRAIN_SHADER_FILES
@@ -295,6 +298,21 @@ if(SHADER_COMPILE_CMD)
             COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}
             DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}
             COMMENT "Compiling special compute shader: ${SHADER}"
+        )
+    endforeach()
+
+    # Water shaders with common includes
+    set(WATER_SHADERS
+        water.vert
+        water.frag
+    )
+
+    foreach(SHADER ${WATER_SHADERS})
+        add_custom_command(
+            OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}.spv
+            COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}
+            DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}
+            COMMENT "Compiling water shader: ${SHADER}"
         )
     endforeach()
 
@@ -432,6 +450,8 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/volumetric_snow.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/hiz_downsample.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/hiz_culling.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water.vert.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water.frag.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_dispatcher.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_subdivision.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_frustum_cull.comp.spv

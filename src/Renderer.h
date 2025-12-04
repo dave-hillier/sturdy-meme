@@ -43,6 +43,7 @@
 #include "RenderPipeline.h"
 #include "GlobalBufferManager.h"
 #include "Profiler.h"
+#include "WaterSystem.h"
 
 struct PushConstants {
     glm::mat4 model;
@@ -167,6 +168,8 @@ public:
     // Access to systems for simulation
     WindSystem& getWindSystem() { return windSystem; }
     const WindSystem& getWindSystem() const { return windSystem; }
+    WaterSystem& getWaterSystem() { return waterSystem; }
+    const WaterSystem& getWaterSystem() const { return waterSystem; }
     SceneBuilder& getSceneBuilder() { return sceneManager.getSceneBuilder(); }
     Mesh& getFlagClothMesh() { return sceneManager.getSceneBuilder().getFlagClothMesh(); }
     Mesh& getFlagPoleMesh() { return sceneManager.getSceneBuilder().getFlagPoleMesh(); }
@@ -282,6 +285,7 @@ private:
     RockSystem rockSystem;
     CloudShadowSystem cloudShadowSystem;
     HiZSystem hiZSystem;
+    WaterSystem waterSystem;
     EnvironmentSettings environmentSettings;
     Profiler profiler;
     bool useVolumetricSnow = true;  // Use new volumetric system by default

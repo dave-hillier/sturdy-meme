@@ -47,6 +47,13 @@ struct MoonPosition : public CelestialPosition {
     float illumination;     // Fraction of moon surface illuminated (0-1)
 };
 
+// Tidal information based on lunar/solar positions
+struct TideInfo {
+    float height;           // Current tide height relative to mean sea level (-1 to +1 normalized)
+    float range;            // Current tidal range factor (0.5 = neap, 1.0 = spring)
+    bool isRising;          // True if tide is currently rising
+};
+
 // Calculates astronomical positions of celestial bodies
 class CelestialCalculator {
 public:
@@ -61,6 +68,10 @@ public:
 
     // Calculate moon position for given date/time
     MoonPosition calculateMoonPosition(const DateTime& dateTime) const;
+
+    // Calculate tidal state based on moon/sun positions
+    // Uses simplified equilibrium tide model
+    TideInfo calculateTide(const DateTime& dateTime) const;
 
     // Convenience: get sun color based on altitude (handles sunrise/sunset coloring)
     glm::vec3 getSunColor(float altitude) const;

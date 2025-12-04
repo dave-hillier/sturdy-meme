@@ -353,3 +353,76 @@ glm::vec3 CelestialCalculator::getMoonColor(float moonAltitude, float illuminati
 
     return glm::mix(horizonColor, zenithColor, t);
 }
+
+TideInfo CelestialCalculator::calculateTide(const DateTime& dateTime) const {
+    // Simplified equilibrium tide model
+    // Based on gravitational forces from Moon and Sun
+    //
+    // Real tides are complex due to coastline geometry, ocean depth, etc.
+    // This model provides a reasonable approximation for visual purposes.
+
+    double julianDay = dateTime.toJulianDay();
+    double LST = calculateLocalSiderealTime(julianDay);
+
+    // Get moon parameters for lunar tide component
+    double moonRA, moonDec, moonPhase;
+    calculateLunarParameters(julianDay, moonRA, moonDec, moonPhase);
+
+    // Moon's hour angle (angular distance from meridian)
+    double moonHA = normalizeAngle180(LST - moonRA);
+    double moonHARad = moonHA * DEG_TO_RAD;
+
+    // Get sun parameters for solar tide component
+    double sunDec, eot;
+    calculateSolarParameters(julianDay, sunDec, eot);
+
+    // Sun's approximate right ascension
+    double n = julianDay - J2000;
+    double L = normalizeAngle(280.460 + 0.9856474 * n);
+    double g = normalizeAngle(357.528 + 0.9856003 * n);
+    double gRad = g * DEG_TO_RAD;
+    double lambda = L + 1.915 * std::sin(gRad) + 0.020 * std::sin(2 * gRad);
+    double epsilon = 23.439 - 0.0000004 * n;
+    double epsilonRad = epsilon * DEG_TO_RAD;
+    double lambdaRad = lambda * DEG_TO_RAD;
+    double sunRA = std::atan2(std::cos(epsilonRad) * std::sin(lambdaRad), std::cos(lambdaRad)) * RAD_TO_DEG;
+    sunRA = normalizeAngle(sunRA);
+
+    // Sun's hour angle
+    double sunHA = normalizeAngle180(LST - sunRA);
+    double sunHARad = sunHA * DEG_TO_RAD;
+
+    // Lunar tide component (M2 - principal lunar semidiurnal)
+    // High tide when moon is at transit (HA = 0) or antitransit (HA = 180)
+    // Uses cos(2*HA) so we get two highs per lunar day
+    double lunarTide = std::cos(2.0 * moonHARad);
+
+    // Solar tide component (S2 - principal solar semidiurnal)
+    // About 46% the strength of lunar tide
+    double solarTide = 0.46 * std::cos(2.0 * sunHARad);
+
+    // Spring/Neap modulation based on moon phase
+    // At new moon (phase=0) and full moon (phase=0.5): spring tides (max range)
+    // At quarter moons (phase=0.25, 0.75): neap tides (min range)
+    // Use cos(4*pi*phase) to get peaks at 0 and 0.5
+    double springNeapFactor = 0.7 + 0.3 * std::cos(4.0 * PI * moonPhase);
+
+    // Combined tide height (normalized -1 to +1)
+    double tideHeight = (lunarTide + solarTide) * springNeapFactor;
+
+    // Normalize to -1 to +1 range
+    // Max possible is (1 + 0.46) * 1.0 = 1.46, min is -1.46
+    tideHeight /= 1.46;
+
+    // Determine if tide is rising by checking derivative
+    // d/dt cos(2*HA) = -2 * sin(2*HA) * d(HA)/dt
+    // Since HA increases with time (moon moves west), tide rises when sin(2*moonHA) < 0
+    bool isRising = std::sin(2.0 * moonHARad) < 0;
+
+    TideInfo result;
+    result.height = static_cast<float>(tideHeight);
+    result.range = static_cast<float>(springNeapFactor);
+    result.isRising = isRising;
+
+    return result;
+}
