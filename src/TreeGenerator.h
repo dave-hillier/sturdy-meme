@@ -5,6 +5,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <vector>
 #include <random>
+#include <array>
 
 // Algorithm selection
 enum class TreeAlgorithm {
@@ -22,12 +23,54 @@ enum class VolumeShape {
     Box
 };
 
-// Space colonisation specific parameters
+// Bark texture types (matches ez-tree)
+enum class BarkType {
+    Oak = 0,
+    Birch = 1,
+    Pine = 2,
+    Willow = 3
+};
+
+// Leaf texture types (matches ez-tree)
+enum class LeafType {
+    Oak = 0,
+    Ash = 1,
+    Aspen = 2,
+    Pine = 3
+};
+
+// Billboard rendering mode for leaves
+enum class BillboardMode {
+    Single,     // Single-sided quad
+    Double      // Two perpendicular quads for 3D effect
+};
+
+// Tree type (affects terminal branch behavior)
+enum class TreeType {
+    Deciduous,  // Terminal branch extends from parent end
+    Evergreen   // No terminal branch, cone-like shape
+};
+
+// Per-level branch parameters (ez-tree style)
+struct BranchLevelParams {
+    float angle = 60.0f;        // Angle from parent branch (degrees)
+    int children = 5;           // Number of child branches
+    float gnarliness = 0.2f;    // Random twist/curve amount
+    float length = 10.0f;       // Length of branches at this level
+    float radius = 0.7f;        // Radius at this level
+    int sections = 8;           // Segments along branch length
+    int segments = 6;           // Radial segments
+    float start = 0.3f;         // Where children start on parent (0-1)
+    float taper = 0.7f;         // Taper from base to tip (0-1)
+    float twist = 0.0f;         // Axial twist amount
+};
+
+// Space colonisation specific parameters (scaled for meters)
 struct SpaceColonisationParams {
     // Crown volume shape and size
     VolumeShape crownShape = VolumeShape::Sphere;
-    float crownRadius = 4.0f;           // Base radius of crown volume
-    float crownHeight = 5.0f;           // Height for non-spherical shapes
+    float crownRadius = 3.0f;           // Base radius of crown volume (~3m)
+    float crownHeight = 4.0f;           // Height for non-spherical shapes
     glm::vec3 crownOffset = glm::vec3(0.0f, 0.0f, 0.0f);  // Offset from trunk top
     glm::vec3 crownScale = glm::vec3(1.0f, 1.0f, 1.0f);   // For ellipsoid scaling
     float crownExclusionRadius = 0.0f;  // Inner hollow zone (no points here)
@@ -37,9 +80,9 @@ struct SpaceColonisationParams {
     bool uniformDistribution = true;    // Uniform vs clustered distribution
 
     // Algorithm parameters
-    float attractionDistance = 3.0f;    // Max distance for point to influence node (di)
-    float killDistance = 0.5f;          // Distance at which point is removed (dk)
-    float segmentLength = 0.3f;         // Length of each growth step (D)
+    float attractionDistance = 2.0f;    // Max distance for point to influence node (di)
+    float killDistance = 0.3f;          // Distance at which point is removed (dk)
+    float segmentLength = 0.2f;         // Length of each growth step (D)
     int maxIterations = 200;            // Safety limit for iterations
     float branchAngleLimit = 45.0f;     // Max angle change per segment (degrees)
 
@@ -49,20 +92,20 @@ struct SpaceColonisationParams {
 
     // Initial trunk before branching
     float trunkSegments = 3;            // Number of trunk segments before crown
-    float trunkHeight = 3.0f;           // Height of trunk before crown starts
+    float trunkHeight = 2.5f;           // Height of trunk before crown starts (~2.5m)
 
     // Root system
     bool generateRoots = false;
     VolumeShape rootShape = VolumeShape::Hemisphere;
-    float rootRadius = 2.0f;
-    float rootDepth = 1.5f;
+    float rootRadius = 1.5f;
+    float rootDepth = 1.0f;
     int rootAttractionPointCount = 200;
     float rootTropismStrength = 0.3f;   // Downward tropism for roots
 
     // Branch thickness calculation
-    float baseThickness = 0.3f;         // Trunk base thickness
+    float baseThickness = 0.2f;         // Trunk base thickness (~20cm)
     float thicknessPower = 2.0f;        // Exponent for pipe model (da Vinci's rule)
-    float minThickness = 0.02f;         // Minimum branch thickness
+    float minThickness = 0.01f;         // Minimum branch thickness (~1cm)
 
     // Geometry quality settings
     int radialSegments = 8;             // Segments around circumference
@@ -81,15 +124,59 @@ struct TreeParameters {
     // Seed for reproducibility
     uint32_t seed = 12345;
 
-    // Trunk parameters
-    float trunkHeight = 5.0f;           // Height of main trunk
-    float trunkRadius = 0.3f;           // Radius at trunk base
-    float trunkTaper = 0.6f;            // Taper ratio (0-1, 1 = no taper)
+    // Tree type
+    TreeType treeType = TreeType::Deciduous;
+
+    // Bark parameters
+    BarkType barkType = BarkType::Oak;
+    glm::vec3 barkTint = glm::vec3(1.0f);       // Tint color for bark
+    bool barkTextured = true;                    // Whether to apply bark texture
+    glm::vec2 barkTextureScale = glm::vec2(1.0f); // UV scale for bark texture
+    bool barkFlatShading = false;                // Use flat shading for bark
+
+    // Per-level branch parameters (ez-tree style, levels 0-3)
+    // Scaled for meters: typical tree ~5-8m tall, trunk radius ~0.15-0.25m
+    std::array<BranchLevelParams, 4> branchParams = {{
+        // Level 0 (trunk): ~5m tall, 0.2m radius
+        { 0.0f, 5, 0.15f, 5.0f, 0.2f, 12, 8, 0.0f, 0.7f, 0.0f },
+        // Level 1: main branches ~2.5m long, 0.08m radius
+        { 45.0f, 4, 0.2f, 2.5f, 0.08f, 10, 6, 0.5f, 0.7f, 0.0f },
+        // Level 2: secondary branches ~1.2m long, 0.03m radius
+        { 50.0f, 3, 0.3f, 1.2f, 0.03f, 8, 4, 0.3f, 0.7f, 0.0f },
+        // Level 3: twigs ~0.4m long, 0.01m radius
+        { 55.0f, 0, 0.02f, 0.4f, 0.01f, 6, 3, 0.3f, 0.7f, 0.0f }
+    }};
+
+    // Number of branch recursion levels (0-3)
+    int branchLevels = 3;
+
+    // Growth direction influence (external force)
+    glm::vec3 growthDirection = glm::vec3(0.0f, 1.0f, 0.0f);
+    float growthInfluence = 0.01f;       // How much growth direction affects branches
+
+    // Leaf parameters (scaled for meters)
+    // ez-tree uses leaf size ~12.5% of trunk height for good visual balance
+    LeafType leafType = LeafType::Oak;
+    glm::vec3 leafTint = glm::vec3(1.0f);       // Tint color for leaves
+    BillboardMode leafBillboard = BillboardMode::Double;
+    float leafAlphaTest = 0.5f;                  // Alpha discard threshold
+    bool generateLeaves = true;
+    float leafSize = 0.5f;                       // ~50cm leaves (matches ez-tree ratio)
+    float leafSizeVariance = 0.5f;               // Random size variance (0-1)
+    int leavesPerBranch = 3;                     // Number of leaves per branch
+    float leafAngle = 30.0f;                     // Angle from branch (degrees)
+    float leafStart = 0.3f;                      // Where leaves start on branch (0-1)
+    int leafStartLevel = 2;                      // Branch level where leaves start
+
+    // Legacy parameters (for backwards compatibility with existing code)
+    // These are derived from branchParams when using per-level system
+    float trunkHeight = 5.0f;           // Height of main trunk (uses branchParams[0].length)
+    float trunkRadius = 0.2f;           // Radius at trunk base (uses branchParams[0].radius)
+    float trunkTaper = 0.6f;            // Taper ratio (uses branchParams[0].taper)
     int trunkSegments = 8;              // Radial segments for trunk
     int trunkRings = 6;                 // Vertical segments for trunk
 
-    // Branch parameters
-    int branchLevels = 3;               // Number of branch recursion levels
+    // Legacy branch parameters (used when not using per-level system)
     int childrenPerBranch = 4;          // Number of child branches per parent
     float branchingAngle = 35.0f;       // Angle from parent branch (degrees)
     float branchingSpread = 120.0f;     // Spread angle around parent (degrees)
@@ -102,21 +189,13 @@ struct TreeParameters {
     float gnarliness = 0.2f;            // Random twist/curve amount
     float twistAngle = 15.0f;           // Twist per segment (degrees)
 
-    // Growth direction influence
-    glm::vec3 growthDirection = glm::vec3(0.0f, 1.0f, 0.0f);
-    float growthInfluence = 0.3f;       // How much growth direction affects branches
-
-    // Leaf parameters
-    bool generateLeaves = true;
-    float leafSize = 0.3f;
-    int leavesPerBranch = 8;
-    float leafAngle = 45.0f;            // Angle from branch (degrees)
-    int leafStartLevel = 2;           // Branch level where leaves start
-
     // Quality settings
     int branchSegments = 6;             // Radial segments for branches
     int branchRings = 4;                // Segments along branch length
     float minBranchRadius = 0.02f;      // Stop branching below this radius
+
+    // Whether to use per-level parameters (ez-tree style) vs legacy parameters
+    bool usePerLevelParams = true;
 };
 
 // Represents a branch segment for building the tree
@@ -169,7 +248,7 @@ public:
     void buildMesh(Mesh& outMesh);
 
     // Get leaf vertex data (quad billboards)
-    void buildLeafMesh(Mesh& outMesh);
+    void buildLeafMesh(Mesh& outMesh, const TreeParameters& params);
 
 private:
     // Recursive branch generation
