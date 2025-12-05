@@ -5,6 +5,7 @@
 #include <vector>
 #include <string>
 #include <optional>
+#include <functional>
 
 #include "GLTFLoader.h"
 
@@ -41,6 +42,104 @@ struct IKDebugData {
         bool active;
     };
     std::vector<Chain> chains;
+
+    struct LookAt {
+        glm::vec3 headPos;
+        glm::vec3 targetPos;
+        glm::vec3 forward;
+        bool active;
+    };
+    std::vector<LookAt> lookAtTargets;
+
+    struct FootPlacement {
+        glm::vec3 footPos;
+        glm::vec3 groundPos;
+        glm::vec3 normal;
+        bool active;
+    };
+    std::vector<FootPlacement> footPlacements;
+};
+
+// Look-At IK definition (for head/eye tracking)
+struct LookAtIK {
+    int32_t headBoneIndex = -1;       // Head bone to rotate
+    int32_t neckBoneIndex = -1;       // Optional neck bone for smoother rotation
+    int32_t spineBoneIndex = -1;      // Optional spine for full body turn
+
+    glm::vec3 targetPosition = glm::vec3(0.0f);
+    glm::vec3 eyeOffset = glm::vec3(0.0f, 0.1f, 0.1f);  // Offset from head bone to "eyes"
+
+    // Distribution of rotation across bones (should sum to ~1.0)
+    float headWeight = 0.6f;          // How much head contributes
+    float neckWeight = 0.3f;          // How much neck contributes
+    float spineWeight = 0.1f;         // How much spine contributes
+
+    // Angular limits (radians)
+    float maxYawAngle = glm::radians(80.0f);    // Left/right limit
+    float maxPitchAngle = glm::radians(60.0f);  // Up/down limit
+
+    float weight = 1.0f;              // Overall blend weight
+    float smoothSpeed = 8.0f;         // Interpolation speed (0 = instant)
+    bool enabled = false;
+
+    // Internal state for smooth interpolation
+    glm::quat currentHeadRotation = glm::quat(1, 0, 0, 0);
+    glm::quat currentNeckRotation = glm::quat(1, 0, 0, 0);
+    glm::quat currentSpineRotation = glm::quat(1, 0, 0, 0);
+};
+
+// Ground query result for foot placement
+struct GroundQueryResult {
+    glm::vec3 position;      // Hit position on ground
+    glm::vec3 normal;        // Surface normal at hit
+    float distance;          // Distance from query origin
+    bool hit;                // Whether ground was found
+};
+
+// Callback for ground height queries
+// Takes world position (x, z) and returns ground height and normal
+using GroundQueryFunc = std::function<GroundQueryResult(const glm::vec3& position, float maxDistance)>;
+
+// Foot Placement IK definition
+struct FootPlacementIK {
+    // Leg chain indices (uses TwoBoneIK internally)
+    int32_t hipBoneIndex = -1;        // Thigh/upper leg
+    int32_t kneeBoneIndex = -1;       // Shin/lower leg
+    int32_t footBoneIndex = -1;       // Foot/ankle
+    int32_t toeBoneIndex = -1;        // Optional toe bone for ground alignment
+
+    // Foot dimensions for ground probing
+    glm::vec3 footOffset = glm::vec3(0.0f, -0.05f, 0.0f);  // Offset from ankle to sole
+    float footLength = 0.2f;          // Foot length for toe raycast
+    float raycastHeight = 0.5f;       // How high above foot to start raycast
+    float raycastDistance = 1.0f;     // How far down to check for ground
+
+    // IK settings
+    glm::vec3 poleVector = glm::vec3(0.0f, 0.0f, 1.0f);  // Knee direction
+    float weight = 1.0f;
+    bool enabled = false;
+
+    // Foot rotation alignment
+    bool alignToGround = true;        // Rotate foot to match ground slope
+    float maxFootAngle = glm::radians(45.0f);  // Max foot rotation
+
+    // Internal state
+    glm::vec3 currentFootTarget = glm::vec3(0.0f);
+    glm::quat currentFootRotation = glm::quat(1, 0, 0, 0);
+    float currentGroundHeight = 0.0f;
+    bool isGrounded = false;
+};
+
+// Pelvis adjustment for foot placement
+struct PelvisAdjustment {
+    int32_t pelvisBoneIndex = -1;     // Hips/pelvis bone
+    float minOffset = -0.3f;          // Max downward adjustment
+    float maxOffset = 0.1f;           // Max upward adjustment
+    float smoothSpeed = 5.0f;         // Interpolation speed
+    bool enabled = false;
+
+    // Internal state
+    float currentOffset = 0.0f;
 };
 
 // Two-Bone IK Solver
@@ -73,10 +172,88 @@ private:
     static float angleBetween(const glm::vec3& a, const glm::vec3& b);
 };
 
+// Look-At IK Solver
+// Rotates head/neck/spine to look at a target
+class LookAtIKSolver {
+public:
+    // Solve look-at IK
+    // deltaTime is used for smooth interpolation
+    static void solve(
+        Skeleton& skeleton,
+        LookAtIK& lookAt,
+        const std::vector<glm::mat4>& globalTransforms,
+        float deltaTime
+    );
+
+    // Calculate the look direction from a bone to target
+    static glm::vec3 getLookDirection(
+        const glm::mat4& boneGlobalTransform,
+        const glm::vec3& targetPosition,
+        const glm::vec3& eyeOffset
+    );
+
+private:
+    // Clamp rotation to yaw/pitch limits
+    static glm::quat clampLookRotation(
+        const glm::quat& rotation,
+        float maxYaw,
+        float maxPitch
+    );
+
+    // Apply rotation to a single bone
+    static void applyBoneRotation(
+        Joint& joint,
+        const glm::quat& targetRotation,
+        const glm::mat4& parentGlobalTransform,
+        float weight
+    );
+};
+
+// Foot Placement IK Solver
+// Plants feet on uneven terrain using ground queries
+class FootPlacementIKSolver {
+public:
+    // Solve foot placement for a single foot
+    // Uses GroundQueryFunc to probe terrain height
+    static void solve(
+        Skeleton& skeleton,
+        FootPlacementIK& foot,
+        const std::vector<glm::mat4>& globalTransforms,
+        const GroundQueryFunc& groundQuery,
+        const glm::mat4& characterTransform,
+        float deltaTime
+    );
+
+    // Calculate required pelvis offset to keep both feet grounded
+    static float calculatePelvisOffset(
+        const FootPlacementIK& leftFoot,
+        const FootPlacementIK& rightFoot,
+        float currentPelvisHeight
+    );
+
+    // Apply pelvis height adjustment
+    static void applyPelvisAdjustment(
+        Skeleton& skeleton,
+        PelvisAdjustment& pelvis,
+        float targetOffset,
+        float deltaTime
+    );
+
+private:
+    // Align foot rotation to ground normal
+    static glm::quat alignFootToGround(
+        const glm::vec3& groundNormal,
+        const glm::quat& currentRotation,
+        float maxAngle
+    );
+};
+
 // IK System - manages multiple IK chains for a character
 class IKSystem {
 public:
     IKSystem() = default;
+
+    // ========== Two-Bone IK (Arms/Legs) ==========
 
     // Setup chains by bone names
     bool addTwoBoneChain(
@@ -97,9 +274,65 @@ public:
     void setWeight(const std::string& chainName, float weight);
     void setEnabled(const std::string& chainName, bool enabled);
 
+    // ========== Look-At IK ==========
+
+    // Setup look-at by bone names
+    bool setupLookAt(
+        const Skeleton& skeleton,
+        const std::string& headBoneName,
+        const std::string& neckBoneName = "",
+        const std::string& spineBoneName = ""
+    );
+
+    // Get look-at for modification
+    LookAtIK* getLookAt() { return lookAtEnabled ? &lookAt : nullptr; }
+    const LookAtIK* getLookAt() const { return lookAtEnabled ? &lookAt : nullptr; }
+
+    // Set look-at target
+    void setLookAtTarget(const glm::vec3& target);
+    void setLookAtWeight(float weight);
+    void setLookAtEnabled(bool enabled);
+
+    // ========== Foot Placement IK ==========
+
+    // Setup foot placement by bone names
+    bool addFootPlacement(
+        const std::string& name,
+        const Skeleton& skeleton,
+        const std::string& hipBoneName,
+        const std::string& kneeBoneName,
+        const std::string& footBoneName,
+        const std::string& toeBoneName = ""
+    );
+
+    // Setup pelvis adjustment
+    bool setupPelvisAdjustment(
+        const Skeleton& skeleton,
+        const std::string& pelvisBoneName
+    );
+
+    // Get foot placement by name
+    FootPlacementIK* getFootPlacement(const std::string& name);
+    const FootPlacementIK* getFootPlacement(const std::string& name) const;
+
+    // Get pelvis adjustment
+    PelvisAdjustment* getPelvisAdjustment() { return &pelvisAdjustment; }
+
+    // Set ground query function for foot placement
+    void setGroundQueryFunc(const GroundQueryFunc& func) { groundQuery = func; }
+
+    // Enable/disable foot placement
+    void setFootPlacementEnabled(const std::string& name, bool enabled);
+    void setFootPlacementWeight(const std::string& name, float weight);
+
+    // ========== Solving ==========
+
     // Solve all enabled IK chains
     // Call this after animation sampling, before computing bone matrices
-    void solve(Skeleton& skeleton);
+    void solve(Skeleton& skeleton, float deltaTime = 0.016f);
+
+    // Solve with character transform (needed for foot placement world queries)
+    void solve(Skeleton& skeleton, const glm::mat4& characterTransform, float deltaTime = 0.016f);
 
     // Get debug visualization data
     IKDebugData getDebugData(const Skeleton& skeleton) const;
@@ -111,11 +344,25 @@ public:
     bool hasEnabledChains() const;
 
 private:
+    // Two-bone chains
     struct NamedChain {
         std::string name;
         TwoBoneIKChain chain;
     };
     std::vector<NamedChain> chains;
+
+    // Look-at IK
+    LookAtIK lookAt;
+    bool lookAtEnabled = false;
+
+    // Foot placement
+    struct NamedFootPlacement {
+        std::string name;
+        FootPlacementIK foot;
+    };
+    std::vector<NamedFootPlacement> footPlacements;
+    PelvisAdjustment pelvisAdjustment;
+    GroundQueryFunc groundQuery;
 
     // Cached global transforms (computed once per solve)
     mutable std::vector<glm::mat4> cachedGlobalTransforms;

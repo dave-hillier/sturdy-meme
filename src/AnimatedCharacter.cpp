@@ -270,7 +270,7 @@ void AnimatedCharacter::update(float deltaTime, VmaAllocator allocator, VkDevice
 
     // Apply IK after animation sampling
     if (ikSystem.hasEnabledChains()) {
-        ikSystem.solve(skeleton);
+        ikSystem.solve(skeleton, deltaTime);
     }
 
     // GPU skinning: Bone matrices are computed and uploaded by Renderer each frame
@@ -432,6 +432,49 @@ void AnimatedCharacter::setupDefaultIKChains() {
                 chain->poleVector = glm::vec3(0, 0, 1);  // Knees bend forward
             }
             SDL_Log("AnimatedCharacter: Setup right leg IK chain");
+        }
+    }
+
+    // Look-At IK (head tracking)
+    std::string head = findBone({"Head", "head"});
+    std::string neck = findBone({"Neck", "neck"});
+    std::string spine2 = findBone({"Spine2", "Spine1", "spine_02", "spine2"});
+
+    if (!head.empty()) {
+        if (ikSystem.setupLookAt(skeleton, head, neck, spine2)) {
+            SDL_Log("AnimatedCharacter: Setup look-at IK");
+        }
+    }
+
+    // Foot Placement IK
+    std::string leftToe = findBone({"LeftToeBase", "LeftToe", "L_Toe", "toe.L", "ball_l"});
+    std::string rightToe = findBone({"RightToeBase", "RightToe", "R_Toe", "toe.R", "ball_r"});
+
+    if (!leftThigh.empty() && !leftKnee.empty() && !leftFoot.empty()) {
+        if (ikSystem.addFootPlacement("LeftFoot", skeleton, leftThigh, leftKnee, leftFoot, leftToe)) {
+            // Set knee pole vector (forward)
+            if (auto* foot = ikSystem.getFootPlacement("LeftFoot")) {
+                foot->poleVector = glm::vec3(0, 0, 1);
+            }
+            SDL_Log("AnimatedCharacter: Setup left foot placement IK");
+        }
+    }
+
+    if (!rightThigh.empty() && !rightKnee.empty() && !rightFoot.empty()) {
+        if (ikSystem.addFootPlacement("RightFoot", skeleton, rightThigh, rightKnee, rightFoot, rightToe)) {
+            // Set knee pole vector (forward)
+            if (auto* foot = ikSystem.getFootPlacement("RightFoot")) {
+                foot->poleVector = glm::vec3(0, 0, 1);
+            }
+            SDL_Log("AnimatedCharacter: Setup right foot placement IK");
+        }
+    }
+
+    // Pelvis adjustment for foot IK
+    std::string hips = findBone({"Hips", "Pelvis", "pelvis", "hip"});
+    if (!hips.empty()) {
+        if (ikSystem.setupPelvisAdjustment(skeleton, hips)) {
+            SDL_Log("AnimatedCharacter: Setup pelvis adjustment");
         }
     }
 
