@@ -42,6 +42,10 @@ layout(std140, binding = 1) uniform WaterUniforms {
     float scatteringScale;     // Turbidity multiplier
     float displacementScale;   // Scale for interactive displacement
     float sssIntensity;        // Phase 17: Subsurface scattering intensity
+    float causticsScale;       // Phase 9: Caustics pattern scale
+    float causticsSpeed;       // Phase 9: Caustics animation speed
+    float causticsIntensity;   // Phase 9: Caustics brightness
+    float padding;             // Alignment padding
 };
 
 layout(binding = 2) uniform sampler2DArrayShadow shadowMapArray;
@@ -49,6 +53,7 @@ layout(binding = 3) uniform sampler2D terrainHeightMap;
 layout(binding = 4) uniform sampler2D flowMap;
 layout(binding = 6) uniform sampler2D foamNoiseTexture;
 layout(binding = 7) uniform sampler2D temporalFoamMap;  // Phase 14: Persistent foam
+layout(binding = 8) uniform sampler2D causticsTexture;  // Phase 9: Underwater light patterns
 
 layout(location = 0) in vec3 fragWorldPos;
 layout(location = 1) in vec3 fragNormal;
@@ -334,6 +339,50 @@ void main() {
 
     // Apply enhanced SSS to base color
     baseColor += waveSSS * shadow;
+
+    // =========================================================================
+    // PHASE 9: Caustics - Underwater Light Patterns
+    // Animated light patterns that appear on underwater surfaces
+    // =========================================================================
+
+    // Calculate caustics contribution - strongest in shallow, sunlit water
+    vec3 causticsContribution = vec3(0.0);
+
+    if (waterDepth > 0.0 && waterDepth < 20.0) {
+        float time = ubo.windDirectionAndSpeed.w;
+
+        // Two-layer caustics animation for richer look
+        // Layer 1: Main caustics pattern
+        vec2 causticsUV1 = fragWorldPos.xz * causticsScale + vec2(time * causticsSpeed * 0.3, time * causticsSpeed * 0.2);
+        float caustic1 = texture(causticsTexture, causticsUV1).r;
+
+        // Layer 2: Secondary pattern at different scale and speed (creates shimmering)
+        vec2 causticsUV2 = fragWorldPos.xz * causticsScale * 1.5 - vec2(time * causticsSpeed * 0.2, time * causticsSpeed * 0.35);
+        float caustic2 = texture(causticsTexture, causticsUV2).r;
+
+        // Combine layers - multiply for sharper caustic lines
+        float causticPattern = caustic1 * caustic2 * 2.0 + (caustic1 + caustic2) * 0.25;
+        causticPattern = clamp(causticPattern, 0.0, 1.0);
+
+        // Depth falloff - caustics are most visible in shallow water
+        float depthFalloff = 1.0 - smoothstep(0.0, 15.0, waterDepth);
+
+        // Sun angle influence - caustics are stronger with overhead sun
+        float sunAngle = max(0.0, sunDir.y);
+        float sunInfluence = sunAngle * sunAngle;
+
+        // Combine factors
+        float causticStrength = causticPattern * depthFalloff * sunInfluence * causticsIntensity;
+
+        // Caustics are sun-colored light focused by wave refraction
+        causticsContribution = sunColor * causticStrength * shadow;
+
+        // Reduce caustics in turbid water (particles scatter the light)
+        causticsContribution *= (1.0 - turbidity * 0.8);
+    }
+
+    // Add caustics to base color (affects what we see through the water)
+    baseColor += causticsContribution;
 
     // Reflection color from environment
     vec3 reflectionColor = sampleReflection(R, sunDir, sunColor);

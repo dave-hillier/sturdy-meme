@@ -47,12 +47,17 @@ bool WaterSystem::init(const InitInfo& info) {
     waterUniforms.scatteringScale = 1.0f;      // Turbidity multiplier
     waterUniforms.displacementScale = 1.0f;   // Interactive displacement scale (Phase 4)
     waterUniforms.sssIntensity = 1.5f;        // Subsurface scattering intensity (Phase 17)
+    waterUniforms.causticsScale = 0.1f;       // Caustics pattern scale (Phase 9)
+    waterUniforms.causticsSpeed = 0.8f;       // Caustics animation speed (Phase 9)
+    waterUniforms.causticsIntensity = 0.5f;   // Caustics brightness (Phase 9)
+    waterUniforms.padding = 0.0f;
 
     if (!createDescriptorSetLayout()) return false;
     if (!createPipeline()) return false;
     if (!createWaterMesh()) return false;
     if (!createUniformBuffers()) return false;
     if (!loadFoamTexture()) return false;
+    if (!loadCausticsTexture()) return false;
 
     return true;
 }
@@ -60,6 +65,9 @@ bool WaterSystem::init(const InitInfo& info) {
 void WaterSystem::destroy(VkDevice device, VmaAllocator allocator) {
     // Destroy foam texture
     foamTexture.destroy(allocator, device);
+
+    // Destroy caustics texture
+    causticsTexture.destroy(allocator, device);
 
     // Destroy uniform buffers
     for (size_t i = 0; i < waterUniformBuffers.size(); i++) {
@@ -100,6 +108,7 @@ bool WaterSystem::createDescriptorSetLayout() {
     // 5: Displacement map (for interactive splashes)
     // 6: Foam noise texture (tileable Worley noise)
     // 7: Temporal foam buffer (Phase 14: persistent foam)
+    // 8: Caustics texture (Phase 9: animated underwater light patterns)
 
     auto uboBinding = BindingBuilder()
         .setBinding(0)
@@ -149,9 +158,16 @@ bool WaterSystem::createDescriptorSetLayout() {
         .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
         .build();
 
-    std::array<VkDescriptorSetLayoutBinding, 8> bindings = {
+    auto causticsTextureBinding = BindingBuilder()
+        .setBinding(8)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
+        .build();
+
+    std::array<VkDescriptorSetLayoutBinding, 9> bindings = {
         uboBinding, waterUniformBinding, shadowMapBinding, terrainHeightMapBinding,
-        flowMapBinding, displacementMapBinding, foamTextureBinding, temporalFoamBinding
+        flowMapBinding, displacementMapBinding, foamTextureBinding, temporalFoamBinding,
+        causticsTextureBinding
     };
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
@@ -326,6 +342,25 @@ bool WaterSystem::loadFoamTexture() {
     return true;
 }
 
+bool WaterSystem::loadCausticsTexture() {
+    std::string causticsPath = assetPath + "/textures/caustics.png";
+
+    // Try to load the caustics texture, fall back to white if not found
+    if (!causticsTexture.load(causticsPath, allocator, device, commandPool, graphicsQueue, physicalDevice, false)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Caustics texture not found at %s, creating fallback white texture", causticsPath.c_str());
+        // Create a 1x1 white texture as fallback
+        if (!causticsTexture.createSolidColor(255, 255, 255, 255, allocator, device, commandPool, graphicsQueue)) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create fallback caustics texture");
+            return false;
+        }
+    } else {
+        SDL_Log("Loaded caustics texture from %s", causticsPath.c_str());
+    }
+
+    return true;
+}
+
 bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffers,
                                         VkDeviceSize uniformBufferSize,
                                         ShadowSystem& shadowSystem,
@@ -398,7 +433,13 @@ bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffe
         temporalFoamInfo.imageView = temporalFoamView;
         temporalFoamInfo.sampler = temporalFoamSampler;
 
-        std::array<VkWriteDescriptorSet, 8> descriptorWrites{};
+        // Caustics texture binding (Phase 9: underwater light patterns)
+        VkDescriptorImageInfo causticsInfo{};
+        causticsInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        causticsInfo.imageView = causticsTexture.getImageView();
+        causticsInfo.sampler = causticsTexture.getSampler();
+
+        std::array<VkWriteDescriptorSet, 9> descriptorWrites{};
 
         descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         descriptorWrites[0].dstSet = descriptorSets[i];
@@ -464,11 +505,19 @@ bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffe
         descriptorWrites[7].descriptorCount = 1;
         descriptorWrites[7].pImageInfo = &temporalFoamInfo;
 
+        descriptorWrites[8].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[8].dstSet = descriptorSets[i];
+        descriptorWrites[8].dstBinding = 8;
+        descriptorWrites[8].dstArrayElement = 0;
+        descriptorWrites[8].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[8].descriptorCount = 1;
+        descriptorWrites[8].pImageInfo = &causticsInfo;
+
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                descriptorWrites.data(), 0, nullptr);
     }
 
-    SDL_Log("Water descriptor sets created with terrain heightmap, flow map, displacement map, foam texture, and temporal foam");
+    SDL_Log("Water descriptor sets created with terrain heightmap, flow map, displacement map, foam texture, temporal foam, and caustics");
     return true;
 }
 

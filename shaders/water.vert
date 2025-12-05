@@ -34,6 +34,10 @@ layout(std140, binding = 1) uniform WaterUniforms {
     float scatteringScale;     // How much light scatters
     float displacementScale;   // Scale for interactive displacement (Phase 4)
     float sssIntensity;        // Phase 17: Subsurface scattering intensity
+    float causticsScale;       // Phase 9: Caustics pattern scale
+    float causticsSpeed;       // Phase 9: Caustics animation speed
+    float causticsIntensity;   // Phase 9: Caustics brightness
+    float padding;             // Alignment padding
 };
 
 // Displacement map (Phase 4: Interactive splashes)

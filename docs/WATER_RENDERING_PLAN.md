@@ -20,7 +20,7 @@ This plan implements screen-space water rendering with flow maps, procedural foa
 | 6 | Variance Specular Filtering | ✅ Implemented |
 | 7 | Screen-Space Tessellation | ❌ Not started |
 | 8 | PBR Light Transport | ✅ Implemented |
-| 9 | Refraction & Caustics | ⚠️ Partial (refraction only) |
+| 9 | Refraction & Caustics | ✅ Implemented |
 | 10 | Screen-Space Reflections | ❌ Not started |
 | 11 | Dual Depth Buffer | ❌ Not started |
 | 12 | Material Blending | ❌ Not started |
@@ -198,21 +198,37 @@ This plan implements screen-space water rendering with flow maps, procedural foa
 
 ---
 
-## Phase 9: Refraction & Caustics
+## Phase 9: Refraction & Caustics ✅
+
+**Status:** Implemented. Animated caustics with depth and sun angle modulation.
 
 **Goal:** Underwater distortion and light patterns
 
 ### 9.1 Refraction
-- Sample scene color behind water with UV offset based on water normal
-- Depth-based blending (shallow = more refraction visible)
+- ✅ Water color blending based on Fresnel (reflection vs refraction)
+- ✅ Depth-based absorption using Beer-Lambert law
 
-### 9.2 Fractioned Caustics
-- Animated caustics texture projected onto underwater surfaces
-- Modulate by water depth and light angle
+### 9.2 Animated Caustics
+- ✅ Tileable caustics texture generated at build time
+- ✅ Two-layer animation for shimmering effect
+- ✅ Depth falloff (strongest in shallow water, fades by 15m)
+- ✅ Sun angle modulation (stronger with overhead sun)
+- ✅ Turbidity reduction (particles scatter caustic light)
+- ✅ Uniforms: `causticsScale`, `causticsSpeed`, `causticsIntensity`
+
+### 9.3 Implementation
+```glsl
+// Two-layer caustics for richer animation
+vec2 causticsUV1 = fragWorldPos.xz * causticsScale + time * causticsSpeed;
+vec2 causticsUV2 = fragWorldPos.xz * causticsScale * 1.5 - time * causticsSpeed;
+float causticPattern = texture(causticsTexture, causticsUV1).r *
+                       texture(causticsTexture, causticsUV2).r;
+```
 
 **Files:**
-- Modify: `shaders/water.frag`
-- New: texture asset for caustics pattern
+- ✅ `tools/caustics_gen.cpp` - Procedural caustics texture generator
+- ✅ `shaders/water.frag` - Caustics sampling and modulation
+- ✅ `src/WaterSystem.h/cpp` - Caustics texture and uniforms
 
 ---
 
@@ -425,7 +441,7 @@ vec3 waveSSS = sssTint * sunColor * sssStrength * sssIntensity;
 3. ✅ **Phase 14** (Temporal Foam) - Foam that looks alive, not static
 
 ### Medium Impact:
-4. **Phase 9** (Caustics) - Complete the partial implementation
+4. ✅ **Phase 9** (Caustics) - Animated underwater light patterns
 5. **Phase 15** (Intersection Foam) - Foam around geometry
 6. **Phase 16** (Wake System) - Interactivity
 
@@ -445,17 +461,15 @@ Based on current state, the highest-impact remaining improvements are:
 - **Phase 13** (Jacobian Foam) - Physically-accurate foam at wave crests
 - **Phase 14** (Temporal Foam) - Foam that persists and fades naturally
 - **Phase 17** (Enhanced SSS) - Light glowing through thin wave peaks
+- **Phase 9** (Caustics) - Animated underwater light patterns
 
-### 1. Caustics Completion (Phase 9)
-**Why:** Refraction is partially implemented. Adding animated caustics would complete the underwater light patterns, enhancing the overall visual quality.
-
-### 2. Intersection Foam (Phase 15)
+### 1. Intersection Foam (Phase 15)
 **Why:** Foam where water meets geometry (islands, rocks, boats) adds realism and makes the water interact with the world.
 
-### 3. Wake/Trail System (Phase 16)
+### 2. Wake/Trail System (Phase 16)
 **Why:** Persistent foam trails behind moving objects creates interactivity and dynamic water responses.
 
-### 4. Foam Texture Quality
+### 3. Foam Texture Quality
 **Why:** The generated Worley noise texture may need tuning. Consider:
 - Higher resolution (1024x1024)
 - More octaves for finer detail

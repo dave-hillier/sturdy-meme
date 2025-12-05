@@ -53,6 +53,10 @@ public:
         float scatteringScale;     // How much light scatters (turbidity multiplier)
         float displacementScale;   // Scale for interactive displacement (Phase 4)
         float sssIntensity;        // Subsurface scattering intensity (Phase 17)
+        float causticsScale;       // Caustics pattern scale (Phase 9)
+        float causticsSpeed;       // Caustics animation speed (Phase 9)
+        float causticsIntensity;   // Caustics brightness (Phase 9)
+        float padding;             // Padding for alignment
     };
 
     WaterSystem() = default;
@@ -160,6 +164,14 @@ public:
     void setSSSIntensity(float intensity) { waterUniforms.sssIntensity = intensity; }
     float getSSSIntensity() const { return waterUniforms.sssIntensity; }
 
+    // Caustics parameters (Phase 9)
+    void setCausticsScale(float scale) { waterUniforms.causticsScale = scale; }
+    void setCausticsSpeed(float speed) { waterUniforms.causticsSpeed = speed; }
+    void setCausticsIntensity(float intensity) { waterUniforms.causticsIntensity = intensity; }
+    float getCausticsScale() const { return waterUniforms.causticsScale; }
+    float getCausticsSpeed() const { return waterUniforms.causticsSpeed; }
+    float getCausticsIntensity() const { return waterUniforms.causticsIntensity; }
+
     // Water type presets (based on Far Cry 5 approach)
     enum class WaterType {
         Ocean,          // Deep blue, low turbidity, clear
@@ -179,6 +191,7 @@ private:
     bool createWaterMesh();
     bool createUniformBuffers();
     bool loadFoamTexture();
+    bool loadCausticsTexture();
 
     // Initialization info
     VkDevice device = VK_NULL_HANDLE;
@@ -212,6 +225,9 @@ private:
 
     // Foam texture (tileable Worley noise)
     Texture foamTexture;
+
+    // Caustics texture (Phase 9)
+    Texture causticsTexture;
 
     // Tidal parameters
     float baseWaterLevel = 0.0f;  // Mean sea level

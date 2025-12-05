@@ -65,3 +65,16 @@ target_link_libraries(foam_noise_gen PRIVATE
 )
 
 target_compile_features(foam_noise_gen PRIVATE cxx_std_17)
+
+# Caustics texture generator
+add_executable(caustics_gen
+    caustics_gen.cpp
+)
+
+target_link_libraries(caustics_gen PRIVATE
+    SDL3::SDL3
+    glm::glm
+    lodepng
+)
+
+target_compile_features(caustics_gen PRIVATE cxx_std_17)
