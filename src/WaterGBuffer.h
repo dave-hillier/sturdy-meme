@@ -6,6 +6,8 @@
 #include <vector>
 #include <string>
 
+#include "DescriptorManager.h"
+
 /**
  * WaterGBuffer - Phase 3: Screen-Space Mini G-Buffer
  *
@@ -25,6 +27,8 @@ public:
         VkExtent2D fullResExtent;       // Full screen resolution
         float resolutionScale = 0.5f;   // G-buffer resolution relative to full res
         uint32_t framesInFlight;
+        std::string shaderPath;         // Path to shader SPV files
+        DescriptorManager::Pool* descriptorPool; // For allocating descriptor sets
     };
 
     // G-buffer data packed into textures
@@ -61,6 +65,20 @@ public:
     VkImageView getDepthImageView() const { return depthImageView; }
     VkSampler getSampler() const { return sampler; }
 
+    // Get pipeline resources
+    VkPipeline getPipeline() const { return pipeline; }
+    VkPipelineLayout getPipelineLayout() const { return pipelineLayout; }
+    VkDescriptorSet getDescriptorSet(uint32_t frameIndex) const { return descriptorSets[frameIndex]; }
+
+    // Create descriptor sets after resources are available
+    bool createDescriptorSets(
+        const std::vector<VkBuffer>& mainUBOs,
+        VkDeviceSize mainUBOSize,
+        const std::vector<VkBuffer>& waterUBOs,
+        VkDeviceSize waterUBOSize,
+        VkImageView terrainHeightView, VkSampler terrainSampler,
+        VkImageView flowMapView, VkSampler flowMapSampler);
+
     // Begin/end G-buffer rendering
     void beginRenderPass(VkCommandBuffer cmd);
     void endRenderPass(VkCommandBuffer cmd);
@@ -73,6 +91,9 @@ private:
     bool createRenderPass();
     bool createFramebuffer();
     bool createSampler();
+    bool createDescriptorSetLayout();
+    bool createPipelineLayout();
+    bool createPipeline();
     void destroyImages();
 
     // Device handles
@@ -104,4 +125,13 @@ private:
 
     // Sampler for reading G-buffer in composite pass
     VkSampler sampler = VK_NULL_HANDLE;
+
+    // Graphics pipeline for position pass
+    VkPipeline pipeline = VK_NULL_HANDLE;
+    VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
+    DescriptorManager::Pool* descriptorPool = nullptr;
+    std::vector<VkDescriptorSet> descriptorSets;
+    std::string shaderPath;
+    uint32_t framesInFlight = 0;
 };

@@ -648,6 +648,22 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
         // Don't fail init - tile culling is optional optimization
     }
 
+    // Initialize water G-buffer (Phase 3)
+    WaterGBuffer::InitInfo gbufferInfo{};
+    gbufferInfo.device = device;
+    gbufferInfo.physicalDevice = physicalDevice;
+    gbufferInfo.allocator = allocator;
+    gbufferInfo.fullResExtent = swapchainExtent;
+    gbufferInfo.resolutionScale = 0.5f;  // Half resolution for performance
+    gbufferInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+    gbufferInfo.shaderPath = resourcePath + "/shaders";
+    gbufferInfo.descriptorPool = &*descriptorManagerPool;
+
+    if (!waterGBuffer.init(gbufferInfo)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize water G-buffer - continuing without");
+        // Don't fail init - G-buffer is optional optimization
+    }
+
     // Create water descriptor sets with terrain heightmap, flow map, displacement map, temporal foam, SSR, and scene depth
     if (!waterSystem.createDescriptorSets(uniformBuffers, sizeof(UniformBufferObject), shadowSystem,
                                           terrainSystem.getHeightMapView(), terrainSystem.getHeightMapSampler(),
@@ -656,6 +672,17 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
                                           foamBuffer.getFoamBufferView(), foamBuffer.getSampler(),
                                           ssrSystem.getSSRResultView(), ssrSystem.getSampler(),
                                           postProcessSystem.getHDRDepthView(), depthSampler)) return false;
+
+    // Create water G-buffer descriptor sets
+    if (waterGBuffer.getPipeline() != VK_NULL_HANDLE) {
+        if (!waterGBuffer.createDescriptorSets(
+                uniformBuffers, sizeof(UniformBufferObject),
+                waterSystem.getUniformBuffers(), WaterSystem::getUniformBufferSize(),
+                terrainSystem.getHeightMapView(), terrainSystem.getHeightMapSampler(),
+                flowMapGenerator.getFlowMapView(), flowMapGenerator.getFlowMapSampler())) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to create water G-buffer descriptor sets");
+        }
+    }
 
     // Initialize tree edit system
     TreeEditSystem::InitInfo treeEditInfo{};
@@ -757,6 +784,7 @@ void Renderer::shutdown() {
         foamBuffer.destroy();
         ssrSystem.destroy();
         waterTileCull.destroy();
+        waterGBuffer.destroy();
         flowMapGenerator.destroy(device, allocator);
         treeEditSystem.destroy(device, allocator);
         atmosphereLUTSystem.destroy(device, allocator);
@@ -1652,6 +1680,25 @@ void Renderer::render(const Camera& camera) {
         profiler.endGpuZone(cmd, "Atmosphere");
     }
 
+    // Water G-buffer pass (Phase 3) - renders water mesh to mini G-buffer
+    if (waterGBuffer.getPipeline() != VK_NULL_HANDLE) {
+        profiler.beginGpuZone(cmd, "WaterGBuffer");
+        waterGBuffer.beginRenderPass(cmd);
+
+        // Bind G-buffer pipeline and descriptor set
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, waterGBuffer.getPipeline());
+        VkDescriptorSet gbufferDescSet = waterGBuffer.getDescriptorSet(frame.frameIndex);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                waterGBuffer.getPipelineLayout(), 0, 1,
+                                &gbufferDescSet, 0, nullptr);
+
+        // Draw water mesh
+        waterSystem.recordMeshDraw(cmd);
+
+        waterGBuffer.endRenderPass(cmd);
+        profiler.endGpuZone(cmd, "WaterGBuffer");
+    }
+
     // HDR scene render pass
     profiler.beginGpuZone(cmd, "HDRPass");
     recordHDRPass(cmd, frame.frameIndex, frame.time);
@@ -1869,6 +1916,9 @@ bool Renderer::handleResize() {
 
     // Resize water tile cull system
     waterTileCull.resize(newExtent);
+
+    // Resize water G-buffer
+    waterGBuffer.resize(newExtent);
 
     // Update extent on all rendering subsystems for viewport/scissor
     terrainSystem.setExtent(newExtent);

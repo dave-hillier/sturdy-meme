@@ -40,6 +40,7 @@ GraphicsPipelineFactory& GraphicsPipelineFactory::reset() {
     maxDepthBounds = 1.0f;
     stencilTestEnable = false;
     hasColorAttachments = true;
+    colorAttachmentCount = 1;
     initDefaultColorBlendAttachment();
 
     return *this;
@@ -265,6 +266,12 @@ GraphicsPipelineFactory& GraphicsPipelineFactory::setNoColorAttachments() {
     return *this;
 }
 
+GraphicsPipelineFactory& GraphicsPipelineFactory::setColorAttachmentCount(uint32_t count) {
+    colorAttachmentCount = count;
+    hasColorAttachments = count > 0;
+    return *this;
+}
+
 void GraphicsPipelineFactory::initDefaultColorBlendAttachment() {
     colorBlendAttachment = {};
     colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
@@ -409,12 +416,15 @@ bool GraphicsPipelineFactory::build(VkPipeline& pipeline) {
     depthStencil.stencilTestEnable = stencilTestEnable ? VK_TRUE : VK_FALSE;
 
     // Color blend state
+    // For MRT, we create an array of blend attachments (all using the same settings)
+    std::vector<VkPipelineColorBlendAttachmentState> colorBlendAttachments(colorAttachmentCount, colorBlendAttachment);
+
     VkPipelineColorBlendStateCreateInfo colorBlending{};
     colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
     colorBlending.logicOpEnable = VK_FALSE;
     if (hasColorAttachments) {
-        colorBlending.attachmentCount = 1;
-        colorBlending.pAttachments = &colorBlendAttachment;
+        colorBlending.attachmentCount = colorAttachmentCount;
+        colorBlending.pAttachments = colorBlendAttachments.data();
     } else {
         colorBlending.attachmentCount = 0;
         colorBlending.pAttachments = nullptr;

@@ -1,4 +1,7 @@
 #include "WaterGBuffer.h"
+#include "GraphicsPipelineFactory.h"
+#include "Mesh.h"
+#include "ShaderLoader.h"
 #include <SDL3/SDL_log.h>
 #include <array>
 #include <algorithm>
@@ -9,6 +12,9 @@ bool WaterGBuffer::init(const InitInfo& info) {
     allocator = info.allocator;
     fullResExtent = info.fullResExtent;
     resolutionScale = info.resolutionScale;
+    shaderPath = info.shaderPath;
+    descriptorPool = info.descriptorPool;
+    framesInFlight = info.framesInFlight;
 
     // Calculate G-buffer resolution
     gbufferExtent.width = static_cast<uint32_t>(fullResExtent.width * resolutionScale);
@@ -41,6 +47,21 @@ bool WaterGBuffer::init(const InitInfo& info) {
         return false;
     }
 
+    if (!createDescriptorSetLayout()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "WaterGBuffer: Failed to create descriptor set layout");
+        return false;
+    }
+
+    if (!createPipelineLayout()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "WaterGBuffer: Failed to create pipeline layout");
+        return false;
+    }
+
+    if (!createPipeline()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "WaterGBuffer: Failed to create pipeline");
+        return false;
+    }
+
     SDL_Log("WaterGBuffer: Initialized successfully");
     return true;
 }
@@ -49,6 +70,23 @@ void WaterGBuffer::destroy() {
     if (device == VK_NULL_HANDLE) return;
 
     vkDeviceWaitIdle(device);
+
+    if (pipeline != VK_NULL_HANDLE) {
+        vkDestroyPipeline(device, pipeline, nullptr);
+        pipeline = VK_NULL_HANDLE;
+    }
+
+    if (pipelineLayout != VK_NULL_HANDLE) {
+        vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+        pipelineLayout = VK_NULL_HANDLE;
+    }
+
+    if (descriptorSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+        descriptorSetLayout = VK_NULL_HANDLE;
+    }
+
+    // Note: descriptor sets are freed when pool is destroyed
 
     if (sampler != VK_NULL_HANDLE) {
         vkDestroySampler(device, sampler, nullptr);
@@ -416,4 +454,185 @@ void WaterGBuffer::endRenderPass(VkCommandBuffer cmd) {
 void WaterGBuffer::clear(VkCommandBuffer cmd) {
     // The render pass already clears on begin, so this is a no-op
     // But could be used for mid-frame clearing if needed
+}
+
+bool WaterGBuffer::createDescriptorSetLayout() {
+    std::array<VkDescriptorSetLayoutBinding, 4> bindings{};
+
+    // Binding 0: Main UBO
+    bindings[0].binding = 0;
+    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    bindings[0].descriptorCount = 1;
+    bindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    bindings[0].pImmutableSamplers = nullptr;
+
+    // Binding 1: Water UBO
+    bindings[1].binding = 1;
+    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    bindings[1].descriptorCount = 1;
+    bindings[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    bindings[1].pImmutableSamplers = nullptr;
+
+    // Binding 3: Terrain height map
+    bindings[2].binding = 3;
+    bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[2].descriptorCount = 1;
+    bindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    bindings[2].pImmutableSamplers = nullptr;
+
+    // Binding 4: Flow map
+    bindings[3].binding = 4;
+    bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[3].descriptorCount = 1;
+    bindings[3].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    bindings[3].pImmutableSamplers = nullptr;
+
+    VkDescriptorSetLayoutCreateInfo layoutInfo{};
+    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
+    layoutInfo.pBindings = bindings.data();
+
+    if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &descriptorSetLayout) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "WaterGBuffer: Failed to create descriptor set layout");
+        return false;
+    }
+
+    SDL_Log("WaterGBuffer: Descriptor set layout created");
+    return true;
+}
+
+bool WaterGBuffer::createPipelineLayout() {
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipelineLayoutInfo.setLayoutCount = 1;
+    pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;
+    pipelineLayoutInfo.pushConstantRangeCount = 0;
+    pipelineLayoutInfo.pPushConstantRanges = nullptr;
+
+    if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "WaterGBuffer: Failed to create pipeline layout");
+        return false;
+    }
+
+    SDL_Log("WaterGBuffer: Pipeline layout created");
+    return true;
+}
+
+bool WaterGBuffer::createPipeline() {
+    GraphicsPipelineFactory factory(device);
+
+    auto bindingDesc = Vertex::getBindingDescription();
+    auto attrDescs = Vertex::getAttributeDescriptions();
+
+    std::vector<VkVertexInputBindingDescription> bindings = {bindingDesc};
+    std::vector<VkVertexInputAttributeDescription> attributes(attrDescs.begin(), attrDescs.end());
+
+    // G-buffer pipeline: write to both color attachments, depth test and write
+    bool success = factory
+        .setShaders(shaderPath + "/water_position.vert.spv",
+                    shaderPath + "/water_position.frag.spv")
+        .setRenderPass(renderPass)
+        .setPipelineLayout(pipelineLayout)
+        .setExtent(gbufferExtent)
+        .setVertexInput(bindings, attributes)
+        .setDepthTest(true)
+        .setDepthWrite(true)
+        .setCullMode(VK_CULL_MODE_NONE)
+        .setColorAttachmentCount(2)  // Data + Normal textures
+        .build(pipeline);
+
+    if (!success) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "WaterGBuffer: Failed to create pipeline");
+        return false;
+    }
+
+    SDL_Log("WaterGBuffer: Pipeline created");
+    return true;
+}
+
+bool WaterGBuffer::createDescriptorSets(
+    const std::vector<VkBuffer>& mainUBOs,
+    VkDeviceSize mainUBOSize,
+    const std::vector<VkBuffer>& waterUBOs,
+    VkDeviceSize waterUBOSize,
+    VkImageView terrainHeightView, VkSampler terrainSampler,
+    VkImageView flowMapView, VkSampler flowMapSampler) {
+
+    if (descriptorPool == nullptr) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "WaterGBuffer: Descriptor pool is null");
+        return false;
+    }
+
+    // Allocate descriptor sets using DescriptorManager::Pool
+    descriptorSets = descriptorPool->allocate(descriptorSetLayout, framesInFlight);
+    if (descriptorSets.empty()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "WaterGBuffer: Failed to allocate descriptor sets");
+        return false;
+    }
+
+    // Update descriptor sets for each frame
+    for (uint32_t i = 0; i < framesInFlight; i++) {
+        std::array<VkWriteDescriptorSet, 4> writes{};
+
+        // Main UBO
+        VkDescriptorBufferInfo mainUBOInfo{};
+        mainUBOInfo.buffer = mainUBOs[i];
+        mainUBOInfo.offset = 0;
+        mainUBOInfo.range = mainUBOSize;
+
+        writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[0].dstSet = descriptorSets[i];
+        writes[0].dstBinding = 0;
+        writes[0].dstArrayElement = 0;
+        writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        writes[0].descriptorCount = 1;
+        writes[0].pBufferInfo = &mainUBOInfo;
+
+        // Water UBO
+        VkDescriptorBufferInfo waterUBOInfo{};
+        waterUBOInfo.buffer = waterUBOs[i];
+        waterUBOInfo.offset = 0;
+        waterUBOInfo.range = waterUBOSize;
+
+        writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[1].dstSet = descriptorSets[i];
+        writes[1].dstBinding = 1;
+        writes[1].dstArrayElement = 0;
+        writes[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        writes[1].descriptorCount = 1;
+        writes[1].pBufferInfo = &waterUBOInfo;
+
+        // Terrain height map
+        VkDescriptorImageInfo terrainInfo{};
+        terrainInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        terrainInfo.imageView = terrainHeightView;
+        terrainInfo.sampler = terrainSampler;
+
+        writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[2].dstSet = descriptorSets[i];
+        writes[2].dstBinding = 3;
+        writes[2].dstArrayElement = 0;
+        writes[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        writes[2].descriptorCount = 1;
+        writes[2].pImageInfo = &terrainInfo;
+
+        // Flow map
+        VkDescriptorImageInfo flowInfo{};
+        flowInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        flowInfo.imageView = flowMapView;
+        flowInfo.sampler = flowMapSampler;
+
+        writes[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[3].dstSet = descriptorSets[i];
+        writes[3].dstBinding = 4;
+        writes[3].dstArrayElement = 0;
+        writes[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        writes[3].descriptorCount = 1;
+        writes[3].pImageInfo = &flowInfo;
+
+        vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+    }
+
+    SDL_Log("WaterGBuffer: Descriptor sets created for %u frames", framesInFlight);
+    return true;
 }
