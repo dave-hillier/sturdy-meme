@@ -225,11 +225,6 @@ void process(GLTFSkinnedLoadResult& result, const FBXImportSettings& settings) {
 
         glm::vec3 localPos = glm::vec3(joint.localTransform[3]);
         glm::mat3 localRot = glm::mat3(joint.localTransform);
-        glm::vec3 localScale(
-            glm::length(joint.localTransform[0]),
-            glm::length(joint.localTransform[1]),
-            glm::length(joint.localTransform[2])
-        );
 
         // Apply coordinate system conversion to rotation
         glm::mat3 newLocalRot = rotationMat * localRot * glm::transpose(rotationMat);
@@ -237,11 +232,14 @@ void process(GLTFSkinnedLoadResult& result, const FBXImportSettings& settings) {
         // Apply scale and coordinate conversion to position
         glm::vec3 newLocalPos = rotationMat * (localPos * settings.scaleFactor);
 
-        // Rebuild local transform
+        // Rebuild local transform with unit scale
+        // FBX files (especially Mixamo cm exports) often have scale baked into bones
+        // (e.g., scale of 100 for cm units). We normalize to 1.0 since our position
+        // scaling already handles unit conversion.
         joint.localTransform = glm::mat4(1.0f);
-        joint.localTransform[0] = glm::vec4(glm::normalize(newLocalRot[0]) * localScale.x, 0.0f);
-        joint.localTransform[1] = glm::vec4(glm::normalize(newLocalRot[1]) * localScale.y, 0.0f);
-        joint.localTransform[2] = glm::vec4(glm::normalize(newLocalRot[2]) * localScale.z, 0.0f);
+        joint.localTransform[0] = glm::vec4(glm::normalize(newLocalRot[0]), 0.0f);
+        joint.localTransform[1] = glm::vec4(glm::normalize(newLocalRot[1]), 0.0f);
+        joint.localTransform[2] = glm::vec4(glm::normalize(newLocalRot[2]), 0.0f);
         joint.localTransform[3] = glm::vec4(newLocalPos, 1.0f);
 
         // Transform inverse bind matrix
@@ -318,9 +316,18 @@ void processAnimations(std::vector<AnimationClip>& animations,
                 value = glm::quat_cast(newRotMat);
             }
 
-            // Scale keyframes don't need coordinate conversion (scalar per axis)
-            // But if we had non-uniform coordinate swapping, we'd need to remap axes
-            // For now, assume scale is uniform or axis-aligned
+            // Normalize scale keyframes to unit scale
+            // FBX files (especially Mixamo cm exports) may have scale values like (100, 100, 100)
+            // baked into animations to handle unit conversion. Since we normalize skeleton
+            // scales to 1.0 and handle unit conversion via position scaling, we should
+            // also normalize animation scale keyframes.
+            for (auto& value : channel.scale.values) {
+                // Normalize scale: divide by 100 if values appear to be in cm units
+                // (values around 100), otherwise keep as-is (values around 1)
+                if (value.x > 10.0f || value.y > 10.0f || value.z > 10.0f) {
+                    value = value * settings.scaleFactor;
+                }
+            }
         }
     }
 }
