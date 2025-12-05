@@ -82,6 +82,9 @@ set(SOURCES
     src/GpuProfiler.cpp
     src/CpuProfiler.cpp
     src/WaterSystem.cpp
+    src/FlowMapGenerator.cpp
+    src/WaterGBuffer.cpp
+    src/WaterDisplacement.cpp
     src/TreeGenerator.cpp
     src/TreeEditSystem.cpp
     src/TreeEditorGui.cpp
@@ -108,7 +111,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     lodepng
 )
 
-# macOS app bundle configuration
+# Platform-specific setup
 if(APPLE)
     set_target_properties(${PROJECT_NAME} PROPERTIES
         MACOSX_BUNDLE TRUE
@@ -144,6 +147,24 @@ if(APPLE)
             ${CMAKE_CURRENT_SOURCE_DIR}/assets
             $<TARGET_BUNDLE_CONTENT_DIR:${PROJECT_NAME}>/Resources/assets
         COMMENT "Copying assets to app bundle"
+    )
+else()
+    # Copy textures directory to build output (Linux/Windows)
+    add_custom_command(
+        TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_CURRENT_SOURCE_DIR}/textures
+            $<TARGET_FILE_DIR:${PROJECT_NAME}>/textures
+        COMMENT "Copying textures to build directory"
+    )
+
+    # Copy assets directory to build output (Linux/Windows)
+    add_custom_command(
+        TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_CURRENT_SOURCE_DIR}/assets
+            $<TARGET_FILE_DIR:${PROJECT_NAME}>/assets
+        COMMENT "Copying assets to build directory"
     )
 endif()
 
@@ -194,7 +215,7 @@ add_dependencies(terrain_preprocessing terrain_preprocess erosion_preprocess)
 # Main target depends on preprocessing
 add_dependencies(${PROJECT_NAME} terrain_preprocessing)
 
-# Copy terrain data to app bundle (macOS only)
+# Copy terrain data to output location
 if(APPLE)
     add_custom_command(
         TARGET ${PROJECT_NAME} POST_BUILD
@@ -202,6 +223,14 @@ if(APPLE)
             ${TERRAIN_DATA_DIR}
             $<TARGET_BUNDLE_CONTENT_DIR:${PROJECT_NAME}>/Resources/terrain_data
         COMMENT "Copying terrain data to app bundle"
+    )
+else()
+    add_custom_command(
+        TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${TERRAIN_DATA_DIR}
+            $<TARGET_FILE_DIR:${PROJECT_NAME}>/terrain_data
+        COMMENT "Copying terrain data to build directory"
     )
 endif()
 
@@ -247,6 +276,9 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/hiz_culling.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water.frag.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_position.vert.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_position.frag.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_displacement.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree.frag.spv
 )
@@ -384,20 +416,42 @@ if(SHADER_COMPILE_CMD)
         )
     endforeach()
 
+    # Water shader dependencies (common includes)
+    set(WATER_DEPS
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/constants_common.glsl
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/lighting_common.glsl
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow_common.glsl
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/atmosphere_common.glsl
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain_height_common.glsl
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/flow_common.glsl
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/fbm_common.glsl
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/foam.glsl
+    )
+
     # Water shaders with common includes
     set(WATER_SHADERS
         water.vert
         water.frag
+        water_position.vert
+        water_position.frag
     )
 
     foreach(SHADER ${WATER_SHADERS})
         add_custom_command(
             OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}.spv
             COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}
-            DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}
+            DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER} ${WATER_DEPS}
             COMMENT "Compiling water shader: ${SHADER}"
         )
     endforeach()
+
+    # Water displacement compute shader (Phase 4)
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_displacement.comp.spv
+        COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_displacement.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_displacement.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_displacement.comp
+        COMMENT "Compiling water displacement compute shader"
+    )
 
     # Terrain shaders (LEB terrain system)
     set(TERRAIN_CBT_DEPS
@@ -538,6 +592,9 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/hiz_culling.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water.frag.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_position.vert.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_position.frag.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_displacement.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree.frag.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_dispatcher.comp.spv

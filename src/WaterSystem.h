@@ -33,6 +33,7 @@ public:
         glm::vec4 waveParams;      // x = amplitude, y = wavelength, z = steepness, w = speed
         glm::vec4 waveParams2;     // Second wave layer parameters
         glm::vec4 waterExtent;     // xy = position offset, zw = size
+        glm::vec4 scatteringCoeffs; // rgb = absorption coefficients, a = turbidity
         float waterLevel;          // Y height of water plane
         float foamThreshold;       // Wave height threshold for foam
         float fresnelPower;        // Fresnel reflection power
@@ -40,7 +41,15 @@ public:
         float terrainHeightScale;  // Terrain height scale
         float shoreBlendDistance;  // Distance over which shore fades (world units)
         float shoreFoamWidth;      // Width of shore foam band (world units)
-        float padding;
+        float flowStrength;        // How much flow affects UV offset (world units)
+        float flowSpeed;           // Flow animation speed multiplier
+        float flowFoamStrength;    // How much flow speed affects foam
+        float fbmNearDistance;     // Distance for max FBM detail (9 octaves)
+        float fbmFarDistance;      // Distance for min FBM detail (3 octaves)
+        float specularRoughness;   // Base roughness for specular (0 = mirror, 1 = diffuse)
+        float absorptionScale;     // How quickly light is absorbed with depth
+        float scatteringScale;     // How much light scatters (turbidity multiplier)
+        float displacementScale;   // Scale for interactive displacement (Phase 4)
     };
 
     WaterSystem() = default;
@@ -57,7 +66,11 @@ public:
                               VkDeviceSize uniformBufferSize,
                               ShadowSystem& shadowSystem,
                               VkImageView terrainHeightMapView,
-                              VkSampler terrainHeightMapSampler);
+                              VkSampler terrainHeightMapSampler,
+                              VkImageView flowMapView,
+                              VkSampler flowMapSampler,
+                              VkImageView displacementMapView,
+                              VkSampler displacementMapSampler);
 
     // Update water uniforms (call each frame)
     void updateUniforms(uint32_t frameIndex);
@@ -102,6 +115,54 @@ public:
     void setShoreFoamWidth(float width) { waterUniforms.shoreFoamWidth = width; }
     float getShoreBlendDistance() const { return waterUniforms.shoreBlendDistance; }
     float getShoreFoamWidth() const { return waterUniforms.shoreFoamWidth; }
+
+    // Flow map parameters
+    void setFlowStrength(float strength) { waterUniforms.flowStrength = strength; }
+    void setFlowSpeed(float speed) { waterUniforms.flowSpeed = speed; }
+    void setFlowFoamStrength(float strength) { waterUniforms.flowFoamStrength = strength; }
+    float getFlowStrength() const { return waterUniforms.flowStrength; }
+    float getFlowSpeed() const { return waterUniforms.flowSpeed; }
+    float getFlowFoamStrength() const { return waterUniforms.flowFoamStrength; }
+
+    // FBM LOD parameters
+    void setFBMLODDistances(float nearDist, float farDist) {
+        waterUniforms.fbmNearDistance = nearDist;
+        waterUniforms.fbmFarDistance = farDist;
+    }
+    float getFBMNearDistance() const { return waterUniforms.fbmNearDistance; }
+    float getFBMFarDistance() const { return waterUniforms.fbmFarDistance; }
+
+    // PBR Scattering parameters (Phase 8)
+    void setScatteringCoeffs(const glm::vec3& absorption, float turbidity) {
+        waterUniforms.scatteringCoeffs = glm::vec4(absorption, turbidity);
+    }
+    glm::vec3 getAbsorptionCoeffs() const { return glm::vec3(waterUniforms.scatteringCoeffs); }
+    float getTurbidity() const { return waterUniforms.scatteringCoeffs.a; }
+    void setAbsorptionScale(float scale) { waterUniforms.absorptionScale = scale; }
+    void setScatteringScale(float scale) { waterUniforms.scatteringScale = scale; }
+    float getAbsorptionScale() const { return waterUniforms.absorptionScale; }
+    float getScatteringScale() const { return waterUniforms.scatteringScale; }
+
+    // Specular parameters (Phase 6)
+    void setSpecularRoughness(float roughness) { waterUniforms.specularRoughness = roughness; }
+    float getSpecularRoughness() const { return waterUniforms.specularRoughness; }
+
+    // Displacement parameters (Phase 4)
+    void setDisplacementScale(float scale) { waterUniforms.displacementScale = scale; }
+    float getDisplacementScale() const { return waterUniforms.displacementScale; }
+
+    // Water type presets (based on Far Cry 5 approach)
+    enum class WaterType {
+        Ocean,          // Deep blue, low turbidity, clear
+        CoastalOcean,   // Blue-green, medium turbidity
+        River,          // Green-blue, variable turbidity
+        MuddyRiver,     // Brown, high turbidity
+        ClearStream,    // Very clear, low absorption
+        Lake,           // Dark blue-green, medium
+        Swamp,          // Dark green-brown, high turbidity
+        Tropical        // Turquoise, very clear
+    };
+    void setWaterType(WaterType type);
 
 private:
     bool createDescriptorSetLayout();

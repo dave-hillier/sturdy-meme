@@ -536,7 +536,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     // Configure water surface
     // Terrain formula is h * heightScale, so world Y=0 corresponds to minAltitude
     // Real sea level (0m altitude) is at world Y = -minAltitude
-    float seaLevel = -terrainConfig.minAltitude;  // e.g., minAltitude=-15 → seaLevel=15
+    float seaLevel = 25;
     waterSystem.setWaterLevel(seaLevel);
     waterSystem.setWaterExtent(glm::vec2(0.0f, 0.0f), glm::vec2(65536.0f, 65536.0f));
     waterSystem.setWaterColor(glm::vec4(0.02f, 0.08f, 0.15f, 0.95f));  // Deep ocean blue
@@ -551,9 +551,57 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     waterSystem.setShoreBlendDistance(3.0f);  // Soft edge over 3m
     waterSystem.setShoreFoamWidth(8.0f);      // Shore foam band 8m wide
 
-    // Create water descriptor sets with terrain heightmap
+    // Initialize flow map generator
+    if (!flowMapGenerator.init(device, allocator, commandPool, graphicsQueue)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize flow map generator");
+        return false;
+    }
+
+    // Generate flow map from terrain data
+    FlowMapGenerator::Config flowConfig{};
+    flowConfig.resolution = 512;
+    flowConfig.worldSize = terrainConfig.size;
+    flowConfig.waterLevel = seaLevel;
+    flowConfig.maxFlowSpeed = 1.0f;
+    flowConfig.slopeInfluence = 2.0f;  // Water flows faster on steeper slopes
+    flowConfig.shoreDistance = 100.0f; // Max shore distance for foam
+
+    // Get terrain height data and generate slope-based flow
+    const float* heightData = terrainSystem.getHeightMapData();
+    uint32_t heightRes = terrainSystem.getHeightMapResolution();
+    if (heightData && heightRes > 0) {
+        std::vector<float> heightVec(heightData, heightData + heightRes * heightRes);
+        if (!flowMapGenerator.generateFromTerrain(heightVec, heightRes, terrainConfig.heightScale, flowConfig)) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Flow map generation failed, using radial flow fallback");
+            flowMapGenerator.generateRadialFlow(flowConfig, glm::vec2(0.0f));
+        }
+    } else {
+        // Fallback to radial flow for testing
+        SDL_Log("No terrain height data available, generating radial flow map");
+        flowMapGenerator.generateRadialFlow(flowConfig, glm::vec2(0.0f));
+    }
+
+    // Initialize water displacement system (Phase 4: interactive splashes)
+    WaterDisplacement::InitInfo dispInfo{};
+    dispInfo.device = device;
+    dispInfo.physicalDevice = physicalDevice;
+    dispInfo.allocator = allocator;
+    dispInfo.commandPool = commandPool;
+    dispInfo.computeQueue = graphicsQueue;  // Use graphics queue for compute
+    dispInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+    dispInfo.displacementResolution = 512;
+    dispInfo.worldSize = 65536.0f;
+
+    if (!waterDisplacement.init(dispInfo)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize water displacement");
+        return false;
+    }
+
+    // Create water descriptor sets with terrain heightmap, flow map, and displacement map
     if (!waterSystem.createDescriptorSets(uniformBuffers, sizeof(UniformBufferObject), shadowSystem,
-                                          terrainSystem.getHeightMapView(), terrainSystem.getHeightMapSampler())) return false;
+                                          terrainSystem.getHeightMapView(), terrainSystem.getHeightMapSampler(),
+                                          flowMapGenerator.getFlowMapView(), flowMapGenerator.getFlowMapSampler(),
+                                          waterDisplacement.getDisplacementMapView(), waterDisplacement.getSampler())) return false;
 
     // Initialize tree edit system
     TreeEditSystem::InitInfo treeEditInfo{};
@@ -651,6 +699,8 @@ void Renderer::shutdown() {
         hiZSystem.destroy();
         profiler.shutdown();
         waterSystem.destroy(device, allocator);
+        waterDisplacement.destroy();
+        flowMapGenerator.destroy(device, allocator);
         treeEditSystem.destroy(device, allocator);
         atmosphereLUTSystem.destroy(device, allocator);
         skySystem.destroy(device, allocator);

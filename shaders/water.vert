@@ -1,30 +1,14 @@
 #version 450
 
+#extension GL_GOOGLE_include_directive : require
+
 /*
  * water.vert - Water surface vertex shader
  * Implements Gerstner wave animation for realistic ocean/lake surfaces
+ * Phase 4: Samples displacement map for interactive splashes
  */
 
-layout(binding = 0) uniform UniformBufferObject {
-    mat4 model;
-    mat4 view;
-    mat4 proj;
-    mat4 cascadeViewProj[4];
-    vec4 cascadeSplits;
-    vec4 sunDirection;
-    vec4 moonDirection;
-    vec4 sunColor;
-    vec4 moonColor;
-    vec4 ambientColor;
-    vec4 cameraPosition;
-    vec4 pointLightPosition;
-    vec4 pointLightColor;
-    vec4 windDirectionAndSpeed;  // xy = direction, z = speed, w = time
-    float timeOfDay;
-    float shadowMapSize;
-    float debugCascades;
-    float julianDay;
-} ubo;
+#include "ubo_common.glsl"
 
 // Water-specific uniforms
 layout(std140, binding = 1) uniform WaterUniforms {
@@ -32,11 +16,27 @@ layout(std140, binding = 1) uniform WaterUniforms {
     vec4 waveParams;           // x = amplitude, y = wavelength, z = steepness, w = speed
     vec4 waveParams2;          // Second wave layer parameters
     vec4 waterExtent;          // xy = position offset, zw = size
+    vec4 scatteringCoeffs;     // rgb = absorption coefficients, a = turbidity
     float waterLevel;          // Y height of water plane
     float foamThreshold;       // Wave height threshold for foam
     float fresnelPower;        // Fresnel reflection power
-    float padding;
+    float terrainSize;         // Terrain size for UV calculation
+    float terrainHeightScale;  // Terrain height scale
+    float shoreBlendDistance;  // Distance over which shore fades
+    float shoreFoamWidth;      // Width of shore foam band
+    float flowStrength;        // How much flow affects UV offset
+    float flowSpeed;           // Flow animation speed multiplier
+    float flowFoamStrength;    // How much flow speed affects foam
+    float fbmNearDistance;     // Distance for max FBM detail
+    float fbmFarDistance;      // Distance for min FBM detail
+    float specularRoughness;   // Base roughness for specular
+    float absorptionScale;     // How quickly light is absorbed
+    float scatteringScale;     // How much light scatters
+    float displacementScale;   // Scale for interactive displacement (Phase 4)
 };
+
+// Displacement map (Phase 4: Interactive splashes)
+layout(binding = 5) uniform sampler2D displacementMap;
 
 layout(push_constant) uniform PushConstants {
     mat4 model;
@@ -127,13 +127,22 @@ void main() {
     // Calculate normal from tangent and bitangent
     vec3 normal = normalize(cross(totalBitangent, totalTangent));
 
-    // Apply displacement
+    // Apply Gerstner wave displacement
     worldPos.xyz += totalDisplacement;
+
+    // Phase 4: Sample displacement map for interactive splashes
+    // Calculate UV for displacement map (world position to UV)
+    vec2 displacementUV = (worldPos.xz - waterExtent.xy) / waterExtent.zw + 0.5;
+    displacementUV = clamp(displacementUV, 0.0, 1.0);
+
+    // Sample displacement and apply with scale
+    float interactiveDisplacement = texture(displacementMap, displacementUV).r;
+    worldPos.y += interactiveDisplacement * displacementScale;
 
     // Output
     gl_Position = ubo.proj * ubo.view * worldPos;
     fragWorldPos = worldPos.xyz;
     fragNormal = normal;
     fragTexCoord = inTexCoord;
-    fragWaveHeight = totalDisplacement.y;
+    fragWaveHeight = totalDisplacement.y + interactiveDisplacement * displacementScale;
 }

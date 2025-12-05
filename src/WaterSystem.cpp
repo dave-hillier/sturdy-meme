@@ -31,7 +31,20 @@ bool WaterSystem::init(const InitInfo& info) {
     waterUniforms.terrainHeightScale = 220.0f; // Default height scale
     waterUniforms.shoreBlendDistance = 3.0f;   // 3m shore blend
     waterUniforms.shoreFoamWidth = 5.0f;       // 5m shore foam band
-    waterUniforms.padding = 0.0f;
+    waterUniforms.flowStrength = 1.0f;         // 1m UV offset per flow cycle
+    waterUniforms.flowSpeed = 0.5f;            // Flow animation speed
+    waterUniforms.flowFoamStrength = 0.5f;     // Flow-based foam intensity
+    waterUniforms.fbmNearDistance = 50.0f;     // Max detail within 50m
+    waterUniforms.fbmFarDistance = 500.0f;     // Min detail beyond 500m
+
+    // PBR Scattering defaults (Ocean type)
+    // Absorption coefficients based on real ocean water optical properties
+    // Red absorbs fastest, blue slowest
+    waterUniforms.scatteringCoeffs = glm::vec4(0.45f, 0.09f, 0.02f, 0.1f); // absorption RGB + turbidity
+    waterUniforms.specularRoughness = 0.05f;   // Water is quite smooth
+    waterUniforms.absorptionScale = 0.15f;     // Depth-based absorption rate
+    waterUniforms.scatteringScale = 1.0f;      // Turbidity multiplier
+    waterUniforms.displacementScale = 1.0f;   // Interactive displacement scale (Phase 4)
 
     if (!createDescriptorSetLayout()) return false;
     if (!createPipeline()) return false;
@@ -77,6 +90,7 @@ bool WaterSystem::createDescriptorSetLayout() {
     // 1: Water uniforms
     // 2: Shadow map array (for shadow sampling)
     // 3: Terrain heightmap (for shore detection)
+    // 4: Flow map (for water flow direction and speed)
 
     auto uboBinding = BindingBuilder()
         .setBinding(0)
@@ -102,8 +116,20 @@ bool WaterSystem::createDescriptorSetLayout() {
         .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
         .build();
 
-    std::array<VkDescriptorSetLayoutBinding, 4> bindings = {
-        uboBinding, waterUniformBinding, shadowMapBinding, terrainHeightMapBinding
+    auto flowMapBinding = BindingBuilder()
+        .setBinding(4)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
+        .build();
+
+    auto displacementMapBinding = BindingBuilder()
+        .setBinding(5)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        .setStageFlags(VK_SHADER_STAGE_VERTEX_BIT)
+        .build();
+
+    std::array<VkDescriptorSetLayoutBinding, 6> bindings = {
+        uboBinding, waterUniformBinding, shadowMapBinding, terrainHeightMapBinding, flowMapBinding, displacementMapBinding
     };
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
@@ -263,7 +289,11 @@ bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffe
                                         VkDeviceSize uniformBufferSize,
                                         ShadowSystem& shadowSystem,
                                         VkImageView terrainHeightMapView,
-                                        VkSampler terrainHeightMapSampler) {
+                                        VkSampler terrainHeightMapSampler,
+                                        VkImageView flowMapView,
+                                        VkSampler flowMapSampler,
+                                        VkImageView displacementMapView,
+                                        VkSampler displacementMapSampler) {
     // Allocate descriptor sets using managed pool
     descriptorSets = descriptorPool->allocate(descriptorSetLayout, framesInFlight);
     if (descriptorSets.size() != framesInFlight) {
@@ -301,7 +331,19 @@ bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffe
         terrainInfo.imageView = terrainHeightMapView;
         terrainInfo.sampler = terrainHeightMapSampler;
 
-        std::array<VkWriteDescriptorSet, 4> descriptorWrites{};
+        // Flow map binding
+        VkDescriptorImageInfo flowInfo{};
+        flowInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        flowInfo.imageView = flowMapView;
+        flowInfo.sampler = flowMapSampler;
+
+        // Displacement map binding (Phase 4: interactive splashes)
+        VkDescriptorImageInfo displacementInfo{};
+        displacementInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        displacementInfo.imageView = displacementMapView;
+        displacementInfo.sampler = displacementMapSampler;
+
+        std::array<VkWriteDescriptorSet, 6> descriptorWrites{};
 
         descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         descriptorWrites[0].dstSet = descriptorSets[i];
@@ -335,11 +377,27 @@ bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffe
         descriptorWrites[3].descriptorCount = 1;
         descriptorWrites[3].pImageInfo = &terrainInfo;
 
+        descriptorWrites[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[4].dstSet = descriptorSets[i];
+        descriptorWrites[4].dstBinding = 4;
+        descriptorWrites[4].dstArrayElement = 0;
+        descriptorWrites[4].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[4].descriptorCount = 1;
+        descriptorWrites[4].pImageInfo = &flowInfo;
+
+        descriptorWrites[5].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[5].dstSet = descriptorSets[i];
+        descriptorWrites[5].dstBinding = 5;
+        descriptorWrites[5].dstArrayElement = 0;
+        descriptorWrites[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[5].descriptorCount = 1;
+        descriptorWrites[5].pImageInfo = &displacementInfo;
+
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                descriptorWrites.data(), 0, nullptr);
     }
 
-    SDL_Log("Water descriptor sets created with terrain heightmap");
+    SDL_Log("Water descriptor sets created with terrain heightmap, flow map, and displacement map");
     return true;
 }
 
@@ -384,4 +442,81 @@ void WaterSystem::updateTide(float tideHeight) {
     // tideHeight is normalized -1 to +1 from CelestialCalculator::calculateTide()
     // Scale by tidalRange and add to base water level
     waterUniforms.waterLevel = baseWaterLevel + (tideHeight * tidalRange);
+}
+
+void WaterSystem::setWaterType(WaterType type) {
+    // Water type presets based on real-world optical properties
+    // Absorption coefficients: how quickly each wavelength is absorbed (higher = faster absorption)
+    // Real water absorbs red fastest, then green, then blue
+    // Turbidity: amount of suspended particles causing scattering
+
+    switch (type) {
+        case WaterType::Ocean:
+            // Deep ocean: very clear, strong blue tint
+            waterUniforms.scatteringCoeffs = glm::vec4(0.45f, 0.09f, 0.02f, 0.05f);
+            waterUniforms.waterColor = glm::vec4(0.01f, 0.03f, 0.08f, 0.95f);
+            waterUniforms.absorptionScale = 0.12f;
+            waterUniforms.scatteringScale = 0.8f;
+            break;
+
+        case WaterType::CoastalOcean:
+            // Coastal waters: more sediment, blue-green
+            waterUniforms.scatteringCoeffs = glm::vec4(0.35f, 0.12f, 0.05f, 0.15f);
+            waterUniforms.waterColor = glm::vec4(0.02f, 0.06f, 0.10f, 0.92f);
+            waterUniforms.absorptionScale = 0.18f;
+            waterUniforms.scatteringScale = 1.2f;
+            break;
+
+        case WaterType::River:
+            // River: green-brown tint, moderate turbidity
+            waterUniforms.scatteringCoeffs = glm::vec4(0.25f, 0.18f, 0.12f, 0.25f);
+            waterUniforms.waterColor = glm::vec4(0.04f, 0.08f, 0.06f, 0.90f);
+            waterUniforms.absorptionScale = 0.25f;
+            waterUniforms.scatteringScale = 1.5f;
+            break;
+
+        case WaterType::MuddyRiver:
+            // Muddy river: brown, high turbidity
+            waterUniforms.scatteringCoeffs = glm::vec4(0.15f, 0.20f, 0.25f, 0.6f);
+            waterUniforms.waterColor = glm::vec4(0.12f, 0.10f, 0.06f, 0.85f);
+            waterUniforms.absorptionScale = 0.4f;
+            waterUniforms.scatteringScale = 2.5f;
+            break;
+
+        case WaterType::ClearStream:
+            // Mountain stream: extremely clear
+            waterUniforms.scatteringCoeffs = glm::vec4(0.50f, 0.08f, 0.01f, 0.02f);
+            waterUniforms.waterColor = glm::vec4(0.01f, 0.04f, 0.08f, 0.98f);
+            waterUniforms.absorptionScale = 0.08f;
+            waterUniforms.scatteringScale = 0.5f;
+            break;
+
+        case WaterType::Lake:
+            // Lake: dark blue-green, moderate clarity
+            waterUniforms.scatteringCoeffs = glm::vec4(0.35f, 0.15f, 0.08f, 0.12f);
+            waterUniforms.waterColor = glm::vec4(0.02f, 0.05f, 0.08f, 0.93f);
+            waterUniforms.absorptionScale = 0.20f;
+            waterUniforms.scatteringScale = 1.0f;
+            break;
+
+        case WaterType::Swamp:
+            // Swamp: dark green-brown, very turbid
+            waterUniforms.scatteringCoeffs = glm::vec4(0.10f, 0.15f, 0.20f, 0.8f);
+            waterUniforms.waterColor = glm::vec4(0.08f, 0.10f, 0.04f, 0.80f);
+            waterUniforms.absorptionScale = 0.5f;
+            waterUniforms.scatteringScale = 3.0f;
+            break;
+
+        case WaterType::Tropical:
+            // Tropical: bright turquoise, very clear
+            waterUniforms.scatteringCoeffs = glm::vec4(0.55f, 0.06f, 0.03f, 0.03f);
+            waterUniforms.waterColor = glm::vec4(0.0f, 0.08f, 0.12f, 0.97f);
+            waterUniforms.absorptionScale = 0.06f;
+            waterUniforms.scatteringScale = 0.4f;
+            break;
+    }
+
+    SDL_Log("Water type set with absorption (%.2f, %.2f, %.2f), turbidity %.2f",
+            waterUniforms.scatteringCoeffs.r, waterUniforms.scatteringCoeffs.g,
+            waterUniforms.scatteringCoeffs.b, waterUniforms.scatteringCoeffs.a);
 }
