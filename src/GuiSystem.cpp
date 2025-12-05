@@ -1957,7 +1957,9 @@ void GuiSystem::renderSkeletonOverlay(Renderer& renderer, const Camera& camera) 
         }
         glm::vec3 ndc = glm::vec3(clipPos) / clipPos.w;
         float screenX = (ndc.x * 0.5f + 0.5f) * width;
-        float screenY = (1.0f - (ndc.y * 0.5f + 0.5f)) * height;
+        // Vulkan projection already flips Y (proj[1][1] *= -1), so NDC Y is already
+        // in screen orientation (negative = up, positive = down). Just map to pixels.
+        float screenY = (ndc.y * 0.5f + 0.5f) * height;
         return ImVec2(screenX, screenY);
     };
 
