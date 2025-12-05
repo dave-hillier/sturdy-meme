@@ -11,6 +11,19 @@
 #include <vector>
 #include <memory>
 
+// Debug data for skeleton visualization
+struct SkeletonDebugData {
+    struct Bone {
+        glm::vec3 startPos;   // Parent joint position
+        glm::vec3 endPos;     // This joint's position
+        std::string name;
+        int32_t parentIndex;
+        bool isEndEffector;   // True if this is a leaf bone (hand, foot, head tip)
+    };
+    std::vector<Bone> bones;
+    std::vector<glm::vec3> jointPositions;  // All joint world positions
+};
+
 // High-level animated character class
 // Combines: skinned mesh, skeleton, animations, and animation player
 // Uses GPU skinning for performance (bone matrices uploaded to UBO each frame)
@@ -84,6 +97,10 @@ public:
 
     // Get IK debug visualization data
     IKDebugData getIKDebugData() const { return ikSystem.getDebugData(skeleton); }
+
+    // Get skeleton debug data for wireframe rendering
+    // worldTransform: the character's world transform matrix
+    SkeletonDebugData getSkeletonDebugData(const glm::mat4& worldTransform) const;
 
     bool isLoaded() const { return loaded; }
 

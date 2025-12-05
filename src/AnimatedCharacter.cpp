@@ -480,3 +480,55 @@ void AnimatedCharacter::setupDefaultIKChains() {
 
     SDL_Log("AnimatedCharacter: IK setup complete");
 }
+
+SkeletonDebugData AnimatedCharacter::getSkeletonDebugData(const glm::mat4& worldTransform) const {
+    SkeletonDebugData data;
+
+    if (!loaded || skeleton.joints.empty()) {
+        return data;
+    }
+
+    // Compute global transforms for all joints
+    std::vector<glm::mat4> globalTransforms;
+    skeleton.computeGlobalTransforms(globalTransforms);
+
+    // Extract world positions for all joints
+    data.jointPositions.resize(skeleton.joints.size());
+    for (size_t i = 0; i < skeleton.joints.size(); ++i) {
+        glm::vec4 localPos = globalTransforms[i] * glm::vec4(0, 0, 0, 1);
+        glm::vec4 worldPos = worldTransform * localPos;
+        data.jointPositions[i] = glm::vec3(worldPos);
+    }
+
+    // Build bone data (lines from parent to child)
+    data.bones.reserve(skeleton.joints.size());
+    for (size_t i = 0; i < skeleton.joints.size(); ++i) {
+        const auto& joint = skeleton.joints[i];
+
+        SkeletonDebugData::Bone bone;
+        bone.name = joint.name;
+        bone.parentIndex = joint.parentIndex;
+        bone.endPos = data.jointPositions[i];
+
+        // Check if this is an end effector (no children)
+        bool hasChildren = false;
+        for (size_t j = 0; j < skeleton.joints.size(); ++j) {
+            if (skeleton.joints[j].parentIndex == static_cast<int32_t>(i)) {
+                hasChildren = true;
+                break;
+            }
+        }
+        bone.isEndEffector = !hasChildren;
+
+        if (joint.parentIndex >= 0 && joint.parentIndex < static_cast<int32_t>(data.jointPositions.size())) {
+            bone.startPos = data.jointPositions[joint.parentIndex];
+        } else {
+            // Root bone - draw from origin to position
+            bone.startPos = bone.endPos;
+        }
+
+        data.bones.push_back(bone);
+    }
+
+    return data;
+}

@@ -93,6 +93,23 @@ bool SceneBuilder::createMeshes(const InitInfo& info) {
             info.resourcePath + "/assets/characters/fbx/ss_jump.fbx"
         };
         animatedCharacter.loadAdditionalAnimations(additionalAnimations);
+
+        // Setup default IK chains for arms, legs, look-at, and foot placement
+        animatedCharacter.setupDefaultIKChains();
+
+        // Setup ground query for foot placement IK
+        if (terrainHeightFunc) {
+            auto& ikSystem = animatedCharacter.getIKSystem();
+            ikSystem.setGroundQueryFunc([this](const glm::vec3& position, float maxDistance) -> GroundQueryResult {
+                GroundQueryResult result;
+                result.hit = true;
+                result.position = glm::vec3(position.x, getTerrainHeight(position.x, position.z), position.z);
+                result.normal = glm::vec3(0, 1, 0);  // Simplified - assume flat ground normal
+                result.distance = glm::abs(position.y - result.position.y);
+                return result;
+            });
+            SDL_Log("SceneBuilder: Setup ground query for foot IK");
+        }
     } else {
         hasAnimatedCharacter = false;
         SDL_Log("SceneBuilder: Failed to load FBX character, using capsule fallback");
