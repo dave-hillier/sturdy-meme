@@ -11,7 +11,13 @@ void AnimationStateMachine::addState(const std::string& name, const AnimationCli
     state.looping = looping;
     state.time = 0.0f;
     state.speed = 1.0f;
+    state.rootMotionSpeed = clip ? clip->getRootMotionSpeed() : 0.0f;
     states.push_back(state);
+
+    if (state.rootMotionSpeed > 0.0f) {
+        SDL_Log("AnimationStateMachine: State '%s' has root motion speed %.2f m/s",
+                name.c_str(), state.rootMotionSpeed);
+    }
 
     // Set as current state if this is the first one
     if (states.size() == 1) {
@@ -67,6 +73,19 @@ void AnimationStateMachine::update(float deltaTime, float movementSpeed, bool is
     // Update animation times for current (and previous if blending) states
     State* current = findState(currentState);
 
+    // Calculate animation speed scaling to match character movement speed
+    // This prevents foot sliding by making the animation play faster/slower
+    // to match how fast the character is actually moving
+    auto calculateSpeedScale = [movementSpeed](const State* state) -> float {
+        if (!state || state->rootMotionSpeed <= 0.0f) {
+            return 1.0f;  // No root motion data, play at normal speed
+        }
+        // Scale animation speed to match character movement
+        float scale = movementSpeed / state->rootMotionSpeed;
+        // Clamp to reasonable range to avoid extreme distortion
+        return std::clamp(scale, 0.5f, 2.0f);
+    };
+
     // Special handling for jump animation - sync to trajectory
     if (currentState == "jump" && jumpTrajectory.active && current && current->clip) {
         jumpTrajectory.elapsedTime += deltaTime;
@@ -80,7 +99,12 @@ void AnimationStateMachine::update(float deltaTime, float movementSpeed, bool is
             current->time += deltaTime * current->speed;
         }
     } else if (current && current->clip) {
-        current->time += deltaTime * current->speed;
+        // For locomotion animations, scale playback speed to match movement
+        float speedScale = 1.0f;
+        if (currentState == "walk" || currentState == "run") {
+            speedScale = calculateSpeedScale(current);
+        }
+        current->time += deltaTime * current->speed * speedScale;
         if (current->looping && current->clip->duration > 0.0f) {
             current->time = std::fmod(current->time, current->clip->duration);
         }
@@ -89,7 +113,12 @@ void AnimationStateMachine::update(float deltaTime, float movementSpeed, bool is
     if (blending) {
         State* previous = findState(previousState);
         if (previous && previous->clip) {
-            previous->time += deltaTime * previous->speed;
+            // Also scale the previous animation during blending
+            float speedScale = 1.0f;
+            if (previousState == "walk" || previousState == "run") {
+                speedScale = calculateSpeedScale(previous);
+            }
+            previous->time += deltaTime * previous->speed * speedScale;
             if (previous->looping && previous->clip->duration > 0.0f) {
                 previous->time = std::fmod(previous->time, previous->clip->duration);
             }
