@@ -49,8 +49,8 @@ glm::mat3 getCoordinateSystemRotation(UpAxis sourceUp, ForwardAxis sourceFwd) {
         case ForwardAxis::NEG_X: srcFwdVec = glm::vec3(-1, 0, 0); break;
     }
 
-    // Derive right vector from up and forward
-    glm::vec3 srcRightVec = glm::cross(srcUpVec, srcFwdVec);
+    // Derive right vector from forward and up (right-handed: right = forward × up)
+    glm::vec3 srcRightVec = glm::cross(srcFwdVec, srcUpVec);
 
     // Handle degenerate case (up and forward parallel)
     if (glm::length(srcRightVec) < 0.001f) {
@@ -64,8 +64,8 @@ glm::mat3 getCoordinateSystemRotation(UpAxis sourceUp, ForwardAxis sourceFwd) {
     }
     srcRightVec = glm::normalize(srcRightVec);
 
-    // Re-derive forward to ensure orthogonality
-    srcFwdVec = glm::cross(srcRightVec, srcUpVec);
+    // Re-derive forward to ensure orthogonality (forward = up × right for right-handed)
+    srcFwdVec = glm::cross(srcUpVec, srcRightVec);
     srcFwdVec = glm::normalize(srcFwdVec);
 
     // Build transformation matrix
@@ -201,6 +201,11 @@ void process(GLTFSkinnedLoadResult& result, const FBXImportSettings& settings) {
     glm::mat3 rotationMat = buildRotationMatrix(settings);
     glm::mat3 normalMat = glm::transpose(glm::inverse(rotationMat));  // For non-uniform scale safety
 
+    // Check if transform flips handedness (negative determinant)
+    float det = glm::determinant(glm::mat3(transform));
+    bool flipWinding = det < 0.0f;
+    SDL_Log("FBXPostProcess: Transform determinant=%.4f, flipWinding=%s", det, flipWinding ? "yes" : "no");
+
     // Process vertices
     for (auto& vertex : result.vertices) {
         // Transform position (includes scale and coordinate conversion)
@@ -216,13 +221,16 @@ void process(GLTFSkinnedLoadResult& result, const FBXImportSettings& settings) {
         vertex.tangent = glm::vec4(tangentDir, tangentW);
     }
 
-    // Process skeleton joints
-    for (auto& joint : result.skeleton.joints) {
-        // Transform local transform
-        // For local transforms, we need to handle the hierarchy properly
-        // The scale should only be applied to root bones' translations
-        // Child bone translations are relative to parent and scaled implicitly
+    // Flip triangle winding if transform has negative determinant (reflects handedness)
+    if (flipWinding) {
+        SDL_Log("FBXPostProcess: Flipping triangle winding due to negative determinant");
+        for (size_t i = 0; i + 2 < result.indices.size(); i += 3) {
+            std::swap(result.indices[i + 1], result.indices[i + 2]);
+        }
+    }
 
+    // Process skeleton joints - first pass: transform local transforms
+    for (auto& joint : result.skeleton.joints) {
         glm::vec3 localPos = glm::vec3(joint.localTransform[3]);
         glm::mat3 localRot = glm::mat3(joint.localTransform);
 
@@ -242,19 +250,37 @@ void process(GLTFSkinnedLoadResult& result, const FBXImportSettings& settings) {
         joint.localTransform[2] = glm::vec4(glm::normalize(newLocalRot[2]), 0.0f);
         joint.localTransform[3] = glm::vec4(newLocalPos, 1.0f);
 
-        // Transform inverse bind matrix
-        // inverseBindMatrix transforms from model space to bone space
-        // After transforming model space, we need: newInvBind * newModelPos = bonePos
-        // Where newModelPos = transform * oldModelPos
-        // So: newInvBind = oldInvBind * inverse(transform)
-        joint.inverseBindMatrix = joint.inverseBindMatrix * glm::inverse(transform);
-
         // Transform pre-rotation
-        // Pre-rotation is applied in local space, so we need to transform it
         if (joint.preRotation != glm::quat(1.0f, 0.0f, 0.0f, 0.0f)) {
             glm::mat3 preRotMat = glm::mat3_cast(joint.preRotation);
             glm::mat3 newPreRotMat = rotationMat * preRotMat * glm::transpose(rotationMat);
             joint.preRotation = glm::quat_cast(newPreRotMat);
+        }
+    }
+
+    // Second pass: recompute inverseBindMatrix from the transformed skeleton's bind pose
+    //
+    // The original inverseBindMatrix was: inverse(originalGlobalBindPose)
+    // where originalGlobalBindPose was computed from the original local transforms.
+    //
+    // Since we've modified the local transforms (normalized scales, transformed rotations
+    // and positions), we need to recompute what the global bind pose is now and invert it.
+    //
+    // This ensures that at bind pose: boneMatrix = globalTransform * IBM = identity
+    // which is required for correct skinning.
+    {
+        std::vector<glm::mat4> globalTransforms(result.skeleton.joints.size());
+        for (size_t i = 0; i < result.skeleton.joints.size(); ++i) {
+            const auto& joint = result.skeleton.joints[i];
+            if (joint.parentIndex < 0) {
+                globalTransforms[i] = joint.localTransform;
+            } else {
+                globalTransforms[i] = globalTransforms[joint.parentIndex] * joint.localTransform;
+            }
+        }
+
+        for (size_t i = 0; i < result.skeleton.joints.size(); ++i) {
+            result.skeleton.joints[i].inverseBindMatrix = glm::inverse(globalTransforms[i]);
         }
     }
 
@@ -317,13 +343,9 @@ void processAnimations(std::vector<AnimationClip>& animations,
             }
 
             // Normalize scale keyframes to unit scale
-            // FBX files (especially Mixamo cm exports) may have scale values like (100, 100, 100)
-            // baked into animations to handle unit conversion. Since we normalize skeleton
-            // scales to 1.0 and handle unit conversion via position scaling, we should
-            // also normalize animation scale keyframes.
+            // Since we normalize skeleton bone scales to 1.0, animation scale keyframes
+            // that were set to 100 (for cm units) should also be normalized.
             for (auto& value : channel.scale.values) {
-                // Normalize scale: divide by 100 if values appear to be in cm units
-                // (values around 100), otherwise keep as-is (values around 1)
                 if (value.x > 10.0f || value.y > 10.0f || value.z > 10.0f) {
                     value = value * settings.scaleFactor;
                 }
