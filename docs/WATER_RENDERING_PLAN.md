@@ -24,10 +24,11 @@ This plan implements screen-space water rendering with flow maps, procedural foa
 | 10 | Screen-Space Reflections | ❌ Not started |
 | 11 | Dual Depth Buffer | ❌ Not started |
 | 12 | Material Blending | ❌ Not started |
-| 13 | Jacobian Foam (NEW) | ❌ Not started |
-| 14 | Temporal Foam Persistence (NEW) | ❌ Not started |
-| 15 | Intersection Foam (NEW) | ❌ Not started |
-| 16 | Wake/Trail System (NEW) | ❌ Not started |
+| 13 | Jacobian Foam | ❌ Not started |
+| 14 | Temporal Foam Persistence | ❌ Not started |
+| 15 | Intersection Foam | ❌ Not started |
+| 16 | Wake/Trail System | ❌ Not started |
+| 17 | Enhanced SSS | ❌ Not started |
 
 ---
 
@@ -54,24 +55,27 @@ This plan implements screen-space water rendering with flow maps, procedural foa
 
 ---
 
-## Phase 2: Enhanced Foam System
+## Phase 2: Enhanced Foam System ✅ (Superseded by Phase 13/14)
 
-**Goal:** Physically-based foam following flow and shore contours
+**Status:** Basic implementation complete. Texture-based foam with flow animation.
 
-### 2.1 Signed Distance Field for Shores/Rocks
-- Generate SDF from terrain heightmap at water level
-- Store distance to nearest shore/rock per texel
-- Use jump flooding algorithm for GPU-accelerated SDF generation
+**Note:** This phase provided initial foam functionality. For higher quality, implement:
+- **Phase 13** (Jacobian Foam) for physically-accurate wave crest foam
+- **Phase 14** (Temporal Persistence) for foam that lingers and fades
 
-### 2.2 Flow-Aware Foam
-- Foam intensity driven by: flow speed, shore proximity, wave peaks
-- Noise-modulated foam texture sampling along flow direction
-- Smooth foam transitions between water bodies
+### 2.1 Current Implementation
+- ✅ Tileable Worley noise texture (512x512, generated at build time)
+- ✅ Multi-scale texture sampling (3 scales with flow animation)
+- ✅ Shore foam based on water depth
+- ✅ Flow-speed modulated foam intensity
+
+### 2.2 Remaining (Low Priority)
+- SDF generation via jump flooding (currently using depth-based shore detection)
 
 **Files:**
-- New: `src/SDFGenerator.h/cpp`
-- New: `shaders/foam.glsl`
-- Modify: `shaders/water.frag`
+- ✅ `tools/foam_noise_gen.cpp` - Texture generator
+- ✅ `shaders/foam.glsl` - Foam utilities
+- ✅ `shaders/water.frag` - Texture-based foam sampling
 
 ---
 
@@ -257,36 +261,6 @@ This plan implements screen-space water rendering with flow maps, procedural foa
 **Files:**
 - Modify: `src/WaterSystem.h/cpp`
 - Modify: `shaders/water.frag`
-
----
-
-## Performance Budget Target
-
-Based on Far Cry 5's numbers:
-- **Total budget:** ~2ms GPU
-- Position pass: ~0.1ms
-- Tile culling: ~0.05ms
-- Tessellation: ~0.22ms
-- FBM/Displacement: ~0.15ms
-- Composite/Lighting: ~0.87ms (most expensive)
-- Potential async compute savings: ~30%
-
----
-
-## Implementation Order
-
-1. **Phase 1** (Flow Maps) - Biggest visual improvement
-2. **Phase 2** (Enhanced Foam) - Works with flow maps
-3. **Phase 5** (FBM Detail) - Better surface quality
-4. **Phase 6** (Specular Filtering) - Fixes aliasing
-5. **Phase 8** (PBR Lighting) - Physical accuracy
-6. **Phase 9** (Refraction) - Underwater visibility
-7. **Phase 3** (Mini G-Buffer) - Setup for advanced features
-8. **Phase 4** (Displacement) - Interactivity
-9. **Phase 7** (Screen-Space Tessellation) - Performance/quality
-10. **Phase 10** (SSR) - Polish
-11. **Phase 11** (Dual Depth) - Correctness
-12. **Phase 12** (Material Blending) - Multi-water-body support
 
 ---
 
