@@ -195,8 +195,8 @@ bool TwoBoneIKSolver::solve(
     IKUtils::decomposeTransform(midJoint.localTransform, midTranslation, midLocalRot, midScale);
 
     // Calculate the plane normal using pole vector
-    // The pole vector defines which way the elbow/knee should point
-    glm::vec3 poleDir = glm::normalize(chain.poleVector - rootPos);
+    // The pole vector is a direction (not a position) indicating which way the elbow/knee should point
+    glm::vec3 poleDir = glm::normalize(chain.poleVector);
     glm::vec3 planeNormal = glm::normalize(glm::cross(targetDir, poleDir));
     if (glm::length2(planeNormal) < 0.0001f) {
         // Pole vector is aligned with target direction, use a default

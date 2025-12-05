@@ -462,8 +462,14 @@ void SceneBuilder::updateAnimatedCharacter(float deltaTime, VmaAllocator allocat
                                             float movementSpeed, bool isGrounded, bool isJumping) {
     if (!hasAnimatedCharacter) return;
 
+    // Get the character's current world transform for IK ground queries
+    glm::mat4 worldTransform = glm::mat4(1.0f);
+    if (playerObjectIndex < sceneObjects.size()) {
+        worldTransform = sceneObjects[playerObjectIndex].transform;
+    }
+
     animatedCharacter.update(deltaTime, allocator, device, commandPool, queue,
-                             movementSpeed, isGrounded, isJumping);
+                             movementSpeed, isGrounded, isJumping, worldTransform);
 
     // Update the mesh pointer in the renderable (in case it was re-created)
     if (playerObjectIndex < sceneObjects.size()) {

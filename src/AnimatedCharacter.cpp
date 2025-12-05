@@ -249,7 +249,8 @@ const AnimationClip* AnimatedCharacter::getCurrentAnimation() const {
 
 void AnimatedCharacter::update(float deltaTime, VmaAllocator allocator, VkDevice device,
                                 VkCommandPool commandPool, VkQueue queue,
-                                float movementSpeed, bool isGrounded, bool isJumping) {
+                                float movementSpeed, bool isGrounded, bool isJumping,
+                                const glm::mat4& worldTransform) {
     if (!loaded) return;
 
     // Reset skeleton to bind pose before applying animation
@@ -269,8 +270,9 @@ void AnimatedCharacter::update(float deltaTime, VmaAllocator allocator, VkDevice
     }
 
     // Apply IK after animation sampling
+    // Pass world transform so foot placement can query terrain in world space
     if (ikSystem.hasEnabledChains()) {
-        ikSystem.solve(skeleton, deltaTime);
+        ikSystem.solve(skeleton, worldTransform, deltaTime);
     }
 
     // GPU skinning: Bone matrices are computed and uploaded by Renderer each frame
