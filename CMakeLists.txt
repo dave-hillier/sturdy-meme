@@ -86,6 +86,8 @@ set(SOURCES
     src/WaterGBuffer.cpp
     src/WaterDisplacement.cpp
     src/FoamBuffer.cpp
+    src/SSRSystem.cpp
+    src/WaterTileCull.cpp
     src/TreeGenerator.cpp
     src/TreeEditSystem.cpp
     src/TreeEditorGui.cpp

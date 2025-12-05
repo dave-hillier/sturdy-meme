@@ -21,6 +21,12 @@ struct CausticsConfig {
     std::string outputPath = "assets/textures/caustics.png";
 };
 
+// Forward declaration of smoothstep
+float smoothstep(float edge0, float edge1, float x) {
+    float t = std::clamp((x - edge0) / (edge1 - edge0), 0.0f, 1.0f);
+    return t * t * (3.0f - 2.0f * t);
+}
+
 // Generate a single caustic wave pattern
 float causticWave(glm::vec2 uv, glm::vec2 direction, float frequency, float phase) {
     float wave = sin(glm::dot(uv, direction) * frequency + phase);
@@ -107,11 +113,6 @@ float voronoiCaustics(glm::vec2 uv, float scale, unsigned int seed) {
     caustic = pow(caustic, 0.5f); // Soften slightly
 
     return caustic;
-}
-
-float smoothstep(float edge0, float edge1, float x) {
-    float t = std::clamp((x - edge0) / (edge1 - edge0), 0.0f, 1.0f);
-    return t * t * (3.0f - 2.0f * t);
 }
 
 void printUsage(const char* programName) {
