@@ -1,5 +1,9 @@
 #pragma once
 
+#include "BillboardCapture.h"
+#include <memory>
+#include <string>
+
 class Renderer;
 class Camera;
 
@@ -29,6 +33,14 @@ private:
     void renderSeedSection(Renderer& renderer);
     void renderTransformSection(Renderer& renderer, const Camera& camera);
     void renderPresets(Renderer& renderer);
+    void renderBillboardSection(Renderer& renderer);
 
     bool visible = false;
+
+    // Billboard capture state
+    std::unique_ptr<BillboardCapture> billboardCapture;
+    int billboardResolution = 512;  // 256, 512, or 1024
+    std::string lastExportPath;
+    bool captureInProgress = false;
+    std::string captureStatus;
 };
