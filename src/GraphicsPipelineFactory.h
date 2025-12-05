@@ -96,6 +96,7 @@ public:
     GraphicsPipelineFactory& setColorBlendAttachment(const VkPipelineColorBlendAttachmentState& attachment);
     GraphicsPipelineFactory& setColorWriteMask(VkColorComponentFlags mask);
     GraphicsPipelineFactory& setNoColorAttachments();
+    GraphicsPipelineFactory& setColorAttachmentCount(uint32_t count);  // For multiple render targets
 
     // Build the pipeline
     bool build(VkPipeline& pipeline);
@@ -151,6 +152,7 @@ private:
 
     // Color blend state
     bool hasColorAttachments = true;
+    uint32_t colorAttachmentCount = 1;  // Number of color attachments (MRT support)
     VkPipelineColorBlendAttachmentState colorBlendAttachment{};
 
     void initDefaultColorBlendAttachment();

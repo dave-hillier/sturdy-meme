@@ -115,6 +115,9 @@ public:
     // Record water rendering commands
     void recordDraw(VkCommandBuffer cmd, uint32_t frameIndex);
 
+    // Record just mesh draw (for G-buffer pass with external pipeline)
+    void recordMeshDraw(VkCommandBuffer cmd);
+
     // Configuration
     void setWaterLevel(float level) { baseWaterLevel = level; waterUniforms.waterLevel = level; }
     void setWaterColor(const glm::vec4& color) { waterUniforms.waterColor = color; }
@@ -199,6 +202,10 @@ public:
     float getCausticsScale() const { return waterUniforms.causticsScale; }
     float getCausticsSpeed() const { return waterUniforms.causticsSpeed; }
     float getCausticsIntensity() const { return waterUniforms.causticsIntensity; }
+
+    // Get uniform buffers (for G-buffer pass descriptor sets)
+    const std::vector<VkBuffer>& getUniformBuffers() const { return waterUniformBuffers; }
+    static VkDeviceSize getUniformBufferSize() { return sizeof(WaterUniforms); }
 
     // Water type presets (based on Far Cry 5 approach)
     enum class WaterType {

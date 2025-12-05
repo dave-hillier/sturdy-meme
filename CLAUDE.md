@@ -2,6 +2,7 @@
 
 - See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for rendering architecture overview
 - dont include estimates, either time or lines of code, in any plans
+- when a feature is completed describe how to test it. It doesnt have to be a unit test - it can be some example and manual testing.
 - use opengameart.org for texture asset placeholders
 - keep an emphasis when planning on incremental progress, each state should be working and look decent when rendered
 - always ensure that the build both compiles and runs without crashing before considering it done

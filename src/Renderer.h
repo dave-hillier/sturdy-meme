@@ -50,6 +50,7 @@
 #include "TreeEditSystem.h"
 #include "SSRSystem.h"
 #include "WaterTileCull.h"
+#include "WaterGBuffer.h"
 
 struct PushConstants {
     glm::mat4 model;
@@ -348,6 +349,7 @@ private:
     FoamBuffer foamBuffer;
     SSRSystem ssrSystem;
     WaterTileCull waterTileCull;
+    WaterGBuffer waterGBuffer;
     ErosionSimulator erosionSimulator;
     TreeEditSystem treeEditSystem;
     EnvironmentSettings environmentSettings;
