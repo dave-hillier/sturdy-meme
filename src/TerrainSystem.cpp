@@ -370,7 +370,7 @@ bool TerrainSystem::createRenderDescriptorSetLayout() {
             .build();
     };
 
-    std::array<VkDescriptorSetLayoutBinding, 13> bindings = {
+    std::array<VkDescriptorSetLayoutBinding, 14> bindings = {
         makeGraphicsBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT),
         makeGraphicsBinding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT),
@@ -388,7 +388,9 @@ bool TerrainSystem::createRenderDescriptorSetLayout() {
         // Cloud shadow map
         makeGraphicsBinding(13, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
         // Shadow culled visible indices (for shadow culled vertex shaders)
-        makeGraphicsBinding(14, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT)};
+        makeGraphicsBinding(14, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT),
+        // Hole mask for caves/wells
+        makeGraphicsBinding(16, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)};
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -1755,6 +1757,17 @@ void TerrainSystem::updateDescriptorSets(VkDevice device,
             shadowVisibleWrite.pBufferInfo = &shadowVisibleInfo;
             writes.push_back(shadowVisibleWrite);
         }
+
+        // Hole mask (for cave/well rendering)
+        VkDescriptorImageInfo holeMaskInfo{heightMap.getHoleMaskSampler(), heightMap.getHoleMaskView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkWriteDescriptorSet holeMaskWrite{};
+        holeMaskWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        holeMaskWrite.dstSet = renderDescriptorSets[i];
+        holeMaskWrite.dstBinding = 16;  // BINDING_TERRAIN_HOLE_MASK
+        holeMaskWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        holeMaskWrite.descriptorCount = 1;
+        holeMaskWrite.pImageInfo = &holeMaskInfo;
+        writes.push_back(holeMaskWrite);
 
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
     }

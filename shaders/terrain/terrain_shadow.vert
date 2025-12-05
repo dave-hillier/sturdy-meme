@@ -27,6 +27,9 @@ layout(push_constant) uniform PushConstants {
     int padding;
 };
 
+// Output UV for hole mask sampling in fragment shader
+layout(location = 0) out vec2 fragTexCoord;
+
 void main() {
     // Determine which triangle and vertex
     uint triangleIndex = gl_VertexIndex / 3u;
@@ -61,4 +64,7 @@ void main() {
 
     // Transform to light space
     gl_Position = lightViewProj * vec4(worldPos, 1.0);
+
+    // Pass UV for hole mask sampling
+    fragTexCoord = uv;
 }

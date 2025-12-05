@@ -65,6 +65,11 @@ public:
     size_t getFlagClothIndex() const { return flagClothIndex; }
     size_t getFlagPoleIndex() const { return flagPoleIndex; }
 
+    // Well entrance position (for creating terrain hole)
+    float getWellEntranceX() const { return wellEntranceX; }
+    float getWellEntranceZ() const { return wellEntranceZ; }
+    static constexpr float WELL_HOLE_RADIUS = 5.0f;  // Radius in meters (hole mask now 2048 res = ~8m/texel)
+
     // Update player transform
     void updatePlayerTransform(const glm::mat4& transform);
 
@@ -130,6 +135,11 @@ private:
     size_t playerObjectIndex = 0;
     size_t flagPoleIndex = 0;
     size_t flagClothIndex = 0;
+    size_t wellEntranceIndex = 0;
+
+    // Well entrance position (for terrain hole creation)
+    float wellEntranceX = 0.0f;
+    float wellEntranceZ = 0.0f;
 
     // Material registry for data-driven material management
     MaterialRegistry materialRegistry;

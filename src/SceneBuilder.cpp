@@ -381,6 +381,26 @@ void SceneBuilder::createSceneObjects() {
         .withMetallic(0.0f)
         .withCastsShadow(true)
         .build());
+
+    // Well entrance - demonstrates terrain hole mask system
+    // A stone-like frame floating above the terrain hole
+    wellEntranceX = 20.0f;
+    wellEntranceZ = 20.0f;
+    float wellY = getTerrainHeight(wellEntranceX, wellEntranceZ);
+    // Frame floats 3m above terrain so hole is visible
+    glm::mat4 wellTransform = glm::translate(glm::mat4(1.0f),
+        glm::vec3(wellEntranceX, wellY + 3.0f, wellEntranceZ));
+    wellTransform = glm::scale(wellTransform, glm::vec3(2.0f, 0.5f, 2.0f));
+    wellEntranceIndex = sceneObjects.size();
+    sceneObjects.push_back(RenderableBuilder()
+        .withTransform(wellTransform)
+        .withMesh(&cubeMesh)
+        .withTexture(&metalTexture)  // Stone-like appearance
+        .withMaterialId(metalMaterialId)
+        .withRoughness(0.8f)
+        .withMetallic(0.1f)
+        .withCastsShadow(true)
+        .build());
 }
 
 void SceneBuilder::uploadFlagClothMesh(VmaAllocator allocator, VkDevice device, VkCommandPool commandPool, VkQueue queue) {

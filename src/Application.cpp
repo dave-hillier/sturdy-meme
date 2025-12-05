@@ -53,12 +53,27 @@ bool Application::init(const std::string& title, int width, int height) {
         return false;
     }
 
+    // Create terrain hole at well entrance location
+    // This must be done before terrain physics is initialized
+    {
+        auto& terrain = renderer.getTerrainSystem();
+        const auto& sceneBuilder = renderer.getSceneManager().getSceneBuilder();
+        float wellX = sceneBuilder.getWellEntranceX();
+        float wellZ = sceneBuilder.getWellEntranceZ();
+        terrain.setHoleCircle(wellX, wellZ, SceneBuilder::WELL_HOLE_RADIUS, true);
+        terrain.uploadHoleMaskToGPU();
+        SDL_Log("Created terrain hole at well entrance (%.1f, %.1f) radius %.1f",
+                wellX, wellZ, SceneBuilder::WELL_HOLE_RADIUS);
+    }
+
     // Initialize terrain physics using heightfield from terrain system
+    // Include hole mask for caves/wells (areas with no collision)
     const auto& terrain = renderer.getTerrainSystem();
     const auto& terrainConfig = terrain.getConfig();
     renderer.getSceneManager().initTerrainPhysics(
         physics,
         terrain.getHeightMapData(),
+        terrain.getHoleMaskData(),
         terrain.getHeightMapResolution(),
         terrainConfig.size,
         terrainConfig.heightScale

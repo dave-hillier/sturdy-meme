@@ -81,6 +81,8 @@
 // Shadow culling (compute pass - uses terrain compute descriptor set)
 #define BINDING_TERRAIN_SHADOW_VISIBLE 14   // Shadow visible indices buffer
 #define BINDING_TERRAIN_SHADOW_DRAW    15   // Shadow indirect draw buffer
+// Hole mask for caves/wells (R8_UNORM: 0=solid, 1=hole)
+#define BINDING_TERRAIN_HOLE_MASK      16   // Hole mask texture
 
 // =============================================================================
 // Grass Compute Shader Descriptor Set

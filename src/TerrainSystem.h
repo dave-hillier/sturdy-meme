@@ -205,6 +205,15 @@ public:
     VkImageView getHeightMapView() const { return heightMap.getView(); }
     VkSampler getHeightMapSampler() const { return heightMap.getSampler(); }
 
+    // Hole mask for caves/wells (areas with no terrain)
+    bool isHole(float x, float z) const { return heightMap.isHole(x, z); }
+    void setHole(float x, float z, bool isHole) { heightMap.setHole(x, z, isHole); }
+    void setHoleCircle(float centerX, float centerZ, float radius, bool isHole) {
+        heightMap.setHoleCircle(centerX, centerZ, radius, isHole);
+    }
+    void uploadHoleMaskToGPU() { heightMap.uploadHoleMaskToGPU(); }
+    const uint8_t* getHoleMaskData() const { return heightMap.getHoleMaskData(); }
+
     // Toggle wireframe mode for debugging
     void setWireframeMode(bool enabled) { wireframeMode = enabled; }
     bool isWireframeMode() const { return wireframeMode; }

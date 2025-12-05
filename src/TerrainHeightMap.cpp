@@ -28,14 +28,21 @@ bool TerrainHeightMap::init(const InitInfo& info) {
         if (!generateHeightData()) return false;
     }
 
-    if (!createGPUResources()) return false;
-    if (!uploadToGPU()) return false;
+    // Initialize hole mask to all solid (no holes) - uses higher resolution for finer detail
+    holeMaskCpuData.resize(holeMaskResolution * holeMaskResolution, 0);
 
-    SDL_Log("TerrainHeightMap initialized: %ux%u", resolution, resolution);
+    if (!createGPUResources()) return false;
+    if (!createHoleMaskResources()) return false;
+    if (!uploadToGPU()) return false;
+    if (!uploadHoleMaskToGPUInternal()) return false;
+
+    SDL_Log("TerrainHeightMap initialized: %ux%u heightmap, %ux%u hole mask",
+            resolution, resolution, holeMaskResolution, holeMaskResolution);
     return true;
 }
 
 void TerrainHeightMap::destroy(VkDevice device, VmaAllocator allocator) {
+    // Destroy height map resources
     if (sampler) vkDestroySampler(device, sampler, nullptr);
     if (imageView) vkDestroyImageView(device, imageView, nullptr);
     if (image) vmaDestroyImage(allocator, image, allocation);
@@ -44,6 +51,16 @@ void TerrainHeightMap::destroy(VkDevice device, VmaAllocator allocator) {
     imageView = VK_NULL_HANDLE;
     image = VK_NULL_HANDLE;
     allocation = VK_NULL_HANDLE;
+
+    // Destroy hole mask resources
+    if (holeMaskSampler) vkDestroySampler(device, holeMaskSampler, nullptr);
+    if (holeMaskImageView) vkDestroyImageView(device, holeMaskImageView, nullptr);
+    if (holeMaskImage) vmaDestroyImage(allocator, holeMaskImage, holeMaskAllocation);
+
+    holeMaskSampler = VK_NULL_HANDLE;
+    holeMaskImageView = VK_NULL_HANDLE;
+    holeMaskImage = VK_NULL_HANDLE;
+    holeMaskAllocation = VK_NULL_HANDLE;
 }
 
 bool TerrainHeightMap::generateHeightData() {
@@ -260,6 +277,170 @@ bool TerrainHeightMap::createGPUResources() {
     return true;
 }
 
+bool TerrainHeightMap::createHoleMaskResources() {
+    // Create Vulkan image for hole mask (R8_UNORM: 0=solid, 255=hole)
+    // Uses higher resolution than heightmap for finer hole detail
+    VkImageCreateInfo imageInfo{};
+    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    imageInfo.imageType = VK_IMAGE_TYPE_2D;
+    imageInfo.format = VK_FORMAT_R8_UNORM;
+    imageInfo.extent = {holeMaskResolution, holeMaskResolution, 1};
+    imageInfo.mipLevels = 1;
+    imageInfo.arrayLayers = 1;
+    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imageInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+
+    if (vmaCreateImage(allocator, &imageInfo, &allocInfo, &holeMaskImage, &holeMaskAllocation, nullptr) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create hole mask image");
+        return false;
+    }
+
+    // Create image view
+    VkImageViewCreateInfo viewInfo{};
+    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewInfo.image = holeMaskImage;
+    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format = VK_FORMAT_R8_UNORM;
+    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.subresourceRange.baseMipLevel = 0;
+    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.baseArrayLayer = 0;
+    viewInfo.subresourceRange.layerCount = 1;
+
+    if (vkCreateImageView(device, &viewInfo, nullptr, &holeMaskImageView) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create hole mask image view");
+        return false;
+    }
+
+    // Create sampler (nearest filtering for crisp hole edges)
+    VkSamplerCreateInfo samplerInfo{};
+    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    samplerInfo.magFilter = VK_FILTER_LINEAR;  // Smooth edges for rendering
+    samplerInfo.minFilter = VK_FILTER_LINEAR;
+    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+
+    if (vkCreateSampler(device, &samplerInfo, nullptr, &holeMaskSampler) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create hole mask sampler");
+        return false;
+    }
+
+    return true;
+}
+
+bool TerrainHeightMap::uploadHoleMaskToGPUInternal() {
+    VkDeviceSize imageSize = holeMaskResolution * holeMaskResolution * sizeof(uint8_t);
+
+    // Create staging buffer
+    VkBuffer stagingBuffer;
+    VmaAllocation stagingAllocation;
+
+    VkBufferCreateInfo bufferInfo{};
+    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferInfo.size = imageSize;
+    bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+    allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+
+    if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &stagingBuffer, &stagingAllocation, nullptr) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create staging buffer for hole mask upload");
+        return false;
+    }
+
+    // Copy data to staging buffer
+    void* mappedData;
+    vmaMapMemory(allocator, stagingAllocation, &mappedData);
+    memcpy(mappedData, holeMaskCpuData.data(), imageSize);
+    vmaUnmapMemory(allocator, stagingAllocation);
+
+    // Allocate command buffer
+    VkCommandBufferAllocateInfo cmdAllocInfo{};
+    cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cmdAllocInfo.commandPool = commandPool;
+    cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cmdAllocInfo.commandBufferCount = 1;
+
+    VkCommandBuffer cmd;
+    vkAllocateCommandBuffers(device, &cmdAllocInfo, &cmd);
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cmd, &beginInfo);
+
+    // Transition image to transfer destination
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = holeMaskImage;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+    barrier.srcAccessMask = 0;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+    vkCmdPipelineBarrier(cmd,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    // Copy buffer to image
+    VkBufferImageCopy region{};
+    region.bufferOffset = 0;
+    region.bufferRowLength = 0;
+    region.bufferImageHeight = 0;
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.mipLevel = 0;
+    region.imageSubresource.baseArrayLayer = 0;
+    region.imageSubresource.layerCount = 1;
+    region.imageOffset = {0, 0, 0};
+    region.imageExtent = {holeMaskResolution, holeMaskResolution, 1};
+
+    vkCmdCopyBufferToImage(cmd, stagingBuffer, holeMaskImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+    // Transition image to shader read
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(cmd,
+        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    vkEndCommandBuffer(cmd);
+
+    // Submit and wait
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &cmd;
+
+    vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+    vkQueueWaitIdle(graphicsQueue);
+
+    // Cleanup
+    vkFreeCommandBuffers(device, commandPool, 1, &cmd);
+    vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
+
+    return true;
+}
+
 bool TerrainHeightMap::uploadToGPU() {
     VkDeviceSize imageSize = resolution * resolution * sizeof(float);
 
@@ -365,7 +546,98 @@ bool TerrainHeightMap::uploadToGPU() {
     return true;
 }
 
+void TerrainHeightMap::worldToTexel(float x, float z, int& texelX, int& texelY) const {
+    float u = (x / terrainSize) + 0.5f;
+    float v = (z / terrainSize) + 0.5f;
+    u = std::clamp(u, 0.0f, 1.0f);
+    v = std::clamp(v, 0.0f, 1.0f);
+    texelX = static_cast<int>(u * (resolution - 1));
+    texelY = static_cast<int>(v * (resolution - 1));
+    texelX = std::clamp(texelX, 0, static_cast<int>(resolution - 1));
+    texelY = std::clamp(texelY, 0, static_cast<int>(resolution - 1));
+}
+
+void TerrainHeightMap::worldToHoleMaskTexel(float x, float z, int& texelX, int& texelY) const {
+    float u = (x / terrainSize) + 0.5f;
+    float v = (z / terrainSize) + 0.5f;
+    u = std::clamp(u, 0.0f, 1.0f);
+    v = std::clamp(v, 0.0f, 1.0f);
+    texelX = static_cast<int>(u * (holeMaskResolution - 1));
+    texelY = static_cast<int>(v * (holeMaskResolution - 1));
+    texelX = std::clamp(texelX, 0, static_cast<int>(holeMaskResolution - 1));
+    texelY = std::clamp(texelY, 0, static_cast<int>(holeMaskResolution - 1));
+}
+
+bool TerrainHeightMap::isHole(float x, float z) const {
+    int texelX, texelY;
+    worldToHoleMaskTexel(x, z, texelX, texelY);
+    return holeMaskCpuData[texelY * holeMaskResolution + texelX] > 127;
+}
+
+void TerrainHeightMap::setHole(float x, float z, bool hole) {
+    int texelX, texelY;
+    worldToHoleMaskTexel(x, z, texelX, texelY);
+    holeMaskCpuData[texelY * holeMaskResolution + texelX] = hole ? 255 : 0;
+    holeMaskDirty = true;
+}
+
+void TerrainHeightMap::setHoleCircle(float centerX, float centerZ, float radius, bool hole) {
+    // Convert radius to texel space (using hole mask resolution)
+    float texelsPerUnit = static_cast<float>(holeMaskResolution - 1) / terrainSize;
+    int texelRadius = static_cast<int>(std::ceil(radius * texelsPerUnit));
+
+    // Ensure at least 1 texel radius for small holes
+    if (texelRadius < 1) texelRadius = 1;
+
+    int centerTexelX, centerTexelY;
+    worldToHoleMaskTexel(centerX, centerZ, centerTexelX, centerTexelY);
+
+    int holesSet = 0;
+
+    // Iterate over bounding box of circle
+    for (int dy = -texelRadius; dy <= texelRadius; dy++) {
+        for (int dx = -texelRadius; dx <= texelRadius; dx++) {
+            int tx = centerTexelX + dx;
+            int ty = centerTexelY + dy;
+
+            // Check bounds
+            if (tx < 0 || tx >= static_cast<int>(holeMaskResolution) ||
+                ty < 0 || ty >= static_cast<int>(holeMaskResolution)) {
+                continue;
+            }
+
+            // Check if within circle (in world space for accuracy)
+            float worldX = (static_cast<float>(tx) / (holeMaskResolution - 1) - 0.5f) * terrainSize;
+            float worldZ = (static_cast<float>(ty) / (holeMaskResolution - 1) - 0.5f) * terrainSize;
+            float distSq = (worldX - centerX) * (worldX - centerX) +
+                          (worldZ - centerZ) * (worldZ - centerZ);
+
+            if (distSq <= radius * radius) {
+                holeMaskCpuData[ty * holeMaskResolution + tx] = hole ? 255 : 0;
+                holesSet++;
+            }
+        }
+    }
+
+    SDL_Log("setHoleCircle: center=(%.1f,%.1f) radius=%.1f texelRadius=%d centerTexel=(%d,%d) texelsSet=%d (holeMaskRes=%u)",
+            centerX, centerZ, radius, texelRadius, centerTexelX, centerTexelY, holesSet, holeMaskResolution);
+
+    holeMaskDirty = true;
+}
+
+void TerrainHeightMap::uploadHoleMaskToGPU() {
+    if (holeMaskDirty) {
+        uploadHoleMaskToGPUInternal();
+        holeMaskDirty = false;
+    }
+}
+
 float TerrainHeightMap::getHeightAt(float x, float z) const {
+    // Check hole mask first
+    if (isHole(x, z)) {
+        return NO_GROUND;
+    }
+
     // Convert world position to UV coordinates
     float u = (x / terrainSize) + 0.5f;
     float v = (z / terrainSize) + 0.5f;
