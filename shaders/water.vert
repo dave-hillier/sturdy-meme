@@ -9,9 +9,10 @@
  */
 
 #include "ubo_common.glsl"
+#include "bindings.glsl"
 
 // Water-specific uniforms
-layout(std140, binding = 1) uniform WaterUniforms {
+layout(std140, binding = BINDING_WATER_UBO) uniform WaterUniforms {
     vec4 waterColor;           // rgb = base water color, a = transparency
     vec4 waveParams;           // x = amplitude, y = wavelength, z = steepness, w = speed
     vec4 waveParams2;          // Second wave layer parameters
@@ -41,7 +42,7 @@ layout(std140, binding = 1) uniform WaterUniforms {
 };
 
 // Displacement map (Phase 4: Interactive splashes)
-layout(binding = 5) uniform sampler2D displacementMap;
+layout(binding = BINDING_WATER_DISPLACEMENT) uniform sampler2D displacementMap;
 
 layout(push_constant) uniform PushConstants {
     mat4 model;

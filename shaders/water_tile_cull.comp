@@ -16,10 +16,14 @@
  * 5. Update indirect draw command
  */
 
+#extension GL_GOOGLE_include_directive : require
+
+#include "bindings.glsl"
+
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 // Depth buffer for occlusion
-layout(binding = 0) uniform sampler2D depthTexture;
+layout(binding = BINDING_WATER_CULL_DEPTH) uniform sampler2D depthTexture;
 
 // Output: visible tile buffer
 struct TileData {
@@ -28,12 +32,12 @@ struct TileData {
     float maxDepth;
 };
 
-layout(binding = 1, std430) writeonly buffer TileBuffer {
+layout(binding = BINDING_WATER_CULL_TILES, std430) writeonly buffer TileBuffer {
     TileData tiles[];
 };
 
 // Atomic counter for visible tiles
-layout(binding = 2, std430) buffer CounterBuffer {
+layout(binding = BINDING_WATER_CULL_COUNTER, std430) buffer CounterBuffer {
     uint visibleCount;
 };
 
@@ -45,7 +49,7 @@ struct IndirectDrawCommand {
     uint firstInstance;
 };
 
-layout(binding = 3, std430) buffer IndirectBuffer {
+layout(binding = BINDING_WATER_CULL_INDIRECT, std430) buffer IndirectBuffer {
     IndirectDrawCommand drawCommand;
 };
 

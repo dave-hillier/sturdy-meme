@@ -13,17 +13,21 @@
  * - Edge fading to hide artifacts
  */
 
+#extension GL_GOOGLE_include_directive : require
+
+#include "bindings.glsl"
+
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 // Input textures
-layout(binding = 0) uniform sampler2D colorTexture;
-layout(binding = 1) uniform sampler2D depthTexture;
+layout(binding = BINDING_SSR_COLOR) uniform sampler2D colorTexture;
+layout(binding = BINDING_SSR_DEPTH) uniform sampler2D depthTexture;
 
 // Output SSR texture
-layout(binding = 2, rgba16f) uniform writeonly image2D ssrOutput;
+layout(binding = BINDING_SSR_OUTPUT, rgba16f) uniform writeonly image2D ssrOutput;
 
 // Previous frame SSR for temporal filtering
-layout(binding = 3) uniform sampler2D prevSSR;
+layout(binding = BINDING_SSR_PREV) uniform sampler2D prevSSR;
 
 // Push constants
 layout(push_constant) uniform SSRParams {
