@@ -104,9 +104,6 @@ private:
     // Build character model transform from world position and rotation
     glm::mat4 buildCharacterTransform(const glm::vec3& position, float yRotation) const;
 
-    // Character model constants
-    static constexpr float CHARACTER_SCALE = 0.01f;  // Mixamo FBX is in cm, scale to meters
-
     // Terrain height query function
     HeightQueryFunc terrainHeightFunc;
 

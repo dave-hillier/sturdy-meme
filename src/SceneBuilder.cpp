@@ -446,10 +446,9 @@ glm::mat4 SceneBuilder::buildCharacterTransform(const glm::vec3& position, float
     // Character model transform:
     // 1. Translate to world position
     // 2. Apply Y rotation (facing direction)
-    // 3. Scale down (Mixamo FBX uses cm, convert to meters)
+    // Note: Scale is now handled by FBX post-import processing
     glm::mat4 transform = glm::translate(glm::mat4(1.0f), position);
     transform = glm::rotate(transform, yRotation, glm::vec3(0.0f, 1.0f, 0.0f));
-    transform = glm::scale(transform, glm::vec3(CHARACTER_SCALE));
     return transform;
 }
 
@@ -460,12 +459,10 @@ void SceneBuilder::updatePlayerTransform(const glm::mat4& transform) {
             glm::vec3 pos = glm::vec3(transform[3]);
             pos.y -= 0.9f;  // CAPSULE_HEIGHT * 0.5 = 1.8 * 0.5
 
-            // Use the player transform's rotation directly, just adjust position and add model corrections
+            // Use the player transform's rotation directly, just adjust position
+            // Note: Scale is now handled by FBX post-import processing
             glm::mat4 result = transform;
             result[3] = glm::vec4(pos, 1.0f);
-
-            // Apply scale (Mixamo FBX uses cm, convert to meters)
-            result = glm::scale(result, glm::vec3(CHARACTER_SCALE));
 
             sceneObjects[playerObjectIndex].transform = result;
         } else {
