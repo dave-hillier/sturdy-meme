@@ -5,9 +5,11 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
+#include <array>
 
 #include "TreeGenerator.h"
 #include "Mesh.h"
+#include "Texture.h"
 #include "UBOs.h"
 #include "DescriptorManager.h"
 
@@ -16,7 +18,8 @@ struct TreePushConstants {
     glm::mat4 model;
     float roughness;
     float metallic;
-    float padding[2];
+    float alphaTest;       // Alpha discard threshold for leaves
+    int isLeaf;            // 0 = bark, 1 = leaf
 };
 
 class TreeEditSystem {
@@ -85,9 +88,13 @@ private:
     bool createDescriptorSets();
     bool createPipelines();
     bool createWireframePipeline();
+    bool loadTextures();
 
     // Upload tree mesh to GPU
     void uploadTreeMesh();
+
+    // Update texture bindings when bark/leaf type changes
+    void updateTextureBindings();
 
     // Vulkan resources
     VkDevice device = VK_NULL_HANDLE;
@@ -97,6 +104,7 @@ private:
     DescriptorManager::Pool* descriptorPool = nullptr;
     VkExtent2D extent = {0, 0};
     std::string shaderPath;
+    std::string assetPath;
     uint32_t framesInFlight = 0;
     VkQueue graphicsQueue = VK_NULL_HANDLE;
     VkCommandPool commandPool = VK_NULL_HANDLE;
@@ -110,6 +118,25 @@ private:
 
     // Descriptor sets (per frame)
     std::vector<VkDescriptorSet> descriptorSets;
+
+    // Bark textures (4 types: Oak, Birch, Pine, Willow)
+    static constexpr int NUM_BARK_TYPES = 4;
+    std::array<Texture, NUM_BARK_TYPES> barkColorTextures;
+    std::array<Texture, NUM_BARK_TYPES> barkNormalTextures;
+    std::array<Texture, NUM_BARK_TYPES> barkAOTextures;
+    std::array<Texture, NUM_BARK_TYPES> barkRoughnessTextures;
+
+    // Leaf textures (4 types: Oak, Ash, Aspen, Pine)
+    static constexpr int NUM_LEAF_TYPES = 4;
+    std::array<Texture, NUM_LEAF_TYPES> leafTextures;
+
+    // Fallback solid color texture
+    Texture fallbackTexture;
+    bool texturesLoaded = false;
+
+    // Currently selected texture indices for descriptor binding
+    BarkType currentBarkType = BarkType::Oak;
+    LeafType currentLeafType = LeafType::Oak;
 
     // Tree data
     TreeGenerator generator;

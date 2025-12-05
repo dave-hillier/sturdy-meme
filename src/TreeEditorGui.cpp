@@ -10,6 +10,9 @@
 // Helper arrays for combo boxes
 static const char* algorithmNames[] = { "Recursive", "Space Colonisation" };
 static const char* shapeNames[] = { "Sphere", "Hemisphere", "Cone", "Cylinder", "Ellipsoid", "Box" };
+static const char* barkTypeNames[] = { "Oak", "Birch", "Pine", "Willow" };
+static const char* leafTypeNames[] = { "Oak", "Ash", "Aspen", "Pine" };
+static const char* billboardModeNames[] = { "Single", "Double" };
 
 void TreeEditorGui::placeTreeAtCamera(Renderer& renderer, const Camera& camera) {
     auto& treeSystem = renderer.getTreeEditSystem();
@@ -84,6 +87,7 @@ void TreeEditorGui::render(Renderer& renderer, const Camera& camera) {
         ImGui::Spacing();
 
         renderAlgorithmSection(renderer);
+        renderBarkSection(renderer);
 
         auto& params = treeSystem.getParameters();
         if (params.algorithm == TreeAlgorithm::SpaceColonisation) {
@@ -114,6 +118,48 @@ void TreeEditorGui::renderAlgorithmSection(Renderer& renderer) {
     int currentAlgo = static_cast<int>(params.algorithm);
     if (ImGui::Combo("Algorithm", &currentAlgo, algorithmNames, IM_ARRAYSIZE(algorithmNames))) {
         params.algorithm = static_cast<TreeAlgorithm>(currentAlgo);
+        changed = true;
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    if (changed) {
+        treeSystem.regenerateTree();
+    }
+}
+
+void TreeEditorGui::renderBarkSection(Renderer& renderer) {
+    auto& treeSystem = renderer.getTreeEditSystem();
+    auto& params = treeSystem.getParameters();
+    bool changed = false;
+
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.7f, 0.5f, 0.3f, 1.0f));
+    ImGui::Text("BARK");
+    ImGui::PopStyleColor();
+
+    int barkType = static_cast<int>(params.barkType);
+    if (ImGui::Combo("Bark Type", &barkType, barkTypeNames, IM_ARRAYSIZE(barkTypeNames))) {
+        params.barkType = static_cast<BarkType>(barkType);
+        changed = true;
+    }
+
+    // Bark tint color picker
+    float barkTint[3] = { params.barkTint.r, params.barkTint.g, params.barkTint.b };
+    if (ImGui::ColorEdit3("Bark Tint", barkTint)) {
+        params.barkTint = glm::vec3(barkTint[0], barkTint[1], barkTint[2]);
+        changed = true;
+    }
+
+    if (ImGui::Checkbox("Textured", &params.barkTextured)) {
+        changed = true;
+    }
+
+    // Texture scale
+    float texScale[2] = { params.barkTextureScale.x, params.barkTextureScale.y };
+    if (ImGui::SliderFloat2("Texture Scale", texScale, 0.5f, 5.0f)) {
+        params.barkTextureScale = glm::vec2(texScale[0], texScale[1]);
         changed = true;
     }
 
@@ -344,10 +390,39 @@ void TreeEditorGui::renderLeafSection(Renderer& renderer) {
     ImGui::PopStyleColor();
 
     if (ImGui::Checkbox("Generate Leaves", &params.generateLeaves)) changed = true;
+
     if (params.generateLeaves) {
-        if (ImGui::SliderFloat("Leaf Size", &params.leafSize, 0.1f, 1.0f)) changed = true;
+        // Leaf texture type
+        int leafType = static_cast<int>(params.leafType);
+        if (ImGui::Combo("Leaf Type", &leafType, leafTypeNames, IM_ARRAYSIZE(leafTypeNames))) {
+            params.leafType = static_cast<LeafType>(leafType);
+            changed = true;
+        }
+
+        // Leaf tint color
+        float leafTint[3] = { params.leafTint.r, params.leafTint.g, params.leafTint.b };
+        if (ImGui::ColorEdit3("Leaf Tint", leafTint)) {
+            params.leafTint = glm::vec3(leafTint[0], leafTint[1], leafTint[2]);
+            changed = true;
+        }
+
+        // Billboard mode
+        int billboardMode = static_cast<int>(params.leafBillboard);
+        if (ImGui::Combo("Billboard Mode", &billboardMode, billboardModeNames, IM_ARRAYSIZE(billboardModeNames))) {
+            params.leafBillboard = static_cast<BillboardMode>(billboardMode);
+            changed = true;
+        }
+
+        if (ImGui::SliderFloat("Leaf Size", &params.leafSize, 0.1f, 5.0f)) changed = true;
+        if (ImGui::SliderFloat("Size Variance", &params.leafSizeVariance, 0.0f, 1.0f)) changed = true;
         if (ImGui::SliderInt("Leaves/Branch", &params.leavesPerBranch, 1, 20)) changed = true;
+        if (ImGui::SliderFloat("Leaf Angle", &params.leafAngle, 0.0f, 90.0f, "%.0f deg")) changed = true;
+        if (ImGui::SliderFloat("Leaf Start", &params.leafStart, 0.0f, 1.0f)) changed = true;
         if (ImGui::SliderInt("Start Level", &params.leafStartLevel, 1, params.branchLevels)) changed = true;
+        if (ImGui::SliderFloat("Alpha Test", &params.leafAlphaTest, 0.0f, 1.0f)) changed = true;
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Discard pixels with alpha below this threshold");
+        }
     }
 
     ImGui::Spacing();
@@ -433,8 +508,9 @@ void TreeEditorGui::renderPresets(Renderer& renderer) {
     ImGui::PopStyleColor();
 
     if (params.algorithm == TreeAlgorithm::Recursive) {
-        // Recursive algorithm presets
+        // Recursive algorithm presets (use legacy parameters)
         if (ImGui::Button("Oak", ImVec2(60, 0))) {
+            params.usePerLevelParams = false;
             params.trunkHeight = 8.0f;
             params.trunkRadius = 0.4f;
             params.branchLevels = 4;
@@ -447,6 +523,7 @@ void TreeEditorGui::renderPresets(Renderer& renderer) {
         }
         ImGui::SameLine();
         if (ImGui::Button("Pine", ImVec2(60, 0))) {
+            params.usePerLevelParams = false;
             params.trunkHeight = 12.0f;
             params.trunkRadius = 0.3f;
             params.trunkTaper = 0.8f;
@@ -461,6 +538,7 @@ void TreeEditorGui::renderPresets(Renderer& renderer) {
         }
         ImGui::SameLine();
         if (ImGui::Button("Willow", ImVec2(60, 0))) {
+            params.usePerLevelParams = false;
             params.trunkHeight = 6.0f;
             params.trunkRadius = 0.35f;
             params.branchLevels = 4;
@@ -473,6 +551,7 @@ void TreeEditorGui::renderPresets(Renderer& renderer) {
             treeSystem.regenerateTree();
         }
         if (ImGui::Button("Shrub", ImVec2(60, 0))) {
+            params.usePerLevelParams = false;
             params.trunkHeight = 2.0f;
             params.trunkRadius = 0.15f;
             params.branchLevels = 3;
@@ -485,6 +564,7 @@ void TreeEditorGui::renderPresets(Renderer& renderer) {
         }
         ImGui::SameLine();
         if (ImGui::Button("Birch", ImVec2(60, 0))) {
+            params.usePerLevelParams = false;
             params.trunkHeight = 10.0f;
             params.trunkRadius = 0.2f;
             params.trunkTaper = 0.9f;

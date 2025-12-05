@@ -20,6 +20,7 @@ public:
 
 private:
     void renderAlgorithmSection(Renderer& renderer);
+    void renderBarkSection(Renderer& renderer);
     void renderSpaceColonisationSection(Renderer& renderer);
     void renderTrunkSection(Renderer& renderer);
     void renderBranchSection(Renderer& renderer);

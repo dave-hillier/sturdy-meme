@@ -119,13 +119,22 @@ if(APPLE)
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in"
     )
 
-    # Copy entire textures directory to app bundle
+    # Copy textures directory to app bundle (from root textures/)
     add_custom_command(
         TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${CMAKE_CURRENT_SOURCE_DIR}/textures
             $<TARGET_BUNDLE_CONTENT_DIR:${PROJECT_NAME}>/Resources/textures
-        COMMENT "Copying textures to app bundle"
+        COMMENT "Copying root textures to app bundle"
+    )
+
+    # Copy assets/textures to Resources/textures (for terrain textures)
+    add_custom_command(
+        TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_CURRENT_SOURCE_DIR}/assets/textures
+            $<TARGET_BUNDLE_CONTENT_DIR:${PROJECT_NAME}>/Resources/textures
+        COMMENT "Copying assets/textures to app bundle"
     )
 
     # Copy assets directory to app bundle
