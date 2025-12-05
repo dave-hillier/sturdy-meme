@@ -340,83 +340,69 @@ void main() {
 
     // =========================================================================
     // FOAM - Enhanced flow-aware foam system (Phase 2)
-    // Uses SDF-based shore foam, flow turbulence foam, and wave peak foam
-    // LOD-aware: full detail near camera, simplified at distance
+    // Combines depth-based shore foam, flow foam, and wave foam
+    // Uses voronoi noise for organic foam patterns
     // =========================================================================
-    vec3 foamColor;
-    float totalFoamAmount;
+    vec3 foamColor = vec3(0.9, 0.95, 1.0);
+    float totalFoamAmount = 0.0;
 
-    // LOD threshold for foam detail (use simpler foam at distance)
-    const float foamLodDistance = 200.0;
+    // World UV for noise sampling
+    vec2 worldUV = fragWorldPos.xz * 0.01;
 
-    if (viewDistance < foamLodDistance) {
-        // Full enhanced foam system for nearby water
-        FoamResult foamResult = calculateAllFoam(
-            flowSample.flowDir,
-            flowSample.speed,
-            flowSample.shoreDist,
-            fragWaveHeight,
-            foamThreshold,
-            waterDepth,
-            fragWorldPos,
-            waterColor.rgb,
-            time
-        );
+    // --- Wave peak foam ---
+    float waveFoamAmount = smoothstep(foamThreshold * 0.7, foamThreshold, fragWaveHeight);
+    // Add voronoi pattern for foam caps
+    float foamCaps = voronoiNoise(worldUV * 1.5 - flowSample.flowDir * time * 0.1, 8.0);
+    waveFoamAmount *= smoothstep(0.4, 0.2, foamCaps);
 
-        foamColor = foamResult.color;
-        totalFoamAmount = foamResult.totalIntensity;
+    // --- Flow-based foam (fast water generates foam) ---
+    float flowFoamAmount = 0.0;
+    if (flowSample.speed > 0.2) {
+        // Flow turbulence foam with voronoi bubbles
+        float turbulenceNoise = voronoiNoise(worldUV * 2.0 - flowSample.flowDir * time * 0.3, 10.0);
+        flowFoamAmount = smoothstep(0.3, 0.8, flowSample.speed) * flowFoamStrength;
+        flowFoamAmount *= smoothstep(0.5, 0.25, turbulenceNoise);
 
-        // Apply flow foam strength uniform for artist control
-        float flowContribution = foamResult.flowFoam * flowFoamStrength;
-        totalFoamAmount = max(foamResult.shoreFoam, max(flowContribution, foamResult.waveFoam));
-        totalFoamAmount = clamp(totalFoamAmount, 0.0, 1.0);
-
-    } else if (viewDistance < foamLodDistance * 2.0) {
-        // Blend between detailed and simple foam
-        float lodBlend = (viewDistance - foamLodDistance) / foamLodDistance;
-
-        // Calculate both versions
-        FoamResult detailedFoam = calculateAllFoam(
-            flowSample.flowDir,
-            flowSample.speed,
-            flowSample.shoreDist,
-            fragWaveHeight,
-            foamThreshold,
-            waterDepth,
-            fragWorldPos,
-            waterColor.rgb,
-            time
-        );
-
-        float simpleFoam = calculateDistantFoam(
-            flowSample.speed,
-            flowSample.shoreDist,
-            fragWaveHeight,
-            foamThreshold
-        );
-
-        // Blend between detailed and simple
-        totalFoamAmount = mix(detailedFoam.totalIntensity, simpleFoam, lodBlend);
-        foamColor = mix(detailedFoam.color, vec3(0.9, 0.95, 1.0), lodBlend);
-
-    } else {
-        // Simple foam for distant water
-        totalFoamAmount = calculateDistantFoam(
-            flowSample.speed,
-            flowSample.shoreDist,
-            fragWaveHeight,
-            foamThreshold
-        );
-        foamColor = vec3(0.9, 0.95, 1.0);
+        // Extra foam where flow meets obstacles (SDF-based)
+        float obstacleProximity = 1.0 - smoothstep(0.0, 0.2, flowSample.shoreDist);
+        float obstacleFoam = obstacleProximity * flowSample.speed * 0.8;
+        float splashNoise = voronoiNoise(worldUV * 3.0 + flowSample.flowDir * time * 0.2, 12.0);
+        obstacleFoam *= smoothstep(0.4, 0.2, splashNoise);
+        flowFoamAmount = max(flowFoamAmount, obstacleFoam);
     }
 
-    // Additional depth-based shore foam for shallow water (complements SDF)
-    // This handles cases where water depth is known but SDF may not capture fine detail
+    // --- Shore foam (depth-based, more reliable than SDF) ---
+    float shoreFoamAmount = 0.0;
     if (insideTerrain && waterDepth > 0.0 && waterDepth < shoreFoamWidth) {
-        float depthBasedFoam = 1.0 - smoothstep(0.0, shoreFoamWidth * 0.3, waterDepth);
-        depthBasedFoam *= mix(1.0, 1.4, flowSample.speed);  // Boost in flowing water
-        totalFoamAmount = max(totalFoamAmount, depthBasedFoam * 0.8);
+        // Animated foam with voronoi cellular pattern
+        float shoreNoise = voronoiNoise(worldUV * 0.5 + time * 0.05, 6.0);
+        float shoreNoise2 = voronoiNoise(worldUV * 1.0 - time * 0.08, 8.0);
+
+        // Create foam bands at different depths
+        float fw = shoreFoamWidth;
+        float band1 = smoothstep(0.0, fw * 0.15, waterDepth) * smoothstep(fw * 0.35, fw * 0.1, waterDepth);
+        float band2 = smoothstep(fw * 0.25, fw * 0.4, waterDepth) * smoothstep(fw * 0.6, fw * 0.4, waterDepth);
+        float band3 = smoothstep(fw * 0.5, fw * 0.7, waterDepth) * smoothstep(fw, fw * 0.7, waterDepth);
+
+        // Modulate bands with voronoi noise for organic cellular look
+        shoreFoamAmount = band1 * smoothstep(0.5, 0.2, shoreNoise);
+        shoreFoamAmount += band2 * smoothstep(0.6, 0.3, shoreNoise2) * 0.7;
+        shoreFoamAmount += band3 * smoothstep(0.55, 0.25, shoreNoise) * 0.4;
+
+        // Strong foam right at the waterline
+        float waterlineIntensity = smoothstep(1.0, 0.0, waterDepth);
+        shoreFoamAmount = max(shoreFoamAmount, waterlineIntensity);
+
+        // Boost shore foam in fast-flowing areas (rapids effect)
+        shoreFoamAmount *= mix(1.0, 1.5, flowSample.speed);
     }
+
+    // Combine all foam sources
+    totalFoamAmount = max(max(waveFoamAmount, shoreFoamAmount), flowFoamAmount);
+    totalFoamAmount = clamp(totalFoamAmount, 0.0, 1.0);
+
+    // Foam color varies slightly with depth
+    foamColor = calculateFoamColor(totalFoamAmount, waterDepth, waterColor.rgb);
 
     // =========================================================================
     // COMBINE LIGHTING
