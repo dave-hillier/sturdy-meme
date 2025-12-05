@@ -127,34 +127,29 @@ float volumetricGroundFog(vec3 worldPos) {
     // layerHeight is the TOP of the fog layer
     float heightAboveLayer = worldPos.y - layerHeight;
 
-    // Hard cutoff above the layer - no fog above layerHeight + small margin
-    if (heightAboveLayer > layerThickness * 0.5) {
+    // Hard cutoff above the layer
+    if (heightAboveLayer > layerThickness) {
         return 0.0;
     }
 
     // Fog is full density below layerHeight, fades out above
     float heightFalloff;
     if (heightAboveLayer <= 0.0) {
-        // Below or at layer height - full fog (modulated by noise)
         heightFalloff = 1.0;
     } else {
-        // Above layer height - fade out smoothly
-        heightFalloff = 1.0 - smoothstep(0.0, layerThickness * 0.5, heightAboveLayer);
+        heightFalloff = 1.0 - (heightAboveLayer / layerThickness);
     }
 
-    // 3D noise for fog volume shapes - creates patches and clear areas
-    float noiseScale = 0.012;  // ~80m fog patches
-    vec3 noisePos = worldPos * noiseScale;
+    // DEBUG: Use simple grid pattern to verify patches work
+    // Creates 100m x 100m fog cells with gaps between
+    float cellSize = 100.0;
+    vec2 cell = floor(worldPos.xz / cellSize);
+    float checker = mod(cell.x + cell.y, 2.0);  // Alternating cells
 
-    // Multi-octave noise for natural variation
-    float fogNoise = fbm(noisePos, 3);  // Fewer octaves = larger scale features
+    // Only fog in "on" cells
+    float fogShape = checker;
 
-    // Higher threshold creates more clear areas (less fog coverage)
-    // At 0.55, roughly 40% of space has fog, 60% is clear
-    float threshold = 0.55;
-    float fogShape = smoothstep(threshold - 0.1, threshold + 0.1, fogNoise);
-
-    // Combine: only fog where noise says AND below layer height
+    // Combine: only fog in checker cells AND below layer height
     return layerDensity * heightFalloff * fogShape;
 }
 
