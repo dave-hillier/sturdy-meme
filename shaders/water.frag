@@ -503,26 +503,50 @@ void main() {
         flowFoamAmount = max(flowFoamAmount, obstacleFoam);
     }
 
-    // --- Shore foam (depth-based) ---
+    // --- Phase 15: Intersection Foam (shore + geometry) ---
+    // Enhanced shore foam with better intersection detection and flow advection
     float shoreFoamAmount = 0.0;
     if (insideTerrain && waterDepth > 0.0 && waterDepth < shoreFoamWidth) {
-        // Create foam bands at different depths
         float fw = shoreFoamWidth;
-        float band1 = smoothstep(0.0, fw * 0.15, waterDepth) * smoothstep(fw * 0.35, fw * 0.1, waterDepth);
-        float band2 = smoothstep(fw * 0.25, fw * 0.4, waterDepth) * smoothstep(fw * 0.6, fw * 0.4, waterDepth);
-        float band3 = smoothstep(fw * 0.5, fw * 0.7, waterDepth) * smoothstep(fw, fw * 0.7, waterDepth);
+
+        // Wave-modulated intersection detection
+        // Waves push and pull the waterline, creating dynamic foam patterns
+        float waveInfluence = sin(fragWaveHeight * 10.0 + time * 2.0) * 0.3 + 0.7;
+        float effectiveDepth = waterDepth / waveInfluence;
+
+        // Create foam bands at different depths - more bands for richer look
+        float band1 = smoothstep(0.0, fw * 0.15, effectiveDepth) * smoothstep(fw * 0.35, fw * 0.1, effectiveDepth);
+        float band2 = smoothstep(fw * 0.25, fw * 0.4, effectiveDepth) * smoothstep(fw * 0.6, fw * 0.4, effectiveDepth);
+        float band3 = smoothstep(fw * 0.5, fw * 0.7, effectiveDepth) * smoothstep(fw, fw * 0.7, effectiveDepth);
+
+        // Flow-advected foam UVs for intersection foam
+        // Foam appears at intersection and flows away with water
+        vec2 advectedUV = fragWorldPos.xz * 0.1 + flowSample.flowDir * time * 0.3;
+        float advectedNoise = texture(foamNoiseTexture, advectedUV * 0.5).r;
 
         // Modulate bands with foam texture for organic cellular look
         shoreFoamAmount = band1 * smoothstep(0.3, 0.7, foam1);
         shoreFoamAmount += band2 * smoothstep(0.35, 0.65, foam2) * 0.7;
         shoreFoamAmount += band3 * smoothstep(0.4, 0.6, combinedFoamNoise) * 0.4;
 
-        // Strong foam right at the waterline
-        float waterlineIntensity = smoothstep(1.0, 0.0, waterDepth);
-        shoreFoamAmount = max(shoreFoamAmount, waterlineIntensity * foam2);
+        // Strong foam right at the waterline with wave dynamics
+        float waterlineIntensity = smoothstep(1.0, 0.0, effectiveDepth);
+        // Add advected noise for foam that appears to flow away from the shore
+        float dynamicWaterline = waterlineIntensity * mix(foam2, advectedNoise, 0.5);
+        shoreFoamAmount = max(shoreFoamAmount, dynamicWaterline);
+
+        // Intersection foam boost - extra foam very close to geometry
+        float intersectionStrength = smoothstep(0.5, 0.0, waterDepth);
+        float intersectionFoam = intersectionStrength * advectedNoise * 1.5;
+        shoreFoamAmount = max(shoreFoamAmount, intersectionFoam);
 
         // Boost shore foam in fast-flowing areas (rapids effect)
-        shoreFoamAmount *= mix(1.0, 1.5, flowSample.speed);
+        shoreFoamAmount *= mix(1.0, 1.8, flowSample.speed);
+
+        // Add splashing effect based on wave height at shoreline
+        float splashFactor = smoothstep(0.0, 0.05, fragWaveHeight) * intersectionStrength;
+        float splashFoam = splashFactor * foam3 * 0.8;
+        shoreFoamAmount = max(shoreFoamAmount, splashFoam);
     }
 
     // Combine all foam sources

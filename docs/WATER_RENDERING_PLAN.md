@@ -26,7 +26,7 @@ This plan implements screen-space water rendering with flow maps, procedural foa
 | 12 | Material Blending | ❌ Not started |
 | 13 | Jacobian Foam | ✅ Implemented |
 | 14 | Temporal Foam Persistence | ✅ Implemented |
-| 15 | Intersection Foam | ❌ Not started |
+| 15 | Intersection Foam | ✅ Implemented |
 | 16 | Wake/Trail System | ❌ Not started |
 | 17 | Enhanced SSS | ✅ Implemented |
 
@@ -343,32 +343,47 @@ Sea of Thieves progressively blurs the foam render target frame-by-frame, creati
 
 ---
 
-## Phase 15: Intersection Foam System (Sea of Thieves)
+## Phase 15: Intersection Foam System (Sea of Thieves) ✅
+
+**Status:** Implemented using terrain depth data and flow advection.
 
 **Goal:** Real-time foam generation where water meets geometry
 
-Sea of Thieves generates foam by comparing water mesh depth against scene depth in a separate render pass.
-
-### 15.1 Intersection Detection Pass
-- Render water geometry to separate render target
-- Each pixel: compare water depth vs scene depth
-- If depths are close → intersection → write foam
-- UV-unwrap approach allows per-mesh foam masks
+### 15.1 Intersection Detection (Simplified Approach)
+- ✅ Uses existing terrain heightmap for depth comparison
+- ✅ Wave-modulated intersection detection (waves push/pull waterline)
+- ✅ Intersection strength based on water depth proximity
 
 ### 15.2 Foam Advection
-- Advect intersection foam using flow map
-- Progressive blur over time (same as Phase 14)
-- Foam flows away from intersection points
+- ✅ Flow-advected foam UVs - foam appears at intersection and flows away
+- ✅ Combined with temporal foam buffer (Phase 14) for persistence
+- ✅ Dynamic noise blending for organic appearance
 
-### 15.3 Applications
-- Foam around islands/rocks
-- Foam where boats touch water
-- Waterfall spray occlusion
+### 15.3 Implementation Features
+- ✅ Wave-influenced effective depth for dynamic waterline
+- ✅ Multiple foam bands with different characteristics
+- ✅ Intersection foam boost near geometry (< 0.5m water depth)
+- ✅ Splash effect at shoreline based on wave height
+- ✅ Enhanced flow-based foam in fast-flowing areas
+
+### 15.4 Code
+```glsl
+// Wave-modulated intersection detection
+float waveInfluence = sin(fragWaveHeight * 10.0 + time * 2.0) * 0.3 + 0.7;
+float effectiveDepth = waterDepth / waveInfluence;
+
+// Flow-advected foam
+vec2 advectedUV = fragWorldPos.xz * 0.1 + flowSample.flowDir * time * 0.3;
+float advectedNoise = texture(foamNoiseTexture, advectedUV * 0.5).r;
+
+// Intersection boost near geometry
+float intersectionStrength = smoothstep(0.5, 0.0, waterDepth);
+```
 
 **Files:**
-- New: `src/IntersectionFoam.h/cpp`
-- New: `shaders/intersection_foam.frag`
-- Modify: `shaders/water.frag`
+- ✅ `shaders/water.frag` - Enhanced intersection foam in shore foam section
+
+**Note:** Full Sea of Thieves approach (separate depth comparison pass) not implemented. Current implementation uses terrain depth data which works well for shorelines. For dynamic objects (boats), Phase 16 (Wake System) would be needed.
 
 ---
 
@@ -442,7 +457,7 @@ vec3 waveSSS = sssTint * sunColor * sssStrength * sssIntensity;
 
 ### Medium Impact:
 4. ✅ **Phase 9** (Caustics) - Animated underwater light patterns
-5. **Phase 15** (Intersection Foam) - Foam around geometry
+5. ✅ **Phase 15** (Intersection Foam) - Foam around geometry
 6. **Phase 16** (Wake System) - Interactivity
 
 ### Performance/Polish:
@@ -462,14 +477,12 @@ Based on current state, the highest-impact remaining improvements are:
 - **Phase 14** (Temporal Foam) - Foam that persists and fades naturally
 - **Phase 17** (Enhanced SSS) - Light glowing through thin wave peaks
 - **Phase 9** (Caustics) - Animated underwater light patterns
+- **Phase 15** (Intersection Foam) - Dynamic foam at shorelines and geometry
 
-### 1. Intersection Foam (Phase 15)
-**Why:** Foam where water meets geometry (islands, rocks, boats) adds realism and makes the water interact with the world.
-
-### 2. Wake/Trail System (Phase 16)
+### 1. Wake/Trail System (Phase 16)
 **Why:** Persistent foam trails behind moving objects creates interactivity and dynamic water responses.
 
-### 3. Foam Texture Quality
+### 2. Foam Texture Quality
 **Why:** The generated Worley noise texture may need tuning. Consider:
 - Higher resolution (1024x1024)
 - More octaves for finer detail
