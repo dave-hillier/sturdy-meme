@@ -1,10 +1,33 @@
 # Advanced Water Rendering Plan
 
-Based on Far Cry 5's GDC talk "Water Rendering in Far Cry 5" by Branislav Grujic and Christian Coto Charis.
+Based on:
+- GDC 2018: "Water Rendering in Far Cry 5" - Branislav Grujic, Christian Coto Charis
+- GDC 2018: "The Technical Art of Sea of Thieves" - Rare
 
 ## Overview
 
 This plan implements screen-space water rendering with flow maps, procedural foam, PBR lighting, and screen-space tessellation.
+
+## Current Status
+
+| Phase | Description | Status |
+|-------|-------------|--------|
+| 1 | Flow Maps | ✅ Implemented |
+| 2 | Enhanced Foam | ✅ Implemented (texture-based) |
+| 3 | Mini G-Buffer | ✅ Implemented |
+| 4 | Vector Displacement | ✅ Implemented (fallback mode) |
+| 5 | FBM Surface Detail | ✅ Implemented |
+| 6 | Variance Specular Filtering | ✅ Implemented |
+| 7 | Screen-Space Tessellation | ❌ Not started |
+| 8 | PBR Light Transport | ✅ Implemented |
+| 9 | Refraction & Caustics | ⚠️ Partial (refraction only) |
+| 10 | Screen-Space Reflections | ❌ Not started |
+| 11 | Dual Depth Buffer | ❌ Not started |
+| 12 | Material Blending | ❌ Not started |
+| 13 | Jacobian Foam (NEW) | ❌ Not started |
+| 14 | Temporal Foam Persistence (NEW) | ❌ Not started |
+| 15 | Intersection Foam (NEW) | ❌ Not started |
+| 16 | Wake/Trail System (NEW) | ❌ Not started |
 
 ---
 
@@ -267,8 +290,208 @@ Based on Far Cry 5's numbers:
 
 ---
 
+## Phase 13: Jacobian-Based Foam (Sea of Thieves)
+
+**Goal:** Physically-accurate foam from wave folding/overlap
+
+Sea of Thieves generates foam where wave peaks overlap by computing the Jacobian determinant of the wave displacement field.
+
+### 13.1 Jacobian Calculation
+- Compute Jacobian determinant of Gerstner wave displacement
+- Foam appears where Jacobian goes negative (wave folding)
+- Bias threshold to control foam amount (more bias = stormier)
+
+### 13.2 Implementation
+```glsl
+// In vertex shader or compute: calculate wave displacement Jacobian
+// J = 1 - steepness * cos(phase) for each wave, multiply together
+float jacobian = 1.0;
+for each wave:
+    jacobian *= (1.0 - steepness * cos(k * x - omega * t));
+
+// Negative jacobian = wave folding = foam
+float foamMask = smoothstep(foamBias, 0.0, jacobian);
+```
+
+### 13.3 Storm Mode
+- Increase wave amplitude
+- Bias Jacobian threshold further negative for more foam coverage
+- Add foam "bias" uniform for runtime control
+
+**Files:**
+- Modify: `shaders/water.vert` (compute Jacobian per-vertex)
+- Modify: `shaders/water.frag` (use Jacobian foam mask)
+- Modify: `src/WaterSystem.h` (add foam bias parameter)
+
+---
+
+## Phase 14: Temporal Foam Persistence (Sea of Thieves)
+
+**Goal:** Foam that persists and dissipates over time
+
+Sea of Thieves progressively blurs the foam render target frame-by-frame, creating foam that lingers at wave crests then gradually fades.
+
+### 14.1 Foam Render Target
+- Render foam intensity to separate R16F texture
+- Tile across water surface (512x512 sufficient)
+- Inject foam where Jacobian indicates wave peaks
+
+### 14.2 Progressive Blur
+- Each frame: blur the foam texture slightly
+- Blend new foam in additively at wave peaks
+- Result: sharp foam at crests, gradual dissipation
+
+### 14.3 Multi-Scale Foam Textures
+- High-frequency foam texture at wave crests
+- Low-frequency foam texture as foam dissipates
+- Blend between them based on foam age/intensity
+
+**Files:**
+- New: `src/FoamBuffer.h/cpp`
+- New: `shaders/foam_blur.comp`
+- Modify: `shaders/water.frag`
+
+---
+
+## Phase 15: Intersection Foam System (Sea of Thieves)
+
+**Goal:** Real-time foam generation where water meets geometry
+
+Sea of Thieves generates foam by comparing water mesh depth against scene depth in a separate render pass.
+
+### 15.1 Intersection Detection Pass
+- Render water geometry to separate render target
+- Each pixel: compare water depth vs scene depth
+- If depths are close → intersection → write foam
+- UV-unwrap approach allows per-mesh foam masks
+
+### 15.2 Foam Advection
+- Advect intersection foam using flow map
+- Progressive blur over time (same as Phase 14)
+- Foam flows away from intersection points
+
+### 15.3 Applications
+- Foam around islands/rocks
+- Foam where boats touch water
+- Waterfall spray occlusion
+
+**Files:**
+- New: `src/IntersectionFoam.h/cpp`
+- New: `shaders/intersection_foam.frag`
+- Modify: `shaders/water.frag`
+
+---
+
+## Phase 16: Wake/Trail System
+
+**Goal:** Persistent foam trails behind moving objects
+
+### 16.1 Wake Injection
+- Track moving objects in water (boats, characters, projectiles)
+- Inject foam into foam buffer at object positions
+- Shape based on object velocity and size
+
+### 16.2 Wake Persistence
+- Uses same foam buffer as Phase 14
+- Advect with flow, blur over time
+- Foam trails naturally dissipate
+
+### 16.3 Bow Waves
+- Special case for boats: directional wake pattern
+- V-shaped foam at bow based on velocity
+- Kelvin wake pattern for realistic appearance
+
+**Files:**
+- Modify: `src/FoamBuffer.h/cpp`
+- Modify: `shaders/foam_blur.comp` (add injection points)
+
+---
+
+## Phase 17: Enhanced Subsurface Scattering (Sea of Thieves)
+
+**Goal:** Light transmission through thin wave peaks
+
+Sea of Thieves uses wave "choppiness" (displacement amplitude) to mask where SSS should appear.
+
+### 17.1 SSS Mask from Wave Geometry
+- Calculate wave slope/steepness per-vertex
+- Steep slopes = thin water = more light transmission
+- Use dot(lightDir, viewDir) for SSS contribution
+
+### 17.2 Integration
+```glsl
+float sssStrength = waveSlope * max(0.0, dot(lightDir, -viewDir));
+vec3 sssColor = waterColor * sunColor * sssStrength * sssIntensity;
+```
+
+**Files:**
+- Modify: `shaders/water.frag`
+
+---
+
+## Recommended Implementation Order (Updated)
+
+### High Impact / Lower Complexity (Do First):
+1. **Phase 13** (Jacobian Foam) - Much better foam placement than height threshold
+2. **Phase 17** (Enhanced SSS) - Quick win for visual quality
+3. **Phase 14** (Temporal Foam) - Foam that looks alive, not static
+
+### Medium Impact:
+4. **Phase 9** (Caustics) - Complete the partial implementation
+5. **Phase 15** (Intersection Foam) - Foam around geometry
+6. **Phase 16** (Wake System) - Interactivity
+
+### Performance/Polish:
+7. **Phase 7** (Screen-Space Tessellation) - Performance optimization
+8. **Phase 10** (SSR) - High-quality reflections
+9. **Phase 11** (Dual Depth) - Correctness for complex scenes
+10. **Phase 12** (Material Blending) - Multiple water types
+
+---
+
+## Next Steps for Quality Improvement
+
+Based on current state, the highest-impact improvements are:
+
+### 1. Jacobian Foam (Phase 13)
+**Why:** Current foam uses height threshold which doesn't capture wave physics. Jacobian foam appears where waves actually fold/overlap, which is physically correct and looks much better.
+
+### 2. Temporal Foam Persistence (Phase 14)
+**Why:** Current foam is instantaneous - appears and disappears each frame. Persistent foam that fades over time looks more realistic and creates natural foam trails.
+
+### 3. SSS Enhancement (Phase 17)
+**Why:** Quick implementation, big visual impact. Light glowing through wave peaks adds life to the water.
+
+### 4. Foam Texture Quality
+**Why:** The generated Worley noise texture may need tuning. Consider:
+- Higher resolution (1024x1024)
+- More octaves for finer detail
+- Different noise parameters
+
+---
+
+## Performance Budget Target
+
+Based on Far Cry 5's numbers:
+- **Total budget:** ~2ms GPU
+- Position pass: ~0.1ms
+- Tile culling: ~0.05ms
+- Tessellation: ~0.22ms
+- FBM/Displacement: ~0.15ms
+- Composite/Lighting: ~0.87ms (most expensive)
+- Potential async compute savings: ~30%
+
+Sea of Thieves notes:
+- Water rendering: ~8ms when full screen (acceptable as nothing else renders)
+- Intersection foam: <0.1ms per waterfall
+- Deck water sim: ~0.2ms per ship
+
+---
+
 ## References
 
 - GDC 2018: "Water Rendering in Far Cry 5" - Branislav Grujic, Christian Coto Charis
+- GDC 2018: "The Technical Art of Sea of Thieves" - Rare
+- Tessendorf 2001: "Simulating Ocean Water" (Jacobian foam)
 - GPU Gems: Flow Map techniques
 - Vlachos 2010: "Water Flow in Portal 2"
