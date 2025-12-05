@@ -17,9 +17,10 @@
 #include "flow_common.glsl"
 #include "fbm_common.glsl"
 #include "foam.glsl"
+#include "bindings.glsl"
 
 // Water-specific uniforms
-layout(std140, binding = 1) uniform WaterUniforms {
+layout(std140, binding = BINDING_WATER_UBO) uniform WaterUniforms {
     // Primary material properties
     vec4 waterColor;           // rgb = base water color, a = transparency
     vec4 waveParams;           // x = amplitude, y = wavelength, z = steepness, w = speed
@@ -61,14 +62,14 @@ layout(std140, binding = 1) uniform WaterUniforms {
     float padding;             // Alignment padding
 };
 
-layout(binding = 2) uniform sampler2DArrayShadow shadowMapArray;
-layout(binding = 3) uniform sampler2D terrainHeightMap;
-layout(binding = 4) uniform sampler2D flowMap;
-layout(binding = 6) uniform sampler2D foamNoiseTexture;
-layout(binding = 7) uniform sampler2D temporalFoamMap;  // Phase 14: Persistent foam
-layout(binding = 8) uniform sampler2D causticsTexture;  // Phase 9: Underwater light patterns
-layout(binding = 9) uniform sampler2D ssrTexture;       // Phase 10: Screen-Space Reflections
-layout(binding = 10) uniform sampler2D sceneDepthTexture; // Phase 11: Scene depth for refraction
+layout(binding = BINDING_WATER_SHADOW_MAP) uniform sampler2DArrayShadow shadowMapArray;
+layout(binding = BINDING_WATER_TERRAIN_HEIGHT) uniform sampler2D terrainHeightMap;
+layout(binding = BINDING_WATER_FLOW_MAP) uniform sampler2D flowMap;
+layout(binding = BINDING_WATER_FOAM_NOISE) uniform sampler2D foamNoiseTexture;
+layout(binding = BINDING_WATER_TEMPORAL_FOAM) uniform sampler2D temporalFoamMap;  // Phase 14: Persistent foam
+layout(binding = BINDING_WATER_CAUSTICS) uniform sampler2D causticsTexture;  // Phase 9: Underwater light patterns
+layout(binding = BINDING_WATER_SSR) uniform sampler2D ssrTexture;       // Phase 10: Screen-Space Reflections
+layout(binding = BINDING_WATER_SCENE_DEPTH) uniform sampler2D sceneDepthTexture; // Phase 11: Scene depth for refraction
 
 layout(location = 0) in vec3 fragWorldPos;
 layout(location = 1) in vec3 fragNormal;

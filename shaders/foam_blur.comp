@@ -16,16 +16,20 @@
  * Based on Sea of Thieves GDC 2018 talk.
  */
 
+#extension GL_GOOGLE_include_directive : require
+
+#include "bindings.glsl"
+
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
 // Output foam buffer (write)
-layout(binding = 0, r16f) uniform image2D foamBufferOut;
+layout(binding = BINDING_FOAM_OUTPUT, r16f) uniform image2D foamBufferOut;
 
 // Previous frame foam buffer (read)
-layout(binding = 1) uniform sampler2D foamBufferIn;
+layout(binding = BINDING_FOAM_INPUT) uniform sampler2D foamBufferIn;
 
 // Flow map for advection (rg = flow direction, b = speed)
-layout(binding = 2) uniform sampler2D flowMap;
+layout(binding = BINDING_FOAM_FLOW_MAP) uniform sampler2D flowMap;
 
 // Wake source structure (must match C++ WakeSource struct)
 struct WakeSource {
@@ -41,7 +45,7 @@ struct WakeSource {
 #define MAX_WAKE_SOURCES 16
 
 // Wake sources uniform buffer
-layout(std140, binding = 3) uniform WakeData {
+layout(std140, binding = BINDING_FOAM_WAKE_DATA) uniform WakeData {
     WakeSource wakeSources[MAX_WAKE_SOURCES];
 };
 

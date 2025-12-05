@@ -14,8 +14,9 @@
 #include "constants_common.glsl"
 #include "terrain_height_common.glsl"
 #include "flow_common.glsl"
+#include "bindings.glsl"
 
-layout(binding = 0) uniform UniformBufferObject {
+layout(binding = BINDING_UBO) uniform UniformBufferObject {
     mat4 model;
     mat4 view;
     mat4 proj;
@@ -36,7 +37,7 @@ layout(binding = 0) uniform UniformBufferObject {
     float julianDay;
 } ubo;
 
-layout(std140, binding = 1) uniform WaterUniforms {
+layout(std140, binding = BINDING_WATER_UBO) uniform WaterUniforms {
     vec4 waterColor;
     vec4 waveParams;
     vec4 waveParams2;
@@ -61,10 +62,10 @@ layout(std140, binding = 1) uniform WaterUniforms {
 } water;
 
 // Terrain heightmap for depth calculation
-layout(binding = 3) uniform sampler2D terrainHeightMap;
+layout(binding = BINDING_WATER_TERRAIN_HEIGHT) uniform sampler2D terrainHeightMap;
 
 // Flow map for foam and flow data
-layout(binding = 4) uniform sampler2D flowMap;
+layout(binding = BINDING_WATER_FLOW_MAP) uniform sampler2D flowMap;
 
 layout(location = 0) in vec3 fragWorldPos;
 layout(location = 1) in vec3 fragNormal;

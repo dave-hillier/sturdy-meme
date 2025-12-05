@@ -5,6 +5,7 @@
 #include "ubo_common.glsl"
 #include "lighting_common.glsl"
 #include "atmosphere_common.glsl"
+#include "bindings.glsl"
 
 // Push constants
 layout(push_constant) uniform PushConstants {
@@ -16,11 +17,11 @@ layout(push_constant) uniform PushConstants {
 } pc;
 
 // Texture samplers
-layout(set = 0, binding = 1) uniform sampler2D barkColorTex;
-layout(set = 0, binding = 2) uniform sampler2D barkNormalTex;
-layout(set = 0, binding = 3) uniform sampler2D barkAOTex;
-layout(set = 0, binding = 4) uniform sampler2D barkRoughnessTex;
-layout(set = 0, binding = 5) uniform sampler2D leafTex;
+layout(set = 0, binding = BINDING_TREE_BARK_COLOR) uniform sampler2D barkColorTex;
+layout(set = 0, binding = BINDING_TREE_BARK_NORMAL) uniform sampler2D barkNormalTex;
+layout(set = 0, binding = BINDING_TREE_BARK_AO) uniform sampler2D barkAOTex;
+layout(set = 0, binding = BINDING_TREE_BARK_ROUGHNESS) uniform sampler2D barkRoughnessTex;
+layout(set = 0, binding = BINDING_TREE_LEAF) uniform sampler2D leafTex;
 
 // Fragment inputs
 layout(location = 0) in vec3 fragNormal;

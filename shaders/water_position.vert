@@ -11,8 +11,9 @@
 
 #include "constants_common.glsl"
 #include "ubo_common.glsl"
+#include "bindings.glsl"
 
-layout(std140, binding = 1) uniform WaterUniforms {
+layout(std140, binding = BINDING_WATER_UBO) uniform WaterUniforms {
     vec4 waterColor;
     vec4 waveParams;
     vec4 waveParams2;
