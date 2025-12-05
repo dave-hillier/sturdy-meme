@@ -4,6 +4,7 @@
 
 #include "ubo_common.glsl"
 #include "lighting_common.glsl"
+#include "atmosphere_common.glsl"
 
 // Push constants
 layout(push_constant) uniform PushConstants {
@@ -123,11 +124,14 @@ void main() {
 
     vec3 finalColor = ambient + sunContrib + moonContrib;
 
-    // Apply simple fog based on distance
-    float distance = length(fragWorldPos - ubo.cameraPosition.xyz);
-    float fogFactor = 1.0 - exp(-distance * 0.002);
-    vec3 fogColor = ubo.ambientColor.rgb * 0.8;
-    finalColor = mix(finalColor, fogColor, fogFactor * 0.5);
+    // Apply aerial perspective (atmospheric scattering and fog)
+    vec3 cameraToFrag = fragWorldPos - ubo.cameraPosition.xyz;
+    float viewDistance = length(cameraToFrag);
+    vec3 sunDir = normalize(ubo.sunDirection.xyz);
+    vec3 sunColor = ubo.sunColor.rgb * ubo.sunDirection.w;
+    finalColor = applyAerialPerspective(finalColor, ubo.cameraPosition.xyz,
+                                        normalize(cameraToFrag), viewDistance,
+                                        sunDir, sunColor);
 
     outColor = vec4(finalColor, alpha);
 }
