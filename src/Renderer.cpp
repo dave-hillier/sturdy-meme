@@ -536,7 +536,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     // Configure water surface
     // Terrain formula is h * heightScale, so world Y=0 corresponds to minAltitude
     // Real sea level (0m altitude) is at world Y = -minAltitude
-    float seaLevel = -terrainConfig.minAltitude;  // e.g., minAltitude=-15 → seaLevel=15
+    float seaLevel = 25;
     waterSystem.setWaterLevel(seaLevel);
     waterSystem.setWaterExtent(glm::vec2(0.0f, 0.0f), glm::vec2(65536.0f, 65536.0f));
     waterSystem.setWaterColor(glm::vec4(0.02f, 0.08f, 0.15f, 0.95f));  // Deep ocean blue
