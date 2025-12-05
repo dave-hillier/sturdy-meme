@@ -480,8 +480,8 @@ void BillboardCapture::calculateBoundingSphere(const Mesh& branchMesh, const Mes
 
     auto processVertices = [&](const std::vector<Vertex>& vertices) {
         for (const auto& v : vertices) {
-            minPos = glm::min(minPos, v.pos);
-            maxPos = glm::max(maxPos, v.pos);
+            minPos = glm::min(minPos, v.position);
+            maxPos = glm::max(maxPos, v.position);
         }
     };
 
