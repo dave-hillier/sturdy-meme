@@ -73,7 +73,7 @@ float sliceToDepth(float slice) {
 float exponentialHeightDensity(float height) {
     float baseHeight = ubo.fogParams.x;
     float scaleHeight = ubo.fogParams.y;
-    float density = ubo.fogParams.z;
+    float density = ubo.fogParams.z * 50.0;  // Amplify density for visible fog
     float relHeight = height - baseHeight;
     return density * exp(-max(relHeight, 0.0) / scaleHeight);
 }
@@ -82,7 +82,7 @@ float exponentialHeightDensity(float height) {
 float sigmoidalLayerDensity(float height) {
     float layerHeight = ubo.layerParams.x;
     float layerThickness = ubo.layerParams.y;
-    float layerDensity = ubo.layerParams.z;
+    float layerDensity = ubo.layerParams.z * 50.0;  // Amplify for visible ground fog
     float t = (height - layerHeight) / max(layerThickness, 0.001);
     return layerDensity / (1.0 + exp(t * 2.0));
 }
