@@ -148,7 +148,8 @@ vec4 sampleFroxelFog(vec2 uv, float linearDepth) {
 
     // Convert to froxel UVW coordinates
     float sliceIndex = depthToSlice(clampedDepth);
-    float w = sliceIndex / float(FROXEL_DEPTH);
+    // Clamp w to sample within valid texture range (slice 63 center, not edge)
+    float w = min(sliceIndex / float(FROXEL_DEPTH), (float(FROXEL_DEPTH) - 0.5) / float(FROXEL_DEPTH));
 
     // Sample with tricubic B-spline filtering for smoother fog gradients
     vec4 fogData = sampleFroxelTricubic(vec3(uv, w));
