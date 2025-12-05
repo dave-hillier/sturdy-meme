@@ -51,6 +51,10 @@ void WaterTileCull::destroy() {
         vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
         descriptorSetLayout = VK_NULL_HANDLE;
     }
+    if (depthSampler != VK_NULL_HANDLE) {
+        vkDestroySampler(device, depthSampler, nullptr);
+        depthSampler = VK_NULL_HANDLE;
+    }
 
     if (tileBuffer != VK_NULL_HANDLE) {
         vmaDestroyBuffer(allocator, tileBuffer, tileAllocation);
@@ -258,6 +262,27 @@ bool WaterTileCull::createComputePipeline() {
     }
 
     SDL_Log("WaterTileCull compute pipeline created");
+
+    // Create depth sampler for tile culling
+    VkSamplerCreateInfo samplerInfo{};
+    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    samplerInfo.magFilter = VK_FILTER_NEAREST;
+    samplerInfo.minFilter = VK_FILTER_NEAREST;
+    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.mipLodBias = 0.0f;
+    samplerInfo.anisotropyEnable = VK_FALSE;
+    samplerInfo.compareEnable = VK_FALSE;
+    samplerInfo.minLod = 0.0f;
+    samplerInfo.maxLod = 0.0f;
+
+    if (vkCreateSampler(device, &samplerInfo, nullptr, &depthSampler) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create tile cull depth sampler");
+        return false;
+    }
+
     return true;
 }
 
@@ -310,10 +335,58 @@ void WaterTileCull::recordTileCull(VkCommandBuffer cmd, uint32_t frameIndex,
     uint32_t* counterPtr = static_cast<uint32_t*>(counterMapped) + frameIndex;
     *counterPtr = 0;
 
-    // Update descriptor set with depth view
-    // Note: In production, you'd want to use a sampler stored in the class
-    // For now, we'll skip the depth binding update and use a dummy
-    // The actual tile culling will be based on water plane vs camera frustum
+    // Update descriptor set with depth texture and storage buffers
+    VkDescriptorImageInfo depthImageInfo{};
+    depthImageInfo.sampler = depthSampler;
+    depthImageInfo.imageView = depthView;
+    depthImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    VkDescriptorBufferInfo tileBufferInfo{};
+    tileBufferInfo.buffer = tileBuffer;
+    tileBufferInfo.offset = 0;
+    tileBufferInfo.range = VK_WHOLE_SIZE;
+
+    VkDescriptorBufferInfo counterBufferInfo{};
+    counterBufferInfo.buffer = counterBuffer;
+    counterBufferInfo.offset = 0;
+    counterBufferInfo.range = VK_WHOLE_SIZE;
+
+    VkDescriptorBufferInfo indirectBufferInfo{};
+    indirectBufferInfo.buffer = indirectDrawBuffer;
+    indirectBufferInfo.offset = 0;
+    indirectBufferInfo.range = sizeof(IndirectDrawCommand);
+
+    std::array<VkWriteDescriptorSet, 4> writes{};
+
+    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[0].dstSet = descriptorSets[frameIndex];
+    writes[0].dstBinding = 0;
+    writes[0].descriptorCount = 1;
+    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[0].pImageInfo = &depthImageInfo;
+
+    writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[1].dstSet = descriptorSets[frameIndex];
+    writes[1].dstBinding = 1;
+    writes[1].descriptorCount = 1;
+    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writes[1].pBufferInfo = &tileBufferInfo;
+
+    writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[2].dstSet = descriptorSets[frameIndex];
+    writes[2].dstBinding = 2;
+    writes[2].descriptorCount = 1;
+    writes[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writes[2].pBufferInfo = &counterBufferInfo;
+
+    writes[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[3].dstSet = descriptorSets[frameIndex];
+    writes[3].dstBinding = 3;
+    writes[3].descriptorCount = 1;
+    writes[3].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writes[3].pBufferInfo = &indirectBufferInfo;
+
+    vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 
     // Push constants
     TileCullPushConstants pc{};

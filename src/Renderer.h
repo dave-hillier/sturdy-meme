@@ -49,6 +49,7 @@
 #include "FoamBuffer.h"
 #include "TreeEditSystem.h"
 #include "SSRSystem.h"
+#include "WaterTileCull.h"
 
 struct PushConstants {
     glm::mat4 model;
@@ -346,6 +347,7 @@ private:
     FlowMapGenerator flowMapGenerator;
     FoamBuffer foamBuffer;
     SSRSystem ssrSystem;
+    WaterTileCull waterTileCull;
     ErosionSimulator erosionSimulator;
     TreeEditSystem treeEditSystem;
     EnvironmentSettings environmentSettings;

@@ -631,6 +631,23 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
         // Don't fail init - SSR is optional
     }
 
+    // Initialize water tile culling (Phase 7: screen-space tile visibility)
+    WaterTileCull::InitInfo tileCullInfo{};
+    tileCullInfo.device = device;
+    tileCullInfo.physicalDevice = physicalDevice;
+    tileCullInfo.allocator = allocator;
+    tileCullInfo.commandPool = commandPool;
+    tileCullInfo.computeQueue = graphicsQueue;
+    tileCullInfo.shaderPath = resourcePath + "/shaders";
+    tileCullInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+    tileCullInfo.extent = swapchainExtent;
+    tileCullInfo.tileSize = 32;
+
+    if (!waterTileCull.init(tileCullInfo)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize water tile cull - continuing without");
+        // Don't fail init - tile culling is optional optimization
+    }
+
     // Create water descriptor sets with terrain heightmap, flow map, displacement map, temporal foam, SSR, and scene depth
     if (!waterSystem.createDescriptorSets(uniformBuffers, sizeof(UniformBufferObject), shadowSystem,
                                           terrainSystem.getHeightMapView(), terrainSystem.getHeightMapSampler(),
@@ -739,6 +756,7 @@ void Renderer::shutdown() {
         waterDisplacement.destroy();
         foamBuffer.destroy();
         ssrSystem.destroy();
+        waterTileCull.destroy();
         flowMapGenerator.destroy(device, allocator);
         treeEditSystem.destroy(device, allocator);
         atmosphereLUTSystem.destroy(device, allocator);
@@ -1651,6 +1669,18 @@ void Renderer::render(const Camera& camera) {
         profiler.endGpuZone(cmd, "SSR");
     }
 
+    // Water tile culling compute pass (Phase 7)
+    // Determines which screen tiles contain water for optimized rendering
+    if (waterTileCull.isEnabled()) {
+        profiler.beginGpuZone(cmd, "WaterTileCull");
+        glm::mat4 viewProj = frame.projection * frame.view;
+        waterTileCull.recordTileCull(cmd, frame.frameIndex,
+                                      viewProj, frame.cameraPosition,
+                                      waterSystem.getWaterLevel(),
+                                      postProcessSystem.getHDRDepthView());
+        profiler.endGpuZone(cmd, "WaterTileCull");
+    }
+
     // Generate Hi-Z pyramid from scene depth (before bloom to ensure bloom doesn't affect it)
     profiler.beginGpuZone(cmd, "HiZPyramid");
     hiZSystem.recordPyramidGeneration(cmd, frame.frameIndex);
@@ -1836,6 +1866,9 @@ bool Renderer::handleResize() {
 
     // Resize SSR system (screen-space reflections)
     ssrSystem.resize(newExtent);
+
+    // Resize water tile cull system
+    waterTileCull.resize(newExtent);
 
     // Update extent on all rendering subsystems for viewport/scissor
     terrainSystem.setExtent(newExtent);

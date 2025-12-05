@@ -128,4 +128,7 @@ private:
     VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
     std::vector<VkDescriptorSet> descriptorSets;
+
+    // Depth texture sampler for tile culling
+    VkSampler depthSampler = VK_NULL_HANDLE;
 };
