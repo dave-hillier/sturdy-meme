@@ -2,10 +2,12 @@
 #include "Renderer.h"
 #include "Camera.h"
 #include "TreeGenerator.h"
+#include "BillboardCapture.h"
 
 #include <imgui.h>
 #include <glm/glm.hpp>
 #include <cmath>
+#include <ctime>
 
 // Helper arrays for combo boxes
 static const char* algorithmNames[] = { "Recursive", "Space Colonisation" };
@@ -102,6 +104,7 @@ void TreeEditorGui::render(Renderer& renderer, const Camera& camera) {
         renderSeedSection(renderer);
         renderTransformSection(renderer, camera);
         renderPresets(renderer);
+        renderBillboardSection(renderer);
     }
     ImGui::End();
 }
@@ -688,4 +691,121 @@ void TreeEditorGui::renderPresets(Renderer& renderer) {
             treeSystem.regenerateTree();
         }
     }
+}
+
+void TreeEditorGui::renderBillboardSection(Renderer& renderer) {
+    auto& treeSystem = renderer.getTreeEditSystem();
+
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.6f, 0.8f, 1.0f, 1.0f));
+    ImGui::Text("BILLBOARD EXPORT");
+    ImGui::PopStyleColor();
+
+    // Resolution selector
+    static const char* resolutionLabels[] = { "256x256", "512x512", "1024x1024" };
+    static const int resolutionValues[] = { 256, 512, 1024 };
+    int currentResIdx = (billboardResolution == 256) ? 0 : (billboardResolution == 512) ? 1 : 2;
+
+    if (ImGui::Combo("Resolution", &currentResIdx, resolutionLabels, 3)) {
+        billboardResolution = resolutionValues[currentResIdx];
+    }
+
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Resolution per billboard view (17 views total)\nAtlas will be 5x4 = 20 cells");
+    }
+
+    ImGui::Spacing();
+
+    // Info about the capture
+    ImGui::TextDisabled("Captures: 8 side + 8 angled + 1 top = 17");
+    ImGui::TextDisabled("Atlas size: %dx%d pixels", billboardResolution * 5, billboardResolution * 4);
+
+    ImGui::Spacing();
+
+    // Generate button
+    if (captureInProgress) {
+        ImGui::BeginDisabled();
+    }
+
+    if (ImGui::Button("Generate Billboard Atlas", ImVec2(-1, 30))) {
+        captureInProgress = true;
+        captureStatus = "Initializing...";
+
+        // Initialize billboard capture if needed
+        if (!billboardCapture) {
+            billboardCapture = std::make_unique<BillboardCapture>();
+
+            BillboardCapture::InitInfo initInfo{};
+            initInfo.device = renderer.getDevice();
+            initInfo.physicalDevice = renderer.getPhysicalDevice();
+            initInfo.allocator = renderer.getVulkanContext().getAllocator();
+            initInfo.descriptorPool = renderer.getDescriptorPool();
+            initInfo.shaderPath = renderer.getShaderPath();
+            initInfo.graphicsQueue = renderer.getGraphicsQueue();
+            initInfo.commandPool = renderer.getCommandPool();
+
+            if (!billboardCapture->init(initInfo)) {
+                captureStatus = "Failed to initialize capture system";
+                captureInProgress = false;
+                billboardCapture.reset();
+            }
+        }
+
+        if (billboardCapture) {
+            captureStatus = "Rendering captures...";
+
+            // Wait for GPU to finish any pending work
+            vkDeviceWaitIdle(renderer.getDevice());
+
+            // Generate the atlas
+            BillboardAtlas atlas;
+            bool success = billboardCapture->generateAtlas(
+                treeSystem.getBranchMesh(),
+                treeSystem.getLeafMesh(),
+                treeSystem.getParameters(),
+                treeSystem.getBarkColorTexture(),
+                treeSystem.getBarkNormalTexture(),
+                treeSystem.getBarkAOTexture(),
+                treeSystem.getBarkRoughnessTexture(),
+                treeSystem.getLeafTexture(),
+                billboardResolution,
+                atlas
+            );
+
+            if (success) {
+                // Generate filename with timestamp
+                time_t now = time(nullptr);
+                struct tm* timeinfo = localtime(&now);
+                char filename[256];
+                snprintf(filename, sizeof(filename), "tree_billboard_%04d%02d%02d_%02d%02d%02d.png",
+                        timeinfo->tm_year + 1900, timeinfo->tm_mon + 1, timeinfo->tm_mday,
+                        timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
+
+                lastExportPath = filename;
+
+                if (BillboardCapture::saveAtlasToPNG(atlas, lastExportPath)) {
+                    captureStatus = "Saved: " + lastExportPath;
+                } else {
+                    captureStatus = "Failed to save PNG";
+                }
+            } else {
+                captureStatus = "Failed to generate atlas";
+            }
+        }
+
+        captureInProgress = false;
+    }
+
+    if (captureInProgress) {
+        ImGui::EndDisabled();
+    }
+
+    // Show status
+    if (!captureStatus.empty()) {
+        ImGui::Spacing();
+        ImGui::TextWrapped("%s", captureStatus.c_str());
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
 }

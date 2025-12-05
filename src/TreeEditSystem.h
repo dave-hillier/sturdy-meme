@@ -82,6 +82,18 @@ public:
     void setScale(float s) { scale = s; }
     float getScale() const { return scale; }
 
+    // Access to meshes for billboard capture
+    const Mesh& getBranchMesh() const { return branchMesh; }
+    const Mesh& getLeafMesh() const { return leafMesh; }
+
+    // Access to textures for billboard capture
+    const Texture& getBarkColorTexture() const;
+    const Texture& getBarkNormalTexture() const;
+    const Texture& getBarkAOTexture() const;
+    const Texture& getBarkRoughnessTexture() const;
+    const Texture& getLeafTexture() const;
+    const Texture& getFallbackTexture() const { return fallbackTexture; }
+
 private:
     // Initialization helpers
     bool createDescriptorSetLayout();
