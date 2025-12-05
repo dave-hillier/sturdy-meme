@@ -249,6 +249,11 @@ public:
     void setTreeEditMode(bool enabled) { treeEditSystem.setEnabled(enabled); }
     void toggleTreeEditMode() { treeEditSystem.toggle(); }
 
+    // Resource access for billboard capture
+    VkCommandPool getCommandPool() const { return commandPool; }
+    DescriptorManager::Pool* getDescriptorPool() { return &*descriptorManagerPool; }
+    std::string getShaderPath() const { return resourcePath + "/shaders"; }
+
 private:
     bool createRenderPass();
     void destroyRenderResources();

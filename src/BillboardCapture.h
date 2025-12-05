@@ -1,0 +1,164 @@
+#pragma once
+
+#include <vulkan/vulkan.h>
+#include <vk_mem_alloc.h>
+#include <glm/glm.hpp>
+#include <vector>
+#include <string>
+#include <functional>
+
+#include "TreeGenerator.h"
+#include "Mesh.h"
+#include "Texture.h"
+#include "UBOs.h"
+#include "DescriptorManager.h"
+
+// Capture angle definition
+struct CaptureAngle {
+    float azimuth;      // Horizontal angle in degrees (0 = front, 90 = right, etc.)
+    float elevation;    // Vertical angle in degrees (0 = side, 45 = angled, 90 = top)
+    std::string name;   // Debug name for this angle
+};
+
+// Result of billboard generation
+struct BillboardAtlas {
+    std::vector<uint8_t> rgbaPixels;  // RGBA8 pixel data
+    uint32_t width;                    // Atlas width in pixels
+    uint32_t height;                   // Atlas height in pixels
+    uint32_t cellWidth;                // Individual capture cell width
+    uint32_t cellHeight;               // Individual capture cell height
+    uint32_t columns;                  // Number of columns in atlas
+    uint32_t rows;                     // Number of rows in atlas
+    std::vector<CaptureAngle> angles;  // Angles for each cell (row-major order)
+};
+
+class BillboardCapture {
+public:
+    struct InitInfo {
+        VkDevice device;
+        VkPhysicalDevice physicalDevice;
+        VmaAllocator allocator;
+        DescriptorManager::Pool* descriptorPool;
+        std::string shaderPath;
+        VkQueue graphicsQueue;
+        VkCommandPool commandPool;
+    };
+
+    BillboardCapture() = default;
+    ~BillboardCapture() = default;
+
+    bool init(const InitInfo& info);
+    void destroy();
+
+    // Generate billboard atlas from tree meshes
+    // Returns true on success, fills out the atlas struct
+    bool generateAtlas(
+        const Mesh& branchMesh,
+        const Mesh& leafMesh,
+        const TreeParameters& treeParams,
+        const Texture& barkColorTex,
+        const Texture& barkNormalTex,
+        const Texture& barkAOTex,
+        const Texture& barkRoughnessTex,
+        const Texture& leafTex,
+        uint32_t captureResolution,   // Resolution per capture (e.g., 512)
+        BillboardAtlas& outAtlas
+    );
+
+    // Save atlas to PNG file
+    static bool saveAtlasToPNG(const BillboardAtlas& atlas, const std::string& filepath);
+
+    // Get the standard 17 capture angles
+    static std::vector<CaptureAngle> getStandardAngles();
+
+private:
+    // Create offscreen render target
+    bool createRenderTarget(uint32_t width, uint32_t height);
+    void destroyRenderTarget();
+
+    // Create render pass for offscreen rendering
+    bool createRenderPass();
+
+    // Create pipeline for billboard capture (no fog)
+    bool createPipeline();
+
+    // Create descriptor set layout and sets
+    bool createDescriptorSetLayout();
+    bool createDescriptorSets();
+
+    // Create UBO buffer
+    bool createUniformBuffer();
+
+    // Calculate orthographic projection that fits the tree
+    glm::mat4 calculateOrthoProjection(const Mesh& branchMesh, const Mesh& leafMesh, float padding = 0.1f);
+
+    // Calculate view matrix for a capture angle
+    glm::mat4 calculateViewMatrix(const CaptureAngle& angle, const glm::vec3& center, float distance);
+
+    // Calculate bounding sphere of meshes
+    void calculateBoundingSphere(const Mesh& branchMesh, const Mesh& leafMesh,
+                                  glm::vec3& outCenter, float& outRadius);
+
+    // Render tree to offscreen target
+    bool renderCapture(
+        const Mesh& branchMesh,
+        const Mesh& leafMesh,
+        const TreeParameters& treeParams,
+        const glm::mat4& view,
+        const glm::mat4& proj,
+        const Texture& barkColorTex,
+        const Texture& barkNormalTex,
+        const Texture& barkAOTex,
+        const Texture& barkRoughnessTex,
+        const Texture& leafTex
+    );
+
+    // Read pixels from render target
+    bool readPixels(std::vector<uint8_t>& outPixels);
+
+    // Vulkan resources
+    VkDevice device = VK_NULL_HANDLE;
+    VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
+    VmaAllocator allocator = VK_NULL_HANDLE;
+    DescriptorManager::Pool* descriptorPool = nullptr;
+    std::string shaderPath;
+    VkQueue graphicsQueue = VK_NULL_HANDLE;
+    VkCommandPool commandPool = VK_NULL_HANDLE;
+
+    // Offscreen render target
+    VkImage colorImage = VK_NULL_HANDLE;
+    VmaAllocation colorAllocation = VK_NULL_HANDLE;
+    VkImageView colorImageView = VK_NULL_HANDLE;
+
+    VkImage depthImage = VK_NULL_HANDLE;
+    VmaAllocation depthAllocation = VK_NULL_HANDLE;
+    VkImageView depthImageView = VK_NULL_HANDLE;
+
+    VkRenderPass renderPass = VK_NULL_HANDLE;
+    VkFramebuffer framebuffer = VK_NULL_HANDLE;
+    VkSampler sampler = VK_NULL_HANDLE;
+
+    uint32_t renderWidth = 0;
+    uint32_t renderHeight = 0;
+
+    // Staging buffer for readback
+    VkBuffer stagingBuffer = VK_NULL_HANDLE;
+    VmaAllocation stagingAllocation = VK_NULL_HANDLE;
+
+    // Pipeline
+    VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
+    VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
+    VkPipeline solidPipeline = VK_NULL_HANDLE;
+    VkPipeline leafPipeline = VK_NULL_HANDLE;
+
+    // Descriptor sets
+    VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
+
+    // UBO
+    VkBuffer uboBuffer = VK_NULL_HANDLE;
+    VmaAllocation uboAllocation = VK_NULL_HANDLE;
+    void* uboMapped = nullptr;
+
+    static constexpr VkFormat COLOR_FORMAT = VK_FORMAT_R8G8B8A8_UNORM;
+    static constexpr VkFormat DEPTH_FORMAT = VK_FORMAT_D32_SFLOAT;
+};

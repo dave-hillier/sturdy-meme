@@ -85,6 +85,7 @@ set(SOURCES
     src/TreeGenerator.cpp
     src/TreeEditSystem.cpp
     src/TreeEditorGui.cpp
+    src/BillboardCapture.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
@@ -249,6 +250,7 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water.frag.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree.frag.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_billboard.frag.spv
 )
 
 set(TERRAIN_SHADER_FILES
@@ -339,7 +341,7 @@ if(SHADER_COMPILE_CMD)
         weather.comp weather.vert weather.frag
         leaf.comp leaf.vert leaf.frag
         snow_accumulation.comp
-        tree.vert tree.frag
+        tree.vert tree.frag tree_billboard.frag
     )
 
     foreach(SHADER ${SHADERS_WITH_BINDINGS})

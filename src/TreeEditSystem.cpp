@@ -597,3 +597,43 @@ bool TreeEditSystem::loadTextures() {
     SDL_Log("Tree textures loaded: %d bark types, %d leaf types", NUM_BARK_TYPES, NUM_LEAF_TYPES);
     return true;
 }
+
+const Texture& TreeEditSystem::getBarkColorTexture() const {
+    int idx = static_cast<int>(treeParams.barkType);
+    if (idx >= 0 && idx < NUM_BARK_TYPES && barkColorTextures[idx].getImageView()) {
+        return barkColorTextures[idx];
+    }
+    return fallbackTexture;
+}
+
+const Texture& TreeEditSystem::getBarkNormalTexture() const {
+    int idx = static_cast<int>(treeParams.barkType);
+    if (idx >= 0 && idx < NUM_BARK_TYPES && barkNormalTextures[idx].getImageView()) {
+        return barkNormalTextures[idx];
+    }
+    return fallbackTexture;
+}
+
+const Texture& TreeEditSystem::getBarkAOTexture() const {
+    int idx = static_cast<int>(treeParams.barkType);
+    if (idx >= 0 && idx < NUM_BARK_TYPES && barkAOTextures[idx].getImageView()) {
+        return barkAOTextures[idx];
+    }
+    return fallbackTexture;
+}
+
+const Texture& TreeEditSystem::getBarkRoughnessTexture() const {
+    int idx = static_cast<int>(treeParams.barkType);
+    if (idx >= 0 && idx < NUM_BARK_TYPES && barkRoughnessTextures[idx].getImageView()) {
+        return barkRoughnessTextures[idx];
+    }
+    return fallbackTexture;
+}
+
+const Texture& TreeEditSystem::getLeafTexture() const {
+    int idx = static_cast<int>(treeParams.leafType);
+    if (idx >= 0 && idx < NUM_LEAF_TYPES && leafTextures[idx].getImageView()) {
+        return leafTextures[idx];
+    }
+    return fallbackTexture;
+}
