@@ -18,11 +18,11 @@ This plan implements screen-space water rendering with flow maps, procedural foa
 | 4 | Vector Displacement | ✅ Implemented (fallback mode) |
 | 5 | FBM Surface Detail | ✅ Implemented |
 | 6 | Variance Specular Filtering | ✅ Implemented |
-| 7 | Screen-Space Tessellation | ❌ Not started |
+| 7 | Screen-Space Tessellation | ✅ Implemented |
 | 8 | PBR Light Transport | ✅ Implemented |
 | 9 | Refraction & Caustics | ✅ Implemented |
-| 10 | Screen-Space Reflections | ❌ Not started |
-| 11 | Dual Depth Buffer | ❌ Not started |
+| 10 | Screen-Space Reflections | ✅ Implemented |
+| 11 | Dual Depth Buffer | ✅ Implemented |
 | 12 | Material Blending | ❌ Not started |
 | 13 | Jacobian Foam | ✅ Implemented |
 | 14 | Temporal Foam Persistence | ✅ Implemented |
