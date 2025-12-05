@@ -60,6 +60,7 @@ private:
         bool looping;
         float time;
         float speed;
+        float rootMotionSpeed;  // Animation's natural movement speed (m/s)
     };
 
     State* findState(const std::string& name);
