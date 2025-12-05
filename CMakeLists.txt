@@ -411,6 +411,18 @@ if(SHADER_COMPILE_CMD)
         )
     endforeach()
 
+    # Water shader dependencies (common includes)
+    set(WATER_DEPS
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/constants_common.glsl
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/lighting_common.glsl
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow_common.glsl
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/atmosphere_common.glsl
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain_height_common.glsl
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/flow_common.glsl
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/fbm_common.glsl
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/foam.glsl
+    )
+
     # Water shaders with common includes
     set(WATER_SHADERS
         water.vert
@@ -421,7 +433,7 @@ if(SHADER_COMPILE_CMD)
         add_custom_command(
             OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}.spv
             COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}
-            DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}
+            DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER} ${WATER_DEPS}
             COMMENT "Compiling water shader: ${SHADER}"
         )
     endforeach()
