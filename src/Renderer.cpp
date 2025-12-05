@@ -530,6 +530,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     waterInfo.commandPool = commandPool;
     waterInfo.graphicsQueue = graphicsQueue;
     waterInfo.waterSize = 65536.0f;  // Extend well beyond terrain for horizon
+    waterInfo.assetPath = resourcePath;
 
     if (!waterSystem.init(waterInfo)) return false;
 

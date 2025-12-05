@@ -17,6 +17,8 @@
   - `SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, ...)` for errors
   - `SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, ...)` for warnings
   - `SDL_LogDebug(SDL_LOG_CATEGORY_APPLICATION, ...)` for debug output
+- procedurally generated content should be generated as part of the build process.
+- generated textures should be saved in png format
 
 ## Web Claude Code Environment
 

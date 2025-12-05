@@ -7,6 +7,7 @@
 #include <string>
 
 #include "Mesh.h"
+#include "Texture.h"
 #include "DescriptorManager.h"
 
 class ShadowSystem;
@@ -25,6 +26,7 @@ public:
         VkCommandPool commandPool;
         VkQueue graphicsQueue;
         float waterSize = 100.0f;  // Size of water plane in world units
+        std::string assetPath;     // Base path for assets (for foam texture)
     };
 
     // Water uniforms - must match shader layout
@@ -169,6 +171,7 @@ private:
     bool createPipeline();
     bool createWaterMesh();
     bool createUniformBuffers();
+    bool loadFoamTexture();
 
     // Initialization info
     VkDevice device = VK_NULL_HANDLE;
@@ -182,6 +185,7 @@ private:
     VkCommandPool commandPool = VK_NULL_HANDLE;
     VkQueue graphicsQueue = VK_NULL_HANDLE;
     float waterSize = 100.0f;
+    std::string assetPath;
 
     // Pipeline resources
     VkPipeline pipeline = VK_NULL_HANDLE;
@@ -198,6 +202,9 @@ private:
     std::vector<VkBuffer> waterUniformBuffers;
     std::vector<VmaAllocation> waterUniformAllocations;
     std::vector<void*> waterUniformMapped;
+
+    // Foam texture (tileable Worley noise)
+    Texture foamTexture;
 
     // Tidal parameters
     float baseWaterLevel = 0.0f;  // Mean sea level

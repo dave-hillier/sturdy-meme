@@ -212,6 +212,29 @@ add_custom_target(terrain_preprocessing
 # Ensure tools are built before preprocessing runs
 add_dependencies(terrain_preprocessing terrain_preprocess erosion_preprocess)
 
+# Foam noise texture generation
+set(FOAM_TEXTURE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/assets/textures)
+set(FOAM_TEXTURE ${FOAM_TEXTURE_DIR}/foam_noise.png)
+
+# Generate foam noise texture (only regenerate if tool source changes)
+add_custom_command(
+    OUTPUT ${FOAM_TEXTURE}
+    COMMAND $<TARGET_FILE:foam_noise_gen>
+        --resolution 512
+        --octaves 4
+        --output ${FOAM_TEXTURE}
+    DEPENDS foam_noise_gen
+    COMMENT "Generating foam noise texture"
+)
+
+# Custom target for foam texture generation
+add_custom_target(foam_texture_gen
+    DEPENDS ${FOAM_TEXTURE}
+)
+
+# Main target depends on foam texture
+add_dependencies(${PROJECT_NAME} foam_texture_gen)
+
 # Main target depends on preprocessing
 add_dependencies(${PROJECT_NAME} terrain_preprocessing)
 

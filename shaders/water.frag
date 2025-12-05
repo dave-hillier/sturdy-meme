@@ -46,6 +46,7 @@ layout(std140, binding = 1) uniform WaterUniforms {
 layout(binding = 2) uniform sampler2DArrayShadow shadowMapArray;
 layout(binding = 3) uniform sampler2D terrainHeightMap;
 layout(binding = 4) uniform sampler2D flowMap;
+layout(binding = 6) uniform sampler2D foamNoiseTexture;
 
 layout(location = 0) in vec3 fragWorldPos;
 layout(location = 1) in vec3 fragNormal;
@@ -339,60 +340,72 @@ void main() {
     vec3 ambient = baseColor * ubo.ambientColor.rgb * 0.4 * depthDarkening;
 
     // =========================================================================
-    // FOAM - Enhanced flow-aware foam system (Phase 2)
-    // Combines depth-based shore foam, flow foam, and wave foam
-    // Uses voronoi noise for organic foam patterns
+    // FOAM - Texture-based foam system with flow animation
+    // Uses tileable Worley noise texture sampled at multiple scales
+    // Based on Far Cry 5 approach: "noise texture modulated by noise texture"
     // =========================================================================
     vec3 foamColor = vec3(0.9, 0.95, 1.0);
     float totalFoamAmount = 0.0;
 
-    // World UV for noise sampling
-    // Higher scale = smaller foam cells (0.01 gave ~12.5m cells, 0.05 gives ~2.5m cells)
-    vec2 worldUV = fragWorldPos.xz * 0.05;
+    // Multi-scale foam texture sampling with flow-based UV animation
+    // Sample at 3 scales for detail: large clumps, medium bubbles, fine detail
+    vec2 flowOffset = flowSample.flowDir * time * 0.05;
+
+    // Large scale foam (clumps) - moves slowly with flow
+    vec2 foamUV1 = fragWorldPos.xz * 0.02 + flowOffset * 0.5;
+    float foam1 = texture(foamNoiseTexture, foamUV1).r;
+
+    // Medium scale foam (bubbles) - moves with flow
+    vec2 foamUV2 = fragWorldPos.xz * 0.08 - flowOffset;
+    float foam2 = texture(foamNoiseTexture, foamUV2).r;
+
+    // Fine scale foam (detail) - moves faster, opposite direction for turbulence
+    vec2 foamUV3 = fragWorldPos.xz * 0.25 + flowOffset * 2.0;
+    float foam3 = texture(foamNoiseTexture, foamUV3).r;
+
+    // Combine scales: large modulates medium, both modulate fine
+    float combinedFoamNoise = foam1 * 0.5 + foam2 * 0.35 + foam3 * 0.15;
+    // Add some contrast
+    combinedFoamNoise = smoothstep(0.2, 0.8, combinedFoamNoise);
 
     // --- Wave peak foam ---
     float waveFoamAmount = smoothstep(foamThreshold * 0.7, foamThreshold, fragWaveHeight);
-    // Add voronoi pattern for foam caps
-    float foamCaps = voronoiNoise(worldUV * 1.5 - flowSample.flowDir * time * 0.1, 8.0);
-    waveFoamAmount *= smoothstep(0.4, 0.2, foamCaps);
+    // Modulate by foam texture for organic wave caps
+    waveFoamAmount *= smoothstep(0.3, 0.7, combinedFoamNoise);
 
     // --- Flow-based foam (fast water generates foam) ---
     float flowFoamAmount = 0.0;
     if (flowSample.speed > 0.2) {
-        // Flow turbulence foam with voronoi bubbles
-        float turbulenceNoise = voronoiNoise(worldUV * 2.0 - flowSample.flowDir * time * 0.3, 10.0);
+        // Flow turbulence foam
         flowFoamAmount = smoothstep(0.3, 0.8, flowSample.speed) * flowFoamStrength;
-        flowFoamAmount *= smoothstep(0.5, 0.25, turbulenceNoise);
+        // Use medium + fine scale for turbulent look
+        float turbulenceNoise = foam2 * 0.6 + foam3 * 0.4;
+        flowFoamAmount *= smoothstep(0.25, 0.6, turbulenceNoise);
 
-        // Extra foam where flow meets obstacles (SDF-based)
+        // Extra foam where flow meets obstacles
         float obstacleProximity = 1.0 - smoothstep(0.0, 0.2, flowSample.shoreDist);
         float obstacleFoam = obstacleProximity * flowSample.speed * 0.8;
-        float splashNoise = voronoiNoise(worldUV * 3.0 + flowSample.flowDir * time * 0.2, 12.0);
-        obstacleFoam *= smoothstep(0.4, 0.2, splashNoise);
+        obstacleFoam *= smoothstep(0.2, 0.5, foam3); // Fine detail for splashing
         flowFoamAmount = max(flowFoamAmount, obstacleFoam);
     }
 
-    // --- Shore foam (depth-based, more reliable than SDF) ---
+    // --- Shore foam (depth-based) ---
     float shoreFoamAmount = 0.0;
     if (insideTerrain && waterDepth > 0.0 && waterDepth < shoreFoamWidth) {
-        // Animated foam with voronoi cellular pattern
-        float shoreNoise = voronoiNoise(worldUV * 0.5 + time * 0.05, 6.0);
-        float shoreNoise2 = voronoiNoise(worldUV * 1.0 - time * 0.08, 8.0);
-
         // Create foam bands at different depths
         float fw = shoreFoamWidth;
         float band1 = smoothstep(0.0, fw * 0.15, waterDepth) * smoothstep(fw * 0.35, fw * 0.1, waterDepth);
         float band2 = smoothstep(fw * 0.25, fw * 0.4, waterDepth) * smoothstep(fw * 0.6, fw * 0.4, waterDepth);
         float band3 = smoothstep(fw * 0.5, fw * 0.7, waterDepth) * smoothstep(fw, fw * 0.7, waterDepth);
 
-        // Modulate bands with voronoi noise for organic cellular look
-        shoreFoamAmount = band1 * smoothstep(0.5, 0.2, shoreNoise);
-        shoreFoamAmount += band2 * smoothstep(0.6, 0.3, shoreNoise2) * 0.7;
-        shoreFoamAmount += band3 * smoothstep(0.55, 0.25, shoreNoise) * 0.4;
+        // Modulate bands with foam texture for organic cellular look
+        shoreFoamAmount = band1 * smoothstep(0.3, 0.7, foam1);
+        shoreFoamAmount += band2 * smoothstep(0.35, 0.65, foam2) * 0.7;
+        shoreFoamAmount += band3 * smoothstep(0.4, 0.6, combinedFoamNoise) * 0.4;
 
         // Strong foam right at the waterline
         float waterlineIntensity = smoothstep(1.0, 0.0, waterDepth);
-        shoreFoamAmount = max(shoreFoamAmount, waterlineIntensity);
+        shoreFoamAmount = max(shoreFoamAmount, waterlineIntensity * foam2);
 
         // Boost shore foam in fast-flowing areas (rapids effect)
         shoreFoamAmount *= mix(1.0, 1.5, flowSample.speed);

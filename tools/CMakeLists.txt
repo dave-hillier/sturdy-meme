@@ -52,3 +52,16 @@ target_link_libraries(erosion_preprocess PRIVATE
 )
 
 target_compile_features(erosion_preprocess PRIVATE cxx_std_17)
+
+# Foam noise texture generator
+add_executable(foam_noise_gen
+    foam_noise_gen.cpp
+)
+
+target_link_libraries(foam_noise_gen PRIVATE
+    SDL3::SDL3
+    glm::glm
+    lodepng
+)
+
+target_compile_features(foam_noise_gen PRIVATE cxx_std_17)
