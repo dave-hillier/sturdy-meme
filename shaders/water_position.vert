@@ -10,27 +10,7 @@
  */
 
 #include "constants_common.glsl"
-
-layout(binding = 0) uniform UniformBufferObject {
-    mat4 model;
-    mat4 view;
-    mat4 proj;
-    mat4 cascadeViewProj[NUM_CASCADES];
-    vec4 cascadeSplits;
-    vec4 sunDirection;
-    vec4 moonDirection;
-    vec4 sunColor;
-    vec4 moonColor;
-    vec4 ambientColor;
-    vec4 cameraPosition;
-    vec4 pointLightPosition;
-    vec4 pointLightColor;
-    vec4 windDirectionAndSpeed;
-    float timeOfDay;
-    float shadowMapSize;
-    float debugCascades;
-    float julianDay;
-} ubo;
+#include "ubo_common.glsl"
 
 layout(std140, binding = 1) uniform WaterUniforms {
     vec4 waterColor;
@@ -70,7 +50,7 @@ layout(location = 3) out float fragWaveHeight;
 vec3 gerstnerWave(vec2 pos, float amplitude, float wavelength, float steepness, float speed, vec2 direction) {
     float k = 2.0 * 3.14159 / wavelength;
     float c = sqrt(9.81 / k);
-    float phase = k * (dot(direction, pos) - c * speed * ubo.timeOfDay);
+    float phase = k * (dot(direction, pos) - c * speed * ubo.windDirectionAndSpeed.w);
 
     float sinPhase = sin(phase);
     float cosPhase = cos(phase);

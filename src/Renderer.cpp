@@ -581,10 +581,27 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
         flowMapGenerator.generateRadialFlow(flowConfig, glm::vec2(0.0f));
     }
 
-    // Create water descriptor sets with terrain heightmap and flow map
+    // Initialize water displacement system (Phase 4: interactive splashes)
+    WaterDisplacement::InitInfo dispInfo{};
+    dispInfo.device = device;
+    dispInfo.physicalDevice = physicalDevice;
+    dispInfo.allocator = allocator;
+    dispInfo.commandPool = commandPool;
+    dispInfo.computeQueue = graphicsQueue;  // Use graphics queue for compute
+    dispInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+    dispInfo.displacementResolution = 512;
+    dispInfo.worldSize = 65536.0f;
+
+    if (!waterDisplacement.init(dispInfo)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize water displacement");
+        return false;
+    }
+
+    // Create water descriptor sets with terrain heightmap, flow map, and displacement map
     if (!waterSystem.createDescriptorSets(uniformBuffers, sizeof(UniformBufferObject), shadowSystem,
                                           terrainSystem.getHeightMapView(), terrainSystem.getHeightMapSampler(),
-                                          flowMapGenerator.getFlowMapView(), flowMapGenerator.getFlowMapSampler())) return false;
+                                          flowMapGenerator.getFlowMapView(), flowMapGenerator.getFlowMapSampler(),
+                                          waterDisplacement.getDisplacementMapView(), waterDisplacement.getSampler())) return false;
 
     // Initialize tree edit system
     TreeEditSystem::InitInfo treeEditInfo{};
@@ -682,6 +699,7 @@ void Renderer::shutdown() {
         hiZSystem.destroy();
         profiler.shutdown();
         waterSystem.destroy(device, allocator);
+        waterDisplacement.destroy();
         flowMapGenerator.destroy(device, allocator);
         treeEditSystem.destroy(device, allocator);
         atmosphereLUTSystem.destroy(device, allocator);

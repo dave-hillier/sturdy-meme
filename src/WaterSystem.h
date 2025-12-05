@@ -68,7 +68,9 @@ public:
                               VkImageView terrainHeightMapView,
                               VkSampler terrainHeightMapSampler,
                               VkImageView flowMapView,
-                              VkSampler flowMapSampler);
+                              VkSampler flowMapSampler,
+                              VkImageView displacementMapView,
+                              VkSampler displacementMapSampler);
 
     // Update water uniforms (call each frame)
     void updateUniforms(uint32_t frameIndex);

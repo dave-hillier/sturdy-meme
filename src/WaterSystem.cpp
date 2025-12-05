@@ -122,8 +122,14 @@ bool WaterSystem::createDescriptorSetLayout() {
         .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
         .build();
 
-    std::array<VkDescriptorSetLayoutBinding, 5> bindings = {
-        uboBinding, waterUniformBinding, shadowMapBinding, terrainHeightMapBinding, flowMapBinding
+    auto displacementMapBinding = BindingBuilder()
+        .setBinding(5)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        .setStageFlags(VK_SHADER_STAGE_VERTEX_BIT)
+        .build();
+
+    std::array<VkDescriptorSetLayoutBinding, 6> bindings = {
+        uboBinding, waterUniformBinding, shadowMapBinding, terrainHeightMapBinding, flowMapBinding, displacementMapBinding
     };
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
@@ -285,7 +291,9 @@ bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffe
                                         VkImageView terrainHeightMapView,
                                         VkSampler terrainHeightMapSampler,
                                         VkImageView flowMapView,
-                                        VkSampler flowMapSampler) {
+                                        VkSampler flowMapSampler,
+                                        VkImageView displacementMapView,
+                                        VkSampler displacementMapSampler) {
     // Allocate descriptor sets using managed pool
     descriptorSets = descriptorPool->allocate(descriptorSetLayout, framesInFlight);
     if (descriptorSets.size() != framesInFlight) {
@@ -329,7 +337,13 @@ bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffe
         flowInfo.imageView = flowMapView;
         flowInfo.sampler = flowMapSampler;
 
-        std::array<VkWriteDescriptorSet, 5> descriptorWrites{};
+        // Displacement map binding (Phase 4: interactive splashes)
+        VkDescriptorImageInfo displacementInfo{};
+        displacementInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        displacementInfo.imageView = displacementMapView;
+        displacementInfo.sampler = displacementMapSampler;
+
+        std::array<VkWriteDescriptorSet, 6> descriptorWrites{};
 
         descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         descriptorWrites[0].dstSet = descriptorSets[i];
@@ -371,11 +385,19 @@ bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffe
         descriptorWrites[4].descriptorCount = 1;
         descriptorWrites[4].pImageInfo = &flowInfo;
 
+        descriptorWrites[5].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[5].dstSet = descriptorSets[i];
+        descriptorWrites[5].dstBinding = 5;
+        descriptorWrites[5].dstArrayElement = 0;
+        descriptorWrites[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[5].descriptorCount = 1;
+        descriptorWrites[5].pImageInfo = &displacementInfo;
+
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                descriptorWrites.data(), 0, nullptr);
     }
 
-    SDL_Log("Water descriptor sets created with terrain heightmap and flow map");
+    SDL_Log("Water descriptor sets created with terrain heightmap, flow map, and displacement map");
     return true;
 }
 

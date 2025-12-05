@@ -99,7 +99,7 @@ void main() {
                          terrainUV.y >= 0.0 && terrainUV.y <= 1.0;
 
     if (insideTerrain) {
-        terrainHeight = getTerrainHeight(terrainHeightMap, terrainUV, water.terrainHeightScale);
+        terrainHeight = sampleTerrainHeight(terrainHeightMap, terrainUV, water.terrainHeightScale);
         waterDepth = max(0.0, fragWorldPos.y - terrainHeight);
 
         // Discard if terrain is above water
