@@ -80,6 +80,23 @@ void MaterialRegistry::createDescriptorSets(
                 textures.normalView = mat.normal->getImageView();
                 textures.normalSampler = mat.normal->getSampler();
             }
+            // Optional PBR textures
+            if (mat.roughnessMap) {
+                textures.roughnessView = mat.roughnessMap->getImageView();
+                textures.roughnessSampler = mat.roughnessMap->getSampler();
+            }
+            if (mat.metallicMap) {
+                textures.metallicView = mat.metallicMap->getImageView();
+                textures.metallicSampler = mat.metallicMap->getSampler();
+            }
+            if (mat.aoMap) {
+                textures.aoView = mat.aoMap->getImageView();
+                textures.aoSampler = mat.aoMap->getSampler();
+            }
+            if (mat.heightMap) {
+                textures.heightView = mat.heightMap->getImageView();
+                textures.heightSampler = mat.heightMap->getSampler();
+            }
 
             factory.writeDescriptorSet(descriptorSets[id][frameIndex], common, textures);
         }

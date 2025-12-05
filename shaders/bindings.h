@@ -25,6 +25,12 @@
 #define BINDING_SNOW_MASK               8   // Snow coverage mask
 #define BINDING_CLOUD_SHADOW_MAP        9   // Cloud shadow projection
 
+// PBR Material Textures (optional, for Substance/PBR materials)
+#define BINDING_ROUGHNESS_MAP          13   // Per-pixel roughness (linear, R channel)
+#define BINDING_METALLIC_MAP           14   // Per-pixel metallic (linear, R channel)
+#define BINDING_AO_MAP                 15   // Ambient occlusion (linear, R channel)
+#define BINDING_HEIGHT_MAP             16   // Height/displacement map (linear, R channel)
+
 // Storage Buffers
 #define BINDING_LIGHT_BUFFER            4   // Point/spot light array
 
@@ -300,6 +306,12 @@ constexpr uint32_t SNOW_MASK              = BINDING_SNOW_MASK;
 constexpr uint32_t CLOUD_SHADOW_MAP       = BINDING_CLOUD_SHADOW_MAP;
 constexpr uint32_t LIGHT_BUFFER           = BINDING_LIGHT_BUFFER;
 constexpr uint32_t BONE_MATRICES          = BINDING_BONE_MATRICES;
+
+// PBR Material Textures
+constexpr uint32_t ROUGHNESS_MAP          = BINDING_ROUGHNESS_MAP;
+constexpr uint32_t METALLIC_MAP           = BINDING_METALLIC_MAP;
+constexpr uint32_t AO_MAP                 = BINDING_AO_MAP;
+constexpr uint32_t HEIGHT_MAP             = BINDING_HEIGHT_MAP;
 
 // Grass/Leaf System
 constexpr uint32_t GRASS_INSTANCE_BUFFER  = BINDING_GRASS_INSTANCE_BUFFER;

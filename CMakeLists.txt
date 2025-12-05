@@ -240,6 +240,49 @@ add_custom_target(foam_texture_gen
 # Main target depends on foam texture
 add_dependencies(${PROJECT_NAME} foam_texture_gen)
 
+# SBSAR (Substance Archive) texture processing
+set(SBSAR_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/assets/substances)
+set(SBSAR_OUTPUT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/assets/textures/substances)
+set(SBSAR_RESOLUTION 1024)
+
+# Create output directory
+file(MAKE_DIRECTORY ${SBSAR_OUTPUT_DIR})
+
+# Collect all SBSAR files from the substances directory
+file(GLOB SBSAR_FILES "${SBSAR_SOURCE_DIR}/*.sbsar")
+
+# Create a list to track all generated texture manifests
+set(SBSAR_MANIFESTS "")
+
+# Process each SBSAR file
+foreach(SBSAR_FILE ${SBSAR_FILES})
+    get_filename_component(SBSAR_NAME ${SBSAR_FILE} NAME_WE)
+    set(SBSAR_MANIFEST ${SBSAR_OUTPUT_DIR}/${SBSAR_NAME}_manifest.txt)
+
+    add_custom_command(
+        OUTPUT ${SBSAR_MANIFEST}
+        COMMAND $<TARGET_FILE:sbsar_render>
+            "${SBSAR_FILE}"
+            "${SBSAR_OUTPUT_DIR}"
+            --name "${SBSAR_NAME}"
+            --resolution ${SBSAR_RESOLUTION}
+        DEPENDS ${SBSAR_FILE} sbsar_render
+        COMMENT "Processing SBSAR: ${SBSAR_NAME}"
+    )
+
+    list(APPEND SBSAR_MANIFESTS ${SBSAR_MANIFEST})
+endforeach()
+
+# Custom target for all SBSAR processing
+add_custom_target(sbsar_textures
+    DEPENDS ${SBSAR_MANIFESTS}
+)
+
+# Main target depends on SBSAR textures (only if there are any)
+if(SBSAR_MANIFESTS)
+    add_dependencies(${PROJECT_NAME} sbsar_textures)
+endif()
+
 # Main target depends on preprocessing
 add_dependencies(${PROJECT_NAME} terrain_preprocessing)
 

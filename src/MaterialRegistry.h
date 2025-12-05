@@ -36,6 +36,13 @@ public:
         const Texture* normal = nullptr;
         float roughness = 0.5f;
         float metallic = 0.0f;
+
+        // Optional PBR textures (for Substance/PBR materials)
+        // If set, these override the scalar roughness/metallic values
+        const Texture* roughnessMap = nullptr;
+        const Texture* metallicMap = nullptr;
+        const Texture* aoMap = nullptr;
+        const Texture* heightMap = nullptr;
     };
 
     MaterialRegistry() = default;

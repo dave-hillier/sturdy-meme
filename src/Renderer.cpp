@@ -2234,6 +2234,7 @@ void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
         push.emissiveIntensity = obj.emissiveIntensity;
         push.opacity = obj.opacity;
         push.emissiveColor = glm::vec4(obj.emissiveColor, 1.0f);
+        push.pbrFlags = obj.pbrFlags;
 
         vkCmdPushConstants(cmd, pipelineLayout,
                           VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -2574,6 +2575,7 @@ void Renderer::recordSkinnedCharacter(VkCommandBuffer cmd, uint32_t frameIndex) 
     push.emissiveIntensity = playerObj.emissiveIntensity;
     push.opacity = playerObj.opacity;
     push.emissiveColor = glm::vec4(playerObj.emissiveColor, 1.0f);
+    push.pbrFlags = playerObj.pbrFlags;
 
     vkCmdPushConstants(cmd, skinnedPipelineLayout,
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,

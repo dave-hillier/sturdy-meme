@@ -57,6 +57,17 @@ public:
         VkSampler diffuseSampler;
         VkImageView normalView;
         VkSampler normalSampler;
+
+        // Optional PBR textures (for Substance/PBR materials)
+        // Set to VK_NULL_HANDLE if not used - shader will use push constant values
+        VkImageView roughnessView = VK_NULL_HANDLE;
+        VkSampler roughnessSampler = VK_NULL_HANDLE;
+        VkImageView metallicView = VK_NULL_HANDLE;
+        VkSampler metallicSampler = VK_NULL_HANDLE;
+        VkImageView aoView = VK_NULL_HANDLE;
+        VkSampler aoSampler = VK_NULL_HANDLE;
+        VkImageView heightView = VK_NULL_HANDLE;
+        VkSampler heightSampler = VK_NULL_HANDLE;
     };
 
     explicit MaterialDescriptorFactory(VkDevice device);

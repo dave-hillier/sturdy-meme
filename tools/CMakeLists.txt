@@ -78,3 +78,16 @@ target_link_libraries(caustics_gen PRIVATE
 )
 
 target_compile_features(caustics_gen PRIVATE cxx_std_17)
+
+# SBSAR file renderer (Substance Archive)
+add_executable(sbsar_render
+    sbsar_render.cpp
+)
+
+target_link_libraries(sbsar_render PRIVATE
+    SDL3::SDL3
+    glm::glm
+    lodepng
+)
+
+target_compile_features(sbsar_render PRIVATE cxx_std_17)
