@@ -3,12 +3,33 @@
 #include <vulkan/vulkan.h>
 #include <SDL3/SDL.h>
 #include <vk_mem_alloc.h>
+#include <glm/glm.hpp>
 #include <string>
 
 #include "TreeEditorGui.h"
 
 class Renderer;
 class Camera;
+
+// IK debug settings for GUI control
+struct IKDebugSettings {
+    bool showSkeleton = false;
+    bool showIKTargets = false;
+    bool showFootPlacement = false;
+
+    // IK feature enables
+    bool lookAtEnabled = false;
+    bool footPlacementEnabled = false;
+    bool straddleEnabled = false;
+
+    // Look-at target mode
+    enum class LookAtMode { Fixed, Camera, Mouse };
+    LookAtMode lookAtMode = LookAtMode::Camera;
+    glm::vec3 fixedLookAtTarget = glm::vec3(0, 1.5f, 5.0f);
+
+    // Foot placement
+    float groundOffset = 0.0f;
+};
 
 class GuiSystem {
 public:
@@ -30,6 +51,10 @@ public:
     void toggleVisibility() { visible = !visible; }
     void setVisible(bool v) { visible = v; }
 
+    // Get IK debug settings for external systems
+    IKDebugSettings& getIKDebugSettings() { return ikDebugSettings; }
+    const IKDebugSettings& getIKDebugSettings() const { return ikDebugSettings; }
+
 private:
     void setupStyle();
     void renderDashboard(Renderer& renderer, const Camera& camera, float fps);
@@ -40,13 +65,18 @@ private:
     void renderTerrainSection(Renderer& renderer);
     void renderWaterSection(Renderer& renderer);
     void renderDebugSection(Renderer& renderer);
+    void renderIKSection(Renderer& renderer, const Camera& camera);
     void renderProfilerSection(Renderer& renderer);
     void renderHelpOverlay();
     void renderPositionPanel(const Camera& camera);
+    void renderSkeletonOverlay(Renderer& renderer, const Camera& camera);
 
     VkDescriptorPool imguiPool = VK_NULL_HANDLE;
     bool visible = true;
     bool showHelp = false;
+
+    // IK debug settings
+    IKDebugSettings ikDebugSettings;
 
     // Tree editor as separate window
     TreeEditorGui treeEditorGui;

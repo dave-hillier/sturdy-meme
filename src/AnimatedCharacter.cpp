@@ -249,7 +249,8 @@ const AnimationClip* AnimatedCharacter::getCurrentAnimation() const {
 
 void AnimatedCharacter::update(float deltaTime, VmaAllocator allocator, VkDevice device,
                                 VkCommandPool commandPool, VkQueue queue,
-                                float movementSpeed, bool isGrounded, bool isJumping) {
+                                float movementSpeed, bool isGrounded, bool isJumping,
+                                const glm::mat4& worldTransform) {
     if (!loaded) return;
 
     // Reset skeleton to bind pose before applying animation
@@ -266,6 +267,12 @@ void AnimatedCharacter::update(float deltaTime, VmaAllocator allocator, VkDevice
         // Fallback to simple animation player
         animationPlayer.update(deltaTime);
         animationPlayer.applyToSkeleton(skeleton);
+    }
+
+    // Apply IK after animation sampling
+    // Pass world transform so foot placement can query terrain in world space
+    if (ikSystem.hasEnabledChains()) {
+        ikSystem.solve(skeleton, worldTransform, deltaTime);
     }
 
     // GPU skinning: Bone matrices are computed and uploaded by Renderer each frame
@@ -352,4 +359,178 @@ void AnimatedCharacter::uploadMesh(VmaAllocator allocator, VkDevice device,
     renderMesh.destroy(allocator);
     renderMesh.setCustomGeometry(skinnedVertices, indices);
     renderMesh.upload(allocator, device, commandPool, queue);
+}
+
+void AnimatedCharacter::setupDefaultIKChains() {
+    if (!loaded) {
+        SDL_Log("AnimatedCharacter: Cannot setup IK chains before loading character");
+        return;
+    }
+
+    ikSystem.clear();
+
+    // Common bone name patterns for humanoid rigs
+    // Mixamo uses "mixamorig:" prefix, others may not
+    auto findBone = [this](const std::vector<std::string>& names) -> std::string {
+        for (const auto& name : names) {
+            if (skeleton.findJointIndex(name) >= 0) {
+                return name;
+            }
+            // Try with mixamorig prefix
+            std::string mixamoName = "mixamorig:" + name;
+            if (skeleton.findJointIndex(mixamoName) >= 0) {
+                return mixamoName;
+            }
+        }
+        return "";
+    };
+
+    // Left arm chain
+    std::string leftShoulder = findBone({"LeftArm", "LeftUpperArm", "L_UpperArm", "shoulder.L", "upperarm_l"});
+    std::string leftElbow = findBone({"LeftForeArm", "LeftLowerArm", "L_LowerArm", "forearm.L", "lowerarm_l"});
+    std::string leftHand = findBone({"LeftHand", "L_Hand", "hand.L", "hand_l"});
+
+    if (!leftShoulder.empty() && !leftElbow.empty() && !leftHand.empty()) {
+        if (ikSystem.addTwoBoneChain("LeftArm", skeleton, leftShoulder, leftElbow, leftHand)) {
+            SDL_Log("AnimatedCharacter: Setup left arm IK chain");
+        }
+    }
+
+    // Right arm chain
+    std::string rightShoulder = findBone({"RightArm", "RightUpperArm", "R_UpperArm", "shoulder.R", "upperarm_r"});
+    std::string rightElbow = findBone({"RightForeArm", "RightLowerArm", "R_LowerArm", "forearm.R", "lowerarm_r"});
+    std::string rightHand = findBone({"RightHand", "R_Hand", "hand.R", "hand_r"});
+
+    if (!rightShoulder.empty() && !rightElbow.empty() && !rightHand.empty()) {
+        if (ikSystem.addTwoBoneChain("RightArm", skeleton, rightShoulder, rightElbow, rightHand)) {
+            SDL_Log("AnimatedCharacter: Setup right arm IK chain");
+        }
+    }
+
+    // Left leg chain
+    std::string leftThigh = findBone({"LeftUpLeg", "LeftUpperLeg", "L_UpperLeg", "thigh.L", "thigh_l"});
+    std::string leftKnee = findBone({"LeftLeg", "LeftLowerLeg", "L_LowerLeg", "shin.L", "calf_l"});
+    std::string leftFoot = findBone({"LeftFoot", "L_Foot", "foot.L", "foot_l"});
+
+    if (!leftThigh.empty() && !leftKnee.empty() && !leftFoot.empty()) {
+        if (ikSystem.addTwoBoneChain("LeftLeg", skeleton, leftThigh, leftKnee, leftFoot)) {
+            // Set default pole vector for knee (forward)
+            if (auto* chain = ikSystem.getChain("LeftLeg")) {
+                chain->poleVector = glm::vec3(0, 0, 1);  // Knees bend forward
+            }
+            SDL_Log("AnimatedCharacter: Setup left leg IK chain");
+        }
+    }
+
+    // Right leg chain
+    std::string rightThigh = findBone({"RightUpLeg", "RightUpperLeg", "R_UpperLeg", "thigh.R", "thigh_r"});
+    std::string rightKnee = findBone({"RightLeg", "RightLowerLeg", "R_LowerLeg", "shin.R", "calf_r"});
+    std::string rightFoot = findBone({"RightFoot", "R_Foot", "foot.R", "foot_r"});
+
+    if (!rightThigh.empty() && !rightKnee.empty() && !rightFoot.empty()) {
+        if (ikSystem.addTwoBoneChain("RightLeg", skeleton, rightThigh, rightKnee, rightFoot)) {
+            // Set default pole vector for knee (forward)
+            if (auto* chain = ikSystem.getChain("RightLeg")) {
+                chain->poleVector = glm::vec3(0, 0, 1);  // Knees bend forward
+            }
+            SDL_Log("AnimatedCharacter: Setup right leg IK chain");
+        }
+    }
+
+    // Look-At IK (head tracking)
+    std::string head = findBone({"Head", "head"});
+    std::string neck = findBone({"Neck", "neck"});
+    std::string spine2 = findBone({"Spine2", "Spine1", "spine_02", "spine2"});
+
+    if (!head.empty()) {
+        if (ikSystem.setupLookAt(skeleton, head, neck, spine2)) {
+            SDL_Log("AnimatedCharacter: Setup look-at IK");
+        }
+    }
+
+    // Foot Placement IK
+    std::string leftToe = findBone({"LeftToeBase", "LeftToe", "L_Toe", "toe.L", "ball_l"});
+    std::string rightToe = findBone({"RightToeBase", "RightToe", "R_Toe", "toe.R", "ball_r"});
+
+    if (!leftThigh.empty() && !leftKnee.empty() && !leftFoot.empty()) {
+        if (ikSystem.addFootPlacement("LeftFoot", skeleton, leftThigh, leftKnee, leftFoot, leftToe)) {
+            // Set knee pole vector (forward)
+            if (auto* foot = ikSystem.getFootPlacement("LeftFoot")) {
+                foot->poleVector = glm::vec3(0, 0, 1);
+            }
+            SDL_Log("AnimatedCharacter: Setup left foot placement IK");
+        }
+    }
+
+    if (!rightThigh.empty() && !rightKnee.empty() && !rightFoot.empty()) {
+        if (ikSystem.addFootPlacement("RightFoot", skeleton, rightThigh, rightKnee, rightFoot, rightToe)) {
+            // Set knee pole vector (forward)
+            if (auto* foot = ikSystem.getFootPlacement("RightFoot")) {
+                foot->poleVector = glm::vec3(0, 0, 1);
+            }
+            SDL_Log("AnimatedCharacter: Setup right foot placement IK");
+        }
+    }
+
+    // Pelvis adjustment for foot IK
+    std::string hips = findBone({"Hips", "Pelvis", "pelvis", "hip"});
+    if (!hips.empty()) {
+        if (ikSystem.setupPelvisAdjustment(skeleton, hips)) {
+            SDL_Log("AnimatedCharacter: Setup pelvis adjustment");
+        }
+    }
+
+    SDL_Log("AnimatedCharacter: IK setup complete");
+}
+
+SkeletonDebugData AnimatedCharacter::getSkeletonDebugData(const glm::mat4& worldTransform) const {
+    SkeletonDebugData data;
+
+    if (!loaded || skeleton.joints.empty()) {
+        return data;
+    }
+
+    // Compute global transforms for all joints
+    std::vector<glm::mat4> globalTransforms;
+    skeleton.computeGlobalTransforms(globalTransforms);
+
+    // Extract world positions for all joints
+    data.jointPositions.resize(skeleton.joints.size());
+    for (size_t i = 0; i < skeleton.joints.size(); ++i) {
+        glm::vec4 localPos = globalTransforms[i] * glm::vec4(0, 0, 0, 1);
+        glm::vec4 worldPos = worldTransform * localPos;
+        data.jointPositions[i] = glm::vec3(worldPos);
+    }
+
+    // Build bone data (lines from parent to child)
+    data.bones.reserve(skeleton.joints.size());
+    for (size_t i = 0; i < skeleton.joints.size(); ++i) {
+        const auto& joint = skeleton.joints[i];
+
+        SkeletonDebugData::Bone bone;
+        bone.name = joint.name;
+        bone.parentIndex = joint.parentIndex;
+        bone.endPos = data.jointPositions[i];
+
+        // Check if this is an end effector (no children)
+        bool hasChildren = false;
+        for (size_t j = 0; j < skeleton.joints.size(); ++j) {
+            if (skeleton.joints[j].parentIndex == static_cast<int32_t>(i)) {
+                hasChildren = true;
+                break;
+            }
+        }
+        bone.isEndEffector = !hasChildren;
+
+        if (joint.parentIndex >= 0 && joint.parentIndex < static_cast<int32_t>(data.jointPositions.size())) {
+            bone.startPos = data.jointPositions[joint.parentIndex];
+        } else {
+            // Root bone - draw from origin to position
+            bone.startPos = bone.endPos;
+        }
+
+        data.bones.push_back(bone);
+    }
+
+    return data;
 }
