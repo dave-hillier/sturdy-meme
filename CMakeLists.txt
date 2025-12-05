@@ -78,6 +78,7 @@ set(SOURCES
     src/AnimationStateMachine.cpp
     src/IKSolver.cpp
     src/FBXLoader.cpp
+    src/FBXPostProcess.cpp
     src/HiZSystem.cpp
     src/GpuProfiler.cpp
     src/CpuProfiler.cpp
