@@ -1705,3 +1705,20 @@ bool AtmosphereLUTSystem::exportLUTsAsPNG(const std::string& outputDir) {
 
     return success;
 }
+
+void AtmosphereLUTSystem::recomputeStaticLUTs(VkCommandBuffer cmd) {
+    if (!paramsDirty) return;
+
+    // Update uniform buffer with new atmosphere parameters
+    AtmosphereUniforms uniforms{};
+    uniforms.params = atmosphereParams;
+    memcpy(uniformMappedPtr, &uniforms, sizeof(AtmosphereUniforms));
+
+    // Recompute the static LUTs that depend on atmosphere parameters
+    computeTransmittanceLUT(cmd);
+    computeMultiScatterLUT(cmd);
+    computeIrradianceLUT(cmd);
+
+    paramsDirty = false;
+    SDL_Log("Atmosphere LUTs recomputed with new parameters");
+}

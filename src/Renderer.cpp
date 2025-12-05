@@ -1515,6 +1515,11 @@ void Renderer::render(const Camera& camera) {
 
         postProcessSystem.setCameraPlanes(camera.getNearPlane(), camera.getFarPlane());
 
+        // Recompute static LUTs if atmosphere parameters changed (e.g., from UI)
+        if (atmosphereLUTSystem.needsRecompute()) {
+            atmosphereLUTSystem.recomputeStaticLUTs(cmd);
+        }
+
         // Update sky-view LUT with current sun direction (Phase 4.1.5)
         // This precomputes atmospheric scattering for all view directions
         atmosphereLUTSystem.updateSkyViewLUT(cmd, frame.frameIndex, frame.sunDirection, frame.cameraPosition, 0.0f);

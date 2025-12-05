@@ -117,8 +117,18 @@ public:
     bool exportLUTsAsPNG(const std::string& outputDir);
 
     // Atmosphere parameters
-    void setAtmosphereParams(const AtmosphereParams& params) { atmosphereParams = params; }
+    void setAtmosphereParams(const AtmosphereParams& params) {
+        atmosphereParams = params;
+        paramsDirty = true;  // Mark for LUT recomputation
+    }
     const AtmosphereParams& getAtmosphereParams() const { return atmosphereParams; }
+
+    // Check if LUTs need recomputation due to parameter changes
+    bool needsRecompute() const { return paramsDirty; }
+
+    // Recompute static LUTs (transmittance, multi-scatter, irradiance) when params change
+    // Call this from the render loop when needsRecompute() returns true
+    void recomputeStaticLUTs(VkCommandBuffer cmd);
 
 private:
     bool createTransmittanceLUT();
@@ -218,4 +228,7 @@ private:
 
     // Atmosphere parameters
     AtmosphereParams atmosphereParams;
+
+    // Dirty flag for LUT recomputation
+    bool paramsDirty = false;
 };
