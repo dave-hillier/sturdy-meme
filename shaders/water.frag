@@ -347,7 +347,8 @@ void main() {
     float totalFoamAmount = 0.0;
 
     // World UV for noise sampling
-    vec2 worldUV = fragWorldPos.xz * 0.01;
+    // Higher scale = smaller foam cells (0.01 gave ~12.5m cells, 0.05 gives ~2.5m cells)
+    vec2 worldUV = fragWorldPos.xz * 0.05;
 
     // --- Wave peak foam ---
     float waveFoamAmount = smoothstep(foamThreshold * 0.7, foamThreshold, fragWaveHeight);

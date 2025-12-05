@@ -21,11 +21,11 @@ bool WaterSystem::init(const InitInfo& info) {
 
     // Initialize default water parameters
     waterUniforms.waterColor = glm::vec4(0.1f, 0.3f, 0.5f, 0.85f);  // Blue-green, semi-transparent
-    waterUniforms.waveParams = glm::vec4(0.5f, 8.0f, 0.4f, 1.0f);   // amplitude, wavelength, steepness, speed
-    waterUniforms.waveParams2 = glm::vec4(0.3f, 5.0f, 0.3f, 1.2f);  // Secondary wave
+    waterUniforms.waveParams = glm::vec4(0.15f, 4.0f, 0.3f, 0.8f);   // amplitude, wavelength, steepness, speed (calmer)
+    waterUniforms.waveParams2 = glm::vec4(0.08f, 2.5f, 0.25f, 1.0f);  // Secondary wave (smaller)
     waterUniforms.waterExtent = glm::vec4(0.0f, 0.0f, 100.0f, 100.0f);  // position, size
     waterUniforms.waterLevel = 0.0f;
-    waterUniforms.foamThreshold = 0.3f;
+    waterUniforms.foamThreshold = 0.1f;  // Reduced to match smaller wave amplitude
     waterUniforms.fresnelPower = 5.0f;
     waterUniforms.terrainSize = 16384.0f;      // Default terrain size
     waterUniforms.terrainHeightScale = 220.0f; // Default height scale

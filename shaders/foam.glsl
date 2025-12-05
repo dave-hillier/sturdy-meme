@@ -281,7 +281,7 @@ FoamResult calculateAllFoam(
 ) {
     FoamResult result;
 
-    vec2 worldUV = worldPos.xz * 0.01;  // Scale for noise sampling
+    vec2 worldUV = worldPos.xz * 0.05;  // Scale for noise sampling (higher = smaller foam cells)
 
     // Shore/obstacle foam
     ShoreFoam shore = calculateShoreFoam(shoreDist, flowSpeed, worldUV, time);
