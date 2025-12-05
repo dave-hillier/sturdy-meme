@@ -139,11 +139,36 @@ public:
     uint32_t getWeatherType() const { return weatherSystem.getWeatherType(); }
     float getIntensity() const { return weatherSystem.getIntensity(); }
 
-    // Fog control
+    // Fog control - Froxel volumetric fog
     void setFogDensity(float density) { froxelSystem.setFogDensity(density); }
     float getFogDensity() const { return froxelSystem.getFogDensity(); }
     void setFogEnabled(bool enabled) { froxelSystem.setEnabled(enabled); postProcessSystem.setFroxelEnabled(enabled); }
     bool isFogEnabled() const { return froxelSystem.isEnabled(); }
+
+    // Froxel fog extended parameters
+    void setFogBaseHeight(float h) { froxelSystem.setFogBaseHeight(h); }
+    float getFogBaseHeight() const { return froxelSystem.getFogBaseHeight(); }
+    void setFogScaleHeight(float h) { froxelSystem.setFogScaleHeight(h); }
+    float getFogScaleHeight() const { return froxelSystem.getFogScaleHeight(); }
+    void setFogAbsorption(float a) { froxelSystem.setFogAbsorption(a); }
+    float getFogAbsorption() const { return froxelSystem.getFogAbsorption(); }
+    void setVolumetricFarPlane(float f) { froxelSystem.setVolumetricFarPlane(f); postProcessSystem.setFroxelParams(f, FroxelSystem::DEPTH_DISTRIBUTION); }
+    float getVolumetricFarPlane() const { return froxelSystem.getVolumetricFarPlane(); }
+    void setTemporalBlend(float b) { froxelSystem.setTemporalBlend(b); }
+    float getTemporalBlend() const { return froxelSystem.getTemporalBlend(); }
+
+    // Height fog layer parameters
+    void setLayerHeight(float h) { froxelSystem.setLayerHeight(h); }
+    float getLayerHeight() const { return froxelSystem.getLayerHeight(); }
+    void setLayerThickness(float t) { froxelSystem.setLayerThickness(t); }
+    float getLayerThickness() const { return froxelSystem.getLayerThickness(); }
+    void setLayerDensity(float d) { froxelSystem.setLayerDensity(d); }
+    float getLayerDensity() const { return froxelSystem.getLayerDensity(); }
+
+    // Atmospheric scattering parameters
+    void setAtmosphereParams(const AtmosphereParams& params) { atmosphereLUTSystem.setAtmosphereParams(params); }
+    const AtmosphereParams& getAtmosphereParams() const { return atmosphereLUTSystem.getAtmosphereParams(); }
+    AtmosphereLUTSystem& getAtmosphereLUTSystem() { return atmosphereLUTSystem; }
 
     // Leaf control
     void setLeafIntensity(float intensity) { leafSystem.setIntensity(intensity); }

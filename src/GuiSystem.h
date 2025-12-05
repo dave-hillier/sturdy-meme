@@ -56,6 +56,15 @@ private:
     int frameTimeIndex = 0;
     float avgFrameTime = 0.0f;
 
+    // Height fog layer enable state and cached values
+    bool heightFogEnabled = true;
+    float cachedLayerDensity = 0.02f;
+
+    // Atmospheric scattering enable state and cached values
+    bool atmosphereEnabled = true;
+    float cachedRayleighScale = 13.558f;
+    float cachedMieScale = 3.996f;
+
 public:
     // Access to tree editor GUI
     TreeEditorGui& getTreeEditorGui() { return treeEditorGui; }
