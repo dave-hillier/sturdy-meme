@@ -83,6 +83,8 @@ set(SOURCES
     src/CpuProfiler.cpp
     src/WaterSystem.cpp
     src/FlowMapGenerator.cpp
+    src/WaterGBuffer.cpp
+    src/WaterDisplacement.cpp
     src/TreeGenerator.cpp
     src/TreeEditSystem.cpp
     src/TreeEditorGui.cpp
@@ -274,6 +276,9 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/hiz_culling.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water.frag.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_position.vert.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_position.frag.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_displacement.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree.frag.spv
 )
@@ -427,6 +432,8 @@ if(SHADER_COMPILE_CMD)
     set(WATER_SHADERS
         water.vert
         water.frag
+        water_position.vert
+        water_position.frag
     )
 
     foreach(SHADER ${WATER_SHADERS})
@@ -437,6 +444,14 @@ if(SHADER_COMPILE_CMD)
             COMMENT "Compiling water shader: ${SHADER}"
         )
     endforeach()
+
+    # Water displacement compute shader (Phase 4)
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_displacement.comp.spv
+        COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_displacement.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_displacement.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_displacement.comp
+        COMMENT "Compiling water displacement compute shader"
+    )
 
     # Terrain shaders (LEB terrain system)
     set(TERRAIN_CBT_DEPS
@@ -577,6 +592,9 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/hiz_culling.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water.frag.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_position.vert.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_position.frag.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_displacement.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree.frag.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_dispatcher.comp.spv

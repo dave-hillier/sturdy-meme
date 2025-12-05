@@ -44,7 +44,7 @@ bool WaterSystem::init(const InitInfo& info) {
     waterUniforms.specularRoughness = 0.05f;   // Water is quite smooth
     waterUniforms.absorptionScale = 0.15f;     // Depth-based absorption rate
     waterUniforms.scatteringScale = 1.0f;      // Turbidity multiplier
-    waterUniforms.padding = 0.0f;
+    waterUniforms.displacementScale = 1.0f;   // Interactive displacement scale (Phase 4)
 
     if (!createDescriptorSetLayout()) return false;
     if (!createPipeline()) return false;

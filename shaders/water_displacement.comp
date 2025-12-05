@@ -1,0 +1,177 @@
+#version 450
+
+/*
+ * water_displacement.comp - Water Displacement Compute Shader
+ *
+ * Phase 4: Generates displacement map from splash particles.
+ * Implements:
+ * - Splash particles with radial falloff
+ * - Ripple rings (expanding waves)
+ * - Temporal decay of previous displacement
+ * - Edge fading to prevent artifacts at particle boundaries
+ *
+ * Based on Far Cry 5's water rendering approach (GDC 2018).
+ */
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+// Output displacement map (R16F - height displacement)
+layout(binding = 0, r16f) uniform image2D displacementMap;
+
+// Previous frame displacement (for temporal blending/decay)
+layout(binding = 1) uniform sampler2D prevDisplacementMap;
+
+// Splash particle data
+struct SplashParticle {
+    vec3 position;      // World position
+    float radius;       // Splash radius
+    float intensity;    // Displacement height (+ up, - creates ring)
+    float age;          // 0-1 normalized age
+    float lifetime;     // Total lifetime
+    float falloff;      // Edge falloff exponent
+    uint animFrame;     // Animation frame
+    float padding1;
+    float padding2;
+    float padding3;
+};
+
+layout(std430, binding = 2) readonly buffer ParticleBuffer {
+    SplashParticle particles[];
+};
+
+layout(push_constant) uniform PushConstants {
+    vec4 worldExtent;   // xy = center, zw = size
+    float time;
+    float deltaTime;
+    uint numParticles;
+    float decayRate;
+} pc;
+
+// Convert pixel coords to world position
+vec2 pixelToWorld(ivec2 pixel, ivec2 resolution) {
+    vec2 uv = (vec2(pixel) + 0.5) / vec2(resolution);
+    vec2 worldPos = pc.worldExtent.xy + (uv - 0.5) * pc.worldExtent.zw;
+    return worldPos;
+}
+
+// Smooth falloff function (like smoothstep but more control)
+float smoothFalloff(float dist, float radius, float falloffPower) {
+    float t = clamp(dist / radius, 0.0, 1.0);
+    return pow(1.0 - t, falloffPower);
+}
+
+// Edge fade to prevent hard edges at particle boundaries
+float edgeFade(float dist, float radius) {
+    float edgeWidth = radius * 0.1;
+    float edgeDist = radius - dist;
+    return smoothstep(0.0, edgeWidth, edgeDist);
+}
+
+// Calculate splash displacement
+float calculateSplashDisplacement(vec2 worldPos, SplashParticle particle) {
+    vec2 toParticle = worldPos - particle.position.xz;
+    float dist = length(toParticle);
+
+    if (dist > particle.radius) {
+        return 0.0;
+    }
+
+    // Age-based intensity decay
+    float ageDecay = 1.0 - particle.age;
+    ageDecay = ageDecay * ageDecay;  // Quadratic decay
+
+    // Radial falloff
+    float falloff = smoothFalloff(dist, particle.radius, particle.falloff);
+
+    // Edge fade
+    float edge = edgeFade(dist, particle.radius);
+
+    // Final displacement
+    float displacement = particle.intensity * falloff * edge * ageDecay;
+
+    return displacement;
+}
+
+// Calculate ripple displacement (expanding ring)
+float calculateRippleDisplacement(vec2 worldPos, SplashParticle particle) {
+    vec2 toParticle = worldPos - particle.position.xz;
+    float dist = length(toParticle);
+
+    // Ripples use negative intensity as a flag
+    float intensity = abs(particle.intensity);
+
+    // Ring expands outward based on age
+    float ringRadius = particle.radius * particle.age;
+    float ringWidth = particle.radius * 0.15;  // Width of the ring
+
+    // Distance from the ring
+    float ringDist = abs(dist - ringRadius);
+
+    if (ringDist > ringWidth) {
+        return 0.0;
+    }
+
+    // Ring profile (sine wave)
+    float phase = (dist - ringRadius) / ringWidth * 3.14159;
+    float ringProfile = cos(phase);
+
+    // Age-based decay
+    float ageDecay = 1.0 - particle.age;
+
+    // Outer edge fade
+    float outerFade = 1.0 - smoothstep(particle.radius * 0.8, particle.radius, dist);
+
+    return intensity * ringProfile * ageDecay * outerFade;
+}
+
+void main() {
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 resolution = imageSize(displacementMap);
+
+    if (pixel.x >= resolution.x || pixel.y >= resolution.y) {
+        return;
+    }
+
+    // Convert pixel to world position
+    vec2 worldPos = pixelToWorld(pixel, resolution);
+
+    // Sample previous displacement for temporal blending
+    vec2 uv = (vec2(pixel) + 0.5) / vec2(resolution);
+    float prevDisplacement = texture(prevDisplacementMap, uv).r;
+
+    // Decay previous displacement
+    float decayedPrev = prevDisplacement * exp(-pc.decayRate * pc.deltaTime);
+
+    // Accumulate displacement from all particles
+    float totalDisplacement = 0.0;
+
+    for (uint i = 0; i < pc.numParticles; i++) {
+        SplashParticle particle = particles[i];
+
+        // Skip dead particles
+        if (particle.radius <= 0.0 || particle.age >= 1.0) {
+            continue;
+        }
+
+        // Negative intensity indicates ripple, positive is splash
+        if (particle.intensity < 0.0) {
+            totalDisplacement += calculateRippleDisplacement(worldPos, particle);
+        } else {
+            totalDisplacement += calculateSplashDisplacement(worldPos, particle);
+        }
+    }
+
+    // Combine with decayed previous (max blend for splashes)
+    // This creates the "max alpha blend" from Far Cry 5
+    float finalDisplacement;
+    if (totalDisplacement > 0.0) {
+        finalDisplacement = max(decayedPrev, totalDisplacement);
+    } else if (totalDisplacement < 0.0) {
+        finalDisplacement = min(decayedPrev, totalDisplacement);
+    } else {
+        finalDisplacement = decayedPrev;
+    }
+
+    // Write to displacement map
+    imageStore(displacementMap, pixel, vec4(finalDisplacement, 0.0, 0.0, 0.0));
+}
