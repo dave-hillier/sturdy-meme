@@ -55,8 +55,23 @@ void MaterialDescriptorFactory::writeDescriptorSet(
         // Binding 1: Diffuse texture
         .writeImage(1, material.diffuseView, material.diffuseSampler)
         // Binding 3: Normal map
-        .writeImage(3, material.normalView, material.normalSampler)
-        .update();
+        .writeImage(3, material.normalView, material.normalSampler);
+
+    // Optional PBR texture bindings (13-16)
+    if (material.roughnessView != VK_NULL_HANDLE) {
+        writer.writeImage(13, material.roughnessView, material.roughnessSampler);
+    }
+    if (material.metallicView != VK_NULL_HANDLE) {
+        writer.writeImage(14, material.metallicView, material.metallicSampler);
+    }
+    if (material.aoView != VK_NULL_HANDLE) {
+        writer.writeImage(15, material.aoView, material.aoSampler);
+    }
+    if (material.heightView != VK_NULL_HANDLE) {
+        writer.writeImage(16, material.heightView, material.heightSampler);
+    }
+
+    writer.update();
 }
 
 void MaterialDescriptorFactory::writeSkinnedDescriptorSet(
@@ -76,6 +91,20 @@ void MaterialDescriptorFactory::writeSkinnedDescriptorSet(
     // Binding 12: Bone matrices (required for skinned meshes)
     if (common.boneMatricesBuffer != VK_NULL_HANDLE) {
         writer.writeBuffer(12, common.boneMatricesBuffer, 0, common.boneMatricesBufferSize);
+    }
+
+    // Optional PBR texture bindings (13-16)
+    if (material.roughnessView != VK_NULL_HANDLE) {
+        writer.writeImage(13, material.roughnessView, material.roughnessSampler);
+    }
+    if (material.metallicView != VK_NULL_HANDLE) {
+        writer.writeImage(14, material.metallicView, material.metallicSampler);
+    }
+    if (material.aoView != VK_NULL_HANDLE) {
+        writer.writeImage(15, material.aoView, material.aoSampler);
+    }
+    if (material.heightView != VK_NULL_HANDLE) {
+        writer.writeImage(16, material.heightView, material.heightSampler);
     }
 
     writer.update();

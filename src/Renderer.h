@@ -50,6 +50,13 @@
 #include "TreeEditSystem.h"
 #include "SSRSystem.h"
 
+// PBR texture flags - indicates which optional PBR textures are bound
+// Must match definitions in push_constants_common.glsl
+constexpr uint32_t PBR_HAS_ROUGHNESS_MAP = (1u << 0);
+constexpr uint32_t PBR_HAS_METALLIC_MAP  = (1u << 1);
+constexpr uint32_t PBR_HAS_AO_MAP        = (1u << 2);
+constexpr uint32_t PBR_HAS_HEIGHT_MAP    = (1u << 3);
+
 struct PushConstants {
     glm::mat4 model;
     float roughness;
@@ -57,6 +64,10 @@ struct PushConstants {
     float emissiveIntensity;
     float opacity;  // For camera occlusion fading (1.0 = fully visible)
     glm::vec4 emissiveColor;  // rgb = color, a unused
+    uint32_t pbrFlags;  // Bitmask indicating which PBR textures are bound
+    float _padding1;
+    float _padding2;
+    float _padding3;
 };
 
 class Renderer {

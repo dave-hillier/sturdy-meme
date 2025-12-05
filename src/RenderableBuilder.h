@@ -25,6 +25,7 @@ struct Renderable {
     glm::vec3 emissiveColor = glm::vec3(1.0f);
     bool castsShadow = true;
     float opacity = 1.0f;  // For camera occlusion fading (1.0 = fully visible)
+    uint32_t pbrFlags = 0;  // Bitmask indicating which PBR textures are bound (set automatically from material)
 
 private:
     friend class RenderableBuilder;
