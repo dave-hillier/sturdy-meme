@@ -5,10 +5,24 @@
 #include "AnimationStateMachine.h"
 #include "GLTFLoader.h"
 #include "Mesh.h"
+#include "IKSolver.h"
 #include <vk_mem_alloc.h>
 #include <string>
 #include <vector>
 #include <memory>
+
+// Debug data for skeleton visualization
+struct SkeletonDebugData {
+    struct Bone {
+        glm::vec3 startPos;   // Parent joint position
+        glm::vec3 endPos;     // This joint's position
+        std::string name;
+        int32_t parentIndex;
+        bool isEndEffector;   // True if this is a leaf bone (hand, foot, head tip)
+    };
+    std::vector<Bone> bones;
+    std::vector<glm::vec3> jointPositions;  // All joint world positions
+};
 
 // High-level animated character class
 // Combines: skinned mesh, skeleton, animations, and animation player
@@ -41,9 +55,11 @@ public:
     // movementSpeed: horizontal movement speed for animation state selection
     // isGrounded: whether the character is on the ground
     // isJumping: whether the character just started a jump
+    // worldTransform: character's world transform matrix (for IK ground queries)
     void update(float deltaTime, VmaAllocator allocator, VkDevice device,
                 VkCommandPool commandPool, VkQueue queue,
-                float movementSpeed = 0.0f, bool isGrounded = true, bool isJumping = false);
+                float movementSpeed = 0.0f, bool isGrounded = true, bool isJumping = false,
+                const glm::mat4& worldTransform = glm::mat4(1.0f));
 
     // Get the skinned mesh for rendering (uses SkinnedVertex format for GPU skinning)
     SkinnedMesh& getSkinnedMesh() { return skinnedMesh; }
@@ -74,6 +90,20 @@ public:
     // Get bone matrices for GPU skinning
     void computeBoneMatrices(std::vector<glm::mat4>& outBoneMatrices) const;
 
+    // IK System access
+    IKSystem& getIKSystem() { return ikSystem; }
+    const IKSystem& getIKSystem() const { return ikSystem; }
+
+    // Setup common IK chains (arms, legs) by searching for standard bone names
+    void setupDefaultIKChains();
+
+    // Get IK debug visualization data
+    IKDebugData getIKDebugData() const { return ikSystem.getDebugData(skeleton); }
+
+    // Get skeleton debug data for wireframe rendering
+    // worldTransform: the character's world transform matrix
+    SkeletonDebugData getSkeletonDebugData(const glm::mat4& worldTransform) const;
+
     bool isLoaded() const { return loaded; }
 
 private:
@@ -95,6 +125,9 @@ private:
     AnimationPlayer animationPlayer;
     AnimationStateMachine stateMachine;
     bool useStateMachine = false;  // Set true after state machine is initialized
+
+    // IK system for procedural adjustments
+    IKSystem ikSystem;
 
     // Materials loaded from FBX/glTF
     std::vector<MaterialInfo> materials;
