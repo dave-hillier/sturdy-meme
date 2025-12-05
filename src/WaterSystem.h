@@ -81,7 +81,9 @@ public:
                               VkImageView temporalFoamView,
                               VkSampler temporalFoamSampler,
                               VkImageView ssrView,
-                              VkSampler ssrSampler);
+                              VkSampler ssrSampler,
+                              VkImageView sceneDepthView,
+                              VkSampler sceneDepthSampler);
 
     // Update water uniforms (call each frame)
     void updateUniforms(uint32_t frameIndex);

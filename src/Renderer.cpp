@@ -631,13 +631,14 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
         // Don't fail init - SSR is optional
     }
 
-    // Create water descriptor sets with terrain heightmap, flow map, displacement map, temporal foam, and SSR
+    // Create water descriptor sets with terrain heightmap, flow map, displacement map, temporal foam, SSR, and scene depth
     if (!waterSystem.createDescriptorSets(uniformBuffers, sizeof(UniformBufferObject), shadowSystem,
                                           terrainSystem.getHeightMapView(), terrainSystem.getHeightMapSampler(),
                                           flowMapGenerator.getFlowMapView(), flowMapGenerator.getFlowMapSampler(),
                                           waterDisplacement.getDisplacementMapView(), waterDisplacement.getSampler(),
                                           foamBuffer.getFoamBufferView(), foamBuffer.getSampler(),
-                                          ssrSystem.getSSRResultView(), ssrSystem.getSampler())) return false;
+                                          ssrSystem.getSSRResultView(), ssrSystem.getSampler(),
+                                          postProcessSystem.getHDRDepthView(), depthSampler)) return false;
 
     // Initialize tree edit system
     TreeEditSystem::InitInfo treeEditInfo{};

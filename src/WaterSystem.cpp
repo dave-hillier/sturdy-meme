@@ -110,6 +110,7 @@ bool WaterSystem::createDescriptorSetLayout() {
     // 7: Temporal foam buffer (Phase 14: persistent foam)
     // 8: Caustics texture (Phase 9: animated underwater light patterns)
     // 9: SSR texture (Phase 10: screen-space reflections)
+    // 10: Scene depth texture (Phase 11: dual depth for refraction)
 
     auto uboBinding = BindingBuilder()
         .setBinding(0)
@@ -171,10 +172,16 @@ bool WaterSystem::createDescriptorSetLayout() {
         .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
         .build();
 
-    std::array<VkDescriptorSetLayoutBinding, 10> bindings = {
+    auto sceneDepthBinding = BindingBuilder()
+        .setBinding(10)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
+        .build();
+
+    std::array<VkDescriptorSetLayoutBinding, 11> bindings = {
         uboBinding, waterUniformBinding, shadowMapBinding, terrainHeightMapBinding,
         flowMapBinding, displacementMapBinding, foamTextureBinding, temporalFoamBinding,
-        causticsTextureBinding, ssrTextureBinding
+        causticsTextureBinding, ssrTextureBinding, sceneDepthBinding
     };
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
@@ -380,7 +387,9 @@ bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffe
                                         VkImageView temporalFoamView,
                                         VkSampler temporalFoamSampler,
                                         VkImageView ssrView,
-                                        VkSampler ssrSampler) {
+                                        VkSampler ssrSampler,
+                                        VkImageView sceneDepthView,
+                                        VkSampler sceneDepthSampler) {
     // Allocate descriptor sets using managed pool
     descriptorSets = descriptorPool->allocate(descriptorSetLayout, framesInFlight);
     if (descriptorSets.size() != framesInFlight) {
@@ -454,7 +463,13 @@ bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffe
         ssrInfo.imageView = ssrView;
         ssrInfo.sampler = ssrSampler;
 
-        std::array<VkWriteDescriptorSet, 10> descriptorWrites{};
+        // Scene depth binding (Phase 11: dual depth for refraction)
+        VkDescriptorImageInfo sceneDepthInfo{};
+        sceneDepthInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+        sceneDepthInfo.imageView = sceneDepthView;
+        sceneDepthInfo.sampler = sceneDepthSampler;
+
+        std::array<VkWriteDescriptorSet, 11> descriptorWrites{};
 
         descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         descriptorWrites[0].dstSet = descriptorSets[i];
@@ -536,11 +551,19 @@ bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffe
         descriptorWrites[9].descriptorCount = 1;
         descriptorWrites[9].pImageInfo = &ssrInfo;
 
+        descriptorWrites[10].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[10].dstSet = descriptorSets[i];
+        descriptorWrites[10].dstBinding = 10;
+        descriptorWrites[10].dstArrayElement = 0;
+        descriptorWrites[10].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[10].descriptorCount = 1;
+        descriptorWrites[10].pImageInfo = &sceneDepthInfo;
+
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                descriptorWrites.data(), 0, nullptr);
     }
 
-    SDL_Log("Water descriptor sets created with terrain heightmap, flow map, displacement map, foam texture, temporal foam, caustics, and SSR");
+    SDL_Log("Water descriptor sets created with terrain heightmap, flow map, displacement map, foam texture, temporal foam, caustics, SSR, and scene depth");
     return true;
 }
 

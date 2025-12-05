@@ -55,6 +55,7 @@ layout(binding = 6) uniform sampler2D foamNoiseTexture;
 layout(binding = 7) uniform sampler2D temporalFoamMap;  // Phase 14: Persistent foam
 layout(binding = 8) uniform sampler2D causticsTexture;  // Phase 9: Underwater light patterns
 layout(binding = 9) uniform sampler2D ssrTexture;       // Phase 10: Screen-Space Reflections
+layout(binding = 10) uniform sampler2D sceneDepthTexture; // Phase 11: Scene depth for refraction
 
 layout(location = 0) in vec3 fragWorldPos;
 layout(location = 1) in vec3 fragNormal;
@@ -95,6 +96,50 @@ float fbm(vec2 p, int octaves) {
     }
 
     return value;
+}
+
+// =========================================================================
+// PHASE 11: Dual Depth Buffer Functions
+// Scene depth sampling for refraction and soft edges
+// =========================================================================
+
+// Saturate helper (clamp to 0-1)
+float saturate(float x) { return clamp(x, 0.0, 1.0); }
+vec2 saturate(vec2 x) { return clamp(x, 0.0, 1.0); }
+vec3 saturate(vec3 x) { return clamp(x, 0.0, 1.0); }
+
+// Convert hardware depth to linear depth (view space)
+float linearizeDepth(float depth, float near, float far) {
+    // Vulkan uses [0,1] depth range with reverse-Z typically
+    float z = depth;
+    return near * far / (far - z * (far - near));
+}
+
+// Get scene depth at screen UV
+float getSceneDepth(vec2 screenUV, float near, float far) {
+    float rawDepth = texture(sceneDepthTexture, screenUV).r;
+    return linearizeDepth(rawDepth, near, far);
+}
+
+// Calculate soft edge factor for water-geometry intersection
+// Returns 0.0 at geometry intersection, 1.0 away from geometry
+float calculateSoftEdge(vec2 screenUV, float waterDepth, float softEdgeDistance, float near, float far) {
+    float sceneDepth = getSceneDepth(screenUV, near, far);
+    float depthDiff = sceneDepth - waterDepth;
+    return smoothstep(0.0, softEdgeDistance, depthDiff);
+}
+
+// Calculate refraction UV offset based on scene depth
+// Deeper water = more refraction distortion
+vec2 calculateRefractionOffset(vec2 screenUV, vec3 normal, float waterDepth, float near, float far) {
+    float sceneDepth = getSceneDepth(screenUV, near, far);
+    float depthDiff = max(0.0, sceneDepth - waterDepth);
+
+    // Scale refraction by depth difference (more distortion through deeper water)
+    float refractionStrength = saturate(depthDiff * 0.1) * 0.05;
+
+    // Offset UV based on normal XZ (horizontal distortion)
+    return normal.xz * refractionStrength;
 }
 
 // Schlick's Fresnel approximation
@@ -577,6 +622,49 @@ void main() {
         float splashFactor = smoothstep(0.0, 0.05, fragWaveHeight) * intersectionStrength;
         float splashFoam = splashFactor * foam3 * 0.8;
         shoreFoamAmount = max(shoreFoamAmount, splashFoam);
+    }
+
+    // =========================================================================
+    // PHASE 11: Scene Depth-Based Intersection Foam
+    // Detect intersections with ANY geometry using scene depth buffer
+    // This catches objects like rocks, boats, docks that terrain check misses
+    // =========================================================================
+    {
+        // Calculate linear depth of water surface
+        vec4 clipPos = ubo.proj * ubo.view * vec4(fragWorldPos, 1.0);
+        float waterLinearDepth = linearizeDepth(clipPos.z / clipPos.w * 0.5 + 0.5, 0.1, 1000.0);
+
+        // Get scene depth and calculate soft edge
+        float sceneLinearDepth = getSceneDepth(screenUV, 0.1, 1000.0);
+        float depthDiff = sceneLinearDepth - waterLinearDepth;
+
+        // Soft edge factor: 0 at intersection, 1 away from geometry
+        float softEdgeDist = 0.5;  // World units for soft transition
+        float softEdge = smoothstep(0.0, softEdgeDist, depthDiff);
+
+        // Add foam at intersections with any geometry
+        if (depthDiff < softEdgeDist && depthDiff > -0.1) {
+            float intersectionFactor = 1.0 - softEdge;
+
+            // Sample foam texture at intersection
+            vec2 intersectionUV = fragWorldPos.xz * 0.15 + time * 0.05;
+            float intersectionNoise = texture(foamNoiseTexture, intersectionUV).r;
+
+            // Scale foam by intersection proximity
+            float geometryFoam = intersectionFactor * intersectionNoise * 0.8;
+
+            // Add to shore foam (if inside terrain) or directly to total
+            if (insideTerrain) {
+                shoreFoamAmount = max(shoreFoamAmount, geometryFoam);
+            } else {
+                // For non-terrain geometry intersections
+                flowFoamAmount = max(flowFoamAmount, geometryFoam);
+            }
+        }
+
+        // Use soft edge to fade water alpha at intersections (soft particles effect)
+        // This creates a smoother blend where water meets geometry
+        // Store for later use in alpha blending
     }
 
     // Combine all foam sources

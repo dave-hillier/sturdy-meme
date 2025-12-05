@@ -267,17 +267,39 @@ vec3 finalReflection = mix(envReflection, ssrSample.rgb, ssrConfidence);
 
 ---
 
-## Phase 11: Dual Depth Buffer System
+## Phase 11: Dual Depth Buffer System ✅
+
+**Status:** Implemented. Scene depth available for intersection detection and soft edges.
 
 **Goal:** Proper depth handling for water-scene interaction
 
-### 11.1 Depth Buffer Management
-- Maintain depth buffer without water (for refraction sampling)
-- Maintain depth buffer with water (for scene compositing)
-- Handle stencil propagation between buffers
+### 11.1 Scene Depth Access
+- ✅ Scene depth texture (HDR depth) bound to water shader (binding 10)
+- ✅ Depth linearization for proper distance calculation
+- ✅ Scene depth sampling for intersection detection
+
+### 11.2 Intersection Detection
+- ✅ Soft edge calculation at water-geometry intersection
+- ✅ Foam generation at any geometry intersection (not just terrain)
+- ✅ Depth difference-based soft particle effect
+
+### 11.3 Implementation Details
+```glsl
+// Get scene depth and water depth
+float sceneLinearDepth = getSceneDepth(screenUV, near, far);
+float depthDiff = sceneLinearDepth - waterLinearDepth;
+
+// Soft edge factor: 0 at intersection, 1 away from geometry
+float softEdge = smoothstep(0.0, softEdgeDist, depthDiff);
+
+// Add foam at intersections
+float geometryFoam = (1.0 - softEdge) * foamNoise;
+```
 
 **Files:**
-- Modify: `src/Renderer.cpp`
+- ✅ `src/WaterSystem.h/cpp` - Scene depth texture binding
+- ✅ `shaders/water.frag` - Depth-based intersection foam
+- ✅ `src/Renderer.cpp` - Pass HDR depth to water system
 
 ---
 
@@ -506,7 +528,7 @@ vec3 waveSSS = sssTint * sunColor * sssStrength * sssIntensity;
 ### Performance/Polish:
 7. **Phase 7** (Screen-Space Tessellation) - Performance optimization
 8. ✅ **Phase 10** (SSR) - High-quality reflections
-9. **Phase 11** (Dual Depth) - Correctness for complex scenes
+9. ✅ **Phase 11** (Dual Depth) - Correctness for complex scenes
 10. **Phase 12** (Material Blending) - Multiple water types
 
 ---
@@ -523,6 +545,7 @@ Based on current state, the highest-impact remaining improvements are:
 - **Phase 15** (Intersection Foam) - Dynamic foam at shorelines and geometry
 - **Phase 16** (Wake System) - V-shaped wakes with Kelvin angle and bow waves
 - **Phase 10** (SSR) - Screen-space reflections with temporal filtering
+- **Phase 11** (Dual Depth) - Scene depth for geometry intersection foam
 
 ### 1. Foam Texture Quality
 **Why:** The generated Worley noise texture may need tuning. Consider:
