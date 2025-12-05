@@ -278,17 +278,6 @@ bool TwoBoneIKSolver::solve(
     // Recompose: localTransform = T * Rpre * R * S
     glm::quat finalRootLocalRot = rootJoint.preRotation * newRootAnimRot;
 
-    if (debugCounter % 300 == 1) {
-        // Verify: apply the new rotation and see where the child would end up
-        glm::mat4 testRootGlobal;
-        if (rootJoint.parentIndex >= 0) {
-            testRootGlobal = globalTransforms[rootJoint.parentIndex] *
-                            IKUtils::composeTransform(rootTranslation, finalRootLocalRot, rootScale);
-        } else {
-            testRootGlobal = IKUtils::composeTransform(rootTranslation, finalRootLocalRot, rootScale);
-        }
-    }
-
     // Calculate rotations for mid bone using the same approach
     glm::vec3 currentEndOffset = endPos - midPos;
     glm::vec3 desiredEndOffset = targetPos - newMidPos;
@@ -712,33 +701,26 @@ void FootPlacementIKSolver::solve(
     foot.isGrounded = true;
     foot.currentGroundHeight = groundResult.position.y;
 
-    // Extract scale from character transform (for converting world offsets to skeleton space)
-    // The character transform includes scale (e.g., 0.01 for Mixamo cm→m conversion)
-    float scaleY = glm::length(glm::vec3(characterTransform[1]));
-    if (scaleY < 0.0001f) scaleY = 1.0f;
-
     // Calculate target foot position in world space
     // The foot bone (ankle) should be at ground height + ankle height offset
-    float ankleHeightAboveGround = 0.08f;  // ~8cm ankle height in world space (meters)
+    // Note: Skeleton data is now in meters (converted during FBX post-import processing)
+    float ankleHeightAboveGround = 0.08f;  // ~8cm ankle height in meters
     float targetWorldFootY = groundResult.position.y + ankleHeightAboveGround;
 
-    // Calculate how much the foot needs to move in world space
-    float worldHeightDiff = targetWorldFootY - worldFootPos.y;  // Positive = need to move up
+    // Calculate how much the foot needs to move
+    // Since skeleton is now in meters (same as world space), no scale conversion needed
+    float heightOffset = targetWorldFootY - worldFootPos.y;  // Positive = need to move up
 
-    // Convert to skeleton space (skeleton is in cm, world is in m, scale is 0.01)
-    // world_to_skeleton = world / scale = world * 100
-    float skeletonHeightOffset = worldHeightDiff / scaleY;
+    // Clamp the offset to reasonable bounds (in meters)
+    // Positive: foot moves up (leg bends more) - max ~20cm = 0.20m
+    // Negative: foot moves down (leg straightens) - max ~15cm = 0.15m
+    const float maxLiftOffset = 0.20f;
+    const float maxDropOffset = -0.15f;
+    heightOffset = glm::clamp(heightOffset, maxDropOffset, maxLiftOffset);
 
-    // Clamp the offset to reasonable bounds in skeleton space (cm)
-    // Positive: foot moves up (leg bends more) - max ~20cm
-    // Negative: foot moves down (leg straightens) - max ~15cm
-    const float maxLiftOffset = 20.0f;
-    const float maxDropOffset = -15.0f;
-    skeletonHeightOffset = glm::clamp(skeletonHeightOffset, maxDropOffset, maxLiftOffset);
-
-    // Small threshold to avoid jitter
-    const float threshold = 2.0f;  // 2cm in skeleton space
-    if (std::abs(skeletonHeightOffset) < threshold) {
+    // Small threshold to avoid jitter (in meters)
+    const float threshold = 0.02f;  // 2cm
+    if (std::abs(heightOffset) < threshold) {
         foot.isGrounded = true;
         foot.currentFootTarget = animFootPos;
         return;
@@ -746,7 +728,7 @@ void FootPlacementIKSolver::solve(
 
     // The target position is the animation position adjusted to meet ground
     glm::vec3 targetLocalPos = animFootPos;
-    targetLocalPos.y += skeletonHeightOffset;
+    targetLocalPos.y += heightOffset;
 
     // Initialize currentFootTarget if it's at origin (first frame)
     if (glm::length2(foot.currentFootTarget) < 0.001f) {

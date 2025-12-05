@@ -1,4 +1,5 @@
 #include "FBXLoader.h"
+#include "FBXPostProcess.h"
 #include "SkinnedMesh.h"
 #include "Animation.h"
 #include <SDL3/SDL_log.h>
@@ -282,7 +283,7 @@ MaterialInfo extractMaterialInfo(const ofbx::Material* mat, const std::string& f
 
 } // anonymous namespace
 
-std::optional<GLTFSkinnedLoadResult> loadSkinned(const std::string& path) {
+std::optional<GLTFSkinnedLoadResult> loadSkinned(const std::string& path, const FBXImportSettings& settings) {
     auto fileData = readFile(path);
     if (fileData.empty()) {
         SDL_Log("FBXLoader: Failed to read file: %s", path.c_str());
@@ -767,11 +768,14 @@ std::optional<GLTFSkinnedLoadResult> loadSkinned(const std::string& path) {
         result.normalTexturePath = result.materials[0].normalTexturePath;
     }
 
+    // Apply post-import processing (scale, coordinate system conversion)
+    FBXPostProcess::process(result, settings);
+
     return result;
 }
 
-std::optional<GLTFLoadResult> load(const std::string& path) {
-    auto skinned = loadSkinned(path);
+std::optional<GLTFLoadResult> load(const std::string& path, const FBXImportSettings& settings) {
+    auto skinned = loadSkinned(path, settings);
     if (!skinned) {
         return std::nullopt;
     }
@@ -799,7 +803,7 @@ std::optional<GLTFLoadResult> load(const std::string& path) {
     return result;
 }
 
-std::vector<AnimationClip> loadAnimations(const std::string& path, const Skeleton& skeleton) {
+std::vector<AnimationClip> loadAnimations(const std::string& path, const Skeleton& skeleton, const FBXImportSettings& settings) {
     std::vector<AnimationClip> result;
 
     auto fileData = readFile(path);
@@ -1065,6 +1069,9 @@ std::vector<AnimationClip> loadAnimations(const std::string& path, const Skeleto
             result.push_back(std::move(clip));
         }
     }
+
+    // Apply post-import processing (scale, coordinate system conversion)
+    FBXPostProcess::processAnimations(result, skeleton, settings);
 
     return result;
 }
