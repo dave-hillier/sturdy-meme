@@ -141,8 +141,8 @@ float volumetricGroundFog(vec3 worldPos) {
     }
 
     // DEBUG: Use simple grid pattern to verify patches work
-    // Creates 100m x 100m fog cells with gaps between
-    float cellSize = 100.0;
+    // Creates 25m x 25m fog cells with gaps between
+    float cellSize = 25.0;
     vec2 cell = floor(worldPos.xz / cellSize);
     float checker = mod(cell.x + cell.y, 2.0);  // Alternating cells
 
@@ -464,19 +464,21 @@ void main() {
     float totalShadow = sunVisibility * shadow;
 
     // In-scattering from sun (attenuated by shadow)
-    // Boost scattering to make volumetric light shafts visible
     vec3 sunInScatter = sunLight * phase * totalShadow * density * 2.0;
 
-    // Ambient sky contribution (isotropic)
+    // Ambient sky/fog contribution - this makes fog VISIBLE as bright fog, not just opacity
+    // Without this, fog only absorbs light and appears as dark occlusion
     float night = 1.0 - smoothstep(-0.05, 0.08, sunDir.y);
-    vec3 skyColor = mix(vec3(0.4, 0.5, 0.7), vec3(0.02, 0.03, 0.05), night);
-    vec3 skyInScatter = skyColor * density * 0.5;  // Boosted ambient scatter
+    vec3 fogBaseColor = mix(vec3(0.7, 0.75, 0.85), vec3(0.1, 0.12, 0.15), night);
+
+    // Strong ambient scatter ensures fog is always bright, not just dark
+    vec3 ambientScatter = fogBaseColor * density * 3.0;
 
     // Local light contribution (point and spot lights)
-    vec3 localLightScatter = computeLocalLightScatter(worldPos, viewDir, density) * 3.0;  // Boost local lights
+    vec3 localLightScatter = computeLocalLightScatter(worldPos, viewDir, density) * 3.0;
 
-    // Total in-scattering
-    vec3 totalInScatter = sunInScatter + skyInScatter + localLightScatter;
+    // Total in-scattering - fog should be BRIGHT where it exists
+    vec3 totalInScatter = sunInScatter + ambientScatter + localLightScatter;
 
     // =========================================================================
     // Temporal Reprojection
