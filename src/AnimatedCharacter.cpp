@@ -269,6 +269,28 @@ void AnimatedCharacter::update(float deltaTime, VmaAllocator allocator, VkDevice
         animationPlayer.applyToSkeleton(skeleton);
     }
 
+    // Adjust foot IK weight based on movement speed
+    // During idle (low speed), reduce foot IK to prevent sliding from IK fighting animation
+    // During movement, enable foot IK to plant feet on uneven terrain
+    constexpr float IDLE_THRESHOLD = 0.1f;  // Same as AnimationStateMachine::WALK_THRESHOLD
+    constexpr float FULL_IK_THRESHOLD = 0.5f;  // Speed at which foot IK is fully enabled
+
+    float footIKWeight = 0.0f;
+    if (movementSpeed > FULL_IK_THRESHOLD) {
+        footIKWeight = 1.0f;
+    } else if (movementSpeed > IDLE_THRESHOLD) {
+        // Smooth transition between idle and moving
+        footIKWeight = (movementSpeed - IDLE_THRESHOLD) / (FULL_IK_THRESHOLD - IDLE_THRESHOLD);
+    }
+
+    // Apply the calculated weight to foot placement IK
+    if (auto* leftFoot = ikSystem.getFootPlacement("LeftFoot")) {
+        leftFoot->weight = footIKWeight;
+    }
+    if (auto* rightFoot = ikSystem.getFootPlacement("RightFoot")) {
+        rightFoot->weight = footIKWeight;
+    }
+
     // Apply IK after animation sampling
     // Pass world transform so foot placement can query terrain in world space
     if (ikSystem.hasEnabledChains()) {
