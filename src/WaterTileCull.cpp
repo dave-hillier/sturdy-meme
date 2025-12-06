@@ -61,7 +61,8 @@ void WaterTileCull::destroy() {
         tileBuffer = VK_NULL_HANDLE;
     }
     if (counterBuffer != VK_NULL_HANDLE) {
-        vmaUnmapMemory(allocator, counterAllocation);
+        // Note: Do NOT call vmaUnmapMemory here - the buffer was created with
+        // VMA_ALLOCATION_CREATE_MAPPED_BIT, so VMA manages the mapping automatically
         vmaDestroyBuffer(allocator, counterBuffer, counterAllocation);
         counterBuffer = VK_NULL_HANDLE;
         counterMapped = nullptr;
