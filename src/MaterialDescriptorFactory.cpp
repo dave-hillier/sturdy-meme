@@ -57,19 +57,22 @@ void MaterialDescriptorFactory::writeDescriptorSet(
         // Binding 3: Normal map
         .writeImage(3, material.normalView, material.normalSampler);
 
-    // Optional PBR texture bindings (13-16)
-    if (material.roughnessView != VK_NULL_HANDLE) {
-        writer.writeImage(13, material.roughnessView, material.roughnessSampler);
-    }
-    if (material.metallicView != VK_NULL_HANDLE) {
-        writer.writeImage(14, material.metallicView, material.metallicSampler);
-    }
-    if (material.aoView != VK_NULL_HANDLE) {
-        writer.writeImage(15, material.aoView, material.aoSampler);
-    }
-    if (material.heightView != VK_NULL_HANDLE) {
-        writer.writeImage(16, material.heightView, material.heightSampler);
-    }
+    // PBR texture bindings (13-16) - always write, using placeholder if no texture provided
+    VkImageView placeholderView = common.placeholderTextureView;
+    VkSampler placeholderSampler = common.placeholderTextureSampler;
+
+    writer.writeImage(13,
+        material.roughnessView != VK_NULL_HANDLE ? material.roughnessView : placeholderView,
+        material.roughnessSampler != VK_NULL_HANDLE ? material.roughnessSampler : placeholderSampler);
+    writer.writeImage(14,
+        material.metallicView != VK_NULL_HANDLE ? material.metallicView : placeholderView,
+        material.metallicSampler != VK_NULL_HANDLE ? material.metallicSampler : placeholderSampler);
+    writer.writeImage(15,
+        material.aoView != VK_NULL_HANDLE ? material.aoView : placeholderView,
+        material.aoSampler != VK_NULL_HANDLE ? material.aoSampler : placeholderSampler);
+    writer.writeImage(16,
+        material.heightView != VK_NULL_HANDLE ? material.heightView : placeholderView,
+        material.heightSampler != VK_NULL_HANDLE ? material.heightSampler : placeholderSampler);
 
     writer.update();
 }
@@ -93,19 +96,22 @@ void MaterialDescriptorFactory::writeSkinnedDescriptorSet(
         writer.writeBuffer(12, common.boneMatricesBuffer, 0, common.boneMatricesBufferSize);
     }
 
-    // Optional PBR texture bindings (13-16)
-    if (material.roughnessView != VK_NULL_HANDLE) {
-        writer.writeImage(13, material.roughnessView, material.roughnessSampler);
-    }
-    if (material.metallicView != VK_NULL_HANDLE) {
-        writer.writeImage(14, material.metallicView, material.metallicSampler);
-    }
-    if (material.aoView != VK_NULL_HANDLE) {
-        writer.writeImage(15, material.aoView, material.aoSampler);
-    }
-    if (material.heightView != VK_NULL_HANDLE) {
-        writer.writeImage(16, material.heightView, material.heightSampler);
-    }
+    // PBR texture bindings (13-16) - always write, using placeholder if no texture provided
+    VkImageView placeholderView = common.placeholderTextureView;
+    VkSampler placeholderSampler = common.placeholderTextureSampler;
+
+    writer.writeImage(13,
+        material.roughnessView != VK_NULL_HANDLE ? material.roughnessView : placeholderView,
+        material.roughnessSampler != VK_NULL_HANDLE ? material.roughnessSampler : placeholderSampler);
+    writer.writeImage(14,
+        material.metallicView != VK_NULL_HANDLE ? material.metallicView : placeholderView,
+        material.metallicSampler != VK_NULL_HANDLE ? material.metallicSampler : placeholderSampler);
+    writer.writeImage(15,
+        material.aoView != VK_NULL_HANDLE ? material.aoView : placeholderView,
+        material.aoSampler != VK_NULL_HANDLE ? material.aoSampler : placeholderSampler);
+    writer.writeImage(16,
+        material.heightView != VK_NULL_HANDLE ? material.heightView : placeholderView,
+        material.heightSampler != VK_NULL_HANDLE ? material.heightSampler : placeholderSampler);
 
     writer.update();
 }
