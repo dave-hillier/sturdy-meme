@@ -4,6 +4,7 @@
 #include "BindingBuilder.h"
 #include "GraphicsPipelineFactory.h"
 #include "MaterialDescriptorFactory.h"
+#include "Bindings.h"
 #include <SDL3/SDL_vulkan.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <stdexcept>
@@ -283,6 +284,9 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
             common.spotShadowSampler = shadowSystem.getSpotShadowSampler();
             common.snowMaskView = snowMaskSystem.getSnowMaskView();
             common.snowMaskSampler = snowMaskSystem.getSnowMaskSampler();
+            // Placeholder texture for unused PBR bindings (13-16)
+            common.placeholderTextureView = sceneManager.getSceneBuilder().getWhiteTexture().getImageView();
+            common.placeholderTextureSampler = sceneManager.getSceneBuilder().getWhiteTexture().getSampler();
 
             MaterialDescriptorFactory::MaterialTextures mat{};
             mat.diffuseView = rockSystem.getRockTexture().getImageView();
@@ -1096,6 +1100,7 @@ bool Renderer::createDescriptorSetLayout() {
     // 9: Cloud shadow map
     // 10: Snow UBO
     // 11: Cloud shadow UBO
+    // 13-16: PBR textures (roughness, metallic, AO, height)
     descriptorSetLayout = DescriptorManager::LayoutBuilder(device)
         .addUniformBuffer(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)  // 0: UBO
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 1: diffuse
@@ -1109,6 +1114,10 @@ bool Renderer::createDescriptorSetLayout() {
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 9: cloud shadow map
         .addUniformBuffer(VK_SHADER_STAGE_FRAGMENT_BIT)         // 10: Snow UBO
         .addUniformBuffer(VK_SHADER_STAGE_FRAGMENT_BIT)         // 11: Cloud shadow UBO
+        .addBinding(Bindings::ROUGHNESS_MAP, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)  // 13: roughness
+        .addBinding(Bindings::METALLIC_MAP, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)   // 14: metallic
+        .addBinding(Bindings::AO_MAP, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)         // 15: AO
+        .addBinding(Bindings::HEIGHT_MAP, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)     // 16: height
         .build();
 
     if (descriptorSetLayout == VK_NULL_HANDLE) {
@@ -1365,6 +1374,9 @@ bool Renderer::createDescriptorSets() {
         common.cloudShadowUboBuffer = cloudShadowBuffers[i];
         common.cloudShadowUboBufferSize = sizeof(CloudShadowUBO);
         // Cloud shadow texture is added later in init() after cloudShadowSystem is initialized
+        // Placeholder texture for unused PBR bindings (13-16)
+        common.placeholderTextureView = sceneManager.getSceneBuilder().getWhiteTexture().getImageView();
+        common.placeholderTextureSampler = sceneManager.getSceneBuilder().getWhiteTexture().getSampler();
 
         // Crate material
         {
@@ -2354,6 +2366,7 @@ bool Renderer::createSkinnedDescriptorSetLayout() {
     // 10: Snow UBO
     // 11: Cloud shadow UBO
     // 12: Bone matrices UBO
+    // 13-16: PBR textures (roughness, metallic, AO, height)
     skinnedDescriptorSetLayout = DescriptorManager::LayoutBuilder(device)
         .addUniformBuffer(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)  // 0: UBO
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 1: diffuse
@@ -2368,6 +2381,10 @@ bool Renderer::createSkinnedDescriptorSetLayout() {
         .addUniformBuffer(VK_SHADER_STAGE_FRAGMENT_BIT)         // 10: snow UBO
         .addUniformBuffer(VK_SHADER_STAGE_FRAGMENT_BIT)         // 11: cloud shadow UBO
         .addUniformBuffer(VK_SHADER_STAGE_VERTEX_BIT)           // 12: bone matrices
+        .addBinding(Bindings::ROUGHNESS_MAP, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)  // 13: roughness
+        .addBinding(Bindings::METALLIC_MAP, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)   // 14: metallic
+        .addBinding(Bindings::AO_MAP, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)         // 15: AO
+        .addBinding(Bindings::HEIGHT_MAP, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)     // 16: height
         .build();
 
     if (skinnedDescriptorSetLayout == VK_NULL_HANDLE) {
@@ -2509,6 +2526,9 @@ bool Renderer::createSkinnedDescriptorSets() {
         // Bone matrices (binding 12)
         common.boneMatricesBuffer = boneMatricesBuffers[i];
         common.boneMatricesBufferSize = sizeof(BoneMatricesUBO);
+        // Placeholder texture for unused PBR bindings (13-16)
+        common.placeholderTextureView = whiteTexture.getImageView();
+        common.placeholderTextureSampler = whiteTexture.getSampler();
 
         MaterialDescriptorFactory::MaterialTextures mat{};
         mat.diffuseView = whiteTexture.getImageView();
