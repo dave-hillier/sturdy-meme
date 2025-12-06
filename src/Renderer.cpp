@@ -4,6 +4,7 @@
 #include "BindingBuilder.h"
 #include "GraphicsPipelineFactory.h"
 #include "MaterialDescriptorFactory.h"
+#include "Bindings.h"
 #include <SDL3/SDL_vulkan.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <stdexcept>
@@ -1050,6 +1051,10 @@ bool Renderer::createDescriptorSetLayout() {
     // 9: Cloud shadow map
     // 10: Snow UBO
     // 11: Cloud shadow UBO
+    // 13: Roughness map (PBR)
+    // 14: Metallic map (PBR)
+    // 15: AO map (PBR)
+    // 16: Height map (PBR)
     descriptorSetLayout = DescriptorManager::LayoutBuilder(device)
         .addUniformBuffer(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)  // 0: UBO
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 1: diffuse
@@ -1063,6 +1068,14 @@ bool Renderer::createDescriptorSetLayout() {
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 9: cloud shadow map
         .addUniformBuffer(VK_SHADER_STAGE_FRAGMENT_BIT)         // 10: Snow UBO
         .addUniformBuffer(VK_SHADER_STAGE_FRAGMENT_BIT)         // 11: Cloud shadow UBO
+        .addBinding(BINDING_ROUGHNESS_MAP, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                    VK_SHADER_STAGE_FRAGMENT_BIT)               // 13: Roughness map
+        .addBinding(BINDING_METALLIC_MAP, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                    VK_SHADER_STAGE_FRAGMENT_BIT)               // 14: Metallic map
+        .addBinding(BINDING_AO_MAP, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                    VK_SHADER_STAGE_FRAGMENT_BIT)               // 15: AO map
+        .addBinding(BINDING_HEIGHT_MAP, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                    VK_SHADER_STAGE_FRAGMENT_BIT)               // 16: Height map
         .build();
 
     if (descriptorSetLayout == VK_NULL_HANDLE) {
@@ -2271,6 +2284,10 @@ bool Renderer::createSkinnedDescriptorSetLayout() {
     // 10: Snow UBO
     // 11: Cloud shadow UBO
     // 12: Bone matrices UBO
+    // 13: Roughness map (PBR)
+    // 14: Metallic map (PBR)
+    // 15: AO map (PBR)
+    // 16: Height map (PBR)
     skinnedDescriptorSetLayout = DescriptorManager::LayoutBuilder(device)
         .addUniformBuffer(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)  // 0: UBO
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 1: diffuse
@@ -2285,6 +2302,14 @@ bool Renderer::createSkinnedDescriptorSetLayout() {
         .addUniformBuffer(VK_SHADER_STAGE_FRAGMENT_BIT)         // 10: snow UBO
         .addUniformBuffer(VK_SHADER_STAGE_FRAGMENT_BIT)         // 11: cloud shadow UBO
         .addUniformBuffer(VK_SHADER_STAGE_VERTEX_BIT)           // 12: bone matrices
+        .addBinding(BINDING_ROUGHNESS_MAP, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                    VK_SHADER_STAGE_FRAGMENT_BIT)               // 13: Roughness map
+        .addBinding(BINDING_METALLIC_MAP, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                    VK_SHADER_STAGE_FRAGMENT_BIT)               // 14: Metallic map
+        .addBinding(BINDING_AO_MAP, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                    VK_SHADER_STAGE_FRAGMENT_BIT)               // 15: AO map
+        .addBinding(BINDING_HEIGHT_MAP, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                    VK_SHADER_STAGE_FRAGMENT_BIT)               // 16: Height map
         .build();
 
     if (skinnedDescriptorSetLayout == VK_NULL_HANDLE) {
