@@ -728,6 +728,7 @@ if(SHADER_COMPILE_CMD)
             ${CMAKE_CURRENT_SOURCE_DIR}/generated/UBOs.h
             ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.vert.spv
             ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.frag.spv
+            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.frag.spv
             ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.vert.spv
             ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.comp.spv
             ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.frag.spv
