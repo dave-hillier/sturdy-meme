@@ -20,7 +20,7 @@ struct EnvironmentSettings {
     float grassMaxDisplacement = 1.0f;
 
     // Snow accumulation parameters
-    float snowAmount = 0.0f;                             // Global snow intensity (0-1)
+    float snowAmount = 0.8f;                             // Global snow intensity (0-1)
     glm::vec3 snowColor = glm::vec3(0.95f, 0.97f, 1.0f); // Slightly blue-white snow
     float snowRoughness = 0.7f;                          // Snow surface roughness
     float snowTexScale = 0.1f;                           // World-space snow texture scale

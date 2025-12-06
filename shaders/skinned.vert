@@ -36,12 +36,18 @@ void main() {
         boneData.bones[inBoneIndices.w] * inBoneWeights.w;
 
     vec4 skinnedPosition = skinMatrix * vec4(inPosition, 1.0);
-    vec3 skinnedNormal = mat3(skinMatrix) * inNormal;
-    vec3 skinnedTangent = mat3(skinMatrix) * inTangent.xyz;
+
+    // For proper normal transformation with skinning, we need to use the inverse-transpose
+    // of the 3x3 rotation/scale portion. Since bone matrices can include scale from animation
+    // blending (linear blend of matrices is not orthonormal), we compute the proper normal matrix.
+    mat3 skinMatrix3 = mat3(skinMatrix);
+    mat3 normalMatrix = transpose(inverse(skinMatrix3));
+    vec3 skinnedNormal = normalize(normalMatrix * inNormal);
+    vec3 skinnedTangent = normalize(skinMatrix3 * inTangent.xyz);
 
     vec4 worldPos = material.model * skinnedPosition;
     gl_Position = ubo.proj * ubo.view * worldPos;
-    fragNormal = mat3(material.model) * skinnedNormal;
+    fragNormal = normalize(mat3(material.model) * skinnedNormal);
     fragTexCoord = inTexCoord;
     fragWorldPos = worldPos.xyz;
     // Transform tangent direction by model matrix, preserve handedness in w
