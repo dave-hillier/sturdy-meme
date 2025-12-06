@@ -2,6 +2,7 @@
 #include "GLTFLoader.h"
 #include "FBXLoader.h"
 #include "PhysicsSystem.h"
+#include "BoneMask.h"
 #include <SDL3/SDL_log.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
@@ -127,6 +128,12 @@ bool AnimatedCharacter::load(const std::string& path, VmaAllocator allocator, Vk
             SDL_Log("AnimatedCharacter: State machine enabled with %s locomotion animations",
                     (walkClip && runClip) ? "full" : "partial");
         }
+
+        // Initialize layer controller with skeleton
+        layerController.initialize(skeleton);
+
+        // Setup locomotion blend space if we have the animations
+        setupLocomotionBlendSpace();
     } else {
         SDL_Log("AnimatedCharacter: Loaded but no animations found");
     }
@@ -259,7 +266,11 @@ void AnimatedCharacter::update(float deltaTime, VmaAllocator allocator, VkDevice
         skeleton.joints[i].localTransform = bindPoseLocalTransforms[i];
     }
 
-    if (useStateMachine) {
+    if (useLayerController) {
+        // Use layer controller for advanced layer-based blending
+        layerController.update(deltaTime);
+        layerController.applyToSkeleton(skeleton);
+    } else if (useStateMachine) {
         // Use state machine for animation selection and blending
         stateMachine.update(deltaTime, movementSpeed, isGrounded, isJumping);
         stateMachine.applyToSkeleton(skeleton);
@@ -475,4 +486,61 @@ SkeletonDebugData AnimatedCharacter::getSkeletonDebugData(const glm::mat4& world
     }
 
     return data;
+}
+
+void AnimatedCharacter::setUseLayerController(bool use) {
+    useLayerController = use;
+    if (use) {
+        useStateMachine = false;
+        SDL_Log("AnimatedCharacter: Switched to layer controller mode");
+    } else {
+        SDL_Log("AnimatedCharacter: Switched to state machine mode");
+    }
+}
+
+void AnimatedCharacter::setupLocomotionBlendSpace() {
+    locomotionBlendSpace.clear();
+
+    // Find locomotion animations by name
+    const AnimationClip* idleClip = nullptr;
+    const AnimationClip* walkClip = nullptr;
+    const AnimationClip* runClip = nullptr;
+
+    for (const auto& clip : animations) {
+        std::string lowerName = clip.name;
+        for (char& c : lowerName) c = std::tolower(c);
+
+        if (lowerName.find("idle") != std::string::npos) {
+            idleClip = &clip;
+        } else if (lowerName.find("walk") != std::string::npos) {
+            walkClip = &clip;
+        } else if (lowerName.find("run") != std::string::npos) {
+            runClip = &clip;
+        }
+    }
+
+    // Build blend space based on root motion speed
+    // Position 0 = idle, walk speed = walk, run speed = run
+    if (idleClip) {
+        locomotionBlendSpace.addSample(0.0f, idleClip);
+    }
+
+    if (walkClip) {
+        float walkSpeed = walkClip->getRootMotionSpeed();
+        if (walkSpeed <= 0.0f) walkSpeed = 1.5f;  // Default walk speed
+        locomotionBlendSpace.addSample(walkSpeed, walkClip);
+    }
+
+    if (runClip) {
+        float runSpeed = runClip->getRootMotionSpeed();
+        if (runSpeed <= 0.0f) runSpeed = 4.0f;  // Default run speed
+        locomotionBlendSpace.addSample(runSpeed, runClip);
+    }
+
+    locomotionBlendSpace.enableTimeSync(true);
+
+    if (locomotionBlendSpace.getSampleCount() > 0) {
+        SDL_Log("AnimatedCharacter: Locomotion blend space set up with %zu samples",
+                locomotionBlendSpace.getSampleCount());
+    }
 }
