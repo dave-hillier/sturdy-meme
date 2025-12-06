@@ -2,8 +2,7 @@
 #include "ShaderLoader.h"
 #include "PipelineBuilder.h"
 #include "BindingBuilder.h"
-#include "SnowUBO.h"
-#include "CloudShadowUBO.h"
+#include "UBOs.h"
 #include <SDL3/SDL.h>
 #include <cstring>
 #include <array>

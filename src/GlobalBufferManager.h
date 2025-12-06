@@ -9,8 +9,6 @@
 #include "BufferUtils.h"
 #include "Light.h"
 #include "UBOs.h"
-#include "SnowUBO.h"
-#include "CloudShadowUBO.h"
 
 /**
  * GlobalBufferManager - Manages per-frame shared GPU buffers
