@@ -220,6 +220,7 @@ void AnimatedCharacter::playAnimation(const std::string& name) {
 
 void AnimatedCharacter::playAnimation(size_t index) {
     if (index < animations.size()) {
+        currentAnimationIndex = index;
         animationPlayer.setAnimation(&animations[index]);
         SDL_Log("AnimatedCharacter: Now playing '%s'", animations[index].name.c_str());
     }
@@ -240,10 +241,8 @@ void AnimatedCharacter::startJump(const glm::vec3& startPos, const glm::vec3& ve
 }
 
 const AnimationClip* AnimatedCharacter::getCurrentAnimation() const {
-    for (const auto& clip : animations) {
-        if (animationPlayer.getDuration() == clip.duration) {
-            return &clip;
-        }
+    if (currentAnimationIndex < animations.size()) {
+        return &animations[currentAnimationIndex];
     }
     return nullptr;
 }

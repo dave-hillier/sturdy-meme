@@ -345,9 +345,22 @@ void processAnimations(std::vector<AnimationClip>& animations,
             // Normalize scale keyframes to unit scale
             // Since we normalize skeleton bone scales to 1.0, animation scale keyframes
             // that were set to 100 (for cm units) should also be normalized.
-            for (auto& value : channel.scale.values) {
-                if (value.x > 10.0f || value.y > 10.0f || value.z > 10.0f) {
-                    value = value * settings.scaleFactor;
+            // We detect source-unit scale values by checking if they're approximately
+            // equal to the inverse of the scale factor (e.g., ~100 for cm->m conversion).
+            // Intentional scale animations (like squash/stretch between 0.5 and 2.0) are preserved.
+            if (settings.scaleFactor < 1.0f && settings.scaleFactor > 0.0f) {
+                float expectedSourceUnitScale = 1.0f / settings.scaleFactor;
+                float tolerance = expectedSourceUnitScale * 0.5f;  // Allow 50% tolerance
+                for (auto& value : channel.scale.values) {
+                    // Check if this looks like a source-unit scale value
+                    // (close to expectedSourceUnitScale, e.g., ~100 for cm models)
+                    bool looksLikeSourceUnit =
+                        (std::abs(value.x - expectedSourceUnitScale) < tolerance) ||
+                        (std::abs(value.y - expectedSourceUnitScale) < tolerance) ||
+                        (std::abs(value.z - expectedSourceUnitScale) < tolerance);
+                    if (looksLikeSourceUnit) {
+                        value = value * settings.scaleFactor;
+                    }
                 }
             }
         }

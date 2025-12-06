@@ -90,6 +90,9 @@ public:
     IKSystem& getIKSystem() { return ikSystem; }
     const IKSystem& getIKSystem() const { return ikSystem; }
 
+    // Reset foot IK locks (call when teleporting or significantly repositioning the character)
+    void resetFootLocks() { ikSystem.resetFootLocks(); }
+
     // Setup common IK chains (arms, legs) by searching for standard bone names
     void setupDefaultIKChains();
 
@@ -114,6 +117,7 @@ private:
     AnimationPlayer animationPlayer;
     AnimationStateMachine stateMachine;
     bool useStateMachine = false;  // Set true after state machine is initialized
+    size_t currentAnimationIndex = 0;  // Track current animation by index, not duration
 
     // IK system for procedural adjustments
     IKSystem ikSystem;

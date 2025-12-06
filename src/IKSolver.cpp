@@ -106,15 +106,61 @@ glm::quat TwoBoneIKSolver::applyJointLimits(const glm::quat& rotation, const Joi
         return rotation;
     }
 
-    // Convert to euler angles
-    glm::vec3 euler = glm::eulerAngles(rotation);
+    // Use swing-twist decomposition to avoid gimbal lock issues
+    // This is more robust than euler angles for joint limits
+    //
+    // Decompose rotation into twist (around primary axis, typically Y for elbows/knees)
+    // and swing (rotation perpendicular to twist axis)
+    glm::vec3 twistAxis = glm::vec3(0.0f, 1.0f, 0.0f);  // Primary rotation axis
 
-    // Clamp each axis
-    euler.x = glm::clamp(euler.x, limits.minAngles.x, limits.maxAngles.x);
-    euler.y = glm::clamp(euler.y, limits.minAngles.y, limits.maxAngles.y);
-    euler.z = glm::clamp(euler.z, limits.minAngles.z, limits.maxAngles.z);
+    // Project rotation axis onto twist axis to get twist component
+    glm::vec3 rotAxis = glm::axis(rotation);
+    float rotAngle = glm::angle(rotation);
 
-    return glm::quat(euler);
+    // Handle identity quaternion
+    if (rotAngle < 0.0001f) {
+        return rotation;
+    }
+
+    // Twist component: rotation around twist axis
+    float twistAmount = glm::dot(rotAxis, twistAxis) * rotAngle;
+    glm::quat twist = glm::angleAxis(twistAmount, twistAxis);
+
+    // Swing component: remaining rotation
+    glm::quat swing = rotation * glm::inverse(twist);
+
+    // Clamp twist angle (Y rotation - typically the main bend axis)
+    float clampedTwist = glm::clamp(twistAmount, limits.minAngles.y, limits.maxAngles.y);
+    glm::quat clampedTwistQuat = glm::angleAxis(clampedTwist, twistAxis);
+
+    // Clamp swing using cone limit (combined X and Z limits)
+    // Extract swing angle and axis
+    float swingAngle = glm::angle(swing);
+    if (swingAngle > 0.0001f) {
+        glm::vec3 swingAxis = glm::axis(swing);
+
+        // Calculate limit based on swing direction
+        // Use elliptical cone: limit varies based on swing direction
+        float xComponent = std::abs(swingAxis.x);
+        float zComponent = std::abs(swingAxis.z);
+        float maxSwingX = std::max(std::abs(limits.minAngles.x), std::abs(limits.maxAngles.x));
+        float maxSwingZ = std::max(std::abs(limits.minAngles.z), std::abs(limits.maxAngles.z));
+
+        // Elliptical interpolation of limit
+        float maxSwing = maxSwingX;
+        if (xComponent + zComponent > 0.0001f) {
+            float t = zComponent / (xComponent + zComponent);
+            maxSwing = glm::mix(maxSwingX, maxSwingZ, t);
+        }
+
+        // Clamp swing angle
+        if (swingAngle > maxSwing) {
+            swing = glm::angleAxis(maxSwing, swingAxis);
+        }
+    }
+
+    // Recombine: swing * twist
+    return glm::normalize(swing * clampedTwistQuat);
 }
 
 bool TwoBoneIKSolver::solve(
@@ -634,14 +680,37 @@ glm::quat LookAtIKSolver::clampLookRotation(
     float maxYaw,
     float maxPitch
 ) {
-    // Convert to euler angles
-    glm::vec3 euler = glm::eulerAngles(rotation);
+    // Use swing-twist decomposition to avoid gimbal lock
+    // Twist = yaw (rotation around Y axis)
+    // Swing = pitch/roll (rotation perpendicular to Y)
+    glm::vec3 yawAxis = glm::vec3(0.0f, 1.0f, 0.0f);
 
-    // Clamp yaw (y-axis rotation) and pitch (x-axis rotation)
-    euler.y = glm::clamp(euler.y, -maxYaw, maxYaw);
-    euler.x = glm::clamp(euler.x, -maxPitch, maxPitch);
+    float rotAngle = glm::angle(rotation);
+    if (rotAngle < 0.0001f) {
+        return rotation;
+    }
 
-    return glm::quat(euler);
+    glm::vec3 rotAxis = glm::axis(rotation);
+
+    // Extract yaw (twist around Y)
+    float yawAmount = glm::dot(rotAxis, yawAxis) * rotAngle;
+    glm::quat yaw = glm::angleAxis(yawAmount, yawAxis);
+
+    // Extract pitch/roll (swing)
+    glm::quat swing = rotation * glm::inverse(yaw);
+
+    // Clamp yaw
+    float clampedYaw = glm::clamp(yawAmount, -maxYaw, maxYaw);
+    glm::quat clampedYawQuat = glm::angleAxis(clampedYaw, yawAxis);
+
+    // Clamp pitch (swing angle, primarily around X axis for look-at)
+    float swingAngle = glm::angle(swing);
+    if (swingAngle > maxPitch) {
+        glm::vec3 swingAxis = glm::axis(swing);
+        swing = glm::angleAxis(maxPitch, swingAxis);
+    }
+
+    return glm::normalize(swing * clampedYawQuat);
 }
 
 void LookAtIKSolver::applyBoneRotation(
@@ -1068,6 +1137,15 @@ void IKSystem::setFootPlacementWeight(const std::string& name, float weight) {
     }
 }
 
+void IKSystem::resetFootLocks() {
+    for (auto& nfp : footPlacements) {
+        nfp.foot.isLocked = false;
+        nfp.foot.lockBlend = 0.0f;
+        nfp.foot.lockedWorldPosition = glm::vec3(0.0f);
+        nfp.foot.currentFootTarget = glm::vec3(0.0f);
+    }
+}
+
 // ============================================================================
 // IKSystem - Updated Solve Methods
 // ============================================================================
@@ -1359,9 +1437,13 @@ void ClimbingIKSolver::solve(
 
             // Orient hand to grip
             if (climbing.leftHandBoneIndex >= 0) {
+                int32_t parentIdx = skeleton.joints[climbing.leftHandBoneIndex].parentIndex;
+                glm::mat4 parentGlobal = (parentIdx >= 0 && static_cast<size_t>(parentIdx) < globalTransforms.size())
+                    ? globalTransforms[parentIdx]
+                    : glm::mat4(1.0f);
                 orientHandToHold(skeleton.joints[climbing.leftHandBoneIndex],
                                 climbing.leftHandHold,
-                                globalTransforms[skeleton.joints[climbing.leftHandBoneIndex].parentIndex]);
+                                parentGlobal);
             }
         }
 
@@ -1373,9 +1455,13 @@ void ClimbingIKSolver::solve(
             TwoBoneIKSolver::solveBlended(skeleton, armChains[1], globalTransforms, armChains[1].weight);
 
             if (climbing.rightHandBoneIndex >= 0) {
+                int32_t parentIdx = skeleton.joints[climbing.rightHandBoneIndex].parentIndex;
+                glm::mat4 parentGlobal = (parentIdx >= 0 && static_cast<size_t>(parentIdx) < globalTransforms.size())
+                    ? globalTransforms[parentIdx]
+                    : glm::mat4(1.0f);
                 orientHandToHold(skeleton.joints[climbing.rightHandBoneIndex],
                                 climbing.rightHandHold,
-                                globalTransforms[skeleton.joints[climbing.rightHandBoneIndex].parentIndex]);
+                                parentGlobal);
             }
         }
     }

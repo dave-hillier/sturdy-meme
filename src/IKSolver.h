@@ -566,6 +566,9 @@ public:
     void setFootPlacementEnabled(const std::string& name, bool enabled);
     void setFootPlacementWeight(const std::string& name, float weight);
 
+    // Reset all foot locks (call when character is teleported or position changes significantly)
+    void resetFootLocks();
+
     // ========== Straddling IK (stepping on boxes) ==========
 
     // Setup straddling by bone names
