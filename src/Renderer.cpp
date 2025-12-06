@@ -2014,6 +2014,8 @@ UniformBufferObject Renderer::buildUniformBufferData(const Camera& camera, const
     ubo.debugCascades = showCascadeDebug ? 1.0f : 0.0f;
     ubo.julianDay = static_cast<float>(lighting.julianDay);
     ubo.cloudStyle = useParaboloidClouds ? 1.0f : 0.0f;
+    ubo.cameraNear = camera.getNearPlane();
+    ubo.cameraFar = camera.getFarPlane();
 
     // Copy atmosphere parameters from AtmosphereLUTSystem for use in atmosphere_common.glsl
     const auto& atmosParams = atmosphereLUTSystem.getAtmosphereParams();

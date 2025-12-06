@@ -714,10 +714,10 @@ void main() {
     {
         // Calculate linear depth of water surface
         vec4 clipPos = ubo.proj * ubo.view * vec4(fragWorldPos, 1.0);
-        float waterLinearDepth = linearizeDepth(clipPos.z / clipPos.w * 0.5 + 0.5, 0.1, 1000.0);
+        float waterLinearDepth = linearizeDepth(clipPos.z / clipPos.w * 0.5 + 0.5, ubo.cameraNear, ubo.cameraFar);
 
         // Get scene depth and calculate soft edge
-        float sceneLinearDepth = getSceneDepth(screenUV, 0.1, 1000.0);
+        float sceneLinearDepth = getSceneDepth(screenUV, ubo.cameraNear, ubo.cameraFar);
         float depthDiff = sceneLinearDepth - waterLinearDepth;
 
         // Soft edge factor: 0 at intersection, 1 away from geometry

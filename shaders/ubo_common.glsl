@@ -37,8 +37,8 @@ layout(binding = UBO_BINDING) uniform UniformBufferObject {
     float debugCascades;       // 1.0 = show cascade colors
     float julianDay;           // Julian day for sidereal rotation
     float cloudStyle;
-    float uboPad1;             // Padding - was vec3 but vec3 causes std140 alignment mismatch
-    float uboPad2;
+    float cameraNear;          // Camera near plane for linearizing depth
+    float cameraFar;           // Camera far plane for linearizing depth
     float uboPad3;
 
     // Atmosphere parameters (from UI controls) - used by atmosphere_common.glsl
