@@ -13,10 +13,9 @@ namespace fs = std::filesystem;
 
 // UBO struct names that are manually defined in separate header files
 // These modular UBOs are split from the main UniformBufferObject for cleaner organization
-// The manual definitions are used instead of auto-generated to support bootstrapping
+// All UBOs are now auto-generated from SPIR-V reflection
 const std::set<std::string> MANUALLY_DEFINED_UBOS = {
-    "SnowUBO",           // Defined in src/SnowUBO.h (binding 10)
-    "CloudShadowUBO",    // Defined in src/CloudShadowUBO.h (binding 11)
+    // All UBOs are now auto-generated - no manual definitions needed
 };
 
 struct UBOMember {
