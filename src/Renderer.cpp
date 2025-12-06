@@ -2032,6 +2032,10 @@ UniformBufferObject Renderer::buildUniformBufferData(const Camera& camera, const
                                           froxelSystem.getLayerDensity(),
                                           0.0f, 0.0f);
 
+    // Cloud parameters for sky.frag and cloud systems
+    ubo.cloudCoverage = cloudCoverage;
+    ubo.cloudDensity = cloudDensity;
+
     return ubo;
 }
 

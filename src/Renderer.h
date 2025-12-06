@@ -125,6 +125,21 @@ public:
     void toggleCloudStyle() { useParaboloidClouds = !useParaboloidClouds; }
     bool isUsingParaboloidClouds() const { return useParaboloidClouds; }
 
+    // Cloud coverage and density (synced to sky shader, cloud shadows, and cloud map LUT)
+    void setCloudCoverage(float coverage) {
+        cloudCoverage = glm::clamp(coverage, 0.0f, 1.0f);
+        cloudShadowSystem.setCloudCoverage(cloudCoverage);
+        atmosphereLUTSystem.setCloudCoverage(cloudCoverage);
+    }
+    float getCloudCoverage() const { return cloudCoverage; }
+
+    void setCloudDensity(float density) {
+        cloudDensity = glm::clamp(density, 0.0f, 1.0f);
+        cloudShadowSystem.setCloudDensity(cloudDensity);
+        atmosphereLUTSystem.setCloudDensity(cloudDensity);
+    }
+    float getCloudDensity() const { return cloudDensity; }
+
     // Cloud shadow control
     void setCloudShadowEnabled(bool enabled) { cloudShadowSystem.setEnabled(enabled); }
     bool isCloudShadowEnabled() const { return cloudShadowSystem.isEnabled(); }
@@ -436,6 +451,10 @@ private:
     bool showSnowDepthDebug = false;       // true = show snow depth heat map overlay
     bool useParaboloidClouds = true;       // true = paraboloid LUT hybrid, false = procedural
     bool hdrEnabled = true;                // true = HDR tonemapping/bloom, false = bypass
+
+    // Cloud parameters (synced to UBO, cloud shadows, and cloud map LUT)
+    float cloudCoverage = 0.5f;            // 0-1 cloud coverage amount
+    float cloudDensity = 0.3f;             // Base density multiplier
     bool framebufferResized = false;       // true = window resized, need to recreate swapchain
 
     // Player position for grass displacement
