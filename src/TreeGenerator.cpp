@@ -215,8 +215,6 @@ void TreeGenerator::generateBranchGeometry(const BranchSegment& segment,
             // UV coordinates with texture scaling
             // U wraps around circumference, V runs along branch length
             float u = static_cast<float>(i) / static_cast<float>(radialSegments);
-            // Alternate V between 0 and 1 for adjacent rings to improve seaming (ez-tree style)
-            float v = (ring % 2 == 0) ? 0.0f : 1.0f;
             // Scale UVs for texture tiling
             glm::vec2 uv(u * texScale.x, t * length * texScale.y * 0.1f);
 
@@ -785,7 +783,7 @@ void TreeGenerator::generateSpaceColonisation(const TreeParameters& params) {
 
     // Create initial trunk nodes
     glm::vec3 trunkBase(0.0f, 0.0f, 0.0f);
-    int trunkSegmentCount = static_cast<int>(scParams.trunkSegments);
+    int trunkSegmentCount = scParams.trunkSegments;
     float segmentHeight = scParams.trunkHeight / static_cast<float>(trunkSegmentCount);
 
     for (int i = 0; i <= trunkSegmentCount; ++i) {
@@ -998,13 +996,14 @@ void TreeGenerator::generateCurvedTube(const std::vector<glm::vec3>& points,
             glm::vec3 pos = center + offset;
             glm::vec3 normal = glm::normalize(offset);
 
-            glm::vec2 uv(static_cast<float>(i) / static_cast<float>(radialSegments), t);
+            // UV coordinates with texture scaling (matching generateBranchGeometry)
+            float u = static_cast<float>(i) / static_cast<float>(radialSegments);
+            glm::vec2 uv(u * params.barkTextureScale.x, t * params.barkTextureScale.y);
             glm::vec3 tangentDir = glm::normalize(-right * sinA + up * cosA);
             glm::vec4 tangent4(tangentDir, 1.0f);
 
-            // Color based on level
-            float levelColor = 1.0f - static_cast<float>(level) / static_cast<float>(params.branchLevels + 1);
-            glm::vec4 color(0.4f * levelColor + 0.2f, 0.25f * levelColor + 0.1f, 0.1f, 1.0f);
+            // Color: apply bark tint (shader will multiply with texture)
+            glm::vec4 color(params.barkTint, 1.0f);
 
             branchVertices.push_back({pos, normal, uv, tangent4, color});
         }
