@@ -1782,6 +1782,21 @@ void Renderer::waitIdle() {
     vulkanContext.waitIdle();
 }
 
+void Renderer::waitForPreviousFrame() {
+    // Wait for the previous frame's fence to ensure GPU is done with resources
+    // we might be about to destroy/update.
+    //
+    // With double-buffering (MAX_FRAMES_IN_FLIGHT=2):
+    // - Frame N uses fence[N % 2]
+    // - Before updating meshes for frame N, we need frame N-1's GPU work complete
+    // - Previous frame's fence is fence[(N-1) % 2] = fence[(currentFrame + 1) % 2]
+    //
+    // This prevents race conditions where we destroy mesh buffers while the GPU
+    // is still reading them from the previous frame's commands.
+    uint32_t previousFrame = (currentFrame + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT;
+    vkWaitForFences(vulkanContext.getDevice(), 1, &inFlightFences[previousFrame], VK_TRUE, UINT64_MAX);
+}
+
 void Renderer::destroyDepthImageAndView() {
     VkDevice device = vulkanContext.getDevice();
     VmaAllocator allocator = vulkanContext.getAllocator();

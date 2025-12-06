@@ -81,6 +81,11 @@ public:
     void render(const Camera& camera);
     void waitIdle();
 
+    // Wait for the previous frame's GPU work to complete.
+    // MUST be called before destroying/updating any mesh buffers that the previous frame used.
+    // This prevents race conditions where GPU is reading buffers we're about to destroy.
+    void waitForPreviousFrame();
+
     uint32_t getWidth() const { return vulkanContext.getWidth(); }
     uint32_t getHeight() const { return vulkanContext.getHeight(); }
 

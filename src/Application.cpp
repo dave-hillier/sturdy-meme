@@ -232,6 +232,11 @@ void Application::run() {
         // Update player position for grass interaction (always, regardless of camera mode)
         renderer.setPlayerPosition(player.getPosition(), Player::CAPSULE_RADIUS);
 
+        // Wait for previous frame's GPU work to complete before updating dynamic meshes.
+        // This prevents race conditions where we destroy mesh buffers while the GPU
+        // is still reading them from the previous frame.
+        renderer.waitForPreviousFrame();
+
         // Update flag cloth simulation
         updateFlag(deltaTime);
 
