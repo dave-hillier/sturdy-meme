@@ -1054,8 +1054,9 @@ vec3 renderAtmosphere(vec3 dir) {
     vec3 horizonDir = normalize(vec3(normDir.x, 0.001, normDir.z));
     vec3 horizonLUTColor = sampleSkyViewLUT(horizonDir);
 
-    // Still need ray-marched result for transmittance
-    ScatteringResult horizonResult = integrateAtmosphere(vec3(0.0, PLANET_RADIUS + 0.001, 0.0), horizonDir, 16);
+    // Sample transmittance LUT for horizon direction
+    vec3 horizonOrigin = vec3(0.0, PLANET_RADIUS + 0.001, 0.0);
+    vec3 horizonTransmittance = sampleTransmittanceFromPos(horizonOrigin, horizonDir);
 
     vec3 sunLight = ubo.sunColor.rgb * ubo.sunDirection.w;
     vec3 moonLight = ubo.moonColor.rgb * ubo.moonDirection.w;
@@ -1069,7 +1070,6 @@ vec3 renderAtmosphere(vec3 dir) {
     }
 
     // Multiple scattering compensation (reduced to avoid overpowering sky color)
-    vec3 horizonTransmittance = horizonResult.transmittance;
     horizonColor += sunLight * 0.02 * (1.0 - horizonTransmittance);
     if (moonSkyContribution > 0.01) {
         horizonColor += moonLight * 0.01 * (1.0 - horizonTransmittance) * moonSkyContribution;
@@ -1098,16 +1098,11 @@ vec3 renderAtmosphere(vec3 dir) {
     // The LUT is precomputed per-frame with current sun direction and responds to UI parameter changes
     vec3 skyLUTColor = sampleSkyViewLUT(normDir);
 
-    // Still need ray-marched result for transmittance (used for sun disc, clouds, etc.)
-    // Use fewer samples since we have the LUT for primary color
-    ScatteringResult result = integrateAtmosphere(origin, normDir, 12);
+    // Sample transmittance LUT for viewer-to-sky transmittance
+    // This replaces the expensive integrateAtmosphere() call - LUTs are already computed with correct params
+    vec3 skyTransmittance = sampleTransmittanceFromPos(origin, normDir);
 
     // sunLight and moonLight already defined above for horizon calculation
-
-    // Compute atmospheric transmittance from viewer to sky (for energy conservation)
-    // Note: transmittance also uses hardcoded constants, but its effect is less visible
-    // when atmosphere is disabled (mostly affects sun/moon disc brightness)
-    vec3 skyTransmittance = result.transmittance;
 
     // Use LUT-based sky color which responds to atmosphere parameter changes from UI
     // The LUT already includes proper Rayleigh/Mie scattering with current parameters
