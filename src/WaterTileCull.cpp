@@ -150,8 +150,12 @@ bool WaterTileCull::createBuffers() {
     }
     counterMapped = mapInfo.pMappedData;
 
-    // Initialize counter to 0
-    memset(counterMapped, 0, sizeof(uint32_t) * framesInFlight);
+    // Initialize counter to non-zero so water renders on first frames
+    // (visibility will be properly computed after first tile cull pass)
+    uint32_t* counters = static_cast<uint32_t*>(counterMapped);
+    for (uint32_t i = 0; i < framesInFlight; ++i) {
+        counters[i] = 1;  // Assume visible initially
+    }
 
     // Indirect draw buffer
     VkBufferCreateInfo indirectBufferInfo{};
@@ -432,14 +436,17 @@ uint32_t WaterTileCull::getVisibleTileCount(uint32_t frameIndex) const {
 }
 
 bool WaterTileCull::wasWaterVisibleLastFrame(uint32_t currentFrameIndex) const {
-    if (!enabled || counterMapped == nullptr || framesInFlight == 0) {
-        // If disabled or not initialized, assume water is visible
+    if (!enabled || counterMapped == nullptr || framesInFlight < 2) {
+        // If disabled, not initialized, or not enough frames, assume water is visible
         return true;
     }
 
-    // Get previous frame's index (wrap around)
-    uint32_t prevFrameIndex = (currentFrameIndex + framesInFlight - 1) % framesInFlight;
-    uint32_t count = getVisibleTileCount(prevFrameIndex);
+    // Read from 2 frames back - this is guaranteed complete by fence synchronization
+    // (frame N waits on fence from frame N-2 before starting)
+    // With framesInFlight=2: frame 0 reads from frame 0, frame 1 reads from frame 1
+    // This effectively means same-frame-index from last cycle, which is complete
+    uint32_t safeFrameIndex = currentFrameIndex;  // Same index = 2 frames ago
+    uint32_t count = getVisibleTileCount(safeFrameIndex);
 
     // Water is visible if any tiles were marked visible
     return count > 0;
