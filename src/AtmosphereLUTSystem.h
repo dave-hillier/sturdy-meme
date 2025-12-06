@@ -123,6 +123,12 @@ public:
     }
     const AtmosphereParams& getAtmosphereParams() const { return atmosphereParams; }
 
+    // Cloud map parameters (used by updateCloudMapLUT)
+    void setCloudCoverage(float coverage) { cloudCoverage = glm::clamp(coverage, 0.0f, 1.0f); }
+    float getCloudCoverage() const { return cloudCoverage; }
+    void setCloudDensity(float density) { cloudDensity = glm::clamp(density, 0.0f, 2.0f); }
+    float getCloudDensity() const { return cloudDensity; }
+
     // Check if LUTs need recomputation due to parameter changes
     bool needsRecompute() const { return paramsDirty; }
 
@@ -228,6 +234,10 @@ private:
 
     // Atmosphere parameters
     AtmosphereParams atmosphereParams;
+
+    // Cloud map parameters
+    float cloudCoverage = 0.5f;  // 0-1 cloud coverage
+    float cloudDensity = 0.3f;   // Base density multiplier
 
     // Dirty flag for LUT recomputation
     bool paramsDirty = false;
