@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Animation.h"
+#include "AnimationEvent.h"
 #include <string>
 #include <vector>
 #include <functional>
@@ -53,6 +54,14 @@ public:
     float getBlendFactor() const { return blendFactor; }
     bool isBlending() const { return blending; }
 
+    // Event handling
+    AnimationEventDispatcher& getEventDispatcher() { return eventDispatcher; }
+    const AnimationEventDispatcher& getEventDispatcher() const { return eventDispatcher; }
+
+    // Set optional user data that will be passed to event callbacks
+    void setUserData(void* data) { userData = data; }
+    void* getUserData() const { return userData; }
+
 private:
     struct State {
         std::string name;
@@ -82,6 +91,17 @@ private:
     // Jump trajectory tracking
     JumpTrajectory jumpTrajectory;
 
+    // Event handling
+    AnimationEventDispatcher eventDispatcher;
+    void* userData = nullptr;
+    float lastEventTime = 0.0f;  // Track last event firing time for current state
+
     // Predict landing time by tracing the parabolic arc
     float predictLandingTime(const glm::vec3& startPos, const glm::vec3& velocity, float gravity, const PhysicsWorld* physics) const;
+
+    // Fire events that occurred between prevTime and newTime for a clip
+    void fireClipEvents(const AnimationClip* clip, float prevTime, float newTime, bool looped, const std::string& stateName);
+
+    // Build context for event firing
+    AnimationEventContext buildContext(const std::string& stateName, const AnimationClip* clip, float time) const;
 };

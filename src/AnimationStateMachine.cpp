@@ -49,24 +49,62 @@ void AnimationStateMachine::transitionTo(const std::string& name, float duration
         return;
     }
 
+    // Fire state exit event for previous state
+    if (eventDispatcher.hasListeners()) {
+        State* prevState = findState(currentState);
+        if (prevState && prevState->clip) {
+            AnimationEvent exitEvent;
+            exitEvent.name = AnimationEvents::STATE_EXIT;
+            exitEvent.data = currentState;
+            eventDispatcher.dispatch(exitEvent, buildContext(currentState, prevState->clip, prevState->time));
+        }
+    }
+
     // Start blending from current state to new state
     previousState = currentState;
     currentState = name;
     newState->time = 0.0f;  // Reset new animation to start
+    lastEventTime = 0.0f;   // Reset event tracking for new state
     blendDuration = duration;
     blendTime = 0.0f;
     blendFactor = 0.0f;
     blending = true;
+
+    // Fire blend start and state enter events
+    if (eventDispatcher.hasListeners()) {
+        AnimationEvent blendStartEvent;
+        blendStartEvent.name = AnimationEvents::BLEND_START;
+        blendStartEvent.data = name;
+        eventDispatcher.dispatch(blendStartEvent, buildContext(name, newState->clip, 0.0f));
+
+        AnimationEvent enterEvent;
+        enterEvent.name = AnimationEvents::STATE_ENTER;
+        enterEvent.data = name;
+        eventDispatcher.dispatch(enterEvent, buildContext(name, newState->clip, 0.0f));
+    }
 }
 
 void AnimationStateMachine::update(float deltaTime, float movementSpeed, bool isGrounded, bool isJumping) {
     // Update blend factor if blending
+    bool blendJustEnded = false;
     if (blending) {
         blendTime += deltaTime;
         blendFactor = blendTime / blendDuration;
         if (blendFactor >= 1.0f) {
             blendFactor = 1.0f;
             blending = false;
+            blendJustEnded = true;
+        }
+    }
+
+    // Fire blend end event
+    if (blendJustEnded && eventDispatcher.hasListeners()) {
+        State* current = findState(currentState);
+        if (current && current->clip) {
+            AnimationEvent blendEndEvent;
+            blendEndEvent.name = AnimationEvents::BLEND_END;
+            blendEndEvent.data = currentState;
+            eventDispatcher.dispatch(blendEndEvent, buildContext(currentState, current->clip, current->time));
         }
     }
 
@@ -88,6 +126,7 @@ void AnimationStateMachine::update(float deltaTime, float movementSpeed, bool is
 
     // Special handling for jump animation - sync to trajectory
     if (currentState == "jump" && jumpTrajectory.active && current && current->clip) {
+        float prevTime = current->time;
         jumpTrajectory.elapsedTime += deltaTime;
 
         if (jumpTrajectory.predictedDuration > 0.0f && jumpTrajectory.animationDuration > 0.0f) {
@@ -98,15 +137,30 @@ void AnimationStateMachine::update(float deltaTime, float movementSpeed, bool is
             // Fallback to normal time progression
             current->time += deltaTime * current->speed;
         }
+
+        // Fire clip events for jump animation (no looping)
+        if (eventDispatcher.hasListeners() && current->time > prevTime) {
+            fireClipEvents(current->clip, prevTime, current->time, false, currentState);
+        }
     } else if (current && current->clip) {
         // For locomotion animations, scale playback speed to match movement
+        float prevTime = current->time;
         float speedScale = 1.0f;
         if (currentState == "walk" || currentState == "run") {
             speedScale = calculateSpeedScale(current);
         }
         current->time += deltaTime * current->speed * speedScale;
+        bool looped = false;
         if (current->looping && current->clip->duration > 0.0f) {
-            current->time = std::fmod(current->time, current->clip->duration);
+            if (current->time >= current->clip->duration) {
+                looped = true;
+                current->time = std::fmod(current->time, current->clip->duration);
+            }
+        }
+
+        // Fire clip events for current animation
+        if (eventDispatcher.hasListeners()) {
+            fireClipEvents(current->clip, prevTime, current->time, looped, currentState);
         }
     }
 
@@ -352,4 +406,51 @@ float AnimationStateMachine::predictLandingTime(const glm::vec3& startPos, const
 
     // No collision found - use simple parabola time
     return std::max(simpleFlightTime, 0.3f);
+}
+
+void AnimationStateMachine::fireClipEvents(const AnimationClip* clip, float prevTime, float newTime, bool looped, const std::string& stateName) {
+    if (!clip) {
+        return;
+    }
+
+    AnimationEventContext context = buildContext(stateName, clip, newTime);
+
+    if (looped) {
+        // Animation looped - fire loop event and events across the boundary
+        AnimationEvent loopEvent;
+        loopEvent.name = AnimationEvents::LOOP;
+        loopEvent.time = clip->duration;
+        eventDispatcher.dispatch(loopEvent, context);
+
+        // Events from prevTime to duration
+        auto eventsToEnd = clip->getEventsInRange(prevTime, clip->duration);
+        for (const auto* event : eventsToEnd) {
+            eventDispatcher.dispatch(*event, context);
+        }
+
+        // Events from 0 to newTime
+        auto eventsFromStart = clip->getEventsInRange(-0.001f, newTime);
+        for (const auto* event : eventsFromStart) {
+            eventDispatcher.dispatch(*event, context);
+        }
+    } else {
+        // Normal playback - fire events in range
+        auto events = clip->getEventsInRange(prevTime, newTime);
+        for (const auto* event : events) {
+            eventDispatcher.dispatch(*event, context);
+        }
+    }
+}
+
+AnimationEventContext AnimationStateMachine::buildContext(const std::string& stateName, const AnimationClip* clip, float time) const {
+    AnimationEventContext context;
+    context.stateName = stateName;
+    if (clip) {
+        context.animationName = clip->name;
+        context.duration = clip->duration;
+        context.normalizedTime = clip->duration > 0.0f ? time / clip->duration : 0.0f;
+    }
+    context.currentTime = time;
+    context.userData = userData;
+    return context;
 }
