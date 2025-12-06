@@ -89,19 +89,35 @@ void main() {
     // Transform to world position
     vec3 worldPos = (ubo.model * vec4(inPosition, 1.0)).xyz;
 
-    // Apply Gerstner waves
+    // Apply Gerstner waves - 6 octaves for detailed surface
     float amplitude = water.waveParams.x;
     float wavelength = water.waveParams.y;
     float steepness = water.waveParams.z;
     float speed = water.waveParams.w;
 
-    vec2 waveDir1 = normalize(vec2(1.0, 0.3));
-    vec2 waveDir2 = normalize(vec2(-0.5, 0.8));
+    float amplitude2 = water.waveParams2.x;
+    float wavelength2 = water.waveParams2.y;
+    float steepness2 = water.waveParams2.z;
+    float speed2 = water.waveParams2.w;
 
-    vec3 wave1 = gerstnerWave(worldPos.xz, amplitude, wavelength, steepness, speed, waveDir1);
-    vec3 wave2 = gerstnerWave(worldPos.xz, amplitude * 0.5, wavelength * 0.7, steepness * 0.8, speed * 1.2, waveDir2);
+    vec2 windDir = normalize(ubo.windDirectionAndSpeed.xy + vec2(0.001));
+    vec2 crossDir = vec2(-windDir.y, windDir.x) * 0.7 + windDir * 0.3;
+    vec2 counterDir = -windDir * 0.5 + vec2(windDir.y, -windDir.x) * 0.5;
+    vec2 diagDir = normalize(windDir + vec2(1.0, 0.5));
+    vec2 diagDir2 = normalize(windDir + vec2(-0.7, 0.7));
+    vec2 rippleDir = normalize(vec2(windDir.y, -windDir.x) + windDir * 0.3);
 
-    vec3 totalWave = wave1 + wave2;
+    // Primary waves (low frequency, large amplitude)
+    vec3 wave1 = gerstnerWave(worldPos.xz, amplitude, wavelength, steepness, speed, windDir);
+    vec3 wave2 = gerstnerWave(worldPos.xz, amplitude * 0.5, wavelength * 0.6, steepness * 0.7, speed * 1.3, crossDir);
+    vec3 wave3 = gerstnerWave(worldPos.xz, amplitude * 0.25, wavelength * 0.3, steepness * 0.5, speed * 0.7, counterDir);
+
+    // Secondary waves (high frequency detail)
+    vec3 wave4 = gerstnerWave(worldPos.xz, amplitude2 * 0.3, wavelength2 * 0.4, steepness2 * 0.6, speed2 * 1.8, diagDir);
+    vec3 wave5 = gerstnerWave(worldPos.xz, amplitude2 * 0.2, wavelength2 * 0.25, steepness2 * 0.5, speed2 * 2.2, diagDir2);
+    vec3 wave6 = gerstnerWave(worldPos.xz, amplitude2 * 0.12, wavelength2 * 0.15, steepness2 * 0.4, speed2 * 2.8, rippleDir);
+
+    vec3 totalWave = wave1 + wave2 + wave3 + wave4 + wave5 + wave6;
     worldPos += totalWave;
 
     // Store wave height for foam calculation

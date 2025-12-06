@@ -534,7 +534,8 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     waterInfo.extent = swapchainExtent;
     waterInfo.commandPool = commandPool;
     waterInfo.graphicsQueue = graphicsQueue;
-    waterInfo.waterSize = 65536.0f;  // Extend well beyond terrain for horizon
+    float waterSize = terrainConfig.size * 2.0f;  // 2x terrain size (32768) for horizon coverage
+    waterInfo.waterSize = waterSize;
     waterInfo.assetPath = resourcePath;
 
     if (!waterSystem.init(waterInfo)) return false;
@@ -545,7 +546,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     // Real-world 0m altitude corresponds to worldY = 0 - minAltitude = 15m
     float seaLevel = -terrainConfig.minAltitude;  // = 15.0f for minAltitude = -15
     waterSystem.setWaterLevel(seaLevel);
-    waterSystem.setWaterExtent(glm::vec2(0.0f, 0.0f), glm::vec2(65536.0f, 65536.0f));
+    waterSystem.setWaterExtent(glm::vec2(0.0f, 0.0f), glm::vec2(waterSize, waterSize));
     waterSystem.setWaterColor(glm::vec4(0.02f, 0.08f, 0.15f, 0.95f));  // Deep ocean blue
     waterSystem.setWaveAmplitude(0.5f);   // Ocean-scale waves
     waterSystem.setWaveLength(30.0f);     // Longer wavelengths for open sea
@@ -601,7 +602,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     dispInfo.computeQueue = graphicsQueue;  // Use graphics queue for compute
     dispInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
     dispInfo.displacementResolution = 512;
-    dispInfo.worldSize = 65536.0f;
+    dispInfo.worldSize = waterSize;
 
     if (!waterDisplacement.init(dispInfo)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize water displacement");
@@ -618,7 +619,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     foamInfo.shaderPath = resourcePath + "/shaders";
     foamInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
     foamInfo.resolution = 512;
-    foamInfo.worldSize = 65536.0f;
+    foamInfo.worldSize = waterSize;
 
     if (!foamBuffer.init(foamInfo)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize foam buffer");

@@ -128,6 +128,12 @@ public:
     void setWaveLength(float wavelength) { waterUniforms.waveParams.y = wavelength; }
     void setWaveSteepness(float steepness) { waterUniforms.waveParams.z = steepness; }
     void setWaveSpeed(float speed) { waterUniforms.waveParams.w = speed; }
+
+    // Secondary wave parameters (for cross-wave detail)
+    void setSecondaryWaveAmplitude(float amplitude) { waterUniforms.waveParams2.x = amplitude; }
+    void setSecondaryWaveLength(float wavelength) { waterUniforms.waveParams2.y = wavelength; }
+    void setSecondaryWaveSteepness(float steepness) { waterUniforms.waveParams2.z = steepness; }
+    void setSecondaryWaveSpeed(float speed) { waterUniforms.waveParams2.w = speed; }
     void setWaterExtent(const glm::vec2& position, const glm::vec2& size);
 
     // Tidal configuration
@@ -143,6 +149,10 @@ public:
     float getWaveLength() const { return waterUniforms.waveParams.y; }
     float getWaveSteepness() const { return waterUniforms.waveParams.z; }
     float getWaveSpeed() const { return waterUniforms.waveParams.w; }
+    float getSecondaryWaveAmplitude() const { return waterUniforms.waveParams2.x; }
+    float getSecondaryWaveLength() const { return waterUniforms.waveParams2.y; }
+    float getSecondaryWaveSteepness() const { return waterUniforms.waveParams2.z; }
+    float getSecondaryWaveSpeed() const { return waterUniforms.waveParams2.w; }
     float getFoamThreshold() const { return waterUniforms.foamThreshold; }
     float getFresnelPower() const { return waterUniforms.fresnelPower; }
 

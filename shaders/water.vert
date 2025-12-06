@@ -160,9 +160,41 @@ void main() {
     totalDisplacement += wave3;
     totalJacobian *= jacobian3;
 
-    // Blend tangents/bitangents
-    totalTangent = normalize(tangent1 + tangent2 * 0.5 + tangent3 * 0.25);
-    totalBitangent = normalize(bitangent1 + bitangent2 * 0.5 + bitangent3 * 0.25);
+    // Fourth wave (high frequency detail - diagonal)
+    vec3 tangent4, bitangent4;
+    float jacobian4;
+    vec2 diagDir = normalize(windDir + vec2(1.0, 0.5));
+    vec3 wave4 = gerstnerWave(pos, time * waveParams2.w * 1.8, diagDir,
+                               waveParams2.y * 0.4, waveParams2.z * 0.6, waveParams2.x * 0.3,
+                               tangent4, bitangent4, jacobian4);
+    totalDisplacement += wave4;
+    totalJacobian *= jacobian4;
+
+    // Fifth wave (high frequency - opposite diagonal)
+    vec3 tangent5, bitangent5;
+    float jacobian5;
+    vec2 diagDir2 = normalize(windDir + vec2(-0.7, 0.7));
+    vec3 wave5 = gerstnerWave(pos, time * waveParams2.w * 2.2, diagDir2,
+                               waveParams2.y * 0.25, waveParams2.z * 0.5, waveParams2.x * 0.2,
+                               tangent5, bitangent5, jacobian5);
+    totalDisplacement += wave5;
+    totalJacobian *= jacobian5;
+
+    // Sixth wave (very high frequency ripples)
+    vec3 tangent6, bitangent6;
+    float jacobian6;
+    vec2 rippleDir = normalize(vec2(windDir.y, -windDir.x) + windDir * 0.3);
+    vec3 wave6 = gerstnerWave(pos, time * waveParams2.w * 2.8, rippleDir,
+                               waveParams2.y * 0.15, waveParams2.z * 0.4, waveParams2.x * 0.12,
+                               tangent6, bitangent6, jacobian6);
+    totalDisplacement += wave6;
+    totalJacobian *= jacobian6;
+
+    // Blend tangents/bitangents (weighted by wave contribution)
+    totalTangent = normalize(tangent1 + tangent2 * 0.5 + tangent3 * 0.25 +
+                             tangent4 * 0.3 + tangent5 * 0.2 + tangent6 * 0.12);
+    totalBitangent = normalize(bitangent1 + bitangent2 * 0.5 + bitangent3 * 0.25 +
+                               bitangent4 * 0.3 + bitangent5 * 0.2 + bitangent6 * 0.12);
 
     // Calculate normal from tangent and bitangent
     vec3 normal = normalize(cross(totalBitangent, totalTangent));
