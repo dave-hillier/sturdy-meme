@@ -47,32 +47,17 @@ void TreeEditorGui::render(Renderer& renderer, const Camera& camera) {
 
     auto& treeSystem = renderer.getTreeEditSystem();
 
+    // Auto-enable tree edit system when window is visible
+    if (!treeSystem.isEnabled()) {
+        treeSystem.setEnabled(true);
+    }
+
     ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoCollapse;
 
     ImGui::SetNextWindowPos(ImVec2(380, 20), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(320, 720), ImGuiCond_FirstUseEver);
 
     if (ImGui::Begin("Tree Editor", &visible, windowFlags)) {
-        // Enable/disable toggle
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 0.9f, 0.5f, 1.0f));
-        ImGui::Text("TREE EDITOR MODE");
-        ImGui::PopStyleColor();
-
-        bool enabled = treeSystem.isEnabled();
-        if (ImGui::Checkbox("Enable Tree Editor", &enabled)) {
-            treeSystem.setEnabled(enabled);
-        }
-
-        if (!enabled) {
-            ImGui::TextDisabled("Enable to edit procedural tree");
-            ImGui::End();
-            return;
-        }
-
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-
         // Visualization options
         bool wireframe = treeSystem.isWireframeMode();
         if (ImGui::Checkbox("Wireframe Mode", &wireframe)) {
