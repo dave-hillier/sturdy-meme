@@ -17,6 +17,9 @@ void SceneBuilder::registerMaterials() {
     // Register crate material
     crateMaterialId = materialRegistry.registerMaterial("crate", crateTexture, crateNormalMap);
 
+    // Register ground material (for any ground-related objects)
+    groundMaterialId = materialRegistry.registerMaterial("ground", groundTexture, groundNormalMap);
+
     // Register metal material
     metalMaterialId = materialRegistry.registerMaterial("metal", metalTexture, metalNormalMap);
 
