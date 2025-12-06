@@ -221,7 +221,7 @@ void TreeEditorGui::renderSpaceColonisationSection(Renderer& renderer) {
     ImGui::PopStyleColor();
 
     if (ImGui::SliderFloat("Trunk Height", &scParams.trunkHeight, 0.5f, 10.0f)) changed = true;
-    if (ImGui::SliderFloat("Trunk Segments", &scParams.trunkSegments, 1.0f, 10.0f)) changed = true;
+    if (ImGui::SliderInt("Trunk Segments", &scParams.trunkSegments, 1, 10)) changed = true;
     if (ImGui::SliderFloat("Base Thickness", &scParams.baseThickness, 0.1f, 1.0f)) changed = true;
 
     ImGui::Spacing();
@@ -344,7 +344,13 @@ void TreeEditorGui::renderBranchSection(Renderer& renderer) {
     ImGui::Text("BRANCHES");
     ImGui::PopStyleColor();
 
-    if (ImGui::SliderInt("Levels", &params.branchLevels, 1, 5)) changed = true;
+    if (ImGui::SliderInt("Levels", &params.branchLevels, 1, 5)) {
+        // Clamp leafStartLevel to not exceed branchLevels
+        if (params.leafStartLevel > params.branchLevels) {
+            params.leafStartLevel = params.branchLevels;
+        }
+        changed = true;
+    }
     if (ImGui::SliderInt("Children/Branch", &params.childrenPerBranch, 1, 8)) changed = true;
     if (ImGui::SliderFloat("Branching Angle", &params.branchingAngle, 10.0f, 80.0f, "%.0f deg")) changed = true;
     if (ImGui::SliderFloat("Spread", &params.branchingSpread, 30.0f, 360.0f, "%.0f deg")) changed = true;

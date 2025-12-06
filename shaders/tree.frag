@@ -96,7 +96,6 @@ void main() {
     float NoL = max(dot(N, sunL), 0.0);
     vec3 H = normalize(V + sunL);
     float NoH = max(dot(N, H), 0.0);
-    float NoV = max(dot(N, V), 0.001);
 
     // Diffuse
     vec3 diffuse = albedo / PI;
