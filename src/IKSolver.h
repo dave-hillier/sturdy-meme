@@ -225,6 +225,12 @@ struct ClimbingIK {
     int32_t leftHandBoneIndex = -1;
     int32_t rightHandBoneIndex = -1;
 
+    // Root bone indices for reach calculations (shoulder/hip)
+    int32_t leftShoulderBoneIndex = -1;
+    int32_t rightShoulderBoneIndex = -1;
+    int32_t leftHipBoneIndex = -1;
+    int32_t rightHipBoneIndex = -1;
+
     // Current holds
     HandHold leftHandHold;
     HandHold rightHandHold;
