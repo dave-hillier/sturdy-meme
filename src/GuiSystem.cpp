@@ -500,6 +500,82 @@ void GuiSystem::renderTimeSection(Renderer& renderer) {
     if (ImGui::Button("Equator")) {
         renderer.setLocation({0.0f, 0.0f});
     }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Moon Phase Controls
+    ImGui::Text("Moon Phase:");
+
+    // Display current moon phase
+    float currentPhase = renderer.getCurrentMoonPhase();
+    const char* phaseNames[] = { "New Moon", "Waxing Crescent", "First Quarter", "Waxing Gibbous",
+                                 "Full Moon", "Waning Gibbous", "Last Quarter", "Waning Crescent" };
+    int phaseIndex = static_cast<int>(currentPhase * 8.0f) % 8;
+    ImGui::Text("Current: %s (%.2f)", phaseNames[phaseIndex], currentPhase);
+
+    // Override checkbox
+    bool overrideEnabled = renderer.isMoonPhaseOverrideEnabled();
+    if (ImGui::Checkbox("Override Moon Phase", &overrideEnabled)) {
+        renderer.setMoonPhaseOverride(overrideEnabled);
+    }
+
+    // Manual phase slider (only active when override is enabled)
+    if (overrideEnabled) {
+        float manualPhase = renderer.getMoonPhase();
+        if (ImGui::SliderFloat("Moon Phase", &manualPhase, 0.0f, 1.0f, "%.3f")) {
+            renderer.setMoonPhase(manualPhase);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("0.0 = New Moon, 0.25 = First Quarter, 0.5 = Full Moon, 0.75 = Last Quarter");
+        }
+
+        // Quick phase buttons
+        ImGui::Text("Presets:");
+        ImGui::SameLine();
+        if (ImGui::Button("New")) renderer.setMoonPhase(0.0f);
+        ImGui::SameLine();
+        if (ImGui::Button("1st Q")) renderer.setMoonPhase(0.25f);
+        ImGui::SameLine();
+        if (ImGui::Button("Full")) renderer.setMoonPhase(0.5f);
+        ImGui::SameLine();
+        if (ImGui::Button("3rd Q")) renderer.setMoonPhase(0.75f);
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Eclipse Controls
+    ImGui::Text("Solar Eclipse:");
+
+    bool eclipseEnabled = renderer.isEclipseEnabled();
+    if (ImGui::Checkbox("Enable Eclipse", &eclipseEnabled)) {
+        renderer.setEclipseEnabled(eclipseEnabled);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Simulates a solar eclipse with the moon passing in front of the sun");
+    }
+
+    if (eclipseEnabled) {
+        float eclipseAmount = renderer.getEclipseAmount();
+        if (ImGui::SliderFloat("Eclipse Amount", &eclipseAmount, 0.0f, 1.0f, "%.3f")) {
+            renderer.setEclipseAmount(eclipseAmount);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("0.0 = No eclipse, 1.0 = Total eclipse");
+        }
+
+        // Eclipse presets
+        ImGui::Text("Presets:");
+        ImGui::SameLine();
+        if (ImGui::Button("Partial")) renderer.setEclipseAmount(0.5f);
+        ImGui::SameLine();
+        if (ImGui::Button("Annular")) renderer.setEclipseAmount(0.85f);
+        ImGui::SameLine();
+        if (ImGui::Button("Total")) renderer.setEclipseAmount(1.0f);
+    }
 }
 
 void GuiSystem::renderWeatherSection(Renderer& renderer) {

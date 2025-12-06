@@ -1969,7 +1969,23 @@ Renderer::LightingParams Renderer::calculateLightingParams(float timeOfDay) cons
     params.sunColor = celestialCalculator.getSunColor(sunPos.altitude);
     params.moonColor = celestialCalculator.getMoonColor(moonPos.altitude, moonPos.illumination);
     params.ambientColor = celestialCalculator.getAmbientColor(sunPos.altitude);
-    params.moonPhase = moonPos.phase;  // Moon phase for lunar cycle simulation
+
+    // Apply moon phase override if enabled, otherwise use astronomical calculation
+    if (useMoonPhaseOverride) {
+        params.moonPhase = manualMoonPhase;
+        // Recalculate illumination based on manual phase
+        float phaseAngle = params.moonPhase * 2.0f * glm::pi<float>();
+        float illumination = (1.0f - std::cos(phaseAngle)) * 0.5f;
+        // Adjust moon color based on manual phase illumination
+        params.moonColor = celestialCalculator.getMoonColor(moonPos.altitude, illumination);
+    } else {
+        params.moonPhase = moonPos.phase;
+    }
+    currentMoonPhase = params.moonPhase;  // Track current effective phase
+
+    // Eclipse simulation - affects sun intensity
+    params.eclipseAmount = eclipseEnabled ? eclipseAmount : 0.0f;
+
     params.julianDay = dateTime.toJulianDay();
 
     return params;
@@ -2022,6 +2038,7 @@ UniformBufferObject Renderer::buildUniformBufferData(const Camera& camera, const
     ubo.cloudStyle = useParaboloidClouds ? 1.0f : 0.0f;
     ubo.cameraNear = camera.getNearPlane();
     ubo.cameraFar = camera.getFarPlane();
+    ubo.eclipseAmount = lighting.eclipseAmount;
 
     // Copy atmosphere parameters from AtmosphereLUTSystem for use in atmosphere_common.glsl
     const auto& atmosParams = atmosphereLUTSystem.getAtmosphereParams();

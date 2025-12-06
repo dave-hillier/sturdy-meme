@@ -39,7 +39,7 @@ layout(binding = UBO_BINDING) uniform UniformBufferObject {
     float cloudStyle;
     float cameraNear;          // Camera near plane for linearizing depth
     float cameraFar;           // Camera far plane for linearizing depth
-    float uboPad3;
+    float eclipseAmount;       // Eclipse amount (0 = none, 1 = total solar eclipse)
 
     // Atmosphere parameters (from UI controls) - used by atmosphere_common.glsl
     vec4 atmosRayleighScattering;  // xyz = rayleigh scattering base, w = scale height
