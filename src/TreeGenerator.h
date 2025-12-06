@@ -91,7 +91,7 @@ struct SpaceColonisationParams {
     float tropismStrength = 0.1f;       // How much tropism affects growth
 
     // Initial trunk before branching
-    float trunkSegments = 3;            // Number of trunk segments before crown
+    int trunkSegments = 3;              // Number of trunk segments before crown
     float trunkHeight = 2.5f;           // Height of trunk before crown starts (~2.5m)
 
     // Root system
