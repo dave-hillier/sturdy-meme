@@ -1029,8 +1029,8 @@ float lunarPhaseMask(vec3 dir, vec3 moonDir, vec3 sunDir, float discSize) {
     // Smooth terminator
     float lit = smoothstep(-0.1, 0.1, lighting);
 
-    // Earthshine (very subtle light on dark side - 2% for realism)
-    return max(lit, 0.02);
+    // Earthshine (subtle light on dark side - user-configurable)
+    return max(lit, ubo.moonEarthshine);
 }
 
 // Solar eclipse mask - simulates the moon passing in front of the sun
@@ -1258,10 +1258,10 @@ vec3 renderAtmosphere(vec3 dir) {
 
     // Apply phase mask with intensity scaled by illumination
     // Moon surface has albedo ~0.12, so it's much dimmer than the sun
-    // Use 15.0 base (less than sun's 20.0) scaled by phase mask
-    float moonDiscIntensity = 15.0 * phaseMask;
+    // Use user-configurable disc intensity scaled by phase mask
+    float moonDiscBrightness = ubo.moonDiscIntensity * phaseMask;
     // Allow moon to redden at horizon like the sun (remove minimum clamp)
-    sky += ubo.moonColor.rgb * moonDisc * moonDiscIntensity * ubo.moonDirection.w *
+    sky += ubo.moonColor.rgb * moonDisc * moonDiscBrightness * ubo.moonDirection.w *
            skyTransmittance * clouds.transmittance;
 
     // Star field blended over the atmospheric tint (also behind clouds)

@@ -1966,6 +1966,9 @@ Renderer::LightingParams Renderer::calculateLightingParams(float timeOfDay) cons
         params.moonIntensity *= (1.0f + twilightFactor * 1.0f);
     }
 
+    // Apply user-controlled moon brightness multiplier
+    params.moonIntensity *= moonBrightness;
+
     params.sunColor = celestialCalculator.getSunColor(sunPos.altitude);
     params.moonColor = celestialCalculator.getMoonColor(moonPos.altitude, moonPos.illumination);
     params.ambientColor = celestialCalculator.getAmbientColor(sunPos.altitude);
@@ -2060,6 +2063,12 @@ UniformBufferObject Renderer::buildUniformBufferData(const Camera& camera, const
     // Cloud parameters for sky.frag and cloud systems
     ubo.cloudCoverage = cloudCoverage;
     ubo.cloudDensity = cloudDensity;
+
+    // Moon rendering parameters for sky.frag
+    ubo.moonBrightness = moonBrightness;
+    ubo.moonDiscIntensity = moonDiscIntensity;
+    ubo.moonEarthshine = moonEarthshine;
+    ubo.moonPad = 0.0f;
 
     return ubo;
 }

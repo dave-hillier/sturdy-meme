@@ -267,6 +267,14 @@ public:
     float getMoonPhase() const { return manualMoonPhase; }
     float getCurrentMoonPhase() const { return currentMoonPhase; }  // Actual phase (auto or manual)
 
+    // Moon brightness controls
+    void setMoonBrightness(float brightness) { moonBrightness = glm::clamp(brightness, 0.0f, 5.0f); }
+    float getMoonBrightness() const { return moonBrightness; }
+    void setMoonDiscIntensity(float intensity) { moonDiscIntensity = glm::clamp(intensity, 0.0f, 50.0f); }
+    float getMoonDiscIntensity() const { return moonDiscIntensity; }
+    void setMoonEarthshine(float earthshine) { moonEarthshine = glm::clamp(earthshine, 0.0f, 0.2f); }
+    float getMoonEarthshine() const { return moonEarthshine; }
+
     // Eclipse controls
     void setEclipseEnabled(bool enabled) { eclipseEnabled = enabled; }
     bool isEclipseEnabled() const { return eclipseEnabled; }
@@ -463,6 +471,11 @@ private:
     bool useMoonPhaseOverride = false;
     float manualMoonPhase = 0.5f;  // Default to full moon (0=new, 0.5=full, 1=new)
     mutable float currentMoonPhase = 0.5f; // Tracks current effective phase (mutable for const functions)
+
+    // Moon brightness controls
+    float moonBrightness = 1.0f;      // Multiplier for moon light intensity (0-5)
+    float moonDiscIntensity = 20.0f;  // Visual disc intensity in sky (0-50, default was 25, now 20)
+    float moonEarthshine = 0.02f;     // Earthshine on dark side (0-0.2, default 2%)
 
     // Eclipse simulation
     bool eclipseEnabled = false;
