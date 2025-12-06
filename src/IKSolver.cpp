@@ -1597,10 +1597,13 @@ bool ClimbingIKSolver::canReach(
     bool isLeft,
     const std::vector<glm::mat4>& globalTransforms
 ) {
-    // Get shoulder/hip position
-    int32_t rootBoneIndex = isArm
-        ? (isLeft ? climbing.leftArmChainIndex : climbing.rightArmChainIndex)
-        : (isLeft ? climbing.leftLegChainIndex : climbing.rightLegChainIndex);
+    // Get shoulder/hip bone index (the root of the arm/leg chain)
+    int32_t rootBoneIndex;
+    if (isArm) {
+        rootBoneIndex = isLeft ? climbing.leftShoulderBoneIndex : climbing.rightShoulderBoneIndex;
+    } else {
+        rootBoneIndex = isLeft ? climbing.leftHipBoneIndex : climbing.rightHipBoneIndex;
+    }
 
     if (rootBoneIndex < 0 || static_cast<size_t>(rootBoneIndex) >= globalTransforms.size()) {
         return false;
@@ -1763,10 +1766,16 @@ void IKSystem::setClimbingArmChains(const std::string& leftArm, const std::strin
     leftArmChainName = leftArm;
     rightArmChainName = rightArm;
 
-    // Find chain indices
+    // Find chain indices and store root bone indices for reach calculations
     for (size_t i = 0; i < chains.size(); i++) {
-        if (chains[i].name == leftArm) climbing.leftArmChainIndex = static_cast<int32_t>(i);
-        if (chains[i].name == rightArm) climbing.rightArmChainIndex = static_cast<int32_t>(i);
+        if (chains[i].name == leftArm) {
+            climbing.leftArmChainIndex = static_cast<int32_t>(i);
+            climbing.leftShoulderBoneIndex = chains[i].chain.rootBoneIndex;
+        }
+        if (chains[i].name == rightArm) {
+            climbing.rightArmChainIndex = static_cast<int32_t>(i);
+            climbing.rightShoulderBoneIndex = chains[i].chain.rootBoneIndex;
+        }
     }
 }
 
@@ -1774,9 +1783,16 @@ void IKSystem::setClimbingLegChains(const std::string& leftLeg, const std::strin
     leftLegChainName = leftLeg;
     rightLegChainName = rightLeg;
 
+    // Find chain indices and store root bone indices for reach calculations
     for (size_t i = 0; i < chains.size(); i++) {
-        if (chains[i].name == leftLeg) climbing.leftLegChainIndex = static_cast<int32_t>(i);
-        if (chains[i].name == rightLeg) climbing.rightLegChainIndex = static_cast<int32_t>(i);
+        if (chains[i].name == leftLeg) {
+            climbing.leftLegChainIndex = static_cast<int32_t>(i);
+            climbing.leftHipBoneIndex = chains[i].chain.rootBoneIndex;
+        }
+        if (chains[i].name == rightLeg) {
+            climbing.rightLegChainIndex = static_cast<int32_t>(i);
+            climbing.rightHipBoneIndex = chains[i].chain.rootBoneIndex;
+        }
     }
 }
 

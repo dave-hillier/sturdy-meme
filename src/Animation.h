@@ -93,7 +93,10 @@ T AnimationSampler<T>::sample(float time) const {
         return values.back();
     }
 
-    // Find the two keyframes to interpolate between
+    // Find the two keyframes to interpolate between.
+    // Note: This linear search is O(n) but binary search optimization is not necessary
+    // because animations typically have few keyframes per channel (< 100) and the
+    // constant factor of std::lower_bound would negate benefits at small sizes.
     size_t nextIndex = 0;
     for (size_t i = 0; i < times.size(); ++i) {
         if (times[i] > time) {
@@ -126,6 +129,7 @@ inline glm::quat AnimationSampler<glm::quat>::sample(float time) const {
         return values.back();
     }
 
+    // Linear search - see comment in primary template for rationale
     size_t nextIndex = 0;
     for (size_t i = 0; i < times.size(); ++i) {
         if (times[i] > time) {
