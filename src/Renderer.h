@@ -260,6 +260,19 @@ public:
     int getCurrentDay() const { return currentDay; }
     const CelestialCalculator& getCelestialCalculator() const { return celestialCalculator; }
 
+    // Moon phase override controls
+    void setMoonPhaseOverride(bool enabled) { useMoonPhaseOverride = enabled; }
+    bool isMoonPhaseOverrideEnabled() const { return useMoonPhaseOverride; }
+    void setMoonPhase(float phase) { manualMoonPhase = glm::clamp(phase, 0.0f, 1.0f); }
+    float getMoonPhase() const { return manualMoonPhase; }
+    float getCurrentMoonPhase() const { return currentMoonPhase; }  // Actual phase (auto or manual)
+
+    // Eclipse controls
+    void setEclipseEnabled(bool enabled) { eclipseEnabled = enabled; }
+    bool isEclipseEnabled() const { return eclipseEnabled; }
+    void setEclipseAmount(float amount) { eclipseAmount = glm::clamp(amount, 0.0f, 1.0f); }
+    float getEclipseAmount() const { return eclipseAmount; }
+
     // Hi-Z occlusion culling control
     void setHiZCullingEnabled(bool enabled) { hiZSystem.setHiZEnabled(enabled); }
     bool isHiZCullingEnabled() const { return hiZSystem.isHiZEnabled(); }
@@ -319,6 +332,7 @@ private:
         glm::vec3 moonColor;
         glm::vec3 ambientColor;
         float moonPhase;       // Moon phase (0 = new moon, 0.5 = full moon, 1 = new moon)
+        float eclipseAmount;   // Eclipse amount (0 = none, 1 = total solar eclipse)
         double julianDay;
     };
     LightingParams calculateLightingParams(float timeOfDay) const;
@@ -444,6 +458,15 @@ private:
     int currentYear = 2024;
     int currentMonth = 6;
     int currentDay = 21;  // Summer solstice by default
+
+    // Moon phase override
+    bool useMoonPhaseOverride = false;
+    float manualMoonPhase = 0.5f;  // Default to full moon (0=new, 0.5=full, 1=new)
+    mutable float currentMoonPhase = 0.5f; // Tracks current effective phase (mutable for const functions)
+
+    // Eclipse simulation
+    bool eclipseEnabled = false;
+    float eclipseAmount = 0.0f;    // 0 = no eclipse, 1 = total eclipse
 
     bool showCascadeDebug = false;         // true = show cascade colors overlay
     bool showSnowDepthDebug = false;       // true = show snow depth heat map overlay
