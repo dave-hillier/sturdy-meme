@@ -4,8 +4,10 @@
 #include <glm/gtc/quaternion.hpp>
 #include <vector>
 #include <string>
+#include <algorithm>
 
 #include "GLTFLoader.h"
+#include "AnimationEvent.h"
 
 // Keyframe data for a single transform component
 template<typename T>
@@ -36,6 +38,7 @@ struct AnimationClip {
     std::vector<AnimationChannel> channels;
     int32_t rootBoneIndex = -1;  // Index of root bone for root motion extraction
     glm::vec3 rootMotionPerCycle = glm::vec3(0.0f);  // Total root displacement over one cycle
+    std::vector<AnimationEvent> events;  // Events to fire during playback
 
     // Sample all channels at a given time and apply to skeleton
     // If stripRootMotion is true, horizontal (XZ) translation is removed from the root bone
@@ -48,6 +51,35 @@ struct AnimationClip {
     float getRootMotionSpeed() const {
         if (duration <= 0.0f) return 0.0f;
         return glm::length(glm::vec2(rootMotionPerCycle.x, rootMotionPerCycle.z)) / duration;
+    }
+
+    // Add an event at a specific time (in seconds)
+    void addEvent(const std::string& eventName, float time, const std::string& data = "", int32_t intData = 0) {
+        AnimationEvent event;
+        event.name = eventName;
+        event.time = time;
+        event.data = data;
+        event.intData = intData;
+        events.push_back(event);
+        // Keep events sorted by time for efficient firing
+        std::sort(events.begin(), events.end());
+    }
+
+    // Add an event at a normalized time (0.0 to 1.0)
+    void addEventNormalized(const std::string& eventName, float normalizedTime, const std::string& data = "", int32_t intData = 0) {
+        addEvent(eventName, normalizedTime * duration, data, intData);
+    }
+
+    // Get events in a time range (exclusive start, inclusive end)
+    // Used to find events that should fire between two time points
+    std::vector<const AnimationEvent*> getEventsInRange(float startTime, float endTime) const {
+        std::vector<const AnimationEvent*> result;
+        for (const auto& event : events) {
+            if (event.time > startTime && event.time <= endTime) {
+                result.push_back(&event);
+            }
+        }
+        return result;
     }
 };
 
@@ -65,17 +97,35 @@ public:
 
     float getCurrentTime() const { return currentTime; }
     float getDuration() const { return currentClip ? currentClip->duration : 0.0f; }
+    float getNormalizedTime() const { return currentClip && currentClip->duration > 0.0f ? currentTime / currentClip->duration : 0.0f; }
     bool isPlaying() const { return playing; }
     void play() { playing = true; }
     void pause() { playing = false; }
-    void reset() { currentTime = 0.0f; }
+    void reset() { currentTime = 0.0f; lastEventTime = 0.0f; }
+
+    // Event handling
+    AnimationEventDispatcher& getEventDispatcher() { return eventDispatcher; }
+    const AnimationEventDispatcher& getEventDispatcher() const { return eventDispatcher; }
+
+    // Set optional user data that will be passed to event callbacks
+    void setUserData(void* data) { userData = data; }
+    void* getUserData() const { return userData; }
 
 private:
     const AnimationClip* currentClip = nullptr;
     float currentTime = 0.0f;
+    float lastEventTime = 0.0f;  // Used to track which events have been fired
     float playbackSpeed = 1.0f;
     bool looping = true;
     bool playing = true;
+
+    AnimationEventDispatcher eventDispatcher;
+    void* userData = nullptr;
+
+    // Fire events that occurred between lastEventTime and currentTime
+    void fireEvents(float prevTime, float newTime, bool looped);
+    // Build context for event firing
+    AnimationEventContext buildContext() const;
 };
 
 // Template implementations
