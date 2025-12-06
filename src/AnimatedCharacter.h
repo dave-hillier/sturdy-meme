@@ -3,6 +3,8 @@
 #include "SkinnedMesh.h"
 #include "Animation.h"
 #include "AnimationStateMachine.h"
+#include "AnimationLayerController.h"
+#include "BlendSpace.h"
 #include "GLTFLoader.h"
 #include "Mesh.h"
 #include "IKSolver.h"
@@ -90,6 +92,22 @@ public:
     IKSystem& getIKSystem() { return ikSystem; }
     const IKSystem& getIKSystem() const { return ikSystem; }
 
+    // Animation Layer Controller access (advanced layer-based blending)
+    AnimationLayerController& getLayerController() { return layerController; }
+    const AnimationLayerController& getLayerController() const { return layerController; }
+
+    // Enable layer controller mode (disables state machine)
+    void setUseLayerController(bool use);
+    bool isUsingLayerController() const { return useLayerController; }
+
+    // BlendSpace access for locomotion blending
+    BlendSpace1D& getLocomotionBlendSpace() { return locomotionBlendSpace; }
+    const BlendSpace1D& getLocomotionBlendSpace() const { return locomotionBlendSpace; }
+
+    // Setup a locomotion blend space from available animations
+    // Creates a 1D blend space based on animation speed (idle -> walk -> run)
+    void setupLocomotionBlendSpace();
+
     // Reset foot IK locks (call when teleporting or significantly repositioning the character)
     void resetFootLocks() { ikSystem.resetFootLocks(); }
 
@@ -116,7 +134,10 @@ private:
     std::vector<AnimationClip> animations;
     AnimationPlayer animationPlayer;
     AnimationStateMachine stateMachine;
+    AnimationLayerController layerController;
+    BlendSpace1D locomotionBlendSpace;
     bool useStateMachine = false;  // Set true after state machine is initialized
+    bool useLayerController = false;  // Set true to use layer controller instead
     size_t currentAnimationIndex = 0;  // Track current animation by index, not duration
 
     // IK system for procedural adjustments

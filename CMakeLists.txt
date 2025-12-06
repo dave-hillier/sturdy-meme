@@ -76,6 +76,11 @@ set(SOURCES
     src/Animation.cpp
     src/AnimatedCharacter.cpp
     src/AnimationStateMachine.cpp
+    src/AnimationBlend.cpp
+    src/AnimationLayer.cpp
+    src/AnimationLayerController.cpp
+    src/BlendSpace.cpp
+    src/BoneMask.cpp
     src/IKSolver.cpp
     src/FBXLoader.cpp
     src/FBXPostProcess.cpp
