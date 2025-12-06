@@ -17,7 +17,7 @@
 #define UBO_BINDING BINDING_UBO
 #endif
 
-layout(binding = UBO_BINDING) uniform UniformBufferObject {
+layout(set = 0, binding = UBO_BINDING) uniform UniformBufferObject {
     mat4 model;
     mat4 view;
     mat4 proj;
