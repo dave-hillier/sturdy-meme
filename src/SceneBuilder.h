@@ -68,6 +68,7 @@ public:
     Mesh& getCapeMesh() { return capeMesh; }
     size_t getCapeIndex() const { return capeIndex; }
     bool hasCape() const { return hasCapeEnabled; }
+    void setCapeEnabled(bool enabled) { hasCapeEnabled = enabled; }
 
     // Well entrance position (for creating terrain hole)
     float getWellEntranceX() const { return wellEntranceX; }

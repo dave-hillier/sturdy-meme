@@ -239,6 +239,10 @@ void Application::run() {
         // Calculate movement speed from desired velocity for animation state machine
         float movementSpeed = glm::length(glm::vec2(desiredVelocity.x, desiredVelocity.z));
         bool isGrounded = physics.isCharacterOnGround();
+
+        // Sync cape enabled state from GUI
+        renderer.getSceneBuilder().setCapeEnabled(gui.getPlayerSettings().capeEnabled);
+
         renderer.updateAnimatedCharacter(deltaTime, movementSpeed, isGrounded, isJumping);
 
         // Update camera and player based on mode

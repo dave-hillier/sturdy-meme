@@ -34,7 +34,7 @@ struct IKDebugSettings {
 // Player settings for GUI control
 struct PlayerSettings {
     // Cape
-    bool capeEnabled = true;
+    bool capeEnabled = false;
     bool showCapeColliders = false;
 
     // Future player settings can go here
