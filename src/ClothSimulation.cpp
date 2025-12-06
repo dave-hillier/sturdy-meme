@@ -66,6 +66,14 @@ void ClothSimulation::pinParticle(int x, int y) {
     }
 }
 
+void ClothSimulation::setParticlePosition(int x, int y, const glm::vec3& position) {
+    if (x >= 0 && x < width && y >= 0 && y < height) {
+        int idx = getParticleIndex(x, y);
+        particles[idx].position = position;
+        particles[idx].oldPosition = position;  // Avoid velocity jump
+    }
+}
+
 void ClothSimulation::addConstraint(int x1, int y1, int x2, int y2) {
     int idx1 = getParticleIndex(x1, y1);
     int idx2 = getParticleIndex(x2, y2);
@@ -178,8 +186,13 @@ void ClothSimulation::addSphereCollision(const glm::vec3& center, float radius) 
     sphereColliders.push_back({center, radius});
 }
 
+void ClothSimulation::addCapsuleCollision(const glm::vec3& point1, const glm::vec3& point2, float radius) {
+    capsuleColliders.push_back({point1, point2, radius});
+}
+
 void ClothSimulation::clearCollisions() {
     sphereColliders.clear();
+    capsuleColliders.clear();
 }
 
 void ClothSimulation::handleCollisions() {
@@ -200,6 +213,44 @@ void ClothSimulation::handleCollisions() {
                     // Push particle to surface of sphere
                     glm::vec3 normal = toParticle / dist;
                     p.position = sphere.center + normal * sphere.radius;
+                }
+            }
+        }
+    }
+
+    // Handle capsule collisions
+    for (const auto& capsule : capsuleColliders) {
+        glm::vec3 axis = capsule.point2 - capsule.point1;
+        float axisLengthSq = glm::dot(axis, axis);
+
+        for (auto& p : particles) {
+            if (p.pinned) continue;
+
+            // Find closest point on capsule axis to particle
+            glm::vec3 toParticle = p.position - capsule.point1;
+            float t = 0.0f;
+
+            if (axisLengthSq > 0.0001f) {
+                t = glm::clamp(glm::dot(toParticle, axis) / axisLengthSq, 0.0f, 1.0f);
+            }
+
+            glm::vec3 closestPoint = capsule.point1 + axis * t;
+            glm::vec3 toParticleFromClosest = p.position - closestPoint;
+            float dist = glm::length(toParticleFromClosest);
+
+            // If particle is inside the capsule, push it out
+            if (dist < capsule.radius) {
+                if (dist < 0.0001f) {
+                    // Particle exactly on axis, push in arbitrary perpendicular direction
+                    glm::vec3 perpendicular = glm::vec3(1.0f, 0.0f, 0.0f);
+                    if (std::abs(glm::dot(glm::normalize(axis), perpendicular)) > 0.9f) {
+                        perpendicular = glm::vec3(0.0f, 1.0f, 0.0f);
+                    }
+                    p.position = closestPoint + perpendicular * capsule.radius;
+                } else {
+                    // Push particle to surface of capsule
+                    glm::vec3 normal = toParticleFromClosest / dist;
+                    p.position = closestPoint + normal * capsule.radius;
                 }
             }
         }
