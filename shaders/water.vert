@@ -51,7 +51,10 @@ layout(std140, binding = BINDING_WATER_UBO) uniform WaterUniforms {
     float causticsScale;       // Phase 9: Caustics pattern scale
     float causticsSpeed;       // Phase 9: Caustics animation speed
     float causticsIntensity;   // Phase 9: Caustics brightness
-    float padding;             // Alignment padding
+    float nearPlane;           // Camera near plane for depth linearization
+    float farPlane;            // Camera far plane for depth linearization
+    float padding1;            // Alignment padding
+    float padding2;            // Alignment padding
 };
 
 // Displacement map (Phase 4: Interactive splashes)

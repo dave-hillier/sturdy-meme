@@ -52,7 +52,10 @@ layout(std140, binding = BINDING_WATER_UBO) uniform WaterUniforms {
     float causticsScale;
     float causticsSpeed;
     float causticsIntensity;
-    float padding;
+    float nearPlane;
+    float farPlane;
+    float padding1;
+    float padding2;
 } water;
 
 layout(location = 0) in vec3 inPosition;

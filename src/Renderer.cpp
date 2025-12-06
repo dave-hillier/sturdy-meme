@@ -106,7 +106,8 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     ErosionConfig erosionConfig{};
     erosionConfig.sourceHeightmapPath = heightmapPath;
     erosionConfig.cacheDirectory = terrainDataPath;
-    erosionConfig.seaLevel = 23.0f;
+    // Sea level: real-world 0m altitude maps to worldY = 0 - minAltitude = 15m
+    erosionConfig.seaLevel = 15.0f;
     erosionConfig.terrainSize = 16384.0f;
     erosionConfig.minAltitude = -15.0f;
     erosionConfig.maxAltitude = 220.0f;
@@ -539,9 +540,10 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     if (!waterSystem.init(waterInfo)) return false;
 
     // Configure water surface
-    // Terrain formula is h * heightScale, so world Y=0 corresponds to minAltitude
-    // Real sea level (0m altitude) is at world Y = -minAltitude
-    float seaLevel = 25;
+    // Terrain formula is worldY = h * heightScale, where h is normalized [0,1]
+    // h=0 maps to minAltitude, h=1 maps to maxAltitude
+    // Real-world 0m altitude corresponds to worldY = 0 - minAltitude = 15m
+    float seaLevel = -terrainConfig.minAltitude;  // = 15.0f for minAltitude = -15
     waterSystem.setWaterLevel(seaLevel);
     waterSystem.setWaterExtent(glm::vec2(0.0f, 0.0f), glm::vec2(65536.0f, 65536.0f));
     waterSystem.setWaterColor(glm::vec4(0.02f, 0.08f, 0.15f, 0.95f));  // Deep ocean blue
@@ -549,12 +551,15 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     waterSystem.setWaveLength(30.0f);     // Longer wavelengths for open sea
     waterSystem.setWaveSteepness(0.4f);
     waterSystem.setWaveSpeed(0.8f);
-    waterSystem.setTidalRange(1.0f);      // 3m tidal range (spring tide: ±3m from mean)
+    waterSystem.setTidalRange(1.0f);      // ±1m tidal range
 
     // Set terrain params for shore detection
     waterSystem.setTerrainParams(terrainConfig.size, terrainConfig.heightScale);
     waterSystem.setShoreBlendDistance(3.0f);  // Soft edge over 3m
     waterSystem.setShoreFoamWidth(8.0f);      // Shore foam band 8m wide
+
+    // Set camera planes for depth linearization (used for soft edges, intersection foam)
+    waterSystem.setCameraPlanes(camera.getNearPlane(), camera.getFarPlane());
 
     // Initialize flow map generator
     if (!flowMapGenerator.init(device, allocator, commandPool, graphicsQueue)) {
