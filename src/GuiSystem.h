@@ -31,6 +31,15 @@ struct IKDebugSettings {
     float groundOffset = 0.0f;
 };
 
+// Player settings for GUI control
+struct PlayerSettings {
+    // Cape
+    bool capeEnabled = false;
+    bool showCapeColliders = false;
+
+    // Future player settings can go here
+};
+
 class GuiSystem {
 public:
     GuiSystem() = default;
@@ -55,6 +64,10 @@ public:
     IKDebugSettings& getIKDebugSettings() { return ikDebugSettings; }
     const IKDebugSettings& getIKDebugSettings() const { return ikDebugSettings; }
 
+    // Get player settings for external systems
+    PlayerSettings& getPlayerSettings() { return playerSettings; }
+    const PlayerSettings& getPlayerSettings() const { return playerSettings; }
+
 private:
     void setupStyle();
     void renderDashboard(Renderer& renderer, const Camera& camera, float fps);
@@ -66,6 +79,7 @@ private:
     void renderWaterSection(Renderer& renderer);
     void renderDebugSection(Renderer& renderer);
     void renderIKSection(Renderer& renderer, const Camera& camera);
+    void renderPlayerSection(Renderer& renderer);
     void renderProfilerSection(Renderer& renderer);
     void renderHelpOverlay();
     void renderPositionPanel(const Camera& camera);
@@ -77,6 +91,9 @@ private:
 
     // IK debug settings
     IKDebugSettings ikDebugSettings;
+
+    // Player settings
+    PlayerSettings playerSettings;
 
     // Tree editor as separate window
     TreeEditorGui treeEditorGui;

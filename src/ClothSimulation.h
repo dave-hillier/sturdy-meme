@@ -32,11 +32,15 @@ public:
     // Pin particles (fix them in place) - useful for attaching to pole
     void pinParticle(int x, int y);
 
+    // Set particle position (for updating pinned particle positions each frame)
+    void setParticlePosition(int x, int y, const glm::vec3& position);
+
     // Simulation step
     void update(float deltaTime, const WindSystem* windSystem = nullptr);
 
     // Collision detection
     void addSphereCollision(const glm::vec3& center, float radius);
+    void addCapsuleCollision(const glm::vec3& point1, const glm::vec3& point2, float radius);
     void clearCollisions();
 
     // Update mesh vertices from particle positions
@@ -54,6 +58,12 @@ public:
         float radius;
     };
 
+    struct CapsuleCollider {
+        glm::vec3 point1;  // First endpoint of capsule axis
+        glm::vec3 point2;  // Second endpoint of capsule axis
+        float radius;
+    };
+
 private:
     void applyForces(const WindSystem* windSystem);
     void satisfyConstraints();
@@ -67,6 +77,7 @@ private:
     std::vector<Particle> particles;
     std::vector<DistanceConstraint> constraints;
     std::vector<SphereCollider> sphereColliders;
+    std::vector<CapsuleCollider> capsuleColliders;
 
     int width = 0;
     int height = 0;

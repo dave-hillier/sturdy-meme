@@ -24,6 +24,9 @@ void SceneBuilder::registerMaterials() {
     // Uses white texture with a flat normal map
     whiteMaterialId = materialRegistry.registerMaterial("white", whiteTexture, groundNormalMap);
 
+    // Register cape material
+    capeMaterialId = materialRegistry.registerMaterial("cape", capeTexture, capeNormalMap);
+
     SDL_Log("SceneBuilder: Registered %zu materials", materialRegistry.getMaterialCount());
 }
 
@@ -43,6 +46,8 @@ void SceneBuilder::destroy(VmaAllocator allocator, VkDevice device) {
     metalNormalMap.destroy(allocator, device);
     defaultEmissiveMap.destroy(allocator, device);
     whiteTexture.destroy(allocator, device);
+    capeTexture.destroy(allocator, device);
+    capeNormalMap.destroy(allocator, device);
 
     cubeMesh.destroy(allocator);
     sphereMesh.destroy(allocator);
@@ -50,6 +55,7 @@ void SceneBuilder::destroy(VmaAllocator allocator, VkDevice device) {
     groundMesh.destroy(allocator);
     flagPoleMesh.destroy(allocator);
     flagClothMesh.destroy(allocator);
+    capeMesh.destroy(allocator);
     if (hasAnimatedCharacter) {
         animatedCharacter.destroy(allocator);
     }
@@ -127,6 +133,15 @@ bool SceneBuilder::createMeshes(const InitInfo& info) {
             });
             SDL_Log("SceneBuilder: Setup ground query for foot IK");
         }
+
+        // Initialize player cape attached to the character
+        playerCape.create(8, 12, 0.08f);  // 8x12 grid, 8cm spacing
+        playerCape.setupDefaultColliders();
+        playerCape.setupDefaultAttachments();
+        playerCape.createMesh(capeMesh);
+        capeMesh.upload(info.allocator, info.device, info.commandPool, info.graphicsQueue);
+        hasCapeEnabled = true;
+        SDL_Log("SceneBuilder: Initialized player cape");
     } else {
         hasAnimatedCharacter = false;
         SDL_Log("SceneBuilder: Failed to load FBX character, using capsule fallback");
@@ -190,6 +205,31 @@ bool SceneBuilder::loadTextures(const InitInfo& info) {
                                         info.commandPool, info.graphicsQueue)) {
         SDL_Log("Failed to create white texture");
         return false;
+    }
+
+    // Load cape textures (generated during build)
+    std::string capeDiffusePath = info.resourcePath + "/assets/textures/cape_diffuse.png";
+    if (!capeTexture.load(capeDiffusePath, info.allocator, info.device, info.commandPool,
+                          info.graphicsQueue, info.physicalDevice)) {
+        SDL_Log("Cape texture not found, creating red fallback: %s", capeDiffusePath.c_str());
+        // Create red fallback if generated texture not found
+        if (!capeTexture.createSolidColor(180, 30, 30, 255, info.allocator, info.device,
+                                           info.commandPool, info.graphicsQueue)) {
+            SDL_Log("Failed to create cape fallback texture");
+            return false;
+        }
+    }
+
+    std::string capeNormalPath = info.resourcePath + "/assets/textures/cape_normal.png";
+    if (!capeNormalMap.load(capeNormalPath, info.allocator, info.device, info.commandPool,
+                             info.graphicsQueue, info.physicalDevice, false)) {
+        SDL_Log("Cape normal map not found, creating flat fallback: %s", capeNormalPath.c_str());
+        // Create flat normal map fallback
+        if (!capeNormalMap.createSolidColor(128, 128, 255, 255, info.allocator, info.device,
+                                             info.commandPool, info.graphicsQueue)) {
+            SDL_Log("Failed to create cape normal map fallback");
+            return false;
+        }
     }
 
     return true;
@@ -416,6 +456,20 @@ void SceneBuilder::createRenderables() {
         .withCastsShadow(true)
         .build());
 
+    // Player cape - attached to character, updated each frame
+    if (hasCapeEnabled) {
+        capeIndex = sceneObjects.size();
+        sceneObjects.push_back(RenderableBuilder()
+            .withTransform(glm::mat4(1.0f))  // Identity, cloth positions are in world space
+            .withMesh(&capeMesh)
+            .withTexture(&capeTexture)
+            .withMaterialId(capeMaterialId)
+            .withRoughness(0.7f)
+            .withMetallic(0.0f)
+            .withCastsShadow(true)
+            .build());
+    }
+
     // Well entrance - demonstrates terrain hole mask system
     // A stone-like frame floating above the terrain hole
     wellEntranceX = 20.0f;
@@ -488,6 +542,22 @@ void SceneBuilder::updateAnimatedCharacter(float deltaTime, VmaAllocator allocat
     // Update the mesh pointer in the renderable (in case it was re-created)
     if (playerObjectIndex < sceneObjects.size()) {
         sceneObjects[playerObjectIndex].mesh = &animatedCharacter.getMesh();
+    }
+
+    // Update player cape if enabled
+    if (hasCapeEnabled) {
+        // Update cape simulation with current skeleton pose
+        playerCape.update(animatedCharacter.getSkeleton(), worldTransform, deltaTime, nullptr);
+
+        // Update cape mesh and re-upload
+        playerCape.updateMesh(capeMesh);
+        capeMesh.destroy(allocator);
+        capeMesh.upload(allocator, device, commandPool, queue);
+
+        // Update mesh pointer in renderable
+        if (capeIndex < sceneObjects.size()) {
+            sceneObjects[capeIndex].mesh = &capeMesh;
+        }
     }
 }
 

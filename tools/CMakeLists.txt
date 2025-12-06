@@ -91,3 +91,16 @@ target_link_libraries(sbsar_render PRIVATE
 )
 
 target_compile_features(sbsar_render PRIVATE cxx_std_17)
+
+# Cape texture generator
+add_executable(cape_texture_gen
+    cape_texture_gen.cpp
+)
+
+target_link_libraries(cape_texture_gen PRIVATE
+    SDL3::SDL3
+    glm::glm
+    lodepng
+)
+
+target_compile_features(cape_texture_gen PRIVATE cxx_std_17)

@@ -3,6 +3,7 @@
 #include "Camera.h"
 #include "AtmosphereLUTSystem.h"
 #include "AnimatedCharacter.h"
+#include "PlayerCape.h"
 
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
@@ -262,6 +263,10 @@ void GuiSystem::render(Renderer& renderer, const Camera& camera, float deltaTime
             }
             if (ImGui::BeginTabItem("Water")) {
                 renderWaterSection(renderer);
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Player")) {
+                renderPlayerSection(renderer);
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("IK")) {
@@ -2276,4 +2281,114 @@ void GuiSystem::renderSkeletonOverlay(Renderer& renderer, const Camera& camera) 
             }
         }
     }
+
+    // Draw cape colliders if enabled
+    if (playerSettings.showCapeColliders) {
+        auto& cape = sceneBuilder.getPlayerCape();
+        if (cape.isInitialized()) {
+            CapeDebugData capeData = cape.getDebugData();
+
+            // Draw sphere colliders (orange circles)
+            for (const auto& sphere : capeData.spheres) {
+                ImVec2 centerScreen = worldToScreen(sphere.center);
+                if (centerScreen.x < -500) continue;
+
+                // Approximate screen radius based on depth
+                glm::vec4 clipCenter = viewProj * glm::vec4(sphere.center, 1.0f);
+                glm::vec4 clipEdge = viewProj * glm::vec4(sphere.center + glm::vec3(sphere.radius, 0, 0), 1.0f);
+                float screenRadius = 20.0f;  // Default size
+                if (clipCenter.w > 0.1f && clipEdge.w > 0.1f) {
+                    float ndcRadius = std::abs((clipEdge.x / clipEdge.w) - (clipCenter.x / clipCenter.w));
+                    screenRadius = ndcRadius * 0.5f * width;
+                    screenRadius = glm::clamp(screenRadius, 5.0f, 100.0f);
+                }
+
+                drawList->AddCircle(centerScreen, screenRadius, IM_COL32(255, 150, 50, 200), 16, 2.0f);
+            }
+
+            // Draw capsule colliders (green lines with circles at ends)
+            for (const auto& capsule : capeData.capsules) {
+                ImVec2 p1Screen = worldToScreen(capsule.point1);
+                ImVec2 p2Screen = worldToScreen(capsule.point2);
+
+                if (p1Screen.x < -500 && p2Screen.x < -500) continue;
+
+                // Approximate screen radius for capsule ends
+                glm::vec4 clipP1 = viewProj * glm::vec4(capsule.point1, 1.0f);
+                float screenRadius = 15.0f;
+                if (clipP1.w > 0.1f) {
+                    glm::vec4 clipEdge = viewProj * glm::vec4(capsule.point1 + glm::vec3(capsule.radius, 0, 0), 1.0f);
+                    if (clipEdge.w > 0.1f) {
+                        float ndcRadius = std::abs((clipEdge.x / clipEdge.w) - (clipP1.x / clipP1.w));
+                        screenRadius = ndcRadius * 0.5f * width;
+                        screenRadius = glm::clamp(screenRadius, 4.0f, 60.0f);
+                    }
+                }
+
+                // Draw capsule axis line
+                if (p1Screen.x > -500 && p2Screen.x > -500) {
+                    drawList->AddLine(p1Screen, p2Screen, IM_COL32(100, 255, 100, 200), 3.0f);
+                }
+
+                // Draw circles at capsule ends
+                if (p1Screen.x > -500) {
+                    drawList->AddCircle(p1Screen, screenRadius, IM_COL32(100, 255, 100, 200), 12, 2.0f);
+                }
+                if (p2Screen.x > -500) {
+                    drawList->AddCircle(p2Screen, screenRadius, IM_COL32(100, 255, 100, 200), 12, 2.0f);
+                }
+            }
+
+            // Draw attachment points (cyan diamonds)
+            for (const auto& attachPos : capeData.attachmentPoints) {
+                ImVec2 screenPos = worldToScreen(attachPos);
+                if (screenPos.x < -500) continue;
+
+                drawList->AddQuadFilled(
+                    ImVec2(screenPos.x, screenPos.y - 8),
+                    ImVec2(screenPos.x + 8, screenPos.y),
+                    ImVec2(screenPos.x, screenPos.y + 8),
+                    ImVec2(screenPos.x - 8, screenPos.y),
+                    IM_COL32(100, 255, 255, 220));
+            }
+        }
+    }
+}
+
+void GuiSystem::renderPlayerSection(Renderer& renderer) {
+    ImGui::Spacing();
+
+    auto& sceneBuilder = renderer.getSceneBuilder();
+    if (!sceneBuilder.hasCharacter()) {
+        ImGui::TextDisabled("No animated character loaded");
+        return;
+    }
+
+    // Cape section
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.9f, 0.5f, 0.5f, 1.0f));
+    ImGui::Text("CAPE");
+    ImGui::PopStyleColor();
+
+    ImGui::Checkbox("Enable Cape", &playerSettings.capeEnabled);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Toggle cape visibility and simulation");
+    }
+
+    ImGui::Checkbox("Show Cape Colliders", &playerSettings.showCapeColliders);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Visualize body colliders used for cape collision");
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Cape info
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.7f, 0.7f, 0.7f, 1.0f));
+    ImGui::Text("CAPE INFO");
+    ImGui::PopStyleColor();
+
+    ImGui::BulletText("Cloth simulation: Verlet integration");
+    ImGui::BulletText("Body colliders: Spheres + Capsules");
+    ImGui::BulletText("Attachments: Shoulders + Upper back");
 }
