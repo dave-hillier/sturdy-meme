@@ -80,7 +80,10 @@ public:
         float causticsScale;       // Caustics pattern scale (Phase 9)
         float causticsSpeed;       // Caustics animation speed (Phase 9)
         float causticsIntensity;   // Caustics brightness (Phase 9)
-        float padding;             // Padding for alignment
+        float nearPlane;           // Camera near plane for depth linearization
+        float farPlane;            // Camera far plane for depth linearization
+        float padding1;            // Padding for alignment
+        float padding2;            // Padding for alignment
     };
 
     WaterSystem() = default;
@@ -202,6 +205,11 @@ public:
     float getCausticsScale() const { return waterUniforms.causticsScale; }
     float getCausticsSpeed() const { return waterUniforms.causticsSpeed; }
     float getCausticsIntensity() const { return waterUniforms.causticsIntensity; }
+
+    // Camera planes for depth linearization (needed for soft edges, intersection foam)
+    void setCameraPlanes(float near, float far) { waterUniforms.nearPlane = near; waterUniforms.farPlane = far; }
+    float getNearPlane() const { return waterUniforms.nearPlane; }
+    float getFarPlane() const { return waterUniforms.farPlane; }
 
     // Get uniform buffers (for G-buffer pass descriptor sets)
     const std::vector<VkBuffer>& getUniformBuffers() const { return waterUniformBuffers; }
