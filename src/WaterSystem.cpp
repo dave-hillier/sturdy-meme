@@ -29,7 +29,7 @@ bool WaterSystem::init(const InitInfo& info) {
     waterUniforms.foamThreshold = 0.1f;  // Reduced to match smaller wave amplitude
     waterUniforms.fresnelPower = 5.0f;
     waterUniforms.terrainSize = 16384.0f;      // Default terrain size
-    waterUniforms.terrainHeightScale = 220.0f; // Default height scale
+    waterUniforms.terrainHeightScale = 235.0f; // Default height scale (maxAlt - minAlt = 220 - (-15))
     waterUniforms.shoreBlendDistance = 3.0f;   // 3m shore blend
     waterUniforms.shoreFoamWidth = 5.0f;       // 5m shore foam band
     waterUniforms.flowStrength = 1.0f;         // 1m UV offset per flow cycle
@@ -50,7 +50,10 @@ bool WaterSystem::init(const InitInfo& info) {
     waterUniforms.causticsScale = 0.1f;       // Caustics pattern scale (Phase 9)
     waterUniforms.causticsSpeed = 0.8f;       // Caustics animation speed (Phase 9)
     waterUniforms.causticsIntensity = 0.5f;   // Caustics brightness (Phase 9)
-    waterUniforms.padding = 0.0f;
+    waterUniforms.nearPlane = 0.1f;           // Default camera near plane
+    waterUniforms.farPlane = 50000.0f;        // Default camera far plane (matches Camera.cpp)
+    waterUniforms.padding1 = 0.0f;
+    waterUniforms.padding2 = 0.0f;
 
     // Phase 12: Material blending defaults
     // Secondary material defaults to same as primary (no blending)
