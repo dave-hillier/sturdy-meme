@@ -435,19 +435,15 @@ uint32_t WaterTileCull::getVisibleTileCount(uint32_t frameIndex) const {
     return *counterPtr;
 }
 
-bool WaterTileCull::wasWaterVisibleLastFrame(uint32_t currentFrameIndex) const {
-    if (!enabled || counterMapped == nullptr || framesInFlight < 2) {
-        // If disabled, not initialized, or not enough frames, assume water is visible
-        return true;
-    }
-
-    // Read from 2 frames back - this is guaranteed complete by fence synchronization
-    // (frame N waits on fence from frame N-2 before starting)
-    // With framesInFlight=2: frame 0 reads from frame 0, frame 1 reads from frame 1
-    // This effectively means same-frame-index from last cycle, which is complete
-    uint32_t safeFrameIndex = currentFrameIndex;  // Same index = 2 frames ago
-    uint32_t count = getVisibleTileCount(safeFrameIndex);
-
-    // Water is visible if any tiles were marked visible
-    return count > 0;
+bool WaterTileCull::wasWaterVisibleLastFrame(uint32_t /*currentFrameIndex*/) const {
+    // TODO: Tile-based visibility culling has GPU/CPU synchronization issues causing flickering.
+    // The compute shader writes to counter buffer via atomicAdd, but CPU reads may not see
+    // updated values reliably. Possible causes:
+    // - Memory coherency between GPU writes and CPU reads
+    // - Timing of when counter is read vs when GPU dispatch completes
+    // - Counter reset at start of recordTileCull interfering with reads
+    //
+    // For now, always assume water is visible. The tile cull compute still runs and
+    // produces valid data - this can be used for indirect draw integration later.
+    return true;
 }
