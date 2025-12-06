@@ -33,6 +33,10 @@ public:
     // Snap smoothed values to targets (call on mode switch)
     void resetSmoothing();
 
+    // Initialize third-person camera from current free camera position
+    // Call this when switching from free camera to third-person mode
+    void initializeThirdPersonFromCurrentPosition(const glm::vec3& target);
+
     glm::mat4 getViewMatrix() const;
     glm::mat4 getProjectionMatrix() const;
     glm::vec3 getPosition() const { return position; }

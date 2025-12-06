@@ -198,3 +198,44 @@ void Camera::resetSmoothing() {
 void Camera::setTargetFov(float newFov) {
     targetFov = newFov;
 }
+
+void Camera::initializeThirdPersonFromCurrentPosition(const glm::vec3& target) {
+    // Set the target position
+    thirdPersonTarget = target;
+    smoothedTarget = target;
+
+    // Calculate camera offset from target
+    glm::vec3 offset = position - target;
+    float distance = glm::length(offset);
+
+    // Clamp distance to valid range
+    distance = std::clamp(distance, thirdPersonMinDistance, thirdPersonMaxDistance);
+
+    // Calculate yaw from horizontal offset (atan2 of x,z gives angle)
+    // Camera is positioned at target - horizontalDist * (cos(yaw), 0, sin(yaw))
+    // So offset = -horizontalDist * (cos(yaw), 0, sin(yaw)) + (0, verticalOffset, 0)
+    // Therefore: yaw = atan2(-offset.z, -offset.x)
+    float calculatedYaw = glm::degrees(atan2(-offset.z, -offset.x));
+
+    // Calculate pitch from vertical offset
+    // verticalOffset = distance * sin(pitch)
+    // horizontalDist = distance * cos(pitch)
+    float horizontalDist = glm::length(glm::vec2(offset.x, offset.z));
+    float calculatedPitch = glm::degrees(atan2(offset.y, horizontalDist));
+
+    // Clamp pitch to valid range
+    calculatedPitch = std::clamp(calculatedPitch, -60.0f, 60.0f);
+
+    // Set both target and smoothed values to calculated values for smooth transition
+    targetYaw = calculatedYaw;
+    smoothedYaw = calculatedYaw;
+    targetPitch = calculatedPitch;
+    smoothedPitch = calculatedPitch;
+    targetDistance = distance;
+    smoothedDistance = distance;
+
+    // Also update the base yaw/pitch so getYaw() returns correct value
+    yaw = calculatedYaw;
+    pitch = calculatedPitch;
+    thirdPersonDistance = distance;
+}

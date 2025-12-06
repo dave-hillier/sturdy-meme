@@ -465,9 +465,13 @@ void Application::processEvents() {
 
     // Handle camera mode switch initialization
     if (input.wasModeSwitchedThisFrame()) {
-        camera.resetSmoothing();
         if (input.isThirdPersonMode()) {
-            camera.orbitPitch(15.0f);
+            // Initialize third-person camera from current free camera position
+            // This ensures smooth transition instead of snapping to origin
+            camera.initializeThirdPersonFromCurrentPosition(player.getFocusPoint());
+        } else {
+            // Switching to free camera - just reset smoothing
+            camera.resetSmoothing();
         }
     }
 }
