@@ -1168,12 +1168,12 @@ vec3 renderAtmosphere(vec3 dir) {
     vec3 skyBehindClouds = sky * clouds.transmittance;
 
     // Add atmospheric in-scattering between camera and clouds (haze in front of clouds)
-    // This uses the inscatter we already computed, scaled by how much cloud is visible
+    // This uses the LUT inscatter, scaled by how much cloud is visible
     vec3 hazeLight = sunLight;
     if (moonSkyContribution > 0.01) {
         hazeLight += moonLight * 0.3 * moonSkyContribution;
     }
-    vec3 hazeInFront = result.inscatter * hazeLight * (1.0 - clouds.transmittance) * 0.3;
+    vec3 hazeInFront = skyLUTColor * hazeLight * (1.0 - clouds.transmittance) * 0.3;
 
     // Final composite: sky behind clouds + cloud color + haze in front
     sky = skyBehindClouds + cloudColor + hazeInFront;
@@ -1181,7 +1181,7 @@ vec3 renderAtmosphere(vec3 dir) {
     // Sun and moon discs (rendered behind clouds)
     // Only show sun/moon if clouds don't fully occlude them
     float sunDisc = celestialDisc(dir, ubo.sunDirection.xyz, SUN_ANGULAR_RADIUS);
-    sky += sunLight * sunDisc * 20.0 * result.transmittance * clouds.transmittance;
+    sky += sunLight * sunDisc * 20.0 * skyTransmittance * clouds.transmittance;
 
     // Moon disc with lunar phase simulation
     // Use MOON_DISC_SIZE for celestialDisc (creates visible disc)
@@ -1195,7 +1195,7 @@ vec3 renderAtmosphere(vec3 dir) {
     // During full moon, this should create a strong bloom halo
     float moonIntensity = 25.0 * phaseMask;  // Higher than sun (20.0) when fully lit
     sky += ubo.moonColor.rgb * moonDisc * moonIntensity * ubo.moonDirection.w *
-           clamp(result.transmittance, vec3(0.2), vec3(1.0)) * clouds.transmittance;
+           clamp(skyTransmittance, vec3(0.2), vec3(1.0)) * clouds.transmittance;
 
     // Star field blended over the atmospheric tint (also behind clouds)
     // Stars are already modulated by nightFactor inside starField()
