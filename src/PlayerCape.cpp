@@ -35,23 +35,26 @@ void PlayerCape::setupDefaultColliders() {
         return "mixamorig:" + name;
     };
 
+    // Note: In Mixamo character local space:
+    // +Y is up, +Z is FORWARD (where character faces), -Z is BACK
+
     // Spine/Torso capsule (from hips to spine2)
-    // Offset slightly back (+Z in character local space)
+    // Offset slightly back (-Z in character local space)
     bodyColliders.push_back({
         makeBone("Hips"), makeBone("Spine2"),
-        0.12f,                           // radius
-        glm::vec3(0.0f, 0.0f, 0.02f),   // offset1 - slightly back
-        glm::vec3(0.0f, 0.0f, 0.02f),   // offset2 - slightly back
-        true                             // isCapsule
+        0.12f,                            // radius
+        glm::vec3(0.0f, 0.0f, -0.02f),   // offset1 - slightly back (-Z)
+        glm::vec3(0.0f, 0.0f, -0.02f),   // offset2 - slightly back (-Z)
+        true                              // isCapsule
     });
 
     // Upper back sphere (to prevent cape going through back)
     bodyColliders.push_back({
         makeBone("Spine2"), "",
-        0.14f,                           // radius
-        glm::vec3(0.0f, 0.0f, 0.08f),   // offset: behind spine (+Z is back)
+        0.14f,                            // radius
+        glm::vec3(0.0f, 0.0f, -0.08f),   // offset: behind spine (-Z is back)
         glm::vec3(0.0f),
-        false                            // isSphere
+        false                             // isSphere
     });
 
     // Left upper arm
@@ -90,7 +93,7 @@ void PlayerCape::setupDefaultColliders() {
     bodyColliders.push_back({
         makeBone("Head"), "",
         0.10f,
-        glm::vec3(0.0f, 0.05f, 0.0f),   // offset up
+        glm::vec3(0.0f, 0.05f, 0.0f),    // offset up
         glm::vec3(0.0f),
         false
     });
@@ -105,27 +108,29 @@ void PlayerCape::setupDefaultAttachments() {
         return "mixamorig:" + name;
     };
 
+    // Note: In Mixamo character local space:
+    // +Y is up, +Z is FORWARD (where character faces), -Z is BACK
+
     // Attach top-left corner to left shoulder
-    // +Z is back in character local space
     attachments.push_back({
         makeBone("LeftShoulder"),
-        glm::vec3(0.0f, -0.02f, 0.08f),  // Offset: back of shoulder
-        0, 0                              // Top-left corner
+        glm::vec3(0.0f, -0.02f, -0.08f),  // Offset: back of shoulder (-Z)
+        0, 0                               // Top-left corner
     });
 
     // Attach top-right corner to right shoulder
     attachments.push_back({
         makeBone("RightShoulder"),
-        glm::vec3(0.0f, -0.02f, 0.08f),  // Offset: back of shoulder
-        clothWidth - 1, 0                 // Top-right corner
+        glm::vec3(0.0f, -0.02f, -0.08f),  // Offset: back of shoulder (-Z)
+        clothWidth - 1, 0                  // Top-right corner
     });
 
     // Attach top-center to spine2 (upper back)
     int centerX = clothWidth / 2;
     attachments.push_back({
         makeBone("Spine2"),
-        glm::vec3(0.0f, 0.0f, 0.10f),    // Offset: back of spine
-        centerX, 0                        // Top-center
+        glm::vec3(0.0f, 0.0f, -0.10f),    // Offset: back of spine (-Z)
+        centerX, 0                         // Top-center
     });
 
     // Pin the particles
@@ -234,7 +239,8 @@ void PlayerCape::initializeFromSkeleton(const Skeleton& skeleton, const glm::mat
 
     // Initialize all cloth particles to form a flat cape behind the character
     // Get the character's back direction from world transform
-    glm::vec3 back = glm::normalize(glm::vec3(worldTransform[2]));  // Z axis of transform
+    // In Mixamo, +Z is forward, so -Z is back
+    glm::vec3 back = -glm::normalize(glm::vec3(worldTransform[2]));  // -Z axis = back
 
     for (int y = 0; y < clothHeight; ++y) {
         for (int x = 0; x < clothWidth; ++x) {
