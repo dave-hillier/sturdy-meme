@@ -133,18 +133,18 @@ void AnimationStateMachine::update(float deltaTime, float movementSpeed, bool is
             jumpTrajectory.active = false;
 
             // Quick blend to landing animation if we landed early
-            float blendTime = 0.15f;
+            float landingBlendDuration = 0.15f;
             if (jumpTrajectory.elapsedTime < jumpTrajectory.predictedDuration * 0.8f) {
                 // Early landing - faster blend
-                blendTime = 0.1f;
+                landingBlendDuration = 0.1f;
             }
 
             if (movementSpeed > RUN_THRESHOLD) {
-                transitionTo("run", blendTime);
+                transitionTo("run", landingBlendDuration);
             } else if (movementSpeed > WALK_THRESHOLD) {
-                transitionTo("walk", blendTime);
+                transitionTo("walk", landingBlendDuration);
             } else {
-                transitionTo("idle", blendTime + 0.05f);
+                transitionTo("idle", landingBlendDuration + 0.05f);
             }
         }
     } else if (isJumping) {
@@ -191,6 +191,9 @@ void AnimationStateMachine::applyToSkeleton(Skeleton& skeleton) const {
             // Blend between previous and current
             for (size_t i = 0; i < skeleton.joints.size(); ++i) {
                 // Decompose both transforms
+                // Note: localTransform = T * Rpre * R * S (see Animation.cpp)
+                // We need to extract the animated rotation R (without preRotation),
+                // interpolate that, then reapply preRotation
                 glm::vec3 prevT = glm::vec3(prevTransforms[i][3]);
                 glm::vec3 currT = glm::vec3(skeleton.joints[i].localTransform[3]);
 
@@ -212,19 +215,29 @@ void AnimationStateMachine::applyToSkeleton(Skeleton& skeleton) const {
                     glm::vec3(skeleton.joints[i].localTransform[1]) / currS.y,
                     glm::vec3(skeleton.joints[i].localTransform[2]) / currS.z
                 );
-                glm::quat prevR = glm::quat_cast(prevRotMat);
-                glm::quat currR = glm::quat_cast(currRotMat);
 
-                // Interpolate
+                // The decomposed rotation is Rpre * R (preRotation combined with animated rotation)
+                glm::quat prevCombinedR = glm::quat_cast(prevRotMat);
+                glm::quat currCombinedR = glm::quat_cast(currRotMat);
+
+                // Extract the animated rotation by removing preRotation:
+                // combinedR = Rpre * R, so R = inverse(Rpre) * combinedR
+                const glm::quat& preRot = skeleton.joints[i].preRotation;
+                glm::quat preRotInv = glm::inverse(preRot);
+                glm::quat prevAnimR = preRotInv * prevCombinedR;
+                glm::quat currAnimR = preRotInv * currCombinedR;
+
+                // Interpolate the animated rotations (not the preRotation)
                 glm::vec3 blendT = glm::mix(prevT, currT, blendFactor);
-                glm::quat blendR = glm::slerp(prevR, currR, blendFactor);
+                glm::quat blendAnimR = glm::slerp(prevAnimR, currAnimR, blendFactor);
                 glm::vec3 blendS = glm::mix(prevS, currS, blendFactor);
 
-                // Rebuild transform
+                // Rebuild transform: T * Rpre * R * S
                 glm::mat4 T = glm::translate(glm::mat4(1.0f), blendT);
-                glm::mat4 R = glm::mat4_cast(blendR);
+                glm::mat4 Rpre = glm::mat4_cast(preRot);
+                glm::mat4 R = glm::mat4_cast(blendAnimR);
                 glm::mat4 S = glm::scale(glm::mat4(1.0f), blendS);
-                skeleton.joints[i].localTransform = T * R * S;
+                skeleton.joints[i].localTransform = T * Rpre * R * S;
             }
             return;
         }
