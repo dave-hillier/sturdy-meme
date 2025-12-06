@@ -156,6 +156,7 @@ private:
 
     // Material IDs cached for use in createRenderables
     MaterialId crateMaterialId = INVALID_MATERIAL_ID;
+    MaterialId groundMaterialId = INVALID_MATERIAL_ID;
     MaterialId metalMaterialId = INVALID_MATERIAL_ID;
     MaterialId whiteMaterialId = INVALID_MATERIAL_ID;
     MaterialId capeMaterialId = INVALID_MATERIAL_ID;

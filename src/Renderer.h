@@ -441,8 +441,6 @@ private:
     std::vector<void*> lightBuffersMapped;
 
     std::optional<DescriptorManager::Pool> descriptorManagerPool;
-    std::vector<VkDescriptorSet> descriptorSets;
-    std::vector<VkDescriptorSet> groundDescriptorSets;
 
     std::vector<VkSemaphore> imageAvailableSemaphores;
     std::vector<VkSemaphore> renderFinishedSemaphores;
@@ -450,9 +448,8 @@ private:
 
     // Scene management (meshes, textures, objects, lights, physics)
     SceneManager sceneManager;
-    std::vector<VkDescriptorSet> metalDescriptorSets;
+    // Rock descriptor sets (RockSystem has its own textures, not in MaterialRegistry)
     std::vector<VkDescriptorSet> rockDescriptorSets;
-    std::vector<VkDescriptorSet> characterDescriptorSets;  // For vertex-colored character
 
     uint32_t currentFrame = 0;
     static constexpr int MAX_FRAMES_IN_FLIGHT = 2;

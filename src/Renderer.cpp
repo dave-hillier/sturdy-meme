@@ -444,19 +444,22 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
         cloudShadowSystem.getShadowMapView(),
         cloudShadowSystem.getShadowMapSampler());
 
-    // Update main descriptor sets with cloud shadow map (binding 9)
+    // Update all descriptor sets with cloud shadow map (binding 9)
     // This is done here because cloudShadowSystem is initialized after createDescriptorSets
     {
+        // Update MaterialRegistry-managed descriptor sets
+        sceneManager.getSceneBuilder().getMaterialRegistry().updateCloudShadowBinding(
+            device,
+            cloudShadowSystem.getShadowMapView(),
+            cloudShadowSystem.getShadowMapSampler());
+
+        // Update descriptor sets not managed by MaterialRegistry (rocks, skinned)
         MaterialDescriptorFactory factory(device);
-        VkDescriptorSet allSets[] = {
-            descriptorSets[0], descriptorSets[1],
-            groundDescriptorSets[0], groundDescriptorSets[1],
-            metalDescriptorSets[0], metalDescriptorSets[1],
+        VkDescriptorSet otherSets[] = {
             rockDescriptorSets[0], rockDescriptorSets[1],
-            characterDescriptorSets[0], characterDescriptorSets[1],
             skinnedDescriptorSets[0], skinnedDescriptorSets[1]
         };
-        for (auto set : allSets) {
+        for (auto set : otherSets) {
             factory.updateCloudShadowBinding(set,
                 cloudShadowSystem.getShadowMapView(),
                 cloudShadowSystem.getShadowMapSampler());
@@ -1318,106 +1321,69 @@ bool Renderer::createDescriptorPool() {
 bool Renderer::createDescriptorSets() {
     VkDevice device = vulkanContext.getDevice();
 
-    // Allocate descriptor sets using the pool manager
-    descriptorSets = descriptorManagerPool->allocate(descriptorSetLayout, MAX_FRAMES_IN_FLIGHT);
-    if (descriptorSets.empty()) {
-        SDL_Log("Failed to allocate descriptor sets");
+    // Create descriptor sets for all materials via MaterialRegistry
+    // This replaces the hardcoded per-material descriptor set allocation
+    auto& materialRegistry = sceneManager.getSceneBuilder().getMaterialRegistry();
+
+    // Lambda to build common bindings for a given frame
+    auto getCommonBindings = [this](uint32_t frameIndex) -> MaterialDescriptorFactory::CommonBindings {
+        MaterialDescriptorFactory::CommonBindings common{};
+        common.uniformBuffer = uniformBuffers[frameIndex];
+        common.uniformBufferSize = sizeof(UniformBufferObject);
+        common.shadowMapView = shadowSystem.getShadowImageView();
+        common.shadowMapSampler = shadowSystem.getShadowSampler();
+        common.lightBuffer = lightBuffers[frameIndex];
+        common.lightBufferSize = sizeof(LightBuffer);
+        common.emissiveMapView = sceneManager.getSceneBuilder().getDefaultEmissiveMap().getImageView();
+        common.emissiveMapSampler = sceneManager.getSceneBuilder().getDefaultEmissiveMap().getSampler();
+        common.pointShadowView = shadowSystem.getPointShadowArrayView(frameIndex);
+        common.pointShadowSampler = shadowSystem.getPointShadowSampler();
+        common.spotShadowView = shadowSystem.getSpotShadowArrayView(frameIndex);
+        common.spotShadowSampler = shadowSystem.getSpotShadowSampler();
+        common.snowMaskView = snowMaskSystem.getSnowMaskView();
+        common.snowMaskSampler = snowMaskSystem.getSnowMaskSampler();
+        // Snow and cloud shadow UBOs (bindings 10 and 11)
+        common.snowUboBuffer = snowBuffers[frameIndex];
+        common.snowUboBufferSize = sizeof(SnowUBO);
+        common.cloudShadowUboBuffer = cloudShadowBuffers[frameIndex];
+        common.cloudShadowUboBufferSize = sizeof(CloudShadowUBO);
+        // Cloud shadow texture is added later in init() after cloudShadowSystem is initialized
+        // Placeholder texture for unused PBR bindings (13-16)
+        common.placeholderTextureView = sceneManager.getSceneBuilder().getWhiteTexture().getImageView();
+        common.placeholderTextureSampler = sceneManager.getSceneBuilder().getWhiteTexture().getSampler();
+        return common;
+    };
+
+    materialRegistry.createDescriptorSets(
+        device,
+        *descriptorManagerPool,
+        descriptorSetLayout,
+        MAX_FRAMES_IN_FLIGHT,
+        getCommonBindings);
+
+    if (!materialRegistry.hasDescriptorSets()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create MaterialRegistry descriptor sets");
         return false;
     }
 
-    groundDescriptorSets = descriptorManagerPool->allocate(descriptorSetLayout, MAX_FRAMES_IN_FLIGHT);
-    if (groundDescriptorSets.empty()) {
-        SDL_Log("Failed to allocate ground descriptor sets");
-        return false;
-    }
-
-    metalDescriptorSets = descriptorManagerPool->allocate(descriptorSetLayout, MAX_FRAMES_IN_FLIGHT);
-    if (metalDescriptorSets.empty()) {
-        SDL_Log("Failed to allocate metal descriptor sets");
-        return false;
-    }
-
+    // Rock descriptor sets (RockSystem has its own textures, not in MaterialRegistry)
     rockDescriptorSets = descriptorManagerPool->allocate(descriptorSetLayout, MAX_FRAMES_IN_FLIGHT);
     if (rockDescriptorSets.empty()) {
         SDL_Log("Failed to allocate rock descriptor sets");
         return false;
     }
 
-    characterDescriptorSets = descriptorManagerPool->allocate(descriptorSetLayout, MAX_FRAMES_IN_FLIGHT);
-    if (characterDescriptorSets.empty()) {
-        SDL_Log("Failed to allocate character descriptor sets");
-        return false;
-    }
-
-    // Use factory to write descriptor sets with proper image layouts
+    // Write rock descriptor sets
     MaterialDescriptorFactory factory(device);
-
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        // Build common bindings for this frame
-        MaterialDescriptorFactory::CommonBindings common{};
-        common.uniformBuffer = uniformBuffers[i];
-        common.uniformBufferSize = sizeof(UniformBufferObject);
-        common.shadowMapView = shadowSystem.getShadowImageView();
-        common.shadowMapSampler = shadowSystem.getShadowSampler();
-        common.lightBuffer = lightBuffers[i];
-        common.lightBufferSize = sizeof(LightBuffer);
-        common.emissiveMapView = sceneManager.getSceneBuilder().getDefaultEmissiveMap().getImageView();
-        common.emissiveMapSampler = sceneManager.getSceneBuilder().getDefaultEmissiveMap().getSampler();
-        common.pointShadowView = shadowSystem.getPointShadowArrayView(i);
-        common.pointShadowSampler = shadowSystem.getPointShadowSampler();
-        common.spotShadowView = shadowSystem.getSpotShadowArrayView(i);
-        common.spotShadowSampler = shadowSystem.getSpotShadowSampler();
-        common.snowMaskView = snowMaskSystem.getSnowMaskView();
-        common.snowMaskSampler = snowMaskSystem.getSnowMaskSampler();
-        // Snow and cloud shadow UBOs (bindings 10 and 11)
-        common.snowUboBuffer = snowBuffers[i];
-        common.snowUboBufferSize = sizeof(SnowUBO);
-        common.cloudShadowUboBuffer = cloudShadowBuffers[i];
-        common.cloudShadowUboBufferSize = sizeof(CloudShadowUBO);
-        // Cloud shadow texture is added later in init() after cloudShadowSystem is initialized
-        // Placeholder texture for unused PBR bindings (13-16)
-        common.placeholderTextureView = sceneManager.getSceneBuilder().getWhiteTexture().getImageView();
-        common.placeholderTextureSampler = sceneManager.getSceneBuilder().getWhiteTexture().getSampler();
+        MaterialDescriptorFactory::CommonBindings common = getCommonBindings(static_cast<uint32_t>(i));
 
-        // Crate material
-        {
-            MaterialDescriptorFactory::MaterialTextures mat{};
-            mat.diffuseView = sceneManager.getSceneBuilder().getCrateTexture().getImageView();
-            mat.diffuseSampler = sceneManager.getSceneBuilder().getCrateTexture().getSampler();
-            mat.normalView = sceneManager.getSceneBuilder().getCrateNormalMap().getImageView();
-            mat.normalSampler = sceneManager.getSceneBuilder().getCrateNormalMap().getSampler();
-            factory.writeDescriptorSet(descriptorSets[i], common, mat);
-        }
-
-        // Ground material
-        {
-            MaterialDescriptorFactory::MaterialTextures mat{};
-            mat.diffuseView = sceneManager.getSceneBuilder().getGroundTexture().getImageView();
-            mat.diffuseSampler = sceneManager.getSceneBuilder().getGroundTexture().getSampler();
-            mat.normalView = sceneManager.getSceneBuilder().getGroundNormalMap().getImageView();
-            mat.normalSampler = sceneManager.getSceneBuilder().getGroundNormalMap().getSampler();
-            factory.writeDescriptorSet(groundDescriptorSets[i], common, mat);
-        }
-
-        // Metal material
-        {
-            MaterialDescriptorFactory::MaterialTextures mat{};
-            mat.diffuseView = sceneManager.getSceneBuilder().getMetalTexture().getImageView();
-            mat.diffuseSampler = sceneManager.getSceneBuilder().getMetalTexture().getSampler();
-            mat.normalView = sceneManager.getSceneBuilder().getMetalNormalMap().getImageView();
-            mat.normalSampler = sceneManager.getSceneBuilder().getMetalNormalMap().getSampler();
-            factory.writeDescriptorSet(metalDescriptorSets[i], common, mat);
-        }
-
-        // Character material (white texture for vertex colors)
-        {
-            MaterialDescriptorFactory::MaterialTextures mat{};
-            mat.diffuseView = sceneManager.getSceneBuilder().getWhiteTexture().getImageView();
-            mat.diffuseSampler = sceneManager.getSceneBuilder().getWhiteTexture().getSampler();
-            mat.normalView = sceneManager.getSceneBuilder().getWhiteTexture().getImageView();  // No normal map
-            mat.normalSampler = sceneManager.getSceneBuilder().getWhiteTexture().getSampler();
-            factory.writeDescriptorSet(characterDescriptorSets[i], common, mat);
-        }
+        MaterialDescriptorFactory::MaterialTextures mat{};
+        mat.diffuseView = rockSystem.getRockTexture().getImageView();
+        mat.diffuseSampler = rockSystem.getRockTexture().getSampler();
+        mat.normalView = rockSystem.getRockNormalMap().getImageView();
+        mat.normalSampler = rockSystem.getRockNormalMap().getSampler();
+        factory.writeDescriptorSet(rockDescriptorSets[i], common, mat);
     }
 
     return true;
@@ -2265,14 +2231,21 @@ void Renderer::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float 
         };
     }
 
-    shadowSystem.recordShadowPass(cmd, frameIndex, descriptorSets[frameIndex],
+    // Use any MaterialRegistry descriptor set for shadow pass (only needs common bindings/UBO)
+    // MaterialId 0 is the first registered material (crate)
+    const auto& materialRegistry = sceneManager.getSceneBuilder().getMaterialRegistry();
+    VkDescriptorSet shadowDescriptorSet = materialRegistry.getDescriptorSet(0, frameIndex);
+    shadowSystem.recordShadowPass(cmd, frameIndex, shadowDescriptorSet,
                                    allObjects,
                                    terrainCallback, grassCallback, skinnedCallback);
 }
 
 void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
-    // Helper lambda to render a scene object
-    auto renderObject = [&](const Renderable& obj, VkDescriptorSet* descSet) {
+    // Get MaterialRegistry for descriptor set lookup
+    const auto& materialRegistry = sceneManager.getSceneBuilder().getMaterialRegistry();
+
+    // Helper lambda to render a scene object with a descriptor set
+    auto renderObject = [&](const Renderable& obj, VkDescriptorSet descSet) {
         PushConstants push{};
         push.model = obj.transform;
         push.roughness = obj.roughness;
@@ -2287,7 +2260,7 @@ void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
                           0, sizeof(PushConstants), &push);
 
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                pipelineLayout, 0, 1, descSet, 0, nullptr);
+                                pipelineLayout, 0, 1, &descSet, 0, nullptr);
 
         VkBuffer vertexBuffers[] = {obj.mesh->getVertexBuffer()};
         VkDeviceSize offsets[] = {0};
@@ -2297,7 +2270,7 @@ void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
         vkCmdDrawIndexed(cmd, obj.mesh->getIndexCount(), 1, 0, 0, 0);
     };
 
-    // Render scene manager objects
+    // Render scene manager objects using MaterialRegistry for descriptor set lookup
     const auto& sceneObjects = sceneManager.getRenderables();
     size_t playerIndex = sceneManager.getSceneBuilder().getPlayerObjectIndex();
     bool hasCharacter = sceneManager.getSceneBuilder().hasCharacter();
@@ -2309,22 +2282,23 @@ void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
         }
 
         const auto& obj = sceneObjects[i];
-        VkDescriptorSet* descSet;
-        if (obj.texture == &sceneManager.getSceneBuilder().getGroundTexture()) {
-            descSet = &groundDescriptorSets[frameIndex];
-        } else if (obj.texture == &sceneManager.getSceneBuilder().getMetalTexture()) {
-            descSet = &metalDescriptorSets[frameIndex];
-        } else if (obj.texture == &sceneManager.getSceneBuilder().getWhiteTexture()) {
-            descSet = &characterDescriptorSets[frameIndex];
-        } else {
-            descSet = &descriptorSets[frameIndex];
+
+        // Use MaterialRegistry to get descriptor set by materialId
+        // This replaces the brittle texture pointer comparison
+        VkDescriptorSet descSet = materialRegistry.getDescriptorSet(obj.materialId, frameIndex);
+        if (descSet == VK_NULL_HANDLE) {
+            // Fallback: skip objects with invalid materialId
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                "Skipping object with invalid materialId %u", obj.materialId);
+            continue;
         }
         renderObject(obj, descSet);
     }
 
-    // Render procedural rocks
+    // Render procedural rocks (RockSystem uses its own descriptor sets)
+    VkDescriptorSet rockDescSet = rockDescriptorSets[frameIndex];
     for (const auto& rock : rockSystem.getSceneObjects()) {
-        renderObject(rock, &rockDescriptorSets[frameIndex]);
+        renderObject(rock, rockDescSet);
     }
 }
 
