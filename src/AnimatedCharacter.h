@@ -65,12 +65,8 @@ public:
     SkinnedMesh& getSkinnedMesh() { return skinnedMesh; }
     const SkinnedMesh& getSkinnedMesh() const { return skinnedMesh; }
 
-    // Legacy: Get render mesh for CPU skinning fallback
+    // Get render mesh (for scene object bounds/transform tracking)
     Mesh& getMesh() { return renderMesh; }
-    const Mesh& getMesh() const { return renderMesh; }
-
-    // Check if GPU skinning is enabled
-    bool isGPUSkinningEnabled() const { return useGPUSkinning; }
 
     // Get skeleton for external use
     const Skeleton& getSkeleton() const { return skeleton; }
@@ -107,13 +103,6 @@ public:
     bool isLoaded() const { return loaded; }
 
 private:
-    // Compute skinned vertices (CPU skinning)
-    void applySkinning();
-
-    // Re-upload mesh to GPU
-    void uploadMesh(VmaAllocator allocator, VkDevice device,
-                    VkCommandPool commandPool, VkQueue queue);
-
     // Original skinned mesh data (bind pose)
     std::vector<SkinnedVertex> bindPoseVertices;
     std::vector<uint32_t> indices;
@@ -134,10 +123,9 @@ private:
 
     // GPU skinning: SkinnedMesh keeps original vertex data, bone matrices are updated each frame
     SkinnedMesh skinnedMesh;
-    bool useGPUSkinning = true;  // Enable GPU skinning by default
 
-    // CPU skinning fallback (deprecated, kept for compatibility)
-    std::vector<Vertex> skinnedVertices;
+    // Render mesh (for scene object bounds/transform tracking)
+    std::vector<Vertex> meshVertices;  // Bind pose vertices for bounds calculation
     Mesh renderMesh;
 
     bool loaded = false;

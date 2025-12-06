@@ -49,8 +49,6 @@ struct AtmosphereUniforms {
     float padding[2];
 };
 
-// Alias for compatibility
-using AtmosphereLUTUniforms = AtmosphereUniforms;
 
 // Cloud map uniform parameters (must match GLSL layout)
 struct CloudMapUniforms {

@@ -73,8 +73,6 @@ struct SkinnedMeshData {
     std::vector<SkinnedVertex> vertices;
     std::vector<uint32_t> indices;
     Skeleton skeleton;
-    std::string baseColorTexturePath;
-    std::string normalTexturePath;
 };
 
 // Mesh with skinning data and skeleton reference

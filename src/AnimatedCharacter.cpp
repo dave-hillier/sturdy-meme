@@ -63,15 +63,15 @@ bool AnimatedCharacter::load(const std::string& path, VmaAllocator allocator, Vk
     // Initialize renderMesh with bind pose for bounds/transform tracking
     // This mesh is used by sceneObjects for Hi-Z culling and transform updates,
     // but actual rendering is skipped (handled by recordSkinnedCharacter)
-    skinnedVertices.resize(bindPoseVertices.size());
+    meshVertices.resize(bindPoseVertices.size());
     for (size_t i = 0; i < bindPoseVertices.size(); ++i) {
-        skinnedVertices[i].position = bindPoseVertices[i].position;
-        skinnedVertices[i].normal = bindPoseVertices[i].normal;
-        skinnedVertices[i].texCoord = bindPoseVertices[i].texCoord;
-        skinnedVertices[i].tangent = bindPoseVertices[i].tangent;
-        skinnedVertices[i].color = bindPoseVertices[i].color;
+        meshVertices[i].position = bindPoseVertices[i].position;
+        meshVertices[i].normal = bindPoseVertices[i].normal;
+        meshVertices[i].texCoord = bindPoseVertices[i].texCoord;
+        meshVertices[i].tangent = bindPoseVertices[i].tangent;
+        meshVertices[i].color = bindPoseVertices[i].color;
     }
-    renderMesh.setCustomGeometry(skinnedVertices, indices);
+    renderMesh.setCustomGeometry(meshVertices, indices);
     renderMesh.upload(allocator, device, commandPool, queue);
 
     // Set up default animation (play first one if available)
@@ -143,7 +143,7 @@ void AnimatedCharacter::destroy(VmaAllocator allocator) {
     skeleton.joints.clear();
     bindPoseLocalTransforms.clear();
     animations.clear();
-    skinnedVertices.clear();
+    meshVertices.clear();
     loaded = false;
 }
 
@@ -307,13 +307,6 @@ void AnimatedCharacter::update(float deltaTime, VmaAllocator allocator, VkDevice
 
     // GPU skinning: Bone matrices are computed and uploaded by Renderer each frame
     // No mesh re-upload needed - the vertex shader applies skinning
-    if (useGPUSkinning) {
-        return;  // Bone matrices updated externally via computeBoneMatrices()
-    }
-
-    // CPU skinning fallback (deprecated path)
-    applySkinning();
-    uploadMesh(allocator, device, commandPool, queue);
 }
 
 void AnimatedCharacter::computeBoneMatrices(std::vector<glm::mat4>& outBoneMatrices) const {
@@ -326,69 +319,6 @@ void AnimatedCharacter::computeBoneMatrices(std::vector<glm::mat4>& outBoneMatri
     for (size_t i = 0; i < skeleton.joints.size(); ++i) {
         outBoneMatrices[i] = globalTransforms[i] * skeleton.joints[i].inverseBindMatrix;
     }
-}
-
-void AnimatedCharacter::applySkinning() {
-    // Compute bone matrices (globalTransform * inverseBindMatrix)
-    std::vector<glm::mat4> boneMatrices;
-    computeBoneMatrices(boneMatrices);
-
-    // Also compute global transforms alone (for non-skinned primitives)
-    std::vector<glm::mat4> globalTransforms;
-    skeleton.computeGlobalTransforms(globalTransforms);
-
-    // Apply skinning to each vertex
-    for (size_t i = 0; i < bindPoseVertices.size(); ++i) {
-        const SkinnedVertex& bindVert = bindPoseVertices[i];
-        Vertex& skinnedVert = skinnedVertices[i];
-
-        glm::mat4 skinMatrix;
-
-        // Negative weight on x indicates non-skinned primitive - no transformation needed
-        // These vertices are already in model space and should stay there
-        if (bindVert.boneWeights.x < 0.0f) {
-            // Identity matrix - keep vertices in their original position
-            skinMatrix = glm::mat4(1.0f);
-        } else {
-            // Build skin matrix from weighted bone matrices (normal skinning path)
-            skinMatrix = glm::mat4(0.0f);
-
-            if (bindVert.boneIndices.x < boneMatrices.size()) {
-                skinMatrix += boneMatrices[bindVert.boneIndices.x] * bindVert.boneWeights.x;
-            }
-            if (bindVert.boneIndices.y < boneMatrices.size()) {
-                skinMatrix += boneMatrices[bindVert.boneIndices.y] * bindVert.boneWeights.y;
-            }
-            if (bindVert.boneIndices.z < boneMatrices.size()) {
-                skinMatrix += boneMatrices[bindVert.boneIndices.z] * bindVert.boneWeights.z;
-            }
-            if (bindVert.boneIndices.w < boneMatrices.size()) {
-                skinMatrix += boneMatrices[bindVert.boneIndices.w] * bindVert.boneWeights.w;
-            }
-        }
-
-        // Transform position
-        glm::vec4 skinnedPos = skinMatrix * glm::vec4(bindVert.position, 1.0f);
-        skinnedVert.position = glm::vec3(skinnedPos);
-
-        // Transform normal
-        glm::mat3 normalMatrix = glm::mat3(skinMatrix);
-        skinnedVert.normal = glm::normalize(normalMatrix * bindVert.normal);
-
-        // Transform tangent (keep w component for handedness)
-        skinnedVert.tangent = glm::vec4(glm::normalize(normalMatrix * glm::vec3(bindVert.tangent)), bindVert.tangent.w);
-
-        // Copy UV (unchanged)
-        skinnedVert.texCoord = bindVert.texCoord;
-    }
-}
-
-void AnimatedCharacter::uploadMesh(VmaAllocator allocator, VkDevice device,
-                                    VkCommandPool commandPool, VkQueue queue) {
-    // Destroy old mesh and re-upload with new data
-    renderMesh.destroy(allocator);
-    renderMesh.setCustomGeometry(skinnedVertices, indices);
-    renderMesh.upload(allocator, device, commandPool, queue);
 }
 
 void AnimatedCharacter::setupDefaultIKChains() {

@@ -35,7 +35,7 @@ struct TerrainDispatcherPushConstants {
     uint32_t meshletIndexCount;  // 0 = use direct triangles, >0 = use meshlet instancing
 };
 
-// Push constants for sum reduction (legacy single-pass)
+// Push constants for sum reduction (single-pass)
 struct TerrainSumReductionPushConstants {
     int passID;
 };
@@ -60,7 +60,7 @@ struct TerrainSubdivisionPushConstants {
     uint32_t reserved;         // Reserved for future use (was useCompactBuffer)
 };
 
-// Push constants for prepare cull dispatch (legacy, kept for compatibility)
+// Push constants for prepare cull dispatch
 struct TerrainPrepareCullDispatchPushConstants {
     uint32_t workgroupSize;  // Subdivision workgroup size
 };
@@ -139,7 +139,7 @@ public:
                               const std::vector<VkBuffer>& snowUBOBuffers,
                               const std::vector<VkBuffer>& cloudShadowUBOBuffers);
 
-    // Set snow mask texture for snow accumulation rendering (legacy)
+    // Set snow mask texture for snow accumulation rendering
     void setSnowMask(VkDevice device, VkImageView snowMaskView, VkSampler snowMaskSampler);
 
     // Set volumetric snow cascade textures

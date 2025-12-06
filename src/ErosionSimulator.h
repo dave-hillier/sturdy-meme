@@ -110,11 +110,8 @@ private:
     // Load source heightmap at full resolution
     bool loadSourceHeightmap(const std::string& path, float minAlt, float maxAlt);
 
-    // Core erosion simulation
+    // Core erosion simulation using D8 flow accumulation
     void simulateDroplets(const ErosionConfig& config, ErosionProgressCallback progressCallback);
-
-    // Single droplet simulation step
-    void simulateDroplet(const ErosionConfig& config, uint32_t startX, uint32_t startY);
 
     // Extract rivers from flow accumulation
     void extractRivers(const ErosionConfig& config, ErosionProgressCallback progressCallback);

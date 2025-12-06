@@ -762,12 +762,6 @@ std::optional<GLTFSkinnedLoadResult> loadSkinned(const std::string& path, const 
             maxBounds.x, maxBounds.y, maxBounds.z);
     SDL_Log("FBXLoader: Loaded %zu materials", result.materials.size());
 
-    // Set legacy texture paths from first material (backward compatibility)
-    if (!result.materials.empty()) {
-        result.baseColorTexturePath = result.materials[0].diffuseTexturePath;
-        result.normalTexturePath = result.materials[0].normalTexturePath;
-    }
-
     // Apply post-import processing (scale, coordinate system conversion)
     FBXPostProcess::process(result, settings);
 
@@ -797,8 +791,6 @@ std::optional<GLTFLoadResult> load(const std::string& path, const FBXImportSetti
     result.indices = std::move(skinned->indices);
     result.skeleton = std::move(skinned->skeleton);
     result.materials = std::move(skinned->materials);
-    result.baseColorTexturePath = std::move(skinned->baseColorTexturePath);
-    result.normalTexturePath = std::move(skinned->normalTexturePath);
 
     return result;
 }

@@ -1974,7 +1974,7 @@ void GuiSystem::renderSkeletonOverlay(Renderer& renderer, const Camera& camera) 
     auto& character = sceneBuilder.getAnimatedCharacter();
 
     // Get the character's world transform from the scene object
-    const auto& sceneObjects = sceneBuilder.getSceneObjects();
+    const auto& sceneObjects = sceneBuilder.getRenderables();
     size_t playerIndex = sceneBuilder.getPlayerObjectIndex();
     if (playerIndex >= sceneObjects.size()) {
         return;

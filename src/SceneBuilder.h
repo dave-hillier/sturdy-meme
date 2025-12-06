@@ -15,9 +15,6 @@
 #include "AnimatedCharacter.h"
 #include "MaterialRegistry.h"
 
-// Backward compatibility alias - Renderable is the canonical type
-using SceneObject = Renderable;
-
 // Holds all scene resources (meshes, textures) and provides scene objects
 class SceneBuilder {
 public:
@@ -41,8 +38,8 @@ public:
     void destroy(VmaAllocator allocator, VkDevice device);
 
     // Access to built scene
-    const std::vector<SceneObject>& getSceneObjects() const { return sceneObjects; }
-    std::vector<SceneObject>& getSceneObjects() { return sceneObjects; }
+    const std::vector<Renderable>& getRenderables() const { return sceneObjects; }
+    std::vector<Renderable>& getRenderables() { return sceneObjects; }
     size_t getPlayerObjectIndex() const { return playerObjectIndex; }
 
     // Material registry - call registerMaterials() after init(), before Renderer creates descriptor sets
@@ -96,7 +93,7 @@ private:
     bool createMeshes(const InitInfo& info);
     bool loadTextures(const InitInfo& info);
     void registerMaterials();
-    void createSceneObjects();
+    void createRenderables();
 
     // Get terrain height at (x, z), returns 0 if no terrain function available
     float getTerrainHeight(float x, float z) const;
@@ -128,7 +125,7 @@ private:
     Texture whiteTexture;        // White texture for vertex-colored objects
 
     // Scene objects
-    std::vector<SceneObject> sceneObjects;
+    std::vector<Renderable> sceneObjects;
     size_t playerObjectIndex = 0;
     size_t flagPoleIndex = 0;
     size_t flagClothIndex = 0;
@@ -141,7 +138,7 @@ private:
     // Material registry for data-driven material management
     MaterialRegistry materialRegistry;
 
-    // Material IDs cached for use in createSceneObjects
+    // Material IDs cached for use in createRenderables
     MaterialId crateMaterialId = INVALID_MATERIAL_ID;
     MaterialId metalMaterialId = INVALID_MATERIAL_ID;
     MaterialId whiteMaterialId = INVALID_MATERIAL_ID;
