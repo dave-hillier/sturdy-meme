@@ -2194,7 +2194,7 @@ void Renderer::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float 
     // Combine scene objects and rock objects for shadow rendering
     // Skip player character - it's rendered separately with skinned shadow pipeline
     std::vector<Renderable> allObjects;
-    const auto& sceneObjects = sceneManager.getSceneObjects();
+    const auto& sceneObjects = sceneManager.getRenderables();
     size_t playerIndex = sceneManager.getSceneBuilder().getPlayerObjectIndex();
     bool hasCharacter = sceneManager.getSceneBuilder().hasCharacter();
 
@@ -2214,7 +2214,7 @@ void Renderer::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float 
         skinnedCallback = [this, frameIndex, playerIndex](VkCommandBuffer cb, uint32_t cascade, const glm::mat4& lightMatrix) {
             (void)lightMatrix;  // Not used, cascade matrices are in UBO
             SceneBuilder& sceneBuilder = sceneManager.getSceneBuilder();
-            const auto& sceneObjs = sceneBuilder.getSceneObjects();
+            const auto& sceneObjs = sceneBuilder.getRenderables();
             if (playerIndex >= sceneObjs.size()) return;
 
             const Renderable& playerObj = sceneObjs[playerIndex];
@@ -2262,7 +2262,7 @@ void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
     };
 
     // Render scene manager objects
-    const auto& sceneObjects = sceneManager.getSceneObjects();
+    const auto& sceneObjects = sceneManager.getRenderables();
     size_t playerIndex = sceneManager.getSceneBuilder().getPlayerObjectIndex();
     bool hasCharacter = sceneManager.getSceneBuilder().hasCharacter();
 
@@ -2550,7 +2550,7 @@ void Renderer::recordSkinnedCharacter(VkCommandBuffer cmd, uint32_t frameIndex) 
                             skinnedPipelineLayout, 0, 1, &skinnedDescriptorSets[frameIndex], 0, nullptr);
 
     // Get the player object to get transform
-    const auto& sceneObjects = sceneBuilder.getSceneObjects();
+    const auto& sceneObjects = sceneBuilder.getRenderables();
     size_t playerIndex = sceneBuilder.getPlayerObjectIndex();
     if (playerIndex >= sceneObjects.size()) return;
 
@@ -2586,7 +2586,7 @@ void Renderer::updateHiZObjectData() {
     std::vector<CullObjectData> cullObjects;
 
     // Gather scene objects for culling
-    const auto& sceneObjects = sceneManager.getSceneObjects();
+    const auto& sceneObjects = sceneManager.getRenderables();
     for (size_t i = 0; i < sceneObjects.size(); ++i) {
         const auto& obj = sceneObjects[i];
         if (obj.mesh == nullptr) continue;

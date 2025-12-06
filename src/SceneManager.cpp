@@ -184,7 +184,7 @@ void SceneManager::initializeSceneLights() {
 
 void SceneManager::updatePhysicsToScene(PhysicsWorld& physics) {
     // Update scene object transforms from physics simulation
-    auto& sceneObjects = sceneBuilder.getSceneObjects();
+    auto& sceneObjects = sceneBuilder.getRenderables();
 
     for (size_t i = 0; i < scenePhysicsBodies.size() && i < sceneObjects.size(); i++) {
         PhysicsBodyID bodyID = scenePhysicsBodies[i];

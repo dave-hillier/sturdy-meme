@@ -589,7 +589,7 @@ void Application::initPhysics() {
 
 void Application::updatePhysicsToScene() {
     // Update scene object transforms from physics simulation
-    auto& sceneObjects = renderer.getSceneManager().getSceneObjects();
+    auto& sceneObjects = renderer.getSceneManager().getRenderables();
 
     for (size_t i = 1; i < scenePhysicsBodies.size() && i < sceneObjects.size(); i++) {
         PhysicsBodyID bodyID = scenePhysicsBodies[i];
@@ -674,7 +674,7 @@ void Application::updateCameraOcclusion(float deltaTime) {
     }
 
     // Update opacities for all scene objects
-    auto& sceneObjects = renderer.getSceneManager().getSceneObjects();
+    auto& sceneObjects = renderer.getSceneManager().getRenderables();
     for (size_t i = 0; i < scenePhysicsBodies.size() && i < sceneObjects.size(); i++) {
         PhysicsBodyID bodyID = scenePhysicsBodies[i];
         if (bodyID == INVALID_BODY_ID) continue;
@@ -709,7 +709,7 @@ void Application::updateFlag(float deltaTime) {
     clothSim.addSphereCollision(playerPos + glm::vec3(0, playerHeight - playerRadius, 0), playerRadius);
 
     // Add collision spheres for dynamic physics objects
-    auto& sceneObjects = renderer.getSceneManager().getSceneObjects();
+    auto& sceneObjects = renderer.getSceneManager().getRenderables();
     for (size_t i = 1; i < scenePhysicsBodies.size() && i < sceneObjects.size(); i++) {
         PhysicsBodyID bodyID = scenePhysicsBodies[i];
         if (bodyID == INVALID_BODY_ID) continue;

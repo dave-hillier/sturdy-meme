@@ -9,7 +9,7 @@ bool SceneBuilder::init(const InitInfo& info) {
     if (!createMeshes(info)) return false;
     if (!loadTextures(info)) return false;
     registerMaterials();
-    createSceneObjects();
+    createRenderables();
     return true;
 }
 
@@ -195,7 +195,7 @@ bool SceneBuilder::loadTextures(const InitInfo& info) {
     return true;
 }
 
-void SceneBuilder::createSceneObjects() {
+void SceneBuilder::createRenderables() {
     sceneObjects.clear();
 
     // Ground disc removed - terrain system provides the ground now
