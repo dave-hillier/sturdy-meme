@@ -467,7 +467,12 @@ bool GraphicsPipelineFactory::build(VkPipeline& pipeline) {
     cleanup();
 
     if (result != VK_SUCCESS) {
-        SDL_Log("GraphicsPipelineFactory: Failed to create graphics pipeline");
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+            "GraphicsPipelineFactory: Failed to create graphics pipeline (VkResult=%d) "
+            "vert='%s' frag='%s'",
+            static_cast<int>(result),
+            vertShaderPath.c_str(),
+            fragShaderPath.empty() ? "<none>" : fragShaderPath.c_str());
         return false;
     }
 
