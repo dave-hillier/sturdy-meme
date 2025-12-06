@@ -26,7 +26,7 @@ layout(binding = UBO_BINDING) uniform UniformBufferObject {
     vec4 sunDirection;
     vec4 moonDirection;
     vec4 sunColor;
-    vec4 moonColor;                       // rgb = moon color
+    vec4 moonColor;                       // rgb = moon color, a = moon phase (0-1)
     vec4 ambientColor;
     vec4 cameraPosition;
     vec4 pointLightPosition;  // xyz = position, w = intensity
