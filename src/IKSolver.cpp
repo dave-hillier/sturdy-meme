@@ -833,13 +833,6 @@ void FootPlacementIKSolver::solve(
         targetLocalPos.y += heightOffset;
     }
 
-    static int footDebugCounter = 0;
-    if (footDebugCounter++ % 300 == 0) {
-        SDL_Log("FootIK: worldFoot=%.2f targetWorld=%.2f offset=%.3f lockBlend=%.2f locked=%d",
-                queryWorldPos.y, targetWorldFootY, heightOffset,
-                foot.lockBlend, foot.isLocked ? 1 : 0);
-    }
-
     // Initialize currentFootTarget if it's at origin (first frame)
     if (glm::length2(foot.currentFootTarget) < 0.001f) {
         foot.currentFootTarget = targetLocalPos;
