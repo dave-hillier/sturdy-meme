@@ -1033,6 +1033,62 @@ float lunarPhaseMask(vec3 dir, vec3 moonDir, float phase, float discSize) {
     return max(lit, 0.05);
 }
 
+// Solar eclipse mask - simulates the moon passing in front of the sun
+// eclipseAmount: 0 = no eclipse, 1 = total eclipse (moon centered on sun)
+// Returns 0-1 where 1 = fully visible sun, 0 = fully occluded
+float solarEclipseMask(vec3 dir, vec3 sunDir, vec3 moonDir, float eclipseAmount, float sunRadius) {
+    if (eclipseAmount <= 0.0) return 1.0;
+
+    vec3 viewDir = normalize(dir);
+    vec3 sunCenter = normalize(sunDir);
+
+    // During eclipse, the moon is positioned between Earth and Sun
+    // We interpolate moon position toward sun position based on eclipse amount
+    vec3 eclipseMoonDir = normalize(mix(moonDir, sunCenter, eclipseAmount));
+
+    // Calculate angular distance from moon center to view direction
+    float moonDot = dot(viewDir, eclipseMoonDir);
+    float moonAngularDist = acos(clamp(moonDot, -1.0, 1.0));
+
+    // Moon is same apparent size as sun during eclipse
+    float moonRadius = sunRadius * 1.02;  // Slight variation for annular/total
+
+    // Smooth edge for the moon shadow
+    float eclipseShadow = 1.0 - smoothstep(moonRadius * 0.9, moonRadius * 1.1, moonAngularDist);
+
+    return 1.0 - eclipseShadow * eclipseAmount;
+}
+
+// Solar corona effect - visible during total eclipse
+vec3 solarCorona(vec3 dir, vec3 sunDir, float eclipseAmount, float sunRadius) {
+    if (eclipseAmount < 0.8) return vec3(0.0);  // Only visible near totality
+
+    vec3 viewDir = normalize(dir);
+    vec3 sunCenter = normalize(sunDir);
+
+    float sunDot = dot(viewDir, sunCenter);
+    float angularDist = acos(clamp(sunDot, -1.0, 1.0));
+
+    // Corona extends 2-4 sun radii out
+    float coronaStart = sunRadius * 1.0;
+    float coronaEnd = sunRadius * 4.0;
+
+    // Radial falloff for corona
+    float coronaFade = 1.0 - smoothstep(coronaStart, coronaEnd, angularDist);
+    coronaFade *= smoothstep(sunRadius * 0.8, coronaStart, angularDist);
+
+    // Corona is very bright near the limb and fades rapidly
+    float coronaIntensity = pow(coronaFade, 1.5) * 15.0;
+
+    // Corona color is pearly white
+    vec3 coronaColor = vec3(1.0, 0.98, 0.95);
+
+    // Only visible during near-total eclipse
+    float totalityFactor = smoothstep(0.8, 1.0, eclipseAmount);
+
+    return coronaColor * coronaIntensity * totalityFactor;
+}
+
 vec3 renderAtmosphere(vec3 dir) {
     vec3 normDir = normalize(dir);
 
@@ -1181,7 +1237,15 @@ vec3 renderAtmosphere(vec3 dir) {
     // Sun and moon discs (rendered behind clouds)
     // Only show sun/moon if clouds don't fully occlude them
     float sunDisc = celestialDisc(dir, ubo.sunDirection.xyz, SUN_ANGULAR_RADIUS);
-    sky += sunLight * sunDisc * 20.0 * skyTransmittance * clouds.transmittance;
+
+    // Apply eclipse masking to sun
+    float eclipseMask = solarEclipseMask(dir, ubo.sunDirection.xyz, ubo.moonDirection.xyz,
+                                         ubo.eclipseAmount, MOON_MASK_RADIUS);
+    sky += sunLight * sunDisc * 20.0 * eclipseMask * skyTransmittance * clouds.transmittance;
+
+    // Add solar corona during eclipse (visible during totality)
+    vec3 corona = solarCorona(dir, ubo.sunDirection.xyz, ubo.eclipseAmount, MOON_MASK_RADIUS);
+    sky += corona * skyTransmittance * clouds.transmittance;
 
     // Moon disc with lunar phase simulation
     // Use MOON_DISC_SIZE for celestialDisc (creates visible disc)
