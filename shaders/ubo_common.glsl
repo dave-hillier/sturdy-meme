@@ -51,6 +51,11 @@ layout(binding = UBO_BINDING) uniform UniformBufferObject {
     // Height fog parameters (from UI controls) - used by applyHeightFog/applyAerialPerspective
     vec4 heightFogParams;          // x = baseHeight, y = scaleHeight, z = density, w = unused
     vec4 heightFogLayerParams;     // x = layerThickness, y = layerDensity, z = unused, w = unused
+
+    // Cloud parameters (from UI controls) - used by sky.frag and cloud systems
+    float cloudCoverage;           // 0-1 cloud coverage amount
+    float cloudDensity;            // Base density multiplier
+    float cloudPad1, cloudPad2;    // Padding for alignment
 } ubo;
 
 #endif // UBO_COMMON_GLSL

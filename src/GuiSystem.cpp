@@ -934,6 +934,46 @@ void GuiSystem::renderEnvironmentSection(Renderer& renderer) {
         ImGui::SetTooltip("Toggle between procedural and paraboloid LUT hybrid cloud rendering");
     }
 
+    // Cloud coverage and density controls
+    float cloudCoverage = renderer.getCloudCoverage();
+    if (ImGui::SliderFloat("Cloud Coverage", &cloudCoverage, 0.0f, 1.0f, "%.2f")) {
+        renderer.setCloudCoverage(cloudCoverage);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("0 = clear sky, 0.5 = partly cloudy, 1 = overcast");
+    }
+
+    float cloudDensity = renderer.getCloudDensity();
+    if (ImGui::SliderFloat("Cloud Density", &cloudDensity, 0.0f, 1.0f, "%.2f")) {
+        renderer.setCloudDensity(cloudDensity);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("0 = thin/wispy, 0.3 = normal, 1 = thick/opaque");
+    }
+
+    // Cloud presets
+    ImGui::Text("Presets:");
+    ImGui::SameLine();
+    if (ImGui::Button("Clear##clouds")) {
+        renderer.setCloudCoverage(0.0f);
+        renderer.setCloudDensity(0.3f);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Partly##clouds")) {
+        renderer.setCloudCoverage(0.4f);
+        renderer.setCloudDensity(0.3f);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Cloudy##clouds")) {
+        renderer.setCloudCoverage(0.7f);
+        renderer.setCloudDensity(0.5f);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Overcast##clouds")) {
+        renderer.setCloudCoverage(0.95f);
+        renderer.setCloudDensity(0.7f);
+    }
+
     ImGui::Spacing();
     ImGui::Separator();
     ImGui::Spacing();

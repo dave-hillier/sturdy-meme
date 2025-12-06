@@ -1430,10 +1430,10 @@ void AtmosphereLUTSystem::updateCloudMapLUT(VkCommandBuffer cmd, uint32_t frameI
     // Update per-frame cloud map uniform buffer (double-buffered)
     CloudMapUniforms uniforms{};
     uniforms.windOffset = glm::vec4(windOffset, time);
-    uniforms.coverage = 0.6f;      // 60% cloud coverage
-    uniforms.density = 1.0f;       // Full density multiplier
-    uniforms.sharpness = 0.3f;     // Coverage transition sharpness
-    uniforms.detailScale = 2.5f;   // Detail noise scale
+    uniforms.coverage = cloudCoverage;    // From UI controls
+    uniforms.density = cloudDensity;      // From UI controls
+    uniforms.sharpness = 0.3f;            // Coverage transition sharpness
+    uniforms.detailScale = 2.5f;          // Detail noise scale
     memcpy(cloudMapUniformBuffers.mappedPointers[frameIndex], &uniforms, sizeof(CloudMapUniforms));
 
     // Transition from SHADER_READ_ONLY to GENERAL for compute write
