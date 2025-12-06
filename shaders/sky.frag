@@ -654,7 +654,8 @@ ScatteringResult integrateAtmosphere(vec3 origin, vec3 dir, int sampleCount) {
     // At sun altitude 0.17 (10°): no moon atmospheric scattering
     // At sun altitude -0.1 (-6°): full moon atmospheric scattering
     float twilightFactor = smoothstep(0.17, -0.1, sunAltitude);
-    float moonVisibility = smoothstep(-0.09, 0.1, moonAltitude);
+    // Moon visibility: matches C++ altFactor range (-2° to +10°, i.e., -0.035 to 0.17 radians)
+    float moonVisibility = smoothstep(-0.035, 0.17, moonAltitude);
     float moonAtmoContribution = twilightFactor * moonVisibility;
 
     for (int i = 0; i < sampleCount; i++) {
@@ -825,7 +826,8 @@ CloudResult marchClouds(vec3 origin, vec3 dir) {
 
     // Smooth twilight transition factor - moon fades in as sun approaches/passes horizon
     float twilightFactor = smoothstep(0.17, -0.1, sunAltitude);
-    float moonVisibility = smoothstep(-0.09, 0.1, moonAltitude);
+    // Moon visibility: matches C++ altFactor range (-2° to +10°, i.e., -0.035 to 0.17 radians)
+    float moonVisibility = smoothstep(-0.035, 0.17, moonAltitude);
     float moonContribution = twilightFactor * moonVisibility;
 
     // Compute physically-based sky irradiance at cloud altitude
@@ -978,12 +980,13 @@ float celestialDisc(vec3 dir, vec3 celestialDir, float size) {
     return smoothstep(1.0 - size, 1.0 - size * 0.3, d);
 }
 
-// Lunar phase mask - creates moon phases using a simple 2D approach
-// phase: 0 = new moon, 0.25 = first quarter, 0.5 = full moon, 0.75 = last quarter, 1 = new moon
+// Lunar phase mask - creates moon phases based on actual sun-moon geometry
+// sunDir: actual sun direction in world space
 // Returns 0-1 illumination factor
-float lunarPhaseMask(vec3 dir, vec3 moonDir, float phase, float discSize) {
+float lunarPhaseMask(vec3 dir, vec3 moonDir, vec3 sunDir, float discSize) {
     vec3 viewDir = normalize(dir);
     vec3 moonCenter = normalize(moonDir);
+    vec3 sunDirection = normalize(sunDir);
 
     // Calculate angular distance from moon center
     float centerDot = dot(viewDir, moonCenter);
@@ -992,7 +995,7 @@ float lunarPhaseMask(vec3 dir, vec3 moonDir, float phase, float discSize) {
     // Outside the disc
     if (angularDist > discSize) return 0.0;
 
-    // Create coordinate system on moon disc
+    // Create coordinate system on moon disc aligned with view
     vec3 up = abs(moonCenter.y) < 0.999 ? vec3(0, 1, 0) : vec3(1, 0, 0);
     vec3 right = normalize(cross(up, moonCenter));
     vec3 tangentUp = normalize(cross(moonCenter, right));
@@ -1009,28 +1012,25 @@ float lunarPhaseMask(vec3 dir, vec3 moonDir, float phase, float discSize) {
     // Calculate 3D sphere normal (z points toward viewer)
     float z = sqrt(max(0.0, 1.0 - r * r));
 
-    // Phase angle determines terminator position
-    // phase 0.0: new moon (terminator at center, facing viewer)
-    // phase 0.5: full moon (terminator behind moon, all visible)
-    // phase 1.0: new moon again
-    float phaseAngle = (phase - 0.5) * 2.0 * PI;
+    // Transform sun direction into moon's local coordinate system
+    // The moon's local frame: right, tangentUp, moonCenter (toward viewer)
+    vec3 sunLocal;
+    sunLocal.x = dot(sunDirection, right);
+    sunLocal.y = dot(sunDirection, tangentUp);
+    sunLocal.z = dot(sunDirection, moonCenter);
+    sunLocal = normalize(sunLocal);
 
-    // Terminator moves across the disc based on phase
-    // For crescent, we need to consider the sphere curvature
-    float sunAngle = phaseAngle;
-    vec3 sunLocalDir = vec3(sin(sunAngle), 0.0, cos(sunAngle));
-
-    // Surface normal at this point
+    // Surface normal at this point in local space
     vec3 normal = normalize(vec3(x, y, z));
 
-    // Lambertian lighting
-    float lighting = dot(normal, sunLocalDir);
+    // Lambertian lighting based on actual sun direction
+    float lighting = dot(normal, sunLocal);
 
     // Smooth terminator
     float lit = smoothstep(-0.1, 0.1, lighting);
 
-    // Earthshine (subtle light on dark side, reduced for better contrast)
-    return max(lit, 0.05);
+    // Earthshine (subtle light on dark side - user-configurable)
+    return max(lit, ubo.moonEarthshine);
 }
 
 // Solar eclipse mask - simulates the moon passing in front of the sun
@@ -1061,7 +1061,8 @@ float solarEclipseMask(vec3 dir, vec3 sunDir, vec3 moonDir, float eclipseAmount,
 
 // Solar corona effect - visible during total eclipse
 vec3 solarCorona(vec3 dir, vec3 sunDir, float eclipseAmount, float sunRadius) {
-    if (eclipseAmount < 0.8) return vec3(0.0);  // Only visible near totality
+    // Corona only becomes visible very close to totality (95%+)
+    if (eclipseAmount < 0.9) return vec3(0.0);
 
     vec3 viewDir = normalize(dir);
     vec3 sunCenter = normalize(sunDir);
@@ -1083,8 +1084,8 @@ vec3 solarCorona(vec3 dir, vec3 sunDir, float eclipseAmount, float sunRadius) {
     // Corona color is pearly white
     vec3 coronaColor = vec3(1.0, 0.98, 0.95);
 
-    // Only visible during near-total eclipse
-    float totalityFactor = smoothstep(0.8, 1.0, eclipseAmount);
+    // Only visible during near-total eclipse (95%+ with smooth transition)
+    float totalityFactor = smoothstep(0.9, 0.98, eclipseAmount);
 
     return coronaColor * coronaIntensity * totalityFactor;
 }
@@ -1102,7 +1103,8 @@ vec3 renderAtmosphere(vec3 dir) {
 
     // Smooth twilight transition factor for sky rendering
     float twilightFactor = smoothstep(0.17, -0.1, sunAltitude);
-    float moonVisibility = smoothstep(-0.09, 0.1, moonAltitude);
+    // Moon visibility: matches C++ altFactor range (-2° to +10°, i.e., -0.035 to 0.17 radians)
+    float moonVisibility = smoothstep(-0.035, 0.17, moonAltitude);
     float moonSkyContribution = twilightFactor * moonVisibility;
 
     // Compute horizon/below-horizon color for blending
@@ -1250,16 +1252,17 @@ vec3 renderAtmosphere(vec3 dir) {
     // Moon disc with lunar phase simulation
     // Use MOON_DISC_SIZE for celestialDisc (creates visible disc)
     // Use MOON_MASK_RADIUS for lunarPhaseMask (angular radius for phase calculation)
+    // Pass actual sun direction for correct terminator orientation
     float moonDisc = celestialDisc(dir, ubo.moonDirection.xyz, MOON_DISC_SIZE);
-    float moonPhase = ubo.moonColor.a;  // Phase: 0 = new, 0.5 = full, 1 = new
-    float phaseMask = lunarPhaseMask(dir, ubo.moonDirection.xyz, moonPhase, MOON_MASK_RADIUS);
+    float phaseMask = lunarPhaseMask(dir, ubo.moonDirection.xyz, ubo.sunDirection.xyz, MOON_MASK_RADIUS);
 
-    // Apply phase mask with very high intensity to ensure bloom triggers
-    // Moon surface is highly reflective (albedo ~0.12), but we boost for visual impact
-    // During full moon, this should create a strong bloom halo
-    float moonIntensity = 25.0 * phaseMask;  // Higher than sun (20.0) when fully lit
-    sky += ubo.moonColor.rgb * moonDisc * moonIntensity * ubo.moonDirection.w *
-           clamp(skyTransmittance, vec3(0.2), vec3(1.0)) * clouds.transmittance;
+    // Apply phase mask with intensity scaled by illumination
+    // Moon surface has albedo ~0.12, so it's much dimmer than the sun
+    // Use user-configurable disc intensity scaled by phase mask
+    float moonDiscBrightness = ubo.moonDiscIntensity * phaseMask;
+    // Allow moon to redden at horizon like the sun (remove minimum clamp)
+    sky += ubo.moonColor.rgb * moonDisc * moonDiscBrightness * ubo.moonDirection.w *
+           skyTransmittance * clouds.transmittance;
 
     // Star field blended over the atmospheric tint (also behind clouds)
     // Stars are already modulated by nightFactor inside starField()

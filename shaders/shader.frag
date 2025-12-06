@@ -295,7 +295,8 @@ void main() {
     float shadow = combineShadows(terrainShadow, cloudShadowFactor);
 
     // Sun lighting with shadow
-    float sunIntensity = ubo.sunDirection.w;
+    // Apply eclipse darkening - moon blocks sunlight during solar eclipse
+    float sunIntensity = ubo.sunDirection.w * (1.0 - ubo.eclipseAmount);
     vec3 sunLight = calculatePBR(N, V, sunL, ubo.sunColor.rgb, sunIntensity, albedo, shadow,
                                   roughness, metallic);
 

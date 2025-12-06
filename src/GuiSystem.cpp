@@ -547,6 +547,55 @@ void GuiSystem::renderTimeSection(Renderer& renderer) {
     ImGui::Separator();
     ImGui::Spacing();
 
+    // Moon Brightness Controls
+    ImGui::Text("Moon Brightness:");
+
+    float moonBrightness = renderer.getMoonBrightness();
+    if (ImGui::SliderFloat("Light Intensity", &moonBrightness, 0.0f, 5.0f, "%.2f")) {
+        renderer.setMoonBrightness(moonBrightness);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Multiplier for moonlight intensity on terrain (0-5, default 1.0)");
+    }
+
+    float moonDiscIntensity = renderer.getMoonDiscIntensity();
+    if (ImGui::SliderFloat("Disc Intensity", &moonDiscIntensity, 0.0f, 50.0f, "%.1f")) {
+        renderer.setMoonDiscIntensity(moonDiscIntensity);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Visual brightness of moon disc in sky (0-50, default 20)");
+    }
+
+    float moonEarthshine = renderer.getMoonEarthshine();
+    if (ImGui::SliderFloat("Earthshine", &moonEarthshine, 0.0f, 0.2f, "%.3f")) {
+        renderer.setMoonEarthshine(moonEarthshine);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Visibility of dark side during crescent phases (0-0.2, default 0.02)");
+    }
+
+    // Brightness presets
+    ImGui::Text("Presets:");
+    ImGui::SameLine();
+    if (ImGui::Button("Dim")) {
+        renderer.setMoonBrightness(0.5f);
+        renderer.setMoonDiscIntensity(10.0f);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Normal")) {
+        renderer.setMoonBrightness(1.0f);
+        renderer.setMoonDiscIntensity(20.0f);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Bright")) {
+        renderer.setMoonBrightness(2.0f);
+        renderer.setMoonDiscIntensity(35.0f);
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
     // Eclipse Controls
     ImGui::Text("Solar Eclipse:");
 
