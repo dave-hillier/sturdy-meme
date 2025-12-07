@@ -9,7 +9,8 @@ find_package(LibArchive REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_path(STB_INCLUDE_DIRS "stb_image.h")
 
-add_executable(shader_reflect shader_reflect.cpp)
+# Shader reflection tool
+add_executable(shader_reflect shader/shader_reflect.cpp)
 
 target_link_libraries(shader_reflect PRIVATE
     unofficial::spirv-reflect
@@ -20,13 +21,13 @@ target_compile_features(shader_reflect PRIVATE cxx_std_17)
 # Terrain tile preprocessing tool
 # TerrainImporter.cpp is now local to tools/ for better decoupling from engine
 add_executable(terrain_preprocess
-    terrain_preprocess.cpp
-    stb_impl.cpp
-    TerrainImporter.cpp
+    terrain/terrain_preprocess.cpp
+    texture/stb_impl.cpp
+    terrain/TerrainImporter.cpp
 )
 
 target_include_directories(terrain_preprocess PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain
     ${STB_INCLUDE_DIRS}
 )
 
@@ -42,13 +43,13 @@ target_compile_features(terrain_preprocess PRIVATE cxx_std_17)
 # ErosionSimulator.cpp is now local to tools/ for better decoupling from engine
 # It uses shared WaterPlacementData.h from ../src/
 add_executable(erosion_preprocess
-    erosion_preprocess.cpp
-    stb_impl.cpp
-    ErosionSimulator.cpp
+    terrain/erosion_preprocess.cpp
+    texture/stb_impl.cpp
+    terrain/ErosionSimulator.cpp
 )
 
 target_include_directories(erosion_preprocess PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain
     ${CMAKE_CURRENT_SOURCE_DIR}/../src
     ${STB_INCLUDE_DIRS}
 )
@@ -63,13 +64,13 @@ target_compile_features(erosion_preprocess PRIVATE cxx_std_17)
 # Biome map preprocessing tool
 # BiomeGenerator.cpp is now local to tools/ for better decoupling from engine
 add_executable(biome_preprocess
-    biome_preprocess.cpp
-    stb_impl.cpp
-    BiomeGenerator.cpp
+    terrain/biome_preprocess.cpp
+    texture/stb_impl.cpp
+    terrain/BiomeGenerator.cpp
 )
 
 target_include_directories(biome_preprocess PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain
     ${STB_INCLUDE_DIRS}
 )
 target_link_libraries(biome_preprocess PRIVATE
@@ -78,10 +79,11 @@ target_link_libraries(biome_preprocess PRIVATE
     lodepng
 )
 
+target_compile_features(biome_preprocess PRIVATE cxx_std_17)
 
 # Foam noise texture generator
 add_executable(foam_noise_gen
-    foam_noise_gen.cpp
+    texture/foam_noise_gen.cpp
 )
 
 target_link_libraries(foam_noise_gen PRIVATE
@@ -94,7 +96,7 @@ target_compile_features(foam_noise_gen PRIVATE cxx_std_17)
 
 # Caustics texture generator
 add_executable(caustics_gen
-    caustics_gen.cpp
+    texture/caustics_gen.cpp
 )
 
 target_link_libraries(caustics_gen PRIVATE
@@ -107,7 +109,7 @@ target_compile_features(caustics_gen PRIVATE cxx_std_17)
 
 # SBSAR file renderer (Substance Archive)
 add_executable(sbsar_render
-    sbsar_render.cpp
+    texture/sbsar_render.cpp
 )
 
 target_link_libraries(sbsar_render PRIVATE
@@ -122,7 +124,7 @@ target_compile_features(sbsar_render PRIVATE cxx_std_17)
 
 # Cape texture generator
 add_executable(cape_texture_gen
-    cape_texture_gen.cpp
+    texture/cape_texture_gen.cpp
 )
 
 target_link_libraries(cape_texture_gen PRIVATE
@@ -131,13 +133,11 @@ target_link_libraries(cape_texture_gen PRIVATE
     lodepng
 )
 
-target_compile_features(biome_preprocess PRIVATE cxx_std_17)
-
 target_compile_features(cape_texture_gen PRIVATE cxx_std_17)
 
 # Material texture generator (procedural placeholder textures)
 add_executable(material_texture_gen
-    material_texture_gen.cpp
+    texture/material_texture_gen.cpp
 )
 
 target_link_libraries(material_texture_gen PRIVATE
