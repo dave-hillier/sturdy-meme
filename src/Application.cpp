@@ -66,18 +66,18 @@ bool Application::init(const std::string& title, int width, int height) {
                 wellX, wellZ, SceneBuilder::WELL_HOLE_RADIUS);
     }
 
-    // Initialize terrain physics using heightfield from terrain system
-    // Include hole mask for caves/wells (areas with no collision)
-    const auto& terrain = renderer.getTerrainSystem();
+    // Initialize tile-based terrain physics
+    // Streams high-res collision tiles near player, coarse tiles for distant coverage
+    auto& terrain = renderer.getTerrainSystem();
     const auto& terrainConfig = terrain.getConfig();
-    renderer.getSceneManager().initTerrainPhysics(
-        physics,
-        terrain.getHeightMapData(),
-        terrain.getHoleMaskData(),
-        terrain.getHeightMapResolution(),
+    terrainPhysicsTiles.init(
+        &physics,
+        &terrain.getTileCache(),
         terrainConfig.size,
-        terrainConfig.heightScale
+        terrain.getTileCache().getHeightScale(),
+        terrain.getTileCache().getMinAltitude()
     );
+    SDL_Log("Terrain physics using tile-based streaming (1000m high detail radius)");
 
     // Initialize scene physics (dynamic objects)
     renderer.getSceneManager().initPhysics(physics);
@@ -222,8 +222,12 @@ void Application::run() {
         // Update physics simulation
         physics.update(deltaTime);
 
+        // Update terrain physics tiles based on player position
+        glm::vec3 playerPos = physics.getCharacterPosition();
+        terrainPhysicsTiles.update(playerPos, 1000.0f);
+
         // Update player position from physics character controller
-        glm::vec3 physicsPos = physics.getCharacterPosition();
+        glm::vec3 physicsPos = playerPos;
         player.setPosition(physicsPos);
 
         // Update scene object transforms from physics
@@ -292,6 +296,7 @@ void Application::shutdown() {
     renderer.waitIdle();
     gui.shutdown();
     input.shutdown();
+    terrainPhysicsTiles.destroy();
     physics.shutdown();
     renderer.shutdown();
 

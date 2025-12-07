@@ -151,6 +151,11 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     terrainConfig.maxAltitude = 220.0f;
     // heightScale is computed from minAltitude/maxAltitude during init
 
+    // Enable LOD-based tile streaming from preprocessed tile cache
+    terrainConfig.tileCacheDir = resourcePath + "/terrain_data";
+    terrainConfig.tileLoadRadius = 2000.0f;   // Load high-res tiles within 2km
+    terrainConfig.tileUnloadRadius = 3000.0f; // Unload tiles beyond 3km
+
     if (!terrainSystem.init(terrainInfo, terrainConfig)) return false;
 
     // Initialize scene (meshes, textures, objects, lights)

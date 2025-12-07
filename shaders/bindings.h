@@ -93,6 +93,9 @@
 // Terrain-specific UBO bindings (separate from textures)
 #define BINDING_TERRAIN_SNOW_UBO       17   // Snow UBO for terrain
 #define BINDING_TERRAIN_CLOUD_SHADOW_UBO 18 // Cloud shadow UBO for terrain
+// LOD tile streaming
+#define BINDING_TERRAIN_TILE_ARRAY     19   // sampler2DArray of loaded tiles
+#define BINDING_TERRAIN_TILE_INFO      20   // SSBO with tile bounds and count
 
 // =============================================================================
 // Grass Compute Shader Descriptor Set
@@ -351,6 +354,8 @@ constexpr uint32_t TERRAIN_SHADOW_DRAW    = BINDING_TERRAIN_SHADOW_DRAW;
 constexpr uint32_t TERRAIN_HOLE_MASK      = BINDING_TERRAIN_HOLE_MASK;
 constexpr uint32_t TERRAIN_SNOW_UBO       = BINDING_TERRAIN_SNOW_UBO;
 constexpr uint32_t TERRAIN_CLOUD_SHADOW_UBO = BINDING_TERRAIN_CLOUD_SHADOW_UBO;
+constexpr uint32_t TERRAIN_TILE_ARRAY     = BINDING_TERRAIN_TILE_ARRAY;
+constexpr uint32_t TERRAIN_TILE_INFO      = BINDING_TERRAIN_TILE_INFO;
 
 // Grass Compute
 constexpr uint32_t GRASS_COMPUTE_INSTANCES   = BINDING_GRASS_COMPUTE_INSTANCES;

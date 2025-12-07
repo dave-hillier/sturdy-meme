@@ -11,6 +11,7 @@
 #include "ClothSimulation.h"
 #include "GuiSystem.h"
 #include "InputSystem.h"
+#include "TerrainPhysicsTiles.h"
 
 class Application {
 public:
@@ -42,6 +43,9 @@ private:
 
     // Physics body IDs for scene objects (mapped to scene object indices)
     std::vector<PhysicsBodyID> scenePhysicsBodies;
+
+    // Terrain physics tiles (streams collision tiles near player)
+    TerrainPhysicsTiles terrainPhysicsTiles;
 
     // Flag simulation
     ClothSimulation clothSim;

@@ -114,6 +114,20 @@ public:
     // Raycast queries
     std::vector<RaycastHit> castRayAllHits(const glm::vec3& from, const glm::vec3& to) const;
 
+    // Body management
+    void removeBody(PhysicsBodyID bodyID);
+
+    // Terrain tile - creates a heightfield for a single tile positioned in world space
+    // samples: row-major height values, sampleCount x sampleCount grid (normalized 0-1)
+    // worldMinX, worldMinZ: world position of tile corner
+    // tileWorldSize: tile extent in world units
+    // heightScale: multiplier for height values
+    // minAltitude: offset added to height (base altitude)
+    PhysicsBodyID createTerrainTile(const float* samples, uint32_t sampleCount,
+                                    float worldMinX, float worldMinZ,
+                                    float tileWorldSize, float heightScale,
+                                    float minAltitude = 0.0f);
+
     // Debug
     int getActiveBodyCount() const;
 

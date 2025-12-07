@@ -11,6 +11,7 @@
 #include "TerrainTextures.h"
 #include "TerrainCBT.h"
 #include "TerrainMeshlet.h"
+#include "TerrainTileCache.h"
 #include "DescriptorManager.h"
 
 class GpuProfiler;
@@ -102,6 +103,11 @@ struct TerrainConfig {
 
     // Curvature-based LOD
     float flatnessScale = 2.0f;       // How much flat areas reduce subdivision (0=disabled, 2=3x threshold for flat)
+
+    // Tile cache settings for LOD-based height streaming
+    std::string tileCacheDir;         // Directory containing preprocessed tiles (empty = disabled)
+    float tileLoadRadius = 2000.0f;   // Distance from camera to load high-res tiles
+    float tileUnloadRadius = 3000.0f; // Distance from camera to unload tiles
 };
 
 class TerrainSystem {
@@ -216,6 +222,10 @@ public:
     void uploadHoleMaskToGPU() { heightMap.uploadHoleMaskToGPU(); }
     const uint8_t* getHoleMaskData() const { return heightMap.getHoleMaskData(); }
 
+    // Tile cache accessor for physics integration
+    TerrainTileCache& getTileCache() { return tileCache; }
+    const TerrainTileCache& getTileCache() const { return tileCache; }
+
     // Toggle wireframe mode for debugging
     void setWireframeMode(bool enabled) { wireframeMode = enabled; }
     bool isWireframeMode() const { return wireframeMode; }
@@ -275,6 +285,7 @@ private:
     TerrainTextures textures;
     TerrainCBT cbt;
     TerrainMeshlet meshlet;
+    TerrainTileCache tileCache;  // LOD-based tile streaming
 
     // Indirect dispatch/draw buffers
     VkBuffer indirectDispatchBuffer = VK_NULL_HANDLE;

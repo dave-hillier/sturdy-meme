@@ -779,3 +779,78 @@ std::vector<RaycastHit> PhysicsWorld::castRayAllHits(const glm::vec3& from, cons
 
     return results;
 }
+
+void PhysicsWorld::removeBody(PhysicsBodyID bodyID) {
+    if (!initialized || bodyID == INVALID_BODY_ID) return;
+
+    JPH::BodyID joltID(bodyID);
+    JPH::BodyInterface& bodyInterface = physicsSystem->GetBodyInterface();
+
+    if (bodyInterface.IsAdded(joltID)) {
+        bodyInterface.RemoveBody(joltID);
+        bodyInterface.DestroyBody(joltID);
+    }
+}
+
+PhysicsBodyID PhysicsWorld::createTerrainTile(const float* samples, uint32_t sampleCount,
+                                               float worldMinX, float worldMinZ,
+                                               float tileWorldSize, float heightScale,
+                                               float minAltitude) {
+    if (!initialized) return INVALID_BODY_ID;
+    if (!samples || sampleCount < 2) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Invalid terrain tile parameters");
+        return INVALID_BODY_ID;
+    }
+
+    JPH::BodyInterface& bodyInterface = physicsSystem->GetBodyInterface();
+
+    // Convert normalized heights to world heights
+    // Height formula: worldY = h * heightScale + minAltitude
+    std::vector<float> joltSamples(sampleCount * sampleCount);
+    for (uint32_t i = 0; i < sampleCount * sampleCount; i++) {
+        joltSamples[i] = samples[i] * heightScale + minAltitude;
+    }
+
+    // The scale parameter determines the XZ spacing between samples
+    // tileWorldSize covers sampleCount-1 intervals
+    float xzScale = tileWorldSize / (sampleCount - 1);
+
+    // HeightFieldShapeSettings - offset positions the tile corner in world space
+    JPH::HeightFieldShapeSettings heightFieldSettings(
+        joltSamples.data(),
+        JPH::Vec3(worldMinX, 0.0f, worldMinZ),  // Offset: tile corner position
+        JPH::Vec3(xzScale, 1.0f, xzScale),       // Scale: XZ spacing, Y is direct (already scaled)
+        sampleCount
+    );
+
+    // Set material properties
+    heightFieldSettings.mMaterials.push_back(new JPH::PhysicsMaterial());
+
+    JPH::ShapeSettings::ShapeResult shapeResult = heightFieldSettings.Create();
+    if (!shapeResult.IsValid()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create terrain tile shape: %s",
+                     shapeResult.GetError().c_str());
+        return INVALID_BODY_ID;
+    }
+
+    // Create the body at the origin (the shape's offset handles positioning)
+    JPH::BodyCreationSettings bodySettings(
+        shapeResult.Get(),
+        JPH::RVec3(0.0, 0.0, 0.0),
+        JPH::Quat::sIdentity(),
+        JPH::EMotionType::Static,
+        PhysicsLayers::NON_MOVING
+    );
+    bodySettings.mFriction = 0.8f;
+    bodySettings.mRestitution = 0.0f;
+
+    JPH::Body* body = bodyInterface.CreateBody(bodySettings);
+    if (!body) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create terrain tile body");
+        return INVALID_BODY_ID;
+    }
+
+    bodyInterface.AddBody(body->GetID(), JPH::EActivation::DontActivate);
+
+    return body->GetID().GetIndexAndSequenceNumber();
+}

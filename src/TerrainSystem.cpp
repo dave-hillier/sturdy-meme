@@ -71,6 +71,25 @@ bool TerrainSystem::init(const InitInfo& info, const TerrainConfig& cfg) {
         }
     }
 
+    // Initialize tile cache for LOD-based height streaming (if configured)
+    if (!config.tileCacheDir.empty()) {
+        TerrainTileCache::InitInfo tileCacheInfo{};
+        tileCacheInfo.cacheDirectory = config.tileCacheDir;
+        tileCacheInfo.device = device;
+        tileCacheInfo.allocator = allocator;
+        tileCacheInfo.graphicsQueue = graphicsQueue;
+        tileCacheInfo.commandPool = commandPool;
+        tileCacheInfo.terrainSize = config.size;
+        tileCacheInfo.heightScale = config.heightScale;
+        tileCacheInfo.minAltitude = config.minAltitude;
+        tileCacheInfo.maxAltitude = config.maxAltitude;
+        if (!tileCache.init(tileCacheInfo)) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize tile cache, using global heightmap only");
+        } else {
+            SDL_Log("Tile cache initialized: %s", config.tileCacheDir.c_str());
+        }
+    }
+
     // Query GPU subgroup capabilities for optimized compute paths
     querySubgroupCapabilities();
 
@@ -159,6 +178,7 @@ void TerrainSystem::destroy(VkDevice device, VmaAllocator allocator) {
     }
 
     // Destroy composed subsystems
+    tileCache.destroy();
     meshlet.destroy(allocator);
     cbt.destroy(allocator);
     textures.destroy(device, allocator);
@@ -371,7 +391,7 @@ bool TerrainSystem::createRenderDescriptorSetLayout() {
             .build();
     };
 
-    std::array<VkDescriptorSetLayoutBinding, 16> bindings = {
+    std::array<VkDescriptorSetLayoutBinding, 18> bindings = {
         makeGraphicsBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT),
         makeGraphicsBinding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT),
@@ -395,7 +415,11 @@ bool TerrainSystem::createRenderDescriptorSetLayout() {
         // Snow UBO (binding 17) - separate from snow cascade textures
         makeGraphicsBinding(17, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT),
         // Cloud shadow UBO (binding 18) - separate from cloud shadow texture
-        makeGraphicsBinding(18, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT)};
+        makeGraphicsBinding(18, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT),
+        // LOD tile streaming: tile array texture (binding 19)
+        makeGraphicsBinding(19, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_VERTEX_BIT),
+        // LOD tile streaming: tile info SSBO (binding 20)
+        makeGraphicsBinding(20, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT)};
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -1802,6 +1826,32 @@ void TerrainSystem::updateDescriptorSets(VkDevice device,
             writes.push_back(cloudShadowUBOWrite);
         }
 
+        // LOD tile array texture (binding 19)
+        if (tileCache.getTileArrayView() != VK_NULL_HANDLE) {
+            VkDescriptorImageInfo tileArrayInfo{tileCache.getSampler(), tileCache.getTileArrayView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+            VkWriteDescriptorSet tileArrayWrite{};
+            tileArrayWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            tileArrayWrite.dstSet = renderDescriptorSets[i];
+            tileArrayWrite.dstBinding = 19;  // BINDING_TERRAIN_TILE_ARRAY
+            tileArrayWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            tileArrayWrite.descriptorCount = 1;
+            tileArrayWrite.pImageInfo = &tileArrayInfo;
+            writes.push_back(tileArrayWrite);
+        }
+
+        // LOD tile info buffer (binding 20)
+        if (tileCache.getTileInfoBuffer() != VK_NULL_HANDLE) {
+            VkDescriptorBufferInfo tileInfoBufInfo{tileCache.getTileInfoBuffer(), 0, VK_WHOLE_SIZE};
+            VkWriteDescriptorSet tileInfoWrite{};
+            tileInfoWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            tileInfoWrite.dstSet = renderDescriptorSets[i];
+            tileInfoWrite.dstBinding = 20;  // BINDING_TERRAIN_TILE_INFO
+            tileInfoWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            tileInfoWrite.descriptorCount = 1;
+            tileInfoWrite.pBufferInfo = &tileInfoBufInfo;
+            writes.push_back(tileInfoWrite);
+        }
+
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
     }
 }
@@ -1914,6 +1964,11 @@ void TerrainSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraP
         staticFrameCount = 0;
     } else {
         staticFrameCount++;
+    }
+
+    // Update tile cache - stream high-res tiles based on camera position
+    if (!config.tileCacheDir.empty()) {
+        tileCache.updateActiveTiles(cameraPos, config.tileLoadRadius, config.tileUnloadRadius);
     }
 
     TerrainUniforms uniforms{};
@@ -2304,6 +2359,15 @@ void TerrainSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex,
 }
 
 float TerrainSystem::getHeightAt(float x, float z) const {
+    // First try the tile cache for high-res height data
+    if (!config.tileCacheDir.empty()) {
+        float tileHeight;
+        if (tileCache.getHeightAt(x, z, tileHeight)) {
+            return tileHeight;
+        }
+    }
+
+    // Fall back to global heightmap (coarse LOD)
     return heightMap.getHeightAt(x, z);
 }
 
