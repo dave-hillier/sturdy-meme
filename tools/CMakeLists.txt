@@ -52,3 +52,23 @@ target_link_libraries(erosion_preprocess PRIVATE
 )
 
 target_compile_features(erosion_preprocess PRIVATE cxx_std_17)
+
+# Biome map preprocessing tool
+add_executable(biome_preprocess
+    biome_preprocess.cpp
+    stb_impl.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/BiomeGenerator.cpp
+)
+
+target_include_directories(biome_preprocess PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src
+    ${STB_INCLUDE_DIRS}
+)
+
+target_link_libraries(biome_preprocess PRIVATE
+    SDL3::SDL3
+    glm::glm
+    lodepng
+)
+
+target_compile_features(biome_preprocess PRIVATE cxx_std_17)
