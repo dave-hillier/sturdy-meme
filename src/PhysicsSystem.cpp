@@ -360,12 +360,13 @@ PhysicsBodyID PhysicsWorld::createTerrainDisc(float radius, float heightOffset) 
 
 PhysicsBodyID PhysicsWorld::createTerrainHeightfield(const float* samples, uint32_t sampleCount,
                                                       float worldSize, float heightScale) {
-    // Call the version with no hole mask
-    return createTerrainHeightfield(samples, nullptr, sampleCount, worldSize, heightScale);
+    // Call the version with no hole mask (holeMaskResolution = 0 means no mask)
+    return createTerrainHeightfield(samples, nullptr, sampleCount, 0, worldSize, heightScale);
 }
 
 PhysicsBodyID PhysicsWorld::createTerrainHeightfield(const float* samples, const uint8_t* holeMask,
-                                                      uint32_t sampleCount, float worldSize, float heightScale) {
+                                                      uint32_t sampleCount, uint32_t holeMaskResolution,
+                                                      float worldSize, float heightScale) {
     if (!initialized) return INVALID_BODY_ID;
     if (!samples || sampleCount < 2) {
         SDL_Log("Invalid heightfield parameters");
@@ -383,7 +384,24 @@ PhysicsBodyID PhysicsWorld::createTerrainHeightfield(const float* samples, const
     // For holes, use JPH::HeightFieldShapeConstants::cNoCollisionValue
     std::vector<float> joltSamples(sampleCount * sampleCount);
     for (uint32_t i = 0; i < sampleCount * sampleCount; i++) {
-        if (holeMask && holeMask[i] > 127) {
+        bool isHole = false;
+        if (holeMask && holeMaskResolution > 0) {
+            // Convert heightmap sample index to UV coordinates
+            uint32_t hx = i % sampleCount;
+            uint32_t hy = i / sampleCount;
+            float u = static_cast<float>(hx) / (sampleCount - 1);
+            float v = static_cast<float>(hy) / (sampleCount - 1);
+
+            // Map UV to hole mask pixel coordinates
+            uint32_t mx = static_cast<uint32_t>(u * (holeMaskResolution - 1));
+            uint32_t my = static_cast<uint32_t>(v * (holeMaskResolution - 1));
+            mx = std::min(mx, holeMaskResolution - 1);
+            my = std::min(my, holeMaskResolution - 1);
+
+            isHole = holeMask[my * holeMaskResolution + mx] > 127;
+        }
+
+        if (isHole) {
             // This is a hole - no collision
             joltSamples[i] = JPH::HeightFieldShapeConstants::cNoCollisionValue;
         } else {

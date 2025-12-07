@@ -75,6 +75,7 @@ bool Application::init(const std::string& title, int width, int height) {
         terrain.getHeightMapData(),
         terrain.getHoleMaskData(),
         terrain.getHeightMapResolution(),
+        terrain.getHoleMaskResolution(),
         terrainConfig.size,
         terrainConfig.heightScale
     );

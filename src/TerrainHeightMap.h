@@ -55,6 +55,7 @@ public:
     const float* getData() const { return cpuData.data(); }
     const uint8_t* getHoleMaskData() const { return holeMaskCpuData.data(); }
     uint32_t getResolution() const { return resolution; }
+    uint32_t getHoleMaskResolution() const { return holeMaskResolution; }
     float getHeightScale() const { return heightScale; }
     float getTerrainSize() const { return terrainSize; }
 

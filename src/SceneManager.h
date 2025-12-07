@@ -23,9 +23,10 @@ public:
                             uint32_t sampleCount, float worldSize, float heightScale);
 
     // Initialize terrain physics with hole mask (for caves/wells)
+    // holeMaskResolution: resolution of hole mask (may differ from heightmap sampleCount)
     void initTerrainPhysics(PhysicsWorld& physics, const float* heightSamples,
                             const uint8_t* holeMask, uint32_t sampleCount,
-                            float worldSize, float heightScale);
+                            uint32_t holeMaskResolution, float worldSize, float heightScale);
 
     void destroy(VmaAllocator allocator, VkDevice device);
 

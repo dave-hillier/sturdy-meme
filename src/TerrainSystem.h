@@ -215,6 +215,7 @@ public:
     }
     void uploadHoleMaskToGPU() { heightMap.uploadHoleMaskToGPU(); }
     const uint8_t* getHoleMaskData() const { return heightMap.getHoleMaskData(); }
+    uint32_t getHoleMaskResolution() const { return heightMap.getHoleMaskResolution(); }
 
     // Toggle wireframe mode for debugging
     void setWireframeMode(bool enabled) { wireframeMode = enabled; }

@@ -74,10 +74,12 @@ public:
                                            float worldSize, float heightScale);
 
     // Terrain with hole mask - holes have no collision (for caves/wells)
-    // holeMask: row-major uint8_t values, same dimensions as height samples
+    // holeMask: row-major uint8_t values at holeMaskResolution x holeMaskResolution
     //           values > 127 indicate holes (no collision)
+    // holeMaskResolution: resolution of the hole mask (may differ from sampleCount)
     PhysicsBodyID createTerrainHeightfield(const float* samples, const uint8_t* holeMask,
-                                           uint32_t sampleCount, float worldSize, float heightScale);
+                                           uint32_t sampleCount, uint32_t holeMaskResolution,
+                                           float worldSize, float heightScale);
 
     // Dynamic rigid bodies
     PhysicsBodyID createBox(const glm::vec3& position, const glm::vec3& halfExtents,
