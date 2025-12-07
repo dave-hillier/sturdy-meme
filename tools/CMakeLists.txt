@@ -152,6 +152,7 @@ target_compile_features(material_texture_gen PRIVATE cxx_std_17)
 add_library(tile_generator_lib STATIC
     tile_generator/MaterialLibrary.cpp
     tile_generator/SplineRasterizer.cpp
+    tile_generator/TileCompositor.cpp
 )
 
 target_include_directories(tile_generator_lib PUBLIC
@@ -163,9 +164,22 @@ target_include_directories(tile_generator_lib PUBLIC
 target_link_libraries(tile_generator_lib PUBLIC
     SDL3::SDL3
     glm::glm
+    lodepng
+    nlohmann_json::nlohmann_json
 )
 
 target_compile_features(tile_generator_lib PRIVATE cxx_std_17)
+
+# Virtual texture tile generator
+add_executable(tile_generator
+    tile_generator/main.cpp
+)
+
+target_link_libraries(tile_generator PRIVATE
+    tile_generator_lib
+)
+
+target_compile_features(tile_generator PRIVATE cxx_std_17)
 
 # Road network generator (A* pathfinding for settlement connections)
 add_executable(road_generator
