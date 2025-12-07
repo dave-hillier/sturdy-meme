@@ -63,7 +63,7 @@ struct FBXImportSettings {
 namespace FBXPresets {
     // Mixamo exports: Y-up, cm units
     // Note: Mixamo FBX files have normals that appear rotated 90 degrees around X axis
-    // relative to our engine's expectations. The normal rotation correction fixes this so
+    // relative to our engine's expectations. The rotation correction fixes this so
     // upward-facing normals have high Y component instead of high Z component.
     inline FBXImportSettings Mixamo() {
         FBXImportSettings settings;
