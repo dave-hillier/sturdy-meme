@@ -142,8 +142,7 @@ if(APPLE)
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in"
     )
 
-
-    # Copy assets/textures to Resources/textures (for terrain textures)
+    # Copy assets/textures to Resources/textures
     add_custom_command(
         TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
@@ -161,11 +160,11 @@ if(APPLE)
         COMMENT "Copying assets to app bundle"
     )
 else()
-    # Copy textures directory to build output (Linux/Windows)
+    # Copy assets/textures to build output (Linux/Windows)
     add_custom_command(
         TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
-            ${CMAKE_CURRENT_SOURCE_DIR}/textures
+            ${CMAKE_CURRENT_SOURCE_DIR}/assets/textures
             $<TARGET_FILE_DIR:${PROJECT_NAME}>/textures
         COMMENT "Copying textures to build directory"
     )
