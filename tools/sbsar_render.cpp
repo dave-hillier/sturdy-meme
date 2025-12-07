@@ -1,15 +1,29 @@
 // SBSAR file renderer
 // Processes Substance Archive (.sbsar) files to generate texture maps
 // Uses Adobe's sbsrender CLI tool if available, otherwise generates fallback textures
+// with procedural noise-based detail
+//
+// .sbsar files are 7-zip archives containing:
+// - XML metadata describing inputs, outputs, and presets (e.g., MaterialName.xml)
+// - .sbsasm binary compiled substance graph files
+// Reference: https://blog.jdboyd.net/2018/09/substance-designer-sbsprs-sbsar-file-format-notes/
 
 #include <SDL3/SDL_log.h>
 #include <glm/glm.hpp>
 #include <lodepng.h>
+#include <miniz.h>
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <random>
+#include <sstream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -41,6 +55,484 @@ static const std::vector<OutputMap> STANDARD_OUTPUTS = {
     {"ambientocclusion", "ambientocclusion", glm::vec4(1.0f, 1.0f, 1.0f, 1.0f), false},
     {"emissive", "emissive", glm::vec4(0.0f, 0.0f, 0.0f, 1.0f), true},
 };
+
+// ============================================================================
+// Material Parameters extracted from .sbsar archive
+// ============================================================================
+
+struct MaterialParameters {
+    // Base colors
+    glm::vec4 baseColor = glm::vec4(0.5f, 0.5f, 0.5f, 1.0f);
+    glm::vec4 emissiveColor = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+
+    // PBR values
+    float roughness = 0.5f;
+    float metallic = 0.0f;
+    float normalIntensity = 1.0f;
+    float heightScale = 0.5f;
+
+    // Pattern controls
+    float patternScale = 8.0f;
+    float patternRandomness = 0.8f;
+    int patternOctaves = 6;
+
+    // Material type hint
+    std::string materialType;  // e.g., "stone", "wood", "metal", "fabric"
+    std::string materialName;
+
+    // Parsed from archive
+    bool parsed = false;
+};
+
+// Simple XML attribute parser (finds value="..." or just the text content)
+std::string extractXmlAttribute(const std::string& xml, const std::string& tag,
+                                 const std::string& attr) {
+    std::string searchTag = "<" + tag;
+    size_t tagStart = xml.find(searchTag);
+    while (tagStart != std::string::npos) {
+        size_t tagEnd = xml.find('>', tagStart);
+        if (tagEnd == std::string::npos) break;
+
+        std::string tagContent = xml.substr(tagStart, tagEnd - tagStart);
+        std::string attrSearch = attr + "=\"";
+        size_t attrPos = tagContent.find(attrSearch);
+        if (attrPos != std::string::npos) {
+            size_t valueStart = attrPos + attrSearch.length();
+            size_t valueEnd = tagContent.find('"', valueStart);
+            if (valueEnd != std::string::npos) {
+                return tagContent.substr(valueStart, valueEnd - valueStart);
+            }
+        }
+        tagStart = xml.find(searchTag, tagEnd);
+    }
+    return "";
+}
+
+// Extract all values for a specific input parameter
+std::vector<float> extractInputValues(const std::string& xml, const std::string& inputId) {
+    std::vector<float> values;
+
+    // Look for input definitions like <input identifier="basecolor" ...>
+    // and extract default values from the same element
+    std::string searchPattern = "identifier=\"" + inputId + "\"";
+    size_t pos = xml.find(searchPattern);
+    if (pos != std::string::npos) {
+        // Find the start of this <input element
+        size_t elementStart = xml.rfind('<', pos);
+        // Find the end of this element (either /> or </input>)
+        size_t elementEnd = xml.find('>', pos);
+        if (elementEnd != std::string::npos && xml[elementEnd - 1] != '/') {
+            // Not self-closing, find the closing tag
+            elementEnd = xml.find("</", pos);
+        }
+
+        if (elementStart != std::string::npos && elementEnd != std::string::npos) {
+            std::string element = xml.substr(elementStart, elementEnd - elementStart + 1);
+
+            // Try to find float values like value="0.5" or default="0.5" within THIS element
+            for (const auto& attr : {"default", "value", "defaultvalue"}) {
+                std::string attrSearch = std::string(attr) + "=\"";
+                size_t attrPos = element.find(attrSearch);
+                if (attrPos != std::string::npos) {
+                    size_t valueStart = attrPos + attrSearch.length();
+                    size_t valueEnd = element.find('"', valueStart);
+                    if (valueEnd != std::string::npos) {
+                        std::string valueStr = element.substr(valueStart, valueEnd - valueStart);
+                        try {
+                            // Handle comma-separated values (for colors)
+                            std::istringstream iss(valueStr);
+                            std::string token;
+                            while (std::getline(iss, token, ',')) {
+                                values.push_back(std::stof(token));
+                            }
+                            if (!values.empty()) break;  // Found values, stop looking
+                        } catch (...) {
+                            // Ignore parse errors
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return values;
+}
+
+// Parse material parameters from XML content
+MaterialParameters parseXmlParameters(const std::string& xml) {
+    MaterialParameters params;
+
+    // Extract material name/label
+    params.materialName = extractXmlAttribute(xml, "graph", "label");
+    if (params.materialName.empty()) {
+        params.materialName = extractXmlAttribute(xml, "package", "label");
+    }
+
+    // Try to determine material type from keywords in the XML
+    std::string lowerXml = xml;
+    std::transform(lowerXml.begin(), lowerXml.end(), lowerXml.begin(), ::tolower);
+
+    if (lowerXml.find("stone") != std::string::npos ||
+        lowerXml.find("rock") != std::string::npos ||
+        lowerXml.find("brick") != std::string::npos) {
+        params.materialType = "stone";
+        params.roughness = 0.7f;
+        params.patternScale = 4.0f;
+    } else if (lowerXml.find("wood") != std::string::npos ||
+               lowerXml.find("bark") != std::string::npos) {
+        params.materialType = "wood";
+        params.roughness = 0.6f;
+        params.patternScale = 6.0f;
+        params.baseColor = glm::vec4(0.4f, 0.25f, 0.15f, 1.0f);
+    } else if (lowerXml.find("metal") != std::string::npos ||
+               lowerXml.find("steel") != std::string::npos ||
+               lowerXml.find("iron") != std::string::npos) {
+        params.materialType = "metal";
+        params.metallic = 0.9f;
+        params.roughness = 0.3f;
+        params.baseColor = glm::vec4(0.7f, 0.7f, 0.75f, 1.0f);
+    } else if (lowerXml.find("fabric") != std::string::npos ||
+               lowerXml.find("cloth") != std::string::npos ||
+               lowerXml.find("leather") != std::string::npos) {
+        params.materialType = "fabric";
+        params.roughness = 0.8f;
+        params.patternScale = 12.0f;
+    } else if (lowerXml.find("sand") != std::string::npos ||
+               lowerXml.find("dirt") != std::string::npos ||
+               lowerXml.find("ground") != std::string::npos) {
+        params.materialType = "ground";
+        params.roughness = 0.9f;
+        params.baseColor = glm::vec4(0.6f, 0.5f, 0.4f, 1.0f);
+    } else if (lowerXml.find("grass") != std::string::npos) {
+        params.materialType = "grass";
+        params.roughness = 0.7f;
+        params.baseColor = glm::vec4(0.3f, 0.5f, 0.2f, 1.0f);
+    }
+
+    // Try to extract explicit color values
+    auto colorValues = extractInputValues(xml, "basecolor");
+    if (colorValues.size() >= 3) {
+        params.baseColor = glm::vec4(colorValues[0], colorValues[1], colorValues[2],
+                                     colorValues.size() > 3 ? colorValues[3] : 1.0f);
+    }
+
+    // Try to extract roughness
+    auto roughnessValues = extractInputValues(xml, "roughness");
+    if (!roughnessValues.empty()) {
+        params.roughness = roughnessValues[0];
+    }
+
+    // Try to extract metallic
+    auto metallicValues = extractInputValues(xml, "metallic");
+    if (!metallicValues.empty()) {
+        params.metallic = metallicValues[0];
+    }
+
+    params.parsed = true;
+    return params;
+}
+
+// Check if 7z command is available
+bool check7zAvailable() {
+#ifdef _WIN32
+    int result = std::system("7z >nul 2>&1");
+#else
+    int result = std::system("7z >/dev/null 2>&1");
+#endif
+    // 7z returns 0 on success, but also returns 0 with no args on some versions
+    // Check for common 7z/7za commands
+    if (result != 0) {
+#ifdef _WIN32
+        result = std::system("7za >nul 2>&1");
+#else
+        result = std::system("7za >/dev/null 2>&1");
+#endif
+    }
+    return result == 0;
+}
+
+// Try to parse .sbsar as 7-zip archive using command-line tool
+std::string extract7zXmlContent(const std::string& path) {
+    std::string xmlContent;
+
+    // Create temp directory for extraction
+    std::string tempDir = "/tmp/sbsar_extract_" + std::to_string(std::hash<std::string>{}(path));
+    fs::create_directories(tempDir);
+
+    // First, list the archive contents to find XML files
+    std::string listCmd = "7z l \"" + path + "\" 2>/dev/null";
+    FILE* pipe = popen(listCmd.c_str(), "r");
+    if (!pipe) {
+        // Try 7za as fallback
+        listCmd = "7za l \"" + path + "\" 2>/dev/null";
+        pipe = popen(listCmd.c_str(), "r");
+    }
+
+    std::string xmlFilename;
+    if (pipe) {
+        std::array<char, 256> buffer;
+        std::string output;
+        while (fgets(buffer.data(), buffer.size(), pipe) != nullptr) {
+            output += buffer.data();
+        }
+        pclose(pipe);
+
+        // Parse output to find .xml files
+        std::istringstream iss(output);
+        std::string line;
+        while (std::getline(iss, line)) {
+            if (line.find(".xml") != std::string::npos) {
+                // Extract filename from 7z output line
+                // Format varies but filename is usually at end after spaces
+                size_t pos = line.rfind("   ");
+                if (pos != std::string::npos) {
+                    xmlFilename = line.substr(pos);
+                    // Trim whitespace
+                    size_t start = xmlFilename.find_first_not_of(" \t");
+                    if (start != std::string::npos) {
+                        xmlFilename = xmlFilename.substr(start);
+                    }
+                }
+                if (!xmlFilename.empty()) {
+                    SDL_Log("Found XML file in 7z archive: %s", xmlFilename.c_str());
+                    break;
+                }
+            }
+        }
+    }
+
+    // Extract all XML files (including nested paths like assemblies/content/0000/*.xml)
+    if (!xmlFilename.empty()) {
+        // Use -r for recursive extraction of all xml files from nested directories
+        std::string extractCmd = "7z e -y -r -o\"" + tempDir + "\" \"" + path + "\" \"*.xml\" 2>/dev/null";
+        int result = std::system(extractCmd.c_str());
+        if (result != 0) {
+            extractCmd = "7za e -y -r -o\"" + tempDir + "\" \"" + path + "\" \"*.xml\" 2>/dev/null";
+            result = std::system(extractCmd.c_str());
+        }
+
+        if (result == 0) {
+            // Read extracted XML file
+            for (const auto& entry : fs::directory_iterator(tempDir)) {
+                if (entry.path().extension() == ".xml") {
+                    std::ifstream file(entry.path());
+                    if (file.is_open()) {
+                        std::stringstream ss;
+                        ss << file.rdbuf();
+                        xmlContent = ss.str();
+                        SDL_Log("Extracted XML from 7z archive (%zu bytes)", xmlContent.size());
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // Clean up temp directory
+    fs::remove_all(tempDir);
+
+    return xmlContent;
+}
+
+// Try to parse .sbsar as regular ZIP archive (fallback/test files)
+std::string extractZipXmlContent(const std::string& path) {
+    std::string xmlContent;
+
+    mz_zip_archive zip;
+    memset(&zip, 0, sizeof(zip));
+
+    if (!mz_zip_reader_init_file(&zip, path.c_str(), 0)) {
+        return xmlContent;
+    }
+
+    int numFiles = static_cast<int>(mz_zip_reader_get_num_files(&zip));
+    SDL_Log("ZIP archive contains %d files", numFiles);
+
+    for (int i = 0; i < numFiles; i++) {
+        mz_zip_archive_file_stat fileStat;
+        if (!mz_zip_reader_file_stat(&zip, i, &fileStat)) {
+            continue;
+        }
+
+        std::string filename = fileStat.m_filename;
+        SDL_Log("  Archive file: %s (%zu bytes)", filename.c_str(),
+                static_cast<size_t>(fileStat.m_uncomp_size));
+
+        // Look for XML files (substance description)
+        if (filename.find(".xml") != std::string::npos ||
+            filename.find("desc") != std::string::npos) {
+
+            size_t uncompSize = static_cast<size_t>(fileStat.m_uncomp_size);
+            std::vector<char> buffer(uncompSize + 1);
+
+            if (mz_zip_reader_extract_to_mem(&zip, i, buffer.data(), uncompSize, 0)) {
+                buffer[uncompSize] = '\0';
+                xmlContent = buffer.data();
+                SDL_Log("  Extracted XML content (%zu bytes)", xmlContent.size());
+                break;
+            }
+        }
+    }
+
+    mz_zip_reader_end(&zip);
+    return xmlContent;
+}
+
+// Extract and parse .sbsar archive to get material parameters
+MaterialParameters parseSbsarArchive(const std::string& path) {
+    MaterialParameters params;
+
+    SDL_Log("Parsing SBSAR archive: %s", path.c_str());
+
+    std::string xmlContent;
+
+    // Try 7-zip first if available (real .sbsar files are 7z archives)
+    if (check7zAvailable()) {
+        SDL_Log("7z command available, trying 7-zip format...");
+        xmlContent = extract7zXmlContent(path);
+    } else {
+        SDL_Log("7z command not found (install p7zip-full for real .sbsar support)");
+    }
+
+    // Fall back to regular ZIP (for test files or older formats)
+    if (xmlContent.empty()) {
+        SDL_Log("Trying ZIP format...");
+        xmlContent = extractZipXmlContent(path);
+    }
+
+    // Parse XML if found
+    if (!xmlContent.empty()) {
+        params = parseXmlParameters(xmlContent);
+        if (!params.materialName.empty()) {
+            SDL_Log("Material name: %s", params.materialName.c_str());
+        }
+        if (!params.materialType.empty()) {
+            SDL_Log("Material type: %s", params.materialType.c_str());
+        }
+        SDL_Log("Extracted parameters - baseColor: (%.2f, %.2f, %.2f), roughness: %.2f, metallic: %.2f",
+                params.baseColor.r, params.baseColor.g, params.baseColor.b,
+                params.roughness, params.metallic);
+    } else {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "No XML metadata found in SBSAR archive");
+    }
+
+    return params;
+}
+
+// ============================================================================
+// Procedural Noise Generation
+// ============================================================================
+
+// Permutation table for Perlin noise (doubled to avoid modulo operations)
+static int perm[512];
+static bool permInitialized = false;
+
+void initPermutationTable(unsigned int seed) {
+    if (permInitialized) return;
+
+    std::mt19937 rng(seed);
+    for (int i = 0; i < 256; i++) {
+        perm[i] = i;
+    }
+    for (int i = 255; i > 0; i--) {
+        std::uniform_int_distribution<int> dist(0, i);
+        int j = dist(rng);
+        std::swap(perm[i], perm[j]);
+    }
+    for (int i = 0; i < 256; i++) {
+        perm[256 + i] = perm[i];
+    }
+    permInitialized = true;
+}
+
+// Fade function for smooth interpolation
+float fade(float t) {
+    return t * t * t * (t * (t * 6.0f - 15.0f) + 10.0f);
+}
+
+// Linear interpolation
+float lerp(float a, float b, float t) {
+    return a + t * (b - a);
+}
+
+// Gradient function - returns dot product with gradient vector
+float grad(int hash, float x, float y) {
+    int h = hash & 7;
+    float u = h < 4 ? x : y;
+    float v = h < 4 ? y : x;
+    return ((h & 1) ? -u : u) + ((h & 2) ? -2.0f * v : 2.0f * v);
+}
+
+// 2D Perlin noise function
+float perlinNoise(float x, float y) {
+    // Find unit grid cell containing point
+    int X = static_cast<int>(std::floor(x)) & 255;
+    int Y = static_cast<int>(std::floor(y)) & 255;
+
+    // Get relative position within cell
+    x -= std::floor(x);
+    y -= std::floor(y);
+
+    // Compute fade curves
+    float u = fade(x);
+    float v = fade(y);
+
+    // Hash coordinates of the 4 cube corners
+    int A = perm[X] + Y;
+    int B = perm[X + 1] + Y;
+
+    // Blend the results
+    float res = lerp(
+        lerp(grad(perm[A], x, y), grad(perm[B], x - 1, y), u),
+        lerp(grad(perm[A + 1], x, y - 1), grad(perm[B + 1], x - 1, y - 1), u),
+        v
+    );
+
+    // Normalize to [0, 1]
+    return (res + 1.0f) * 0.5f;
+}
+
+// Fractal Brownian Motion - layered noise for natural-looking detail
+float fbm(float x, float y, int octaves, float persistence, float lacunarity) {
+    float total = 0.0f;
+    float amplitude = 1.0f;
+    float frequency = 1.0f;
+    float maxValue = 0.0f;
+
+    for (int i = 0; i < octaves; i++) {
+        total += perlinNoise(x * frequency, y * frequency) * amplitude;
+        maxValue += amplitude;
+        amplitude *= persistence;
+        frequency *= lacunarity;
+    }
+
+    return total / maxValue;
+}
+
+// Voronoi/cellular noise for patterns like stone, scales, etc.
+float voronoiNoise(float x, float y, float randomness) {
+    int xi = static_cast<int>(std::floor(x));
+    int yi = static_cast<int>(std::floor(y));
+
+    float minDist = 10.0f;
+
+    for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+            int cx = xi + dx;
+            int cy = yi + dy;
+
+            // Generate pseudo-random point within this cell
+            int hash = perm[(perm[cx & 255] + cy) & 255];
+            float px = cx + (static_cast<float>(hash) / 255.0f) * randomness;
+            float py = cy + (static_cast<float>(perm[hash]) / 255.0f) * randomness;
+
+            float dist = std::sqrt((x - px) * (x - px) + (y - py) * (y - py));
+            minDist = std::min(minDist, dist);
+        }
+    }
+
+    return glm::clamp(minDist, 0.0f, 1.0f);
+}
 
 bool checkSbsrenderAvailable() {
     // Try to run sbsrender --version to check if it's available
@@ -88,14 +580,271 @@ bool renderWithSbsrender(const RenderConfig& config) {
     return true;
 }
 
-void generateFallbackTexture(const std::string& path, int resolution,
-                             const glm::vec4& color) {
+// ============================================================================
+// Procedural Texture Generators
+// ============================================================================
+
+// Generate basecolor texture with natural color variation
+void generateBasecolorTexture(const std::string& path, int resolution,
+                               const glm::vec4& baseColor) {
+    std::vector<unsigned char> imageData(resolution * resolution * 4);
+    float scale = 8.0f;  // Controls pattern scale
+
+    for (int y = 0; y < resolution; y++) {
+        for (int x = 0; x < resolution; x++) {
+            float u = static_cast<float>(x) / resolution;
+            float v = static_cast<float>(y) / resolution;
+
+            // Multi-octave noise for natural variation
+            float noise1 = fbm(u * scale, v * scale, 6, 0.5f, 2.0f);
+            float noise2 = fbm(u * scale * 2.0f + 100.0f, v * scale * 2.0f, 4, 0.5f, 2.0f);
+            float noise3 = voronoiNoise(u * scale * 0.5f, v * scale * 0.5f, 0.8f);
+
+            // Combine noises for rich variation
+            float variation = noise1 * 0.5f + noise2 * 0.3f + noise3 * 0.2f;
+
+            // Apply variation to base color (subtle color shifts)
+            float r = baseColor.r + (variation - 0.5f) * 0.3f;
+            float g = baseColor.g + (variation - 0.5f) * 0.25f;
+            float b = baseColor.b + (variation - 0.5f) * 0.2f;
+
+            int idx = (y * resolution + x) * 4;
+            imageData[idx + 0] = static_cast<unsigned char>(glm::clamp(r * 255.0f, 0.0f, 255.0f));
+            imageData[idx + 1] = static_cast<unsigned char>(glm::clamp(g * 255.0f, 0.0f, 255.0f));
+            imageData[idx + 2] = static_cast<unsigned char>(glm::clamp(b * 255.0f, 0.0f, 255.0f));
+            imageData[idx + 3] = 255;
+        }
+    }
+
+    unsigned error = lodepng::encode(path, imageData, resolution, resolution);
+    if (error) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "Failed to write basecolor texture %s: %s",
+                     path.c_str(), lodepng_error_text(error));
+    } else {
+        SDL_Log("Generated basecolor texture: %s", path.c_str());
+    }
+}
+
+// Generate normal map from height data using Sobel filter
+void generateNormalTexture(const std::string& path, int resolution) {
+    std::vector<unsigned char> imageData(resolution * resolution * 4);
+    std::vector<float> heightData(resolution * resolution);
+    float scale = 8.0f;
+    float normalStrength = 2.0f;  // Controls bump intensity
+
+    // First generate height data
+    for (int y = 0; y < resolution; y++) {
+        for (int x = 0; x < resolution; x++) {
+            float u = static_cast<float>(x) / resolution;
+            float v = static_cast<float>(y) / resolution;
+
+            // Multi-scale noise for height
+            float height = fbm(u * scale, v * scale, 6, 0.5f, 2.0f);
+            height += voronoiNoise(u * scale * 0.5f, v * scale * 0.5f, 0.8f) * 0.3f;
+
+            heightData[y * resolution + x] = height;
+        }
+    }
+
+    // Convert height to normals using Sobel filter
+    for (int y = 0; y < resolution; y++) {
+        for (int x = 0; x < resolution; x++) {
+            // Sample neighboring heights (with wrapping)
+            auto getHeight = [&](int px, int py) {
+                px = (px + resolution) % resolution;
+                py = (py + resolution) % resolution;
+                return heightData[py * resolution + px];
+            };
+
+            // Sobel filter for X gradient
+            float dx = getHeight(x - 1, y - 1) * -1.0f + getHeight(x + 1, y - 1) * 1.0f
+                     + getHeight(x - 1, y)     * -2.0f + getHeight(x + 1, y)     * 2.0f
+                     + getHeight(x - 1, y + 1) * -1.0f + getHeight(x + 1, y + 1) * 1.0f;
+
+            // Sobel filter for Y gradient
+            float dy = getHeight(x - 1, y - 1) * -1.0f + getHeight(x, y - 1) * -2.0f + getHeight(x + 1, y - 1) * -1.0f
+                     + getHeight(x - 1, y + 1) *  1.0f + getHeight(x, y + 1) *  2.0f + getHeight(x + 1, y + 1) *  1.0f;
+
+            // Create normal vector
+            glm::vec3 normal(-dx * normalStrength, -dy * normalStrength, 1.0f);
+            normal = glm::normalize(normal);
+
+            // Convert from [-1,1] to [0,1] range for storage
+            int idx = (y * resolution + x) * 4;
+            imageData[idx + 0] = static_cast<unsigned char>((normal.x * 0.5f + 0.5f) * 255.0f);
+            imageData[idx + 1] = static_cast<unsigned char>((normal.y * 0.5f + 0.5f) * 255.0f);
+            imageData[idx + 2] = static_cast<unsigned char>((normal.z * 0.5f + 0.5f) * 255.0f);
+            imageData[idx + 3] = 255;
+        }
+    }
+
+    unsigned error = lodepng::encode(path, imageData, resolution, resolution);
+    if (error) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "Failed to write normal texture %s: %s",
+                     path.c_str(), lodepng_error_text(error));
+    } else {
+        SDL_Log("Generated normal texture: %s", path.c_str());
+    }
+}
+
+// Generate roughness map with variation
+void generateRoughnessTexture(const std::string& path, int resolution,
+                               float baseRoughness) {
+    std::vector<unsigned char> imageData(resolution * resolution * 4);
+    float scale = 8.0f;
+
+    for (int y = 0; y < resolution; y++) {
+        for (int x = 0; x < resolution; x++) {
+            float u = static_cast<float>(x) / resolution;
+            float v = static_cast<float>(y) / resolution;
+
+            // Combine different noise types for interesting roughness variation
+            float noise1 = fbm(u * scale, v * scale, 4, 0.5f, 2.0f);
+            float noise2 = voronoiNoise(u * scale * 0.7f, v * scale * 0.7f, 0.9f);
+
+            // Mix and apply to base roughness
+            float variation = noise1 * 0.7f + noise2 * 0.3f;
+            float roughness = baseRoughness + (variation - 0.5f) * 0.4f;
+            roughness = glm::clamp(roughness, 0.0f, 1.0f);
+
+            unsigned char val = static_cast<unsigned char>(roughness * 255.0f);
+            int idx = (y * resolution + x) * 4;
+            imageData[idx + 0] = val;
+            imageData[idx + 1] = val;
+            imageData[idx + 2] = val;
+            imageData[idx + 3] = 255;
+        }
+    }
+
+    unsigned error = lodepng::encode(path, imageData, resolution, resolution);
+    if (error) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "Failed to write roughness texture %s: %s",
+                     path.c_str(), lodepng_error_text(error));
+    } else {
+        SDL_Log("Generated roughness texture: %s", path.c_str());
+    }
+}
+
+// Generate height/displacement map
+void generateHeightTexture(const std::string& path, int resolution) {
+    std::vector<unsigned char> imageData(resolution * resolution * 4);
+    float scale = 8.0f;
+
+    for (int y = 0; y < resolution; y++) {
+        for (int x = 0; x < resolution; x++) {
+            float u = static_cast<float>(x) / resolution;
+            float v = static_cast<float>(y) / resolution;
+
+            // Rich multi-octave noise for height detail
+            float height = fbm(u * scale, v * scale, 6, 0.5f, 2.0f);
+
+            // Add voronoi for stone-like cracks/cells
+            float voronoi = voronoiNoise(u * scale * 0.5f, v * scale * 0.5f, 0.8f);
+            height = height * 0.7f + voronoi * 0.3f;
+
+            unsigned char val = static_cast<unsigned char>(glm::clamp(height * 255.0f, 0.0f, 255.0f));
+            int idx = (y * resolution + x) * 4;
+            imageData[idx + 0] = val;
+            imageData[idx + 1] = val;
+            imageData[idx + 2] = val;
+            imageData[idx + 3] = 255;
+        }
+    }
+
+    unsigned error = lodepng::encode(path, imageData, resolution, resolution);
+    if (error) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "Failed to write height texture %s: %s",
+                     path.c_str(), lodepng_error_text(error));
+    } else {
+        SDL_Log("Generated height texture: %s", path.c_str());
+    }
+}
+
+// Generate ambient occlusion map
+void generateAOTexture(const std::string& path, int resolution) {
+    std::vector<unsigned char> imageData(resolution * resolution * 4);
+    float scale = 8.0f;
+
+    for (int y = 0; y < resolution; y++) {
+        for (int x = 0; x < resolution; x++) {
+            float u = static_cast<float>(x) / resolution;
+            float v = static_cast<float>(y) / resolution;
+
+            // AO is darkening in crevices - use inverted voronoi for crack darkness
+            float voronoi = voronoiNoise(u * scale * 0.5f, v * scale * 0.5f, 0.8f);
+            float noise = fbm(u * scale, v * scale, 4, 0.5f, 2.0f);
+
+            // AO is mostly white with dark in crevices
+            float ao = 0.7f + voronoi * 0.2f + noise * 0.1f;
+            ao = glm::clamp(ao, 0.0f, 1.0f);
+
+            unsigned char val = static_cast<unsigned char>(ao * 255.0f);
+            int idx = (y * resolution + x) * 4;
+            imageData[idx + 0] = val;
+            imageData[idx + 1] = val;
+            imageData[idx + 2] = val;
+            imageData[idx + 3] = 255;
+        }
+    }
+
+    unsigned error = lodepng::encode(path, imageData, resolution, resolution);
+    if (error) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "Failed to write AO texture %s: %s",
+                     path.c_str(), lodepng_error_text(error));
+    } else {
+        SDL_Log("Generated AO texture: %s", path.c_str());
+    }
+}
+
+// Generate metallic map (mostly non-metallic with some spots)
+void generateMetallicTexture(const std::string& path, int resolution,
+                              float baseMetallic) {
+    std::vector<unsigned char> imageData(resolution * resolution * 4);
+    float scale = 8.0f;
+
+    for (int y = 0; y < resolution; y++) {
+        for (int x = 0; x < resolution; x++) {
+            float u = static_cast<float>(x) / resolution;
+            float v = static_cast<float>(y) / resolution;
+
+            // For most materials, metallic is uniform or has subtle variation
+            float noise = fbm(u * scale * 2.0f, v * scale * 2.0f, 3, 0.5f, 2.0f);
+            float metallic = baseMetallic + (noise - 0.5f) * 0.1f;
+            metallic = glm::clamp(metallic, 0.0f, 1.0f);
+
+            unsigned char val = static_cast<unsigned char>(metallic * 255.0f);
+            int idx = (y * resolution + x) * 4;
+            imageData[idx + 0] = val;
+            imageData[idx + 1] = val;
+            imageData[idx + 2] = val;
+            imageData[idx + 3] = 255;
+        }
+    }
+
+    unsigned error = lodepng::encode(path, imageData, resolution, resolution);
+    if (error) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "Failed to write metallic texture %s: %s",
+                     path.c_str(), lodepng_error_text(error));
+    } else {
+        SDL_Log("Generated metallic texture: %s", path.c_str());
+    }
+}
+
+// Generate emissive map (usually black for most materials)
+void generateEmissiveTexture(const std::string& path, int resolution,
+                              const glm::vec4& emissiveColor) {
     std::vector<unsigned char> imageData(resolution * resolution * 4);
 
-    unsigned char r = static_cast<unsigned char>(glm::clamp(color.r * 255.0f, 0.0f, 255.0f));
-    unsigned char g = static_cast<unsigned char>(glm::clamp(color.g * 255.0f, 0.0f, 255.0f));
-    unsigned char b = static_cast<unsigned char>(glm::clamp(color.b * 255.0f, 0.0f, 255.0f));
-    unsigned char a = static_cast<unsigned char>(glm::clamp(color.a * 255.0f, 0.0f, 255.0f));
+    // Emissive is usually flat - no emission for standard materials
+    unsigned char r = static_cast<unsigned char>(glm::clamp(emissiveColor.r * 255.0f, 0.0f, 255.0f));
+    unsigned char g = static_cast<unsigned char>(glm::clamp(emissiveColor.g * 255.0f, 0.0f, 255.0f));
+    unsigned char b = static_cast<unsigned char>(glm::clamp(emissiveColor.b * 255.0f, 0.0f, 255.0f));
 
     for (int y = 0; y < resolution; y++) {
         for (int x = 0; x < resolution; x++) {
@@ -103,45 +852,91 @@ void generateFallbackTexture(const std::string& path, int resolution,
             imageData[idx + 0] = r;
             imageData[idx + 1] = g;
             imageData[idx + 2] = b;
-            imageData[idx + 3] = a;
+            imageData[idx + 3] = 255;
         }
     }
 
     unsigned error = lodepng::encode(path, imageData, resolution, resolution);
     if (error) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "Failed to write fallback texture %s: %s",
+                     "Failed to write emissive texture %s: %s",
                      path.c_str(), lodepng_error_text(error));
     } else {
-        SDL_Log("Generated fallback texture: %s", path.c_str());
+        SDL_Log("Generated emissive texture: %s", path.c_str());
     }
 }
 
 bool generateFallbackTextures(const RenderConfig& config) {
     SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                "sbsrender not available, generating fallback textures for: %s",
+                "sbsrender not available, generating procedural textures for: %s",
                 config.inputPath.c_str());
+
+    // Try to parse the .sbsar archive for material parameters
+    MaterialParameters matParams = parseSbsarArchive(config.inputPath);
+
+    // Initialize noise permutation table with seed from input filename
+    unsigned int seed = 0;
+    for (char c : config.outputName) {
+        seed = seed * 31 + static_cast<unsigned int>(c);
+    }
+    initPermutationTable(seed);
 
     // Create output directory if it doesn't exist
     fs::create_directories(config.outputDir);
 
-    // Generate a fallback texture for each standard output type
+    // Use extracted parameters or defaults
+    glm::vec4 baseColor = matParams.parsed ? matParams.baseColor :
+                          STANDARD_OUTPUTS[0].fallbackColor;
+    float roughness = matParams.parsed ? matParams.roughness : 0.5f;
+    float metallic = matParams.parsed ? matParams.metallic : 0.0f;
+    glm::vec4 emissiveColor = matParams.parsed ? matParams.emissiveColor :
+                              STANDARD_OUTPUTS[6].fallbackColor;
+
+    // Generate specialized procedural textures for each output type
     for (const auto& output : STANDARD_OUTPUTS) {
         std::string outputPath = config.outputDir + "/" + config.outputName +
                                  "_" + output.name + ".png";
-        generateFallbackTexture(outputPath, config.resolution, output.fallbackColor);
+
+        if (output.name == "basecolor") {
+            generateBasecolorTexture(outputPath, config.resolution, baseColor);
+        } else if (output.name == "normal") {
+            generateNormalTexture(outputPath, config.resolution);
+        } else if (output.name == "roughness") {
+            generateRoughnessTexture(outputPath, config.resolution, roughness);
+        } else if (output.name == "metallic") {
+            generateMetallicTexture(outputPath, config.resolution, metallic);
+        } else if (output.name == "height") {
+            generateHeightTexture(outputPath, config.resolution);
+        } else if (output.name == "ambientocclusion") {
+            generateAOTexture(outputPath, config.resolution);
+        } else if (output.name == "emissive") {
+            generateEmissiveTexture(outputPath, config.resolution, emissiveColor);
+        }
     }
 
-    // Write a manifest file indicating fallbacks were generated
+    // Write a manifest file indicating procedural textures were generated
     std::string manifestPath = config.outputDir + "/" + config.outputName + "_manifest.txt";
     std::ofstream manifest(manifestPath);
     if (manifest.is_open()) {
-        manifest << "# SBSAR Fallback Textures\n";
-        manifest << "# Generated because sbsrender was not available\n";
-        manifest << "# Install Adobe Substance Automation Toolkit for proper rendering\n";
+        manifest << "# SBSAR Procedural Textures\n";
+        manifest << "# Generated with procedural noise (Perlin + Voronoi FBM)\n";
+        if (matParams.parsed) {
+            manifest << "# Parameters extracted from SBSAR archive\n";
+            if (!matParams.materialName.empty()) {
+                manifest << "# Material: " << matParams.materialName << "\n";
+            }
+            if (!matParams.materialType.empty()) {
+                manifest << "# Type: " << matParams.materialType << "\n";
+            }
+        }
+        manifest << "# Install Adobe Substance Automation Toolkit for exact .sbsar rendering\n";
         manifest << "source=" << config.inputPath << "\n";
         manifest << "resolution=" << config.resolution << "\n";
         manifest << "fallback=true\n";
+        manifest << "parsed=" << (matParams.parsed ? "true" : "false") << "\n";
+        manifest << "basecolor=" << baseColor.r << "," << baseColor.g << "," << baseColor.b << "\n";
+        manifest << "roughness=" << roughness << "\n";
+        manifest << "metallic=" << metallic << "\n";
         for (const auto& output : STANDARD_OUTPUTS) {
             manifest << "output=" << config.outputName << "_" << output.name << ".png\n";
         }
@@ -156,7 +951,7 @@ void printUsage(const char* programName) {
     SDL_Log(" ");
     SDL_Log("Renders Substance Archive (.sbsar) files to PNG texture maps.");
     SDL_Log("Requires Adobe Substance Automation Toolkit (sbsrender) for full quality.");
-    SDL_Log("Falls back to placeholder textures if sbsrender is not available.");
+    SDL_Log("Falls back to procedural textures with noise-based detail if sbsrender is not available.");
     SDL_Log(" ");
     SDL_Log("Options:");
     SDL_Log("  --name <name>        Output file name prefix (default: input filename)");
