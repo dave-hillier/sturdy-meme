@@ -1,0 +1,93 @@
+#pragma once
+
+#include "VirtualTextureTypes.h"
+#include <vulkan/vulkan.h>
+#include <vk_mem_alloc.h>
+#include <vector>
+
+namespace VirtualTexture {
+
+/**
+ * VirtualTexturePageTable manages the indirection texture (page table).
+ *
+ * The page table maps virtual tile coordinates to physical cache locations.
+ * Each mip level has its own indirection texture of appropriate size.
+ * Entries are RGBA8: RG = cache position, B = unused, A = valid flag
+ */
+class VirtualTexturePageTable {
+public:
+    VirtualTexturePageTable() = default;
+    ~VirtualTexturePageTable() = default;
+
+    // Non-copyable
+    VirtualTexturePageTable(const VirtualTexturePageTable&) = delete;
+    VirtualTexturePageTable& operator=(const VirtualTexturePageTable&) = delete;
+
+    // Initialize the page table
+    bool init(VkDevice device, VmaAllocator allocator, VkCommandPool commandPool,
+              VkQueue queue, const VirtualTextureConfig& config);
+
+    // Cleanup resources
+    void destroy(VkDevice device, VmaAllocator allocator);
+
+    // Update entry when tile is loaded into cache
+    void setEntry(TileId id, uint16_t cacheX, uint16_t cacheY);
+
+    // Invalidate entry when tile is evicted
+    void clearEntry(TileId id);
+
+    // Get the current entry for a tile
+    PageTableEntry getEntry(TileId id) const;
+
+    // Upload changes to GPU (call once per frame if dirty)
+    void upload(VkDevice device, VkCommandPool commandPool, VkQueue queue);
+
+    // Check if any entries have changed
+    bool isDirty() const { return dirty; }
+
+    // Get the image view for a mip level
+    VkImageView getImageView(uint32_t mipLevel) const;
+
+    // Get the sampler for the page table
+    VkSampler getSampler() const { return pageTableSampler; }
+
+    // Get the combined image view (array of all mip levels)
+    VkImageView getCombinedImageView() const { return combinedImageView; }
+
+private:
+    // Create page table textures
+    bool createPageTableTextures(VkDevice device, VmaAllocator allocator,
+                                  VkCommandPool commandPool, VkQueue queue);
+
+    // Create sampler
+    bool createSampler(VkDevice device);
+
+    // Get linear index into cpuData for a tile
+    size_t getEntryIndex(TileId id) const;
+
+    VirtualTextureConfig config;
+
+    // One image per mip level
+    std::vector<VkImage> pageTableImages;
+    std::vector<VmaAllocation> pageTableAllocations;
+    std::vector<VkImageView> pageTableViews;
+
+    // Combined image view (texture array)
+    VkImageView combinedImageView = VK_NULL_HANDLE;
+    VkSampler pageTableSampler = VK_NULL_HANDLE;
+
+    // Staging buffer for uploads
+    VkBuffer stagingBuffer = VK_NULL_HANDLE;
+    VmaAllocation stagingAllocation = VK_NULL_HANDLE;
+    void* stagingMapped = nullptr;
+
+    // CPU-side page table data (linear array, indexed per mip level)
+    std::vector<PageTableEntry> cpuData;
+    std::vector<size_t> mipOffsets;  // Offset into cpuData for each mip level
+    std::vector<uint32_t> mipSizes;  // Number of entries per mip level
+
+    bool dirty = false;
+    std::vector<bool> mipDirty;  // Track which mip levels need upload
+};
+
+} // namespace VirtualTexture

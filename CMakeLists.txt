@@ -100,6 +100,11 @@ set(SOURCES
     src/TreeEditSystem.cpp
     src/TreeEditorGui.cpp
     src/BillboardCapture.cpp
+    src/VirtualTextureCache.cpp
+    src/VirtualTexturePageTable.cpp
+    src/VirtualTextureFeedback.cpp
+    src/VirtualTextureTileLoader.cpp
+    src/VirtualTextureSystem.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
