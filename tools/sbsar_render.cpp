@@ -2,17 +2,25 @@
 // Processes Substance Archive (.sbsar) files to generate texture maps
 // Uses Adobe's sbsrender CLI tool if available, otherwise generates fallback textures
 // with procedural noise-based detail
+//
+// .sbsar files are ZIP archives containing:
+// - XML metadata describing inputs, outputs, and presets
+// - .sbsasm binary compiled substance graph files
 
 #include <SDL3/SDL_log.h>
 #include <glm/glm.hpp>
 #include <lodepng.h>
+#include <miniz.h>
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <random>
+#include <sstream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -44,6 +52,251 @@ static const std::vector<OutputMap> STANDARD_OUTPUTS = {
     {"ambientocclusion", "ambientocclusion", glm::vec4(1.0f, 1.0f, 1.0f, 1.0f), false},
     {"emissive", "emissive", glm::vec4(0.0f, 0.0f, 0.0f, 1.0f), true},
 };
+
+// ============================================================================
+// Material Parameters extracted from .sbsar archive
+// ============================================================================
+
+struct MaterialParameters {
+    // Base colors
+    glm::vec4 baseColor = glm::vec4(0.5f, 0.5f, 0.5f, 1.0f);
+    glm::vec4 emissiveColor = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+
+    // PBR values
+    float roughness = 0.5f;
+    float metallic = 0.0f;
+    float normalIntensity = 1.0f;
+    float heightScale = 0.5f;
+
+    // Pattern controls
+    float patternScale = 8.0f;
+    float patternRandomness = 0.8f;
+    int patternOctaves = 6;
+
+    // Material type hint
+    std::string materialType;  // e.g., "stone", "wood", "metal", "fabric"
+    std::string materialName;
+
+    // Parsed from archive
+    bool parsed = false;
+};
+
+// Simple XML attribute parser (finds value="..." or just the text content)
+std::string extractXmlAttribute(const std::string& xml, const std::string& tag,
+                                 const std::string& attr) {
+    std::string searchTag = "<" + tag;
+    size_t tagStart = xml.find(searchTag);
+    while (tagStart != std::string::npos) {
+        size_t tagEnd = xml.find('>', tagStart);
+        if (tagEnd == std::string::npos) break;
+
+        std::string tagContent = xml.substr(tagStart, tagEnd - tagStart);
+        std::string attrSearch = attr + "=\"";
+        size_t attrPos = tagContent.find(attrSearch);
+        if (attrPos != std::string::npos) {
+            size_t valueStart = attrPos + attrSearch.length();
+            size_t valueEnd = tagContent.find('"', valueStart);
+            if (valueEnd != std::string::npos) {
+                return tagContent.substr(valueStart, valueEnd - valueStart);
+            }
+        }
+        tagStart = xml.find(searchTag, tagEnd);
+    }
+    return "";
+}
+
+// Extract all values for a specific input parameter
+std::vector<float> extractInputValues(const std::string& xml, const std::string& inputId) {
+    std::vector<float> values;
+
+    // Look for input definitions like <input identifier="basecolor" ...>
+    // and extract default values from the same element
+    std::string searchPattern = "identifier=\"" + inputId + "\"";
+    size_t pos = xml.find(searchPattern);
+    if (pos != std::string::npos) {
+        // Find the start of this <input element
+        size_t elementStart = xml.rfind('<', pos);
+        // Find the end of this element (either /> or </input>)
+        size_t elementEnd = xml.find('>', pos);
+        if (elementEnd != std::string::npos && xml[elementEnd - 1] != '/') {
+            // Not self-closing, find the closing tag
+            elementEnd = xml.find("</", pos);
+        }
+
+        if (elementStart != std::string::npos && elementEnd != std::string::npos) {
+            std::string element = xml.substr(elementStart, elementEnd - elementStart + 1);
+
+            // Try to find float values like value="0.5" or default="0.5" within THIS element
+            for (const auto& attr : {"default", "value", "defaultvalue"}) {
+                std::string attrSearch = std::string(attr) + "=\"";
+                size_t attrPos = element.find(attrSearch);
+                if (attrPos != std::string::npos) {
+                    size_t valueStart = attrPos + attrSearch.length();
+                    size_t valueEnd = element.find('"', valueStart);
+                    if (valueEnd != std::string::npos) {
+                        std::string valueStr = element.substr(valueStart, valueEnd - valueStart);
+                        try {
+                            // Handle comma-separated values (for colors)
+                            std::istringstream iss(valueStr);
+                            std::string token;
+                            while (std::getline(iss, token, ',')) {
+                                values.push_back(std::stof(token));
+                            }
+                            if (!values.empty()) break;  // Found values, stop looking
+                        } catch (...) {
+                            // Ignore parse errors
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return values;
+}
+
+// Parse material parameters from XML content
+MaterialParameters parseXmlParameters(const std::string& xml) {
+    MaterialParameters params;
+
+    // Extract material name/label
+    params.materialName = extractXmlAttribute(xml, "graph", "label");
+    if (params.materialName.empty()) {
+        params.materialName = extractXmlAttribute(xml, "package", "label");
+    }
+
+    // Try to determine material type from keywords in the XML
+    std::string lowerXml = xml;
+    std::transform(lowerXml.begin(), lowerXml.end(), lowerXml.begin(), ::tolower);
+
+    if (lowerXml.find("stone") != std::string::npos ||
+        lowerXml.find("rock") != std::string::npos ||
+        lowerXml.find("brick") != std::string::npos) {
+        params.materialType = "stone";
+        params.roughness = 0.7f;
+        params.patternScale = 4.0f;
+    } else if (lowerXml.find("wood") != std::string::npos ||
+               lowerXml.find("bark") != std::string::npos) {
+        params.materialType = "wood";
+        params.roughness = 0.6f;
+        params.patternScale = 6.0f;
+        params.baseColor = glm::vec4(0.4f, 0.25f, 0.15f, 1.0f);
+    } else if (lowerXml.find("metal") != std::string::npos ||
+               lowerXml.find("steel") != std::string::npos ||
+               lowerXml.find("iron") != std::string::npos) {
+        params.materialType = "metal";
+        params.metallic = 0.9f;
+        params.roughness = 0.3f;
+        params.baseColor = glm::vec4(0.7f, 0.7f, 0.75f, 1.0f);
+    } else if (lowerXml.find("fabric") != std::string::npos ||
+               lowerXml.find("cloth") != std::string::npos ||
+               lowerXml.find("leather") != std::string::npos) {
+        params.materialType = "fabric";
+        params.roughness = 0.8f;
+        params.patternScale = 12.0f;
+    } else if (lowerXml.find("sand") != std::string::npos ||
+               lowerXml.find("dirt") != std::string::npos ||
+               lowerXml.find("ground") != std::string::npos) {
+        params.materialType = "ground";
+        params.roughness = 0.9f;
+        params.baseColor = glm::vec4(0.6f, 0.5f, 0.4f, 1.0f);
+    } else if (lowerXml.find("grass") != std::string::npos) {
+        params.materialType = "grass";
+        params.roughness = 0.7f;
+        params.baseColor = glm::vec4(0.3f, 0.5f, 0.2f, 1.0f);
+    }
+
+    // Try to extract explicit color values
+    auto colorValues = extractInputValues(xml, "basecolor");
+    if (colorValues.size() >= 3) {
+        params.baseColor = glm::vec4(colorValues[0], colorValues[1], colorValues[2],
+                                     colorValues.size() > 3 ? colorValues[3] : 1.0f);
+    }
+
+    // Try to extract roughness
+    auto roughnessValues = extractInputValues(xml, "roughness");
+    if (!roughnessValues.empty()) {
+        params.roughness = roughnessValues[0];
+    }
+
+    // Try to extract metallic
+    auto metallicValues = extractInputValues(xml, "metallic");
+    if (!metallicValues.empty()) {
+        params.metallic = metallicValues[0];
+    }
+
+    params.parsed = true;
+    return params;
+}
+
+// Extract and parse .sbsar archive to get material parameters
+MaterialParameters parseSbsarArchive(const std::string& path) {
+    MaterialParameters params;
+
+    SDL_Log("Parsing SBSAR archive: %s", path.c_str());
+
+    // Open the archive using miniz
+    mz_zip_archive zip;
+    memset(&zip, 0, sizeof(zip));
+
+    if (!mz_zip_reader_init_file(&zip, path.c_str(), 0)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Failed to open SBSAR as ZIP archive: %s", path.c_str());
+        return params;
+    }
+
+    // List files in archive and look for XML
+    int numFiles = static_cast<int>(mz_zip_reader_get_num_files(&zip));
+    SDL_Log("SBSAR archive contains %d files", numFiles);
+
+    std::string xmlContent;
+
+    for (int i = 0; i < numFiles; i++) {
+        mz_zip_archive_file_stat fileStat;
+        if (!mz_zip_reader_file_stat(&zip, i, &fileStat)) {
+            continue;
+        }
+
+        std::string filename = fileStat.m_filename;
+        SDL_Log("  Archive file: %s (%zu bytes)", filename.c_str(),
+                static_cast<size_t>(fileStat.m_uncomp_size));
+
+        // Look for XML files (substance description)
+        if (filename.find(".xml") != std::string::npos ||
+            filename.find("desc") != std::string::npos) {
+
+            // Extract file content
+            size_t uncompSize = static_cast<size_t>(fileStat.m_uncomp_size);
+            std::vector<char> buffer(uncompSize + 1);
+
+            if (mz_zip_reader_extract_to_mem(&zip, i, buffer.data(), uncompSize, 0)) {
+                buffer[uncompSize] = '\0';
+                xmlContent = buffer.data();
+                SDL_Log("  Extracted XML content (%zu bytes)", xmlContent.size());
+            }
+        }
+    }
+
+    mz_zip_reader_end(&zip);
+
+    // Parse XML if found
+    if (!xmlContent.empty()) {
+        params = parseXmlParameters(xmlContent);
+        if (!params.materialName.empty()) {
+            SDL_Log("Material name: %s", params.materialName.c_str());
+        }
+        if (!params.materialType.empty()) {
+            SDL_Log("Material type: %s", params.materialType.c_str());
+        }
+        SDL_Log("Extracted parameters - baseColor: (%.2f, %.2f, %.2f), roughness: %.2f, metallic: %.2f",
+                params.baseColor.r, params.baseColor.g, params.baseColor.b,
+                params.roughness, params.metallic);
+    } else {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "No XML metadata found in SBSAR archive");
+    }
+
+    return params;
+}
 
 // ============================================================================
 // Procedural Noise Generation
@@ -497,6 +750,9 @@ bool generateFallbackTextures(const RenderConfig& config) {
                 "sbsrender not available, generating procedural textures for: %s",
                 config.inputPath.c_str());
 
+    // Try to parse the .sbsar archive for material parameters
+    MaterialParameters matParams = parseSbsarArchive(config.inputPath);
+
     // Initialize noise permutation table with seed from input filename
     unsigned int seed = 0;
     for (char c : config.outputName) {
@@ -507,25 +763,33 @@ bool generateFallbackTextures(const RenderConfig& config) {
     // Create output directory if it doesn't exist
     fs::create_directories(config.outputDir);
 
+    // Use extracted parameters or defaults
+    glm::vec4 baseColor = matParams.parsed ? matParams.baseColor :
+                          STANDARD_OUTPUTS[0].fallbackColor;
+    float roughness = matParams.parsed ? matParams.roughness : 0.5f;
+    float metallic = matParams.parsed ? matParams.metallic : 0.0f;
+    glm::vec4 emissiveColor = matParams.parsed ? matParams.emissiveColor :
+                              STANDARD_OUTPUTS[6].fallbackColor;
+
     // Generate specialized procedural textures for each output type
     for (const auto& output : STANDARD_OUTPUTS) {
         std::string outputPath = config.outputDir + "/" + config.outputName +
                                  "_" + output.name + ".png";
 
         if (output.name == "basecolor") {
-            generateBasecolorTexture(outputPath, config.resolution, output.fallbackColor);
+            generateBasecolorTexture(outputPath, config.resolution, baseColor);
         } else if (output.name == "normal") {
             generateNormalTexture(outputPath, config.resolution);
         } else if (output.name == "roughness") {
-            generateRoughnessTexture(outputPath, config.resolution, output.fallbackColor.r);
+            generateRoughnessTexture(outputPath, config.resolution, roughness);
         } else if (output.name == "metallic") {
-            generateMetallicTexture(outputPath, config.resolution, output.fallbackColor.r);
+            generateMetallicTexture(outputPath, config.resolution, metallic);
         } else if (output.name == "height") {
             generateHeightTexture(outputPath, config.resolution);
         } else if (output.name == "ambientocclusion") {
             generateAOTexture(outputPath, config.resolution);
         } else if (output.name == "emissive") {
-            generateEmissiveTexture(outputPath, config.resolution, output.fallbackColor);
+            generateEmissiveTexture(outputPath, config.resolution, emissiveColor);
         }
     }
 
@@ -535,10 +799,23 @@ bool generateFallbackTextures(const RenderConfig& config) {
     if (manifest.is_open()) {
         manifest << "# SBSAR Procedural Textures\n";
         manifest << "# Generated with procedural noise (Perlin + Voronoi FBM)\n";
+        if (matParams.parsed) {
+            manifest << "# Parameters extracted from SBSAR archive\n";
+            if (!matParams.materialName.empty()) {
+                manifest << "# Material: " << matParams.materialName << "\n";
+            }
+            if (!matParams.materialType.empty()) {
+                manifest << "# Type: " << matParams.materialType << "\n";
+            }
+        }
         manifest << "# Install Adobe Substance Automation Toolkit for exact .sbsar rendering\n";
         manifest << "source=" << config.inputPath << "\n";
         manifest << "resolution=" << config.resolution << "\n";
         manifest << "fallback=true\n";
+        manifest << "parsed=" << (matParams.parsed ? "true" : "false") << "\n";
+        manifest << "basecolor=" << baseColor.r << "," << baseColor.g << "," << baseColor.b << "\n";
+        manifest << "roughness=" << roughness << "\n";
+        manifest << "metallic=" << metallic << "\n";
         for (const auto& output : STANDARD_OUTPUTS) {
             manifest << "output=" << config.outputName << "_" << output.name << ".png\n";
         }

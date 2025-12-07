@@ -339,6 +339,21 @@ else()
     )
 endif()
 
+# Check for shader compiler early so we can skip shader target_sources if not available
+find_program(GLSLC glslc HINTS $ENV{VULKAN_SDK}/bin)
+find_program(GLSLANG_VALIDATOR glslangValidator HINTS $ENV{VULKAN_SDK}/bin)
+
+# Check if shaders already exist (pre-compiled) or if we have a compiler
+set(FIRST_SHADER_FILE ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.vert.spv)
+if(EXISTS ${FIRST_SHADER_FILE} OR GLSLC OR GLSLANG_VALIDATOR)
+    set(SHADERS_AVAILABLE TRUE)
+else()
+    set(SHADERS_AVAILABLE FALSE)
+    message(WARNING "No shader compiler found and no pre-compiled shaders exist. Main executable will not be built.")
+endif()
+
+if(SHADERS_AVAILABLE)
+
 set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.frag.spv
@@ -432,9 +447,6 @@ set_source_files_properties(${CATMULLCLARK_SHADER_FILES} PROPERTIES
 )
 
 target_sources(${PROJECT_NAME} PRIVATE ${SHADER_FILES} ${TERRAIN_SHADER_FILES} ${CATMULLCLARK_SHADER_FILES})
-
-find_program(GLSLC glslc HINTS $ENV{VULKAN_SDK}/bin)
-find_program(GLSLANG_VALIDATOR glslangValidator HINTS $ENV{VULKAN_SDK}/bin)
 
 if(GLSLC)
     set(SHADER_COMPILE_CMD ${GLSLC} -o)
@@ -787,6 +799,8 @@ if(SHADER_COMPILE_CMD)
 else()
     message(WARNING "glslc/glslangValidator not found. Shaders must be compiled manually.")
 endif()
+
+endif() # SHADERS_AVAILABLE
 
 if(APPLE)
     target_compile_definitions(${PROJECT_NAME} PRIVATE VK_USE_PLATFORM_METAL_EXT)
