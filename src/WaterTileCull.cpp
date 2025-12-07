@@ -67,6 +67,12 @@ void WaterTileCull::destroy() {
         counterBuffer = VK_NULL_HANDLE;
         counterMapped = nullptr;
     }
+    if (counterReadbackBuffer != VK_NULL_HANDLE) {
+        vmaDestroyBuffer(allocator, counterReadbackBuffer, counterReadbackAllocation);
+        counterReadbackBuffer = VK_NULL_HANDLE;
+        counterReadbackAllocation = VK_NULL_HANDLE;
+        counterReadbackMapped = nullptr;
+    }
     if (indirectDrawBuffer != VK_NULL_HANDLE) {
         vmaDestroyBuffer(allocator, indirectDrawBuffer, indirectDrawAllocation);
         indirectDrawBuffer = VK_NULL_HANDLE;
@@ -136,7 +142,9 @@ bool WaterTileCull::createBuffers() {
     VkBufferCreateInfo counterBufferInfo{};
     counterBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     counterBufferInfo.size = sizeof(uint32_t) * framesInFlight;
-    counterBufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    counterBufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                              VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                              VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
 
     VmaAllocationCreateInfo counterAllocInfo{};
     counterAllocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
@@ -155,6 +163,29 @@ bool WaterTileCull::createBuffers() {
     uint32_t* counters = static_cast<uint32_t*>(counterMapped);
     for (uint32_t i = 0; i < framesInFlight; ++i) {
         counters[i] = 1;  // Assume visible initially
+    }
+
+    // Counter readback buffer (host-visible)
+    VkBufferCreateInfo counterReadbackInfo{};
+    counterReadbackInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    counterReadbackInfo.size = sizeof(uint32_t) * framesInFlight;
+    counterReadbackInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+
+    VmaAllocationCreateInfo counterReadbackAllocInfo{};
+    counterReadbackAllocInfo.usage = VMA_MEMORY_USAGE_GPU_TO_CPU;
+    counterReadbackAllocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+    VmaAllocationInfo readbackInfo;
+    if (vmaCreateBuffer(allocator, &counterReadbackInfo, &counterReadbackAllocInfo,
+                        &counterReadbackBuffer, &counterReadbackAllocation, &readbackInfo) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create counter readback buffer");
+        return false;
+    }
+    counterReadbackMapped = readbackInfo.pMappedData;
+
+    uint32_t* readbackPtr = static_cast<uint32_t*>(counterReadbackMapped);
+    for (uint32_t i = 0; i < framesInFlight; ++i) {
+        readbackPtr[i] = counters[i];
     }
 
     // Indirect draw buffer
@@ -339,6 +370,7 @@ void WaterTileCull::recordTileCull(VkCommandBuffer cmd, uint32_t frameIndex,
     // Reset counter for this frame
     uint32_t* counterPtr = static_cast<uint32_t*>(counterMapped) + frameIndex;
     *counterPtr = 0;
+    vmaFlushAllocation(allocator, counterAllocation, frameIndex * sizeof(uint32_t), sizeof(uint32_t));
 
     // Update descriptor set with depth texture and storage buffers
     VkDescriptorImageInfo depthImageInfo{};
@@ -417,33 +449,86 @@ void WaterTileCull::recordTileCull(VkCommandBuffer cmd, uint32_t frameIndex,
     uint32_t groupsY = (tileCount.y + 7) / 8;
     vkCmdDispatch(cmd, groupsX, groupsY, 1);
 
-    // Memory barrier for tile buffer
-    VkMemoryBarrier barrier{};
-    barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-    barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
+    // Ensure compute writes are visible before copying to the readback buffer
+    std::array<VkBufferMemoryBarrier, 3> bufferBarriers{};
+
+    bufferBarriers[0].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    bufferBarriers[0].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    bufferBarriers[0].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    bufferBarriers[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    bufferBarriers[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    bufferBarriers[0].buffer = counterBuffer;
+    bufferBarriers[0].offset = frameIndex * sizeof(uint32_t);
+    bufferBarriers[0].size = sizeof(uint32_t);
+
+    bufferBarriers[1].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    bufferBarriers[1].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    bufferBarriers[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    bufferBarriers[1].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    bufferBarriers[1].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    bufferBarriers[1].buffer = tileBuffer;
+    bufferBarriers[1].offset = 0;
+    bufferBarriers[1].size = VK_WHOLE_SIZE;
+
+    bufferBarriers[2].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    bufferBarriers[2].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    bufferBarriers[2].dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
+    bufferBarriers[2].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    bufferBarriers[2].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    bufferBarriers[2].buffer = indirectDrawBuffer;
+    bufferBarriers[2].offset = 0;
+    bufferBarriers[2].size = sizeof(IndirectDrawCommand);
 
     vkCmdPipelineBarrier(cmd,
                          VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
-                         0, 1, &barrier, 0, nullptr, 0, nullptr);
+                         VK_PIPELINE_STAGE_TRANSFER_BIT |
+                             VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
+                             VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
+                         0, 0, nullptr,
+                         static_cast<uint32_t>(bufferBarriers.size()),
+                         bufferBarriers.data(),
+                         0, nullptr);
+
+    // Copy the counter value for this frame to the host-visible readback buffer
+    VkBufferCopy copyRegion{};
+    copyRegion.srcOffset = frameIndex * sizeof(uint32_t);
+    copyRegion.dstOffset = frameIndex * sizeof(uint32_t);
+    copyRegion.size = sizeof(uint32_t);
+    vkCmdCopyBuffer(cmd, counterBuffer, counterReadbackBuffer, 1, &copyRegion);
+
+    // Make the transfer visible to the CPU before next frame reads
+    VkBufferMemoryBarrier readbackBarrier{};
+    readbackBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    readbackBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    readbackBarrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+    readbackBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    readbackBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    readbackBarrier.buffer = counterReadbackBuffer;
+    readbackBarrier.offset = frameIndex * sizeof(uint32_t);
+    readbackBarrier.size = sizeof(uint32_t);
+
+    vkCmdPipelineBarrier(cmd,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_HOST_BIT,
+                         0, 0, nullptr, 1, &readbackBarrier, 0, nullptr);
 }
 
 uint32_t WaterTileCull::getVisibleTileCount(uint32_t frameIndex) const {
-    if (counterMapped == nullptr) return 0;
-    const uint32_t* counterPtr = static_cast<const uint32_t*>(counterMapped) + frameIndex;
+    if (counterReadbackMapped == nullptr) return 0;
+
+    VkResult invalidateResult = vmaInvalidateAllocation(allocator, counterReadbackAllocation,
+                                                        frameIndex * sizeof(uint32_t), sizeof(uint32_t));
+    if (invalidateResult != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to invalidate counter readback allocation");
+        return 0;
+    }
+
+    const uint32_t* counterPtr = static_cast<const uint32_t*>(counterReadbackMapped) + frameIndex;
     return *counterPtr;
 }
 
-bool WaterTileCull::wasWaterVisibleLastFrame(uint32_t /*currentFrameIndex*/) const {
-    // TODO: Tile-based visibility culling has GPU/CPU synchronization issues causing flickering.
-    // The compute shader writes to counter buffer via atomicAdd, but CPU reads may not see
-    // updated values reliably. Possible causes:
-    // - Memory coherency between GPU writes and CPU reads
-    // - Timing of when counter is read vs when GPU dispatch completes
-    // - Counter reset at start of recordTileCull interfering with reads
-    //
-    // For now, always assume water is visible. The tile cull compute still runs and
-    // produces valid data - this can be used for indirect draw integration later.
-    return true;
+bool WaterTileCull::wasWaterVisibleLastFrame(uint32_t currentFrameIndex) const {
+    // Requires that the previous frame using this frame index has finished (CPU waits on fences).
+    uint32_t visibleTiles = getVisibleTileCount(currentFrameIndex);
+    return visibleTiles > 0;
 }

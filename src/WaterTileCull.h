@@ -122,6 +122,11 @@ private:
     VmaAllocation counterAllocation = VK_NULL_HANDLE;
     void* counterMapped = nullptr;
 
+    // Readback buffer for CPU-visible counter results
+    VkBuffer counterReadbackBuffer = VK_NULL_HANDLE;
+    VmaAllocation counterReadbackAllocation = VK_NULL_HANDLE;
+    void* counterReadbackMapped = nullptr;
+
     // Indirect draw buffer
     VkBuffer indirectDrawBuffer = VK_NULL_HANDLE;
     VmaAllocation indirectDrawAllocation = VK_NULL_HANDLE;
