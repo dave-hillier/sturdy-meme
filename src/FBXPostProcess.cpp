@@ -201,6 +201,15 @@ void process(GLTFSkinnedLoadResult& result, const FBXImportSettings& settings) {
     glm::mat3 rotationMat = buildRotationMatrix(settings);
     glm::mat3 normalMat = glm::transpose(glm::inverse(rotationMat));  // For non-uniform scale safety
 
+    // Build normal-only correction matrix (applied only to normals/tangents, not geometry)
+    glm::mat3 normalCorrectionMat(1.0f);
+    if (glm::length(settings.normalRotationCorrection) > 0.001f) {
+        glm::quat normalCorrectionQuat = eulerToQuat(settings.normalRotationCorrection);
+        normalCorrectionMat = glm::mat3_cast(normalCorrectionQuat);
+        SDL_Log("FBXPostProcess: Applying normal-only rotation correction (%.1f, %.1f, %.1f)",
+                settings.normalRotationCorrection.x, settings.normalRotationCorrection.y, settings.normalRotationCorrection.z);
+    }
+
     // Check if transform flips handedness (negative determinant)
     float det = glm::determinant(glm::mat3(transform));
     bool flipWinding = det < 0.0f;
@@ -212,12 +221,12 @@ void process(GLTFSkinnedLoadResult& result, const FBXImportSettings& settings) {
         glm::vec4 pos4 = transform * glm::vec4(vertex.position, 1.0f);
         vertex.position = glm::vec3(pos4);
 
-        // Transform normal (rotation only, normalized)
-        vertex.normal = glm::normalize(normalMat * vertex.normal);
+        // Transform normal (rotation only, normalized) + normal-only correction
+        vertex.normal = glm::normalize(normalCorrectionMat * normalMat * vertex.normal);
 
-        // Transform tangent direction (keep w component for handedness)
+        // Transform tangent direction (keep w component for handedness) + normal-only correction
         float tangentW = vertex.tangent.w;
-        glm::vec3 tangentDir = glm::normalize(rotationMat * glm::vec3(vertex.tangent));
+        glm::vec3 tangentDir = glm::normalize(normalCorrectionMat * rotationMat * glm::vec3(vertex.tangent));
         vertex.tangent = glm::vec4(tangentDir, tangentW);
     }
 
@@ -300,18 +309,25 @@ void process(GLTFLoadResult& result, const FBXImportSettings& settings) {
     glm::mat3 rotationMat = buildRotationMatrix(settings);
     glm::mat3 normalMat = glm::transpose(glm::inverse(rotationMat));
 
+    // Build normal-only correction matrix (applied only to normals/tangents, not geometry)
+    glm::mat3 normalCorrectionMat(1.0f);
+    if (glm::length(settings.normalRotationCorrection) > 0.001f) {
+        glm::quat normalCorrectionQuat = eulerToQuat(settings.normalRotationCorrection);
+        normalCorrectionMat = glm::mat3_cast(normalCorrectionQuat);
+    }
+
     // Process vertices
     for (auto& vertex : result.vertices) {
         // Transform position
         glm::vec4 pos4 = transform * glm::vec4(vertex.position, 1.0f);
         vertex.position = glm::vec3(pos4);
 
-        // Transform normal
-        vertex.normal = glm::normalize(normalMat * vertex.normal);
+        // Transform normal + normal-only correction
+        vertex.normal = glm::normalize(normalCorrectionMat * normalMat * vertex.normal);
 
-        // Transform tangent
+        // Transform tangent + normal-only correction
         float tangentW = vertex.tangent.w;
-        glm::vec3 tangentDir = glm::normalize(rotationMat * glm::vec3(vertex.tangent));
+        glm::vec3 tangentDir = glm::normalize(normalCorrectionMat * rotationMat * glm::vec3(vertex.tangent));
         vertex.tangent = glm::vec4(tangentDir, tangentW);
     }
 

@@ -45,6 +45,10 @@ struct FBXImportSettings {
     // Euler angles in degrees (applied as XYZ intrinsic rotation)
     glm::vec3 rotationCorrection = glm::vec3(0.0f);
 
+    // Normal-only rotation correction (fixes normals without affecting geometry)
+    // Euler angles in degrees - applied only to normals/tangents, not positions or skeleton
+    glm::vec3 normalRotationCorrection = glm::vec3(0.0f);
+
     // Whether to flip UV V coordinate (handled during FBX load, kept for reference)
     bool flipUVs = true;
 
@@ -58,12 +62,16 @@ struct FBXImportSettings {
 // Common presets for different source applications
 namespace FBXPresets {
     // Mixamo exports: Y-up, cm units
+    // Note: Mixamo FBX files have normals that appear rotated 90 degrees around X axis
+    // relative to our engine's expectations. The normal rotation correction fixes this so
+    // upward-facing normals have high Y component instead of high Z component.
     inline FBXImportSettings Mixamo() {
         FBXImportSettings settings;
         settings.scaleFactor = 0.01f;  // cm to meters
         settings.sourceUpAxis = UpAxis::Y_UP;
         settings.sourceForwardAxis = ForwardAxis::NEG_Z;
         settings.rotationCorrection = glm::vec3(0.0f);
+        settings.normalRotationCorrection = glm::vec3(-90.0f, 0.0f, 0.0f);  // Fix 90-degree X rotation in normals only
         settings.presetName = "Mixamo";
         return settings;
     }
