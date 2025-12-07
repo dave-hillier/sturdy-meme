@@ -300,12 +300,13 @@ std::string extract7zXmlContent(const std::string& path) {
         }
     }
 
-    // Extract all XML files
+    // Extract all XML files (including nested paths like assemblies/content/0000/*.xml)
     if (!xmlFilename.empty()) {
-        std::string extractCmd = "7z e -y -o\"" + tempDir + "\" \"" + path + "\" \"*.xml\" 2>/dev/null";
+        // Use -r for recursive extraction of all xml files from nested directories
+        std::string extractCmd = "7z e -y -r -o\"" + tempDir + "\" \"" + path + "\" \"*.xml\" 2>/dev/null";
         int result = std::system(extractCmd.c_str());
         if (result != 0) {
-            extractCmd = "7za e -y -o\"" + tempDir + "\" \"" + path + "\" \"*.xml\" 2>/dev/null";
+            extractCmd = "7za e -y -r -o\"" + tempDir + "\" \"" + path + "\" \"*.xml\" 2>/dev/null";
             result = std::system(extractCmd.c_str());
         }
 
