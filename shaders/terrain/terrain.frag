@@ -14,6 +14,11 @@
 #include "../snow_common.glsl"
 #include "../cloud_shadow_common.glsl"
 
+// Virtual texturing support - define USE_VIRTUAL_TEXTURE to enable
+#ifdef USE_VIRTUAL_TEXTURE
+#include "../virtual_texture.glsl"
+#endif
+
 // Terrain uses binding 5 for the main UBO (different descriptor set layout)
 #define UBO_BINDING 5
 #include "../ubo_common.glsl"
@@ -66,6 +71,12 @@ const float FAR_LOD_TRANSITION_END = 70.0;    // Full far LOD (terrain with gras
 // Triplanar mapping parameters
 const float TRIPLANAR_SCALE = 0.1;            // World-space texture scale (larger = bigger texture)
 const float TRIPLANAR_SHARPNESS = 4.0;        // Higher = sharper transitions between projections
+
+// Virtual texture world size (should match tile generator output)
+// The VT maps from (0,0) to (VT_WORLD_SIZE, VT_WORLD_SIZE) in world XZ coordinates
+#ifdef USE_VIRTUAL_TEXTURE
+const float VT_WORLD_SIZE = 16384.0;          // World size covered by virtual texture
+#endif
 
 // Triplanar texture sampling - samples texture from 3 axis-aligned projections
 // and blends based on surface normal to avoid stretching on steep surfaces
@@ -125,10 +136,34 @@ void main() {
     vec3 normal = normalize(fragNormal);
     float slope = 1.0 - normal.y;
 
-    // Use triplanar mapping for terrain albedo - prevents texture stretching on steep slopes
+    // Sample terrain albedo
+    vec3 albedo;
+
+#ifdef USE_VIRTUAL_TEXTURE
+    // Virtual Texture: Sample pre-composited megatexture (includes roads, rivers, biome materials)
+    // Convert world XZ position to virtual texture UV
+    vec2 vtUV = fragWorldPos.xz / VT_WORLD_SIZE;
+
+    // Clamp UV to valid range (handles terrain edges)
+    vtUV = clamp(vtUV, 0.0, 1.0);
+
+    // Sample with automatic mip selection
+    vec4 vtSample = sampleVirtualTextureAuto(vtUV);
+    albedo = vtSample.rgb;
+
+    // On steep slopes, blend with cliff material (not baked into VT for triplanar quality)
+    // Use triplanar for cliffs to avoid stretching on vertical surfaces
+    if (slope > 0.5) {
+        vec3 cliffAlbedo = sampleTriplanar(terrainAlbedo, fragWorldPos, normal, TRIPLANAR_SCALE);
+        float cliffBlend = smoothstep(0.5, 0.8, slope);
+        albedo = mix(albedo, cliffAlbedo, cliffBlend);
+    }
+#else
+    // Fallback: Use triplanar mapping for terrain albedo - prevents texture stretching on steep slopes
     // On flat surfaces (high normal.y), this mainly uses the Y projection (top-down XZ plane)
     // On steep cliffs, it blends in X and Z projections to avoid stretching
-    vec3 albedo = sampleTriplanar(terrainAlbedo, fragWorldPos, normal, TRIPLANAR_SCALE);
+    albedo = sampleTriplanar(terrainAlbedo, fragWorldPos, normal, TRIPLANAR_SCALE);
+#endif
 
     // === FAR LOD GRASS BLENDING ===
     // At distances beyond grass render distance, blend in grass texture to maintain
@@ -151,10 +186,12 @@ void main() {
         albedo = mix(albedo, farGrassColor, farLodBlend * grassGrowthFactor);
     }
 
-    // Blend in rock color on steep slopes
+#ifndef USE_VIRTUAL_TEXTURE
+    // Blend in rock color on steep slopes (only for non-VT mode; VT handles cliffs separately)
     vec3 rockColor = vec3(0.4, 0.35, 0.3);
     vec3 grassColor = albedo;
     albedo = mix(grassColor, rockColor, smoothstep(0.3, 0.6, slope));
+#endif
 
     // Material properties
     float roughness = mix(0.8, 0.95, slope);  // Rougher on slopes

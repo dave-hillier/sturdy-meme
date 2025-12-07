@@ -94,6 +94,13 @@
 #define BINDING_TERRAIN_SNOW_UBO       17   // Snow UBO for terrain
 #define BINDING_TERRAIN_CLOUD_SHADOW_UBO 18 // Cloud shadow UBO for terrain
 
+// Virtual Texture bindings (terrain descriptor set)
+#define BINDING_VT_PAGE_TABLE          19   // VT indirection/page table texture (usampler2D)
+#define BINDING_VT_PHYSICAL_CACHE      20   // VT physical cache texture (sampler2D)
+#define BINDING_VT_FEEDBACK            21   // VT feedback buffer (SSBO)
+#define BINDING_VT_FEEDBACK_COUNTER    22   // VT feedback counter (SSBO)
+#define BINDING_VT_PARAMS_UBO          23   // VT parameters UBO
+
 // =============================================================================
 // Grass Compute Shader Descriptor Set
 // =============================================================================
@@ -351,6 +358,13 @@ constexpr uint32_t TERRAIN_SHADOW_DRAW    = BINDING_TERRAIN_SHADOW_DRAW;
 constexpr uint32_t TERRAIN_HOLE_MASK      = BINDING_TERRAIN_HOLE_MASK;
 constexpr uint32_t TERRAIN_SNOW_UBO       = BINDING_TERRAIN_SNOW_UBO;
 constexpr uint32_t TERRAIN_CLOUD_SHADOW_UBO = BINDING_TERRAIN_CLOUD_SHADOW_UBO;
+
+// Virtual Texture
+constexpr uint32_t VT_PAGE_TABLE          = BINDING_VT_PAGE_TABLE;
+constexpr uint32_t VT_PHYSICAL_CACHE      = BINDING_VT_PHYSICAL_CACHE;
+constexpr uint32_t VT_FEEDBACK            = BINDING_VT_FEEDBACK;
+constexpr uint32_t VT_FEEDBACK_COUNTER    = BINDING_VT_FEEDBACK_COUNTER;
+constexpr uint32_t VT_PARAMS_UBO          = BINDING_VT_PARAMS_UBO;
 
 // Grass Compute
 constexpr uint32_t GRASS_COMPUTE_INSTANCES   = BINDING_GRASS_COMPUTE_INSTANCES;
