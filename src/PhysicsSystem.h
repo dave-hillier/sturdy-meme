@@ -70,14 +70,17 @@ public:
     // samples: row-major height values, sampleCount x sampleCount grid
     // worldSize: terrain extent in world units (centered at origin)
     // heightScale: multiplier for height values
+    // minAltitude: offset added to all heights (base altitude)
     PhysicsBodyID createTerrainHeightfield(const float* samples, uint32_t sampleCount,
-                                           float worldSize, float heightScale);
+                                           float worldSize, float heightScale,
+                                           float minAltitude = 0.0f);
 
     // Terrain with hole mask - holes have no collision (for caves/wells)
     // holeMask: row-major uint8_t values, same dimensions as height samples
     //           values > 127 indicate holes (no collision)
     PhysicsBodyID createTerrainHeightfield(const float* samples, const uint8_t* holeMask,
-                                           uint32_t sampleCount, float worldSize, float heightScale);
+                                           uint32_t sampleCount, float worldSize, float heightScale,
+                                           float minAltitude = 0.0f);
 
     // Dynamic rigid bodies
     PhysicsBodyID createBox(const glm::vec3& position, const glm::vec3& halfExtents,

@@ -359,13 +359,15 @@ PhysicsBodyID PhysicsWorld::createTerrainDisc(float radius, float heightOffset) 
 }
 
 PhysicsBodyID PhysicsWorld::createTerrainHeightfield(const float* samples, uint32_t sampleCount,
-                                                      float worldSize, float heightScale) {
+                                                      float worldSize, float heightScale,
+                                                      float minAltitude) {
     // Call the version with no hole mask
-    return createTerrainHeightfield(samples, nullptr, sampleCount, worldSize, heightScale);
+    return createTerrainHeightfield(samples, nullptr, sampleCount, worldSize, heightScale, minAltitude);
 }
 
 PhysicsBodyID PhysicsWorld::createTerrainHeightfield(const float* samples, const uint8_t* holeMask,
-                                                      uint32_t sampleCount, float worldSize, float heightScale) {
+                                                      uint32_t sampleCount, float worldSize, float heightScale,
+                                                      float minAltitude) {
     if (!initialized) return INVALID_BODY_ID;
     if (!samples || sampleCount < 2) {
         SDL_Log("Invalid heightfield parameters");
@@ -387,7 +389,7 @@ PhysicsBodyID PhysicsWorld::createTerrainHeightfield(const float* samples, const
             // This is a hole - no collision
             joltSamples[i] = JPH::HeightFieldShapeConstants::cNoCollisionValue;
         } else {
-            joltSamples[i] = TerrainHeight::toWorld(samples[i], heightScale);
+            joltSamples[i] = TerrainHeight::toWorld(samples[i], heightScale) + minAltitude;
         }
     }
 
@@ -804,13 +806,12 @@ PhysicsBodyID PhysicsWorld::createTerrainTile(const float* samples, uint32_t sam
 
     JPH::BodyInterface& bodyInterface = physicsSystem->GetBodyInterface();
 
-    // Convert normalized heights to world heights
-    // Use same formula as global heightfield: worldY = h * heightScale
+    // Convert normalized heights to world heights (with base altitude offset)
+    // Use same formula as global heightfield: worldY = minAltitude + h * heightScale
     // See TerrainHeight.h for authoritative formula
-    (void)minAltitude; // Unused - kept for API compatibility
     std::vector<float> joltSamples(sampleCount * sampleCount);
     for (uint32_t i = 0; i < sampleCount * sampleCount; i++) {
-        joltSamples[i] = samples[i] * heightScale;
+        joltSamples[i] = TerrainHeight::toWorld(samples[i], heightScale) + minAltitude;
     }
 
     // Debug: Log first sample height for tile containing origin
