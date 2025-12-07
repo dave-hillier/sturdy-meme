@@ -733,7 +733,12 @@ void Renderer::setWeatherType(uint32_t type) {
 }
 
 void Renderer::setPlayerPosition(const glm::vec3& position, float radius) {
+    setPlayerState(position, glm::vec3(0.0f), radius);
+}
+
+void Renderer::setPlayerState(const glm::vec3& position, const glm::vec3& velocity, float radius) {
     playerPosition = position;
+    playerVelocity = velocity;
     playerCapsuleRadius = radius;
 }
 
@@ -1535,10 +1540,8 @@ void Renderer::render(const Camera& camera) {
         volumetricSnowSystem.addInteraction(frame.playerPosition, frame.playerCapsuleRadius * 1.5f, 0.3f);
     }
 
-    // Update leaf system with player position (using camera as player proxy)
-    // TODO: Integrate actual player velocity from Player class for proper disruption
-    glm::vec3 playerVel = glm::vec3(0.0f);  // Will be updated when player movement tracking is added
-    leafSystem.updateUniforms(frame.frameIndex, frame.cameraPosition, frame.viewProj, frame.cameraPosition, playerVel, frame.deltaTime, frame.time,
+    // Update leaf system with player position and velocity for disruption
+    leafSystem.updateUniforms(frame.frameIndex, frame.cameraPosition, frame.viewProj, frame.cameraPosition, frame.playerVelocity, frame.deltaTime, frame.time,
                                frame.terrainSize, frame.heightScale);
 
     // Update water system uniforms
@@ -2125,6 +2128,7 @@ FrameData Renderer::buildFrameData(const Camera& camera, float deltaTime, float 
     frame.sunIntensity = ubo->sunDirection.w;
 
     frame.playerPosition = playerPosition;
+    frame.playerVelocity = playerVelocity;
     frame.playerCapsuleRadius = playerCapsuleRadius;
 
     const auto& terrainConfig = terrainSystem.getConfig();

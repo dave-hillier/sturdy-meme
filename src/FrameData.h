@@ -41,6 +41,7 @@ struct FrameData {
 
     // Player (for interaction systems like grass displacement)
     glm::vec3 playerPosition = glm::vec3(0.0f);
+    glm::vec3 playerVelocity = glm::vec3(0.0f);
     float playerCapsuleRadius = 0.5f;
 
     // Terrain parameters (for systems that need terrain info)

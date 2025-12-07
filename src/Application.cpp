@@ -309,13 +309,14 @@ void Application::run() {
 
         // Update player position from physics character controller
         glm::vec3 physicsPos = playerPos;
+        glm::vec3 physicsVelocity = physics.getCharacterVelocity();
         player.setPosition(physicsPos);
 
         // Update scene object transforms from physics
         renderer.getSceneManager().update(physics);
 
         // Update player position for grass interaction (always, regardless of camera mode)
-        renderer.setPlayerPosition(player.getPosition(), Player::CAPSULE_RADIUS);
+        renderer.setPlayerState(player.getPosition(), physicsVelocity, Player::CAPSULE_RADIUS);
 
         // Wait for previous frame's GPU work to complete before updating dynamic meshes.
         // This prevents race conditions where we destroy mesh buffers while the GPU

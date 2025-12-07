@@ -231,6 +231,7 @@ public:
 
     // Player position for grass interaction (xyz = position, w = capsule radius)
     void setPlayerPosition(const glm::vec3& position, float radius);
+    void setPlayerState(const glm::vec3& position, const glm::vec3& velocity, float radius);
 
     // Access to systems for simulation
     WindSystem& getWindSystem() { return windSystem; }
@@ -497,6 +498,7 @@ private:
 
     // Player position for grass displacement
     glm::vec3 playerPosition = glm::vec3(0.0f);
+    glm::vec3 playerVelocity = glm::vec3(0.0f);
     float playerCapsuleRadius = 0.3f;      // Default capsule radius
 
     // Dynamic lights
