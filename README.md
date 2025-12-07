@@ -180,10 +180,81 @@ vulkan-game/
 ├── shaders/
 │   ├── shader.vert       # Vertex shader
 │   └── shader.frag       # Fragment shader
+├── tools/                # Preprocessing tools
+│   ├── terrain_preprocess.cpp
+│   ├── erosion_preprocess.cpp
+│   └── biome_preprocess.cpp
 └── assets/
     └── textures/
         └── crate.png     # Wooden crate texture
 ```
+
+## Preprocessing Tools
+
+The project includes standalone tools for terrain data preprocessing. Build them with:
+
+```bash
+cmake --build build/debug --target terrain_preprocess erosion_preprocess biome_preprocess
+```
+
+### terrain_preprocess
+
+Generates tile cache from a 16-bit PNG heightmap.
+
+```bash
+./build/debug/tools/terrain_preprocess <heightmap.png> <cache_dir> [options]
+  --min-altitude <value>     Altitude for height value 0 (default: 0.0)
+  --max-altitude <value>     Altitude for height value 65535 (default: 200.0)
+  --meters-per-pixel <value> World scale (default: 1.0)
+  --tile-resolution <value>  Output tile resolution (default: 512)
+  --lod-levels <value>       Number of LOD levels (default: 4)
+```
+
+### erosion_preprocess
+
+Simulates hydraulic erosion and generates flow accumulation data for rivers.
+
+```bash
+./build/debug/tools/erosion_preprocess <heightmap.png> <cache_dir> [options]
+  --num-droplets <value>       Water droplets to simulate (default: 500000)
+  --sea-level <value>          Height below which is sea (default: 0.0)
+  --terrain-size <value>       World size in meters (default: 16384.0)
+  --output-resolution <value>  Flow map resolution (default: 4096)
+```
+
+Outputs: `flow_accumulation.bin`, `flow_direction.bin`, `erosion_preview.png`, `rivers.svg`
+
+### biome_preprocess
+
+Generates biome classification for south coast of England terrain types.
+
+```bash
+./build/debug/tools/biome_preprocess <heightmap.png> <erosion_cache> <output_dir> [options]
+  --sea-level <value>         Height below which is sea (default: 0.0)
+  --terrain-size <value>      World size in meters (default: 16384.0)
+  --min-altitude <value>      Min altitude in heightmap (default: 0.0)
+  --max-altitude <value>      Max altitude in heightmap (default: 200.0)
+  --output-resolution <value> Biome map resolution (default: 1024)
+  --num-settlements <value>   Target number of settlements (default: 20)
+```
+
+**Biome zones:**
+| ID | Zone | Description |
+|----|------|-------------|
+| 0 | Sea | Below sea level |
+| 1 | Beach | Low coastal, gentle slope |
+| 2 | Chalk Cliff | Steep coastal slopes |
+| 3 | Salt Marsh | Low-lying coastal wetland |
+| 4 | River | River channels |
+| 5 | Wetland | Inland wet areas near rivers |
+| 6 | Grassland | Chalk downs, higher elevation |
+| 7 | Agricultural | Flat lowland fields |
+| 8 | Woodland | Valleys and sheltered slopes |
+
+**Outputs:**
+- `biome_map.png` - RGBA8 data (R=zone, G=subzone, B=settlement_distance)
+- `biome_debug.png` - Colored visualization
+- `settlements.json` - Settlement locations with metadata
 
 ## Dependencies
 
