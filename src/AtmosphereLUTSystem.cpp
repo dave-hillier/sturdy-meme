@@ -419,7 +419,7 @@ bool AtmosphereLUTSystem::createLUTSampler() {
 
 bool AtmosphereLUTSystem::createUniformBuffer() {
     // Create atmosphere LUT uniform buffer (single buffer for one-time LUT computations)
-    VkDeviceSize bufferSize = sizeof(AtmosphereLUTUniforms);
+    VkDeviceSize bufferSize = sizeof(AtmosphereUniforms);
 
     VkBufferCreateInfo bufferInfo{};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -444,7 +444,7 @@ bool AtmosphereLUTSystem::createUniformBuffer() {
     BufferUtils::PerFrameBufferBuilder skyViewBuilder;
     if (!skyViewBuilder.setAllocator(allocator)
              .setFrameCount(framesInFlight)
-             .setSize(sizeof(AtmosphereLUTUniforms))
+             .setSize(sizeof(AtmosphereUniforms))
              .build(skyViewUniformBuffers)) {
         SDL_Log("Failed to create sky view per-frame uniform buffers");
         return false;
@@ -709,7 +709,7 @@ bool AtmosphereLUTSystem::createDescriptorSets() {
         VkDescriptorBufferInfo bufferInfo{};
         bufferInfo.buffer = uniformBuffer;
         bufferInfo.offset = 0;
-        bufferInfo.range = sizeof(AtmosphereLUTUniforms);
+        bufferInfo.range = sizeof(AtmosphereUniforms);
 
         writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[1].dstSet = transmittanceDescriptorSet;
@@ -760,7 +760,7 @@ bool AtmosphereLUTSystem::createDescriptorSets() {
         VkDescriptorBufferInfo bufferInfo{};
         bufferInfo.buffer = uniformBuffer;
         bufferInfo.offset = 0;
-        bufferInfo.range = sizeof(AtmosphereLUTUniforms);
+        bufferInfo.range = sizeof(AtmosphereUniforms);
 
         writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[2].dstSet = multiScatterDescriptorSet;
@@ -826,7 +826,7 @@ bool AtmosphereLUTSystem::createDescriptorSets() {
             VkDescriptorBufferInfo bufferInfo{};
             bufferInfo.buffer = skyViewUniformBuffers.buffers[i];
             bufferInfo.offset = 0;
-            bufferInfo.range = sizeof(AtmosphereLUTUniforms);
+            bufferInfo.range = sizeof(AtmosphereUniforms);
 
             writes[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             writes[3].dstSet = skyViewDescriptorSets[i];
@@ -890,7 +890,7 @@ bool AtmosphereLUTSystem::createDescriptorSets() {
         VkDescriptorBufferInfo bufferInfo{};
         bufferInfo.buffer = uniformBuffer;
         bufferInfo.offset = 0;
-        bufferInfo.range = sizeof(AtmosphereLUTUniforms);
+        bufferInfo.range = sizeof(AtmosphereUniforms);
 
         writes[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[3].dstSet = irradianceDescriptorSet;
@@ -1133,9 +1133,9 @@ bool AtmosphereLUTSystem::createComputePipelines() {
 
 void AtmosphereLUTSystem::computeTransmittanceLUT(VkCommandBuffer cmd) {
     // Update uniform buffer with atmosphere params
-    AtmosphereLUTUniforms uniforms{};
+    AtmosphereUniforms uniforms{};
     uniforms.params = atmosphereParams;
-    memcpy(uniformMappedPtr, &uniforms, sizeof(AtmosphereLUTUniforms));
+    memcpy(uniformMappedPtr, &uniforms, sizeof(AtmosphereUniforms));
 
     // Transition to GENERAL layout for compute write
     VkImageMemoryBarrier barrier{};
@@ -1179,9 +1179,9 @@ void AtmosphereLUTSystem::computeTransmittanceLUT(VkCommandBuffer cmd) {
 
 void AtmosphereLUTSystem::computeMultiScatterLUT(VkCommandBuffer cmd) {
     // Update uniform buffer with atmosphere params
-    AtmosphereLUTUniforms uniforms{};
+    AtmosphereUniforms uniforms{};
     uniforms.params = atmosphereParams;
-    memcpy(uniformMappedPtr, &uniforms, sizeof(AtmosphereLUTUniforms));
+    memcpy(uniformMappedPtr, &uniforms, sizeof(AtmosphereUniforms));
 
     // Transition to GENERAL layout for compute write
     VkImageMemoryBarrier barrier{};
@@ -1225,9 +1225,9 @@ void AtmosphereLUTSystem::computeMultiScatterLUT(VkCommandBuffer cmd) {
 
 void AtmosphereLUTSystem::computeIrradianceLUT(VkCommandBuffer cmd) {
     // Update uniform buffer with atmosphere params
-    AtmosphereLUTUniforms uniforms{};
+    AtmosphereUniforms uniforms{};
     uniforms.params = atmosphereParams;
-    memcpy(uniformMappedPtr, &uniforms, sizeof(AtmosphereLUTUniforms));
+    memcpy(uniformMappedPtr, &uniforms, sizeof(AtmosphereUniforms));
 
     // Transition both irradiance LUTs to GENERAL layout for compute write
     std::array<VkImageMemoryBarrier, 2> barriers{};
@@ -1280,11 +1280,11 @@ void AtmosphereLUTSystem::computeIrradianceLUT(VkCommandBuffer cmd) {
 void AtmosphereLUTSystem::computeSkyViewLUT(VkCommandBuffer cmd, const glm::vec3& sunDir,
                                             const glm::vec3& cameraPos, float cameraAltitude) {
     // Update uniform buffer (use frame 0's per-frame buffer for startup computation)
-    AtmosphereLUTUniforms uniforms{};
+    AtmosphereUniforms uniforms{};
     uniforms.params = atmosphereParams;
     uniforms.sunDirection = glm::vec4(sunDir, 0.0f);
     uniforms.cameraPosition = glm::vec4(cameraPos, cameraAltitude);
-    memcpy(skyViewUniformBuffers.mappedPointers[0], &uniforms, sizeof(AtmosphereLUTUniforms));
+    memcpy(skyViewUniformBuffers.mappedPointers[0], &uniforms, sizeof(AtmosphereUniforms));
 
     // Transition to GENERAL layout for compute write (from UNDEFINED at startup)
     VkImageMemoryBarrier barrier{};
@@ -1330,11 +1330,11 @@ void AtmosphereLUTSystem::updateSkyViewLUT(VkCommandBuffer cmd, uint32_t frameIn
                                            const glm::vec3& sunDir,
                                            const glm::vec3& cameraPos, float cameraAltitude) {
     // Update per-frame uniform buffer with new sun direction (double-buffered)
-    AtmosphereLUTUniforms uniforms{};
+    AtmosphereUniforms uniforms{};
     uniforms.params = atmosphereParams;
     uniforms.sunDirection = glm::vec4(sunDir, 0.0f);
     uniforms.cameraPosition = glm::vec4(cameraPos, cameraAltitude);
-    memcpy(skyViewUniformBuffers.mappedPointers[frameIndex], &uniforms, sizeof(AtmosphereLUTUniforms));
+    memcpy(skyViewUniformBuffers.mappedPointers[frameIndex], &uniforms, sizeof(AtmosphereUniforms));
 
     // Transition from SHADER_READ_ONLY to GENERAL for compute write
     // (LUT was already in read-only from previous frame)
@@ -1430,10 +1430,10 @@ void AtmosphereLUTSystem::updateCloudMapLUT(VkCommandBuffer cmd, uint32_t frameI
     // Update per-frame cloud map uniform buffer (double-buffered)
     CloudMapUniforms uniforms{};
     uniforms.windOffset = glm::vec4(windOffset, time);
-    uniforms.coverage = 0.6f;      // 60% cloud coverage
-    uniforms.density = 1.0f;       // Full density multiplier
-    uniforms.sharpness = 0.3f;     // Coverage transition sharpness
-    uniforms.detailScale = 2.5f;   // Detail noise scale
+    uniforms.coverage = cloudCoverage;    // From UI controls
+    uniforms.density = cloudDensity;      // From UI controls
+    uniforms.sharpness = 0.3f;            // Coverage transition sharpness
+    uniforms.detailScale = 2.5f;          // Detail noise scale
     memcpy(cloudMapUniformBuffers.mappedPointers[frameIndex], &uniforms, sizeof(CloudMapUniforms));
 
     // Transition from SHADER_READ_ONLY to GENERAL for compute write

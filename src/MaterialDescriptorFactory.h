@@ -49,6 +49,10 @@ public:
         // Optional: bone matrices for skinned meshes
         VkBuffer boneMatricesBuffer = VK_NULL_HANDLE;
         VkDeviceSize boneMatricesBufferSize = 0;
+
+        // Placeholder texture for unused PBR bindings (bindings 13-16 must always be written)
+        VkImageView placeholderTextureView = VK_NULL_HANDLE;
+        VkSampler placeholderTextureSampler = VK_NULL_HANDLE;
     };
 
     // Per-material texture bindings
@@ -57,6 +61,17 @@ public:
         VkSampler diffuseSampler;
         VkImageView normalView;
         VkSampler normalSampler;
+
+        // Optional PBR textures (for Substance/PBR materials)
+        // Set to VK_NULL_HANDLE if not used - shader will use push constant values
+        VkImageView roughnessView = VK_NULL_HANDLE;
+        VkSampler roughnessSampler = VK_NULL_HANDLE;
+        VkImageView metallicView = VK_NULL_HANDLE;
+        VkSampler metallicSampler = VK_NULL_HANDLE;
+        VkImageView aoView = VK_NULL_HANDLE;
+        VkSampler aoSampler = VK_NULL_HANDLE;
+        VkImageView heightView = VK_NULL_HANDLE;
+        VkSampler heightSampler = VK_NULL_HANDLE;
     };
 
     explicit MaterialDescriptorFactory(VkDevice device);

@@ -14,6 +14,9 @@ build/
 # Generated code (regenerated during build)
 generated/
 
+# Generated textures (regenerated during build)
+assets/textures/foam_noise.png
+
 # Compiled shaders (regenerated during build)
 *.spv
 vcpkg_installed/

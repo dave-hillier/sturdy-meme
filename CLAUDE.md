@@ -2,11 +2,12 @@
 
 - See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for rendering architecture overview
 - dont include estimates, either time or lines of code, in any plans
+- when a feature is completed describe how to test it. It doesnt have to be a unit test - it can be some example and manual testing.
 - use opengameart.org for texture asset placeholders
 - keep an emphasis when planning on incremental progress, each state should be working and look decent when rendered
 - always ensure that the build both compiles and runs without crashing before considering it done
 - shaders can be compiled by running cmake
-- UBO structs are automatically generated from shaders during the cmake build
+- UBO structs are automatically generated from shaders during the cmake build. The `shader_reflect` tool (in `tools/`) parses compiled SPIR-V files using SPIRV-Reflect and outputs `generated/UBOs.h` with std140-aligned C++ structs matching the shader uniform buffer layouts.
 - compile with `cmake --preset debug && cmake --build build/debug`
 - run with `./run-debug.sh` do not attempt to combine with timeouts or sleeps
 - Prefer composition over inheritance - assume pretty much all of the time you want to use inheritance you are wrong.
@@ -17,6 +18,8 @@
   - `SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, ...)` for errors
   - `SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, ...)` for warnings
   - `SDL_LogDebug(SDL_LOG_CATEGORY_APPLICATION, ...)` for debug output
+- procedurally generated content should be generated as part of the build process.
+- generated textures should be saved in png format
 
 ## Web Claude Code Environment
 

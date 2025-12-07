@@ -36,8 +36,8 @@ public:
     void updatePlayerTransform(const glm::mat4& transform);
 
     // Scene object access for rendering
-    std::vector<SceneObject>& getSceneObjects() { return sceneBuilder.getSceneObjects(); }
-    const std::vector<SceneObject>& getSceneObjects() const { return sceneBuilder.getSceneObjects(); }
+    std::vector<Renderable>& getRenderables() { return sceneBuilder.getRenderables(); }
+    const std::vector<Renderable>& getRenderables() const { return sceneBuilder.getRenderables(); }
     size_t getPlayerObjectIndex() const { return sceneBuilder.getPlayerObjectIndex(); }
 
     // SceneBuilder access for texture descriptor sets

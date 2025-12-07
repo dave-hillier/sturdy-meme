@@ -14,6 +14,7 @@ find_package(imgui CONFIG REQUIRED)
 find_package(fastgltf CONFIG REQUIRED)
 find_package(unofficial-openfbx CONFIG REQUIRED)
 find_package(lodepng CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
 
 find_path(STB_INCLUDE_DIRS "stb_image.h")
 
@@ -59,6 +60,7 @@ set(SOURCES
     src/TerrainImporter.cpp
     src/ErosionSimulator.cpp
     src/ClothSimulation.cpp
+    src/PlayerCape.cpp
     src/SnowMaskSystem.cpp
     src/VolumetricSnowSystem.cpp
     src/SkySystem.cpp
@@ -76,14 +78,29 @@ set(SOURCES
     src/Animation.cpp
     src/AnimatedCharacter.cpp
     src/AnimationStateMachine.cpp
+    src/AnimationEventLoader.cpp
+    src/AnimationBlend.cpp
+    src/AnimationLayer.cpp
+    src/AnimationLayerController.cpp
+    src/BlendSpace.cpp
+    src/BoneMask.cpp
+    src/IKSolver.cpp
     src/FBXLoader.cpp
+    src/FBXPostProcess.cpp
     src/HiZSystem.cpp
     src/GpuProfiler.cpp
     src/CpuProfiler.cpp
     src/WaterSystem.cpp
+    src/FlowMapGenerator.cpp
+    src/WaterGBuffer.cpp
+    src/WaterDisplacement.cpp
+    src/FoamBuffer.cpp
+    src/SSRSystem.cpp
+    src/WaterTileCull.cpp
     src/TreeGenerator.cpp
     src/TreeEditSystem.cpp
     src/TreeEditorGui.cpp
+    src/BillboardCapture.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
@@ -105,9 +122,10 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     fastgltf::fastgltf
     unoffical::openfbx::openfbx
     lodepng
+    nlohmann_json::nlohmann_json
 )
 
-# macOS app bundle configuration
+# Platform-specific setup
 if(APPLE)
     set_target_properties(${PROJECT_NAME} PROPERTIES
         MACOSX_BUNDLE TRUE
@@ -118,13 +136,22 @@ if(APPLE)
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in"
     )
 
-    # Copy entire textures directory to app bundle
+    # Copy textures directory to app bundle (from root textures/)
     add_custom_command(
         TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${CMAKE_CURRENT_SOURCE_DIR}/textures
             $<TARGET_BUNDLE_CONTENT_DIR:${PROJECT_NAME}>/Resources/textures
-        COMMENT "Copying textures to app bundle"
+        COMMENT "Copying root textures to app bundle"
+    )
+
+    # Copy assets/textures to Resources/textures (for terrain textures)
+    add_custom_command(
+        TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_CURRENT_SOURCE_DIR}/assets/textures
+            $<TARGET_BUNDLE_CONTENT_DIR:${PROJECT_NAME}>/Resources/textures
+        COMMENT "Copying assets/textures to app bundle"
     )
 
     # Copy assets directory to app bundle
@@ -134,6 +161,24 @@ if(APPLE)
             ${CMAKE_CURRENT_SOURCE_DIR}/assets
             $<TARGET_BUNDLE_CONTENT_DIR:${PROJECT_NAME}>/Resources/assets
         COMMENT "Copying assets to app bundle"
+    )
+else()
+    # Copy textures directory to build output (Linux/Windows)
+    add_custom_command(
+        TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_CURRENT_SOURCE_DIR}/textures
+            $<TARGET_FILE_DIR:${PROJECT_NAME}>/textures
+        COMMENT "Copying textures to build directory"
+    )
+
+    # Copy assets directory to build output (Linux/Windows)
+    add_custom_command(
+        TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_CURRENT_SOURCE_DIR}/assets
+            $<TARGET_FILE_DIR:${PROJECT_NAME}>/assets
+        COMMENT "Copying assets to build directory"
     )
 endif()
 
@@ -181,10 +226,101 @@ add_custom_target(terrain_preprocessing
 # Ensure tools are built before preprocessing runs
 add_dependencies(terrain_preprocessing terrain_preprocess erosion_preprocess)
 
+# Foam noise texture generation
+set(FOAM_TEXTURE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/assets/textures)
+set(FOAM_TEXTURE ${FOAM_TEXTURE_DIR}/foam_noise.png)
+
+# Generate foam noise texture (only regenerate if tool source changes)
+add_custom_command(
+    OUTPUT ${FOAM_TEXTURE}
+    COMMAND $<TARGET_FILE:foam_noise_gen>
+        --resolution 512
+        --octaves 4
+        --output ${FOAM_TEXTURE}
+    DEPENDS foam_noise_gen
+    COMMENT "Generating foam noise texture"
+)
+
+# Custom target for foam texture generation
+add_custom_target(foam_texture_gen
+    DEPENDS ${FOAM_TEXTURE}
+)
+
+# Main target depends on foam texture
+add_dependencies(${PROJECT_NAME} foam_texture_gen)
+
+# Cape texture generation
+set(CAPE_TEXTURE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/assets/textures)
+set(CAPE_DIFFUSE ${CAPE_TEXTURE_DIR}/cape_diffuse.png)
+set(CAPE_NORMAL ${CAPE_TEXTURE_DIR}/cape_normal.png)
+
+# Generate cape textures
+add_custom_command(
+    OUTPUT ${CAPE_DIFFUSE} ${CAPE_NORMAL}
+    COMMAND $<TARGET_FILE:cape_texture_gen>
+        --width 256
+        --height 512
+        --output ${CAPE_DIFFUSE}
+        --normal ${CAPE_NORMAL}
+    DEPENDS cape_texture_gen
+    COMMENT "Generating cape textures"
+)
+
+# Custom target for cape texture generation
+add_custom_target(cape_texture_gen_target
+    DEPENDS ${CAPE_DIFFUSE} ${CAPE_NORMAL}
+)
+
+# Main target depends on cape textures
+add_dependencies(${PROJECT_NAME} cape_texture_gen_target)
+
+# SBSAR (Substance Archive) texture processing
+set(SBSAR_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/assets/substances)
+set(SBSAR_OUTPUT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/assets/textures/substances)
+set(SBSAR_RESOLUTION 1024)
+
+# Create output directory
+file(MAKE_DIRECTORY ${SBSAR_OUTPUT_DIR})
+
+# Collect all SBSAR files from the substances directory
+file(GLOB SBSAR_FILES "${SBSAR_SOURCE_DIR}/*.sbsar")
+
+# Create a list to track all generated texture manifests
+set(SBSAR_MANIFESTS "")
+
+# Process each SBSAR file
+foreach(SBSAR_FILE ${SBSAR_FILES})
+    get_filename_component(SBSAR_NAME ${SBSAR_FILE} NAME_WE)
+    set(SBSAR_MANIFEST ${SBSAR_OUTPUT_DIR}/${SBSAR_NAME}_manifest.txt)
+
+    add_custom_command(
+        OUTPUT ${SBSAR_MANIFEST}
+        COMMAND $<TARGET_FILE:sbsar_render>
+            "${SBSAR_FILE}"
+            "${SBSAR_OUTPUT_DIR}"
+            --name "${SBSAR_NAME}"
+            --resolution ${SBSAR_RESOLUTION}
+        DEPENDS ${SBSAR_FILE} sbsar_render
+        COMMENT "Processing SBSAR: ${SBSAR_NAME}"
+    )
+
+    list(APPEND SBSAR_MANIFESTS ${SBSAR_MANIFEST})
+endforeach()
+
+# Custom target for all SBSAR processing
+add_custom_target(sbsar_textures
+    DEPENDS ${SBSAR_MANIFESTS}
+)
+
+# Main target depends on SBSAR textures (only if there are any)
+if(SBSAR_MANIFESTS)
+    add_dependencies(${PROJECT_NAME} sbsar_textures)
+endif()
+
 # Main target depends on preprocessing
 add_dependencies(${PROJECT_NAME} terrain_preprocessing)
 
-# Copy terrain data to app bundle (macOS only)
+# Copy terrain data to output location
 if(APPLE)
     add_custom_command(
         TARGET ${PROJECT_NAME} POST_BUILD
@@ -192,6 +328,14 @@ if(APPLE)
             ${TERRAIN_DATA_DIR}
             $<TARGET_BUNDLE_CONTENT_DIR:${PROJECT_NAME}>/Resources/terrain_data
         COMMENT "Copying terrain data to app bundle"
+    )
+else()
+    add_custom_command(
+        TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${TERRAIN_DATA_DIR}
+            $<TARGET_FILE_DIR:${PROJECT_NAME}>/terrain_data
+        COMMENT "Copying terrain data to build directory"
     )
 endif()
 
@@ -237,8 +381,15 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/hiz_culling.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water.frag.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_position.vert.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_position.frag.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_displacement.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/foam_blur.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ssr.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_tile_cull.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree.frag.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_billboard.frag.spv
 )
 
 set(TERRAIN_SHADER_FILES
@@ -329,7 +480,7 @@ if(SHADER_COMPILE_CMD)
         weather.comp weather.vert weather.frag
         leaf.comp leaf.vert leaf.frag
         snow_accumulation.comp
-        tree.vert tree.frag
+        tree.vert tree.frag tree_billboard.frag
     )
 
     foreach(SHADER ${SHADERS_WITH_BINDINGS})
@@ -374,20 +525,66 @@ if(SHADER_COMPILE_CMD)
         )
     endforeach()
 
+    # Water shader dependencies (common includes)
+    set(WATER_DEPS
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/constants_common.glsl
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/lighting_common.glsl
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow_common.glsl
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/atmosphere_common.glsl
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain_height_common.glsl
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/flow_common.glsl
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/fbm_common.glsl
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/foam.glsl
+    )
+
     # Water shaders with common includes
     set(WATER_SHADERS
         water.vert
         water.frag
+        water_position.vert
+        water_position.frag
     )
 
     foreach(SHADER ${WATER_SHADERS})
         add_custom_command(
             OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}.spv
             COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}
-            DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}
+            DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER} ${WATER_DEPS}
             COMMENT "Compiling water shader: ${SHADER}"
         )
     endforeach()
+
+    # Water displacement compute shader (Phase 4)
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_displacement.comp.spv
+        COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_displacement.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_displacement.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_displacement.comp
+        COMMENT "Compiling water displacement compute shader"
+    )
+
+    # Foam blur compute shader (Phase 14: temporal foam persistence)
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/foam_blur.comp.spv
+        COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/foam_blur.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/foam_blur.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/foam_blur.comp
+        COMMENT "Compiling foam blur compute shader"
+    )
+
+    # SSR compute shader (Phase 10: Screen-Space Reflections)
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ssr.comp.spv
+        COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ssr.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ssr.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ssr.comp
+        COMMENT "Compiling SSR compute shader"
+    )
+
+    # Water tile cull compute shader (Phase 7: Screen-Space Tessellation)
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_tile_cull.comp.spv
+        COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_tile_cull.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_tile_cull.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_tile_cull.comp
+        COMMENT "Compiling water tile cull compute shader"
+    )
 
     # Terrain shaders (LEB terrain system)
     set(TERRAIN_CBT_DEPS
@@ -528,6 +725,10 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/hiz_culling.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water.frag.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_position.vert.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_position.frag.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_displacement.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/foam_blur.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree.frag.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_dispatcher.comp.spv
@@ -561,6 +762,7 @@ if(SHADER_COMPILE_CMD)
             ${CMAKE_CURRENT_SOURCE_DIR}/generated/UBOs.h
             ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.vert.spv
             ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.frag.spv
+            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.frag.spv
             ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.vert.spv
             ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.comp.spv
             ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.frag.spv

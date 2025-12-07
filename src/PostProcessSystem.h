@@ -9,9 +9,6 @@
 #include "UBOs.h"
 #include "DescriptorManager.h"
 
-// Alias for compatibility with existing code
-using HistogramBuildParams = HistogramParams;
-
 // Histogram reduce compute shader parameters
 struct HistogramReduceParams {
     float minLogLum;      // Minimum log luminance

@@ -25,6 +25,12 @@
 #define BINDING_SNOW_MASK               8   // Snow coverage mask
 #define BINDING_CLOUD_SHADOW_MAP        9   // Cloud shadow projection
 
+// PBR Material Textures (optional, for Substance/PBR materials)
+#define BINDING_ROUGHNESS_MAP          13   // Per-pixel roughness (linear, R channel)
+#define BINDING_METALLIC_MAP           14   // Per-pixel metallic (linear, R channel)
+#define BINDING_AO_MAP                 15   // Ambient occlusion (linear, R channel)
+#define BINDING_HEIGHT_MAP             16   // Height/displacement map (linear, R channel)
+
 // Storage Buffers
 #define BINDING_LIGHT_BUFFER            4   // Point/spot light array
 
@@ -224,6 +230,60 @@
 #define BINDING_CC_FACE_BUFFER             4   // Face buffer
 
 // =============================================================================
+// Water System Descriptor Set
+// =============================================================================
+#define BINDING_WATER_UBO                  1   // Water uniforms
+#define BINDING_WATER_SHADOW_MAP           2   // Shadow map array
+#define BINDING_WATER_TERRAIN_HEIGHT       3   // Terrain height map
+#define BINDING_WATER_FLOW_MAP             4   // Flow map
+#define BINDING_WATER_DISPLACEMENT         5   // Displacement map
+#define BINDING_WATER_FOAM_NOISE           6   // Foam noise texture
+#define BINDING_WATER_TEMPORAL_FOAM        7   // Temporal foam map
+#define BINDING_WATER_CAUSTICS             8   // Caustics texture
+#define BINDING_WATER_SSR                  9   // SSR texture
+#define BINDING_WATER_SCENE_DEPTH         10   // Scene depth texture
+
+// =============================================================================
+// Water Displacement Compute Descriptor Set
+// =============================================================================
+#define BINDING_WATER_DISP_OUTPUT          0   // Displacement output image
+#define BINDING_WATER_DISP_PREV            1   // Previous displacement map
+#define BINDING_WATER_DISP_PARTICLES       2   // Splash particle buffer
+
+// =============================================================================
+// Water Tile Cull Compute Descriptor Set
+// =============================================================================
+#define BINDING_WATER_CULL_DEPTH           0   // Depth texture
+#define BINDING_WATER_CULL_TILES           1   // Tile buffer output
+#define BINDING_WATER_CULL_COUNTER         2   // Visible count buffer
+#define BINDING_WATER_CULL_INDIRECT        3   // Indirect draw buffer
+
+// =============================================================================
+// Foam Blur Compute Descriptor Set
+// =============================================================================
+#define BINDING_FOAM_OUTPUT                0   // Foam buffer output
+#define BINDING_FOAM_INPUT                 1   // Previous foam buffer
+#define BINDING_FOAM_FLOW_MAP              2   // Flow map for advection
+#define BINDING_FOAM_WAKE_DATA             3   // Wake source data
+
+// =============================================================================
+// SSR Compute Descriptor Set
+// =============================================================================
+#define BINDING_SSR_COLOR                  0   // Color texture input
+#define BINDING_SSR_DEPTH                  1   // Depth texture input
+#define BINDING_SSR_OUTPUT                 2   // SSR output image
+#define BINDING_SSR_PREV                   3   // Previous frame SSR
+
+// =============================================================================
+// Tree Shader Descriptor Set
+// =============================================================================
+#define BINDING_TREE_BARK_COLOR            1   // Bark color texture
+#define BINDING_TREE_BARK_NORMAL           2   // Bark normal map
+#define BINDING_TREE_BARK_AO               3   // Bark ambient occlusion
+#define BINDING_TREE_BARK_ROUGHNESS        4   // Bark roughness map
+#define BINDING_TREE_LEAF                  5   // Leaf texture
+
+// =============================================================================
 // C++ Type-Safe Wrappers
 // =============================================================================
 #ifdef __cplusplus
@@ -246,6 +306,12 @@ constexpr uint32_t SNOW_MASK              = BINDING_SNOW_MASK;
 constexpr uint32_t CLOUD_SHADOW_MAP       = BINDING_CLOUD_SHADOW_MAP;
 constexpr uint32_t LIGHT_BUFFER           = BINDING_LIGHT_BUFFER;
 constexpr uint32_t BONE_MATRICES          = BINDING_BONE_MATRICES;
+
+// PBR Material Textures
+constexpr uint32_t ROUGHNESS_MAP          = BINDING_ROUGHNESS_MAP;
+constexpr uint32_t METALLIC_MAP           = BINDING_METALLIC_MAP;
+constexpr uint32_t AO_MAP                 = BINDING_AO_MAP;
+constexpr uint32_t HEIGHT_MAP             = BINDING_HEIGHT_MAP;
 
 // Grass/Leaf System
 constexpr uint32_t GRASS_INSTANCE_BUFFER  = BINDING_GRASS_INSTANCE_BUFFER;
@@ -390,6 +456,48 @@ constexpr uint32_t CC_CBT_BUFFER          = BINDING_CC_CBT_BUFFER;
 constexpr uint32_t CC_VERTEX_BUFFER       = BINDING_CC_VERTEX_BUFFER;
 constexpr uint32_t CC_HALFEDGE_BUFFER     = BINDING_CC_HALFEDGE_BUFFER;
 constexpr uint32_t CC_FACE_BUFFER         = BINDING_CC_FACE_BUFFER;
+
+// Water System
+constexpr uint32_t WATER_UBO              = BINDING_WATER_UBO;
+constexpr uint32_t WATER_SHADOW_MAP       = BINDING_WATER_SHADOW_MAP;
+constexpr uint32_t WATER_TERRAIN_HEIGHT   = BINDING_WATER_TERRAIN_HEIGHT;
+constexpr uint32_t WATER_FLOW_MAP         = BINDING_WATER_FLOW_MAP;
+constexpr uint32_t WATER_DISPLACEMENT     = BINDING_WATER_DISPLACEMENT;
+constexpr uint32_t WATER_FOAM_NOISE       = BINDING_WATER_FOAM_NOISE;
+constexpr uint32_t WATER_TEMPORAL_FOAM    = BINDING_WATER_TEMPORAL_FOAM;
+constexpr uint32_t WATER_CAUSTICS         = BINDING_WATER_CAUSTICS;
+constexpr uint32_t WATER_SSR              = BINDING_WATER_SSR;
+constexpr uint32_t WATER_SCENE_DEPTH      = BINDING_WATER_SCENE_DEPTH;
+
+// Water Displacement
+constexpr uint32_t WATER_DISP_OUTPUT      = BINDING_WATER_DISP_OUTPUT;
+constexpr uint32_t WATER_DISP_PREV        = BINDING_WATER_DISP_PREV;
+constexpr uint32_t WATER_DISP_PARTICLES   = BINDING_WATER_DISP_PARTICLES;
+
+// Water Tile Cull
+constexpr uint32_t WATER_CULL_DEPTH       = BINDING_WATER_CULL_DEPTH;
+constexpr uint32_t WATER_CULL_TILES       = BINDING_WATER_CULL_TILES;
+constexpr uint32_t WATER_CULL_COUNTER     = BINDING_WATER_CULL_COUNTER;
+constexpr uint32_t WATER_CULL_INDIRECT    = BINDING_WATER_CULL_INDIRECT;
+
+// Foam Blur
+constexpr uint32_t FOAM_OUTPUT            = BINDING_FOAM_OUTPUT;
+constexpr uint32_t FOAM_INPUT             = BINDING_FOAM_INPUT;
+constexpr uint32_t FOAM_FLOW_MAP          = BINDING_FOAM_FLOW_MAP;
+constexpr uint32_t FOAM_WAKE_DATA         = BINDING_FOAM_WAKE_DATA;
+
+// SSR
+constexpr uint32_t SSR_COLOR              = BINDING_SSR_COLOR;
+constexpr uint32_t SSR_DEPTH              = BINDING_SSR_DEPTH;
+constexpr uint32_t SSR_OUTPUT             = BINDING_SSR_OUTPUT;
+constexpr uint32_t SSR_PREV               = BINDING_SSR_PREV;
+
+// Tree Shader
+constexpr uint32_t TREE_BARK_COLOR        = BINDING_TREE_BARK_COLOR;
+constexpr uint32_t TREE_BARK_NORMAL       = BINDING_TREE_BARK_NORMAL;
+constexpr uint32_t TREE_BARK_AO           = BINDING_TREE_BARK_AO;
+constexpr uint32_t TREE_BARK_ROUGHNESS    = BINDING_TREE_BARK_ROUGHNESS;
+constexpr uint32_t TREE_LEAF              = BINDING_TREE_LEAF;
 
 } // namespace Bindings
 

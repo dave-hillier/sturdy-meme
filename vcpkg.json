@@ -33,6 +33,7 @@
     },
     "fastgltf",
     "openfbx",
-    "lodepng"
+    "lodepng",
+    "nlohmann-json"
   ]
 }

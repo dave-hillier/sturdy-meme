@@ -66,9 +66,56 @@ target_include_directories(biome_preprocess PRIVATE
 )
 
 target_link_libraries(biome_preprocess PRIVATE
+# Foam noise texture generator
+add_executable(foam_noise_gen
+    foam_noise_gen.cpp
+)
+
+target_link_libraries(foam_noise_gen PRIVATE
+    SDL3::SDL3
+    glm::glm
+    lodepng
+)
+
+target_compile_features(foam_noise_gen PRIVATE cxx_std_17)
+
+# Caustics texture generator
+add_executable(caustics_gen
+    caustics_gen.cpp
+)
+
+target_link_libraries(caustics_gen PRIVATE
+    SDL3::SDL3
+    glm::glm
+    lodepng
+)
+
+target_compile_features(caustics_gen PRIVATE cxx_std_17)
+
+# SBSAR file renderer (Substance Archive)
+add_executable(sbsar_render
+    sbsar_render.cpp
+)
+
+target_link_libraries(sbsar_render PRIVATE
+    SDL3::SDL3
+    glm::glm
+    lodepng
+)
+
+target_compile_features(sbsar_render PRIVATE cxx_std_17)
+
+# Cape texture generator
+add_executable(cape_texture_gen
+    cape_texture_gen.cpp
+)
+
+target_link_libraries(cape_texture_gen PRIVATE
     SDL3::SDL3
     glm::glm
     lodepng
 )
 
 target_compile_features(biome_preprocess PRIVATE cxx_std_17)
+
+target_compile_features(cape_texture_gen PRIVATE cxx_std_17)

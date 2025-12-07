@@ -18,30 +18,72 @@ bool WaterSystem::init(const InitInfo& info) {
     commandPool = info.commandPool;
     graphicsQueue = info.graphicsQueue;
     waterSize = info.waterSize;
+    assetPath = info.assetPath;
 
     // Initialize default water parameters
     waterUniforms.waterColor = glm::vec4(0.1f, 0.3f, 0.5f, 0.85f);  // Blue-green, semi-transparent
-    waterUniforms.waveParams = glm::vec4(0.5f, 8.0f, 0.4f, 1.0f);   // amplitude, wavelength, steepness, speed
-    waterUniforms.waveParams2 = glm::vec4(0.3f, 5.0f, 0.3f, 1.2f);  // Secondary wave
+    waterUniforms.waveParams = glm::vec4(0.15f, 4.0f, 0.3f, 0.8f);   // amplitude, wavelength, steepness, speed (calmer)
+    waterUniforms.waveParams2 = glm::vec4(0.08f, 2.5f, 0.25f, 1.0f);  // Secondary wave (smaller)
     waterUniforms.waterExtent = glm::vec4(0.0f, 0.0f, 100.0f, 100.0f);  // position, size
     waterUniforms.waterLevel = 0.0f;
-    waterUniforms.foamThreshold = 0.3f;
+    waterUniforms.foamThreshold = 0.1f;  // Reduced to match smaller wave amplitude
     waterUniforms.fresnelPower = 5.0f;
     waterUniforms.terrainSize = 16384.0f;      // Default terrain size
-    waterUniforms.terrainHeightScale = 220.0f; // Default height scale
+    waterUniforms.terrainHeightScale = 235.0f; // Default height scale (maxAlt - minAlt = 220 - (-15))
     waterUniforms.shoreBlendDistance = 3.0f;   // 3m shore blend
     waterUniforms.shoreFoamWidth = 5.0f;       // 5m shore foam band
-    waterUniforms.padding = 0.0f;
+    waterUniforms.flowStrength = 1.0f;         // 1m UV offset per flow cycle
+    waterUniforms.flowSpeed = 0.5f;            // Flow animation speed
+    waterUniforms.flowFoamStrength = 0.5f;     // Flow-based foam intensity
+    waterUniforms.fbmNearDistance = 50.0f;     // Max detail within 50m
+    waterUniforms.fbmFarDistance = 500.0f;     // Min detail beyond 500m
+
+    // PBR Scattering defaults (Ocean type)
+    // Absorption coefficients based on real ocean water optical properties
+    // Red absorbs fastest, blue slowest
+    waterUniforms.scatteringCoeffs = glm::vec4(0.45f, 0.09f, 0.02f, 0.1f); // absorption RGB + turbidity
+    waterUniforms.specularRoughness = 0.05f;   // Water is quite smooth
+    waterUniforms.absorptionScale = 0.15f;     // Depth-based absorption rate
+    waterUniforms.scatteringScale = 1.0f;      // Turbidity multiplier
+    waterUniforms.displacementScale = 1.0f;   // Interactive displacement scale (Phase 4)
+    waterUniforms.sssIntensity = 1.5f;        // Subsurface scattering intensity (Phase 17)
+    waterUniforms.causticsScale = 0.1f;       // Caustics pattern scale (Phase 9)
+    waterUniforms.causticsSpeed = 0.8f;       // Caustics animation speed (Phase 9)
+    waterUniforms.causticsIntensity = 0.5f;   // Caustics brightness (Phase 9)
+    waterUniforms.nearPlane = 0.1f;           // Default camera near plane
+    waterUniforms.farPlane = 50000.0f;        // Default camera far plane (matches Camera.cpp)
+    waterUniforms.padding1 = 0.0f;
+    waterUniforms.padding2 = 0.0f;
+
+    // Phase 12: Material blending defaults
+    // Secondary material defaults to same as primary (no blending)
+    waterUniforms.waterColor2 = waterUniforms.waterColor;
+    waterUniforms.scatteringCoeffs2 = waterUniforms.scatteringCoeffs;
+    waterUniforms.absorptionScale2 = waterUniforms.absorptionScale;
+    waterUniforms.scatteringScale2 = waterUniforms.scatteringScale;
+    waterUniforms.specularRoughness2 = waterUniforms.specularRoughness;
+    waterUniforms.sssIntensity2 = waterUniforms.sssIntensity;
+    waterUniforms.blendCenter = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
+    waterUniforms.blendDistance = 50.0f;  // Default 50m blend distance
+    waterUniforms.blendMode = 0;          // Distance mode
 
     if (!createDescriptorSetLayout()) return false;
     if (!createPipeline()) return false;
     if (!createWaterMesh()) return false;
     if (!createUniformBuffers()) return false;
+    if (!loadFoamTexture()) return false;
+    if (!loadCausticsTexture()) return false;
 
     return true;
 }
 
 void WaterSystem::destroy(VkDevice device, VmaAllocator allocator) {
+    // Destroy foam texture
+    foamTexture.destroy(allocator, device);
+
+    // Destroy caustics texture
+    causticsTexture.destroy(allocator, device);
+
     // Destroy uniform buffers
     for (size_t i = 0; i < waterUniformBuffers.size(); i++) {
         if (waterUniformBuffers[i] != VK_NULL_HANDLE) {
@@ -77,6 +119,13 @@ bool WaterSystem::createDescriptorSetLayout() {
     // 1: Water uniforms
     // 2: Shadow map array (for shadow sampling)
     // 3: Terrain heightmap (for shore detection)
+    // 4: Flow map (for water flow direction and speed)
+    // 5: Displacement map (for interactive splashes)
+    // 6: Foam noise texture (tileable Worley noise)
+    // 7: Temporal foam buffer (Phase 14: persistent foam)
+    // 8: Caustics texture (Phase 9: animated underwater light patterns)
+    // 9: SSR texture (Phase 10: screen-space reflections)
+    // 10: Scene depth texture (Phase 11: dual depth for refraction)
 
     auto uboBinding = BindingBuilder()
         .setBinding(0)
@@ -102,8 +151,52 @@ bool WaterSystem::createDescriptorSetLayout() {
         .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
         .build();
 
-    std::array<VkDescriptorSetLayoutBinding, 4> bindings = {
-        uboBinding, waterUniformBinding, shadowMapBinding, terrainHeightMapBinding
+    auto flowMapBinding = BindingBuilder()
+        .setBinding(4)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
+        .build();
+
+    auto displacementMapBinding = BindingBuilder()
+        .setBinding(5)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        .setStageFlags(VK_SHADER_STAGE_VERTEX_BIT)
+        .build();
+
+    auto foamTextureBinding = BindingBuilder()
+        .setBinding(6)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
+        .build();
+
+    auto temporalFoamBinding = BindingBuilder()
+        .setBinding(7)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
+        .build();
+
+    auto causticsTextureBinding = BindingBuilder()
+        .setBinding(8)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
+        .build();
+
+    auto ssrTextureBinding = BindingBuilder()
+        .setBinding(9)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
+        .build();
+
+    auto sceneDepthBinding = BindingBuilder()
+        .setBinding(10)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
+        .build();
+
+    std::array<VkDescriptorSetLayoutBinding, 11> bindings = {
+        uboBinding, waterUniformBinding, shadowMapBinding, terrainHeightMapBinding,
+        flowMapBinding, displacementMapBinding, foamTextureBinding, temporalFoamBinding,
+        causticsTextureBinding, ssrTextureBinding, sceneDepthBinding
     };
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
@@ -259,11 +352,59 @@ bool WaterSystem::createUniformBuffers() {
     return true;
 }
 
+bool WaterSystem::loadFoamTexture() {
+    std::string foamPath = assetPath + "/textures/foam_noise.png";
+
+    // Try to load the foam texture, fall back to white if not found
+    if (!foamTexture.load(foamPath, allocator, device, commandPool, graphicsQueue, physicalDevice, false)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Foam texture not found at %s, creating fallback white texture", foamPath.c_str());
+        // Create a 1x1 white texture as fallback
+        if (!foamTexture.createSolidColor(255, 255, 255, 255, allocator, device, commandPool, graphicsQueue)) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create fallback foam texture");
+            return false;
+        }
+    } else {
+        SDL_Log("Loaded foam texture from %s", foamPath.c_str());
+    }
+
+    return true;
+}
+
+bool WaterSystem::loadCausticsTexture() {
+    std::string causticsPath = assetPath + "/textures/caustics.png";
+
+    // Try to load the caustics texture, fall back to white if not found
+    if (!causticsTexture.load(causticsPath, allocator, device, commandPool, graphicsQueue, physicalDevice, false)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Caustics texture not found at %s, creating fallback white texture", causticsPath.c_str());
+        // Create a 1x1 white texture as fallback
+        if (!causticsTexture.createSolidColor(255, 255, 255, 255, allocator, device, commandPool, graphicsQueue)) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create fallback caustics texture");
+            return false;
+        }
+    } else {
+        SDL_Log("Loaded caustics texture from %s", causticsPath.c_str());
+    }
+
+    return true;
+}
+
 bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffers,
                                         VkDeviceSize uniformBufferSize,
                                         ShadowSystem& shadowSystem,
                                         VkImageView terrainHeightMapView,
-                                        VkSampler terrainHeightMapSampler) {
+                                        VkSampler terrainHeightMapSampler,
+                                        VkImageView flowMapView,
+                                        VkSampler flowMapSampler,
+                                        VkImageView displacementMapView,
+                                        VkSampler displacementMapSampler,
+                                        VkImageView temporalFoamView,
+                                        VkSampler temporalFoamSampler,
+                                        VkImageView ssrView,
+                                        VkSampler ssrSampler,
+                                        VkImageView sceneDepthView,
+                                        VkSampler sceneDepthSampler) {
     // Allocate descriptor sets using managed pool
     descriptorSets = descriptorPool->allocate(descriptorSetLayout, framesInFlight);
     if (descriptorSets.size() != framesInFlight) {
@@ -301,7 +442,49 @@ bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffe
         terrainInfo.imageView = terrainHeightMapView;
         terrainInfo.sampler = terrainHeightMapSampler;
 
-        std::array<VkWriteDescriptorSet, 4> descriptorWrites{};
+        // Flow map binding
+        VkDescriptorImageInfo flowInfo{};
+        flowInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        flowInfo.imageView = flowMapView;
+        flowInfo.sampler = flowMapSampler;
+
+        // Displacement map binding (Phase 4: interactive splashes)
+        VkDescriptorImageInfo displacementInfo{};
+        displacementInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        displacementInfo.imageView = displacementMapView;
+        displacementInfo.sampler = displacementMapSampler;
+
+        // Foam noise texture binding
+        VkDescriptorImageInfo foamInfo{};
+        foamInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        foamInfo.imageView = foamTexture.getImageView();
+        foamInfo.sampler = foamTexture.getSampler();
+
+        // Temporal foam buffer binding (Phase 14: persistent foam)
+        VkDescriptorImageInfo temporalFoamInfo{};
+        temporalFoamInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        temporalFoamInfo.imageView = temporalFoamView;
+        temporalFoamInfo.sampler = temporalFoamSampler;
+
+        // Caustics texture binding (Phase 9: underwater light patterns)
+        VkDescriptorImageInfo causticsInfo{};
+        causticsInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        causticsInfo.imageView = causticsTexture.getImageView();
+        causticsInfo.sampler = causticsTexture.getSampler();
+
+        // SSR texture binding (Phase 10: screen-space reflections)
+        VkDescriptorImageInfo ssrInfo{};
+        ssrInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;  // SSR uses general layout for compute
+        ssrInfo.imageView = ssrView;
+        ssrInfo.sampler = ssrSampler;
+
+        // Scene depth binding (Phase 11: dual depth for refraction)
+        VkDescriptorImageInfo sceneDepthInfo{};
+        sceneDepthInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+        sceneDepthInfo.imageView = sceneDepthView;
+        sceneDepthInfo.sampler = sceneDepthSampler;
+
+        std::array<VkWriteDescriptorSet, 11> descriptorWrites{};
 
         descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         descriptorWrites[0].dstSet = descriptorSets[i];
@@ -335,11 +518,67 @@ bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffe
         descriptorWrites[3].descriptorCount = 1;
         descriptorWrites[3].pImageInfo = &terrainInfo;
 
+        descriptorWrites[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[4].dstSet = descriptorSets[i];
+        descriptorWrites[4].dstBinding = 4;
+        descriptorWrites[4].dstArrayElement = 0;
+        descriptorWrites[4].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[4].descriptorCount = 1;
+        descriptorWrites[4].pImageInfo = &flowInfo;
+
+        descriptorWrites[5].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[5].dstSet = descriptorSets[i];
+        descriptorWrites[5].dstBinding = 5;
+        descriptorWrites[5].dstArrayElement = 0;
+        descriptorWrites[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[5].descriptorCount = 1;
+        descriptorWrites[5].pImageInfo = &displacementInfo;
+
+        descriptorWrites[6].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[6].dstSet = descriptorSets[i];
+        descriptorWrites[6].dstBinding = 6;
+        descriptorWrites[6].dstArrayElement = 0;
+        descriptorWrites[6].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[6].descriptorCount = 1;
+        descriptorWrites[6].pImageInfo = &foamInfo;
+
+        descriptorWrites[7].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[7].dstSet = descriptorSets[i];
+        descriptorWrites[7].dstBinding = 7;
+        descriptorWrites[7].dstArrayElement = 0;
+        descriptorWrites[7].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[7].descriptorCount = 1;
+        descriptorWrites[7].pImageInfo = &temporalFoamInfo;
+
+        descriptorWrites[8].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[8].dstSet = descriptorSets[i];
+        descriptorWrites[8].dstBinding = 8;
+        descriptorWrites[8].dstArrayElement = 0;
+        descriptorWrites[8].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[8].descriptorCount = 1;
+        descriptorWrites[8].pImageInfo = &causticsInfo;
+
+        descriptorWrites[9].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[9].dstSet = descriptorSets[i];
+        descriptorWrites[9].dstBinding = 9;
+        descriptorWrites[9].dstArrayElement = 0;
+        descriptorWrites[9].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[9].descriptorCount = 1;
+        descriptorWrites[9].pImageInfo = &ssrInfo;
+
+        descriptorWrites[10].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[10].dstSet = descriptorSets[i];
+        descriptorWrites[10].dstBinding = 10;
+        descriptorWrites[10].dstArrayElement = 0;
+        descriptorWrites[10].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[10].descriptorCount = 1;
+        descriptorWrites[10].pImageInfo = &sceneDepthInfo;
+
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                descriptorWrites.data(), 0, nullptr);
     }
 
-    SDL_Log("Water descriptor sets created with terrain heightmap");
+    SDL_Log("Water descriptor sets created with terrain heightmap, flow map, displacement map, foam texture, temporal foam, caustics, SSR, and scene depth");
     return true;
 }
 
@@ -380,8 +619,217 @@ void WaterSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
     vkCmdDrawIndexed(cmd, waterMesh.getIndexCount(), 1, 0, 0, 0);
 }
 
+void WaterSystem::recordMeshDraw(VkCommandBuffer cmd) {
+    // Draw just the mesh (pipeline and descriptors bound externally)
+    VkBuffer vertexBuffers[] = {waterMesh.getVertexBuffer()};
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
+    vkCmdBindIndexBuffer(cmd, waterMesh.getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+    vkCmdDrawIndexed(cmd, waterMesh.getIndexCount(), 1, 0, 0, 0);
+}
+
 void WaterSystem::updateTide(float tideHeight) {
     // tideHeight is normalized -1 to +1 from CelestialCalculator::calculateTide()
     // Scale by tidalRange and add to base water level
     waterUniforms.waterLevel = baseWaterLevel + (tideHeight * tidalRange);
+}
+
+void WaterSystem::setWaterType(WaterType type) {
+    // Water type presets based on real-world optical properties
+    // Absorption coefficients: how quickly each wavelength is absorbed (higher = faster absorption)
+    // Real water absorbs red fastest, then green, then blue
+    // Turbidity: amount of suspended particles causing scattering
+
+    switch (type) {
+        case WaterType::Ocean:
+            // Deep ocean: very clear, strong blue tint
+            waterUniforms.scatteringCoeffs = glm::vec4(0.45f, 0.09f, 0.02f, 0.05f);
+            waterUniforms.waterColor = glm::vec4(0.01f, 0.03f, 0.08f, 0.95f);
+            waterUniforms.absorptionScale = 0.12f;
+            waterUniforms.scatteringScale = 0.8f;
+            break;
+
+        case WaterType::CoastalOcean:
+            // Coastal waters: more sediment, blue-green
+            waterUniforms.scatteringCoeffs = glm::vec4(0.35f, 0.12f, 0.05f, 0.15f);
+            waterUniforms.waterColor = glm::vec4(0.02f, 0.06f, 0.10f, 0.92f);
+            waterUniforms.absorptionScale = 0.18f;
+            waterUniforms.scatteringScale = 1.2f;
+            break;
+
+        case WaterType::River:
+            // River: green-brown tint, moderate turbidity
+            waterUniforms.scatteringCoeffs = glm::vec4(0.25f, 0.18f, 0.12f, 0.25f);
+            waterUniforms.waterColor = glm::vec4(0.04f, 0.08f, 0.06f, 0.90f);
+            waterUniforms.absorptionScale = 0.25f;
+            waterUniforms.scatteringScale = 1.5f;
+            break;
+
+        case WaterType::MuddyRiver:
+            // Muddy river: brown, high turbidity
+            waterUniforms.scatteringCoeffs = glm::vec4(0.15f, 0.20f, 0.25f, 0.6f);
+            waterUniforms.waterColor = glm::vec4(0.12f, 0.10f, 0.06f, 0.85f);
+            waterUniforms.absorptionScale = 0.4f;
+            waterUniforms.scatteringScale = 2.5f;
+            break;
+
+        case WaterType::ClearStream:
+            // Mountain stream: extremely clear
+            waterUniforms.scatteringCoeffs = glm::vec4(0.50f, 0.08f, 0.01f, 0.02f);
+            waterUniforms.waterColor = glm::vec4(0.01f, 0.04f, 0.08f, 0.98f);
+            waterUniforms.absorptionScale = 0.08f;
+            waterUniforms.scatteringScale = 0.5f;
+            break;
+
+        case WaterType::Lake:
+            // Lake: dark blue-green, moderate clarity
+            waterUniforms.scatteringCoeffs = glm::vec4(0.35f, 0.15f, 0.08f, 0.12f);
+            waterUniforms.waterColor = glm::vec4(0.02f, 0.05f, 0.08f, 0.93f);
+            waterUniforms.absorptionScale = 0.20f;
+            waterUniforms.scatteringScale = 1.0f;
+            break;
+
+        case WaterType::Swamp:
+            // Swamp: dark green-brown, very turbid
+            waterUniforms.scatteringCoeffs = glm::vec4(0.10f, 0.15f, 0.20f, 0.8f);
+            waterUniforms.waterColor = glm::vec4(0.08f, 0.10f, 0.04f, 0.80f);
+            waterUniforms.absorptionScale = 0.5f;
+            waterUniforms.scatteringScale = 3.0f;
+            break;
+
+        case WaterType::Tropical:
+            // Tropical: bright turquoise, very clear
+            waterUniforms.scatteringCoeffs = glm::vec4(0.55f, 0.06f, 0.03f, 0.03f);
+            waterUniforms.waterColor = glm::vec4(0.0f, 0.08f, 0.12f, 0.97f);
+            waterUniforms.absorptionScale = 0.06f;
+            waterUniforms.scatteringScale = 0.4f;
+            break;
+    }
+
+    SDL_Log("Water type set with absorption (%.2f, %.2f, %.2f), turbidity %.2f",
+            waterUniforms.scatteringCoeffs.r, waterUniforms.scatteringCoeffs.g,
+            waterUniforms.scatteringCoeffs.b, waterUniforms.scatteringCoeffs.a);
+}
+
+// Phase 12: Material blending implementation
+
+WaterSystem::WaterMaterial WaterSystem::getMaterialPreset(WaterType type) const {
+    WaterMaterial material{};
+
+    switch (type) {
+        case WaterType::Ocean:
+            material.waterColor = glm::vec4(0.01f, 0.03f, 0.08f, 0.95f);
+            material.scatteringCoeffs = glm::vec4(0.45f, 0.09f, 0.02f, 0.05f);
+            material.absorptionScale = 0.12f;
+            material.scatteringScale = 0.8f;
+            material.specularRoughness = 0.04f;
+            material.sssIntensity = 1.2f;
+            break;
+
+        case WaterType::CoastalOcean:
+            material.waterColor = glm::vec4(0.02f, 0.06f, 0.10f, 0.92f);
+            material.scatteringCoeffs = glm::vec4(0.35f, 0.12f, 0.05f, 0.15f);
+            material.absorptionScale = 0.18f;
+            material.scatteringScale = 1.2f;
+            material.specularRoughness = 0.05f;
+            material.sssIntensity = 1.4f;
+            break;
+
+        case WaterType::River:
+            material.waterColor = glm::vec4(0.04f, 0.08f, 0.06f, 0.90f);
+            material.scatteringCoeffs = glm::vec4(0.25f, 0.18f, 0.12f, 0.25f);
+            material.absorptionScale = 0.25f;
+            material.scatteringScale = 1.5f;
+            material.specularRoughness = 0.06f;
+            material.sssIntensity = 1.0f;
+            break;
+
+        case WaterType::MuddyRiver:
+            material.waterColor = glm::vec4(0.12f, 0.10f, 0.06f, 0.85f);
+            material.scatteringCoeffs = glm::vec4(0.15f, 0.20f, 0.25f, 0.6f);
+            material.absorptionScale = 0.4f;
+            material.scatteringScale = 2.5f;
+            material.specularRoughness = 0.08f;
+            material.sssIntensity = 0.5f;
+            break;
+
+        case WaterType::ClearStream:
+            material.waterColor = glm::vec4(0.01f, 0.04f, 0.08f, 0.98f);
+            material.scatteringCoeffs = glm::vec4(0.50f, 0.08f, 0.01f, 0.02f);
+            material.absorptionScale = 0.08f;
+            material.scatteringScale = 0.5f;
+            material.specularRoughness = 0.03f;
+            material.sssIntensity = 2.0f;
+            break;
+
+        case WaterType::Lake:
+            material.waterColor = glm::vec4(0.02f, 0.05f, 0.08f, 0.93f);
+            material.scatteringCoeffs = glm::vec4(0.35f, 0.15f, 0.08f, 0.12f);
+            material.absorptionScale = 0.20f;
+            material.scatteringScale = 1.0f;
+            material.specularRoughness = 0.04f;
+            material.sssIntensity = 1.3f;
+            break;
+
+        case WaterType::Swamp:
+            material.waterColor = glm::vec4(0.08f, 0.10f, 0.04f, 0.80f);
+            material.scatteringCoeffs = glm::vec4(0.10f, 0.15f, 0.20f, 0.8f);
+            material.absorptionScale = 0.5f;
+            material.scatteringScale = 3.0f;
+            material.specularRoughness = 0.10f;
+            material.sssIntensity = 0.3f;
+            break;
+
+        case WaterType::Tropical:
+            material.waterColor = glm::vec4(0.0f, 0.08f, 0.12f, 0.97f);
+            material.scatteringCoeffs = glm::vec4(0.55f, 0.06f, 0.03f, 0.03f);
+            material.absorptionScale = 0.06f;
+            material.scatteringScale = 0.4f;
+            material.specularRoughness = 0.03f;
+            material.sssIntensity = 2.5f;
+            break;
+    }
+
+    return material;
+}
+
+void WaterSystem::setPrimaryMaterial(const WaterMaterial& material) {
+    waterUniforms.waterColor = material.waterColor;
+    waterUniforms.scatteringCoeffs = material.scatteringCoeffs;
+    waterUniforms.absorptionScale = material.absorptionScale;
+    waterUniforms.scatteringScale = material.scatteringScale;
+    waterUniforms.specularRoughness = material.specularRoughness;
+    waterUniforms.sssIntensity = material.sssIntensity;
+}
+
+void WaterSystem::setSecondaryMaterial(const WaterMaterial& material) {
+    waterUniforms.waterColor2 = material.waterColor;
+    waterUniforms.scatteringCoeffs2 = material.scatteringCoeffs;
+    waterUniforms.absorptionScale2 = material.absorptionScale;
+    waterUniforms.scatteringScale2 = material.scatteringScale;
+    waterUniforms.specularRoughness2 = material.specularRoughness;
+    waterUniforms.sssIntensity2 = material.sssIntensity;
+}
+
+void WaterSystem::setPrimaryMaterial(WaterType type) {
+    setPrimaryMaterial(getMaterialPreset(type));
+    SDL_Log("Primary water material set to type %d", static_cast<int>(type));
+}
+
+void WaterSystem::setSecondaryMaterial(WaterType type) {
+    setSecondaryMaterial(getMaterialPreset(type));
+    SDL_Log("Secondary water material set to type %d", static_cast<int>(type));
+}
+
+void WaterSystem::setupMaterialTransition(WaterType from, WaterType to, const glm::vec2& center,
+                                           float distance, BlendMode mode) {
+    setPrimaryMaterial(from);
+    setSecondaryMaterial(to);
+    setBlendCenter(center);
+    setBlendDistance(distance);
+    setBlendMode(mode);
+
+    SDL_Log("Material transition set up: type %d -> %d at (%.1f, %.1f), distance %.1fm, mode %d",
+            static_cast<int>(from), static_cast<int>(to),
+            center.x, center.y, distance, static_cast<int>(mode));
 }

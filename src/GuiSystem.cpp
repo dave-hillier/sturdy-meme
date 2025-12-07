@@ -2,6 +2,8 @@
 #include "Renderer.h"
 #include "Camera.h"
 #include "AtmosphereLUTSystem.h"
+#include "AnimatedCharacter.h"
+#include "PlayerCape.h"
 
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
@@ -263,6 +265,14 @@ void GuiSystem::render(Renderer& renderer, const Camera& camera, float deltaTime
                 renderWaterSection(renderer);
                 ImGui::EndTabItem();
             }
+            if (ImGui::BeginTabItem("Player")) {
+                renderPlayerSection(renderer);
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("IK")) {
+                renderIKSection(renderer, camera);
+                ImGui::EndTabItem();
+            }
             if (ImGui::BeginTabItem("Debug")) {
                 renderDebugSection(renderer);
                 ImGui::EndTabItem();
@@ -283,6 +293,11 @@ void GuiSystem::render(Renderer& renderer, const Camera& camera, float deltaTime
 
     // Position panel (separate window)
     renderPositionPanel(camera);
+
+    // Skeleton/IK debug overlay
+    if (ikDebugSettings.showSkeleton || ikDebugSettings.showIKTargets) {
+        renderSkeletonOverlay(renderer, camera);
+    }
 
     // Tree editor as separate window
     treeEditorGui.render(renderer, camera);
@@ -489,6 +504,131 @@ void GuiSystem::renderTimeSection(Renderer& renderer) {
     ImGui::SameLine();
     if (ImGui::Button("Equator")) {
         renderer.setLocation({0.0f, 0.0f});
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Moon Phase Controls
+    ImGui::Text("Moon Phase:");
+
+    // Display current moon phase
+    float currentPhase = renderer.getCurrentMoonPhase();
+    const char* phaseNames[] = { "New Moon", "Waxing Crescent", "First Quarter", "Waxing Gibbous",
+                                 "Full Moon", "Waning Gibbous", "Last Quarter", "Waning Crescent" };
+    int phaseIndex = static_cast<int>(currentPhase * 8.0f) % 8;
+    ImGui::Text("Current: %s (%.2f)", phaseNames[phaseIndex], currentPhase);
+
+    // Override checkbox
+    bool overrideEnabled = renderer.isMoonPhaseOverrideEnabled();
+    if (ImGui::Checkbox("Override Moon Phase", &overrideEnabled)) {
+        renderer.setMoonPhaseOverride(overrideEnabled);
+    }
+
+    // Manual phase slider (only active when override is enabled)
+    if (overrideEnabled) {
+        float manualPhase = renderer.getMoonPhase();
+        if (ImGui::SliderFloat("Moon Phase", &manualPhase, 0.0f, 1.0f, "%.3f")) {
+            renderer.setMoonPhase(manualPhase);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("0.0 = New Moon, 0.25 = First Quarter, 0.5 = Full Moon, 0.75 = Last Quarter");
+        }
+
+        // Quick phase buttons
+        ImGui::Text("Presets:");
+        ImGui::SameLine();
+        if (ImGui::Button("New")) renderer.setMoonPhase(0.0f);
+        ImGui::SameLine();
+        if (ImGui::Button("1st Q")) renderer.setMoonPhase(0.25f);
+        ImGui::SameLine();
+        if (ImGui::Button("Full")) renderer.setMoonPhase(0.5f);
+        ImGui::SameLine();
+        if (ImGui::Button("3rd Q")) renderer.setMoonPhase(0.75f);
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Moon Brightness Controls
+    ImGui::Text("Moon Brightness:");
+
+    float moonBrightness = renderer.getMoonBrightness();
+    if (ImGui::SliderFloat("Light Intensity", &moonBrightness, 0.0f, 5.0f, "%.2f")) {
+        renderer.setMoonBrightness(moonBrightness);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Multiplier for moonlight intensity on terrain (0-5, default 1.0)");
+    }
+
+    float moonDiscIntensity = renderer.getMoonDiscIntensity();
+    if (ImGui::SliderFloat("Disc Intensity", &moonDiscIntensity, 0.0f, 50.0f, "%.1f")) {
+        renderer.setMoonDiscIntensity(moonDiscIntensity);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Visual brightness of moon disc in sky (0-50, default 20)");
+    }
+
+    float moonEarthshine = renderer.getMoonEarthshine();
+    if (ImGui::SliderFloat("Earthshine", &moonEarthshine, 0.0f, 0.2f, "%.3f")) {
+        renderer.setMoonEarthshine(moonEarthshine);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Visibility of dark side during crescent phases (0-0.2, default 0.02)");
+    }
+
+    // Brightness presets
+    ImGui::Text("Presets:");
+    ImGui::SameLine();
+    if (ImGui::Button("Dim")) {
+        renderer.setMoonBrightness(0.5f);
+        renderer.setMoonDiscIntensity(10.0f);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Normal")) {
+        renderer.setMoonBrightness(1.0f);
+        renderer.setMoonDiscIntensity(20.0f);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Bright")) {
+        renderer.setMoonBrightness(2.0f);
+        renderer.setMoonDiscIntensity(35.0f);
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Eclipse Controls
+    ImGui::Text("Solar Eclipse:");
+
+    bool eclipseEnabled = renderer.isEclipseEnabled();
+    if (ImGui::Checkbox("Enable Eclipse", &eclipseEnabled)) {
+        renderer.setEclipseEnabled(eclipseEnabled);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Simulates a solar eclipse with the moon passing in front of the sun");
+    }
+
+    if (eclipseEnabled) {
+        float eclipseAmount = renderer.getEclipseAmount();
+        if (ImGui::SliderFloat("Eclipse Amount", &eclipseAmount, 0.0f, 1.0f, "%.3f")) {
+            renderer.setEclipseAmount(eclipseAmount);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("0.0 = No eclipse, 1.0 = Total eclipse");
+        }
+
+        // Eclipse presets
+        ImGui::Text("Presets:");
+        ImGui::SameLine();
+        if (ImGui::Button("Partial")) renderer.setEclipseAmount(0.5f);
+        ImGui::SameLine();
+        if (ImGui::Button("Annular")) renderer.setEclipseAmount(0.85f);
+        ImGui::SameLine();
+        if (ImGui::Button("Total")) renderer.setEclipseAmount(1.0f);
     }
 }
 
@@ -924,6 +1064,46 @@ void GuiSystem::renderEnvironmentSection(Renderer& renderer) {
         ImGui::SetTooltip("Toggle between procedural and paraboloid LUT hybrid cloud rendering");
     }
 
+    // Cloud coverage and density controls
+    float cloudCoverage = renderer.getCloudCoverage();
+    if (ImGui::SliderFloat("Cloud Coverage", &cloudCoverage, 0.0f, 1.0f, "%.2f")) {
+        renderer.setCloudCoverage(cloudCoverage);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("0 = clear sky, 0.5 = partly cloudy, 1 = overcast");
+    }
+
+    float cloudDensity = renderer.getCloudDensity();
+    if (ImGui::SliderFloat("Cloud Density", &cloudDensity, 0.0f, 1.0f, "%.2f")) {
+        renderer.setCloudDensity(cloudDensity);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("0 = thin/wispy, 0.3 = normal, 1 = thick/opaque");
+    }
+
+    // Cloud presets
+    ImGui::Text("Presets:");
+    ImGui::SameLine();
+    if (ImGui::Button("Clear##clouds")) {
+        renderer.setCloudCoverage(0.0f);
+        renderer.setCloudDensity(0.3f);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Partly##clouds")) {
+        renderer.setCloudCoverage(0.4f);
+        renderer.setCloudDensity(0.3f);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Cloudy##clouds")) {
+        renderer.setCloudCoverage(0.7f);
+        renderer.setCloudDensity(0.5f);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Overcast##clouds")) {
+        renderer.setCloudCoverage(0.95f);
+        renderer.setCloudDensity(0.7f);
+    }
+
     ImGui::Spacing();
     ImGui::Separator();
     ImGui::Spacing();
@@ -1344,6 +1524,30 @@ void GuiSystem::renderWaterSection(Renderer& renderer) {
         water.setWaveSteepness(0.3f);
         water.setWaveSpeed(0.6f);
     }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Performance optimization controls
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.9f, 0.7f, 0.5f, 1.0f));
+    ImGui::Text("PERFORMANCE");
+    ImGui::PopStyleColor();
+
+    auto& tileCull = renderer.getWaterTileCull();
+    bool tileCullEnabled = tileCull.isEnabled();
+    if (ImGui::Checkbox("Tile Culling", &tileCullEnabled)) {
+        tileCull.setEnabled(tileCullEnabled);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Skip water rendering when not visible (temporal)");
+    }
+
+    // Show tile cull stats when enabled
+    if (tileCullEnabled) {
+        glm::uvec2 tileCount = tileCull.getTileCount();
+        ImGui::Text("Tiles: %ux%u (%u px)", tileCount.x, tileCount.y, tileCull.getTileSize());
+    }
 }
 
 void GuiSystem::renderDebugSection(Renderer& renderer) {
@@ -1756,4 +1960,435 @@ void GuiSystem::renderPositionPanel(const Camera& camera) {
         ImGui::Text("Bearing: %.0f", bearing);
     }
     ImGui::End();
+}
+
+void GuiSystem::renderIKSection(Renderer& renderer, const Camera& camera) {
+    ImGui::Spacing();
+
+    // Check if character is loaded
+    auto& sceneBuilder = renderer.getSceneBuilder();
+    if (!sceneBuilder.hasCharacter()) {
+        ImGui::TextDisabled("No animated character loaded");
+        return;
+    }
+
+    auto& character = sceneBuilder.getAnimatedCharacter();
+    auto& ikSystem = character.getIKSystem();
+
+    // Debug Visualization section
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.9f, 0.5f, 1.0f));
+    ImGui::Text("DEBUG VISUALIZATION");
+    ImGui::PopStyleColor();
+
+    ImGui::Checkbox("Show Skeleton", &ikDebugSettings.showSkeleton);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Draw wireframe skeleton bones");
+    }
+
+    ImGui::Checkbox("Show IK Targets", &ikDebugSettings.showIKTargets);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Draw IK target positions and pole vectors");
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Look-At IK section
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.8f, 1.0f, 1.0f));
+    ImGui::Text("LOOK-AT IK");
+    ImGui::PopStyleColor();
+
+    if (ImGui::Checkbox("Enable Look-At", &ikDebugSettings.lookAtEnabled)) {
+        ikSystem.setLookAtEnabled(ikDebugSettings.lookAtEnabled);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Character head/neck tracks a target");
+    }
+
+    if (ikDebugSettings.lookAtEnabled) {
+        ImGui::Indent();
+
+        const char* modeNames[] = { "Fixed Point", "Camera Position", "Mouse (Screen)" };
+        int currentMode = static_cast<int>(ikDebugSettings.lookAtMode);
+        if (ImGui::Combo("Target Mode", &currentMode, modeNames, 3)) {
+            ikDebugSettings.lookAtMode = static_cast<IKDebugSettings::LookAtMode>(currentMode);
+        }
+
+        if (ikDebugSettings.lookAtMode == IKDebugSettings::LookAtMode::Fixed) {
+            ImGui::DragFloat3("Target Position", &ikDebugSettings.fixedLookAtTarget.x, 0.1f);
+        }
+
+        // Update look-at target based on mode
+        glm::vec3 lookTarget;
+        switch (ikDebugSettings.lookAtMode) {
+            case IKDebugSettings::LookAtMode::Fixed:
+                lookTarget = ikDebugSettings.fixedLookAtTarget;
+                break;
+            case IKDebugSettings::LookAtMode::Camera:
+                lookTarget = camera.getPosition();
+                break;
+            case IKDebugSettings::LookAtMode::Mouse:
+                // Project mouse into world (simplified - uses camera front direction)
+                lookTarget = camera.getPosition() + camera.getFront() * 5.0f;
+                break;
+        }
+        ikSystem.setLookAtTarget(lookTarget);
+
+        float lookAtWeight = 1.0f;
+        if (ImGui::SliderFloat("Weight", &lookAtWeight, 0.0f, 1.0f)) {
+            ikSystem.setLookAtWeight(lookAtWeight);
+        }
+
+        ImGui::Unindent();
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Foot Placement IK section
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.8f, 0.5f, 1.0f));
+    ImGui::Text("FOOT PLACEMENT IK");
+    ImGui::PopStyleColor();
+
+    if (ImGui::Checkbox("Enable Foot Placement", &ikDebugSettings.footPlacementEnabled)) {
+        // Enable/disable both feet
+        ikSystem.setFootPlacementEnabled("LeftFoot", ikDebugSettings.footPlacementEnabled);
+        ikSystem.setFootPlacementEnabled("RightFoot", ikDebugSettings.footPlacementEnabled);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Feet adapt to terrain height");
+    }
+
+    if (ikDebugSettings.footPlacementEnabled) {
+        ImGui::Indent();
+
+        if (ImGui::SliderFloat("Ground Offset", &ikDebugSettings.groundOffset, -0.2f, 0.2f)) {
+            // Ground offset adjustment
+        }
+
+        // Show foot placement debug info
+        ImGui::TextDisabled("Left Foot: Active");
+        ImGui::TextDisabled("Right Foot: Active");
+
+        ImGui::Unindent();
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Straddle IK section
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.6f, 0.8f, 1.0f));
+    ImGui::Text("STRADDLE IK");
+    ImGui::PopStyleColor();
+
+    if (ImGui::Checkbox("Enable Straddling", &ikDebugSettings.straddleEnabled)) {
+        ikSystem.setStraddleEnabled(ikDebugSettings.straddleEnabled);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Hip tilt when feet at different heights");
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // IK Chain Info
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.7f, 0.7f, 0.7f, 1.0f));
+    ImGui::Text("IK CHAINS");
+    ImGui::PopStyleColor();
+
+    // Show configured chains
+    const auto& skeleton = character.getSkeleton();
+    ImGui::Text("Skeleton Bones: %zu", skeleton.joints.size());
+
+    // Two-bone chains
+    if (auto* chain = ikSystem.getChain("LeftArm")) {
+        ImGui::BulletText("Left Arm: %s", chain->enabled ? "Enabled" : "Disabled");
+    }
+    if (auto* chain = ikSystem.getChain("RightArm")) {
+        ImGui::BulletText("Right Arm: %s", chain->enabled ? "Enabled" : "Disabled");
+    }
+    if (auto* chain = ikSystem.getChain("LeftLeg")) {
+        ImGui::BulletText("Left Leg: %s", chain->enabled ? "Enabled" : "Disabled");
+    }
+    if (auto* chain = ikSystem.getChain("RightLeg")) {
+        ImGui::BulletText("Right Leg: %s", chain->enabled ? "Enabled" : "Disabled");
+    }
+}
+
+void GuiSystem::renderSkeletonOverlay(Renderer& renderer, const Camera& camera) {
+    auto& sceneBuilder = renderer.getSceneBuilder();
+    if (!sceneBuilder.hasCharacter()) {
+        return;
+    }
+
+    auto& character = sceneBuilder.getAnimatedCharacter();
+
+    // Get the character's world transform from the scene object
+    const auto& sceneObjects = sceneBuilder.getRenderables();
+    size_t playerIndex = sceneBuilder.getPlayerObjectIndex();
+    if (playerIndex >= sceneObjects.size()) {
+        return;
+    }
+
+    glm::mat4 worldTransform = sceneObjects[playerIndex].transform;
+
+    // Get viewport size
+    float width = static_cast<float>(renderer.getWidth());
+    float height = static_cast<float>(renderer.getHeight());
+
+    // Get view-projection matrix
+    glm::mat4 viewProj = camera.getProjectionMatrix() * camera.getViewMatrix();
+
+    // Helper to project world position to screen
+    auto worldToScreen = [&](const glm::vec3& worldPos) -> ImVec2 {
+        glm::vec4 clipPos = viewProj * glm::vec4(worldPos, 1.0f);
+        if (clipPos.w <= 0.0f) {
+            return ImVec2(-1000, -1000);  // Behind camera
+        }
+        glm::vec3 ndc = glm::vec3(clipPos) / clipPos.w;
+        float screenX = (ndc.x * 0.5f + 0.5f) * width;
+        // Vulkan projection already flips Y (proj[1][1] *= -1), so NDC Y is already
+        // in screen orientation (negative = up, positive = down). Just map to pixels.
+        float screenY = (ndc.y * 0.5f + 0.5f) * height;
+        return ImVec2(screenX, screenY);
+    };
+
+    // Get the background draw list (renders behind everything)
+    ImDrawList* drawList = ImGui::GetBackgroundDrawList();
+
+    // Draw skeleton if enabled
+    if (ikDebugSettings.showSkeleton) {
+        SkeletonDebugData skelData = character.getSkeletonDebugData(worldTransform);
+
+        // Draw bones as lines
+        for (const auto& bone : skelData.bones) {
+            if (bone.parentIndex < 0) continue;  // Skip root
+
+            ImVec2 startScreen = worldToScreen(bone.startPos);
+            ImVec2 endScreen = worldToScreen(bone.endPos);
+
+            // Skip if behind camera
+            if (startScreen.x < -500 || endScreen.x < -500) continue;
+
+            // Bone color - cyan for normal, yellow for end effectors
+            ImU32 boneColor = bone.isEndEffector ?
+                IM_COL32(255, 255, 100, 200) :
+                IM_COL32(100, 255, 255, 200);
+
+            drawList->AddLine(startScreen, endScreen, boneColor, 2.0f);
+        }
+
+        // Draw joint positions as circles
+        for (const auto& pos : skelData.jointPositions) {
+            ImVec2 screenPos = worldToScreen(pos);
+            if (screenPos.x < -500) continue;
+
+            drawList->AddCircleFilled(screenPos, 4.0f, IM_COL32(255, 100, 100, 255));
+        }
+    }
+
+    // Draw IK targets if enabled
+    if (ikDebugSettings.showIKTargets) {
+        IKDebugData ikData = character.getIKDebugData();
+
+        // Transform IK positions to world space and draw
+        for (const auto& chain : ikData.chains) {
+            if (!chain.active) continue;
+
+            // Chain positions are already in skeleton local space
+            glm::vec4 targetWorld = worldTransform * glm::vec4(chain.targetPos, 1.0f);
+            glm::vec4 poleWorld = worldTransform * glm::vec4(chain.polePos, 1.0f);
+            glm::vec4 endWorld = worldTransform * glm::vec4(chain.endPos, 1.0f);
+
+            ImVec2 targetScreen = worldToScreen(glm::vec3(targetWorld));
+            ImVec2 poleScreen = worldToScreen(glm::vec3(poleWorld));
+            ImVec2 endScreen = worldToScreen(glm::vec3(endWorld));
+
+            // Draw target as green cross
+            if (targetScreen.x > -500) {
+                drawList->AddLine(
+                    ImVec2(targetScreen.x - 8, targetScreen.y),
+                    ImVec2(targetScreen.x + 8, targetScreen.y),
+                    IM_COL32(100, 255, 100, 255), 2.0f);
+                drawList->AddLine(
+                    ImVec2(targetScreen.x, targetScreen.y - 8),
+                    ImVec2(targetScreen.x, targetScreen.y + 8),
+                    IM_COL32(100, 255, 100, 255), 2.0f);
+            }
+
+            // Draw pole vector as blue diamond
+            if (poleScreen.x > -500) {
+                drawList->AddQuadFilled(
+                    ImVec2(poleScreen.x, poleScreen.y - 6),
+                    ImVec2(poleScreen.x + 6, poleScreen.y),
+                    ImVec2(poleScreen.x, poleScreen.y + 6),
+                    ImVec2(poleScreen.x - 6, poleScreen.y),
+                    IM_COL32(100, 100, 255, 200));
+            }
+
+            // Draw line from end effector to target
+            if (targetScreen.x > -500 && endScreen.x > -500) {
+                drawList->AddLine(endScreen, targetScreen, IM_COL32(255, 255, 100, 150), 1.0f);
+            }
+        }
+
+        // Draw look-at targets
+        for (const auto& lookAt : ikData.lookAtTargets) {
+            if (!lookAt.active) continue;
+
+            glm::vec4 targetWorld = worldTransform * glm::vec4(lookAt.targetPos, 1.0f);
+            glm::vec4 headWorld = worldTransform * glm::vec4(lookAt.headPos, 1.0f);
+
+            ImVec2 targetScreen = worldToScreen(glm::vec3(targetWorld));
+            ImVec2 headScreen = worldToScreen(glm::vec3(headWorld));
+
+            // Draw target as magenta circle
+            if (targetScreen.x > -500) {
+                drawList->AddCircle(targetScreen, 10.0f, IM_COL32(255, 100, 255, 255), 12, 2.0f);
+            }
+
+            // Draw line from head to target
+            if (targetScreen.x > -500 && headScreen.x > -500) {
+                drawList->AddLine(headScreen, targetScreen, IM_COL32(255, 100, 255, 150), 1.0f);
+            }
+        }
+
+        // Draw foot placement targets
+        for (const auto& foot : ikData.footPlacements) {
+            if (!foot.active) continue;
+
+            glm::vec4 groundWorld = worldTransform * glm::vec4(foot.groundPos, 1.0f);
+            glm::vec4 footWorld = worldTransform * glm::vec4(foot.footPos, 1.0f);
+
+            ImVec2 groundScreen = worldToScreen(glm::vec3(groundWorld));
+            ImVec2 footScreen = worldToScreen(glm::vec3(footWorld));
+
+            // Draw ground target as orange square
+            if (groundScreen.x > -500) {
+                drawList->AddRectFilled(
+                    ImVec2(groundScreen.x - 5, groundScreen.y - 5),
+                    ImVec2(groundScreen.x + 5, groundScreen.y + 5),
+                    IM_COL32(255, 150, 50, 200));
+            }
+
+            // Draw line from foot to ground target
+            if (groundScreen.x > -500 && footScreen.x > -500) {
+                drawList->AddLine(footScreen, groundScreen, IM_COL32(255, 150, 50, 150), 1.0f);
+            }
+        }
+    }
+
+    // Draw cape colliders if enabled
+    if (playerSettings.showCapeColliders) {
+        auto& cape = sceneBuilder.getPlayerCape();
+        if (cape.isInitialized()) {
+            CapeDebugData capeData = cape.getDebugData();
+
+            // Draw sphere colliders (orange circles)
+            for (const auto& sphere : capeData.spheres) {
+                ImVec2 centerScreen = worldToScreen(sphere.center);
+                if (centerScreen.x < -500) continue;
+
+                // Approximate screen radius based on depth
+                glm::vec4 clipCenter = viewProj * glm::vec4(sphere.center, 1.0f);
+                glm::vec4 clipEdge = viewProj * glm::vec4(sphere.center + glm::vec3(sphere.radius, 0, 0), 1.0f);
+                float screenRadius = 20.0f;  // Default size
+                if (clipCenter.w > 0.1f && clipEdge.w > 0.1f) {
+                    float ndcRadius = std::abs((clipEdge.x / clipEdge.w) - (clipCenter.x / clipCenter.w));
+                    screenRadius = ndcRadius * 0.5f * width;
+                    screenRadius = glm::clamp(screenRadius, 5.0f, 100.0f);
+                }
+
+                drawList->AddCircle(centerScreen, screenRadius, IM_COL32(255, 150, 50, 200), 16, 2.0f);
+            }
+
+            // Draw capsule colliders (green lines with circles at ends)
+            for (const auto& capsule : capeData.capsules) {
+                ImVec2 p1Screen = worldToScreen(capsule.point1);
+                ImVec2 p2Screen = worldToScreen(capsule.point2);
+
+                if (p1Screen.x < -500 && p2Screen.x < -500) continue;
+
+                // Approximate screen radius for capsule ends
+                glm::vec4 clipP1 = viewProj * glm::vec4(capsule.point1, 1.0f);
+                float screenRadius = 15.0f;
+                if (clipP1.w > 0.1f) {
+                    glm::vec4 clipEdge = viewProj * glm::vec4(capsule.point1 + glm::vec3(capsule.radius, 0, 0), 1.0f);
+                    if (clipEdge.w > 0.1f) {
+                        float ndcRadius = std::abs((clipEdge.x / clipEdge.w) - (clipP1.x / clipP1.w));
+                        screenRadius = ndcRadius * 0.5f * width;
+                        screenRadius = glm::clamp(screenRadius, 4.0f, 60.0f);
+                    }
+                }
+
+                // Draw capsule axis line
+                if (p1Screen.x > -500 && p2Screen.x > -500) {
+                    drawList->AddLine(p1Screen, p2Screen, IM_COL32(100, 255, 100, 200), 3.0f);
+                }
+
+                // Draw circles at capsule ends
+                if (p1Screen.x > -500) {
+                    drawList->AddCircle(p1Screen, screenRadius, IM_COL32(100, 255, 100, 200), 12, 2.0f);
+                }
+                if (p2Screen.x > -500) {
+                    drawList->AddCircle(p2Screen, screenRadius, IM_COL32(100, 255, 100, 200), 12, 2.0f);
+                }
+            }
+
+            // Draw attachment points (cyan diamonds)
+            for (const auto& attachPos : capeData.attachmentPoints) {
+                ImVec2 screenPos = worldToScreen(attachPos);
+                if (screenPos.x < -500) continue;
+
+                drawList->AddQuadFilled(
+                    ImVec2(screenPos.x, screenPos.y - 8),
+                    ImVec2(screenPos.x + 8, screenPos.y),
+                    ImVec2(screenPos.x, screenPos.y + 8),
+                    ImVec2(screenPos.x - 8, screenPos.y),
+                    IM_COL32(100, 255, 255, 220));
+            }
+        }
+    }
+}
+
+void GuiSystem::renderPlayerSection(Renderer& renderer) {
+    ImGui::Spacing();
+
+    auto& sceneBuilder = renderer.getSceneBuilder();
+    if (!sceneBuilder.hasCharacter()) {
+        ImGui::TextDisabled("No animated character loaded");
+        return;
+    }
+
+    // Cape section
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.9f, 0.5f, 0.5f, 1.0f));
+    ImGui::Text("CAPE");
+    ImGui::PopStyleColor();
+
+    ImGui::Checkbox("Enable Cape", &playerSettings.capeEnabled);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Toggle cape visibility and simulation");
+    }
+
+    ImGui::Checkbox("Show Cape Colliders", &playerSettings.showCapeColliders);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Visualize body colliders used for cape collision");
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Cape info
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.7f, 0.7f, 0.7f, 1.0f));
+    ImGui::Text("CAPE INFO");
+    ImGui::PopStyleColor();
+
+    ImGui::BulletText("Cloth simulation: Verlet integration");
+    ImGui::BulletText("Body colliders: Spheres + Capsules");
+    ImGui::BulletText("Attachments: Shoulders + Upper back");
 }

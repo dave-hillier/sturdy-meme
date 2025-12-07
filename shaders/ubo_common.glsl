@@ -17,7 +17,7 @@
 #define UBO_BINDING BINDING_UBO
 #endif
 
-layout(binding = UBO_BINDING) uniform UniformBufferObject {
+layout(set = 0, binding = UBO_BINDING) uniform UniformBufferObject {
     mat4 model;
     mat4 view;
     mat4 proj;
@@ -26,7 +26,7 @@ layout(binding = UBO_BINDING) uniform UniformBufferObject {
     vec4 sunDirection;
     vec4 moonDirection;
     vec4 sunColor;
-    vec4 moonColor;                       // rgb = moon color
+    vec4 moonColor;                       // rgb = moon color, a = moon phase (0-1)
     vec4 ambientColor;
     vec4 cameraPosition;
     vec4 pointLightPosition;  // xyz = position, w = intensity
@@ -37,9 +37,9 @@ layout(binding = UBO_BINDING) uniform UniformBufferObject {
     float debugCascades;       // 1.0 = show cascade colors
     float julianDay;           // Julian day for sidereal rotation
     float cloudStyle;
-    float uboPad1;             // Padding - was vec3 but vec3 causes std140 alignment mismatch
-    float uboPad2;
-    float uboPad3;
+    float cameraNear;          // Camera near plane for linearizing depth
+    float cameraFar;           // Camera far plane for linearizing depth
+    float eclipseAmount;       // Eclipse amount (0 = none, 1 = total solar eclipse)
 
     // Atmosphere parameters (from UI controls) - used by atmosphere_common.glsl
     vec4 atmosRayleighScattering;  // xyz = rayleigh scattering base, w = scale height
@@ -51,6 +51,17 @@ layout(binding = UBO_BINDING) uniform UniformBufferObject {
     // Height fog parameters (from UI controls) - used by applyHeightFog/applyAerialPerspective
     vec4 heightFogParams;          // x = baseHeight, y = scaleHeight, z = density, w = unused
     vec4 heightFogLayerParams;     // x = layerThickness, y = layerDensity, z = unused, w = unused
+
+    // Cloud parameters (from UI controls) - used by sky.frag and cloud systems
+    float cloudCoverage;           // 0-1 cloud coverage amount
+    float cloudDensity;            // Base density multiplier
+    float cloudPad1, cloudPad2;    // Padding for alignment
+
+    // Moon rendering parameters (from UI controls) - used by sky.frag
+    float moonBrightness;          // Multiplier for moon light intensity (0-5, default 1.0)
+    float moonDiscIntensity;       // Visual disc intensity in sky (0-50, default 20)
+    float moonEarthshine;          // Earthshine on dark side (0-0.2, default 0.02)
+    float moonPad;                 // Padding for alignment
 } ubo;
 
 #endif // UBO_COMMON_GLSL

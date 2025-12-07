@@ -23,6 +23,12 @@ layout(binding = BINDING_SPOT_SHADOW_MAP) uniform sampler2DArrayShadow spotShado
 layout(binding = BINDING_SNOW_MASK) uniform sampler2D snowMaskTexture;               // World-space snow coverage
 layout(binding = BINDING_CLOUD_SHADOW_MAP) uniform sampler2D cloudShadowMap;                // Cloud shadow map (R16F)
 
+// Optional PBR texture maps (for Substance/PBR materials)
+layout(binding = BINDING_ROUGHNESS_MAP) uniform sampler2D roughnessMap;
+layout(binding = BINDING_METALLIC_MAP) uniform sampler2D metallicMap;
+layout(binding = BINDING_AO_MAP) uniform sampler2D aoMap;
+layout(binding = BINDING_HEIGHT_MAP) uniform sampler2D heightMap;
+
 // GPU light structure (must match CPU GPULight struct)
 struct GPULight {
     vec4 positionAndType;    // xyz = position, w = type (0=point, 1=spot)
@@ -147,7 +153,8 @@ float sampleDynamicShadow(GPULight light, vec3 worldPos) {
 }
 
 // Calculate PBR lighting for a single light
-vec3 calculatePBR(vec3 N, vec3 V, vec3 L, vec3 lightColor, float lightIntensity, vec3 albedo, float shadow) {
+vec3 calculatePBR(vec3 N, vec3 V, vec3 L, vec3 lightColor, float lightIntensity, vec3 albedo, float shadow,
+                  float roughness, float metallic) {
     vec3 H = normalize(V + L);
 
     float NoL = max(dot(N, L), 0.0);
@@ -156,24 +163,25 @@ vec3 calculatePBR(vec3 N, vec3 V, vec3 L, vec3 lightColor, float lightIntensity,
     float VoH = max(dot(V, H), 0.0);
 
     // Dielectric F0 (0.04 is typical for non-metals)
-    vec3 F0 = mix(vec3(0.04), albedo, material.metallic);
+    vec3 F0 = mix(vec3(0.04), albedo, metallic);
 
     // Specular BRDF
-    float D = D_GGX(NoH, material.roughness);
-    float Vis = V_SmithGGX(NoV, NoL, material.roughness);
+    float D = D_GGX(NoH, roughness);
+    float Vis = V_SmithGGX(NoV, NoL, roughness);
     vec3 F = F_Schlick(VoH, F0);
 
     vec3 specular = D * Vis * F;
 
     // Energy-conserving diffuse
-    vec3 kD = (1.0 - F) * (1.0 - material.metallic);
+    vec3 kD = (1.0 - F) * (1.0 - metallic);
     vec3 diffuse = kD * albedo / PI;
 
     return (diffuse + specular) * lightColor * lightIntensity * NoL * shadow;
 }
 
 // Calculate contribution from a single dynamic light (point or spot)
-vec3 calculateDynamicLight(GPULight light, vec3 N, vec3 V, vec3 worldPos, vec3 albedo) {
+vec3 calculateDynamicLight(GPULight light, vec3 N, vec3 V, vec3 worldPos, vec3 albedo,
+                           float roughness, float metallic) {
     vec3 lightPos = light.positionAndType.xyz;
     uint lightType = uint(light.positionAndType.w);
     vec3 lightColor = light.colorAndIntensity.rgb;
@@ -208,16 +216,19 @@ vec3 calculateDynamicLight(GPULight light, vec3 N, vec3 V, vec3 worldPos, vec3 a
     attenuation *= shadow;
 
     // Calculate PBR lighting contribution with shadow
-    return calculatePBR(N, V, L, lightColor, lightIntensity * attenuation, albedo, 1.0);
+    return calculatePBR(N, V, L, lightColor, lightIntensity * attenuation, albedo, 1.0,
+                        roughness, metallic);
 }
 
 // Calculate contribution from all dynamic lights
-vec3 calculateAllDynamicLights(vec3 N, vec3 V, vec3 worldPos, vec3 albedo) {
+vec3 calculateAllDynamicLights(vec3 N, vec3 V, vec3 worldPos, vec3 albedo,
+                               float roughness, float metallic) {
     vec3 totalLight = vec3(0.0);
     uint numLights = min(lightBuffer.lightCount.x, MAX_LIGHTS);
 
     for (uint i = 0; i < numLights; i++) {
-        totalLight += calculateDynamicLight(lightBuffer.lights[i], N, V, worldPos, albedo);
+        totalLight += calculateDynamicLight(lightBuffer.lights[i], N, V, worldPos, albedo,
+                                            roughness, metallic);
     }
 
     return totalLight;
@@ -233,6 +244,24 @@ void main() {
     vec4 texColor = texture(texSampler, fragTexCoord);
     // Multiply texture color with vertex color (for glTF material baseColorFactor)
     vec3 albedo = texColor.rgb * fragColor.rgb;
+
+    // === PBR MATERIAL PROPERTIES ===
+    // Sample optional PBR texture maps, falling back to push constant values
+    float roughness = material.roughness;
+    float metallic = material.metallic;
+    float ao = 1.0;
+
+    if ((material.pbrFlags & PBR_HAS_ROUGHNESS_MAP) != 0u) {
+        roughness = texture(roughnessMap, fragTexCoord).r;
+    }
+    if ((material.pbrFlags & PBR_HAS_METALLIC_MAP) != 0u) {
+        metallic = texture(metallicMap, fragTexCoord).r;
+    }
+    if ((material.pbrFlags & PBR_HAS_AO_MAP) != 0u) {
+        ao = texture(aoMap, fragTexCoord).r;
+    }
+    // Height map can be used for parallax mapping (not implemented yet)
+    // if ((material.pbrFlags & PBR_HAS_HEIGHT_MAP) != 0u) { ... }
 
     // === SNOW LAYER ===
     // Sample snow mask at world position
@@ -266,27 +295,30 @@ void main() {
     float shadow = combineShadows(terrainShadow, cloudShadowFactor);
 
     // Sun lighting with shadow
-    float sunIntensity = ubo.sunDirection.w;
-    vec3 sunLight = calculatePBR(N, V, sunL, ubo.sunColor.rgb, sunIntensity, albedo, shadow);
+    // Apply eclipse darkening - moon blocks sunlight during solar eclipse
+    float sunIntensity = ubo.sunDirection.w * (1.0 - ubo.eclipseAmount);
+    vec3 sunLight = calculatePBR(N, V, sunL, ubo.sunColor.rgb, sunIntensity, albedo, shadow,
+                                  roughness, metallic);
 
     // Moon lighting (no shadow - moon is soft fill light but becomes primary light at night)
     vec3 moonL = normalize(ubo.moonDirection.xyz);
     float moonIntensity = ubo.moonDirection.w;
-    vec3 moonLight = calculatePBR(N, V, moonL, ubo.moonColor.rgb, moonIntensity, albedo, 1.0);
+    vec3 moonLight = calculatePBR(N, V, moonL, ubo.moonColor.rgb, moonIntensity, albedo, 1.0,
+                                   roughness, metallic);
 
     // Ambient lighting
     // For dielectrics: diffuse ambient from all directions
     // For metals: specular ambient (environment reflection approximation)
-    vec3 F0 = mix(vec3(0.04), albedo, material.metallic);
-    vec3 ambientDiffuse = ubo.ambientColor.rgb * albedo * (1.0 - material.metallic);
+    vec3 F0 = mix(vec3(0.04), albedo, metallic);
+    vec3 ambientDiffuse = ubo.ambientColor.rgb * albedo * (1.0 - metallic);
     // Metals need higher ambient to simulate environment reflections
     // Rougher metals get more ambient, smoother metals rely more on direct specular
-    float envReflection = mix(0.3, 1.0, material.roughness);
-    vec3 ambientSpecular = ubo.ambientColor.rgb * F0 * material.metallic * envReflection;
-    vec3 ambient = ambientDiffuse + ambientSpecular;
+    float envReflection = mix(0.3, 1.0, roughness);
+    vec3 ambientSpecular = ubo.ambientColor.rgb * F0 * metallic * envReflection;
+    vec3 ambient = (ambientDiffuse + ambientSpecular) * ao;  // Apply AO to ambient lighting
 
     // Dynamic lights contribution (multiple point and spot lights)
-    vec3 dynamicLights = calculateAllDynamicLights(N, V, fragWorldPos, albedo);
+    vec3 dynamicLights = calculateAllDynamicLights(N, V, fragWorldPos, albedo, roughness, metallic);
 
     vec3 finalColor = ambient + sunLight + moonLight + dynamicLights;
 

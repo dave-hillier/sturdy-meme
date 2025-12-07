@@ -17,7 +17,7 @@ constexpr MaterialId INVALID_MATERIAL_ID = ~0u;
 struct Renderable {
     glm::mat4 transform;
     Mesh* mesh;
-    Texture* texture;  // Kept for backwards compatibility, prefer materialId
+    Texture* texture;  // Used for texture selection, materialId for descriptor sets
     MaterialId materialId = INVALID_MATERIAL_ID;
     float roughness = 0.5f;
     float metallic = 0.0f;
@@ -25,6 +25,7 @@ struct Renderable {
     glm::vec3 emissiveColor = glm::vec3(1.0f);
     bool castsShadow = true;
     float opacity = 1.0f;  // For camera occlusion fading (1.0 = fully visible)
+    uint32_t pbrFlags = 0;  // Bitmask indicating which PBR textures are bound (set automatically from material)
 
 private:
     friend class RenderableBuilder;

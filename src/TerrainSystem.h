@@ -35,7 +35,7 @@ struct TerrainDispatcherPushConstants {
     uint32_t meshletIndexCount;  // 0 = use direct triangles, >0 = use meshlet instancing
 };
 
-// Push constants for sum reduction (legacy single-pass)
+// Push constants for sum reduction (single-pass)
 struct TerrainSumReductionPushConstants {
     int passID;
 };
@@ -60,7 +60,7 @@ struct TerrainSubdivisionPushConstants {
     uint32_t reserved;         // Reserved for future use (was useCompactBuffer)
 };
 
-// Push constants for prepare cull dispatch (legacy, kept for compatibility)
+// Push constants for prepare cull dispatch
 struct TerrainPrepareCullDispatchPushConstants {
     uint32_t workgroupSize;  // Subdivision workgroup size
 };
@@ -90,7 +90,7 @@ struct TerrainConfig {
     float mergeThreshold = 8.0f;      // Screen pixels to trigger merge
     uint32_t spreadFactor = 2;        // Temporal spreading: process 1/N triangles per frame (1 = all)
     std::string heightmapPath;        // Optional: path to 16-bit PNG heightmap
-    float minAltitude = 0.0f;         // Altitude for height value 0 (when loading from file)
+    float minAltitude = -15.0f;         // Altitude for height value 0 (when loading from file)
     float maxAltitude = 220.0f;       // Altitude for height value 65535 (when loading from file)
 
     // Computed height scale (maxAltitude - minAltitude), set during init
@@ -139,7 +139,7 @@ public:
                               const std::vector<VkBuffer>& snowUBOBuffers,
                               const std::vector<VkBuffer>& cloudShadowUBOBuffers);
 
-    // Set snow mask texture for snow accumulation rendering (legacy)
+    // Set snow mask texture for snow accumulation rendering
     void setSnowMask(VkDevice device, VkImageView snowMaskView, VkSampler snowMaskSampler);
 
     // Set volumetric snow cascade textures

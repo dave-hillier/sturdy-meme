@@ -357,7 +357,8 @@ void CatmullClarkSystem::updateDescriptorSets(VkDevice device, const std::vector
             write4.descriptorCount = 1;
             write4.pBufferInfo = &faceBufferInfo;
 
-            vkUpdateDescriptorSets(device, 5, (VkWriteDescriptorSet[]){write0, write1, write2, write3, write4}, 0, nullptr);
+            VkWriteDescriptorSet writes[] = {write0, write1, write2, write3, write4};
+            vkUpdateDescriptorSets(device, 5, writes, 0, nullptr);
         }
 
         // Render descriptor set (same buffers)
@@ -432,7 +433,8 @@ void CatmullClarkSystem::updateDescriptorSets(VkDevice device, const std::vector
             write4.descriptorCount = 1;
             write4.pBufferInfo = &faceBufferInfo;
 
-            vkUpdateDescriptorSets(device, 5, (VkWriteDescriptorSet[]){write0, write1, write2, write3, write4}, 0, nullptr);
+            VkWriteDescriptorSet writes[] = {write0, write1, write2, write3, write4};
+            vkUpdateDescriptorSets(device, 5, writes, 0, nullptr);
         }
     }
 }

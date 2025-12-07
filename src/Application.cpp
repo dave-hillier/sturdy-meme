@@ -232,6 +232,11 @@ void Application::run() {
         // Update player position for grass interaction (always, regardless of camera mode)
         renderer.setPlayerPosition(player.getPosition(), Player::CAPSULE_RADIUS);
 
+        // Wait for previous frame's GPU work to complete before updating dynamic meshes.
+        // This prevents race conditions where we destroy mesh buffers while the GPU
+        // is still reading them from the previous frame.
+        renderer.waitForPreviousFrame();
+
         // Update flag cloth simulation
         updateFlag(deltaTime);
 
@@ -239,6 +244,10 @@ void Application::run() {
         // Calculate movement speed from desired velocity for animation state machine
         float movementSpeed = glm::length(glm::vec2(desiredVelocity.x, desiredVelocity.z));
         bool isGrounded = physics.isCharacterOnGround();
+
+        // Sync cape enabled state from GUI
+        renderer.getSceneBuilder().setCapeEnabled(gui.getPlayerSettings().capeEnabled);
+
         renderer.updateAnimatedCharacter(deltaTime, movementSpeed, isGrounded, isJumping);
 
         // Update camera and player based on mode
@@ -465,9 +474,13 @@ void Application::processEvents() {
 
     // Handle camera mode switch initialization
     if (input.wasModeSwitchedThisFrame()) {
-        camera.resetSmoothing();
         if (input.isThirdPersonMode()) {
-            camera.orbitPitch(15.0f);
+            // Initialize third-person camera from current free camera position
+            // This ensures smooth transition instead of snapping to origin
+            camera.initializeThirdPersonFromCurrentPosition(player.getFocusPoint());
+        } else {
+            // Switching to free camera - just reset smoothing
+            camera.resetSmoothing();
         }
     }
 }
@@ -589,7 +602,7 @@ void Application::initPhysics() {
 
 void Application::updatePhysicsToScene() {
     // Update scene object transforms from physics simulation
-    auto& sceneObjects = renderer.getSceneManager().getSceneObjects();
+    auto& sceneObjects = renderer.getSceneManager().getRenderables();
 
     for (size_t i = 1; i < scenePhysicsBodies.size() && i < sceneObjects.size(); i++) {
         PhysicsBodyID bodyID = scenePhysicsBodies[i];
@@ -674,7 +687,7 @@ void Application::updateCameraOcclusion(float deltaTime) {
     }
 
     // Update opacities for all scene objects
-    auto& sceneObjects = renderer.getSceneManager().getSceneObjects();
+    auto& sceneObjects = renderer.getSceneManager().getRenderables();
     for (size_t i = 0; i < scenePhysicsBodies.size() && i < sceneObjects.size(); i++) {
         PhysicsBodyID bodyID = scenePhysicsBodies[i];
         if (bodyID == INVALID_BODY_ID) continue;
@@ -709,7 +722,7 @@ void Application::updateFlag(float deltaTime) {
     clothSim.addSphereCollision(playerPos + glm::vec3(0, playerHeight - playerRadius, 0), playerRadius);
 
     // Add collision spheres for dynamic physics objects
-    auto& sceneObjects = renderer.getSceneManager().getSceneObjects();
+    auto& sceneObjects = renderer.getSceneManager().getRenderables();
     for (size_t i = 1; i < scenePhysicsBodies.size() && i < sceneObjects.size(); i++) {
         PhysicsBodyID bodyID = scenePhysicsBodies[i];
         if (bodyID == INVALID_BODY_ID) continue;

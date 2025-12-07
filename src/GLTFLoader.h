@@ -57,10 +57,6 @@ struct GLTFLoadResult {
 
     // Materials extracted from the file
     std::vector<MaterialInfo> materials;
-
-    // Legacy: first material texture paths (for backward compatibility)
-    std::string baseColorTexturePath;
-    std::string normalTexturePath;
 };
 
 // Forward declare SkinnedVertex to avoid circular include
@@ -78,10 +74,6 @@ struct GLTFSkinnedLoadResult {
 
     // Materials extracted from the file
     std::vector<MaterialInfo> materials;
-
-    // Legacy: first material texture paths (for backward compatibility)
-    std::string baseColorTexturePath;
-    std::string normalTexturePath;
 };
 
 namespace GLTFLoader {

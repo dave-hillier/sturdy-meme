@@ -1,42 +1,64 @@
 #version 450
 
+#extension GL_GOOGLE_include_directive : require
+
 /*
  * water.vert - Water surface vertex shader
  * Implements Gerstner wave animation for realistic ocean/lake surfaces
+ * Phase 4: Samples displacement map for interactive splashes
  */
 
-layout(binding = 0) uniform UniformBufferObject {
-    mat4 model;
-    mat4 view;
-    mat4 proj;
-    mat4 cascadeViewProj[4];
-    vec4 cascadeSplits;
-    vec4 sunDirection;
-    vec4 moonDirection;
-    vec4 sunColor;
-    vec4 moonColor;
-    vec4 ambientColor;
-    vec4 cameraPosition;
-    vec4 pointLightPosition;
-    vec4 pointLightColor;
-    vec4 windDirectionAndSpeed;  // xy = direction, z = speed, w = time
-    float timeOfDay;
-    float shadowMapSize;
-    float debugCascades;
-    float julianDay;
-} ubo;
+#include "ubo_common.glsl"
+#include "bindings.glsl"
 
 // Water-specific uniforms
-layout(std140, binding = 1) uniform WaterUniforms {
+layout(std140, binding = BINDING_WATER_UBO) uniform WaterUniforms {
+    // Primary material properties
     vec4 waterColor;           // rgb = base water color, a = transparency
     vec4 waveParams;           // x = amplitude, y = wavelength, z = steepness, w = speed
     vec4 waveParams2;          // Second wave layer parameters
     vec4 waterExtent;          // xy = position offset, zw = size
+    vec4 scatteringCoeffs;     // rgb = absorption coefficients, a = turbidity
+
+    // Phase 12: Secondary material for blending
+    vec4 waterColor2;          // Secondary water color
+    vec4 scatteringCoeffs2;    // Secondary scattering coefficients
+    vec4 blendCenter;          // xy = world position, z = blend direction angle, w = unused
+    float absorptionScale2;    // Secondary absorption scale
+    float scatteringScale2;    // Secondary scattering scale
+    float specularRoughness2;  // Secondary specular roughness
+    float sssIntensity2;       // Secondary SSS intensity
+    float blendDistance;       // Distance over which materials blend (world units)
+    int blendMode;             // 0 = distance from center, 1 = directional, 2 = radial
+
     float waterLevel;          // Y height of water plane
     float foamThreshold;       // Wave height threshold for foam
     float fresnelPower;        // Fresnel reflection power
-    float padding;
+    float terrainSize;         // Terrain size for UV calculation
+    float terrainHeightScale;  // Terrain height scale
+    float shoreBlendDistance;  // Distance over which shore fades (world units)
+    float shoreFoamWidth;      // Width of shore foam band (world units)
+    float flowStrength;        // How much flow affects UV offset (world units)
+    float flowSpeed;           // Flow animation speed multiplier
+    float flowFoamStrength;    // How much flow speed affects foam
+    float fbmNearDistance;     // Distance for max FBM detail (9 octaves)
+    float fbmFarDistance;      // Distance for min FBM detail (3 octaves)
+    float specularRoughness;   // Base roughness for specular
+    float absorptionScale;     // How quickly light is absorbed with depth
+    float scatteringScale;     // Turbidity multiplier
+    float displacementScale;   // Scale for interactive displacement
+    float sssIntensity;        // Phase 17: Subsurface scattering intensity
+    float causticsScale;       // Phase 9: Caustics pattern scale
+    float causticsSpeed;       // Phase 9: Caustics animation speed
+    float causticsIntensity;   // Phase 9: Caustics brightness
+    float nearPlane;           // Camera near plane for depth linearization
+    float farPlane;            // Camera far plane for depth linearization
+    float padding1;            // Alignment padding
+    float padding2;            // Alignment padding
 };
+
+// Displacement map (Phase 4: Interactive splashes)
+layout(binding = BINDING_WATER_DISPLACEMENT) uniform sampler2D displacementMap;
 
 layout(push_constant) uniform PushConstants {
     mat4 model;
@@ -50,11 +72,14 @@ layout(location = 0) out vec3 fragWorldPos;
 layout(location = 1) out vec3 fragNormal;
 layout(location = 2) out vec2 fragTexCoord;
 layout(location = 3) out float fragWaveHeight;
+layout(location = 4) out float fragJacobian;  // Phase 13: Jacobian for foam detection
+layout(location = 5) out float fragWaveSlope; // Phase 17: Wave slope for SSS
 
 // Gerstner wave function
 // Returns displacement and calculates tangent/bitangent for normal
+// Also outputs jacobian contribution for foam detection (Phase 13)
 vec3 gerstnerWave(vec2 pos, float time, vec2 direction, float wavelength, float steepness, float amplitude,
-                  out vec3 tangent, out vec3 bitangent) {
+                  out vec3 tangent, out vec3 bitangent, out float jacobian) {
     float k = 2.0 * 3.14159265359 / wavelength;
     float c = sqrt(9.8 / k);  // Phase speed from dispersion relation
     vec2 d = normalize(direction);
@@ -81,6 +106,12 @@ vec3 gerstnerWave(vec2 pos, float time, vec2 direction, float wavelength, float 
         1.0 - d.y * d.y * steepness * sin(f)
     );
 
+    // Phase 13: Jacobian determinant for foam detection
+    // For Gerstner waves: J = (1 - steepness * cos(f))
+    // When J < 0, the wave surface folds over itself (whitecap formation)
+    // We compute the contribution to the total Jacobian (multiply later)
+    jacobian = 1.0 - steepness * cos(f);
+
     return displacement;
 }
 
@@ -97,28 +128,37 @@ void main() {
     vec3 totalTangent = vec3(1.0, 0.0, 0.0);
     vec3 totalBitangent = vec3(0.0, 0.0, 1.0);
 
+    // Phase 13: Accumulate Jacobian from all waves (multiplicative)
+    float totalJacobian = 1.0;
+
     // Primary wave (wind-driven)
     vec3 tangent1, bitangent1;
+    float jacobian1;
     vec3 wave1 = gerstnerWave(pos, time * waveParams.w, windDir,
                                waveParams.y, waveParams.z, waveParams.x,
-                               tangent1, bitangent1);
+                               tangent1, bitangent1, jacobian1);
     totalDisplacement += wave1;
+    totalJacobian *= jacobian1;
 
     // Secondary wave (cross-wind, smaller)
     vec3 tangent2, bitangent2;
+    float jacobian2;
     vec2 crossDir = vec2(-windDir.y, windDir.x) * 0.7 + windDir * 0.3;
     vec3 wave2 = gerstnerWave(pos, time * waveParams2.w * 1.3, crossDir,
                                waveParams2.y * 0.6, waveParams2.z * 0.7, waveParams2.x * 0.5,
-                               tangent2, bitangent2);
+                               tangent2, bitangent2, jacobian2);
     totalDisplacement += wave2;
+    totalJacobian *= jacobian2;
 
     // Tertiary wave (counter direction, even smaller for detail)
     vec3 tangent3, bitangent3;
+    float jacobian3;
     vec2 counterDir = -windDir * 0.5 + vec2(windDir.y, -windDir.x) * 0.5;
     vec3 wave3 = gerstnerWave(pos, time * waveParams.w * 0.7, counterDir,
                                waveParams.y * 0.3, waveParams.z * 0.5, waveParams.x * 0.25,
-                               tangent3, bitangent3);
+                               tangent3, bitangent3, jacobian3);
     totalDisplacement += wave3;
+    totalJacobian *= jacobian3;
 
     // Blend tangents/bitangents
     totalTangent = normalize(tangent1 + tangent2 * 0.5 + tangent3 * 0.25);
@@ -127,13 +167,29 @@ void main() {
     // Calculate normal from tangent and bitangent
     vec3 normal = normalize(cross(totalBitangent, totalTangent));
 
-    // Apply displacement
+    // Apply Gerstner wave displacement
     worldPos.xyz += totalDisplacement;
+
+    // Phase 4: Sample displacement map for interactive splashes
+    // Calculate UV for displacement map (world position to UV)
+    vec2 displacementUV = (worldPos.xz - waterExtent.xy) / waterExtent.zw + 0.5;
+    displacementUV = clamp(displacementUV, 0.0, 1.0);
+
+    // Sample displacement and apply with scale
+    float interactiveDisplacement = texture(displacementMap, displacementUV).r;
+    worldPos.y += interactiveDisplacement * displacementScale;
 
     // Output
     gl_Position = ubo.proj * ubo.view * worldPos;
     fragWorldPos = worldPos.xyz;
     fragNormal = normal;
     fragTexCoord = inTexCoord;
-    fragWaveHeight = totalDisplacement.y;
+    fragWaveHeight = totalDisplacement.y + interactiveDisplacement * displacementScale;
+    fragJacobian = totalJacobian;  // Phase 13: Pass Jacobian for foam detection
+
+    // Phase 17: Calculate wave slope for SSS
+    // Slope = how much the normal deviates from straight up
+    // A flat surface has normal.y = 1, slope = 0
+    // A steep wave has normal tilted, slope > 0
+    fragWaveSlope = 1.0 - abs(normal.y);
 }

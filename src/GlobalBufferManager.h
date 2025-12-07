@@ -9,8 +9,6 @@
 #include "BufferUtils.h"
 #include "Light.h"
 #include "UBOs.h"
-#include "SnowUBO.h"
-#include "CloudShadowUBO.h"
 
 /**
  * GlobalBufferManager - Manages per-frame shared GPU buffers
@@ -202,26 +200,5 @@ struct GlobalBufferManager {
             info.range = sizeof(CloudShadowUBO);
         }
         return info;
-    }
-
-    // Direct buffer accessors (for legacy code that needs VkBuffer directly)
-    VkBuffer getUniformBuffer(uint32_t frameIndex) const {
-        return frameIndex < uniformBuffers.buffers.size() ? uniformBuffers.buffers[frameIndex] : VK_NULL_HANDLE;
-    }
-
-    VkBuffer getLightBuffer(uint32_t frameIndex) const {
-        return frameIndex < lightBuffers.buffers.size() ? lightBuffers.buffers[frameIndex] : VK_NULL_HANDLE;
-    }
-
-    VkBuffer getBoneMatricesBuffer(uint32_t frameIndex) const {
-        return frameIndex < boneMatricesBuffers.buffers.size() ? boneMatricesBuffers.buffers[frameIndex] : VK_NULL_HANDLE;
-    }
-
-    VkBuffer getSnowBuffer(uint32_t frameIndex) const {
-        return frameIndex < snowBuffers.buffers.size() ? snowBuffers.buffers[frameIndex] : VK_NULL_HANDLE;
-    }
-
-    VkBuffer getCloudShadowBuffer(uint32_t frameIndex) const {
-        return frameIndex < cloudShadowBuffers.buffers.size() ? cloudShadowBuffers.buffers[frameIndex] : VK_NULL_HANDLE;
     }
 };

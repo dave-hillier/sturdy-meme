@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Animation.h"
+#include "AnimationEvent.h"
+#include "BlendSpace.h"
 #include <string>
 #include <vector>
 #include <functional>
@@ -53,6 +55,52 @@ public:
     float getBlendFactor() const { return blendFactor; }
     bool isBlending() const { return blending; }
 
+    // Event handling
+    AnimationEventDispatcher& getEventDispatcher() { return eventDispatcher; }
+    const AnimationEventDispatcher& getEventDispatcher() const { return eventDispatcher; }
+
+    // Set optional user data that will be passed to event callbacks
+    void setUserData(void* data) { userData = data; }
+    void* getUserData() const { return userData; }
+
+    // ========== Blend Space Mode ==========
+    // When enabled, locomotion (idle/walk/run) uses smooth blend space interpolation
+    // instead of discrete state transitions
+
+    // Enable blend space mode for locomotion blending
+    void setUseBlendSpace(bool use) { useBlendSpace = use; }
+    bool isUsingBlendSpace() const { return useBlendSpace; }
+
+    // Get the locomotion blend space for configuration
+    BlendSpace1D& getLocomotionBlendSpace() { return locomotionBlendSpace; }
+    const BlendSpace1D& getLocomotionBlendSpace() const { return locomotionBlendSpace; }
+
+    // Setup locomotion blend space from registered states
+    // Call after adding idle, walk, run states
+    void setupLocomotionBlendSpace();
+
+    // ========== Configurable Thresholds ==========
+
+    // Set speed thresholds for locomotion state transitions
+    void setWalkThreshold(float threshold) { walkThreshold = threshold; }
+    void setRunThreshold(float threshold) { runThreshold = threshold; }
+    float getWalkThreshold() const { return walkThreshold; }
+    float getRunThreshold() const { return runThreshold; }
+
+    // ========== Locomotion State Names ==========
+    // Configure which state names are treated as locomotion states
+    // This allows custom state naming (e.g., "locomotion_idle" instead of "idle")
+
+    void setIdleStateName(const std::string& name) { idleStateName = name; }
+    void setWalkStateName(const std::string& name) { walkStateName = name; }
+    void setRunStateName(const std::string& name) { runStateName = name; }
+    void setJumpStateName(const std::string& name) { jumpStateName = name; }
+
+    const std::string& getIdleStateName() const { return idleStateName; }
+    const std::string& getWalkStateName() const { return walkStateName; }
+    const std::string& getRunStateName() const { return runStateName; }
+    const std::string& getJumpStateName() const { return jumpStateName; }
+
 private:
     struct State {
         std::string name;
@@ -60,6 +108,7 @@ private:
         bool looping;
         float time;
         float speed;
+        float rootMotionSpeed;  // Animation's natural movement speed (m/s)
     };
 
     State* findState(const std::string& name);
@@ -74,13 +123,38 @@ private:
     float blendTime = 0.0f;
     bool blending = false;
 
-    // Thresholds for state transitions
-    static constexpr float WALK_THRESHOLD = 0.1f;
-    static constexpr float RUN_THRESHOLD = 2.5f;  // Between walk (1.44 m/s) and run (3.98 m/s) animation speeds
+    // Configurable thresholds for state transitions
+    float walkThreshold = 0.1f;
+    float runThreshold = 2.5f;  // Between walk (1.44 m/s) and run (3.98 m/s) animation speeds
+
+    // Configurable locomotion state names
+    std::string idleStateName = "idle";
+    std::string walkStateName = "walk";
+    std::string runStateName = "run";
+    std::string jumpStateName = "jump";
+
+    // Blend space mode for smooth locomotion blending
+    bool useBlendSpace = false;
+    BlendSpace1D locomotionBlendSpace;
+    SkeletonPose blendSpacePose;  // Cached pose for blend space sampling
 
     // Jump trajectory tracking
     JumpTrajectory jumpTrajectory;
 
+    // Check if a state is a locomotion state (idle, walk, or run)
+    bool isLocomotionState(const std::string& stateName) const;
+
+    // Event handling
+    AnimationEventDispatcher eventDispatcher;
+    void* userData = nullptr;
+    float lastEventTime = 0.0f;  // Track last event firing time for current state
+
     // Predict landing time by tracing the parabolic arc
     float predictLandingTime(const glm::vec3& startPos, const glm::vec3& velocity, float gravity, const PhysicsWorld* physics) const;
+
+    // Fire events that occurred between prevTime and newTime for a clip
+    void fireClipEvents(const AnimationClip* clip, float prevTime, float newTime, bool looped, const std::string& stateName);
+
+    // Build context for event firing
+    AnimationEventContext buildContext(const std::string& stateName, const AnimationClip* clip, float time) const;
 };

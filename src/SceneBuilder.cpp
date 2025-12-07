@@ -9,7 +9,7 @@ bool SceneBuilder::init(const InitInfo& info) {
     if (!createMeshes(info)) return false;
     if (!loadTextures(info)) return false;
     registerMaterials();
-    createSceneObjects();
+    createRenderables();
     return true;
 }
 
@@ -17,12 +17,18 @@ void SceneBuilder::registerMaterials() {
     // Register crate material
     crateMaterialId = materialRegistry.registerMaterial("crate", crateTexture, crateNormalMap);
 
+    // Register ground material (for any ground-related objects)
+    groundMaterialId = materialRegistry.registerMaterial("ground", groundTexture, groundNormalMap);
+
     // Register metal material
     metalMaterialId = materialRegistry.registerMaterial("metal", metalTexture, metalNormalMap);
 
     // Register white material (for vertex-colored objects like animated characters)
     // Uses white texture with a flat normal map
     whiteMaterialId = materialRegistry.registerMaterial("white", whiteTexture, groundNormalMap);
+
+    // Register cape material
+    capeMaterialId = materialRegistry.registerMaterial("cape", capeTexture, capeNormalMap);
 
     SDL_Log("SceneBuilder: Registered %zu materials", materialRegistry.getMaterialCount());
 }
@@ -43,6 +49,8 @@ void SceneBuilder::destroy(VmaAllocator allocator, VkDevice device) {
     metalNormalMap.destroy(allocator, device);
     defaultEmissiveMap.destroy(allocator, device);
     whiteTexture.destroy(allocator, device);
+    capeTexture.destroy(allocator, device);
+    capeNormalMap.destroy(allocator, device);
 
     cubeMesh.destroy(allocator);
     sphereMesh.destroy(allocator);
@@ -50,6 +58,7 @@ void SceneBuilder::destroy(VmaAllocator allocator, VkDevice device) {
     groundMesh.destroy(allocator);
     flagPoleMesh.destroy(allocator);
     flagClothMesh.destroy(allocator);
+    capeMesh.destroy(allocator);
     if (hasAnimatedCharacter) {
         animatedCharacter.destroy(allocator);
     }
@@ -93,6 +102,49 @@ bool SceneBuilder::createMeshes(const InitInfo& info) {
             info.resourcePath + "/assets/characters/fbx/ss_jump.fbx"
         };
         animatedCharacter.loadAdditionalAnimations(additionalAnimations);
+
+        // Setup default IK chains for arms, legs, look-at, and foot placement
+        animatedCharacter.setupDefaultIKChains();
+
+        // Setup ground query for foot placement IK
+        if (terrainHeightFunc) {
+            auto& ikSystem = animatedCharacter.getIKSystem();
+            ikSystem.setGroundQueryFunc([this](const glm::vec3& position, float maxDistance) -> GroundQueryResult {
+                GroundQueryResult result;
+                result.hit = true;
+
+                // Get height at position
+                float h = getTerrainHeight(position.x, position.z);
+                result.position = glm::vec3(position.x, h, position.z);
+                result.distance = glm::abs(position.y - h);
+
+                // Compute terrain normal using finite differences
+                const float delta = 0.1f;  // 10cm sample distance
+                float hPosX = getTerrainHeight(position.x + delta, position.z);
+                float hNegX = getTerrainHeight(position.x - delta, position.z);
+                float hPosZ = getTerrainHeight(position.x, position.z + delta);
+                float hNegZ = getTerrainHeight(position.x, position.z - delta);
+
+                // Tangent vectors
+                glm::vec3 tangentX(2.0f * delta, hPosX - hNegX, 0.0f);
+                glm::vec3 tangentZ(0.0f, hPosZ - hNegZ, 2.0f * delta);
+
+                // Normal is cross product of tangents
+                result.normal = glm::normalize(glm::cross(tangentZ, tangentX));
+
+                return result;
+            });
+            SDL_Log("SceneBuilder: Setup ground query for foot IK");
+        }
+
+        // Initialize player cape attached to the character
+        playerCape.create(8, 12, 0.08f);  // 8x12 grid, 8cm spacing
+        playerCape.setupDefaultColliders();
+        playerCape.setupDefaultAttachments();
+        playerCape.createMesh(capeMesh);
+        capeMesh.upload(info.allocator, info.device, info.commandPool, info.graphicsQueue);
+        hasCapeEnabled = true;
+        SDL_Log("SceneBuilder: Initialized player cape");
     } else {
         hasAnimatedCharacter = false;
         SDL_Log("SceneBuilder: Failed to load FBX character, using capsule fallback");
@@ -158,10 +210,35 @@ bool SceneBuilder::loadTextures(const InitInfo& info) {
         return false;
     }
 
+    // Load cape textures (generated during build)
+    std::string capeDiffusePath = info.resourcePath + "/assets/textures/cape_diffuse.png";
+    if (!capeTexture.load(capeDiffusePath, info.allocator, info.device, info.commandPool,
+                          info.graphicsQueue, info.physicalDevice)) {
+        SDL_Log("Cape texture not found, creating red fallback: %s", capeDiffusePath.c_str());
+        // Create red fallback if generated texture not found
+        if (!capeTexture.createSolidColor(180, 30, 30, 255, info.allocator, info.device,
+                                           info.commandPool, info.graphicsQueue)) {
+            SDL_Log("Failed to create cape fallback texture");
+            return false;
+        }
+    }
+
+    std::string capeNormalPath = info.resourcePath + "/assets/textures/cape_normal.png";
+    if (!capeNormalMap.load(capeNormalPath, info.allocator, info.device, info.commandPool,
+                             info.graphicsQueue, info.physicalDevice, false)) {
+        SDL_Log("Cape normal map not found, creating flat fallback: %s", capeNormalPath.c_str());
+        // Create flat normal map fallback
+        if (!capeNormalMap.createSolidColor(128, 128, 255, 255, info.allocator, info.device,
+                                             info.commandPool, info.graphicsQueue)) {
+            SDL_Log("Failed to create cape normal map fallback");
+            return false;
+        }
+    }
+
     return true;
 }
 
-void SceneBuilder::createSceneObjects() {
+void SceneBuilder::createRenderables() {
     sceneObjects.clear();
 
     // Ground disc removed - terrain system provides the ground now
@@ -382,6 +459,20 @@ void SceneBuilder::createSceneObjects() {
         .withCastsShadow(true)
         .build());
 
+    // Player cape - attached to character, updated each frame
+    if (hasCapeEnabled) {
+        capeIndex = sceneObjects.size();
+        sceneObjects.push_back(RenderableBuilder()
+            .withTransform(glm::mat4(1.0f))  // Identity, cloth positions are in world space
+            .withMesh(&capeMesh)
+            .withTexture(&capeTexture)
+            .withMaterialId(capeMaterialId)
+            .withRoughness(0.7f)
+            .withMetallic(0.0f)
+            .withCastsShadow(true)
+            .build());
+    }
+
     // Well entrance - demonstrates terrain hole mask system
     // A stone-like frame floating above the terrain hole
     wellEntranceX = 20.0f;
@@ -412,10 +503,9 @@ glm::mat4 SceneBuilder::buildCharacterTransform(const glm::vec3& position, float
     // Character model transform:
     // 1. Translate to world position
     // 2. Apply Y rotation (facing direction)
-    // 3. Scale down (Mixamo FBX uses cm, convert to meters)
+    // Note: Scale is now handled by FBX post-import processing
     glm::mat4 transform = glm::translate(glm::mat4(1.0f), position);
     transform = glm::rotate(transform, yRotation, glm::vec3(0.0f, 1.0f, 0.0f));
-    transform = glm::scale(transform, glm::vec3(CHARACTER_SCALE));
     return transform;
 }
 
@@ -426,12 +516,10 @@ void SceneBuilder::updatePlayerTransform(const glm::mat4& transform) {
             glm::vec3 pos = glm::vec3(transform[3]);
             pos.y -= 0.9f;  // CAPSULE_HEIGHT * 0.5 = 1.8 * 0.5
 
-            // Use the player transform's rotation directly, just adjust position and add model corrections
+            // Use the player transform's rotation directly, just adjust position
+            // Note: Scale is now handled by FBX post-import processing
             glm::mat4 result = transform;
             result[3] = glm::vec4(pos, 1.0f);
-
-            // Apply scale (Mixamo FBX uses cm, convert to meters)
-            result = glm::scale(result, glm::vec3(CHARACTER_SCALE));
 
             sceneObjects[playerObjectIndex].transform = result;
         } else {
@@ -445,12 +533,34 @@ void SceneBuilder::updateAnimatedCharacter(float deltaTime, VmaAllocator allocat
                                             float movementSpeed, bool isGrounded, bool isJumping) {
     if (!hasAnimatedCharacter) return;
 
+    // Get the character's current world transform for IK ground queries
+    glm::mat4 worldTransform = glm::mat4(1.0f);
+    if (playerObjectIndex < sceneObjects.size()) {
+        worldTransform = sceneObjects[playerObjectIndex].transform;
+    }
+
     animatedCharacter.update(deltaTime, allocator, device, commandPool, queue,
-                             movementSpeed, isGrounded, isJumping);
+                             movementSpeed, isGrounded, isJumping, worldTransform);
 
     // Update the mesh pointer in the renderable (in case it was re-created)
     if (playerObjectIndex < sceneObjects.size()) {
         sceneObjects[playerObjectIndex].mesh = &animatedCharacter.getMesh();
+    }
+
+    // Update player cape if enabled
+    if (hasCapeEnabled) {
+        // Update cape simulation with current skeleton pose
+        playerCape.update(animatedCharacter.getSkeleton(), worldTransform, deltaTime, nullptr);
+
+        // Update cape mesh and re-upload
+        playerCape.updateMesh(capeMesh);
+        capeMesh.destroy(allocator);
+        capeMesh.upload(allocator, device, commandPool, queue);
+
+        // Update mesh pointer in renderable
+        if (capeIndex < sceneObjects.size()) {
+            sceneObjects[capeIndex].mesh = &capeMesh;
+        }
     }
 }
 

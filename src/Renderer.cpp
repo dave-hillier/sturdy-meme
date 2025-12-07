@@ -4,6 +4,7 @@
 #include "BindingBuilder.h"
 #include "GraphicsPipelineFactory.h"
 #include "MaterialDescriptorFactory.h"
+#include "Bindings.h"
 #include <SDL3/SDL_vulkan.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <stdexcept>
@@ -105,7 +106,8 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     ErosionConfig erosionConfig{};
     erosionConfig.sourceHeightmapPath = heightmapPath;
     erosionConfig.cacheDirectory = terrainDataPath;
-    erosionConfig.seaLevel = 23.0f;
+    // Sea level: real-world 0m altitude maps to worldY = 0 - minAltitude = 15m
+    erosionConfig.seaLevel = 15.0f;
     erosionConfig.terrainSize = 16384.0f;
     erosionConfig.minAltitude = -15.0f;
     erosionConfig.maxAltitude = 220.0f;
@@ -283,6 +285,9 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
             common.spotShadowSampler = shadowSystem.getSpotShadowSampler();
             common.snowMaskView = snowMaskSystem.getSnowMaskView();
             common.snowMaskSampler = snowMaskSystem.getSnowMaskSampler();
+            // Placeholder texture for unused PBR bindings (13-16)
+            common.placeholderTextureView = sceneManager.getSceneBuilder().getWhiteTexture().getImageView();
+            common.placeholderTextureSampler = sceneManager.getSceneBuilder().getWhiteTexture().getSampler();
 
             MaterialDescriptorFactory::MaterialTextures mat{};
             mat.diffuseView = rockSystem.getRockTexture().getImageView();
@@ -439,19 +444,22 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
         cloudShadowSystem.getShadowMapView(),
         cloudShadowSystem.getShadowMapSampler());
 
-    // Update main descriptor sets with cloud shadow map (binding 9)
+    // Update all descriptor sets with cloud shadow map (binding 9)
     // This is done here because cloudShadowSystem is initialized after createDescriptorSets
     {
+        // Update MaterialRegistry-managed descriptor sets
+        sceneManager.getSceneBuilder().getMaterialRegistry().updateCloudShadowBinding(
+            device,
+            cloudShadowSystem.getShadowMapView(),
+            cloudShadowSystem.getShadowMapSampler());
+
+        // Update descriptor sets not managed by MaterialRegistry (rocks, skinned)
         MaterialDescriptorFactory factory(device);
-        VkDescriptorSet allSets[] = {
-            descriptorSets[0], descriptorSets[1],
-            groundDescriptorSets[0], groundDescriptorSets[1],
-            metalDescriptorSets[0], metalDescriptorSets[1],
+        VkDescriptorSet otherSets[] = {
             rockDescriptorSets[0], rockDescriptorSets[1],
-            characterDescriptorSets[0], characterDescriptorSets[1],
             skinnedDescriptorSets[0], skinnedDescriptorSets[1]
         };
-        for (auto set : allSets) {
+        for (auto set : otherSets) {
             factory.updateCloudShadowBinding(set,
                 cloudShadowSystem.getShadowMapView(),
                 cloudShadowSystem.getShadowMapSampler());
@@ -530,13 +538,15 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     waterInfo.commandPool = commandPool;
     waterInfo.graphicsQueue = graphicsQueue;
     waterInfo.waterSize = 65536.0f;  // Extend well beyond terrain for horizon
+    waterInfo.assetPath = resourcePath;
 
     if (!waterSystem.init(waterInfo)) return false;
 
     // Configure water surface
-    // Terrain formula is h * heightScale, so world Y=0 corresponds to minAltitude
-    // Real sea level (0m altitude) is at world Y = -minAltitude
-    float seaLevel = -terrainConfig.minAltitude;  // e.g., minAltitude=-15 → seaLevel=15
+    // Terrain formula is worldY = h * heightScale, where h is normalized [0,1]
+    // h=0 maps to minAltitude, h=1 maps to maxAltitude
+    // Real-world 0m altitude corresponds to worldY = 0 - minAltitude = 15m
+    float seaLevel = -terrainConfig.minAltitude;  // = 15.0f for minAltitude = -15
     waterSystem.setWaterLevel(seaLevel);
     waterSystem.setWaterExtent(glm::vec2(0.0f, 0.0f), glm::vec2(65536.0f, 65536.0f));
     waterSystem.setWaterColor(glm::vec4(0.02f, 0.08f, 0.15f, 0.95f));  // Deep ocean blue
@@ -544,16 +554,148 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     waterSystem.setWaveLength(30.0f);     // Longer wavelengths for open sea
     waterSystem.setWaveSteepness(0.4f);
     waterSystem.setWaveSpeed(0.8f);
-    waterSystem.setTidalRange(1.0f);      // 3m tidal range (spring tide: ±3m from mean)
+    waterSystem.setTidalRange(1.0f);      // ±1m tidal range
 
     // Set terrain params for shore detection
     waterSystem.setTerrainParams(terrainConfig.size, terrainConfig.heightScale);
     waterSystem.setShoreBlendDistance(3.0f);  // Soft edge over 3m
     waterSystem.setShoreFoamWidth(8.0f);      // Shore foam band 8m wide
 
-    // Create water descriptor sets with terrain heightmap
+    // Set camera planes for depth linearization (used for soft edges, intersection foam)
+    // Values must match Camera.cpp defaults: nearPlane=0.1f, farPlane=50000.0f
+    waterSystem.setCameraPlanes(0.1f, 50000.0f);
+
+    // Initialize flow map generator
+    if (!flowMapGenerator.init(device, allocator, commandPool, graphicsQueue)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize flow map generator");
+        return false;
+    }
+
+    // Generate flow map from terrain data
+    FlowMapGenerator::Config flowConfig{};
+    flowConfig.resolution = 512;
+    flowConfig.worldSize = terrainConfig.size;
+    flowConfig.waterLevel = seaLevel;
+    flowConfig.maxFlowSpeed = 1.0f;
+    flowConfig.slopeInfluence = 2.0f;  // Water flows faster on steeper slopes
+    flowConfig.shoreDistance = 100.0f; // Max shore distance for foam
+
+    // Get terrain height data and generate slope-based flow
+    const float* heightData = terrainSystem.getHeightMapData();
+    uint32_t heightRes = terrainSystem.getHeightMapResolution();
+    if (heightData && heightRes > 0) {
+        std::vector<float> heightVec(heightData, heightData + heightRes * heightRes);
+        if (!flowMapGenerator.generateFromTerrain(heightVec, heightRes, terrainConfig.heightScale, flowConfig)) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Flow map generation failed, using radial flow fallback");
+            flowMapGenerator.generateRadialFlow(flowConfig, glm::vec2(0.0f));
+        }
+    } else {
+        // Fallback to radial flow for testing
+        SDL_Log("No terrain height data available, generating radial flow map");
+        flowMapGenerator.generateRadialFlow(flowConfig, glm::vec2(0.0f));
+    }
+
+    // Initialize water displacement system (Phase 4: interactive splashes)
+    WaterDisplacement::InitInfo dispInfo{};
+    dispInfo.device = device;
+    dispInfo.physicalDevice = physicalDevice;
+    dispInfo.allocator = allocator;
+    dispInfo.commandPool = commandPool;
+    dispInfo.computeQueue = graphicsQueue;  // Use graphics queue for compute
+    dispInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+    dispInfo.displacementResolution = 512;
+    dispInfo.worldSize = 65536.0f;
+
+    if (!waterDisplacement.init(dispInfo)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize water displacement");
+        return false;
+    }
+
+    // Initialize foam buffer (Phase 14: temporal foam persistence)
+    FoamBuffer::InitInfo foamInfo{};
+    foamInfo.device = device;
+    foamInfo.physicalDevice = physicalDevice;
+    foamInfo.allocator = allocator;
+    foamInfo.commandPool = commandPool;
+    foamInfo.computeQueue = graphicsQueue;
+    foamInfo.shaderPath = resourcePath + "/shaders";
+    foamInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+    foamInfo.resolution = 512;
+    foamInfo.worldSize = 65536.0f;
+
+    if (!foamBuffer.init(foamInfo)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize foam buffer");
+        return false;
+    }
+
+    // Initialize SSR system (Phase 10: Screen-Space Reflections)
+    SSRSystem::InitInfo ssrInfo{};
+    ssrInfo.device = device;
+    ssrInfo.physicalDevice = physicalDevice;
+    ssrInfo.allocator = allocator;
+    ssrInfo.commandPool = commandPool;
+    ssrInfo.computeQueue = graphicsQueue;
+    ssrInfo.shaderPath = resourcePath + "/shaders";
+    ssrInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+    ssrInfo.extent = swapchainExtent;
+
+    if (!ssrSystem.init(ssrInfo)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize SSR system - continuing without SSR");
+        // Don't fail init - SSR is optional
+    }
+
+    // Initialize water tile culling (Phase 7: screen-space tile visibility)
+    WaterTileCull::InitInfo tileCullInfo{};
+    tileCullInfo.device = device;
+    tileCullInfo.physicalDevice = physicalDevice;
+    tileCullInfo.allocator = allocator;
+    tileCullInfo.commandPool = commandPool;
+    tileCullInfo.computeQueue = graphicsQueue;
+    tileCullInfo.shaderPath = resourcePath + "/shaders";
+    tileCullInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+    tileCullInfo.extent = swapchainExtent;
+    tileCullInfo.tileSize = 32;
+
+    if (!waterTileCull.init(tileCullInfo)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize water tile cull - continuing without");
+        // Don't fail init - tile culling is optional optimization
+    }
+
+    // Initialize water G-buffer (Phase 3)
+    WaterGBuffer::InitInfo gbufferInfo{};
+    gbufferInfo.device = device;
+    gbufferInfo.physicalDevice = physicalDevice;
+    gbufferInfo.allocator = allocator;
+    gbufferInfo.fullResExtent = swapchainExtent;
+    gbufferInfo.resolutionScale = 0.5f;  // Half resolution for performance
+    gbufferInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+    gbufferInfo.shaderPath = resourcePath + "/shaders";
+    gbufferInfo.descriptorPool = &*descriptorManagerPool;
+
+    if (!waterGBuffer.init(gbufferInfo)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize water G-buffer - continuing without");
+        // Don't fail init - G-buffer is optional optimization
+    }
+
+    // Create water descriptor sets with terrain heightmap, flow map, displacement map, temporal foam, SSR, and scene depth
     if (!waterSystem.createDescriptorSets(uniformBuffers, sizeof(UniformBufferObject), shadowSystem,
-                                          terrainSystem.getHeightMapView(), terrainSystem.getHeightMapSampler())) return false;
+                                          terrainSystem.getHeightMapView(), terrainSystem.getHeightMapSampler(),
+                                          flowMapGenerator.getFlowMapView(), flowMapGenerator.getFlowMapSampler(),
+                                          waterDisplacement.getDisplacementMapView(), waterDisplacement.getSampler(),
+                                          foamBuffer.getFoamBufferView(), foamBuffer.getSampler(),
+                                          ssrSystem.getSSRResultView(), ssrSystem.getSampler(),
+                                          postProcessSystem.getHDRDepthView(), depthSampler)) return false;
+
+    // Create water G-buffer descriptor sets
+    if (waterGBuffer.getPipeline() != VK_NULL_HANDLE) {
+        if (!waterGBuffer.createDescriptorSets(
+                uniformBuffers, sizeof(UniformBufferObject),
+                waterSystem.getUniformBuffers(), WaterSystem::getUniformBufferSize(),
+                terrainSystem.getHeightMapView(), terrainSystem.getHeightMapSampler(),
+                flowMapGenerator.getFlowMapView(), flowMapGenerator.getFlowMapSampler())) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to create water G-buffer descriptor sets");
+        }
+    }
 
     // Initialize tree edit system
     TreeEditSystem::InitInfo treeEditInfo{};
@@ -651,6 +793,12 @@ void Renderer::shutdown() {
         hiZSystem.destroy();
         profiler.shutdown();
         waterSystem.destroy(device, allocator);
+        waterDisplacement.destroy();
+        foamBuffer.destroy();
+        ssrSystem.destroy();
+        waterTileCull.destroy();
+        waterGBuffer.destroy();
+        flowMapGenerator.destroy(device, allocator);
         treeEditSystem.destroy(device, allocator);
         atmosphereLUTSystem.destroy(device, allocator);
         skySystem.destroy(device, allocator);
@@ -945,23 +1093,10 @@ bool Renderer::createSyncObjects() {
     return true;
 }
 
-bool Renderer::createDescriptorSetLayout() {
-    VkDevice device = vulkanContext.getDevice();
-
-    // Main scene descriptor set layout:
-    // 0: UBO (camera/view data)
-    // 1: Diffuse texture sampler
-    // 2: Shadow map sampler (CSM cascade array)
-    // 3: Normal map sampler
-    // 4: Light buffer (SSBO for dynamic lights)
-    // 5: Emissive map sampler
-    // 6: Point shadow cube maps
-    // 7: Spot shadow depth maps
-    // 8: Snow mask texture
-    // 9: Cloud shadow map
-    // 10: Snow UBO
-    // 11: Cloud shadow UBO
-    descriptorSetLayout = DescriptorManager::LayoutBuilder(device)
+// Adds the common descriptor bindings shared between main and skinned layouts.
+// This ensures both layouts stay in sync for bindings used by shader.frag.
+void Renderer::addCommonDescriptorBindings(DescriptorManager::LayoutBuilder& builder) {
+    builder
         .addUniformBuffer(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)  // 0: UBO
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 1: diffuse
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 2: shadow
@@ -974,7 +1109,20 @@ bool Renderer::createDescriptorSetLayout() {
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 9: cloud shadow map
         .addUniformBuffer(VK_SHADER_STAGE_FRAGMENT_BIT)         // 10: Snow UBO
         .addUniformBuffer(VK_SHADER_STAGE_FRAGMENT_BIT)         // 11: Cloud shadow UBO
-        .build();
+        // Note: binding 12 (bone matrices) is added separately for skinned layout
+        .addBinding(Bindings::ROUGHNESS_MAP, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)  // 13: roughness
+        .addBinding(Bindings::METALLIC_MAP, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)   // 14: metallic
+        .addBinding(Bindings::AO_MAP, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)         // 15: AO
+        .addBinding(Bindings::HEIGHT_MAP, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT);    // 16: height
+}
+
+bool Renderer::createDescriptorSetLayout() {
+    VkDevice device = vulkanContext.getDevice();
+
+    // Main scene descriptor set layout - uses common bindings (0-11, 13-16)
+    DescriptorManager::LayoutBuilder builder(device);
+    addCommonDescriptorBindings(builder);
+    descriptorSetLayout = builder.build();
 
     if (descriptorSetLayout == VK_NULL_HANDLE) {
         SDL_Log("Failed to create descriptor set layout");
@@ -1173,103 +1321,69 @@ bool Renderer::createDescriptorPool() {
 bool Renderer::createDescriptorSets() {
     VkDevice device = vulkanContext.getDevice();
 
-    // Allocate descriptor sets using the pool manager
-    descriptorSets = descriptorManagerPool->allocate(descriptorSetLayout, MAX_FRAMES_IN_FLIGHT);
-    if (descriptorSets.empty()) {
-        SDL_Log("Failed to allocate descriptor sets");
+    // Create descriptor sets for all materials via MaterialRegistry
+    // This replaces the hardcoded per-material descriptor set allocation
+    auto& materialRegistry = sceneManager.getSceneBuilder().getMaterialRegistry();
+
+    // Lambda to build common bindings for a given frame
+    auto getCommonBindings = [this](uint32_t frameIndex) -> MaterialDescriptorFactory::CommonBindings {
+        MaterialDescriptorFactory::CommonBindings common{};
+        common.uniformBuffer = uniformBuffers[frameIndex];
+        common.uniformBufferSize = sizeof(UniformBufferObject);
+        common.shadowMapView = shadowSystem.getShadowImageView();
+        common.shadowMapSampler = shadowSystem.getShadowSampler();
+        common.lightBuffer = lightBuffers[frameIndex];
+        common.lightBufferSize = sizeof(LightBuffer);
+        common.emissiveMapView = sceneManager.getSceneBuilder().getDefaultEmissiveMap().getImageView();
+        common.emissiveMapSampler = sceneManager.getSceneBuilder().getDefaultEmissiveMap().getSampler();
+        common.pointShadowView = shadowSystem.getPointShadowArrayView(frameIndex);
+        common.pointShadowSampler = shadowSystem.getPointShadowSampler();
+        common.spotShadowView = shadowSystem.getSpotShadowArrayView(frameIndex);
+        common.spotShadowSampler = shadowSystem.getSpotShadowSampler();
+        common.snowMaskView = snowMaskSystem.getSnowMaskView();
+        common.snowMaskSampler = snowMaskSystem.getSnowMaskSampler();
+        // Snow and cloud shadow UBOs (bindings 10 and 11)
+        common.snowUboBuffer = snowBuffers[frameIndex];
+        common.snowUboBufferSize = sizeof(SnowUBO);
+        common.cloudShadowUboBuffer = cloudShadowBuffers[frameIndex];
+        common.cloudShadowUboBufferSize = sizeof(CloudShadowUBO);
+        // Cloud shadow texture is added later in init() after cloudShadowSystem is initialized
+        // Placeholder texture for unused PBR bindings (13-16)
+        common.placeholderTextureView = sceneManager.getSceneBuilder().getWhiteTexture().getImageView();
+        common.placeholderTextureSampler = sceneManager.getSceneBuilder().getWhiteTexture().getSampler();
+        return common;
+    };
+
+    materialRegistry.createDescriptorSets(
+        device,
+        *descriptorManagerPool,
+        descriptorSetLayout,
+        MAX_FRAMES_IN_FLIGHT,
+        getCommonBindings);
+
+    if (!materialRegistry.hasDescriptorSets()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create MaterialRegistry descriptor sets");
         return false;
     }
 
-    groundDescriptorSets = descriptorManagerPool->allocate(descriptorSetLayout, MAX_FRAMES_IN_FLIGHT);
-    if (groundDescriptorSets.empty()) {
-        SDL_Log("Failed to allocate ground descriptor sets");
-        return false;
-    }
-
-    metalDescriptorSets = descriptorManagerPool->allocate(descriptorSetLayout, MAX_FRAMES_IN_FLIGHT);
-    if (metalDescriptorSets.empty()) {
-        SDL_Log("Failed to allocate metal descriptor sets");
-        return false;
-    }
-
+    // Rock descriptor sets (RockSystem has its own textures, not in MaterialRegistry)
     rockDescriptorSets = descriptorManagerPool->allocate(descriptorSetLayout, MAX_FRAMES_IN_FLIGHT);
     if (rockDescriptorSets.empty()) {
         SDL_Log("Failed to allocate rock descriptor sets");
         return false;
     }
 
-    characterDescriptorSets = descriptorManagerPool->allocate(descriptorSetLayout, MAX_FRAMES_IN_FLIGHT);
-    if (characterDescriptorSets.empty()) {
-        SDL_Log("Failed to allocate character descriptor sets");
-        return false;
-    }
-
-    // Use factory to write descriptor sets with proper image layouts
+    // Write rock descriptor sets
     MaterialDescriptorFactory factory(device);
-
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        // Build common bindings for this frame
-        MaterialDescriptorFactory::CommonBindings common{};
-        common.uniformBuffer = uniformBuffers[i];
-        common.uniformBufferSize = sizeof(UniformBufferObject);
-        common.shadowMapView = shadowSystem.getShadowImageView();
-        common.shadowMapSampler = shadowSystem.getShadowSampler();
-        common.lightBuffer = lightBuffers[i];
-        common.lightBufferSize = sizeof(LightBuffer);
-        common.emissiveMapView = sceneManager.getSceneBuilder().getDefaultEmissiveMap().getImageView();
-        common.emissiveMapSampler = sceneManager.getSceneBuilder().getDefaultEmissiveMap().getSampler();
-        common.pointShadowView = shadowSystem.getPointShadowArrayView(i);
-        common.pointShadowSampler = shadowSystem.getPointShadowSampler();
-        common.spotShadowView = shadowSystem.getSpotShadowArrayView(i);
-        common.spotShadowSampler = shadowSystem.getSpotShadowSampler();
-        common.snowMaskView = snowMaskSystem.getSnowMaskView();
-        common.snowMaskSampler = snowMaskSystem.getSnowMaskSampler();
-        // Snow and cloud shadow UBOs (bindings 10 and 11)
-        common.snowUboBuffer = snowBuffers[i];
-        common.snowUboBufferSize = sizeof(SnowUBO);
-        common.cloudShadowUboBuffer = cloudShadowBuffers[i];
-        common.cloudShadowUboBufferSize = sizeof(CloudShadowUBO);
-        // Cloud shadow texture is added later in init() after cloudShadowSystem is initialized
+        MaterialDescriptorFactory::CommonBindings common = getCommonBindings(static_cast<uint32_t>(i));
 
-        // Crate material
-        {
-            MaterialDescriptorFactory::MaterialTextures mat{};
-            mat.diffuseView = sceneManager.getSceneBuilder().getCrateTexture().getImageView();
-            mat.diffuseSampler = sceneManager.getSceneBuilder().getCrateTexture().getSampler();
-            mat.normalView = sceneManager.getSceneBuilder().getCrateNormalMap().getImageView();
-            mat.normalSampler = sceneManager.getSceneBuilder().getCrateNormalMap().getSampler();
-            factory.writeDescriptorSet(descriptorSets[i], common, mat);
-        }
-
-        // Ground material
-        {
-            MaterialDescriptorFactory::MaterialTextures mat{};
-            mat.diffuseView = sceneManager.getSceneBuilder().getGroundTexture().getImageView();
-            mat.diffuseSampler = sceneManager.getSceneBuilder().getGroundTexture().getSampler();
-            mat.normalView = sceneManager.getSceneBuilder().getGroundNormalMap().getImageView();
-            mat.normalSampler = sceneManager.getSceneBuilder().getGroundNormalMap().getSampler();
-            factory.writeDescriptorSet(groundDescriptorSets[i], common, mat);
-        }
-
-        // Metal material
-        {
-            MaterialDescriptorFactory::MaterialTextures mat{};
-            mat.diffuseView = sceneManager.getSceneBuilder().getMetalTexture().getImageView();
-            mat.diffuseSampler = sceneManager.getSceneBuilder().getMetalTexture().getSampler();
-            mat.normalView = sceneManager.getSceneBuilder().getMetalNormalMap().getImageView();
-            mat.normalSampler = sceneManager.getSceneBuilder().getMetalNormalMap().getSampler();
-            factory.writeDescriptorSet(metalDescriptorSets[i], common, mat);
-        }
-
-        // Character material (white texture for vertex colors)
-        {
-            MaterialDescriptorFactory::MaterialTextures mat{};
-            mat.diffuseView = sceneManager.getSceneBuilder().getWhiteTexture().getImageView();
-            mat.diffuseSampler = sceneManager.getSceneBuilder().getWhiteTexture().getSampler();
-            mat.normalView = sceneManager.getSceneBuilder().getWhiteTexture().getImageView();  // No normal map
-            mat.normalSampler = sceneManager.getSceneBuilder().getWhiteTexture().getSampler();
-            factory.writeDescriptorSet(characterDescriptorSets[i], common, mat);
-        }
+        MaterialDescriptorFactory::MaterialTextures mat{};
+        mat.diffuseView = rockSystem.getRockTexture().getImageView();
+        mat.diffuseSampler = rockSystem.getRockTexture().getSampler();
+        mat.normalView = rockSystem.getRockNormalMap().getImageView();
+        mat.normalSampler = rockSystem.getRockNormalMap().getSampler();
+        factory.writeDescriptorSet(rockDescriptorSets[i], common, mat);
     }
 
     return true;
@@ -1477,6 +1591,12 @@ void Renderer::render(const Camera& camera) {
     leafSystem.recordResetAndCompute(cmd, frame.frameIndex, frame.time, frame.deltaTime);
     profiler.endGpuZone(cmd, "LeafCompute");
 
+    // Water foam persistence compute pass (Phase 14)
+    profiler.beginGpuZone(cmd, "FoamCompute");
+    foamBuffer.recordCompute(cmd, frame.frameIndex, frame.deltaTime,
+                             flowMapGenerator.getFlowMapView(), flowMapGenerator.getFlowMapSampler());
+    profiler.endGpuZone(cmd, "FoamCompute");
+
     // Cloud shadow map compute pass
     if (cloudShadowSystem.isEnabled()) {
         profiler.beginGpuZone(cmd, "CloudShadow");
@@ -1539,10 +1659,55 @@ void Renderer::render(const Camera& camera) {
         profiler.endGpuZone(cmd, "Atmosphere");
     }
 
+    // Water G-buffer pass (Phase 3) - renders water mesh to mini G-buffer
+    // Skip if water was not visible last frame (temporal culling)
+    if (waterGBuffer.getPipeline() != VK_NULL_HANDLE &&
+        waterTileCull.wasWaterVisibleLastFrame(frame.frameIndex)) {
+        profiler.beginGpuZone(cmd, "WaterGBuffer");
+        waterGBuffer.beginRenderPass(cmd);
+
+        // Bind G-buffer pipeline and descriptor set
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, waterGBuffer.getPipeline());
+        VkDescriptorSet gbufferDescSet = waterGBuffer.getDescriptorSet(frame.frameIndex);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                waterGBuffer.getPipelineLayout(), 0, 1,
+                                &gbufferDescSet, 0, nullptr);
+
+        // Draw water mesh
+        waterSystem.recordMeshDraw(cmd);
+
+        waterGBuffer.endRenderPass(cmd);
+        profiler.endGpuZone(cmd, "WaterGBuffer");
+    }
+
     // HDR scene render pass
     profiler.beginGpuZone(cmd, "HDRPass");
     recordHDRPass(cmd, frame.frameIndex, frame.time);
     profiler.endGpuZone(cmd, "HDRPass");
+
+    // Screen-Space Reflections compute pass (Phase 10)
+    // Computes SSR for next frame's water - uses current scene for temporal stability
+    if (ssrSystem.isEnabled()) {
+        profiler.beginGpuZone(cmd, "SSR");
+        ssrSystem.recordCompute(cmd, frame.frameIndex,
+                                postProcessSystem.getHDRColorView(),
+                                postProcessSystem.getHDRDepthView(),
+                                frame.view, frame.projection,
+                                frame.cameraPosition);
+        profiler.endGpuZone(cmd, "SSR");
+    }
+
+    // Water tile culling compute pass (Phase 7)
+    // Determines which screen tiles contain water for optimized rendering
+    if (waterTileCull.isEnabled()) {
+        profiler.beginGpuZone(cmd, "WaterTileCull");
+        glm::mat4 viewProj = frame.projection * frame.view;
+        waterTileCull.recordTileCull(cmd, frame.frameIndex,
+                                      viewProj, frame.cameraPosition,
+                                      waterSystem.getWaterLevel(),
+                                      postProcessSystem.getHDRDepthView());
+        profiler.endGpuZone(cmd, "WaterTileCull");
+    }
 
     // Generate Hi-Z pyramid from scene depth (before bloom to ensure bloom doesn't affect it)
     profiler.beginGpuZone(cmd, "HiZPyramid");
@@ -1615,6 +1780,21 @@ void Renderer::render(const Camera& camera) {
 
 void Renderer::waitIdle() {
     vulkanContext.waitIdle();
+}
+
+void Renderer::waitForPreviousFrame() {
+    // Wait for the previous frame's fence to ensure GPU is done with resources
+    // we might be about to destroy/update.
+    //
+    // With double-buffering (MAX_FRAMES_IN_FLIGHT=2):
+    // - Frame N uses fence[N % 2]
+    // - Before updating meshes for frame N, we need frame N-1's GPU work complete
+    // - Previous frame's fence is fence[(N-1) % 2] = fence[(currentFrame + 1) % 2]
+    //
+    // This prevents race conditions where we destroy mesh buffers while the GPU
+    // is still reading them from the previous frame's commands.
+    uint32_t previousFrame = (currentFrame + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT;
+    vkWaitForFences(vulkanContext.getDevice(), 1, &inFlightFences[previousFrame], VK_TRUE, UINT64_MAX);
 }
 
 void Renderer::destroyDepthImageAndView() {
@@ -1727,6 +1907,15 @@ bool Renderer::handleResize() {
     // Resize Hi-Z system (occlusion culling)
     hiZSystem.resize(newExtent);
 
+    // Resize SSR system (screen-space reflections)
+    ssrSystem.resize(newExtent);
+
+    // Resize water tile cull system
+    waterTileCull.resize(newExtent);
+
+    // Resize water G-buffer
+    waterGBuffer.resize(newExtent);
+
     // Update extent on all rendering subsystems for viewport/scissor
     terrainSystem.setExtent(newExtent);
     skySystem.setExtent(newExtent);
@@ -1760,10 +1949,29 @@ Renderer::LightingParams Renderer::calculateLightingParams(float timeOfDay) cons
         params.moonIntensity *= (1.0f + twilightFactor * 1.0f);
     }
 
+    // Apply user-controlled moon brightness multiplier
+    params.moonIntensity *= moonBrightness;
+
     params.sunColor = celestialCalculator.getSunColor(sunPos.altitude);
     params.moonColor = celestialCalculator.getMoonColor(moonPos.altitude, moonPos.illumination);
     params.ambientColor = celestialCalculator.getAmbientColor(sunPos.altitude);
-    params.moonPhase = moonPos.phase;  // Moon phase for lunar cycle simulation
+
+    // Apply moon phase override if enabled, otherwise use astronomical calculation
+    if (useMoonPhaseOverride) {
+        params.moonPhase = manualMoonPhase;
+        // Recalculate illumination based on manual phase
+        float phaseAngle = params.moonPhase * 2.0f * glm::pi<float>();
+        float illumination = (1.0f - std::cos(phaseAngle)) * 0.5f;
+        // Adjust moon color based on manual phase illumination
+        params.moonColor = celestialCalculator.getMoonColor(moonPos.altitude, illumination);
+    } else {
+        params.moonPhase = moonPos.phase;
+    }
+    currentMoonPhase = params.moonPhase;  // Track current effective phase
+
+    // Eclipse simulation - affects sun intensity
+    params.eclipseAmount = eclipseEnabled ? eclipseAmount : 0.0f;
+
     params.julianDay = dateTime.toJulianDay();
 
     return params;
@@ -1814,6 +2022,9 @@ UniformBufferObject Renderer::buildUniformBufferData(const Camera& camera, const
     ubo.debugCascades = showCascadeDebug ? 1.0f : 0.0f;
     ubo.julianDay = static_cast<float>(lighting.julianDay);
     ubo.cloudStyle = useParaboloidClouds ? 1.0f : 0.0f;
+    ubo.cameraNear = camera.getNearPlane();
+    ubo.cameraFar = camera.getFarPlane();
+    ubo.eclipseAmount = lighting.eclipseAmount;
 
     // Copy atmosphere parameters from AtmosphereLUTSystem for use in atmosphere_common.glsl
     const auto& atmosParams = atmosphereLUTSystem.getAtmosphereParams();
@@ -1831,6 +2042,16 @@ UniformBufferObject Renderer::buildUniformBufferData(const Camera& camera, const
     ubo.heightFogLayerParams = glm::vec4(froxelSystem.getLayerThickness(),
                                           froxelSystem.getLayerDensity(),
                                           0.0f, 0.0f);
+
+    // Cloud parameters for sky.frag and cloud systems
+    ubo.cloudCoverage = cloudCoverage;
+    ubo.cloudDensity = cloudDensity;
+
+    // Moon rendering parameters for sky.frag
+    ubo.moonBrightness = moonBrightness;
+    ubo.moonDiscIntensity = moonDiscIntensity;
+    ubo.moonEarthshine = moonEarthshine;
+    ubo.moonPad = 0.0f;
 
     return ubo;
 }
@@ -1990,15 +2211,14 @@ void Renderer::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float 
     // Combine scene objects and rock objects for shadow rendering
     // Skip player character - it's rendered separately with skinned shadow pipeline
     std::vector<Renderable> allObjects;
-    const auto& sceneObjects = sceneManager.getSceneObjects();
+    const auto& sceneObjects = sceneManager.getRenderables();
     size_t playerIndex = sceneManager.getSceneBuilder().getPlayerObjectIndex();
     bool hasCharacter = sceneManager.getSceneBuilder().hasCharacter();
-    bool useGPUSkinning = hasCharacter && sceneManager.getSceneBuilder().getAnimatedCharacter().isGPUSkinningEnabled();
 
     allObjects.reserve(sceneObjects.size() + rockSystem.getSceneObjects().size());
     for (size_t i = 0; i < sceneObjects.size(); ++i) {
         // Skip player character - rendered with skinned shadow pipeline
-        if (useGPUSkinning && i == playerIndex && hasCharacter) {
+        if (hasCharacter && i == playerIndex) {
             continue;
         }
         allObjects.push_back(sceneObjects[i]);
@@ -2007,11 +2227,11 @@ void Renderer::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float 
 
     // Skinned character shadow callback (renders with GPU skinning)
     ShadowSystem::DrawCallback skinnedCallback = nullptr;
-    if (useGPUSkinning) {
+    if (hasCharacter) {
         skinnedCallback = [this, frameIndex, playerIndex](VkCommandBuffer cb, uint32_t cascade, const glm::mat4& lightMatrix) {
             (void)lightMatrix;  // Not used, cascade matrices are in UBO
             SceneBuilder& sceneBuilder = sceneManager.getSceneBuilder();
-            const auto& sceneObjs = sceneBuilder.getSceneObjects();
+            const auto& sceneObjs = sceneBuilder.getRenderables();
             if (playerIndex >= sceneObjs.size()) return;
 
             const Renderable& playerObj = sceneObjs[playerIndex];
@@ -2026,14 +2246,21 @@ void Renderer::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float 
         };
     }
 
-    shadowSystem.recordShadowPass(cmd, frameIndex, descriptorSets[frameIndex],
+    // Use any MaterialRegistry descriptor set for shadow pass (only needs common bindings/UBO)
+    // MaterialId 0 is the first registered material (crate)
+    const auto& materialRegistry = sceneManager.getSceneBuilder().getMaterialRegistry();
+    VkDescriptorSet shadowDescriptorSet = materialRegistry.getDescriptorSet(0, frameIndex);
+    shadowSystem.recordShadowPass(cmd, frameIndex, shadowDescriptorSet,
                                    allObjects,
                                    terrainCallback, grassCallback, skinnedCallback);
 }
 
 void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
-    // Helper lambda to render a scene object
-    auto renderObject = [&](const Renderable& obj, VkDescriptorSet* descSet) {
+    // Get MaterialRegistry for descriptor set lookup
+    const auto& materialRegistry = sceneManager.getSceneBuilder().getMaterialRegistry();
+
+    // Helper lambda to render a scene object with a descriptor set
+    auto renderObject = [&](const Renderable& obj, VkDescriptorSet descSet) {
         PushConstants push{};
         push.model = obj.transform;
         push.roughness = obj.roughness;
@@ -2041,13 +2268,14 @@ void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
         push.emissiveIntensity = obj.emissiveIntensity;
         push.opacity = obj.opacity;
         push.emissiveColor = glm::vec4(obj.emissiveColor, 1.0f);
+        push.pbrFlags = obj.pbrFlags;
 
         vkCmdPushConstants(cmd, pipelineLayout,
                           VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                           0, sizeof(PushConstants), &push);
 
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                pipelineLayout, 0, 1, descSet, 0, nullptr);
+                                pipelineLayout, 0, 1, &descSet, 0, nullptr);
 
         VkBuffer vertexBuffers[] = {obj.mesh->getVertexBuffer()};
         VkDeviceSize offsets[] = {0};
@@ -2057,35 +2285,35 @@ void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
         vkCmdDrawIndexed(cmd, obj.mesh->getIndexCount(), 1, 0, 0, 0);
     };
 
-    // Render scene manager objects
-    const auto& sceneObjects = sceneManager.getSceneObjects();
+    // Render scene manager objects using MaterialRegistry for descriptor set lookup
+    const auto& sceneObjects = sceneManager.getRenderables();
     size_t playerIndex = sceneManager.getSceneBuilder().getPlayerObjectIndex();
     bool hasCharacter = sceneManager.getSceneBuilder().hasCharacter();
-    bool useGPUSkinning = hasCharacter && sceneManager.getSceneBuilder().getAnimatedCharacter().isGPUSkinningEnabled();
 
     for (size_t i = 0; i < sceneObjects.size(); ++i) {
-        // Skip player character if using GPU skinning (rendered separately)
-        if (useGPUSkinning && i == playerIndex && hasCharacter) {
+        // Skip player character (rendered separately with GPU skinning)
+        if (hasCharacter && i == playerIndex) {
             continue;
         }
 
         const auto& obj = sceneObjects[i];
-        VkDescriptorSet* descSet;
-        if (obj.texture == &sceneManager.getSceneBuilder().getGroundTexture()) {
-            descSet = &groundDescriptorSets[frameIndex];
-        } else if (obj.texture == &sceneManager.getSceneBuilder().getMetalTexture()) {
-            descSet = &metalDescriptorSets[frameIndex];
-        } else if (obj.texture == &sceneManager.getSceneBuilder().getWhiteTexture()) {
-            descSet = &characterDescriptorSets[frameIndex];
-        } else {
-            descSet = &descriptorSets[frameIndex];
+
+        // Use MaterialRegistry to get descriptor set by materialId
+        // This replaces the brittle texture pointer comparison
+        VkDescriptorSet descSet = materialRegistry.getDescriptorSet(obj.materialId, frameIndex);
+        if (descSet == VK_NULL_HANDLE) {
+            // Fallback: skip objects with invalid materialId
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                "Skipping object with invalid materialId %u", obj.materialId);
+            continue;
         }
         renderObject(obj, descSet);
     }
 
-    // Render procedural rocks
+    // Render procedural rocks (RockSystem uses its own descriptor sets)
+    VkDescriptorSet rockDescSet = rockDescriptorSets[frameIndex];
     for (const auto& rock : rockSystem.getSceneObjects()) {
-        renderObject(rock, &rockDescriptorSets[frameIndex]);
+        renderObject(rock, rockDescSet);
     }
 }
 
@@ -2129,7 +2357,10 @@ void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float gra
     grassSystem.recordDraw(cmd, frameIndex, grassTime);
 
     // Draw water surface (after opaque geometry, blended)
-    waterSystem.recordDraw(cmd, frameIndex);
+    // Use temporal tile culling: skip if no tiles were visible last frame
+    if (waterTileCull.wasWaterVisibleLastFrame(frameIndex)) {
+        waterSystem.recordDraw(cmd, frameIndex);
+    }
 
     // Draw falling leaves - after grass, before weather
     leafSystem.recordDraw(cmd, frameIndex, grassTime);
@@ -2147,34 +2378,11 @@ bool Renderer::createSkinnedDescriptorSetLayout() {
 
     // Skinned descriptor set layout:
     // Same as main layout but with additional binding 12 for bone matrices UBO
-    // 0: UBO (camera/view data)
-    // 1: Diffuse texture sampler
-    // 2: Shadow map sampler (CSM cascade array)
-    // 3: Normal map sampler
-    // 4: Light buffer (SSBO for dynamic lights)
-    // 5: Emissive map sampler
-    // 6: Point shadow cube maps
-    // 7: Spot shadow depth maps
-    // 8: Snow mask texture
-    // 9: Cloud shadow map
-    // 10: Snow UBO
-    // 11: Cloud shadow UBO
-    // 12: Bone matrices UBO
-    skinnedDescriptorSetLayout = DescriptorManager::LayoutBuilder(device)
-        .addUniformBuffer(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)  // 0: UBO
-        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 1: diffuse
-        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 2: shadow
-        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 3: normal
-        .addStorageBuffer(VK_SHADER_STAGE_FRAGMENT_BIT)         // 4: lights
-        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 5: emissive
-        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 6: point shadow
-        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 7: spot shadow
-        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 8: snow mask
-        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 9: cloud shadow map
-        .addUniformBuffer(VK_SHADER_STAGE_FRAGMENT_BIT)         // 10: snow UBO
-        .addUniformBuffer(VK_SHADER_STAGE_FRAGMENT_BIT)         // 11: cloud shadow UBO
-        .addUniformBuffer(VK_SHADER_STAGE_VERTEX_BIT)           // 12: bone matrices
-        .build();
+    DescriptorManager::LayoutBuilder builder(device);
+    addCommonDescriptorBindings(builder);
+    // Add skinned-specific binding
+    builder.addBinding(Bindings::BONE_MATRICES, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT);  // 12: bone matrices
+    skinnedDescriptorSetLayout = builder.build();
 
     if (skinnedDescriptorSetLayout == VK_NULL_HANDLE) {
         SDL_Log("Failed to create skinned descriptor set layout");
@@ -2315,6 +2523,9 @@ bool Renderer::createSkinnedDescriptorSets() {
         // Bone matrices (binding 12)
         common.boneMatricesBuffer = boneMatricesBuffers[i];
         common.boneMatricesBufferSize = sizeof(BoneMatricesUBO);
+        // Placeholder texture for unused PBR bindings (13-16)
+        common.placeholderTextureView = whiteTexture.getImageView();
+        common.placeholderTextureSampler = whiteTexture.getSampler();
 
         MaterialDescriptorFactory::MaterialTextures mat{};
         mat.diffuseView = whiteTexture.getImageView();
@@ -2367,7 +2578,7 @@ void Renderer::recordSkinnedCharacter(VkCommandBuffer cmd, uint32_t frameIndex) 
                             skinnedPipelineLayout, 0, 1, &skinnedDescriptorSets[frameIndex], 0, nullptr);
 
     // Get the player object to get transform
-    const auto& sceneObjects = sceneBuilder.getSceneObjects();
+    const auto& sceneObjects = sceneBuilder.getRenderables();
     size_t playerIndex = sceneBuilder.getPlayerObjectIndex();
     if (playerIndex >= sceneObjects.size()) return;
 
@@ -2381,6 +2592,7 @@ void Renderer::recordSkinnedCharacter(VkCommandBuffer cmd, uint32_t frameIndex) 
     push.emissiveIntensity = playerObj.emissiveIntensity;
     push.opacity = playerObj.opacity;
     push.emissiveColor = glm::vec4(playerObj.emissiveColor, 1.0f);
+    push.pbrFlags = playerObj.pbrFlags;
 
     vkCmdPushConstants(cmd, skinnedPipelineLayout,
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -2402,7 +2614,7 @@ void Renderer::updateHiZObjectData() {
     std::vector<CullObjectData> cullObjects;
 
     // Gather scene objects for culling
-    const auto& sceneObjects = sceneManager.getSceneObjects();
+    const auto& sceneObjects = sceneManager.getRenderables();
     for (size_t i = 0; i < sceneObjects.size(); ++i) {
         const auto& obj = sceneObjects[i];
         if (obj.mesh == nullptr) continue;

@@ -14,9 +14,7 @@
 #include "GLTFLoader.h"
 #include "AnimatedCharacter.h"
 #include "MaterialRegistry.h"
-
-// Backward compatibility alias - Renderable is the canonical type
-using SceneObject = Renderable;
+#include "PlayerCape.h"
 
 // Holds all scene resources (meshes, textures) and provides scene objects
 class SceneBuilder {
@@ -41,8 +39,8 @@ public:
     void destroy(VmaAllocator allocator, VkDevice device);
 
     // Access to built scene
-    const std::vector<SceneObject>& getSceneObjects() const { return sceneObjects; }
-    std::vector<SceneObject>& getSceneObjects() { return sceneObjects; }
+    const std::vector<Renderable>& getRenderables() const { return sceneObjects; }
+    std::vector<Renderable>& getRenderables() { return sceneObjects; }
     size_t getPlayerObjectIndex() const { return playerObjectIndex; }
 
     // Material registry - call registerMaterials() after init(), before Renderer creates descriptor sets
@@ -64,6 +62,13 @@ public:
     Mesh& getFlagPoleMesh() { return flagPoleMesh; }
     size_t getFlagClothIndex() const { return flagClothIndex; }
     size_t getFlagPoleIndex() const { return flagPoleIndex; }
+
+    // Cape access
+    PlayerCape& getPlayerCape() { return playerCape; }
+    Mesh& getCapeMesh() { return capeMesh; }
+    size_t getCapeIndex() const { return capeIndex; }
+    bool hasCape() const { return hasCapeEnabled; }
+    void setCapeEnabled(bool enabled) { hasCapeEnabled = enabled; }
 
     // Well entrance position (for creating terrain hole)
     float getWellEntranceX() const { return wellEntranceX; }
@@ -96,16 +101,13 @@ private:
     bool createMeshes(const InitInfo& info);
     bool loadTextures(const InitInfo& info);
     void registerMaterials();
-    void createSceneObjects();
+    void createRenderables();
 
     // Get terrain height at (x, z), returns 0 if no terrain function available
     float getTerrainHeight(float x, float z) const;
 
     // Build character model transform from world position and rotation
     glm::mat4 buildCharacterTransform(const glm::vec3& position, float yRotation) const;
-
-    // Character model constants
-    static constexpr float CHARACTER_SCALE = 0.01f;  // Mixamo FBX is in cm, scale to meters
 
     // Terrain height query function
     HeightQueryFunc terrainHeightFunc;
@@ -117,8 +119,13 @@ private:
     Mesh capsuleMesh;
     Mesh flagPoleMesh;
     Mesh flagClothMesh;
+    Mesh capeMesh;
     AnimatedCharacter animatedCharacter;  // Player character (animated from glTF)
     bool hasAnimatedCharacter = false;  // True if animated character was loaded successfully
+
+    // Player cape (cloth simulation attached to character)
+    PlayerCape playerCape;
+    bool hasCapeEnabled = false;
 
     // Textures
     Texture crateTexture;
@@ -129,13 +136,16 @@ private:
     Texture metalNormalMap;
     Texture defaultEmissiveMap;  // Black texture for objects without emissive
     Texture whiteTexture;        // White texture for vertex-colored objects
+    Texture capeTexture;         // Cape diffuse texture
+    Texture capeNormalMap;       // Cape normal map
 
     // Scene objects
-    std::vector<SceneObject> sceneObjects;
+    std::vector<Renderable> sceneObjects;
     size_t playerObjectIndex = 0;
     size_t flagPoleIndex = 0;
     size_t flagClothIndex = 0;
     size_t wellEntranceIndex = 0;
+    size_t capeIndex = 0;
 
     // Well entrance position (for terrain hole creation)
     float wellEntranceX = 0.0f;
@@ -144,8 +154,10 @@ private:
     // Material registry for data-driven material management
     MaterialRegistry materialRegistry;
 
-    // Material IDs cached for use in createSceneObjects
+    // Material IDs cached for use in createRenderables
     MaterialId crateMaterialId = INVALID_MATERIAL_ID;
+    MaterialId groundMaterialId = INVALID_MATERIAL_ID;
     MaterialId metalMaterialId = INVALID_MATERIAL_ID;
     MaterialId whiteMaterialId = INVALID_MATERIAL_ID;
+    MaterialId capeMaterialId = INVALID_MATERIAL_ID;
 };

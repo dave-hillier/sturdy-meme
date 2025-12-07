@@ -298,13 +298,6 @@ glm::vec2 ErosionSimulator::worldToPixel(float wx, float wy, float terrainSize) 
     );
 }
 
-void ErosionSimulator::simulateDroplet(const ErosionConfig& config, uint32_t startX, uint32_t startY) {
-    // Not used - kept for interface compatibility
-    (void)config;
-    (void)startX;
-    (void)startY;
-}
-
 void ErosionSimulator::simulateDroplets(const ErosionConfig& config, ErosionProgressCallback progressCallback) {
     // Use D8 flow accumulation algorithm instead of random droplets
     // This gives clean river networks by calculating upstream contributing area

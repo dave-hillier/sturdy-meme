@@ -3,12 +3,28 @@
 #include "SkinnedMesh.h"
 #include "Animation.h"
 #include "AnimationStateMachine.h"
+#include "AnimationLayerController.h"
+#include "BlendSpace.h"
 #include "GLTFLoader.h"
 #include "Mesh.h"
+#include "IKSolver.h"
 #include <vk_mem_alloc.h>
 #include <string>
 #include <vector>
 #include <memory>
+
+// Debug data for skeleton visualization
+struct SkeletonDebugData {
+    struct Bone {
+        glm::vec3 startPos;   // Parent joint position
+        glm::vec3 endPos;     // This joint's position
+        std::string name;
+        int32_t parentIndex;
+        bool isEndEffector;   // True if this is a leaf bone (hand, foot, head tip)
+    };
+    std::vector<Bone> bones;
+    std::vector<glm::vec3> jointPositions;  // All joint world positions
+};
 
 // High-level animated character class
 // Combines: skinned mesh, skeleton, animations, and animation player
@@ -41,20 +57,18 @@ public:
     // movementSpeed: horizontal movement speed for animation state selection
     // isGrounded: whether the character is on the ground
     // isJumping: whether the character just started a jump
+    // worldTransform: character's world transform matrix (for IK ground queries)
     void update(float deltaTime, VmaAllocator allocator, VkDevice device,
                 VkCommandPool commandPool, VkQueue queue,
-                float movementSpeed = 0.0f, bool isGrounded = true, bool isJumping = false);
+                float movementSpeed = 0.0f, bool isGrounded = true, bool isJumping = false,
+                const glm::mat4& worldTransform = glm::mat4(1.0f));
 
     // Get the skinned mesh for rendering (uses SkinnedVertex format for GPU skinning)
     SkinnedMesh& getSkinnedMesh() { return skinnedMesh; }
     const SkinnedMesh& getSkinnedMesh() const { return skinnedMesh; }
 
-    // Legacy: Get render mesh for CPU skinning fallback
+    // Get render mesh (for scene object bounds/transform tracking)
     Mesh& getMesh() { return renderMesh; }
-    const Mesh& getMesh() const { return renderMesh; }
-
-    // Check if GPU skinning is enabled
-    bool isGPUSkinningEnabled() const { return useGPUSkinning; }
 
     // Get skeleton for external use
     const Skeleton& getSkeleton() const { return skeleton; }
@@ -74,16 +88,47 @@ public:
     // Get bone matrices for GPU skinning
     void computeBoneMatrices(std::vector<glm::mat4>& outBoneMatrices) const;
 
+    // IK System access
+    IKSystem& getIKSystem() { return ikSystem; }
+    const IKSystem& getIKSystem() const { return ikSystem; }
+
+    // Animation Layer Controller access (advanced layer-based blending)
+    AnimationLayerController& getLayerController() { return layerController; }
+    const AnimationLayerController& getLayerController() const { return layerController; }
+
+    // Enable layer controller mode (disables state machine)
+    void setUseLayerController(bool use);
+    bool isUsingLayerController() const { return useLayerController; }
+
+    // BlendSpace access for locomotion blending (from state machine)
+    BlendSpace1D& getLocomotionBlendSpace() { return stateMachine.getLocomotionBlendSpace(); }
+    const BlendSpace1D& getLocomotionBlendSpace() const { return stateMachine.getLocomotionBlendSpace(); }
+
+    // Enable blend space mode for smooth locomotion transitions
+    // When enabled, idle/walk/run blend smoothly based on speed instead of discrete state changes
+    void setUseBlendSpace(bool use);
+    bool isUsingBlendSpace() const { return stateMachine.isUsingBlendSpace(); }
+
+    // Setup locomotion blend space from available animations
+    // Call this after loading to configure the blend space with idle/walk/run clips
+    void setupLocomotionBlendSpace();
+
+    // Reset foot IK locks (call when teleporting or significantly repositioning the character)
+    void resetFootLocks() { ikSystem.resetFootLocks(); }
+
+    // Setup common IK chains (arms, legs) by searching for standard bone names
+    void setupDefaultIKChains();
+
+    // Get IK debug visualization data
+    IKDebugData getIKDebugData() const { return ikSystem.getDebugData(skeleton); }
+
+    // Get skeleton debug data for wireframe rendering
+    // worldTransform: the character's world transform matrix
+    SkeletonDebugData getSkeletonDebugData(const glm::mat4& worldTransform) const;
+
     bool isLoaded() const { return loaded; }
 
 private:
-    // Compute skinned vertices (CPU skinning)
-    void applySkinning();
-
-    // Re-upload mesh to GPU
-    void uploadMesh(VmaAllocator allocator, VkDevice device,
-                    VkCommandPool commandPool, VkQueue queue);
-
     // Original skinned mesh data (bind pose)
     std::vector<SkinnedVertex> bindPoseVertices;
     std::vector<uint32_t> indices;
@@ -94,17 +139,22 @@ private:
     std::vector<AnimationClip> animations;
     AnimationPlayer animationPlayer;
     AnimationStateMachine stateMachine;
+    AnimationLayerController layerController;
     bool useStateMachine = false;  // Set true after state machine is initialized
+    bool useLayerController = false;  // Set true to use layer controller instead
+    size_t currentAnimationIndex = 0;  // Track current animation by index, not duration
+
+    // IK system for procedural adjustments
+    IKSystem ikSystem;
 
     // Materials loaded from FBX/glTF
     std::vector<MaterialInfo> materials;
 
     // GPU skinning: SkinnedMesh keeps original vertex data, bone matrices are updated each frame
     SkinnedMesh skinnedMesh;
-    bool useGPUSkinning = true;  // Enable GPU skinning by default
 
-    // CPU skinning fallback (deprecated, kept for compatibility)
-    std::vector<Vertex> skinnedVertices;
+    // Render mesh (for scene object bounds/transform tracking)
+    std::vector<Vertex> meshVertices;  // Bind pose vertices for bounds calculation
     Mesh renderMesh;
 
     bool loaded = false;

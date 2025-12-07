@@ -2,14 +2,19 @@
 #include "Renderer.h"
 #include "Camera.h"
 #include "TreeGenerator.h"
+#include "BillboardCapture.h"
 
 #include <imgui.h>
 #include <glm/glm.hpp>
 #include <cmath>
+#include <ctime>
 
 // Helper arrays for combo boxes
 static const char* algorithmNames[] = { "Recursive", "Space Colonisation" };
 static const char* shapeNames[] = { "Sphere", "Hemisphere", "Cone", "Cylinder", "Ellipsoid", "Box" };
+static const char* barkTypeNames[] = { "Oak", "Birch", "Pine", "Willow" };
+static const char* leafTypeNames[] = { "Oak", "Ash", "Aspen", "Pine" };
+static const char* billboardModeNames[] = { "Single", "Double" };
 
 void TreeEditorGui::placeTreeAtCamera(Renderer& renderer, const Camera& camera) {
     auto& treeSystem = renderer.getTreeEditSystem();
@@ -42,32 +47,17 @@ void TreeEditorGui::render(Renderer& renderer, const Camera& camera) {
 
     auto& treeSystem = renderer.getTreeEditSystem();
 
+    // Auto-enable tree edit system when window is visible
+    if (!treeSystem.isEnabled()) {
+        treeSystem.setEnabled(true);
+    }
+
     ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoCollapse;
 
     ImGui::SetNextWindowPos(ImVec2(380, 20), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(320, 720), ImGuiCond_FirstUseEver);
 
     if (ImGui::Begin("Tree Editor", &visible, windowFlags)) {
-        // Enable/disable toggle
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 0.9f, 0.5f, 1.0f));
-        ImGui::Text("TREE EDITOR MODE");
-        ImGui::PopStyleColor();
-
-        bool enabled = treeSystem.isEnabled();
-        if (ImGui::Checkbox("Enable Tree Editor", &enabled)) {
-            treeSystem.setEnabled(enabled);
-        }
-
-        if (!enabled) {
-            ImGui::TextDisabled("Enable to edit procedural tree");
-            ImGui::End();
-            return;
-        }
-
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-
         // Visualization options
         bool wireframe = treeSystem.isWireframeMode();
         if (ImGui::Checkbox("Wireframe Mode", &wireframe)) {
@@ -84,6 +74,7 @@ void TreeEditorGui::render(Renderer& renderer, const Camera& camera) {
         ImGui::Spacing();
 
         renderAlgorithmSection(renderer);
+        renderBarkSection(renderer);
 
         auto& params = treeSystem.getParameters();
         if (params.algorithm == TreeAlgorithm::SpaceColonisation) {
@@ -98,6 +89,7 @@ void TreeEditorGui::render(Renderer& renderer, const Camera& camera) {
         renderSeedSection(renderer);
         renderTransformSection(renderer, camera);
         renderPresets(renderer);
+        renderBillboardSection(renderer);
     }
     ImGui::End();
 }
@@ -114,6 +106,48 @@ void TreeEditorGui::renderAlgorithmSection(Renderer& renderer) {
     int currentAlgo = static_cast<int>(params.algorithm);
     if (ImGui::Combo("Algorithm", &currentAlgo, algorithmNames, IM_ARRAYSIZE(algorithmNames))) {
         params.algorithm = static_cast<TreeAlgorithm>(currentAlgo);
+        changed = true;
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    if (changed) {
+        treeSystem.regenerateTree();
+    }
+}
+
+void TreeEditorGui::renderBarkSection(Renderer& renderer) {
+    auto& treeSystem = renderer.getTreeEditSystem();
+    auto& params = treeSystem.getParameters();
+    bool changed = false;
+
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.7f, 0.5f, 0.3f, 1.0f));
+    ImGui::Text("BARK");
+    ImGui::PopStyleColor();
+
+    int barkType = static_cast<int>(params.barkType);
+    if (ImGui::Combo("Bark Type", &barkType, barkTypeNames, IM_ARRAYSIZE(barkTypeNames))) {
+        params.barkType = static_cast<BarkType>(barkType);
+        changed = true;
+    }
+
+    // Bark tint color picker
+    float barkTint[3] = { params.barkTint.r, params.barkTint.g, params.barkTint.b };
+    if (ImGui::ColorEdit3("Bark Tint", barkTint)) {
+        params.barkTint = glm::vec3(barkTint[0], barkTint[1], barkTint[2]);
+        changed = true;
+    }
+
+    if (ImGui::Checkbox("Textured", &params.barkTextured)) {
+        changed = true;
+    }
+
+    // Texture scale
+    float texScale[2] = { params.barkTextureScale.x, params.barkTextureScale.y };
+    if (ImGui::SliderFloat2("Texture Scale", texScale, 0.5f, 5.0f)) {
+        params.barkTextureScale = glm::vec2(texScale[0], texScale[1]);
         changed = true;
     }
 
@@ -172,7 +206,7 @@ void TreeEditorGui::renderSpaceColonisationSection(Renderer& renderer) {
     ImGui::PopStyleColor();
 
     if (ImGui::SliderFloat("Trunk Height", &scParams.trunkHeight, 0.5f, 10.0f)) changed = true;
-    if (ImGui::SliderFloat("Trunk Segments", &scParams.trunkSegments, 1.0f, 10.0f)) changed = true;
+    if (ImGui::SliderInt("Trunk Segments", &scParams.trunkSegments, 1, 10)) changed = true;
     if (ImGui::SliderFloat("Base Thickness", &scParams.baseThickness, 0.1f, 1.0f)) changed = true;
 
     ImGui::Spacing();
@@ -295,7 +329,13 @@ void TreeEditorGui::renderBranchSection(Renderer& renderer) {
     ImGui::Text("BRANCHES");
     ImGui::PopStyleColor();
 
-    if (ImGui::SliderInt("Levels", &params.branchLevels, 1, 5)) changed = true;
+    if (ImGui::SliderInt("Levels", &params.branchLevels, 1, 5)) {
+        // Clamp leafStartLevel to not exceed branchLevels
+        if (params.leafStartLevel > params.branchLevels) {
+            params.leafStartLevel = params.branchLevels;
+        }
+        changed = true;
+    }
     if (ImGui::SliderInt("Children/Branch", &params.childrenPerBranch, 1, 8)) changed = true;
     if (ImGui::SliderFloat("Branching Angle", &params.branchingAngle, 10.0f, 80.0f, "%.0f deg")) changed = true;
     if (ImGui::SliderFloat("Spread", &params.branchingSpread, 30.0f, 360.0f, "%.0f deg")) changed = true;
@@ -344,10 +384,39 @@ void TreeEditorGui::renderLeafSection(Renderer& renderer) {
     ImGui::PopStyleColor();
 
     if (ImGui::Checkbox("Generate Leaves", &params.generateLeaves)) changed = true;
+
     if (params.generateLeaves) {
-        if (ImGui::SliderFloat("Leaf Size", &params.leafSize, 0.1f, 1.0f)) changed = true;
+        // Leaf texture type
+        int leafType = static_cast<int>(params.leafType);
+        if (ImGui::Combo("Leaf Type", &leafType, leafTypeNames, IM_ARRAYSIZE(leafTypeNames))) {
+            params.leafType = static_cast<LeafType>(leafType);
+            changed = true;
+        }
+
+        // Leaf tint color
+        float leafTint[3] = { params.leafTint.r, params.leafTint.g, params.leafTint.b };
+        if (ImGui::ColorEdit3("Leaf Tint", leafTint)) {
+            params.leafTint = glm::vec3(leafTint[0], leafTint[1], leafTint[2]);
+            changed = true;
+        }
+
+        // Billboard mode
+        int billboardMode = static_cast<int>(params.leafBillboard);
+        if (ImGui::Combo("Billboard Mode", &billboardMode, billboardModeNames, IM_ARRAYSIZE(billboardModeNames))) {
+            params.leafBillboard = static_cast<BillboardMode>(billboardMode);
+            changed = true;
+        }
+
+        if (ImGui::SliderFloat("Leaf Size", &params.leafSize, 0.1f, 5.0f)) changed = true;
+        if (ImGui::SliderFloat("Size Variance", &params.leafSizeVariance, 0.0f, 1.0f)) changed = true;
         if (ImGui::SliderInt("Leaves/Branch", &params.leavesPerBranch, 1, 20)) changed = true;
+        if (ImGui::SliderFloat("Leaf Angle", &params.leafAngle, 0.0f, 90.0f, "%.0f deg")) changed = true;
+        if (ImGui::SliderFloat("Leaf Start", &params.leafStart, 0.0f, 1.0f)) changed = true;
         if (ImGui::SliderInt("Start Level", &params.leafStartLevel, 1, params.branchLevels)) changed = true;
+        if (ImGui::SliderFloat("Alpha Test", &params.leafAlphaTest, 0.0f, 1.0f)) changed = true;
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Discard pixels with alpha below this threshold");
+        }
     }
 
     ImGui::Spacing();
@@ -433,8 +502,9 @@ void TreeEditorGui::renderPresets(Renderer& renderer) {
     ImGui::PopStyleColor();
 
     if (params.algorithm == TreeAlgorithm::Recursive) {
-        // Recursive algorithm presets
+        // Recursive algorithm presets (use legacy parameters)
         if (ImGui::Button("Oak", ImVec2(60, 0))) {
+            params.usePerLevelParams = false;
             params.trunkHeight = 8.0f;
             params.trunkRadius = 0.4f;
             params.branchLevels = 4;
@@ -447,6 +517,7 @@ void TreeEditorGui::renderPresets(Renderer& renderer) {
         }
         ImGui::SameLine();
         if (ImGui::Button("Pine", ImVec2(60, 0))) {
+            params.usePerLevelParams = false;
             params.trunkHeight = 12.0f;
             params.trunkRadius = 0.3f;
             params.trunkTaper = 0.8f;
@@ -461,6 +532,7 @@ void TreeEditorGui::renderPresets(Renderer& renderer) {
         }
         ImGui::SameLine();
         if (ImGui::Button("Willow", ImVec2(60, 0))) {
+            params.usePerLevelParams = false;
             params.trunkHeight = 6.0f;
             params.trunkRadius = 0.35f;
             params.branchLevels = 4;
@@ -473,6 +545,7 @@ void TreeEditorGui::renderPresets(Renderer& renderer) {
             treeSystem.regenerateTree();
         }
         if (ImGui::Button("Shrub", ImVec2(60, 0))) {
+            params.usePerLevelParams = false;
             params.trunkHeight = 2.0f;
             params.trunkRadius = 0.15f;
             params.branchLevels = 3;
@@ -485,6 +558,7 @@ void TreeEditorGui::renderPresets(Renderer& renderer) {
         }
         ImGui::SameLine();
         if (ImGui::Button("Birch", ImVec2(60, 0))) {
+            params.usePerLevelParams = false;
             params.trunkHeight = 10.0f;
             params.trunkRadius = 0.2f;
             params.trunkTaper = 0.9f;
@@ -608,4 +682,121 @@ void TreeEditorGui::renderPresets(Renderer& renderer) {
             treeSystem.regenerateTree();
         }
     }
+}
+
+void TreeEditorGui::renderBillboardSection(Renderer& renderer) {
+    auto& treeSystem = renderer.getTreeEditSystem();
+
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.6f, 0.8f, 1.0f, 1.0f));
+    ImGui::Text("BILLBOARD EXPORT");
+    ImGui::PopStyleColor();
+
+    // Resolution selector
+    static const char* resolutionLabels[] = { "256x256", "512x512", "1024x1024" };
+    static const int resolutionValues[] = { 256, 512, 1024 };
+    int currentResIdx = (billboardResolution == 256) ? 0 : (billboardResolution == 512) ? 1 : 2;
+
+    if (ImGui::Combo("Resolution", &currentResIdx, resolutionLabels, 3)) {
+        billboardResolution = resolutionValues[currentResIdx];
+    }
+
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Resolution per billboard view (17 views total)\nAtlas will be 5x4 = 20 cells");
+    }
+
+    ImGui::Spacing();
+
+    // Info about the capture
+    ImGui::TextDisabled("Captures: 8 side + 8 angled + 1 top = 17");
+    ImGui::TextDisabled("Atlas size: %dx%d pixels", billboardResolution * 5, billboardResolution * 4);
+
+    ImGui::Spacing();
+
+    // Generate button
+    if (captureInProgress) {
+        ImGui::BeginDisabled();
+    }
+
+    if (ImGui::Button("Generate Billboard Atlas", ImVec2(-1, 30))) {
+        captureInProgress = true;
+        captureStatus = "Initializing...";
+
+        // Initialize billboard capture if needed
+        if (!billboardCapture) {
+            billboardCapture = std::make_unique<BillboardCapture>();
+
+            BillboardCapture::InitInfo initInfo{};
+            initInfo.device = renderer.getDevice();
+            initInfo.physicalDevice = renderer.getPhysicalDevice();
+            initInfo.allocator = renderer.getVulkanContext().getAllocator();
+            initInfo.descriptorPool = renderer.getDescriptorPool();
+            initInfo.shaderPath = renderer.getShaderPath();
+            initInfo.graphicsQueue = renderer.getGraphicsQueue();
+            initInfo.commandPool = renderer.getCommandPool();
+
+            if (!billboardCapture->init(initInfo)) {
+                captureStatus = "Failed to initialize capture system";
+                captureInProgress = false;
+                billboardCapture.reset();
+            }
+        }
+
+        if (billboardCapture) {
+            captureStatus = "Rendering captures...";
+
+            // Wait for GPU to finish any pending work
+            vkDeviceWaitIdle(renderer.getDevice());
+
+            // Generate the atlas
+            BillboardAtlas atlas;
+            bool success = billboardCapture->generateAtlas(
+                treeSystem.getBranchMesh(),
+                treeSystem.getLeafMesh(),
+                treeSystem.getParameters(),
+                treeSystem.getBarkColorTexture(),
+                treeSystem.getBarkNormalTexture(),
+                treeSystem.getBarkAOTexture(),
+                treeSystem.getBarkRoughnessTexture(),
+                treeSystem.getLeafTexture(),
+                billboardResolution,
+                atlas
+            );
+
+            if (success) {
+                // Generate filename with timestamp
+                time_t now = time(nullptr);
+                struct tm* timeinfo = localtime(&now);
+                char filename[256];
+                snprintf(filename, sizeof(filename), "tree_billboard_%04d%02d%02d_%02d%02d%02d.png",
+                        timeinfo->tm_year + 1900, timeinfo->tm_mon + 1, timeinfo->tm_mday,
+                        timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
+
+                lastExportPath = filename;
+
+                if (BillboardCapture::saveAtlasToPNG(atlas, lastExportPath)) {
+                    captureStatus = "Saved: " + lastExportPath;
+                } else {
+                    captureStatus = "Failed to save PNG";
+                }
+            } else {
+                captureStatus = "Failed to generate atlas";
+            }
+        }
+
+        captureInProgress = false;
+    }
+
+    if (captureInProgress) {
+        ImGui::EndDisabled();
+    }
+
+    // Show status
+    if (!captureStatus.empty()) {
+        ImGui::Spacing();
+        ImGui::TextWrapped("%s", captureStatus.c_str());
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
 }

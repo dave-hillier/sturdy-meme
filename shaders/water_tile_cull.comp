@@ -1,0 +1,169 @@
+#version 450
+
+/*
+ * water_tile_cull.comp - Screen-Space Tile Visibility Culling
+ *
+ * Phase 7: Determines which screen tiles contain water pixels
+ * for indirect rendering optimization.
+ *
+ * Based on Far Cry 5 water rendering (GDC 2018).
+ *
+ * Algorithm:
+ * 1. Each workgroup processes one tile
+ * 2. Check if tile's frustum intersects water plane
+ * 3. Write visible tiles to output buffer
+ * 4. Atomic counter tracks total visible tiles
+ * 5. Update indirect draw command
+ */
+
+#extension GL_GOOGLE_include_directive : require
+
+#include "bindings.glsl"
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+// Depth buffer for occlusion
+layout(binding = BINDING_WATER_CULL_DEPTH) uniform sampler2D depthTexture;
+
+// Output: visible tile buffer
+struct TileData {
+    uvec2 tileCoord;
+    float minDepth;
+    float maxDepth;
+};
+
+layout(binding = BINDING_WATER_CULL_TILES, std430) writeonly buffer TileBuffer {
+    TileData tiles[];
+};
+
+// Atomic counter for visible tiles
+layout(binding = BINDING_WATER_CULL_COUNTER, std430) buffer CounterBuffer {
+    uint visibleCount;
+};
+
+// Indirect draw command
+struct IndirectDrawCommand {
+    uint vertexCount;
+    uint instanceCount;
+    uint firstVertex;
+    uint firstInstance;
+};
+
+layout(binding = BINDING_WATER_CULL_INDIRECT, std430) buffer IndirectBuffer {
+    IndirectDrawCommand drawCommand;
+};
+
+// Push constants
+layout(push_constant) uniform TileCullParams {
+    mat4 viewProjMatrix;
+    vec4 waterPlane;     // xyz = normal, w = -distance
+    vec4 cameraPos;
+    uvec2 screenSize;
+    uvec2 tileCount;
+    float waterLevel;
+    float tileSize;
+    float nearPlane;
+    float farPlane;
+};
+
+// Check if a point is below water
+bool isUnderwater(vec3 worldPos) {
+    return dot(waterPlane.xyz, worldPos) + waterPlane.w < 0.0;
+}
+
+// Convert clip space to world space
+vec3 clipToWorld(vec4 clipPos) {
+    // We need inverse viewProj - approximate by using camera position
+    // For proper implementation, pass inverse matrix in push constants
+    vec4 ndcPos = clipPos / clipPos.w;
+    // Simplified: just use the clip position as world approximation
+    return ndcPos.xyz;
+}
+
+// Convert depth to view-space Z
+float linearizeDepth(float depth) {
+    return nearPlane * farPlane / (farPlane - depth * (farPlane - nearPlane));
+}
+
+void main() {
+    uvec2 tileCoord = gl_GlobalInvocationID.xy;
+
+    // Skip tiles outside bounds
+    if (tileCoord.x >= tileCount.x || tileCoord.y >= tileCount.y) {
+        return;
+    }
+
+    // Calculate tile bounds in screen space
+    vec2 tileMin = vec2(tileCoord) * tileSize;
+    vec2 tileMax = min(tileMin + tileSize, vec2(screenSize));
+    vec2 tileMid = (tileMin + tileMax) * 0.5;
+
+    // Convert to UV space
+    vec2 uvMin = tileMin / vec2(screenSize);
+    vec2 uvMax = tileMax / vec2(screenSize);
+    vec2 uvMid = tileMid / vec2(screenSize);
+
+    // Sample depth at tile corners and center
+    float d0 = texture(depthTexture, uvMin).r;
+    float d1 = texture(depthTexture, vec2(uvMax.x, uvMin.y)).r;
+    float d2 = texture(depthTexture, vec2(uvMin.x, uvMax.y)).r;
+    float d3 = texture(depthTexture, uvMax).r;
+    float dc = texture(depthTexture, uvMid).r;
+
+    // Find min/max depth in tile
+    float minD = min(min(d0, d1), min(d2, d3));
+    float maxD = max(max(d0, d1), max(d2, d3));
+    minD = min(minD, dc);
+    maxD = max(maxD, dc);
+
+    // Convert to linear depth
+    float minLinear = linearizeDepth(minD);
+    float maxLinear = linearizeDepth(maxD);
+
+    // Simple visibility check:
+    // - Camera is above water: tile is visible if it could contain water surface
+    // - We use a conservative test based on water level
+    bool cameraAboveWater = cameraPos.y > waterLevel;
+    bool tileVisible = false;
+
+    // For tiles where the camera is above water:
+    // The tile is visible if the water plane could intersect the view frustum
+    // Simplified: always mark tiles as visible if camera is near water level
+    // or if the tile is in front of the camera
+    float cameraWaterDist = abs(cameraPos.y - waterLevel);
+
+    // Conservative: mark tile visible if water could be in view
+    // Be very conservative to avoid flickering - only cull when definitely not visible
+    if (cameraWaterDist < 500.0) {
+        // Camera is reasonably near water - assume water might be visible
+        tileVisible = true;
+    } else if (cameraAboveWater) {
+        // Camera far above water - only cull if looking at sky (infinite depth)
+        tileVisible = maxLinear < farPlane * 0.99;
+    } else {
+        // Camera far below water - water surface might still be visible above
+        tileVisible = true;
+    }
+
+    // Write visible tile to output
+    if (tileVisible) {
+        uint tileIndex = atomicAdd(visibleCount, 1);
+
+        // Store tile data
+        tiles[tileIndex].tileCoord = tileCoord;
+        tiles[tileIndex].minDepth = minLinear;
+        tiles[tileIndex].maxDepth = maxLinear;
+    }
+
+    // First thread updates indirect draw command
+    if (gl_GlobalInvocationID.xy == uvec2(0, 0)) {
+        // Wait for all tiles to be processed (memory barrier in CPU code)
+        // For now, set up for a grid of quads per tile
+        // vertexCount = 6 vertices per quad (2 triangles)
+        // instanceCount = will be updated after dispatch
+        drawCommand.vertexCount = 6;
+        drawCommand.instanceCount = 0;  // Updated by CPU after reading visibleCount
+        drawCommand.firstVertex = 0;
+        drawCommand.firstInstance = 0;
+    }
+}

@@ -943,7 +943,7 @@ bool PostProcessSystem::createHistogramDescriptorSets() {
             VkDescriptorBufferInfo paramsInfo{};
             paramsInfo.buffer = histogramParamsBuffers[i];
             paramsInfo.offset = 0;
-            paramsInfo.range = sizeof(HistogramBuildParams);
+            paramsInfo.range = sizeof(HistogramParams);
 
             std::array<VkWriteDescriptorSet, 3> writes{};
 
