@@ -499,48 +499,15 @@ void AnimatedCharacter::setUseLayerController(bool use) {
 }
 
 void AnimatedCharacter::setupLocomotionBlendSpace() {
-    locomotionBlendSpace.clear();
+    // Delegate to the state machine's blend space setup
+    stateMachine.setupLocomotionBlendSpace();
+}
 
-    // Find locomotion animations by name
-    const AnimationClip* idleClip = nullptr;
-    const AnimationClip* walkClip = nullptr;
-    const AnimationClip* runClip = nullptr;
-
-    for (const auto& clip : animations) {
-        std::string lowerName = clip.name;
-        for (char& c : lowerName) c = std::tolower(c);
-
-        if (lowerName.find("idle") != std::string::npos) {
-            idleClip = &clip;
-        } else if (lowerName.find("walk") != std::string::npos) {
-            walkClip = &clip;
-        } else if (lowerName.find("run") != std::string::npos) {
-            runClip = &clip;
-        }
-    }
-
-    // Build blend space based on root motion speed
-    // Position 0 = idle, walk speed = walk, run speed = run
-    if (idleClip) {
-        locomotionBlendSpace.addSample(0.0f, idleClip);
-    }
-
-    if (walkClip) {
-        float walkSpeed = walkClip->getRootMotionSpeed();
-        if (walkSpeed <= 0.0f) walkSpeed = 1.5f;  // Default walk speed
-        locomotionBlendSpace.addSample(walkSpeed, walkClip);
-    }
-
-    if (runClip) {
-        float runSpeed = runClip->getRootMotionSpeed();
-        if (runSpeed <= 0.0f) runSpeed = 4.0f;  // Default run speed
-        locomotionBlendSpace.addSample(runSpeed, runClip);
-    }
-
-    locomotionBlendSpace.enableTimeSync(true);
-
-    if (locomotionBlendSpace.getSampleCount() > 0) {
-        SDL_Log("AnimatedCharacter: Locomotion blend space set up with %zu samples",
-                locomotionBlendSpace.getSampleCount());
+void AnimatedCharacter::setUseBlendSpace(bool use) {
+    stateMachine.setUseBlendSpace(use);
+    if (use) {
+        SDL_Log("AnimatedCharacter: Blend space mode enabled for smooth locomotion");
+    } else {
+        SDL_Log("AnimatedCharacter: Blend space mode disabled, using discrete state transitions");
     }
 }

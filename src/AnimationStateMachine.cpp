@@ -125,7 +125,7 @@ void AnimationStateMachine::update(float deltaTime, float movementSpeed, bool is
     };
 
     // Special handling for jump animation - sync to trajectory
-    if (currentState == "jump" && jumpTrajectory.active && current && current->clip) {
+    if (currentState == jumpStateName && jumpTrajectory.active && current && current->clip) {
         float prevTime = current->time;
         jumpTrajectory.elapsedTime += deltaTime;
 
@@ -146,7 +146,7 @@ void AnimationStateMachine::update(float deltaTime, float movementSpeed, bool is
         // For locomotion animations, scale playback speed to match movement
         float prevTime = current->time;
         float speedScale = 1.0f;
-        if (currentState == "walk" || currentState == "run") {
+        if (currentState == walkStateName || currentState == runStateName) {
             speedScale = calculateSpeedScale(current);
         }
         current->time += deltaTime * current->speed * speedScale;
@@ -169,7 +169,7 @@ void AnimationStateMachine::update(float deltaTime, float movementSpeed, bool is
         if (previous && previous->clip) {
             // Also scale the previous animation during blending
             float speedScale = 1.0f;
-            if (previousState == "walk" || previousState == "run") {
+            if (previousState == walkStateName || previousState == runStateName) {
                 speedScale = calculateSpeedScale(previous);
             }
             previous->time += deltaTime * previous->speed * speedScale;
@@ -179,8 +179,14 @@ void AnimationStateMachine::update(float deltaTime, float movementSpeed, bool is
         }
     }
 
+    // Update blend space if enabled
+    if (useBlendSpace && isLocomotionState(currentState)) {
+        locomotionBlendSpace.setParameter(movementSpeed);
+        locomotionBlendSpace.update(deltaTime);
+    }
+
     // Automatic state transitions based on movement
-    if (currentState == "jump") {
+    if (currentState == jumpStateName) {
         // Check for landing - either expected or early
         if (isGrounded) {
             // Landed - deactivate trajectory and transition based on movement
@@ -193,34 +199,65 @@ void AnimationStateMachine::update(float deltaTime, float movementSpeed, bool is
                 landingBlendDuration = 0.1f;
             }
 
-            if (movementSpeed > RUN_THRESHOLD) {
-                transitionTo("run", landingBlendDuration);
-            } else if (movementSpeed > WALK_THRESHOLD) {
-                transitionTo("walk", landingBlendDuration);
+            if (movementSpeed > runThreshold) {
+                transitionTo(runStateName, landingBlendDuration);
+            } else if (movementSpeed > walkThreshold) {
+                transitionTo(walkStateName, landingBlendDuration);
             } else {
-                transitionTo("idle", landingBlendDuration + 0.05f);
+                transitionTo(idleStateName, landingBlendDuration + 0.05f);
             }
         }
     } else if (isJumping) {
         // Started jumping (isJumping is already gated by isGrounded in Application.cpp)
         // Note: startJump() should be called before update() to set up trajectory
-        transitionTo("jump", 0.1f);
-    } else if (movementSpeed > RUN_THRESHOLD) {
-        if (currentState != "run") {
-            transitionTo("run", 0.2f);
-        }
-    } else if (movementSpeed > WALK_THRESHOLD) {
-        if (currentState != "walk") {
-            transitionTo("walk", 0.2f);
+        transitionTo(jumpStateName, 0.1f);
+    } else if (!useBlendSpace) {
+        // Discrete state transitions (only when not using blend space)
+        if (movementSpeed > runThreshold) {
+            if (currentState != runStateName) {
+                transitionTo(runStateName, 0.2f);
+            }
+        } else if (movementSpeed > walkThreshold) {
+            if (currentState != walkStateName) {
+                transitionTo(walkStateName, 0.2f);
+            }
+        } else {
+            if (currentState != idleStateName) {
+                transitionTo(idleStateName, 0.25f);
+            }
         }
     } else {
-        if (currentState != "idle") {
-            transitionTo("idle", 0.25f);
+        // Blend space mode: stay in a generic locomotion state
+        // The actual blending is done in applyToSkeleton
+        if (!isLocomotionState(currentState)) {
+            // Coming from a non-locomotion state (like jump), transition to idle
+            transitionTo(idleStateName, 0.2f);
         }
     }
 }
 
 void AnimationStateMachine::applyToSkeleton(Skeleton& skeleton) const {
+    // Use blend space for locomotion if enabled
+    if (useBlendSpace && isLocomotionState(currentState) && !blending) {
+        // Sample blend space directly
+        if (locomotionBlendSpace.getSampleCount() > 0) {
+            // We need a mutable pose to sample into
+            SkeletonPose pose;
+            pose.resize(skeleton.joints.size());
+            locomotionBlendSpace.samplePose(skeleton, pose);
+
+            // Apply pose to skeleton
+            for (size_t i = 0; i < skeleton.joints.size(); ++i) {
+                glm::mat4 T = glm::translate(glm::mat4(1.0f), pose[i].translation);
+                glm::mat4 Rpre = glm::mat4_cast(skeleton.joints[i].preRotation);
+                glm::mat4 R = glm::mat4_cast(pose[i].rotation);
+                glm::mat4 S = glm::scale(glm::mat4(1.0f), pose[i].scale);
+                skeleton.joints[i].localTransform = T * Rpre * R * S;
+            }
+            return;
+        }
+    }
+
     const State* current = findState(currentState);
     if (!current || !current->clip) {
         return;
@@ -327,7 +364,7 @@ void AnimationStateMachine::startJump(const glm::vec3& startPos, const glm::vec3
     jumpTrajectory.elapsedTime = 0.0f;
 
     // Get the jump animation duration
-    const State* jumpState = findState("jump");
+    const State* jumpState = findState(jumpStateName);
     if (jumpState && jumpState->clip) {
         jumpTrajectory.animationDuration = jumpState->clip->duration;
     } else {
@@ -453,4 +490,46 @@ AnimationEventContext AnimationStateMachine::buildContext(const std::string& sta
     context.currentTime = time;
     context.userData = userData;
     return context;
+}
+
+bool AnimationStateMachine::isLocomotionState(const std::string& stateName) const {
+    return stateName == idleStateName ||
+           stateName == walkStateName ||
+           stateName == runStateName;
+}
+
+void AnimationStateMachine::setupLocomotionBlendSpace() {
+    locomotionBlendSpace.clear();
+
+    // Find locomotion states and add to blend space based on root motion speed
+    const State* idle = findState(idleStateName);
+    const State* walk = findState(walkStateName);
+    const State* run = findState(runStateName);
+
+    if (idle && idle->clip) {
+        locomotionBlendSpace.addSample(0.0f, idle->clip);
+        SDL_Log("AnimationStateMachine: Added idle to blend space at speed 0");
+    }
+
+    if (walk && walk->clip) {
+        float walkSpeed = walk->rootMotionSpeed;
+        if (walkSpeed <= 0.0f) walkSpeed = 1.5f;  // Default walk speed
+        locomotionBlendSpace.addSample(walkSpeed, walk->clip);
+        SDL_Log("AnimationStateMachine: Added walk to blend space at speed %.2f", walkSpeed);
+    }
+
+    if (run && run->clip) {
+        float runSpeed = run->rootMotionSpeed;
+        if (runSpeed <= 0.0f) runSpeed = 4.0f;  // Default run speed
+        locomotionBlendSpace.addSample(runSpeed, run->clip);
+        SDL_Log("AnimationStateMachine: Added run to blend space at speed %.2f", runSpeed);
+    }
+
+    // Enable time synchronization for smooth foot blending
+    locomotionBlendSpace.enableTimeSync(true);
+
+    if (locomotionBlendSpace.getSampleCount() > 0) {
+        SDL_Log("AnimationStateMachine: Locomotion blend space ready with %zu samples",
+                locomotionBlendSpace.getSampleCount());
+    }
 }
