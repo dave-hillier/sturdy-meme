@@ -1,7 +1,7 @@
 // Standalone biome map preprocessing tool
 // Generates biome classification from heightmap and erosion data
 
-#include "../src/BiomeGenerator.h"
+#include "BiomeGenerator.h"
 #include <SDL3/SDL_log.h>
 #include <iostream>
 #include <string>

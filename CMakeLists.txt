@@ -57,8 +57,7 @@ set(SOURCES
     src/TerrainTextures.cpp
     src/TerrainCBT.cpp
     src/TerrainMeshlet.cpp
-    src/TerrainImporter.cpp
-    src/ErosionSimulator.cpp
+    src/ErosionDataLoader.cpp
     src/ClothSimulation.cpp
     src/PlayerCape.cpp
     src/SnowMaskSystem.cpp

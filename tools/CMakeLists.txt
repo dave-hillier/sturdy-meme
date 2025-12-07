@@ -15,14 +15,15 @@ target_link_libraries(shader_reflect PRIVATE
 target_compile_features(shader_reflect PRIVATE cxx_std_17)
 
 # Terrain tile preprocessing tool
+# TerrainImporter.cpp is now local to tools/ for better decoupling from engine
 add_executable(terrain_preprocess
     terrain_preprocess.cpp
     stb_impl.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/TerrainImporter.cpp
+    TerrainImporter.cpp
 )
 
 target_include_directories(terrain_preprocess PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src
+    ${CMAKE_CURRENT_SOURCE_DIR}
     ${STB_INCLUDE_DIRS}
 )
 
@@ -35,13 +36,16 @@ target_link_libraries(terrain_preprocess PRIVATE
 target_compile_features(terrain_preprocess PRIVATE cxx_std_17)
 
 # Erosion and water placement preprocessing tool
+# ErosionSimulator.cpp is now local to tools/ for better decoupling from engine
+# It uses shared WaterPlacementData.h from ../src/
 add_executable(erosion_preprocess
     erosion_preprocess.cpp
     stb_impl.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/ErosionSimulator.cpp
+    ErosionSimulator.cpp
 )
 
 target_include_directories(erosion_preprocess PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../src
     ${STB_INCLUDE_DIRS}
 )
@@ -54,14 +58,15 @@ target_link_libraries(erosion_preprocess PRIVATE
 target_compile_features(erosion_preprocess PRIVATE cxx_std_17)
 
 # Biome map preprocessing tool
+# BiomeGenerator.cpp is now local to tools/ for better decoupling from engine
 add_executable(biome_preprocess
     biome_preprocess.cpp
     stb_impl.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/BiomeGenerator.cpp
+    BiomeGenerator.cpp
 )
 
 target_include_directories(biome_preprocess PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src
+    ${CMAKE_CURRENT_SOURCE_DIR}
     ${STB_INCLUDE_DIRS}
 )
 target_link_libraries(biome_preprocess PRIVATE

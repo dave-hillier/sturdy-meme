@@ -1,7 +1,7 @@
 // Standalone terrain tile preprocessing tool
 // Generates tile cache from a 16-bit PNG heightmap
 
-#include "../src/TerrainImporter.h"
+#include "TerrainImporter.h"
 #include <SDL3/SDL_log.h>
 #include <iostream>
 #include <string>
