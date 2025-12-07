@@ -6,6 +6,7 @@ find_package(glm CONFIG REQUIRED)
 find_package(lodepng CONFIG REQUIRED)
 find_package(miniz CONFIG REQUIRED)
 find_package(LibArchive REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
 find_path(STB_INCLUDE_DIRS "stb_image.h")
 
 add_executable(shader_reflect shader_reflect.cpp)
@@ -163,3 +164,23 @@ target_link_libraries(tile_generator_lib PUBLIC
 )
 
 target_compile_features(tile_generator_lib PRIVATE cxx_std_17)
+
+# Road network generator (A* pathfinding for settlement connections)
+add_executable(road_generator
+    road_generator/main.cpp
+    road_generator/RoadPathfinder.cpp
+)
+
+target_include_directories(road_generator PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src
+)
+
+target_link_libraries(road_generator PRIVATE
+    SDL3::SDL3
+    glm::glm
+    lodepng
+    nlohmann_json::nlohmann_json
+)
+
+target_compile_features(road_generator PRIVATE cxx_std_17)
