@@ -100,12 +100,17 @@ public:
     void setUseLayerController(bool use);
     bool isUsingLayerController() const { return useLayerController; }
 
-    // BlendSpace access for locomotion blending
-    BlendSpace1D& getLocomotionBlendSpace() { return locomotionBlendSpace; }
-    const BlendSpace1D& getLocomotionBlendSpace() const { return locomotionBlendSpace; }
+    // BlendSpace access for locomotion blending (from state machine)
+    BlendSpace1D& getLocomotionBlendSpace() { return stateMachine.getLocomotionBlendSpace(); }
+    const BlendSpace1D& getLocomotionBlendSpace() const { return stateMachine.getLocomotionBlendSpace(); }
 
-    // Setup a locomotion blend space from available animations
-    // Creates a 1D blend space based on animation speed (idle -> walk -> run)
+    // Enable blend space mode for smooth locomotion transitions
+    // When enabled, idle/walk/run blend smoothly based on speed instead of discrete state changes
+    void setUseBlendSpace(bool use);
+    bool isUsingBlendSpace() const { return stateMachine.isUsingBlendSpace(); }
+
+    // Setup locomotion blend space from available animations
+    // Call this after loading to configure the blend space with idle/walk/run clips
     void setupLocomotionBlendSpace();
 
     // Reset foot IK locks (call when teleporting or significantly repositioning the character)
@@ -135,7 +140,6 @@ private:
     AnimationPlayer animationPlayer;
     AnimationStateMachine stateMachine;
     AnimationLayerController layerController;
-    BlendSpace1D locomotionBlendSpace;
     bool useStateMachine = false;  // Set true after state machine is initialized
     bool useLayerController = false;  // Set true to use layer controller instead
     size_t currentAnimationIndex = 0;  // Track current animation by index, not duration
