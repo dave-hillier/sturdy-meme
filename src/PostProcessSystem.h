@@ -178,6 +178,8 @@ private:
     // Froxel volumetrics (Phase 4.3)
     VkImageView froxelVolumeView = VK_NULL_HANDLE;
     VkSampler froxelSampler = VK_NULL_HANDLE;
+    VkImageView bloomView = VK_NULL_HANDLE;
+    VkSampler bloomSampler = VK_NULL_HANDLE;
     bool froxelEnabled = false;
     bool hdrEnabled = true;  // HDR tonemapping enabled by default
     float froxelFarPlane = 200.0f;

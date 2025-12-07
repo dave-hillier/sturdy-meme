@@ -401,66 +401,72 @@ bool PostProcessSystem::createDescriptorSets() {
         bufferInfo.offset = 0;
         bufferInfo.range = sizeof(PostProcessUniforms);
 
-        // Depth texture (initially bound to hdrDepthView, uses same sampler)
         VkDescriptorImageInfo depthImageInfo{};
         depthImageInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
         depthImageInfo.imageView = hdrDepthView;
         depthImageInfo.sampler = hdrSampler;
 
-        // Froxel volume (placeholder - will be updated when froxel system is initialized)
-        // Initially bound to HDR color as placeholder to avoid null binding
-        VkDescriptorImageInfo froxelImageInfo{};
-        froxelImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        froxelImageInfo.imageView = hdrColorView;  // Placeholder
-        froxelImageInfo.sampler = hdrSampler;
+        std::vector<VkWriteDescriptorSet> descriptorWrites;
+        descriptorWrites.reserve(5);
 
-        // Bloom texture (placeholder - will be updated when bloom system is initialized)
-        VkDescriptorImageInfo bloomImageInfo{};
-        bloomImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        bloomImageInfo.imageView = hdrColorView;  // Placeholder
-        bloomImageInfo.sampler = hdrSampler;
+        VkWriteDescriptorSet hdrWrite{};
+        hdrWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        hdrWrite.dstSet = compositeDescriptorSets[i];
+        hdrWrite.dstBinding = 0;
+        hdrWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        hdrWrite.descriptorCount = 1;
+        hdrWrite.pImageInfo = &hdrImageInfo;
+        descriptorWrites.push_back(hdrWrite);
 
-        std::array<VkWriteDescriptorSet, 5> descriptorWrites{};
+        VkWriteDescriptorSet uboWrite{};
+        uboWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        uboWrite.dstSet = compositeDescriptorSets[i];
+        uboWrite.dstBinding = 1;
+        uboWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        uboWrite.descriptorCount = 1;
+        uboWrite.pBufferInfo = &bufferInfo;
+        descriptorWrites.push_back(uboWrite);
 
-        descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[0].dstSet = compositeDescriptorSets[i];
-        descriptorWrites[0].dstBinding = 0;
-        descriptorWrites[0].dstArrayElement = 0;
-        descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        descriptorWrites[0].descriptorCount = 1;
-        descriptorWrites[0].pImageInfo = &hdrImageInfo;
+        VkWriteDescriptorSet depthWrite{};
+        depthWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        depthWrite.dstSet = compositeDescriptorSets[i];
+        depthWrite.dstBinding = 2;
+        depthWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        depthWrite.descriptorCount = 1;
+        depthWrite.pImageInfo = &depthImageInfo;
+        descriptorWrites.push_back(depthWrite);
 
-        descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[1].dstSet = compositeDescriptorSets[i];
-        descriptorWrites[1].dstBinding = 1;
-        descriptorWrites[1].dstArrayElement = 0;
-        descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        descriptorWrites[1].descriptorCount = 1;
-        descriptorWrites[1].pBufferInfo = &bufferInfo;
+        if (froxelVolumeView != VK_NULL_HANDLE && froxelSampler != VK_NULL_HANDLE) {
+            VkDescriptorImageInfo froxelImageInfo{};
+            froxelImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            froxelImageInfo.imageView = froxelVolumeView;
+            froxelImageInfo.sampler = froxelSampler;
 
-        descriptorWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[2].dstSet = compositeDescriptorSets[i];
-        descriptorWrites[2].dstBinding = 2;
-        descriptorWrites[2].dstArrayElement = 0;
-        descriptorWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        descriptorWrites[2].descriptorCount = 1;
-        descriptorWrites[2].pImageInfo = &depthImageInfo;
+            VkWriteDescriptorSet froxelWrite{};
+            froxelWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            froxelWrite.dstSet = compositeDescriptorSets[i];
+            froxelWrite.dstBinding = 3;
+            froxelWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            froxelWrite.descriptorCount = 1;
+            froxelWrite.pImageInfo = &froxelImageInfo;
+            descriptorWrites.push_back(froxelWrite);
+        }
 
-        descriptorWrites[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[3].dstSet = compositeDescriptorSets[i];
-        descriptorWrites[3].dstBinding = 3;
-        descriptorWrites[3].dstArrayElement = 0;
-        descriptorWrites[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        descriptorWrites[3].descriptorCount = 1;
-        descriptorWrites[3].pImageInfo = &froxelImageInfo;
+        if (bloomView != VK_NULL_HANDLE && bloomSampler != VK_NULL_HANDLE) {
+            VkDescriptorImageInfo bloomImageInfo{};
+            bloomImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            bloomImageInfo.imageView = bloomView;
+            bloomImageInfo.sampler = bloomSampler;
 
-        descriptorWrites[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[4].dstSet = compositeDescriptorSets[i];
-        descriptorWrites[4].dstBinding = 4;
-        descriptorWrites[4].dstArrayElement = 0;
-        descriptorWrites[4].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        descriptorWrites[4].descriptorCount = 1;
-        descriptorWrites[4].pImageInfo = &bloomImageInfo;
+            VkWriteDescriptorSet bloomWrite{};
+            bloomWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            bloomWrite.dstSet = compositeDescriptorSets[i];
+            bloomWrite.dstBinding = 4;
+            bloomWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            bloomWrite.descriptorCount = 1;
+            bloomWrite.pImageInfo = &bloomImageInfo;
+            descriptorWrites.push_back(bloomWrite);
+        }
 
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                descriptorWrites.data(), 0, nullptr);
@@ -1206,6 +1212,9 @@ void PostProcessSystem::setFroxelVolume(VkImageView volumeView, VkSampler volume
 }
 
 void PostProcessSystem::setBloomTexture(VkImageView bloomView, VkSampler bloomSampler) {
+    this->bloomView = bloomView;
+    this->bloomSampler = bloomSampler;
+
     // Update descriptor sets with the bloom texture
     for (size_t i = 0; i < framesInFlight; i++) {
         VkDescriptorImageInfo bloomImageInfo{};
