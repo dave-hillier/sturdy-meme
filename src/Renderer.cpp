@@ -557,7 +557,9 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     waterSystem.setTidalRange(1.0f);      // ±1m tidal range
 
     // Set terrain params for shore detection
-    waterSystem.setTerrainParams(terrainConfig.size, terrainConfig.heightScale);
+    // Use terrainSystem.getConfig() to get the computed heightScale (not the local variable)
+    const auto& computedTerrainConfig = terrainSystem.getConfig();
+    waterSystem.setTerrainParams(computedTerrainConfig.size, computedTerrainConfig.heightScale);
     waterSystem.setShoreBlendDistance(3.0f);  // Soft edge over 3m
     waterSystem.setShoreFoamWidth(8.0f);      // Shore foam band 8m wide
 
@@ -574,7 +576,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     // Generate flow map from terrain data
     FlowMapGenerator::Config flowConfig{};
     flowConfig.resolution = 512;
-    flowConfig.worldSize = terrainConfig.size;
+    flowConfig.worldSize = computedTerrainConfig.size;
     flowConfig.waterLevel = seaLevel;
     flowConfig.maxFlowSpeed = 1.0f;
     flowConfig.slopeInfluence = 2.0f;  // Water flows faster on steeper slopes
@@ -585,7 +587,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     uint32_t heightRes = terrainSystem.getHeightMapResolution();
     if (heightData && heightRes > 0) {
         std::vector<float> heightVec(heightData, heightData + heightRes * heightRes);
-        if (!flowMapGenerator.generateFromTerrain(heightVec, heightRes, terrainConfig.heightScale, flowConfig)) {
+        if (!flowMapGenerator.generateFromTerrain(heightVec, heightRes, computedTerrainConfig.heightScale, flowConfig)) {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Flow map generation failed, using radial flow fallback");
             flowMapGenerator.generateRadialFlow(flowConfig, glm::vec2(0.0f));
         }

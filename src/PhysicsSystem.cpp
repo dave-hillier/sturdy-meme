@@ -381,13 +381,30 @@ PhysicsBodyID PhysicsWorld::createTerrainHeightfield(const float* samples, const
     // Create height samples for Jolt using shared TerrainHeight functions
     // See TerrainHeight.h for authoritative height formula
     // For holes, use JPH::HeightFieldShapeConstants::cNoCollisionValue
+    // Note: hole mask has higher resolution (4x) than height map, so we need to scale indices
+    const uint32_t holeMaskScale = 4;  // 2048 / 512 = 4
+    const uint32_t holeMaskRes = sampleCount * holeMaskScale;
+
     std::vector<float> joltSamples(sampleCount * sampleCount);
-    for (uint32_t i = 0; i < sampleCount * sampleCount; i++) {
-        if (holeMask && holeMask[i] > 127) {
-            // This is a hole - no collision
-            joltSamples[i] = JPH::HeightFieldShapeConstants::cNoCollisionValue;
-        } else {
-            joltSamples[i] = TerrainHeight::toWorld(samples[i], heightScale);
+    for (uint32_t y = 0; y < sampleCount; y++) {
+        for (uint32_t x = 0; x < sampleCount; x++) {
+            uint32_t heightIdx = y * sampleCount + x;
+
+            // Check hole mask at scaled coordinates (center of corresponding hole mask region)
+            bool isHole = false;
+            if (holeMask) {
+                uint32_t holeMaskX = x * holeMaskScale + holeMaskScale / 2;
+                uint32_t holeMaskY = y * holeMaskScale + holeMaskScale / 2;
+                uint32_t holeMaskIdx = holeMaskY * holeMaskRes + holeMaskX;
+                isHole = holeMask[holeMaskIdx] > 127;
+            }
+
+            if (isHole) {
+                // This is a hole - no collision
+                joltSamples[heightIdx] = JPH::HeightFieldShapeConstants::cNoCollisionValue;
+            } else {
+                joltSamples[heightIdx] = TerrainHeight::toWorld(samples[heightIdx], heightScale);
+            }
         }
     }
 
