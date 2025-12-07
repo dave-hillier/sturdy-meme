@@ -2,6 +2,7 @@
 #include "ShaderLoader.h"
 #include "Mesh.h"
 #include <SDL3/SDL.h>
+#include <algorithm>
 #include <glm/gtc/matrix_transform.hpp>
 #include <cmath>
 #include <limits>
@@ -1160,7 +1161,137 @@ void ShadowSystem::recordSkinnedMeshShadow(VkCommandBuffer cmd, uint32_t cascade
     vkCmdDrawIndexed(cmd, mesh.getIndexCount(), 1, 0, 0, 0);
 }
 
-void ShadowSystem::renderDynamicShadows(VkCommandBuffer cmd, uint32_t frameIndex) {
-    // TODO: Implement shadow rendering for each light
-    // For now, this is a placeholder that will be filled in when we hook up the rendering
+void ShadowSystem::renderDynamicShadows(VkCommandBuffer cmd, uint32_t frameIndex,
+                                        VkDescriptorSet descriptorSet,
+                                        const std::vector<Renderable>& sceneObjects,
+                                        const DrawCallback& terrainDrawCallback,
+                                        const DrawCallback& grassDrawCallback,
+                                        const DrawCallback& skinnedDrawCallback,
+                                        const std::vector<Light>& visibleLights) {
+    if (dynamicShadowPipeline == VK_NULL_HANDLE || shadowRenderPassDynamic == VK_NULL_HANDLE) {
+        return;
+    }
+
+    VkViewport viewport{};
+    viewport.x = 0.0f;
+    viewport.y = 0.0f;
+    viewport.width = static_cast<float>(DYNAMIC_SHADOW_MAP_SIZE);
+    viewport.height = static_cast<float>(DYNAMIC_SHADOW_MAP_SIZE);
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+
+    VkRect2D scissor{};
+    scissor.offset = {0, 0};
+    scissor.extent = {DYNAMIC_SHADOW_MAP_SIZE, DYNAMIC_SHADOW_MAP_SIZE};
+
+    uint32_t lightCount = static_cast<uint32_t>(std::min<size_t>(visibleLights.size(), MAX_SHADOW_CASTING_LIGHTS));
+
+    for (uint32_t lightIndex = 0; lightIndex < lightCount; lightIndex++) {
+        const Light& light = visibleLights[lightIndex];
+        if (!light.castsShadows) continue;
+
+        if (light.type == LightType::Point) {
+            if (frameIndex >= pointShadowFramebuffers.size()) continue;
+            for (uint32_t face = 0; face < pointShadowFramebuffers[frameIndex].size(); face++) {
+                VkRenderPassBeginInfo passInfo{};
+                passInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+                passInfo.renderPass = shadowRenderPassDynamic;
+                passInfo.framebuffer = pointShadowFramebuffers[frameIndex][face];
+                passInfo.renderArea.offset = {0, 0};
+                passInfo.renderArea.extent = {DYNAMIC_SHADOW_MAP_SIZE, DYNAMIC_SHADOW_MAP_SIZE};
+
+                VkClearValue clear{};
+                clear.depthStencil = {1.0f, 0};
+                passInfo.clearValueCount = 1;
+                passInfo.pClearValues = &clear;
+
+                vkCmdBeginRenderPass(cmd, &passInfo, VK_SUBPASS_CONTENTS_INLINE);
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, dynamicShadowPipeline);
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                        dynamicShadowPipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
+                vkCmdSetViewport(cmd, 0, 1, &viewport);
+                vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+                for (const auto& obj : sceneObjects) {
+                    if (!obj.castsShadow) continue;
+
+                    ShadowPushConstants push{};
+                    push.model = obj.transform;
+                    push.cascadeIndex = static_cast<int>(face);
+                    vkCmdPushConstants(cmd, dynamicShadowPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT,
+                                       0, sizeof(ShadowPushConstants), &push);
+
+                    VkBuffer vb[] = {obj.mesh->getVertexBuffer()};
+                    VkDeviceSize offsets[] = {0};
+                    vkCmdBindVertexBuffers(cmd, 0, 1, vb, offsets);
+                    vkCmdBindIndexBuffer(cmd, obj.mesh->getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+                    vkCmdDrawIndexed(cmd, obj.mesh->getIndexCount(), 1, 0, 0, 0);
+                }
+
+                if (terrainDrawCallback) {
+                    terrainDrawCallback(cmd, face, glm::mat4(1.0f));
+                }
+                if (grassDrawCallback) {
+                    grassDrawCallback(cmd, face, glm::mat4(1.0f));
+                }
+                if (skinnedDrawCallback) {
+                    skinnedDrawCallback(cmd, face, glm::mat4(1.0f));
+                }
+
+                vkCmdEndRenderPass(cmd);
+            }
+        } else {
+            if (frameIndex >= spotShadowFramebuffers.size() ||
+                lightIndex >= spotShadowFramebuffers[frameIndex].size()) {
+                continue;
+            }
+
+            VkRenderPassBeginInfo passInfo{};
+            passInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            passInfo.renderPass = shadowRenderPassDynamic;
+            passInfo.framebuffer = spotShadowFramebuffers[frameIndex][lightIndex];
+            passInfo.renderArea.offset = {0, 0};
+            passInfo.renderArea.extent = {DYNAMIC_SHADOW_MAP_SIZE, DYNAMIC_SHADOW_MAP_SIZE};
+
+            VkClearValue clear{};
+            clear.depthStencil = {1.0f, 0};
+            passInfo.clearValueCount = 1;
+            passInfo.pClearValues = &clear;
+
+            vkCmdBeginRenderPass(cmd, &passInfo, VK_SUBPASS_CONTENTS_INLINE);
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, dynamicShadowPipeline);
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                    dynamicShadowPipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
+            vkCmdSetViewport(cmd, 0, 1, &viewport);
+            vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+            for (const auto& obj : sceneObjects) {
+                if (!obj.castsShadow) continue;
+
+                ShadowPushConstants push{};
+                push.model = obj.transform;
+                push.cascadeIndex = static_cast<int>(lightIndex);
+                vkCmdPushConstants(cmd, dynamicShadowPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT,
+                                   0, sizeof(ShadowPushConstants), &push);
+
+                VkBuffer vb[] = {obj.mesh->getVertexBuffer()};
+                VkDeviceSize offsets[] = {0};
+                vkCmdBindVertexBuffers(cmd, 0, 1, vb, offsets);
+                vkCmdBindIndexBuffer(cmd, obj.mesh->getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+                vkCmdDrawIndexed(cmd, obj.mesh->getIndexCount(), 1, 0, 0, 0);
+            }
+
+            if (terrainDrawCallback) {
+                terrainDrawCallback(cmd, lightIndex, glm::mat4(1.0f));
+            }
+            if (grassDrawCallback) {
+                grassDrawCallback(cmd, lightIndex, glm::mat4(1.0f));
+            }
+            if (skinnedDrawCallback) {
+                skinnedDrawCallback(cmd, lightIndex, glm::mat4(1.0f));
+            }
+
+            vkCmdEndRenderPass(cmd);
+        }
+    }
 }

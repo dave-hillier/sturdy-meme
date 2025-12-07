@@ -9,6 +9,7 @@
 #include <functional>
 
 #include "Camera.h"
+#include "Light.h"
 #include "RenderableBuilder.h"
 #include "SkinnedMesh.h"
 
@@ -83,7 +84,13 @@ public:
     VkSampler getSpotShadowSampler() const { return spotShadowSampler; }
 
     // Dynamic shadow rendering (placeholder for future implementation)
-    void renderDynamicShadows(VkCommandBuffer cmd, uint32_t frameIndex);
+    void renderDynamicShadows(VkCommandBuffer cmd, uint32_t frameIndex,
+                              VkDescriptorSet descriptorSet,
+                              const std::vector<Renderable>& sceneObjects,
+                              const DrawCallback& terrainDrawCallback,
+                              const DrawCallback& grassDrawCallback,
+                              const DrawCallback& skinnedDrawCallback,
+                              const std::vector<Light>& visibleLights);
 
 private:
     // CSM creation methods
