@@ -202,3 +202,24 @@ target_link_libraries(road_generator PRIVATE
 )
 
 target_compile_features(road_generator PRIVATE cxx_std_17)
+
+# River sources preprocessing tool
+# Traces rivers upstream from sea-level mouths to their sources
+add_executable(river_sources_preprocess
+    river_sources_preprocess/river_sources_preprocess.cpp
+    common/stb_impl.cpp
+)
+
+target_include_directories(river_sources_preprocess PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/river_sources_preprocess
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src
+    ${STB_INCLUDE_DIRS}
+)
+
+target_link_libraries(river_sources_preprocess PRIVATE
+    SDL3::SDL3
+    glm::glm
+    lodepng
+)
+
+target_compile_features(river_sources_preprocess PRIVATE cxx_std_17)
