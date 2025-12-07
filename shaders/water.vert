@@ -150,19 +150,29 @@ void main() {
     totalDisplacement += wave2;
     totalJacobian *= jacobian2;
 
-    // Tertiary wave (counter direction, even smaller for detail)
+    // Tertiary wave (counter direction, medium detail)
     vec3 tangent3, bitangent3;
     float jacobian3;
     vec2 counterDir = -windDir * 0.5 + vec2(windDir.y, -windDir.x) * 0.5;
     vec3 wave3 = gerstnerWave(pos, time * waveParams.w * 0.7, counterDir,
-                               waveParams.y * 0.3, waveParams.z * 0.5, waveParams.x * 0.25,
+                               waveParams.y * 0.3, waveParams.z * 0.5, waveParams.x * 0.4,
                                tangent3, bitangent3, jacobian3);
     totalDisplacement += wave3;
     totalJacobian *= jacobian3;
 
-    // Blend tangents/bitangents
-    totalTangent = normalize(tangent1 + tangent2 * 0.5 + tangent3 * 0.25);
-    totalBitangent = normalize(bitangent1 + bitangent2 * 0.5 + bitangent3 * 0.25);
+    // Quaternary wave (fine ripples for surface texture)
+    vec3 tangent4, bitangent4;
+    float jacobian4;
+    vec2 rippleDir = normalize(windDir + vec2(0.3, 0.7));
+    vec3 wave4 = gerstnerWave(pos, time * waveParams2.w * 1.5, rippleDir,
+                               2.0, 0.2, 0.05,  // Short wavelength, low steepness, small amplitude
+                               tangent4, bitangent4, jacobian4);
+    totalDisplacement += wave4;
+    totalJacobian *= jacobian4;
+
+    // Blend tangents/bitangents with increased weights for secondary waves
+    totalTangent = normalize(tangent1 + tangent2 * 0.7 + tangent3 * 0.5 + tangent4 * 0.3);
+    totalBitangent = normalize(bitangent1 + bitangent2 * 0.7 + bitangent3 * 0.5 + bitangent4 * 0.3);
 
     // Calculate normal from tangent and bitangent
     vec3 normal = normalize(cross(totalBitangent, totalTangent));

@@ -1,0 +1,102 @@
+#version 450
+
+/*
+ * ssr_blur.comp - Bilateral Blur for Screen-Space Reflections
+ *
+ * Applies an edge-aware blur to the SSR result to reduce blockiness
+ * while preserving sharp edges at geometry boundaries.
+ */
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+// Input SSR texture (from main SSR pass)
+layout(binding = 0) uniform sampler2D ssrInput;
+
+// Depth texture for edge detection
+layout(binding = 1) uniform sampler2D depthTexture;
+
+// Output blurred SSR
+layout(binding = 2, rgba16f) uniform writeonly image2D ssrOutput;
+
+// Push constants
+layout(push_constant) uniform BlurParams {
+    vec2 resolution;      // SSR texture resolution (half screen)
+    vec2 texelSize;       // 1.0 / resolution
+    float depthThreshold; // Depth difference threshold for bilateral weight
+    float blurRadius;     // Blur kernel radius (in pixels)
+    float padding1;
+    float padding2;
+};
+
+// Bilateral blur kernel
+// Uses depth to weight samples - samples at different depths get less weight
+void main() {
+    ivec2 pixelCoord = ivec2(gl_GlobalInvocationID.xy);
+
+    if (pixelCoord.x >= int(resolution.x) || pixelCoord.y >= int(resolution.y)) {
+        return;
+    }
+
+    vec2 uv = (vec2(pixelCoord) + 0.5) / resolution;
+
+    // Get center pixel values
+    vec4 centerColor = texture(ssrInput, uv);
+    float centerDepth = texture(depthTexture, uv).r;
+
+    // Skip sky pixels (no reflection data)
+    if (centerDepth >= 0.9999) {
+        imageStore(ssrOutput, pixelCoord, centerColor);
+        return;
+    }
+
+    // Skip pixels with no SSR hit (alpha = 0)
+    if (centerColor.a < 0.01) {
+        imageStore(ssrOutput, pixelCoord, centerColor);
+        return;
+    }
+
+    // Accumulate weighted samples
+    vec4 colorSum = vec4(0.0);
+    float weightSum = 0.0;
+
+    // 5x5 kernel with bilateral weighting
+    int radius = int(blurRadius);
+    for (int y = -radius; y <= radius; y++) {
+        for (int x = -radius; x <= radius; x++) {
+            vec2 sampleUV = uv + vec2(float(x), float(y)) * texelSize;
+
+            // Clamp to valid UV range
+            sampleUV = clamp(sampleUV, vec2(0.0), vec2(1.0));
+
+            // Sample color and depth
+            vec4 sampleColor = texture(ssrInput, sampleUV);
+            float sampleDepth = texture(depthTexture, sampleUV).r;
+
+            // Spatial weight (Gaussian-like falloff)
+            float dist = length(vec2(x, y));
+            float spatialWeight = exp(-dist * dist / (2.0 * blurRadius * blurRadius));
+
+            // Depth weight (bilateral term)
+            // Reduce weight for samples at different depths to preserve edges
+            float depthDiff = abs(sampleDepth - centerDepth);
+            float depthWeight = exp(-depthDiff * depthDiff / (depthThreshold * depthThreshold));
+
+            // Confidence weight - prefer samples with high SSR confidence
+            float confidenceWeight = max(sampleColor.a, 0.1);
+
+            // Combined weight
+            float weight = spatialWeight * depthWeight * confidenceWeight;
+
+            colorSum += sampleColor * weight;
+            weightSum += weight;
+        }
+    }
+
+    // Normalize
+    vec4 result = colorSum / max(weightSum, 0.001);
+
+    // Preserve original confidence (alpha) but smooth the color
+    result.a = centerColor.a;
+
+    imageStore(ssrOutput, pixelCoord, result);
+}

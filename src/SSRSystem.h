@@ -54,6 +54,16 @@ public:
         float padding;              // Alignment
     };
 
+    // Push constants for blur compute shader
+    struct BlurPushConstants {
+        glm::vec2 resolution;       // SSR texture resolution
+        glm::vec2 texelSize;        // 1.0 / resolution
+        float depthThreshold;       // Depth difference threshold for bilateral weight
+        float blurRadius;           // Blur kernel radius in pixels
+        float padding1;
+        float padding2;
+    };
+
     SSRSystem() = default;
     ~SSRSystem() = default;
 
@@ -80,15 +90,21 @@ public:
     void setMaxSteps(int steps) { maxSteps = steps; }
     void setFadeDistance(float start, float end) { fadeStart = start; fadeEnd = end; }
     void setEnabled(bool enable) { enabled = enable; }
+    void setBlurEnabled(bool enable) { blurEnabled = enable; }
+    void setBlurRadius(float radius) { blurRadius = radius; }
+    void setBlurDepthThreshold(float threshold) { blurDepthThreshold = threshold; }
 
     float getMaxDistance() const { return maxDistance; }
     float getThickness() const { return thickness; }
     int getMaxSteps() const { return maxSteps; }
     bool isEnabled() const { return enabled; }
+    bool isBlurEnabled() const { return blurEnabled; }
+    float getBlurRadius() const { return blurRadius; }
 
 private:
     bool createSSRBuffers();
     bool createComputePipeline();
+    bool createBlurPipeline();
     bool createDescriptorSets();
 
     VkDevice device = VK_NULL_HANDLE;
@@ -101,6 +117,7 @@ private:
     uint32_t framesInFlight = 0;
     VkExtent2D extent = {0, 0};
     bool enabled = true;
+    bool blurEnabled = false;        // Disabled - causes screen corruption, needs debugging
 
     // SSR parameters
     float maxDistance = 100.0f;     // Max reflection distance
@@ -110,6 +127,10 @@ private:
     float fadeStart = 0.7f;         // Start fading reflections at 70% of max distance
     float fadeEnd = 1.0f;           // Fully fade at 100% of max distance
     float temporalBlend = 0.9f;     // Temporal stability blend factor
+
+    // Blur parameters
+    float blurRadius = 2.0f;        // Blur kernel radius in pixels
+    float blurDepthThreshold = 0.01f; // Depth threshold for bilateral weight
 
     // Double-buffered SSR result (ping-pong for temporal filtering)
     // RGBA16F format - rgb = reflection color, a = confidence
@@ -121,10 +142,24 @@ private:
     // Sampler
     VkSampler sampler = VK_NULL_HANDLE;
 
-    // Compute pipeline
+    // Main SSR compute pipeline
     VkPipeline computePipeline = VK_NULL_HANDLE;
     VkPipelineLayout computePipelineLayout = VK_NULL_HANDLE;
     VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
     std::vector<VkDescriptorSet> descriptorSets;
+
+    // Blur compute pipeline
+    VkPipeline blurPipeline = VK_NULL_HANDLE;
+    VkPipelineLayout blurPipelineLayout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout blurDescriptorSetLayout = VK_NULL_HANDLE;
+    std::vector<VkDescriptorSet> blurDescriptorSets;
+
+    // Intermediate buffer for blur (SSR writes here, blur reads and writes to final)
+    VkImage ssrIntermediate = VK_NULL_HANDLE;
+    VkImageView ssrIntermediateView = VK_NULL_HANDLE;
+    VmaAllocation ssrIntermediateAllocation = VK_NULL_HANDLE;
+
+    // Store depth view for blur pass
+    VkImageView cachedDepthView = VK_NULL_HANDLE;
 };

@@ -445,6 +445,28 @@ void main() {
     // Mix with white for scattered light in turbid water
     vec3 baseColor = mat.color.rgb * waterTransmission;
 
+    // =========================================================================
+    // DEPTH-BASED COLOR BLENDING (English estuary style)
+    // Shallow water is murky/muddy, surface is grey-green, deep is dark grey-blue
+    // =========================================================================
+    vec3 shoreColor = vec3(0.35, 0.38, 0.32);   // Muddy brown-green (estuary sediment)
+    vec3 surfaceColor = vec3(0.15, 0.22, 0.25); // Grey-green (mid-depth)
+    vec3 depthColor = vec3(0.05, 0.1, 0.15);    // Dark grey-blue (deep water)
+
+    // Per-channel extinction distances for realistic color falloff
+    vec3 extinctionDist = vec3(5.0, 40.0, 150.0); // Red fades fast, blue lingers
+
+    // Blend shore color into surface based on shallow depth
+    float shoreBlend = 1.0 - smoothstep(0.0, 10.0, waterDepth);
+    vec3 depthTint = mix(surfaceColor, shoreColor, shoreBlend * turbidity);
+
+    // Blend surface into deep color based on extinction
+    vec3 extinctionFactor = clamp(waterDepth / extinctionDist, 0.0, 1.0);
+    depthTint = mix(depthTint, depthColor, extinctionFactor);
+
+    // Apply depth tint to base color - blend with physical transmission
+    baseColor = mix(baseColor, depthTint * waterTransmission, 0.5);
+
     // Sun color used for SSS and specular - calculate once
     vec3 sunColor = ubo.sunColor.rgb * ubo.sunDirection.w;
 
@@ -664,49 +686,41 @@ void main() {
     }
 
     // --- Phase 15: Intersection Foam (shore + geometry) ---
-    // Enhanced shore foam with better intersection detection and flow advection
+    // Simplified shore foam with better visibility
     float shoreFoamAmount = 0.0;
     if (insideTerrain && waterDepth > 0.0 && waterDepth < shoreFoamWidth) {
-        float fw = shoreFoamWidth;
+        // Simple gradient-based foam that's always visible near shore
+        // smoothstep from shoreFoamWidth (outer edge, 0 foam) to 0 (waterline, max foam)
+        float shoreGradient = smoothstep(shoreFoamWidth, 0.0, waterDepth);
 
-        // Wave-modulated intersection detection
-        // Waves push and pull the waterline, creating dynamic foam patterns
-        float waveInfluence = sin(fragWaveHeight * 10.0 + time * 2.0) * 0.3 + 0.7;
-        float effectiveDepth = waterDepth / waveInfluence;
+        // Wave-modulated for natural animation
+        float waveModulation = sin(fragWaveHeight * 8.0 + time * 2.0) * 0.2 + 0.8;
+        shoreGradient *= waveModulation;
 
-        // Create foam bands at different depths - more bands for richer look
-        float band1 = smoothstep(0.0, fw * 0.15, effectiveDepth) * smoothstep(fw * 0.35, fw * 0.1, effectiveDepth);
-        float band2 = smoothstep(fw * 0.25, fw * 0.4, effectiveDepth) * smoothstep(fw * 0.6, fw * 0.4, effectiveDepth);
-        float band3 = smoothstep(fw * 0.5, fw * 0.7, effectiveDepth) * smoothstep(fw, fw * 0.7, effectiveDepth);
+        // Flow-advected foam texture for organic movement
+        vec2 advectedUV = fragWorldPos.xz * 0.08 + flowSample.flowDir * time * 0.2;
+        float advectedNoise = texture(foamNoiseTexture, advectedUV).r;
 
-        // Flow-advected foam UVs for intersection foam
-        // Foam appears at intersection and flows away with water
-        vec2 advectedUV = fragWorldPos.xz * 0.1 + flowSample.flowDir * time * 0.3;
-        float advectedNoise = texture(foamNoiseTexture, advectedUV * 0.5).r;
+        // Combine gradient with noise - use max to ensure foam is always visible
+        float foamNoise = mix(combinedFoamNoise, advectedNoise, 0.4);
+        foamNoise = smoothstep(0.2, 0.7, foamNoise);  // Add contrast
 
-        // Modulate bands with foam texture for organic cellular look
-        shoreFoamAmount = band1 * smoothstep(0.3, 0.7, foam1);
-        shoreFoamAmount += band2 * smoothstep(0.35, 0.65, foam2) * 0.7;
-        shoreFoamAmount += band3 * smoothstep(0.4, 0.6, combinedFoamNoise) * 0.4;
+        // Shore foam = gradient * noise, with minimum visibility
+        shoreFoamAmount = shoreGradient * foamNoise;
 
-        // Strong foam right at the waterline with wave dynamics
-        float waterlineIntensity = smoothstep(1.0, 0.0, effectiveDepth);
-        // Add advected noise for foam that appears to flow away from the shore
-        float dynamicWaterline = waterlineIntensity * mix(foam2, advectedNoise, 0.5);
-        shoreFoamAmount = max(shoreFoamAmount, dynamicWaterline);
+        // Strong waterline foam (very close to shore)
+        float waterlineFoam = smoothstep(2.0, 0.0, waterDepth) * 0.8;
+        shoreFoamAmount = max(shoreFoamAmount, waterlineFoam * foam2);
 
-        // Intersection foam boost - extra foam very close to geometry
-        float intersectionStrength = smoothstep(0.5, 0.0, waterDepth);
-        float intersectionFoam = intersectionStrength * advectedNoise * 1.5;
-        shoreFoamAmount = max(shoreFoamAmount, intersectionFoam);
+        // Boost in fast-flowing areas
+        shoreFoamAmount *= mix(1.0, 1.5, flowSample.speed);
+    }
 
-        // Boost shore foam in fast-flowing areas (rapids effect)
-        shoreFoamAmount *= mix(1.0, 1.8, flowSample.speed);
-
-        // Add splashing effect based on wave height at shoreline
-        float splashFactor = smoothstep(0.0, 0.05, fragWaveHeight) * intersectionStrength;
-        float splashFoam = splashFactor * foam3 * 0.8;
-        shoreFoamAmount = max(shoreFoamAmount, splashFoam);
+    // Fallback: If not inside terrain but shallow depth detected, still show some foam
+    // This handles cases where terrain UV mapping might not work perfectly
+    if (!insideTerrain && waterDepth > 0.0 && waterDepth < shoreFoamWidth * 0.5) {
+        float fallbackFoam = smoothstep(shoreFoamWidth * 0.5, 0.0, waterDepth) * combinedFoamNoise * 0.5;
+        shoreFoamAmount = max(shoreFoamAmount, fallbackFoam);
     }
 
     // =========================================================================
@@ -787,16 +801,15 @@ void main() {
     float alpha = shoreAlpha * foamOpacity;
 
     // DEBUG: Visualize water depth as color gradient
-    // Uncomment to debug terrain sampling:
     // Red = shallow (0-5m), Green = medium (5-20m), Blue = deep (20m+)
-    /*
+    #if 0  // Set to 1 to enable debug
     vec3 debugColor = vec3(0.0);
     debugColor.r = 1.0 - smoothstep(0.0, 5.0, waterDepth);
     debugColor.g = smoothstep(0.0, 5.0, waterDepth) * (1.0 - smoothstep(5.0, 20.0, waterDepth));
     debugColor.b = smoothstep(5.0, 20.0, waterDepth);
     outColor = vec4(debugColor, 1.0);
     return;
-    */
+    #endif
 
     outColor = vec4(finalColor, alpha);
 }

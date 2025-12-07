@@ -17,9 +17,10 @@ bool SSRSystem::init(const InitInfo& info) {
 
     if (!createSSRBuffers()) return false;
     if (!createComputePipeline()) return false;
+    if (!createBlurPipeline()) return false;
     if (!createDescriptorSets()) return false;
 
-    SDL_Log("SSRSystem initialized: %dx%d", extent.width, extent.height);
+    SDL_Log("SSRSystem initialized: %dx%d (with bilateral blur)", extent.width, extent.height);
     return true;
 }
 
@@ -34,7 +35,7 @@ void SSRSystem::destroy() {
         descriptorPool = VK_NULL_HANDLE;
     }
 
-    // Destroy pipeline resources
+    // Destroy main pipeline resources
     if (computePipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(device, computePipeline, nullptr);
         computePipeline = VK_NULL_HANDLE;
@@ -48,10 +49,35 @@ void SSRSystem::destroy() {
         descriptorSetLayout = VK_NULL_HANDLE;
     }
 
+    // Destroy blur pipeline resources
+    if (blurPipeline != VK_NULL_HANDLE) {
+        vkDestroyPipeline(device, blurPipeline, nullptr);
+        blurPipeline = VK_NULL_HANDLE;
+    }
+    if (blurPipelineLayout != VK_NULL_HANDLE) {
+        vkDestroyPipelineLayout(device, blurPipelineLayout, nullptr);
+        blurPipelineLayout = VK_NULL_HANDLE;
+    }
+    if (blurDescriptorSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(device, blurDescriptorSetLayout, nullptr);
+        blurDescriptorSetLayout = VK_NULL_HANDLE;
+    }
+
     // Destroy sampler
     if (sampler != VK_NULL_HANDLE) {
         vkDestroySampler(device, sampler, nullptr);
         sampler = VK_NULL_HANDLE;
+    }
+
+    // Destroy intermediate buffer
+    if (ssrIntermediateView != VK_NULL_HANDLE) {
+        vkDestroyImageView(device, ssrIntermediateView, nullptr);
+        ssrIntermediateView = VK_NULL_HANDLE;
+    }
+    if (ssrIntermediate != VK_NULL_HANDLE) {
+        vmaDestroyImage(allocator, ssrIntermediate, ssrIntermediateAllocation);
+        ssrIntermediate = VK_NULL_HANDLE;
+        ssrIntermediateAllocation = VK_NULL_HANDLE;
     }
 
     // Destroy SSR buffers
@@ -76,6 +102,16 @@ void SSRSystem::resize(VkExtent2D newExtent) {
     }
 
     extent = newExtent;
+
+    // Recreate intermediate buffer
+    if (ssrIntermediateView != VK_NULL_HANDLE) {
+        vkDestroyImageView(device, ssrIntermediateView, nullptr);
+        ssrIntermediateView = VK_NULL_HANDLE;
+    }
+    if (ssrIntermediate != VK_NULL_HANDLE) {
+        vmaDestroyImage(allocator, ssrIntermediate, ssrIntermediateAllocation);
+        ssrIntermediate = VK_NULL_HANDLE;
+    }
 
     // Recreate SSR buffers at new size
     for (int i = 0; i < 2; i++) {
@@ -146,6 +182,31 @@ bool SSRSystem::createSSRBuffers() {
         }
     }
 
+    // Create intermediate buffer for blur pass
+    if (vmaCreateImage(allocator, &imageInfo, &allocInfo,
+                       &ssrIntermediate, &ssrIntermediateAllocation, nullptr) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SSR intermediate image");
+        return false;
+    }
+
+    {
+        VkImageViewCreateInfo viewInfo{};
+        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        viewInfo.image = ssrIntermediate;
+        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        viewInfo.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        viewInfo.subresourceRange.baseMipLevel = 0;
+        viewInfo.subresourceRange.levelCount = 1;
+        viewInfo.subresourceRange.baseArrayLayer = 0;
+        viewInfo.subresourceRange.layerCount = 1;
+
+        if (vkCreateImageView(device, &viewInfo, nullptr, &ssrIntermediateView) != VK_SUCCESS) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SSR intermediate image view");
+            return false;
+        }
+    }
+
     // Create sampler
     VkSamplerCreateInfo samplerInfo{};
     samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
@@ -185,6 +246,29 @@ bool SSRSystem::createSSRBuffers() {
         barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.image = ssrResult[i];
+        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        barrier.subresourceRange.baseMipLevel = 0;
+        barrier.subresourceRange.levelCount = 1;
+        barrier.subresourceRange.baseArrayLayer = 0;
+        barrier.subresourceRange.layerCount = 1;
+        barrier.srcAccessMask = 0;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+
+        vkCmdPipelineBarrier(cmd,
+                             VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             0, 0, nullptr, 0, nullptr, 1, &barrier);
+    }
+
+    // Also transition intermediate buffer
+    {
+        VkImageMemoryBarrier barrier{};
+        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image = ssrIntermediate;
         barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         barrier.subresourceRange.baseMipLevel = 0;
         barrier.subresourceRange.levelCount = 1;
@@ -309,26 +393,118 @@ bool SSRSystem::createComputePipeline() {
     return true;
 }
 
+bool SSRSystem::createBlurPipeline() {
+    // Blur descriptor set layout:
+    // 0: SSR input (sampler2D)
+    // 1: Depth buffer (sampler2D) for bilateral weights
+    // 2: Blurred output (storage image, write)
+
+    auto ssrInputBinding = BindingBuilder()
+        .setBinding(0)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
+        .build();
+
+    auto depthBinding = BindingBuilder()
+        .setBinding(1)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
+        .build();
+
+    auto outputBinding = BindingBuilder()
+        .setBinding(2)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+        .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
+        .build();
+
+    std::array<VkDescriptorSetLayoutBinding, 3> bindings = {
+        ssrInputBinding, depthBinding, outputBinding
+    };
+
+    VkDescriptorSetLayoutCreateInfo layoutInfo{};
+    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
+    layoutInfo.pBindings = bindings.data();
+
+    if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &blurDescriptorSetLayout) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SSR blur descriptor set layout");
+        return false;
+    }
+
+    // Push constant range for blur parameters
+    VkPushConstantRange pushConstantRange{};
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = sizeof(BlurPushConstants);
+
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipelineLayoutInfo.setLayoutCount = 1;
+    pipelineLayoutInfo.pSetLayouts = &blurDescriptorSetLayout;
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
+
+    if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &blurPipelineLayout) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SSR blur pipeline layout");
+        return false;
+    }
+
+    // Load blur compute shader
+    std::string shaderFile = shaderPath + "/ssr_blur.comp.spv";
+    VkShaderModule shaderModule = ShaderLoader::loadShaderModule(device, shaderFile);
+    if (shaderModule == VK_NULL_HANDLE) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load SSR blur compute shader: %s", shaderFile.c_str());
+        return false;
+    }
+
+    VkPipelineShaderStageCreateInfo stageInfo{};
+    stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    stageInfo.module = shaderModule;
+    stageInfo.pName = "main";
+
+    VkComputePipelineCreateInfo pipelineInfo{};
+    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    pipelineInfo.stage = stageInfo;
+    pipelineInfo.layout = blurPipelineLayout;
+
+    VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1,
+                                                &pipelineInfo, nullptr, &blurPipeline);
+    vkDestroyShaderModule(device, shaderModule, nullptr);
+
+    if (result != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SSR blur compute pipeline");
+        return false;
+    }
+
+    SDL_Log("SSR blur compute pipeline created");
+    return true;
+}
+
 bool SSRSystem::createDescriptorSets() {
-    // Create descriptor pool
+    // Create descriptor pool - need sets for both main SSR and blur passes
     std::array<VkDescriptorPoolSize, 2> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[0].descriptorCount = framesInFlight * 3;  // color, depth, prev per frame
+    // Main SSR: color, depth, prev (3 per frame)
+    // Blur: ssr input, depth (2 per frame)
+    poolSizes[0].descriptorCount = framesInFlight * 5;
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    poolSizes[1].descriptorCount = framesInFlight;
+    // Main SSR: output (1 per frame)
+    // Blur: output (1 per frame)
+    poolSizes[1].descriptorCount = framesInFlight * 2;
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
     poolInfo.pPoolSizes = poolSizes.data();
-    poolInfo.maxSets = framesInFlight;
+    poolInfo.maxSets = framesInFlight * 2;  // main SSR + blur per frame
 
     if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SSR descriptor pool");
         return false;
     }
 
-    // Allocate descriptor sets
+    // Allocate main SSR descriptor sets
     std::vector<VkDescriptorSetLayout> layouts(framesInFlight, descriptorSetLayout);
 
     VkDescriptorSetAllocateInfo allocInfo{};
@@ -340,6 +516,16 @@ bool SSRSystem::createDescriptorSets() {
     descriptorSets.resize(framesInFlight);
     if (vkAllocateDescriptorSets(device, &allocInfo, descriptorSets.data()) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate SSR descriptor sets");
+        return false;
+    }
+
+    // Allocate blur descriptor sets
+    std::vector<VkDescriptorSetLayout> blurLayouts(framesInFlight, blurDescriptorSetLayout);
+    allocInfo.pSetLayouts = blurLayouts.data();
+
+    blurDescriptorSets.resize(framesInFlight);
+    if (vkAllocateDescriptorSets(device, &allocInfo, blurDescriptorSets.data()) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate SSR blur descriptor sets");
         return false;
     }
 
@@ -355,10 +541,24 @@ void SSRSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex,
         return;
     }
 
+    // Cache depth view for blur pass
+    cachedDepthView = hdrDepthView;
+
     // Swap ping-pong buffers
     int writeBuffer = 1 - currentBuffer;
 
-    // Update descriptor set for this frame
+    // SSR extent (half resolution)
+    VkExtent2D ssrExtent = {extent.width / 2, extent.height / 2};
+    uint32_t groupsX = (ssrExtent.width + 7) / 8;
+    uint32_t groupsY = (ssrExtent.height + 7) / 8;
+
+    // Determine where SSR writes to:
+    // - If blur enabled: write to intermediate, blur will write to final
+    // - If blur disabled: write directly to final
+    VkImageView ssrOutputView = blurEnabled ? ssrIntermediateView : ssrResultView[writeBuffer];
+    VkImage ssrOutputImage = blurEnabled ? ssrIntermediate : ssrResult[writeBuffer];
+
+    // Update descriptor set for main SSR pass
     VkDescriptorImageInfo colorInfo{};
     colorInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     colorInfo.imageView = hdrColorView;
@@ -371,7 +571,7 @@ void SSRSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex,
 
     VkDescriptorImageInfo outputInfo{};
     outputInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-    outputInfo.imageView = ssrResultView[writeBuffer];
+    outputInfo.imageView = ssrOutputView;
 
     VkDescriptorImageInfo prevInfo{};
     prevInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
@@ -410,7 +610,7 @@ void SSRSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex,
 
     vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 
-    // Build push constants
+    // Build push constants for main SSR
     SSRPushConstants pc{};
     pc.viewMatrix = view;
     pc.projMatrix = proj;
@@ -418,8 +618,8 @@ void SSRSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex,
     pc.invProjMatrix = glm::inverse(proj);
     pc.cameraPos = glm::vec4(cameraPos, 1.0f);
     pc.screenParams = glm::vec4(
-        static_cast<float>(extent.width / 2),  // Half resolution
-        static_cast<float>(extent.height / 2),
+        static_cast<float>(ssrExtent.width),
+        static_cast<float>(ssrExtent.height),
         2.0f / static_cast<float>(extent.width),
         2.0f / static_cast<float>(extent.height)
     );
@@ -431,26 +631,23 @@ void SSRSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex,
     pc.fadeEnd = fadeEnd;
     pc.temporalBlend = temporalBlend;
 
-    // Bind pipeline and dispatch
+    // Bind pipeline and dispatch main SSR pass
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
                             computePipelineLayout, 0, 1, &descriptorSets[frameIndex], 0, nullptr);
     vkCmdPushConstants(cmd, computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT,
                        0, sizeof(SSRPushConstants), &pc);
 
-    // Dispatch - 8x8 workgroups
-    uint32_t groupsX = (extent.width / 2 + 7) / 8;
-    uint32_t groupsY = (extent.height / 2 + 7) / 8;
     vkCmdDispatch(cmd, groupsX, groupsY, 1);
 
-    // Memory barrier for the SSR result
+    // Barrier after SSR pass
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
     barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
     barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.image = ssrResult[writeBuffer];
+    barrier.image = ssrOutputImage;
     barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     barrier.subresourceRange.baseMipLevel = 0;
     barrier.subresourceRange.levelCount = 1;
@@ -459,10 +656,83 @@ void SSRSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex,
     barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
     barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
-    vkCmdPipelineBarrier(cmd,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                         0, 0, nullptr, 0, nullptr, 1, &barrier);
+    // If blur is enabled, dispatch blur pass
+    if (blurEnabled && blurPipeline != VK_NULL_HANDLE) {
+        // Barrier: SSR output -> blur input
+        vkCmdPipelineBarrier(cmd,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+        // Update blur descriptor set
+        VkDescriptorImageInfo blurInputInfo{};
+        blurInputInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        blurInputInfo.imageView = ssrIntermediateView;
+        blurInputInfo.sampler = sampler;
+
+        VkDescriptorImageInfo blurDepthInfo{};
+        blurDepthInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+        blurDepthInfo.imageView = hdrDepthView;
+        blurDepthInfo.sampler = sampler;
+
+        VkDescriptorImageInfo blurOutputInfo{};
+        blurOutputInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        blurOutputInfo.imageView = ssrResultView[writeBuffer];
+
+        std::array<VkWriteDescriptorSet, 3> blurWrites{};
+
+        blurWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        blurWrites[0].dstSet = blurDescriptorSets[frameIndex];
+        blurWrites[0].dstBinding = 0;
+        blurWrites[0].descriptorCount = 1;
+        blurWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        blurWrites[0].pImageInfo = &blurInputInfo;
+
+        blurWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        blurWrites[1].dstSet = blurDescriptorSets[frameIndex];
+        blurWrites[1].dstBinding = 1;
+        blurWrites[1].descriptorCount = 1;
+        blurWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        blurWrites[1].pImageInfo = &blurDepthInfo;
+
+        blurWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        blurWrites[2].dstSet = blurDescriptorSets[frameIndex];
+        blurWrites[2].dstBinding = 2;
+        blurWrites[2].descriptorCount = 1;
+        blurWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        blurWrites[2].pImageInfo = &blurOutputInfo;
+
+        vkUpdateDescriptorSets(device, static_cast<uint32_t>(blurWrites.size()), blurWrites.data(), 0, nullptr);
+
+        // Build blur push constants
+        BlurPushConstants blurPc{};
+        blurPc.resolution = glm::vec2(static_cast<float>(ssrExtent.width), static_cast<float>(ssrExtent.height));
+        blurPc.texelSize = glm::vec2(1.0f / ssrExtent.width, 1.0f / ssrExtent.height);
+        blurPc.depthThreshold = blurDepthThreshold;
+        blurPc.blurRadius = blurRadius;
+
+        // Dispatch blur pass
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, blurPipeline);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                                blurPipelineLayout, 0, 1, &blurDescriptorSets[frameIndex], 0, nullptr);
+        vkCmdPushConstants(cmd, blurPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT,
+                           0, sizeof(BlurPushConstants), &blurPc);
+
+        vkCmdDispatch(cmd, groupsX, groupsY, 1);
+
+        // Final barrier: blur output -> fragment shader
+        barrier.image = ssrResult[writeBuffer];
+        vkCmdPipelineBarrier(cmd,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                             0, 0, nullptr, 0, nullptr, 1, &barrier);
+    } else {
+        // No blur - barrier directly to fragment shader
+        vkCmdPipelineBarrier(cmd,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                             0, 0, nullptr, 0, nullptr, 1, &barrier);
+    }
 
     // Swap buffers for next frame
     currentBuffer = writeBuffer;

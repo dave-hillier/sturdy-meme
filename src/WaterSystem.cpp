@@ -20,28 +20,27 @@ bool WaterSystem::init(const InitInfo& info) {
     waterSize = info.waterSize;
     assetPath = info.assetPath;
 
-    // Initialize default water parameters
-    waterUniforms.waterColor = glm::vec4(0.1f, 0.3f, 0.5f, 0.85f);  // Blue-green, semi-transparent
-    waterUniforms.waveParams = glm::vec4(0.15f, 4.0f, 0.3f, 0.8f);   // amplitude, wavelength, steepness, speed (calmer)
-    waterUniforms.waveParams2 = glm::vec4(0.08f, 2.5f, 0.25f, 1.0f);  // Secondary wave (smaller)
+    // Initialize default water parameters - English estuary/coastal style
+    waterUniforms.waterColor = glm::vec4(0.15f, 0.22f, 0.25f, 0.9f);  // Grey-green estuary color
+    waterUniforms.waveParams = glm::vec4(0.3f, 15.0f, 0.25f, 0.5f);   // amplitude, wavelength, steepness, speed (English Channel swell)
+    waterUniforms.waveParams2 = glm::vec4(0.15f, 5.0f, 0.35f, 0.8f);  // Secondary wave (medium chop)
     waterUniforms.waterExtent = glm::vec4(0.0f, 0.0f, 100.0f, 100.0f);  // position, size
     waterUniforms.waterLevel = 0.0f;
-    waterUniforms.foamThreshold = 0.1f;  // Reduced to match smaller wave amplitude
+    waterUniforms.foamThreshold = 0.25f;  // Higher threshold for realistic whitecaps
     waterUniforms.fresnelPower = 5.0f;
     waterUniforms.terrainSize = 16384.0f;      // Default terrain size
     waterUniforms.terrainHeightScale = 235.0f; // Default height scale (maxAlt - minAlt = 220 - (-15))
-    waterUniforms.shoreBlendDistance = 3.0f;   // 3m shore blend
-    waterUniforms.shoreFoamWidth = 5.0f;       // 5m shore foam band
+    waterUniforms.shoreBlendDistance = 8.0f;   // 8m shore blend (wider for muddy estuaries)
+    waterUniforms.shoreFoamWidth = 15.0f;      // 15m shore foam band (much wider)
     waterUniforms.flowStrength = 1.0f;         // 1m UV offset per flow cycle
     waterUniforms.flowSpeed = 0.5f;            // Flow animation speed
     waterUniforms.flowFoamStrength = 0.5f;     // Flow-based foam intensity
     waterUniforms.fbmNearDistance = 50.0f;     // Max detail within 50m
     waterUniforms.fbmFarDistance = 500.0f;     // Min detail beyond 500m
 
-    // PBR Scattering defaults (Ocean type)
-    // Absorption coefficients based on real ocean water optical properties
-    // Red absorbs fastest, blue slowest
-    waterUniforms.scatteringCoeffs = glm::vec4(0.45f, 0.09f, 0.02f, 0.1f); // absorption RGB + turbidity
+    // PBR Scattering defaults (English estuary - murkier than ocean)
+    // Higher turbidity for sediment-laden coastal waters
+    waterUniforms.scatteringCoeffs = glm::vec4(0.6f, 0.15f, 0.05f, 0.3f); // absorption RGB + turbidity (murky)
     waterUniforms.specularRoughness = 0.05f;   // Water is quite smooth
     waterUniforms.absorptionScale = 0.15f;     // Depth-based absorption rate
     waterUniforms.scatteringScale = 1.0f;      // Turbidity multiplier

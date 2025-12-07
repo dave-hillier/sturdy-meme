@@ -546,17 +546,18 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     float seaLevel = -terrainConfig.minAltitude;  // = 15.0f for minAltitude = -15
     waterSystem.setWaterLevel(seaLevel);
     waterSystem.setWaterExtent(glm::vec2(0.0f, 0.0f), glm::vec2(65536.0f, 65536.0f));
-    waterSystem.setWaterColor(glm::vec4(0.02f, 0.08f, 0.15f, 0.95f));  // Deep ocean blue
-    waterSystem.setWaveAmplitude(0.5f);   // Ocean-scale waves
-    waterSystem.setWaveLength(30.0f);     // Longer wavelengths for open sea
-    waterSystem.setWaveSteepness(0.4f);
-    waterSystem.setWaveSpeed(0.8f);
-    waterSystem.setTidalRange(1.0f);      // ±1m tidal range
+    // English estuary/coastal water style - murky grey-green, moderate chop
+    waterSystem.setWaterColor(glm::vec4(0.15f, 0.22f, 0.25f, 0.9f));  // Grey-green estuary
+    waterSystem.setWaveAmplitude(0.3f);   // English Channel swell
+    waterSystem.setWaveLength(15.0f);     // Medium wavelengths
+    waterSystem.setWaveSteepness(0.25f);
+    waterSystem.setWaveSpeed(0.5f);
+    waterSystem.setTidalRange(3.0f);      // ±3m tidal range (English Channel has large tides)
 
     // Set terrain params for shore detection
     waterSystem.setTerrainParams(terrainConfig.size, terrainConfig.heightScale);
-    waterSystem.setShoreBlendDistance(3.0f);  // Soft edge over 3m
-    waterSystem.setShoreFoamWidth(8.0f);      // Shore foam band 8m wide
+    waterSystem.setShoreBlendDistance(8.0f);   // Wider soft edge (was 3.0)
+    waterSystem.setShoreFoamWidth(15.0f);      // Shore foam band 15m wide (was 8.0)
 
     // Set camera planes for depth linearization (used for soft edges, intersection foam)
     // Values must match Camera.cpp defaults: nearPlane=0.1f, farPlane=50000.0f
