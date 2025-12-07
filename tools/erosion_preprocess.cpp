@@ -1,7 +1,7 @@
 // Standalone erosion and sea level preprocessing tool
 // Generates flow accumulation, river/lake detection, and water placement data
 
-#include "../src/ErosionSimulator.h"
+#include "ErosionSimulator.h"
 #include <SDL3/SDL_log.h>
 #include <iostream>
 #include <fstream>

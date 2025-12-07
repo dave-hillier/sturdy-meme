@@ -23,7 +23,7 @@
 #include "SkySystem.h"
 #include "SceneManager.h"
 #include "TerrainSystem.h"
-#include "ErosionSimulator.h"
+#include "ErosionDataLoader.h"
 #include "CatmullClarkSystem.h"
 #include "SnowMaskSystem.h"
 #include "VolumetricSnowSystem.h"
@@ -239,7 +239,7 @@ public:
     const WaterSystem& getWaterSystem() const { return waterSystem; }
     WaterTileCull& getWaterTileCull() { return waterTileCull; }
     const WaterTileCull& getWaterTileCull() const { return waterTileCull; }
-    const WaterPlacementData& getWaterPlacementData() const { return erosionSimulator.getWaterData(); }
+    const WaterPlacementData& getWaterPlacementData() const { return erosionDataLoader.getWaterData(); }
     SceneBuilder& getSceneBuilder() { return sceneManager.getSceneBuilder(); }
     Mesh& getFlagClothMesh() { return sceneManager.getSceneBuilder().getFlagClothMesh(); }
     Mesh& getFlagPoleMesh() { return sceneManager.getSceneBuilder().getFlagPoleMesh(); }
@@ -404,7 +404,7 @@ private:
     SSRSystem ssrSystem;
     WaterTileCull waterTileCull;
     WaterGBuffer waterGBuffer;
-    ErosionSimulator erosionSimulator;
+    ErosionDataLoader erosionDataLoader;
     TreeEditSystem treeEditSystem;
     EnvironmentSettings environmentSettings;
     Profiler profiler;
