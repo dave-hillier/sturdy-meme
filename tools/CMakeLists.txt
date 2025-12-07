@@ -159,6 +159,7 @@ target_include_directories(tile_generator_lib PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../src
     ${CMAKE_CURRENT_SOURCE_DIR}/road_generator
     ${CMAKE_CURRENT_SOURCE_DIR}/biome_preprocess
+    ${CMAKE_CURRENT_SOURCE_DIR}/erosion_preprocess
 )
 
 target_link_libraries(tile_generator_lib PUBLIC
