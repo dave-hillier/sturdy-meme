@@ -805,12 +805,11 @@ PhysicsBodyID PhysicsWorld::createTerrainTile(const float* samples, uint32_t sam
     JPH::BodyInterface& bodyInterface = physicsSystem->GetBodyInterface();
 
     // Convert normalized heights to world heights
-    // Use same formula as global heightfield: worldY = h * heightScale
+    // Use same formula as global heightfield: worldY = h * heightScale + minAltitude
     // See TerrainHeight.h for authoritative formula
-    (void)minAltitude; // Unused - kept for API compatibility
     std::vector<float> joltSamples(sampleCount * sampleCount);
     for (uint32_t i = 0; i < sampleCount * sampleCount; i++) {
-        joltSamples[i] = samples[i] * heightScale;
+        joltSamples[i] = TerrainHeight::toWorld(samples[i], heightScale) + minAltitude;
     }
 
     // Debug: Log first sample height for tile containing origin
