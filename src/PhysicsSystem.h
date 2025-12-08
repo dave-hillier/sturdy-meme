@@ -15,6 +15,9 @@ namespace JPH {
     class Body;
     class Character;
     class CharacterVirtual;
+#ifdef JPH_DEBUG_RENDERER
+    class DebugRenderer;
+#endif
 }
 
 // Physics body handle
@@ -130,6 +133,12 @@ public:
 
     // Debug
     int getActiveBodyCount() const;
+
+#ifdef JPH_DEBUG_RENDERER
+    // Debug rendering - draw physics bodies to a Jolt debug renderer
+    // Set wireframe=true to draw shapes in wireframe mode
+    void drawBodies(JPH::DebugRenderer* renderer, bool wireframe = true);
+#endif
 
 private:
     std::unique_ptr<JPH::TempAllocatorImpl> tempAllocator;

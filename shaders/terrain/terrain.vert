@@ -94,10 +94,21 @@ float sampleHeightLOD(vec2 uv, vec2 worldXZ) {
         // High-res tile available - calculate local UV within tile
         vec4 bounds = tiles[tileIdx].worldBounds;
         vec2 tileUV = (worldXZ - bounds.xy) / (bounds.zw - bounds.xy);
+
+        // Correct UVs to align vertices with texel centers
+        // Physics uses vertices at logical grid points 0..N-1
+        // Texture samples closest texel center.
+        // Map logical 0..1 to 0.5/N .. (N-0.5)/N
+        float N = float(textureSize(heightMapTiles, 0).x);
+        tileUV = tileUV * ((N - 1.0) / N) + (0.5 / N);
+
         return texture(heightMapTiles, vec3(tileUV, float(tileIdx))).r * HEIGHT_SCALE;
     }
     // Fall back to global coarse texture
-    return texture(heightMapGlobal, uv).r * HEIGHT_SCALE;
+    // Apply same texel-center correction for consistency
+    float N_global = float(textureSize(heightMapGlobal, 0).x);
+    vec2 correctedUV = uv * ((N_global - 1.0) / N_global) + (0.5 / N_global);
+    return texture(heightMapGlobal, correctedUV).r * HEIGHT_SCALE;
 }
 
 // Calculate normal from height map gradient with LOD support

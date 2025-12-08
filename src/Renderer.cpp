@@ -1502,6 +1502,10 @@ void Renderer::render(const Camera& camera) {
     // Build per-frame shared state
     FrameData frame = buildFrameData(camera, deltaTime, grassTime);
 
+#ifdef JPH_DEBUG_RENDERER
+    currentFrameViewProj = frame.viewProj;
+#endif
+
     // Update subsystems (state mutations)
     profiler.beginCpuZone("SystemUpdates");
 
@@ -2375,6 +2379,13 @@ void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float gra
 
     // Draw weather particles (rain/snow) - after opaque geometry
     weatherSystem.recordDraw(cmd, frameIndex, grassTime);
+
+#ifdef JPH_DEBUG_RENDERER
+    // Draw physics debug visualization (wireframe collision shapes)
+    if (physicsDebugCallback) {
+        physicsDebugCallback(cmd, currentFrameViewProj, postProcessSystem.getExtent());
+    }
+#endif
 
     vkCmdEndRenderPass(cmd);
 }

@@ -865,3 +865,23 @@ PhysicsBodyID PhysicsWorld::createTerrainTile(const float* samples, uint32_t sam
 
     return body->GetID().GetIndexAndSequenceNumber();
 }
+
+#ifdef JPH_DEBUG_RENDERER
+#include <Jolt/Renderer/DebugRenderer.h>
+#include <Jolt/Physics/Body/BodyManager.h>
+
+void PhysicsWorld::drawBodies(JPH::DebugRenderer* renderer, bool wireframe) {
+    if (!initialized || !renderer) return;
+
+    JPH::BodyManager::DrawSettings settings;
+    settings.mDrawShape = true;
+    settings.mDrawShapeWireframe = wireframe;
+    settings.mDrawShapeColor = JPH::BodyManager::EShapeColor::MotionTypeColor;
+    settings.mDrawBoundingBox = false;
+    settings.mDrawCenterOfMassTransform = false;
+    settings.mDrawWorldTransform = false;
+    settings.mDrawVelocity = false;
+
+    physicsSystem->DrawBodies(settings, renderer, nullptr);
+}
+#endif // JPH_DEBUG_RENDERER

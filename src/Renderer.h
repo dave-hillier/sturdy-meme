@@ -112,6 +112,15 @@ public:
     using GuiRenderCallback = std::function<void(VkCommandBuffer)>;
     void setGuiRenderCallback(GuiRenderCallback callback) { guiRenderCallback = callback; }
 
+#ifdef JPH_DEBUG_RENDERER
+    // Physics debug rendering callback (called during HDR render pass)
+    using PhysicsDebugCallback = std::function<void(VkCommandBuffer, const glm::mat4& viewProj, VkExtent2D extent)>;
+    void setPhysicsDebugCallback(PhysicsDebugCallback callback) { physicsDebugCallback = callback; }
+#endif
+
+    // Access to HDR render pass (for debug renderers that need same pass)
+    VkRenderPass getHDRRenderPass() const { return postProcessSystem.getHDRRenderPass(); }
+
     void setTimeScale(float scale) { timeScale = scale; }
     float getTimeScale() const { return timeScale; }
     void setTimeOfDay(float time) { manualTime = time; useManualTime = true; }
@@ -506,6 +515,12 @@ private:
 
     // GUI rendering callback
     GuiRenderCallback guiRenderCallback;
+
+#ifdef JPH_DEBUG_RENDERER
+    // Physics debug rendering callback
+    PhysicsDebugCallback physicsDebugCallback;
+    glm::mat4 currentFrameViewProj{1.0f};  // Cached for physics debug callback
+#endif
 
     bool createLightBuffers();
     void updateLightBuffer(uint32_t currentImage, const Camera& camera);

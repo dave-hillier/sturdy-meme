@@ -25,7 +25,10 @@
     "stb",
     "vk-bootstrap",
     "vulkan-memory-allocator",
-    "joltphysics",
+    {
+      "name": "joltphysics",
+      "features": ["debugrenderer", "rtti"]
+    },
     "spirv-reflect",
     {
       "name": "imgui",

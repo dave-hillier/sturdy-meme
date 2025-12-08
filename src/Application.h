@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <unordered_set>
+#include <memory>
 #include "Renderer.h"
 #include "Camera.h"
 #include "Player.h"
@@ -12,6 +13,9 @@
 #include "GuiSystem.h"
 #include "InputSystem.h"
 #include "TerrainPhysicsTiles.h"
+#ifdef JPH_DEBUG_RENDERER
+#include "PhysicsDebugRenderer.h"
+#endif
 
 class Application {
 public:
@@ -67,4 +71,10 @@ private:
     float moveSpeed = 1.44f;
     // Run speed matches animation root motion: 278.32 cm / 0.70s * 0.01 scale = 3.98 m/s
     float sprintSpeed = 3.98f;
+
+#ifdef JPH_DEBUG_RENDERER
+    // Physics debug visualization (allocated after Jolt init to avoid allocator crash)
+    std::unique_ptr<PhysicsDebugRenderer> physicsDebugRenderer;
+    bool showPhysicsDebug = false;
+#endif
 };

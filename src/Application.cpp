@@ -157,6 +157,29 @@ bool Application::init(const std::string& title, int width, int height) {
         gui.endFrame(cmd);
     });
 
+#ifdef JPH_DEBUG_RENDERER
+    // Create and initialize physics debug renderer AFTER physics.init() (which sets up Jolt allocator)
+    physicsDebugRenderer = std::make_unique<PhysicsDebugRenderer>();
+    if (!physicsDebugRenderer->init(
+            renderer.getDevice(),
+            renderer.getVulkanContext().getAllocator(),
+            renderer.getHDRRenderPass(),
+            renderer.getVulkanContext().getSwapchainExtent(),
+            renderer.getShaderPath())) {
+        SDL_Log("Failed to initialize physics debug renderer (non-fatal)");
+        physicsDebugRenderer.reset();
+    } else {
+        // Set up physics debug render callback
+        renderer.setPhysicsDebugCallback([this](VkCommandBuffer cmd, const glm::mat4& viewProj, VkExtent2D extent) {
+            if (showPhysicsDebug && physicsDebugRenderer) {
+                physicsDebugRenderer->setExtent(extent);
+                physicsDebugRenderer->render(cmd, viewProj);
+            }
+        });
+        SDL_Log("Physics debug renderer initialized (press 9 to toggle)");
+    }
+#endif
+
     // Set up input system with GUI reference for input blocking
     input.setGuiSystem(&gui);
     input.setMoveSpeed(moveSpeed);
@@ -355,6 +378,14 @@ void Application::run() {
 
         camera.setAspectRatio(static_cast<float>(renderer.getWidth()) / static_cast<float>(renderer.getHeight()));
 
+#ifdef JPH_DEBUG_RENDERER
+        // Prepare physics debug geometry for rendering (if enabled)
+        if (showPhysicsDebug && physicsDebugRenderer) {
+            physicsDebugRenderer->beginFrame(camera.getPosition());
+            physics.drawBodies(physicsDebugRenderer.get(), true);  // wireframe mode
+        }
+#endif
+
         renderer.render(camera);
 
         // Update window title with FPS, time of day, and camera mode
@@ -376,6 +407,12 @@ void Application::run() {
 
 void Application::shutdown() {
     renderer.waitIdle();
+#ifdef JPH_DEBUG_RENDERER
+    if (physicsDebugRenderer) {
+        physicsDebugRenderer->destroy();
+        physicsDebugRenderer.reset();
+    }
+#endif
     gui.shutdown();
     input.shutdown();
     terrainPhysicsTiles.destroy();
@@ -457,6 +494,15 @@ void Application::processEvents() {
                     renderer.setHiZCullingEnabled(!renderer.isHiZCullingEnabled());
                     SDL_Log("Hi-Z occlusion culling: %s", renderer.isHiZCullingEnabled() ? "ON" : "OFF");
                 }
+#ifdef JPH_DEBUG_RENDERER
+                else if (event.key.scancode == SDL_SCANCODE_9) {
+                    showPhysicsDebug = !showPhysicsDebug;
+                    if (physicsDebugRenderer) {
+                        physicsDebugRenderer->setEnabled(showPhysicsDebug);
+                    }
+                    SDL_Log("Physics debug visualization: %s", showPhysicsDebug ? "ON" : "OFF");
+                }
+#endif
                 else if (event.key.scancode == SDL_SCANCODE_Z) {
                     float currentIntensity = renderer.getIntensity();
                     renderer.setWeatherIntensity(std::max(0.0f, currentIntensity - 0.1f));
