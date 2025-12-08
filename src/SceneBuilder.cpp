@@ -27,8 +27,8 @@ void SceneBuilder::registerMaterials() {
     // Uses white texture with a flat normal map
     whiteMaterialId = materialRegistry.registerMaterial("white", whiteTexture, groundNormalMap);
 
-    // Register cape material
-    capeMaterialId = materialRegistry.registerMaterial("cape", capeTexture, capeNormalMap);
+    // Register cape material (using metal texture)
+    capeMaterialId = materialRegistry.registerMaterial("cape", metalTexture, metalNormalMap);
 
     SDL_Log("SceneBuilder: Registered %zu materials", materialRegistry.getMaterialCount());
 }
@@ -49,8 +49,6 @@ void SceneBuilder::destroy(VmaAllocator allocator, VkDevice device) {
     metalNormalMap.destroy(allocator, device);
     defaultEmissiveMap.destroy(allocator, device);
     whiteTexture.destroy(allocator, device);
-    capeTexture.destroy(allocator, device);
-    capeNormalMap.destroy(allocator, device);
 
     cubeMesh.destroy(allocator);
     sphereMesh.destroy(allocator);
@@ -205,31 +203,6 @@ bool SceneBuilder::loadTextures(const InitInfo& info) {
                                         info.commandPool, info.graphicsQueue)) {
         SDL_Log("Failed to create white texture");
         return false;
-    }
-
-    // Load cape textures (generated during build)
-    std::string capeDiffusePath = info.resourcePath + "/assets/textures/cape_diffuse.png";
-    if (!capeTexture.load(capeDiffusePath, info.allocator, info.device, info.commandPool,
-                          info.graphicsQueue, info.physicalDevice)) {
-        SDL_Log("Cape texture not found, creating red fallback: %s", capeDiffusePath.c_str());
-        // Create red fallback if generated texture not found
-        if (!capeTexture.createSolidColor(180, 30, 30, 255, info.allocator, info.device,
-                                           info.commandPool, info.graphicsQueue)) {
-            SDL_Log("Failed to create cape fallback texture");
-            return false;
-        }
-    }
-
-    std::string capeNormalPath = info.resourcePath + "/assets/textures/cape_normal.png";
-    if (!capeNormalMap.load(capeNormalPath, info.allocator, info.device, info.commandPool,
-                             info.graphicsQueue, info.physicalDevice, false)) {
-        SDL_Log("Cape normal map not found, creating flat fallback: %s", capeNormalPath.c_str());
-        // Create flat normal map fallback
-        if (!capeNormalMap.createSolidColor(128, 128, 255, 255, info.allocator, info.device,
-                                             info.commandPool, info.graphicsQueue)) {
-            SDL_Log("Failed to create cape normal map fallback");
-            return false;
-        }
     }
 
     return true;
@@ -456,16 +429,16 @@ void SceneBuilder::createRenderables() {
         .withCastsShadow(true)
         .build());
 
-    // Player cape - attached to character, updated each frame
+    // Player cape - attached to character, updated each frame (using metal texture)
     if (hasCapeEnabled) {
         capeIndex = sceneObjects.size();
         sceneObjects.push_back(RenderableBuilder()
             .withTransform(glm::mat4(1.0f))  // Identity, cloth positions are in world space
             .withMesh(&capeMesh)
-            .withTexture(&capeTexture)
+            .withTexture(&metalTexture)
             .withMaterialId(capeMaterialId)
-            .withRoughness(0.7f)
-            .withMetallic(0.0f)
+            .withRoughness(0.3f)
+            .withMetallic(0.8f)
             .withCastsShadow(true)
             .build());
     }
