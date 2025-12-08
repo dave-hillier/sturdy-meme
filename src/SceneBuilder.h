@@ -136,8 +136,6 @@ private:
     Texture metalNormalMap;
     Texture defaultEmissiveMap;  // Black texture for objects without emissive
     Texture whiteTexture;        // White texture for vertex-colored objects
-    Texture capeTexture;         // Cape diffuse texture
-    Texture capeNormalMap;       // Cape normal map
 
     // Scene objects
     std::vector<Renderable> sceneObjects;

@@ -246,31 +246,6 @@ add_custom_target(foam_texture_gen
 # Main target depends on foam texture
 add_dependencies(${PROJECT_NAME} foam_texture_gen)
 
-# Cape texture generation
-set(CAPE_TEXTURE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/assets/textures)
-set(CAPE_DIFFUSE ${CAPE_TEXTURE_DIR}/cape_diffuse.png)
-set(CAPE_NORMAL ${CAPE_TEXTURE_DIR}/cape_normal.png)
-
-# Generate cape textures
-add_custom_command(
-    OUTPUT ${CAPE_DIFFUSE} ${CAPE_NORMAL}
-    COMMAND $<TARGET_FILE:cape_texture_gen>
-        --width 256
-        --height 512
-        --output ${CAPE_DIFFUSE}
-        --normal ${CAPE_NORMAL}
-    DEPENDS cape_texture_gen
-    COMMENT "Generating cape textures"
-)
-
-# Custom target for cape texture generation
-add_custom_target(cape_texture_gen_target
-    DEPENDS ${CAPE_DIFFUSE} ${CAPE_NORMAL}
-)
-
-# Main target depends on cape textures
-add_dependencies(${PROJECT_NAME} cape_texture_gen_target)
-
 # SBSAR (Substance Archive) texture processing
 set(SBSAR_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/assets/substances)
 set(SBSAR_OUTPUT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/assets/textures/substances)
