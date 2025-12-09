@@ -6,18 +6,31 @@ This document compares our current streaming architecture against techniques fro
 
 ## Executive Summary
 
-Our current implementation has a solid foundation with **virtual texturing**, **terrain tile caching**, **GPU compute culling**, and **async loading**. However, Ghost of Tsushima introduced several advanced techniques that could significantly improve memory efficiency, loading times, and scalability:
+Our current implementation has a solid foundation with **virtual texturing**, **terrain tile caching**, **GPU compute culling**, and **async loading**. However, Ghost of Tsushima introduced several advanced techniques that could improve memory efficiency, loading times, and scalability for non-terrain content.
 
-| Area | Current Status | Ghost of Tsushima | Gap |
-|------|---------------|-------------------|-----|
-| Texture Streaming | Virtual texturing, LRU cache | Fine-grained per-texture, UV heuristics | Medium |
-| Mesh Streaming | Not implemented | Per-LOD streaming, squishy budgets | High |
-| Asset Aggregation | Individual files | Pack system with pointer-patch | High |
-| Distance Checks | Per-object per-frame | Static distance heap (O(1) amortized) | Medium |
-| Prefetching | Not implemented | Camera cut prediction | High |
-| Memory Management | VMA allocator | Virtual memory, defrag-free | Low |
-| Compile-time Merging | Build-time tools | Deep object flattening, index ranges | Medium |
-| Over-budget Handling | Cache eviction | Penalty scheme with progressive LOD | Medium |
+### Key Architectural Difference: Terrain Geometry
+
+| Aspect | This Project (CBT/LEB) | Ghost of Tsushima (Patches) |
+|--------|------------------------|----------------------------|
+| **Geometry LOD** | GPU-driven adaptive tessellation | Pre-baked LOD levels per tile |
+| **Mesh Source** | Procedural from heightmap | Streamed from disk |
+| **Subdivision** | Continuous screen-space error | Fixed LOD thresholds |
+| **Memory** | Heightmap only | Heightmap + pre-tessellated meshes |
+| **CPU/GPU Split** | GPU decides everything | CPU manages tile/LOD selection |
+
+**Implication:** Ghost's terrain geometry streaming (200m tiles, neighbor stitching, LOD mesh loading) does not apply here. CBT/LEB generates geometry on-the-fly, so only heightmap data needs streaming—which is already handled by `TerrainTileCache`.
+
+### Technique Applicability
+
+| Area | Current Status | Ghost of Tsushima | Applies To |
+|------|---------------|-------------------|------------|
+| Texture Streaming | Virtual texturing, LRU cache | Fine-grained per-texture, UV heuristics | Non-terrain meshes |
+| Mesh Streaming | Not implemented | Per-LOD streaming, squishy budgets | Characters, props, buildings |
+| Asset Aggregation | Individual files | Pack system with pointer-patch | All assets |
+| Distance Checks | Per-frame checks | Static distance heap (O(1) amortized) | Tile cache, physics, regions |
+| Prefetching | Not implemented | Camera cut prediction | Cutscenes, spawns |
+| Over-budget Handling | Cache eviction | Penalty scheme with progressive LOD | VT system |
+| Terrain Geometry | **CBT/LEB (more advanced)** | Patch-based with neighbor buffers | N/A - different approach |
 
 ---
 
@@ -75,11 +88,14 @@ Ghost of Tsushima started with scale estimation:
 
 **Key insight:** Early math drives architecture decisions. Budget backwards from target hardware.
 
-### 2.2 200-Meter Tile Quad Tree
+### 2.2 200-Meter Tile Quad Tree (Patch-Based Terrain)
 - 7-level quad tree for spatial streaming
 - Leaf level: 3×3 grid of tiles (~200m guaranteed sight lines)
 - Fewer files than 100m tiles, less duplication waste
 - ~2.5MB terrain data per tile (textures + metadata + grass/water control)
+- Used Frostbite-style neighbor index buffers for LOD stitching
+
+> **Note:** This patch-based approach differs fundamentally from our CBT/LEB terrain. Ghost pre-tessellated terrain meshes at multiple LOD levels and streamed them from disk. CBT/LEB generates geometry procedurally on the GPU from heightmap data, eliminating the need for terrain mesh streaming. The virtual texturing and heightmap tile streaming concepts still apply.
 
 ### 2.3 Pack Aggregation System
 **Key optimization: Single-read asset loading**
@@ -244,6 +260,18 @@ No fixed time-of-day baking (20× world size made it impossible):
 ---
 
 ## Part 3: Gap Analysis
+
+### Non-Gaps (Where Current Approach is Equal or Better)
+
+#### Terrain Geometry Streaming
+**Not needed.** CBT/LEB terrain generates geometry procedurally on the GPU. Ghost had to stream pre-tessellated terrain meshes at multiple LOD levels with neighbor stitching buffers. Our approach:
+- Eliminates terrain mesh storage entirely
+- Provides continuous LOD (no visible LOD pops)
+- Adapts to screen-space error in real-time
+- Only requires heightmap tile streaming (already implemented in `TerrainTileCache`)
+
+#### GPU Terrain Culling
+**Already implemented.** Per-triangle culling via CBT compute shaders, shadow cascade culling. Ghost used GPU occlusion culling for props/trees but CPU-managed terrain tiles.
 
 ### High Priority Gaps
 
@@ -511,27 +539,37 @@ class BreadcrumbTracker {
 
 ---
 
-## Part 6: Memory Budget Comparison
+## Part 6: Memory Considerations
 
-### Current Budget
-| Resource | Size |
-|----------|------|
-| VT Physical Cache | 64 MB |
-| VT Indirection | 1 MB |
-| VT Feedback/Staging | 5 MB |
-| Terrain Tiles (64 max) | ~128 MB |
-| **Texture Total** | ~200 MB |
+### Current Default Configuration
+| Resource | Size | Notes |
+|----------|------|-------|
+| VT Physical Cache | 64 MB | Configurable via `cacheSizePixels` |
+| VT Indirection | 1 MB | Scales with virtual texture size |
+| VT Feedback/Staging | 5 MB | Per-frame buffers |
+| Terrain Tiles (64 max) | ~128 MB | Heightmap data for physics/rendering |
 
-### Ghost of Tsushima Budget
-| Resource | Size |
-|----------|------|
-| Texture space | 1 GB |
-| Stream meshes | Up to 1 GB |
-| Packs | 1.6 GB |
-| Terrain probes | 44 MB |
-| Render targets + heaps | Remainder |
+These are current defaults, not hard constraints. The VT cache can be increased (e.g., 8K×8K = 256MB) depending on target hardware.
 
-**Key insight:** Ghost had ~10× our texture budget but ~320× the world area. Their streaming was extremely efficient.
+### Ghost of Tsushima Budget (PS4 Reference)
+| Resource | Size | Notes |
+|----------|------|-------|
+| Texture space | 1 GB | Hard PS4 constraint |
+| Stream meshes | Up to 1 GB | Characters, props, buildings |
+| Packs | 1.6 GB | Aggregated asset data |
+| Terrain probes | 44 MB | Runtime relighting |
+| Render targets + heaps | Remainder | ~5.5GB total available |
+
+### Key Efficiency Techniques (Hardware-Agnostic)
+Ghost's streaming efficiency came from architectural choices, not just memory size:
+
+1. **Single-read packs** - Reduced I/O operations regardless of budget
+2. **UV heuristics** - Prioritized textures that matter on screen
+3. **Static distance heap** - O(1) amortized checks saved CPU time
+4. **Compile-time flattening** - 6-byte instances vs full objects
+5. **Penalty scheme** - Graceful degradation without stalls
+
+These techniques improve efficiency at any memory budget.
 
 ---
 
