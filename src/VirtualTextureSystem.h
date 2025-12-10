@@ -126,6 +126,8 @@ public:
     uint32_t getPendingTileCount() const { return tileLoader.getPendingCount(); }
     uint32_t getLoadedTileCount() const { return tileLoader.getLoadedCount(); }
     uint64_t getTotalBytesLoaded() const { return tileLoader.getTotalBytesLoaded(); }
+    float getCurrentPenalty() const { return currentPenalty; }
+    uint32_t getTotalCacheSlots() const { return config.getTotalCacheSlots(); }
 
     /**
      * Force load a specific tile (for debugging/testing)
@@ -147,6 +149,13 @@ private:
 
     uint32_t currentFrame = 0;
     std::unordered_set<uint32_t> pendingTiles; // Tiles currently being loaded
+
+    // Over-budget penalty scheme (Ghost of Tsushima style)
+    // When cache is under pressure, we increase the penalty to request coarser mips
+    float currentPenalty = 0.0f;
+    static constexpr float PENALTY_INCREMENT = 0.5f;  // Half a mip level per iteration
+    static constexpr float PENALTY_RELAX_RATE = 0.1f; // Relax penalty when stable
+    static constexpr float MAX_PENALTY = 4.0f;        // Max 4 mip levels of degradation
 
     // Maximum tiles to upload per frame (to limit stalls)
     static constexpr uint32_t MAX_UPLOADS_PER_FRAME = 16;

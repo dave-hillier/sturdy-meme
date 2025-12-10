@@ -101,7 +101,44 @@ void VirtualTextureSystem::processFeedback(uint32_t frameIndex) {
     std::vector<TileId> requested = feedback.getRequestedTiles();
 
     if (requested.empty()) {
+        // No requests - relax penalty if we have headroom
+        if (currentPenalty > 0.0f && pendingTiles.empty()) {
+            currentPenalty = std::max(0.0f, currentPenalty - PENALTY_RELAX_RATE);
+        }
         return;
+    }
+
+    // Calculate cache pressure: how many tiles we're trying to load vs capacity
+    uint32_t totalCacheSlots = config.getTotalCacheSlots();
+    uint32_t usedSlots = cache.getUsedSlotCount();
+    uint32_t pendingCount = static_cast<uint32_t>(pendingTiles.size());
+
+    // Count how many new tiles we'd be requesting
+    uint32_t newRequestCount = 0;
+    for (const auto& id : requested) {
+        if (!cache.hasTile(id) &&
+            pendingTiles.find(id.pack()) == pendingTiles.end() &&
+            !tileLoader.isQueued(id)) {
+            newRequestCount++;
+        }
+    }
+
+    // Apply penalty scheme: increase penalty if we're over budget
+    float projectedUsage = static_cast<float>(usedSlots + pendingCount + newRequestCount) /
+                           static_cast<float>(totalCacheSlots);
+
+    // Target 80% cache utilization to leave headroom
+    constexpr float TARGET_UTILIZATION = 0.8f;
+
+    if (projectedUsage > TARGET_UTILIZATION) {
+        // Increase penalty to request coarser mips
+        currentPenalty = std::min(MAX_PENALTY, currentPenalty + PENALTY_INCREMENT);
+        SDL_LogDebug(SDL_LOG_CATEGORY_APPLICATION,
+                     "VT: Over budget (%.1f%% projected), penalty now %.1f mip levels",
+                     projectedUsage * 100.0f, currentPenalty);
+    } else if (currentPenalty > 0.0f && projectedUsage < TARGET_UTILIZATION * 0.5f) {
+        // Relax penalty when well under budget
+        currentPenalty = std::max(0.0f, currentPenalty - PENALTY_RELAX_RATE);
     }
 
     uint32_t queued = 0;
@@ -110,11 +147,28 @@ void VirtualTextureSystem::processFeedback(uint32_t frameIndex) {
             break;
         }
 
-        uint32_t packed = id.pack();
+        // Apply penalty: shift requested mip level coarser
+        TileId adjustedId = id;
+        if (currentPenalty > 0.0f) {
+            uint8_t penaltyMips = static_cast<uint8_t>(currentPenalty);
+            adjustedId.mipLevel = std::min(
+                static_cast<uint8_t>(config.maxMipLevels - 1),
+                static_cast<uint8_t>(id.mipLevel + penaltyMips)
+            );
+
+            // Adjust tile coordinates for the new mip level
+            if (adjustedId.mipLevel > id.mipLevel) {
+                uint8_t mipDiff = adjustedId.mipLevel - id.mipLevel;
+                adjustedId.x = id.x >> mipDiff;
+                adjustedId.y = id.y >> mipDiff;
+            }
+        }
+
+        uint32_t packed = adjustedId.pack();
 
         // Skip if already in cache
-        if (cache.hasTile(id)) {
-            cache.markUsed(id, currentFrame);
+        if (cache.hasTile(adjustedId)) {
+            cache.markUsed(adjustedId, currentFrame);
             continue;
         }
 
@@ -124,21 +178,21 @@ void VirtualTextureSystem::processFeedback(uint32_t frameIndex) {
         }
 
         // Skip if already queued for loading
-        if (tileLoader.isQueued(id)) {
+        if (tileLoader.isQueued(adjustedId)) {
             continue;
         }
 
         // Queue for loading with priority based on mip level
         // Lower mip = larger tile = higher priority
-        int priority = static_cast<int>(id.mipLevel);
-        tileLoader.queueTile(id, priority);
+        int priority = static_cast<int>(adjustedId.mipLevel);
+        tileLoader.queueTile(adjustedId, priority);
         pendingTiles.insert(packed);
         queued++;
     }
 
     if (queued > 0) {
         SDL_LogDebug(SDL_LOG_CATEGORY_APPLICATION,
-                     "VT: Queued %u new tile requests", queued);
+                     "VT: Queued %u new tile requests (penalty: %.1f)", queued, currentPenalty);
     }
 }
 

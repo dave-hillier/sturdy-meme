@@ -12,6 +12,7 @@
 #include "GuiSystem.h"
 #include "InputSystem.h"
 #include "TerrainPhysicsTiles.h"
+#include "BreadcrumbTracker.h"
 
 class Application {
 public:
@@ -46,6 +47,10 @@ private:
 
     // Terrain physics tiles (streams collision tiles near player)
     TerrainPhysicsTiles terrainPhysicsTiles;
+
+    // Breadcrumb tracker for fast respawn (Ghost of Tsushima optimization)
+    // Tracks safe player positions so respawns load most content from cache
+    BreadcrumbTracker breadcrumbTracker;
 
     // Flag simulation
     ClothSimulation clothSim;

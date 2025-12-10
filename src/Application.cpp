@@ -140,6 +140,24 @@ bool Application::init(const std::string& title, int width, int height) {
 
     SDL_Log("Physics initialized with %d active bodies", physics.getActiveBodyCount());
 
+    // Configure breadcrumb tracker for safe respawn positions
+    // Safety check: not in water, not in terrain holes
+    breadcrumbTracker.setSafetyCheck([this](const glm::vec3& pos) {
+        // Check if position is above water level (with margin)
+        float waterLevel = renderer.getWaterSystem().getWaterLevel();
+        if (pos.y < waterLevel + 0.5f) {
+            return false;  // In or near water
+        }
+        // Check if position is in a terrain hole
+        if (renderer.getTerrainSystem().isHole(pos.x, pos.z)) {
+            return false;  // In terrain hole (cave entrance, etc.)
+        }
+        return true;
+    });
+    breadcrumbTracker.setMinDistance(5.0f);  // Breadcrumb every 5 meters
+    breadcrumbTracker.setMaxBreadcrumbs(200);  // Keep last 200 positions (~1km of travel)
+    SDL_Log("Breadcrumb tracker configured for respawn optimization");
+
     // Initialize flag simulation
     initFlag();
 
@@ -311,6 +329,12 @@ void Application::run() {
         glm::vec3 physicsPos = playerPos;
         glm::vec3 physicsVelocity = physics.getCharacterVelocity();
         player.setPosition(physicsPos);
+
+        // Update breadcrumb tracker (Ghost of Tsushima respawn optimization)
+        // Only track positions when player is grounded and not in water/hazards
+        if (physics.isCharacterOnGround()) {
+            breadcrumbTracker.update(physicsPos);
+        }
 
         // Update scene object transforms from physics
         renderer.getSceneManager().update(physics);

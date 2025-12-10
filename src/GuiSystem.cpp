@@ -1363,6 +1363,33 @@ void GuiSystem::renderTerrainSection(Renderer& renderer) {
 
     // Height query demo
     ImGui::Text("Height at origin: %.2f", renderer.getTerrainHeightAt(0.0f, 0.0f));
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Streaming stats (Ghost of Tsushima style)
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.6f, 0.9f, 0.8f, 1.0f));
+    ImGui::Text("STREAMING");
+    ImGui::PopStyleColor();
+
+    const auto& tileCache = terrain.getTileCache();
+    uint32_t activeTiles = tileCache.getActiveTileCount();
+    uint32_t maxTiles = 64;  // MAX_ACTIVE_TILES constant
+
+    // Active tiles with color coding
+    float tileUsage = static_cast<float>(activeTiles) / static_cast<float>(maxTiles);
+    ImVec4 tileColor = tileUsage < 0.5f ? ImVec4(0.4f, 0.9f, 0.4f, 1.0f) :
+                       tileUsage < 0.8f ? ImVec4(0.9f, 0.9f, 0.4f, 1.0f) :
+                                          ImVec4(0.9f, 0.4f, 0.4f, 1.0f);
+    ImGui::Text("Height Tiles:");
+    ImGui::SameLine();
+    ImGui::PushStyleColor(ImGuiCol_Text, tileColor);
+    ImGui::Text("%u / %u (%.0f%%)", activeTiles, maxTiles, tileUsage * 100.0f);
+    ImGui::PopStyleColor();
+
+    // LOD info
+    ImGui::Text("LOD Ranges: <1km:LOD0, 1-2km:LOD1, 2-4km:LOD2");
 }
 
 void GuiSystem::renderWaterSection(Renderer& renderer) {
