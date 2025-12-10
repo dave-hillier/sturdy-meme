@@ -1390,6 +1390,38 @@ void GuiSystem::renderTerrainSection(Renderer& renderer) {
 
     // LOD info
     ImGui::Text("LOD Ranges: <1km:LOD0, 1-2km:LOD1, 2-4km:LOD2");
+
+    ImGui::Spacing();
+
+    // Render distance controls
+    TerrainConfig streamCfg = terrainMut.getConfig();
+    bool streamConfigChanged = false;
+
+    if (ImGui::SliderFloat("Load Radius", &streamCfg.tileLoadRadius, 500.0f, 8000.0f, "%.0f m")) {
+        // Ensure unload radius stays larger than load radius
+        if (streamCfg.tileUnloadRadius < streamCfg.tileLoadRadius + 500.0f) {
+            streamCfg.tileUnloadRadius = streamCfg.tileLoadRadius + 500.0f;
+        }
+        streamConfigChanged = true;
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Distance from camera to load high-resolution height tiles");
+    }
+
+    if (ImGui::SliderFloat("Unload Radius", &streamCfg.tileUnloadRadius, 1000.0f, 10000.0f, "%.0f m")) {
+        // Ensure unload radius stays larger than load radius
+        if (streamCfg.tileUnloadRadius < streamCfg.tileLoadRadius + 500.0f) {
+            streamCfg.tileUnloadRadius = streamCfg.tileLoadRadius + 500.0f;
+        }
+        streamConfigChanged = true;
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Distance from camera to unload tiles (should be > load radius)");
+    }
+
+    if (streamConfigChanged) {
+        terrainMut.setConfig(streamCfg);
+    }
 }
 
 void GuiSystem::renderWaterSection(Renderer& renderer) {
