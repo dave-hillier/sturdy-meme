@@ -1295,10 +1295,25 @@ void GuiSystem::renderTerrainSection(Renderer& renderer) {
     ImGui::Separator();
     ImGui::Spacing();
 
-    // Wireframe toggle
+    // Debug toggles
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.9f, 0.6f, 0.6f, 1.0f));
+    ImGui::Text("DEBUG");
+    ImGui::PopStyleColor();
+
+    bool terrainEnabled = renderer.isTerrainEnabled();
+    if (ImGui::Checkbox("Enable Terrain", &terrainEnabled)) {
+        renderer.setTerrainEnabled(terrainEnabled);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Toggle terrain rendering on/off");
+    }
+
     bool wireframe = renderer.isTerrainWireframeMode();
     if (ImGui::Checkbox("Wireframe Mode", &wireframe)) {
         renderer.toggleTerrainWireframe();
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Show terrain mesh wireframe overlay");
     }
 
     ImGui::Spacing();

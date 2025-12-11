@@ -154,6 +154,8 @@ public:
     float getCloudShadowIntensity() const { return cloudShadowSystem.getShadowIntensity(); }
 
     // Terrain control
+    void setTerrainEnabled(bool enabled) { terrainEnabled = enabled; }
+    bool isTerrainEnabled() const { return terrainEnabled; }
     void toggleTerrainWireframe() { terrainSystem.setWireframeMode(!terrainSystem.isWireframeMode()); }
     bool isTerrainWireframeMode() const { return terrainSystem.isWireframeMode(); }
     float getTerrainHeightAt(float x, float z) const { return terrainSystem.getHeightAt(x, z); }
@@ -490,6 +492,7 @@ private:
     bool showSnowDepthDebug = false;       // true = show snow depth heat map overlay
     bool useParaboloidClouds = true;       // true = paraboloid LUT hybrid, false = procedural
     bool hdrEnabled = true;                // true = HDR tonemapping/bloom, false = bypass
+    bool terrainEnabled = true;            // true = render terrain, false = skip terrain rendering
 
     // Cloud parameters (synced to UBO, cloud shadows, and cloud map LUT)
     float cloudCoverage = 0.5f;            // 0-1 cloud coverage amount

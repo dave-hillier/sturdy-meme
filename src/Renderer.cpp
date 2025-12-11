@@ -1563,9 +1563,11 @@ void Renderer::render(const Camera& camera) {
 
     // Terrain compute pass (adaptive subdivision)
     // Detailed per-phase profiling inside recordCompute
-    profiler.beginGpuZone(cmd, "TerrainCompute");
-    terrainSystem.recordCompute(cmd, frame.frameIndex, &profiler.getGpuProfiler());
-    profiler.endGpuZone(cmd, "TerrainCompute");
+    if (terrainEnabled) {
+        profiler.beginGpuZone(cmd, "TerrainCompute");
+        terrainSystem.recordCompute(cmd, frame.frameIndex, &profiler.getGpuProfiler());
+        profiler.endGpuZone(cmd, "TerrainCompute");
+    }
 
     // Catmull-Clark subdivision compute pass
     profiler.beginGpuZone(cmd, "SubdivisionCompute");
@@ -2208,7 +2210,9 @@ RenderResources Renderer::buildRenderResources(uint32_t swapchainImageIndex) con
 void Renderer::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float grassTime) {
     // Delegate to the shadow system with callbacks for terrain and grass
     auto terrainCallback = [this, frameIndex](VkCommandBuffer cb, uint32_t cascade, const glm::mat4& lightMatrix) {
-        terrainSystem.recordShadowDraw(cb, frameIndex, lightMatrix, static_cast<int>(cascade));
+        if (terrainEnabled) {
+            terrainSystem.recordShadowDraw(cb, frameIndex, lightMatrix, static_cast<int>(cascade));
+        }
     };
 
     auto grassCallback = [this, frameIndex, grassTime](VkCommandBuffer cb, uint32_t cascade, const glm::mat4& lightMatrix) {
@@ -2346,7 +2350,9 @@ void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float gra
     skySystem.recordDraw(cmd, frameIndex);
 
     // Draw terrain (LEB adaptive tessellation)
-    terrainSystem.recordDraw(cmd, frameIndex);
+    if (terrainEnabled) {
+        terrainSystem.recordDraw(cmd, frameIndex);
+    }
 
     // Draw Catmull-Clark subdivision surfaces
     catmullClarkSystem.recordDraw(cmd, frameIndex);
