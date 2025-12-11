@@ -1446,6 +1446,11 @@ void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera& camera) 
 }
 
 void Renderer::render(const Camera& camera) {
+    // Skip rendering if window is suspended (e.g., macOS screen lock)
+    if (windowSuspended) {
+        return;
+    }
+
     VkDevice device = vulkanContext.getDevice();
     VkSwapchainKHR swapchain = vulkanContext.getSwapchain();
     VkQueue graphicsQueue = vulkanContext.getGraphicsQueue();
@@ -1455,6 +1460,7 @@ void Renderer::render(const Camera& camera) {
     if (framebufferResized) {
         handleResize();
         swapchain = vulkanContext.getSwapchain();  // Update after resize
+        framebufferResized = false;
     }
 
     // Skip rendering if window is minimized
@@ -1473,8 +1479,19 @@ void Renderer::render(const Camera& camera) {
     if (result == VK_ERROR_OUT_OF_DATE_KHR) {
         handleResize();
         return;
+    } else if (result == VK_ERROR_SURFACE_LOST_KHR) {
+        // Surface lost - can happen on macOS when screen locks/unlocks
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Surface lost, will recreate on next frame");
+        framebufferResized = true;
+        return;
+    } else if (result == VK_ERROR_DEVICE_LOST) {
+        // Device lost - critical error on macOS lock/unlock
+        // Log error but return gracefully - app can attempt recovery on next frame
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Vulkan device lost - attempting recovery");
+        framebufferResized = true;
+        return;
     } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to acquire swapchain image");
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to acquire swapchain image: %d", result);
         return;
     }
 
@@ -1753,7 +1770,15 @@ void Renderer::render(const Camera& camera) {
     submitInfo.signalSemaphoreCount = 1;
     submitInfo.pSignalSemaphores = signalSemaphores;
 
-    vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]);
+    result = vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]);
+    if (result == VK_ERROR_DEVICE_LOST) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Device lost during queue submit");
+        framebufferResized = true;
+        return;
+    } else if (result != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to submit draw command buffer: %d", result);
+        return;
+    }
 
     // Present
     VkPresentInfoKHR presentInfo{};
@@ -1770,8 +1795,11 @@ void Renderer::render(const Camera& camera) {
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
         framebufferResized = true;
+    } else if (result == VK_ERROR_SURFACE_LOST_KHR || result == VK_ERROR_DEVICE_LOST) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Surface/device lost during present, will recover");
+        framebufferResized = true;
     } else if (result != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to present swapchain image");
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to present swapchain image: %d", result);
     }
 
     // Advance grass double-buffer sets after frame submission

@@ -431,6 +431,22 @@ void Application::processEvents() {
             case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
                 renderer.notifyWindowResized();
                 break;
+            case SDL_EVENT_WINDOW_MINIMIZED:
+            case SDL_EVENT_WINDOW_HIDDEN:
+            case SDL_EVENT_WINDOW_OCCLUDED:
+                // Window minimized or hidden (e.g., macOS screen lock)
+                SDL_Log("Window suspended");
+                renderer.notifyWindowSuspended();
+                break;
+            case SDL_EVENT_WINDOW_RESTORED:
+            case SDL_EVENT_WINDOW_SHOWN:
+            case SDL_EVENT_WINDOW_EXPOSED:
+                // Window restored (e.g., macOS screen unlock)
+                if (renderer.isWindowSuspended()) {
+                    SDL_Log("Window restored, recreating swapchain");
+                    renderer.notifyWindowRestored();
+                }
+                break;
             case SDL_EVENT_KEY_DOWN:
                 if (event.key.scancode == SDL_SCANCODE_ESCAPE) {
                     running = false;

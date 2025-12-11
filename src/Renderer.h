@@ -95,6 +95,17 @@ public:
     // Notify renderer that window was resized (will trigger resize on next render)
     void notifyWindowResized() { framebufferResized = true; }
 
+    // Notify renderer that window was minimized/hidden (e.g., screen lock on macOS)
+    void notifyWindowSuspended() { windowSuspended = true; }
+
+    // Notify renderer that window was restored (e.g., screen unlock on macOS)
+    void notifyWindowRestored() {
+        windowSuspended = false;
+        framebufferResized = true;  // Force swapchain recreation after restore
+    }
+
+    bool isWindowSuspended() const { return windowSuspended; }
+
     // Vulkan handle getters for GUI integration
     VkInstance getInstance() const { return vulkanContext.getInstance(); }
     VkPhysicalDevice getPhysicalDevice() const { return vulkanContext.getPhysicalDevice(); }
@@ -495,6 +506,7 @@ private:
     float cloudCoverage = 0.5f;            // 0-1 cloud coverage amount
     float cloudDensity = 0.3f;             // Base density multiplier
     bool framebufferResized = false;       // true = window resized, need to recreate swapchain
+    bool windowSuspended = false;          // true = window minimized/hidden (macOS screen lock)
 
     // Player position for grass displacement
     glm::vec3 playerPosition = glm::vec3(0.0f);
