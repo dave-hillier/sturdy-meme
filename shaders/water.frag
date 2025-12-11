@@ -361,7 +361,8 @@ void main() {
     }
 
     // Discard fragments where terrain is above water (water shouldn't render there)
-    if (waterDepth < -0.1) {
+    // Use larger epsilon (-0.5) to prevent flickering from floating-point precision issues
+    if (waterDepth < -0.5) {
         discard;
     }
 

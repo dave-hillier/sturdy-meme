@@ -240,6 +240,7 @@ bool WaterSystem::createPipeline() {
     std::vector<VkVertexInputAttributeDescription> attributes(attrDescs.begin(), attrDescs.end());
 
     // Water pipeline: alpha blending, depth test but no depth write (for transparency)
+    // Depth bias prevents z-fighting flickering at water/terrain intersection
     bool success = factory
         .setShaders(shaderPath + "/water.vert.spv", shaderPath + "/water.frag.spv")
         .setRenderPass(hdrRenderPass)
@@ -248,6 +249,7 @@ bool WaterSystem::createPipeline() {
         .setVertexInput(bindings, attributes)
         .setDepthTest(true)
         .setDepthWrite(false)  // Don't write depth for transparent water
+        .setDepthBias(1.0f, 1.5f)  // Bias water slightly away from camera to prevent z-fighting
         .setBlendMode(GraphicsPipelineFactory::BlendMode::Alpha)
         .setCullMode(VK_CULL_MODE_NONE)  // Render both sides of water
         .build(pipeline);
