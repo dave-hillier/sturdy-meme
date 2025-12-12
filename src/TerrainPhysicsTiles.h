@@ -17,8 +17,8 @@ struct PhysicsTile {
 };
 
 // Manages streaming terrain physics collision tiles
-// Creates Jolt heightfield bodies for tiles near the player (high detail)
-// and coarse LOD tiles for distant terrain coverage
+// Creates Jolt heightfield bodies for LOD0 tiles near the player
+// Limited to a configurable radius (default 512m) for ~4 active tiles
 class TerrainPhysicsTiles {
 public:
     TerrainPhysicsTiles() = default;
@@ -32,12 +32,12 @@ public:
     void destroy();
 
     // Update physics tiles based on player position
-    // Loads LOD0 tiles within highDetailRadius, LOD3 tiles for rest of terrain
-    void update(const glm::vec3& playerPos, float highDetailRadius = 150.0f);
+    // Only loads LOD0 tiles within the specified radius (~4 tiles at 512m)
+    void update(const glm::vec3& playerPos, float radius = 512.0f);
 
     // Preload all physics tiles needed for a position (blocking, no per-frame limit)
     // Call this before spawning character to ensure collision is ready
-    void preloadTilesAt(const glm::vec3& playerPos, float highDetailRadius = 150.0f);
+    void preloadTilesAt(const glm::vec3& playerPos, float radius = 512.0f);
 
     // Get count of active physics tiles
     uint32_t getActivePhysicsTileCount() const { return static_cast<uint32_t>(physicsTiles.size()); }
@@ -61,8 +61,8 @@ private:
                             float& outMinX, float& outMinZ,
                             float& outMaxX, float& outMaxZ) const;
 
-    // Get tiles that should have physics at given player position
-    void getDesiredTiles(const glm::vec3& playerPos, float highDetailRadius,
+    // Get LOD0 tiles within radius of player position
+    void getDesiredTiles(const glm::vec3& playerPos, float radius,
                          std::vector<std::pair<TileCoord, uint32_t>>& outTiles) const;
 
     // Track physics bodies by tile key
@@ -77,13 +77,10 @@ private:
     float heightScale = 235.0f;
     float minAltitude = -15.0f;
 
-    // LOD grid dimensions
+    // LOD0 grid dimensions (only LOD0 is used for physics)
     uint32_t lod0TilesX = 32;  // LOD0: 32x32 tiles
     uint32_t lod0TilesZ = 32;
-    uint32_t lod3TilesX = 4;   // LOD3: 4x4 tiles
-    uint32_t lod3TilesZ = 4;
 
-    // Physics tile LOD levels
-    static constexpr uint32_t HIGH_DETAIL_LOD = 0;  // LOD0 for near player
-    static constexpr uint32_t LOW_DETAIL_LOD = 3;   // LOD3 for distant coverage
+    // Physics only uses LOD0 (highest detail)
+    static constexpr uint32_t HIGH_DETAIL_LOD = 0;
 };

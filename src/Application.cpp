@@ -81,12 +81,12 @@ bool Application::init(const std::string& title, int width, int height) {
         terrain.getTileCache().getHeightScale(),
         terrain.getTileCache().getMinAltitude()
     );
-    SDL_Log("Terrain physics using tile-based streaming (1000m high detail radius)");
+    SDL_Log("Terrain physics using LOD0 tiles only (512m radius, ~4 tiles)");
 
     // IMPORTANT: Preload terrain physics tiles BEFORE spawning any dynamic objects
     // Otherwise objects spawn and immediately fall through non-existent collision
     glm::vec3 spawnAreaCenter(0.0f, 0.0f, 0.0f);
-    terrainPhysicsTiles.preloadTilesAt(spawnAreaCenter, 150.0f);
+    terrainPhysicsTiles.preloadTilesAt(spawnAreaCenter);  // Uses default 512m radius
 
     // Initialize scene physics (dynamic objects)
     renderer.getSceneManager().initPhysics(physics);
@@ -129,7 +129,7 @@ bool Application::init(const std::string& title, int width, int height) {
     // Otherwise character falls through non-existent terrain collision
     // Use preloadTilesAt() which loads all needed tiles at once (no per-frame limit)
     glm::vec3 spawnPos(playerSpawnX, playerSpawnY, playerSpawnZ);
-    terrainPhysicsTiles.preloadTilesAt(spawnPos, 150.0f);
+    terrainPhysicsTiles.preloadTilesAt(spawnPos);  // Uses default 512m radius
 
     // Debug: Sample terrain height at spawn position using different methods
     float heightFromTerrainSystem = terrain.getHeightAt(playerSpawnX, playerSpawnZ);
@@ -266,9 +266,9 @@ void Application::run() {
         physics.update(deltaTime);
 
         // Update terrain physics tiles based on player position
-        // Only need physics collision within ~150m of player (character + thrown objects range)
+        // Only loads LOD0 tiles within 512m radius (~4 tiles) for consistent physics
         glm::vec3 playerPos = physics.getCharacterPosition();
-        terrainPhysicsTiles.update(playerPos, 150.0f);
+        terrainPhysicsTiles.update(playerPos);  // Uses default 512m radius with 128m hysteresis
 
         // Debug: Log orb position every second to track physics terrain offset
         static float debugLogTimer = 0.0f;

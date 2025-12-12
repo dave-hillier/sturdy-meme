@@ -12,17 +12,15 @@ void TerrainPhysicsTiles::init(PhysicsWorld* physicsWorld, TerrainTileCache* cac
     heightScale = scale;
     minAltitude = minAlt;
 
-    // Get LOD grid dimensions from tile cache
+    // Get LOD0 grid dimensions from tile cache
     if (tileCache) {
         lod0TilesX = tileCache->getTilesX();
         lod0TilesZ = tileCache->getTilesZ();
-        // LOD3 has 8x fewer tiles in each dimension (2^3 = 8)
-        lod3TilesX = std::max(1u, lod0TilesX >> 3);
-        lod3TilesZ = std::max(1u, lod0TilesZ >> 3);
     }
 
-    SDL_Log("TerrainPhysicsTiles initialized: LOD0 %ux%u tiles, LOD3 %ux%u tiles",
-            lod0TilesX, lod0TilesZ, lod3TilesX, lod3TilesZ);
+    float tileSize = terrainSize / lod0TilesX;
+    SDL_Log("TerrainPhysicsTiles initialized: LOD0 %ux%u tiles (%.0fm each), physics limited to 512m radius (~4 tiles)",
+            lod0TilesX, lod0TilesZ, tileSize);
 }
 
 void TerrainPhysicsTiles::destroy() {
@@ -65,19 +63,20 @@ void TerrainPhysicsTiles::getTileWorldBounds(TileCoord coord, uint32_t lod,
     outMaxZ = outMinZ + tileWorldSizeZ;
 }
 
-void TerrainPhysicsTiles::getDesiredTiles(const glm::vec3& playerPos, float highDetailRadius,
+void TerrainPhysicsTiles::getDesiredTiles(const glm::vec3& playerPos, float radius,
                                            std::vector<std::pair<TileCoord, uint32_t>>& outTiles) const {
     outTiles.clear();
 
-    // 1. Find LOD0 tiles within highDetailRadius of player
+    // Only use LOD0 tiles within the specified radius
+    // With 512m radius and ~512m tiles, this typically loads ~4 tiles
     float halfTerrain = terrainSize * 0.5f;
     float lod0TileSize = terrainSize / lod0TilesX;
 
     // Calculate the range of LOD0 tiles that could be within radius
-    int minTileX = static_cast<int>((playerPos.x - highDetailRadius + halfTerrain) / lod0TileSize);
-    int maxTileX = static_cast<int>((playerPos.x + highDetailRadius + halfTerrain) / lod0TileSize);
-    int minTileZ = static_cast<int>((playerPos.z - highDetailRadius + halfTerrain) / lod0TileSize);
-    int maxTileZ = static_cast<int>((playerPos.z + highDetailRadius + halfTerrain) / lod0TileSize);
+    int minTileX = static_cast<int>((playerPos.x - radius + halfTerrain) / lod0TileSize);
+    int maxTileX = static_cast<int>((playerPos.x + radius + halfTerrain) / lod0TileSize);
+    int minTileZ = static_cast<int>((playerPos.z - radius + halfTerrain) / lod0TileSize);
+    int maxTileZ = static_cast<int>((playerPos.z + radius + halfTerrain) / lod0TileSize);
 
     // Clamp to valid tile range
     minTileX = std::max(0, minTileX);
@@ -86,55 +85,22 @@ void TerrainPhysicsTiles::getDesiredTiles(const glm::vec3& playerPos, float high
     maxTileZ = std::min(static_cast<int>(lod0TilesZ) - 1, maxTileZ);
 
     // Add LOD0 tiles that are actually within the radius
-    std::vector<TileCoord> lod0Tiles;
     for (int tz = minTileZ; tz <= maxTileZ; tz++) {
         for (int tx = minTileX; tx <= maxTileX; tx++) {
             TileCoord coord{tx, tz};
 
             // Check if tile center is within radius
-            float tileCenterX, tileCenterZ, tileMaxX, tileMaxZ;
-            getTileWorldBounds(coord, HIGH_DETAIL_LOD, tileCenterX, tileCenterZ, tileMaxX, tileMaxZ);
-            tileCenterX = (tileCenterX + tileMaxX) * 0.5f;
-            tileCenterZ = (tileCenterZ + tileMaxZ) * 0.5f;
+            float tileMinX, tileMinZ, tileMaxX, tileMaxZ;
+            getTileWorldBounds(coord, HIGH_DETAIL_LOD, tileMinX, tileMinZ, tileMaxX, tileMaxZ);
+            float tileCenterX = (tileMinX + tileMaxX) * 0.5f;
+            float tileCenterZ = (tileMinZ + tileMaxZ) * 0.5f;
 
             float dx = tileCenterX - playerPos.x;
             float dz = tileCenterZ - playerPos.z;
             float distSq = dx * dx + dz * dz;
 
-            if (distSq <= highDetailRadius * highDetailRadius) {
+            if (distSq <= radius * radius) {
                 outTiles.push_back({coord, HIGH_DETAIL_LOD});
-                lod0Tiles.push_back(coord);
-            }
-        }
-    }
-
-    // 2. Add LOD3 tiles for the entire terrain (except where LOD0 covers)
-    float lod3TileSize = terrainSize / lod3TilesX;
-
-    for (uint32_t tz = 0; tz < lod3TilesZ; tz++) {
-        for (uint32_t tx = 0; tx < lod3TilesX; tx++) {
-            TileCoord lod3Coord{static_cast<int32_t>(tx), static_cast<int32_t>(tz)};
-
-            // Check if this LOD3 tile overlaps with any LOD0 tile
-            float lod3MinX, lod3MinZ, lod3MaxX, lod3MaxZ;
-            getTileWorldBounds(lod3Coord, LOW_DETAIL_LOD, lod3MinX, lod3MinZ, lod3MaxX, lod3MaxZ);
-
-            bool overlapsLod0 = false;
-            for (const auto& lod0Coord : lod0Tiles) {
-                float lod0MinX, lod0MinZ, lod0MaxX, lod0MaxZ;
-                getTileWorldBounds(lod0Coord, HIGH_DETAIL_LOD, lod0MinX, lod0MinZ, lod0MaxX, lod0MaxZ);
-
-                // Check for overlap (any intersection)
-                if (lod3MaxX > lod0MinX && lod3MinX < lod0MaxX &&
-                    lod3MaxZ > lod0MinZ && lod3MinZ < lod0MaxZ) {
-                    overlapsLod0 = true;
-                    break;
-                }
-            }
-
-            // Only add LOD3 tile if it doesn't overlap any LOD0 tile
-            if (!overlapsLod0) {
-                outTiles.push_back({lod3Coord, LOW_DETAIL_LOD});
             }
         }
     }
@@ -231,12 +197,17 @@ void TerrainPhysicsTiles::preloadTilesAt(const glm::vec3& playerPos, float highD
     SDL_Log("TerrainPhysicsTiles: Preloaded %u physics tiles", getActivePhysicsTileCount());
 }
 
-void TerrainPhysicsTiles::update(const glm::vec3& playerPos, float highDetailRadius) {
+void TerrainPhysicsTiles::update(const glm::vec3& playerPos, float radius) {
     if (!physics || !tileCache) return;
 
-    // Get the set of tiles we want to have physics for
+    // Use hysteresis to prevent tile flickering at boundary
+    // Load tiles at radius, unload at radius + hysteresis margin
+    static constexpr float HYSTERESIS_MARGIN = 128.0f;
+    float unloadRadius = radius + HYSTERESIS_MARGIN;
+
+    // Get tiles we want to load (within radius)
     std::vector<std::pair<TileCoord, uint32_t>> desiredTiles;
-    getDesiredTiles(playerPos, highDetailRadius, desiredTiles);
+    getDesiredTiles(playerPos, radius, desiredTiles);
 
     // Build a set of desired keys for fast lookup
     std::unordered_map<uint64_t, bool> desiredKeys;
@@ -244,10 +215,19 @@ void TerrainPhysicsTiles::update(const glm::vec3& playerPos, float highDetailRad
         desiredKeys[makeTileKey(coord, lod)] = true;
     }
 
-    // Remove physics for tiles no longer needed
+    // Get tiles within unload radius (tiles to keep)
+    std::vector<std::pair<TileCoord, uint32_t>> keepTiles;
+    getDesiredTiles(playerPos, unloadRadius, keepTiles);
+
+    std::unordered_map<uint64_t, bool> keepKeys;
+    for (const auto& [coord, lod] : keepTiles) {
+        keepKeys[makeTileKey(coord, lod)] = true;
+    }
+
+    // Remove physics for tiles outside unload radius
     std::vector<uint64_t> toRemove;
     for (const auto& [key, tile] : physicsTiles) {
-        if (desiredKeys.find(key) == desiredKeys.end()) {
+        if (keepKeys.find(key) == keepKeys.end()) {
             toRemove.push_back(key);
         }
     }
@@ -255,7 +235,7 @@ void TerrainPhysicsTiles::update(const glm::vec3& playerPos, float highDetailRad
         destroyPhysicsForTile(key);
     }
 
-    // Add physics for new tiles (limit to a few per frame to avoid hitches)
+    // Add physics for new tiles within load radius (limit to a few per frame)
     int tilesCreatedThisFrame = 0;
     static constexpr int MAX_TILES_PER_FRAME = 2;
 
@@ -272,9 +252,8 @@ void TerrainPhysicsTiles::update(const glm::vec3& playerPos, float highDetailRad
 }
 
 void TerrainPhysicsTiles::drawTileBounds(DebugLineSystem& debugLines) const {
-    // Colors for different LOD levels
-    const glm::vec4 lod0Color{0.0f, 1.0f, 0.0f, 1.0f};  // Green for LOD0 (high detail)
-    const glm::vec4 lod3Color{1.0f, 0.5f, 0.0f, 1.0f};  // Orange for LOD3 (coarse)
+    // Green for physics tiles (all LOD0)
+    const glm::vec4 tileColor{0.0f, 1.0f, 0.0f, 1.0f};
 
     for (const auto& [key, tile] : physicsTiles) {
         float minX, minZ, maxX, maxZ;
@@ -284,8 +263,6 @@ void TerrainPhysicsTiles::drawTileBounds(DebugLineSystem& debugLines) const {
         float minY = minAltitude;
         float maxY = minAltitude + heightScale;
 
-        glm::vec4 color = (tile.lod == HIGH_DETAIL_LOD) ? lod0Color : lod3Color;
-
-        debugLines.addBox(glm::vec3(minX, minY, minZ), glm::vec3(maxX, maxY, maxZ), color);
+        debugLines.addBox(glm::vec3(minX, minY, minZ), glm::vec3(maxX, maxY, maxZ), tileColor);
     }
 }
