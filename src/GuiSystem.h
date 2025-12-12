@@ -48,7 +48,7 @@ public:
     bool init(SDL_Window* window, VkInstance instance, VkPhysicalDevice physicalDevice,
               VkDevice device, uint32_t graphicsQueueFamily, VkQueue graphicsQueue,
               VkRenderPass renderPass, uint32_t imageCount);
-    void shutdown();
+    void shutdown(VkDevice device);
 
     void processEvent(const SDL_Event& event);
     void beginFrame();

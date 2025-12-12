@@ -84,13 +84,13 @@ bool GuiSystem::init(SDL_Window* window, VkInstance instance, VkPhysicalDevice p
     return true;
 }
 
-void GuiSystem::shutdown() {
+void GuiSystem::shutdown(VkDevice device) {
     ImGui_ImplVulkan_Shutdown();
     ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
 
     if (imguiPool != VK_NULL_HANDLE) {
-        // Note: Pool is destroyed with device
+        vkDestroyDescriptorPool(device, imguiPool, nullptr);
         imguiPool = VK_NULL_HANDLE;
     }
 }

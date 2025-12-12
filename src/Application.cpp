@@ -400,7 +400,7 @@ void Application::run() {
 
 void Application::shutdown() {
     renderer.waitIdle();
-    gui.shutdown();
+    gui.shutdown(renderer.getDevice());
     input.shutdown();
     terrainPhysicsTiles.destroy();
     physics.shutdown();
