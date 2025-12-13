@@ -117,20 +117,20 @@ private:
     uint32_t framesInFlight = 0;
     VkExtent2D extent = {0, 0};
     bool enabled = true;
-    bool blurEnabled = false;        // Disabled - causes screen corruption, needs debugging
+    bool blurEnabled = false;        // Disabled - causes screen corruption, needs barrier/sync debugging
 
     // SSR parameters
-    float maxDistance = 100.0f;     // Max reflection distance
-    float thickness = 0.5f;         // Depth comparison thickness
-    float stride = 2.0f;            // Ray march step size in pixels
-    int maxSteps = 64;              // Max ray march iterations
+    float maxDistance = 300.0f;     // Max reflection distance (world units)
+    float thickness = 1.0f;         // Depth comparison thickness (more forgiving)
+    float stride = 1.5f;            // Ray march step size in pixels (finer tracing)
+    int maxSteps = 128;             // Max ray march iterations (longer traces)
     float fadeStart = 0.7f;         // Start fading reflections at 70% of max distance
     float fadeEnd = 1.0f;           // Fully fade at 100% of max distance
     float temporalBlend = 0.9f;     // Temporal stability blend factor
 
     // Blur parameters
-    float blurRadius = 2.0f;        // Blur kernel radius in pixels
-    float blurDepthThreshold = 0.01f; // Depth threshold for bilateral weight
+    float blurRadius = 1.5f;        // Blur kernel radius in pixels (conservative)
+    float blurDepthThreshold = 0.005f; // Depth threshold for bilateral weight (tighter)
 
     // Double-buffered SSR result (ping-pong for temporal filtering)
     // RGBA16F format - rgb = reflection color, a = confidence
