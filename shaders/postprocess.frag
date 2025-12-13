@@ -28,8 +28,16 @@ layout(binding = BINDING_PP_UNIFORMS) uniform PostProcessUniforms {
     // Purkinje effect (Phase 5.6)
     float sceneIlluminance; // Scene illuminance in lux
     float hdrEnabled;       // 1.0 = HDR tonemapping, 0.0 = bypass
+    // Quality settings
+    float godRaysEnabled;       // 1.0 = enabled, 0.0 = disabled
+    float froxelFilterQuality;  // 0.0 = trilinear (fast), 1.0 = tricubic (quality)
+    float padding2;
     float padding3;
 } ubo;
+
+// Specialization constant for god ray sample count
+// Low=16, Medium=32, High=64
+layout(constant_id = 0) const int GOD_RAY_SAMPLES = 64;
 
 layout(binding = BINDING_PP_DEPTH) uniform sampler2D depthInput;
 layout(binding = BINDING_PP_FROXEL) uniform sampler3D froxelVolume;
@@ -141,7 +149,7 @@ float depthToSlice(float linearDepth) {
 }
 
 // Sample froxel volume for volumetric fog (Phase 4.3)
-// Uses tricubic B-spline filtering for smoother gradients
+// Quality setting controls filtering: 0 = trilinear (fast), 1 = tricubic (quality)
 vec4 sampleFroxelFog(vec2 uv, float linearDepth) {
     // Clamp to volumetric range
     float clampedDepth = min(linearDepth, ubo.froxelFarPlane);
@@ -150,8 +158,15 @@ vec4 sampleFroxelFog(vec2 uv, float linearDepth) {
     float sliceIndex = depthToSlice(clampedDepth);
     float w = sliceIndex / float(FROXEL_DEPTH);
 
-    // Sample with tricubic B-spline filtering for smoother fog gradients
-    vec4 fogData = sampleFroxelTricubic(vec3(uv, w));
+    // Sample with quality-dependent filtering
+    vec4 fogData;
+    if (ubo.froxelFilterQuality > 0.5) {
+        // High quality: tricubic B-spline filtering (8 bilinear samples)
+        fogData = sampleFroxelTricubic(vec3(uv, w));
+    } else {
+        // Low quality: simple trilinear filtering (1 sample)
+        fogData = texture(froxelVolume, vec3(uv, w));
+    }
 
     // fogData format: RGB = L/alpha (normalized scatter), A = alpha
     // Recover actual scattering: L = (L/alpha) * alpha
@@ -213,7 +228,7 @@ vec3 SimplePurkinje(vec3 color, float illuminance) {
 
 // God rays / Light shafts (Phase 4.4)
 // Screen-space radial blur from sun position
-const int GOD_RAY_SAMPLES = 64;
+// GOD_RAY_SAMPLES is now a specialization constant defined at top of file
 
 vec3 computeGodRays(vec2 uv, vec2 sunPos) {
     // Only process if sun is roughly on screen
@@ -298,8 +313,9 @@ void main() {
     vec3 bloom = texture(bloomTexture, fragTexCoord).rgb;
 
     // Compute god rays (Phase 4.4)
+    // Only compute if enabled and intensity > 0
     vec3 godRays = vec3(0.0);
-    if (ubo.godRayIntensity > 0.0) {
+    if (ubo.godRaysEnabled > 0.5 && ubo.godRayIntensity > 0.0) {
         godRays = computeGodRays(fragTexCoord, ubo.sunScreenPos);
     }
 

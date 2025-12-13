@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 #include <functional>
+#include <array>
 #include "UBOs.h"
 #include "DescriptorManager.h"
 
@@ -85,6 +86,17 @@ public:
     float getGodRayIntensity() const { return godRayIntensity; }
     void setGodRayDecay(float d) { godRayDecay = d; }
     float getGodRayDecay() const { return godRayDecay; }
+    void setGodRaysEnabled(bool enabled) { godRaysEnabled = enabled; }
+    bool isGodRaysEnabled() const { return godRaysEnabled; }
+
+    // God ray quality (sample count): 0=Low(16), 1=Medium(32), 2=High(64)
+    enum class GodRayQuality { Low = 0, Medium = 1, High = 2 };
+    void setGodRayQuality(GodRayQuality quality);
+    GodRayQuality getGodRayQuality() const { return godRayQuality; }
+
+    // Froxel filter quality: false=trilinear (fast), true=tricubic (quality)
+    void setFroxelFilterQuality(bool highQuality) { froxelFilterHighQuality = highQuality; }
+    bool isFroxelFilterHighQuality() const { return froxelFilterHighQuality; }
 
     // Froxel volumetrics (Phase 4.3)
     void setFroxelVolume(VkImageView volumeView, VkSampler volumeSampler);
@@ -150,7 +162,9 @@ private:
     // Final composite pipeline
     VkDescriptorSetLayout compositeDescriptorSetLayout = VK_NULL_HANDLE;
     VkPipelineLayout compositePipelineLayout = VK_NULL_HANDLE;
-    VkPipeline compositePipeline = VK_NULL_HANDLE;
+    // Pipeline variants for different god ray sample counts
+    // Index 0=Low(16), 1=Medium(32), 2=High(64)
+    std::array<VkPipeline, 3> compositePipelines = {VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE};
     std::vector<VkDescriptorSet> compositeDescriptorSets;
 
     // Uniform buffers (per frame)
@@ -174,6 +188,9 @@ private:
     glm::vec2 sunScreenPos = glm::vec2(0.5f, 0.5f);  // Default to center
     float godRayIntensity = 0.25f;  // God ray strength (subtle)
     float godRayDecay = 0.92f;      // Falloff per sample (faster falloff = less extreme)
+    bool godRaysEnabled = true;     // Enable/disable god rays
+    GodRayQuality godRayQuality = GodRayQuality::High;  // Sample count quality level
+    bool froxelFilterHighQuality = true;  // Tricubic (true) vs trilinear (false)
 
     // Froxel volumetrics (Phase 4.3)
     VkImageView froxelVolumeView = VK_NULL_HANDLE;

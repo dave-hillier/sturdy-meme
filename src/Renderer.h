@@ -169,6 +169,16 @@ public:
     void setCloudShadowIntensity(float intensity) { cloudShadowSystem.setShadowIntensity(intensity); }
     float getCloudShadowIntensity() const { return cloudShadowSystem.getShadowIntensity(); }
 
+    // God ray quality control
+    void setGodRaysEnabled(bool enabled) { postProcessSystem.setGodRaysEnabled(enabled); }
+    bool isGodRaysEnabled() const { return postProcessSystem.isGodRaysEnabled(); }
+    void setGodRayQuality(PostProcessSystem::GodRayQuality quality) { postProcessSystem.setGodRayQuality(quality); }
+    PostProcessSystem::GodRayQuality getGodRayQuality() const { return postProcessSystem.getGodRayQuality(); }
+
+    // Froxel volumetric fog quality control
+    void setFroxelFilterQuality(bool highQuality) { postProcessSystem.setFroxelFilterQuality(highQuality); }
+    bool isFroxelFilterHighQuality() const { return postProcessSystem.isFroxelFilterHighQuality(); }
+
     // Terrain control
     void setTerrainEnabled(bool enabled) { terrainEnabled = enabled; }
     bool isTerrainEnabled() const { return terrainEnabled; }

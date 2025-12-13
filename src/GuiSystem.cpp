@@ -1180,7 +1180,41 @@ void GuiSystem::renderPostProcessSection(Renderer& renderer) {
     ImGui::Text("GOD RAYS");
     ImGui::PopStyleColor();
 
-    ImGui::TextDisabled("God rays follow sun position");
+    bool godRaysEnabled = renderer.isGodRaysEnabled();
+    if (ImGui::Checkbox("Enable God Rays", &godRaysEnabled)) {
+        renderer.setGodRaysEnabled(godRaysEnabled);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Toggle god ray light shafts effect");
+    }
+
+    if (godRaysEnabled) {
+        // God ray quality dropdown
+        const char* qualityNames[] = {"Low (16 samples)", "Medium (32 samples)", "High (64 samples)"};
+        int currentQuality = static_cast<int>(renderer.getGodRayQuality());
+        if (ImGui::Combo("God Ray Quality", &currentQuality, qualityNames, 3)) {
+            renderer.setGodRayQuality(static_cast<PostProcessSystem::GodRayQuality>(currentQuality));
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Higher quality = more samples = better rays but slower");
+        }
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.7f, 0.9f, 1.0f, 1.0f));
+    ImGui::Text("VOLUMETRIC FOG");
+    ImGui::PopStyleColor();
+
+    bool froxelHighQuality = renderer.isFroxelFilterHighQuality();
+    if (ImGui::Checkbox("High Quality Fog Filter", &froxelHighQuality)) {
+        renderer.setFroxelFilterQuality(froxelHighQuality);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Tricubic filtering (8 samples) vs Trilinear (1 sample)");
+    }
 
     ImGui::Spacing();
     ImGui::Separator();

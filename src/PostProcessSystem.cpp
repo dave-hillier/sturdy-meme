@@ -44,9 +44,11 @@ void PostProcessSystem::destroy(VkDevice device, VmaAllocator allocator) {
     uniformAllocations.clear();
     uniformMappedPtrs.clear();
 
-    if (compositePipeline != VK_NULL_HANDLE) {
-        vkDestroyPipeline(device, compositePipeline, nullptr);
-        compositePipeline = VK_NULL_HANDLE;
+    for (auto& pipeline : compositePipelines) {
+        if (pipeline != VK_NULL_HANDLE) {
+            vkDestroyPipeline(device, pipeline, nullptr);
+            pipeline = VK_NULL_HANDLE;
+        }
     }
     if (compositePipelineLayout != VK_NULL_HANDLE) {
         vkDestroyPipelineLayout(device, compositePipelineLayout, nullptr);
@@ -493,6 +495,16 @@ bool PostProcessSystem::createCompositePipeline() {
     vertShaderStageInfo.module = vertShaderModule;
     vertShaderStageInfo.pName = "main";
 
+    // Specialization constant for god ray sample count
+    // constant_id = 0 maps to GOD_RAY_SAMPLES in shader
+    VkSpecializationMapEntry specMapEntry{};
+    specMapEntry.constantID = 0;
+    specMapEntry.offset = 0;
+    specMapEntry.size = sizeof(int32_t);
+
+    // Sample counts for each quality level: Low=16, Medium=32, High=64
+    const int32_t sampleCounts[3] = {16, 32, 64};
+
     VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
     fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
@@ -585,11 +597,24 @@ bool PostProcessSystem::createCompositePipeline() {
     pipelineInfo.renderPass = outputRenderPass;
     pipelineInfo.subpass = 0;
 
-    if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &compositePipeline) != VK_SUCCESS) {
-        SDL_Log("Failed to create composite graphics pipeline");
-        vkDestroyShaderModule(device, vertShaderModule, nullptr);
-        vkDestroyShaderModule(device, fragShaderModule, nullptr);
-        return false;
+    // Create pipeline variants for each god ray quality level
+    for (int i = 0; i < 3; i++) {
+        VkSpecializationInfo specInfo{};
+        specInfo.mapEntryCount = 1;
+        specInfo.pMapEntries = &specMapEntry;
+        specInfo.dataSize = sizeof(int32_t);
+        specInfo.pData = &sampleCounts[i];
+
+        // Update fragment shader stage with specialization info
+        shaderStages[1].pSpecializationInfo = &specInfo;
+
+        if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &compositePipelines[i]) != VK_SUCCESS) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create composite graphics pipeline variant %d", i);
+            vkDestroyShaderModule(device, vertShaderModule, nullptr);
+            vkDestroyShaderModule(device, fragShaderModule, nullptr);
+            return false;
+        }
+        SDL_Log("Created post-process pipeline variant %d (god ray samples: %d)", i, sampleCounts[i]);
     }
 
     vkDestroyShaderModule(device, vertShaderModule, nullptr);
@@ -646,6 +671,9 @@ void PostProcessSystem::recordPostProcess(VkCommandBuffer cmd, uint32_t frameInd
     ubo->sceneIlluminance = adaptedLuminance * 200.0f;
     // HDR tonemapping bypass toggle
     ubo->hdrEnabled = hdrEnabled ? 1.0f : 0.0f;
+    // Quality settings
+    ubo->godRaysEnabled = godRaysEnabled ? 1.0f : 0.0f;
+    ubo->froxelFilterQuality = froxelFilterHighQuality ? 1.0f : 0.0f;
 
     // Store computed exposure for next frame
     lastAutoExposure = autoExposureEnabled ? computedExposure : manualExposure;
@@ -666,7 +694,9 @@ void PostProcessSystem::recordPostProcess(VkCommandBuffer cmd, uint32_t frameInd
 
     vkCmdBeginRenderPass(cmd, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, compositePipeline);
+    // Select pipeline variant based on god ray quality setting
+    VkPipeline selectedPipeline = compositePipelines[static_cast<int>(godRayQuality)];
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, selectedPipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, compositePipelineLayout,
                             0, 1, &compositeDescriptorSets[frameIndex], 0, nullptr);
 
@@ -1233,4 +1263,10 @@ void PostProcessSystem::setBloomTexture(VkImageView bloomView, VkSampler bloomSa
 
         vkUpdateDescriptorSets(device, 1, &descriptorWrite, 0, nullptr);
     }
+}
+
+void PostProcessSystem::setGodRayQuality(GodRayQuality quality) {
+    godRayQuality = quality;
+    const char* qualityNames[] = {"Low (16 samples)", "Medium (32 samples)", "High (64 samples)"};
+    SDL_Log("God ray quality set to: %s", qualityNames[static_cast<int>(quality)]);
 }
