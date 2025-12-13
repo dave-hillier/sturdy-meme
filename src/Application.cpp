@@ -73,6 +73,28 @@ bool Application::init(const std::string& title, int width, int height) {
     // Get terrain reference for spawning objects
     auto& terrain = renderer.getTerrainSystem();
 
+    // Create terrain physics heightfield from the terrain heightmap data
+    // This provides collision for the entire terrain matching the visual rendering
+    // Note: hole mask is not passed since it's at different resolution (2048 vs 512);
+    // holes in the terrain (e.g., well entrance) will still allow objects through visually
+    {
+        const float* heightData = terrain.getHeightMapData();
+        uint32_t resolution = terrain.getHeightMapResolution();
+        float worldSize = terrain.getConfig().size;
+        float heightScale = terrain.getConfig().heightScale;
+
+        PhysicsBodyID terrainBody = physics.createTerrainHeightfield(
+            heightData, resolution, worldSize, heightScale
+        );
+
+        if (terrainBody != INVALID_BODY_ID) {
+            SDL_Log("Terrain heightfield physics created: %ux%u samples, world size %.0f, height scale %.1f",
+                    resolution, resolution, worldSize, heightScale);
+        } else {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create terrain heightfield physics!");
+        }
+    }
+
     // Initialize scene physics (dynamic objects)
     renderer.getSceneManager().initPhysics(physics);
 
