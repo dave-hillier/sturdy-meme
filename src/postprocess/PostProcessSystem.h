@@ -8,6 +8,7 @@
 #include <functional>
 #include <array>
 #include "UBOs.h"
+#include "BufferUtils.h"
 #include "DescriptorManager.h"
 #include "InitContext.h"
 
@@ -176,9 +177,7 @@ private:
     std::vector<VkDescriptorSet> compositeDescriptorSets;
 
     // Uniform buffers (per frame)
-    std::vector<VkBuffer> uniformBuffers;
-    std::vector<VmaAllocation> uniformAllocations;
-    std::vector<void*> uniformMappedPtrs;
+    BufferUtils::PerFrameBufferSet uniformBuffers;
 
     // Exposure control
     float manualExposure = 0.0f;
@@ -228,13 +227,9 @@ private:
     VkBuffer histogramBuffer = VK_NULL_HANDLE;
     VmaAllocation histogramAllocation = VK_NULL_HANDLE;
 
-    std::vector<VkBuffer> exposureBuffers;          // Per-frame exposure output
-    std::vector<VmaAllocation> exposureAllocations;
-    std::vector<void*> exposureMappedPtrs;
+    BufferUtils::PerFrameBufferSet exposureBuffers;  // Per-frame exposure output
 
-    std::vector<VkBuffer> histogramParamsBuffers;     // Per-frame histogram params
-    std::vector<VmaAllocation> histogramParamsAllocations;
-    std::vector<void*> histogramParamsMappedPtrs;
+    BufferUtils::PerFrameBufferSet histogramParamsBuffers;  // Per-frame histogram params
 
     // Histogram compute pipelines
     VkDescriptorSetLayout histogramBuildDescLayout = VK_NULL_HANDLE;

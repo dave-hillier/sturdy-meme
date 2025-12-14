@@ -63,14 +63,7 @@ void PostProcessSystem::destroy(VkDevice device, VmaAllocator allocator) {
     destroyHDRResources();
     destroyHistogramResources();
 
-    for (size_t i = 0; i < uniformBuffers.size(); i++) {
-        if (uniformBuffers[i] != VK_NULL_HANDLE) {
-            vmaDestroyBuffer(allocator, uniformBuffers[i], uniformAllocations[i]);
-        }
-    }
-    uniformBuffers.clear();
-    uniformAllocations.clear();
-    uniformMappedPtrs.clear();
+    BufferUtils::destroyBuffers(allocator, uniformBuffers);
 
     for (auto& pipeline : compositePipelines) {
         if (pipeline != VK_NULL_HANDLE) {
@@ -353,32 +346,19 @@ bool PostProcessSystem::createDescriptorSetLayout() {
 }
 
 bool PostProcessSystem::createUniformBuffers() {
-    uniformBuffers.resize(framesInFlight);
-    uniformAllocations.resize(framesInFlight);
-    uniformMappedPtrs.resize(framesInFlight);
+    if (!BufferUtils::PerFrameBufferBuilder()
+            .setAllocator(allocator)
+            .setFrameCount(framesInFlight)
+            .setSize(sizeof(PostProcessUniforms))
+            .setUsage(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT)
+            .build(uniformBuffers)) {
+        SDL_Log("Failed to create post-process uniform buffers");
+        return false;
+    }
 
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = sizeof(PostProcessUniforms);
-    bufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    VmaAllocationCreateInfo allocInfo{};
-    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-    allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
-                      VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
+    // Initialize with defaults
     for (size_t i = 0; i < framesInFlight; i++) {
-        VmaAllocationInfo allocationInfo{};
-        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo,
-                            &uniformBuffers[i], &uniformAllocations[i], &allocationInfo) != VK_SUCCESS) {
-            SDL_Log("Failed to create post-process uniform buffer");
-            return false;
-        }
-        uniformMappedPtrs[i] = allocationInfo.pMappedData;
-
-        // Initialize with defaults
-        PostProcessUniforms* ubo = static_cast<PostProcessUniforms*>(uniformMappedPtrs[i]);
+        PostProcessUniforms* ubo = static_cast<PostProcessUniforms*>(uniformBuffers.mappedPointers[i]);
         ubo->exposure = 0.0f;
         ubo->bloomThreshold = 1.0f;
         ubo->bloomIntensity = 0.5f;
@@ -400,7 +380,7 @@ bool PostProcessSystem::createDescriptorSets() {
         DescriptorManager::SetWriter writer(device, compositeDescriptorSets[i]);
         writer
             .writeImage(0, hdrColorView, hdrSampler)
-            .writeBuffer(1, uniformBuffers[i], 0, sizeof(PostProcessUniforms))
+            .writeBuffer(1, uniformBuffers.buffers[i], 0, sizeof(PostProcessUniforms))
             .writeImage(2, hdrDepthView, hdrSampler, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
 
         if (froxelVolumeView != VK_NULL_HANDLE && froxelSampler != VK_NULL_HANDLE) {
@@ -569,18 +549,18 @@ void PostProcessSystem::recordPostProcess(VkCommandBuffer cmd, uint32_t frameInd
     uint32_t readFrameIndex = (frameIndex + framesInFlight - 1) % framesInFlight;
     float computedExposure = manualExposure;
 
-    if (autoExposureEnabled && exposureMappedPtrs.size() > readFrameIndex) {
+    if (autoExposureEnabled && exposureBuffers.mappedPointers.size() > readFrameIndex) {
         // Invalidate to ensure CPU sees GPU writes
-        vmaInvalidateAllocation(allocator, exposureAllocations[readFrameIndex], 0, sizeof(ExposureData));
+        vmaInvalidateAllocation(allocator, exposureBuffers.allocations[readFrameIndex], 0, sizeof(ExposureData));
 
-        ExposureData* exposureData = static_cast<ExposureData*>(exposureMappedPtrs[readFrameIndex]);
+        ExposureData* exposureData = static_cast<ExposureData*>(exposureBuffers.mappedPointers[readFrameIndex]);
         computedExposure = exposureData->adaptedExposure;
         currentExposure = computedExposure;
         adaptedLuminance = exposureData->averageLuminance;
     }
 
     // Update uniform buffer
-    PostProcessUniforms* ubo = static_cast<PostProcessUniforms*>(uniformMappedPtrs[frameIndex]);
+    PostProcessUniforms* ubo = static_cast<PostProcessUniforms*>(uniformBuffers.mappedPointers[frameIndex]);
     ubo->exposure = autoExposureEnabled ? computedExposure : manualExposure;
     ubo->autoExposure = 0.0f;  // Disable fragment shader auto-exposure (now using compute)
     ubo->previousExposure = lastAutoExposure;
@@ -677,66 +657,40 @@ bool PostProcessSystem::createHistogramResources() {
         return false;
     }
 
-    // Create per-frame exposure buffers (readable from CPU for debugging, writable from GPU)
-    exposureBuffers.resize(framesInFlight);
-    exposureAllocations.resize(framesInFlight);
-    exposureMappedPtrs.resize(framesInFlight);
+    // Create per-frame exposure buffers (readable from CPU, writable from GPU)
+    if (!BufferUtils::PerFrameBufferBuilder()
+            .setAllocator(allocator)
+            .setFrameCount(framesInFlight)
+            .setSize(sizeof(ExposureData))
+            .setUsage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+            .setAllocationFlags(VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
+                                VMA_ALLOCATION_CREATE_MAPPED_BIT)
+            .build(exposureBuffers)) {
+        SDL_Log("Failed to create exposure buffers");
+        return false;
+    }
 
-    VkBufferCreateInfo exposureBufferInfo{};
-    exposureBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    exposureBufferInfo.size = sizeof(ExposureData);
-    exposureBufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-    exposureBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    VmaAllocationCreateInfo exposureAllocInfo{};
-    exposureAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-    exposureAllocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
-                              VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
+    // Initialize exposure data
     for (uint32_t i = 0; i < framesInFlight; i++) {
-        VmaAllocationInfo allocationInfo{};
-        if (vmaCreateBuffer(allocator, &exposureBufferInfo, &exposureAllocInfo,
-                            &exposureBuffers[i], &exposureAllocations[i], &allocationInfo) != VK_SUCCESS) {
-            SDL_Log("Failed to create exposure buffer");
-            return false;
-        }
-        exposureMappedPtrs[i] = allocationInfo.pMappedData;
-
-        // Initialize exposure data
-        ExposureData* data = static_cast<ExposureData*>(exposureMappedPtrs[i]);
+        ExposureData* data = static_cast<ExposureData*>(exposureBuffers.mappedPointers[i]);
         data->averageLuminance = 0.18f;
         data->exposureValue = 0.0f;
         data->previousExposure = 0.0f;
         data->adaptedExposure = 0.0f;
 
         // Flush to ensure initial values are visible to GPU
-        vmaFlushAllocation(allocator, exposureAllocations[i], 0, sizeof(ExposureData));
+        vmaFlushAllocation(allocator, exposureBuffers.allocations[i], 0, sizeof(ExposureData));
     }
 
     // Create per-frame histogram params buffers
-    histogramParamsBuffers.resize(framesInFlight);
-    histogramParamsAllocations.resize(framesInFlight);
-    histogramParamsMappedPtrs.resize(framesInFlight);
-
-    VkBufferCreateInfo paramsBufferInfo{};
-    paramsBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    paramsBufferInfo.size = sizeof(HistogramReduceParams);  // Larger of the two
-    paramsBufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-    paramsBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    VmaAllocationCreateInfo paramsAllocInfo{};
-    paramsAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-    paramsAllocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
-                            VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
-    for (uint32_t i = 0; i < framesInFlight; i++) {
-        VmaAllocationInfo allocationInfo{};
-        if (vmaCreateBuffer(allocator, &paramsBufferInfo, &paramsAllocInfo,
-                            &histogramParamsBuffers[i], &histogramParamsAllocations[i], &allocationInfo) != VK_SUCCESS) {
-            SDL_Log("Failed to create histogram params buffer");
-            return false;
-        }
-        histogramParamsMappedPtrs[i] = allocationInfo.pMappedData;
+    if (!BufferUtils::PerFrameBufferBuilder()
+            .setAllocator(allocator)
+            .setFrameCount(framesInFlight)
+            .setSize(sizeof(HistogramReduceParams))
+            .setUsage(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT)
+            .build(histogramParamsBuffers)) {
+        SDL_Log("Failed to create histogram params buffers");
+        return false;
     }
 
     return true;
@@ -878,16 +832,16 @@ bool PostProcessSystem::createHistogramDescriptorSets() {
             .writeStorageImage(0, hdrColorView)
             .writeBuffer(1, histogramBuffer, 0, HISTOGRAM_BINS * sizeof(uint32_t),
                          VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(2, histogramParamsBuffers[i], 0, sizeof(HistogramParams))
+            .writeBuffer(2, histogramParamsBuffers.buffers[i], 0, sizeof(HistogramParams))
             .update();
 
         // Reduce descriptor set
         DescriptorManager::SetWriter(device, histogramReduceDescSets[i])
             .writeBuffer(0, histogramBuffer, 0, HISTOGRAM_BINS * sizeof(uint32_t),
                          VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(1, exposureBuffers[i], 0, sizeof(ExposureData),
+            .writeBuffer(1, exposureBuffers.buffers[i], 0, sizeof(ExposureData),
                          VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(2, histogramParamsBuffers[i], 0, sizeof(HistogramReduceParams))
+            .writeBuffer(2, histogramParamsBuffers.buffers[i], 0, sizeof(HistogramReduceParams))
             .update();
     }
 
@@ -900,23 +854,8 @@ void PostProcessSystem::destroyHistogramResources() {
         histogramBuffer = VK_NULL_HANDLE;
     }
 
-    for (size_t i = 0; i < exposureBuffers.size(); i++) {
-        if (exposureBuffers[i] != VK_NULL_HANDLE) {
-            vmaDestroyBuffer(allocator, exposureBuffers[i], exposureAllocations[i]);
-        }
-    }
-    exposureBuffers.clear();
-    exposureAllocations.clear();
-    exposureMappedPtrs.clear();
-
-    for (size_t i = 0; i < histogramParamsBuffers.size(); i++) {
-        if (histogramParamsBuffers[i] != VK_NULL_HANDLE) {
-            vmaDestroyBuffer(allocator, histogramParamsBuffers[i], histogramParamsAllocations[i]);
-        }
-    }
-    histogramParamsBuffers.clear();
-    histogramParamsAllocations.clear();
-    histogramParamsMappedPtrs.clear();
+    BufferUtils::destroyBuffers(allocator, exposureBuffers);
+    BufferUtils::destroyBuffers(allocator, histogramParamsBuffers);
 
     if (histogramBuildPipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(device, histogramBuildPipeline, nullptr);
@@ -952,7 +891,7 @@ void PostProcessSystem::recordHistogramCompute(VkCommandBuffer cmd, uint32_t fra
     // Update histogram parameters (HistogramReduceParams is a superset of HistogramBuildParams)
     // Both shaders read from the same buffer, so we only need to write once
     float logRange = MAX_LOG_LUMINANCE - MIN_LOG_LUMINANCE;
-    HistogramReduceParams* params = static_cast<HistogramReduceParams*>(histogramParamsMappedPtrs[frameIndex]);
+    HistogramReduceParams* params = static_cast<HistogramReduceParams*>(histogramParamsBuffers.mappedPointers[frameIndex]);
     params->minLogLum = MIN_LOG_LUMINANCE;
     params->maxLogLum = MAX_LOG_LUMINANCE;
     params->invLogLumRange = 1.0f / logRange;
@@ -968,7 +907,7 @@ void PostProcessSystem::recordHistogramCompute(VkCommandBuffer cmd, uint32_t fra
 
     // Flush mapped memory to ensure CPU writes are visible to GPU
     // (required if memory is not HOST_COHERENT)
-    vmaFlushAllocation(allocator, histogramParamsAllocations[frameIndex], 0, sizeof(HistogramReduceParams));
+    vmaFlushAllocation(allocator, histogramParamsBuffers.allocations[frameIndex], 0, sizeof(HistogramReduceParams));
 
     // Transition HDR image to general layout for compute access
     Barriers::transitionImage(cmd, hdrColorImage,
@@ -1011,7 +950,7 @@ void PostProcessSystem::barrierHistogramReduceComplete(VkCommandBuffer cmd, uint
     Barriers::BarrierBatch(cmd)
         .setStages(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                    VK_PIPELINE_STAGE_HOST_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT)
-        .bufferBarrier(exposureBuffers[frameIndex], VK_ACCESS_SHADER_WRITE_BIT,
+        .bufferBarrier(exposureBuffers.buffers[frameIndex], VK_ACCESS_SHADER_WRITE_BIT,
                        VK_ACCESS_HOST_READ_BIT, 0, sizeof(ExposureData))
         .imageTransition(hdrColorImage,
                          VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,

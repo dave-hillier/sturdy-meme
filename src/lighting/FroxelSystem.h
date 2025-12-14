@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 #include "UBOs.h"
+#include "BufferUtils.h"
 #include "DescriptorManager.h"
 #include "InitContext.h"
 
@@ -154,9 +155,7 @@ private:
     std::vector<VkDescriptorSet> froxelDescriptorSets;
 
     // Uniform buffers (per frame)
-    std::vector<VkBuffer> uniformBuffers;
-    std::vector<VmaAllocation> uniformAllocations;
-    std::vector<void*> uniformMappedPtrs;
+    BufferUtils::PerFrameBufferSet uniformBuffers;
 
     // Previous view-proj for temporal reprojection
     glm::mat4 prevViewProj = glm::mat4(1.0f);

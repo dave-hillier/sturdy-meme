@@ -57,12 +57,7 @@ bool FroxelSystem::init(const InitContext& ctx, VkImageView shadowMapView_, VkSa
 void FroxelSystem::destroy(VkDevice device, VmaAllocator allocator) {
     destroyVolumeResources();
 
-    for (size_t i = 0; i < uniformBuffers.size(); i++) {
-        vmaDestroyBuffer(allocator, uniformBuffers[i], uniformAllocations[i]);
-    }
-    uniformBuffers.clear();
-    uniformAllocations.clear();
-    uniformMappedPtrs.clear();
+    BufferUtils::destroyBuffers(allocator, uniformBuffers);
 
     if (froxelUpdatePipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(device, froxelUpdatePipeline, nullptr);
@@ -274,34 +269,12 @@ bool FroxelSystem::createDescriptorSetLayout() {
 }
 
 bool FroxelSystem::createUniformBuffers() {
-    VkDeviceSize bufferSize = sizeof(FroxelUniforms);
-
-    uniformBuffers.resize(framesInFlight);
-    uniformAllocations.resize(framesInFlight);
-    uniformMappedPtrs.resize(framesInFlight);
-
-    for (uint32_t i = 0; i < framesInFlight; i++) {
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = bufferSize;
-        bufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
-        allocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
-        VmaAllocationInfo allocResult{};
-        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo,
-                            &uniformBuffers[i], &uniformAllocations[i], &allocResult) != VK_SUCCESS) {
-            SDL_Log("Failed to create froxel uniform buffer");
-            return false;
-        }
-
-        uniformMappedPtrs[i] = allocResult.pMappedData;
-    }
-
-    return true;
+    return BufferUtils::PerFrameBufferBuilder()
+        .setAllocator(allocator)
+        .setFrameCount(framesInFlight)
+        .setSize(sizeof(FroxelUniforms))
+        .setUsage(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT)
+        .build(uniformBuffers);
 }
 
 bool FroxelSystem::createDescriptorSets() {
@@ -343,7 +316,7 @@ bool FroxelSystem::createDescriptorSets() {
 
         // Uniform buffer
         VkDescriptorBufferInfo bufferInfo{};
-        bufferInfo.buffer = uniformBuffers[i];
+        bufferInfo.buffer = uniformBuffers.buffers[i];
         bufferInfo.offset = 0;
         bufferInfo.range = sizeof(FroxelUniforms);
 
@@ -485,7 +458,7 @@ void FroxelSystem::recordFroxelUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
 
     // Update uniform buffer
     glm::mat4 viewProj = proj * view;
-    FroxelUniforms* ubo = static_cast<FroxelUniforms*>(uniformMappedPtrs[frameIndex]);
+    FroxelUniforms* ubo = static_cast<FroxelUniforms*>(uniformBuffers.mappedPointers[frameIndex]);
     ubo->invViewProj = glm::inverse(viewProj);
     ubo->prevViewProj = prevViewProj;
 
