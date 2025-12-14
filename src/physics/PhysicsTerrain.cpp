@@ -8,8 +8,12 @@ void PhysicsTerrain::init(PhysicsWorld* physics, TerrainTileCache* tileCache, co
     terrainTileCache = tileCache;
     config = cfg;
 
-    SDL_Log("PhysicsTerrain initialized: tileSize=%.0f, loadRadius=%.0f, unloadRadius=%.0f",
-            config.tileSize, config.loadRadius, config.unloadRadius);
+    if (tileCache) {
+        float actualTileSize = tileCache->getTerrainSize() / tileCache->getTilesX();
+        SDL_Log("PhysicsTerrain initialized: tileSize=%.0f (%ux%u tiles), loadRadius=%.0f, unloadRadius=%.0f, heightScale=%.1f",
+                actualTileSize, tileCache->getTilesX(), tileCache->getTilesZ(),
+                config.loadRadius, config.unloadRadius, tileCache->getHeightScale());
+    }
 }
 
 void PhysicsTerrain::update(const glm::vec3& playerPos) {
@@ -18,8 +22,12 @@ void PhysicsTerrain::update(const glm::vec3& playerPos) {
     // Get current tile coordinate
     TileCoord currentTile = worldToTileCoord(playerPos.x, playerPos.z);
 
+    // Calculate actual tile size from cache
+    float terrainSize = terrainTileCache->getTerrainSize();
+    float actualTileSize = terrainSize / terrainTileCache->getTilesX();
+
     // Calculate how many tiles we need to check in each direction
-    int tileRadius = static_cast<int>(std::ceil(config.loadRadius / config.tileSize)) + 1;
+    int tileRadius = static_cast<int>(std::ceil(config.loadRadius / actualTileSize)) + 1;
 
     // Collect tiles that should be loaded
     std::vector<TileCoord> tilesToLoad;
@@ -74,28 +82,43 @@ void PhysicsTerrain::update(const glm::vec3& playerPos) {
 }
 
 TileCoord PhysicsTerrain::worldToTileCoord(float worldX, float worldZ) const {
-    // Terrain is centered at origin, so offset by half terrain size
-    float halfSize = config.terrainSize * 0.5f;
-    float localX = worldX + halfSize;
-    float localZ = worldZ + halfSize;
+    // Use the same coordinate calculation as TerrainTileCache for LOD 0
+    // Convert world position to normalized [0, 1]
+    float terrainSize = terrainTileCache->getTerrainSize();
+    float normX = (worldX / terrainSize) + 0.5f;
+    float normZ = (worldZ / terrainSize) + 0.5f;
+
+    // Clamp to valid range
+    normX = std::clamp(normX, 0.0f, 0.9999f);
+    normZ = std::clamp(normZ, 0.0f, 0.9999f);
+
+    // Use tile cache's tile counts for LOD 0
+    uint32_t tilesX = terrainTileCache->getTilesX();
+    uint32_t tilesZ = terrainTileCache->getTilesZ();
 
     return TileCoord{
-        static_cast<int32_t>(std::floor(localX / config.tileSize)),
-        static_cast<int32_t>(std::floor(localZ / config.tileSize))
+        static_cast<int32_t>(normX * tilesX),
+        static_cast<int32_t>(normZ * tilesZ)
     };
 }
 
 glm::vec2 PhysicsTerrain::getTileCenter(TileCoord coord) const {
-    float halfSize = config.terrainSize * 0.5f;
-    float centerX = coord.x * config.tileSize + config.tileSize * 0.5f - halfSize;
-    float centerZ = coord.z * config.tileSize + config.tileSize * 0.5f - halfSize;
+    // Use the same formula as TerrainTileCache for consistency
+    float terrainSize = terrainTileCache->getTerrainSize();
+    uint32_t tilesX = terrainTileCache->getTilesX();
+    uint32_t tilesZ = terrainTileCache->getTilesZ();
+
+    // Tile center = ((coord + 0.5) / numTiles - 0.5) * terrainSize
+    float centerX = ((static_cast<float>(coord.x) + 0.5f) / tilesX - 0.5f) * terrainSize;
+    float centerZ = ((static_cast<float>(coord.z) + 0.5f) / tilesZ - 0.5f) * terrainSize;
     return glm::vec2(centerX, centerZ);
 }
 
 bool PhysicsTerrain::loadTile(TileCoord coord) {
-    // Check bounds - terrain is divided into tiles
-    int maxTiles = static_cast<int>(config.terrainSize / config.tileSize);
-    if (coord.x < 0 || coord.x >= maxTiles || coord.z < 0 || coord.z >= maxTiles) {
+    // Check bounds using tile cache's tile counts
+    int maxTilesX = static_cast<int>(terrainTileCache->getTilesX());
+    int maxTilesZ = static_cast<int>(terrainTileCache->getTilesZ());
+    if (coord.x < 0 || coord.x >= maxTilesX || coord.z < 0 || coord.z >= maxTilesZ) {
         return false;
     }
 
@@ -120,13 +143,15 @@ bool PhysicsTerrain::loadTile(TileCoord coord) {
     float tileWorldSize = worldMaxX - worldMinX;  // Actual tile size from cache
 
     // Create physics heightfield for this tile
+    // Use tile cache's heightScale for consistency with rendering
     uint32_t resolution = terrainTileCache->getTileResolution();
+    float heightScale = terrainTileCache->getHeightScale();
 
     PhysicsBodyID bodyId = physicsWorld->createTileHeightfield(
         tile->cpuData.data(),
         resolution,
         tileWorldSize,
-        config.heightScale,
+        heightScale,
         worldMinX,
         worldMinZ
     );

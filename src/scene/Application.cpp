@@ -84,15 +84,10 @@ bool Application::init(const std::string& title, int width, int height) {
     // Uses high-fidelity tiles near the player, dynamically loading/unloading
     {
         PhysicsTerrain::Config ptConfig;
-        ptConfig.tileSize = 512.0f;          // Match rendering tile size
         ptConfig.loadRadius = 512.0f;        // Load tiles within one tile distance
         ptConfig.unloadRadius = 768.0f;      // Hysteresis to prevent thrashing
-        ptConfig.heightScale = terrain.getConfig().heightScale;
-        ptConfig.terrainSize = terrain.getConfig().size;
 
         physicsTerrain.init(&physics(), terrain.getTileCache(), ptConfig);
-        SDL_Log("Tile-based terrain physics initialized: tileSize=%.0f, loadRadius=%.0f, unloadRadius=%.0f",
-                ptConfig.tileSize, ptConfig.loadRadius, ptConfig.unloadRadius);
     }
 
     // Initialize scene physics (dynamic objects)

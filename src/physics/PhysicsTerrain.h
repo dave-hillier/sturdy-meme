@@ -11,11 +11,9 @@
 class PhysicsTerrain {
 public:
     struct Config {
-        float tileSize = 512.0f;        // World units per tile (matches rendering tile size)
         float loadRadius = 512.0f;      // Distance to load tiles
         float unloadRadius = 768.0f;    // Distance to unload tiles (hysteresis)
-        float heightScale = 235.0f;     // Height scale for terrain
-        float terrainSize = 16384.0f;   // Total terrain size
+        // Note: tileSize, terrainSize, and heightScale are obtained from TerrainTileCache
     };
 
     PhysicsTerrain() = default;
