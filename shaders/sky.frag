@@ -180,13 +180,18 @@ vec2 directionToParaboloidUV(vec3 dir) {
 // Sample cloud density from paraboloid cloud map LUT
 // Returns: vec4(baseDensity, detailNoise, coverageMask, heightGradient)
 vec4 sampleCloudMapLUT(vec3 dir) {
-    // Only sample for upper hemisphere
-    if (dir.y < 0.0) {
-        return vec4(0.0);
-    }
+    // Smoothly fade clouds near horizon to match horizonBlend range
+    // Use slightly elevated direction for sampling to avoid edge artifacts
+    vec3 sampleDir = dir;
+    sampleDir.y = max(sampleDir.y, 0.001);
+    sampleDir = normalize(sampleDir);
 
-    vec2 uv = directionToParaboloidUV(dir);
-    return texture(cloudMapLUT, uv);
+    vec2 uv = directionToParaboloidUV(sampleDir);
+    vec4 cloudData = texture(cloudMapLUT, uv);
+
+    // Fade out smoothly as we approach/go below horizon (matches horizonBlend range)
+    float horizonFade = smoothstep(-0.02, 0.02, dir.y);
+    return cloudData * horizonFade;
 }
 
 // Sample cloud density at a point
@@ -939,13 +944,21 @@ float starField(vec3 dir) {
     if (nightFactor < 0.01) return 0.0;
 
     dir = normalize(dir);
-    if (dir.y < 0.0) return 0.0;
+
+    // Smooth fade for stars near horizon (matches horizonBlend range)
+    float horizonFade = smoothstep(-0.02, 0.02, dir.y);
+    if (horizonFade < 0.01) return 0.0;
+
+    // Use horizon direction for sampling stars below horizon to avoid discontinuity
+    vec3 starDir = dir;
+    starDir.y = max(starDir.y, 0.001);
+    starDir = normalize(starDir);
 
     // Apply sidereal rotation based on Julian day
-    dir = rotateSidereal(dir, ubo.julianDay);
+    starDir = rotateSidereal(starDir, ubo.julianDay);
 
-    float theta = atan(dir.z, dir.x);
-    float phi = asin(clamp(dir.y, -1.0, 1.0));
+    float theta = atan(starDir.z, starDir.x);
+    float phi = asin(clamp(starDir.y, -1.0, 1.0));
 
     vec2 gridCoord = vec2(theta * 200.0, phi * 200.0);
     vec2 cell = floor(gridCoord);
@@ -972,7 +985,7 @@ float starField(vec3 dir) {
     // High intensity to trigger bloom (3-8x brighter)
     float brightness = (hash(p + vec3(3.0)) * 0.6 + 0.4) * 6.0;
 
-    return star * brightness * nightFactor;
+    return star * brightness * nightFactor * horizonFade;
 }
 
 float celestialDisc(vec3 dir, vec3 celestialDir, float size) {
