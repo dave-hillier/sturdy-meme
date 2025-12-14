@@ -40,26 +40,6 @@ target_link_libraries(terrain_preprocess PRIVATE
 
 target_compile_features(terrain_preprocess PRIVATE cxx_std_17)
 
-# Erosion and water placement preprocessing tool
-add_executable(erosion_preprocess
-    erosion_preprocess/erosion_preprocess.cpp
-    erosion_preprocess/ErosionSimulator.cpp
-    common/stb_impl.cpp
-)
-
-target_include_directories(erosion_preprocess PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/erosion_preprocess
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src
-    ${STB_INCLUDE_DIRS}
-)
-
-target_link_libraries(erosion_preprocess PRIVATE
-    SDL3::SDL3
-    glm::glm
-)
-
-target_compile_features(erosion_preprocess PRIVATE cxx_std_17)
-
 # Biome map preprocessing tool
 add_executable(biome_preprocess
     biome_preprocess/biome_preprocess.cpp
@@ -146,7 +126,6 @@ target_include_directories(tile_generator_lib PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../src
     ${CMAKE_CURRENT_SOURCE_DIR}/road_generator
     ${CMAKE_CURRENT_SOURCE_DIR}/biome_preprocess
-    ${CMAKE_CURRENT_SOURCE_DIR}/erosion_preprocess
 )
 
 target_link_libraries(tile_generator_lib PUBLIC

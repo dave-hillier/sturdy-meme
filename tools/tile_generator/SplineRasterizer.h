@@ -5,7 +5,7 @@
 #include <string>
 #include <glm/glm.hpp>
 #include "../road_generator/RoadSpline.h"
-#include "ErosionSimulator.h"
+#include "WaterPlacementData.h"
 
 namespace VirtualTexture {
 
