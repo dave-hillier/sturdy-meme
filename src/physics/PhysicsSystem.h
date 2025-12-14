@@ -89,6 +89,16 @@ public:
     PhysicsBodyID createTerrainHeightfield(const float* samples, const uint8_t* holeMask,
                                            uint32_t sampleCount, float worldSize, float heightScale);
 
+    // Create a terrain tile heightfield at a specific world position
+    // Used for tile-based terrain physics where tiles are loaded/unloaded dynamically
+    // samples: row-major height values (normalized 0-1), sampleCount x sampleCount grid
+    // tileSize: tile extent in world units
+    // heightScale: multiplier for height values
+    // worldMinX, worldMinZ: world position of the tile's minimum corner
+    PhysicsBodyID createTileHeightfield(const float* samples, uint32_t sampleCount,
+                                        float tileSize, float heightScale,
+                                        float worldMinX, float worldMinZ);
+
     // Dynamic rigid bodies
     PhysicsBodyID createBox(const glm::vec3& position, const glm::vec3& halfExtents,
                             float mass = 1.0f, float friction = 0.5f, float restitution = 0.3f);

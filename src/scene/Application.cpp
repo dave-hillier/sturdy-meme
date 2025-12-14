@@ -80,26 +80,19 @@ bool Application::init(const std::string& title, int width, int height) {
     // Get terrain reference for spawning objects
     auto& terrain = renderer.getTerrainSystem();
 
-    // Create terrain physics heightfield from the terrain heightmap data
-    // This provides collision for the entire terrain matching the visual rendering
-    // Note: hole mask is not passed since it's at different resolution (2048 vs 512);
-    // holes in the terrain (e.g., well entrance) will still allow objects through visually
+    // Initialize tile-based terrain physics
+    // Uses high-fidelity tiles near the player, dynamically loading/unloading
     {
-        const float* heightData = terrain.getHeightMapData();
-        uint32_t resolution = terrain.getHeightMapResolution();
-        float worldSize = terrain.getConfig().size;
-        float heightScale = terrain.getConfig().heightScale;
+        PhysicsTerrain::Config ptConfig;
+        ptConfig.tileSize = 512.0f;          // Match rendering tile size
+        ptConfig.loadRadius = 512.0f;        // Load tiles within one tile distance
+        ptConfig.unloadRadius = 768.0f;      // Hysteresis to prevent thrashing
+        ptConfig.heightScale = terrain.getConfig().heightScale;
+        ptConfig.terrainSize = terrain.getConfig().size;
 
-        PhysicsBodyID terrainBody = physics().createTerrainHeightfield(
-            heightData, resolution, worldSize, heightScale
-        );
-
-        if (terrainBody != INVALID_BODY_ID) {
-            SDL_Log("Terrain heightfield physics created: %ux%u samples, world size %.0f, height scale %.1f",
-                    resolution, resolution, worldSize, heightScale);
-        } else {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create terrain heightfield physics!");
-        }
+        physicsTerrain.init(&physics(), terrain.getTileCache(), ptConfig);
+        SDL_Log("Tile-based terrain physics initialized: tileSize=%.0f, loadRadius=%.0f, unloadRadius=%.0f",
+                ptConfig.tileSize, ptConfig.loadRadius, ptConfig.unloadRadius);
     }
 
     // Initialize scene physics (dynamic objects)
@@ -277,6 +270,9 @@ void Application::run() {
         physics().update(deltaTime);
 
         glm::vec3 playerPos = physics().getCharacterPosition();
+
+        // Update tile-based terrain physics (load/unload tiles near player)
+        physicsTerrain.update(playerPos);
 
         // Debug: Log orb position every second to track physics terrain offset
         static float debugLogTimer = 0.0f;

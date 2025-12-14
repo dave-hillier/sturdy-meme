@@ -9,6 +9,7 @@
 #include "Camera.h"
 #include "Player.h"
 #include "PhysicsSystem.h"
+#include "PhysicsTerrain.h"
 #include "ClothSimulation.h"
 #include "GuiSystem.h"
 #include "InputSystem.h"
@@ -38,6 +39,7 @@ private:
     Camera camera;
     Player player;
     std::optional<PhysicsWorld> physics_;
+    PhysicsTerrain physicsTerrain;
 
     // Helper to access physics (assumes physics is initialized)
     PhysicsWorld& physics() { return *physics_; }

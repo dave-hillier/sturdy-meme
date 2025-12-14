@@ -90,6 +90,7 @@ set(SOURCES
     src/lighting/ShadowSystem.cpp
     # Physics
     src/physics/PhysicsSystem.cpp
+    src/physics/PhysicsTerrain.cpp
     src/physics/ParticleSystem.cpp
     src/physics/ClothSimulation.cpp
     src/physics/PlayerCape.cpp
