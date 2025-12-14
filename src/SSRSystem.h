@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 #include "InitContext.h"
+#include "DescriptorManager.h"
 
 /**
  * SSRSystem - Phase 10: Screen-Space Reflections
@@ -35,6 +36,7 @@ public:
         std::string shaderPath;
         uint32_t framesInFlight;
         VkExtent2D extent;
+        DescriptorManager::Pool* descriptorPool;  // Shared auto-growing pool
     };
 
     // Push constants for SSR compute shader
@@ -148,7 +150,7 @@ private:
     VkPipeline computePipeline = VK_NULL_HANDLE;
     VkPipelineLayout computePipelineLayout = VK_NULL_HANDLE;
     VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
-    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
+    DescriptorManager::Pool* descriptorPool = nullptr;  // Shared auto-growing pool
     std::vector<VkDescriptorSet> descriptorSets;
 
     // Blur compute pipeline
