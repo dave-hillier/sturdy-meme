@@ -2055,6 +2055,7 @@ bool Renderer::handleResize() {
     leafSystem.setExtent(newExtent);
     catmullClarkSystem.setExtent(newExtent);
     skinnedMeshRenderer.setExtent(newExtent);
+    treeEditSystem.updateExtent(newExtent);
 
     framebufferResized = false;
     return true;
