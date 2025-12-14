@@ -114,6 +114,7 @@ public:
     float getTerrainSize() const { return terrainSize; }
     float getHeightScale() const { return heightScale; }
     float getMinAltitude() const { return minAltitude; }
+    float getMaxAltitude() const { return maxAltitude; }
 
     // Get a loaded tile by coordinate and LOD (returns nullptr if not loaded)
     const TerrainTile* getLoadedTile(TileCoord coord, uint32_t lod) const;
