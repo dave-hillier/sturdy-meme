@@ -372,6 +372,9 @@ private:
     void recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float grassTime);
     void recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex);
 
+    // Setup render pipeline stages with lambdas (called once during init)
+    void setupRenderPipeline();
+
     // Pure calculation helpers (no state mutation)
     struct LightingParams {
         glm::vec3 sunDir;

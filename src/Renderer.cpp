@@ -714,7 +714,252 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     }
     SDL_Log("Debug line system initialized");
 
+    // Setup render pipeline stages with lambdas
+    setupRenderPipeline();
+    SDL_Log("Render pipeline configured");
+
     return true;
+}
+
+void Renderer::setupRenderPipeline() {
+    // Clear any existing passes
+    renderPipeline.clear();
+
+    // ===== COMPUTE STAGE =====
+    // Terrain compute pass (adaptive subdivision)
+    renderPipeline.computeStage.addPass("terrain", [this](RenderContext& ctx) {
+        if (!terrainEnabled) return;
+        profiler.beginGpuZone(ctx.cmd, "TerrainCompute");
+        terrainSystem.recordCompute(ctx.cmd, ctx.frameIndex, &profiler.getGpuProfiler());
+        profiler.endGpuZone(ctx.cmd, "TerrainCompute");
+    });
+
+    // Catmull-Clark subdivision compute pass
+    renderPipeline.computeStage.addPass("subdivision", [this](RenderContext& ctx) {
+        profiler.beginGpuZone(ctx.cmd, "SubdivisionCompute");
+        catmullClarkSystem.recordCompute(ctx.cmd, ctx.frameIndex);
+        profiler.endGpuZone(ctx.cmd, "SubdivisionCompute");
+    });
+
+    // Grass compute pass (displacement + simulation)
+    renderPipeline.computeStage.addPass("grass", [this](RenderContext& ctx) {
+        profiler.beginGpuZone(ctx.cmd, "GrassCompute");
+        grassSystem.recordDisplacementUpdate(ctx.cmd, ctx.frameIndex);
+        grassSystem.recordResetAndCompute(ctx.cmd, ctx.frameIndex, ctx.frame.time);
+        profiler.endGpuZone(ctx.cmd, "GrassCompute");
+    });
+
+    // Weather particle compute pass
+    renderPipeline.computeStage.addPass("weather", [this](RenderContext& ctx) {
+        profiler.beginGpuZone(ctx.cmd, "WeatherCompute");
+        weatherSystem.recordResetAndCompute(ctx.cmd, ctx.frameIndex, ctx.frame.time, ctx.frame.deltaTime);
+        profiler.endGpuZone(ctx.cmd, "WeatherCompute");
+    });
+
+    // Snow compute passes (mask + volumetric)
+    renderPipeline.computeStage.addPass("snow", [this](RenderContext& ctx) {
+        profiler.beginGpuZone(ctx.cmd, "SnowCompute");
+        snowMaskSystem.recordCompute(ctx.cmd, ctx.frameIndex);
+        volumetricSnowSystem.recordCompute(ctx.cmd, ctx.frameIndex);
+        profiler.endGpuZone(ctx.cmd, "SnowCompute");
+    });
+
+    // Leaf particle compute pass
+    renderPipeline.computeStage.addPass("leaf", [this](RenderContext& ctx) {
+        profiler.beginGpuZone(ctx.cmd, "LeafCompute");
+        leafSystem.recordResetAndCompute(ctx.cmd, ctx.frameIndex, ctx.frame.time, ctx.frame.deltaTime);
+        profiler.endGpuZone(ctx.cmd, "LeafCompute");
+    });
+
+    // Water foam persistence compute pass
+    renderPipeline.computeStage.addPass("foam", [this](RenderContext& ctx) {
+        profiler.beginGpuZone(ctx.cmd, "FoamCompute");
+        foamBuffer.recordCompute(ctx.cmd, ctx.frameIndex, ctx.frame.deltaTime,
+                                 flowMapGenerator.getFlowMapView(), flowMapGenerator.getFlowMapSampler());
+        profiler.endGpuZone(ctx.cmd, "FoamCompute");
+    });
+
+    // Cloud shadow map compute pass
+    renderPipeline.computeStage.addPass("cloudShadow", [this](RenderContext& ctx) {
+        if (!cloudShadowSystem.isEnabled()) return;
+        profiler.beginGpuZone(ctx.cmd, "CloudShadow");
+
+        // Wind offset for cloud animation
+        glm::vec2 windDir = windSystem.getWindDirection();
+        float windSpeed = windSystem.getWindSpeed();
+        float windTime = windSystem.getTime();
+        float cloudTimeScale = 0.02f;
+        glm::vec3 windOffset = glm::vec3(windDir.x * windSpeed * windTime * cloudTimeScale,
+                                          windTime * 0.002f,
+                                          windDir.y * windSpeed * windTime * cloudTimeScale);
+
+        cloudShadowSystem.recordUpdate(ctx.cmd, ctx.frameIndex, ctx.frame.sunDirection, ctx.frame.sunIntensity,
+                                        windOffset, windTime * cloudTimeScale, ctx.frame.cameraPosition);
+        profiler.endGpuZone(ctx.cmd, "CloudShadow");
+    });
+
+    // ===== SHADOW STAGE =====
+    renderPipeline.shadowStage.setTerrainCallback([this](VkCommandBuffer cb, uint32_t cascade, const glm::mat4& lightMatrix) {
+        if (terrainEnabled) {
+            // Need to get frameIndex from somewhere - we'll use currentFrame
+            terrainSystem.recordShadowDraw(cb, currentFrame, lightMatrix, static_cast<int>(cascade));
+        }
+    });
+
+    renderPipeline.shadowStage.setGrassCallback([this](VkCommandBuffer cb, uint32_t cascade, const glm::mat4& lightMatrix) {
+        (void)lightMatrix;
+        // Need grassTime from ctx - this callback doesn't have access to it
+        // For now, use windSystem.getTime() as a proxy
+        grassSystem.recordShadowDraw(cb, currentFrame, windSystem.getTime(), cascade);
+    });
+
+    renderPipeline.shadowStage.getDescriptorSet = [this](uint32_t frameIndex) -> VkDescriptorSet {
+        const auto& materialRegistry = sceneManager.getSceneBuilder().getMaterialRegistry();
+        return materialRegistry.getDescriptorSet(0, frameIndex);
+    };
+
+    renderPipeline.shadowStage.getSceneObjects = [this]() -> const std::vector<Renderable>& {
+        return sceneManager.getRenderables();
+    };
+
+    // ===== ATMOSPHERE/FROXEL STAGES =====
+    renderPipeline.setFroxelStageFn([this](RenderContext& ctx) {
+        profiler.beginGpuZone(ctx.cmd, "Atmosphere");
+
+        UniformBufferObject* ubo = static_cast<UniformBufferObject*>(uniformBuffersMapped[ctx.frameIndex]);
+        glm::vec3 sunColor = glm::vec3(ubo->sunColor);
+
+        // Froxel volumetric fog
+        froxelSystem.recordFroxelUpdate(ctx.cmd, ctx.frameIndex,
+                                        ctx.frame.view, ctx.frame.projection,
+                                        ctx.frame.cameraPosition,
+                                        ctx.frame.sunDirection, ctx.frame.sunIntensity, sunColor,
+                                        shadowSystem.getCascadeMatrices().data(),
+                                        ubo->cascadeSplits);
+
+        // Recompute static LUTs if atmosphere parameters changed
+        if (atmosphereLUTSystem.needsRecompute()) {
+            atmosphereLUTSystem.recomputeStaticLUTs(ctx.cmd);
+        }
+
+        // Update sky-view LUT with current sun direction
+        atmosphereLUTSystem.updateSkyViewLUT(ctx.cmd, ctx.frameIndex, ctx.frame.sunDirection, ctx.frame.cameraPosition, 0.0f);
+
+        // Update cloud map LUT with wind animation
+        glm::vec2 windDir = windSystem.getWindDirection();
+        float windSpeed = windSystem.getWindSpeed();
+        float windTime = windSystem.getTime();
+        float cloudTimeScale = 0.02f;
+        glm::vec3 windOffset = glm::vec3(windDir.x * windSpeed * windTime * cloudTimeScale,
+                                          windTime * 0.002f,
+                                          windDir.y * windSpeed * windTime * cloudTimeScale);
+        atmosphereLUTSystem.updateCloudMapLUT(ctx.cmd, ctx.frameIndex, windOffset, windTime * cloudTimeScale);
+
+        profiler.endGpuZone(ctx.cmd, "Atmosphere");
+    });
+
+    // ===== HDR STAGE =====
+    // Sky rendering
+    renderPipeline.hdrStage.addDrawCall("sky", [this](RenderContext& ctx) {
+        skySystem.recordDraw(ctx.cmd, ctx.frameIndex);
+    });
+
+    // Terrain rendering
+    renderPipeline.hdrStage.addDrawCall("terrain", [this](RenderContext& ctx) {
+        if (terrainEnabled) {
+            terrainSystem.recordDraw(ctx.cmd, ctx.frameIndex);
+        }
+    });
+
+    // Catmull-Clark subdivision surfaces
+    renderPipeline.hdrStage.addDrawCall("catmullClark", [this](RenderContext& ctx) {
+        catmullClarkSystem.recordDraw(ctx.cmd, ctx.frameIndex);
+    });
+
+    // Scene objects (static meshes)
+    renderPipeline.hdrStage.addDrawCall("sceneObjects", [this](RenderContext& ctx) {
+        vkCmdBindPipeline(ctx.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+        recordSceneObjects(ctx.cmd, ctx.frameIndex);
+    });
+
+    // Skinned character (GPU skinning)
+    renderPipeline.hdrStage.addDrawCall("skinnedCharacter", [this](RenderContext& ctx) {
+        SceneBuilder& sceneBuilder = sceneManager.getSceneBuilder();
+        if (sceneBuilder.hasCharacter()) {
+            const auto& sceneObjects = sceneBuilder.getRenderables();
+            size_t playerIndex = sceneBuilder.getPlayerObjectIndex();
+            if (playerIndex < sceneObjects.size()) {
+                const Renderable& playerObj = sceneObjects[playerIndex];
+                skinnedMeshRenderer.record(ctx.cmd, ctx.frameIndex, playerObj, sceneBuilder.getAnimatedCharacter());
+            }
+        }
+    });
+
+    // Tree editor
+    renderPipeline.hdrStage.addDrawCall("treeEdit", [this](RenderContext& ctx) {
+        treeEditSystem.recordDraw(ctx.cmd, ctx.frameIndex);
+    });
+
+    // Grass
+    renderPipeline.hdrStage.addDrawCall("grass", [this](RenderContext& ctx) {
+        grassSystem.recordDraw(ctx.cmd, ctx.frameIndex, ctx.frame.time);
+    });
+
+    // Water surface (after opaque geometry)
+    renderPipeline.hdrStage.addDrawCall("water", [this](RenderContext& ctx) {
+        if (waterTileCull.wasWaterVisibleLastFrame(ctx.frameIndex)) {
+            waterSystem.recordDraw(ctx.cmd, ctx.frameIndex);
+        }
+    });
+
+    // Leaves (after grass, before weather)
+    renderPipeline.hdrStage.addDrawCall("leaves", [this](RenderContext& ctx) {
+        leafSystem.recordDraw(ctx.cmd, ctx.frameIndex, ctx.frame.time);
+    });
+
+    // Weather particles (rain/snow)
+    renderPipeline.hdrStage.addDrawCall("weather", [this](RenderContext& ctx) {
+        weatherSystem.recordDraw(ctx.cmd, ctx.frameIndex, ctx.frame.time);
+    });
+
+    // Physics debug lines
+    renderPipeline.hdrStage.addDrawCall("debugLines", [this](RenderContext& ctx) {
+#ifdef JPH_DEBUG_RENDERER
+        if (physicsDebugEnabled && debugLineSystem.hasLines()) {
+            VkViewport viewport{};
+            viewport.x = 0.0f;
+            viewport.y = 0.0f;
+            viewport.width = static_cast<float>(postProcessSystem.getExtent().width);
+            viewport.height = static_cast<float>(postProcessSystem.getExtent().height);
+            viewport.minDepth = 0.0f;
+            viewport.maxDepth = 1.0f;
+            vkCmdSetViewport(ctx.cmd, 0, 1, &viewport);
+
+            VkRect2D scissor{};
+            scissor.offset = {0, 0};
+            scissor.extent = postProcessSystem.getExtent();
+            vkCmdSetScissor(ctx.cmd, 0, 1, &scissor);
+
+            debugLineSystem.recordCommands(ctx.cmd, lastViewProj);
+        }
+#endif
+    });
+
+    // ===== POST STAGE =====
+    renderPipeline.postStage.setHiZRecordFn([this](RenderContext& ctx) {
+        profiler.beginGpuZone(ctx.cmd, "HiZPyramid");
+        hiZSystem.recordPyramidGeneration(ctx.cmd, ctx.frameIndex);
+        profiler.endGpuZone(ctx.cmd, "HiZPyramid");
+    });
+
+    renderPipeline.postStage.setBloomRecordFn([this](RenderContext& ctx) {
+        profiler.beginGpuZone(ctx.cmd, "Bloom");
+        bloomSystem.setThreshold(postProcessSystem.getBloomThreshold());
+        bloomSystem.recordBloomPass(ctx.cmd, postProcessSystem.getHDRColorView());
+        profiler.endGpuZone(ctx.cmd, "Bloom");
+    });
+
+    // Post-process is handled separately since it needs guiRenderCallback and framebuffer
 }
 
 void Renderer::setWeatherIntensity(float intensity) {
@@ -1588,67 +1833,12 @@ bool Renderer::render(const Camera& camera) {
     // Begin GPU profiling frame
     profiler.beginFrame(cmd, frame.frameIndex);
 
-    // Terrain compute pass (adaptive subdivision)
-    // Detailed per-phase profiling inside recordCompute
-    if (terrainEnabled) {
-        profiler.beginGpuZone(cmd, "TerrainCompute");
-        terrainSystem.recordCompute(cmd, frame.frameIndex, &profiler.getGpuProfiler());
-        profiler.endGpuZone(cmd, "TerrainCompute");
-    }
+    // Build render resources and context for pipeline stages
+    RenderResources resources = buildRenderResources(imageIndex);
+    RenderContext ctx(cmd, frame.frameIndex, frame, resources);
 
-    // Catmull-Clark subdivision compute pass
-    profiler.beginGpuZone(cmd, "SubdivisionCompute");
-    catmullClarkSystem.recordCompute(cmd, frame.frameIndex);
-    profiler.endGpuZone(cmd, "SubdivisionCompute");
-
-    // Grass displacement update (player/NPC interaction)
-    profiler.beginGpuZone(cmd, "GrassCompute");
-    grassSystem.recordDisplacementUpdate(cmd, frame.frameIndex);
-
-    // Grass compute pass
-    grassSystem.recordResetAndCompute(cmd, frame.frameIndex, frame.time);
-    profiler.endGpuZone(cmd, "GrassCompute");
-
-    // Weather particle compute pass
-    profiler.beginGpuZone(cmd, "WeatherCompute");
-    weatherSystem.recordResetAndCompute(cmd, frame.frameIndex, frame.time, frame.deltaTime);
-    profiler.endGpuZone(cmd, "WeatherCompute");
-
-    // Snow mask accumulation compute pass
-    profiler.beginGpuZone(cmd, "SnowCompute");
-    snowMaskSystem.recordCompute(cmd, frame.frameIndex);
-
-    // Volumetric snow cascade compute pass
-    volumetricSnowSystem.recordCompute(cmd, frame.frameIndex);
-    profiler.endGpuZone(cmd, "SnowCompute");
-
-    // Leaf particle compute pass
-    profiler.beginGpuZone(cmd, "LeafCompute");
-    leafSystem.recordResetAndCompute(cmd, frame.frameIndex, frame.time, frame.deltaTime);
-    profiler.endGpuZone(cmd, "LeafCompute");
-
-    // Water foam persistence compute pass (Phase 14)
-    profiler.beginGpuZone(cmd, "FoamCompute");
-    foamBuffer.recordCompute(cmd, frame.frameIndex, frame.deltaTime,
-                             flowMapGenerator.getFlowMapView(), flowMapGenerator.getFlowMapSampler());
-    profiler.endGpuZone(cmd, "FoamCompute");
-
-    // Cloud shadow map compute pass
-    if (cloudShadowSystem.isEnabled()) {
-        profiler.beginGpuZone(cmd, "CloudShadow");
-        // Wind offset for cloud animation (matching cloud LUT animation)
-        glm::vec2 windDir = windSystem.getWindDirection();
-        float windSpeed = windSystem.getWindSpeed();
-        float windTime = windSystem.getTime();
-        float cloudTimeScale = 0.02f;  // Match cloud map LUT speed
-        glm::vec3 windOffset = glm::vec3(windDir.x * windSpeed * windTime * cloudTimeScale,
-                                          windTime * 0.002f,
-                                          windDir.y * windSpeed * windTime * cloudTimeScale);
-
-        cloudShadowSystem.recordUpdate(cmd, frame.frameIndex, frame.sunDirection, frame.sunIntensity,
-                                        windOffset, windTime * cloudTimeScale, frame.cameraPosition);
-        profiler.endGpuZone(cmd, "CloudShadow");
-    }
+    // Execute all compute passes via pipeline
+    renderPipeline.computeStage.execute(ctx);
 
     // Shadow pass (skip when sun is below horizon)
     if (lastSunIntensity > 0.001f) {
@@ -1657,42 +1847,10 @@ bool Renderer::render(const Camera& camera) {
         profiler.endGpuZone(cmd, "ShadowPass");
     }
 
-    // Froxel volumetric fog compute pass
-    {
-        profiler.beginGpuZone(cmd, "Atmosphere");
-        UniformBufferObject* ubo = static_cast<UniformBufferObject*>(uniformBuffersMapped[frame.frameIndex]);
-        glm::vec3 sunColor = glm::vec3(ubo->sunColor);
-
-        // Pass cascade matrices for volumetric shadow sampling
-        froxelSystem.recordFroxelUpdate(cmd, frame.frameIndex,
-                                        frame.view, frame.projection,
-                                        frame.cameraPosition,
-                                        frame.sunDirection, frame.sunIntensity, sunColor,
-                                        shadowSystem.getCascadeMatrices().data(),
-                                        ubo->cascadeSplits);
-
-        postProcessSystem.setCameraPlanes(camera.getNearPlane(), camera.getFarPlane());
-
-        // Recompute static LUTs if atmosphere parameters changed (e.g., from UI)
-        if (atmosphereLUTSystem.needsRecompute()) {
-            atmosphereLUTSystem.recomputeStaticLUTs(cmd);
-        }
-
-        // Update sky-view LUT with current sun direction (Phase 4.1.5)
-        // This precomputes atmospheric scattering for all view directions
-        atmosphereLUTSystem.updateSkyViewLUT(cmd, frame.frameIndex, frame.sunDirection, frame.cameraPosition, 0.0f);
-
-        // Update cloud map LUT with wind animation (Paraboloid projection)
-        glm::vec2 windDir = windSystem.getWindDirection();
-        float windSpeed = windSystem.getWindSpeed();
-        float windTime = windSystem.getTime();
-        // Slow down cloud animation for realistic drift (0.02x speed)
-        float cloudTimeScale = 0.02f;
-        glm::vec3 windOffset = glm::vec3(windDir.x * windSpeed * windTime * cloudTimeScale,
-                                          windTime * 0.002f,  // Slow vertical evolution
-                                          windDir.y * windSpeed * windTime * cloudTimeScale);
-        atmosphereLUTSystem.updateCloudMapLUT(cmd, frame.frameIndex, windOffset, windTime * cloudTimeScale);
-        profiler.endGpuZone(cmd, "Atmosphere");
+    // Froxel volumetric fog and atmosphere updates via pipeline
+    postProcessSystem.setCameraPlanes(camera.getNearPlane(), camera.getFarPlane());
+    if (renderPipeline.froxelStageFn) {
+        renderPipeline.froxelStageFn(ctx);
     }
 
     // Water G-buffer pass (Phase 3) - renders water mesh to mini G-buffer
@@ -1745,18 +1903,16 @@ bool Renderer::render(const Camera& camera) {
         profiler.endGpuZone(cmd, "WaterTileCull");
     }
 
-    // Generate Hi-Z pyramid from scene depth (before bloom to ensure bloom doesn't affect it)
-    profiler.beginGpuZone(cmd, "HiZPyramid");
-    hiZSystem.recordPyramidGeneration(cmd, frame.frameIndex);
-    profiler.endGpuZone(cmd, "HiZPyramid");
-
-    // Multi-pass bloom
-    profiler.beginGpuZone(cmd, "Bloom");
-    bloomSystem.setThreshold(postProcessSystem.getBloomThreshold());
-    bloomSystem.recordBloomPass(cmd, postProcessSystem.getHDRColorView());
-    profiler.endGpuZone(cmd, "Bloom");
+    // Hi-Z pyramid and Bloom via pipeline post stage
+    if (renderPipeline.postStage.hiZRecordFn) {
+        renderPipeline.postStage.hiZRecordFn(ctx);
+    }
+    if (renderPipeline.postStage.bloomRecordFn) {
+        renderPipeline.postStage.bloomRecordFn(ctx);
+    }
 
     // Post-process pass (with optional GUI overlay callback)
+    // Note: This is not in postStage because it needs framebuffer and guiRenderCallback
     profiler.beginGpuZone(cmd, "PostProcess");
     postProcessSystem.recordPostProcess(cmd, frame.frameIndex, framebuffers[imageIndex], frame.deltaTime, guiRenderCallback);
     profiler.endGpuZone(cmd, "PostProcess");
