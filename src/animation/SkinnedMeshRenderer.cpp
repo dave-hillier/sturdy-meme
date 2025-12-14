@@ -103,6 +103,7 @@ bool SkinnedMeshRenderer::createPipeline() {
         .setRenderPass(renderPass)
         .setPipelineLayout(pipelineLayout)
         .setExtent(extent)
+        .setDynamicViewport(true)
         .setBlendMode(GraphicsPipelineFactory::BlendMode::Alpha)
         .build(pipeline);
 
@@ -246,6 +247,21 @@ void SkinnedMeshRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex,
                                   const Renderable& playerObj, AnimatedCharacter& character) {
     // Bind skinned pipeline
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+
+    // Set dynamic viewport and scissor to handle window resize
+    VkViewport viewport{};
+    viewport.x = 0.0f;
+    viewport.y = 0.0f;
+    viewport.width = static_cast<float>(extent.width);
+    viewport.height = static_cast<float>(extent.height);
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+    VkRect2D scissor{};
+    scissor.offset = {0, 0};
+    scissor.extent = extent;
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
 
     // Bind skinned descriptor set
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,

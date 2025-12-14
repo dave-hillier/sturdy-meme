@@ -266,6 +266,7 @@ bool WaterSystem::createPipeline() {
         .setRenderPass(hdrRenderPass)
         .setPipelineLayout(pipelineLayout)
         .setExtent(extent)
+        .setDynamicViewport(true)
         .setVertexInput(bindings, attributes)
         .setDepthTest(true)
         .setDepthWrite(false)  // Don't write depth for transparent water
@@ -662,6 +663,22 @@ void WaterSystem::setWaterExtent(const glm::vec2& position, const glm::vec2& siz
 
 void WaterSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+
+    // Set dynamic viewport and scissor to handle window resize
+    VkViewport viewport{};
+    viewport.x = 0.0f;
+    viewport.y = 0.0f;
+    viewport.width = static_cast<float>(extent.width);
+    viewport.height = static_cast<float>(extent.height);
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+    VkRect2D scissor{};
+    scissor.offset = {0, 0};
+    scissor.extent = extent;
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
+
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                             pipelineLayout, 0, 1, &descriptorSets[frameIndex], 0, nullptr);
 

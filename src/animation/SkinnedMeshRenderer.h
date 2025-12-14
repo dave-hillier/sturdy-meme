@@ -72,6 +72,9 @@ public:
     void record(VkCommandBuffer cmd, uint32_t frameIndex,
                 const Renderable& playerObj, AnimatedCharacter& character);
 
+    // Update extent for viewport (on window resize)
+    void setExtent(VkExtent2D newExtent) { extent = newExtent; }
+
     // Accessors for ShadowSystem integration
     VkDescriptorSetLayout getDescriptorSetLayout() const { return descriptorSetLayout; }
     VkPipelineLayout getPipelineLayout() const { return pipelineLayout; }

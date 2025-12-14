@@ -534,6 +534,7 @@ bool WaterGBuffer::createPipeline() {
         .setRenderPass(renderPass)
         .setPipelineLayout(pipelineLayout)
         .setExtent(gbufferExtent)
+        .setDynamicViewport(true)
         .setVertexInput(bindings, attributes)
         .setDepthTest(true)
         .setDepthWrite(true)
