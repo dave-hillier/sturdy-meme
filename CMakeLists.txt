@@ -36,6 +36,7 @@ set(SOURCES
     # Core
     src/core/Renderer.cpp
     src/core/RendererInit.cpp
+    src/core/RendererInitPhases.cpp
     src/core/VulkanResourceFactory.cpp
     src/core/CoreResources.cpp
     src/core/ResizeCoordinator.cpp

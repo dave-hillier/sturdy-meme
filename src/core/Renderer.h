@@ -350,6 +350,12 @@ public:
 #endif
 
 private:
+    // High-level initialization phases
+    bool initCoreVulkanResources();       // render pass, depth, framebuffers, command pool
+    bool initDescriptorInfrastructure();  // layouts, pools, sets
+    bool initSubsystems(const InitContext& initCtx);  // terrain, grass, weather, snow, water, etc.
+    void initResizeCoordinator();         // resize registration
+
     bool createRenderPass();
     void destroyRenderResources();
     void destroyDepthImageAndView();  // Helper for resize (keeps sampler)
