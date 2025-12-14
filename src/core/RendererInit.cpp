@@ -2,6 +2,45 @@
 #include "VulkanRAII.h"
 #include "MaterialDescriptorFactory.h"
 
+// Post-processing systems
+#include "PostProcessSystem.h"
+#include "BloomSystem.h"
+#include "SSRSystem.h"
+#include "HiZSystem.h"
+
+// Atmosphere/weather systems
+#include "SnowMaskSystem.h"
+#include "VolumetricSnowSystem.h"
+#include "WindSystem.h"
+#include "WeatherSystem.h"
+#include "FroxelSystem.h"
+#include "AtmosphereLUTSystem.h"
+#include "CloudShadowSystem.h"
+
+// Vegetation systems
+#include "GrassSystem.h"
+#include "LeafSystem.h"
+#include "RockSystem.h"
+#include "TreeEditSystem.h"
+
+// Water systems
+#include "WaterSystem.h"
+#include "WaterDisplacement.h"
+#include "FlowMapGenerator.h"
+#include "FoamBuffer.h"
+#include "WaterTileCull.h"
+#include "WaterGBuffer.h"
+
+// Terrain
+#include "TerrainSystem.h"
+
+// Other systems
+#include "CatmullClarkSystem.h"
+#include "ShadowSystem.h"
+#include "MaterialRegistry.h"
+#include "SkinnedMeshRenderer.h"
+#include "DebugLineSystem.h"
+
 #include <SDL3/SDL.h>
 
 bool RendererInit::initPostProcessing(
@@ -377,7 +416,7 @@ bool RendererInit::createWaterDescriptorSets(
     WaterSubsystems& water,
     const std::vector<VkBuffer>& uniformBuffers,
     size_t uniformBufferSize,
-    const ShadowSystem& shadowSystem,
+    ShadowSystem& shadowSystem,
     const TerrainSystem& terrainSystem,
     const PostProcessSystem& postProcessSystem,
     VkSampler depthSampler

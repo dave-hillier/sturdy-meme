@@ -308,7 +308,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     uboSystems.snowMaskSystem = &snowMaskSystem;
     uboSystems.volumetricSnowSystem = &volumetricSnowSystem;
     uboSystems.cloudShadowSystem = &cloudShadowSystem;
-    uboSystems.environmentSettings = environmentSettings;
+    uboSystems.environmentSettings = &environmentSettings;
     uboBuilder.setSystems(uboSystems);
 
     // Setup render pipeline stages with lambdas

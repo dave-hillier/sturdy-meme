@@ -203,7 +203,7 @@ public:
         WaterSubsystems& water,
         const std::vector<VkBuffer>& uniformBuffers,
         size_t uniformBufferSize,
-        const ShadowSystem& shadowSystem,
+        ShadowSystem& shadowSystem,
         const TerrainSystem& terrainSystem,
         const PostProcessSystem& postProcessSystem,
         VkSampler depthSampler
