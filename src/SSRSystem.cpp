@@ -16,6 +16,7 @@ bool SSRSystem::init(const InitInfo& info) {
     shaderPath = info.shaderPath;
     framesInFlight = info.framesInFlight;
     extent = info.extent;
+    descriptorPool = info.descriptorPool;
 
     if (!createSSRBuffers()) return false;
     if (!createComputePipeline()) return false;
@@ -35,6 +36,7 @@ bool SSRSystem::init(const InitContext& ctx) {
     shaderPath = ctx.shaderPath;
     framesInFlight = ctx.framesInFlight;
     extent = ctx.extent;
+    descriptorPool = ctx.descriptorPool;
 
     if (!createSSRBuffers()) return false;
     if (!createComputePipeline()) return false;
@@ -50,11 +52,10 @@ void SSRSystem::destroy() {
 
     vkDeviceWaitIdle(device);
 
-    // Destroy descriptor pool
-    if (descriptorPool != VK_NULL_HANDLE) {
-        vkDestroyDescriptorPool(device, descriptorPool, nullptr);
-        descriptorPool = VK_NULL_HANDLE;
-    }
+    // Clear descriptor sets (pool is shared and managed externally)
+    descriptorSets.clear();
+    blurDescriptorSets.clear();
+    descriptorPool = nullptr;
 
     // Destroy main pipeline resources
     if (computePipeline != VK_NULL_HANDLE) {
@@ -148,11 +149,7 @@ void SSRSystem::resize(VkExtent2D newExtent) {
 
     createSSRBuffers();
 
-    // Recreate descriptor sets with new image views
-    if (descriptorPool != VK_NULL_HANDLE) {
-        vkDestroyDescriptorPool(device, descriptorPool, nullptr);
-        descriptorPool = VK_NULL_HANDLE;
-    }
+    // Allocate new descriptor sets from shared pool (old sets will be reused when pool is reset)
     createDescriptorSets();
 
     SDL_Log("SSRSystem resized to %dx%d", extent.width, extent.height);
@@ -446,49 +443,21 @@ bool SSRSystem::createBlurPipeline() {
 }
 
 bool SSRSystem::createDescriptorSets() {
-    // Create descriptor pool - need sets for both main SSR and blur passes
-    std::array<VkDescriptorPoolSize, 2> poolSizes{};
-    poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    // Main SSR: color, depth, prev (3 per frame)
-    // Blur: ssr input, depth (2 per frame)
-    poolSizes[0].descriptorCount = framesInFlight * 5;
-    poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    // Main SSR: output (1 per frame)
-    // Blur: output (1 per frame)
-    poolSizes[1].descriptorCount = framesInFlight * 2;
-
-    VkDescriptorPoolCreateInfo poolInfo{};
-    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
-    poolInfo.pPoolSizes = poolSizes.data();
-    poolInfo.maxSets = framesInFlight * 2;  // main SSR + blur per frame
-
-    if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SSR descriptor pool");
+    if (!descriptorPool) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SSRSystem: descriptor pool is null");
         return false;
     }
 
-    // Allocate main SSR descriptor sets
-    std::vector<VkDescriptorSetLayout> layouts(framesInFlight, descriptorSetLayout);
-
-    VkDescriptorSetAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = descriptorPool;
-    allocInfo.descriptorSetCount = framesInFlight;
-    allocInfo.pSetLayouts = layouts.data();
-
-    descriptorSets.resize(framesInFlight);
-    if (vkAllocateDescriptorSets(device, &allocInfo, descriptorSets.data()) != VK_SUCCESS) {
+    // Allocate main SSR descriptor sets using shared pool
+    descriptorSets = descriptorPool->allocate(descriptorSetLayout, framesInFlight);
+    if (descriptorSets.size() != framesInFlight) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate SSR descriptor sets");
         return false;
     }
 
-    // Allocate blur descriptor sets
-    std::vector<VkDescriptorSetLayout> blurLayouts(framesInFlight, blurDescriptorSetLayout);
-    allocInfo.pSetLayouts = blurLayouts.data();
-
-    blurDescriptorSets.resize(framesInFlight);
-    if (vkAllocateDescriptorSets(device, &allocInfo, blurDescriptorSets.data()) != VK_SUCCESS) {
+    // Allocate blur descriptor sets using shared pool
+    blurDescriptorSets = descriptorPool->allocate(blurDescriptorSetLayout, framesInFlight);
+    if (blurDescriptorSets.size() != framesInFlight) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate SSR blur descriptor sets");
         return false;
     }
@@ -522,57 +491,13 @@ void SSRSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex,
     VkImageView ssrOutputView = blurEnabled ? ssrIntermediateView : ssrResultView[writeBuffer];
     VkImage ssrOutputImage = blurEnabled ? ssrIntermediate : ssrResult[writeBuffer];
 
-    // Update descriptor set for main SSR pass
-    VkDescriptorImageInfo colorInfo{};
-    colorInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    colorInfo.imageView = hdrColorView;
-    colorInfo.sampler = sampler;
-
-    VkDescriptorImageInfo depthInfo{};
-    depthInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
-    depthInfo.imageView = hdrDepthView;
-    depthInfo.sampler = sampler;
-
-    VkDescriptorImageInfo outputInfo{};
-    outputInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-    outputInfo.imageView = ssrOutputView;
-
-    VkDescriptorImageInfo prevInfo{};
-    prevInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-    prevInfo.imageView = ssrResultView[currentBuffer];
-    prevInfo.sampler = sampler;
-
-    std::array<VkWriteDescriptorSet, 4> writes{};
-
-    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[0].dstSet = descriptorSets[frameIndex];
-    writes[0].dstBinding = 0;
-    writes[0].descriptorCount = 1;
-    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    writes[0].pImageInfo = &colorInfo;
-
-    writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[1].dstSet = descriptorSets[frameIndex];
-    writes[1].dstBinding = 1;
-    writes[1].descriptorCount = 1;
-    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    writes[1].pImageInfo = &depthInfo;
-
-    writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[2].dstSet = descriptorSets[frameIndex];
-    writes[2].dstBinding = 2;
-    writes[2].descriptorCount = 1;
-    writes[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    writes[2].pImageInfo = &outputInfo;
-
-    writes[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[3].dstSet = descriptorSets[frameIndex];
-    writes[3].dstBinding = 3;
-    writes[3].descriptorCount = 1;
-    writes[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    writes[3].pImageInfo = &prevInfo;
-
-    vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+    // Update descriptor set for main SSR pass using SetWriter
+    DescriptorManager::SetWriter(device, descriptorSets[frameIndex])
+        .writeImage(0, hdrColorView, sampler, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+        .writeImage(1, hdrDepthView, sampler, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL)
+        .writeStorageImage(2, ssrOutputView)
+        .writeImage(3, ssrResultView[currentBuffer], sampler, VK_IMAGE_LAYOUT_GENERAL)
+        .update();
 
     // Build push constants for main SSR
     SSRPushConstants pc{};
@@ -612,45 +537,12 @@ void SSRSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex,
             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
             VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
 
-        // Update blur descriptor set
-        VkDescriptorImageInfo blurInputInfo{};
-        blurInputInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-        blurInputInfo.imageView = ssrIntermediateView;
-        blurInputInfo.sampler = sampler;
-
-        VkDescriptorImageInfo blurDepthInfo{};
-        blurDepthInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
-        blurDepthInfo.imageView = hdrDepthView;
-        blurDepthInfo.sampler = sampler;
-
-        VkDescriptorImageInfo blurOutputInfo{};
-        blurOutputInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-        blurOutputInfo.imageView = ssrResultView[writeBuffer];
-
-        std::array<VkWriteDescriptorSet, 3> blurWrites{};
-
-        blurWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        blurWrites[0].dstSet = blurDescriptorSets[frameIndex];
-        blurWrites[0].dstBinding = 0;
-        blurWrites[0].descriptorCount = 1;
-        blurWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        blurWrites[0].pImageInfo = &blurInputInfo;
-
-        blurWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        blurWrites[1].dstSet = blurDescriptorSets[frameIndex];
-        blurWrites[1].dstBinding = 1;
-        blurWrites[1].descriptorCount = 1;
-        blurWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        blurWrites[1].pImageInfo = &blurDepthInfo;
-
-        blurWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        blurWrites[2].dstSet = blurDescriptorSets[frameIndex];
-        blurWrites[2].dstBinding = 2;
-        blurWrites[2].descriptorCount = 1;
-        blurWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        blurWrites[2].pImageInfo = &blurOutputInfo;
-
-        vkUpdateDescriptorSets(device, static_cast<uint32_t>(blurWrites.size()), blurWrites.data(), 0, nullptr);
+        // Update blur descriptor set using SetWriter
+        DescriptorManager::SetWriter(device, blurDescriptorSets[frameIndex])
+            .writeImage(0, ssrIntermediateView, sampler, VK_IMAGE_LAYOUT_GENERAL)
+            .writeImage(1, hdrDepthView, sampler, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL)
+            .writeStorageImage(2, ssrResultView[writeBuffer])
+            .update();
 
         // Build blur push constants
         BlurPushConstants blurPc{};
