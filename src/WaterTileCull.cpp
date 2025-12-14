@@ -1,6 +1,7 @@
 #include "WaterTileCull.h"
 #include "ShaderLoader.h"
 #include "BindingBuilder.h"
+#include "VulkanBarriers.h"
 #include <SDL3/SDL.h>
 #include <array>
 #include <cstring>
@@ -450,44 +451,17 @@ void WaterTileCull::recordTileCull(VkCommandBuffer cmd, uint32_t frameIndex,
     vkCmdDispatch(cmd, groupsX, groupsY, 1);
 
     // Ensure compute writes are visible before copying to the readback buffer
-    std::array<VkBufferMemoryBarrier, 3> bufferBarriers{};
-
-    bufferBarriers[0].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-    bufferBarriers[0].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    bufferBarriers[0].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    bufferBarriers[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    bufferBarriers[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    bufferBarriers[0].buffer = counterBuffer;
-    bufferBarriers[0].offset = frameIndex * sizeof(uint32_t);
-    bufferBarriers[0].size = sizeof(uint32_t);
-
-    bufferBarriers[1].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-    bufferBarriers[1].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    bufferBarriers[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-    bufferBarriers[1].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    bufferBarriers[1].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    bufferBarriers[1].buffer = tileBuffer;
-    bufferBarriers[1].offset = 0;
-    bufferBarriers[1].size = VK_WHOLE_SIZE;
-
-    bufferBarriers[2].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-    bufferBarriers[2].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    bufferBarriers[2].dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
-    bufferBarriers[2].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    bufferBarriers[2].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    bufferBarriers[2].buffer = indirectDrawBuffer;
-    bufferBarriers[2].offset = 0;
-    bufferBarriers[2].size = sizeof(IndirectDrawCommand);
-
-    vkCmdPipelineBarrier(cmd,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         VK_PIPELINE_STAGE_TRANSFER_BIT |
-                             VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
-                             VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
-                         0, 0, nullptr,
-                         static_cast<uint32_t>(bufferBarriers.size()),
-                         bufferBarriers.data(),
-                         0, nullptr);
+    {
+        Barriers::BarrierBatch batch(cmd,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
+                VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT);
+        batch.bufferBarrier(counterBuffer, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
+                            frameIndex * sizeof(uint32_t), sizeof(uint32_t));
+        batch.bufferBarrier(tileBuffer, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
+        batch.bufferBarrier(indirectDrawBuffer, VK_ACCESS_SHADER_WRITE_BIT,
+                            VK_ACCESS_INDIRECT_COMMAND_READ_BIT, 0, sizeof(IndirectDrawCommand));
+    }
 
     // Copy the counter value for this frame to the host-visible readback buffer
     VkBufferCopy copyRegion{};
@@ -497,20 +471,11 @@ void WaterTileCull::recordTileCull(VkCommandBuffer cmd, uint32_t frameIndex,
     vkCmdCopyBuffer(cmd, counterBuffer, counterReadbackBuffer, 1, &copyRegion);
 
     // Make the transfer visible to the CPU before next frame reads
-    VkBufferMemoryBarrier readbackBarrier{};
-    readbackBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-    readbackBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    readbackBarrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
-    readbackBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    readbackBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    readbackBarrier.buffer = counterReadbackBuffer;
-    readbackBarrier.offset = frameIndex * sizeof(uint32_t);
-    readbackBarrier.size = sizeof(uint32_t);
-
-    vkCmdPipelineBarrier(cmd,
-                         VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         VK_PIPELINE_STAGE_HOST_BIT,
-                         0, 0, nullptr, 1, &readbackBarrier, 0, nullptr);
+    {
+        Barriers::BarrierBatch batch(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT);
+        batch.bufferBarrier(counterReadbackBuffer, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT,
+                            frameIndex * sizeof(uint32_t), sizeof(uint32_t));
+    }
 }
 
 uint32_t WaterTileCull::getVisibleTileCount(uint32_t frameIndex) const {

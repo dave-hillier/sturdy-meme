@@ -1,5 +1,6 @@
 #include "HiZSystem.h"
 #include "ShaderLoader.h"
+#include "VulkanBarriers.h"
 #include <SDL3/SDL_log.h>
 #include <cstring>
 #include <algorithm>
@@ -595,25 +596,7 @@ void HiZSystem::recordPyramidGeneration(VkCommandBuffer cmd, uint32_t frameIndex
     }
 
     // Transition Hi-Z pyramid to general for writing
-    VkImageMemoryBarrier barrier{};
-    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrier.srcAccessMask = 0;
-    barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.image = hiZPyramidImage;
-    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    barrier.subresourceRange.baseMipLevel = 0;
-    barrier.subresourceRange.levelCount = mipLevelCount;
-    barrier.subresourceRange.baseArrayLayer = 0;
-    barrier.subresourceRange.layerCount = 1;
-
-    vkCmdPipelineBarrier(cmd,
-        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-        0, 0, nullptr, 0, nullptr, 1, &barrier);
+    Barriers::prepareImageForCompute(cmd, hiZPyramidImage, mipLevelCount, 1);
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pyramidPipeline);
 
@@ -657,17 +640,11 @@ void HiZSystem::recordPyramidGeneration(VkCommandBuffer cmd, uint32_t frameIndex
 
         // Barrier between mip levels
         if (mip < mipLevelCount - 1) {
-            barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-            barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-            barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-            barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            barrier.subresourceRange.baseMipLevel = mip;
-            barrier.subresourceRange.levelCount = 1;
-
-            vkCmdPipelineBarrier(cmd,
-                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                0, 0, nullptr, 0, nullptr, 1, &barrier);
+            Barriers::transitionImage(cmd, hiZPyramidImage,
+                VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+                VK_IMAGE_ASPECT_COLOR_BIT, mip, 1);
         }
 
         srcWidth = dstWidth;
@@ -675,17 +652,8 @@ void HiZSystem::recordPyramidGeneration(VkCommandBuffer cmd, uint32_t frameIndex
     }
 
     // Transition entire pyramid to shader read for culling
-    barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-    barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    barrier.subresourceRange.baseMipLevel = 0;
-    barrier.subresourceRange.levelCount = mipLevelCount;
-
-    vkCmdPipelineBarrier(cmd,
-        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-        0, 0, nullptr, 0, nullptr, 1, &barrier);
+    Barriers::imageComputeToSampling(cmd, hiZPyramidImage,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, mipLevelCount, 1);
 }
 
 void HiZSystem::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex) {
@@ -694,18 +662,7 @@ void HiZSystem::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex) {
     }
 
     // Reset draw count to zero
-    vkCmdFillBuffer(cmd, drawCountBuffers.buffers[frameIndex], 0, sizeof(uint32_t), 0);
-
-    // Barrier to ensure fill is complete before compute
-    VkMemoryBarrier memBarrier{};
-    memBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-    memBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    memBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-
-    vkCmdPipelineBarrier(cmd,
-        VK_PIPELINE_STAGE_TRANSFER_BIT,
-        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-        0, 1, &memBarrier, 0, nullptr, 0, nullptr);
+    Barriers::clearBufferForComputeReadWrite(cmd, drawCountBuffers.buffers[frameIndex]);
 
     // Bind culling pipeline and descriptor set
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullingPipeline);
@@ -717,13 +674,10 @@ void HiZSystem::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex) {
     vkCmdDispatch(cmd, groupCount, 1, 1);
 
     // Barrier before indirect draw
-    memBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    memBarrier.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
-
-    vkCmdPipelineBarrier(cmd,
-        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-        VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
-        0, 1, &memBarrier, 0, nullptr, 0, nullptr);
+    Barriers::BarrierBatch(cmd)
+        .setStages(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT)
+        .memoryBarrier(VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_INDIRECT_COMMAND_READ_BIT)
+        .submit();
 }
 
 VkBuffer HiZSystem::getIndirectDrawBuffer(uint32_t frameIndex) const {

@@ -1,4 +1,5 @@
 #include "VirtualTextureFeedback.h"
+#include "VulkanBarriers.h"
 #include <SDL3/SDL_log.h>
 #include <algorithm>
 #include <cstring>
@@ -148,18 +149,8 @@ void VirtualTextureFeedback::clear(VkCommandBuffer cmd, uint32_t frameIndex) {
 
     FrameBuffer& fb = frameBuffers[frameIndex];
 
-    // Clear counter to 0
-    vkCmdFillBuffer(cmd, fb.counterBuffer, 0, sizeof(uint32_t), 0);
-
-    // Memory barrier to ensure clear is visible to shader
-    VkMemoryBarrier barrier{};
-    barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                         0, 1, &barrier, 0, nullptr, 0, nullptr);
+    // Clear counter to 0 and barrier for fragment shader
+    Barriers::clearBufferForFragment(cmd, fb.counterBuffer);
 }
 
 void VirtualTextureFeedback::readback(uint32_t frameIndex) {

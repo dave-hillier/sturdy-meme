@@ -1,6 +1,7 @@
 #include "BloomSystem.h"
 #include "GraphicsPipelineFactory.h"
 #include "BindingBuilder.h"
+#include "VulkanBarriers.h"
 #include <array>
 #include <algorithm>
 #include <cmath>
@@ -348,22 +349,6 @@ void BloomSystem::destroyMipChain() {
 void BloomSystem::recordBloomPass(VkCommandBuffer cmd, VkImageView hdrInput) {
     if (mipChain.empty()) return;
 
-    // Transition HDR input to shader read layout
-    VkImageMemoryBarrier hdrBarrier = {};
-    hdrBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    hdrBarrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    hdrBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-    hdrBarrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    hdrBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    hdrBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    hdrBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    hdrBarrier.image = VK_NULL_HANDLE; // Will be set by caller if needed
-    hdrBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    hdrBarrier.subresourceRange.baseMipLevel = 0;
-    hdrBarrier.subresourceRange.levelCount = 1;
-    hdrBarrier.subresourceRange.baseArrayLayer = 0;
-    hdrBarrier.subresourceRange.layerCount = 1;
-
     // Downsample pass - from HDR to smallest mip
     for (size_t i = 0; i < mipChain.size(); ++i) {
         // Update descriptor set to sample from previous level
@@ -461,25 +446,10 @@ void BloomSystem::recordBloomPass(VkCommandBuffer cmd, VkImageView hdrInput) {
         vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
 
         // Transition current mip to color attachment for blending
-        VkImageMemoryBarrier barrier = {};
-        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-        barrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        barrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.image = mipChain[i].image;
-        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        barrier.subresourceRange.baseMipLevel = 0;
-        barrier.subresourceRange.levelCount = 1;
-        barrier.subresourceRange.baseArrayLayer = 0;
-        barrier.subresourceRange.layerCount = 1;
-
-        vkCmdPipelineBarrier(cmd,
-                            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                            0, 0, nullptr, 0, nullptr, 1, &barrier);
+        Barriers::transitionImage(cmd, mipChain[i].image,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
 
         // Begin render pass with LOAD operation to preserve downsampled content
         VkRenderPassBeginInfo renderPassInfo = {};

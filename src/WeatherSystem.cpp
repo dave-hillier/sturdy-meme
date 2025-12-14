@@ -2,6 +2,7 @@
 #include "WindSystem.h"
 #include "ShaderLoader.h"
 #include "PipelineBuilder.h"
+#include "VulkanBarriers.h"
 #include <SDL3/SDL.h>
 #include <cstring>
 #include <algorithm>
@@ -421,17 +422,7 @@ void WeatherSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameInd
     vkUpdateDescriptorSets(getDevice(), static_cast<uint32_t>(computeWrites.size()), computeWrites.data(), 0, nullptr);
 
     // Reset indirect buffer before compute dispatch
-    vkCmdFillBuffer(cmd, indirectBuffers.buffers[writeSet], 0, sizeof(VkDrawIndirectCommand), 0);
-
-    // Barrier to ensure fill completes before compute shader runs
-    VkMemoryBarrier fillBarrier{};
-    fillBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-    fillBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    fillBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-    vkCmdPipelineBarrier(cmd,
-                         VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         0, 1, &fillBarrier, 0, nullptr, 0, nullptr);
+    Barriers::clearBufferForComputeReadWrite(cmd, indirectBuffers.buffers[writeSet], 0, sizeof(VkDrawIndirectCommand));
 
     // Dispatch weather compute shader
     auto& computePipeline = getComputePipelineHandles();
@@ -452,15 +443,11 @@ void WeatherSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameInd
     vkCmdDispatch(cmd, workgroupCount, 1, 1);
 
     // Memory barrier: compute write -> vertex shader read and indirect read
-    VkMemoryBarrier memBarrier{};
-    memBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-    memBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    memBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
-
-    vkCmdPipelineBarrier(cmd,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
-                         0, 1, &memBarrier, 0, nullptr, 0, nullptr);
+    Barriers::BarrierBatch(cmd)
+        .setStages(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                   VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT)
+        .memoryBarrier(VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_INDIRECT_COMMAND_READ_BIT)
+        .submit();
 }
 
 void WeatherSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time) {
