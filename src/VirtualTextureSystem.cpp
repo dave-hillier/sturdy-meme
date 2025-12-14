@@ -1,4 +1,5 @@
 #include "VirtualTextureSystem.h"
+#include "VulkanBarriers.h"
 #include <SDL3/SDL_log.h>
 #include <algorithm>
 
@@ -69,14 +70,11 @@ void VirtualTextureSystem::endFrame(VkCommandBuffer cmd, uint32_t frameIndex) {
     // A more efficient approach would be to copy to readback buffers here
 
     // Memory barrier to ensure shader writes are visible
-    VkMemoryBarrier barrier{};
-    barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-    barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                         VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         0, 1, &barrier, 0, nullptr, 0, nullptr);
+    {
+        Barriers::BarrierBatch batch(cmd,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+        batch.memoryBarrier(VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+    }
 }
 
 void VirtualTextureSystem::update(VkDevice device, VkCommandPool commandPool,

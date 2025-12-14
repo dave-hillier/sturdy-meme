@@ -3,6 +3,7 @@
 #include "BindingBuilder.h"
 #include "GpuProfiler.h"
 #include "UBOs.h"
+#include "VulkanBarriers.h"
 #include <SDL3/SDL.h>
 #include <cstring>
 #include <cmath>
@@ -2027,14 +2028,7 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
         lastFrameWasSkipped = true;
 
         // Still need the final barrier for rendering (CBT state unchanged but GPU needs it)
-        VkMemoryBarrier renderBarrier{};
-        renderBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-        renderBarrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        renderBarrier.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
-
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                            VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
-                            0, 1, &renderBarrier, 0, nullptr, 0, nullptr);
+        Barriers::computeToIndirectDraw(cmd);
         return;
     }
 
@@ -2042,11 +2036,6 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
     forceNextCompute = false;
     framesSinceLastCompute = 0;
     lastFrameWasSkipped = false;
-
-    VkMemoryBarrier barrier{};
-    barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-    barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
 
     // 1. Dispatcher - set up indirect args
     if (profiler) profiler->beginZone(cmd, "Terrain:Dispatcher");
@@ -2065,8 +2054,7 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
 
     if (profiler) profiler->endZone(cmd, "Terrain:Dispatcher");
 
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                        0, 1, &barrier, 0, nullptr, 0, nullptr);
+    Barriers::computeToComputeReadWrite(cmd);
 
     // 2. Subdivision - LOD update with inline frustum culling
     // Ping-pong between split and merge to avoid race conditions
@@ -2119,8 +2107,7 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
 
     subdivisionFrameCount++;
 
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                        0, 1, &barrier, 0, nullptr, 0, nullptr);
+    Barriers::computeToComputeReadWrite(cmd);
 
     // 3. Sum reduction - rebuild the sum tree
     // Choose optimized or fallback path based on subgroup support
@@ -2146,8 +2133,7 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
         uint32_t workgroups = std::max(1u, (1u << (config.maxDepth - 5)) / SUM_REDUCTION_WORKGROUP_SIZE);
         vkCmdDispatch(cmd, workgroups, 1, 1);
 
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                            0, 1, &barrier, 0, nullptr, 0, nullptr);
+        Barriers::computeToComputeReadWrite(cmd);
 
         levelsFromPrepass = 13;  // SWAR (5) + subgroup (5) + shared memory (3)
     } else {
@@ -2162,8 +2148,7 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
         uint32_t workgroups = std::max(1u, (1u << (config.maxDepth - 5)) / SUM_REDUCTION_WORKGROUP_SIZE);
         vkCmdDispatch(cmd, workgroups, 1, 1);
 
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                            0, 1, &barrier, 0, nullptr, 0, nullptr);
+        Barriers::computeToComputeReadWrite(cmd);
 
         levelsFromPrepass = 5;
     }
@@ -2188,8 +2173,7 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
             uint32_t workgroups = std::max(1u, (1u << depth) / SUM_REDUCTION_WORKGROUP_SIZE);
             vkCmdDispatch(cmd, workgroups, 1, 1);
 
-            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                                0, 1, &barrier, 0, nullptr, 0, nullptr);
+            Barriers::computeToComputeReadWrite(cmd);
         }
 
         if (profiler) profiler->endZone(cmd, "Terrain:SumReductionLevels");
@@ -2206,14 +2190,7 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
     if (profiler) profiler->endZone(cmd, "Terrain:FinalDispatch");
 
     // Final barrier before rendering
-    VkMemoryBarrier renderBarrier{};
-    renderBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-    renderBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    renderBarrier.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
-
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                        VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
-                        0, 1, &renderBarrier, 0, nullptr, 0, nullptr);
+    Barriers::computeToIndirectDraw(cmd);
 }
 
 void TerrainSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
@@ -2263,16 +2240,8 @@ void TerrainSystem::recordShadowCull(VkCommandBuffer cmd, uint32_t frameIndex,
         return;
     }
 
-    // Clear the shadow visible count to 0
-    vkCmdFillBuffer(cmd, shadowVisibleBuffer, 0, sizeof(uint32_t), 0);
-
-    // Memory barrier before compute
-    VkMemoryBarrier clearBarrier{};
-    clearBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-    clearBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    clearBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         0, 1, &clearBarrier, 0, nullptr, 0, nullptr);
+    // Clear the shadow visible count to 0 and barrier for compute
+    Barriers::clearBufferForCompute(cmd, shadowVisibleBuffer);
 
     // Bind shadow cull compute pipeline
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, shadowCullPipeline);
@@ -2294,13 +2263,7 @@ void TerrainSystem::recordShadowCull(VkCommandBuffer cmd, uint32_t frameIndex,
     vkCmdDispatchIndirect(cmd, indirectDispatchBuffer, 0);
 
     // Memory barrier to ensure shadow cull results are visible for draw
-    VkMemoryBarrier computeBarrier{};
-    computeBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-    computeBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    computeBarrier.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_SHADER_READ_BIT;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
-                         0, 1, &computeBarrier, 0, nullptr, 0, nullptr);
+    Barriers::computeToIndirectDraw(cmd);
 }
 
 void TerrainSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex,

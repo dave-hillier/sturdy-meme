@@ -1,6 +1,7 @@
 #include "SnowMaskSystem.h"
 #include "ShaderLoader.h"
 #include "PipelineBuilder.h"
+#include "VulkanBarriers.h"
 #include <SDL3/SDL.h>
 #include <cstring>
 #include <array>
@@ -266,36 +267,19 @@ void SnowMaskSystem::setMaskCenter(const glm::vec3& worldPos) {
 
 void SnowMaskSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) {
     // Transition snow mask image to general layout for compute write
-    VkImageMemoryBarrier imageBarrier{};
-    imageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    imageBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    imageBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    imageBarrier.image = snowMaskImage;
-    imageBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    imageBarrier.subresourceRange.baseMipLevel = 0;
-    imageBarrier.subresourceRange.levelCount = 1;
-    imageBarrier.subresourceRange.baseArrayLayer = 0;
-    imageBarrier.subresourceRange.layerCount = 1;
-    imageBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    imageBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-
-    VkPipelineStageFlags srcStage;
     if (isFirstFrame) {
         // First frame: image is in undefined state
-        imageBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        imageBarrier.srcAccessMask = 0;
-        srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        Barriers::transitionImage(cmd, snowMaskImage,
+            VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            0, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
     } else {
         // Subsequent frames: image was left in SHADER_READ_ONLY_OPTIMAL
-        imageBarrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        imageBarrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        srcStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        Barriers::transitionImage(cmd, snowMaskImage,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
     }
-
-    vkCmdPipelineBarrier(cmd,
-                         srcStage,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         0, 0, nullptr, 0, nullptr, 1, &imageBarrier);
 
     // Bind compute pipeline and descriptor set
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, getComputePipelineHandles().pipeline);
@@ -308,25 +292,8 @@ void SnowMaskSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) {
     vkCmdDispatch(cmd, workgroupCount, workgroupCount, 1);
 
     // Transition snow mask to shader read optimal for fragment shaders
-    VkImageMemoryBarrier readBarrier{};
-    readBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    readBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-    readBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    readBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    readBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    readBarrier.image = snowMaskImage;
-    readBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    readBarrier.subresourceRange.baseMipLevel = 0;
-    readBarrier.subresourceRange.levelCount = 1;
-    readBarrier.subresourceRange.baseArrayLayer = 0;
-    readBarrier.subresourceRange.layerCount = 1;
-    readBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    readBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-    vkCmdPipelineBarrier(cmd,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                         0, 0, nullptr, 0, nullptr, 1, &readBarrier);
+    Barriers::imageComputeToSampling(cmd, snowMaskImage,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
 
     // Mark first frame as done
     isFirstFrame = false;

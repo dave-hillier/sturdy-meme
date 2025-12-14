@@ -1,6 +1,7 @@
 #include "PostProcessSystem.h"
 #include "ShaderLoader.h"
 #include "BindingBuilder.h"
+#include "VulkanBarriers.h"
 #include <SDL3/SDL.h>
 #include <array>
 
@@ -1131,42 +1132,13 @@ void PostProcessSystem::recordHistogramCompute(VkCommandBuffer cmd, uint32_t fra
     vmaFlushAllocation(allocator, histogramParamsAllocations[frameIndex], 0, sizeof(HistogramReduceParams));
 
     // Transition HDR image to general layout for compute access
-    VkImageMemoryBarrier hdrBarrier{};
-    hdrBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    hdrBarrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    hdrBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    hdrBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    hdrBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    hdrBarrier.image = hdrColorImage;
-    hdrBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    hdrBarrier.subresourceRange.baseMipLevel = 0;
-    hdrBarrier.subresourceRange.levelCount = 1;
-    hdrBarrier.subresourceRange.baseArrayLayer = 0;
-    hdrBarrier.subresourceRange.layerCount = 1;
-    hdrBarrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    hdrBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-    vkCmdPipelineBarrier(cmd,
-                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         0, 0, nullptr, 0, nullptr, 1, &hdrBarrier);
+    Barriers::transitionImage(cmd, hdrColorImage,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
 
     // Clear histogram buffer
-    vkCmdFillBuffer(cmd, histogramBuffer, 0, HISTOGRAM_BINS * sizeof(uint32_t), 0);
-
-    // Barrier after clear
-    VkBufferMemoryBarrier histClearBarrier{};
-    histClearBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-    histClearBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    histClearBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-    histClearBarrier.buffer = histogramBuffer;
-    histClearBarrier.offset = 0;
-    histClearBarrier.size = HISTOGRAM_BINS * sizeof(uint32_t);
-
-    vkCmdPipelineBarrier(cmd,
-                         VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         0, 0, nullptr, 1, &histClearBarrier, 0, nullptr);
+    Barriers::clearBufferForComputeReadWrite(cmd, histogramBuffer, 0, HISTOGRAM_BINS * sizeof(uint32_t));
 
     // Dispatch histogram build
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, histogramBuildPipeline);
@@ -1178,18 +1150,11 @@ void PostProcessSystem::recordHistogramCompute(VkCommandBuffer cmd, uint32_t fra
     vkCmdDispatch(cmd, groupsX, groupsY, 1);
 
     // Barrier between build and reduce
-    VkBufferMemoryBarrier histBuildBarrier{};
-    histBuildBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-    histBuildBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    histBuildBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-    histBuildBarrier.buffer = histogramBuffer;
-    histBuildBarrier.offset = 0;
-    histBuildBarrier.size = HISTOGRAM_BINS * sizeof(uint32_t);
-
-    vkCmdPipelineBarrier(cmd,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         0, 0, nullptr, 1, &histBuildBarrier, 0, nullptr);
+    Barriers::BarrierBatch(cmd)
+        .setStages(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT)
+        .bufferBarrier(histogramBuffer, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+                       0, HISTOGRAM_BINS * sizeof(uint32_t))
+        .submit();
 
     // Dispatch histogram reduce (single workgroup of 256 threads)
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, histogramReducePipeline);
@@ -1198,23 +1163,15 @@ void PostProcessSystem::recordHistogramCompute(VkCommandBuffer cmd, uint32_t fra
     vkCmdDispatch(cmd, 1, 1, 1);
 
     // Barrier: exposure buffer ready for CPU read, HDR image back to shader read
-    VkBufferMemoryBarrier exposureBarrier{};
-    exposureBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-    exposureBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    exposureBarrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
-    exposureBarrier.buffer = exposureBuffers[frameIndex];
-    exposureBarrier.offset = 0;
-    exposureBarrier.size = sizeof(ExposureData);
-
-    hdrBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-    hdrBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    hdrBarrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-    hdrBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-    vkCmdPipelineBarrier(cmd,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         VK_PIPELINE_STAGE_HOST_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                         0, 0, nullptr, 1, &exposureBarrier, 1, &hdrBarrier);
+    Barriers::BarrierBatch(cmd)
+        .setStages(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                   VK_PIPELINE_STAGE_HOST_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT)
+        .bufferBarrier(exposureBuffers[frameIndex], VK_ACCESS_SHADER_WRITE_BIT,
+                       VK_ACCESS_HOST_READ_BIT, 0, sizeof(ExposureData))
+        .imageTransition(hdrColorImage,
+                         VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                         VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_SHADER_READ_BIT)
+        .submit();
 }
 
 void PostProcessSystem::setFroxelVolume(VkImageView volumeView, VkSampler volumeSampler) {

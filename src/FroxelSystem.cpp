@@ -1,6 +1,7 @@
 #include "FroxelSystem.h"
 #include "ShaderLoader.h"
 #include "BindingBuilder.h"
+#include "VulkanBarriers.h"
 #include <SDL3/SDL_log.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <array>
@@ -520,126 +521,56 @@ void FroxelSystem::recordFroxelUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
 
     vkUpdateDescriptorSets(device, static_cast<uint32_t>(volumeWrites.size()), volumeWrites.data(), 0, nullptr);
 
-    // Transition volumes to GENERAL layout for compute
-    VkImageMemoryBarrier barrier{};
-    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    barrier.subresourceRange.baseMipLevel = 0;
-    barrier.subresourceRange.levelCount = 1;
-    barrier.subresourceRange.baseArrayLayer = 0;
-    barrier.subresourceRange.layerCount = 1;
-
     // Note: frameCounter was already incremented above, so first frame is frameCounter == 1
     bool isFirstFrame = (frameCounter == 1);
 
     // Current scattering volume (write target) - can discard previous contents
-    barrier.image = scatteringVolumes[currentVolumeIdx];
-    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;  // Don't care about previous contents
-    barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    barrier.srcAccessMask = 0;
-    barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-
-    vkCmdPipelineBarrier(cmd,
-                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         0, 0, nullptr, 0, nullptr, 1, &barrier);
+    Barriers::prepareImageForCompute(cmd, scatteringVolumes[currentVolumeIdx]);
 
     // History scattering volume (read source) - preserve data from previous frame
-    barrier.image = scatteringVolumes[historyVolumeIdx];
     if (isFirstFrame) {
-        // First frame: no valid history yet, transition from UNDEFINED to TRANSFER_DST for clearing
-        barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        barrier.srcAccessMask = 0;
-        barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        // First frame: no valid history yet, clear to zero
+        Barriers::prepareImageForTransferDst(cmd, scatteringVolumes[historyVolumeIdx]);
 
-        vkCmdPipelineBarrier(cmd,
-                             VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                             VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             0, 0, nullptr, 0, nullptr, 1, &barrier);
-
-        // Clear history volume to zero to prevent garbage data from affecting first frames
         VkClearColorValue clearValue = {{0.0f, 0.0f, 0.0f, 0.0f}};
-        VkImageSubresourceRange clearRange{};
-        clearRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        clearRange.baseMipLevel = 0;
-        clearRange.levelCount = 1;
-        clearRange.baseArrayLayer = 0;
-        clearRange.layerCount = 1;
+        VkImageSubresourceRange clearRange{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
         vkCmdClearColorImage(cmd, scatteringVolumes[historyVolumeIdx],
                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearValue, 1, &clearRange);
 
         // Transition to GENERAL for shader access
-        barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-        vkCmdPipelineBarrier(cmd,
-                             VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                             0, 0, nullptr, 0, nullptr, 1, &barrier);
+        Barriers::transitionImage(cmd, scatteringVolumes[historyVolumeIdx],
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
+            VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
     } else {
         // Subsequent frames: history volume was written in previous frame
-        barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-        barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-        vkCmdPipelineBarrier(cmd,
-                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                             0, 0, nullptr, 0, nullptr, 1, &barrier);
+        Barriers::transitionImage(cmd, scatteringVolumes[historyVolumeIdx],
+            VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
     }
 
     // Integrated volume: transitions between GENERAL (for compute) and SHADER_READ_ONLY (for fragment)
-    barrier.image = integratedVolume;
     if (isFirstFrame) {
-        // First frame: transition from UNDEFINED to TRANSFER_DST for clearing
-        barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        barrier.srcAccessMask = 0;
-        barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        // First frame: clear to zero
+        Barriers::prepareImageForTransferDst(cmd, integratedVolume);
 
-        vkCmdPipelineBarrier(cmd,
-                             VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                             VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             0, 0, nullptr, 0, nullptr, 1, &barrier);
-
-        // Clear integrated volume to zero (transmittance=1, scatter=0)
         VkClearColorValue clearValue = {{0.0f, 0.0f, 0.0f, 0.0f}};
-        VkImageSubresourceRange clearRange{};
-        clearRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        clearRange.baseMipLevel = 0;
-        clearRange.levelCount = 1;
-        clearRange.baseArrayLayer = 0;
-        clearRange.layerCount = 1;
+        VkImageSubresourceRange clearRange{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
         vkCmdClearColorImage(cmd, integratedVolume,
                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearValue, 1, &clearRange);
 
         // Transition to GENERAL for compute
-        barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-        barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-
-        vkCmdPipelineBarrier(cmd,
-                             VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                             0, 0, nullptr, 0, nullptr, 1, &barrier);
+        Barriers::transitionImage(cmd, integratedVolume,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
+            VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_WRITE_BIT);
     } else {
-        // Subsequent frames: transition from SHADER_READ_ONLY_OPTIMAL (set at end of previous frame)
-        barrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-        barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-
-        vkCmdPipelineBarrier(cmd,
-                             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                             0, 0, nullptr, 0, nullptr, 1, &barrier);
+        // Subsequent frames: transition from SHADER_READ_ONLY_OPTIMAL
+        Barriers::transitionImage(cmd, integratedVolume,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_SHADER_WRITE_BIT);
     }
 
     // Dispatch froxel update compute shader
@@ -654,16 +585,7 @@ void FroxelSystem::recordFroxelUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
     vkCmdDispatch(cmd, groupsX, groupsY, groupsZ);
 
     // Barrier between update and integration - wait for current volume write
-    barrier.image = scatteringVolumes[currentVolumeIdx];
-    barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-    barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-    vkCmdPipelineBarrier(cmd,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         0, 0, nullptr, 0, nullptr, 1, &barrier);
+    Barriers::computeToCompute(cmd);
 
     // Dispatch integration pass
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, integrationPipeline);
@@ -674,14 +596,5 @@ void FroxelSystem::recordFroxelUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
     vkCmdDispatch(cmd, groupsX, groupsY, 1);
 
     // Transition integrated volume to shader read for fragment sampling
-    barrier.image = integratedVolume;
-    barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-    vkCmdPipelineBarrier(cmd,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                         0, 0, nullptr, 0, nullptr, 1, &barrier);
+    Barriers::imageComputeToSampling(cmd, integratedVolume);
 }

@@ -3,6 +3,7 @@
 #include "PipelineBuilder.h"
 #include "BindingBuilder.h"
 #include "UBOs.h"
+#include "VulkanBarriers.h"
 #include <SDL3/SDL.h>
 #include <cstring>
 #include <array>
@@ -867,25 +868,10 @@ void GrassSystem::recordDisplacementUpdate(VkCommandBuffer cmd, uint32_t frameIn
 
     // Transition displacement image to general layout if needed (first frame)
     // For subsequent frames, it should already be in GENERAL layout
-    VkImageMemoryBarrier imageBarrier{};
-    imageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    imageBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;  // Don't care about old contents
-    imageBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    imageBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    imageBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    imageBarrier.image = displacementImage;
-    imageBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    imageBarrier.subresourceRange.baseMipLevel = 0;
-    imageBarrier.subresourceRange.levelCount = 1;
-    imageBarrier.subresourceRange.baseArrayLayer = 0;
-    imageBarrier.subresourceRange.layerCount = 1;
-    imageBarrier.srcAccessMask = 0;
-    imageBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-
-    vkCmdPipelineBarrier(cmd,
-                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         0, 0, nullptr, 0, nullptr, 1, &imageBarrier);
+    Barriers::transitionImage(cmd, displacementImage,
+        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        0, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
 
     // Dispatch displacement update compute shader using per-frame descriptor set (double-buffered)
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, displacementPipeline);
@@ -897,25 +883,8 @@ void GrassSystem::recordDisplacementUpdate(VkCommandBuffer cmd, uint32_t frameIn
     vkCmdDispatch(cmd, 32, 32, 1);
 
     // Barrier: displacement compute write -> grass compute read
-    VkImageMemoryBarrier readBarrier{};
-    readBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    readBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-    readBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    readBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    readBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    readBarrier.image = displacementImage;
-    readBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    readBarrier.subresourceRange.baseMipLevel = 0;
-    readBarrier.subresourceRange.levelCount = 1;
-    readBarrier.subresourceRange.baseArrayLayer = 0;
-    readBarrier.subresourceRange.layerCount = 1;
-    readBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    readBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-    vkCmdPipelineBarrier(cmd,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         0, 0, nullptr, 0, nullptr, 1, &readBarrier);
+    Barriers::imageComputeToSampling(cmd, displacementImage,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
 }
 
 void GrassSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex, float time) {
@@ -968,17 +937,7 @@ void GrassSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex
     vkUpdateDescriptorSets(getDevice(), static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 
     // Reset indirect buffer before compute dispatch to prevent accumulation
-    vkCmdFillBuffer(cmd, indirectBuffers.buffers[writeSet], 0, sizeof(VkDrawIndirectCommand), 0);
-
-    // Barrier to ensure fill completes before compute shader runs
-    VkMemoryBarrier fillBarrier{};
-    fillBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-    fillBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    fillBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-    vkCmdPipelineBarrier(cmd,
-                         VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         0, 1, &fillBarrier, 0, nullptr, 0, nullptr);
+    Barriers::clearBufferForComputeReadWrite(cmd, indirectBuffers.buffers[writeSet], 0, sizeof(VkDrawIndirectCommand));
 
     // Dispatch grass compute shader using the compute buffer set
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, getComputePipelineHandles().pipeline);
@@ -998,15 +957,11 @@ void GrassSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex
     // Memory barrier: compute write -> vertex shader read (storage buffer) and indirect read
     // Note: This barrier ensures the compute results are visible when we draw from this buffer
     // in the NEXT frame (after advanceBufferSet swaps the sets)
-    VkMemoryBarrier memBarrier{};
-    memBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-    memBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    memBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
-
-    vkCmdPipelineBarrier(cmd,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
-                         0, 1, &memBarrier, 0, nullptr, 0, nullptr);
+    Barriers::BarrierBatch(cmd)
+        .setStages(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                   VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT)
+        .memoryBarrier(VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_INDIRECT_COMMAND_READ_BIT)
+        .submit();
 }
 
 void GrassSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time) {

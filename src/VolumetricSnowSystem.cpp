@@ -1,6 +1,7 @@
 #include "VolumetricSnowSystem.h"
 #include "ShaderLoader.h"
 #include "PipelineBuilder.h"
+#include "VulkanBarriers.h"
 #include <SDL3/SDL.h>
 #include <cstring>
 #include <array>
@@ -341,38 +342,20 @@ std::array<glm::vec4, NUM_SNOW_CASCADES> VolumetricSnowSystem::getCascadeParams(
 
 void VolumetricSnowSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) {
     // Transition all cascade images to general layout for compute write
-    std::array<VkImageMemoryBarrier, NUM_SNOW_CASCADES> imageBarriers{};
+    {
+        VkPipelineStageFlags srcStage = isFirstFrame[0] ?
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT : VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
 
-    for (uint32_t i = 0; i < NUM_SNOW_CASCADES; i++) {
-        imageBarriers[i].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        imageBarriers[i].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        imageBarriers[i].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        imageBarriers[i].image = cascadeImages[i];
-        imageBarriers[i].subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        imageBarriers[i].subresourceRange.baseMipLevel = 0;
-        imageBarriers[i].subresourceRange.levelCount = 1;
-        imageBarriers[i].subresourceRange.baseArrayLayer = 0;
-        imageBarriers[i].subresourceRange.layerCount = 1;
-        imageBarriers[i].newLayout = VK_IMAGE_LAYOUT_GENERAL;
-        imageBarriers[i].dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+        Barriers::BarrierBatch batch(cmd, srcStage, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+        for (uint32_t i = 0; i < NUM_SNOW_CASCADES; i++) {
+            VkImageLayout oldLayout = isFirstFrame[i] ?
+                VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            VkAccessFlags srcAccess = isFirstFrame[i] ? 0 : VK_ACCESS_SHADER_READ_BIT;
 
-        if (isFirstFrame[i]) {
-            imageBarriers[i].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-            imageBarriers[i].srcAccessMask = 0;
-        } else {
-            imageBarriers[i].oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            imageBarriers[i].srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+            batch.imageTransition(cascadeImages[i], oldLayout, VK_IMAGE_LAYOUT_GENERAL,
+                                  srcAccess, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
         }
     }
-
-    VkPipelineStageFlags srcStage = isFirstFrame[0] ?
-        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT : VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-
-    vkCmdPipelineBarrier(cmd,
-                         srcStage,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         0, 0, nullptr, 0, nullptr,
-                         NUM_SNOW_CASCADES, imageBarriers.data());
 
     // Bind compute pipeline and descriptor set
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, getComputePipelineHandles().pipeline);
@@ -386,28 +369,15 @@ void VolumetricSnowSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameInde
     vkCmdDispatch(cmd, workgroupCount, workgroupCount, NUM_SNOW_CASCADES);
 
     // Transition all cascades to shader read optimal for fragment shaders
-    std::array<VkImageMemoryBarrier, NUM_SNOW_CASCADES> readBarriers{};
-    for (uint32_t i = 0; i < NUM_SNOW_CASCADES; i++) {
-        readBarriers[i].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        readBarriers[i].oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-        readBarriers[i].newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        readBarriers[i].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        readBarriers[i].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        readBarriers[i].image = cascadeImages[i];
-        readBarriers[i].subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        readBarriers[i].subresourceRange.baseMipLevel = 0;
-        readBarriers[i].subresourceRange.levelCount = 1;
-        readBarriers[i].subresourceRange.baseArrayLayer = 0;
-        readBarriers[i].subresourceRange.layerCount = 1;
-        readBarriers[i].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        readBarriers[i].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    {
+        Barriers::BarrierBatch batch(cmd,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+        for (uint32_t i = 0; i < NUM_SNOW_CASCADES; i++) {
+            batch.imageTransition(cascadeImages[i],
+                VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
+        }
     }
-
-    vkCmdPipelineBarrier(cmd,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                         0, 0, nullptr, 0, nullptr,
-                         NUM_SNOW_CASCADES, readBarriers.data());
 
     // Mark first frame as done
     for (uint32_t i = 0; i < NUM_SNOW_CASCADES; i++) {
