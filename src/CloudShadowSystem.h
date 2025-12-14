@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 #include "DescriptorManager.h"
+#include "InitContext.h"
 
 // Cloud Shadow System
 // Generates a world-space cloud shadow map by ray-marching through the cloud layer
@@ -53,6 +54,7 @@ public:
     ~CloudShadowSystem() = default;
 
     bool init(const InitInfo& info);
+    bool init(const InitContext& ctx, VkImageView cloudMapLUTView, VkSampler cloudMapLUTSampler);
     void destroy();
 
     // Update cloud shadow map (call before scene rendering)

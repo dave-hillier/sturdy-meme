@@ -30,6 +30,30 @@ bool FroxelSystem::init(const InitInfo& info) {
     return true;
 }
 
+bool FroxelSystem::init(const InitContext& ctx, VkImageView shadowMapView_, VkSampler shadowSampler_,
+                        const std::vector<VkBuffer>& lightBuffers_) {
+    device = ctx.device;
+    allocator = ctx.allocator;
+    descriptorPool = ctx.descriptorPool;
+    extent = ctx.extent;
+    shaderPath = ctx.shaderPath;
+    framesInFlight = ctx.framesInFlight;
+    shadowMapView = shadowMapView_;
+    shadowSampler = shadowSampler_;
+    lightBuffers = lightBuffers_;
+
+    if (!createScatteringVolume()) return false;
+    if (!createIntegratedVolume()) return false;
+    if (!createSampler()) return false;
+    if (!createDescriptorSetLayout()) return false;
+    if (!createUniformBuffers()) return false;
+    if (!createDescriptorSets()) return false;
+    if (!createFroxelUpdatePipeline()) return false;
+    if (!createIntegrationPipeline()) return false;
+
+    return true;
+}
+
 void FroxelSystem::destroy(VkDevice device, VmaAllocator allocator) {
     destroyVolumeResources();
 

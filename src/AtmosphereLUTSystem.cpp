@@ -23,6 +23,28 @@ bool AtmosphereLUTSystem::init(const InitInfo& info) {
     return true;
 }
 
+bool AtmosphereLUTSystem::init(const InitContext& ctx) {
+    device = ctx.device;
+    allocator = ctx.allocator;
+    descriptorPool = ctx.descriptorPool;
+    shaderPath = ctx.shaderPath;
+    framesInFlight = ctx.framesInFlight;
+
+    if (!createTransmittanceLUT()) return false;
+    if (!createMultiScatterLUT()) return false;
+    if (!createSkyViewLUT()) return false;
+    if (!createIrradianceLUTs()) return false;
+    if (!createCloudMapLUT()) return false;
+    if (!createLUTSampler()) return false;
+    if (!createUniformBuffer()) return false;
+    if (!createDescriptorSetLayouts()) return false;
+    if (!createDescriptorSets()) return false;
+    if (!createComputePipelines()) return false;
+
+    SDL_Log("Atmosphere LUT System initialized");
+    return true;
+}
+
 void AtmosphereLUTSystem::destroy(VkDevice device, VmaAllocator allocator) {
     destroyLUTResources();
 

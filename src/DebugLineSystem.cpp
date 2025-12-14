@@ -22,6 +22,23 @@ bool DebugLineSystem::init(VkDevice device, VmaAllocator allocator, VkRenderPass
     return true;
 }
 
+bool DebugLineSystem::init(const InitContext& ctx, VkRenderPass renderPass) {
+    this->device = ctx.device;
+    this->allocator = ctx.allocator;
+
+    // Create per-frame data
+    frameData.resize(ctx.framesInFlight);
+
+    // Create pipeline
+    if (!createPipeline(renderPass, ctx.shaderPath)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "DebugLineSystem: Failed to create pipeline");
+        return false;
+    }
+
+    SDL_Log("DebugLineSystem: Initialized with %u frames in flight", ctx.framesInFlight);
+    return true;
+}
+
 void DebugLineSystem::shutdown() {
     if (device == VK_NULL_HANDLE) return;
 

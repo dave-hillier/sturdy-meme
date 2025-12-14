@@ -27,6 +27,27 @@ bool ShadowSystem::init(const InitInfo& info) {
     return true;
 }
 
+bool ShadowSystem::init(const InitContext& ctx, VkDescriptorSetLayout mainDescriptorSetLayout_,
+                        VkDescriptorSetLayout skinnedDescriptorSetLayout_) {
+    device = ctx.device;
+    physicalDevice = ctx.physicalDevice;
+    allocator = ctx.allocator;
+    mainDescriptorSetLayout = mainDescriptorSetLayout_;
+    skinnedDescriptorSetLayout = skinnedDescriptorSetLayout_;
+    shaderPath = ctx.shaderPath;
+    framesInFlight = ctx.framesInFlight;
+
+    if (!createShadowResources()) return false;
+    if (!createShadowRenderPass()) return false;
+    if (!createDynamicShadowResources()) return false;
+    if (!createDynamicShadowRenderPass()) return false;
+    if (!createShadowPipeline()) return false;
+    if (!createSkinnedShadowPipeline()) return false;
+    if (!createDynamicShadowPipeline()) return false;
+
+    return true;
+}
+
 void ShadowSystem::destroy() {
     if (device == VK_NULL_HANDLE) return;
 

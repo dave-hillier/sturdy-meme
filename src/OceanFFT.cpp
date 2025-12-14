@@ -96,6 +96,97 @@ bool OceanFFT::init(const InitInfo& info) {
     return true;
 }
 
+bool OceanFFT::init(const InitContext& ctx, const OceanParams& oceanParams, bool useCascades) {
+    device = ctx.device;
+    physicalDevice = ctx.physicalDevice;
+    allocator = ctx.allocator;
+    commandPool = ctx.commandPool;
+    computeQueue = ctx.graphicsQueue;  // Use graphics queue for compute
+    shaderPath = ctx.shaderPath;
+    framesInFlight = ctx.framesInFlight;
+    params = oceanParams;
+
+    // Set up cascades based on configuration
+    if (useCascades) {
+        cascadeCount = 3;
+        cascades.resize(cascadeCount);
+
+        // Cascade 0: Large swells (long wavelength)
+        cascades[0].config = {
+            params.oceanSize,           // 256m patch
+            params.heightScale,         // Full height
+            params.choppiness * 0.8f    // Slightly less choppy
+        };
+
+        // Cascade 1: Medium waves
+        cascades[1].config = {
+            params.oceanSize / 4.0f,    // 64m patch
+            params.heightScale * 0.4f,  // Smaller waves
+            params.choppiness
+        };
+
+        // Cascade 2: Small ripples (high frequency detail)
+        cascades[2].config = {
+            params.oceanSize / 16.0f,   // 16m patch
+            params.heightScale * 0.15f, // Tiny ripples
+            params.choppiness * 1.5f    // More choppy for detail
+        };
+    } else {
+        cascadeCount = 1;
+        cascades.resize(1);
+        cascades[0].config = {
+            params.oceanSize,
+            params.heightScale,
+            params.choppiness
+        };
+    }
+
+    // Create sampler for output textures
+    VkSamplerCreateInfo samplerInfo{};
+    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    samplerInfo.magFilter = VK_FILTER_LINEAR;
+    samplerInfo.minFilter = VK_FILTER_LINEAR;
+    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;  // Tiling ocean
+    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    samplerInfo.mipLodBias = 0.0f;
+    samplerInfo.anisotropyEnable = VK_TRUE;
+    samplerInfo.maxAnisotropy = 16.0f;
+    samplerInfo.compareEnable = VK_FALSE;
+    samplerInfo.minLod = 0.0f;
+    samplerInfo.maxLod = 0.0f;
+    samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
+
+    if (vkCreateSampler(device, &samplerInfo, nullptr, &sampler) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to create sampler");
+        return false;
+    }
+
+    // Create compute pipelines
+    if (!createComputePipelines()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to create compute pipelines");
+        return false;
+    }
+
+    // Create cascades
+    for (int i = 0; i < cascadeCount; i++) {
+        if (!createCascade(cascades[i], cascades[i].config)) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to create cascade %d", i);
+            return false;
+        }
+    }
+
+    // Create descriptor sets
+    if (!createDescriptorSets()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to create descriptor sets");
+        return false;
+    }
+
+    SDL_Log("OceanFFT: Initialized with %d cascades, resolution %d", cascadeCount, params.resolution);
+    return true;
+}
+
 void OceanFFT::destroy() {
     if (device == VK_NULL_HANDLE) return;
 

@@ -7,6 +7,7 @@
 #include <string>
 #include "UBOs.h"
 #include "DescriptorManager.h"
+#include "InitContext.h"
 
 // Froxel-based volumetric fog system (Phase 4.3)
 // Implements frustum-aligned voxel grid for efficient volumetric rendering
@@ -39,6 +40,8 @@ public:
     ~FroxelSystem() = default;
 
     bool init(const InitInfo& info);
+    bool init(const InitContext& ctx, VkImageView shadowMapView, VkSampler shadowSampler,
+              const std::vector<VkBuffer>& lightBuffers);
     void destroy(VkDevice device, VmaAllocator allocator);
     void resize(VkDevice device, VmaAllocator allocator, VkExtent2D newExtent);
 

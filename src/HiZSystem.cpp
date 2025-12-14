@@ -43,6 +43,44 @@ bool HiZSystem::init(const InitInfo& info) {
     return true;
 }
 
+bool HiZSystem::init(const InitContext& ctx, VkFormat depthFormat_) {
+    device = ctx.device;
+    allocator = ctx.allocator;
+    descriptorPool = ctx.descriptorPool;
+    extent = ctx.extent;
+    shaderPath = ctx.shaderPath;
+    framesInFlight = ctx.framesInFlight;
+    depthFormat = depthFormat_;
+
+    if (!createHiZPyramid()) {
+        SDL_Log("HiZSystem: Failed to create Hi-Z pyramid");
+        return false;
+    }
+
+    if (!createPyramidPipeline()) {
+        SDL_Log("HiZSystem: Failed to create pyramid pipeline");
+        return false;
+    }
+
+    if (!createCullingPipeline()) {
+        SDL_Log("HiZSystem: Failed to create culling pipeline");
+        return false;
+    }
+
+    if (!createBuffers()) {
+        SDL_Log("HiZSystem: Failed to create buffers");
+        return false;
+    }
+
+    if (!createDescriptorSets()) {
+        SDL_Log("HiZSystem: Failed to create descriptor sets");
+        return false;
+    }
+
+    SDL_Log("HiZSystem: Initialized with %u mip levels", mipLevelCount);
+    return true;
+}
+
 void HiZSystem::destroy() {
     destroyDescriptorSets();
     destroyBuffers();

@@ -9,6 +9,7 @@
 #include <array>
 #include "UBOs.h"
 #include "DescriptorManager.h"
+#include "InitContext.h"
 
 // Histogram reduce compute shader parameters
 struct HistogramReduceParams {
@@ -51,6 +52,7 @@ public:
     ~PostProcessSystem() = default;
 
     bool init(const InitInfo& info);
+    bool init(const InitContext& ctx, VkRenderPass outputRenderPass, VkFormat swapchainFormat);
     void destroy(VkDevice device, VmaAllocator allocator);
     void resize(VkDevice device, VmaAllocator allocator, VkExtent2D newExtent);
 

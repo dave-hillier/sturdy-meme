@@ -26,6 +26,25 @@ bool SSRSystem::init(const InitInfo& info) {
     return true;
 }
 
+bool SSRSystem::init(const InitContext& ctx) {
+    device = ctx.device;
+    physicalDevice = ctx.physicalDevice;
+    allocator = ctx.allocator;
+    commandPool = ctx.commandPool;
+    computeQueue = ctx.graphicsQueue;  // Use graphics queue for compute
+    shaderPath = ctx.shaderPath;
+    framesInFlight = ctx.framesInFlight;
+    extent = ctx.extent;
+
+    if (!createSSRBuffers()) return false;
+    if (!createComputePipeline()) return false;
+    if (!createBlurPipeline()) return false;
+    if (!createDescriptorSets()) return false;
+
+    SDL_Log("SSRSystem initialized: %dx%d (with bilateral blur)", extent.width, extent.height);
+    return true;
+}
+
 void SSRSystem::destroy() {
     if (device == VK_NULL_HANDLE) return;
 

@@ -27,6 +27,26 @@ bool CloudShadowSystem::init(const InitInfo& info) {
     return true;
 }
 
+bool CloudShadowSystem::init(const InitContext& ctx, VkImageView cloudMapLUTView_, VkSampler cloudMapLUTSampler_) {
+    device = ctx.device;
+    allocator = ctx.allocator;
+    descriptorPool = ctx.descriptorPool;
+    shaderPath = ctx.shaderPath;
+    framesInFlight = ctx.framesInFlight;
+    cloudMapLUTView = cloudMapLUTView_;
+    cloudMapLUTSampler = cloudMapLUTSampler_;
+
+    if (!createShadowMap()) return false;
+    if (!createSampler()) return false;
+    if (!createUniformBuffers()) return false;
+    if (!createDescriptorSetLayout()) return false;
+    if (!createDescriptorSets()) return false;
+    if (!createComputePipeline()) return false;
+
+    SDL_Log("Cloud Shadow System initialized (%dx%d shadow map)", SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
+    return true;
+}
+
 void CloudShadowSystem::destroy() {
     if (computePipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(device, computePipeline, nullptr);

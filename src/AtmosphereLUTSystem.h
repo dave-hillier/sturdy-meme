@@ -8,6 +8,7 @@
 #include "UBOs.h"
 #include "BufferUtils.h"
 #include "DescriptorManager.h"
+#include "InitContext.h"
 
 // Atmosphere LUT system for physically-based sky rendering (Phase 4.1)
 // Precomputes transmittance and multi-scatter LUTs for efficient atmospheric scattering
@@ -88,6 +89,7 @@ public:
     ~AtmosphereLUTSystem() = default;
 
     bool init(const InitInfo& info);
+    bool init(const InitContext& ctx);
     void destroy(VkDevice device, VmaAllocator allocator);
 
     // Compute LUTs (called at startup and when atmosphere parameters change)

@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
+#include "InitContext.h"
 
 #ifdef JPH_DEBUG_RENDERER
 #include "PhysicsDebugRenderer.h"
@@ -24,6 +25,7 @@ public:
 
     bool init(VkDevice device, VmaAllocator allocator, VkRenderPass renderPass,
               const std::string& shaderPath, uint32_t framesInFlight);
+    bool init(const InitContext& ctx, VkRenderPass renderPass);
     void shutdown();
 
     // Begin collecting lines for this frame

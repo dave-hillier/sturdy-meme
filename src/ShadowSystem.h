@@ -9,6 +9,7 @@
 #include <functional>
 
 #include "Camera.h"
+#include "InitContext.h"
 #include "Light.h"
 #include "RenderableBuilder.h"
 #include "SkinnedMesh.h"
@@ -40,6 +41,8 @@ public:
     ~ShadowSystem() = default;
 
     bool init(const InitInfo& info);
+    bool init(const InitContext& ctx, VkDescriptorSetLayout mainDescriptorSetLayout,
+              VkDescriptorSetLayout skinnedDescriptorSetLayout = VK_NULL_HANDLE);
     void destroy();
 
     // Update cascade matrices based on light direction and camera

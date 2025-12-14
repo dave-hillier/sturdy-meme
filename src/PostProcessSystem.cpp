@@ -32,6 +32,33 @@ bool PostProcessSystem::init(const InitInfo& info) {
     return true;
 }
 
+bool PostProcessSystem::init(const InitContext& ctx, VkRenderPass outputRenderPass_, VkFormat swapchainFormat_) {
+    device = ctx.device;
+    allocator = ctx.allocator;
+    outputRenderPass = outputRenderPass_;
+    descriptorPool = ctx.descriptorPool;
+    extent = ctx.extent;
+    swapchainFormat = swapchainFormat_;
+    shaderPath = ctx.shaderPath;
+    framesInFlight = ctx.framesInFlight;
+
+    if (!createHDRRenderTarget()) return false;
+    if (!createHDRRenderPass()) return false;
+    if (!createHDRFramebuffer()) return false;
+    if (!createSampler()) return false;
+    if (!createDescriptorSetLayout()) return false;
+    if (!createUniformBuffers()) return false;
+    if (!createDescriptorSets()) return false;
+    if (!createCompositePipeline()) return false;
+
+    // Histogram-based auto-exposure
+    if (!createHistogramResources()) return false;
+    if (!createHistogramPipelines()) return false;
+    if (!createHistogramDescriptorSets()) return false;
+
+    return true;
+}
+
 void PostProcessSystem::destroy(VkDevice device, VmaAllocator allocator) {
     destroyHDRResources();
     destroyHistogramResources();

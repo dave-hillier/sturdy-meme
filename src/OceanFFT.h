@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
+#include "InitContext.h"
 
 /**
  * OceanFFT - FFT-based Ocean Simulation (Tessendorf Method)
@@ -63,6 +64,7 @@ public:
     ~OceanFFT() = default;
 
     bool init(const InitInfo& info);
+    bool init(const InitContext& ctx, const OceanParams& params, bool useCascades = true);
     void destroy();
 
     // Update ocean simulation (call each frame before water rendering)

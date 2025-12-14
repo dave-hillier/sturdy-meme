@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
+#include "InitContext.h"
 
 /**
  * SSRSystem - Phase 10: Screen-Space Reflections
@@ -68,6 +69,7 @@ public:
     ~SSRSystem() = default;
 
     bool init(const InitInfo& info);
+    bool init(const InitContext& ctx);  // Uses graphicsQueue as compute queue
     void destroy();
     void resize(VkExtent2D newExtent);
 

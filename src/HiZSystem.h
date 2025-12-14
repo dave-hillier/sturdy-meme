@@ -9,6 +9,7 @@
 
 #include "BufferUtils.h"
 #include "DescriptorManager.h"
+#include "InitContext.h"
 #include "Mesh.h"
 
 // GPU-side object data for culling (matches shader struct)
@@ -63,6 +64,7 @@ public:
     ~HiZSystem() = default;
 
     bool init(const InitInfo& info);
+    bool init(const InitContext& ctx, VkFormat depthFormat);
     void destroy();
     void resize(VkExtent2D newExtent);
 
