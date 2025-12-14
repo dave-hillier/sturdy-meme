@@ -3,7 +3,7 @@
 #include <vulkan/vulkan.h>
 #include <functional>
 
-#include "../RenderContext.h"
+#include "RenderContext.h"
 
 /**
  * PostStage - Post-processing pipeline (HiZ, Bloom, Final composite)

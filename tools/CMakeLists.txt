@@ -124,6 +124,7 @@ add_library(tile_generator_lib STATIC
 target_include_directories(tile_generator_lib PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/water
     ${CMAKE_CURRENT_SOURCE_DIR}/road_generator
     ${CMAKE_CURRENT_SOURCE_DIR}/biome_preprocess
 )

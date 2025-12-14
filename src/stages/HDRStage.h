@@ -6,7 +6,7 @@
 #include <string>
 #include <array>
 
-#include "../RenderContext.h"
+#include "RenderContext.h"
 
 /**
  * HDRStage - Main scene rendering into HDR target

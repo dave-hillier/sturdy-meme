@@ -4,8 +4,8 @@
 #include <functional>
 #include <vector>
 
-#include "../RenderContext.h"
-#include "../RenderableBuilder.h"
+#include "RenderContext.h"
+#include "RenderableBuilder.h"
 
 /**
  * ShadowStage - Conditional shadow pass rendering

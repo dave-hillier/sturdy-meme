@@ -26,123 +26,154 @@ add_subdirectory(tools)
 
 set(SOURCES
     src/main.cpp
-    src/Application.cpp
-    src/Renderer.cpp
-    src/TimeSystem.cpp
-    src/VulkanContext.cpp
-    src/SceneBuilder.cpp
-    src/SceneManager.cpp
-    src/Camera.cpp
-    src/Mesh.cpp
-    src/BufferUtils.cpp
-    src/Texture.cpp
-    src/ShaderLoader.cpp
-    src/PipelineBuilder.cpp
-    src/GraphicsPipelineFactory.cpp
-    src/BindingBuilder.cpp
-    src/DescriptorManager.cpp
-    src/MaterialDescriptorFactory.cpp
-    src/MaterialRegistry.cpp
-    src/RenderableBuilder.cpp
-    src/GrassSystem.cpp
-    src/CelestialCalculator.cpp
-    src/WindSystem.cpp
-    src/WeatherSystem.cpp
-    src/LeafSystem.cpp
-    src/PostProcessSystem.cpp
-    src/BloomSystem.cpp
-    src/FroxelSystem.cpp
-    src/AtmosphereLUTSystem.cpp
-    src/AtmosphereLUTResources.cpp
-    src/AtmosphereLUTDescriptors.cpp
-    src/AtmosphereLUTPipelines.cpp
-    src/AtmosphereLUTCompute.cpp
-    src/AtmosphereLUTExport.cpp
-    src/Player.cpp
-    src/PhysicsSystem.cpp
-    src/ParticleSystem.cpp
-    src/TerrainSystem.cpp
-    src/TerrainHeightMap.cpp
-    src/TerrainTextures.cpp
-    src/TerrainCBT.cpp
-    src/TerrainMeshlet.cpp
-    src/TerrainTileCache.cpp
-    src/ErosionDataLoader.cpp
-    src/ClothSimulation.cpp
-    src/PlayerCape.cpp
-    src/SnowMaskSystem.cpp
-    src/VolumetricSnowSystem.cpp
-    src/SkySystem.cpp
-    src/ShadowSystem.cpp
-    src/GuiSystem.cpp
-    src/GuiTimeTab.cpp
-    src/GuiWeatherTab.cpp
-    src/GuiEnvironmentTab.cpp
-    src/GuiPostFXTab.cpp
-    src/GuiTerrainTab.cpp
-    src/GuiWaterTab.cpp
-    src/GuiDebugTab.cpp
-    src/GuiProfilerTab.cpp
-    src/GuiIKTab.cpp
-    src/GuiPlayerTab.cpp
-    src/InputSystem.cpp
-    src/CatmullClarkCBT.cpp
-    src/CatmullClarkMesh.cpp
-    src/CatmullClarkSystem.cpp
-    src/OBJLoader.cpp
-    src/RockSystem.cpp
-    src/CloudShadowSystem.cpp
-    src/GLTFLoader.cpp
-    src/SkinnedMesh.cpp
-    src/SkinnedMeshRenderer.cpp
-    src/Animation.cpp
-    src/AnimatedCharacter.cpp
-    src/AnimationStateMachine.cpp
-    src/AnimationEventLoader.cpp
-    src/AnimationBlend.cpp
-    src/AnimationLayer.cpp
-    src/AnimationLayerController.cpp
-    src/BlendSpace.cpp
-    src/BoneMask.cpp
-    src/IKSolver.cpp
-    src/IKUtils.cpp
-    src/TwoBoneIKSolver.cpp
-    src/LookAtIKSolver.cpp
-    src/FootPlacementIKSolver.cpp
-    src/StraddleIKSolver.cpp
-    src/ClimbingIKSolver.cpp
-    src/FBXLoader.cpp
-    src/FBXPostProcess.cpp
-    src/HiZSystem.cpp
-    src/GpuProfiler.cpp
-    src/CpuProfiler.cpp
-    src/WaterSystem.cpp
-    src/FlowMapGenerator.cpp
-    src/WaterGBuffer.cpp
-    src/WaterDisplacement.cpp
-    src/FoamBuffer.cpp
-    src/SSRSystem.cpp
-    src/WaterTileCull.cpp
-    src/TreeGenerator.cpp
-    src/VolumeGenerator.cpp
-    src/SpaceColonisationGenerator.cpp
-    src/CurvedGeometryGenerator.cpp
-    src/TreeEditSystem.cpp
-    src/TreeEditorGui.cpp
-    src/BillboardCapture.cpp
-    src/VirtualTextureCache.cpp
-    src/VirtualTexturePageTable.cpp
-    src/VirtualTextureFeedback.cpp
-    src/VirtualTextureTileLoader.cpp
-    src/VirtualTextureSystem.cpp
-    src/PhysicsDebugRenderer.cpp
-    src/DebugLineSystem.cpp
+    # Scene
+    src/scene/Application.cpp
+    src/scene/SceneBuilder.cpp
+    src/scene/SceneManager.cpp
+    src/scene/Camera.cpp
+    src/scene/Player.cpp
+    src/scene/InputSystem.cpp
+    # Core
+    src/core/Renderer.cpp
+    src/core/VulkanContext.cpp
+    src/core/Mesh.cpp
+    src/core/BufferUtils.cpp
+    src/core/Texture.cpp
+    src/core/ShaderLoader.cpp
+    src/core/PipelineBuilder.cpp
+    src/core/GraphicsPipelineFactory.cpp
+    src/core/BindingBuilder.cpp
+    src/core/DescriptorManager.cpp
+    src/core/MaterialDescriptorFactory.cpp
+    src/core/MaterialRegistry.cpp
+    src/core/RenderableBuilder.cpp
+    src/core/VolumeGenerator.cpp
+    src/core/CurvedGeometryGenerator.cpp
+    # Atmosphere
+    src/atmosphere/TimeSystem.cpp
+    src/atmosphere/CelestialCalculator.cpp
+    src/atmosphere/WindSystem.cpp
+    src/atmosphere/WeatherSystem.cpp
+    src/atmosphere/AtmosphereLUTSystem.cpp
+    src/atmosphere/AtmosphereLUTResources.cpp
+    src/atmosphere/AtmosphereLUTDescriptors.cpp
+    src/atmosphere/AtmosphereLUTPipelines.cpp
+    src/atmosphere/AtmosphereLUTCompute.cpp
+    src/atmosphere/AtmosphereLUTExport.cpp
+    src/atmosphere/SkySystem.cpp
+    src/atmosphere/CloudShadowSystem.cpp
+    src/atmosphere/SnowMaskSystem.cpp
+    src/atmosphere/VolumetricSnowSystem.cpp
+    # Vegetation
+    src/vegetation/GrassSystem.cpp
+    src/vegetation/LeafSystem.cpp
+    src/vegetation/RockSystem.cpp
+    src/vegetation/TreeGenerator.cpp
+    src/vegetation/SpaceColonisationGenerator.cpp
+    src/vegetation/TreeEditSystem.cpp
+    src/vegetation/TreeEditorGui.cpp
+    src/vegetation/BillboardCapture.cpp
+    # Postprocess
+    src/postprocess/PostProcessSystem.cpp
+    src/postprocess/BloomSystem.cpp
+    src/postprocess/SSRSystem.cpp
+    src/postprocess/HiZSystem.cpp
+    # Lighting
+    src/lighting/FroxelSystem.cpp
+    src/lighting/ShadowSystem.cpp
+    # Physics
+    src/physics/PhysicsSystem.cpp
+    src/physics/ParticleSystem.cpp
+    src/physics/ClothSimulation.cpp
+    src/physics/PlayerCape.cpp
+    src/physics/PhysicsDebugRenderer.cpp
+    # Terrain
+    src/terrain/TerrainSystem.cpp
+    src/terrain/TerrainHeightMap.cpp
+    src/terrain/TerrainTextures.cpp
+    src/terrain/TerrainCBT.cpp
+    src/terrain/TerrainMeshlet.cpp
+    src/terrain/TerrainTileCache.cpp
+    src/terrain/ErosionDataLoader.cpp
+    src/terrain/VirtualTextureCache.cpp
+    src/terrain/VirtualTexturePageTable.cpp
+    src/terrain/VirtualTextureFeedback.cpp
+    src/terrain/VirtualTextureTileLoader.cpp
+    src/terrain/VirtualTextureSystem.cpp
+    # Water
+    src/water/WaterSystem.cpp
+    src/water/FlowMapGenerator.cpp
+    src/water/WaterGBuffer.cpp
+    src/water/WaterDisplacement.cpp
+    src/water/FoamBuffer.cpp
+    src/water/WaterTileCull.cpp
+    # GUI
+    src/gui/GuiSystem.cpp
+    src/gui/GuiTimeTab.cpp
+    src/gui/GuiWeatherTab.cpp
+    src/gui/GuiEnvironmentTab.cpp
+    src/gui/GuiPostFXTab.cpp
+    src/gui/GuiTerrainTab.cpp
+    src/gui/GuiWaterTab.cpp
+    src/gui/GuiDebugTab.cpp
+    src/gui/GuiProfilerTab.cpp
+    src/gui/GuiIKTab.cpp
+    src/gui/GuiPlayerTab.cpp
+    # Subdivision
+    src/subdivision/CatmullClarkCBT.cpp
+    src/subdivision/CatmullClarkMesh.cpp
+    src/subdivision/CatmullClarkSystem.cpp
+    # Loaders
+    src/loaders/OBJLoader.cpp
+    src/loaders/GLTFLoader.cpp
+    src/loaders/FBXLoader.cpp
+    src/loaders/FBXPostProcess.cpp
+    # Animation
+    src/animation/SkinnedMesh.cpp
+    src/animation/SkinnedMeshRenderer.cpp
+    src/animation/Animation.cpp
+    src/animation/AnimatedCharacter.cpp
+    src/animation/AnimationStateMachine.cpp
+    src/animation/AnimationEventLoader.cpp
+    src/animation/AnimationBlend.cpp
+    src/animation/AnimationLayer.cpp
+    src/animation/AnimationLayerController.cpp
+    src/animation/BlendSpace.cpp
+    src/animation/BoneMask.cpp
+    # IK
+    src/ik/IKSolver.cpp
+    src/ik/IKUtils.cpp
+    src/ik/TwoBoneIKSolver.cpp
+    src/ik/LookAtIKSolver.cpp
+    src/ik/FootPlacementIKSolver.cpp
+    src/ik/StraddleIKSolver.cpp
+    src/ik/ClimbingIKSolver.cpp
+    # Debug
+    src/debug/GpuProfiler.cpp
+    src/debug/CpuProfiler.cpp
+    src/debug/DebugLineSystem.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
 
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/animation
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/atmosphere
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/core
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/debug
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/gui
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ik
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/lighting
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/loaders
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/physics
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/postprocess
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/scene
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/stages
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/subdivision
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/terrain
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/vegetation
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/water
     ${CMAKE_CURRENT_SOURCE_DIR}/generated
     ${STB_INCLUDE_DIRS}
 )

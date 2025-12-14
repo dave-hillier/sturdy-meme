@@ -5,7 +5,7 @@
 #include <vector>
 #include <string>
 
-#include "../RenderContext.h"
+#include "RenderContext.h"
 
 /**
  * ComputeStage - Orchestrates all compute passes before rendering
