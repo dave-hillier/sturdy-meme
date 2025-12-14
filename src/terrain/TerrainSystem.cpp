@@ -336,290 +336,80 @@ bool TerrainSystem::createDescriptorSets() {
 }
 
 bool TerrainSystem::createDispatcherPipeline() {
-    VkShaderModule shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_dispatcher.comp.spv");
-    if (!shaderModule) return false;
-
-    VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(TerrainDispatcherPushConstants);
-
-    dispatcherPipelineLayout = DescriptorManager::createPipelineLayout(device, computeDescriptorSetLayout, {pushConstantRange});
-    if (dispatcherPipelineLayout == VK_NULL_HANDLE) {
-        vkDestroyShaderModule(device, shaderModule, nullptr);
-        return false;
-    }
-
-    VkPipelineShaderStageCreateInfo stageInfo{};
-    stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stageInfo.module = shaderModule;
-    stageInfo.pName = "main";
-
-    VkComputePipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    pipelineInfo.stage = stageInfo;
-    pipelineInfo.layout = dispatcherPipelineLayout;
-
-    VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &dispatcherPipeline);
-    vkDestroyShaderModule(device, shaderModule, nullptr);
-
-    return result == VK_SUCCESS;
+    return createComputePipeline("terrain_dispatcher.comp.spv",
+                                 sizeof(TerrainDispatcherPushConstants),
+                                 dispatcherPipelineLayout,
+                                 dispatcherPipeline);
 }
 
 bool TerrainSystem::createSubdivisionPipeline() {
-    VkShaderModule shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_subdivision.comp.spv");
-    if (!shaderModule) return false;
-
-    VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(TerrainSubdivisionPushConstants);
-
-    VkPipelineLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    layoutInfo.setLayoutCount = 1;
-    layoutInfo.pSetLayouts = &computeDescriptorSetLayout;
-    layoutInfo.pushConstantRangeCount = 1;
-    layoutInfo.pPushConstantRanges = &pushConstantRange;
-
-    if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &subdivisionPipelineLayout) != VK_SUCCESS) {
-        vkDestroyShaderModule(device, shaderModule, nullptr);
-        return false;
-    }
-
-    VkPipelineShaderStageCreateInfo stageInfo{};
-    stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stageInfo.module = shaderModule;
-    stageInfo.pName = "main";
-
-    VkComputePipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    pipelineInfo.stage = stageInfo;
-    pipelineInfo.layout = subdivisionPipelineLayout;
-
-    VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &subdivisionPipeline);
-    vkDestroyShaderModule(device, shaderModule, nullptr);
-
-    return result == VK_SUCCESS;
+    return createComputePipeline("terrain_subdivision.comp.spv",
+                                 sizeof(TerrainSubdivisionPushConstants),
+                                 subdivisionPipelineLayout,
+                                 subdivisionPipeline);
 }
 
 bool TerrainSystem::createSumReductionPipelines() {
+    // Create shared layout for prepass and regular pipelines
     VkPushConstantRange pushConstantRange{};
     pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
     pushConstantRange.offset = 0;
     pushConstantRange.size = sizeof(TerrainSumReductionPushConstants);
 
-    VkPipelineLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    layoutInfo.setLayoutCount = 1;
-    layoutInfo.pSetLayouts = &computeDescriptorSetLayout;
-    layoutInfo.pushConstantRangeCount = 1;
-    layoutInfo.pPushConstantRanges = &pushConstantRange;
+    sumReductionPipelineLayout = DescriptorManager::createPipelineLayout(
+        device, computeDescriptorSetLayout, {pushConstantRange});
+    if (sumReductionPipelineLayout == VK_NULL_HANDLE) return false;
 
-    if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &sumReductionPipelineLayout) != VK_SUCCESS) {
+    // Prepass pipeline
+    if (!createComputePipelineWithLayout("terrain_sum_reduction_prepass.comp.spv",
+                                         sumReductionPipelineLayout,
+                                         sumReductionPrepassPipeline)) {
         return false;
     }
 
-    // Prepass pipeline
-    {
-        VkShaderModule shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_sum_reduction_prepass.comp.spv");
-        if (!shaderModule) return false;
-
-        VkPipelineShaderStageCreateInfo stageInfo{};
-        stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        stageInfo.module = shaderModule;
-        stageInfo.pName = "main";
-
-        VkComputePipelineCreateInfo pipelineInfo{};
-        pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-        pipelineInfo.stage = stageInfo;
-        pipelineInfo.layout = sumReductionPipelineLayout;
-
-        VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &sumReductionPrepassPipeline);
-        vkDestroyShaderModule(device, shaderModule, nullptr);
-        if (result != VK_SUCCESS) return false;
-    }
-
-    // Subgroup-optimized prepass pipeline (processes 13 levels instead of 5)
+    // Subgroup-optimized prepass pipeline (optional)
     if (subgroupCaps.hasSubgroupArithmetic) {
-        VkShaderModule shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_sum_reduction_prepass_subgroup.comp.spv");
-        if (shaderModule) {
-            VkPipelineShaderStageCreateInfo stageInfo{};
-            stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-            stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-            stageInfo.module = shaderModule;
-            stageInfo.pName = "main";
-
-            VkComputePipelineCreateInfo pipelineInfo{};
-            pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-            pipelineInfo.stage = stageInfo;
-            pipelineInfo.layout = sumReductionPipelineLayout;
-
-            VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &sumReductionPrepassSubgroupPipeline);
-            vkDestroyShaderModule(device, shaderModule, nullptr);
-            if (result != VK_SUCCESS) {
-                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to create subgroup prepass pipeline, using fallback");
-            } else {
-                SDL_Log("TerrainSystem: Using subgroup-optimized sum reduction prepass");
-            }
+        if (createComputePipelineWithLayout("terrain_sum_reduction_prepass_subgroup.comp.spv",
+                                            sumReductionPipelineLayout,
+                                            sumReductionPrepassSubgroupPipeline)) {
+            SDL_Log("TerrainSystem: Using subgroup-optimized sum reduction prepass");
+        } else {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to create subgroup prepass pipeline, using fallback");
         }
     }
 
-    // Regular sum reduction pipeline (legacy single-level per dispatch)
-    {
-        VkShaderModule shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_sum_reduction.comp.spv");
-        if (!shaderModule) return false;
-
-        VkPipelineShaderStageCreateInfo stageInfo{};
-        stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        stageInfo.module = shaderModule;
-        stageInfo.pName = "main";
-
-        VkComputePipelineCreateInfo pipelineInfo{};
-        pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-        pipelineInfo.stage = stageInfo;
-        pipelineInfo.layout = sumReductionPipelineLayout;
-
-        VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &sumReductionPipeline);
-        vkDestroyShaderModule(device, shaderModule, nullptr);
-        if (result != VK_SUCCESS) return false;
+    // Regular sum reduction pipeline
+    if (!createComputePipelineWithLayout("terrain_sum_reduction.comp.spv",
+                                         sumReductionPipelineLayout,
+                                         sumReductionPipeline)) {
+        return false;
     }
 
-    // Batched sum reduction pipeline (multi-level per dispatch using shared memory)
-    {
-        // Create pipeline layout for batched push constants
-        VkPushConstantRange batchedPushConstantRange{};
-        batchedPushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-        batchedPushConstantRange.offset = 0;
-        batchedPushConstantRange.size = sizeof(TerrainSumReductionBatchedPushConstants);
-
-        VkPipelineLayoutCreateInfo batchedLayoutInfo{};
-        batchedLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        batchedLayoutInfo.setLayoutCount = 1;
-        batchedLayoutInfo.pSetLayouts = &computeDescriptorSetLayout;
-        batchedLayoutInfo.pushConstantRangeCount = 1;
-        batchedLayoutInfo.pPushConstantRanges = &batchedPushConstantRange;
-
-        if (vkCreatePipelineLayout(device, &batchedLayoutInfo, nullptr, &sumReductionBatchedPipelineLayout) != VK_SUCCESS) {
-            return false;
-        }
-
-        VkShaderModule shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_sum_reduction_batched.comp.spv");
-        if (!shaderModule) return false;
-
-        VkPipelineShaderStageCreateInfo stageInfo{};
-        stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        stageInfo.module = shaderModule;
-        stageInfo.pName = "main";
-
-        VkComputePipelineCreateInfo pipelineInfo{};
-        pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-        pipelineInfo.stage = stageInfo;
-        pipelineInfo.layout = sumReductionBatchedPipelineLayout;
-
-        VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &sumReductionBatchedPipeline);
-        vkDestroyShaderModule(device, shaderModule, nullptr);
-        if (result != VK_SUCCESS) return false;
-    }
-
-    return true;
+    // Batched sum reduction pipeline (separate layout with different push constants)
+    return createComputePipeline("terrain_sum_reduction_batched.comp.spv",
+                                 sizeof(TerrainSumReductionBatchedPushConstants),
+                                 sumReductionBatchedPipelineLayout,
+                                 sumReductionBatchedPipeline);
 }
 
 bool TerrainSystem::createFrustumCullPipelines() {
-    // Frustum cull pipeline (with push constants for dispatch calculation)
-    {
-        VkShaderModule shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_frustum_cull.comp.spv");
-        if (!shaderModule) return false;
-
-        VkPushConstantRange pushConstantRange{};
-        pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-        pushConstantRange.offset = 0;
-        pushConstantRange.size = sizeof(TerrainFrustumCullPushConstants);
-
-        VkPipelineLayoutCreateInfo layoutInfo{};
-        layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        layoutInfo.setLayoutCount = 1;
-        layoutInfo.pSetLayouts = &computeDescriptorSetLayout;
-        layoutInfo.pushConstantRangeCount = 1;
-        layoutInfo.pPushConstantRanges = &pushConstantRange;
-
-        if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &frustumCullPipelineLayout) != VK_SUCCESS) {
-            vkDestroyShaderModule(device, shaderModule, nullptr);
-            return false;
-        }
-
-        VkPipelineShaderStageCreateInfo stageInfo{};
-        stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        stageInfo.module = shaderModule;
-        stageInfo.pName = "main";
-
-        VkComputePipelineCreateInfo pipelineInfo{};
-        pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-        pipelineInfo.stage = stageInfo;
-        pipelineInfo.layout = frustumCullPipelineLayout;
-
-        VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &frustumCullPipeline);
-        vkDestroyShaderModule(device, shaderModule, nullptr);
-        if (result != VK_SUCCESS) return false;
+    if (!createComputePipeline("terrain_frustum_cull.comp.spv",
+                               sizeof(TerrainFrustumCullPushConstants),
+                               frustumCullPipelineLayout,
+                               frustumCullPipeline)) {
+        return false;
     }
 
-    // Prepare cull dispatch pipeline
-    {
-        VkShaderModule shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_prepare_cull_dispatch.comp.spv");
-        if (!shaderModule) return false;
-
-        VkPushConstantRange pushConstantRange{};
-        pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-        pushConstantRange.offset = 0;
-        pushConstantRange.size = sizeof(TerrainPrepareCullDispatchPushConstants);
-
-        VkPipelineLayoutCreateInfo layoutInfo{};
-        layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        layoutInfo.setLayoutCount = 1;
-        layoutInfo.pSetLayouts = &computeDescriptorSetLayout;
-        layoutInfo.pushConstantRangeCount = 1;
-        layoutInfo.pPushConstantRanges = &pushConstantRange;
-
-        if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &prepareDispatchPipelineLayout) != VK_SUCCESS) {
-            vkDestroyShaderModule(device, shaderModule, nullptr);
-            return false;
-        }
-
-        VkPipelineShaderStageCreateInfo stageInfo{};
-        stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        stageInfo.module = shaderModule;
-        stageInfo.pName = "main";
-
-        VkComputePipelineCreateInfo pipelineInfo{};
-        pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-        pipelineInfo.stage = stageInfo;
-        pipelineInfo.layout = prepareDispatchPipelineLayout;
-
-        VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &prepareDispatchPipeline);
-        vkDestroyShaderModule(device, shaderModule, nullptr);
-        if (result != VK_SUCCESS) return false;
-    }
-
-    return true;
+    return createComputePipeline("terrain_prepare_cull_dispatch.comp.spv",
+                                 sizeof(TerrainPrepareCullDispatchPushConstants),
+                                 prepareDispatchPipelineLayout,
+                                 prepareDispatchPipeline);
 }
 
 bool TerrainSystem::createRenderPipeline() {
     // Create render pipeline layout (shared by render and wireframe pipelines)
-    VkPipelineLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    layoutInfo.setLayoutCount = 1;
-    layoutInfo.pSetLayouts = &renderDescriptorSetLayout;
-
-    if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &renderPipelineLayout) != VK_SUCCESS) {
-        return false;
-    }
+    renderPipelineLayout = DescriptorManager::createPipelineLayout(device, renderDescriptorSetLayout, {});
+    if (renderPipelineLayout == VK_NULL_HANDLE) return false;
 
     // Create filled render pipeline
     PipelineBuilder builder(device);
@@ -688,195 +478,44 @@ bool TerrainSystem::createMeshletShadowPipeline() {
 }
 
 bool TerrainSystem::createShadowCullPipelines() {
-    // Create shadow cull compute pipeline
-    VkShaderModule cullShaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_shadow_cull.comp.spv");
-    if (!cullShaderModule) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load shadow cull compute shader");
-        return false;
-    }
-
-    // Pipeline layout for shadow cull compute
-    VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(TerrainShadowCullPushConstants);
-
-    VkPipelineLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    layoutInfo.setLayoutCount = 1;
-    layoutInfo.pSetLayouts = &computeDescriptorSetLayout;
-    layoutInfo.pushConstantRangeCount = 1;
-    layoutInfo.pPushConstantRanges = &pushConstantRange;
-
-    if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &shadowCullPipelineLayout) != VK_SUCCESS) {
-        vkDestroyShaderModule(device, cullShaderModule, nullptr);
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create shadow cull pipeline layout");
-        return false;
-    }
-
-    // Create compute pipeline
-    VkPipelineShaderStageCreateInfo stageInfo{};
-    stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stageInfo.module = cullShaderModule;
-    stageInfo.pName = "main";
-
     // Specialization constant for meshlet index count
     uint32_t meshletIndexCount = config.useMeshlets ? meshlet.getIndexCount() : 0;
-    VkSpecializationMapEntry specEntry{};
-    specEntry.constantID = 0;
-    specEntry.offset = 0;
-    specEntry.size = sizeof(uint32_t);
+    VkSpecializationMapEntry specEntry{0, 0, sizeof(uint32_t)};
+    VkSpecializationInfo specInfo{1, &specEntry, sizeof(uint32_t), &meshletIndexCount};
 
-    VkSpecializationInfo specInfo{};
-    specInfo.mapEntryCount = 1;
-    specInfo.pMapEntries = &specEntry;
-    specInfo.dataSize = sizeof(uint32_t);
-    specInfo.pData = &meshletIndexCount;
-    stageInfo.pSpecializationInfo = &specInfo;
-
-    VkComputePipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    pipelineInfo.stage = stageInfo;
-    pipelineInfo.layout = shadowCullPipelineLayout;
-
-    VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &shadowCullPipeline);
-    vkDestroyShaderModule(device, cullShaderModule, nullptr);
-
-    if (result != VK_SUCCESS) {
+    // Create shadow cull compute pipeline with specialization constants
+    if (!createComputePipeline("terrain_shadow_cull.comp.spv",
+                               sizeof(TerrainShadowCullPushConstants),
+                               shadowCullPipelineLayout,
+                               shadowCullPipeline,
+                               &specInfo)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create shadow cull compute pipeline");
         return false;
     }
 
-    // Create shadow culled graphics pipeline (non-meshlet)
-    VkShaderModule shadowCulledVertModule = loadShaderModule(device, shaderPath + "/terrain/terrain_shadow_culled.vert.spv");
-    VkShaderModule shadowFragModule = loadShaderModule(device, shaderPath + "/terrain/terrain_shadow.frag.spv");
-    if (!shadowCulledVertModule || !shadowFragModule) {
-        if (shadowCulledVertModule) vkDestroyShaderModule(device, shadowCulledVertModule, nullptr);
-        if (shadowFragModule) vkDestroyShaderModule(device, shadowFragModule, nullptr);
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load shadow culled shaders");
-        return false;
-    }
+    // Create shadow culled graphics pipeline (non-meshlet, no vertex input)
+    {
+        PipelineBuilder builder(device);
+        builder.addShaderStage(shaderPath + "/terrain/terrain_shadow_culled.vert.spv", VK_SHADER_STAGE_VERTEX_BIT)
+               .addShaderStage(shaderPath + "/terrain/terrain_shadow.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
 
-    std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages{};
-    shaderStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    shaderStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-    shaderStages[0].module = shadowCulledVertModule;
-    shaderStages[0].pName = "main";
-
-    shaderStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    shaderStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    shaderStages[1].module = shadowFragModule;
-    shaderStages[1].pName = "main";
-
-    // No vertex input for non-meshlet (generated in shader)
-    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
-    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-
-    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
-    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-
-    VkPipelineViewportStateCreateInfo viewportState{};
-    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewportState.viewportCount = 1;
-    viewportState.scissorCount = 1;
-
-    VkPipelineRasterizationStateCreateInfo rasterizer{};
-    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-    rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_FRONT_BIT;
-    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    rasterizer.depthBiasEnable = VK_TRUE;
-
-    VkPipelineMultisampleStateCreateInfo multisampling{};
-    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-
-    VkPipelineDepthStencilStateCreateInfo depthStencil{};
-    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    depthStencil.depthTestEnable = VK_TRUE;
-    depthStencil.depthWriteEnable = VK_TRUE;
-    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
-
-    VkPipelineColorBlendStateCreateInfo colorBlending{};
-    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    colorBlending.attachmentCount = 0;
-
-    std::array<VkDynamicState, 3> dynamicStates = {
-        VK_DYNAMIC_STATE_VIEWPORT,
-        VK_DYNAMIC_STATE_SCISSOR,
-        VK_DYNAMIC_STATE_DEPTH_BIAS
-    };
-    VkPipelineDynamicStateCreateInfo dynamicState{};
-    dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
-    dynamicState.pDynamicStates = dynamicStates.data();
-
-    VkGraphicsPipelineCreateInfo gfxPipelineInfo{};
-    gfxPipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    gfxPipelineInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
-    gfxPipelineInfo.pStages = shaderStages.data();
-    gfxPipelineInfo.pVertexInputState = &vertexInputInfo;
-    gfxPipelineInfo.pInputAssemblyState = &inputAssembly;
-    gfxPipelineInfo.pViewportState = &viewportState;
-    gfxPipelineInfo.pRasterizationState = &rasterizer;
-    gfxPipelineInfo.pMultisampleState = &multisampling;
-    gfxPipelineInfo.pDepthStencilState = &depthStencil;
-    gfxPipelineInfo.pColorBlendState = &colorBlending;
-    gfxPipelineInfo.pDynamicState = &dynamicState;
-    gfxPipelineInfo.layout = shadowPipelineLayout;
-    gfxPipelineInfo.renderPass = shadowRenderPass;
-    gfxPipelineInfo.subpass = 0;
-
-    result = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &gfxPipelineInfo, nullptr, &shadowCulledPipeline);
-    vkDestroyShaderModule(device, shadowCulledVertModule, nullptr);
-    vkDestroyShaderModule(device, shadowFragModule, nullptr);
-
-    if (result != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create shadow culled graphics pipeline");
-        return false;
+        if (!builder.buildGraphicsPipeline(PipelinePresets::shadow(shadowRenderPass),
+                                           shadowPipelineLayout, shadowCulledPipeline)) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create shadow culled graphics pipeline");
+            return false;
+        }
     }
 
     // Create meshlet shadow culled pipeline (if meshlets enabled)
     if (config.useMeshlets) {
-        VkShaderModule meshletShadowCulledVertModule = loadShaderModule(device, shaderPath + "/terrain/terrain_meshlet_shadow_culled.vert.spv");
-        shadowFragModule = loadShaderModule(device, shaderPath + "/terrain/terrain_shadow.frag.spv");
-        if (!meshletShadowCulledVertModule || !shadowFragModule) {
-            if (meshletShadowCulledVertModule) vkDestroyShaderModule(device, meshletShadowCulledVertModule, nullptr);
-            if (shadowFragModule) vkDestroyShaderModule(device, shadowFragModule, nullptr);
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load meshlet shadow culled shaders");
-            return false;
-        }
+        PipelineBuilder builder(device);
+        builder.addShaderStage(shaderPath + "/terrain/terrain_meshlet_shadow_culled.vert.spv", VK_SHADER_STAGE_VERTEX_BIT)
+               .addShaderStage(shaderPath + "/terrain/terrain_shadow.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
 
-        shaderStages[0].module = meshletShadowCulledVertModule;
-        shaderStages[1].module = shadowFragModule;
+        auto cfg = PipelinePresets::shadow(shadowRenderPass);
+        cfg.useMeshletVertexInput = true;
 
-        // Meshlet vertex input: vec2 for local UV
-        VkVertexInputBindingDescription bindingDesc{};
-        bindingDesc.binding = 0;
-        bindingDesc.stride = sizeof(glm::vec2);
-        bindingDesc.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-
-        VkVertexInputAttributeDescription attrDesc{};
-        attrDesc.binding = 0;
-        attrDesc.location = 0;
-        attrDesc.format = VK_FORMAT_R32G32_SFLOAT;
-        attrDesc.offset = 0;
-
-        vertexInputInfo.vertexBindingDescriptionCount = 1;
-        vertexInputInfo.pVertexBindingDescriptions = &bindingDesc;
-        vertexInputInfo.vertexAttributeDescriptionCount = 1;
-        vertexInputInfo.pVertexAttributeDescriptions = &attrDesc;
-
-        gfxPipelineInfo.pStages = shaderStages.data();
-
-        result = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &gfxPipelineInfo, nullptr, &meshletShadowCulledPipeline);
-        vkDestroyShaderModule(device, meshletShadowCulledVertModule, nullptr);
-        vkDestroyShaderModule(device, shadowFragModule, nullptr);
-
-        if (result != VK_SUCCESS) {
+        if (!builder.buildGraphicsPipeline(cfg, shadowPipelineLayout, meshletShadowCulledPipeline)) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create meshlet shadow culled graphics pipeline");
             return false;
         }
@@ -903,6 +542,73 @@ void TerrainSystem::querySubgroupCapabilities() {
     SDL_Log("TerrainSystem: Subgroup size=%u, arithmetic=%s",
             subgroupCaps.subgroupSize,
             subgroupCaps.hasSubgroupArithmetic ? "yes" : "no");
+}
+
+bool TerrainSystem::createComputePipeline(const std::string& shaderName,
+                                          size_t pushConstantSize,
+                                          VkPipelineLayout& layout,
+                                          VkPipeline& pipeline,
+                                          const VkSpecializationInfo* specInfo) {
+    VkShaderModule shaderModule = loadShaderModule(device, shaderPath + "/terrain/" + shaderName);
+    if (!shaderModule) return false;
+
+    // Create pipeline layout with push constants if needed
+    std::vector<VkPushConstantRange> pushConstants;
+    if (pushConstantSize > 0) {
+        VkPushConstantRange range{};
+        range.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        range.offset = 0;
+        range.size = static_cast<uint32_t>(pushConstantSize);
+        pushConstants.push_back(range);
+    }
+
+    layout = DescriptorManager::createPipelineLayout(device, computeDescriptorSetLayout, pushConstants);
+    if (layout == VK_NULL_HANDLE) {
+        vkDestroyShaderModule(device, shaderModule, nullptr);
+        return false;
+    }
+
+    VkPipelineShaderStageCreateInfo stageInfo{};
+    stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    stageInfo.module = shaderModule;
+    stageInfo.pName = "main";
+    stageInfo.pSpecializationInfo = specInfo;
+
+    VkComputePipelineCreateInfo pipelineInfo{};
+    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    pipelineInfo.stage = stageInfo;
+    pipelineInfo.layout = layout;
+
+    VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline);
+    vkDestroyShaderModule(device, shaderModule, nullptr);
+
+    return result == VK_SUCCESS;
+}
+
+bool TerrainSystem::createComputePipelineWithLayout(const std::string& shaderName,
+                                                    VkPipelineLayout layout,
+                                                    VkPipeline& pipeline,
+                                                    const VkSpecializationInfo* specInfo) {
+    VkShaderModule shaderModule = loadShaderModule(device, shaderPath + "/terrain/" + shaderName);
+    if (!shaderModule) return false;
+
+    VkPipelineShaderStageCreateInfo stageInfo{};
+    stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    stageInfo.module = shaderModule;
+    stageInfo.pName = "main";
+    stageInfo.pSpecializationInfo = specInfo;
+
+    VkComputePipelineCreateInfo pipelineInfo{};
+    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    pipelineInfo.stage = stageInfo;
+    pipelineInfo.layout = layout;
+
+    VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline);
+    vkDestroyShaderModule(device, shaderModule, nullptr);
+
+    return result == VK_SUCCESS;
 }
 
 void TerrainSystem::extractFrustumPlanes(const glm::mat4& viewProj, glm::vec4 planes[6]) {

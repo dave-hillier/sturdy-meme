@@ -276,6 +276,18 @@ private:
     void extractFrustumPlanes(const glm::mat4& viewProj, glm::vec4 planes[6]);
     void querySubgroupCapabilities();
 
+    // Pipeline creation helpers
+    bool createComputePipeline(const std::string& shaderName,
+                               size_t pushConstantSize,
+                               VkPipelineLayout& layout,
+                               VkPipeline& pipeline,
+                               const VkSpecializationInfo* specInfo = nullptr);
+    // Overload for pipelines that share an existing layout
+    bool createComputePipelineWithLayout(const std::string& shaderName,
+                                         VkPipelineLayout layout,
+                                         VkPipeline& pipeline,
+                                         const VkSpecializationInfo* specInfo = nullptr);
+
     // Vulkan resources
     VkDevice device = VK_NULL_HANDLE;
     VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
