@@ -1,0 +1,118 @@
+#version 450
+
+/*
+ * ocean_displacement.comp - Final Displacement and Normal Map Generation
+ *
+ * Takes the FFT results (spatial domain displacement) and generates:
+ * 1. Combined displacement map (XYZ displacement + Jacobian for foam)
+ * 2. Normal map from displacement gradients
+ * 3. Foam map based on Jacobian determinant (wave folding)
+ *
+ * The Jacobian determinant indicates where the wave surface folds over itself:
+ *   J = (1 + dDx/dx)(1 + dDz/dz) - (dDx/dz)(dDz/dx)
+ * When J < 0, the surface is folding (whitecap formation).
+ */
+
+#extension GL_GOOGLE_include_directive : require
+
+#include "bindings.glsl"
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+// Input - FFT results (spatial domain)
+layout(binding = BINDING_OCEAN_DISP_DY, rg32f) uniform readonly image2D dispY;  // Height displacement
+layout(binding = BINDING_OCEAN_DISP_DX, rg32f) uniform readonly image2D dispX;  // X displacement
+layout(binding = BINDING_OCEAN_DISP_DZ, rg32f) uniform readonly image2D dispZ;  // Z displacement
+
+// Output maps
+layout(binding = BINDING_OCEAN_DISP_OUTPUT, rgba16f) uniform writeonly image2D displacementMap;  // xyz = displacement, w = jacobian
+layout(binding = BINDING_OCEAN_NORMAL_OUTPUT, rgba16f) uniform writeonly image2D normalMap;      // xyz = normal, w = unused
+layout(binding = BINDING_OCEAN_FOAM_OUTPUT, r16f) uniform writeonly image2D foamMap;            // r = foam intensity
+
+// Push constants
+layout(push_constant) uniform PushConstants {
+    int resolution;
+    float oceanSize;
+    float heightScale;      // Scale factor for height displacement
+    float foamThreshold;    // Jacobian threshold for foam (typically -0.5 to 0)
+    float foamDecay;        // How quickly foam fades (0.9 = slow, 0.5 = fast)
+    float normalStrength;   // Normal map intensity
+};
+
+// Sample displacement with wrapping (tiling)
+vec2 sampleDisp(readonly image2D img, ivec2 coord) {
+    coord = coord & (resolution - 1);  // Wrap using power-of-2 mask
+    return imageLoad(img, coord).xy;
+}
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+
+    if (coord.x >= resolution || coord.y >= resolution) return;
+
+    // Read displacement values
+    // FFT output is complex, but for real input the imaginary part should be ~0
+    // We take the real part as our displacement
+    float dy = sampleDisp(dispY, coord).x * heightScale;
+    float dx = sampleDisp(dispX, coord).x;
+    float dz = sampleDisp(dispZ, coord).x;
+
+    // Store combined displacement
+    vec3 displacement = vec3(dx, dy, dz);
+
+    // Calculate gradients for normals and Jacobian using central differences
+    float texelSize = oceanSize / float(resolution);
+
+    // Sample neighbors for gradient calculation
+    float dy_px = sampleDisp(dispY, coord + ivec2(1, 0)).x * heightScale;
+    float dy_nx = sampleDisp(dispY, coord + ivec2(-1, 0)).x * heightScale;
+    float dy_py = sampleDisp(dispY, coord + ivec2(0, 1)).x * heightScale;
+    float dy_ny = sampleDisp(dispY, coord + ivec2(0, -1)).x * heightScale;
+
+    float dx_px = sampleDisp(dispX, coord + ivec2(1, 0)).x;
+    float dx_nx = sampleDisp(dispX, coord + ivec2(-1, 0)).x;
+    float dx_py = sampleDisp(dispX, coord + ivec2(0, 1)).x;
+    float dx_ny = sampleDisp(dispX, coord + ivec2(0, -1)).x;
+
+    float dz_px = sampleDisp(dispZ, coord + ivec2(1, 0)).x;
+    float dz_nx = sampleDisp(dispZ, coord + ivec2(-1, 0)).x;
+    float dz_py = sampleDisp(dispZ, coord + ivec2(0, 1)).x;
+    float dz_ny = sampleDisp(dispZ, coord + ivec2(0, -1)).x;
+
+    // Height gradients (for normal calculation)
+    float dydx = (dy_px - dy_nx) / (2.0 * texelSize);
+    float dydz = (dy_py - dy_ny) / (2.0 * texelSize);
+
+    // Horizontal displacement gradients (for Jacobian)
+    float dDx_dx = (dx_px - dx_nx) / (2.0 * texelSize);
+    float dDx_dz = (dx_py - dx_ny) / (2.0 * texelSize);
+    float dDz_dx = (dz_px - dz_nx) / (2.0 * texelSize);
+    float dDz_dz = (dz_py - dz_ny) / (2.0 * texelSize);
+
+    // Calculate normal from height gradient
+    // Normal = normalize((-dydx, 1, -dydz))
+    vec3 normal = normalize(vec3(-dydx * normalStrength, 1.0, -dydz * normalStrength));
+
+    // Calculate Jacobian determinant
+    // J = (1 + dDx/dx)(1 + dDz/dz) - (dDx/dz)(dDz/dx)
+    // This measures how much the surface is compressed/stretched
+    float jacobian = (1.0 + dDx_dx) * (1.0 + dDz_dz) - dDx_dz * dDz_dx;
+
+    // Calculate foam from Jacobian
+    // Foam appears when J < foamThreshold (wave folding)
+    // We use a smooth transition for better visuals
+    float foam = smoothstep(foamThreshold, foamThreshold - 0.5, jacobian);
+
+    // Boost foam based on how negative the Jacobian is (more folding = more foam)
+    foam = clamp(foam, 0.0, 1.0);
+
+    // Also add foam at steep wave slopes (high gradient = steep)
+    float steepness = length(vec2(dydx, dydz));
+    float slopeFoam = smoothstep(0.5, 1.5, steepness);
+    foam = max(foam, slopeFoam * 0.5);
+
+    // Write outputs
+    imageStore(displacementMap, coord, vec4(displacement, jacobian));
+    imageStore(normalMap, coord, vec4(normal * 0.5 + 0.5, 1.0));  // Encode normal to [0,1]
+    imageStore(foamMap, coord, vec4(foam, 0.0, 0.0, 0.0));
+}

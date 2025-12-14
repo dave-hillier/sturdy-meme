@@ -1,0 +1,116 @@
+#version 450
+
+/*
+ * ocean_time_evolution.comp - Time-Dependent Spectrum Evolution
+ *
+ * Computes H(k, t) from H0(k) using the dispersion relation.
+ * This shader runs every frame to animate the ocean.
+ *
+ * H(k, t) = H0(k) * exp(i * omega(k) * t) + H0*(-k) * exp(-i * omega(k) * t)
+ *
+ * Also computes displacement spectra for X and Z directions:
+ *   Dx(k, t) = -i * kx/|k| * H(k, t)
+ *   Dz(k, t) = -i * kz/|k| * H(k, t)
+ *
+ * These are then transformed via inverse FFT to get spatial displacements.
+ */
+
+#extension GL_GOOGLE_include_directive : require
+
+#include "bindings.glsl"
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+// Output - time-evolved spectra for height and horizontal displacement
+layout(binding = BINDING_OCEAN_HKT_DY, rg32f) uniform writeonly image2D hktDy;  // Height spectrum
+layout(binding = BINDING_OCEAN_HKT_DX, rg32f) uniform writeonly image2D hktDx;  // X displacement spectrum
+layout(binding = BINDING_OCEAN_HKT_DZ, rg32f) uniform writeonly image2D hktDz;  // Z displacement spectrum
+
+// Input - initial spectrum and frequencies
+layout(binding = BINDING_OCEAN_H0_INPUT) uniform sampler2D h0Spectrum;
+layout(binding = BINDING_OCEAN_OMEGA_INPUT) uniform sampler2D omegaSpectrum;
+
+// Push constants for per-frame data
+layout(push_constant) uniform PushConstants {
+    float time;
+    int resolution;
+    float oceanSize;
+    float choppiness;  // Lambda - horizontal displacement scale (0.5 to 2.0 typical)
+};
+
+const float PI = 3.14159265359;
+const float TWO_PI = 6.28318530718;
+
+// Complex multiplication: (a + bi)(c + di) = (ac - bd) + (ad + bc)i
+vec2 complexMul(vec2 a, vec2 b) {
+    return vec2(
+        a.x * b.x - a.y * b.y,
+        a.x * b.y + a.y * b.x
+    );
+}
+
+// Complex conjugate
+vec2 complexConj(vec2 c) {
+    return vec2(c.x, -c.y);
+}
+
+// Euler's formula: exp(i * theta) = cos(theta) + i*sin(theta)
+vec2 complexExp(float theta) {
+    return vec2(cos(theta), sin(theta));
+}
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+
+    if (coord.x >= resolution || coord.y >= resolution) return;
+
+    // Sample H0(k) and H0*(-k) from the spectrum texture
+    // Stored as: xy = H0(k), zw = H0*(-k)
+    vec2 texCoord = (vec2(coord) + 0.5) / float(resolution);
+    vec4 h0_data = texture(h0Spectrum, texCoord);
+    vec2 h0 = h0_data.xy;
+    vec2 h0_conj_neg = h0_data.zw;
+
+    // Get angular frequency omega(k)
+    float omega = texture(omegaSpectrum, texCoord).r;
+
+    // Time evolution factors
+    float omega_t = omega * time;
+    vec2 exp_iwt = complexExp(omega_t);       // exp(i * omega * t)
+    vec2 exp_neg_iwt = complexConj(exp_iwt);  // exp(-i * omega * t)
+
+    // H(k, t) = H0(k) * exp(i*omega*t) + conj(H0(-k)) * exp(-i*omega*t)
+    // For Hermitian symmetry: conj(H0(-k)) is stored directly
+    vec2 h_kt = complexMul(h0, exp_iwt) + complexMul(complexConj(h0_conj_neg), exp_neg_iwt);
+
+    // Calculate wave vector k
+    int n = coord.x - resolution / 2;
+    int m = coord.y - resolution / 2;
+    float dk = TWO_PI / oceanSize;
+    vec2 k = vec2(float(n), float(m)) * dk;
+    float k_length = length(k);
+
+    // Height displacement spectrum (Y direction)
+    // Dy(k, t) = H(k, t)
+    imageStore(hktDy, coord, vec4(h_kt, 0.0, 0.0));
+
+    // Horizontal displacement spectra
+    // Dx(k, t) = -i * (kx / |k|) * H(k, t) * lambda
+    // Dz(k, t) = -i * (kz / |k|) * H(k, t) * lambda
+    // Multiplying by -i rotates complex number: -i * (a + bi) = (b - ai)
+    vec2 dx_kt = vec2(0.0);
+    vec2 dz_kt = vec2(0.0);
+
+    if (k_length > 1e-6) {
+        vec2 k_normalized = k / k_length;
+
+        // -i * H(k,t) = (h_kt.y, -h_kt.x)
+        vec2 neg_i_h = vec2(h_kt.y, -h_kt.x);
+
+        dx_kt = k_normalized.x * neg_i_h * choppiness;
+        dz_kt = k_normalized.y * neg_i_h * choppiness;
+    }
+
+    imageStore(hktDx, coord, vec4(dx_kt, 0.0, 0.0));
+    imageStore(hktDz, coord, vec4(dz_kt, 0.0, 0.0));
+}

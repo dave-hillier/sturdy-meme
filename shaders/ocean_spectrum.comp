@@ -1,0 +1,176 @@
+#version 450
+
+/*
+ * ocean_spectrum.comp - Initial Ocean Spectrum Generation
+ *
+ * Generates the initial wave amplitude spectrum H0(k) using the Phillips spectrum.
+ * This is computed once at initialization and when parameters change.
+ *
+ * Based on "Simulating Ocean Water" (Tessendorf, 2001)
+ *
+ * The Phillips spectrum models wind-driven waves:
+ *   P(k) = A * exp(-1/(kL)^2) / k^4 * |k dot w|^2
+ * where:
+ *   k = wave vector
+ *   L = V^2/g (largest wave from wind)
+ *   w = wind direction
+ *   A = amplitude constant
+ *
+ * Output: H0(k) and H0*(-k) for Hermitian symmetry
+ */
+
+#extension GL_GOOGLE_include_directive : require
+
+#include "bindings.glsl"
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+// Output textures
+layout(binding = BINDING_OCEAN_SPECTRUM_H0, rgba32f) uniform writeonly image2D h0Spectrum;
+layout(binding = BINDING_OCEAN_SPECTRUM_OMEGA, r32f) uniform writeonly image2D omegaSpectrum;
+
+// Parameters UBO
+layout(binding = BINDING_OCEAN_SPECTRUM_PARAMS) uniform SpectrumParams {
+    int resolution;         // FFT resolution (256 or 512)
+    float oceanSize;        // Physical size of ocean patch in meters
+    float windSpeed;        // Wind speed in m/s
+    vec2 windDirection;     // Normalized wind direction
+    float amplitude;        // Wave amplitude multiplier (Phillips A constant)
+    float gravity;          // Gravitational constant (9.81)
+    float smallWaveCutoff;  // Suppress small waves below this size (l)
+    float alignment;        // Wind alignment factor (1 = unidirectional, 0 = omni)
+    uint seed;              // Random seed for spectrum generation
+    float padding1;
+    float padding2;
+    float padding3;
+};
+
+// Constants
+const float PI = 3.14159265359;
+const float TWO_PI = 6.28318530718;
+
+// Box-Muller transform for Gaussian random numbers
+// Input: two uniform random numbers in [0,1]
+// Output: two independent Gaussian random numbers
+vec2 gaussianRandom(vec2 uniform_rand) {
+    float u1 = max(uniform_rand.x, 1e-6);  // Avoid log(0)
+    float u2 = uniform_rand.y;
+
+    float mag = sqrt(-2.0 * log(u1));
+    float theta = TWO_PI * u2;
+
+    return mag * vec2(cos(theta), sin(theta));
+}
+
+// Hash function for pseudo-random numbers
+// Based on pcg hash
+uint pcg_hash(uint input) {
+    uint state = input * 747796405u + 2891336453u;
+    uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
+// Generate uniform random number in [0,1] from 2D coordinate
+vec2 uniformRandom(ivec2 coord, uint seed) {
+    uint h1 = pcg_hash(uint(coord.x) + seed);
+    uint h2 = pcg_hash(uint(coord.y) + h1);
+    uint h3 = pcg_hash(h1 + h2);
+    uint h4 = pcg_hash(h2 + h3);
+
+    return vec2(
+        float(h3) / 4294967295.0,
+        float(h4) / 4294967295.0
+    );
+}
+
+// Phillips spectrum
+// Returns the amplitude for a given wave vector k
+float phillipsSpectrum(vec2 k) {
+    float k_length = length(k);
+    if (k_length < 1e-6) return 0.0;
+
+    float k_length2 = k_length * k_length;
+    float k_length4 = k_length2 * k_length2;
+
+    // L = largest possible wave from wind (V^2 / g)
+    float L = windSpeed * windSpeed / gravity;
+    float L2 = L * L;
+
+    // Suppress waves smaller than smallWaveCutoff
+    float l2 = smallWaveCutoff * smallWaveCutoff;
+    float damping = exp(-k_length2 * l2);
+
+    // Main Phillips spectrum term
+    float phillips = amplitude * exp(-1.0 / (k_length2 * L2)) / k_length4;
+
+    // Wind alignment term: |k dot wind|^2 / k^2
+    vec2 k_normalized = k / k_length;
+    float k_dot_wind = dot(k_normalized, windDirection);
+    float wind_alignment = k_dot_wind * k_dot_wind;
+
+    // Optional: suppress waves perpendicular to wind
+    // alignment = 1: fully directional, 0: omnidirectional
+    wind_alignment = mix(1.0, wind_alignment, alignment);
+
+    // Suppress waves going against the wind (optional)
+    if (k_dot_wind < 0.0) {
+        wind_alignment *= 0.25;  // Reduce counter-wind waves
+    }
+
+    return phillips * wind_alignment * damping;
+}
+
+// Deep water dispersion relation: omega(k) = sqrt(g * |k|)
+float dispersionRelation(float k_length) {
+    return sqrt(gravity * k_length);
+}
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+
+    if (coord.x >= resolution || coord.y >= resolution) return;
+
+    // Calculate wave vector k
+    // k ranges from -N/2 to N/2-1 in frequency space
+    int n = coord.x - resolution / 2;
+    int m = coord.y - resolution / 2;
+
+    // Convert to wave numbers (spatial frequency)
+    // dk = 2*PI / oceanSize
+    float dk = TWO_PI / oceanSize;
+    vec2 k = vec2(float(n), float(m)) * dk;
+
+    float k_length = length(k);
+
+    // Generate Gaussian random numbers for this wave
+    vec2 uniform1 = uniformRandom(coord, seed);
+    vec2 uniform2 = uniformRandom(coord, seed + 12345u);
+    vec2 gaussian1 = gaussianRandom(uniform1);
+    vec2 gaussian2 = gaussianRandom(uniform2);
+
+    // Phillips spectrum amplitude
+    float spectrum = phillipsSpectrum(k);
+    float amplitude_scale = sqrt(spectrum / 2.0);
+
+    // H0(k) = 1/sqrt(2) * (xi_r + i*xi_i) * sqrt(P(k))
+    vec2 h0 = amplitude_scale * gaussian1;
+
+    // For Hermitian symmetry, we also need H0*(-k)
+    // H0*(-k) = conj(H0(-k))
+    // We'll compute this for the conjugate position
+    ivec2 conj_coord = ivec2(resolution - coord.x, resolution - coord.y) % resolution;
+
+    // For the conjugate, we need to ensure the spectrum is properly symmetric
+    vec2 k_conj = -k;
+    float spectrum_conj = phillipsSpectrum(k_conj);
+    float amplitude_scale_conj = sqrt(spectrum_conj / 2.0);
+    vec2 h0_conj = amplitude_scale_conj * gaussian2;
+
+    // Store H0(k) in xy and H0*(-k) in zw
+    // This allows time evolution to compute H(k,t) efficiently
+    imageStore(h0Spectrum, coord, vec4(h0, h0_conj));
+
+    // Store angular frequency omega(k) = sqrt(g * |k|)
+    float omega = dispersionRelation(k_length);
+    imageStore(omegaSpectrum, coord, vec4(omega, 0.0, 0.0, 0.0));
+}
