@@ -25,6 +25,19 @@ void ResizeCoordinator::ensureSorted() {
 }
 
 bool ResizeCoordinator::performResize(VkDevice device, VmaAllocator allocator, VkExtent2D newExtent) {
+    // If we have a core resize handler and no explicit extent, let it determine the extent
+    if (coreResizeHandler_ && newExtent.width == 0 && newExtent.height == 0) {
+        // Wait for GPU to finish all work before resizing
+        vkDeviceWaitIdle(device);
+
+        newExtent = coreResizeHandler_(device, allocator);
+
+        // Handle minimized window or failure
+        if (newExtent.width == 0 || newExtent.height == 0) {
+            return true;  // Not an error, just minimized
+        }
+    }
+
     ensureSorted();
 
     SDL_Log("ResizeCoordinator: Resizing %zu systems to %ux%u",

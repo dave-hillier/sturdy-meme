@@ -346,6 +346,38 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
         nullptr,
         ResizePriority::RenderTarget);
 
+    // Register core resize handler for swapchain, depth buffer, and framebuffers
+    resizeCoordinator.setCoreResizeHandler([this](VkDevice, VmaAllocator) -> VkExtent2D {
+        // Recreate swapchain
+        if (!vulkanContext.recreateSwapchain()) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to recreate swapchain");
+            return {0, 0};
+        }
+
+        VkExtent2D newExtent = vulkanContext.getSwapchainExtent();
+
+        // Handle minimized window (extent = 0)
+        if (newExtent.width == 0 || newExtent.height == 0) {
+            return {0, 0};
+        }
+
+        SDL_Log("Window resized to %ux%u", newExtent.width, newExtent.height);
+
+        // Recreate depth resources
+        if (!recreateDepthResources(newExtent)) {
+            return {0, 0};
+        }
+
+        // Recreate framebuffers
+        destroyFramebuffers();
+        if (!createFramebuffers()) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to recreate framebuffers during resize");
+            return {0, 0};
+        }
+
+        return newExtent;
+    });
+
     SDL_Log("Resize coordinator configured with %zu systems", 17UL);
 
     // Setup render pipeline stages with lambdas
@@ -1578,41 +1610,14 @@ bool Renderer::recreateDepthResources(VkExtent2D newExtent) {
 }
 
 bool Renderer::handleResize() {
-    VkDevice device = vulkanContext.getDevice();
-    VmaAllocator allocator = vulkanContext.getAllocator();
-
-    // Wait for GPU to finish all work
-    vkDeviceWaitIdle(device);
-
-    // Recreate swapchain
-    if (!vulkanContext.recreateSwapchain()) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to recreate swapchain");
-        return false;
-    }
-
-    VkExtent2D newExtent = vulkanContext.getSwapchainExtent();
-
-    // Handle minimized window (extent = 0)
-    if (newExtent.width == 0 || newExtent.height == 0) {
-        return true;  // Don't recreate resources for minimized window
-    }
-
-    SDL_Log("Window resized to %ux%u", newExtent.width, newExtent.height);
-
-    // Recreate core resources (depth buffer, framebuffers)
-    if (!recreateDepthResources(newExtent)) return false;
-
-    destroyFramebuffers();
-    if (!createFramebuffers()) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to recreate framebuffers during resize");
-        return false;
-    }
-
-    // Delegate subsystem resize to coordinator
-    resizeCoordinator.performResize(device, allocator, newExtent);
-
+    // Delegate all resize logic to the coordinator (pass {0,0} to trigger core handler)
+    bool success = resizeCoordinator.performResize(
+        vulkanContext.getDevice(),
+        vulkanContext.getAllocator(),
+        {0, 0}
+    );
     framebufferResized = false;
-    return true;
+    return success;
 }
 
 // Pure calculation helper - sun screen position for god rays

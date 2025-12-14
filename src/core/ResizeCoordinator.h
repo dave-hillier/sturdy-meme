@@ -129,6 +129,13 @@ public:
     ResizeCoordinator(const ResizeCoordinator&) = delete;
     ResizeCoordinator& operator=(const ResizeCoordinator&) = delete;
 
+    // Core resize handler type - called before performResize to handle swapchain/depth/framebuffers
+    // Returns the new extent (or {0,0} if minimized/failed)
+    using CoreResizeHandler = std::function<VkExtent2D(VkDevice, VmaAllocator)>;
+
+    // Set the core resize handler (swapchain, depth buffer, framebuffers)
+    void setCoreResizeHandler(CoreResizeHandler handler) { coreResizeHandler_ = std::move(handler); }
+
     // Register a resizable component with given priority
     void registerResizable(IResizable* resizable, ResizePriority priority);
 
@@ -208,6 +215,7 @@ private:
 
     std::vector<Registration> registrations_;
     std::vector<std::unique_ptr<IResizable>> adapters_;  // Owns adapter instances
+    CoreResizeHandler coreResizeHandler_;
     bool sorted_ = false;
 
     void ensureSorted();
