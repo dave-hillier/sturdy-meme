@@ -1139,15 +1139,13 @@ vec3 renderAtmosphere(vec3 dir) {
     float nightBlend = nightFactor * (1.0 - moonSkyContribution * 0.5);
     horizonColor = mix(horizonColor, max(horizonColor, nightHorizonRadiance), nightBlend);
 
-    // For rays below horizon, darken and return early
-    if (normDir.y < -0.02) {
-        float belowHorizonFactor = clamp(-normDir.y * 2.0, 0.0, 1.0);
-        vec3 fogColor = horizonColor * mix(1.0, 0.5, belowHorizonFactor);
-        return fogColor;
-    }
-
     // Blend factor for smooth transition near horizon (y from -0.02 to 0.02)
+    // Below -0.02: horizonBlend=0 (full horizon color)
+    // Above 0.02: horizonBlend=1 (full sky)
     float horizonBlend = smoothstep(-0.02, 0.02, normDir.y);
+
+    // Darkening factor for below-horizon rays (kicks in below y=-0.02)
+    float belowHorizonDarken = clamp((-normDir.y - 0.02) * 2.0, 0.0, 1.0);
 
     // Place observer on planet surface (camera height is negligible for atmosphere)
     vec3 origin = vec3(0.0, PLANET_RADIUS + 0.001, 0.0);
@@ -1269,8 +1267,11 @@ vec3 renderAtmosphere(vec3 dir) {
     float stars = starField(dir);
     sky += vec3(stars) * clouds.transmittance;
 
-    // Blend with horizon color near the horizon to avoid seams
+    // Blend with horizon color near the horizon
     sky = mix(horizonColor, sky, horizonBlend);
+
+    // Apply gradual darkening for below-horizon rays
+    sky *= mix(1.0, 0.5, belowHorizonDarken);
 
     return sky;
 }
