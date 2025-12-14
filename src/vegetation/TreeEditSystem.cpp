@@ -77,50 +77,17 @@ void TreeEditSystem::destroy(VkDevice device, VmaAllocator allocator) {
 }
 
 bool TreeEditSystem::createDescriptorSetLayout() {
-    std::array<VkDescriptorSetLayoutBinding, 6> bindings{};
+    // Use DescriptorManager::LayoutBuilder for consistent descriptor set layout creation
+    descriptorSetLayout = DescriptorManager::LayoutBuilder(device)
+        .addUniformBuffer(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)  // 0: Scene UBO
+        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 1: Bark color texture
+        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 2: Bark normal texture
+        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 3: Bark AO texture
+        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 4: Bark roughness texture
+        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 5: Leaf texture
+        .build();
 
-    // Binding 0: Scene UBO for MVP matrices
-    bindings[0].binding = 0;
-    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    bindings[0].descriptorCount = 1;
-    bindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-
-    // Binding 1: Bark color texture
-    bindings[1].binding = 1;
-    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    bindings[1].descriptorCount = 1;
-    bindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-
-    // Binding 2: Bark normal texture
-    bindings[2].binding = 2;
-    bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    bindings[2].descriptorCount = 1;
-    bindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-
-    // Binding 3: Bark AO texture
-    bindings[3].binding = 3;
-    bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    bindings[3].descriptorCount = 1;
-    bindings[3].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-
-    // Binding 4: Bark roughness texture
-    bindings[4].binding = 4;
-    bindings[4].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    bindings[4].descriptorCount = 1;
-    bindings[4].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-
-    // Binding 5: Leaf texture
-    bindings[5].binding = 5;
-    bindings[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    bindings[5].descriptorCount = 1;
-    bindings[5].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-
-    VkDescriptorSetLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
-    layoutInfo.pBindings = bindings.data();
-
-    if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &descriptorSetLayout) != VK_SUCCESS) {
+    if (descriptorSetLayout == VK_NULL_HANDLE) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create tree descriptor set layout");
         return false;
     }
@@ -152,116 +119,58 @@ void TreeEditSystem::updateDescriptorSets(VkDevice device, const std::vector<VkB
     if (barkIdx < 0 || barkIdx >= NUM_BARK_TYPES) barkIdx = 0;
     if (leafIdx < 0 || leafIdx >= NUM_LEAF_TYPES) leafIdx = 0;
 
+    // Helper to get texture view/sampler with fallback
+    auto getBarkColorView = [&]() -> VkImageView {
+        return (texturesLoaded && barkColorTextures[barkIdx].getImageView())
+            ? barkColorTextures[barkIdx].getImageView() : fallbackTexture.getImageView();
+    };
+    auto getBarkColorSampler = [&]() -> VkSampler {
+        return (texturesLoaded && barkColorTextures[barkIdx].getImageView())
+            ? barkColorTextures[barkIdx].getSampler() : fallbackTexture.getSampler();
+    };
+    auto getBarkNormalView = [&]() -> VkImageView {
+        return (texturesLoaded && barkNormalTextures[barkIdx].getImageView())
+            ? barkNormalTextures[barkIdx].getImageView() : fallbackNormalTexture.getImageView();
+    };
+    auto getBarkNormalSampler = [&]() -> VkSampler {
+        return (texturesLoaded && barkNormalTextures[barkIdx].getImageView())
+            ? barkNormalTextures[barkIdx].getSampler() : fallbackNormalTexture.getSampler();
+    };
+    auto getBarkAOView = [&]() -> VkImageView {
+        return (texturesLoaded && barkAOTextures[barkIdx].getImageView())
+            ? barkAOTextures[barkIdx].getImageView() : fallbackTexture.getImageView();
+    };
+    auto getBarkAOSampler = [&]() -> VkSampler {
+        return (texturesLoaded && barkAOTextures[barkIdx].getImageView())
+            ? barkAOTextures[barkIdx].getSampler() : fallbackTexture.getSampler();
+    };
+    auto getBarkRoughnessView = [&]() -> VkImageView {
+        return (texturesLoaded && barkRoughnessTextures[barkIdx].getImageView())
+            ? barkRoughnessTextures[barkIdx].getImageView() : fallbackTexture.getImageView();
+    };
+    auto getBarkRoughnessSampler = [&]() -> VkSampler {
+        return (texturesLoaded && barkRoughnessTextures[barkIdx].getImageView())
+            ? barkRoughnessTextures[barkIdx].getSampler() : fallbackTexture.getSampler();
+    };
+    auto getLeafView = [&]() -> VkImageView {
+        return (texturesLoaded && leafTextures[leafIdx].getImageView())
+            ? leafTextures[leafIdx].getImageView() : fallbackTexture.getImageView();
+    };
+    auto getLeafSampler = [&]() -> VkSampler {
+        return (texturesLoaded && leafTextures[leafIdx].getImageView())
+            ? leafTextures[leafIdx].getSampler() : fallbackTexture.getSampler();
+    };
+
+    // Use DescriptorManager::SetWriter for consistent descriptor set updates
     for (uint32_t i = 0; i < framesInFlight; ++i) {
-        std::array<VkWriteDescriptorSet, 6> descriptorWrites{};
-
-        // UBO binding
-        VkDescriptorBufferInfo bufferInfo{};
-        bufferInfo.buffer = sceneUniformBuffers[i];
-        bufferInfo.offset = 0;
-        bufferInfo.range = sizeof(UniformBufferObject);
-
-        descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[0].dstSet = descriptorSets[i];
-        descriptorWrites[0].dstBinding = 0;
-        descriptorWrites[0].dstArrayElement = 0;
-        descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        descriptorWrites[0].descriptorCount = 1;
-        descriptorWrites[0].pBufferInfo = &bufferInfo;
-
-        // Bark color texture
-        VkDescriptorImageInfo barkColorInfo{};
-        if (texturesLoaded && barkColorTextures[barkIdx].getImageView()) {
-            barkColorInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            barkColorInfo.imageView = barkColorTextures[barkIdx].getImageView();
-            barkColorInfo.sampler = barkColorTextures[barkIdx].getSampler();
-        } else {
-            barkColorInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            barkColorInfo.imageView = fallbackTexture.getImageView();
-            barkColorInfo.sampler = fallbackTexture.getSampler();
-        }
-        descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[1].dstSet = descriptorSets[i];
-        descriptorWrites[1].dstBinding = 1;
-        descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        descriptorWrites[1].descriptorCount = 1;
-        descriptorWrites[1].pImageInfo = &barkColorInfo;
-
-        // Bark normal texture
-        VkDescriptorImageInfo barkNormalInfo{};
-        if (texturesLoaded && barkNormalTextures[barkIdx].getImageView()) {
-            barkNormalInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            barkNormalInfo.imageView = barkNormalTextures[barkIdx].getImageView();
-            barkNormalInfo.sampler = barkNormalTextures[barkIdx].getSampler();
-        } else {
-            // Use fallback normal texture (128,128,255) for flat normal
-            barkNormalInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            barkNormalInfo.imageView = fallbackNormalTexture.getImageView();
-            barkNormalInfo.sampler = fallbackNormalTexture.getSampler();
-        }
-        descriptorWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[2].dstSet = descriptorSets[i];
-        descriptorWrites[2].dstBinding = 2;
-        descriptorWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        descriptorWrites[2].descriptorCount = 1;
-        descriptorWrites[2].pImageInfo = &barkNormalInfo;
-
-        // Bark AO texture
-        VkDescriptorImageInfo barkAOInfo{};
-        if (texturesLoaded && barkAOTextures[barkIdx].getImageView()) {
-            barkAOInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            barkAOInfo.imageView = barkAOTextures[barkIdx].getImageView();
-            barkAOInfo.sampler = barkAOTextures[barkIdx].getSampler();
-        } else {
-            barkAOInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            barkAOInfo.imageView = fallbackTexture.getImageView();
-            barkAOInfo.sampler = fallbackTexture.getSampler();
-        }
-        descriptorWrites[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[3].dstSet = descriptorSets[i];
-        descriptorWrites[3].dstBinding = 3;
-        descriptorWrites[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        descriptorWrites[3].descriptorCount = 1;
-        descriptorWrites[3].pImageInfo = &barkAOInfo;
-
-        // Bark roughness texture
-        VkDescriptorImageInfo barkRoughnessInfo{};
-        if (texturesLoaded && barkRoughnessTextures[barkIdx].getImageView()) {
-            barkRoughnessInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            barkRoughnessInfo.imageView = barkRoughnessTextures[barkIdx].getImageView();
-            barkRoughnessInfo.sampler = barkRoughnessTextures[barkIdx].getSampler();
-        } else {
-            barkRoughnessInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            barkRoughnessInfo.imageView = fallbackTexture.getImageView();
-            barkRoughnessInfo.sampler = fallbackTexture.getSampler();
-        }
-        descriptorWrites[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[4].dstSet = descriptorSets[i];
-        descriptorWrites[4].dstBinding = 4;
-        descriptorWrites[4].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        descriptorWrites[4].descriptorCount = 1;
-        descriptorWrites[4].pImageInfo = &barkRoughnessInfo;
-
-        // Leaf texture
-        VkDescriptorImageInfo leafInfo{};
-        if (texturesLoaded && leafTextures[leafIdx].getImageView()) {
-            leafInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            leafInfo.imageView = leafTextures[leafIdx].getImageView();
-            leafInfo.sampler = leafTextures[leafIdx].getSampler();
-        } else {
-            leafInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            leafInfo.imageView = fallbackTexture.getImageView();
-            leafInfo.sampler = fallbackTexture.getSampler();
-        }
-        descriptorWrites[5].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[5].dstSet = descriptorSets[i];
-        descriptorWrites[5].dstBinding = 5;
-        descriptorWrites[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        descriptorWrites[5].descriptorCount = 1;
-        descriptorWrites[5].pImageInfo = &leafInfo;
-
-        vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
-                               descriptorWrites.data(), 0, nullptr);
+        DescriptorManager::SetWriter(device, descriptorSets[i])
+            .writeBuffer(0, sceneUniformBuffers[i], 0, sizeof(UniformBufferObject))
+            .writeImage(1, getBarkColorView(), getBarkColorSampler())
+            .writeImage(2, getBarkNormalView(), getBarkNormalSampler())
+            .writeImage(3, getBarkAOView(), getBarkAOSampler())
+            .writeImage(4, getBarkRoughnessView(), getBarkRoughnessSampler())
+            .writeImage(5, getLeafView(), getLeafSampler())
+            .update();
     }
 
     // Track current types
