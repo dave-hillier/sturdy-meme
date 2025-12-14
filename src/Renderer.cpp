@@ -68,9 +68,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     if (!createGraphicsPipeline()) return false;
 
     // Initialize skinned mesh rendering (GPU skinning for animated characters)
-    if (!createSkinnedDescriptorSetLayout()) return false;
-    if (!createSkinnedGraphicsPipeline()) return false;
-    if (!createBoneMatricesBuffers()) return false;
+    if (!initSkinnedMeshRenderer()) return false;
 
     // Initialize sky system (needs HDR render pass from postProcessSystem)
     SkySystem::InitInfo skyInfo{};
@@ -93,7 +91,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     shadowInfo.physicalDevice = physicalDevice;
     shadowInfo.allocator = allocator;
     shadowInfo.mainDescriptorSetLayout = descriptorSetLayout;
-    shadowInfo.skinnedDescriptorSetLayout = skinnedDescriptorSetLayout;  // For skinned shadow pipeline
+    shadowInfo.skinnedDescriptorSetLayout = skinnedMeshRenderer.getDescriptorSetLayout();  // For skinned shadow pipeline
     shadowInfo.shaderPath = resourcePath + "/shaders";
     shadowInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
 
@@ -200,7 +198,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     if (!volumetricSnowSystem.init(volumetricSnowInfo)) return false;
 
     if (!createDescriptorSets()) return false;
-    if (!createSkinnedDescriptorSets()) return false;
+    if (!createSkinnedMeshRendererDescriptorSets()) return false;
 
     // Initialize grass system using HDR render pass
     GrassSystem::InitInfo grassInfo{};
@@ -442,15 +440,18 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
 
         // Update descriptor sets not managed by MaterialRegistry (rocks, skinned)
         MaterialDescriptorFactory factory(device);
-        VkDescriptorSet otherSets[] = {
-            rockDescriptorSets[0], rockDescriptorSets[1],
-            skinnedDescriptorSets[0], skinnedDescriptorSets[1]
+        VkDescriptorSet rockSets[] = {
+            rockDescriptorSets[0], rockDescriptorSets[1]
         };
-        for (auto set : otherSets) {
+        for (auto set : rockSets) {
             factory.updateCloudShadowBinding(set,
                 cloudShadowSystem.getShadowMapView(),
                 cloudShadowSystem.getShadowMapSampler());
         }
+        // Update skinned mesh renderer cloud shadow binding
+        skinnedMeshRenderer.updateCloudShadowBinding(
+            cloudShadowSystem.getShadowMapView(),
+            cloudShadowSystem.getShadowMapSampler());
     }
 
     // Initialize Catmull-Clark subdivision system
@@ -840,21 +841,8 @@ void Renderer::shutdown() {
         vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
         vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 
-        // Clean up skinned mesh resources
-        if (skinnedGraphicsPipeline != VK_NULL_HANDLE) {
-            vkDestroyPipeline(device, skinnedGraphicsPipeline, nullptr);
-        }
-        if (skinnedPipelineLayout != VK_NULL_HANDLE) {
-            vkDestroyPipelineLayout(device, skinnedPipelineLayout, nullptr);
-        }
-        if (skinnedDescriptorSetLayout != VK_NULL_HANDLE) {
-            vkDestroyDescriptorSetLayout(device, skinnedDescriptorSetLayout, nullptr);
-        }
-        for (size_t i = 0; i < boneMatricesBuffers.size(); ++i) {
-            if (boneMatricesBuffers[i] != VK_NULL_HANDLE) {
-                vmaDestroyBuffer(allocator, boneMatricesBuffers[i], boneMatricesAllocations[i]);
-            }
-        }
+        // Clean up skinned mesh renderer
+        skinnedMeshRenderer.destroy();
 
         // Shadow system cleanup
         shadowSystem.destroy();
@@ -1526,7 +1514,9 @@ bool Renderer::render(const Camera& camera) {
     updateUniformBuffer(currentFrame, camera);
 
     // Update bone matrices for GPU skinning
-    updateBoneMatrices(currentFrame);
+    SceneBuilder& sceneBuilder = sceneManager.getSceneBuilder();
+    AnimatedCharacter* character = sceneBuilder.hasCharacter() ? &sceneBuilder.getAnimatedCharacter() : nullptr;
+    skinnedMeshRenderer.updateBoneMatrices(currentFrame, character);
 
     profiler.endCpuZone("UniformUpdates");
 
@@ -2315,7 +2305,7 @@ void Renderer::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float 
             SkinnedMesh& skinnedMesh = character.getSkinnedMesh();
 
             // Bind skinned shadow pipeline with descriptor set that has bone matrices
-            shadowSystem.bindSkinnedShadowPipeline(cb, skinnedDescriptorSets[frameIndex]);
+            shadowSystem.bindSkinnedShadowPipeline(cb, skinnedMeshRenderer.getDescriptorSet(frameIndex));
 
             // Record the skinned mesh shadow
             shadowSystem.recordSkinnedMeshShadow(cb, cascade, playerObj.transform, skinnedMesh);
@@ -2426,7 +2416,17 @@ void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float gra
     recordSceneObjects(cmd, frameIndex);
 
     // Draw skinned character with GPU skinning
-    recordSkinnedCharacter(cmd, frameIndex);
+    {
+        SceneBuilder& sceneBuilder = sceneManager.getSceneBuilder();
+        if (sceneBuilder.hasCharacter()) {
+            const auto& sceneObjects = sceneBuilder.getRenderables();
+            size_t playerIndex = sceneBuilder.getPlayerObjectIndex();
+            if (playerIndex < sceneObjects.size()) {
+                const Renderable& playerObj = sceneObjects[playerIndex];
+                skinnedMeshRenderer.record(cmd, frameIndex, playerObj, sceneBuilder.getAnimatedCharacter());
+            }
+        }
+    }
 
     // Draw tree editor (when enabled)
     treeEditSystem.recordDraw(cmd, frameIndex);
@@ -2475,241 +2475,57 @@ void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float gra
 
 // ===== GPU Skinning Implementation =====
 
-bool Renderer::createSkinnedDescriptorSetLayout() {
-    VkDevice device = vulkanContext.getDevice();
+bool Renderer::initSkinnedMeshRenderer() {
+    SkinnedMeshRenderer::InitInfo info{};
+    info.device = vulkanContext.getDevice();
+    info.allocator = vulkanContext.getAllocator();
+    info.descriptorPool = &*descriptorManagerPool;
+    info.renderPass = postProcessSystem.getHDRRenderPass();
+    info.extent = vulkanContext.getSwapchainExtent();
+    info.shaderPath = resourcePath + "/shaders";
+    info.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+    info.addCommonBindings = [this](DescriptorManager::LayoutBuilder& builder) {
+        addCommonDescriptorBindings(builder);
+    };
 
-    // Skinned descriptor set layout:
-    // Same as main layout but with additional binding 12 for bone matrices UBO
-    DescriptorManager::LayoutBuilder builder(device);
-    addCommonDescriptorBindings(builder);
-    // Add skinned-specific binding
-    builder.addBinding(Bindings::BONE_MATRICES, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT);  // 12: bone matrices
-    skinnedDescriptorSetLayout = builder.build();
-
-    if (skinnedDescriptorSetLayout == VK_NULL_HANDLE) {
-        SDL_Log("Failed to create skinned descriptor set layout");
-        return false;
-    }
-
-    return true;
+    return skinnedMeshRenderer.init(info);
 }
 
-bool Renderer::createSkinnedGraphicsPipeline() {
-    VkDevice device = vulkanContext.getDevice();
-    VkExtent2D swapchainExtent = vulkanContext.getSwapchainExtent();
-
-    // Create pipeline layout (still needed - factory expects it to be provided)
-    VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-    pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(PushConstants);
-
-    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
-    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutInfo.setLayoutCount = 1;
-    pipelineLayoutInfo.pSetLayouts = &skinnedDescriptorSetLayout;
-    pipelineLayoutInfo.pushConstantRangeCount = 1;
-    pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
-
-    if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &skinnedPipelineLayout) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create skinned pipeline layout");
-        return false;
-    }
-
-    // Use factory for pipeline creation with SkinnedVertex input
-    auto bindingDescription = SkinnedVertex::getBindingDescription();
-    auto attributeDescriptions = SkinnedVertex::getAttributeDescriptions();
-
-    GraphicsPipelineFactory factory(device);
-    bool success = factory
-        .applyPreset(GraphicsPipelineFactory::Preset::Default)
-        .setShaders(resourcePath + "/shaders/skinned.vert.spv",
-                    resourcePath + "/shaders/shader.frag.spv")
-        .setVertexInput({bindingDescription},
-                        {attributeDescriptions.begin(), attributeDescriptions.end()})
-        .setRenderPass(postProcessSystem.getHDRRenderPass())
-        .setPipelineLayout(skinnedPipelineLayout)
-        .setExtent(swapchainExtent)
-        .setBlendMode(GraphicsPipelineFactory::BlendMode::Alpha)
-        .build(skinnedGraphicsPipeline);
-
-    if (!success) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create skinned graphics pipeline");
-        return false;
-    }
-
-    SDL_Log("Created skinned graphics pipeline for GPU skinning");
-    return true;
-}
-
-bool Renderer::createBoneMatricesBuffers() {
-    VmaAllocator allocator = vulkanContext.getAllocator();
-    VkDeviceSize bufferSize = sizeof(BoneMatricesUBO);
-
-    boneMatricesBuffers.resize(MAX_FRAMES_IN_FLIGHT);
-    boneMatricesAllocations.resize(MAX_FRAMES_IN_FLIGHT);
-    boneMatricesMapped.resize(MAX_FRAMES_IN_FLIGHT);
-
-    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = bufferSize;
-        bufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
-        VmaAllocationInfo allocationInfo;
-        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &boneMatricesBuffers[i],
-                            &boneMatricesAllocations[i], &allocationInfo) != VK_SUCCESS) {
-            SDL_Log("Failed to create bone matrices buffer");
-            return false;
-        }
-
-        boneMatricesMapped[i] = allocationInfo.pMappedData;
-
-        // Initialize with identity matrices
-        BoneMatricesUBO* ubo = static_cast<BoneMatricesUBO*>(boneMatricesMapped[i]);
-        for (uint32_t j = 0; j < MAX_BONES; j++) {
-            ubo->bones[j] = glm::mat4(1.0f);
-        }
-    }
-
-    SDL_Log("Created bone matrices buffers for GPU skinning");
-    return true;
-}
-
-bool Renderer::createSkinnedDescriptorSets() {
-    VkDevice device = vulkanContext.getDevice();
-
-    // Allocate skinned descriptor sets using the pool manager
-    skinnedDescriptorSets = descriptorManagerPool->allocate(skinnedDescriptorSetLayout, MAX_FRAMES_IN_FLIGHT);
-    if (skinnedDescriptorSets.empty()) {
-        SDL_Log("Failed to allocate skinned descriptor sets");
-        return false;
-    }
-
-    // Use factory to write skinned descriptor sets
-    MaterialDescriptorFactory factory(device);
+bool Renderer::createSkinnedMeshRendererDescriptorSets() {
     const auto& whiteTexture = sceneManager.getSceneBuilder().getWhiteTexture();
     const auto& emissiveMap = sceneManager.getSceneBuilder().getDefaultEmissiveMap();
 
-    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        MaterialDescriptorFactory::CommonBindings common{};
-        common.uniformBuffer = uniformBuffers[i];
-        common.uniformBufferSize = sizeof(UniformBufferObject);
-        common.shadowMapView = shadowSystem.getShadowImageView();
-        common.shadowMapSampler = shadowSystem.getShadowSampler();
-        common.lightBuffer = lightBuffers[i];
-        common.lightBufferSize = sizeof(LightBuffer);
-        common.emissiveMapView = emissiveMap.getImageView();
-        common.emissiveMapSampler = emissiveMap.getSampler();
-        // Point/spot shadow maps need proper array/cube textures, not 2D emissive
-        common.pointShadowView = shadowSystem.getPointShadowArrayView(i);
-        common.pointShadowSampler = shadowSystem.getPointShadowSampler();
-        common.spotShadowView = shadowSystem.getSpotShadowArrayView(i);
-        common.spotShadowSampler = shadowSystem.getSpotShadowSampler();
-        common.snowMaskView = snowMaskSystem.getSnowMaskView();
-        common.snowMaskSampler = snowMaskSystem.getSnowMaskSampler();
-        // Cloud shadow system may not be initialized yet - use white texture as fallback
-        // The binding will be updated later in init() after cloudShadowSystem.init()
-        common.cloudShadowView = whiteTexture.getImageView();
-        common.cloudShadowSampler = whiteTexture.getSampler();
-        // Snow and cloud shadow UBOs (bindings 10 and 11)
-        common.snowUboBuffer = snowBuffers[i];
-        common.snowUboBufferSize = sizeof(SnowUBO);
-        common.cloudShadowUboBuffer = cloudShadowBuffers[i];
-        common.cloudShadowUboBufferSize = sizeof(CloudShadowUBO);
-        // Bone matrices (binding 12)
-        common.boneMatricesBuffer = boneMatricesBuffers[i];
-        common.boneMatricesBufferSize = sizeof(BoneMatricesUBO);
-        // Placeholder texture for unused PBR bindings (13-16)
-        common.placeholderTextureView = whiteTexture.getImageView();
-        common.placeholderTextureSampler = whiteTexture.getSampler();
-
-        MaterialDescriptorFactory::MaterialTextures mat{};
-        mat.diffuseView = whiteTexture.getImageView();
-        mat.diffuseSampler = whiteTexture.getSampler();
-        mat.normalView = whiteTexture.getImageView();
-        mat.normalSampler = whiteTexture.getSampler();
-        factory.writeSkinnedDescriptorSet(skinnedDescriptorSets[i], common, mat);
+    // Build point and spot shadow views for all frames
+    std::vector<VkImageView> pointShadowViews(MAX_FRAMES_IN_FLIGHT);
+    std::vector<VkImageView> spotShadowViews(MAX_FRAMES_IN_FLIGHT);
+    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        pointShadowViews[i] = shadowSystem.getPointShadowArrayView(i);
+        spotShadowViews[i] = shadowSystem.getSpotShadowArrayView(i);
     }
 
-    SDL_Log("Created skinned descriptor sets for GPU skinning");
-    return true;
-}
+    SkinnedMeshRenderer::DescriptorResources resources{};
+    resources.uniformBuffers = &uniformBuffers;
+    resources.uniformBufferSize = sizeof(UniformBufferObject);
+    resources.lightBuffers = &lightBuffers;
+    resources.lightBufferSize = sizeof(LightBuffer);
+    resources.snowBuffers = &snowBuffers;
+    resources.snowBufferSize = sizeof(SnowUBO);
+    resources.cloudShadowBuffers = &cloudShadowBuffers;
+    resources.cloudShadowBufferSize = sizeof(CloudShadowUBO);
+    resources.shadowMapView = shadowSystem.getShadowImageView();
+    resources.shadowMapSampler = shadowSystem.getShadowSampler();
+    resources.emissiveMapView = emissiveMap.getImageView();
+    resources.emissiveMapSampler = emissiveMap.getSampler();
+    resources.pointShadowViews = &pointShadowViews;
+    resources.pointShadowSampler = shadowSystem.getPointShadowSampler();
+    resources.spotShadowViews = &spotShadowViews;
+    resources.spotShadowSampler = shadowSystem.getSpotShadowSampler();
+    resources.snowMaskView = snowMaskSystem.getSnowMaskView();
+    resources.snowMaskSampler = snowMaskSystem.getSnowMaskSampler();
+    resources.whiteTextureView = whiteTexture.getImageView();
+    resources.whiteTextureSampler = whiteTexture.getSampler();
 
-void Renderer::updateBoneMatrices(uint32_t currentImage) {
-    BoneMatricesUBO* ubo = static_cast<BoneMatricesUBO*>(boneMatricesMapped[currentImage]);
-
-    SceneBuilder& sceneBuilder = sceneManager.getSceneBuilder();
-    if (!sceneBuilder.hasCharacter()) {
-        // Ensure identity matrices when no character to prevent garbage data
-        for (uint32_t i = 0; i < MAX_BONES; i++) {
-            ubo->bones[i] = glm::mat4(1.0f);
-        }
-        return;
-    }
-
-    // Get bone matrices from animated character
-    std::vector<glm::mat4> boneMatrices;
-    sceneBuilder.getAnimatedCharacter().computeBoneMatrices(boneMatrices);
-
-    // Copy to mapped buffer
-    size_t numBones = std::min(boneMatrices.size(), static_cast<size_t>(MAX_BONES));
-    for (size_t i = 0; i < numBones; i++) {
-        ubo->bones[i] = boneMatrices[i];
-    }
-    // Fill remaining slots with identity to prevent garbage data in unused bones
-    for (size_t i = numBones; i < MAX_BONES; i++) {
-        ubo->bones[i] = glm::mat4(1.0f);
-    }
-}
-
-void Renderer::recordSkinnedCharacter(VkCommandBuffer cmd, uint32_t frameIndex) {
-    SceneBuilder& sceneBuilder = sceneManager.getSceneBuilder();
-    if (!sceneBuilder.hasCharacter()) return;
-
-    // Bind skinned pipeline
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, skinnedGraphicsPipeline);
-
-    // Bind skinned descriptor set
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            skinnedPipelineLayout, 0, 1, &skinnedDescriptorSets[frameIndex], 0, nullptr);
-
-    // Get the player object to get transform
-    const auto& sceneObjects = sceneBuilder.getRenderables();
-    size_t playerIndex = sceneBuilder.getPlayerObjectIndex();
-    if (playerIndex >= sceneObjects.size()) return;
-
-    const Renderable& playerObj = sceneObjects[playerIndex];
-
-    // Push constants
-    PushConstants push{};
-    push.model = playerObj.transform;
-    push.roughness = playerObj.roughness;
-    push.metallic = playerObj.metallic;
-    push.emissiveIntensity = playerObj.emissiveIntensity;
-    push.opacity = playerObj.opacity;
-    push.emissiveColor = glm::vec4(playerObj.emissiveColor, 1.0f);
-    push.pbrFlags = playerObj.pbrFlags;
-
-    vkCmdPushConstants(cmd, skinnedPipelineLayout,
-                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                       0, sizeof(PushConstants), &push);
-
-    // Bind skinned mesh vertex and index buffers
-    AnimatedCharacter& character = sceneBuilder.getAnimatedCharacter();
-    SkinnedMesh& skinnedMesh = character.getSkinnedMesh();
-
-    VkBuffer vertexBuffers[] = {skinnedMesh.getVertexBuffer()};
-    VkDeviceSize offsets[] = {0};
-    vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
-    vkCmdBindIndexBuffer(cmd, skinnedMesh.getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
-
-    vkCmdDrawIndexed(cmd, skinnedMesh.getIndexCount(), 1, 0, 0, 0);
+    return skinnedMeshRenderer.createDescriptorSets(resources);
 }
 
 void Renderer::updateHiZObjectData() {

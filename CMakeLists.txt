@@ -88,6 +88,7 @@ set(SOURCES
     src/CloudShadowSystem.cpp
     src/GLTFLoader.cpp
     src/SkinnedMesh.cpp
+    src/SkinnedMeshRenderer.cpp
     src/Animation.cpp
     src/AnimatedCharacter.cpp
     src/AnimationStateMachine.cpp

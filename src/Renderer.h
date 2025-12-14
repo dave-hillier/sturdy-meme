@@ -35,6 +35,7 @@
 #include "RockSystem.h"
 #include "CloudShadowSystem.h"
 #include "SkinnedMesh.h"
+#include "SkinnedMeshRenderer.h"
 #include "HiZSystem.h"
 #include "FrameData.h"
 #include "RenderContext.h"
@@ -404,13 +405,7 @@ private:
     VkPipeline graphicsPipeline = VK_NULL_HANDLE;
 
     // Skinned mesh rendering (GPU skinning)
-    VkDescriptorSetLayout skinnedDescriptorSetLayout = VK_NULL_HANDLE;
-    VkPipelineLayout skinnedPipelineLayout = VK_NULL_HANDLE;
-    VkPipeline skinnedGraphicsPipeline = VK_NULL_HANDLE;
-    std::vector<VkDescriptorSet> skinnedDescriptorSets;
-    std::vector<VkBuffer> boneMatricesBuffers;
-    std::vector<VmaAllocation> boneMatricesAllocations;
-    std::vector<void*> boneMatricesMapped;
+    SkinnedMeshRenderer skinnedMeshRenderer;
 
     SkySystem skySystem;
     GrassSystem grassSystem;
@@ -549,12 +544,8 @@ private:
     void updateLightBuffer(uint32_t currentImage, const Camera& camera);
 
     // Skinned mesh rendering
-    bool createSkinnedDescriptorSetLayout();
-    bool createSkinnedGraphicsPipeline();
-    bool createBoneMatricesBuffers();
-    bool createSkinnedDescriptorSets();
-    void updateBoneMatrices(uint32_t currentImage);
-    void recordSkinnedCharacter(VkCommandBuffer cmd, uint32_t frameIndex);
+    bool initSkinnedMeshRenderer();
+    bool createSkinnedMeshRendererDescriptorSets();
 
     // Hi-Z occlusion culling
     void updateHiZObjectData();
