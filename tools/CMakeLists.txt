@@ -189,3 +189,23 @@ target_link_libraries(road_generator PRIVATE
 )
 
 target_compile_features(road_generator PRIVATE cxx_std_17)
+
+# Watershed analysis tool (D8 flow direction, river extraction)
+add_executable(watershed
+    watershed/src/main.cpp
+    watershed/src/d8.cpp
+    watershed/src/watershed.cpp
+    watershed/src/png_io.cpp
+    watershed/src/river_svg.cpp
+)
+
+target_include_directories(watershed PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/watershed/include
+)
+
+target_link_libraries(watershed PRIVATE
+    SDL3::SDL3
+    lodepng
+)
+
+target_compile_features(watershed PRIVATE cxx_std_17)

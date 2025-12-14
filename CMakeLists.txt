@@ -219,13 +219,31 @@ add_custom_command(
     COMMENT "Preprocessing erosion and water placement"
 )
 
-# Custom target that depends on both preprocessing outputs
+# Watershed analysis outputs
+set(WATERSHED_DATA_DIR ${TERRAIN_DATA_DIR}/watershed)
+set(WATERSHED_RIVERS_SVG ${WATERSHED_DATA_DIR}/rivers.svg)
+
+# Run watershed tool when heightmap changes
+add_custom_command(
+    OUTPUT ${WATERSHED_RIVERS_SVG}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${WATERSHED_DATA_DIR}
+    COMMAND $<TARGET_FILE:watershed>
+        ${TERRAIN_HEIGHTMAP}
+        --output ${WATERSHED_DATA_DIR}
+        --threshold 5000
+        --sea-level 6000
+        --resolution 512
+    DEPENDS ${TERRAIN_HEIGHTMAP}
+    COMMENT "Running watershed analysis for river extraction"
+)
+
+# Custom target that depends on all preprocessing outputs
 add_custom_target(terrain_preprocessing
-    DEPENDS ${TERRAIN_TILES_META} ${EROSION_DATA_META}
+    DEPENDS ${TERRAIN_TILES_META} ${EROSION_DATA_META} ${WATERSHED_RIVERS_SVG}
 )
 
 # Ensure tools are built before preprocessing runs
-add_dependencies(terrain_preprocessing terrain_preprocess erosion_preprocess)
+add_dependencies(terrain_preprocessing terrain_preprocess erosion_preprocess watershed)
 
 # Foam noise texture generation
 set(FOAM_TEXTURE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/assets/textures)
