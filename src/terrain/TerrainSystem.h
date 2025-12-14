@@ -14,6 +14,7 @@
 #include "TerrainTileCache.h"
 #include "TerrainBuffers.h"
 #include "TerrainCameraOptimizer.h"
+#include "TerrainPipelines.h"
 #include "DescriptorManager.h"
 #include "InitContext.h"
 
@@ -258,35 +259,9 @@ private:
     bool createRenderDescriptorSetLayout();
     bool createDescriptorSets();
 
-    // Pipeline creation
-    bool createDispatcherPipeline();
-    bool createSubdivisionPipeline();
-    bool createSumReductionPipelines();
-    bool createFrustumCullPipelines();
-    bool createRenderPipeline();
-    bool createWireframePipeline();
-    bool createShadowPipeline();
-    bool createMeshletRenderPipeline();
-    bool createMeshletWireframePipeline();
-    bool createMeshletShadowPipeline();
-    bool createShadowCullPipelines();
-    bool createShadowCullingBuffers();
-
     // Utility functions
     void extractFrustumPlanes(const glm::mat4& viewProj, glm::vec4 planes[6]);
     void querySubgroupCapabilities();
-
-    // Pipeline creation helpers
-    bool createComputePipeline(const std::string& shaderName,
-                               size_t pushConstantSize,
-                               VkPipelineLayout& layout,
-                               VkPipeline& pipeline,
-                               const VkSpecializationInfo* specInfo = nullptr);
-    // Overload for pipelines that share an existing layout
-    bool createComputePipelineWithLayout(const std::string& shaderName,
-                                         VkPipelineLayout layout,
-                                         VkPipeline& pipeline,
-                                         const VkSpecializationInfo* specInfo = nullptr);
 
     // Vulkan resources
     VkDevice device = VK_NULL_HANDLE;
@@ -311,48 +286,11 @@ private:
     TerrainTileCache tileCache;          // LOD-based tile streaming
     TerrainBuffers buffers;              // Uniform, indirect, and visibility buffers
     TerrainCameraOptimizer cameraOptimizer;  // Skip-frame optimization
+    TerrainPipelines pipelines;          // All compute and graphics pipelines
 
-    // Compute pipelines
+    // Descriptor set layouts (needed for descriptor allocation)
     VkDescriptorSetLayout computeDescriptorSetLayout = VK_NULL_HANDLE;
-    VkPipelineLayout dispatcherPipelineLayout = VK_NULL_HANDLE;
-    VkPipeline dispatcherPipeline = VK_NULL_HANDLE;
-    VkPipelineLayout subdivisionPipelineLayout = VK_NULL_HANDLE;
-    VkPipeline subdivisionPipeline = VK_NULL_HANDLE;
-    VkPipelineLayout sumReductionPipelineLayout = VK_NULL_HANDLE;
-    VkPipeline sumReductionPrepassPipeline = VK_NULL_HANDLE;
-    VkPipeline sumReductionPrepassSubgroupPipeline = VK_NULL_HANDLE;  // Subgroup-optimized version
-    VkPipeline sumReductionPipeline = VK_NULL_HANDLE;
-
-    // Optimized sum reduction pipelines (batched multi-level)
-    VkPipelineLayout sumReductionBatchedPipelineLayout = VK_NULL_HANDLE;
-    VkPipeline sumReductionBatchedPipeline = VK_NULL_HANDLE;
-
-    // GPU culling pipelines (stream compaction)
-    VkPipelineLayout frustumCullPipelineLayout = VK_NULL_HANDLE;
-    VkPipeline frustumCullPipeline = VK_NULL_HANDLE;
-    VkPipelineLayout prepareDispatchPipelineLayout = VK_NULL_HANDLE;
-    VkPipeline prepareDispatchPipeline = VK_NULL_HANDLE;
-
-    // Render pipelines
     VkDescriptorSetLayout renderDescriptorSetLayout = VK_NULL_HANDLE;
-    VkPipelineLayout renderPipelineLayout = VK_NULL_HANDLE;
-    VkPipeline renderPipeline = VK_NULL_HANDLE;
-    VkPipeline wireframePipeline = VK_NULL_HANDLE;
-
-    // Meshlet render pipelines (uses same layout/descriptor sets)
-    VkPipeline meshletRenderPipeline = VK_NULL_HANDLE;
-    VkPipeline meshletWireframePipeline = VK_NULL_HANDLE;
-
-    // Shadow pipeline
-    VkPipelineLayout shadowPipelineLayout = VK_NULL_HANDLE;
-    VkPipeline shadowPipeline = VK_NULL_HANDLE;
-    VkPipeline meshletShadowPipeline = VK_NULL_HANDLE;
-
-    // Shadow culling pipeline and resources
-    VkPipelineLayout shadowCullPipelineLayout = VK_NULL_HANDLE;
-    VkPipeline shadowCullPipeline = VK_NULL_HANDLE;
-    VkPipeline shadowCulledPipeline = VK_NULL_HANDLE;           // Uses culled indices
-    VkPipeline meshletShadowCulledPipeline = VK_NULL_HANDLE;    // Meshlet version
 
     // Descriptor sets
     std::vector<VkDescriptorSet> computeDescriptorSets;  // Per frame

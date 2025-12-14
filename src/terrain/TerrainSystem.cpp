@@ -1,9 +1,7 @@
 #include "TerrainSystem.h"
 #include "TerrainBuffers.h"
 #include "TerrainCameraOptimizer.h"
-#include "ShaderLoader.h"
 #include "BindingBuilder.h"
-#include "PipelineBuilder.h"
 #include "DescriptorManager.h"
 #include "GpuProfiler.h"
 #include "UBOs.h"
@@ -13,8 +11,6 @@
 #include <cmath>
 #include <algorithm>
 #include <stdexcept>
-
-using ShaderLoader::loadShaderModule;
 
 bool TerrainSystem::init(const InitInfo& info, const TerrainConfig& cfg) {
     device = info.device;
@@ -105,27 +101,24 @@ bool TerrainSystem::init(const InitInfo& info, const TerrainConfig& cfg) {
     bufferInfo.maxVisibleTriangles = MAX_VISIBLE_TRIANGLES;
     if (!buffers.init(bufferInfo)) return false;
 
-    // Create remaining resources
+    // Create descriptor set layouts and sets
     if (!createComputeDescriptorSetLayout()) return false;
     if (!createRenderDescriptorSetLayout()) return false;
     if (!createDescriptorSets()) return false;
-    if (!createDispatcherPipeline()) return false;
-    if (!createSubdivisionPipeline()) return false;
-    if (!createSumReductionPipelines()) return false;
-    if (!createFrustumCullPipelines()) return false;
-    if (!createRenderPipeline()) return false;
-    if (!createWireframePipeline()) return false;
-    if (!createShadowPipeline()) return false;
 
-    // Create meshlet pipelines if enabled
-    if (config.useMeshlets) {
-        if (!createMeshletRenderPipeline()) return false;
-        if (!createMeshletWireframePipeline()) return false;
-        if (!createMeshletShadowPipeline()) return false;
-    }
-
-    // Create shadow culling pipelines
-    if (!createShadowCullPipelines()) return false;
+    // Initialize pipelines subsystem
+    TerrainPipelines::InitInfo pipelineInfo{};
+    pipelineInfo.device = device;
+    pipelineInfo.physicalDevice = physicalDevice;
+    pipelineInfo.renderPass = renderPass;
+    pipelineInfo.shadowRenderPass = shadowRenderPass;
+    pipelineInfo.computeDescriptorSetLayout = computeDescriptorSetLayout;
+    pipelineInfo.renderDescriptorSetLayout = renderDescriptorSetLayout;
+    pipelineInfo.shaderPath = shaderPath;
+    pipelineInfo.useMeshlets = config.useMeshlets;
+    pipelineInfo.meshletIndexCount = config.useMeshlets ? meshlet.getIndexCount() : 0;
+    pipelineInfo.subgroupCaps = &subgroupCaps;
+    if (!pipelines.init(pipelineInfo)) return false;
 
     SDL_Log("TerrainSystem initialized with CBT max depth %d, meshlets %s, shadow culling %s",
             config.maxDepth, config.useMeshlets ? "enabled" : "disabled",
@@ -154,37 +147,8 @@ bool TerrainSystem::init(const InitContext& ctx, const TerrainInitParams& params
 void TerrainSystem::destroy(VkDevice device, VmaAllocator allocator) {
     vkDeviceWaitIdle(device);
 
-    // Destroy pipelines
-    if (dispatcherPipeline) vkDestroyPipeline(device, dispatcherPipeline, nullptr);
-    if (subdivisionPipeline) vkDestroyPipeline(device, subdivisionPipeline, nullptr);
-    if (sumReductionPrepassPipeline) vkDestroyPipeline(device, sumReductionPrepassPipeline, nullptr);
-    if (sumReductionPrepassSubgroupPipeline) vkDestroyPipeline(device, sumReductionPrepassSubgroupPipeline, nullptr);
-    if (sumReductionPipeline) vkDestroyPipeline(device, sumReductionPipeline, nullptr);
-    if (sumReductionBatchedPipeline) vkDestroyPipeline(device, sumReductionBatchedPipeline, nullptr);
-    if (frustumCullPipeline) vkDestroyPipeline(device, frustumCullPipeline, nullptr);
-    if (prepareDispatchPipeline) vkDestroyPipeline(device, prepareDispatchPipeline, nullptr);
-    if (renderPipeline) vkDestroyPipeline(device, renderPipeline, nullptr);
-    if (wireframePipeline) vkDestroyPipeline(device, wireframePipeline, nullptr);
-    if (shadowPipeline) vkDestroyPipeline(device, shadowPipeline, nullptr);
-    if (meshletRenderPipeline) vkDestroyPipeline(device, meshletRenderPipeline, nullptr);
-    if (meshletWireframePipeline) vkDestroyPipeline(device, meshletWireframePipeline, nullptr);
-    if (meshletShadowPipeline) vkDestroyPipeline(device, meshletShadowPipeline, nullptr);
-
-    // Shadow culling pipelines
-    if (shadowCullPipeline) vkDestroyPipeline(device, shadowCullPipeline, nullptr);
-    if (shadowCulledPipeline) vkDestroyPipeline(device, shadowCulledPipeline, nullptr);
-    if (meshletShadowCulledPipeline) vkDestroyPipeline(device, meshletShadowCulledPipeline, nullptr);
-
-    // Destroy pipeline layouts
-    if (dispatcherPipelineLayout) vkDestroyPipelineLayout(device, dispatcherPipelineLayout, nullptr);
-    if (subdivisionPipelineLayout) vkDestroyPipelineLayout(device, subdivisionPipelineLayout, nullptr);
-    if (sumReductionPipelineLayout) vkDestroyPipelineLayout(device, sumReductionPipelineLayout, nullptr);
-    if (sumReductionBatchedPipelineLayout) vkDestroyPipelineLayout(device, sumReductionBatchedPipelineLayout, nullptr);
-    if (frustumCullPipelineLayout) vkDestroyPipelineLayout(device, frustumCullPipelineLayout, nullptr);
-    if (prepareDispatchPipelineLayout) vkDestroyPipelineLayout(device, prepareDispatchPipelineLayout, nullptr);
-    if (renderPipelineLayout) vkDestroyPipelineLayout(device, renderPipelineLayout, nullptr);
-    if (shadowPipelineLayout) vkDestroyPipelineLayout(device, shadowPipelineLayout, nullptr);
-    if (shadowCullPipelineLayout) vkDestroyPipelineLayout(device, shadowCullPipelineLayout, nullptr);
+    // Destroy pipelines subsystem
+    pipelines.destroy(device);
 
     // Destroy descriptor set layouts
     if (computeDescriptorSetLayout) vkDestroyDescriptorSetLayout(device, computeDescriptorSetLayout, nullptr);
@@ -335,195 +299,6 @@ bool TerrainSystem::createDescriptorSets() {
     return true;
 }
 
-bool TerrainSystem::createDispatcherPipeline() {
-    return createComputePipeline("terrain_dispatcher.comp.spv",
-                                 sizeof(TerrainDispatcherPushConstants),
-                                 dispatcherPipelineLayout,
-                                 dispatcherPipeline);
-}
-
-bool TerrainSystem::createSubdivisionPipeline() {
-    return createComputePipeline("terrain_subdivision.comp.spv",
-                                 sizeof(TerrainSubdivisionPushConstants),
-                                 subdivisionPipelineLayout,
-                                 subdivisionPipeline);
-}
-
-bool TerrainSystem::createSumReductionPipelines() {
-    // Create shared layout for prepass and regular pipelines
-    VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(TerrainSumReductionPushConstants);
-
-    sumReductionPipelineLayout = DescriptorManager::createPipelineLayout(
-        device, computeDescriptorSetLayout, {pushConstantRange});
-    if (sumReductionPipelineLayout == VK_NULL_HANDLE) return false;
-
-    // Prepass pipeline
-    if (!createComputePipelineWithLayout("terrain_sum_reduction_prepass.comp.spv",
-                                         sumReductionPipelineLayout,
-                                         sumReductionPrepassPipeline)) {
-        return false;
-    }
-
-    // Subgroup-optimized prepass pipeline (optional)
-    if (subgroupCaps.hasSubgroupArithmetic) {
-        if (createComputePipelineWithLayout("terrain_sum_reduction_prepass_subgroup.comp.spv",
-                                            sumReductionPipelineLayout,
-                                            sumReductionPrepassSubgroupPipeline)) {
-            SDL_Log("TerrainSystem: Using subgroup-optimized sum reduction prepass");
-        } else {
-            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to create subgroup prepass pipeline, using fallback");
-        }
-    }
-
-    // Regular sum reduction pipeline
-    if (!createComputePipelineWithLayout("terrain_sum_reduction.comp.spv",
-                                         sumReductionPipelineLayout,
-                                         sumReductionPipeline)) {
-        return false;
-    }
-
-    // Batched sum reduction pipeline (separate layout with different push constants)
-    return createComputePipeline("terrain_sum_reduction_batched.comp.spv",
-                                 sizeof(TerrainSumReductionBatchedPushConstants),
-                                 sumReductionBatchedPipelineLayout,
-                                 sumReductionBatchedPipeline);
-}
-
-bool TerrainSystem::createFrustumCullPipelines() {
-    if (!createComputePipeline("terrain_frustum_cull.comp.spv",
-                               sizeof(TerrainFrustumCullPushConstants),
-                               frustumCullPipelineLayout,
-                               frustumCullPipeline)) {
-        return false;
-    }
-
-    return createComputePipeline("terrain_prepare_cull_dispatch.comp.spv",
-                                 sizeof(TerrainPrepareCullDispatchPushConstants),
-                                 prepareDispatchPipelineLayout,
-                                 prepareDispatchPipeline);
-}
-
-bool TerrainSystem::createRenderPipeline() {
-    // Create render pipeline layout (shared by render and wireframe pipelines)
-    renderPipelineLayout = DescriptorManager::createPipelineLayout(device, renderDescriptorSetLayout, {});
-    if (renderPipelineLayout == VK_NULL_HANDLE) return false;
-
-    // Create filled render pipeline
-    PipelineBuilder builder(device);
-    builder.addShaderStage(shaderPath + "/terrain/terrain.vert.spv", VK_SHADER_STAGE_VERTEX_BIT)
-           .addShaderStage(shaderPath + "/terrain/terrain.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
-
-    return builder.buildGraphicsPipeline(PipelinePresets::filled(renderPass), renderPipelineLayout, renderPipeline);
-}
-
-bool TerrainSystem::createWireframePipeline() {
-    PipelineBuilder builder(device);
-    builder.addShaderStage(shaderPath + "/terrain/terrain.vert.spv", VK_SHADER_STAGE_VERTEX_BIT)
-           .addShaderStage(shaderPath + "/terrain/terrain_wireframe.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
-
-    return builder.buildGraphicsPipeline(PipelinePresets::wireframe(renderPass), renderPipelineLayout, wireframePipeline);
-}
-
-bool TerrainSystem::createShadowPipeline() {
-    // Create shadow pipeline layout with push constants
-    PipelineBuilder layoutBuilder(device);
-    layoutBuilder.addPushConstantRange(VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(TerrainShadowPushConstants));
-
-    if (!layoutBuilder.buildPipelineLayout({renderDescriptorSetLayout}, shadowPipelineLayout)) {
-        return false;
-    }
-
-    // Create shadow pipeline
-    PipelineBuilder builder(device);
-    builder.addShaderStage(shaderPath + "/terrain/terrain_shadow.vert.spv", VK_SHADER_STAGE_VERTEX_BIT)
-           .addShaderStage(shaderPath + "/terrain/terrain_shadow.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
-
-    return builder.buildGraphicsPipeline(PipelinePresets::shadow(shadowRenderPass), shadowPipelineLayout, shadowPipeline);
-}
-
-bool TerrainSystem::createMeshletRenderPipeline() {
-    PipelineBuilder builder(device);
-    builder.addShaderStage(shaderPath + "/terrain/terrain_meshlet.vert.spv", VK_SHADER_STAGE_VERTEX_BIT)
-           .addShaderStage(shaderPath + "/terrain/terrain.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
-
-    auto cfg = PipelinePresets::filled(renderPass);
-    cfg.useMeshletVertexInput = true;
-
-    return builder.buildGraphicsPipeline(cfg, renderPipelineLayout, meshletRenderPipeline);
-}
-
-bool TerrainSystem::createMeshletWireframePipeline() {
-    PipelineBuilder builder(device);
-    builder.addShaderStage(shaderPath + "/terrain/terrain_meshlet.vert.spv", VK_SHADER_STAGE_VERTEX_BIT)
-           .addShaderStage(shaderPath + "/terrain/terrain_wireframe.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
-
-    auto cfg = PipelinePresets::wireframe(renderPass);
-    cfg.useMeshletVertexInput = true;
-
-    return builder.buildGraphicsPipeline(cfg, renderPipelineLayout, meshletWireframePipeline);
-}
-
-bool TerrainSystem::createMeshletShadowPipeline() {
-    PipelineBuilder builder(device);
-    builder.addShaderStage(shaderPath + "/terrain/terrain_meshlet_shadow.vert.spv", VK_SHADER_STAGE_VERTEX_BIT)
-           .addShaderStage(shaderPath + "/terrain/terrain_shadow.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
-
-    auto cfg = PipelinePresets::shadow(shadowRenderPass);
-    cfg.useMeshletVertexInput = true;
-
-    return builder.buildGraphicsPipeline(cfg, shadowPipelineLayout, meshletShadowPipeline);
-}
-
-bool TerrainSystem::createShadowCullPipelines() {
-    // Specialization constant for meshlet index count
-    uint32_t meshletIndexCount = config.useMeshlets ? meshlet.getIndexCount() : 0;
-    VkSpecializationMapEntry specEntry{0, 0, sizeof(uint32_t)};
-    VkSpecializationInfo specInfo{1, &specEntry, sizeof(uint32_t), &meshletIndexCount};
-
-    // Create shadow cull compute pipeline with specialization constants
-    if (!createComputePipeline("terrain_shadow_cull.comp.spv",
-                               sizeof(TerrainShadowCullPushConstants),
-                               shadowCullPipelineLayout,
-                               shadowCullPipeline,
-                               &specInfo)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create shadow cull compute pipeline");
-        return false;
-    }
-
-    // Create shadow culled graphics pipeline (non-meshlet, no vertex input)
-    {
-        PipelineBuilder builder(device);
-        builder.addShaderStage(shaderPath + "/terrain/terrain_shadow_culled.vert.spv", VK_SHADER_STAGE_VERTEX_BIT)
-               .addShaderStage(shaderPath + "/terrain/terrain_shadow.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
-
-        if (!builder.buildGraphicsPipeline(PipelinePresets::shadow(shadowRenderPass),
-                                           shadowPipelineLayout, shadowCulledPipeline)) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create shadow culled graphics pipeline");
-            return false;
-        }
-    }
-
-    // Create meshlet shadow culled pipeline (if meshlets enabled)
-    if (config.useMeshlets) {
-        PipelineBuilder builder(device);
-        builder.addShaderStage(shaderPath + "/terrain/terrain_meshlet_shadow_culled.vert.spv", VK_SHADER_STAGE_VERTEX_BIT)
-               .addShaderStage(shaderPath + "/terrain/terrain_shadow.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
-
-        auto cfg = PipelinePresets::shadow(shadowRenderPass);
-        cfg.useMeshletVertexInput = true;
-
-        if (!builder.buildGraphicsPipeline(cfg, shadowPipelineLayout, meshletShadowCulledPipeline)) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create meshlet shadow culled graphics pipeline");
-            return false;
-        }
-    }
-
-    SDL_Log("TerrainSystem: Shadow culling pipelines created successfully");
-    return true;
-}
 
 void TerrainSystem::querySubgroupCapabilities() {
     VkPhysicalDeviceSubgroupProperties subgroupProps{};
@@ -542,73 +317,6 @@ void TerrainSystem::querySubgroupCapabilities() {
     SDL_Log("TerrainSystem: Subgroup size=%u, arithmetic=%s",
             subgroupCaps.subgroupSize,
             subgroupCaps.hasSubgroupArithmetic ? "yes" : "no");
-}
-
-bool TerrainSystem::createComputePipeline(const std::string& shaderName,
-                                          size_t pushConstantSize,
-                                          VkPipelineLayout& layout,
-                                          VkPipeline& pipeline,
-                                          const VkSpecializationInfo* specInfo) {
-    VkShaderModule shaderModule = loadShaderModule(device, shaderPath + "/terrain/" + shaderName);
-    if (!shaderModule) return false;
-
-    // Create pipeline layout with push constants if needed
-    std::vector<VkPushConstantRange> pushConstants;
-    if (pushConstantSize > 0) {
-        VkPushConstantRange range{};
-        range.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-        range.offset = 0;
-        range.size = static_cast<uint32_t>(pushConstantSize);
-        pushConstants.push_back(range);
-    }
-
-    layout = DescriptorManager::createPipelineLayout(device, computeDescriptorSetLayout, pushConstants);
-    if (layout == VK_NULL_HANDLE) {
-        vkDestroyShaderModule(device, shaderModule, nullptr);
-        return false;
-    }
-
-    VkPipelineShaderStageCreateInfo stageInfo{};
-    stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stageInfo.module = shaderModule;
-    stageInfo.pName = "main";
-    stageInfo.pSpecializationInfo = specInfo;
-
-    VkComputePipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    pipelineInfo.stage = stageInfo;
-    pipelineInfo.layout = layout;
-
-    VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline);
-    vkDestroyShaderModule(device, shaderModule, nullptr);
-
-    return result == VK_SUCCESS;
-}
-
-bool TerrainSystem::createComputePipelineWithLayout(const std::string& shaderName,
-                                                    VkPipelineLayout layout,
-                                                    VkPipeline& pipeline,
-                                                    const VkSpecializationInfo* specInfo) {
-    VkShaderModule shaderModule = loadShaderModule(device, shaderPath + "/terrain/" + shaderName);
-    if (!shaderModule) return false;
-
-    VkPipelineShaderStageCreateInfo stageInfo{};
-    stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stageInfo.module = shaderModule;
-    stageInfo.pName = "main";
-    stageInfo.pSpecializationInfo = specInfo;
-
-    VkComputePipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    pipelineInfo.stage = stageInfo;
-    pipelineInfo.layout = layout;
-
-    VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline);
-    vkDestroyShaderModule(device, shaderModule, nullptr);
-
-    return result == VK_SUCCESS;
 }
 
 void TerrainSystem::extractFrustumPlanes(const glm::mat4& viewProj, glm::vec4 planes[6]) {
@@ -971,14 +679,14 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
     // 1. Dispatcher - set up indirect args
     if (profiler) profiler->beginZone(cmd, "Terrain:Dispatcher");
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, dispatcherPipeline);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, dispatcherPipelineLayout,
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines.getDispatcherPipeline());
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines.getDispatcherPipelineLayout(),
                            0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
 
     TerrainDispatcherPushConstants dispatcherPC{};
     dispatcherPC.subdivisionWorkgroupSize = SUBDIVISION_WORKGROUP_SIZE;
     dispatcherPC.meshletIndexCount = config.useMeshlets ? meshlet.getIndexCount() : 0;
-    vkCmdPushConstants(cmd, dispatcherPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+    vkCmdPushConstants(cmd, pipelines.getDispatcherPipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0,
                       sizeof(dispatcherPC), &dispatcherPC);
 
     vkCmdDispatch(cmd, 1, 1, 1);
@@ -998,8 +706,8 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
         // No separate frustum cull pass - culling happens inside subdivision shader
         if (profiler) profiler->beginZone(cmd, "Terrain:Subdivision");
 
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, subdivisionPipeline);
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, subdivisionPipelineLayout,
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines.getSubdivisionPipeline());
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines.getSubdivisionPipelineLayout(),
                                0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
 
         TerrainSubdivisionPushConstants subdivPC{};
@@ -1007,7 +715,7 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
         subdivPC.frameIndex = subdivisionFrameCount;
         subdivPC.spreadFactor = config.spreadFactor;
         subdivPC.reserved = 0;
-        vkCmdPushConstants(cmd, subdivisionPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+        vkCmdPushConstants(cmd, pipelines.getSubdivisionPipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0,
                           sizeof(subdivPC), &subdivPC);
 
         // Dispatch all triangles - inline frustum culling handles early-out
@@ -1018,8 +726,8 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
         // Merge phase: process all triangles directly (no culling)
         if (profiler) profiler->beginZone(cmd, "Terrain:Subdivision");
 
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, subdivisionPipeline);
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, subdivisionPipelineLayout,
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines.getSubdivisionPipeline());
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines.getSubdivisionPipelineLayout(),
                                0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
 
         TerrainSubdivisionPushConstants subdivPC{};
@@ -1027,7 +735,7 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
         subdivPC.frameIndex = subdivisionFrameCount;
         subdivPC.spreadFactor = config.spreadFactor;
         subdivPC.reserved = 0;
-        vkCmdPushConstants(cmd, subdivisionPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+        vkCmdPushConstants(cmd, pipelines.getSubdivisionPipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0,
                           sizeof(subdivPC), &subdivPC);
 
         // Use the original indirect dispatch (all triangles)
@@ -1049,16 +757,16 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
 
     int levelsFromPrepass;
 
-    if (sumReductionPrepassSubgroupPipeline) {
+    if (pipelines.getSumReductionPrepassSubgroupPipeline()) {
         // Subgroup prepass - processes 13 levels:
         // - SWAR popcount: 5 levels (32 bits -> 6-bit sum)
         // - Subgroup shuffle: 5 levels (32 threads -> 11-bit sum)
         // - Shared memory: 3 levels (8 subgroups -> 14-bit sum)
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, sumReductionPrepassSubgroupPipeline);
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, sumReductionPipelineLayout,
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines.getSumReductionPrepassSubgroupPipeline());
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines.getSumReductionPipelineLayout(),
                                0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
 
-        vkCmdPushConstants(cmd, sumReductionPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+        vkCmdPushConstants(cmd, pipelines.getSumReductionPipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0,
                           sizeof(sumPC), &sumPC);
 
         uint32_t workgroups = std::max(1u, (1u << (config.maxDepth - 5)) / SUM_REDUCTION_WORKGROUP_SIZE);
@@ -1069,11 +777,11 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
         levelsFromPrepass = 13;  // SWAR (5) + subgroup (5) + shared memory (3)
     } else {
         // Fallback path: standard prepass handles 5 levels
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, sumReductionPrepassPipeline);
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, sumReductionPipelineLayout,
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines.getSumReductionPrepassPipeline());
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines.getSumReductionPipelineLayout(),
                                0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
 
-        vkCmdPushConstants(cmd, sumReductionPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+        vkCmdPushConstants(cmd, pipelines.getSumReductionPipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0,
                           sizeof(sumPC), &sumPC);
 
         uint32_t workgroups = std::max(1u, (1u << (config.maxDepth - 5)) / SUM_REDUCTION_WORKGROUP_SIZE);
@@ -1092,13 +800,13 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
     if (startDepth >= 0) {
         if (profiler) profiler->beginZone(cmd, "Terrain:SumReductionLevels");
 
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, sumReductionPipeline);
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, sumReductionPipelineLayout,
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines.getSumReductionPipeline());
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines.getSumReductionPipelineLayout(),
                                0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
 
         for (int depth = startDepth; depth >= 0; --depth) {
             sumPC.passID = depth;
-            vkCmdPushConstants(cmd, sumReductionPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+            vkCmdPushConstants(cmd, pipelines.getSumReductionPipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0,
                               sizeof(sumPC), &sumPC);
 
             uint32_t workgroups = std::max(1u, (1u << depth) / SUM_REDUCTION_WORKGROUP_SIZE);
@@ -1113,8 +821,8 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
     // 4. Final dispatcher pass to update draw args
     if (profiler) profiler->beginZone(cmd, "Terrain:FinalDispatch");
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, dispatcherPipeline);
-    vkCmdPushConstants(cmd, dispatcherPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines.getDispatcherPipeline());
+    vkCmdPushConstants(cmd, pipelines.getDispatcherPipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0,
                       sizeof(dispatcherPC), &dispatcherPC);
     vkCmdDispatch(cmd, 1, 1, 1);
 
@@ -1127,13 +835,13 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
 void TerrainSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
     VkPipeline pipeline;
     if (config.useMeshlets) {
-        pipeline = wireframeMode ? meshletWireframePipeline : meshletRenderPipeline;
+        pipeline = wireframeMode ? pipelines.getMeshletWireframePipeline() : pipelines.getMeshletRenderPipeline();
     } else {
-        pipeline = wireframeMode ? wireframePipeline : renderPipeline;
+        pipeline = wireframeMode ? pipelines.getWireframePipeline() : pipelines.getRenderPipeline();
     }
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, renderPipelineLayout,
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.getRenderPipelineLayout(),
                            0, 1, &renderDescriptorSets[frameIndex], 0, nullptr);
 
     VkViewport viewport{};
@@ -1167,7 +875,7 @@ void TerrainSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
 
 void TerrainSystem::recordShadowCull(VkCommandBuffer cmd, uint32_t frameIndex,
                                       const glm::mat4& lightViewProj, int cascadeIndex) {
-    if (!shadowCullingEnabled || shadowCullPipeline == VK_NULL_HANDLE) {
+    if (!shadowCullingEnabled || !pipelines.hasShadowCulling()) {
         return;
     }
 
@@ -1175,8 +883,8 @@ void TerrainSystem::recordShadowCull(VkCommandBuffer cmd, uint32_t frameIndex,
     Barriers::clearBufferForCompute(cmd, buffers.getShadowVisibleBuffer());
 
     // Bind shadow cull compute pipeline
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, shadowCullPipeline);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, shadowCullPipelineLayout,
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines.getShadowCullPipeline());
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines.getShadowCullPipelineLayout(),
                            0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
 
     // Set up push constants with frustum planes
@@ -1187,7 +895,7 @@ void TerrainSystem::recordShadowCull(VkCommandBuffer cmd, uint32_t frameIndex,
     pc.heightScale = config.heightScale;
     pc.cascadeIndex = static_cast<uint32_t>(cascadeIndex);
 
-    vkCmdPushConstants(cmd, shadowCullPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT,
+    vkCmdPushConstants(cmd, pipelines.getShadowCullPipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT,
                        0, sizeof(pc), &pc);
 
     // Use indirect dispatch - the workgroup count is computed on GPU in terrain_dispatcher
@@ -1201,16 +909,16 @@ void TerrainSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex,
                                       const glm::mat4& lightViewProj, int cascadeIndex) {
     // Choose pipeline: culled vs non-culled, meshlet vs direct
     VkPipeline pipeline;
-    bool useCulled = shadowCullingEnabled && shadowCulledPipeline != VK_NULL_HANDLE;
+    bool useCulled = shadowCullingEnabled && pipelines.getShadowCulledPipeline() != VK_NULL_HANDLE;
 
     if (config.useMeshlets) {
-        pipeline = useCulled ? meshletShadowCulledPipeline : meshletShadowPipeline;
+        pipeline = useCulled ? pipelines.getMeshletShadowCulledPipeline() : pipelines.getMeshletShadowPipeline();
     } else {
-        pipeline = useCulled ? shadowCulledPipeline : shadowPipeline;
+        pipeline = useCulled ? pipelines.getShadowCulledPipeline() : pipelines.getShadowPipeline();
     }
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipelineLayout,
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.getShadowPipelineLayout(),
                            0, 1, &renderDescriptorSets[frameIndex], 0, nullptr);
 
     VkViewport viewport{};
@@ -1234,7 +942,7 @@ void TerrainSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex,
     pc.terrainSize = config.size;
     pc.heightScale = config.heightScale;
     pc.cascadeIndex = cascadeIndex;
-    vkCmdPushConstants(cmd, shadowPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pc), &pc);
+    vkCmdPushConstants(cmd, pipelines.getShadowPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pc), &pc);
 
     if (config.useMeshlets) {
         // Bind meshlet vertex and index buffers
