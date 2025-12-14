@@ -743,3 +743,103 @@ bool TerrainTileCache::loadTileCPUOnly(TileCoord coord, uint32_t lod) {
 
     return true;
 }
+
+#ifdef DEBUG_LOD_HEIGHTS
+void TerrainTileCache::debugCrossReferenceLODs(float worldX, float worldZ) {
+    SDL_Log("=== DEBUG LOD Cross-Reference at world (%.1f, %.1f) ===", worldX, worldZ);
+
+    // Sample height from each LOD level
+    float heights[4] = {0, 0, 0, 0};
+    bool found[4] = {false, false, false, false};
+
+    for (uint32_t lod = 0; lod < numLODLevels && lod < 4; lod++) {
+        // Calculate which tile contains this position at this LOD
+        uint32_t lodTilesX = tilesX >> lod;
+        uint32_t lodTilesZ = tilesZ >> lod;
+        if (lodTilesX < 1) lodTilesX = 1;
+        if (lodTilesZ < 1) lodTilesZ = 1;
+
+        float normX = (worldX / terrainSize) + 0.5f;
+        float normZ = (worldZ / terrainSize) + 0.5f;
+        normX = std::clamp(normX, 0.0f, 0.9999f);
+        normZ = std::clamp(normZ, 0.0f, 0.9999f);
+
+        TileCoord coord;
+        coord.x = static_cast<int32_t>(normX * lodTilesX);
+        coord.z = static_cast<int32_t>(normZ * lodTilesZ);
+
+        // Try to load tile CPU data
+        if (!loadTileCPUOnly(coord, lod)) {
+            SDL_Log("  LOD%u: Tile (%d,%d) - FAILED TO LOAD", lod, coord.x, coord.z);
+            continue;
+        }
+
+        // Get the tile
+        uint64_t key = makeTileKey(coord, lod);
+        auto it = loadedTiles.find(key);
+        if (it == loadedTiles.end() || it->second.cpuData.empty()) {
+            SDL_Log("  LOD%u: Tile (%d,%d) - NO DATA", lod, coord.x, coord.z);
+            continue;
+        }
+
+        const TerrainTile& tile = it->second;
+
+        // Check if position is within tile bounds
+        if (worldX < tile.worldMinX || worldX > tile.worldMaxX ||
+            worldZ < tile.worldMinZ || worldZ > tile.worldMaxZ) {
+            SDL_Log("  LOD%u: Tile (%d,%d) bounds [%.0f,%.0f]-[%.0f,%.0f] - POSITION OUTSIDE!",
+                    lod, coord.x, coord.z,
+                    tile.worldMinX, tile.worldMinZ, tile.worldMaxX, tile.worldMaxZ);
+            continue;
+        }
+
+        // Calculate UV within tile
+        float u = (worldX - tile.worldMinX) / (tile.worldMaxX - tile.worldMinX);
+        float v = (worldZ - tile.worldMinZ) / (tile.worldMaxZ - tile.worldMinZ);
+
+        // Sample with bilinear interpolation
+        float fx = u * (tileResolution - 1);
+        float fy = v * (tileResolution - 1);
+
+        int x0 = static_cast<int>(fx);
+        int y0 = static_cast<int>(fy);
+        int x1 = std::min(x0 + 1, static_cast<int>(tileResolution - 1));
+        int y1 = std::min(y0 + 1, static_cast<int>(tileResolution - 1));
+
+        float tx = fx - x0;
+        float ty = fy - y0;
+
+        float h00 = tile.cpuData[y0 * tileResolution + x0];
+        float h10 = tile.cpuData[y0 * tileResolution + x1];
+        float h01 = tile.cpuData[y1 * tileResolution + x0];
+        float h11 = tile.cpuData[y1 * tileResolution + x1];
+
+        float h0 = h00 * (1.0f - tx) + h10 * tx;
+        float h1 = h01 * (1.0f - tx) + h11 * tx;
+        float hNorm = h0 * (1.0f - ty) + h1 * ty;
+
+        heights[lod] = hNorm * heightScale;
+        found[lod] = true;
+
+        SDL_Log("  LOD%u: Tile (%d,%d) bounds [%.0f,%.0f]-[%.0f,%.0f]",
+                lod, coord.x, coord.z,
+                tile.worldMinX, tile.worldMinZ, tile.worldMaxX, tile.worldMaxZ);
+        SDL_Log("         UV=(%.4f,%.4f) pixel=(%.1f,%.1f) hNorm=%.6f worldH=%.2f",
+                u, v, fx, fy, hNorm, heights[lod]);
+    }
+
+    // Compare heights
+    SDL_Log("  --- Height Comparison ---");
+    for (uint32_t lod = 0; lod < numLODLevels && lod < 4; lod++) {
+        if (found[lod]) {
+            float diff = (lod > 0 && found[0]) ? (heights[lod] - heights[0]) : 0.0f;
+            SDL_Log("  LOD%u: %.2f m %s", lod, heights[lod],
+                    (lod > 0 && found[0]) ?
+                        (std::abs(diff) > 0.1f ?
+                            (diff > 0 ? "(HIGHER than LOD0!)" : "(lower than LOD0)") : "(matches LOD0)")
+                        : "(reference)");
+        }
+    }
+    SDL_Log("=== End LOD Cross-Reference ===");
+}
+#endif

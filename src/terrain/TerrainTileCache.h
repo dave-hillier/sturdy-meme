@@ -127,6 +127,12 @@ public:
     // Returns true if cpuData is available after this call
     bool loadTileCPUOnly(TileCoord coord, uint32_t lod);
 
+#ifdef DEBUG_LOD_HEIGHTS
+    // Debug: Cross-reference heights across LOD levels at a world position
+    // Logs heights from all available LOD levels to verify consistency
+    void debugCrossReferenceLODs(float worldX, float worldZ);
+#endif
+
     // LOD distance thresholds (can be configured)
     static constexpr float LOD0_MAX_DISTANCE = 1000.0f;  // < 1km: LOD0
     static constexpr float LOD1_MAX_DISTANCE = 2000.0f;  // 1-2km: LOD1

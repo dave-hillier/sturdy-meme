@@ -191,6 +191,13 @@ bool PhysicsTerrain::loadTile(TileCoord coord) {
     SDL_Log("PhysicsTerrain: Loaded tile (%d, %d) at world (%.0f, %.0f) - (%.0f, %.0f)",
             coord.x, coord.z, worldMinX, worldMinZ, worldMaxX, worldMaxZ);
 
+#ifdef DEBUG_LOD_HEIGHTS
+    // Cross-reference LOD levels at tile center to verify height consistency
+    float testX = (worldMinX + worldMaxX) * 0.5f;
+    float testZ = (worldMinZ + worldMaxZ) * 0.5f;
+    terrainTileCache->debugCrossReferenceLODs(testX, testZ);
+#endif
+
     return true;
 }
 
