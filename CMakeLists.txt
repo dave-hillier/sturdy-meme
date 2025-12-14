@@ -4,6 +4,9 @@ project(vulkan-game VERSION 1.0.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Option to skip terrain preprocessing (faster builds)
+option(SKIP_TERRAIN_PREPROCESSING "Skip building terrain preprocessing tools" OFF)
+
 find_package(Vulkan REQUIRED)
 find_package(SDL3 CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
@@ -311,8 +314,10 @@ if(SBSAR_MANIFESTS)
     add_dependencies(${PROJECT_NAME} sbsar_textures)
 endif()
 
-# Main target depends on preprocessing
-add_dependencies(${PROJECT_NAME} terrain_preprocessing)
+# Main target depends on preprocessing (unless skipped for faster builds)
+if(NOT SKIP_TERRAIN_PREPROCESSING)
+    add_dependencies(${PROJECT_NAME} terrain_preprocessing)
+endif()
 
 # Copy terrain data to output location
 if(APPLE)
