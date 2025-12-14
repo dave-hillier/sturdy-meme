@@ -125,6 +125,24 @@ bool TerrainSystem::init(const InitInfo& info, const TerrainConfig& cfg) {
     return true;
 }
 
+bool TerrainSystem::init(const InitContext& ctx, const TerrainInitParams& params, const TerrainConfig& cfg) {
+    InitInfo info{};
+    info.device = ctx.device;
+    info.physicalDevice = ctx.physicalDevice;
+    info.allocator = ctx.allocator;
+    info.renderPass = params.renderPass;
+    info.shadowRenderPass = params.shadowRenderPass;
+    info.descriptorPool = ctx.descriptorPool;
+    info.extent = ctx.extent;
+    info.shadowMapSize = params.shadowMapSize;
+    info.shaderPath = ctx.shaderPath;
+    info.texturePath = params.texturePath;
+    info.framesInFlight = ctx.framesInFlight;
+    info.graphicsQueue = ctx.graphicsQueue;
+    info.commandPool = ctx.commandPool;
+    return init(info, cfg);
+}
+
 void TerrainSystem::destroy(VkDevice device, VmaAllocator allocator) {
     vkDeviceWaitIdle(device);
 

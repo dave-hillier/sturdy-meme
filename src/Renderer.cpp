@@ -1,5 +1,6 @@
 #define VMA_IMPLEMENTATION
 #include "Renderer.h"
+#include "RendererInit.h"
 #include "ShaderLoader.h"
 #include "BindingBuilder.h"
 #include "GraphicsPipelineFactory.h"
@@ -39,28 +40,17 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     if (!createDescriptorSetLayout()) return false;
     if (!createDescriptorPool()) return false;
 
-    // Initialize post-process system early to get HDR render pass
-    PostProcessSystem::InitInfo postProcessInfo{};
-    postProcessInfo.device = device;
-    postProcessInfo.allocator = allocator;
-    postProcessInfo.outputRenderPass = renderPass;
-    postProcessInfo.descriptorPool = &*descriptorManagerPool;
-    postProcessInfo.extent = swapchainExtent;
-    postProcessInfo.swapchainFormat = swapchainImageFormat;
-    postProcessInfo.shaderPath = resourcePath + "/shaders";
-    postProcessInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+    // Build shared InitContext for subsystem initialization
+    // This centralizes common parameters and reduces duplication
+    InitContext initCtx = RendererInit::buildContext(
+        vulkanContext, commandPool, &*descriptorManagerPool,
+        resourcePath, MAX_FRAMES_IN_FLIGHT);
 
-    if (!postProcessSystem.init(postProcessInfo)) return false;
+    // Initialize post-process system early to get HDR render pass
+    if (!postProcessSystem.init(initCtx, renderPass, swapchainImageFormat)) return false;
 
     // Initialize bloom system
-    BloomSystem::InitInfo bloomInfo{};
-    bloomInfo.device = device;
-    bloomInfo.allocator = allocator;
-    bloomInfo.descriptorPool = &*descriptorManagerPool;
-    bloomInfo.extent = swapchainExtent;
-    bloomInfo.shaderPath = resourcePath + "/shaders";
-
-    if (!bloomSystem.init(bloomInfo)) return false;
+    if (!bloomSystem.init(initCtx)) return false;
 
     // Bind bloom texture to post-process system
     postProcessSystem.setBloomTexture(bloomSystem.getBloomOutput(), bloomSystem.getBloomSampler());
@@ -71,31 +61,14 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     if (!initSkinnedMeshRenderer()) return false;
 
     // Initialize sky system (needs HDR render pass from postProcessSystem)
-    SkySystem::InitInfo skyInfo{};
-    skyInfo.device = device;
-    skyInfo.allocator = allocator;
-    skyInfo.descriptorPool = &*descriptorManagerPool;
-    skyInfo.shaderPath = resourcePath + "/shaders";
-    skyInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
-    skyInfo.extent = swapchainExtent;
-    skyInfo.hdrRenderPass = postProcessSystem.getHDRRenderPass();
+    if (!skySystem.init(initCtx, postProcessSystem.getHDRRenderPass())) return false;
 
-    if (!skySystem.init(skyInfo)) return false;
     if (!createCommandBuffers()) return false;
     if (!createUniformBuffers()) return false;
     if (!createLightBuffers()) return false;
 
-    // Initialize shadow system (needs descriptor set layout for pipeline compatibility)
-    ShadowSystem::InitInfo shadowInfo{};
-    shadowInfo.device = device;
-    shadowInfo.physicalDevice = physicalDevice;
-    shadowInfo.allocator = allocator;
-    shadowInfo.mainDescriptorSetLayout = descriptorSetLayout;
-    shadowInfo.skinnedDescriptorSetLayout = skinnedMeshRenderer.getDescriptorSetLayout();  // For skinned shadow pipeline
-    shadowInfo.shaderPath = resourcePath + "/shaders";
-    shadowInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
-
-    if (!shadowSystem.init(shadowInfo)) return false;
+    // Initialize shadow system (needs descriptor set layouts for pipeline compatibility)
+    if (!shadowSystem.init(initCtx, descriptorSetLayout, skinnedMeshRenderer.getDescriptorSetLayout())) return false;
 
     // Initialize terrain system BEFORE scene so scene objects can query terrain height
     std::string heightmapPath = resourcePath + "/assets/terrain/isleofwight-0m-200m.png";
@@ -123,20 +96,11 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     // }
 
     // Initialize terrain system with CBT (loads heightmap directly)
-    TerrainSystem::InitInfo terrainInfo{};
-    terrainInfo.device = device;
-    terrainInfo.physicalDevice = physicalDevice;
-    terrainInfo.allocator = allocator;
-    terrainInfo.renderPass = postProcessSystem.getHDRRenderPass();
-    terrainInfo.shadowRenderPass = shadowSystem.getShadowRenderPass();
-    terrainInfo.descriptorPool = &*descriptorManagerPool;
-    terrainInfo.extent = swapchainExtent;
-    terrainInfo.shadowMapSize = shadowSystem.getShadowMapSize();
-    terrainInfo.shaderPath = resourcePath + "/shaders";
-    terrainInfo.texturePath = resourcePath + "/textures";
-    terrainInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
-    terrainInfo.graphicsQueue = graphicsQueue;
-    terrainInfo.commandPool = commandPool;
+    TerrainSystem::TerrainInitParams terrainParams{};
+    terrainParams.renderPass = postProcessSystem.getHDRRenderPass();
+    terrainParams.shadowRenderPass = shadowSystem.getShadowRenderPass();
+    terrainParams.shadowMapSize = shadowSystem.getShadowMapSize();
+    terrainParams.texturePath = resourcePath + "/textures";
 
     TerrainConfig terrainConfig{};
     terrainConfig.size = 16384.0f;
@@ -156,7 +120,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     terrainConfig.tileLoadRadius = 2000.0f;   // Load high-res tiles within 2km
     terrainConfig.tileUnloadRadius = 3000.0f; // Unload tiles beyond 3km
 
-    if (!terrainSystem.init(terrainInfo, terrainConfig)) return false;
+    if (!terrainSystem.init(initCtx, terrainParams, terrainConfig)) return false;
 
     // Initialize scene (meshes, textures, objects, lights)
     // Pass terrain height function so objects can be placed on terrain
@@ -353,18 +317,10 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     leafSystem.setIntensity(0.5f);
 
     // Initialize froxel volumetric fog system (Phase 4.3)
-    FroxelSystem::InitInfo froxelInfo{};
-    froxelInfo.device = device;
-    froxelInfo.allocator = allocator;
-    froxelInfo.descriptorPool = &*descriptorManagerPool;
-    froxelInfo.extent = swapchainExtent;
-    froxelInfo.shaderPath = resourcePath + "/shaders";
-    froxelInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
-    froxelInfo.shadowMapView = shadowSystem.getShadowImageView();
-    froxelInfo.shadowSampler = shadowSystem.getShadowSampler();
-    froxelInfo.lightBuffers = lightBuffers;  // For local light contribution in fog
-
-    if (!froxelSystem.init(froxelInfo)) return false;
+    if (!froxelSystem.init(initCtx,
+                           shadowSystem.getShadowImageView(),
+                           shadowSystem.getShadowSampler(),
+                           lightBuffers)) return false;
 
     // Connect froxel volume to post-process system for compositing (use integrated volume)
     postProcessSystem.setFroxelVolume(froxelSystem.getIntegratedVolumeView(), froxelSystem.getVolumeSampler());
@@ -376,14 +332,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
                                    froxelSystem.getVolumetricFarPlane(), FroxelSystem::DEPTH_DISTRIBUTION);
 
     // Initialize atmosphere LUT system (Phase 4.1)
-    AtmosphereLUTSystem::InitInfo atmosphereInfo{};
-    atmosphereInfo.device = device;
-    atmosphereInfo.allocator = allocator;
-    atmosphereInfo.descriptorPool = &*descriptorManagerPool;
-    atmosphereInfo.shaderPath = resourcePath + "/shaders";
-    atmosphereInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
-
-    if (!atmosphereLUTSystem.init(atmosphereInfo)) return false;
+    if (!atmosphereLUTSystem.init(initCtx)) return false;
 
     // Compute atmosphere LUTs at startup
     {
@@ -413,16 +362,9 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     SDL_Log("Atmosphere LUTs exported as PNG to: %s", resourcePath.c_str());
 
     // Initialize cloud shadow system
-    CloudShadowSystem::InitInfo cloudShadowInfo{};
-    cloudShadowInfo.device = device;
-    cloudShadowInfo.allocator = allocator;
-    cloudShadowInfo.descriptorPool = &*descriptorManagerPool;
-    cloudShadowInfo.shaderPath = resourcePath + "/shaders";
-    cloudShadowInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
-    cloudShadowInfo.cloudMapLUTView = atmosphereLUTSystem.getCloudMapLUTView();
-    cloudShadowInfo.cloudMapLUTSampler = atmosphereLUTSystem.getLUTSampler();
-
-    if (!cloudShadowSystem.init(cloudShadowInfo)) return false;
+    if (!cloudShadowSystem.init(initCtx,
+                                 atmosphereLUTSystem.getCloudMapLUTView(),
+                                 atmosphereLUTSystem.getLUTSampler())) return false;
 
     // Connect cloud shadow map to terrain system
     terrainSystem.setCloudShadowMap(device,
@@ -487,16 +429,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     if (!skySystem.createDescriptorSets(uniformBuffers, sizeof(UniformBufferObject), atmosphereLUTSystem)) return false;
 
     // Initialize Hi-Z occlusion culling system
-    HiZSystem::InitInfo hiZInfo{};
-    hiZInfo.device = device;
-    hiZInfo.allocator = allocator;
-    hiZInfo.descriptorPool = &*descriptorManagerPool;
-    hiZInfo.extent = swapchainExtent;
-    hiZInfo.shaderPath = resourcePath + "/shaders";
-    hiZInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
-    hiZInfo.depthFormat = depthFormat;
-
-    if (!hiZSystem.init(hiZInfo)) {
+    if (!hiZSystem.init(initCtx, depthFormat)) {
         SDL_Log("Warning: Hi-Z system initialization failed, occlusion culling disabled");
         // Continue without Hi-Z - it's an optional optimization
     } else {
@@ -618,17 +551,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     }
 
     // Initialize SSR system (Phase 10: Screen-Space Reflections)
-    SSRSystem::InitInfo ssrInfo{};
-    ssrInfo.device = device;
-    ssrInfo.physicalDevice = physicalDevice;
-    ssrInfo.allocator = allocator;
-    ssrInfo.commandPool = commandPool;
-    ssrInfo.computeQueue = graphicsQueue;
-    ssrInfo.shaderPath = resourcePath + "/shaders";
-    ssrInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
-    ssrInfo.extent = swapchainExtent;
-
-    if (!ssrSystem.init(ssrInfo)) {
+    if (!ssrSystem.init(initCtx)) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize SSR system - continuing without SSR");
         // Don't fail init - SSR is optional
     }

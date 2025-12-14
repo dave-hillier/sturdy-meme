@@ -5,6 +5,7 @@
 #include <vector>
 #include <string>
 #include "DescriptorManager.h"
+#include "InitContext.h"
 
 class AtmosphereLUTSystem;
 
@@ -24,6 +25,7 @@ public:
     ~SkySystem() = default;
 
     bool init(const InitInfo& info);
+    bool init(const InitContext& ctx, VkRenderPass hdrRenderPass);
     void destroy(VkDevice device, VmaAllocator allocator);
 
     // Update extent for viewport (on window resize)
