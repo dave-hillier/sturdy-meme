@@ -1,4 +1,5 @@
 #include "Mesh.h"
+#include "VulkanRAII.h"
 #include <cstring>
 #include <stdexcept>
 #include <cmath>
@@ -655,92 +656,75 @@ void Mesh::createRock(float baseRadius, int subdivisions, uint32_t seed, float r
     calculateBounds();
 }
 
-void Mesh::upload(VmaAllocator allocator, VkDevice device, VkCommandPool commandPool, VkQueue queue) {
+bool Mesh::upload(VmaAllocator allocator, VkDevice device, VkCommandPool commandPool, VkQueue queue) {
+    if (vertices.empty() || indices.empty()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Mesh::upload: No vertex or index data");
+        return false;
+    }
+
     VkDeviceSize vertexBufferSize = sizeof(vertices[0]) * vertices.size();
     VkDeviceSize indexBufferSize = sizeof(indices[0]) * indices.size();
 
-    VkBuffer stagingBuffer;
-    VmaAllocation stagingAllocation;
+    // Create staging buffer using RAII
+    ManagedBuffer stagingBuffer;
+    if (!ManagedBuffer::createStaging(allocator, vertexBufferSize + indexBufferSize, stagingBuffer)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Mesh::upload: Failed to create staging buffer");
+        return false;
+    }
 
-    VkBufferCreateInfo stagingBufferInfo{};
-    stagingBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    stagingBufferInfo.size = vertexBufferSize + indexBufferSize;
-    stagingBufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-    stagingBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    VmaAllocationCreateInfo stagingAllocInfo{};
-    stagingAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-    stagingAllocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
-    vmaCreateBuffer(allocator, &stagingBufferInfo, &stagingAllocInfo, &stagingBuffer, &stagingAllocation, nullptr);
-
-    void* data;
-    vmaMapMemory(allocator, stagingAllocation, &data);
+    // Copy data to staging buffer
+    void* data = stagingBuffer.map();
+    if (!data) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Mesh::upload: Failed to map staging buffer");
+        return false;
+    }
     memcpy(data, vertices.data(), vertexBufferSize);
     memcpy(static_cast<char*>(data) + vertexBufferSize, indices.data(), indexBufferSize);
-    vmaUnmapMemory(allocator, stagingAllocation);
+    stagingBuffer.unmap();
 
-    VkBufferCreateInfo vertexBufferInfo{};
-    vertexBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    vertexBufferInfo.size = vertexBufferSize;
-    vertexBufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-    vertexBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    // Create vertex buffer using RAII
+    ManagedBuffer managedVertexBuffer;
+    if (!ManagedBuffer::createVertex(allocator, vertexBufferSize, managedVertexBuffer)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Mesh::upload: Failed to create vertex buffer");
+        return false;
+    }
 
-    VmaAllocationCreateInfo vertexAllocInfo{};
-    vertexAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+    // Create index buffer using RAII
+    ManagedBuffer managedIndexBuffer;
+    if (!ManagedBuffer::createIndex(allocator, indexBufferSize, managedIndexBuffer)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Mesh::upload: Failed to create index buffer");
+        return false;
+    }
 
-    vmaCreateBuffer(allocator, &vertexBufferInfo, &vertexAllocInfo, &vertexBuffer, &vertexAllocation, nullptr);
-
-    VkBufferCreateInfo indexBufferInfo{};
-    indexBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    indexBufferInfo.size = indexBufferSize;
-    indexBufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-    indexBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    VmaAllocationCreateInfo indexAllocInfo{};
-    indexAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-
-    vmaCreateBuffer(allocator, &indexBufferInfo, &indexAllocInfo, &indexBuffer, &indexAllocation, nullptr);
-
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandPool = commandPool;
-    allocInfo.commandBufferCount = 1;
-
-    VkCommandBuffer commandBuffer;
-    vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer);
-
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-    vkBeginCommandBuffer(commandBuffer, &beginInfo);
+    // Copy using command scope
+    CommandScope cmd(device, commandPool, queue);
+    if (!cmd.begin()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Mesh::upload: Failed to begin command buffer");
+        return false;
+    }
 
     VkBufferCopy vertexCopyRegion{};
     vertexCopyRegion.srcOffset = 0;
     vertexCopyRegion.dstOffset = 0;
     vertexCopyRegion.size = vertexBufferSize;
-    vkCmdCopyBuffer(commandBuffer, stagingBuffer, vertexBuffer, 1, &vertexCopyRegion);
+    vkCmdCopyBuffer(cmd.get(), stagingBuffer.get(), managedVertexBuffer.get(), 1, &vertexCopyRegion);
 
     VkBufferCopy indexCopyRegion{};
     indexCopyRegion.srcOffset = vertexBufferSize;
     indexCopyRegion.dstOffset = 0;
     indexCopyRegion.size = indexBufferSize;
-    vkCmdCopyBuffer(commandBuffer, stagingBuffer, indexBuffer, 1, &indexCopyRegion);
+    vkCmdCopyBuffer(cmd.get(), stagingBuffer.get(), managedIndexBuffer.get(), 1, &indexCopyRegion);
 
-    vkEndCommandBuffer(commandBuffer);
+    if (!cmd.end()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Mesh::upload: Failed to submit command buffer");
+        return false;
+    }
 
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &commandBuffer;
+    // Success - transfer ownership to member variables
+    managedVertexBuffer.releaseToRaw(vertexBuffer, vertexAllocation);
+    managedIndexBuffer.releaseToRaw(indexBuffer, indexAllocation);
 
-    vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
-    vkQueueWaitIdle(queue);
-
-    vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
-    vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
+    return true;
 }
 
 void Mesh::destroy(VmaAllocator allocator) {
