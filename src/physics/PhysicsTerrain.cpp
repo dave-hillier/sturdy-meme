@@ -112,12 +112,12 @@ bool PhysicsTerrain::loadTile(TileCoord coord) {
         return false;
     }
 
-    // Calculate world bounds for this tile
-    float halfSize = config.terrainSize * 0.5f;
-    float worldMinX = coord.x * config.tileSize - halfSize;
-    float worldMinZ = coord.z * config.tileSize - halfSize;
-    float worldMaxX = worldMinX + config.tileSize;
-    float worldMaxZ = worldMinZ + config.tileSize;
+    // Use the tile's pre-computed world bounds for consistency with rendering
+    float worldMinX = tile->worldMinX;
+    float worldMinZ = tile->worldMinZ;
+    float worldMaxX = tile->worldMaxX;
+    float worldMaxZ = tile->worldMaxZ;
+    float tileWorldSize = worldMaxX - worldMinX;  // Actual tile size from cache
 
     // Create physics heightfield for this tile
     uint32_t resolution = terrainTileCache->getTileResolution();
@@ -125,7 +125,7 @@ bool PhysicsTerrain::loadTile(TileCoord coord) {
     PhysicsBodyID bodyId = physicsWorld->createTileHeightfield(
         tile->cpuData.data(),
         resolution,
-        config.tileSize,
+        tileWorldSize,
         config.heightScale,
         worldMinX,
         worldMinZ
