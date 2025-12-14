@@ -13,6 +13,7 @@
 #include "TerrainMeshlet.h"
 #include "TerrainTileCache.h"
 #include "DescriptorManager.h"
+#include "InitContext.h"
 
 class GpuProfiler;
 
@@ -132,6 +133,16 @@ public:
     ~TerrainSystem() = default;
 
     bool init(const InitInfo& info, const TerrainConfig& config = {});
+
+    // System-specific params for InitContext-based init
+    struct TerrainInitParams {
+        VkRenderPass renderPass;
+        VkRenderPass shadowRenderPass;
+        uint32_t shadowMapSize;
+        std::string texturePath;
+    };
+    bool init(const InitContext& ctx, const TerrainInitParams& params, const TerrainConfig& config = {});
+
     void destroy(VkDevice device, VmaAllocator allocator);
 
     // Update extent for viewport (on window resize)

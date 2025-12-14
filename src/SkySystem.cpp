@@ -20,6 +20,20 @@ bool SkySystem::init(const InitInfo& info) {
     return true;
 }
 
+bool SkySystem::init(const InitContext& ctx, VkRenderPass hdrPass) {
+    device = ctx.device;
+    descriptorPool = ctx.descriptorPool;
+    shaderPath = ctx.shaderPath;
+    framesInFlight = ctx.framesInFlight;
+    extent = ctx.extent;
+    hdrRenderPass = hdrPass;
+
+    if (!createDescriptorSetLayout()) return false;
+    if (!createPipeline()) return false;
+
+    return true;
+}
+
 void SkySystem::destroy(VkDevice device, VmaAllocator allocator) {
     if (pipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(device, pipeline, nullptr);
