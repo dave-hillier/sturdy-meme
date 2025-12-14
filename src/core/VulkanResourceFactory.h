@@ -56,6 +56,31 @@ public:
         bool clearColor = true;
         bool clearDepth = true;
         bool storeDepth = true;  // Store for Hi-Z pyramid generation
+        bool depthOnly = false;  // If true, no color attachment (for shadow maps)
+    };
+
+    /**
+     * Configuration for depth array image creation (shadow maps, etc.)
+     */
+    struct DepthArrayConfig {
+        VkExtent2D extent;
+        VkFormat format = VK_FORMAT_D32_SFLOAT;
+        uint32_t arrayLayers = 1;
+        bool cubeCompatible = false;  // For point light shadow cubemaps
+        bool createSampler = true;    // Create comparison sampler for shadow mapping
+    };
+
+    /**
+     * Depth array resources (image, allocation, views, sampler)
+     */
+    struct DepthArrayResources {
+        VkImage image = VK_NULL_HANDLE;
+        VmaAllocation allocation = VK_NULL_HANDLE;
+        VkImageView arrayView = VK_NULL_HANDLE;      // View of all layers (for shader sampling)
+        std::vector<VkImageView> layerViews;         // Per-layer views (for rendering)
+        VkSampler sampler = VK_NULL_HANDLE;
+
+        void destroy(VkDevice device, VmaAllocator allocator);
     };
 
     // ========================================================================
@@ -148,9 +173,34 @@ public:
 
     /**
      * Create a standard render pass for swapchain presentation with depth
+     * If config.depthOnly is true, creates a depth-only render pass (for shadow maps)
      */
     static bool createRenderPass(
         VkDevice device,
         const RenderPassConfig& config,
         VkRenderPass& outRenderPass);
+
+    // ========================================================================
+    // Depth Array Resources (for shadow maps)
+    // ========================================================================
+
+    /**
+     * Create depth array image with array view and per-layer views
+     * Suitable for CSM shadow cascades, point light cubemaps, spot light arrays
+     */
+    static bool createDepthArrayResources(
+        VkDevice device,
+        VmaAllocator allocator,
+        const DepthArrayConfig& config,
+        DepthArrayResources& outResources);
+
+    /**
+     * Create framebuffers for depth-only rendering (shadow maps)
+     */
+    static bool createDepthOnlyFramebuffers(
+        VkDevice device,
+        VkRenderPass renderPass,
+        const std::vector<VkImageView>& depthImageViews,
+        VkExtent2D extent,
+        std::vector<VkFramebuffer>& outFramebuffers);
 };
