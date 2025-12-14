@@ -1410,23 +1410,16 @@ bool Renderer::createDescriptorSets() {
 
 
 void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera& camera) {
-    // Update time of day (state mutation)
-    static auto startTime = std::chrono::high_resolution_clock::now();
-    auto currentTime = std::chrono::high_resolution_clock::now();
-    float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
-
-    float cycleDuration = 120.0f;
-    if (useManualTime) {
-        currentTimeOfDay = manualTime;
-    } else {
-        currentTimeOfDay = fmod((time * timeScale) / cycleDuration, 1.0f);
-    }
+    // Get current time of day from time system (already updated in render())
+    float currentTimeOfDay = timeSystem.getTimeOfDay();
 
     // Pure calculations
     LightingParams lighting = calculateLightingParams(currentTimeOfDay);
+    timeSystem.setCurrentMoonPhase(lighting.moonPhase);  // Track current effective phase
 
     // Calculate and apply tide based on celestial positions
-    DateTime dateTime = DateTime::fromTimeOfDay(currentTimeOfDay, currentYear, currentMonth, currentDay);
+    DateTime dateTime = DateTime::fromTimeOfDay(currentTimeOfDay, timeSystem.getCurrentYear(),
+                                                 timeSystem.getCurrentMonth(), timeSystem.getCurrentDay());
     TideInfo tide = celestialCalculator.calculateTide(dateTime);
     waterSystem.updateTide(tide.height);
 
@@ -1507,6 +1500,9 @@ bool Renderer::render(const Camera& camera) {
 
     vkResetFences(device, 1, &inFlightFences[currentFrame]);
 
+    // Update time system (frame timing and day/night cycle)
+    TimingData timing = timeSystem.update();
+
     // Begin CPU profiling for this frame
     profiler.beginCpuZone("UniformUpdates");
 
@@ -1520,16 +1516,8 @@ bool Renderer::render(const Camera& camera) {
 
     profiler.endCpuZone("UniformUpdates");
 
-    // Calculate frame timing
-    static auto startTime = std::chrono::high_resolution_clock::now();
-    static auto lastTime = startTime;
-    auto currentTime = std::chrono::high_resolution_clock::now();
-    float grassTime = std::chrono::duration<float>(currentTime - startTime).count();
-    float deltaTime = std::chrono::duration<float>(currentTime - lastTime).count();
-    lastTime = currentTime;
-
     // Build per-frame shared state
-    FrameData frame = buildFrameData(camera, deltaTime, grassTime);
+    FrameData frame = buildFrameData(camera, timing.deltaTime, timing.elapsedTime);
 
     // Cache view-projection for debug rendering
     lastViewProj = frame.viewProj;
@@ -1997,7 +1985,8 @@ bool Renderer::handleResize() {
 Renderer::LightingParams Renderer::calculateLightingParams(float timeOfDay) const {
     LightingParams params{};
 
-    DateTime dateTime = DateTime::fromTimeOfDay(timeOfDay, currentYear, currentMonth, currentDay);
+    DateTime dateTime = DateTime::fromTimeOfDay(timeOfDay, timeSystem.getCurrentYear(),
+                                                 timeSystem.getCurrentMonth(), timeSystem.getCurrentDay());
     CelestialPosition sunPos = celestialCalculator.calculateSunPosition(dateTime);
     MoonPosition moonPos = celestialCalculator.calculateMoonPosition(dateTime);
 
@@ -2013,15 +2002,15 @@ Renderer::LightingParams Renderer::calculateLightingParams(float timeOfDay) cons
     }
 
     // Apply user-controlled moon brightness multiplier
-    params.moonIntensity *= moonBrightness;
+    params.moonIntensity *= timeSystem.getMoonBrightness();
 
     params.sunColor = celestialCalculator.getSunColor(sunPos.altitude);
     params.moonColor = celestialCalculator.getMoonColor(moonPos.altitude, moonPos.illumination);
     params.ambientColor = celestialCalculator.getAmbientColor(sunPos.altitude);
 
     // Apply moon phase override if enabled, otherwise use astronomical calculation
-    if (useMoonPhaseOverride) {
-        params.moonPhase = manualMoonPhase;
+    if (timeSystem.isMoonPhaseOverrideEnabled()) {
+        params.moonPhase = timeSystem.getMoonPhase();
         // Recalculate illumination based on manual phase
         float phaseAngle = params.moonPhase * 2.0f * glm::pi<float>();
         float illumination = (1.0f - std::cos(phaseAngle)) * 0.5f;
@@ -2030,10 +2019,8 @@ Renderer::LightingParams Renderer::calculateLightingParams(float timeOfDay) cons
     } else {
         params.moonPhase = moonPos.phase;
     }
-    currentMoonPhase = params.moonPhase;  // Track current effective phase
-
     // Eclipse simulation - affects sun intensity
-    params.eclipseAmount = eclipseEnabled ? eclipseAmount : 0.0f;
+    params.eclipseAmount = timeSystem.isEclipseEnabled() ? timeSystem.getEclipseAmount() : 0.0f;
 
     params.julianDay = dateTime.toJulianDay();
 
@@ -2111,9 +2098,9 @@ UniformBufferObject Renderer::buildUniformBufferData(const Camera& camera, const
     ubo.cloudDensity = cloudDensity;
 
     // Moon rendering parameters for sky.frag
-    ubo.moonBrightness = moonBrightness;
-    ubo.moonDiscIntensity = moonDiscIntensity;
-    ubo.moonEarthshine = moonEarthshine;
+    ubo.moonBrightness = timeSystem.getMoonBrightness();
+    ubo.moonDiscIntensity = timeSystem.getMoonDiscIntensity();
+    ubo.moonEarthshine = timeSystem.getMoonEarthshine();
     ubo.moonPad = 0.0f;
 
     return ubo;
@@ -2171,7 +2158,7 @@ FrameData Renderer::buildFrameData(const Camera& camera, float deltaTime, float 
     frame.frameIndex = currentFrame;
     frame.deltaTime = deltaTime;
     frame.time = time;
-    frame.timeOfDay = currentTimeOfDay;
+    frame.timeOfDay = timeSystem.getTimeOfDay();
 
     frame.cameraPosition = camera.getPosition();
     frame.view = camera.getViewMatrix();

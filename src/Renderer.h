@@ -39,6 +39,7 @@
 #include "HiZSystem.h"
 #include "FrameData.h"
 #include "RenderContext.h"
+#include "TimeSystem.h"
 #include "RenderPipeline.h"
 #include "GlobalBufferManager.h"
 #include "Profiler.h"
@@ -118,11 +119,13 @@ public:
     using GuiRenderCallback = std::function<void(VkCommandBuffer)>;
     void setGuiRenderCallback(GuiRenderCallback callback) { guiRenderCallback = callback; }
 
-    void setTimeScale(float scale) { timeScale = scale; }
-    float getTimeScale() const { return timeScale; }
-    void setTimeOfDay(float time) { manualTime = time; useManualTime = true; }
-    void resumeAutoTime() { useManualTime = false; }
-    float getTimeOfDay() const { return currentTimeOfDay; }
+    void setTimeScale(float scale) { timeSystem.setTimeScale(scale); }
+    float getTimeScale() const { return timeSystem.getTimeScale(); }
+    void setTimeOfDay(float time) { timeSystem.setTimeOfDay(time); }
+    void resumeAutoTime() { timeSystem.resumeAutoTime(); }
+    float getTimeOfDay() const { return timeSystem.getTimeOfDay(); }
+    TimeSystem& getTimeSystem() { return timeSystem; }
+    const TimeSystem& getTimeSystem() const { return timeSystem; }
 
     void toggleCascadeDebug() { showCascadeDebug = !showCascadeDebug; }
     bool isShowingCascadeDebug() const { return showCascadeDebug; }
@@ -280,32 +283,32 @@ public:
     // Celestial/astronomical settings
     void setLocation(const GeographicLocation& location) { celestialCalculator.setLocation(location); }
     const GeographicLocation& getLocation() const { return celestialCalculator.getLocation(); }
-    void setDate(int year, int month, int day) { currentYear = year; currentMonth = month; currentDay = day; }
-    int getCurrentYear() const { return currentYear; }
-    int getCurrentMonth() const { return currentMonth; }
-    int getCurrentDay() const { return currentDay; }
+    void setDate(int year, int month, int day) { timeSystem.setDate(year, month, day); }
+    int getCurrentYear() const { return timeSystem.getCurrentYear(); }
+    int getCurrentMonth() const { return timeSystem.getCurrentMonth(); }
+    int getCurrentDay() const { return timeSystem.getCurrentDay(); }
     const CelestialCalculator& getCelestialCalculator() const { return celestialCalculator; }
 
     // Moon phase override controls
-    void setMoonPhaseOverride(bool enabled) { useMoonPhaseOverride = enabled; }
-    bool isMoonPhaseOverrideEnabled() const { return useMoonPhaseOverride; }
-    void setMoonPhase(float phase) { manualMoonPhase = glm::clamp(phase, 0.0f, 1.0f); }
-    float getMoonPhase() const { return manualMoonPhase; }
-    float getCurrentMoonPhase() const { return currentMoonPhase; }  // Actual phase (auto or manual)
+    void setMoonPhaseOverride(bool enabled) { timeSystem.setMoonPhaseOverride(enabled); }
+    bool isMoonPhaseOverrideEnabled() const { return timeSystem.isMoonPhaseOverrideEnabled(); }
+    void setMoonPhase(float phase) { timeSystem.setMoonPhase(phase); }
+    float getMoonPhase() const { return timeSystem.getMoonPhase(); }
+    float getCurrentMoonPhase() const { return timeSystem.getCurrentMoonPhase(); }  // Actual phase (auto or manual)
 
     // Moon brightness controls
-    void setMoonBrightness(float brightness) { moonBrightness = glm::clamp(brightness, 0.0f, 5.0f); }
-    float getMoonBrightness() const { return moonBrightness; }
-    void setMoonDiscIntensity(float intensity) { moonDiscIntensity = glm::clamp(intensity, 0.0f, 50.0f); }
-    float getMoonDiscIntensity() const { return moonDiscIntensity; }
-    void setMoonEarthshine(float earthshine) { moonEarthshine = glm::clamp(earthshine, 0.0f, 0.2f); }
-    float getMoonEarthshine() const { return moonEarthshine; }
+    void setMoonBrightness(float brightness) { timeSystem.setMoonBrightness(brightness); }
+    float getMoonBrightness() const { return timeSystem.getMoonBrightness(); }
+    void setMoonDiscIntensity(float intensity) { timeSystem.setMoonDiscIntensity(intensity); }
+    float getMoonDiscIntensity() const { return timeSystem.getMoonDiscIntensity(); }
+    void setMoonEarthshine(float earthshine) { timeSystem.setMoonEarthshine(earthshine); }
+    float getMoonEarthshine() const { return timeSystem.getMoonEarthshine(); }
 
     // Eclipse controls
-    void setEclipseEnabled(bool enabled) { eclipseEnabled = enabled; }
-    bool isEclipseEnabled() const { return eclipseEnabled; }
-    void setEclipseAmount(float amount) { eclipseAmount = glm::clamp(amount, 0.0f, 1.0f); }
-    float getEclipseAmount() const { return eclipseAmount; }
+    void setEclipseEnabled(bool enabled) { timeSystem.setEclipseEnabled(enabled); }
+    bool isEclipseEnabled() const { return timeSystem.isEclipseEnabled(); }
+    void setEclipseAmount(float amount) { timeSystem.setEclipseAmount(amount); }
+    float getEclipseAmount() const { return timeSystem.getEclipseAmount(); }
 
     // Hi-Z occlusion culling control
     void setHiZCullingEnabled(bool enabled) { hiZSystem.setHiZEnabled(enabled); }
@@ -491,31 +494,12 @@ private:
     uint32_t currentFrame = 0;
     static constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 
-    float timeScale = 1.0f;
-    float manualTime = 0.5f;  // Noon
-    bool useManualTime = true;  // Start with manual time
-    float currentTimeOfDay = 0.5f;  // Noon
+    // Time management (day/night cycle, frame timing, moon phase, eclipse)
+    TimeSystem timeSystem;
     float lastSunIntensity = 1.0f;
 
     // Celestial calculations
     CelestialCalculator celestialCalculator;
-    int currentYear = 2024;
-    int currentMonth = 6;
-    int currentDay = 21;  // Summer solstice by default
-
-    // Moon phase override
-    bool useMoonPhaseOverride = false;
-    float manualMoonPhase = 0.5f;  // Default to full moon (0=new, 0.5=full, 1=new)
-    mutable float currentMoonPhase = 0.5f; // Tracks current effective phase (mutable for const functions)
-
-    // Moon brightness controls
-    float moonBrightness = 1.0f;      // Multiplier for moon light intensity (0-5)
-    float moonDiscIntensity = 20.0f;  // Visual disc intensity in sky (0-50, default was 25, now 20)
-    float moonEarthshine = 0.02f;     // Earthshine on dark side (0-0.2, default 2%)
-
-    // Eclipse simulation
-    bool eclipseEnabled = false;
-    float eclipseAmount = 0.0f;    // 0 = no eclipse, 1 = total eclipse
 
     bool showCascadeDebug = false;         // true = show cascade colors overlay
     bool showSnowDepthDebug = false;       // true = show snow depth heat map overlay
