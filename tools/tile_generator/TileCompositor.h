@@ -4,7 +4,6 @@
 #include "SplineRasterizer.h"
 #include "../road_generator/RoadSpline.h"
 #include "BiomeGenerator.h"
-#include "ErosionSimulator.h"
 #include <vector>
 #include <string>
 #include <functional>

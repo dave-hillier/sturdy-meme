@@ -187,7 +187,6 @@ endif()
 set(TERRAIN_HEIGHTMAP ${CMAKE_CURRENT_SOURCE_DIR}/assets/terrain/isleofwight-0m-200m.png)
 set(TERRAIN_DATA_DIR ${CMAKE_BINARY_DIR}/terrain_data)
 set(TERRAIN_TILES_META ${TERRAIN_DATA_DIR}/terrain_tiles.meta)
-set(EROSION_DATA_META ${TERRAIN_DATA_DIR}/erosion_data.meta)
 
 # Create terrain data directory
 file(MAKE_DIRECTORY ${TERRAIN_DATA_DIR})
@@ -205,19 +204,8 @@ add_custom_command(
     COMMENT "Preprocessing terrain tiles"
 )
 
-# Run erosion_preprocess when heightmap changes
-add_custom_command(
-    OUTPUT ${EROSION_DATA_META}
-    COMMAND $<TARGET_FILE:erosion_preprocess>
-        ${TERRAIN_HEIGHTMAP}
-        ${TERRAIN_DATA_DIR}
-        --min-altitude -15
-        --max-altitude 220
-        --sea-level 23
-        --terrain-size 16384
-    DEPENDS ${TERRAIN_HEIGHTMAP}
-    COMMENT "Preprocessing erosion and water placement"
-)
+# Note: erosion_preprocess has been removed in favor of the watershed tool
+# which provides better river/flow data
 
 # Watershed analysis outputs
 set(WATERSHED_DATA_DIR ${TERRAIN_DATA_DIR}/watershed)
@@ -239,11 +227,11 @@ add_custom_command(
 
 # Custom target that depends on all preprocessing outputs
 add_custom_target(terrain_preprocessing
-    DEPENDS ${TERRAIN_TILES_META} ${EROSION_DATA_META} ${WATERSHED_RIVERS_SVG}
+    DEPENDS ${TERRAIN_TILES_META} ${WATERSHED_RIVERS_SVG}
 )
 
 # Ensure tools are built before preprocessing runs
-add_dependencies(terrain_preprocessing terrain_preprocess erosion_preprocess watershed)
+add_dependencies(terrain_preprocessing terrain_preprocess watershed)
 
 # Foam noise texture generation
 set(FOAM_TEXTURE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/assets/textures)
