@@ -161,17 +161,19 @@ bool SkinnedMeshRenderer::createDescriptorSets(const DescriptorResources& resour
         return false;
     }
 
+    const auto& gbm = *resources.globalBufferManager;
+
     // Use factory to write skinned descriptor sets
     MaterialDescriptorFactory factory(device);
 
     for (size_t i = 0; i < framesInFlight; i++) {
         MaterialDescriptorFactory::CommonBindings common{};
-        common.uniformBuffer = (*resources.uniformBuffers)[i];
-        common.uniformBufferSize = resources.uniformBufferSize;
+        common.uniformBuffer = gbm.uniformBuffers.buffers[i];
+        common.uniformBufferSize = sizeof(UniformBufferObject);
         common.shadowMapView = resources.shadowMapView;
         common.shadowMapSampler = resources.shadowMapSampler;
-        common.lightBuffer = (*resources.lightBuffers)[i];
-        common.lightBufferSize = resources.lightBufferSize;
+        common.lightBuffer = gbm.lightBuffers.buffers[i];
+        common.lightBufferSize = sizeof(LightBuffer);
         common.emissiveMapView = resources.emissiveMapView;
         common.emissiveMapSampler = resources.emissiveMapSampler;
         common.pointShadowView = (*resources.pointShadowViews)[i];
@@ -183,11 +185,11 @@ bool SkinnedMeshRenderer::createDescriptorSets(const DescriptorResources& resour
         // Cloud shadow not yet initialized - use white texture as fallback
         common.cloudShadowView = resources.whiteTextureView;
         common.cloudShadowSampler = resources.whiteTextureSampler;
-        // Snow and cloud shadow UBOs
-        common.snowUboBuffer = (*resources.snowBuffers)[i];
-        common.snowUboBufferSize = resources.snowBufferSize;
-        common.cloudShadowUboBuffer = (*resources.cloudShadowBuffers)[i];
-        common.cloudShadowUboBufferSize = resources.cloudShadowBufferSize;
+        // Snow and cloud shadow UBOs (from GlobalBufferManager)
+        common.snowUboBuffer = gbm.snowBuffers.buffers[i];
+        common.snowUboBufferSize = sizeof(SnowUBO);
+        common.cloudShadowUboBuffer = gbm.cloudShadowBuffers.buffers[i];
+        common.cloudShadowUboBufferSize = sizeof(CloudShadowUBO);
         // Bone matrices
         common.boneMatricesBuffer = boneMatricesBuffers[i];
         common.boneMatricesBufferSize = sizeof(BoneMatricesUBO);

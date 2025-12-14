@@ -64,8 +64,19 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     if (!skySystem.init(initCtx, postProcessSystem.getHDRRenderPass())) return false;
 
     if (!createCommandBuffers()) return false;
-    if (!createUniformBuffers()) return false;
-    if (!createLightBuffers()) return false;
+
+    // Initialize global buffer manager for all per-frame shared buffers
+    if (!globalBufferManager.init(allocator, MAX_FRAMES_IN_FLIGHT)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize GlobalBufferManager");
+        return false;
+    }
+
+    // Initialize light buffers with empty data
+    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        LightBuffer emptyBuffer{};
+        emptyBuffer.lightCount = glm::uvec4(0, 0, 0, 0);
+        globalBufferManager.updateLightBuffer(i, emptyBuffer);
+    }
 
     // Initialize shadow system (needs descriptor set layouts for pipeline compatibility)
     if (!shadowSystem.init(initCtx, descriptorSetLayout, skinnedMeshRenderer.getDescriptorSetLayout())) return false;
@@ -195,14 +206,14 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         windBuffers[i] = windSystem.getBufferInfo(i).buffer;
     }
-    grassSystem.updateDescriptorSets(device, uniformBuffers, shadowSystem.getShadowImageView(), shadowSystem.getShadowSampler(), windBuffers, lightBuffers,
+    grassSystem.updateDescriptorSets(device, globalBufferManager.uniformBuffers.buffers, shadowSystem.getShadowImageView(), shadowSystem.getShadowSampler(), windBuffers, globalBufferManager.lightBuffers.buffers,
                                       terrainSystem.getHeightMapView(), terrainSystem.getHeightMapSampler(),
-                                      snowBuffers, cloudShadowBuffers,
+                                      globalBufferManager.snowBuffers.buffers, globalBufferManager.cloudShadowBuffers.buffers,
                                       cloudShadowSystem.getShadowMapView(), cloudShadowSystem.getShadowMapSampler());
 
     // Update terrain descriptor sets with shared resources
-    terrainSystem.updateDescriptorSets(device, uniformBuffers, shadowSystem.getShadowImageView(), shadowSystem.getShadowSampler(),
-                                        snowBuffers, cloudShadowBuffers);
+    terrainSystem.updateDescriptorSets(device, globalBufferManager.uniformBuffers.buffers, shadowSystem.getShadowImageView(), shadowSystem.getShadowSampler(),
+                                        globalBufferManager.snowBuffers.buffers, globalBufferManager.cloudShadowBuffers.buffers);
 
     // Initialize rock system (uses terrain for height queries)
     RockSystem::InitInfo rockInfo{};
@@ -237,11 +248,11 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
         MaterialDescriptorFactory factory(device);
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             MaterialDescriptorFactory::CommonBindings common{};
-            common.uniformBuffer = uniformBuffers[i];
+            common.uniformBuffer = globalBufferManager.uniformBuffers.buffers[i];
             common.uniformBufferSize = sizeof(UniformBufferObject);
             common.shadowMapView = shadowSystem.getShadowImageView();
             common.shadowMapSampler = shadowSystem.getShadowSampler();
-            common.lightBuffer = lightBuffers[i];
+            common.lightBuffer = globalBufferManager.lightBuffers.buffers[i];
             common.lightBufferSize = sizeof(LightBuffer);
             common.emissiveMapView = sceneManager.getSceneBuilder().getDefaultEmissiveMap().getImageView();
             common.emissiveMapSampler = sceneManager.getSceneBuilder().getDefaultEmissiveMap().getSampler();
@@ -277,7 +288,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     if (!weatherSystem.init(weatherInfo)) return false;
 
     // Update weather system descriptor sets with wind buffers - use HDR depth where scene is rendered
-    weatherSystem.updateDescriptorSets(device, uniformBuffers, windBuffers, postProcessSystem.getHDRDepthView(), shadowSystem.getShadowSampler());
+    weatherSystem.updateDescriptorSets(device, globalBufferManager.uniformBuffers.buffers, windBuffers, postProcessSystem.getHDRDepthView(), shadowSystem.getShadowSampler());
 
     // Connect snow mask to environment settings (already initialized above)
     snowMaskSystem.setEnvironmentSettings(environmentSettings);
@@ -309,7 +320,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     if (!leafSystem.init(leafInfo)) return false;
 
     // Update leaf system descriptor sets with wind buffers, terrain heightmap, and displacement map
-    leafSystem.updateDescriptorSets(device, uniformBuffers, windBuffers,
+    leafSystem.updateDescriptorSets(device, globalBufferManager.uniformBuffers.buffers, windBuffers,
                                      terrainSystem.getHeightMapView(), terrainSystem.getHeightMapSampler(),
                                      grassSystem.getDisplacementImageView(), grassSystem.getDisplacementSampler());
 
@@ -320,7 +331,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     if (!froxelSystem.init(initCtx,
                            shadowSystem.getShadowImageView(),
                            shadowSystem.getShadowSampler(),
-                           lightBuffers)) return false;
+                           globalBufferManager.lightBuffers.buffers)) return false;
 
     // Connect froxel volume to post-process system for compositing (use integrated volume)
     postProcessSystem.setFroxelVolume(froxelSystem.getIntegratedVolumeView(), froxelSystem.getVolumeSampler());
@@ -423,10 +434,10 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     if (!catmullClarkSystem.init(catmullClarkInfo, catmullClarkConfig)) return false;
 
     // Update Catmull-Clark descriptor sets with shared resources
-    catmullClarkSystem.updateDescriptorSets(device, uniformBuffers);
+    catmullClarkSystem.updateDescriptorSets(device, globalBufferManager.uniformBuffers.buffers);
 
     // Create sky descriptor sets now that uniform buffers and LUTs are ready
-    if (!skySystem.createDescriptorSets(uniformBuffers, sizeof(UniformBufferObject), atmosphereLUTSystem)) return false;
+    if (!skySystem.createDescriptorSets(globalBufferManager.uniformBuffers.buffers, sizeof(UniformBufferObject), atmosphereLUTSystem)) return false;
 
     // Initialize Hi-Z occlusion culling system
     if (!hiZSystem.init(initCtx, depthFormat)) {
@@ -590,7 +601,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     }
 
     // Create water descriptor sets with terrain heightmap, flow map, displacement map, temporal foam, SSR, and scene depth
-    if (!waterSystem.createDescriptorSets(uniformBuffers, sizeof(UniformBufferObject), shadowSystem,
+    if (!waterSystem.createDescriptorSets(globalBufferManager.uniformBuffers.buffers, sizeof(UniformBufferObject), shadowSystem,
                                           terrainSystem.getHeightMapView(), terrainSystem.getHeightMapSampler(),
                                           flowMapGenerator.getFlowMapView(), flowMapGenerator.getFlowMapSampler(),
                                           waterDisplacement.getDisplacementMapView(), waterDisplacement.getSampler(),
@@ -601,7 +612,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     // Create water G-buffer descriptor sets
     if (waterGBuffer.getPipeline() != VK_NULL_HANDLE) {
         if (!waterGBuffer.createDescriptorSets(
-                uniformBuffers, sizeof(UniformBufferObject),
+                globalBufferManager.uniformBuffers.buffers, sizeof(UniformBufferObject),
                 waterSystem.getUniformBuffers(), WaterSystem::getUniformBufferSize(),
                 terrainSystem.getHeightMapView(), terrainSystem.getHeightMapSampler(),
                 flowMapGenerator.getFlowMapView(), flowMapGenerator.getFlowMapSampler())) {
@@ -625,7 +636,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     if (!treeEditSystem.init(treeEditInfo)) return false;
 
     // Update tree edit system descriptor sets with scene UBOs
-    treeEditSystem.updateDescriptorSets(device, uniformBuffers);
+    treeEditSystem.updateDescriptorSets(device, globalBufferManager.uniformBuffers.buffers);
 
     if (!createSyncObjects()) return false;
 
@@ -764,7 +775,7 @@ void Renderer::setupRenderPipeline() {
     renderPipeline.setFroxelStageFn([this](RenderContext& ctx) {
         profiler.beginGpuZone(ctx.cmd, "Atmosphere");
 
-        UniformBufferObject* ubo = static_cast<UniformBufferObject*>(uniformBuffersMapped[ctx.frameIndex]);
+        UniformBufferObject* ubo = static_cast<UniformBufferObject*>(globalBufferManager.uniformBuffers.mappedPointers[ctx.frameIndex]);
         glm::vec3 sunColor = glm::vec3(ubo->sunColor);
 
         // Froxel volumetric fog
@@ -968,30 +979,8 @@ void Renderer::shutdown() {
             descriptorManagerPool.reset();
         }
 
-        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            vmaDestroyBuffer(allocator, uniformBuffers[i], uniformBuffersAllocations[i]);
-        }
-
-        // Clean up snow UBO buffers
-        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            if (snowBuffers.size() > i && snowBuffers[i] != VK_NULL_HANDLE) {
-                vmaDestroyBuffer(allocator, snowBuffers[i], snowBuffersAllocations[i]);
-            }
-        }
-
-        // Clean up cloud shadow UBO buffers
-        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            if (cloudShadowBuffers.size() > i && cloudShadowBuffers[i] != VK_NULL_HANDLE) {
-                vmaDestroyBuffer(allocator, cloudShadowBuffers[i], cloudShadowBuffersAllocations[i]);
-            }
-        }
-
-        // Clean up light buffers
-        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            if (lightBuffers.size() > i && lightBuffers[i] != VK_NULL_HANDLE) {
-                vmaDestroyBuffer(allocator, lightBuffers[i], lightBufferAllocations[i]);
-            }
-        }
+        // Clean up all per-frame shared buffers via GlobalBufferManager
+        globalBufferManager.destroy(allocator);
 
         grassSystem.destroy(device, allocator);
         terrainSystem.destroy(device, allocator);
@@ -1381,132 +1370,11 @@ bool Renderer::createGraphicsPipeline() {
     return true;
 }
 
-bool Renderer::createUniformBuffers() {
-    VmaAllocator allocator = vulkanContext.getAllocator();
-    VkDeviceSize bufferSize = sizeof(UniformBufferObject);
-
-    uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
-    uniformBuffersAllocations.resize(MAX_FRAMES_IN_FLIGHT);
-    uniformBuffersMapped.resize(MAX_FRAMES_IN_FLIGHT);
-
-    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = bufferSize;
-        bufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
-        VmaAllocationInfo allocationInfo;
-        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &uniformBuffers[i],
-                            &uniformBuffersAllocations[i], &allocationInfo) != VK_SUCCESS) {
-            SDL_Log("Failed to create uniform buffer");
-            return false;
-        }
-
-        uniformBuffersMapped[i] = allocationInfo.pMappedData;
-    }
-
-    // Create snow UBO buffers (binding 14)
-    snowBuffers.resize(MAX_FRAMES_IN_FLIGHT);
-    snowBuffersAllocations.resize(MAX_FRAMES_IN_FLIGHT);
-    snowBuffersMapped.resize(MAX_FRAMES_IN_FLIGHT);
-
-    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = sizeof(SnowUBO);
-        bufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
-        VmaAllocationInfo allocationInfo;
-        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &snowBuffers[i],
-                            &snowBuffersAllocations[i], &allocationInfo) != VK_SUCCESS) {
-            SDL_Log("Failed to create snow UBO buffer");
-            return false;
-        }
-
-        snowBuffersMapped[i] = allocationInfo.pMappedData;
-    }
-
-    // Create cloud shadow UBO buffers (binding 15)
-    cloudShadowBuffers.resize(MAX_FRAMES_IN_FLIGHT);
-    cloudShadowBuffersAllocations.resize(MAX_FRAMES_IN_FLIGHT);
-    cloudShadowBuffersMapped.resize(MAX_FRAMES_IN_FLIGHT);
-
-    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = sizeof(CloudShadowUBO);
-        bufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
-        VmaAllocationInfo allocationInfo;
-        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &cloudShadowBuffers[i],
-                            &cloudShadowBuffersAllocations[i], &allocationInfo) != VK_SUCCESS) {
-            SDL_Log("Failed to create cloud shadow UBO buffer");
-            return false;
-        }
-
-        cloudShadowBuffersMapped[i] = allocationInfo.pMappedData;
-    }
-
-    return true;
-}
-
-bool Renderer::createLightBuffers() {
-    VmaAllocator allocator = vulkanContext.getAllocator();
-    VkDeviceSize bufferSize = sizeof(LightBuffer);
-
-    lightBuffers.resize(MAX_FRAMES_IN_FLIGHT);
-    lightBufferAllocations.resize(MAX_FRAMES_IN_FLIGHT);
-    lightBuffersMapped.resize(MAX_FRAMES_IN_FLIGHT);
-
-    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = bufferSize;
-        bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
-        VmaAllocationInfo allocationInfo;
-        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &lightBuffers[i],
-                            &lightBufferAllocations[i], &allocationInfo) != VK_SUCCESS) {
-            SDL_Log("Failed to create light buffer");
-            return false;
-        }
-
-        lightBuffersMapped[i] = allocationInfo.pMappedData;
-
-        // Initialize with empty light buffer
-        LightBuffer emptyBuffer{};
-        emptyBuffer.lightCount = glm::uvec4(0, 0, 0, 0);
-        memcpy(lightBuffersMapped[i], &emptyBuffer, sizeof(LightBuffer));
-    }
-
-    return true;
-}
-
 void Renderer::updateLightBuffer(uint32_t currentImage, const Camera& camera) {
     LightBuffer buffer{};
     glm::mat4 viewProj = camera.getProjectionMatrix() * camera.getViewMatrix();
     sceneManager.getLightManager().buildLightBuffer(buffer, camera.getPosition(), camera.getFront(), viewProj, lightCullRadius);
-    memcpy(lightBuffersMapped[currentImage], &buffer, sizeof(LightBuffer));
+    globalBufferManager.updateLightBuffer(currentImage, buffer);
 }
 
 bool Renderer::createDescriptorPool() {
@@ -1527,14 +1395,14 @@ bool Renderer::createDescriptorSets() {
     // This replaces the hardcoded per-material descriptor set allocation
     auto& materialRegistry = sceneManager.getSceneBuilder().getMaterialRegistry();
 
-    // Lambda to build common bindings for a given frame
+    // Lambda to build common bindings for a given frame (using GlobalBufferManager)
     auto getCommonBindings = [this](uint32_t frameIndex) -> MaterialDescriptorFactory::CommonBindings {
         MaterialDescriptorFactory::CommonBindings common{};
-        common.uniformBuffer = uniformBuffers[frameIndex];
+        common.uniformBuffer = globalBufferManager.uniformBuffers.buffers[frameIndex];
         common.uniformBufferSize = sizeof(UniformBufferObject);
         common.shadowMapView = shadowSystem.getShadowImageView();
         common.shadowMapSampler = shadowSystem.getShadowSampler();
-        common.lightBuffer = lightBuffers[frameIndex];
+        common.lightBuffer = globalBufferManager.lightBuffers.buffers[frameIndex];
         common.lightBufferSize = sizeof(LightBuffer);
         common.emissiveMapView = sceneManager.getSceneBuilder().getDefaultEmissiveMap().getImageView();
         common.emissiveMapSampler = sceneManager.getSceneBuilder().getDefaultEmissiveMap().getSampler();
@@ -1545,9 +1413,9 @@ bool Renderer::createDescriptorSets() {
         common.snowMaskView = snowMaskSystem.getSnowMaskView();
         common.snowMaskSampler = snowMaskSystem.getSnowMaskSampler();
         // Snow and cloud shadow UBOs (bindings 10 and 11)
-        common.snowUboBuffer = snowBuffers[frameIndex];
+        common.snowUboBuffer = globalBufferManager.snowBuffers.buffers[frameIndex];
         common.snowUboBufferSize = sizeof(SnowUBO);
-        common.cloudShadowUboBuffer = cloudShadowBuffers[frameIndex];
+        common.cloudShadowUboBuffer = globalBufferManager.cloudShadowBuffers.buffers[frameIndex];
         common.cloudShadowUboBufferSize = sizeof(CloudShadowUBO);
         // Cloud shadow texture is added later in init() after cloudShadowSystem is initialized
         // Placeholder texture for unused PBR bindings (13-16)
@@ -1625,11 +1493,11 @@ void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera& camera) 
 
     CloudShadowUBO cloudShadowUbo = uboBuilder.buildCloudShadowUBOData();
 
-    // State mutations
+    // State mutations - use GlobalBufferManager for buffer updates
     lastSunIntensity = lighting.sunIntensity;
-    memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
-    memcpy(snowBuffersMapped[currentImage], &snowUbo, sizeof(snowUbo));
-    memcpy(cloudShadowBuffersMapped[currentImage], &cloudShadowUbo, sizeof(cloudShadowUbo));
+    globalBufferManager.updateUniformBuffer(currentImage, ubo);
+    globalBufferManager.updateSnowBuffer(currentImage, snowUbo);
+    globalBufferManager.updateCloudShadowBuffer(currentImage, cloudShadowUbo);
 
     // Update light buffer with camera-based culling
     updateLightBuffer(currentImage, camera);
@@ -2114,7 +1982,7 @@ FrameData Renderer::buildFrameData(const Camera& camera, float deltaTime, float 
     frame.viewProj = frame.projection * frame.view;
 
     // Get sun direction from last computed UBO (already computed in updateUniformBuffer)
-    UniformBufferObject* ubo = static_cast<UniformBufferObject*>(uniformBuffersMapped[currentFrame]);
+    UniformBufferObject* ubo = static_cast<UniformBufferObject*>(globalBufferManager.uniformBuffers.mappedPointers[currentFrame]);
     frame.sunDirection = glm::normalize(glm::vec3(ubo->sunDirection));
     frame.sunIntensity = ubo->sunDirection.w;
 
@@ -2439,14 +2307,7 @@ bool Renderer::createSkinnedMeshRendererDescriptorSets() {
     }
 
     SkinnedMeshRenderer::DescriptorResources resources{};
-    resources.uniformBuffers = &uniformBuffers;
-    resources.uniformBufferSize = sizeof(UniformBufferObject);
-    resources.lightBuffers = &lightBuffers;
-    resources.lightBufferSize = sizeof(LightBuffer);
-    resources.snowBuffers = &snowBuffers;
-    resources.snowBufferSize = sizeof(SnowUBO);
-    resources.cloudShadowBuffers = &cloudShadowBuffers;
-    resources.cloudShadowBufferSize = sizeof(CloudShadowUBO);
+    resources.globalBufferManager = &globalBufferManager;
     resources.shadowMapView = shadowSystem.getShadowImageView();
     resources.shadowMapSampler = shadowSystem.getShadowSampler();
     resources.emissiveMapView = emissiveMap.getImageView();

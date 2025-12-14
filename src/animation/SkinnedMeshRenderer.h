@@ -11,6 +11,7 @@
 #include "DescriptorManager.h"
 #include "MaterialDescriptorFactory.h"
 #include "RenderableBuilder.h"
+#include "GlobalBufferManager.h"
 
 class AnimatedCharacter;
 
@@ -33,14 +34,7 @@ public:
 
     // Resources needed for descriptor set writing
     struct DescriptorResources {
-        std::vector<VkBuffer>* uniformBuffers;
-        VkDeviceSize uniformBufferSize;
-        std::vector<VkBuffer>* lightBuffers;
-        VkDeviceSize lightBufferSize;
-        std::vector<VkBuffer>* snowBuffers;
-        VkDeviceSize snowBufferSize;
-        std::vector<VkBuffer>* cloudShadowBuffers;
-        VkDeviceSize cloudShadowBufferSize;
+        const GlobalBufferManager* globalBufferManager;
 
         // Shadow system resources
         VkImageView shadowMapView;
