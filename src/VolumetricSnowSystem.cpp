@@ -341,21 +341,7 @@ std::array<glm::vec4, NUM_SNOW_CASCADES> VolumetricSnowSystem::getCascadeParams(
 }
 
 void VolumetricSnowSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) {
-    // Transition all cascade images to general layout for compute write
-    {
-        VkPipelineStageFlags srcStage = isFirstFrame[0] ?
-            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT : VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-
-        Barriers::BarrierBatch batch(cmd, srcStage, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
-        for (uint32_t i = 0; i < NUM_SNOW_CASCADES; i++) {
-            VkImageLayout oldLayout = isFirstFrame[i] ?
-                VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            VkAccessFlags srcAccess = isFirstFrame[i] ? 0 : VK_ACCESS_SHADER_READ_BIT;
-
-            batch.imageTransition(cascadeImages[i], oldLayout, VK_IMAGE_LAYOUT_GENERAL,
-                                  srcAccess, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
-        }
-    }
+    barrierCascadesForCompute(cmd);
 
     // Bind compute pipeline and descriptor set
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, getComputePipelineHandles().pipeline);
@@ -368,16 +354,7 @@ void VolumetricSnowSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameInde
     uint32_t workgroupCount = SNOW_CASCADE_SIZE / WORKGROUP_SIZE;
     vkCmdDispatch(cmd, workgroupCount, workgroupCount, NUM_SNOW_CASCADES);
 
-    // Transition all cascades to shader read optimal for fragment shaders
-    {
-        Barriers::BarrierBatch batch(cmd,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
-        for (uint32_t i = 0; i < NUM_SNOW_CASCADES; i++) {
-            batch.imageTransition(cascadeImages[i],
-                VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
-        }
-    }
+    barrierCascadesForSampling(cmd);
 
     // Mark first frame as done
     for (uint32_t i = 0; i < NUM_SNOW_CASCADES; i++) {
@@ -386,4 +363,29 @@ void VolumetricSnowSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameInde
 
     // Clear interactions for next frame
     clearInteractions();
+}
+
+void VolumetricSnowSystem::barrierCascadesForCompute(VkCommandBuffer cmd) {
+    VkPipelineStageFlags srcStage = isFirstFrame[0] ?
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT : VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+
+    Barriers::BarrierBatch batch(cmd, srcStage, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+    for (uint32_t i = 0; i < NUM_SNOW_CASCADES; i++) {
+        VkImageLayout oldLayout = isFirstFrame[i] ?
+            VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        VkAccessFlags srcAccess = isFirstFrame[i] ? 0 : VK_ACCESS_SHADER_READ_BIT;
+
+        batch.imageTransition(cascadeImages[i], oldLayout, VK_IMAGE_LAYOUT_GENERAL,
+                              srcAccess, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+    }
+}
+
+void VolumetricSnowSystem::barrierCascadesForSampling(VkCommandBuffer cmd) {
+    Barriers::BarrierBatch batch(cmd,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+    for (uint32_t i = 0; i < NUM_SNOW_CASCADES; i++) {
+        batch.imageTransition(cascadeImages[i],
+            VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
+    }
 }

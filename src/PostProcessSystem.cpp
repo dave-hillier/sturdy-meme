@@ -1149,12 +1149,7 @@ void PostProcessSystem::recordHistogramCompute(VkCommandBuffer cmd, uint32_t fra
     uint32_t groupsY = (extent.height + 15) / 16;
     vkCmdDispatch(cmd, groupsX, groupsY, 1);
 
-    // Barrier between build and reduce
-    Barriers::BarrierBatch(cmd)
-        .setStages(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT)
-        .bufferBarrier(histogramBuffer, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-                       0, HISTOGRAM_BINS * sizeof(uint32_t))
-        .submit();
+    barrierHistogramBuildToReduce(cmd);
 
     // Dispatch histogram reduce (single workgroup of 256 threads)
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, histogramReducePipeline);
@@ -1162,7 +1157,18 @@ void PostProcessSystem::recordHistogramCompute(VkCommandBuffer cmd, uint32_t fra
                             0, 1, &histogramReduceDescSets[frameIndex], 0, nullptr);
     vkCmdDispatch(cmd, 1, 1, 1);
 
-    // Barrier: exposure buffer ready for CPU read, HDR image back to shader read
+    barrierHistogramReduceComplete(cmd, frameIndex);
+}
+
+void PostProcessSystem::barrierHistogramBuildToReduce(VkCommandBuffer cmd) {
+    Barriers::BarrierBatch(cmd)
+        .setStages(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT)
+        .bufferBarrier(histogramBuffer, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+                       0, HISTOGRAM_BINS * sizeof(uint32_t))
+        .submit();
+}
+
+void PostProcessSystem::barrierHistogramReduceComplete(VkCommandBuffer cmd, uint32_t frameIndex) {
     Barriers::BarrierBatch(cmd)
         .setStages(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                    VK_PIPELINE_STAGE_HOST_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT)

@@ -132,6 +132,12 @@ private:
     void destroyHistogramResources();
     void recordHistogramCompute(VkCommandBuffer cmd, uint32_t frameIndex, float deltaTime);
 
+    // Synchronize histogram build output for reduce pass
+    void barrierHistogramBuildToReduce(VkCommandBuffer cmd);
+
+    // Synchronize histogram reduce output for CPU read and HDR image for sampling
+    void barrierHistogramReduceComplete(VkCommandBuffer cmd, uint32_t frameIndex);
+
     void destroyHDRResources();
 
     VkDevice device = VK_NULL_HANDLE;

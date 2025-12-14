@@ -1186,17 +1186,7 @@ void AtmosphereLUTSystem::computeIrradianceLUT(VkCommandBuffer cmd) {
     uniforms.params = atmosphereParams;
     memcpy(uniformMappedPtr, &uniforms, sizeof(AtmosphereUniforms));
 
-    // Transition both irradiance LUTs to GENERAL layout for compute write
-    {
-        Barriers::BarrierBatch batch(cmd);
-        batch.imageTransition(rayleighIrradianceLUT,
-            VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
-            0, VK_ACCESS_SHADER_WRITE_BIT);
-        batch.imageTransition(mieIrradianceLUT,
-            VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
-            0, VK_ACCESS_SHADER_WRITE_BIT);
-        batch.setStages(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
-    }
+    barrierIrradianceLUTsForCompute(cmd);
 
     // Bind pipeline and dispatch
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, irradiancePipeline);
@@ -1207,17 +1197,7 @@ void AtmosphereLUTSystem::computeIrradianceLUT(VkCommandBuffer cmd) {
     uint32_t groupCountY = (IRRADIANCE_HEIGHT + 7) / 8;
     vkCmdDispatch(cmd, groupCountX, groupCountY, 1);
 
-    // Transition both LUTs to SHADER_READ for sampling
-    {
-        Barriers::BarrierBatch batch(cmd);
-        batch.imageTransition(rayleighIrradianceLUT,
-            VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
-        batch.imageTransition(mieIrradianceLUT,
-            VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
-        batch.setStages(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
-    }
+    barrierIrradianceLUTsForSampling(cmd);
 
     SDL_Log("Computed irradiance LUTs (%dx%d)", IRRADIANCE_WIDTH, IRRADIANCE_HEIGHT);
 }
@@ -1567,4 +1547,26 @@ void AtmosphereLUTSystem::recomputeStaticLUTs(VkCommandBuffer cmd) {
 
     paramsDirty = false;
     SDL_Log("Atmosphere LUTs recomputed with new parameters");
+}
+
+void AtmosphereLUTSystem::barrierIrradianceLUTsForCompute(VkCommandBuffer cmd) {
+    Barriers::BarrierBatch batch(cmd);
+    batch.imageTransition(rayleighIrradianceLUT,
+        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+        0, VK_ACCESS_SHADER_WRITE_BIT);
+    batch.imageTransition(mieIrradianceLUT,
+        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+        0, VK_ACCESS_SHADER_WRITE_BIT);
+    batch.setStages(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+}
+
+void AtmosphereLUTSystem::barrierIrradianceLUTsForSampling(VkCommandBuffer cmd) {
+    Barriers::BarrierBatch batch(cmd);
+    batch.imageTransition(rayleighIrradianceLUT,
+        VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
+    batch.imageTransition(mieIrradianceLUT,
+        VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
+    batch.setStages(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
 }

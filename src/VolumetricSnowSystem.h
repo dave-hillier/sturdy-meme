@@ -127,6 +127,12 @@ private:
 
     void updateCascadeOrigins(const glm::vec3& cameraPos);
 
+    // Transition cascade images for compute write
+    void barrierCascadesForCompute(VkCommandBuffer cmd);
+
+    // Transition cascade images for fragment shader sampling
+    void barrierCascadesForSampling(VkCommandBuffer cmd);
+
     VkDevice getDevice() const { return lifecycle.getDevice(); }
     VmaAllocator getAllocator() const { return lifecycle.getAllocator(); }
     DescriptorManager::Pool* getDescriptorPool() const { return lifecycle.getDescriptorPool(); }

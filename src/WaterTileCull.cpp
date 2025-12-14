@@ -450,18 +450,7 @@ void WaterTileCull::recordTileCull(VkCommandBuffer cmd, uint32_t frameIndex,
     uint32_t groupsY = (tileCount.y + 7) / 8;
     vkCmdDispatch(cmd, groupsX, groupsY, 1);
 
-    // Ensure compute writes are visible before copying to the readback buffer
-    {
-        Barriers::BarrierBatch batch(cmd,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
-                VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT);
-        batch.bufferBarrier(counterBuffer, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
-                            frameIndex * sizeof(uint32_t), sizeof(uint32_t));
-        batch.bufferBarrier(tileBuffer, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
-        batch.bufferBarrier(indirectDrawBuffer, VK_ACCESS_SHADER_WRITE_BIT,
-                            VK_ACCESS_INDIRECT_COMMAND_READ_BIT, 0, sizeof(IndirectDrawCommand));
-    }
+    barrierCullResultsForDrawAndTransfer(cmd, frameIndex);
 
     // Copy the counter value for this frame to the host-visible readback buffer
     VkBufferCopy copyRegion{};
@@ -470,12 +459,25 @@ void WaterTileCull::recordTileCull(VkCommandBuffer cmd, uint32_t frameIndex,
     copyRegion.size = sizeof(uint32_t);
     vkCmdCopyBuffer(cmd, counterBuffer, counterReadbackBuffer, 1, &copyRegion);
 
-    // Make the transfer visible to the CPU before next frame reads
-    {
-        Barriers::BarrierBatch batch(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT);
-        batch.bufferBarrier(counterReadbackBuffer, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT,
-                            frameIndex * sizeof(uint32_t), sizeof(uint32_t));
-    }
+    barrierCounterForHostRead(cmd, frameIndex);
+}
+
+void WaterTileCull::barrierCullResultsForDrawAndTransfer(VkCommandBuffer cmd, uint32_t frameIndex) {
+    Barriers::BarrierBatch batch(cmd,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
+            VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT);
+    batch.bufferBarrier(counterBuffer, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
+                        frameIndex * sizeof(uint32_t), sizeof(uint32_t));
+    batch.bufferBarrier(tileBuffer, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
+    batch.bufferBarrier(indirectDrawBuffer, VK_ACCESS_SHADER_WRITE_BIT,
+                        VK_ACCESS_INDIRECT_COMMAND_READ_BIT, 0, sizeof(IndirectDrawCommand));
+}
+
+void WaterTileCull::barrierCounterForHostRead(VkCommandBuffer cmd, uint32_t frameIndex) {
+    Barriers::BarrierBatch batch(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT);
+    batch.bufferBarrier(counterReadbackBuffer, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT,
+                        frameIndex * sizeof(uint32_t), sizeof(uint32_t));
 }
 
 uint32_t WaterTileCull::getVisibleTileCount(uint32_t frameIndex) const {

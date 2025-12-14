@@ -141,6 +141,9 @@ private:
     // Extract frustum planes from view-projection matrix
     static void extractFrustumPlanes(const glm::mat4& viewProj, glm::vec4 planes[6]);
 
+    // Synchronize culling output for indirect draw consumption
+    void barrierCullingToIndirectDraw(VkCommandBuffer cmd);
+
     VkDevice device = VK_NULL_HANDLE;
     VmaAllocator allocator = VK_NULL_HANDLE;
     DescriptorManager::Pool* descriptorPool = nullptr;

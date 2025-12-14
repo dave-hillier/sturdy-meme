@@ -148,6 +148,12 @@ private:
 
     void destroyLUTResources();
 
+    // Transition irradiance LUTs for compute write
+    void barrierIrradianceLUTsForCompute(VkCommandBuffer cmd);
+
+    // Transition irradiance LUTs for fragment shader sampling
+    void barrierIrradianceLUTsForSampling(VkCommandBuffer cmd);
+
     // Helper to export a 2D image to PNG
     bool exportImageToPNG(VkImage image, VkFormat format, uint32_t width, uint32_t height, const std::string& filename);
 

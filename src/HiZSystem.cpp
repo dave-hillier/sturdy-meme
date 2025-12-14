@@ -673,7 +673,10 @@ void HiZSystem::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex) {
     uint32_t groupCount = (objectCount + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
     vkCmdDispatch(cmd, groupCount, 1, 1);
 
-    // Barrier before indirect draw
+    barrierCullingToIndirectDraw(cmd);
+}
+
+void HiZSystem::barrierCullingToIndirectDraw(VkCommandBuffer cmd) {
     Barriers::BarrierBatch(cmd)
         .setStages(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT)
         .memoryBarrier(VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_INDIRECT_COMMAND_READ_BIT)

@@ -102,6 +102,12 @@ private:
     bool createComputePipeline();
     bool createDescriptorSets();
 
+    // Synchronize cull output for drawing and counter transfer
+    void barrierCullResultsForDrawAndTransfer(VkCommandBuffer cmd, uint32_t frameIndex);
+
+    // Synchronize counter readback for CPU access
+    void barrierCounterForHostRead(VkCommandBuffer cmd, uint32_t frameIndex);
+
     VkDevice device = VK_NULL_HANDLE;
     VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
     VmaAllocator allocator = VK_NULL_HANDLE;
