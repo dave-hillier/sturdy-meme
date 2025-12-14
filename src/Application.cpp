@@ -387,7 +387,10 @@ void Application::run() {
         renderer.updatePhysicsDebug(physics, camera.getPosition());
 #endif
 
-        renderer.render(camera);
+        // Render frame - if skipped (window minimized/suspended), cancel GUI frame
+        if (!renderer.render(camera)) {
+            gui.cancelFrame();
+        }
 
         // Update window title with FPS, time of day, and camera mode
         if (deltaTime > 0.0f) {

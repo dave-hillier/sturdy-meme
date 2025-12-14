@@ -54,6 +54,7 @@ public:
     void beginFrame();
     void render(Renderer& renderer, const Camera& camera, float deltaTime, float fps);
     void endFrame(VkCommandBuffer cmd);
+    void cancelFrame();  // End frame without rendering (for early returns)
 
     bool wantsInput() const;
     bool isVisible() const { return visible; }

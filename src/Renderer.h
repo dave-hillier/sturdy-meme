@@ -71,7 +71,8 @@ public:
     bool init(SDL_Window* window, const std::string& resourcePath);
     void shutdown();
 
-    void render(const Camera& camera);
+    // Returns true if frame was rendered, false if skipped (caller must handle GUI frame cancellation)
+    bool render(const Camera& camera);
     void waitIdle();
 
     // Wait for the previous frame's GPU work to complete.

@@ -312,6 +312,12 @@ void GuiSystem::endFrame(VkCommandBuffer cmd) {
     ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
 }
 
+void GuiSystem::cancelFrame() {
+    // End the ImGui frame without rendering to GPU
+    // This must be called if beginFrame() was called but render won't happen
+    ImGui::EndFrame();
+}
+
 bool GuiSystem::wantsInput() const {
     ImGuiIO& io = ImGui::GetIO();
     return io.WantCaptureMouse || io.WantCaptureKeyboard;

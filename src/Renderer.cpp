@@ -1483,10 +1483,10 @@ void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera& camera) 
     postProcessSystem.setHDREnabled(hdrEnabled);
 }
 
-void Renderer::render(const Camera& camera) {
+bool Renderer::render(const Camera& camera) {
     // Skip rendering if window is suspended (e.g., macOS screen lock)
     if (windowSuspended) {
-        return;
+        return false;
     }
 
     VkDevice device = vulkanContext.getDevice();
@@ -1504,7 +1504,7 @@ void Renderer::render(const Camera& camera) {
     // Skip rendering if window is minimized
     VkExtent2D extent = vulkanContext.getSwapchainExtent();
     if (extent.width == 0 || extent.height == 0) {
-        return;
+        return false;
     }
 
     // Frame synchronization
@@ -1516,21 +1516,21 @@ void Renderer::render(const Camera& camera) {
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR) {
         handleResize();
-        return;
+        return false;
     } else if (result == VK_ERROR_SURFACE_LOST_KHR) {
         // Surface lost - can happen on macOS when screen locks/unlocks
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Surface lost, will recreate on next frame");
         framebufferResized = true;
-        return;
+        return false;
     } else if (result == VK_ERROR_DEVICE_LOST) {
         // Device lost - critical error on macOS lock/unlock
         // Log error but return gracefully - app can attempt recovery on next frame
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Vulkan device lost - attempting recovery");
         framebufferResized = true;
-        return;
+        return false;
     } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to acquire swapchain image: %d", result);
-        return;
+        return false;
     }
 
     vkResetFences(device, 1, &inFlightFences[currentFrame]);
@@ -1824,10 +1824,10 @@ void Renderer::render(const Camera& camera) {
     if (result == VK_ERROR_DEVICE_LOST) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Device lost during queue submit");
         framebufferResized = true;
-        return;
+        return false;
     } else if (result != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to submit draw command buffer: %d", result);
-        return;
+        return false;
     }
 
     // Present
@@ -1864,6 +1864,7 @@ void Renderer::render(const Camera& camera) {
     waterTileCull.endFrame(currentFrame);
 
     currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+    return true;
 }
 
 void Renderer::waitIdle() {
