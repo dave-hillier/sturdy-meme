@@ -49,6 +49,11 @@ set(SOURCES
     src/BloomSystem.cpp
     src/FroxelSystem.cpp
     src/AtmosphereLUTSystem.cpp
+    src/AtmosphereLUTResources.cpp
+    src/AtmosphereLUTDescriptors.cpp
+    src/AtmosphereLUTPipelines.cpp
+    src/AtmosphereLUTCompute.cpp
+    src/AtmosphereLUTExport.cpp
     src/Player.cpp
     src/PhysicsSystem.cpp
     src/ParticleSystem.cpp
