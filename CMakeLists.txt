@@ -98,6 +98,9 @@ set(SOURCES
     src/SSRSystem.cpp
     src/WaterTileCull.cpp
     src/TreeGenerator.cpp
+    src/VolumeGenerator.cpp
+    src/SpaceColonisationGenerator.cpp
+    src/CurvedGeometryGenerator.cpp
     src/TreeEditSystem.cpp
     src/TreeEditorGui.cpp
     src/BillboardCapture.cpp
