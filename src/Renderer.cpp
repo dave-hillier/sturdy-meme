@@ -1427,6 +1427,7 @@ void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera& camera) 
 
     // Pure calculations
     LightingParams lighting = calculateLightingParams(currentTimeOfDay);
+    timeSystem.setCurrentMoonPhase(lighting.moonPhase);  // Track current effective phase
 
     // Calculate and apply tide based on celestial positions
     DateTime dateTime = DateTime::fromTimeOfDay(currentTimeOfDay, timeSystem.getCurrentYear(),
@@ -2028,8 +2029,6 @@ Renderer::LightingParams Renderer::calculateLightingParams(float timeOfDay) cons
     } else {
         params.moonPhase = moonPos.phase;
     }
-    timeSystem.setCurrentMoonPhase(params.moonPhase);  // Track current effective phase
-
     // Eclipse simulation - affects sun intensity
     params.eclipseAmount = timeSystem.isEclipseEnabled() ? timeSystem.getEclipseAmount() : 0.0f;
 
