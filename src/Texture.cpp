@@ -1,7 +1,8 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 #include "Texture.h"
-#include <stdexcept>
+#include "VulkanRAII.h"
+#include <cstring>
 
 bool Texture::load(const std::string& path, VmaAllocator allocator, VkDevice device,
                    VkCommandPool commandPool, VkQueue queue, VkPhysicalDevice physicalDevice,
@@ -10,35 +11,34 @@ bool Texture::load(const std::string& path, VmaAllocator allocator, VkDevice dev
     stbi_uc* pixels = stbi_load(path.c_str(), &width, &height, &channels, STBI_rgb_alpha);
 
     if (!pixels) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load texture: %s", path.c_str());
         return false;
     }
 
+    // Use scope guard to ensure pixels are freed on any exit path
+    auto pixelGuard = makeScopeGuard([&]() { stbi_image_free(pixels); });
+
     VkDeviceSize imageSize = width * height * 4;
 
-    VkBuffer stagingBuffer;
-    VmaAllocation stagingAllocation;
+    // Create staging buffer using RAII
+    ManagedBuffer stagingBuffer;
+    if (!ManagedBuffer::createStaging(allocator, imageSize, stagingBuffer)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create staging buffer for texture: %s", path.c_str());
+        return false;
+    }
 
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = imageSize;
-    bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    VmaAllocationCreateInfo allocInfo{};
-    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-    allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
-    vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &stagingBuffer, &stagingAllocation, nullptr);
-
-    void* data;
-    vmaMapMemory(allocator, stagingAllocation, &data);
+    // Copy pixel data to staging buffer
+    void* data = stagingBuffer.map();
+    if (!data) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to map staging buffer for texture: %s", path.c_str());
+        return false;
+    }
     memcpy(data, pixels, static_cast<size_t>(imageSize));
-    vmaUnmapMemory(allocator, stagingAllocation);
-
-    stbi_image_free(pixels);
+    stagingBuffer.unmap();
 
     VkFormat imageFormat = useSRGB ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
 
+    // Create image using RAII
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     imageInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -57,20 +57,34 @@ bool Texture::load(const std::string& path, VmaAllocator allocator, VkDevice dev
     VmaAllocationCreateInfo imageAllocInfo{};
     imageAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
 
-    vmaCreateImage(allocator, &imageInfo, &imageAllocInfo, &image, &allocation, nullptr);
+    ManagedImage managedImage;
+    if (!ManagedImage::create(allocator, imageInfo, imageAllocInfo, managedImage)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create image for texture: %s", path.c_str());
+        return false;
+    }
 
-    transitionImageLayout(device, commandPool, queue, image,
-                          VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-    copyBufferToImage(device, commandPool, queue, stagingBuffer, image,
-                      static_cast<uint32_t>(width), static_cast<uint32_t>(height));
-    transitionImageLayout(device, commandPool, queue, image,
-                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    // Transition and copy using RAII command scope
+    if (!transitionImageLayout(device, commandPool, queue, managedImage.get(),
+                               VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)) {
+        return false;
+    }
 
-    vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
+    if (!copyBufferToImage(device, commandPool, queue, stagingBuffer.get(), managedImage.get(),
+                           static_cast<uint32_t>(width), static_cast<uint32_t>(height))) {
+        return false;
+    }
 
+    if (!transitionImageLayout(device, commandPool, queue, managedImage.get(),
+                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)) {
+        return false;
+    }
+
+    // stagingBuffer automatically destroyed here
+
+    // Create image view using RAII
     VkImageViewCreateInfo viewInfo{};
     viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.image = image;
+    viewInfo.image = managedImage.get();
     viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
     viewInfo.format = imageFormat;
     viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -79,10 +93,13 @@ bool Texture::load(const std::string& path, VmaAllocator allocator, VkDevice dev
     viewInfo.subresourceRange.baseArrayLayer = 0;
     viewInfo.subresourceRange.layerCount = 1;
 
-    if (vkCreateImageView(device, &viewInfo, nullptr, &imageView) != VK_SUCCESS) {
+    ManagedImageView managedView;
+    if (!ManagedImageView::create(device, viewInfo, managedView)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create image view for texture: %s", path.c_str());
         return false;
     }
 
+    // Create sampler using RAII
     VkSamplerCreateInfo samplerInfo{};
     samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     samplerInfo.magFilter = VK_FILTER_LINEAR;
@@ -101,9 +118,16 @@ bool Texture::load(const std::string& path, VmaAllocator allocator, VkDevice dev
     samplerInfo.minLod = 0.0f;
     samplerInfo.maxLod = 0.0f;
 
-    if (vkCreateSampler(device, &samplerInfo, nullptr, &sampler) != VK_SUCCESS) {
+    ManagedSampler managedSampler;
+    if (!ManagedSampler::create(device, samplerInfo, managedSampler)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create sampler for texture: %s", path.c_str());
         return false;
     }
+
+    // Success - transfer ownership to member variables
+    managedImage.releaseToRaw(image, allocation);
+    imageView = managedView.release();
+    sampler = managedSampler.release();
 
     return true;
 }
@@ -117,26 +141,22 @@ bool Texture::createSolidColor(uint8_t r, uint8_t g, uint8_t b, uint8_t a,
 
     VkDeviceSize imageSize = 4;
 
-    VkBuffer stagingBuffer;
-    VmaAllocation stagingAllocation;
+    // Create staging buffer using RAII
+    ManagedBuffer stagingBuffer;
+    if (!ManagedBuffer::createStaging(allocator, imageSize, stagingBuffer)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create staging buffer for solid color texture");
+        return false;
+    }
 
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = imageSize;
-    bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    VmaAllocationCreateInfo allocInfo{};
-    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-    allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
-    vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &stagingBuffer, &stagingAllocation, nullptr);
-
-    void* data;
-    vmaMapMemory(allocator, stagingAllocation, &data);
+    void* data = stagingBuffer.map();
+    if (!data) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to map staging buffer for solid color texture");
+        return false;
+    }
     memcpy(data, pixels, imageSize);
-    vmaUnmapMemory(allocator, stagingAllocation);
+    stagingBuffer.unmap();
 
+    // Create image using RAII
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     imageInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -155,19 +175,30 @@ bool Texture::createSolidColor(uint8_t r, uint8_t g, uint8_t b, uint8_t a,
     VmaAllocationCreateInfo imageAllocInfo{};
     imageAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
 
-    vmaCreateImage(allocator, &imageInfo, &imageAllocInfo, &image, &allocation, nullptr);
+    ManagedImage managedImage;
+    if (!ManagedImage::create(allocator, imageInfo, imageAllocInfo, managedImage)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create image for solid color texture");
+        return false;
+    }
 
-    transitionImageLayout(device, commandPool, queue, image,
-                          VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-    copyBufferToImage(device, commandPool, queue, stagingBuffer, image, 1, 1);
-    transitionImageLayout(device, commandPool, queue, image,
-                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    if (!transitionImageLayout(device, commandPool, queue, managedImage.get(),
+                               VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)) {
+        return false;
+    }
 
-    vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
+    if (!copyBufferToImage(device, commandPool, queue, stagingBuffer.get(), managedImage.get(), 1, 1)) {
+        return false;
+    }
 
+    if (!transitionImageLayout(device, commandPool, queue, managedImage.get(),
+                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)) {
+        return false;
+    }
+
+    // Create image view using RAII
     VkImageViewCreateInfo viewInfo{};
     viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.image = image;
+    viewInfo.image = managedImage.get();
     viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
     viewInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
     viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -176,10 +207,13 @@ bool Texture::createSolidColor(uint8_t r, uint8_t g, uint8_t b, uint8_t a,
     viewInfo.subresourceRange.baseArrayLayer = 0;
     viewInfo.subresourceRange.layerCount = 1;
 
-    if (vkCreateImageView(device, &viewInfo, nullptr, &imageView) != VK_SUCCESS) {
+    ManagedImageView managedView;
+    if (!ManagedImageView::create(device, viewInfo, managedView)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create image view for solid color texture");
         return false;
     }
 
+    // Create sampler using RAII
     VkSamplerCreateInfo samplerInfo{};
     samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     samplerInfo.magFilter = VK_FILTER_NEAREST;
@@ -198,9 +232,16 @@ bool Texture::createSolidColor(uint8_t r, uint8_t g, uint8_t b, uint8_t a,
     samplerInfo.minLod = 0.0f;
     samplerInfo.maxLod = 0.0f;
 
-    if (vkCreateSampler(device, &samplerInfo, nullptr, &sampler) != VK_SUCCESS) {
+    ManagedSampler managedSampler;
+    if (!ManagedSampler::create(device, samplerInfo, managedSampler)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create sampler for solid color texture");
         return false;
     }
+
+    // Success - transfer ownership to member variables
+    managedImage.releaseToRaw(image, allocation);
+    imageView = managedView.release();
+    sampler = managedSampler.release();
 
     return true;
 }
@@ -220,22 +261,12 @@ void Texture::destroy(VmaAllocator allocator, VkDevice device) {
     }
 }
 
-void Texture::transitionImageLayout(VkDevice device, VkCommandPool commandPool, VkQueue queue,
+bool Texture::transitionImageLayout(VkDevice device, VkCommandPool commandPool, VkQueue queue,
                                     VkImage image, VkImageLayout oldLayout, VkImageLayout newLayout) {
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandPool = commandPool;
-    allocInfo.commandBufferCount = 1;
-
-    VkCommandBuffer commandBuffer;
-    vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer);
-
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-    vkBeginCommandBuffer(commandBuffer, &beginInfo);
+    CommandScope cmd(device, commandPool, queue);
+    if (!cmd.begin()) {
+        return false;
+    }
 
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -270,38 +301,18 @@ void Texture::transitionImageLayout(VkDevice device, VkCommandPool commandPool, 
         destinationStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
     }
 
-    vkCmdPipelineBarrier(commandBuffer, sourceStage, destinationStage, 0,
+    vkCmdPipelineBarrier(cmd.get(), sourceStage, destinationStage, 0,
                          0, nullptr, 0, nullptr, 1, &barrier);
 
-    vkEndCommandBuffer(commandBuffer);
-
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &commandBuffer;
-
-    vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
-    vkQueueWaitIdle(queue);
-
-    vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
+    return cmd.end();
 }
 
-void Texture::copyBufferToImage(VkDevice device, VkCommandPool commandPool, VkQueue queue,
+bool Texture::copyBufferToImage(VkDevice device, VkCommandPool commandPool, VkQueue queue,
                                 VkBuffer buffer, VkImage image, uint32_t width, uint32_t height) {
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandPool = commandPool;
-    allocInfo.commandBufferCount = 1;
-
-    VkCommandBuffer commandBuffer;
-    vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer);
-
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-    vkBeginCommandBuffer(commandBuffer, &beginInfo);
+    CommandScope cmd(device, commandPool, queue);
+    if (!cmd.begin()) {
+        return false;
+    }
 
     VkBufferImageCopy region{};
     region.bufferOffset = 0;
@@ -314,17 +325,7 @@ void Texture::copyBufferToImage(VkDevice device, VkCommandPool commandPool, VkQu
     region.imageOffset = {0, 0, 0};
     region.imageExtent = {width, height, 1};
 
-    vkCmdCopyBufferToImage(commandBuffer, buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+    vkCmdCopyBufferToImage(cmd.get(), buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
-    vkEndCommandBuffer(commandBuffer);
-
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &commandBuffer;
-
-    vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
-    vkQueueWaitIdle(queue);
-
-    vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
+    return cmd.end();
 }

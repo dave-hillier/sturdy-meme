@@ -82,7 +82,7 @@ public:
     ~SkinnedMesh() = default;
 
     void setData(const SkinnedMeshData& data);
-    void upload(VmaAllocator allocator, VkDevice device, VkCommandPool commandPool, VkQueue queue);
+    bool upload(VmaAllocator allocator, VkDevice device, VkCommandPool commandPool, VkQueue queue);
     void destroy(VmaAllocator allocator);
 
     VkBuffer getVertexBuffer() const { return vertexBuffer; }

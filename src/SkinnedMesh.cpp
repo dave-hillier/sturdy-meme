@@ -1,4 +1,5 @@
 #include "SkinnedMesh.h"
+#include "VulkanRAII.h"
 #include <SDL3/SDL_log.h>
 #include <cstring>
 
@@ -8,125 +9,133 @@ void SkinnedMesh::setData(const SkinnedMeshData& data) {
     skeleton = data.skeleton;
 }
 
-void SkinnedMesh::upload(VmaAllocator allocator, VkDevice device, VkCommandPool commandPool, VkQueue queue) {
+bool SkinnedMesh::upload(VmaAllocator allocator, VkDevice device, VkCommandPool commandPool, VkQueue queue) {
     if (vertices.empty() || indices.empty()) {
         SDL_Log("SkinnedMesh: No data to upload");
-        return;
+        return false;
     }
 
-    // Create staging buffers and upload to GPU (similar to Mesh::upload)
     VkDeviceSize vertexBufferSize = sizeof(SkinnedVertex) * vertices.size();
     VkDeviceSize indexBufferSize = sizeof(uint32_t) * indices.size();
 
-    // Create vertex staging buffer
-    VkBuffer stagingVertexBuffer;
-    VmaAllocation stagingVertexAllocation;
+    // Create vertex staging buffer using RAII
+    ManagedBuffer stagingVertexBuffer;
     {
         VkBufferCreateInfo bufferInfo{};
         bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
         bufferInfo.size = vertexBufferSize;
         bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
         VmaAllocationCreateInfo allocInfo{};
         allocInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
 
-        vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &stagingVertexBuffer, &stagingVertexAllocation, nullptr);
+        if (!ManagedBuffer::create(allocator, bufferInfo, allocInfo, stagingVertexBuffer)) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SkinnedMesh: Failed to create vertex staging buffer");
+            return false;
+        }
 
-        void* data;
-        vmaMapMemory(allocator, stagingVertexAllocation, &data);
+        void* data = stagingVertexBuffer.map();
+        if (!data) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SkinnedMesh: Failed to map vertex staging buffer");
+            return false;
+        }
         memcpy(data, vertices.data(), vertexBufferSize);
-        vmaUnmapMemory(allocator, stagingVertexAllocation);
+        stagingVertexBuffer.unmap();
     }
 
-    // Create index staging buffer
-    VkBuffer stagingIndexBuffer;
-    VmaAllocation stagingIndexAllocation;
+    // Create index staging buffer using RAII
+    ManagedBuffer stagingIndexBuffer;
     {
         VkBufferCreateInfo bufferInfo{};
         bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
         bufferInfo.size = indexBufferSize;
         bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
         VmaAllocationCreateInfo allocInfo{};
         allocInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
 
-        vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &stagingIndexBuffer, &stagingIndexAllocation, nullptr);
+        if (!ManagedBuffer::create(allocator, bufferInfo, allocInfo, stagingIndexBuffer)) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SkinnedMesh: Failed to create index staging buffer");
+            return false;
+        }
 
-        void* data;
-        vmaMapMemory(allocator, stagingIndexAllocation, &data);
+        void* data = stagingIndexBuffer.map();
+        if (!data) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SkinnedMesh: Failed to map index staging buffer");
+            return false;
+        }
         memcpy(data, indices.data(), indexBufferSize);
-        vmaUnmapMemory(allocator, stagingIndexAllocation);
+        stagingIndexBuffer.unmap();
     }
 
-    // Create device-local vertex buffer
+    // Create device-local vertex buffer using RAII
+    ManagedBuffer managedVertexBuffer;
     {
         VkBufferCreateInfo bufferInfo{};
         bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
         bufferInfo.size = vertexBufferSize;
         bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
         VmaAllocationCreateInfo allocInfo{};
         allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
-        vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &vertexBuffer, &vertexAllocation, nullptr);
+        if (!ManagedBuffer::create(allocator, bufferInfo, allocInfo, managedVertexBuffer)) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SkinnedMesh: Failed to create device vertex buffer");
+            return false;
+        }
     }
 
-    // Create device-local index buffer
+    // Create device-local index buffer using RAII
+    ManagedBuffer managedIndexBuffer;
     {
         VkBufferCreateInfo bufferInfo{};
         bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
         bufferInfo.size = indexBufferSize;
         bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
         VmaAllocationCreateInfo allocInfo{};
         allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
-        vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &indexBuffer, &indexAllocation, nullptr);
+        if (!ManagedBuffer::create(allocator, bufferInfo, allocInfo, managedIndexBuffer)) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SkinnedMesh: Failed to create device index buffer");
+            return false;
+        }
     }
 
-    // Copy staging buffers to device-local buffers
-    VkCommandBufferAllocateInfo allocInfoCmd{};
-    allocInfoCmd.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfoCmd.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfoCmd.commandPool = commandPool;
-    allocInfoCmd.commandBufferCount = 1;
-
-    VkCommandBuffer commandBuffer;
-    vkAllocateCommandBuffers(device, &allocInfoCmd, &commandBuffer);
-
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-    vkBeginCommandBuffer(commandBuffer, &beginInfo);
+    // Copy staging buffers to device-local buffers using command scope
+    CommandScope cmd(device, commandPool, queue);
+    if (!cmd.begin()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SkinnedMesh: Failed to begin command buffer");
+        return false;
+    }
 
     VkBufferCopy copyRegion{};
 
     // Copy vertex buffer
     copyRegion.size = vertexBufferSize;
-    vkCmdCopyBuffer(commandBuffer, stagingVertexBuffer, vertexBuffer, 1, &copyRegion);
+    vkCmdCopyBuffer(cmd.get(), stagingVertexBuffer.get(), managedVertexBuffer.get(), 1, &copyRegion);
 
     // Copy index buffer
     copyRegion.size = indexBufferSize;
-    vkCmdCopyBuffer(commandBuffer, stagingIndexBuffer, indexBuffer, 1, &copyRegion);
+    vkCmdCopyBuffer(cmd.get(), stagingIndexBuffer.get(), managedIndexBuffer.get(), 1, &copyRegion);
 
-    vkEndCommandBuffer(commandBuffer);
+    if (!cmd.end()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SkinnedMesh: Failed to submit command buffer");
+        return false;
+    }
 
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &commandBuffer;
+    // Success - transfer ownership to member variables
+    managedVertexBuffer.releaseToRaw(vertexBuffer, vertexAllocation);
+    managedIndexBuffer.releaseToRaw(indexBuffer, indexAllocation);
 
-    vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
-    vkQueueWaitIdle(queue);
-
-    vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
-
-    // Cleanup staging buffers
-    vmaDestroyBuffer(allocator, stagingVertexBuffer, stagingVertexAllocation);
-    vmaDestroyBuffer(allocator, stagingIndexBuffer, stagingIndexAllocation);
+    // Staging buffers automatically destroyed here
 
     SDL_Log("SkinnedMesh: Uploaded %zu vertices, %zu indices", vertices.size(), indices.size());
+    return true;
 }
 
 void SkinnedMesh::destroy(VmaAllocator allocator) {
