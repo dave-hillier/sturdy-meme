@@ -52,6 +52,7 @@
 #include "WaterTileCull.h"
 #include "WaterGBuffer.h"
 #include "DebugLineSystem.h"
+#include "UBOBuilder.h"
 
 #ifdef JPH_DEBUG_RENDERER
 #include "PhysicsDebugRenderer.h"
@@ -376,22 +377,6 @@ private:
     void setupRenderPipeline();
 
     // Pure calculation helpers (no state mutation)
-    struct LightingParams {
-        glm::vec3 sunDir;
-        glm::vec3 moonDir;
-        float sunIntensity;
-        float moonIntensity;
-        glm::vec3 sunColor;
-        glm::vec3 moonColor;
-        glm::vec3 ambientColor;
-        float moonPhase;       // Moon phase (0 = new moon, 0.5 = full moon, 1 = new moon)
-        float eclipseAmount;   // Eclipse amount (0 = none, 1 = total solar eclipse)
-        double julianDay;
-    };
-    LightingParams calculateLightingParams(float timeOfDay) const;
-    UniformBufferObject buildUniformBufferData(const Camera& camera, const LightingParams& lighting, float timeOfDay) const;
-    SnowUBO buildSnowUBOData() const;
-    CloudShadowUBO buildCloudShadowUBOData() const;
     glm::vec2 calculateSunScreenPos(const Camera& camera, const glm::vec3& sunDir) const;
 
     // Build per-frame shared state from camera and timing
@@ -439,6 +424,7 @@ private:
     ErosionDataLoader erosionDataLoader;
     TreeEditSystem treeEditSystem;
     EnvironmentSettings environmentSettings;
+    UBOBuilder uboBuilder;
     Profiler profiler;
     DebugLineSystem debugLineSystem;
 #ifdef JPH_DEBUG_RENDERER

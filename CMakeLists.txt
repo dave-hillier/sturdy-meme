@@ -35,6 +35,7 @@ set(SOURCES
     src/scene/InputSystem.cpp
     # Core
     src/core/Renderer.cpp
+    src/core/UBOBuilder.cpp
     src/core/VulkanContext.cpp
     src/core/Mesh.cpp
     src/core/BufferUtils.cpp

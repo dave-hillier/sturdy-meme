@@ -637,6 +637,21 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     }
     SDL_Log("Debug line system initialized");
 
+    // Initialize UBO builder with system references
+    UBOBuilder::Systems uboSystems{};
+    uboSystems.timeSystem = &timeSystem;
+    uboSystems.celestialCalculator = &celestialCalculator;
+    uboSystems.shadowSystem = &shadowSystem;
+    uboSystems.windSystem = &windSystem;
+    uboSystems.atmosphereLUTSystem = &atmosphereLUTSystem;
+    uboSystems.froxelSystem = &froxelSystem;
+    uboSystems.sceneManager = &sceneManager;
+    uboSystems.snowMaskSystem = &snowMaskSystem;
+    uboSystems.volumetricSnowSystem = &volumetricSnowSystem;
+    uboSystems.cloudShadowSystem = &cloudShadowSystem;
+    uboSystems.environmentSettings = &environmentSettings;
+    uboBuilder.setSystems(uboSystems);
+
     // Setup render pipeline stages with lambdas
     setupRenderPipeline();
     SDL_Log("Render pipeline configured");
@@ -1581,8 +1596,8 @@ void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera& camera) 
     // Get current time of day from time system (already updated in render())
     float currentTimeOfDay = timeSystem.getTimeOfDay();
 
-    // Pure calculations
-    LightingParams lighting = calculateLightingParams(currentTimeOfDay);
+    // Pure calculations via UBOBuilder
+    UBOBuilder::LightingParams lighting = uboBuilder.calculateLightingParams(currentTimeOfDay);
     timeSystem.setCurrentMoonPhase(lighting.moonPhase);  // Track current effective phase
 
     // Calculate and apply tide based on celestial positions
@@ -1594,10 +1609,21 @@ void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera& camera) 
     // Update cascade matrices via shadow system
     shadowSystem.updateCascadeMatrices(lighting.sunDir, camera);
 
-    // Build UBO data (pure calculation)
-    UniformBufferObject ubo = buildUniformBufferData(camera, lighting, currentTimeOfDay);
-    SnowUBO snowUbo = buildSnowUBOData();
-    CloudShadowUBO cloudShadowUbo = buildCloudShadowUBOData();
+    // Build UBO data via UBOBuilder (pure calculation)
+    UBOBuilder::MainUBOConfig mainConfig{};
+    mainConfig.showCascadeDebug = showCascadeDebug;
+    mainConfig.useParaboloidClouds = useParaboloidClouds;
+    mainConfig.cloudCoverage = cloudCoverage;
+    mainConfig.cloudDensity = cloudDensity;
+    UniformBufferObject ubo = uboBuilder.buildUniformBufferData(camera, lighting, currentTimeOfDay, mainConfig);
+
+    UBOBuilder::SnowConfig snowConfig{};
+    snowConfig.useVolumetricSnow = useVolumetricSnow;
+    snowConfig.showSnowDepthDebug = showSnowDepthDebug;
+    snowConfig.maxSnowHeight = MAX_SNOW_HEIGHT;
+    SnowUBO snowUbo = uboBuilder.buildSnowUBOData(snowConfig);
+
+    CloudShadowUBO cloudShadowUbo = uboBuilder.buildCloudShadowUBOData();
 
     // State mutations
     lastSunIntensity = lighting.sunIntensity;
@@ -2059,164 +2085,7 @@ bool Renderer::handleResize() {
     return true;
 }
 
-// Pure calculation helpers - no state mutation
-
-Renderer::LightingParams Renderer::calculateLightingParams(float timeOfDay) const {
-    LightingParams params{};
-
-    DateTime dateTime = DateTime::fromTimeOfDay(timeOfDay, timeSystem.getCurrentYear(),
-                                                 timeSystem.getCurrentMonth(), timeSystem.getCurrentDay());
-    CelestialPosition sunPos = celestialCalculator.calculateSunPosition(dateTime);
-    MoonPosition moonPos = celestialCalculator.calculateMoonPosition(dateTime);
-
-    params.sunDir = sunPos.direction;
-    params.moonDir = moonPos.direction;
-    params.sunIntensity = sunPos.intensity;
-    params.moonIntensity = moonPos.intensity;
-
-    // Smooth transition for moon as light source during twilight
-    if (moonPos.altitude > -5.0f) {
-        float twilightFactor = glm::smoothstep(10.0f, -6.0f, sunPos.altitude);
-        params.moonIntensity *= (1.0f + twilightFactor * 1.0f);
-    }
-
-    // Apply user-controlled moon brightness multiplier
-    params.moonIntensity *= timeSystem.getMoonBrightness();
-
-    params.sunColor = celestialCalculator.getSunColor(sunPos.altitude);
-    params.moonColor = celestialCalculator.getMoonColor(moonPos.altitude, moonPos.illumination);
-    params.ambientColor = celestialCalculator.getAmbientColor(sunPos.altitude);
-
-    // Apply moon phase override if enabled, otherwise use astronomical calculation
-    if (timeSystem.isMoonPhaseOverrideEnabled()) {
-        params.moonPhase = timeSystem.getMoonPhase();
-        // Recalculate illumination based on manual phase
-        float phaseAngle = params.moonPhase * 2.0f * glm::pi<float>();
-        float illumination = (1.0f - std::cos(phaseAngle)) * 0.5f;
-        // Adjust moon color based on manual phase illumination
-        params.moonColor = celestialCalculator.getMoonColor(moonPos.altitude, illumination);
-    } else {
-        params.moonPhase = moonPos.phase;
-    }
-    // Eclipse simulation - affects sun intensity
-    params.eclipseAmount = timeSystem.isEclipseEnabled() ? timeSystem.getEclipseAmount() : 0.0f;
-
-    params.julianDay = dateTime.toJulianDay();
-
-    return params;
-}
-
-UniformBufferObject Renderer::buildUniformBufferData(const Camera& camera, const LightingParams& lighting, float timeOfDay) const {
-    UniformBufferObject ubo{};
-    ubo.model = glm::mat4(1.0f);
-    ubo.view = camera.getViewMatrix();
-    ubo.proj = camera.getProjectionMatrix();
-
-    // Copy cascade matrices from shadow system
-    const auto& cascadeMatrices = shadowSystem.getCascadeMatrices();
-    for (uint32_t i = 0; i < NUM_SHADOW_CASCADES; i++) {
-        ubo.cascadeViewProj[i] = cascadeMatrices[i];
-    }
-
-    // Store view-space split depths from shadow system
-    const auto& cascadeSplitDepths = shadowSystem.getCascadeSplitDepths();
-    ubo.cascadeSplits = glm::vec4(
-        cascadeSplitDepths[1],
-        cascadeSplitDepths[2],
-        cascadeSplitDepths[3],
-        cascadeSplitDepths[4]
-    );
-
-    ubo.sunDirection = glm::vec4(lighting.sunDir, lighting.sunIntensity);
-    ubo.moonDirection = glm::vec4(lighting.moonDir, lighting.moonIntensity);
-    ubo.sunColor = glm::vec4(lighting.sunColor, 1.0f);
-    ubo.moonColor = glm::vec4(lighting.moonColor, lighting.moonPhase);  // Pass moon phase in alpha channel
-    ubo.ambientColor = glm::vec4(lighting.ambientColor, 1.0f);
-    ubo.cameraPosition = glm::vec4(camera.getPosition(), 1.0f);
-
-    // Point light from the glowing sphere (position updated by physics)
-    float pointLightIntensity = 5.0f;
-    float pointLightRadius = 8.0f;
-    ubo.pointLightPosition = glm::vec4(sceneManager.getOrbLightPosition(), pointLightIntensity);
-    ubo.pointLightColor = glm::vec4(1.0f, 0.9f, 0.7f, pointLightRadius);
-
-    // Wind parameters for cloud animation
-    glm::vec2 windDir = windSystem.getWindDirection();
-    float windSpeed = windSystem.getWindSpeed();
-    float windTime = windSystem.getTime();
-    ubo.windDirectionAndSpeed = glm::vec4(windDir.x, windDir.y, windSpeed, windTime);
-
-    ubo.timeOfDay = timeOfDay;
-    ubo.shadowMapSize = static_cast<float>(shadowSystem.getShadowMapSize());
-    ubo.debugCascades = showCascadeDebug ? 1.0f : 0.0f;
-    ubo.julianDay = static_cast<float>(lighting.julianDay);
-    ubo.cloudStyle = useParaboloidClouds ? 1.0f : 0.0f;
-    ubo.cameraNear = camera.getNearPlane();
-    ubo.cameraFar = camera.getFarPlane();
-    ubo.eclipseAmount = lighting.eclipseAmount;
-
-    // Copy atmosphere parameters from AtmosphereLUTSystem for use in atmosphere_common.glsl
-    const auto& atmosParams = atmosphereLUTSystem.getAtmosphereParams();
-    ubo.atmosRayleighScattering = glm::vec4(atmosParams.rayleighScatteringBase, atmosParams.rayleighScaleHeight);
-    ubo.atmosMieParams = glm::vec4(atmosParams.mieScatteringBase, atmosParams.mieAbsorptionBase,
-                                   atmosParams.mieScaleHeight, atmosParams.mieAnisotropy);
-    ubo.atmosOzoneAbsorption = glm::vec4(atmosParams.ozoneAbsorption, atmosParams.ozoneLayerCenter);
-    ubo.atmosOzoneWidth = atmosParams.ozoneLayerWidth;
-
-    // Copy height fog parameters from FroxelSystem for use in atmosphere_common.glsl
-    ubo.heightFogParams = glm::vec4(froxelSystem.getFogBaseHeight(),
-                                     froxelSystem.getFogScaleHeight(),
-                                     froxelSystem.getFogDensity(),
-                                     0.0f);
-    ubo.heightFogLayerParams = glm::vec4(froxelSystem.getLayerThickness(),
-                                          froxelSystem.getLayerDensity(),
-                                          0.0f, 0.0f);
-
-    // Cloud parameters for sky.frag and cloud systems
-    ubo.cloudCoverage = cloudCoverage;
-    ubo.cloudDensity = cloudDensity;
-
-    // Moon rendering parameters for sky.frag
-    ubo.moonBrightness = timeSystem.getMoonBrightness();
-    ubo.moonDiscIntensity = timeSystem.getMoonDiscIntensity();
-    ubo.moonEarthshine = timeSystem.getMoonEarthshine();
-    ubo.moonPad = 0.0f;
-
-    return ubo;
-}
-
-SnowUBO Renderer::buildSnowUBOData() const {
-    SnowUBO snow{};
-
-    snow.snowAmount = environmentSettings.snowAmount;
-    snow.snowRoughness = environmentSettings.snowRoughness;
-    snow.snowTexScale = environmentSettings.snowTexScale;
-    snow.useVolumetricSnow = useVolumetricSnow ? 1.0f : 0.0f;
-    snow.snowColor = glm::vec4(environmentSettings.snowColor, 1.0f);
-    snow.snowMaskParams = glm::vec4(snowMaskSystem.getMaskOrigin(), snowMaskSystem.getMaskSize(), 0.0f);
-
-    // Volumetric snow cascade parameters
-    auto cascadeParams = volumetricSnowSystem.getCascadeParams();
-    snow.snowCascade0Params = cascadeParams[0];
-    snow.snowCascade1Params = cascadeParams[1];
-    snow.snowCascade2Params = cascadeParams[2];
-    snow.snowMaxHeight = MAX_SNOW_HEIGHT;
-    snow.debugSnowDepth = showSnowDepthDebug ? 1.0f : 0.0f;
-    snow.snowPadding = glm::vec2(0.0f);
-
-    return snow;
-}
-
-CloudShadowUBO Renderer::buildCloudShadowUBOData() const {
-    CloudShadowUBO cloudShadowUbo{};
-
-    cloudShadowUbo.cloudShadowMatrix = cloudShadowSystem.getWorldToShadowUV();
-    cloudShadowUbo.cloudShadowIntensity = cloudShadowSystem.getShadowIntensity();
-    cloudShadowUbo.cloudShadowEnabled = cloudShadowSystem.isEnabled() ? 1.0f : 0.0f;
-    cloudShadowUbo.cloudShadowPadding = glm::vec2(0.0f);
-
-    return cloudShadowUbo;
-}
+// Pure calculation helper - sun screen position for god rays
 
 glm::vec2 Renderer::calculateSunScreenPos(const Camera& camera, const glm::vec3& sunDir) const {
     glm::vec3 sunWorldPos = camera.getPosition() + sunDir * 1000.0f;
