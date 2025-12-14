@@ -86,6 +86,7 @@ bool Application::init(const std::string& title, int width, int height) {
         PhysicsTerrain::Config ptConfig;
         ptConfig.loadRadius = 512.0f;        // Load tiles within one tile distance
         ptConfig.unloadRadius = 768.0f;      // Hysteresis to prevent thrashing
+        ptConfig.heightScale = terrain.getConfig().heightScale;  // Must match rendering!
 
         physicsTerrain.init(&physics(), terrain.getTileCache(), ptConfig);
     }

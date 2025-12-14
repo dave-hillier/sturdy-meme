@@ -10,9 +10,11 @@ void PhysicsTerrain::init(PhysicsWorld* physics, TerrainTileCache* tileCache, co
 
     if (tileCache) {
         float actualTileSize = tileCache->getTerrainSize() / tileCache->getTilesX();
-        SDL_Log("PhysicsTerrain initialized: tileSize=%.0f (%ux%u tiles), loadRadius=%.0f, unloadRadius=%.0f, heightScale=%.1f",
+        SDL_Log("PhysicsTerrain initialized: tileSize=%.0f (%ux%u tiles), loadRadius=%.0f, unloadRadius=%.0f",
                 actualTileSize, tileCache->getTilesX(), tileCache->getTilesZ(),
-                config.loadRadius, config.unloadRadius, tileCache->getHeightScale());
+                config.loadRadius, config.unloadRadius);
+        SDL_Log("PhysicsTerrain: using heightScale=%.1f (tile cache has %.1f)",
+                config.heightScale, tileCache->getHeightScale());
     }
 }
 
@@ -143,15 +145,14 @@ bool PhysicsTerrain::loadTile(TileCoord coord) {
     float tileWorldSize = worldMaxX - worldMinX;  // Actual tile size from cache
 
     // Create physics heightfield for this tile
-    // Use tile cache's heightScale for consistency with rendering
+    // Use config.heightScale which comes from TerrainSystem (same as rendering)
     uint32_t resolution = terrainTileCache->getTileResolution();
-    float heightScale = terrainTileCache->getHeightScale();
 
     PhysicsBodyID bodyId = physicsWorld->createTileHeightfield(
         tile->cpuData.data(),
         resolution,
         tileWorldSize,
-        heightScale,
+        config.heightScale,
         worldMinX,
         worldMinZ
     );

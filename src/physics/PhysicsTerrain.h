@@ -13,7 +13,8 @@ public:
     struct Config {
         float loadRadius = 512.0f;      // Distance to load tiles
         float unloadRadius = 768.0f;    // Distance to unload tiles (hysteresis)
-        // Note: tileSize, terrainSize, and heightScale are obtained from TerrainTileCache
+        float heightScale = 235.0f;     // Height scale (must match rendering's heightScale!)
+        // Note: tileSize and terrainSize are obtained from TerrainTileCache
     };
 
     PhysicsTerrain() = default;
