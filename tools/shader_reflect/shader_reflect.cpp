@@ -36,6 +36,14 @@ struct UBODefinition {
     std::vector<UBOMember> members;
 };
 
+struct PushConstantDefinition {
+    std::string name;
+    std::string structName;
+    uint32_t totalSize;
+    bool hasNestedStructs;
+    std::vector<UBOMember> members;
+};
+
 std::string getGLMType(const SpvReflectTypeDescription* typeDesc) {
     std::string baseType;
 
@@ -126,14 +134,41 @@ UBODefinition reflectUBO(const SpvReflectDescriptorBinding* binding) {
     return ubo;
 }
 
-std::vector<UBODefinition> reflectSPIRV(const std::string& filepath) {
+PushConstantDefinition reflectPushConstant(const SpvReflectBlockVariable* block) {
+    PushConstantDefinition pc;
+    pc.name = block->name ? block->name : "";
+    pc.structName = block->type_description->type_name ? block->type_description->type_name : "PushConstants";
+    pc.totalSize = block->size;
+    pc.hasNestedStructs = false;
+
+    // Extract all members
+    for (uint32_t i = 0; i < block->member_count; i++) {
+        const SpvReflectBlockVariable& member = block->members[i];
+
+        // Check for nested structs
+        if (member.type_description->type_flags & SPV_REFLECT_TYPE_FLAG_STRUCT) {
+            pc.hasNestedStructs = true;
+        }
+
+        pc.members.push_back(extractMember(&member));
+    }
+
+    return pc;
+}
+
+struct ReflectionResult {
     std::vector<UBODefinition> ubos;
+    std::vector<PushConstantDefinition> pushConstants;
+};
+
+ReflectionResult reflectSPIRV(const std::string& filepath) {
+    ReflectionResult result_data;
 
     // Read SPIR-V file
     std::ifstream file(filepath, std::ios::binary | std::ios::ate);
     if (!file.is_open()) {
         std::cerr << "Failed to open file: " << filepath << std::endl;
-        return ubos;
+        return result_data;
     }
 
     size_t fileSize = file.tellg();
@@ -153,7 +188,7 @@ std::vector<UBODefinition> reflectSPIRV(const std::string& filepath) {
 
     if (result != SPV_REFLECT_RESULT_SUCCESS) {
         std::cerr << "Failed to reflect shader: " << filepath << std::endl;
-        return ubos;
+        return result_data;
     }
 
     // Enumerate descriptor bindings
@@ -161,25 +196,38 @@ std::vector<UBODefinition> reflectSPIRV(const std::string& filepath) {
     result = spvReflectEnumerateDescriptorBindings(&module, &count, nullptr);
     if (result != SPV_REFLECT_RESULT_SUCCESS) {
         spvReflectDestroyShaderModule(&module);
-        return ubos;
+        return result_data;
     }
 
     std::vector<SpvReflectDescriptorBinding*> bindings(count);
     result = spvReflectEnumerateDescriptorBindings(&module, &count, bindings.data());
     if (result != SPV_REFLECT_RESULT_SUCCESS) {
         spvReflectDestroyShaderModule(&module);
-        return ubos;
+        return result_data;
     }
 
     // Extract UBOs
     for (auto* binding : bindings) {
         if (binding->descriptor_type == SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
-            ubos.push_back(reflectUBO(binding));
+            result_data.ubos.push_back(reflectUBO(binding));
+        }
+    }
+
+    // Enumerate push constant blocks
+    uint32_t pcCount = 0;
+    result = spvReflectEnumeratePushConstantBlocks(&module, &pcCount, nullptr);
+    if (result == SPV_REFLECT_RESULT_SUCCESS && pcCount > 0) {
+        std::vector<SpvReflectBlockVariable*> pcBlocks(pcCount);
+        result = spvReflectEnumeratePushConstantBlocks(&module, &pcCount, pcBlocks.data());
+        if (result == SPV_REFLECT_RESULT_SUCCESS) {
+            for (auto* block : pcBlocks) {
+                result_data.pushConstants.push_back(reflectPushConstant(block));
+            }
         }
     }
 
     spvReflectDestroyShaderModule(&module);
-    return ubos;
+    return result_data;
 }
 
 // Get the size in bytes for a C++ type matching std140 layout
@@ -289,12 +337,63 @@ std::string generateStructDef(const UBODefinition& ubo) {
     return structDef.str();
 }
 
-std::string generateHeader(const std::map<std::string, UBODefinition>& uniqueUBOs) {
+std::string generatePushConstantDef(const PushConstantDefinition& pc) {
+    std::ostringstream structDef;
+
+    if (pc.hasNestedStructs) {
+        structDef << "// SKIPPED: " << pc.structName
+                  << " (contains nested struct types - define manually)\n";
+        structDef << "// Size: " << pc.totalSize << " bytes";
+    } else {
+        // Push constants use natural alignment, not std140
+        structDef << "struct " << pc.structName << " {\n";
+
+        // Sort members by offset to ensure correct order
+        std::vector<UBOMember> sortedMembers = pc.members;
+        std::sort(sortedMembers.begin(), sortedMembers.end(),
+            [](const UBOMember& a, const UBOMember& b) {
+                return a.offset < b.offset;
+            });
+
+        // Generate members with explicit padding
+        uint32_t currentOffset = 0;
+        int paddingIndex = 0;
+
+        for (const auto& member : sortedMembers) {
+            // Add padding if there's a gap between current offset and member offset
+            if (member.offset > currentOffset) {
+                uint32_t paddingNeeded = member.offset - currentOffset;
+                structDef << "    uint8_t _pad" << paddingIndex++ << "[" << paddingNeeded << "];  // alignment padding\n";
+            }
+
+            // For push constants, just use natural types without forced alignment
+            structDef << "    " << member.type << " " << member.name << member.arraySpec << ";\n";
+
+            currentOffset = member.offset + member.size;
+        }
+
+        // Add trailing padding if struct size is less than total reported size
+        if (currentOffset < pc.totalSize) {
+            uint32_t trailingPadding = pc.totalSize - currentOffset;
+            structDef << "    uint8_t _paddingEnd[" << trailingPadding << "];  // trailing padding\n";
+        }
+
+        structDef << "};\n";
+        structDef << "static_assert(sizeof(" << pc.structName << ") == " << pc.totalSize
+                  << ", \"" << pc.structName << " size mismatch with shader layout\");";
+    }
+
+    return structDef.str();
+}
+
+std::string generateHeader(const std::map<std::string, UBODefinition>& uniqueUBOs,
+                           const std::map<std::string, PushConstantDefinition>& uniquePushConstants) {
     std::ostringstream header;
 
     header << "// Auto-generated by shader_reflect tool\n";
     header << "// DO NOT EDIT MANUALLY - this file is generated from SPIR-V shaders\n";
-    header << "// Structs are laid out to match std140 GLSL layout for UBO compatibility\n";
+    header << "// UBO structs are laid out to match std140 GLSL layout\n";
+    header << "// Push constant structs use natural alignment\n";
     header << "\n";
     header << "#pragma once\n";
     header << "\n";
@@ -302,9 +401,28 @@ std::string generateHeader(const std::map<std::string, UBODefinition>& uniqueUBO
     header << "#include <cstdint>\n";
     header << "\n";
 
-    for (const auto& [name, ubo] : uniqueUBOs) {
-        header << "// Binding: " << ubo.binding << ", Set: " << ubo.set << "\n";
-        header << generateStructDef(ubo) << "\n\n";
+    // Generate UBO definitions
+    if (!uniqueUBOs.empty()) {
+        header << "// ============================================================================\n";
+        header << "// Uniform Buffer Objects (UBOs) - std140 layout\n";
+        header << "// ============================================================================\n\n";
+
+        for (const auto& [name, ubo] : uniqueUBOs) {
+            header << "// Binding: " << ubo.binding << ", Set: " << ubo.set << "\n";
+            header << generateStructDef(ubo) << "\n\n";
+        }
+    }
+
+    // Generate push constant definitions
+    if (!uniquePushConstants.empty()) {
+        header << "// ============================================================================\n";
+        header << "// Push Constants\n";
+        header << "// ============================================================================\n\n";
+
+        for (const auto& [name, pc] : uniquePushConstants) {
+            header << "// Size: " << pc.totalSize << " bytes\n";
+            header << generatePushConstantDef(pc) << "\n\n";
+        }
     }
 
     return header.str();
@@ -318,15 +436,16 @@ int main(int argc, char** argv) {
 
     std::string outputPath = argv[1];
     std::map<std::string, UBODefinition> uniqueUBOs;
+    std::map<std::string, PushConstantDefinition> uniquePushConstants;
 
     // Process all SPIR-V files
     for (int i = 2; i < argc; i++) {
         std::string spirvPath = argv[i];
 
-        auto ubos = reflectSPIRV(spirvPath);
+        auto reflectionResult = reflectSPIRV(spirvPath);
 
         // Merge UBOs by struct name - keep the one with most members (largest definition)
-        for (const auto& ubo : ubos) {
+        for (const auto& ubo : reflectionResult.ubos) {
             const std::string& structName = ubo.structName;
 
             auto it = uniqueUBOs.find(structName);
@@ -345,10 +464,31 @@ int main(int argc, char** argv) {
                 }
             }
         }
+
+        // Merge push constants by struct name - keep the one with most members
+        for (const auto& pc : reflectionResult.pushConstants) {
+            const std::string& structName = pc.structName;
+
+            auto it = uniquePushConstants.find(structName);
+            if (it == uniquePushConstants.end()) {
+                // First time seeing this struct
+                uniquePushConstants[structName] = pc;
+            } else {
+                // Keep the definition with more members (more complete)
+                if (pc.members.size() > it->second.members.size()) {
+                    it->second = pc;
+                }
+                // If same member count, keep the one with larger total size
+                else if (pc.members.size() == it->second.members.size() &&
+                         pc.totalSize > it->second.totalSize) {
+                    it->second = pc;
+                }
+            }
+        }
     }
 
     // Generate header file
-    std::string headerContent = generateHeader(uniqueUBOs);
+    std::string headerContent = generateHeader(uniqueUBOs, uniquePushConstants);
 
     // Write to file
     std::ofstream outFile(outputPath);
@@ -360,7 +500,8 @@ int main(int argc, char** argv) {
     outFile << headerContent;
     outFile.close();
 
-    std::cout << "Generated " << outputPath << " with " << uniqueUBOs.size() << " UBO definitions\n";
+    std::cout << "Generated " << outputPath << " with " << uniqueUBOs.size() << " UBO definitions and "
+              << uniquePushConstants.size() << " push constant definitions\n";
 
     return 0;
 }
