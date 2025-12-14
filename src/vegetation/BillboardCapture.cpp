@@ -266,28 +266,18 @@ void BillboardCapture::destroyRenderTarget() {
 }
 
 bool BillboardCapture::createDescriptorSetLayout() {
-    std::array<VkDescriptorSetLayoutBinding, 6> bindings{};
+    // Use DescriptorManager::LayoutBuilder for consistent descriptor set layout creation
+    // Same layout as TreeEditSystem: 1 UBO + 5 texture samplers
+    descriptorSetLayout = DescriptorManager::LayoutBuilder(device)
+        .addUniformBuffer(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)  // 0: Scene UBO
+        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 1: Bark color texture
+        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 2: Bark normal texture
+        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 3: Bark AO texture
+        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 4: Bark roughness texture
+        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 5: Leaf texture
+        .build();
 
-    // Binding 0: Scene UBO
-    bindings[0].binding = 0;
-    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    bindings[0].descriptorCount = 1;
-    bindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-
-    // Binding 1-5: Textures (same as TreeEditSystem)
-    for (int i = 1; i <= 5; ++i) {
-        bindings[i].binding = i;
-        bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        bindings[i].descriptorCount = 1;
-        bindings[i].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    }
-
-    VkDescriptorSetLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
-    layoutInfo.pBindings = bindings.data();
-
-    if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &descriptorSetLayout) != VK_SUCCESS) {
+    if (descriptorSetLayout == VK_NULL_HANDLE) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create billboard descriptor set layout");
         return false;
     }
@@ -550,77 +540,15 @@ bool BillboardCapture::renderCapture(
 
     memcpy(uboMapped, &ubo, sizeof(ubo));
 
-    // Update descriptor set with textures
-    std::array<VkWriteDescriptorSet, 6> writes{};
-
-    VkDescriptorBufferInfo bufferInfo{};
-    bufferInfo.buffer = uboBuffer;
-    bufferInfo.offset = 0;
-    bufferInfo.range = sizeof(UniformBufferObject);
-
-    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[0].dstSet = descriptorSet;
-    writes[0].dstBinding = 0;
-    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    writes[0].descriptorCount = 1;
-    writes[0].pBufferInfo = &bufferInfo;
-
-    VkDescriptorImageInfo barkColorInfo{};
-    barkColorInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    barkColorInfo.imageView = barkColorTex.getImageView();
-    barkColorInfo.sampler = barkColorTex.getSampler();
-    writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[1].dstSet = descriptorSet;
-    writes[1].dstBinding = 1;
-    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    writes[1].descriptorCount = 1;
-    writes[1].pImageInfo = &barkColorInfo;
-
-    VkDescriptorImageInfo barkNormalInfo{};
-    barkNormalInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    barkNormalInfo.imageView = barkNormalTex.getImageView();
-    barkNormalInfo.sampler = barkNormalTex.getSampler();
-    writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[2].dstSet = descriptorSet;
-    writes[2].dstBinding = 2;
-    writes[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    writes[2].descriptorCount = 1;
-    writes[2].pImageInfo = &barkNormalInfo;
-
-    VkDescriptorImageInfo barkAOInfo{};
-    barkAOInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    barkAOInfo.imageView = barkAOTex.getImageView();
-    barkAOInfo.sampler = barkAOTex.getSampler();
-    writes[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[3].dstSet = descriptorSet;
-    writes[3].dstBinding = 3;
-    writes[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    writes[3].descriptorCount = 1;
-    writes[3].pImageInfo = &barkAOInfo;
-
-    VkDescriptorImageInfo barkRoughnessInfo{};
-    barkRoughnessInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    barkRoughnessInfo.imageView = barkRoughnessTex.getImageView();
-    barkRoughnessInfo.sampler = barkRoughnessTex.getSampler();
-    writes[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[4].dstSet = descriptorSet;
-    writes[4].dstBinding = 4;
-    writes[4].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    writes[4].descriptorCount = 1;
-    writes[4].pImageInfo = &barkRoughnessInfo;
-
-    VkDescriptorImageInfo leafInfo{};
-    leafInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    leafInfo.imageView = leafTex.getImageView();
-    leafInfo.sampler = leafTex.getSampler();
-    writes[5].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[5].dstSet = descriptorSet;
-    writes[5].dstBinding = 5;
-    writes[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    writes[5].descriptorCount = 1;
-    writes[5].pImageInfo = &leafInfo;
-
-    vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+    // Update descriptor set using DescriptorManager::SetWriter for consistency
+    DescriptorManager::SetWriter(device, descriptorSet)
+        .writeBuffer(0, uboBuffer, 0, sizeof(UniformBufferObject))
+        .writeImage(1, barkColorTex.getImageView(), barkColorTex.getSampler())
+        .writeImage(2, barkNormalTex.getImageView(), barkNormalTex.getSampler())
+        .writeImage(3, barkAOTex.getImageView(), barkAOTex.getSampler())
+        .writeImage(4, barkRoughnessTex.getImageView(), barkRoughnessTex.getSampler())
+        .writeImage(5, leafTex.getImageView(), leafTex.getSampler())
+        .update();
 
     // Allocate command buffer
     VkCommandBufferAllocateInfo allocInfo{};
