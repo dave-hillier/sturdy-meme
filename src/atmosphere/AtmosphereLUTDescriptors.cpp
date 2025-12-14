@@ -247,7 +247,7 @@ bool AtmosphereLUTSystem::createDescriptorSets() {
         writes[0].pImageInfo = &imageInfo;
 
         VkDescriptorBufferInfo bufferInfo{};
-        bufferInfo.buffer = uniformBuffer;
+        bufferInfo.buffer = staticUniformBuffers.buffers[0];
         bufferInfo.offset = 0;
         bufferInfo.range = sizeof(AtmosphereUniforms);
 
@@ -298,7 +298,7 @@ bool AtmosphereLUTSystem::createDescriptorSets() {
         writes[1].pImageInfo = &transmittanceImageInfo;
 
         VkDescriptorBufferInfo bufferInfo{};
-        bufferInfo.buffer = uniformBuffer;
+        bufferInfo.buffer = staticUniformBuffers.buffers[0];
         bufferInfo.offset = 0;
         bufferInfo.range = sizeof(AtmosphereUniforms);
 
@@ -428,7 +428,7 @@ bool AtmosphereLUTSystem::createDescriptorSets() {
         writes[2].pImageInfo = &transmittanceImageInfo;
 
         VkDescriptorBufferInfo bufferInfo{};
-        bufferInfo.buffer = uniformBuffer;
+        bufferInfo.buffer = staticUniformBuffers.buffers[0];
         bufferInfo.offset = 0;
         bufferInfo.range = sizeof(AtmosphereUniforms);
 

@@ -7,7 +7,7 @@ void AtmosphereLUTSystem::computeTransmittanceLUT(VkCommandBuffer cmd) {
     // Update uniform buffer with atmosphere params
     AtmosphereUniforms uniforms{};
     uniforms.params = atmosphereParams;
-    memcpy(uniformMappedPtr, &uniforms, sizeof(AtmosphereUniforms));
+    memcpy(staticUniformBuffers.mappedPointers[0], &uniforms, sizeof(AtmosphereUniforms));
 
     // Transition to GENERAL layout for compute write
     Barriers::prepareImageForCompute(cmd, transmittanceLUT);
@@ -31,7 +31,7 @@ void AtmosphereLUTSystem::computeMultiScatterLUT(VkCommandBuffer cmd) {
     // Update uniform buffer with atmosphere params
     AtmosphereUniforms uniforms{};
     uniforms.params = atmosphereParams;
-    memcpy(uniformMappedPtr, &uniforms, sizeof(AtmosphereUniforms));
+    memcpy(staticUniformBuffers.mappedPointers[0], &uniforms, sizeof(AtmosphereUniforms));
 
     // Transition to GENERAL layout for compute write
     Barriers::prepareImageForCompute(cmd, multiScatterLUT);
@@ -55,7 +55,7 @@ void AtmosphereLUTSystem::computeIrradianceLUT(VkCommandBuffer cmd) {
     // Update uniform buffer with atmosphere params
     AtmosphereUniforms uniforms{};
     uniforms.params = atmosphereParams;
-    memcpy(uniformMappedPtr, &uniforms, sizeof(AtmosphereUniforms));
+    memcpy(staticUniformBuffers.mappedPointers[0], &uniforms, sizeof(AtmosphereUniforms));
 
     barrierIrradianceLUTsForCompute(cmd);
 
@@ -193,7 +193,7 @@ void AtmosphereLUTSystem::recomputeStaticLUTs(VkCommandBuffer cmd) {
     // Update uniform buffer with new atmosphere parameters
     AtmosphereUniforms uniforms{};
     uniforms.params = atmosphereParams;
-    memcpy(uniformMappedPtr, &uniforms, sizeof(AtmosphereUniforms));
+    memcpy(staticUniformBuffers.mappedPointers[0], &uniforms, sizeof(AtmosphereUniforms));
 
     // Recompute the static LUTs that depend on atmosphere parameters
     computeTransmittanceLUT(cmd);

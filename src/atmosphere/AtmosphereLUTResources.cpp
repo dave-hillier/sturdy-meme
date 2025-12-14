@@ -251,27 +251,15 @@ bool AtmosphereLUTSystem::createLUTSampler() {
 }
 
 bool AtmosphereLUTSystem::createUniformBuffer() {
-    // Create atmosphere LUT uniform buffer (single buffer for one-time LUT computations)
-    VkDeviceSize bufferSize = sizeof(AtmosphereUniforms);
-
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = bufferSize;
-    bufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    VmaAllocationCreateInfo allocInfo{};
-    allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
-    allocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
-    VmaAllocationInfo allocResult{};
-    if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo,
-                        &uniformBuffer, &uniformAllocation, &allocResult) != VK_SUCCESS) {
-        SDL_Log("Failed to create atmosphere uniform buffer");
+    // Create static uniform buffer for one-time LUT computations (frame count of 1 for consistency)
+    BufferUtils::PerFrameBufferBuilder staticBuilder;
+    if (!staticBuilder.setAllocator(allocator)
+             .setFrameCount(1)
+             .setSize(sizeof(AtmosphereUniforms))
+             .build(staticUniformBuffers)) {
+        SDL_Log("Failed to create static atmosphere uniform buffer");
         return false;
     }
-
-    uniformMappedPtr = allocResult.pMappedData;
 
     // Create per-frame uniform buffers for sky view LUT updates (double-buffered)
     BufferUtils::PerFrameBufferBuilder skyViewBuilder;

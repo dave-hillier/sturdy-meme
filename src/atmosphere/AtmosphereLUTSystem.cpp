@@ -48,12 +48,8 @@ bool AtmosphereLUTSystem::init(const InitContext& ctx) {
 void AtmosphereLUTSystem::destroy(VkDevice device, VmaAllocator allocator) {
     destroyLUTResources();
 
-    if (uniformBuffer != VK_NULL_HANDLE) {
-        vmaDestroyBuffer(allocator, uniformBuffer, uniformAllocation);
-        uniformBuffer = VK_NULL_HANDLE;
-    }
-
-    // Destroy per-frame uniform buffers
+    // Destroy all uniform buffers using consistent BufferUtils pattern
+    BufferUtils::destroyBuffers(allocator, staticUniformBuffers);
     BufferUtils::destroyBuffers(allocator, skyViewUniformBuffers);
     BufferUtils::destroyBuffers(allocator, cloudMapUniformBuffers);
 

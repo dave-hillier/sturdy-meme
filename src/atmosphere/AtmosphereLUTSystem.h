@@ -229,10 +229,9 @@ private:
     std::vector<VkDescriptorSet> skyViewDescriptorSets;
     std::vector<VkDescriptorSet> cloudMapDescriptorSets;
 
-    // Single uniform buffer for one-time LUT computation (at startup)
-    VkBuffer uniformBuffer = VK_NULL_HANDLE;
-    VmaAllocation uniformAllocation = VK_NULL_HANDLE;
-    void* uniformMappedPtr = nullptr;
+    // Uniform buffers for one-time LUT computation (at startup)
+    // Uses PerFrameBufferSet with frame count of 1 for consistency
+    BufferUtils::PerFrameBufferSet staticUniformBuffers;
 
     // Per-frame uniform buffers for per-frame updates (double-buffered)
     BufferUtils::PerFrameBufferSet skyViewUniformBuffers;
