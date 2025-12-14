@@ -107,6 +107,19 @@ public:
         VkFormat format,
         DepthResources& outResources);
 
+    /**
+     * Create depth image and view only (no sampler) - for resize operations
+     * where sampler is preserved
+     */
+    static bool createDepthImageAndView(
+        VkDevice device,
+        VmaAllocator allocator,
+        VkExtent2D extent,
+        VkFormat format,
+        VkImage& outImage,
+        VmaAllocation& outAllocation,
+        VkImageView& outView);
+
     // ========================================================================
     // Framebuffers
     // ========================================================================
