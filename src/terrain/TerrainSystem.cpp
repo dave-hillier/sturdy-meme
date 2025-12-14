@@ -1,4 +1,6 @@
 #include "TerrainSystem.h"
+#include "TerrainBuffers.h"
+#include "TerrainCameraOptimizer.h"
 #include "ShaderLoader.h"
 #include "BindingBuilder.h"
 #include "PipelineBuilder.h"
@@ -96,9 +98,14 @@ bool TerrainSystem::init(const InitInfo& info, const TerrainConfig& cfg) {
     // Query GPU subgroup capabilities for optimized compute paths
     querySubgroupCapabilities();
 
+    // Initialize buffers subsystem
+    TerrainBuffers::InitInfo bufferInfo{};
+    bufferInfo.allocator = allocator;
+    bufferInfo.framesInFlight = framesInFlight;
+    bufferInfo.maxVisibleTriangles = MAX_VISIBLE_TRIANGLES;
+    if (!buffers.init(bufferInfo)) return false;
+
     // Create remaining resources
-    if (!createUniformBuffers()) return false;
-    if (!createIndirectBuffers()) return false;
     if (!createComputeDescriptorSetLayout()) return false;
     if (!createRenderDescriptorSetLayout()) return false;
     if (!createDescriptorSets()) return false;
@@ -183,20 +190,8 @@ void TerrainSystem::destroy(VkDevice device, VmaAllocator allocator) {
     if (computeDescriptorSetLayout) vkDestroyDescriptorSetLayout(device, computeDescriptorSetLayout, nullptr);
     if (renderDescriptorSetLayout) vkDestroyDescriptorSetLayout(device, renderDescriptorSetLayout, nullptr);
 
-    // Destroy indirect buffers
-    if (indirectDispatchBuffer) vmaDestroyBuffer(allocator, indirectDispatchBuffer, indirectDispatchAllocation);
-    if (indirectDrawBuffer) vmaDestroyBuffer(allocator, indirectDrawBuffer, indirectDrawAllocation);
-    if (visibleIndicesBuffer) vmaDestroyBuffer(allocator, visibleIndicesBuffer, visibleIndicesAllocation);
-    if (cullIndirectDispatchBuffer) vmaDestroyBuffer(allocator, cullIndirectDispatchBuffer, cullIndirectDispatchAllocation);
-
-    // Destroy shadow culling buffers
-    if (shadowVisibleBuffer) vmaDestroyBuffer(allocator, shadowVisibleBuffer, shadowVisibleAllocation);
-    if (shadowIndirectDrawBuffer) vmaDestroyBuffer(allocator, shadowIndirectDrawBuffer, shadowIndirectDrawAllocation);
-
-    // Destroy uniform buffers
-    for (size_t i = 0; i < uniformBuffers.size(); i++) {
-        vmaDestroyBuffer(allocator, uniformBuffers[i], uniformAllocations[i]);
-    }
+    // Destroy buffers subsystem
+    buffers.destroy(allocator);
 
     // Destroy composed subsystems
     tileCache.destroy();
@@ -206,163 +201,16 @@ void TerrainSystem::destroy(VkDevice device, VmaAllocator allocator) {
     heightMap.destroy(device, allocator);
 }
 
-bool TerrainSystem::createUniformBuffers() {
-    uniformBuffers.resize(framesInFlight);
-    uniformAllocations.resize(framesInFlight);
-    uniformMappedPtrs.resize(framesInFlight);
-
-    for (uint32_t i = 0; i < framesInFlight; i++) {
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = sizeof(TerrainUniforms);
-        bufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
-                         VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
-        VmaAllocationInfo allocationInfo{};
-        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &uniformBuffers[i],
-                           &uniformAllocations[i], &allocationInfo) != VK_SUCCESS) {
-            return false;
-        }
-        uniformMappedPtrs[i] = allocationInfo.pMappedData;
-    }
-
-    return true;
-}
-
-bool TerrainSystem::createIndirectBuffers() {
-    // Indirect dispatch buffer (3 uints: x, y, z)
-    {
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = sizeof(uint32_t) * 3;
-        bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-
-        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &indirectDispatchBuffer,
-                           &indirectDispatchAllocation, nullptr) != VK_SUCCESS) {
-            return false;
-        }
-    }
-
-    // Indirect draw buffer (5 uints for indexed draw: indexCount, instanceCount, firstIndex, vertexOffset, firstInstance)
-    {
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = sizeof(uint32_t) * 5;
-        bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
-                         VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
-        VmaAllocationInfo allocationInfo{};
-        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &indirectDrawBuffer,
-                           &indirectDrawAllocation, &allocationInfo) != VK_SUCCESS) {
-            return false;
-        }
-
-        // Store persistently mapped pointer for readback
-        indirectDrawMappedPtr = allocationInfo.pMappedData;
-
-        // Initialize with default values (2 triangles = 6 vertices/indices)
-        uint32_t drawArgs[5] = {6, 1, 0, 0, 0};
-        memcpy(indirectDrawMappedPtr, drawArgs, sizeof(drawArgs));
-    }
-
-    // Visible indices buffer for stream compaction: [count, index0, index1, ...]
-    {
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        // Size: 1 uint for count + MAX_VISIBLE_TRIANGLES uints for indices
-        bufferInfo.size = sizeof(uint32_t) * (1 + MAX_VISIBLE_TRIANGLES);
-        bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-
-        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &visibleIndicesBuffer,
-                           &visibleIndicesAllocation, nullptr) != VK_SUCCESS) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create visible indices buffer");
-            return false;
-        }
-    }
-
-    // Cull indirect dispatch buffer (3 uints: x, y, z for vkCmdDispatchIndirect)
-    {
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = sizeof(uint32_t) * 3;
-        bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-
-        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &cullIndirectDispatchBuffer,
-                           &cullIndirectDispatchAllocation, nullptr) != VK_SUCCESS) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create cull indirect dispatch buffer");
-            return false;
-        }
-    }
-
-    // Shadow visible indices buffer: [count, index0, index1, ...]
-    {
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = sizeof(uint32_t) * (1 + MAX_VISIBLE_TRIANGLES);
-        bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-
-        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &shadowVisibleBuffer,
-                           &shadowVisibleAllocation, nullptr) != VK_SUCCESS) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create shadow visible indices buffer");
-            return false;
-        }
-    }
-
-    // Shadow indirect draw buffer (5 uints for indexed draw)
-    {
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = sizeof(uint32_t) * 5;
-        bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-
-        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &shadowIndirectDrawBuffer,
-                           &shadowIndirectDrawAllocation, nullptr) != VK_SUCCESS) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create shadow indirect draw buffer");
-            return false;
-        }
-    }
-
-    return true;
-}
 
 uint32_t TerrainSystem::getTriangleCount() const {
-    if (!indirectDrawMappedPtr) {
+    void* mappedPtr = buffers.getIndirectDrawMappedPtr();
+    if (!mappedPtr) {
         return 0;
     }
     // Indirect draw buffer layout depends on rendering mode:
     // - Meshlet mode: {indexCount, instanceCount, ...} where total = instanceCount * meshletTriangles
     // - Direct mode: {vertexCount, instanceCount, ...} where total = vertexCount / 3
-    const uint32_t* drawArgs = static_cast<const uint32_t*>(indirectDrawMappedPtr);
+    const uint32_t* drawArgs = static_cast<const uint32_t*>(mappedPtr);
     if (config.useMeshlets) {
         uint32_t instanceCount = drawArgs[1];  // Number of CBT leaf nodes
         return instanceCount * meshlet.getTriangleCount();
@@ -473,14 +321,14 @@ bool TerrainSystem::createDescriptorSets() {
     for (uint32_t i = 0; i < framesInFlight; i++) {
         DescriptorManager::SetWriter(device, computeDescriptorSets[i])
             .writeBuffer(0, cbt.getBuffer(), 0, cbt.getBufferSize(), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(1, indirectDispatchBuffer, 0, sizeof(uint32_t) * 3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(2, indirectDrawBuffer, 0, sizeof(uint32_t) * 4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+            .writeBuffer(1, buffers.getIndirectDispatchBuffer(), 0, sizeof(uint32_t) * 3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+            .writeBuffer(2, buffers.getIndirectDrawBuffer(), 0, sizeof(uint32_t) * 4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
             .writeImage(3, heightMap.getView(), heightMap.getSampler())
-            .writeBuffer(4, uniformBuffers[i], 0, sizeof(TerrainUniforms))
-            .writeBuffer(5, visibleIndicesBuffer, 0, sizeof(uint32_t) * (1 + MAX_VISIBLE_TRIANGLES), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(6, cullIndirectDispatchBuffer, 0, sizeof(uint32_t) * 3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(14, shadowVisibleBuffer, 0, sizeof(uint32_t) * (1 + MAX_VISIBLE_TRIANGLES), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(15, shadowIndirectDrawBuffer, 0, sizeof(uint32_t) * 5, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+            .writeBuffer(4, buffers.getUniformBuffer(i), 0, sizeof(TerrainUniforms))
+            .writeBuffer(5, buffers.getVisibleIndicesBuffer(), 0, sizeof(uint32_t) * (1 + MAX_VISIBLE_TRIANGLES), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+            .writeBuffer(6, buffers.getCullIndirectDispatchBuffer(), 0, sizeof(uint32_t) * 3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+            .writeBuffer(14, buffers.getShadowVisibleBuffer(), 0, sizeof(uint32_t) * (1 + MAX_VISIBLE_TRIANGLES), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+            .writeBuffer(15, buffers.getShadowIndirectDrawBuffer(), 0, sizeof(uint32_t) * 5, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
             .update();
     }
 
@@ -1140,7 +988,7 @@ void TerrainSystem::updateDescriptorSets(VkDevice device,
         writes.push_back(heightMapWrite);
 
         // Terrain uniforms
-        VkDescriptorBufferInfo uniformInfo{uniformBuffers[i], 0, sizeof(TerrainUniforms)};
+        VkDescriptorBufferInfo uniformInfo{buffers.getUniformBuffer(i), 0, sizeof(TerrainUniforms)};
         VkWriteDescriptorSet uniformWrite{};
         uniformWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         uniformWrite.dstSet = renderDescriptorSets[i];
@@ -1201,8 +1049,8 @@ void TerrainSystem::updateDescriptorSets(VkDevice device,
         }
 
         // Shadow visible indices (for shadow culled vertex shaders)
-        if (shadowVisibleBuffer != VK_NULL_HANDLE) {
-            VkDescriptorBufferInfo shadowVisibleInfo{shadowVisibleBuffer, 0, sizeof(uint32_t) * (1 + MAX_VISIBLE_TRIANGLES)};
+        if (buffers.getShadowVisibleBuffer() != VK_NULL_HANDLE) {
+            VkDescriptorBufferInfo shadowVisibleInfo{buffers.getShadowVisibleBuffer(), 0, sizeof(uint32_t) * (1 + MAX_VISIBLE_TRIANGLES)};
             VkWriteDescriptorSet shadowVisibleWrite{};
             shadowVisibleWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             shadowVisibleWrite.dstSet = renderDescriptorSets[i];
@@ -1346,49 +1194,13 @@ void TerrainSystem::setCloudShadowMap(VkDevice device, VkImageView cloudShadowVi
     }
 }
 
-bool TerrainSystem::cameraHasMoved(const glm::vec3& cameraPos, const glm::mat4& view) {
-    // Extract forward direction from view matrix (negated row 2)
-    glm::vec3 forward = -glm::vec3(view[0][2], view[1][2], view[2][2]);
-
-    // First frame - always consider moved
-    if (!previousCamera.valid) {
-        previousCamera.position = cameraPos;
-        previousCamera.forward = forward;
-        previousCamera.valid = true;
-        return true;
-    }
-
-    // Check position delta
-    float positionDelta = glm::length(cameraPos - previousCamera.position);
-    if (positionDelta > POSITION_THRESHOLD) {
-        previousCamera.position = cameraPos;
-        previousCamera.forward = forward;
-        return true;
-    }
-
-    // Check rotation delta (using dot product of forward vectors)
-    float forwardDot = glm::dot(forward, previousCamera.forward);
-    if (forwardDot < (1.0f - ROTATION_THRESHOLD)) {
-        previousCamera.position = cameraPos;
-        previousCamera.forward = forward;
-        return true;
-    }
-
-    // No significant change
-    return false;
-}
-
 void TerrainSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos,
                                     const glm::mat4& view, const glm::mat4& proj,
                                     const std::array<glm::vec4, 3>& snowCascadeParams,
                                     bool useVolumetricSnow,
                                     float snowMaxHeight) {
     // Track camera movement for skip-frame optimization
-    if (cameraHasMoved(cameraPos, view)) {
-        staticFrameCount = 0;
-    } else {
-        staticFrameCount++;
-    }
+    cameraOptimizer.update(cameraPos, view);
 
     // Update tile cache - stream high-res tiles based on camera position
     if (!config.tileCacheDir.empty()) {
@@ -1434,21 +1246,13 @@ void TerrainSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraP
     uniforms.snowPadding1 = 0.0f;
     uniforms.snowPadding2 = 0.0f;
 
-    memcpy(uniformMappedPtrs[frameIndex], &uniforms, sizeof(TerrainUniforms));
+    memcpy(buffers.getUniformMappedPtr(frameIndex), &uniforms, sizeof(TerrainUniforms));
 }
 
 void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuProfiler* profiler) {
     // Skip-frame optimization: skip compute when camera is stationary and terrain has converged
-    bool shouldSkip = false;
-    if (skipFrameOptimizationEnabled && !forceNextCompute && staticFrameCount > CONVERGENCE_FRAMES) {
-        if (framesSinceLastCompute < MAX_SKIP_FRAMES) {
-            shouldSkip = true;
-        }
-    }
-
-    if (shouldSkip) {
-        framesSinceLastCompute++;
-        lastFrameWasSkipped = true;
+    if (cameraOptimizer.shouldSkipCompute()) {
+        cameraOptimizer.recordComputeSkipped();
 
         // Still need the final barrier for rendering (CBT state unchanged but GPU needs it)
         Barriers::computeToIndirectDraw(cmd);
@@ -1456,9 +1260,7 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
     }
 
     // Reset skip tracking
-    forceNextCompute = false;
-    framesSinceLastCompute = 0;
-    lastFrameWasSkipped = false;
+    cameraOptimizer.recordComputeExecuted();
 
     // 1. Dispatcher - set up indirect args
     if (profiler) profiler->beginZone(cmd, "Terrain:Dispatcher");
@@ -1503,7 +1305,7 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
                           sizeof(subdivPC), &subdivPC);
 
         // Dispatch all triangles - inline frustum culling handles early-out
-        vkCmdDispatchIndirect(cmd, indirectDispatchBuffer, 0);
+        vkCmdDispatchIndirect(cmd, buffers.getIndirectDispatchBuffer(), 0);
 
         if (profiler) profiler->endZone(cmd, "Terrain:Subdivision");
     } else {
@@ -1523,7 +1325,7 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
                           sizeof(subdivPC), &subdivPC);
 
         // Use the original indirect dispatch (all triangles)
-        vkCmdDispatchIndirect(cmd, indirectDispatchBuffer, 0);
+        vkCmdDispatchIndirect(cmd, buffers.getIndirectDispatchBuffer(), 0);
 
         if (profiler) profiler->endZone(cmd, "Terrain:Subdivision");
     }
@@ -1650,10 +1452,10 @@ void TerrainSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
         vkCmdBindIndexBuffer(cmd, meshlet.getIndexBuffer(), 0, VK_INDEX_TYPE_UINT16);
 
         // Indexed instanced draw
-        vkCmdDrawIndexedIndirect(cmd, indirectDrawBuffer, 0, 1, sizeof(VkDrawIndexedIndirectCommand));
+        vkCmdDrawIndexedIndirect(cmd, buffers.getIndirectDrawBuffer(), 0, 1, sizeof(VkDrawIndexedIndirectCommand));
     } else {
         // Direct vertex draw (no vertex buffer - vertices generated from gl_VertexIndex)
-        vkCmdDrawIndirect(cmd, indirectDrawBuffer, 0, 1, sizeof(VkDrawIndirectCommand));
+        vkCmdDrawIndirect(cmd, buffers.getIndirectDrawBuffer(), 0, 1, sizeof(VkDrawIndirectCommand));
     }
 }
 
@@ -1664,7 +1466,7 @@ void TerrainSystem::recordShadowCull(VkCommandBuffer cmd, uint32_t frameIndex,
     }
 
     // Clear the shadow visible count to 0 and barrier for compute
-    Barriers::clearBufferForCompute(cmd, shadowVisibleBuffer);
+    Barriers::clearBufferForCompute(cmd, buffers.getShadowVisibleBuffer());
 
     // Bind shadow cull compute pipeline
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, shadowCullPipeline);
@@ -1683,7 +1485,7 @@ void TerrainSystem::recordShadowCull(VkCommandBuffer cmd, uint32_t frameIndex,
                        0, sizeof(pc), &pc);
 
     // Use indirect dispatch - the workgroup count is computed on GPU in terrain_dispatcher
-    vkCmdDispatchIndirect(cmd, indirectDispatchBuffer, 0);
+    vkCmdDispatchIndirect(cmd, buffers.getIndirectDispatchBuffer(), 0);
 
     // Memory barrier to ensure shadow cull results are visible for draw
     Barriers::computeToIndirectDraw(cmd);
@@ -1736,10 +1538,10 @@ void TerrainSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex,
         vkCmdBindIndexBuffer(cmd, meshlet.getIndexBuffer(), 0, VK_INDEX_TYPE_UINT16);
 
         // Use shadow indirect draw buffer if culling, else main indirect buffer
-        VkBuffer drawBuffer = useCulled ? shadowIndirectDrawBuffer : indirectDrawBuffer;
+        VkBuffer drawBuffer = useCulled ? buffers.getShadowIndirectDrawBuffer() : buffers.getIndirectDrawBuffer();
         vkCmdDrawIndexedIndirect(cmd, drawBuffer, 0, 1, sizeof(VkDrawIndexedIndirectCommand));
     } else {
-        VkBuffer drawBuffer = useCulled ? shadowIndirectDrawBuffer : indirectDrawBuffer;
+        VkBuffer drawBuffer = useCulled ? buffers.getShadowIndirectDrawBuffer() : buffers.getIndirectDrawBuffer();
         vkCmdDrawIndirect(cmd, drawBuffer, 0, 1, sizeof(VkDrawIndirectCommand));
     }
 }

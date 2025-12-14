@@ -12,6 +12,8 @@
 #include "TerrainCBT.h"
 #include "TerrainMeshlet.h"
 #include "TerrainTileCache.h"
+#include "TerrainBuffers.h"
+#include "TerrainCameraOptimizer.h"
 #include "DescriptorManager.h"
 #include "InitContext.h"
 
@@ -204,13 +206,13 @@ public:
     uint32_t getTriangleCount() const;
 
     // Optimization toggles
-    void setSkipFrameOptimization(bool enabled) { skipFrameOptimizationEnabled = enabled; forceNextCompute = true; }
-    bool isSkipFrameOptimizationEnabled() const { return skipFrameOptimizationEnabled; }
+    void setSkipFrameOptimization(bool enabled) { cameraOptimizer.setEnabled(enabled); }
+    bool isSkipFrameOptimizationEnabled() const { return cameraOptimizer.isEnabled(); }
     void setGpuCulling(bool enabled) { gpuCullingEnabled = enabled; }
     bool isGpuCullingEnabled() const { return gpuCullingEnabled; }
 
     // Debug info
-    bool isCurrentlySkipping() const { return lastFrameWasSkipped; }
+    bool isCurrentlySkipping() const { return cameraOptimizer.wasLastFrameSkipped(); }
     uint32_t getCurrentPhase() const { return subdivisionFrameCount & 1; }  // 0 = split, 1 = merge
 
     // Legacy method - prefer getTriangleCount()
@@ -249,9 +251,7 @@ public:
     bool setMeshletSubdivisionLevel(int level);  // Returns true if successful, reinitializes meshlet
 
 private:
-    // Initialization helpers
-    bool createUniformBuffers();
-    bool createIndirectBuffers();
+    // Initialization helpers (buffers now in TerrainBuffers)
 
     // Descriptor set creation
     bool createComputeDescriptorSetLayout();
@@ -296,25 +296,9 @@ private:
     TerrainTextures textures;
     TerrainCBT cbt;
     TerrainMeshlet meshlet;
-    TerrainTileCache tileCache;  // LOD-based tile streaming
-
-    // Indirect dispatch/draw buffers
-    VkBuffer indirectDispatchBuffer = VK_NULL_HANDLE;
-    VmaAllocation indirectDispatchAllocation = VK_NULL_HANDLE;
-    VkBuffer indirectDrawBuffer = VK_NULL_HANDLE;
-    VmaAllocation indirectDrawAllocation = VK_NULL_HANDLE;
-    void* indirectDrawMappedPtr = nullptr;  // Persistently mapped for readback
-
-    // Stream compaction buffers for GPU culling
-    VkBuffer visibleIndicesBuffer = VK_NULL_HANDLE;  // [count, index0, index1, ...]
-    VmaAllocation visibleIndicesAllocation = VK_NULL_HANDLE;
-    VkBuffer cullIndirectDispatchBuffer = VK_NULL_HANDLE;  // Indirect dispatch for subdivision after cull
-    VmaAllocation cullIndirectDispatchAllocation = VK_NULL_HANDLE;
-
-    // Uniform buffers (per frame in flight)
-    std::vector<VkBuffer> uniformBuffers;
-    std::vector<VmaAllocation> uniformAllocations;
-    std::vector<void*> uniformMappedPtrs;
+    TerrainTileCache tileCache;          // LOD-based tile streaming
+    TerrainBuffers buffers;              // Uniform, indirect, and visibility buffers
+    TerrainCameraOptimizer cameraOptimizer;  // Skip-frame optimization
 
     // Compute pipelines
     VkDescriptorSetLayout computeDescriptorSetLayout = VK_NULL_HANDLE;
@@ -358,12 +342,6 @@ private:
     VkPipeline shadowCulledPipeline = VK_NULL_HANDLE;           // Uses culled indices
     VkPipeline meshletShadowCulledPipeline = VK_NULL_HANDLE;    // Meshlet version
 
-    // Shadow culling buffers (reused per cascade)
-    VkBuffer shadowVisibleBuffer = VK_NULL_HANDLE;       // [count, index0, index1, ...]
-    VmaAllocation shadowVisibleAllocation = VK_NULL_HANDLE;
-    VkBuffer shadowIndirectDrawBuffer = VK_NULL_HANDLE;  // VkDrawIndirectCommand or VkDrawIndexedIndirectCommand
-    VmaAllocation shadowIndirectDrawAllocation = VK_NULL_HANDLE;
-
     // Descriptor sets
     std::vector<VkDescriptorSet> computeDescriptorSets;  // Per frame
     std::vector<VkDescriptorSet> renderDescriptorSets;   // Per frame
@@ -372,7 +350,6 @@ private:
     // Configuration
     TerrainConfig config;
     bool wireframeMode = false;
-    bool skipFrameOptimizationEnabled = true;  // Camera-still skip optimization
     bool gpuCullingEnabled = true;             // GPU frustum culling for split phase
     bool shadowCullingEnabled = true;          // GPU frustum culling for shadow cascades
 
@@ -380,27 +357,6 @@ private:
     uint32_t currentNodeCount = 2;  // Start with 2 root triangles
     uint32_t subdivisionFrameCount = 0;  // Frame counter for split/merge ping-pong
     SubgroupCapabilities subgroupCaps;  // GPU subgroup feature support
-
-    // Camera state tracking for skip-frame optimization
-    struct CameraState {
-        glm::vec3 position{0.0f};
-        glm::vec3 forward{0.0f, 0.0f, -1.0f};
-        bool valid = false;
-    };
-    CameraState previousCamera;
-    uint32_t staticFrameCount = 0;       // Consecutive frames camera hasn't moved
-    uint32_t framesSinceLastCompute = 0; // Frames since last subdivision compute
-    bool forceNextCompute = true;        // Force compute on next frame
-    bool lastFrameWasSkipped = false;    // Debug: was last frame skipped?
-
-    // Skip-frame thresholds
-    static constexpr float POSITION_THRESHOLD = 0.1f;    // World units
-    static constexpr float ROTATION_THRESHOLD = 0.001f;  // Dot product threshold
-    static constexpr uint32_t MAX_SKIP_FRAMES = 30;      // Force update every N frames
-    static constexpr uint32_t CONVERGENCE_FRAMES = 4;    // Frames to converge after camera stops
-
-    // Helper to detect camera movement
-    bool cameraHasMoved(const glm::vec3& cameraPos, const glm::mat4& view);
 
     // Constants
     static constexpr uint32_t SUBDIVISION_WORKGROUP_SIZE = 64;
