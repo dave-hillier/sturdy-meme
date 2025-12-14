@@ -294,6 +294,39 @@
 #define BINDING_TREE_LEAF                  5   // Leaf texture
 
 // =============================================================================
+// Ocean FFT Descriptor Set (Tessendorf-style ocean simulation)
+// =============================================================================
+// Spectrum generation pass
+#define BINDING_OCEAN_SPECTRUM_H0          0   // Initial spectrum H0 (rgba32f: h0.xy, h0conj.xy)
+#define BINDING_OCEAN_SPECTRUM_OMEGA       1   // Angular frequencies (r32f)
+#define BINDING_OCEAN_SPECTRUM_PARAMS      2   // Spectrum parameters UBO
+
+// Time evolution pass
+#define BINDING_OCEAN_HKT_DY               0   // Height spectrum Hk(t) for Y displacement
+#define BINDING_OCEAN_HKT_DX               1   // Displacement spectrum for X
+#define BINDING_OCEAN_HKT_DZ               2   // Displacement spectrum for Z
+#define BINDING_OCEAN_H0_INPUT             3   // H0 spectrum input
+#define BINDING_OCEAN_OMEGA_INPUT          4   // Omega input
+
+// FFT pass (horizontal and vertical)
+#define BINDING_OCEAN_FFT_INPUT            0   // Input complex buffer
+#define BINDING_OCEAN_FFT_OUTPUT           1   // Output complex buffer
+#define BINDING_OCEAN_FFT_TWIDDLE          2   // Pre-computed twiddle factors
+
+// Displacement generation pass
+#define BINDING_OCEAN_DISP_DY              0   // Y displacement after FFT
+#define BINDING_OCEAN_DISP_DX              1   // X displacement after FFT
+#define BINDING_OCEAN_DISP_DZ              2   // Z displacement after FFT
+#define BINDING_OCEAN_DISP_OUTPUT          3   // Final displacement map (rgba16f: xyz + jacobian)
+#define BINDING_OCEAN_NORMAL_OUTPUT        4   // Normal map output (rgba16f)
+#define BINDING_OCEAN_FOAM_OUTPUT          5   // Foam/folding map output (r16f)
+
+// Sampling in water shader
+#define BINDING_WATER_OCEAN_DISP          11   // Ocean displacement map (water shader)
+#define BINDING_WATER_OCEAN_NORMAL        12   // Ocean normal map (water shader)
+#define BINDING_WATER_OCEAN_FOAM          13   // Ocean foam map (water shader)
+
+// =============================================================================
 // C++ Type-Safe Wrappers
 // =============================================================================
 #ifdef __cplusplus
@@ -517,6 +550,28 @@ constexpr uint32_t TREE_BARK_NORMAL       = BINDING_TREE_BARK_NORMAL;
 constexpr uint32_t TREE_BARK_AO           = BINDING_TREE_BARK_AO;
 constexpr uint32_t TREE_BARK_ROUGHNESS    = BINDING_TREE_BARK_ROUGHNESS;
 constexpr uint32_t TREE_LEAF              = BINDING_TREE_LEAF;
+
+// Ocean FFT
+constexpr uint32_t OCEAN_SPECTRUM_H0      = BINDING_OCEAN_SPECTRUM_H0;
+constexpr uint32_t OCEAN_SPECTRUM_OMEGA   = BINDING_OCEAN_SPECTRUM_OMEGA;
+constexpr uint32_t OCEAN_SPECTRUM_PARAMS  = BINDING_OCEAN_SPECTRUM_PARAMS;
+constexpr uint32_t OCEAN_HKT_DY           = BINDING_OCEAN_HKT_DY;
+constexpr uint32_t OCEAN_HKT_DX           = BINDING_OCEAN_HKT_DX;
+constexpr uint32_t OCEAN_HKT_DZ           = BINDING_OCEAN_HKT_DZ;
+constexpr uint32_t OCEAN_H0_INPUT         = BINDING_OCEAN_H0_INPUT;
+constexpr uint32_t OCEAN_OMEGA_INPUT      = BINDING_OCEAN_OMEGA_INPUT;
+constexpr uint32_t OCEAN_FFT_INPUT        = BINDING_OCEAN_FFT_INPUT;
+constexpr uint32_t OCEAN_FFT_OUTPUT       = BINDING_OCEAN_FFT_OUTPUT;
+constexpr uint32_t OCEAN_FFT_TWIDDLE      = BINDING_OCEAN_FFT_TWIDDLE;
+constexpr uint32_t OCEAN_DISP_DY          = BINDING_OCEAN_DISP_DY;
+constexpr uint32_t OCEAN_DISP_DX          = BINDING_OCEAN_DISP_DX;
+constexpr uint32_t OCEAN_DISP_DZ          = BINDING_OCEAN_DISP_DZ;
+constexpr uint32_t OCEAN_DISP_OUTPUT      = BINDING_OCEAN_DISP_OUTPUT;
+constexpr uint32_t OCEAN_NORMAL_OUTPUT    = BINDING_OCEAN_NORMAL_OUTPUT;
+constexpr uint32_t OCEAN_FOAM_OUTPUT      = BINDING_OCEAN_FOAM_OUTPUT;
+constexpr uint32_t WATER_OCEAN_DISP       = BINDING_WATER_OCEAN_DISP;
+constexpr uint32_t WATER_OCEAN_NORMAL     = BINDING_WATER_OCEAN_NORMAL;
+constexpr uint32_t WATER_OCEAN_FOAM       = BINDING_WATER_OCEAN_FOAM;
 
 } // namespace Bindings
 

@@ -192,10 +192,30 @@ bool WaterSystem::createDescriptorSetLayout() {
         .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
         .build();
 
-    std::array<VkDescriptorSetLayoutBinding, 11> bindings = {
+    // FFT Ocean displacement maps (bindings 11-13, vertex shader)
+    auto oceanDispBinding = BindingBuilder()
+        .setBinding(11)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        .setStageFlags(VK_SHADER_STAGE_VERTEX_BIT)
+        .build();
+
+    auto oceanNormalBinding = BindingBuilder()
+        .setBinding(12)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        .setStageFlags(VK_SHADER_STAGE_VERTEX_BIT)
+        .build();
+
+    auto oceanFoamBinding = BindingBuilder()
+        .setBinding(13)
+        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        .setStageFlags(VK_SHADER_STAGE_VERTEX_BIT)
+        .build();
+
+    std::array<VkDescriptorSetLayoutBinding, 14> bindings = {
         uboBinding, waterUniformBinding, shadowMapBinding, terrainHeightMapBinding,
         flowMapBinding, displacementMapBinding, foamTextureBinding, temporalFoamBinding,
-        causticsTextureBinding, ssrTextureBinding, sceneDepthBinding
+        causticsTextureBinding, ssrTextureBinding, sceneDepthBinding,
+        oceanDispBinding, oceanNormalBinding, oceanFoamBinding
     };
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
@@ -208,11 +228,11 @@ bool WaterSystem::createDescriptorSetLayout() {
         return false;
     }
 
-    // Create pipeline layout with push constants for model matrix
+    // Create pipeline layout with push constants for model matrix + FFT params
     VkPushConstantRange pushConstantRange{};
     pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
     pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(glm::mat4);  // Just model matrix
+    pushConstantRange.size = sizeof(PushConstants);
 
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -485,7 +505,23 @@ bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffe
         sceneDepthInfo.imageView = sceneDepthView;
         sceneDepthInfo.sampler = sceneDepthSampler;
 
-        std::array<VkWriteDescriptorSet, 11> descriptorWrites{};
+        // FFT Ocean bindings (11-13) - use displacement map as placeholder until FFT is integrated
+        VkDescriptorImageInfo oceanDispInfo{};
+        oceanDispInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        oceanDispInfo.imageView = displacementMapView;
+        oceanDispInfo.sampler = displacementMapSampler;
+
+        VkDescriptorImageInfo oceanNormalInfo{};
+        oceanNormalInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        oceanNormalInfo.imageView = displacementMapView;
+        oceanNormalInfo.sampler = displacementMapSampler;
+
+        VkDescriptorImageInfo oceanFoamInfo{};
+        oceanFoamInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        oceanFoamInfo.imageView = displacementMapView;
+        oceanFoamInfo.sampler = displacementMapSampler;
+
+        std::array<VkWriteDescriptorSet, 14> descriptorWrites{};
 
         descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         descriptorWrites[0].dstSet = descriptorSets[i];
@@ -575,6 +611,33 @@ bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffe
         descriptorWrites[10].descriptorCount = 1;
         descriptorWrites[10].pImageInfo = &sceneDepthInfo;
 
+        // FFT Ocean displacement (binding 11)
+        descriptorWrites[11].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[11].dstSet = descriptorSets[i];
+        descriptorWrites[11].dstBinding = 11;
+        descriptorWrites[11].dstArrayElement = 0;
+        descriptorWrites[11].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[11].descriptorCount = 1;
+        descriptorWrites[11].pImageInfo = &oceanDispInfo;
+
+        // FFT Ocean normal (binding 12)
+        descriptorWrites[12].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[12].dstSet = descriptorSets[i];
+        descriptorWrites[12].dstBinding = 12;
+        descriptorWrites[12].dstArrayElement = 0;
+        descriptorWrites[12].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[12].descriptorCount = 1;
+        descriptorWrites[12].pImageInfo = &oceanNormalInfo;
+
+        // FFT Ocean foam (binding 13)
+        descriptorWrites[13].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[13].dstSet = descriptorSets[i];
+        descriptorWrites[13].dstBinding = 13;
+        descriptorWrites[13].dstArrayElement = 0;
+        descriptorWrites[13].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[13].descriptorCount = 1;
+        descriptorWrites[13].pImageInfo = &oceanFoamInfo;
+
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                descriptorWrites.data(), 0, nullptr);
     }
@@ -602,15 +665,16 @@ void WaterSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                             pipelineLayout, 0, 1, &descriptorSets[frameIndex], 0, nullptr);
 
-    // Push model matrix
-    glm::mat4 model = glm::mat4(1.0f);
-    model = glm::translate(model, glm::vec3(
+    // Set up push constants
+    pushConstants.model = glm::mat4(1.0f);
+    pushConstants.model = glm::translate(pushConstants.model, glm::vec3(
         waterUniforms.waterExtent.x,
         waterUniforms.waterLevel,
         waterUniforms.waterExtent.y
     ));
+    // useFFTOcean and oceanSize values are set via setUseFFTOcean()
     vkCmdPushConstants(cmd, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT,
-                       0, sizeof(glm::mat4), &model);
+                       0, sizeof(PushConstants), &pushConstants);
 
     // Bind water mesh and draw
     VkBuffer vertexBuffers[] = {waterMesh.getVertexBuffer()};

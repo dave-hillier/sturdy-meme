@@ -211,6 +211,18 @@ public:
     float getNearPlane() const { return waterUniforms.nearPlane; }
     float getFarPlane() const { return waterUniforms.farPlane; }
 
+    // FFT Ocean mode (Tessendorf simulation vs Gerstner waves)
+    void setUseFFTOcean(bool enabled, float size0 = 256.0f, float size1 = 64.0f, float size2 = 16.0f) {
+        pushConstants.useFFTOcean = enabled ? 1 : 0;
+        pushConstants.oceanSize0 = size0;
+        pushConstants.oceanSize1 = size1;
+        pushConstants.oceanSize2 = size2;
+    }
+    bool getUseFFTOcean() const { return pushConstants.useFFTOcean != 0; }
+    float getOceanSize0() const { return pushConstants.oceanSize0; }
+    float getOceanSize1() const { return pushConstants.oceanSize1; }
+    float getOceanSize2() const { return pushConstants.oceanSize2; }
+
     // Get uniform buffers (for G-buffer pass descriptor sets)
     const std::vector<VkBuffer>& getUniformBuffers() const { return waterUniformBuffers; }
     static VkDeviceSize getUniformBufferSize() { return sizeof(WaterUniforms); }
@@ -308,4 +320,14 @@ private:
     // Tidal parameters
     float baseWaterLevel = 0.0f;  // Mean sea level
     float tidalRange = 2.0f;      // Max tide height variation in meters
+
+    // Push constants - must match shader layout exactly
+    struct PushConstants {
+        glm::mat4 model;
+        int32_t useFFTOcean;   // 0 = Gerstner, 1 = FFT ocean
+        float oceanSize0;      // FFT cascade 0 patch size
+        float oceanSize1;      // FFT cascade 1 patch size
+        float oceanSize2;      // FFT cascade 2 patch size
+    };
+    PushConstants pushConstants{};
 };

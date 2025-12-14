@@ -1521,6 +1521,15 @@ void GuiSystem::renderWaterSection(Renderer& renderer) {
     ImGui::Text("WAVES");
     ImGui::PopStyleColor();
 
+    // FFT Ocean toggle
+    bool useFFT = water.getUseFFTOcean();
+    if (ImGui::Checkbox("FFT Ocean (Tessendorf)", &useFFT)) {
+        water.setUseFFTOcean(useFFT);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Use FFT-based ocean simulation instead of Gerstner waves");
+    }
+
     float amplitude = water.getWaveAmplitude();
     if (ImGui::SliderFloat("Amplitude", &amplitude, 0.0f, 5.0f, "%.2f m")) {
         water.setWaveAmplitude(amplitude);

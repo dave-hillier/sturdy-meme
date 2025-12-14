@@ -80,6 +80,7 @@ layout(location = 2) in vec2 fragTexCoord;
 layout(location = 3) in float fragWaveHeight;
 layout(location = 4) in float fragJacobian;  // Phase 13: Jacobian for foam detection
 layout(location = 5) in float fragWaveSlope; // Phase 17: Wave slope for SSS
+layout(location = 6) in float fragOceanFoam; // FFT ocean foam from vertex shader
 
 layout(location = 0) out vec4 outColor;
 
@@ -768,7 +769,9 @@ void main() {
     }
 
     // Combine all foam sources
-    totalFoamAmount = max(max(waveFoamAmount, shoreFoamAmount), flowFoamAmount);
+    // Include FFT ocean foam from vertex shader if available
+    float fftFoam = fragOceanFoam * combinedFoamNoise;  // Modulate with noise for texture
+    totalFoamAmount = max(max(max(waveFoamAmount, shoreFoamAmount), flowFoamAmount), fftFoam);
     totalFoamAmount = clamp(totalFoamAmount, 0.0, 1.0);
 
     // Foam color varies slightly with depth

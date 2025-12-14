@@ -4,7 +4,10 @@
 
 /*
  * water.vert - Water surface vertex shader
- * Implements Gerstner wave animation for realistic ocean/lake surfaces
+ * Supports two wave animation modes:
+ * 1. Analytical Gerstner waves (original, good for smaller water bodies)
+ * 2. FFT-based ocean simulation (Tessendorf, for realistic open ocean)
+ *
  * Phase 4: Samples displacement map for interactive splashes
  */
 
@@ -60,8 +63,17 @@ layout(std140, binding = BINDING_WATER_UBO) uniform WaterUniforms {
 // Displacement map (Phase 4: Interactive splashes)
 layout(binding = BINDING_WATER_DISPLACEMENT) uniform sampler2D displacementMap;
 
+// FFT Ocean displacement maps (3 cascades for multi-scale detail)
+layout(binding = BINDING_WATER_OCEAN_DISP) uniform sampler2D oceanDisplacement0;   // Large swells
+layout(binding = BINDING_WATER_OCEAN_NORMAL) uniform sampler2D oceanNormal0;       // Ocean normals
+layout(binding = BINDING_WATER_OCEAN_FOAM) uniform sampler2D oceanFoam0;           // Ocean foam
+
 layout(push_constant) uniform PushConstants {
     mat4 model;
+    int useFFTOcean;      // 0 = Gerstner, 1 = FFT ocean
+    float oceanSize0;     // FFT cascade 0 patch size
+    float oceanSize1;     // FFT cascade 1 patch size
+    float oceanSize2;     // FFT cascade 2 patch size
 } push;
 
 layout(location = 0) in vec3 inPosition;
@@ -74,6 +86,7 @@ layout(location = 2) out vec2 fragTexCoord;
 layout(location = 3) out float fragWaveHeight;
 layout(location = 4) out float fragJacobian;  // Phase 13: Jacobian for foam detection
 layout(location = 5) out float fragWaveSlope; // Phase 17: Wave slope for SSS
+layout(location = 6) out float fragOceanFoam; // FFT ocean foam output
 
 // Gerstner wave function
 // Returns displacement and calculates tangent/bitangent for normal
@@ -115,6 +128,33 @@ vec3 gerstnerWave(vec2 pos, float time, vec2 direction, float wavelength, float 
     return displacement;
 }
 
+// Sample FFT ocean displacement from cascaded maps
+// Returns xyz = total displacement, w = jacobian
+vec4 sampleFFTOcean(vec2 worldXZ, float oceanSize) {
+    // Calculate UV from world position (tiling)
+    vec2 uv = worldXZ / oceanSize;
+
+    // Sample displacement map (xyz = displacement, w = jacobian)
+    vec4 dispSample = texture(oceanDisplacement0, uv);
+
+    return dispSample;
+}
+
+// Sample FFT ocean normal
+vec3 sampleFFTNormal(vec2 worldXZ, float oceanSize) {
+    vec2 uv = worldXZ / oceanSize;
+
+    // Normal is stored in [0,1] range, decode to [-1,1]
+    vec3 normal = texture(oceanNormal0, uv).xyz * 2.0 - 1.0;
+    return normalize(normal);
+}
+
+// Sample FFT ocean foam
+float sampleFFTFoam(vec2 worldXZ, float oceanSize) {
+    vec2 uv = worldXZ / oceanSize;
+    return texture(oceanFoam0, uv).r;
+}
+
 void main() {
     float time = ubo.windDirectionAndSpeed.w;
     vec2 windDir = normalize(ubo.windDirectionAndSpeed.xy + vec2(0.001));
@@ -123,62 +163,89 @@ void main() {
     vec4 worldPos = push.model * vec4(inPosition, 1.0);
     vec2 pos = worldPos.xz;
 
-    // Accumulate multiple Gerstner waves for more realistic surface
     vec3 totalDisplacement = vec3(0.0);
-    vec3 totalTangent = vec3(1.0, 0.0, 0.0);
-    vec3 totalBitangent = vec3(0.0, 0.0, 1.0);
-
-    // Phase 13: Accumulate Jacobian from all waves (multiplicative)
+    vec3 normal = vec3(0.0, 1.0, 0.0);
     float totalJacobian = 1.0;
+    float oceanFoam = 0.0;
 
-    // Primary wave (wind-driven)
-    vec3 tangent1, bitangent1;
-    float jacobian1;
-    vec3 wave1 = gerstnerWave(pos, time * waveParams.w, windDir,
-                               waveParams.y, waveParams.z, waveParams.x,
-                               tangent1, bitangent1, jacobian1);
-    totalDisplacement += wave1;
-    totalJacobian *= jacobian1;
+    if (push.useFFTOcean != 0) {
+        // =========================================================================
+        // FFT OCEAN MODE - Sample from pre-computed displacement maps
+        // Uses Tessendorf's FFT-based ocean simulation
+        // =========================================================================
 
-    // Secondary wave (cross-wind, smaller)
-    vec3 tangent2, bitangent2;
-    float jacobian2;
-    vec2 crossDir = vec2(-windDir.y, windDir.x) * 0.7 + windDir * 0.3;
-    vec3 wave2 = gerstnerWave(pos, time * waveParams2.w * 1.3, crossDir,
-                               waveParams2.y * 0.6, waveParams2.z * 0.7, waveParams2.x * 0.5,
-                               tangent2, bitangent2, jacobian2);
-    totalDisplacement += wave2;
-    totalJacobian *= jacobian2;
+        // Sample primary cascade (large swells)
+        vec4 disp0 = sampleFFTOcean(pos, push.oceanSize0);
+        totalDisplacement = disp0.xyz;
+        totalJacobian = disp0.w;  // Jacobian from displacement shader
 
-    // Tertiary wave (counter direction, medium detail)
-    vec3 tangent3, bitangent3;
-    float jacobian3;
-    vec2 counterDir = -windDir * 0.5 + vec2(windDir.y, -windDir.x) * 0.5;
-    vec3 wave3 = gerstnerWave(pos, time * waveParams.w * 0.7, counterDir,
-                               waveParams.y * 0.3, waveParams.z * 0.5, waveParams.x * 0.4,
-                               tangent3, bitangent3, jacobian3);
-    totalDisplacement += wave3;
-    totalJacobian *= jacobian3;
+        // Sample normal from FFT
+        normal = sampleFFTNormal(pos, push.oceanSize0);
 
-    // Quaternary wave (fine ripples for surface texture)
-    vec3 tangent4, bitangent4;
-    float jacobian4;
-    vec2 rippleDir = normalize(windDir + vec2(0.3, 0.7));
-    vec3 wave4 = gerstnerWave(pos, time * waveParams2.w * 1.5, rippleDir,
-                               2.0, 0.2, 0.05,  // Short wavelength, low steepness, small amplitude
-                               tangent4, bitangent4, jacobian4);
-    totalDisplacement += wave4;
-    totalJacobian *= jacobian4;
+        // Sample foam
+        oceanFoam = sampleFFTFoam(pos, push.oceanSize0);
 
-    // Blend tangents/bitangents with increased weights for secondary waves
-    totalTangent = normalize(tangent1 + tangent2 * 0.7 + tangent3 * 0.5 + tangent4 * 0.3);
-    totalBitangent = normalize(bitangent1 + bitangent2 * 0.7 + bitangent3 * 0.5 + bitangent4 * 0.3);
+        // Apply displacement
+        worldPos.xyz += totalDisplacement;
 
-    // Calculate normal from tangent and bitangent
-    vec3 normal = normalize(cross(totalBitangent, totalTangent));
+    } else {
+        // =========================================================================
+        // GERSTNER WAVE MODE - Analytical waves (original implementation)
+        // Good for smaller water bodies, rivers, lakes
+        // =========================================================================
 
-    // Apply Gerstner wave displacement
-    worldPos.xyz += totalDisplacement;
+        vec3 totalTangent = vec3(1.0, 0.0, 0.0);
+        vec3 totalBitangent = vec3(0.0, 0.0, 1.0);
+
+        // Primary wave (wind-driven)
+        vec3 tangent1, bitangent1;
+        float jacobian1;
+        vec3 wave1 = gerstnerWave(pos, time * waveParams.w, windDir,
+                                   waveParams.y, waveParams.z, waveParams.x,
+                                   tangent1, bitangent1, jacobian1);
+        totalDisplacement += wave1;
+        totalJacobian *= jacobian1;
+
+        // Secondary wave (cross-wind, smaller)
+        vec3 tangent2, bitangent2;
+        float jacobian2;
+        vec2 crossDir = vec2(-windDir.y, windDir.x) * 0.7 + windDir * 0.3;
+        vec3 wave2 = gerstnerWave(pos, time * waveParams2.w * 1.3, crossDir,
+                                   waveParams2.y * 0.6, waveParams2.z * 0.7, waveParams2.x * 0.5,
+                                   tangent2, bitangent2, jacobian2);
+        totalDisplacement += wave2;
+        totalJacobian *= jacobian2;
+
+        // Tertiary wave (counter direction, medium detail)
+        vec3 tangent3, bitangent3;
+        float jacobian3;
+        vec2 counterDir = -windDir * 0.5 + vec2(windDir.y, -windDir.x) * 0.5;
+        vec3 wave3 = gerstnerWave(pos, time * waveParams.w * 0.7, counterDir,
+                                   waveParams.y * 0.3, waveParams.z * 0.5, waveParams.x * 0.4,
+                                   tangent3, bitangent3, jacobian3);
+        totalDisplacement += wave3;
+        totalJacobian *= jacobian3;
+
+        // Quaternary wave (fine ripples for surface texture)
+        vec3 tangent4, bitangent4;
+        float jacobian4;
+        vec2 rippleDir = normalize(windDir + vec2(0.3, 0.7));
+        vec3 wave4 = gerstnerWave(pos, time * waveParams2.w * 1.5, rippleDir,
+                                   2.0, 0.2, 0.05,  // Short wavelength, low steepness, small amplitude
+                                   tangent4, bitangent4, jacobian4);
+        totalDisplacement += wave4;
+        totalJacobian *= jacobian4;
+
+        // Blend tangents/bitangents with increased weights for secondary waves
+        totalTangent = normalize(tangent1 + tangent2 * 0.7 + tangent3 * 0.5 + tangent4 * 0.3);
+        totalBitangent = normalize(bitangent1 + bitangent2 * 0.7 + bitangent3 * 0.5 + bitangent4 * 0.3);
+
+        // Calculate normal from tangent and bitangent
+        normal = normalize(cross(totalBitangent, totalTangent));
+
+        // Apply Gerstner wave displacement
+        worldPos.xyz += totalDisplacement;
+    }
 
     // Phase 4: Sample displacement map for interactive splashes
     // Calculate UV for displacement map (world position to UV)
@@ -196,6 +263,7 @@ void main() {
     fragTexCoord = inTexCoord;
     fragWaveHeight = totalDisplacement.y + interactiveDisplacement * displacementScale;
     fragJacobian = totalJacobian;  // Phase 13: Pass Jacobian for foam detection
+    fragOceanFoam = oceanFoam;     // Pass FFT foam to fragment shader
 
     // Phase 17: Calculate wave slope for SSS
     // Slope = how much the normal deviates from straight up

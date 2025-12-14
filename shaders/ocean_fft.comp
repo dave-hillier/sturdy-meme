@@ -1,0 +1,113 @@
+#version 450
+
+/*
+ * ocean_fft.comp - Radix-2 Cooley-Tukey FFT (Butterfly)
+ *
+ * Performs in-place FFT using the Stockham auto-sort algorithm.
+ * This shader is dispatched log2(N) times per direction (horizontal then vertical).
+ *
+ * The FFT transforms the frequency-domain spectrum to spatial-domain displacement.
+ * We use inverse FFT (IFFT) since we're going from frequency to space.
+ *
+ * Each dispatch processes one stage of the butterfly algorithm.
+ * Push constant specifies which stage and direction.
+ */
+
+#extension GL_GOOGLE_include_directive : require
+
+#include "bindings.glsl"
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+// Ping-pong buffers for in-place FFT
+layout(binding = BINDING_OCEAN_FFT_INPUT, rg32f) uniform readonly image2D inputBuffer;
+layout(binding = BINDING_OCEAN_FFT_OUTPUT, rg32f) uniform writeonly image2D outputBuffer;
+
+// Push constants for FFT stage
+layout(push_constant) uniform PushConstants {
+    int stage;       // Current butterfly stage (0 to log2(N)-1)
+    int direction;   // 0 = horizontal (rows), 1 = vertical (columns)
+    int resolution;  // FFT size (must be power of 2)
+    int inverse;     // 1 = inverse FFT, 0 = forward FFT
+};
+
+const float PI = 3.14159265359;
+const float TWO_PI = 6.28318530718;
+
+// Complex multiplication
+vec2 complexMul(vec2 a, vec2 b) {
+    return vec2(
+        a.x * b.x - a.y * b.y,
+        a.x * b.y + a.y * b.x
+    );
+}
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+
+    if (coord.x >= resolution || coord.y >= resolution) return;
+
+    // Determine which dimension we're working on
+    int index = (direction == 0) ? coord.x : coord.y;
+
+    // Butterfly parameters for this stage
+    int butterflySpan = 1 << stage;           // Distance between butterfly pairs
+    int butterflyGroup = 1 << (stage + 1);    // Size of butterfly group
+    int groupIndex = index & (butterflyGroup - 1);  // Position within group
+    int pairIndex = index >> (stage + 1);     // Which group we're in
+
+    // Determine if this is top or bottom of butterfly
+    bool isTop = groupIndex < butterflySpan;
+
+    // Calculate twiddle factor index
+    int k = groupIndex & (butterflySpan - 1);  // k = groupIndex mod butterflySpan
+
+    // Twiddle factor: W_N^k = exp(-2*pi*i*k/butterflyGroup) for forward FFT
+    // For inverse FFT: exp(+2*pi*i*k/butterflyGroup)
+    float angle = TWO_PI * float(k) / float(butterflyGroup);
+    if (inverse == 0) angle = -angle;  // Forward FFT uses negative angle
+
+    vec2 twiddle = vec2(cos(angle), sin(angle));
+
+    // Calculate indices for butterfly pair
+    int topIndex, bottomIndex;
+    if (isTop) {
+        topIndex = index;
+        bottomIndex = index + butterflySpan;
+    } else {
+        topIndex = index - butterflySpan;
+        bottomIndex = index;
+    }
+
+    // Read input values
+    ivec2 topCoord, bottomCoord;
+    if (direction == 0) {
+        // Horizontal FFT
+        topCoord = ivec2(topIndex, coord.y);
+        bottomCoord = ivec2(bottomIndex, coord.y);
+    } else {
+        // Vertical FFT
+        topCoord = ivec2(coord.x, topIndex);
+        bottomCoord = ivec2(coord.x, bottomIndex);
+    }
+
+    vec2 a = imageLoad(inputBuffer, topCoord).xy;
+    vec2 b = imageLoad(inputBuffer, bottomCoord).xy;
+
+    // Butterfly operation
+    vec2 result;
+    if (isTop) {
+        // Top output: a + W * b
+        result = a + complexMul(twiddle, b);
+    } else {
+        // Bottom output: a - W * b
+        result = a - complexMul(twiddle, b);
+    }
+
+    // For inverse FFT, divide by N at the final stage
+    if (inverse == 1 && stage == int(log2(float(resolution))) - 1) {
+        result /= float(resolution);
+    }
+
+    imageStore(outputBuffer, coord, vec4(result, 0.0, 0.0));
+}
