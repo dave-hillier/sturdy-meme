@@ -7,38 +7,12 @@
 #include <string>
 
 #include "TreeEditorGui.h"
+#include "GuiIKTab.h"
+#include "GuiPlayerTab.h"
+#include "GuiEnvironmentTab.h"
 
 class Renderer;
 class Camera;
-
-// IK debug settings for GUI control
-struct IKDebugSettings {
-    bool showSkeleton = false;
-    bool showIKTargets = false;
-    bool showFootPlacement = false;
-
-    // IK feature enables
-    bool lookAtEnabled = false;
-    bool footPlacementEnabled = true;
-    bool straddleEnabled = false;
-
-    // Look-at target mode
-    enum class LookAtMode { Fixed, Camera, Mouse };
-    LookAtMode lookAtMode = LookAtMode::Camera;
-    glm::vec3 fixedLookAtTarget = glm::vec3(0, 1.5f, 5.0f);
-
-    // Foot placement
-    float groundOffset = 0.0f;
-};
-
-// Player settings for GUI control
-struct PlayerSettings {
-    // Cape
-    bool capeEnabled = false;
-    bool showCapeColliders = false;
-
-    // Future player settings can go here
-};
 
 class GuiSystem {
 public:
@@ -72,19 +46,8 @@ public:
 private:
     void setupStyle();
     void renderDashboard(Renderer& renderer, const Camera& camera, float fps);
-    void renderTimeSection(Renderer& renderer);
-    void renderWeatherSection(Renderer& renderer);
-    void renderEnvironmentSection(Renderer& renderer);
-    void renderPostProcessSection(Renderer& renderer);
-    void renderTerrainSection(Renderer& renderer);
-    void renderWaterSection(Renderer& renderer);
-    void renderDebugSection(Renderer& renderer);
-    void renderIKSection(Renderer& renderer, const Camera& camera);
-    void renderPlayerSection(Renderer& renderer);
-    void renderProfilerSection(Renderer& renderer);
     void renderHelpOverlay();
     void renderPositionPanel(const Camera& camera);
-    void renderSkeletonOverlay(Renderer& renderer, const Camera& camera);
 
     VkDescriptorPool imguiPool = VK_NULL_HANDLE;
     bool visible = true;
@@ -96,6 +59,9 @@ private:
     // Player settings
     PlayerSettings playerSettings;
 
+    // Environment tab state
+    EnvironmentTabState environmentTabState;
+
     // Tree editor as separate window
     TreeEditorGui treeEditorGui;
 
@@ -103,15 +69,6 @@ private:
     float frameTimeHistory[120] = {0};
     int frameTimeIndex = 0;
     float avgFrameTime = 0.0f;
-
-    // Height fog layer enable state and cached values
-    bool heightFogEnabled = true;
-    float cachedLayerDensity = 0.02f;
-
-    // Atmospheric scattering enable state and cached values
-    bool atmosphereEnabled = true;
-    float cachedRayleighScale = 13.558f;
-    float cachedMieScale = 3.996f;
 
 public:
     // Access to tree editor GUI

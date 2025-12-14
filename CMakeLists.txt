@@ -66,6 +66,16 @@ set(SOURCES
     src/SkySystem.cpp
     src/ShadowSystem.cpp
     src/GuiSystem.cpp
+    src/GuiTimeTab.cpp
+    src/GuiWeatherTab.cpp
+    src/GuiEnvironmentTab.cpp
+    src/GuiPostFXTab.cpp
+    src/GuiTerrainTab.cpp
+    src/GuiWaterTab.cpp
+    src/GuiDebugTab.cpp
+    src/GuiProfilerTab.cpp
+    src/GuiIKTab.cpp
+    src/GuiPlayerTab.cpp
     src/InputSystem.cpp
     src/CatmullClarkCBT.cpp
     src/CatmullClarkMesh.cpp
