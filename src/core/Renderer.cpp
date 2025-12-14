@@ -129,6 +129,10 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
 
     if (!terrainSystem.init(initCtx, terrainParams, terrainConfig)) return false;
 
+    // Collect resources from tier-1 systems for tier-2+ initialization
+    // This decouples tier-2 systems from tier-1 systems - they depend on resources, not systems
+    CoreResources core = CoreResources::collect(postProcessSystem, shadowSystem, terrainSystem, MAX_FRAMES_IN_FLIGHT);
+
     // Initialize scene (meshes, textures, objects, lights)
     // Pass terrain height function so objects can be placed on terrain
     SceneBuilder::InitInfo sceneInfo{};
@@ -145,17 +149,14 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     if (!sceneManager.init(sceneInfo)) return false;
 
     // Initialize snow subsystems (SnowMaskSystem, VolumetricSnowSystem)
-    if (!RendererInit::initSnowSubsystems(snowMaskSystem, volumetricSnowSystem, initCtx,
-                                          postProcessSystem.getHDRRenderPass())) return false;
+    if (!RendererInit::initSnowSubsystems(snowMaskSystem, volumetricSnowSystem, initCtx, core.hdr)) return false;
 
     if (!createDescriptorSets()) return false;
     if (!createSkinnedMeshRendererDescriptorSets()) return false;
 
     // Initialize grass and wind subsystems
     if (!RendererInit::initGrassSubsystem(grassSystem, windSystem, leafSystem, initCtx,
-                                          postProcessSystem.getHDRRenderPass(),
-                                          shadowSystem.getShadowRenderPass(),
-                                          shadowSystem.getShadowMapSize())) return false;
+                                          core.hdr, core.shadow)) return false;
 
     const EnvironmentSettings* envSettings = &windSystem.getEnvironmentSettings();
 
@@ -174,8 +175,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
                                         globalBufferManager.snowBuffers.buffers, globalBufferManager.cloudShadowBuffers.buffers);
 
     // Initialize rock system
-    if (!RendererInit::initRockSystem(rockSystem, initCtx, terrainConfig.size,
-                                       [this](float x, float z) { return terrainSystem.getHeightAt(x, z); })) return false;
+    if (!RendererInit::initRockSystem(rockSystem, initCtx, core.terrain)) return false;
 
     // Update rock descriptor sets now that rock textures are loaded
     {
@@ -210,8 +210,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
     }
 
     // Initialize weather and leaf subsystems
-    if (!RendererInit::initWeatherSubsystems(weatherSystem, leafSystem, initCtx,
-                                              postProcessSystem.getHDRRenderPass())) return false;
+    if (!RendererInit::initWeatherSubsystems(weatherSystem, leafSystem, initCtx, core.hdr)) return false;
 
     // Update weather system descriptor sets
     weatherSystem.updateDescriptorSets(device, globalBufferManager.uniformBuffers.buffers, windBuffers,
@@ -233,8 +232,8 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
 
     // Initialize atmosphere subsystems (Froxel, AtmosphereLUT, CloudShadow)
     if (!RendererInit::initAtmosphereSubsystems(froxelSystem, atmosphereLUTSystem, cloudShadowSystem,
-                                                 postProcessSystem, initCtx, shadowSystem.getShadowImageView(),
-                                                 shadowSystem.getShadowSampler(), globalBufferManager.lightBuffers.buffers)) return false;
+                                                 postProcessSystem, initCtx, core.shadow,
+                                                 globalBufferManager.lightBuffers.buffers)) return false;
 
     // Connect froxel volume to weather system
     weatherSystem.setFroxelVolume(froxelSystem.getScatteringVolumeView(), froxelSystem.getVolumeSampler(),
@@ -250,9 +249,8 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
 
     // Initialize Catmull-Clark subdivision system
     float suzanneX = 5.0f, suzanneZ = -5.0f;
-    glm::vec3 suzannePos(suzanneX, terrainSystem.getHeightAt(suzanneX, suzanneZ) + 2.0f, suzanneZ);
-    if (!RendererInit::initCatmullClarkSystem(catmullClarkSystem, initCtx,
-                                              postProcessSystem.getHDRRenderPass(), suzannePos)) return false;
+    glm::vec3 suzannePos(suzanneX, core.terrain.getHeightAt(suzanneX, suzanneZ) + 2.0f, suzanneZ);
+    if (!RendererInit::initCatmullClarkSystem(catmullClarkSystem, initCtx, core.hdr, suzannePos)) return false;
     catmullClarkSystem.updateDescriptorSets(device, globalBufferManager.uniformBuffers.buffers);
 
     // Create sky descriptor sets now that uniform buffers and LUTs are ready
@@ -264,7 +262,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
         // Continue without Hi-Z - it's an optional optimization
     } else {
         // Connect depth buffer to Hi-Z system - use HDR depth where scene is rendered
-        hiZSystem.setDepthBuffer(postProcessSystem.getHDRDepthView(), depthSampler);
+        hiZSystem.setDepthBuffer(core.hdr.depthView, depthSampler);
 
         // Initialize object data for culling
         updateHiZObjectData();
@@ -278,7 +276,7 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
 
     // Initialize water subsystems (WaterSystem, WaterDisplacement, FlowMap, Foam, SSR, TileCull, GBuffer)
     WaterSubsystems waterSubs{waterSystem, waterDisplacement, flowMapGenerator, foamBuffer, ssrSystem, waterTileCull, waterGBuffer};
-    if (!RendererInit::initWaterSubsystems(waterSubs, initCtx, postProcessSystem.getHDRRenderPass(),
+    if (!RendererInit::initWaterSubsystems(waterSubs, initCtx, core.hdr.renderPass,
                                             shadowSystem, terrainSystem, terrainConfig, postProcessSystem, depthSampler)) return false;
 
     // Create water descriptor sets
@@ -287,13 +285,13 @@ bool Renderer::init(SDL_Window* win, const std::string& resPath) {
                                                   postProcessSystem, depthSampler)) return false;
 
     // Initialize tree edit system
-    if (!RendererInit::initTreeEditSystem(treeEditSystem, initCtx, postProcessSystem.getHDRRenderPass())) return false;
+    if (!RendererInit::initTreeEditSystem(treeEditSystem, initCtx, core.hdr)) return false;
     treeEditSystem.updateDescriptorSets(device, globalBufferManager.uniformBuffers.buffers);
 
     if (!createSyncObjects()) return false;
 
     // Initialize debug line system
-    if (!RendererInit::initDebugLineSystem(debugLineSystem, initCtx, postProcessSystem.getHDRRenderPass())) return false;
+    if (!RendererInit::initDebugLineSystem(debugLineSystem, initCtx, core.hdr)) return false;
     SDL_Log("Debug line system initialized");
 
     // Initialize UBO builder with system references

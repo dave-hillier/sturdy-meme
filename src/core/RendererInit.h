@@ -3,6 +3,7 @@
 #include "InitContext.h"
 #include "VulkanContext.h"
 #include "DescriptorManager.h"
+#include "CoreResources.h"
 
 #include <string>
 #include <vector>
@@ -143,6 +144,16 @@ public:
         VkRenderPass hdrRenderPass
     );
 
+    // Overload using CoreResources
+    static bool initSnowSubsystems(
+        SnowMaskSystem& snowMaskSystem,
+        VolumetricSnowSystem& volumetricSnowSystem,
+        const InitContext& ctx,
+        const HDRResources& hdr
+    ) {
+        return initSnowSubsystems(snowMaskSystem, volumetricSnowSystem, ctx, hdr.renderPass);
+    }
+
     /**
      * Initialize grass and wind systems (GrassSystem, WindSystem)
      * Also connects environment settings to grass and leaf systems
@@ -157,6 +168,19 @@ public:
         uint32_t shadowMapSize
     );
 
+    // Overload using CoreResources
+    static bool initGrassSubsystem(
+        GrassSystem& grassSystem,
+        WindSystem& windSystem,
+        LeafSystem& leafSystem,
+        const InitContext& ctx,
+        const HDRResources& hdr,
+        const ShadowResources& shadow
+    ) {
+        return initGrassSubsystem(grassSystem, windSystem, leafSystem, ctx,
+                                   hdr.renderPass, shadow.renderPass, shadow.mapSize);
+    }
+
     /**
      * Initialize weather-related systems (WeatherSystem, LeafSystem)
      */
@@ -166,6 +190,16 @@ public:
         const InitContext& ctx,
         VkRenderPass hdrRenderPass
     );
+
+    // Overload using CoreResources
+    static bool initWeatherSubsystems(
+        WeatherSystem& weatherSystem,
+        LeafSystem& leafSystem,
+        const InitContext& ctx,
+        const HDRResources& hdr
+    ) {
+        return initWeatherSubsystems(weatherSystem, leafSystem, ctx, hdr.renderPass);
+    }
 
     /**
      * Initialize atmosphere/fog systems (FroxelSystem, AtmosphereLUTSystem, CloudShadowSystem)
@@ -181,6 +215,20 @@ public:
         VkSampler shadowMapSampler,
         const std::vector<VkBuffer>& lightBuffers
     );
+
+    // Overload using CoreResources
+    static bool initAtmosphereSubsystems(
+        FroxelSystem& froxelSystem,
+        AtmosphereLUTSystem& atmosphereLUTSystem,
+        CloudShadowSystem& cloudShadowSystem,
+        PostProcessSystem& postProcessSystem,
+        const InitContext& ctx,
+        const ShadowResources& shadow,
+        const std::vector<VkBuffer>& lightBuffers
+    ) {
+        return initAtmosphereSubsystems(froxelSystem, atmosphereLUTSystem, cloudShadowSystem,
+                                         postProcessSystem, ctx, shadow.cascadeView, shadow.sampler, lightBuffers);
+    }
 
     /**
      * Initialize all water-related systems
@@ -222,6 +270,19 @@ public:
         const TerrainConfig& config
     );
 
+    // Overload using CoreResources (note: HDR resources come from PostProcess, shadow from ShadowSystem)
+    static bool initTerrainSubsystems(
+        TerrainSystem& terrainSystem,
+        const InitContext& ctx,
+        const HDRResources& hdr,
+        const ShadowResources& shadow,
+        const std::string& heightmapPath,
+        const TerrainConfig& config
+    ) {
+        return initTerrainSubsystems(terrainSystem, ctx, hdr.renderPass, shadow.renderPass,
+                                      shadow.mapSize, heightmapPath, config);
+    }
+
     /**
      * Initialize rock system
      */
@@ -232,6 +293,15 @@ public:
         std::function<float(float, float)> getTerrainHeight
     );
 
+    // Overload using TerrainResources
+    static bool initRockSystem(
+        RockSystem& rockSystem,
+        const InitContext& ctx,
+        const TerrainResources& terrain
+    ) {
+        return initRockSystem(rockSystem, ctx, terrain.size, terrain.getHeightAt);
+    }
+
     /**
      * Initialize Catmull-Clark subdivision system
      */
@@ -241,6 +311,16 @@ public:
         VkRenderPass hdrRenderPass,
         const glm::vec3& position
     );
+
+    // Overload using CoreResources
+    static bool initCatmullClarkSystem(
+        CatmullClarkSystem& catmullClarkSystem,
+        const InitContext& ctx,
+        const HDRResources& hdr,
+        const glm::vec3& position
+    ) {
+        return initCatmullClarkSystem(catmullClarkSystem, ctx, hdr.renderPass, position);
+    }
 
     /**
      * Initialize Hi-Z occlusion culling system
@@ -254,6 +334,17 @@ public:
         VkSampler depthSampler
     );
 
+    // Overload using HDRResources (still needs depthFormat and depthSampler)
+    static bool initHiZSystem(
+        HiZSystem& hiZSystem,
+        const InitContext& ctx,
+        VkFormat depthFormat,
+        const HDRResources& hdr,
+        VkSampler depthSampler
+    ) {
+        return initHiZSystem(hiZSystem, ctx, depthFormat, hdr.depthView, depthSampler);
+    }
+
     /**
      * Initialize tree edit system
      */
@@ -263,6 +354,15 @@ public:
         VkRenderPass hdrRenderPass
     );
 
+    // Overload using CoreResources
+    static bool initTreeEditSystem(
+        TreeEditSystem& treeEditSystem,
+        const InitContext& ctx,
+        const HDRResources& hdr
+    ) {
+        return initTreeEditSystem(treeEditSystem, ctx, hdr.renderPass);
+    }
+
     /**
      * Initialize debug line system for physics visualization
      */
@@ -271,6 +371,15 @@ public:
         const InitContext& ctx,
         VkRenderPass hdrRenderPass
     );
+
+    // Overload using CoreResources
+    static bool initDebugLineSystem(
+        DebugLineSystem& debugLineSystem,
+        const InitContext& ctx,
+        const HDRResources& hdr
+    ) {
+        return initDebugLineSystem(debugLineSystem, ctx, hdr.renderPass);
+    }
 
     /**
      * Update cloud shadow bindings across all descriptor sets
