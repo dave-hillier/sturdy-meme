@@ -30,6 +30,7 @@
 #include <thread>
 #include <cmath>
 #include <algorithm>
+#include <mutex>
 
 // Memory allocation hooks for Jolt
 JPH_SUPPRESS_WARNINGS
@@ -140,6 +141,60 @@ static ObjectLayerPairFilterImpl objectLayerPairFilter;
 static ObjectVsBroadPhaseLayerFilterImpl objectVsBroadPhaseLayerFilter;
 static CharacterContactListener characterContactListener;
 
+// JoltRuntime RAII wrapper for global Jolt state
+// Uses weak_ptr to allow multiple PhysicsWorld instances to share runtime
+namespace {
+    std::weak_ptr<JoltRuntime> g_joltRuntime;
+    std::mutex g_joltMutex;
+}
+
+struct JoltRuntime {
+    JoltRuntime() {
+        // Register allocation hook
+        JPH::RegisterDefaultAllocator();
+
+        // Install callbacks
+        JPH::Trace = TraceImpl;
+        JPH_IF_ENABLE_ASSERTS(JPH::AssertFailed = AssertFailedImpl;)
+
+        // Create factory
+        JPH::Factory::sInstance = new JPH::Factory();
+
+        // Register all Jolt physics types
+        JPH::RegisterTypes();
+
+        SDL_Log("Jolt runtime initialized");
+    }
+
+    ~JoltRuntime() {
+        // Unregisters all types with the factory and cleans up the default material
+        JPH::UnregisterTypes();
+
+        // Destroy factory
+        delete JPH::Factory::sInstance;
+        JPH::Factory::sInstance = nullptr;
+
+        SDL_Log("Jolt runtime shutdown");
+    }
+
+    // Get or create the shared runtime
+    static std::shared_ptr<JoltRuntime> acquire() {
+        std::lock_guard<std::mutex> lock(g_joltMutex);
+        auto runtime = g_joltRuntime.lock();
+        if (!runtime) {
+            runtime = std::make_shared<JoltRuntime>();
+            g_joltRuntime = runtime;
+        }
+        return runtime;
+    }
+
+    // Non-copyable, non-movable
+    JoltRuntime(const JoltRuntime&) = delete;
+    JoltRuntime& operator=(const JoltRuntime&) = delete;
+    JoltRuntime(JoltRuntime&&) = delete;
+    JoltRuntime& operator=(JoltRuntime&&) = delete;
+};
+
 // Helper conversions
 static inline JPH::Vec3 toJolt(const glm::vec3& v) {
     return JPH::Vec3(v.x, v.y, v.z);
@@ -167,24 +222,67 @@ static inline glm::quat toGLM(const JPH::Quat& q) {
 PhysicsWorld::PhysicsWorld() = default;
 
 PhysicsWorld::~PhysicsWorld() {
-    shutdown();
+    // RAII cleanup: reset unique_ptrs in reverse order of creation
+    character.reset();
+    physicsSystem.reset();
+    jobSystem.reset();
+    tempAllocator.reset();
+
+    // Release our reference to the Jolt runtime
+    // When the last PhysicsWorld is destroyed, this will trigger JoltRuntime cleanup
+    joltRuntime_.reset();
+
+    SDL_Log("Physics system shutdown");
 }
 
-bool PhysicsWorld::init() {
-    if (initialized) return true;
+PhysicsWorld::PhysicsWorld(PhysicsWorld&& other) noexcept
+    : joltRuntime_(std::move(other.joltRuntime_))
+    , tempAllocator(std::move(other.tempAllocator))
+    , jobSystem(std::move(other.jobSystem))
+    , physicsSystem(std::move(other.physicsSystem))
+    , character(std::move(other.character))
+    , characterHeight(other.characterHeight)
+    , characterRadius(other.characterRadius)
+    , characterDesiredVelocity(other.characterDesiredVelocity)
+    , characterWantsJump(other.characterWantsJump)
+    , accumulatedTime(other.accumulatedTime) {
+}
 
-    // Register allocation hook
-    JPH::RegisterDefaultAllocator();
+PhysicsWorld& PhysicsWorld::operator=(PhysicsWorld&& other) noexcept {
+    if (this != &other) {
+        // Clean up existing resources
+        character.reset();
+        physicsSystem.reset();
+        jobSystem.reset();
+        tempAllocator.reset();
+        joltRuntime_.reset();
 
-    // Install callbacks
-    JPH::Trace = TraceImpl;
-    JPH_IF_ENABLE_ASSERTS(JPH::AssertFailed = AssertFailedImpl;)
+        // Move resources from other
+        joltRuntime_ = std::move(other.joltRuntime_);
+        tempAllocator = std::move(other.tempAllocator);
+        jobSystem = std::move(other.jobSystem);
+        physicsSystem = std::move(other.physicsSystem);
+        character = std::move(other.character);
+        characterHeight = other.characterHeight;
+        characterRadius = other.characterRadius;
+        characterDesiredVelocity = other.characterDesiredVelocity;
+        characterWantsJump = other.characterWantsJump;
+        accumulatedTime = other.accumulatedTime;
+    }
+    return *this;
+}
 
-    // Create factory
-    JPH::Factory::sInstance = new JPH::Factory();
+std::optional<PhysicsWorld> PhysicsWorld::create() {
+    PhysicsWorld world;
+    if (!world.initInternal()) {
+        return std::nullopt;
+    }
+    return world;
+}
 
-    // Register all Jolt physics types
-    JPH::RegisterTypes();
+bool PhysicsWorld::initInternal() {
+    // Acquire shared Jolt runtime (thread-safe, ref-counted)
+    joltRuntime_ = JoltRuntime::acquire();
 
     // Create temp allocator (10 MB)
     tempAllocator = std::make_unique<JPH::TempAllocatorImpl>(10 * 1024 * 1024);
@@ -217,33 +315,11 @@ bool PhysicsWorld::init() {
     // Set gravity
     physicsSystem->SetGravity(JPH::Vec3(0.0f, -9.81f, 0.0f));
 
-    initialized = true;
     SDL_Log("Physics system initialized with %d worker threads", numThreads);
     return true;
 }
 
-void PhysicsWorld::shutdown() {
-    if (!initialized) return;
-
-    character.reset();
-    physicsSystem.reset();
-    jobSystem.reset();
-    tempAllocator.reset();
-
-    // Unregisters all types with the factory and cleans up the default material
-    JPH::UnregisterTypes();
-
-    // Destroy factory
-    delete JPH::Factory::sInstance;
-    JPH::Factory::sInstance = nullptr;
-
-    initialized = false;
-    SDL_Log("Physics system shutdown");
-}
-
 void PhysicsWorld::update(float deltaTime) {
-    if (!initialized) return;
-
     // Fixed timestep physics with accumulator
     accumulatedTime += deltaTime;
     int numSteps = 0;
@@ -320,8 +396,6 @@ void PhysicsWorld::update(float deltaTime) {
 }
 
 PhysicsBodyID PhysicsWorld::createTerrainDisc(float radius, float heightOffset) {
-    if (!initialized) return INVALID_BODY_ID;
-
     JPH::BodyInterface& bodyInterface = physicsSystem->GetBodyInterface();
 
     // Create a large flat box as the ground plane
@@ -366,7 +440,6 @@ PhysicsBodyID PhysicsWorld::createTerrainHeightfield(const float* samples, uint3
 
 PhysicsBodyID PhysicsWorld::createTerrainHeightfield(const float* samples, const uint8_t* holeMask,
                                                       uint32_t sampleCount, float worldSize, float heightScale) {
-    if (!initialized) return INVALID_BODY_ID;
     if (!samples || sampleCount < 2) {
         SDL_Log("Invalid heightfield parameters");
         return INVALID_BODY_ID;
@@ -491,8 +564,6 @@ PhysicsBodyID PhysicsWorld::createTerrainHeightfield(const float* samples, const
 
 PhysicsBodyID PhysicsWorld::createBox(const glm::vec3& position, const glm::vec3& halfExtents,
                                        float mass, float friction, float restitution) {
-    if (!initialized) return INVALID_BODY_ID;
-
     JPH::BodyInterface& bodyInterface = physicsSystem->GetBodyInterface();
 
     JPH::BoxShapeSettings boxSettings(toJolt(halfExtents));
@@ -528,8 +599,6 @@ PhysicsBodyID PhysicsWorld::createBox(const glm::vec3& position, const glm::vec3
 
 PhysicsBodyID PhysicsWorld::createSphere(const glm::vec3& position, float radius,
                                           float mass, float friction, float restitution) {
-    if (!initialized) return INVALID_BODY_ID;
-
     JPH::BodyInterface& bodyInterface = physicsSystem->GetBodyInterface();
 
     JPH::SphereShapeSettings sphereSettings(radius);
@@ -565,8 +634,6 @@ PhysicsBodyID PhysicsWorld::createSphere(const glm::vec3& position, float radius
 
 PhysicsBodyID PhysicsWorld::createStaticBox(const glm::vec3& position, const glm::vec3& halfExtents,
                                              const glm::quat& rotation) {
-    if (!initialized) return INVALID_BODY_ID;
-
     JPH::BodyInterface& bodyInterface = physicsSystem->GetBodyInterface();
 
     JPH::BoxShapeSettings boxSettings(toJolt(halfExtents));
@@ -598,7 +665,7 @@ PhysicsBodyID PhysicsWorld::createStaticBox(const glm::vec3& position, const glm
 PhysicsBodyID PhysicsWorld::createStaticConvexHull(const glm::vec3& position, const glm::vec3* vertices,
                                                     size_t vertexCount, float scale,
                                                     const glm::quat& rotation) {
-    if (!initialized || vertexCount < 4) return INVALID_BODY_ID;
+    if (vertexCount < 4) return INVALID_BODY_ID;
 
     JPH::BodyInterface& bodyInterface = physicsSystem->GetBodyInterface();
 
@@ -638,8 +705,6 @@ PhysicsBodyID PhysicsWorld::createStaticConvexHull(const glm::vec3& position, co
 }
 
 bool PhysicsWorld::createCharacter(const glm::vec3& position, float height, float radius) {
-    if (!initialized) return false;
-
     characterHeight = height;
     characterRadius = radius;
 
@@ -678,7 +743,7 @@ bool PhysicsWorld::createCharacter(const glm::vec3& position, float height, floa
 }
 
 void PhysicsWorld::updateCharacter(float deltaTime, const glm::vec3& desiredVelocity, bool jump) {
-    if (!character || !initialized) return;
+    if (!character) return;
 
     // Store the desired velocity and jump request for the fixed timestep update
     characterDesiredVelocity = desiredVelocity;
@@ -709,7 +774,7 @@ bool PhysicsWorld::isCharacterOnGround() const {
 
 PhysicsBodyInfo PhysicsWorld::getBodyInfo(PhysicsBodyID bodyID) const {
     PhysicsBodyInfo info;
-    if (!initialized || bodyID == INVALID_BODY_ID) return info;
+    if (bodyID == INVALID_BODY_ID) return info;
 
     JPH::BodyID joltID;
     joltID = JPH::BodyID(bodyID);
@@ -727,7 +792,7 @@ PhysicsBodyInfo PhysicsWorld::getBodyInfo(PhysicsBodyID bodyID) const {
 }
 
 void PhysicsWorld::setBodyPosition(PhysicsBodyID bodyID, const glm::vec3& position) {
-    if (!initialized || bodyID == INVALID_BODY_ID) return;
+    if (bodyID == INVALID_BODY_ID) return;
 
     JPH::BodyID joltID(bodyID);
     JPH::BodyInterface& bodyInterface = physicsSystem->GetBodyInterface();
@@ -737,7 +802,7 @@ void PhysicsWorld::setBodyPosition(PhysicsBodyID bodyID, const glm::vec3& positi
 }
 
 void PhysicsWorld::setBodyVelocity(PhysicsBodyID bodyID, const glm::vec3& velocity) {
-    if (!initialized || bodyID == INVALID_BODY_ID) return;
+    if (bodyID == INVALID_BODY_ID) return;
 
     JPH::BodyID joltID(bodyID);
     JPH::BodyInterface& bodyInterface = physicsSystem->GetBodyInterface();
@@ -747,7 +812,7 @@ void PhysicsWorld::setBodyVelocity(PhysicsBodyID bodyID, const glm::vec3& veloci
 }
 
 void PhysicsWorld::applyImpulse(PhysicsBodyID bodyID, const glm::vec3& impulse) {
-    if (!initialized || bodyID == INVALID_BODY_ID) return;
+    if (bodyID == INVALID_BODY_ID) return;
 
     JPH::BodyID joltID(bodyID);
     JPH::BodyInterface& bodyInterface = physicsSystem->GetBodyInterface();
@@ -757,7 +822,7 @@ void PhysicsWorld::applyImpulse(PhysicsBodyID bodyID, const glm::vec3& impulse) 
 }
 
 glm::mat4 PhysicsWorld::getBodyTransform(PhysicsBodyID bodyID) const {
-    if (!initialized || bodyID == INVALID_BODY_ID) {
+    if (bodyID == INVALID_BODY_ID) {
         return glm::mat4(1.0f);
     }
 
@@ -781,13 +846,11 @@ glm::mat4 PhysicsWorld::getBodyTransform(PhysicsBodyID bodyID) const {
 }
 
 int PhysicsWorld::getActiveBodyCount() const {
-    if (!initialized) return 0;
     return static_cast<int>(physicsSystem->GetNumActiveBodies(JPH::EBodyType::RigidBody));
 }
 
 std::vector<RaycastHit> PhysicsWorld::castRayAllHits(const glm::vec3& from, const glm::vec3& to) const {
     std::vector<RaycastHit> results;
-    if (!initialized) return results;
 
     // Calculate ray direction and length
     glm::vec3 direction = to - from;
@@ -830,7 +893,7 @@ std::vector<RaycastHit> PhysicsWorld::castRayAllHits(const glm::vec3& from, cons
 }
 
 void PhysicsWorld::removeBody(PhysicsBodyID bodyID) {
-    if (!initialized || bodyID == INVALID_BODY_ID) return;
+    if (bodyID == INVALID_BODY_ID) return;
 
     JPH::BodyID joltID(bodyID);
     JPH::BodyInterface& bodyInterface = physicsSystem->GetBodyInterface();

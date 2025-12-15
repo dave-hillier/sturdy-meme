@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <unordered_set>
+#include <optional>
 #include "Renderer.h"
 #include "Camera.h"
 #include "Player.h"
@@ -36,7 +37,10 @@ private:
     Renderer renderer;
     Camera camera;
     Player player;
-    PhysicsWorld physics;
+    std::optional<PhysicsWorld> physics_;
+
+    // Helper to access physics (assumes physics is initialized)
+    PhysicsWorld& physics() { return *physics_; }
 
     // Input system
     InputSystem input;

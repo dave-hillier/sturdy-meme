@@ -4,6 +4,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <vector>
 #include <memory>
+#include <optional>
 #include <cstdint>
 
 // Forward declarations for Jolt types
@@ -16,6 +17,9 @@ namespace JPH {
     class Character;
     class CharacterVirtual;
 }
+
+// Forward declaration for Jolt runtime RAII wrapper
+struct JoltRuntime;
 
 // Physics body handle
 using PhysicsBodyID = uint32_t;
@@ -54,11 +58,17 @@ struct RaycastHit {
 
 class PhysicsWorld {
 public:
-    PhysicsWorld();
-    ~PhysicsWorld();
+    // Factory: returns nullopt on failure
+    static std::optional<PhysicsWorld> create();
 
-    bool init();
-    void shutdown();
+    // Move-only (RAII handles are non-copyable)
+    PhysicsWorld(PhysicsWorld&&) noexcept;
+    PhysicsWorld& operator=(PhysicsWorld&&) noexcept;
+    PhysicsWorld(const PhysicsWorld&) = delete;
+    PhysicsWorld& operator=(const PhysicsWorld&) = delete;
+
+    // Destructor handles cleanup
+    ~PhysicsWorld();
 
     // Simulation
     void update(float deltaTime);
@@ -126,6 +136,12 @@ public:
 #endif
 
 private:
+    PhysicsWorld();  // Private: only factory can construct
+    bool initInternal();
+
+    // Jolt runtime (ref-counted for multiple worlds)
+    std::shared_ptr<JoltRuntime> joltRuntime_;
+
     std::unique_ptr<JPH::TempAllocatorImpl> tempAllocator;
     std::unique_ptr<JPH::JobSystemThreadPool> jobSystem;
     std::unique_ptr<JPH::PhysicsSystem> physicsSystem;
@@ -141,6 +157,4 @@ private:
     float accumulatedTime = 0.0f;
     static constexpr float FIXED_TIMESTEP = 1.0f / 60.0f;
     static constexpr int MAX_SUBSTEPS = 4;
-
-    bool initialized = false;
 };
