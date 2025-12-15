@@ -651,23 +651,11 @@ bool Renderer::createDescriptorSets() {
     }
 
     // Rock descriptor sets (RockSystem has its own textures, not in MaterialRegistry)
+    // Note: rockSystem is not initialized at this point - allocation only, writing done in initPhase2
     rockDescriptorSets = descriptorManagerPool->allocate(descriptorSetLayout, MAX_FRAMES_IN_FLIGHT);
     if (rockDescriptorSets.empty()) {
         SDL_Log("Failed to allocate rock descriptor sets");
         return false;
-    }
-
-    // Write rock descriptor sets
-    MaterialDescriptorFactory factory(device);
-    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        MaterialDescriptorFactory::CommonBindings common = getCommonBindings(static_cast<uint32_t>(i));
-
-        MaterialDescriptorFactory::MaterialTextures mat{};
-        mat.diffuseView = rockSystem.getRockTexture().getImageView();
-        mat.diffuseSampler = rockSystem.getRockTexture().getSampler();
-        mat.normalView = rockSystem.getRockNormalMap().getImageView();
-        mat.normalSampler = rockSystem.getRockNormalMap().getSampler();
-        factory.writeDescriptorSet(rockDescriptorSets[i], common, mat);
     }
 
     return true;

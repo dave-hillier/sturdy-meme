@@ -135,7 +135,10 @@ bool Application::init(const std::string& title, int width, int height) {
     // Debug: Sample terrain height at spawn position using different methods
     float heightFromTerrainSystem = terrain.getHeightAt(playerSpawnX, playerSpawnZ);
     float heightFromTileCache = 0.0f;
-    bool tileHasHeight = terrain.getTileCache().getHeightAt(playerSpawnX, playerSpawnZ, heightFromTileCache);
+    bool tileHasHeight = false;
+    if (auto* tileCachePtr = terrain.getTileCache()) {
+        tileHasHeight = tileCachePtr->getHeightAt(playerSpawnX, playerSpawnZ, heightFromTileCache);
+    }
     SDL_Log("DEBUG Height at spawn (%.1f, %.1f):", playerSpawnX, playerSpawnZ);
     SDL_Log("  TerrainSystem.getHeightAt(): %.2f", heightFromTerrainSystem);
     SDL_Log("  TileCache.getHeightAt(): %.2f (found=%d)", heightFromTileCache, tileHasHeight ? 1 : 0);
@@ -296,16 +299,18 @@ void Application::run() {
             float orbBottom = orbPos.y - 0.15f;  // Physics radius = 0.5 * 0.3 = 0.15
 
             // Also log GPU active tile count to see if shaders are using tiles
-            auto& tileCache = terrainSys.getTileCache();
-            uint32_t gpuTileCount = tileCache.getActiveTileCount();
-
-            // Check if orb position is covered by any GPU tile
+            uint32_t gpuTileCount = 0;
             bool gpuTileCoversOrb = false;
-            for (const auto* tile : tileCache.getActiveTiles()) {
-                if (orbPos.x >= tile->worldMinX && orbPos.x < tile->worldMaxX &&
-                    orbPos.z >= tile->worldMinZ && orbPos.z < tile->worldMaxZ) {
-                    gpuTileCoversOrb = true;
-                    break;
+            if (auto* tileCachePtr = terrainSys.getTileCache()) {
+                gpuTileCount = tileCachePtr->getActiveTileCount();
+
+                // Check if orb position is covered by any GPU tile
+                for (const auto* tile : tileCachePtr->getActiveTiles()) {
+                    if (orbPos.x >= tile->worldMinX && orbPos.x < tile->worldMaxX &&
+                        orbPos.z >= tile->worldMinZ && orbPos.z < tile->worldMaxZ) {
+                        gpuTileCoversOrb = true;
+                        break;
+                    }
                 }
             }
 
@@ -316,13 +321,15 @@ void Application::run() {
             // Log first few GPU tile bounds to understand coverage
             if (!gpuTileCoversOrb && gpuTileCount > 0) {
                 SDL_Log("  GPU tiles not covering orb at (%.1f, %.1f):", orbPos.x, orbPos.z);
-                int count = 0;
-                for (const auto* tile : tileCache.getActiveTiles()) {
-                    if (count++ < 3) {
-                        SDL_Log("    Tile[%d,%d]: X[%.0f,%.0f] Z[%.0f,%.0f]",
-                                tile->coord.x, tile->coord.z,
-                                tile->worldMinX, tile->worldMaxX,
-                                tile->worldMinZ, tile->worldMaxZ);
+                if (auto* tileCacheDebug = terrainSys.getTileCache()) {
+                    int count = 0;
+                    for (const auto* tile : tileCacheDebug->getActiveTiles()) {
+                        if (count++ < 3) {
+                            SDL_Log("    Tile[%d,%d]: X[%.0f,%.0f] Z[%.0f,%.0f]",
+                                    tile->coord.x, tile->coord.z,
+                                    tile->worldMinX, tile->worldMaxX,
+                                    tile->worldMinZ, tile->worldMaxZ);
+                        }
                     }
                 }
             }

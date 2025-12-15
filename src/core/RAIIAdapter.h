@@ -1,11 +1,13 @@
 #pragma once
 
 #include <functional>
+#include <memory>
 #include <optional>
 #include <utility>
 
 // Adapts classes with init/destroy pattern to RAII semantics.
 // Does not modify the underlying class - only changes callsites.
+// Uses unique_ptr internally so wrapped types don't need to be movable.
 //
 // Usage:
 //   auto pipelines = RAIIAdapter<TerrainPipelines>::create(
@@ -21,14 +23,14 @@ public:
     template<typename InitFunc, typename DestroyFunc>
     static std::optional<RAIIAdapter> create(InitFunc&& init, DestroyFunc&& destroy) {
         RAIIAdapter adapter(std::forward<DestroyFunc>(destroy));
-        if (!init(adapter.value_)) {
+        if (!init(*adapter.value_)) {
             return std::nullopt;
         }
         return adapter;
     }
 
     ~RAIIAdapter() {
-        if (destroy_) destroy_(value_);
+        if (value_ && destroy_) destroy_(*value_);
     }
 
     // Move-only
@@ -40,7 +42,7 @@ public:
 
     RAIIAdapter& operator=(RAIIAdapter&& other) noexcept {
         if (this != &other) {
-            if (destroy_) destroy_(value_);
+            if (value_ && destroy_) destroy_(*value_);
             value_ = std::move(other.value_);
             destroy_ = std::move(other.destroy_);
             other.destroy_ = nullptr;
@@ -51,18 +53,19 @@ public:
     RAIIAdapter(const RAIIAdapter&) = delete;
     RAIIAdapter& operator=(const RAIIAdapter&) = delete;
 
-    T& get() { return value_; }
-    const T& get() const { return value_; }
-    T* operator->() { return &value_; }
-    const T* operator->() const { return &value_; }
-    T& operator*() { return value_; }
-    const T& operator*() const { return value_; }
+    T& get() { return *value_; }
+    const T& get() const { return *value_; }
+    T* operator->() { return value_.get(); }
+    const T* operator->() const { return value_.get(); }
+    T& operator*() { return *value_; }
+    const T& operator*() const { return *value_; }
 
 private:
     template<typename DestroyFunc>
     explicit RAIIAdapter(DestroyFunc&& destroy)
-        : destroy_(std::forward<DestroyFunc>(destroy)) {}
+        : value_(std::make_unique<T>())
+        , destroy_(std::forward<DestroyFunc>(destroy)) {}
 
-    T value_{};
+    std::unique_ptr<T> value_;
     std::function<void(T&)> destroy_;
 };

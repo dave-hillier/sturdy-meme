@@ -539,7 +539,7 @@ void TerrainSystem::updateDescriptorSets(VkDevice device,
         }
 
         // LOD tile array texture (binding 19)
-        if ((*tileCache)->getTileArrayView() != VK_NULL_HANDLE) {
+        if (tileCache && (*tileCache)->getTileArrayView() != VK_NULL_HANDLE) {
             VkDescriptorImageInfo tileArrayInfo{(*tileCache)->getSampler(), (*tileCache)->getTileArrayView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
             VkWriteDescriptorSet tileArrayWrite{};
             tileArrayWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -552,7 +552,7 @@ void TerrainSystem::updateDescriptorSets(VkDevice device,
         }
 
         // LOD tile info buffer (binding 20)
-        if ((*tileCache)->getTileInfoBuffer() != VK_NULL_HANDLE) {
+        if (tileCache && (*tileCache)->getTileInfoBuffer() != VK_NULL_HANDLE) {
             VkDescriptorBufferInfo tileInfoBufInfo{(*tileCache)->getTileInfoBuffer(), 0, VK_WHOLE_SIZE};
             VkWriteDescriptorSet tileInfoWrite{};
             tileInfoWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -643,7 +643,7 @@ void TerrainSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraP
     cameraOptimizer.update(cameraPos, view);
 
     // Update tile cache - stream high-res tiles based on camera position
-    if (!config.tileCacheDir.empty()) {
+    if (tileCache) {
         (*tileCache)->updateActiveTiles(cameraPos, config.tileLoadRadius, config.tileUnloadRadius);
     }
 
@@ -988,7 +988,7 @@ void TerrainSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex,
 
 float TerrainSystem::getHeightAt(float x, float z) const {
     // First try the tile cache for high-res height data
-    if (!config.tileCacheDir.empty()) {
+    if (tileCache) {
         float tileHeight;
         if ((*tileCache)->getHeightAt(x, z, tileHeight)) {
             return tileHeight;
