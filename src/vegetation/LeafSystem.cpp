@@ -7,6 +7,15 @@
 #include <algorithm>
 
 bool LeafSystem::init(const InitInfo& info) {
+    // Store init info for accessors used during initialization
+    storedDevice = info.device;
+    storedAllocator = info.allocator;
+    storedRenderPass = info.renderPass;
+    storedDescriptorPool = info.descriptorPool;
+    storedExtent = info.extent;
+    storedShaderPath = info.shaderPath;
+    storedFramesInFlight = info.framesInFlight;
+
     SystemLifecycleHelper::Hooks hooks{};
     hooks.createBuffers = [this]() { return createBuffers(); };
     hooks.createComputeDescriptorSetLayout = [this]() { return createComputeDescriptorSetLayout(); };
@@ -429,7 +438,9 @@ bool LeafSystem::createGraphicsPipeline() {
 }
 
 bool LeafSystem::createDescriptorSets() {
-    return (*particleSystem)->createStandardDescriptorSets();
+    // Note: Standard compute/graphics descriptor sets are allocated by ParticleSystem::init()
+    // after all hooks complete. LeafSystem has no additional custom descriptor sets.
+    return true;
 }
 
 void LeafSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>& rendererUniformBuffers,

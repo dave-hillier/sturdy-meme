@@ -12,25 +12,58 @@
 struct UniformBufferObject;
 
 bool GrassSystem::init(const InitInfo& info) {
+    SDL_Log("GrassSystem::init() starting, device=%p, pool=%p", (void*)info.device, (void*)info.descriptorPool);
     shadowRenderPass = info.shadowRenderPass;
     shadowMapSize = info.shadowMapSize;
 
+    // Store init info for accessors used during initialization
+    storedDevice = info.device;
+    storedAllocator = info.allocator;
+    storedRenderPass = info.renderPass;
+    storedDescriptorPool = info.descriptorPool;
+    storedExtent = info.extent;
+    storedShaderPath = info.shaderPath;
+    storedFramesInFlight = info.framesInFlight;
+
+    // Pointer to the ParticleSystem being initialized (for hooks to access)
+    ParticleSystem* initializingPS = nullptr;
+
     SystemLifecycleHelper::Hooks hooks{};
     hooks.createBuffers = [this]() { return createBuffers(); };
-    hooks.createComputeDescriptorSetLayout = [this]() { return createComputeDescriptorSetLayout(); };
-    hooks.createComputePipeline = [this]() { return createComputePipeline(); };
-    hooks.createGraphicsDescriptorSetLayout = [this]() { return createGraphicsDescriptorSetLayout(); };
-    hooks.createGraphicsPipeline = [this]() { return createGraphicsPipeline(); };
+    hooks.createComputeDescriptorSetLayout = [this, &initializingPS]() {
+        return createComputeDescriptorSetLayout(initializingPS->getComputePipelineHandles());
+    };
+    hooks.createComputePipeline = [this, &initializingPS]() {
+        return createComputePipeline(initializingPS->getComputePipelineHandles());
+    };
+    hooks.createGraphicsDescriptorSetLayout = [this, &initializingPS]() {
+        return createGraphicsDescriptorSetLayout(initializingPS->getGraphicsPipelineHandles());
+    };
+    hooks.createGraphicsPipeline = [this, &initializingPS]() {
+        return createGraphicsPipeline(initializingPS->getGraphicsPipelineHandles());
+    };
     hooks.createExtraPipelines = [this]() { return createExtraPipelines(); };
     hooks.createDescriptorSets = [this]() { return createDescriptorSets(); };
     hooks.destroyBuffers = [this](VmaAllocator allocator) { destroyBuffers(allocator); };
 
     particleSystem = RAIIAdapter<ParticleSystem>::create(
-        [&](auto& ps) { return ps.init(info, hooks, BUFFER_SET_COUNT); },
+        [&](auto& ps) {
+            initializingPS = &ps;  // Store pointer for hooks to use
+            return ps.init(info, hooks, BUFFER_SET_COUNT);
+        },
         [](auto& ps) { ps.destroy(ps.getDevice(), ps.getAllocator()); }
     );
 
-    return particleSystem.has_value();
+    if (!particleSystem.has_value()) {
+        return false;
+    }
+
+    SDL_Log("GrassSystem::init() - particleSystem created successfully");
+
+    // Write compute descriptor sets now that particleSystem is fully initialized
+    writeComputeDescriptorSets();
+    SDL_Log("GrassSystem::init() - done writing compute descriptor sets");
+    return true;
 }
 
 void GrassSystem::destroy(VkDevice dev, VmaAllocator alloc) {
@@ -319,7 +352,7 @@ bool GrassSystem::createDisplacementPipeline() {
     return true;
 }
 
-bool GrassSystem::createComputeDescriptorSetLayout() {
+bool GrassSystem::createComputeDescriptorSetLayout(SystemLifecycleHelper::PipelineHandles& handles) {
     PipelineBuilder builder(getDevice());
     builder.addDescriptorBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT)
         .addDescriptorBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT)
@@ -327,22 +360,22 @@ bool GrassSystem::createComputeDescriptorSetLayout() {
         .addDescriptorBinding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_COMPUTE_BIT)
         .addDescriptorBinding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_COMPUTE_BIT);
 
-    return builder.buildDescriptorSetLayout(getComputePipelineHandles().descriptorSetLayout);
+    return builder.buildDescriptorSetLayout(handles.descriptorSetLayout);
 }
 
-bool GrassSystem::createComputePipeline() {
+bool GrassSystem::createComputePipeline(SystemLifecycleHelper::PipelineHandles& handles) {
     PipelineBuilder builder(getDevice());
     builder.addShaderStage(getShaderPath() + "/grass.comp.spv", VK_SHADER_STAGE_COMPUTE_BIT)
         .addPushConstantRange(VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(GrassPushConstants));
 
-    if (!builder.buildPipelineLayout({getComputePipelineHandles().descriptorSetLayout}, getComputePipelineHandles().pipelineLayout)) {
+    if (!builder.buildPipelineLayout({handles.descriptorSetLayout}, handles.pipelineLayout)) {
         return false;
     }
 
-    return builder.buildComputePipeline(getComputePipelineHandles().pipelineLayout, getComputePipelineHandles().pipeline);
+    return builder.buildComputePipeline(handles.pipelineLayout, handles.pipeline);
 }
 
-bool GrassSystem::createGraphicsDescriptorSetLayout() {
+bool GrassSystem::createGraphicsDescriptorSetLayout(SystemLifecycleHelper::PipelineHandles& handles) {
     PipelineBuilder builder(getDevice());
     // Grass system descriptor set layout:
     // binding 0: UBO (main rendering uniforms)
@@ -365,10 +398,10 @@ bool GrassSystem::createGraphicsDescriptorSetLayout() {
         .addDescriptorBinding(10, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT)
         .addDescriptorBinding(11, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT);
 
-    return builder.buildDescriptorSetLayout(getGraphicsPipelineHandles().descriptorSetLayout);
+    return builder.buildDescriptorSetLayout(handles.descriptorSetLayout);
 }
 
-bool GrassSystem::createGraphicsPipeline() {
+bool GrassSystem::createGraphicsPipeline(SystemLifecycleHelper::PipelineHandles& handles) {
     PipelineBuilder builder(getDevice());
     builder.addShaderStage(getShaderPath() + "/grass.vert.spv", VK_SHADER_STAGE_VERTEX_BIT)
         .addShaderStage(getShaderPath() + "/grass.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT)
@@ -447,7 +480,7 @@ bool GrassSystem::createGraphicsPipeline() {
     dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
     dynamicState.pDynamicStates = dynamicStates.data();
 
-    if (!builder.buildPipelineLayout({getGraphicsPipelineHandles().descriptorSetLayout}, getGraphicsPipelineHandles().pipelineLayout)) {
+    if (!builder.buildPipelineLayout({handles.descriptorSetLayout}, handles.pipelineLayout)) {
         return false;
     }
 
@@ -464,7 +497,7 @@ bool GrassSystem::createGraphicsPipeline() {
     pipelineInfo.renderPass = getRenderPass();
     pipelineInfo.subpass = 0;
 
-    return builder.buildGraphicsPipeline(pipelineInfo, getGraphicsPipelineHandles().pipelineLayout, getGraphicsPipelineHandles().pipeline);
+    return builder.buildGraphicsPipeline(pipelineInfo, handles.pipelineLayout, handles.pipeline);
 }
 
 bool GrassSystem::createShadowPipeline() {
@@ -561,21 +594,31 @@ bool GrassSystem::createShadowPipeline() {
 }
 
 bool GrassSystem::createDescriptorSets() {
-    // Allocate standard compute and graphics descriptor sets for both buffer sets
-    if (!(*particleSystem)->createStandardDescriptorSets()) {
-        return false;
-    }
+    // Note: Standard compute/graphics descriptor sets are allocated by ParticleSystem::init()
+    // after all hooks complete. This hook only allocates GrassSystem-specific descriptor sets.
+    // Compute descriptor set updates happen later in writeComputeDescriptorSets() called after init.
+
+    SDL_Log("GrassSystem::createDescriptorSets - pool=%p, shadowLayout=%p", (void*)getDescriptorPool(), (void*)shadowDescriptorSetLayout);
+    SDL_Log("GrassSystem::createDescriptorSets - about to allocate shadow sets");
 
     // Allocate shadow descriptor sets for both buffer sets using managed pool
     for (uint32_t set = 0; set < BUFFER_SET_COUNT; set++) {
+        SDL_Log("GrassSystem::createDescriptorSets - allocating shadow set %u", set);
         shadowDescriptorSetsDB[set] = getDescriptorPool()->allocateSingle(shadowDescriptorSetLayout);
+        SDL_Log("GrassSystem::createDescriptorSets - allocated shadow set %u", set);
         if (shadowDescriptorSetsDB[set] == VK_NULL_HANDLE) {
             SDL_Log("Failed to allocate grass shadow descriptor set (set %u)", set);
             return false;
         }
+    }
 
-        // Update compute descriptor sets (instance and indirect buffers only)
-        // Uniform buffer will be updated in updateDescriptorSets with the right frame's buffer
+    return true;
+}
+
+void GrassSystem::writeComputeDescriptorSets() {
+    // Write compute descriptor sets with instance and indirect buffers
+    // Called after ParticleSystem is fully initialized and descriptor sets are allocated
+    for (uint32_t set = 0; set < BUFFER_SET_COUNT; set++) {
         VkDescriptorBufferInfo instanceBufferInfo{};
         instanceBufferInfo.buffer = instanceBuffers.buffers[set];
         instanceBufferInfo.offset = 0;
@@ -621,8 +664,6 @@ bool GrassSystem::createDescriptorSets() {
         vkUpdateDescriptorSets(getDevice(), static_cast<uint32_t>(computeWrites.size()),
                                computeWrites.data(), 0, nullptr);
     }
-
-    return true;
 }
 
 bool GrassSystem::createExtraPipelines() {
