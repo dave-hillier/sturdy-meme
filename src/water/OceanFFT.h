@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 #include "InitContext.h"
+#include "core/VulkanRAII.h"
 
 /**
  * OceanFFT - FFT-based Ocean Simulation (Tessendorf Method)
@@ -78,7 +79,7 @@ public:
     VkImageView getDisplacementView(int cascade = 0) const;
     VkImageView getNormalView(int cascade = 0) const;
     VkImageView getFoamView(int cascade = 0) const;
-    VkSampler getSampler() const { return sampler; }
+    VkSampler getSampler() const { return sampler.get(); }
 
     // Parameter access
     void setParams(const OceanParams& newParams);
@@ -114,48 +115,38 @@ private:
     // Per-cascade data
     struct Cascade {
         // Spectrum textures (generated once)
-        VkImage h0Spectrum = VK_NULL_HANDLE;
-        VkImageView h0SpectrumView = VK_NULL_HANDLE;
-        VmaAllocation h0Allocation = VK_NULL_HANDLE;
+        ManagedImage h0Spectrum;
+        ManagedImageView h0SpectrumView;
 
-        VkImage omegaSpectrum = VK_NULL_HANDLE;
-        VkImageView omegaSpectrumView = VK_NULL_HANDLE;
-        VmaAllocation omegaAllocation = VK_NULL_HANDLE;
+        ManagedImage omegaSpectrum;
+        ManagedImageView omegaSpectrumView;
 
         // Time-evolved spectrum (per frame)
-        VkImage hktDy = VK_NULL_HANDLE;
-        VkImageView hktDyView = VK_NULL_HANDLE;
-        VmaAllocation hktDyAllocation = VK_NULL_HANDLE;
+        ManagedImage hktDy;
+        ManagedImageView hktDyView;
 
-        VkImage hktDx = VK_NULL_HANDLE;
-        VkImageView hktDxView = VK_NULL_HANDLE;
-        VmaAllocation hktDxAllocation = VK_NULL_HANDLE;
+        ManagedImage hktDx;
+        ManagedImageView hktDxView;
 
-        VkImage hktDz = VK_NULL_HANDLE;
-        VkImageView hktDzView = VK_NULL_HANDLE;
-        VmaAllocation hktDzAllocation = VK_NULL_HANDLE;
+        ManagedImage hktDz;
+        ManagedImageView hktDzView;
 
         // FFT ping-pong buffers (reused for all 3 components)
-        VkImage fftPing = VK_NULL_HANDLE;
-        VkImageView fftPingView = VK_NULL_HANDLE;
-        VmaAllocation fftPingAllocation = VK_NULL_HANDLE;
+        ManagedImage fftPing;
+        ManagedImageView fftPingView;
 
-        VkImage fftPong = VK_NULL_HANDLE;
-        VkImageView fftPongView = VK_NULL_HANDLE;
-        VmaAllocation fftPongAllocation = VK_NULL_HANDLE;
+        ManagedImage fftPong;
+        ManagedImageView fftPongView;
 
         // Output textures
-        VkImage displacementMap = VK_NULL_HANDLE;
-        VkImageView displacementMapView = VK_NULL_HANDLE;
-        VmaAllocation displacementAllocation = VK_NULL_HANDLE;
+        ManagedImage displacementMap;
+        ManagedImageView displacementMapView;
 
-        VkImage normalMap = VK_NULL_HANDLE;
-        VkImageView normalMapView = VK_NULL_HANDLE;
-        VmaAllocation normalAllocation = VK_NULL_HANDLE;
+        ManagedImage normalMap;
+        ManagedImageView normalMapView;
 
-        VkImage foamMap = VK_NULL_HANDLE;
-        VkImageView foamMapView = VK_NULL_HANDLE;
-        VmaAllocation foamAllocation = VK_NULL_HANDLE;
+        ManagedImage foamMap;
+        ManagedImageView foamMapView;
 
         // Cascade-specific config
         CascadeConfig config;
@@ -163,7 +154,7 @@ private:
 
     bool createComputePipelines();
     bool createCascade(Cascade& cascade, const CascadeConfig& config);
-    bool createImage(VkImage& image, VkImageView& view, VmaAllocation& allocation,
+    bool createImage(ManagedImage& image, ManagedImageView& view,
                      VkFormat format, uint32_t width, uint32_t height, VkImageUsageFlags usage);
     bool createDescriptorSets();
 
@@ -172,8 +163,6 @@ private:
     void recordFFT(VkCommandBuffer cmd, Cascade& cascade, VkImage input, VkImageView inputView,
                    VkImage output, VkImageView outputView);
     void recordDisplacementGeneration(VkCommandBuffer cmd, Cascade& cascade);
-
-    void destroyCascade(Cascade& cascade);
 
     // Device resources
     VkDevice device = VK_NULL_HANDLE;
@@ -195,21 +184,21 @@ private:
     int cascadeCount = 1;  // Start with single cascade
 
     // Compute pipelines
-    VkPipeline spectrumPipeline = VK_NULL_HANDLE;
-    VkPipelineLayout spectrumPipelineLayout = VK_NULL_HANDLE;
-    VkDescriptorSetLayout spectrumDescLayout = VK_NULL_HANDLE;
+    ManagedPipeline spectrumPipeline;
+    ManagedPipelineLayout spectrumPipelineLayout;
+    ManagedDescriptorSetLayout spectrumDescLayout;
 
-    VkPipeline timeEvolutionPipeline = VK_NULL_HANDLE;
-    VkPipelineLayout timeEvolutionPipelineLayout = VK_NULL_HANDLE;
-    VkDescriptorSetLayout timeEvolutionDescLayout = VK_NULL_HANDLE;
+    ManagedPipeline timeEvolutionPipeline;
+    ManagedPipelineLayout timeEvolutionPipelineLayout;
+    ManagedDescriptorSetLayout timeEvolutionDescLayout;
 
-    VkPipeline fftPipeline = VK_NULL_HANDLE;
-    VkPipelineLayout fftPipelineLayout = VK_NULL_HANDLE;
-    VkDescriptorSetLayout fftDescLayout = VK_NULL_HANDLE;
+    ManagedPipeline fftPipeline;
+    ManagedPipelineLayout fftPipelineLayout;
+    ManagedDescriptorSetLayout fftDescLayout;
 
-    VkPipeline displacementPipeline = VK_NULL_HANDLE;
-    VkPipelineLayout displacementPipelineLayout = VK_NULL_HANDLE;
-    VkDescriptorSetLayout displacementDescLayout = VK_NULL_HANDLE;
+    ManagedPipeline displacementPipeline;
+    ManagedPipelineLayout displacementPipelineLayout;
+    ManagedDescriptorSetLayout displacementDescLayout;
 
     // Descriptor pool and sets
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
@@ -234,10 +223,9 @@ private:
         float padding3;
         float padding4;
     };
-    std::vector<VkBuffer> spectrumUBOs;
-    std::vector<VmaAllocation> spectrumUBOAllocations;
+    std::vector<ManagedBuffer> spectrumUBOs;
     std::vector<void*> spectrumUBOMapped;
 
     // Sampler for output textures
-    VkSampler sampler = VK_NULL_HANDLE;
+    ManagedSampler sampler;
 };

@@ -642,6 +642,14 @@ public:
         return true;
     }
 
+    // Adopt an existing raw descriptor set layout (e.g., created by DescriptorManager)
+    static ManagedDescriptorSetLayout fromRaw(VkDevice device, VkDescriptorSetLayout layout) {
+        ManagedDescriptorSetLayout result;
+        result.device_ = device;
+        result.layout_ = layout;
+        return result;
+    }
+
     void destroy() {
         if (layout_ != VK_NULL_HANDLE && device_ != VK_NULL_HANDLE) {
             vkDestroyDescriptorSetLayout(device_, layout_, nullptr);
