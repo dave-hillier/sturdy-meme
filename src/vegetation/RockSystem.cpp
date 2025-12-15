@@ -6,6 +6,8 @@
 
 bool RockSystem::init(const InitInfo& info, const RockConfig& cfg) {
     config = cfg;
+    storedAllocator = info.allocator;
+    storedDevice = info.device;
 
     if (!loadTextures(info)) {
         SDL_Log("RockSystem: Failed to load textures");
@@ -27,9 +29,11 @@ bool RockSystem::init(const InitInfo& info, const RockConfig& cfg) {
 }
 
 void RockSystem::destroy(VmaAllocator allocator, VkDevice device) {
-    rockTexture.destroy(allocator, device);
-    rockNormalMap.destroy(allocator, device);
+    // RAII-managed textures
+    rockTexture.reset();
+    rockNormalMap.reset();
 
+    // Manually managed mesh vector
     for (auto& mesh : rockMeshes) {
         mesh.destroy(allocator);
     }
@@ -42,18 +46,32 @@ void RockSystem::destroy(VmaAllocator allocator, VkDevice device) {
 bool RockSystem::loadTextures(const InitInfo& info) {
     // Use concrete texture as a rock-like surface
     std::string texturePath = info.resourcePath + "/assets/textures/industrial/concrete_1.jpg";
-    if (!rockTexture.load(texturePath, info.allocator, info.device, info.commandPool,
-                          info.graphicsQueue, info.physicalDevice)) {
-        SDL_Log("RockSystem: Failed to load rock texture: %s", texturePath.c_str());
-        return false;
-    }
+    rockTexture = RAIIAdapter<Texture>::create(
+        [&](auto& t) {
+            if (!t.load(texturePath, info.allocator, info.device, info.commandPool,
+                        info.graphicsQueue, info.physicalDevice)) {
+                SDL_Log("RockSystem: Failed to load rock texture: %s", texturePath.c_str());
+                return false;
+            }
+            return true;
+        },
+        [this](auto& t) { t.destroy(storedAllocator, storedDevice); }
+    );
+    if (!rockTexture) return false;
 
     std::string normalPath = info.resourcePath + "/assets/textures/industrial/concrete_1_norm.jpg";
-    if (!rockNormalMap.load(normalPath, info.allocator, info.device, info.commandPool,
-                            info.graphicsQueue, info.physicalDevice, false)) {
-        SDL_Log("RockSystem: Failed to load rock normal map: %s", normalPath.c_str());
-        return false;
-    }
+    rockNormalMap = RAIIAdapter<Texture>::create(
+        [&](auto& t) {
+            if (!t.load(normalPath, info.allocator, info.device, info.commandPool,
+                        info.graphicsQueue, info.physicalDevice, false)) {
+                SDL_Log("RockSystem: Failed to load rock normal map: %s", normalPath.c_str());
+                return false;
+            }
+            return true;
+        },
+        [this](auto& t) { t.destroy(storedAllocator, storedDevice); }
+    );
+    if (!rockNormalMap) return false;
 
     return true;
 }
@@ -199,7 +217,7 @@ void RockSystem::createSceneObjects() {
         sceneObjects.push_back(RenderableBuilder()
             .withTransform(transform)
             .withMesh(&rockMeshes[rock.meshVariation])
-            .withTexture(&rockTexture)
+            .withTexture(&**rockTexture)
             .withRoughness(config.materialRoughness)
             .withMetallic(config.materialMetallic)
             .withCastsShadow(true)

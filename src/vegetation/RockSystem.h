@@ -10,6 +10,8 @@
 #include "Mesh.h"
 #include "Texture.h"
 #include "RenderableBuilder.h"
+#include "core/RAIIAdapter.h"
+#include <optional>
 
 // Configuration for rock generation and placement
 struct RockConfig {
@@ -58,8 +60,8 @@ public:
     std::vector<Renderable>& getSceneObjects() { return sceneObjects; }
 
     // Access to textures for descriptor set binding
-    Texture& getRockTexture() { return rockTexture; }
-    Texture& getRockNormalMap() { return rockNormalMap; }
+    Texture& getRockTexture() { return **rockTexture; }
+    Texture& getRockNormalMap() { return **rockNormalMap; }
 
     // Get rock count for statistics
     size_t getRockCount() const { return rockInstances.size(); }
@@ -82,12 +84,16 @@ private:
 
     RockConfig config;
 
+    // Stored for RAII cleanup
+    VmaAllocator storedAllocator = VK_NULL_HANDLE;
+    VkDevice storedDevice = VK_NULL_HANDLE;
+
     // Rock mesh variations
     std::vector<Mesh> rockMeshes;
 
-    // Rock textures
-    Texture rockTexture;
-    Texture rockNormalMap;
+    // Rock textures (RAII-managed)
+    std::optional<RAIIAdapter<Texture>> rockTexture;
+    std::optional<RAIIAdapter<Texture>> rockNormalMap;
 
     // Rock instances (positions, rotations, etc.)
     std::vector<RockInstance> rockInstances;

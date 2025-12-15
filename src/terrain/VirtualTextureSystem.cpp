@@ -17,26 +17,42 @@ bool VirtualTextureSystem::init(VkDevice device, VmaAllocator allocator,
     SDL_Log("  Cache size: %u px", config.cacheSizePixels);
     SDL_Log("  Max mip levels: %u", config.maxMipLevels);
 
-    // Initialize cache
-    if (!cache.init(device, allocator, commandPool, queue, config)) {
+    // Initialize cache with RAII wrapper
+    cache = RAIIAdapter<VirtualTextureCache>::create(
+        [&](auto& c) { return c.init(device, allocator, commandPool, queue, config); },
+        [device, allocator](auto& c) { c.destroy(device, allocator); }
+    );
+    if (!cache) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize VT cache");
         return false;
     }
 
-    // Initialize page table
-    if (!pageTable.init(device, allocator, commandPool, queue, config)) {
+    // Initialize page table with RAII wrapper
+    pageTable = RAIIAdapter<VirtualTexturePageTable>::create(
+        [&](auto& p) { return p.init(device, allocator, commandPool, queue, config); },
+        [device, allocator](auto& p) { p.destroy(device, allocator); }
+    );
+    if (!pageTable) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize VT page table");
         return false;
     }
 
-    // Initialize feedback
-    if (!feedback.init(device, allocator, 4096, 2)) {
+    // Initialize feedback with RAII wrapper
+    feedback = RAIIAdapter<VirtualTextureFeedback>::create(
+        [&](auto& f) { return f.init(device, allocator, 4096, 2); },
+        [device, allocator](auto& f) { f.destroy(device, allocator); }
+    );
+    if (!feedback) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize VT feedback");
         return false;
     }
 
-    // Initialize tile loader
-    if (!tileLoader.init(tilePath, 2)) {
+    // Initialize tile loader with RAII wrapper
+    tileLoader = RAIIAdapter<VirtualTextureTileLoader>::create(
+        [&](auto& t) { return t.init(tilePath, 2); },
+        [](auto& t) { t.shutdown(); }
+    );
+    if (!tileLoader) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize VT tile loader");
         return false;
     }
@@ -46,24 +62,25 @@ bool VirtualTextureSystem::init(VkDevice device, VmaAllocator allocator,
 }
 
 void VirtualTextureSystem::destroy(VkDevice device, VmaAllocator allocator) {
-    tileLoader.shutdown();
-    feedback.destroy(device, allocator);
-    pageTable.destroy(device, allocator);
-    cache.destroy(device, allocator);
+    // RAII-managed subsystems are destroyed automatically via std::optional reset
+    tileLoader.reset();
+    feedback.reset();
+    pageTable.reset();
+    cache.reset();
     pendingTiles.clear();
 }
 
 void VirtualTextureSystem::beginFrame(VkCommandBuffer cmd, uint32_t frameIndex) {
     // Clear the feedback buffer for this frame
-    feedback.clear(cmd, frameIndex);
+    (*feedback)->clear(cmd, frameIndex);
 }
 
 void VirtualTextureSystem::endFrame(VkCommandBuffer cmd, uint32_t frameIndex) {
     // Copy feedback buffer to readback buffer
     // This happens at end of frame so the copy is after all rendering
 
-    VkBuffer srcBuffer = feedback.getFeedbackBuffer(frameIndex);
-    VkBuffer counterSrc = feedback.getCounterBuffer(frameIndex);
+    VkBuffer srcBuffer = (*feedback)->getFeedbackBuffer(frameIndex);
+    VkBuffer counterSrc = (*feedback)->getCounterBuffer(frameIndex);
 
     // We need to access the internal readback buffers - for now, the readback
     // happens synchronously in update() after waiting for the frame
@@ -88,15 +105,15 @@ void VirtualTextureSystem::update(VkDevice device, VkCommandPool commandPool,
     uploadPendingTiles(device, commandPool, queue);
 
     // Upload any dirty page table entries
-    pageTable.upload(device, commandPool, queue);
+    (*pageTable)->upload(device, commandPool, queue);
 }
 
 void VirtualTextureSystem::processFeedback(uint32_t frameIndex) {
     // Read back tile requests from GPU
-    feedback.readback(frameIndex);
+    (*feedback)->readback(frameIndex);
 
     // Get deduplicated, sorted list of requested tiles
-    std::vector<TileId> requested = feedback.getRequestedTiles();
+    std::vector<TileId> requested = (*feedback)->getRequestedTiles();
 
     if (requested.empty()) {
         // No requests - relax penalty if we have headroom
@@ -108,15 +125,15 @@ void VirtualTextureSystem::processFeedback(uint32_t frameIndex) {
 
     // Calculate cache pressure: how many tiles we're trying to load vs capacity
     uint32_t totalCacheSlots = config.getTotalCacheSlots();
-    uint32_t usedSlots = cache.getUsedSlotCount();
+    uint32_t usedSlots = (*cache)->getUsedSlotCount();
     uint32_t pendingCount = static_cast<uint32_t>(pendingTiles.size());
 
     // Count how many new tiles we'd be requesting
     uint32_t newRequestCount = 0;
     for (const auto& id : requested) {
-        if (!cache.hasTile(id) &&
+        if (!(*cache)->hasTile(id) &&
             pendingTiles.find(id.pack()) == pendingTiles.end() &&
-            !tileLoader.isQueued(id)) {
+            !(*tileLoader)->isQueued(id)) {
             newRequestCount++;
         }
     }
@@ -165,8 +182,8 @@ void VirtualTextureSystem::processFeedback(uint32_t frameIndex) {
         uint32_t packed = adjustedId.pack();
 
         // Skip if already in cache
-        if (cache.hasTile(adjustedId)) {
-            cache.markUsed(adjustedId, currentFrame);
+        if ((*cache)->hasTile(adjustedId)) {
+            (*cache)->markUsed(adjustedId, currentFrame);
             continue;
         }
 
@@ -176,14 +193,14 @@ void VirtualTextureSystem::processFeedback(uint32_t frameIndex) {
         }
 
         // Skip if already queued for loading
-        if (tileLoader.isQueued(adjustedId)) {
+        if ((*tileLoader)->isQueued(adjustedId)) {
             continue;
         }
 
         // Queue for loading with priority based on mip level
         // Lower mip = larger tile = higher priority
         int priority = static_cast<int>(adjustedId.mipLevel);
-        tileLoader.queueTile(adjustedId, priority);
+        (*tileLoader)->queueTile(adjustedId, priority);
         pendingTiles.insert(packed);
         queued++;
     }
@@ -197,7 +214,7 @@ void VirtualTextureSystem::processFeedback(uint32_t frameIndex) {
 void VirtualTextureSystem::uploadPendingTiles(VkDevice device, VkCommandPool commandPool,
                                                VkQueue queue) {
     // Get tiles that finished loading
-    std::vector<LoadedTile> loaded = tileLoader.getLoadedTiles();
+    std::vector<LoadedTile> loaded = (*tileLoader)->getLoadedTiles();
 
     if (loaded.empty()) {
         return;
@@ -212,7 +229,7 @@ void VirtualTextureSystem::uploadPendingTiles(VkDevice device, VkCommandPool com
         }
 
         // Allocate cache slot
-        CacheSlot* slot = cache.allocateSlot(tile.id, currentFrame);
+        CacheSlot* slot = (*cache)->allocateSlot(tile.id, currentFrame);
         if (!slot) {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                         "VT: Failed to allocate cache slot for tile");
@@ -220,19 +237,19 @@ void VirtualTextureSystem::uploadPendingTiles(VkDevice device, VkCommandPool com
         }
 
         // Upload tile data to cache
-        cache.uploadTile(tile.id, tile.pixels.data(),
+        (*cache)->uploadTile(tile.id, tile.pixels.data(),
                          tile.width, tile.height,
                          device, commandPool, queue);
 
         // Update page table
         uint32_t slotsPerAxis = config.getCacheTilesPerAxis();
         uint32_t packed = tile.id.pack();
-        auto slotIt = cache.getTileSlotIndex(tile.id);
+        auto slotIt = (*cache)->getTileSlotIndex(tile.id);
 
         if (slotIt != UINT32_MAX) {
             uint16_t cacheX = slotIt % slotsPerAxis;
             uint16_t cacheY = slotIt / slotsPerAxis;
-            pageTable.setEntry(tile.id, cacheX, cacheY);
+            (*pageTable)->setEntry(tile.id, cacheX, cacheY);
         }
 
         // Remove from pending set
@@ -275,8 +292,8 @@ VTParamsUBO VirtualTextureSystem::getParams() const {
 }
 
 void VirtualTextureSystem::requestTile(TileId id) {
-    if (!cache.hasTile(id) && !tileLoader.isQueued(id)) {
-        tileLoader.queueTile(id, 0); // High priority
+    if (!(*cache)->hasTile(id) && !(*tileLoader)->isQueued(id)) {
+        (*tileLoader)->queueTile(id, 0); // High priority
         pendingTiles.insert(id.pack());
     }
 }

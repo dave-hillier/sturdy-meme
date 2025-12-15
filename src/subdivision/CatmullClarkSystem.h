@@ -5,10 +5,12 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
+#include <optional>
 #include "UBOs.h"
 #include "CatmullClarkCBT.h"
 #include "CatmullClarkMesh.h"
 #include "DescriptorManager.h"
+#include "core/RAIIAdapter.h"
 
 // Push constants for rendering
 struct CatmullClarkPushConstants {
@@ -106,9 +108,9 @@ private:
     VkQueue graphicsQueue = VK_NULL_HANDLE;
     VkCommandPool commandPool = VK_NULL_HANDLE;
 
-    // Composed subsystems
-    CatmullClarkCBT cbt;
-    CatmullClarkMesh mesh;
+    // Composed subsystems (RAII-managed)
+    std::optional<RAIIAdapter<CatmullClarkCBT>> cbt;
+    std::optional<RAIIAdapter<CatmullClarkMesh>> mesh;
 
     // Indirect dispatch/draw buffers
     VkBuffer indirectDispatchBuffer = VK_NULL_HANDLE;

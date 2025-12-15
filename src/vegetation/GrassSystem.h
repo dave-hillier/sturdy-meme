@@ -10,6 +10,8 @@
 #include "BufferUtils.h"
 #include "ParticleSystem.h"
 #include "UBOs.h"
+#include "core/RAIIAdapter.h"
+#include <optional>
 
 struct GrassPushConstants {
     float time;
@@ -48,7 +50,7 @@ public:
     void destroy(VkDevice device, VmaAllocator allocator);
 
     // Update extent for viewport (on window resize)
-    void setExtent(VkExtent2D newExtent) { particleSystem.setExtent(newExtent); }
+    void setExtent(VkExtent2D newExtent) { (*particleSystem)->setExtent(newExtent); }
 
     void updateDescriptorSets(VkDevice device, const std::vector<VkBuffer>& uniformBuffers,
                               VkImageView shadowMapView, VkSampler shadowSampler,
@@ -92,18 +94,18 @@ private:
     bool createExtraPipelines();
     void destroyBuffers(VmaAllocator allocator);
 
-    VkDevice getDevice() const { return particleSystem.getDevice(); }
-    VmaAllocator getAllocator() const { return particleSystem.getAllocator(); }
-    VkRenderPass getRenderPass() const { return particleSystem.getRenderPass(); }
-    DescriptorManager::Pool* getDescriptorPool() const { return particleSystem.getDescriptorPool(); }
-    const VkExtent2D& getExtent() const { return particleSystem.getExtent(); }
-    const std::string& getShaderPath() const { return particleSystem.getShaderPath(); }
-    uint32_t getFramesInFlight() const { return particleSystem.getFramesInFlight(); }
+    VkDevice getDevice() const { return (*particleSystem)->getDevice(); }
+    VmaAllocator getAllocator() const { return (*particleSystem)->getAllocator(); }
+    VkRenderPass getRenderPass() const { return (*particleSystem)->getRenderPass(); }
+    DescriptorManager::Pool* getDescriptorPool() const { return (*particleSystem)->getDescriptorPool(); }
+    const VkExtent2D& getExtent() const { return (*particleSystem)->getExtent(); }
+    const std::string& getShaderPath() const { return (*particleSystem)->getShaderPath(); }
+    uint32_t getFramesInFlight() const { return (*particleSystem)->getFramesInFlight(); }
 
-    SystemLifecycleHelper::PipelineHandles& getComputePipelineHandles() { return particleSystem.getComputePipelineHandles(); }
-    SystemLifecycleHelper::PipelineHandles& getGraphicsPipelineHandles() { return particleSystem.getGraphicsPipelineHandles(); }
+    SystemLifecycleHelper::PipelineHandles& getComputePipelineHandles() { return (*particleSystem)->getComputePipelineHandles(); }
+    SystemLifecycleHelper::PipelineHandles& getGraphicsPipelineHandles() { return (*particleSystem)->getGraphicsPipelineHandles(); }
 
-    ParticleSystem particleSystem;
+    std::optional<RAIIAdapter<ParticleSystem>> particleSystem;
 
     VkRenderPass shadowRenderPass = VK_NULL_HANDLE;
     uint32_t shadowMapSize = 0;

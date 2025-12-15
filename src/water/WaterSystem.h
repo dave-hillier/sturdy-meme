@@ -5,10 +5,12 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
+#include <optional>
 
 #include "Mesh.h"
 #include "Texture.h"
 #include "DescriptorManager.h"
+#include "core/RAIIAdapter.h"
 
 class ShadowSystem;
 
@@ -301,8 +303,8 @@ private:
     VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
     std::vector<VkDescriptorSet> descriptorSets;
 
-    // Water mesh (a subdivided plane for wave animation)
-    Mesh waterMesh;
+    // Water mesh (a subdivided plane for wave animation) - RAII-managed
+    std::optional<RAIIAdapter<Mesh>> waterMesh;
     glm::mat4 waterModelMatrix = glm::mat4(1.0f);
 
     // Water uniforms
@@ -311,11 +313,11 @@ private:
     std::vector<VmaAllocation> waterUniformAllocations;
     std::vector<void*> waterUniformMapped;
 
-    // Foam texture (tileable Worley noise)
-    Texture foamTexture;
+    // Foam texture (tileable Worley noise) - RAII-managed
+    std::optional<RAIIAdapter<Texture>> foamTexture;
 
-    // Caustics texture (Phase 9)
-    Texture causticsTexture;
+    // Caustics texture (Phase 9) - RAII-managed
+    std::optional<RAIIAdapter<Texture>> causticsTexture;
 
     // Tidal parameters
     float baseWaterLevel = 0.0f;  // Mean sea level

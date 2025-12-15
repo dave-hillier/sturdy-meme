@@ -60,8 +60,8 @@ void TreeEditSystem::destroy(VkDevice device, VmaAllocator allocator) {
     for (int i = 0; i < NUM_LEAF_TYPES; ++i) {
         leafTextures[i].destroy(allocator, device);
     }
-    fallbackTexture.destroy(allocator, device);
-    fallbackNormalTexture.destroy(allocator, device);
+    fallbackTexture.reset();
+    fallbackNormalTexture.reset();
     texturesLoaded = false;
 
     // Destroy pipelines
@@ -122,43 +122,43 @@ void TreeEditSystem::updateDescriptorSets(VkDevice device, const std::vector<VkB
     // Helper to get texture view/sampler with fallback
     auto getBarkColorView = [&]() -> VkImageView {
         return (texturesLoaded && barkColorTextures[barkIdx].getImageView())
-            ? barkColorTextures[barkIdx].getImageView() : fallbackTexture.getImageView();
+            ? barkColorTextures[barkIdx].getImageView() : (*fallbackTexture)->getImageView();
     };
     auto getBarkColorSampler = [&]() -> VkSampler {
         return (texturesLoaded && barkColorTextures[barkIdx].getImageView())
-            ? barkColorTextures[barkIdx].getSampler() : fallbackTexture.getSampler();
+            ? barkColorTextures[barkIdx].getSampler() : (*fallbackTexture)->getSampler();
     };
     auto getBarkNormalView = [&]() -> VkImageView {
         return (texturesLoaded && barkNormalTextures[barkIdx].getImageView())
-            ? barkNormalTextures[barkIdx].getImageView() : fallbackNormalTexture.getImageView();
+            ? barkNormalTextures[barkIdx].getImageView() : (*fallbackNormalTexture)->getImageView();
     };
     auto getBarkNormalSampler = [&]() -> VkSampler {
         return (texturesLoaded && barkNormalTextures[barkIdx].getImageView())
-            ? barkNormalTextures[barkIdx].getSampler() : fallbackNormalTexture.getSampler();
+            ? barkNormalTextures[barkIdx].getSampler() : (*fallbackNormalTexture)->getSampler();
     };
     auto getBarkAOView = [&]() -> VkImageView {
         return (texturesLoaded && barkAOTextures[barkIdx].getImageView())
-            ? barkAOTextures[barkIdx].getImageView() : fallbackTexture.getImageView();
+            ? barkAOTextures[barkIdx].getImageView() : (*fallbackTexture)->getImageView();
     };
     auto getBarkAOSampler = [&]() -> VkSampler {
         return (texturesLoaded && barkAOTextures[barkIdx].getImageView())
-            ? barkAOTextures[barkIdx].getSampler() : fallbackTexture.getSampler();
+            ? barkAOTextures[barkIdx].getSampler() : (*fallbackTexture)->getSampler();
     };
     auto getBarkRoughnessView = [&]() -> VkImageView {
         return (texturesLoaded && barkRoughnessTextures[barkIdx].getImageView())
-            ? barkRoughnessTextures[barkIdx].getImageView() : fallbackTexture.getImageView();
+            ? barkRoughnessTextures[barkIdx].getImageView() : (*fallbackTexture)->getImageView();
     };
     auto getBarkRoughnessSampler = [&]() -> VkSampler {
         return (texturesLoaded && barkRoughnessTextures[barkIdx].getImageView())
-            ? barkRoughnessTextures[barkIdx].getSampler() : fallbackTexture.getSampler();
+            ? barkRoughnessTextures[barkIdx].getSampler() : (*fallbackTexture)->getSampler();
     };
     auto getLeafView = [&]() -> VkImageView {
         return (texturesLoaded && leafTextures[leafIdx].getImageView())
-            ? leafTextures[leafIdx].getImageView() : fallbackTexture.getImageView();
+            ? leafTextures[leafIdx].getImageView() : (*fallbackTexture)->getImageView();
     };
     auto getLeafSampler = [&]() -> VkSampler {
         return (texturesLoaded && leafTextures[leafIdx].getImageView())
-            ? leafTextures[leafIdx].getSampler() : fallbackTexture.getSampler();
+            ? leafTextures[leafIdx].getSampler() : (*fallbackTexture)->getSampler();
     };
 
     // Use DescriptorManager::SetWriter for consistent descriptor set updates
@@ -463,17 +463,31 @@ glm::vec3 TreeEditSystem::getTreeCenter() const {
 
 bool TreeEditSystem::loadTextures() {
     // Create fallback texture (gray color for bark, green for leaves)
-    if (!fallbackTexture.createSolidColor(128, 128, 128, 255, allocator, device, commandPool, graphicsQueue)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create fallback texture");
-        return false;
-    }
+    fallbackTexture = RAIIAdapter<Texture>::create(
+        [this](auto& t) {
+            if (!t.createSolidColor(128, 128, 128, 255, allocator, device, commandPool, graphicsQueue)) {
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create fallback texture");
+                return false;
+            }
+            return true;
+        },
+        [this](auto& t) { t.destroy(allocator, device); }
+    );
+    if (!fallbackTexture) return false;
 
     // Create fallback normal map texture (flat normal pointing up in tangent space)
     // RGB(128, 128, 255) = normalized (0, 0, 1) after conversion from [0,1] to [-1,1]
-    if (!fallbackNormalTexture.createSolidColor(128, 128, 255, 255, allocator, device, commandPool, graphicsQueue)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create fallback normal texture");
-        return false;
-    }
+    fallbackNormalTexture = RAIIAdapter<Texture>::create(
+        [this](auto& t) {
+            if (!t.createSolidColor(128, 128, 255, 255, allocator, device, commandPool, graphicsQueue)) {
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create fallback normal texture");
+                return false;
+            }
+            return true;
+        },
+        [this](auto& t) { t.destroy(allocator, device); }
+    );
+    if (!fallbackNormalTexture) return false;
 
     // Bark type names (order matches BarkType enum)
     const char* barkNames[NUM_BARK_TYPES] = { "oak", "birch", "pine", "willow" };
@@ -521,7 +535,7 @@ const Texture& TreeEditSystem::getBarkColorTexture() const {
     if (idx >= 0 && idx < NUM_BARK_TYPES && barkColorTextures[idx].getImageView()) {
         return barkColorTextures[idx];
     }
-    return fallbackTexture;
+    return **fallbackTexture;
 }
 
 const Texture& TreeEditSystem::getBarkNormalTexture() const {
@@ -529,7 +543,7 @@ const Texture& TreeEditSystem::getBarkNormalTexture() const {
     if (idx >= 0 && idx < NUM_BARK_TYPES && barkNormalTextures[idx].getImageView()) {
         return barkNormalTextures[idx];
     }
-    return fallbackTexture;
+    return **fallbackTexture;
 }
 
 const Texture& TreeEditSystem::getBarkAOTexture() const {
@@ -537,7 +551,7 @@ const Texture& TreeEditSystem::getBarkAOTexture() const {
     if (idx >= 0 && idx < NUM_BARK_TYPES && barkAOTextures[idx].getImageView()) {
         return barkAOTextures[idx];
     }
-    return fallbackTexture;
+    return **fallbackTexture;
 }
 
 const Texture& TreeEditSystem::getBarkRoughnessTexture() const {
@@ -545,7 +559,7 @@ const Texture& TreeEditSystem::getBarkRoughnessTexture() const {
     if (idx >= 0 && idx < NUM_BARK_TYPES && barkRoughnessTextures[idx].getImageView()) {
         return barkRoughnessTextures[idx];
     }
-    return fallbackTexture;
+    return **fallbackTexture;
 }
 
 const Texture& TreeEditSystem::getLeafTexture() const {
@@ -553,5 +567,5 @@ const Texture& TreeEditSystem::getLeafTexture() const {
     if (idx >= 0 && idx < NUM_LEAF_TYPES && leafTextures[idx].getImageView()) {
         return leafTextures[idx];
     }
-    return fallbackTexture;
+    return **fallbackTexture;
 }

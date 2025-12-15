@@ -5,10 +5,12 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
+#include <optional>
 
 #include "BufferUtils.h"
 #include "ParticleSystem.h"
 #include "UBOs.h"
+#include "core/RAIIAdapter.h"
 
 // Forward declaration
 class WindSystem;
@@ -44,7 +46,7 @@ public:
     void destroy(VkDevice device, VmaAllocator allocator);
 
     // Update extent for viewport (on window resize)
-    void setExtent(VkExtent2D newExtent) { particleSystem.setExtent(newExtent); }
+    void setExtent(VkExtent2D newExtent) { (*particleSystem)->setExtent(newExtent); }
 
     // Update descriptor sets with external resources (UBO, wind buffer)
     void updateDescriptorSets(VkDevice device, const std::vector<VkBuffer>& uniformBuffers,
@@ -85,18 +87,19 @@ private:
     bool createDescriptorSets();
     void destroyBuffers(VmaAllocator allocator);
 
-    VkDevice getDevice() const { return particleSystem.getDevice(); }
-    VmaAllocator getAllocator() const { return particleSystem.getAllocator(); }
-    VkRenderPass getRenderPass() const { return particleSystem.getRenderPass(); }
-    DescriptorManager::Pool* getDescriptorPool() const { return particleSystem.getDescriptorPool(); }
-    const VkExtent2D& getExtent() const { return particleSystem.getExtent(); }
-    const std::string& getShaderPath() const { return particleSystem.getShaderPath(); }
-    uint32_t getFramesInFlight() const { return particleSystem.getFramesInFlight(); }
+    VkDevice getDevice() const { return (*particleSystem)->getDevice(); }
+    VmaAllocator getAllocator() const { return (*particleSystem)->getAllocator(); }
+    VkRenderPass getRenderPass() const { return (*particleSystem)->getRenderPass(); }
+    DescriptorManager::Pool* getDescriptorPool() const { return (*particleSystem)->getDescriptorPool(); }
+    const VkExtent2D& getExtent() const { return (*particleSystem)->getExtent(); }
+    const std::string& getShaderPath() const { return (*particleSystem)->getShaderPath(); }
+    uint32_t getFramesInFlight() const { return (*particleSystem)->getFramesInFlight(); }
 
-    SystemLifecycleHelper::PipelineHandles& getComputePipelineHandles() { return particleSystem.getComputePipelineHandles(); }
-    SystemLifecycleHelper::PipelineHandles& getGraphicsPipelineHandles() { return particleSystem.getGraphicsPipelineHandles(); }
+    SystemLifecycleHelper::PipelineHandles& getComputePipelineHandles() { return (*particleSystem)->getComputePipelineHandles(); }
+    SystemLifecycleHelper::PipelineHandles& getGraphicsPipelineHandles() { return (*particleSystem)->getGraphicsPipelineHandles(); }
 
-    ParticleSystem particleSystem;
+    // RAII-managed subsystem
+    std::optional<RAIIAdapter<ParticleSystem>> particleSystem;
 
     // Double-buffered storage buffers
     static constexpr uint32_t BUFFER_SET_COUNT = 2;

@@ -15,6 +15,8 @@
 #include "AnimatedCharacter.h"
 #include "MaterialRegistry.h"
 #include "PlayerCape.h"
+#include "core/RAIIAdapter.h"
+#include <optional>
 
 // Holds all scene resources (meshes, textures) and provides scene objects
 class SceneBuilder {
@@ -48,18 +50,18 @@ public:
     const MaterialRegistry& getMaterialRegistry() const { return materialRegistry; }
 
     // Access to textures for descriptor set creation
-    Texture& getGroundTexture() { return groundTexture; }
-    Texture& getGroundNormalMap() { return groundNormalMap; }
-    Texture& getCrateTexture() { return crateTexture; }
-    Texture& getCrateNormalMap() { return crateNormalMap; }
-    Texture& getMetalTexture() { return metalTexture; }
-    Texture& getMetalNormalMap() { return metalNormalMap; }
-    Texture& getDefaultEmissiveMap() { return defaultEmissiveMap; }
-    Texture& getWhiteTexture() { return whiteTexture; }
+    Texture& getGroundTexture() { return **groundTexture; }
+    Texture& getGroundNormalMap() { return **groundNormalMap; }
+    Texture& getCrateTexture() { return **crateTexture; }
+    Texture& getCrateNormalMap() { return **crateNormalMap; }
+    Texture& getMetalTexture() { return **metalTexture; }
+    Texture& getMetalNormalMap() { return **metalNormalMap; }
+    Texture& getDefaultEmissiveMap() { return **defaultEmissiveMap; }
+    Texture& getWhiteTexture() { return **whiteTexture; }
 
     // Access to meshes for dynamic updates (e.g., cloth)
     Mesh& getFlagClothMesh() { return flagClothMesh; }
-    Mesh& getFlagPoleMesh() { return flagPoleMesh; }
+    Mesh& getFlagPoleMesh() { return **flagPoleMesh; }
     size_t getFlagClothIndex() const { return flagClothIndex; }
     size_t getFlagPoleIndex() const { return flagPoleIndex; }
 
@@ -112,12 +114,17 @@ private:
     // Terrain height query function
     HeightQueryFunc terrainHeightFunc;
 
-    // Meshes
-    Mesh groundMesh;
-    Mesh cubeMesh;
-    Mesh sphereMesh;
-    Mesh capsuleMesh;
-    Mesh flagPoleMesh;
+    // Stored for RAII cleanup
+    VmaAllocator storedAllocator = VK_NULL_HANDLE;
+    VkDevice storedDevice = VK_NULL_HANDLE;
+
+    // Meshes (static RAII-managed)
+    std::optional<RAIIAdapter<Mesh>> cubeMesh;
+    std::optional<RAIIAdapter<Mesh>> sphereMesh;
+    std::optional<RAIIAdapter<Mesh>> capsuleMesh;
+    std::optional<RAIIAdapter<Mesh>> flagPoleMesh;
+
+    // Meshes (dynamic - manually managed, re-uploaded during runtime)
     Mesh flagClothMesh;
     Mesh capeMesh;
     AnimatedCharacter animatedCharacter;  // Player character (animated from glTF)
@@ -127,15 +134,15 @@ private:
     PlayerCape playerCape;
     bool hasCapeEnabled = false;
 
-    // Textures
-    Texture crateTexture;
-    Texture crateNormalMap;
-    Texture groundTexture;
-    Texture groundNormalMap;
-    Texture metalTexture;
-    Texture metalNormalMap;
-    Texture defaultEmissiveMap;  // Black texture for objects without emissive
-    Texture whiteTexture;        // White texture for vertex-colored objects
+    // Textures (RAII-managed)
+    std::optional<RAIIAdapter<Texture>> crateTexture;
+    std::optional<RAIIAdapter<Texture>> crateNormalMap;
+    std::optional<RAIIAdapter<Texture>> groundTexture;
+    std::optional<RAIIAdapter<Texture>> groundNormalMap;
+    std::optional<RAIIAdapter<Texture>> metalTexture;
+    std::optional<RAIIAdapter<Texture>> metalNormalMap;
+    std::optional<RAIIAdapter<Texture>> defaultEmissiveMap;  // Black texture for objects without emissive
+    std::optional<RAIIAdapter<Texture>> whiteTexture;        // White texture for vertex-colored objects
 
     // Scene objects
     std::vector<Renderable> sceneObjects;
