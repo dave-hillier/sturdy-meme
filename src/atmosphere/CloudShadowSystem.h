@@ -7,6 +7,7 @@
 #include <string>
 #include "DescriptorManager.h"
 #include "InitContext.h"
+#include "core/VulkanRAII.h"
 
 // Cloud Shadow System
 // Generates a world-space cloud shadow map by ray-marching through the cloud layer
@@ -112,10 +113,10 @@ private:
     VkImageView shadowMapView = VK_NULL_HANDLE;
     VkSampler shadowMapSampler = VK_NULL_HANDLE;
 
-    // Compute pipeline
-    VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
-    VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
-    VkPipeline computePipeline = VK_NULL_HANDLE;
+    // Compute pipeline (RAII-managed)
+    ManagedDescriptorSetLayout descriptorSetLayout;
+    ManagedPipelineLayout pipelineLayout;
+    ManagedPipeline computePipeline;
     std::vector<VkDescriptorSet> descriptorSets;
 
     // Uniform buffers (per frame)

@@ -6,6 +6,7 @@
 #include <string>
 #include "DescriptorManager.h"
 #include "InitContext.h"
+#include "core/VulkanRAII.h"
 
 class AtmosphereLUTSystem;
 
@@ -51,7 +52,7 @@ private:
     VkRenderPass hdrRenderPass = VK_NULL_HANDLE;
 
     VkPipeline pipeline = VK_NULL_HANDLE;
-    VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
-    VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
+    ManagedPipelineLayout pipelineLayout;
+    ManagedDescriptorSetLayout descriptorSetLayout;
     std::vector<VkDescriptorSet> descriptorSets;
 };

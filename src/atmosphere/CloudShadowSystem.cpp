@@ -49,18 +49,10 @@ bool CloudShadowSystem::init(const InitContext& ctx, VkImageView cloudMapLUTView
 }
 
 void CloudShadowSystem::destroy() {
-    if (computePipeline != VK_NULL_HANDLE) {
-        vkDestroyPipeline(device, computePipeline, nullptr);
-        computePipeline = VK_NULL_HANDLE;
-    }
-    if (pipelineLayout != VK_NULL_HANDLE) {
-        vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
-        pipelineLayout = VK_NULL_HANDLE;
-    }
-    if (descriptorSetLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
-        descriptorSetLayout = VK_NULL_HANDLE;
-    }
+    // RAII wrappers handle cleanup automatically
+    computePipeline = ManagedPipeline();
+    pipelineLayout = ManagedPipelineLayout();
+    descriptorSetLayout = ManagedDescriptorSetLayout();
 
     for (size_t i = 0; i < uniformBuffers.size(); i++) {
         if (uniformBuffers[i] != VK_NULL_HANDLE) {
@@ -189,14 +181,12 @@ bool CloudShadowSystem::createDescriptorSetLayout() {
     // 1: Cloud map LUT (sampled image from atmosphere system)
     // 2: Uniform buffer
 
-    descriptorSetLayout = DescriptorManager::LayoutBuilder(device)
-        .addStorageImage(VK_SHADER_STAGE_COMPUTE_BIT)            // 0: Cloud shadow map
-        .addCombinedImageSampler(VK_SHADER_STAGE_COMPUTE_BIT)    // 1: Cloud map LUT
-        .addUniformBuffer(VK_SHADER_STAGE_COMPUTE_BIT)           // 2: Uniform buffer
-        .build();
-
-    if (descriptorSetLayout == VK_NULL_HANDLE) {
-        SDL_Log("Failed to create cloud shadow descriptor set layout");
+    if (!DescriptorManager::LayoutBuilder(device)
+            .addStorageImage(VK_SHADER_STAGE_COMPUTE_BIT)            // 0: Cloud shadow map
+            .addCombinedImageSampler(VK_SHADER_STAGE_COMPUTE_BIT)    // 1: Cloud map LUT
+            .addUniformBuffer(VK_SHADER_STAGE_COMPUTE_BIT)           // 2: Uniform buffer
+            .buildManaged(descriptorSetLayout)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create cloud shadow descriptor set layout");
         return false;
     }
 
@@ -205,7 +195,7 @@ bool CloudShadowSystem::createDescriptorSetLayout() {
 
 bool CloudShadowSystem::createDescriptorSets() {
     // Allocate descriptor sets using managed pool
-    descriptorSets = descriptorPool->allocate(descriptorSetLayout, framesInFlight);
+    descriptorSets = descriptorPool->allocate(descriptorSetLayout.get(), framesInFlight);
     if (descriptorSets.size() != framesInFlight) {
         SDL_Log("Failed to allocate cloud shadow descriptor sets");
         return false;
@@ -227,13 +217,13 @@ bool CloudShadowSystem::createComputePipeline() {
     // Load compute shader
     auto shaderCode = ShaderLoader::readFile(shaderPath + "/cloud_shadow.comp.spv");
     if (shaderCode.empty()) {
-        SDL_Log("Failed to load cloud shadow compute shader");
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load cloud shadow compute shader");
         return false;
     }
 
     VkShaderModule shaderModule = ShaderLoader::createShaderModule(device, shaderCode);
     if (shaderModule == VK_NULL_HANDLE) {
-        SDL_Log("Failed to create cloud shadow shader module");
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create cloud shadow shader module");
         return false;
     }
 
@@ -243,26 +233,24 @@ bool CloudShadowSystem::createComputePipeline() {
     stageInfo.module = shaderModule;
     stageInfo.pName = "main";
 
-    pipelineLayout = DescriptorManager::createPipelineLayout(device, descriptorSetLayout);
-    if (pipelineLayout == VK_NULL_HANDLE) {
+    if (!DescriptorManager::createManagedPipelineLayout(device, descriptorSetLayout.get(), pipelineLayout)) {
         vkDestroyShaderModule(device, shaderModule, nullptr);
-        SDL_Log("Failed to create cloud shadow pipeline layout");
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create cloud shadow pipeline layout");
         return false;
     }
 
     VkComputePipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
     pipelineInfo.stage = stageInfo;
-    pipelineInfo.layout = pipelineLayout;
+    pipelineInfo.layout = pipelineLayout.get();
 
-    VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &computePipeline);
-    vkDestroyShaderModule(device, shaderModule, nullptr);
-
-    if (result != VK_SUCCESS) {
-        SDL_Log("Failed to create cloud shadow compute pipeline");
+    if (!ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, computePipeline)) {
+        vkDestroyShaderModule(device, shaderModule, nullptr);
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create cloud shadow compute pipeline");
         return false;
     }
 
+    vkDestroyShaderModule(device, shaderModule, nullptr);
     return true;
 }
 
@@ -347,9 +335,9 @@ void CloudShadowSystem::recordUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
         VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_SHADER_WRITE_BIT);
 
     // Bind pipeline and descriptor set
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline.get());
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                            pipelineLayout, 0, 1, &descriptorSets[frameIndex], 0, nullptr);
+                            pipelineLayout.get(), 0, 1, &descriptorSets[frameIndex], 0, nullptr);
 
     // Dispatch compute shader (16x16 workgroups)
     uint32_t groupCountX = (SHADOW_MAP_SIZE + 15) / 16;

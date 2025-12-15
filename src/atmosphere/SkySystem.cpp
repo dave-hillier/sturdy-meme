@@ -39,14 +39,9 @@ void SkySystem::destroy(VkDevice device, VmaAllocator allocator) {
         vkDestroyPipeline(device, pipeline, nullptr);
         pipeline = VK_NULL_HANDLE;
     }
-    if (pipelineLayout != VK_NULL_HANDLE) {
-        vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
-        pipelineLayout = VK_NULL_HANDLE;
-    }
-    if (descriptorSetLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
-        descriptorSetLayout = VK_NULL_HANDLE;
-    }
+    // RAII wrappers handle cleanup automatically
+    pipelineLayout = ManagedPipelineLayout();
+    descriptorSetLayout = ManagedDescriptorSetLayout();
     // Descriptor sets are freed when the pool is destroyed
     descriptorSets.clear();
 }
@@ -61,24 +56,21 @@ bool SkySystem::createDescriptorSetLayout() {
     // 5: Mie Irradiance LUT sampler (Phase 4.1.9)
     // 6: Cloud Map LUT sampler (Paraboloid projection, updated per-frame)
 
-    descriptorSetLayout = DescriptorManager::LayoutBuilder(device)
-        .addUniformBuffer(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)  // 0: UBO
-        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 1: Transmittance LUT
-        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 2: Multi-scatter LUT
-        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 3: Sky-view LUT
-        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 4: Rayleigh Irradiance LUT
-        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 5: Mie Irradiance LUT
-        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 6: Cloud Map LUT
-        .build();
-
-    if (descriptorSetLayout == VK_NULL_HANDLE) {
-        SDL_Log("Failed to create sky descriptor set layout");
+    if (!DescriptorManager::LayoutBuilder(device)
+            .addUniformBuffer(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)  // 0: UBO
+            .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 1: Transmittance LUT
+            .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 2: Multi-scatter LUT
+            .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 3: Sky-view LUT
+            .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 4: Rayleigh Irradiance LUT
+            .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 5: Mie Irradiance LUT
+            .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 6: Cloud Map LUT
+            .buildManaged(descriptorSetLayout)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create sky descriptor set layout");
         return false;
     }
 
-    pipelineLayout = DescriptorManager::createPipelineLayout(device, descriptorSetLayout);
-    if (pipelineLayout == VK_NULL_HANDLE) {
-        SDL_Log("Failed to create sky pipeline layout");
+    if (!DescriptorManager::createManagedPipelineLayout(device, descriptorSetLayout.get(), pipelineLayout)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create sky pipeline layout");
         return false;
     }
 
@@ -89,7 +81,7 @@ bool SkySystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffers
                                       VkDeviceSize uniformBufferSize,
                                       AtmosphereLUTSystem& atmosphereLUTSystem) {
     // Allocate sky descriptor sets using managed pool
-    descriptorSets = descriptorPool->allocate(descriptorSetLayout, framesInFlight);
+    descriptorSets = descriptorPool->allocate(descriptorSetLayout.get(), framesInFlight);
     if (descriptorSets.size() != framesInFlight) {
         SDL_Log("Failed to allocate sky descriptor sets");
         return false;
@@ -128,7 +120,7 @@ bool SkySystem::createPipeline() {
         .applyPreset(GraphicsPipelineFactory::Preset::FullscreenQuad)
         .setShaders(shaderPath + "/sky.vert.spv", shaderPath + "/sky.frag.spv")
         .setRenderPass(hdrRenderPass)
-        .setPipelineLayout(pipelineLayout)
+        .setPipelineLayout(pipelineLayout.get())
         .setExtent(extent)
         .setDynamicViewport(true)
         .build(pipeline);
@@ -160,6 +152,6 @@ void SkySystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            pipelineLayout, 0, 1, &descriptorSets[frameIndex], 0, nullptr);
+                            pipelineLayout.get(), 0, 1, &descriptorSets[frameIndex], 0, nullptr);
     vkCmdDraw(cmd, 3, 1, 0, 0);
 }
