@@ -1,7 +1,6 @@
 #include "SkySystem.h"
 #include "AtmosphereLUTSystem.h"
 #include "GraphicsPipelineFactory.h"
-#include "BindingBuilder.h"
 #include "UBOs.h"
 #include <SDL3/SDL.h>
 #include <array>
@@ -61,51 +60,26 @@ bool SkySystem::createDescriptorSetLayout() {
     // 5: Mie Irradiance LUT sampler (Phase 4.1.9)
     // 6: Cloud Map LUT sampler (Paraboloid projection, updated per-frame)
 
-    auto uboBinding = BindingBuilder()
-        .setBinding(0)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
-        .setStageFlags(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
-        .build();
+    auto makeBinding = [](uint32_t binding, VkDescriptorType type, VkShaderStageFlags stages) {
+        VkDescriptorSetLayoutBinding b{};
+        b.binding = binding;
+        b.descriptorType = type;
+        b.descriptorCount = 1;
+        b.stageFlags = stages;
+        return b;
+    };
 
-    auto transmittanceLUTBinding = BindingBuilder()
-        .setBinding(1)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
-        .build();
-
-    auto multiScatterLUTBinding = BindingBuilder()
-        .setBinding(2)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
-        .build();
-
-    auto skyViewLUTBinding = BindingBuilder()
-        .setBinding(3)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
-        .build();
-
-    auto rayleighIrradianceLUTBinding = BindingBuilder()
-        .setBinding(4)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
-        .build();
-
-    auto mieIrradianceLUTBinding = BindingBuilder()
-        .setBinding(5)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
-        .build();
-
-    auto cloudMapLUTBinding = BindingBuilder()
-        .setBinding(6)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
-        .build();
+    constexpr auto VF = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    constexpr auto F = VK_SHADER_STAGE_FRAGMENT_BIT;
 
     std::array<VkDescriptorSetLayoutBinding, 7> bindings = {
-        uboBinding, transmittanceLUTBinding, multiScatterLUTBinding, skyViewLUTBinding,
-        rayleighIrradianceLUTBinding, mieIrradianceLUTBinding, cloudMapLUTBinding
+        makeBinding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VF),
+        makeBinding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, F),
+        makeBinding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, F),
+        makeBinding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, F),
+        makeBinding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, F),
+        makeBinding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, F),
+        makeBinding(6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, F)
     };
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};

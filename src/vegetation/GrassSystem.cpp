@@ -1,7 +1,6 @@
 #include "GrassSystem.h"
 #include "ShaderLoader.h"
 #include "PipelineBuilder.h"
-#include "BindingBuilder.h"
 #include "UBOs.h"
 #include "VulkanBarriers.h"
 #include <SDL3/SDL.h>
@@ -220,28 +219,20 @@ bool GrassSystem::createDisplacementResources() {
 
 bool GrassSystem::createDisplacementPipeline() {
     // Create descriptor set layout for displacement update compute shader
-    // Displacement map (storage image, read-write)
-    auto displacementMap = BindingBuilder()
-        .setBinding(0)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-        .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-        .build();
+    auto makeComputeBinding = [](uint32_t binding, VkDescriptorType type) {
+        VkDescriptorSetLayoutBinding b{};
+        b.binding = binding;
+        b.descriptorType = type;
+        b.descriptorCount = 1;
+        b.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        return b;
+    };
 
-    // Source buffer (SSBO)
-    auto sourceBuffer = BindingBuilder()
-        .setBinding(1)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-        .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-        .build();
-
-    // Displacement uniforms
-    auto displacementUniforms = BindingBuilder()
-        .setBinding(2)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
-        .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-        .build();
-
-    std::array<VkDescriptorSetLayoutBinding, 3> bindings = {displacementMap, sourceBuffer, displacementUniforms};
+    std::array<VkDescriptorSetLayoutBinding, 3> bindings = {
+        makeComputeBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE),      // Displacement map
+        makeComputeBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),     // Source buffer
+        makeComputeBinding(2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)      // Displacement uniforms
+    };
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;

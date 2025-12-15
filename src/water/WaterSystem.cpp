@@ -1,7 +1,6 @@
 #include "WaterSystem.h"
 #include "ShadowSystem.h"
 #include "GraphicsPipelineFactory.h"
-#include "BindingBuilder.h"
 #include <SDL3/SDL.h>
 #include <array>
 #include <cstring>
@@ -122,96 +121,34 @@ bool WaterSystem::createDescriptorSetLayout() {
     // 9: SSR texture (Phase 10: screen-space reflections)
     // 10: Scene depth texture (Phase 11: dual depth for refraction)
 
-    auto uboBinding = BindingBuilder()
-        .setBinding(0)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
-        .setStageFlags(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
-        .build();
+    auto makeBinding = [](uint32_t binding, VkDescriptorType type, VkShaderStageFlags stages) {
+        VkDescriptorSetLayoutBinding b{};
+        b.binding = binding;
+        b.descriptorType = type;
+        b.descriptorCount = 1;
+        b.stageFlags = stages;
+        return b;
+    };
 
-    auto waterUniformBinding = BindingBuilder()
-        .setBinding(1)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
-        .setStageFlags(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
-        .build();
-
-    auto shadowMapBinding = BindingBuilder()
-        .setBinding(2)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
-        .build();
-
-    auto terrainHeightMapBinding = BindingBuilder()
-        .setBinding(3)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
-        .build();
-
-    auto flowMapBinding = BindingBuilder()
-        .setBinding(4)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
-        .build();
-
-    auto displacementMapBinding = BindingBuilder()
-        .setBinding(5)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-        .setStageFlags(VK_SHADER_STAGE_VERTEX_BIT)
-        .build();
-
-    auto foamTextureBinding = BindingBuilder()
-        .setBinding(6)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
-        .build();
-
-    auto temporalFoamBinding = BindingBuilder()
-        .setBinding(7)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
-        .build();
-
-    auto causticsTextureBinding = BindingBuilder()
-        .setBinding(8)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
-        .build();
-
-    auto ssrTextureBinding = BindingBuilder()
-        .setBinding(9)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
-        .build();
-
-    auto sceneDepthBinding = BindingBuilder()
-        .setBinding(10)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
-        .build();
-
-    // FFT Ocean displacement maps (bindings 11-13, vertex shader)
-    auto oceanDispBinding = BindingBuilder()
-        .setBinding(11)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-        .setStageFlags(VK_SHADER_STAGE_VERTEX_BIT)
-        .build();
-
-    auto oceanNormalBinding = BindingBuilder()
-        .setBinding(12)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-        .setStageFlags(VK_SHADER_STAGE_VERTEX_BIT)
-        .build();
-
-    auto oceanFoamBinding = BindingBuilder()
-        .setBinding(13)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-        .setStageFlags(VK_SHADER_STAGE_VERTEX_BIT)
-        .build();
+    constexpr auto VF = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    constexpr auto F = VK_SHADER_STAGE_FRAGMENT_BIT;
+    constexpr auto V = VK_SHADER_STAGE_VERTEX_BIT;
 
     std::array<VkDescriptorSetLayoutBinding, 14> bindings = {
-        uboBinding, waterUniformBinding, shadowMapBinding, terrainHeightMapBinding,
-        flowMapBinding, displacementMapBinding, foamTextureBinding, temporalFoamBinding,
-        causticsTextureBinding, ssrTextureBinding, sceneDepthBinding,
-        oceanDispBinding, oceanNormalBinding, oceanFoamBinding
+        makeBinding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VF),
+        makeBinding(1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VF),
+        makeBinding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, F),
+        makeBinding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, F),
+        makeBinding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, F),
+        makeBinding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, V),
+        makeBinding(6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, F),
+        makeBinding(7, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, F),
+        makeBinding(8, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, F),
+        makeBinding(9, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, F),
+        makeBinding(10, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, F),
+        makeBinding(11, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, V),
+        makeBinding(12, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, V),
+        makeBinding(13, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, V)
     };
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};

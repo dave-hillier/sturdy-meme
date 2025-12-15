@@ -1,6 +1,5 @@
 #include "LeafSystem.h"
 #include "ShaderLoader.h"
-#include "BindingBuilder.h"
 #include "VulkanBarriers.h"
 #include <SDL3/SDL.h>
 #include <cstring>
@@ -128,65 +127,24 @@ bool LeafSystem::createBuffers() {
 }
 
 bool LeafSystem::createComputeDescriptorSetLayout(SystemLifecycleHelper::PipelineHandles& handles) {
-    // Particle buffer input (previous frame state)
-    auto particleBufferInput = BindingBuilder()
-        .setBinding(0)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-        .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-        .build();
-
-    // Particle buffer output (current frame result)
-    auto particleBufferOutput = BindingBuilder()
-        .setBinding(1)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-        .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-        .build();
-
-    // Indirect buffer (output)
-    auto indirectBuffer = BindingBuilder()
-        .setBinding(2)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-        .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-        .build();
-
-    // Leaf uniforms
-    auto leafUniforms = BindingBuilder()
-        .setBinding(3)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
-        .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-        .build();
-
-    // Wind uniforms
-    auto windUniforms = BindingBuilder()
-        .setBinding(4)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
-        .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-        .build();
-
-    // Terrain heightmap
-    auto terrainHeightmap = BindingBuilder()
-        .setBinding(5)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-        .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-        .build();
-
-    // Displacement map (shared with grass system for player interaction)
-    auto displacementMap = BindingBuilder()
-        .setBinding(6)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-        .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-        .build();
-
-    // Displacement region uniform buffer
-    auto displacementRegion = BindingBuilder()
-        .setBinding(7)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
-        .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-        .build();
+    auto makeComputeBinding = [](uint32_t binding, VkDescriptorType type) {
+        VkDescriptorSetLayoutBinding b{};
+        b.binding = binding;
+        b.descriptorType = type;
+        b.descriptorCount = 1;
+        b.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        return b;
+    };
 
     std::array<VkDescriptorSetLayoutBinding, 8> bindings = {
-        particleBufferInput, particleBufferOutput, indirectBuffer,
-        leafUniforms, windUniforms, terrainHeightmap, displacementMap, displacementRegion
+        makeComputeBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),         // Particle buffer input
+        makeComputeBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),         // Particle buffer output
+        makeComputeBinding(2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),         // Indirect buffer
+        makeComputeBinding(3, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER),         // Leaf uniforms
+        makeComputeBinding(4, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER),         // Wind uniforms
+        makeComputeBinding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER), // Terrain heightmap
+        makeComputeBinding(6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER), // Displacement map
+        makeComputeBinding(7, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)          // Displacement region
     };
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
@@ -257,28 +215,23 @@ bool LeafSystem::createComputePipeline(SystemLifecycleHelper::PipelineHandles& h
 }
 
 bool LeafSystem::createGraphicsDescriptorSetLayout(SystemLifecycleHelper::PipelineHandles& handles) {
-    // UBO (scene uniforms)
-    auto uboBinding = BindingBuilder()
-        .setBinding(0)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
-        .setStageFlags(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
-        .build();
+    auto makeBinding = [](uint32_t binding, VkDescriptorType type, VkShaderStageFlags stages) {
+        VkDescriptorSetLayoutBinding b{};
+        b.binding = binding;
+        b.descriptorType = type;
+        b.descriptorCount = 1;
+        b.stageFlags = stages;
+        return b;
+    };
 
-    // Particle buffer (read-only in vertex shader)
-    auto particleBuffer = BindingBuilder()
-        .setBinding(1)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-        .setStageFlags(VK_SHADER_STAGE_VERTEX_BIT)
-        .build();
+    constexpr auto VF = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    constexpr auto V = VK_SHADER_STAGE_VERTEX_BIT;
 
-    // Wind uniforms (for consistent animation)
-    auto windUniforms = BindingBuilder()
-        .setBinding(2)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
-        .setStageFlags(VK_SHADER_STAGE_VERTEX_BIT)
-        .build();
-
-    std::array<VkDescriptorSetLayoutBinding, 3> bindings = {uboBinding, particleBuffer, windUniforms};
+    std::array<VkDescriptorSetLayoutBinding, 3> bindings = {
+        makeBinding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VF),  // UBO
+        makeBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, V),   // Particle buffer
+        makeBinding(2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, V)    // Wind uniforms
+    };
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
