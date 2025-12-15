@@ -11,6 +11,7 @@
 #include "DescriptorManager.h"
 #include "InitContext.h"
 #include "Mesh.h"
+#include "core/VulkanRAII.h"
 
 // GPU-side object data for culling (matches shader struct)
 struct alignas(16) CullObjectData {
@@ -160,7 +161,7 @@ private:
     VmaAllocation hiZPyramidAllocation = VK_NULL_HANDLE;
     VkImageView hiZPyramidView = VK_NULL_HANDLE;         // View of all mip levels
     std::vector<VkImageView> hiZMipViews;                // Individual mip level views
-    VkSampler hiZSampler = VK_NULL_HANDLE;               // Sampler for Hi-Z reads
+    ManagedSampler hiZSampler;                           // Sampler for Hi-Z reads
     uint32_t mipLevelCount = 0;
 
     // Source depth buffer reference
@@ -168,15 +169,15 @@ private:
     VkSampler sourceDepthSampler = VK_NULL_HANDLE;
 
     // Pyramid generation pipeline
-    VkDescriptorSetLayout pyramidDescSetLayout = VK_NULL_HANDLE;
-    VkPipelineLayout pyramidPipelineLayout = VK_NULL_HANDLE;
-    VkPipeline pyramidPipeline = VK_NULL_HANDLE;
+    ManagedDescriptorSetLayout pyramidDescSetLayout;
+    ManagedPipelineLayout pyramidPipelineLayout;
+    ManagedPipeline pyramidPipeline;
     std::vector<VkDescriptorSet> pyramidDescSets;  // One per mip level
 
     // Culling pipeline
-    VkDescriptorSetLayout cullingDescSetLayout = VK_NULL_HANDLE;
-    VkPipelineLayout cullingPipelineLayout = VK_NULL_HANDLE;
-    VkPipeline cullingPipeline = VK_NULL_HANDLE;
+    ManagedDescriptorSetLayout cullingDescSetLayout;
+    ManagedPipelineLayout cullingPipelineLayout;
+    ManagedPipeline cullingPipeline;
     std::vector<VkDescriptorSet> cullingDescSets;  // Per frame
 
     // Object data buffer (input to culling)

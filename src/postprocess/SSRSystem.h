@@ -7,6 +7,7 @@
 #include <string>
 #include "InitContext.h"
 #include "DescriptorManager.h"
+#include "core/VulkanRAII.h"
 
 /**
  * SSRSystem - Phase 10: Screen-Space Reflections
@@ -86,7 +87,7 @@ public:
 
     // Get SSR result texture for sampling in water shader
     VkImageView getSSRResultView() const { return ssrResultView[currentBuffer]; }
-    VkSampler getSampler() const { return sampler; }
+    VkSampler getSampler() const { return sampler.get(); }
 
     // Configuration
     void setMaxDistance(float dist) { maxDistance = dist; }
@@ -144,19 +145,19 @@ private:
     int currentBuffer = 0;
 
     // Sampler
-    VkSampler sampler = VK_NULL_HANDLE;
+    ManagedSampler sampler;
 
     // Main SSR compute pipeline
-    VkPipeline computePipeline = VK_NULL_HANDLE;
-    VkPipelineLayout computePipelineLayout = VK_NULL_HANDLE;
-    VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
+    ManagedPipeline computePipeline;
+    ManagedPipelineLayout computePipelineLayout;
+    ManagedDescriptorSetLayout descriptorSetLayout;
     DescriptorManager::Pool* descriptorPool = nullptr;  // Shared auto-growing pool
     std::vector<VkDescriptorSet> descriptorSets;
 
     // Blur compute pipeline
-    VkPipeline blurPipeline = VK_NULL_HANDLE;
-    VkPipelineLayout blurPipelineLayout = VK_NULL_HANDLE;
-    VkDescriptorSetLayout blurDescriptorSetLayout = VK_NULL_HANDLE;
+    ManagedPipeline blurPipeline;
+    ManagedPipelineLayout blurPipelineLayout;
+    ManagedDescriptorSetLayout blurDescriptorSetLayout;
     std::vector<VkDescriptorSet> blurDescriptorSets;
 
     // Intermediate buffer for blur (SSR writes here, blur reads and writes to final)

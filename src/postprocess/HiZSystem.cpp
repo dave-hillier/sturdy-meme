@@ -2,6 +2,7 @@
 #include "ShaderLoader.h"
 #include "VulkanBarriers.h"
 #include <SDL3/SDL_log.h>
+#include <array>
 #include <cstring>
 #include <algorithm>
 
@@ -174,7 +175,7 @@ bool HiZSystem::createHiZPyramid() {
     samplerInfo.maxLod = static_cast<float>(mipLevelCount);
     samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
 
-    if (vkCreateSampler(device, &samplerInfo, nullptr, &hiZSampler) != VK_SUCCESS) {
+    if (!ManagedSampler::create(device, samplerInfo, hiZSampler)) {
         SDL_Log("HiZSystem: Failed to create Hi-Z sampler");
         return false;
     }
@@ -183,10 +184,8 @@ bool HiZSystem::createHiZPyramid() {
 }
 
 void HiZSystem::destroyHiZPyramid() {
-    if (hiZSampler != VK_NULL_HANDLE) {
-        vkDestroySampler(device, hiZSampler, nullptr);
-        hiZSampler = VK_NULL_HANDLE;
-    }
+    // RAII wrapper handles sampler cleanup
+    hiZSampler = ManagedSampler();
 
     for (auto view : hiZMipViews) {
         if (view != VK_NULL_HANDLE) {
@@ -213,12 +212,11 @@ bool HiZSystem::createPyramidPipeline() {
     // Binding 1: Source Hi-Z mip (sampler2D) - for subsequent passes
     // Binding 2: Destination Hi-Z mip (storage image)
     auto layoutBuilder = DescriptorManager::LayoutBuilder(device)
-        .addCombinedImageSampler(VK_SHADER_STAGE_COMPUTE_BIT)   // 0: src depth
-        .addCombinedImageSampler(VK_SHADER_STAGE_COMPUTE_BIT)   // 1: src Hi-Z mip
-        .addStorageImage(VK_SHADER_STAGE_COMPUTE_BIT);          // 2: dst Hi-Z mip
+        .addCombinedImageSampler(VK_SHADER_STAGE_COMPUTE_BIT)  // 0: Source depth
+        .addCombinedImageSampler(VK_SHADER_STAGE_COMPUTE_BIT)  // 1: Source Hi-Z mip
+        .addStorageImage(VK_SHADER_STAGE_COMPUTE_BIT);         // 2: Destination Hi-Z mip
 
-    pyramidDescSetLayout = layoutBuilder.build();
-    if (pyramidDescSetLayout == VK_NULL_HANDLE) {
+    if (!layoutBuilder.buildManaged(pyramidDescSetLayout)) {
         SDL_Log("HiZSystem: Failed to create pyramid descriptor set layout");
         return false;
     }
@@ -230,14 +228,8 @@ bool HiZSystem::createPyramidPipeline() {
     pushConstantRange.size = sizeof(uint32_t) * 6;  // srcSize, dstSize, srcMipLevel, isFirstPass
 
     // Pipeline layout
-    VkPipelineLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    layoutInfo.setLayoutCount = 1;
-    layoutInfo.pSetLayouts = &pyramidDescSetLayout;
-    layoutInfo.pushConstantRangeCount = 1;
-    layoutInfo.pPushConstantRanges = &pushConstantRange;
-
-    if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &pyramidPipelineLayout) != VK_SUCCESS) {
+    if (!DescriptorManager::createManagedPipelineLayout(
+            device, pyramidDescSetLayout.get(), pyramidPipelineLayout, {pushConstantRange})) {
         SDL_Log("HiZSystem: Failed to create pyramid pipeline layout");
         return false;
     }
@@ -259,13 +251,12 @@ bool HiZSystem::createPyramidPipeline() {
     VkComputePipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
     pipelineInfo.stage = stageInfo;
-    pipelineInfo.layout = pyramidPipelineLayout;
+    pipelineInfo.layout = pyramidPipelineLayout.get();
 
-    VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo,
-                                                nullptr, &pyramidPipeline);
+    bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, pyramidPipeline);
     vkDestroyShaderModule(device, shaderModule, nullptr);
 
-    if (result != VK_SUCCESS) {
+    if (!success) {
         SDL_Log("HiZSystem: Failed to create pyramid compute pipeline");
         return false;
     }
@@ -281,25 +272,20 @@ bool HiZSystem::createCullingPipeline() {
     // Binding 3: Draw count buffer (SSBO, atomic)
     // Binding 4: Hi-Z pyramid (sampler2D)
     auto layoutBuilder = DescriptorManager::LayoutBuilder(device)
-        .addUniformBuffer(VK_SHADER_STAGE_COMPUTE_BIT)          // 0: uniforms
-        .addStorageBuffer(VK_SHADER_STAGE_COMPUTE_BIT)          // 1: objects
-        .addStorageBuffer(VK_SHADER_STAGE_COMPUTE_BIT)          // 2: indirect draw
-        .addStorageBuffer(VK_SHADER_STAGE_COMPUTE_BIT)          // 3: draw count
-        .addCombinedImageSampler(VK_SHADER_STAGE_COMPUTE_BIT);  // 4: Hi-Z pyramid
+        .addUniformBuffer(VK_SHADER_STAGE_COMPUTE_BIT)         // 0: Uniforms
+        .addStorageBuffer(VK_SHADER_STAGE_COMPUTE_BIT)         // 1: Object data
+        .addStorageBuffer(VK_SHADER_STAGE_COMPUTE_BIT)         // 2: Indirect draw buffer
+        .addStorageBuffer(VK_SHADER_STAGE_COMPUTE_BIT)         // 3: Draw count buffer
+        .addCombinedImageSampler(VK_SHADER_STAGE_COMPUTE_BIT); // 4: Hi-Z pyramid
 
-    cullingDescSetLayout = layoutBuilder.build();
-    if (cullingDescSetLayout == VK_NULL_HANDLE) {
+    if (!layoutBuilder.buildManaged(cullingDescSetLayout)) {
         SDL_Log("HiZSystem: Failed to create culling descriptor set layout");
         return false;
     }
 
     // Pipeline layout (no push constants needed)
-    VkPipelineLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    layoutInfo.setLayoutCount = 1;
-    layoutInfo.pSetLayouts = &cullingDescSetLayout;
-
-    if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &cullingPipelineLayout) != VK_SUCCESS) {
+    if (!DescriptorManager::createManagedPipelineLayout(
+            device, cullingDescSetLayout.get(), cullingPipelineLayout)) {
         SDL_Log("HiZSystem: Failed to create culling pipeline layout");
         return false;
     }
@@ -321,13 +307,12 @@ bool HiZSystem::createCullingPipeline() {
     VkComputePipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
     pipelineInfo.stage = stageInfo;
-    pipelineInfo.layout = cullingPipelineLayout;
+    pipelineInfo.layout = cullingPipelineLayout.get();
 
-    VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo,
-                                                nullptr, &cullingPipeline);
+    bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, cullingPipeline);
     vkDestroyShaderModule(device, shaderModule, nullptr);
 
-    if (result != VK_SUCCESS) {
+    if (!success) {
         SDL_Log("HiZSystem: Failed to create culling compute pipeline");
         return false;
     }
@@ -336,31 +321,14 @@ bool HiZSystem::createCullingPipeline() {
 }
 
 void HiZSystem::destroyPipelines() {
-    if (cullingPipeline != VK_NULL_HANDLE) {
-        vkDestroyPipeline(device, cullingPipeline, nullptr);
-        cullingPipeline = VK_NULL_HANDLE;
-    }
-    if (cullingPipelineLayout != VK_NULL_HANDLE) {
-        vkDestroyPipelineLayout(device, cullingPipelineLayout, nullptr);
-        cullingPipelineLayout = VK_NULL_HANDLE;
-    }
-    if (cullingDescSetLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(device, cullingDescSetLayout, nullptr);
-        cullingDescSetLayout = VK_NULL_HANDLE;
-    }
+    // RAII wrappers handle cleanup automatically
+    cullingPipeline = ManagedPipeline();
+    cullingPipelineLayout = ManagedPipelineLayout();
+    cullingDescSetLayout = ManagedDescriptorSetLayout();
 
-    if (pyramidPipeline != VK_NULL_HANDLE) {
-        vkDestroyPipeline(device, pyramidPipeline, nullptr);
-        pyramidPipeline = VK_NULL_HANDLE;
-    }
-    if (pyramidPipelineLayout != VK_NULL_HANDLE) {
-        vkDestroyPipelineLayout(device, pyramidPipelineLayout, nullptr);
-        pyramidPipelineLayout = VK_NULL_HANDLE;
-    }
-    if (pyramidDescSetLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(device, pyramidDescSetLayout, nullptr);
-        pyramidDescSetLayout = VK_NULL_HANDLE;
-    }
+    pyramidPipeline = ManagedPipeline();
+    pyramidPipelineLayout = ManagedPipelineLayout();
+    pyramidDescSetLayout = ManagedDescriptorSetLayout();
 }
 
 bool HiZSystem::createBuffers() {
@@ -443,27 +411,27 @@ void HiZSystem::destroyBuffers() {
 
 bool HiZSystem::createDescriptorSets() {
     // Allocate pyramid descriptor sets (one per mip level) using managed pool
-    pyramidDescSets = descriptorPool->allocate(pyramidDescSetLayout, mipLevelCount);
+    pyramidDescSets = descriptorPool->allocate(pyramidDescSetLayout.get(), mipLevelCount);
     if (pyramidDescSets.size() != mipLevelCount) {
         SDL_Log("HiZSystem: Failed to allocate pyramid descriptor sets");
         return false;
     }
 
     // Allocate culling descriptor sets (one per frame) using managed pool
-    cullingDescSets = descriptorPool->allocate(cullingDescSetLayout, framesInFlight);
+    cullingDescSets = descriptorPool->allocate(cullingDescSetLayout.get(), framesInFlight);
     if (cullingDescSets.size() != framesInFlight) {
         SDL_Log("HiZSystem: Failed to allocate culling descriptor sets");
         return false;
     }
 
     for (uint32_t i = 0; i < framesInFlight; ++i) {
-        // Update culling descriptor set
+        // Update culling descriptor set using SetWriter
         DescriptorManager::SetWriter(device, cullingDescSets[i])
             .writeBuffer(0, uniformBuffers.buffers[i], 0, sizeof(HiZCullUniforms))
             .writeBuffer(1, objectDataBuffer, 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
             .writeBuffer(2, indirectDrawBuffers.buffers[i], 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
             .writeBuffer(3, drawCountBuffers.buffers[i], 0, sizeof(uint32_t), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeImage(4, hiZPyramidView, hiZSampler)
+            .writeImage(4, hiZPyramidView, hiZSampler.get())
             .update();
     }
 
@@ -490,7 +458,7 @@ void HiZSystem::setDepthBuffer(VkImageView depthView, VkSampler depthSampler) {
 
         DescriptorManager::SetWriter(device, pyramidDescSets[mip])
             .writeImage(0, sourceDepthView, sourceDepthSampler, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL)
-            .writeImage(1, srcMipView, hiZSampler)
+            .writeImage(1, srcMipView, hiZSampler.get())
             .writeStorageImage(2, hiZMipViews[mip])
             .update();
     }
@@ -548,7 +516,7 @@ void HiZSystem::recordPyramidGeneration(VkCommandBuffer cmd, uint32_t frameIndex
     // Transition Hi-Z pyramid to general for writing
     Barriers::prepareImageForCompute(cmd, hiZPyramidImage, mipLevelCount, 1);
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pyramidPipeline);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pyramidPipeline.get());
 
     // Generate each mip level
     uint32_t srcWidth = extent.width;
@@ -577,11 +545,11 @@ void HiZSystem::recordPyramidGeneration(VkCommandBuffer cmd, uint32_t frameIndex
             mip == 0 ? 1u : 0u
         };
 
-        vkCmdPushConstants(cmd, pyramidPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT,
+        vkCmdPushConstants(cmd, pyramidPipelineLayout.get(), VK_SHADER_STAGE_COMPUTE_BIT,
                            0, sizeof(pushConstants), &pushConstants);
 
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                                pyramidPipelineLayout, 0, 1, &pyramidDescSets[mip], 0, nullptr);
+                                pyramidPipelineLayout.get(), 0, 1, &pyramidDescSets[mip], 0, nullptr);
 
         // Dispatch
         uint32_t groupsX = (dstWidth + 7) / 8;
@@ -615,9 +583,9 @@ void HiZSystem::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex) {
     Barriers::clearBufferForComputeReadWrite(cmd, drawCountBuffers.buffers[frameIndex]);
 
     // Bind culling pipeline and descriptor set
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullingPipeline);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullingPipeline.get());
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                            cullingPipelineLayout, 0, 1, &cullingDescSets[frameIndex], 0, nullptr);
+                            cullingPipelineLayout.get(), 0, 1, &cullingDescSets[frameIndex], 0, nullptr);
 
     // Dispatch
     uint32_t groupCount = (objectCount + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
