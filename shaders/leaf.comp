@@ -4,6 +4,7 @@
 
 #include "bindings.glsl"
 #include "terrain_height_common.glsl"
+#include "instancing_common.glsl"
 
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
@@ -32,12 +33,7 @@ struct LeafParticle {
     float padding;          // 4 bytes
 };
 
-struct DrawIndirectCommand {
-    uint vertexCount;
-    uint instanceCount;
-    uint firstVertex;
-    uint firstInstance;
-};
+// DrawIndirectCommand is now provided by instancing_common.glsl
 
 // Input particle buffer (previous frame)
 layout(std430, binding = BINDING_LEAF_COMPUTE_INPUT) readonly buffer InputParticleBuffer {
@@ -144,17 +140,10 @@ const int perm[512] = int[512](
     222,114,67,29,24,72,243,141,128,195,78,66,215,61,156,180
 );
 
-// Hash functions
-float hash(float n) {
-    return fract(sin(n) * 43758.5453);
-}
-
-vec3 hash3(vec3 p) {
-    p = vec3(dot(p, vec3(127.1, 311.7, 74.7)),
-             dot(p, vec3(269.5, 183.3, 246.1)),
-             dot(p, vec3(113.5, 271.9, 124.6)));
-    return fract(sin(p) * 43758.5453);
-}
+// Hash functions - use instancing_common.glsl versions
+// Local aliases for compatibility with existing code
+#define hash(n) hash1D(n)
+#define hash3(p) hash3D(p)
 
 float fade(float t) {
     return t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
@@ -261,15 +250,9 @@ vec4 quatFromAxisAngle(vec3 axis, float angle) {
     return vec4(axis * s, cos(halfAngle));
 }
 
-// Check if particle is inside frustum
-bool isInFrustum(vec3 pos, float margin) {
-    vec4 posW = vec4(pos, 1.0);
-    for (int i = 0; i < 6; i++) {
-        if (dot(posW, uniforms.frustumPlanes[i]) < -margin) {
-            return false;
-        }
-    }
-    return true;
+// Check if particle is inside frustum - uses instancing_common.glsl
+bool isInFrustumLocal(vec3 pos, float margin) {
+    return isInFrustum(uniforms.frustumPlanes, pos, margin);
 }
 
 // Spawn a new falling leaf
@@ -409,9 +392,9 @@ void main() {
     uint idx = gl_GlobalInvocationID.x;
     if (idx >= MAX_PARTICLES) return;
 
-    // Set vertex count for quad (4 vertices for triangle strip)
+    // Set vertex count for quad using common helper (4 vertices for triangle strip)
     if (idx == 0) {
-        atomicMax(drawCmd.vertexCount, 4);
+        setVertexCount(drawCmd, 4);
     }
 
     float dt = push.deltaTime;
@@ -637,8 +620,8 @@ void main() {
         visible = false;
     }
 
-    // Frustum culling
-    if (visible && !isInFrustum(p.position, p.size * 2.0)) {
+    // Frustum culling using common helper
+    if (visible && !isInFrustumLocal(p.position, p.size * 2.0)) {
         visible = false;
     }
 
@@ -658,6 +641,6 @@ void main() {
         outputParticles[idx].flags &= ~FLAG_VISIBLE;
     }
 
-    // Update instance count
-    atomicMax(drawCmd.instanceCount, totalTarget);
+    // Update instance count using common helper
+    setInstanceCount(drawCmd, totalTarget);
 }

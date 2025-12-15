@@ -4,6 +4,7 @@
 
 #include "bindings.glsl"
 #include "terrain_height_common.glsl"
+#include "instancing_common.glsl"
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
@@ -13,12 +14,7 @@ struct GrassInstance {
     vec4 terrainNormal;      // xyz = terrain normal (for tangent alignment), w = unused
 };
 
-struct DrawIndirectCommand {
-    uint vertexCount;
-    uint instanceCount;
-    uint firstVertex;
-    uint firstInstance;
-};
+// DrawIndirectCommand is now provided by instancing_common.glsl
 
 layout(std430, binding = BINDING_GRASS_COMPUTE_INSTANCES) buffer InstanceBuffer {
     GrassInstance instances[];
@@ -50,19 +46,11 @@ layout(push_constant) uniform PushConstants {
     float time;
 } push;
 
-// Hash functions for procedural placement
-float hash(vec2 p) {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
-}
-
-float hash2(vec2 p) {
-    return fract(sin(dot(p, vec2(269.5, 183.3))) * 43758.5453);
-}
-
-// Returns vec2 hash for a cell
-vec2 hash2v(vec2 p) {
-    return vec2(hash(p), hash(p + vec2(47.0, 13.0)));
-}
+// Hash functions - use instancing_common.glsl versions
+// Local aliases for compatibility with existing code
+#define hash(p) hash2D(p)
+#define hash2(p) hash2D_alt(p)
+#define hash2v(p) hash2D_vec2(p)
 
 // Calculate terrain normal from heightmap gradient (uses shared terrain_height_common.glsl)
 vec3 calculateTerrainNormal(vec2 uv) {
@@ -139,10 +127,10 @@ void calculateClump(vec2 worldPos, float clumpScale,
 void main() {
     uint idx = gl_GlobalInvocationID.x;
 
-    // Set vertexCount atomically (buffer is pre-cleared to 0 by CPU, so atomicMax ensures it becomes 15)
-    // This is safe even with multiple workgroups since they all write the same value
+    // Set vertexCount atomically using common helper
+    // (buffer is pre-cleared to 0 by CPU, so atomicMax ensures it becomes 15)
     if (idx == 0) {
-        atomicMax(drawCmd.vertexCount, 15);  // 5 segments * 3 vertices per triangle
+        setVertexCount(drawCmd, 15);  // 5 segments * 3 vertices per triangle
     }
 
     // Generate grass positions in a grid pattern
@@ -183,26 +171,21 @@ void main() {
     // Calculate terrain normal for tangent-aligned grass placement
     vec3 terrainNormal = calculateTerrainNormal(terrainUV);
 
-    // Distance culling (relative to camera)
-    float distToCamera = length(worldPos - uniforms.cameraPosition.xyz);
+    // Distance culling (relative to camera) using common helper
+    float distToCamera = getDistanceToCamera(worldPos, uniforms.cameraPosition.xyz);
     if (distToCamera > uniforms.maxDrawDistance) return;
 
-    // Frustum culling - check against all 6 planes
+    // Frustum culling using common helper
     // Use large margin (5.0) to ensure grass behind camera can still cast shadows
-    vec4 posW = vec4(worldPos, 1.0);
-    for (int i = 0; i < 6; i++) {
-        // If position is behind any plane with margin, cull it
-        if (dot(posW, uniforms.frustumPlanes[i]) < -5.0) return;
-    }
+    if (!isInFrustum(uniforms.frustumPlanes, worldPos, 5.0)) return;
 
-    // LOD blade dropping - probabilistically drop blades at distance
-    float lodFactor = smoothstep(uniforms.lodTransitionStart,
-                                 uniforms.lodTransitionEnd, distToCamera);
-    float dropThreshold = lodFactor * 0.75; // Drop up to 75% at max LOD distance
-    if (hash(cell + vec2(500.0, 500.0)) < dropThreshold) return;
+    // LOD blade dropping using common helper
+    // Drop up to 75% at max LOD distance
+    float instanceHash = hash(cell + vec2(500.0, 500.0));
+    if (lodCull(distToCamera, uniforms.lodTransitionStart, uniforms.lodTransitionEnd, 0.75, instanceHash)) return;
 
-    // Atomically increment instance count and get our slot
-    uint slot = atomicAdd(drawCmd.instanceCount, 1);
+    // Atomically increment instance count and get our slot using common helper
+    uint slot = allocateInstanceSlot(drawCmd);
 
     // Calculate clumping
     float clumpId, clumpDist;

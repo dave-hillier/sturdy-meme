@@ -3,6 +3,7 @@
 #extension GL_GOOGLE_include_directive : require
 
 #include "bindings.glsl"
+#include "instancing_common.glsl"
 
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
@@ -18,12 +19,7 @@ struct WeatherParticle {
     uint flags;     // bit 0 = active
 };
 
-struct DrawIndirectCommand {
-    uint vertexCount;
-    uint instanceCount;
-    uint firstVertex;
-    uint firstInstance;
-};
+// DrawIndirectCommand is now provided by instancing_common.glsl
 
 // Input particle buffer (previous frame)
 layout(std430, binding = BINDING_WEATHER_PARTICLES) readonly buffer InputParticleBuffer {
@@ -79,21 +75,11 @@ const float PARTICLE_LIFETIME_SNOW = 15.0;
 // Flag bits
 const uint FLAG_ACTIVE = 1u;
 
-// Hash functions for randomization
-float hash(float n) {
-    return fract(sin(n) * 43758.5453);
-}
-
-float hash2(vec2 p) {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
-}
-
-vec3 hash3(vec3 p) {
-    p = vec3(dot(p, vec3(127.1, 311.7, 74.7)),
-             dot(p, vec3(269.5, 183.3, 246.1)),
-             dot(p, vec3(113.5, 271.9, 124.6)));
-    return fract(sin(p) * 43758.5453);
-}
+// Hash functions - use instancing_common.glsl versions
+// Local aliases for compatibility with existing code
+#define hash(n) hash1D(n)
+#define hash2(p) hash2D(p)
+#define hash3(p) hash3D(p)
 
 // Perlin noise for turbulence
 const int perm[512] = int[512](
@@ -197,15 +183,9 @@ vec3 sampleWind(vec3 worldPos) {
     return (windDir3D + perpWind * turbulenceAngle) * windStrength;
 }
 
-// Check if particle is inside frustum
-bool isInFrustum(vec3 pos, float margin) {
-    vec4 posW = vec4(pos, 1.0);
-    for (int i = 0; i < 6; i++) {
-        if (dot(posW, uniforms.frustumPlanes[i]) < -margin) {
-            return false;
-        }
-    }
-    return true;
+// Check if particle is inside frustum - uses instancing_common.glsl
+bool isInFrustumLocal(vec3 pos, float margin) {
+    return isInFrustum(uniforms.frustumPlanes, pos, margin);
 }
 
 // Spawn a new particle at the given index
@@ -259,9 +239,9 @@ void main() {
     uint idx = gl_GlobalInvocationID.x;
     if (idx >= MAX_PARTICLES) return;
 
-    // Set vertex count for quad (4 vertices for triangle strip)
+    // Set vertex count for quad using common helper (4 vertices for triangle strip)
     if (idx == 0) {
-        atomicMax(drawCmd.vertexCount, 4);
+        setVertexCount(drawCmd, 4);
     }
 
     // Calculate target particle count based on intensity
@@ -358,9 +338,9 @@ void main() {
         visible = false;
     }
 
-    // Frustum culling with margin
+    // Frustum culling with margin using common helper
     float cullMargin = uniforms.weatherType == 0 ? 1.0 : 2.0;
-    if (visible && !isInFrustum(p.position, cullMargin)) {
+    if (visible && !isInFrustumLocal(p.position, cullMargin)) {
         visible = false;
     }
 
@@ -380,7 +360,6 @@ void main() {
         outputParticles[idx].flags &= ~2u;  // Clear visible bit
     }
 
-    // Set instance count to target particles (all active particles get processed)
-    // Use atomicMax to ensure it's set to targetParticles
-    atomicMax(drawCmd.instanceCount, targetParticles);
+    // Set instance count to target particles using common helper
+    setInstanceCount(drawCmd, targetParticles);
 }
