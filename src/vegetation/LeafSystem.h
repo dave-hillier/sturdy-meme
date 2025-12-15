@@ -100,10 +100,10 @@ public:
 
 private:
     bool createBuffers();
-    bool createComputeDescriptorSetLayout();
-    bool createComputePipeline();
-    bool createGraphicsDescriptorSetLayout();
-    bool createGraphicsPipeline();
+    bool createComputeDescriptorSetLayout(SystemLifecycleHelper::PipelineHandles& handles);
+    bool createComputePipeline(SystemLifecycleHelper::PipelineHandles& handles);
+    bool createGraphicsDescriptorSetLayout(SystemLifecycleHelper::PipelineHandles& handles);
+    bool createGraphicsPipeline(SystemLifecycleHelper::PipelineHandles& handles);
     bool createDescriptorSets();
     void destroyBuffers(VmaAllocator allocator);
 

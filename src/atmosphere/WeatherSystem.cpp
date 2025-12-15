@@ -18,17 +18,31 @@ bool WeatherSystem::init(const InitInfo& info) {
     storedShaderPath = info.shaderPath;
     storedFramesInFlight = info.framesInFlight;
 
+    // Pointer to the ParticleSystem being initialized (for hooks to access)
+    ParticleSystem* initializingPS = nullptr;
+
     SystemLifecycleHelper::Hooks hooks{};
     hooks.createBuffers = [this]() { return createBuffers(); };
-    hooks.createComputeDescriptorSetLayout = [this]() { return createComputeDescriptorSetLayout(); };
-    hooks.createComputePipeline = [this]() { return createComputePipeline(); };
-    hooks.createGraphicsDescriptorSetLayout = [this]() { return createGraphicsDescriptorSetLayout(); };
-    hooks.createGraphicsPipeline = [this]() { return createGraphicsPipeline(); };
+    hooks.createComputeDescriptorSetLayout = [this, &initializingPS]() {
+        return createComputeDescriptorSetLayout(initializingPS->getComputePipelineHandles());
+    };
+    hooks.createComputePipeline = [this, &initializingPS]() {
+        return createComputePipeline(initializingPS->getComputePipelineHandles());
+    };
+    hooks.createGraphicsDescriptorSetLayout = [this, &initializingPS]() {
+        return createGraphicsDescriptorSetLayout(initializingPS->getGraphicsPipelineHandles());
+    };
+    hooks.createGraphicsPipeline = [this, &initializingPS]() {
+        return createGraphicsPipeline(initializingPS->getGraphicsPipelineHandles());
+    };
     hooks.createDescriptorSets = [this]() { return createDescriptorSets(); };
     hooks.destroyBuffers = [this](VmaAllocator allocator) { destroyBuffers(allocator); };
 
     particleSystem = RAIIAdapter<ParticleSystem>::create(
-        [&](auto& p) { return p.init(info, hooks, BUFFER_SET_COUNT); },
+        [&](auto& p) {
+            initializingPS = &p;
+            return p.init(info, hooks, BUFFER_SET_COUNT);
+        },
         [](auto& p) { p.destroy(p.getDevice(), p.getAllocator()); }
     );
     return particleSystem.has_value();
@@ -82,8 +96,7 @@ bool WeatherSystem::createBuffers() {
     return true;
 }
 
-bool WeatherSystem::createComputeDescriptorSetLayout() {
-    auto& computePipeline = getComputePipelineHandles();
+bool WeatherSystem::createComputeDescriptorSetLayout(SystemLifecycleHelper::PipelineHandles& handles) {
     PipelineBuilder builder(getDevice());
     builder.addDescriptorBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT)
         .addDescriptorBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT)
@@ -91,24 +104,22 @@ bool WeatherSystem::createComputeDescriptorSetLayout() {
         .addDescriptorBinding(3, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT)
         .addDescriptorBinding(4, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT);
 
-    return builder.buildDescriptorSetLayout(computePipeline.descriptorSetLayout);
+    return builder.buildDescriptorSetLayout(handles.descriptorSetLayout);
 }
 
-bool WeatherSystem::createComputePipeline() {
-    auto& computePipeline = getComputePipelineHandles();
+bool WeatherSystem::createComputePipeline(SystemLifecycleHelper::PipelineHandles& handles) {
     PipelineBuilder builder(getDevice());
     builder.addShaderStage(getShaderPath() + "/weather.comp.spv", VK_SHADER_STAGE_COMPUTE_BIT)
         .addPushConstantRange(VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(WeatherPushConstants));
 
-    if (!builder.buildPipelineLayout({computePipeline.descriptorSetLayout}, computePipeline.pipelineLayout)) {
+    if (!builder.buildPipelineLayout({handles.descriptorSetLayout}, handles.pipelineLayout)) {
         return false;
     }
 
-    return builder.buildComputePipeline(computePipeline.pipelineLayout, computePipeline.pipeline);
+    return builder.buildComputePipeline(handles.pipelineLayout, handles.pipeline);
 }
 
-bool WeatherSystem::createGraphicsDescriptorSetLayout() {
-    auto& graphicsPipeline = getGraphicsPipelineHandles();
+bool WeatherSystem::createGraphicsDescriptorSetLayout(SystemLifecycleHelper::PipelineHandles& handles) {
     PipelineBuilder builder(getDevice());
     builder.addDescriptorBinding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1,
                                  VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
@@ -116,11 +127,10 @@ bool WeatherSystem::createGraphicsDescriptorSetLayout() {
         .addDescriptorBinding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT)
         .addDescriptorBinding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT);
 
-    return builder.buildDescriptorSetLayout(graphicsPipeline.descriptorSetLayout);
+    return builder.buildDescriptorSetLayout(handles.descriptorSetLayout);
 }
 
-bool WeatherSystem::createGraphicsPipeline() {
-    auto& graphicsPipeline = getGraphicsPipelineHandles();
+bool WeatherSystem::createGraphicsPipeline(SystemLifecycleHelper::PipelineHandles& handles) {
     PipelineBuilder builder(getDevice());
     builder.addShaderStage(getShaderPath() + "/weather.vert.spv", VK_SHADER_STAGE_VERTEX_BIT)
         .addShaderStage(getShaderPath() + "/weather.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT)
@@ -207,7 +217,7 @@ bool WeatherSystem::createGraphicsPipeline() {
     dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
     dynamicState.pDynamicStates = dynamicStates.data();
 
-    if (!builder.buildPipelineLayout({graphicsPipeline.descriptorSetLayout}, graphicsPipeline.pipelineLayout)) {
+    if (!builder.buildPipelineLayout({handles.descriptorSetLayout}, handles.pipelineLayout)) {
         return false;
     }
 
@@ -224,7 +234,7 @@ bool WeatherSystem::createGraphicsPipeline() {
     pipelineInfo.renderPass = getRenderPass();
     pipelineInfo.subpass = 0;
 
-    return builder.buildGraphicsPipeline(pipelineInfo, graphicsPipeline.pipelineLayout, graphicsPipeline.pipeline);
+    return builder.buildGraphicsPipeline(pipelineInfo, handles.pipelineLayout, handles.pipeline);
 }
 
 bool WeatherSystem::createDescriptorSets() {
