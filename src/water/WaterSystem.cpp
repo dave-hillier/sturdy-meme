@@ -114,7 +114,7 @@ bool WaterSystem::createDescriptorSetLayout() {
     // 10: Scene depth texture (Phase 11: dual depth for refraction)
     // 11-13: FFT Ocean displacement maps (vertex shader)
 
-    descriptorSetLayout = DescriptorManager::LayoutBuilder(device)
+    VkDescriptorSetLayout rawLayout = DescriptorManager::LayoutBuilder(device)
         .addUniformBuffer(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)  // 0: Main UBO
         .addUniformBuffer(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)  // 1: Water uniforms
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 2: Shadow map
@@ -131,10 +131,11 @@ bool WaterSystem::createDescriptorSetLayout() {
         .addCombinedImageSampler(VK_SHADER_STAGE_VERTEX_BIT)    // 13: Ocean foam
         .build();
 
-    if (descriptorSetLayout.get() == VK_NULL_HANDLE) {
+    if (rawLayout == VK_NULL_HANDLE) {
         SDL_Log("Failed to create water descriptor set layout");
         return false;
     }
+    descriptorSetLayout = ManagedDescriptorSetLayout::fromRaw(device, rawLayout);
 
     // Create pipeline layout with push constants for model matrix + FFT params
     VkPushConstantRange pushConstantRange{};
@@ -142,11 +143,12 @@ bool WaterSystem::createDescriptorSetLayout() {
     pushConstantRange.offset = 0;
     pushConstantRange.size = sizeof(PushConstants);
 
-    pipelineLayout = DescriptorManager::createPipelineLayout(device, descriptorSetLayout.get(), {pushConstantRange});
-    if (pipelineLayout.get() == VK_NULL_HANDLE) {
+    VkPipelineLayout rawPipelineLayout = DescriptorManager::createPipelineLayout(device, descriptorSetLayout.get(), {pushConstantRange});
+    if (rawPipelineLayout == VK_NULL_HANDLE) {
         SDL_Log("Failed to create water pipeline layout");
         return false;
     }
+    pipelineLayout = ManagedPipelineLayout::fromRaw(device, rawPipelineLayout);
 
     return true;
 }
