@@ -11,6 +11,7 @@
 #include "ParticleSystem.h"
 #include "UBOs.h"
 #include "core/RAIIAdapter.h"
+#include "core/VulkanRAII.h"
 #include <optional>
 
 struct GrassPushConstants {
@@ -74,7 +75,7 @@ public:
 
     // Displacement texture accessors (for sharing with LeafSystem)
     VkImageView getDisplacementImageView() const { return displacementImageView; }
-    VkSampler getDisplacementSampler() const { return displacementSampler; }
+    VkSampler getDisplacementSampler() const { return displacementSampler_.get(); }
 
     void setEnvironmentSettings(const EnvironmentSettings* settings) { environmentSettings = settings; }
 
@@ -122,9 +123,9 @@ private:
     uint32_t shadowMapSize = 0;
 
     // Shadow pipeline (for casting shadows)
-    VkDescriptorSetLayout shadowDescriptorSetLayout = VK_NULL_HANDLE;
-    VkPipelineLayout shadowPipelineLayout = VK_NULL_HANDLE;
-    VkPipeline shadowPipeline = VK_NULL_HANDLE;
+    ManagedDescriptorSetLayout shadowDescriptorSetLayout_;
+    ManagedPipelineLayout shadowPipelineLayout_;
+    ManagedPipeline shadowPipeline_;
 
     // Displacement texture resources (for player/NPC grass interaction)
     static constexpr uint32_t DISPLACEMENT_TEXTURE_SIZE = 512;  // 512x512 texels
@@ -134,12 +135,12 @@ private:
     VkImage displacementImage = VK_NULL_HANDLE;
     VmaAllocation displacementAllocation = VK_NULL_HANDLE;
     VkImageView displacementImageView = VK_NULL_HANDLE;
-    VkSampler displacementSampler = VK_NULL_HANDLE;
+    ManagedSampler displacementSampler_;
 
     // Displacement update compute pipeline
-    VkDescriptorSetLayout displacementDescriptorSetLayout = VK_NULL_HANDLE;
-    VkPipelineLayout displacementPipelineLayout = VK_NULL_HANDLE;
-    VkPipeline displacementPipeline = VK_NULL_HANDLE;
+    ManagedDescriptorSetLayout displacementDescriptorSetLayout_;
+    ManagedPipelineLayout displacementPipelineLayout_;
+    ManagedPipeline displacementPipeline_;
     // Per-frame descriptor sets for displacement update (double-buffered)
     std::vector<VkDescriptorSet> displacementDescriptorSets;
 

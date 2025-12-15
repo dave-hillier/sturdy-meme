@@ -58,11 +58,8 @@ void BillboardCapture::destroy() {
         uboBuffer = VK_NULL_HANDLE;
     }
 
-    if (solidPipeline) vkDestroyPipeline(device, solidPipeline, nullptr);
-    if (leafPipeline) vkDestroyPipeline(device, leafPipeline, nullptr);
-    if (pipelineLayout) vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
-    if (descriptorSetLayout) vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
-    if (renderPass) vkDestroyRenderPass(device, renderPass, nullptr);
+    // RAII wrappers automatically clean up: solidPipeline_, leafPipeline_,
+    // pipelineLayout_, descriptorSetLayout_, renderPass_, framebuffer_, sampler_
 }
 
 bool BillboardCapture::createRenderPass() {
@@ -121,7 +118,7 @@ bool BillboardCapture::createRenderPass() {
     createInfo.dependencyCount = 1;
     createInfo.pDependencies = &dependency;
 
-    if (vkCreateRenderPass(device, &createInfo, nullptr, &renderPass) != VK_SUCCESS) {
+    if (!ManagedRenderPass::create(device, createInfo, renderPass_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create billboard render pass");
         return false;
     }
@@ -199,14 +196,14 @@ bool BillboardCapture::createRenderTarget(uint32_t width, uint32_t height) {
 
     VkFramebufferCreateInfo fbInfo{};
     fbInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-    fbInfo.renderPass = renderPass;
+    fbInfo.renderPass = renderPass_.get();
     fbInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
     fbInfo.pAttachments = attachments.data();
     fbInfo.width = width;
     fbInfo.height = height;
     fbInfo.layers = 1;
 
-    if (vkCreateFramebuffer(device, &fbInfo, nullptr, &framebuffer) != VK_SUCCESS) {
+    if (!ManagedFramebuffer::create(device, fbInfo, framebuffer_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create billboard framebuffer");
         return false;
     }
@@ -236,10 +233,8 @@ void BillboardCapture::destroyRenderTarget() {
         stagingBuffer = VK_NULL_HANDLE;
     }
 
-    if (framebuffer) {
-        vkDestroyFramebuffer(device, framebuffer, nullptr);
-        framebuffer = VK_NULL_HANDLE;
-    }
+    // Reset RAII framebuffer wrapper
+    framebuffer_ = ManagedFramebuffer();
 
     if (depthImageView) {
         vkDestroyImageView(device, depthImageView, nullptr);
@@ -268,7 +263,7 @@ void BillboardCapture::destroyRenderTarget() {
 bool BillboardCapture::createDescriptorSetLayout() {
     // Use DescriptorManager::LayoutBuilder for consistent descriptor set layout creation
     // Same layout as TreeEditSystem: 1 UBO + 5 texture samplers
-    descriptorSetLayout = DescriptorManager::LayoutBuilder(device)
+    VkDescriptorSetLayout rawLayout = DescriptorManager::LayoutBuilder(device)
         .addUniformBuffer(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)  // 0: Scene UBO
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 1: Bark color texture
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 2: Bark normal texture
@@ -277,18 +272,20 @@ bool BillboardCapture::createDescriptorSetLayout() {
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 5: Leaf texture
         .build();
 
-    if (descriptorSetLayout == VK_NULL_HANDLE) {
+    if (rawLayout == VK_NULL_HANDLE) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create billboard descriptor set layout");
         return false;
     }
 
+    // Adopt raw handle into RAII wrapper
+    descriptorSetLayout_ = ManagedDescriptorSetLayout::fromRaw(device, rawLayout);
     return true;
 }
 
 bool BillboardCapture::createDescriptorSets() {
     if (!descriptorPool) return false;
 
-    auto sets = descriptorPool->allocate(descriptorSetLayout, 1);
+    auto sets = descriptorPool->allocate(descriptorSetLayout_.get(), 1);
     if (sets.empty()) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate billboard descriptor set");
         return false;
@@ -401,14 +398,15 @@ bool BillboardCapture::createPipeline() {
     pushConstantRange.offset = 0;
     pushConstantRange.size = sizeof(TreePushConstants);
 
+    VkDescriptorSetLayout rawLayout = descriptorSetLayout_.get();
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.setLayoutCount = 1;
-    pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;
+    pipelineLayoutInfo.pSetLayouts = &rawLayout;
     pipelineLayoutInfo.pushConstantRangeCount = 1;
     pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
 
-    if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
+    if (!ManagedPipelineLayout::create(device, pipelineLayoutInfo, pipelineLayout_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create billboard pipeline layout");
         vkDestroyShaderModule(device, vertModule, nullptr);
         vkDestroyShaderModule(device, fragModule, nullptr);
@@ -428,11 +426,11 @@ bool BillboardCapture::createPipeline() {
     pipelineInfo.pDepthStencilState = &depthStencil;
     pipelineInfo.pColorBlendState = &colorBlending;
     pipelineInfo.pDynamicState = &dynamicState;
-    pipelineInfo.layout = pipelineLayout;
-    pipelineInfo.renderPass = renderPass;
+    pipelineInfo.layout = pipelineLayout_.get();
+    pipelineInfo.renderPass = renderPass_.get();
     pipelineInfo.subpass = 0;
 
-    if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &solidPipeline) != VK_SUCCESS) {
+    if (!ManagedPipeline::createGraphics(device, VK_NULL_HANDLE, pipelineInfo, solidPipeline_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create billboard solid pipeline");
         vkDestroyShaderModule(device, vertModule, nullptr);
         vkDestroyShaderModule(device, fragModule, nullptr);
@@ -449,7 +447,7 @@ bool BillboardCapture::createPipeline() {
     colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
     colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
 
-    if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &leafPipeline) != VK_SUCCESS) {
+    if (!ManagedPipeline::createGraphics(device, VK_NULL_HANDLE, pipelineInfo, leafPipeline_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create billboard leaf pipeline");
         vkDestroyShaderModule(device, vertModule, nullptr);
         vkDestroyShaderModule(device, fragModule, nullptr);
@@ -573,8 +571,8 @@ bool BillboardCapture::renderCapture(
 
     VkRenderPassBeginInfo rpInfo{};
     rpInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    rpInfo.renderPass = renderPass;
-    rpInfo.framebuffer = framebuffer;
+    rpInfo.renderPass = renderPass_.get();
+    rpInfo.framebuffer = framebuffer_.get();
     rpInfo.renderArea.offset = {0, 0};
     rpInfo.renderArea.extent = {renderWidth, renderHeight};
     rpInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
@@ -598,7 +596,7 @@ bool BillboardCapture::renderCapture(
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
     // Bind descriptor set
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout,
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout_.get(),
                             0, 1, &descriptorSet, 0, nullptr);
 
     // Push constants
@@ -611,8 +609,8 @@ bool BillboardCapture::renderCapture(
 
     // Draw branches
     if (branchMesh.getIndexCount() > 0 && branchMesh.getVertexBuffer() != VK_NULL_HANDLE) {
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, solidPipeline);
-        vkCmdPushConstants(cmd, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, solidPipeline_.get());
+        vkCmdPushConstants(cmd, pipelineLayout_.get(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                            0, sizeof(TreePushConstants), &pc);
 
         VkBuffer vertexBuffers[] = {branchMesh.getVertexBuffer()};
@@ -624,12 +622,12 @@ bool BillboardCapture::renderCapture(
 
     // Draw leaves
     if (leafMesh.getIndexCount() > 0 && leafMesh.getVertexBuffer() != VK_NULL_HANDLE) {
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, leafPipeline);
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, leafPipeline_.get());
 
         pc.roughness = 0.6f;
         pc.alphaTest = treeParams.leafAlphaTest;
         pc.isLeaf = 1;
-        vkCmdPushConstants(cmd, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+        vkCmdPushConstants(cmd, pipelineLayout_.get(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                            0, sizeof(TreePushConstants), &pc);
 
         VkBuffer vertexBuffers[] = {leafMesh.getVertexBuffer()};

@@ -12,6 +12,7 @@
 #include "Texture.h"
 #include "UBOs.h"
 #include "DescriptorManager.h"
+#include "core/VulkanRAII.h"
 
 // Capture angle definition
 struct CaptureAngle {
@@ -134,9 +135,9 @@ private:
     VmaAllocation depthAllocation = VK_NULL_HANDLE;
     VkImageView depthImageView = VK_NULL_HANDLE;
 
-    VkRenderPass renderPass = VK_NULL_HANDLE;
-    VkFramebuffer framebuffer = VK_NULL_HANDLE;
-    VkSampler sampler = VK_NULL_HANDLE;
+    ManagedRenderPass renderPass_;
+    ManagedFramebuffer framebuffer_;
+    ManagedSampler sampler_;
 
     uint32_t renderWidth = 0;
     uint32_t renderHeight = 0;
@@ -146,10 +147,10 @@ private:
     VmaAllocation stagingAllocation = VK_NULL_HANDLE;
 
     // Pipeline
-    VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
-    VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
-    VkPipeline solidPipeline = VK_NULL_HANDLE;
-    VkPipeline leafPipeline = VK_NULL_HANDLE;
+    ManagedDescriptorSetLayout descriptorSetLayout_;
+    ManagedPipelineLayout pipelineLayout_;
+    ManagedPipeline solidPipeline_;
+    ManagedPipeline leafPipeline_;
 
     // Descriptor sets
     VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
