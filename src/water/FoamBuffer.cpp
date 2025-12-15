@@ -55,28 +55,11 @@ void FoamBuffer::destroy() {
         descriptorPool = VK_NULL_HANDLE;
     }
 
-    // Destroy descriptor set layout
-    if (descriptorSetLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
-        descriptorSetLayout = VK_NULL_HANDLE;
-    }
-
-    // Destroy compute pipeline
-    if (computePipeline != VK_NULL_HANDLE) {
-        vkDestroyPipeline(device, computePipeline, nullptr);
-        computePipeline = VK_NULL_HANDLE;
-    }
-
-    if (computePipelineLayout != VK_NULL_HANDLE) {
-        vkDestroyPipelineLayout(device, computePipelineLayout, nullptr);
-        computePipelineLayout = VK_NULL_HANDLE;
-    }
-
-    // Destroy sampler
-    if (sampler != VK_NULL_HANDLE) {
-        vkDestroySampler(device, sampler, nullptr);
-        sampler = VK_NULL_HANDLE;
-    }
+    // RAII wrappers handle cleanup automatically - just reset them
+    descriptorSetLayout = ManagedDescriptorSetLayout();
+    computePipeline = ManagedPipeline();
+    computePipelineLayout = ManagedPipelineLayout();
+    sampler = ManagedSampler();
 
     // Destroy foam buffers
     for (int i = 0; i < 2; i++) {
@@ -160,11 +143,7 @@ bool FoamBuffer::createFoamBuffers() {
     samplerInfo.maxLod = 0.0f;
     samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
 
-    if (vkCreateSampler(device, &samplerInfo, nullptr, &sampler) != VK_SUCCESS) {
-        return false;
-    }
-
-    return true;
+    return ManagedSampler::create(device, samplerInfo, sampler);
 }
 
 bool FoamBuffer::createWakeBuffers() {
@@ -235,7 +214,7 @@ bool FoamBuffer::createComputePipeline() {
     layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
     layoutInfo.pBindings = bindings.data();
 
-    if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &descriptorSetLayout) != VK_SUCCESS) {
+    if (!ManagedDescriptorSetLayout::create(device, layoutInfo, descriptorSetLayout)) {
         return false;
     }
 
@@ -246,14 +225,15 @@ bool FoamBuffer::createComputePipeline() {
     pushConstantRange.size = sizeof(FoamPushConstants);
 
     // Pipeline layout
+    VkDescriptorSetLayout rawLayout = descriptorSetLayout.get();
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.setLayoutCount = 1;
-    pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;
+    pipelineLayoutInfo.pSetLayouts = &rawLayout;
     pipelineLayoutInfo.pushConstantRangeCount = 1;
     pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
 
-    if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &computePipelineLayout) != VK_SUCCESS) {
+    if (!ManagedPipelineLayout::create(device, pipelineLayoutInfo, computePipelineLayout)) {
         return false;
     }
 
@@ -274,11 +254,16 @@ bool FoamBuffer::createComputePipeline() {
     VkComputePipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
     pipelineInfo.stage = shaderStage;
-    pipelineInfo.layout = computePipelineLayout;
+    pipelineInfo.layout = computePipelineLayout.get();
 
-    VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &computePipeline);
+    VkPipeline rawPipeline = VK_NULL_HANDLE;
+    VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &rawPipeline);
 
     vkDestroyShaderModule(device, shaderModule, nullptr);
+
+    if (result == VK_SUCCESS) {
+        computePipeline = ManagedPipeline::fromRaw(device, rawPipeline);
+    }
 
     return result == VK_SUCCESS;
 }
@@ -306,7 +291,7 @@ bool FoamBuffer::createDescriptorSets() {
     }
 
     // Allocate descriptor sets (2 per frame for ping-pong)
-    std::vector<VkDescriptorSetLayout> layouts(setCount, descriptorSetLayout);
+    std::vector<VkDescriptorSetLayout> layouts(setCount, descriptorSetLayout.get());
 
     VkDescriptorSetAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -325,7 +310,7 @@ bool FoamBuffer::createDescriptorSets() {
 
 void FoamBuffer::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, float deltaTime,
                                 VkImageView flowMapView, VkSampler flowMapSampler) {
-    if (computePipeline == VK_NULL_HANDLE) return;
+    if (!computePipeline.get()) return;
 
     // Update wake uniform buffer for this frame
     if (!wakeUniformMapped.empty()) {
@@ -342,7 +327,7 @@ void FoamBuffer::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, float d
     // Update descriptor set using SetWriter
     DescriptorManager::SetWriter(device, descriptorSets[descSetIndex])
         .writeStorageImage(0, foamBufferView[writeBuffer])
-        .writeImage(1, foamBufferView[readBuffer], sampler)
+        .writeImage(1, foamBufferView[readBuffer], sampler.get())
         .writeImage(2, flowMapView, flowMapSampler)
         .writeBuffer(3, wakeUniformBuffers[frameIndex], 0, sizeof(WakeUniformData))
         .update();
@@ -357,8 +342,8 @@ void FoamBuffer::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, float d
         0, VK_ACCESS_SHADER_READ_BIT);
 
     // Bind compute pipeline
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayout,
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline.get());
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayout.get(),
                            0, 1, &descriptorSets[descSetIndex], 0, nullptr);
 
     // Push constants
@@ -373,7 +358,7 @@ void FoamBuffer::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, float d
     pushConstants.padding[1] = 0.0f;
     pushConstants.padding[2] = 0.0f;
 
-    vkCmdPushConstants(cmd, computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT,
+    vkCmdPushConstants(cmd, computePipelineLayout.get(), VK_SHADER_STAGE_COMPUTE_BIT,
                       0, sizeof(pushConstants), &pushConstants);
 
     // Dispatch compute shader

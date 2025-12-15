@@ -6,6 +6,8 @@
 #include <vector>
 #include <string>
 
+#include "core/VulkanRAII.h"
+
 /**
  * FoamBuffer - Phase 14 & 16: Temporal Foam Persistence + Wake System
  *
@@ -79,7 +81,7 @@ public:
 
     // Get foam buffer for sampling in water shader
     VkImageView getFoamBufferView() const { return foamBufferView[currentBuffer]; }
-    VkSampler getSampler() const { return sampler; }
+    VkSampler getSampler() const { return sampler.get(); }
 
     // Configuration
     void setWorldExtent(const glm::vec2& center, const glm::vec2& size);
@@ -139,13 +141,13 @@ private:
     VmaAllocation foamAllocation[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
     int currentBuffer = 0;  // Which buffer to read from
 
-    // Sampler
-    VkSampler sampler = VK_NULL_HANDLE;
+    // Sampler (RAII-managed)
+    ManagedSampler sampler;
 
-    // Compute pipeline
-    VkPipeline computePipeline = VK_NULL_HANDLE;
-    VkPipelineLayout computePipelineLayout = VK_NULL_HANDLE;
-    VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
+    // Compute pipeline (RAII-managed)
+    ManagedPipeline computePipeline;
+    ManagedPipelineLayout computePipelineLayout;
+    ManagedDescriptorSetLayout descriptorSetLayout;
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
     std::vector<VkDescriptorSet> descriptorSets;
 

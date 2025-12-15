@@ -54,22 +54,10 @@ void WaterDisplacement::destroy() {
         descriptorPool = VK_NULL_HANDLE;
     }
 
-    // Destroy descriptor set layout
-    if (descriptorSetLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
-        descriptorSetLayout = VK_NULL_HANDLE;
-    }
-
-    // Destroy compute pipeline
-    if (computePipeline != VK_NULL_HANDLE) {
-        vkDestroyPipeline(device, computePipeline, nullptr);
-        computePipeline = VK_NULL_HANDLE;
-    }
-
-    if (computePipelineLayout != VK_NULL_HANDLE) {
-        vkDestroyPipelineLayout(device, computePipelineLayout, nullptr);
-        computePipelineLayout = VK_NULL_HANDLE;
-    }
+    // RAII wrappers handle cleanup automatically - just reset them
+    descriptorSetLayout = ManagedDescriptorSetLayout();
+    computePipeline = ManagedPipeline();
+    computePipelineLayout = ManagedPipelineLayout();
 
     // Destroy particle buffers
     for (size_t i = 0; i < particleBuffers.size(); i++) {
@@ -81,11 +69,8 @@ void WaterDisplacement::destroy() {
     particleAllocations.clear();
     particleMapped.clear();
 
-    // Destroy sampler
-    if (sampler != VK_NULL_HANDLE) {
-        vkDestroySampler(device, sampler, nullptr);
-        sampler = VK_NULL_HANDLE;
-    }
+    // RAII-managed sampler
+    sampler = ManagedSampler();
 
     // Destroy displacement maps
     if (displacementMapView != VK_NULL_HANDLE) {
@@ -205,11 +190,7 @@ bool WaterDisplacement::createDisplacementMap() {
     samplerInfo.maxLod = 0.0f;
     samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
 
-    if (vkCreateSampler(device, &samplerInfo, nullptr, &sampler) != VK_SUCCESS) {
-        return false;
-    }
-
-    return true;
+    return ManagedSampler::create(device, samplerInfo, sampler);
 }
 
 bool WaterDisplacement::createParticleBuffer() {
@@ -272,7 +253,7 @@ bool WaterDisplacement::createComputePipeline() {
     layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
     layoutInfo.pBindings = bindings.data();
 
-    if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &descriptorSetLayout) != VK_SUCCESS) {
+    if (!ManagedDescriptorSetLayout::create(device, layoutInfo, descriptorSetLayout)) {
         return false;
     }
 
@@ -283,14 +264,15 @@ bool WaterDisplacement::createComputePipeline() {
     pushConstantRange.size = sizeof(DisplacementPushConstants);
 
     // Pipeline layout
+    VkDescriptorSetLayout rawLayout = descriptorSetLayout.get();
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.setLayoutCount = 1;
-    pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;
+    pipelineLayoutInfo.pSetLayouts = &rawLayout;
     pipelineLayoutInfo.pushConstantRangeCount = 1;
     pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
 
-    if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &computePipelineLayout) != VK_SUCCESS) {
+    if (!ManagedPipelineLayout::create(device, pipelineLayoutInfo, computePipelineLayout)) {
         return false;
     }
 
@@ -311,11 +293,16 @@ bool WaterDisplacement::createComputePipeline() {
     VkComputePipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
     pipelineInfo.stage = shaderStage;
-    pipelineInfo.layout = computePipelineLayout;
+    pipelineInfo.layout = computePipelineLayout.get();
 
-    VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &computePipeline);
+    VkPipeline rawPipeline = VK_NULL_HANDLE;
+    VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &rawPipeline);
 
     vkDestroyShaderModule(device, shaderModule, nullptr);
+
+    if (result == VK_SUCCESS) {
+        computePipeline = ManagedPipeline::fromRaw(device, rawPipeline);
+    }
 
     return result == VK_SUCCESS;
 }
@@ -341,7 +328,7 @@ bool WaterDisplacement::createDescriptorSets() {
     }
 
     // Allocate descriptor sets
-    std::vector<VkDescriptorSetLayout> layouts(framesInFlight, descriptorSetLayout);
+    std::vector<VkDescriptorSetLayout> layouts(framesInFlight, descriptorSetLayout.get());
 
     VkDescriptorSetAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -358,7 +345,7 @@ bool WaterDisplacement::createDescriptorSets() {
     for (uint32_t i = 0; i < framesInFlight; i++) {
         DescriptorManager::SetWriter(device, descriptorSets[i])
             .writeStorageImage(0, displacementMapView)
-            .writeImage(1, prevDisplacementMapView, sampler)
+            .writeImage(1, prevDisplacementMapView, sampler.get())
             .writeBuffer(2, particleBuffers[i], 0, sizeof(SplashParticle) * MAX_PARTICLES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
             .update();
     }
@@ -424,7 +411,7 @@ void WaterDisplacement::updateParticleBuffer(uint32_t frameIndex) {
 }
 
 void WaterDisplacement::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) {
-    if (computePipeline == VK_NULL_HANDLE) return;
+    if (!computePipeline.get()) return;
 
     // Update particle buffer
     updateParticleBuffer(frameIndex);
@@ -433,8 +420,8 @@ void WaterDisplacement::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) 
     Barriers::prepareImageForCompute(cmd, displacementMap);
 
     // Bind compute pipeline
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayout,
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline.get());
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayout.get(),
                            0, 1, &descriptorSets[frameIndex], 0, nullptr);
 
     // Push constants
@@ -445,7 +432,7 @@ void WaterDisplacement::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) 
     pushConstants.numParticles = static_cast<uint32_t>(particles.size());
     pushConstants.decayRate = decayRate;
 
-    vkCmdPushConstants(cmd, computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT,
+    vkCmdPushConstants(cmd, computePipelineLayout.get(), VK_SHADER_STAGE_COMPUTE_BIT,
                       0, sizeof(pushConstants), &pushConstants);
 
     // Dispatch compute shader

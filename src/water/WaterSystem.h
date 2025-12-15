@@ -11,6 +11,7 @@
 #include "Texture.h"
 #include "DescriptorManager.h"
 #include "core/RAIIAdapter.h"
+#include "core/VulkanRAII.h"
 
 class ShadowSystem;
 
@@ -297,10 +298,10 @@ private:
     float waterSize = 100.0f;
     std::string assetPath;
 
-    // Pipeline resources
-    VkPipeline pipeline = VK_NULL_HANDLE;
-    VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
-    VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
+    // Pipeline resources (RAII-managed)
+    ManagedPipeline pipeline;
+    ManagedPipelineLayout pipelineLayout;
+    ManagedDescriptorSetLayout descriptorSetLayout;
     std::vector<VkDescriptorSet> descriptorSets;
 
     // Water mesh (a subdivided plane for wave animation) - RAII-managed

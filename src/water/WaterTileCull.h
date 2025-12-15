@@ -6,6 +6,8 @@
 #include <vector>
 #include <string>
 
+#include "core/VulkanRAII.h"
+
 /**
  * WaterTileCull - Phase 7: Screen-Space Tile Visibility
  *
@@ -140,15 +142,15 @@ private:
     VkBuffer indirectDrawBuffer = VK_NULL_HANDLE;
     VmaAllocation indirectDrawAllocation = VK_NULL_HANDLE;
 
-    // Compute pipeline
-    VkPipeline computePipeline = VK_NULL_HANDLE;
-    VkPipelineLayout computePipelineLayout = VK_NULL_HANDLE;
-    VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
+    // Compute pipeline (RAII-managed)
+    ManagedPipeline computePipeline;
+    ManagedPipelineLayout computePipelineLayout;
+    ManagedDescriptorSetLayout descriptorSetLayout;
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
     std::vector<VkDescriptorSet> descriptorSets;
 
-    // Depth texture sampler for tile culling
-    VkSampler depthSampler = VK_NULL_HANDLE;
+    // Depth texture sampler for tile culling (RAII-managed)
+    ManagedSampler depthSampler;
 
     // CPU-side visibility tracking to avoid double-buffer aliasing issues
     // Tracks the last frame number where water was visible

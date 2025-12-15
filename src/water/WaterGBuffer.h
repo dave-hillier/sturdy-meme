@@ -7,6 +7,7 @@
 #include <string>
 
 #include "DescriptorManager.h"
+#include "core/VulkanRAII.h"
 
 /**
  * WaterGBuffer - Phase 3: Screen-Space Mini G-Buffer
@@ -55,19 +56,19 @@ public:
     void resize(VkExtent2D newFullResExtent);
 
     // Get render pass for position pass
-    VkRenderPass getRenderPass() const { return renderPass; }
-    VkFramebuffer getFramebuffer() const { return framebuffer; }
+    VkRenderPass getRenderPass() const { return renderPass.get(); }
+    VkFramebuffer getFramebuffer() const { return framebuffer.get(); }
     VkExtent2D getExtent() const { return gbufferExtent; }
 
     // Get G-buffer textures for sampling in composite pass
     VkImageView getDataImageView() const { return dataImageView; }
     VkImageView getNormalImageView() const { return normalImageView; }
     VkImageView getDepthImageView() const { return depthImageView; }
-    VkSampler getSampler() const { return sampler; }
+    VkSampler getSampler() const { return sampler.get(); }
 
     // Get pipeline resources
-    VkPipeline getPipeline() const { return pipeline; }
-    VkPipelineLayout getPipelineLayout() const { return pipelineLayout; }
+    VkPipeline getPipeline() const { return pipeline.get(); }
+    VkPipelineLayout getPipelineLayout() const { return pipelineLayout.get(); }
     VkDescriptorSet getDescriptorSet(uint32_t frameIndex) const { return descriptorSets[frameIndex]; }
 
     // Create descriptor sets after resources are available
@@ -119,17 +120,17 @@ private:
     VkImageView depthImageView = VK_NULL_HANDLE;
     VmaAllocation depthAllocation = VK_NULL_HANDLE;
 
-    // Render pass and framebuffer
-    VkRenderPass renderPass = VK_NULL_HANDLE;
-    VkFramebuffer framebuffer = VK_NULL_HANDLE;
+    // Render pass and framebuffer (RAII-managed)
+    ManagedRenderPass renderPass;
+    ManagedFramebuffer framebuffer;
 
-    // Sampler for reading G-buffer in composite pass
-    VkSampler sampler = VK_NULL_HANDLE;
+    // Sampler for reading G-buffer in composite pass (RAII-managed)
+    ManagedSampler sampler;
 
-    // Graphics pipeline for position pass
-    VkPipeline pipeline = VK_NULL_HANDLE;
-    VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
-    VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
+    // Graphics pipeline for position pass (RAII-managed)
+    ManagedPipeline pipeline;
+    ManagedPipelineLayout pipelineLayout;
+    ManagedDescriptorSetLayout descriptorSetLayout;
     DescriptorManager::Pool* descriptorPool = nullptr;
     std::vector<VkDescriptorSet> descriptorSets;
     std::string shaderPath;

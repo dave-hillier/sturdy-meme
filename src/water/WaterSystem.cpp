@@ -92,19 +92,10 @@ void WaterSystem::destroy(VkDevice device, VmaAllocator allocator) {
     waterUniformAllocations.clear();
     waterUniformMapped.clear();
 
-    // Destroy pipeline resources
-    if (pipeline != VK_NULL_HANDLE) {
-        vkDestroyPipeline(device, pipeline, nullptr);
-        pipeline = VK_NULL_HANDLE;
-    }
-    if (pipelineLayout != VK_NULL_HANDLE) {
-        vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
-        pipelineLayout = VK_NULL_HANDLE;
-    }
-    if (descriptorSetLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
-        descriptorSetLayout = VK_NULL_HANDLE;
-    }
+    // RAII wrappers handle cleanup automatically - just reset them
+    pipeline = ManagedPipeline();
+    pipelineLayout = ManagedPipelineLayout();
+    descriptorSetLayout = ManagedDescriptorSetLayout();
     descriptorSets.clear();
 }
 
@@ -123,7 +114,7 @@ bool WaterSystem::createDescriptorSetLayout() {
     // 10: Scene depth texture (Phase 11: dual depth for refraction)
     // 11-13: FFT Ocean displacement maps (vertex shader)
 
-    descriptorSetLayout = DescriptorManager::LayoutBuilder(device)
+    VkDescriptorSetLayout rawLayout = DescriptorManager::LayoutBuilder(device)
         .addUniformBuffer(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)  // 0: Main UBO
         .addUniformBuffer(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)  // 1: Water uniforms
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 2: Shadow map
@@ -140,10 +131,11 @@ bool WaterSystem::createDescriptorSetLayout() {
         .addCombinedImageSampler(VK_SHADER_STAGE_VERTEX_BIT)    // 13: Ocean foam
         .build();
 
-    if (descriptorSetLayout == VK_NULL_HANDLE) {
+    if (rawLayout == VK_NULL_HANDLE) {
         SDL_Log("Failed to create water descriptor set layout");
         return false;
     }
+    descriptorSetLayout = ManagedDescriptorSetLayout::fromRaw(device, rawLayout);
 
     // Create pipeline layout with push constants for model matrix + FFT params
     VkPushConstantRange pushConstantRange{};
@@ -151,11 +143,12 @@ bool WaterSystem::createDescriptorSetLayout() {
     pushConstantRange.offset = 0;
     pushConstantRange.size = sizeof(PushConstants);
 
-    pipelineLayout = DescriptorManager::createPipelineLayout(device, descriptorSetLayout, {pushConstantRange});
-    if (pipelineLayout == VK_NULL_HANDLE) {
+    VkPipelineLayout rawPipelineLayout = DescriptorManager::createPipelineLayout(device, descriptorSetLayout.get(), {pushConstantRange});
+    if (rawPipelineLayout == VK_NULL_HANDLE) {
         SDL_Log("Failed to create water pipeline layout");
         return false;
     }
+    pipelineLayout = ManagedPipelineLayout::fromRaw(device, rawPipelineLayout);
 
     return true;
 }
@@ -172,10 +165,11 @@ bool WaterSystem::createPipeline() {
 
     // Water pipeline: alpha blending, depth test but no depth write (for transparency)
     // Depth bias prevents z-fighting flickering at water/terrain intersection
+    VkPipeline rawPipeline = VK_NULL_HANDLE;
     bool success = factory
         .setShaders(shaderPath + "/water.vert.spv", shaderPath + "/water.frag.spv")
         .setRenderPass(hdrRenderPass)
-        .setPipelineLayout(pipelineLayout)
+        .setPipelineLayout(pipelineLayout.get())
         .setExtent(extent)
         .setDynamicViewport(true)
         .setVertexInput(bindings, attributes)
@@ -184,13 +178,14 @@ bool WaterSystem::createPipeline() {
         .setDepthBias(1.0f, 1.5f)  // Bias water slightly away from camera to prevent z-fighting
         .setBlendMode(GraphicsPipelineFactory::BlendMode::Alpha)
         .setCullMode(VK_CULL_MODE_NONE)  // Render both sides of water
-        .build(pipeline);
+        .build(rawPipeline);
 
     if (!success) {
         SDL_Log("Failed to create water pipeline");
         return false;
     }
 
+    pipeline = ManagedPipeline::fromRaw(device, rawPipeline);
     return true;
 }
 
@@ -360,7 +355,7 @@ bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffe
                                         VkImageView sceneDepthView,
                                         VkSampler sceneDepthSampler) {
     // Allocate descriptor sets using managed pool
-    descriptorSets = descriptorPool->allocate(descriptorSetLayout, framesInFlight);
+    descriptorSets = descriptorPool->allocate(descriptorSetLayout.get(), framesInFlight);
     if (descriptorSets.size() != framesInFlight) {
         SDL_Log("Failed to allocate water descriptor sets");
         return false;
@@ -409,7 +404,7 @@ void WaterSystem::setWaterExtent(const glm::vec2& position, const glm::vec2& siz
 }
 
 void WaterSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.get());
 
     // Set dynamic viewport and scissor to handle window resize
     VkViewport viewport{};
@@ -427,7 +422,7 @@ void WaterSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            pipelineLayout, 0, 1, &descriptorSets[frameIndex], 0, nullptr);
+                            pipelineLayout.get(), 0, 1, &descriptorSets[frameIndex], 0, nullptr);
 
     // Set up push constants
     pushConstants.model = glm::mat4(1.0f);
@@ -437,7 +432,7 @@ void WaterSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
         waterUniforms.waterExtent.y
     ));
     // useFFTOcean and oceanSize values are set via setUseFFTOcean()
-    vkCmdPushConstants(cmd, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT,
+    vkCmdPushConstants(cmd, pipelineLayout.get(), VK_SHADER_STAGE_VERTEX_BIT,
                        0, sizeof(PushConstants), &pushConstants);
 
     // Bind water mesh and draw

@@ -72,37 +72,14 @@ void WaterGBuffer::destroy() {
 
     vkDeviceWaitIdle(device);
 
-    if (pipeline != VK_NULL_HANDLE) {
-        vkDestroyPipeline(device, pipeline, nullptr);
-        pipeline = VK_NULL_HANDLE;
-    }
-
-    if (pipelineLayout != VK_NULL_HANDLE) {
-        vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
-        pipelineLayout = VK_NULL_HANDLE;
-    }
-
-    if (descriptorSetLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
-        descriptorSetLayout = VK_NULL_HANDLE;
-    }
-
+    // RAII wrappers handle cleanup automatically - just reset them
+    pipeline = ManagedPipeline();
+    pipelineLayout = ManagedPipelineLayout();
+    descriptorSetLayout = ManagedDescriptorSetLayout();
     // Note: descriptor sets are freed when pool is destroyed
-
-    if (sampler != VK_NULL_HANDLE) {
-        vkDestroySampler(device, sampler, nullptr);
-        sampler = VK_NULL_HANDLE;
-    }
-
-    if (framebuffer != VK_NULL_HANDLE) {
-        vkDestroyFramebuffer(device, framebuffer, nullptr);
-        framebuffer = VK_NULL_HANDLE;
-    }
-
-    if (renderPass != VK_NULL_HANDLE) {
-        vkDestroyRenderPass(device, renderPass, nullptr);
-        renderPass = VK_NULL_HANDLE;
-    }
+    sampler = ManagedSampler();
+    framebuffer = ManagedFramebuffer();
+    renderPass = ManagedRenderPass();
 
     destroyImages();
 
@@ -122,11 +99,8 @@ void WaterGBuffer::resize(VkExtent2D newFullResExtent) {
 
     vkDeviceWaitIdle(device);
 
-    // Destroy old framebuffer
-    if (framebuffer != VK_NULL_HANDLE) {
-        vkDestroyFramebuffer(device, framebuffer, nullptr);
-        framebuffer = VK_NULL_HANDLE;
-    }
+    // Destroy old framebuffer (RAII reset)
+    framebuffer = ManagedFramebuffer();
 
     // Destroy and recreate images
     destroyImages();
@@ -361,11 +335,7 @@ bool WaterGBuffer::createRenderPass() {
     renderPassInfo.dependencyCount = static_cast<uint32_t>(dependencies.size());
     renderPassInfo.pDependencies = dependencies.data();
 
-    if (vkCreateRenderPass(device, &renderPassInfo, nullptr, &renderPass) != VK_SUCCESS) {
-        return false;
-    }
-
-    return true;
+    return ManagedRenderPass::create(device, renderPassInfo, renderPass);
 }
 
 bool WaterGBuffer::createFramebuffer() {
@@ -377,18 +347,14 @@ bool WaterGBuffer::createFramebuffer() {
 
     VkFramebufferCreateInfo framebufferInfo{};
     framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-    framebufferInfo.renderPass = renderPass;
+    framebufferInfo.renderPass = renderPass.get();
     framebufferInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
     framebufferInfo.pAttachments = attachments.data();
     framebufferInfo.width = gbufferExtent.width;
     framebufferInfo.height = gbufferExtent.height;
     framebufferInfo.layers = 1;
 
-    if (vkCreateFramebuffer(device, &framebufferInfo, nullptr, &framebuffer) != VK_SUCCESS) {
-        return false;
-    }
-
-    return true;
+    return ManagedFramebuffer::create(device, framebufferInfo, framebuffer);
 }
 
 bool WaterGBuffer::createSampler() {
@@ -408,11 +374,7 @@ bool WaterGBuffer::createSampler() {
     samplerInfo.maxLod = 0.0f;
     samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
 
-    if (vkCreateSampler(device, &samplerInfo, nullptr, &sampler) != VK_SUCCESS) {
-        return false;
-    }
-
-    return true;
+    return ManagedSampler::create(device, samplerInfo, sampler);
 }
 
 void WaterGBuffer::beginRenderPass(VkCommandBuffer cmd) {
@@ -423,8 +385,8 @@ void WaterGBuffer::beginRenderPass(VkCommandBuffer cmd) {
 
     VkRenderPassBeginInfo renderPassInfo{};
     renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    renderPassInfo.renderPass = renderPass;
-    renderPassInfo.framebuffer = framebuffer;
+    renderPassInfo.renderPass = renderPass.get();
+    renderPassInfo.framebuffer = framebuffer.get();
     renderPassInfo.renderArea.offset = {0, 0};
     renderPassInfo.renderArea.extent = gbufferExtent;
     renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
@@ -493,7 +455,7 @@ bool WaterGBuffer::createDescriptorSetLayout() {
     layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
     layoutInfo.pBindings = bindings.data();
 
-    if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &descriptorSetLayout) != VK_SUCCESS) {
+    if (!ManagedDescriptorSetLayout::create(device, layoutInfo, descriptorSetLayout)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "WaterGBuffer: Failed to create descriptor set layout");
         return false;
     }
@@ -503,14 +465,15 @@ bool WaterGBuffer::createDescriptorSetLayout() {
 }
 
 bool WaterGBuffer::createPipelineLayout() {
+    VkDescriptorSetLayout rawLayout = descriptorSetLayout.get();
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.setLayoutCount = 1;
-    pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;
+    pipelineLayoutInfo.pSetLayouts = &rawLayout;
     pipelineLayoutInfo.pushConstantRangeCount = 0;
     pipelineLayoutInfo.pPushConstantRanges = nullptr;
 
-    if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
+    if (!ManagedPipelineLayout::create(device, pipelineLayoutInfo, pipelineLayout)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "WaterGBuffer: Failed to create pipeline layout");
         return false;
     }
@@ -529,11 +492,12 @@ bool WaterGBuffer::createPipeline() {
     std::vector<VkVertexInputAttributeDescription> attributes(attrDescs.begin(), attrDescs.end());
 
     // G-buffer pipeline: write to both color attachments, depth test and write
+    VkPipeline rawPipeline = VK_NULL_HANDLE;
     bool success = factory
         .setShaders(shaderPath + "/water_position.vert.spv",
                     shaderPath + "/water_position.frag.spv")
-        .setRenderPass(renderPass)
-        .setPipelineLayout(pipelineLayout)
+        .setRenderPass(renderPass.get())
+        .setPipelineLayout(pipelineLayout.get())
         .setExtent(gbufferExtent)
         .setDynamicViewport(true)
         .setVertexInput(bindings, attributes)
@@ -541,12 +505,14 @@ bool WaterGBuffer::createPipeline() {
         .setDepthWrite(true)
         .setCullMode(VK_CULL_MODE_NONE)
         .setColorAttachmentCount(2)  // Data + Normal textures
-        .build(pipeline);
+        .build(rawPipeline);
 
     if (!success) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "WaterGBuffer: Failed to create pipeline");
         return false;
     }
+
+    pipeline = ManagedPipeline::fromRaw(device, rawPipeline);
 
     SDL_Log("WaterGBuffer: Pipeline created");
     return true;
@@ -566,7 +532,7 @@ bool WaterGBuffer::createDescriptorSets(
     }
 
     // Allocate descriptor sets using DescriptorManager::Pool
-    descriptorSets = descriptorPool->allocate(descriptorSetLayout, framesInFlight);
+    descriptorSets = descriptorPool->allocate(descriptorSetLayout.get(), framesInFlight);
     if (descriptorSets.empty()) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "WaterGBuffer: Failed to allocate descriptor sets");
         return false;

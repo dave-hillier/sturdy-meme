@@ -6,6 +6,8 @@
 #include <vector>
 #include <string>
 
+#include "core/VulkanRAII.h"
+
 /**
  * WaterDisplacement - Phase 4: Vector Displacement Maps (Interactive Splashes)
  *
@@ -71,10 +73,10 @@ public:
 
     // Get displacement map for sampling in water shader
     VkImageView getDisplacementMapView() const { return displacementMapView; }
-    VkSampler getSampler() const { return sampler; }
+    VkSampler getSampler() const { return sampler.get(); }
 
     // Get descriptor set for water shader binding
-    VkDescriptorSetLayout getDescriptorSetLayout() const { return descriptorSetLayout; }
+    VkDescriptorSetLayout getDescriptorSetLayout() const { return descriptorSetLayout.get(); }
     VkDescriptorSet getDescriptorSet(uint32_t frameIndex) const { return descriptorSets[frameIndex]; }
 
     // Configuration
@@ -119,13 +121,13 @@ private:
     VkImageView prevDisplacementMapView = VK_NULL_HANDLE;
     VmaAllocation prevDisplacementAllocation = VK_NULL_HANDLE;
 
-    // Sampler
-    VkSampler sampler = VK_NULL_HANDLE;
+    // Sampler (RAII-managed)
+    ManagedSampler sampler;
 
-    // Compute pipeline
-    VkPipeline computePipeline = VK_NULL_HANDLE;
-    VkPipelineLayout computePipelineLayout = VK_NULL_HANDLE;
-    VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
+    // Compute pipeline (RAII-managed)
+    ManagedPipeline computePipeline;
+    ManagedPipelineLayout computePipelineLayout;
+    ManagedDescriptorSetLayout descriptorSetLayout;
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
     std::vector<VkDescriptorSet> descriptorSets;
 
