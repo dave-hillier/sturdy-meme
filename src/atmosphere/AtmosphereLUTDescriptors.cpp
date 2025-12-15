@@ -1,24 +1,23 @@
 #include "AtmosphereLUTSystem.h"
-#include "BindingBuilder.h"
 #include <SDL3/SDL_log.h>
 #include <array>
 
 bool AtmosphereLUTSystem::createDescriptorSetLayouts() {
+    auto makeComputeBinding = [](uint32_t binding, VkDescriptorType type) {
+        VkDescriptorSetLayoutBinding b{};
+        b.binding = binding;
+        b.descriptorType = type;
+        b.descriptorCount = 1;
+        b.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        return b;
+    };
+
     // Transmittance LUT descriptor set layout (just output image and uniform buffer)
     {
-        auto outputImage = BindingBuilder()
-            .setBinding(0)
-            .setDescriptorType(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-            .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-            .build();
-
-        auto uniformBuffer = BindingBuilder()
-            .setBinding(1)
-            .setDescriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
-            .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-            .build();
-
-        std::array<VkDescriptorSetLayoutBinding, 2> bindings = {outputImage, uniformBuffer};
+        std::array<VkDescriptorSetLayoutBinding, 2> bindings = {
+            makeComputeBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE),
+            makeComputeBinding(1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+        };
 
         VkDescriptorSetLayoutCreateInfo layoutInfo{};
         layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -43,25 +42,11 @@ bool AtmosphereLUTSystem::createDescriptorSetLayouts() {
 
     // Multi-scatter LUT descriptor set layout (transmittance input, output image, uniform buffer)
     {
-        auto outputImage = BindingBuilder()
-            .setBinding(0)
-            .setDescriptorType(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-            .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-            .build();
-
-        auto transmittanceInput = BindingBuilder()
-            .setBinding(1)
-            .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-            .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-            .build();
-
-        auto uniformBuffer = BindingBuilder()
-            .setBinding(2)
-            .setDescriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
-            .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-            .build();
-
-        std::array<VkDescriptorSetLayoutBinding, 3> bindings = {outputImage, transmittanceInput, uniformBuffer};
+        std::array<VkDescriptorSetLayoutBinding, 3> bindings = {
+            makeComputeBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE),
+            makeComputeBinding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+            makeComputeBinding(2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+        };
 
         VkDescriptorSetLayoutCreateInfo layoutInfo{};
         layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -86,31 +71,12 @@ bool AtmosphereLUTSystem::createDescriptorSetLayouts() {
 
     // Sky-view LUT descriptor set layout (transmittance + multiscatter inputs, output image, uniform buffer)
     {
-        auto outputImage = BindingBuilder()
-            .setBinding(0)
-            .setDescriptorType(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-            .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-            .build();
-
-        auto transmittanceInput = BindingBuilder()
-            .setBinding(1)
-            .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-            .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-            .build();
-
-        auto multiScatterInput = BindingBuilder()
-            .setBinding(2)
-            .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-            .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-            .build();
-
-        auto uniformBuffer = BindingBuilder()
-            .setBinding(3)
-            .setDescriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
-            .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-            .build();
-
-        std::array<VkDescriptorSetLayoutBinding, 4> bindings = {outputImage, transmittanceInput, multiScatterInput, uniformBuffer};
+        std::array<VkDescriptorSetLayoutBinding, 4> bindings = {
+            makeComputeBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE),
+            makeComputeBinding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+            makeComputeBinding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+            makeComputeBinding(3, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+        };
 
         VkDescriptorSetLayoutCreateInfo layoutInfo{};
         layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -136,31 +102,12 @@ bool AtmosphereLUTSystem::createDescriptorSetLayouts() {
     // Irradiance LUT descriptor set layout (Phase 4.1.9)
     // Two output images (Rayleigh and Mie), transmittance input, uniform buffer
     {
-        auto rayleighOutput = BindingBuilder()
-            .setBinding(0)
-            .setDescriptorType(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-            .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-            .build();
-
-        auto mieOutput = BindingBuilder()
-            .setBinding(1)
-            .setDescriptorType(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-            .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-            .build();
-
-        auto transmittanceInput = BindingBuilder()
-            .setBinding(2)
-            .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-            .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-            .build();
-
-        auto uniformBuffer = BindingBuilder()
-            .setBinding(3)
-            .setDescriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
-            .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-            .build();
-
-        std::array<VkDescriptorSetLayoutBinding, 4> bindings = {rayleighOutput, mieOutput, transmittanceInput, uniformBuffer};
+        std::array<VkDescriptorSetLayoutBinding, 4> bindings = {
+            makeComputeBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE),
+            makeComputeBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE),
+            makeComputeBinding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+            makeComputeBinding(3, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+        };
 
         VkDescriptorSetLayoutCreateInfo layoutInfo{};
         layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -185,19 +132,10 @@ bool AtmosphereLUTSystem::createDescriptorSetLayouts() {
 
     // Cloud Map LUT descriptor set layout (output image, uniform buffer)
     {
-        auto outputImage = BindingBuilder()
-            .setBinding(0)
-            .setDescriptorType(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-            .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-            .build();
-
-        auto uniformBuffer = BindingBuilder()
-            .setBinding(1)
-            .setDescriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
-            .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-            .build();
-
-        std::array<VkDescriptorSetLayoutBinding, 2> bindings = {outputImage, uniformBuffer};
+        std::array<VkDescriptorSetLayoutBinding, 2> bindings = {
+            makeComputeBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE),
+            makeComputeBinding(1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+        };
 
         VkDescriptorSetLayoutCreateInfo layoutInfo{};
         layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;

@@ -1,6 +1,5 @@
 #include "SSRSystem.h"
 #include "ShaderLoader.h"
-#include "BindingBuilder.h"
 #include "VulkanBarriers.h"
 #include "VulkanRAII.h"
 #include <SDL3/SDL.h>
@@ -266,33 +265,26 @@ bool SSRSystem::createComputePipeline() {
     // 2: SSR output (storage image, write)
     // 3: Previous SSR (sampler2D, for temporal)
 
-    auto colorBinding = BindingBuilder()
-        .setBinding(0)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-        .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-        .build();
+    std::array<VkDescriptorSetLayoutBinding, 4> bindings{};
+    bindings[0].binding = 0;
+    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[0].descriptorCount = 1;
+    bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
-    auto depthBinding = BindingBuilder()
-        .setBinding(1)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-        .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-        .build();
+    bindings[1].binding = 1;
+    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[1].descriptorCount = 1;
+    bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
-    auto outputBinding = BindingBuilder()
-        .setBinding(2)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-        .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-        .build();
+    bindings[2].binding = 2;
+    bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    bindings[2].descriptorCount = 1;
+    bindings[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
-    auto prevBinding = BindingBuilder()
-        .setBinding(3)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-        .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-        .build();
-
-    std::array<VkDescriptorSetLayoutBinding, 4> bindings = {
-        colorBinding, depthBinding, outputBinding, prevBinding
-    };
+    bindings[3].binding = 3;
+    bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[3].descriptorCount = 1;
+    bindings[3].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -360,27 +352,21 @@ bool SSRSystem::createBlurPipeline() {
     // 1: Depth buffer (sampler2D) for bilateral weights
     // 2: Blurred output (storage image, write)
 
-    auto ssrInputBinding = BindingBuilder()
-        .setBinding(0)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-        .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-        .build();
+    std::array<VkDescriptorSetLayoutBinding, 3> bindings{};
+    bindings[0].binding = 0;
+    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[0].descriptorCount = 1;
+    bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
-    auto depthBinding = BindingBuilder()
-        .setBinding(1)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-        .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-        .build();
+    bindings[1].binding = 1;
+    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[1].descriptorCount = 1;
+    bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
-    auto outputBinding = BindingBuilder()
-        .setBinding(2)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-        .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-        .build();
-
-    std::array<VkDescriptorSetLayoutBinding, 3> bindings = {
-        ssrInputBinding, depthBinding, outputBinding
-    };
+    bindings[2].binding = 2;
+    bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    bindings[2].descriptorCount = 1;
+    bindings[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;

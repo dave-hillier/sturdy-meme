@@ -1,7 +1,6 @@
 #include "TerrainSystem.h"
 #include "TerrainBuffers.h"
 #include "TerrainCameraOptimizer.h"
-#include "BindingBuilder.h"
 #include "DescriptorManager.h"
 #include "GpuProfiler.h"
 #include "UBOs.h"
@@ -211,11 +210,12 @@ uint32_t TerrainSystem::getTriangleCount() const {
 
 bool TerrainSystem::createComputeDescriptorSetLayout() {
     auto makeComputeBinding = [](uint32_t binding, VkDescriptorType type) {
-        return BindingBuilder()
-            .setBinding(binding)
-            .setDescriptorType(type)
-            .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-            .build();
+        VkDescriptorSetLayoutBinding b{};
+        b.binding = binding;
+        b.descriptorType = type;
+        b.descriptorCount = 1;
+        b.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        return b;
     };
 
     std::array<VkDescriptorSetLayoutBinding, 9> bindings = {
@@ -243,11 +243,12 @@ bool TerrainSystem::createComputeDescriptorSetLayout() {
 
 bool TerrainSystem::createRenderDescriptorSetLayout() {
     auto makeGraphicsBinding = [](uint32_t binding, VkDescriptorType type, VkShaderStageFlags stageFlags) {
-        return BindingBuilder()
-            .setBinding(binding)
-            .setDescriptorType(type)
-            .setStageFlags(stageFlags)
-            .build();
+        VkDescriptorSetLayoutBinding b{};
+        b.binding = binding;
+        b.descriptorType = type;
+        b.descriptorCount = 1;
+        b.stageFlags = stageFlags;
+        return b;
     };
 
     std::array<VkDescriptorSetLayoutBinding, 18> bindings = {

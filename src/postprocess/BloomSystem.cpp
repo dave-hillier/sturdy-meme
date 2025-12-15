@@ -1,6 +1,5 @@
 #include "BloomSystem.h"
 #include "GraphicsPipelineFactory.h"
-#include "BindingBuilder.h"
 #include "VulkanBarriers.h"
 #include <array>
 #include <algorithm>
@@ -220,11 +219,11 @@ bool BloomSystem::createSampler() {
 bool BloomSystem::createDescriptorSetLayouts() {
     // Both downsample and upsample use the same descriptor set layout
     // Binding 0: input texture (sampler2D)
-    auto binding = BindingBuilder()
-        .setBinding(0)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-        .setStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
-        .build();
+    VkDescriptorSetLayoutBinding binding{};
+    binding.binding = 0;
+    binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    binding.descriptorCount = 1;
+    binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
     VkDescriptorSetLayoutCreateInfo layoutInfo = {};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;

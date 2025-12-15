@@ -2,7 +2,16 @@
 
 #include <vulkan/vulkan.h>
 
-class BindingBuilder {
+// DEPRECATED: Use direct VkDescriptorSetLayoutBinding initialization instead.
+// Example:
+//   VkDescriptorSetLayoutBinding binding{};
+//   binding.binding = 0;
+//   binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+//   binding.descriptorCount = 1;
+//   binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+//
+// This class will be removed in a future version.
+class [[deprecated("Use direct VkDescriptorSetLayoutBinding initialization")]] BindingBuilder {
 public:
     BindingBuilder();
 

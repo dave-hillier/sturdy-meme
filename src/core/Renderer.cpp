@@ -2,7 +2,6 @@
 #include "Renderer.h"
 #include "RendererInit.h"
 #include "ShaderLoader.h"
-#include "BindingBuilder.h"
 #include "GraphicsPipelineFactory.h"
 #include "MaterialDescriptorFactory.h"
 #include "VulkanResourceFactory.h"

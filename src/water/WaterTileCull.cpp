@@ -1,6 +1,5 @@
 #include "WaterTileCull.h"
 #include "ShaderLoader.h"
-#include "BindingBuilder.h"
 #include "VulkanBarriers.h"
 #include <SDL3/SDL.h>
 #include <array>
@@ -214,32 +213,20 @@ bool WaterTileCull::createComputePipeline() {
     // 2: Counter buffer (storage)
     // 3: Indirect draw buffer (storage)
 
-    auto depthBinding = BindingBuilder()
-        .setBinding(0)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-        .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-        .build();
-
-    auto tileBinding = BindingBuilder()
-        .setBinding(1)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-        .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-        .build();
-
-    auto counterBinding = BindingBuilder()
-        .setBinding(2)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-        .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-        .build();
-
-    auto indirectBinding = BindingBuilder()
-        .setBinding(3)
-        .setDescriptorType(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-        .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-        .build();
+    auto makeComputeBinding = [](uint32_t binding, VkDescriptorType type) {
+        VkDescriptorSetLayoutBinding b{};
+        b.binding = binding;
+        b.descriptorType = type;
+        b.descriptorCount = 1;
+        b.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        return b;
+    };
 
     std::array<VkDescriptorSetLayoutBinding, 4> bindings = {
-        depthBinding, tileBinding, counterBinding, indirectBinding
+        makeComputeBinding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+        makeComputeBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
+        makeComputeBinding(2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
+        makeComputeBinding(3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
     };
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};

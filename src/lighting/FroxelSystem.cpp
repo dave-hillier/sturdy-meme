@@ -1,6 +1,5 @@
 #include "FroxelSystem.h"
 #include "ShaderLoader.h"
-#include "BindingBuilder.h"
 #include "VulkanBarriers.h"
 #include <SDL3/SDL_log.h>
 #include <glm/gtc/matrix_transform.hpp>
@@ -229,11 +228,12 @@ bool FroxelSystem::createSampler() {
 
 bool FroxelSystem::createDescriptorSetLayout() {
     auto makeComputeBinding = [](uint32_t binding, VkDescriptorType type) {
-        return BindingBuilder()
-            .setBinding(binding)
-            .setDescriptorType(type)
-            .setStageFlags(VK_SHADER_STAGE_COMPUTE_BIT)
-            .build();
+        VkDescriptorSetLayoutBinding b{};
+        b.binding = binding;
+        b.descriptorType = type;
+        b.descriptorCount = 1;
+        b.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        return b;
     };
 
     std::array<VkDescriptorSetLayoutBinding, 6> bindings = {
