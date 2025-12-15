@@ -9,6 +9,7 @@
 #include "BufferUtils.h"
 #include "DescriptorManager.h"
 #include "InitContext.h"
+#include "VulkanRAII.h"
 
 // Froxel-based volumetric fog system (Phase 4.3)
 // Implements frustum-aligned voxel grid for efficient volumetric rendering
@@ -59,7 +60,7 @@ public:
     VkImageView getScatteringVolumeView() const { return scatteringVolumeViews[frameCounter % 2]; }
     // Get the integrated volume for compositing (front-to-back integrated result)
     VkImageView getIntegratedVolumeView() const { return integratedVolumeView; }
-    VkSampler getVolumeSampler() const { return volumeSampler; }
+    VkSampler getVolumeSampler() const { return volumeSampler.get(); }
 
     // Fog parameters (reset temporal history on change for immediate feedback)
     void setFogBaseHeight(float h) { fogBaseHeight = h; resetTemporalHistory(); }
@@ -144,13 +145,13 @@ private:
     VkImageView integratedVolumeView = VK_NULL_HANDLE;
 
     // Volume sampler (trilinear filtering)
-    VkSampler volumeSampler = VK_NULL_HANDLE;
+    ManagedSampler volumeSampler;
 
     // Compute pipelines
-    VkDescriptorSetLayout froxelDescriptorSetLayout = VK_NULL_HANDLE;
-    VkPipelineLayout froxelPipelineLayout = VK_NULL_HANDLE;
-    VkPipeline froxelUpdatePipeline = VK_NULL_HANDLE;
-    VkPipeline integrationPipeline = VK_NULL_HANDLE;
+    ManagedDescriptorSetLayout froxelDescriptorSetLayout;
+    ManagedPipelineLayout froxelPipelineLayout;
+    ManagedPipeline froxelUpdatePipeline;
+    ManagedPipeline integrationPipeline;
 
     std::vector<VkDescriptorSet> froxelDescriptorSets;
 

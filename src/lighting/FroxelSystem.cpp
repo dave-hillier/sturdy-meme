@@ -59,30 +59,12 @@ void FroxelSystem::destroy(VkDevice device, VmaAllocator allocator) {
 
     BufferUtils::destroyBuffers(allocator, uniformBuffers);
 
-    if (froxelUpdatePipeline != VK_NULL_HANDLE) {
-        vkDestroyPipeline(device, froxelUpdatePipeline, nullptr);
-        froxelUpdatePipeline = VK_NULL_HANDLE;
-    }
-
-    if (integrationPipeline != VK_NULL_HANDLE) {
-        vkDestroyPipeline(device, integrationPipeline, nullptr);
-        integrationPipeline = VK_NULL_HANDLE;
-    }
-
-    if (froxelPipelineLayout != VK_NULL_HANDLE) {
-        vkDestroyPipelineLayout(device, froxelPipelineLayout, nullptr);
-        froxelPipelineLayout = VK_NULL_HANDLE;
-    }
-
-    if (froxelDescriptorSetLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(device, froxelDescriptorSetLayout, nullptr);
-        froxelDescriptorSetLayout = VK_NULL_HANDLE;
-    }
-
-    if (volumeSampler != VK_NULL_HANDLE) {
-        vkDestroySampler(device, volumeSampler, nullptr);
-        volumeSampler = VK_NULL_HANDLE;
-    }
+    // RAII wrappers handle cleanup automatically
+    froxelUpdatePipeline = ManagedPipeline();
+    integrationPipeline = ManagedPipeline();
+    froxelPipelineLayout = ManagedPipelineLayout();
+    froxelDescriptorSetLayout = ManagedDescriptorSetLayout();
+    volumeSampler = ManagedSampler();
 }
 
 void FroxelSystem::destroyVolumeResources() {
@@ -219,7 +201,7 @@ bool FroxelSystem::createSampler() {
     samplerInfo.maxLod = 0.0f;
     samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
 
-    if (vkCreateSampler(device, &samplerInfo, nullptr, &volumeSampler) != VK_SUCCESS) {
+    if (!ManagedSampler::create(device, samplerInfo, volumeSampler)) {
         SDL_Log("Failed to create volume sampler");
         return false;
     }
@@ -250,18 +232,19 @@ bool FroxelSystem::createDescriptorSetLayout() {
     layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
     layoutInfo.pBindings = bindings.data();
 
-    if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &froxelDescriptorSetLayout) != VK_SUCCESS) {
+    if (!ManagedDescriptorSetLayout::create(device, layoutInfo, froxelDescriptorSetLayout)) {
         SDL_Log("Failed to create froxel descriptor set layout");
         return false;
     }
 
     // Create pipeline layout
+    VkDescriptorSetLayout rawLayout = froxelDescriptorSetLayout.get();
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.setLayoutCount = 1;
-    pipelineLayoutInfo.pSetLayouts = &froxelDescriptorSetLayout;
+    pipelineLayoutInfo.pSetLayouts = &rawLayout;
 
-    if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &froxelPipelineLayout) != VK_SUCCESS) {
+    if (!ManagedPipelineLayout::create(device, pipelineLayoutInfo, froxelPipelineLayout)) {
         SDL_Log("Failed to create froxel pipeline layout");
         return false;
     }
@@ -280,7 +263,7 @@ bool FroxelSystem::createUniformBuffers() {
 
 bool FroxelSystem::createDescriptorSets() {
     // Allocate froxel descriptor sets using managed pool
-    froxelDescriptorSets = descriptorPool->allocate(froxelDescriptorSetLayout, framesInFlight);
+    froxelDescriptorSets = descriptorPool->allocate(froxelDescriptorSetLayout.get(), framesInFlight);
     if (froxelDescriptorSets.size() != framesInFlight) {
         SDL_Log("Failed to allocate froxel descriptor sets");
         return false;
@@ -323,12 +306,12 @@ bool FroxelSystem::createFroxelUpdatePipeline() {
     VkComputePipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
     pipelineInfo.stage = stageInfo;
-    pipelineInfo.layout = froxelPipelineLayout;
+    pipelineInfo.layout = froxelPipelineLayout.get();
 
-    VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &froxelUpdatePipeline);
+    bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, froxelUpdatePipeline);
     vkDestroyShaderModule(device, shaderModule, nullptr);
 
-    if (result != VK_SUCCESS) {
+    if (!success) {
         SDL_Log("Failed to create froxel update pipeline");
         return false;
     }
@@ -359,12 +342,12 @@ bool FroxelSystem::createIntegrationPipeline() {
     VkComputePipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
     pipelineInfo.stage = stageInfo;
-    pipelineInfo.layout = froxelPipelineLayout;
+    pipelineInfo.layout = froxelPipelineLayout.get();
 
-    VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &integrationPipeline);
+    bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, integrationPipeline);
     vkDestroyShaderModule(device, shaderModule, nullptr);
 
-    if (result != VK_SUCCESS) {
+    if (!success) {
         SDL_Log("Failed to create froxel integration pipeline");
         return false;
     }
@@ -474,8 +457,8 @@ void FroxelSystem::recordFroxelUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
     }
 
     // Dispatch froxel update compute shader
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, froxelUpdatePipeline);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, froxelPipelineLayout,
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, froxelUpdatePipeline.get());
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, froxelPipelineLayout.get(),
                             0, 1, &froxelDescriptorSets[frameIndex], 0, nullptr);
 
     // Dispatch with 4x4x4 local size
@@ -488,7 +471,7 @@ void FroxelSystem::recordFroxelUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
     Barriers::computeToCompute(cmd);
 
     // Dispatch integration pass
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, integrationPipeline);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, integrationPipeline.get());
 
     // Integration dispatches per XY column, iterating through Z
     groupsX = (FROXEL_WIDTH + 3) / 4;
