@@ -12,6 +12,8 @@
 #include "Texture.h"
 #include "UBOs.h"
 #include "DescriptorManager.h"
+#include "core/RAIIAdapter.h"
+#include <optional>
 
 // Push constants for tree rendering
 struct TreePushConstants {
@@ -92,7 +94,7 @@ public:
     const Texture& getBarkAOTexture() const;
     const Texture& getBarkRoughnessTexture() const;
     const Texture& getLeafTexture() const;
-    const Texture& getFallbackTexture() const { return fallbackTexture; }
+    const Texture& getFallbackTexture() const { return **fallbackTexture; }
 
 private:
     // Initialization helpers
@@ -142,9 +144,9 @@ private:
     static constexpr int NUM_LEAF_TYPES = 4;
     std::array<Texture, NUM_LEAF_TYPES> leafTextures;
 
-    // Fallback textures
-    Texture fallbackTexture;        // Gray for color/AO/roughness
-    Texture fallbackNormalTexture;  // Flat normal (128,128,255) for normal maps
+    // Fallback textures (RAII-managed)
+    std::optional<RAIIAdapter<Texture>> fallbackTexture;        // Gray for color/AO/roughness
+    std::optional<RAIIAdapter<Texture>> fallbackNormalTexture;  // Flat normal (128,128,255) for normal maps
     bool texturesLoaded = false;
 
     // Currently selected texture indices for descriptor binding

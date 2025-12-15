@@ -201,9 +201,11 @@ void GuiTerrainTab::render(Renderer& renderer) {
     ImGui::Text("STREAMING");
     ImGui::PopStyleColor();
 
-    const auto& tileCache = terrain.getTileCache();
-    uint32_t activeTiles = tileCache.getActiveTileCount();
+    uint32_t activeTiles = 0;
     uint32_t maxTiles = 64;  // MAX_ACTIVE_TILES constant
+    if (const auto* tileCachePtr = terrain.getTileCache()) {
+        activeTiles = tileCachePtr->getActiveTileCount();
+    }
 
     // Active tiles with color coding
     float tileUsage = static_cast<float>(activeTiles) / static_cast<float>(maxTiles);

@@ -5,6 +5,8 @@
 bool SceneBuilder::init(const InitInfo& info) {
     // Store terrain height function for object placement
     terrainHeightFunc = info.getTerrainHeight;
+    storedAllocator = info.allocator;
+    storedDevice = info.device;
 
     if (!createMeshes(info)) return false;
     if (!loadTextures(info)) return false;
@@ -15,20 +17,20 @@ bool SceneBuilder::init(const InitInfo& info) {
 
 void SceneBuilder::registerMaterials() {
     // Register crate material
-    crateMaterialId = materialRegistry.registerMaterial("crate", crateTexture, crateNormalMap);
+    crateMaterialId = materialRegistry.registerMaterial("crate", **crateTexture, **crateNormalMap);
 
     // Register ground material (for any ground-related objects)
-    groundMaterialId = materialRegistry.registerMaterial("ground", groundTexture, groundNormalMap);
+    groundMaterialId = materialRegistry.registerMaterial("ground", **groundTexture, **groundNormalMap);
 
     // Register metal material
-    metalMaterialId = materialRegistry.registerMaterial("metal", metalTexture, metalNormalMap);
+    metalMaterialId = materialRegistry.registerMaterial("metal", **metalTexture, **metalNormalMap);
 
     // Register white material (for vertex-colored objects like animated characters)
     // Uses white texture with a flat normal map
-    whiteMaterialId = materialRegistry.registerMaterial("white", whiteTexture, groundNormalMap);
+    whiteMaterialId = materialRegistry.registerMaterial("white", **whiteTexture, **groundNormalMap);
 
     // Register cape material (using metal texture)
-    capeMaterialId = materialRegistry.registerMaterial("cape", metalTexture, metalNormalMap);
+    capeMaterialId = materialRegistry.registerMaterial("cape", **metalTexture, **metalNormalMap);
 
     SDL_Log("SceneBuilder: Registered %zu materials", materialRegistry.getMaterialCount());
 }
@@ -41,69 +43,112 @@ float SceneBuilder::getTerrainHeight(float x, float z) const {
 }
 
 void SceneBuilder::destroy(VmaAllocator allocator, VkDevice device) {
-    crateTexture.destroy(allocator, device);
-    crateNormalMap.destroy(allocator, device);
-    groundTexture.destroy(allocator, device);
-    groundNormalMap.destroy(allocator, device);
-    metalTexture.destroy(allocator, device);
-    metalNormalMap.destroy(allocator, device);
-    defaultEmissiveMap.destroy(allocator, device);
-    whiteTexture.destroy(allocator, device);
+    // RAII-managed textures
+    crateTexture.reset();
+    crateNormalMap.reset();
+    groundTexture.reset();
+    groundNormalMap.reset();
+    metalTexture.reset();
+    metalNormalMap.reset();
+    defaultEmissiveMap.reset();
+    whiteTexture.reset();
 
-    cubeMesh.destroy(allocator);
-    sphereMesh.destroy(allocator);
-    capsuleMesh.destroy(allocator);
-    groundMesh.destroy(allocator);
-    flagPoleMesh.destroy(allocator);
+    // RAII-managed meshes (static)
+    cubeMesh.reset();
+    sphereMesh.reset();
+    capsuleMesh.reset();
+    flagPoleMesh.reset();
+
+    // Manually managed meshes (dynamic - re-uploaded during runtime)
     flagClothMesh.destroy(allocator);
     capeMesh.destroy(allocator);
-    if (hasAnimatedCharacter) {
-        animatedCharacter.destroy(allocator);
-    }
+
+    // RAII-managed animated character
+    animatedCharacter.reset();
 
     sceneObjects.clear();
 }
 
 bool SceneBuilder::createMeshes(const InitInfo& info) {
 
-    cubeMesh.createCube();
-    cubeMesh.upload(info.allocator, info.device, info.commandPool, info.graphicsQueue);
+    cubeMesh = RAIIAdapter<Mesh>::create(
+        [&](auto& m) {
+            m.createCube();
+            m.upload(info.allocator, info.device, info.commandPool, info.graphicsQueue);
+            return true;
+        },
+        [this](auto& m) { m.destroy(storedAllocator); }
+    );
+    if (!cubeMesh) return false;
 
-    sphereMesh.createSphere(0.5f, 32, 32);
-    sphereMesh.upload(info.allocator, info.device, info.commandPool, info.graphicsQueue);
+    sphereMesh = RAIIAdapter<Mesh>::create(
+        [&](auto& m) {
+            m.createSphere(0.5f, 32, 32);
+            m.upload(info.allocator, info.device, info.commandPool, info.graphicsQueue);
+            return true;
+        },
+        [this](auto& m) { m.destroy(storedAllocator); }
+    );
+    if (!sphereMesh) return false;
 
     // Player capsule mesh (1.8m tall, 0.3m radius)
-    capsuleMesh.createCapsule(0.3f, 1.8f, 16, 16);
-    capsuleMesh.upload(info.allocator, info.device, info.commandPool, info.graphicsQueue);
+    capsuleMesh = RAIIAdapter<Mesh>::create(
+        [&](auto& m) {
+            m.createCapsule(0.3f, 1.8f, 16, 16);
+            m.upload(info.allocator, info.device, info.commandPool, info.graphicsQueue);
+            return true;
+        },
+        [this](auto& m) { m.destroy(storedAllocator); }
+    );
+    if (!capsuleMesh) return false;
 
     // Flag pole mesh (cylinder: 0.05m radius, 3m height)
-    flagPoleMesh.createCylinder(0.05f, 3.0f, 16);
-    flagPoleMesh.upload(info.allocator, info.device, info.commandPool, info.graphicsQueue);
+    flagPoleMesh = RAIIAdapter<Mesh>::create(
+        [&](auto& m) {
+            m.createCylinder(0.05f, 3.0f, 16);
+            m.upload(info.allocator, info.device, info.commandPool, info.graphicsQueue);
+            return true;
+        },
+        [this](auto& m) { m.destroy(storedAllocator); }
+    );
+    if (!flagPoleMesh) return false;
 
     // Flag cloth mesh will be initialized later by ClothSimulation
     // (it's dynamic and will be updated each frame)
 
-    // Load animated character from FBX
+    // Load animated character from FBX (RAII-managed)
     std::string characterPath = info.resourcePath + "/assets/characters/fbx/Y Bot.fbx";
-    if (animatedCharacter.load(characterPath, info.allocator, info.device, info.commandPool, info.graphicsQueue)) {
+    std::vector<std::string> additionalAnimations = {
+        info.resourcePath + "/assets/characters/fbx/ss_idle.fbx",
+        info.resourcePath + "/assets/characters/fbx/ss_walk.fbx",
+        info.resourcePath + "/assets/characters/fbx/ss_run.fbx",
+        info.resourcePath + "/assets/characters/fbx/ss_jump.fbx"
+    };
+
+    animatedCharacter = RAIIAdapter<AnimatedCharacter>::create(
+        [&](auto& c) {
+            if (!c.load(characterPath, info.allocator, info.device, info.commandPool, info.graphicsQueue)) {
+                return false;  // Load failed, don't create RAII wrapper
+            }
+
+            // Load additional animations (sword and shield locomotion set)
+            c.loadAdditionalAnimations(additionalAnimations);
+
+            // Setup default IK chains for arms, legs, look-at, and foot placement
+            c.setupDefaultIKChains();
+
+            return true;
+        },
+        [this](auto& c) { c.destroy(storedAllocator); }
+    );
+
+    if (animatedCharacter) {
         hasAnimatedCharacter = true;
         SDL_Log("SceneBuilder: Loaded FBX animated character");
 
-        // Load additional animations (sword and shield locomotion set)
-        std::vector<std::string> additionalAnimations = {
-            info.resourcePath + "/assets/characters/fbx/ss_idle.fbx",
-            info.resourcePath + "/assets/characters/fbx/ss_walk.fbx",
-            info.resourcePath + "/assets/characters/fbx/ss_run.fbx",
-            info.resourcePath + "/assets/characters/fbx/ss_jump.fbx"
-        };
-        animatedCharacter.loadAdditionalAnimations(additionalAnimations);
-
-        // Setup default IK chains for arms, legs, look-at, and foot placement
-        animatedCharacter.setupDefaultIKChains();
-
         // Setup ground query for foot placement IK
         if (terrainHeightFunc) {
-            auto& ikSystem = animatedCharacter.getIKSystem();
+            auto& ikSystem = (*animatedCharacter)->getIKSystem();
             ikSystem.setGroundQueryFunc([this](const glm::vec3& position, float maxDistance) -> GroundQueryResult {
                 GroundQueryResult result;
                 result.hit = true;
@@ -150,60 +195,116 @@ bool SceneBuilder::createMeshes(const InitInfo& info) {
 
 bool SceneBuilder::loadTextures(const InitInfo& info) {
     std::string texturePath = info.resourcePath + "/assets/textures/crates/crate1/crate1_diffuse.png";
-    if (!crateTexture.load(texturePath, info.allocator, info.device, info.commandPool,
-                           info.graphicsQueue, info.physicalDevice)) {
-        SDL_Log("Failed to load texture: %s", texturePath.c_str());
-        return false;
-    }
+    crateTexture = RAIIAdapter<Texture>::create(
+        [&](auto& t) {
+            if (!t.load(texturePath, info.allocator, info.device, info.commandPool,
+                       info.graphicsQueue, info.physicalDevice)) {
+                SDL_Log("Failed to load texture: %s", texturePath.c_str());
+                return false;
+            }
+            return true;
+        },
+        [this](auto& t) { t.destroy(storedAllocator, storedDevice); }
+    );
+    if (!crateTexture) return false;
 
     std::string crateNormalPath = info.resourcePath + "/assets/textures/crates/crate1/crate1_normal.png";
-    if (!crateNormalMap.load(crateNormalPath, info.allocator, info.device, info.commandPool,
-                              info.graphicsQueue, info.physicalDevice, false)) {
-        SDL_Log("Failed to load crate normal map: %s", crateNormalPath.c_str());
-        return false;
-    }
+    crateNormalMap = RAIIAdapter<Texture>::create(
+        [&](auto& t) {
+            if (!t.load(crateNormalPath, info.allocator, info.device, info.commandPool,
+                        info.graphicsQueue, info.physicalDevice, false)) {
+                SDL_Log("Failed to load crate normal map: %s", crateNormalPath.c_str());
+                return false;
+            }
+            return true;
+        },
+        [this](auto& t) { t.destroy(storedAllocator, storedDevice); }
+    );
+    if (!crateNormalMap) return false;
 
     std::string grassTexturePath = info.resourcePath + "/assets/textures/grass/grass/grass01.jpg";
-    if (!groundTexture.load(grassTexturePath, info.allocator, info.device, info.commandPool,
-                            info.graphicsQueue, info.physicalDevice)) {
-        SDL_Log("Failed to load grass texture: %s", grassTexturePath.c_str());
-        return false;
-    }
+    groundTexture = RAIIAdapter<Texture>::create(
+        [&](auto& t) {
+            if (!t.load(grassTexturePath, info.allocator, info.device, info.commandPool,
+                        info.graphicsQueue, info.physicalDevice)) {
+                SDL_Log("Failed to load grass texture: %s", grassTexturePath.c_str());
+                return false;
+            }
+            return true;
+        },
+        [this](auto& t) { t.destroy(storedAllocator, storedDevice); }
+    );
+    if (!groundTexture) return false;
 
     std::string grassNormalPath = info.resourcePath + "/assets/textures/grass/grass/grass01_n.jpg";
-    if (!groundNormalMap.load(grassNormalPath, info.allocator, info.device, info.commandPool,
-                               info.graphicsQueue, info.physicalDevice, false)) {
-        SDL_Log("Failed to load grass normal map: %s", grassNormalPath.c_str());
-        return false;
-    }
+    groundNormalMap = RAIIAdapter<Texture>::create(
+        [&](auto& t) {
+            if (!t.load(grassNormalPath, info.allocator, info.device, info.commandPool,
+                         info.graphicsQueue, info.physicalDevice, false)) {
+                SDL_Log("Failed to load grass normal map: %s", grassNormalPath.c_str());
+                return false;
+            }
+            return true;
+        },
+        [this](auto& t) { t.destroy(storedAllocator, storedDevice); }
+    );
+    if (!groundNormalMap) return false;
 
     std::string metalTexturePath = info.resourcePath + "/assets/textures/industrial/metal_1.jpg";
-    if (!metalTexture.load(metalTexturePath, info.allocator, info.device, info.commandPool,
-                           info.graphicsQueue, info.physicalDevice)) {
-        SDL_Log("Failed to load metal texture: %s", metalTexturePath.c_str());
-        return false;
-    }
+    metalTexture = RAIIAdapter<Texture>::create(
+        [&](auto& t) {
+            if (!t.load(metalTexturePath, info.allocator, info.device, info.commandPool,
+                        info.graphicsQueue, info.physicalDevice)) {
+                SDL_Log("Failed to load metal texture: %s", metalTexturePath.c_str());
+                return false;
+            }
+            return true;
+        },
+        [this](auto& t) { t.destroy(storedAllocator, storedDevice); }
+    );
+    if (!metalTexture) return false;
 
     std::string metalNormalPath = info.resourcePath + "/assets/textures/industrial/metal_1_norm.jpg";
-    if (!metalNormalMap.load(metalNormalPath, info.allocator, info.device, info.commandPool,
-                              info.graphicsQueue, info.physicalDevice, false)) {
-        SDL_Log("Failed to load metal normal map: %s", metalNormalPath.c_str());
-        return false;
-    }
+    metalNormalMap = RAIIAdapter<Texture>::create(
+        [&](auto& t) {
+            if (!t.load(metalNormalPath, info.allocator, info.device, info.commandPool,
+                        info.graphicsQueue, info.physicalDevice, false)) {
+                SDL_Log("Failed to load metal normal map: %s", metalNormalPath.c_str());
+                return false;
+            }
+            return true;
+        },
+        [this](auto& t) { t.destroy(storedAllocator, storedDevice); }
+    );
+    if (!metalNormalMap) return false;
 
     // Create default black emissive map for objects without emissive textures
-    if (!defaultEmissiveMap.createSolidColor(0, 0, 0, 255, info.allocator, info.device,
-                                              info.commandPool, info.graphicsQueue)) {
-        SDL_Log("Failed to create default emissive map");
-        return false;
-    }
+    defaultEmissiveMap = RAIIAdapter<Texture>::create(
+        [&](auto& t) {
+            if (!t.createSolidColor(0, 0, 0, 255, info.allocator, info.device,
+                                    info.commandPool, info.graphicsQueue)) {
+                SDL_Log("Failed to create default emissive map");
+                return false;
+            }
+            return true;
+        },
+        [this](auto& t) { t.destroy(storedAllocator, storedDevice); }
+    );
+    if (!defaultEmissiveMap) return false;
 
     // Create white texture for vertex-colored objects (like glTF characters)
-    if (!whiteTexture.createSolidColor(255, 255, 255, 255, info.allocator, info.device,
-                                        info.commandPool, info.graphicsQueue)) {
-        SDL_Log("Failed to create white texture");
-        return false;
-    }
+    whiteTexture = RAIIAdapter<Texture>::create(
+        [&](auto& t) {
+            if (!t.createSolidColor(255, 255, 255, 255, info.allocator, info.device,
+                                    info.commandPool, info.graphicsQueue)) {
+                SDL_Log("Failed to create white texture");
+                return false;
+            }
+            return true;
+        },
+        [this](auto& t) { t.destroy(storedAllocator, storedDevice); }
+    );
+    if (!whiteTexture) return false;
 
     return true;
 }
@@ -223,8 +324,8 @@ void SceneBuilder::createRenderables() {
     float crateX = 2.0f, crateZ = 0.0f;
     sceneObjects.push_back(RenderableBuilder()
         .atPosition(glm::vec3(crateX, getGroundY(crateX, crateZ, 0.5f), crateZ))
-        .withMesh(&cubeMesh)
-        .withTexture(&crateTexture)
+        .withMesh(&**cubeMesh)
+        .withTexture(&**crateTexture)
         .withMaterialId(crateMaterialId)
         .withRoughness(0.4f)
         .withMetallic(0.0f)
@@ -237,8 +338,8 @@ void SceneBuilder::createRenderables() {
     rotatedCube = glm::rotate(rotatedCube, glm::radians(30.0f), glm::vec3(0.0f, 1.0f, 0.0f));
     sceneObjects.push_back(RenderableBuilder()
         .withTransform(rotatedCube)
-        .withMesh(&cubeMesh)
-        .withTexture(&crateTexture)
+        .withMesh(&**cubeMesh)
+        .withTexture(&**crateTexture)
         .withMaterialId(crateMaterialId)
         .withRoughness(0.4f)
         .withMetallic(0.0f)
@@ -248,8 +349,8 @@ void SceneBuilder::createRenderables() {
     float polishedSphereX = 0.0f, polishedSphereZ = -2.0f;
     sceneObjects.push_back(RenderableBuilder()
         .atPosition(glm::vec3(polishedSphereX, getGroundY(polishedSphereX, polishedSphereZ, 0.5f), polishedSphereZ))
-        .withMesh(&sphereMesh)
-        .withTexture(&metalTexture)
+        .withMesh(&**sphereMesh)
+        .withTexture(&**metalTexture)
         .withMaterialId(metalMaterialId)
         .withRoughness(0.1f)
         .withMetallic(1.0f)
@@ -259,8 +360,8 @@ void SceneBuilder::createRenderables() {
     float roughSphereX = -3.0f, roughSphereZ = -1.0f;
     sceneObjects.push_back(RenderableBuilder()
         .atPosition(glm::vec3(roughSphereX, getGroundY(roughSphereX, roughSphereZ, 0.5f), roughSphereZ))
-        .withMesh(&sphereMesh)
-        .withTexture(&metalTexture)
+        .withMesh(&**sphereMesh)
+        .withTexture(&**metalTexture)
         .withMaterialId(metalMaterialId)
         .withRoughness(0.5f)
         .withMetallic(1.0f)
@@ -270,8 +371,8 @@ void SceneBuilder::createRenderables() {
     float polishedCubeX = 3.0f, polishedCubeZ = -2.0f;
     sceneObjects.push_back(RenderableBuilder()
         .atPosition(glm::vec3(polishedCubeX, getGroundY(polishedCubeX, polishedCubeZ, 0.5f), polishedCubeZ))
-        .withMesh(&cubeMesh)
-        .withTexture(&metalTexture)
+        .withMesh(&**cubeMesh)
+        .withTexture(&**metalTexture)
         .withMaterialId(metalMaterialId)
         .withRoughness(0.1f)
         .withMetallic(1.0f)
@@ -284,8 +385,8 @@ void SceneBuilder::createRenderables() {
     brushedCube = glm::rotate(brushedCube, glm::radians(45.0f), glm::vec3(0.0f, 1.0f, 0.0f));
     sceneObjects.push_back(RenderableBuilder()
         .withTransform(brushedCube)
-        .withMesh(&cubeMesh)
-        .withTexture(&metalTexture)
+        .withMesh(&**cubeMesh)
+        .withTexture(&**metalTexture)
         .withMaterialId(metalMaterialId)
         .withRoughness(0.6f)
         .withMetallic(1.0f)
@@ -299,8 +400,8 @@ void SceneBuilder::createRenderables() {
     glowingSphereTransform = glm::scale(glowingSphereTransform, glm::vec3(glowSphereScale));
     sceneObjects.push_back(RenderableBuilder()
         .withTransform(glowingSphereTransform)
-        .withMesh(&sphereMesh)
-        .withTexture(&metalTexture)
+        .withMesh(&**sphereMesh)
+        .withTexture(&**metalTexture)
         .withMaterialId(metalMaterialId)
         .withRoughness(0.2f)
         .withMetallic(0.0f)
@@ -316,8 +417,8 @@ void SceneBuilder::createRenderables() {
     blueLightTransform = glm::scale(blueLightTransform, glm::vec3(0.2f));
     sceneObjects.push_back(RenderableBuilder()
         .withTransform(blueLightTransform)
-        .withMesh(&sphereMesh)
-        .withTexture(&metalTexture)
+        .withMesh(&**sphereMesh)
+        .withTexture(&**metalTexture)
         .withMaterialId(metalMaterialId)
         .withRoughness(0.2f)
         .withMetallic(0.0f)
@@ -333,8 +434,8 @@ void SceneBuilder::createRenderables() {
     greenLightTransform = glm::scale(greenLightTransform, glm::vec3(0.2f));
     sceneObjects.push_back(RenderableBuilder()
         .withTransform(greenLightTransform)
-        .withMesh(&sphereMesh)
-        .withTexture(&metalTexture)
+        .withMesh(&**sphereMesh)
+        .withTexture(&**metalTexture)
         .withMaterialId(metalMaterialId)
         .withRoughness(0.2f)
         .withMetallic(0.0f)
@@ -347,8 +448,8 @@ void SceneBuilder::createRenderables() {
     float debugCubeX = 5.0f, debugCubeZ = -5.0f;
     sceneObjects.push_back(RenderableBuilder()
         .atPosition(glm::vec3(debugCubeX, getGroundY(debugCubeX, debugCubeZ, 15.0f), debugCubeZ))
-        .withMesh(&cubeMesh)
-        .withTexture(&crateTexture)
+        .withMesh(&**cubeMesh)
+        .withTexture(&**crateTexture)
         .withMaterialId(crateMaterialId)
         .withRoughness(0.3f)
         .withMetallic(0.0f)
@@ -368,7 +469,7 @@ void SceneBuilder::createRenderables() {
         glm::vec3 charEmissiveColor = glm::vec3(0.0f);
         float charEmissiveIntensity = 0.0f;
 
-        const auto& materials = animatedCharacter.getMaterials();
+        const auto& materials = (*animatedCharacter)->getMaterials();
         if (!materials.empty()) {
             // Use first material's properties (most characters have a primary material)
             const auto& mat = materials[0];
@@ -382,8 +483,8 @@ void SceneBuilder::createRenderables() {
 
         sceneObjects.push_back(RenderableBuilder()
             .withTransform(buildCharacterTransform(glm::vec3(playerX, playerTerrainY, playerZ), 10.0f))
-            .withMesh(&animatedCharacter.getMesh())
-            .withTexture(&whiteTexture)  // White texture so vertex colors show through
+            .withMesh(&(*animatedCharacter)->getMesh())
+            .withTexture(&**whiteTexture)  // White texture so vertex colors show through
             .withMaterialId(whiteMaterialId)
             .withRoughness(charRoughness)
             .withMetallic(charMetallic)
@@ -395,8 +496,8 @@ void SceneBuilder::createRenderables() {
         // Capsule fallback - capsule height 1.8m, center at 0.9m above ground
         sceneObjects.push_back(RenderableBuilder()
             .atPosition(glm::vec3(playerX, playerTerrainY + 0.9f, playerZ))
-            .withMesh(&capsuleMesh)
-            .withTexture(&metalTexture)
+            .withMesh(&**capsuleMesh)
+            .withTexture(&**metalTexture)
             .withMaterialId(metalMaterialId)
             .withRoughness(0.3f)
             .withMetallic(0.8f)
@@ -409,8 +510,8 @@ void SceneBuilder::createRenderables() {
     flagPoleIndex = sceneObjects.size();
     sceneObjects.push_back(RenderableBuilder()
         .atPosition(glm::vec3(flagPoleX, getGroundY(flagPoleX, flagPoleZ, 11.5f), flagPoleZ))
-        .withMesh(&flagPoleMesh)
-        .withTexture(&metalTexture)
+        .withMesh(&**flagPoleMesh)
+        .withTexture(&**metalTexture)
         .withMaterialId(metalMaterialId)
         .withRoughness(0.4f)
         .withMetallic(0.9f)
@@ -422,7 +523,7 @@ void SceneBuilder::createRenderables() {
     sceneObjects.push_back(RenderableBuilder()
         .withTransform(glm::mat4(1.0f))  // Identity, will be handled differently
         .withMesh(&flagClothMesh)
-        .withTexture(&crateTexture)  // Using crate texture for now
+        .withTexture(&**crateTexture)  // Using crate texture for now
         .withMaterialId(crateMaterialId)
         .withRoughness(0.6f)
         .withMetallic(0.0f)
@@ -435,7 +536,7 @@ void SceneBuilder::createRenderables() {
         sceneObjects.push_back(RenderableBuilder()
             .withTransform(glm::mat4(1.0f))  // Identity, cloth positions are in world space
             .withMesh(&capeMesh)
-            .withTexture(&metalTexture)
+            .withTexture(&**metalTexture)
             .withMaterialId(capeMaterialId)
             .withRoughness(0.3f)
             .withMetallic(0.8f)
@@ -455,8 +556,8 @@ void SceneBuilder::createRenderables() {
     wellEntranceIndex = sceneObjects.size();
     sceneObjects.push_back(RenderableBuilder()
         .withTransform(wellTransform)
-        .withMesh(&cubeMesh)
-        .withTexture(&metalTexture)  // Stone-like appearance
+        .withMesh(&**cubeMesh)
+        .withTexture(&**metalTexture)  // Stone-like appearance
         .withMaterialId(metalMaterialId)
         .withRoughness(0.8f)
         .withMetallic(0.1f)
@@ -509,18 +610,18 @@ void SceneBuilder::updateAnimatedCharacter(float deltaTime, VmaAllocator allocat
         worldTransform = sceneObjects[playerObjectIndex].transform;
     }
 
-    animatedCharacter.update(deltaTime, allocator, device, commandPool, queue,
-                             movementSpeed, isGrounded, isJumping, worldTransform);
+    (*animatedCharacter)->update(deltaTime, allocator, device, commandPool, queue,
+                                  movementSpeed, isGrounded, isJumping, worldTransform);
 
     // Update the mesh pointer in the renderable (in case it was re-created)
     if (playerObjectIndex < sceneObjects.size()) {
-        sceneObjects[playerObjectIndex].mesh = &animatedCharacter.getMesh();
+        sceneObjects[playerObjectIndex].mesh = &(*animatedCharacter)->getMesh();
     }
 
     // Update player cape if enabled
     if (hasCapeEnabled) {
         // Update cape simulation with current skeleton pose
-        playerCape.update(animatedCharacter.getSkeleton(), worldTransform, deltaTime, nullptr);
+        playerCape.update((*animatedCharacter)->getSkeleton(), worldTransform, deltaTime, nullptr);
 
         // Update cape mesh and re-upload
         playerCape.updateMesh(capeMesh);
@@ -536,5 +637,5 @@ void SceneBuilder::updateAnimatedCharacter(float deltaTime, VmaAllocator allocat
 
 void SceneBuilder::startCharacterJump(const glm::vec3& startPos, const glm::vec3& velocity, float gravity, const PhysicsWorld* physics) {
     if (!hasAnimatedCharacter) return;
-    animatedCharacter.startJump(startPos, velocity, gravity, physics);
+    (*animatedCharacter)->startJump(startPos, velocity, gravity, physics);
 }

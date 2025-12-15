@@ -249,7 +249,14 @@ std::vector<VkDescriptorSet> DescriptorManager::Pool::allocate(
 
     std::vector<VkDescriptorSet> sets;
 
+    SDL_Log("DescriptorManager::allocate - pools.size()=%zu, currentPoolIndex=%u, device=%p",
+            pools.size(), currentPoolIndex, (void*)device);
+
     // Try current pool first
+    if (pools.empty()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "DescriptorManager::allocate - pools is empty!");
+        return {};
+    }
     if (tryAllocate(pools[currentPoolIndex], layout, count, sets)) {
         totalAllocatedSets += count;
         return sets;

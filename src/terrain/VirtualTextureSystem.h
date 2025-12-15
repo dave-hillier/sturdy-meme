@@ -5,11 +5,13 @@
 #include "VirtualTexturePageTable.h"
 #include "VirtualTextureFeedback.h"
 #include "VirtualTextureTileLoader.h"
+#include "core/RAIIAdapter.h"
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
 #include <string>
 #include <vector>
 #include <unordered_set>
+#include <optional>
 
 namespace VirtualTexture {
 
@@ -88,25 +90,25 @@ public:
     /**
      * Get the physical cache texture for shader binding
      */
-    VkImageView getCacheImageView() const { return cache.getCacheImageView(); }
-    VkSampler getCacheSampler() const { return cache.getCacheSampler(); }
+    VkImageView getCacheImageView() const { return (*cache)->getCacheImageView(); }
+    VkSampler getCacheSampler() const { return (*cache)->getCacheSampler(); }
 
     /**
      * Get page table textures for shader binding
      */
     VkImageView getPageTableImageView(uint32_t mipLevel) const {
-        return pageTable.getImageView(mipLevel);
+        return (*pageTable)->getImageView(mipLevel);
     }
-    VkSampler getPageTableSampler() const { return pageTable.getSampler(); }
+    VkSampler getPageTableSampler() const { return (*pageTable)->getSampler(); }
 
     /**
      * Get feedback buffer for shader binding
      */
     VkBuffer getFeedbackBuffer(uint32_t frameIndex) const {
-        return feedback.getFeedbackBuffer(frameIndex);
+        return (*feedback)->getFeedbackBuffer(frameIndex);
     }
     VkBuffer getCounterBuffer(uint32_t frameIndex) const {
-        return feedback.getCounterBuffer(frameIndex);
+        return (*feedback)->getCounterBuffer(frameIndex);
     }
 
     /**
@@ -122,10 +124,10 @@ public:
     /**
      * Get statistics
      */
-    uint32_t getCacheUsedSlots() const { return cache.getUsedSlotCount(); }
-    uint32_t getPendingTileCount() const { return tileLoader.getPendingCount(); }
-    uint32_t getLoadedTileCount() const { return tileLoader.getLoadedCount(); }
-    uint64_t getTotalBytesLoaded() const { return tileLoader.getTotalBytesLoaded(); }
+    uint32_t getCacheUsedSlots() const { return (*cache)->getUsedSlotCount(); }
+    uint32_t getPendingTileCount() const { return (*tileLoader)->getPendingCount(); }
+    uint32_t getLoadedTileCount() const { return (*tileLoader)->getLoadedCount(); }
+    uint64_t getTotalBytesLoaded() const { return (*tileLoader)->getTotalBytesLoaded(); }
     float getCurrentPenalty() const { return currentPenalty; }
     uint32_t getTotalCacheSlots() const { return config.getTotalCacheSlots(); }
 
@@ -137,15 +139,16 @@ public:
     /**
      * Check if a tile is resident in cache
      */
-    bool isTileResident(TileId id) const { return cache.hasTile(id); }
+    bool isTileResident(TileId id) const { return (*cache)->hasTile(id); }
 
 private:
     VirtualTextureConfig config;
 
-    VirtualTextureCache cache;
-    VirtualTexturePageTable pageTable;
-    VirtualTextureFeedback feedback;
-    VirtualTextureTileLoader tileLoader;
+    // RAII-managed subsystems
+    std::optional<RAIIAdapter<VirtualTextureCache>> cache;
+    std::optional<RAIIAdapter<VirtualTexturePageTable>> pageTable;
+    std::optional<RAIIAdapter<VirtualTextureFeedback>> feedback;
+    std::optional<RAIIAdapter<VirtualTextureTileLoader>> tileLoader;
 
     uint32_t currentFrame = 0;
     std::unordered_set<uint32_t> pendingTiles; // Tiles currently being loaded

@@ -31,7 +31,7 @@ bool TerrainSystem::init(const InitInfo& info, const TerrainConfig& cfg) {
     // Compute heightScale from altitude range
     config.heightScale = config.maxAltitude - config.minAltitude;
 
-    // Initialize height map
+    // Initialize height map with RAII wrapper
     TerrainHeightMap::InitInfo heightMapInfo{};
     heightMapInfo.device = device;
     heightMapInfo.allocator = allocator;
@@ -43,36 +43,52 @@ bool TerrainSystem::init(const InitInfo& info, const TerrainConfig& cfg) {
     heightMapInfo.heightmapPath = config.heightmapPath;
     heightMapInfo.minAltitude = config.minAltitude;
     heightMapInfo.maxAltitude = config.maxAltitude;
-    if (!heightMap.init(heightMapInfo)) return false;
+    heightMap = RAIIAdapter<TerrainHeightMap>::create(
+        [&](auto& h) { return h.init(heightMapInfo); },
+        [this](auto& h) { h.destroy(device, allocator); }
+    );
+    if (!heightMap) return false;
 
-    // Initialize textures
+    // Initialize textures with RAII wrapper
     TerrainTextures::InitInfo texturesInfo{};
     texturesInfo.device = device;
     texturesInfo.allocator = allocator;
     texturesInfo.graphicsQueue = graphicsQueue;
     texturesInfo.commandPool = commandPool;
     texturesInfo.resourcePath = texturePath;
-    if (!textures.init(texturesInfo)) return false;
+    textures = RAIIAdapter<TerrainTextures>::create(
+        [&](auto& t) { return t.init(texturesInfo); },
+        [this](auto& t) { t.destroy(device, allocator); }
+    );
+    if (!textures) return false;
 
-    // Initialize CBT
+    // Initialize CBT with RAII wrapper
     TerrainCBT::InitInfo cbtInfo{};
     cbtInfo.allocator = allocator;
     cbtInfo.maxDepth = config.maxDepth;
     cbtInfo.initDepth = 6;  // Start with 64 triangles
-    if (!cbt.init(cbtInfo)) return false;
+    cbt = RAIIAdapter<TerrainCBT>::create(
+        [&](auto& c) { return c.init(cbtInfo); },
+        [this](auto& c) { c.destroy(allocator); }
+    );
+    if (!cbt) return false;
 
-    // Initialize meshlet for high-resolution rendering
+    // Initialize meshlet for high-resolution rendering with RAII wrapper
     if (config.useMeshlets) {
         TerrainMeshlet::InitInfo meshletInfo{};
         meshletInfo.allocator = allocator;
         meshletInfo.subdivisionLevel = static_cast<uint32_t>(config.meshletSubdivisionLevel);
-        if (!meshlet.init(meshletInfo)) {
+        meshlet = RAIIAdapter<TerrainMeshlet>::create(
+            [&](auto& m) { return m.init(meshletInfo); },
+            [this](auto& m) { m.destroy(allocator); }
+        );
+        if (!meshlet) {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to create meshlet, falling back to direct triangles");
             config.useMeshlets = false;
         }
     }
 
-    // Initialize tile cache for LOD-based height streaming (if configured)
+    // Initialize tile cache for LOD-based height streaming (if configured) with RAII wrapper
     if (!config.tileCacheDir.empty()) {
         TerrainTileCache::InitInfo tileCacheInfo{};
         tileCacheInfo.cacheDirectory = config.tileCacheDir;
@@ -84,7 +100,11 @@ bool TerrainSystem::init(const InitInfo& info, const TerrainConfig& cfg) {
         tileCacheInfo.heightScale = config.heightScale;
         tileCacheInfo.minAltitude = config.minAltitude;
         tileCacheInfo.maxAltitude = config.maxAltitude;
-        if (!tileCache.init(tileCacheInfo)) {
+        tileCache = RAIIAdapter<TerrainTileCache>::create(
+            [&](auto& tc) { return tc.init(tileCacheInfo); },
+            [](auto& tc) { tc.destroy(); }
+        );
+        if (!tileCache) {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize tile cache, using global heightmap only");
         } else {
             SDL_Log("Tile cache initialized: %s", config.tileCacheDir.c_str());
@@ -94,12 +114,16 @@ bool TerrainSystem::init(const InitInfo& info, const TerrainConfig& cfg) {
     // Query GPU subgroup capabilities for optimized compute paths
     querySubgroupCapabilities();
 
-    // Initialize buffers subsystem
+    // Initialize buffers subsystem with RAII wrapper
     TerrainBuffers::InitInfo bufferInfo{};
     bufferInfo.allocator = allocator;
     bufferInfo.framesInFlight = framesInFlight;
     bufferInfo.maxVisibleTriangles = MAX_VISIBLE_TRIANGLES;
-    if (!buffers.init(bufferInfo)) return false;
+    buffers = RAIIAdapter<TerrainBuffers>::create(
+        [&](auto& b) { return b.init(bufferInfo); },
+        [this](auto& b) { b.destroy(allocator); }
+    );
+    if (!buffers) return false;
 
     // Create descriptor set layouts and sets
     if (!createComputeDescriptorSetLayout()) return false;
@@ -116,7 +140,7 @@ bool TerrainSystem::init(const InitInfo& info, const TerrainConfig& cfg) {
     pipelineInfo.renderDescriptorSetLayout = renderDescriptorSetLayout;
     pipelineInfo.shaderPath = shaderPath;
     pipelineInfo.useMeshlets = config.useMeshlets;
-    pipelineInfo.meshletIndexCount = config.useMeshlets ? meshlet.getIndexCount() : 0;
+    pipelineInfo.meshletIndexCount = config.useMeshlets && meshlet ? (*meshlet)->getIndexCount() : 0;
     pipelineInfo.subgroupCaps = &subgroupCaps;
     pipelines = RAIIAdapter<TerrainPipelines>::create(
         [&](auto& p) { return p.init(pipelineInfo); },
@@ -151,27 +175,25 @@ bool TerrainSystem::init(const InitContext& ctx, const TerrainInitParams& params
 void TerrainSystem::destroy(VkDevice device, VmaAllocator allocator) {
     vkDeviceWaitIdle(device);
 
-    // Pipelines destroyed automatically via RAII (reset optional to trigger cleanup now)
+    // RAII-managed subsystems destroyed automatically via std::optional reset
     pipelines.reset();
 
     // Destroy descriptor set layouts
     if (computeDescriptorSetLayout) vkDestroyDescriptorSetLayout(device, computeDescriptorSetLayout, nullptr);
     if (renderDescriptorSetLayout) vkDestroyDescriptorSetLayout(device, renderDescriptorSetLayout, nullptr);
 
-    // Destroy buffers subsystem
-    buffers.destroy(allocator);
-
-    // Destroy composed subsystems
-    tileCache.destroy();
-    meshlet.destroy(allocator);
-    cbt.destroy(allocator);
-    textures.destroy(device, allocator);
-    heightMap.destroy(device, allocator);
+    // Reset all RAII-managed subsystems
+    buffers.reset();
+    tileCache.reset();
+    meshlet.reset();
+    cbt.reset();
+    textures.reset();
+    heightMap.reset();
 }
 
 
 uint32_t TerrainSystem::getTriangleCount() const {
-    void* mappedPtr = buffers.getIndirectDrawMappedPtr();
+    void* mappedPtr = (*buffers)->getIndirectDrawMappedPtr();
     if (!mappedPtr) {
         return 0;
     }
@@ -181,7 +203,7 @@ uint32_t TerrainSystem::getTriangleCount() const {
     const uint32_t* drawArgs = static_cast<const uint32_t*>(mappedPtr);
     if (config.useMeshlets) {
         uint32_t instanceCount = drawArgs[1];  // Number of CBT leaf nodes
-        return instanceCount * meshlet.getTriangleCount();
+        return instanceCount * (*meshlet)->getTriangleCount();
     } else {
         return drawArgs[0] / 3;
     }
@@ -288,15 +310,15 @@ bool TerrainSystem::createDescriptorSets() {
     // Update compute descriptor sets
     for (uint32_t i = 0; i < framesInFlight; i++) {
         DescriptorManager::SetWriter(device, computeDescriptorSets[i])
-            .writeBuffer(0, cbt.getBuffer(), 0, cbt.getBufferSize(), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(1, buffers.getIndirectDispatchBuffer(), 0, sizeof(uint32_t) * 3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(2, buffers.getIndirectDrawBuffer(), 0, sizeof(uint32_t) * 4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeImage(3, heightMap.getView(), heightMap.getSampler())
-            .writeBuffer(4, buffers.getUniformBuffer(i), 0, sizeof(TerrainUniforms))
-            .writeBuffer(5, buffers.getVisibleIndicesBuffer(), 0, sizeof(uint32_t) * (1 + MAX_VISIBLE_TRIANGLES), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(6, buffers.getCullIndirectDispatchBuffer(), 0, sizeof(uint32_t) * 3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(14, buffers.getShadowVisibleBuffer(), 0, sizeof(uint32_t) * (1 + MAX_VISIBLE_TRIANGLES), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(15, buffers.getShadowIndirectDrawBuffer(), 0, sizeof(uint32_t) * 5, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+            .writeBuffer(0, (*cbt)->getBuffer(), 0, (*cbt)->getBufferSize(), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+            .writeBuffer(1, (*buffers)->getIndirectDispatchBuffer(), 0, sizeof(uint32_t) * 3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+            .writeBuffer(2, (*buffers)->getIndirectDrawBuffer(), 0, sizeof(uint32_t) * 4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+            .writeImage(3, (*heightMap)->getView(), (*heightMap)->getSampler())
+            .writeBuffer(4, (*buffers)->getUniformBuffer(i), 0, sizeof(TerrainUniforms))
+            .writeBuffer(5, (*buffers)->getVisibleIndicesBuffer(), 0, sizeof(uint32_t) * (1 + MAX_VISIBLE_TRIANGLES), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+            .writeBuffer(6, (*buffers)->getCullIndirectDispatchBuffer(), 0, sizeof(uint32_t) * 3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+            .writeBuffer(14, (*buffers)->getShadowVisibleBuffer(), 0, sizeof(uint32_t) * (1 + MAX_VISIBLE_TRIANGLES), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+            .writeBuffer(15, (*buffers)->getShadowIndirectDrawBuffer(), 0, sizeof(uint32_t) * 5, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
             .update();
     }
 
@@ -384,7 +406,7 @@ void TerrainSystem::updateDescriptorSets(VkDevice device,
         std::vector<VkWriteDescriptorSet> writes;
 
         // CBT buffer
-        VkDescriptorBufferInfo cbtInfo{cbt.getBuffer(), 0, cbt.getBufferSize()};
+        VkDescriptorBufferInfo cbtInfo{(*cbt)->getBuffer(), 0, (*cbt)->getBufferSize()};
         VkWriteDescriptorSet cbtWrite{};
         cbtWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         cbtWrite.dstSet = renderDescriptorSets[i];
@@ -395,7 +417,7 @@ void TerrainSystem::updateDescriptorSets(VkDevice device,
         writes.push_back(cbtWrite);
 
         // Height map
-        VkDescriptorImageInfo heightMapInfo{heightMap.getSampler(), heightMap.getView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkDescriptorImageInfo heightMapInfo{(*heightMap)->getSampler(), (*heightMap)->getView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkWriteDescriptorSet heightMapWrite{};
         heightMapWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         heightMapWrite.dstSet = renderDescriptorSets[i];
@@ -406,7 +428,7 @@ void TerrainSystem::updateDescriptorSets(VkDevice device,
         writes.push_back(heightMapWrite);
 
         // Terrain uniforms
-        VkDescriptorBufferInfo uniformInfo{buffers.getUniformBuffer(i), 0, sizeof(TerrainUniforms)};
+        VkDescriptorBufferInfo uniformInfo{(*buffers)->getUniformBuffer(i), 0, sizeof(TerrainUniforms)};
         VkWriteDescriptorSet uniformWrite{};
         uniformWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         uniformWrite.dstSet = renderDescriptorSets[i];
@@ -430,7 +452,7 @@ void TerrainSystem::updateDescriptorSets(VkDevice device,
         }
 
         // Terrain albedo
-        VkDescriptorImageInfo albedoInfo{textures.getAlbedoSampler(), textures.getAlbedoView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkDescriptorImageInfo albedoInfo{(*textures)->getAlbedoSampler(), (*textures)->getAlbedoView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkWriteDescriptorSet albedoWrite{};
         albedoWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         albedoWrite.dstSet = renderDescriptorSets[i];
@@ -454,8 +476,8 @@ void TerrainSystem::updateDescriptorSets(VkDevice device,
         }
 
         // Grass far LOD texture
-        if (textures.getGrassFarLODView() != VK_NULL_HANDLE) {
-            VkDescriptorImageInfo grassFarLODInfo{textures.getGrassFarLODSampler(), textures.getGrassFarLODView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        if ((*textures)->getGrassFarLODView() != VK_NULL_HANDLE) {
+            VkDescriptorImageInfo grassFarLODInfo{(*textures)->getGrassFarLODSampler(), (*textures)->getGrassFarLODView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
             VkWriteDescriptorSet grassFarLODWrite{};
             grassFarLODWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             grassFarLODWrite.dstSet = renderDescriptorSets[i];
@@ -467,8 +489,8 @@ void TerrainSystem::updateDescriptorSets(VkDevice device,
         }
 
         // Shadow visible indices (for shadow culled vertex shaders)
-        if (buffers.getShadowVisibleBuffer() != VK_NULL_HANDLE) {
-            VkDescriptorBufferInfo shadowVisibleInfo{buffers.getShadowVisibleBuffer(), 0, sizeof(uint32_t) * (1 + MAX_VISIBLE_TRIANGLES)};
+        if ((*buffers)->getShadowVisibleBuffer() != VK_NULL_HANDLE) {
+            VkDescriptorBufferInfo shadowVisibleInfo{(*buffers)->getShadowVisibleBuffer(), 0, sizeof(uint32_t) * (1 + MAX_VISIBLE_TRIANGLES)};
             VkWriteDescriptorSet shadowVisibleWrite{};
             shadowVisibleWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             shadowVisibleWrite.dstSet = renderDescriptorSets[i];
@@ -480,7 +502,7 @@ void TerrainSystem::updateDescriptorSets(VkDevice device,
         }
 
         // Hole mask (for cave/well rendering)
-        VkDescriptorImageInfo holeMaskInfo{heightMap.getHoleMaskSampler(), heightMap.getHoleMaskView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkDescriptorImageInfo holeMaskInfo{(*heightMap)->getHoleMaskSampler(), (*heightMap)->getHoleMaskView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkWriteDescriptorSet holeMaskWrite{};
         holeMaskWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         holeMaskWrite.dstSet = renderDescriptorSets[i];
@@ -517,8 +539,8 @@ void TerrainSystem::updateDescriptorSets(VkDevice device,
         }
 
         // LOD tile array texture (binding 19)
-        if (tileCache.getTileArrayView() != VK_NULL_HANDLE) {
-            VkDescriptorImageInfo tileArrayInfo{tileCache.getSampler(), tileCache.getTileArrayView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        if (tileCache && (*tileCache)->getTileArrayView() != VK_NULL_HANDLE) {
+            VkDescriptorImageInfo tileArrayInfo{(*tileCache)->getSampler(), (*tileCache)->getTileArrayView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
             VkWriteDescriptorSet tileArrayWrite{};
             tileArrayWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             tileArrayWrite.dstSet = renderDescriptorSets[i];
@@ -530,8 +552,8 @@ void TerrainSystem::updateDescriptorSets(VkDevice device,
         }
 
         // LOD tile info buffer (binding 20)
-        if (tileCache.getTileInfoBuffer() != VK_NULL_HANDLE) {
-            VkDescriptorBufferInfo tileInfoBufInfo{tileCache.getTileInfoBuffer(), 0, VK_WHOLE_SIZE};
+        if (tileCache && (*tileCache)->getTileInfoBuffer() != VK_NULL_HANDLE) {
+            VkDescriptorBufferInfo tileInfoBufInfo{(*tileCache)->getTileInfoBuffer(), 0, VK_WHOLE_SIZE};
             VkWriteDescriptorSet tileInfoWrite{};
             tileInfoWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             tileInfoWrite.dstSet = renderDescriptorSets[i];
@@ -621,8 +643,8 @@ void TerrainSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraP
     cameraOptimizer.update(cameraPos, view);
 
     // Update tile cache - stream high-res tiles based on camera position
-    if (!config.tileCacheDir.empty()) {
-        tileCache.updateActiveTiles(cameraPos, config.tileLoadRadius, config.tileUnloadRadius);
+    if (tileCache) {
+        (*tileCache)->updateActiveTiles(cameraPos, config.tileLoadRadius, config.tileUnloadRadius);
     }
 
     TerrainUniforms uniforms{};
@@ -664,7 +686,7 @@ void TerrainSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraP
     uniforms.snowPadding1 = 0.0f;
     uniforms.snowPadding2 = 0.0f;
 
-    memcpy(buffers.getUniformMappedPtr(frameIndex), &uniforms, sizeof(TerrainUniforms));
+    memcpy((*buffers)->getUniformMappedPtr(frameIndex), &uniforms, sizeof(TerrainUniforms));
 }
 
 void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuProfiler* profiler) {
@@ -689,7 +711,7 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
 
     TerrainDispatcherPushConstants dispatcherPC{};
     dispatcherPC.subdivisionWorkgroupSize = SUBDIVISION_WORKGROUP_SIZE;
-    dispatcherPC.meshletIndexCount = config.useMeshlets ? meshlet.getIndexCount() : 0;
+    dispatcherPC.meshletIndexCount = config.useMeshlets ? (*meshlet)->getIndexCount() : 0;
     vkCmdPushConstants(cmd, (*pipelines)->getDispatcherPipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0,
                       sizeof(dispatcherPC), &dispatcherPC);
 
@@ -723,7 +745,7 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
                           sizeof(subdivPC), &subdivPC);
 
         // Dispatch all triangles - inline frustum culling handles early-out
-        vkCmdDispatchIndirect(cmd, buffers.getIndirectDispatchBuffer(), 0);
+        vkCmdDispatchIndirect(cmd, (*buffers)->getIndirectDispatchBuffer(), 0);
 
         if (profiler) profiler->endZone(cmd, "Terrain:Subdivision");
     } else {
@@ -743,7 +765,7 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
                           sizeof(subdivPC), &subdivPC);
 
         // Use the original indirect dispatch (all triangles)
-        vkCmdDispatchIndirect(cmd, buffers.getIndirectDispatchBuffer(), 0);
+        vkCmdDispatchIndirect(cmd, (*buffers)->getIndirectDispatchBuffer(), 0);
 
         if (profiler) profiler->endZone(cmd, "Terrain:Subdivision");
     }
@@ -864,16 +886,16 @@ void TerrainSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
 
     if (config.useMeshlets) {
         // Bind meshlet vertex and index buffers
-        VkBuffer vertexBuffers[] = {meshlet.getVertexBuffer()};
+        VkBuffer vertexBuffers[] = {(*meshlet)->getVertexBuffer()};
         VkDeviceSize offsets[] = {0};
         vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
-        vkCmdBindIndexBuffer(cmd, meshlet.getIndexBuffer(), 0, VK_INDEX_TYPE_UINT16);
+        vkCmdBindIndexBuffer(cmd, (*meshlet)->getIndexBuffer(), 0, VK_INDEX_TYPE_UINT16);
 
         // Indexed instanced draw
-        vkCmdDrawIndexedIndirect(cmd, buffers.getIndirectDrawBuffer(), 0, 1, sizeof(VkDrawIndexedIndirectCommand));
+        vkCmdDrawIndexedIndirect(cmd, (*buffers)->getIndirectDrawBuffer(), 0, 1, sizeof(VkDrawIndexedIndirectCommand));
     } else {
         // Direct vertex draw (no vertex buffer - vertices generated from gl_VertexIndex)
-        vkCmdDrawIndirect(cmd, buffers.getIndirectDrawBuffer(), 0, 1, sizeof(VkDrawIndirectCommand));
+        vkCmdDrawIndirect(cmd, (*buffers)->getIndirectDrawBuffer(), 0, 1, sizeof(VkDrawIndirectCommand));
     }
 }
 
@@ -884,7 +906,7 @@ void TerrainSystem::recordShadowCull(VkCommandBuffer cmd, uint32_t frameIndex,
     }
 
     // Clear the shadow visible count to 0 and barrier for compute
-    Barriers::clearBufferForCompute(cmd, buffers.getShadowVisibleBuffer());
+    Barriers::clearBufferForCompute(cmd, (*buffers)->getShadowVisibleBuffer());
 
     // Bind shadow cull compute pipeline
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, (*pipelines)->getShadowCullPipeline());
@@ -903,7 +925,7 @@ void TerrainSystem::recordShadowCull(VkCommandBuffer cmd, uint32_t frameIndex,
                        0, sizeof(pc), &pc);
 
     // Use indirect dispatch - the workgroup count is computed on GPU in terrain_dispatcher
-    vkCmdDispatchIndirect(cmd, buffers.getIndirectDispatchBuffer(), 0);
+    vkCmdDispatchIndirect(cmd, (*buffers)->getIndirectDispatchBuffer(), 0);
 
     // Memory barrier to ensure shadow cull results are visible for draw
     Barriers::computeToIndirectDraw(cmd);
@@ -950,31 +972,31 @@ void TerrainSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex,
 
     if (config.useMeshlets) {
         // Bind meshlet vertex and index buffers
-        VkBuffer vertexBuffers[] = {meshlet.getVertexBuffer()};
+        VkBuffer vertexBuffers[] = {(*meshlet)->getVertexBuffer()};
         VkDeviceSize offsets[] = {0};
         vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
-        vkCmdBindIndexBuffer(cmd, meshlet.getIndexBuffer(), 0, VK_INDEX_TYPE_UINT16);
+        vkCmdBindIndexBuffer(cmd, (*meshlet)->getIndexBuffer(), 0, VK_INDEX_TYPE_UINT16);
 
         // Use shadow indirect draw buffer if culling, else main indirect buffer
-        VkBuffer drawBuffer = useCulled ? buffers.getShadowIndirectDrawBuffer() : buffers.getIndirectDrawBuffer();
+        VkBuffer drawBuffer = useCulled ? (*buffers)->getShadowIndirectDrawBuffer() : (*buffers)->getIndirectDrawBuffer();
         vkCmdDrawIndexedIndirect(cmd, drawBuffer, 0, 1, sizeof(VkDrawIndexedIndirectCommand));
     } else {
-        VkBuffer drawBuffer = useCulled ? buffers.getShadowIndirectDrawBuffer() : buffers.getIndirectDrawBuffer();
+        VkBuffer drawBuffer = useCulled ? (*buffers)->getShadowIndirectDrawBuffer() : (*buffers)->getIndirectDrawBuffer();
         vkCmdDrawIndirect(cmd, drawBuffer, 0, 1, sizeof(VkDrawIndirectCommand));
     }
 }
 
 float TerrainSystem::getHeightAt(float x, float z) const {
     // First try the tile cache for high-res height data
-    if (!config.tileCacheDir.empty()) {
+    if (tileCache) {
         float tileHeight;
-        if (tileCache.getHeightAt(x, z, tileHeight)) {
+        if ((*tileCache)->getHeightAt(x, z, tileHeight)) {
             return tileHeight;
         }
     }
 
     // Fall back to global heightmap (coarse LOD)
-    return heightMap.getHeightAt(x, z);
+    return (*heightMap)->getHeightAt(x, z);
 }
 
 bool TerrainSystem::setMeshletSubdivisionLevel(int level) {
@@ -988,25 +1010,32 @@ bool TerrainSystem::setMeshletSubdivisionLevel(int level) {
         return true;  // No change needed
     }
 
-    // Destroy old meshlet and create new one
+    // Destroy old meshlet and create new one with RAII
     vkDeviceWaitIdle(device);
-    meshlet.destroy(allocator);
+    meshlet.reset();
 
     TerrainMeshlet::InitInfo meshletInfo{};
     meshletInfo.allocator = allocator;
     meshletInfo.subdivisionLevel = static_cast<uint32_t>(level);
 
-    if (!meshlet.init(meshletInfo)) {
+    meshlet = RAIIAdapter<TerrainMeshlet>::create(
+        [&](auto& m) { return m.init(meshletInfo); },
+        [this](auto& m) { m.destroy(allocator); }
+    );
+    if (!meshlet) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "Failed to reinitialize meshlet at level %d", level);
         // Try to restore previous level
         meshletInfo.subdivisionLevel = static_cast<uint32_t>(config.meshletSubdivisionLevel);
-        meshlet.init(meshletInfo);
+        meshlet = RAIIAdapter<TerrainMeshlet>::create(
+            [&](auto& m) { return m.init(meshletInfo); },
+            [this](auto& m) { m.destroy(allocator); }
+        );
         return false;
     }
 
     config.meshletSubdivisionLevel = level;
     SDL_Log("Meshlet subdivision level changed to %d (%u triangles per leaf)",
-            level, meshlet.getTriangleCount());
+            level, (*meshlet)->getTriangleCount());
     return true;
 }

@@ -10,6 +10,8 @@
 #include "ParticleSystem.h"
 #include "BufferUtils.h"
 #include "UBOs.h"
+#include "core/RAIIAdapter.h"
+#include <optional>
 
 // Leaf particle states
 enum class LeafState : uint32_t {
@@ -52,7 +54,7 @@ public:
     void destroy(VkDevice device, VmaAllocator allocator);
 
     // Update extent for viewport (on window resize)
-    void setExtent(VkExtent2D newExtent) { particleSystem.setExtent(newExtent); }
+    void setExtent(VkExtent2D newExtent) { (*particleSystem)->setExtent(newExtent); }
 
     // Update descriptor sets with external resources (UBO, wind buffer, heightmap, displacement)
     void updateDescriptorSets(VkDevice device, const std::vector<VkBuffer>& uniformBuffers,
@@ -98,25 +100,35 @@ public:
 
 private:
     bool createBuffers();
-    bool createComputeDescriptorSetLayout();
-    bool createComputePipeline();
-    bool createGraphicsDescriptorSetLayout();
-    bool createGraphicsPipeline();
+    bool createComputeDescriptorSetLayout(SystemLifecycleHelper::PipelineHandles& handles);
+    bool createComputePipeline(SystemLifecycleHelper::PipelineHandles& handles);
+    bool createGraphicsDescriptorSetLayout(SystemLifecycleHelper::PipelineHandles& handles);
+    bool createGraphicsPipeline(SystemLifecycleHelper::PipelineHandles& handles);
     bool createDescriptorSets();
     void destroyBuffers(VmaAllocator allocator);
 
-    VkDevice getDevice() const { return particleSystem.getDevice(); }
-    VmaAllocator getAllocator() const { return particleSystem.getAllocator(); }
-    VkRenderPass getRenderPass() const { return particleSystem.getRenderPass(); }
-    DescriptorManager::Pool* getDescriptorPool() const { return particleSystem.getDescriptorPool(); }
-    const VkExtent2D& getExtent() const { return particleSystem.getExtent(); }
-    const std::string& getShaderPath() const { return particleSystem.getShaderPath(); }
-    uint32_t getFramesInFlight() const { return particleSystem.getFramesInFlight(); }
+    // Accessors - use stored initInfo during init, particleSystem after init completes
+    VkDevice getDevice() const { return storedDevice; }
+    VmaAllocator getAllocator() const { return storedAllocator; }
+    VkRenderPass getRenderPass() const { return storedRenderPass; }
+    DescriptorManager::Pool* getDescriptorPool() const { return storedDescriptorPool; }
+    const VkExtent2D& getExtent() const { return particleSystem ? (*particleSystem)->getExtent() : storedExtent; }
+    const std::string& getShaderPath() const { return storedShaderPath; }
+    uint32_t getFramesInFlight() const { return storedFramesInFlight; }
 
-    SystemLifecycleHelper::PipelineHandles& getComputePipelineHandles() { return particleSystem.getComputePipelineHandles(); }
-    SystemLifecycleHelper::PipelineHandles& getGraphicsPipelineHandles() { return particleSystem.getGraphicsPipelineHandles(); }
+    SystemLifecycleHelper::PipelineHandles& getComputePipelineHandles() { return (*particleSystem)->getComputePipelineHandles(); }
+    SystemLifecycleHelper::PipelineHandles& getGraphicsPipelineHandles() { return (*particleSystem)->getGraphicsPipelineHandles(); }
 
-    ParticleSystem particleSystem;
+    std::optional<RAIIAdapter<ParticleSystem>> particleSystem;
+
+    // Stored init info (available during initialization before particleSystem is created)
+    VkDevice storedDevice = VK_NULL_HANDLE;
+    VmaAllocator storedAllocator = VK_NULL_HANDLE;
+    VkRenderPass storedRenderPass = VK_NULL_HANDLE;
+    DescriptorManager::Pool* storedDescriptorPool = nullptr;
+    VkExtent2D storedExtent = {0, 0};
+    std::string storedShaderPath;
+    uint32_t storedFramesInFlight = 0;
 
     // Double-buffered storage buffers
     static constexpr uint32_t BUFFER_SET_COUNT = 2;
