@@ -3,6 +3,7 @@
 #include "Camera.h"
 #include "AnimatedCharacter.h"
 #include "PlayerCape.h"
+#include "SceneBuilder.h"
 
 #include <imgui.h>
 #include <glm/glm.hpp>

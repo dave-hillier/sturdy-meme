@@ -1,5 +1,7 @@
 #include "GuiTimeTab.h"
 #include "Renderer.h"
+#include "TimeSystem.h"
+#include "CelestialCalculator.h"
 
 #include <imgui.h>
 #include <algorithm>

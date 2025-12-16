@@ -4,6 +4,12 @@
 #include <cstdio>
 #include <unordered_set>
 
+#include "TerrainSystem.h"
+#include "RockSystem.h"
+#include "SceneManager.h"
+#include "WaterSystem.h"
+#include "WindSystem.h"
+
 #ifdef JPH_DEBUG_RENDERER
 #include "PhysicsDebugRenderer.h"
 #endif

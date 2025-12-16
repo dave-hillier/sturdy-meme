@@ -1,5 +1,6 @@
 #include "GuiPlayerTab.h"
 #include "Renderer.h"
+#include "SceneBuilder.h"
 
 #include <imgui.h>
 

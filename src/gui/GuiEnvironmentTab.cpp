@@ -1,6 +1,7 @@
 #include "GuiEnvironmentTab.h"
 #include "Renderer.h"
 #include "AtmosphereLUTSystem.h"
+#include "EnvironmentSettings.h"
 
 #include <imgui.h>
 #include <glm/glm.hpp>

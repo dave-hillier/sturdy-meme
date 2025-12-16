@@ -1,5 +1,6 @@
 #include "GuiProfilerTab.h"
 #include "Renderer.h"
+#include "Profiler.h"
 
 #include <imgui.h>
 #include <algorithm>

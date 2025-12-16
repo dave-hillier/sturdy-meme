@@ -1,5 +1,7 @@
 #include "GuiPostFXTab.h"
 #include "Renderer.h"
+#include "HiZSystem.h"
+#include "PostProcessSystem.h"
 
 #include <imgui.h>
 
@@ -74,7 +76,7 @@ void GuiPostFXTab::render(Renderer& renderer) {
         const char* qualityNames[] = {"Low (16 samples)", "Medium (32 samples)", "High (64 samples)"};
         int currentQuality = static_cast<int>(renderer.getGodRayQuality());
         if (ImGui::Combo("God Ray Quality", &currentQuality, qualityNames, 3)) {
-            renderer.setGodRayQuality(static_cast<PostProcessSystem::GodRayQuality>(currentQuality));
+            renderer.setGodRayQuality(currentQuality);
         }
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Higher quality = more samples = better rays but slower");

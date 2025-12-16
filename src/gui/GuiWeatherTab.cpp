@@ -1,5 +1,7 @@
 #include "GuiWeatherTab.h"
 #include "Renderer.h"
+#include "WindSystem.h"
+#include "LeafSystem.h"
 
 #include <imgui.h>
 #include <glm/glm.hpp>

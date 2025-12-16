@@ -1,5 +1,6 @@
 #include "GuiTerrainTab.h"
 #include "Renderer.h"
+#include "TerrainSystem.h"
 
 #include <imgui.h>
 

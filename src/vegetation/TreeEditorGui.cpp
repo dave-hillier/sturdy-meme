@@ -3,6 +3,8 @@
 #include "Camera.h"
 #include "TreeGenerator.h"
 #include "BillboardCapture.h"
+#include "TreeEditSystem.h"
+#include "SceneManager.h"
 
 #include <imgui.h>
 #include <glm/glm.hpp>

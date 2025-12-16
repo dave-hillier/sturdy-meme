@@ -1,5 +1,7 @@
 #include "GuiWaterTab.h"
 #include "Renderer.h"
+#include "WaterSystem.h"
+#include "WaterTileCull.h"
 
 #include <imgui.h>
 #include <glm/glm.hpp>

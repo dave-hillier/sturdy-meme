@@ -41,6 +41,7 @@ set(SOURCES
     src/core/CoreResources.cpp
     src/core/ResizeCoordinator.cpp
     src/core/UBOBuilder.cpp
+    src/core/RendererSystems.cpp
     src/core/VulkanContext.cpp
     src/core/Mesh.cpp
     src/core/BufferUtils.cpp
