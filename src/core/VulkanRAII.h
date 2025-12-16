@@ -284,9 +284,6 @@ public:
         return ManagedBuffer(makeUniqueVmaBuffer(allocator, buffer, allocation));
     }
 
-    // Legacy API compatibility
-    void destroy() { reset(); }
-
     // Access allocator and allocation from deleter
     VmaAllocator allocator() const { return get_deleter().allocator; }
     VmaAllocation getAllocation() const { return get_deleter().allocation; }
@@ -364,9 +361,6 @@ public:
         return ManagedImage(makeUniqueVmaImage(allocator, image, allocation));
     }
 
-    // Legacy API compatibility
-    void destroy() { reset(); }
-
     // Access allocator and allocation from deleter
     VmaAllocator allocator() const { return get_deleter().allocator; }
     VmaAllocation getAllocation() const { return get_deleter().allocation; }
@@ -412,9 +406,6 @@ public:
     static ManagedImageView fromRaw(VkDevice device, VkImageView imageView) {
         return ManagedImageView(makeUniqueImageView(device, imageView));
     }
-
-    // Legacy API compatibility
-    void destroy() { reset(); }
 };
 
 // ============================================================================
@@ -451,9 +442,6 @@ public:
     static ManagedSampler fromRaw(VkDevice device, VkSampler sampler) {
         return ManagedSampler(makeUniqueSampler(device, sampler));
     }
-
-    // Legacy API compatibility
-    void destroy() { reset(); }
 };
 
 // ============================================================================
@@ -489,9 +477,6 @@ public:
     static ManagedDescriptorSetLayout fromRaw(VkDevice device, VkDescriptorSetLayout layout) {
         return ManagedDescriptorSetLayout(makeUniqueDescriptorSetLayout(device, layout));
     }
-
-    // Legacy API compatibility
-    void destroy() { reset(); }
 };
 
 // ============================================================================
@@ -527,9 +512,6 @@ public:
     static ManagedPipelineLayout fromRaw(VkDevice device, VkPipelineLayout layout) {
         return ManagedPipelineLayout(makeUniquePipelineLayout(device, layout));
     }
-
-    // Legacy API compatibility
-    void destroy() { reset(); }
 };
 
 // ============================================================================
@@ -584,9 +566,6 @@ public:
     static ManagedPipeline fromRaw(VkDevice device, VkPipeline pipeline) {
         return ManagedPipeline(makeUniquePipeline(device, pipeline));
     }
-
-    // Legacy API compatibility
-    void destroy() { reset(); }
 };
 
 // ============================================================================
@@ -622,9 +601,6 @@ public:
     static ManagedRenderPass fromRaw(VkDevice device, VkRenderPass renderPass) {
         return ManagedRenderPass(makeUniqueRenderPass(device, renderPass));
     }
-
-    // Legacy API compatibility
-    void destroy() { reset(); }
 };
 
 // ============================================================================
@@ -660,9 +636,6 @@ public:
     static ManagedFramebuffer fromRaw(VkDevice device, VkFramebuffer framebuffer) {
         return ManagedFramebuffer(makeUniqueFramebuffer(device, framebuffer));
     }
-
-    // Legacy API compatibility
-    void destroy() { reset(); }
 };
 
 // ============================================================================
@@ -783,9 +756,6 @@ public:
     static ManagedCommandPool fromRaw(VkDevice device, VkCommandPool commandPool) {
         return ManagedCommandPool(makeUniqueCommandPool(device, commandPool));
     }
-
-    // Legacy API compatibility
-    void destroy() { reset(); }
 };
 
 // ============================================================================
@@ -822,9 +792,6 @@ public:
     static ManagedSemaphore fromRaw(VkDevice device, VkSemaphore semaphore) {
         return ManagedSemaphore(makeUniqueSemaphore(device, semaphore));
     }
-
-    // Legacy API compatibility
-    void destroy() { reset(); }
 };
 
 // ============================================================================
@@ -868,9 +835,6 @@ public:
     static ManagedFence fromRaw(VkDevice device, VkFence fence) {
         return ManagedFence(makeUniqueFence(device, fence));
     }
-
-    // Legacy API compatibility
-    void destroy() { reset(); }
 
     // Access device from deleter (for sync operations)
     VkDevice device() const { return get_deleter().device; }

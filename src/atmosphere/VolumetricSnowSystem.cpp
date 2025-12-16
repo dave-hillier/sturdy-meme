@@ -23,7 +23,7 @@ bool VolumetricSnowSystem::init(const InitInfo& info) {
 }
 
 void VolumetricSnowSystem::destroy(VkDevice dev, VmaAllocator alloc) {
-    cascadeSampler.destroy();
+    cascadeSampler.reset();
 
     for (uint32_t i = 0; i < NUM_SNOW_CASCADES; i++) {
         vkDestroyImageView(dev, cascadeViews[i], nullptr);

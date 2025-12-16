@@ -59,7 +59,7 @@ void BillboardCapture::destroy() {
         uboBuffer_.unmap();
         uboMapped = nullptr;
     }
-    uboBuffer_.destroy();
+    uboBuffer_.reset();
 
     // RAII wrappers automatically clean up: solidPipeline_, leafPipeline_,
     // pipelineLayout_, descriptorSetLayout_, renderPass_, framebuffer_, sampler_
@@ -223,8 +223,8 @@ bool BillboardCapture::createRenderTarget(uint32_t width, uint32_t height) {
 }
 
 void BillboardCapture::destroyRenderTarget() {
-    // ManagedBuffer cleanup for staging buffer
-    stagingBuffer_.destroy();
+    // ManagedBuffer cleanup for staging buffer (RAII via reset)
+    stagingBuffer_.reset();
 
     // Reset RAII framebuffer wrapper
     framebuffer_ = ManagedFramebuffer();

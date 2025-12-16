@@ -23,7 +23,7 @@ bool FlowMapGenerator::init(VkDevice device, VmaAllocator allocator,
 }
 
 void FlowMapGenerator::destroy(VkDevice device, VmaAllocator allocator) {
-    flowMapSampler.destroy();
+    flowMapSampler.reset();
 
     if (flowMapView != VK_NULL_HANDLE) {
         vkDestroyImageView(device, flowMapView, nullptr);

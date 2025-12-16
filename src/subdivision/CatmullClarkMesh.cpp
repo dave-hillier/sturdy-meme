@@ -38,9 +38,7 @@ bool CatmullClarkMesh::uploadToGPU(VmaAllocator allocator) {
 }
 
 void CatmullClarkMesh::destroy() {
-    vertexBuffer_.destroy();
-    halfedgeBuffer_.destroy();
-    faceBuffer_.destroy();
+    // RAII handles cleanup automatically
 }
 
 CatmullClarkMesh CatmullClarkMesh::createCube() {

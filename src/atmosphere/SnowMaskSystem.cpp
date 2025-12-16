@@ -23,7 +23,7 @@ bool SnowMaskSystem::init(const InitInfo& info) {
 }
 
 void SnowMaskSystem::destroy(VkDevice dev, VmaAllocator alloc) {
-    snowMaskSampler.destroy();
+    snowMaskSampler.reset();
     vkDestroyImageView(dev, snowMaskView, nullptr);
     vmaDestroyImage(alloc, snowMaskImage, snowMaskAllocation);
 

@@ -47,13 +47,13 @@ void WaterTileCull::destroy() {
     descriptorSetLayout = ManagedDescriptorSetLayout();
     depthSampler = ManagedSampler();
 
-    // ManagedBuffer cleanup
-    tileBuffer_.destroy();
-    counterBuffer_.destroy();
+    // ManagedBuffer cleanup (RAII handles via reset)
+    tileBuffer_.reset();
+    counterBuffer_.reset();
     counterMapped = nullptr;
-    counterReadbackBuffer_.destroy();
+    counterReadbackBuffer_.reset();
     counterReadbackMapped = nullptr;
-    indirectDrawBuffer_.destroy();
+    indirectDrawBuffer_.reset();
 
     device = VK_NULL_HANDLE;
 }
@@ -74,9 +74,9 @@ void WaterTileCull::resize(VkExtent2D newExtent) {
     if (newTileCount != tileCount) {
         tileCount = newTileCount;
 
-        // Destroy and recreate buffers
-        tileBuffer_.destroy();
-        indirectDrawBuffer_.destroy();
+        // Destroy and recreate buffers (RAII via reset)
+        tileBuffer_.reset();
+        indirectDrawBuffer_.reset();
 
         createBuffers();
 

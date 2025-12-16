@@ -393,8 +393,8 @@ void HiZSystem::destroyBuffers() {
     BufferUtils::destroyBuffers(allocator, drawCountBuffers);
     BufferUtils::destroyBuffers(allocator, indirectDrawBuffers);
 
-    // RAII-managed object data buffer
-    objectDataBuffer_.destroy();
+    // RAII-managed object data buffer (via reset)
+    objectDataBuffer_.reset();
 }
 
 bool HiZSystem::createDescriptorSets() {

@@ -44,8 +44,8 @@ bool TerrainHeightMap::init(const InitInfo& info) {
 }
 
 void TerrainHeightMap::destroy(VkDevice device, VmaAllocator allocator) {
-    // Destroy height map resources
-    sampler.destroy();
+    // Destroy height map resources (sampler via RAII)
+    sampler.reset();
     if (imageView) vkDestroyImageView(device, imageView, nullptr);
     if (image) vmaDestroyImage(allocator, image, allocation);
 
@@ -53,8 +53,8 @@ void TerrainHeightMap::destroy(VkDevice device, VmaAllocator allocator) {
     image = VK_NULL_HANDLE;
     allocation = VK_NULL_HANDLE;
 
-    // Destroy hole mask resources
-    holeMaskSampler.destroy();
+    // Destroy hole mask resources (sampler via RAII)
+    holeMaskSampler.reset();
     if (holeMaskImageView) vkDestroyImageView(device, holeMaskImageView, nullptr);
     if (holeMaskImage) vmaDestroyImage(allocator, holeMaskImage, holeMaskAllocation);
 

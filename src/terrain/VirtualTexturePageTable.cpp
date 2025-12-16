@@ -68,9 +68,9 @@ void VirtualTexturePageTable::destroy(VkDevice device, VmaAllocator allocator) {
         stagingBuffer_.unmap();
         stagingMapped = nullptr;
     }
-    stagingBuffer_.destroy();
+    stagingBuffer_.reset();
 
-    pageTableSampler.destroy();
+    pageTableSampler.reset();
 
     if (combinedImageView != VK_NULL_HANDLE) {
         vkDestroyImageView(device, combinedImageView, nullptr);

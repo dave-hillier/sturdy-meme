@@ -24,11 +24,8 @@ bool VirtualTextureFeedback::init(VkDevice device, VmaAllocator allocator,
 }
 
 void VirtualTextureFeedback::destroy() {
+    // RAII handles buffer cleanup automatically when frameBuffers is cleared
     for (auto& fb : frameBuffers) {
-        fb.feedbackBuffer.destroy();
-        fb.counterBuffer.destroy();
-        fb.readbackBuffer.destroy();
-        fb.counterReadbackBuffer.destroy();
         fb.readbackMapped = nullptr;
         fb.counterReadbackMapped = nullptr;
     }

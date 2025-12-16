@@ -55,9 +55,9 @@ void VirtualTextureCache::destroy(VkDevice device, VmaAllocator allocator) {
         stagingBuffer_.unmap();
         stagingMapped = nullptr;
     }
-    stagingBuffer_.destroy();
+    stagingBuffer_.reset();
 
-    cacheSampler.destroy();
+    cacheSampler.reset();
 
     if (cacheImageView != VK_NULL_HANDLE) {
         vkDestroyImageView(device, cacheImageView, nullptr);

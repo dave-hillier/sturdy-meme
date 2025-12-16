@@ -20,11 +20,12 @@ bool TerrainTextures::init(const InitInfo& info) {
 }
 
 void TerrainTextures::destroy(VkDevice device, VmaAllocator allocator) {
-    albedoSampler.destroy();
+    // Samplers via RAII
+    albedoSampler.reset();
     if (albedoView) vkDestroyImageView(device, albedoView, nullptr);
     if (albedoImage) vmaDestroyImage(allocator, albedoImage, albedoAllocation);
 
-    grassFarLODSampler.destroy();
+    grassFarLODSampler.reset();
     if (grassFarLODView) vkDestroyImageView(device, grassFarLODView, nullptr);
     if (grassFarLODImage) vmaDestroyImage(allocator, grassFarLODImage, grassFarLODAllocation);
 

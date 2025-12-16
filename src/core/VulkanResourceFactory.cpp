@@ -26,7 +26,7 @@ void VulkanResourceFactory::SyncResources::destroy(VkDevice device) {
 // ============================================================================
 
 void VulkanResourceFactory::DepthResources::destroy(VkDevice device, VmaAllocator allocator) {
-    sampler.destroy();
+    sampler.reset();
     if (view != VK_NULL_HANDLE) {
         vkDestroyImageView(device, view, nullptr);
         view = VK_NULL_HANDLE;
@@ -413,7 +413,7 @@ bool VulkanResourceFactory::createRenderPass(
 // ============================================================================
 
 void VulkanResourceFactory::DepthArrayResources::destroy(VkDevice device, VmaAllocator allocator) {
-    sampler.destroy();
+    sampler.reset();
     for (auto& view : layerViews) {
         if (view != VK_NULL_HANDLE) {
             vkDestroyImageView(device, view, nullptr);

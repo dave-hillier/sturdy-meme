@@ -174,6 +174,5 @@ bool TerrainMeshlet::init(const InitInfo& info) {
 }
 
 void TerrainMeshlet::destroy() {
-    vertexBuffer_.destroy();
-    indexBuffer_.destroy();
+    // RAII handles cleanup automatically
 }

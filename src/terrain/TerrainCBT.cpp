@@ -160,5 +160,5 @@ bool TerrainCBT::init(const InitInfo& info) {
 }
 
 void TerrainCBT::destroy() {
-    buffer_.destroy();
+    // RAII handles cleanup automatically
 }

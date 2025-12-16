@@ -63,7 +63,7 @@ void CloudShadowSystem::destroy() {
     uniformAllocations.clear();
     uniformMappedPtrs.clear();
 
-    shadowMapSampler.destroy();
+    shadowMapSampler.reset();
     if (shadowMapView != VK_NULL_HANDLE) {
         vkDestroyImageView(device, shadowMapView, nullptr);
         shadowMapView = VK_NULL_HANDLE;

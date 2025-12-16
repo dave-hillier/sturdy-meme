@@ -139,8 +139,8 @@ void TerrainTileCache::destroy() {
     loadedTiles.clear();
     activeTiles.clear();
 
-    // Destroy tile info buffer (RAII)
-    tileInfoBuffer_.destroy();
+    // Destroy tile info buffer (RAII via reset)
+    tileInfoBuffer_.reset();
 
     // Destroy tile array texture
     if (tileArrayView) {
@@ -152,8 +152,8 @@ void TerrainTileCache::destroy() {
         tileArrayImage = VK_NULL_HANDLE;
     }
 
-    // Destroy sampler
-    sampler.destroy();
+    // Destroy sampler (RAII via reset)
+    sampler.reset();
 }
 
 bool TerrainTileCache::loadMetadata() {

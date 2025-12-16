@@ -83,9 +83,9 @@ void CatmullClarkSystem::destroy(VkDevice device, VmaAllocator allocator) {
     mesh.reset();
     cbt.reset();
 
-    // RAII-managed buffers are destroyed automatically
-    indirectDispatchBuffer_.destroy();
-    indirectDrawBuffer_.destroy();
+    // RAII-managed buffers are destroyed automatically via reset/clear
+    indirectDispatchBuffer_.reset();
+    indirectDrawBuffer_.reset();
     uniformBuffers_.clear();
     uniformMappedPtrs.clear();
 

@@ -81,7 +81,7 @@ void PostProcessSystem::destroy(VkDevice device, VmaAllocator allocator) {
         compositeDescriptorSetLayout = VK_NULL_HANDLE;
     }
 
-    hdrSampler.destroy();
+    hdrSampler.reset();
     if (hdrRenderPass != VK_NULL_HANDLE) {
         vkDestroyRenderPass(device, hdrRenderPass, nullptr);
         hdrRenderPass = VK_NULL_HANDLE;
