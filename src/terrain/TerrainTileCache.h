@@ -104,7 +104,7 @@ public:
     const std::vector<TerrainTile*>& getActiveTiles() const { return activeTiles; }
 
     // Get tile info buffer for shader
-    VkBuffer getTileInfoBuffer() const { return tileInfoBuffer; }
+    VkBuffer getTileInfoBuffer() const { return tileInfoBuffer_.get(); }
 
     // Accessors
     uint32_t getNumLODLevels() const { return numLODLevels; }
@@ -170,9 +170,8 @@ private:
     VkCommandPool commandPool = VK_NULL_HANDLE;
     ManagedSampler sampler;
 
-    // Tile info buffer for shader
-    VkBuffer tileInfoBuffer = VK_NULL_HANDLE;
-    VmaAllocation tileInfoAllocation = VK_NULL_HANDLE;
+    // Tile info buffer for shader (RAII-managed)
+    ManagedBuffer tileInfoBuffer_;
     void* tileInfoMappedPtr = nullptr;
 
     // Tile array texture (sampler2DArray) for shader - holds all active tiles

@@ -12,7 +12,7 @@ bool VirtualTextureFeedback::init(VkDevice device, VmaAllocator allocator,
     frameBuffers.resize(frameCount);
 
     for (auto& fb : frameBuffers) {
-        if (!createFrameBuffer(device, allocator, fb)) {
+        if (!createFrameBuffer(allocator, fb)) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create VT feedback frame buffer");
             return false;
         }
@@ -22,126 +22,47 @@ bool VirtualTextureFeedback::init(VkDevice device, VmaAllocator allocator,
     return true;
 }
 
-void VirtualTextureFeedback::destroy(VkDevice device, VmaAllocator allocator) {
+void VirtualTextureFeedback::destroy() {
     for (auto& fb : frameBuffers) {
-        destroyFrameBuffer(device, allocator, fb);
+        fb.feedbackBuffer.destroy();
+        fb.counterBuffer.destroy();
+        fb.readbackBuffer.destroy();
+        fb.counterReadbackBuffer.destroy();
+        fb.readbackMapped = nullptr;
+        fb.counterReadbackMapped = nullptr;
     }
     frameBuffers.clear();
     requestedTilePacked.clear();
     requestedTilesSorted.clear();
 }
 
-bool VirtualTextureFeedback::createFrameBuffer(VkDevice device, VmaAllocator allocator,
-                                                FrameBuffer& fb) {
+bool VirtualTextureFeedback::createFrameBuffer(VmaAllocator allocator, FrameBuffer& fb) {
     VkDeviceSize feedbackSize = maxEntries * sizeof(uint32_t);
     VkDeviceSize counterSize = sizeof(uint32_t);
 
     // GPU feedback buffer (storage buffer, written by shader)
-    {
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = feedbackSize;
-        bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                          VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-                          VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-        allocInfo.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-
-        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo,
-                           &fb.feedbackBuffer, &fb.feedbackAllocation, nullptr) != VK_SUCCESS) {
-            return false;
-        }
+    if (!ManagedBuffer::createStorage(allocator, feedbackSize, fb.feedbackBuffer)) {
+        return false;
     }
 
     // GPU counter buffer (atomic counter for number of requests)
-    {
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = counterSize;
-        bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                          VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-                          VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-        allocInfo.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-
-        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo,
-                           &fb.counterBuffer, &fb.counterAllocation, nullptr) != VK_SUCCESS) {
-            return false;
-        }
+    if (!ManagedBuffer::createStorage(allocator, counterSize, fb.counterBuffer)) {
+        return false;
     }
 
     // CPU readback buffer for feedback
-    {
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = feedbackSize;
-        bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
-                         VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
-        VmaAllocationInfo allocationInfo;
-        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo,
-                           &fb.readbackBuffer, &fb.readbackAllocation, &allocationInfo) != VK_SUCCESS) {
-            return false;
-        }
-        fb.readbackMapped = allocationInfo.pMappedData;
+    if (!ManagedBuffer::createReadback(allocator, feedbackSize, fb.readbackBuffer)) {
+        return false;
     }
+    fb.readbackMapped = fb.readbackBuffer.map();
 
     // CPU readback buffer for counter
-    {
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = counterSize;
-        bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
-                         VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
-        VmaAllocationInfo allocationInfo;
-        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo,
-                           &fb.counterReadbackBuffer, &fb.counterReadbackAllocation,
-                           &allocationInfo) != VK_SUCCESS) {
-            return false;
-        }
-        fb.counterReadbackMapped = allocationInfo.pMappedData;
+    if (!ManagedBuffer::createReadback(allocator, counterSize, fb.counterReadbackBuffer)) {
+        return false;
     }
+    fb.counterReadbackMapped = fb.counterReadbackBuffer.map();
 
     return true;
-}
-
-void VirtualTextureFeedback::destroyFrameBuffer(VkDevice device, VmaAllocator allocator,
-                                                  FrameBuffer& fb) {
-    if (fb.feedbackBuffer != VK_NULL_HANDLE) {
-        vmaDestroyBuffer(allocator, fb.feedbackBuffer, fb.feedbackAllocation);
-        fb.feedbackBuffer = VK_NULL_HANDLE;
-    }
-    if (fb.counterBuffer != VK_NULL_HANDLE) {
-        vmaDestroyBuffer(allocator, fb.counterBuffer, fb.counterAllocation);
-        fb.counterBuffer = VK_NULL_HANDLE;
-    }
-    if (fb.readbackBuffer != VK_NULL_HANDLE) {
-        vmaDestroyBuffer(allocator, fb.readbackBuffer, fb.readbackAllocation);
-        fb.readbackBuffer = VK_NULL_HANDLE;
-        fb.readbackMapped = nullptr;
-    }
-    if (fb.counterReadbackBuffer != VK_NULL_HANDLE) {
-        vmaDestroyBuffer(allocator, fb.counterReadbackBuffer, fb.counterReadbackAllocation);
-        fb.counterReadbackBuffer = VK_NULL_HANDLE;
-        fb.counterReadbackMapped = nullptr;
-    }
 }
 
 void VirtualTextureFeedback::clear(VkCommandBuffer cmd, uint32_t frameIndex) {
@@ -150,7 +71,7 @@ void VirtualTextureFeedback::clear(VkCommandBuffer cmd, uint32_t frameIndex) {
     FrameBuffer& fb = frameBuffers[frameIndex];
 
     // Clear counter to 0 and barrier for fragment shader
-    Barriers::clearBufferForFragment(cmd, fb.counterBuffer);
+    Barriers::clearBufferForFragment(cmd, fb.counterBuffer.get());
 }
 
 void VirtualTextureFeedback::readback(uint32_t frameIndex) {
@@ -203,18 +124,18 @@ std::vector<TileId> VirtualTextureFeedback::getRequestedTiles() const {
 
 VkBuffer VirtualTextureFeedback::getFeedbackBuffer(uint32_t frameIndex) const {
     if (frameIndex >= frameBuffers.size()) return VK_NULL_HANDLE;
-    return frameBuffers[frameIndex].feedbackBuffer;
+    return frameBuffers[frameIndex].feedbackBuffer.get();
 }
 
 VkBuffer VirtualTextureFeedback::getCounterBuffer(uint32_t frameIndex) const {
     if (frameIndex >= frameBuffers.size()) return VK_NULL_HANDLE;
-    return frameBuffers[frameIndex].counterBuffer;
+    return frameBuffers[frameIndex].counterBuffer.get();
 }
 
 VkDescriptorBufferInfo VirtualTextureFeedback::getDescriptorInfo(uint32_t frameIndex) const {
     VkDescriptorBufferInfo info{};
     if (frameIndex < frameBuffers.size()) {
-        info.buffer = frameBuffers[frameIndex].feedbackBuffer;
+        info.buffer = frameBuffers[frameIndex].feedbackBuffer.get();
         info.offset = 0;
         info.range = maxEntries * sizeof(uint32_t);
     }
@@ -224,7 +145,7 @@ VkDescriptorBufferInfo VirtualTextureFeedback::getDescriptorInfo(uint32_t frameI
 VkDescriptorBufferInfo VirtualTextureFeedback::getCounterDescriptorInfo(uint32_t frameIndex) const {
     VkDescriptorBufferInfo info{};
     if (frameIndex < frameBuffers.size()) {
-        info.buffer = frameBuffers[frameIndex].counterBuffer;
+        info.buffer = frameBuffers[frameIndex].counterBuffer.get();
         info.offset = 0;
         info.range = sizeof(uint32_t);
     }

@@ -4,73 +4,31 @@
 
 bool CatmullClarkMesh::uploadToGPU(VmaAllocator allocator) {
     // Upload vertices
-    {
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = vertices.size() * sizeof(Vertex);
-        bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
-
-        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &vertexBuffer, &vertexAllocation, nullptr) != VK_SUCCESS) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create vertex buffer for Catmull-Clark mesh");
-            return false;
-        }
-
-        void* data;
-        vmaMapMemory(allocator, vertexAllocation, &data);
-        memcpy(data, vertices.data(), bufferInfo.size);
-        vmaUnmapMemory(allocator, vertexAllocation);
+    if (!ManagedBuffer::createStorageHostWritable(allocator, vertices.size() * sizeof(Vertex), vertexBuffer_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create vertex buffer for Catmull-Clark mesh");
+        return false;
     }
+    void* data = vertexBuffer_.map();
+    memcpy(data, vertices.data(), vertices.size() * sizeof(Vertex));
+    vertexBuffer_.unmap();
 
     // Upload halfedges
-    {
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = halfedges.size() * sizeof(Halfedge);
-        bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
-
-        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &halfedgeBuffer, &halfedgeAllocation, nullptr) != VK_SUCCESS) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create halfedge buffer for Catmull-Clark mesh");
-            return false;
-        }
-
-        void* data;
-        vmaMapMemory(allocator, halfedgeAllocation, &data);
-        memcpy(data, halfedges.data(), bufferInfo.size);
-        vmaUnmapMemory(allocator, halfedgeAllocation);
+    if (!ManagedBuffer::createStorageHostWritable(allocator, halfedges.size() * sizeof(Halfedge), halfedgeBuffer_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create halfedge buffer for Catmull-Clark mesh");
+        return false;
     }
+    data = halfedgeBuffer_.map();
+    memcpy(data, halfedges.data(), halfedges.size() * sizeof(Halfedge));
+    halfedgeBuffer_.unmap();
 
     // Upload faces
-    {
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = faces.size() * sizeof(Face);
-        bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
-
-        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &faceBuffer, &faceAllocation, nullptr) != VK_SUCCESS) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create face buffer for Catmull-Clark mesh");
-            return false;
-        }
-
-        void* data;
-        vmaMapMemory(allocator, faceAllocation, &data);
-        memcpy(data, faces.data(), bufferInfo.size);
-        vmaUnmapMemory(allocator, faceAllocation);
+    if (!ManagedBuffer::createStorageHostWritable(allocator, faces.size() * sizeof(Face), faceBuffer_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create face buffer for Catmull-Clark mesh");
+        return false;
     }
+    data = faceBuffer_.map();
+    memcpy(data, faces.data(), faces.size() * sizeof(Face));
+    faceBuffer_.unmap();
 
     SDL_Log("Catmull-Clark mesh uploaded: %zu vertices, %zu halfedges, %zu faces",
             vertices.size(), halfedges.size(), faces.size());
@@ -78,19 +36,10 @@ bool CatmullClarkMesh::uploadToGPU(VmaAllocator allocator) {
     return true;
 }
 
-void CatmullClarkMesh::destroy(VmaAllocator allocator) {
-    if (vertexBuffer) {
-        vmaDestroyBuffer(allocator, vertexBuffer, vertexAllocation);
-        vertexBuffer = VK_NULL_HANDLE;
-    }
-    if (halfedgeBuffer) {
-        vmaDestroyBuffer(allocator, halfedgeBuffer, halfedgeAllocation);
-        halfedgeBuffer = VK_NULL_HANDLE;
-    }
-    if (faceBuffer) {
-        vmaDestroyBuffer(allocator, faceBuffer, faceAllocation);
-        faceBuffer = VK_NULL_HANDLE;
-    }
+void CatmullClarkMesh::destroy() {
+    vertexBuffer_.destroy();
+    halfedgeBuffer_.destroy();
+    faceBuffer_.destroy();
 }
 
 CatmullClarkMesh CatmullClarkMesh::createCube() {

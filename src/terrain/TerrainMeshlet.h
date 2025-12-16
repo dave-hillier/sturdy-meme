@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 #include <cstdint>
 #include <vector>
+#include "core/VulkanRAII.h"
 
 // Pre-subdivided meshlet for terrain rendering
 // Each CBT leaf node is rendered as an instance of this meshlet,
@@ -20,11 +21,11 @@ public:
     ~TerrainMeshlet() = default;
 
     bool init(const InitInfo& info);
-    void destroy(VmaAllocator allocator);
+    void destroy();
 
     // Buffer accessors
-    VkBuffer getVertexBuffer() const { return vertexBuffer; }
-    VkBuffer getIndexBuffer() const { return indexBuffer; }
+    VkBuffer getVertexBuffer() const { return vertexBuffer_.get(); }
+    VkBuffer getIndexBuffer() const { return indexBuffer_.get(); }
     uint32_t getVertexCount() const { return vertexCount; }
     uint32_t getIndexCount() const { return indexCount; }
     uint32_t getTriangleCount() const { return triangleCount; }
@@ -46,10 +47,8 @@ private:
     // Helper to create unique vertex key for deduplication
     static uint64_t makeVertexKey(const glm::vec2& v);
 
-    VkBuffer vertexBuffer = VK_NULL_HANDLE;
-    VmaAllocation vertexAllocation = VK_NULL_HANDLE;
-    VkBuffer indexBuffer = VK_NULL_HANDLE;
-    VmaAllocation indexAllocation = VK_NULL_HANDLE;
+    ManagedBuffer vertexBuffer_;
+    ManagedBuffer indexBuffer_;
 
     uint32_t vertexCount = 0;
     uint32_t indexCount = 0;

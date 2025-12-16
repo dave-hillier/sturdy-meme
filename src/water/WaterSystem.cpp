@@ -82,14 +82,8 @@ void WaterSystem::destroy(VkDevice device, VmaAllocator allocator) {
     causticsTexture.reset();
     waterMesh.reset();
 
-    // Destroy uniform buffers
-    for (size_t i = 0; i < waterUniformBuffers.size(); i++) {
-        if (waterUniformBuffers[i] != VK_NULL_HANDLE) {
-            vmaDestroyBuffer(allocator, waterUniformBuffers[i], waterUniformAllocations[i]);
-        }
-    }
-    waterUniformBuffers.clear();
-    waterUniformAllocations.clear();
+    // Destroy uniform buffers (RAII-managed)
+    waterUniformBuffers_.clear();
     waterUniformMapped.clear();
 
     // RAII wrappers handle cleanup automatically - just reset them
@@ -264,28 +258,15 @@ bool WaterSystem::createWaterMesh() {
 }
 
 bool WaterSystem::createUniformBuffers() {
-    waterUniformBuffers.resize(framesInFlight);
-    waterUniformAllocations.resize(framesInFlight);
+    waterUniformBuffers_.resize(framesInFlight);
     waterUniformMapped.resize(framesInFlight);
 
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = sizeof(WaterUniforms);
-    bufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-
-    VmaAllocationCreateInfo allocInfo{};
-    allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
-    allocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
     for (uint32_t i = 0; i < framesInFlight; i++) {
-        VmaAllocationInfo allocationInfo;
-        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo,
-                           &waterUniformBuffers[i], &waterUniformAllocations[i],
-                           &allocationInfo) != VK_SUCCESS) {
+        if (!ManagedBuffer::createUniform(allocator, sizeof(WaterUniforms), waterUniformBuffers_[i])) {
             SDL_Log("Failed to create water uniform buffer %u", i);
             return false;
         }
-        waterUniformMapped[i] = allocationInfo.pMappedData;
+        waterUniformMapped[i] = waterUniformBuffers_[i].map();
     }
 
     return true;
@@ -369,7 +350,7 @@ bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffe
     for (size_t i = 0; i < framesInFlight; i++) {
         DescriptorManager::SetWriter(device, descriptorSets[i])
             .writeBuffer(0, uniformBuffers[i], 0, uniformBufferSize)
-            .writeBuffer(1, waterUniformBuffers[i], 0, sizeof(WaterUniforms))
+            .writeBuffer(1, waterUniformBuffers_[i].get(), 0, sizeof(WaterUniforms))
             .writeImage(2, shadowView, shadowSampler, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL)
             .writeImage(3, terrainHeightMapView, terrainHeightMapSampler)
             .writeImage(4, flowMapView, flowMapSampler)

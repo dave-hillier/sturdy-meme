@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/VulkanRAII.h"
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
@@ -31,18 +32,18 @@ struct CatmullClarkMesh {
     std::vector<Halfedge> halfedges;
     std::vector<Face> faces;
 
-    // GPU buffers
-    VkBuffer vertexBuffer = VK_NULL_HANDLE;
-    VmaAllocation vertexAllocation = VK_NULL_HANDLE;
+    // GPU buffers (RAII-managed)
+    ManagedBuffer vertexBuffer_;
+    ManagedBuffer halfedgeBuffer_;
+    ManagedBuffer faceBuffer_;
 
-    VkBuffer halfedgeBuffer = VK_NULL_HANDLE;
-    VmaAllocation halfedgeAllocation = VK_NULL_HANDLE;
-
-    VkBuffer faceBuffer = VK_NULL_HANDLE;
-    VmaAllocation faceAllocation = VK_NULL_HANDLE;
+    // Buffer accessors
+    VkBuffer getVertexBuffer() const { return vertexBuffer_.get(); }
+    VkBuffer getHalfedgeBuffer() const { return halfedgeBuffer_.get(); }
+    VkBuffer getFaceBuffer() const { return faceBuffer_.get(); }
 
     bool uploadToGPU(VmaAllocator allocator);
-    void destroy(VmaAllocator allocator);
+    void destroy();
 
     // Factory methods for common meshes
     static CatmullClarkMesh createCube();

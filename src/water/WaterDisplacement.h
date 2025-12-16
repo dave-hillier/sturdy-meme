@@ -131,10 +131,9 @@ private:
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
     std::vector<VkDescriptorSet> descriptorSets;
 
-    // Particle buffer (SSBO)
+    // Particle buffer (SSBO, RAII-managed)
     static constexpr uint32_t MAX_PARTICLES = 256;
-    std::vector<VkBuffer> particleBuffers;
-    std::vector<VmaAllocation> particleAllocations;
+    std::vector<ManagedBuffer> particleBuffers_;
     std::vector<void*> particleMapped;
 
     // Active particles

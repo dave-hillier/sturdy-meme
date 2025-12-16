@@ -227,7 +227,14 @@ public:
     float getOceanSize2() const { return pushConstants.oceanSize2; }
 
     // Get uniform buffers (for G-buffer pass descriptor sets)
-    const std::vector<VkBuffer>& getUniformBuffers() const { return waterUniformBuffers; }
+    VkBuffer getUniformBuffer(size_t frameIndex) const { return waterUniformBuffers_[frameIndex].get(); }
+    std::vector<VkBuffer> getUniformBuffers() const {
+        std::vector<VkBuffer> buffers;
+        for (const auto& buf : waterUniformBuffers_) {
+            buffers.push_back(buf.get());
+        }
+        return buffers;
+    }
     static VkDeviceSize getUniformBufferSize() { return sizeof(WaterUniforms); }
 
     // Water type presets (based on Far Cry 5 approach)
@@ -308,10 +315,9 @@ private:
     std::optional<RAIIAdapter<Mesh>> waterMesh;
     glm::mat4 waterModelMatrix = glm::mat4(1.0f);
 
-    // Water uniforms
+    // Water uniforms (RAII-managed)
     WaterUniforms waterUniforms{};
-    std::vector<VkBuffer> waterUniformBuffers;
-    std::vector<VmaAllocation> waterUniformAllocations;
+    std::vector<ManagedBuffer> waterUniformBuffers_;
     std::vector<void*> waterUniformMapped;
 
     // Foam texture (tileable Worley noise) - RAII-managed

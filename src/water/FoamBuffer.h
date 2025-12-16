@@ -154,8 +154,7 @@ private:
     // Phase 16: Wake system
     WakeUniformData wakeData{};
     uint32_t wakeCount = 0;
-    std::vector<VkBuffer> wakeUniformBuffers;
-    std::vector<VmaAllocation> wakeUniformAllocations;
+    std::vector<ManagedBuffer> wakeUniformBuffers_;
     std::vector<void*> wakeUniformMapped;
 
     bool createWakeBuffers();

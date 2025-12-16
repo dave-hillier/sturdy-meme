@@ -41,7 +41,7 @@ bool CatmullClarkSystem::init(const InitInfo& info, const CatmullClarkConfig& cf
             m = std::move(baseMesh);
             return m.uploadToGPU(allocator);
         },
-        [this](auto& m) { m.destroy(allocator); }
+        [](auto& m) { m.destroy(); }
     );
     if (!mesh) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to upload Catmull-Clark mesh to GPU");
@@ -56,7 +56,7 @@ bool CatmullClarkSystem::init(const InitInfo& info, const CatmullClarkConfig& cf
 
     cbt = RAIIAdapter<CatmullClarkCBT>::create(
         [&](auto& c) { return c.init(cbtInfo); },
-        [this](auto& c) { c.destroy(allocator); }
+        [](auto& c) { c.destroy(); }
     );
     if (!cbt) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize Catmull-Clark CBT");
@@ -82,22 +82,10 @@ void CatmullClarkSystem::destroy(VkDevice device, VmaAllocator allocator) {
     mesh.reset();
     cbt.reset();
 
-    // Destroy indirect buffers
-    if (indirectDispatchBuffer) {
-        vmaDestroyBuffer(allocator, indirectDispatchBuffer, indirectDispatchAllocation);
-    }
-    if (indirectDrawBuffer) {
-        vmaDestroyBuffer(allocator, indirectDrawBuffer, indirectDrawAllocation);
-    }
-
-    // Destroy uniform buffers
-    for (size_t i = 0; i < uniformBuffers.size(); ++i) {
-        if (uniformBuffers[i]) {
-            vmaDestroyBuffer(allocator, uniformBuffers[i], uniformAllocations[i]);
-        }
-    }
-    uniformBuffers.clear();
-    uniformAllocations.clear();
+    // RAII-managed buffers are destroyed automatically
+    indirectDispatchBuffer_.destroy();
+    indirectDrawBuffer_.destroy();
+    uniformBuffers_.clear();
     uniformMappedPtrs.clear();
 
     // Destroy pipelines
@@ -115,29 +103,15 @@ void CatmullClarkSystem::destroy(VkDevice device, VmaAllocator allocator) {
 }
 
 bool CatmullClarkSystem::createUniformBuffers() {
-    uniformBuffers.resize(framesInFlight);
-    uniformAllocations.resize(framesInFlight);
+    uniformBuffers_.resize(framesInFlight);
     uniformMappedPtrs.resize(framesInFlight);
 
     for (uint32_t i = 0; i < framesInFlight; ++i) {
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = sizeof(UniformBufferObject);
-        bufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
-                         VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
-        VmaAllocationInfo allocationInfo{};
-        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &uniformBuffers[i],
-                           &uniformAllocations[i], &allocationInfo) != VK_SUCCESS) {
+        if (!ManagedBuffer::createUniform(allocator, sizeof(UniformBufferObject), uniformBuffers_[i])) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create Catmull-Clark uniform buffer %u", i);
             return false;
         }
-        uniformMappedPtrs[i] = allocationInfo.pMappedData;
+        uniformMappedPtrs[i] = uniformBuffers_[i].map();
     }
 
     return true;
@@ -145,39 +119,15 @@ bool CatmullClarkSystem::createUniformBuffers() {
 
 bool CatmullClarkSystem::createIndirectBuffers() {
     // Indirect dispatch buffer
-    {
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = sizeof(VkDispatchIndirectCommand);
-        bufferInfo.usage = VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-
-        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &indirectDispatchBuffer,
-                            &indirectDispatchAllocation, nullptr) != VK_SUCCESS) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create indirect dispatch buffer");
-            return false;
-        }
+    if (!ManagedBuffer::createIndirect(allocator, sizeof(VkDispatchIndirectCommand), indirectDispatchBuffer_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create indirect dispatch buffer");
+        return false;
     }
 
     // Indirect draw buffer
-    {
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = sizeof(VkDrawIndirectCommand);
-        bufferInfo.usage = VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-
-        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &indirectDrawBuffer,
-                            &indirectDrawAllocation, nullptr) != VK_SUCCESS) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create indirect draw buffer");
-            return false;
-        }
+    if (!ManagedBuffer::createIndirect(allocator, sizeof(VkDrawIndirectCommand), indirectDrawBuffer_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create indirect draw buffer");
+        return false;
     }
 
     return true;
@@ -303,18 +253,18 @@ void CatmullClarkSystem::updateDescriptorSets(VkDevice device, const std::vector
         DescriptorManager::SetWriter(device, computeDescriptorSets[i])
             .writeBuffer(0, sceneUniformBuffers[i], 0, sizeof(UniformBufferObject))
             .writeBuffer(1, (*cbt)->getBuffer(), 0, (*cbt)->getBufferSize(), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(2, (*mesh)->vertexBuffer, 0, vertexBufferSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(3, (*mesh)->halfedgeBuffer, 0, halfedgeBufferSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(4, (*mesh)->faceBuffer, 0, faceBufferSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+            .writeBuffer(2, (*mesh)->getVertexBuffer(), 0, vertexBufferSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+            .writeBuffer(3, (*mesh)->getHalfedgeBuffer(), 0, halfedgeBufferSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+            .writeBuffer(4, (*mesh)->getFaceBuffer(), 0, faceBufferSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
             .update();
 
         // Render descriptor set (same buffers)
         DescriptorManager::SetWriter(device, renderDescriptorSets[i])
             .writeBuffer(0, sceneUniformBuffers[i], 0, sizeof(UniformBufferObject))
             .writeBuffer(1, (*cbt)->getBuffer(), 0, (*cbt)->getBufferSize(), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(2, (*mesh)->vertexBuffer, 0, vertexBufferSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(3, (*mesh)->halfedgeBuffer, 0, halfedgeBufferSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(4, (*mesh)->faceBuffer, 0, faceBufferSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+            .writeBuffer(2, (*mesh)->getVertexBuffer(), 0, vertexBufferSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+            .writeBuffer(3, (*mesh)->getHalfedgeBuffer(), 0, halfedgeBufferSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+            .writeBuffer(4, (*mesh)->getFaceBuffer(), 0, faceBufferSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
             .update();
     }
 }
@@ -643,5 +593,5 @@ void CatmullClarkSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
                       0, sizeof(CatmullClarkPushConstants), &pc);
 
     // Indirect draw - vertex count populated by subdivision compute shader
-    vkCmdDrawIndirect(cmd, indirectDrawBuffer, 0, 1, sizeof(VkDrawIndirectCommand));
+    vkCmdDrawIndirect(cmd, indirectDrawBuffer_.get(), 0, 1, sizeof(VkDrawIndirectCommand));
 }

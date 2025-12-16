@@ -74,14 +74,8 @@ void FoamBuffer::destroy() {
         }
     }
 
-    // Destroy wake uniform buffers
-    for (size_t i = 0; i < wakeUniformBuffers.size(); i++) {
-        if (wakeUniformBuffers[i] != VK_NULL_HANDLE) {
-            vmaDestroyBuffer(allocator, wakeUniformBuffers[i], wakeUniformAllocations[i]);
-        }
-    }
-    wakeUniformBuffers.clear();
-    wakeUniformAllocations.clear();
+    // Destroy wake uniform buffers (RAII-managed, destroyed automatically)
+    wakeUniformBuffers_.clear();
     wakeUniformMapped.clear();
 
     SDL_Log("FoamBuffer: Destroyed");
@@ -148,30 +142,16 @@ bool FoamBuffer::createFoamBuffers() {
 
 bool FoamBuffer::createWakeBuffers() {
     // Create uniform buffers for wake data (one per frame in flight)
-    wakeUniformBuffers.resize(framesInFlight);
-    wakeUniformAllocations.resize(framesInFlight);
+    wakeUniformBuffers_.resize(framesInFlight);
     wakeUniformMapped.resize(framesInFlight);
 
     for (uint32_t i = 0; i < framesInFlight; i++) {
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = sizeof(WakeUniformData);
-        bufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
-        allocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
-        VmaAllocationInfo allocationInfo{};
-        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo,
-                           &wakeUniformBuffers[i], &wakeUniformAllocations[i],
-                           &allocationInfo) != VK_SUCCESS) {
+        if (!ManagedBuffer::createUniform(allocator, sizeof(WakeUniformData), wakeUniformBuffers_[i])) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create wake uniform buffer %u", i);
             return false;
         }
 
-        wakeUniformMapped[i] = allocationInfo.pMappedData;
+        wakeUniformMapped[i] = wakeUniformBuffers_[i].map();
 
         // Initialize to zero
         std::memset(wakeUniformMapped[i], 0, sizeof(WakeUniformData));
@@ -329,7 +309,7 @@ void FoamBuffer::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, float d
         .writeStorageImage(0, foamBufferView[writeBuffer])
         .writeImage(1, foamBufferView[readBuffer], sampler.get())
         .writeImage(2, flowMapView, flowMapSampler)
-        .writeBuffer(3, wakeUniformBuffers[frameIndex], 0, sizeof(WakeUniformData))
+        .writeBuffer(3, wakeUniformBuffers_[frameIndex].get(), 0, sizeof(WakeUniformData))
         .update();
 
     // Transition write buffer to general layout

@@ -33,26 +33,14 @@ bool TerrainTileCache::init(const InitInfo& info) {
         return false;
     }
 
-    // Create tile info buffer for shader
+    // Create tile info buffer for shader using ManagedBuffer
     // Layout: uint activeTileCount, uint padding[3], TileInfoGPU tiles[MAX_ACTIVE_TILES]
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = sizeof(uint32_t) * 4 + MAX_ACTIVE_TILES * sizeof(TileInfoGPU);
-    bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    VmaAllocationCreateInfo allocInfo{};
-    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-    allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
-                     VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
-    VmaAllocationInfo allocationInfo{};
-    if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &tileInfoBuffer,
-                       &tileInfoAllocation, &allocationInfo) != VK_SUCCESS) {
+    VkDeviceSize bufferSize = sizeof(uint32_t) * 4 + MAX_ACTIVE_TILES * sizeof(TileInfoGPU);
+    if (!ManagedBuffer::createStorageHostReadable(allocator, bufferSize, tileInfoBuffer_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TerrainTileCache: Failed to create tile info buffer");
         return false;
     }
-    tileInfoMappedPtr = allocationInfo.pMappedData;
+    tileInfoMappedPtr = tileInfoBuffer_.map();
 
     // Create tile array image (2D array texture with MAX_ACTIVE_TILES layers)
     VkImageCreateInfo imageInfo{};
@@ -150,11 +138,8 @@ void TerrainTileCache::destroy() {
     loadedTiles.clear();
     activeTiles.clear();
 
-    // Destroy tile info buffer
-    if (tileInfoBuffer) {
-        vmaDestroyBuffer(allocator, tileInfoBuffer, tileInfoAllocation);
-        tileInfoBuffer = VK_NULL_HANDLE;
-    }
+    // Destroy tile info buffer (RAII)
+    tileInfoBuffer_.destroy();
 
     // Destroy tile array texture
     if (tileArrayView) {

@@ -78,7 +78,7 @@ public:
                         VkImageView depthView);
 
     // Get indirect draw buffer for water rendering
-    VkBuffer getIndirectDrawBuffer() const { return indirectDrawBuffer; }
+    VkBuffer getIndirectDrawBuffer() const { return indirectDrawBuffer_.get(); }
 
     // Get visible tile count for this frame
     uint32_t getVisibleTileCount(uint32_t frameIndex) const;
@@ -88,7 +88,7 @@ public:
     bool wasWaterVisibleLastFrame(uint32_t currentFrameIndex) const;
 
     // Get tile buffer for debug visualization
-    VkBuffer getTileBuffer() const { return tileBuffer; }
+    VkBuffer getTileBuffer() const { return tileBuffer_.get(); }
 
     // Configuration
     void setEnabled(bool enable) { enabled = enable; }
@@ -123,24 +123,19 @@ private:
     glm::uvec2 tileCount = {0, 0};
     bool enabled = true;
 
-    // Tile visibility buffer
-    // Stores which tiles contain water
-    VkBuffer tileBuffer = VK_NULL_HANDLE;
-    VmaAllocation tileAllocation = VK_NULL_HANDLE;
+    // Tile visibility buffer (stores which tiles contain water)
+    ManagedBuffer tileBuffer_;
 
-    // Counter buffer (atomic counter for visible tiles)
-    VkBuffer counterBuffer = VK_NULL_HANDLE;
-    VmaAllocation counterAllocation = VK_NULL_HANDLE;
+    // Counter buffer (atomic counter for visible tiles, CPU-to-GPU mapped)
+    ManagedBuffer counterBuffer_;
     void* counterMapped = nullptr;
 
     // Readback buffer for CPU-visible counter results
-    VkBuffer counterReadbackBuffer = VK_NULL_HANDLE;
-    VmaAllocation counterReadbackAllocation = VK_NULL_HANDLE;
+    ManagedBuffer counterReadbackBuffer_;
     void* counterReadbackMapped = nullptr;
 
     // Indirect draw buffer
-    VkBuffer indirectDrawBuffer = VK_NULL_HANDLE;
-    VmaAllocation indirectDrawAllocation = VK_NULL_HANDLE;
+    ManagedBuffer indirectDrawBuffer_;
 
     // Compute pipeline (RAII-managed)
     ManagedPipeline computePipeline;

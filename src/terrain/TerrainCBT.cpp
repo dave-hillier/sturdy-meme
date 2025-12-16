@@ -110,18 +110,8 @@ bool TerrainCBT::init(const InitInfo& info) {
     maxDepth = info.maxDepth;
     bufferSize = calculateBufferSize(maxDepth);
 
-    // Create buffer
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = bufferSize;
-    bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    VmaAllocationCreateInfo allocInfo{};
-    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-    allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
-
-    if (vmaCreateBuffer(info.allocator, &bufferInfo, &allocInfo, &buffer, &allocation, nullptr) != VK_SUCCESS) {
+    // Create buffer using ManagedBuffer
+    if (!ManagedBuffer::createStorageHostWritable(info.allocator, bufferSize, buffer_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create CBT buffer");
         return false;
     }
@@ -154,13 +144,13 @@ bool TerrainCBT::init(const InitInfo& info) {
     SDL_Log("CBT root count after init: %u", rootCount);
 
     // Map the CBT buffer and write initialization data
-    void* data;
-    if (vmaMapMemory(info.allocator, allocation, &data) != VK_SUCCESS) {
+    void* data = buffer_.map();
+    if (!data) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to map CBT buffer for initialization");
         return false;
     }
     memcpy(data, initData.data(), bufferSize);
-    vmaUnmapMemory(info.allocator, allocation);
+    buffer_.unmap();
 
     SDL_Log("CBT initialized with %u triangles at depth %d, max depth %d",
             (maxNodeID - minNodeID), initDepth, maxDepth);
@@ -168,10 +158,6 @@ bool TerrainCBT::init(const InitInfo& info) {
     return true;
 }
 
-void TerrainCBT::destroy(VmaAllocator allocator) {
-    if (buffer) {
-        vmaDestroyBuffer(allocator, buffer, allocation);
-        buffer = VK_NULL_HANDLE;
-        allocation = VK_NULL_HANDLE;
-    }
+void TerrainCBT::destroy() {
+    buffer_.destroy();
 }

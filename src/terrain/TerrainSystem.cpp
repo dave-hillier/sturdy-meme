@@ -68,7 +68,7 @@ bool TerrainSystem::init(const InitInfo& info, const TerrainConfig& cfg) {
     cbtInfo.initDepth = 6;  // Start with 64 triangles
     cbt = RAIIAdapter<TerrainCBT>::create(
         [&](auto& c) { return c.init(cbtInfo); },
-        [this](auto& c) { c.destroy(allocator); }
+        [](auto& c) { c.destroy(); }
     );
     if (!cbt) return false;
 
@@ -79,7 +79,7 @@ bool TerrainSystem::init(const InitInfo& info, const TerrainConfig& cfg) {
         meshletInfo.subdivisionLevel = static_cast<uint32_t>(config.meshletSubdivisionLevel);
         meshlet = RAIIAdapter<TerrainMeshlet>::create(
             [&](auto& m) { return m.init(meshletInfo); },
-            [this](auto& m) { m.destroy(allocator); }
+            [](auto& m) { m.destroy(); }
         );
         if (!meshlet) {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to create meshlet, falling back to direct triangles");
@@ -952,7 +952,7 @@ bool TerrainSystem::setMeshletSubdivisionLevel(int level) {
 
     meshlet = RAIIAdapter<TerrainMeshlet>::create(
         [&](auto& m) { return m.init(meshletInfo); },
-        [this](auto& m) { m.destroy(allocator); }
+        [](auto& m) { m.destroy(); }
     );
     if (!meshlet) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
@@ -961,7 +961,7 @@ bool TerrainSystem::setMeshletSubdivisionLevel(int level) {
         meshletInfo.subdivisionLevel = static_cast<uint32_t>(config.meshletSubdivisionLevel);
         meshlet = RAIIAdapter<TerrainMeshlet>::create(
             [&](auto& m) { return m.init(meshletInfo); },
-            [this](auto& m) { m.destroy(allocator); }
+            [](auto& m) { m.destroy(); }
         );
         return false;
     }

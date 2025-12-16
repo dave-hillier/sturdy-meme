@@ -180,9 +180,8 @@ private:
     ManagedPipeline cullingPipeline;
     std::vector<VkDescriptorSet> cullingDescSets;  // Per frame
 
-    // Object data buffer (input to culling)
-    VkBuffer objectDataBuffer = VK_NULL_HANDLE;
-    VmaAllocation objectDataAllocation = VK_NULL_HANDLE;
+    // Object data buffer (input to culling, RAII-managed)
+    ManagedBuffer objectDataBuffer_;
     uint32_t objectCount = 0;
     uint32_t objectBufferCapacity = 0;
 

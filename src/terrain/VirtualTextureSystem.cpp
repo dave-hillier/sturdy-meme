@@ -40,7 +40,7 @@ bool VirtualTextureSystem::init(VkDevice device, VmaAllocator allocator,
     // Initialize feedback with RAII wrapper
     feedback = RAIIAdapter<VirtualTextureFeedback>::create(
         [&](auto& f) { return f.init(device, allocator, 4096, 2); },
-        [device, allocator](auto& f) { f.destroy(device, allocator); }
+        [](auto& f) { f.destroy(); }
     );
     if (!feedback) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize VT feedback");

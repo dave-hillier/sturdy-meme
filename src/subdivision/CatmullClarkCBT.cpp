@@ -115,18 +115,8 @@ bool CatmullClarkCBT::init(const InitInfo& info) {
     faceCount = info.faceCount;
     bufferSize = calculateBufferSize(maxDepth, faceCount);
 
-    // Create buffer
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = bufferSize;
-    bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    VmaAllocationCreateInfo allocInfo{};
-    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-    allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
-
-    if (vmaCreateBuffer(info.allocator, &bufferInfo, &allocInfo, &buffer, &allocation, nullptr) != VK_SUCCESS) {
+    // Create buffer using ManagedBuffer
+    if (!ManagedBuffer::createStorageHostWritable(info.allocator, bufferSize, buffer_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create Catmull-Clark CBT buffer");
         return false;
     }
@@ -158,23 +148,19 @@ bool CatmullClarkCBT::init(const InitInfo& info) {
     }
 
     // Map the CBT buffer and write initialization data
-    void* data;
-    if (vmaMapMemory(info.allocator, allocation, &data) != VK_SUCCESS) {
+    void* data = buffer_.map();
+    if (!data) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to map Catmull-Clark CBT buffer for initialization");
         return false;
     }
     memcpy(data, initData.data(), bufferSize);
-    vmaUnmapMemory(info.allocator, allocation);
+    buffer_.unmap();
 
     SDL_Log("Catmull-Clark CBT initialized with %d base faces, max depth %d", faceCount, maxDepth);
 
     return true;
 }
 
-void CatmullClarkCBT::destroy(VmaAllocator allocator) {
-    if (buffer) {
-        vmaDestroyBuffer(allocator, buffer, allocation);
-        buffer = VK_NULL_HANDLE;
-        allocation = VK_NULL_HANDLE;
-    }
+void CatmullClarkCBT::destroy() {
+    buffer_.destroy();
 }

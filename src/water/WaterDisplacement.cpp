@@ -59,14 +59,8 @@ void WaterDisplacement::destroy() {
     computePipeline = ManagedPipeline();
     computePipelineLayout = ManagedPipelineLayout();
 
-    // Destroy particle buffers
-    for (size_t i = 0; i < particleBuffers.size(); i++) {
-        if (particleBuffers[i] != VK_NULL_HANDLE) {
-            vmaDestroyBuffer(allocator, particleBuffers[i], particleAllocations[i]);
-        }
-    }
-    particleBuffers.clear();
-    particleAllocations.clear();
+    // Destroy particle buffers (RAII-managed)
+    particleBuffers_.clear();
     particleMapped.clear();
 
     // RAII-managed sampler
@@ -194,30 +188,17 @@ bool WaterDisplacement::createDisplacementMap() {
 }
 
 bool WaterDisplacement::createParticleBuffer() {
-    particleBuffers.resize(framesInFlight);
-    particleAllocations.resize(framesInFlight);
+    particleBuffers_.resize(framesInFlight);
     particleMapped.resize(framesInFlight);
 
     VkDeviceSize bufferSize = sizeof(SplashParticle) * MAX_PARTICLES;
 
     for (uint32_t i = 0; i < framesInFlight; i++) {
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = bufferSize;
-        bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
-        allocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
-        VmaAllocationInfo allocationInfo{};
-        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo,
-                           &particleBuffers[i], &particleAllocations[i], &allocationInfo) != VK_SUCCESS) {
+        if (!ManagedBuffer::createStorageHostReadable(allocator, bufferSize, particleBuffers_[i])) {
             return false;
         }
 
-        particleMapped[i] = allocationInfo.pMappedData;
+        particleMapped[i] = particleBuffers_[i].map();
 
         // Initialize to zero
         memset(particleMapped[i], 0, bufferSize);
@@ -346,7 +327,7 @@ bool WaterDisplacement::createDescriptorSets() {
         DescriptorManager::SetWriter(device, descriptorSets[i])
             .writeStorageImage(0, displacementMapView)
             .writeImage(1, prevDisplacementMapView, sampler.get())
-            .writeBuffer(2, particleBuffers[i], 0, sizeof(SplashParticle) * MAX_PARTICLES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+            .writeBuffer(2, particleBuffers_[i].get(), 0, sizeof(SplashParticle) * MAX_PARTICLES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
             .update();
     }
 

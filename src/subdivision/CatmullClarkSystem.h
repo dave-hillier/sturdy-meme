@@ -11,6 +11,7 @@
 #include "CatmullClarkMesh.h"
 #include "DescriptorManager.h"
 #include "core/RAIIAdapter.h"
+#include "core/VulkanRAII.h"
 
 // Push constants for rendering
 struct CatmullClarkPushConstants {
@@ -112,15 +113,12 @@ private:
     std::optional<RAIIAdapter<CatmullClarkCBT>> cbt;
     std::optional<RAIIAdapter<CatmullClarkMesh>> mesh;
 
-    // Indirect dispatch/draw buffers
-    VkBuffer indirectDispatchBuffer = VK_NULL_HANDLE;
-    VmaAllocation indirectDispatchAllocation = VK_NULL_HANDLE;
-    VkBuffer indirectDrawBuffer = VK_NULL_HANDLE;
-    VmaAllocation indirectDrawAllocation = VK_NULL_HANDLE;
+    // Indirect dispatch/draw buffers (RAII-managed)
+    ManagedBuffer indirectDispatchBuffer_;
+    ManagedBuffer indirectDrawBuffer_;
 
-    // Uniform buffers (per frame in flight)
-    std::vector<VkBuffer> uniformBuffers;
-    std::vector<VmaAllocation> uniformAllocations;
+    // Uniform buffers (per frame in flight, RAII-managed)
+    std::vector<ManagedBuffer> uniformBuffers_;
     std::vector<void*> uniformMappedPtrs;
 
     // Compute pipelines

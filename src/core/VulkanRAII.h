@@ -88,10 +88,12 @@ public:
     ManagedBuffer(ManagedBuffer&& other) noexcept
         : buffer_(other.buffer_)
         , allocation_(other.allocation_)
-        , allocator_(other.allocator_) {
+        , allocator_(other.allocator_)
+        , mapped_(other.mapped_) {
         other.buffer_ = VK_NULL_HANDLE;
         other.allocation_ = VK_NULL_HANDLE;
         other.allocator_ = VK_NULL_HANDLE;
+        other.mapped_ = false;
     }
 
     ManagedBuffer& operator=(ManagedBuffer&& other) noexcept {
@@ -100,9 +102,11 @@ public:
             buffer_ = other.buffer_;
             allocation_ = other.allocation_;
             allocator_ = other.allocator_;
+            mapped_ = other.mapped_;
             other.buffer_ = VK_NULL_HANDLE;
             other.allocation_ = VK_NULL_HANDLE;
             other.allocator_ = VK_NULL_HANDLE;
+            other.mapped_ = false;
         }
         return *this;
     }
@@ -241,8 +245,89 @@ public:
         return create(allocator, bufferInfo, allocInfo, outBuffer);
     }
 
+    // Convenience factory for indirect draw/dispatch buffers (GPU-only)
+    static bool createIndirect(VmaAllocator allocator, VkDeviceSize size, ManagedBuffer& outBuffer) {
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.size = size;
+        bufferInfo.usage = VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
+                          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+
+        return create(allocator, bufferInfo, allocInfo, outBuffer);
+    }
+
+    // Convenience factory for dynamic vertex buffers (CPU-visible, for per-frame updates)
+    static bool createDynamicVertex(VmaAllocator allocator, VkDeviceSize size, ManagedBuffer& outBuffer) {
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.size = size;
+        bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+                          VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+        return create(allocator, bufferInfo, allocInfo, outBuffer);
+    }
+
+    // Convenience factory for storage buffers with CPU write access (for uploading)
+    static bool createStorageHostWritable(VmaAllocator allocator, VkDeviceSize size, ManagedBuffer& outBuffer) {
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.size = size;
+        bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+
+        return create(allocator, bufferInfo, allocInfo, outBuffer);
+    }
+
+    // Convenience factory for vertex + storage buffers (CPU-writable, for meshlets used in compute)
+    static bool createVertexStorage(VmaAllocator allocator, VkDeviceSize size, ManagedBuffer& outBuffer) {
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.size = size;
+        bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+
+        return create(allocator, bufferInfo, allocInfo, outBuffer);
+    }
+
+    // Convenience factory for index buffers with host write access (for CPU-initialized meshes)
+    static bool createIndexHostWritable(VmaAllocator allocator, VkDeviceSize size, ManagedBuffer& outBuffer) {
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.size = size;
+        bufferInfo.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+
+        return create(allocator, bufferInfo, allocInfo, outBuffer);
+    }
+
     void destroy() {
         if (buffer_ != VK_NULL_HANDLE && allocator_ != VK_NULL_HANDLE) {
+            // Unmap before destroying to avoid VMA assertion
+            if (mapped_) {
+                vmaUnmapMemory(allocator_, allocation_);
+                mapped_ = false;
+            }
             vmaDestroyBuffer(allocator_, buffer_, allocation_);
             buffer_ = VK_NULL_HANDLE;
             allocation_ = VK_NULL_HANDLE;
@@ -254,23 +339,35 @@ public:
         if (allocator_ == VK_NULL_HANDLE || allocation_ == VK_NULL_HANDLE) {
             return nullptr;
         }
+        if (mapped_) {
+            // Already mapped - VMA allows multiple map calls but we should track it
+            // Return the existing mapping via vmaGetAllocationInfo
+            VmaAllocationInfo info;
+            vmaGetAllocationInfo(allocator_, allocation_, &info);
+            return info.pMappedData;
+        }
         void* data = nullptr;
         if (vmaMapMemory(allocator_, allocation_, &data) != VK_SUCCESS) {
             return nullptr;
         }
+        mapped_ = true;
         return data;
     }
 
     void unmap() {
-        if (allocator_ != VK_NULL_HANDLE && allocation_ != VK_NULL_HANDLE) {
+        if (allocator_ != VK_NULL_HANDLE && allocation_ != VK_NULL_HANDLE && mapped_) {
             vmaUnmapMemory(allocator_, allocation_);
+            mapped_ = false;
         }
     }
+
+    bool isMapped() const { return mapped_; }
 
     // Accessors
     VkBuffer get() const { return buffer_; }
     VkBuffer* ptr() { return &buffer_; }
     VmaAllocation getAllocation() const { return allocation_; }
+    VmaAllocator getAllocator() const { return allocator_; }
     explicit operator bool() const { return buffer_ != VK_NULL_HANDLE; }
 
     // Release ownership (for transferring to non-RAII code)
@@ -292,6 +389,7 @@ private:
     VkBuffer buffer_ = VK_NULL_HANDLE;
     VmaAllocation allocation_ = VK_NULL_HANDLE;
     VmaAllocator allocator_ = VK_NULL_HANDLE;
+    bool mapped_ = false;
 };
 
 // ============================================================================

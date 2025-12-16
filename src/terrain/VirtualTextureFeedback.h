@@ -1,6 +1,7 @@
 #pragma once
 
 #include "VirtualTextureTypes.h"
+#include "core/VulkanRAII.h"
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
 #include <vector>
@@ -22,7 +23,7 @@ public:
     VirtualTextureFeedback() = default;
     ~VirtualTextureFeedback() = default;
 
-    // Non-copyable
+    // Non-copyable, but movable for vector storage
     VirtualTextureFeedback(const VirtualTextureFeedback&) = delete;
     VirtualTextureFeedback& operator=(const VirtualTextureFeedback&) = delete;
 
@@ -40,7 +41,7 @@ public:
     /**
      * Destroy all resources
      */
-    void destroy(VkDevice device, VmaAllocator allocator);
+    void destroy();
 
     /**
      * Clear the feedback buffer for a new frame
@@ -81,18 +82,11 @@ public:
 
 private:
     struct FrameBuffer {
-        VkBuffer feedbackBuffer = VK_NULL_HANDLE;
-        VmaAllocation feedbackAllocation = VK_NULL_HANDLE;
-
-        VkBuffer counterBuffer = VK_NULL_HANDLE;
-        VmaAllocation counterAllocation = VK_NULL_HANDLE;
-
-        VkBuffer readbackBuffer = VK_NULL_HANDLE;
-        VmaAllocation readbackAllocation = VK_NULL_HANDLE;
+        ManagedBuffer feedbackBuffer;
+        ManagedBuffer counterBuffer;
+        ManagedBuffer readbackBuffer;
+        ManagedBuffer counterReadbackBuffer;
         void* readbackMapped = nullptr;
-
-        VkBuffer counterReadbackBuffer = VK_NULL_HANDLE;
-        VmaAllocation counterReadbackAllocation = VK_NULL_HANDLE;
         void* counterReadbackMapped = nullptr;
     };
 
@@ -103,8 +97,7 @@ private:
     std::unordered_set<uint32_t> requestedTilePacked;
     std::vector<TileId> requestedTilesSorted;
 
-    bool createFrameBuffer(VkDevice device, VmaAllocator allocator, FrameBuffer& fb);
-    void destroyFrameBuffer(VkDevice device, VmaAllocator allocator, FrameBuffer& fb);
+    bool createFrameBuffer(VmaAllocator allocator, FrameBuffer& fb);
 };
 
 } // namespace VirtualTexture

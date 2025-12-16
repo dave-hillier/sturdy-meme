@@ -4,6 +4,7 @@
 #include <vk_mem_alloc.h>
 #include <cstdint>
 #include <vector>
+#include "core/VulkanRAII.h"
 
 // Concurrent Binary Tree (CBT) buffer for Catmull-Clark subdivision
 // Based on the implementation from https://github.com/jdupuy/LongestEdgeBisection2D
@@ -19,10 +20,10 @@ public:
     ~CatmullClarkCBT() = default;
 
     bool init(const InitInfo& info);
-    void destroy(VmaAllocator allocator);
+    void destroy();
 
     // Buffer accessors
-    VkBuffer getBuffer() const { return buffer; }
+    VkBuffer getBuffer() const { return buffer_.get(); }
     uint32_t getBufferSize() const { return bufferSize; }
     int getMaxDepth() const { return maxDepth; }
     int getFaceCount() const { return faceCount; }
@@ -30,8 +31,7 @@ public:
 private:
     static uint32_t calculateBufferSize(int maxDepth, int faceCount);
 
-    VkBuffer buffer = VK_NULL_HANDLE;
-    VmaAllocation allocation = VK_NULL_HANDLE;
+    ManagedBuffer buffer_;
     uint32_t bufferSize = 0;
     int maxDepth = 20;
     int faceCount = 6;  // Default cube

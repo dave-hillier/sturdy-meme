@@ -134,61 +134,37 @@ bool TerrainMeshlet::init(const InitInfo& info) {
     indexCount = static_cast<uint32_t>(indices.size());
     triangleCount = indexCount / 3;
 
-    // Create vertex buffer
-    {
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = vertices.size() * sizeof(glm::vec2);
-        bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
-
-        if (vmaCreateBuffer(info.allocator, &bufferInfo, &allocInfo,
-                           &vertexBuffer, &vertexAllocation, nullptr) != VK_SUCCESS) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create meshlet vertex buffer");
-            return false;
-        }
-
-        // Copy vertex data
-        void* data;
-        if (vmaMapMemory(info.allocator, vertexAllocation, &data) != VK_SUCCESS) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to map meshlet vertex buffer");
-            return false;
-        }
-        memcpy(data, vertices.data(), bufferInfo.size);
-        vmaUnmapMemory(info.allocator, vertexAllocation);
+    // Create vertex buffer (vertex + storage for compute access)
+    VkDeviceSize vertexBufferSize = vertices.size() * sizeof(glm::vec2);
+    if (!ManagedBuffer::createVertexStorage(info.allocator, vertexBufferSize, vertexBuffer_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create meshlet vertex buffer");
+        return false;
     }
+
+    // Copy vertex data
+    void* data = vertexBuffer_.map();
+    if (!data) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to map meshlet vertex buffer");
+        return false;
+    }
+    memcpy(data, vertices.data(), vertexBufferSize);
+    vertexBuffer_.unmap();
 
     // Create index buffer
-    {
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = indices.size() * sizeof(uint16_t);
-        bufferInfo.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
-
-        if (vmaCreateBuffer(info.allocator, &bufferInfo, &allocInfo,
-                           &indexBuffer, &indexAllocation, nullptr) != VK_SUCCESS) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create meshlet index buffer");
-            return false;
-        }
-
-        // Copy index data
-        void* data;
-        if (vmaMapMemory(info.allocator, indexAllocation, &data) != VK_SUCCESS) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to map meshlet index buffer");
-            return false;
-        }
-        memcpy(data, indices.data(), bufferInfo.size);
-        vmaUnmapMemory(info.allocator, indexAllocation);
+    VkDeviceSize indexBufferSize = indices.size() * sizeof(uint16_t);
+    if (!ManagedBuffer::createIndexHostWritable(info.allocator, indexBufferSize, indexBuffer_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create meshlet index buffer");
+        return false;
     }
+
+    // Copy index data
+    data = indexBuffer_.map();
+    if (!data) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to map meshlet index buffer");
+        return false;
+    }
+    memcpy(data, indices.data(), indexBufferSize);
+    indexBuffer_.unmap();
 
     SDL_Log("TerrainMeshlet initialized: level %u, %u triangles, %u vertices",
             subdivisionLevel, triangleCount, vertexCount);
@@ -196,15 +172,7 @@ bool TerrainMeshlet::init(const InitInfo& info) {
     return true;
 }
 
-void TerrainMeshlet::destroy(VmaAllocator allocator) {
-    if (vertexBuffer) {
-        vmaDestroyBuffer(allocator, vertexBuffer, vertexAllocation);
-        vertexBuffer = VK_NULL_HANDLE;
-        vertexAllocation = VK_NULL_HANDLE;
-    }
-    if (indexBuffer) {
-        vmaDestroyBuffer(allocator, indexBuffer, indexAllocation);
-        indexBuffer = VK_NULL_HANDLE;
-        indexAllocation = VK_NULL_HANDLE;
-    }
+void TerrainMeshlet::destroy() {
+    vertexBuffer_.destroy();
+    indexBuffer_.destroy();
 }

@@ -46,27 +46,13 @@ void WaterTileCull::destroy() {
     descriptorSetLayout = ManagedDescriptorSetLayout();
     depthSampler = ManagedSampler();
 
-    if (tileBuffer != VK_NULL_HANDLE) {
-        vmaDestroyBuffer(allocator, tileBuffer, tileAllocation);
-        tileBuffer = VK_NULL_HANDLE;
-    }
-    if (counterBuffer != VK_NULL_HANDLE) {
-        // Note: Do NOT call vmaUnmapMemory here - the buffer was created with
-        // VMA_ALLOCATION_CREATE_MAPPED_BIT, so VMA manages the mapping automatically
-        vmaDestroyBuffer(allocator, counterBuffer, counterAllocation);
-        counterBuffer = VK_NULL_HANDLE;
-        counterMapped = nullptr;
-    }
-    if (counterReadbackBuffer != VK_NULL_HANDLE) {
-        vmaDestroyBuffer(allocator, counterReadbackBuffer, counterReadbackAllocation);
-        counterReadbackBuffer = VK_NULL_HANDLE;
-        counterReadbackAllocation = VK_NULL_HANDLE;
-        counterReadbackMapped = nullptr;
-    }
-    if (indirectDrawBuffer != VK_NULL_HANDLE) {
-        vmaDestroyBuffer(allocator, indirectDrawBuffer, indirectDrawAllocation);
-        indirectDrawBuffer = VK_NULL_HANDLE;
-    }
+    // ManagedBuffer cleanup
+    tileBuffer_.destroy();
+    counterBuffer_.destroy();
+    counterMapped = nullptr;
+    counterReadbackBuffer_.destroy();
+    counterReadbackMapped = nullptr;
+    indirectDrawBuffer_.destroy();
 
     device = VK_NULL_HANDLE;
 }
@@ -88,14 +74,8 @@ void WaterTileCull::resize(VkExtent2D newExtent) {
         tileCount = newTileCount;
 
         // Destroy and recreate buffers
-        if (tileBuffer != VK_NULL_HANDLE) {
-            vmaDestroyBuffer(allocator, tileBuffer, tileAllocation);
-            tileBuffer = VK_NULL_HANDLE;
-        }
-        if (indirectDrawBuffer != VK_NULL_HANDLE) {
-            vmaDestroyBuffer(allocator, indirectDrawBuffer, indirectDrawAllocation);
-            indirectDrawBuffer = VK_NULL_HANDLE;
-        }
+        tileBuffer_.destroy();
+        indirectDrawBuffer_.destroy();
 
         createBuffers();
 
@@ -114,64 +94,31 @@ bool WaterTileCull::createBuffers() {
     uint32_t maxTiles = tileCount.x * tileCount.y;
 
     // Tile buffer - stores visibility data for each tile
-    VkBufferCreateInfo tileBufferInfo{};
-    tileBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    tileBufferInfo.size = maxTiles * sizeof(TileData);
-    tileBufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-
-    VmaAllocationCreateInfo allocInfo{};
-    allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-
-    if (vmaCreateBuffer(allocator, &tileBufferInfo, &allocInfo,
-                        &tileBuffer, &tileAllocation, nullptr) != VK_SUCCESS) {
+    if (!ManagedBuffer::createStorage(allocator, maxTiles * sizeof(TileData), tileBuffer_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create tile buffer");
         return false;
     }
 
-    // Counter buffer - atomic counter for visible tile count
-    VkBufferCreateInfo counterBufferInfo{};
-    counterBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    counterBufferInfo.size = sizeof(uint32_t) * framesInFlight;
-    counterBufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                              VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                              VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-
-    VmaAllocationCreateInfo counterAllocInfo{};
-    counterAllocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
-    counterAllocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
-    VmaAllocationInfo mapInfo;
-    if (vmaCreateBuffer(allocator, &counterBufferInfo, &counterAllocInfo,
-                        &counterBuffer, &counterAllocation, &mapInfo) != VK_SUCCESS) {
+    // Counter buffer - atomic counter for visible tile count (CPU-to-GPU, mapped)
+    VkDeviceSize counterSize = sizeof(uint32_t) * framesInFlight;
+    if (!ManagedBuffer::createStorageHostReadable(allocator, counterSize, counterBuffer_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create counter buffer");
         return false;
     }
-    counterMapped = mapInfo.pMappedData;
+    counterMapped = counterBuffer_.map();
 
     // Initialize counter to non-zero so water renders on first frames
-    // (visibility will be properly computed after first tile cull pass)
     uint32_t* counters = static_cast<uint32_t*>(counterMapped);
     for (uint32_t i = 0; i < framesInFlight; ++i) {
         counters[i] = 1;  // Assume visible initially
     }
 
     // Counter readback buffer (host-visible)
-    VkBufferCreateInfo counterReadbackInfo{};
-    counterReadbackInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    counterReadbackInfo.size = sizeof(uint32_t) * framesInFlight;
-    counterReadbackInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-
-    VmaAllocationCreateInfo counterReadbackAllocInfo{};
-    counterReadbackAllocInfo.usage = VMA_MEMORY_USAGE_GPU_TO_CPU;
-    counterReadbackAllocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
-    VmaAllocationInfo readbackInfo;
-    if (vmaCreateBuffer(allocator, &counterReadbackInfo, &counterReadbackAllocInfo,
-                        &counterReadbackBuffer, &counterReadbackAllocation, &readbackInfo) != VK_SUCCESS) {
+    if (!ManagedBuffer::createReadback(allocator, counterSize, counterReadbackBuffer_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create counter readback buffer");
         return false;
     }
-    counterReadbackMapped = readbackInfo.pMappedData;
+    counterReadbackMapped = counterReadbackBuffer_.map();
 
     uint32_t* readbackPtr = static_cast<uint32_t*>(counterReadbackMapped);
     for (uint32_t i = 0; i < framesInFlight; ++i) {
@@ -179,15 +126,7 @@ bool WaterTileCull::createBuffers() {
     }
 
     // Indirect draw buffer
-    VkBufferCreateInfo indirectBufferInfo{};
-    indirectBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    indirectBufferInfo.size = sizeof(IndirectDrawCommand);
-    indirectBufferInfo.usage = VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
-                                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                                VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-
-    if (vmaCreateBuffer(allocator, &indirectBufferInfo, &allocInfo,
-                        &indirectDrawBuffer, &indirectDrawAllocation, nullptr) != VK_SUCCESS) {
+    if (!ManagedBuffer::createIndirect(allocator, sizeof(IndirectDrawCommand), indirectDrawBuffer_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create indirect draw buffer");
         return false;
     }
@@ -352,14 +291,15 @@ void WaterTileCull::recordTileCull(VkCommandBuffer cmd, uint32_t frameIndex,
     // Reset counter for this frame
     uint32_t* counterPtr = static_cast<uint32_t*>(counterMapped) + frameIndex;
     *counterPtr = 0;
-    vmaFlushAllocation(allocator, counterAllocation, frameIndex * sizeof(uint32_t), sizeof(uint32_t));
+    vmaFlushAllocation(counterBuffer_.getAllocator(), counterBuffer_.getAllocation(),
+                       frameIndex * sizeof(uint32_t), sizeof(uint32_t));
 
     // Update descriptor set with depth texture and storage buffers
     DescriptorManager::SetWriter(device, descriptorSets[frameIndex])
         .writeImage(0, depthView, depthSampler.get())
-        .writeBuffer(1, tileBuffer, 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-        .writeBuffer(2, counterBuffer, 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-        .writeBuffer(3, indirectDrawBuffer, 0, sizeof(IndirectDrawCommand), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+        .writeBuffer(1, tileBuffer_.get(), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+        .writeBuffer(2, counterBuffer_.get(), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+        .writeBuffer(3, indirectDrawBuffer_.get(), 0, sizeof(IndirectDrawCommand), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
         .update();
 
     // Push constants
@@ -393,7 +333,7 @@ void WaterTileCull::recordTileCull(VkCommandBuffer cmd, uint32_t frameIndex,
     copyRegion.srcOffset = frameIndex * sizeof(uint32_t);
     copyRegion.dstOffset = frameIndex * sizeof(uint32_t);
     copyRegion.size = sizeof(uint32_t);
-    vkCmdCopyBuffer(cmd, counterBuffer, counterReadbackBuffer, 1, &copyRegion);
+    vkCmdCopyBuffer(cmd, counterBuffer_.get(), counterReadbackBuffer_.get(), 1, &copyRegion);
 
     barrierCounterForHostRead(cmd, frameIndex);
 }
@@ -403,23 +343,24 @@ void WaterTileCull::barrierCullResultsForDrawAndTransfer(VkCommandBuffer cmd, ui
         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
         VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
             VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT);
-    batch.bufferBarrier(counterBuffer, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
+    batch.bufferBarrier(counterBuffer_.get(), VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
                         frameIndex * sizeof(uint32_t), sizeof(uint32_t));
-    batch.bufferBarrier(tileBuffer, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
-    batch.bufferBarrier(indirectDrawBuffer, VK_ACCESS_SHADER_WRITE_BIT,
+    batch.bufferBarrier(tileBuffer_.get(), VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
+    batch.bufferBarrier(indirectDrawBuffer_.get(), VK_ACCESS_SHADER_WRITE_BIT,
                         VK_ACCESS_INDIRECT_COMMAND_READ_BIT, 0, sizeof(IndirectDrawCommand));
 }
 
 void WaterTileCull::barrierCounterForHostRead(VkCommandBuffer cmd, uint32_t frameIndex) {
     Barriers::BarrierBatch batch(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT);
-    batch.bufferBarrier(counterReadbackBuffer, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT,
+    batch.bufferBarrier(counterReadbackBuffer_.get(), VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT,
                         frameIndex * sizeof(uint32_t), sizeof(uint32_t));
 }
 
 uint32_t WaterTileCull::getVisibleTileCount(uint32_t frameIndex) const {
     if (counterReadbackMapped == nullptr) return 0;
 
-    VkResult invalidateResult = vmaInvalidateAllocation(allocator, counterReadbackAllocation,
+    VkResult invalidateResult = vmaInvalidateAllocation(counterReadbackBuffer_.getAllocator(),
+                                                        counterReadbackBuffer_.getAllocation(),
                                                         frameIndex * sizeof(uint32_t), sizeof(uint32_t));
     if (invalidateResult != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to invalidate counter readback allocation");
