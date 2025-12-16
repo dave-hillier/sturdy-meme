@@ -72,6 +72,30 @@ void VirtualTextureFeedback::clear(VkCommandBuffer cmd, uint32_t frameIndex) {
     Barriers::clearBufferForFragment(cmd, fb.counterBuffer.get());
 }
 
+void VirtualTextureFeedback::recordCopyToReadback(VkCommandBuffer cmd, uint32_t frameIndex) {
+    if (frameIndex >= frameBuffers.size()) return;
+
+    FrameBuffer& fb = frameBuffers[frameIndex];
+
+    // Copy feedback buffer from GPU storage to CPU readback
+    VkBufferCopy feedbackCopy{};
+    feedbackCopy.srcOffset = 0;
+    feedbackCopy.dstOffset = 0;
+    feedbackCopy.size = maxEntries * sizeof(uint32_t);
+    vkCmdCopyBuffer(cmd, fb.feedbackBuffer.get(), fb.readbackBuffer.get(), 1, &feedbackCopy);
+
+    // Copy counter buffer
+    VkBufferCopy counterCopy{};
+    counterCopy.srcOffset = 0;
+    counterCopy.dstOffset = 0;
+    counterCopy.size = sizeof(uint32_t);
+    vkCmdCopyBuffer(cmd, fb.counterBuffer.get(), fb.counterReadbackBuffer.get(), 1, &counterCopy);
+
+    // Barrier to ensure transfer completes before host read
+    // Note: The actual host read happens after fence wait, so we use HOST_BIT
+    Barriers::transferToHostRead(cmd);
+}
+
 void VirtualTextureFeedback::readback(uint32_t frameIndex) {
     if (frameIndex >= frameBuffers.size()) return;
 
