@@ -69,7 +69,7 @@ public:
 
     // CSM resource accessors (for binding in main shader)
     VkImageView getShadowImageView() const { return csmResources.arrayView; }
-    VkSampler getShadowSampler() const { return csmResources.sampler; }
+    VkSampler getShadowSampler() const { return csmResources.sampler.get(); }
     VkRenderPass getShadowRenderPass() const { return shadowRenderPass; }
     VkPipeline getShadowPipeline() const { return shadowPipeline; }
     VkPipelineLayout getShadowPipelineLayout() const { return shadowPipelineLayout; }
@@ -83,9 +83,9 @@ public:
 
     // Dynamic shadow resource accessors (for binding in main shader)
     VkImageView getPointShadowArrayView(uint32_t frameIndex) const { return pointShadowResources[frameIndex].arrayView; }
-    VkSampler getPointShadowSampler() const { return pointShadowResources.empty() ? VK_NULL_HANDLE : pointShadowResources[0].sampler; }
+    VkSampler getPointShadowSampler() const { return pointShadowResources.empty() ? VK_NULL_HANDLE : pointShadowResources[0].sampler.get(); }
     VkImageView getSpotShadowArrayView(uint32_t frameIndex) const { return spotShadowResources[frameIndex].arrayView; }
-    VkSampler getSpotShadowSampler() const { return spotShadowResources.empty() ? VK_NULL_HANDLE : spotShadowResources[0].sampler; }
+    VkSampler getSpotShadowSampler() const { return spotShadowResources.empty() ? VK_NULL_HANDLE : spotShadowResources[0].sampler.get(); }
 
     // Dynamic shadow rendering (placeholder for future implementation)
     void renderDynamicShadows(VkCommandBuffer cmd, uint32_t frameIndex,

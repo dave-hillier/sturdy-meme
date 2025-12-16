@@ -22,10 +22,7 @@ bool FlowMapGenerator::init(VkDevice device, VmaAllocator allocator,
 }
 
 void FlowMapGenerator::destroy(VkDevice device, VmaAllocator allocator) {
-    if (flowMapSampler != VK_NULL_HANDLE) {
-        vkDestroySampler(device, flowMapSampler, nullptr);
-        flowMapSampler = VK_NULL_HANDLE;
-    }
+    flowMapSampler.destroy();
 
     if (flowMapView != VK_NULL_HANDLE) {
         vkDestroyImageView(device, flowMapView, nullptr);
@@ -118,7 +115,7 @@ bool FlowMapGenerator::createSampler() {
     samplerInfo.minLod = 0.0f;
     samplerInfo.maxLod = 0.0f;
 
-    return vkCreateSampler(device, &samplerInfo, nullptr, &flowMapSampler) == VK_SUCCESS;
+    return ManagedSampler::create(device, samplerInfo, flowMapSampler);
 }
 
 void FlowMapGenerator::uploadToGPU() {

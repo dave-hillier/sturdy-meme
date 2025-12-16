@@ -3,6 +3,7 @@
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
 #include <vector>
+#include "VulkanRAII.h"
 
 /**
  * VulkanResourceFactory - Static factory methods for common Vulkan resource creation
@@ -39,7 +40,7 @@ public:
         VkImage image = VK_NULL_HANDLE;
         VmaAllocation allocation = VK_NULL_HANDLE;
         VkImageView view = VK_NULL_HANDLE;
-        VkSampler sampler = VK_NULL_HANDLE;
+        ManagedSampler sampler;
         VkFormat format = VK_FORMAT_D32_SFLOAT;
 
         void destroy(VkDevice device, VmaAllocator allocator);
@@ -78,7 +79,7 @@ public:
         VmaAllocation allocation = VK_NULL_HANDLE;
         VkImageView arrayView = VK_NULL_HANDLE;      // View of all layers (for shader sampling)
         std::vector<VkImageView> layerViews;         // Per-layer views (for rendering)
-        VkSampler sampler = VK_NULL_HANDLE;
+        ManagedSampler sampler;
 
         void destroy(VkDevice device, VmaAllocator allocator);
     };

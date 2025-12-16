@@ -5,6 +5,7 @@
 #include <vk_mem_alloc.h>
 #include <vector>
 #include <unordered_map>
+#include "VulkanRAII.h"
 
 namespace VirtualTexture {
 
@@ -51,7 +52,7 @@ public:
     VkImageView getCacheImageView() const { return cacheImageView; }
 
     // Get the sampler for the cache texture
-    VkSampler getCacheSampler() const { return cacheSampler; }
+    VkSampler getCacheSampler() const { return cacheSampler.get(); }
 
     // Get the slot index for a tile (UINT32_MAX if not found)
     uint32_t getTileSlotIndex(TileId id) const {
@@ -83,7 +84,7 @@ private:
     VkImage cacheImage = VK_NULL_HANDLE;
     VmaAllocation cacheAllocation = VK_NULL_HANDLE;
     VkImageView cacheImageView = VK_NULL_HANDLE;
-    VkSampler cacheSampler = VK_NULL_HANDLE;
+    ManagedSampler cacheSampler;
 
     // Staging buffer for uploads
     VkBuffer stagingBuffer = VK_NULL_HANDLE;

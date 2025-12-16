@@ -133,7 +133,7 @@ bool AtmosphereLUTSystem::createDescriptorSets() {
 
         DescriptorManager::SetWriter(device, multiScatterDescriptorSet)
             .writeStorageImage(0, multiScatterLUTView)
-            .writeImage(1, transmittanceLUTView, lutSampler)
+            .writeImage(1, transmittanceLUTView, lutSampler.get())
             .writeBuffer(2, staticUniformBuffers.buffers[0], 0, sizeof(AtmosphereUniforms))
             .update();
     }
@@ -150,8 +150,8 @@ bool AtmosphereLUTSystem::createDescriptorSets() {
         for (uint32_t i = 0; i < framesInFlight; ++i) {
             DescriptorManager::SetWriter(device, skyViewDescriptorSets[i])
                 .writeStorageImage(0, skyViewLUTView)
-                .writeImage(1, transmittanceLUTView, lutSampler)
-                .writeImage(2, multiScatterLUTView, lutSampler)
+                .writeImage(1, transmittanceLUTView, lutSampler.get())
+                .writeImage(2, multiScatterLUTView, lutSampler.get())
                 .writeBuffer(3, skyViewUniformBuffers.buffers[i], 0, sizeof(AtmosphereUniforms))
                 .update();
         }
@@ -168,7 +168,7 @@ bool AtmosphereLUTSystem::createDescriptorSets() {
         DescriptorManager::SetWriter(device, irradianceDescriptorSet)
             .writeStorageImage(0, rayleighIrradianceLUTView)
             .writeStorageImage(1, mieIrradianceLUTView)
-            .writeImage(2, transmittanceLUTView, lutSampler)
+            .writeImage(2, transmittanceLUTView, lutSampler.get())
             .writeBuffer(3, staticUniformBuffers.buffers[0], 0, sizeof(AtmosphereUniforms))
             .update();
     }

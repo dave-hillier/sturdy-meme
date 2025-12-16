@@ -44,21 +44,19 @@ bool TerrainHeightMap::init(const InitInfo& info) {
 
 void TerrainHeightMap::destroy(VkDevice device, VmaAllocator allocator) {
     // Destroy height map resources
-    if (sampler) vkDestroySampler(device, sampler, nullptr);
+    sampler.destroy();
     if (imageView) vkDestroyImageView(device, imageView, nullptr);
     if (image) vmaDestroyImage(allocator, image, allocation);
 
-    sampler = VK_NULL_HANDLE;
     imageView = VK_NULL_HANDLE;
     image = VK_NULL_HANDLE;
     allocation = VK_NULL_HANDLE;
 
     // Destroy hole mask resources
-    if (holeMaskSampler) vkDestroySampler(device, holeMaskSampler, nullptr);
+    holeMaskSampler.destroy();
     if (holeMaskImageView) vkDestroyImageView(device, holeMaskImageView, nullptr);
     if (holeMaskImage) vmaDestroyImage(allocator, holeMaskImage, holeMaskAllocation);
 
-    holeMaskSampler = VK_NULL_HANDLE;
     holeMaskImageView = VK_NULL_HANDLE;
     holeMaskImage = VK_NULL_HANDLE;
     holeMaskAllocation = VK_NULL_HANDLE;
@@ -261,16 +259,7 @@ bool TerrainHeightMap::createGPUResources() {
     }
 
     // Create sampler
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-
-    if (vkCreateSampler(device, &samplerInfo, nullptr, &sampler) != VK_SUCCESS) {
+    if (!ManagedSampler::createLinearClamp(device, sampler)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create height map sampler");
         return false;
     }
@@ -319,17 +308,8 @@ bool TerrainHeightMap::createHoleMaskResources() {
         return false;
     }
 
-    // Create sampler (nearest filtering for crisp hole edges)
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_LINEAR;  // Smooth edges for rendering
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-
-    if (vkCreateSampler(device, &samplerInfo, nullptr, &holeMaskSampler) != VK_SUCCESS) {
+    // Create sampler (linear filtering for smooth edges for rendering)
+    if (!ManagedSampler::createLinearClamp(device, holeMaskSampler)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create hole mask sampler");
         return false;
     }

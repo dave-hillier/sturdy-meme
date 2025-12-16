@@ -26,10 +26,7 @@ void VulkanResourceFactory::SyncResources::destroy(VkDevice device) {
 // ============================================================================
 
 void VulkanResourceFactory::DepthResources::destroy(VkDevice device, VmaAllocator allocator) {
-    if (sampler != VK_NULL_HANDLE) {
-        vkDestroySampler(device, sampler, nullptr);
-        sampler = VK_NULL_HANDLE;
-    }
+    sampler.destroy();
     if (view != VK_NULL_HANDLE) {
         vkDestroyImageView(device, view, nullptr);
         view = VK_NULL_HANDLE;
@@ -177,19 +174,7 @@ bool VulkanResourceFactory::createDepthResources(
     }
 
     // Create depth sampler for Hi-Z pyramid generation
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_NEAREST;
-    samplerInfo.minFilter = VK_FILTER_NEAREST;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = 0.0f;
-    samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
-
-    if (vkCreateSampler(device, &samplerInfo, nullptr, &outResources.sampler) != VK_SUCCESS) {
+    if (!ManagedSampler::createNearestClamp(device, outResources.sampler)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create depth sampler");
         outResources.destroy(device, allocator);
         return false;
@@ -428,10 +413,7 @@ bool VulkanResourceFactory::createRenderPass(
 // ============================================================================
 
 void VulkanResourceFactory::DepthArrayResources::destroy(VkDevice device, VmaAllocator allocator) {
-    if (sampler != VK_NULL_HANDLE) {
-        vkDestroySampler(device, sampler, nullptr);
-        sampler = VK_NULL_HANDLE;
-    }
+    sampler.destroy();
     for (auto& view : layerViews) {
         if (view != VK_NULL_HANDLE) {
             vkDestroyImageView(device, view, nullptr);
@@ -532,19 +514,7 @@ bool VulkanResourceFactory::createDepthArrayResources(
 
     // Create sampler with depth comparison (for shadow mapping)
     if (config.createSampler) {
-        VkSamplerCreateInfo samplerInfo{};
-        samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-        samplerInfo.magFilter = VK_FILTER_LINEAR;
-        samplerInfo.minFilter = VK_FILTER_LINEAR;
-        samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
-        samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
-        samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
-        samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
-        samplerInfo.compareEnable = VK_TRUE;
-        samplerInfo.compareOp = VK_COMPARE_OP_LESS;
-        samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-
-        if (vkCreateSampler(device, &samplerInfo, nullptr, &outResources.sampler) != VK_SUCCESS) {
+        if (!ManagedSampler::createShadowComparison(device, outResources.sampler)) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create depth array sampler");
             outResources.destroy(device, allocator);
             return false;

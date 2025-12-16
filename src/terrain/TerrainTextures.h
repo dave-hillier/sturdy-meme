@@ -3,6 +3,7 @@
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
 #include <string>
+#include "VulkanRAII.h"
 
 // Terrain textures - albedo and grass far LOD textures
 class TerrainTextures {
@@ -23,11 +24,11 @@ public:
 
     // Terrain albedo texture
     VkImageView getAlbedoView() const { return albedoView; }
-    VkSampler getAlbedoSampler() const { return albedoSampler; }
+    VkSampler getAlbedoSampler() const { return albedoSampler.get(); }
 
     // Grass far LOD texture (for terrain blending at distance)
     VkImageView getGrassFarLODView() const { return grassFarLODView; }
-    VkSampler getGrassFarLODSampler() const { return grassFarLODSampler; }
+    VkSampler getGrassFarLODSampler() const { return grassFarLODSampler.get(); }
 
 private:
     bool createAlbedoTexture();
@@ -46,11 +47,11 @@ private:
     VkImage albedoImage = VK_NULL_HANDLE;
     VmaAllocation albedoAllocation = VK_NULL_HANDLE;
     VkImageView albedoView = VK_NULL_HANDLE;
-    VkSampler albedoSampler = VK_NULL_HANDLE;
+    ManagedSampler albedoSampler;
 
     // Grass far LOD texture
     VkImage grassFarLODImage = VK_NULL_HANDLE;
     VmaAllocation grassFarLODAllocation = VK_NULL_HANDLE;
     VkImageView grassFarLODView = VK_NULL_HANDLE;
-    VkSampler grassFarLODSampler = VK_NULL_HANDLE;
+    ManagedSampler grassFarLODSampler;
 };

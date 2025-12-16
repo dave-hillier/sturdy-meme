@@ -22,7 +22,7 @@ bool SnowMaskSystem::init(const InitInfo& info) {
 }
 
 void SnowMaskSystem::destroy(VkDevice dev, VmaAllocator alloc) {
-    vkDestroySampler(dev, snowMaskSampler, nullptr);
+    snowMaskSampler.destroy();
     vkDestroyImageView(dev, snowMaskView, nullptr);
     vmaDestroyImage(alloc, snowMaskImage, snowMaskAllocation);
 
@@ -104,24 +104,7 @@ bool SnowMaskSystem::createSnowMaskTexture() {
     }
 
     // Create sampler for other systems to sample the snow mask
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.anisotropyEnable = VK_FALSE;
-    samplerInfo.maxAnisotropy = 1.0f;
-    samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
-    samplerInfo.unnormalizedCoordinates = VK_FALSE;
-    samplerInfo.compareEnable = VK_FALSE;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    samplerInfo.mipLodBias = 0.0f;
-    samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = 0.0f;
-
-    if (vkCreateSampler(getDevice(), &samplerInfo, nullptr, &snowMaskSampler) != VK_SUCCESS) {
+    if (!ManagedSampler::createLinearClamp(getDevice(), snowMaskSampler)) {
         SDL_Log("Failed to create snow mask sampler");
         return false;
     }

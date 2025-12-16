@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
+#include "VulkanRAII.h"
 
 /*
  * FlowMapGenerator - Generates flow maps for water rendering
@@ -58,7 +59,7 @@ public:
 
     // Access the generated flow map
     VkImageView getFlowMapView() const { return flowMapView; }
-    VkSampler getFlowMapSampler() const { return flowMapSampler; }
+    VkSampler getFlowMapSampler() const { return flowMapSampler.get(); }
     VkImage getFlowMapImage() const { return flowMapImage; }
 
     // Get flow map data for CPU-side queries
@@ -96,7 +97,7 @@ private:
     VkImage flowMapImage = VK_NULL_HANDLE;
     VmaAllocation flowMapAllocation = VK_NULL_HANDLE;
     VkImageView flowMapView = VK_NULL_HANDLE;
-    VkSampler flowMapSampler = VK_NULL_HANDLE;
+    ManagedSampler flowMapSampler;
 
     // CPU-side flow data
     std::vector<glm::vec4> flowData;  // RGBA: flowX, flowZ, speed, shoreDist

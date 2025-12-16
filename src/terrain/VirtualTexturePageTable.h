@@ -4,6 +4,7 @@
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
 #include <vector>
+#include "VulkanRAII.h"
 
 namespace VirtualTexture {
 
@@ -49,7 +50,7 @@ public:
     VkImageView getImageView(uint32_t mipLevel) const;
 
     // Get the sampler for the page table
-    VkSampler getSampler() const { return pageTableSampler; }
+    VkSampler getSampler() const { return pageTableSampler.get(); }
 
     // Get the combined image view (array of all mip levels)
     VkImageView getCombinedImageView() const { return combinedImageView; }
@@ -74,7 +75,7 @@ private:
 
     // Combined image view (texture array)
     VkImageView combinedImageView = VK_NULL_HANDLE;
-    VkSampler pageTableSampler = VK_NULL_HANDLE;
+    ManagedSampler pageTableSampler;
 
     // Staging buffer for uploads
     VkBuffer stagingBuffer = VK_NULL_HANDLE;

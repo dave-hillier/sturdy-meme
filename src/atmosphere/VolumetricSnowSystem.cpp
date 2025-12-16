@@ -22,7 +22,7 @@ bool VolumetricSnowSystem::init(const InitInfo& info) {
 }
 
 void VolumetricSnowSystem::destroy(VkDevice dev, VmaAllocator alloc) {
-    vkDestroySampler(dev, cascadeSampler, nullptr);
+    cascadeSampler.destroy();
 
     for (uint32_t i = 0; i < NUM_SNOW_CASCADES; i++) {
         vkDestroyImageView(dev, cascadeViews[i], nullptr);
@@ -109,24 +109,7 @@ bool VolumetricSnowSystem::createCascadeTextures() {
     }
 
     // Create shared sampler for all cascades
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.anisotropyEnable = VK_FALSE;
-    samplerInfo.maxAnisotropy = 1.0f;
-    samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
-    samplerInfo.unnormalizedCoordinates = VK_FALSE;
-    samplerInfo.compareEnable = VK_FALSE;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    samplerInfo.mipLodBias = 0.0f;
-    samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = 0.0f;
-
-    if (vkCreateSampler(getDevice(), &samplerInfo, nullptr, &cascadeSampler) != VK_SUCCESS) {
+    if (!ManagedSampler::createLinearClamp(getDevice(), cascadeSampler)) {
         SDL_Log("Failed to create volumetric snow cascade sampler");
         return false;
     }

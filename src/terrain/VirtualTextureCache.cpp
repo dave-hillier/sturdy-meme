@@ -69,10 +69,7 @@ void VirtualTextureCache::destroy(VkDevice device, VmaAllocator allocator) {
         stagingMapped = nullptr;
     }
 
-    if (cacheSampler != VK_NULL_HANDLE) {
-        vkDestroySampler(device, cacheSampler, nullptr);
-        cacheSampler = VK_NULL_HANDLE;
-    }
+    cacheSampler.destroy();
 
     if (cacheImageView != VK_NULL_HANDLE) {
         vkDestroyImageView(device, cacheImageView, nullptr);
@@ -167,24 +164,7 @@ bool VirtualTextureCache::createCacheTexture(VkDevice device, VmaAllocator alloc
 }
 
 bool VirtualTextureCache::createSampler(VkDevice device) {
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.anisotropyEnable = VK_TRUE;
-    samplerInfo.maxAnisotropy = 4.0f;
-    samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
-    samplerInfo.unnormalizedCoordinates = VK_FALSE;
-    samplerInfo.compareEnable = VK_FALSE;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-    samplerInfo.mipLodBias = 0.0f;
-    samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = 0.0f;
-
-    return vkCreateSampler(device, &samplerInfo, nullptr, &cacheSampler) == VK_SUCCESS;
+    return ManagedSampler::createLinearClamp(device, cacheSampler);
 }
 
 CacheSlot* VirtualTextureCache::allocateSlot(TileId id, uint32_t currentFrame) {

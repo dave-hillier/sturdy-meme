@@ -9,6 +9,7 @@
 #include "BufferUtils.h"
 #include "SystemLifecycleHelper.h"
 #include "EnvironmentSettings.h"
+#include "VulkanRAII.h"
 
 // Uniforms for snow accumulation compute shader (256 bytes, aligned)
 struct SnowMaskUniforms {
@@ -47,7 +48,7 @@ public:
 
     // Accessors for other systems to bind the snow mask texture
     VkImageView getSnowMaskView() const { return snowMaskView; }
-    VkSampler getSnowMaskSampler() const { return snowMaskSampler; }
+    VkSampler getSnowMaskSampler() const { return snowMaskSampler.get(); }
 
     // Get mask parameters for shader uniforms
     glm::vec2 getMaskOrigin() const { return maskOrigin; }
@@ -84,7 +85,7 @@ private:
     VkImage snowMaskImage = VK_NULL_HANDLE;
     VmaAllocation snowMaskAllocation = VK_NULL_HANDLE;
     VkImageView snowMaskView = VK_NULL_HANDLE;
-    VkSampler snowMaskSampler = VK_NULL_HANDLE;
+    ManagedSampler snowMaskSampler;
 
     // Uniform buffers (per frame)
     BufferUtils::PerFrameBufferSet uniformBuffers;

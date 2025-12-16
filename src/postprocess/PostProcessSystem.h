@@ -11,6 +11,7 @@
 #include "BufferUtils.h"
 #include "DescriptorManager.h"
 #include "InitContext.h"
+#include "VulkanRAII.h"
 
 // Histogram reduce compute shader parameters
 struct HistogramReduceParams {
@@ -164,7 +165,7 @@ private:
     VmaAllocation hdrDepthAllocation = VK_NULL_HANDLE;
     VkImageView hdrDepthView = VK_NULL_HANDLE;
 
-    VkSampler hdrSampler = VK_NULL_HANDLE;
+    ManagedSampler hdrSampler;
     VkRenderPass hdrRenderPass = VK_NULL_HANDLE;
     VkFramebuffer hdrFramebuffer = VK_NULL_HANDLE;
 

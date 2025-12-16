@@ -116,8 +116,5 @@ void AtmosphereLUTSystem::destroy(VkDevice device, VmaAllocator allocator) {
         cloudMapDescriptorSetLayout = VK_NULL_HANDLE;
     }
 
-    if (lutSampler != VK_NULL_HANDLE) {
-        vkDestroySampler(device, lutSampler, nullptr);
-        lutSampler = VK_NULL_HANDLE;
-    }
+    lutSampler.destroy();
 }

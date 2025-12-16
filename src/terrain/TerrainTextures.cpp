@@ -19,18 +19,16 @@ bool TerrainTextures::init(const InitInfo& info) {
 }
 
 void TerrainTextures::destroy(VkDevice device, VmaAllocator allocator) {
-    if (albedoSampler) vkDestroySampler(device, albedoSampler, nullptr);
+    albedoSampler.destroy();
     if (albedoView) vkDestroyImageView(device, albedoView, nullptr);
     if (albedoImage) vmaDestroyImage(allocator, albedoImage, albedoAllocation);
 
-    if (grassFarLODSampler) vkDestroySampler(device, grassFarLODSampler, nullptr);
+    grassFarLODSampler.destroy();
     if (grassFarLODView) vkDestroyImageView(device, grassFarLODView, nullptr);
     if (grassFarLODImage) vmaDestroyImage(allocator, grassFarLODImage, grassFarLODAllocation);
 
-    albedoSampler = VK_NULL_HANDLE;
     albedoView = VK_NULL_HANDLE;
     albedoImage = VK_NULL_HANDLE;
-    grassFarLODSampler = VK_NULL_HANDLE;
     grassFarLODView = VK_NULL_HANDLE;
     grassFarLODImage = VK_NULL_HANDLE;
 }
@@ -91,18 +89,7 @@ bool TerrainTextures::createAlbedoTexture() {
     }
 
     // Create sampler
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.anisotropyEnable = VK_TRUE;
-    samplerInfo.maxAnisotropy = 16.0f;
-
-    if (vkCreateSampler(device, &samplerInfo, nullptr, &albedoSampler) != VK_SUCCESS) {
+    if (!ManagedSampler::createLinearRepeatAnisotropic(device, 16.0f, albedoSampler)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create terrain albedo sampler");
         stbi_image_free(pixels);
         return false;
@@ -176,18 +163,7 @@ bool TerrainTextures::createGrassFarLODTexture() {
     }
 
     // Create sampler
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.anisotropyEnable = VK_TRUE;
-    samplerInfo.maxAnisotropy = 16.0f;
-
-    if (vkCreateSampler(device, &samplerInfo, nullptr, &grassFarLODSampler) != VK_SUCCESS) {
+    if (!ManagedSampler::createLinearRepeatAnisotropic(device, 16.0f, grassFarLODSampler)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create grass far LOD sampler");
         stbi_image_free(pixels);
         return false;

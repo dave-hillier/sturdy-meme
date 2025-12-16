@@ -80,10 +80,7 @@ void PostProcessSystem::destroy(VkDevice device, VmaAllocator allocator) {
         compositeDescriptorSetLayout = VK_NULL_HANDLE;
     }
 
-    if (hdrSampler != VK_NULL_HANDLE) {
-        vkDestroySampler(device, hdrSampler, nullptr);
-        hdrSampler = VK_NULL_HANDLE;
-    }
+    hdrSampler.destroy();
     if (hdrRenderPass != VK_NULL_HANDLE) {
         vkDestroyRenderPass(device, hdrRenderPass, nullptr);
         hdrRenderPass = VK_NULL_HANDLE;
@@ -124,7 +121,7 @@ void PostProcessSystem::resize(VkDevice device, VmaAllocator allocator, VkExtent
     // Update descriptor sets with new image view
     for (size_t i = 0; i < framesInFlight; i++) {
         DescriptorManager::SetWriter(device, compositeDescriptorSets[i])
-            .writeImage(0, hdrColorView, hdrSampler)
+            .writeImage(0, hdrColorView, hdrSampler.get())
             .update();
     }
 }
@@ -303,24 +300,7 @@ bool PostProcessSystem::createHDRFramebuffer() {
 }
 
 bool PostProcessSystem::createSampler() {
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.anisotropyEnable = VK_FALSE;
-    samplerInfo.maxAnisotropy = 1.0f;
-    samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
-    samplerInfo.unnormalizedCoordinates = VK_FALSE;
-    samplerInfo.compareEnable = VK_FALSE;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    samplerInfo.mipLodBias = 0.0f;
-    samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = 0.0f;
-
-    if (vkCreateSampler(device, &samplerInfo, nullptr, &hdrSampler) != VK_SUCCESS) {
+    if (!ManagedSampler::createLinearClamp(device, hdrSampler)) {
         SDL_Log("Failed to create HDR sampler");
         return false;
     }
@@ -379,9 +359,9 @@ bool PostProcessSystem::createDescriptorSets() {
     for (size_t i = 0; i < framesInFlight; i++) {
         DescriptorManager::SetWriter writer(device, compositeDescriptorSets[i]);
         writer
-            .writeImage(0, hdrColorView, hdrSampler)
+            .writeImage(0, hdrColorView, hdrSampler.get())
             .writeBuffer(1, uniformBuffers.buffers[i], 0, sizeof(PostProcessUniforms))
-            .writeImage(2, hdrDepthView, hdrSampler, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
+            .writeImage(2, hdrDepthView, hdrSampler.get(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
 
         if (froxelVolumeView != VK_NULL_HANDLE && froxelSampler != VK_NULL_HANDLE) {
             writer.writeImage(3, froxelVolumeView, froxelSampler);

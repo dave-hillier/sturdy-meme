@@ -7,6 +7,7 @@
 #include <string>
 #include <unordered_map>
 #include <cstdint>
+#include "VulkanRAII.h"
 
 // Tile coordinate in the grid
 struct TileCoord {
@@ -93,7 +94,7 @@ public:
     bool isTileLoaded(TileCoord coord, uint32_t lod) const;
 
     // Get sampler for tile textures
-    VkSampler getSampler() const { return sampler; }
+    VkSampler getSampler() const { return sampler.get(); }
 
     // Get tile array image view (sampler2DArray)
     VkImageView getTileArrayView() const { return tileArrayView; }
@@ -167,7 +168,7 @@ private:
     VmaAllocator allocator = VK_NULL_HANDLE;
     VkQueue graphicsQueue = VK_NULL_HANDLE;
     VkCommandPool commandPool = VK_NULL_HANDLE;
-    VkSampler sampler = VK_NULL_HANDLE;
+    ManagedSampler sampler;
 
     // Tile info buffer for shader
     VkBuffer tileInfoBuffer = VK_NULL_HANDLE;

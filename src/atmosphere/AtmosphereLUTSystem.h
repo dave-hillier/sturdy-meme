@@ -9,6 +9,7 @@
 #include "BufferUtils.h"
 #include "DescriptorManager.h"
 #include "InitContext.h"
+#include "VulkanRAII.h"
 
 // Atmosphere LUT system for physically-based sky rendering (Phase 4.1)
 // Precomputes transmittance and multi-scatter LUTs for efficient atmospheric scattering
@@ -111,7 +112,7 @@ public:
     VkImageView getRayleighIrradianceLUTView() const { return rayleighIrradianceLUTView; }
     VkImageView getMieIrradianceLUTView() const { return mieIrradianceLUTView; }
     VkImageView getCloudMapLUTView() const { return cloudMapLUTView; }
-    VkSampler getLUTSampler() const { return lutSampler; }
+    VkSampler getLUTSampler() const { return lutSampler.get(); }
 
     // Export LUTs as PNG files (for debugging/visualization)
     bool exportLUTsAsPNG(const std::string& outputDir);
@@ -199,7 +200,7 @@ private:
     VkImageView cloudMapLUTView = VK_NULL_HANDLE;
 
     // LUT sampler (bilinear filtering, clamp to edge)
-    VkSampler lutSampler = VK_NULL_HANDLE;
+    ManagedSampler lutSampler;
 
     // Compute pipelines
     VkDescriptorSetLayout transmittanceDescriptorSetLayout = VK_NULL_HANDLE;

@@ -6,6 +6,7 @@
 #include <string>
 #include <limits>
 #include <cstdint>
+#include "VulkanRAII.h"
 
 // Height map for terrain - handles generation, GPU texture, and CPU queries
 // Also handles hole mask for caves/wells (areas with no collision/rendering)
@@ -35,11 +36,11 @@ public:
 
     // GPU resource accessors
     VkImageView getView() const { return imageView; }
-    VkSampler getSampler() const { return sampler; }
+    VkSampler getSampler() const { return sampler.get(); }
 
     // Hole mask GPU resource accessors
     VkImageView getHoleMaskView() const { return holeMaskImageView; }
-    VkSampler getHoleMaskSampler() const { return holeMaskSampler; }
+    VkSampler getHoleMaskSampler() const { return holeMaskSampler.get(); }
 
     // CPU-side height query (for physics/collision)
     // Returns NO_GROUND if position is inside a hole
@@ -84,13 +85,13 @@ private:
     VkImage image = VK_NULL_HANDLE;
     VmaAllocation allocation = VK_NULL_HANDLE;
     VkImageView imageView = VK_NULL_HANDLE;
-    VkSampler sampler = VK_NULL_HANDLE;
+    ManagedSampler sampler;
 
     // GPU resources for hole mask (R8_UNORM: 0=solid, 255=hole)
     VkImage holeMaskImage = VK_NULL_HANDLE;
     VmaAllocation holeMaskAllocation = VK_NULL_HANDLE;
     VkImageView holeMaskImageView = VK_NULL_HANDLE;
-    VkSampler holeMaskSampler = VK_NULL_HANDLE;
+    ManagedSampler holeMaskSampler;
 
     // CPU-side data for collision queries
     std::vector<float> cpuData;

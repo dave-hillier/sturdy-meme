@@ -66,7 +66,7 @@ public:
 
     // Accessors for shader binding
     VkImageView getShadowMapView() const { return shadowMapView; }
-    VkSampler getShadowMapSampler() const { return shadowMapSampler; }
+    VkSampler getShadowMapSampler() const { return shadowMapSampler.get(); }
 
     // Get the world-to-shadow-UV matrix for sampling in fragment shaders
     const glm::mat4& getWorldToShadowUV() const { return worldToShadowUV; }
@@ -111,7 +111,7 @@ private:
     VkImage shadowMap = VK_NULL_HANDLE;
     VmaAllocation shadowMapAllocation = VK_NULL_HANDLE;
     VkImageView shadowMapView = VK_NULL_HANDLE;
-    VkSampler shadowMapSampler = VK_NULL_HANDLE;
+    ManagedSampler shadowMapSampler;
 
     // Compute pipeline (RAII-managed)
     ManagedDescriptorSetLayout descriptorSetLayout;

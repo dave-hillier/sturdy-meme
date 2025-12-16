@@ -484,7 +484,7 @@ bool Renderer::createDepthResources() {
     }
     depthImage = ManagedImage::fromRaw(vulkanContext.getAllocator(), depth.image, depth.allocation);
     depthImageView = ManagedImageView::fromRaw(vulkanContext.getDevice(), depth.view);
-    depthSampler = ManagedSampler::fromRaw(vulkanContext.getDevice(), depth.sampler);
+    depthSampler = std::move(depth.sampler);
     return true;
 }
 

@@ -63,10 +63,7 @@ void CloudShadowSystem::destroy() {
     uniformAllocations.clear();
     uniformMappedPtrs.clear();
 
-    if (shadowMapSampler != VK_NULL_HANDLE) {
-        vkDestroySampler(device, shadowMapSampler, nullptr);
-        shadowMapSampler = VK_NULL_HANDLE;
-    }
+    shadowMapSampler.destroy();
     if (shadowMapView != VK_NULL_HANDLE) {
         vkDestroyImageView(device, shadowMapView, nullptr);
         shadowMapView = VK_NULL_HANDLE;
@@ -123,23 +120,7 @@ bool CloudShadowSystem::createShadowMap() {
 
 bool CloudShadowSystem::createSampler() {
     // Bilinear filtering for smooth shadow edges
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.anisotropyEnable = VK_TRUE;
-    samplerInfo.maxAnisotropy = 4.0f;
-    samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;  // No shadow outside bounds
-    samplerInfo.unnormalizedCoordinates = VK_FALSE;
-    samplerInfo.compareEnable = VK_FALSE;
-    samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = 0.0f;
-
-    if (vkCreateSampler(device, &samplerInfo, nullptr, &shadowMapSampler) != VK_SUCCESS) {
+    if (!ManagedSampler::createLinearClamp(device, shadowMapSampler)) {
         SDL_Log("Failed to create cloud shadow sampler");
         return false;
     }

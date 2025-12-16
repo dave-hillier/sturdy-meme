@@ -82,10 +82,7 @@ void VirtualTexturePageTable::destroy(VkDevice device, VmaAllocator allocator) {
         stagingMapped = nullptr;
     }
 
-    if (pageTableSampler != VK_NULL_HANDLE) {
-        vkDestroySampler(device, pageTableSampler, nullptr);
-        pageTableSampler = VK_NULL_HANDLE;
-    }
+    pageTableSampler.destroy();
 
     if (combinedImageView != VK_NULL_HANDLE) {
         vkDestroyImageView(device, combinedImageView, nullptr);
@@ -187,20 +184,7 @@ bool VirtualTexturePageTable::createPageTableTextures(VkDevice device, VmaAlloca
 }
 
 bool VirtualTexturePageTable::createSampler(VkDevice device) {
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_NEAREST;  // Point sampling for page table
-    samplerInfo.minFilter = VK_FILTER_NEAREST;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.anisotropyEnable = VK_FALSE;
-    samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
-    samplerInfo.unnormalizedCoordinates = VK_FALSE;
-    samplerInfo.compareEnable = VK_FALSE;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-
-    return vkCreateSampler(device, &samplerInfo, nullptr, &pageTableSampler) == VK_SUCCESS;
+    return ManagedSampler::createNearestClamp(device, pageTableSampler);
 }
 
 size_t VirtualTexturePageTable::getEntryIndex(TileId id) const {
