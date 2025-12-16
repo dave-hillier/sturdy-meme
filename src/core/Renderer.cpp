@@ -974,7 +974,8 @@ bool Renderer::render(const Camera& camera) {
     if (renderPipeline.postStage.hiZRecordFn) {
         renderPipeline.postStage.hiZRecordFn(ctx);
     }
-    if (renderPipeline.postStage.bloomRecordFn) {
+    // Only run bloom passes if bloom is enabled (skip for performance)
+    if (systems_->postProcess().isBloomEnabled() && renderPipeline.postStage.bloomRecordFn) {
         renderPipeline.postStage.bloomRecordFn(ctx);
     }
 
@@ -1587,6 +1588,17 @@ int Renderer::getGodRayQuality() const {
 // Froxel volumetric fog quality control
 void Renderer::setFroxelFilterQuality(bool highQuality) { systems_->postProcess().setFroxelFilterQuality(highQuality); }
 bool Renderer::isFroxelFilterHighQuality() const { return systems_->postProcess().isFroxelFilterHighQuality(); }
+
+// Bloom control
+void Renderer::setBloomEnabled(bool enabled) { systems_->postProcess().setBloomEnabled(enabled); }
+bool Renderer::isBloomEnabled() const { return systems_->postProcess().isBloomEnabled(); }
+
+// Auto-exposure control
+void Renderer::setAutoExposureEnabled(bool enabled) { systems_->postProcess().setAutoExposure(enabled); }
+bool Renderer::isAutoExposureEnabled() const { return systems_->postProcess().isAutoExposureEnabled(); }
+void Renderer::setManualExposure(float ev) { systems_->postProcess().setExposure(ev); }
+float Renderer::getManualExposure() const { return systems_->postProcess().getExposure(); }
+float Renderer::getCurrentExposure() const { return systems_->postProcess().getCurrentExposure(); }
 
 // Terrain control
 void Renderer::toggleTerrainWireframe() { systems_->terrain().setWireframeMode(!systems_->terrain().isWireframeMode()); }

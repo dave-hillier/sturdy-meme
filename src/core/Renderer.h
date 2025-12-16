@@ -143,6 +143,18 @@ public:
     // HDR/Post-processing control
     void setHDREnabled(bool enabled) { hdrEnabled = enabled; }
     bool isHDREnabled() const { return hdrEnabled; }
+
+    // Bloom control
+    void setBloomEnabled(bool enabled);
+    bool isBloomEnabled() const;
+
+    // Auto-exposure control
+    void setAutoExposureEnabled(bool enabled);
+    bool isAutoExposureEnabled() const;
+    void setManualExposure(float ev);
+    float getManualExposure() const;
+    float getCurrentExposure() const;
+
     void setCloudShadowIntensity(float intensity);
     float getCloudShadowIntensity() const;
 

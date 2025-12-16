@@ -31,8 +31,8 @@ layout(binding = BINDING_PP_UNIFORMS) uniform PostProcessUniforms {
     // Quality settings
     float godRaysEnabled;       // 1.0 = enabled, 0.0 = disabled
     float froxelFilterQuality;  // 0.0 = trilinear (fast), 1.0 = tricubic (quality)
-    float padding2;
-    float padding3;
+    float bloomEnabled;         // 1.0 = enabled, 0.0 = disabled
+    float autoExposureEnabled;  // 1.0 = auto, 0.0 = manual (UI display only)
 } ubo;
 
 // Specialization constant for god ray sample count
@@ -309,8 +309,11 @@ void main() {
     // Exposure is computed by histogram compute shaders and passed via uniform
     float finalExposure = ubo.exposure;
 
-    // Sample bloom from multi-pass bloom texture
-    vec3 bloom = texture(bloomTexture, fragTexCoord).rgb;
+    // Sample bloom from multi-pass bloom texture (only if enabled)
+    vec3 bloom = vec3(0.0);
+    if (ubo.bloomEnabled > 0.5) {
+        bloom = texture(bloomTexture, fragTexCoord).rgb;
+    }
 
     // Compute god rays (Phase 4.4)
     // Only compute if enabled and intensity > 0

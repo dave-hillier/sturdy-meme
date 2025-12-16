@@ -53,7 +53,13 @@ void GuiPostFXTab::render(Renderer& renderer) {
     ImGui::Text("BLOOM");
     ImGui::PopStyleColor();
 
-    ImGui::TextDisabled("Bloom is enabled by default");
+    bool bloomEnabled = renderer.isBloomEnabled();
+    if (ImGui::Checkbox("Enable Bloom", &bloomEnabled)) {
+        renderer.setBloomEnabled(bloomEnabled);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Enable/disable bloom glow effect");
+    }
 
     ImGui::Spacing();
     ImGui::Separator();
@@ -107,6 +113,23 @@ void GuiPostFXTab::render(Renderer& renderer) {
     ImGui::Text("EXPOSURE");
     ImGui::PopStyleColor();
 
-    ImGui::TextDisabled("Auto-exposure is active");
-    ImGui::TextDisabled("Histogram-based adaptation");
+    bool autoExposure = renderer.isAutoExposureEnabled();
+    if (ImGui::Checkbox("Auto Exposure", &autoExposure)) {
+        renderer.setAutoExposureEnabled(autoExposure);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Enable/disable histogram-based auto-exposure");
+    }
+
+    if (autoExposure) {
+        ImGui::TextDisabled("Current: %.2f EV", renderer.getCurrentExposure());
+    } else {
+        float manualExposure = renderer.getManualExposure();
+        if (ImGui::SliderFloat("Manual Exposure", &manualExposure, -4.0f, 4.0f, "%.2f EV")) {
+            renderer.setManualExposure(manualExposure);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Manual exposure value in EV (-4 to +4)");
+        }
+    }
 }

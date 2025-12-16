@@ -569,6 +569,8 @@ void PostProcessSystem::recordPostProcess(VkCommandBuffer cmd, uint32_t frameInd
     // Quality settings
     ubo->godRaysEnabled = godRaysEnabled ? 1.0f : 0.0f;
     ubo->froxelFilterQuality = froxelFilterHighQuality ? 1.0f : 0.0f;
+    ubo->bloomEnabled = bloomEnabled ? 1.0f : 0.0f;
+    ubo->autoExposureEnabled = autoExposureEnabled ? 1.0f : 0.0f;
 
     // Store computed exposure for next frame
     lastAutoExposure = autoExposureEnabled ? computedExposure : manualExposure;
