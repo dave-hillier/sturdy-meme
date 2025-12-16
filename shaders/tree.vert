@@ -32,12 +32,18 @@ void main() {
     vec4 worldPos = pc.model * vec4(inPosition, 1.0);
     gl_Position = ubo.proj * ubo.view * worldPos;
 
-    // Transform normal and tangent to world space
-    mat3 normalMatrix = mat3(pc.model);
+    // Transform normal to world space using inverse-transpose for correct
+    // handling of non-uniform scaling. For uniform scaling this is equivalent
+    // to mat3(model), but handles general cases correctly.
+    mat3 modelMat3 = mat3(pc.model);
+    mat3 normalMatrix = transpose(inverse(modelMat3));
     fragNormal = normalize(normalMatrix * inNormal);
-    fragTangent = normalize(normalMatrix * inTangent.xyz);
+
+    // Tangent uses regular model matrix (direction in surface plane)
+    fragTangent = normalize(modelMat3 * inTangent.xyz);
 
     // Calculate bitangent (cross product with tangent handedness)
+    // Re-orthogonalize after transformation to handle numerical precision
     fragBitangent = normalize(cross(fragNormal, fragTangent) * inTangent.w);
 
     fragTexCoord = inTexCoord;

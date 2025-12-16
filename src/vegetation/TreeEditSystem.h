@@ -6,16 +6,19 @@
 #include <vector>
 #include <string>
 #include <array>
+#include <atomic>
+#include <deque>
 
 #include "TreeGenerator.h"
 #include "Mesh.h"
 #include "Texture.h"
 #include "UBOs.h"
 #include "DescriptorManager.h"
+#include "shaders/bindings.h"
 #include "core/RAIIAdapter.h"
 #include <optional>
 
-// Push constants for tree rendering
+// Push constants for tree rendering - must match shader layout exactly
 struct TreePushConstants {
     glm::mat4 model;
     float roughness;
@@ -23,6 +26,9 @@ struct TreePushConstants {
     float alphaTest;       // Alpha discard threshold for leaves
     int isLeaf;            // 0 = bark, 1 = leaf
 };
+
+// Validate push constant struct size matches shader expectations
+static_assert(sizeof(TreePushConstants) == 80, "TreePushConstants size mismatch with shader");
 
 class TreeEditSystem {
 public:
@@ -51,7 +57,8 @@ public:
     // Update extent after resize
     void updateExtent(VkExtent2D newExtent) { extent = newExtent; }
 
-    // Record rendering commands
+    // Record rendering commands - call beginFrame() before recording
+    void beginFrame(uint32_t frameIndex);
     void recordDraw(VkCommandBuffer cmd, uint32_t frameIndex);
 
     // Tree edit mode control
@@ -97,6 +104,13 @@ public:
     const Texture& getFallbackTexture() const { return **fallbackTexture; }
 
 private:
+    // Pending mesh destruction - deferred until frame is no longer in-flight
+    struct PendingMeshDestroy {
+        Mesh branchMesh;
+        Mesh leafMesh;
+        uint32_t frameToDestroyAfter;  // Safe to destroy when this frame completes
+    };
+
     // Initialization helpers
     bool createDescriptorSetLayout();
     bool createDescriptorSets();
@@ -109,6 +123,12 @@ private:
 
     // Update texture bindings when bark/leaf type changes
     void updateTextureBindings();
+
+    // Clean up meshes that are no longer in-flight
+    void cleanupPendingMeshes(uint32_t completedFrame);
+
+    // Update descriptors for a specific frame if needed
+    void updateDescriptorsIfNeeded(uint32_t frameIndex);
 
     // Vulkan resources
     VkDevice device = VK_NULL_HANDLE;
@@ -158,7 +178,16 @@ private:
     TreeParameters treeParams;
     Mesh branchMesh;
     Mesh leafMesh;
-    bool meshesUploaded = false;
+    std::atomic<bool> meshesUploaded{false};  // Atomic for safe cross-frame access
+
+    // Pending mesh destructions (deferred to avoid stalls)
+    std::deque<PendingMeshDestroy> pendingMeshDestroys;
+    uint32_t currentFrameIndex = 0;
+    uint32_t frameCounter = 0;  // Monotonically increasing frame counter
+
+    // Descriptor update tracking
+    std::vector<bool> descriptorNeedsUpdate;  // Per-frame flag
+    std::vector<VkBuffer> cachedSceneUniformBuffers;  // Cache for deferred updates
 
     // Editor state
     bool enabled = false;

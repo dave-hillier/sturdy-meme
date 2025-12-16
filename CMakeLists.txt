@@ -185,6 +185,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/vegetation
     ${CMAKE_CURRENT_SOURCE_DIR}/src/water
     ${CMAKE_CURRENT_SOURCE_DIR}/generated
+    ${CMAKE_CURRENT_SOURCE_DIR}  # For shaders/bindings.h
     ${STB_INCLUDE_DIRS}
 )
 

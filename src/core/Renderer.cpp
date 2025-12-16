@@ -853,6 +853,9 @@ bool Renderer::render(const Camera& camera) {
     systems_->terrain().updateUniforms(frame.frameIndex, frame.cameraPosition, frame.view, frame.projection,
                                   systems_->volumetricSnow().getCascadeParams(), useVolumetricSnow, MAX_SNOW_HEIGHT);
 
+    // Tree edit system per-frame setup (cleanup pending meshes, update descriptors)
+    systems_->treeEdit().beginFrame(frame.frameIndex);
+
     // Update snow mask system - accumulation/melting based on weather type
     bool isSnowing = (systems_->weather().getWeatherType() == 1);  // 1 = snow
     float weatherIntensity = systems_->weather().getIntensity();
