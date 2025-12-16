@@ -9,8 +9,9 @@ namespace VirtualTexture {
 
 bool VirtualTextureCache::init(VkDevice device, VmaAllocator allocator,
                                 VkCommandPool commandPool, VkQueue queue,
-                                const VirtualTextureConfig& cfg) {
+                                const VirtualTextureConfig& cfg, uint32_t framesInFlight) {
     config = cfg;
+    framesInFlight_ = framesInFlight;
 
     // Initialize slot array
     uint32_t totalSlots = config.getTotalCacheSlots();
@@ -34,28 +35,36 @@ bool VirtualTextureCache::init(VkDevice device, VmaAllocator allocator,
         return false;
     }
 
-    // Create staging buffer for tile uploads using RAII wrapper
+    // Create per-frame staging buffers to avoid race conditions with in-flight frames
     VkDeviceSize stagingSize = config.tileSizePixels * config.tileSizePixels * 4; // RGBA8
+    stagingBuffers_.resize(framesInFlight_);
+    stagingMapped_.resize(framesInFlight_);
 
-    if (!VulkanResourceFactory::createStagingBuffer(allocator, stagingSize, stagingBuffer_)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create VT staging buffer");
-        return false;
+    for (uint32_t i = 0; i < framesInFlight_; ++i) {
+        if (!VulkanResourceFactory::createStagingBuffer(allocator, stagingSize, stagingBuffers_[i])) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create VT staging buffer %u", i);
+            return false;
+        }
+        stagingMapped_[i] = stagingBuffers_[i].map();
     }
-    stagingMapped = stagingBuffer_.map();
 
-    SDL_Log("VirtualTextureCache initialized: %u slots (%ux%u tiles), %upx cache",
-            totalSlots, slotsPerAxis, slotsPerAxis, config.cacheSizePixels);
+    SDL_Log("VirtualTextureCache initialized: %u slots (%ux%u tiles), %upx cache, %u staging buffers",
+            totalSlots, slotsPerAxis, slotsPerAxis, config.cacheSizePixels, framesInFlight_);
 
     return true;
 }
 
 void VirtualTextureCache::destroy(VkDevice device, VmaAllocator allocator) {
     // ManagedBuffer cleanup - unmap first
-    if (stagingMapped) {
-        stagingBuffer_.unmap();
-        stagingMapped = nullptr;
+    for (size_t i = 0; i < stagingBuffers_.size(); ++i) {
+        if (stagingMapped_[i]) {
+            stagingBuffers_[i].unmap();
+            stagingMapped_[i] = nullptr;
+        }
+        stagingBuffers_[i].reset();
     }
-    stagingBuffer_.reset();
+    stagingBuffers_.clear();
+    stagingMapped_.clear();
 
     cacheSampler.reset();
 
@@ -226,14 +235,20 @@ size_t VirtualTextureCache::findLRUSlot() const {
     return lruIndex;
 }
 
-void VirtualTextureCache::uploadTile(TileId id, const void* pixelData,
-                                      uint32_t width, uint32_t height,
-                                      VkDevice device, VkCommandPool commandPool,
-                                      VkQueue queue) {
+void VirtualTextureCache::recordTileUpload(TileId id, const void* pixelData,
+                                            uint32_t width, uint32_t height,
+                                            VkCommandBuffer cmd, uint32_t frameIndex) {
     // Find the slot for this tile
     auto it = tileToSlot.find(id.pack());
     if (it == tileToSlot.end()) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Cannot upload tile not in cache");
+        return;
+    }
+
+    // Select the staging buffer for this frame to avoid race conditions
+    uint32_t bufferIndex = frameIndex % framesInFlight_;
+    if (bufferIndex >= stagingBuffers_.size() || !stagingMapped_[bufferIndex]) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Invalid staging buffer index %u", bufferIndex);
         return;
     }
 
@@ -242,24 +257,9 @@ void VirtualTextureCache::uploadTile(TileId id, const void* pixelData,
     uint32_t slotX = slotIndex % slotsPerAxis;
     uint32_t slotY = slotIndex / slotsPerAxis;
 
-    // Copy to staging buffer
+    // Copy to per-frame staging buffer
     VkDeviceSize dataSize = width * height * 4;
-    std::memcpy(stagingMapped, pixelData, dataSize);
-
-    // Record copy command
-    VkCommandBufferAllocateInfo cmdAllocInfo{};
-    cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    cmdAllocInfo.commandPool = commandPool;
-    cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    cmdAllocInfo.commandBufferCount = 1;
-
-    VkCommandBuffer cmd;
-    vkAllocateCommandBuffers(device, &cmdAllocInfo, &cmd);
-
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(cmd, &beginInfo);
+    std::memcpy(stagingMapped_[bufferIndex], pixelData, dataSize);
 
     // Transition to transfer dst
     Barriers::transitionImage(cmd, cacheImage,
@@ -268,25 +268,13 @@ void VirtualTextureCache::uploadTile(TileId id, const void* pixelData,
         VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
 
     // Copy buffer to image region at tile slot position
-    Barriers::copyBufferToImageRegion(cmd, stagingBuffer_.get(), cacheImage,
+    Barriers::copyBufferToImageRegion(cmd, stagingBuffers_[bufferIndex].get(), cacheImage,
         static_cast<int32_t>(slotX * config.tileSizePixels),
         static_cast<int32_t>(slotY * config.tileSizePixels),
         width, height);
 
     // Transition back to shader read
     Barriers::imageTransferToSampling(cmd, cacheImage);
-
-    vkEndCommandBuffer(cmd);
-
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &cmd;
-
-    vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
-    vkQueueWaitIdle(queue);
-
-    vkFreeCommandBuffers(device, commandPool, 1, &cmd);
 }
 
 uint32_t VirtualTextureCache::getUsedSlotCount() const {

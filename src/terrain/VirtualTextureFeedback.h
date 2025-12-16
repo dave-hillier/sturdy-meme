@@ -50,8 +50,20 @@ public:
     void clear(VkCommandBuffer cmd, uint32_t frameIndex);
 
     /**
-     * Read back tile requests from a completed frame
-     * Should be called after the frame has finished rendering
+     * Record copy commands from GPU feedback buffers to CPU readback buffers.
+     * Should be called at end of frame after all rendering that writes to feedback.
+     * Caller must ensure proper barrier before calling (shader writes visible to transfer).
+     *
+     * @param cmd Command buffer to record into
+     * @param frameIndex Current frame index
+     */
+    void recordCopyToReadback(VkCommandBuffer cmd, uint32_t frameIndex);
+
+    /**
+     * Read back tile requests from a completed frame's readback buffer.
+     * Should only be called after the frame has been submitted AND the GPU has
+     * finished executing (wait on frame fence before calling).
+     *
      * @param frameIndex The frame index that has completed
      */
     void readback(uint32_t frameIndex);

@@ -26,7 +26,7 @@ public:
 
     // Initialize the cache
     bool init(VkDevice device, VmaAllocator allocator, VkCommandPool commandPool,
-              VkQueue queue, const VirtualTextureConfig& config);
+              VkQueue queue, const VirtualTextureConfig& config, uint32_t framesInFlight = 2);
 
     // Cleanup resources
     void destroy(VkDevice device, VmaAllocator allocator);
@@ -44,9 +44,25 @@ public:
     // Get the cache slot for a tile (nullptr if not in cache)
     const CacheSlot* getSlot(TileId id) const;
 
-    // Upload tile data to the cache
-    void uploadTile(TileId id, const void* pixelData, uint32_t width, uint32_t height,
-                    VkDevice device, VkCommandPool commandPool, VkQueue queue);
+    /**
+     * Record tile upload commands into the provided command buffer.
+     * Uses fence-based synchronization - caller is responsible for submitting
+     * the command buffer and waiting on the appropriate frame fence.
+     *
+     * @param id Tile ID to upload
+     * @param pixelData Pixel data to upload
+     * @param width Tile width
+     * @param height Tile height
+     * @param cmd Command buffer to record into (must be in recording state)
+     * @param frameIndex Current frame index for staging buffer selection
+     */
+    void recordTileUpload(TileId id, const void* pixelData, uint32_t width, uint32_t height,
+                          VkCommandBuffer cmd, uint32_t frameIndex);
+
+    /**
+     * Get the number of staging buffers (one per frame in flight)
+     */
+    uint32_t getStagingBufferCount() const { return static_cast<uint32_t>(stagingBuffers_.size()); }
 
     // Get the cache texture image view
     VkImageView getCacheImageView() const { return cacheImageView; }
@@ -86,9 +102,10 @@ private:
     VkImageView cacheImageView = VK_NULL_HANDLE;
     ManagedSampler cacheSampler;
 
-    // Staging buffer for uploads (persistent, reused)
-    ManagedBuffer stagingBuffer_;
-    void* stagingMapped = nullptr;
+    // Per-frame staging buffers to avoid race conditions with in-flight frames
+    std::vector<ManagedBuffer> stagingBuffers_;
+    std::vector<void*> stagingMapped_;
+    uint32_t framesInFlight_ = 2;
 
     // Cache slot management
     std::vector<CacheSlot> slots;

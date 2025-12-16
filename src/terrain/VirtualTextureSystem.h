@@ -50,12 +50,14 @@ public:
      * @param queue Graphics queue
      * @param tilePath Path to pre-generated tile directory
      * @param cfg Configuration options
+     * @param framesInFlight Number of frames in flight for synchronization
      * @return true on success
      */
     bool init(VkDevice device, VmaAllocator allocator,
               VkCommandPool commandPool, VkQueue queue,
               const std::string& tilePath,
-              const VirtualTextureConfig& cfg = VirtualTextureConfig{});
+              const VirtualTextureConfig& cfg = VirtualTextureConfig{},
+              uint32_t framesInFlight = 2);
 
     /**
      * Destroy all resources
@@ -70,22 +72,28 @@ public:
     void beginFrame(VkCommandBuffer cmd, uint32_t frameIndex);
 
     /**
-     * End frame - copy feedback to readback buffer
+     * End frame - copy feedback to readback buffer.
+     * Records GPU copy commands from feedback storage buffers to CPU-readable readback buffers.
      * @param cmd Command buffer to record copy commands
      * @param frameIndex Current frame index
      */
     void endFrame(VkCommandBuffer cmd, uint32_t frameIndex);
 
     /**
-     * Process feedback and upload tiles
-     * Should be called after frame has finished rendering
-     * @param device Vulkan device
-     * @param commandPool Command pool
-     * @param queue Graphics queue
-     * @param frameIndex The frame that just completed
+     * Process feedback from a PREVIOUS frame and record tile uploads.
+     * This should be called at the START of a new frame, processing feedback from
+     * (currentFrame - framesInFlight) to ensure proper synchronization.
+     *
+     * The method:
+     * 1. Reads back feedback from a completed frame (N-2 with double buffering)
+     * 2. Queues tiles for async loading based on feedback
+     * 3. Records tile upload commands for tiles that finished loading
+     * 4. Records page table upload commands if dirty
+     *
+     * @param cmd Command buffer to record upload commands into
+     * @param frameIndex Current frame index (NOT the frame being read back)
      */
-    void update(VkDevice device, VkCommandPool commandPool,
-                VkQueue queue, uint32_t frameIndex);
+    void update(VkCommandBuffer cmd, uint32_t frameIndex);
 
     /**
      * Get the physical cache texture for shader binding
@@ -151,6 +159,7 @@ private:
     std::optional<RAIIAdapter<VirtualTextureTileLoader>> tileLoader;
 
     uint32_t currentFrame = 0;
+    uint32_t framesInFlight_ = 2;
     std::unordered_set<uint32_t> pendingTiles; // Tiles currently being loaded
 
     // Over-budget penalty scheme (Ghost of Tsushima style)
@@ -165,8 +174,8 @@ private:
     // Maximum tile requests to queue per frame
     static constexpr uint32_t MAX_REQUESTS_PER_FRAME = 64;
 
-    void processFeedback(uint32_t frameIndex);
-    void uploadPendingTiles(VkDevice device, VkCommandPool commandPool, VkQueue queue);
+    void processFeedback(uint32_t readbackFrameIndex);
+    void recordPendingTileUploads(VkCommandBuffer cmd, uint32_t frameIndex);
 };
 
 } // namespace VirtualTexture

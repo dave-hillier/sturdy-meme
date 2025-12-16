@@ -26,7 +26,7 @@ public:
 
     // Initialize the page table
     bool init(VkDevice device, VmaAllocator allocator, VkCommandPool commandPool,
-              VkQueue queue, const VirtualTextureConfig& config);
+              VkQueue queue, const VirtualTextureConfig& config, uint32_t framesInFlight = 2);
 
     // Cleanup resources
     void destroy(VkDevice device, VmaAllocator allocator);
@@ -40,8 +40,15 @@ public:
     // Get the current entry for a tile
     PageTableEntry getEntry(TileId id) const;
 
-    // Upload changes to GPU (call once per frame if dirty)
-    void upload(VkDevice device, VkCommandPool commandPool, VkQueue queue);
+    /**
+     * Record page table upload commands into the provided command buffer.
+     * Uses fence-based synchronization - caller is responsible for submitting
+     * the command buffer and waiting on the appropriate frame fence.
+     *
+     * @param cmd Command buffer to record into (must be in recording state)
+     * @param frameIndex Current frame index for staging buffer selection
+     */
+    void recordUpload(VkCommandBuffer cmd, uint32_t frameIndex);
 
     // Check if any entries have changed
     bool isDirty() const { return dirty; }
@@ -77,9 +84,10 @@ private:
     VkImageView combinedImageView = VK_NULL_HANDLE;
     ManagedSampler pageTableSampler;
 
-    // Staging buffer for uploads (persistent, reused)
-    ManagedBuffer stagingBuffer_;
-    void* stagingMapped = nullptr;
+    // Per-frame staging buffers to avoid race conditions with in-flight frames
+    std::vector<ManagedBuffer> stagingBuffers_;
+    std::vector<void*> stagingMapped_;
+    uint32_t framesInFlight_ = 2;
 
     // CPU-side page table data (linear array, indexed per mip level)
     std::vector<PageTableEntry> cpuData;

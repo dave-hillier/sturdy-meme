@@ -8,18 +8,21 @@ namespace VirtualTexture {
 bool VirtualTextureSystem::init(VkDevice device, VmaAllocator allocator,
                                  VkCommandPool commandPool, VkQueue queue,
                                  const std::string& tilePath,
-                                 const VirtualTextureConfig& cfg) {
+                                 const VirtualTextureConfig& cfg,
+                                 uint32_t framesInFlight) {
     config = cfg;
+    framesInFlight_ = framesInFlight;
 
     SDL_Log("Initializing VirtualTextureSystem...");
     SDL_Log("  Virtual size: %u px", config.virtualSizePixels);
     SDL_Log("  Tile size: %u px", config.tileSizePixels);
     SDL_Log("  Cache size: %u px", config.cacheSizePixels);
     SDL_Log("  Max mip levels: %u", config.maxMipLevels);
+    SDL_Log("  Frames in flight: %u", framesInFlight_);
 
     // Initialize cache with RAII wrapper
     cache = RAIIAdapter<VirtualTextureCache>::create(
-        [&](auto& c) { return c.init(device, allocator, commandPool, queue, config); },
+        [&](auto& c) { return c.init(device, allocator, commandPool, queue, config, framesInFlight_); },
         [device, allocator](auto& c) { c.destroy(device, allocator); }
     );
     if (!cache) {
@@ -29,7 +32,7 @@ bool VirtualTextureSystem::init(VkDevice device, VmaAllocator allocator,
 
     // Initialize page table with RAII wrapper
     pageTable = RAIIAdapter<VirtualTexturePageTable>::create(
-        [&](auto& p) { return p.init(device, allocator, commandPool, queue, config); },
+        [&](auto& p) { return p.init(device, allocator, commandPool, queue, config, framesInFlight_); },
         [device, allocator](auto& p) { p.destroy(device, allocator); }
     );
     if (!pageTable) {
@@ -37,9 +40,9 @@ bool VirtualTextureSystem::init(VkDevice device, VmaAllocator allocator,
         return false;
     }
 
-    // Initialize feedback with RAII wrapper
+    // Initialize feedback with RAII wrapper (use framesInFlight for buffering)
     feedback = RAIIAdapter<VirtualTextureFeedback>::create(
-        [&](auto& f) { return f.init(device, allocator, 4096, 2); },
+        [&](auto& f) { return f.init(device, allocator, 4096, framesInFlight_); },
         [](auto& f) { f.destroy(); }
     );
     if (!feedback) {
@@ -76,36 +79,35 @@ void VirtualTextureSystem::beginFrame(VkCommandBuffer cmd, uint32_t frameIndex) 
 }
 
 void VirtualTextureSystem::endFrame(VkCommandBuffer cmd, uint32_t frameIndex) {
-    // Copy feedback buffer to readback buffer
-    // This happens at end of frame so the copy is after all rendering
-
-    VkBuffer srcBuffer = (*feedback)->getFeedbackBuffer(frameIndex);
-    VkBuffer counterSrc = (*feedback)->getCounterBuffer(frameIndex);
-
-    // We need to access the internal readback buffers - for now, the readback
-    // happens synchronously in update() after waiting for the frame
-    // A more efficient approach would be to copy to readback buffers here
-
-    // Memory barrier to ensure shader writes are visible
+    // Memory barrier to ensure shader writes are visible before transfer
     {
         Barriers::BarrierBatch batch(cmd,
             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
         batch.memoryBarrier(VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
     }
+
+    // Copy feedback buffer from GPU storage to CPU readback buffer
+    // The actual CPU read will happen in a future frame after fence wait
+    (*feedback)->recordCopyToReadback(cmd, frameIndex);
 }
 
-void VirtualTextureSystem::update(VkDevice device, VkCommandPool commandPool,
-                                   VkQueue queue, uint32_t frameIndex) {
+void VirtualTextureSystem::update(VkCommandBuffer cmd, uint32_t frameIndex) {
     currentFrame++;
 
-    // Process feedback from the completed frame
-    processFeedback(frameIndex);
+    // Process feedback from a COMPLETED frame.
+    // With N frames in flight, we read back from frame (currentFrame - framesInFlight)
+    // to ensure the GPU has finished writing to it.
+    // For the first few frames, we skip feedback processing since no frames have completed yet.
+    if (currentFrame >= framesInFlight_) {
+        uint32_t readbackFrameIndex = (frameIndex + framesInFlight_ - 1) % framesInFlight_;
+        processFeedback(readbackFrameIndex);
+    }
 
-    // Upload any tiles that finished loading
-    uploadPendingTiles(device, commandPool, queue);
+    // Record upload commands for any tiles that finished loading
+    recordPendingTileUploads(cmd, frameIndex);
 
-    // Upload any dirty page table entries
-    (*pageTable)->upload(device, commandPool, queue);
+    // Record page table upload commands if dirty
+    (*pageTable)->recordUpload(cmd, frameIndex);
 }
 
 void VirtualTextureSystem::processFeedback(uint32_t frameIndex) {
@@ -211,8 +213,7 @@ void VirtualTextureSystem::processFeedback(uint32_t frameIndex) {
     }
 }
 
-void VirtualTextureSystem::uploadPendingTiles(VkDevice device, VkCommandPool commandPool,
-                                               VkQueue queue) {
+void VirtualTextureSystem::recordPendingTileUploads(VkCommandBuffer cmd, uint32_t frameIndex) {
     // Get tiles that finished loading
     std::vector<LoadedTile> loaded = (*tileLoader)->getLoadedTiles();
 
@@ -236,12 +237,13 @@ void VirtualTextureSystem::uploadPendingTiles(VkDevice device, VkCommandPool com
             continue;
         }
 
-        // Upload tile data to cache
-        (*cache)->uploadTile(tile.id, tile.pixels.data(),
-                         tile.width, tile.height,
-                         device, commandPool, queue);
+        // Record tile upload commands into the main command buffer
+        // This uses per-frame staging buffers to avoid race conditions
+        (*cache)->recordTileUpload(tile.id, tile.pixels.data(),
+                                   tile.width, tile.height,
+                                   cmd, frameIndex);
 
-        // Update page table
+        // Update page table (CPU-side, will be uploaded via recordUpload)
         uint32_t slotsPerAxis = config.getCacheTilesPerAxis();
         uint32_t packed = tile.id.pack();
         auto slotIt = (*cache)->getTileSlotIndex(tile.id);
@@ -259,7 +261,7 @@ void VirtualTextureSystem::uploadPendingTiles(VkDevice device, VkCommandPool com
 
     if (uploaded > 0) {
         SDL_LogDebug(SDL_LOG_CATEGORY_APPLICATION,
-                     "VT: Uploaded %u tiles to cache", uploaded);
+                     "VT: Recorded %u tile uploads", uploaded);
     }
 }
 

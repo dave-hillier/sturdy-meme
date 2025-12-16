@@ -10,8 +10,9 @@ namespace VirtualTexture {
 
 bool VirtualTexturePageTable::init(VkDevice device, VmaAllocator allocator,
                                     VkCommandPool commandPool, VkQueue queue,
-                                    const VirtualTextureConfig& cfg) {
+                                    const VirtualTextureConfig& cfg, uint32_t framesInFlight) {
     config = cfg;
+    framesInFlight_ = framesInFlight;
 
     // Calculate total entries and offsets for each mip level
     size_t totalEntries = 0;
@@ -46,29 +47,37 @@ bool VirtualTexturePageTable::init(VkDevice device, VmaAllocator allocator,
         return false;
     }
 
-    // Create staging buffer (sized for largest mip level) using RAII wrapper
+    // Create per-frame staging buffers (sized for largest mip level)
     uint32_t maxMipSize = mipSizes[0];
     VkDeviceSize stagingSize = maxMipSize * sizeof(uint32_t); // RGBA8 packed
+    stagingBuffers_.resize(framesInFlight_);
+    stagingMapped_.resize(framesInFlight_);
 
-    if (!VulkanResourceFactory::createStagingBuffer(allocator, stagingSize, stagingBuffer_)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create VT page table staging buffer");
-        return false;
+    for (uint32_t i = 0; i < framesInFlight_; ++i) {
+        if (!VulkanResourceFactory::createStagingBuffer(allocator, stagingSize, stagingBuffers_[i])) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create VT page table staging buffer %u", i);
+            return false;
+        }
+        stagingMapped_[i] = stagingBuffers_[i].map();
     }
-    stagingMapped = stagingBuffer_.map();
 
-    SDL_Log("VirtualTexturePageTable initialized: %u mip levels, %zu total entries",
-            config.maxMipLevels, totalEntries);
+    SDL_Log("VirtualTexturePageTable initialized: %u mip levels, %zu total entries, %u staging buffers",
+            config.maxMipLevels, totalEntries, framesInFlight_);
 
     return true;
 }
 
 void VirtualTexturePageTable::destroy(VkDevice device, VmaAllocator allocator) {
-    // ManagedBuffer automatically cleans up in destructor, but unmap first
-    if (stagingMapped) {
-        stagingBuffer_.unmap();
-        stagingMapped = nullptr;
+    // ManagedBuffer cleanup - unmap first
+    for (size_t i = 0; i < stagingBuffers_.size(); ++i) {
+        if (stagingMapped_[i]) {
+            stagingBuffers_[i].unmap();
+            stagingMapped_[i] = nullptr;
+        }
+        stagingBuffers_[i].reset();
     }
-    stagingBuffer_.reset();
+    stagingBuffers_.clear();
+    stagingMapped_.clear();
 
     pageTableSampler.reset();
 
@@ -219,22 +228,15 @@ VkImageView VirtualTexturePageTable::getImageView(uint32_t mipLevel) const {
     return pageTableViews[mipLevel];
 }
 
-void VirtualTexturePageTable::upload(VkDevice device, VkCommandPool commandPool, VkQueue queue) {
+void VirtualTexturePageTable::recordUpload(VkCommandBuffer cmd, uint32_t frameIndex) {
     if (!dirty) return;
 
-    VkCommandBufferAllocateInfo cmdAllocInfo{};
-    cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    cmdAllocInfo.commandPool = commandPool;
-    cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    cmdAllocInfo.commandBufferCount = 1;
-
-    VkCommandBuffer cmd;
-    vkAllocateCommandBuffers(device, &cmdAllocInfo, &cmd);
-
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(cmd, &beginInfo);
+    // Select the staging buffer for this frame to avoid race conditions
+    uint32_t bufferIndex = frameIndex % framesInFlight_;
+    if (bufferIndex >= stagingBuffers_.size() || !stagingMapped_[bufferIndex]) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Invalid page table staging buffer index %u", bufferIndex);
+        return;
+    }
 
     for (uint32_t mip = 0; mip < config.maxMipLevels; ++mip) {
         if (!mipDirty[mip]) continue;
@@ -242,8 +244,8 @@ void VirtualTexturePageTable::upload(VkDevice device, VkCommandPool commandPool,
         uint32_t tilesAtMip = config.getTilesAtMip(mip);
         size_t numEntries = mipSizes[mip];
 
-        // Pack entries into staging buffer
-        uint32_t* packed = static_cast<uint32_t*>(stagingMapped);
+        // Pack entries into per-frame staging buffer
+        uint32_t* packed = static_cast<uint32_t*>(stagingMapped_[bufferIndex]);
         for (size_t i = 0; i < numEntries; ++i) {
             packed[i] = cpuData[mipOffsets[mip] + i].packRGBA8();
         }
@@ -255,7 +257,7 @@ void VirtualTexturePageTable::upload(VkDevice device, VkCommandPool commandPool,
             VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
 
         // Copy buffer to page table image
-        Barriers::copyBufferToImageRegion(cmd, stagingBuffer_.get(), pageTableImages[mip],
+        Barriers::copyBufferToImageRegion(cmd, stagingBuffers_[bufferIndex].get(), pageTableImages[mip],
                                           0, 0, tilesAtMip, tilesAtMip);
 
         // Transition back to shader read
@@ -263,18 +265,6 @@ void VirtualTexturePageTable::upload(VkDevice device, VkCommandPool commandPool,
 
         mipDirty[mip] = false;
     }
-
-    vkEndCommandBuffer(cmd);
-
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &cmd;
-
-    vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
-    vkQueueWaitIdle(queue);
-
-    vkFreeCommandBuffers(device, commandPool, 1, &cmd);
 
     dirty = false;
 }

@@ -80,12 +80,21 @@ void CurvedGeometryGenerator::generateCurvedTube(const std::vector<glm::vec3>& p
 
         // Calculate tangent direction
         glm::vec3 tangent;
+        glm::vec3 tangentDiff;
         if (ring == 0) {
-            tangent = glm::normalize(points[1] - points[0]);
+            tangentDiff = points[1] - points[0];
         } else if (ring == numPoints - 1) {
-            tangent = glm::normalize(points[numPoints - 1] - points[numPoints - 2]);
+            tangentDiff = points[numPoints - 1] - points[numPoints - 2];
         } else {
-            tangent = glm::normalize(points[ring + 1] - points[ring - 1]);
+            tangentDiff = points[ring + 1] - points[ring - 1];
+        }
+
+        // Guard against zero-length tangent (degenerate case)
+        float tangentLen = glm::length(tangentDiff);
+        if (tangentLen < 0.0001f) {
+            tangent = glm::vec3(0.0f, 1.0f, 0.0f);  // Default to up direction
+        } else {
+            tangent = tangentDiff / tangentLen;
         }
 
         // Build orthonormal basis
@@ -160,6 +169,11 @@ void CurvedGeometryGenerator::generateCurvedBranchGeometry(const std::vector<Tre
         if (node.parentIndex < 0) continue;
 
         const TreeNode& parent = nodes[node.parentIndex];
+
+        // Skip degenerate segments where parent and child are at same position
+        // This can happen with root base nodes that share position with trunk base
+        float segmentLength = glm::distance(parent.position, node.position);
+        if (segmentLength < 0.0001f) continue;
 
         // Get grandparent and child for spline control points
         glm::vec3 p0, p1, p2, p3;
