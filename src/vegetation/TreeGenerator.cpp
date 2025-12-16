@@ -185,6 +185,11 @@ void TreeGenerator::generateBranch(const TreeParameters& params,
 
 void TreeGenerator::generateBranchGeometry(const BranchSegment& segment,
                                            const TreeParameters& params) {
+    // Calculate segment length first - skip degenerate segments to prevent NaN
+    // This can happen if startPos == endPos (zero-length branch)
+    float length = glm::length(segment.endPos - segment.startPos);
+    if (length < 0.0001f) return;  // Skip zero-length segments
+
     // Get per-level segments or use defaults
     int levelIdx = std::min(segment.level, 3);
     int radialSegments = params.usePerLevelParams ?
@@ -194,9 +199,8 @@ void TreeGenerator::generateBranchGeometry(const BranchSegment& segment,
                params.branchParams[levelIdx].sections :
                (segment.level == 0 ? params.trunkRings : params.branchRings);
 
-    // Direction of branch
-    glm::vec3 direction = glm::normalize(segment.endPos - segment.startPos);
-    float length = glm::length(segment.endPos - segment.startPos);
+    // Direction of branch (safe since we checked length > 0)
+    glm::vec3 direction = (segment.endPos - segment.startPos) / length;
 
     // Build coordinate frame
     glm::vec3 up = glm::abs(direction.y) > 0.99f
