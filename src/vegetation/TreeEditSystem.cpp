@@ -40,8 +40,8 @@ bool TreeEditSystem::init(const InitInfo& info) {
     if (!createDescriptorSets()) return false;
     if (!createPipelines()) return false;
 
-    // Generate initial tree
-    regenerateTree();
+    // Note: Tree generation is deferred until first use (when placed via placeTreeAtCamera)
+    // This avoids potential issues with Vulkan state not being fully initialized during init
 
     SDL_Log("Tree edit system initialized");
     return true;

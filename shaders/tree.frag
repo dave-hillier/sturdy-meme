@@ -34,6 +34,12 @@ layout(location = 5) in vec3 fragBitangent;
 // Output
 layout(location = 0) out vec4 outColor;
 
+// Safe normalize that returns fallback for zero-length or NaN vectors
+vec3 safeNormalize(vec3 v, vec3 fallback) {
+    float len = length(v);
+    return (len > 0.0001 && !isnan(len) && !isinf(len)) ? v / len : fallback;
+}
+
 void main() {
     vec3 albedo;
     float alpha = 1.0;
@@ -55,7 +61,7 @@ void main() {
         alpha = leafColor.a;
 
         // Use geometric normal for leaves (no normal map)
-        N = normalize(fragNormal);
+        N = safeNormalize(fragNormal, vec3(0.0, 1.0, 0.0));
 
         // Make leaves two-sided
         if (!gl_FrontFacing) {
@@ -77,24 +83,24 @@ void main() {
         vec3 normalMapValue = barkNormalMap * 2.0 - 1.0;
 
         // Build TBN matrix for normal mapping
-        vec3 T = normalize(fragTangent);
-        vec3 Ng = normalize(fragNormal);
-        vec3 B = normalize(fragBitangent);
+        vec3 T = safeNormalize(fragTangent, vec3(1.0, 0.0, 0.0));
+        vec3 Ng = safeNormalize(fragNormal, vec3(0.0, 1.0, 0.0));
+        vec3 B = safeNormalize(fragBitangent, vec3(0.0, 0.0, 1.0));
         mat3 TBN = mat3(T, B, Ng);
 
         // Transform normal from tangent space to world space
-        N = normalize(TBN * normalMapValue);
+        N = safeNormalize(TBN * normalMapValue, vec3(0.0, 1.0, 0.0));
     }
 
-    vec3 V = normalize(ubo.cameraPosition.xyz - fragWorldPos);
+    vec3 V = safeNormalize(ubo.cameraPosition.xyz - fragWorldPos, vec3(0.0, 0.0, 1.0));
 
     // Sun lighting
-    vec3 sunL = normalize(ubo.sunDirection.xyz);
+    vec3 sunL = safeNormalize(ubo.sunDirection.xyz, vec3(0.0, 1.0, 0.0));
     float sunIntensity = ubo.sunDirection.w;
 
     // Diffuse + specular lighting
     float NoL = max(dot(N, sunL), 0.0);
-    vec3 H = normalize(V + sunL);
+    vec3 H = safeNormalize(V + sunL, vec3(0.0, 1.0, 0.0));
     float NoH = max(dot(N, H), 0.0);
 
     // Diffuse
@@ -104,13 +110,13 @@ void main() {
     float a = roughness * roughness;
     float a2 = a * a;
     float denom = (NoH * NoH) * (a2 - 1.0) + 1.0;
-    float D = a2 / (PI * denom * denom);
+    float D = a2 / (PI * denom * denom + 0.0001); // Prevent division by zero
     float specular = D * 0.04 * (1.0 - pc.metallic);
 
     vec3 sunContrib = (diffuse + specular) * ubo.sunColor.rgb * sunIntensity * NoL;
 
     // Moon lighting (softer fill)
-    vec3 moonL = normalize(ubo.moonDirection.xyz);
+    vec3 moonL = safeNormalize(ubo.moonDirection.xyz, vec3(0.0, -1.0, 0.0));
     float moonIntensity = ubo.moonDirection.w;
     float moonNoL = max(dot(N, moonL), 0.0);
     vec3 moonContrib = diffuse * ubo.moonColor.rgb * moonIntensity * moonNoL * 0.3;
@@ -127,11 +133,17 @@ void main() {
     // Apply aerial perspective (atmospheric scattering and fog)
     vec3 cameraToFrag = fragWorldPos - ubo.cameraPosition.xyz;
     float viewDistance = length(cameraToFrag);
-    vec3 sunDir = normalize(ubo.sunDirection.xyz);
+    vec3 sunDir = safeNormalize(ubo.sunDirection.xyz, vec3(0.0, 1.0, 0.0));
     vec3 sunColor = ubo.sunColor.rgb * ubo.sunDirection.w;
+    vec3 viewDir = safeNormalize(cameraToFrag, vec3(0.0, 0.0, 1.0));
     finalColor = applyAerialPerspective(finalColor, ubo.cameraPosition.xyz,
-                                        normalize(cameraToFrag), viewDistance,
+                                        viewDir, viewDistance,
                                         sunDir, sunColor);
+
+    // Final NaN guard - output magenta for debugging if NaN detected
+    if (any(isnan(finalColor)) || any(isinf(finalColor))) {
+        finalColor = vec3(1.0, 0.0, 1.0); // Magenta = NaN detected
+    }
 
     outColor = vec4(finalColor, alpha);
 }

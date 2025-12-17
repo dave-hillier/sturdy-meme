@@ -38,6 +38,10 @@ void TreeEditorGui::placeTreeAtCamera(Renderer& renderer, const Camera& camera) 
 
     treeSystem.setPosition(treePos);
 
+    // Always regenerate when placing to ensure fresh mesh
+    // This fixes potential corruption from initial generation during init
+    treeSystem.regenerateTree();
+
     // Enable tree editor if not already enabled
     if (!treeSystem.isEnabled()) {
         treeSystem.setEnabled(true);
