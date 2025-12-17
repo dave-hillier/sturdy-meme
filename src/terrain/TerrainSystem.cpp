@@ -112,14 +112,14 @@ bool TerrainSystem::init(const InitInfo& info, const TerrainConfig& cfg) {
             // The tile cache recalculates heightScale from metadata (maxAltitude - minAltitude)
             // which may differ from our config if the tiles were generated with different settings.
             // We must use the tile cache's values to ensure GPU shaders and CPU queries agree.
-            float cacheHeightScale = tileCache.getHeightScale();
+            float cacheHeightScale = tileCache->get().getHeightScale();
             if (std::abs(config.heightScale - cacheHeightScale) > 0.1f) {
                 SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                             "TerrainSystem: heightScale mismatch! config=%.1f, tileCache=%.1f - using tileCache value",
                             config.heightScale, cacheHeightScale);
                 config.heightScale = cacheHeightScale;
-                config.minAltitude = tileCache.getMinAltitude();
-                config.maxAltitude = tileCache.getMaxAltitude();
+                config.minAltitude = tileCache->get().getMinAltitude();
+                config.maxAltitude = tileCache->get().getMaxAltitude();
             }
         }
     }

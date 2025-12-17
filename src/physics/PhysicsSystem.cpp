@@ -565,7 +565,6 @@ PhysicsBodyID PhysicsWorld::createTerrainHeightfield(const float* samples, const
 PhysicsBodyID PhysicsWorld::createTileHeightfield(const float* samples, uint32_t sampleCount,
                                                     float tileSize, float heightScale,
                                                     float worldMinX, float worldMinZ) {
-    if (!initialized) return INVALID_BODY_ID;
     if (!samples || sampleCount < 2) {
         SDL_Log("Invalid tile heightfield parameters");
         return INVALID_BODY_ID;
