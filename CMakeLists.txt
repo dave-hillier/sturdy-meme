@@ -80,6 +80,11 @@ set(SOURCES
     src/vegetation/TreeEditSystem.cpp
     src/vegetation/TreeEditorGui.cpp
     src/vegetation/BillboardCapture.cpp
+    src/vegetation/RecursiveBranchingStrategy.cpp
+    src/vegetation/SpaceColonisationStrategy.cpp
+    src/vegetation/TubeBranchGeometry.cpp
+    src/vegetation/BillboardLeafGenerator.cpp
+    src/vegetation/TreeBuilder.cpp
     # Postprocess
     src/postprocess/PostProcessSystem.cpp
     src/postprocess/BloomSystem.cpp
