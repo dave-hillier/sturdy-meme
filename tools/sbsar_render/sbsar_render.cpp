@@ -14,6 +14,7 @@
 #include <archive.h>
 #include <archive_entry.h>
 #include <glm/glm.hpp>
+#include <glm/gtc/noise.hpp>
 #include <lodepng.h>
 #include <miniz.h>
 #include <algorithm>
@@ -161,55 +162,98 @@ std::vector<float> extractInputValues(const std::string& xml, const std::string&
     return values;
 }
 
+// Helper to detect material type from a string (name/label)
+std::string detectMaterialType(const std::string& text) {
+    std::string lower = text;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+
+    // Check for specific material keywords in priority order
+    // More specific matches first, generic ones last
+    if (lower.find("grass") != std::string::npos) return "grass";
+    if (lower.find("sand") != std::string::npos) return "sand";
+    if (lower.find("dirt") != std::string::npos ||
+        lower.find("ground") != std::string::npos ||
+        lower.find("soil") != std::string::npos) return "ground";
+    if (lower.find("stone") != std::string::npos ||
+        lower.find("rock") != std::string::npos) return "stone";
+    if (lower.find("brick") != std::string::npos) return "brick";
+    if (lower.find("marble") != std::string::npos) return "marble";
+    if (lower.find("concrete") != std::string::npos) return "concrete";
+    if (lower.find("wood") != std::string::npos ||
+        lower.find("bark") != std::string::npos ||
+        lower.find("plank") != std::string::npos) return "wood";
+    if (lower.find("steel") != std::string::npos ||
+        lower.find("iron") != std::string::npos) return "metal";
+    // Check "metal" last to avoid matching "metallic" attribute
+    if (lower.find("metal ") != std::string::npos ||
+        lower.find("metal_") != std::string::npos ||
+        lower.find(" metal") != std::string::npos ||
+        lower == "metal") return "metal";
+    if (lower.find("fabric") != std::string::npos ||
+        lower.find("cloth") != std::string::npos) return "fabric";
+    if (lower.find("leather") != std::string::npos) return "leather";
+    if (lower.find("plastic") != std::string::npos) return "plastic";
+    return "";
+}
+
 // Parse material parameters from XML content
 MaterialParameters parseXmlParameters(const std::string& xml) {
     MaterialParameters params;
 
-    // Extract material name/label
+    // Extract material name/label - prefer graph label, then package label
     params.materialName = extractXmlAttribute(xml, "graph", "label");
     if (params.materialName.empty()) {
         params.materialName = extractXmlAttribute(xml, "package", "label");
     }
 
-    // Try to determine material type from keywords in the XML
-    std::string lowerXml = xml;
-    std::transform(lowerXml.begin(), lowerXml.end(), lowerXml.begin(), ::tolower);
+    // Try to determine material type from the material name first (most reliable)
+    params.materialType = detectMaterialType(params.materialName);
 
-    if (lowerXml.find("stone") != std::string::npos ||
-        lowerXml.find("rock") != std::string::npos ||
-        lowerXml.find("brick") != std::string::npos) {
-        params.materialType = "stone";
+    // If not found in name, try the package identifier
+    if (params.materialType.empty()) {
+        std::string pkgId = extractXmlAttribute(xml, "package", "identifier");
+        params.materialType = detectMaterialType(pkgId);
+    }
+
+    // If still not found, try graph identifier
+    if (params.materialType.empty()) {
+        std::string graphId = extractXmlAttribute(xml, "graph", "identifier");
+        params.materialType = detectMaterialType(graphId);
+    }
+
+    // Set default parameters based on detected material type
+    if (params.materialType == "stone" || params.materialType == "rock") {
         params.roughness = 0.7f;
         params.patternScale = 4.0f;
-    } else if (lowerXml.find("wood") != std::string::npos ||
-               lowerXml.find("bark") != std::string::npos) {
-        params.materialType = "wood";
+    } else if (params.materialType == "wood") {
         params.roughness = 0.6f;
         params.patternScale = 6.0f;
         params.baseColor = glm::vec4(0.4f, 0.25f, 0.15f, 1.0f);
-    } else if (lowerXml.find("metal") != std::string::npos ||
-               lowerXml.find("steel") != std::string::npos ||
-               lowerXml.find("iron") != std::string::npos) {
-        params.materialType = "metal";
+    } else if (params.materialType == "metal") {
         params.metallic = 0.9f;
         params.roughness = 0.3f;
         params.baseColor = glm::vec4(0.7f, 0.7f, 0.75f, 1.0f);
-    } else if (lowerXml.find("fabric") != std::string::npos ||
-               lowerXml.find("cloth") != std::string::npos ||
-               lowerXml.find("leather") != std::string::npos) {
-        params.materialType = "fabric";
+    } else if (params.materialType == "fabric" || params.materialType == "leather") {
         params.roughness = 0.8f;
         params.patternScale = 12.0f;
-    } else if (lowerXml.find("sand") != std::string::npos ||
-               lowerXml.find("dirt") != std::string::npos ||
-               lowerXml.find("ground") != std::string::npos) {
-        params.materialType = "ground";
+    } else if (params.materialType == "ground" || params.materialType == "sand") {
         params.roughness = 0.9f;
         params.baseColor = glm::vec4(0.6f, 0.5f, 0.4f, 1.0f);
-    } else if (lowerXml.find("grass") != std::string::npos) {
-        params.materialType = "grass";
+    } else if (params.materialType == "grass") {
         params.roughness = 0.7f;
         params.baseColor = glm::vec4(0.3f, 0.5f, 0.2f, 1.0f);
+    } else if (params.materialType == "brick") {
+        params.roughness = 0.75f;
+        params.patternScale = 4.0f;
+    } else if (params.materialType == "concrete") {
+        params.roughness = 0.85f;
+        params.patternScale = 6.0f;
+    } else if (params.materialType == "marble") {
+        params.roughness = 0.3f;
+        params.patternScale = 3.0f;
+    } else if (params.materialType == "plastic") {
+        params.roughness = 0.4f;
+        params.patternScale = 10.0f;
     }
 
     // Try to extract explicit color values
@@ -391,118 +435,218 @@ MaterialParameters parseSbsarArchive(const std::string& path) {
 }
 
 // ============================================================================
-// Procedural Noise Generation
+// Procedural Noise Generation using glm::simplex
 // ============================================================================
 
-// Permutation table for Perlin noise (doubled to avoid modulo operations)
-static int perm[512];
-static bool permInitialized = false;
-
-void initPermutationTable(unsigned int seed) {
-    if (permInitialized) return;
-
-    std::mt19937 rng(seed);
-    for (int i = 0; i < 256; i++) {
-        perm[i] = i;
-    }
-    for (int i = 255; i > 0; i--) {
-        std::uniform_int_distribution<int> dist(0, i);
-        int j = dist(rng);
-        std::swap(perm[i], perm[j]);
-    }
-    for (int i = 0; i < 256; i++) {
-        perm[256 + i] = perm[i];
-    }
-    permInitialized = true;
-}
-
-// Fade function for smooth interpolation
-float fade(float t) {
-    return t * t * t * (t * (t * 6.0f - 15.0f) + 10.0f);
-}
-
-// Linear interpolation
-float lerp(float a, float b, float t) {
-    return a + t * (b - a);
-}
-
-// Gradient function - returns dot product with gradient vector
-float grad(int hash, float x, float y) {
-    int h = hash & 7;
-    float u = h < 4 ? x : y;
-    float v = h < 4 ? y : x;
-    return ((h & 1) ? -u : u) + ((h & 2) ? -2.0f * v : 2.0f * v);
-}
-
-// 2D Perlin noise function
-float perlinNoise(float x, float y) {
-    // Find unit grid cell containing point
-    int X = static_cast<int>(std::floor(x)) & 255;
-    int Y = static_cast<int>(std::floor(y)) & 255;
-
-    // Get relative position within cell
-    x -= std::floor(x);
-    y -= std::floor(y);
-
-    // Compute fade curves
-    float u = fade(x);
-    float v = fade(y);
-
-    // Hash coordinates of the 4 cube corners
-    int A = perm[X] + Y;
-    int B = perm[X + 1] + Y;
-
-    // Blend the results
-    float res = lerp(
-        lerp(grad(perm[A], x, y), grad(perm[B], x - 1, y), u),
-        lerp(grad(perm[A + 1], x, y - 1), grad(perm[B + 1], x - 1, y - 1), u),
-        v
-    );
-
-    // Normalize to [0, 1]
-    return (res + 1.0f) * 0.5f;
-}
-
-// Fractal Brownian Motion - layered noise for natural-looking detail
-float fbm(float x, float y, int octaves, float persistence, float lacunarity) {
-    float total = 0.0f;
-    float amplitude = 1.0f;
+// Fractal Brownian Motion - layered simplex noise for natural-looking detail
+float fbm(glm::vec2 p, int octaves, float lacunarity = 2.0f, float gain = 0.5f) {
+    float value = 0.0f;
+    float amplitude = 0.5f;
     float frequency = 1.0f;
-    float maxValue = 0.0f;
 
     for (int i = 0; i < octaves; i++) {
-        total += perlinNoise(x * frequency, y * frequency) * amplitude;
-        maxValue += amplitude;
-        amplitude *= persistence;
+        value += amplitude * glm::simplex(p * frequency);
         frequency *= lacunarity;
+        amplitude *= gain;
     }
-
-    return total / maxValue;
+    return value;
 }
 
-// Voronoi/cellular noise for patterns like stone, scales, etc.
-float voronoiNoise(float x, float y, float randomness) {
-    int xi = static_cast<int>(std::floor(x));
-    int yi = static_cast<int>(std::floor(y));
+// Turbulence - absolute value noise for crack-like patterns
+float turbulence(glm::vec2 p, int octaves) {
+    float value = 0.0f;
+    float amplitude = 0.5f;
+    float frequency = 1.0f;
 
-    float minDist = 10.0f;
+    for (int i = 0; i < octaves; i++) {
+        value += amplitude * std::abs(glm::simplex(p * frequency));
+        frequency *= 2.0f;
+        amplitude *= 0.5f;
+    }
+    return value;
+}
 
-    for (int dy = -1; dy <= 1; dy++) {
-        for (int dx = -1; dx <= 1; dx++) {
-            int cx = xi + dx;
-            int cy = yi + dy;
+// Worley/cellular noise for stone, pebbles, gravel patterns
+float worley(glm::vec2 p, float scale) {
+    glm::vec2 sp = p * scale;
+    glm::ivec2 cell = glm::ivec2(glm::floor(sp));
+    glm::vec2 frac = glm::fract(sp);
 
-            // Generate pseudo-random point within this cell
-            int hash = perm[(perm[cx & 255] + cy) & 255];
-            float px = cx + (static_cast<float>(hash) / 255.0f) * randomness;
-            float py = cy + (static_cast<float>(perm[hash]) / 255.0f) * randomness;
-
-            float dist = std::sqrt((x - px) * (x - px) + (y - py) * (y - py));
+    float minDist = 1.0f;
+    for (int y = -1; y <= 1; y++) {
+        for (int x = -1; x <= 1; x++) {
+            glm::ivec2 neighbor = cell + glm::ivec2(x, y);
+            // Simple hash for cell center
+            glm::vec2 point = glm::vec2(
+                glm::fract(std::sin(float(neighbor.x * 127 + neighbor.y * 311)) * 43758.5453f),
+                glm::fract(std::sin(float(neighbor.x * 269 + neighbor.y * 183)) * 43758.5453f)
+            );
+            glm::vec2 diff = point + glm::vec2(x, y) - frac;
+            float dist = glm::length(diff);
             minDist = std::min(minDist, dist);
         }
     }
+    return minDist;
+}
 
-    return glm::clamp(minDist, 0.0f, 1.0f);
+// ============================================================================
+// Material-Specific Color Functions
+// ============================================================================
+
+glm::vec3 stoneColor(glm::vec2 uv, float noise, float detail) {
+    glm::vec3 light(0.55f, 0.52f, 0.48f);
+    glm::vec3 dark(0.3f, 0.28f, 0.25f);
+    float cracks = turbulence(uv * 4.0f, 4);
+    float voronoi = worley(uv, 8.0f);
+    float blend = glm::clamp(noise * 0.5f + 0.5f - cracks * 0.3f + voronoi * 0.2f, 0.0f, 1.0f);
+    return glm::mix(dark, light, blend);
+}
+
+glm::vec3 woodColor(glm::vec2 uv, float noise, float detail) {
+    glm::vec3 lightWood(0.6f, 0.45f, 0.25f);
+    glm::vec3 darkWood(0.3f, 0.2f, 0.1f);
+    // Wood grain pattern - elongated in one direction
+    float grain = std::sin(uv.y * 50.0f + noise * 8.0f) * 0.5f + 0.5f;
+    float rings = std::sin((uv.x + uv.y) * 20.0f + noise * 5.0f) * 0.3f;
+    float blend = glm::clamp(grain * 0.6f + noise * 0.3f + rings + 0.2f, 0.0f, 1.0f);
+    return glm::mix(darkWood, lightWood, blend);
+}
+
+glm::vec3 metalColor(glm::vec2 uv, float noise, float detail) {
+    glm::vec3 light(0.75f, 0.75f, 0.8f);
+    glm::vec3 dark(0.5f, 0.5f, 0.55f);
+    // Brushed metal pattern - subtle directional scratches
+    float scratches = std::sin(uv.x * 100.0f + noise * 3.0f) * 0.1f;
+    float blend = glm::clamp(noise * 0.3f + 0.5f + scratches + detail * 0.1f, 0.0f, 1.0f);
+    return glm::mix(dark, light, blend);
+}
+
+glm::vec3 fabricColor(glm::vec2 uv, float noise, float detail, const glm::vec3& baseColor) {
+    glm::vec3 light = baseColor * 1.2f;
+    glm::vec3 dark = baseColor * 0.7f;
+    // Woven pattern
+    float warp = std::sin(uv.x * 80.0f) * 0.5f + 0.5f;
+    float weft = std::sin(uv.y * 80.0f) * 0.5f + 0.5f;
+    float weave = warp * weft * 0.5f + (1.0f - warp) * (1.0f - weft) * 0.5f;
+    float blend = glm::clamp(weave + noise * 0.3f + detail * 0.15f, 0.0f, 1.0f);
+    return glm::clamp(glm::mix(dark, light, blend), 0.0f, 1.0f);
+}
+
+glm::vec3 groundColor(glm::vec2 uv, float noise, float detail) {
+    glm::vec3 light(0.65f, 0.55f, 0.4f);
+    glm::vec3 dark(0.35f, 0.28f, 0.18f);
+    float pebbles = worley(uv, 12.0f);
+    float blend = glm::clamp(noise * 0.5f + 0.5f + pebbles * 0.3f, 0.0f, 1.0f);
+    return glm::mix(dark, light, blend);
+}
+
+glm::vec3 grassColor(glm::vec2 uv, float noise, float detail) {
+    glm::vec3 lightGreen(0.35f, 0.55f, 0.2f);
+    glm::vec3 darkGreen(0.15f, 0.35f, 0.1f);
+    float blend = glm::clamp(noise * 0.5f + 0.5f + detail * 0.3f, 0.0f, 1.0f);
+    return glm::mix(darkGreen, lightGreen, blend);
+}
+
+glm::vec3 sandColor(glm::vec2 uv, float noise, float detail) {
+    glm::vec3 lightSand(0.93f, 0.87f, 0.7f);
+    glm::vec3 darkSand(0.75f, 0.65f, 0.45f);
+    float blend = glm::clamp(noise * 0.5f + 0.5f + detail * 0.2f, 0.0f, 1.0f);
+    return glm::mix(darkSand, lightSand, blend);
+}
+
+glm::vec3 concreteColor(glm::vec2 uv, float noise, float detail) {
+    glm::vec3 light(0.7f, 0.68f, 0.65f);
+    glm::vec3 dark(0.45f, 0.43f, 0.4f);
+    float spots = worley(uv, 15.0f);
+    float blend = glm::clamp(noise * 0.4f + 0.5f + spots * 0.2f + detail * 0.1f, 0.0f, 1.0f);
+    return glm::mix(dark, light, blend);
+}
+
+glm::vec3 brickColor(glm::vec2 uv, float noise, float detail) {
+    glm::vec3 lightBrick(0.7f, 0.35f, 0.25f);
+    glm::vec3 darkBrick(0.45f, 0.2f, 0.15f);
+    glm::vec3 mortar(0.75f, 0.72f, 0.68f);
+
+    // Brick pattern with offset rows
+    float brickWidth = 0.25f;
+    float brickHeight = 0.125f;
+    float mortarWidth = 0.02f;
+
+    float row = std::floor(uv.y / brickHeight);
+    float offset = std::fmod(row, 2.0f) * 0.5f * brickWidth;
+    float brickX = std::fmod(uv.x + offset, brickWidth);
+    float brickY = std::fmod(uv.y, brickHeight);
+
+    // Check if in mortar
+    if (brickX < mortarWidth || brickY < mortarWidth) {
+        return mortar + glm::vec3(noise * 0.1f);
+    }
+
+    float blend = glm::clamp(noise * 0.5f + 0.5f + detail * 0.2f, 0.0f, 1.0f);
+    return glm::mix(darkBrick, lightBrick, blend);
+}
+
+glm::vec3 leatherColor(glm::vec2 uv, float noise, float detail, const glm::vec3& baseColor) {
+    glm::vec3 light = baseColor * 1.15f;
+    glm::vec3 dark = baseColor * 0.75f;
+    // Leather grain pattern
+    float grain = worley(uv, 25.0f);
+    float blend = glm::clamp(noise * 0.4f + 0.5f + grain * 0.3f, 0.0f, 1.0f);
+    return glm::clamp(glm::mix(dark, light, blend), 0.0f, 1.0f);
+}
+
+glm::vec3 marbleColor(glm::vec2 uv, float noise, float detail) {
+    glm::vec3 white(0.95f, 0.93f, 0.9f);
+    glm::vec3 gray(0.6f, 0.58f, 0.55f);
+    glm::vec3 dark(0.3f, 0.28f, 0.25f);
+
+    // Marble veins
+    float veins = std::sin(uv.x * 10.0f + noise * 8.0f + turbulence(uv * 3.0f, 4) * 4.0f);
+    veins = std::pow(std::abs(veins), 0.4f);
+
+    float blend = glm::clamp(noise * 0.3f + 0.6f + detail * 0.1f, 0.0f, 1.0f);
+    glm::vec3 base = glm::mix(gray, white, blend);
+    return glm::mix(base, dark, veins * 0.4f);
+}
+
+glm::vec3 plasticColor(glm::vec2 uv, float noise, float detail, const glm::vec3& baseColor) {
+    // Plastic is mostly uniform with very subtle variation
+    return baseColor + glm::vec3((noise - 0.5f) * 0.05f);
+}
+
+// Get material-specific color based on material type
+glm::vec3 getMaterialColor(const std::string& materialType, glm::vec2 uv,
+                           float noise, float detail, const glm::vec4& baseColor) {
+    if (materialType == "stone" || materialType == "rock") {
+        return stoneColor(uv, noise, detail);
+    } else if (materialType == "wood" || materialType == "bark") {
+        return woodColor(uv, noise, detail);
+    } else if (materialType == "metal" || materialType == "steel" || materialType == "iron") {
+        return metalColor(uv, noise, detail);
+    } else if (materialType == "fabric" || materialType == "cloth") {
+        return fabricColor(uv, noise, detail, glm::vec3(baseColor));
+    } else if (materialType == "leather") {
+        return leatherColor(uv, noise, detail, glm::vec3(baseColor));
+    } else if (materialType == "ground" || materialType == "dirt" || materialType == "soil") {
+        return groundColor(uv, noise, detail);
+    } else if (materialType == "grass") {
+        return grassColor(uv, noise, detail);
+    } else if (materialType == "sand") {
+        return sandColor(uv, noise, detail);
+    } else if (materialType == "concrete") {
+        return concreteColor(uv, noise, detail);
+    } else if (materialType == "brick") {
+        return brickColor(uv, noise, detail);
+    } else if (materialType == "marble") {
+        return marbleColor(uv, noise, detail);
+    } else if (materialType == "plastic") {
+        return plasticColor(uv, noise, detail, glm::vec3(baseColor));
+    } else {
+        // Default: use base color with noise variation
+        glm::vec3 color(baseColor);
+        float variation = noise * 0.5f + 0.5f;
+        return color * (0.8f + variation * 0.4f);
+    }
 }
 
 bool checkSbsrenderAvailable() {
@@ -555,34 +699,29 @@ bool renderWithSbsrender(const RenderConfig& config) {
 // Procedural Texture Generators
 // ============================================================================
 
-// Generate basecolor texture with natural color variation
+// Generate basecolor texture using material-specific color function
 void generateBasecolorTexture(const std::string& path, int resolution,
-                               const glm::vec4& baseColor) {
+                               const MaterialParameters& params) {
     std::vector<unsigned char> imageData(resolution * resolution * 4);
-    float scale = 8.0f;  // Controls pattern scale
+    float scale = params.patternScale;
 
     for (int y = 0; y < resolution; y++) {
         for (int x = 0; x < resolution; x++) {
-            float u = static_cast<float>(x) / resolution;
-            float v = static_cast<float>(y) / resolution;
+            glm::vec2 uv(static_cast<float>(x) / resolution,
+                         static_cast<float>(y) / resolution);
+            glm::vec2 noisePos = uv * scale;
 
             // Multi-octave noise for natural variation
-            float noise1 = fbm(u * scale, v * scale, 6, 0.5f, 2.0f);
-            float noise2 = fbm(u * scale * 2.0f + 100.0f, v * scale * 2.0f, 4, 0.5f, 2.0f);
-            float noise3 = voronoiNoise(u * scale * 0.5f, v * scale * 0.5f, 0.8f);
+            float noise = fbm(noisePos, params.patternOctaves);
+            float detail = turbulence(noisePos * 2.0f, 3);
 
-            // Combine noises for rich variation
-            float variation = noise1 * 0.5f + noise2 * 0.3f + noise3 * 0.2f;
-
-            // Apply variation to base color (subtle color shifts)
-            float r = baseColor.r + (variation - 0.5f) * 0.3f;
-            float g = baseColor.g + (variation - 0.5f) * 0.25f;
-            float b = baseColor.b + (variation - 0.5f) * 0.2f;
+            // Use material-specific color function
+            glm::vec3 color = getMaterialColor(params.materialType, uv, noise, detail, params.baseColor);
 
             int idx = (y * resolution + x) * 4;
-            imageData[idx + 0] = static_cast<unsigned char>(glm::clamp(r * 255.0f, 0.0f, 255.0f));
-            imageData[idx + 1] = static_cast<unsigned char>(glm::clamp(g * 255.0f, 0.0f, 255.0f));
-            imageData[idx + 2] = static_cast<unsigned char>(glm::clamp(b * 255.0f, 0.0f, 255.0f));
+            imageData[idx + 0] = static_cast<unsigned char>(glm::clamp(color.r * 255.0f, 0.0f, 255.0f));
+            imageData[idx + 1] = static_cast<unsigned char>(glm::clamp(color.g * 255.0f, 0.0f, 255.0f));
+            imageData[idx + 2] = static_cast<unsigned char>(glm::clamp(color.b * 255.0f, 0.0f, 255.0f));
             imageData[idx + 3] = 255;
         }
     }
@@ -598,21 +737,42 @@ void generateBasecolorTexture(const std::string& path, int resolution,
 }
 
 // Generate normal map from height data using Sobel filter
-void generateNormalTexture(const std::string& path, int resolution) {
+void generateNormalTexture(const std::string& path, int resolution,
+                            const MaterialParameters& params) {
     std::vector<unsigned char> imageData(resolution * resolution * 4);
     std::vector<float> heightData(resolution * resolution);
-    float scale = 8.0f;
-    float normalStrength = 2.0f;  // Controls bump intensity
+    float scale = params.patternScale;
+    float normalStrength = params.normalIntensity * 2.0f;  // Controls bump intensity
 
-    // First generate height data
+    // First generate height data using material-appropriate noise
     for (int y = 0; y < resolution; y++) {
         for (int x = 0; x < resolution; x++) {
-            float u = static_cast<float>(x) / resolution;
-            float v = static_cast<float>(y) / resolution;
+            glm::vec2 uv(static_cast<float>(x) / resolution,
+                         static_cast<float>(y) / resolution);
+            glm::vec2 noisePos = uv * scale;
 
-            // Multi-scale noise for height
-            float height = fbm(u * scale, v * scale, 6, 0.5f, 2.0f);
-            height += voronoiNoise(u * scale * 0.5f, v * scale * 0.5f, 0.8f) * 0.3f;
+            // Multi-scale noise for height - material-specific patterns
+            float height = fbm(noisePos, params.patternOctaves);
+
+            // Add material-specific height detail
+            if (params.materialType == "stone" || params.materialType == "rock" ||
+                params.materialType == "brick" || params.materialType == "concrete") {
+                // Add voronoi cracks for stone-like materials
+                height += worley(uv, scale * 0.5f) * 0.3f;
+                height += turbulence(noisePos * 2.0f, 3) * 0.2f;
+            } else if (params.materialType == "wood" || params.materialType == "bark") {
+                // Wood grain pattern
+                height += std::sin(uv.y * 50.0f + height * 8.0f) * 0.15f;
+            } else if (params.materialType == "fabric" || params.materialType == "cloth") {
+                // Woven texture
+                float warp = std::sin(uv.x * 80.0f) * 0.5f + 0.5f;
+                float weft = std::sin(uv.y * 80.0f) * 0.5f + 0.5f;
+                height += (warp * weft) * 0.2f;
+            } else if (params.materialType == "ground" || params.materialType == "grass" ||
+                       params.materialType == "sand") {
+                // Natural terrain noise
+                height += worley(uv, scale * 0.8f) * 0.15f;
+            }
 
             heightData[y * resolution + x] = height;
         }
@@ -660,25 +820,47 @@ void generateNormalTexture(const std::string& path, int resolution) {
     }
 }
 
-// Generate roughness map with variation
+// Generate roughness map with material-specific variation
 void generateRoughnessTexture(const std::string& path, int resolution,
-                               float baseRoughness) {
+                               const MaterialParameters& params) {
     std::vector<unsigned char> imageData(resolution * resolution * 4);
-    float scale = 8.0f;
+    float scale = params.patternScale;
+    float baseRoughness = params.roughness;
 
     for (int y = 0; y < resolution; y++) {
         for (int x = 0; x < resolution; x++) {
-            float u = static_cast<float>(x) / resolution;
-            float v = static_cast<float>(y) / resolution;
+            glm::vec2 uv(static_cast<float>(x) / resolution,
+                         static_cast<float>(y) / resolution);
+            glm::vec2 noisePos = uv * scale;
 
             // Combine different noise types for interesting roughness variation
-            float noise1 = fbm(u * scale, v * scale, 4, 0.5f, 2.0f);
-            float noise2 = voronoiNoise(u * scale * 0.7f, v * scale * 0.7f, 0.9f);
+            float noise = fbm(noisePos, 4);
+            float voronoi = worley(uv, scale * 0.7f);
 
-            // Mix and apply to base roughness
-            float variation = noise1 * 0.7f + noise2 * 0.3f;
-            float roughness = baseRoughness + (variation - 0.5f) * 0.4f;
-            roughness = glm::clamp(roughness, 0.0f, 1.0f);
+            // Material-specific roughness variation
+            float variation;
+            if (params.materialType == "metal" || params.materialType == "steel") {
+                // Metal: mostly uniform with slight scratches
+                variation = noise * 0.15f;
+            } else if (params.materialType == "stone" || params.materialType == "rock") {
+                // Stone: larger variation with cracks being rougher
+                float cracks = turbulence(noisePos * 2.0f, 3);
+                variation = noise * 0.25f + cracks * 0.15f + voronoi * 0.1f;
+            } else if (params.materialType == "wood") {
+                // Wood: grain affects roughness
+                float grain = std::sin(uv.y * 50.0f + noise * 8.0f) * 0.5f + 0.5f;
+                variation = noise * 0.15f + grain * 0.1f;
+            } else if (params.materialType == "fabric" || params.materialType == "cloth") {
+                // Fabric: woven pattern affects roughness
+                float warp = std::sin(uv.x * 80.0f) * 0.5f + 0.5f;
+                float weft = std::sin(uv.y * 80.0f) * 0.5f + 0.5f;
+                variation = noise * 0.1f + (warp * weft) * 0.15f;
+            } else {
+                // Default variation
+                variation = noise * 0.5f + voronoi * 0.2f - 0.35f;
+            }
+
+            float roughness = glm::clamp(baseRoughness + variation, 0.0f, 1.0f);
 
             unsigned char val = static_cast<unsigned char>(roughness * 255.0f);
             int idx = (y * resolution + x) * 4;
@@ -699,24 +881,69 @@ void generateRoughnessTexture(const std::string& path, int resolution,
     }
 }
 
-// Generate height/displacement map
-void generateHeightTexture(const std::string& path, int resolution) {
+// Generate height/displacement map with material-specific detail
+void generateHeightTexture(const std::string& path, int resolution,
+                            const MaterialParameters& params) {
     std::vector<unsigned char> imageData(resolution * resolution * 4);
-    float scale = 8.0f;
+    float scale = params.patternScale;
+    float heightScale = params.heightScale;
 
     for (int y = 0; y < resolution; y++) {
         for (int x = 0; x < resolution; x++) {
-            float u = static_cast<float>(x) / resolution;
-            float v = static_cast<float>(y) / resolution;
+            glm::vec2 uv(static_cast<float>(x) / resolution,
+                         static_cast<float>(y) / resolution);
+            glm::vec2 noisePos = uv * scale;
 
-            // Rich multi-octave noise for height detail
-            float height = fbm(u * scale, v * scale, 6, 0.5f, 2.0f);
+            // Base height from multi-octave noise
+            float height = fbm(noisePos, params.patternOctaves);
 
-            // Add voronoi for stone-like cracks/cells
-            float voronoi = voronoiNoise(u * scale * 0.5f, v * scale * 0.5f, 0.8f);
-            height = height * 0.7f + voronoi * 0.3f;
+            // Material-specific height detail
+            if (params.materialType == "stone" || params.materialType == "rock" ||
+                params.materialType == "concrete") {
+                // Add voronoi for cracks/cells
+                float voronoi = worley(uv, scale * 0.5f);
+                float cracks = turbulence(noisePos * 2.0f, 3);
+                height = height * 0.5f + voronoi * 0.3f + cracks * 0.2f;
+            } else if (params.materialType == "brick") {
+                // Brick pattern height
+                float brickWidth = 0.25f;
+                float brickHeight = 0.125f;
+                float mortarWidth = 0.02f;
+                float row = std::floor(uv.y / brickHeight);
+                float offset = std::fmod(row, 2.0f) * 0.5f * brickWidth;
+                float brickX = std::fmod(uv.x + offset, brickWidth);
+                float brickY = std::fmod(uv.y, brickHeight);
 
-            unsigned char val = static_cast<unsigned char>(glm::clamp(height * 255.0f, 0.0f, 255.0f));
+                // Mortar is lower
+                if (brickX < mortarWidth || brickY < mortarWidth) {
+                    height = 0.3f + height * 0.1f;
+                } else {
+                    height = 0.6f + height * 0.3f;
+                }
+            } else if (params.materialType == "wood" || params.materialType == "bark") {
+                // Wood grain height
+                float grain = std::sin(uv.y * 50.0f + height * 8.0f) * 0.5f + 0.5f;
+                height = height * 0.6f + grain * 0.4f;
+            } else if (params.materialType == "fabric" || params.materialType == "cloth") {
+                // Woven pattern height
+                float warp = std::sin(uv.x * 80.0f) * 0.5f + 0.5f;
+                float weft = std::sin(uv.y * 80.0f) * 0.5f + 0.5f;
+                float weave = warp * weft;
+                height = 0.5f + height * 0.2f + weave * 0.3f;
+            } else if (params.materialType == "metal" || params.materialType == "steel") {
+                // Metal: mostly flat with subtle scratches
+                float scratches = std::sin(uv.x * 100.0f + height * 3.0f) * 0.05f;
+                height = 0.5f + height * 0.1f + scratches;
+            } else {
+                // Default: just add some voronoi detail
+                float voronoi = worley(uv, scale * 0.6f);
+                height = height * 0.7f + voronoi * 0.3f;
+            }
+
+            // Apply height scale and normalize to [0, 1]
+            height = glm::clamp((height * 0.5f + 0.5f) * heightScale + (1.0f - heightScale) * 0.5f, 0.0f, 1.0f);
+
+            unsigned char val = static_cast<unsigned char>(height * 255.0f);
             int idx = (y * resolution + x) * 4;
             imageData[idx + 0] = val;
             imageData[idx + 1] = val;
@@ -735,22 +962,61 @@ void generateHeightTexture(const std::string& path, int resolution) {
     }
 }
 
-// Generate ambient occlusion map
-void generateAOTexture(const std::string& path, int resolution) {
+// Generate ambient occlusion map with material-specific patterns
+void generateAOTexture(const std::string& path, int resolution,
+                        const MaterialParameters& params) {
     std::vector<unsigned char> imageData(resolution * resolution * 4);
-    float scale = 8.0f;
+    float scale = params.patternScale;
 
     for (int y = 0; y < resolution; y++) {
         for (int x = 0; x < resolution; x++) {
-            float u = static_cast<float>(x) / resolution;
-            float v = static_cast<float>(y) / resolution;
+            glm::vec2 uv(static_cast<float>(x) / resolution,
+                         static_cast<float>(y) / resolution);
+            glm::vec2 noisePos = uv * scale;
 
-            // AO is darkening in crevices - use inverted voronoi for crack darkness
-            float voronoi = voronoiNoise(u * scale * 0.5f, v * scale * 0.5f, 0.8f);
-            float noise = fbm(u * scale, v * scale, 4, 0.5f, 2.0f);
+            float noise = fbm(noisePos, 4);
+            float voronoi = worley(uv, scale * 0.5f);
 
-            // AO is mostly white with dark in crevices
-            float ao = 0.7f + voronoi * 0.2f + noise * 0.1f;
+            // Material-specific AO
+            float ao;
+            if (params.materialType == "brick") {
+                // Brick: mortar areas are occluded
+                float brickWidth = 0.25f;
+                float brickHeight = 0.125f;
+                float mortarWidth = 0.02f;
+                float row = std::floor(uv.y / brickHeight);
+                float offset = std::fmod(row, 2.0f) * 0.5f * brickWidth;
+                float brickX = std::fmod(uv.x + offset, brickWidth);
+                float brickY = std::fmod(uv.y, brickHeight);
+
+                if (brickX < mortarWidth || brickY < mortarWidth) {
+                    ao = 0.6f + noise * 0.1f;  // Mortar is darker
+                } else {
+                    ao = 0.85f + noise * 0.1f;  // Brick surface is lighter
+                }
+            } else if (params.materialType == "stone" || params.materialType == "rock" ||
+                       params.materialType == "concrete") {
+                // Stone: cracks/crevices are occluded
+                float cracks = turbulence(noisePos * 2.0f, 3);
+                ao = 0.7f + voronoi * 0.2f - cracks * 0.15f + noise * 0.1f;
+            } else if (params.materialType == "wood") {
+                // Wood: grain affects AO slightly
+                float grain = std::sin(uv.y * 50.0f + noise * 8.0f) * 0.5f + 0.5f;
+                ao = 0.8f + noise * 0.1f + grain * 0.05f;
+            } else if (params.materialType == "fabric" || params.materialType == "cloth") {
+                // Fabric: woven pattern creates subtle AO
+                float warp = std::sin(uv.x * 80.0f) * 0.5f + 0.5f;
+                float weft = std::sin(uv.y * 80.0f) * 0.5f + 0.5f;
+                float weave = warp * weft;
+                ao = 0.85f + weave * 0.1f + noise * 0.05f;
+            } else if (params.materialType == "metal" || params.materialType == "steel") {
+                // Metal: mostly uniform AO
+                ao = 0.9f + noise * 0.05f;
+            } else {
+                // Default: use voronoi for crevice darkness
+                ao = 0.7f + voronoi * 0.2f + noise * 0.1f;
+            }
+
             ao = glm::clamp(ao, 0.0f, 1.0f);
 
             unsigned char val = static_cast<unsigned char>(ao * 255.0f);
@@ -772,20 +1038,36 @@ void generateAOTexture(const std::string& path, int resolution) {
     }
 }
 
-// Generate metallic map (mostly non-metallic with some spots)
+// Generate metallic map with material-specific patterns
 void generateMetallicTexture(const std::string& path, int resolution,
-                              float baseMetallic) {
+                              const MaterialParameters& params) {
     std::vector<unsigned char> imageData(resolution * resolution * 4);
-    float scale = 8.0f;
+    float scale = params.patternScale;
+    float baseMetallic = params.metallic;
 
     for (int y = 0; y < resolution; y++) {
         for (int x = 0; x < resolution; x++) {
-            float u = static_cast<float>(x) / resolution;
-            float v = static_cast<float>(y) / resolution;
+            glm::vec2 uv(static_cast<float>(x) / resolution,
+                         static_cast<float>(y) / resolution);
+            glm::vec2 noisePos = uv * scale * 2.0f;
 
-            // For most materials, metallic is uniform or has subtle variation
-            float noise = fbm(u * scale * 2.0f, v * scale * 2.0f, 3, 0.5f, 2.0f);
-            float metallic = baseMetallic + (noise - 0.5f) * 0.1f;
+            float noise = fbm(noisePos, 3);
+
+            // Material-specific metallic variation
+            float metallic;
+            if (params.materialType == "metal" || params.materialType == "steel" ||
+                params.materialType == "iron") {
+                // Metal: high metallic with subtle variation
+                metallic = baseMetallic + noise * 0.1f;
+            } else if (params.materialType == "stone" || params.materialType == "rock") {
+                // Stone: occasional metallic flecks (like mica/pyrite)
+                float spots = worley(uv, 20.0f);
+                metallic = spots < 0.15f ? 0.3f + noise * 0.2f : 0.0f;
+            } else {
+                // Most materials: uniform non-metallic with subtle variation
+                metallic = baseMetallic + (noise - 0.5f) * 0.05f;
+            }
+
             metallic = glm::clamp(metallic, 0.0f, 1.0f);
 
             unsigned char val = static_cast<unsigned char>(metallic * 255.0f);
@@ -839,29 +1121,23 @@ void generateEmissiveTexture(const std::string& path, int resolution,
 
 bool generateFallbackTextures(const RenderConfig& config) {
     SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                "sbsrender not available, generating procedural textures for: %s",
+                "sbsrender not available, generating material-specific procedural textures for: %s",
                 config.inputPath.c_str());
 
     // Try to parse the .sbsar archive for material parameters
     MaterialParameters matParams = parseSbsarArchive(config.inputPath);
 
-    // Initialize noise permutation table with seed from input filename
-    unsigned int seed = 0;
-    for (char c : config.outputName) {
-        seed = seed * 31 + static_cast<unsigned int>(c);
-    }
-    initPermutationTable(seed);
-
     // Create output directory if it doesn't exist
     fs::create_directories(config.outputDir);
 
-    // Use extracted parameters or defaults
-    glm::vec4 baseColor = matParams.parsed ? matParams.baseColor :
-                          STANDARD_OUTPUTS[0].fallbackColor;
-    float roughness = matParams.parsed ? matParams.roughness : 0.5f;
-    float metallic = matParams.parsed ? matParams.metallic : 0.0f;
-    glm::vec4 emissiveColor = matParams.parsed ? matParams.emissiveColor :
-                              STANDARD_OUTPUTS[6].fallbackColor;
+    // Log material type detection
+    if (matParams.parsed) {
+        SDL_Log("Material type detected: %s",
+                matParams.materialType.empty() ? "generic" : matParams.materialType.c_str());
+        SDL_Log("Base parameters - color: (%.2f, %.2f, %.2f), roughness: %.2f, metallic: %.2f",
+                matParams.baseColor.r, matParams.baseColor.g, matParams.baseColor.b,
+                matParams.roughness, matParams.metallic);
+    }
 
     // Generate specialized procedural textures for each output type
     for (const auto& output : STANDARD_OUTPUTS) {
@@ -869,28 +1145,28 @@ bool generateFallbackTextures(const RenderConfig& config) {
                                  "_" + output.name + ".png";
 
         if (output.name == "basecolor") {
-            generateBasecolorTexture(outputPath, config.resolution, baseColor);
+            generateBasecolorTexture(outputPath, config.resolution, matParams);
         } else if (output.name == "normal") {
-            generateNormalTexture(outputPath, config.resolution);
+            generateNormalTexture(outputPath, config.resolution, matParams);
         } else if (output.name == "roughness") {
-            generateRoughnessTexture(outputPath, config.resolution, roughness);
+            generateRoughnessTexture(outputPath, config.resolution, matParams);
         } else if (output.name == "metallic") {
-            generateMetallicTexture(outputPath, config.resolution, metallic);
+            generateMetallicTexture(outputPath, config.resolution, matParams);
         } else if (output.name == "height") {
-            generateHeightTexture(outputPath, config.resolution);
+            generateHeightTexture(outputPath, config.resolution, matParams);
         } else if (output.name == "ambientocclusion") {
-            generateAOTexture(outputPath, config.resolution);
+            generateAOTexture(outputPath, config.resolution, matParams);
         } else if (output.name == "emissive") {
-            generateEmissiveTexture(outputPath, config.resolution, emissiveColor);
+            generateEmissiveTexture(outputPath, config.resolution, matParams.emissiveColor);
         }
     }
 
-    // Write a manifest file indicating procedural textures were generated
+    // Write a manifest file with full material information
     std::string manifestPath = config.outputDir + "/" + config.outputName + "_manifest.txt";
     std::ofstream manifest(manifestPath);
     if (manifest.is_open()) {
-        manifest << "# SBSAR Procedural Textures\n";
-        manifest << "# Generated with procedural noise (Perlin + Voronoi FBM)\n";
+        manifest << "# SBSAR Material-Specific Procedural Textures\n";
+        manifest << "# Generated using GLM simplex noise with material-aware patterns\n";
         if (matParams.parsed) {
             manifest << "# Parameters extracted from SBSAR archive\n";
             if (!matParams.materialName.empty()) {
@@ -901,13 +1177,18 @@ bool generateFallbackTextures(const RenderConfig& config) {
             }
         }
         manifest << "# Install Adobe Substance Automation Toolkit for exact .sbsar rendering\n";
+        manifest << "# Download: https://www.adobe.com/products/substance3d-designer.html\n";
+        manifest << "#\n";
         manifest << "source=" << config.inputPath << "\n";
         manifest << "resolution=" << config.resolution << "\n";
         manifest << "fallback=true\n";
         manifest << "parsed=" << (matParams.parsed ? "true" : "false") << "\n";
-        manifest << "basecolor=" << baseColor.r << "," << baseColor.g << "," << baseColor.b << "\n";
-        manifest << "roughness=" << roughness << "\n";
-        manifest << "metallic=" << metallic << "\n";
+        manifest << "materialType=" << matParams.materialType << "\n";
+        manifest << "basecolor=" << matParams.baseColor.r << "," << matParams.baseColor.g << "," << matParams.baseColor.b << "\n";
+        manifest << "roughness=" << matParams.roughness << "\n";
+        manifest << "metallic=" << matParams.metallic << "\n";
+        manifest << "patternScale=" << matParams.patternScale << "\n";
+        manifest << "patternOctaves=" << matParams.patternOctaves << "\n";
         for (const auto& output : STANDARD_OUTPUTS) {
             manifest << "output=" << config.outputName << "_" << output.name << ".png\n";
         }
