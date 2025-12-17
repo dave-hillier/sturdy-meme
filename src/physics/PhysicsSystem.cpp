@@ -562,6 +562,101 @@ PhysicsBodyID PhysicsWorld::createTerrainHeightfield(const float* samples, const
     return body->GetID().GetIndexAndSequenceNumber();
 }
 
+PhysicsBodyID PhysicsWorld::createTerrainHeightfieldAtPosition(const float* samples, uint32_t sampleCount,
+                                                                 float tileWorldSize, float heightScale,
+                                                                 const glm::vec3& worldPosition) {
+    if (!samples || sampleCount < 2) {
+        SDL_Log("Invalid heightfield parameters");
+        return INVALID_BODY_ID;
+    }
+
+    JPH::BodyInterface& bodyInterface = physicsSystem->GetBodyInterface();
+
+    // Jolt HeightFieldShape requires power-of-2 + 1 sample counts (e.g., 65, 129, 257, 513)
+    auto isPowerOf2Plus1 = [](uint32_t n) { return n >= 3 && ((n - 1) & (n - 2)) == 0; };
+
+    uint32_t joltSampleCount = sampleCount;
+    if (!isPowerOf2Plus1(sampleCount)) {
+        uint32_t n = sampleCount - 1;
+        n |= n >> 1;
+        n |= n >> 2;
+        n |= n >> 4;
+        n |= n >> 8;
+        n |= n >> 16;
+        joltSampleCount = n + 2;
+    }
+
+    // Resample height data with bilinear interpolation
+    std::vector<float> joltSamples(joltSampleCount * joltSampleCount);
+    float srcScale = static_cast<float>(sampleCount - 1) / static_cast<float>(joltSampleCount - 1);
+
+    for (uint32_t dstY = 0; dstY < joltSampleCount; dstY++) {
+        for (uint32_t dstX = 0; dstX < joltSampleCount; dstX++) {
+            float srcX = dstX * srcScale;
+            float srcY = dstY * srcScale;
+
+            uint32_t x0 = static_cast<uint32_t>(srcX);
+            uint32_t y0 = static_cast<uint32_t>(srcY);
+            uint32_t x1 = std::min(x0 + 1, sampleCount - 1);
+            uint32_t y1 = std::min(y0 + 1, sampleCount - 1);
+            float tx = srcX - x0;
+            float ty = srcY - y0;
+
+            float h00 = samples[y0 * sampleCount + x0];
+            float h10 = samples[y0 * sampleCount + x1];
+            float h01 = samples[y1 * sampleCount + x0];
+            float h11 = samples[y1 * sampleCount + x1];
+
+            float h0 = h00 * (1.0f - tx) + h10 * tx;
+            float h1 = h01 * (1.0f - tx) + h11 * tx;
+            float h = h0 * (1.0f - ty) + h1 * ty;
+
+            // Convert normalized height to world space
+            joltSamples[dstY * joltSampleCount + dstX] = TerrainHeight::toWorld(h, heightScale);
+        }
+    }
+
+    // XZ spacing between samples
+    float xzScale = tileWorldSize / (joltSampleCount - 1);
+
+    // Offset centers the shape on the body (shape goes from -half to +half)
+    JPH::HeightFieldShapeSettings heightFieldSettings(
+        joltSamples.data(),
+        JPH::Vec3(-tileWorldSize * 0.5f, 0.0f, -tileWorldSize * 0.5f),
+        JPH::Vec3(xzScale, 1.0f, xzScale),
+        joltSampleCount
+    );
+
+    heightFieldSettings.mMaterials.push_back(new JPH::PhysicsMaterial());
+
+    JPH::ShapeSettings::ShapeResult shapeResult = heightFieldSettings.Create();
+    if (!shapeResult.IsValid()) {
+        SDL_Log("Failed to create heightfield shape: %s", shapeResult.GetError().c_str());
+        return INVALID_BODY_ID;
+    }
+
+    // Create body at the specified world position
+    JPH::BodyCreationSettings bodySettings(
+        shapeResult.Get(),
+        JPH::RVec3(worldPosition.x, worldPosition.y, worldPosition.z),
+        JPH::Quat::sIdentity(),
+        JPH::EMotionType::Static,
+        PhysicsLayers::NON_MOVING
+    );
+    bodySettings.mFriction = 0.8f;
+    bodySettings.mRestitution = 0.0f;
+
+    JPH::Body* body = bodyInterface.CreateBody(bodySettings);
+    if (!body) {
+        SDL_Log("Failed to create heightfield body");
+        return INVALID_BODY_ID;
+    }
+
+    bodyInterface.AddBody(body->GetID(), JPH::EActivation::DontActivate);
+
+    return body->GetID().GetIndexAndSequenceNumber();
+}
+
 PhysicsBodyID PhysicsWorld::createBox(const glm::vec3& position, const glm::vec3& halfExtents,
                                        float mass, float friction, float restitution) {
     JPH::BodyInterface& bodyInterface = physicsSystem->GetBodyInterface();
