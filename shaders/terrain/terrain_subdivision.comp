@@ -27,8 +27,27 @@ layout(push_constant) uniform PushConstants {
     uint reserved;         // Padding (was useCompactBuffer, now unused)
 };
 
-// Height map sampler
+// Height map sampler (global coarse LOD - fallback for distant terrain)
 layout(binding = BINDING_TERRAIN_HEIGHT_MAP) uniform sampler2D heightMap;
+
+// LOD tile array (high-res tiles near camera)
+layout(binding = BINDING_TERRAIN_TILE_ARRAY) uniform sampler2DArray heightMapTiles;
+
+// Tile info buffer - world bounds for each active tile
+struct TileInfo {
+    vec4 worldBounds;    // xy = min corner, zw = max corner
+    vec4 uvScaleOffset;  // xy = scale, zw = offset
+};
+layout(std430, binding = BINDING_TERRAIN_TILE_INFO) readonly buffer TileInfoBuffer {
+    uint activeTileCount;
+    uint padding1;
+    uint padding2;
+    uint padding3;
+    TileInfo tiles[];
+};
+
+// Include tile cache common after defining prerequisites
+#include "../tile_cache_common.glsl"
 
 // Uniform buffer with camera and terrain parameters
 layout(std140, binding = BINDING_TERRAIN_UBO) uniform TerrainUniforms {
@@ -56,9 +75,12 @@ layout(std140, binding = BINDING_TERRAIN_UBO) uniform TerrainUniforms {
 #define MERGE_THRESHOLD (lodParams.y)
 #define MIN_DEPTH (int(lodParams.z))
 
-// Sample terrain height at UV coordinate (uses shared terrain_height_common.glsl)
+// Sample terrain height at UV coordinate with tile cache support
+// Uses high-res tiles near camera, falls back to global heightmap for distant terrain
 float sampleHeight(vec2 uv) {
-    return sampleTerrainHeight(heightMap, uv, HEIGHT_SCALE);
+    vec2 worldXZ = (uv - 0.5) * TERRAIN_SIZE;
+    return sampleHeightWithTileCache(heightMap, heightMapTiles, uv, worldXZ,
+                                     HEIGHT_SCALE, activeTileCount);
 }
 
 // Estimate curvature using Laplacian approximation (second derivative)

@@ -117,6 +117,10 @@ bool TerrainTileCache::init(const InitInfo& info) {
         vkFreeCommandBuffers(device, commandPool, 1, &cmd);
     }
 
+    // Initialize tile info buffer with activeTileCount = 0
+    // This ensures shaders don't read garbage if they run before first updateActiveTiles()
+    updateTileInfoBuffer();
+
     SDL_Log("TerrainTileCache initialized: %s", cacheDirectory.c_str());
     SDL_Log("  Terrain size: %.0fm, Tile resolution: %u, LOD levels: %u",
             terrainSize, tileResolution, numLODLevels);

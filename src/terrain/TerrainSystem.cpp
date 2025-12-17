@@ -229,6 +229,8 @@ bool TerrainSystem::createComputeDescriptorSetLayout() {
         .addStorageBuffer(VK_SHADER_STAGE_COMPUTE_BIT)           // 6: cull indirect dispatch
         .addBinding(14, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT)  // shadow visible indices
         .addBinding(15, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT)  // shadow indirect draw
+        .addBinding(19, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT)  // tile array
+        .addBinding(20, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT)          // tile info
         .build();
 
     return computeDescriptorSetLayout != VK_NULL_HANDLE;
@@ -284,19 +286,39 @@ bool TerrainSystem::createDescriptorSets() {
 
     // Update compute descriptor sets
     for (uint32_t i = 0; i < framesInFlight; i++) {
-        DescriptorManager::SetWriter(device, computeDescriptorSets[i])
-            .writeBuffer(0, (*cbt)->getBuffer(), 0, (*cbt)->getBufferSize(), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(1, (*buffers)->getIndirectDispatchBuffer(), 0, sizeof(uint32_t) * 3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(2, (*buffers)->getIndirectDrawBuffer(), 0, sizeof(uint32_t) * 4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeImage(3, (*heightMap)->getView(), (*heightMap)->getSampler())
-            .writeBuffer(4, (*buffers)->getUniformBuffer(i), 0, sizeof(TerrainUniforms))
-            .writeBuffer(5, (*buffers)->getVisibleIndicesBuffer(), 0, sizeof(uint32_t) * (1 + MAX_VISIBLE_TRIANGLES), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(6, (*buffers)->getCullIndirectDispatchBuffer(), 0, sizeof(uint32_t) * 3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(14, (*buffers)->getShadowVisibleBuffer(), 0, sizeof(uint32_t) * (1 + MAX_VISIBLE_TRIANGLES), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(15, (*buffers)->getShadowIndirectDrawBuffer(), 0, sizeof(uint32_t) * 5, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .update();
-    }
+        // Get tile cache resources if available
+        VkImageView tileArrayView = VK_NULL_HANDLE;
+        VkSampler tileSampler = VK_NULL_HANDLE;
+        VkBuffer tileInfoBuffer = VK_NULL_HANDLE;
+        if (tileCache) {
+            tileArrayView = (*tileCache)->getTileArrayView();
+            tileSampler = (*tileCache)->getSampler();
+            tileInfoBuffer = (*tileCache)->getTileInfoBuffer();
+        }
 
+        // Build writer with all bindings - use separate statements to avoid
+        // copy/reference issues with the fluent API pattern
+        DescriptorManager::SetWriter writer(device, computeDescriptorSets[i]);
+        writer.writeBuffer(0, (*cbt)->getBuffer(), 0, (*cbt)->getBufferSize(), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        writer.writeBuffer(1, (*buffers)->getIndirectDispatchBuffer(), 0, sizeof(uint32_t) * 3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        writer.writeBuffer(2, (*buffers)->getIndirectDrawBuffer(), 0, sizeof(uint32_t) * 4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        writer.writeImage(3, (*heightMap)->getView(), (*heightMap)->getSampler());
+        writer.writeBuffer(4, (*buffers)->getUniformBuffer(i), 0, sizeof(TerrainUniforms));
+        writer.writeBuffer(5, (*buffers)->getVisibleIndicesBuffer(), 0, sizeof(uint32_t) * (1 + MAX_VISIBLE_TRIANGLES), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        writer.writeBuffer(6, (*buffers)->getCullIndirectDispatchBuffer(), 0, sizeof(uint32_t) * 3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        writer.writeBuffer(14, (*buffers)->getShadowVisibleBuffer(), 0, sizeof(uint32_t) * (1 + MAX_VISIBLE_TRIANGLES), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        writer.writeBuffer(15, (*buffers)->getShadowIndirectDrawBuffer(), 0, sizeof(uint32_t) * 5, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+
+        // LOD tile cache bindings (19 and 20) - for subdivision to use high-res terrain data
+        if (tileArrayView != VK_NULL_HANDLE && tileSampler != VK_NULL_HANDLE) {
+            writer.writeImage(19, tileArrayView, tileSampler);
+        }
+        if (tileInfoBuffer != VK_NULL_HANDLE) {
+            writer.writeBuffer(20, tileInfoBuffer, 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        }
+
+        writer.update();
+    }
     return true;
 }
 
