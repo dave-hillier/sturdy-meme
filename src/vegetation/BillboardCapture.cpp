@@ -300,13 +300,13 @@ bool BillboardCapture::createUniformBuffer() {
 
 bool BillboardCapture::createPipeline() {
     // Load shaders - use tree.vert but tree_billboard.frag (no fog)
-    VkShaderModule vertModule = loadShaderModule(device, shaderPath + "/tree.vert.spv");
-    VkShaderModule fragModule = loadShaderModule(device, shaderPath + "/tree_billboard.frag.spv");
+    auto vertModule = loadShaderModule(device, shaderPath + "/tree.vert.spv");
+    auto fragModule = loadShaderModule(device, shaderPath + "/tree_billboard.frag.spv");
 
     if (!vertModule || !fragModule) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load billboard shaders");
-        if (vertModule) vkDestroyShaderModule(device, vertModule, nullptr);
-        if (fragModule) vkDestroyShaderModule(device, fragModule, nullptr);
+        if (vertModule) vkDestroyShaderModule(device, *vertModule, nullptr);
+        if (fragModule) vkDestroyShaderModule(device, *fragModule, nullptr);
         return false;
     }
 
@@ -314,12 +314,12 @@ bool BillboardCapture::createPipeline() {
     std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages{};
     shaderStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     shaderStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-    shaderStages[0].module = vertModule;
+    shaderStages[0].module = *vertModule;
     shaderStages[0].pName = "main";
 
     shaderStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     shaderStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    shaderStages[1].module = fragModule;
+    shaderStages[1].module = *fragModule;
     shaderStages[1].pName = "main";
 
     // Vertex input
@@ -390,8 +390,8 @@ bool BillboardCapture::createPipeline() {
 
     if (!ManagedPipelineLayout::create(device, pipelineLayoutInfo, pipelineLayout_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create billboard pipeline layout");
-        vkDestroyShaderModule(device, vertModule, nullptr);
-        vkDestroyShaderModule(device, fragModule, nullptr);
+        vkDestroyShaderModule(device, *vertModule, nullptr);
+        vkDestroyShaderModule(device, *fragModule, nullptr);
         return false;
     }
 
@@ -414,8 +414,8 @@ bool BillboardCapture::createPipeline() {
 
     if (!ManagedPipeline::createGraphics(device, VK_NULL_HANDLE, pipelineInfo, solidPipeline_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create billboard solid pipeline");
-        vkDestroyShaderModule(device, vertModule, nullptr);
-        vkDestroyShaderModule(device, fragModule, nullptr);
+        vkDestroyShaderModule(device, *vertModule, nullptr);
+        vkDestroyShaderModule(device, *fragModule, nullptr);
         return false;
     }
 
@@ -431,13 +431,13 @@ bool BillboardCapture::createPipeline() {
 
     if (!ManagedPipeline::createGraphics(device, VK_NULL_HANDLE, pipelineInfo, leafPipeline_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create billboard leaf pipeline");
-        vkDestroyShaderModule(device, vertModule, nullptr);
-        vkDestroyShaderModule(device, fragModule, nullptr);
+        vkDestroyShaderModule(device, *vertModule, nullptr);
+        vkDestroyShaderModule(device, *fragModule, nullptr);
         return false;
     }
 
-    vkDestroyShaderModule(device, vertModule, nullptr);
-    vkDestroyShaderModule(device, fragModule, nullptr);
+    vkDestroyShaderModule(device, *vertModule, nullptr);
+    vkDestroyShaderModule(device, *fragModule, nullptr);
 
     return true;
 }

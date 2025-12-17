@@ -260,7 +260,7 @@ bool WaterDisplacement::createComputePipeline() {
 
     // Load compute shader
     auto shaderModule = ShaderLoader::loadShaderModule(device, "shaders/water_displacement.comp.spv");
-    if (shaderModule == VK_NULL_HANDLE) {
+    if (!shaderModule) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "WaterDisplacement: Compute shader not found, using fallback");
         // Create a simple pass-through pipeline or return true to allow system to work without splashes
         return true;
@@ -269,7 +269,7 @@ bool WaterDisplacement::createComputePipeline() {
     VkPipelineShaderStageCreateInfo shaderStage{};
     shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    shaderStage.module = shaderModule;
+    shaderStage.module = *shaderModule;
     shaderStage.pName = "main";
 
     VkComputePipelineCreateInfo pipelineInfo{};
@@ -280,7 +280,7 @@ bool WaterDisplacement::createComputePipeline() {
     VkPipeline rawPipeline = VK_NULL_HANDLE;
     VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &rawPipeline);
 
-    vkDestroyShaderModule(device, shaderModule, nullptr);
+    vkDestroyShaderModule(device, *shaderModule, nullptr);
 
     if (result == VK_SUCCESS) {
         computePipeline = ManagedPipeline::fromRaw(device, rawPipeline);

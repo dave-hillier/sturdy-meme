@@ -289,34 +289,34 @@ bool GraphicsPipelineFactory::loadShaderModules(std::vector<VkPipelineShaderStag
     auto vertCode = ShaderLoader::readFile(vertShaderPath);
     auto fragCode = ShaderLoader::readFile(fragShaderPath);
 
-    if (vertCode.empty() || fragCode.empty()) {
+    if (!vertCode || !fragCode) {
         SDL_Log("GraphicsPipelineFactory: Failed to read shader files");
         return false;
     }
 
-    VkShaderModule vertModule = ShaderLoader::createShaderModule(device, vertCode);
-    VkShaderModule fragModule = ShaderLoader::createShaderModule(device, fragCode);
+    auto vertModule = ShaderLoader::createShaderModule(device, *vertCode);
+    auto fragModule = ShaderLoader::createShaderModule(device, *fragCode);
 
-    if (vertModule == VK_NULL_HANDLE || fragModule == VK_NULL_HANDLE) {
+    if (!vertModule || !fragModule) {
         SDL_Log("GraphicsPipelineFactory: Failed to create shader modules");
-        if (vertModule != VK_NULL_HANDLE) vkDestroyShaderModule(device, vertModule, nullptr);
-        if (fragModule != VK_NULL_HANDLE) vkDestroyShaderModule(device, fragModule, nullptr);
+        if (vertModule) vkDestroyShaderModule(device, *vertModule, nullptr);
+        if (fragModule) vkDestroyShaderModule(device, *fragModule, nullptr);
         return false;
     }
 
-    shaderModules.push_back(vertModule);
-    shaderModules.push_back(fragModule);
+    shaderModules.push_back(*vertModule);
+    shaderModules.push_back(*fragModule);
 
     VkPipelineShaderStageCreateInfo vertStage{};
     vertStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     vertStage.stage = VK_SHADER_STAGE_VERTEX_BIT;
-    vertStage.module = vertModule;
+    vertStage.module = *vertModule;
     vertStage.pName = "main";
 
     VkPipelineShaderStageCreateInfo fragStage{};
     fragStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     fragStage.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    fragStage.module = fragModule;
+    fragStage.module = *fragModule;
     fragStage.pName = "main";
 
     stages.push_back(vertStage);

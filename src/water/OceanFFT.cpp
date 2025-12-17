@@ -362,8 +362,8 @@ bool OceanFFT::createComputePipelines() {
         }
         spectrumPipelineLayout = ManagedPipelineLayout::fromRaw(device, rawPipelineLayout);
 
-        VkShaderModule shaderModule = ShaderLoader::loadShaderModule(device, shaderPath + "/ocean_spectrum.comp.spv");
-        if (shaderModule == VK_NULL_HANDLE) {
+        auto shaderModule = ShaderLoader::loadShaderModule(device, shaderPath + "/ocean_spectrum.comp.spv");
+        if (!shaderModule) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to load ocean_spectrum.comp.spv");
             return false;
         }
@@ -372,12 +372,12 @@ bool OceanFFT::createComputePipelines() {
         pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
         pipelineInfo.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
         pipelineInfo.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        pipelineInfo.stage.module = shaderModule;
+        pipelineInfo.stage.module = *shaderModule;
         pipelineInfo.stage.pName = "main";
         pipelineInfo.layout = spectrumPipelineLayout.get();
 
         bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, spectrumPipeline);
-        vkDestroyShaderModule(device, shaderModule, nullptr);
+        vkDestroyShaderModule(device, *shaderModule, nullptr);
 
         if (!success) {
             return false;
@@ -412,8 +412,8 @@ bool OceanFFT::createComputePipelines() {
         }
         timeEvolutionPipelineLayout = ManagedPipelineLayout::fromRaw(device, rawPipelineLayout);
 
-        VkShaderModule shaderModule = ShaderLoader::loadShaderModule(device, shaderPath + "/ocean_time_evolution.comp.spv");
-        if (shaderModule == VK_NULL_HANDLE) {
+        auto shaderModule = ShaderLoader::loadShaderModule(device, shaderPath + "/ocean_time_evolution.comp.spv");
+        if (!shaderModule) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to load ocean_time_evolution.comp.spv");
             return false;
         }
@@ -422,12 +422,12 @@ bool OceanFFT::createComputePipelines() {
         pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
         pipelineInfo.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
         pipelineInfo.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        pipelineInfo.stage.module = shaderModule;
+        pipelineInfo.stage.module = *shaderModule;
         pipelineInfo.stage.pName = "main";
         pipelineInfo.layout = timeEvolutionPipelineLayout.get();
 
         bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, timeEvolutionPipeline);
-        vkDestroyShaderModule(device, shaderModule, nullptr);
+        vkDestroyShaderModule(device, *shaderModule, nullptr);
 
         if (!success) {
             return false;
@@ -459,8 +459,8 @@ bool OceanFFT::createComputePipelines() {
         }
         fftPipelineLayout = ManagedPipelineLayout::fromRaw(device, rawPipelineLayout);
 
-        VkShaderModule shaderModule = ShaderLoader::loadShaderModule(device, shaderPath + "/ocean_fft.comp.spv");
-        if (shaderModule == VK_NULL_HANDLE) {
+        auto shaderModule = ShaderLoader::loadShaderModule(device, shaderPath + "/ocean_fft.comp.spv");
+        if (!shaderModule) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to load ocean_fft.comp.spv");
             return false;
         }
@@ -469,12 +469,12 @@ bool OceanFFT::createComputePipelines() {
         pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
         pipelineInfo.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
         pipelineInfo.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        pipelineInfo.stage.module = shaderModule;
+        pipelineInfo.stage.module = *shaderModule;
         pipelineInfo.stage.pName = "main";
         pipelineInfo.layout = fftPipelineLayout.get();
 
         bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, fftPipeline);
-        vkDestroyShaderModule(device, shaderModule, nullptr);
+        vkDestroyShaderModule(device, *shaderModule, nullptr);
 
         if (!success) {
             return false;
@@ -510,8 +510,8 @@ bool OceanFFT::createComputePipelines() {
         }
         displacementPipelineLayout = ManagedPipelineLayout::fromRaw(device, rawPipelineLayout);
 
-        VkShaderModule shaderModule = ShaderLoader::loadShaderModule(device, shaderPath + "/ocean_displacement.comp.spv");
-        if (shaderModule == VK_NULL_HANDLE) {
+        auto shaderModule = ShaderLoader::loadShaderModule(device, shaderPath + "/ocean_displacement.comp.spv");
+        if (!shaderModule) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to load ocean_displacement.comp.spv");
             return false;
         }
@@ -520,12 +520,12 @@ bool OceanFFT::createComputePipelines() {
         pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
         pipelineInfo.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
         pipelineInfo.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        pipelineInfo.stage.module = shaderModule;
+        pipelineInfo.stage.module = *shaderModule;
         pipelineInfo.stage.pName = "main";
         pipelineInfo.layout = displacementPipelineLayout.get();
 
         bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, displacementPipeline);
-        vkDestroyShaderModule(device, shaderModule, nullptr);
+        vkDestroyShaderModule(device, *shaderModule, nullptr);
 
         if (!success) {
             return false;

@@ -268,8 +268,8 @@ bool SSRSystem::createComputePipeline() {
 
     // Load compute shader
     std::string shaderFile = shaderPath + "/ssr.comp.spv";
-    VkShaderModule shaderModule = ShaderLoader::loadShaderModule(device, shaderFile);
-    if (shaderModule == VK_NULL_HANDLE) {
+    auto shaderModule = ShaderLoader::loadShaderModule(device, shaderFile);
+    if (!shaderModule) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load SSR compute shader: %s", shaderFile.c_str());
         return false;
     }
@@ -277,7 +277,7 @@ bool SSRSystem::createComputePipeline() {
     VkPipelineShaderStageCreateInfo stageInfo{};
     stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stageInfo.module = shaderModule;
+    stageInfo.module = *shaderModule;
     stageInfo.pName = "main";
 
     VkComputePipelineCreateInfo pipelineInfo{};
@@ -286,7 +286,7 @@ bool SSRSystem::createComputePipeline() {
     pipelineInfo.layout = computePipelineLayout.get();
 
     bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, computePipeline);
-    vkDestroyShaderModule(device, shaderModule, nullptr);
+    vkDestroyShaderModule(device, *shaderModule, nullptr);
 
     if (!success) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SSR compute pipeline");
@@ -327,8 +327,8 @@ bool SSRSystem::createBlurPipeline() {
 
     // Load blur compute shader
     std::string shaderFile = shaderPath + "/ssr_blur.comp.spv";
-    VkShaderModule shaderModule = ShaderLoader::loadShaderModule(device, shaderFile);
-    if (shaderModule == VK_NULL_HANDLE) {
+    auto shaderModule = ShaderLoader::loadShaderModule(device, shaderFile);
+    if (!shaderModule) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load SSR blur compute shader: %s", shaderFile.c_str());
         return false;
     }
@@ -336,7 +336,7 @@ bool SSRSystem::createBlurPipeline() {
     VkPipelineShaderStageCreateInfo stageInfo{};
     stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stageInfo.module = shaderModule;
+    stageInfo.module = *shaderModule;
     stageInfo.pName = "main";
 
     VkComputePipelineCreateInfo pipelineInfo{};
@@ -345,7 +345,7 @@ bool SSRSystem::createBlurPipeline() {
     pipelineInfo.layout = blurPipelineLayout.get();
 
     bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, blurPipeline);
-    vkDestroyShaderModule(device, shaderModule, nullptr);
+    vkDestroyShaderModule(device, *shaderModule, nullptr);
 
     if (!success) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SSR blur compute pipeline");

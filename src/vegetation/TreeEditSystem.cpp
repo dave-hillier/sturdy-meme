@@ -221,13 +221,13 @@ void TreeEditSystem::updateTextureBindings() {
 
 bool TreeEditSystem::createPipelines() {
     // Load shaders
-    VkShaderModule vertModule = loadShaderModule(device, shaderPath + "/tree.vert.spv");
-    VkShaderModule fragModule = loadShaderModule(device, shaderPath + "/tree.frag.spv");
+    auto vertModule = loadShaderModule(device, shaderPath + "/tree.vert.spv");
+    auto fragModule = loadShaderModule(device, shaderPath + "/tree.frag.spv");
 
     if (!vertModule || !fragModule) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load tree shaders");
-        if (vertModule) vkDestroyShaderModule(device, vertModule, nullptr);
-        if (fragModule) vkDestroyShaderModule(device, fragModule, nullptr);
+        if (vertModule) vkDestroyShaderModule(device, *vertModule, nullptr);
+        if (fragModule) vkDestroyShaderModule(device, *fragModule, nullptr);
         return false;
     }
 
@@ -235,12 +235,12 @@ bool TreeEditSystem::createPipelines() {
     std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages{};
     shaderStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     shaderStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-    shaderStages[0].module = vertModule;
+    shaderStages[0].module = *vertModule;
     shaderStages[0].pName = "main";
 
     shaderStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     shaderStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    shaderStages[1].module = fragModule;
+    shaderStages[1].module = *fragModule;
     shaderStages[1].pName = "main";
 
     // Vertex input - use Vertex format from Mesh
@@ -318,8 +318,8 @@ bool TreeEditSystem::createPipelines() {
 
     if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create tree pipeline layout");
-        vkDestroyShaderModule(device, vertModule, nullptr);
-        vkDestroyShaderModule(device, fragModule, nullptr);
+        vkDestroyShaderModule(device, *vertModule, nullptr);
+        vkDestroyShaderModule(device, *fragModule, nullptr);
         return false;
     }
 
@@ -342,8 +342,8 @@ bool TreeEditSystem::createPipelines() {
 
     if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &solidPipeline) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create tree solid pipeline");
-        vkDestroyShaderModule(device, vertModule, nullptr);
-        vkDestroyShaderModule(device, fragModule, nullptr);
+        vkDestroyShaderModule(device, *vertModule, nullptr);
+        vkDestroyShaderModule(device, *fragModule, nullptr);
         return false;
     }
 
@@ -353,8 +353,8 @@ bool TreeEditSystem::createPipelines() {
 
     if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &wireframePipeline) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create tree wireframe pipeline");
-        vkDestroyShaderModule(device, vertModule, nullptr);
-        vkDestroyShaderModule(device, fragModule, nullptr);
+        vkDestroyShaderModule(device, *vertModule, nullptr);
+        vkDestroyShaderModule(device, *fragModule, nullptr);
         return false;
     }
 
@@ -373,13 +373,13 @@ bool TreeEditSystem::createPipelines() {
 
     if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &leafPipeline) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create tree leaf pipeline");
-        vkDestroyShaderModule(device, vertModule, nullptr);
-        vkDestroyShaderModule(device, fragModule, nullptr);
+        vkDestroyShaderModule(device, *vertModule, nullptr);
+        vkDestroyShaderModule(device, *fragModule, nullptr);
         return false;
     }
 
-    vkDestroyShaderModule(device, vertModule, nullptr);
-    vkDestroyShaderModule(device, fragModule, nullptr);
+    vkDestroyShaderModule(device, *vertModule, nullptr);
+    vkDestroyShaderModule(device, *fragModule, nullptr);
 
     return true;
 }

@@ -52,8 +52,8 @@ PipelineBuilder& PipelineBuilder::addPushConstantRange(VkShaderStageFlags stageF
 }
 
 PipelineBuilder& PipelineBuilder::addShaderStage(const std::string& path, VkShaderStageFlagBits stage, const char* entry) {
-    VkShaderModule module = ShaderLoader::loadShaderModule(device, path);
-    if (module == VK_NULL_HANDLE) {
+    auto module = ShaderLoader::loadShaderModule(device, path);
+    if (!module) {
         SDL_Log("Failed to load shader module at %s", path.c_str());
         return *this;
     }
@@ -61,11 +61,11 @@ PipelineBuilder& PipelineBuilder::addShaderStage(const std::string& path, VkShad
     VkPipelineShaderStageCreateInfo stageInfo{};
     stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stageInfo.stage = stage;
-    stageInfo.module = module;
+    stageInfo.module = *module;
     stageInfo.pName = entry;
 
     shaderStages.push_back(stageInfo);
-    shaderModules.push_back(module);
+    shaderModules.push_back(*module);
     return *this;
 }
 

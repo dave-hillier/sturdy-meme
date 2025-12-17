@@ -227,17 +227,21 @@ bool GrassSystem::createDisplacementPipeline() {
 
     // Load compute shader
     auto compShaderCode = ShaderLoader::readFile(getShaderPath() + "/grass_displacement.comp.spv");
-    if (compShaderCode.empty()) {
+    if (!compShaderCode) {
         SDL_Log("Failed to load displacement compute shader");
         return false;
     }
 
-    VkShaderModule compShaderModule = ShaderLoader::createShaderModule(getDevice(), compShaderCode);
+    auto compShaderModule = ShaderLoader::createShaderModule(getDevice(), *compShaderCode);
+    if (!compShaderModule) {
+        SDL_Log("Failed to create displacement compute shader module");
+        return false;
+    }
 
     VkPipelineShaderStageCreateInfo shaderStageInfo{};
     shaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     shaderStageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    shaderStageInfo.module = compShaderModule;
+    shaderStageInfo.module = *compShaderModule;
     shaderStageInfo.pName = "main";
 
     VkComputePipelineCreateInfo pipelineInfo{};
@@ -247,7 +251,7 @@ bool GrassSystem::createDisplacementPipeline() {
 
     bool success = ManagedPipeline::createCompute(getDevice(), VK_NULL_HANDLE, pipelineInfo, displacementPipeline_);
 
-    vkDestroyShaderModule(getDevice(), compShaderModule, nullptr);
+    vkDestroyShaderModule(getDevice(), *compShaderModule, nullptr);
 
     if (!success) {
         SDL_Log("Failed to create displacement compute pipeline");

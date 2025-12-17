@@ -276,13 +276,13 @@ bool FroxelSystem::createDescriptorSets() {
 bool FroxelSystem::createFroxelUpdatePipeline() {
     std::string shaderFile = shaderPath + "/froxel_update.comp.spv";
     auto shaderCode = ShaderLoader::readFile(shaderFile);
-    if (shaderCode.empty()) {
+    if (!shaderCode) {
         SDL_Log("Failed to load froxel update shader: %s", shaderFile.c_str());
         return false;
     }
 
-    VkShaderModule shaderModule = ShaderLoader::createShaderModule(device, shaderCode);
-    if (shaderModule == VK_NULL_HANDLE) {
+    auto shaderModule = ShaderLoader::createShaderModule(device, *shaderCode);
+    if (!shaderModule) {
         SDL_Log("Failed to create froxel update shader module");
         return false;
     }
@@ -290,7 +290,7 @@ bool FroxelSystem::createFroxelUpdatePipeline() {
     VkPipelineShaderStageCreateInfo stageInfo{};
     stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stageInfo.module = shaderModule;
+    stageInfo.module = *shaderModule;
     stageInfo.pName = "main";
 
     VkComputePipelineCreateInfo pipelineInfo{};
@@ -299,7 +299,7 @@ bool FroxelSystem::createFroxelUpdatePipeline() {
     pipelineInfo.layout = froxelPipelineLayout.get();
 
     bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, froxelUpdatePipeline);
-    vkDestroyShaderModule(device, shaderModule, nullptr);
+    vkDestroyShaderModule(device, *shaderModule, nullptr);
 
     if (!success) {
         SDL_Log("Failed to create froxel update pipeline");
@@ -312,13 +312,13 @@ bool FroxelSystem::createFroxelUpdatePipeline() {
 bool FroxelSystem::createIntegrationPipeline() {
     std::string shaderFile = shaderPath + "/froxel_integrate.comp.spv";
     auto shaderCode = ShaderLoader::readFile(shaderFile);
-    if (shaderCode.empty()) {
+    if (!shaderCode) {
         SDL_Log("Failed to load froxel integration shader: %s", shaderFile.c_str());
         return false;
     }
 
-    VkShaderModule shaderModule = ShaderLoader::createShaderModule(device, shaderCode);
-    if (shaderModule == VK_NULL_HANDLE) {
+    auto shaderModule = ShaderLoader::createShaderModule(device, *shaderCode);
+    if (!shaderModule) {
         SDL_Log("Failed to create froxel integration shader module");
         return false;
     }
@@ -326,7 +326,7 @@ bool FroxelSystem::createIntegrationPipeline() {
     VkPipelineShaderStageCreateInfo stageInfo{};
     stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stageInfo.module = shaderModule;
+    stageInfo.module = *shaderModule;
     stageInfo.pName = "main";
 
     VkComputePipelineCreateInfo pipelineInfo{};
@@ -335,7 +335,7 @@ bool FroxelSystem::createIntegrationPipeline() {
     pipelineInfo.layout = froxelPipelineLayout.get();
 
     bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, integrationPipeline);
-    vkDestroyShaderModule(device, shaderModule, nullptr);
+    vkDestroyShaderModule(device, *shaderModule, nullptr);
 
     if (!success) {
         SDL_Log("Failed to create froxel integration pipeline");

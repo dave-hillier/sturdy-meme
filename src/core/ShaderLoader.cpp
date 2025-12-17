@@ -4,12 +4,12 @@
 
 namespace ShaderLoader {
 
-std::vector<char> readFile(const std::string& filename) {
+std::optional<std::vector<char>> readFile(const std::string& filename) {
     std::ifstream file(filename, std::ios::ate | std::ios::binary);
 
     if (!file.is_open()) {
         SDL_Log("Failed to open file: %s", filename.c_str());
-        return {};
+        return std::nullopt;
     }
 
     size_t fileSize = static_cast<size_t>(file.tellg());
@@ -22,7 +22,7 @@ std::vector<char> readFile(const std::string& filename) {
     return buffer;
 }
 
-VkShaderModule createShaderModule(VkDevice device, const std::vector<char>& code) {
+std::optional<VkShaderModule> createShaderModule(VkDevice device, const std::vector<char>& code) {
     VkShaderModuleCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     createInfo.codeSize = code.size();
@@ -30,18 +30,18 @@ VkShaderModule createShaderModule(VkDevice device, const std::vector<char>& code
 
     VkShaderModule shaderModule;
     if (vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
-        return VK_NULL_HANDLE;
+        return std::nullopt;
     }
 
     return shaderModule;
 }
 
-VkShaderModule loadShaderModule(VkDevice device, const std::string& path) {
+std::optional<VkShaderModule> loadShaderModule(VkDevice device, const std::string& path) {
     auto code = readFile(path);
-    if (code.empty()) {
-        return VK_NULL_HANDLE;
+    if (!code) {
+        return std::nullopt;
     }
-    return createShaderModule(device, code);
+    return createShaderModule(device, *code);
 }
 
 }

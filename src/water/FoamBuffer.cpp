@@ -221,7 +221,7 @@ bool FoamBuffer::createComputePipeline() {
     // Load compute shader
     std::string shaderFile = shaderPath + "/foam_blur.comp.spv";
     auto shaderModule = ShaderLoader::loadShaderModule(device, shaderFile);
-    if (shaderModule == VK_NULL_HANDLE) {
+    if (!shaderModule) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "FoamBuffer: Compute shader not found at %s", shaderFile.c_str());
         return true;  // Allow system to work without temporal foam
     }
@@ -229,7 +229,7 @@ bool FoamBuffer::createComputePipeline() {
     VkPipelineShaderStageCreateInfo shaderStage{};
     shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    shaderStage.module = shaderModule;
+    shaderStage.module = *shaderModule;
     shaderStage.pName = "main";
 
     VkComputePipelineCreateInfo pipelineInfo{};
@@ -240,7 +240,7 @@ bool FoamBuffer::createComputePipeline() {
     VkPipeline rawPipeline = VK_NULL_HANDLE;
     VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &rawPipeline);
 
-    vkDestroyShaderModule(device, shaderModule, nullptr);
+    vkDestroyShaderModule(device, *shaderModule, nullptr);
 
     if (result == VK_SUCCESS) {
         computePipeline = ManagedPipeline::fromRaw(device, rawPipeline);

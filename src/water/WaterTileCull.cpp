@@ -190,8 +190,8 @@ bool WaterTileCull::createComputePipeline() {
 
     // Load compute shader
     std::string shaderFile = shaderPath + "/water_tile_cull.comp.spv";
-    VkShaderModule shaderModule = ShaderLoader::loadShaderModule(device, shaderFile);
-    if (shaderModule == VK_NULL_HANDLE) {
+    auto shaderModule = ShaderLoader::loadShaderModule(device, shaderFile);
+    if (!shaderModule) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load tile cull compute shader: %s", shaderFile.c_str());
         return false;
     }
@@ -199,7 +199,7 @@ bool WaterTileCull::createComputePipeline() {
     VkPipelineShaderStageCreateInfo stageInfo{};
     stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stageInfo.module = shaderModule;
+    stageInfo.module = *shaderModule;
     stageInfo.pName = "main";
 
     VkComputePipelineCreateInfo pipelineInfo{};
@@ -210,7 +210,7 @@ bool WaterTileCull::createComputePipeline() {
     VkPipeline rawPipeline = VK_NULL_HANDLE;
     VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1,
                                                 &pipelineInfo, nullptr, &rawPipeline);
-    vkDestroyShaderModule(device, shaderModule, nullptr);
+    vkDestroyShaderModule(device, *shaderModule, nullptr);
 
     if (result != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create tile cull compute pipeline");

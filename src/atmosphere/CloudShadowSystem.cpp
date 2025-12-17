@@ -197,13 +197,13 @@ bool CloudShadowSystem::createDescriptorSets() {
 bool CloudShadowSystem::createComputePipeline() {
     // Load compute shader
     auto shaderCode = ShaderLoader::readFile(shaderPath + "/cloud_shadow.comp.spv");
-    if (shaderCode.empty()) {
+    if (!shaderCode) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load cloud shadow compute shader");
         return false;
     }
 
-    VkShaderModule shaderModule = ShaderLoader::createShaderModule(device, shaderCode);
-    if (shaderModule == VK_NULL_HANDLE) {
+    auto shaderModule = ShaderLoader::createShaderModule(device, *shaderCode);
+    if (!shaderModule) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create cloud shadow shader module");
         return false;
     }
@@ -211,11 +211,11 @@ bool CloudShadowSystem::createComputePipeline() {
     VkPipelineShaderStageCreateInfo stageInfo{};
     stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stageInfo.module = shaderModule;
+    stageInfo.module = *shaderModule;
     stageInfo.pName = "main";
 
     if (!DescriptorManager::createManagedPipelineLayout(device, descriptorSetLayout.get(), pipelineLayout)) {
-        vkDestroyShaderModule(device, shaderModule, nullptr);
+        vkDestroyShaderModule(device, *shaderModule, nullptr);
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create cloud shadow pipeline layout");
         return false;
     }
@@ -226,12 +226,12 @@ bool CloudShadowSystem::createComputePipeline() {
     pipelineInfo.layout = pipelineLayout.get();
 
     if (!ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, computePipeline)) {
-        vkDestroyShaderModule(device, shaderModule, nullptr);
+        vkDestroyShaderModule(device, *shaderModule, nullptr);
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create cloud shadow compute pipeline");
         return false;
     }
 
-    vkDestroyShaderModule(device, shaderModule, nullptr);
+    vkDestroyShaderModule(device, *shaderModule, nullptr);
     return true;
 }
 

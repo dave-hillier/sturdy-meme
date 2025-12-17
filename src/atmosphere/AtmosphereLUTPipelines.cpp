@@ -7,12 +7,16 @@ bool AtmosphereLUTSystem::createComputePipelines() {
     // Create transmittance pipeline
     {
         std::string shaderFile = shaderPath + "/transmittance_lut.comp.spv";
-        std::vector<char> shaderCode = ShaderLoader::readFile(shaderFile);
+        auto shaderCode = ShaderLoader::readFile(shaderFile);
+        if (!shaderCode) {
+            SDL_Log("Failed to read transmittance shader file");
+            return false;
+        }
 
         VkShaderModuleCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-        createInfo.codeSize = shaderCode.size();
-        createInfo.pCode = reinterpret_cast<const uint32_t*>(shaderCode.data());
+        createInfo.codeSize = shaderCode->size();
+        createInfo.pCode = reinterpret_cast<const uint32_t*>(shaderCode->data());
 
         VkShaderModule shaderModule;
         if (vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
@@ -43,12 +47,16 @@ bool AtmosphereLUTSystem::createComputePipelines() {
     // Create multi-scatter pipeline
     {
         std::string shaderFile = shaderPath + "/multiscatter_lut.comp.spv";
-        std::vector<char> shaderCode = ShaderLoader::readFile(shaderFile);
+        auto shaderCode = ShaderLoader::readFile(shaderFile);
+        if (!shaderCode) {
+            SDL_Log("Failed to read multi-scatter shader file");
+            return false;
+        }
 
         VkShaderModuleCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-        createInfo.codeSize = shaderCode.size();
-        createInfo.pCode = reinterpret_cast<const uint32_t*>(shaderCode.data());
+        createInfo.codeSize = shaderCode->size();
+        createInfo.pCode = reinterpret_cast<const uint32_t*>(shaderCode->data());
 
         VkShaderModule shaderModule;
         if (vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
@@ -79,12 +87,16 @@ bool AtmosphereLUTSystem::createComputePipelines() {
     // Create sky-view pipeline
     {
         std::string shaderFile = shaderPath + "/skyview_lut.comp.spv";
-        std::vector<char> shaderCode = ShaderLoader::readFile(shaderFile);
+        auto shaderCode = ShaderLoader::readFile(shaderFile);
+        if (!shaderCode) {
+            SDL_Log("Failed to read sky-view shader file");
+            return false;
+        }
 
         VkShaderModuleCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-        createInfo.codeSize = shaderCode.size();
-        createInfo.pCode = reinterpret_cast<const uint32_t*>(shaderCode.data());
+        createInfo.codeSize = shaderCode->size();
+        createInfo.pCode = reinterpret_cast<const uint32_t*>(shaderCode->data());
 
         VkShaderModule shaderModule;
         if (vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
@@ -115,12 +127,16 @@ bool AtmosphereLUTSystem::createComputePipelines() {
     // Create irradiance pipeline
     {
         std::string shaderFile = shaderPath + "/irradiance_lut.comp.spv";
-        std::vector<char> shaderCode = ShaderLoader::readFile(shaderFile);
+        auto shaderCode = ShaderLoader::readFile(shaderFile);
+        if (!shaderCode) {
+            SDL_Log("Failed to read irradiance shader file");
+            return false;
+        }
 
         VkShaderModuleCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-        createInfo.codeSize = shaderCode.size();
-        createInfo.pCode = reinterpret_cast<const uint32_t*>(shaderCode.data());
+        createInfo.codeSize = shaderCode->size();
+        createInfo.pCode = reinterpret_cast<const uint32_t*>(shaderCode->data());
 
         VkShaderModule shaderModule;
         if (vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
@@ -151,12 +167,16 @@ bool AtmosphereLUTSystem::createComputePipelines() {
     // Create cloud map pipeline
     {
         std::string shaderFile = shaderPath + "/cloudmap_lut.comp.spv";
-        std::vector<char> shaderCode = ShaderLoader::readFile(shaderFile);
+        auto shaderCode = ShaderLoader::readFile(shaderFile);
+        if (!shaderCode) {
+            SDL_Log("Failed to read cloud map shader file");
+            return false;
+        }
 
         VkShaderModuleCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-        createInfo.codeSize = shaderCode.size();
-        createInfo.pCode = reinterpret_cast<const uint32_t*>(shaderCode.data());
+        createInfo.codeSize = shaderCode->size();
+        createInfo.pCode = reinterpret_cast<const uint32_t*>(shaderCode->data());
 
         VkShaderModule shaderModule;
         if (vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {

@@ -381,18 +381,25 @@ bool PostProcessSystem::createCompositePipeline() {
     auto vertShaderCode = ShaderLoader::readFile(shaderPath + "/postprocess.vert.spv");
     auto fragShaderCode = ShaderLoader::readFile(shaderPath + "/postprocess.frag.spv");
 
-    VkShaderModule vertShaderModule = ShaderLoader::createShaderModule(device, vertShaderCode);
-    VkShaderModule fragShaderModule = ShaderLoader::createShaderModule(device, fragShaderCode);
+    if (!vertShaderCode || !fragShaderCode) {
+        SDL_Log("Failed to read post-process shader files");
+        return false;
+    }
 
-    if (vertShaderModule == VK_NULL_HANDLE || fragShaderModule == VK_NULL_HANDLE) {
-        SDL_Log("Failed to load post-process shaders");
+    auto vertShaderModule = ShaderLoader::createShaderModule(device, *vertShaderCode);
+    auto fragShaderModule = ShaderLoader::createShaderModule(device, *fragShaderCode);
+
+    if (!vertShaderModule || !fragShaderModule) {
+        SDL_Log("Failed to create post-process shader modules");
+        if (vertShaderModule) vkDestroyShaderModule(device, *vertShaderModule, nullptr);
+        if (fragShaderModule) vkDestroyShaderModule(device, *fragShaderModule, nullptr);
         return false;
     }
 
     VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
     vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
-    vertShaderStageInfo.module = vertShaderModule;
+    vertShaderStageInfo.module = *vertShaderModule;
     vertShaderStageInfo.pName = "main";
 
     // Specialization constant for god ray sample count
@@ -408,7 +415,7 @@ bool PostProcessSystem::createCompositePipeline() {
     VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
     fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    fragShaderStageInfo.module = fragShaderModule;
+    fragShaderStageInfo.module = *fragShaderModule;
     fragShaderStageInfo.pName = "main";
 
     VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
@@ -472,8 +479,8 @@ bool PostProcessSystem::createCompositePipeline() {
     compositePipelineLayout = DescriptorManager::createPipelineLayout(device, compositeDescriptorSetLayout);
     if (compositePipelineLayout == VK_NULL_HANDLE) {
         SDL_Log("Failed to create composite pipeline layout");
-        vkDestroyShaderModule(device, vertShaderModule, nullptr);
-        vkDestroyShaderModule(device, fragShaderModule, nullptr);
+        vkDestroyShaderModule(device, *vertShaderModule, nullptr);
+        vkDestroyShaderModule(device, *fragShaderModule, nullptr);
         return false;
     }
 
@@ -506,15 +513,15 @@ bool PostProcessSystem::createCompositePipeline() {
 
         if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &compositePipelines[i]) != VK_SUCCESS) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create composite graphics pipeline variant %d", i);
-            vkDestroyShaderModule(device, vertShaderModule, nullptr);
-            vkDestroyShaderModule(device, fragShaderModule, nullptr);
+            vkDestroyShaderModule(device, *vertShaderModule, nullptr);
+            vkDestroyShaderModule(device, *fragShaderModule, nullptr);
             return false;
         }
         SDL_Log("Created post-process pipeline variant %d (god ray samples: %d)", i, sampleCounts[i]);
     }
 
-    vkDestroyShaderModule(device, vertShaderModule, nullptr);
-    vkDestroyShaderModule(device, fragShaderModule, nullptr);
+    vkDestroyShaderModule(device, *vertShaderModule, nullptr);
+    vkDestroyShaderModule(device, *fragShaderModule, nullptr);
 
     return true;
 }
@@ -704,13 +711,13 @@ bool PostProcessSystem::createHistogramPipelines() {
 
         // Load shader
         auto shaderCode = ShaderLoader::readFile(shaderPath + "/histogram_build.comp.spv");
-        if (shaderCode.empty()) {
+        if (!shaderCode) {
             SDL_Log("Failed to load histogram build shader");
             return false;
         }
 
-        VkShaderModule shaderModule = ShaderLoader::createShaderModule(device, shaderCode);
-        if (shaderModule == VK_NULL_HANDLE) {
+        auto shaderModule = ShaderLoader::createShaderModule(device, *shaderCode);
+        if (!shaderModule) {
             SDL_Log("Failed to create histogram build shader module");
             return false;
         }
@@ -718,7 +725,7 @@ bool PostProcessSystem::createHistogramPipelines() {
         VkPipelineShaderStageCreateInfo stageInfo{};
         stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
         stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        stageInfo.module = shaderModule;
+        stageInfo.module = *shaderModule;
         stageInfo.pName = "main";
 
         VkComputePipelineCreateInfo pipelineInfo{};
@@ -727,7 +734,7 @@ bool PostProcessSystem::createHistogramPipelines() {
         pipelineInfo.layout = histogramBuildPipelineLayout;
 
         VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &histogramBuildPipeline);
-        vkDestroyShaderModule(device, shaderModule, nullptr);
+        vkDestroyShaderModule(device, *shaderModule, nullptr);
 
         if (result != VK_SUCCESS) {
             SDL_Log("Failed to create histogram build pipeline");
@@ -759,13 +766,13 @@ bool PostProcessSystem::createHistogramPipelines() {
 
         // Load shader
         auto shaderCode = ShaderLoader::readFile(shaderPath + "/histogram_reduce.comp.spv");
-        if (shaderCode.empty()) {
+        if (!shaderCode) {
             SDL_Log("Failed to load histogram reduce shader");
             return false;
         }
 
-        VkShaderModule shaderModule = ShaderLoader::createShaderModule(device, shaderCode);
-        if (shaderModule == VK_NULL_HANDLE) {
+        auto shaderModule = ShaderLoader::createShaderModule(device, *shaderCode);
+        if (!shaderModule) {
             SDL_Log("Failed to create histogram reduce shader module");
             return false;
         }
@@ -773,7 +780,7 @@ bool PostProcessSystem::createHistogramPipelines() {
         VkPipelineShaderStageCreateInfo stageInfo{};
         stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
         stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        stageInfo.module = shaderModule;
+        stageInfo.module = *shaderModule;
         stageInfo.pName = "main";
 
         VkComputePipelineCreateInfo pipelineInfo{};
@@ -782,7 +789,7 @@ bool PostProcessSystem::createHistogramPipelines() {
         pipelineInfo.layout = histogramReducePipelineLayout;
 
         VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &histogramReducePipeline);
-        vkDestroyShaderModule(device, shaderModule, nullptr);
+        vkDestroyShaderModule(device, *shaderModule, nullptr);
 
         if (result != VK_SUCCESS) {
             SDL_Log("Failed to create histogram reduce pipeline");

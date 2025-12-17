@@ -62,13 +62,13 @@ void DebugLineSystem::shutdown() {
 
 bool DebugLineSystem::createPipeline(VkRenderPass renderPass, const std::string& shaderPath) {
     // Load shaders
-    VkShaderModule vertShader = ShaderLoader::loadShaderModule(device, shaderPath + "/debug_line.vert.spv");
-    VkShaderModule fragShader = ShaderLoader::loadShaderModule(device, shaderPath + "/debug_line.frag.spv");
+    auto vertShader = ShaderLoader::loadShaderModule(device, shaderPath + "/debug_line.vert.spv");
+    auto fragShader = ShaderLoader::loadShaderModule(device, shaderPath + "/debug_line.frag.spv");
 
-    if (vertShader == VK_NULL_HANDLE || fragShader == VK_NULL_HANDLE) {
+    if (!vertShader || !fragShader) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "DebugLineSystem: Failed to load shaders");
-        if (vertShader != VK_NULL_HANDLE) vkDestroyShaderModule(device, vertShader, nullptr);
-        if (fragShader != VK_NULL_HANDLE) vkDestroyShaderModule(device, fragShader, nullptr);
+        if (vertShader) vkDestroyShaderModule(device, *vertShader, nullptr);
+        if (fragShader) vkDestroyShaderModule(device, *fragShader, nullptr);
         return false;
     }
 
@@ -85,8 +85,8 @@ bool DebugLineSystem::createPipeline(VkRenderPass renderPass, const std::string&
 
     if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "DebugLineSystem: Failed to create pipeline layout");
-        vkDestroyShaderModule(device, vertShader, nullptr);
-        vkDestroyShaderModule(device, fragShader, nullptr);
+        vkDestroyShaderModule(device, *vertShader, nullptr);
+        vkDestroyShaderModule(device, *fragShader, nullptr);
         return false;
     }
 
@@ -94,11 +94,11 @@ bool DebugLineSystem::createPipeline(VkRenderPass renderPass, const std::string&
     VkPipelineShaderStageCreateInfo shaderStages[2]{};
     shaderStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     shaderStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-    shaderStages[0].module = vertShader;
+    shaderStages[0].module = *vertShader;
     shaderStages[0].pName = "main";
     shaderStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     shaderStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    shaderStages[1].module = fragShader;
+    shaderStages[1].module = *fragShader;
     shaderStages[1].pName = "main";
 
     // Vertex input
@@ -211,8 +211,8 @@ bool DebugLineSystem::createPipeline(VkRenderPass renderPass, const std::string&
 
     if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &linePipeline) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "DebugLineSystem: Failed to create line pipeline");
-        vkDestroyShaderModule(device, vertShader, nullptr);
-        vkDestroyShaderModule(device, fragShader, nullptr);
+        vkDestroyShaderModule(device, *vertShader, nullptr);
+        vkDestroyShaderModule(device, *fragShader, nullptr);
         return false;
     }
 
@@ -222,13 +222,13 @@ bool DebugLineSystem::createPipeline(VkRenderPass renderPass, const std::string&
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "DebugLineSystem: Failed to create triangle pipeline");
         vkDestroyPipeline(device, linePipeline, nullptr);
         linePipeline = VK_NULL_HANDLE;
-        vkDestroyShaderModule(device, vertShader, nullptr);
-        vkDestroyShaderModule(device, fragShader, nullptr);
+        vkDestroyShaderModule(device, *vertShader, nullptr);
+        vkDestroyShaderModule(device, *fragShader, nullptr);
         return false;
     }
 
-    vkDestroyShaderModule(device, vertShader, nullptr);
-    vkDestroyShaderModule(device, fragShader, nullptr);
+    vkDestroyShaderModule(device, *vertShader, nullptr);
+    vkDestroyShaderModule(device, *fragShader, nullptr);
 
     return true;
 }

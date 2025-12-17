@@ -271,7 +271,7 @@ void CatmullClarkSystem::updateDescriptorSets(VkDevice device, const std::vector
 }
 
 bool CatmullClarkSystem::createSubdivisionPipeline() {
-    VkShaderModule shaderModule = loadShaderModule(device, shaderPath + "/catmullclark_subdivision.comp.spv");
+    auto shaderModule = loadShaderModule(device, shaderPath + "/catmullclark_subdivision.comp.spv");
     if (!shaderModule) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load Catmull-Clark subdivision compute shader");
         return false;
@@ -292,14 +292,14 @@ bool CatmullClarkSystem::createSubdivisionPipeline() {
 
     if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &subdivisionPipelineLayout) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create subdivision pipeline layout");
-        vkDestroyShaderModule(device, shaderModule, nullptr);
+        vkDestroyShaderModule(device, *shaderModule, nullptr);
         return false;
     }
 
     VkPipelineShaderStageCreateInfo stageInfo{};
     stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stageInfo.module = shaderModule;
+    stageInfo.module = *shaderModule;
     stageInfo.pName = "main";
 
     VkComputePipelineCreateInfo pipelineInfo{};
@@ -308,7 +308,7 @@ bool CatmullClarkSystem::createSubdivisionPipeline() {
     pipelineInfo.layout = subdivisionPipelineLayout;
 
     VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &subdivisionPipeline);
-    vkDestroyShaderModule(device, shaderModule, nullptr);
+    vkDestroyShaderModule(device, *shaderModule, nullptr);
 
     if (result != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create subdivision compute pipeline");
@@ -319,24 +319,24 @@ bool CatmullClarkSystem::createSubdivisionPipeline() {
 }
 
 bool CatmullClarkSystem::createRenderPipeline() {
-    VkShaderModule vertModule = loadShaderModule(device, shaderPath + "/catmullclark_render.vert.spv");
-    VkShaderModule fragModule = loadShaderModule(device, shaderPath + "/catmullclark_render.frag.spv");
+    auto vertModule = loadShaderModule(device, shaderPath + "/catmullclark_render.vert.spv");
+    auto fragModule = loadShaderModule(device, shaderPath + "/catmullclark_render.frag.spv");
     if (!vertModule || !fragModule) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load Catmull-Clark render shaders");
-        if (vertModule) vkDestroyShaderModule(device, vertModule, nullptr);
-        if (fragModule) vkDestroyShaderModule(device, fragModule, nullptr);
+        if (vertModule) vkDestroyShaderModule(device, *vertModule, nullptr);
+        if (fragModule) vkDestroyShaderModule(device, *fragModule, nullptr);
         return false;
     }
 
     std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages{};
     shaderStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     shaderStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-    shaderStages[0].module = vertModule;
+    shaderStages[0].module = *vertModule;
     shaderStages[0].pName = "main";
 
     shaderStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     shaderStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    shaderStages[1].module = fragModule;
+    shaderStages[1].module = *fragModule;
     shaderStages[1].pName = "main";
 
     // No vertex input - all vertex data comes from buffers bound as storage buffers
@@ -399,8 +399,8 @@ bool CatmullClarkSystem::createRenderPipeline() {
 
     if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &renderPipelineLayout) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create render pipeline layout");
-        vkDestroyShaderModule(device, vertModule, nullptr);
-        vkDestroyShaderModule(device, fragModule, nullptr);
+        vkDestroyShaderModule(device, *vertModule, nullptr);
+        vkDestroyShaderModule(device, *fragModule, nullptr);
         return false;
     }
 
@@ -422,8 +422,8 @@ bool CatmullClarkSystem::createRenderPipeline() {
 
     VkResult result = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &renderPipeline);
 
-    vkDestroyShaderModule(device, vertModule, nullptr);
-    vkDestroyShaderModule(device, fragModule, nullptr);
+    vkDestroyShaderModule(device, *vertModule, nullptr);
+    vkDestroyShaderModule(device, *fragModule, nullptr);
 
     if (result != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create render graphics pipeline");
@@ -434,24 +434,24 @@ bool CatmullClarkSystem::createRenderPipeline() {
 }
 
 bool CatmullClarkSystem::createWireframePipeline() {
-    VkShaderModule vertModule = loadShaderModule(device, shaderPath + "/catmullclark_render.vert.spv");
-    VkShaderModule fragModule = loadShaderModule(device, shaderPath + "/catmullclark_render.frag.spv");
+    auto vertModule = loadShaderModule(device, shaderPath + "/catmullclark_render.vert.spv");
+    auto fragModule = loadShaderModule(device, shaderPath + "/catmullclark_render.frag.spv");
     if (!vertModule || !fragModule) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load Catmull-Clark wireframe shaders");
-        if (vertModule) vkDestroyShaderModule(device, vertModule, nullptr);
-        if (fragModule) vkDestroyShaderModule(device, fragModule, nullptr);
+        if (vertModule) vkDestroyShaderModule(device, *vertModule, nullptr);
+        if (fragModule) vkDestroyShaderModule(device, *fragModule, nullptr);
         return false;
     }
 
     std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages{};
     shaderStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     shaderStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-    shaderStages[0].module = vertModule;
+    shaderStages[0].module = *vertModule;
     shaderStages[0].pName = "main";
 
     shaderStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     shaderStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    shaderStages[1].module = fragModule;
+    shaderStages[1].module = *fragModule;
     shaderStages[1].pName = "main";
 
     // No vertex input - all vertex data comes from buffers bound as storage buffers
@@ -518,8 +518,8 @@ bool CatmullClarkSystem::createWireframePipeline() {
 
     VkResult result = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &wireframePipeline);
 
-    vkDestroyShaderModule(device, vertModule, nullptr);
-    vkDestroyShaderModule(device, fragModule, nullptr);
+    vkDestroyShaderModule(device, *vertModule, nullptr);
+    vkDestroyShaderModule(device, *fragModule, nullptr);
 
     if (result != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create wireframe graphics pipeline");

@@ -236,9 +236,9 @@ bool HiZSystem::createPyramidPipeline() {
     }
 
     // Load compute shader
-    VkShaderModule shaderModule = ShaderLoader::loadShaderModule(
+    auto shaderModule = ShaderLoader::loadShaderModule(
         device, shaderPath + "/hiz_downsample.comp.spv");
-    if (shaderModule == VK_NULL_HANDLE) {
+    if (!shaderModule) {
         SDL_Log("HiZSystem: Failed to load hiz_downsample.comp.spv");
         return false;
     }
@@ -246,7 +246,7 @@ bool HiZSystem::createPyramidPipeline() {
     VkPipelineShaderStageCreateInfo stageInfo{};
     stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stageInfo.module = shaderModule;
+    stageInfo.module = *shaderModule;
     stageInfo.pName = "main";
 
     VkComputePipelineCreateInfo pipelineInfo{};
@@ -255,7 +255,7 @@ bool HiZSystem::createPyramidPipeline() {
     pipelineInfo.layout = pyramidPipelineLayout.get();
 
     bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, pyramidPipeline);
-    vkDestroyShaderModule(device, shaderModule, nullptr);
+    vkDestroyShaderModule(device, *shaderModule, nullptr);
 
     if (!success) {
         SDL_Log("HiZSystem: Failed to create pyramid compute pipeline");
@@ -292,9 +292,9 @@ bool HiZSystem::createCullingPipeline() {
     }
 
     // Load compute shader
-    VkShaderModule shaderModule = ShaderLoader::loadShaderModule(
+    auto shaderModule = ShaderLoader::loadShaderModule(
         device, shaderPath + "/hiz_culling.comp.spv");
-    if (shaderModule == VK_NULL_HANDLE) {
+    if (!shaderModule) {
         SDL_Log("HiZSystem: Failed to load hiz_culling.comp.spv");
         return false;
     }
@@ -302,7 +302,7 @@ bool HiZSystem::createCullingPipeline() {
     VkPipelineShaderStageCreateInfo stageInfo{};
     stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stageInfo.module = shaderModule;
+    stageInfo.module = *shaderModule;
     stageInfo.pName = "main";
 
     VkComputePipelineCreateInfo pipelineInfo{};
@@ -311,7 +311,7 @@ bool HiZSystem::createCullingPipeline() {
     pipelineInfo.layout = cullingPipelineLayout.get();
 
     bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, cullingPipeline);
-    vkDestroyShaderModule(device, shaderModule, nullptr);
+    vkDestroyShaderModule(device, *shaderModule, nullptr);
 
     if (!success) {
         SDL_Log("HiZSystem: Failed to create culling compute pipeline");

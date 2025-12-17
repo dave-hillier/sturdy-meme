@@ -44,7 +44,7 @@ void TerrainPipelines::destroy(VkDevice /*device*/) {
 }
 
 bool TerrainPipelines::createDispatcherPipeline() {
-    VkShaderModule shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_dispatcher.comp.spv");
+    auto shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_dispatcher.comp.spv");
     if (!shaderModule) return false;
 
     VkPushConstantRange pushConstantRange{};
@@ -60,14 +60,14 @@ bool TerrainPipelines::createDispatcherPipeline() {
     layoutInfo.pPushConstantRanges = &pushConstantRange;
 
     if (!ManagedPipelineLayout::create(device, layoutInfo, dispatcherPipelineLayout_)) {
-        vkDestroyShaderModule(device, shaderModule, nullptr);
+        vkDestroyShaderModule(device, *shaderModule, nullptr);
         return false;
     }
 
     VkPipelineShaderStageCreateInfo stageInfo{};
     stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stageInfo.module = shaderModule;
+    stageInfo.module = *shaderModule;
     stageInfo.pName = "main";
 
     VkComputePipelineCreateInfo pipelineInfo{};
@@ -76,13 +76,13 @@ bool TerrainPipelines::createDispatcherPipeline() {
     pipelineInfo.layout = dispatcherPipelineLayout_.get();
 
     bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, dispatcherPipeline_);
-    vkDestroyShaderModule(device, shaderModule, nullptr);
+    vkDestroyShaderModule(device, *shaderModule, nullptr);
 
     return success;
 }
 
 bool TerrainPipelines::createSubdivisionPipeline() {
-    VkShaderModule shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_subdivision.comp.spv");
+    auto shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_subdivision.comp.spv");
     if (!shaderModule) return false;
 
     VkPushConstantRange pushConstantRange{};
@@ -98,14 +98,14 @@ bool TerrainPipelines::createSubdivisionPipeline() {
     layoutInfo.pPushConstantRanges = &pushConstantRange;
 
     if (!ManagedPipelineLayout::create(device, layoutInfo, subdivisionPipelineLayout_)) {
-        vkDestroyShaderModule(device, shaderModule, nullptr);
+        vkDestroyShaderModule(device, *shaderModule, nullptr);
         return false;
     }
 
     VkPipelineShaderStageCreateInfo stageInfo{};
     stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stageInfo.module = shaderModule;
+    stageInfo.module = *shaderModule;
     stageInfo.pName = "main";
 
     VkComputePipelineCreateInfo pipelineInfo{};
@@ -114,7 +114,7 @@ bool TerrainPipelines::createSubdivisionPipeline() {
     pipelineInfo.layout = subdivisionPipelineLayout_.get();
 
     bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, subdivisionPipeline_);
-    vkDestroyShaderModule(device, shaderModule, nullptr);
+    vkDestroyShaderModule(device, *shaderModule, nullptr);
 
     return success;
 }
@@ -138,13 +138,13 @@ bool TerrainPipelines::createSumReductionPipelines() {
 
     // Prepass pipeline
     {
-        VkShaderModule shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_sum_reduction_prepass.comp.spv");
+        auto shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_sum_reduction_prepass.comp.spv");
         if (!shaderModule) return false;
 
         VkPipelineShaderStageCreateInfo stageInfo{};
         stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
         stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        stageInfo.module = shaderModule;
+        stageInfo.module = *shaderModule;
         stageInfo.pName = "main";
 
         VkComputePipelineCreateInfo pipelineInfo{};
@@ -153,18 +153,18 @@ bool TerrainPipelines::createSumReductionPipelines() {
         pipelineInfo.layout = sumReductionPipelineLayout_.get();
 
         bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, sumReductionPrepassPipeline_);
-        vkDestroyShaderModule(device, shaderModule, nullptr);
+        vkDestroyShaderModule(device, *shaderModule, nullptr);
         if (!success) return false;
     }
 
     // Subgroup-optimized prepass pipeline (processes 13 levels instead of 5)
     if (subgroupCaps && subgroupCaps->hasSubgroupArithmetic) {
-        VkShaderModule shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_sum_reduction_prepass_subgroup.comp.spv");
+        auto shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_sum_reduction_prepass_subgroup.comp.spv");
         if (shaderModule) {
             VkPipelineShaderStageCreateInfo stageInfo{};
             stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
             stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-            stageInfo.module = shaderModule;
+            stageInfo.module = *shaderModule;
             stageInfo.pName = "main";
 
             VkComputePipelineCreateInfo pipelineInfo{};
@@ -173,7 +173,7 @@ bool TerrainPipelines::createSumReductionPipelines() {
             pipelineInfo.layout = sumReductionPipelineLayout_.get();
 
             bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, sumReductionPrepassSubgroupPipeline_);
-            vkDestroyShaderModule(device, shaderModule, nullptr);
+            vkDestroyShaderModule(device, *shaderModule, nullptr);
             if (!success) {
                 SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to create subgroup prepass pipeline, using fallback");
             } else {
@@ -184,13 +184,13 @@ bool TerrainPipelines::createSumReductionPipelines() {
 
     // Regular sum reduction pipeline (legacy single-level per dispatch)
     {
-        VkShaderModule shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_sum_reduction.comp.spv");
+        auto shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_sum_reduction.comp.spv");
         if (!shaderModule) return false;
 
         VkPipelineShaderStageCreateInfo stageInfo{};
         stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
         stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        stageInfo.module = shaderModule;
+        stageInfo.module = *shaderModule;
         stageInfo.pName = "main";
 
         VkComputePipelineCreateInfo pipelineInfo{};
@@ -199,7 +199,7 @@ bool TerrainPipelines::createSumReductionPipelines() {
         pipelineInfo.layout = sumReductionPipelineLayout_.get();
 
         bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, sumReductionPipeline_);
-        vkDestroyShaderModule(device, shaderModule, nullptr);
+        vkDestroyShaderModule(device, *shaderModule, nullptr);
         if (!success) return false;
     }
 
@@ -222,13 +222,13 @@ bool TerrainPipelines::createSumReductionPipelines() {
             return false;
         }
 
-        VkShaderModule shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_sum_reduction_batched.comp.spv");
+        auto shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_sum_reduction_batched.comp.spv");
         if (!shaderModule) return false;
 
         VkPipelineShaderStageCreateInfo stageInfo{};
         stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
         stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        stageInfo.module = shaderModule;
+        stageInfo.module = *shaderModule;
         stageInfo.pName = "main";
 
         VkComputePipelineCreateInfo pipelineInfo{};
@@ -237,7 +237,7 @@ bool TerrainPipelines::createSumReductionPipelines() {
         pipelineInfo.layout = sumReductionBatchedPipelineLayout_.get();
 
         bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, sumReductionBatchedPipeline_);
-        vkDestroyShaderModule(device, shaderModule, nullptr);
+        vkDestroyShaderModule(device, *shaderModule, nullptr);
         if (!success) return false;
     }
 
@@ -247,7 +247,7 @@ bool TerrainPipelines::createSumReductionPipelines() {
 bool TerrainPipelines::createFrustumCullPipelines() {
     // Frustum cull pipeline (with push constants for dispatch calculation)
     {
-        VkShaderModule shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_frustum_cull.comp.spv");
+        auto shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_frustum_cull.comp.spv");
         if (!shaderModule) return false;
 
         VkPushConstantRange pushConstantRange{};
@@ -263,14 +263,14 @@ bool TerrainPipelines::createFrustumCullPipelines() {
         layoutInfo.pPushConstantRanges = &pushConstantRange;
 
         if (!ManagedPipelineLayout::create(device, layoutInfo, frustumCullPipelineLayout_)) {
-            vkDestroyShaderModule(device, shaderModule, nullptr);
+            vkDestroyShaderModule(device, *shaderModule, nullptr);
             return false;
         }
 
         VkPipelineShaderStageCreateInfo stageInfo{};
         stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
         stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        stageInfo.module = shaderModule;
+        stageInfo.module = *shaderModule;
         stageInfo.pName = "main";
 
         VkComputePipelineCreateInfo pipelineInfo{};
@@ -279,13 +279,13 @@ bool TerrainPipelines::createFrustumCullPipelines() {
         pipelineInfo.layout = frustumCullPipelineLayout_.get();
 
         bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, frustumCullPipeline_);
-        vkDestroyShaderModule(device, shaderModule, nullptr);
+        vkDestroyShaderModule(device, *shaderModule, nullptr);
         if (!success) return false;
     }
 
     // Prepare cull dispatch pipeline
     {
-        VkShaderModule shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_prepare_cull_dispatch.comp.spv");
+        auto shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_prepare_cull_dispatch.comp.spv");
         if (!shaderModule) return false;
 
         VkPushConstantRange pushConstantRange{};
@@ -301,14 +301,14 @@ bool TerrainPipelines::createFrustumCullPipelines() {
         layoutInfo.pPushConstantRanges = &pushConstantRange;
 
         if (!ManagedPipelineLayout::create(device, layoutInfo, prepareDispatchPipelineLayout_)) {
-            vkDestroyShaderModule(device, shaderModule, nullptr);
+            vkDestroyShaderModule(device, *shaderModule, nullptr);
             return false;
         }
 
         VkPipelineShaderStageCreateInfo stageInfo{};
         stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
         stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        stageInfo.module = shaderModule;
+        stageInfo.module = *shaderModule;
         stageInfo.pName = "main";
 
         VkComputePipelineCreateInfo pipelineInfo{};
@@ -317,7 +317,7 @@ bool TerrainPipelines::createFrustumCullPipelines() {
         pipelineInfo.layout = prepareDispatchPipelineLayout_.get();
 
         bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, prepareDispatchPipeline_);
-        vkDestroyShaderModule(device, shaderModule, nullptr);
+        vkDestroyShaderModule(device, *shaderModule, nullptr);
         if (!success) return false;
     }
 
@@ -436,7 +436,7 @@ bool TerrainPipelines::createMeshletShadowPipeline() {
 
 bool TerrainPipelines::createShadowCullPipelines() {
     // Create shadow cull compute pipeline
-    VkShaderModule cullShaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_shadow_cull.comp.spv");
+    auto cullShaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_shadow_cull.comp.spv");
     if (!cullShaderModule) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load shadow cull compute shader");
         return false;
@@ -456,7 +456,7 @@ bool TerrainPipelines::createShadowCullPipelines() {
     layoutInfo.pPushConstantRanges = &pushConstantRange;
 
     if (!ManagedPipelineLayout::create(device, layoutInfo, shadowCullPipelineLayout_)) {
-        vkDestroyShaderModule(device, cullShaderModule, nullptr);
+        vkDestroyShaderModule(device, *cullShaderModule, nullptr);
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create shadow cull pipeline layout");
         return false;
     }
@@ -465,7 +465,7 @@ bool TerrainPipelines::createShadowCullPipelines() {
     VkPipelineShaderStageCreateInfo stageInfo{};
     stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stageInfo.module = cullShaderModule;
+    stageInfo.module = *cullShaderModule;
     stageInfo.pName = "main";
 
     // Specialization constant for meshlet index count
@@ -487,7 +487,7 @@ bool TerrainPipelines::createShadowCullPipelines() {
     pipelineInfo.layout = shadowCullPipelineLayout_.get();
 
     bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, shadowCullPipeline_);
-    vkDestroyShaderModule(device, cullShaderModule, nullptr);
+    vkDestroyShaderModule(device, *cullShaderModule, nullptr);
 
     if (!success) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create shadow cull compute pipeline");
@@ -495,11 +495,11 @@ bool TerrainPipelines::createShadowCullPipelines() {
     }
 
     // Create shadow culled graphics pipeline (non-meshlet)
-    VkShaderModule shadowCulledVertModule = loadShaderModule(device, shaderPath + "/terrain/terrain_shadow_culled.vert.spv");
-    VkShaderModule shadowFragModule = loadShaderModule(device, shaderPath + "/terrain/terrain_shadow.frag.spv");
+    auto shadowCulledVertModule = loadShaderModule(device, shaderPath + "/terrain/terrain_shadow_culled.vert.spv");
+    auto shadowFragModule = loadShaderModule(device, shaderPath + "/terrain/terrain_shadow.frag.spv");
     if (!shadowCulledVertModule || !shadowFragModule) {
-        if (shadowCulledVertModule) vkDestroyShaderModule(device, shadowCulledVertModule, nullptr);
-        if (shadowFragModule) vkDestroyShaderModule(device, shadowFragModule, nullptr);
+        if (shadowCulledVertModule) vkDestroyShaderModule(device, *shadowCulledVertModule, nullptr);
+        if (shadowFragModule) vkDestroyShaderModule(device, *shadowFragModule, nullptr);
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load shadow culled shaders");
         return false;
     }
@@ -507,12 +507,12 @@ bool TerrainPipelines::createShadowCullPipelines() {
     std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages{};
     shaderStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     shaderStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-    shaderStages[0].module = shadowCulledVertModule;
+    shaderStages[0].module = *shadowCulledVertModule;
     shaderStages[0].pName = "main";
 
     shaderStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     shaderStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    shaderStages[1].module = shadowFragModule;
+    shaderStages[1].module = *shadowFragModule;
     shaderStages[1].pName = "main";
 
     // No vertex input for non-meshlet (generated in shader)
@@ -578,8 +578,8 @@ bool TerrainPipelines::createShadowCullPipelines() {
 
     VkPipeline rawPipeline = VK_NULL_HANDLE;
     VkResult result = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &gfxPipelineInfo, nullptr, &rawPipeline);
-    vkDestroyShaderModule(device, shadowCulledVertModule, nullptr);
-    vkDestroyShaderModule(device, shadowFragModule, nullptr);
+    vkDestroyShaderModule(device, *shadowCulledVertModule, nullptr);
+    vkDestroyShaderModule(device, *shadowFragModule, nullptr);
 
     if (result != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create shadow culled graphics pipeline");
@@ -589,17 +589,17 @@ bool TerrainPipelines::createShadowCullPipelines() {
 
     // Create meshlet shadow culled pipeline (if meshlets enabled)
     if (useMeshlets) {
-        VkShaderModule meshletShadowCulledVertModule = loadShaderModule(device, shaderPath + "/terrain/terrain_meshlet_shadow_culled.vert.spv");
-        shadowFragModule = loadShaderModule(device, shaderPath + "/terrain/terrain_shadow.frag.spv");
-        if (!meshletShadowCulledVertModule || !shadowFragModule) {
-            if (meshletShadowCulledVertModule) vkDestroyShaderModule(device, meshletShadowCulledVertModule, nullptr);
-            if (shadowFragModule) vkDestroyShaderModule(device, shadowFragModule, nullptr);
+        auto meshletShadowCulledVertModule = loadShaderModule(device, shaderPath + "/terrain/terrain_meshlet_shadow_culled.vert.spv");
+        auto meshletShadowFragModule = loadShaderModule(device, shaderPath + "/terrain/terrain_shadow.frag.spv");
+        if (!meshletShadowCulledVertModule || !meshletShadowFragModule) {
+            if (meshletShadowCulledVertModule) vkDestroyShaderModule(device, *meshletShadowCulledVertModule, nullptr);
+            if (meshletShadowFragModule) vkDestroyShaderModule(device, *meshletShadowFragModule, nullptr);
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load meshlet shadow culled shaders");
             return false;
         }
 
-        shaderStages[0].module = meshletShadowCulledVertModule;
-        shaderStages[1].module = shadowFragModule;
+        shaderStages[0].module = *meshletShadowCulledVertModule;
+        shaderStages[1].module = *meshletShadowFragModule;
 
         // Meshlet vertex input: vec2 for local UV
         VkVertexInputBindingDescription bindingDesc{};
@@ -622,8 +622,8 @@ bool TerrainPipelines::createShadowCullPipelines() {
 
         rawPipeline = VK_NULL_HANDLE;
         result = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &gfxPipelineInfo, nullptr, &rawPipeline);
-        vkDestroyShaderModule(device, meshletShadowCulledVertModule, nullptr);
-        vkDestroyShaderModule(device, shadowFragModule, nullptr);
+        vkDestroyShaderModule(device, *meshletShadowCulledVertModule, nullptr);
+        vkDestroyShaderModule(device, *meshletShadowFragModule, nullptr);
 
         if (result != VK_SUCCESS) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create meshlet shadow culled graphics pipeline");
