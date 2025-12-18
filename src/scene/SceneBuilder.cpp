@@ -378,10 +378,10 @@ void SceneBuilder::createRenderables() {
         .withMetallic(1.0f)
         .build());
 
-    // Brushed metal cube - rough, metallic
+    // Brushed metal cube - rough, metallic (half-extent 0.5)
     float brushedCubeX = -3.0f, brushedCubeZ = -3.0f;
     glm::mat4 brushedCube = glm::translate(glm::mat4(1.0f),
-        glm::vec3(brushedCubeX, getGroundY(brushedCubeX, brushedCubeZ, 10.5f), brushedCubeZ));
+        glm::vec3(brushedCubeX, getGroundY(brushedCubeX, brushedCubeZ, 0.5f), brushedCubeZ));
     brushedCube = glm::rotate(brushedCube, glm::radians(45.0f), glm::vec3(0.0f, 1.0f, 0.0f));
     sceneObjects.push_back(RenderableBuilder()
         .withTransform(brushedCube)
@@ -413,7 +413,7 @@ void SceneBuilder::createRenderables() {
     // Blue light indicator sphere - saturated blue, floating above terrain
     float blueLightX = -3.0f, blueLightZ = 2.0f;
     glm::mat4 blueLightTransform = glm::translate(glm::mat4(1.0f),
-        glm::vec3(blueLightX, getGroundY(blueLightX, blueLightZ, 12.0f), blueLightZ));
+        glm::vec3(blueLightX, getGroundY(blueLightX, blueLightZ, 1.5f), blueLightZ));
     blueLightTransform = glm::scale(blueLightTransform, glm::vec3(0.2f));
     sceneObjects.push_back(RenderableBuilder()
         .withTransform(blueLightTransform)
@@ -430,7 +430,7 @@ void SceneBuilder::createRenderables() {
     // Green light indicator sphere - saturated green, floating above terrain
     float greenLightX = 4.0f, greenLightZ = -2.0f;
     glm::mat4 greenLightTransform = glm::translate(glm::mat4(1.0f),
-        glm::vec3(greenLightX, getGroundY(greenLightX, greenLightZ, 11.5f), greenLightZ));
+        glm::vec3(greenLightX, getGroundY(greenLightX, greenLightZ, 1.5f), greenLightZ));
     greenLightTransform = glm::scale(greenLightTransform, glm::vec3(0.2f));
     sceneObjects.push_back(RenderableBuilder()
         .withTransform(greenLightTransform)
@@ -444,10 +444,10 @@ void SceneBuilder::createRenderables() {
         .withCastsShadow(false)
         .build());
 
-    // Debug cube at elevated position
+    // Debug cube - red emissive cube for testing (half-extent 0.5)
     float debugCubeX = 5.0f, debugCubeZ = -5.0f;
     sceneObjects.push_back(RenderableBuilder()
-        .atPosition(glm::vec3(debugCubeX, getGroundY(debugCubeX, debugCubeZ, 15.0f), debugCubeZ))
+        .atPosition(glm::vec3(debugCubeX, getGroundY(debugCubeX, debugCubeZ, 0.5f), debugCubeZ))
         .withMesh(&**cubeMesh)
         .withTexture(&**crateTexture)
         .withMaterialId(crateMaterialId)
@@ -509,7 +509,7 @@ void SceneBuilder::createRenderables() {
     float flagPoleX = 5.0f, flagPoleZ = 0.0f;
     flagPoleIndex = sceneObjects.size();
     sceneObjects.push_back(RenderableBuilder()
-        .atPosition(glm::vec3(flagPoleX, getGroundY(flagPoleX, flagPoleZ, 11.5f), flagPoleZ))
+        .atPosition(glm::vec3(flagPoleX, getGroundY(flagPoleX, flagPoleZ, 1.5f), flagPoleZ))
         .withMesh(&**flagPoleMesh)
         .withTexture(&**metalTexture)
         .withMaterialId(metalMaterialId)
