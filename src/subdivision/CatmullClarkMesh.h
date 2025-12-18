@@ -43,7 +43,6 @@ struct CatmullClarkMesh {
     VkBuffer getFaceBuffer() const { return faceBuffer_.get(); }
 
     bool uploadToGPU(VmaAllocator allocator);
-    void destroy();
 
     // Factory methods for common meshes
     static CatmullClarkMesh createCube();

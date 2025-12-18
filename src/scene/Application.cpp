@@ -35,7 +35,11 @@ bool Application::init(const std::string& title, int width, int height) {
     }
 
     std::string resourcePath = getResourcePath();
-    if (!renderer.init(window, resourcePath)) {
+    Renderer::InitInfo rendererInfo{};
+    rendererInfo.window = window;
+    rendererInfo.resourcePath = resourcePath;
+    renderer_ = Renderer::create(rendererInfo);
+    if (!renderer_) {
         SDL_Log("Failed to initialize renderer");
         SDL_DestroyWindow(window);
         SDL_Quit();
@@ -46,7 +50,7 @@ bool Application::init(const std::string& title, int width, int height) {
 
     // Position camera at terrain height, looking at scene objects
     {
-        const auto& terrain = renderer.getTerrainSystem();
+        const auto& terrain = renderer_->getTerrainSystem();
         float cameraX = 0.0f, cameraZ = 10.0f;  // Start behind the scene
         float terrainY = terrain.getHeightAt(cameraX, cameraZ);
         camera.setPosition(glm::vec3(cameraX, terrainY + 2.0f, cameraZ));
@@ -64,8 +68,8 @@ bool Application::init(const std::string& title, int width, int height) {
     // Create terrain hole at well entrance location
     // This must be done before terrain physics is initialized
     {
-        auto& terrain = renderer.getTerrainSystem();
-        const auto& sceneBuilder = renderer.getSceneManager().getSceneBuilder();
+        auto& terrain = renderer_->getTerrainSystem();
+        const auto& sceneBuilder = renderer_->getSceneManager().getSceneBuilder();
         float wellX = sceneBuilder.getWellEntranceX();
         float wellZ = sceneBuilder.getWellEntranceZ();
         terrain.setHoleCircle(wellX, wellZ, SceneBuilder::WELL_HOLE_RADIUS, true);
@@ -75,7 +79,7 @@ bool Application::init(const std::string& title, int width, int height) {
     }
 
     // Get terrain reference for spawning objects
-    auto& terrain = renderer.getTerrainSystem();
+    auto& terrain = renderer_->getTerrainSystem();
 
     // Initialize tiled physics terrain manager
     // Uses high-resolution terrain tiles (~1m spacing) within 1000m of player
@@ -101,10 +105,10 @@ bool Application::init(const std::string& title, int width, int height) {
     }
 
     // Initialize scene physics (dynamic objects)
-    renderer.getSceneManager().initPhysics(physics());
+    renderer_->getSceneManager().initPhysics(physics());
 
     // Create convex hull colliders for rocks using actual mesh geometry
-    const auto& rockSystem = renderer.getRockSystem();
+    const auto& rockSystem = renderer_->getRockSystem();
     const auto& rockInstances = rockSystem.getRockInstances();
     const auto& rockMeshes = rockSystem.getRockMeshes();
 
@@ -157,12 +161,12 @@ bool Application::init(const std::string& title, int width, int height) {
     // Safety check: not in water, not in terrain holes
     breadcrumbTracker.setSafetyCheck([this](const glm::vec3& pos) {
         // Check if position is above water level (with margin)
-        float waterLevel = renderer.getWaterSystem().getWaterLevel();
+        float waterLevel = renderer_->getWaterSystem().getWaterLevel();
         if (pos.y < waterLevel + 0.5f) {
             return false;  // In or near water
         }
         // Check if position is in a terrain hole
-        if (renderer.getTerrainSystem().isHole(pos.x, pos.z)) {
+        if (renderer_->getTerrainSystem().isHole(pos.x, pos.z)) {
             return false;  // In terrain hole (cave entrance, etc.)
         }
         return true;
@@ -175,10 +179,10 @@ bool Application::init(const std::string& title, int width, int height) {
     initFlag();
 
     // Initialize GUI system via factory
-    gui_ = GuiSystem::create(window, renderer.getInstance(), renderer.getPhysicalDevice(),
-                              renderer.getDevice(), renderer.getGraphicsQueueFamily(),
-                              renderer.getGraphicsQueue(), renderer.getSwapchainRenderPass(),
-                              renderer.getSwapchainImageCount());
+    gui_ = GuiSystem::create(window, renderer_->getInstance(), renderer_->getPhysicalDevice(),
+                              renderer_->getDevice(), renderer_->getGraphicsQueueFamily(),
+                              renderer_->getGraphicsQueue(), renderer_->getSwapchainRenderPass(),
+                              renderer_->getSwapchainImageCount());
     if (!gui_) {
         SDL_Log("Failed to initialize GUI system");
         return false;
@@ -188,7 +192,7 @@ bool Application::init(const std::string& title, int width, int height) {
     gui_->getTreeEditorGui().loadPresets(resourcePath);
 
     // Set GUI render callback
-    renderer.setGuiRenderCallback([this](VkCommandBuffer cmd) {
+    renderer_->setGuiRenderCallback([this](VkCommandBuffer cmd) {
         gui_->endFrame(cmd);
     });
 
@@ -219,7 +223,7 @@ void Application::run() {
 
         // Begin GUI frame
         gui_->beginFrame();
-        gui_->render(renderer, camera, lastDeltaTime, currentFps);
+        gui_->render(*renderer_, camera, lastDeltaTime, currentFps);
 
         // Update input system
         input.update(deltaTime, camera.getYaw());
@@ -269,7 +273,7 @@ void Application::run() {
             // Velocity: horizontal from input + jump impulse (5.0 m/s up, matching PhysicsSystem)
             glm::vec3 jumpVelocity = desiredVelocity;
             jumpVelocity.y = 5.0f;
-            renderer.startCharacterJump(startPos, jumpVelocity, 9.81f, &physics());
+            renderer_->startCharacterJump(startPos, jumpVelocity, 9.81f, &physics());
         }
 
         // Always update physics character controller (handles gravity, jumping, and movement)
@@ -287,11 +291,11 @@ void Application::run() {
         debugLogTimer += deltaTime;
         if (debugLogTimer >= 1.0f) {
             debugLogTimer = 0.0f;
-            auto& terrainSys = renderer.getTerrainSystem();
+            auto& terrainSys = renderer_->getTerrainSystem();
 
             // Use the orb light position (updated from physics body 6 - emissive sphere)
             // The orb physics radius is 0.15 (0.5 * 0.3 scale)
-            glm::vec3 orbPos = renderer.getSceneManager().getOrbLightPosition();
+            glm::vec3 orbPos = renderer_->getSceneManager().getOrbLightPosition();
             float cpuTerrainHeight = terrainSys.getHeightAt(orbPos.x, orbPos.z);
 
             // Cast ray down from above orb to find where physics terrain collision is
@@ -358,15 +362,15 @@ void Application::run() {
         }
 
         // Update scene object transforms from physics
-        renderer.getSceneManager().update(physics());
+        renderer_->getSceneManager().update(physics());
 
         // Update player position for grass interaction (always, regardless of camera mode)
-        renderer.setPlayerState(player.getPosition(), physicsVelocity, Player::CAPSULE_RADIUS);
+        renderer_->setPlayerState(player.getPosition(), physicsVelocity, Player::CAPSULE_RADIUS);
 
         // Wait for previous frame's GPU work to complete before updating dynamic meshes.
         // This prevents race conditions where we destroy mesh buffers while the GPU
         // is still reading them from the previous frame.
-        renderer.waitForPreviousFrame();
+        renderer_->waitForPreviousFrame();
 
         // Update flag cloth simulation
         updateFlag(deltaTime);
@@ -377,15 +381,15 @@ void Application::run() {
         bool isGrounded = physics().isCharacterOnGround();
 
         // Sync cape enabled state from GUI
-        renderer.getSceneBuilder().setCapeEnabled(gui_->getPlayerSettings().capeEnabled);
+        renderer_->getSceneBuilder().setCapeEnabled(gui_->getPlayerSettings().capeEnabled);
 
-        renderer.updateAnimatedCharacter(deltaTime, movementSpeed, isGrounded, isJumping);
+        renderer_->updateAnimatedCharacter(deltaTime, movementSpeed, isGrounded, isJumping);
 
         // Update camera and player based on mode
         if (input.isThirdPersonMode()) {
             camera.setThirdPersonTarget(player.getFocusPoint());
             camera.updateThirdPerson(deltaTime);
-            renderer.getSceneManager().updatePlayerTransform(player.getModelMatrix());
+            renderer_->getSceneManager().updatePlayerTransform(player.getModelMatrix());
 
             // Dynamic FOV: widen during sprinting for sense of speed
             float targetFov = 45.0f;  // Base FOV
@@ -398,15 +402,15 @@ void Application::run() {
             updateCameraOcclusion(deltaTime);
         }
 
-        camera.setAspectRatio(static_cast<float>(renderer.getWidth()) / static_cast<float>(renderer.getHeight()));
+        camera.setAspectRatio(static_cast<float>(renderer_->getWidth()) / static_cast<float>(renderer_->getHeight()));
 
         // Update physics debug visualization (before render)
 #ifdef JPH_DEBUG_RENDERER
-        renderer.updatePhysicsDebug(physics(), camera.getPosition());
+        renderer_->updatePhysicsDebug(physics(), camera.getPosition());
 #endif
 
         // Render frame - if skipped (window minimized/suspended), cancel GUI frame
-        if (!renderer.render(camera)) {
+        if (!renderer_->render(camera)) {
             gui_->cancelFrame();
         }
 
@@ -414,7 +418,7 @@ void Application::run() {
         if (deltaTime > 0.0f) {
             smoothedFps = smoothedFps * 0.95f + (1.0f / deltaTime) * 0.05f;
         }
-        float timeOfDay = renderer.getTimeOfDay();
+        float timeOfDay = renderer_->getTimeOfDay();
         int hours = static_cast<int>(timeOfDay * 24.0f);
         int minutes = static_cast<int>((timeOfDay * 24.0f - hours) * 60.0f);
         char title[96];
@@ -424,16 +428,16 @@ void Application::run() {
         SDL_SetWindowTitle(window, title);
     }
 
-    renderer.waitIdle();
+    renderer_->waitIdle();
 }
 
 void Application::shutdown() {
-    renderer.waitIdle();
+    renderer_->waitIdle();
     gui_.reset();  // RAII cleanup via destructor
     // InputSystem cleanup handled by destructor (RAII)
     physicsTerrainManager_.cleanup();
     physics_.reset();  // RAII cleanup via optional reset
-    renderer.shutdown();
+    renderer_.reset();  // RAII cleanup via unique_ptr reset
 
     if (window) {
         SDL_DestroyWindow(window);
@@ -458,22 +462,22 @@ void Application::processEvents() {
                 break;
             case SDL_EVENT_WINDOW_RESIZED:
             case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-                renderer.notifyWindowResized();
+                renderer_->notifyWindowResized();
                 break;
             case SDL_EVENT_WINDOW_MINIMIZED:
             case SDL_EVENT_WINDOW_HIDDEN:
             case SDL_EVENT_WINDOW_OCCLUDED:
                 // Window minimized or hidden (e.g., macOS screen lock)
                 SDL_Log("Window suspended");
-                renderer.notifyWindowSuspended();
+                renderer_->notifyWindowSuspended();
                 break;
             case SDL_EVENT_WINDOW_RESTORED:
             case SDL_EVENT_WINDOW_SHOWN:
             case SDL_EVENT_WINDOW_EXPOSED:
                 // Window restored (e.g., macOS screen unlock)
-                if (renderer.isWindowSuspended()) {
+                if (renderer_->isWindowSuspended()) {
                     SDL_Log("Window restored, recreating swapchain");
-                    renderer.notifyWindowRestored();
+                    renderer_->notifyWindowRestored();
                 }
                 break;
             case SDL_EVENT_KEY_DOWN:
@@ -488,136 +492,136 @@ void Application::processEvents() {
                     SDL_Log("Tree Editor: %s", gui_->getTreeEditorGui().isVisible() ? "ON" : "OFF");
                 }
                 else if (event.key.scancode == SDL_SCANCODE_P) {
-                    gui_->getTreeEditorGui().placeTreeAtCamera(renderer, camera);
+                    gui_->getTreeEditorGui().placeTreeAtCamera(*renderer_, camera);
                     gui_->getTreeEditorGui().setVisible(true);
                     SDL_Log("Tree placed at camera position");
                 }
                 else if (event.key.scancode == SDL_SCANCODE_1) {
-                    renderer.setTimeOfDay(0.25f);
+                    renderer_->setTimeOfDay(0.25f);
                 }
                 else if (event.key.scancode == SDL_SCANCODE_2) {
-                    renderer.setTimeOfDay(0.5f);
+                    renderer_->setTimeOfDay(0.5f);
                 }
                 else if (event.key.scancode == SDL_SCANCODE_3) {
-                    renderer.setTimeOfDay(0.75f);
+                    renderer_->setTimeOfDay(0.75f);
                 }
                 else if (event.key.scancode == SDL_SCANCODE_4) {
-                    renderer.setTimeOfDay(0.0f);
+                    renderer_->setTimeOfDay(0.0f);
                 }
                 else if (event.key.scancode == SDL_SCANCODE_EQUALS) {
-                    renderer.setTimeScale(renderer.getTimeScale() * 2.0f);
+                    renderer_->setTimeScale(renderer_->getTimeScale() * 2.0f);
                 }
                 else if (event.key.scancode == SDL_SCANCODE_MINUS) {
-                    renderer.setTimeScale(renderer.getTimeScale() * 0.5f);
+                    renderer_->setTimeScale(renderer_->getTimeScale() * 0.5f);
                 }
                 else if (event.key.scancode == SDL_SCANCODE_R) {
-                    renderer.resumeAutoTime();
-                    renderer.setTimeScale(1.0f);
+                    renderer_->resumeAutoTime();
+                    renderer_->setTimeScale(1.0f);
                 }
                 else if (event.key.scancode == SDL_SCANCODE_6) {
-                    renderer.toggleCascadeDebug();
-                    SDL_Log("Cascade debug visualization: %s", renderer.isShowingCascadeDebug() ? "ON" : "OFF");
+                    renderer_->toggleCascadeDebug();
+                    SDL_Log("Cascade debug visualization: %s", renderer_->isShowingCascadeDebug() ? "ON" : "OFF");
                 }
                 else if (event.key.scancode == SDL_SCANCODE_7) {
-                    renderer.toggleSnowDepthDebug();
-                    SDL_Log("Snow depth debug visualization: %s", renderer.isShowingSnowDepthDebug() ? "ON" : "OFF");
+                    renderer_->toggleSnowDepthDebug();
+                    SDL_Log("Snow depth debug visualization: %s", renderer_->isShowingSnowDepthDebug() ? "ON" : "OFF");
                 }
                 else if (event.key.scancode == SDL_SCANCODE_8) {
-                    renderer.setHiZCullingEnabled(!renderer.isHiZCullingEnabled());
-                    SDL_Log("Hi-Z occlusion culling: %s", renderer.isHiZCullingEnabled() ? "ON" : "OFF");
+                    renderer_->setHiZCullingEnabled(!renderer_->isHiZCullingEnabled());
+                    SDL_Log("Hi-Z occlusion culling: %s", renderer_->isHiZCullingEnabled() ? "ON" : "OFF");
                 }
                 else if (event.key.scancode == SDL_SCANCODE_Z) {
-                    float currentIntensity = renderer.getIntensity();
-                    renderer.setWeatherIntensity(std::max(0.0f, currentIntensity - 0.1f));
-                    SDL_Log("Weather intensity: %.1f", renderer.getIntensity());
+                    float currentIntensity = renderer_->getIntensity();
+                    renderer_->setWeatherIntensity(std::max(0.0f, currentIntensity - 0.1f));
+                    SDL_Log("Weather intensity: %.1f", renderer_->getIntensity());
                 }
                 else if (event.key.scancode == SDL_SCANCODE_X) {
-                    float currentIntensity = renderer.getIntensity();
-                    renderer.setWeatherIntensity(std::min(1.0f, currentIntensity + 0.1f));
-                    SDL_Log("Weather intensity: %.1f", renderer.getIntensity());
+                    float currentIntensity = renderer_->getIntensity();
+                    renderer_->setWeatherIntensity(std::min(1.0f, currentIntensity + 0.1f));
+                    SDL_Log("Weather intensity: %.1f", renderer_->getIntensity());
                 }
                 else if (event.key.scancode == SDL_SCANCODE_C) {
-                    uint32_t currentType = renderer.getWeatherType();
-                    if (renderer.getIntensity() == 0.0f && currentType == 0) {
-                        renderer.setWeatherType(0);
-                        renderer.setWeatherIntensity(0.5f);
+                    uint32_t currentType = renderer_->getWeatherType();
+                    if (renderer_->getIntensity() == 0.0f && currentType == 0) {
+                        renderer_->setWeatherType(0);
+                        renderer_->setWeatherIntensity(0.5f);
                     } else if (currentType == 0) {
-                        renderer.setWeatherType(1);
-                        renderer.setWeatherIntensity(0.5f);
+                        renderer_->setWeatherType(1);
+                        renderer_->setWeatherIntensity(0.5f);
                     } else if (currentType == 1) {
-                        renderer.setWeatherType(0);
-                        renderer.setWeatherIntensity(0.0f);
+                        renderer_->setWeatherType(0);
+                        renderer_->setWeatherIntensity(0.0f);
                     }
 
                     std::string weatherStatus = "Clear";
-                    if (renderer.getIntensity() > 0.0f) {
-                        if (renderer.getWeatherType() == 0) {
+                    if (renderer_->getIntensity() > 0.0f) {
+                        if (renderer_->getWeatherType() == 0) {
                             weatherStatus = "Rain";
-                        } else if (renderer.getWeatherType() == 1) {
+                        } else if (renderer_->getWeatherType() == 1) {
                             weatherStatus = "Snow";
                         }
                     }
-                    SDL_Log("Weather type: %s, Intensity: %.1f", weatherStatus.c_str(), renderer.getIntensity());
+                    SDL_Log("Weather type: %s, Intensity: %.1f", weatherStatus.c_str(), renderer_->getIntensity());
                 }
                 else if (event.key.scancode == SDL_SCANCODE_F) {
                     glm::vec3 playerPos = player.getPosition();
-                    renderer.spawnConfetti(playerPos, 8.0f, 100.0f, 0.5f);
+                    renderer_->spawnConfetti(playerPos, 8.0f, 100.0f, 0.5f);
                     SDL_Log("Confetti!");
                 }
                 else if (event.key.scancode == SDL_SCANCODE_V) {
-                    renderer.toggleCloudStyle();
-                    SDL_Log("Cloud style: %s", renderer.isUsingParaboloidClouds() ? "Paraboloid LUT Hybrid" : "Procedural");
+                    renderer_->toggleCloudStyle();
+                    SDL_Log("Cloud style: %s", renderer_->isUsingParaboloidClouds() ? "Paraboloid LUT Hybrid" : "Procedural");
                 }
                 else if (event.key.scancode == SDL_SCANCODE_LEFTBRACKET) {
-                    float density = renderer.getFogDensity();
-                    renderer.setFogDensity(std::max(0.0f, density - 0.0025f));
-                    SDL_Log("Fog density: %.3f", renderer.getFogDensity());
+                    float density = renderer_->getFogDensity();
+                    renderer_->setFogDensity(std::max(0.0f, density - 0.0025f));
+                    SDL_Log("Fog density: %.3f", renderer_->getFogDensity());
                 }
                 else if (event.key.scancode == SDL_SCANCODE_RIGHTBRACKET) {
-                    float density = renderer.getFogDensity();
-                    renderer.setFogDensity(std::min(0.2f, density + 0.0025f));
-                    SDL_Log("Fog density: %.3f", renderer.getFogDensity());
+                    float density = renderer_->getFogDensity();
+                    renderer_->setFogDensity(std::min(0.2f, density + 0.0025f));
+                    SDL_Log("Fog density: %.3f", renderer_->getFogDensity());
                 }
                 else if (event.key.scancode == SDL_SCANCODE_BACKSLASH) {
-                    renderer.setFogEnabled(!renderer.isFogEnabled());
-                    SDL_Log("Fog: %s", renderer.isFogEnabled() ? "ON" : "OFF");
+                    renderer_->setFogEnabled(!renderer_->isFogEnabled());
+                    SDL_Log("Fog: %s", renderer_->isFogEnabled() ? "ON" : "OFF");
                 }
                 else if (event.key.scancode == SDL_SCANCODE_COMMA) {
-                    float snow = renderer.getSnowAmount();
-                    renderer.setSnowAmount(std::max(0.0f, snow - 0.1f));
-                    SDL_Log("Snow amount: %.1f", renderer.getSnowAmount());
+                    float snow = renderer_->getSnowAmount();
+                    renderer_->setSnowAmount(std::max(0.0f, snow - 0.1f));
+                    SDL_Log("Snow amount: %.1f", renderer_->getSnowAmount());
                 }
                 else if (event.key.scancode == SDL_SCANCODE_PERIOD) {
-                    float snow = renderer.getSnowAmount();
-                    renderer.setSnowAmount(std::min(1.0f, snow + 0.1f));
-                    SDL_Log("Snow amount: %.1f", renderer.getSnowAmount());
+                    float snow = renderer_->getSnowAmount();
+                    renderer_->setSnowAmount(std::min(1.0f, snow + 0.1f));
+                    SDL_Log("Snow amount: %.1f", renderer_->getSnowAmount());
                 }
                 else if (event.key.scancode == SDL_SCANCODE_SLASH) {
-                    float snow = renderer.getSnowAmount();
-                    renderer.setSnowAmount(snow < 0.5f ? 1.0f : 0.0f);
-                    SDL_Log("Snow amount: %.1f", renderer.getSnowAmount());
+                    float snow = renderer_->getSnowAmount();
+                    renderer_->setSnowAmount(snow < 0.5f ? 1.0f : 0.0f);
+                    SDL_Log("Snow amount: %.1f", renderer_->getSnowAmount());
                 }
                 else if (event.key.scancode == SDL_SCANCODE_T) {
-                    renderer.toggleTerrainWireframe();
-                    SDL_Log("Terrain wireframe: %s", renderer.isTerrainWireframeMode() ? "ON" : "OFF");
+                    renderer_->toggleTerrainWireframe();
+                    SDL_Log("Terrain wireframe: %s", renderer_->isTerrainWireframeMode() ? "ON" : "OFF");
                 }
                 break;
             case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
                 if (event.gbutton.button == SDL_GAMEPAD_BUTTON_SOUTH) {
-                    renderer.setTimeOfDay(0.25f);
+                    renderer_->setTimeOfDay(0.25f);
                 }
                 else if (event.gbutton.button == SDL_GAMEPAD_BUTTON_EAST) {
-                    renderer.setTimeOfDay(0.5f);
+                    renderer_->setTimeOfDay(0.5f);
                 }
                 else if (event.gbutton.button == SDL_GAMEPAD_BUTTON_WEST) {
-                    renderer.setTimeOfDay(0.75f);
+                    renderer_->setTimeOfDay(0.75f);
                 }
                 else if (event.gbutton.button == SDL_GAMEPAD_BUTTON_NORTH) {
-                    renderer.setTimeOfDay(0.0f);
+                    renderer_->setTimeOfDay(0.0f);
                 }
                 else if (event.gbutton.button == SDL_GAMEPAD_BUTTON_START) {
-                    renderer.resumeAutoTime();
-                    renderer.setTimeScale(1.0f);
+                    renderer_->resumeAutoTime();
+                    renderer_->setTimeScale(1.0f);
                 }
                 else if (event.gbutton.button == SDL_GAMEPAD_BUTTON_BACK) {
                     running = false;
@@ -659,7 +663,7 @@ void Application::applyInputToCamera() {
     // Handle gamepad time scale input
     float timeScaleInput = input.getTimeScaleInput();
     if (timeScaleInput != 0.0f) {
-        renderer.setTimeScale(renderer.getTimeScale() * timeScaleInput);
+        renderer_->setTimeScale(renderer_->getTimeScale() * timeScaleInput);
     }
 }
 
@@ -692,7 +696,7 @@ void Application::initPhysics() {
 
     // Helper to get terrain height at a position
     auto getTerrainY = [this](float x, float z) -> float {
-        return renderer.getTerrainHeightAt(x, z);
+        return renderer_->getTerrainHeightAt(x, z);
     };
 
     // Scene object layout from SceneBuilder (after multi-lights update):
@@ -771,14 +775,14 @@ void Application::initPhysics() {
 
 void Application::updatePhysicsToScene() {
     // Update scene object transforms from physics simulation
-    auto& sceneObjects = renderer.getSceneManager().getRenderables();
+    auto& sceneObjects = renderer_->getSceneManager().getRenderables();
 
     for (size_t i = 1; i < scenePhysicsBodies.size() && i < sceneObjects.size(); i++) {
         PhysicsBodyID bodyID = scenePhysicsBodies[i];
         if (bodyID == INVALID_BODY_ID) continue;
 
         // Skip player object (handled separately)
-        if (i == renderer.getSceneManager().getPlayerObjectIndex()) continue;
+        if (i == renderer_->getSceneManager().getPlayerObjectIndex()) continue;
 
         // Get transform from physics (position and rotation only)
         glm::mat4 physicsTransform = physics().getBodyTransform(bodyID);
@@ -798,7 +802,7 @@ void Application::updatePhysicsToScene() {
         // Update orb light position to follow the emissive sphere (index 7)
         if (i == 7) {
             glm::vec3 orbPosition = glm::vec3(physicsTransform[3]);
-            renderer.getSceneManager().setOrbLightPosition(orbPosition);
+            renderer_->getSceneManager().setOrbLightPosition(orbPosition);
         }
     }
 }
@@ -814,7 +818,7 @@ void Application::initFlag() {
     // Top of pole is at terrain height + 1.5 + 1.5 = terrain + 3.0
     const float flagPoleX = 5.0f;
     const float flagPoleZ = 0.0f;
-    float terrainHeight = renderer.getTerrainHeightAt(flagPoleX, flagPoleZ);
+    float terrainHeight = renderer_->getTerrainHeightAt(flagPoleX, flagPoleZ);
     float poleTopY = terrainHeight + 3.0f;  // Pole center is 1.5m above terrain, pole is 3m tall
     glm::vec3 clothTopLeft(flagPoleX - 0.1f, poleTopY, flagPoleZ);  // Slightly to the left of pole center
 
@@ -826,8 +830,8 @@ void Application::initFlag() {
     }
 
     // Create initial mesh geometry and upload to GPU
-    clothSim.createMesh(renderer.getFlagClothMesh());
-    renderer.uploadFlagClothMesh();
+    clothSim.createMesh(renderer_->getFlagClothMesh());
+    renderer_->uploadFlagClothMesh();
 
     SDL_Log("Flag initialized with %dx%d cloth simulation", clothWidth, clothHeight);
 }
@@ -856,13 +860,13 @@ void Application::updateCameraOcclusion(float deltaTime) {
     }
 
     // Update opacities for all scene objects
-    auto& sceneObjects = renderer.getSceneManager().getRenderables();
+    auto& sceneObjects = renderer_->getSceneManager().getRenderables();
     for (size_t i = 0; i < scenePhysicsBodies.size() && i < sceneObjects.size(); i++) {
         PhysicsBodyID bodyID = scenePhysicsBodies[i];
         if (bodyID == INVALID_BODY_ID) continue;
 
         // Skip player (handled separately)
-        if (i == renderer.getSceneManager().getPlayerObjectIndex()) continue;
+        if (i == renderer_->getSceneManager().getPlayerObjectIndex()) continue;
 
         bool isOccluding = currentlyOccluding.count(bodyID) > 0;
         float targetOpacity = isOccluding ? occludedOpacity : 1.0f;
@@ -891,11 +895,11 @@ void Application::updateFlag(float deltaTime) {
     clothSim.addSphereCollision(playerPos + glm::vec3(0, playerHeight - playerRadius, 0), playerRadius);
 
     // Add collision spheres for dynamic physics objects
-    auto& sceneObjects = renderer.getSceneManager().getRenderables();
+    auto& sceneObjects = renderer_->getSceneManager().getRenderables();
     for (size_t i = 1; i < scenePhysicsBodies.size() && i < sceneObjects.size(); i++) {
         PhysicsBodyID bodyID = scenePhysicsBodies[i];
         if (bodyID == INVALID_BODY_ID) continue;
-        if (i == renderer.getSceneManager().getPlayerObjectIndex()) continue; // Skip player (already handled)
+        if (i == renderer_->getSceneManager().getPlayerObjectIndex()) continue; // Skip player (already handled)
         if (i == 11 || i == 12) continue; // Skip flag pole and cloth itself
 
         PhysicsBodyInfo info = physics().getBodyInfo(bodyID);
@@ -906,9 +910,9 @@ void Application::updateFlag(float deltaTime) {
     }
 
     // Update cloth simulation with wind
-    clothSim.update(deltaTime, &renderer.getWindSystem());
+    clothSim.update(deltaTime, &renderer_->getWindSystem());
 
     // Update the mesh vertices from cloth particles and re-upload to GPU
-    clothSim.updateMesh(renderer.getFlagClothMesh());
-    renderer.uploadFlagClothMesh();
+    clothSim.updateMesh(renderer_->getFlagClothMesh());
+    renderer_->uploadFlagClothMesh();
 }

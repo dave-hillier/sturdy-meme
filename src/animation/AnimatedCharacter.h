@@ -9,6 +9,7 @@
 #include "Mesh.h"
 #include "IKSolver.h"
 #include <vk_mem_alloc.h>
+#include <vulkan/vulkan.h>
 #include <string>
 #include <vector>
 #include <memory>
@@ -31,17 +32,30 @@ struct SkeletonDebugData {
 // Uses GPU skinning for performance (bone matrices uploaded to UBO each frame)
 class AnimatedCharacter {
 public:
-    AnimatedCharacter() = default;
-    ~AnimatedCharacter() = default;
+    struct InitInfo {
+        std::string path;
+        VmaAllocator allocator;
+        VkDevice device;
+        VkCommandPool commandPool;
+        VkQueue queue;
+    };
 
-    // Load character from glTF file
-    bool load(const std::string& path, VmaAllocator allocator, VkDevice device,
-              VkCommandPool commandPool, VkQueue queue);
+    /**
+     * Factory: Create and load AnimatedCharacter from file.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<AnimatedCharacter> create(const InitInfo& info);
+
+    ~AnimatedCharacter();
+
+    // Non-copyable, non-movable
+    AnimatedCharacter(const AnimatedCharacter&) = delete;
+    AnimatedCharacter& operator=(const AnimatedCharacter&) = delete;
+    AnimatedCharacter(AnimatedCharacter&&) = delete;
+    AnimatedCharacter& operator=(AnimatedCharacter&&) = delete;
 
     // Load additional animations from separate FBX files
     void loadAdditionalAnimations(const std::vector<std::string>& paths);
-
-    void destroy(VmaAllocator allocator);
 
     // Animation control
     void playAnimation(const std::string& name);
@@ -129,6 +143,14 @@ public:
     bool isLoaded() const { return loaded; }
 
 private:
+    AnimatedCharacter() = default;  // Private: use factory
+
+    bool loadInternal(const InitInfo& info);
+    void cleanup();
+
+    // Stored for RAII cleanup
+    VmaAllocator allocator_ = VK_NULL_HANDLE;
+
     // Original skinned mesh data (bind pose)
     std::vector<SkinnedVertex> bindPoseVertices;
     std::vector<uint32_t> indices;

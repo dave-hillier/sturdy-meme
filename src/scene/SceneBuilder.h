@@ -17,6 +17,7 @@
 #include "PlayerCape.h"
 #include "core/RAIIAdapter.h"
 #include <optional>
+#include <memory>
 
 // Holds all scene resources (meshes, textures) and provides scene objects
 class SceneBuilder {
@@ -34,11 +35,19 @@ public:
         HeightQueryFunc getTerrainHeight;  // Optional: query terrain height for object placement
     };
 
-    SceneBuilder() = default;
-    ~SceneBuilder() = default;
+    /**
+     * Factory: Create and initialize SceneBuilder.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<SceneBuilder> create(const InitInfo& info);
 
-    bool init(const InitInfo& info);
-    void destroy(VmaAllocator allocator, VkDevice device);
+    ~SceneBuilder();
+
+    // Non-copyable, non-movable
+    SceneBuilder(const SceneBuilder&) = delete;
+    SceneBuilder& operator=(const SceneBuilder&) = delete;
+    SceneBuilder(SceneBuilder&&) = delete;
+    SceneBuilder& operator=(SceneBuilder&&) = delete;
 
     // Access to built scene
     const std::vector<Renderable>& getRenderables() const { return sceneObjects; }
@@ -89,8 +98,8 @@ public:
     void uploadFlagClothMesh(VmaAllocator allocator, VkDevice device, VkCommandPool commandPool, VkQueue queue);
 
     // Animated character access
-    AnimatedCharacter& getAnimatedCharacter() { return **animatedCharacter; }
-    const AnimatedCharacter& getAnimatedCharacter() const { return **animatedCharacter; }
+    AnimatedCharacter& getAnimatedCharacter() { return *animatedCharacter; }
+    const AnimatedCharacter& getAnimatedCharacter() const { return *animatedCharacter; }
     bool hasCharacter() const { return hasAnimatedCharacter; }
 
     // Update animated character (call each frame)
@@ -105,6 +114,11 @@ public:
     void startCharacterJump(const glm::vec3& startPos, const glm::vec3& velocity, float gravity, const class PhysicsWorld* physics);
 
 private:
+    SceneBuilder() = default;  // Private: use factory
+
+    bool initInternal(const InitInfo& info);
+    void cleanup();
+
     bool createMeshes(const InitInfo& info);
     bool loadTextures(const InitInfo& info);
     void registerMaterials();
@@ -133,8 +147,8 @@ private:
     Mesh flagClothMesh;
     Mesh capeMesh;
 
-    // Animated character (RAII-managed - mesh uploaded once, bone matrices updated by Renderer)
-    std::optional<RAIIAdapter<AnimatedCharacter>> animatedCharacter;
+    // Animated character (RAII-managed via unique_ptr - mesh uploaded once, bone matrices updated by Renderer)
+    std::unique_ptr<AnimatedCharacter> animatedCharacter;
     bool hasAnimatedCharacter = false;  // True if animated character was loaded successfully
 
     // Player cape (cloth simulation attached to character)

@@ -715,8 +715,6 @@ void TreeEditorGui::renderBillboardSection(Renderer& renderer) {
 
         // Initialize billboard capture if needed
         if (!billboardCapture) {
-            billboardCapture = std::make_unique<BillboardCapture>();
-
             BillboardCapture::InitInfo initInfo{};
             initInfo.device = renderer.getDevice();
             initInfo.physicalDevice = renderer.getPhysicalDevice();
@@ -726,10 +724,10 @@ void TreeEditorGui::renderBillboardSection(Renderer& renderer) {
             initInfo.graphicsQueue = renderer.getGraphicsQueue();
             initInfo.commandPool = renderer.getCommandPool();
 
-            if (!billboardCapture->init(initInfo)) {
+            billboardCapture = BillboardCapture::create(initInfo);
+            if (!billboardCapture) {
                 captureStatus = "Failed to initialize capture system";
                 captureInProgress = false;
-                billboardCapture.reset();
             }
         }
 

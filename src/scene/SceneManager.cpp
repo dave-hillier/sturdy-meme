@@ -22,7 +22,8 @@ bool SceneManager::initInternal(SceneBuilder::InitInfo& builderInfo) {
     terrainHeightFunc = builderInfo.getTerrainHeight;
 
     // Initialize scene builder (meshes, textures, objects)
-    if (!sceneBuilder.init(builderInfo)) {
+    sceneBuilder = SceneBuilder::create(builderInfo);
+    if (!sceneBuilder) {
         SDL_Log("Failed to initialize SceneBuilder");
         return false;
     }
@@ -68,8 +69,8 @@ void SceneManager::initTerrainPhysics(PhysicsWorld& physics, const float* height
 }
 
 void SceneManager::cleanup() {
-    if (storedDevice == VK_NULL_HANDLE) return;
-    sceneBuilder.destroy(storedAllocator, storedDevice);
+    // SceneBuilder is RAII-managed, just reset the unique_ptr
+    sceneBuilder.reset();
 }
 
 void SceneManager::update(PhysicsWorld& physics) {
@@ -77,7 +78,7 @@ void SceneManager::update(PhysicsWorld& physics) {
 }
 
 void SceneManager::updatePlayerTransform(const glm::mat4& transform) {
-    sceneBuilder.updatePlayerTransform(transform);
+    sceneBuilder->updatePlayerTransform(transform);
 }
 
 void SceneManager::initializeScenePhysics(PhysicsWorld& physics) {
@@ -85,8 +86,8 @@ void SceneManager::initializeScenePhysics(PhysicsWorld& physics) {
     // which creates a heightfield from the TerrainSystem's height data
 
     // Get scene objects from builder
-    const auto& sceneObjects = sceneBuilder.getRenderables();
-    const auto& physicsIndices = sceneBuilder.getPhysicsEnabledIndices();
+    const auto& sceneObjects = sceneBuilder->getRenderables();
+    const auto& physicsIndices = sceneBuilder->getPhysicsEnabledIndices();
 
     // Resize physics bodies array to match scene objects
     scenePhysicsBodies.resize(sceneObjects.size(), INVALID_BODY_ID);
@@ -103,7 +104,7 @@ void SceneManager::initializeScenePhysics(PhysicsWorld& physics) {
     };
 
     // Get the emissive orb index from SceneBuilder
-    size_t emissiveOrbIndex = sceneBuilder.getEmissiveOrbIndex();
+    size_t emissiveOrbIndex = sceneBuilder->getEmissiveOrbIndex();
 
     // Create physics bodies for each physics-enabled object
     // The physicsIndices tells us which scene objects need physics
@@ -176,15 +177,15 @@ void SceneManager::initializeSceneLights() {
 
 void SceneManager::updatePhysicsToScene(PhysicsWorld& physics) {
     // Update scene object transforms from physics simulation
-    auto& sceneObjects = sceneBuilder.getRenderables();
-    size_t emissiveOrbIndex = sceneBuilder.getEmissiveOrbIndex();
+    auto& sceneObjects = sceneBuilder->getRenderables();
+    size_t emissiveOrbIndex = sceneBuilder->getEmissiveOrbIndex();
 
     for (size_t i = 0; i < scenePhysicsBodies.size() && i < sceneObjects.size(); i++) {
         PhysicsBodyID bodyID = scenePhysicsBodies[i];
         if (bodyID == INVALID_BODY_ID) continue;
 
         // Skip player object (handled separately)
-        if (i == sceneBuilder.getPlayerObjectIndex()) continue;
+        if (i == sceneBuilder->getPlayerObjectIndex()) continue;
 
         // Get transform from physics (position and rotation only)
         glm::mat4 physicsTransform = physics.getBodyTransform(bodyID);

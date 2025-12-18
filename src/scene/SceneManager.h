@@ -43,13 +43,13 @@ public:
     void updatePlayerTransform(const glm::mat4& transform);
 
     // Scene object access for rendering
-    std::vector<Renderable>& getRenderables() { return sceneBuilder.getRenderables(); }
-    const std::vector<Renderable>& getRenderables() const { return sceneBuilder.getRenderables(); }
-    size_t getPlayerObjectIndex() const { return sceneBuilder.getPlayerObjectIndex(); }
+    std::vector<Renderable>& getRenderables() { return sceneBuilder->getRenderables(); }
+    const std::vector<Renderable>& getRenderables() const { return sceneBuilder->getRenderables(); }
+    size_t getPlayerObjectIndex() const { return sceneBuilder->getPlayerObjectIndex(); }
 
     // SceneBuilder access for texture descriptor sets
-    SceneBuilder& getSceneBuilder() { return sceneBuilder; }
-    const SceneBuilder& getSceneBuilder() const { return sceneBuilder; }
+    SceneBuilder& getSceneBuilder() { return *sceneBuilder; }
+    const SceneBuilder& getSceneBuilder() const { return *sceneBuilder; }
 
     // Light management
     LightManager& getLightManager() { return lightManager; }
@@ -76,7 +76,7 @@ private:
     float getTerrainHeight(float x, float z) const;
 
     // Scene resources
-    SceneBuilder sceneBuilder;
+    std::unique_ptr<SceneBuilder> sceneBuilder;
     SceneBuilder::HeightQueryFunc terrainHeightFunc;
     LightManager lightManager;
 

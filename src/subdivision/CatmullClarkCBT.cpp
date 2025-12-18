@@ -111,7 +111,15 @@ uint32_t CatmullClarkCBT::calculateBufferSize(int maxDepth, int faceCount) {
     return static_cast<uint32_t>(std::min(totalBytes, (uint64_t)64 * 1024 * 1024));
 }
 
-bool CatmullClarkCBT::init(const InitInfo& info) {
+std::unique_ptr<CatmullClarkCBT> CatmullClarkCBT::create(const InitInfo& info) {
+    std::unique_ptr<CatmullClarkCBT> cbt(new CatmullClarkCBT());
+    if (!cbt->initInternal(info)) {
+        return nullptr;
+    }
+    return cbt;
+}
+
+bool CatmullClarkCBT::initInternal(const InitInfo& info) {
     maxDepth = info.maxDepth;
     faceCount = info.faceCount;
     bufferSize = calculateBufferSize(maxDepth, faceCount);
@@ -162,6 +170,3 @@ bool CatmullClarkCBT::init(const InitInfo& info) {
     return true;
 }
 
-void CatmullClarkCBT::destroy() {
-    // RAII handles cleanup automatically
-}

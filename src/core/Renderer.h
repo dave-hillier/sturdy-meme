@@ -59,11 +59,24 @@ constexpr uint32_t PBR_HAS_HEIGHT_MAP    = (1u << 3);
 
 class Renderer {
 public:
-    Renderer() = default;
-    ~Renderer() = default;
+    struct InitInfo {
+        SDL_Window* window;
+        std::string resourcePath;
+    };
 
-    bool init(SDL_Window* window, const std::string& resourcePath);
-    void shutdown();
+    /**
+     * Factory: Create and initialize Renderer.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<Renderer> create(const InitInfo& info);
+
+    ~Renderer();
+
+    // Non-copyable, non-movable
+    Renderer(const Renderer&) = delete;
+    Renderer& operator=(const Renderer&) = delete;
+    Renderer(Renderer&&) = delete;
+    Renderer& operator=(Renderer&&) = delete;
 
     // Returns true if frame was rendered, false if skipped (caller must handle GUI frame cancellation)
     bool render(const Camera& camera);
@@ -345,6 +358,11 @@ public:
 #endif
 
 private:
+    Renderer() = default;  // Private: use factory
+
+    bool initInternal(const InitInfo& info);
+    void cleanup();
+
     // High-level initialization phases
     bool initCoreVulkanResources();       // render pass, depth, framebuffers, command pool
     bool initDescriptorInfrastructure();  // layouts, pools, sets

@@ -14,7 +14,7 @@ std::unique_ptr<VirtualTextureTileLoader> VirtualTextureTileLoader::create(const
 }
 
 VirtualTextureTileLoader::~VirtualTextureTileLoader() {
-    shutdown();
+    cleanup();
 }
 
 bool VirtualTextureTileLoader::initInternal(const std::string& path, uint32_t workerCount) {
@@ -32,7 +32,7 @@ bool VirtualTextureTileLoader::initInternal(const std::string& path, uint32_t wo
     return true;
 }
 
-void VirtualTextureTileLoader::shutdown() {
+void VirtualTextureTileLoader::cleanup() {
     {
         std::lock_guard<std::mutex> lock(queueMutex);
         running = false;

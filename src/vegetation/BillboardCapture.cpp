@@ -33,7 +33,19 @@ std::vector<CaptureAngle> BillboardCapture::getStandardAngles() {
     return angles;
 }
 
-bool BillboardCapture::init(const InitInfo& info) {
+std::unique_ptr<BillboardCapture> BillboardCapture::create(const InitInfo& info) {
+    std::unique_ptr<BillboardCapture> instance(new BillboardCapture());
+    if (!instance->initInternal(info)) {
+        return nullptr;
+    }
+    return instance;
+}
+
+BillboardCapture::~BillboardCapture() {
+    cleanup();
+}
+
+bool BillboardCapture::initInternal(const InitInfo& info) {
     device = info.device;
     physicalDevice = info.physicalDevice;
     allocator = info.allocator;
@@ -51,7 +63,7 @@ bool BillboardCapture::init(const InitInfo& info) {
     return true;
 }
 
-void BillboardCapture::destroy() {
+void BillboardCapture::cleanup() {
     destroyRenderTarget();
 
     // ManagedBuffer cleanup for UBO

@@ -88,6 +88,7 @@ private:
     VirtualTextureTileLoader() = default;  // Private: use factory
 
     bool initInternal(const std::string& basePath, uint32_t workerCount);
+    void cleanup();
 
     struct LoadRequest {
         TileId id;

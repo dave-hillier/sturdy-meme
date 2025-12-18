@@ -211,8 +211,8 @@ public:
     float getHeightAt(float x, float z) const;
 
     // Get raw heightmap data for physics integration
-    const float* getHeightMapData() const { return heightMap->get().getData(); }
-    uint32_t getHeightMapResolution() const { return heightMap->get().getResolution(); }
+    const float* getHeightMapData() const { return heightMap->getData(); }
+    uint32_t getHeightMapResolution() const { return heightMap->getResolution(); }
 
     // Get current triangle count from GPU (for debugging/display)
     uint32_t getTriangleCount() const;
@@ -235,31 +235,31 @@ public:
     void setConfig(const TerrainConfig& newConfig) { config = newConfig; }
 
     // Heightmap accessors for grass integration
-    VkImageView getHeightMapView() const { return heightMap->get().getView(); }
-    VkSampler getHeightMapSampler() const { return heightMap->get().getSampler(); }
+    VkImageView getHeightMapView() const { return heightMap->getView(); }
+    VkSampler getHeightMapSampler() const { return heightMap->getSampler(); }
 
     // Hole mask for caves/wells (areas with no terrain)
-    bool isHole(float x, float z) const { return heightMap->get().isHole(x, z); }
-    void setHole(float x, float z, bool isHole) { heightMap->get().setHole(x, z, isHole); }
+    bool isHole(float x, float z) const { return heightMap->isHole(x, z); }
+    void setHole(float x, float z, bool isHole) { heightMap->setHole(x, z, isHole); }
     void setHoleCircle(float centerX, float centerZ, float radius, bool isHole) {
-        heightMap->get().setHoleCircle(centerX, centerZ, radius, isHole);
+        heightMap->setHoleCircle(centerX, centerZ, radius, isHole);
     }
-    void uploadHoleMaskToGPU() { heightMap->get().uploadHoleMaskToGPU(); }
-    const uint8_t* getHoleMaskData() const { return heightMap->get().getHoleMaskData(); }
+    void uploadHoleMaskToGPU() { heightMap->uploadHoleMaskToGPU(); }
+    const uint8_t* getHoleMaskData() const { return heightMap->getHoleMaskData(); }
 
     // Tile cache accessor for physics integration (returns nullptr if not enabled)
-    TerrainTileCache* getTileCache() { return tileCache ? &tileCache->get() : nullptr; }
-    const TerrainTileCache* getTileCache() const { return tileCache ? &tileCache->get() : nullptr; }
+    TerrainTileCache* getTileCache() { return tileCache.get(); }
+    const TerrainTileCache* getTileCache() const { return tileCache.get(); }
 
     // Tile cache GPU resource accessors (for grass/other systems)
     VkImageView getTileArrayView() const {
-        return tileCache ? (*tileCache)->getTileArrayView() : VK_NULL_HANDLE;
+        return tileCache ? tileCache->getTileArrayView() : VK_NULL_HANDLE;
     }
     VkSampler getTileSampler() const {
-        return tileCache ? (*tileCache)->getSampler() : VK_NULL_HANDLE;
+        return tileCache ? tileCache->getSampler() : VK_NULL_HANDLE;
     }
     VkBuffer getTileInfoBuffer() const {
-        return tileCache ? (*tileCache)->getTileInfoBuffer() : VK_NULL_HANDLE;
+        return tileCache ? tileCache->getTileInfoBuffer() : VK_NULL_HANDLE;
     }
 
     // Toggle wireframe mode for debugging
@@ -269,7 +269,7 @@ public:
     // Meshlet control
     void setMeshletsEnabled(bool enabled) { config.useMeshlets = enabled; }
     bool isMeshletsEnabled() const { return config.useMeshlets; }
-    uint32_t getMeshletTriangleCount() const { return meshlet ? meshlet->get().getTriangleCount() : 0; }
+    uint32_t getMeshletTriangleCount() const { return meshlet ? meshlet->getTriangleCount() : 0; }
     int getMeshletSubdivisionLevel() const { return config.meshletSubdivisionLevel; }
     bool setMeshletSubdivisionLevel(int level);  // Returns true if successful, reinitializes meshlet
 
