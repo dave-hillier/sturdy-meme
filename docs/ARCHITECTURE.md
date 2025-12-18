@@ -88,7 +88,7 @@ See [ASYNC_UPLOAD_PATTERN.md](ASYNC_UPLOAD_PATTERN.md) for fence-free GPU upload
 - Per-frame staging buffers avoid race conditions with in-flight frames
 - `recordUpload()` API records transfer commands without blocking
 - Frame fences handle synchronization naturally
-- Used by: `TerrainMeshlet`, `VirtualTextureCache`, `VirtualTexturePageTable`
+- Used by: `TerrainMeshlet`, `TerrainTileCache`, `VirtualTextureCache`, `VirtualTexturePageTable`
 
 ### Per-Frame Data
 - `FrameData` - Consolidated state (frame index, deltaTime, camera, lighting, player, terrain, wind/weather)

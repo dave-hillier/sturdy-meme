@@ -7,6 +7,7 @@
 #include <vector>
 #include <string>
 #include <unordered_map>
+#include <queue>
 #include <cstdint>
 #include <memory>
 #include "VulkanRAII.h"
@@ -130,6 +131,22 @@ public:
     // Number of frames in flight (matches Renderer::MAX_FRAMES_IN_FLIGHT)
     static constexpr uint32_t FRAMES_IN_FLIGHT = 3;
 
+    /**
+     * Check if there are pending tile uploads.
+     * Used to determine if recordUpload() needs to be called.
+     */
+    bool hasPendingUpload() const { return !pendingTileUploads_.empty(); }
+
+    /**
+     * Record GPU commands to upload pending tiles.
+     * Uses per-frame staging buffers to avoid race conditions.
+     * Must be called once per frame while hasPendingUpload() returns true.
+     *
+     * @param cmd Command buffer to record into (must be in recording state)
+     * @param frameIndex Current frame index for staging buffer selection
+     */
+    void recordUpload(VkCommandBuffer cmd, uint32_t frameIndex);
+
     // Accessors
     uint32_t getNumLODLevels() const { return numLODLevels; }
     uint32_t getTileResolution() const { return tileResolution; }
@@ -169,20 +186,14 @@ private:
     // Load a single tile from disk at native resolution (NO downsampling)
     bool loadTile(TileCoord coord, uint32_t lod);
 
-    // Unload a tile and free GPU resources
+    // Unload a tile
     void unloadTile(TileCoord coord, uint32_t lod);
-
-    // Create GPU texture for a tile
-    bool createTileGPUResources(TerrainTile& tile);
-
-    // Upload tile data to GPU
-    bool uploadTileToGPU(TerrainTile& tile);
 
     // Update tile info buffer for shaders
     void updateTileInfoBuffer();
 
-    // Copy tile data to a specific layer of the tile array texture
-    void copyTileToArrayLayer(TerrainTile* tile, uint32_t layerIndex);
+    // Queue a tile for async upload to the tile array
+    void queueTileUpload(TerrainTile* tile, uint32_t layerIndex);
 
     // Get appropriate LOD level for distance
     uint32_t getLODForDistance(float distance) const;
@@ -234,4 +245,26 @@ private:
 
     // Maximum active tiles (limits GPU memory usage)
     static constexpr uint32_t MAX_ACTIVE_TILES = 64;
+
+    // === Async Upload Pattern ===
+    // Per-frame staging buffers for fence-free tile uploads
+    // Each frame-in-flight gets its own staging buffer to avoid race conditions
+
+    // Pending tile upload request
+    struct PendingTileUpload {
+        TerrainTile* tile;
+        uint32_t layerIndex;
+        uint32_t framesRemaining;  // Countdown: FRAMES_IN_FLIGHT → 0
+    };
+
+    // Queue of tiles waiting for GPU upload
+    std::vector<PendingTileUpload> pendingTileUploads_;
+
+    // Per-frame staging buffers for tile array uploads
+    // Size: tileResolution * tileResolution * sizeof(float) * maxUploadsPerFrame
+    std::array<ManagedBuffer, FRAMES_IN_FLIGHT> tileStagingBuffers_;
+    std::array<void*, FRAMES_IN_FLIGHT> tileStagingMapped_ = {};
+
+    // Maximum tiles to upload per frame (budget for staging buffer)
+    static constexpr uint32_t MAX_TILE_UPLOADS_PER_FRAME = 8;
 };

@@ -286,6 +286,7 @@ Barriers::transferToFragmentRead(cmd, image, subresourceRange);
 ## Existing Implementations
 
 - `TerrainMeshlet` - Fence-free mesh upload (`src/terrain/TerrainMeshlet.h`)
+- `TerrainTileCache` - Height tile streaming to array texture (`src/terrain/TerrainTileCache.h`)
 - `VirtualTextureCache` - Tile upload to atlas (`src/terrain/VirtualTextureCache.h`)
 - `VirtualTexturePageTable` - Page table updates (`src/terrain/VirtualTexturePageTable.h`)
 - `VirtualTextureTileLoader` - Async disk loading (`src/terrain/VirtualTextureTileLoader.h`)

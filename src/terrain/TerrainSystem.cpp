@@ -574,6 +574,11 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
         meshlet->recordUpload(cmd, frameIndex);
     }
 
+    // Record pending tile cache uploads (fence-free async pattern)
+    if (tileCache && tileCache->hasPendingUpload()) {
+        tileCache->recordUpload(cmd, frameIndex);
+    }
+
     // Skip-frame optimization: skip compute when camera is stationary and terrain has converged
     if (cameraOptimizer.shouldSkipCompute()) {
         cameraOptimizer.recordComputeSkipped();

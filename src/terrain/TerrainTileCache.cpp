@@ -139,6 +139,18 @@ bool TerrainTileCache::initInternal(const InitInfo& info) {
     }
     currentFrameIndex_ = 0;
 
+    // Create per-frame staging buffers for async tile uploads
+    // Size: enough for MAX_TILE_UPLOADS_PER_FRAME tiles per frame
+    VkDeviceSize tileStagingSize = static_cast<VkDeviceSize>(tileResolution) * tileResolution *
+                                    sizeof(float) * MAX_TILE_UPLOADS_PER_FRAME;
+    for (uint32_t i = 0; i < FRAMES_IN_FLIGHT; i++) {
+        if (!VulkanResourceFactory::createStagingBuffer(allocator, tileStagingSize, tileStagingBuffers_[i])) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TerrainTileCache: Failed to create tile staging buffer %u", i);
+            return false;
+        }
+        tileStagingMapped_[i] = tileStagingBuffers_[i].map();
+    }
+
     SDL_Log("TerrainTileCache initialized: %s", cacheDirectory.c_str());
     SDL_Log("  Terrain size: %.0fm, Tile resolution: %u, LOD levels: %u",
             terrainSize, tileResolution, numLODLevels);
@@ -153,13 +165,18 @@ void TerrainTileCache::cleanup() {
         vkDeviceWaitIdle(device);
     }
 
-    // Unload all tiles
-    for (auto& [key, tile] : loadedTiles) {
-        if (tile.imageView) vkDestroyImageView(device, tile.imageView, nullptr);
-        if (tile.image) vmaDestroyImage(allocator, tile.image, tile.allocation);
-    }
+    // Clear pending uploads
+    pendingTileUploads_.clear();
+
+    // Unload all tiles (no per-tile GPU resources to clean up - using tile array)
     loadedTiles.clear();
     activeTiles.clear();
+
+    // Destroy tile staging buffers (RAII via reset)
+    for (uint32_t i = 0; i < FRAMES_IN_FLIGHT; i++) {
+        tileStagingBuffers_[i].reset();
+        tileStagingMapped_[i] = nullptr;
+    }
 
     // Destroy tile info buffers (RAII via reset)
     for (uint32_t i = 0; i < FRAMES_IN_FLIGHT; i++) {
@@ -335,15 +352,9 @@ void TerrainTileCache::updateActiveTiles(const glm::vec3& cameraPos, float loadR
         }
     }
 
-    // Unload distant tiles
+    // Unload distant tiles (no per-tile GPU resources to clean up - using tile array)
     for (uint64_t key : tilesToUnload) {
-        auto it = loadedTiles.find(key);
-        if (it != loadedTiles.end()) {
-            TerrainTile& tile = it->second;
-            if (tile.imageView) vkDestroyImageView(device, tile.imageView, nullptr);
-            if (tile.image) vmaDestroyImage(allocator, tile.image, tile.allocation);
-            loadedTiles.erase(it);
-        }
+        loadedTiles.erase(key);
     }
 
     // Load new tiles (limit per frame to avoid stalls)
@@ -442,95 +453,14 @@ bool TerrainTileCache::loadTile(TileCoord coord, uint32_t lod) {
 
     TerrainTile& tile = *tilePtr;
 
-    // Create GPU resources and upload
-    if (!createTileGPUResources(tile)) {
-        loadedTiles.erase(key);
-        return false;
-    }
-
-    if (!uploadTileToGPU(tile)) {
-        if (tile.imageView) vkDestroyImageView(device, tile.imageView, nullptr);
-        if (tile.image) vmaDestroyImage(allocator, tile.image, tile.allocation);
-        loadedTiles.erase(key);
-        return false;
-    }
-
+    // Mark tile as loaded - GPU upload happens via tile array in recordUpload()
+    // (Per-tile GPU images removed - redundant since shaders use tile array)
     tile.loaded = true;
 
     SDL_Log("TerrainTileCache: Loaded tile (%d, %d) LOD%u - world bounds [%.0f,%.0f]-[%.0f,%.0f]%s",
             coord.x, coord.z, lod, tile.worldMinX, tile.worldMinZ, tile.worldMaxX, tile.worldMaxZ,
             hasCpuData ? " (added GPU to existing)" : "");
 
-    return true;
-}
-
-bool TerrainTileCache::createTileGPUResources(TerrainTile& tile) {
-    // Create Vulkan image
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.format = VK_FORMAT_R32_SFLOAT;
-    imageInfo.extent = {tileResolution, tileResolution, 1};
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-
-    VmaAllocationCreateInfo allocInfo{};
-    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-
-    if (vmaCreateImage(allocator, &imageInfo, &allocInfo, &tile.image, &tile.allocation, nullptr) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TerrainTileCache: Failed to create tile image");
-        return false;
-    }
-
-    // Create image view
-    VkImageViewCreateInfo viewInfo{};
-    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.image = tile.image;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format = VK_FORMAT_R32_SFLOAT;
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = 1;
-    viewInfo.subresourceRange.baseArrayLayer = 0;
-    viewInfo.subresourceRange.layerCount = 1;
-
-    if (vkCreateImageView(device, &viewInfo, nullptr, &tile.imageView) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TerrainTileCache: Failed to create tile image view");
-        return false;
-    }
-
-    return true;
-}
-
-bool TerrainTileCache::uploadTileToGPU(TerrainTile& tile) {
-    VkDeviceSize imageSize = tileResolution * tileResolution * sizeof(float);
-
-    // Create staging buffer using RAII wrapper
-    ManagedBuffer stagingBuffer;
-    if (!VulkanResourceFactory::createStagingBuffer(allocator, imageSize, stagingBuffer)) {
-        return false;
-    }
-
-    // Copy data to staging buffer
-    void* mappedData = stagingBuffer.map();
-    memcpy(mappedData, tile.cpuData.data(), imageSize);
-    stagingBuffer.unmap();
-
-    // Use CommandScope for one-time command submission
-    CommandScope cmd(device, commandPool, graphicsQueue);
-    if (!cmd.begin()) return false;
-
-    // Copy staging buffer to tile image with automatic barrier transitions
-    Barriers::copyBufferToImage(cmd.get(), stagingBuffer.get(), tile.image, tileResolution, tileResolution);
-
-    if (!cmd.end()) return false;
-
-    // ManagedBuffer automatically destroyed on scope exit
     return true;
 }
 
@@ -568,8 +498,8 @@ void TerrainTileCache::updateTileInfoBuffer() {
             -tile->worldMinX / sizeX, -tile->worldMinZ / sizeZ
         );
 
-        // Copy tile data to the tile array texture (layer i)
-        copyTileToArrayLayer(tile, static_cast<uint32_t>(i));
+        // Queue tile data for async upload to the tile array texture (layer i)
+        queueTileUpload(tile, static_cast<uint32_t>(i));
     }
 }
 
@@ -635,47 +565,91 @@ bool TerrainTileCache::getHeightAt(float worldX, float worldZ, float& outHeight)
     return false; // No tile covers this position
 }
 
-void TerrainTileCache::copyTileToArrayLayer(TerrainTile* tile, uint32_t layerIndex) {
+void TerrainTileCache::queueTileUpload(TerrainTile* tile, uint32_t layerIndex) {
     if (!tile || tile->cpuData.empty() || layerIndex >= MAX_ACTIVE_TILES) return;
 
-    // Create staging buffer using RAII wrapper
-    VkDeviceSize imageSize = tileResolution * tileResolution * sizeof(float);
+    // Check if this tile is already queued
+    for (const auto& pending : pendingTileUploads_) {
+        if (pending.tile == tile && pending.layerIndex == layerIndex) {
+            return;  // Already queued
+        }
+    }
 
-    ManagedBuffer stagingBuffer;
-    if (!VulkanResourceFactory::createStagingBuffer(allocator, imageSize, stagingBuffer)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TerrainTileCache: Failed to create staging buffer for tile copy");
+    // Queue for async upload
+    pendingTileUploads_.push_back({tile, layerIndex, FRAMES_IN_FLIGHT});
+}
+
+void TerrainTileCache::recordUpload(VkCommandBuffer cmd, uint32_t frameIndex) {
+    if (pendingTileUploads_.empty()) return;
+
+    void* stagingMapped = tileStagingMapped_[frameIndex % FRAMES_IN_FLIGHT];
+    VkBuffer stagingBuffer = tileStagingBuffers_[frameIndex % FRAMES_IN_FLIGHT].get();
+
+    if (!stagingMapped || stagingBuffer == VK_NULL_HANDLE) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "TerrainTileCache::recordUpload: staging buffer not available for frame %u", frameIndex);
         return;
     }
 
-    // Copy tile data to staging buffer
-    void* mappedData = stagingBuffer.map();
-    memcpy(mappedData, tile->cpuData.data(), imageSize);
-    stagingBuffer.unmap();
+    VkDeviceSize tileDataSize = static_cast<VkDeviceSize>(tileResolution) * tileResolution * sizeof(float);
+    uint32_t tilesUploaded = 0;
 
-    // Use CommandScope for one-time command submission
-    CommandScope cmd(device, commandPool, graphicsQueue);
-    if (!cmd.begin()) return;
+    // Process pending uploads (up to budget)
+    for (auto& pending : pendingTileUploads_) {
+        if (tilesUploaded >= MAX_TILE_UPLOADS_PER_FRAME) break;
+        if (!pending.tile || pending.tile->cpuData.empty()) continue;
 
-    // Transition tile array layer to transfer dst
-    Barriers::transitionImage(cmd.get(), tileArrayImage,
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-        VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
-        VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, layerIndex, 1);
+        // Calculate offset in staging buffer for this tile
+        VkDeviceSize stagingOffset = static_cast<VkDeviceSize>(tilesUploaded) * tileDataSize;
 
-    // Copy buffer to image layer
-    Barriers::copyBufferToImageLayer(cmd.get(), stagingBuffer.get(), tileArrayImage,
-                                     tileResolution, tileResolution, layerIndex);
+        // Copy tile data to staging buffer at offset
+        uint8_t* destPtr = static_cast<uint8_t*>(stagingMapped) + stagingOffset;
+        memcpy(destPtr, pending.tile->cpuData.data(), tileDataSize);
 
-    // Transition back to shader read
-    Barriers::transitionImage(cmd.get(), tileArrayImage,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
-        VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-        VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, layerIndex, 1);
+        // Transition tile array layer to transfer dst
+        Barriers::transitionImage(cmd, tileArrayImage,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
+            VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, pending.layerIndex, 1);
 
-    cmd.end();
-    // ManagedBuffer automatically destroyed on scope exit
+        // Copy buffer to image layer (with offset)
+        VkBufferImageCopy region{};
+        region.bufferOffset = stagingOffset;
+        region.bufferRowLength = 0;
+        region.bufferImageHeight = 0;
+        region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        region.imageSubresource.mipLevel = 0;
+        region.imageSubresource.baseArrayLayer = pending.layerIndex;
+        region.imageSubresource.layerCount = 1;
+        region.imageOffset = {0, 0, 0};
+        region.imageExtent = {tileResolution, tileResolution, 1};
+
+        vkCmdCopyBufferToImage(cmd, stagingBuffer, tileArrayImage,
+                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+        // Transition back to shader read
+        Barriers::transitionImage(cmd, tileArrayImage,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+            VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+            VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, pending.layerIndex, 1);
+
+        tilesUploaded++;
+    }
+
+    // Decrement frame counters and remove completed uploads
+    for (auto& pending : pendingTileUploads_) {
+        if (pending.framesRemaining > 0) {
+            pending.framesRemaining--;
+        }
+    }
+
+    // Remove uploads that have been sent to all frames
+    pendingTileUploads_.erase(
+        std::remove_if(pendingTileUploads_.begin(), pendingTileUploads_.end(),
+                       [](const PendingTileUpload& p) { return p.framesRemaining == 0; }),
+        pendingTileUploads_.end());
 }
 
 const TerrainTile* TerrainTileCache::getLoadedTile(TileCoord coord, uint32_t lod) const {
