@@ -62,7 +62,7 @@ RendererSystems::RendererSystems()
     , cloudShadowSystem_(std::make_unique<CloudShadowSystem>())
     // Tier 2 - Environment
     , grassSystem_(std::make_unique<GrassSystem>())
-    , windSystem_(std::make_unique<WindSystem>())
+    // windSystem_ created via factory in RendererInitPhases
     , weatherSystem_(std::make_unique<WeatherSystem>())
     , leafSystem_(std::make_unique<LeafSystem>())
     // Tier 2 - Snow
@@ -141,6 +141,10 @@ void RendererSystems::setSky(std::unique_ptr<SkySystem> system) {
     skySystem_ = std::move(system);
 }
 
+void RendererSystems::setWind(std::unique_ptr<WindSystem> system) {
+    windSystem_ = std::move(system);
+}
+
 bool RendererSystems::init(const InitContext& /*initCtx*/,
                             VkRenderPass /*swapchainRenderPass*/,
                             VkFormat /*swapchainImageFormat*/,
@@ -194,7 +198,7 @@ void RendererSystems::destroy(VkDevice device, VmaAllocator allocator) {
     snowMaskSystem_->destroy(device, allocator);
 
     // Grass/Wind
-    windSystem_->destroy(device, allocator);
+    windSystem_.reset();  // RAII cleanup via destructor
     grassSystem_->destroy(device, allocator);
 
     sceneManager_->destroy(allocator, device);

@@ -159,11 +159,10 @@ public:
     /**
      * Initialize grass and wind systems (GrassSystem, WindSystem)
      * Also connects environment settings to grass and leaf systems
+     * Creates WindSystem via factory and stores it in RendererSystems
      */
     static bool initGrassSubsystem(
-        GrassSystem& grassSystem,
-        WindSystem& windSystem,
-        LeafSystem& leafSystem,
+        RendererSystems& systems,
         const InitContext& ctx,
         VkRenderPass hdrRenderPass,
         VkRenderPass shadowRenderPass,
@@ -172,14 +171,12 @@ public:
 
     // Overload using CoreResources
     static bool initGrassSubsystem(
-        GrassSystem& grassSystem,
-        WindSystem& windSystem,
-        LeafSystem& leafSystem,
+        RendererSystems& systems,
         const InitContext& ctx,
         const HDRResources& hdr,
         const ShadowResources& shadow
     ) {
-        return initGrassSubsystem(grassSystem, windSystem, leafSystem, ctx,
+        return initGrassSubsystem(systems, ctx,
                                    hdr.renderPass, shadow.renderPass, shadow.mapSize);
     }
 

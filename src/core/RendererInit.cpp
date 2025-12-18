@@ -114,14 +114,25 @@ bool RendererInit::initSnowSubsystems(
 }
 
 bool RendererInit::initGrassSubsystem(
-    GrassSystem& grassSystem,
-    WindSystem& windSystem,
-    LeafSystem& leafSystem,
+    RendererSystems& systems,
     const InitContext& ctx,
     VkRenderPass hdrRenderPass,
     VkRenderPass shadowRenderPass,
     uint32_t shadowMapSize
 ) {
+    // Initialize wind system via factory
+    WindSystem::InitInfo windInfo{};
+    windInfo.device = ctx.device;
+    windInfo.allocator = ctx.allocator;
+    windInfo.framesInFlight = ctx.framesInFlight;
+
+    auto windSystem = WindSystem::create(windInfo);
+    if (!windSystem) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize WindSystem");
+        return false;
+    }
+    systems.setWind(std::move(windSystem));
+
     // Initialize grass system using HDR render pass
     GrassSystem::InitInfo grassInfo{};
     grassInfo.device = ctx.device;
@@ -134,26 +145,15 @@ bool RendererInit::initGrassSubsystem(
     grassInfo.shaderPath = ctx.shaderPath;
     grassInfo.framesInFlight = ctx.framesInFlight;
 
-    if (!grassSystem.init(grassInfo)) {
+    if (!systems.grass().init(grassInfo)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize GrassSystem");
         return false;
     }
 
-    // Initialize wind system
-    WindSystem::InitInfo windInfo{};
-    windInfo.device = ctx.device;
-    windInfo.allocator = ctx.allocator;
-    windInfo.framesInFlight = ctx.framesInFlight;
-
-    if (!windSystem.init(windInfo)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize WindSystem");
-        return false;
-    }
-
     // Connect environment settings
-    const EnvironmentSettings* environmentSettings = &windSystem.getEnvironmentSettings();
-    grassSystem.setEnvironmentSettings(environmentSettings);
-    leafSystem.setEnvironmentSettings(environmentSettings);
+    const EnvironmentSettings* environmentSettings = &systems.wind().getEnvironmentSettings();
+    systems.grass().setEnvironmentSettings(environmentSettings);
+    systems.leaf().setEnvironmentSettings(environmentSettings);
 
     return true;
 }

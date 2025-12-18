@@ -130,6 +130,7 @@ public:
     const GrassSystem& grass() const { return *grassSystem_; }
     WindSystem& wind() { return *windSystem_; }
     const WindSystem& wind() const { return *windSystem_; }
+    void setWind(std::unique_ptr<WindSystem> system);
     WeatherSystem& weather() { return *weatherSystem_; }
     const WeatherSystem& weather() const { return *weatherSystem_; }
     LeafSystem& leaf() { return *leafSystem_; }

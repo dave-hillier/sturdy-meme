@@ -157,9 +157,8 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     if (!createDescriptorSets()) return false;
     if (!createSkinnedMeshRendererDescriptorSets()) return false;
 
-    // Initialize grass and wind subsystems
-    if (!RendererInit::initGrassSubsystem(systems_->grass(), systems_->wind(), systems_->leaf(), initCtx,
-                                          core.hdr, core.shadow)) return false;
+    // Initialize grass and wind subsystems (WindSystem created via factory)
+    if (!RendererInit::initGrassSubsystem(*systems_, initCtx, core.hdr, core.shadow)) return false;
 
     const EnvironmentSettings* envSettings = &systems_->wind().getEnvironmentSettings();
 
