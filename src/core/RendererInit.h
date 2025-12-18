@@ -52,7 +52,7 @@ struct WaterSubsystems {
     WaterDisplacement& displacement;
     FlowMapGenerator& flowMapGenerator;
     FoamBuffer& foamBuffer;
-    SSRSystem& ssrSystem;
+    RendererSystems& rendererSystems;  // For SSR factory creation
     WaterTileCull& tileCull;
     WaterGBuffer& gBuffer;
 };

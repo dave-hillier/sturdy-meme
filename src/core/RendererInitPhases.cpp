@@ -278,7 +278,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     systems_->setProfiler(Profiler::create(device, physicalDevice, MAX_FRAMES_IN_FLIGHT));
 
     // Initialize water subsystems (WaterSystem, WaterDisplacement, FlowMap, Foam, SSR, TileCull, GBuffer)
-    WaterSubsystems waterSubs{systems_->water(), systems_->waterDisplacement(), systems_->flowMap(), systems_->foam(), systems_->ssr(), systems_->waterTileCull(), systems_->waterGBuffer()};
+    WaterSubsystems waterSubs{systems_->water(), systems_->waterDisplacement(), systems_->flowMap(), systems_->foam(), *systems_, systems_->waterTileCull(), systems_->waterGBuffer()};
     if (!RendererInit::initWaterSubsystems(waterSubs, initCtx, core.hdr.renderPass,
                                             systems_->shadow(), systems_->terrain(), terrainConfig, systems_->postProcess(), depthSampler.get())) return false;
 

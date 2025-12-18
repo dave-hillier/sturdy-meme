@@ -150,6 +150,7 @@ public:
     const FoamBuffer& foam() const { return *foamBuffer_; }
     SSRSystem& ssr() { return *ssrSystem_; }
     const SSRSystem& ssr() const { return *ssrSystem_; }
+    void setSSR(std::unique_ptr<SSRSystem> system);
     WaterTileCull& waterTileCull() { return *waterTileCull_; }
     const WaterTileCull& waterTileCull() const { return *waterTileCull_; }
     WaterGBuffer& waterGBuffer() { return *waterGBuffer_; }

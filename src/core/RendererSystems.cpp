@@ -73,7 +73,7 @@ RendererSystems::RendererSystems()
     , waterDisplacement_(std::make_unique<WaterDisplacement>())
     , flowMapGenerator_(std::make_unique<FlowMapGenerator>())
     , foamBuffer_(std::make_unique<FoamBuffer>())
-    , ssrSystem_(std::make_unique<SSRSystem>())
+    // ssrSystem_ created via factory in RendererInit
     , waterTileCull_(std::make_unique<WaterTileCull>())
     , waterGBuffer_(std::make_unique<WaterGBuffer>())
     // Tier 2 - Geometry
@@ -125,6 +125,10 @@ void RendererSystems::setBloom(std::unique_ptr<BloomSystem> system) {
     bloomSystem_ = std::move(system);
 }
 
+void RendererSystems::setSSR(std::unique_ptr<SSRSystem> system) {
+    ssrSystem_ = std::move(system);
+}
+
 bool RendererSystems::init(const InitContext& /*initCtx*/,
                             VkRenderPass /*swapchainRenderPass*/,
                             VkFormat /*swapchainImageFormat*/,
@@ -154,7 +158,7 @@ void RendererSystems::destroy(VkDevice device, VmaAllocator allocator) {
     // Water
     waterGBuffer_->destroy();
     waterTileCull_->destroy();
-    ssrSystem_->destroy();
+    ssrSystem_.reset();  // RAII cleanup via destructor
     foamBuffer_->destroy();
     flowMapGenerator_->destroy(device, allocator);
     waterDisplacement_->destroy();

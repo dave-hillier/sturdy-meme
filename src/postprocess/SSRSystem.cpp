@@ -7,7 +7,33 @@
 #include <array>
 #include <cstring>
 
-bool SSRSystem::init(const InitInfo& info) {
+std::unique_ptr<SSRSystem> SSRSystem::create(const InitInfo& info) {
+    auto system = std::unique_ptr<SSRSystem>(new SSRSystem());
+    if (!system->initInternal(info)) {
+        return nullptr;
+    }
+    return system;
+}
+
+std::unique_ptr<SSRSystem> SSRSystem::create(const InitContext& ctx) {
+    InitInfo info;
+    info.device = ctx.device;
+    info.physicalDevice = ctx.physicalDevice;
+    info.allocator = ctx.allocator;
+    info.commandPool = ctx.commandPool;
+    info.computeQueue = ctx.graphicsQueue;  // Use graphics queue for compute
+    info.shaderPath = ctx.shaderPath;
+    info.framesInFlight = ctx.framesInFlight;
+    info.extent = ctx.extent;
+    info.descriptorPool = ctx.descriptorPool;
+    return create(info);
+}
+
+SSRSystem::~SSRSystem() {
+    cleanup();
+}
+
+bool SSRSystem::initInternal(const InitInfo& info) {
     device = info.device;
     physicalDevice = info.physicalDevice;
     allocator = info.allocator;
@@ -27,27 +53,7 @@ bool SSRSystem::init(const InitInfo& info) {
     return true;
 }
 
-bool SSRSystem::init(const InitContext& ctx) {
-    device = ctx.device;
-    physicalDevice = ctx.physicalDevice;
-    allocator = ctx.allocator;
-    commandPool = ctx.commandPool;
-    computeQueue = ctx.graphicsQueue;  // Use graphics queue for compute
-    shaderPath = ctx.shaderPath;
-    framesInFlight = ctx.framesInFlight;
-    extent = ctx.extent;
-    descriptorPool = ctx.descriptorPool;
-
-    if (!createSSRBuffers()) return false;
-    if (!createComputePipeline()) return false;
-    if (!createBlurPipeline()) return false;
-    if (!createDescriptorSets()) return false;
-
-    SDL_Log("SSRSystem initialized: %dx%d (with bilateral blur)", extent.width, extent.height);
-    return true;
-}
-
-void SSRSystem::destroy() {
+void SSRSystem::cleanup() {
     if (device == VK_NULL_HANDLE) return;
 
     vkDeviceWaitIdle(device);
