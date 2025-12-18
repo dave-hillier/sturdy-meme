@@ -64,6 +64,7 @@ private:
     SDL_Window* window = nullptr;
 
     vkb::Instance vkbInstance;
+    vkb::PhysicalDevice vkbPhysicalDevice;
     vkb::Device vkbDevice;
 
     VkInstance instance = VK_NULL_HANDLE;

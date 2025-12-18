@@ -85,25 +85,13 @@ bool VulkanContext::selectPhysicalDevice() {
         return false;
     }
 
-    physicalDevice = physRet.value().physical_device;
+    vkbPhysicalDevice = physRet.value();
+    physicalDevice = vkbPhysicalDevice.physical_device;
     return true;
 }
 
 bool VulkanContext::createLogicalDevice() {
-    VkPhysicalDeviceFeatures features{};
-    features.samplerAnisotropy = VK_FALSE;
-
-    vkb::PhysicalDeviceSelector selector{vkbInstance};
-    auto physRet = selector.set_minimum_version(1, 2)
-        .set_surface(surface)
-        .set_required_features(features)
-        .select();
-
-    if (!physRet) {
-        return false;
-    }
-
-    vkb::DeviceBuilder deviceBuilder{physRet.value()};
+    vkb::DeviceBuilder deviceBuilder{vkbPhysicalDevice};
     auto devRet = deviceBuilder.build();
 
     if (!devRet) {
