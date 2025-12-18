@@ -83,6 +83,13 @@ Systems initialized via explicit `init(InitContext&, SystemInitInfo&)`:
 - `ManagedImage`, `ManagedBuffer`, `ManagedSampler`, `ManagedDescriptorSet`
 - `RAIIAdapter.h` for converting POD objects to RAII-managed versions
 
+### Async Upload Pattern
+See [ASYNC_UPLOAD_PATTERN.md](ASYNC_UPLOAD_PATTERN.md) for fence-free GPU upload pattern:
+- Per-frame staging buffers avoid race conditions with in-flight frames
+- `recordUpload()` API records transfer commands without blocking
+- Frame fences handle synchronization naturally
+- Used by: `TerrainMeshlet`, `VirtualTextureCache`, `VirtualTexturePageTable`
+
 ### Per-Frame Data
 - `FrameData` - Consolidated state (frame index, deltaTime, camera, lighting, player, terrain, wind/weather)
 - `RenderContext` - Execution context (cmd buffer, frame data, render resources)
