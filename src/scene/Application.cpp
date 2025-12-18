@@ -5,6 +5,7 @@
 #include <unordered_set>
 
 #include "TerrainSystem.h"
+#include "TerrainTileCache.h"
 #include "RockSystem.h"
 #include "SceneManager.h"
 #include "WaterSystem.h"
@@ -83,25 +84,26 @@ bool Application::init(const std::string& title, int width, int height) {
     // Get terrain reference for spawning objects
     auto& terrain = renderer.getTerrainSystem();
 
-    // Create terrain physics heightfield from the terrain heightmap data
-    // This provides collision for the entire terrain matching the visual rendering
-    // Note: hole mask is not passed since it's at different resolution (2048 vs 512);
-    // holes in the terrain (e.g., well entrance) will still allow objects through visually
+    // Initialize tiled physics terrain manager
+    // Uses high-resolution terrain tiles (~1m spacing) within 1000m of player
+    // instead of a single coarse heightfield (~32m spacing)
     {
-        const float* heightData = terrain.getHeightMapData();
-        uint32_t resolution = terrain.getHeightMapResolution();
-        float worldSize = terrain.getConfig().size;
-        float heightScale = terrain.getConfig().heightScale;
+        TerrainTileCache* tileCache = terrain.getTileCache();
+        if (tileCache) {
+            PhysicsTerrainTileManager::Config config;
+            config.loadRadius = 1000.0f;
+            config.unloadRadius = 1200.0f;
+            config.maxTilesPerFrame = 2;
+            config.terrainSize = terrain.getConfig().size;
+            config.heightScale = terrain.getConfig().heightScale;
 
-        PhysicsBodyID terrainBody = physics().createTerrainHeightfield(
-            heightData, resolution, worldSize, heightScale
-        );
-
-        if (terrainBody != INVALID_BODY_ID) {
-            SDL_Log("Terrain heightfield physics created: %ux%u samples, world size %.0f, height scale %.1f",
-                    resolution, resolution, worldSize, heightScale);
+            if (physicsTerrainManager_.init(physics(), *tileCache, config)) {
+                SDL_Log("Physics terrain tile manager initialized");
+            } else {
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize physics terrain tile manager!");
+            }
         } else {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create terrain heightfield physics!");
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Terrain tile cache not available for physics!");
         }
     }
 
@@ -279,7 +281,9 @@ void Application::run() {
         // Update physics simulation
         physics().update(deltaTime);
 
+        // Update physics terrain tiles based on player position
         glm::vec3 playerPos = physics().getCharacterPosition();
+        physicsTerrainManager_.update(playerPos);
 
         // Debug: Log orb position every second to track physics terrain offset
         static float debugLogTimer = 0.0f;
@@ -430,6 +434,7 @@ void Application::shutdown() {
     renderer.waitIdle();
     gui.shutdown(renderer.getDevice());
     input.shutdown();
+    physicsTerrainManager_.cleanup();
     physics_.reset();  // RAII cleanup via optional reset
     renderer.shutdown();
 

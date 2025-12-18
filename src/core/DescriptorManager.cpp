@@ -81,8 +81,10 @@ bool DescriptorManager::LayoutBuilder::buildManaged(ManagedDescriptorSetLayout& 
 DescriptorManager::SetWriter::SetWriter(VkDevice device, VkDescriptorSet set)
     : device(device), set(set) {
     // Reserve space to avoid reallocation invalidating pointers
-    bufferInfos.reserve(16);
-    imageInfos.reserve(16);
+    // Increased to 32 to handle larger descriptor sets with tile cache bindings
+    bufferInfos.reserve(32);
+    imageInfos.reserve(32);
+    writes.reserve(32);  // Also reserve writes vector
 }
 
 DescriptorManager::SetWriter& DescriptorManager::SetWriter::writeBuffer(

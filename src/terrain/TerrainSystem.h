@@ -242,6 +242,17 @@ public:
     TerrainTileCache* getTileCache() { return tileCache ? &tileCache->get() : nullptr; }
     const TerrainTileCache* getTileCache() const { return tileCache ? &tileCache->get() : nullptr; }
 
+    // Tile cache GPU resource accessors (for grass/other systems)
+    VkImageView getTileArrayView() const {
+        return tileCache ? (*tileCache)->getTileArrayView() : VK_NULL_HANDLE;
+    }
+    VkSampler getTileSampler() const {
+        return tileCache ? (*tileCache)->getSampler() : VK_NULL_HANDLE;
+    }
+    VkBuffer getTileInfoBuffer() const {
+        return tileCache ? (*tileCache)->getTileInfoBuffer() : VK_NULL_HANDLE;
+    }
+
     // Toggle wireframe mode for debugging
     void setWireframeMode(bool enabled) { wireframeMode = enabled; }
     bool isWireframeMode() const { return wireframeMode; }

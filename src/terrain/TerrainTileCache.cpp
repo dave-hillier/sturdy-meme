@@ -117,6 +117,10 @@ bool TerrainTileCache::init(const InitInfo& info) {
         vkFreeCommandBuffers(device, commandPool, 1, &cmd);
     }
 
+    // Initialize tile info buffer with activeTileCount = 0
+    // This ensures shaders don't read garbage if they run before first updateActiveTiles()
+    updateTileInfoBuffer();
+
     SDL_Log("TerrainTileCache initialized: %s", cacheDirectory.c_str());
     SDL_Log("  Terrain size: %.0fm, Tile resolution: %u, LOD levels: %u",
             terrainSize, tileResolution, numLODLevels);
@@ -742,4 +746,47 @@ bool TerrainTileCache::loadTileCPUOnly(TileCoord coord, uint32_t lod) {
             coord.x, coord.z, lod, tile.worldMinX, tile.worldMinZ, tile.worldMaxX, tile.worldMaxZ);
 
     return true;
+}
+
+void TerrainTileCache::preloadTilesAround(float worldX, float worldZ, float radius) {
+    // Pre-load LOD0 tiles (highest resolution) around the given position
+    // This is synchronous and blocks until tiles are loaded
+    const uint32_t lod = 0;
+    const float tileWorldSizeX = terrainSize / tilesX;
+    const float tileWorldSizeZ = terrainSize / tilesZ;
+
+    // Calculate tile range covering the radius
+    int32_t minTileX = static_cast<int32_t>(((worldX - radius) / terrainSize + 0.5f) * tilesX);
+    int32_t maxTileX = static_cast<int32_t>(((worldX + radius) / terrainSize + 0.5f) * tilesX);
+    int32_t minTileZ = static_cast<int32_t>(((worldZ - radius) / terrainSize + 0.5f) * tilesZ);
+    int32_t maxTileZ = static_cast<int32_t>(((worldZ + radius) / terrainSize + 0.5f) * tilesZ);
+
+    // Clamp to valid range
+    minTileX = std::max(0, minTileX);
+    maxTileX = std::min(static_cast<int32_t>(tilesX - 1), maxTileX);
+    minTileZ = std::max(0, minTileZ);
+    maxTileZ = std::min(static_cast<int32_t>(tilesZ - 1), maxTileZ);
+
+    uint32_t tilesLoaded = 0;
+    for (int32_t tz = minTileZ; tz <= maxTileZ; tz++) {
+        for (int32_t tx = minTileX; tx <= maxTileX; tx++) {
+            // Calculate tile center for distance check
+            float tileCenterX = ((static_cast<float>(tx) + 0.5f) / tilesX - 0.5f) * terrainSize;
+            float tileCenterZ = ((static_cast<float>(tz) + 0.5f) / tilesZ - 0.5f) * terrainSize;
+
+            float dx = worldX - tileCenterX;
+            float dz = worldZ - tileCenterZ;
+            float dist = std::sqrt(dx * dx + dz * dz);
+
+            if (dist < radius) {
+                TileCoord coord{tx, tz};
+                if (loadTileCPUOnly(coord, lod)) {
+                    tilesLoaded++;
+                }
+            }
+        }
+    }
+
+    SDL_Log("TerrainTileCache: Pre-loaded %u LOD0 tiles around (%.0f, %.0f) radius %.0f",
+            tilesLoaded, worldX, worldZ, radius);
 }

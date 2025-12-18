@@ -126,6 +126,10 @@ public:
     // Returns true if cpuData is available after this call
     bool loadTileCPUOnly(TileCoord coord, uint32_t lod);
 
+    // Pre-load tiles (CPU data only) around a world position for immediate height queries
+    // Call this before spawning objects to ensure getHeightAt() returns high-res values
+    void preloadTilesAround(float worldX, float worldZ, float radius);
+
     // LOD distance thresholds (can be configured)
     static constexpr float LOD0_MAX_DISTANCE = 1000.0f;  // < 1km: LOD0
     static constexpr float LOD1_MAX_DISTANCE = 2000.0f;  // 1-2km: LOD1

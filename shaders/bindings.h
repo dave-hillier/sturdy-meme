@@ -110,8 +110,10 @@
 #define BINDING_GRASS_COMPUTE_INSTANCES    0   // Grass instance buffer (output)
 #define BINDING_GRASS_COMPUTE_INDIRECT     1   // Indirect draw buffer
 #define BINDING_GRASS_COMPUTE_UNIFORMS     2   // Grass uniforms
-#define BINDING_GRASS_COMPUTE_HEIGHT_MAP   3   // Terrain height map
+#define BINDING_GRASS_COMPUTE_HEIGHT_MAP   3   // Terrain height map (global coarse LOD)
 #define BINDING_GRASS_COMPUTE_DISPLACEMENT 4   // Displacement map
+#define BINDING_GRASS_COMPUTE_TILE_ARRAY   5   // LOD tile array (high-res tiles near camera)
+#define BINDING_GRASS_COMPUTE_TILE_INFO    6   // Tile info SSBO
 
 // =============================================================================
 // Grass Displacement Compute Shader Descriptor Set

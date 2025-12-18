@@ -28,8 +28,27 @@
 // Meshlet vertex buffer (local UV coordinates in unit triangle)
 layout(location = 0) in vec2 inLocalUV;
 
-// Height map
-layout(binding = BINDING_TERRAIN_HEIGHT_MAP) uniform sampler2D heightMap;
+// Height map (global coarse LOD - fallback for distant terrain)
+layout(binding = BINDING_TERRAIN_HEIGHT_MAP) uniform sampler2D heightMapGlobal;
+
+// LOD tile array (high-res tiles near camera)
+layout(binding = BINDING_TERRAIN_TILE_ARRAY) uniform sampler2DArray heightMapTiles;
+
+// Tile info buffer - world bounds for each active tile
+struct TileInfo {
+    vec4 worldBounds;    // xy = min corner, zw = max corner
+    vec4 uvScaleOffset;  // xy = scale, zw = offset
+};
+layout(std430, binding = BINDING_TERRAIN_TILE_INFO) readonly buffer TileInfoBuffer {
+    uint activeTileCount;
+    uint padding1;
+    uint padding2;
+    uint padding3;
+    TileInfo tiles[];
+};
+
+// Include tile cache common after defining prerequisites
+#include "../tile_cache_common.glsl"
 
 // Volumetric snow cascades
 layout(binding = BINDING_TERRAIN_SNOW_CASCADE_0) uniform sampler2D snowCascade0;
@@ -66,11 +85,6 @@ layout(location = 0) out vec2 fragTexCoord;
 layout(location = 1) out vec3 fragNormal;
 layout(location = 2) out vec3 fragWorldPos;
 layout(location = 3) out float fragDepth;
-
-// Calculate normal from height map gradient
-vec3 calculateNormal(vec2 uv) {
-    return calculateTerrainNormalFromHeightmap(heightMap, uv, TERRAIN_SIZE, HEIGHT_SCALE);
-}
 
 void main() {
     // gl_InstanceIndex tells us which CBT leaf node we're rendering
@@ -109,18 +123,20 @@ void main() {
     uv.x = dot(baryWeights, transformedX);
     uv.y = dot(baryWeights, transformedY);
 
-    // Sample height using shared function
-    float height = sampleTerrainHeight(heightMap, uv, HEIGHT_SCALE);
-
-    // Compute world position
-    vec3 worldPos = vec3(
+    // Compute world XZ position first (needed for tile lookup)
+    vec2 worldXZ = vec2(
         (uv.x - 0.5) * TERRAIN_SIZE,
-        height,
         (uv.y - 0.5) * TERRAIN_SIZE
     );
 
-    // Calculate normal
-    vec3 normal = calculateNormal(uv);
+    // Sample height with LOD tile support
+    float height = sampleHeightWithTileCache(heightMapGlobal, heightMapTiles, uv, worldXZ, HEIGHT_SCALE, activeTileCount);
+
+    // Compute world position
+    vec3 worldPos = vec3(worldXZ.x, height, worldXZ.y);
+
+    // Calculate normal with LOD support
+    vec3 normal = calculateNormalWithTileCache(heightMapGlobal, heightMapTiles, uv, worldXZ, TERRAIN_SIZE, HEIGHT_SCALE, activeTileCount);
 
     // Apply volumetric snow displacement
     if (useVolumetricSnow > 0.5) {
