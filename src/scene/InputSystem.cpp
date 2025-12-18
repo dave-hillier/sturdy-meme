@@ -2,13 +2,12 @@
 #include "GuiSystem.h"
 #include <cmath>
 
-bool InputSystem::init() {
-    // Scan for connected gamepads
+InputSystem::InputSystem() {
+    // Scan for connected gamepads on construction
     scanForGamepads();
-    return true;
 }
 
-void InputSystem::shutdown() {
+InputSystem::~InputSystem() {
     closeGamepad();
 }
 

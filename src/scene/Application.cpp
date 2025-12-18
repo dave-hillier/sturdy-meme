@@ -25,11 +25,7 @@ bool Application::init(const std::string& title, int width, int height) {
         return false;
     }
 
-    // Initialize input system (handles gamepad detection)
-    if (!input.init()) {
-        SDL_Log("Failed to initialize input system");
-        return false;
-    }
+    // InputSystem initializes itself in constructor (RAII)
 
     window = SDL_CreateWindow(title.c_str(), width, height, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
     if (!window) {
@@ -433,7 +429,7 @@ void Application::run() {
 void Application::shutdown() {
     renderer.waitIdle();
     gui.shutdown(renderer.getDevice());
-    input.shutdown();
+    // InputSystem cleanup handled by destructor (RAII)
     physicsTerrainManager_.cleanup();
     physics_.reset();  // RAII cleanup via optional reset
     renderer.shutdown();
