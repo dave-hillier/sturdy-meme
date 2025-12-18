@@ -588,18 +588,17 @@ bool RendererInit::initTreeEditSystem(
     return true;
 }
 
-bool RendererInit::initDebugLineSystem(
-    DebugLineSystem& debugLineSystem,
+std::unique_ptr<DebugLineSystem> RendererInit::createDebugLineSystem(
     const InitContext& ctx,
     VkRenderPass hdrRenderPass
 ) {
-    if (!debugLineSystem.init(ctx.device, ctx.allocator, hdrRenderPass,
-                              ctx.shaderPath, ctx.framesInFlight)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize debug line system");
-        return false;
+    auto system = DebugLineSystem::create(ctx, hdrRenderPass);
+    if (!system) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create debug line system");
+        return nullptr;
     }
-    SDL_Log("Debug line system initialized");
-    return true;
+    SDL_Log("Debug line system created");
+    return system;
 }
 
 void RendererInit::updateCloudShadowBindings(

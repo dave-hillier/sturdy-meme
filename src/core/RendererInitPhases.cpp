@@ -291,8 +291,10 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
 
     if (!createSyncObjects()) return false;
 
-    // Initialize debug line system
-    if (!RendererInit::initDebugLineSystem(systems_->debugLine(), initCtx, core.hdr)) return false;
+    // Create debug line system via factory
+    auto debugLineSystem = RendererInit::createDebugLineSystem(initCtx, core.hdr);
+    if (!debugLineSystem) return false;
+    systems_->setDebugLineSystem(std::move(debugLineSystem));
     SDL_Log("Debug line system initialized");
 
     // Initialize UBO builder with system references

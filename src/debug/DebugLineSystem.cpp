@@ -4,8 +4,77 @@
 #include <cstring>
 #include <algorithm>
 
-bool DebugLineSystem::init(VkDevice device, VmaAllocator allocator, VkRenderPass renderPass,
-                            const std::string& shaderPath, uint32_t framesInFlight) {
+// Private constructor
+DebugLineSystem::DebugLineSystem() = default;
+
+// Factory methods
+std::unique_ptr<DebugLineSystem> DebugLineSystem::create(VkDevice device, VmaAllocator allocator,
+                                                          VkRenderPass renderPass,
+                                                          const std::string& shaderPath,
+                                                          uint32_t framesInFlight) {
+    std::unique_ptr<DebugLineSystem> system(new DebugLineSystem());
+    if (!system->initInternal(device, allocator, renderPass, shaderPath, framesInFlight)) {
+        return nullptr;
+    }
+    return system;
+}
+
+std::unique_ptr<DebugLineSystem> DebugLineSystem::create(const InitContext& ctx, VkRenderPass renderPass) {
+    return create(ctx.device, ctx.allocator, renderPass, ctx.shaderPath, ctx.framesInFlight);
+}
+
+// Destructor
+DebugLineSystem::~DebugLineSystem() {
+    cleanup();
+}
+
+// Move constructor
+DebugLineSystem::DebugLineSystem(DebugLineSystem&& other) noexcept
+    : device(other.device)
+    , allocator(other.allocator)
+    , pipelineLayout(other.pipelineLayout)
+    , linePipeline(other.linePipeline)
+    , trianglePipeline(other.trianglePipeline)
+    , frameData(std::move(other.frameData))
+    , currentFrame(other.currentFrame)
+    , lineVertices(std::move(other.lineVertices))
+    , triangleVertices(std::move(other.triangleVertices))
+{
+    // Null out the source to prevent double-free
+    other.device = VK_NULL_HANDLE;
+    other.allocator = VK_NULL_HANDLE;
+    other.pipelineLayout = VK_NULL_HANDLE;
+    other.linePipeline = VK_NULL_HANDLE;
+    other.trianglePipeline = VK_NULL_HANDLE;
+}
+
+// Move assignment
+DebugLineSystem& DebugLineSystem::operator=(DebugLineSystem&& other) noexcept {
+    if (this != &other) {
+        cleanup();
+
+        device = other.device;
+        allocator = other.allocator;
+        pipelineLayout = other.pipelineLayout;
+        linePipeline = other.linePipeline;
+        trianglePipeline = other.trianglePipeline;
+        frameData = std::move(other.frameData);
+        currentFrame = other.currentFrame;
+        lineVertices = std::move(other.lineVertices);
+        triangleVertices = std::move(other.triangleVertices);
+
+        other.device = VK_NULL_HANDLE;
+        other.allocator = VK_NULL_HANDLE;
+        other.pipelineLayout = VK_NULL_HANDLE;
+        other.linePipeline = VK_NULL_HANDLE;
+        other.trianglePipeline = VK_NULL_HANDLE;
+    }
+    return *this;
+}
+
+// Internal initialization
+bool DebugLineSystem::initInternal(VkDevice device, VmaAllocator allocator, VkRenderPass renderPass,
+                                    const std::string& shaderPath, uint32_t framesInFlight) {
     this->device = device;
     this->allocator = allocator;
 
@@ -22,24 +91,8 @@ bool DebugLineSystem::init(VkDevice device, VmaAllocator allocator, VkRenderPass
     return true;
 }
 
-bool DebugLineSystem::init(const InitContext& ctx, VkRenderPass renderPass) {
-    this->device = ctx.device;
-    this->allocator = ctx.allocator;
-
-    // Create per-frame data
-    frameData.resize(ctx.framesInFlight);
-
-    // Create pipeline
-    if (!createPipeline(renderPass, ctx.shaderPath)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "DebugLineSystem: Failed to create pipeline");
-        return false;
-    }
-
-    SDL_Log("DebugLineSystem: Initialized with %u frames in flight", ctx.framesInFlight);
-    return true;
-}
-
-void DebugLineSystem::shutdown() {
+// Cleanup (called by destructor)
+void DebugLineSystem::cleanup() {
     if (device == VK_NULL_HANDLE) return;
 
     vkDeviceWaitIdle(device);

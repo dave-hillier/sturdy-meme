@@ -88,7 +88,7 @@ RendererSystems::RendererSystems()
     , skinnedMeshRenderer_(std::make_unique<SkinnedMeshRenderer>())
     // Tools
     , treeEditSystem_(std::make_unique<TreeEditSystem>())
-    , debugLineSystem_(std::make_unique<DebugLineSystem>())
+    // debugLineSystem_ created via factory in RendererInit::initDebugLineSystem
     , profiler_(std::make_unique<Profiler>())
     // Coordination
     , resizeCoordinator_(std::make_unique<ResizeCoordinator>())
@@ -103,6 +103,10 @@ RendererSystems::RendererSystems()
 RendererSystems::~RendererSystems() {
     // unique_ptrs handle destruction automatically in reverse order
     // No manual cleanup needed - this is the benefit of RAII
+}
+
+void RendererSystems::setDebugLineSystem(std::unique_ptr<DebugLineSystem> system) {
+    debugLineSystem_ = std::move(system);
 }
 
 bool RendererSystems::init(const InitContext& /*initCtx*/,
@@ -127,7 +131,8 @@ void RendererSystems::destroy(VkDevice device, VmaAllocator allocator) {
     // Destroy in reverse dependency order
     // Tier 2+ first, then Tier 1
 
-    debugLineSystem_->shutdown();
+    // debugLineSystem_ cleanup handled by destructor (RAII)
+    debugLineSystem_.reset();
     treeEditSystem_->destroy(device, allocator);
 
     // Water

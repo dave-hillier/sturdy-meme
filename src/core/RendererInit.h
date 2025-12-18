@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 #include <functional>
+#include <memory>
 #include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
 
@@ -364,21 +365,19 @@ public:
     }
 
     /**
-     * Initialize debug line system for physics visualization
+     * Create debug line system for physics visualization (factory pattern)
      */
-    static bool initDebugLineSystem(
-        DebugLineSystem& debugLineSystem,
+    static std::unique_ptr<DebugLineSystem> createDebugLineSystem(
         const InitContext& ctx,
         VkRenderPass hdrRenderPass
     );
 
-    // Overload using CoreResources
-    static bool initDebugLineSystem(
-        DebugLineSystem& debugLineSystem,
+    // Overload using HDRResources
+    static std::unique_ptr<DebugLineSystem> createDebugLineSystem(
         const InitContext& ctx,
         const HDRResources& hdr
     ) {
-        return initDebugLineSystem(debugLineSystem, ctx, hdr.renderPass);
+        return createDebugLineSystem(ctx, hdr.renderPass);
     }
 
     /**

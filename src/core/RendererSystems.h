@@ -180,6 +180,7 @@ public:
     const TreeEditSystem& treeEdit() const { return *treeEditSystem_; }
     DebugLineSystem& debugLine() { return *debugLineSystem_; }
     const DebugLineSystem& debugLine() const { return *debugLineSystem_; }
+    void setDebugLineSystem(std::unique_ptr<DebugLineSystem> system);
     Profiler& profiler() { return *profiler_; }
     const Profiler& profiler() const { return *profiler_; }
 
