@@ -83,7 +83,7 @@ RendererSystems::RendererSystems()
     , hiZSystem_(std::make_unique<HiZSystem>())
     // Infrastructure
     , sceneManager_(std::make_unique<SceneManager>())
-    , globalBufferManager_(std::make_unique<GlobalBufferManager>())
+    // globalBufferManager_ created via factory in RendererInitPhases
     , erosionDataLoader_(std::make_unique<ErosionDataLoader>())
     , skinnedMeshRenderer_(std::make_unique<SkinnedMeshRenderer>())
     // Tools
@@ -111,6 +111,10 @@ void RendererSystems::setDebugLineSystem(std::unique_ptr<DebugLineSystem> system
 
 void RendererSystems::setProfiler(std::unique_ptr<Profiler> profiler) {
     profiler_ = std::move(profiler);
+}
+
+void RendererSystems::setGlobalBuffers(std::unique_ptr<GlobalBufferManager> buffers) {
+    globalBufferManager_ = std::move(buffers);
 }
 
 bool RendererSystems::init(const InitContext& /*initCtx*/,
@@ -170,7 +174,7 @@ void RendererSystems::destroy(VkDevice device, VmaAllocator allocator) {
     grassSystem_->destroy(device, allocator);
 
     sceneManager_->destroy(allocator, device);
-    globalBufferManager_->destroy(allocator);
+    globalBufferManager_.reset();  // RAII cleanup via destructor
 
     // Tier 1
     skySystem_->destroy(device, allocator);

@@ -168,6 +168,7 @@ public:
     const SceneManager& scene() const { return *sceneManager_; }
     GlobalBufferManager& globalBuffers() { return *globalBufferManager_; }
     const GlobalBufferManager& globalBuffers() const { return *globalBufferManager_; }
+    void setGlobalBuffers(std::unique_ptr<GlobalBufferManager> buffers);
     ErosionDataLoader& erosionData() { return *erosionDataLoader_; }
     const ErosionDataLoader& erosionData() const { return *erosionDataLoader_; }
 

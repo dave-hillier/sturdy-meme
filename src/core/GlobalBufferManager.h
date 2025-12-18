@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include <cstring>
+#include <memory>
 
 #include "BufferUtils.h"
 #include "Light.h"
@@ -17,22 +18,54 @@
  * buffer management that was scattered throughout Renderer.
  *
  * Uses the existing BufferUtils patterns for consistency.
+ *
+ * Usage:
+ *   auto buffers = GlobalBufferManager::create(allocator, frameCount);
+ *   if (!buffers) { handle error; }
  */
-struct GlobalBufferManager {
-    // Per-frame buffer sets
+class GlobalBufferManager {
+public:
+    /**
+     * Factory: Create and initialize buffer manager.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<GlobalBufferManager> create(VmaAllocator allocator, uint32_t frameCount,
+                                                        uint32_t maxBones = 128) {
+        auto manager = std::unique_ptr<GlobalBufferManager>(new GlobalBufferManager());
+        if (!manager->initInternal(allocator, frameCount, maxBones)) {
+            return nullptr;
+        }
+        return manager;
+    }
+
+    ~GlobalBufferManager() {
+        cleanup();
+    }
+
+    // Non-copyable, non-movable (stored via unique_ptr)
+    GlobalBufferManager(GlobalBufferManager&&) = delete;
+    GlobalBufferManager& operator=(GlobalBufferManager&&) = delete;
+    GlobalBufferManager(const GlobalBufferManager&) = delete;
+    GlobalBufferManager& operator=(const GlobalBufferManager&) = delete;
+
+    // Per-frame buffer sets (public for descriptor binding)
     BufferUtils::PerFrameBufferSet uniformBuffers;
     BufferUtils::PerFrameBufferSet lightBuffers;
     BufferUtils::PerFrameBufferSet boneMatricesBuffers;
     BufferUtils::PerFrameBufferSet snowBuffers;         // Snow UBO (binding 14)
     BufferUtils::PerFrameBufferSet cloudShadowBuffers;  // Cloud shadow UBO (binding 15)
 
-    // Configuration
-    uint32_t framesInFlight = 0;
-    uint32_t maxBoneMatrices = 128;  // Maximum bone matrices per frame
+    // Configuration accessors
+    uint32_t getFramesInFlight() const { return framesInFlight_; }
+    uint32_t getMaxBoneMatrices() const { return maxBoneMatrices_; }
 
-    bool init(VmaAllocator allocator, uint32_t frameCount, uint32_t maxBones = 128) {
-        framesInFlight = frameCount;
-        maxBoneMatrices = maxBones;
+private:
+    GlobalBufferManager() = default;
+
+    bool initInternal(VmaAllocator allocator, uint32_t frameCount, uint32_t maxBones) {
+        allocator_ = allocator;
+        framesInFlight_ = frameCount;
+        maxBoneMatrices_ = maxBones;
 
         // Create uniform buffers
         bool success = BufferUtils::PerFrameBufferBuilder()
@@ -107,14 +140,17 @@ struct GlobalBufferManager {
         return true;
     }
 
-    void destroy(VmaAllocator allocator) {
-        BufferUtils::destroyBuffers(allocator, uniformBuffers);
-        BufferUtils::destroyBuffers(allocator, lightBuffers);
-        BufferUtils::destroyBuffers(allocator, boneMatricesBuffers);
-        BufferUtils::destroyBuffers(allocator, snowBuffers);
-        BufferUtils::destroyBuffers(allocator, cloudShadowBuffers);
+    void cleanup() {
+        if (!allocator_) return;  // Not initialized
+        BufferUtils::destroyBuffers(allocator_, uniformBuffers);
+        BufferUtils::destroyBuffers(allocator_, lightBuffers);
+        BufferUtils::destroyBuffers(allocator_, boneMatricesBuffers);
+        BufferUtils::destroyBuffers(allocator_, snowBuffers);
+        BufferUtils::destroyBuffers(allocator_, cloudShadowBuffers);
+        allocator_ = nullptr;
     }
 
+public:
     // Update the main UBO for a frame
     void updateUniformBuffer(uint32_t frameIndex, const UniformBufferObject& ubo) {
         if (frameIndex < uniformBuffers.mappedPointers.size()) {
@@ -132,7 +168,7 @@ struct GlobalBufferManager {
     // Update bone matrices for a frame
     void updateBoneMatrices(uint32_t frameIndex, const std::vector<glm::mat4>& matrices) {
         if (frameIndex < boneMatricesBuffers.mappedPointers.size() && !matrices.empty()) {
-            size_t copySize = std::min(matrices.size(), static_cast<size_t>(maxBoneMatrices)) * sizeof(glm::mat4);
+            size_t copySize = std::min(matrices.size(), static_cast<size_t>(maxBoneMatrices_)) * sizeof(glm::mat4);
             std::memcpy(boneMatricesBuffers.mappedPointers[frameIndex], matrices.data(), copySize);
         }
     }
@@ -177,7 +213,7 @@ struct GlobalBufferManager {
         if (frameIndex < boneMatricesBuffers.buffers.size()) {
             info.buffer = boneMatricesBuffers.buffers[frameIndex];
             info.offset = 0;
-            info.range = sizeof(glm::mat4) * maxBoneMatrices;
+            info.range = sizeof(glm::mat4) * maxBoneMatrices_;
         }
         return info;
     }
@@ -201,4 +237,9 @@ struct GlobalBufferManager {
         }
         return info;
     }
+
+private:
+    VmaAllocator allocator_ = nullptr;
+    uint32_t framesInFlight_ = 0;
+    uint32_t maxBoneMatrices_ = 128;
 };

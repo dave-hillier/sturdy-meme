@@ -80,10 +80,12 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     if (!createCommandBuffers()) return false;
 
     // Initialize global buffer manager for all per-frame shared buffers
-    if (!systems_->globalBuffers().init(allocator, MAX_FRAMES_IN_FLIGHT)) {
+    auto globalBuffers = GlobalBufferManager::create(allocator, MAX_FRAMES_IN_FLIGHT);
+    if (!globalBuffers) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize GlobalBufferManager");
         return false;
     }
+    systems_->setGlobalBuffers(std::move(globalBuffers));
 
     // Initialize light buffers with empty data
     for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
