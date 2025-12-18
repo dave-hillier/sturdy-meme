@@ -12,6 +12,7 @@
 #include "InitContext.h"
 #include "Mesh.h"
 #include "core/VulkanRAII.h"
+#include "core/ImageBuilder.h"
 
 // GPU-side object data for culling (matches shader struct)
 struct alignas(16) CullObjectData {
@@ -100,7 +101,7 @@ public:
     uint32_t getVisibleCount(uint32_t frameIndex) const;
 
     // Hi-Z pyramid access (for debugging/visualization)
-    VkImageView getHiZPyramidView() const { return hiZPyramidView; }
+    VkImageView getHiZPyramidView() const { return hiZPyramid.fullView.get(); }
     VkImageView getHiZMipView(uint32_t mipLevel) const;
     uint32_t getMipLevelCount() const { return mipLevelCount; }
 
@@ -157,10 +158,7 @@ private:
 
     // Hi-Z pyramid texture (R32_SFLOAT for max depth values)
     static constexpr VkFormat HIZ_FORMAT = VK_FORMAT_R32_SFLOAT;
-    VkImage hiZPyramidImage = VK_NULL_HANDLE;
-    VmaAllocation hiZPyramidAllocation = VK_NULL_HANDLE;
-    VkImageView hiZPyramidView = VK_NULL_HANDLE;         // View of all mip levels
-    std::vector<VkImageView> hiZMipViews;                // Individual mip level views
+    MipChainBuilder::Result hiZPyramid;                  // Image with per-mip views
     ManagedSampler hiZSampler;                           // Sampler for Hi-Z reads
     uint32_t mipLevelCount = 0;
 

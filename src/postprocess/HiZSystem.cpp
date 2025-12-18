@@ -2,6 +2,7 @@
 #include "ShaderLoader.h"
 #include "VulkanBarriers.h"
 #include "VulkanResourceFactory.h"
+#include "core/ImageBuilder.h"
 #include <SDL3/SDL_log.h>
 #include <array>
 #include <cstring>
@@ -111,59 +112,18 @@ void HiZSystem::resize(VkExtent2D newExtent) {
 bool HiZSystem::createHiZPyramid() {
     mipLevelCount = calculateMipLevels(extent);
 
-    // Create Hi-Z pyramid image
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.format = HIZ_FORMAT;
-    imageInfo.extent = {extent.width, extent.height, 1};
-    imageInfo.mipLevels = mipLevelCount;
-    imageInfo.arrayLayers = 1;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-
-    VmaAllocationCreateInfo allocInfo{};
-    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-
-    if (vmaCreateImage(allocator, &imageInfo, &allocInfo, &hiZPyramidImage,
-                       &hiZPyramidAllocation, nullptr) != VK_SUCCESS) {
-        SDL_Log("HiZSystem: Failed to create Hi-Z pyramid image");
+    // Create Hi-Z pyramid using MipChainBuilder
+    if (!MipChainBuilder(device, allocator)
+            .setExtent(extent)
+            .setFormat(HIZ_FORMAT)
+            .asStorageImage()  // sampled + storage for compute mip generation
+            .build(hiZPyramid)) {
+        SDL_Log("HiZSystem: Failed to create Hi-Z pyramid");
         return false;
     }
+    mipLevelCount = hiZPyramid.mipLevelCount;
 
-    // Create full image view (all mip levels)
-    VkImageViewCreateInfo viewInfo{};
-    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.image = hiZPyramidImage;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format = HIZ_FORMAT;
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = mipLevelCount;
-    viewInfo.subresourceRange.baseArrayLayer = 0;
-    viewInfo.subresourceRange.layerCount = 1;
-
-    if (vkCreateImageView(device, &viewInfo, nullptr, &hiZPyramidView) != VK_SUCCESS) {
-        SDL_Log("HiZSystem: Failed to create Hi-Z pyramid view");
-        return false;
-    }
-
-    // Create per-mip-level views for compute writes
-    hiZMipViews.resize(mipLevelCount);
-    for (uint32_t i = 0; i < mipLevelCount; ++i) {
-        viewInfo.subresourceRange.baseMipLevel = i;
-        viewInfo.subresourceRange.levelCount = 1;
-
-        if (vkCreateImageView(device, &viewInfo, nullptr, &hiZMipViews[i]) != VK_SUCCESS) {
-            SDL_Log("HiZSystem: Failed to create Hi-Z mip view %u", i);
-            return false;
-        }
-    }
-
-    // Create sampler for Hi-Z reads
+    // Create sampler for Hi-Z reads with mipmap support
     VkSamplerCreateInfo samplerInfo{};
     samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     samplerInfo.magFilter = VK_FILTER_NEAREST;
@@ -188,23 +148,9 @@ void HiZSystem::destroyHiZPyramid() {
     // RAII wrapper handles sampler cleanup
     hiZSampler = ManagedSampler();
 
-    for (auto view : hiZMipViews) {
-        if (view != VK_NULL_HANDLE) {
-            vkDestroyImageView(device, view, nullptr);
-        }
-    }
-    hiZMipViews.clear();
-
-    if (hiZPyramidView != VK_NULL_HANDLE) {
-        vkDestroyImageView(device, hiZPyramidView, nullptr);
-        hiZPyramidView = VK_NULL_HANDLE;
-    }
-
-    if (hiZPyramidImage != VK_NULL_HANDLE) {
-        vmaDestroyImage(allocator, hiZPyramidImage, hiZPyramidAllocation);
-        hiZPyramidImage = VK_NULL_HANDLE;
-        hiZPyramidAllocation = VK_NULL_HANDLE;
-    }
+    // MipChainBuilder::Result handles cleanup via RAII
+    hiZPyramid.reset();
+    mipLevelCount = 0;
 }
 
 bool HiZSystem::createPyramidPipeline() {
@@ -419,7 +365,7 @@ bool HiZSystem::createDescriptorSets() {
             .writeBuffer(1, objectDataBuffer_.get(), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
             .writeBuffer(2, indirectDrawBuffers.buffers[i], 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
             .writeBuffer(3, drawCountBuffers.buffers[i], 0, sizeof(uint32_t), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeImage(4, hiZPyramidView, hiZSampler.get())
+            .writeImage(4, hiZPyramid.fullView.get(), hiZSampler.get())
             .update();
     }
 
@@ -437,17 +383,17 @@ void HiZSystem::setDepthBuffer(VkImageView depthView, VkSampler depthSampler) {
     sourceDepthSampler = depthSampler;
 
     // Update pyramid descriptor sets with the depth buffer
-    if (pyramidDescSets.empty() || hiZMipViews.empty()) {
+    if (pyramidDescSets.empty() || hiZPyramid.mipViews.empty()) {
         return;
     }
 
     for (uint32_t mip = 0; mip < mipLevelCount; ++mip) {
-        VkImageView srcMipView = mip > 0 ? hiZMipViews[mip - 1] : hiZMipViews[0];
+        VkImageView srcMipView = mip > 0 ? hiZPyramid.mipViews[mip - 1].get() : hiZPyramid.mipViews[0].get();
 
         DescriptorManager::SetWriter(device, pyramidDescSets[mip])
             .writeImage(0, sourceDepthView, sourceDepthSampler, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL)
             .writeImage(1, srcMipView, hiZSampler.get())
-            .writeStorageImage(2, hiZMipViews[mip])
+            .writeStorageImage(2, hiZPyramid.mipViews[mip].get())
             .update();
     }
 }
@@ -501,7 +447,7 @@ void HiZSystem::recordPyramidGeneration(VkCommandBuffer cmd, uint32_t frameIndex
     }
 
     // Transition Hi-Z pyramid to general for writing
-    Barriers::prepareImageForCompute(cmd, hiZPyramidImage, mipLevelCount, 1);
+    Barriers::prepareImageForCompute(cmd, hiZPyramid.image.get(), mipLevelCount, 1);
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pyramidPipeline.get());
 
@@ -545,7 +491,7 @@ void HiZSystem::recordPyramidGeneration(VkCommandBuffer cmd, uint32_t frameIndex
 
         // Barrier between mip levels
         if (mip < mipLevelCount - 1) {
-            Barriers::transitionImage(cmd, hiZPyramidImage,
+            Barriers::transitionImage(cmd, hiZPyramid.image.get(),
                 VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                 VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
@@ -557,7 +503,7 @@ void HiZSystem::recordPyramidGeneration(VkCommandBuffer cmd, uint32_t frameIndex
     }
 
     // Transition entire pyramid to shader read for culling
-    Barriers::imageComputeToSampling(cmd, hiZPyramidImage,
+    Barriers::imageComputeToSampling(cmd, hiZPyramid.image.get(),
         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, mipLevelCount, 1);
 }
 
@@ -604,8 +550,8 @@ uint32_t HiZSystem::getVisibleCount(uint32_t frameIndex) const {
 }
 
 VkImageView HiZSystem::getHiZMipView(uint32_t mipLevel) const {
-    if (mipLevel < hiZMipViews.size()) {
-        return hiZMipViews[mipLevel];
+    if (mipLevel < hiZPyramid.mipViews.size()) {
+        return hiZPyramid.mipViews[mipLevel].get();
     }
     return VK_NULL_HANDLE;
 }

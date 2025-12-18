@@ -3,6 +3,7 @@
 #include "VulkanBarriers.h"
 #include "VulkanResourceFactory.h"
 #include "DescriptorManager.h"
+#include "core/ImageBuilder.h"
 #include <array>
 #include <algorithm>
 #include <cmath>
@@ -87,42 +88,21 @@ bool BloomSystem::createMipChain() {
         MipLevel mip;
         mip.extent = {width, height};
 
-        // Create image
-        VkImageCreateInfo imageInfo = {};
-        imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-        imageInfo.imageType = VK_IMAGE_TYPE_2D;
-        imageInfo.format = BLOOM_FORMAT;
-        imageInfo.extent = {width, height, 1};
-        imageInfo.mipLevels = 1;
-        imageInfo.arrayLayers = 1;
-        imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-        imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-        imageInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-        imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-
-        VmaAllocationCreateInfo allocInfo = {};
-        allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-
-        if (vmaCreateImage(allocator, &imageInfo, &allocInfo, &mip.image, &mip.allocation, nullptr) != VK_SUCCESS) {
+        // Create image using ImageBuilder
+        ManagedImage managedImage;
+        ManagedImageView managedView;
+        if (!ImageBuilder(allocator)
+                .setExtent(width, height)
+                .setFormat(BLOOM_FORMAT)
+                .asColorAttachment()
+                .setGpuOnly()
+                .build(device, managedImage, managedView)) {
             return false;
         }
 
-        // Create image view
-        VkImageViewCreateInfo viewInfo = {};
-        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        viewInfo.image = mip.image;
-        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        viewInfo.format = BLOOM_FORMAT;
-        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        viewInfo.subresourceRange.baseMipLevel = 0;
-        viewInfo.subresourceRange.levelCount = 1;
-        viewInfo.subresourceRange.baseArrayLayer = 0;
-        viewInfo.subresourceRange.layerCount = 1;
-
-        if (vkCreateImageView(device, &viewInfo, nullptr, &mip.imageView) != VK_SUCCESS) {
-            return false;
-        }
+        // Release to raw handles (BloomSystem uses raw handles for mip chain)
+        managedImage.releaseToRaw(mip.image, mip.allocation);
+        mip.imageView = managedView.release();
 
         mipChain.push_back(mip);
     }

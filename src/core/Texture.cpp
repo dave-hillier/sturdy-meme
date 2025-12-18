@@ -4,6 +4,7 @@
 #include "VulkanRAII.h"
 #include "VulkanResourceFactory.h"
 #include "VulkanBarriers.h"
+#include "ImageBuilder.h"
 #include <cstring>
 
 bool Texture::load(const std::string& path, VmaAllocator allocator, VkDevice device,
@@ -40,27 +41,13 @@ bool Texture::load(const std::string& path, VmaAllocator allocator, VkDevice dev
 
     VkFormat imageFormat = useSRGB ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
 
-    // Create image using RAII
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.extent.width = static_cast<uint32_t>(width);
-    imageInfo.extent.height = static_cast<uint32_t>(height);
-    imageInfo.extent.depth = 1;
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
-    imageInfo.format = imageFormat;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    VmaAllocationCreateInfo imageAllocInfo{};
-    imageAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-
+    // Create image using ImageBuilder
     ManagedImage managedImage;
-    if (!ManagedImage::create(allocator, imageInfo, imageAllocInfo, managedImage)) {
+    if (!ImageBuilder(allocator)
+            .setExtent(static_cast<uint32_t>(width), static_cast<uint32_t>(height))
+            .setFormat(imageFormat)
+            .asTexture()
+            .build(managedImage)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create image for texture: %s", path.c_str());
         return false;
     }
@@ -158,27 +145,13 @@ bool Texture::createSolidColor(uint8_t r, uint8_t g, uint8_t b, uint8_t a,
     memcpy(data, pixels, imageSize);
     stagingBuffer.unmap();
 
-    // Create image using RAII
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.extent.width = 1;
-    imageInfo.extent.height = 1;
-    imageInfo.extent.depth = 1;
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
-    imageInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    VmaAllocationCreateInfo imageAllocInfo{};
-    imageAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-
+    // Create image using ImageBuilder
     ManagedImage managedImage;
-    if (!ManagedImage::create(allocator, imageInfo, imageAllocInfo, managedImage)) {
+    if (!ImageBuilder(allocator)
+            .setExtent(1, 1)
+            .setFormat(VK_FORMAT_R8G8B8A8_SRGB)
+            .asTexture()
+            .build(managedImage)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create image for solid color texture");
         return false;
     }
