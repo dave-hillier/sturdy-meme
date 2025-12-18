@@ -8,6 +8,7 @@
 #include <array>
 #include <atomic>
 #include <deque>
+#include <memory>
 
 #include "TreeGenerator.h"
 #include "Mesh.h"
@@ -45,11 +46,19 @@ public:
         VkCommandPool commandPool;
     };
 
-    TreeEditSystem() = default;
-    ~TreeEditSystem() = default;
+    /**
+     * Factory: Create and initialize TreeEditSystem.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<TreeEditSystem> create(const InitInfo& info);
 
-    bool init(const InitInfo& info);
-    void destroy(VkDevice device, VmaAllocator allocator);
+    ~TreeEditSystem();
+
+    // Non-copyable, non-movable
+    TreeEditSystem(const TreeEditSystem&) = delete;
+    TreeEditSystem& operator=(const TreeEditSystem&) = delete;
+    TreeEditSystem(TreeEditSystem&&) = delete;
+    TreeEditSystem& operator=(TreeEditSystem&&) = delete;
 
     // Update descriptor sets with shared resources
     void updateDescriptorSets(VkDevice device, const std::vector<VkBuffer>& sceneUniformBuffers);
@@ -104,6 +113,10 @@ public:
     const Texture& getFallbackTexture() const { return **fallbackTexture; }
 
 private:
+    TreeEditSystem() = default;  // Private: use factory
+
+    bool initInternal(const InitInfo& info);
+    void cleanup();
     // Pending mesh destruction - deferred until frame is no longer in-flight
     struct PendingMeshDestroy {
         Mesh branchMesh;

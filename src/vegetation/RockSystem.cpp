@@ -4,7 +4,19 @@
 #include <algorithm>
 #include <cmath>
 
-bool RockSystem::init(const InitInfo& info, const RockConfig& cfg) {
+std::unique_ptr<RockSystem> RockSystem::create(const InitInfo& info, const RockConfig& config) {
+    std::unique_ptr<RockSystem> system(new RockSystem());
+    if (!system->initInternal(info, config)) {
+        return nullptr;
+    }
+    return system;
+}
+
+RockSystem::~RockSystem() {
+    cleanup();
+}
+
+bool RockSystem::initInternal(const InitInfo& info, const RockConfig& cfg) {
     config = cfg;
     storedAllocator = info.allocator;
     storedDevice = info.device;
@@ -28,14 +40,16 @@ bool RockSystem::init(const InitInfo& info, const RockConfig& cfg) {
     return true;
 }
 
-void RockSystem::destroy(VmaAllocator allocator, VkDevice device) {
+void RockSystem::cleanup() {
+    if (storedDevice == VK_NULL_HANDLE) return;
+
     // RAII-managed textures
     rockTexture.reset();
     rockNormalMap.reset();
 
     // Manually managed mesh vector
     for (auto& mesh : rockMeshes) {
-        mesh.destroy(allocator);
+        mesh.destroy(storedAllocator);
     }
     rockMeshes.clear();
 

@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 #include <functional>
+#include <memory>
 #include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
 
@@ -39,6 +40,7 @@ class DebugLineSystem;
 class ShadowSystem;
 class MaterialRegistry;
 class SkinnedMeshRenderer;
+class RendererSystems;
 struct TerrainConfig;
 struct EnvironmentSettings;
 
@@ -50,7 +52,7 @@ struct WaterSubsystems {
     WaterDisplacement& displacement;
     FlowMapGenerator& flowMapGenerator;
     FoamBuffer& foamBuffer;
-    SSRSystem& ssrSystem;
+    RendererSystems& rendererSystems;  // For SSR factory creation
     WaterTileCull& tileCull;
     WaterGBuffer& gBuffer;
 };
@@ -124,11 +126,11 @@ public:
 
     /**
      * Initialize post-processing systems (PostProcessSystem, BloomSystem)
+     * Uses factory pattern to create PostProcessSystem.
      * Should be called early to get HDR render pass for other systems
      */
     static bool initPostProcessing(
-        PostProcessSystem& postProcessSystem,
-        BloomSystem& bloomSystem,
+        RendererSystems& systems,
         const InitContext& ctx,
         VkRenderPass finalRenderPass,
         VkFormat swapchainImageFormat
@@ -136,32 +138,30 @@ public:
 
     /**
      * Initialize snow subsystems (SnowMaskSystem, VolumetricSnowSystem)
+     * Creates both systems via factory and stores them in RendererSystems
      */
     static bool initSnowSubsystems(
-        SnowMaskSystem& snowMaskSystem,
-        VolumetricSnowSystem& volumetricSnowSystem,
+        RendererSystems& systems,
         const InitContext& ctx,
         VkRenderPass hdrRenderPass
     );
 
     // Overload using CoreResources
     static bool initSnowSubsystems(
-        SnowMaskSystem& snowMaskSystem,
-        VolumetricSnowSystem& volumetricSnowSystem,
+        RendererSystems& systems,
         const InitContext& ctx,
         const HDRResources& hdr
     ) {
-        return initSnowSubsystems(snowMaskSystem, volumetricSnowSystem, ctx, hdr.renderPass);
+        return initSnowSubsystems(systems, ctx, hdr.renderPass);
     }
 
     /**
      * Initialize grass and wind systems (GrassSystem, WindSystem)
      * Also connects environment settings to grass and leaf systems
+     * Creates WindSystem via factory and stores it in RendererSystems
      */
     static bool initGrassSubsystem(
-        GrassSystem& grassSystem,
-        WindSystem& windSystem,
-        LeafSystem& leafSystem,
+        RendererSystems& systems,
         const InitContext& ctx,
         VkRenderPass hdrRenderPass,
         VkRenderPass shadowRenderPass,
@@ -170,46 +170,41 @@ public:
 
     // Overload using CoreResources
     static bool initGrassSubsystem(
-        GrassSystem& grassSystem,
-        WindSystem& windSystem,
-        LeafSystem& leafSystem,
+        RendererSystems& systems,
         const InitContext& ctx,
         const HDRResources& hdr,
         const ShadowResources& shadow
     ) {
-        return initGrassSubsystem(grassSystem, windSystem, leafSystem, ctx,
+        return initGrassSubsystem(systems, ctx,
                                    hdr.renderPass, shadow.renderPass, shadow.mapSize);
     }
 
     /**
      * Initialize weather-related systems (WeatherSystem, LeafSystem)
+     * Creates WeatherSystem via factory and stores it in RendererSystems
      */
     static bool initWeatherSubsystems(
-        WeatherSystem& weatherSystem,
-        LeafSystem& leafSystem,
+        RendererSystems& systems,
         const InitContext& ctx,
         VkRenderPass hdrRenderPass
     );
 
     // Overload using CoreResources
     static bool initWeatherSubsystems(
-        WeatherSystem& weatherSystem,
-        LeafSystem& leafSystem,
+        RendererSystems& systems,
         const InitContext& ctx,
         const HDRResources& hdr
     ) {
-        return initWeatherSubsystems(weatherSystem, leafSystem, ctx, hdr.renderPass);
+        return initWeatherSubsystems(systems, ctx, hdr.renderPass);
     }
 
     /**
      * Initialize atmosphere/fog systems (FroxelSystem, AtmosphereLUTSystem, CloudShadowSystem)
      * Computes initial atmosphere LUTs and connects froxel to post-process
+     * Creates FroxelSystem via factory and stores it in RendererSystems
      */
     static bool initAtmosphereSubsystems(
-        FroxelSystem& froxelSystem,
-        AtmosphereLUTSystem& atmosphereLUTSystem,
-        CloudShadowSystem& cloudShadowSystem,
-        PostProcessSystem& postProcessSystem,
+        RendererSystems& systems,
         const InitContext& ctx,
         VkImageView shadowMapView,
         VkSampler shadowMapSampler,
@@ -218,16 +213,12 @@ public:
 
     // Overload using CoreResources
     static bool initAtmosphereSubsystems(
-        FroxelSystem& froxelSystem,
-        AtmosphereLUTSystem& atmosphereLUTSystem,
-        CloudShadowSystem& cloudShadowSystem,
-        PostProcessSystem& postProcessSystem,
+        RendererSystems& systems,
         const InitContext& ctx,
         const ShadowResources& shadow,
         const std::vector<VkBuffer>& lightBuffers
     ) {
-        return initAtmosphereSubsystems(froxelSystem, atmosphereLUTSystem, cloudShadowSystem,
-                                         postProcessSystem, ctx, shadow.cascadeView, shadow.sampler, lightBuffers);
+        return initAtmosphereSubsystems(systems, ctx, shadow.cascadeView, shadow.sampler, lightBuffers);
     }
 
     /**
@@ -258,76 +249,11 @@ public:
     );
 
     /**
-     * Initialize terrain system
-     */
-    static bool initTerrainSubsystems(
-        TerrainSystem& terrainSystem,
-        const InitContext& ctx,
-        VkRenderPass hdrRenderPass,
-        VkRenderPass shadowRenderPass,
-        uint32_t shadowMapSize,
-        const std::string& heightmapPath,
-        const TerrainConfig& config
-    );
-
-    // Overload using CoreResources (note: HDR resources come from PostProcess, shadow from ShadowSystem)
-    static bool initTerrainSubsystems(
-        TerrainSystem& terrainSystem,
-        const InitContext& ctx,
-        const HDRResources& hdr,
-        const ShadowResources& shadow,
-        const std::string& heightmapPath,
-        const TerrainConfig& config
-    ) {
-        return initTerrainSubsystems(terrainSystem, ctx, hdr.renderPass, shadow.renderPass,
-                                      shadow.mapSize, heightmapPath, config);
-    }
-
-    /**
-     * Initialize rock system
-     */
-    static bool initRockSystem(
-        RockSystem& rockSystem,
-        const InitContext& ctx,
-        float terrainSize,
-        std::function<float(float, float)> getTerrainHeight
-    );
-
-    // Overload using TerrainResources
-    static bool initRockSystem(
-        RockSystem& rockSystem,
-        const InitContext& ctx,
-        const TerrainResources& terrain
-    ) {
-        return initRockSystem(rockSystem, ctx, terrain.size, terrain.getHeightAt);
-    }
-
-    /**
-     * Initialize Catmull-Clark subdivision system
-     */
-    static bool initCatmullClarkSystem(
-        CatmullClarkSystem& catmullClarkSystem,
-        const InitContext& ctx,
-        VkRenderPass hdrRenderPass,
-        const glm::vec3& position
-    );
-
-    // Overload using CoreResources
-    static bool initCatmullClarkSystem(
-        CatmullClarkSystem& catmullClarkSystem,
-        const InitContext& ctx,
-        const HDRResources& hdr,
-        const glm::vec3& position
-    ) {
-        return initCatmullClarkSystem(catmullClarkSystem, ctx, hdr.renderPass, position);
-    }
-
-    /**
-     * Initialize Hi-Z occlusion culling system
+     * Initialize Hi-Z occlusion culling system via factory
      * Returns true even if Hi-Z fails (it's optional)
      */
     static bool initHiZSystem(
-        HiZSystem& hiZSystem,
+        RendererSystems& systems,
         const InitContext& ctx,
         VkFormat depthFormat,
         VkImageView hdrDepthView,
@@ -336,49 +262,29 @@ public:
 
     // Overload using HDRResources (still needs depthFormat and depthSampler)
     static bool initHiZSystem(
-        HiZSystem& hiZSystem,
+        RendererSystems& systems,
         const InitContext& ctx,
         VkFormat depthFormat,
         const HDRResources& hdr,
         VkSampler depthSampler
     ) {
-        return initHiZSystem(hiZSystem, ctx, depthFormat, hdr.depthView, depthSampler);
+        return initHiZSystem(systems, ctx, depthFormat, hdr.depthView, depthSampler);
     }
 
     /**
-     * Initialize tree edit system
+     * Create debug line system for physics visualization (factory pattern)
      */
-    static bool initTreeEditSystem(
-        TreeEditSystem& treeEditSystem,
+    static std::unique_ptr<DebugLineSystem> createDebugLineSystem(
         const InitContext& ctx,
         VkRenderPass hdrRenderPass
     );
 
-    // Overload using CoreResources
-    static bool initTreeEditSystem(
-        TreeEditSystem& treeEditSystem,
+    // Overload using HDRResources
+    static std::unique_ptr<DebugLineSystem> createDebugLineSystem(
         const InitContext& ctx,
         const HDRResources& hdr
     ) {
-        return initTreeEditSystem(treeEditSystem, ctx, hdr.renderPass);
-    }
-
-    /**
-     * Initialize debug line system for physics visualization
-     */
-    static bool initDebugLineSystem(
-        DebugLineSystem& debugLineSystem,
-        const InitContext& ctx,
-        VkRenderPass hdrRenderPass
-    );
-
-    // Overload using CoreResources
-    static bool initDebugLineSystem(
-        DebugLineSystem& debugLineSystem,
-        const InitContext& ctx,
-        const HDRResources& hdr
-    ) {
-        return initDebugLineSystem(debugLineSystem, ctx, hdr.renderPass);
+        return createDebugLineSystem(ctx, hdr.renderPass);
     }
 
     /**

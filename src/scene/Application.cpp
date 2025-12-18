@@ -25,11 +25,7 @@ bool Application::init(const std::string& title, int width, int height) {
         return false;
     }
 
-    // Initialize input system (handles gamepad detection)
-    if (!input.init()) {
-        SDL_Log("Failed to initialize input system");
-        return false;
-    }
+    // InputSystem initializes itself in constructor (RAII)
 
     window = SDL_CreateWindow(title.c_str(), width, height, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
     if (!window) {
@@ -45,9 +41,6 @@ bool Application::init(const std::string& title, int width, int height) {
         SDL_Quit();
         return false;
     }
-
-    // Load tree presets from JSON files
-    gui.getTreeEditorGui().loadPresets(resourcePath);
 
     camera.setAspectRatio(static_cast<float>(width) / static_cast<float>(height));
 
@@ -181,22 +174,26 @@ bool Application::init(const std::string& title, int width, int height) {
     // Initialize flag simulation
     initFlag();
 
-    // Initialize GUI system
-    if (!gui.init(window, renderer.getInstance(), renderer.getPhysicalDevice(),
-                  renderer.getDevice(), renderer.getGraphicsQueueFamily(),
-                  renderer.getGraphicsQueue(), renderer.getSwapchainRenderPass(),
-                  renderer.getSwapchainImageCount())) {
+    // Initialize GUI system via factory
+    gui_ = GuiSystem::create(window, renderer.getInstance(), renderer.getPhysicalDevice(),
+                              renderer.getDevice(), renderer.getGraphicsQueueFamily(),
+                              renderer.getGraphicsQueue(), renderer.getSwapchainRenderPass(),
+                              renderer.getSwapchainImageCount());
+    if (!gui_) {
         SDL_Log("Failed to initialize GUI system");
         return false;
     }
 
+    // Load tree presets from JSON files
+    gui_->getTreeEditorGui().loadPresets(resourcePath);
+
     // Set GUI render callback
     renderer.setGuiRenderCallback([this](VkCommandBuffer cmd) {
-        gui.endFrame(cmd);
+        gui_->endFrame(cmd);
     });
 
     // Set up input system with GUI reference for input blocking
-    input.setGuiSystem(&gui);
+    input.setGuiSystem(gui_.get());
     input.setMoveSpeed(moveSpeed);
 
     running = true;
@@ -221,8 +218,8 @@ void Application::run() {
         processEvents();
 
         // Begin GUI frame
-        gui.beginFrame();
-        gui.render(renderer, camera, lastDeltaTime, currentFps);
+        gui_->beginFrame();
+        gui_->render(renderer, camera, lastDeltaTime, currentFps);
 
         // Update input system
         input.update(deltaTime, camera.getYaw());
@@ -380,7 +377,7 @@ void Application::run() {
         bool isGrounded = physics().isCharacterOnGround();
 
         // Sync cape enabled state from GUI
-        renderer.getSceneBuilder().setCapeEnabled(gui.getPlayerSettings().capeEnabled);
+        renderer.getSceneBuilder().setCapeEnabled(gui_->getPlayerSettings().capeEnabled);
 
         renderer.updateAnimatedCharacter(deltaTime, movementSpeed, isGrounded, isJumping);
 
@@ -410,7 +407,7 @@ void Application::run() {
 
         // Render frame - if skipped (window minimized/suspended), cancel GUI frame
         if (!renderer.render(camera)) {
-            gui.cancelFrame();
+            gui_->cancelFrame();
         }
 
         // Update window title with FPS, time of day, and camera mode
@@ -432,8 +429,8 @@ void Application::run() {
 
 void Application::shutdown() {
     renderer.waitIdle();
-    gui.shutdown(renderer.getDevice());
-    input.shutdown();
+    gui_.reset();  // RAII cleanup via destructor
+    // InputSystem cleanup handled by destructor (RAII)
     physicsTerrainManager_.cleanup();
     physics_.reset();  // RAII cleanup via optional reset
     renderer.shutdown();
@@ -450,7 +447,7 @@ void Application::processEvents() {
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
         // Pass events to GUI first
-        gui.processEvent(event);
+        gui_->processEvent(event);
 
         // Pass events to input system
         input.processEvent(event);
@@ -484,15 +481,15 @@ void Application::processEvents() {
                     running = false;
                 }
                 else if (event.key.scancode == SDL_SCANCODE_F1) {
-                    gui.toggleVisibility();
+                    gui_->toggleVisibility();
                 }
                 else if (event.key.scancode == SDL_SCANCODE_F2) {
-                    gui.getTreeEditorGui().toggleVisibility();
-                    SDL_Log("Tree Editor: %s", gui.getTreeEditorGui().isVisible() ? "ON" : "OFF");
+                    gui_->getTreeEditorGui().toggleVisibility();
+                    SDL_Log("Tree Editor: %s", gui_->getTreeEditorGui().isVisible() ? "ON" : "OFF");
                 }
                 else if (event.key.scancode == SDL_SCANCODE_P) {
-                    gui.getTreeEditorGui().placeTreeAtCamera(renderer, camera);
-                    gui.getTreeEditorGui().setVisible(true);
+                    gui_->getTreeEditorGui().placeTreeAtCamera(renderer, camera);
+                    gui_->getTreeEditorGui().setVisible(true);
                     SDL_Log("Tree placed at camera position");
                 }
                 else if (event.key.scancode == SDL_SCANCODE_1) {

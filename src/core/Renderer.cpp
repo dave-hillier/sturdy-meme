@@ -1454,7 +1454,13 @@ bool Renderer::initSkinnedMeshRenderer() {
         addCommonDescriptorBindings(builder);
     };
 
-    return systems_->skinnedMesh().init(info);
+    auto skinnedMeshRenderer = SkinnedMeshRenderer::create(info);
+    if (!skinnedMeshRenderer) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SkinnedMeshRenderer");
+        return false;
+    }
+    systems_->setSkinnedMesh(std::move(skinnedMeshRenderer));
+    return true;
 }
 
 bool Renderer::createSkinnedMeshRendererDescriptorSets() {

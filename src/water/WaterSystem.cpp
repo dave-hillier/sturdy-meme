@@ -7,7 +7,19 @@
 #include <array>
 #include <cstring>
 
-bool WaterSystem::init(const InitInfo& info) {
+std::unique_ptr<WaterSystem> WaterSystem::create(const InitInfo& info) {
+    std::unique_ptr<WaterSystem> system(new WaterSystem());
+    if (!system->initInternal(info)) {
+        return nullptr;
+    }
+    return system;
+}
+
+WaterSystem::~WaterSystem() {
+    cleanup();
+}
+
+bool WaterSystem::initInternal(const InitInfo& info) {
     device = info.device;
     physicalDevice = info.physicalDevice;
     allocator = info.allocator;
@@ -77,7 +89,9 @@ bool WaterSystem::init(const InitInfo& info) {
     return true;
 }
 
-void WaterSystem::destroy(VkDevice device, VmaAllocator allocator) {
+void WaterSystem::cleanup() {
+    if (device == VK_NULL_HANDLE) return;  // Not initialized
+
     // Destroy RAII-managed resources
     foamTexture.reset();
     causticsTexture.reset();

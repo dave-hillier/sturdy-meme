@@ -6,7 +6,31 @@
 #include <SDL3/SDL.h>
 #include <array>
 
-bool SkySystem::init(const InitInfo& info) {
+std::unique_ptr<SkySystem> SkySystem::create(const InitInfo& info) {
+    std::unique_ptr<SkySystem> system(new SkySystem());
+    if (!system->initInternal(info)) {
+        return nullptr;
+    }
+    return system;
+}
+
+std::unique_ptr<SkySystem> SkySystem::create(const InitContext& ctx, VkRenderPass hdrPass) {
+    InitInfo info{};
+    info.device = ctx.device;
+    info.allocator = ctx.allocator;
+    info.descriptorPool = ctx.descriptorPool;
+    info.shaderPath = ctx.shaderPath;
+    info.framesInFlight = ctx.framesInFlight;
+    info.extent = ctx.extent;
+    info.hdrRenderPass = hdrPass;
+    return create(info);
+}
+
+SkySystem::~SkySystem() {
+    cleanup();
+}
+
+bool SkySystem::initInternal(const InitInfo& info) {
     device = info.device;
     descriptorPool = info.descriptorPool;
     shaderPath = info.shaderPath;
@@ -20,21 +44,9 @@ bool SkySystem::init(const InitInfo& info) {
     return true;
 }
 
-bool SkySystem::init(const InitContext& ctx, VkRenderPass hdrPass) {
-    device = ctx.device;
-    descriptorPool = ctx.descriptorPool;
-    shaderPath = ctx.shaderPath;
-    framesInFlight = ctx.framesInFlight;
-    extent = ctx.extent;
-    hdrRenderPass = hdrPass;
+void SkySystem::cleanup() {
+    if (device == VK_NULL_HANDLE) return;  // Not initialized
 
-    if (!createDescriptorSetLayout()) return false;
-    if (!createPipeline()) return false;
-
-    return true;
-}
-
-void SkySystem::destroy(VkDevice device, VmaAllocator allocator) {
     if (pipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(device, pipeline, nullptr);
         pipeline = VK_NULL_HANDLE;

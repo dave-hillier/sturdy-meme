@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 #include <cmath>
+#include <memory>
 
 #include "BufferUtils.h"
 #include "DescriptorManager.h"
@@ -62,12 +63,21 @@ public:
         VkFormat depthFormat;       // Format of the source depth buffer
     };
 
-    HiZSystem() = default;
-    ~HiZSystem() = default;
+    /**
+     * Factory: Create and initialize Hi-Z system.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<HiZSystem> create(const InitInfo& info);
+    static std::unique_ptr<HiZSystem> create(const InitContext& ctx, VkFormat depthFormat);
 
-    bool init(const InitInfo& info);
-    bool init(const InitContext& ctx, VkFormat depthFormat);
-    void destroy();
+    ~HiZSystem();
+
+    // Non-copyable, non-movable (stored via unique_ptr only)
+    HiZSystem(HiZSystem&&) = delete;
+    HiZSystem& operator=(HiZSystem&&) = delete;
+    HiZSystem(const HiZSystem&) = delete;
+    HiZSystem& operator=(const HiZSystem&) = delete;
+
     void resize(VkExtent2D newExtent);
 
     // Update the source depth buffer view for pyramid generation
@@ -119,6 +129,11 @@ public:
     CullingStats getStats() const { return stats; }
 
 private:
+    HiZSystem() = default;  // Private: use factory
+
+    bool initInternal(const InitInfo& info);
+    void cleanup();
+
     // Hi-Z pyramid resources
     bool createHiZPyramid();
     void destroyHiZPyramid();

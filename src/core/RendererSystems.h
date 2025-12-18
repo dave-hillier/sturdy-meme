@@ -104,82 +104,112 @@ public:
     // Tier 1 - Core rendering
     PostProcessSystem& postProcess() { return *postProcessSystem_; }
     const PostProcessSystem& postProcess() const { return *postProcessSystem_; }
+    void setPostProcess(std::unique_ptr<PostProcessSystem> system);
     BloomSystem& bloom() { return *bloomSystem_; }
     const BloomSystem& bloom() const { return *bloomSystem_; }
+    void setBloom(std::unique_ptr<BloomSystem> system);
     ShadowSystem& shadow() { return *shadowSystem_; }
     const ShadowSystem& shadow() const { return *shadowSystem_; }
+    void setShadow(std::unique_ptr<ShadowSystem> system);
     TerrainSystem& terrain() { return *terrainSystem_; }
     const TerrainSystem& terrain() const { return *terrainSystem_; }
+    void setTerrain(std::unique_ptr<TerrainSystem> system);
 
     // Sky and atmosphere
     SkySystem& sky() { return *skySystem_; }
     const SkySystem& sky() const { return *skySystem_; }
+    void setSky(std::unique_ptr<SkySystem> system);
     AtmosphereLUTSystem& atmosphereLUT() { return *atmosphereLUTSystem_; }
     const AtmosphereLUTSystem& atmosphereLUT() const { return *atmosphereLUTSystem_; }
+    void setAtmosphereLUT(std::unique_ptr<AtmosphereLUTSystem> system);
     FroxelSystem& froxel() { return *froxelSystem_; }
     const FroxelSystem& froxel() const { return *froxelSystem_; }
+    void setFroxel(std::unique_ptr<FroxelSystem> system);
     CloudShadowSystem& cloudShadow() { return *cloudShadowSystem_; }
     const CloudShadowSystem& cloudShadow() const { return *cloudShadowSystem_; }
+    void setCloudShadow(std::unique_ptr<CloudShadowSystem> system);
 
     // Environment (grass, wind, weather)
     GrassSystem& grass() { return *grassSystem_; }
     const GrassSystem& grass() const { return *grassSystem_; }
+    void setGrass(std::unique_ptr<GrassSystem> system);
     WindSystem& wind() { return *windSystem_; }
     const WindSystem& wind() const { return *windSystem_; }
+    void setWind(std::unique_ptr<WindSystem> system);
     WeatherSystem& weather() { return *weatherSystem_; }
     const WeatherSystem& weather() const { return *weatherSystem_; }
+    void setWeather(std::unique_ptr<WeatherSystem> system);
     LeafSystem& leaf() { return *leafSystem_; }
     const LeafSystem& leaf() const { return *leafSystem_; }
+    void setLeaf(std::unique_ptr<LeafSystem> system);
 
     // Snow
     SnowMaskSystem& snowMask() { return *snowMaskSystem_; }
     const SnowMaskSystem& snowMask() const { return *snowMaskSystem_; }
+    void setSnowMask(std::unique_ptr<SnowMaskSystem> system);
     VolumetricSnowSystem& volumetricSnow() { return *volumetricSnowSystem_; }
     const VolumetricSnowSystem& volumetricSnow() const { return *volumetricSnowSystem_; }
+    void setVolumetricSnow(std::unique_ptr<VolumetricSnowSystem> system);
 
     // Water
     WaterSystem& water() { return *waterSystem_; }
     const WaterSystem& water() const { return *waterSystem_; }
+    void setWater(std::unique_ptr<WaterSystem> system);
     WaterDisplacement& waterDisplacement() { return *waterDisplacement_; }
     const WaterDisplacement& waterDisplacement() const { return *waterDisplacement_; }
+    void setWaterDisplacement(std::unique_ptr<WaterDisplacement> system);
     FlowMapGenerator& flowMap() { return *flowMapGenerator_; }
     const FlowMapGenerator& flowMap() const { return *flowMapGenerator_; }
+    void setFlowMap(std::unique_ptr<FlowMapGenerator> system);
     FoamBuffer& foam() { return *foamBuffer_; }
     const FoamBuffer& foam() const { return *foamBuffer_; }
+    void setFoam(std::unique_ptr<FoamBuffer> system);
     SSRSystem& ssr() { return *ssrSystem_; }
     const SSRSystem& ssr() const { return *ssrSystem_; }
+    void setSSR(std::unique_ptr<SSRSystem> system);
     WaterTileCull& waterTileCull() { return *waterTileCull_; }
     const WaterTileCull& waterTileCull() const { return *waterTileCull_; }
+    void setWaterTileCull(std::unique_ptr<WaterTileCull> system);
     WaterGBuffer& waterGBuffer() { return *waterGBuffer_; }
     const WaterGBuffer& waterGBuffer() const { return *waterGBuffer_; }
+    void setWaterGBuffer(std::unique_ptr<WaterGBuffer> system);
 
     // Geometry processing
     CatmullClarkSystem& catmullClark() { return *catmullClarkSystem_; }
     const CatmullClarkSystem& catmullClark() const { return *catmullClarkSystem_; }
+    void setCatmullClark(std::unique_ptr<CatmullClarkSystem> system);
     RockSystem& rock() { return *rockSystem_; }
     const RockSystem& rock() const { return *rockSystem_; }
+    void setRock(std::unique_ptr<RockSystem> system);
 
     // Culling and optimization
     HiZSystem& hiZ() { return *hiZSystem_; }
     const HiZSystem& hiZ() const { return *hiZSystem_; }
+    void setHiZ(std::unique_ptr<HiZSystem> system);
 
     // Scene and resources
     SceneManager& scene() { return *sceneManager_; }
     const SceneManager& scene() const { return *sceneManager_; }
+    void setScene(std::unique_ptr<SceneManager> system);
     GlobalBufferManager& globalBuffers() { return *globalBufferManager_; }
     const GlobalBufferManager& globalBuffers() const { return *globalBufferManager_; }
+    void setGlobalBuffers(std::unique_ptr<GlobalBufferManager> buffers);
     ErosionDataLoader& erosionData() { return *erosionDataLoader_; }
     const ErosionDataLoader& erosionData() const { return *erosionDataLoader_; }
 
     // Animation and skinning
     SkinnedMeshRenderer& skinnedMesh() { return *skinnedMeshRenderer_; }
     const SkinnedMeshRenderer& skinnedMesh() const { return *skinnedMeshRenderer_; }
+    void setSkinnedMesh(std::unique_ptr<SkinnedMeshRenderer> system);
 
     // Tools and debug
     TreeEditSystem& treeEdit() { return *treeEditSystem_; }
     const TreeEditSystem& treeEdit() const { return *treeEditSystem_; }
+    void setTreeEdit(std::unique_ptr<TreeEditSystem> system);
     DebugLineSystem& debugLine() { return *debugLineSystem_; }
     const DebugLineSystem& debugLine() const { return *debugLineSystem_; }
+    void setDebugLineSystem(std::unique_ptr<DebugLineSystem> system);
+    void setProfiler(std::unique_ptr<Profiler> profiler);
     Profiler& profiler() { return *profiler_; }
     const Profiler& profiler() const { return *profiler_; }
 

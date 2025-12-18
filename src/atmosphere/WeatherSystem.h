@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 #include <optional>
+#include <memory>
 
 #include "BufferUtils.h"
 #include "ParticleSystem.h"
@@ -39,11 +40,19 @@ class WeatherSystem {
 public:
     using InitInfo = ParticleSystem::InitInfo;
 
-    WeatherSystem() = default;
-    ~WeatherSystem() = default;
+    /**
+     * Factory: Create and initialize WeatherSystem.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<WeatherSystem> create(const InitInfo& info);
 
-    bool init(const InitInfo& info);
-    void destroy(VkDevice device, VmaAllocator allocator);
+    ~WeatherSystem();
+
+    // Non-copyable, non-movable
+    WeatherSystem(const WeatherSystem&) = delete;
+    WeatherSystem& operator=(const WeatherSystem&) = delete;
+    WeatherSystem(WeatherSystem&&) = delete;
+    WeatherSystem& operator=(WeatherSystem&&) = delete;
 
     // Update extent for viewport (on window resize)
     void setExtent(VkExtent2D newExtent) { (*particleSystem)->setExtent(newExtent); }
@@ -79,6 +88,11 @@ public:
     void setGroundLevel(float level) { groundLevel = level; }
 
 private:
+    WeatherSystem() = default;  // Private: use factory
+
+    bool initInternal(const InitInfo& info);
+    void cleanup();
+
     bool createBuffers();
     bool createComputeDescriptorSetLayout(SystemLifecycleHelper::PipelineHandles& handles);
     bool createComputePipeline(SystemLifecycleHelper::PipelineHandles& handles);

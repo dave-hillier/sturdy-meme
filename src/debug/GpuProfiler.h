@@ -5,6 +5,7 @@
 #include <vector>
 #include <unordered_map>
 #include <array>
+#include <optional>
 
 /**
  * GPU Profiler using Vulkan timestamp queries.
@@ -13,11 +14,13 @@
  * Uses double-buffered query pools to avoid pipeline stalls.
  *
  * Usage:
- *   profiler.beginFrame(cmd, frameIndex);
- *   profiler.beginZone(cmd, "ShadowPass");
+ *   auto profiler = GpuProfiler::create(device, physicalDevice, framesInFlight);
+ *   if (!profiler) { handle error; }
+ *   profiler->beginFrame(cmd, frameIndex);
+ *   profiler->beginZone(cmd, "ShadowPass");
  *   // ... shadow pass commands ...
- *   profiler.endZone(cmd, "ShadowPass");
- *   profiler.endFrame(cmd, frameIndex);
+ *   profiler->endZone(cmd, "ShadowPass");
+ *   profiler->endFrame(cmd, frameIndex);
  *   // Results available next frame via getResults()
  */
 class GpuProfiler {
@@ -33,22 +36,22 @@ public:
         std::vector<TimingResult> zones;
     };
 
-    GpuProfiler() = default;
-    ~GpuProfiler() = default;
+    /**
+     * Factory: Create a GPU profiler.
+     * Returns nullopt if initialization fails (fatal error).
+     * Note: If timestamps are unsupported, returns a valid but disabled profiler.
+     */
+    static std::optional<GpuProfiler> create(VkDevice device, VkPhysicalDevice physicalDevice,
+                                              uint32_t framesInFlight, uint32_t maxZones = 32);
 
-    // Non-copyable
+    // Destructor handles cleanup
+    ~GpuProfiler();
+
+    // Move-only (owns Vulkan resources)
+    GpuProfiler(GpuProfiler&& other) noexcept;
+    GpuProfiler& operator=(GpuProfiler&& other) noexcept;
     GpuProfiler(const GpuProfiler&) = delete;
     GpuProfiler& operator=(const GpuProfiler&) = delete;
-
-    /**
-     * Initialize the profiler with Vulkan handles.
-     * @param device Vulkan logical device
-     * @param physicalDevice For querying timestamp period
-     * @param framesInFlight Number of frames in flight (for query pool double-buffering)
-     * @param maxZones Maximum number of profiling zones per frame
-     */
-    bool init(VkDevice device, VkPhysicalDevice physicalDevice, uint32_t framesInFlight, uint32_t maxZones = 32);
-    void shutdown();
 
     /**
      * Call at the start of frame command buffer recording.
@@ -98,6 +101,12 @@ public:
     const std::vector<std::string>& getZoneNames() const { return zoneNames; }
 
 private:
+    GpuProfiler();  // Private: use factory
+
+    bool initInternal(VkDevice device, VkPhysicalDevice physicalDevice,
+                      uint32_t framesInFlight, uint32_t maxZones);
+    void cleanup();
+
     static constexpr uint32_t QUERIES_PER_ZONE = 2;  // Start + end timestamp
 
     struct ZoneInfo {
@@ -112,7 +121,6 @@ private:
     uint32_t maxZones = 0;
     uint32_t framesInFlight = 0;
     bool enabled = true;
-    bool initialized = false;
 
     // Current frame state
     uint32_t currentQueryIndex = 0;

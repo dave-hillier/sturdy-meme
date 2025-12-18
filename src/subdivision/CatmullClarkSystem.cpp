@@ -12,7 +12,19 @@
 
 using ShaderLoader::loadShaderModule;
 
-bool CatmullClarkSystem::init(const InitInfo& info, const CatmullClarkConfig& cfg) {
+std::unique_ptr<CatmullClarkSystem> CatmullClarkSystem::create(const InitInfo& info, const CatmullClarkConfig& config) {
+    std::unique_ptr<CatmullClarkSystem> system(new CatmullClarkSystem());
+    if (!system->initInternal(info, config)) {
+        return nullptr;
+    }
+    return system;
+}
+
+CatmullClarkSystem::~CatmullClarkSystem() {
+    cleanup();
+}
+
+bool CatmullClarkSystem::initInternal(const InitInfo& info, const CatmullClarkConfig& cfg) {
     device = info.device;
     physicalDevice = info.physicalDevice;
     allocator = info.allocator;
@@ -78,7 +90,9 @@ bool CatmullClarkSystem::init(const InitInfo& info, const CatmullClarkConfig& cf
     return true;
 }
 
-void CatmullClarkSystem::destroy(VkDevice device, VmaAllocator allocator) {
+void CatmullClarkSystem::cleanup() {
+    if (device == VK_NULL_HANDLE) return;
+
     // RAII-managed subsystems (mesh, cbt) are destroyed automatically via std::optional reset
     mesh.reset();
     cbt.reset();

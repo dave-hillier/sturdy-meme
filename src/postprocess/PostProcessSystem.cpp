@@ -6,7 +6,32 @@
 #include <SDL3/SDL.h>
 #include <array>
 
-bool PostProcessSystem::init(const InitInfo& info) {
+std::unique_ptr<PostProcessSystem> PostProcessSystem::create(const InitInfo& info) {
+    std::unique_ptr<PostProcessSystem> system(new PostProcessSystem());
+    if (!system->initInternal(info)) {
+        return nullptr;
+    }
+    return system;
+}
+
+std::unique_ptr<PostProcessSystem> PostProcessSystem::create(const InitContext& ctx, VkRenderPass outputRenderPass, VkFormat swapchainFormat) {
+    InitInfo info{};
+    info.device = ctx.device;
+    info.allocator = ctx.allocator;
+    info.outputRenderPass = outputRenderPass;
+    info.descriptorPool = ctx.descriptorPool;
+    info.extent = ctx.extent;
+    info.swapchainFormat = swapchainFormat;
+    info.shaderPath = ctx.shaderPath;
+    info.framesInFlight = ctx.framesInFlight;
+    return create(info);
+}
+
+PostProcessSystem::~PostProcessSystem() {
+    cleanup();
+}
+
+bool PostProcessSystem::initInternal(const InitInfo& info) {
     device = info.device;
     allocator = info.allocator;
     outputRenderPass = info.outputRenderPass;
@@ -33,34 +58,9 @@ bool PostProcessSystem::init(const InitInfo& info) {
     return true;
 }
 
-bool PostProcessSystem::init(const InitContext& ctx, VkRenderPass outputRenderPass_, VkFormat swapchainFormat_) {
-    device = ctx.device;
-    allocator = ctx.allocator;
-    outputRenderPass = outputRenderPass_;
-    descriptorPool = ctx.descriptorPool;
-    extent = ctx.extent;
-    swapchainFormat = swapchainFormat_;
-    shaderPath = ctx.shaderPath;
-    framesInFlight = ctx.framesInFlight;
+void PostProcessSystem::cleanup() {
+    if (device == VK_NULL_HANDLE) return;  // Not initialized
 
-    if (!createHDRRenderTarget()) return false;
-    if (!createHDRRenderPass()) return false;
-    if (!createHDRFramebuffer()) return false;
-    if (!createSampler()) return false;
-    if (!createDescriptorSetLayout()) return false;
-    if (!createUniformBuffers()) return false;
-    if (!createDescriptorSets()) return false;
-    if (!createCompositePipeline()) return false;
-
-    // Histogram-based auto-exposure
-    if (!createHistogramResources()) return false;
-    if (!createHistogramPipelines()) return false;
-    if (!createHistogramDescriptorSets()) return false;
-
-    return true;
-}
-
-void PostProcessSystem::destroy(VkDevice device, VmaAllocator allocator) {
     destroyHDRResources();
     destroyHistogramResources();
 
@@ -113,7 +113,7 @@ void PostProcessSystem::destroyHDRResources() {
     }
 }
 
-void PostProcessSystem::resize(VkDevice device, VmaAllocator allocator, VkExtent2D newExtent) {
+void PostProcessSystem::resize(VkExtent2D newExtent) {
     extent = newExtent;
     destroyHDRResources();
     createHDRRenderTarget();

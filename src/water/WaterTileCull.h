@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
+#include <memory>
 
 #include "core/VulkanRAII.h"
 
@@ -62,11 +63,19 @@ public:
         uint32_t firstInstance;
     };
 
-    WaterTileCull() = default;
-    ~WaterTileCull() = default;
+    /**
+     * Factory: Create and initialize WaterTileCull.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<WaterTileCull> create(const InitInfo& info);
 
-    bool init(const InitInfo& info);
-    void destroy();
+    ~WaterTileCull();
+
+    // Non-copyable, non-movable
+    WaterTileCull(const WaterTileCull&) = delete;
+    WaterTileCull& operator=(const WaterTileCull&) = delete;
+    WaterTileCull(WaterTileCull&&) = delete;
+    WaterTileCull& operator=(WaterTileCull&&) = delete;
     void resize(VkExtent2D newExtent);
 
     // Record compute pass to determine visible tiles
@@ -100,6 +109,11 @@ public:
     void endFrame(uint32_t frameIndex);
 
 private:
+    WaterTileCull() = default;  // Private: use factory
+
+    bool initInternal(const InitInfo& info);
+    void cleanup();
+
     bool createBuffers();
     bool createComputePipeline();
     bool createDescriptorSets();

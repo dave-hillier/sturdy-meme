@@ -4,11 +4,24 @@
 #include <cstring>
 #include <cmath>
 
-bool WindSystem::init(const InitInfo& info) {
+std::unique_ptr<WindSystem> WindSystem::create(const InitInfo& info) {
+    std::unique_ptr<WindSystem> system(new WindSystem());
+    if (!system->initInternal(info)) {
+        return nullptr;
+    }
+    return system;
+}
+
+WindSystem::~WindSystem() {
+    cleanup();
+}
+
+bool WindSystem::initInternal(const InitInfo& info) {
+    allocator = info.allocator;
     framesInFlight = info.framesInFlight;
 
     BufferUtils::PerFrameBufferBuilder builder;
-    if (!builder.setAllocator(info.allocator)
+    if (!builder.setAllocator(allocator)
              .setFrameCount(framesInFlight)
              .setSize(sizeof(WindUniforms))
              .build(uniformBuffers)) {
@@ -22,7 +35,9 @@ bool WindSystem::init(const InitInfo& info) {
     return true;
 }
 
-void WindSystem::destroy(VkDevice device, VmaAllocator allocator) {
+void WindSystem::cleanup() {
+    if (allocator == VK_NULL_HANDLE) return;  // Not initialized
+
     BufferUtils::destroyBuffers(allocator, uniformBuffers);
     uniformBuffers = {};
 }

@@ -7,7 +7,19 @@
 
 using ShaderLoader::loadShaderModule;
 
-bool TreeEditSystem::init(const InitInfo& info) {
+std::unique_ptr<TreeEditSystem> TreeEditSystem::create(const InitInfo& info) {
+    std::unique_ptr<TreeEditSystem> system(new TreeEditSystem());
+    if (!system->initInternal(info)) {
+        return nullptr;
+    }
+    return system;
+}
+
+TreeEditSystem::~TreeEditSystem() {
+    cleanup();
+}
+
+bool TreeEditSystem::initInternal(const InitInfo& info) {
     device = info.device;
     physicalDevice = info.physicalDevice;
     allocator = info.allocator;
@@ -47,7 +59,8 @@ bool TreeEditSystem::init(const InitInfo& info) {
     return true;
 }
 
-void TreeEditSystem::destroy(VkDevice device, VmaAllocator allocator) {
+void TreeEditSystem::cleanup() {
+    if (device == VK_NULL_HANDLE) return;
     // Wait for GPU to finish before final cleanup
     vkDeviceWaitIdle(device);
 

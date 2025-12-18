@@ -10,7 +10,7 @@
 - UBO structs are automatically generated from shaders during the cmake build. The `shader_reflect` tool (in `tools/`) parses compiled SPIR-V files using SPIRV-Reflect and outputs `generated/UBOs.h` with std140-aligned C++ structs matching the shader uniform buffer layouts.
 - compile with `cmake --preset debug && cmake --build build/debug`
 - run with `./run-debug.sh` do not attempt to combine with timeouts or sleeps
-- dont use `timeout` or `gtimeout`
+- DO NOT use `timeout` or `gtimeout` to attempt to run - instead run in the background and use pkill
 - Prefer composition over inheritance - assume pretty much all of the time you want to use inheritance you are wrong.
 - ShaderLoader API: use `ShaderLoader::loadShaderModule(device, path)` or the two-step `readFile` + `createShaderModule`. There is NO `loadShader` method.
 - Terrain height uses `h * heightScale` where h is normalized [0,1]. Use functions from `shaders/terrain_height_common.glsl` (shaders) or `src/TerrainHeight.h` (C++). Do NOT duplicate the formula.

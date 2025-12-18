@@ -1,4 +1,5 @@
 #include "RendererInit.h"
+#include "RendererSystems.h"
 #include "VulkanRAII.h"
 #include "MaterialDescriptorFactory.h"
 
@@ -44,37 +45,41 @@
 #include <SDL3/SDL.h>
 
 bool RendererInit::initPostProcessing(
-    PostProcessSystem& postProcessSystem,
-    BloomSystem& bloomSystem,
+    RendererSystems& systems,
     const InitContext& ctx,
     VkRenderPass finalRenderPass,
     VkFormat swapchainImageFormat
 ) {
-    // Initialize post-process system early to get HDR render pass
-    if (!postProcessSystem.init(ctx, finalRenderPass, swapchainImageFormat)) {
+    // Initialize post-process system via factory
+    auto postProcessSystem = PostProcessSystem::create(ctx, finalRenderPass, swapchainImageFormat);
+    if (!postProcessSystem) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize PostProcessSystem");
         return false;
     }
 
-    // Initialize bloom system
-    if (!bloomSystem.init(ctx)) {
+    // Initialize bloom system via factory
+    auto bloomSystem = BloomSystem::create(ctx);
+    if (!bloomSystem) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize BloomSystem");
         return false;
     }
 
     // Bind bloom texture to post-process system
-    postProcessSystem.setBloomTexture(bloomSystem.getBloomOutput(), bloomSystem.getBloomSampler());
+    postProcessSystem->setBloomTexture(bloomSystem->getBloomOutput(), bloomSystem->getBloomSampler());
+
+    // Store in RendererSystems
+    systems.setPostProcess(std::move(postProcessSystem));
+    systems.setBloom(std::move(bloomSystem));
 
     return true;
 }
 
 bool RendererInit::initSnowSubsystems(
-    SnowMaskSystem& snowMaskSystem,
-    VolumetricSnowSystem& volumetricSnowSystem,
+    RendererSystems& systems,
     const InitContext& ctx,
     VkRenderPass hdrRenderPass
 ) {
-    // Initialize snow mask system
+    // Initialize snow mask system via factory
     SnowMaskSystem::InitInfo snowMaskInfo{};
     snowMaskInfo.device = ctx.device;
     snowMaskInfo.allocator = ctx.allocator;
@@ -84,12 +89,14 @@ bool RendererInit::initSnowSubsystems(
     snowMaskInfo.shaderPath = ctx.shaderPath;
     snowMaskInfo.framesInFlight = ctx.framesInFlight;
 
-    if (!snowMaskSystem.init(snowMaskInfo)) {
+    auto snowMaskSystem = SnowMaskSystem::create(snowMaskInfo);
+    if (!snowMaskSystem) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize SnowMaskSystem");
         return false;
     }
+    systems.setSnowMask(std::move(snowMaskSystem));
 
-    // Initialize volumetric snow system (cascaded heightfield)
+    // Initialize volumetric snow system via factory
     VolumetricSnowSystem::InitInfo volumetricSnowInfo{};
     volumetricSnowInfo.device = ctx.device;
     volumetricSnowInfo.allocator = ctx.allocator;
@@ -99,24 +106,37 @@ bool RendererInit::initSnowSubsystems(
     volumetricSnowInfo.shaderPath = ctx.shaderPath;
     volumetricSnowInfo.framesInFlight = ctx.framesInFlight;
 
-    if (!volumetricSnowSystem.init(volumetricSnowInfo)) {
+    auto volumetricSnowSystem = VolumetricSnowSystem::create(volumetricSnowInfo);
+    if (!volumetricSnowSystem) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize VolumetricSnowSystem");
         return false;
     }
+    systems.setVolumetricSnow(std::move(volumetricSnowSystem));
 
     return true;
 }
 
 bool RendererInit::initGrassSubsystem(
-    GrassSystem& grassSystem,
-    WindSystem& windSystem,
-    LeafSystem& leafSystem,
+    RendererSystems& systems,
     const InitContext& ctx,
     VkRenderPass hdrRenderPass,
     VkRenderPass shadowRenderPass,
     uint32_t shadowMapSize
 ) {
-    // Initialize grass system using HDR render pass
+    // Initialize wind system via factory
+    WindSystem::InitInfo windInfo{};
+    windInfo.device = ctx.device;
+    windInfo.allocator = ctx.allocator;
+    windInfo.framesInFlight = ctx.framesInFlight;
+
+    auto windSystem = WindSystem::create(windInfo);
+    if (!windSystem) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize WindSystem");
+        return false;
+    }
+    systems.setWind(std::move(windSystem));
+
+    // Initialize grass system via factory
     GrassSystem::InitInfo grassInfo{};
     grassInfo.device = ctx.device;
     grassInfo.allocator = ctx.allocator;
@@ -128,37 +148,26 @@ bool RendererInit::initGrassSubsystem(
     grassInfo.shaderPath = ctx.shaderPath;
     grassInfo.framesInFlight = ctx.framesInFlight;
 
-    if (!grassSystem.init(grassInfo)) {
+    auto grassSystem = GrassSystem::create(grassInfo);
+    if (!grassSystem) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize GrassSystem");
         return false;
     }
+    systems.setGrass(std::move(grassSystem));
 
-    // Initialize wind system
-    WindSystem::InitInfo windInfo{};
-    windInfo.device = ctx.device;
-    windInfo.allocator = ctx.allocator;
-    windInfo.framesInFlight = ctx.framesInFlight;
-
-    if (!windSystem.init(windInfo)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize WindSystem");
-        return false;
-    }
-
-    // Connect environment settings
-    const EnvironmentSettings* environmentSettings = &windSystem.getEnvironmentSettings();
-    grassSystem.setEnvironmentSettings(environmentSettings);
-    leafSystem.setEnvironmentSettings(environmentSettings);
+    // Connect environment settings to grass (leaf is connected later after initWeatherSubsystems)
+    const EnvironmentSettings* environmentSettings = &systems.wind().getEnvironmentSettings();
+    systems.grass().setEnvironmentSettings(environmentSettings);
 
     return true;
 }
 
 bool RendererInit::initWeatherSubsystems(
-    WeatherSystem& weatherSystem,
-    LeafSystem& leafSystem,
+    RendererSystems& systems,
     const InitContext& ctx,
     VkRenderPass hdrRenderPass
 ) {
-    // Initialize weather particle system (rain/snow)
+    // Initialize weather particle system (rain/snow) via factory
     WeatherSystem::InitInfo weatherInfo{};
     weatherInfo.device = ctx.device;
     weatherInfo.allocator = ctx.allocator;
@@ -168,12 +177,14 @@ bool RendererInit::initWeatherSubsystems(
     weatherInfo.shaderPath = ctx.shaderPath;
     weatherInfo.framesInFlight = ctx.framesInFlight;
 
-    if (!weatherSystem.init(weatherInfo)) {
+    auto weatherSystem = WeatherSystem::create(weatherInfo);
+    if (!weatherSystem) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize WeatherSystem");
         return false;
     }
+    systems.setWeather(std::move(weatherSystem));
 
-    // Initialize leaf particle system
+    // Initialize leaf particle system via factory
     LeafSystem::InitInfo leafInfo{};
     leafInfo.device = ctx.device;
     leafInfo.allocator = ctx.allocator;
@@ -183,43 +194,46 @@ bool RendererInit::initWeatherSubsystems(
     leafInfo.shaderPath = ctx.shaderPath;
     leafInfo.framesInFlight = ctx.framesInFlight;
 
-    if (!leafSystem.init(leafInfo)) {
+    auto leafSystem = LeafSystem::create(leafInfo);
+    if (!leafSystem) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize LeafSystem");
         return false;
     }
 
     // Set default leaf intensity (autumn scene)
-    leafSystem.setIntensity(0.5f);
+    leafSystem->setIntensity(0.5f);
+    systems.setLeaf(std::move(leafSystem));
 
     return true;
 }
 
 bool RendererInit::initAtmosphereSubsystems(
-    FroxelSystem& froxelSystem,
-    AtmosphereLUTSystem& atmosphereLUTSystem,
-    CloudShadowSystem& cloudShadowSystem,
-    PostProcessSystem& postProcessSystem,
+    RendererSystems& systems,
     const InitContext& ctx,
     VkImageView shadowMapView,
     VkSampler shadowMapSampler,
     const std::vector<VkBuffer>& lightBuffers
 ) {
-    // Initialize froxel volumetric fog system
-    if (!froxelSystem.init(ctx, shadowMapView, shadowMapSampler, lightBuffers)) {
+    // Initialize froxel volumetric fog system via factory
+    auto froxelSystem = FroxelSystem::create(ctx, shadowMapView, shadowMapSampler, lightBuffers);
+    if (!froxelSystem) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize FroxelSystem");
         return false;
     }
+    systems.setFroxel(std::move(froxelSystem));
 
     // Connect froxel volume to post-process system for compositing
-    postProcessSystem.setFroxelVolume(froxelSystem.getIntegratedVolumeView(), froxelSystem.getVolumeSampler());
-    postProcessSystem.setFroxelParams(froxelSystem.getVolumetricFarPlane(), FroxelSystem::DEPTH_DISTRIBUTION);
-    postProcessSystem.setFroxelEnabled(true);
+    systems.postProcess().setFroxelVolume(systems.froxel().getIntegratedVolumeView(), systems.froxel().getVolumeSampler());
+    systems.postProcess().setFroxelParams(systems.froxel().getVolumetricFarPlane(), FroxelSystem::DEPTH_DISTRIBUTION);
+    systems.postProcess().setFroxelEnabled(true);
 
-    // Initialize atmosphere LUT system
-    if (!atmosphereLUTSystem.init(ctx)) {
+    // Initialize atmosphere LUT system via factory
+    auto atmosphereLUTSystem = AtmosphereLUTSystem::create(ctx);
+    if (!atmosphereLUTSystem) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize AtmosphereLUTSystem");
         return false;
     }
+    systems.setAtmosphereLUT(std::move(atmosphereLUTSystem));
 
     // Compute atmosphere LUTs at startup
     {
@@ -230,16 +244,16 @@ bool RendererInit::initAtmosphereSubsystems(
         }
 
         // Compute transmittance and multi-scatter LUTs (once at startup)
-        atmosphereLUTSystem.computeTransmittanceLUT(cmdScope.get());
-        atmosphereLUTSystem.computeMultiScatterLUT(cmdScope.get());
-        atmosphereLUTSystem.computeIrradianceLUT(cmdScope.get());
+        systems.atmosphereLUT().computeTransmittanceLUT(cmdScope.get());
+        systems.atmosphereLUT().computeMultiScatterLUT(cmdScope.get());
+        systems.atmosphereLUT().computeIrradianceLUT(cmdScope.get());
 
         // Compute sky-view LUT for current sun direction
         glm::vec3 sunDir = glm::vec3(0.0f, 0.707f, 0.707f);  // Default 45 degree sun
-        atmosphereLUTSystem.computeSkyViewLUT(cmdScope.get(), sunDir, glm::vec3(0.0f), 0.0f);
+        systems.atmosphereLUT().computeSkyViewLUT(cmdScope.get(), sunDir, glm::vec3(0.0f), 0.0f);
 
         // Compute cloud map LUT (paraboloid projection)
-        atmosphereLUTSystem.computeCloudMapLUT(cmdScope.get(), glm::vec3(0.0f), 0.0f);
+        systems.atmosphereLUT().computeCloudMapLUT(cmdScope.get(), glm::vec3(0.0f), 0.0f);
 
         if (!cmdScope.end()) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to end command buffer for atmosphere LUT computation");
@@ -250,14 +264,16 @@ bool RendererInit::initAtmosphereSubsystems(
     SDL_Log("Atmosphere LUTs computed successfully");
 
     // Export LUTs as PNG files for visualization
-    atmosphereLUTSystem.exportLUTsAsPNG(ctx.resourcePath);
+    systems.atmosphereLUT().exportLUTsAsPNG(ctx.resourcePath);
     SDL_Log("Atmosphere LUTs exported as PNG to: %s", ctx.resourcePath.c_str());
 
-    // Initialize cloud shadow system
-    if (!cloudShadowSystem.init(ctx, atmosphereLUTSystem.getCloudMapLUTView(), atmosphereLUTSystem.getLUTSampler())) {
+    // Initialize cloud shadow system via factory
+    auto cloudShadowSystem = CloudShadowSystem::create(ctx, systems.atmosphereLUT().getCloudMapLUTView(), systems.atmosphereLUT().getLUTSampler());
+    if (!cloudShadowSystem) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize CloudShadowSystem");
         return false;
     }
+    systems.setCloudShadow(std::move(cloudShadowSystem));
 
     return true;
 }
@@ -274,25 +290,8 @@ bool RendererInit::initWaterSubsystems(
 ) {
     float seaLevel = -terrainConfig.minAltitude;
 
-    // Initialize water system - sea covering terrain areas below sea level
-    WaterSystem::InitInfo waterInfo{};
-    waterInfo.device = ctx.device;
-    waterInfo.physicalDevice = ctx.physicalDevice;
-    waterInfo.allocator = ctx.allocator;
-    waterInfo.descriptorPool = ctx.descriptorPool;
-    waterInfo.hdrRenderPass = hdrRenderPass;
-    waterInfo.shaderPath = ctx.shaderPath;
-    waterInfo.framesInFlight = ctx.framesInFlight;
-    waterInfo.extent = ctx.extent;
-    waterInfo.commandPool = ctx.commandPool;
-    waterInfo.graphicsQueue = ctx.graphicsQueue;
-    waterInfo.waterSize = 65536.0f;  // Extend well beyond terrain for horizon
-    waterInfo.assetPath = ctx.resourcePath;
-
-    if (!water.system.init(waterInfo)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize WaterSystem");
-        return false;
-    }
+    // All water subsystems are created via factories in RendererInitPhases before this function is called
+    // This function now only configures them
 
     // Configure water surface
     water.system.setWaterLevel(seaLevel);
@@ -309,13 +308,7 @@ bool RendererInit::initWaterSubsystems(
     water.system.setShoreFoamWidth(15.0f);
     water.system.setCameraPlanes(0.1f, 50000.0f);
 
-    // Initialize flow map generator
-    if (!water.flowMapGenerator.init(ctx.device, ctx.allocator, ctx.commandPool, ctx.graphicsQueue)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize flow map generator");
-        return false;
-    }
-
-    // Generate flow map from terrain data
+    // Generate flow map from terrain data (FlowMapGenerator already created via factory)
     FlowMapGenerator::Config flowConfig{};
     flowConfig.resolution = 512;
     flowConfig.worldSize = terrainConfig.size;
@@ -337,76 +330,13 @@ bool RendererInit::initWaterSubsystems(
         water.flowMapGenerator.generateRadialFlow(flowConfig, glm::vec2(0.0f));
     }
 
-    // Initialize water displacement system (Phase 4: interactive splashes)
-    WaterDisplacement::InitInfo dispInfo{};
-    dispInfo.device = ctx.device;
-    dispInfo.physicalDevice = ctx.physicalDevice;
-    dispInfo.allocator = ctx.allocator;
-    dispInfo.commandPool = ctx.commandPool;
-    dispInfo.computeQueue = ctx.graphicsQueue;
-    dispInfo.framesInFlight = ctx.framesInFlight;
-    dispInfo.displacementResolution = 512;
-    dispInfo.worldSize = 65536.0f;
-
-    if (!water.displacement.init(dispInfo)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize water displacement");
-        return false;
-    }
-
-    // Initialize foam buffer (Phase 14: temporal foam persistence)
-    FoamBuffer::InitInfo foamInfo{};
-    foamInfo.device = ctx.device;
-    foamInfo.physicalDevice = ctx.physicalDevice;
-    foamInfo.allocator = ctx.allocator;
-    foamInfo.commandPool = ctx.commandPool;
-    foamInfo.computeQueue = ctx.graphicsQueue;
-    foamInfo.shaderPath = ctx.shaderPath;
-    foamInfo.framesInFlight = ctx.framesInFlight;
-    foamInfo.resolution = 512;
-    foamInfo.worldSize = 65536.0f;
-
-    if (!water.foamBuffer.init(foamInfo)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize foam buffer");
-        return false;
-    }
-
-    // Initialize SSR system (Phase 10: Screen-Space Reflections)
-    if (!water.ssrSystem.init(ctx)) {
+    // Initialize SSR system (Phase 10: Screen-Space Reflections) via factory
+    auto ssrSystem = SSRSystem::create(ctx);
+    if (ssrSystem) {
+        water.rendererSystems.setSSR(std::move(ssrSystem));
+    } else {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize SSR system - continuing without SSR");
         // Don't fail init - SSR is optional
-    }
-
-    // Initialize water tile culling (Phase 7: screen-space tile visibility)
-    WaterTileCull::InitInfo tileCullInfo{};
-    tileCullInfo.device = ctx.device;
-    tileCullInfo.physicalDevice = ctx.physicalDevice;
-    tileCullInfo.allocator = ctx.allocator;
-    tileCullInfo.commandPool = ctx.commandPool;
-    tileCullInfo.computeQueue = ctx.graphicsQueue;
-    tileCullInfo.shaderPath = ctx.shaderPath;
-    tileCullInfo.framesInFlight = ctx.framesInFlight;
-    tileCullInfo.extent = ctx.extent;
-    tileCullInfo.tileSize = 32;
-
-    if (!water.tileCull.init(tileCullInfo)) {
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize water tile cull - continuing without");
-        // Don't fail init - tile culling is optional optimization
-    }
-
-    // Initialize water G-buffer (Phase 3)
-    WaterGBuffer::InitInfo gbufferInfo{};
-    gbufferInfo.device = ctx.device;
-    gbufferInfo.physicalDevice = ctx.physicalDevice;
-    gbufferInfo.allocator = ctx.allocator;
-    gbufferInfo.fullResExtent = ctx.extent;
-    gbufferInfo.resolutionScale = 0.5f;
-    gbufferInfo.framesInFlight = ctx.framesInFlight;
-    gbufferInfo.shaderPath = ctx.shaderPath;
-    gbufferInfo.descriptorPool = ctx.descriptorPool;
-
-    if (!water.gBuffer.init(gbufferInfo)) {
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize water G-buffer - continuing without");
-        // Don't fail init - G-buffer is optional optimization
     }
 
     return true;
@@ -428,7 +358,7 @@ bool RendererInit::createWaterDescriptorSets(
             water.flowMapGenerator.getFlowMapView(), water.flowMapGenerator.getFlowMapSampler(),
             water.displacement.getDisplacementMapView(), water.displacement.getSampler(),
             water.foamBuffer.getFoamBufferView(), water.foamBuffer.getSampler(),
-            water.ssrSystem.getSSRResultView(), water.ssrSystem.getSampler(),
+            water.rendererSystems.ssr().getSSRResultView(), water.rendererSystems.ssr().getSampler(),
             postProcessSystem.getHDRDepthView(), depthSampler,
             terrainSystem.getTileArrayView(), terrainSystem.getTileSampler(),
             terrainSystem.getTileInfoBuffer())) {
@@ -450,156 +380,39 @@ bool RendererInit::createWaterDescriptorSets(
     return true;
 }
 
-bool RendererInit::initTerrainSubsystems(
-    TerrainSystem& terrainSystem,
-    const InitContext& ctx,
-    VkRenderPass hdrRenderPass,
-    VkRenderPass shadowRenderPass,
-    uint32_t shadowMapSize,
-    const std::string& heightmapPath,
-    const TerrainConfig& config
-) {
-    TerrainSystem::TerrainInitParams terrainParams{};
-    terrainParams.renderPass = hdrRenderPass;
-    terrainParams.shadowRenderPass = shadowRenderPass;
-    terrainParams.shadowMapSize = shadowMapSize;
-    terrainParams.texturePath = ctx.resourcePath + "/textures";
-
-    if (!terrainSystem.init(ctx, terrainParams, config)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize TerrainSystem");
-        return false;
-    }
-
-    return true;
-}
-
-bool RendererInit::initRockSystem(
-    RockSystem& rockSystem,
-    const InitContext& ctx,
-    float terrainSize,
-    std::function<float(float, float)> getTerrainHeight
-) {
-    RockSystem::InitInfo rockInfo{};
-    rockInfo.device = ctx.device;
-    rockInfo.allocator = ctx.allocator;
-    rockInfo.commandPool = ctx.commandPool;
-    rockInfo.graphicsQueue = ctx.graphicsQueue;
-    rockInfo.physicalDevice = ctx.physicalDevice;
-    rockInfo.resourcePath = ctx.resourcePath;
-    rockInfo.terrainSize = terrainSize;
-    rockInfo.getTerrainHeight = std::move(getTerrainHeight);
-
-    RockConfig rockConfig{};
-    rockConfig.rockVariations = 6;
-    rockConfig.rocksPerVariation = 10;
-    rockConfig.minRadius = 0.4f;
-    rockConfig.maxRadius = 2.0f;
-    rockConfig.placementRadius = 100.0f;
-    rockConfig.minDistanceBetween = 4.0f;
-    rockConfig.roughness = 0.35f;
-    rockConfig.asymmetry = 0.3f;
-    rockConfig.subdivisions = 3;
-    rockConfig.materialRoughness = 0.75f;
-    rockConfig.materialMetallic = 0.0f;
-
-    if (!rockSystem.init(rockInfo, rockConfig)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize RockSystem");
-        return false;
-    }
-
-    return true;
-}
-
-bool RendererInit::initCatmullClarkSystem(
-    CatmullClarkSystem& catmullClarkSystem,
-    const InitContext& ctx,
-    VkRenderPass hdrRenderPass,
-    const glm::vec3& position
-) {
-    CatmullClarkSystem::InitInfo catmullClarkInfo{};
-    catmullClarkInfo.device = ctx.device;
-    catmullClarkInfo.physicalDevice = ctx.physicalDevice;
-    catmullClarkInfo.allocator = ctx.allocator;
-    catmullClarkInfo.renderPass = hdrRenderPass;
-    catmullClarkInfo.descriptorPool = ctx.descriptorPool;
-    catmullClarkInfo.extent = ctx.extent;
-    catmullClarkInfo.shaderPath = ctx.shaderPath;
-    catmullClarkInfo.framesInFlight = ctx.framesInFlight;
-    catmullClarkInfo.graphicsQueue = ctx.graphicsQueue;
-    catmullClarkInfo.commandPool = ctx.commandPool;
-
-    CatmullClarkConfig catmullClarkConfig{};
-    catmullClarkConfig.position = position;
-    catmullClarkConfig.scale = glm::vec3(2.0f);
-    catmullClarkConfig.targetEdgePixels = 12.0f;
-    catmullClarkConfig.maxDepth = 16;
-    catmullClarkConfig.splitThreshold = 18.0f;
-    catmullClarkConfig.mergeThreshold = 6.0f;
-    catmullClarkConfig.objPath = ctx.resourcePath + "/assets/suzanne.obj";
-
-    if (!catmullClarkSystem.init(catmullClarkInfo, catmullClarkConfig)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize CatmullClarkSystem");
-        return false;
-    }
-
-    return true;
-}
-
 bool RendererInit::initHiZSystem(
-    HiZSystem& hiZSystem,
+    RendererSystems& systems,
     const InitContext& ctx,
     VkFormat depthFormat,
     VkImageView hdrDepthView,
     VkSampler depthSampler
 ) {
-    if (!hiZSystem.init(ctx, depthFormat)) {
+    auto hiZSystem = HiZSystem::create(ctx, depthFormat);
+    if (!hiZSystem) {
         SDL_Log("Warning: Hi-Z system initialization failed, occlusion culling disabled");
         return true;  // Don't fail - Hi-Z is optional
     }
 
     // Connect depth buffer to Hi-Z system
-    hiZSystem.setDepthBuffer(hdrDepthView, depthSampler);
+    hiZSystem->setDepthBuffer(hdrDepthView, depthSampler);
+
+    // Store in RendererSystems
+    systems.setHiZ(std::move(hiZSystem));
 
     return true;
 }
 
-bool RendererInit::initTreeEditSystem(
-    TreeEditSystem& treeEditSystem,
+std::unique_ptr<DebugLineSystem> RendererInit::createDebugLineSystem(
     const InitContext& ctx,
     VkRenderPass hdrRenderPass
 ) {
-    TreeEditSystem::InitInfo treeEditInfo{};
-    treeEditInfo.device = ctx.device;
-    treeEditInfo.physicalDevice = ctx.physicalDevice;
-    treeEditInfo.allocator = ctx.allocator;
-    treeEditInfo.renderPass = hdrRenderPass;
-    treeEditInfo.descriptorPool = ctx.descriptorPool;
-    treeEditInfo.extent = ctx.extent;
-    treeEditInfo.shaderPath = ctx.shaderPath;
-    treeEditInfo.framesInFlight = ctx.framesInFlight;
-    treeEditInfo.graphicsQueue = ctx.graphicsQueue;
-    treeEditInfo.commandPool = ctx.commandPool;
-
-    if (!treeEditSystem.init(treeEditInfo)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize TreeEditSystem");
-        return false;
+    auto system = DebugLineSystem::create(ctx, hdrRenderPass);
+    if (!system) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create debug line system");
+        return nullptr;
     }
-
-    return true;
-}
-
-bool RendererInit::initDebugLineSystem(
-    DebugLineSystem& debugLineSystem,
-    const InitContext& ctx,
-    VkRenderPass hdrRenderPass
-) {
-    if (!debugLineSystem.init(ctx.device, ctx.allocator, hdrRenderPass,
-                              ctx.shaderPath, ctx.framesInFlight)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize debug line system");
-        return false;
-    }
-    SDL_Log("Debug line system initialized");
-    return true;
+    SDL_Log("Debug line system created");
+    return system;
 }
 
 void RendererInit::updateCloudShadowBindings(

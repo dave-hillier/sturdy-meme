@@ -6,7 +6,19 @@
 
 #include <SDL3/SDL.h>
 
-bool SkinnedMeshRenderer::init(const InitInfo& info) {
+std::unique_ptr<SkinnedMeshRenderer> SkinnedMeshRenderer::create(const InitInfo& info) {
+    std::unique_ptr<SkinnedMeshRenderer> system(new SkinnedMeshRenderer());
+    if (!system->initInternal(info)) {
+        return nullptr;
+    }
+    return system;
+}
+
+SkinnedMeshRenderer::~SkinnedMeshRenderer() {
+    cleanup();
+}
+
+bool SkinnedMeshRenderer::initInternal(const InitInfo& info) {
     device = info.device;
     allocator = info.allocator;
     descriptorPool = info.descriptorPool;
@@ -24,7 +36,7 @@ bool SkinnedMeshRenderer::init(const InitInfo& info) {
     return true;
 }
 
-void SkinnedMeshRenderer::destroy() {
+void SkinnedMeshRenderer::cleanup() {
     if (device == VK_NULL_HANDLE) return;
 
     if (pipeline != VK_NULL_HANDLE) {

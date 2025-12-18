@@ -8,7 +8,19 @@
 #include <cstring>
 #include <array>
 
-bool VolumetricSnowSystem::init(const InitInfo& info) {
+std::unique_ptr<VolumetricSnowSystem> VolumetricSnowSystem::create(const InitInfo& info) {
+    std::unique_ptr<VolumetricSnowSystem> system(new VolumetricSnowSystem());
+    if (!system->initInternal(info)) {
+        return nullptr;
+    }
+    return system;
+}
+
+VolumetricSnowSystem::~VolumetricSnowSystem() {
+    cleanup();
+}
+
+bool VolumetricSnowSystem::initInternal(const InitInfo& info) {
     SystemLifecycleHelper::Hooks hooks{};
     hooks.createBuffers = [this]() { return createBuffers(); };
     hooks.createComputeDescriptorSetLayout = [this]() { return createComputeDescriptorSetLayout(); };
@@ -22,15 +34,23 @@ bool VolumetricSnowSystem::init(const InitInfo& info) {
     return lifecycle.init(info, hooks);
 }
 
-void VolumetricSnowSystem::destroy(VkDevice dev, VmaAllocator alloc) {
+void VolumetricSnowSystem::cleanup() {
+    if (!lifecycle.getDevice()) return;  // Not initialized
+
     cascadeSampler.reset();
 
     for (uint32_t i = 0; i < NUM_SNOW_CASCADES; i++) {
-        vkDestroyImageView(dev, cascadeViews[i], nullptr);
-        vmaDestroyImage(alloc, cascadeImages[i], cascadeAllocations[i]);
+        if (cascadeViews[i]) {
+            vkDestroyImageView(lifecycle.getDevice(), cascadeViews[i], nullptr);
+            cascadeViews[i] = VK_NULL_HANDLE;
+        }
+        if (cascadeImages[i]) {
+            vmaDestroyImage(lifecycle.getAllocator(), cascadeImages[i], cascadeAllocations[i]);
+            cascadeImages[i] = VK_NULL_HANDLE;
+        }
     }
 
-    lifecycle.destroy(dev, alloc);
+    lifecycle.destroy(lifecycle.getDevice(), lifecycle.getAllocator());
 }
 
 void VolumetricSnowSystem::destroyBuffers(VmaAllocator alloc) {

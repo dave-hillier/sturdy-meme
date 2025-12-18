@@ -10,7 +10,35 @@
 #include <cmath>
 #include <limits>
 
-bool ShadowSystem::init(const InitInfo& info) {
+// Factory implementations
+std::unique_ptr<ShadowSystem> ShadowSystem::create(const InitInfo& info) {
+    auto system = std::unique_ptr<ShadowSystem>(new ShadowSystem());
+    if (!system->initInternal(info)) {
+        return nullptr;
+    }
+    return system;
+}
+
+std::unique_ptr<ShadowSystem> ShadowSystem::create(const InitContext& ctx,
+                                                    VkDescriptorSetLayout mainDescriptorSetLayout_,
+                                                    VkDescriptorSetLayout skinnedDescriptorSetLayout_) {
+    InitInfo info;
+    info.device = ctx.device;
+    info.physicalDevice = ctx.physicalDevice;
+    info.allocator = ctx.allocator;
+    info.mainDescriptorSetLayout = mainDescriptorSetLayout_;
+    info.skinnedDescriptorSetLayout = skinnedDescriptorSetLayout_;
+    info.shaderPath = ctx.shaderPath;
+    info.framesInFlight = ctx.framesInFlight;
+    return create(info);
+}
+
+// Destructor
+ShadowSystem::~ShadowSystem() {
+    cleanup();
+}
+
+bool ShadowSystem::initInternal(const InitInfo& info) {
     device = info.device;
     physicalDevice = info.physicalDevice;
     allocator = info.allocator;
@@ -29,27 +57,7 @@ bool ShadowSystem::init(const InitInfo& info) {
     return true;
 }
 
-bool ShadowSystem::init(const InitContext& ctx, VkDescriptorSetLayout mainDescriptorSetLayout_,
-                        VkDescriptorSetLayout skinnedDescriptorSetLayout_) {
-    device = ctx.device;
-    physicalDevice = ctx.physicalDevice;
-    allocator = ctx.allocator;
-    mainDescriptorSetLayout = mainDescriptorSetLayout_;
-    skinnedDescriptorSetLayout = skinnedDescriptorSetLayout_;
-    shaderPath = ctx.shaderPath;
-    framesInFlight = ctx.framesInFlight;
-
-    if (!createShadowRenderPass()) return false;
-    if (!createShadowResources()) return false;
-    if (!createDynamicShadowResources()) return false;
-    if (!createShadowPipeline()) return false;
-    if (!createSkinnedShadowPipeline()) return false;
-    if (!createDynamicShadowPipeline()) return false;
-
-    return true;
-}
-
-void ShadowSystem::destroy() {
+void ShadowSystem::cleanup() {
     if (device == VK_NULL_HANDLE) return;
 
     // Pipeline cleanup
@@ -69,6 +77,8 @@ void ShadowSystem::destroy() {
 
     // Render pass
     if (shadowRenderPass != VK_NULL_HANDLE) vkDestroyRenderPass(device, shadowRenderPass, nullptr);
+
+    device = VK_NULL_HANDLE;
 }
 
 bool ShadowSystem::createShadowRenderPass() {

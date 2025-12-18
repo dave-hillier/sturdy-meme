@@ -6,6 +6,7 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
+#include <memory>
 
 #include "BufferUtils.h"
 #include "ParticleSystem.h"
@@ -44,11 +45,19 @@ public:
         uint32_t shadowMapSize;
     };
 
-    GrassSystem() = default;
-    ~GrassSystem() = default;
+    /**
+     * Factory: Create and initialize GrassSystem.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<GrassSystem> create(const InitInfo& info);
 
-    bool init(const InitInfo& info);
-    void destroy(VkDevice device, VmaAllocator allocator);
+    ~GrassSystem();
+
+    // Non-copyable, non-movable
+    GrassSystem(const GrassSystem&) = delete;
+    GrassSystem& operator=(const GrassSystem&) = delete;
+    GrassSystem(GrassSystem&&) = delete;
+    GrassSystem& operator=(GrassSystem&&) = delete;
 
     // Update extent for viewport (on window resize)
     void setExtent(VkExtent2D newExtent) { (*particleSystem)->setExtent(newExtent); }
@@ -86,6 +95,11 @@ public:
     void setSnowMask(VkDevice device, VkImageView snowMaskView, VkSampler snowMaskSampler);
 
 private:
+    GrassSystem() = default;  // Private: use factory
+
+    bool initInternal(const InitInfo& info);
+    void cleanup();
+
     bool createShadowPipeline();
     bool createBuffers();
     bool createDisplacementResources();

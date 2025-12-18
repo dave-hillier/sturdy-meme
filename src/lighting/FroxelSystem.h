@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
+#include <memory>
 #include "UBOs.h"
 #include "BufferUtils.h"
 #include "DescriptorManager.h"
@@ -38,13 +39,21 @@ public:
     // Depth distribution factor (each slice ~20% thicker than previous)
     static constexpr float DEPTH_DISTRIBUTION = 1.2f;
 
-    FroxelSystem() = default;
-    ~FroxelSystem() = default;
+    /**
+     * Factory: Create and initialize FroxelSystem.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<FroxelSystem> create(const InitInfo& info);
+    static std::unique_ptr<FroxelSystem> create(const InitContext& ctx, VkImageView shadowMapView, VkSampler shadowSampler,
+                                                 const std::vector<VkBuffer>& lightBuffers);
 
-    bool init(const InitInfo& info);
-    bool init(const InitContext& ctx, VkImageView shadowMapView, VkSampler shadowSampler,
-              const std::vector<VkBuffer>& lightBuffers);
-    void destroy(VkDevice device, VmaAllocator allocator);
+    ~FroxelSystem();
+
+    // Non-copyable, non-movable
+    FroxelSystem(const FroxelSystem&) = delete;
+    FroxelSystem& operator=(const FroxelSystem&) = delete;
+    FroxelSystem(FroxelSystem&&) = delete;
+    FroxelSystem& operator=(FroxelSystem&&) = delete;
     void resize(VkDevice device, VmaAllocator allocator, VkExtent2D newExtent);
 
     // Update froxel volume (call before scene rendering)
@@ -180,4 +189,9 @@ private:
     float temporalBlend = 0.9f;
 
     bool enabled = true;
+
+    FroxelSystem() = default;  // Private: use factory
+
+    bool initInternal(const InitInfo& info);
+    void cleanup();
 };

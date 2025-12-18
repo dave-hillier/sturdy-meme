@@ -12,14 +12,8 @@ class GuiSystem;
 // for querying input state without coupling to SDL directly.
 class InputSystem {
 public:
-    InputSystem() = default;
-    ~InputSystem() = default;
-
-    // Initialize the input system
-    bool init();
-
-    // Shutdown and release resources
-    void shutdown();
+    InputSystem();
+    ~InputSystem();
 
     // Process SDL events for input (call this with each event from the main loop)
     // Returns true if the event was handled as an input event

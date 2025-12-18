@@ -7,6 +7,7 @@
 #include <array>
 #include <string>
 #include <functional>
+#include <memory>
 
 #include "Camera.h"
 #include "InitContext.h"
@@ -38,13 +39,22 @@ public:
         uint32_t framesInFlight;
     };
 
-    ShadowSystem() = default;
-    ~ShadowSystem() = default;
+    /**
+     * Factory: Create and initialize shadow system.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<ShadowSystem> create(const InitInfo& info);
+    static std::unique_ptr<ShadowSystem> create(const InitContext& ctx,
+                                                 VkDescriptorSetLayout mainDescriptorSetLayout,
+                                                 VkDescriptorSetLayout skinnedDescriptorSetLayout = VK_NULL_HANDLE);
 
-    bool init(const InitInfo& info);
-    bool init(const InitContext& ctx, VkDescriptorSetLayout mainDescriptorSetLayout,
-              VkDescriptorSetLayout skinnedDescriptorSetLayout = VK_NULL_HANDLE);
-    void destroy();
+    ~ShadowSystem();
+
+    // Non-copyable, non-movable (stored via unique_ptr)
+    ShadowSystem(ShadowSystem&&) = delete;
+    ShadowSystem& operator=(ShadowSystem&&) = delete;
+    ShadowSystem(const ShadowSystem&) = delete;
+    ShadowSystem& operator=(const ShadowSystem&) = delete;
 
     // Update cascade matrices based on light direction and camera
     void updateCascadeMatrices(const glm::vec3& lightDir, const Camera& camera);
@@ -97,6 +107,11 @@ public:
                               const std::vector<Light>& visibleLights);
 
 private:
+    ShadowSystem() = default;  // Private: use factory
+
+    bool initInternal(const InitInfo& info);
+    void cleanup();
+
     // CSM creation methods
     bool createShadowResources();
     bool createShadowRenderPass();

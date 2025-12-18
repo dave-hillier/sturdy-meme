@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
+#include <memory>
 
 #include "DescriptorManager.h"
 #include "core/VulkanRAII.h"
@@ -46,11 +47,19 @@ public:
     // Depth texture (D32F):
     //   Water-only depth for proper compositing
 
-    WaterGBuffer() = default;
-    ~WaterGBuffer() = default;
+    /**
+     * Factory: Create and initialize WaterGBuffer.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<WaterGBuffer> create(const InitInfo& info);
 
-    bool init(const InitInfo& info);
-    void destroy();
+    ~WaterGBuffer();
+
+    // Non-copyable, non-movable
+    WaterGBuffer(const WaterGBuffer&) = delete;
+    WaterGBuffer& operator=(const WaterGBuffer&) = delete;
+    WaterGBuffer(WaterGBuffer&&) = delete;
+    WaterGBuffer& operator=(WaterGBuffer&&) = delete;
 
     // Resize G-buffer when window changes
     void resize(VkExtent2D newFullResExtent);
@@ -88,6 +97,11 @@ public:
     void clear(VkCommandBuffer cmd);
 
 private:
+    WaterGBuffer() = default;  // Private: use factory
+
+    bool initInternal(const InitInfo& info);
+    void cleanup();
+
     bool createImages();
     bool createRenderPass();
     bool createFramebuffer();

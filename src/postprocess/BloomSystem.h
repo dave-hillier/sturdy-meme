@@ -4,6 +4,7 @@
 #include <vk_mem_alloc.h>
 #include <vector>
 #include <string>
+#include <memory>
 #include "DescriptorManager.h"
 #include "InitContext.h"
 #include "core/VulkanRAII.h"
@@ -19,13 +20,22 @@ public:
         std::string shaderPath;
     };
 
-    BloomSystem() = default;
-    ~BloomSystem() = default;
+    /**
+     * Factory: Create and initialize bloom system.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<BloomSystem> create(const InitInfo& info);
+    static std::unique_ptr<BloomSystem> create(const InitContext& ctx);
 
-    bool init(const InitInfo& info);
-    bool init(const InitContext& ctx);  // New simplified init
-    void destroy(VkDevice device, VmaAllocator allocator);
-    void resize(VkDevice device, VmaAllocator allocator, VkExtent2D newExtent);
+    ~BloomSystem();
+
+    // Non-copyable, non-movable (stored via unique_ptr only)
+    BloomSystem(BloomSystem&&) = delete;
+    BloomSystem& operator=(BloomSystem&&) = delete;
+    BloomSystem(const BloomSystem&) = delete;
+    BloomSystem& operator=(const BloomSystem&) = delete;
+
+    void resize(VkExtent2D newExtent);
 
     void recordBloomPass(VkCommandBuffer cmd, VkImageView hdrInput);
 
@@ -38,6 +48,11 @@ public:
     float getIntensity() const { return intensity; }
 
 private:
+    BloomSystem() = default;  // Private: use factory
+
+    bool initInternal(const InitInfo& info);
+    void cleanup();
+
     struct MipLevel {
         VkImage image = VK_NULL_HANDLE;
         VmaAllocation allocation = VK_NULL_HANDLE;

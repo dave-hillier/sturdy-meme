@@ -5,6 +5,7 @@
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
 #include <string>
+#include <memory>
 
 #include "TreeEditorGui.h"
 #include "GuiIKTab.h"
@@ -16,13 +17,22 @@ class Camera;
 
 class GuiSystem {
 public:
-    GuiSystem() = default;
-    ~GuiSystem() = default;
+    /**
+     * Factory: Create and initialize GUI system.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<GuiSystem> create(SDL_Window* window, VkInstance instance,
+                                              VkPhysicalDevice physicalDevice, VkDevice device,
+                                              uint32_t graphicsQueueFamily, VkQueue graphicsQueue,
+                                              VkRenderPass renderPass, uint32_t imageCount);
 
-    bool init(SDL_Window* window, VkInstance instance, VkPhysicalDevice physicalDevice,
-              VkDevice device, uint32_t graphicsQueueFamily, VkQueue graphicsQueue,
-              VkRenderPass renderPass, uint32_t imageCount);
-    void shutdown(VkDevice device);
+    ~GuiSystem();
+
+    // Non-copyable, non-movable (stored via unique_ptr only)
+    GuiSystem(GuiSystem&&) = delete;
+    GuiSystem& operator=(GuiSystem&&) = delete;
+    GuiSystem(const GuiSystem&) = delete;
+    GuiSystem& operator=(const GuiSystem&) = delete;
 
     void processEvent(const SDL_Event& event);
     void beginFrame();
@@ -44,11 +54,18 @@ public:
     const PlayerSettings& getPlayerSettings() const { return playerSettings; }
 
 private:
+    GuiSystem();  // Private: use factory
+    bool initInternal(SDL_Window* window, VkInstance instance, VkPhysicalDevice physicalDevice,
+                      VkDevice device, uint32_t graphicsQueueFamily, VkQueue graphicsQueue,
+                      VkRenderPass renderPass, uint32_t imageCount);
+    void cleanup();
+
     void setupStyle();
     void renderDashboard(Renderer& renderer, const Camera& camera, float fps);
     void renderHelpOverlay();
     void renderPositionPanel(const Camera& camera);
 
+    VkDevice device_ = VK_NULL_HANDLE;  // Stored for cleanup
     VkDescriptorPool imguiPool = VK_NULL_HANDLE;
     bool visible = true;
     bool showHelp = false;

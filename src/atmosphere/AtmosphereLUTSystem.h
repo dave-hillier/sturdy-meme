@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
+#include <memory>
 #include "UBOs.h"
 #include "BufferUtils.h"
 #include "DescriptorManager.h"
@@ -86,12 +87,20 @@ public:
     // Stores procedural cloud density mapped to hemisphere directions
     static constexpr uint32_t CLOUDMAP_SIZE = 256;     // Square texture for paraboloid map
 
-    AtmosphereLUTSystem() = default;
-    ~AtmosphereLUTSystem() = default;
+    /**
+     * Factory: Create and initialize AtmosphereLUTSystem.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<AtmosphereLUTSystem> create(const InitInfo& info);
+    static std::unique_ptr<AtmosphereLUTSystem> create(const InitContext& ctx);
 
-    bool init(const InitInfo& info);
-    bool init(const InitContext& ctx);
-    void destroy(VkDevice device, VmaAllocator allocator);
+    ~AtmosphereLUTSystem();
+
+    // Non-copyable, non-movable
+    AtmosphereLUTSystem(const AtmosphereLUTSystem&) = delete;
+    AtmosphereLUTSystem& operator=(const AtmosphereLUTSystem&) = delete;
+    AtmosphereLUTSystem(AtmosphereLUTSystem&&) = delete;
+    AtmosphereLUTSystem& operator=(AtmosphereLUTSystem&&) = delete;
 
     // Compute LUTs (called at startup and when atmosphere parameters change)
     void computeTransmittanceLUT(VkCommandBuffer cmd);
@@ -247,4 +256,9 @@ private:
 
     // Dirty flag for LUT recomputation
     bool paramsDirty = false;
+
+    AtmosphereLUTSystem() = default;  // Private: use factory
+
+    bool initInternal(const InitInfo& info);
+    void cleanup();
 };

@@ -6,7 +6,19 @@
 #include <cstring>
 #include <algorithm>
 
-bool LeafSystem::init(const InitInfo& info) {
+std::unique_ptr<LeafSystem> LeafSystem::create(const InitInfo& info) {
+    std::unique_ptr<LeafSystem> system(new LeafSystem());
+    if (!system->initInternal(info)) {
+        return nullptr;
+    }
+    return system;
+}
+
+LeafSystem::~LeafSystem() {
+    cleanup();
+}
+
+bool LeafSystem::initInternal(const InitInfo& info) {
     // Store init info for accessors used during initialization
     storedDevice = info.device;
     storedAllocator = info.allocator;
@@ -47,7 +59,7 @@ bool LeafSystem::init(const InitInfo& info) {
     return particleSystem.has_value();
 }
 
-void LeafSystem::destroy(VkDevice dev, VmaAllocator alloc) {
+void LeafSystem::cleanup() {
     particleSystem.reset();
 }
 

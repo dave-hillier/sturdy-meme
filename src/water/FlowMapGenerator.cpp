@@ -7,12 +7,23 @@
 #include <queue>
 #include <cmath>
 
-bool FlowMapGenerator::init(VkDevice device, VmaAllocator allocator,
-                            VkCommandPool commandPool, VkQueue queue) {
-    this->device = device;
-    this->allocator = allocator;
-    this->commandPool = commandPool;
-    this->queue = queue;
+std::unique_ptr<FlowMapGenerator> FlowMapGenerator::create(const InitInfo& info) {
+    std::unique_ptr<FlowMapGenerator> system(new FlowMapGenerator());
+    if (!system->initInternal(info)) {
+        return nullptr;
+    }
+    return system;
+}
+
+FlowMapGenerator::~FlowMapGenerator() {
+    cleanup();
+}
+
+bool FlowMapGenerator::initInternal(const InitInfo& info) {
+    device = info.device;
+    allocator = info.allocator;
+    commandPool = info.commandPool;
+    queue = info.queue;
 
     if (!createSampler()) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create flow map sampler");
@@ -22,7 +33,9 @@ bool FlowMapGenerator::init(VkDevice device, VmaAllocator allocator,
     return true;
 }
 
-void FlowMapGenerator::destroy(VkDevice device, VmaAllocator allocator) {
+void FlowMapGenerator::cleanup() {
+    if (device == VK_NULL_HANDLE) return;
+
     flowMapSampler.reset();
 
     if (flowMapView != VK_NULL_HANDLE) {

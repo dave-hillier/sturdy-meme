@@ -5,6 +5,7 @@
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
 #include <vector>
+#include <memory>
 
 #include "BufferUtils.h"
 #include "UBOs.h"
@@ -13,9 +14,6 @@
 // Implements a scrolling Perlin noise wind model as described in Ghost of Tsushima's wind system
 class WindSystem {
 public:
-    WindSystem() = default;
-    ~WindSystem() = default;
-
     // Initialization parameters
     struct InitInfo {
         VkDevice device;
@@ -23,8 +21,19 @@ public:
         uint32_t framesInFlight;
     };
 
-    bool init(const InitInfo& info);
-    void destroy(VkDevice device, VmaAllocator allocator);
+    /**
+     * Factory: Create and initialize WindSystem.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<WindSystem> create(const InitInfo& info);
+
+    ~WindSystem();
+
+    // Non-copyable, non-movable
+    WindSystem(const WindSystem&) = delete;
+    WindSystem& operator=(const WindSystem&) = delete;
+    WindSystem(WindSystem&&) = delete;
+    WindSystem& operator=(WindSystem&&) = delete;
 
     // Update wind state each frame
     void update(float deltaTime);
@@ -68,6 +77,11 @@ public:
     float getTime() const { return totalTime; }
 
 private:
+    WindSystem() = default;  // Private: use factory
+
+    bool initInternal(const InitInfo& info);
+    void cleanup();
+
     // CPU-side Perlin noise for gameplay sampling
     float perlinNoise(float x, float y) const;
     float fade(float t) const;
@@ -81,6 +95,7 @@ private:
     float totalTime = 0.0f;
 
     // Vulkan resources
+    VmaAllocator allocator = VK_NULL_HANDLE;
     BufferUtils::PerFrameBufferSet uniformBuffers;
     uint32_t framesInFlight = 0;
 

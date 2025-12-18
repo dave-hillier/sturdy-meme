@@ -11,7 +11,21 @@
 #include <algorithm>
 #include <stdexcept>
 
-bool TerrainSystem::init(const InitInfo& info, const TerrainConfig& cfg) {
+std::unique_ptr<TerrainSystem> TerrainSystem::create(const InitContext& ctx,
+                                                      const TerrainInitParams& params,
+                                                      const TerrainConfig& config) {
+    std::unique_ptr<TerrainSystem> system(new TerrainSystem());
+    if (!system->initInternal(ctx, params, config)) {
+        return nullptr;
+    }
+    return system;
+}
+
+TerrainSystem::~TerrainSystem() {
+    cleanup();
+}
+
+bool TerrainSystem::initInternal(const InitInfo& info, const TerrainConfig& cfg) {
     device = info.device;
     physicalDevice = info.physicalDevice;
     allocator = info.allocator;
@@ -158,7 +172,7 @@ bool TerrainSystem::init(const InitInfo& info, const TerrainConfig& cfg) {
     return true;
 }
 
-bool TerrainSystem::init(const InitContext& ctx, const TerrainInitParams& params, const TerrainConfig& cfg) {
+bool TerrainSystem::initInternal(const InitContext& ctx, const TerrainInitParams& params, const TerrainConfig& cfg) {
     InitInfo info{};
     info.device = ctx.device;
     info.physicalDevice = ctx.physicalDevice;
@@ -173,10 +187,11 @@ bool TerrainSystem::init(const InitContext& ctx, const TerrainInitParams& params
     info.framesInFlight = ctx.framesInFlight;
     info.graphicsQueue = ctx.graphicsQueue;
     info.commandPool = ctx.commandPool;
-    return init(info, cfg);
+    return initInternal(info, cfg);
 }
 
-void TerrainSystem::destroy(VkDevice device, VmaAllocator allocator) {
+void TerrainSystem::cleanup() {
+    if (device == VK_NULL_HANDLE) return;  // Not initialized
     vkDeviceWaitIdle(device);
 
     // RAII-managed subsystems destroyed automatically via std::optional reset

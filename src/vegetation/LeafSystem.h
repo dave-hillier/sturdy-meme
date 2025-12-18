@@ -6,6 +6,7 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
+#include <memory>
 
 #include "ParticleSystem.h"
 #include "BufferUtils.h"
@@ -47,11 +48,19 @@ class LeafSystem {
 public:
     using InitInfo = ParticleSystem::InitInfo;
 
-    LeafSystem() = default;
-    ~LeafSystem() = default;
+    /**
+     * Factory: Create and initialize LeafSystem.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<LeafSystem> create(const InitInfo& info);
 
-    bool init(const InitInfo& info);
-    void destroy(VkDevice device, VmaAllocator allocator);
+    ~LeafSystem();
+
+    // Non-copyable, non-movable
+    LeafSystem(const LeafSystem&) = delete;
+    LeafSystem& operator=(const LeafSystem&) = delete;
+    LeafSystem(LeafSystem&&) = delete;
+    LeafSystem& operator=(LeafSystem&&) = delete;
 
     // Update extent for viewport (on window resize)
     void setExtent(VkExtent2D newExtent) { (*particleSystem)->setExtent(newExtent); }
@@ -172,4 +181,9 @@ private:
     // Particle counts
     static constexpr uint32_t MAX_PARTICLES = 100000;
     static constexpr uint32_t WORKGROUP_SIZE = 256;
+
+    LeafSystem() = default;  // Private: use factory
+
+    bool initInternal(const InitInfo& info);
+    void cleanup();
 };

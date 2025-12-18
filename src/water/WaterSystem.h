@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 #include <optional>
+#include <memory>
 
 #include "Mesh.h"
 #include "Texture.h"
@@ -89,11 +90,19 @@ public:
         float padding2;            // Padding for alignment
     };
 
-    WaterSystem() = default;
-    ~WaterSystem() = default;
+    /**
+     * Factory: Create and initialize WaterSystem.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<WaterSystem> create(const InitInfo& info);
 
-    bool init(const InitInfo& info);
-    void destroy(VkDevice device, VmaAllocator allocator);
+    ~WaterSystem();
+
+    // Non-copyable, non-movable
+    WaterSystem(const WaterSystem&) = delete;
+    WaterSystem& operator=(const WaterSystem&) = delete;
+    WaterSystem(WaterSystem&&) = delete;
+    WaterSystem& operator=(WaterSystem&&) = delete;
 
     // Update extent for viewport (on window resize)
     void setExtent(VkExtent2D newExtent) { extent = newExtent; }
@@ -287,6 +296,11 @@ public:
                                   float distance, BlendMode mode = BlendMode::Distance);
 
 private:
+    WaterSystem() = default;  // Private: use factory
+
+    bool initInternal(const InitInfo& info);
+    void cleanup();
+
     bool createDescriptorSetLayout();
     bool createPipeline();
     bool createWaterMesh();

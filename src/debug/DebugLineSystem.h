@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
+#include <memory>
 #include "InitContext.h"
 
 #ifdef JPH_DEBUG_RENDERER
@@ -20,13 +21,21 @@ struct DebugLineVertex {
 // System for rendering debug lines and triangles using Vulkan
 class DebugLineSystem {
 public:
-    DebugLineSystem() = default;
-    ~DebugLineSystem() = default;
+    // Factory: returns nullptr on failure
+    static std::unique_ptr<DebugLineSystem> create(VkDevice device, VmaAllocator allocator,
+                                                    VkRenderPass renderPass,
+                                                    const std::string& shaderPath,
+                                                    uint32_t framesInFlight);
+    static std::unique_ptr<DebugLineSystem> create(const InitContext& ctx, VkRenderPass renderPass);
 
-    bool init(VkDevice device, VmaAllocator allocator, VkRenderPass renderPass,
-              const std::string& shaderPath, uint32_t framesInFlight);
-    bool init(const InitContext& ctx, VkRenderPass renderPass);
-    void shutdown();
+    // Destructor handles cleanup
+    ~DebugLineSystem();
+
+    // Move-only (RAII handles are non-copyable)
+    DebugLineSystem(DebugLineSystem&& other) noexcept;
+    DebugLineSystem& operator=(DebugLineSystem&& other) noexcept;
+    DebugLineSystem(const DebugLineSystem&) = delete;
+    DebugLineSystem& operator=(const DebugLineSystem&) = delete;
 
     // Begin collecting lines for this frame
     void beginFrame(uint32_t frameIndex);
@@ -57,8 +66,13 @@ public:
     size_t getTriangleCount() const { return triangleVertices.size() / 3; }
 
 private:
+    DebugLineSystem();  // Private: only factory can construct
+
+    bool initInternal(VkDevice device, VmaAllocator allocator, VkRenderPass renderPass,
+                      const std::string& shaderPath, uint32_t framesInFlight);
     bool createPipeline(VkRenderPass renderPass, const std::string& shaderPath);
     void destroyPipeline();
+    void cleanup();
 
     VkDevice device = VK_NULL_HANDLE;
     VmaAllocator allocator = VK_NULL_HANDLE;

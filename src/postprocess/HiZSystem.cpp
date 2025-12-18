@@ -8,7 +8,31 @@
 #include <cstring>
 #include <algorithm>
 
-bool HiZSystem::init(const InitInfo& info) {
+std::unique_ptr<HiZSystem> HiZSystem::create(const InitInfo& info) {
+    auto system = std::unique_ptr<HiZSystem>(new HiZSystem());
+    if (!system->initInternal(info)) {
+        return nullptr;
+    }
+    return system;
+}
+
+std::unique_ptr<HiZSystem> HiZSystem::create(const InitContext& ctx, VkFormat depthFormat_) {
+    InitInfo info;
+    info.device = ctx.device;
+    info.allocator = ctx.allocator;
+    info.descriptorPool = ctx.descriptorPool;
+    info.extent = ctx.extent;
+    info.shaderPath = ctx.shaderPath;
+    info.framesInFlight = ctx.framesInFlight;
+    info.depthFormat = depthFormat_;
+    return create(info);
+}
+
+HiZSystem::~HiZSystem() {
+    cleanup();
+}
+
+bool HiZSystem::initInternal(const InitInfo& info) {
     device = info.device;
     allocator = info.allocator;
     descriptorPool = info.descriptorPool;
@@ -46,49 +70,15 @@ bool HiZSystem::init(const InitInfo& info) {
     return true;
 }
 
-bool HiZSystem::init(const InitContext& ctx, VkFormat depthFormat_) {
-    device = ctx.device;
-    allocator = ctx.allocator;
-    descriptorPool = ctx.descriptorPool;
-    extent = ctx.extent;
-    shaderPath = ctx.shaderPath;
-    framesInFlight = ctx.framesInFlight;
-    depthFormat = depthFormat_;
+void HiZSystem::cleanup() {
+    if (device == VK_NULL_HANDLE) return;
 
-    if (!createHiZPyramid()) {
-        SDL_Log("HiZSystem: Failed to create Hi-Z pyramid");
-        return false;
-    }
-
-    if (!createPyramidPipeline()) {
-        SDL_Log("HiZSystem: Failed to create pyramid pipeline");
-        return false;
-    }
-
-    if (!createCullingPipeline()) {
-        SDL_Log("HiZSystem: Failed to create culling pipeline");
-        return false;
-    }
-
-    if (!createBuffers()) {
-        SDL_Log("HiZSystem: Failed to create buffers");
-        return false;
-    }
-
-    if (!createDescriptorSets()) {
-        SDL_Log("HiZSystem: Failed to create descriptor sets");
-        return false;
-    }
-
-    SDL_Log("HiZSystem: Initialized with %u mip levels", mipLevelCount);
-    return true;
-}
-
-void HiZSystem::destroy() {
     destroyDescriptorSets();
     destroyBuffers();
     destroyPipelines();
     destroyHiZPyramid();
+
+    device = VK_NULL_HANDLE;
 }
 
 void HiZSystem::resize(VkExtent2D newExtent) {

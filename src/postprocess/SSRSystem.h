@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
+#include <memory>
 #include "InitContext.h"
 #include "DescriptorManager.h"
 #include "core/VulkanRAII.h"
@@ -68,12 +69,21 @@ public:
         float padding2;
     };
 
-    SSRSystem() = default;
-    ~SSRSystem() = default;
+    /**
+     * Factory: Create and initialize SSR system.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<SSRSystem> create(const InitInfo& info);
+    static std::unique_ptr<SSRSystem> create(const InitContext& ctx);
 
-    bool init(const InitInfo& info);
-    bool init(const InitContext& ctx);  // Uses graphicsQueue as compute queue
-    void destroy();
+    ~SSRSystem();
+
+    // Non-copyable, non-movable (stored via unique_ptr only)
+    SSRSystem(SSRSystem&&) = delete;
+    SSRSystem& operator=(SSRSystem&&) = delete;
+    SSRSystem(const SSRSystem&) = delete;
+    SSRSystem& operator=(const SSRSystem&) = delete;
+
     void resize(VkExtent2D newExtent);
 
     // Record SSR compute pass - must be called after scene rendering, before water
@@ -107,6 +117,11 @@ public:
     float getBlurRadius() const { return blurRadius; }
 
 private:
+    SSRSystem() = default;  // Private: use factory
+
+    bool initInternal(const InitInfo& info);
+    void cleanup();
+
     bool createSSRBuffers();
     bool createComputePipeline();
     bool createBlurPipeline();

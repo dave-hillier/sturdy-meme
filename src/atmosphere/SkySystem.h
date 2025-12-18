@@ -4,6 +4,7 @@
 #include <vk_mem_alloc.h>
 #include <vector>
 #include <string>
+#include <memory>
 #include "DescriptorManager.h"
 #include "InitContext.h"
 #include "core/VulkanRAII.h"
@@ -22,12 +23,20 @@ public:
         VkRenderPass hdrRenderPass;
     };
 
-    SkySystem() = default;
-    ~SkySystem() = default;
+    /**
+     * Factory: Create and initialize SkySystem.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<SkySystem> create(const InitInfo& info);
+    static std::unique_ptr<SkySystem> create(const InitContext& ctx, VkRenderPass hdrRenderPass);
 
-    bool init(const InitInfo& info);
-    bool init(const InitContext& ctx, VkRenderPass hdrRenderPass);
-    void destroy(VkDevice device, VmaAllocator allocator);
+    ~SkySystem();
+
+    // Non-copyable, non-movable
+    SkySystem(const SkySystem&) = delete;
+    SkySystem& operator=(const SkySystem&) = delete;
+    SkySystem(SkySystem&&) = delete;
+    SkySystem& operator=(SkySystem&&) = delete;
 
     // Update extent for viewport (on window resize)
     void setExtent(VkExtent2D newExtent) { extent = newExtent; }
@@ -41,6 +50,11 @@ public:
     void recordDraw(VkCommandBuffer cmd, uint32_t frameIndex);
 
 private:
+    SkySystem() = default;  // Private: use factory
+
+    bool initInternal(const InitInfo& info);
+    void cleanup();
+
     bool createDescriptorSetLayout();
     bool createPipeline();
 

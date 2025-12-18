@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 #include <functional>
+#include <memory>
 
 #include "SkinnedMesh.h"
 #include "DescriptorManager.h"
@@ -60,11 +61,19 @@ public:
         VkSampler playerNormalSampler;
     };
 
-    SkinnedMeshRenderer() = default;
-    ~SkinnedMeshRenderer() = default;
+    /**
+     * Factory: Create and initialize SkinnedMeshRenderer.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<SkinnedMeshRenderer> create(const InitInfo& info);
 
-    bool init(const InitInfo& info);
-    void destroy();
+    ~SkinnedMeshRenderer();
+
+    // Non-copyable, non-movable
+    SkinnedMeshRenderer(const SkinnedMeshRenderer&) = delete;
+    SkinnedMeshRenderer& operator=(const SkinnedMeshRenderer&) = delete;
+    SkinnedMeshRenderer(SkinnedMeshRenderer&&) = delete;
+    SkinnedMeshRenderer& operator=(SkinnedMeshRenderer&&) = delete;
 
     // Create descriptor sets after all resources are ready
     bool createDescriptorSets(const DescriptorResources& resources);
@@ -89,6 +98,10 @@ public:
     VkDescriptorSet getDescriptorSet(uint32_t frameIndex) const { return descriptorSets[frameIndex]; }
 
 private:
+    SkinnedMeshRenderer() = default;  // Private: use factory
+
+    bool initInternal(const InitInfo& info);
+    void cleanup();
     bool createDescriptorSetLayout();
     bool createPipeline();
     bool createBoneMatricesBuffers();

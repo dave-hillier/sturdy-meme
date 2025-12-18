@@ -7,7 +7,19 @@
 #include <array>
 #include <cstring>
 
-bool FoamBuffer::init(const InitInfo& info) {
+std::unique_ptr<FoamBuffer> FoamBuffer::create(const InitInfo& info) {
+    std::unique_ptr<FoamBuffer> system(new FoamBuffer());
+    if (!system->initInternal(info)) {
+        return nullptr;
+    }
+    return system;
+}
+
+FoamBuffer::~FoamBuffer() {
+    cleanup();
+}
+
+bool FoamBuffer::initInternal(const InitInfo& info) {
     device = info.device;
     physicalDevice = info.physicalDevice;
     allocator = info.allocator;
@@ -45,7 +57,7 @@ bool FoamBuffer::init(const InitInfo& info) {
     return true;
 }
 
-void FoamBuffer::destroy() {
+void FoamBuffer::cleanup() {
     if (device == VK_NULL_HANDLE) return;
 
     vkDeviceWaitIdle(device);

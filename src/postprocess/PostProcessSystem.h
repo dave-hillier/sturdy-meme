@@ -7,6 +7,7 @@
 #include <string>
 #include <functional>
 #include <array>
+#include <memory>
 #include "UBOs.h"
 #include "BufferUtils.h"
 #include "DescriptorManager.h"
@@ -50,13 +51,22 @@ public:
         uint32_t framesInFlight;
     };
 
-    PostProcessSystem() = default;
-    ~PostProcessSystem() = default;
+    /**
+     * Factory: Create and initialize PostProcessSystem.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<PostProcessSystem> create(const InitInfo& info);
+    static std::unique_ptr<PostProcessSystem> create(const InitContext& ctx, VkRenderPass outputRenderPass, VkFormat swapchainFormat);
 
-    bool init(const InitInfo& info);
-    bool init(const InitContext& ctx, VkRenderPass outputRenderPass, VkFormat swapchainFormat);
-    void destroy(VkDevice device, VmaAllocator allocator);
-    void resize(VkDevice device, VmaAllocator allocator, VkExtent2D newExtent);
+    ~PostProcessSystem();
+
+    // Non-copyable, non-movable (stored via unique_ptr only)
+    PostProcessSystem(PostProcessSystem&&) = delete;
+    PostProcessSystem& operator=(PostProcessSystem&&) = delete;
+    PostProcessSystem(const PostProcessSystem&) = delete;
+    PostProcessSystem& operator=(const PostProcessSystem&) = delete;
+
+    void resize(VkExtent2D newExtent);
 
     VkRenderPass getHDRRenderPass() const { return hdrRenderPass; }
     VkFramebuffer getHDRFramebuffer() const { return hdrFramebuffer; }
@@ -122,6 +132,11 @@ public:
     void setCameraPlanes(float near, float far) { nearPlane = near; farPlane = far; }
 
 private:
+    PostProcessSystem() = default;  // Private: use factory
+
+    bool initInternal(const InitInfo& info);
+    void cleanup();
+
     bool createHDRRenderTarget();
     bool createHDRRenderPass();
     bool createHDRFramebuffer();

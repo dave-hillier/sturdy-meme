@@ -8,7 +8,31 @@
 #include <array>
 #include <cstring>
 
-bool CloudShadowSystem::init(const InitInfo& info) {
+std::unique_ptr<CloudShadowSystem> CloudShadowSystem::create(const InitInfo& info) {
+    std::unique_ptr<CloudShadowSystem> system(new CloudShadowSystem());
+    if (!system->initInternal(info)) {
+        return nullptr;
+    }
+    return system;
+}
+
+std::unique_ptr<CloudShadowSystem> CloudShadowSystem::create(const InitContext& ctx, VkImageView cloudMapLUTView_, VkSampler cloudMapLUTSampler_) {
+    InitInfo info{};
+    info.device = ctx.device;
+    info.allocator = ctx.allocator;
+    info.descriptorPool = ctx.descriptorPool;
+    info.shaderPath = ctx.shaderPath;
+    info.framesInFlight = ctx.framesInFlight;
+    info.cloudMapLUTView = cloudMapLUTView_;
+    info.cloudMapLUTSampler = cloudMapLUTSampler_;
+    return create(info);
+}
+
+CloudShadowSystem::~CloudShadowSystem() {
+    cleanup();
+}
+
+bool CloudShadowSystem::initInternal(const InitInfo& info) {
     device = info.device;
     allocator = info.allocator;
     descriptorPool = info.descriptorPool;
@@ -28,27 +52,9 @@ bool CloudShadowSystem::init(const InitInfo& info) {
     return true;
 }
 
-bool CloudShadowSystem::init(const InitContext& ctx, VkImageView cloudMapLUTView_, VkSampler cloudMapLUTSampler_) {
-    device = ctx.device;
-    allocator = ctx.allocator;
-    descriptorPool = ctx.descriptorPool;
-    shaderPath = ctx.shaderPath;
-    framesInFlight = ctx.framesInFlight;
-    cloudMapLUTView = cloudMapLUTView_;
-    cloudMapLUTSampler = cloudMapLUTSampler_;
+void CloudShadowSystem::cleanup() {
+    if (!device) return;  // Not initialized
 
-    if (!createShadowMap()) return false;
-    if (!createSampler()) return false;
-    if (!createUniformBuffers()) return false;
-    if (!createDescriptorSetLayout()) return false;
-    if (!createDescriptorSets()) return false;
-    if (!createComputePipeline()) return false;
-
-    SDL_Log("Cloud Shadow System initialized (%dx%d shadow map)", SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
-    return true;
-}
-
-void CloudShadowSystem::destroy() {
     // RAII wrappers handle cleanup automatically
     computePipeline = ManagedPipeline();
     pipelineLayout = ManagedPipelineLayout();

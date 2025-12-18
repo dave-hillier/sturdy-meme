@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
+#include <memory>
 
 #include "BufferUtils.h"
 #include "SystemLifecycleHelper.h"
@@ -29,11 +30,19 @@ class SnowMaskSystem {
 public:
     using InitInfo = SystemLifecycleHelper::InitInfo;
 
-    SnowMaskSystem() = default;
-    ~SnowMaskSystem() = default;
+    /**
+     * Factory: Create and initialize SnowMaskSystem.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<SnowMaskSystem> create(const InitInfo& info);
 
-    bool init(const InitInfo& info);
-    void destroy(VkDevice device, VmaAllocator allocator);
+    ~SnowMaskSystem();
+
+    // Non-copyable, non-movable
+    SnowMaskSystem(const SnowMaskSystem&) = delete;
+    SnowMaskSystem& operator=(const SnowMaskSystem&) = delete;
+    SnowMaskSystem(SnowMaskSystem&&) = delete;
+    SnowMaskSystem& operator=(SnowMaskSystem&&) = delete;
 
     // Update uniforms for compute shader
     void updateUniforms(uint32_t frameIndex, float deltaTime, bool isSnowing, float weatherIntensity,
@@ -109,4 +118,9 @@ private:
     static constexpr uint32_t WORKGROUP_SIZE = 16;  // 16x16 workgroups
 
     bool isFirstFrame = true;  // Track first frame for layout transitions
+
+    SnowMaskSystem() = default;  // Private: use factory
+
+    bool initInternal(const InitInfo& info);
+    void cleanup();
 };

@@ -9,7 +9,29 @@
 #include <cmath>
 #include <SDL3/SDL.h>
 
-bool BloomSystem::init(const InitInfo& info) {
+std::unique_ptr<BloomSystem> BloomSystem::create(const InitInfo& info) {
+    auto system = std::unique_ptr<BloomSystem>(new BloomSystem());
+    if (!system->initInternal(info)) {
+        return nullptr;
+    }
+    return system;
+}
+
+std::unique_ptr<BloomSystem> BloomSystem::create(const InitContext& ctx) {
+    InitInfo info;
+    info.device = ctx.device;
+    info.allocator = ctx.allocator;
+    info.descriptorPool = ctx.descriptorPool;
+    info.extent = ctx.extent;
+    info.shaderPath = ctx.shaderPath;
+    return create(info);
+}
+
+BloomSystem::~BloomSystem() {
+    cleanup();
+}
+
+bool BloomSystem::initInternal(const InitInfo& info) {
     device = info.device;
     allocator = info.allocator;
     descriptorPool = info.descriptorPool;
@@ -26,24 +48,9 @@ bool BloomSystem::init(const InitInfo& info) {
     return true;
 }
 
-bool BloomSystem::init(const InitContext& ctx) {
-    device = ctx.device;
-    allocator = ctx.allocator;
-    descriptorPool = ctx.descriptorPool;
-    extent = ctx.extent;
-    shaderPath = ctx.shaderPath;
+void BloomSystem::cleanup() {
+    if (!device) return;  // Not initialized
 
-    if (!createRenderPass()) return false;
-    if (!createMipChain()) return false;
-    if (!createSampler()) return false;
-    if (!createDescriptorSetLayouts()) return false;
-    if (!createPipelines()) return false;
-    if (!createDescriptorSets()) return false;
-
-    return true;
-}
-
-void BloomSystem::destroy(VkDevice /*device*/, VmaAllocator /*allocator*/) {
     destroyMipChain();
 
     // Reset RAII members before device is destroyed
@@ -61,9 +68,11 @@ void BloomSystem::destroy(VkDevice /*device*/, VmaAllocator /*allocator*/) {
 
     downsampleDescSets.clear();
     upsampleDescSets.clear();
+
+    device = VK_NULL_HANDLE;
 }
 
-void BloomSystem::resize(VkDevice device, VmaAllocator allocator, VkExtent2D newExtent) {
+void BloomSystem::resize(VkExtent2D newExtent) {
     extent = newExtent;
 
     destroyMipChain();

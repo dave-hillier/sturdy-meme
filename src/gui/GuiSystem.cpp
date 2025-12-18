@@ -26,9 +26,33 @@ static void checkVkResult(VkResult err) {
     }
 }
 
-bool GuiSystem::init(SDL_Window* window, VkInstance instance, VkPhysicalDevice physicalDevice,
-                     VkDevice device, uint32_t graphicsQueueFamily, VkQueue graphicsQueue,
-                     VkRenderPass renderPass, uint32_t imageCount) {
+// Private constructor
+GuiSystem::GuiSystem() = default;
+
+// Factory
+std::unique_ptr<GuiSystem> GuiSystem::create(SDL_Window* window, VkInstance instance,
+                                              VkPhysicalDevice physicalDevice, VkDevice device,
+                                              uint32_t graphicsQueueFamily, VkQueue graphicsQueue,
+                                              VkRenderPass renderPass, uint32_t imageCount) {
+    auto gui = std::unique_ptr<GuiSystem>(new GuiSystem());
+    if (!gui->initInternal(window, instance, physicalDevice, device, graphicsQueueFamily,
+                           graphicsQueue, renderPass, imageCount)) {
+        return nullptr;
+    }
+    return gui;
+}
+
+// Destructor
+GuiSystem::~GuiSystem() {
+    cleanup();
+}
+
+// Note: Move operations are deleted - GuiSystem is stored via unique_ptr only
+
+bool GuiSystem::initInternal(SDL_Window* window, VkInstance instance, VkPhysicalDevice physicalDevice,
+                              VkDevice device, uint32_t graphicsQueueFamily, VkQueue graphicsQueue,
+                              VkRenderPass renderPass, uint32_t imageCount) {
+    device_ = device;  // Store for cleanup
 
     // Create descriptor pool for ImGui
     VkDescriptorPoolSize poolSizes[] = {
@@ -92,15 +116,18 @@ bool GuiSystem::init(SDL_Window* window, VkInstance instance, VkPhysicalDevice p
     return true;
 }
 
-void GuiSystem::shutdown(VkDevice device) {
+void GuiSystem::cleanup() {
+    if (device_ == VK_NULL_HANDLE) return;  // Not initialized or already cleaned up
+
     ImGui_ImplVulkan_Shutdown();
     ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
 
     if (imguiPool != VK_NULL_HANDLE) {
-        vkDestroyDescriptorPool(device, imguiPool, nullptr);
+        vkDestroyDescriptorPool(device_, imguiPool, nullptr);
         imguiPool = VK_NULL_HANDLE;
     }
+    device_ = VK_NULL_HANDLE;
 }
 
 void GuiSystem::setupStyle() {

@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
+#include <memory>
 
 #include "core/VulkanRAII.h"
 
@@ -68,11 +69,19 @@ public:
         WakeSource sources[MAX_WAKE_SOURCES];
     };
 
-    FoamBuffer() = default;
-    ~FoamBuffer() = default;
+    /**
+     * Factory: Create and initialize FoamBuffer.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<FoamBuffer> create(const InitInfo& info);
 
-    bool init(const InitInfo& info);
-    void destroy();
+    ~FoamBuffer();
+
+    // Non-copyable, non-movable
+    FoamBuffer(const FoamBuffer&) = delete;
+    FoamBuffer& operator=(const FoamBuffer&) = delete;
+    FoamBuffer(FoamBuffer&&) = delete;
+    FoamBuffer& operator=(FoamBuffer&&) = delete;
 
     // Record compute shader dispatch for blur/decay
     // Call this each frame before water rendering
@@ -111,6 +120,11 @@ public:
     uint32_t getWakeCount() const { return wakeCount; }
 
 private:
+    FoamBuffer() = default;  // Private: use factory
+
+    bool initInternal(const InitInfo& info);
+    void cleanup();
+
     bool createFoamBuffers();
     bool createComputePipeline();
     bool createDescriptorSets();

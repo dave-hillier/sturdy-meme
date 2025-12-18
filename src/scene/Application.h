@@ -5,6 +5,7 @@
 #include <vector>
 #include <unordered_set>
 #include <optional>
+#include <memory>
 #include "Renderer.h"
 #include "Camera.h"
 #include "Player.h"
@@ -59,8 +60,8 @@ private:
     size_t flagClothSceneIndex = 0;
     size_t flagPoleSceneIndex = 0;
 
-    // GUI system
-    GuiSystem gui;
+    // GUI system (created via factory)
+    std::unique_ptr<GuiSystem> gui_;
     float currentFps = 60.0f;
     float lastDeltaTime = 0.016f;
 
