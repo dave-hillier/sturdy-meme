@@ -24,8 +24,26 @@
 
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
-// Height map sampler
-layout(binding = BINDING_TERRAIN_HEIGHT_MAP) uniform sampler2D heightMap;
+// Height map (global coarse LOD - fallback for distant terrain)
+layout(binding = BINDING_TERRAIN_HEIGHT_MAP) uniform sampler2D heightMapGlobal;
+
+// LOD tile array (high-res tiles near camera)
+layout(binding = BINDING_TERRAIN_TILE_ARRAY) uniform sampler2DArray heightMapTiles;
+
+// Tile info buffer - world bounds for each active tile
+struct TileInfo {
+    vec4 worldBounds;    // xy = min corner, zw = max corner
+    vec4 uvScaleOffset;  // xy = scale, zw = offset
+};
+layout(std430, binding = BINDING_TERRAIN_TILE_INFO) readonly buffer TileInfoBuffer {
+    uint activeTileCount;
+    uint padding1;
+    uint padding2;
+    uint padding3;
+    TileInfo tiles[];
+};
+
+#include "../tile_cache_common.glsl"
 
 // Uniform buffer with camera and terrain parameters
 layout(std140, binding = BINDING_TERRAIN_UBO) uniform TerrainUniforms {
@@ -66,19 +84,15 @@ shared uint workgroupBaseSlot;
 #define TERRAIN_SIZE (terrainParams.x)
 #define HEIGHT_SCALE (terrainParams.y)
 
-// Sample terrain height at UV coordinate
-float sampleHeight(vec2 uv) {
-    return sampleTerrainHeight(heightMap, uv, HEIGHT_SCALE);
-}
-
-// Transform UV to world position
+// Transform UV to world position with tile cache support
 vec3 uvToWorldPos(vec2 uv) {
-    float height = sampleHeight(uv);
-    return vec3(
+    vec2 worldXZ = vec2(
         (uv.x - 0.5) * TERRAIN_SIZE,
-        height,
         (uv.y - 0.5) * TERRAIN_SIZE
     );
+    float height = sampleHeightWithTileCache(heightMapGlobal, heightMapTiles, uv,
+                                              worldXZ, HEIGHT_SCALE, activeTileCount);
+    return vec3(worldXZ.x, height, worldXZ.y);
 }
 
 // Frustum culling test for AABB

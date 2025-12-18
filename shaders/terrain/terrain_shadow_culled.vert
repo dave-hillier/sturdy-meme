@@ -19,8 +19,26 @@
 #include "leb.glsl"
 #include "../terrain_height_common.glsl"
 
-// Height map
-layout(binding = BINDING_TERRAIN_HEIGHT_MAP) uniform sampler2D heightMap;
+// Height map (global coarse LOD - fallback for distant terrain)
+layout(binding = BINDING_TERRAIN_HEIGHT_MAP) uniform sampler2D heightMapGlobal;
+
+// LOD tile array (high-res tiles near camera)
+layout(binding = BINDING_TERRAIN_TILE_ARRAY) uniform sampler2DArray heightMapTiles;
+
+// Tile info buffer - world bounds for each active tile
+struct TileInfo {
+    vec4 worldBounds;    // xy = min corner, zw = max corner
+    vec4 uvScaleOffset;  // xy = scale, zw = offset
+};
+layout(std430, binding = BINDING_TERRAIN_TILE_INFO) readonly buffer TileInfoBuffer {
+    uint activeTileCount;
+    uint padding1;
+    uint padding2;
+    uint padding3;
+    TileInfo tiles[];
+};
+
+#include "../tile_cache_common.glsl"
 
 // Shadow visible indices buffer: [count, index0, index1, ...]
 layout(std430, binding = BINDING_TERRAIN_SHADOW_VISIBLE) readonly buffer ShadowVisibleIndices {
@@ -65,15 +83,18 @@ void main() {
         uv = v2;
     }
 
-    // Sample height using shared function
-    float height = sampleTerrainHeight(heightMap, uv, heightScale);
-
-    // Compute world position
-    vec3 worldPos = vec3(
+    // Compute world XZ position first (needed for tile lookup)
+    vec2 worldXZ = vec2(
         (uv.x - 0.5) * terrainSize,
-        height,
         (uv.y - 0.5) * terrainSize
     );
+
+    // Sample height with tile cache support for ~1m resolution near camera
+    float height = sampleHeightWithTileCache(heightMapGlobal, heightMapTiles, uv,
+                                              worldXZ, heightScale, activeTileCount);
+
+    // Compute world position
+    vec3 worldPos = vec3(worldXZ.x, height, worldXZ.y);
 
     // Transform to light space
     gl_Position = lightViewProj * vec4(worldPos, 1.0);
