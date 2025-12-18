@@ -39,6 +39,8 @@ layout(std430, binding = BINDING_TERRAIN_TILE_INFO) readonly buffer TileInfoBuff
     TileInfo tiles[];
 };
 
+#include "../tile_cache_common.glsl"
+
 // Volumetric snow cascades
 layout(binding = BINDING_TERRAIN_SNOW_CASCADE_0) uniform sampler2D snowCascade0;
 layout(binding = BINDING_TERRAIN_SNOW_CASCADE_1) uniform sampler2D snowCascade1;
@@ -75,50 +77,6 @@ layout(location = 1) out vec3 fragNormal;
 layout(location = 2) out vec3 fragWorldPos;
 layout(location = 3) out float fragDepth;
 
-// Find tile index covering world position, returns -1 if no tile loaded
-int findTileForWorldPos(vec2 worldXZ) {
-    for (uint i = 0u; i < activeTileCount && i < 64u; i++) {
-        vec4 bounds = tiles[i].worldBounds;
-        if (worldXZ.x >= bounds.x && worldXZ.x < bounds.z &&
-            worldXZ.y >= bounds.y && worldXZ.y < bounds.w) {
-            return int(i);
-        }
-    }
-    return -1;
-}
-
-// Sample height with LOD tile support
-// Uses terrainHeightToWorld() for tile arrays, sampleTerrainHeight() for global fallback
-float sampleHeightLOD(vec2 uv, vec2 worldXZ) {
-    int tileIdx = findTileForWorldPos(worldXZ);
-    if (tileIdx >= 0) {
-        // High-res tile available - calculate local UV within tile
-        vec4 bounds = tiles[tileIdx].worldBounds;
-        vec2 tileUV = (worldXZ - bounds.xy) / (bounds.zw - bounds.xy);
-        float h = texture(heightMapTiles, vec3(tileUV, float(tileIdx))).r;
-        return terrainHeightToWorld(h, HEIGHT_SCALE);
-    }
-    // Fall back to global coarse texture (uses sampleTerrainHeight from terrain_height_common.glsl)
-    return sampleTerrainHeight(heightMapGlobal, uv, HEIGHT_SCALE);
-}
-
-// Calculate normal from height map gradient with LOD support
-vec3 calculateNormal(vec2 uv, vec2 worldXZ) {
-    vec2 texelSize = 1.0 / vec2(textureSize(heightMapGlobal, 0));
-    float worldTexelSize = TERRAIN_SIZE / float(textureSize(heightMapGlobal, 0).x);
-
-    // Sample neighboring heights with LOD support
-    float hL = sampleHeightLOD(uv + vec2(-texelSize.x, 0.0), worldXZ + vec2(-worldTexelSize, 0.0));
-    float hR = sampleHeightLOD(uv + vec2(texelSize.x, 0.0), worldXZ + vec2(worldTexelSize, 0.0));
-    float hD = sampleHeightLOD(uv + vec2(0.0, -texelSize.y), worldXZ + vec2(0.0, -worldTexelSize));
-    float hU = sampleHeightLOD(uv + vec2(0.0, texelSize.y), worldXZ + vec2(0.0, worldTexelSize));
-
-    float dx = (hR - hL) / (2.0 * worldTexelSize);
-    float dz = (hU - hD) / (2.0 * worldTexelSize);
-
-    return normalize(vec3(-dx, 1.0, -dz));
-}
-
 void main() {
     // Determine which triangle and vertex
     uint triangleIndex = gl_VertexIndex / 3u;
@@ -147,14 +105,16 @@ void main() {
         (uv.y - 0.5) * TERRAIN_SIZE
     );
 
-    // Sample height with LOD tile support
-    float height = sampleHeightLOD(uv, worldXZ);
+    // Sample height with tile cache support (~1m resolution near camera)
+    float height = sampleHeightWithTileCache(heightMapGlobal, heightMapTiles, uv,
+                                              worldXZ, HEIGHT_SCALE, activeTileCount);
 
     // Compute world position
     vec3 worldPos = vec3(worldXZ.x, height, worldXZ.y);
 
-    // Calculate normal with LOD support
-    vec3 normal = calculateNormal(uv, worldXZ);
+    // Calculate normal with tile cache support
+    vec3 normal = calculateNormalWithTileCache(heightMapGlobal, heightMapTiles, uv,
+                                                worldXZ, TERRAIN_SIZE, HEIGHT_SCALE, activeTileCount);
 
     // Apply volumetric snow displacement
     if (useVolumetricSnow > 0.5) {

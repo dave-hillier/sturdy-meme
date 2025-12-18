@@ -34,6 +34,8 @@ layout(std430, binding = BINDING_TERRAIN_TILE_INFO) readonly buffer TileInfoBuff
     TileInfo tiles[];
 };
 
+#include "../tile_cache_common.glsl"
+
 // Push constants for per-cascade matrix
 layout(push_constant) uniform PushConstants {
     mat4 lightViewProj;
@@ -45,33 +47,6 @@ layout(push_constant) uniform PushConstants {
 
 // Output UV for hole mask sampling in fragment shader
 layout(location = 0) out vec2 fragTexCoord;
-
-// Find tile index covering world position, returns -1 if no tile loaded
-int findTileForWorldPos(vec2 worldXZ) {
-    for (uint i = 0u; i < activeTileCount && i < 64u; i++) {
-        vec4 bounds = tiles[i].worldBounds;
-        if (worldXZ.x >= bounds.x && worldXZ.x < bounds.z &&
-            worldXZ.y >= bounds.y && worldXZ.y < bounds.w) {
-            return int(i);
-        }
-    }
-    return -1;
-}
-
-// Sample height with LOD tile support
-// Uses terrainHeightToWorld() for tile arrays, sampleTerrainHeight() for global fallback
-float sampleHeightLOD(vec2 uv, vec2 worldXZ) {
-    int tileIdx = findTileForWorldPos(worldXZ);
-    if (tileIdx >= 0) {
-        // High-res tile available - calculate local UV within tile
-        vec4 bounds = tiles[tileIdx].worldBounds;
-        vec2 tileUV = (worldXZ - bounds.xy) / (bounds.zw - bounds.xy);
-        float h = texture(heightMapTiles, vec3(tileUV, float(tileIdx))).r;
-        return terrainHeightToWorld(h, heightScale);
-    }
-    // Fall back to global coarse texture (uses sampleTerrainHeight from terrain_height_common.glsl)
-    return sampleTerrainHeight(heightMapGlobal, uv, heightScale);
-}
 
 void main() {
     // Determine which triangle and vertex
@@ -101,8 +76,9 @@ void main() {
         (uv.y - 0.5) * terrainSize
     );
 
-    // Sample height with LOD tile support
-    float height = sampleHeightLOD(uv, worldXZ);
+    // Sample height with tile cache support (~1m resolution near camera)
+    float height = sampleHeightWithTileCache(heightMapGlobal, heightMapTiles, uv,
+                                              worldXZ, heightScale, activeTileCount);
 
     // Compute world position
     vec3 worldPos = vec3(worldXZ.x, height, worldXZ.y);
