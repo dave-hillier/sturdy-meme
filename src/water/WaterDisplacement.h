@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
+#include <memory>
 
 #include "core/VulkanRAII.h"
 
@@ -53,11 +54,19 @@ public:
         float decayRate;          // How fast old displacements fade
     };
 
-    WaterDisplacement() = default;
-    ~WaterDisplacement() = default;
+    /**
+     * Factory: Create and initialize WaterDisplacement.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<WaterDisplacement> create(const InitInfo& info);
 
-    bool init(const InitInfo& info);
-    void destroy();
+    ~WaterDisplacement();
+
+    // Non-copyable, non-movable
+    WaterDisplacement(const WaterDisplacement&) = delete;
+    WaterDisplacement& operator=(const WaterDisplacement&) = delete;
+    WaterDisplacement(WaterDisplacement&&) = delete;
+    WaterDisplacement& operator=(WaterDisplacement&&) = delete;
 
     // Add a splash at world position
     void addSplash(const glm::vec3& position, float radius, float intensity, float lifetime = 1.0f);
@@ -91,6 +100,11 @@ public:
     size_t getParticleCount() const { return particles.size(); }
 
 private:
+    WaterDisplacement() = default;  // Private: use factory
+
+    bool initInternal(const InitInfo& info);
+    void cleanup();
+
     bool createDisplacementMap();
     bool createComputePipeline();
     bool createParticleBuffer();

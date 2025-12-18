@@ -130,13 +130,15 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     terrainConfig.tileLoadRadius = 2000.0f;   // Load high-res tiles within 2km
     terrainConfig.tileUnloadRadius = 3000.0f; // Unload tiles beyond 3km
 
-    if (!systems_->terrain().init(initCtx, terrainParams, terrainConfig)) return false;
+    auto terrainSystem = TerrainSystem::create(initCtx, terrainParams, terrainConfig);
+    if (!terrainSystem) return false;
+    systems_->setTerrain(std::move(terrainSystem));
 
     // Collect resources from tier-1 systems for tier-2+ initialization
     // This decouples tier-2 systems from tier-1 systems - they depend on resources, not systems
     CoreResources core = CoreResources::collect(systems_->postProcess(), systems_->shadow(), systems_->terrain(), MAX_FRAMES_IN_FLIGHT);
 
-    // Initialize scene (meshes, textures, objects, lights)
+    // Initialize scene (meshes, textures, objects, lights) via factory
     // Pass terrain height function so objects can be placed on terrain
     SceneBuilder::InitInfo sceneInfo{};
     sceneInfo.allocator = allocator;
@@ -149,10 +151,15 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         return systems_->terrain().getHeightAt(x, z);
     };
 
-    if (!systems_->scene().init(sceneInfo)) return false;
+    auto sceneManager = SceneManager::create(sceneInfo);
+    if (!sceneManager) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SceneManager");
+        return false;
+    }
+    systems_->setScene(std::move(sceneManager));
 
     // Initialize snow subsystems (SnowMaskSystem, VolumetricSnowSystem)
-    if (!RendererInit::initSnowSubsystems(systems_->snowMask(), systems_->volumetricSnow(), initCtx, core.hdr)) return false;
+    if (!RendererInit::initSnowSubsystems(*systems_, initCtx, core.hdr)) return false;
 
     if (!createDescriptorSets()) return false;
     if (!createSkinnedMeshRendererDescriptorSets()) return false;
@@ -162,24 +169,47 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
 
     const EnvironmentSettings* envSettings = &systems_->wind().getEnvironmentSettings();
 
-    // Get wind buffers for grass descriptor sets
+    // Get wind buffers for grass and other descriptor sets
     std::vector<VkBuffer> windBuffers(MAX_FRAMES_IN_FLIGHT);
     for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         windBuffers[i] = systems_->wind().getBufferInfo(i).buffer;
     }
-    systems_->grass().updateDescriptorSets(device, systems_->globalBuffers().uniformBuffers.buffers, systems_->shadow().getShadowImageView(), systems_->shadow().getShadowSampler(), windBuffers, systems_->globalBuffers().lightBuffers.buffers,
-                                      systems_->terrain().getHeightMapView(), systems_->terrain().getHeightMapSampler(),
-                                      systems_->globalBuffers().snowBuffers.buffers, systems_->globalBuffers().cloudShadowBuffers.buffers,
-                                      systems_->cloudShadow().getShadowMapView(), systems_->cloudShadow().getShadowMapSampler(),
-                                      systems_->terrain().getTileArrayView(), systems_->terrain().getTileSampler(),
-                                      systems_->terrain().getTileInfoBuffer());
+    // Note: grass.updateDescriptorSets is called later after CloudShadowSystem is created
 
     // Update terrain descriptor sets with shared resources
     systems_->terrain().updateDescriptorSets(device, systems_->globalBuffers().uniformBuffers.buffers, systems_->shadow().getShadowImageView(), systems_->shadow().getShadowSampler(),
                                         systems_->globalBuffers().snowBuffers.buffers, systems_->globalBuffers().cloudShadowBuffers.buffers);
 
-    // Initialize rock system
-    if (!RendererInit::initRockSystem(systems_->rock(), initCtx, core.terrain)) return false;
+    // Initialize rock system via factory
+    RockSystem::InitInfo rockInfo{};
+    rockInfo.device = device;
+    rockInfo.allocator = allocator;
+    rockInfo.commandPool = commandPool.get();
+    rockInfo.graphicsQueue = graphicsQueue;
+    rockInfo.physicalDevice = physicalDevice;
+    rockInfo.resourcePath = resourcePath;
+    rockInfo.terrainSize = core.terrain.size;
+    rockInfo.getTerrainHeight = core.terrain.getHeightAt;
+
+    RockConfig rockConfig{};
+    rockConfig.rockVariations = 6;
+    rockConfig.rocksPerVariation = 10;
+    rockConfig.minRadius = 0.4f;
+    rockConfig.maxRadius = 2.0f;
+    rockConfig.placementRadius = 100.0f;
+    rockConfig.minDistanceBetween = 4.0f;
+    rockConfig.roughness = 0.35f;
+    rockConfig.asymmetry = 0.3f;
+    rockConfig.subdivisions = 3;
+    rockConfig.materialRoughness = 0.75f;
+    rockConfig.materialMetallic = 0.0f;
+
+    auto rockSystem = RockSystem::create(rockInfo, rockConfig);
+    if (!rockSystem) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create RockSystem");
+        return false;
+    }
+    systems_->setRock(std::move(rockSystem));
 
     // Update rock descriptor sets now that rock textures are loaded
     {
@@ -214,7 +244,10 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     }
 
     // Initialize weather and leaf subsystems
-    if (!RendererInit::initWeatherSubsystems(systems_->weather(), systems_->leaf(), initCtx, core.hdr)) return false;
+    if (!RendererInit::initWeatherSubsystems(*systems_, initCtx, core.hdr)) return false;
+
+    // Connect leaf system to environment settings (must be done after initWeatherSubsystems creates LeafSystem)
+    systems_->leaf().setEnvironmentSettings(envSettings);
 
     // Update weather system descriptor sets
     systems_->weather().updateDescriptorSets(device, systems_->globalBuffers().uniformBuffers.buffers, windBuffers,
@@ -237,9 +270,16 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
                                      systems_->terrain().getTileInfoBuffer());
 
     // Initialize atmosphere subsystems (Froxel, AtmosphereLUT, CloudShadow)
-    if (!RendererInit::initAtmosphereSubsystems(systems_->froxel(), systems_->atmosphereLUT(), systems_->cloudShadow(),
-                                                 systems_->postProcess(), initCtx, core.shadow,
+    if (!RendererInit::initAtmosphereSubsystems(*systems_, initCtx, core.shadow,
                                                  systems_->globalBuffers().lightBuffers.buffers)) return false;
+
+    // Update grass descriptor sets (now that CloudShadowSystem exists)
+    systems_->grass().updateDescriptorSets(device, systems_->globalBuffers().uniformBuffers.buffers, systems_->shadow().getShadowImageView(), systems_->shadow().getShadowSampler(), windBuffers, systems_->globalBuffers().lightBuffers.buffers,
+                                      systems_->terrain().getHeightMapView(), systems_->terrain().getHeightMapSampler(),
+                                      systems_->globalBuffers().snowBuffers.buffers, systems_->globalBuffers().cloudShadowBuffers.buffers,
+                                      systems_->cloudShadow().getShadowMapView(), systems_->cloudShadow().getShadowMapSampler(),
+                                      systems_->terrain().getTileArrayView(), systems_->terrain().getTileSampler(),
+                                      systems_->terrain().getTileInfoBuffer());
 
     // Connect froxel volume to weather system
     systems_->weather().setFroxelVolume(systems_->froxel().getScatteringVolumeView(), systems_->froxel().getVolumeSampler(),
@@ -253,10 +293,37 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
                                             rockDescriptorSets, systems_->skinnedMesh(),
                                             systems_->cloudShadow().getShadowMapView(), systems_->cloudShadow().getShadowMapSampler());
 
-    // Initialize Catmull-Clark subdivision system
+    // Initialize Catmull-Clark subdivision system via factory
     float suzanneX = 5.0f, suzanneZ = -5.0f;
     glm::vec3 suzannePos(suzanneX, core.terrain.getHeightAt(suzanneX, suzanneZ) + 2.0f, suzanneZ);
-    if (!RendererInit::initCatmullClarkSystem(systems_->catmullClark(), initCtx, core.hdr, suzannePos)) return false;
+
+    CatmullClarkSystem::InitInfo catmullClarkInfo{};
+    catmullClarkInfo.device = device;
+    catmullClarkInfo.physicalDevice = physicalDevice;
+    catmullClarkInfo.allocator = allocator;
+    catmullClarkInfo.renderPass = core.hdr.renderPass;
+    catmullClarkInfo.descriptorPool = initCtx.descriptorPool;
+    catmullClarkInfo.extent = initCtx.extent;
+    catmullClarkInfo.shaderPath = initCtx.shaderPath;
+    catmullClarkInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+    catmullClarkInfo.graphicsQueue = graphicsQueue;
+    catmullClarkInfo.commandPool = commandPool.get();
+
+    CatmullClarkConfig catmullClarkConfig{};
+    catmullClarkConfig.position = suzannePos;
+    catmullClarkConfig.scale = glm::vec3(2.0f);
+    catmullClarkConfig.targetEdgePixels = 12.0f;
+    catmullClarkConfig.maxDepth = 16;
+    catmullClarkConfig.splitThreshold = 18.0f;
+    catmullClarkConfig.mergeThreshold = 6.0f;
+    catmullClarkConfig.objPath = resourcePath + "/assets/suzanne.obj";
+
+    auto catmullClarkSystem = CatmullClarkSystem::create(catmullClarkInfo, catmullClarkConfig);
+    if (!catmullClarkSystem) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create CatmullClarkSystem");
+        return false;
+    }
+    systems_->setCatmullClark(std::move(catmullClarkSystem));
     systems_->catmullClark().updateDescriptorSets(device, systems_->globalBuffers().uniformBuffers.buffers);
 
     // Create sky descriptor sets now that uniform buffers and LUTs are ready
@@ -280,7 +347,118 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     // Factory always returns valid profiler - GPU may be disabled if init fails
     systems_->setProfiler(Profiler::create(device, physicalDevice, MAX_FRAMES_IN_FLIGHT));
 
-    // Initialize water subsystems (WaterSystem, WaterDisplacement, FlowMap, Foam, SSR, TileCull, GBuffer)
+    // Create WaterSystem via factory before initializing other water subsystems
+    WaterSystem::InitInfo waterInfo{};
+    waterInfo.device = device;
+    waterInfo.physicalDevice = physicalDevice;
+    waterInfo.allocator = allocator;
+    waterInfo.descriptorPool = initCtx.descriptorPool;
+    waterInfo.hdrRenderPass = core.hdr.renderPass;
+    waterInfo.shaderPath = initCtx.shaderPath;
+    waterInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+    waterInfo.extent = initCtx.extent;
+    waterInfo.commandPool = commandPool.get();
+    waterInfo.graphicsQueue = graphicsQueue;
+    waterInfo.waterSize = 65536.0f;  // Extend well beyond terrain for horizon
+    waterInfo.assetPath = resourcePath;
+
+    auto waterSystem = WaterSystem::create(waterInfo);
+    if (!waterSystem) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create WaterSystem");
+        return false;
+    }
+    systems_->setWater(std::move(waterSystem));
+
+    // Create water subsystems via factories before constructing WaterSubsystems struct
+    // FlowMapGenerator
+    FlowMapGenerator::InitInfo flowInfo{};
+    flowInfo.device = device;
+    flowInfo.allocator = allocator;
+    flowInfo.commandPool = commandPool.get();
+    flowInfo.queue = graphicsQueue;
+
+    auto flowMapGenerator = FlowMapGenerator::create(flowInfo);
+    if (!flowMapGenerator) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create FlowMapGenerator");
+        return false;
+    }
+    systems_->setFlowMap(std::move(flowMapGenerator));
+
+    // WaterDisplacement
+    WaterDisplacement::InitInfo dispInfo{};
+    dispInfo.device = device;
+    dispInfo.physicalDevice = physicalDevice;
+    dispInfo.allocator = allocator;
+    dispInfo.commandPool = commandPool.get();
+    dispInfo.computeQueue = graphicsQueue;
+    dispInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+    dispInfo.displacementResolution = 512;
+    dispInfo.worldSize = 65536.0f;
+
+    auto waterDisplacement = WaterDisplacement::create(dispInfo);
+    if (!waterDisplacement) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create WaterDisplacement");
+        return false;
+    }
+    systems_->setWaterDisplacement(std::move(waterDisplacement));
+
+    // FoamBuffer
+    FoamBuffer::InitInfo foamInfo{};
+    foamInfo.device = device;
+    foamInfo.physicalDevice = physicalDevice;
+    foamInfo.allocator = allocator;
+    foamInfo.commandPool = commandPool.get();
+    foamInfo.computeQueue = graphicsQueue;
+    foamInfo.shaderPath = initCtx.shaderPath;
+    foamInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+    foamInfo.resolution = 512;
+    foamInfo.worldSize = 65536.0f;
+
+    auto foamBuffer = FoamBuffer::create(foamInfo);
+    if (!foamBuffer) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create FoamBuffer");
+        return false;
+    }
+    systems_->setFoam(std::move(foamBuffer));
+
+    // WaterTileCull
+    WaterTileCull::InitInfo tileCullInfo{};
+    tileCullInfo.device = device;
+    tileCullInfo.physicalDevice = physicalDevice;
+    tileCullInfo.allocator = allocator;
+    tileCullInfo.commandPool = commandPool.get();
+    tileCullInfo.computeQueue = graphicsQueue;
+    tileCullInfo.shaderPath = initCtx.shaderPath;
+    tileCullInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+    tileCullInfo.extent = initCtx.extent;
+    tileCullInfo.tileSize = 32;
+
+    auto waterTileCull = WaterTileCull::create(tileCullInfo);
+    if (waterTileCull) {
+        systems_->setWaterTileCull(std::move(waterTileCull));
+    } else {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to create WaterTileCull - continuing without");
+    }
+
+    // WaterGBuffer
+    WaterGBuffer::InitInfo gbufferInfo{};
+    gbufferInfo.device = device;
+    gbufferInfo.physicalDevice = physicalDevice;
+    gbufferInfo.allocator = allocator;
+    gbufferInfo.fullResExtent = initCtx.extent;
+    gbufferInfo.resolutionScale = 0.5f;
+    gbufferInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+    gbufferInfo.shaderPath = initCtx.shaderPath;
+    gbufferInfo.descriptorPool = initCtx.descriptorPool;
+
+    auto waterGBuffer = WaterGBuffer::create(gbufferInfo);
+    if (waterGBuffer) {
+        systems_->setWaterGBuffer(std::move(waterGBuffer));
+    } else {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to create WaterGBuffer - continuing without");
+    }
+
+    // Initialize water subsystems (configure WaterSystem, generate flow map, create SSR)
     WaterSubsystems waterSubs{systems_->water(), systems_->waterDisplacement(), systems_->flowMap(), systems_->foam(), *systems_, systems_->waterTileCull(), systems_->waterGBuffer()};
     if (!RendererInit::initWaterSubsystems(waterSubs, initCtx, core.hdr.renderPass,
                                             systems_->shadow(), systems_->terrain(), terrainConfig, systems_->postProcess(), depthSampler.get())) return false;
@@ -290,8 +468,25 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
                                                   sizeof(UniformBufferObject), systems_->shadow(), systems_->terrain(),
                                                   systems_->postProcess(), depthSampler.get())) return false;
 
-    // Initialize tree edit system
-    if (!RendererInit::initTreeEditSystem(systems_->treeEdit(), initCtx, core.hdr)) return false;
+    // Initialize tree edit system via factory
+    TreeEditSystem::InitInfo treeEditInfo{};
+    treeEditInfo.device = device;
+    treeEditInfo.physicalDevice = physicalDevice;
+    treeEditInfo.allocator = allocator;
+    treeEditInfo.renderPass = core.hdr.renderPass;
+    treeEditInfo.descriptorPool = initCtx.descriptorPool;
+    treeEditInfo.extent = initCtx.extent;
+    treeEditInfo.shaderPath = initCtx.shaderPath;
+    treeEditInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+    treeEditInfo.graphicsQueue = graphicsQueue;
+    treeEditInfo.commandPool = commandPool.get();
+
+    auto treeEditSystem = TreeEditSystem::create(treeEditInfo);
+    if (!treeEditSystem) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create TreeEditSystem");
+        return false;
+    }
+    systems_->setTreeEdit(std::move(treeEditSystem));
     systems_->treeEdit().updateDescriptorSets(device, systems_->globalBuffers().uniformBuffers.buffers);
 
     if (!createSyncObjects()) return false;

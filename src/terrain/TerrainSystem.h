@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 #include <array>
+#include <memory>
 #include "UBOs.h"
 #include "TerrainHeightMap.h"
 #include "TerrainTextures.h"
@@ -134,11 +135,6 @@ public:
         VkCommandPool commandPool;
     };
 
-    TerrainSystem() = default;
-    ~TerrainSystem() = default;
-
-    bool init(const InitInfo& info, const TerrainConfig& config = {});
-
     // System-specific params for InitContext-based init
     struct TerrainInitParams {
         VkRenderPass renderPass;
@@ -146,9 +142,22 @@ public:
         uint32_t shadowMapSize;
         std::string texturePath;
     };
-    bool init(const InitContext& ctx, const TerrainInitParams& params, const TerrainConfig& config = {});
 
-    void destroy(VkDevice device, VmaAllocator allocator);
+    /**
+     * Factory: Create and initialize TerrainSystem.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<TerrainSystem> create(const InitContext& ctx,
+                                                  const TerrainInitParams& params,
+                                                  const TerrainConfig& config = {});
+
+    ~TerrainSystem();
+
+    // Non-copyable, non-movable
+    TerrainSystem(const TerrainSystem&) = delete;
+    TerrainSystem& operator=(const TerrainSystem&) = delete;
+    TerrainSystem(TerrainSystem&&) = delete;
+    TerrainSystem& operator=(TerrainSystem&&) = delete;
 
     // Update extent for viewport (on window resize)
     void setExtent(VkExtent2D newExtent) { extent = newExtent; }
@@ -265,7 +274,11 @@ public:
     bool setMeshletSubdivisionLevel(int level);  // Returns true if successful, reinitializes meshlet
 
 private:
-    // Initialization helpers (buffers now in TerrainBuffers)
+    TerrainSystem() = default;  // Private: use factory
+
+    bool initInternal(const InitInfo& info, const TerrainConfig& config);
+    bool initInternal(const InitContext& ctx, const TerrainInitParams& params, const TerrainConfig& config);
+    void cleanup();
 
     // Descriptor set creation
     bool createComputeDescriptorSetLayout();

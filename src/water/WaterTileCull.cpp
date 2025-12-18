@@ -7,7 +7,19 @@
 #include <array>
 #include <cstring>
 
-bool WaterTileCull::init(const InitInfo& info) {
+std::unique_ptr<WaterTileCull> WaterTileCull::create(const InitInfo& info) {
+    std::unique_ptr<WaterTileCull> system(new WaterTileCull());
+    if (!system->initInternal(info)) {
+        return nullptr;
+    }
+    return system;
+}
+
+WaterTileCull::~WaterTileCull() {
+    cleanup();
+}
+
+bool WaterTileCull::initInternal(const InitInfo& info) {
     device = info.device;
     physicalDevice = info.physicalDevice;
     allocator = info.allocator;
@@ -31,7 +43,7 @@ bool WaterTileCull::init(const InitInfo& info) {
     return true;
 }
 
-void WaterTileCull::destroy() {
+void WaterTileCull::cleanup() {
     if (device == VK_NULL_HANDLE) return;
 
     vkDeviceWaitIdle(device);

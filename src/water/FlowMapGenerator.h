@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
+#include <memory>
 #include "VulkanRAII.h"
 
 /*
@@ -33,12 +34,26 @@ public:
         float shoreDistance = 50.0f;     // Max distance for shore SDF (meters)
     };
 
-    FlowMapGenerator() = default;
-    ~FlowMapGenerator() = default;
+    struct InitInfo {
+        VkDevice device;
+        VmaAllocator allocator;
+        VkCommandPool commandPool;
+        VkQueue queue;
+    };
 
-    // Initialize the generator
-    bool init(VkDevice device, VmaAllocator allocator, VkCommandPool commandPool, VkQueue queue);
-    void destroy(VkDevice device, VmaAllocator allocator);
+    /**
+     * Factory: Create and initialize FlowMapGenerator.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<FlowMapGenerator> create(const InitInfo& info);
+
+    ~FlowMapGenerator();
+
+    // Non-copyable, non-movable
+    FlowMapGenerator(const FlowMapGenerator&) = delete;
+    FlowMapGenerator& operator=(const FlowMapGenerator&) = delete;
+    FlowMapGenerator(FlowMapGenerator&&) = delete;
+    FlowMapGenerator& operator=(FlowMapGenerator&&) = delete;
 
     // Generate flow map from terrain heightmap data
     // heightData: raw heightmap values (normalized 0-1)
@@ -75,6 +90,11 @@ public:
     uint32_t getResolution() const { return currentResolution; }
 
 private:
+    FlowMapGenerator() = default;  // Private: use factory
+
+    bool initInternal(const InitInfo& info);
+    void cleanup();
+
     // Create GPU resources
     bool createImage(uint32_t resolution);
     bool createSampler();

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vector>
+#include <memory>
 #include <glm/glm.hpp>
 #include "SceneBuilder.h"
 #include "Light.h"
@@ -9,11 +10,19 @@
 // Centralized scene management - handles visual objects, physics bodies, and lighting
 class SceneManager {
 public:
-    SceneManager() = default;
-    ~SceneManager() = default;
+    /**
+     * Factory: Create and initialize SceneManager.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<SceneManager> create(SceneBuilder::InitInfo& builderInfo);
 
-    // Initialize scene with visual assets and lights
-    bool init(SceneBuilder::InitInfo& builderInfo);
+    ~SceneManager();
+
+    // Non-copyable, non-movable
+    SceneManager(const SceneManager&) = delete;
+    SceneManager& operator=(const SceneManager&) = delete;
+    SceneManager(SceneManager&&) = delete;
+    SceneManager& operator=(SceneManager&&) = delete;
 
     // Initialize physics bodies for scene objects (called separately by Application)
     void initPhysics(PhysicsWorld& physics);
@@ -26,8 +35,6 @@ public:
     void initTerrainPhysics(PhysicsWorld& physics, const float* heightSamples,
                             const uint8_t* holeMask, uint32_t sampleCount,
                             float worldSize, float heightScale);
-
-    void destroy(VmaAllocator allocator, VkDevice device);
 
     // Update scene state (sync physics to visuals)
     void update(PhysicsWorld& physics);
@@ -53,9 +60,17 @@ public:
     const glm::vec3& getOrbLightPosition() const { return orbLightPosition; }
 
 private:
+    SceneManager() = default;  // Private: use factory
+
+    bool initInternal(SceneBuilder::InitInfo& builderInfo);
+    void cleanup();
     void initializeScenePhysics(PhysicsWorld& physics);
     void initializeSceneLights();
     void updatePhysicsToScene(PhysicsWorld& physics);
+
+    // Stored for cleanup
+    VmaAllocator storedAllocator = VK_NULL_HANDLE;
+    VkDevice storedDevice = VK_NULL_HANDLE;
 
     // Get terrain height at (x, z), returns 0 if no terrain function available
     float getTerrainHeight(float x, float z) const;

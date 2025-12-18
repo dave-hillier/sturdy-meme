@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 #include <optional>
+#include <memory>
 #include "UBOs.h"
 #include "CatmullClarkCBT.h"
 #include "CatmullClarkMesh.h"
@@ -52,11 +53,19 @@ public:
         VkCommandPool commandPool;
     };
 
-    CatmullClarkSystem() = default;
-    ~CatmullClarkSystem() = default;
+    /**
+     * Factory: Create and initialize CatmullClarkSystem.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<CatmullClarkSystem> create(const InitInfo& info, const CatmullClarkConfig& config = {});
 
-    bool init(const InitInfo& info, const CatmullClarkConfig& config = {});
-    void destroy(VkDevice device, VmaAllocator allocator);
+    ~CatmullClarkSystem();
+
+    // Non-copyable, non-movable
+    CatmullClarkSystem(const CatmullClarkSystem&) = delete;
+    CatmullClarkSystem& operator=(const CatmullClarkSystem&) = delete;
+    CatmullClarkSystem(CatmullClarkSystem&&) = delete;
+    CatmullClarkSystem& operator=(CatmullClarkSystem&&) = delete;
 
     // Update extent for viewport (on window resize)
     void setExtent(VkExtent2D newExtent) { extent = newExtent; }
@@ -83,6 +92,10 @@ public:
     bool isWireframeMode() const { return wireframeMode; }
 
 private:
+    CatmullClarkSystem() = default;  // Private: use factory
+
+    bool initInternal(const InitInfo& info, const CatmullClarkConfig& config);
+    void cleanup();
     // Initialization helpers
     bool createUniformBuffers();
     bool createIndirectBuffers();

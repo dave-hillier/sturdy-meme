@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 #include <array>
+#include <memory>
 
 #include "BufferUtils.h"
 #include "SystemLifecycleHelper.h"
@@ -73,11 +74,19 @@ class VolumetricSnowSystem {
 public:
     using InitInfo = SystemLifecycleHelper::InitInfo;
 
-    VolumetricSnowSystem() = default;
-    ~VolumetricSnowSystem() = default;
+    /**
+     * Factory: Create and initialize VolumetricSnowSystem.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<VolumetricSnowSystem> create(const InitInfo& info);
 
-    bool init(const InitInfo& info);
-    void destroy(VkDevice device, VmaAllocator allocator);
+    ~VolumetricSnowSystem();
+
+    // Non-copyable, non-movable
+    VolumetricSnowSystem(const VolumetricSnowSystem&) = delete;
+    VolumetricSnowSystem& operator=(const VolumetricSnowSystem&) = delete;
+    VolumetricSnowSystem(VolumetricSnowSystem&&) = delete;
+    VolumetricSnowSystem& operator=(VolumetricSnowSystem&&) = delete;
 
     // Update uniforms for compute shader
     void updateUniforms(uint32_t frameIndex, float deltaTime, bool isSnowing, float weatherIntensity,
@@ -178,4 +187,9 @@ private:
     static constexpr uint32_t WORKGROUP_SIZE = 16;  // 16x16 workgroups
 
     std::array<bool, NUM_SNOW_CASCADES> isFirstFrame{true, true, true};
+
+    VolumetricSnowSystem() = default;  // Private: use factory
+
+    bool initInternal(const InitInfo& info);
+    void cleanup();
 };

@@ -7,7 +7,19 @@
 #include <algorithm>
 #include <cstring>
 
-bool WaterDisplacement::init(const InitInfo& info) {
+std::unique_ptr<WaterDisplacement> WaterDisplacement::create(const InitInfo& info) {
+    std::unique_ptr<WaterDisplacement> system(new WaterDisplacement());
+    if (!system->initInternal(info)) {
+        return nullptr;
+    }
+    return system;
+}
+
+WaterDisplacement::~WaterDisplacement() {
+    cleanup();
+}
+
+bool WaterDisplacement::initInternal(const InitInfo& info) {
     device = info.device;
     physicalDevice = info.physicalDevice;
     allocator = info.allocator;
@@ -44,7 +56,7 @@ bool WaterDisplacement::init(const InitInfo& info) {
     return true;
 }
 
-void WaterDisplacement::destroy() {
+void WaterDisplacement::cleanup() {
     if (device == VK_NULL_HANDLE) return;
 
     vkDeviceWaitIdle(device);

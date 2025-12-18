@@ -8,7 +8,19 @@
 #include <algorithm>
 #include <array>
 
-bool WeatherSystem::init(const InitInfo& info) {
+std::unique_ptr<WeatherSystem> WeatherSystem::create(const InitInfo& info) {
+    std::unique_ptr<WeatherSystem> system(new WeatherSystem());
+    if (!system->initInternal(info)) {
+        return nullptr;
+    }
+    return system;
+}
+
+WeatherSystem::~WeatherSystem() {
+    cleanup();
+}
+
+bool WeatherSystem::initInternal(const InitInfo& info) {
     // Store init info for accessors used during initialization
     storedDevice = info.device;
     storedAllocator = info.allocator;
@@ -48,7 +60,7 @@ bool WeatherSystem::init(const InitInfo& info) {
     return particleSystem.has_value();
 }
 
-void WeatherSystem::destroy(VkDevice dev, VmaAllocator alloc) {
+void WeatherSystem::cleanup() {
     // RAII-managed subsystem destroyed automatically
     particleSystem.reset();
 }

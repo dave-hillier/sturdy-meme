@@ -7,7 +7,19 @@
 #include <array>
 #include <algorithm>
 
-bool WaterGBuffer::init(const InitInfo& info) {
+std::unique_ptr<WaterGBuffer> WaterGBuffer::create(const InitInfo& info) {
+    std::unique_ptr<WaterGBuffer> system(new WaterGBuffer());
+    if (!system->initInternal(info)) {
+        return nullptr;
+    }
+    return system;
+}
+
+WaterGBuffer::~WaterGBuffer() {
+    cleanup();
+}
+
+bool WaterGBuffer::initInternal(const InitInfo& info) {
     device = info.device;
     physicalDevice = info.physicalDevice;
     allocator = info.allocator;
@@ -67,7 +79,7 @@ bool WaterGBuffer::init(const InitInfo& info) {
     return true;
 }
 
-void WaterGBuffer::destroy() {
+void WaterGBuffer::cleanup() {
     if (device == VK_NULL_HANDLE) return;
 
     vkDeviceWaitIdle(device);

@@ -12,7 +12,19 @@
 // Forward declare UniformBufferObject size (needed for descriptor set update)
 struct UniformBufferObject;
 
-bool GrassSystem::init(const InitInfo& info) {
+std::unique_ptr<GrassSystem> GrassSystem::create(const InitInfo& info) {
+    std::unique_ptr<GrassSystem> system(new GrassSystem());
+    if (!system->initInternal(info)) {
+        return nullptr;
+    }
+    return system;
+}
+
+GrassSystem::~GrassSystem() {
+    cleanup();
+}
+
+bool GrassSystem::initInternal(const InitInfo& info) {
     SDL_Log("GrassSystem::init() starting, device=%p, pool=%p", (void*)info.device, (void*)info.descriptorPool);
     shadowRenderPass = info.shadowRenderPass;
     shadowMapSize = info.shadowMapSize;
@@ -67,13 +79,22 @@ bool GrassSystem::init(const InitInfo& info) {
     return true;
 }
 
-void GrassSystem::destroy(VkDevice dev, VmaAllocator alloc) {
+void GrassSystem::cleanup() {
+    if (!storedDevice) return;  // Not initialized
+
     // RAII wrappers automatically clean up: shadowPipeline_, shadowPipelineLayout_,
     // shadowDescriptorSetLayout_, displacementPipeline_, displacementPipelineLayout_,
     // displacementDescriptorSetLayout_, displacementSampler_
 
-    vkDestroyImageView(dev, displacementImageView, nullptr);
-    vmaDestroyImage(alloc, displacementImage, displacementAllocation);
+    if (displacementImageView) {
+        vkDestroyImageView(storedDevice, displacementImageView, nullptr);
+        displacementImageView = VK_NULL_HANDLE;
+    }
+    if (displacementImage && storedAllocator) {
+        vmaDestroyImage(storedAllocator, displacementImage, displacementAllocation);
+        displacementImage = VK_NULL_HANDLE;
+        displacementAllocation = VK_NULL_HANDLE;
+    }
 
     particleSystem.reset();
 }

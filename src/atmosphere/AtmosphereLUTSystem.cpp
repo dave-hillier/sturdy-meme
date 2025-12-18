@@ -1,7 +1,29 @@
 #include "AtmosphereLUTSystem.h"
 #include <SDL3/SDL_log.h>
 
-bool AtmosphereLUTSystem::init(const InitInfo& info) {
+std::unique_ptr<AtmosphereLUTSystem> AtmosphereLUTSystem::create(const InitInfo& info) {
+    std::unique_ptr<AtmosphereLUTSystem> system(new AtmosphereLUTSystem());
+    if (!system->initInternal(info)) {
+        return nullptr;
+    }
+    return system;
+}
+
+std::unique_ptr<AtmosphereLUTSystem> AtmosphereLUTSystem::create(const InitContext& ctx) {
+    InitInfo info{};
+    info.device = ctx.device;
+    info.allocator = ctx.allocator;
+    info.descriptorPool = ctx.descriptorPool;
+    info.shaderPath = ctx.shaderPath;
+    info.framesInFlight = ctx.framesInFlight;
+    return create(info);
+}
+
+AtmosphereLUTSystem::~AtmosphereLUTSystem() {
+    cleanup();
+}
+
+bool AtmosphereLUTSystem::initInternal(const InitInfo& info) {
     device = info.device;
     allocator = info.allocator;
     descriptorPool = info.descriptorPool;
@@ -23,29 +45,8 @@ bool AtmosphereLUTSystem::init(const InitInfo& info) {
     return true;
 }
 
-bool AtmosphereLUTSystem::init(const InitContext& ctx) {
-    device = ctx.device;
-    allocator = ctx.allocator;
-    descriptorPool = ctx.descriptorPool;
-    shaderPath = ctx.shaderPath;
-    framesInFlight = ctx.framesInFlight;
-
-    if (!createTransmittanceLUT()) return false;
-    if (!createMultiScatterLUT()) return false;
-    if (!createSkyViewLUT()) return false;
-    if (!createIrradianceLUTs()) return false;
-    if (!createCloudMapLUT()) return false;
-    if (!createLUTSampler()) return false;
-    if (!createUniformBuffer()) return false;
-    if (!createDescriptorSetLayouts()) return false;
-    if (!createDescriptorSets()) return false;
-    if (!createComputePipelines()) return false;
-
-    SDL_Log("Atmosphere LUT System initialized");
-    return true;
-}
-
-void AtmosphereLUTSystem::destroy(VkDevice device, VmaAllocator allocator) {
+void AtmosphereLUTSystem::cleanup() {
+    if (!device) return;  // Not initialized
     destroyLUTResources();
 
     // Destroy all uniform buffers using consistent BufferUtils pattern

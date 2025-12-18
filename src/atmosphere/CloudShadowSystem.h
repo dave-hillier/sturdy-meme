@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
+#include <memory>
 #include "DescriptorManager.h"
 #include "InitContext.h"
 #include "core/VulkanRAII.h"
@@ -52,12 +53,20 @@ public:
     static constexpr float CLOUD_LAYER_BOTTOM = 1500.0f;  // 1.5km in world units = 1500m
     static constexpr float CLOUD_LAYER_TOP = 4000.0f;     // 4.0km in world units = 4000m
 
-    CloudShadowSystem() = default;
-    ~CloudShadowSystem() = default;
+    /**
+     * Factory: Create and initialize CloudShadowSystem.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<CloudShadowSystem> create(const InitInfo& info);
+    static std::unique_ptr<CloudShadowSystem> create(const InitContext& ctx, VkImageView cloudMapLUTView, VkSampler cloudMapLUTSampler);
 
-    bool init(const InitInfo& info);
-    bool init(const InitContext& ctx, VkImageView cloudMapLUTView, VkSampler cloudMapLUTSampler);
-    void destroy();
+    ~CloudShadowSystem();
+
+    // Non-copyable, non-movable
+    CloudShadowSystem(const CloudShadowSystem&) = delete;
+    CloudShadowSystem& operator=(const CloudShadowSystem&) = delete;
+    CloudShadowSystem(CloudShadowSystem&&) = delete;
+    CloudShadowSystem& operator=(CloudShadowSystem&&) = delete;
 
     // Update cloud shadow map (call before scene rendering)
     void recordUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
@@ -133,4 +142,9 @@ private:
     float cloudDensity = 0.3f;      // Matches CLOUD_DENSITY in sky.frag
 
     bool enabled = true;
+
+    CloudShadowSystem() = default;  // Private: use factory
+
+    bool initInternal(const InitInfo& info);
+    void cleanup();
 };

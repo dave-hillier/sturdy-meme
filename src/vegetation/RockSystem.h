@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 #include <functional>
+#include <memory>
 
 #include "Mesh.h"
 #include "Texture.h"
@@ -49,11 +50,19 @@ public:
         float terrainSize;
     };
 
-    RockSystem() = default;
-    ~RockSystem() = default;
+    /**
+     * Factory: Create and initialize RockSystem.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<RockSystem> create(const InitInfo& info, const RockConfig& config = {});
 
-    bool init(const InitInfo& info, const RockConfig& config = {});
-    void destroy(VmaAllocator allocator, VkDevice device);
+    ~RockSystem();
+
+    // Non-copyable, non-movable
+    RockSystem(const RockSystem&) = delete;
+    RockSystem& operator=(const RockSystem&) = delete;
+    RockSystem(RockSystem&&) = delete;
+    RockSystem& operator=(RockSystem&&) = delete;
 
     // Get scene objects for rendering (integrated with existing pipeline)
     const std::vector<Renderable>& getSceneObjects() const { return sceneObjects; }
@@ -74,6 +83,10 @@ public:
     const std::vector<Mesh>& getRockMeshes() const { return rockMeshes; }
 
 private:
+    RockSystem() = default;  // Private: use factory
+
+    bool initInternal(const InitInfo& info, const RockConfig& config);
+    void cleanup();
     bool createRockMeshes(const InitInfo& info);
     bool loadTextures(const InitInfo& info);
     void generateRockPlacements(const InitInfo& info);

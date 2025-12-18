@@ -8,7 +8,19 @@
 #include <cstring>
 #include <array>
 
-bool SnowMaskSystem::init(const InitInfo& info) {
+std::unique_ptr<SnowMaskSystem> SnowMaskSystem::create(const InitInfo& info) {
+    std::unique_ptr<SnowMaskSystem> system(new SnowMaskSystem());
+    if (!system->initInternal(info)) {
+        return nullptr;
+    }
+    return system;
+}
+
+SnowMaskSystem::~SnowMaskSystem() {
+    cleanup();
+}
+
+bool SnowMaskSystem::initInternal(const InitInfo& info) {
     SystemLifecycleHelper::Hooks hooks{};
     hooks.createBuffers = [this]() { return createBuffers(); };
     hooks.createComputeDescriptorSetLayout = [this]() { return createComputeDescriptorSetLayout(); };
@@ -22,12 +34,20 @@ bool SnowMaskSystem::init(const InitInfo& info) {
     return lifecycle.init(info, hooks);
 }
 
-void SnowMaskSystem::destroy(VkDevice dev, VmaAllocator alloc) {
-    snowMaskSampler.reset();
-    vkDestroyImageView(dev, snowMaskView, nullptr);
-    vmaDestroyImage(alloc, snowMaskImage, snowMaskAllocation);
+void SnowMaskSystem::cleanup() {
+    if (!lifecycle.getDevice()) return;  // Not initialized
 
-    lifecycle.destroy(dev, alloc);
+    snowMaskSampler.reset();
+    if (snowMaskView) {
+        vkDestroyImageView(lifecycle.getDevice(), snowMaskView, nullptr);
+        snowMaskView = VK_NULL_HANDLE;
+    }
+    if (snowMaskImage) {
+        vmaDestroyImage(lifecycle.getAllocator(), snowMaskImage, snowMaskAllocation);
+        snowMaskImage = VK_NULL_HANDLE;
+    }
+
+    lifecycle.destroy(lifecycle.getDevice(), lifecycle.getAllocator());
 }
 
 void SnowMaskSystem::destroyBuffers(VmaAllocator alloc) {

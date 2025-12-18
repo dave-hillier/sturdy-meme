@@ -7,7 +7,35 @@
 #include <array>
 #include <cmath>
 
-bool FroxelSystem::init(const InitInfo& info) {
+std::unique_ptr<FroxelSystem> FroxelSystem::create(const InitInfo& info) {
+    std::unique_ptr<FroxelSystem> system(new FroxelSystem());
+    if (!system->initInternal(info)) {
+        return nullptr;
+    }
+    return system;
+}
+
+std::unique_ptr<FroxelSystem> FroxelSystem::create(const InitContext& ctx, VkImageView shadowMapView_, VkSampler shadowSampler_,
+                                                    const std::vector<VkBuffer>& lightBuffers_) {
+    InitInfo info{};
+    info.device = ctx.device;
+    info.allocator = ctx.allocator;
+    info.descriptorPool = ctx.descriptorPool;
+    info.extent = ctx.extent;
+    info.shaderPath = ctx.shaderPath;
+    info.framesInFlight = ctx.framesInFlight;
+    info.shadowMapView = shadowMapView_;
+    info.shadowSampler = shadowSampler_;
+    info.lightBuffers = lightBuffers_;
+
+    return create(info);
+}
+
+FroxelSystem::~FroxelSystem() {
+    cleanup();
+}
+
+bool FroxelSystem::initInternal(const InitInfo& info) {
     device = info.device;
     allocator = info.allocator;
     descriptorPool = info.descriptorPool;
@@ -30,31 +58,9 @@ bool FroxelSystem::init(const InitInfo& info) {
     return true;
 }
 
-bool FroxelSystem::init(const InitContext& ctx, VkImageView shadowMapView_, VkSampler shadowSampler_,
-                        const std::vector<VkBuffer>& lightBuffers_) {
-    device = ctx.device;
-    allocator = ctx.allocator;
-    descriptorPool = ctx.descriptorPool;
-    extent = ctx.extent;
-    shaderPath = ctx.shaderPath;
-    framesInFlight = ctx.framesInFlight;
-    shadowMapView = shadowMapView_;
-    shadowSampler = shadowSampler_;
-    lightBuffers = lightBuffers_;
+void FroxelSystem::cleanup() {
+    if (!device) return;  // Not initialized
 
-    if (!createScatteringVolume()) return false;
-    if (!createIntegratedVolume()) return false;
-    if (!createSampler()) return false;
-    if (!createDescriptorSetLayout()) return false;
-    if (!createUniformBuffers()) return false;
-    if (!createDescriptorSets()) return false;
-    if (!createFroxelUpdatePipeline()) return false;
-    if (!createIntegrationPipeline()) return false;
-
-    return true;
-}
-
-void FroxelSystem::destroy(VkDevice device, VmaAllocator allocator) {
     destroyVolumeResources();
 
     BufferUtils::destroyBuffers(allocator, uniformBuffers);

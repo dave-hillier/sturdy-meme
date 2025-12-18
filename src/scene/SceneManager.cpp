@@ -1,7 +1,23 @@
 #include "SceneManager.h"
 #include <SDL3/SDL.h>
 
-bool SceneManager::init(SceneBuilder::InitInfo& builderInfo) {
+std::unique_ptr<SceneManager> SceneManager::create(SceneBuilder::InitInfo& builderInfo) {
+    std::unique_ptr<SceneManager> system(new SceneManager());
+    if (!system->initInternal(builderInfo)) {
+        return nullptr;
+    }
+    return system;
+}
+
+SceneManager::~SceneManager() {
+    cleanup();
+}
+
+bool SceneManager::initInternal(SceneBuilder::InitInfo& builderInfo) {
+    // Store for cleanup
+    storedAllocator = builderInfo.allocator;
+    storedDevice = builderInfo.device;
+
     // Store terrain height function for physics placement
     terrainHeightFunc = builderInfo.getTerrainHeight;
 
@@ -51,8 +67,9 @@ void SceneManager::initTerrainPhysics(PhysicsWorld& physics, const float* height
     }
 }
 
-void SceneManager::destroy(VmaAllocator allocator, VkDevice device) {
-    sceneBuilder.destroy(allocator, device);
+void SceneManager::cleanup() {
+    if (storedDevice == VK_NULL_HANDLE) return;
+    sceneBuilder.destroy(storedAllocator, storedDevice);
 }
 
 void SceneManager::update(PhysicsWorld& physics) {
