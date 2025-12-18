@@ -258,8 +258,10 @@ public:
     VkSampler getTileSampler() const {
         return tileCache ? tileCache->getSampler() : VK_NULL_HANDLE;
     }
+    // DEPRECATED: Use getTileInfoBuffer(frameIndex) to avoid CPU-GPU sync issues
+    [[deprecated("Use getTileInfoBuffer(uint32_t frameIndex) to avoid CPU-GPU sync issues")]]
     VkBuffer getTileInfoBuffer() const {
-        return tileCache ? tileCache->getTileInfoBuffer() : VK_NULL_HANDLE;
+        return tileCache ? tileCache->getTileInfoBuffer(0) : VK_NULL_HANDLE;
     }
     VkBuffer getTileInfoBuffer(uint32_t frameIndex) const {
         return tileCache ? tileCache->getTileInfoBuffer(frameIndex) : VK_NULL_HANDLE;

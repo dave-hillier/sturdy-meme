@@ -356,7 +356,10 @@ bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffe
                                         VkSampler sceneDepthSampler,
                                         VkImageView tileArrayView,
                                         VkSampler tileSampler,
-                                        VkBuffer tileInfoBuffer) {
+                                        const std::array<VkBuffer, 3>& tileInfoBuffers) {
+    // Store tile info buffers for per-frame updates (triple-buffered)
+    tileInfoBuffers_ = tileInfoBuffers;
+
     // Allocate descriptor sets using managed pool
     descriptorSets = descriptorPool->allocate(descriptorSetLayout.get(), framesInFlight);
     if (descriptorSets.size() != framesInFlight) {
@@ -369,6 +372,7 @@ bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffe
     VkSampler shadowSampler = shadowSystem.getShadowSampler();
 
     // Update each descriptor set - use non-fluent pattern to avoid copy semantics bug
+    // Note: tile info buffer (binding 15) is updated per-frame in recordDraw
     for (size_t i = 0; i < framesInFlight; i++) {
         DescriptorManager::SetWriter writer(device, descriptorSets[i]);
         writer.writeBuffer(0, uniformBuffers[i], 0, uniformBufferSize);
@@ -390,8 +394,9 @@ bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffe
         if (tileArrayView != VK_NULL_HANDLE && tileSampler != VK_NULL_HANDLE) {
             writer.writeImage(14, tileArrayView, tileSampler);
         }
-        if (tileInfoBuffer != VK_NULL_HANDLE) {
-            writer.writeBuffer(15, tileInfoBuffer, 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        // Write initial tile info buffer (frame 0) - will be updated per-frame
+        if (tileInfoBuffers_[0] != VK_NULL_HANDLE) {
+            writer.writeBuffer(15, tileInfoBuffers_[0], 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
         }
 
         writer.update();
@@ -416,6 +421,13 @@ void WaterSystem::setWaterExtent(const glm::vec2& position, const glm::vec2& siz
 }
 
 void WaterSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
+    // Update tile info buffer binding to the correct frame's buffer (triple-buffered to avoid CPU-GPU sync)
+    if (tileInfoBuffers_[frameIndex % 3] != VK_NULL_HANDLE) {
+        DescriptorManager::SetWriter(device, descriptorSets[frameIndex])
+            .writeBuffer(15, tileInfoBuffers_[frameIndex % 3], 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+            .update();
+    }
+
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.get());
 
     // Set dynamic viewport and scissor to handle window resize

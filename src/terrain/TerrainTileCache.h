@@ -111,10 +111,17 @@ public:
     const std::vector<TerrainTile*>& getActiveTiles() const { return activeTiles; }
 
     // Get tile info buffer for shader (triple-buffered for frames-in-flight sync)
+    // IMPORTANT: Always use this per-frame version to avoid CPU-GPU sync issues.
+    // The buffer is written by CPU during updateActiveTiles() and read by GPU shaders.
+    // Using the wrong frame's buffer causes flickering artifacts.
     VkBuffer getTileInfoBuffer(uint32_t frameIndex) const {
         return tileInfoBuffers_[frameIndex % FRAMES_IN_FLIGHT].get();
     }
-    // Legacy accessor for systems that don't need per-frame sync (returns frame 0)
+
+    // DEPRECATED: Do not use - causes CPU-GPU sync issues leading to flickering.
+    // This exists only for backwards compatibility during transition.
+    // Use getTileInfoBuffer(frameIndex) instead in all new code.
+    [[deprecated("Use getTileInfoBuffer(uint32_t frameIndex) to avoid CPU-GPU sync issues")]]
     VkBuffer getTileInfoBuffer() const { return tileInfoBuffers_[0].get(); }
 
     // Update which frame we're writing to (call during updateActiveTiles)

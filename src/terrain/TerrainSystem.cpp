@@ -293,11 +293,9 @@ bool TerrainSystem::createDescriptorSets() {
         // Get tile cache resources if available
         VkImageView tileArrayView = VK_NULL_HANDLE;
         VkSampler tileSampler = VK_NULL_HANDLE;
-        VkBuffer tileInfoBuffer = VK_NULL_HANDLE;
         if (tileCache) {
             tileArrayView = tileCache->getTileArrayView();
             tileSampler = tileCache->getSampler();
-            tileInfoBuffer = tileCache->getTileInfoBuffer();
         }
 
         // Build writer with all bindings - use separate statements to avoid
@@ -314,11 +312,13 @@ bool TerrainSystem::createDescriptorSets() {
         writer.writeBuffer(15, (*buffers)->getShadowIndirectDrawBuffer(), 0, sizeof(uint32_t) * 5, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
 
         // LOD tile cache bindings (19 and 20) - for subdivision to use high-res terrain data
+        // Note: tile info buffer (binding 20) is updated per-frame in recordCompute
         if (tileArrayView != VK_NULL_HANDLE && tileSampler != VK_NULL_HANDLE) {
             writer.writeImage(19, tileArrayView, tileSampler);
         }
-        if (tileInfoBuffer != VK_NULL_HANDLE) {
-            writer.writeBuffer(20, tileInfoBuffer, 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        // Write initial tile info buffer (frame i) - will be updated per-frame in recordCompute
+        if (tileCache && tileCache->getTileInfoBuffer(i) != VK_NULL_HANDLE) {
+            writer.writeBuffer(20, tileCache->getTileInfoBuffer(i), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
         }
 
         writer.update();
@@ -465,9 +465,10 @@ void TerrainSystem::updateDescriptorSets(VkDevice device,
                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         }
 
-        // LOD tile info buffer (binding 20)
-        if (tileCache && tileCache->getTileInfoBuffer() != VK_NULL_HANDLE) {
-            writer.writeBuffer(20, tileCache->getTileInfoBuffer(), 0, VK_WHOLE_SIZE,
+        // LOD tile info buffer (binding 20) - use per-frame buffer
+        // Note: This is also updated per-frame in recordDraw for proper sync
+        if (tileCache && tileCache->getTileInfoBuffer(i) != VK_NULL_HANDLE) {
+            writer.writeBuffer(20, tileCache->getTileInfoBuffer(i), 0, VK_WHOLE_SIZE,
                               VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
         }
 
@@ -561,6 +562,13 @@ void TerrainSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraP
 }
 
 void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuProfiler* profiler) {
+    // Update tile info buffer binding to the correct frame's buffer (triple-buffered to avoid CPU-GPU sync)
+    if (tileCache && tileCache->getTileInfoBuffer(frameIndex) != VK_NULL_HANDLE) {
+        DescriptorManager::SetWriter(device, computeDescriptorSets[frameIndex])
+            .writeBuffer(20, tileCache->getTileInfoBuffer(frameIndex), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+            .update();
+    }
+
     // Record pending meshlet uploads (fence-free, like virtual texture system)
     if (config.useMeshlets && meshlet && meshlet->hasPendingUpload()) {
         meshlet->recordUpload(cmd, frameIndex);
@@ -735,6 +743,13 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
 }
 
 void TerrainSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
+    // Update tile info buffer binding to the correct frame's buffer (triple-buffered to avoid CPU-GPU sync)
+    if (tileCache && tileCache->getTileInfoBuffer(frameIndex) != VK_NULL_HANDLE) {
+        DescriptorManager::SetWriter(device, renderDescriptorSets[frameIndex])
+            .writeBuffer(20, tileCache->getTileInfoBuffer(frameIndex), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+            .update();
+    }
+
     VkPipeline pipeline;
     if (config.useMeshlets) {
         pipeline = wireframeMode ? pipelines->getMeshletWireframePipeline() : pipelines->getMeshletRenderPipeline();

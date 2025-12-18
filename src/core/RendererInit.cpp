@@ -1,3 +1,4 @@
+#include <array>
 #include "RendererInit.h"
 #include "RendererSystems.h"
 #include "VulkanRAII.h"
@@ -352,6 +353,12 @@ bool RendererInit::createWaterDescriptorSets(
     VkSampler depthSampler
 ) {
     // Create water descriptor sets with terrain heightmap, flow map, displacement map, temporal foam, SSR, scene depth, and tile cache
+    // Pass triple-buffered tile info buffers to avoid CPU-GPU sync issues
+    std::array<VkBuffer, 3> waterTileInfoBuffers = {
+        terrainSystem.getTileInfoBuffer(0),
+        terrainSystem.getTileInfoBuffer(1),
+        terrainSystem.getTileInfoBuffer(2)
+    };
     if (!water.system.createDescriptorSets(
             uniformBuffers, uniformBufferSize, shadowSystem,
             terrainSystem.getHeightMapView(), terrainSystem.getHeightMapSampler(),
@@ -361,7 +368,7 @@ bool RendererInit::createWaterDescriptorSets(
             water.rendererSystems.ssr().getSSRResultView(), water.rendererSystems.ssr().getSampler(),
             postProcessSystem.getHDRDepthView(), depthSampler,
             terrainSystem.getTileArrayView(), terrainSystem.getTileSampler(),
-            terrainSystem.getTileInfoBuffer())) {
+            waterTileInfoBuffers)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create water descriptor sets");
         return false;
     }

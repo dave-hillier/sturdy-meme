@@ -3,6 +3,7 @@
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
+#include <array>
 #include <vector>
 #include <string>
 #include <optional>
@@ -125,7 +126,7 @@ public:
                               VkSampler sceneDepthSampler,
                               VkImageView tileArrayView = VK_NULL_HANDLE,
                               VkSampler tileSampler = VK_NULL_HANDLE,
-                              VkBuffer tileInfoBuffer = VK_NULL_HANDLE);
+                              const std::array<VkBuffer, 3>& tileInfoBuffers = {});
 
     // Update water uniforms (call each frame)
     void updateUniforms(uint32_t frameIndex);
@@ -346,6 +347,9 @@ private:
     // Tidal parameters
     float baseWaterLevel = 0.0f;  // Mean sea level
     float tidalRange = 2.0f;      // Max tide height variation in meters
+
+    // Tile cache resources for high-res terrain sampling
+    std::array<VkBuffer, 3> tileInfoBuffers_ = {};  // Triple-buffered for frames-in-flight sync
 
     // Push constants - must match shader layout exactly
     struct PushConstants {
