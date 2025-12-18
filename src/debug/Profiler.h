@@ -2,6 +2,7 @@
 
 #include "GpuProfiler.h"
 #include "CpuProfiler.h"
+#include <optional>
 
 /**
  * Unified Profiler combining GPU timestamp queries and CPU timing.
@@ -18,11 +19,16 @@ public:
      * Initialize the profiler.
      */
     bool init(VkDevice device, VkPhysicalDevice physicalDevice, uint32_t framesInFlight) {
-        return gpuProfiler.init(device, physicalDevice, framesInFlight);
+        auto gpu = GpuProfiler::create(device, physicalDevice, framesInFlight);
+        if (!gpu) {
+            return false;
+        }
+        gpuProfiler_ = std::move(*gpu);
+        return true;
     }
 
     void shutdown() {
-        gpuProfiler.shutdown();
+        gpuProfiler_.reset();
     }
 
     /**
@@ -30,14 +36,18 @@ public:
      */
     void beginFrame(VkCommandBuffer cmd, uint32_t frameIndex) {
         cpuProfiler.beginFrame();
-        gpuProfiler.beginFrame(cmd, frameIndex);
+        if (gpuProfiler_) {
+            gpuProfiler_->beginFrame(cmd, frameIndex);
+        }
     }
 
     /**
      * End frame profiling (call after command buffer recording, before submit).
      */
     void endFrame(VkCommandBuffer cmd, uint32_t frameIndex) {
-        gpuProfiler.endFrame(cmd, frameIndex);
+        if (gpuProfiler_) {
+            gpuProfiler_->endFrame(cmd, frameIndex);
+        }
         cpuProfiler.endFrame();
     }
 
@@ -45,14 +55,18 @@ public:
      * Begin a GPU profiling zone.
      */
     void beginGpuZone(VkCommandBuffer cmd, const char* zoneName) {
-        gpuProfiler.beginZone(cmd, zoneName);
+        if (gpuProfiler_) {
+            gpuProfiler_->beginZone(cmd, zoneName);
+        }
     }
 
     /**
      * End a GPU profiling zone.
      */
     void endGpuZone(VkCommandBuffer cmd, const char* zoneName) {
-        gpuProfiler.endZone(cmd, zoneName);
+        if (gpuProfiler_) {
+            gpuProfiler_->endZone(cmd, zoneName);
+        }
     }
 
     /**
@@ -77,34 +91,40 @@ public:
     }
 
     // Results access
-    const GpuProfiler::FrameStats& getGpuResults() const { return gpuProfiler.getResults(); }
-    const GpuProfiler::FrameStats& getSmoothedGpuResults() const { return gpuProfiler.getSmoothedResults(); }
+    const GpuProfiler::FrameStats& getGpuResults() const {
+        static GpuProfiler::FrameStats empty;
+        return gpuProfiler_ ? gpuProfiler_->getResults() : empty;
+    }
+    const GpuProfiler::FrameStats& getSmoothedGpuResults() const {
+        static GpuProfiler::FrameStats empty;
+        return gpuProfiler_ ? gpuProfiler_->getSmoothedResults() : empty;
+    }
     const CpuProfiler::FrameStats& getCpuResults() const { return cpuProfiler.getResults(); }
     const CpuProfiler::FrameStats& getSmoothedCpuResults() const { return cpuProfiler.getSmoothedResults(); }
 
     // Enable/disable
-    bool isGpuProfilingEnabled() const { return gpuProfiler.isEnabled(); }
+    bool isGpuProfilingEnabled() const { return gpuProfiler_ && gpuProfiler_->isEnabled(); }
     bool isCpuProfilingEnabled() const { return cpuProfiler.isEnabled(); }
-    void setGpuProfilingEnabled(bool e) { gpuProfiler.setEnabled(e); }
+    void setGpuProfilingEnabled(bool e) { if (gpuProfiler_) gpuProfiler_->setEnabled(e); }
     void setCpuProfilingEnabled(bool e) { cpuProfiler.setEnabled(e); }
 
     void setEnabled(bool e) {
-        gpuProfiler.setEnabled(e);
+        if (gpuProfiler_) gpuProfiler_->setEnabled(e);
         cpuProfiler.setEnabled(e);
     }
 
     bool isEnabled() const {
-        return gpuProfiler.isEnabled() || cpuProfiler.isEnabled();
+        return (gpuProfiler_ && gpuProfiler_->isEnabled()) || cpuProfiler.isEnabled();
     }
 
     // Direct access to profilers
-    GpuProfiler& getGpuProfiler() { return gpuProfiler; }
+    GpuProfiler& getGpuProfiler() { return *gpuProfiler_; }
     CpuProfiler& getCpuProfiler() { return cpuProfiler; }
-    const GpuProfiler& getGpuProfiler() const { return gpuProfiler; }
+    const GpuProfiler& getGpuProfiler() const { return *gpuProfiler_; }
     const CpuProfiler& getCpuProfiler() const { return cpuProfiler; }
 
 private:
-    GpuProfiler gpuProfiler;
+    std::optional<GpuProfiler> gpuProfiler_;
     CpuProfiler cpuProfiler;
 };
 
