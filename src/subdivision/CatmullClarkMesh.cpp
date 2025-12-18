@@ -37,10 +37,6 @@ bool CatmullClarkMesh::uploadToGPU(VmaAllocator allocator) {
     return true;
 }
 
-void CatmullClarkMesh::destroy() {
-    // RAII handles cleanup automatically
-}
-
 CatmullClarkMesh CatmullClarkMesh::createCube() {
     CatmullClarkMesh mesh;
 

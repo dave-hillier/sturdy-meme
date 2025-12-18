@@ -6,6 +6,7 @@
 #include <string>
 #include <limits>
 #include <cstdint>
+#include <memory>
 #include "VulkanRAII.h"
 
 // Height map for terrain - handles generation, GPU texture, and CPU queries
@@ -28,11 +29,19 @@ public:
     // Special return value indicating a hole in terrain (no ground)
     static constexpr float NO_GROUND = -std::numeric_limits<float>::infinity();
 
-    TerrainHeightMap() = default;
-    ~TerrainHeightMap() = default;
+    /**
+     * Factory: Create and initialize TerrainHeightMap.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<TerrainHeightMap> create(const InitInfo& info);
 
-    bool init(const InitInfo& info);
-    void destroy(VkDevice device, VmaAllocator allocator);
+    ~TerrainHeightMap();
+
+    // Non-copyable, non-movable
+    TerrainHeightMap(const TerrainHeightMap&) = delete;
+    TerrainHeightMap& operator=(const TerrainHeightMap&) = delete;
+    TerrainHeightMap(TerrainHeightMap&&) = delete;
+    TerrainHeightMap& operator=(TerrainHeightMap&&) = delete;
 
     // GPU resource accessors
     VkImageView getView() const { return imageView; }
@@ -60,6 +69,11 @@ public:
     float getTerrainSize() const { return terrainSize; }
 
 private:
+    TerrainHeightMap() = default;  // Private: use factory
+
+    bool initInternal(const InitInfo& info);
+    void cleanup();
+
     bool generateHeightData();
     bool loadHeightDataFromFile(const std::string& path, float minAlt, float maxAlt);
     bool createGPUResources();

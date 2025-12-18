@@ -30,31 +30,22 @@ bool VirtualTextureSystem::init(VkDevice device, VmaAllocator allocator,
         return false;
     }
 
-    // Initialize page table with RAII wrapper
-    pageTable = RAIIAdapter<VirtualTexturePageTable>::create(
-        [&](auto& p) { return p.init(device, allocator, commandPool, queue, config, framesInFlight_); },
-        [device, allocator](auto& p) { p.destroy(device, allocator); }
-    );
+    // Initialize page table
+    pageTable = VirtualTexturePageTable::create(device, allocator, commandPool, queue, config, framesInFlight_);
     if (!pageTable) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize VT page table");
         return false;
     }
 
-    // Initialize feedback with RAII wrapper (use framesInFlight for buffering)
-    feedback = RAIIAdapter<VirtualTextureFeedback>::create(
-        [&](auto& f) { return f.init(device, allocator, 4096, framesInFlight_); },
-        [](auto& f) { f.destroy(); }
-    );
+    // Initialize feedback (use framesInFlight for buffering)
+    feedback = VirtualTextureFeedback::create(device, allocator, 4096, framesInFlight_);
     if (!feedback) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize VT feedback");
         return false;
     }
 
-    // Initialize tile loader with RAII wrapper
-    tileLoader = RAIIAdapter<VirtualTextureTileLoader>::create(
-        [&](auto& t) { return t.init(tilePath, 2); },
-        [](auto& t) { t.shutdown(); }
-    );
+    // Initialize tile loader
+    tileLoader = VirtualTextureTileLoader::create(tilePath, 2);
     if (!tileLoader) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize VT tile loader");
         return false;
@@ -75,7 +66,7 @@ void VirtualTextureSystem::destroy(VkDevice device, VmaAllocator allocator) {
 
 void VirtualTextureSystem::beginFrame(VkCommandBuffer cmd, uint32_t frameIndex) {
     // Clear the feedback buffer for this frame
-    (*feedback)->clear(cmd, frameIndex);
+    feedback->clear(cmd, frameIndex);
 }
 
 void VirtualTextureSystem::endFrame(VkCommandBuffer cmd, uint32_t frameIndex) {
@@ -88,7 +79,7 @@ void VirtualTextureSystem::endFrame(VkCommandBuffer cmd, uint32_t frameIndex) {
 
     // Copy feedback buffer from GPU storage to CPU readback buffer
     // The actual CPU read will happen in a future frame after fence wait
-    (*feedback)->recordCopyToReadback(cmd, frameIndex);
+    feedback->recordCopyToReadback(cmd, frameIndex);
 }
 
 void VirtualTextureSystem::update(VkCommandBuffer cmd, uint32_t frameIndex) {
@@ -107,15 +98,15 @@ void VirtualTextureSystem::update(VkCommandBuffer cmd, uint32_t frameIndex) {
     recordPendingTileUploads(cmd, frameIndex);
 
     // Record page table upload commands if dirty
-    (*pageTable)->recordUpload(cmd, frameIndex);
+    pageTable->recordUpload(cmd, frameIndex);
 }
 
 void VirtualTextureSystem::processFeedback(uint32_t frameIndex) {
     // Read back tile requests from GPU
-    (*feedback)->readback(frameIndex);
+    feedback->readback(frameIndex);
 
     // Get deduplicated, sorted list of requested tiles
-    std::vector<TileId> requested = (*feedback)->getRequestedTiles();
+    std::vector<TileId> requested = feedback->getRequestedTiles();
 
     if (requested.empty()) {
         // No requests - relax penalty if we have headroom
@@ -135,7 +126,7 @@ void VirtualTextureSystem::processFeedback(uint32_t frameIndex) {
     for (const auto& id : requested) {
         if (!(*cache)->hasTile(id) &&
             pendingTiles.find(id.pack()) == pendingTiles.end() &&
-            !(*tileLoader)->isQueued(id)) {
+            !tileLoader->isQueued(id)) {
             newRequestCount++;
         }
     }
@@ -195,14 +186,14 @@ void VirtualTextureSystem::processFeedback(uint32_t frameIndex) {
         }
 
         // Skip if already queued for loading
-        if ((*tileLoader)->isQueued(adjustedId)) {
+        if (tileLoader->isQueued(adjustedId)) {
             continue;
         }
 
         // Queue for loading with priority based on mip level
         // Lower mip = larger tile = higher priority
         int priority = static_cast<int>(adjustedId.mipLevel);
-        (*tileLoader)->queueTile(adjustedId, priority);
+        tileLoader->queueTile(adjustedId, priority);
         pendingTiles.insert(packed);
         queued++;
     }
@@ -215,7 +206,7 @@ void VirtualTextureSystem::processFeedback(uint32_t frameIndex) {
 
 void VirtualTextureSystem::recordPendingTileUploads(VkCommandBuffer cmd, uint32_t frameIndex) {
     // Get tiles that finished loading
-    std::vector<LoadedTile> loaded = (*tileLoader)->getLoadedTiles();
+    std::vector<LoadedTile> loaded = tileLoader->getLoadedTiles();
 
     if (loaded.empty()) {
         return;
@@ -251,7 +242,7 @@ void VirtualTextureSystem::recordPendingTileUploads(VkCommandBuffer cmd, uint32_
         if (slotIt != UINT32_MAX) {
             uint16_t cacheX = slotIt % slotsPerAxis;
             uint16_t cacheY = slotIt / slotsPerAxis;
-            (*pageTable)->setEntry(tile.id, cacheX, cacheY);
+            pageTable->setEntry(tile.id, cacheX, cacheY);
         }
 
         // Remove from pending set
@@ -294,8 +285,8 @@ VTParamsUBO VirtualTextureSystem::getParams() const {
 }
 
 void VirtualTextureSystem::requestTile(TileId id) {
-    if (!(*cache)->hasTile(id) && !(*tileLoader)->isQueued(id)) {
-        (*tileLoader)->queueTile(id, 0); // High priority
+    if (!(*cache)->hasTile(id) && !tileLoader->isQueued(id)) {
+        tileLoader->queueTile(id, 0); // High priority
         pendingTiles.insert(id.pack());
     }
 }

@@ -11,7 +11,19 @@
 #define STB_IMAGE_IMPLEMENTATION_SKIP  // Already implemented elsewhere
 #include <stb_image.h>
 
-bool TerrainHeightMap::init(const InitInfo& info) {
+std::unique_ptr<TerrainHeightMap> TerrainHeightMap::create(const InitInfo& info) {
+    std::unique_ptr<TerrainHeightMap> heightMap(new TerrainHeightMap());
+    if (!heightMap->initInternal(info)) {
+        return nullptr;
+    }
+    return heightMap;
+}
+
+TerrainHeightMap::~TerrainHeightMap() {
+    cleanup();
+}
+
+bool TerrainHeightMap::initInternal(const InitInfo& info) {
     device = info.device;
     allocator = info.allocator;
     graphicsQueue = info.graphicsQueue;
@@ -43,7 +55,8 @@ bool TerrainHeightMap::init(const InitInfo& info) {
     return true;
 }
 
-void TerrainHeightMap::destroy(VkDevice device, VmaAllocator allocator) {
+void TerrainHeightMap::cleanup() {
+    if (device == VK_NULL_HANDLE) return;  // Not initialized
     // Destroy height map resources (sampler via RAII)
     sampler.reset();
     if (imageView) vkDestroyImageView(device, imageView, nullptr);

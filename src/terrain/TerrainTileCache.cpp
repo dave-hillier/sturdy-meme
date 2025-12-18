@@ -10,7 +10,19 @@
 #include <algorithm>
 #include <cmath>
 
-bool TerrainTileCache::init(const InitInfo& info) {
+std::unique_ptr<TerrainTileCache> TerrainTileCache::create(const InitInfo& info) {
+    std::unique_ptr<TerrainTileCache> cache(new TerrainTileCache());
+    if (!cache->initInternal(info)) {
+        return nullptr;
+    }
+    return cache;
+}
+
+TerrainTileCache::~TerrainTileCache() {
+    cleanup();
+}
+
+bool TerrainTileCache::initInternal(const InitInfo& info) {
     cacheDirectory = info.cacheDirectory;
     device = info.device;
     allocator = info.allocator;
@@ -129,7 +141,7 @@ bool TerrainTileCache::init(const InitInfo& info) {
     return true;
 }
 
-void TerrainTileCache::destroy() {
+void TerrainTileCache::cleanup() {
     // Wait for GPU to finish
     if (device) {
         vkDeviceWaitIdle(device);

@@ -1,5 +1,38 @@
 # Plan: Eliminate Two-Phase Initialization & Adopt Smart Pointers
 
+## Status: COMPLETE ✓
+
+All systems have been converted to RAII factory pattern. The two-phase initialization pattern has been eliminated.
+
+### Completed Conversions
+All systems now use `static std::unique_ptr<T> create(...)` factory pattern:
+
+**Terrain Systems:**
+- TerrainSystem, TerrainPipelines, TerrainHeightMap, TerrainTileCache, TerrainMeshlet
+
+**Virtual Texture Systems:**
+- VirtualTextureFeedback, VirtualTexturePageTable, VirtualTextureTileLoader
+
+**Water Systems:**
+- OceanFFT, WaterSystem, WaterGBuffer, WaterDisplacement, FoamBuffer
+
+**Subdivision Systems:**
+- CatmullClarkSystem, CatmullClarkCBT, CatmullClarkMesh (struct with existing factory methods)
+
+**Scene & Animation:**
+- SceneBuilder, SceneManager, AnimatedCharacter
+
+**Core:**
+- Renderer, BillboardCapture
+
+**Already Converted (earlier work):**
+- WindSystem, PhysicsWorld, ShadowSystem, BloomSystem, SSRSystem, HiZSystem
+- PostProcessSystem, SkySystem, AtmosphereLUTSystem, GrassSystem, RockSystem
+- LeafSystem, WeatherSystem, SnowMaskSystem, FroxelSystem, DebugLineSystem
+- GuiSystem, GpuProfiler, CpuProfiler, TreeEditSystem
+
+---
+
 ## Goal
 Systematically replace `init()`/`destroy()` two-phase initialization patterns with proper RAII semantics, and adopt smart pointers for clear ownership throughout the engine, following C++17+ best practices.
 

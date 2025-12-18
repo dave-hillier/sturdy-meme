@@ -2,6 +2,7 @@
 
 #include <vulkan/vulkan.h>
 #include <string>
+#include <memory>
 #include "core/VulkanRAII.h"
 
 struct SubgroupCapabilities;
@@ -24,11 +25,19 @@ public:
         const SubgroupCapabilities* subgroupCaps;  // For optimized compute paths
     };
 
-    TerrainPipelines() = default;
+    /**
+     * Factory: Create and initialize TerrainPipelines.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<TerrainPipelines> create(const InitInfo& info);
+
     ~TerrainPipelines() = default;
 
-    bool init(const InitInfo& info);
-    void destroy(VkDevice device);
+    // Non-copyable, non-movable
+    TerrainPipelines(const TerrainPipelines&) = delete;
+    TerrainPipelines& operator=(const TerrainPipelines&) = delete;
+    TerrainPipelines(TerrainPipelines&&) = delete;
+    TerrainPipelines& operator=(TerrainPipelines&&) = delete;
 
     // Compute pipeline accessors
     VkPipelineLayout getDispatcherPipelineLayout() const { return dispatcherPipelineLayout_.get(); }
@@ -73,6 +82,10 @@ public:
     bool hasShadowCulling() const { return static_cast<bool>(shadowCullPipeline_); }
 
 private:
+    TerrainPipelines() = default;  // Private: use factory
+
+    bool initInternal(const InitInfo& info);
+
     // Pipeline creation helpers
     bool createDispatcherPipeline();
     bool createSubdivisionPipeline();

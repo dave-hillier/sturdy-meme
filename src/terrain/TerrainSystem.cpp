@@ -56,10 +56,7 @@ bool TerrainSystem::initInternal(const InitInfo& info, const TerrainConfig& cfg)
     heightMapInfo.heightmapPath = config.heightmapPath;
     heightMapInfo.minAltitude = config.minAltitude;
     heightMapInfo.maxAltitude = config.maxAltitude;
-    heightMap = RAIIAdapter<TerrainHeightMap>::create(
-        [&](auto& h) { return h.init(heightMapInfo); },
-        [this](auto& h) { h.destroy(device, allocator); }
-    );
+    heightMap = TerrainHeightMap::create(heightMapInfo);
     if (!heightMap) return false;
 
     // Initialize textures with RAII wrapper
@@ -91,10 +88,7 @@ bool TerrainSystem::initInternal(const InitInfo& info, const TerrainConfig& cfg)
         TerrainMeshlet::InitInfo meshletInfo{};
         meshletInfo.allocator = allocator;
         meshletInfo.subdivisionLevel = static_cast<uint32_t>(config.meshletSubdivisionLevel);
-        meshlet = RAIIAdapter<TerrainMeshlet>::create(
-            [&](auto& m) { return m.init(meshletInfo); },
-            [](auto& m) { m.destroy(); }
-        );
+        meshlet = TerrainMeshlet::create(meshletInfo);
         if (!meshlet) {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to create meshlet, falling back to direct triangles");
             config.useMeshlets = false;
@@ -113,10 +107,7 @@ bool TerrainSystem::initInternal(const InitInfo& info, const TerrainConfig& cfg)
         tileCacheInfo.heightScale = config.heightScale;
         tileCacheInfo.minAltitude = config.minAltitude;
         tileCacheInfo.maxAltitude = config.maxAltitude;
-        tileCache = RAIIAdapter<TerrainTileCache>::create(
-            [&](auto& tc) { return tc.init(tileCacheInfo); },
-            [](auto& tc) { tc.destroy(); }
-        );
+        tileCache = TerrainTileCache::create(tileCacheInfo);
         if (!tileCache) {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize tile cache, using global heightmap only");
         } else {
@@ -125,7 +116,7 @@ bool TerrainSystem::initInternal(const InitInfo& info, const TerrainConfig& cfg)
             // Pre-load tiles around origin for immediate height queries during scene init
             // This ensures objects spawned near (0,0) use high-res terrain heights
             // Radius 600m covers ~2 tiles in each direction from origin (tiles are ~512m each)
-            (*tileCache)->preloadTilesAround(0.0f, 0.0f, 600.0f);
+            tileCache->preloadTilesAround(0.0f, 0.0f, 600.0f);
         }
     }
 
@@ -158,12 +149,9 @@ bool TerrainSystem::initInternal(const InitInfo& info, const TerrainConfig& cfg)
     pipelineInfo.renderDescriptorSetLayout = renderDescriptorSetLayout;
     pipelineInfo.shaderPath = shaderPath;
     pipelineInfo.useMeshlets = config.useMeshlets;
-    pipelineInfo.meshletIndexCount = config.useMeshlets && meshlet ? (*meshlet)->getIndexCount() : 0;
+    pipelineInfo.meshletIndexCount = config.useMeshlets && meshlet ? meshlet->getIndexCount() : 0;
     pipelineInfo.subgroupCaps = &subgroupCaps;
-    pipelines = RAIIAdapter<TerrainPipelines>::create(
-        [&](auto& p) { return p.init(pipelineInfo); },
-        [this](auto& p) { p.destroy(device); }
-    );
+    pipelines = TerrainPipelines::create(pipelineInfo);
     if (!pipelines) return false;
 
     SDL_Log("TerrainSystem initialized with CBT max depth %d, meshlets %s, shadow culling %s",
@@ -222,7 +210,7 @@ uint32_t TerrainSystem::getTriangleCount() const {
     const uint32_t* drawArgs = static_cast<const uint32_t*>(mappedPtr);
     if (config.useMeshlets) {
         uint32_t instanceCount = drawArgs[1];  // Number of CBT leaf nodes
-        return instanceCount * (*meshlet)->getTriangleCount();
+        return instanceCount * meshlet->getTriangleCount();
     } else {
         return drawArgs[0] / 3;
     }
@@ -306,9 +294,9 @@ bool TerrainSystem::createDescriptorSets() {
         VkSampler tileSampler = VK_NULL_HANDLE;
         VkBuffer tileInfoBuffer = VK_NULL_HANDLE;
         if (tileCache) {
-            tileArrayView = (*tileCache)->getTileArrayView();
-            tileSampler = (*tileCache)->getSampler();
-            tileInfoBuffer = (*tileCache)->getTileInfoBuffer();
+            tileArrayView = tileCache->getTileArrayView();
+            tileSampler = tileCache->getSampler();
+            tileInfoBuffer = tileCache->getTileInfoBuffer();
         }
 
         // Build writer with all bindings - use separate statements to avoid
@@ -317,7 +305,7 @@ bool TerrainSystem::createDescriptorSets() {
         writer.writeBuffer(0, (*cbt)->getBuffer(), 0, (*cbt)->getBufferSize(), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
         writer.writeBuffer(1, (*buffers)->getIndirectDispatchBuffer(), 0, sizeof(uint32_t) * 3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
         writer.writeBuffer(2, (*buffers)->getIndirectDrawBuffer(), 0, sizeof(uint32_t) * 4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-        writer.writeImage(3, (*heightMap)->getView(), (*heightMap)->getSampler());
+        writer.writeImage(3, heightMap->getView(), heightMap->getSampler());
         writer.writeBuffer(4, (*buffers)->getUniformBuffer(i), 0, sizeof(TerrainUniforms));
         writer.writeBuffer(5, (*buffers)->getVisibleIndicesBuffer(), 0, sizeof(uint32_t) * (1 + MAX_VISIBLE_TRIANGLES), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
         writer.writeBuffer(6, (*buffers)->getCullIndirectDispatchBuffer(), 0, sizeof(uint32_t) * 3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
@@ -422,7 +410,7 @@ void TerrainSystem::updateDescriptorSets(VkDevice device,
                           VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
 
         // Height map (binding 3)
-        writer.writeImage(3, (*heightMap)->getView(), (*heightMap)->getSampler(),
+        writer.writeImage(3, heightMap->getView(), heightMap->getSampler(),
                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
         // Terrain uniforms (binding 4)
@@ -457,7 +445,7 @@ void TerrainSystem::updateDescriptorSets(VkDevice device,
         }
 
         // Hole mask (binding 16)
-        writer.writeImage(16, (*heightMap)->getHoleMaskView(), (*heightMap)->getHoleMaskSampler(),
+        writer.writeImage(16, heightMap->getHoleMaskView(), heightMap->getHoleMaskSampler(),
                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
         // Snow UBO (binding 17)
@@ -471,14 +459,14 @@ void TerrainSystem::updateDescriptorSets(VkDevice device,
         }
 
         // LOD tile array texture (binding 19)
-        if (tileCache && (*tileCache)->getTileArrayView() != VK_NULL_HANDLE) {
-            writer.writeImage(19, (*tileCache)->getTileArrayView(), (*tileCache)->getSampler(),
+        if (tileCache && tileCache->getTileArrayView() != VK_NULL_HANDLE) {
+            writer.writeImage(19, tileCache->getTileArrayView(), tileCache->getSampler(),
                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         }
 
         // LOD tile info buffer (binding 20)
-        if (tileCache && (*tileCache)->getTileInfoBuffer() != VK_NULL_HANDLE) {
-            writer.writeBuffer(20, (*tileCache)->getTileInfoBuffer(), 0, VK_WHOLE_SIZE,
+        if (tileCache && tileCache->getTileInfoBuffer() != VK_NULL_HANDLE) {
+            writer.writeBuffer(20, tileCache->getTileInfoBuffer(), 0, VK_WHOLE_SIZE,
                               VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
         }
 
@@ -524,7 +512,7 @@ void TerrainSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraP
 
     // Update tile cache - stream high-res tiles based on camera position
     if (tileCache) {
-        (*tileCache)->updateActiveTiles(cameraPos, config.tileLoadRadius, config.tileUnloadRadius);
+        tileCache->updateActiveTiles(cameraPos, config.tileLoadRadius, config.tileUnloadRadius);
     }
 
     TerrainUniforms uniforms{};
@@ -585,14 +573,14 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
     // 1. Dispatcher - set up indirect args
     if (profiler) profiler->beginZone(cmd, "Terrain:Dispatcher");
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, (*pipelines)->getDispatcherPipeline());
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, (*pipelines)->getDispatcherPipelineLayout(),
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines->getDispatcherPipeline());
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines->getDispatcherPipelineLayout(),
                            0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
 
     TerrainDispatcherPushConstants dispatcherPC{};
     dispatcherPC.subdivisionWorkgroupSize = SUBDIVISION_WORKGROUP_SIZE;
-    dispatcherPC.meshletIndexCount = config.useMeshlets ? (*meshlet)->getIndexCount() : 0;
-    vkCmdPushConstants(cmd, (*pipelines)->getDispatcherPipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0,
+    dispatcherPC.meshletIndexCount = config.useMeshlets ? meshlet->getIndexCount() : 0;
+    vkCmdPushConstants(cmd, pipelines->getDispatcherPipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0,
                       sizeof(dispatcherPC), &dispatcherPC);
 
     vkCmdDispatch(cmd, 1, 1, 1);
@@ -612,8 +600,8 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
         // No separate frustum cull pass - culling happens inside subdivision shader
         if (profiler) profiler->beginZone(cmd, "Terrain:Subdivision");
 
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, (*pipelines)->getSubdivisionPipeline());
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, (*pipelines)->getSubdivisionPipelineLayout(),
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines->getSubdivisionPipeline());
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines->getSubdivisionPipelineLayout(),
                                0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
 
         TerrainSubdivisionPushConstants subdivPC{};
@@ -621,7 +609,7 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
         subdivPC.frameIndex = subdivisionFrameCount;
         subdivPC.spreadFactor = config.spreadFactor;
         subdivPC.reserved = 0;
-        vkCmdPushConstants(cmd, (*pipelines)->getSubdivisionPipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0,
+        vkCmdPushConstants(cmd, pipelines->getSubdivisionPipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0,
                           sizeof(subdivPC), &subdivPC);
 
         // Dispatch all triangles - inline frustum culling handles early-out
@@ -632,8 +620,8 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
         // Merge phase: process all triangles directly (no culling)
         if (profiler) profiler->beginZone(cmd, "Terrain:Subdivision");
 
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, (*pipelines)->getSubdivisionPipeline());
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, (*pipelines)->getSubdivisionPipelineLayout(),
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines->getSubdivisionPipeline());
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines->getSubdivisionPipelineLayout(),
                                0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
 
         TerrainSubdivisionPushConstants subdivPC{};
@@ -641,7 +629,7 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
         subdivPC.frameIndex = subdivisionFrameCount;
         subdivPC.spreadFactor = config.spreadFactor;
         subdivPC.reserved = 0;
-        vkCmdPushConstants(cmd, (*pipelines)->getSubdivisionPipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0,
+        vkCmdPushConstants(cmd, pipelines->getSubdivisionPipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0,
                           sizeof(subdivPC), &subdivPC);
 
         // Use the original indirect dispatch (all triangles)
@@ -663,16 +651,16 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
 
     int levelsFromPrepass;
 
-    if ((*pipelines)->getSumReductionPrepassSubgroupPipeline()) {
+    if (pipelines->getSumReductionPrepassSubgroupPipeline()) {
         // Subgroup prepass - processes 13 levels:
         // - SWAR popcount: 5 levels (32 bits -> 6-bit sum)
         // - Subgroup shuffle: 5 levels (32 threads -> 11-bit sum)
         // - Shared memory: 3 levels (8 subgroups -> 14-bit sum)
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, (*pipelines)->getSumReductionPrepassSubgroupPipeline());
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, (*pipelines)->getSumReductionPipelineLayout(),
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines->getSumReductionPrepassSubgroupPipeline());
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines->getSumReductionPipelineLayout(),
                                0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
 
-        vkCmdPushConstants(cmd, (*pipelines)->getSumReductionPipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0,
+        vkCmdPushConstants(cmd, pipelines->getSumReductionPipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0,
                           sizeof(sumPC), &sumPC);
 
         uint32_t workgroups = std::max(1u, (1u << (config.maxDepth - 5)) / SUM_REDUCTION_WORKGROUP_SIZE);
@@ -683,11 +671,11 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
         levelsFromPrepass = 13;  // SWAR (5) + subgroup (5) + shared memory (3)
     } else {
         // Fallback path: standard prepass handles 5 levels
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, (*pipelines)->getSumReductionPrepassPipeline());
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, (*pipelines)->getSumReductionPipelineLayout(),
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines->getSumReductionPrepassPipeline());
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines->getSumReductionPipelineLayout(),
                                0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
 
-        vkCmdPushConstants(cmd, (*pipelines)->getSumReductionPipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0,
+        vkCmdPushConstants(cmd, pipelines->getSumReductionPipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0,
                           sizeof(sumPC), &sumPC);
 
         uint32_t workgroups = std::max(1u, (1u << (config.maxDepth - 5)) / SUM_REDUCTION_WORKGROUP_SIZE);
@@ -706,13 +694,13 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
     if (startDepth >= 0) {
         if (profiler) profiler->beginZone(cmd, "Terrain:SumReductionLevels");
 
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, (*pipelines)->getSumReductionPipeline());
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, (*pipelines)->getSumReductionPipelineLayout(),
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines->getSumReductionPipeline());
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines->getSumReductionPipelineLayout(),
                                0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
 
         for (int depth = startDepth; depth >= 0; --depth) {
             sumPC.passID = depth;
-            vkCmdPushConstants(cmd, (*pipelines)->getSumReductionPipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0,
+            vkCmdPushConstants(cmd, pipelines->getSumReductionPipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0,
                               sizeof(sumPC), &sumPC);
 
             uint32_t workgroups = std::max(1u, (1u << depth) / SUM_REDUCTION_WORKGROUP_SIZE);
@@ -727,8 +715,8 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
     // 4. Final dispatcher pass to update draw args
     if (profiler) profiler->beginZone(cmd, "Terrain:FinalDispatch");
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, (*pipelines)->getDispatcherPipeline());
-    vkCmdPushConstants(cmd, (*pipelines)->getDispatcherPipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0,
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines->getDispatcherPipeline());
+    vkCmdPushConstants(cmd, pipelines->getDispatcherPipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0,
                       sizeof(dispatcherPC), &dispatcherPC);
     vkCmdDispatch(cmd, 1, 1, 1);
 
@@ -741,13 +729,13 @@ void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuP
 void TerrainSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
     VkPipeline pipeline;
     if (config.useMeshlets) {
-        pipeline = wireframeMode ? (*pipelines)->getMeshletWireframePipeline() : (*pipelines)->getMeshletRenderPipeline();
+        pipeline = wireframeMode ? pipelines->getMeshletWireframePipeline() : pipelines->getMeshletRenderPipeline();
     } else {
-        pipeline = wireframeMode ? (*pipelines)->getWireframePipeline() : (*pipelines)->getRenderPipeline();
+        pipeline = wireframeMode ? pipelines->getWireframePipeline() : pipelines->getRenderPipeline();
     }
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, (*pipelines)->getRenderPipelineLayout(),
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines->getRenderPipelineLayout(),
                            0, 1, &renderDescriptorSets[frameIndex], 0, nullptr);
 
     VkViewport viewport{};
@@ -766,10 +754,10 @@ void TerrainSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
 
     if (config.useMeshlets) {
         // Bind meshlet vertex and index buffers
-        VkBuffer vertexBuffers[] = {(*meshlet)->getVertexBuffer()};
+        VkBuffer vertexBuffers[] = {meshlet->getVertexBuffer()};
         VkDeviceSize offsets[] = {0};
         vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
-        vkCmdBindIndexBuffer(cmd, (*meshlet)->getIndexBuffer(), 0, VK_INDEX_TYPE_UINT16);
+        vkCmdBindIndexBuffer(cmd, meshlet->getIndexBuffer(), 0, VK_INDEX_TYPE_UINT16);
 
         // Indexed instanced draw
         vkCmdDrawIndexedIndirect(cmd, (*buffers)->getIndirectDrawBuffer(), 0, 1, sizeof(VkDrawIndexedIndirectCommand));
@@ -781,7 +769,7 @@ void TerrainSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
 
 void TerrainSystem::recordShadowCull(VkCommandBuffer cmd, uint32_t frameIndex,
                                       const glm::mat4& lightViewProj, int cascadeIndex) {
-    if (!shadowCullingEnabled || !(*pipelines)->hasShadowCulling()) {
+    if (!shadowCullingEnabled || !pipelines->hasShadowCulling()) {
         return;
     }
 
@@ -789,8 +777,8 @@ void TerrainSystem::recordShadowCull(VkCommandBuffer cmd, uint32_t frameIndex,
     Barriers::clearBufferForCompute(cmd, (*buffers)->getShadowVisibleBuffer());
 
     // Bind shadow cull compute pipeline
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, (*pipelines)->getShadowCullPipeline());
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, (*pipelines)->getShadowCullPipelineLayout(),
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines->getShadowCullPipeline());
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines->getShadowCullPipelineLayout(),
                            0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
 
     // Set up push constants with frustum planes
@@ -801,7 +789,7 @@ void TerrainSystem::recordShadowCull(VkCommandBuffer cmd, uint32_t frameIndex,
     pc.heightScale = config.heightScale;
     pc.cascadeIndex = static_cast<uint32_t>(cascadeIndex);
 
-    vkCmdPushConstants(cmd, (*pipelines)->getShadowCullPipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT,
+    vkCmdPushConstants(cmd, pipelines->getShadowCullPipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT,
                        0, sizeof(pc), &pc);
 
     // Use indirect dispatch - the workgroup count is computed on GPU in terrain_dispatcher
@@ -815,16 +803,16 @@ void TerrainSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex,
                                       const glm::mat4& lightViewProj, int cascadeIndex) {
     // Choose pipeline: culled vs non-culled, meshlet vs direct
     VkPipeline pipeline;
-    bool useCulled = shadowCullingEnabled && (*pipelines)->getShadowCulledPipeline() != VK_NULL_HANDLE;
+    bool useCulled = shadowCullingEnabled && pipelines->getShadowCulledPipeline() != VK_NULL_HANDLE;
 
     if (config.useMeshlets) {
-        pipeline = useCulled ? (*pipelines)->getMeshletShadowCulledPipeline() : (*pipelines)->getMeshletShadowPipeline();
+        pipeline = useCulled ? pipelines->getMeshletShadowCulledPipeline() : pipelines->getMeshletShadowPipeline();
     } else {
-        pipeline = useCulled ? (*pipelines)->getShadowCulledPipeline() : (*pipelines)->getShadowPipeline();
+        pipeline = useCulled ? pipelines->getShadowCulledPipeline() : pipelines->getShadowPipeline();
     }
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, (*pipelines)->getShadowPipelineLayout(),
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines->getShadowPipelineLayout(),
                            0, 1, &renderDescriptorSets[frameIndex], 0, nullptr);
 
     VkViewport viewport{};
@@ -848,14 +836,14 @@ void TerrainSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex,
     pc.terrainSize = config.size;
     pc.heightScale = config.heightScale;
     pc.cascadeIndex = cascadeIndex;
-    vkCmdPushConstants(cmd, (*pipelines)->getShadowPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pc), &pc);
+    vkCmdPushConstants(cmd, pipelines->getShadowPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pc), &pc);
 
     if (config.useMeshlets) {
         // Bind meshlet vertex and index buffers
-        VkBuffer vertexBuffers[] = {(*meshlet)->getVertexBuffer()};
+        VkBuffer vertexBuffers[] = {meshlet->getVertexBuffer()};
         VkDeviceSize offsets[] = {0};
         vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
-        vkCmdBindIndexBuffer(cmd, (*meshlet)->getIndexBuffer(), 0, VK_INDEX_TYPE_UINT16);
+        vkCmdBindIndexBuffer(cmd, meshlet->getIndexBuffer(), 0, VK_INDEX_TYPE_UINT16);
 
         // Use shadow indirect draw buffer if culling, else main indirect buffer
         VkBuffer drawBuffer = useCulled ? (*buffers)->getShadowIndirectDrawBuffer() : (*buffers)->getIndirectDrawBuffer();
@@ -870,13 +858,13 @@ float TerrainSystem::getHeightAt(float x, float z) const {
     // First try the tile cache for high-res height data
     if (tileCache) {
         float tileHeight;
-        if ((*tileCache)->getHeightAt(x, z, tileHeight)) {
+        if (tileCache->getHeightAt(x, z, tileHeight)) {
             return tileHeight;
         }
     }
 
     // Fall back to global heightmap (coarse LOD)
-    return (*heightMap)->getHeightAt(x, z);
+    return heightMap->getHeightAt(x, z);
 }
 
 bool TerrainSystem::setMeshletSubdivisionLevel(int level) {
@@ -898,24 +886,18 @@ bool TerrainSystem::setMeshletSubdivisionLevel(int level) {
     meshletInfo.allocator = allocator;
     meshletInfo.subdivisionLevel = static_cast<uint32_t>(level);
 
-    meshlet = RAIIAdapter<TerrainMeshlet>::create(
-        [&](auto& m) { return m.init(meshletInfo); },
-        [](auto& m) { m.destroy(); }
-    );
+    meshlet = TerrainMeshlet::create(meshletInfo);
     if (!meshlet) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "Failed to reinitialize meshlet at level %d", level);
         // Try to restore previous level
         meshletInfo.subdivisionLevel = static_cast<uint32_t>(config.meshletSubdivisionLevel);
-        meshlet = RAIIAdapter<TerrainMeshlet>::create(
-            [&](auto& m) { return m.init(meshletInfo); },
-            [](auto& m) { m.destroy(); }
-        );
+        meshlet = TerrainMeshlet::create(meshletInfo);
         return false;
     }
 
     config.meshletSubdivisionLevel = level;
     SDL_Log("Meshlet subdivision level changed to %d (%u triangles per leaf)",
-            level, (*meshlet)->getTriangleCount());
+            level, meshlet->getTriangleCount());
     return true;
 }

@@ -8,10 +8,27 @@
 
 namespace VirtualTexture {
 
-bool VirtualTexturePageTable::init(VkDevice device, VmaAllocator allocator,
-                                    VkCommandPool commandPool, VkQueue queue,
-                                    const VirtualTextureConfig& cfg, uint32_t framesInFlight) {
+std::unique_ptr<VirtualTexturePageTable> VirtualTexturePageTable::create(VkDevice device, VmaAllocator allocator,
+                                                                          VkCommandPool commandPool, VkQueue queue,
+                                                                          const VirtualTextureConfig& config,
+                                                                          uint32_t framesInFlight) {
+    std::unique_ptr<VirtualTexturePageTable> pageTable(new VirtualTexturePageTable());
+    if (!pageTable->initInternal(device, allocator, commandPool, queue, config, framesInFlight)) {
+        return nullptr;
+    }
+    return pageTable;
+}
+
+VirtualTexturePageTable::~VirtualTexturePageTable() {
+    cleanup();
+}
+
+bool VirtualTexturePageTable::initInternal(VkDevice device, VmaAllocator allocator,
+                                            VkCommandPool commandPool, VkQueue queue,
+                                            const VirtualTextureConfig& cfg, uint32_t framesInFlight) {
     config = cfg;
+    device_ = device;
+    allocator_ = allocator;
     framesInFlight_ = framesInFlight;
 
     // Calculate total entries and offsets for each mip level
@@ -67,7 +84,10 @@ bool VirtualTexturePageTable::init(VkDevice device, VmaAllocator allocator,
     return true;
 }
 
-void VirtualTexturePageTable::destroy(VkDevice device, VmaAllocator allocator) {
+void VirtualTexturePageTable::cleanup() {
+    if (device_ == VK_NULL_HANDLE) return;  // Not initialized
+    VkDevice device = device_;
+    VmaAllocator allocator = allocator_;
     // ManagedBuffer cleanup - unmap first
     for (size_t i = 0; i < stagingBuffers_.size(); ++i) {
         if (stagingMapped_[i]) {

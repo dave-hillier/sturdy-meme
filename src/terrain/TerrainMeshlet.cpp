@@ -123,7 +123,15 @@ void TerrainMeshlet::generateMeshletGeometry(uint32_t level,
             vertices.size(), indices.size(), indices.size() / 3, level);
 }
 
-bool TerrainMeshlet::init(const InitInfo& info) {
+std::unique_ptr<TerrainMeshlet> TerrainMeshlet::create(const InitInfo& info) {
+    std::unique_ptr<TerrainMeshlet> meshlet(new TerrainMeshlet());
+    if (!meshlet->initInternal(info)) {
+        return nullptr;
+    }
+    return meshlet;
+}
+
+bool TerrainMeshlet::initInternal(const InitInfo& info) {
     subdivisionLevel = info.subdivisionLevel;
 
     // Generate meshlet geometry
@@ -173,6 +181,3 @@ bool TerrainMeshlet::init(const InitInfo& info) {
     return true;
 }
 
-void TerrainMeshlet::destroy() {
-    // RAII handles cleanup automatically
-}

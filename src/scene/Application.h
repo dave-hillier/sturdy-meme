@@ -36,7 +36,7 @@ private:
     void updateCameraOcclusion(float deltaTime);
 
     SDL_Window* window = nullptr;
-    Renderer renderer;
+    std::unique_ptr<Renderer> renderer_;
     Camera camera;
     Player player;
     std::optional<PhysicsWorld> physics_;

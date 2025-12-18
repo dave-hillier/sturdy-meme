@@ -9,7 +9,15 @@
 
 using ShaderLoader::loadShaderModule;
 
-bool TerrainPipelines::init(const InitInfo& info) {
+std::unique_ptr<TerrainPipelines> TerrainPipelines::create(const InitInfo& info) {
+    std::unique_ptr<TerrainPipelines> pipelines(new TerrainPipelines());
+    if (!pipelines->initInternal(info)) {
+        return nullptr;
+    }
+    return pipelines;
+}
+
+bool TerrainPipelines::initInternal(const InitInfo& info) {
     device = info.device;
     renderPass = info.renderPass;
     shadowRenderPass = info.shadowRenderPass;
@@ -37,10 +45,6 @@ bool TerrainPipelines::init(const InitInfo& info) {
     if (!createShadowCullPipelines()) return false;
 
     return true;
-}
-
-void TerrainPipelines::destroy(VkDevice /*device*/) {
-    // RAII handles cleanup - nothing to do here
 }
 
 bool TerrainPipelines::createDispatcherPipeline() {

@@ -6,6 +6,7 @@
 #include <vk_mem_alloc.h>
 #include <vector>
 #include <unordered_set>
+#include <memory>
 
 namespace VirtualTexture {
 
@@ -20,28 +21,20 @@ namespace VirtualTexture {
  */
 class VirtualTextureFeedback {
 public:
-    VirtualTextureFeedback() = default;
-    ~VirtualTextureFeedback() = default;
+    /**
+     * Factory: Create and initialize VirtualTextureFeedback.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<VirtualTextureFeedback> create(VkDevice device, VmaAllocator allocator,
+                                                           uint32_t maxEntries = 4096, uint32_t frameCount = 2);
 
-    // Non-copyable, but movable for vector storage
+    ~VirtualTextureFeedback();
+
+    // Non-copyable, non-movable
     VirtualTextureFeedback(const VirtualTextureFeedback&) = delete;
     VirtualTextureFeedback& operator=(const VirtualTextureFeedback&) = delete;
-
-    /**
-     * Initialize the feedback system
-     * @param device Vulkan device
-     * @param allocator VMA allocator
-     * @param maxEntries Maximum number of tile requests per frame
-     * @param frameCount Number of frames in flight (for buffering)
-     * @return true on success
-     */
-    bool init(VkDevice device, VmaAllocator allocator,
-              uint32_t maxEntries = 4096, uint32_t frameCount = 2);
-
-    /**
-     * Destroy all resources
-     */
-    void destroy();
+    VirtualTextureFeedback(VirtualTextureFeedback&&) = delete;
+    VirtualTextureFeedback& operator=(VirtualTextureFeedback&&) = delete;
 
     /**
      * Clear the feedback buffer for a new frame
@@ -93,6 +86,12 @@ public:
     uint32_t getMaxEntries() const { return maxEntries; }
 
 private:
+    VirtualTextureFeedback() = default;  // Private: use factory
+
+    bool initInternal(VkDevice device, VmaAllocator allocator,
+                      uint32_t maxEntries, uint32_t frameCount);
+    void cleanup();
+
     struct FrameBuffer {
         ManagedBuffer feedbackBuffer;
         ManagedBuffer counterBuffer;

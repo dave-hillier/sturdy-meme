@@ -13,6 +13,7 @@
 #include "UBOs.h"
 #include "DescriptorManager.h"
 #include "core/VulkanRAII.h"
+#include <memory>
 
 // Capture angle definition
 struct CaptureAngle {
@@ -45,11 +46,19 @@ public:
         VkCommandPool commandPool;
     };
 
-    BillboardCapture() = default;
-    ~BillboardCapture() = default;
+    /**
+     * Factory: Create and initialize BillboardCapture.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<BillboardCapture> create(const InitInfo& info);
 
-    bool init(const InitInfo& info);
-    void destroy();
+    ~BillboardCapture();
+
+    // Non-copyable, non-movable
+    BillboardCapture(const BillboardCapture&) = delete;
+    BillboardCapture& operator=(const BillboardCapture&) = delete;
+    BillboardCapture(BillboardCapture&&) = delete;
+    BillboardCapture& operator=(BillboardCapture&&) = delete;
 
     // Generate billboard atlas from tree meshes
     // Returns true on success, fills out the atlas struct
@@ -73,6 +82,11 @@ public:
     static std::vector<CaptureAngle> getStandardAngles();
 
 private:
+    BillboardCapture() = default;  // Private: use factory
+
+    bool initInternal(const InitInfo& info);
+    void cleanup();
+
     // Create offscreen render target
     bool createRenderTarget(uint32_t width, uint32_t height);
     void destroyRenderTarget();

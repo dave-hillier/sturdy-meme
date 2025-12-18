@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
+#include <memory>
 #include "InitContext.h"
 #include "core/VulkanRAII.h"
 
@@ -61,12 +62,20 @@ public:
         bool useCascades = true;  // Enable multi-scale cascades
     };
 
-    OceanFFT() = default;
-    ~OceanFFT() = default;
+    /**
+     * Factory: Create and initialize OceanFFT.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<OceanFFT> create(const InitInfo& info);
+    static std::unique_ptr<OceanFFT> create(const InitContext& ctx, const OceanParams& params, bool useCascades = true);
 
-    bool init(const InitInfo& info);
-    bool init(const InitContext& ctx, const OceanParams& params, bool useCascades = true);
-    void destroy();
+    ~OceanFFT();
+
+    // Non-copyable, non-movable
+    OceanFFT(const OceanFFT&) = delete;
+    OceanFFT& operator=(const OceanFFT&) = delete;
+    OceanFFT(OceanFFT&&) = delete;
+    OceanFFT& operator=(OceanFFT&&) = delete;
 
     // Update ocean simulation (call each frame before water rendering)
     // Records compute commands to animate the ocean
@@ -112,6 +121,12 @@ public:
     void markSpectrumDirty() { spectrumDirty = true; }
 
 private:
+    OceanFFT() = default;  // Private: use factory
+
+    bool initInternal(const InitInfo& info);
+    bool initInternal(const InitContext& ctx, const OceanParams& params, bool useCascades);
+    void cleanup();
+
     // Per-cascade data
     struct Cascade {
         // Spectrum textures (generated once)

@@ -123,8 +123,8 @@ private:
     VkCommandPool commandPool = VK_NULL_HANDLE;
 
     // Composed subsystems (RAII-managed)
-    std::optional<RAIIAdapter<CatmullClarkCBT>> cbt;
-    std::optional<RAIIAdapter<CatmullClarkMesh>> mesh;
+    std::unique_ptr<CatmullClarkCBT> cbt;
+    std::optional<CatmullClarkMesh> mesh;  // Value type with RAII buffers
 
     // Indirect dispatch/draw buffers (RAII-managed)
     ManagedBuffer indirectDispatchBuffer_;

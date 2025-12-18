@@ -5,11 +5,19 @@
 
 namespace VirtualTexture {
 
-VirtualTextureTileLoader::~VirtualTextureTileLoader() {
-    shutdown();
+std::unique_ptr<VirtualTextureTileLoader> VirtualTextureTileLoader::create(const std::string& basePath, uint32_t workerCount) {
+    std::unique_ptr<VirtualTextureTileLoader> loader(new VirtualTextureTileLoader());
+    if (!loader->initInternal(basePath, workerCount)) {
+        return nullptr;
+    }
+    return loader;
 }
 
-bool VirtualTextureTileLoader::init(const std::string& path, uint32_t workerCount) {
+VirtualTextureTileLoader::~VirtualTextureTileLoader() {
+    cleanup();
+}
+
+bool VirtualTextureTileLoader::initInternal(const std::string& path, uint32_t workerCount) {
     basePath = path;
     running = true;
 
@@ -24,7 +32,7 @@ bool VirtualTextureTileLoader::init(const std::string& path, uint32_t workerCoun
     return true;
 }
 
-void VirtualTextureTileLoader::shutdown() {
+void VirtualTextureTileLoader::cleanup() {
     {
         std::lock_guard<std::mutex> lock(queueMutex);
         running = false;

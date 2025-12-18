@@ -10,6 +10,7 @@
 #include <atomic>
 #include <functional>
 #include <unordered_set>
+#include <memory>
 
 namespace VirtualTexture {
 
@@ -23,25 +24,19 @@ class VirtualTextureTileLoader {
 public:
     using TileLoadedCallback = std::function<void(const LoadedTile&)>;
 
-    VirtualTextureTileLoader() = default;
+    /**
+     * Factory: Create and initialize VirtualTextureTileLoader.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<VirtualTextureTileLoader> create(const std::string& basePath, uint32_t workerCount = 2);
+
     ~VirtualTextureTileLoader();
 
-    // Non-copyable
+    // Non-copyable, non-movable
     VirtualTextureTileLoader(const VirtualTextureTileLoader&) = delete;
     VirtualTextureTileLoader& operator=(const VirtualTextureTileLoader&) = delete;
-
-    /**
-     * Initialize the tile loader
-     * @param basePath Base path to tile directory (e.g., "assets/tiles")
-     * @param workerCount Number of worker threads
-     * @return true on success
-     */
-    bool init(const std::string& basePath, uint32_t workerCount = 2);
-
-    /**
-     * Shutdown the loader and wait for workers to finish
-     */
-    void shutdown();
+    VirtualTextureTileLoader(VirtualTextureTileLoader&&) = delete;
+    VirtualTextureTileLoader& operator=(VirtualTextureTileLoader&&) = delete;
 
     /**
      * Queue a tile for loading
@@ -90,6 +85,11 @@ public:
     uint64_t getTotalBytesLoaded() const { return totalBytesLoaded.load(); }
 
 private:
+    VirtualTextureTileLoader() = default;  // Private: use factory
+
+    bool initInternal(const std::string& basePath, uint32_t workerCount);
+    void cleanup();
+
     struct LoadRequest {
         TileId id;
         int priority;

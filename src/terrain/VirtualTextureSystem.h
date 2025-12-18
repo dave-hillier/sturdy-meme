@@ -105,18 +105,18 @@ public:
      * Get page table textures for shader binding
      */
     VkImageView getPageTableImageView(uint32_t mipLevel) const {
-        return (*pageTable)->getImageView(mipLevel);
+        return pageTable->getImageView(mipLevel);
     }
-    VkSampler getPageTableSampler() const { return (*pageTable)->getSampler(); }
+    VkSampler getPageTableSampler() const { return pageTable->getSampler(); }
 
     /**
      * Get feedback buffer for shader binding
      */
     VkBuffer getFeedbackBuffer(uint32_t frameIndex) const {
-        return (*feedback)->getFeedbackBuffer(frameIndex);
+        return feedback->getFeedbackBuffer(frameIndex);
     }
     VkBuffer getCounterBuffer(uint32_t frameIndex) const {
-        return (*feedback)->getCounterBuffer(frameIndex);
+        return feedback->getCounterBuffer(frameIndex);
     }
 
     /**
@@ -133,9 +133,9 @@ public:
      * Get statistics
      */
     uint32_t getCacheUsedSlots() const { return (*cache)->getUsedSlotCount(); }
-    uint32_t getPendingTileCount() const { return (*tileLoader)->getPendingCount(); }
-    uint32_t getLoadedTileCount() const { return (*tileLoader)->getLoadedCount(); }
-    uint64_t getTotalBytesLoaded() const { return (*tileLoader)->getTotalBytesLoaded(); }
+    uint32_t getPendingTileCount() const { return tileLoader->getPendingCount(); }
+    uint32_t getLoadedTileCount() const { return tileLoader->getLoadedCount(); }
+    uint64_t getTotalBytesLoaded() const { return tileLoader->getTotalBytesLoaded(); }
     float getCurrentPenalty() const { return currentPenalty; }
     uint32_t getTotalCacheSlots() const { return config.getTotalCacheSlots(); }
 
@@ -154,9 +154,9 @@ private:
 
     // RAII-managed subsystems
     std::optional<RAIIAdapter<VirtualTextureCache>> cache;
-    std::optional<RAIIAdapter<VirtualTexturePageTable>> pageTable;
-    std::optional<RAIIAdapter<VirtualTextureFeedback>> feedback;
-    std::optional<RAIIAdapter<VirtualTextureTileLoader>> tileLoader;
+    std::unique_ptr<VirtualTexturePageTable> pageTable;
+    std::unique_ptr<VirtualTextureFeedback> feedback;
+    std::unique_ptr<VirtualTextureTileLoader> tileLoader;
 
     uint32_t currentFrame = 0;
     uint32_t framesInFlight_ = 2;

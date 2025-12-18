@@ -58,9 +58,21 @@
 #include <array>
 #include <limits>
 
-bool Renderer::init(SDL_Window* win, const std::string& resPath) {
-    window = win;
-    resourcePath = resPath;
+std::unique_ptr<Renderer> Renderer::create(const InitInfo& info) {
+    std::unique_ptr<Renderer> instance(new Renderer());
+    if (!instance->initInternal(info)) {
+        return nullptr;
+    }
+    return instance;
+}
+
+Renderer::~Renderer() {
+    cleanup();
+}
+
+bool Renderer::initInternal(const InitInfo& info) {
+    window = info.window;
+    resourcePath = info.resourcePath;
 
     // Create subsystems container
     systems_ = std::make_unique<RendererSystems>();
@@ -391,7 +403,7 @@ void Renderer::updatePhysicsDebug(PhysicsWorld& physics, const glm::vec3& camera
 }
 #endif
 
-void Renderer::shutdown() {
+void Renderer::cleanup() {
     VkDevice device = vulkanContext.getDevice();
     VmaAllocator allocator = vulkanContext.getAllocator();
 

@@ -7,8 +7,21 @@
 
 namespace VirtualTexture {
 
-bool VirtualTextureFeedback::init(VkDevice device, VmaAllocator allocator,
-                                   uint32_t entries, uint32_t frameCount) {
+std::unique_ptr<VirtualTextureFeedback> VirtualTextureFeedback::create(VkDevice device, VmaAllocator allocator,
+                                                                        uint32_t maxEntries, uint32_t frameCount) {
+    std::unique_ptr<VirtualTextureFeedback> feedback(new VirtualTextureFeedback());
+    if (!feedback->initInternal(device, allocator, maxEntries, frameCount)) {
+        return nullptr;
+    }
+    return feedback;
+}
+
+VirtualTextureFeedback::~VirtualTextureFeedback() {
+    cleanup();
+}
+
+bool VirtualTextureFeedback::initInternal(VkDevice device, VmaAllocator allocator,
+                                           uint32_t entries, uint32_t frameCount) {
     maxEntries = entries;
     frameBuffers.resize(frameCount);
 
@@ -23,7 +36,7 @@ bool VirtualTextureFeedback::init(VkDevice device, VmaAllocator allocator,
     return true;
 }
 
-void VirtualTextureFeedback::destroy() {
+void VirtualTextureFeedback::cleanup() {
     // RAII handles buffer cleanup automatically when frameBuffers is cleared
     for (auto& fb : frameBuffers) {
         fb.readbackMapped = nullptr;

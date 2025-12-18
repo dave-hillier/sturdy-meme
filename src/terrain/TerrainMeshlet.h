@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 #include <cstdint>
 #include <vector>
+#include <memory>
 #include "core/VulkanRAII.h"
 
 // Pre-subdivided meshlet for terrain rendering
@@ -17,11 +18,19 @@ public:
         uint32_t subdivisionLevel;  // Number of LEB subdivisions (e.g., 4 = 16 triangles, 6 = 64 triangles)
     };
 
-    TerrainMeshlet() = default;
+    /**
+     * Factory: Create and initialize TerrainMeshlet.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<TerrainMeshlet> create(const InitInfo& info);
+
     ~TerrainMeshlet() = default;
 
-    bool init(const InitInfo& info);
-    void destroy();
+    // Non-copyable, non-movable
+    TerrainMeshlet(const TerrainMeshlet&) = delete;
+    TerrainMeshlet& operator=(const TerrainMeshlet&) = delete;
+    TerrainMeshlet(TerrainMeshlet&&) = delete;
+    TerrainMeshlet& operator=(TerrainMeshlet&&) = delete;
 
     // Buffer accessors
     VkBuffer getVertexBuffer() const { return vertexBuffer_.get(); }
@@ -32,6 +41,10 @@ public:
     uint32_t getSubdivisionLevel() const { return subdivisionLevel; }
 
 private:
+    TerrainMeshlet() = default;  // Private: use factory
+
+    bool initInternal(const InitInfo& info);
+
     // Generate meshlet geometry using LEB subdivision
     void generateMeshletGeometry(uint32_t level,
                                   std::vector<glm::vec2>& vertices,

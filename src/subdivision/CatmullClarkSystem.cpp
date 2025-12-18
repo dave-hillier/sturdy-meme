@@ -49,28 +49,19 @@ bool CatmullClarkSystem::initInternal(const InitInfo& info, const CatmullClarkCo
         baseMesh = CatmullClarkMesh::createCube();
     }
 
-    mesh = RAIIAdapter<CatmullClarkMesh>::create(
-        [&](auto& m) {
-            m = std::move(baseMesh);
-            return m.uploadToGPU(allocator);
-        },
-        [](auto& m) { m.destroy(); }
-    );
-    if (!mesh) {
+    mesh = std::move(baseMesh);
+    if (!mesh->uploadToGPU(allocator)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to upload Catmull-Clark mesh to GPU");
         return false;
     }
 
-    // Initialize CBT with RAII wrapper
+    // Initialize CBT
     CatmullClarkCBT::InitInfo cbtInfo{};
     cbtInfo.allocator = allocator;
     cbtInfo.maxDepth = config.maxDepth;
-    cbtInfo.faceCount = static_cast<int>((*mesh)->faces.size());
+    cbtInfo.faceCount = static_cast<int>(mesh->faces.size());
 
-    cbt = RAIIAdapter<CatmullClarkCBT>::create(
-        [&](auto& c) { return c.init(cbtInfo); },
-        [](auto& c) { c.destroy(); }
-    );
+    cbt = CatmullClarkCBT::create(cbtInfo);
     if (!cbt) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize Catmull-Clark CBT");
         return false;
@@ -259,27 +250,27 @@ bool CatmullClarkSystem::createDescriptorSets() {
 }
 
 void CatmullClarkSystem::updateDescriptorSets(VkDevice device, const std::vector<VkBuffer>& sceneUniformBuffers) {
-    VkDeviceSize vertexBufferSize = (*mesh)->vertices.size() * sizeof(CatmullClarkMesh::Vertex);
-    VkDeviceSize halfedgeBufferSize = (*mesh)->halfedges.size() * sizeof(CatmullClarkMesh::Halfedge);
-    VkDeviceSize faceBufferSize = (*mesh)->faces.size() * sizeof(CatmullClarkMesh::Face);
+    VkDeviceSize vertexBufferSize = mesh->vertices.size() * sizeof(CatmullClarkMesh::Vertex);
+    VkDeviceSize halfedgeBufferSize = mesh->halfedges.size() * sizeof(CatmullClarkMesh::Halfedge);
+    VkDeviceSize faceBufferSize = mesh->faces.size() * sizeof(CatmullClarkMesh::Face);
 
     for (uint32_t i = 0; i < framesInFlight; ++i) {
         // Compute descriptor set
         DescriptorManager::SetWriter(device, computeDescriptorSets[i])
             .writeBuffer(0, sceneUniformBuffers[i], 0, sizeof(UniformBufferObject))
-            .writeBuffer(1, (*cbt)->getBuffer(), 0, (*cbt)->getBufferSize(), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(2, (*mesh)->getVertexBuffer(), 0, vertexBufferSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(3, (*mesh)->getHalfedgeBuffer(), 0, halfedgeBufferSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(4, (*mesh)->getFaceBuffer(), 0, faceBufferSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+            .writeBuffer(1, cbt->getBuffer(), 0, cbt->getBufferSize(), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+            .writeBuffer(2, mesh->getVertexBuffer(), 0, vertexBufferSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+            .writeBuffer(3, mesh->getHalfedgeBuffer(), 0, halfedgeBufferSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+            .writeBuffer(4, mesh->getFaceBuffer(), 0, faceBufferSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
             .update();
 
         // Render descriptor set (same buffers)
         DescriptorManager::SetWriter(device, renderDescriptorSets[i])
             .writeBuffer(0, sceneUniformBuffers[i], 0, sizeof(UniformBufferObject))
-            .writeBuffer(1, (*cbt)->getBuffer(), 0, (*cbt)->getBufferSize(), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(2, (*mesh)->getVertexBuffer(), 0, vertexBufferSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(3, (*mesh)->getHalfedgeBuffer(), 0, halfedgeBufferSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(4, (*mesh)->getFaceBuffer(), 0, faceBufferSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+            .writeBuffer(1, cbt->getBuffer(), 0, cbt->getBufferSize(), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+            .writeBuffer(2, mesh->getVertexBuffer(), 0, vertexBufferSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+            .writeBuffer(3, mesh->getHalfedgeBuffer(), 0, halfedgeBufferSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+            .writeBuffer(4, mesh->getFaceBuffer(), 0, faceBufferSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
             .update();
     }
 }
@@ -568,7 +559,7 @@ void CatmullClarkSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex)
                       0, sizeof(CatmullClarkSubdivisionPushConstants), &pc);
 
     // Dispatch compute shader - one workgroup per face at base level
-    uint32_t workgroupCount = ((*cbt)->getFaceCount() + SUBDIVISION_WORKGROUP_SIZE - 1) / SUBDIVISION_WORKGROUP_SIZE;
+    uint32_t workgroupCount = (cbt->getFaceCount() + SUBDIVISION_WORKGROUP_SIZE - 1) / SUBDIVISION_WORKGROUP_SIZE;
     vkCmdDispatch(cmd, std::max(1u, workgroupCount), 1, 1);
 
     // Memory barrier: compute shader writes -> graphics shader reads

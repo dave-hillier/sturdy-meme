@@ -7,6 +7,7 @@
 #include <string>
 #include <unordered_map>
 #include <cstdint>
+#include <memory>
 #include "VulkanRAII.h"
 
 // Tile coordinate in the grid
@@ -69,14 +70,19 @@ public:
         float maxAltitude;      // Maximum altitude (for height value 65535)
     };
 
-    TerrainTileCache() = default;
-    ~TerrainTileCache() = default;
+    /**
+     * Factory: Create and initialize TerrainTileCache.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<TerrainTileCache> create(const InitInfo& info);
 
-    // Initialize - loads metadata from terrain_tiles.meta
-    bool init(const InitInfo& info);
+    ~TerrainTileCache();
 
-    // Cleanup all GPU resources
-    void destroy();
+    // Non-copyable, non-movable
+    TerrainTileCache(const TerrainTileCache&) = delete;
+    TerrainTileCache& operator=(const TerrainTileCache&) = delete;
+    TerrainTileCache(TerrainTileCache&&) = delete;
+    TerrainTileCache& operator=(TerrainTileCache&&) = delete;
 
     // Update active tiles based on camera position
     // Loads tiles within loadRadius, unloads tiles beyond unloadRadius
@@ -137,6 +143,11 @@ public:
     static constexpr float LOD3_MAX_DISTANCE = 8000.0f;  // 4-8km: LOD3
 
 private:
+    TerrainTileCache() = default;  // Private: use factory
+
+    bool initInternal(const InitInfo& info);
+    void cleanup();
+
     // Load a single tile from disk at native resolution (NO downsampling)
     bool loadTile(TileCoord coord, uint32_t lod);
 

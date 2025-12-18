@@ -4,6 +4,7 @@
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
 #include <vector>
+#include <memory>
 #include "VulkanRAII.h"
 
 namespace VirtualTexture {
@@ -17,19 +18,22 @@ namespace VirtualTexture {
  */
 class VirtualTexturePageTable {
 public:
-    VirtualTexturePageTable() = default;
-    ~VirtualTexturePageTable() = default;
+    /**
+     * Factory: Create and initialize VirtualTexturePageTable.
+     * Returns nullptr on failure.
+     */
+    static std::unique_ptr<VirtualTexturePageTable> create(VkDevice device, VmaAllocator allocator,
+                                                            VkCommandPool commandPool, VkQueue queue,
+                                                            const VirtualTextureConfig& config,
+                                                            uint32_t framesInFlight = 2);
 
-    // Non-copyable
+    ~VirtualTexturePageTable();
+
+    // Non-copyable, non-movable
     VirtualTexturePageTable(const VirtualTexturePageTable&) = delete;
     VirtualTexturePageTable& operator=(const VirtualTexturePageTable&) = delete;
-
-    // Initialize the page table
-    bool init(VkDevice device, VmaAllocator allocator, VkCommandPool commandPool,
-              VkQueue queue, const VirtualTextureConfig& config, uint32_t framesInFlight = 2);
-
-    // Cleanup resources
-    void destroy(VkDevice device, VmaAllocator allocator);
+    VirtualTexturePageTable(VirtualTexturePageTable&&) = delete;
+    VirtualTexturePageTable& operator=(VirtualTexturePageTable&&) = delete;
 
     // Update entry when tile is loaded into cache
     void setEntry(TileId id, uint16_t cacheX, uint16_t cacheY);
@@ -63,6 +67,12 @@ public:
     VkImageView getCombinedImageView() const { return combinedImageView; }
 
 private:
+    VirtualTexturePageTable() = default;  // Private: use factory
+
+    bool initInternal(VkDevice device, VmaAllocator allocator, VkCommandPool commandPool,
+                      VkQueue queue, const VirtualTextureConfig& config, uint32_t framesInFlight);
+    void cleanup();
+
     // Create page table textures
     bool createPageTableTextures(VkDevice device, VmaAllocator allocator,
                                   VkCommandPool commandPool, VkQueue queue);
@@ -74,6 +84,8 @@ private:
     size_t getEntryIndex(TileId id) const;
 
     VirtualTextureConfig config;
+    VkDevice device_ = VK_NULL_HANDLE;
+    VmaAllocator allocator_ = VK_NULL_HANDLE;
 
     // One image per mip level
     std::vector<VkImage> pageTableImages;

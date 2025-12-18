@@ -14,19 +14,32 @@ bool endsWith(const std::string& str, const std::string& suffix) {
 }
 }
 
-bool AnimatedCharacter::load(const std::string& path, VmaAllocator allocator, VkDevice device,
-                              VkCommandPool commandPool, VkQueue queue) {
+std::unique_ptr<AnimatedCharacter> AnimatedCharacter::create(const InitInfo& info) {
+    std::unique_ptr<AnimatedCharacter> instance(new AnimatedCharacter());
+    if (!instance->loadInternal(info)) {
+        return nullptr;
+    }
+    return instance;
+}
+
+AnimatedCharacter::~AnimatedCharacter() {
+    cleanup();
+}
+
+bool AnimatedCharacter::loadInternal(const InitInfo& info) {
+    allocator_ = info.allocator;
+
     std::optional<GLTFSkinnedLoadResult> result;
 
     // Detect file format and use appropriate loader
-    if (endsWith(path, ".fbx") || endsWith(path, ".FBX")) {
-        result = FBXLoader::loadSkinned(path);
+    if (endsWith(info.path, ".fbx") || endsWith(info.path, ".FBX")) {
+        result = FBXLoader::loadSkinned(info.path);
     } else {
-        result = GLTFLoader::loadSkinned(path);
+        result = GLTFLoader::loadSkinned(info.path);
     }
 
     if (!result) {
-        SDL_Log("AnimatedCharacter: Failed to load %s", path.c_str());
+        SDL_Log("AnimatedCharacter: Failed to load %s", info.path.c_str());
         return false;
     }
 
@@ -59,7 +72,7 @@ bool AnimatedCharacter::load(const std::string& path, VmaAllocator allocator, Vk
     meshData.indices = indices;
     meshData.skeleton = skeleton;
     skinnedMesh.setData(meshData);
-    skinnedMesh.upload(allocator, device, commandPool, queue);
+    skinnedMesh.upload(info.allocator, info.device, info.commandPool, info.queue);
 
     // Initialize renderMesh with bind pose for bounds/transform tracking
     // This mesh is used by sceneObjects for Hi-Z culling and transform updates,
@@ -73,7 +86,7 @@ bool AnimatedCharacter::load(const std::string& path, VmaAllocator allocator, Vk
         meshVertices[i].color = bindPoseVertices[i].color;
     }
     renderMesh.setCustomGeometry(meshVertices, indices);
-    renderMesh.upload(allocator, device, commandPool, queue);
+    renderMesh.upload(info.allocator, info.device, info.commandPool, info.queue);
 
     // Set up default animation (play first one if available)
     if (!animations.empty()) {
@@ -142,9 +155,11 @@ bool AnimatedCharacter::load(const std::string& path, VmaAllocator allocator, Vk
     return true;
 }
 
-void AnimatedCharacter::destroy(VmaAllocator allocator) {
-    skinnedMesh.destroy(allocator);
-    renderMesh.destroy(allocator);
+void AnimatedCharacter::cleanup() {
+    if (allocator_ != VK_NULL_HANDLE) {
+        skinnedMesh.destroy(allocator_);
+        renderMesh.destroy(allocator_);
+    }
     bindPoseVertices.clear();
     indices.clear();
     skeleton.joints.clear();

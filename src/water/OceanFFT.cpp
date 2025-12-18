@@ -7,7 +7,27 @@
 #include <cmath>
 #include <array>
 
-bool OceanFFT::init(const InitInfo& info) {
+std::unique_ptr<OceanFFT> OceanFFT::create(const InitInfo& info) {
+    std::unique_ptr<OceanFFT> ocean(new OceanFFT());
+    if (!ocean->initInternal(info)) {
+        return nullptr;
+    }
+    return ocean;
+}
+
+std::unique_ptr<OceanFFT> OceanFFT::create(const InitContext& ctx, const OceanParams& params, bool useCascades) {
+    std::unique_ptr<OceanFFT> ocean(new OceanFFT());
+    if (!ocean->initInternal(ctx, params, useCascades)) {
+        return nullptr;
+    }
+    return ocean;
+}
+
+OceanFFT::~OceanFFT() {
+    cleanup();
+}
+
+bool OceanFFT::initInternal(const InitInfo& info) {
     device = info.device;
     physicalDevice = info.physicalDevice;
     allocator = info.allocator;
@@ -98,7 +118,7 @@ bool OceanFFT::init(const InitInfo& info) {
     return true;
 }
 
-bool OceanFFT::init(const InitContext& ctx, const OceanParams& oceanParams, bool useCascades) {
+bool OceanFFT::initInternal(const InitContext& ctx, const OceanParams& oceanParams, bool useCascades) {
     device = ctx.device;
     physicalDevice = ctx.physicalDevice;
     allocator = ctx.allocator;
@@ -189,7 +209,7 @@ bool OceanFFT::init(const InitContext& ctx, const OceanParams& oceanParams, bool
     return true;
 }
 
-void OceanFFT::destroy() {
+void OceanFFT::cleanup() {
     if (device == VK_NULL_HANDLE) return;
 
     vkDeviceWaitIdle(device);
