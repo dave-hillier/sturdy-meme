@@ -944,33 +944,35 @@ bool Renderer::render(const Camera& camera) {
         systems_->profiler().endGpuZone(cmd, "WaterGBuffer");
     }
 
-    // HDR scene render pass
-    systems_->profiler().beginGpuZone(cmd, "HDRPass");
-    recordHDRPass(cmd, frame.frameIndex, frame.time);
-    systems_->profiler().endGpuZone(cmd, "HDRPass");
+    // HDR scene render pass (can be disabled for performance debugging)
+    if (hdrPassEnabled) {
+        systems_->profiler().beginGpuZone(cmd, "HDRPass");
+        recordHDRPass(cmd, frame.frameIndex, frame.time);
+        systems_->profiler().endGpuZone(cmd, "HDRPass");
 
-    // Screen-Space Reflections compute pass (Phase 10)
-    // Computes SSR for next frame's water - uses current scene for temporal stability
-    if (systems_->ssr().isEnabled()) {
-        systems_->profiler().beginGpuZone(cmd, "SSR");
-        systems_->ssr().recordCompute(cmd, frame.frameIndex,
-                                systems_->postProcess().getHDRColorView(),
-                                systems_->postProcess().getHDRDepthView(),
-                                frame.view, frame.projection,
-                                frame.cameraPosition);
-        systems_->profiler().endGpuZone(cmd, "SSR");
-    }
+        // Screen-Space Reflections compute pass (Phase 10)
+        // Computes SSR for next frame's water - uses current scene for temporal stability
+        if (systems_->ssr().isEnabled()) {
+            systems_->profiler().beginGpuZone(cmd, "SSR");
+            systems_->ssr().recordCompute(cmd, frame.frameIndex,
+                                    systems_->postProcess().getHDRColorView(),
+                                    systems_->postProcess().getHDRDepthView(),
+                                    frame.view, frame.projection,
+                                    frame.cameraPosition);
+            systems_->profiler().endGpuZone(cmd, "SSR");
+        }
 
-    // Water tile culling compute pass (Phase 7)
-    // Determines which screen tiles contain water for optimized rendering
-    if (systems_->waterTileCull().isEnabled()) {
-        systems_->profiler().beginGpuZone(cmd, "WaterTileCull");
-        glm::mat4 viewProj = frame.projection * frame.view;
-        systems_->waterTileCull().recordTileCull(cmd, frame.frameIndex,
-                                      viewProj, frame.cameraPosition,
-                                      systems_->water().getWaterLevel(),
-                                      systems_->postProcess().getHDRDepthView());
-        systems_->profiler().endGpuZone(cmd, "WaterTileCull");
+        // Water tile culling compute pass (Phase 7)
+        // Determines which screen tiles contain water for optimized rendering
+        if (systems_->waterTileCull().isEnabled()) {
+            systems_->profiler().beginGpuZone(cmd, "WaterTileCull");
+            glm::mat4 viewProj = frame.projection * frame.view;
+            systems_->waterTileCull().recordTileCull(cmd, frame.frameIndex,
+                                          viewProj, frame.cameraPosition,
+                                          systems_->water().getWaterLevel(),
+                                          systems_->postProcess().getHDRDepthView());
+            systems_->profiler().endGpuZone(cmd, "WaterTileCull");
+        }
     }
 
     // Hi-Z pyramid and Bloom via pipeline post stage

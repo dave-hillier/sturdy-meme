@@ -13,6 +13,14 @@ void GuiPostFXTab::render(Renderer& renderer) {
     ImGui::Text("HDR PIPELINE");
     ImGui::PopStyleColor();
 
+    bool hdrPassEnabled = renderer.isHDRPassEnabled();
+    if (ImGui::Checkbox("HDR Pass (Scene Rendering)", &hdrPassEnabled)) {
+        renderer.setHDRPassEnabled(hdrPassEnabled);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Enable/disable entire HDR scene rendering pass (for performance debugging)");
+    }
+
     bool hdrEnabled = renderer.isHDREnabled();
     if (ImGui::Checkbox("HDR Tonemapping", &hdrEnabled)) {
         renderer.setHDREnabled(hdrEnabled);

@@ -144,6 +144,10 @@ public:
     void setHDREnabled(bool enabled) { hdrEnabled = enabled; }
     bool isHDREnabled() const { return hdrEnabled; }
 
+    // HDR pass control (skips entire scene rendering to HDR target)
+    void setHDRPassEnabled(bool enabled) { hdrPassEnabled = enabled; }
+    bool isHDRPassEnabled() const { return hdrPassEnabled; }
+
     // Bloom control
     void setBloomEnabled(bool enabled);
     bool isBloomEnabled() const;
@@ -434,6 +438,7 @@ private:
     bool showSnowDepthDebug = false;       // true = show snow depth heat map overlay
     bool useParaboloidClouds = true;       // true = paraboloid LUT hybrid, false = procedural
     bool hdrEnabled = true;                // true = HDR tonemapping/bloom, false = bypass
+    bool hdrPassEnabled = true;            // true = render HDR pass, false = skip entire HDR scene rendering
     bool terrainEnabled = true;            // true = render terrain, false = skip terrain rendering
 
     // Cloud parameters (synced to UBO, cloud shadows, and cloud map LUT)
