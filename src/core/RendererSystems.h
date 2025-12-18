@@ -181,6 +181,7 @@ public:
     DebugLineSystem& debugLine() { return *debugLineSystem_; }
     const DebugLineSystem& debugLine() const { return *debugLineSystem_; }
     void setDebugLineSystem(std::unique_ptr<DebugLineSystem> system);
+    void setProfiler(std::unique_ptr<Profiler> profiler);
     Profiler& profiler() { return *profiler_; }
     const Profiler& profiler() const { return *profiler_; }
 

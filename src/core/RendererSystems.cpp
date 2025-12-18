@@ -88,8 +88,8 @@ RendererSystems::RendererSystems()
     , skinnedMeshRenderer_(std::make_unique<SkinnedMeshRenderer>())
     // Tools
     , treeEditSystem_(std::make_unique<TreeEditSystem>())
-    // debugLineSystem_ created via factory in RendererInit::initDebugLineSystem
-    , profiler_(std::make_unique<Profiler>())
+    // debugLineSystem_ created via factory in RendererInit
+    // profiler_ created via Profiler::create() factory in RendererInitPhases
     // Coordination
     , resizeCoordinator_(std::make_unique<ResizeCoordinator>())
     , uboBuilder_(std::make_unique<UBOBuilder>())
@@ -107,6 +107,10 @@ RendererSystems::~RendererSystems() {
 
 void RendererSystems::setDebugLineSystem(std::unique_ptr<DebugLineSystem> system) {
     debugLineSystem_ = std::move(system);
+}
+
+void RendererSystems::setProfiler(std::unique_ptr<Profiler> profiler) {
+    profiler_ = std::move(profiler);
 }
 
 bool RendererSystems::init(const InitContext& /*initCtx*/,
@@ -144,7 +148,7 @@ void RendererSystems::destroy(VkDevice device, VmaAllocator allocator) {
     waterDisplacement_->destroy();
     waterSystem_->destroy(device, allocator);
 
-    profiler_->shutdown();
+    profiler_.reset();
     hiZSystem_->destroy();
 
     catmullClarkSystem_->destroy(device, allocator);

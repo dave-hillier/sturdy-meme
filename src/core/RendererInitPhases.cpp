@@ -270,10 +270,8 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     }
 
     // Initialize profiler for GPU and CPU timing
-    if (!systems_->profiler().init(device, physicalDevice, MAX_FRAMES_IN_FLIGHT)) {
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Profiler initialization failed - profiling disabled");
-        // Continue without profiling - it's optional
-    }
+    // Factory always returns valid profiler - GPU may be disabled if init fails
+    systems_->setProfiler(Profiler::create(device, physicalDevice, MAX_FRAMES_IN_FLIGHT));
 
     // Initialize water subsystems (WaterSystem, WaterDisplacement, FlowMap, Foam, SSR, TileCull, GBuffer)
     WaterSubsystems waterSubs{systems_->water(), systems_->waterDisplacement(), systems_->flowMap(), systems_->foam(), systems_->ssr(), systems_->waterTileCull(), systems_->waterGBuffer()};

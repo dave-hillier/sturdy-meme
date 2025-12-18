@@ -2,6 +2,7 @@
 
 #include "GpuProfiler.h"
 #include "CpuProfiler.h"
+#include <memory>
 #include <optional>
 
 /**
@@ -9,27 +10,38 @@
  *
  * Provides a single interface for frame profiling with both GPU and CPU breakdown.
  * Results are accessible for GUI display.
+ *
+ * Usage:
+ *   auto profiler = Profiler::create(device, physicalDevice, framesInFlight);
+ *   // GPU may be disabled if init fails, but CPU profiling always works
  */
 class Profiler {
 public:
-    Profiler() = default;
-    ~Profiler() = default;
-
     /**
-     * Initialize the profiler.
+     * Factory: Create a profiler instance.
+     * Always returns valid profiler - GPU may be disabled if init fails,
+     * but CPU profiling will still work.
      */
-    bool init(VkDevice device, VkPhysicalDevice physicalDevice, uint32_t framesInFlight) {
+    static std::unique_ptr<Profiler> create(VkDevice device, VkPhysicalDevice physicalDevice,
+                                             uint32_t framesInFlight) {
+        auto profiler = std::unique_ptr<Profiler>(new Profiler());
         auto gpu = GpuProfiler::create(device, physicalDevice, framesInFlight);
-        if (!gpu) {
-            return false;
+        if (gpu) {
+            profiler->gpuProfiler_ = std::move(*gpu);
         }
-        gpuProfiler_ = std::move(*gpu);
-        return true;
+        // CPU profiling always works, so we return valid profiler even if GPU fails
+        return profiler;
     }
 
-    void shutdown() {
+    ~Profiler() {
         gpuProfiler_.reset();
     }
+
+    // Move-only (owns GPU resources)
+    Profiler(Profiler&& other) noexcept = default;
+    Profiler& operator=(Profiler&& other) noexcept = default;
+    Profiler(const Profiler&) = delete;
+    Profiler& operator=(const Profiler&) = delete;
 
     /**
      * Begin frame profiling (call after fence wait, before command buffer recording).
@@ -124,6 +136,8 @@ public:
     const CpuProfiler& getCpuProfiler() const { return cpuProfiler; }
 
 private:
+    Profiler() = default;  // Private: use factory
+
     std::optional<GpuProfiler> gpuProfiler_;
     CpuProfiler cpuProfiler;
 };
