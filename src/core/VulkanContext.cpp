@@ -10,6 +10,7 @@ bool VulkanContext::init(SDL_Window* win) {
     if (!selectPhysicalDevice()) return false;
     if (!createLogicalDevice()) return false;
     if (!createAllocator()) return false;
+    if (!createPipelineCache()) return false;
     if (!createSwapchain()) return false;
 
     return true;
@@ -21,6 +22,8 @@ void VulkanContext::shutdown() {
     }
 
     destroySwapchain();
+
+    pipelineCache.shutdown();
 
     if (allocator != VK_NULL_HANDLE) {
         vmaDestroyAllocator(allocator);
@@ -200,4 +203,8 @@ uint32_t VulkanContext::getGraphicsQueueFamily() const {
 
 uint32_t VulkanContext::getPresentQueueFamily() const {
     return vkbDevice.get_queue_index(vkb::QueueType::present).value();
+}
+
+bool VulkanContext::createPipelineCache() {
+    return pipelineCache.init(device, "pipeline_cache.bin");
 }

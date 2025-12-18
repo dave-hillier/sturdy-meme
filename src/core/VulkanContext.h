@@ -5,6 +5,7 @@
 #include <VkBootstrap.h>
 #include <SDL3/SDL.h>
 #include <vector>
+#include "PipelineCache.h"
 
 /**
  * VulkanContext encapsulates core Vulkan setup:
@@ -43,6 +44,7 @@ public:
     uint32_t getGraphicsQueueFamily() const;
     uint32_t getPresentQueueFamily() const;
     VmaAllocator getAllocator() const { return allocator; }
+    VkPipelineCache getPipelineCache() const { return pipelineCache.getCache(); }
 
     VkSwapchainKHR getSwapchain() const { return swapchain; }
     const std::vector<VkImageView>& getSwapchainImageViews() const { return swapchainImageViews; }
@@ -60,6 +62,7 @@ private:
     bool selectPhysicalDevice();
     bool createLogicalDevice();
     bool createAllocator();
+    bool createPipelineCache();
 
     SDL_Window* window = nullptr;
 
@@ -74,6 +77,8 @@ private:
     VkQueue presentQueue = VK_NULL_HANDLE;
 
     VmaAllocator allocator = VK_NULL_HANDLE;
+
+    PipelineCache pipelineCache;
 
     VkSwapchainKHR swapchain = VK_NULL_HANDLE;
     std::vector<VkImage> swapchainImages;

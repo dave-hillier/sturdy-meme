@@ -13,7 +13,13 @@ PipelineBuilder& PipelineBuilder::reset() {
     descriptorBindings.clear();
     pushConstantRanges.clear();
     shaderStages.clear();
+    pipelineCacheHandle = VK_NULL_HANDLE;
     cleanupShaderModules();
+    return *this;
+}
+
+PipelineBuilder& PipelineBuilder::setPipelineCache(VkPipelineCache cache) {
+    pipelineCacheHandle = cache;
     return *this;
 }
 
@@ -96,7 +102,7 @@ bool PipelineBuilder::buildComputePipeline(VkPipelineLayout layout, VkPipeline& 
     pipelineInfo.stage = shaderStages[0];
     pipelineInfo.layout = layout;
 
-    VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline);
+    VkResult result = vkCreateComputePipelines(device, pipelineCacheHandle, 1, &pipelineInfo, nullptr, &pipeline);
     cleanupShaderModules();
 
     if (result != VK_SUCCESS) {
@@ -119,7 +125,7 @@ bool PipelineBuilder::buildGraphicsPipeline(const VkGraphicsPipelineCreateInfo& 
     pipelineInfo.pStages = shaderStages.data();
     pipelineInfo.layout = layout;
 
-    VkResult result = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline);
+    VkResult result = vkCreateGraphicsPipelines(device, pipelineCacheHandle, 1, &pipelineInfo, nullptr, &pipeline);
     cleanupShaderModules();
 
     if (result != VK_SUCCESS) {
@@ -241,7 +247,7 @@ bool PipelineBuilder::buildGraphicsPipeline(const GraphicsPipelineConfig& config
     pipelineInfo.renderPass = config.renderPass;
     pipelineInfo.subpass = config.subpass;
 
-    VkResult result = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline);
+    VkResult result = vkCreateGraphicsPipelines(device, pipelineCacheHandle, 1, &pipelineInfo, nullptr, &pipeline);
     cleanupShaderModules();
 
     if (result != VK_SUCCESS) {

@@ -48,6 +48,7 @@ set(SOURCES
     src/core/Texture.cpp
     src/core/ShaderLoader.cpp
     src/core/PipelineBuilder.cpp
+    src/core/PipelineCache.cpp
     src/core/GraphicsPipelineFactory.cpp
     src/core/BindingBuilder.cpp
     src/core/DescriptorManager.cpp
