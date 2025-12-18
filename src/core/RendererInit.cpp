@@ -421,7 +421,7 @@ bool RendererInit::createWaterDescriptorSets(
     const PostProcessSystem& postProcessSystem,
     VkSampler depthSampler
 ) {
-    // Create water descriptor sets with terrain heightmap, flow map, displacement map, temporal foam, SSR, and scene depth
+    // Create water descriptor sets with terrain heightmap, flow map, displacement map, temporal foam, SSR, scene depth, and tile cache
     if (!water.system.createDescriptorSets(
             uniformBuffers, uniformBufferSize, shadowSystem,
             terrainSystem.getHeightMapView(), terrainSystem.getHeightMapSampler(),
@@ -429,7 +429,9 @@ bool RendererInit::createWaterDescriptorSets(
             water.displacement.getDisplacementMapView(), water.displacement.getSampler(),
             water.foamBuffer.getFoamBufferView(), water.foamBuffer.getSampler(),
             water.ssrSystem.getSSRResultView(), water.ssrSystem.getSampler(),
-            postProcessSystem.getHDRDepthView(), depthSampler)) {
+            postProcessSystem.getHDRDepthView(), depthSampler,
+            terrainSystem.getTileArrayView(), terrainSystem.getTileSampler(),
+            terrainSystem.getTileInfoBuffer())) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create water descriptor sets");
         return false;
     }

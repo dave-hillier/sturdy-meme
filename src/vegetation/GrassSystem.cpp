@@ -279,11 +279,13 @@ bool GrassSystem::createDisplacementPipeline() {
 
 bool GrassSystem::createComputeDescriptorSetLayout(SystemLifecycleHelper::PipelineHandles& handles) {
     PipelineBuilder builder(getDevice());
-    builder.addDescriptorBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT)
-        .addDescriptorBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT)
-        .addDescriptorBinding(2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT)
-        .addDescriptorBinding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_COMPUTE_BIT)
-        .addDescriptorBinding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_COMPUTE_BIT);
+    builder.addDescriptorBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT)    // instance buffer
+        .addDescriptorBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT)       // indirect buffer
+        .addDescriptorBinding(2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT)       // uniforms
+        .addDescriptorBinding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_COMPUTE_BIT)  // terrain heightmap
+        .addDescriptorBinding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_COMPUTE_BIT)  // displacement map
+        .addDescriptorBinding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_COMPUTE_BIT)  // tile array
+        .addDescriptorBinding(6, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT);         // tile info
 
     return builder.buildDescriptorSetLayout(handles.descriptorSetLayout);
 }
@@ -554,12 +556,14 @@ bool GrassSystem::createDescriptorSets() {
 void GrassSystem::writeComputeDescriptorSets() {
     // Write compute descriptor sets with instance and indirect buffers
     // Called after ParticleSystem is fully initialized and descriptor sets are allocated
+    // Note: Tile cache resources are written later in updateDescriptorSets when available
     for (uint32_t set = 0; set < BUFFER_SET_COUNT; set++) {
-        DescriptorManager::SetWriter(getDevice(), (*particleSystem)->getComputeDescriptorSet(set))
-            .writeBuffer(0, instanceBuffers.buffers[set], 0, sizeof(GrassInstance) * MAX_INSTANCES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(1, indirectBuffers.buffers[set], 0, sizeof(VkDrawIndirectCommand), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(2, uniformBuffers.buffers[0], 0, sizeof(GrassUniforms))
-            .update();
+        // Use non-fluent pattern to avoid copy semantics bug with DescriptorManager::SetWriter
+        DescriptorManager::SetWriter writer(getDevice(), (*particleSystem)->getComputeDescriptorSet(set));
+        writer.writeBuffer(0, instanceBuffers.buffers[set], 0, sizeof(GrassInstance) * MAX_INSTANCES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        writer.writeBuffer(1, indirectBuffers.buffers[set], 0, sizeof(VkDrawIndirectCommand), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        writer.writeBuffer(2, uniformBuffers.buffers[0], 0, sizeof(GrassUniforms));
+        writer.update();
     }
 }
 
@@ -573,34 +577,63 @@ void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>
                                         VkImageView shadowMapView, VkSampler shadowSampler,
                                         const std::vector<VkBuffer>& windBuffers,
                                         const std::vector<VkBuffer>& lightBuffersParam,
-                                        VkImageView terrainHeightMapView, VkSampler terrainHeightMapSampler,
+                                        VkImageView terrainHeightMapViewParam, VkSampler terrainHeightMapSamplerParam,
                                         const std::vector<VkBuffer>& snowBuffersParam,
                                         const std::vector<VkBuffer>& cloudShadowBuffersParam,
-                                        VkImageView cloudShadowMapView, VkSampler cloudShadowMapSampler) {
+                                        VkImageView cloudShadowMapView, VkSampler cloudShadowMapSampler,
+                                        VkImageView tileArrayViewParam,
+                                        VkSampler tileSamplerParam,
+                                        VkBuffer tileInfoBufferParam) {
     // Store terrain heightmap info for compute descriptor set updates
-    this->terrainHeightMapView = terrainHeightMapView;
-    this->terrainHeightMapSampler = terrainHeightMapSampler;
+    this->terrainHeightMapView = terrainHeightMapViewParam;
+    this->terrainHeightMapSampler = terrainHeightMapSamplerParam;
+
+    // Store tile cache resources
+    this->tileArrayView = tileArrayViewParam;
+    this->tileSampler = tileSamplerParam;
+    this->tileInfoBuffer = tileInfoBufferParam;
+
+    // Update compute descriptor sets with terrain heightmap, displacement, and tile cache
+    for (uint32_t set = 0; set < BUFFER_SET_COUNT; set++) {
+        // Use non-fluent pattern to avoid copy semantics bug with DescriptorManager::SetWriter
+        DescriptorManager::SetWriter computeWriter(dev, (*particleSystem)->getComputeDescriptorSet(set));
+        computeWriter.writeBuffer(0, instanceBuffers.buffers[set], 0, sizeof(GrassInstance) * MAX_INSTANCES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        computeWriter.writeBuffer(1, indirectBuffers.buffers[set], 0, sizeof(VkDrawIndirectCommand), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        computeWriter.writeBuffer(2, uniformBuffers.buffers[0], 0, sizeof(GrassUniforms));
+        computeWriter.writeImage(3, terrainHeightMapView, terrainHeightMapSampler);
+        computeWriter.writeImage(4, displacementImageView, displacementSampler_.get());
+
+        // Tile cache bindings (5 and 6) - for high-res terrain sampling
+        if (tileArrayView != VK_NULL_HANDLE && tileSampler != VK_NULL_HANDLE) {
+            computeWriter.writeImage(5, tileArrayView, tileSampler);
+        }
+        if (tileInfoBuffer != VK_NULL_HANDLE) {
+            computeWriter.writeBuffer(6, tileInfoBuffer, 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        }
+
+        computeWriter.update();
+    }
 
     // Update graphics and shadow descriptor sets for both buffer sets (A and B)
     for (uint32_t set = 0; set < BUFFER_SET_COUNT; set++) {
-        // Graphics descriptor set
-        DescriptorManager::SetWriter(dev, (*particleSystem)->getGraphicsDescriptorSet(set))
-            .writeBuffer(0, rendererUniformBuffers[0], 0, 160)  // sizeof(UniformBufferObject)
-            .writeBuffer(1, instanceBuffers.buffers[set], 0, sizeof(GrassInstance) * MAX_INSTANCES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeImage(2, shadowMapView, shadowSampler, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL)
-            .writeBuffer(3, windBuffers[0], 0, 32)  // sizeof(WindUniforms)
-            .writeBuffer(4, lightBuffersParam[0], 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeImage(6, cloudShadowMapView, cloudShadowMapSampler)
-            .writeBuffer(10, snowBuffersParam[0], 0, sizeof(SnowUBO))
-            .writeBuffer(11, cloudShadowBuffersParam[0], 0, sizeof(CloudShadowUBO))
-            .update();
+        // Graphics descriptor set - use non-fluent pattern
+        DescriptorManager::SetWriter graphicsWriter(dev, (*particleSystem)->getGraphicsDescriptorSet(set));
+        graphicsWriter.writeBuffer(0, rendererUniformBuffers[0], 0, 160);  // sizeof(UniformBufferObject)
+        graphicsWriter.writeBuffer(1, instanceBuffers.buffers[set], 0, sizeof(GrassInstance) * MAX_INSTANCES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        graphicsWriter.writeImage(2, shadowMapView, shadowSampler, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
+        graphicsWriter.writeBuffer(3, windBuffers[0], 0, 32);  // sizeof(WindUniforms)
+        graphicsWriter.writeBuffer(4, lightBuffersParam[0], 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        graphicsWriter.writeImage(6, cloudShadowMapView, cloudShadowMapSampler);
+        graphicsWriter.writeBuffer(10, snowBuffersParam[0], 0, sizeof(SnowUBO));
+        graphicsWriter.writeBuffer(11, cloudShadowBuffersParam[0], 0, sizeof(CloudShadowUBO));
+        graphicsWriter.update();
 
-        // Shadow descriptor set
-        DescriptorManager::SetWriter(dev, shadowDescriptorSetsDB[set])
-            .writeBuffer(0, rendererUniformBuffers[0], 0, 160)  // sizeof(UniformBufferObject)
-            .writeBuffer(1, instanceBuffers.buffers[set], 0, sizeof(GrassInstance) * MAX_INSTANCES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(2, windBuffers[0], 0, 32)  // sizeof(WindUniforms)
-            .update();
+        // Shadow descriptor set - use non-fluent pattern
+        DescriptorManager::SetWriter shadowWriter(dev, shadowDescriptorSetsDB[set]);
+        shadowWriter.writeBuffer(0, rendererUniformBuffers[0], 0, 160);  // sizeof(UniformBufferObject)
+        shadowWriter.writeBuffer(1, instanceBuffers.buffers[set], 0, sizeof(GrassInstance) * MAX_INSTANCES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        shadowWriter.writeBuffer(2, windBuffers[0], 0, 32);  // sizeof(WindUniforms)
+        shadowWriter.update();
     }
 }
 

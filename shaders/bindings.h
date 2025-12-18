@@ -133,6 +133,8 @@
 #define BINDING_LEAF_COMPUTE_HEIGHT_MAP    5   // Terrain height map
 #define BINDING_LEAF_COMPUTE_DISPLACEMENT  6   // Displacement map
 #define BINDING_LEAF_COMPUTE_DISP_REGION   7   // Displacement region
+#define BINDING_LEAF_COMPUTE_TILE_ARRAY    8   // LOD tile array (high-res tiles near camera)
+#define BINDING_LEAF_COMPUTE_TILE_INFO     9   // Tile info SSBO
 
 // =============================================================================
 // Weather System Descriptor Set
@@ -327,6 +329,8 @@
 #define BINDING_WATER_OCEAN_DISP          11   // Ocean displacement map (water shader)
 #define BINDING_WATER_OCEAN_NORMAL        12   // Ocean normal map (water shader)
 #define BINDING_WATER_OCEAN_FOAM          13   // Ocean foam map (water shader)
+#define BINDING_WATER_TILE_ARRAY          14   // LOD tile array (high-res shore detection)
+#define BINDING_WATER_TILE_INFO           15   // Tile info SSBO
 
 // =============================================================================
 // C++ Type-Safe Wrappers
@@ -427,6 +431,8 @@ constexpr uint32_t LEAF_COMPUTE_WIND      = BINDING_LEAF_COMPUTE_WIND;
 constexpr uint32_t LEAF_COMPUTE_HEIGHT_MAP = BINDING_LEAF_COMPUTE_HEIGHT_MAP;
 constexpr uint32_t LEAF_COMPUTE_DISPLACEMENT = BINDING_LEAF_COMPUTE_DISPLACEMENT;
 constexpr uint32_t LEAF_COMPUTE_DISP_REGION = BINDING_LEAF_COMPUTE_DISP_REGION;
+constexpr uint32_t LEAF_COMPUTE_TILE_ARRAY = BINDING_LEAF_COMPUTE_TILE_ARRAY;
+constexpr uint32_t LEAF_COMPUTE_TILE_INFO = BINDING_LEAF_COMPUTE_TILE_INFO;
 
 // Weather System
 constexpr uint32_t WEATHER_PARTICLES      = BINDING_WEATHER_PARTICLES;
@@ -574,6 +580,8 @@ constexpr uint32_t OCEAN_FOAM_OUTPUT      = BINDING_OCEAN_FOAM_OUTPUT;
 constexpr uint32_t WATER_OCEAN_DISP       = BINDING_WATER_OCEAN_DISP;
 constexpr uint32_t WATER_OCEAN_NORMAL     = BINDING_WATER_OCEAN_NORMAL;
 constexpr uint32_t WATER_OCEAN_FOAM       = BINDING_WATER_OCEAN_FOAM;
+constexpr uint32_t WATER_TILE_ARRAY       = BINDING_WATER_TILE_ARRAY;
+constexpr uint32_t WATER_TILE_INFO        = BINDING_WATER_TILE_INFO;
 
 } // namespace Bindings
 

@@ -74,6 +74,28 @@ layout(binding = BINDING_WATER_CAUSTICS) uniform sampler2D causticsTexture;  // 
 layout(binding = BINDING_WATER_SSR) uniform sampler2D ssrTexture;       // Phase 10: Screen-Space Reflections
 layout(binding = BINDING_WATER_SCENE_DEPTH) uniform sampler2D sceneDepthTexture; // Phase 11: Scene depth for refraction
 
+// LOD tile array (high-res tiles near camera)
+layout(binding = BINDING_WATER_TILE_ARRAY) uniform sampler2DArray heightMapTiles;
+
+// Tile info buffer - world bounds for each active tile
+struct TileInfo {
+    vec4 worldBounds;    // xy = min corner, zw = max corner
+    vec4 uvScaleOffset;  // xy = scale, zw = offset
+};
+layout(std430, binding = BINDING_WATER_TILE_INFO) readonly buffer TileInfoBuffer {
+    uint activeTileCount;
+    uint padding1;
+    uint padding2;
+    uint padding3;
+    TileInfo tiles[];
+} waterTileInfoBuffer;
+
+// Alias for tile_cache_common.glsl compatibility
+#define tiles waterTileInfoBuffer.tiles
+
+// Include tile cache common after defining prerequisites
+#include "tile_cache_common.glsl"
+
 layout(location = 0) in vec3 fragWorldPos;
 layout(location = 1) in vec3 fragNormal;
 layout(location = 2) in vec2 fragTexCoord;
@@ -355,7 +377,9 @@ void main() {
                           terrainUV.y >= 0.0 && terrainUV.y <= 1.0);
 
     if (insideTerrain) {
-        terrainHeight = sampleTerrainHeight(terrainHeightMap, terrainUV, terrainHeightScale);
+        // Use tile cache for high-res terrain sampling near camera
+        terrainHeight = sampleHeightWithTileCache(terrainHeightMap, heightMapTiles, terrainUV,
+                                                   fragWorldPos.xz, terrainHeightScale, waterTileInfoBuffer.activeTileCount);
         // Water depth = distance from water surface to terrain
         // Positive = underwater terrain, Negative = terrain above water
         waterDepth = fragWorldPos.y - terrainHeight;

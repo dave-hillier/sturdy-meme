@@ -108,6 +108,8 @@ bool WaterSystem::createDescriptorSetLayout() {
     // 9: SSR texture (Phase 10: screen-space reflections)
     // 10: Scene depth texture (Phase 11: dual depth for refraction)
     // 11-13: FFT Ocean displacement maps (vertex shader)
+    // 14: Tile array (high-res terrain tiles near camera)
+    // 15: Tile info SSBO
 
     VkDescriptorSetLayout rawLayout = DescriptorManager::LayoutBuilder(device)
         .addUniformBuffer(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)  // 0: Main UBO
@@ -124,6 +126,8 @@ bool WaterSystem::createDescriptorSetLayout() {
         .addCombinedImageSampler(VK_SHADER_STAGE_VERTEX_BIT)    // 11: Ocean displacement
         .addCombinedImageSampler(VK_SHADER_STAGE_VERTEX_BIT)    // 12: Ocean normal
         .addCombinedImageSampler(VK_SHADER_STAGE_VERTEX_BIT)    // 13: Ocean foam
+        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 14: Tile array
+        .addStorageBuffer(VK_SHADER_STAGE_FRAGMENT_BIT)         // 15: Tile info SSBO
         .build();
 
     if (rawLayout == VK_NULL_HANDLE) {
@@ -335,7 +339,10 @@ bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffe
                                         VkImageView ssrView,
                                         VkSampler ssrSampler,
                                         VkImageView sceneDepthView,
-                                        VkSampler sceneDepthSampler) {
+                                        VkSampler sceneDepthSampler,
+                                        VkImageView tileArrayView,
+                                        VkSampler tileSampler,
+                                        VkBuffer tileInfoBuffer) {
     // Allocate descriptor sets using managed pool
     descriptorSets = descriptorPool->allocate(descriptorSetLayout.get(), framesInFlight);
     if (descriptorSets.size() != framesInFlight) {
@@ -347,27 +354,36 @@ bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffe
     VkImageView shadowView = shadowSystem.getShadowImageView();
     VkSampler shadowSampler = shadowSystem.getShadowSampler();
 
-    // Update each descriptor set
+    // Update each descriptor set - use non-fluent pattern to avoid copy semantics bug
     for (size_t i = 0; i < framesInFlight; i++) {
-        DescriptorManager::SetWriter(device, descriptorSets[i])
-            .writeBuffer(0, uniformBuffers[i], 0, uniformBufferSize)
-            .writeBuffer(1, waterUniformBuffers_[i].get(), 0, sizeof(WaterUniforms))
-            .writeImage(2, shadowView, shadowSampler, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL)
-            .writeImage(3, terrainHeightMapView, terrainHeightMapSampler)
-            .writeImage(4, flowMapView, flowMapSampler)
-            .writeImage(5, displacementMapView, displacementMapSampler)
-            .writeImage(6, (*foamTexture)->getImageView(), (*foamTexture)->getSampler())
-            .writeImage(7, temporalFoamView, temporalFoamSampler)
-            .writeImage(8, (*causticsTexture)->getImageView(), (*causticsTexture)->getSampler())
-            .writeImage(9, ssrView, ssrSampler, VK_IMAGE_LAYOUT_GENERAL)
-            .writeImage(10, sceneDepthView, sceneDepthSampler, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL)
-            .writeImage(11, displacementMapView, displacementMapSampler)  // FFT Ocean displacement placeholder
-            .writeImage(12, displacementMapView, displacementMapSampler)  // FFT Ocean normal placeholder
-            .writeImage(13, displacementMapView, displacementMapSampler)  // FFT Ocean foam placeholder
-            .update();
+        DescriptorManager::SetWriter writer(device, descriptorSets[i]);
+        writer.writeBuffer(0, uniformBuffers[i], 0, uniformBufferSize);
+        writer.writeBuffer(1, waterUniformBuffers_[i].get(), 0, sizeof(WaterUniforms));
+        writer.writeImage(2, shadowView, shadowSampler, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
+        writer.writeImage(3, terrainHeightMapView, terrainHeightMapSampler);
+        writer.writeImage(4, flowMapView, flowMapSampler);
+        writer.writeImage(5, displacementMapView, displacementMapSampler);
+        writer.writeImage(6, (*foamTexture)->getImageView(), (*foamTexture)->getSampler());
+        writer.writeImage(7, temporalFoamView, temporalFoamSampler);
+        writer.writeImage(8, (*causticsTexture)->getImageView(), (*causticsTexture)->getSampler());
+        writer.writeImage(9, ssrView, ssrSampler, VK_IMAGE_LAYOUT_GENERAL);
+        writer.writeImage(10, sceneDepthView, sceneDepthSampler, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
+        writer.writeImage(11, displacementMapView, displacementMapSampler);  // FFT Ocean displacement placeholder
+        writer.writeImage(12, displacementMapView, displacementMapSampler);  // FFT Ocean normal placeholder
+        writer.writeImage(13, displacementMapView, displacementMapSampler);  // FFT Ocean foam placeholder
+
+        // Tile cache bindings (14 and 15) - for high-res terrain sampling
+        if (tileArrayView != VK_NULL_HANDLE && tileSampler != VK_NULL_HANDLE) {
+            writer.writeImage(14, tileArrayView, tileSampler);
+        }
+        if (tileInfoBuffer != VK_NULL_HANDLE) {
+            writer.writeBuffer(15, tileInfoBuffer, 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        }
+
+        writer.update();
     }
 
-    SDL_Log("Water descriptor sets created with terrain heightmap, flow map, displacement map, foam texture, temporal foam, caustics, SSR, and scene depth");
+    SDL_Log("Water descriptor sets created with terrain heightmap, flow map, displacement map, foam texture, temporal foam, caustics, SSR, scene depth, and tile cache");
     return true;
 }
 

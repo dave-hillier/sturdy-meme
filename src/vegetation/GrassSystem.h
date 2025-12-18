@@ -60,7 +60,10 @@ public:
                               VkImageView terrainHeightMapView, VkSampler terrainHeightMapSampler,
                               const std::vector<VkBuffer>& snowBuffers,
                               const std::vector<VkBuffer>& cloudShadowBuffers,
-                              VkImageView cloudShadowMapView, VkSampler cloudShadowMapSampler);
+                              VkImageView cloudShadowMapView, VkSampler cloudShadowMapSampler,
+                              VkImageView tileArrayView = VK_NULL_HANDLE,
+                              VkSampler tileSampler = VK_NULL_HANDLE,
+                              VkBuffer tileInfoBuffer = VK_NULL_HANDLE);
 
     void updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos, const glm::mat4& viewProj,
                         float terrainSize, float terrainHeightScale);
@@ -173,6 +176,11 @@ private:
     // Terrain heightmap for grass placement (stored for compute descriptor updates)
     VkImageView terrainHeightMapView = VK_NULL_HANDLE;
     VkSampler terrainHeightMapSampler = VK_NULL_HANDLE;
+
+    // Tile cache resources for high-res terrain sampling
+    VkImageView tileArrayView = VK_NULL_HANDLE;
+    VkSampler tileSampler = VK_NULL_HANDLE;
+    VkBuffer tileInfoBuffer = VK_NULL_HANDLE;
 
     static constexpr uint32_t MAX_INSTANCES = 100000;  // ~100k rendered after culling
 

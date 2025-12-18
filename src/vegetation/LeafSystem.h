@@ -56,13 +56,16 @@ public:
     // Update extent for viewport (on window resize)
     void setExtent(VkExtent2D newExtent) { (*particleSystem)->setExtent(newExtent); }
 
-    // Update descriptor sets with external resources (UBO, wind buffer, heightmap, displacement)
+    // Update descriptor sets with external resources (UBO, wind buffer, heightmap, displacement, tile cache)
     void updateDescriptorSets(VkDevice device, const std::vector<VkBuffer>& uniformBuffers,
                               const std::vector<VkBuffer>& windBuffers,
                               VkImageView terrainHeightMapView,
                               VkSampler terrainHeightMapSampler,
                               VkImageView displacementMapView,
-                              VkSampler displacementMapSampler);
+                              VkSampler displacementMapSampler,
+                              VkImageView tileArrayView = VK_NULL_HANDLE,
+                              VkSampler tileSampler = VK_NULL_HANDLE,
+                              VkBuffer tileInfoBuffer = VK_NULL_HANDLE);
 
     // Update leaf uniforms each frame
     void updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos,

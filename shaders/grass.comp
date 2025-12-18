@@ -42,6 +42,25 @@ layout(binding = BINDING_GRASS_COMPUTE_HEIGHT_MAP) uniform sampler2D terrainHeig
 // Displacement map for player/NPC grass interaction (RG16F - XZ displacement)
 layout(binding = BINDING_GRASS_COMPUTE_DISPLACEMENT) uniform sampler2D displacementMap;
 
+// LOD tile array (high-res tiles near camera)
+layout(binding = BINDING_GRASS_COMPUTE_TILE_ARRAY) uniform sampler2DArray heightMapTiles;
+
+// Tile info buffer - world bounds for each active tile
+struct TileInfo {
+    vec4 worldBounds;    // xy = min corner, zw = max corner
+    vec4 uvScaleOffset;  // xy = scale, zw = offset
+};
+layout(std430, binding = BINDING_GRASS_COMPUTE_TILE_INFO) readonly buffer TileInfoBuffer {
+    uint activeTileCount;
+    uint padding1;
+    uint padding2;
+    uint padding3;
+    TileInfo tiles[];
+};
+
+// Include tile cache common after defining prerequisites
+#include "tile_cache_common.glsl"
+
 layout(push_constant) uniform PushConstants {
     float time;
 } push;
@@ -52,10 +71,10 @@ layout(push_constant) uniform PushConstants {
 #define hash2(p) hash2D_alt(p)
 #define hash2v(p) hash2D_vec2(p)
 
-// Calculate terrain normal from heightmap gradient (uses shared terrain_height_common.glsl)
-vec3 calculateTerrainNormal(vec2 uv) {
-    return calculateTerrainNormalFromHeightmap(terrainHeightMap, uv,
-                                                uniforms.terrainSize, uniforms.terrainHeightScale);
+// Calculate terrain normal from heightmap gradient with tile cache support
+vec3 calculateTerrainNormal(vec2 uv, vec2 worldXZ) {
+    return calculateNormalWithTileCache(terrainHeightMap, heightMapTiles, uv, worldXZ,
+                                         uniforms.terrainSize, uniforms.terrainHeightScale, activeTileCount);
 }
 
 // Clumping parameters
@@ -163,13 +182,14 @@ void main() {
     // Check if grass is within terrain bounds
     if (terrainUV.x < 0.0 || terrainUV.x > 1.0 || terrainUV.y < 0.0 || terrainUV.y > 1.0) return;
 
-    // Sample terrain height using shared function (terrain_height_common.glsl)
-    float terrainY = sampleTerrainHeight(terrainHeightMap, terrainUV, uniforms.terrainHeightScale);
+    // Sample terrain height with tile cache support for ~1m resolution near camera
+    float terrainY = sampleHeightWithTileCache(terrainHeightMap, heightMapTiles, terrainUV,
+                                                vec2(x, z), uniforms.terrainHeightScale, activeTileCount);
 
     vec3 worldPos = vec3(x, terrainY, z);
 
-    // Calculate terrain normal for tangent-aligned grass placement
-    vec3 terrainNormal = calculateTerrainNormal(terrainUV);
+    // Calculate terrain normal for tangent-aligned grass placement (with tile cache)
+    vec3 terrainNormal = calculateTerrainNormal(terrainUV, vec2(x, z));
 
     // Distance culling (relative to camera) using common helper
     float distToCamera = getDistanceToCamera(worldPos, uniforms.cameraPosition.xyz);

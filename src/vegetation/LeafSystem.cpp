@@ -119,6 +119,8 @@ bool LeafSystem::createComputeDescriptorSetLayout(SystemLifecycleHelper::Pipelin
     // 5: Terrain heightmap
     // 6: Displacement map (shared with grass system for player interaction)
     // 7: Displacement region uniform buffer
+    // 8: Tile array (high-res terrain tiles near camera)
+    // 9: Tile info buffer
 
     handles.descriptorSetLayout = DescriptorManager::LayoutBuilder(getDevice())
         .addStorageBuffer(VK_SHADER_STAGE_COMPUTE_BIT)           // 0: Particle buffer input
@@ -129,6 +131,8 @@ bool LeafSystem::createComputeDescriptorSetLayout(SystemLifecycleHelper::Pipelin
         .addCombinedImageSampler(VK_SHADER_STAGE_COMPUTE_BIT)    // 5: Terrain heightmap
         .addCombinedImageSampler(VK_SHADER_STAGE_COMPUTE_BIT)    // 6: Displacement map
         .addUniformBuffer(VK_SHADER_STAGE_COMPUTE_BIT)           // 7: Displacement region
+        .addCombinedImageSampler(VK_SHADER_STAGE_COMPUTE_BIT)    // 8: Tile array
+        .addStorageBuffer(VK_SHADER_STAGE_COMPUTE_BIT)           // 9: Tile info
         .build();
 
     if (handles.descriptorSetLayout == VK_NULL_HANDLE) {
@@ -378,7 +382,10 @@ void LeafSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>&
                                        VkImageView terrainHeightMapView,
                                        VkSampler terrainHeightMapSampler,
                                        VkImageView displacementMapViewParam,
-                                       VkSampler displacementMapSamplerParam) {
+                                       VkSampler displacementMapSamplerParam,
+                                       VkImageView tileArrayView,
+                                       VkSampler tileSampler,
+                                       VkBuffer tileInfoBuffer) {
     // Store displacement texture references
     this->displacementMapView = displacementMapViewParam;
     this->displacementMapSampler = displacementMapSamplerParam;
@@ -388,24 +395,33 @@ void LeafSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>&
         uint32_t inputSet = (set == 0) ? 1 : 0;  // Read from opposite buffer
         uint32_t outputSet = set;
 
-        // Compute descriptor set
-        DescriptorManager::SetWriter(dev, (*particleSystem)->getComputeDescriptorSet(set))
-            .writeBuffer(0, particleBuffers.buffers[inputSet], 0, sizeof(LeafParticle) * MAX_PARTICLES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(1, particleBuffers.buffers[outputSet], 0, sizeof(LeafParticle) * MAX_PARTICLES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(2, indirectBuffers.buffers[outputSet], 0, sizeof(VkDrawIndirectCommand), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(3, uniformBuffers.buffers[0], 0, sizeof(LeafUniforms))
-            .writeBuffer(4, windBuffers[0], 0, 32)  // sizeof(WindUniforms)
-            .writeImage(5, terrainHeightMapView, terrainHeightMapSampler)
-            .writeImage(6, displacementMapViewParam, displacementMapSamplerParam)
-            .writeBuffer(7, displacementRegionBuffers.buffers[0], 0, sizeof(glm::vec4))
-            .update();
+        // Compute descriptor set - use non-fluent pattern to avoid copy semantics bug
+        DescriptorManager::SetWriter computeWriter(dev, (*particleSystem)->getComputeDescriptorSet(set));
+        computeWriter.writeBuffer(0, particleBuffers.buffers[inputSet], 0, sizeof(LeafParticle) * MAX_PARTICLES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        computeWriter.writeBuffer(1, particleBuffers.buffers[outputSet], 0, sizeof(LeafParticle) * MAX_PARTICLES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        computeWriter.writeBuffer(2, indirectBuffers.buffers[outputSet], 0, sizeof(VkDrawIndirectCommand), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        computeWriter.writeBuffer(3, uniformBuffers.buffers[0], 0, sizeof(LeafUniforms));
+        computeWriter.writeBuffer(4, windBuffers[0], 0, 32);  // sizeof(WindUniforms)
+        computeWriter.writeImage(5, terrainHeightMapView, terrainHeightMapSampler);
+        computeWriter.writeImage(6, displacementMapViewParam, displacementMapSamplerParam);
+        computeWriter.writeBuffer(7, displacementRegionBuffers.buffers[0], 0, sizeof(glm::vec4));
 
-        // Graphics descriptor set
-        DescriptorManager::SetWriter(dev, (*particleSystem)->getGraphicsDescriptorSet(set))
-            .writeBuffer(0, rendererUniformBuffers[0], 0, 320)  // sizeof(UniformBufferObject)
-            .writeBuffer(1, particleBuffers.buffers[set], 0, sizeof(LeafParticle) * MAX_PARTICLES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeBuffer(2, windBuffers[0], 0, 32)  // sizeof(WindUniforms)
-            .update();
+        // Tile cache bindings (8 and 9) - for high-res terrain sampling
+        if (tileArrayView != VK_NULL_HANDLE && tileSampler != VK_NULL_HANDLE) {
+            computeWriter.writeImage(8, tileArrayView, tileSampler);
+        }
+        if (tileInfoBuffer != VK_NULL_HANDLE) {
+            computeWriter.writeBuffer(9, tileInfoBuffer, 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        }
+
+        computeWriter.update();
+
+        // Graphics descriptor set - use non-fluent pattern
+        DescriptorManager::SetWriter graphicsWriter(dev, (*particleSystem)->getGraphicsDescriptorSet(set));
+        graphicsWriter.writeBuffer(0, rendererUniformBuffers[0], 0, 320);  // sizeof(UniformBufferObject)
+        graphicsWriter.writeBuffer(1, particleBuffers.buffers[set], 0, sizeof(LeafParticle) * MAX_PARTICLES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        graphicsWriter.writeBuffer(2, windBuffers[0], 0, 32);  // sizeof(WindUniforms)
+        graphicsWriter.update();
     }
 }
 

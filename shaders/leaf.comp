@@ -92,6 +92,25 @@ layout(binding = BINDING_LEAF_COMPUTE_DISP_REGION) uniform DisplacementRegion {
     vec4 regionCenterAndSize;  // xy = world center, z = region size (50m), w = unused
 } dispRegion;
 
+// LOD tile array (high-res tiles near camera)
+layout(binding = BINDING_LEAF_COMPUTE_TILE_ARRAY) uniform sampler2DArray heightMapTiles;
+
+// Tile info buffer - world bounds for each active tile
+struct TileInfo {
+    vec4 worldBounds;    // xy = min corner, zw = max corner
+    vec4 uvScaleOffset;  // xy = scale, zw = offset
+};
+layout(std430, binding = BINDING_LEAF_COMPUTE_TILE_INFO) readonly buffer TileInfoBuffer {
+    uint activeTileCount;
+    uint padding1;
+    uint padding2;
+    uint padding3;
+    TileInfo tiles[];
+};
+
+// Include tile cache common after defining prerequisites
+#include "tile_cache_common.glsl"
+
 layout(push_constant) uniform PushConstants {
     float time;
     float deltaTime;
@@ -196,7 +215,7 @@ vec2 sampleDisplacement(vec2 worldXZ) {
     return texture(displacementMap, uv).rg;
 }
 
-// Sample terrain height at world XZ position (uses shared terrain_height_common.glsl)
+// Sample terrain height at world XZ position with tile cache support
 float sampleLeafTerrainHeight(vec2 worldXZ) {
     vec2 terrainUV = worldPosToTerrainUV(worldXZ, uniforms.terrainSize);
 
@@ -205,7 +224,9 @@ float sampleLeafTerrainHeight(vec2 worldXZ) {
         return uniforms.groundLevel;  // Fall back to flat ground level outside terrain
     }
 
-    return sampleTerrainHeight(terrainHeightMap, terrainUV, uniforms.terrainHeightScale);
+    // Use tile cache for high-res sampling near camera, fallback to global heightmap
+    return sampleHeightWithTileCache(terrainHeightMap, heightMapTiles, terrainUV,
+                                      worldXZ, uniforms.terrainHeightScale, activeTileCount);
 }
 
 // Sample wind with turbulence

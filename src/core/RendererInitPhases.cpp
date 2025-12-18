@@ -165,7 +165,9 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     systems_->grass().updateDescriptorSets(device, systems_->globalBuffers().uniformBuffers.buffers, systems_->shadow().getShadowImageView(), systems_->shadow().getShadowSampler(), windBuffers, systems_->globalBuffers().lightBuffers.buffers,
                                       systems_->terrain().getHeightMapView(), systems_->terrain().getHeightMapSampler(),
                                       systems_->globalBuffers().snowBuffers.buffers, systems_->globalBuffers().cloudShadowBuffers.buffers,
-                                      systems_->cloudShadow().getShadowMapView(), systems_->cloudShadow().getShadowMapSampler());
+                                      systems_->cloudShadow().getShadowMapView(), systems_->cloudShadow().getShadowMapSampler(),
+                                      systems_->terrain().getTileArrayView(), systems_->terrain().getTileSampler(),
+                                      systems_->terrain().getTileInfoBuffer());
 
     // Update terrain descriptor sets with shared resources
     systems_->terrain().updateDescriptorSets(device, systems_->globalBuffers().uniformBuffers.buffers, systems_->shadow().getShadowImageView(), systems_->shadow().getShadowSampler(),
@@ -225,7 +227,9 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     // Update leaf system descriptor sets
     systems_->leaf().updateDescriptorSets(device, systems_->globalBuffers().uniformBuffers.buffers, windBuffers,
                                      systems_->terrain().getHeightMapView(), systems_->terrain().getHeightMapSampler(),
-                                     systems_->grass().getDisplacementImageView(), systems_->grass().getDisplacementSampler());
+                                     systems_->grass().getDisplacementImageView(), systems_->grass().getDisplacementSampler(),
+                                     systems_->terrain().getTileArrayView(), systems_->terrain().getTileSampler(),
+                                     systems_->terrain().getTileInfoBuffer());
 
     // Initialize atmosphere subsystems (Froxel, AtmosphereLUT, CloudShadow)
     if (!RendererInit::initAtmosphereSubsystems(systems_->froxel(), systems_->atmosphereLUT(), systems_->cloudShadow(),

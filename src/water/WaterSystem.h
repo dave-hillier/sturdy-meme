@@ -113,7 +113,10 @@ public:
                               VkImageView ssrView,
                               VkSampler ssrSampler,
                               VkImageView sceneDepthView,
-                              VkSampler sceneDepthSampler);
+                              VkSampler sceneDepthSampler,
+                              VkImageView tileArrayView = VK_NULL_HANDLE,
+                              VkSampler tileSampler = VK_NULL_HANDLE,
+                              VkBuffer tileInfoBuffer = VK_NULL_HANDLE);
 
     // Update water uniforms (call each frame)
     void updateUniforms(uint32_t frameIndex);
