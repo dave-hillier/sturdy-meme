@@ -34,6 +34,6 @@ struct InitContext {
     std::string resourcePath;
 
     // Frame/swapchain info
-    uint32_t framesInFlight = 2;
+    uint32_t framesInFlight = 3;
     VkExtent2D extent = {0, 0};
 };

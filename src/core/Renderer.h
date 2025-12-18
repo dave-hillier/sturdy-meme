@@ -430,7 +430,7 @@ private:
     std::vector<VkDescriptorSet> rockDescriptorSets;
 
     uint32_t currentFrame = 0;
-    static constexpr int MAX_FRAMES_IN_FLIGHT = 2;
+    static constexpr int MAX_FRAMES_IN_FLIGHT = 3;
 
     float lastSunIntensity = 1.0f;
 

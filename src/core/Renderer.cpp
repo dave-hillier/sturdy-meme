@@ -784,11 +784,15 @@ bool Renderer::render(const Camera& camera) {
     }
 
     // Frame synchronization
+    systems_->profiler().beginCpuZone("FenceWait");
     inFlightFences[currentFrame].wait();
+    systems_->profiler().endCpuZone("FenceWait");
 
+    systems_->profiler().beginCpuZone("AcquireImage");
     uint32_t imageIndex;
     VkResult result = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX,
                                             imageAvailableSemaphores[currentFrame].get(), VK_NULL_HANDLE, &imageIndex);
+    systems_->profiler().endCpuZone("AcquireImage");
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR) {
         handleResize();
@@ -945,10 +949,10 @@ bool Renderer::render(const Camera& camera) {
     }
 
     // HDR scene render pass (can be disabled for performance debugging)
+    // Note: HDRPass is not wrapped in a profiler zone because recordHDRPass()
+    // contains granular HDR:* sub-zones. Nesting would confuse the profiler.
     if (hdrPassEnabled) {
-        systems_->profiler().beginGpuZone(cmd, "HDRPass");
         recordHDRPass(cmd, frame.frameIndex, frame.time);
-        systems_->profiler().endGpuZone(cmd, "HDRPass");
 
         // Screen-Space Reflections compute pass (Phase 10)
         // Computes SSR for next frame's water - uses current scene for temporal stability
