@@ -618,13 +618,11 @@ void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>
     this->rendererUniformBuffers_ = rendererUniformBuffers;
 
     // Update compute descriptor sets with terrain heightmap, displacement, and tile cache
+    // Note: Bindings 0, 1, 2 are already written in writeComputeDescriptorSets() - only write new bindings here
     // Note: tile info buffer (binding 6) is updated per-frame in recordResetAndCompute
     for (uint32_t set = 0; set < BUFFER_SET_COUNT; set++) {
         // Use non-fluent pattern to avoid copy semantics bug with DescriptorManager::SetWriter
         DescriptorManager::SetWriter computeWriter(dev, (*particleSystem)->getComputeDescriptorSet(set));
-        computeWriter.writeBuffer(0, instanceBuffers.buffers[set], 0, sizeof(GrassInstance) * MAX_INSTANCES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-        computeWriter.writeBuffer(1, indirectBuffers.buffers[set], 0, sizeof(VkDrawIndirectCommand), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-        computeWriter.writeBuffer(2, uniformBuffers.buffers[0], 0, sizeof(GrassUniforms));
         computeWriter.writeImage(3, terrainHeightMapView, terrainHeightMapSampler);
         computeWriter.writeImage(4, displacementImageView, displacementSampler_.get());
 
@@ -772,12 +770,10 @@ void GrassSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex
     // Double-buffer: compute writes to computeBufferSet
     uint32_t writeSet = (*particleSystem)->getComputeBufferSet();
 
-    // Update compute descriptor set to use this frame's uniform buffer, terrain heightmap, displacement map,
-    // and the correct triple-buffered tile info buffer for this frame
+    // Update compute descriptor set with per-frame buffers only
+    // Note: Static images (bindings 3, 4, 5) are already bound in updateDescriptorSets()
     DescriptorManager::SetWriter writer(getDevice(), (*particleSystem)->getComputeDescriptorSet(writeSet));
-    writer.writeBuffer(2, uniformBuffers.buffers[frameIndex], 0, sizeof(GrassUniforms))
-          .writeImage(3, terrainHeightMapView, terrainHeightMapSampler)
-          .writeImage(4, displacementImageView, displacementSampler_.get());
+    writer.writeBuffer(2, uniformBuffers.buffers[frameIndex], 0, sizeof(GrassUniforms));
 
     // Update tile info buffer to the correct frame's buffer (triple-buffered to avoid CPU-GPU sync)
     if (tileInfoBuffers[frameIndex % 3] != VK_NULL_HANDLE) {
