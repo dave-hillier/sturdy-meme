@@ -65,10 +65,10 @@ void FootPlacementIKSolver::solve(
     float heightOffset = targetWorldFootY - queryWorldPos.y;  // Positive = need to move up
 
     // Clamp the offset to reasonable bounds (in meters)
-    // Positive: foot moves up (leg bends more) - max ~20cm = 0.20m
-    // Negative: foot moves down (leg straightens) - max ~15cm = 0.15m
-    const float maxLiftOffset = 0.20f;
-    const float maxDropOffset = -0.15f;
+    // Positive: foot moves up (leg bends more) - max ~30cm
+    // Negative: foot moves down (leg straightens) - max ~25cm
+    const float maxLiftOffset = 0.30f;
+    const float maxDropOffset = -0.25f;
     heightOffset = glm::clamp(heightOffset, maxDropOffset, maxLiftOffset);
 
     // Small threshold to avoid jitter (in meters)

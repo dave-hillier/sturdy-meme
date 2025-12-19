@@ -138,9 +138,9 @@ struct FootPlacementIK {
 // Pelvis adjustment for foot placement
 struct PelvisAdjustment {
     int32_t pelvisBoneIndex = -1;     // Hips/pelvis bone
-    float minOffset = -0.3f;          // Max downward adjustment
-    float maxOffset = 0.1f;           // Max upward adjustment
-    float smoothSpeed = 5.0f;         // Interpolation speed
+    float minOffset = -0.5f;          // Max downward adjustment (50cm)
+    float maxOffset = 0.15f;          // Max upward adjustment (15cm)
+    float smoothSpeed = 15.0f;        // Interpolation speed (faster response)
     bool enabled = false;
 
     // Internal state
