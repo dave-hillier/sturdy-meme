@@ -695,17 +695,38 @@ public:
             return false;
         }
 
+        // Create a fence for fine-grained synchronization (better than vkQueueWaitIdle)
+        VkFenceCreateInfo fenceInfo{};
+        fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        fenceInfo.flags = 0; // Not signaled initially
+
+        VkFence fence = VK_NULL_HANDLE;
+        if (vkCreateFence(device_, &fenceInfo, nullptr, &fence) != VK_SUCCESS) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "CommandScope: Failed to create fence");
+            return false;
+        }
+
         VkSubmitInfo submitInfo{};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers = &commandBuffer_;
 
-        if (vkQueueSubmit(queue_, 1, &submitInfo, VK_NULL_HANDLE) != VK_SUCCESS) {
+        VkResult submitResult = vkQueueSubmit(queue_, 1, &submitInfo, fence);
+        if (submitResult != VK_SUCCESS) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "CommandScope: Failed to submit queue");
+            vkDestroyFence(device_, fence, nullptr);
             return false;
         }
 
-        vkQueueWaitIdle(queue_);
+        // Wait only for this specific submission to complete
+        VkResult waitResult = vkWaitForFences(device_, 1, &fence, VK_TRUE, UINT64_MAX);
+        vkDestroyFence(device_, fence, nullptr);
+
+        if (waitResult != VK_SUCCESS) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "CommandScope: Failed to wait for fence");
+            return false;
+        }
+
         return true;
     }
 
