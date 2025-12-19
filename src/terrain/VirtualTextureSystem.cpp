@@ -232,7 +232,7 @@ void VirtualTextureSystem::recordPendingTileUploads(VkCommandBuffer cmd, uint32_
         // This uses per-frame staging buffers to avoid race conditions
         (*cache)->recordTileUpload(tile.id, tile.pixels.data(),
                                    tile.width, tile.height,
-                                   cmd, frameIndex);
+                                   tile.format, cmd, frameIndex);
 
         // Update page table (CPU-side, will be uploaded via recordUpload)
         uint32_t slotsPerAxis = config.getCacheTilesPerAxis();

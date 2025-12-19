@@ -1,20 +1,27 @@
 // Procedural material texture generator for virtual texturing
 // Generates placeholder textures for all biome materials
+// Supports both PNG and BCn compressed DDS output
 
 #include <SDL3/SDL_log.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/noise.hpp>
 #include <lodepng.h>
+#include "../common/bc_compress.h"
+#include "../common/dds_file.h"
 #include <vector>
 #include <string>
 #include <filesystem>
 #include <cmath>
 #include <functional>
+#include <cstring>
 
 namespace fs = std::filesystem;
 
 // Texture size for generated materials
 constexpr int TEXTURE_SIZE = 512;
+
+// Global option for output format
+static bool g_useCompression = false;
 
 // Simple noise functions
 float fbm(glm::vec2 p, int octaves, float lacunarity = 2.0f, float gain = 0.5f) {
@@ -236,6 +243,20 @@ glm::vec3 gorseColor(glm::vec2 uv, float noise, float detail) {
     return glm::mix(green * 0.7f, green, blend);
 }
 
+// Get output path with correct extension
+std::string getOutputPath(const std::string& basePath) {
+    if (g_useCompression) {
+        // Replace .png with .dds
+        std::string path = basePath;
+        size_t pos = path.rfind(".png");
+        if (pos != std::string::npos) {
+            path.replace(pos, 4, ".dds");
+        }
+        return path;
+    }
+    return basePath;
+}
+
 bool generateTexture(const std::string& path, TextureGenerator::ColorFunc colorFunc,
                      float noiseScale, int octaves) {
     std::vector<unsigned char> pixels(TEXTURE_SIZE * TEXTURE_SIZE * 4);
@@ -259,14 +280,28 @@ bool generateTexture(const std::string& path, TextureGenerator::ColorFunc colorF
         }
     }
 
-    unsigned error = lodepng::encode(path, pixels, TEXTURE_SIZE, TEXTURE_SIZE);
-    if (error) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to save %s: %s",
-                     path.c_str(), lodepng_error_text(error));
-        return false;
+    std::string outputPath = getOutputPath(path);
+
+    if (g_useCompression) {
+        // Compress to BC1 (RGB, 4 bits per pixel)
+        BCCompress::CompressedImage compressed = BCCompress::compressImage(
+            pixels.data(), TEXTURE_SIZE, TEXTURE_SIZE, BCCompress::BCFormat::BC1);
+
+        if (!DDS::write(outputPath, TEXTURE_SIZE, TEXTURE_SIZE, DDS::Format::BC1_SRGB,
+                        compressed.data.data(), static_cast<uint32_t>(compressed.data.size()))) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to save %s", outputPath.c_str());
+            return false;
+        }
+    } else {
+        unsigned error = lodepng::encode(outputPath, pixels, TEXTURE_SIZE, TEXTURE_SIZE);
+        if (error) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to save %s: %s",
+                         outputPath.c_str(), lodepng_error_text(error));
+            return false;
+        }
     }
 
-    SDL_Log("Generated: %s", path.c_str());
+    SDL_Log("Generated: %s", outputPath.c_str());
     return true;
 }
 
@@ -306,26 +341,53 @@ bool generateNormalMap(const std::string& path, float scale, float strength) {
         }
     }
 
-    unsigned error = lodepng::encode(path, pixels, TEXTURE_SIZE, TEXTURE_SIZE);
-    if (error) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to save %s: %s",
-                     path.c_str(), lodepng_error_text(error));
-        return false;
+    std::string outputPath = getOutputPath(path);
+
+    if (g_useCompression) {
+        // Use BC5 for normal maps (stores X and Y in two channels)
+        BCCompress::CompressedImage compressed = BCCompress::compressImage(
+            pixels.data(), TEXTURE_SIZE, TEXTURE_SIZE, BCCompress::BCFormat::BC5);
+
+        if (!DDS::write(outputPath, TEXTURE_SIZE, TEXTURE_SIZE, DDS::Format::BC5,
+                        compressed.data.data(), static_cast<uint32_t>(compressed.data.size()))) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to save %s", outputPath.c_str());
+            return false;
+        }
+    } else {
+        unsigned error = lodepng::encode(outputPath, pixels, TEXTURE_SIZE, TEXTURE_SIZE);
+        if (error) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to save %s: %s",
+                         outputPath.c_str(), lodepng_error_text(error));
+            return false;
+        }
     }
 
-    SDL_Log("Generated normal: %s", path.c_str());
+    SDL_Log("Generated normal: %s", outputPath.c_str());
     return true;
 }
 
 int main(int argc, char* argv[]) {
     std::string outputDir = "assets/materials";
 
-    if (argc > 1) {
-        outputDir = argv[1];
+    // Parse command line arguments
+    for (int i = 1; i < argc; i++) {
+        std::string arg = argv[i];
+        if (arg == "--compress" || arg == "--dds" || arg == "-c") {
+            g_useCompression = true;
+        } else if (arg == "--help" || arg == "-h") {
+            SDL_Log("Usage: material_texture_gen [options] [output_dir]");
+            SDL_Log("Options:");
+            SDL_Log("  --compress, --dds, -c  Output BCn compressed DDS files");
+            SDL_Log("  --help, -h             Show this help message");
+            return 0;
+        } else if (arg[0] != '-') {
+            outputDir = arg;
+        }
     }
 
     SDL_Log("Material Texture Generator");
     SDL_Log("Output directory: %s", outputDir.c_str());
+    SDL_Log("Compression: %s", g_useCompression ? "BC1/BC5 DDS" : "PNG");
 
     // Create all directories
     std::vector<std::string> dirs = {

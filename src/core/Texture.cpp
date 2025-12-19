@@ -1,15 +1,33 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 #include "Texture.h"
+#include "DDSLoader.h"
 #include "VulkanRAII.h"
 #include "VulkanResourceFactory.h"
 #include "VulkanBarriers.h"
 #include "ImageBuilder.h"
 #include <cstring>
+#include <algorithm>
+
+// Check if a path ends with a specific extension (case-insensitive)
+static bool hasExtension(const std::string& path, const std::string& ext) {
+    if (path.size() < ext.size()) return false;
+    std::string pathExt = path.substr(path.size() - ext.size());
+    std::transform(pathExt.begin(), pathExt.end(), pathExt.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    return pathExt == ext;
+}
 
 bool Texture::load(const std::string& path, VmaAllocator allocator, VkDevice device,
                    VkCommandPool commandPool, VkQueue queue, VkPhysicalDevice physicalDevice,
                    bool useSRGB) {
+
+    // Check if this is a DDS file
+    if (hasExtension(path, ".dds")) {
+        return loadDDS(path, allocator, device, commandPool, queue, useSRGB);
+    }
+
+    // Load with stb_image (PNG, JPG, etc.)
     int channels;
     stbi_uc* pixels = stbi_load(path.c_str(), &width, &height, &channels, STBI_rgb_alpha);
 
@@ -118,6 +136,137 @@ bool Texture::load(const std::string& path, VmaAllocator allocator, VkDevice dev
     imageView = managedView.release();
     sampler = managedSampler.release();
 
+    return true;
+}
+
+bool Texture::loadDDS(const std::string& path, VmaAllocator allocator, VkDevice device,
+                      VkCommandPool commandPool, VkQueue queue, bool useSRGB) {
+    DDSLoader::Image dds = DDSLoader::load(path);
+    if (!dds.isValid()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load DDS texture: %s", path.c_str());
+        return false;
+    }
+
+    width = static_cast<int>(dds.width);
+    height = static_cast<int>(dds.height);
+
+    // Get the format - adjust for sRGB if requested
+    VkFormat imageFormat = dds.format;
+    if (useSRGB) {
+        // Convert to sRGB variant if available
+        switch (dds.format) {
+            case VK_FORMAT_BC1_RGB_UNORM_BLOCK:
+                imageFormat = VK_FORMAT_BC1_RGB_SRGB_BLOCK;
+                break;
+            case VK_FORMAT_BC7_UNORM_BLOCK:
+                imageFormat = VK_FORMAT_BC7_SRGB_BLOCK;
+                break;
+            default:
+                break;  // Keep original format
+        }
+    }
+
+    VkDeviceSize imageSize = dds.data.size();
+
+    // Create staging buffer
+    ManagedBuffer stagingBuffer;
+    if (!VulkanResourceFactory::createStagingBuffer(allocator, imageSize, stagingBuffer)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create staging buffer for DDS texture: %s", path.c_str());
+        return false;
+    }
+
+    // Copy compressed data to staging buffer
+    void* data = stagingBuffer.map();
+    if (!data) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to map staging buffer for DDS texture: %s", path.c_str());
+        return false;
+    }
+    memcpy(data, dds.data.data(), imageSize);
+    stagingBuffer.unmap();
+
+    // Create image with BCn format
+    VkImageCreateInfo imageInfo{};
+    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    imageInfo.imageType = VK_IMAGE_TYPE_2D;
+    imageInfo.format = imageFormat;
+    imageInfo.extent.width = dds.width;
+    imageInfo.extent.height = dds.height;
+    imageInfo.extent.depth = 1;
+    imageInfo.mipLevels = dds.mipLevels;
+    imageInfo.arrayLayers = 1;
+    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+    allocInfo.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+
+    if (vmaCreateImage(allocator, &imageInfo, &allocInfo, &image, &allocation, nullptr) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create image for DDS texture: %s", path.c_str());
+        return false;
+    }
+
+    // Transition and copy
+    if (!transitionImageLayout(device, commandPool, queue, image,
+                               VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)) {
+        return false;
+    }
+
+    if (!copyBufferToImage(device, commandPool, queue, stagingBuffer.get(), image,
+                           dds.width, dds.height)) {
+        return false;
+    }
+
+    if (!transitionImageLayout(device, commandPool, queue, image,
+                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)) {
+        return false;
+    }
+
+    // Create image view
+    VkImageViewCreateInfo viewInfo{};
+    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewInfo.image = image;
+    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format = imageFormat;
+    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.subresourceRange.baseMipLevel = 0;
+    viewInfo.subresourceRange.levelCount = dds.mipLevels;
+    viewInfo.subresourceRange.baseArrayLayer = 0;
+    viewInfo.subresourceRange.layerCount = 1;
+
+    if (vkCreateImageView(device, &viewInfo, nullptr, &imageView) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create image view for DDS texture: %s", path.c_str());
+        return false;
+    }
+
+    // Create sampler
+    VkSamplerCreateInfo samplerInfo{};
+    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    samplerInfo.magFilter = VK_FILTER_LINEAR;
+    samplerInfo.minFilter = VK_FILTER_LINEAR;
+    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    samplerInfo.anisotropyEnable = VK_FALSE;
+    samplerInfo.maxAnisotropy = 1.0f;
+    samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+    samplerInfo.unnormalizedCoordinates = VK_FALSE;
+    samplerInfo.compareEnable = VK_FALSE;
+    samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
+    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    samplerInfo.mipLodBias = 0.0f;
+    samplerInfo.minLod = 0.0f;
+    samplerInfo.maxLod = static_cast<float>(dds.mipLevels);
+
+    if (vkCreateSampler(device, &samplerInfo, nullptr, &sampler) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create sampler for DDS texture: %s", path.c_str());
+        return false;
+    }
+
+    SDL_Log("Loaded DDS texture: %s (%ux%u, format %u)", path.c_str(), dds.width, dds.height, imageFormat);
     return true;
 }
 

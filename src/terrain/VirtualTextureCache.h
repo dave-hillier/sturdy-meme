@@ -12,7 +12,8 @@ namespace VirtualTexture {
 /**
  * VirtualTextureCache manages the physical tile cache texture.
  *
- * The cache is a large RGBA8 texture that holds the currently loaded tiles.
+ * The cache can use either RGBA8 or BC1 compressed format.
+ * BC1 uses 4x less GPU memory but requires all tiles to be BC1 compressed.
  * It uses LRU eviction when the cache is full.
  */
 class VirtualTextureCache {
@@ -25,8 +26,10 @@ public:
     VirtualTextureCache& operator=(const VirtualTextureCache&) = delete;
 
     // Initialize the cache
+    // Set useCompression=true to use BC1 format for the cache (4x smaller GPU memory)
     bool init(VkDevice device, VmaAllocator allocator, VkCommandPool commandPool,
-              VkQueue queue, const VirtualTextureConfig& config, uint32_t framesInFlight = 2);
+              VkQueue queue, const VirtualTextureConfig& config, uint32_t framesInFlight = 2,
+              bool useCompression = false);
 
     // Cleanup resources
     void destroy(VkDevice device, VmaAllocator allocator);
@@ -50,14 +53,18 @@ public:
      * the command buffer and waiting on the appropriate frame fence.
      *
      * @param id Tile ID to upload
-     * @param pixelData Pixel data to upload
+     * @param pixelData Pixel data to upload (RGBA8 or BC1 compressed)
      * @param width Tile width
      * @param height Tile height
+     * @param format Tile format (RGBA8 or BC1)
      * @param cmd Command buffer to record into (must be in recording state)
      * @param frameIndex Current frame index for staging buffer selection
      */
     void recordTileUpload(TileId id, const void* pixelData, uint32_t width, uint32_t height,
-                          VkCommandBuffer cmd, uint32_t frameIndex);
+                          TileFormat format, VkCommandBuffer cmd, uint32_t frameIndex);
+
+    // Check if the cache is using compressed BC1 format
+    bool isCompressed() const { return useCompression_; }
 
     /**
      * Get the number of staging buffers (one per frame in flight)
@@ -95,6 +102,7 @@ private:
     bool createSampler(VkDevice device);
 
     VirtualTextureConfig config;
+    bool useCompression_ = false;  // BC1 compressed cache
 
     // Physical cache texture
     VkImage cacheImage = VK_NULL_HANDLE;

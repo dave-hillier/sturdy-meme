@@ -102,15 +102,47 @@ struct FeedbackEntry {
     }
 };
 
+// Tile compression format
+enum class TileFormat : uint8_t {
+    RGBA8 = 0,      // Uncompressed RGBA8
+    BC1 = 1,        // BC1/DXT1 compressed (RGB, 4bpp)
+    BC1_SRGB = 2,   // BC1 sRGB
+    BC4 = 3,        // BC4 compressed (single channel, 4bpp)
+    BC5 = 4,        // BC5 compressed (two channels, 8bpp)
+    BC7 = 5,        // BC7 compressed (RGBA, 8bpp)
+    BC7_SRGB = 6    // BC7 sRGB
+};
+
 // Loaded tile data ready for upload
 struct LoadedTile {
     TileId id;
-    std::vector<uint8_t> pixels;    // RGBA8 data
+    std::vector<uint8_t> pixels;    // RGBA8 or compressed data
     uint32_t width = 0;
     uint32_t height = 0;
+    TileFormat format = TileFormat::RGBA8;
 
     bool isValid() const {
         return !pixels.empty() && width > 0 && height > 0;
+    }
+
+    bool isCompressed() const {
+        return format != TileFormat::RGBA8;
+    }
+
+    // Get bytes per 4x4 block for compressed formats
+    uint32_t getBlockSize() const {
+        switch (format) {
+            case TileFormat::BC1:
+            case TileFormat::BC1_SRGB:
+            case TileFormat::BC4:
+                return 8;
+            case TileFormat::BC5:
+            case TileFormat::BC7:
+            case TileFormat::BC7_SRGB:
+                return 16;
+            default:
+                return 0;
+        }
     }
 };
 

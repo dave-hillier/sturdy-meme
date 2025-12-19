@@ -9,9 +9,11 @@ namespace VirtualTexture {
 
 bool VirtualTextureCache::init(VkDevice device, VmaAllocator allocator,
                                 VkCommandPool commandPool, VkQueue queue,
-                                const VirtualTextureConfig& cfg, uint32_t framesInFlight) {
+                                const VirtualTextureConfig& cfg, uint32_t framesInFlight,
+                                bool useCompression) {
     config = cfg;
     framesInFlight_ = framesInFlight;
+    useCompression_ = useCompression;
 
     // Initialize slot array
     uint32_t totalSlots = config.getTotalCacheSlots();
@@ -36,7 +38,14 @@ bool VirtualTextureCache::init(VkDevice device, VmaAllocator allocator,
     }
 
     // Create per-frame staging buffers to avoid race conditions with in-flight frames
-    VkDeviceSize stagingSize = config.tileSizePixels * config.tileSizePixels * 4; // RGBA8
+    // BC1: 8 bytes per 4x4 block = 0.5 bytes per pixel
+    // RGBA8: 4 bytes per pixel
+    uint32_t blockWidth = (config.tileSizePixels + 3) / 4;
+    uint32_t blockHeight = (config.tileSizePixels + 3) / 4;
+    VkDeviceSize stagingSize = useCompression_
+        ? (blockWidth * blockHeight * 8)  // BC1: 8 bytes per block
+        : (config.tileSizePixels * config.tileSizePixels * 4);  // RGBA8
+
     stagingBuffers_.resize(framesInFlight_);
     stagingMapped_.resize(framesInFlight_);
 
@@ -48,8 +57,9 @@ bool VirtualTextureCache::init(VkDevice device, VmaAllocator allocator,
         stagingMapped_[i] = stagingBuffers_[i].map();
     }
 
-    SDL_Log("VirtualTextureCache initialized: %u slots (%ux%u tiles), %upx cache, %u staging buffers",
-            totalSlots, slotsPerAxis, slotsPerAxis, config.cacheSizePixels, framesInFlight_);
+    SDL_Log("VirtualTextureCache initialized: %u slots (%ux%u tiles), %upx cache, %u staging buffers, format: %s",
+            totalSlots, slotsPerAxis, slotsPerAxis, config.cacheSizePixels, framesInFlight_,
+            useCompression_ ? "BC1" : "RGBA8");
 
     return true;
 }
@@ -85,10 +95,12 @@ void VirtualTextureCache::destroy(VkDevice device, VmaAllocator allocator) {
 
 bool VirtualTextureCache::createCacheTexture(VkDevice device, VmaAllocator allocator,
                                               VkCommandPool commandPool, VkQueue queue) {
+    VkFormat cacheFormat = useCompression_ ? VK_FORMAT_BC1_RGB_SRGB_BLOCK : VK_FORMAT_R8G8B8A8_SRGB;
+
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
+    imageInfo.format = cacheFormat;
     imageInfo.extent.width = config.cacheSizePixels;
     imageInfo.extent.height = config.cacheSizePixels;
     imageInfo.extent.depth = 1;
@@ -114,7 +126,7 @@ bool VirtualTextureCache::createCacheTexture(VkDevice device, VmaAllocator alloc
     viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     viewInfo.image = cacheImage;
     viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
+    viewInfo.format = cacheFormat;
     viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     viewInfo.subresourceRange.baseMipLevel = 0;
     viewInfo.subresourceRange.levelCount = 1;
@@ -237,11 +249,21 @@ size_t VirtualTextureCache::findLRUSlot() const {
 
 void VirtualTextureCache::recordTileUpload(TileId id, const void* pixelData,
                                             uint32_t width, uint32_t height,
-                                            VkCommandBuffer cmd, uint32_t frameIndex) {
+                                            TileFormat format, VkCommandBuffer cmd, uint32_t frameIndex) {
     // Find the slot for this tile
     auto it = tileToSlot.find(id.pack());
     if (it == tileToSlot.end()) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Cannot upload tile not in cache");
+        return;
+    }
+
+    // Check format compatibility
+    bool tileIsCompressed = (format != TileFormat::RGBA8);
+    if (tileIsCompressed != useCompression_) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+            "Tile format mismatch: tile is %s, cache is %s",
+            tileIsCompressed ? "compressed" : "RGBA8",
+            useCompression_ ? "BC1" : "RGBA8");
         return;
     }
 
@@ -257,8 +279,19 @@ void VirtualTextureCache::recordTileUpload(TileId id, const void* pixelData,
     uint32_t slotX = slotIndex % slotsPerAxis;
     uint32_t slotY = slotIndex / slotsPerAxis;
 
+    // Calculate data size based on format
+    VkDeviceSize dataSize;
+    if (useCompression_) {
+        // BC1: 8 bytes per 4x4 block
+        uint32_t blockWidth = (width + 3) / 4;
+        uint32_t blockHeight = (height + 3) / 4;
+        dataSize = blockWidth * blockHeight * 8;
+    } else {
+        // RGBA8: 4 bytes per pixel
+        dataSize = width * height * 4;
+    }
+
     // Copy to per-frame staging buffer
-    VkDeviceSize dataSize = width * height * 4;
     std::memcpy(stagingMapped_[bufferIndex], pixelData, dataSize);
 
     // Transition to transfer dst

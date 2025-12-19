@@ -1,7 +1,9 @@
 #include "VirtualTextureTileLoader.h"
+#include "../core/DDSLoader.h"
 #include <SDL3/SDL_log.h>
 #include <lodepng.h>
 #include <algorithm>
+#include <filesystem>
 
 namespace VirtualTexture {
 
@@ -188,51 +190,92 @@ void VirtualTextureTileLoader::workerLoop() {
 }
 
 bool VirtualTextureTileLoader::loadTileFromDisk(TileId id, LoadedTile& tile) {
-    std::string path = getTilePath(id);
+    // Try loading DDS first (compressed format), then fall back to PNG
+    std::string ddsPath = getTilePath(id, true);
+    std::string pngPath = getTilePath(id, false);
 
+    // Try DDS first
+    if (std::filesystem::exists(ddsPath)) {
+        DDSLoader::Image dds = DDSLoader::load(ddsPath);
+        if (dds.isValid()) {
+            tile.id = id;
+            tile.width = dds.width;
+            tile.height = dds.height;
+            tile.pixels = std::move(dds.data);
+
+            // Map DDS format to our tile format
+            switch (dds.format) {
+                case VK_FORMAT_BC1_RGB_UNORM_BLOCK:
+                    tile.format = TileFormat::BC1;
+                    break;
+                case VK_FORMAT_BC1_RGB_SRGB_BLOCK:
+                    tile.format = TileFormat::BC1_SRGB;
+                    break;
+                case VK_FORMAT_BC4_UNORM_BLOCK:
+                    tile.format = TileFormat::BC4;
+                    break;
+                case VK_FORMAT_BC5_UNORM_BLOCK:
+                    tile.format = TileFormat::BC5;
+                    break;
+                case VK_FORMAT_BC7_UNORM_BLOCK:
+                    tile.format = TileFormat::BC7;
+                    break;
+                case VK_FORMAT_BC7_SRGB_BLOCK:
+                    tile.format = TileFormat::BC7_SRGB;
+                    break;
+                default:
+                    tile.format = TileFormat::BC1_SRGB; // Default assumption
+                    break;
+            }
+
+            return true;
+        }
+    }
+
+    // Try PNG
     std::vector<unsigned char> png;
     unsigned width, height;
 
-    // Load PNG file
-    unsigned error = lodepng::decode(png, width, height, path);
-    if (error) {
-        // Not necessarily an error - tile might not exist yet
-        // Use a fallback/placeholder in this case
-        SDL_LogDebug(SDL_LOG_CATEGORY_APPLICATION,
-                     "Could not load tile %s: %s", path.c_str(), lodepng_error_text(error));
-
-        // Create a placeholder tile (pink/magenta checkerboard)
+    unsigned error = lodepng::decode(png, width, height, pngPath);
+    if (error == 0) {
         tile.id = id;
-        tile.width = 128;
-        tile.height = 128;
-        tile.pixels.resize(tile.width * tile.height * 4);
-
-        for (uint32_t y = 0; y < tile.height; ++y) {
-            for (uint32_t x = 0; x < tile.width; ++x) {
-                size_t idx = (y * tile.width + x) * 4;
-                bool checker = ((x / 16) + (y / 16)) % 2 == 0;
-                tile.pixels[idx + 0] = checker ? 255 : 128;  // R
-                tile.pixels[idx + 1] = checker ? 0 : 0;      // G
-                tile.pixels[idx + 2] = checker ? 255 : 128;  // B
-                tile.pixels[idx + 3] = 255;                   // A
-            }
-        }
+        tile.width = width;
+        tile.height = height;
+        tile.pixels = std::move(png);
+        tile.format = TileFormat::RGBA8;
         return true;
     }
 
-    tile.id = id;
-    tile.width = width;
-    tile.height = height;
-    tile.pixels = std::move(png);
+    // Neither format found - use a fallback/placeholder
+    SDL_LogDebug(SDL_LOG_CATEGORY_APPLICATION,
+                 "Could not load tile (tried %s and %s)", ddsPath.c_str(), pngPath.c_str());
 
+    // Create a placeholder tile (pink/magenta checkerboard)
+    tile.id = id;
+    tile.width = 128;
+    tile.height = 128;
+    tile.format = TileFormat::RGBA8;
+    tile.pixels.resize(tile.width * tile.height * 4);
+
+    for (uint32_t y = 0; y < tile.height; ++y) {
+        for (uint32_t x = 0; x < tile.width; ++x) {
+            size_t idx = (y * tile.width + x) * 4;
+            bool checker = ((x / 16) + (y / 16)) % 2 == 0;
+            tile.pixels[idx + 0] = checker ? 255 : 128;  // R
+            tile.pixels[idx + 1] = checker ? 0 : 0;      // G
+            tile.pixels[idx + 2] = checker ? 255 : 128;  // B
+            tile.pixels[idx + 3] = 255;                   // A
+        }
+    }
     return true;
 }
 
-std::string VirtualTextureTileLoader::getTilePath(TileId id) const {
-    // Format: basePath/mip{level}/tile_{x}_{y}.png
+std::string VirtualTextureTileLoader::getTilePath(TileId id, bool dds) const {
+    // Format: basePath/mip{level}/tile_{x}_{y}.{dds|png}
     char path[512];
-    snprintf(path, sizeof(path), "%s/mip%u/tile_%u_%u.png",
-             basePath.c_str(), id.mipLevel, id.x, id.y);
+    snprintf(path, sizeof(path), "%s/mip%u/tile_%u_%u.%s",
+             basePath.c_str(), id.mipLevel, id.x, id.y,
+             dds ? "dds" : "png");
     return std::string(path);
 }
 

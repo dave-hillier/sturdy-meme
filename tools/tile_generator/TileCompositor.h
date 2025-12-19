@@ -31,6 +31,9 @@ struct TileCompositorConfig {
     float subZoneNoiseScale = 0.01f;     // Noise frequency for sub-zone blending
     float subZoneBlendStrength = 0.3f;   // Max blend amount for sub-zones
 
+    // BCn compression option
+    bool useCompression = false;         // Output BC1 compressed DDS instead of PNG
+
     // Get tile size in world units
     float getTileSize() const {
         return terrainSize / tilesPerAxis;

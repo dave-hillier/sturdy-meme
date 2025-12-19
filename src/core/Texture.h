@@ -21,6 +21,8 @@ public:
     VkSampler getSampler() const { return sampler; }
 
 private:
+    bool loadDDS(const std::string& path, VmaAllocator allocator, VkDevice device,
+                 VkCommandPool commandPool, VkQueue queue, bool useSRGB);
     bool transitionImageLayout(VkDevice device, VkCommandPool commandPool, VkQueue queue,
                                VkImage image, VkImageLayout oldLayout, VkImageLayout newLayout);
     bool copyBufferToImage(VkDevice device, VkCommandPool commandPool, VkQueue queue,

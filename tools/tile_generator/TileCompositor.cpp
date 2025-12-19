@@ -6,6 +6,8 @@
 #include <cmath>
 #include <algorithm>
 #include <filesystem>
+#include "../common/bc_compress.h"
+#include "../common/dds_file.h"
 
 namespace VirtualTexture {
 
@@ -544,20 +546,34 @@ bool TileCompositor::generateMipLevel(uint32_t mipLevel, const std::string& outp
     std::filesystem::create_directories(mipDir);
 
     OutputTile tile;
+    std::string extension = config.useCompression ? ".dds" : ".png";
 
     for (uint32_t ty = 0; ty < tilesAtMip; ++ty) {
         for (uint32_t tx = 0; tx < tilesAtMip; ++tx) {
             // Generate tile
             generateTile(tx, ty, mipLevel, tile);
 
-            // Save tile as PNG
-            std::string filename = mipDir + "/tile_" + std::to_string(tx) + "_" + std::to_string(ty) + ".png";
-            unsigned error = lodepng::encode(filename, tile.pixels, tile.resolution, tile.resolution);
+            // Save tile
+            std::string filename = mipDir + "/tile_" + std::to_string(tx) + "_" + std::to_string(ty) + extension;
 
-            if (error) {
-                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to save tile %s: %s",
-                             filename.c_str(), lodepng_error_text(error));
-                return false;
+            if (config.useCompression) {
+                // Compress to BC1 and save as DDS
+                BCCompress::CompressedImage compressed = BCCompress::compressImage(
+                    tile.pixels.data(), tile.resolution, tile.resolution, BCCompress::BCFormat::BC1);
+
+                if (!DDS::write(filename, tile.resolution, tile.resolution, DDS::Format::BC1_SRGB,
+                                compressed.data.data(), static_cast<uint32_t>(compressed.data.size()))) {
+                    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to save tile %s", filename.c_str());
+                    return false;
+                }
+            } else {
+                // Save as PNG
+                unsigned error = lodepng::encode(filename, tile.pixels, tile.resolution, tile.resolution);
+                if (error) {
+                    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to save tile %s: %s",
+                                 filename.c_str(), lodepng_error_text(error));
+                    return false;
+                }
             }
 
             processedTiles++;
@@ -570,7 +586,8 @@ bool TileCompositor::generateMipLevel(uint32_t mipLevel, const std::string& outp
         }
     }
 
-    SDL_Log("Generated mip level %u: %u tiles", mipLevel, totalTiles);
+    SDL_Log("Generated mip level %u: %u tiles (%s)", mipLevel, totalTiles,
+            config.useCompression ? "BC1 DDS" : "PNG");
     return true;
 }
 

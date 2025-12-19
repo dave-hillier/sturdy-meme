@@ -119,7 +119,7 @@ private:
 
     void workerLoop();
     bool loadTileFromDisk(TileId id, LoadedTile& tile);
-    std::string getTilePath(TileId id) const;
+    std::string getTilePath(TileId id, bool dds = false) const;
 };
 
 } // namespace VirtualTexture

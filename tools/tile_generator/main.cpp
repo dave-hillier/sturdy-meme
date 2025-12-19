@@ -23,6 +23,7 @@ void printUsage(const char* programName) {
     SDL_Log("  --max-mip <n>         Maximum mip level (default: 9)");
     SDL_Log("  --single-mip <n>      Generate only a single mip level");
     SDL_Log("  --single-tile <x,y,m> Generate a single tile at x,y,mip level");
+    SDL_Log("  --compress, --dds     Output BC1 compressed DDS files (default: PNG)");
     SDL_Log("  --help                Show this help message");
 }
 
@@ -45,6 +46,8 @@ struct GeneratorOptions {
     uint32_t singleTileX = 0;
     uint32_t singleTileY = 0;
     uint32_t singleTileMip = 0;
+
+    bool useCompression = false;  // Output BC1 compressed DDS files
 };
 
 bool parseArguments(int argc, char* argv[], GeneratorOptions& opts) {
@@ -100,6 +103,9 @@ bool parseArguments(int argc, char* argv[], GeneratorOptions& opts) {
                 return false;
             }
         }
+        else if (arg == "--compress" || arg == "--dds" || arg == "-c") {
+            opts.useCompression = true;
+        }
         else {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Unknown argument: %s", arg.c_str());
             return false;
@@ -140,6 +146,7 @@ int main(int argc, char* argv[]) {
     SDL_Log("Tile resolution: %u px", opts.tileResolution);
     SDL_Log("Tiles/axis:     %u", opts.tilesPerAxis);
     SDL_Log("Max mip levels: %u", opts.maxMipLevels);
+    SDL_Log("Output format:  %s", opts.useCompression ? "BC1 DDS (compressed)" : "PNG");
 
     // Setup compositor config
     VirtualTexture::TileCompositorConfig config;
@@ -147,6 +154,7 @@ int main(int argc, char* argv[]) {
     config.tileResolution = opts.tileResolution;
     config.tilesPerAxis = opts.tilesPerAxis;
     config.maxMipLevels = opts.maxMipLevels;
+    config.useCompression = opts.useCompression;
 
     // Create compositor
     VirtualTexture::TileCompositor compositor;
