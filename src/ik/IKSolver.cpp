@@ -253,7 +253,7 @@ bool IKSystem::setupPelvisAdjustment(
     }
 
     pelvisAdjustment.pelvisBoneIndex = pelvisIdx;
-    pelvisAdjustment.enabled = false;
+    pelvisAdjustment.enabled = true;  // Enable by default - feet need pelvis to move
 
     SDL_Log("IKSystem: Setup pelvis adjustment (bone=%d)", pelvisIdx);
     return true;
@@ -438,29 +438,59 @@ void IKSystem::solve(Skeleton& skeleton, const glm::mat4& characterTransform, fl
     // Compute global transforms once
     skeleton.computeGlobalTransforms(cachedGlobalTransforms);
 
-    // Solve pelvis adjustment first (affects leg IK)
-    if (pelvisAdjustment.enabled && !footPlacements.empty()) {
-        // Find left and right foot placements
-        FootPlacementIK* leftFoot = nullptr;
-        FootPlacementIK* rightFoot = nullptr;
+    // ========== PHASE 1: Pre-query ground heights and calculate pelvis adjustment ==========
+    // We need to know where the ground is BEFORE adjusting the pelvis, not after.
+    // This fixes the chicken-and-egg problem where pelvis adjustment used stale data.
+
+    if (pelvisAdjustment.enabled && !footPlacements.empty() && groundQuery) {
+        float lowestGroundOffset = 0.0f;  // How much lower the ground is vs animation
+        bool anyFootGrounded = false;
+
         for (auto& nfp : footPlacements) {
-            if (nfp.name.find("left") != std::string::npos ||
-                nfp.name.find("Left") != std::string::npos ||
-                nfp.name.find("L_") != std::string::npos) {
-                leftFoot = &nfp.foot;
-            } else {
-                rightFoot = &nfp.foot;
+            if (!nfp.foot.enabled || nfp.foot.weight <= 0.0f) continue;
+            if (nfp.foot.footBoneIndex < 0) continue;
+
+            // Get animated foot position
+            glm::vec3 animFootPos = IKUtils::getWorldPosition(cachedGlobalTransforms[nfp.foot.footBoneIndex]);
+            glm::vec3 worldFootPos = glm::vec3(characterTransform * glm::vec4(animFootPos, 1.0f));
+
+            // Query ground at this position
+            glm::vec3 rayOrigin = worldFootPos + glm::vec3(0.0f, nfp.foot.raycastHeight, 0.0f);
+            GroundQueryResult groundResult = groundQuery(rayOrigin, nfp.foot.raycastHeight + nfp.foot.raycastDistance);
+
+            if (groundResult.hit) {
+                // How much lower is the ground compared to where the foot currently is?
+                // Positive = ground is below foot, need to lower pelvis
+                float ankleHeight = 0.08f;  // Ankle height above ground
+                float groundOffset = worldFootPos.y - (groundResult.position.y + ankleHeight);
+
+                // Track the foot that needs the pelvis to drop the most
+                if (!anyFootGrounded || groundOffset > lowestGroundOffset) {
+                    lowestGroundOffset = groundOffset;
+                }
+                anyFootGrounded = true;
+
+                // Store ground height for later foot IK
+                nfp.foot.currentGroundHeight = groundResult.position.y;
+                nfp.foot.isGrounded = true;
             }
         }
 
-        if (leftFoot && rightFoot) {
-            float offset = FootPlacementIKSolver::calculatePelvisOffset(*leftFoot, *rightFoot, 0.0f);
-            FootPlacementIKSolver::applyPelvisAdjustment(skeleton, pelvisAdjustment, offset, deltaTime);
+        if (anyFootGrounded) {
+            // Pelvis needs to drop by the amount of the lowest foot
+            // Negative offset = lower the pelvis
+            float targetOffset = -lowestGroundOffset;
+
+            // Clamp to reasonable bounds
+            targetOffset = glm::clamp(targetOffset, pelvisAdjustment.minOffset, pelvisAdjustment.maxOffset);
+
+            FootPlacementIKSolver::applyPelvisAdjustment(skeleton, pelvisAdjustment, targetOffset, deltaTime);
             skeleton.computeGlobalTransforms(cachedGlobalTransforms);
         }
     }
 
-    // Solve foot placement IK
+    // ========== PHASE 2: Solve foot placement IK ==========
+    // Now with pelvis properly adjusted, solve foot IK
     for (auto& nfp : footPlacements) {
         if (nfp.foot.enabled && nfp.foot.weight > 0.0f && groundQuery) {
             FootPlacementIKSolver::solve(skeleton, nfp.foot, cachedGlobalTransforms,
