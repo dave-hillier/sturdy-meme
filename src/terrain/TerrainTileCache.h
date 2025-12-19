@@ -118,12 +118,6 @@ public:
         return tileInfoBuffers_[frameIndex % FRAMES_IN_FLIGHT].get();
     }
 
-    // DEPRECATED: Do not use - causes CPU-GPU sync issues leading to flickering.
-    // This exists only for backwards compatibility during transition.
-    // Use getTileInfoBuffer(frameIndex) instead in all new code.
-    [[deprecated("Use getTileInfoBuffer(uint32_t frameIndex) to avoid CPU-GPU sync issues")]]
-    VkBuffer getTileInfoBuffer() const { return tileInfoBuffers_[0].get(); }
-
     // Update which frame we're writing to (call during updateActiveTiles)
     void setCurrentFrameIndex(uint32_t frameIndex) { currentFrameIndex_ = frameIndex; }
 

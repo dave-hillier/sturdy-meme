@@ -49,7 +49,6 @@ set(SOURCES
     src/core/ShaderLoader.cpp
     src/core/PipelineBuilder.cpp
     src/core/GraphicsPipelineFactory.cpp
-    src/core/BindingBuilder.cpp
     src/core/DescriptorManager.cpp
     src/core/MaterialDescriptorFactory.cpp
     src/core/MaterialRegistry.cpp
