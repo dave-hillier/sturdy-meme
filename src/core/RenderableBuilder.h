@@ -17,7 +17,7 @@ constexpr MaterialId INVALID_MATERIAL_ID = ~0u;
 struct Renderable {
     glm::mat4 transform;
     Mesh* mesh;
-    Texture* texture;  // Deprecated: kept for debug/inspection only. Use materialId for rendering.
+    Texture* texture;  // For debug/inspection. Use materialId for rendering.
     MaterialId materialId = INVALID_MATERIAL_ID;  // Used for descriptor set lookup during rendering
     float roughness = 0.5f;
     float metallic = 0.0f;
