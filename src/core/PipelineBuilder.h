@@ -44,6 +44,9 @@ public:
 
     PipelineBuilder& reset();
 
+    // Set pipeline cache for faster pipeline creation
+    PipelineBuilder& setPipelineCache(VkPipelineCache cache);
+
     PipelineBuilder& addDescriptorBinding(uint32_t binding, VkDescriptorType type, uint32_t count,
                                           VkShaderStageFlags stageFlags, const VkSampler* immutableSamplers = nullptr);
 
@@ -75,6 +78,7 @@ public:
 
 private:
     VkDevice device;
+    VkPipelineCache pipelineCacheHandle = VK_NULL_HANDLE;
     std::vector<VkDescriptorSetLayoutBinding> descriptorBindings;
     std::vector<VkPushConstantRange> pushConstantRanges;
     std::vector<VkPipelineShaderStageCreateInfo> shaderStages;

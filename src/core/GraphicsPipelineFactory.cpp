@@ -11,6 +11,11 @@ GraphicsPipelineFactory::~GraphicsPipelineFactory() {
     cleanup();
 }
 
+GraphicsPipelineFactory& GraphicsPipelineFactory::setPipelineCache(VkPipelineCache cache) {
+    pipelineCacheHandle = cache;
+    return *this;
+}
+
 GraphicsPipelineFactory& GraphicsPipelineFactory::reset() {
     cleanup();
 
@@ -19,6 +24,7 @@ GraphicsPipelineFactory& GraphicsPipelineFactory::reset() {
     renderPass = VK_NULL_HANDLE;
     subpass = 0;
     pipelineLayout = VK_NULL_HANDLE;
+    pipelineCacheHandle = VK_NULL_HANDLE;
     extent = {0, 0};
     dynamicViewport = false;
     vertexBindings.clear();
@@ -464,7 +470,7 @@ bool GraphicsPipelineFactory::build(VkPipeline& pipeline) {
     pipelineInfo.renderPass = renderPass;
     pipelineInfo.subpass = subpass;
 
-    VkResult result = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline);
+    VkResult result = vkCreateGraphicsPipelines(device, pipelineCacheHandle, 1, &pipelineInfo, nullptr, &pipeline);
     cleanup();
 
     if (result != VK_SUCCESS) {

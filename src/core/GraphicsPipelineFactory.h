@@ -49,6 +49,9 @@ public:
     // Reset all state to defaults
     GraphicsPipelineFactory& reset();
 
+    // Set pipeline cache for faster pipeline creation
+    GraphicsPipelineFactory& setPipelineCache(VkPipelineCache cache);
+
     // Apply a preset configuration
     GraphicsPipelineFactory& applyPreset(Preset preset);
 
@@ -110,6 +113,7 @@ public:
 
 private:
     VkDevice device;
+    VkPipelineCache pipelineCacheHandle = VK_NULL_HANDLE;
 
     // Shader state
     std::string vertShaderPath;
