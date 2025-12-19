@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ILeafGenerator.h"
+#include "TreeVertex.h"
 #include <random>
 
 // Generates billboard quad leaves placed along terminal branches
@@ -15,6 +16,13 @@ public:
                       const TreeParameters& params,
                       std::vector<Vertex>& outVertices,
                       std::vector<uint32_t>& outIndices) override;
+
+    // Build leaf mesh with wind animation data (TreeVertex)
+    // Each leaf vertex gets wind parameters for flutter animation
+    void buildLeafMeshWithWind(const std::vector<LeafInstance>& leaves,
+                               const TreeParameters& params,
+                               std::vector<TreeVertex>& outVertices,
+                               std::vector<uint32_t>& outIndices);
 
     const char* getName() const override { return "Billboard Leaves"; }
 

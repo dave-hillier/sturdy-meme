@@ -1,10 +1,20 @@
 #include "BillboardLeafGenerator.h"
 #include <SDL3/SDL.h>
 #include <cmath>
+#include <functional>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
+
+// Hash function for generating per-leaf phase offsets
+static float hashLeafPosition(const glm::vec3& pos) {
+    uint32_t h = 0;
+    h ^= std::hash<float>{}(pos.x);
+    h ^= std::hash<float>{}(pos.y) * 31;
+    h ^= std::hash<float>{}(pos.z) * 127;
+    return static_cast<float>(h % 10000) / 10000.0f * 2.0f * static_cast<float>(M_PI);
+}
 
 void BillboardLeafGenerator::generateLeaves(const TreeStructure& tree,
                                             const TreeParameters& params,
@@ -189,6 +199,134 @@ void BillboardLeafGenerator::buildLeafMesh(const std::vector<LeafInstance>& leav
     }
 
     SDL_Log("BillboardLeafGenerator: Built mesh with %zu vertices, %zu indices",
+            outVertices.size(), outIndices.size());
+}
+
+void BillboardLeafGenerator::buildLeafMeshWithWind(const std::vector<LeafInstance>& leaves,
+                                                    const TreeParameters& params,
+                                                    std::vector<TreeVertex>& outVertices,
+                                                    std::vector<uint32_t>& outIndices) {
+    outVertices.clear();
+    outIndices.clear();
+
+    if (leaves.empty()) return;
+
+    bool doubleBillboard = (params.leafBillboard == BillboardMode::Double);
+
+    for (size_t i = 0; i < leaves.size(); ++i) {
+        const auto& leaf = leaves[i];
+
+        // Skip invalid leaves
+        if (std::isnan(leaf.position.x) || std::isnan(leaf.position.y) || std::isnan(leaf.position.z) ||
+            std::isnan(leaf.normal.x) || std::isnan(leaf.normal.y) || std::isnan(leaf.normal.z)) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Skipping leaf %zu with NaN data", i);
+            continue;
+        }
+
+        // Build tangent space from normal
+        glm::vec3 right;
+        glm::vec3 crossVec = glm::cross(glm::vec3(0.0f, 1.0f, 0.0f), leaf.normal);
+        float crossLen = glm::length(crossVec);
+        if (crossLen < 0.001f) {
+            right = glm::vec3(1.0f, 0.0f, 0.0f);
+        } else {
+            right = crossVec / crossLen;
+        }
+        glm::vec3 up = glm::cross(leaf.normal, right);
+
+        // Apply rotation around normal
+        float c = std::cos(leaf.rotation);
+        float s = std::sin(leaf.rotation);
+        glm::vec3 rotRight = right * c + up * s;
+        glm::vec3 rotUp = -right * s + up * c;
+
+        float halfSize = leaf.size * 0.5f;
+        glm::vec4 color(params.leafTint, 1.0f);
+
+        glm::vec2 uvs[4] = {
+            {0.0f, 1.0f},
+            {1.0f, 1.0f},
+            {1.0f, 0.0f},
+            {0.0f, 0.0f}
+        };
+
+        // Wind parameters for leaves:
+        // - branchOrigin: leaf center position (attachment point for wind rotation)
+        // - branchLevel: high value (3.0) to indicate leaf-level motion
+        // - phase: per-leaf phase offset for varied flutter
+        // - flexibility: 1.0 (fully flexible)
+        // - length: leaf size (for scaling motion)
+        glm::vec3 branchOrigin = leaf.position;
+        float leafPhase = hashLeafPosition(leaf.position);
+        glm::vec4 windParams(3.0f, leafPhase, 1.0f, leaf.size);
+
+        // First quad
+        {
+            uint32_t baseIdx = static_cast<uint32_t>(outVertices.size());
+
+            glm::vec3 corners[4] = {
+                leaf.position + (-rotRight - rotUp) * halfSize,
+                leaf.position + ( rotRight - rotUp) * halfSize,
+                leaf.position + ( rotRight + rotUp) * halfSize,
+                leaf.position + (-rotRight + rotUp) * halfSize
+            };
+
+            for (int j = 0; j < 4; ++j) {
+                TreeVertex vert;
+                vert.position = corners[j];
+                vert.normal = leaf.normal;
+                vert.texCoord = uvs[j];
+                vert.tangent = glm::vec4(rotRight, 1.0f);
+                vert.color = color;
+                vert.branchOrigin = branchOrigin;
+                vert.windParams = windParams;
+                outVertices.push_back(vert);
+            }
+
+            outIndices.push_back(baseIdx);
+            outIndices.push_back(baseIdx + 1);
+            outIndices.push_back(baseIdx + 2);
+            outIndices.push_back(baseIdx);
+            outIndices.push_back(baseIdx + 2);
+            outIndices.push_back(baseIdx + 3);
+        }
+
+        // Second quad for double billboard
+        if (doubleBillboard) {
+            uint32_t baseIdx = static_cast<uint32_t>(outVertices.size());
+
+            glm::vec3 rotRight2 = leaf.normal;
+            glm::vec3 normal2 = -rotRight;
+
+            glm::vec3 corners[4] = {
+                leaf.position + (-rotRight2 - rotUp) * halfSize,
+                leaf.position + ( rotRight2 - rotUp) * halfSize,
+                leaf.position + ( rotRight2 + rotUp) * halfSize,
+                leaf.position + (-rotRight2 + rotUp) * halfSize
+            };
+
+            for (int j = 0; j < 4; ++j) {
+                TreeVertex vert;
+                vert.position = corners[j];
+                vert.normal = normal2;
+                vert.texCoord = uvs[j];
+                vert.tangent = glm::vec4(rotRight2, 1.0f);
+                vert.color = color;
+                vert.branchOrigin = branchOrigin;
+                vert.windParams = windParams;
+                outVertices.push_back(vert);
+            }
+
+            outIndices.push_back(baseIdx);
+            outIndices.push_back(baseIdx + 1);
+            outIndices.push_back(baseIdx + 2);
+            outIndices.push_back(baseIdx);
+            outIndices.push_back(baseIdx + 2);
+            outIndices.push_back(baseIdx + 3);
+        }
+    }
+
+    SDL_Log("BillboardLeafGenerator: Built wind mesh with %zu vertices, %zu indices",
             outVertices.size(), outIndices.size());
 }
 

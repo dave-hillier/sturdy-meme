@@ -8,6 +8,7 @@
 #include <functional>
 
 #include "TreeGenerator.h"
+#include "TreeMesh.h"
 #include "Mesh.h"
 #include "Texture.h"
 #include "UBOs.h"
@@ -60,7 +61,7 @@ public:
     BillboardCapture(BillboardCapture&&) = delete;
     BillboardCapture& operator=(BillboardCapture&&) = delete;
 
-    // Generate billboard atlas from tree meshes
+    // Generate billboard atlas from tree meshes (legacy Mesh version)
     // Returns true on success, fills out the atlas struct
     bool generateAtlas(
         const Mesh& branchMesh,
@@ -72,6 +73,21 @@ public:
         const Texture& barkRoughnessTex,
         const Texture& leafTex,
         uint32_t captureResolution,   // Resolution per capture (e.g., 512)
+        BillboardAtlas& outAtlas
+    );
+
+    // Generate billboard atlas from tree meshes (TreeMesh version with wind data)
+    // Note: Wind animation is not applied during billboard capture (static snapshots)
+    bool generateAtlas(
+        const TreeMesh& branchMesh,
+        const TreeMesh& leafMesh,
+        const TreeParameters& treeParams,
+        const Texture& barkColorTex,
+        const Texture& barkNormalTex,
+        const Texture& barkAOTex,
+        const Texture& barkRoughnessTex,
+        const Texture& leafTex,
+        uint32_t captureResolution,
         BillboardAtlas& outAtlas
     );
 
@@ -113,11 +129,25 @@ private:
     // Calculate bounding sphere of meshes
     void calculateBoundingSphere(const Mesh& branchMesh, const Mesh& leafMesh,
                                   glm::vec3& outCenter, float& outRadius);
+    void calculateBoundingSphere(const TreeMesh& branchMesh, const TreeMesh& leafMesh,
+                                  glm::vec3& outCenter, float& outRadius);
 
     // Render tree to offscreen target
     bool renderCapture(
         const Mesh& branchMesh,
         const Mesh& leafMesh,
+        const TreeParameters& treeParams,
+        const glm::mat4& view,
+        const glm::mat4& proj,
+        const Texture& barkColorTex,
+        const Texture& barkNormalTex,
+        const Texture& barkAOTex,
+        const Texture& barkRoughnessTex,
+        const Texture& leafTex
+    );
+    bool renderCapture(
+        const TreeMesh& branchMesh,
+        const TreeMesh& leafMesh,
         const TreeParameters& treeParams,
         const glm::mat4& view,
         const glm::mat4& proj,

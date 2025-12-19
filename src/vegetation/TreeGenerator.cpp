@@ -196,3 +196,35 @@ void TreeGenerator::buildLeafMesh(Mesh& outMesh, const TreeParameters& params) {
         outMesh.setCustomGeometry(leafVertices, leafIndices);
     }
 }
+
+void TreeGenerator::buildWindMesh(TreeMesh& outMesh, const TreeParameters& params) {
+    // Generate TreeVertex data with wind animation parameters
+    // Uses TubeBranchGeometry::generateWithWind() for branches
+    std::vector<TreeVertex> windVertices;
+    std::vector<uint32_t> windIndices;
+
+    TubeBranchGeometry tubeGen;
+
+    // Generate wind vertices from the tree structure
+    tubeGen.generateWithWind(treeStructure, params, windVertices, windIndices);
+
+    if (!windVertices.empty()) {
+        outMesh.setCustomGeometry(windVertices, windIndices);
+        SDL_Log("TreeGenerator: Built wind mesh with %zu vertices", windVertices.size());
+    }
+}
+
+void TreeGenerator::buildWindLeafMesh(TreeMesh& outMesh, const TreeParameters& params) {
+    std::vector<TreeVertex> windLeafVertices;
+    std::vector<uint32_t> windLeafIndices;
+
+    if (!leafInstances.empty()) {
+        BillboardLeafGenerator leafGen;
+        leafGen.buildLeafMeshWithWind(leafInstances, params, windLeafVertices, windLeafIndices);
+    }
+
+    if (!windLeafVertices.empty()) {
+        outMesh.setCustomGeometry(windLeafVertices, windLeafIndices);
+        SDL_Log("TreeGenerator: Built wind leaf mesh with %zu vertices", windLeafVertices.size());
+    }
+}

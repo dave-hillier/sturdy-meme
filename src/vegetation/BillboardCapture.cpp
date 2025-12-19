@@ -770,6 +770,267 @@ bool BillboardCapture::generateAtlas(
     return true;
 }
 
+// TreeMesh overload - calculates bounding sphere from TreeVertex data
+void BillboardCapture::calculateBoundingSphere(const TreeMesh& branchMesh, const TreeMesh& leafMesh,
+                                                glm::vec3& outCenter, float& outRadius) {
+    glm::vec3 minPos(std::numeric_limits<float>::max());
+    glm::vec3 maxPos(std::numeric_limits<float>::lowest());
+
+    auto processVertices = [&](const std::vector<TreeVertex>& vertices) {
+        for (const auto& v : vertices) {
+            minPos = glm::min(minPos, v.position);
+            maxPos = glm::max(maxPos, v.position);
+        }
+    };
+
+    processVertices(branchMesh.getVertices());
+    if (!leafMesh.getVertices().empty()) {
+        processVertices(leafMesh.getVertices());
+    }
+
+    outCenter = (minPos + maxPos) * 0.5f;
+    outRadius = glm::length(maxPos - minPos) * 0.5f;
+    outRadius *= 1.1f;
+}
+
+// TreeMesh overload for renderCapture
+bool BillboardCapture::renderCapture(
+    const TreeMesh& branchMesh,
+    const TreeMesh& leafMesh,
+    const TreeParameters& treeParams,
+    const glm::mat4& view,
+    const glm::mat4& proj,
+    const Texture& barkColorTex,
+    const Texture& barkNormalTex,
+    const Texture& barkAOTex,
+    const Texture& barkRoughnessTex,
+    const Texture& leafTex)
+{
+    // Update UBO
+    UniformBufferObject ubo{};
+    ubo.view = view;
+    ubo.proj = proj;
+
+    glm::mat4 invView = glm::inverse(view);
+    ubo.cameraPosition = glm::vec4(invView[3]);
+
+    ubo.sunDirection = glm::vec4(glm::normalize(glm::vec3(0.3f, 1.0f, 0.2f)), 1.0f);
+    ubo.sunColor = glm::vec4(1.0f, 0.98f, 0.95f, 1.0f);
+    ubo.moonDirection = glm::vec4(0.0f, -1.0f, 0.0f, 0.0f);
+    ubo.moonColor = glm::vec4(0.0f);
+    ubo.ambientColor = glm::vec4(0.4f, 0.45f, 0.5f, 1.0f);
+
+    memcpy(uboMapped, &ubo, sizeof(ubo));
+
+    DescriptorManager::SetWriter(device, descriptorSet)
+        .writeBuffer(0, uboBuffer_.get(), 0, sizeof(UniformBufferObject))
+        .writeImage(1, barkColorTex.getImageView(), barkColorTex.getSampler())
+        .writeImage(2, barkNormalTex.getImageView(), barkNormalTex.getSampler())
+        .writeImage(3, barkAOTex.getImageView(), barkAOTex.getSampler())
+        .writeImage(4, barkRoughnessTex.getImageView(), barkRoughnessTex.getSampler())
+        .writeImage(5, leafTex.getImageView(), leafTex.getSampler())
+        .update();
+
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.commandPool = commandPool;
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandBufferCount = 1;
+
+    VkCommandBuffer cmd;
+    vkAllocateCommandBuffers(device, &allocInfo, &cmd);
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    vkBeginCommandBuffer(cmd, &beginInfo);
+
+    std::array<VkClearValue, 2> clearValues{};
+    clearValues[0].color = {{0.0f, 0.0f, 0.0f, 0.0f}};
+    clearValues[1].depthStencil = {1.0f, 0};
+
+    VkRenderPassBeginInfo rpInfo{};
+    rpInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    rpInfo.renderPass = renderPass_.get();
+    rpInfo.framebuffer = framebuffer_.get();
+    rpInfo.renderArea.offset = {0, 0};
+    rpInfo.renderArea.extent = {renderWidth, renderHeight};
+    rpInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
+    rpInfo.pClearValues = clearValues.data();
+
+    vkCmdBeginRenderPass(cmd, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+    VkViewport viewport{};
+    viewport.x = 0.0f;
+    viewport.y = 0.0f;
+    viewport.width = static_cast<float>(renderWidth);
+    viewport.height = static_cast<float>(renderHeight);
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+    VkRect2D scissor{};
+    scissor.offset = {0, 0};
+    scissor.extent = {renderWidth, renderHeight};
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout_.get(),
+                            0, 1, &descriptorSet, 0, nullptr);
+
+    TreePushConstants pc{};
+    pc.model = glm::mat4(1.0f);
+    pc.roughness = 0.8f;
+    pc.metallic = 0.0f;
+    pc.alphaTest = 0.0f;
+    pc.isLeaf = 0;
+
+    // Draw branches
+    if (branchMesh.getIndexCount() > 0 && branchMesh.getVertexBuffer() != VK_NULL_HANDLE) {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, solidPipeline_.get());
+        vkCmdPushConstants(cmd, pipelineLayout_.get(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                           0, sizeof(TreePushConstants), &pc);
+
+        VkBuffer vertexBuffers[] = {branchMesh.getVertexBuffer()};
+        VkDeviceSize offsets[] = {0};
+        vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
+        vkCmdBindIndexBuffer(cmd, branchMesh.getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+        vkCmdDrawIndexed(cmd, branchMesh.getIndexCount(), 1, 0, 0, 0);
+    }
+
+    // Draw leaves
+    if (leafMesh.getIndexCount() > 0 && leafMesh.getVertexBuffer() != VK_NULL_HANDLE) {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, leafPipeline_.get());
+
+        pc.roughness = 0.6f;
+        pc.alphaTest = treeParams.leafAlphaTest;
+        pc.isLeaf = 1;
+        vkCmdPushConstants(cmd, pipelineLayout_.get(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                           0, sizeof(TreePushConstants), &pc);
+
+        VkBuffer vertexBuffers[] = {leafMesh.getVertexBuffer()};
+        VkDeviceSize offsets[] = {0};
+        vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
+        vkCmdBindIndexBuffer(cmd, leafMesh.getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+        vkCmdDrawIndexed(cmd, leafMesh.getIndexCount(), 1, 0, 0, 0);
+    }
+
+    vkCmdEndRenderPass(cmd);
+
+    VkBufferImageCopy region{};
+    region.bufferOffset = 0;
+    region.bufferRowLength = 0;
+    region.bufferImageHeight = 0;
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.mipLevel = 0;
+    region.imageSubresource.baseArrayLayer = 0;
+    region.imageSubresource.layerCount = 1;
+    region.imageOffset = {0, 0, 0};
+    region.imageExtent = {renderWidth, renderHeight, 1};
+
+    vkCmdCopyImageToBuffer(cmd, colorImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, stagingBuffer_.get(), 1, &region);
+
+    vkEndCommandBuffer(cmd);
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &cmd;
+
+    vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+    vkQueueWaitIdle(graphicsQueue);
+
+    vkFreeCommandBuffers(device, commandPool, 1, &cmd);
+
+    return true;
+}
+
+// TreeMesh overload for generateAtlas
+bool BillboardCapture::generateAtlas(
+    const TreeMesh& branchMesh,
+    const TreeMesh& leafMesh,
+    const TreeParameters& treeParams,
+    const Texture& barkColorTex,
+    const Texture& barkNormalTex,
+    const Texture& barkAOTex,
+    const Texture& barkRoughnessTex,
+    const Texture& leafTex,
+    uint32_t captureResolution,
+    BillboardAtlas& outAtlas)
+{
+    auto angles = getStandardAngles();
+    uint32_t numCaptures = static_cast<uint32_t>(angles.size());
+
+    uint32_t cols = 5;
+    uint32_t rows = 4;
+
+    outAtlas.cellWidth = captureResolution;
+    outAtlas.cellHeight = captureResolution;
+    outAtlas.columns = cols;
+    outAtlas.rows = rows;
+    outAtlas.width = cols * captureResolution;
+    outAtlas.height = rows * captureResolution;
+    outAtlas.angles = angles;
+
+    outAtlas.rgbaPixels.resize(outAtlas.width * outAtlas.height * 4, 0);
+
+    if (!createRenderTarget(captureResolution, captureResolution)) {
+        return false;
+    }
+
+    if (!createDescriptorSets()) {
+        return false;
+    }
+
+    glm::vec3 center;
+    float radius;
+    calculateBoundingSphere(branchMesh, leafMesh, center, radius);
+
+    float orthoSize = radius * 1.1f;
+    glm::mat4 proj = glm::ortho(-orthoSize, orthoSize, -orthoSize, orthoSize, 0.1f, radius * 4.0f);
+    proj[1][1] *= -1;
+
+    float cameraDistance = radius * 2.0f;
+
+    SDL_Log("Generating billboard atlas: %d captures at %dx%d", numCaptures, captureResolution, captureResolution);
+
+    for (uint32_t i = 0; i < numCaptures; ++i) {
+        const auto& angle = angles[i];
+
+        glm::mat4 view = calculateViewMatrix(angle, center, cameraDistance);
+
+        if (!renderCapture(branchMesh, leafMesh, treeParams, view, proj,
+                          barkColorTex, barkNormalTex, barkAOTex, barkRoughnessTex, leafTex)) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to render capture %d (%s)", i, angle.name.c_str());
+            continue;
+        }
+
+        std::vector<uint8_t> capturePixels;
+        if (!readPixels(capturePixels)) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to read capture %d (%s)", i, angle.name.c_str());
+            continue;
+        }
+
+        uint32_t col = i % cols;
+        uint32_t row = i / cols;
+        uint32_t atlasX = col * captureResolution;
+        uint32_t atlasY = row * captureResolution;
+
+        for (uint32_t y = 0; y < captureResolution; ++y) {
+            uint32_t srcOffset = y * captureResolution * 4;
+            uint32_t dstOffset = ((atlasY + y) * outAtlas.width + atlasX) * 4;
+            memcpy(&outAtlas.rgbaPixels[dstOffset], &capturePixels[srcOffset], captureResolution * 4);
+        }
+
+        SDL_Log("Captured angle %d: %s (azimuth=%.0f, elevation=%.0f)",
+                i, angle.name.c_str(), angle.azimuth, angle.elevation);
+    }
+
+    SDL_Log("Billboard atlas generated: %dx%d (%d captures)", outAtlas.width, outAtlas.height, numCaptures);
+
+    return true;
+}
+
 bool BillboardCapture::saveAtlasToPNG(const BillboardAtlas& atlas, const std::string& filepath) {
     int result = stbi_write_png(filepath.c_str(), atlas.width, atlas.height, 4,
                                  atlas.rgbaPixels.data(), atlas.width * 4);

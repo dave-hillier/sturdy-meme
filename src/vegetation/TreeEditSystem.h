@@ -11,6 +11,7 @@
 #include <memory>
 
 #include "TreeGenerator.h"
+#include "TreeMesh.h"
 #include "Mesh.h"
 #include "Texture.h"
 #include "UBOs.h"
@@ -101,8 +102,8 @@ public:
     float getScale() const { return scale; }
 
     // Access to meshes for billboard capture
-    const Mesh& getBranchMesh() const { return branchMesh; }
-    const Mesh& getLeafMesh() const { return leafMesh; }
+    const TreeMesh& getBranchMesh() const { return branchMesh; }
+    const TreeMesh& getLeafMesh() const { return leafMesh; }
 
     // Access to textures for billboard capture
     const Texture& getBarkColorTexture() const;
@@ -119,8 +120,8 @@ private:
     void cleanup();
     // Pending mesh destruction - deferred until frame is no longer in-flight
     struct PendingMeshDestroy {
-        Mesh branchMesh;
-        Mesh leafMesh;
+        TreeMesh branchMesh;
+        TreeMesh leafMesh;
         uint32_t frameToDestroyAfter;  // Safe to destroy when this frame completes
     };
 
@@ -189,8 +190,8 @@ private:
     // Tree data
     TreeGenerator generator;
     TreeParameters treeParams;
-    Mesh branchMesh;
-    Mesh leafMesh;
+    TreeMesh branchMesh;  // Uses TreeVertex with wind animation data
+    TreeMesh leafMesh;    // Uses TreeVertex with wind animation data
     std::atomic<bool> meshesUploaded{false};  // Atomic for safe cross-frame access
 
     // Pending mesh destructions (deferred to avoid stalls)

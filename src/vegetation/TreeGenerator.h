@@ -4,6 +4,8 @@
 #include "TreeGeometry.h"
 #include "TreeStructure.h"
 #include "TreeBuilder.h"
+#include "TreeMesh.h"
+#include "TreeVertex.h"
 #include "Mesh.h"
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -36,11 +38,18 @@ public:
     const TreeStructure& getTreeStructure() const { return treeStructure; }
     TreeStructure& getTreeStructure() { return treeStructure; }
 
-    // Build mesh from generated geometry
+    // Build mesh from generated geometry (legacy Vertex format)
     void buildMesh(Mesh& outMesh);
 
-    // Get leaf vertex data (quad billboards)
+    // Get leaf vertex data (quad billboards, legacy format)
     void buildLeafMesh(Mesh& outMesh, const TreeParameters& params);
+
+    // Build mesh with wind animation data (TreeVertex format)
+    // This includes per-vertex branch origin, level, and phase for GPU wind animation
+    void buildWindMesh(TreeMesh& outMesh, const TreeParameters& params);
+
+    // Build leaf mesh with wind animation data (TreeVertex format)
+    void buildWindLeafMesh(TreeMesh& outMesh, const TreeParameters& params);
 
     // Access the underlying builder for advanced customization
     TreeBuilder& getBuilder() { return builder; }

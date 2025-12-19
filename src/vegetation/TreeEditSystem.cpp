@@ -1,4 +1,5 @@
 #include "TreeEditSystem.h"
+#include "TreeVertex.h"
 #include "ShaderLoader.h"
 #include <SDL3/SDL.h>
 #include <glm/gtc/matrix_transform.hpp>
@@ -256,9 +257,9 @@ bool TreeEditSystem::createPipelines() {
     shaderStages[1].module = *fragModule;
     shaderStages[1].pName = "main";
 
-    // Vertex input - use Vertex format from Mesh
-    auto bindingDescription = Vertex::getBindingDescription();
-    auto attributeDescriptions = Vertex::getAttributeDescriptions();
+    // Vertex input - use TreeVertex format for wind animation support
+    auto bindingDescription = TreeVertex::getBindingDescription();
+    auto attributeDescriptions = TreeVertex::getAttributeDescriptions();
 
     VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
     vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
@@ -410,17 +411,18 @@ void TreeEditSystem::regenerateTree() {
         pendingMeshDestroys.push_back(std::move(pending));
 
         // Reset current meshes to empty state
-        branchMesh = Mesh();
-        leafMesh = Mesh();
+        branchMesh = TreeMesh();
+        leafMesh = TreeMesh();
         meshesUploaded.store(false);
     }
 
     // Generate new tree geometry
     generator.generate(treeParams);
 
-    // Build meshes
-    generator.buildMesh(branchMesh);
-    generator.buildLeafMesh(leafMesh, treeParams);
+    // Build meshes with wind animation data (TreeVertex format)
+    // This includes per-vertex branch origin, level, and phase for GPU wind animation
+    generator.buildWindMesh(branchMesh, treeParams);
+    generator.buildWindLeafMesh(leafMesh, treeParams);
 
     // Upload to GPU
     uploadTreeMesh();
@@ -430,17 +432,18 @@ void TreeEditSystem::regenerateTree() {
 }
 
 void TreeEditSystem::uploadTreeMesh() {
-    if (generator.getBranchVertices().empty()) return;
+    // Check if we have mesh data to upload
+    if (!branchMesh.hasData()) return;
 
     branchMesh.upload(allocator, device, commandPool, graphicsQueue);
 
-    if (!generator.getLeafInstances().empty()) {
+    if (leafMesh.hasData()) {
         leafMesh.upload(allocator, device, commandPool, graphicsQueue);
     }
 
     meshesUploaded.store(true);
-    SDL_Log("Tree mesh uploaded: %u branch vertices, %zu leaf instances",
-            branchMesh.getIndexCount(), generator.getLeafInstances().size());
+    SDL_Log("Tree mesh uploaded: %u branch indices, %u leaf indices",
+            branchMesh.getIndexCount(), leafMesh.getIndexCount());
 }
 
 void TreeEditSystem::beginFrame(uint32_t frameIndex) {

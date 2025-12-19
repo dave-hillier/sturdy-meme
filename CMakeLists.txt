@@ -85,6 +85,7 @@ set(SOURCES
     src/vegetation/TubeBranchGeometry.cpp
     src/vegetation/BillboardLeafGenerator.cpp
     src/vegetation/TreeBuilder.cpp
+    src/vegetation/TreeMesh.cpp
     # Postprocess
     src/postprocess/PostProcessSystem.cpp
     src/postprocess/BloomSystem.cpp
