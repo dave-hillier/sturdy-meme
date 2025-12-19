@@ -40,7 +40,7 @@ private:
     void renderPresets(Renderer& renderer);
     void renderBillboardSection(Renderer& renderer);
 
-    bool visible = false;
+    bool visible = true;
 
     // Loaded presets from JSON files
     std::vector<TreePreset> presets;

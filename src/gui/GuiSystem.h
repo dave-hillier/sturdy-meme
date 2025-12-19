@@ -62,13 +62,11 @@ private:
 
     void setupStyle();
     void renderDashboard(Renderer& renderer, const Camera& camera, float fps);
-    void renderHelpOverlay();
     void renderPositionPanel(const Camera& camera);
 
     VkDevice device_ = VK_NULL_HANDLE;  // Stored for cleanup
     VkDescriptorPool imguiPool = VK_NULL_HANDLE;
     bool visible = true;
-    bool showHelp = false;
 
     // IK debug settings
     IKDebugSettings ikDebugSettings;

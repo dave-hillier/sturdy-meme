@@ -326,11 +326,6 @@ void GuiSystem::render(Renderer& renderer, const Camera& camera, float deltaTime
     }
     ImGui::End();
 
-    // Help overlay
-    if (showHelp) {
-        renderHelpOverlay();
-    }
-
     // Position panel (separate window)
     renderPositionPanel(camera);
 
@@ -422,65 +417,6 @@ void GuiSystem::renderDashboard(Renderer& renderer, const Camera& camera, float 
     ImGui::Spacing();
     glm::vec3 pos = camera.getPosition();
     ImGui::Text("Camera: X %.1f  Y %.1f  Z %.1f", pos.x, pos.y, pos.z);
-
-    // Help toggle
-    ImGui::Spacing();
-    if (ImGui::Button(showHelp ? "Hide Help (H)" : "Show Help (H)", ImVec2(-1, 0))) {
-        showHelp = !showHelp;
-    }
-
-    // Tree Editor toggle
-    if (ImGui::Button(treeEditorGui.isVisible() ? "Hide Tree Editor (F2)" : "Show Tree Editor (F2)", ImVec2(-1, 0))) {
-        treeEditorGui.toggleVisibility();
-    }
-}
-
-void GuiSystem::renderHelpOverlay() {
-    ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration |
-                             ImGuiWindowFlags_AlwaysAutoResize |
-                             ImGuiWindowFlags_NoSavedSettings |
-                             ImGuiWindowFlags_NoFocusOnAppearing |
-                             ImGuiWindowFlags_NoNav |
-                             ImGuiWindowFlags_NoMove;
-
-    ImGui::SetNextWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x * 0.5f,
-                                   ImGui::GetIO().DisplaySize.y * 0.5f),
-                            ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowBgAlpha(0.9f);
-
-    if (ImGui::Begin("Help", &showHelp, flags)) {
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 0.8f, 1.0f, 1.0f));
-        ImGui::Text("VULKAN GAME ENGINE");
-        ImGui::PopStyleColor();
-
-        ImGui::Separator();
-        ImGui::Spacing();
-
-        ImGui::Text("CAMERA CONTROLS");
-        ImGui::BulletText("Free Camera: WASD + Arrow keys");
-        ImGui::BulletText("Third Person: WASD moves player");
-        ImGui::BulletText("Space: Jump (3rd person) / Up (free cam)");
-        ImGui::BulletText("Tab: Switch camera mode");
-
-        ImGui::Spacing();
-        ImGui::Text("GAMEPAD CONTROLS");
-        ImGui::BulletText("Left Stick: Move");
-        ImGui::BulletText("Right Stick: Look / Orbit");
-        ImGui::BulletText("A/B/X/Y: Time presets");
-        ImGui::BulletText("Bumpers: Up/Down or Zoom");
-
-        ImGui::Spacing();
-        ImGui::Text("GUI");
-        ImGui::BulletText("F1: Toggle this panel");
-        ImGui::BulletText("Click and drag sliders");
-        ImGui::BulletText("Ctrl+Click for precise input");
-
-        ImGui::Spacing();
-        if (ImGui::Button("Close (H)", ImVec2(-1, 0))) {
-            showHelp = false;
-        }
-    }
-    ImGui::End();
 }
 
 void GuiSystem::renderPositionPanel(const Camera& camera) {
