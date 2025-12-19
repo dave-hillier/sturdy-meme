@@ -49,6 +49,14 @@ struct alignas(16) HiZCullUniforms {
     uint32_t padding[2];
 };
 
+// Hi-Z pyramid generation push constants
+struct HiZPyramidPushConstants {
+    uint32_t srcWidth, srcHeight;
+    uint32_t dstWidth, dstHeight;
+    uint32_t srcMipLevel;
+    uint32_t isFirstPass;
+};
+
 // Hierarchical Z-Buffer Occlusion Culling System
 // Generates a depth pyramid from the depth buffer and uses it to cull objects
 class HiZSystem {

@@ -29,10 +29,10 @@ bool TerrainBuffers::createUniformBuffers(const InitInfo& info) {
 }
 
 bool TerrainBuffers::createIndirectBuffers(const InitInfo& info) {
-    // Indirect dispatch buffer (3 uints: x, y, z)
+    // Indirect dispatch buffer for compute shaders
     if (!BufferUtils::SingleBufferBuilder()
             .setAllocator(info.allocator)
-            .setSize(sizeof(uint32_t) * 3)
+            .setSize(sizeof(VkDispatchIndirectCommand))
             .setUsage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT)
             .setAllocationFlags(0)
             .build(indirectDispatch)) {
@@ -40,10 +40,10 @@ bool TerrainBuffers::createIndirectBuffers(const InitInfo& info) {
         return false;
     }
 
-    // Indirect draw buffer (5 uints for indexed draw)
+    // Indirect draw buffer for indexed draw commands
     if (!BufferUtils::SingleBufferBuilder()
             .setAllocator(info.allocator)
-            .setSize(sizeof(uint32_t) * 5)
+            .setSize(sizeof(VkDrawIndexedIndirectCommand))
             .setUsage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT)
             .setAllocationFlags(VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT)
             .build(indirectDraw)) {
@@ -66,10 +66,10 @@ bool TerrainBuffers::createIndirectBuffers(const InitInfo& info) {
         return false;
     }
 
-    // Cull indirect dispatch buffer (3 uints: x, y, z)
+    // Cull indirect dispatch buffer for compute shaders
     if (!BufferUtils::SingleBufferBuilder()
             .setAllocator(info.allocator)
-            .setSize(sizeof(uint32_t) * 3)
+            .setSize(sizeof(VkDispatchIndirectCommand))
             .setUsage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT)
             .setAllocationFlags(0)
             .build(cullIndirectDispatch)) {
@@ -88,10 +88,10 @@ bool TerrainBuffers::createIndirectBuffers(const InitInfo& info) {
         return false;
     }
 
-    // Shadow indirect draw buffer (5 uints for indexed draw)
+    // Shadow indirect draw buffer for indexed draw commands
     if (!BufferUtils::SingleBufferBuilder()
             .setAllocator(info.allocator)
-            .setSize(sizeof(uint32_t) * 5)
+            .setSize(sizeof(VkDrawIndexedIndirectCommand))
             .setUsage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT)
             .setAllocationFlags(0)
             .build(shadowIndirectDraw)) {

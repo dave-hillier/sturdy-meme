@@ -25,6 +25,30 @@
  * Supports cascaded FFT for multi-scale detail (large swells + small ripples).
  */
 
+// Push constant structures for Ocean compute shaders
+struct OceanTimeEvolutionPushConstants {
+    float time;
+    int resolution;
+    float oceanSize;
+    float choppiness;
+};
+
+struct OceanFFTPushConstants {
+    int stage;
+    int direction;
+    int resolution;
+    int inverse;
+};
+
+struct OceanDisplacementPushConstants {
+    int resolution;
+    float oceanSize;
+    float heightScale;
+    float foamThreshold;
+    float foamDecay;
+    float normalStrength;
+};
+
 class OceanFFT {
 public:
     // Ocean simulation parameters

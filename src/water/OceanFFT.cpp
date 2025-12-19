@@ -424,7 +424,7 @@ bool OceanFFT::createComputePipelines() {
         VkPushConstantRange pushRange{};
         pushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
         pushRange.offset = 0;
-        pushRange.size = sizeof(float) * 4;  // time, resolution, oceanSize, choppiness
+        pushRange.size = sizeof(OceanTimeEvolutionPushConstants);
 
         VkPipelineLayout rawPipelineLayout = DescriptorManager::createPipelineLayout(device, timeEvolutionDescLayout.get(), {pushRange});
         if (rawPipelineLayout == VK_NULL_HANDLE) {
@@ -471,7 +471,7 @@ bool OceanFFT::createComputePipelines() {
         VkPushConstantRange pushRange{};
         pushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
         pushRange.offset = 0;
-        pushRange.size = sizeof(int) * 4;
+        pushRange.size = sizeof(OceanFFTPushConstants);
 
         VkPipelineLayout rawPipelineLayout = DescriptorManager::createPipelineLayout(device, fftDescLayout.get(), {pushRange});
         if (rawPipelineLayout == VK_NULL_HANDLE) {
@@ -522,7 +522,7 @@ bool OceanFFT::createComputePipelines() {
         VkPushConstantRange pushRange{};
         pushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
         pushRange.offset = 0;
-        pushRange.size = sizeof(float) * 6;  // resolution, oceanSize, heightScale, foamThreshold, foamDecay, normalStrength
+        pushRange.size = sizeof(OceanDisplacementPushConstants);
 
         VkPipelineLayout rawPipelineLayout = DescriptorManager::createPipelineLayout(device, displacementDescLayout.get(), {pushRange});
         if (rawPipelineLayout == VK_NULL_HANDLE) {
@@ -776,12 +776,7 @@ void OceanFFT::recordTimeEvolution(VkCommandBuffer cmd, Cascade& cascade, float 
                             0, 1, &timeEvolutionDescSets[cascadeIndex], 0, nullptr);
 
     // Push constants
-    struct {
-        float time;
-        int resolution;
-        float oceanSize;
-        float choppiness;
-    } pushConstants = {
+    OceanTimeEvolutionPushConstants pushConstants = {
         time,
         params.resolution,
         cascade.config.oceanSize,
@@ -841,9 +836,9 @@ void OceanFFT::recordFFT(VkCommandBuffer cmd, Cascade& cascade,
                                 0, 1, &fftDescSet, 0, nullptr);
 
         // Push constants: stage, direction (0=horizontal), resolution, inverse (1=IFFT)
-        int pushData[4] = {stage, 0, params.resolution, 1};
+        OceanFFTPushConstants pushData = {stage, 0, params.resolution, 1};
         vkCmdPushConstants(cmd, fftPipelineLayout.get(), VK_SHADER_STAGE_COMPUTE_BIT,
-                           0, sizeof(pushData), pushData);
+                           0, sizeof(pushData), &pushData);
 
         vkCmdDispatch(cmd, groupCount, groupCount, 1);
 
@@ -880,9 +875,9 @@ void OceanFFT::recordFFT(VkCommandBuffer cmd, Cascade& cascade,
                                 0, 1, &fftDescSet, 0, nullptr);
 
         // Push constants: stage, direction (1=vertical), resolution, inverse
-        int pushData[4] = {stage, 1, params.resolution, 1};
+        OceanFFTPushConstants pushData = {stage, 1, params.resolution, 1};
         vkCmdPushConstants(cmd, fftPipelineLayout.get(), VK_SHADER_STAGE_COMPUTE_BIT,
-                           0, sizeof(pushData), pushData);
+                           0, sizeof(pushData), &pushData);
 
         vkCmdDispatch(cmd, groupCount, groupCount, 1);
 
@@ -930,14 +925,7 @@ void OceanFFT::recordDisplacementGeneration(VkCommandBuffer cmd, Cascade& cascad
                             0, 1, &displacementDescSets[cascadeIndex], 0, nullptr);
 
     // Push constants
-    struct {
-        int resolution;
-        float oceanSize;
-        float heightScale;
-        float foamThreshold;
-        float foamDecay;
-        float normalStrength;
-    } pushConstants = {
+    OceanDisplacementPushConstants pushConstants = {
         params.resolution,
         cascade.config.oceanSize,
         cascade.config.heightScale,

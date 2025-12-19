@@ -162,7 +162,7 @@ bool HiZSystem::createPyramidPipeline() {
     VkPushConstantRange pushConstantRange{};
     pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
     pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(uint32_t) * 6;  // srcSize, dstSize, srcMipLevel, isFirstPass
+    pushConstantRange.size = sizeof(HiZPyramidPushConstants);
 
     // Pipeline layout
     if (!DescriptorManager::createManagedPipelineLayout(
@@ -456,12 +456,7 @@ void HiZSystem::recordPyramidGeneration(VkCommandBuffer cmd, uint32_t frameIndex
         }
 
         // Push constants
-        struct {
-            uint32_t srcWidth, srcHeight;
-            uint32_t dstWidth, dstHeight;
-            uint32_t srcMipLevel;
-            uint32_t isFirstPass;
-        } pushConstants = {
+        HiZPyramidPushConstants pushConstants = {
             srcWidth, srcHeight,
             dstWidth, dstHeight,
             mip > 0 ? mip - 1 : 0,
