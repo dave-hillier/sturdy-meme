@@ -36,4 +36,7 @@ struct InitContext {
     // Frame/swapchain info
     uint32_t framesInFlight = 3;
     VkExtent2D extent = {0, 0};
+
+    // Optional pool sizes hint for systems that create their own pools
+    std::optional<DescriptorPoolSizes> poolSizesHint;
 };

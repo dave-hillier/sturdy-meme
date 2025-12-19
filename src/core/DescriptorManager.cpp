@@ -167,8 +167,16 @@ void DescriptorManager::SetWriter::update() {
 // ============================================================================
 
 DescriptorManager::Pool::Pool(VkDevice device, uint32_t initialSetsPerPool)
-    : device(device), setsPerPool(initialSetsPerPool) {
+    : device(device), setsPerPool(initialSetsPerPool), poolSizes(DescriptorPoolSizes::standard()) {
     // Create initial pool
+    pools.push_back(createPool());
+}
+
+DescriptorManager::Pool::Pool(VkDevice device, uint32_t initialSetsPerPool, const DescriptorPoolSizes& sizes)
+    : device(device), setsPerPool(initialSetsPerPool), poolSizes(sizes) {
+    // Create initial pool with custom sizes
+    SDL_Log("DescriptorManager: Creating pool with custom sizes (UBO=%u, SSBO=%u, samplers=%u, storage=%u)",
+            sizes.uniformBuffers, sizes.storageBuffers, sizes.combinedImageSamplers, sizes.storageImages);
     pools.push_back(createPool());
 }
 

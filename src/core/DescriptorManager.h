@@ -9,6 +9,56 @@
 class ManagedDescriptorSetLayout;
 class ManagedPipelineLayout;
 
+// Configurable descriptor pool sizes with builder pattern and presets
+// These are per-set multipliers - actual pool size = count * setsPerPool
+struct DescriptorPoolSizes {
+    uint32_t uniformBuffers = 16;
+    uint32_t storageBuffers = 16;
+    uint32_t combinedImageSamplers = 32;
+    uint32_t storageImages = 8;
+
+    // Builder methods for fluent configuration
+    DescriptorPoolSizes& withUniformBuffers(uint32_t count) {
+        uniformBuffers = count;
+        return *this;
+    }
+    DescriptorPoolSizes& withStorageBuffers(uint32_t count) {
+        storageBuffers = count;
+        return *this;
+    }
+    DescriptorPoolSizes& withCombinedImageSamplers(uint32_t count) {
+        combinedImageSamplers = count;
+        return *this;
+    }
+    DescriptorPoolSizes& withStorageImages(uint32_t count) {
+        storageImages = count;
+        return *this;
+    }
+
+    // Preset configurations for common scenarios
+    static DescriptorPoolSizes minimal() {
+        return {8, 8, 16, 4};
+    }
+
+    static DescriptorPoolSizes standard() {
+        return {16, 16, 32, 8};  // Current defaults
+    }
+
+    static DescriptorPoolSizes large() {
+        return {32, 32, 64, 16};
+    }
+
+    // Scale all sizes by a factor
+    DescriptorPoolSizes scaled(float factor) const {
+        return {
+            static_cast<uint32_t>(uniformBuffers * factor),
+            static_cast<uint32_t>(storageBuffers * factor),
+            static_cast<uint32_t>(combinedImageSamplers * factor),
+            static_cast<uint32_t>(storageImages * factor)
+        };
+    }
+};
+
 // Declarative descriptor set management with automatic pool growth
 // Replaces verbose manual descriptor set creation patterns
 
@@ -80,7 +130,12 @@ public:
     // Pool that automatically grows when exhausted
     class Pool {
     public:
+        // Backwards-compatible constructor (uses standard defaults)
         Pool(VkDevice device, uint32_t initialSetsPerPool = 32);
+
+        // Constructor with configurable pool sizes
+        Pool(VkDevice device, uint32_t initialSetsPerPool, const DescriptorPoolSizes& sizes);
+
         ~Pool();
 
         // Non-copyable but movable
@@ -105,6 +160,9 @@ public:
         uint32_t getPoolCount() const { return static_cast<uint32_t>(pools.size()); }
         uint32_t getTotalAllocatedSets() const { return totalAllocatedSets; }
 
+        // Get current pool sizes configuration
+        const DescriptorPoolSizes& getPoolSizes() const { return poolSizes; }
+
     private:
         VkDescriptorPool createPool();
         bool tryAllocate(VkDescriptorPool pool, VkDescriptorSetLayout layout,
@@ -116,13 +174,8 @@ public:
         uint32_t currentPoolIndex = 0;
         uint32_t totalAllocatedSets = 0;
 
-        // Track descriptor type counts for pool sizing
-        struct PoolSizes {
-            uint32_t uniformBuffers = 16;
-            uint32_t storageBuffers = 16;
-            uint32_t combinedImageSamplers = 32;
-            uint32_t storageImages = 8;
-        } poolSizes;
+        // Configurable descriptor type counts for pool sizing
+        DescriptorPoolSizes poolSizes;
     };
 
     // Helper: Create pipeline layout from descriptor set layouts (raw handle)

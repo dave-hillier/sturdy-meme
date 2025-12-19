@@ -73,13 +73,16 @@ public:
     /**
      * Build an InitContext from VulkanContext and common resources.
      * This is the single source of truth for creating the shared init context.
+     *
+     * @param poolSizes Optional pool sizes hint for systems that create their own pools
      */
     static InitContext buildContext(
         const VulkanContext& vulkanContext,
         VkCommandPool commandPool,
         DescriptorManager::Pool* descriptorPool,
         const std::string& resourcePath,
-        uint32_t framesInFlight
+        uint32_t framesInFlight,
+        std::optional<DescriptorPoolSizes> poolSizes = std::nullopt
     ) {
         InitContext ctx{};
         ctx.device = vulkanContext.getDevice();
@@ -92,6 +95,7 @@ public:
         ctx.resourcePath = resourcePath;
         ctx.framesInFlight = framesInFlight;
         ctx.extent = vulkanContext.getSwapchainExtent();
+        ctx.poolSizesHint = poolSizes;
         return ctx;
     }
 

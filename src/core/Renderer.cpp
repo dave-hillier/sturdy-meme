@@ -73,6 +73,7 @@ Renderer::~Renderer() {
 bool Renderer::initInternal(const InitInfo& info) {
     window = info.window;
     resourcePath = info.resourcePath;
+    config_ = info.config;
 
     // Create subsystems container
     systems_ = std::make_unique<RendererSystems>();
@@ -90,9 +91,10 @@ bool Renderer::initInternal(const InitInfo& info) {
     if (!initDescriptorInfrastructure()) return false;
 
     // Build shared InitContext for subsystem initialization
+    // Pass pool sizes hint so subsystems can create consistent pools if needed
     InitContext initCtx = RendererInit::buildContext(
         vulkanContext, commandPool.get(), &*descriptorManagerPool,
-        resourcePath, MAX_FRAMES_IN_FLIGHT);
+        resourcePath, MAX_FRAMES_IN_FLIGHT, config_.descriptorPoolSizes);
 
     // Phase 3: All subsystems (terrain, grass, weather, snow, water, etc.)
     if (!initSubsystems(initCtx)) return false;
@@ -653,10 +655,10 @@ void Renderer::updateLightBuffer(uint32_t currentImage, const Camera& camera) {
 bool Renderer::createDescriptorPool() {
     VkDevice device = vulkanContext.getDevice();
 
-    // Create the auto-growing descriptor pool
-    // Initial capacity of 64 sets per pool, will automatically grow if exhausted
+    // Create the auto-growing descriptor pool with configurable sizes
+    // Will automatically grow if exhausted
     // All subsystems now use this managed pool for consistent descriptor allocation
-    descriptorManagerPool.emplace(device, 64);
+    descriptorManagerPool.emplace(device, config_.setsPerPool, config_.descriptorPoolSizes);
 
     return true;
 }

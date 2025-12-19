@@ -59,9 +59,16 @@ constexpr uint32_t PBR_HAS_HEIGHT_MAP    = (1u << 3);
 
 class Renderer {
 public:
+    // Configuration for renderer initialization
+    struct Config {
+        uint32_t setsPerPool = 64;
+        DescriptorPoolSizes descriptorPoolSizes = DescriptorPoolSizes::standard();
+    };
+
     struct InitInfo {
         SDL_Window* window;
         std::string resourcePath;
+        Config config{};  // Optional renderer configuration
     };
 
     /**
@@ -411,6 +418,7 @@ private:
 
     SDL_Window* window = nullptr;
     std::string resourcePath;
+    Config config_;  // Renderer configuration
 
     VulkanContext vulkanContext;
 
