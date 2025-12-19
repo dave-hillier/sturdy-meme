@@ -378,10 +378,8 @@ void WeatherSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float t
         return;
     }
 
-    // Read from computeBufferSet directly - the compute-to-graphics barrier ensures
-    // the compute shader has finished writing before we read. This eliminates the
-    // one-frame lag that caused flickering during camera rotation.
-    uint32_t readSet = (*particleSystem)->getComputeBufferSet();
+    // Double-buffer: graphics reads from renderBufferSet (previous frame's compute output)
+    uint32_t readSet = (*particleSystem)->getRenderBufferSet();
 
     // Update graphics descriptor set to use this frame's renderer UBO
     DescriptorManager::SetWriter(getDevice(), (*particleSystem)->getGraphicsDescriptorSet(readSet))

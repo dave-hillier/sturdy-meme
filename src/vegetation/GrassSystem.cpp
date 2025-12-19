@@ -815,10 +815,8 @@ void GrassSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex
 }
 
 void GrassSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time) {
-    // Read from computeBufferSet directly - the compute-to-graphics barrier ensures
-    // the compute shader has finished writing before we read. This eliminates the
-    // one-frame lag that caused flickering during camera rotation.
-    uint32_t readSet = (*particleSystem)->getComputeBufferSet();
+    // Double-buffer: graphics reads from renderBufferSet (previous frame's compute output)
+    uint32_t readSet = (*particleSystem)->getRenderBufferSet();
 
     // Update graphics descriptor set to use this frame's renderer UBO
     // This ensures the grass uses the current frame's view-projection matrix
@@ -859,8 +857,8 @@ void GrassSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float tim
 }
 
 void GrassSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time, uint32_t cascadeIndex) {
-    // Read from computeBufferSet directly - same buffer as main draw pass
-    uint32_t readSet = (*particleSystem)->getComputeBufferSet();
+    // Double-buffer: shadow pass reads from renderBufferSet (same as main draw)
+    uint32_t readSet = (*particleSystem)->getRenderBufferSet();
 
     // Update shadow descriptor set to use this frame's renderer UBO
     if (!rendererUniformBuffers_.empty()) {
