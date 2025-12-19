@@ -812,14 +812,10 @@ void GrassSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex
 }
 
 void GrassSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time) {
-    // Double-buffer: graphics reads from renderBufferSet
-    // On first frame before double-buffering kicks in, read from compute set (same as renderBufferSet)
-    uint32_t readSet = (*particleSystem)->getRenderBufferSet();
-
-    // Bootstrap: if we haven't diverged yet, read from what we just computed
-    if ((*particleSystem)->getComputeBufferSet() == (*particleSystem)->getRenderBufferSet()) {
-        readSet = (*particleSystem)->getComputeBufferSet();
-    }
+    // Read from computeBufferSet directly - the compute-to-graphics barrier ensures
+    // the compute shader has finished writing before we read. This eliminates the
+    // one-frame lag that caused flickering during camera rotation.
+    uint32_t readSet = (*particleSystem)->getComputeBufferSet();
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, getGraphicsPipelineHandles().pipeline);
 
@@ -852,13 +848,8 @@ void GrassSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float tim
 }
 
 void GrassSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time, uint32_t cascadeIndex) {
-    // Double-buffer: shadow pass reads from renderBufferSet (same as main draw)
-    uint32_t readSet = (*particleSystem)->getRenderBufferSet();
-
-    // Bootstrap: if we haven't diverged yet, read from what we just computed
-    if ((*particleSystem)->getComputeBufferSet() == (*particleSystem)->getRenderBufferSet()) {
-        readSet = (*particleSystem)->getComputeBufferSet();
-    }
+    // Read from computeBufferSet directly - same buffer as main draw pass
+    uint32_t readSet = (*particleSystem)->getComputeBufferSet();
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipeline_.get());
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
