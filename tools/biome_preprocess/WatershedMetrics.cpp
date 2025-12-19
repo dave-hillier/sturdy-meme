@@ -6,6 +6,10 @@
 #include <limits>
 #include <tuple>
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 namespace {
     // D8 flow direction offsets
     const int dx[] = {1, 1, 0, -1, -1, -1, 0, 1};
@@ -57,6 +61,8 @@ void WatershedMetrics::computeTWI(
     float maxTwi = 0.0f;
     float minTwi = std::numeric_limits<float>::max();
 
+    // Parallel TWI computation with reduction for min/max
+    #pragma omp parallel for schedule(dynamic, 64) collapse(2) reduction(max:maxTwi) reduction(min:minTwi)
     for (uint32_t y = 0; y < outputHeight; y++) {
         for (uint32_t x = 0; x < outputWidth; x++) {
             float worldX = (static_cast<float>(x) + 0.5f) / outputWidth * terrainSize;

@@ -262,6 +262,7 @@ else()
 endif()
 
 # Terrain preprocessing - runs tools to generate data if inputs changed
+# Tools are organized into parallel targets where possible for faster builds
 set(TERRAIN_HEIGHTMAP ${CMAKE_CURRENT_SOURCE_DIR}/assets/terrain/isleofwight-0m-200m.png)
 set(TERRAIN_DATA_DIR ${CMAKE_BINARY_DIR}/terrain_data)
 set(TERRAIN_TILES_META ${TERRAIN_DATA_DIR}/terrain_tiles.meta)
@@ -269,8 +270,12 @@ set(TERRAIN_TILES_META ${TERRAIN_DATA_DIR}/terrain_tiles.meta)
 # Create terrain data directory
 file(MAKE_DIRECTORY ${TERRAIN_DATA_DIR})
 
+# ============================================================================
+# PARALLEL PHASE: terrain_preprocess and watershed run concurrently
+# Both only depend on the heightmap, so Ninja can run them in parallel
+# ============================================================================
+
 # Run terrain_preprocess when heightmap changes
-# Note: We don't depend on terrain_preprocess executable to avoid re-running when code changes
 add_custom_command(
     OUTPUT ${TERRAIN_TILES_META}
     COMMAND $<TARGET_FILE:terrain_preprocess>
@@ -279,19 +284,25 @@ add_custom_command(
         --min-altitude -15
         --max-altitude 220
     DEPENDS ${TERRAIN_HEIGHTMAP}
-    COMMENT "Preprocessing terrain tiles"
+    COMMENT "Preprocessing terrain tiles (parallel)"
 )
 
-# Note: erosion_preprocess has been removed in favor of the watershed tool
-# which provides better river/flow data
+# Explicit target for terrain tile generation (enables parallel build)
+add_custom_target(terrain_tiles_gen DEPENDS ${TERRAIN_TILES_META})
+add_dependencies(terrain_tiles_gen terrain_preprocess)
 
 # Watershed analysis outputs
 set(WATERSHED_DATA_DIR ${TERRAIN_DATA_DIR}/watershed)
 set(WATERSHED_RIVERS_SVG ${WATERSHED_DATA_DIR}/rivers.svg)
+set(WATERSHED_FLOW_PNG ${WATERSHED_DATA_DIR}/flow.png)
+set(WATERSHED_FLOW_BIN ${WATERSHED_DATA_DIR}/flow_accumulation.bin)
+set(WATERSHED_DIR_BIN ${WATERSHED_DATA_DIR}/flow_direction.bin)
+set(WATERSHED_LABELS_BIN ${WATERSHED_DATA_DIR}/watershed_labels.bin)
 
 # Run watershed tool when heightmap changes
 add_custom_command(
-    OUTPUT ${WATERSHED_RIVERS_SVG}
+    OUTPUT ${WATERSHED_RIVERS_SVG} ${WATERSHED_FLOW_PNG}
+           ${WATERSHED_FLOW_BIN} ${WATERSHED_DIR_BIN} ${WATERSHED_LABELS_BIN}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${WATERSHED_DATA_DIR}
     COMMAND $<TARGET_FILE:watershed>
         ${TERRAIN_HEIGHTMAP}
@@ -300,16 +311,59 @@ add_custom_command(
         --sea-level 6000
         --resolution 512
     DEPENDS ${TERRAIN_HEIGHTMAP}
-    COMMENT "Running watershed analysis for river extraction"
+    COMMENT "Running watershed analysis (parallel)"
 )
+
+# Explicit target for watershed generation (enables parallel build)
+add_custom_target(watershed_gen DEPENDS ${WATERSHED_RIVERS_SVG} ${WATERSHED_FLOW_PNG}
+                                        ${WATERSHED_FLOW_BIN} ${WATERSHED_DIR_BIN} ${WATERSHED_LABELS_BIN})
+add_dependencies(watershed_gen watershed)
+
+# ============================================================================
+# SEQUENTIAL PHASE: biome_preprocess runs after watershed completes
+# Biome classification requires watershed flow data
+# ============================================================================
+
+# Biome preprocessing outputs
+set(BIOME_DATA_DIR ${TERRAIN_DATA_DIR}/biome)
+set(BIOME_MAP_PNG ${BIOME_DATA_DIR}/biome_map.png)
+set(BIOME_SETTLEMENTS_JSON ${BIOME_DATA_DIR}/settlements.json)
+
+# Run biome_preprocess after watershed completes
+add_custom_command(
+    OUTPUT ${BIOME_MAP_PNG} ${BIOME_SETTLEMENTS_JSON}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${BIOME_DATA_DIR}
+    COMMAND $<TARGET_FILE:biome_preprocess>
+        ${TERRAIN_HEIGHTMAP}
+        ${WATERSHED_DATA_DIR}
+        ${BIOME_DATA_DIR}
+        --sea-level 23
+        --min-altitude -15
+        --max-altitude 220
+        --terrain-size 16384
+        --output-resolution 1024
+        --num-settlements 20
+    DEPENDS ${TERRAIN_HEIGHTMAP} ${WATERSHED_FLOW_BIN} ${WATERSHED_DIR_BIN}
+    COMMENT "Generating biome classification (after watershed)"
+)
+
+# Explicit target for biome generation
+add_custom_target(biome_gen DEPENDS ${BIOME_MAP_PNG} ${BIOME_SETTLEMENTS_JSON})
+add_dependencies(biome_gen biome_preprocess watershed_gen)
+
+# ============================================================================
+# UMBRELLA TARGET: terrain_preprocessing depends on all outputs
+# ============================================================================
 
 # Custom target that depends on all preprocessing outputs
 add_custom_target(terrain_preprocessing
-    DEPENDS ${TERRAIN_TILES_META} ${WATERSHED_RIVERS_SVG}
+    DEPENDS ${TERRAIN_TILES_META} ${WATERSHED_RIVERS_SVG} ${BIOME_MAP_PNG}
 )
 
-# Ensure tools are built before preprocessing runs
-add_dependencies(terrain_preprocessing terrain_preprocess watershed)
+# Dependencies ensure correct build order:
+# - terrain_tiles_gen and watershed_gen can run in parallel
+# - biome_gen runs after watershed_gen completes
+add_dependencies(terrain_preprocessing terrain_tiles_gen watershed_gen biome_gen)
 
 # Foam noise texture generation
 set(FOAM_TEXTURE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/assets/textures)

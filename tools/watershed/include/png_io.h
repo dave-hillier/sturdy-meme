@@ -39,3 +39,13 @@ void write_terrain_traced_rivers_png(
     const std::vector<uint32_t>& river_map,
     uint16_t sea_level = 0
 );
+
+// Binary output functions for biome_preprocess compatibility
+// Write flow accumulation as normalized float binary (for biome_preprocess)
+void write_flow_accumulation_bin(const std::string& filename, const D8Result& d8);
+
+// Write flow direction as int8_t binary (for biome_preprocess)
+void write_flow_direction_bin(const std::string& filename, const D8Result& d8);
+
+// Write watershed labels as uint32_t binary (for biome_preprocess)
+void write_watershed_labels_bin(const std::string& filename, const WatershedResult& watersheds);

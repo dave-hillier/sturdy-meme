@@ -172,6 +172,19 @@ int main(int argc, char* argv[]) {
         SDL_Log("Writing watershed map to: %s", output_file.c_str());
         write_watershed_png(output_file, watersheds);
 
+        // Write binary files for biome_preprocess compatibility
+        std::string flow_acc_bin = (fs::path(output_dir) / "flow_accumulation.bin").string();
+        SDL_Log("Writing flow accumulation binary to: %s", flow_acc_bin.c_str());
+        write_flow_accumulation_bin(flow_acc_bin, d8);
+
+        std::string flow_dir_bin = (fs::path(output_dir) / "flow_direction.bin").string();
+        SDL_Log("Writing flow direction binary to: %s", flow_dir_bin.c_str());
+        write_flow_direction_bin(flow_dir_bin, d8);
+
+        std::string watershed_bin = (fs::path(output_dir) / "watershed_labels.bin").string();
+        SDL_Log("Writing watershed labels binary to: %s", watershed_bin.c_str());
+        write_watershed_labels_bin(watershed_bin, watersheds);
+
         SDL_Log("Done.");
         return 0;
 

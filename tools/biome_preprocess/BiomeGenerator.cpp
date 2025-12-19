@@ -8,6 +8,10 @@
 #include <cmath>
 #include <limits>
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 // Simple hash-based noise function
 float BiomeGenerator::noise2D(float x, float y, float frequency) const {
     x *= frequency;
@@ -309,6 +313,8 @@ void BiomeGenerator::computeSlopeMap(ProgressCallback callback) {
 
     float cellSize = config.terrainSize / result.width;
 
+    // Parallel slope computation - each pixel is independent
+    #pragma omp parallel for schedule(dynamic, 64) collapse(2)
     for (uint32_t y = 0; y < result.height; y++) {
         for (uint32_t x = 0; x < result.width; x++) {
             float worldX = (static_cast<float>(x) + 0.5f) / result.width * config.terrainSize;
@@ -491,6 +497,8 @@ void BiomeGenerator::computeDistanceToRiver(ProgressCallback callback) {
 void BiomeGenerator::classifyZones(ProgressCallback callback) {
     if (callback) callback(0.3f, "Classifying zones...");
 
+    // Parallel zone classification - each cell is independent
+    #pragma omp parallel for schedule(dynamic, 64) collapse(2)
     for (uint32_t y = 0; y < result.height; y++) {
         for (uint32_t x = 0; x < result.width; x++) {
             float worldX = (static_cast<float>(x) + 0.5f) / result.width * config.terrainSize;
@@ -593,6 +601,8 @@ void BiomeGenerator::classifyZones(ProgressCallback callback) {
 void BiomeGenerator::applySubZoneNoise(ProgressCallback callback) {
     if (callback) callback(0.5f, "Applying sub-zone variation...");
 
+    // Parallel sub-zone noise application
+    #pragma omp parallel for schedule(dynamic, 64) collapse(2)
     for (uint32_t y = 0; y < result.height; y++) {
         for (uint32_t x = 0; x < result.width; x++) {
             float worldX = (static_cast<float>(x) + 0.5f) / result.width * config.terrainSize;

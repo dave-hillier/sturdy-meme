@@ -9,6 +9,9 @@ find_package(LibArchive REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_path(STB_INCLUDE_DIRS "stb_image.h")
 
+# Find OpenMP for parallel processing
+find_package(OpenMP)
+
 # Shader reflection tool
 add_executable(shader_reflect
     shader_reflect/shader_reflect.cpp
@@ -58,6 +61,11 @@ target_link_libraries(biome_preprocess PRIVATE
     glm::glm
     lodepng
 )
+
+# Enable OpenMP for parallel processing
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(biome_preprocess PRIVATE OpenMP::OpenMP_CXX)
+endif()
 
 target_compile_features(biome_preprocess PRIVATE cxx_std_17)
 
@@ -188,5 +196,10 @@ target_link_libraries(watershed PRIVATE
     SDL3::SDL3
     lodepng
 )
+
+# Enable OpenMP for parallel processing
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(watershed PRIVATE OpenMP::OpenMP_CXX)
+endif()
 
 target_compile_features(watershed PRIVATE cxx_std_17)

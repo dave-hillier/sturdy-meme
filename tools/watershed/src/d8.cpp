@@ -9,6 +9,10 @@
 #include <functional>
 #include <SDL3/SDL_log.h>
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 // D8 direction offsets
 // Direction: 0=N, 1=NE, 2=E, 3=SE, 4=S, 5=SW, 6=W, 7=NW
 static const int dx8[8] = { 0,  1, 1, 1, 0, -1, -1, -1};
@@ -61,9 +65,10 @@ static void compute_flow_accumulation(
     std::vector<uint32_t>& flow_accumulation,
     int width, int height
 ) {
-    // Count incoming flows for each cell
+    // Count incoming flows for each cell (parallel with atomics)
     std::vector<int> in_degree(width * height, 0);
 
+    #pragma omp parallel for schedule(static) collapse(2)
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
             uint8_t dir = flow_direction[y * width + x];
@@ -71,23 +76,40 @@ static void compute_flow_accumulation(
                 int nx = x + dx8[dir];
                 int ny = y + dy8[dir];
                 if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                    #pragma omp atomic
                     in_degree[ny * width + nx]++;
                 }
             }
         }
     }
 
-    // Initialize accumulation to 1 (self)
-    std::fill(flow_accumulation.begin(), flow_accumulation.end(), 1);
+    // Initialize accumulation to 1 (self) - parallel
+    #pragma omp parallel for schedule(static)
+    for (size_t i = 0; i < flow_accumulation.size(); ++i) {
+        flow_accumulation[i] = 1;
+    }
 
-    // Process cells with no incoming flow first (topological sort)
-    std::queue<std::pair<int, int>> queue;
-    for (int y = 0; y < height; ++y) {
-        for (int x = 0; x < width; ++x) {
-            if (in_degree[y * width + x] == 0) {
-                queue.push({x, y});
+    // Collect cells with no incoming flow (parallel)
+    std::vector<std::pair<int, int>> sources;
+    #pragma omp parallel
+    {
+        std::vector<std::pair<int, int>> local_sources;
+        #pragma omp for schedule(static) collapse(2) nowait
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                if (in_degree[y * width + x] == 0) {
+                    local_sources.push_back({x, y});
+                }
             }
         }
+        #pragma omp critical
+        sources.insert(sources.end(), local_sources.begin(), local_sources.end());
+    }
+
+    // Process cells with topological sort (sequential due to dependencies)
+    std::queue<std::pair<int, int>> queue;
+    for (auto& p : sources) {
+        queue.push(p);
     }
 
     while (!queue.empty()) {
@@ -116,7 +138,8 @@ D8Result compute_d8(const ElevationGrid& elevation) {
     result.flow_direction.resize(elevation.width * elevation.height);
     result.flow_accumulation.resize(elevation.width * elevation.height);
 
-    // Compute flow directions
+    // Compute flow directions (embarrassingly parallel - each pixel is independent)
+    #pragma omp parallel for schedule(dynamic, 64) collapse(2)
     for (int y = 0; y < elevation.height; ++y) {
         for (int x = 0; x < elevation.width; ++x) {
             result.flow_direction[y * elevation.width + x] =
@@ -124,7 +147,7 @@ D8Result compute_d8(const ElevationGrid& elevation) {
         }
     }
 
-    // Compute flow accumulation
+    // Compute flow accumulation (sequential due to dependencies)
     compute_flow_accumulation(
         result.flow_direction,
         result.flow_accumulation,
@@ -268,41 +291,58 @@ D8Result resolve_dafa_by_merging(const ElevationGrid& elevation, D8Result d8, ui
         return parent[x];
     };
 
-    // Step 3: Find all spill points between adjacent watersheds (done once)
-    // Use a map to store the best spill point for each pair of watersheds
+    // Step 3: Find all spill points between adjacent watersheds (parallel)
+    // Each thread builds a local map, then merge them
     std::map<std::pair<uint32_t, uint32_t>, SpillPoint> best_spills;
 
-    for (int y = 0; y < height; ++y) {
-        for (int x = 0; x < width; ++x) {
-            uint32_t label1 = labels[y * width + x];
-            if (label1 == 0) continue;
+    #pragma omp parallel
+    {
+        std::map<std::pair<uint32_t, uint32_t>, SpillPoint> local_spills;
 
-            uint16_t elev1 = elevation.at(x, y);
+        #pragma omp for schedule(dynamic, 64) nowait
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                uint32_t label1 = labels[y * width + x];
+                if (label1 == 0) continue;
 
-            for (int dir = 0; dir < 8; ++dir) {
-                int nx = x + dx8[dir];
-                int ny = y + dy8[dir];
-                if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
+                uint16_t elev1 = elevation.at(x, y);
 
-                uint32_t label2 = labels[ny * width + nx];
-                if (label2 == 0 || label2 == label1) continue;
+                for (int dir = 0; dir < 8; ++dir) {
+                    int nx = x + dx8[dir];
+                    int ny = y + dy8[dir];
+                    if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
 
-                uint16_t elev2 = elevation.at(nx, ny);
-                uint16_t spill_elev = std::max(elev1, elev2);
+                    uint32_t label2 = labels[ny * width + nx];
+                    if (label2 == 0 || label2 == label1) continue;
 
-                // Canonical key (smaller label first)
-                auto key = std::make_pair(std::min(label1, label2), std::max(label1, label2));
+                    uint16_t elev2 = elevation.at(nx, ny);
+                    uint16_t spill_elev = std::max(elev1, elev2);
 
+                    // Canonical key (smaller label first)
+                    auto key = std::make_pair(std::min(label1, label2), std::max(label1, label2));
+
+                    auto it = local_spills.find(key);
+                    if (it == local_spills.end() || spill_elev < it->second.spill_elevation) {
+                        SpillPoint sp;
+                        sp.ws1 = label1;
+                        sp.ws2 = label2;
+                        sp.x1 = x;
+                        sp.y1 = y;
+                        sp.x2 = nx;
+                        sp.y2 = ny;
+                        sp.spill_elevation = spill_elev;
+                        local_spills[key] = sp;
+                    }
+                }
+            }
+        }
+
+        // Merge local maps into global map
+        #pragma omp critical
+        {
+            for (auto& [key, sp] : local_spills) {
                 auto it = best_spills.find(key);
-                if (it == best_spills.end() || spill_elev < it->second.spill_elevation) {
-                    SpillPoint sp;
-                    sp.ws1 = label1;
-                    sp.ws2 = label2;
-                    sp.x1 = x;
-                    sp.y1 = y;
-                    sp.x2 = nx;
-                    sp.y2 = ny;
-                    sp.spill_elevation = spill_elev;
+                if (it == best_spills.end() || sp.spill_elevation < it->second.spill_elevation) {
                     best_spills[key] = sp;
                 }
             }
