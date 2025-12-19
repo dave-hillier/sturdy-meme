@@ -25,8 +25,7 @@ layout(location = 0) in vec3 rayDir;
 layout(location = 0) out vec4 outColor;
 
 // Atmospheric parameters (values from Phase 4 docs, scaled to kilometers)
-const float PLANET_RADIUS = 6371.0;           // Earth radius in km
-const float ATMOSPHERE_RADIUS = 6471.0;       // Top of atmosphere in km
+// PLANET_RADIUS and ATMOSPHERE_RADIUS are defined in constants_common.glsl
 
 const vec3 RAYLEIGH_SCATTERING_BASE = vec3(5.802e-3, 13.558e-3, 33.1e-3);
 const float RAYLEIGH_SCALE_HEIGHT = 8.0;      // km
