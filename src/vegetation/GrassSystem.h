@@ -197,6 +197,9 @@ private:
     VkSampler tileSampler = VK_NULL_HANDLE;
     std::array<VkBuffer, 3> tileInfoBuffers = {};  // Triple-buffered for frames-in-flight sync
 
+    // Renderer uniform buffers for per-frame descriptor updates (stores reference from updateDescriptorSets)
+    std::vector<VkBuffer> rendererUniformBuffers_;
+
     static constexpr uint32_t MAX_INSTANCES = 100000;  // ~100k rendered after culling
 
     const EnvironmentSettings* environmentSettings = nullptr;

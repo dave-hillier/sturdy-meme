@@ -173,6 +173,9 @@ private:
     // Tile cache resources for high-res terrain sampling
     std::array<VkBuffer, 3> tileInfoBuffers = {};  // Triple-buffered for frames-in-flight sync
 
+    // Renderer uniform buffers for per-frame descriptor updates
+    std::vector<VkBuffer> rendererUniformBuffers_;
+
     // Displacement region uniform buffer (per-frame)
     BufferUtils::PerFrameBufferSet displacementRegionBuffers;
 

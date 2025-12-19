@@ -614,6 +614,9 @@ void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>
     this->tileSampler = tileSamplerParam;
     this->tileInfoBuffers = tileInfoBuffersParam;
 
+    // Store renderer uniform buffers for per-frame graphics descriptor updates
+    this->rendererUniformBuffers_ = rendererUniformBuffers;
+
     // Update compute descriptor sets with terrain heightmap, displacement, and tile cache
     // Note: tile info buffer (binding 6) is updated per-frame in recordResetAndCompute
     for (uint32_t set = 0; set < BUFFER_SET_COUNT; set++) {
@@ -817,6 +820,14 @@ void GrassSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float tim
     // one-frame lag that caused flickering during camera rotation.
     uint32_t readSet = (*particleSystem)->getComputeBufferSet();
 
+    // Update graphics descriptor set to use this frame's renderer UBO
+    // This ensures the grass uses the current frame's view-projection matrix
+    if (!rendererUniformBuffers_.empty()) {
+        DescriptorManager::SetWriter(getDevice(), (*particleSystem)->getGraphicsDescriptorSet(readSet))
+            .writeBuffer(0, rendererUniformBuffers_[frameIndex], 0, 160)  // sizeof(UniformBufferObject) truncated for grass needs
+            .update();
+    }
+
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, getGraphicsPipelineHandles().pipeline);
 
     // Set dynamic viewport and scissor to handle window resize
@@ -850,6 +861,13 @@ void GrassSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float tim
 void GrassSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time, uint32_t cascadeIndex) {
     // Read from computeBufferSet directly - same buffer as main draw pass
     uint32_t readSet = (*particleSystem)->getComputeBufferSet();
+
+    // Update shadow descriptor set to use this frame's renderer UBO
+    if (!rendererUniformBuffers_.empty()) {
+        DescriptorManager::SetWriter(getDevice(), shadowDescriptorSetsDB[readSet])
+            .writeBuffer(0, rendererUniformBuffers_[frameIndex], 0, 160)
+            .update();
+    }
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipeline_.get());
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,

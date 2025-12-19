@@ -405,6 +405,9 @@ void LeafSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>&
     // Store tile info buffers (triple-buffered for frames-in-flight sync)
     this->tileInfoBuffers = tileInfoBuffersParam;
 
+    // Store renderer uniform buffers for per-frame graphics descriptor updates
+    this->rendererUniformBuffers_ = rendererUniformBuffers;
+
     // Update compute and graphics descriptor sets for both buffer sets
     // Note: tile info buffer (binding 9) is updated per-frame in recordResetAndCompute
     for (uint32_t set = 0; set < BUFFER_SET_COUNT; set++) {
@@ -563,6 +566,14 @@ void LeafSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time
     // the compute shader has finished writing before we read. This eliminates the
     // one-frame lag that caused flickering during camera rotation.
     uint32_t readSet = (*particleSystem)->getComputeBufferSet();
+
+    // Update graphics descriptor set to use this frame's renderer UBO
+    // This ensures leaves use the current frame's view-projection matrix
+    if (!rendererUniformBuffers_.empty()) {
+        DescriptorManager::SetWriter(getDevice(), (*particleSystem)->getGraphicsDescriptorSet(readSet))
+            .writeBuffer(0, rendererUniformBuffers_[frameIndex], 0, 320)  // sizeof(UniformBufferObject)
+            .update();
+    }
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, getGraphicsPipelineHandles().pipeline);
 
