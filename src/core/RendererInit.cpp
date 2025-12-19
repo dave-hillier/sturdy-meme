@@ -7,6 +7,7 @@
 // Post-processing systems
 #include "PostProcessSystem.h"
 #include "BloomSystem.h"
+#include "BilateralGridSystem.h"
 #include "SSRSystem.h"
 #include "HiZSystem.h"
 
@@ -65,12 +66,23 @@ bool RendererInit::initPostProcessing(
         return false;
     }
 
+    // Initialize bilateral grid system via factory (for local tone mapping)
+    auto bilateralGridSystem = BilateralGridSystem::create(ctx);
+    if (!bilateralGridSystem) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize BilateralGridSystem");
+        return false;
+    }
+
     // Bind bloom texture to post-process system
     postProcessSystem->setBloomTexture(bloomSystem->getBloomOutput(), bloomSystem->getBloomSampler());
+
+    // Bind bilateral grid to post-process system
+    postProcessSystem->setBilateralGrid(bilateralGridSystem->getGridView(), bilateralGridSystem->getGridSampler());
 
     // Store in RendererSystems
     systems.setPostProcess(std::move(postProcessSystem));
     systems.setBloom(std::move(bloomSystem));
+    systems.setBilateralGrid(std::move(bilateralGridSystem));
 
     return true;
 }

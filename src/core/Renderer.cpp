@@ -12,6 +12,7 @@
 // Subsystem headers for render pipeline lambda captures
 #include "PostProcessSystem.h"
 #include "BloomSystem.h"
+#include "BilateralGridSystem.h"
 #include "ShadowSystem.h"
 #include "TerrainSystem.h"
 #include "SkySystem.h"
@@ -1038,6 +1039,14 @@ bool Renderer::render(const Camera& camera) {
         renderPipeline.postStage.bloomRecordFn(ctx);
     }
 
+    // Bilateral grid for local tone mapping (if enabled)
+    if (systems_->postProcess().isLocalToneMapEnabled()) {
+        systems_->profiler().beginGpuZone(cmd, "BilateralGrid");
+        systems_->bilateralGrid().recordBilateralGrid(cmd, frame.frameIndex,
+                                                       systems_->postProcess().getHDRColorView());
+        systems_->profiler().endGpuZone(cmd, "BilateralGrid");
+    }
+
     // Post-process pass (with optional GUI overlay callback)
     // Note: This is not in postStage because it needs framebuffer and guiRenderCallback
     systems_->profiler().beginGpuZone(cmd, "PostProcess");
@@ -1706,6 +1715,16 @@ int Renderer::getGodRayQuality() const {
 // Froxel volumetric fog quality control
 void Renderer::setFroxelFilterQuality(bool highQuality) { systems_->postProcess().setFroxelFilterQuality(highQuality); }
 bool Renderer::isFroxelFilterHighQuality() const { return systems_->postProcess().isFroxelFilterHighQuality(); }
+
+// Local tone mapping (bilateral grid)
+void Renderer::setLocalToneMapEnabled(bool enabled) { systems_->postProcess().setLocalToneMapEnabled(enabled); }
+bool Renderer::isLocalToneMapEnabled() const { return systems_->postProcess().isLocalToneMapEnabled(); }
+void Renderer::setLocalToneMapContrast(float c) { systems_->postProcess().setLocalToneMapContrast(c); }
+float Renderer::getLocalToneMapContrast() const { return systems_->postProcess().getLocalToneMapContrast(); }
+void Renderer::setLocalToneMapDetail(float d) { systems_->postProcess().setLocalToneMapDetail(d); }
+float Renderer::getLocalToneMapDetail() const { return systems_->postProcess().getLocalToneMapDetail(); }
+void Renderer::setBilateralBlend(float b) { systems_->postProcess().setBilateralBlend(b); }
+float Renderer::getBilateralBlend() const { return systems_->postProcess().getBilateralBlend(); }
 
 // Bloom control
 void Renderer::setBloomEnabled(bool enabled) { systems_->postProcess().setBloomEnabled(enabled); }

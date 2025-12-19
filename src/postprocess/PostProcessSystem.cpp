@@ -316,6 +316,7 @@ bool PostProcessSystem::createDescriptorSetLayout() {
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 2: depth
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 3: froxel
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 4: bloom
+        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 5: bilateral grid
         .build();
 
     if (compositeDescriptorSetLayout == VK_NULL_HANDLE) {
@@ -579,6 +580,13 @@ void PostProcessSystem::recordPostProcess(VkCommandBuffer cmd, uint32_t frameInd
     ubo->froxelFilterQuality = froxelFilterHighQuality ? 1.0f : 0.0f;
     ubo->bloomEnabled = bloomEnabled ? 1.0f : 0.0f;
     ubo->autoExposureEnabled = autoExposureEnabled ? 1.0f : 0.0f;
+    // Local tone mapping (bilateral grid)
+    ubo->localToneMapEnabled = localToneMapEnabled ? 1.0f : 0.0f;
+    ubo->localToneMapContrast = localToneMapContrast;
+    ubo->localToneMapDetail = localToneMapDetail;
+    ubo->minLogLuminance = minLogLuminance;
+    ubo->maxLogLuminance = maxLogLuminance;
+    ubo->bilateralBlend = bilateralBlend;
 
     // Store computed exposure for next frame
     lastAutoExposure = autoExposureEnabled ? computedExposure : manualExposure;
@@ -956,6 +964,18 @@ void PostProcessSystem::setBloomTexture(VkImageView bloomView, VkSampler bloomSa
     for (size_t i = 0; i < framesInFlight; i++) {
         DescriptorManager::SetWriter(device, compositeDescriptorSets[i])
             .writeImage(4, bloomView, bloomSampler)
+            .update();
+    }
+}
+
+void PostProcessSystem::setBilateralGrid(VkImageView gridView, VkSampler gridSampler) {
+    this->bilateralGridView = gridView;
+    this->bilateralGridSampler = gridSampler;
+
+    // Update descriptor sets with the bilateral grid texture
+    for (size_t i = 0; i < framesInFlight; i++) {
+        DescriptorManager::SetWriter(device, compositeDescriptorSets[i])
+            .writeImage(5, gridView, gridSampler)
             .update();
     }
 }

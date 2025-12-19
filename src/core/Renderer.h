@@ -193,6 +193,16 @@ public:
     void setFroxelFilterQuality(bool highQuality);
     bool isFroxelFilterHighQuality() const;
 
+    // Local tone mapping (bilateral grid - Ghost of Tsushima technique)
+    void setLocalToneMapEnabled(bool enabled);
+    bool isLocalToneMapEnabled() const;
+    void setLocalToneMapContrast(float c);
+    float getLocalToneMapContrast() const;
+    void setLocalToneMapDetail(float d);
+    float getLocalToneMapDetail() const;
+    void setBilateralBlend(float b);
+    float getBilateralBlend() const;
+
     // Terrain control
     void setTerrainEnabled(bool enabled) { terrainEnabled = enabled; }
     bool isTerrainEnabled() const { return terrainEnabled; }

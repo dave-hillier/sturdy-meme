@@ -42,6 +42,7 @@ class GlobalBufferManager;
 class SkinnedMeshRenderer;
 class TimeSystem;
 class CelestialCalculator;
+class BilateralGridSystem;
 struct EnvironmentSettings;
 struct TerrainConfig;
 
@@ -108,6 +109,9 @@ public:
     BloomSystem& bloom() { return *bloomSystem_; }
     const BloomSystem& bloom() const { return *bloomSystem_; }
     void setBloom(std::unique_ptr<BloomSystem> system);
+    BilateralGridSystem& bilateralGrid() { return *bilateralGridSystem_; }
+    const BilateralGridSystem& bilateralGrid() const { return *bilateralGridSystem_; }
+    void setBilateralGrid(std::unique_ptr<BilateralGridSystem> system);
     ShadowSystem& shadow() { return *shadowSystem_; }
     const ShadowSystem& shadow() const { return *shadowSystem_; }
     void setShadow(std::unique_ptr<ShadowSystem> system);
@@ -239,6 +243,7 @@ private:
     // Tier 1 - Core rendering systems (initialize first)
     std::unique_ptr<PostProcessSystem> postProcessSystem_;
     std::unique_ptr<BloomSystem> bloomSystem_;
+    std::unique_ptr<BilateralGridSystem> bilateralGridSystem_;
     std::unique_ptr<ShadowSystem> shadowSystem_;
     std::unique_ptr<TerrainSystem> terrainSystem_;
 

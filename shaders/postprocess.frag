@@ -33,6 +33,14 @@ layout(binding = BINDING_PP_UNIFORMS) uniform PostProcessUniforms {
     float froxelFilterQuality;  // 0.0 = trilinear (fast), 1.0 = tricubic (quality)
     float bloomEnabled;         // 1.0 = enabled, 0.0 = disabled
     float autoExposureEnabled;  // 1.0 = auto, 0.0 = manual (UI display only)
+    // Local tone mapping (bilateral grid)
+    float localToneMapEnabled;  // 1.0 = enabled
+    float localToneMapContrast; // Contrast reduction (0-1, 0=none, 0.5=typical)
+    float localToneMapDetail;   // Detail boost (1.0=neutral, 1.5=punch)
+    float minLogLuminance;      // Min log2 luminance for grid
+    float maxLogLuminance;      // Max log2 luminance for grid
+    float bilateralBlend;       // Blend factor for bilateral vs gaussian (0.4=GOT)
+    float pad1, pad2;           // Alignment padding
 } ubo;
 
 // Specialization constant for god ray sample count
@@ -42,6 +50,7 @@ layout(constant_id = 0) const int GOD_RAY_SAMPLES = 64;
 layout(binding = BINDING_PP_DEPTH) uniform sampler2D depthInput;
 layout(binding = BINDING_PP_FROXEL) uniform sampler3D froxelVolume;
 layout(binding = BINDING_PP_BLOOM) uniform sampler2D bloomTexture;
+layout(binding = BINDING_PP_BILATERAL_GRID) uniform sampler3D bilateralGrid;
 
 layout(location = 0) in vec2 fragTexCoord;
 layout(location = 0) out vec4 outColor;
@@ -226,6 +235,71 @@ vec3 SimplePurkinje(vec3 color, float illuminance) {
 // (histogram_build.comp and histogram_reduce.comp)
 // The computed exposure is passed through ubo.exposure from the CPU
 
+// ============================================================================
+// Local Tone Mapping (Bilateral Grid) - Ghost of Tsushima technique
+// Reduces global contrast while preserving local detail
+// ============================================================================
+
+// Bilateral grid dimensions (must match BilateralGridSystem)
+const ivec3 BILATERAL_GRID_SIZE = ivec3(64, 32, 64);
+
+// Sample bilateral grid with trilinear interpolation
+float sampleBilateralGrid(vec2 uv, float logLum) {
+    // Normalize log luminance to [0,1]
+    float normalizedLum = (logLum - ubo.minLogLuminance) /
+                          (ubo.maxLogLuminance - ubo.minLogLuminance);
+    normalizedLum = clamp(normalizedLum, 0.0, 1.0);
+
+    // Sample the blurred bilateral grid
+    vec3 gridUVW = vec3(uv, normalizedLum);
+    vec4 gridSample = texture(bilateralGrid, gridUVW);
+
+    // Grid stores (weighted_log_lum, weight, 0, 0)
+    // Normalize to get average log luminance in this region
+    if (gridSample.g > 0.001) {
+        return gridSample.r / gridSample.g;
+    }
+    return logLum;  // Fallback to input
+}
+
+// Apply local tone mapping using bilateral grid
+// Based on: Petri, "Samurai Cinema", SIGGRAPH 2021
+//
+// Formula: output = midpoint + (blurred - midpoint) * contrast + (input - blurred) * detail
+//
+// - blurred: bilaterally filtered log luminance (smooth version)
+// - midpoint: target middle gray (in log space)
+// - contrast: 0 = flat, 1 = original contrast
+// - detail: multiplier for local contrast (1 = neutral, >1 = punch)
+vec3 applyLocalToneMapping(vec3 hdrColor, vec2 uv) {
+    // Compute log luminance of input
+    float lum = getLuminance(hdrColor);
+    float logLum = log2(max(lum, 0.0001));
+
+    // Sample bilaterally filtered log luminance
+    float blurredLogLum = sampleBilateralGrid(uv, logLum);
+
+    // Midpoint is typically log2(0.18) ≈ -2.47 for middle gray
+    float midpoint = log2(0.18);
+
+    // Apply contrast reduction: move blurred value toward midpoint
+    float contrast = ubo.localToneMapContrast;
+    float adjustedBlurred = mix(blurredLogLum, midpoint, 1.0 - contrast);
+
+    // Compute detail (difference between input and blurred)
+    float detail = logLum - blurredLogLum;
+
+    // Final log luminance: adjusted base + boosted detail
+    float outputLogLum = adjustedBlurred + detail * ubo.localToneMapDetail;
+
+    // Convert back to linear luminance
+    float outputLum = exp2(outputLogLum);
+
+    // Apply luminance ratio to color (preserve hue/saturation)
+    float lumRatio = outputLum / max(lum, 0.0001);
+    return hdrColor * lumRatio;
+}
+
 // God rays / Light shafts (Phase 4.4)
 // Screen-space radial blur from sun position
 // GOD_RAY_SAMPLES is now a specialization constant defined at top of file
@@ -329,6 +403,13 @@ void main() {
     if (ubo.hdrEnabled > 0.5) {
         // Apply exposure
         vec3 exposed = combined * exp2(finalExposure);
+
+        // Apply local tone mapping (bilateral grid) - Ghost of Tsushima technique
+        // Reduces global contrast while preserving local detail
+        // Applied before ACES to maintain HDR range for the tonemapper
+        if (ubo.localToneMapEnabled > 0.5) {
+            exposed = applyLocalToneMapping(exposed, fragTexCoord);
+        }
 
         // Apply ACES tone mapping
         vec3 mapped = ACESFilmic(exposed);

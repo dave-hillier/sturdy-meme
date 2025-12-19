@@ -122,6 +122,21 @@ public:
     bool isBloomEnabled() const { return bloomEnabled; }
     bool isFroxelEnabled() const { return froxelEnabled; }
 
+    // Local tone mapping (bilateral grid) - Ghost of Tsushima technique
+    void setBilateralGrid(VkImageView gridView, VkSampler gridSampler);
+    void setLocalToneMapEnabled(bool enabled) { localToneMapEnabled = enabled; }
+    bool isLocalToneMapEnabled() const { return localToneMapEnabled; }
+    void setLocalToneMapContrast(float c) { localToneMapContrast = glm::clamp(c, 0.0f, 1.0f); }
+    float getLocalToneMapContrast() const { return localToneMapContrast; }
+    void setLocalToneMapDetail(float d) { localToneMapDetail = glm::clamp(d, 0.5f, 2.0f); }
+    float getLocalToneMapDetail() const { return localToneMapDetail; }
+    void setBilateralBlend(float b) { bilateralBlend = glm::clamp(b, 0.0f, 1.0f); }
+    float getBilateralBlend() const { return bilateralBlend; }
+    void setLocalToneMapLumRange(float minLog, float maxLog) {
+        minLogLuminance = minLog;
+        maxLogLuminance = maxLog;
+    }
+
     // HDR tonemapping bypass (for comparison/debugging)
     void setHDREnabled(bool enabled) { hdrEnabled = enabled; }
     bool isHDREnabled() const { return hdrEnabled; }
@@ -229,6 +244,16 @@ private:
     float froxelDepthDist = 1.2f;
     float nearPlane = 0.1f;
     float farPlane = 1000.0f;
+
+    // Local tone mapping (bilateral grid)
+    VkImageView bilateralGridView = VK_NULL_HANDLE;
+    VkSampler bilateralGridSampler = VK_NULL_HANDLE;
+    bool localToneMapEnabled = false;  // Disabled by default
+    float localToneMapContrast = 0.5f; // 0=none, 0.5=typical, 1.0=flat
+    float localToneMapDetail = 1.0f;   // 1.0=neutral, 1.5=punchy
+    float bilateralBlend = 0.4f;       // GOT used 40% bilateral, 60% gaussian
+    float minLogLuminance = -8.0f;
+    float maxLogLuminance = 4.0f;
 
     // Auto-exposure parameters
     static constexpr float MIN_EXPOSURE = -4.0f;  // EV (darkening limit)

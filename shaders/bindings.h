@@ -154,6 +154,15 @@
 #define BINDING_PP_DEPTH                   2   // Depth buffer
 #define BINDING_PP_FROXEL                  3   // Froxel volume
 #define BINDING_PP_BLOOM                   4   // Bloom texture
+#define BINDING_PP_BILATERAL_GRID          5   // Bilateral grid 3D texture
+
+// Bilateral Grid Local Tone Mapping (Ghost of Tsushima)
+#define BINDING_BILATERAL_HDR_INPUT        0   // HDR input image
+#define BINDING_BILATERAL_GRID             1   // Bilateral grid output/input
+#define BINDING_BILATERAL_UNIFORMS         2   // Build uniforms
+#define BINDING_BILATERAL_GRID_SRC         0   // Source grid (blur input)
+#define BINDING_BILATERAL_GRID_DST         1   // Dest grid (blur output)
+#define BINDING_BILATERAL_BLUR_UNIFORMS    2   // Blur uniforms
 
 // =============================================================================
 // Bloom Pass Descriptor Set
@@ -448,6 +457,15 @@ constexpr uint32_t PP_UNIFORMS            = BINDING_PP_UNIFORMS;
 constexpr uint32_t PP_DEPTH               = BINDING_PP_DEPTH;
 constexpr uint32_t PP_FROXEL              = BINDING_PP_FROXEL;
 constexpr uint32_t PP_BLOOM               = BINDING_PP_BLOOM;
+constexpr uint32_t PP_BILATERAL_GRID      = BINDING_PP_BILATERAL_GRID;
+
+// Bilateral Grid
+constexpr uint32_t BILATERAL_HDR_INPUT    = BINDING_BILATERAL_HDR_INPUT;
+constexpr uint32_t BILATERAL_GRID         = BINDING_BILATERAL_GRID;
+constexpr uint32_t BILATERAL_UNIFORMS     = BINDING_BILATERAL_UNIFORMS;
+constexpr uint32_t BILATERAL_GRID_SRC     = BINDING_BILATERAL_GRID_SRC;
+constexpr uint32_t BILATERAL_GRID_DST     = BINDING_BILATERAL_GRID_DST;
+constexpr uint32_t BILATERAL_BLUR_UNIFORMS = BINDING_BILATERAL_BLUR_UNIFORMS;
 
 // Bloom
 constexpr uint32_t BLOOM_INPUT            = BINDING_BLOOM_INPUT;

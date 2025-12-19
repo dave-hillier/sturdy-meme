@@ -1,0 +1,71 @@
+#version 450
+
+/*
+ * Bilateral Grid Blur Compute Shader
+ * Separable Gaussian blur for the bilateral grid
+ *
+ * Ghost of Tsushima uses:
+ * - Wide blur in X,Y (spatial dimensions)
+ * - Smaller or no blur in Z (luminance dimension)
+ *
+ * This shader performs a 1D blur along one axis at a time.
+ * Call 3 times with different axis values for full 3D blur.
+ */
+
+#extension GL_GOOGLE_include_directive : require
+
+#include "bindings.glsl"
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 8) in;
+
+// Input/output bilateral grid (ping-pong between two images)
+layout(binding = BINDING_BILATERAL_GRID_SRC, rgba16f) uniform readonly image3D gridSrc;
+layout(binding = BINDING_BILATERAL_GRID_DST, rgba16f) uniform writeonly image3D gridDst;
+
+layout(binding = BINDING_BILATERAL_BLUR_UNIFORMS) uniform BlurUniforms {
+    int axis;           // 0=X, 1=Y, 2=Z
+    int kernelRadius;   // Blur radius (e.g., 4 for 9-tap kernel)
+    float sigma;        // Gaussian sigma
+    float pad;
+    ivec4 gridDims;     // xyz = grid dimensions, w = unused
+};
+
+// Precomputed Gaussian weights for up to 13-tap kernel (radius 6)
+float gaussianWeight(int offset, float sigma) {
+    float sigma2 = sigma * sigma;
+    return exp(-0.5 * float(offset * offset) / sigma2);
+}
+
+void main() {
+    ivec3 coord = ivec3(gl_GlobalInvocationID.xyz);
+
+    if (coord.x >= gridDims.x || coord.y >= gridDims.y || coord.z >= gridDims.z) {
+        return;
+    }
+
+    // Direction vector based on axis
+    ivec3 dir = ivec3(0);
+    dir[axis] = 1;
+
+    // Gaussian blur along axis
+    vec4 result = vec4(0.0);
+    float totalWeight = 0.0;
+
+    for (int i = -kernelRadius; i <= kernelRadius; i++) {
+        ivec3 sampleCoord = coord + dir * i;
+
+        // Clamp to grid bounds
+        sampleCoord = clamp(sampleCoord, ivec3(0), gridDims.xyz - 1);
+
+        float weight = gaussianWeight(i, sigma);
+        vec4 gridValue = imageLoad(gridSrc, sampleCoord);
+
+        result += gridValue * weight;
+        totalWeight += weight;
+    }
+
+    // Normalize
+    result /= max(totalWeight, 0.0001);
+
+    imageStore(gridDst, coord, result);
+}

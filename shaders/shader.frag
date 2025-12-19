@@ -315,6 +315,12 @@ void main() {
     // Rougher metals get more ambient, smoother metals rely more on direct specular
     float envReflection = mix(0.3, 1.0, roughness);
     vec3 ambientSpecular = ubo.ambientColor.rgb * F0 * metallic * envReflection;
+
+    // Apply horizon occlusion to ambient specular (Ghost of Tsushima technique)
+    // This prevents normal-mapped bumps from glowing unrealistically on their back sides
+    float horizonOcc = horizonOcclusion(V, geometricN, N, roughness);
+    ambientSpecular *= horizonOcc;
+
     vec3 ambient = (ambientDiffuse + ambientSpecular) * ao;  // Apply AO to ambient lighting
 
     // Dynamic lights contribution (multiple point and spot lights)

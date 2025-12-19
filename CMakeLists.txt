@@ -88,6 +88,7 @@ set(SOURCES
     # Postprocess
     src/postprocess/PostProcessSystem.cpp
     src/postprocess/BloomSystem.cpp
+    src/postprocess/BilateralGridSystem.cpp
     src/postprocess/SSRSystem.cpp
     src/postprocess/HiZSystem.cpp
     # Lighting
@@ -527,6 +528,8 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cloud_shadow.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_build.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_reduce.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bilateral_grid_build.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bilateral_grid_blur.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/snow_accumulation.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/volumetric_snow.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/hiz_downsample.comp.spv
@@ -634,6 +637,7 @@ if(SHADER_COMPILE_CMD)
         leaf.comp leaf.vert leaf.frag
         snow_accumulation.comp
         tree.vert tree.frag tree_billboard.frag
+        bilateral_grid_build.comp bilateral_grid_blur.comp
     )
 
     foreach(SHADER ${SHADERS_WITH_BINDINGS})
@@ -880,6 +884,8 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cloud_shadow.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_build.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_reduce.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bilateral_grid_build.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bilateral_grid_blur.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/snow_accumulation.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/volumetric_snow.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/hiz_downsample.comp.spv

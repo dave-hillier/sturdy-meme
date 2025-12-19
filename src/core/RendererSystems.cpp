@@ -13,6 +13,7 @@
 #include "LeafSystem.h"
 #include "PostProcessSystem.h"
 #include "BloomSystem.h"
+#include "BilateralGridSystem.h"
 #include "FroxelSystem.h"
 #include "AtmosphereLUTSystem.h"
 #include "TerrainSystem.h"
@@ -131,6 +132,10 @@ void RendererSystems::setPostProcess(std::unique_ptr<PostProcessSystem> system) 
 
 void RendererSystems::setBloom(std::unique_ptr<BloomSystem> system) {
     bloomSystem_ = std::move(system);
+}
+
+void RendererSystems::setBilateralGrid(std::unique_ptr<BilateralGridSystem> system) {
+    bilateralGridSystem_ = std::move(system);
 }
 
 void RendererSystems::setSSR(std::unique_ptr<SSRSystem> system) {

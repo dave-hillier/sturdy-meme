@@ -117,6 +117,48 @@ void GuiPostFXTab::render(Renderer& renderer) {
     ImGui::Separator();
     ImGui::Spacing();
 
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.9f, 0.85f, 0.7f, 1.0f));
+    ImGui::Text("LOCAL TONE MAPPING");
+    ImGui::PopStyleColor();
+
+    bool localToneMapEnabled = renderer.isLocalToneMapEnabled();
+    if (ImGui::Checkbox("Enable Local Tone Mapping", &localToneMapEnabled)) {
+        renderer.setLocalToneMapEnabled(localToneMapEnabled);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Ghost of Tsushima bilateral grid technique for detail-preserving contrast");
+    }
+
+    if (localToneMapEnabled) {
+        float contrast = renderer.getLocalToneMapContrast();
+        if (ImGui::SliderFloat("Contrast Reduction", &contrast, 0.0f, 1.0f)) {
+            renderer.setLocalToneMapContrast(contrast);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("0 = no contrast reduction, 0.5 = typical, 1.0 = very flat");
+        }
+
+        float detail = renderer.getLocalToneMapDetail();
+        if (ImGui::SliderFloat("Detail Boost", &detail, 0.5f, 2.0f)) {
+            renderer.setLocalToneMapDetail(detail);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("1.0 = neutral, 1.5 = punchy, 2.0 = maximum detail");
+        }
+
+        float bilateralBlend = renderer.getBilateralBlend();
+        if (ImGui::SliderFloat("Bilateral Blend", &bilateralBlend, 0.0f, 1.0f)) {
+            renderer.setBilateralBlend(bilateralBlend);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("GOT used 40%% bilateral, 60%% gaussian for smooth gradients");
+        }
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.8f, 1.0f, 1.0f));
     ImGui::Text("EXPOSURE");
     ImGui::PopStyleColor();
