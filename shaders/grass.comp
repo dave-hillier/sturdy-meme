@@ -197,8 +197,9 @@ void main() {
     if (distToCamera > uniforms.maxDrawDistance) return;
 
     // Frustum culling using common helper
-    // Use large margin (5.0) to ensure grass behind camera can still cast shadows
-    if (!isInFrustum(uniforms.frustumPlanes, worldPos, 5.0)) return;
+    // Use large margin (15.0) to handle double-buffer lag during camera rotation
+    // and ensure grass behind camera can still cast shadows
+    if (!isInFrustum(uniforms.frustumPlanes, worldPos, 15.0)) return;
 
     // LOD blade dropping using common helper
     // Drop up to 75% at max LOD distance
