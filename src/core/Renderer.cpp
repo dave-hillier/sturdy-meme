@@ -346,6 +346,38 @@ void Renderer::setupRenderPipeline() {
     });
 
     // Post-process is handled separately since it needs guiRenderCallback and framebuffer
+
+    // Apply initial toggle state
+    syncPerformanceToggles();
+}
+
+void Renderer::syncPerformanceToggles() {
+    // Sync compute stage passes
+    renderPipeline.computeStage.setPassEnabled("terrain", perfToggles.terrainCompute);
+    renderPipeline.computeStage.setPassEnabled("subdivision", perfToggles.subdivisionCompute);
+    renderPipeline.computeStage.setPassEnabled("grass", perfToggles.grassCompute);
+    renderPipeline.computeStage.setPassEnabled("weather", perfToggles.weatherCompute);
+    renderPipeline.computeStage.setPassEnabled("snow", perfToggles.snowCompute);
+    renderPipeline.computeStage.setPassEnabled("leaf", perfToggles.leafCompute);
+    renderPipeline.computeStage.setPassEnabled("foam", perfToggles.foamCompute);
+    renderPipeline.computeStage.setPassEnabled("cloudShadow", perfToggles.cloudShadowCompute);
+
+    // Sync HDR stage draw calls
+    renderPipeline.hdrStage.setDrawCallEnabled("sky", perfToggles.skyDraw);
+    renderPipeline.hdrStage.setDrawCallEnabled("terrain", perfToggles.terrainDraw);
+    renderPipeline.hdrStage.setDrawCallEnabled("catmullClark", perfToggles.catmullClarkDraw);
+    renderPipeline.hdrStage.setDrawCallEnabled("sceneObjects", perfToggles.sceneObjectsDraw);
+    renderPipeline.hdrStage.setDrawCallEnabled("skinnedCharacter", perfToggles.skinnedCharacterDraw);
+    renderPipeline.hdrStage.setDrawCallEnabled("treeEdit", perfToggles.treeEditDraw);
+    renderPipeline.hdrStage.setDrawCallEnabled("grass", perfToggles.grassDraw);
+    renderPipeline.hdrStage.setDrawCallEnabled("water", perfToggles.waterDraw);
+    renderPipeline.hdrStage.setDrawCallEnabled("leaves", perfToggles.leavesDraw);
+    renderPipeline.hdrStage.setDrawCallEnabled("weather", perfToggles.weatherDraw);
+    renderPipeline.hdrStage.setDrawCallEnabled("debugLines", perfToggles.debugLinesDraw);
+
+    // Sync post stage
+    renderPipeline.postStage.setHiZEnabled(perfToggles.hiZPyramid);
+    renderPipeline.postStage.setBloomEnabled(perfToggles.bloom);
 }
 
 // Note: initCoreVulkanResources(), initDescriptorInfrastructure(), initSubsystems(),
@@ -777,6 +809,9 @@ bool Renderer::render(const Camera& camera) {
         return false;
     }
 
+    // Sync performance toggles to pipeline stages (allows runtime toggle changes)
+    syncPerformanceToggles();
+
     VkDevice device = vulkanContext.getDevice();
     VkSwapchainKHR swapchain = vulkanContext.getSwapchain();
     VkQueue graphicsQueue = vulkanContext.getGraphicsQueue();
@@ -926,8 +961,8 @@ bool Renderer::render(const Camera& camera) {
     // Execute all compute passes via pipeline
     renderPipeline.computeStage.execute(ctx);
 
-    // Shadow pass (skip when sun is below horizon)
-    if (lastSunIntensity > 0.001f) {
+    // Shadow pass (skip when sun is below horizon or shadows disabled)
+    if (lastSunIntensity > 0.001f && perfToggles.shadowPass) {
         systems_->profiler().beginGpuZone(cmd, "ShadowPass");
         recordShadowPass(cmd, frame.frameIndex, frame.time);
         systems_->profiler().endGpuZone(cmd, "ShadowPass");
@@ -935,13 +970,14 @@ bool Renderer::render(const Camera& camera) {
 
     // Froxel volumetric fog and atmosphere updates via pipeline
     systems_->postProcess().setCameraPlanes(camera.getNearPlane(), camera.getFarPlane());
-    if (renderPipeline.froxelStageFn) {
+    if (renderPipeline.froxelStageFn && (perfToggles.froxelFog || perfToggles.atmosphereLUT)) {
         renderPipeline.froxelStageFn(ctx);
     }
 
     // Water G-buffer pass (Phase 3) - renders water mesh to mini G-buffer
-    // Skip if water was not visible last frame (temporal culling)
-    if (systems_->waterGBuffer().getPipeline() != VK_NULL_HANDLE &&
+    // Skip if water was not visible last frame (temporal culling) or disabled
+    if (perfToggles.waterGBuffer &&
+        systems_->waterGBuffer().getPipeline() != VK_NULL_HANDLE &&
         systems_->waterTileCull().wasWaterVisibleLastFrame(frame.frameIndex)) {
         systems_->profiler().beginGpuZone(cmd, "WaterGBuffer");
         systems_->waterGBuffer().beginRenderPass(cmd);
@@ -968,7 +1004,7 @@ bool Renderer::render(const Camera& camera) {
 
         // Screen-Space Reflections compute pass (Phase 10)
         // Computes SSR for next frame's water - uses current scene for temporal stability
-        if (systems_->ssr().isEnabled()) {
+        if (perfToggles.ssr && systems_->ssr().isEnabled()) {
             systems_->profiler().beginGpuZone(cmd, "SSR");
             systems_->ssr().recordCompute(cmd, frame.frameIndex,
                                     systems_->postProcess().getHDRColorView(),
@@ -980,7 +1016,7 @@ bool Renderer::render(const Camera& camera) {
 
         // Water tile culling compute pass (Phase 7)
         // Determines which screen tiles contain water for optimized rendering
-        if (systems_->waterTileCull().isEnabled()) {
+        if (perfToggles.waterTileCull && systems_->waterTileCull().isEnabled()) {
             systems_->profiler().beginGpuZone(cmd, "WaterTileCull");
             glm::mat4 viewProj = frame.projection * frame.view;
             systems_->waterTileCull().recordTileCull(cmd, frame.frameIndex,
@@ -1248,14 +1284,16 @@ RenderResources Renderer::buildRenderResources(uint32_t swapchainImageIndex) con
 void Renderer::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float grassTime) {
     // Delegate to the shadow system with callbacks for terrain and grass
     auto terrainCallback = [this, frameIndex](VkCommandBuffer cb, uint32_t cascade, const glm::mat4& lightMatrix) {
-        if (terrainEnabled) {
+        if (terrainEnabled && perfToggles.terrainShadows) {
             systems_->terrain().recordShadowDraw(cb, frameIndex, lightMatrix, static_cast<int>(cascade));
         }
     };
 
     auto grassCallback = [this, frameIndex, grassTime](VkCommandBuffer cb, uint32_t cascade, const glm::mat4& lightMatrix) {
         (void)lightMatrix;  // Grass uses cascade index only
-        systems_->grass().recordShadowDraw(cb, frameIndex, grassTime, cascade);
+        if (perfToggles.grassShadows) {
+            systems_->grass().recordShadowDraw(cb, frameIndex, grassTime, cascade);
+        }
     };
 
     // Combine scene objects and rock objects for shadow rendering

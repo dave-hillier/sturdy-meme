@@ -25,6 +25,9 @@ public:
     void run();
     void shutdown();
 
+    // Access renderer for command line toggle configuration
+    Renderer& getRenderer() { return *renderer_; }
+
 private:
     void processEvents();
     void applyInputToCamera();

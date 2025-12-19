@@ -20,6 +20,7 @@
 #include "RenderPipeline.h"
 #include "VulkanRAII.h"
 #include "RendererSystems.h"
+#include "PerformanceToggles.h"
 
 // Forward declarations for types used in public API
 class PostProcessSystem;
@@ -353,6 +354,11 @@ public:
     const DebugLineSystem& getDebugLineSystem() const;
     void setPhysicsDebugEnabled(bool enabled) { physicsDebugEnabled = enabled; }
     bool isPhysicsDebugEnabled() const { return physicsDebugEnabled; }
+
+    // Performance toggles for debugging synchronization and bottlenecks
+    PerformanceToggles& getPerformanceToggles() { return perfToggles; }
+    const PerformanceToggles& getPerformanceToggles() const { return perfToggles; }
+    void syncPerformanceToggles();  // Apply toggle state to render pipeline stages
 #ifdef JPH_DEBUG_RENDERER
     PhysicsDebugRenderer* getPhysicsDebugRenderer();
     const PhysicsDebugRenderer* getPhysicsDebugRenderer() const;
@@ -425,6 +431,9 @@ private:
     bool physicsDebugEnabled = false;
     glm::mat4 lastViewProj{1.0f};  // Cached view-projection for debug rendering
     bool useVolumetricSnow = true;  // Use new volumetric system by default
+
+    // Performance toggles for debugging
+    PerformanceToggles perfToggles;
 
     // Render pipeline (stages abstraction - for future refactoring)
     RenderPipeline renderPipeline;

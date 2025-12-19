@@ -10,6 +10,7 @@
 #include "GuiWaterTab.h"
 #include "GuiDebugTab.h"
 #include "GuiProfilerTab.h"
+#include "GuiPerformanceTab.h"
 #include "GuiIKTab.h"
 #include "GuiPlayerTab.h"
 
@@ -310,6 +311,10 @@ void GuiSystem::render(Renderer& renderer, const Camera& camera, float deltaTime
             }
             if (ImGui::BeginTabItem("Debug")) {
                 GuiDebugTab::render(renderer);
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Perf")) {
+                GuiPerformanceTab::render(renderer);
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Profiler")) {
