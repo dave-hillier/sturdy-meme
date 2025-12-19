@@ -22,8 +22,8 @@
 #ifndef TILE_CACHE_COMMON_GLSL
 #define TILE_CACHE_COMMON_GLSL
 
-// Find tile index covering world position, returns -1 if no tile loaded
-// Requires: tiles[] array defined in TileInfoBuffer
+// Find tile covering world position, returns index in tiles[] array or -1 if not found
+// Requires: tiles[] array defined in TileInfoBuffer with layerIndex field
 int tileCacheFindTile(vec2 worldXZ, uint tileCount) {
     for (uint i = 0u; i < tileCount && i < 64u; i++) {
         vec4 bounds = tiles[i].worldBounds;
@@ -44,8 +44,12 @@ float sampleHeightWithTileCache(sampler2D heightMapGlobal, sampler2DArray height
         // High-res tile available - calculate local UV within tile
         vec4 bounds = tiles[tileIdx].worldBounds;
         vec2 tileUV = (worldXZ - bounds.xy) / (bounds.zw - bounds.xy);
-        float h = texture(heightMapTiles, vec3(tileUV, float(tileIdx))).r;
-        return terrainHeightToWorld(h, heightScale);
+        // Use the stored layer index instead of assuming tile position == layer index
+        int layerIdx = tiles[tileIdx].layerIndex.x;
+        if (layerIdx >= 0) {
+            float h = texture(heightMapTiles, vec3(tileUV, float(layerIdx))).r;
+            return terrainHeightToWorld(h, heightScale);
+        }
     }
     // Fall back to global coarse texture
     return sampleTerrainHeight(heightMapGlobal, uv, heightScale);

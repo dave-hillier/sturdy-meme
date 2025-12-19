@@ -48,12 +48,16 @@ struct TerrainTile {
     float worldMaxZ = 0.0f;
 
     bool loaded = false;
+
+    // Index in the tile array texture (-1 = not yet uploaded to array)
+    int32_t arrayLayerIndex = -1;
 };
 
 // Tile info for GPU (matches shader buffer layout)
 struct TileInfoGPU {
     glm::vec4 worldBounds;  // xy = min corner, zw = max corner
     glm::vec4 uvScaleOffset; // xy = scale, zw = offset (for UV calculation)
+    glm::ivec4 layerIndex;  // x = layer index in tile array, yzw = padding (std140 alignment)
 };
 
 // Terrain tile cache - manages LOD-based tile streaming
@@ -228,4 +232,13 @@ private:
 
     // Maximum active tiles (limits GPU memory usage)
     static constexpr uint32_t MAX_ACTIVE_TILES = 64;
+
+    // Track which array layers are free (true = free, false = occupied)
+    std::array<bool, MAX_ACTIVE_TILES> freeArrayLayers_;
+
+    // Allocate a free layer in the tile array texture, returns -1 if none available
+    int32_t allocateArrayLayer();
+
+    // Free a layer in the tile array texture
+    void freeArrayLayer(int32_t layerIndex);
 };

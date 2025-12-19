@@ -81,6 +81,7 @@ layout(binding = BINDING_WATER_TILE_ARRAY) uniform sampler2DArray heightMapTiles
 struct TileInfo {
     vec4 worldBounds;    // xy = min corner, zw = max corner
     vec4 uvScaleOffset;  // xy = scale, zw = offset
+    ivec4 layerIndex;    // x = layer index in tile array, yzw = padding
 };
 layout(std430, binding = BINDING_WATER_TILE_INFO) readonly buffer TileInfoBuffer {
     uint activeTileCount;

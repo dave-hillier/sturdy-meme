@@ -139,6 +139,9 @@ bool TerrainTileCache::initInternal(const InitInfo& info) {
     }
     currentFrameIndex_ = 0;
 
+    // Initialize all array layers as free
+    freeArrayLayers_.fill(true);
+
     SDL_Log("TerrainTileCache initialized: %s", cacheDirectory.c_str());
     SDL_Log("  Terrain size: %.0fm, Tile resolution: %u, LOD levels: %u",
             terrainSize, tileResolution, numLODLevels);
@@ -340,6 +343,10 @@ void TerrainTileCache::updateActiveTiles(const glm::vec3& cameraPos, float loadR
         auto it = loadedTiles.find(key);
         if (it != loadedTiles.end()) {
             TerrainTile& tile = it->second;
+            // Free the array layer used by this tile
+            if (tile.arrayLayerIndex >= 0) {
+                freeArrayLayer(tile.arrayLayerIndex);
+            }
             if (tile.imageView) vkDestroyImageView(device, tile.imageView, nullptr);
             if (tile.image) vmaDestroyImage(allocator, tile.image, tile.allocation);
             loadedTiles.erase(it);
@@ -455,10 +462,20 @@ bool TerrainTileCache::loadTile(TileCoord coord, uint32_t lod) {
         return false;
     }
 
+    // Allocate a layer in the tile array and copy data to it (one-time upload)
+    int32_t layerIndex = allocateArrayLayer();
+    if (layerIndex >= 0) {
+        tile.arrayLayerIndex = layerIndex;
+        copyTileToArrayLayer(&tile, static_cast<uint32_t>(layerIndex));
+    } else {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "TerrainTileCache: No free array layers for tile (%d, %d) LOD%u",
+                    coord.x, coord.z, lod);
+    }
+
     tile.loaded = true;
 
-    SDL_Log("TerrainTileCache: Loaded tile (%d, %d) LOD%u - world bounds [%.0f,%.0f]-[%.0f,%.0f]%s",
-            coord.x, coord.z, lod, tile.worldMinX, tile.worldMinZ, tile.worldMaxX, tile.worldMaxZ,
+    SDL_Log("TerrainTileCache: Loaded tile (%d, %d) LOD%u layer %d - world bounds [%.0f,%.0f]-[%.0f,%.0f]%s",
+            coord.x, coord.z, lod, tile.arrayLayerIndex, tile.worldMinX, tile.worldMinZ, tile.worldMaxX, tile.worldMaxZ,
             hasCpuData ? " (added GPU to existing)" : "");
 
     return true;
@@ -568,8 +585,10 @@ void TerrainTileCache::updateTileInfoBuffer() {
             -tile->worldMinX / sizeX, -tile->worldMinZ / sizeZ
         );
 
-        // Copy tile data to the tile array texture (layer i)
-        copyTileToArrayLayer(tile, static_cast<uint32_t>(i));
+        // Store the array layer index where this tile's data is stored
+        // The tile data was copied to the array when it was first loaded (in loadTile)
+        // so we don't need to re-copy it every frame - just tell the shader which layer to sample
+        tileInfoArray[i].layerIndex = glm::ivec4(tile->arrayLayerIndex, 0, 0, 0);
     }
 }
 
@@ -811,4 +830,20 @@ void TerrainTileCache::preloadTilesAround(float worldX, float worldZ, float radi
 
     SDL_Log("TerrainTileCache: Pre-loaded %u LOD0 tiles around (%.0f, %.0f) radius %.0f",
             tilesLoaded, worldX, worldZ, radius);
+}
+
+int32_t TerrainTileCache::allocateArrayLayer() {
+    for (uint32_t i = 0; i < MAX_ACTIVE_TILES; i++) {
+        if (freeArrayLayers_[i]) {
+            freeArrayLayers_[i] = false;
+            return static_cast<int32_t>(i);
+        }
+    }
+    return -1;  // No free layers
+}
+
+void TerrainTileCache::freeArrayLayer(int32_t layerIndex) {
+    if (layerIndex >= 0 && layerIndex < static_cast<int32_t>(MAX_ACTIVE_TILES)) {
+        freeArrayLayers_[layerIndex] = true;
+    }
 }
