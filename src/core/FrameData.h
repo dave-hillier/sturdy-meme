@@ -46,7 +46,7 @@ struct FrameData {
 
     // Terrain parameters (for systems that need terrain info)
     float terrainSize = 1024.0f;
-    float heightScale = 100.0f;
+    float heightScale = 0.0f;
 
     // Wind parameters (from WindSystem/EnvironmentSettings)
     glm::vec2 windDirection = glm::vec2(1.0f, 0.0f);

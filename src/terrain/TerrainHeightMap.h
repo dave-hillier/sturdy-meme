@@ -91,7 +91,7 @@ private:
     VkQueue graphicsQueue = VK_NULL_HANDLE;
     VkCommandPool commandPool = VK_NULL_HANDLE;
     float terrainSize = 500.0f;
-    float heightScale = 50.0f;
+    float heightScale = 0.0f;
     uint32_t resolution = 512;
     uint32_t holeMaskResolution = 2048;  // Higher res for finer hole detail (~8m/texel on 16km terrain)
 

@@ -27,7 +27,7 @@ public:
         float unloadRadius = 1200.0f;
         uint32_t maxTilesPerFrame = 2;
         float terrainSize = 16384.0f;
-        float heightScale = 235.0f;
+        float heightScale = 0.0f;
     };
 
     PhysicsTerrainTileManager() = default;

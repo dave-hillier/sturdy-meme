@@ -216,7 +216,7 @@ private:
     // Configuration from metadata
     std::string cacheDirectory;
     float terrainSize = 16384.0f;
-    float heightScale = 235.0f;
+    float heightScale = 0.0f;
     float minAltitude = -15.0f;
     float maxAltitude = 220.0f;
     uint32_t tileResolution = 512;
