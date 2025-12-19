@@ -4,6 +4,7 @@
 #include <cmath>
 #include <algorithm>
 #include <limits>
+#include <fstream>
 
 ElevationGrid downsample_elevation(const ElevationGrid& src, int target_size) {
     // Calculate scale to fit largest dimension into target_size
@@ -381,5 +382,83 @@ void write_terrain_traced_rivers_png(
     unsigned error = lodepng::encode(filename, image, elevation.width, elevation.height, LCT_RGB, 8);
     if (error) {
         throw std::runtime_error("Cannot write file: " + filename + " - " + lodepng_error_text(error));
+    }
+}
+
+// Binary output functions for biome_preprocess compatibility
+
+void write_flow_accumulation_bin(const std::string& filename, const D8Result& d8) {
+    // Find max for normalization
+    uint32_t max_acc = 1;
+    for (const auto& acc : d8.flow_accumulation) {
+        max_acc = std::max(max_acc, acc);
+    }
+
+    // Write header: width, height as uint32_t
+    std::ofstream file(filename, std::ios::binary);
+    if (!file.is_open()) {
+        throw std::runtime_error("Cannot open file for writing: " + filename);
+    }
+
+    uint32_t width = static_cast<uint32_t>(d8.width);
+    uint32_t height = static_cast<uint32_t>(d8.height);
+    file.write(reinterpret_cast<const char*>(&width), sizeof(width));
+    file.write(reinterpret_cast<const char*>(&height), sizeof(height));
+
+    // Write normalized flow accumulation as floats [0,1]
+    std::vector<float> normalized(d8.flow_accumulation.size());
+    for (size_t i = 0; i < d8.flow_accumulation.size(); ++i) {
+        normalized[i] = static_cast<float>(d8.flow_accumulation[i]) / static_cast<float>(max_acc);
+    }
+    file.write(reinterpret_cast<const char*>(normalized.data()), normalized.size() * sizeof(float));
+
+    if (!file.good()) {
+        throw std::runtime_error("Error writing to file: " + filename);
+    }
+}
+
+void write_flow_direction_bin(const std::string& filename, const D8Result& d8) {
+    std::ofstream file(filename, std::ios::binary);
+    if (!file.is_open()) {
+        throw std::runtime_error("Cannot open file for writing: " + filename);
+    }
+
+    uint32_t width = static_cast<uint32_t>(d8.width);
+    uint32_t height = static_cast<uint32_t>(d8.height);
+    file.write(reinterpret_cast<const char*>(&width), sizeof(width));
+    file.write(reinterpret_cast<const char*>(&height), sizeof(height));
+
+    // Convert uint8_t to int8_t (8 = no flow becomes -1)
+    std::vector<int8_t> directions(d8.flow_direction.size());
+    for (size_t i = 0; i < d8.flow_direction.size(); ++i) {
+        if (d8.flow_direction[i] == 8) {
+            directions[i] = -1;  // No flow / pit
+        } else {
+            directions[i] = static_cast<int8_t>(d8.flow_direction[i]);
+        }
+    }
+    file.write(reinterpret_cast<const char*>(directions.data()), directions.size() * sizeof(int8_t));
+
+    if (!file.good()) {
+        throw std::runtime_error("Error writing to file: " + filename);
+    }
+}
+
+void write_watershed_labels_bin(const std::string& filename, const WatershedResult& watersheds) {
+    std::ofstream file(filename, std::ios::binary);
+    if (!file.is_open()) {
+        throw std::runtime_error("Cannot open file for writing: " + filename);
+    }
+
+    uint32_t width = static_cast<uint32_t>(watersheds.width);
+    uint32_t height = static_cast<uint32_t>(watersheds.height);
+    file.write(reinterpret_cast<const char*>(&width), sizeof(width));
+    file.write(reinterpret_cast<const char*>(&height), sizeof(height));
+
+    file.write(reinterpret_cast<const char*>(watersheds.labels.data()),
+               watersheds.labels.size() * sizeof(uint32_t));
+
+    if (!file.good()) {
+        throw std::runtime_error("Error writing to file: " + filename);
     }
 }

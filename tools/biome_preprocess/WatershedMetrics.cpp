@@ -5,8 +5,32 @@
 #include <cmath>
 #include <limits>
 #include <tuple>
+#include <thread>
+#include <vector>
+#include <mutex>
+#include <atomic>
 
 namespace {
+    // Simple parallel for using std::thread
+    template<typename Func>
+    void parallel_for(int start, int end, Func f) {
+        int n = std::max(1u, std::thread::hardware_concurrency());
+        std::vector<std::thread> threads;
+        int total = end - start;
+        int chunk = (total + n - 1) / n;
+
+        for (int t = 0; t < n; ++t) {
+            int from = start + t * chunk;
+            int to = std::min(from + chunk, end);
+            if (from < end) {
+                threads.emplace_back([=]{
+                    for (int i = from; i < to; ++i) f(i);
+                });
+            }
+        }
+        for (auto& t : threads) t.join();
+    }
+
     // D8 flow direction offsets
     const int dx[] = {1, 1, 0, -1, -1, -1, 0, 1};
     const int dy[] = {0, 1, 1, 1, 0, -1, -1, -1};
@@ -54,10 +78,8 @@ void WatershedMetrics::computeTWI(
     const float minSlope = 0.001f;
     const float epsilon = 0.0001f;
 
-    float maxTwi = 0.0f;
-    float minTwi = std::numeric_limits<float>::max();
-
-    for (uint32_t y = 0; y < outputHeight; y++) {
+    // Parallel TWI computation
+    parallel_for(0, static_cast<int>(outputHeight), [&](int y) {
         for (uint32_t x = 0; x < outputWidth; x++) {
             float worldX = (static_cast<float>(x) + 0.5f) / outputWidth * terrainSize;
             float worldZ = (static_cast<float>(y) + 0.5f) / outputHeight * terrainSize;
@@ -70,9 +92,15 @@ void WatershedMetrics::computeTWI(
             float twi = std::log(upstreamArea / tanSlope);
 
             result.twiMap[y * outputWidth + x] = twi;
-            maxTwi = std::max(maxTwi, twi);
-            minTwi = std::min(minTwi, twi);
         }
+    });
+
+    // Find min/max after parallel computation
+    float maxTwi = 0.0f;
+    float minTwi = std::numeric_limits<float>::max();
+    for (const auto& twi : result.twiMap) {
+        maxTwi = std::max(maxTwi, twi);
+        minTwi = std::min(minTwi, twi);
     }
 
     SDL_Log("Computed TWI map: range [%.2f, %.2f]", minTwi, maxTwi);
