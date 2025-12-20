@@ -391,8 +391,8 @@ bool TreeSystem::generateTreeMesh(const TreeOptions& options, Mesh& branchMesh, 
                 v.tangent = glm::vec4(finalQuat * glm::vec3(1.0f, 0.0f, 0.0f), 1.0f);
                 // Wind animation data in vertex color:
                 // RGB = pivot point (leaf attachment) for skeletal rotation
-                // A = 1.0 (leaves are highest level, maximum sway)
-                v.color = glm::vec4(leaf.position, 1.0f);
+                // A = 0.98 (leaves are highest level, maximum sway - not 1.0 to avoid default color detection)
+                v.color = glm::vec4(leaf.position, 0.98f);
 
                 leafVertices.push_back(v);
             }

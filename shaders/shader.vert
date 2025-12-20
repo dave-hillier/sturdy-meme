@@ -110,13 +110,15 @@ void main() {
     // Wind animation using skeletal approach:
     // inColor.rgb = pivot point (branch/leaf attachment in model space)
     // inColor.a = branch level (0-1), where 0 = trunk, 1 = leaves
-    // Non-vegetation objects have pivot at origin (0,0,0), so we check for that
+    // Non-vegetation objects have default color (1,1,1,1), so we detect that
     float branchLevel = inColor.a;
     vec3 pivotLocal = inColor.rgb;
 
-    // Only animate if this is vegetation (has a valid pivot point or non-zero level)
-    bool isVegetation = (branchLevel > 0.001 && branchLevel < 0.999) ||
-                        (pivotLocal.x != 0.0 || pivotLocal.y != 0.0 || pivotLocal.z != 0.0);
+    // Detect vegetation: NOT the default white (1,1,1,1) color
+    // Default meshes have color=(1,1,1,1), vegetation has pivot data in RGB and level in A
+    // Trunk has (1,1,1,0), branches have (pivot.xyz, level), leaves have (pivot.xyz, 1.0)
+    bool isDefaultColor = (inColor.r > 0.99 && inColor.g > 0.99 && inColor.b > 0.99 && inColor.a > 0.99);
+    bool isVegetation = !isDefaultColor;
 
     if (isVegetation) {
         float windStrength = wind.windDirectionAndStrength.z;
