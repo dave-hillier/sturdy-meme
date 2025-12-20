@@ -23,6 +23,7 @@
 #include "HiZSystem.h"
 #include "CatmullClarkSystem.h"
 #include "RockSystem.h"
+#include "TreeSystem.h"
 #include "WaterSystem.h"
 #include "WaterDisplacement.h"
 #include "FlowMapGenerator.h"
@@ -215,6 +216,41 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     }
     systems_->setRock(std::move(rockSystem));
 
+    // Initialize tree system via factory
+    TreeSystem::InitInfo treeInfo{};
+    treeInfo.device = device;
+    treeInfo.allocator = allocator;
+    treeInfo.commandPool = commandPool.get();
+    treeInfo.graphicsQueue = graphicsQueue;
+    treeInfo.physicalDevice = physicalDevice;
+    treeInfo.resourcePath = resourcePath;
+    treeInfo.terrainSize = core.terrain.size;
+    treeInfo.getTerrainHeight = core.terrain.getHeightAt;
+
+    auto treeSystem = TreeSystem::create(treeInfo);
+    if (!treeSystem) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create TreeSystem");
+        return false;
+    }
+
+    // Add some default trees to the scene
+    float treeX = 15.0f, treeZ = -10.0f;
+    glm::vec3 treePos(treeX, core.terrain.getHeightAt(treeX, treeZ), treeZ);
+    treeSystem->addTree(treePos, 0.0f, 1.0f, TreeOptions::defaultOak());
+
+    // Add a pine tree nearby
+    float pineX = 25.0f, pineZ = -15.0f;
+    glm::vec3 pinePos(pineX, core.terrain.getHeightAt(pineX, pineZ), pineZ);
+    treeSystem->addTree(pinePos, 0.5f, 1.2f, TreeOptions::defaultPine());
+
+    // Add a birch tree
+    float birchX = 10.0f, birchZ = 5.0f;
+    glm::vec3 birchPos(birchX, core.terrain.getHeightAt(birchX, birchZ), birchZ);
+    treeSystem->addTree(birchPos, 1.0f, 0.9f, TreeOptions::defaultBirch());
+
+    systems_->setTree(std::move(treeSystem));
+    SDL_Log("Tree system initialized with %zu trees", systems_->tree()->getTreeCount());
+
     // Update rock descriptor sets now that rock textures are loaded
     {
         MaterialDescriptorFactory factory(device);
@@ -244,6 +280,79 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
             mat.normalView = systems_->rock().getRockNormalMap().getImageView();
             mat.normalSampler = systems_->rock().getRockNormalMap().getSampler();
             factory.writeDescriptorSet(rockDescriptorSets[i], common, mat);
+        }
+    }
+
+    // Allocate and update tree descriptor sets for all texture types (string-based maps)
+    if (systems_->tree()) {
+        MaterialDescriptorFactory factory(device);
+
+        // Allocate descriptor sets for each bark type
+        for (const auto& typeName : systems_->tree()->getBarkTextureTypes()) {
+            auto sets = descriptorManagerPool->allocate(descriptorSetLayout.get(), MAX_FRAMES_IN_FLIGHT);
+            if (sets.empty()) {
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate bark descriptor sets for type: %s", typeName.c_str());
+                return false;
+            }
+            treeBarkDescriptorSets[typeName] = std::move(sets);
+        }
+
+        // Allocate descriptor sets for each leaf type
+        for (const auto& typeName : systems_->tree()->getLeafTextureTypes()) {
+            auto sets = descriptorManagerPool->allocate(descriptorSetLayout.get(), MAX_FRAMES_IN_FLIGHT);
+            if (sets.empty()) {
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate leaf descriptor sets for type: %s", typeName.c_str());
+                return false;
+            }
+            treeLeafDescriptorSets[typeName] = std::move(sets);
+        }
+
+        // Write descriptor sets for each frame
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            MaterialDescriptorFactory::CommonBindings common{};
+            common.uniformBuffer = systems_->globalBuffers().uniformBuffers.buffers[i];
+            common.uniformBufferSize = sizeof(UniformBufferObject);
+            common.shadowMapView = systems_->shadow().getShadowImageView();
+            common.shadowMapSampler = systems_->shadow().getShadowSampler();
+            common.lightBuffer = systems_->globalBuffers().lightBuffers.buffers[i];
+            common.lightBufferSize = sizeof(LightBuffer);
+            common.emissiveMapView = systems_->scene().getSceneBuilder().getDefaultEmissiveMap().getImageView();
+            common.emissiveMapSampler = systems_->scene().getSceneBuilder().getDefaultEmissiveMap().getSampler();
+            common.pointShadowView = systems_->shadow().getPointShadowArrayView(i);
+            common.pointShadowSampler = systems_->shadow().getPointShadowSampler();
+            common.spotShadowView = systems_->shadow().getSpotShadowArrayView(i);
+            common.spotShadowSampler = systems_->shadow().getSpotShadowSampler();
+            common.snowMaskView = systems_->snowMask().getSnowMaskView();
+            common.snowMaskSampler = systems_->snowMask().getSnowMaskSampler();
+            common.placeholderTextureView = systems_->scene().getSceneBuilder().getWhiteTexture().getImageView();
+            common.placeholderTextureSampler = systems_->scene().getSceneBuilder().getWhiteTexture().getSampler();
+
+            // Write descriptor sets for each bark type
+            for (const auto& typeName : systems_->tree()->getBarkTextureTypes()) {
+                Texture* barkTex = systems_->tree()->getBarkTexture(typeName);
+                Texture* barkNormal = systems_->tree()->getBarkNormalMap(typeName);
+
+                MaterialDescriptorFactory::MaterialTextures branchMat{};
+                branchMat.diffuseView = barkTex->getImageView();
+                branchMat.diffuseSampler = barkTex->getSampler();
+                branchMat.normalView = barkNormal->getImageView();
+                branchMat.normalSampler = barkNormal->getSampler();
+                factory.writeDescriptorSet(treeBarkDescriptorSets[typeName][i], common, branchMat);
+            }
+
+            // Write descriptor sets for each leaf type
+            for (const auto& typeName : systems_->tree()->getLeafTextureTypes()) {
+                Texture* leafTex = systems_->tree()->getLeafTexture(typeName);
+                // Use oak bark normal as placeholder for leaves
+                Texture* barkNormal = systems_->tree()->getBarkNormalMap("oak");
+
+                MaterialDescriptorFactory::MaterialTextures leafMat{};
+                leafMat.diffuseView = leafTex->getImageView();
+                leafMat.diffuseSampler = leafTex->getSampler();
+                leafMat.normalView = barkNormal->getImageView();
+                leafMat.normalSampler = barkNormal->getSampler();
+                factory.writeDescriptorSet(treeLeafDescriptorSets[typeName][i], common, leafMat);
+            }
         }
     }
 

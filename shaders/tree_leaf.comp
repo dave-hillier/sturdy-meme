@@ -1,0 +1,143 @@
+#version 450
+#extension GL_GOOGLE_include_directive : enable
+
+#include "bindings.h"
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+// Leaf data from CPU
+struct LeafData {
+    vec4 positionAndSize;  // xyz = position, w = size
+    vec4 orientation;      // quaternion xyzw
+};
+
+// Output vertex for leaf billboard
+struct LeafVertex {
+    vec4 position;         // xyz = position, w = size
+    vec4 normal;           // xyz = normal, w = unused
+    vec2 uv;
+    vec2 padding;
+};
+
+// Indirect draw command
+struct DrawIndexedIndirectCommand {
+    uint indexCount;
+    uint instanceCount;
+    uint firstIndex;
+    int vertexOffset;
+    uint firstInstance;
+};
+
+layout(std430, set = 0, binding = BINDING_TREE_LEAF_INPUT) readonly buffer LeafInputBuffer {
+    LeafData leaves[];
+};
+
+layout(std430, set = 0, binding = BINDING_TREE_LEAF_VERTICES) writeonly buffer LeafVertexBuffer {
+    LeafVertex vertices[];
+};
+
+layout(std430, set = 0, binding = BINDING_TREE_LEAF_INDICES) writeonly buffer LeafIndexBuffer {
+    uint indices[];
+};
+
+layout(std430, set = 0, binding = BINDING_TREE_LEAF_INDIRECT) buffer LeafIndirectBuffer {
+    DrawIndexedIndirectCommand drawCmd;
+};
+
+layout(std140, set = 0, binding = BINDING_TREE_LEAF_PARAMS) uniform LeafParams {
+    uint leafCount;
+    uint billboard;        // 0 = single, 1 = double
+    float padding1;
+    float padding2;
+};
+
+// Quaternion rotation
+vec3 rotateByQuat(vec3 v, vec4 q) {
+    vec3 u = q.xyz;
+    float s = q.w;
+    return 2.0 * dot(u, v) * u + (s*s - dot(u, u)) * v + 2.0 * s * cross(u, v);
+}
+
+void main() {
+    uint leafIdx = gl_GlobalInvocationID.x;
+    if (leafIdx >= leafCount) return;
+
+    LeafData leaf = leaves[leafIdx];
+
+    vec3 position = leaf.positionAndSize.xyz;
+    float size = leaf.positionAndSize.w;
+    vec4 orientation = leaf.orientation;
+
+    // Number of quads per leaf (1 for single billboard, 2 for double)
+    uint quadsPerLeaf = billboard == 1 ? 2u : 1u;
+
+    // Vertex and index offsets
+    uint vertexOffset = leafIdx * 4 * quadsPerLeaf;
+    uint indexOffset = leafIdx * 6 * quadsPerLeaf;
+
+    // Half extents
+    float halfW = size * 0.5;
+    float halfH = size;
+
+    // Create quad(s)
+    for (uint quadIdx = 0; quadIdx < quadsPerLeaf; quadIdx++) {
+        // Rotation around Y for double billboard
+        float yRotation = quadIdx == 1 ? 3.14159265 * 0.5 : 0.0;
+        vec4 yQuat = vec4(0.0, sin(yRotation * 0.5), 0.0, cos(yRotation * 0.5));
+
+        // Combine rotations
+        vec4 finalQuat = vec4(
+            orientation.w * yQuat.xyz + yQuat.w * orientation.xyz + cross(orientation.xyz, yQuat.xyz),
+            orientation.w * yQuat.w - dot(orientation.xyz, yQuat.xyz)
+        );
+        finalQuat = normalize(finalQuat);
+
+        // Local quad vertices (centered at bottom)
+        vec3 localVerts[4] = vec3[4](
+            vec3(-halfW, halfH * 2.0, 0.0),  // Top-left
+            vec3(-halfW, 0.0, 0.0),           // Bottom-left
+            vec3(halfW, 0.0, 0.0),            // Bottom-right
+            vec3(halfW, halfH * 2.0, 0.0)    // Top-right
+        );
+
+        // Transform and write vertices
+        vec3 normal = rotateByQuat(vec3(0.0, 0.0, 1.0), finalQuat);
+
+        for (uint i = 0; i < 4; i++) {
+            vec3 worldPos = position + rotateByQuat(localVerts[i], finalQuat);
+
+            uint vIdx = vertexOffset + quadIdx * 4 + i;
+            vertices[vIdx].position = vec4(worldPos, size);
+            vertices[vIdx].normal = vec4(normal, 0.0);
+
+            // UVs: 0,1 -> 0,0 -> 1,0 -> 1,1
+            vec2 uvs[4] = vec2[4](
+                vec2(0.0, 1.0),
+                vec2(0.0, 0.0),
+                vec2(1.0, 0.0),
+                vec2(1.0, 1.0)
+            );
+            vertices[vIdx].uv = uvs[i];
+        }
+
+        // Write indices (two triangles per quad)
+        uint baseVert = vertexOffset + quadIdx * 4;
+        uint baseIdx = indexOffset + quadIdx * 6;
+
+        indices[baseIdx + 0] = baseVert + 0;
+        indices[baseIdx + 1] = baseVert + 1;
+        indices[baseIdx + 2] = baseVert + 2;
+        indices[baseIdx + 3] = baseVert + 0;
+        indices[baseIdx + 4] = baseVert + 2;
+        indices[baseIdx + 5] = baseVert + 3;
+    }
+
+    // Update indirect draw command (only first thread)
+    if (leafIdx == 0) {
+        drawCmd.indexCount = leafCount * 6 * quadsPerLeaf;
+        drawCmd.instanceCount = 1;
+        drawCmd.firstIndex = 0;
+        drawCmd.vertexOffset = 0;
+        drawCmd.firstInstance = 0;
+    }
+}

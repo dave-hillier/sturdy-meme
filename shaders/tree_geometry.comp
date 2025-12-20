@@ -1,0 +1,174 @@
+#version 450
+#extension GL_GOOGLE_include_directive : enable
+
+#include "bindings.h"
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+// Branch data from CPU
+struct BranchData {
+    vec4 origin;           // xyz = origin, w = radius
+    vec4 orientation;      // quaternion xyzw
+    vec4 params;           // x = length, y = level, z = sectionCount, w = segmentCount
+    vec4 sectionStart;     // x = first section index, y = section count, zw = unused
+};
+
+// Section data from CPU
+struct SectionData {
+    vec4 origin;           // xyz = origin, w = radius
+    vec4 orientation;      // quaternion xyzw
+};
+
+// Output vertex
+struct TreeVertex {
+    vec4 position;         // xyz = position, w = level (for wind)
+    vec4 normal;           // xyz = normal, w = unused
+    vec4 tangent;          // xyz = tangent, w = sign
+    vec2 uv;
+    vec2 padding;
+};
+
+// Indirect draw command
+struct DrawIndexedIndirectCommand {
+    uint indexCount;
+    uint instanceCount;
+    uint firstIndex;
+    int vertexOffset;
+    uint firstInstance;
+};
+
+layout(std430, set = 0, binding = BINDING_TREE_BRANCHES) readonly buffer BranchBuffer {
+    BranchData branches[];
+};
+
+layout(std430, set = 0, binding = BINDING_TREE_SECTIONS) readonly buffer SectionBuffer {
+    SectionData sections[];
+};
+
+layout(std430, set = 0, binding = BINDING_TREE_VERTICES) writeonly buffer VertexBuffer {
+    TreeVertex vertices[];
+};
+
+layout(std430, set = 0, binding = BINDING_TREE_INDICES) writeonly buffer IndexBuffer {
+    uint indices[];
+};
+
+layout(std430, set = 0, binding = BINDING_TREE_INDIRECT) buffer IndirectBuffer {
+    DrawIndexedIndirectCommand drawCmd;
+};
+
+layout(std140, set = 0, binding = BINDING_TREE_PARAMS) uniform TreeParams {
+    uint branchCount;
+    uint totalSections;
+    float textureScaleU;
+    float textureScaleV;
+};
+
+// Quaternion multiplication
+vec3 rotateByQuat(vec3 v, vec4 q) {
+    vec3 u = q.xyz;
+    float s = q.w;
+    return 2.0 * dot(u, v) * u + (s*s - dot(u, u)) * v + 2.0 * s * cross(u, v);
+}
+
+void main() {
+    uint branchIdx = gl_GlobalInvocationID.x;
+    if (branchIdx >= branchCount) return;
+
+    BranchData branch = branches[branchIdx];
+
+    int sectionCount = int(branch.params.z);
+    int segmentCount = int(branch.params.w);
+    int level = int(branch.params.y);
+    uint sectionStartIdx = uint(branch.sectionStart.x);
+
+    // Calculate vertex and index offsets for this branch
+    // Each section ring has segmentCount+1 vertices (extra for UV wrap)
+    // We have sectionCount+1 rings
+    uint vertsPerRing = uint(segmentCount + 1);
+    uint totalVerts = vertsPerRing * uint(sectionCount + 1);
+
+    // Calculate offset based on previous branches
+    // This is simplified - in practice you'd use atomic counters or prefix sum
+    uint vertexOffset = branchIdx * 1024;  // Conservative allocation per branch
+    uint indexOffset = branchIdx * 6144;   // 6 indices per quad, many quads
+
+    // Generate vertices for each section ring
+    for (int sectionIdx = 0; sectionIdx <= sectionCount; sectionIdx++) {
+        SectionData section = sections[sectionStartIdx + uint(sectionIdx)];
+
+        vec3 sectionOrigin = section.origin.xyz;
+        float sectionRadius = section.origin.w;
+        vec4 sectionQuat = section.orientation;
+
+        // Calculate tangent direction (along branch)
+        vec3 tangentDir = rotateByQuat(vec3(0.0, 1.0, 0.0), sectionQuat);
+
+        for (int segmentIdx = 0; segmentIdx <= segmentCount; segmentIdx++) {
+            // Angle around circumference
+            float angle = 2.0 * 3.14159265 * float(segmentIdx) / float(segmentCount);
+
+            // Local position on unit circle
+            vec3 localPos = vec3(cos(angle), 0.0, sin(angle));
+            vec3 localNormal = localPos;
+
+            // Transform by section quaternion
+            vec3 worldOffset = rotateByQuat(localPos * sectionRadius, sectionQuat);
+            vec3 worldNormal = rotateByQuat(localNormal, sectionQuat);
+
+            // Final vertex position
+            vec3 position = sectionOrigin + worldOffset;
+
+            // UV coordinates
+            float u = float(segmentIdx) / float(segmentCount) * textureScaleU;
+            float v = float(sectionIdx % 2) * textureScaleV;  // Alternating for tiling
+
+            // Calculate tangent for normal mapping
+            vec3 bitangent = cross(tangentDir, worldNormal);
+
+            // Write vertex
+            uint vertIdx = vertexOffset + uint(sectionIdx) * vertsPerRing + uint(segmentIdx);
+            vertices[vertIdx].position = vec4(position, float(level));
+            vertices[vertIdx].normal = vec4(normalize(worldNormal), 0.0);
+            vertices[vertIdx].tangent = vec4(normalize(tangentDir), 1.0);
+            vertices[vertIdx].uv = vec2(u, v);
+        }
+    }
+
+    // Generate indices (quads between section rings)
+    uint idxWritePos = indexOffset;
+    for (int sectionIdx = 0; sectionIdx < sectionCount; sectionIdx++) {
+        for (int segmentIdx = 0; segmentIdx < segmentCount; segmentIdx++) {
+            uint v0 = vertexOffset + uint(sectionIdx) * vertsPerRing + uint(segmentIdx);
+            uint v1 = v0 + 1;
+            uint v2 = v0 + vertsPerRing;
+            uint v3 = v2 + 1;
+
+            // Two triangles per quad
+            indices[idxWritePos++] = v0;
+            indices[idxWritePos++] = v2;
+            indices[idxWritePos++] = v1;
+
+            indices[idxWritePos++] = v1;
+            indices[idxWritePos++] = v2;
+            indices[idxWritePos++] = v3;
+        }
+    }
+
+    // Update indirect draw command (only one thread should do this)
+    if (branchIdx == 0) {
+        // Calculate total indices
+        uint totalIndices = 0;
+        for (uint i = 0; i < branchCount; i++) {
+            int sc = int(branches[i].params.z);
+            int sg = int(branches[i].params.w);
+            totalIndices += uint(sc * sg * 6);
+        }
+
+        drawCmd.indexCount = totalIndices;
+        drawCmd.instanceCount = 1;
+        drawCmd.firstIndex = 0;
+        drawCmd.vertexOffset = 0;
+        drawCmd.firstInstance = 0;
+    }
+}

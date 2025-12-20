@@ -21,6 +21,7 @@
 #include "SnowMaskSystem.h"
 #include "VolumetricSnowSystem.h"
 #include "RockSystem.h"
+#include "TreeSystem.h"
 #include "CloudShadowSystem.h"
 #include "HiZSystem.h"
 #include "WaterSystem.h"
@@ -216,6 +217,10 @@ void RendererSystems::setRock(std::unique_ptr<RockSystem> system) {
     rockSystem_ = std::move(system);
 }
 
+void RendererSystems::setTree(std::unique_ptr<TreeSystem> system) {
+    treeSystem_ = std::move(system);
+}
+
 void RendererSystems::setScene(std::unique_ptr<SceneManager> system) {
     sceneManager_ = std::move(system);
 }
@@ -263,6 +268,7 @@ void RendererSystems::destroy(VkDevice device, VmaAllocator allocator) {
 
     catmullClarkSystem_.reset();  // RAII cleanup via destructor
     rockSystem_.reset();  // RAII cleanup via destructor
+    treeSystem_.reset();  // RAII cleanup via destructor
 
     // Atmosphere
     cloudShadowSystem_.reset();  // RAII cleanup via destructor

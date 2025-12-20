@@ -10,6 +10,7 @@
 #include <functional>
 #include <optional>
 #include <memory>
+#include <unordered_map>
 
 #include "Camera.h"
 #include "DescriptorManager.h"
@@ -44,6 +45,7 @@ class ErosionDataLoader;
 class SceneBuilder;
 class Mesh;
 class PhysicsWorld;
+class TreeSystem;
 
 #ifdef JPH_DEBUG_RENDERER
 class PhysicsDebugRenderer;
@@ -276,6 +278,10 @@ public:
     // Rock system access for physics integration
     const RockSystem& getRockSystem() const;
 
+    // Tree system access for GUI
+    TreeSystem* getTreeSystem();
+    const TreeSystem* getTreeSystem() const;
+
     // Player position for grass interaction (xyz = position, w = capsule radius)
     void setPlayerPosition(const glm::vec3& position, float radius);
     void setPlayerState(const glm::vec3& position, const glm::vec3& velocity, float radius);
@@ -465,6 +471,11 @@ private:
 
     // Rock descriptor sets (RockSystem has its own textures, not in MaterialRegistry)
     std::vector<VkDescriptorSet> rockDescriptorSets;
+
+    // Tree descriptor sets per texture type (keyed by type name string)
+    // Each map has entries for each frame: map[typeName][frameIndex]
+    std::unordered_map<std::string, std::vector<VkDescriptorSet>> treeBarkDescriptorSets;
+    std::unordered_map<std::string, std::vector<VkDescriptorSet>> treeLeafDescriptorSets;
 
     uint32_t currentFrame = 0;
     static constexpr int MAX_FRAMES_IN_FLIGHT = 3;

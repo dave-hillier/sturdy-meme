@@ -73,6 +73,9 @@ set(SOURCES
     src/vegetation/GrassSystem.cpp
     src/vegetation/LeafSystem.cpp
     src/vegetation/RockSystem.cpp
+    src/vegetation/TreeSystem.cpp
+    src/vegetation/TreeGenerator.cpp
+    src/vegetation/TreeOptions.cpp
     # Postprocess
     src/postprocess/PostProcessSystem.cpp
     src/postprocess/BloomSystem.cpp
@@ -125,6 +128,7 @@ set(SOURCES
     src/gui/GuiIKTab.cpp
     src/gui/GuiPlayerTab.cpp
     src/gui/GuiPerformanceTab.cpp
+    src/gui/GuiTreeTab.cpp
     # Subdivision
     src/subdivision/CatmullClarkCBT.cpp
     src/subdivision/CatmullClarkMesh.cpp

@@ -123,6 +123,34 @@
 #define BINDING_GRASS_DISP_UNIFORMS        2   // Displacement uniforms
 
 // =============================================================================
+// Tree System Compute Descriptor Set
+// =============================================================================
+#define BINDING_TREE_BRANCHES              0   // Branch data SSBO
+#define BINDING_TREE_SECTIONS              1   // Section data SSBO
+#define BINDING_TREE_VERTICES              2   // Output vertex buffer
+#define BINDING_TREE_INDICES               3   // Output index buffer
+#define BINDING_TREE_INDIRECT              4   // Indirect draw command
+#define BINDING_TREE_PARAMS                5   // Tree params UBO
+
+// Tree Leaf Compute Descriptor Set
+#define BINDING_TREE_LEAF_INPUT            0   // Leaf data SSBO
+#define BINDING_TREE_LEAF_VERTICES         1   // Output vertex buffer
+#define BINDING_TREE_LEAF_INDICES          2   // Output index buffer
+#define BINDING_TREE_LEAF_INDIRECT         3   // Indirect draw command
+#define BINDING_TREE_LEAF_PARAMS           4   // Leaf params UBO
+
+// Tree Graphics Descriptor Set
+#define BINDING_TREE_GFX_UBO               0   // Scene uniforms
+#define BINDING_TREE_GFX_VERTICES          1   // Vertex SSBO
+#define BINDING_TREE_GFX_SHADOW_MAP        2   // Shadow map
+#define BINDING_TREE_GFX_WIND_UBO          3   // Wind uniforms
+#define BINDING_TREE_GFX_BARK_ALBEDO       4   // Bark albedo texture
+#define BINDING_TREE_GFX_BARK_NORMAL       5   // Bark normal map
+#define BINDING_TREE_GFX_BARK_ROUGHNESS    6   // Bark roughness map
+#define BINDING_TREE_GFX_BARK_AO           7   // Bark AO map
+#define BINDING_TREE_GFX_LEAF_ALBEDO       8   // Leaf albedo texture
+
+// =============================================================================
 // Leaf Compute Shader Descriptor Set
 // =============================================================================
 #define BINDING_LEAF_COMPUTE_INPUT         0   // Input particle buffer
@@ -421,6 +449,32 @@ constexpr uint32_t GRASS_COMPUTE_DISPLACEMENT = BINDING_GRASS_COMPUTE_DISPLACEME
 constexpr uint32_t GRASS_DISP_OUTPUT      = BINDING_GRASS_DISP_OUTPUT;
 constexpr uint32_t GRASS_DISP_SOURCE      = BINDING_GRASS_DISP_SOURCE;
 constexpr uint32_t GRASS_DISP_UNIFORMS    = BINDING_GRASS_DISP_UNIFORMS;
+
+// Tree System Compute
+constexpr uint32_t TREE_BRANCHES          = BINDING_TREE_BRANCHES;
+constexpr uint32_t TREE_SECTIONS          = BINDING_TREE_SECTIONS;
+constexpr uint32_t TREE_VERTICES          = BINDING_TREE_VERTICES;
+constexpr uint32_t TREE_INDICES           = BINDING_TREE_INDICES;
+constexpr uint32_t TREE_INDIRECT          = BINDING_TREE_INDIRECT;
+constexpr uint32_t TREE_PARAMS            = BINDING_TREE_PARAMS;
+
+// Tree Leaf Compute
+constexpr uint32_t TREE_LEAF_INPUT        = BINDING_TREE_LEAF_INPUT;
+constexpr uint32_t TREE_LEAF_VERTICES     = BINDING_TREE_LEAF_VERTICES;
+constexpr uint32_t TREE_LEAF_INDICES      = BINDING_TREE_LEAF_INDICES;
+constexpr uint32_t TREE_LEAF_INDIRECT     = BINDING_TREE_LEAF_INDIRECT;
+constexpr uint32_t TREE_LEAF_PARAMS       = BINDING_TREE_LEAF_PARAMS;
+
+// Tree Graphics
+constexpr uint32_t TREE_GFX_UBO           = BINDING_TREE_GFX_UBO;
+constexpr uint32_t TREE_GFX_VERTICES      = BINDING_TREE_GFX_VERTICES;
+constexpr uint32_t TREE_GFX_SHADOW_MAP    = BINDING_TREE_GFX_SHADOW_MAP;
+constexpr uint32_t TREE_GFX_WIND_UBO      = BINDING_TREE_GFX_WIND_UBO;
+constexpr uint32_t TREE_GFX_BARK_ALBEDO   = BINDING_TREE_GFX_BARK_ALBEDO;
+constexpr uint32_t TREE_GFX_BARK_NORMAL   = BINDING_TREE_GFX_BARK_NORMAL;
+constexpr uint32_t TREE_GFX_BARK_ROUGHNESS = BINDING_TREE_GFX_BARK_ROUGHNESS;
+constexpr uint32_t TREE_GFX_BARK_AO       = BINDING_TREE_GFX_BARK_AO;
+constexpr uint32_t TREE_GFX_LEAF_ALBEDO   = BINDING_TREE_GFX_LEAF_ALBEDO;
 
 // Leaf Compute
 constexpr uint32_t LEAF_COMPUTE_INPUT     = BINDING_LEAF_COMPUTE_INPUT;

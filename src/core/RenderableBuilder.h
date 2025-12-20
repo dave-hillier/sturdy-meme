@@ -26,6 +26,7 @@ struct Renderable {
     bool castsShadow = true;
     float opacity = 1.0f;  // For camera occlusion fading (1.0 = fully visible)
     uint32_t pbrFlags = 0;  // Bitmask indicating which PBR textures are bound (set automatically from material)
+    float alphaTestThreshold = 0.0f;  // Alpha test threshold (0 = disabled, >0 = discard if alpha < threshold)
 
 private:
     friend class RenderableBuilder;
@@ -64,6 +65,10 @@ public:
     // Optional: Set whether object casts shadows (default: true)
     RenderableBuilder& withCastsShadow(bool casts);
 
+    // Optional: Set alpha test threshold (default: 0.0 = disabled)
+    // Pixels with alpha < threshold will be discarded
+    RenderableBuilder& withAlphaTest(float threshold);
+
     // Convenience: Set position only (creates translation matrix)
     RenderableBuilder& atPosition(const glm::vec3& position);
 
@@ -84,4 +89,5 @@ private:
     float emissiveIntensity_ = 0.0f;
     glm::vec3 emissiveColor_ = glm::vec3(1.0f);
     bool castsShadow_ = true;
+    float alphaTestThreshold_ = 0.0f;
 };

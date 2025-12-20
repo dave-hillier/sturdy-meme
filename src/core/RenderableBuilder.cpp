@@ -46,6 +46,11 @@ RenderableBuilder& RenderableBuilder::withCastsShadow(bool casts) {
     return *this;
 }
 
+RenderableBuilder& RenderableBuilder::withAlphaTest(float threshold) {
+    alphaTestThreshold_ = threshold;
+    return *this;
+}
+
 RenderableBuilder& RenderableBuilder::atPosition(const glm::vec3& position) {
     transform_ = glm::translate(glm::mat4(1.0f), position);
     return *this;
@@ -80,6 +85,7 @@ Renderable RenderableBuilder::build() const {
     renderable.emissiveIntensity = emissiveIntensity_;
     renderable.emissiveColor = emissiveColor_;
     renderable.castsShadow = castsShadow_;
+    renderable.alphaTestThreshold = alphaTestThreshold_;
 
     return renderable;
 }

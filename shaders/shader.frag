@@ -235,13 +235,19 @@ vec3 calculateAllDynamicLights(vec3 N, vec3 V, vec3 worldPos, vec3 albedo,
 }
 
 void main() {
+    vec4 texColor = texture(texSampler, fragTexCoord);
+
+    // Alpha test for transparent textures (leaves, etc.)
+    if (material.alphaTestThreshold > 0.0 && texColor.a < material.alphaTestThreshold) {
+        discard;
+    }
+
     vec3 geometricN = normalize(fragNormal);
     vec3 V = normalize(ubo.cameraPosition.xyz - fragWorldPos);
 
     // Enable normal mapping for debugging
     vec3 N = perturbNormal(geometricN, fragTangent, fragTexCoord);
 
-    vec4 texColor = texture(texSampler, fragTexCoord);
     // Multiply texture color with vertex color (for glTF material baseColorFactor)
     vec3 albedo = texColor.rgb * fragColor.rgb;
 

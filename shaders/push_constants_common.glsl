@@ -18,7 +18,7 @@ layout(push_constant) uniform PushConstants {
     float opacity;  // For camera occlusion fading (1.0 = fully visible)
     vec4 emissiveColor;
     uint pbrFlags;  // Bitmask indicating which PBR textures are bound
-    float _padding1;
+    float alphaTestThreshold;  // Alpha test threshold (0 = disabled, >0 = discard if alpha < threshold)
     float _padding2;
     float _padding3;
 } material;

@@ -13,6 +13,7 @@
 #include "GuiPerformanceTab.h"
 #include "GuiIKTab.h"
 #include "GuiPlayerTab.h"
+#include "GuiTreeTab.h"
 
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
@@ -299,6 +300,10 @@ void GuiSystem::render(Renderer& renderer, const Camera& camera, float deltaTime
             }
             if (ImGui::BeginTabItem("Water")) {
                 GuiWaterTab::render(renderer);
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Trees")) {
+                GuiTreeTab::render(renderer);
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Player")) {

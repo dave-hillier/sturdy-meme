@@ -21,6 +21,7 @@ class CatmullClarkSystem;
 class SnowMaskSystem;
 class VolumetricSnowSystem;
 class RockSystem;
+class TreeSystem;
 class CloudShadowSystem;
 class HiZSystem;
 class WaterSystem;
@@ -184,6 +185,9 @@ public:
     RockSystem& rock() { return *rockSystem_; }
     const RockSystem& rock() const { return *rockSystem_; }
     void setRock(std::unique_ptr<RockSystem> system);
+    TreeSystem* tree() { return treeSystem_.get(); }
+    const TreeSystem* tree() const { return treeSystem_.get(); }
+    void setTree(std::unique_ptr<TreeSystem> system);
 
     // Culling and optimization
     HiZSystem& hiZ() { return *hiZSystem_; }
@@ -271,6 +275,7 @@ private:
     // Tier 2 - Geometry
     std::unique_ptr<CatmullClarkSystem> catmullClarkSystem_;
     std::unique_ptr<RockSystem> rockSystem_;
+    std::unique_ptr<TreeSystem> treeSystem_;
 
     // Tier 2 - Culling
     std::unique_ptr<HiZSystem> hiZSystem_;

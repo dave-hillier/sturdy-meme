@@ -41,6 +41,7 @@
 #include "CelestialCalculator.h"
 #include "EnvironmentSettings.h"
 #include "RockSystem.h"
+#include "TreeSystem.h"
 #include "UBOBuilder.h"
 #include "WaterGBuffer.h"
 #include "WaterDisplacement.h"
@@ -745,6 +746,9 @@ bool Renderer::createDescriptorSets() {
         return false;
     }
 
+    // Tree descriptor sets - allocation deferred to initPhase2 when TreeSystem is available
+    // Will allocate per texture type using string-based maps
+
     return true;
 }
 
@@ -1358,6 +1362,7 @@ void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
         push.opacity = obj.opacity;
         push.emissiveColor = glm::vec4(obj.emissiveColor, 1.0f);
         push.pbrFlags = obj.pbrFlags;
+        push.alphaTestThreshold = obj.alphaTestThreshold;
 
         vkCmdPushConstants(cmd, pipelineLayout.get(),
                           VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -1403,6 +1408,47 @@ void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
     VkDescriptorSet rockDescSet = rockDescriptorSets[frameIndex];
     for (const auto& rock : systems_->rock().getSceneObjects()) {
         renderObject(rock, rockDescSet);
+    }
+
+    // Render procedural trees (TreeSystem uses per-type descriptor sets)
+    if (systems_->tree()) {
+        const auto& treeInstances = systems_->tree()->getTreeInstances();
+        const auto& branchRenderables = systems_->tree()->getBranchRenderables();
+        const auto& leafRenderables = systems_->tree()->getLeafRenderables();
+
+        // Render tree branches - select descriptor set based on bark type
+        for (size_t i = 0; i < branchRenderables.size() && i < treeInstances.size(); ++i) {
+            const auto& branch = branchRenderables[i];
+            // Get bark type from the renderable's texture pointer by comparing with TreeSystem textures
+            std::string barkType = "oak";  // Default
+            for (const auto& typeName : systems_->tree()->getBarkTextureTypes()) {
+                if (branch.texture == systems_->tree()->getBarkTexture(typeName)) {
+                    barkType = typeName;
+                    break;
+                }
+            }
+            auto it = treeBarkDescriptorSets.find(barkType);
+            if (it != treeBarkDescriptorSets.end() && frameIndex < it->second.size()) {
+                renderObject(branch, it->second[frameIndex]);
+            }
+        }
+
+        // Render tree leaves - select descriptor set based on leaf type
+        for (size_t i = 0; i < leafRenderables.size() && i < treeInstances.size(); ++i) {
+            const auto& leaf = leafRenderables[i];
+            // Get leaf type from the renderable's texture pointer
+            std::string leafType = "oak";  // Default
+            for (const auto& typeName : systems_->tree()->getLeafTextureTypes()) {
+                if (leaf.texture == systems_->tree()->getLeafTexture(typeName)) {
+                    leafType = typeName;
+                    break;
+                }
+            }
+            auto it = treeLeafDescriptorSets.find(leafType);
+            if (it != treeLeafDescriptorSets.end() && frameIndex < it->second.size()) {
+                renderObject(leaf, it->second[frameIndex]);
+            }
+        }
     }
 }
 
@@ -1790,6 +1836,10 @@ const SceneManager& Renderer::getSceneManager() const { return systems_->scene()
 
 // Rock system access
 const RockSystem& Renderer::getRockSystem() const { return systems_->rock(); }
+
+// Tree system access
+TreeSystem* Renderer::getTreeSystem() { return systems_->tree(); }
+const TreeSystem* Renderer::getTreeSystem() const { return systems_->tree(); }
 
 // Access to systems for simulation
 WindSystem& Renderer::getWindSystem() { return systems_->wind(); }
