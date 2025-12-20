@@ -92,7 +92,7 @@ void GuiTreeTab::render(Renderer& renderer) {
         if (ImGui::Checkbox("Textured", &opts.bark.textured)) changed = true;
 
         float texScale[2] = {opts.bark.textureScale.x, opts.bark.textureScale.y};
-        if (ImGui::SliderFloat2("Texture Scale", texScale, 0.1f, 5.0f)) {
+        if (ImGui::SliderFloat2("Texture Scale", texScale, 0.5f, 5.0f)) {
             opts.bark.textureScale = glm::vec2(texScale[0], texScale[1]);
             changed = true;
         }
@@ -119,7 +119,7 @@ void GuiTreeTab::render(Renderer& renderer) {
 
                 if (level > 0) {
                     snprintf(label, sizeof(label), "Angle##%d", level);
-                    if (ImGui::SliderFloat(label, &opts.branch.angle[level], 0.0f, 90.0f, "%.1f deg")) changed = true;
+                    if (ImGui::SliderFloat(label, &opts.branch.angle[level], 0.0f, 180.0f, "%.1f deg")) changed = true;
 
                     snprintf(label, sizeof(label), "Start##%d", level);
                     if (ImGui::SliderFloat(label, &opts.branch.start[level], 0.0f, 1.0f)) changed = true;
@@ -127,20 +127,22 @@ void GuiTreeTab::render(Renderer& renderer) {
 
                 if (level < 3) {
                     snprintf(label, sizeof(label), "Children##%d", level);
-                    if (ImGui::SliderInt(label, &opts.branch.children[level], 0, 12)) changed = true;
+                    // ez-tree: level 0 = 0-100, level 1 = 0-10, level 2 = 0-5
+                    int maxChildren = (level == 0) ? 100 : (level == 1) ? 10 : 5;
+                    if (ImGui::SliderInt(label, &opts.branch.children[level], 0, maxChildren)) changed = true;
                 }
 
                 snprintf(label, sizeof(label), "Length##%d", level);
-                if (ImGui::SliderFloat(label, &opts.branch.length[level], 0.5f, 40.0f)) changed = true;
+                if (ImGui::SliderFloat(label, &opts.branch.length[level], 0.1f, 100.0f)) changed = true;
 
                 snprintf(label, sizeof(label), "Radius##%d", level);
-                if (ImGui::SliderFloat(label, &opts.branch.radius[level], 0.01f, 3.0f)) changed = true;
+                if (ImGui::SliderFloat(label, &opts.branch.radius[level], 0.1f, 5.0f)) changed = true;
 
                 snprintf(label, sizeof(label), "Sections##%d", level);
-                if (ImGui::SliderInt(label, &opts.branch.sections[level], 2, 20)) changed = true;
+                if (ImGui::SliderInt(label, &opts.branch.sections[level], 1, 20)) changed = true;
 
                 snprintf(label, sizeof(label), "Segments##%d", level);
-                if (ImGui::SliderInt(label, &opts.branch.segments[level], 3, 12)) changed = true;
+                if (ImGui::SliderInt(label, &opts.branch.segments[level], 3, 16)) changed = true;
 
                 snprintf(label, sizeof(label), "Taper##%d", level);
                 if (ImGui::SliderFloat(label, &opts.branch.taper[level], 0.0f, 1.0f)) changed = true;
@@ -162,7 +164,7 @@ void GuiTreeTab::render(Renderer& renderer) {
                 opts.branch.forceDirection = glm::vec3(force[0], force[1], force[2]);
                 changed = true;
             }
-            if (ImGui::SliderFloat("Strength", &opts.branch.forceStrength, 0.0f, 0.1f)) changed = true;
+            if (ImGui::SliderFloat("Strength", &opts.branch.forceStrength, -0.1f, 0.1f)) changed = true;
             ImGui::TreePop();
         }
     }
@@ -187,10 +189,10 @@ void GuiTreeTab::render(Renderer& renderer) {
             changed = true;
         }
 
-        if (ImGui::SliderFloat("Angle", &opts.leaves.angle, 0.0f, 90.0f, "%.1f deg")) changed = true;
-        if (ImGui::SliderInt("Count", &opts.leaves.count, 0, 20)) changed = true;
+        if (ImGui::SliderFloat("Angle", &opts.leaves.angle, 0.0f, 100.0f, "%.1f deg")) changed = true;
+        if (ImGui::SliderInt("Count", &opts.leaves.count, 0, 100)) changed = true;
         if (ImGui::SliderFloat("Start", &opts.leaves.start, 0.0f, 1.0f)) changed = true;
-        if (ImGui::SliderFloat("Size", &opts.leaves.size, 0.1f, 5.0f)) changed = true;
+        if (ImGui::SliderFloat("Size", &opts.leaves.size, 0.0f, 10.0f)) changed = true;
         if (ImGui::SliderFloat("Size Variance", &opts.leaves.sizeVariance, 0.0f, 1.0f)) changed = true;
         if (ImGui::SliderFloat("Alpha Test", &opts.leaves.alphaTest, 0.0f, 1.0f)) changed = true;
 
