@@ -272,7 +272,10 @@ bool TreeSystem::generateTreeMesh(const TreeOptions& options, Mesh& branchMesh, 
     std::vector<uint32_t> branchIndices;
 
     // Get texture scale from options (applied to UVs)
+    // ez-tree uses: repeat.x = scale.x, repeat.y = 1/scale.y
+    // So higher Y values = less tiling (stretched texture)
     glm::vec2 textureScale = options.bark.textureScale;
+    float vRepeat = 1.0f / textureScale.y;  // Invert Y to match ez-tree semantics
 
     uint32_t indexOffset = 0;
     for (const auto& branch : meshData.branches) {
@@ -282,9 +285,9 @@ bool TreeSystem::generateTreeMesh(const TreeOptions& options, Mesh& branchMesh, 
         for (size_t sectionIdx = 0; sectionIdx < branch.sections.size(); ++sectionIdx) {
             const SectionData& section = branch.sections[sectionIdx];
 
-            // Match ez-tree: V coordinate alternates 0/1 to tile the bark texture along the branch
+            // Match ez-tree: V coordinate alternates 0/vRepeat to tile the bark texture along the branch
             // This creates a repeating pattern rather than stretching the texture
-            float vCoord = (sectionIdx % 2 == 0) ? 0.0f : textureScale.y;
+            float vCoord = (sectionIdx % 2 == 0) ? 0.0f : vRepeat;
 
             for (int seg = 0; seg <= segmentCount; ++seg) {
                 float angle = 2.0f * glm::pi<float>() * static_cast<float>(seg) / static_cast<float>(segmentCount);

@@ -138,7 +138,7 @@ void main() {
     float swayFactor = 1.0 - texCoord.y;
 
     // Multi-frequency wind sway (matching ez-tree formula)
-    vec3 windSway = swayFactor * windStrength * 1.5 * vec3(windDir.x, 0.0, windDir.y) * (
+    vec3 windSway = swayFactor * windStrength * vec3(windDir.x, 0.0, windDir.y) * (
         0.5 * sin(windTime * gustFreq + windOffset) +
         0.3 * sin(2.0 * windTime * gustFreq + 1.3 * windOffset) +
         0.2 * sin(5.0 * windTime * gustFreq + 1.5 * windOffset)

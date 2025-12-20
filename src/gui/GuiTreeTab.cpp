@@ -92,7 +92,7 @@ void GuiTreeTab::render(Renderer& renderer) {
         if (ImGui::Checkbox("Textured", &opts.bark.textured)) changed = true;
 
         float texScale[2] = {opts.bark.textureScale.x, opts.bark.textureScale.y};
-        if (ImGui::SliderFloat2("Texture Scale", texScale, 0.5f, 5.0f)) {
+        if (ImGui::SliderFloat2("Texture Scale", texScale, 0.5f, 10.0f)) {
             opts.bark.textureScale = glm::vec2(texScale[0], texScale[1]);
             changed = true;
         }
