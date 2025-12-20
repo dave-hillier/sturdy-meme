@@ -37,6 +37,7 @@ def scale_preset(data: dict, scale_factor: float) -> dict:
     Scales:
     - branch.length (all levels - these are absolute values)
     - branch.radius["0"] only (levels 1+ are relative multipliers)
+    - branch.force.strength (divided by sectionRadius, so must scale with radius)
     - leaves.size
 
     Does NOT modify texture scale - those values control UV tiling, not world size.
@@ -54,6 +55,10 @@ def scale_preset(data: dict, scale_factor: float) -> dict:
         # Scale radius[0] only (levels 1+ are relative multipliers applied to parent radius)
         if "radius" in branch and isinstance(branch["radius"], dict):
             branch["radius"] = scale_level_zero_only(branch["radius"], scale_factor)
+
+        # Scale force.strength (formula is strength/sectionRadius, so scale with radius)
+        if "force" in branch and "strength" in branch["force"]:
+            branch["force"]["strength"] = round(branch["force"]["strength"] * scale_factor, 4)
 
     # Scale leaf size proportionally
     if "leaves" in result:
@@ -139,6 +144,12 @@ def main():
             new_size = scaled["leaves"].get("size", 0)
             if orig_size:
                 print(f"  leaf size: {orig_size} -> {new_size}")
+
+        if "branch" in original and "branch" in scaled:
+            orig_force = original["branch"].get("force", {}).get("strength")
+            new_force = scaled["branch"].get("force", {}).get("strength")
+            if orig_force is not None and new_force is not None:
+                print(f"  force.strength: {orig_force} -> {new_force}")
 
         if not args.dry_run:
             with open(json_path, "w") as f:
