@@ -7,17 +7,13 @@ const int NUM_CASCADES = 4;
 #include "bindings.glsl"
 #include "ubo_common.glsl"
 
-// Leaf vertex data from compute shader
-struct LeafVertex {
-    vec4 position;         // xyz = position, w = size
-    vec4 normal;           // xyz = normal, w = unused
-    vec2 uv;
-    vec2 padding;
-};
-
-layout(std430, set = 0, binding = BINDING_TREE_GFX_VERTICES) readonly buffer VertexBuffer {
-    LeafVertex vertices[];
-};
+// Vertex attributes (matching Mesh::getAttributeDescriptions)
+layout(location = 0) in vec3 inPosition;
+layout(location = 1) in vec3 inNormal;
+layout(location = 2) in vec2 inTexCoord;
+layout(location = 3) in vec4 inTangent;
+// Locations 4, 5 are bone indices/weights (unused for leaves)
+layout(location = 6) in vec4 inColor;  // RGB = leaf attachment point, A = leaf indicator (0.98)
 
 // Wind uniform buffer
 layout(binding = BINDING_TREE_GFX_WIND_UBO) uniform WindUniforms {
@@ -28,6 +24,8 @@ layout(binding = BINDING_TREE_GFX_WIND_UBO) uniform WindUniforms {
 layout(push_constant) uniform PushConstants {
     mat4 model;
     float time;
+    vec3 leafTint;
+    float alphaTest;
 } push;
 
 layout(location = 0) out vec3 fragNormal;
@@ -113,30 +111,27 @@ float simplex3(vec3 v) {
 }
 
 void main() {
-    LeafVertex vert = vertices[gl_VertexIndex];
-
-    vec3 localPos = vert.position.xyz;
-    float leafSize = vert.position.w;
-    vec3 localNormal = vert.normal.xyz;
-    vec2 texCoord = vert.uv;
+    vec3 localPos = inPosition;
+    vec3 localNormal = inNormal;
+    vec2 texCoord = inTexCoord;
 
     // Transform to world space
     vec4 worldPos = push.model * vec4(localPos, 1.0);
 
-    // Wind animation for leaves (stronger effect than branches)
+    // Wind animation for leaves (matches ez-tree behavior)
     float windStrength = wind.windDirectionAndStrength.z;
     float windScale = wind.windParams.z;
     float windTime = wind.windParams.w;
     vec2 windDir = wind.windDirectionAndStrength.xy;
     float gustFreq = wind.windParams.x;
 
-    // Sample wind noise
+    // Sample wind noise using world position
     float windOffset = 2.0 * 3.14159265 * simplex3(worldPos.xyz / windScale);
 
     // Leaves sway more based on UV.y (tip vs base of leaf)
     float swayFactor = texCoord.y;
 
-    // Multi-frequency wind sway (stronger for leaves)
+    // Multi-frequency wind sway (matching ez-tree formula)
     vec3 windSway = swayFactor * windStrength * 1.5 * vec3(windDir.x, 0.0, windDir.y) * (
         0.5 * sin(windTime * gustFreq + windOffset) +
         0.3 * sin(2.0 * windTime * gustFreq + 1.3 * windOffset) +
@@ -152,5 +147,5 @@ void main() {
     fragNormal = normalize(normalMatrix * localNormal);
     fragTexCoord = texCoord;
     fragWorldPos = worldPos.xyz;
-    fragLeafSize = leafSize;
+    fragLeafSize = 1.0;  // Could be derived from vertex data if needed
 }

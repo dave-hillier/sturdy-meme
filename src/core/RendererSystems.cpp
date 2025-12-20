@@ -22,6 +22,7 @@
 #include "VolumetricSnowSystem.h"
 #include "RockSystem.h"
 #include "TreeSystem.h"
+#include "TreeRenderer.h"
 #include "CloudShadowSystem.h"
 #include "HiZSystem.h"
 #include "WaterSystem.h"
@@ -219,6 +220,10 @@ void RendererSystems::setRock(std::unique_ptr<RockSystem> system) {
 
 void RendererSystems::setTree(std::unique_ptr<TreeSystem> system) {
     treeSystem_ = std::move(system);
+}
+
+void RendererSystems::setTreeRenderer(std::unique_ptr<TreeRenderer> renderer) {
+    treeRenderer_ = std::move(renderer);
 }
 
 void RendererSystems::setScene(std::unique_ptr<SceneManager> system) {

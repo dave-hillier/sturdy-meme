@@ -25,6 +25,7 @@
 #include "CatmullClarkSystem.h"
 #include "RockSystem.h"
 #include "TreeSystem.h"
+#include "TreeRenderer.h"
 #include "WaterSystem.h"
 #include "WaterDisplacement.h"
 #include "FlowMapGenerator.h"
@@ -261,6 +262,28 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
 
     systems_->setTree(std::move(treeSystem));
     SDL_Log("Tree system initialized with %zu trees", systems_->tree()->getTreeCount());
+
+    // Initialize TreeRenderer for dedicated tree shaders with wind animation
+    {
+        TreeRenderer::InitInfo treeRendererInfo{};
+        treeRendererInfo.device = device;
+        treeRendererInfo.physicalDevice = physicalDevice;
+        treeRendererInfo.allocator = allocator;
+        treeRendererInfo.hdrRenderPass = systems_->postProcess().getHDRRenderPass();
+        treeRendererInfo.shadowRenderPass = systems_->shadow().getShadowRenderPass();
+        treeRendererInfo.descriptorPool = &*descriptorManagerPool;
+        treeRendererInfo.extent = systems_->postProcess().getExtent();
+        treeRendererInfo.resourcePath = resourcePath;
+        treeRendererInfo.maxFramesInFlight = MAX_FRAMES_IN_FLIGHT;
+
+        auto treeRenderer = TreeRenderer::create(treeRendererInfo);
+        if (!treeRenderer) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create TreeRenderer");
+            return false;
+        }
+        systems_->setTreeRenderer(std::move(treeRenderer));
+        SDL_Log("TreeRenderer initialized for wind animation");
+    }
 
     // Update rock descriptor sets now that rock textures are loaded
     {

@@ -76,6 +76,7 @@ set(SOURCES
     src/vegetation/TreeSystem.cpp
     src/vegetation/TreeGenerator.cpp
     src/vegetation/TreeOptions.cpp
+    src/vegetation/TreeRenderer.cpp
     # Postprocess
     src/postprocess/PostProcessSystem.cpp
     src/postprocess/BloomSystem.cpp
@@ -537,6 +538,15 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_tile_cull.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/debug_line.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/debug_line.frag.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree.vert.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree.frag.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_leaf.vert.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_leaf.frag.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_shadow.vert.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_leaf_shadow.vert.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_leaf_shadow.frag.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_geometry.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_leaf.comp.spv
 )
 
 set(TERRAIN_SHADER_FILES
@@ -626,6 +636,11 @@ if(SHADER_COMPILE_CMD)
         leaf.comp leaf.vert leaf.frag
         snow_accumulation.comp
         bilateral_grid_build.comp bilateral_grid_blur.comp
+        tree.vert tree.frag
+        tree_leaf.vert tree_leaf.frag
+        tree_shadow.vert
+        tree_leaf_shadow.vert tree_leaf_shadow.frag
+        tree_geometry.comp tree_leaf.comp
     )
 
     foreach(SHADER ${SHADERS_WITH_BINDINGS})
@@ -907,6 +922,15 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_render.frag.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/debug_line.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/debug_line.frag.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree.vert.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree.frag.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_leaf.vert.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_leaf.frag.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_shadow.vert.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_leaf_shadow.vert.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_leaf_shadow.frag.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_geometry.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_leaf.comp.spv
     )
 
     # Generate UBO headers from SPIR-V reflection

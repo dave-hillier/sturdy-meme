@@ -50,7 +50,11 @@ void main() {
     vec3 L = normalize(-ubo.sunDirection.xyz);
 
     // Calculate shadow
-    float shadow = calculateCascadedShadow(fragWorldPos, N, L, shadowMapArray);
+    float shadow = calculateCascadedShadow(
+        fragWorldPos, N, L,
+        ubo.view, ubo.cascadeSplits, ubo.cascadeViewProj,
+        ubo.shadowMapSize, shadowMapArray
+    );
 
     // Simple lighting for leaves
     float NdotL = max(dot(N, L), 0.0);
@@ -63,10 +67,11 @@ void main() {
     vec3 diffuse = baseColor * (NdotL + subsurface);
 
     // Sun contribution
-    vec3 sunColor = getSunColor(ubo.sunDirection.xyz);
-    vec3 sunIntensity = sunColor * ubo.sunIntensity * shadow;
+    vec3 sunColor = ubo.sunColor.rgb;
+    float sunIntensity = ubo.sunDirection.w;
+    vec3 sunLighting = sunColor * sunIntensity * shadow;
 
-    vec3 directLight = diffuse * sunIntensity;
+    vec3 directLight = diffuse * sunLighting;
 
     // Ambient contribution
     vec3 ambient = baseColor * 0.2;
@@ -74,10 +79,12 @@ void main() {
     // Final color
     vec3 color = directLight + ambient;
 
-    // Apply atmospheric scattering
-    float viewDist = length(fragWorldPos - ubo.cameraPosition.xyz);
-    vec3 viewDir = normalize(fragWorldPos - ubo.cameraPosition.xyz);
-    color = applyAtmosphericScattering(color, viewDir, viewDist);
+    // Apply aerial perspective for distant leaves
+    vec3 cameraToFrag = fragWorldPos - ubo.cameraPosition.xyz;
+    float viewDist = length(cameraToFrag);
+    vec3 viewDir = normalize(cameraToFrag);
+    vec3 sunDir = normalize(-ubo.sunDirection.xyz);
+    color = applyAerialPerspective(color, ubo.cameraPosition.xyz, viewDir, viewDist, sunDir, sunColor);
 
     outColor = vec4(color, albedo.a);
 }

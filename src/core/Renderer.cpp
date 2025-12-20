@@ -42,6 +42,7 @@
 #include "EnvironmentSettings.h"
 #include "RockSystem.h"
 #include "TreeSystem.h"
+#include "TreeRenderer.h"
 #include "UBOBuilder.h"
 #include "WaterGBuffer.h"
 #include "WaterDisplacement.h"
@@ -898,6 +899,31 @@ bool Renderer::render(const Camera& camera) {
     systems_->wind().update(frame.deltaTime);
     systems_->wind().updateUniforms(frame.frameIndex);
 
+    // Update tree renderer descriptor sets with current frame resources and textures
+    if (systems_->treeRenderer() && systems_->tree()) {
+        VkDescriptorBufferInfo windInfo = systems_->wind().getBufferInfo(frame.frameIndex);
+
+        // Use oak textures as default (all trees currently use the same descriptor set)
+        Texture* barkTex = systems_->tree()->getBarkTexture("oak");
+        Texture* barkNormal = systems_->tree()->getBarkNormalMap("oak");
+        Texture* leafTex = systems_->tree()->getLeafTexture("oak");
+
+        // Use bark albedo as placeholder for roughness/AO if not available
+        systems_->treeRenderer()->updateDescriptorSets(
+            frame.frameIndex,
+            systems_->globalBuffers().uniformBuffers.buffers[frame.frameIndex],
+            windInfo.buffer,
+            systems_->shadow().getShadowImageView(),
+            systems_->shadow().getShadowSampler(),
+            barkTex->getImageView(),
+            barkNormal->getImageView(),
+            barkTex->getImageView(),  // roughness placeholder
+            barkTex->getImageView(),  // AO placeholder
+            barkTex->getSampler(),
+            leafTex->getImageView(),
+            leafTex->getSampler());
+    }
+
     systems_->grass().updateUniforms(frame.frameIndex, frame.cameraPosition, frame.viewProj,
                                frame.terrainSize, frame.heightScale);
     systems_->grass().updateDisplacementSources(frame.playerPosition, frame.playerCapsuleRadius, frame.deltaTime);
@@ -1411,45 +1437,9 @@ void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
         renderObject(rock, rockDescSet);
     }
 
-    // Render procedural trees (TreeSystem uses per-type descriptor sets)
-    if (systems_->tree()) {
-        const auto& treeInstances = systems_->tree()->getTreeInstances();
-        const auto& branchRenderables = systems_->tree()->getBranchRenderables();
-        const auto& leafRenderables = systems_->tree()->getLeafRenderables();
-
-        // Render tree branches - select descriptor set based on bark type
-        for (size_t i = 0; i < branchRenderables.size() && i < treeInstances.size(); ++i) {
-            const auto& branch = branchRenderables[i];
-            // Get bark type from the renderable's texture pointer by comparing with TreeSystem textures
-            std::string barkType = "oak";  // Default
-            for (const auto& typeName : systems_->tree()->getBarkTextureTypes()) {
-                if (branch.texture == systems_->tree()->getBarkTexture(typeName)) {
-                    barkType = typeName;
-                    break;
-                }
-            }
-            auto it = treeBarkDescriptorSets.find(barkType);
-            if (it != treeBarkDescriptorSets.end() && frameIndex < it->second.size()) {
-                renderObject(branch, it->second[frameIndex]);
-            }
-        }
-
-        // Render tree leaves - select descriptor set based on leaf type
-        for (size_t i = 0; i < leafRenderables.size() && i < treeInstances.size(); ++i) {
-            const auto& leaf = leafRenderables[i];
-            // Get leaf type from the renderable's texture pointer
-            std::string leafType = "oak";  // Default
-            for (const auto& typeName : systems_->tree()->getLeafTextureTypes()) {
-                if (leaf.texture == systems_->tree()->getLeafTexture(typeName)) {
-                    leafType = typeName;
-                    break;
-                }
-            }
-            auto it = treeLeafDescriptorSets.find(leafType);
-            if (it != treeLeafDescriptorSets.end() && frameIndex < it->second.size()) {
-                renderObject(leaf, it->second[frameIndex]);
-            }
-        }
+    // Render procedural trees using dedicated TreeRenderer with wind animation
+    if (systems_->tree() && systems_->treeRenderer()) {
+        systems_->treeRenderer()->render(cmd, frameIndex, systems_->wind().getTime(), *systems_->tree());
     }
 }
 

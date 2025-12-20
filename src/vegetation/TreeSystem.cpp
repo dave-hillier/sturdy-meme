@@ -282,10 +282,9 @@ bool TreeSystem::generateTreeMesh(const TreeOptions& options, Mesh& branchMesh, 
         for (size_t sectionIdx = 0; sectionIdx < branch.sections.size(); ++sectionIdx) {
             const SectionData& section = branch.sections[sectionIdx];
 
-            // Calculate V coordinate as normalized position along the branch
-            // Then scale by textureScale.y to control how many times the texture repeats
-            float normalizedV = static_cast<float>(sectionIdx) / static_cast<float>(sectionCount);
-            float vCoord = normalizedV * textureScale.y;
+            // Match ez-tree: V coordinate alternates 0/1 to tile the bark texture along the branch
+            // This creates a repeating pattern rather than stretching the texture
+            float vCoord = (sectionIdx % 2 == 0) ? 0.0f : textureScale.y;
 
             for (int seg = 0; seg <= segmentCount; ++seg) {
                 float angle = 2.0f * glm::pi<float>() * static_cast<float>(seg) / static_cast<float>(segmentCount);

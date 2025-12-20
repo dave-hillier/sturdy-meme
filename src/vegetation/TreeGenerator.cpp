@@ -123,10 +123,9 @@ void TreeGenerator::processBranch(const Branch& branch, const TreeOptions& optio
     glm::quat sectionOrientation = branch.orientation;
     glm::vec3 sectionOrigin = branch.origin;
 
+    // Match ez-tree: section length is simply branch.length / sectionCount
+    // (ez-tree has a bug where it tries to divide by levels-1 for deciduous but fails due to case mismatch)
     float sectionLength = branch.length / static_cast<float>(branch.sectionCount);
-    if (options.type == TreeType::Deciduous && options.branch.levels > 1) {
-        sectionLength /= static_cast<float>(options.branch.levels - 1);
-    }
 
     for (int i = 0; i <= branch.sectionCount; ++i) {
         float sectionRadius = branch.radius;
@@ -240,8 +239,8 @@ void TreeGenerator::generateChildBranches(int count, int level,
         float childRadius = options.branch.radius[level] *
                            glm::mix(sectionA.radius, sectionB.radius, alpha);
 
-        // Interpolate orientation: alpha=0 -> sectionA, alpha=1 -> sectionB
-        glm::quat parentOrientation = glm::slerp(sectionA.orientation, sectionB.orientation, alpha);
+        // Interpolate orientation: match ez-tree's qB.slerp(qA, alpha) which goes FROM qB TOWARDS qA
+        glm::quat parentOrientation = glm::slerp(sectionB.orientation, sectionA.orientation, alpha);
 
         // Calculate child branch angle and radial position
         float radialAngle = 2.0f * glm::pi<float>() * (radialOffset + static_cast<float>(i) / count);
@@ -300,8 +299,8 @@ void TreeGenerator::generateLeaves(const std::vector<SectionData>& sections,
         // Interpolate origin
         glm::vec3 leafOrigin = glm::mix(sectionA.origin, sectionB.origin, alpha);
 
-        // Interpolate orientation: alpha=0 -> sectionA, alpha=1 -> sectionB
-        glm::quat parentOrientation = glm::slerp(sectionA.orientation, sectionB.orientation, alpha);
+        // Interpolate orientation: match ez-tree's qB.slerp(qA, alpha) which goes FROM qB TOWARDS qA
+        glm::quat parentOrientation = glm::slerp(sectionB.orientation, sectionA.orientation, alpha);
 
         // Calculate leaf orientation
         float radialAngle = 2.0f * glm::pi<float>() * (radialOffset + static_cast<float>(i) / options.leaves.count);

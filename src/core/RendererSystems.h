@@ -22,6 +22,7 @@ class SnowMaskSystem;
 class VolumetricSnowSystem;
 class RockSystem;
 class TreeSystem;
+class TreeRenderer;
 class CloudShadowSystem;
 class HiZSystem;
 class WaterSystem;
@@ -188,6 +189,9 @@ public:
     TreeSystem* tree() { return treeSystem_.get(); }
     const TreeSystem* tree() const { return treeSystem_.get(); }
     void setTree(std::unique_ptr<TreeSystem> system);
+    TreeRenderer* treeRenderer() { return treeRenderer_.get(); }
+    const TreeRenderer* treeRenderer() const { return treeRenderer_.get(); }
+    void setTreeRenderer(std::unique_ptr<TreeRenderer> renderer);
 
     // Culling and optimization
     HiZSystem& hiZ() { return *hiZSystem_; }
@@ -276,6 +280,7 @@ private:
     std::unique_ptr<CatmullClarkSystem> catmullClarkSystem_;
     std::unique_ptr<RockSystem> rockSystem_;
     std::unique_ptr<TreeSystem> treeSystem_;
+    std::unique_ptr<TreeRenderer> treeRenderer_;
 
     // Tier 2 - Culling
     std::unique_ptr<HiZSystem> hiZSystem_;
