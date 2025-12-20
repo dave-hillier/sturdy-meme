@@ -118,6 +118,11 @@ void main() {
     // Transform to world space
     vec4 worldPos = push.model * vec4(localPos, 1.0);
 
+    // Get leaf pivot point (attachment point) from vertex color
+    // Both quads of a double-billboard leaf share the same pivot
+    vec3 leafPivot = inColor.rgb;
+    vec4 worldPivot = push.model * vec4(leafPivot, 1.0);
+
     // Wind animation for leaves (matches ez-tree behavior)
     float windStrength = wind.windDirectionAndStrength.z;
     float windScale = wind.windParams.z;
@@ -125,11 +130,12 @@ void main() {
     vec2 windDir = wind.windDirectionAndStrength.xy;
     float gustFreq = wind.windParams.x;
 
-    // Sample wind noise using world position
-    float windOffset = 2.0 * 3.14159265 * simplex3(worldPos.xyz / windScale);
+    // Sample wind noise using pivot position so both quads get same wind
+    float windOffset = 2.0 * 3.14159265 * simplex3(worldPivot.xyz / windScale);
 
-    // Leaves sway more based on UV.y (tip vs base of leaf)
-    float swayFactor = texCoord.y;
+    // Leaves sway more at tips (UV.y=0) than at branch attachment (UV.y=1)
+    // Invert so tips move most, branch stays relatively fixed
+    float swayFactor = 1.0 - texCoord.y;
 
     // Multi-frequency wind sway (matching ez-tree formula)
     vec3 windSway = swayFactor * windStrength * 1.5 * vec3(windDir.x, 0.0, windDir.y) * (
