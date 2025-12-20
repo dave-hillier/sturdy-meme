@@ -15,17 +15,19 @@
 
 // Push constants for tree rendering
 struct TreeBranchPushConstants {
-    glm::mat4 model;
-    float time;
-    glm::vec3 barkTint;
-    float roughnessScale;
+    glm::mat4 model;      // offset 0, size 64
+    float time;           // offset 64, size 4
+    float _pad1[3];       // offset 68, size 12 (padding to align vec3 to 16 bytes)
+    glm::vec3 barkTint;   // offset 80, size 12
+    float roughnessScale; // offset 92, size 4
 };
 
 struct TreeLeafPushConstants {
-    glm::mat4 model;
-    float time;
-    glm::vec3 leafTint;
-    float alphaTest;
+    glm::mat4 model;    // offset 0, size 64
+    float time;         // offset 64, size 4
+    float _pad1[3];     // offset 68, size 12 (padding to align vec3 to 16 bytes)
+    glm::vec3 leafTint; // offset 80, size 12
+    float alphaTest;    // offset 92, size 4
 };
 
 class TreeRenderer {

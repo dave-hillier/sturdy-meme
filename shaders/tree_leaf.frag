@@ -86,6 +86,6 @@ void main() {
     vec3 sunDir = normalize(-ubo.sunDirection.xyz);
     color = applyAerialPerspective(color, ubo.cameraPosition.xyz, viewDir, viewDist, sunDir, sunColor);
 
-    // Output alpha = 1.0 since we use alpha-test (discard) for transparency
+    // Output with alpha=1.0 since we use alpha-test (discard) for transparency
     outColor = vec4(color, 1.0);
 }
