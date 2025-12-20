@@ -14,9 +14,20 @@ import os
 from pathlib import Path
 
 
-def scale_dict_values(d: dict, scale_factor: float) -> dict:
+def scale_all_values(d: dict, scale_factor: float) -> dict:
     """Scale all numeric values in a dict with string keys like {"0": 1.5, "1": 2.0}."""
     return {k: round(v * scale_factor, 2) for k, v in d.items()}
+
+
+def scale_level_zero_only(d: dict, scale_factor: float) -> dict:
+    """Scale only the '0' key value in a dict, leaving other levels unchanged.
+
+    In ez-tree, radius values for levels 1+ are relative multipliers applied to parent radius.
+    """
+    result = dict(d)
+    if "0" in result:
+        result["0"] = round(result["0"] * scale_factor, 2)
+    return result
 
 
 def scale_preset(data: dict, scale_factor: float, max_texture_scale_y: float = 3.0) -> dict:
@@ -24,8 +35,8 @@ def scale_preset(data: dict, scale_factor: float, max_texture_scale_y: float = 3
     Scale tree preset dimensions by the given factor.
 
     Scales:
-    - branch.length dict values
-    - branch.radius dict values
+    - branch.length (all levels - these are absolute values)
+    - branch.radius["0"] only (levels 1+ are relative multipliers)
     - leaves.size
 
     Also caps bark.textureScale.y to reduce UV repetition.
@@ -36,13 +47,13 @@ def scale_preset(data: dict, scale_factor: float, max_texture_scale_y: float = 3
     if "branch" in result:
         branch = result["branch"]
 
-        # Scale length dict (keys are "0", "1", "2", etc.)
+        # Scale all length values (all levels are absolute)
         if "length" in branch and isinstance(branch["length"], dict):
-            branch["length"] = scale_dict_values(branch["length"], scale_factor)
+            branch["length"] = scale_all_values(branch["length"], scale_factor)
 
-        # Scale radius dict
+        # Scale radius[0] only (levels 1+ are relative multipliers applied to parent radius)
         if "radius" in branch and isinstance(branch["radius"], dict):
-            branch["radius"] = scale_dict_values(branch["radius"], scale_factor)
+            branch["radius"] = scale_level_zero_only(branch["radius"], scale_factor)
 
     # Scale leaf size proportionally
     if "leaves" in result:
@@ -127,13 +138,15 @@ def main():
         if "branch" in original and "branch" in scaled:
             orig_len = original["branch"].get("length", {})
             new_len = scaled["branch"].get("length", {})
-            if orig_len and new_len and "0" in orig_len:
-                print(f"  length[0]: {orig_len['0']} -> {new_len['0']}")
+            if orig_len and new_len:
+                for k in sorted(orig_len.keys()):
+                    if k in new_len:
+                        print(f"  length[{k}]: {orig_len[k]} -> {new_len[k]}")
 
             orig_rad = original["branch"].get("radius", {})
             new_rad = scaled["branch"].get("radius", {})
             if orig_rad and new_rad and "0" in orig_rad:
-                print(f"  radius[0]: {orig_rad['0']} -> {new_rad['0']}")
+                print(f"  radius[0]: {orig_rad['0']} -> {new_rad['0']} (levels 1+ unchanged)")
 
         if "leaves" in original and "leaves" in scaled:
             orig_size = original["leaves"].get("size", 0)
