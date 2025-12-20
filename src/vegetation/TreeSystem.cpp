@@ -291,7 +291,8 @@ bool TreeSystem::generateTreeMesh(const TreeOptions& options, Mesh& branchMesh, 
 
                 // Local position on unit circle
                 glm::vec3 localPos(std::cos(angle), 0.0f, std::sin(angle));
-                glm::vec3 localNormal = localPos;
+                // Negate normal to point outward (matching front-face winding)
+                glm::vec3 localNormal = -localPos;
 
                 // Transform by section orientation
                 glm::vec3 worldOffset = section.orientation * (localPos * section.radius);
@@ -397,14 +398,14 @@ bool TreeSystem::generateTreeMesh(const TreeOptions& options, Mesh& branchMesh, 
                 leafVertices.push_back(v);
             }
 
-            // Indices
+            // Indices - CCW winding when viewed from positive Z (where normal points)
             uint32_t base = leafVertexOffset + quad * 4;
             leafIndices.push_back(base + 0);
+            leafIndices.push_back(base + 2);
             leafIndices.push_back(base + 1);
-            leafIndices.push_back(base + 2);
             leafIndices.push_back(base + 0);
-            leafIndices.push_back(base + 2);
             leafIndices.push_back(base + 3);
+            leafIndices.push_back(base + 2);
         }
 
         leafVertexOffset += quadsPerLeaf * 4;

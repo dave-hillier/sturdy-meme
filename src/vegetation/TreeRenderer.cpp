@@ -172,7 +172,7 @@ bool TreeRenderer::createPipelines(const InitInfo& info) {
     }
     branchPipeline_ = ManagedPipeline::fromRaw(device_, rawBranchPipeline);
 
-    // Create leaf pipeline (with alpha blending and double-sided)
+    // Create leaf pipeline (alpha-test via discard, double-sided, no blending needed)
     VkPipeline rawLeafPipeline;
     factory.reset();
     success = factory
@@ -184,7 +184,7 @@ bool TreeRenderer::createPipelines(const InitInfo& info) {
         .setRenderPass(info.hdrRenderPass)
         .setPipelineLayout(leafPipelineLayout_.get())
         .setExtent(extent_)
-        .setBlendMode(GraphicsPipelineFactory::BlendMode::Alpha)
+        .setBlendMode(GraphicsPipelineFactory::BlendMode::None)  // Alpha-test via discard, no blending
         .setCullMode(VK_CULL_MODE_NONE)  // Double-sided leaves
         .build(rawLeafPipeline);
 
