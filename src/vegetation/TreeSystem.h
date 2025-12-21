@@ -8,12 +8,14 @@
 #include <functional>
 #include <memory>
 #include <unordered_map>
+#include <optional>
 
 #include "TreeOptions.h"
 #include "TreeGenerator.h"
 #include "Mesh.h"
 #include "Texture.h"
 #include "RenderableBuilder.h"
+#include "core/RAIIAdapter.h"
 
 // A single tree instance in the scene
 struct TreeInstanceData {
@@ -125,9 +127,10 @@ private:
     std::vector<Mesh> leafMeshes_;
 
     // Textures indexed by type name (e.g., "oak", "pine", "ash")
-    std::unordered_map<std::string, std::unique_ptr<Texture>> barkTextures_;
-    std::unordered_map<std::string, std::unique_ptr<Texture>> barkNormalMaps_;
-    std::unordered_map<std::string, std::unique_ptr<Texture>> leafTextures_;
+    // Using RAIIAdapter for automatic cleanup matching RockSystem pattern
+    std::unordered_map<std::string, std::optional<RAIIAdapter<Texture>>> barkTextures_;
+    std::unordered_map<std::string, std::optional<RAIIAdapter<Texture>>> barkNormalMaps_;
+    std::unordered_map<std::string, std::optional<RAIIAdapter<Texture>>> leafTextures_;
 
     // Tree instances (positions, rotations, etc.)
     std::vector<TreeInstanceData> treeInstances_;

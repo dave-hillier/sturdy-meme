@@ -54,29 +54,14 @@ bool TreeSystem::initInternal(const InitInfo& info) {
 }
 
 void TreeSystem::cleanup() {
-    // Clean up textures
-    for (auto& [name, tex] : barkTextures_) {
-        if (tex) {
-            tex->destroy(storedAllocator_, storedDevice_);
-        }
-    }
+    if (storedDevice_ == VK_NULL_HANDLE) return;
+
+    // RAII-managed textures - just reset the maps
     barkTextures_.clear();
-
-    for (auto& [name, tex] : barkNormalMaps_) {
-        if (tex) {
-            tex->destroy(storedAllocator_, storedDevice_);
-        }
-    }
     barkNormalMaps_.clear();
-
-    for (auto& [name, tex] : leafTextures_) {
-        if (tex) {
-            tex->destroy(storedAllocator_, storedDevice_);
-        }
-    }
     leafTextures_.clear();
 
-    // Clean up meshes
+    // Manually managed mesh vector
     for (auto& mesh : branchMeshes_) {
         mesh.destroy(storedAllocator_);
     }
@@ -99,40 +84,50 @@ bool TreeSystem::loadTextures(const InitInfo& info) {
     // Bark type names (data-driven from JSON presets)
     std::vector<std::string> barkTypeNames = {"birch", "oak", "pine", "willow"};
 
-    // Load all bark textures
+    // Load all bark textures using RAIIAdapter for automatic cleanup
     for (const auto& typeName : barkTypeNames) {
-        auto tex = std::make_unique<Texture>();
         std::string path = texturePath + "bark/" + typeName + "_color_1k.jpg";
-        if (!tex->load(path, info.allocator, info.device,
-                       info.commandPool, info.graphicsQueue, info.physicalDevice)) {
-            SDL_Log("TreeSystem: Using placeholder for %s bark texture", typeName.c_str());
-            if (!tex->createSolidColor(102, 77, 51, 255, info.allocator, info.device,
-                                        info.commandPool, info.graphicsQueue)) {
-                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create bark texture %s", typeName.c_str());
-                return false;
-            }
-        } else {
-            SDL_Log("TreeSystem: Loaded bark texture: %s", path.c_str());
-        }
-        barkTextures_[typeName] = std::move(tex);
+        barkTextures_[typeName] = RAIIAdapter<Texture>::create(
+            [&](auto& t) {
+                if (!t.load(path, info.allocator, info.device,
+                           info.commandPool, info.graphicsQueue, info.physicalDevice)) {
+                    SDL_Log("TreeSystem: Using placeholder for %s bark texture", typeName.c_str());
+                    if (!t.createSolidColor(102, 77, 51, 255, info.allocator, info.device,
+                                            info.commandPool, info.graphicsQueue)) {
+                        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create bark texture %s", typeName.c_str());
+                        return false;
+                    }
+                } else {
+                    SDL_Log("TreeSystem: Loaded bark texture: %s", path.c_str());
+                }
+                return true;
+            },
+            [this](auto& t) { t.destroy(storedAllocator_, storedDevice_); }
+        );
+        if (!barkTextures_[typeName]) return false;
     }
 
     // Load all bark normal maps
     for (const auto& typeName : barkTypeNames) {
-        auto tex = std::make_unique<Texture>();
         std::string path = texturePath + "bark/" + typeName + "_normal_1k.jpg";
-        if (!tex->load(path, info.allocator, info.device,
-                       info.commandPool, info.graphicsQueue, info.physicalDevice, false)) {
-            SDL_Log("TreeSystem: Using placeholder for %s bark normal", typeName.c_str());
-            if (!tex->createSolidColor(128, 128, 255, 255, info.allocator, info.device,
-                                        info.commandPool, info.graphicsQueue)) {
-                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create bark normal %s", typeName.c_str());
-                return false;
-            }
-        } else {
-            SDL_Log("TreeSystem: Loaded bark normal: %s", path.c_str());
-        }
-        barkNormalMaps_[typeName] = std::move(tex);
+        barkNormalMaps_[typeName] = RAIIAdapter<Texture>::create(
+            [&](auto& t) {
+                if (!t.load(path, info.allocator, info.device,
+                           info.commandPool, info.graphicsQueue, info.physicalDevice, false)) {
+                    SDL_Log("TreeSystem: Using placeholder for %s bark normal", typeName.c_str());
+                    if (!t.createSolidColor(128, 128, 255, 255, info.allocator, info.device,
+                                            info.commandPool, info.graphicsQueue)) {
+                        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create bark normal %s", typeName.c_str());
+                        return false;
+                    }
+                } else {
+                    SDL_Log("TreeSystem: Loaded bark normal: %s", path.c_str());
+                }
+                return true;
+            },
+            [this](auto& t) { t.destroy(storedAllocator_, storedDevice_); }
+        );
+        if (!barkNormalMaps_[typeName]) return false;
     }
 
     // Leaf type names (data-driven from JSON presets)
@@ -140,20 +135,25 @@ bool TreeSystem::loadTextures(const InitInfo& info) {
 
     // Load all leaf textures
     for (const auto& typeName : leafTypeNames) {
-        auto tex = std::make_unique<Texture>();
         std::string path = texturePath + "leaves/" + typeName + "_color.png";
-        if (!tex->load(path, info.allocator, info.device,
-                       info.commandPool, info.graphicsQueue, info.physicalDevice)) {
-            SDL_Log("TreeSystem: Using placeholder for %s leaf texture", typeName.c_str());
-            if (!tex->createSolidColor(51, 102, 51, 200, info.allocator, info.device,
-                                        info.commandPool, info.graphicsQueue)) {
-                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create leaf texture %s", typeName.c_str());
-                return false;
-            }
-        } else {
-            SDL_Log("TreeSystem: Loaded leaf texture: %s", path.c_str());
-        }
-        leafTextures_[typeName] = std::move(tex);
+        leafTextures_[typeName] = RAIIAdapter<Texture>::create(
+            [&](auto& t) {
+                if (!t.load(path, info.allocator, info.device,
+                           info.commandPool, info.graphicsQueue, info.physicalDevice)) {
+                    SDL_Log("TreeSystem: Using placeholder for %s leaf texture", typeName.c_str());
+                    if (!t.createSolidColor(51, 102, 51, 200, info.allocator, info.device,
+                                            info.commandPool, info.graphicsQueue)) {
+                        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create leaf texture %s", typeName.c_str());
+                        return false;
+                    }
+                } else {
+                    SDL_Log("TreeSystem: Loaded leaf texture: %s", path.c_str());
+                }
+                return true;
+            },
+            [this](auto& t) { t.destroy(storedAllocator_, storedDevice_); }
+        );
+        if (!leafTextures_[typeName]) return false;
     }
 
     return true;
@@ -161,32 +161,32 @@ bool TreeSystem::loadTextures(const InitInfo& info) {
 
 Texture* TreeSystem::getBarkTexture(const std::string& type) const {
     auto it = barkTextures_.find(type);
-    if (it != barkTextures_.end()) {
-        return it->second.get();
+    if (it != barkTextures_.end() && it->second) {
+        return const_cast<Texture*>(&(**it->second));
     }
     // Fallback to oak if type not found
     it = barkTextures_.find("oak");
-    return it != barkTextures_.end() ? it->second.get() : nullptr;
+    return (it != barkTextures_.end() && it->second) ? const_cast<Texture*>(&(**it->second)) : nullptr;
 }
 
 Texture* TreeSystem::getBarkNormalMap(const std::string& type) const {
     auto it = barkNormalMaps_.find(type);
-    if (it != barkNormalMaps_.end()) {
-        return it->second.get();
+    if (it != barkNormalMaps_.end() && it->second) {
+        return const_cast<Texture*>(&(**it->second));
     }
     // Fallback to oak if type not found
     it = barkNormalMaps_.find("oak");
-    return it != barkNormalMaps_.end() ? it->second.get() : nullptr;
+    return (it != barkNormalMaps_.end() && it->second) ? const_cast<Texture*>(&(**it->second)) : nullptr;
 }
 
 Texture* TreeSystem::getLeafTexture(const std::string& type) const {
     auto it = leafTextures_.find(type);
-    if (it != leafTextures_.end()) {
-        return it->second.get();
+    if (it != leafTextures_.end() && it->second) {
+        return const_cast<Texture*>(&(**it->second));
     }
     // Fallback to oak if type not found
     it = leafTextures_.find("oak");
-    return it != leafTextures_.end() ? it->second.get() : nullptr;
+    return (it != leafTextures_.end() && it->second) ? const_cast<Texture*>(&(**it->second)) : nullptr;
 }
 
 std::vector<std::string> TreeSystem::getBarkTextureTypes() const {
