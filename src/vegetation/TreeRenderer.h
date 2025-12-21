@@ -30,6 +30,19 @@ struct TreeLeafPushConstants {
     float alphaTest;    // offset 92, size 4
 };
 
+// Shadow pass push constants (branches)
+struct TreeBranchShadowPushConstants {
+    glm::mat4 model;      // offset 0, size 64
+    int cascadeIndex;     // offset 64, size 4
+};
+
+// Shadow pass push constants (leaves with alpha test)
+struct TreeLeafShadowPushConstants {
+    glm::mat4 model;      // offset 0, size 64
+    int cascadeIndex;     // offset 64, size 4
+    float alphaTest;      // offset 68, size 4
+};
+
 class TreeRenderer {
 public:
     struct InitInfo {
@@ -40,6 +53,7 @@ public:
         VkRenderPass shadowRenderPass;
         DescriptorManager::Pool* descriptorPool;
         VkExtent2D extent;
+        uint32_t shadowMapSize = 2048;
         std::string resourcePath;
         uint32_t maxFramesInFlight;
     };
@@ -117,7 +131,8 @@ private:
     // Pipeline layouts
     ManagedPipelineLayout branchPipelineLayout_;
     ManagedPipelineLayout leafPipelineLayout_;
-    ManagedPipelineLayout shadowPipelineLayout_;
+    ManagedPipelineLayout branchShadowPipelineLayout_;
+    ManagedPipelineLayout leafShadowPipelineLayout_;
 
     // Descriptor set layouts
     ManagedDescriptorSetLayout branchDescriptorSetLayout_;

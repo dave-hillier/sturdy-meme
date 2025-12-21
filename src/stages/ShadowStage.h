@@ -35,12 +35,14 @@ struct ShadowStage {
         VkDescriptorSet descriptorSet,
         const std::vector<Renderable>& sceneObjects,
         const DrawCallback& terrainCallback,
-        const DrawCallback& grassCallback
+        const DrawCallback& grassCallback,
+        const DrawCallback& treeCallback
     )>;
 
     ShadowRenderFn shadowRenderFn;
     DrawCallback terrainCallback;
     DrawCallback grassCallback;
+    DrawCallback treeCallback;
 
     // Accessor functions for scene data (set by Renderer)
     std::function<VkDescriptorSet(uint32_t)> getDescriptorSet;
@@ -61,6 +63,10 @@ struct ShadowStage {
         grassCallback = std::move(fn);
     }
 
+    void setTreeCallback(DrawCallback fn) {
+        treeCallback = std::move(fn);
+    }
+
     bool isEnabled(const RenderContext& ctx) const {
         return ctx.frame.sunIntensity > sunIntensityThreshold;
     }
@@ -75,7 +81,8 @@ struct ShadowStage {
             getDescriptorSet(ctx.frameIndex),
             getSceneObjects(),
             terrainCallback,
-            grassCallback
+            grassCallback,
+            treeCallback
         );
     }
 };

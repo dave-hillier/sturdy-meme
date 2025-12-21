@@ -279,6 +279,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         treeRendererInfo.shadowRenderPass = systems_->shadow().getShadowRenderPass();
         treeRendererInfo.descriptorPool = &*descriptorManagerPool;
         treeRendererInfo.extent = systems_->postProcess().getExtent();
+        treeRendererInfo.shadowMapSize = systems_->shadow().getShadowMapSize();
         treeRendererInfo.resourcePath = resourcePath;
         treeRendererInfo.maxFramesInFlight = MAX_FRAMES_IN_FLIGHT;
 

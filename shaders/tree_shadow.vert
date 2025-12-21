@@ -7,18 +7,12 @@ const int NUM_CASCADES = 4;
 #include "bindings.glsl"
 #include "ubo_common.glsl"
 
-// Tree vertex data from compute shader
-struct TreeVertex {
-    vec4 position;         // xyz = position, w = level (for wind)
-    vec4 normal;           // xyz = normal, w = unused
-    vec4 tangent;          // xyz = tangent, w = sign
-    vec2 uv;
-    vec2 padding;
-};
-
-layout(std430, set = 0, binding = BINDING_TREE_GFX_VERTICES) readonly buffer VertexBuffer {
-    TreeVertex vertices[];
-};
+// Vertex attributes (matching tree.vert)
+layout(location = 0) in vec3 inPosition;
+layout(location = 1) in vec3 inNormal;
+layout(location = 2) in vec2 inTexCoord;
+layout(location = 3) in vec4 inTangent;
+layout(location = 6) in vec4 inColor;
 
 layout(push_constant) uniform PushConstants {
     mat4 model;
@@ -26,8 +20,6 @@ layout(push_constant) uniform PushConstants {
 } push;
 
 void main() {
-    TreeVertex vert = vertices[gl_VertexIndex];
-    vec3 localPos = vert.position.xyz;
-
+    vec3 localPos = inPosition;
     gl_Position = ubo.cascadeViewProj[push.cascadeIndex] * push.model * vec4(localPos, 1.0);
 }

@@ -67,6 +67,7 @@ public:
                           const std::vector<Renderable>& sceneObjects,
                           const DrawCallback& terrainDrawCallback,
                           const DrawCallback& grassDrawCallback,
+                          const DrawCallback& treeDrawCallback = nullptr,
                           const DrawCallback& skinnedDrawCallback = nullptr);
 
     // Record skinned mesh shadow for a single cascade (called after bindSkinnedShadowPipeline)
@@ -142,6 +143,7 @@ private:
         const std::vector<Renderable>& sceneObjects,
         const DrawCallback& terrainCallback,
         const DrawCallback& grassCallback,
+        const DrawCallback& treeCallback,
         const DrawCallback& skinnedCallback);
 
     // Cascade calculation methods

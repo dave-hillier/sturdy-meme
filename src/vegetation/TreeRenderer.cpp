@@ -194,10 +194,91 @@ bool TreeRenderer::createPipelines(const InitInfo& info) {
     }
     leafPipeline_ = ManagedPipeline::fromRaw(device_, rawLeafPipeline);
 
-    // TODO: Create shadow pipelines
-    // For now, we'll skip shadow rendering for trees with custom shaders
+    // Create shadow pipeline layouts
+    // Branch shadow push constants
+    VkPushConstantRange branchShadowPushRange{};
+    branchShadowPushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    branchShadowPushRange.offset = 0;
+    branchShadowPushRange.size = sizeof(TreeBranchShadowPushConstants);
 
-    SDL_Log("TreeRenderer: Created branch and leaf pipelines");
+    VkPipelineLayoutCreateInfo branchShadowLayoutInfo{};
+    branchShadowLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    branchShadowLayoutInfo.setLayoutCount = 1;
+    branchShadowLayoutInfo.pSetLayouts = &branchSetLayout;
+    branchShadowLayoutInfo.pushConstantRangeCount = 1;
+    branchShadowLayoutInfo.pPushConstantRanges = &branchShadowPushRange;
+
+    VkPipelineLayout rawBranchShadowLayout;
+    if (vkCreatePipelineLayout(device_, &branchShadowLayoutInfo, nullptr, &rawBranchShadowLayout) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create branch shadow pipeline layout");
+        return false;
+    }
+    branchShadowPipelineLayout_ = ManagedPipelineLayout::fromRaw(device_, rawBranchShadowLayout);
+
+    // Leaf shadow push constants
+    VkPushConstantRange leafShadowPushRange{};
+    leafShadowPushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    leafShadowPushRange.offset = 0;
+    leafShadowPushRange.size = sizeof(TreeLeafShadowPushConstants);
+
+    VkPipelineLayoutCreateInfo leafShadowLayoutInfo{};
+    leafShadowLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    leafShadowLayoutInfo.setLayoutCount = 1;
+    leafShadowLayoutInfo.pSetLayouts = &leafSetLayout;
+    leafShadowLayoutInfo.pushConstantRangeCount = 1;
+    leafShadowLayoutInfo.pPushConstantRanges = &leafShadowPushRange;
+
+    VkPipelineLayout rawLeafShadowLayout;
+    if (vkCreatePipelineLayout(device_, &leafShadowLayoutInfo, nullptr, &rawLeafShadowLayout) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create leaf shadow pipeline layout");
+        return false;
+    }
+    leafShadowPipelineLayout_ = ManagedPipelineLayout::fromRaw(device_, rawLeafShadowLayout);
+
+    // Create branch shadow pipeline
+    VkPipeline rawBranchShadowPipeline;
+    factory.reset();
+    success = factory
+        .applyPreset(GraphicsPipelineFactory::Preset::Shadow)
+        .setShaders(resourcePath_ + "/shaders/tree_shadow.vert.spv",
+                    resourcePath_ + "/shaders/shadow.frag.spv")
+        .setVertexInput({bindingDescription},
+                        {attributeDescriptions.begin(), attributeDescriptions.end()})
+        .setRenderPass(info.shadowRenderPass)
+        .setPipelineLayout(branchShadowPipelineLayout_.get())
+        .setExtent({info.shadowMapSize, info.shadowMapSize})
+        .setDepthBias(1.25f, 1.75f)
+        .build(rawBranchShadowPipeline);
+
+    if (!success) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create tree branch shadow pipeline");
+        return false;
+    }
+    branchShadowPipeline_ = ManagedPipeline::fromRaw(device_, rawBranchShadowPipeline);
+
+    // Create leaf shadow pipeline (with alpha test)
+    VkPipeline rawLeafShadowPipeline;
+    factory.reset();
+    success = factory
+        .applyPreset(GraphicsPipelineFactory::Preset::Shadow)
+        .setShaders(resourcePath_ + "/shaders/tree_leaf_shadow.vert.spv",
+                    resourcePath_ + "/shaders/tree_leaf_shadow.frag.spv")
+        .setVertexInput({bindingDescription},
+                        {attributeDescriptions.begin(), attributeDescriptions.end()})
+        .setRenderPass(info.shadowRenderPass)
+        .setPipelineLayout(leafShadowPipelineLayout_.get())
+        .setExtent({info.shadowMapSize, info.shadowMapSize})
+        .setDepthBias(1.25f, 1.75f)
+        .setCullMode(VK_CULL_MODE_NONE)  // Double-sided leaves
+        .build(rawLeafShadowPipeline);
+
+    if (!success) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create tree leaf shadow pipeline");
+        return false;
+    }
+    leafShadowPipeline_ = ManagedPipeline::fromRaw(device_, rawLeafShadowPipeline);
+
+    SDL_Log("TreeRenderer: Created branch, leaf, and shadow pipelines");
     return true;
 }
 
@@ -502,8 +583,73 @@ void TreeRenderer::render(VkCommandBuffer cmd, uint32_t frameIndex, float time,
 
 void TreeRenderer::renderShadows(VkCommandBuffer cmd, uint32_t frameIndex,
                                  const TreeSystem& treeSystem, int cascadeIndex) {
-    // TODO: Implement shadow rendering with tree shadow shaders
-    // For now, trees won't cast shadows with the new renderer
+    const auto& branchRenderables = treeSystem.getBranchRenderables();
+    const auto& leafRenderables = treeSystem.getLeafRenderables();
+
+    if (branchRenderables.empty() && leafRenderables.empty()) {
+        return;
+    }
+
+    // Render branch shadows
+    if (!branchRenderables.empty() && branchShadowPipeline_.get() != VK_NULL_HANDLE) {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, branchShadowPipeline_.get());
+
+        // Bind descriptor set for UBO access
+        VkDescriptorSet branchSet = defaultBranchDescriptorSets_[frameIndex];
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                branchShadowPipelineLayout_.get(), 0, 1, &branchSet, 0, nullptr);
+
+        for (const auto& renderable : branchRenderables) {
+            TreeBranchShadowPushConstants push{};
+            push.model = renderable.transform;
+            push.cascadeIndex = cascadeIndex;
+
+            vkCmdPushConstants(cmd, branchShadowPipelineLayout_.get(),
+                               VK_SHADER_STAGE_VERTEX_BIT,
+                               0, sizeof(TreeBranchShadowPushConstants), &push);
+
+            if (renderable.mesh) {
+                VkBuffer vertexBuffers[] = {renderable.mesh->getVertexBuffer()};
+                VkDeviceSize offsets[] = {0};
+                vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
+                vkCmdBindIndexBuffer(cmd, renderable.mesh->getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+                vkCmdDrawIndexed(cmd, renderable.mesh->getIndexCount(), 1, 0, 0, 0);
+            }
+        }
+    }
+
+    // Render leaf shadows (with alpha test)
+    if (!leafRenderables.empty() && leafShadowPipeline_.get() != VK_NULL_HANDLE) {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, leafShadowPipeline_.get());
+
+        std::string lastLeafType;
+        for (const auto& renderable : leafRenderables) {
+            // Bind descriptor set for this leaf type (for alpha test texture)
+            if (renderable.leafType != lastLeafType) {
+                VkDescriptorSet leafSet = getLeafDescriptorSet(frameIndex, renderable.leafType);
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                        leafShadowPipelineLayout_.get(), 0, 1, &leafSet, 0, nullptr);
+                lastLeafType = renderable.leafType;
+            }
+
+            TreeLeafShadowPushConstants push{};
+            push.model = renderable.transform;
+            push.cascadeIndex = cascadeIndex;
+            push.alphaTest = renderable.alphaTestThreshold > 0.0f ? renderable.alphaTestThreshold : 0.5f;
+
+            vkCmdPushConstants(cmd, leafShadowPipelineLayout_.get(),
+                               VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                               0, sizeof(TreeLeafShadowPushConstants), &push);
+
+            if (renderable.mesh) {
+                VkBuffer vertexBuffers[] = {renderable.mesh->getVertexBuffer()};
+                VkDeviceSize offsets[] = {0};
+                vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
+                vkCmdBindIndexBuffer(cmd, renderable.mesh->getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+                vkCmdDrawIndexed(cmd, renderable.mesh->getIndexCount(), 1, 0, 0, 0);
+            }
+        }
+    }
 }
 
 void TreeRenderer::setExtent(VkExtent2D newExtent) {

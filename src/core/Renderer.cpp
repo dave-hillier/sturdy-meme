@@ -203,6 +203,13 @@ void Renderer::setupRenderPipeline() {
         systems_->grass().recordShadowDraw(cb, currentFrame, systems_->wind().getTime(), cascade);
     });
 
+    renderPipeline.shadowStage.setTreeCallback([this](VkCommandBuffer cb, uint32_t cascade, const glm::mat4& lightMatrix) {
+        (void)lightMatrix;
+        if (systems_->tree() && systems_->treeRenderer()) {
+            systems_->treeRenderer()->renderShadows(cb, currentFrame, *systems_->tree(), static_cast<int>(cascade));
+        }
+    });
+
     renderPipeline.shadowStage.getDescriptorSet = [this](uint32_t frameIndex) -> VkDescriptorSet {
         const auto& materialRegistry = systems_->scene().getSceneBuilder().getMaterialRegistry();
         return materialRegistry.getDescriptorSet(0, frameIndex);
@@ -1342,6 +1349,13 @@ void Renderer::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float 
         }
     };
 
+    auto treeCallback = [this, frameIndex](VkCommandBuffer cb, uint32_t cascade, const glm::mat4& lightMatrix) {
+        (void)lightMatrix;
+        if (systems_->tree() && systems_->treeRenderer()) {
+            systems_->treeRenderer()->renderShadows(cb, frameIndex, *systems_->tree(), static_cast<int>(cascade));
+        }
+    };
+
     // Combine scene objects and rock objects for shadow rendering
     // Skip player character - it's rendered separately with skinned shadow pipeline
     std::vector<Renderable> allObjects;
@@ -1386,7 +1400,7 @@ void Renderer::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float 
     VkDescriptorSet shadowDescriptorSet = materialRegistry.getDescriptorSet(0, frameIndex);
     systems_->shadow().recordShadowPass(cmd, frameIndex, shadowDescriptorSet,
                                    allObjects,
-                                   terrainCallback, grassCallback, skinnedCallback);
+                                   terrainCallback, grassCallback, treeCallback, skinnedCallback);
 }
 
 void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {

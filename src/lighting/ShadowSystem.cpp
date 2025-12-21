@@ -312,6 +312,7 @@ void ShadowSystem::drawShadowScene(
     const std::vector<Renderable>& sceneObjects,
     const DrawCallback& terrainCallback,
     const DrawCallback& grassCallback,
+    const DrawCallback& treeCallback,
     const DrawCallback& skinnedCallback)
 {
     for (const auto& obj : sceneObjects) {
@@ -331,6 +332,7 @@ void ShadowSystem::drawShadowScene(
 
     if (terrainCallback) terrainCallback(cmd, cascadeOrFaceIndex, lightMatrix);
     if (grassCallback) grassCallback(cmd, cascadeOrFaceIndex, lightMatrix);
+    if (treeCallback) treeCallback(cmd, cascadeOrFaceIndex, lightMatrix);
     if (skinnedCallback) skinnedCallback(cmd, cascadeOrFaceIndex, lightMatrix);
 }
 
@@ -339,6 +341,7 @@ void ShadowSystem::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex,
                                      const std::vector<Renderable>& sceneObjects,
                                      const DrawCallback& terrainDrawCallback,
                                      const DrawCallback& grassDrawCallback,
+                                     const DrawCallback& treeDrawCallback,
                                      const DrawCallback& skinnedDrawCallback) {
     for (uint32_t cascade = 0; cascade < NUM_SHADOW_CASCADES; cascade++) {
         VkRenderPassBeginInfo shadowPassInfo{};
@@ -358,7 +361,7 @@ void ShadowSystem::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex,
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
 
         drawShadowScene(cmd, shadowPipelineLayout, cascade, cascadeMatrices[cascade],
-                        sceneObjects, terrainDrawCallback, grassDrawCallback, skinnedDrawCallback);
+                        sceneObjects, terrainDrawCallback, grassDrawCallback, treeDrawCallback, skinnedDrawCallback);
 
         vkCmdEndRenderPass(cmd);
     }
@@ -427,7 +430,7 @@ void ShadowSystem::renderDynamicShadows(VkCommandBuffer cmd, uint32_t frameIndex
                 vkCmdSetScissor(cmd, 0, 1, &scissor);
 
                 drawShadowScene(cmd, dynamicShadowPipelineLayout, face, glm::mat4(1.0f),
-                                sceneObjects, terrainDrawCallback, grassDrawCallback, skinnedDrawCallback);
+                                sceneObjects, terrainDrawCallback, grassDrawCallback, nullptr, skinnedDrawCallback);
 
                 vkCmdEndRenderPass(cmd);
             }
@@ -452,7 +455,7 @@ void ShadowSystem::renderDynamicShadows(VkCommandBuffer cmd, uint32_t frameIndex
             vkCmdSetScissor(cmd, 0, 1, &scissor);
 
             drawShadowScene(cmd, dynamicShadowPipelineLayout, lightIndex, glm::mat4(1.0f),
-                            sceneObjects, terrainDrawCallback, grassDrawCallback, skinnedDrawCallback);
+                            sceneObjects, terrainDrawCallback, grassDrawCallback, nullptr, skinnedDrawCallback);
 
             vkCmdEndRenderPass(cmd);
         }
