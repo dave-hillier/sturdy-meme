@@ -135,7 +135,7 @@ private:
     bool gamepadLockToggleHeld = false;
 
     // Input settings
-    float moveSpeed = 3.0f;
+    float moveSpeed = 5.0f;
     float rotateSpeed = 60.0f;
 
     // Gamepad constants
