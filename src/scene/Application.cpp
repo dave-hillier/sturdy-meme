@@ -7,6 +7,7 @@
 #include "TerrainSystem.h"
 #include "TerrainTileCache.h"
 #include "RockSystem.h"
+#include "TreeSystem.h"
 #include "SceneManager.h"
 #include "WaterSystem.h"
 #include "WindSystem.h"
@@ -136,6 +137,26 @@ bool Application::init(const std::string& title, int width, int height) {
                                        rock.scale, rotation);
     }
     SDL_Log("Created %zu rock convex hull colliders", rockInstances.size());
+
+    // Create compound capsule colliders for trees (trunk + major branches)
+    if (TreeSystem* treeSystem = renderer_->getTreeSystem()) {
+        const auto& treeInstances = treeSystem->getTreeInstances();
+        TreeCollision::Config treeCollisionConfig;
+        treeCollisionConfig.maxBranchLevel = 2;  // Trunk + first 2 levels of branches
+        treeCollisionConfig.minBranchRadius = 0.05f;
+
+        for (size_t i = 0; i < treeInstances.size(); ++i) {
+            const auto& tree = treeInstances[i];
+            auto capsules = treeSystem->getTreeCollisionCapsules(static_cast<uint32_t>(i), treeCollisionConfig);
+
+            if (!capsules.empty()) {
+                // Create rotation quaternion from Y-axis rotation
+                glm::quat rotation = glm::angleAxis(tree.rotation, glm::vec3(0.0f, 1.0f, 0.0f));
+                physics().createStaticCompoundCapsules(tree.position, capsules, rotation);
+            }
+        }
+        SDL_Log("Created %zu tree compound capsule colliders", treeInstances.size());
+    }
 
     // Create character controller for player at terrain height
     float playerSpawnX = 0.0f, playerSpawnZ = 0.0f;
