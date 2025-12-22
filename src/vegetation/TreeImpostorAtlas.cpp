@@ -941,20 +941,20 @@ int32_t TreeImpostorAtlas::generateArchetype(
     for (int h = 0; h < ImpostorAtlasConfig::HORIZONTAL_ANGLES; h++) {
         float azimuth = h * (360.0f / ImpostorAtlasConfig::HORIZONTAL_ANGLES);
         renderToCell(cmd, h, 0, azimuth, 0.0f, branchMesh, leafInstances, maxRadius, centerHeight,
-                     captureDescSet, leafCaptureDescSet);
+                     minBounds.y, captureDescSet, leafCaptureDescSet);
         cellIndex++;
     }
 
     // Top-down view (cell 8 of row 0)
     renderToCell(cmd, 8, 0, 0.0f, 90.0f, branchMesh, leafInstances, maxRadius, centerHeight,
-                 captureDescSet, leafCaptureDescSet);
+                 minBounds.y, captureDescSet, leafCaptureDescSet);
     cellIndex++;
 
     // Row 1: 8 elevated views (45 degrees)
     for (int h = 0; h < ImpostorAtlasConfig::HORIZONTAL_ANGLES; h++) {
         float azimuth = h * (360.0f / ImpostorAtlasConfig::HORIZONTAL_ANGLES);
         renderToCell(cmd, h, 1, azimuth, 45.0f, branchMesh, leafInstances, maxRadius, centerHeight,
-                     captureDescSet, leafCaptureDescSet);
+                     minBounds.y, captureDescSet, leafCaptureDescSet);
         cellIndex++;
     }
 
@@ -1004,6 +1004,7 @@ void TreeImpostorAtlas::renderToCell(
     const std::vector<LeafInstanceGPU>& leafInstances,
     float boundingRadius,
     float centerHeight,
+    float baseY,
     VkDescriptorSet branchDescSet,
     VkDescriptorSet leafDescSet) {
 
@@ -1040,9 +1041,21 @@ void TreeImpostorAtlas::renderToCell(
 
     glm::mat4 view = glm::lookAt(camPos, target, up);
 
-    // Orthographic projection sized to fit tree
-    float orthoSize = boundingRadius * 1.2f;
-    glm::mat4 proj = glm::ortho(-orthoSize, orthoSize, -orthoSize, orthoSize, 0.1f, camDist * 2.0f);
+    // Orthographic projection sized to fit tree with base at bottom of cell
+    float orthoSize = boundingRadius * 1.1f;  // Small margin for padding
+
+    glm::mat4 proj;
+    if (elevation < 45.0f) {
+        // For horizon and low-angle views: place tree base at bottom of cell
+        // In camera space, baseY is at (baseY - centerHeight) relative to look target
+        float baseInCamSpace = baseY - centerHeight;
+        float yBottom = baseInCamSpace;
+        float yTop = yBottom + 2.0f * orthoSize;
+        proj = glm::ortho(-orthoSize, orthoSize, yBottom, yTop, 0.1f, camDist * 2.0f);
+    } else {
+        // For elevated and top-down views: use symmetric projection centered on tree
+        proj = glm::ortho(-orthoSize, orthoSize, -orthoSize, orthoSize, 0.1f, camDist * 2.0f);
+    }
 
     // Vulkan clip space correction
     proj[1][1] *= -1;

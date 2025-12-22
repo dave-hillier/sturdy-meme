@@ -20,7 +20,7 @@ layout(location = 5) in uint instanceArchetype; // Archetype index for atlas loo
 layout(push_constant) uniform PushConstants {
     vec4 cameraPos;         // xyz = camera world position
     vec4 lodParams;         // x = blend factor (0 = full geo, 1 = impostor), y = brightness, z = normal strength
-    vec4 atlasParams;       // x = unused, y = bounding radius, z = center height (for positioning)
+    vec4 atlasParams;       // x = unused, y = orthoSize (billboard half-size), z = baseOffset (tree base Y)
 } push;
 
 layout(location = 0) out vec2 fragTexCoord;
@@ -121,16 +121,19 @@ void main() {
     fragImpostorToWorld = mat3(right, up, forward);
 
     // Position billboard vertex
-    // Billboard is sized to bounding sphere diameter, centered at tree's center height
-    float boundingRadius = push.atlasParams.y * scale;
-    float centerHeight = push.atlasParams.z * scale;
+    // Billboard is sized to 2*orthoSize (matching capture projection)
+    // Tree base is at bottom of texture cell (inPosition.y = 0)
+    float orthoSize = push.atlasParams.y * scale;
+    float baseOffset = push.atlasParams.z * scale;
 
-    // inPosition.y is 0-1, we need to center it around the billboard center
-    vec3 localPos = right * inPosition.x * boundingRadius * 2.0 +
-                    up * (inPosition.y - 0.5) * boundingRadius * 2.0;
+    // inPosition.x is -0.5 to 0.5, inPosition.y is 0 to 1
+    // Billboard spans: width = 2*orthoSize, height = 2*orthoSize
+    // Base of billboard (y=0) should be at tree base
+    vec3 localPos = right * inPosition.x * orthoSize * 2.0 +
+                    up * inPosition.y * orthoSize * 2.0;
 
-    // Offset billboard center to tree's center height
-    vec3 worldPos = treePos + vec3(0.0, centerHeight, 0.0) + localPos;
+    // Position billboard with base at tree's base position
+    vec3 worldPos = treePos + vec3(0.0, baseOffset, 0.0) + localPos;
     fragWorldPos = worldPos;
 
     gl_Position = ubo.proj * ubo.view * vec4(worldPos, 1.0);

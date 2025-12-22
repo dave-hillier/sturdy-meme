@@ -814,13 +814,14 @@ void TreeLODSystem::renderImpostors(VkCommandBuffer cmd, uint32_t frameIndex,
 
     if (impostorAtlas_->getArchetypeCount() > 0) {
         const auto* archetype = impostorAtlas_->getArchetype(0u);
-        // atlasParams: x=unused, y=boundingSphereRadius (for billboard sizing), z=centerHeight (for positioning)
-        float boundingRadius = archetype ? archetype->boundingSphereRadius : 10.0f;
-        float centerHeight = archetype ? archetype->centerHeight : 10.0f;
+        // atlasParams: x=unused, y=orthoSize (billboard half-size), z=baseOffset (tree base Y)
+        // orthoSize = boundingSphereRadius * 1.1 (matches capture projection)
+        float orthoSize = archetype ? archetype->boundingSphereRadius * 1.1f : 10.0f;
+        float baseOffset = archetype ? archetype->baseOffset : 0.0f;
         pushConstants.atlasParams = glm::vec4(
             0.0f,
-            boundingRadius,
-            centerHeight,
+            orthoSize,
+            baseOffset,
             0.0f
         );
     }
@@ -911,13 +912,13 @@ void TreeLODSystem::renderImpostorShadows(VkCommandBuffer cmd, uint32_t frameInd
 
     if (impostorAtlas_->getArchetypeCount() > 0) {
         const auto* archetype = impostorAtlas_->getArchetype(0u);
-        // atlasParams: x=unused, y=boundingSphereRadius (for billboard sizing), z=centerHeight (for positioning)
-        float boundingRadius = archetype ? archetype->boundingSphereRadius : 10.0f;
-        float centerHeight = archetype ? archetype->centerHeight : 10.0f;
+        // atlasParams: x=unused, y=orthoSize (billboard half-size), z=baseOffset (tree base Y)
+        float orthoSize = archetype ? archetype->boundingSphereRadius * 1.1f : 10.0f;
+        float baseOffset = archetype ? archetype->baseOffset : 0.0f;
         pushConstants.atlasParams = glm::vec4(
             0.0f,
-            boundingRadius,
-            centerHeight,
+            orthoSize,
+            baseOffset,
             0.0f
         );
     }

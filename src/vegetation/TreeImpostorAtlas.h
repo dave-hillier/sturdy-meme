@@ -136,6 +136,7 @@ private:
         const std::vector<LeafInstanceGPU>& leafInstances,
         float boundingRadius,
         float centerHeight,
+        float baseY,        // Y coordinate of tree base (for asymmetric projection)
         VkDescriptorSet branchDescSet,
         VkDescriptorSet leafDescSet);
 

@@ -20,7 +20,7 @@ layout(location = 5) in uint instanceArchetype; // Archetype index for atlas loo
 layout(push_constant) uniform PushConstants {
     vec4 cameraPos;         // xyz = camera world position (for billboard facing)
     vec4 lodParams;         // x = blend factor, y = brightness, z = normal strength
-    vec4 atlasParams;       // x = unused, y = bounding radius, z = center height (for positioning)
+    vec4 atlasParams;       // x = unused, y = orthoSize (billboard half-size), z = baseOffset (tree base Y)
     int cascadeIndex;       // Which shadow cascade we're rendering
 } push;
 
@@ -102,15 +102,15 @@ void main() {
     }
 
     // Position billboard vertex
-    // Billboard is sized to bounding sphere diameter, centered at tree's center height
-    float boundingRadius = push.atlasParams.y * scale;
-    float centerHeight = push.atlasParams.z * scale;
+    // Billboard is sized to 2*orthoSize, base at tree base position
+    float orthoSize = push.atlasParams.y * scale;
+    float baseOffset = push.atlasParams.z * scale;
 
-    vec3 localPos = right * inPosition.x * boundingRadius * 2.0 +
-                    up * (inPosition.y - 0.5) * boundingRadius * 2.0;
+    vec3 localPos = right * inPosition.x * orthoSize * 2.0 +
+                    up * inPosition.y * orthoSize * 2.0;
 
-    // Offset billboard center to tree's center height
-    vec3 worldPos = treePos + vec3(0.0, centerHeight, 0.0) + localPos;
+    // Position billboard with base at tree's base position
+    vec3 worldPos = treePos + vec3(0.0, baseOffset, 0.0) + localPos;
 
     // Transform by cascade light matrix
     gl_Position = ubo.cascadeViewProj[push.cascadeIndex] * vec4(worldPos, 1.0);
