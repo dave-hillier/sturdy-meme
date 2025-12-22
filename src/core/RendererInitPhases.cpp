@@ -366,6 +366,40 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
             }
 
             SDL_Log("Forest added: %d trees at distance 100 units", numTrees);
+
+            // Generate impostor for the first tree archetype (they share similar appearance)
+            auto* treeLOD = systems_->treeLOD();
+            if (treeLOD && treeSystem->getMeshCount() > 0) {
+                // Use the first tree's mesh as the impostor archetype
+                const auto& branchMesh = treeSystem->getBranchMesh(0);
+                const auto& leafInstances = treeSystem->getLeafInstances(0);
+                const auto& treeOpts = treeSystem->getTreeOptions(0);
+
+                // Get textures (using default oak for now)
+                auto* barkTex = treeSystem->getBarkTexture("oak");
+                auto* barkNorm = treeSystem->getBarkNormalMap("oak");
+                auto* leafTex = treeSystem->getLeafTexture("oak");
+
+                if (barkTex && barkNorm && leafTex) {
+                    int32_t archetypeIdx = treeLOD->generateImpostor(
+                        "forest_tree",
+                        treeOpts,
+                        branchMesh,
+                        leafInstances,
+                        barkTex->getImageView(),
+                        barkNorm->getImageView(),
+                        leafTex->getImageView(),
+                        barkTex->getSampler()
+                    );
+                    if (archetypeIdx >= 0) {
+                        SDL_Log("Generated impostor archetype %d for forest trees", archetypeIdx);
+                    } else {
+                        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to generate tree impostor");
+                    }
+                } else {
+                    SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Missing textures for impostor generation");
+                }
+            }
         }
     }
 

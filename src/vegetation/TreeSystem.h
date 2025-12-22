@@ -128,6 +128,11 @@ public:
     const Mesh& getSharedLeafQuadMesh() const { return sharedLeafQuadMesh_; }
     const std::vector<LeafDrawInfo>& getLeafDrawInfo() const { return leafDrawInfoPerTree_; }
 
+    // Accessors for impostor generation
+    const Mesh& getBranchMesh(uint32_t meshIndex) const { return branchMeshes_[meshIndex]; }
+    const std::vector<LeafInstanceGPU>& getLeafInstances(uint32_t meshIndex) const { return leafInstancesPerTree_[meshIndex]; }
+    const TreeOptions& getTreeOptions(uint32_t meshIndex) const { return treeOptions_[meshIndex]; }
+
 private:
     TreeSystem() = default;  // Private: use factory
 
