@@ -8,6 +8,7 @@
 #include <SDL3/SDL.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <array>
+#include <imgui_impl_vulkan.h>
 
 std::unique_ptr<TreeImpostorAtlas> TreeImpostorAtlas::create(const InitInfo& info) {
     auto atlas = std::unique_ptr<TreeImpostorAtlas>(new TreeImpostorAtlas());
@@ -37,6 +38,10 @@ TreeImpostorAtlas::~TreeImpostorAtlas() {
 
     // Cleanup atlas textures
     for (auto& atlas : atlasTextures_) {
+        // Remove ImGui texture before destroying resources
+        if (atlas.previewDescriptorSet != VK_NULL_HANDLE) {
+            ImGui_ImplVulkan_RemoveTexture(atlas.previewDescriptorSet);
+        }
         if (atlas.albedoAlphaImage != VK_NULL_HANDLE) {
             vmaDestroyImage(allocator_, atlas.albedoAlphaImage, atlas.albedoAlphaAllocation);
         }
@@ -982,6 +987,13 @@ int32_t TreeImpostorAtlas::generateArchetype(
     archetype.atlasIndex = archetypeIndex;
 
     archetypes_.push_back(archetype);
+
+    // Create ImGui preview descriptor set for this atlas
+    atlasTextures_[archetypeIndex].previewDescriptorSet = ImGui_ImplVulkan_AddTexture(
+        atlasSampler_.get(),
+        atlasTextures_[archetypeIndex].albedoAlphaView.get(),
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    );
 
     SDL_Log("TreeImpostorAtlas: Generated archetype '%s' (radius=%.2f, height=%.2f, baseOffset=%.2f, %d cells)",
             name.c_str(), maxRadius, treeExtent.y, minBounds.y, cellIndex);

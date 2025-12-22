@@ -61,23 +61,65 @@ void GuiTreeTab::render(Renderer& renderer) {
             if (atlas && atlas->getArchetypeCount() > 0) {
                 ImGui::Spacing();
                 ImGui::Separator();
-                ImGui::Text("Impostor Atlas Preview:");
-                ImGui::Text("Archetypes: %zu", atlas->getArchetypeCount());
+                ImGui::Text("Impostor Atlas:");
+                ImGui::SameLine();
+                ImGui::Text("(%zu archetypes)", atlas->getArchetypeCount());
 
                 // Show archetype info
                 for (size_t i = 0; i < atlas->getArchetypeCount(); i++) {
                     const auto* archetype = atlas->getArchetype(static_cast<uint32_t>(i));
                     if (archetype) {
-                        ImGui::BulletText("%s (radius: %.2f)", archetype->name.c_str(), archetype->boundingSphereRadius);
+                        ImGui::BulletText("%s (r=%.1f, h=%.1f)",
+                                         archetype->name.c_str(),
+                                         archetype->boundingSphereRadius,
+                                         archetype->treeHeight);
                     }
                 }
 
-                // Atlas texture preview (if ImGui texture binding is available)
+                // Atlas texture preview button
                 VkDescriptorSet previewSet = atlas->getPreviewDescriptorSet(0);
                 if (previewSet != VK_NULL_HANDLE) {
-                    ImGui::Image(reinterpret_cast<ImTextureID>(previewSet),
-                                ImVec2(ImpostorAtlasConfig::ATLAS_WIDTH * 0.25f,
-                                       ImpostorAtlasConfig::ATLAS_HEIGHT * 0.25f));
+                    if (ImGui::Button("Preview Atlas Texture")) {
+                        ImGui::OpenPopup("AtlasPreview");
+                    }
+
+                    // Preview popup window
+                    if (ImGui::BeginPopup("AtlasPreview")) {
+                        ImGui::Text("Impostor Atlas (9x2 cells, 256px each)");
+                        ImGui::Separator();
+
+                        // Draw atlas with cell grid overlay
+                        ImVec2 imageSize(ImpostorAtlasConfig::ATLAS_WIDTH * 0.5f,
+                                        ImpostorAtlasConfig::ATLAS_HEIGHT * 0.5f);
+
+                        ImVec2 cursorPos = ImGui::GetCursorScreenPos();
+                        ImGui::Image(reinterpret_cast<ImTextureID>(previewSet), imageSize);
+
+                        // Draw grid lines to show cells
+                        ImDrawList* drawList = ImGui::GetWindowDrawList();
+                        float cellW = imageSize.x / ImpostorAtlasConfig::CELLS_PER_ROW;
+                        float cellH = imageSize.y / ImpostorAtlasConfig::VERTICAL_LEVELS;
+                        ImU32 gridColor = IM_COL32(255, 255, 255, 80);
+
+                        // Vertical lines
+                        for (int x = 0; x <= ImpostorAtlasConfig::CELLS_PER_ROW; x++) {
+                            float px = cursorPos.x + x * cellW;
+                            drawList->AddLine(ImVec2(px, cursorPos.y),
+                                            ImVec2(px, cursorPos.y + imageSize.y), gridColor);
+                        }
+                        // Horizontal lines
+                        for (int y = 0; y <= ImpostorAtlasConfig::VERTICAL_LEVELS; y++) {
+                            float py = cursorPos.y + y * cellH;
+                            drawList->AddLine(ImVec2(cursorPos.x, py),
+                                            ImVec2(cursorPos.x + imageSize.x, py), gridColor);
+                        }
+
+                        ImGui::Spacing();
+                        ImGui::Text("Row 0: 8 horizon views (0-315 deg) + top-down");
+                        ImGui::Text("Row 1: 8 elevated views (45 deg elevation)");
+
+                        ImGui::EndPopup();
+                    }
                 }
             }
         }
