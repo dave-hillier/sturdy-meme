@@ -10,6 +10,7 @@
 #include <array>
 
 #include "TreeSystem.h"
+#include "TreeLODSystem.h"
 #include "core/VulkanRAII.h"
 #include "core/DescriptorManager.h"
 #include "BufferUtils.h"
@@ -137,13 +138,14 @@ public:
                            const glm::vec3& cameraPos,
                            const glm::vec4* frustumPlanes);
 
-    // Render all trees
+    // Render all trees (optionally filtering by LOD)
     void render(VkCommandBuffer cmd, uint32_t frameIndex, float time,
-                const TreeSystem& treeSystem);
+                const TreeSystem& treeSystem, const TreeLODSystem* lodSystem = nullptr);
 
-    // Render tree shadows
+    // Render tree shadows (optionally filtering by LOD)
     void renderShadows(VkCommandBuffer cmd, uint32_t frameIndex,
-                       const TreeSystem& treeSystem, int cascadeIndex);
+                       const TreeSystem& treeSystem, int cascadeIndex,
+                       const TreeLODSystem* lodSystem = nullptr);
 
     // Update extent on resize
     void setExtent(VkExtent2D newExtent);

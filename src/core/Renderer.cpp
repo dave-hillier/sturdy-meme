@@ -219,7 +219,7 @@ void Renderer::setupRenderPipeline() {
     renderPipeline.shadowStage.setTreeCallback([this](VkCommandBuffer cb, uint32_t cascade, const glm::mat4& lightMatrix) {
         (void)lightMatrix;
         if (systems_->tree() && systems_->treeRenderer()) {
-            systems_->treeRenderer()->renderShadows(cb, currentFrame, *systems_->tree(), static_cast<int>(cascade));
+            systems_->treeRenderer()->renderShadows(cb, currentFrame, *systems_->tree(), static_cast<int>(cascade), systems_->treeLOD());
         }
     });
 
@@ -1405,7 +1405,7 @@ void Renderer::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float 
     auto treeCallback = [this, frameIndex](VkCommandBuffer cb, uint32_t cascade, const glm::mat4& lightMatrix) {
         (void)lightMatrix;
         if (systems_->tree() && systems_->treeRenderer()) {
-            systems_->treeRenderer()->renderShadows(cb, frameIndex, *systems_->tree(), static_cast<int>(cascade));
+            systems_->treeRenderer()->renderShadows(cb, frameIndex, *systems_->tree(), static_cast<int>(cascade), systems_->treeLOD());
         }
     };
 
@@ -1520,7 +1520,7 @@ void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
 
     // Render procedural trees using dedicated TreeRenderer with wind animation
     if (systems_->tree() && systems_->treeRenderer()) {
-        systems_->treeRenderer()->render(cmd, frameIndex, systems_->wind().getTime(), *systems_->tree());
+        systems_->treeRenderer()->render(cmd, frameIndex, systems_->wind().getTime(), *systems_->tree(), systems_->treeLOD());
     }
 
     // Render tree impostors for distant trees

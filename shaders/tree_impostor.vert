@@ -20,7 +20,7 @@ layout(location = 5) in uint instanceArchetype; // Archetype index for atlas loo
 layout(push_constant) uniform PushConstants {
     vec4 cameraPos;         // xyz = camera world position
     vec4 lodParams;         // x = blend factor (0 = full geo, 1 = impostor), y = brightness, z = normal strength
-    vec4 atlasParams;       // x = archetype index, y = bounding radius
+    vec4 atlasParams;       // x = archetype index, y = bounding radius, z = center height
 } push;
 
 layout(location = 0) out vec2 fragTexCoord;
@@ -121,11 +121,16 @@ void main() {
     fragImpostorToWorld = mat3(right, up, forward);
 
     // Position billboard vertex
+    // Billboard is centered on tree center (at centerHeight above base)
     float boundingRadius = push.atlasParams.y * scale;
-    vec3 localPos = right * inPosition.x * boundingRadius * 2.0 +
-                    up * inPosition.y * boundingRadius * 2.0;
+    float centerHeight = push.atlasParams.z * scale;
 
-    vec3 worldPos = treePos + localPos;
+    // inPosition.y is 0-1, we need to center it around the tree center
+    vec3 localPos = right * inPosition.x * boundingRadius * 2.0 +
+                    up * (inPosition.y - 0.5) * boundingRadius * 2.0;
+
+    // Offset billboard center to tree center height
+    vec3 worldPos = treePos + vec3(0.0, centerHeight, 0.0) + localPos;
     fragWorldPos = worldPos;
 
     gl_Position = ubo.proj * ubo.view * vec4(worldPos, 1.0);

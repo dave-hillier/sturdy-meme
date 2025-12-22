@@ -622,7 +622,7 @@ void TreeLODSystem::renderImpostors(VkCommandBuffer cmd, uint32_t frameIndex,
         pushConstants.atlasParams = glm::vec4(
             0.0f,  // archetype index
             archetype ? archetype->boundingSphereRadius : 10.0f,
-            0.0f,
+            archetype ? archetype->centerHeight : 5.0f,  // center height for billboard offset
             0.0f
         );
     }

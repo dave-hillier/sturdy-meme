@@ -21,9 +21,9 @@ struct ImpostorAtlasConfig {
     static constexpr int VERTICAL_LEVELS = 2;         // Horizon + 45 degree elevation
     static constexpr int CELLS_PER_ROW = 9;           // 8 angles + 1 (top-down or unused)
     static constexpr int TOTAL_CELLS = 17;            // 8 + 8 + 1 top-down
-    static constexpr int CELL_SIZE = 128;             // Pixels per cell
-    static constexpr int ATLAS_WIDTH = CELLS_PER_ROW * CELL_SIZE;   // 1152 pixels
-    static constexpr int ATLAS_HEIGHT = VERTICAL_LEVELS * CELL_SIZE; // 256 pixels
+    static constexpr int CELL_SIZE = 256;             // Pixels per cell (increased from 128)
+    static constexpr int ATLAS_WIDTH = CELLS_PER_ROW * CELL_SIZE;   // 2304 pixels
+    static constexpr int ATLAS_HEIGHT = VERTICAL_LEVELS * CELL_SIZE; // 512 pixels
 };
 
 // A single tree archetype's impostor data
@@ -31,6 +31,7 @@ struct TreeImpostorArchetype {
     std::string name;           // e.g., "oak_large", "pine_medium"
     std::string treeType;       // e.g., "oak", "pine"
     float boundingSphereRadius; // For billboard sizing
+    float centerHeight;         // Height of tree center above base (for billboard offset)
 
     // Atlas textures (owned by TreeImpostorAtlas)
     VkImageView albedoAlphaView = VK_NULL_HANDLE;
@@ -44,7 +45,7 @@ struct TreeImpostorArchetype {
 struct TreeLODSettings {
     // Distance thresholds
     float fullDetailDistance = 50.0f;      // Full geometry below this
-    float impostorDistance = 150.0f;       // Pure impostor above this
+    float impostorDistance = 5000.0f;      // Impostors visible up to this distance
 
     // Hysteresis (prevents flickering at LOD boundaries)
     float hysteresis = 5.0f;               // Dead zone for LOD transitions
@@ -132,10 +133,12 @@ private:
         const Mesh& branchMesh,
         const std::vector<LeafInstanceGPU>& leafInstances,
         float boundingRadius,
-        VkImageView barkAlbedo,
-        VkImageView barkNormal,
-        VkImageView leafAlbedo,
-        VkDescriptorSet captureDescSet);
+        float centerHeight,
+        VkDescriptorSet branchDescSet,
+        VkDescriptorSet leafDescSet);
+
+    bool createLeafCapturePipeline();
+    bool createLeafQuadMesh();
 
     VkDevice device_ = VK_NULL_HANDLE;
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
@@ -152,7 +155,16 @@ private:
     ManagedPipeline branchCapturePipeline_;
     ManagedPipeline leafCapturePipeline_;
     ManagedPipelineLayout capturePipelineLayout_;
+    ManagedPipelineLayout leafCapturePipelineLayout_;
     ManagedDescriptorSetLayout captureDescriptorSetLayout_;
+    ManagedDescriptorSetLayout leafCaptureDescriptorSetLayout_;
+
+    // Leaf quad mesh for capture
+    VkBuffer leafQuadVertexBuffer_ = VK_NULL_HANDLE;
+    VmaAllocation leafQuadVertexAllocation_ = VK_NULL_HANDLE;
+    VkBuffer leafQuadIndexBuffer_ = VK_NULL_HANDLE;
+    VmaAllocation leafQuadIndexAllocation_ = VK_NULL_HANDLE;
+    uint32_t leafQuadIndexCount_ = 0;
 
     // Per-archetype atlas textures
     struct AtlasTextures {

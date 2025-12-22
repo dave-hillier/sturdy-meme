@@ -42,8 +42,8 @@ void GuiTreeTab::render(Renderer& renderer) {
 
             ImGui::Spacing();
             ImGui::Text("Distance Thresholds:");
-            ImGui::SliderFloat("Full Detail Dist", &settings.fullDetailDistance, 0.0f, 200.0f, "%.1f");
-            ImGui::SliderFloat("Impostor Dist", &settings.impostorDistance, 0.0f, 500.0f, "%.1f");
+            ImGui::SliderFloat("Full Detail Dist", &settings.fullDetailDistance, 0.0f, 500.0f, "%.1f");
+            ImGui::SliderFloat("Impostor Dist", &settings.impostorDistance, 0.0f, 10000.0f, "%.0f");
             ImGui::SliderFloat("Hysteresis", &settings.hysteresis, 0.0f, 20.0f, "%.1f");
 
             ImGui::Spacing();
