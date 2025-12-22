@@ -41,12 +41,15 @@ void main() {
     float scale = instanceScale;
     float rotation = instanceRotation;
 
-    // Compute view direction to tree (horizontal only for angle selection)
-    vec3 toTree = treePos - push.cameraPos.xyz;
-    vec2 toTreeHorizontal = normalize(toTree.xz);
+    // Compute view direction FROM tree TO camera (horizontal only for angle selection)
+    // This must match the capture convention where azimuth=0 means camera on +Z axis
+    vec3 toCamera = push.cameraPos.xyz - treePos;
+    vec2 toCameraHorizontal = normalize(toCamera.xz);
 
-    // Compute horizontal angle (0-360 degrees, clockwise from +Z)
-    float hAngle = atan(toTreeHorizontal.x, toTreeHorizontal.y);  // atan2(x, z)
+    // Compute horizontal angle (0-360 degrees)
+    // atan(x, z) gives angle where +Z is 0°, +X is 90°
+    // Negate so that moving counterclockwise around tree decreases cell index
+    float hAngle = -atan(toCameraHorizontal.x, toCameraHorizontal.y);
     hAngle = degrees(hAngle);
     if (hAngle < 0.0) hAngle += 360.0;
 
@@ -56,9 +59,9 @@ void main() {
     // Select horizontal cell index (0-7)
     int hIndex = int(mod(round(hAngle / ANGLE_STEP), float(HORIZONTAL_ANGLES)));
 
-    // Compute elevation angle
-    float dist = length(toTree);
-    float elevation = degrees(asin(clamp(-toTree.y / dist, -1.0, 1.0)));
+    // Compute elevation angle (how much camera is above tree)
+    float dist = length(toCamera);
+    float elevation = degrees(asin(clamp(toCamera.y / dist, -1.0, 1.0)));
 
     // Debug elevation override (lodParams.w >= -90 means override is enabled)
     if (push.lodParams.w >= -90.0) {
@@ -123,7 +126,8 @@ void main() {
         billboardCenter = treePos + vec3(0.0, vSize, 0.0);
     } else {
         // Normal billboard: face camera but stay upright
-        forward = normalize(vec3(toTree.x, 0.0, toTree.z));
+        // Forward points toward camera (opposite of toCamera horizontal direction)
+        forward = -normalize(vec3(toCamera.x, 0.0, toCamera.z));
         up = vec3(0.0, 1.0, 0.0);
         right = cross(up, forward);
 

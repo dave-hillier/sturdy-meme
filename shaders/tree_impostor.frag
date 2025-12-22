@@ -25,9 +25,21 @@ layout(binding = BINDING_TREE_IMPOSTOR_SHADOW_MAP) uniform sampler2DArrayShadow 
 
 layout(push_constant) uniform PushConstants {
     vec4 cameraPos;
-    vec4 lodParams;     // x = blend factor, y = brightness, z = normal strength
-    vec4 atlasParams;   // x = archetype index, y = bounding radius
+    vec4 lodParams;     // x = blend factor, y = brightness, z = normal strength, w = debug elevation
+    vec4 atlasParams;   // x = hSize, y = vSize, z = baseOffset, w = debugShowCellIndex
 } push;
+
+// Debug colors for 8 horizontal angles (rainbow-ish)
+const vec3 debugColors[8] = vec3[8](
+    vec3(1.0, 0.0, 0.0),   // 0: Red (0°, +Z)
+    vec3(1.0, 0.5, 0.0),   // 1: Orange (45°)
+    vec3(1.0, 1.0, 0.0),   // 2: Yellow (90°, +X)
+    vec3(0.0, 1.0, 0.0),   // 3: Green (135°)
+    vec3(0.0, 1.0, 1.0),   // 4: Cyan (180°, -Z)
+    vec3(0.0, 0.0, 1.0),   // 5: Blue (225°)
+    vec3(0.5, 0.0, 1.0),   // 6: Purple (270°, -X)
+    vec3(1.0, 0.0, 1.0)    // 7: Magenta (315°)
+);
 
 // Octahedral normal decoding
 vec3 decodeOctahedral(vec2 e) {
@@ -118,6 +130,26 @@ void main() {
 
     vec3 color = ambient * albedo;
     color += (diffuse + specular) * sunLight * NdotL * shadow;
+
+    // Debug: show cell index as color
+    if (push.atlasParams.w > 0.5) {
+        // Get horizontal cell index (0-7) from fragCellIndex
+        // Row 0: cells 0-7 are horizontal, cell 8 is top-down
+        // Row 1: cells 9-16 are elevated horizontal
+        int hIndex;
+        if (fragCellIndex == 8) {
+            // Top-down view - show as white
+            color = vec3(1.0);
+        } else if (fragCellIndex < 8) {
+            // Row 0 horizon view
+            hIndex = fragCellIndex;
+            color = debugColors[hIndex];
+        } else {
+            // Row 1 elevated view - same color but darker
+            hIndex = fragCellIndex - 9;
+            color = debugColors[hIndex] * 0.7;
+        }
+    }
 
     outColor = vec4(color, 1.0);
 }

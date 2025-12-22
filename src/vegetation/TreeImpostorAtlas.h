@@ -64,6 +64,7 @@ struct TreeLODSettings {
     // Debug settings
     bool enableDebugElevation = false;     // Override elevation angle for testing
     float debugElevation = 0.0f;           // Debug elevation angle in degrees (-90 to 90)
+    bool debugShowCellIndex = false;       // Color-code impostors by cell index
 };
 
 class TreeImpostorAtlas {

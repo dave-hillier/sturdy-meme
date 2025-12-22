@@ -90,6 +90,25 @@ void GuiTreeTab::render(Renderer& renderer) {
                 }
             }
 
+            ImGui::Checkbox("Show Cell Index Colors", &settings.debugShowCellIndex);
+            if (settings.debugShowCellIndex) {
+                ImGui::TextWrapped("Colors show which atlas cell is used:");
+                ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "Red=0 (+Z)");
+                ImGui::SameLine();
+                ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "Orange=45");
+                ImGui::SameLine();
+                ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "Yellow=90 (+X)");
+                ImGui::SameLine();
+                ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "Green=135");
+                ImGui::TextColored(ImVec4(0.0f, 1.0f, 1.0f, 1.0f), "Cyan=180 (-Z)");
+                ImGui::SameLine();
+                ImGui::TextColored(ImVec4(0.0f, 0.0f, 1.0f, 1.0f), "Blue=225");
+                ImGui::SameLine();
+                ImGui::TextColored(ImVec4(0.5f, 0.0f, 1.0f, 1.0f), "Purple=270 (-X)");
+                ImGui::SameLine();
+                ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), "Magenta=315");
+            }
+
             // Atlas preview
             auto* atlas = treeLOD->getImpostorAtlas();
             if (atlas && atlas->getArchetypeCount() > 0) {

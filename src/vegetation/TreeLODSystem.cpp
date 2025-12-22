@@ -835,7 +835,7 @@ void TreeLODSystem::renderImpostors(VkCommandBuffer cmd, uint32_t frameIndex,
 
     if (impostorAtlas_->getArchetypeCount() > 0) {
         const auto* archetype = impostorAtlas_->getArchetype(0u);
-        // atlasParams: x=hSize (horizontal half-size), y=vSize (vertical half-size), z=baseOffset, w=unused
+        // atlasParams: x=hSize (horizontal half-size), y=vSize (vertical half-size), z=baseOffset, w=debugShowCellIndex
         // hSize = boundingSphereRadius * 1.1, vSize = halfHeight * 1.1 (matches capture projection)
         float hSize = archetype ? archetype->boundingSphereRadius * 1.1f : 10.0f;
         float vSize = archetype ? archetype->treeHeight * 0.5f * 1.1f : 10.0f;
@@ -844,7 +844,7 @@ void TreeLODSystem::renderImpostors(VkCommandBuffer cmd, uint32_t frameIndex,
             hSize,
             vSize,
             baseOffset,
-            0.0f
+            settings.debugShowCellIndex ? 1.0f : 0.0f
         );
     }
 
@@ -935,7 +935,7 @@ void TreeLODSystem::renderImpostorShadows(VkCommandBuffer cmd, uint32_t frameInd
 
     if (impostorAtlas_->getArchetypeCount() > 0) {
         const auto* archetype = impostorAtlas_->getArchetype(0u);
-        // atlasParams: x=hSize (horizontal half-size), y=vSize (vertical half-size), z=baseOffset, w=unused
+        // atlasParams: x=hSize (horizontal half-size), y=vSize (vertical half-size), z=baseOffset, w=debugShowCellIndex
         float hSize = archetype ? archetype->boundingSphereRadius * 1.1f : 10.0f;
         float vSize = archetype ? archetype->treeHeight * 0.5f * 1.1f : 10.0f;
         float baseOffset = archetype ? archetype->baseOffset : 0.0f;
@@ -943,7 +943,7 @@ void TreeLODSystem::renderImpostorShadows(VkCommandBuffer cmd, uint32_t frameInd
             hSize,
             vSize,
             baseOffset,
-            0.0f
+            settings.debugShowCellIndex ? 1.0f : 0.0f
         );
     }
     pushConstants.cascadeIndex = cascadeIndex;
