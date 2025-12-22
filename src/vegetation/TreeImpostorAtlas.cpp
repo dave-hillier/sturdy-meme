@@ -1056,22 +1056,23 @@ void TreeImpostorAtlas::renderToCell(
     float vSize = halfHeight * 1.1f;      // Vertical extent with small margin
 
     glm::mat4 proj;
-    if (elevation < 45.0f) {
-        // For horizon and low-angle views: place tree base at bottom of cell
+    if (elevation < 80.0f) {
+        // For horizon and elevated views: place tree base at bottom of cell
         // In camera space, baseY is at (baseY - centerHeight) relative to look target
         float baseInCamSpace = baseY - centerHeight;
         float yBottom = baseInCamSpace;
         float yTop = yBottom + 2.0f * vSize;
         proj = glm::ortho(-hSize, hSize, yBottom, yTop, 0.1f, camDist * 2.0f);
     } else {
-        // For elevated and top-down views: use symmetric projection
-        // Use max of horizontal and vertical for both axes since we're looking at an angle
+        // For top-down views: use symmetric projection (no clear "bottom")
+        // Use max of horizontal and vertical for both axes
         float maxSize = glm::max(hSize, vSize);
         proj = glm::ortho(-maxSize, maxSize, -maxSize, maxSize, 0.1f, camDist * 2.0f);
     }
 
-    // Vulkan clip space correction
+    // Vulkan clip space correction - for asymmetric projections, must flip both Y scale and Y translation
     proj[1][1] *= -1;
+    proj[3][1] *= -1;
 
     glm::mat4 viewProj = proj * view;
 
