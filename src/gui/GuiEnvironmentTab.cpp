@@ -175,6 +175,15 @@ void GuiEnvironmentTab::render(Renderer& renderer, EnvironmentTabState& state) {
     ImGui::Text("ATMOSPHERIC SCATTERING");
     ImGui::PopStyleColor();
 
+    // Sky exposure - controls overall sky brightness
+    float skyExposure = renderer.getSkyExposure();
+    if (ImGui::SliderFloat("Sky Exposure", &skyExposure, 1.0f, 20.0f, "%.1f")) {
+        renderer.setSkyExposure(skyExposure);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Sky brightness multiplier (1 = dim, 5 = default, 20 = very bright)");
+    }
+
     AtmosphereParams atmosParams = renderer.getAtmosphereParams();
     bool atmosChanged = false;
 

@@ -56,6 +56,7 @@ public:
         bool useParaboloidClouds = true;
         float cloudCoverage = 0.5f;
         float cloudDensity = 0.3f;
+        float skyExposure = 5.0f;
     };
 
     // Systems references for building - set once and reused

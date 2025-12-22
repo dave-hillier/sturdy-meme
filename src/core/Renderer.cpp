@@ -797,6 +797,7 @@ void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera& camera) 
     mainConfig.useParaboloidClouds = useParaboloidClouds;
     mainConfig.cloudCoverage = cloudCoverage;
     mainConfig.cloudDensity = cloudDensity;
+    mainConfig.skyExposure = skyExposure;
     UniformBufferObject ubo = systems_->uboBuilder().buildUniformBufferData(camera, lighting, currentTimeOfDay, mainConfig);
 
     UBOBuilder::SnowConfig snowConfig{};
@@ -1790,6 +1791,15 @@ void Renderer::setCloudDensity(float density) {
     cloudDensity = glm::clamp(density, 0.0f, 1.0f);
     systems_->cloudShadow().setCloudDensity(cloudDensity);
     systems_->atmosphereLUT().setCloudDensity(cloudDensity);
+}
+
+// Sky exposure control
+void Renderer::setSkyExposure(float exposure) {
+    skyExposure = glm::clamp(exposure, 1.0f, 20.0f);
+}
+
+float Renderer::getSkyExposure() const {
+    return skyExposure;
 }
 
 // Cloud shadow control

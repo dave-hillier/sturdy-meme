@@ -702,8 +702,8 @@ ScatteringResult integrateAtmosphere(vec3 origin, vec3 dir, int sampleCount) {
     // Apply solar irradiance to produce physically-correct sky brightness
     // The base scattering coefficients produce HDR values that need exposure adjustment
     // for display. A factor of ~5 brings the sky to typical daytime brightness levels.
-    const float SKY_EXPOSURE = 5.0;
-    inscatter *= SOLAR_IRRADIANCE * SKY_EXPOSURE;
+    // skyExposure can be adjusted via UI (default 5.0, range 1-20)
+    inscatter *= SOLAR_IRRADIANCE * ubo.skyExposure;
 
     return ScatteringResult(inscatter, transmittance);
 }
@@ -1089,8 +1089,9 @@ vec3 renderAtmosphere(vec3 dir) {
 
     // Compute horizon/below-horizon color for blending
     // Use sky-view LUT sampled at horizon level for consistent atmosphere response
+    // Apply sky exposure multiplier for consistency with main sky sampling
     vec3 horizonDir = normalize(vec3(normDir.x, 0.001, normDir.z));
-    vec3 horizonLUTColor = sampleSkyViewLUT(horizonDir);
+    vec3 horizonLUTColor = sampleSkyViewLUT(horizonDir) * ubo.skyExposure;
 
     // Sample transmittance LUT for horizon direction
     vec3 horizonOrigin = vec3(0.0, PLANET_RADIUS + 0.001, 0.0);
@@ -1132,7 +1133,8 @@ vec3 renderAtmosphere(vec3 dir) {
 
     // Use sky-view LUT for fast atmospheric scattering lookup (Phase 4.1.5)
     // The LUT is precomputed per-frame with current sun direction and responds to UI parameter changes
-    vec3 skyLUTColor = sampleSkyViewLUT(normDir);
+    // Apply sky exposure multiplier here (default 5.0, adjustable via UI)
+    vec3 skyLUTColor = sampleSkyViewLUT(normDir) * ubo.skyExposure;
 
     // Sample transmittance LUT for viewer-to-sky transmittance
     // This replaces the expensive integrateAtmosphere() call - LUTs are already computed with correct params

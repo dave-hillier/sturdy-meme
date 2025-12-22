@@ -159,6 +159,12 @@ UniformBufferObject UBOBuilder::buildUniformBufferData(
     ubo.moonEarthshine = systems_.timeSystem->getMoonEarthshine();
     ubo.moonPad = 0.0f;
 
+    // Sky rendering parameters for sky.frag
+    ubo.skyExposure = config.skyExposure;
+    ubo.skyPad1 = 0.0f;
+    ubo.skyPad2 = 0.0f;
+    ubo.skyPad3 = 0.0f;
+
     return ubo;
 }
 

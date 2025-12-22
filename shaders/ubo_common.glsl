@@ -62,6 +62,10 @@ layout(set = 0, binding = UBO_BINDING) uniform UniformBufferObject {
     float moonDiscIntensity;       // Visual disc intensity in sky (0-50, default 20)
     float moonEarthshine;          // Earthshine on dark side (0-0.2, default 0.02)
     float moonPad;                 // Padding for alignment
+
+    // Sky rendering parameters (from UI controls) - used by sky.frag
+    float skyExposure;             // Sky brightness multiplier (1-20, default 5.0)
+    float skyPad1, skyPad2, skyPad3; // Padding for alignment
 } ubo;
 
 #endif // UBO_COMMON_GLSL

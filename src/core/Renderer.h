@@ -158,6 +158,10 @@ public:
     void setCloudDensity(float density);
     float getCloudDensity() const { return cloudDensity; }
 
+    // Sky exposure (brightness multiplier for atmospheric scattering)
+    void setSkyExposure(float exposure);
+    float getSkyExposure() const;
+
     // Cloud shadow control
     void setCloudShadowEnabled(bool enabled);
     bool isCloudShadowEnabled() const;
@@ -492,6 +496,9 @@ private:
     // Cloud parameters (synced to UBO, cloud shadows, and cloud map LUT)
     float cloudCoverage = 0.5f;            // 0-1 cloud coverage amount
     float cloudDensity = 0.3f;             // Base density multiplier
+
+    // Sky parameters (synced to UBO)
+    float skyExposure = 5.0f;              // Sky brightness multiplier (1-20)
     bool framebufferResized = false;       // true = window resized, need to recreate swapchain
     bool windowSuspended = false;          // true = window minimized/hidden (macOS screen lock)
 
