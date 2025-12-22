@@ -107,7 +107,7 @@ struct TerrainConfig {
 
     // Meshlet settings
     bool useMeshlets = true;          // Enable meshlet-based rendering for higher detail
-    int meshletSubdivisionLevel = 4;  // LEB subdivision level per meshlet (4 = 16 triangles)
+    int meshletSubdivisionLevel = 5;  // LEB subdivision level per meshlet (4 = 16 triangles)
 
     // Curvature-based LOD
     float flatnessScale = 2.0f;       // How much flat areas reduce subdivision (0=disabled, 2=3x threshold for flat)
