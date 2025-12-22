@@ -35,6 +35,9 @@ struct ImpostorInstanceGPU {
     float rotation;
     uint32_t archetypeIndex;
     float blendFactor;
+    float hSize;        // Horizontal half-size (from archetype, pre-scaled)
+    float vSize;        // Vertical half-size (from archetype, pre-scaled)
+    float baseOffset;   // Base offset (from archetype, pre-scaled)
     float _padding;
 };
 

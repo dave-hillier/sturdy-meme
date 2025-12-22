@@ -17,6 +17,9 @@ layout(location = 3) in float instanceScale;   // Tree scale
 layout(location = 4) in float instanceRotation; // Y-axis rotation
 layout(location = 5) in uint instanceArchetype; // Archetype index for atlas lookup
 layout(location = 6) in float instanceBlendFactor; // LOD blend factor (0=full geo, 1=impostor)
+layout(location = 7) in float instanceHSize;   // Horizontal half-size (pre-scaled)
+layout(location = 8) in float instanceVSize;   // Vertical half-size (pre-scaled)
+layout(location = 9) in float instanceBaseOffset; // Base offset (pre-scaled)
 
 layout(push_constant) uniform PushConstants {
     vec4 cameraPos;         // xyz = camera world position
@@ -102,9 +105,10 @@ void main() {
 
     // Billboard orientation depends on view angle
     vec3 forward, up, right;
-    float hSize = push.atlasParams.x * scale;
-    float vSize = push.atlasParams.y * scale;
-    float baseOffset = push.atlasParams.z * scale;
+    // Use per-instance dimensions (already pre-scaled in C++)
+    float hSize = instanceHSize;
+    float vSize = instanceVSize;
+    float baseOffset = instanceBaseOffset;
     vec3 localPos;
     vec3 billboardCenter;
 

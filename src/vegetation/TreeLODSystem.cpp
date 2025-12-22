@@ -314,7 +314,7 @@ bool TreeLODSystem::createPipeline() {
     bindingDescriptions[1].stride = sizeof(ImpostorInstanceGPU);
     bindingDescriptions[1].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
 
-    std::array<VkVertexInputAttributeDescription, 7> attributeDescriptions{};
+    std::array<VkVertexInputAttributeDescription, 10> attributeDescriptions{};
     // Per-vertex attributes
     attributeDescriptions[0] = {0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0};  // position
     attributeDescriptions[1] = {1, 0, VK_FORMAT_R32G32_SFLOAT, sizeof(glm::vec3)};  // texcoord
@@ -325,12 +325,15 @@ bool TreeLODSystem::createPipeline() {
     attributeDescriptions[4] = {4, 1, VK_FORMAT_R32_SFLOAT, offsetof(ImpostorInstanceGPU, rotation)};
     attributeDescriptions[5] = {5, 1, VK_FORMAT_R32_UINT, offsetof(ImpostorInstanceGPU, archetypeIndex)};
     attributeDescriptions[6] = {6, 1, VK_FORMAT_R32_SFLOAT, offsetof(ImpostorInstanceGPU, blendFactor)};
+    attributeDescriptions[7] = {7, 1, VK_FORMAT_R32_SFLOAT, offsetof(ImpostorInstanceGPU, hSize)};
+    attributeDescriptions[8] = {8, 1, VK_FORMAT_R32_SFLOAT, offsetof(ImpostorInstanceGPU, vSize)};
+    attributeDescriptions[9] = {9, 1, VK_FORMAT_R32_SFLOAT, offsetof(ImpostorInstanceGPU, baseOffset)};
 
     VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
     vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     vertexInputInfo.vertexBindingDescriptionCount = static_cast<uint32_t>(bindingDescriptions.size());
     vertexInputInfo.pVertexBindingDescriptions = bindingDescriptions.data();
-    vertexInputInfo.vertexAttributeDescriptionCount = 7;  // All 7 attributes used
+    vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
     vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
 
     VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
@@ -496,13 +499,16 @@ bool TreeLODSystem::createShadowPipeline() {
     bindingDescriptions[1].stride = sizeof(ImpostorInstanceGPU);
     bindingDescriptions[1].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
 
-    std::array<VkVertexInputAttributeDescription, 6> attributeDescriptions{};
+    std::array<VkVertexInputAttributeDescription, 9> attributeDescriptions{};
     attributeDescriptions[0] = {0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0};
     attributeDescriptions[1] = {1, 0, VK_FORMAT_R32G32_SFLOAT, sizeof(glm::vec3)};
     attributeDescriptions[2] = {2, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(ImpostorInstanceGPU, position)};
     attributeDescriptions[3] = {3, 1, VK_FORMAT_R32_SFLOAT, offsetof(ImpostorInstanceGPU, scale)};
     attributeDescriptions[4] = {4, 1, VK_FORMAT_R32_SFLOAT, offsetof(ImpostorInstanceGPU, rotation)};
     attributeDescriptions[5] = {5, 1, VK_FORMAT_R32_UINT, offsetof(ImpostorInstanceGPU, archetypeIndex)};
+    attributeDescriptions[6] = {6, 1, VK_FORMAT_R32_SFLOAT, offsetof(ImpostorInstanceGPU, hSize)};
+    attributeDescriptions[7] = {7, 1, VK_FORMAT_R32_SFLOAT, offsetof(ImpostorInstanceGPU, vSize)};
+    attributeDescriptions[8] = {8, 1, VK_FORMAT_R32_SFLOAT, offsetof(ImpostorInstanceGPU, baseOffset)};
 
     VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
     vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
@@ -669,12 +675,17 @@ void TreeLODSystem::update(float deltaTime, const glm::vec3& cameraPos, const Tr
 
         // Collect visible impostors
         if (settings.enableImpostors && state.blendFactor > 0.0f && state.archetypeIndex < impostorAtlas_->getArchetypeCount()) {
+            const auto* archetype = impostorAtlas_->getArchetype(state.archetypeIndex);
             ImpostorInstanceGPU instance;
             instance.position = tree.position;
             instance.scale = tree.scale;
             instance.rotation = tree.rotation;
             instance.archetypeIndex = state.archetypeIndex;
             instance.blendFactor = state.blendFactor;
+            // Store archetype dimensions scaled by tree scale
+            instance.hSize = (archetype ? archetype->boundingSphereRadius * 1.1f : 10.0f) * tree.scale;
+            instance.vSize = (archetype ? archetype->treeHeight * 0.5f * 1.1f : 10.0f) * tree.scale;
+            instance.baseOffset = (archetype ? archetype->baseOffset : 0.0f) * tree.scale;
             visibleImpostors_.push_back(instance);
         }
     }

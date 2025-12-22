@@ -16,6 +16,9 @@ layout(location = 2) in vec3 instancePos;      // World position of tree
 layout(location = 3) in float instanceScale;   // Tree scale
 layout(location = 4) in float instanceRotation; // Y-axis rotation
 layout(location = 5) in uint instanceArchetype; // Archetype index for atlas lookup
+layout(location = 6) in float instanceHSize;   // Horizontal half-size (pre-scaled)
+layout(location = 7) in float instanceVSize;   // Vertical half-size (pre-scaled)
+layout(location = 8) in float instanceBaseOffset; // Base offset (pre-scaled)
 
 layout(push_constant) uniform PushConstants {
     vec4 cameraPos;         // xyz = camera world position (for billboard facing)
@@ -102,11 +105,10 @@ void main() {
         right = cross(up, forward);
     }
 
-    // Position billboard vertex
-    // atlasParams: x=hSize (horizontal), y=vSize (vertical), z=baseOffset
-    float hSize = push.atlasParams.x * scale;
-    float vSize = push.atlasParams.y * scale;
-    float baseOffset = push.atlasParams.z * scale;
+    // Position billboard vertex - use per-instance dimensions (already pre-scaled)
+    float hSize = instanceHSize;
+    float vSize = instanceVSize;
+    float baseOffset = instanceBaseOffset;
 
     vec3 localPos = right * inPosition.x * hSize * 2.0 +
                     up * inPosition.y * vSize * 2.0;
