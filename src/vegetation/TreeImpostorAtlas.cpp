@@ -781,6 +781,12 @@ int32_t TreeImpostorAtlas::generateArchetype(
     glm::vec3 treeExtent = maxBounds - minBounds;
     float maxRadius = glm::max(treeExtent.x, glm::max(treeExtent.y, treeExtent.z)) * 0.5f;
     float centerHeight = treeCenter.y;  // Height of tree center above origin
+    float orthoSize = maxRadius * 1.1f;
+
+    SDL_Log("TreeImpostorAtlas: Capture bounds Y=[%.2f, %.2f], center=%.2f, radius=%.2f, orthoSize=%.2f",
+            minBounds.y, maxBounds.y, centerHeight, maxRadius, orthoSize);
+    SDL_Log("TreeImpostorAtlas: Projection yBottom=%.2f, yTop=%.2f",
+            minBounds.y - centerHeight, minBounds.y - centerHeight + 2.0f * orthoSize);
 
     // Upload leaf instances to buffer if we have any
     VkDescriptorSet leafCaptureDescSet = VK_NULL_HANDLE;
