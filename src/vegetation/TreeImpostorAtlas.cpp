@@ -1046,7 +1046,9 @@ void TreeImpostorAtlas::renderToCell(
         centerHeight + camDist * sin(elevationRad),
         camDist * cos(elevationRad) * cos(azimuthRad)
     );
-    glm::vec3 up(0.0f, 1.0f, 0.0f);
+    // For top-down view (elevation ~90), up vector (0,1,0) is parallel to view direction
+    // which makes lookAt degenerate. Use a horizontal up vector instead.
+    glm::vec3 up = (elevation > 80.0f) ? glm::vec3(0.0f, 0.0f, -1.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
 
     glm::mat4 view = glm::lookAt(camPos, target, up);
 
@@ -1058,10 +1060,12 @@ void TreeImpostorAtlas::renderToCell(
     glm::mat4 proj;
     if (elevation < 80.0f) {
         // For horizon and elevated views: place tree base at bottom of cell
-        // In camera space, baseY is at (baseY - centerHeight) relative to look target
-        float baseInCamSpace = baseY - centerHeight;
-        float yBottom = baseInCamSpace;
-        float yTop = yBottom + 2.0f * vSize;
+        // In view space, Y coordinate depends on viewing elevation:
+        // view.y = (worldY - centerHeight) * cos(elevation)
+        float elevCos = cos(elevationRad);
+        float baseInViewSpace = (baseY - centerHeight) * elevCos;
+        float yBottom = baseInViewSpace;
+        float yTop = yBottom + 2.0f * vSize * elevCos;  // Also scale vertical extent
         proj = glm::ortho(-hSize, hSize, yBottom, yTop, 0.1f, camDist * 2.0f);
     } else {
         // For top-down views: use symmetric projection (no clear "bottom")

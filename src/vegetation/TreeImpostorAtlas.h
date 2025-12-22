@@ -60,6 +60,10 @@ struct TreeLODSettings {
     bool enableImpostors = true;
     float impostorBrightness = 1.0f;       // Brightness adjustment for impostors
     float normalStrength = 1.0f;           // How much normals affect lighting
+
+    // Debug settings
+    bool enableDebugElevation = false;     // Override elevation angle for testing
+    float debugElevation = 0.0f;           // Debug elevation angle in degrees (-90 to 90)
 };
 
 class TreeImpostorAtlas {

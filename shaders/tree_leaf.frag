@@ -15,6 +15,7 @@ layout(binding = BINDING_TREE_GFX_LEAF_ALBEDO) uniform sampler2D leafAlbedo;
 layout(push_constant) uniform PushConstants {
     mat4 model;
     float time;
+    float lodBlendFactor;  // 0=full geometry, 1=full impostor
     vec3 leafTint;
     float alphaTest;
 } push;
@@ -26,6 +27,14 @@ layout(location = 3) in float fragLeafSize;
 
 layout(location = 0) out vec4 outColor;
 
+// 4x4 Bayer dither matrix for LOD transition
+const float bayerMatrix[16] = float[16](
+    0.0/16.0,  8.0/16.0,  2.0/16.0, 10.0/16.0,
+    12.0/16.0, 4.0/16.0, 14.0/16.0,  6.0/16.0,
+    3.0/16.0, 11.0/16.0,  1.0/16.0,  9.0/16.0,
+    15.0/16.0, 7.0/16.0, 13.0/16.0,  5.0/16.0
+);
+
 void main() {
     // Sample leaf texture
     vec4 albedo = texture(leafAlbedo, fragTexCoord);
@@ -33,6 +42,16 @@ void main() {
     // Alpha test for leaf transparency
     if (albedo.a < push.alphaTest) {
         discard;
+    }
+
+    // LOD dithered fade-out - discard more pixels as blend factor increases
+    if (push.lodBlendFactor > 0.01) {
+        ivec2 pixelCoord = ivec2(gl_FragCoord.xy);
+        int ditherIndex = (pixelCoord.x % 4) + (pixelCoord.y % 4) * 4;
+        float ditherValue = bayerMatrix[ditherIndex];
+        if (push.lodBlendFactor > ditherValue) {
+            discard;
+        }
     }
 
     vec3 baseColor = albedo.rgb * push.leafTint;

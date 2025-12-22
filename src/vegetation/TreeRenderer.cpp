@@ -1051,6 +1051,7 @@ void TreeRenderer::render(VkCommandBuffer cmd, uint32_t frameIndex, float time,
         TreeBranchPushConstants push{};
         push.model = renderable.transform;
         push.time = time;
+        push.lodBlendFactor = lodSystem ? lodSystem->getBlendFactor(branchTreeIndex) : 0.0f;
         push.barkTint = glm::vec3(1.0f);
         push.roughnessScale = renderable.roughness;
 
@@ -1135,6 +1136,7 @@ void TreeRenderer::render(VkCommandBuffer cmd, uint32_t frameIndex, float time,
             TreeLeafPushConstants push{};
             push.model = renderable.transform;
             push.time = time;
+            push.lodBlendFactor = lodSystem ? lodSystem->getBlendFactor(leafTreeIndex) : 0.0f;
             push.leafTint = glm::vec3(1.0f);
             push.alphaTest = renderable.alphaTestThreshold > 0.0f ? renderable.alphaTestThreshold : 0.5f;
             push.firstInstance = static_cast<int32_t>(perTreeOutputOffsets_[treeIdx]);
@@ -1188,6 +1190,7 @@ void TreeRenderer::render(VkCommandBuffer cmd, uint32_t frameIndex, float time,
             TreeLeafPushConstants push{};
             push.model = renderable.transform;
             push.time = time;
+            push.lodBlendFactor = lodSystem ? lodSystem->getBlendFactor(leafTreeIndex) : 0.0f;
             push.leafTint = glm::vec3(1.0f);
             push.alphaTest = renderable.alphaTestThreshold > 0.0f ? renderable.alphaTestThreshold : 0.5f;
             push.firstInstance = static_cast<int32_t>(drawInfo.firstInstance);

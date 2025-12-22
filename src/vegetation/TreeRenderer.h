@@ -19,7 +19,8 @@
 struct TreeBranchPushConstants {
     glm::mat4 model;      // offset 0, size 64
     float time;           // offset 64, size 4
-    float _pad1[3];       // offset 68, size 12 (padding to align vec3 to 16 bytes)
+    float lodBlendFactor; // offset 68, size 4 (0=full geometry, 1=full impostor)
+    float _pad1[2];       // offset 72, size 8 (padding to align vec3 to 16 bytes)
     glm::vec3 barkTint;   // offset 80, size 12
     float roughnessScale; // offset 92, size 4
 };
@@ -27,7 +28,8 @@ struct TreeBranchPushConstants {
 struct TreeLeafPushConstants {
     glm::mat4 model;     // offset 0, size 64
     float time;          // offset 64, size 4
-    float _pad1[3];      // offset 68, size 12 (padding to align vec3 to 16 bytes)
+    float lodBlendFactor;// offset 68, size 4 (0=full geometry, 1=full impostor)
+    float _pad1[2];      // offset 72, size 8 (padding to align vec3 to 16 bytes)
     glm::vec3 leafTint;  // offset 80, size 12
     float alphaTest;     // offset 92, size 4
     int32_t firstInstance; // offset 96, size 4 (offset into leaf SSBO for this tree)

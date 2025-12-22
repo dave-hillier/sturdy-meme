@@ -37,12 +37,14 @@ void main() {
     float scale = instanceScale;
     float rotation = instanceRotation;
 
-    // Compute view direction to tree (from camera for billboard facing)
-    vec3 toTree = treePos - push.cameraPos.xyz;
-    vec2 toTreeHorizontal = normalize(toTree.xz);
+    // For shadows, orient billboard to face the sun (not the camera)
+    // This gives a full shadow profile instead of a thin edge shadow
+    vec3 sunDir = normalize(ubo.sunDirection.xyz);  // Points toward sun
+    vec3 toSun = sunDir;  // Direction from tree to sun
+    vec2 toSunHorizontal = normalize(toSun.xz);
 
-    // Compute horizontal angle (0-360 degrees, clockwise from +Z)
-    float hAngle = atan(toTreeHorizontal.x, toTreeHorizontal.y);
+    // Compute horizontal angle from sun direction (0-360 degrees, clockwise from +Z)
+    float hAngle = atan(toSunHorizontal.x, toSunHorizontal.y);
     hAngle = degrees(hAngle);
     if (hAngle < 0.0) hAngle += 360.0;
 
@@ -52,15 +54,14 @@ void main() {
     // Select horizontal cell index (0-7)
     int hIndex = int(mod(round(hAngle / ANGLE_STEP), float(HORIZONTAL_ANGLES)));
 
-    // Compute elevation angle
-    float dist = length(toTree);
-    float elevation = degrees(asin(clamp(-toTree.y / dist, -1.0, 1.0)));
+    // Compute sun elevation angle (how high the sun is above horizon)
+    float sunElevation = degrees(asin(clamp(sunDir.y, -1.0, 1.0)));
 
-    // Select vertical level
+    // Select vertical level based on sun elevation
     int cellIndex;
-    if (elevation > 67.5) {
-        cellIndex = 8;  // Top-down view
-    } else if (elevation > 22.5) {
+    if (sunElevation > 67.5) {
+        cellIndex = 8;  // Top-down view (sun directly above)
+    } else if (sunElevation > 22.5) {
         cellIndex = CELLS_PER_ROW + hIndex;  // Elevated view
     } else {
         cellIndex = hIndex;  // Horizon view
@@ -73,8 +74,8 @@ void main() {
     // Transform quad UV to atlas UV
     vec2 cellUV = inTexCoord;
 
-    // For top-down view, rotate UV by horizontal angle
-    if (elevation > 67.5) {
+    // For top-down view (sun directly overhead), rotate UV by horizontal angle
+    if (sunElevation > 67.5) {
         float rotAngle = radians(-hAngle + degrees(rotation));
         vec2 centered = cellUV - 0.5;
         cellUV = vec2(
@@ -86,14 +87,14 @@ void main() {
     vec2 atlasUV = (vec2(cellX, cellY) + cellUV) / vec2(float(CELLS_PER_ROW), 2.0);
     fragTexCoord = atlasUV;
 
-    // Billboard orientation: face camera but stay upright
-    vec3 forward = normalize(vec3(toTree.x, 0.0, toTree.z));
+    // Billboard orientation: face toward sun to cast full shadow
+    vec3 forward = normalize(vec3(toSun.x, 0.0, toSun.z));
     vec3 up = vec3(0.0, 1.0, 0.0);
     vec3 right = cross(up, forward);
 
-    // For elevated views, tilt the billboard
-    if (elevation > 22.5) {
-        float tiltAngle = radians(min(elevation - 22.5, 45.0));
+    // For elevated sun angles, tilt the billboard to face the sun
+    if (sunElevation > 22.5) {
+        float tiltAngle = radians(min(sunElevation - 22.5, 45.0));
         vec3 tiltedUp = cos(tiltAngle) * up - sin(tiltAngle) * forward;
         vec3 tiltedForward = sin(tiltAngle) * up + cos(tiltAngle) * forward;
         forward = tiltedForward;

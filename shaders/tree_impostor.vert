@@ -16,6 +16,7 @@ layout(location = 2) in vec3 instancePos;      // World position of tree
 layout(location = 3) in float instanceScale;   // Tree scale
 layout(location = 4) in float instanceRotation; // Y-axis rotation
 layout(location = 5) in uint instanceArchetype; // Archetype index for atlas lookup
+layout(location = 6) in float instanceBlendFactor; // LOD blend factor (0=full geo, 1=impostor)
 
 layout(push_constant) uniform PushConstants {
     vec4 cameraPos;         // xyz = camera world position
@@ -59,6 +60,11 @@ void main() {
     float dist = length(toTree);
     float elevation = degrees(asin(clamp(-toTree.y / dist, -1.0, 1.0)));
 
+    // Debug elevation override (lodParams.w >= -90 means override is enabled)
+    if (push.lodParams.w >= -90.0) {
+        elevation = push.lodParams.w;
+    }
+
     // Select vertical level
     // Level 0: horizon (-22.5 to 22.5 degrees)
     // Level 1: elevated (22.5 to 67.5 degrees)
@@ -86,58 +92,67 @@ void main() {
     int cellX = cellIndex % CELLS_PER_ROW;
     int cellY = cellIndex / CELLS_PER_ROW;
 
-    // Transform quad UV to atlas UV
+    // Transform quad UV to atlas UV (no rotation needed - billboard orientation handles it)
     vec2 cellUV = inTexCoord;
-
-    // For top-down view, rotate UV by horizontal angle
-    if (elevation > 67.5) {
-        float rotAngle = radians(-hAngle + degrees(rotation));
-        vec2 centered = cellUV - 0.5;
-        cellUV = vec2(
-            centered.x * cos(rotAngle) - centered.y * sin(rotAngle),
-            centered.x * sin(rotAngle) + centered.y * cos(rotAngle)
-        ) + 0.5;
-    }
-
     vec2 atlasUV = (vec2(cellX, cellY) + cellUV) / vec2(float(CELLS_PER_ROW), 2.0);
     fragTexCoord = atlasUV;
 
-    // Billboard orientation: face camera but stay upright
-    vec3 forward = normalize(vec3(toTree.x, 0.0, toTree.z));
-    vec3 up = vec3(0.0, 1.0, 0.0);
-    vec3 right = cross(up, forward);
+    // Billboard orientation depends on view angle
+    vec3 forward, up, right;
+    float hSize = push.atlasParams.x * scale;
+    float vSize = push.atlasParams.y * scale;
+    float baseOffset = push.atlasParams.z * scale;
+    vec3 localPos;
+    vec3 billboardCenter;
 
-    // For elevated views, tilt the billboard
-    if (elevation > 22.5) {
-        float tiltAngle = radians(min(elevation - 22.5, 45.0));
-        vec3 tiltedUp = cos(tiltAngle) * up - sin(tiltAngle) * forward;
-        vec3 tiltedForward = sin(tiltAngle) * up + cos(tiltAngle) * forward;
-        forward = tiltedForward;
-        up = tiltedUp;
+    if (elevation > 67.5) {
+        // Top-down view: billboard lies flat, fixed orientation based on tree rotation only
+        forward = vec3(0.0, 1.0, 0.0);  // Billboard faces up
+        // Fixed orientation based on tree rotation (doesn't change with camera angle)
+        right = vec3(cos(rotation), 0.0, -sin(rotation));
+        up = vec3(sin(rotation), 0.0, cos(rotation));
+
+        // For top-down, use same size in both directions (it's a square from above)
+        float maxSize = max(hSize, vSize);
+        // Billboard is centered on the tree at canopy height
+        // inPosition.x is -0.5 to 0.5, inPosition.y is 0 to 1
+        // Remap Y to also be -0.5 to 0.5 for centered quad
+        localPos = right * inPosition.x * maxSize * 2.0 +
+                   up * (inPosition.y - 0.5) * maxSize * 2.0;
+        // Center the billboard at tree center height (half the tree height)
+        billboardCenter = treePos + vec3(0.0, vSize, 0.0);
+    } else {
+        // Normal billboard: face camera but stay upright
+        forward = normalize(vec3(toTree.x, 0.0, toTree.z));
+        up = vec3(0.0, 1.0, 0.0);
         right = cross(up, forward);
+
+        // For elevated views (row 1, captured at 45 degrees), tilt billboard 45 degrees
+        // Tilt top of billboard away from camera so face tilts up toward camera
+        if (elevation > 22.5) {
+            float tiltAngle = radians(45.0);  // Fixed 45 degrees to match capture angle
+            vec3 tiltedUp = cos(tiltAngle) * up + sin(tiltAngle) * forward;
+            vec3 tiltedForward = -sin(tiltAngle) * up + cos(tiltAngle) * forward;
+            forward = tiltedForward;
+            up = tiltedUp;
+            right = cross(up, forward);
+        }
+
+        // inPosition.x is -0.5 to 0.5, inPosition.y is 0 to 1
+        // Billboard width = 2*hSize, height = 2*vSize
+        // Base of billboard (y=0) should be at tree base
+        localPos = right * inPosition.x * hSize * 2.0 +
+                   up * inPosition.y * vSize * 2.0;
+        billboardCenter = treePos + vec3(0.0, baseOffset, 0.0);
     }
 
     // Build impostor-to-world rotation matrix for normal transformation
     fragImpostorToWorld = mat3(right, up, forward);
 
-    // Position billboard vertex
-    // atlasParams: x=hSize (horizontal), y=vSize (vertical), z=baseOffset
-    // Sizes match capture projection with 1.1 margin
-    float hSize = push.atlasParams.x * scale;
-    float vSize = push.atlasParams.y * scale;
-    float baseOffset = push.atlasParams.z * scale;
-
-    // inPosition.x is -0.5 to 0.5, inPosition.y is 0 to 1
-    // Billboard width = 2*hSize, height = 2*vSize
-    // Base of billboard (y=0) should be at tree base
-    vec3 localPos = right * inPosition.x * hSize * 2.0 +
-                    up * inPosition.y * vSize * 2.0;
-
-    // Position billboard with base at tree's base position
-    vec3 worldPos = treePos + vec3(0.0, baseOffset, 0.0) + localPos;
+    vec3 worldPos = billboardCenter + localPos;
     fragWorldPos = worldPos;
 
     gl_Position = ubo.proj * ubo.view * vec4(worldPos, 1.0);
 
-    fragBlendFactor = push.lodParams.x;
+    fragBlendFactor = instanceBlendFactor;
 }

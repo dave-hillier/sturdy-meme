@@ -9,6 +9,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <array>
 #include <algorithm>
+#include <limits>
 
 std::unique_ptr<TreeLODSystem> TreeLODSystem::create(const InitInfo& info) {
     auto system = std::unique_ptr<TreeLODSystem>(new TreeLODSystem());
@@ -323,12 +324,13 @@ bool TreeLODSystem::createPipeline() {
     attributeDescriptions[3] = {3, 1, VK_FORMAT_R32_SFLOAT, offsetof(ImpostorInstanceGPU, scale)};
     attributeDescriptions[4] = {4, 1, VK_FORMAT_R32_SFLOAT, offsetof(ImpostorInstanceGPU, rotation)};
     attributeDescriptions[5] = {5, 1, VK_FORMAT_R32_UINT, offsetof(ImpostorInstanceGPU, archetypeIndex)};
+    attributeDescriptions[6] = {6, 1, VK_FORMAT_R32_SFLOAT, offsetof(ImpostorInstanceGPU, blendFactor)};
 
     VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
     vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     vertexInputInfo.vertexBindingDescriptionCount = static_cast<uint32_t>(bindingDescriptions.size());
     vertexInputInfo.pVertexBindingDescriptions = bindingDescriptions.data();
-    vertexInputInfo.vertexAttributeDescriptionCount = 6;  // Only 6 attributes used
+    vertexInputInfo.vertexAttributeDescriptionCount = 7;  // All 7 attributes used
     vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
 
     VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
@@ -679,6 +681,24 @@ void TreeLODSystem::update(float deltaTime, const glm::vec3& cameraPos, const Tr
 
     lastCameraPos_ = cameraPos;
 
+    // Update debug info - find nearest tree and calculate elevation
+    debugInfo_.cameraPos = cameraPos;
+    debugInfo_.nearestTreeDistance = std::numeric_limits<float>::max();
+    for (const auto& tree : instances) {
+        float dist = glm::distance(cameraPos, tree.position);
+        if (dist < debugInfo_.nearestTreeDistance) {
+            debugInfo_.nearestTreeDistance = dist;
+            debugInfo_.nearestTreePos = tree.position;
+
+            // Calculate elevation angle (same as shader)
+            glm::vec3 toTree = tree.position - cameraPos;
+            float toTreeDist = glm::length(toTree);
+            if (toTreeDist > 0.001f) {
+                debugInfo_.calculatedElevation = glm::degrees(std::asin(glm::clamp(-toTree.y / toTreeDist, -1.0f, 1.0f)));
+            }
+        }
+    }
+
     // Update instance buffer
     if (!visibleImpostors_.empty()) {
         updateInstanceBuffer(visibleImpostors_);
@@ -805,11 +825,12 @@ void TreeLODSystem::renderImpostors(VkCommandBuffer cmd, uint32_t frameIndex,
     } pushConstants;
 
     pushConstants.cameraPos = glm::vec4(lastCameraPos_, 1.0f);
+    // lodParams: x=blend, y=brightness, z=normalStrength, w=debugElevation (negative=disabled)
     pushConstants.lodParams = glm::vec4(
         1.0f,  // blend factor (handled per-instance)
         settings.impostorBrightness,
         settings.normalStrength,
-        0.0f
+        settings.enableDebugElevation ? settings.debugElevation : -999.0f  // -999 = disabled
     );
 
     if (impostorAtlas_->getArchetypeCount() > 0) {
@@ -904,11 +925,12 @@ void TreeLODSystem::renderImpostorShadows(VkCommandBuffer cmd, uint32_t frameInd
     } pushConstants;
 
     pushConstants.cameraPos = glm::vec4(lastCameraPos_, 1.0f);
+    // lodParams: x=blend, y=brightness, z=normalStrength, w=debugElevation (negative=disabled)
     pushConstants.lodParams = glm::vec4(
         1.0f,
         settings.impostorBrightness,
         settings.normalStrength,
-        0.0f
+        settings.enableDebugElevation ? settings.debugElevation : -999.0f  // -999 = disabled
     );
 
     if (impostorAtlas_->getArchetypeCount() > 0) {

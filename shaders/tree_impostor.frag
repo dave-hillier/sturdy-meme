@@ -40,6 +40,14 @@ vec3 decodeOctahedral(vec2 e) {
     return normalize(n);
 }
 
+// 4x4 Bayer dither matrix for LOD transition
+const float bayerMatrix[16] = float[16](
+    0.0/16.0,  8.0/16.0,  2.0/16.0, 10.0/16.0,
+    12.0/16.0, 4.0/16.0, 14.0/16.0,  6.0/16.0,
+    3.0/16.0, 11.0/16.0,  1.0/16.0,  9.0/16.0,
+    15.0/16.0, 7.0/16.0, 13.0/16.0,  5.0/16.0
+);
+
 void main() {
     // Sample impostor atlas
     vec4 albedoAlpha = texture(albedoAlphaAtlas, fragTexCoord);
@@ -48,6 +56,18 @@ void main() {
     // Alpha test
     if (albedoAlpha.a < 0.5) {
         discard;
+    }
+
+    // LOD dithered transition - discard pixels based on blend factor
+    // When blend factor is low (geometry visible), discard more impostor pixels
+    // When blend factor is high (impostor visible), keep more impostor pixels
+    if (fragBlendFactor < 0.99) {
+        ivec2 pixelCoord = ivec2(gl_FragCoord.xy);
+        int ditherIndex = (pixelCoord.x % 4) + (pixelCoord.y % 4) * 4;
+        float ditherValue = bayerMatrix[ditherIndex];
+        if (fragBlendFactor < ditherValue) {
+            discard;
+        }
     }
 
     // Decode normal from octahedral encoding

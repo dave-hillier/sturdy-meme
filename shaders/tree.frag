@@ -18,6 +18,7 @@ layout(binding = BINDING_TREE_GFX_BARK_AO) uniform sampler2D barkAO;
 layout(push_constant) uniform PushConstants {
     mat4 model;
     float time;
+    float lodBlendFactor;  // 0=full geometry, 1=full impostor
     vec3 barkTint;
     float roughnessScale;
 } push;
@@ -43,7 +44,28 @@ vec3 perturbNormal(vec3 N, vec4 tangent, vec2 texcoord) {
     return normalize(TBN * normalSample);
 }
 
+// 4x4 Bayer dither matrix for LOD transition
+const float bayerMatrix[16] = float[16](
+    0.0/16.0,  8.0/16.0,  2.0/16.0, 10.0/16.0,
+    12.0/16.0, 4.0/16.0, 14.0/16.0,  6.0/16.0,
+    3.0/16.0, 11.0/16.0,  1.0/16.0,  9.0/16.0,
+    15.0/16.0, 7.0/16.0, 13.0/16.0,  5.0/16.0
+);
+
 void main() {
+    // LOD dithered fade-out - discard more pixels as blend factor increases
+    // (inverse of impostor fade-in)
+    if (push.lodBlendFactor > 0.01) {
+        ivec2 pixelCoord = ivec2(gl_FragCoord.xy);
+        int ditherIndex = (pixelCoord.x % 4) + (pixelCoord.y % 4) * 4;
+        float ditherValue = bayerMatrix[ditherIndex];
+        // Discard if blend factor exceeds dither threshold
+        // At blendFactor=0.5, about half the pixels are discarded
+        if (push.lodBlendFactor > ditherValue) {
+            discard;
+        }
+    }
+
     // Sample bark textures
     vec4 albedo = texture(barkAlbedo, fragTexCoord);
     vec3 baseColor = albedo.rgb * push.barkTint;

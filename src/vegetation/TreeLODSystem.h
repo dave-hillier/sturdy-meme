@@ -113,6 +113,15 @@ public:
 
     VkDevice getDevice() const { return device_; }
 
+    // Debug info
+    struct DebugInfo {
+        glm::vec3 cameraPos{0.0f};
+        glm::vec3 nearestTreePos{0.0f};
+        float nearestTreeDistance = 0.0f;
+        float calculatedElevation = 0.0f;
+    };
+    const DebugInfo& getDebugInfo() const { return debugInfo_; }
+
 private:
     TreeLODSystem() = default;
     bool initInternal(const InitInfo& info);
@@ -174,4 +183,7 @@ private:
     // Current frame data
     std::vector<ImpostorInstanceGPU> visibleImpostors_;
     glm::vec3 lastCameraPos_{0.0f};
+
+    // Debug info
+    DebugInfo debugInfo_;
 };
