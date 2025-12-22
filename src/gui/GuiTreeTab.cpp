@@ -2,6 +2,9 @@
 #include "Renderer.h"
 #include "vegetation/TreeSystem.h"
 #include "vegetation/TreeOptions.h"
+#include "vegetation/TreeLODSystem.h"
+#include "vegetation/TreeImpostorAtlas.h"
+#include "core/RendererSystems.h"
 
 #include <imgui.h>
 
@@ -28,6 +31,60 @@ void GuiTreeTab::render(Renderer& renderer) {
 
     ImGui::Spacing();
     ImGui::Separator();
+
+    // LOD Settings Section
+    auto* treeLOD = renderer.getSystems().treeLOD();
+    if (treeLOD) {
+        if (ImGui::CollapsingHeader("LOD Settings", ImGuiTreeNodeFlags_DefaultOpen)) {
+            auto& settings = treeLOD->getLODSettings();
+
+            ImGui::Checkbox("Enable Impostors", &settings.enableImpostors);
+
+            ImGui::Spacing();
+            ImGui::Text("Distance Thresholds:");
+            ImGui::SliderFloat("Full Detail Dist", &settings.fullDetailDistance, 10.0f, 200.0f, "%.1f");
+            ImGui::SliderFloat("Impostor Dist", &settings.impostorDistance, 50.0f, 500.0f, "%.1f");
+            ImGui::SliderFloat("Hysteresis", &settings.hysteresis, 0.0f, 20.0f, "%.1f");
+
+            ImGui::Spacing();
+            ImGui::Text("Blending:");
+            ImGui::SliderFloat("Blend Range", &settings.blendRange, 0.0f, 50.0f, "%.1f");
+            ImGui::SliderFloat("Blend Exponent", &settings.blendExponent, 0.1f, 3.0f, "%.2f");
+
+            ImGui::Spacing();
+            ImGui::Text("Impostor Appearance:");
+            ImGui::SliderFloat("Brightness", &settings.impostorBrightness, 0.5f, 2.0f, "%.2f");
+            ImGui::SliderFloat("Normal Strength", &settings.normalStrength, 0.0f, 1.0f, "%.2f");
+
+            // Atlas preview
+            auto* atlas = treeLOD->getImpostorAtlas();
+            if (atlas && atlas->getArchetypeCount() > 0) {
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Text("Impostor Atlas Preview:");
+                ImGui::Text("Archetypes: %zu", atlas->getArchetypeCount());
+
+                // Show archetype info
+                for (size_t i = 0; i < atlas->getArchetypeCount(); i++) {
+                    const auto* archetype = atlas->getArchetype(static_cast<uint32_t>(i));
+                    if (archetype) {
+                        ImGui::BulletText("%s (radius: %.2f)", archetype->name.c_str(), archetype->boundingSphereRadius);
+                    }
+                }
+
+                // Atlas texture preview (if ImGui texture binding is available)
+                VkDescriptorSet previewSet = atlas->getPreviewDescriptorSet(0);
+                if (previewSet != VK_NULL_HANDLE) {
+                    ImGui::Image(reinterpret_cast<ImTextureID>(previewSet),
+                                ImVec2(ImpostorAtlasConfig::ATLAS_WIDTH * 0.25f,
+                                       ImpostorAtlasConfig::ATLAS_HEIGHT * 0.25f));
+                }
+            }
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+    }
 
     // Presets
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.9f, 0.8f, 0.5f, 1.0f));

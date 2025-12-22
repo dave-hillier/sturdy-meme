@@ -286,6 +286,10 @@ public:
     TreeSystem* getTreeSystem();
     const TreeSystem* getTreeSystem() const;
 
+    // Access to all subsystems
+    RendererSystems& getSystems() { return *systems_; }
+    const RendererSystems& getSystems() const { return *systems_; }
+
     // Player position for grass interaction (xyz = position, w = capsule radius)
     void setPlayerPosition(const glm::vec3& position, float radius);
     void setPlayerState(const glm::vec3& position, const glm::vec3& velocity, float radius);

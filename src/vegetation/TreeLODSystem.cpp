@@ -1,0 +1,686 @@
+#include "TreeLODSystem.h"
+#include "TreeSystem.h"
+#include "TreeOptions.h"
+#include "Mesh.h"
+#include "ShaderLoader.h"
+#include "shaders/bindings.h"
+
+#include <SDL3/SDL.h>
+#include <glm/gtc/matrix_transform.hpp>
+#include <array>
+#include <algorithm>
+
+std::unique_ptr<TreeLODSystem> TreeLODSystem::create(const InitInfo& info) {
+    auto system = std::unique_ptr<TreeLODSystem>(new TreeLODSystem());
+    if (!system->initInternal(info)) {
+        return nullptr;
+    }
+    return system;
+}
+
+TreeLODSystem::~TreeLODSystem() {
+    if (device_ == VK_NULL_HANDLE) return;
+
+    vkDeviceWaitIdle(device_);
+
+    if (billboardVertexBuffer_ != VK_NULL_HANDLE) {
+        vmaDestroyBuffer(allocator_, billboardVertexBuffer_, billboardVertexAllocation_);
+    }
+    if (billboardIndexBuffer_ != VK_NULL_HANDLE) {
+        vmaDestroyBuffer(allocator_, billboardIndexBuffer_, billboardIndexAllocation_);
+    }
+    if (instanceBuffer_ != VK_NULL_HANDLE) {
+        vmaDestroyBuffer(allocator_, instanceBuffer_, instanceAllocation_);
+    }
+}
+
+bool TreeLODSystem::initInternal(const InitInfo& info) {
+    device_ = info.device;
+    physicalDevice_ = info.physicalDevice;
+    allocator_ = info.allocator;
+    hdrRenderPass_ = info.hdrRenderPass;
+    commandPool_ = info.commandPool;
+    graphicsQueue_ = info.graphicsQueue;
+    descriptorPool_ = info.descriptorPool;
+    resourcePath_ = info.resourcePath;
+    extent_ = info.extent;
+    maxFramesInFlight_ = info.maxFramesInFlight;
+
+    // Create impostor atlas
+    TreeImpostorAtlas::InitInfo atlasInfo{};
+    atlasInfo.device = device_;
+    atlasInfo.physicalDevice = physicalDevice_;
+    atlasInfo.allocator = allocator_;
+    atlasInfo.commandPool = commandPool_;
+    atlasInfo.graphicsQueue = graphicsQueue_;
+    atlasInfo.descriptorPool = info.descriptorPool;
+    atlasInfo.resourcePath = resourcePath_;
+
+    impostorAtlas_ = TreeImpostorAtlas::create(atlasInfo);
+    if (!impostorAtlas_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLODSystem: Failed to create impostor atlas");
+        return false;
+    }
+
+    if (!createBillboardMesh()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLODSystem: Failed to create billboard mesh");
+        return false;
+    }
+
+    if (!createDescriptorSetLayout()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLODSystem: Failed to create descriptor set layout");
+        return false;
+    }
+
+    if (!createPipeline()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLODSystem: Failed to create pipeline");
+        return false;
+    }
+
+    if (!allocateDescriptorSets()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLODSystem: Failed to allocate descriptor sets");
+        return false;
+    }
+
+    // Create initial instance buffer
+    if (!createInstanceBuffer(256)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLODSystem: Failed to create instance buffer");
+        return false;
+    }
+
+    SDL_Log("TreeLODSystem: Initialized successfully");
+    return true;
+}
+
+bool TreeLODSystem::createBillboardMesh() {
+    // Simple quad for billboard rendering
+    // Centered horizontally, bottom at origin
+    struct BillboardVertex {
+        glm::vec3 position;
+        glm::vec2 texCoord;
+    };
+
+    std::array<BillboardVertex, 4> vertices = {{
+        {{-0.5f, 0.0f, 0.0f}, {0.0f, 1.0f}},  // Bottom-left
+        {{ 0.5f, 0.0f, 0.0f}, {1.0f, 1.0f}},  // Bottom-right
+        {{ 0.5f, 1.0f, 0.0f}, {1.0f, 0.0f}},  // Top-right
+        {{-0.5f, 1.0f, 0.0f}, {0.0f, 0.0f}},  // Top-left
+    }};
+
+    std::array<uint32_t, 6> indices = {0, 1, 2, 2, 3, 0};
+    billboardIndexCount_ = 6;
+
+    // Create vertex buffer
+    VkDeviceSize vertexSize = sizeof(vertices);
+    VkBufferCreateInfo vertexBufferInfo{};
+    vertexBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    vertexBufferInfo.size = vertexSize;
+    vertexBufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+
+    if (vmaCreateBuffer(allocator_, &vertexBufferInfo, &allocInfo,
+                        &billboardVertexBuffer_, &billboardVertexAllocation_, nullptr) != VK_SUCCESS) {
+        return false;
+    }
+
+    // Create index buffer
+    VkDeviceSize indexSize = sizeof(indices);
+    VkBufferCreateInfo indexBufferInfo{};
+    indexBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    indexBufferInfo.size = indexSize;
+    indexBufferInfo.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+
+    if (vmaCreateBuffer(allocator_, &indexBufferInfo, &allocInfo,
+                        &billboardIndexBuffer_, &billboardIndexAllocation_, nullptr) != VK_SUCCESS) {
+        return false;
+    }
+
+    // Upload data via staging buffer
+    VkBuffer stagingBuffer;
+    VmaAllocation stagingAllocation;
+    VkDeviceSize stagingSize = vertexSize + indexSize;
+
+    VkBufferCreateInfo stagingInfo{};
+    stagingInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    stagingInfo.size = stagingSize;
+    stagingInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+
+    VmaAllocationCreateInfo stagingAllocInfo{};
+    stagingAllocInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
+
+    if (vmaCreateBuffer(allocator_, &stagingInfo, &stagingAllocInfo,
+                        &stagingBuffer, &stagingAllocation, nullptr) != VK_SUCCESS) {
+        return false;
+    }
+
+    void* data;
+    vmaMapMemory(allocator_, stagingAllocation, &data);
+    memcpy(data, vertices.data(), vertexSize);
+    memcpy(static_cast<char*>(data) + vertexSize, indices.data(), indexSize);
+    vmaUnmapMemory(allocator_, stagingAllocation);
+
+    // Copy to GPU buffers
+    VkCommandBufferAllocateInfo cmdAllocInfo{};
+    cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cmdAllocInfo.commandPool = commandPool_;
+    cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cmdAllocInfo.commandBufferCount = 1;
+
+    VkCommandBuffer cmd;
+    vkAllocateCommandBuffers(device_, &cmdAllocInfo, &cmd);
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cmd, &beginInfo);
+
+    VkBufferCopy vertexCopy{};
+    vertexCopy.size = vertexSize;
+    vkCmdCopyBuffer(cmd, stagingBuffer, billboardVertexBuffer_, 1, &vertexCopy);
+
+    VkBufferCopy indexCopy{};
+    indexCopy.srcOffset = vertexSize;
+    indexCopy.size = indexSize;
+    vkCmdCopyBuffer(cmd, stagingBuffer, billboardIndexBuffer_, 1, &indexCopy);
+
+    vkEndCommandBuffer(cmd);
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &cmd;
+
+    vkQueueSubmit(graphicsQueue_, 1, &submitInfo, VK_NULL_HANDLE);
+    vkQueueWaitIdle(graphicsQueue_);
+
+    vkFreeCommandBuffers(device_, commandPool_, 1, &cmd);
+    vmaDestroyBuffer(allocator_, stagingBuffer, stagingAllocation);
+
+    return true;
+}
+
+bool TreeLODSystem::createDescriptorSetLayout() {
+    std::array<VkDescriptorSetLayoutBinding, 4> bindings{};
+
+    // UBO
+    bindings[0].binding = BINDING_TREE_IMPOSTOR_UBO;
+    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    bindings[0].descriptorCount = 1;
+    bindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    // Albedo atlas
+    bindings[1].binding = BINDING_TREE_IMPOSTOR_ALBEDO;
+    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[1].descriptorCount = 1;
+    bindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    // Normal atlas
+    bindings[2].binding = BINDING_TREE_IMPOSTOR_NORMAL;
+    bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[2].descriptorCount = 1;
+    bindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    // Shadow map
+    bindings[3].binding = BINDING_TREE_IMPOSTOR_SHADOW_MAP;
+    bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[3].descriptorCount = 1;
+    bindings[3].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    VkDescriptorSetLayoutCreateInfo layoutInfo{};
+    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
+    layoutInfo.pBindings = bindings.data();
+
+    VkDescriptorSetLayout layout;
+    if (vkCreateDescriptorSetLayout(device_, &layoutInfo, nullptr, &layout) != VK_SUCCESS) {
+        return false;
+    }
+    impostorDescriptorSetLayout_ = ManagedDescriptorSetLayout(makeUniqueDescriptorSetLayout(device_, layout));
+
+    return true;
+}
+
+bool TreeLODSystem::createPipeline() {
+    // Pipeline layout with push constants
+    VkPushConstantRange pushConstant{};
+    pushConstant.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    pushConstant.offset = 0;
+    pushConstant.size = sizeof(glm::vec4) * 3;  // cameraPos, lodParams, atlasParams
+
+    VkDescriptorSetLayout layouts[] = {impostorDescriptorSetLayout_.get()};
+
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipelineLayoutInfo.setLayoutCount = 1;
+    pipelineLayoutInfo.pSetLayouts = layouts;
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.pPushConstantRanges = &pushConstant;
+
+    VkPipelineLayout pipelineLayout;
+    if (vkCreatePipelineLayout(device_, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
+        return false;
+    }
+    impostorPipelineLayout_ = ManagedPipelineLayout(makeUniquePipelineLayout(device_, pipelineLayout));
+
+    // Load shaders
+    std::string shaderPath = resourcePath_ + "/shaders/";
+    auto vertModule = ShaderLoader::loadShaderModule(device_, shaderPath + "tree_impostor.vert.spv");
+    auto fragModule = ShaderLoader::loadShaderModule(device_, shaderPath + "tree_impostor.frag.spv");
+
+    if (!vertModule || !fragModule) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLODSystem: Failed to load impostor shaders");
+        return false;
+    }
+
+    std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages{};
+    shaderStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    shaderStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+    shaderStages[0].module = *vertModule;
+    shaderStages[0].pName = "main";
+    shaderStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    shaderStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    shaderStages[1].module = *fragModule;
+    shaderStages[1].pName = "main";
+
+    // Vertex input: billboard vertex + instance data
+    std::array<VkVertexInputBindingDescription, 2> bindingDescriptions{};
+    bindingDescriptions[0].binding = 0;
+    bindingDescriptions[0].stride = sizeof(glm::vec3) + sizeof(glm::vec2);  // position + texcoord
+    bindingDescriptions[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+    bindingDescriptions[1].binding = 1;
+    bindingDescriptions[1].stride = sizeof(ImpostorInstanceGPU);
+    bindingDescriptions[1].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
+
+    std::array<VkVertexInputAttributeDescription, 7> attributeDescriptions{};
+    // Per-vertex attributes
+    attributeDescriptions[0] = {0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0};  // position
+    attributeDescriptions[1] = {1, 0, VK_FORMAT_R32G32_SFLOAT, sizeof(glm::vec3)};  // texcoord
+
+    // Per-instance attributes
+    attributeDescriptions[2] = {2, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(ImpostorInstanceGPU, position)};
+    attributeDescriptions[3] = {3, 1, VK_FORMAT_R32_SFLOAT, offsetof(ImpostorInstanceGPU, scale)};
+    attributeDescriptions[4] = {4, 1, VK_FORMAT_R32_SFLOAT, offsetof(ImpostorInstanceGPU, rotation)};
+    attributeDescriptions[5] = {5, 1, VK_FORMAT_R32_UINT, offsetof(ImpostorInstanceGPU, archetypeIndex)};
+
+    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
+    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    vertexInputInfo.vertexBindingDescriptionCount = static_cast<uint32_t>(bindingDescriptions.size());
+    vertexInputInfo.pVertexBindingDescriptions = bindingDescriptions.data();
+    vertexInputInfo.vertexAttributeDescriptionCount = 6;  // Only 6 attributes used
+    vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
+
+    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+    VkPipelineViewportStateCreateInfo viewportState{};
+    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewportState.viewportCount = 1;
+    viewportState.scissorCount = 1;
+
+    VkPipelineRasterizationStateCreateInfo rasterizer{};
+    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+    rasterizer.lineWidth = 1.0f;
+    rasterizer.cullMode = VK_CULL_MODE_NONE;  // Billboard faces camera
+    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+
+    VkPipelineMultisampleStateCreateInfo multisampling{};
+    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    VkPipelineDepthStencilStateCreateInfo depthStencil{};
+    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    depthStencil.depthTestEnable = VK_TRUE;
+    depthStencil.depthWriteEnable = VK_TRUE;
+    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+
+    VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+    colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                                          VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    colorBlendAttachment.blendEnable = VK_FALSE;
+
+    VkPipelineColorBlendStateCreateInfo colorBlending{};
+    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    colorBlending.attachmentCount = 1;
+    colorBlending.pAttachments = &colorBlendAttachment;
+
+    std::array<VkDynamicState, 2> dynamicStates = {
+        VK_DYNAMIC_STATE_VIEWPORT,
+        VK_DYNAMIC_STATE_SCISSOR
+    };
+
+    VkPipelineDynamicStateCreateInfo dynamicState{};
+    dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
+    dynamicState.pDynamicStates = dynamicStates.data();
+
+    VkGraphicsPipelineCreateInfo pipelineInfo{};
+    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pipelineInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
+    pipelineInfo.pStages = shaderStages.data();
+    pipelineInfo.pVertexInputState = &vertexInputInfo;
+    pipelineInfo.pInputAssemblyState = &inputAssembly;
+    pipelineInfo.pViewportState = &viewportState;
+    pipelineInfo.pRasterizationState = &rasterizer;
+    pipelineInfo.pMultisampleState = &multisampling;
+    pipelineInfo.pDepthStencilState = &depthStencil;
+    pipelineInfo.pColorBlendState = &colorBlending;
+    pipelineInfo.pDynamicState = &dynamicState;
+    pipelineInfo.layout = pipelineLayout;
+    pipelineInfo.renderPass = hdrRenderPass_;
+    pipelineInfo.subpass = 0;
+
+    VkPipeline pipeline;
+    VkResult result = vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline);
+
+    vkDestroyShaderModule(device_, *vertModule, nullptr);
+    vkDestroyShaderModule(device_, *fragModule, nullptr);
+
+    if (result != VK_SUCCESS) {
+        return false;
+    }
+    impostorPipeline_ = ManagedPipeline(makeUniquePipeline(device_, pipeline));
+
+    return true;
+}
+
+bool TreeLODSystem::allocateDescriptorSets() {
+    impostorDescriptorSets_ = descriptorPool_->allocate(impostorDescriptorSetLayout_.get(), maxFramesInFlight_);
+    return !impostorDescriptorSets_.empty();
+}
+
+bool TreeLODSystem::createInstanceBuffer(size_t maxInstances) {
+    maxInstances_ = maxInstances;
+    instanceBufferSize_ = maxInstances * sizeof(ImpostorInstanceGPU);
+
+    VkBufferCreateInfo bufferInfo{};
+    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferInfo.size = instanceBufferSize_;
+    bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+
+    return vmaCreateBuffer(allocator_, &bufferInfo, &allocInfo,
+                           &instanceBuffer_, &instanceAllocation_, nullptr) == VK_SUCCESS;
+}
+
+void TreeLODSystem::update(float deltaTime, const glm::vec3& cameraPos, const TreeSystem& treeSystem) {
+    const auto& settings = getLODSettings();
+    const auto& instances = treeSystem.getTreeInstances();
+
+    // Resize LOD states if needed
+    if (lodStates_.size() != instances.size()) {
+        lodStates_.resize(instances.size());
+    }
+
+    visibleImpostors_.clear();
+
+    for (size_t i = 0; i < instances.size(); i++) {
+        const auto& tree = instances[i];
+        auto& state = lodStates_[i];
+
+        float distance = glm::distance(cameraPos, tree.position);
+        state.lastDistance = distance;
+
+        // Determine target LOD level with hysteresis
+        TreeLODState::Level newTarget = state.targetLevel;
+
+        if (state.targetLevel == TreeLODState::Level::FullDetail) {
+            // Currently at full detail, check if should switch to impostor
+            if (distance > settings.fullDetailDistance + settings.hysteresis) {
+                newTarget = TreeLODState::Level::Impostor;
+            }
+        } else {
+            // Currently at impostor, check if should switch to full detail
+            if (distance < settings.fullDetailDistance - settings.hysteresis) {
+                newTarget = TreeLODState::Level::FullDetail;
+            }
+        }
+
+        state.targetLevel = newTarget;
+
+        // Update blend factor
+        if (settings.blendRange > 0.0f) {
+            float blendStart = settings.fullDetailDistance;
+            float blendEnd = settings.fullDetailDistance + settings.blendRange;
+
+            if (distance < blendStart) {
+                state.blendFactor = 0.0f;
+            } else if (distance > blendEnd) {
+                state.blendFactor = 1.0f;
+            } else {
+                float t = (distance - blendStart) / settings.blendRange;
+                state.blendFactor = std::pow(t, settings.blendExponent);
+            }
+        } else {
+            state.blendFactor = (state.targetLevel == TreeLODState::Level::Impostor) ? 1.0f : 0.0f;
+        }
+
+        // Determine current level based on blend factor
+        if (state.blendFactor < 0.01f) {
+            state.currentLevel = TreeLODState::Level::FullDetail;
+        } else if (state.blendFactor > 0.99f) {
+            state.currentLevel = TreeLODState::Level::Impostor;
+        } else {
+            state.currentLevel = TreeLODState::Level::Blending;
+        }
+
+        // Collect visible impostors
+        if (settings.enableImpostors && state.blendFactor > 0.0f && state.archetypeIndex < impostorAtlas_->getArchetypeCount()) {
+            ImpostorInstanceGPU instance;
+            instance.position = tree.position;
+            instance.scale = tree.scale;
+            instance.rotation = tree.rotation;
+            instance.archetypeIndex = state.archetypeIndex;
+            instance.blendFactor = state.blendFactor;
+            visibleImpostors_.push_back(instance);
+        }
+    }
+
+    lastCameraPos_ = cameraPos;
+
+    // Update instance buffer
+    if (!visibleImpostors_.empty()) {
+        updateInstanceBuffer(visibleImpostors_);
+    }
+}
+
+void TreeLODSystem::updateInstanceBuffer(const std::vector<ImpostorInstanceGPU>& instances) {
+    if (instances.empty()) return;
+
+    // Resize buffer if needed
+    if (instances.size() > maxInstances_) {
+        vmaDestroyBuffer(allocator_, instanceBuffer_, instanceAllocation_);
+        createInstanceBuffer(instances.size() * 2);
+    }
+
+    // Upload instance data
+    void* data;
+    vmaMapMemory(allocator_, instanceAllocation_, &data);
+    memcpy(data, instances.data(), instances.size() * sizeof(ImpostorInstanceGPU));
+    vmaUnmapMemory(allocator_, instanceAllocation_);
+}
+
+void TreeLODSystem::updateDescriptorSets(uint32_t frameIndex, VkBuffer uniformBuffer,
+                                          VkImageView shadowMap, VkSampler shadowSampler) {
+    if (impostorAtlas_->getArchetypeCount() == 0) return;
+
+    // Use first archetype's atlas for now (could support multiple atlases)
+    VkImageView albedoView = impostorAtlas_->getAlbedoAtlasView(0);
+    VkImageView normalView = impostorAtlas_->getNormalAtlasView(0);
+    VkSampler atlasSampler = impostorAtlas_->getAtlasSampler();
+
+    if (albedoView == VK_NULL_HANDLE || normalView == VK_NULL_HANDLE) return;
+
+    std::array<VkWriteDescriptorSet, 4> writes{};
+
+    VkDescriptorBufferInfo uboInfo{};
+    uboInfo.buffer = uniformBuffer;
+    uboInfo.offset = 0;
+    uboInfo.range = VK_WHOLE_SIZE;
+
+    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[0].dstSet = impostorDescriptorSets_[frameIndex];
+    writes[0].dstBinding = BINDING_TREE_IMPOSTOR_UBO;
+    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    writes[0].descriptorCount = 1;
+    writes[0].pBufferInfo = &uboInfo;
+
+    VkDescriptorImageInfo albedoInfo{};
+    albedoInfo.sampler = atlasSampler;
+    albedoInfo.imageView = albedoView;
+    albedoInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[1].dstSet = impostorDescriptorSets_[frameIndex];
+    writes[1].dstBinding = BINDING_TREE_IMPOSTOR_ALBEDO;
+    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[1].descriptorCount = 1;
+    writes[1].pImageInfo = &albedoInfo;
+
+    VkDescriptorImageInfo normalInfo{};
+    normalInfo.sampler = atlasSampler;
+    normalInfo.imageView = normalView;
+    normalInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[2].dstSet = impostorDescriptorSets_[frameIndex];
+    writes[2].dstBinding = BINDING_TREE_IMPOSTOR_NORMAL;
+    writes[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[2].descriptorCount = 1;
+    writes[2].pImageInfo = &normalInfo;
+
+    VkDescriptorImageInfo shadowInfo{};
+    shadowInfo.sampler = shadowSampler;
+    shadowInfo.imageView = shadowMap;
+    shadowInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    writes[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[3].dstSet = impostorDescriptorSets_[frameIndex];
+    writes[3].dstBinding = BINDING_TREE_IMPOSTOR_SHADOW_MAP;
+    writes[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[3].descriptorCount = 1;
+    writes[3].pImageInfo = &shadowInfo;
+
+    vkUpdateDescriptorSets(device_, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+}
+
+void TreeLODSystem::renderImpostors(VkCommandBuffer cmd, uint32_t frameIndex,
+                                     VkBuffer uniformBuffer, VkImageView shadowMap, VkSampler shadowSampler) {
+    if (visibleImpostors_.empty() || impostorAtlas_->getArchetypeCount() == 0) return;
+
+    const auto& settings = getLODSettings();
+    if (!settings.enableImpostors) return;
+
+    // Update descriptor sets
+    updateDescriptorSets(frameIndex, uniformBuffer, shadowMap, shadowSampler);
+
+    // Bind pipeline
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, impostorPipeline_.get());
+
+    // Set viewport and scissor
+    VkViewport viewport{};
+    viewport.x = 0.0f;
+    viewport.y = 0.0f;
+    viewport.width = static_cast<float>(extent_.width);
+    viewport.height = static_cast<float>(extent_.height);
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+    VkRect2D scissor{};
+    scissor.offset = {0, 0};
+    scissor.extent = extent_;
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+    // Bind descriptor sets
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, impostorPipelineLayout_.get(),
+                           0, 1, &impostorDescriptorSets_[frameIndex], 0, nullptr);
+
+    // Push constants
+    struct {
+        glm::vec4 cameraPos;
+        glm::vec4 lodParams;
+        glm::vec4 atlasParams;
+    } pushConstants;
+
+    pushConstants.cameraPos = glm::vec4(lastCameraPos_, 1.0f);
+    pushConstants.lodParams = glm::vec4(
+        1.0f,  // blend factor (handled per-instance)
+        settings.impostorBrightness,
+        settings.normalStrength,
+        0.0f
+    );
+
+    if (impostorAtlas_->getArchetypeCount() > 0) {
+        const auto* archetype = impostorAtlas_->getArchetype(0u);
+        pushConstants.atlasParams = glm::vec4(
+            0.0f,  // archetype index
+            archetype ? archetype->boundingSphereRadius : 10.0f,
+            0.0f,
+            0.0f
+        );
+    }
+
+    vkCmdPushConstants(cmd, impostorPipelineLayout_.get(),
+                      VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                      0, sizeof(pushConstants), &pushConstants);
+
+    // Bind buffers
+    VkBuffer vertexBuffers[] = {billboardVertexBuffer_, instanceBuffer_};
+    VkDeviceSize offsets[] = {0, 0};
+    vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
+    vkCmdBindIndexBuffer(cmd, billboardIndexBuffer_, 0, VK_INDEX_TYPE_UINT32);
+
+    // Draw instanced
+    vkCmdDrawIndexed(cmd, billboardIndexCount_, static_cast<uint32_t>(visibleImpostors_.size()), 0, 0, 0);
+}
+
+const TreeLODState& TreeLODSystem::getTreeLODState(uint32_t treeIndex) const {
+    static TreeLODState defaultState;
+    if (treeIndex < lodStates_.size()) {
+        return lodStates_[treeIndex];
+    }
+    return defaultState;
+}
+
+bool TreeLODSystem::shouldRenderFullGeometry(uint32_t treeIndex) const {
+    if (treeIndex >= lodStates_.size()) return true;
+    const auto& state = lodStates_[treeIndex];
+    return state.currentLevel == TreeLODState::Level::FullDetail ||
+           state.currentLevel == TreeLODState::Level::Blending;
+}
+
+bool TreeLODSystem::shouldRenderImpostor(uint32_t treeIndex) const {
+    if (treeIndex >= lodStates_.size()) return false;
+    const auto& state = lodStates_[treeIndex];
+    return state.currentLevel == TreeLODState::Level::Impostor ||
+           state.currentLevel == TreeLODState::Level::Blending;
+}
+
+float TreeLODSystem::getBlendFactor(uint32_t treeIndex) const {
+    if (treeIndex >= lodStates_.size()) return 0.0f;
+    return lodStates_[treeIndex].blendFactor;
+}
+
+int32_t TreeLODSystem::generateImpostor(const std::string& name, const TreeOptions& options,
+                                         const Mesh& branchMesh,
+                                         const std::vector<LeafInstanceGPU>& leafInstances,
+                                         VkImageView barkAlbedo, VkImageView barkNormal,
+                                         VkImageView leafAlbedo, VkSampler sampler) {
+    return impostorAtlas_->generateArchetype(name, options, branchMesh, leafInstances,
+                                              barkAlbedo, barkNormal, leafAlbedo, sampler);
+}
+
+void TreeLODSystem::updateTreeCount(size_t count) {
+    lodStates_.resize(count);
+}
+
+void TreeLODSystem::setExtent(VkExtent2D newExtent) {
+    extent_ = newExtent;
+}
