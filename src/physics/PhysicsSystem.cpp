@@ -447,86 +447,34 @@ PhysicsBodyID PhysicsWorld::createTerrainHeightfield(const float* samples, const
 
     JPH::BodyInterface& bodyInterface = physicsSystem->GetBodyInterface();
 
-    // Jolt HeightFieldShape requires power-of-2 + 1 sample counts (e.g., 65, 129, 257, 513)
-    // Resample to the nearest valid size
-    auto isPowerOf2Plus1 = [](uint32_t n) { return n >= 3 && ((n - 1) & (n - 2)) == 0; };
+    // Convert to world-space heights and apply hole mask
+    std::vector<float> joltSamples(sampleCount * sampleCount);
 
-    // Find the best Jolt-compatible sample count
-    // For 512 input, use 513 (slightly upsample to preserve detail)
-    uint32_t joltSampleCount = sampleCount;
-    if (!isPowerOf2Plus1(sampleCount)) {
-        // Find the next power-of-2 + 1
-        uint32_t n = sampleCount - 1;
-        n |= n >> 1;
-        n |= n >> 2;
-        n |= n >> 4;
-        n |= n >> 8;
-        n |= n >> 16;
-        joltSampleCount = n + 2;  // Next power of 2 + 1
-        SDL_Log("Resampling heightfield from %u to %u (Jolt requires power-of-2 + 1)",
-                sampleCount, joltSampleCount);
-    }
+    for (uint32_t y = 0; y < sampleCount; y++) {
+        for (uint32_t x = 0; x < sampleCount; x++) {
+            uint32_t idx = y * sampleCount + x;
 
-    // Resample height data with bilinear interpolation
-    // Also convert to world-space heights and apply hole mask
-    std::vector<float> joltSamples(joltSampleCount * joltSampleCount);
-    float srcScale = static_cast<float>(sampleCount - 1) / static_cast<float>(joltSampleCount - 1);
-
-    for (uint32_t dstY = 0; dstY < joltSampleCount; dstY++) {
-        for (uint32_t dstX = 0; dstX < joltSampleCount; dstX++) {
-            // Map destination to source coordinates
-            float srcX = dstX * srcScale;
-            float srcY = dstY * srcScale;
-
-            // Bilinear interpolation
-            uint32_t x0 = static_cast<uint32_t>(srcX);
-            uint32_t y0 = static_cast<uint32_t>(srcY);
-            uint32_t x1 = std::min(x0 + 1, sampleCount - 1);
-            uint32_t y1 = std::min(y0 + 1, sampleCount - 1);
-            float tx = srcX - x0;
-            float ty = srcY - y0;
-
-            // Check if any of the 4 source samples is a hole
             bool isHole = false;
             if (holeMask) {
-                // Use nearest-neighbor for hole mask (any hole in the 4 samples = hole)
-                uint32_t nearestX = static_cast<uint32_t>(srcX + 0.5f);
-                uint32_t nearestY = static_cast<uint32_t>(srcY + 0.5f);
-                nearestX = std::min(nearestX, sampleCount - 1);
-                nearestY = std::min(nearestY, sampleCount - 1);
-                // The hole mask may be higher resolution than height samples
-                // Use the same index mapping for simplicity
-                isHole = holeMask[nearestY * sampleCount + nearestX] > 127;
+                isHole = holeMask[idx] > 127;
             }
 
             if (isHole) {
-                joltSamples[dstY * joltSampleCount + dstX] = JPH::HeightFieldShapeConstants::cNoCollisionValue;
+                joltSamples[idx] = JPH::HeightFieldShapeConstants::cNoCollisionValue;
             } else {
-                // Bilinear interpolation of height values
-                float h00 = samples[y0 * sampleCount + x0];
-                float h10 = samples[y0 * sampleCount + x1];
-                float h01 = samples[y1 * sampleCount + x0];
-                float h11 = samples[y1 * sampleCount + x1];
-
-                float h0 = h00 * (1.0f - tx) + h10 * tx;
-                float h1 = h01 * (1.0f - tx) + h11 * tx;
-                float h = h0 * (1.0f - ty) + h1 * ty;
-
-                // Convert normalized height to world space
-                joltSamples[dstY * joltSampleCount + dstX] = TerrainHeight::toWorld(h, heightScale);
+                joltSamples[idx] = TerrainHeight::toWorld(samples[idx], heightScale);
             }
         }
     }
 
-    // The scale parameter determines the XZ spacing between samples
-    // worldSize covers (joltSampleCount-1) intervals
-    float xzScale = worldSize / (joltSampleCount - 1);
+    // XZ spacing: sampleCount samples span (sampleCount-1) intervals
+    float xzScale = worldSize / (sampleCount - 1);
 
     JPH::HeightFieldShapeSettings heightFieldSettings(
         joltSamples.data(),
-        JPH::Vec3(-worldSize * 0.5f, 0.0f, -worldSize * 0.5f),  // Offset: center terrain at origin
-        JPH::Vec3(xzScale, 1.0f, xzScale),                       // Scale: XZ spacing, Y is direct
-        joltSampleCount
+        JPH::Vec3(-worldSize * 0.5f, 0.0f, -worldSize * 0.5f),
+        JPH::Vec3(xzScale, 1.0f, xzScale),
+        sampleCount
     );
 
     // Set material properties
@@ -557,8 +505,8 @@ PhysicsBodyID PhysicsWorld::createTerrainHeightfield(const float* samples, const
 
     bodyInterface.AddBody(body->GetID(), JPH::EActivation::DontActivate);
 
-    SDL_Log("Created terrain heightfield %ux%u (from %ux%u input), world size %.1f, height scale %.1f",
-            joltSampleCount, joltSampleCount, sampleCount, sampleCount, worldSize, heightScale);
+    SDL_Log("Created terrain heightfield %ux%u, world size %.1f, height scale %.1f",
+            sampleCount, sampleCount, worldSize, heightScale);
     return body->GetID().GetIndexAndSequenceNumber();
 }
 
@@ -572,59 +520,23 @@ PhysicsBodyID PhysicsWorld::createTerrainHeightfieldAtPosition(const float* samp
 
     JPH::BodyInterface& bodyInterface = physicsSystem->GetBodyInterface();
 
-    // Jolt HeightFieldShape requires power-of-2 + 1 sample counts (e.g., 65, 129, 257, 513)
-    auto isPowerOf2Plus1 = [](uint32_t n) { return n >= 3 && ((n - 1) & (n - 2)) == 0; };
-
-    uint32_t joltSampleCount = sampleCount;
-    if (!isPowerOf2Plus1(sampleCount)) {
-        uint32_t n = sampleCount - 1;
-        n |= n >> 1;
-        n |= n >> 2;
-        n |= n >> 4;
-        n |= n >> 8;
-        n |= n >> 16;
-        joltSampleCount = n + 2;
+    // Convert to world-space heights
+    std::vector<float> joltSamples(sampleCount * sampleCount);
+    for (uint32_t i = 0; i < sampleCount * sampleCount; i++) {
+        joltSamples[i] = TerrainHeight::toWorld(samples[i], heightScale);
     }
 
-    // Resample height data with bilinear interpolation
-    std::vector<float> joltSamples(joltSampleCount * joltSampleCount);
-    float srcScale = static_cast<float>(sampleCount - 1) / static_cast<float>(joltSampleCount - 1);
+    // XZ spacing
+    float xzScale = tileWorldSize / (sampleCount - 1);
 
-    for (uint32_t dstY = 0; dstY < joltSampleCount; dstY++) {
-        for (uint32_t dstX = 0; dstX < joltSampleCount; dstX++) {
-            float srcX = dstX * srcScale;
-            float srcY = dstY * srcScale;
+    // Half-texel offset to align with GPU texture sampling
+    float halfTexel = (tileWorldSize / sampleCount) * 0.5f;
 
-            uint32_t x0 = static_cast<uint32_t>(srcX);
-            uint32_t y0 = static_cast<uint32_t>(srcY);
-            uint32_t x1 = std::min(x0 + 1, sampleCount - 1);
-            uint32_t y1 = std::min(y0 + 1, sampleCount - 1);
-            float tx = srcX - x0;
-            float ty = srcY - y0;
-
-            float h00 = samples[y0 * sampleCount + x0];
-            float h10 = samples[y0 * sampleCount + x1];
-            float h01 = samples[y1 * sampleCount + x0];
-            float h11 = samples[y1 * sampleCount + x1];
-
-            float h0 = h00 * (1.0f - tx) + h10 * tx;
-            float h1 = h01 * (1.0f - tx) + h11 * tx;
-            float h = h0 * (1.0f - ty) + h1 * ty;
-
-            // Convert normalized height to world space
-            joltSamples[dstY * joltSampleCount + dstX] = TerrainHeight::toWorld(h, heightScale);
-        }
-    }
-
-    // XZ spacing between samples
-    float xzScale = tileWorldSize / (joltSampleCount - 1);
-
-    // Offset centers the shape on the body (shape goes from -half to +half)
     JPH::HeightFieldShapeSettings heightFieldSettings(
         joltSamples.data(),
-        JPH::Vec3(-tileWorldSize * 0.5f, 0.0f, -tileWorldSize * 0.5f),
+        JPH::Vec3(-tileWorldSize * 0.5f - halfTexel, 0.0f, -tileWorldSize * 0.5f - halfTexel),
         JPH::Vec3(xzScale, 1.0f, xzScale),
-        joltSampleCount
+        sampleCount
     );
 
     heightFieldSettings.mMaterials.push_back(new JPH::PhysicsMaterial());
