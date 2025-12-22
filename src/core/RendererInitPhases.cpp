@@ -317,15 +317,15 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         }
     }
 
-    // Add a forest 100 units away from the initial position (0, 0, 0)
-    // The forest is placed at approximately (100, y, 0) with random distribution
+    // Add a forest 300 units away from the initial position (0, 0, 0)
+    // The forest is placed away from spawn for load testing
     {
         auto* treeSystem = systems_->tree();
         if (treeSystem) {
-            const float forestCenterX = 100.0f;
-            const float forestCenterZ = 0.0f;
-            const float forestRadius = 30.0f;
-            const int numTrees = 25;
+            const float forestCenterX = 300.0f;
+            const float forestCenterZ = 100.0f;
+            const float forestRadius = 80.0f;
+            const int numTrees = 500;
 
             std::string presetDir = resourcePath + "/assets/trees/presets/";
             std::vector<std::pair<std::string, TreeOptions(*)()>> treePresets = {
@@ -343,30 +343,89 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
                 return defaultFn();
             };
 
-            // Simple pseudo-random distribution using golden ratio
-            const float goldenAngle = 2.39996322f; // radians (137.5 degrees)
+            // Poisson disk sampling for natural tree placement
+            // Minimum distance between trees (adjusted for tree size variation)
+            const float minDist = 8.0f;
+            const int maxAttempts = 30;  // Attempts to place each new point
 
-            for (int i = 0; i < numTrees; i++) {
-                // Fibonacci spiral distribution
-                float r = forestRadius * std::sqrt(static_cast<float>(i + 1) / numTrees);
-                float theta = i * goldenAngle;
+            // Simple LCG pseudo-random generator for deterministic results
+            uint32_t seed = 12345;
+            auto nextRand = [&seed]() -> float {
+                seed = seed * 1103515245 + 12345;
+                return static_cast<float>((seed >> 16) & 0x7FFF) / 32767.0f;
+            };
 
-                float x = forestCenterX + r * std::cos(theta);
-                float z = forestCenterZ + r * std::sin(theta);
+            std::vector<glm::vec2> placedTrees;
+            placedTrees.reserve(numTrees);
+
+            // Start with a random point in the forest area
+            placedTrees.push_back(glm::vec2(forestCenterX, forestCenterZ));
+
+            // Active list for Poisson disk sampling
+            std::vector<size_t> activeList;
+            activeList.push_back(0);
+
+            int treesPlaced = 0;
+            while (!activeList.empty() && treesPlaced < numTrees) {
+                // Pick a random active point
+                size_t activeIdx = static_cast<size_t>(nextRand() * activeList.size());
+                if (activeIdx >= activeList.size()) activeIdx = activeList.size() - 1;
+                glm::vec2 activePoint = placedTrees[activeList[activeIdx]];
+
+                bool foundValid = false;
+                for (int attempt = 0; attempt < maxAttempts; attempt++) {
+                    // Generate random point in annulus [minDist, 2*minDist] around active point
+                    float angle = nextRand() * 2.0f * 3.14159265f;
+                    float dist = minDist + nextRand() * minDist;
+                    glm::vec2 newPoint = activePoint + glm::vec2(std::cos(angle), std::sin(angle)) * dist;
+
+                    // Check if within forest bounds (circular)
+                    float distFromCenter = glm::length(newPoint - glm::vec2(forestCenterX, forestCenterZ));
+                    if (distFromCenter > forestRadius) continue;
+
+                    // Check distance from all existing points
+                    bool tooClose = false;
+                    for (const auto& p : placedTrees) {
+                        if (glm::length(newPoint - p) < minDist) {
+                            tooClose = true;
+                            break;
+                        }
+                    }
+
+                    if (!tooClose) {
+                        placedTrees.push_back(newPoint);
+                        activeList.push_back(placedTrees.size() - 1);
+                        foundValid = true;
+                        break;
+                    }
+                }
+
+                if (!foundValid) {
+                    // Remove from active list if no valid point found
+                    activeList.erase(activeList.begin() + activeIdx);
+                }
+            }
+
+            // Add trees at Poisson-distributed positions
+            for (size_t i = 0; i < placedTrees.size() && treesPlaced < numTrees; i++) {
+                float x = placedTrees[i].x;
+                float z = placedTrees[i].y;
                 float y = core.terrain.getHeightAt(x, z);
 
                 // Random rotation and scale variation
-                float rotation = static_cast<float>(i * 137) * 0.0174533f;  // Pseudo-random angle
-                float scale = 0.7f + 0.6f * (static_cast<float>((i * 7) % 10) / 10.0f);
+                float rotation = nextRand() * 2.0f * 3.14159265f;
+                float scale = 0.7f + 0.6f * nextRand();
 
-                // Select tree type based on index
-                size_t presetIdx = i % treePresets.size();
+                // Select tree type pseudo-randomly
+                size_t presetIdx = static_cast<size_t>(nextRand() * treePresets.size());
+                if (presetIdx >= treePresets.size()) presetIdx = treePresets.size() - 1;
                 auto opts = loadPreset(treePresets[presetIdx].first, treePresets[presetIdx].second);
 
                 treeSystem->addTree(glm::vec3(x, y, z), rotation, scale, opts);
+                treesPlaced++;
             }
 
-            SDL_Log("Forest added: %d trees at distance 100 units", numTrees);
+            SDL_Log("Forest added: %d trees (Poisson disk) at distance 300 units", treesPlaced);
 
             // Generate impostor archetypes for each unique tree type
             // The first 4 trees (display trees) define the archetypes: oak, pine, ash, aspen

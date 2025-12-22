@@ -46,7 +46,7 @@ struct TreeImpostorArchetype {
 // LOD settings with hysteresis support
 struct TreeLODSettings {
     // Distance thresholds
-    float fullDetailDistance = 50.0f;      // Full geometry below this
+    float fullDetailDistance = 250.0f;     // Full geometry below this
     float impostorDistance = 5000.0f;      // Impostors visible up to this distance
 
     // Hysteresis (prevents flickering at LOD boundaries)
