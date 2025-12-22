@@ -42,18 +42,18 @@ void GuiTreeTab::render(Renderer& renderer) {
 
             ImGui::Spacing();
             ImGui::Text("Distance Thresholds:");
-            ImGui::SliderFloat("Full Detail Dist", &settings.fullDetailDistance, 10.0f, 200.0f, "%.1f");
-            ImGui::SliderFloat("Impostor Dist", &settings.impostorDistance, 50.0f, 500.0f, "%.1f");
+            ImGui::SliderFloat("Full Detail Dist", &settings.fullDetailDistance, 0.0f, 200.0f, "%.1f");
+            ImGui::SliderFloat("Impostor Dist", &settings.impostorDistance, 0.0f, 500.0f, "%.1f");
             ImGui::SliderFloat("Hysteresis", &settings.hysteresis, 0.0f, 20.0f, "%.1f");
 
             ImGui::Spacing();
             ImGui::Text("Blending:");
             ImGui::SliderFloat("Blend Range", &settings.blendRange, 0.0f, 50.0f, "%.1f");
-            ImGui::SliderFloat("Blend Exponent", &settings.blendExponent, 0.1f, 3.0f, "%.2f");
+            ImGui::SliderFloat("Blend Exponent", &settings.blendExponent, 0.0f, 3.0f, "%.2f");
 
             ImGui::Spacing();
             ImGui::Text("Impostor Appearance:");
-            ImGui::SliderFloat("Brightness", &settings.impostorBrightness, 0.5f, 2.0f, "%.2f");
+            ImGui::SliderFloat("Brightness", &settings.impostorBrightness, 0.0f, 2.0f, "%.2f");
             ImGui::SliderFloat("Normal Strength", &settings.normalStrength, 0.0f, 1.0f, "%.2f");
 
             // Atlas preview
