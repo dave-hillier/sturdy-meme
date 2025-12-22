@@ -37,11 +37,9 @@ TreeImpostorAtlas::~TreeImpostorAtlas() {
     }
 
     // Cleanup atlas textures
+    // Note: Don't call ImGui_ImplVulkan_RemoveTexture here - ImGui may already
+    // be shut down. ImGui cleans up its own descriptor pool on shutdown anyway.
     for (auto& atlas : atlasTextures_) {
-        // Remove ImGui texture before destroying resources
-        if (atlas.previewDescriptorSet != VK_NULL_HANDLE) {
-            ImGui_ImplVulkan_RemoveTexture(atlas.previewDescriptorSet);
-        }
         if (atlas.albedoAlphaImage != VK_NULL_HANDLE) {
             vmaDestroyImage(allocator_, atlas.albedoAlphaImage, atlas.albedoAlphaAllocation);
         }
