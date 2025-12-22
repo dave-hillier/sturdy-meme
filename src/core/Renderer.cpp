@@ -43,6 +43,7 @@
 #include "RockSystem.h"
 #include "TreeSystem.h"
 #include "TreeRenderer.h"
+#include "TreeLODSystem.h"
 #include "UBOBuilder.h"
 #include "WaterGBuffer.h"
 #include "WaterDisplacement.h"
@@ -218,7 +219,7 @@ void Renderer::setupRenderPipeline() {
     renderPipeline.shadowStage.setTreeCallback([this](VkCommandBuffer cb, uint32_t cascade, const glm::mat4& lightMatrix) {
         (void)lightMatrix;
         if (systems_->tree() && systems_->treeRenderer()) {
-            systems_->treeRenderer()->renderShadows(cb, currentFrame, *systems_->tree(), static_cast<int>(cascade));
+            systems_->treeRenderer()->renderShadows(cb, currentFrame, *systems_->tree(), static_cast<int>(cascade), systems_->treeLOD());
         }
     });
 
@@ -1014,6 +1015,11 @@ bool Renderer::render(const Camera& camera) {
     systems_->leaf().updateUniforms(frame.frameIndex, frame.cameraPosition, frame.viewProj, frame.cameraPosition, frame.playerVelocity, frame.deltaTime, frame.time,
                                frame.terrainSize, frame.heightScale);
 
+    // Update tree LOD system for impostor rendering
+    if (systems_->treeLOD() && systems_->tree()) {
+        systems_->treeLOD()->update(frame.deltaTime, frame.cameraPosition, *systems_->tree());
+    }
+
     // Update water system uniforms
     systems_->water().updateUniforms(frame.frameIndex);
 
@@ -1399,7 +1405,12 @@ void Renderer::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float 
     auto treeCallback = [this, frameIndex](VkCommandBuffer cb, uint32_t cascade, const glm::mat4& lightMatrix) {
         (void)lightMatrix;
         if (systems_->tree() && systems_->treeRenderer()) {
-            systems_->treeRenderer()->renderShadows(cb, frameIndex, *systems_->tree(), static_cast<int>(cascade));
+            systems_->treeRenderer()->renderShadows(cb, frameIndex, *systems_->tree(), static_cast<int>(cascade), systems_->treeLOD());
+        }
+        // Render impostor shadows
+        if (systems_->treeLOD()) {
+            VkBuffer uniformBuffer = systems_->globalBuffers().uniformBuffers.buffers[frameIndex];
+            systems_->treeLOD()->renderImpostorShadows(cb, frameIndex, static_cast<int>(cascade), uniformBuffer);
         }
     };
 
@@ -1514,7 +1525,17 @@ void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
 
     // Render procedural trees using dedicated TreeRenderer with wind animation
     if (systems_->tree() && systems_->treeRenderer()) {
-        systems_->treeRenderer()->render(cmd, frameIndex, systems_->wind().getTime(), *systems_->tree());
+        systems_->treeRenderer()->render(cmd, frameIndex, systems_->wind().getTime(), *systems_->tree(), systems_->treeLOD());
+    }
+
+    // Render tree impostors for distant trees
+    if (systems_->treeLOD()) {
+        systems_->treeLOD()->renderImpostors(
+            cmd, frameIndex,
+            systems_->globalBuffers().uniformBuffers.buffers[frameIndex],
+            systems_->shadow().getShadowImageView(),
+            systems_->shadow().getShadowSampler()
+        );
     }
 }
 

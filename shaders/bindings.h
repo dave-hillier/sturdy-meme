@@ -158,6 +158,13 @@
 #define BINDING_TREE_GFX_LEAF_ALBEDO       8   // Leaf albedo texture
 #define BINDING_TREE_GFX_LEAF_INSTANCES    9   // Leaf instance SSBO
 
+// Tree Impostor Descriptor Set
+#define BINDING_TREE_IMPOSTOR_UBO          0   // Scene uniforms
+#define BINDING_TREE_IMPOSTOR_ALBEDO       1   // Impostor albedo+alpha atlas
+#define BINDING_TREE_IMPOSTOR_NORMAL       2   // Impostor normal+depth+AO atlas
+#define BINDING_TREE_IMPOSTOR_SHADOW_MAP   3   // Shadow map
+#define BINDING_TREE_IMPOSTOR_INSTANCES    4   // Impostor instance SSBO
+
 // =============================================================================
 // Leaf Compute Shader Descriptor Set
 // =============================================================================
@@ -491,6 +498,13 @@ constexpr uint32_t TREE_GFX_BARK_ROUGHNESS = BINDING_TREE_GFX_BARK_ROUGHNESS;
 constexpr uint32_t TREE_GFX_BARK_AO       = BINDING_TREE_GFX_BARK_AO;
 constexpr uint32_t TREE_GFX_LEAF_ALBEDO   = BINDING_TREE_GFX_LEAF_ALBEDO;
 constexpr uint32_t TREE_GFX_LEAF_INSTANCES = BINDING_TREE_GFX_LEAF_INSTANCES;
+
+// Tree Impostor
+constexpr uint32_t TREE_IMPOSTOR_UBO      = BINDING_TREE_IMPOSTOR_UBO;
+constexpr uint32_t TREE_IMPOSTOR_ALBEDO   = BINDING_TREE_IMPOSTOR_ALBEDO;
+constexpr uint32_t TREE_IMPOSTOR_NORMAL   = BINDING_TREE_IMPOSTOR_NORMAL;
+constexpr uint32_t TREE_IMPOSTOR_SHADOW_MAP = BINDING_TREE_IMPOSTOR_SHADOW_MAP;
+constexpr uint32_t TREE_IMPOSTOR_INSTANCES = BINDING_TREE_IMPOSTOR_INSTANCES;
 
 // Leaf Compute
 constexpr uint32_t LEAF_COMPUTE_INPUT     = BINDING_LEAF_COMPUTE_INPUT;

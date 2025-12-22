@@ -26,6 +26,7 @@
 #include "RockSystem.h"
 #include "TreeSystem.h"
 #include "TreeRenderer.h"
+#include "TreeLODSystem.h"
 #include "WaterSystem.h"
 #include "WaterDisplacement.h"
 #include "FlowMapGenerator.h"
@@ -290,6 +291,117 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         }
         systems_->setTreeRenderer(std::move(treeRenderer));
         SDL_Log("TreeRenderer initialized for wind animation");
+    }
+
+    // Initialize TreeLODSystem for impostor rendering
+    {
+        TreeLODSystem::InitInfo treeLODInfo{};
+        treeLODInfo.device = device;
+        treeLODInfo.physicalDevice = physicalDevice;
+        treeLODInfo.allocator = allocator;
+        treeLODInfo.hdrRenderPass = systems_->postProcess().getHDRRenderPass();
+        treeLODInfo.shadowRenderPass = systems_->shadow().getShadowRenderPass();
+        treeLODInfo.commandPool = commandPool.get();
+        treeLODInfo.graphicsQueue = graphicsQueue;
+        treeLODInfo.descriptorPool = &*descriptorManagerPool;
+        treeLODInfo.extent = systems_->postProcess().getExtent();
+        treeLODInfo.resourcePath = resourcePath;
+        treeLODInfo.maxFramesInFlight = MAX_FRAMES_IN_FLIGHT;
+
+        auto treeLOD = TreeLODSystem::create(treeLODInfo);
+        if (treeLOD) {
+            systems_->setTreeLOD(std::move(treeLOD));
+            SDL_Log("TreeLODSystem initialized for impostor rendering");
+        } else {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "TreeLODSystem creation failed (non-fatal)");
+        }
+    }
+
+    // Add a forest 100 units away from the initial position (0, 0, 0)
+    // The forest is placed at approximately (100, y, 0) with random distribution
+    {
+        auto* treeSystem = systems_->tree();
+        if (treeSystem) {
+            const float forestCenterX = 100.0f;
+            const float forestCenterZ = 0.0f;
+            const float forestRadius = 30.0f;
+            const int numTrees = 25;
+
+            std::string presetDir = resourcePath + "/assets/trees/presets/";
+            std::vector<std::pair<std::string, TreeOptions(*)()>> treePresets = {
+                {"oak_medium.json", TreeOptions::defaultOak},
+                {"pine_medium.json", TreeOptions::defaultPine},
+                {"ash_medium.json", TreeOptions::defaultOak},
+                {"aspen_medium.json", TreeOptions::defaultOak}
+            };
+
+            auto loadPreset = [&](const std::string& presetName, TreeOptions (*defaultFn)()) {
+                std::string path = presetDir + presetName;
+                if (std::filesystem::exists(path)) {
+                    return TreeOptions::loadFromJson(path);
+                }
+                return defaultFn();
+            };
+
+            // Simple pseudo-random distribution using golden ratio
+            const float goldenAngle = 2.39996322f; // radians (137.5 degrees)
+
+            for (int i = 0; i < numTrees; i++) {
+                // Fibonacci spiral distribution
+                float r = forestRadius * std::sqrt(static_cast<float>(i + 1) / numTrees);
+                float theta = i * goldenAngle;
+
+                float x = forestCenterX + r * std::cos(theta);
+                float z = forestCenterZ + r * std::sin(theta);
+                float y = core.terrain.getHeightAt(x, z);
+
+                // Random rotation and scale variation
+                float rotation = static_cast<float>(i * 137) * 0.0174533f;  // Pseudo-random angle
+                float scale = 0.7f + 0.6f * (static_cast<float>((i * 7) % 10) / 10.0f);
+
+                // Select tree type based on index
+                size_t presetIdx = i % treePresets.size();
+                auto opts = loadPreset(treePresets[presetIdx].first, treePresets[presetIdx].second);
+
+                treeSystem->addTree(glm::vec3(x, y, z), rotation, scale, opts);
+            }
+
+            SDL_Log("Forest added: %d trees at distance 100 units", numTrees);
+
+            // Generate impostor for the first tree archetype (they share similar appearance)
+            auto* treeLOD = systems_->treeLOD();
+            if (treeLOD && treeSystem->getMeshCount() > 0) {
+                // Use the first tree's mesh as the impostor archetype
+                const auto& branchMesh = treeSystem->getBranchMesh(0);
+                const auto& leafInstances = treeSystem->getLeafInstances(0);
+                const auto& treeOpts = treeSystem->getTreeOptions(0);
+
+                // Get textures (using default oak for now)
+                auto* barkTex = treeSystem->getBarkTexture("oak");
+                auto* barkNorm = treeSystem->getBarkNormalMap("oak");
+                auto* leafTex = treeSystem->getLeafTexture("oak");
+
+                if (barkTex && barkNorm && leafTex) {
+                    int32_t archetypeIdx = treeLOD->generateImpostor(
+                        "forest_tree",
+                        treeOpts,
+                        branchMesh,
+                        leafInstances,
+                        barkTex->getImageView(),
+                        barkNorm->getImageView(),
+                        leafTex->getImageView(),
+                        barkTex->getSampler()
+                    );
+                    if (archetypeIdx >= 0) {
+                        SDL_Log("Generated impostor archetype %d for forest trees", archetypeIdx);
+                    } else {
+                        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to generate tree impostor");
+                    }
+                } else {
+                    SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Missing textures for impostor generation");
+                }
+            }
+        }
     }
 
     // Update rock descriptor sets now that rock textures are loaded

@@ -23,6 +23,7 @@ class VolumetricSnowSystem;
 class RockSystem;
 class TreeSystem;
 class TreeRenderer;
+class TreeLODSystem;
 class CloudShadowSystem;
 class HiZSystem;
 class WaterSystem;
@@ -192,6 +193,9 @@ public:
     TreeRenderer* treeRenderer() { return treeRenderer_.get(); }
     const TreeRenderer* treeRenderer() const { return treeRenderer_.get(); }
     void setTreeRenderer(std::unique_ptr<TreeRenderer> renderer);
+    TreeLODSystem* treeLOD() { return treeLODSystem_.get(); }
+    const TreeLODSystem* treeLOD() const { return treeLODSystem_.get(); }
+    void setTreeLOD(std::unique_ptr<TreeLODSystem> system);
 
     // Culling and optimization
     HiZSystem& hiZ() { return *hiZSystem_; }
@@ -281,6 +285,7 @@ private:
     std::unique_ptr<RockSystem> rockSystem_;
     std::unique_ptr<TreeSystem> treeSystem_;
     std::unique_ptr<TreeRenderer> treeRenderer_;
+    std::unique_ptr<TreeLODSystem> treeLODSystem_;
 
     // Tier 2 - Culling
     std::unique_ptr<HiZSystem> hiZSystem_;

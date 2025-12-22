@@ -1023,7 +1023,7 @@ void TreeRenderer::recordLeafCulling(VkCommandBuffer cmd, uint32_t frameIndex,
 }
 
 void TreeRenderer::render(VkCommandBuffer cmd, uint32_t frameIndex, float time,
-                          const TreeSystem& treeSystem) {
+                          const TreeSystem& treeSystem, const TreeLODSystem* lodSystem) {
     const auto& branchRenderables = treeSystem.getBranchRenderables();
     const auto& leafRenderables = treeSystem.getLeafRenderables();
 
@@ -1033,7 +1033,13 @@ void TreeRenderer::render(VkCommandBuffer cmd, uint32_t frameIndex, float time,
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, branchPipeline_.get());
 
     std::string lastBarkType;
+    uint32_t branchTreeIndex = 0;
     for (const auto& renderable : branchRenderables) {
+        // Skip if LOD system says this tree should be pure impostor (no full geometry)
+        if (lodSystem && !lodSystem->shouldRenderFullGeometry(branchTreeIndex)) {
+            branchTreeIndex++;
+            continue;
+        }
         // Bind descriptor set for this bark type if different from last
         if (renderable.barkType != lastBarkType) {
             VkDescriptorSet descriptorSet = getBranchDescriptorSet(frameIndex, renderable.barkType);
@@ -1045,6 +1051,7 @@ void TreeRenderer::render(VkCommandBuffer cmd, uint32_t frameIndex, float time,
         TreeBranchPushConstants push{};
         push.model = renderable.transform;
         push.time = time;
+        push.lodBlendFactor = lodSystem ? lodSystem->getBlendFactor(branchTreeIndex) : 0.0f;
         push.barkTint = glm::vec3(1.0f);
         push.roughnessScale = renderable.roughness;
 
@@ -1059,6 +1066,7 @@ void TreeRenderer::render(VkCommandBuffer cmd, uint32_t frameIndex, float time,
             vkCmdBindIndexBuffer(cmd, renderable.mesh->getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
             vkCmdDrawIndexed(cmd, renderable.mesh->getIndexCount(), 1, 0, 0, 0);
         }
+        branchTreeIndex++;
     }
 
     // Render leaves with instancing
@@ -1091,15 +1099,27 @@ void TreeRenderer::render(VkCommandBuffer cmd, uint32_t frameIndex, float time,
         // Use per-type culled descriptor sets (with culled output buffer as SSBO)
         std::string lastLeafType;
         uint32_t treeIdx = 0;
+        uint32_t leafTreeIndex = 0;
         for (const auto& renderable : leafRenderables) {
             // Skip if no leaf instances for this tree
             if (renderable.leafInstanceIndex < 0 ||
                 static_cast<size_t>(renderable.leafInstanceIndex) >= leafDrawInfo.size()) {
+                leafTreeIndex++;
                 continue;
             }
 
             const auto& drawInfo = leafDrawInfo[renderable.leafInstanceIndex];
-            if (drawInfo.instanceCount == 0) continue;
+            if (drawInfo.instanceCount == 0) {
+                leafTreeIndex++;
+                continue;
+            }
+
+            // Skip if LOD system says this tree should be pure impostor (no full geometry)
+            if (lodSystem && !lodSystem->shouldRenderFullGeometry(leafTreeIndex)) {
+                leafTreeIndex++;
+                treeIdx++;
+                continue;
+            }
 
             // Ensure we have an offset for this tree
             if (treeIdx >= perTreeOutputOffsets_.size()) break;
@@ -1116,6 +1136,7 @@ void TreeRenderer::render(VkCommandBuffer cmd, uint32_t frameIndex, float time,
             TreeLeafPushConstants push{};
             push.model = renderable.transform;
             push.time = time;
+            push.lodBlendFactor = lodSystem ? lodSystem->getBlendFactor(leafTreeIndex) : 0.0f;
             push.leafTint = glm::vec3(1.0f);
             push.alphaTest = renderable.alphaTestThreshold > 0.0f ? renderable.alphaTestThreshold : 0.5f;
             push.firstInstance = static_cast<int32_t>(perTreeOutputOffsets_[treeIdx]);
@@ -1128,6 +1149,7 @@ void TreeRenderer::render(VkCommandBuffer cmd, uint32_t frameIndex, float time,
             VkDeviceSize indirectOffset = treeIdx * sizeof(VkDrawIndexedIndirectCommand);
             vkCmdDrawIndexedIndirect(cmd, cullIndirectBuffers_[currentCullBufferSet_],
                                      indirectOffset, 1, sizeof(VkDrawIndexedIndirectCommand));
+            leafTreeIndex++;
             treeIdx++;
         }
 
@@ -1136,15 +1158,26 @@ void TreeRenderer::render(VkCommandBuffer cmd, uint32_t frameIndex, float time,
     } else {
         // Direct draw path (fallback when culling not available)
         std::string lastLeafType;
+        uint32_t leafTreeIndex = 0;
         for (const auto& renderable : leafRenderables) {
             // Skip if no leaf instances for this tree
             if (renderable.leafInstanceIndex < 0 ||
                 static_cast<size_t>(renderable.leafInstanceIndex) >= leafDrawInfo.size()) {
+                leafTreeIndex++;
                 continue;
             }
 
             const auto& drawInfo = leafDrawInfo[renderable.leafInstanceIndex];
-            if (drawInfo.instanceCount == 0) continue;
+            if (drawInfo.instanceCount == 0) {
+                leafTreeIndex++;
+                continue;
+            }
+
+            // Skip if LOD system says this tree should be pure impostor (no full geometry)
+            if (lodSystem && !lodSystem->shouldRenderFullGeometry(leafTreeIndex)) {
+                leafTreeIndex++;
+                continue;
+            }
 
             // Bind descriptor set for this leaf type if different from last
             if (renderable.leafType != lastLeafType) {
@@ -1157,6 +1190,7 @@ void TreeRenderer::render(VkCommandBuffer cmd, uint32_t frameIndex, float time,
             TreeLeafPushConstants push{};
             push.model = renderable.transform;
             push.time = time;
+            push.lodBlendFactor = lodSystem ? lodSystem->getBlendFactor(leafTreeIndex) : 0.0f;
             push.leafTint = glm::vec3(1.0f);
             push.alphaTest = renderable.alphaTestThreshold > 0.0f ? renderable.alphaTestThreshold : 0.5f;
             push.firstInstance = static_cast<int32_t>(drawInfo.firstInstance);
@@ -1167,12 +1201,14 @@ void TreeRenderer::render(VkCommandBuffer cmd, uint32_t frameIndex, float time,
 
             // Draw instanced: 6 indices for one quad, N instances for this tree's leaves
             vkCmdDrawIndexed(cmd, sharedQuad.getIndexCount(), drawInfo.instanceCount, 0, 0, 0);
+            leafTreeIndex++;
         }
     }
 }
 
 void TreeRenderer::renderShadows(VkCommandBuffer cmd, uint32_t frameIndex,
-                                 const TreeSystem& treeSystem, int cascadeIndex) {
+                                 const TreeSystem& treeSystem, int cascadeIndex,
+                                 const TreeLODSystem* lodSystem) {
     const auto& branchRenderables = treeSystem.getBranchRenderables();
     const auto& leafRenderables = treeSystem.getLeafRenderables();
 
@@ -1189,7 +1225,14 @@ void TreeRenderer::renderShadows(VkCommandBuffer cmd, uint32_t frameIndex,
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                 branchShadowPipelineLayout_.get(), 0, 1, &branchSet, 0, nullptr);
 
+        uint32_t branchTreeIndex = 0;
         for (const auto& renderable : branchRenderables) {
+            // Skip if LOD system says this tree should be pure impostor (no full geometry)
+            if (lodSystem && !lodSystem->shouldRenderFullGeometry(branchTreeIndex)) {
+                branchTreeIndex++;
+                continue;
+            }
+
             TreeBranchShadowPushConstants push{};
             push.model = renderable.transform;
             push.cascadeIndex = cascadeIndex;
@@ -1205,6 +1248,7 @@ void TreeRenderer::renderShadows(VkCommandBuffer cmd, uint32_t frameIndex,
                 vkCmdBindIndexBuffer(cmd, renderable.mesh->getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
                 vkCmdDrawIndexed(cmd, renderable.mesh->getIndexCount(), 1, 0, 0, 0);
             }
+            branchTreeIndex++;
         }
     }
 
@@ -1225,15 +1269,26 @@ void TreeRenderer::renderShadows(VkCommandBuffer cmd, uint32_t frameIndex,
         }
 
         std::string lastLeafType;
+        uint32_t leafTreeIndex = 0;
         for (const auto& renderable : leafRenderables) {
             // Skip if no leaf instances for this tree
             if (renderable.leafInstanceIndex < 0 ||
                 static_cast<size_t>(renderable.leafInstanceIndex) >= leafDrawInfo.size()) {
+                leafTreeIndex++;
                 continue;
             }
 
             const auto& drawInfo = leafDrawInfo[renderable.leafInstanceIndex];
-            if (drawInfo.instanceCount == 0) continue;
+            if (drawInfo.instanceCount == 0) {
+                leafTreeIndex++;
+                continue;
+            }
+
+            // Skip if LOD system says this tree should be pure impostor (no full geometry)
+            if (lodSystem && !lodSystem->shouldRenderFullGeometry(leafTreeIndex)) {
+                leafTreeIndex++;
+                continue;
+            }
 
             // Bind descriptor set for this leaf type (for alpha test texture)
             if (renderable.leafType != lastLeafType) {
@@ -1255,6 +1310,7 @@ void TreeRenderer::renderShadows(VkCommandBuffer cmd, uint32_t frameIndex,
 
             // Draw instanced
             vkCmdDrawIndexed(cmd, sharedQuad.getIndexCount(), drawInfo.instanceCount, 0, 0, 0);
+            leafTreeIndex++;
         }
     }
 }
