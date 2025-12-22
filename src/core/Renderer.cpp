@@ -43,6 +43,7 @@
 #include "RockSystem.h"
 #include "TreeSystem.h"
 #include "TreeRenderer.h"
+#include "TreeLODSystem.h"
 #include "UBOBuilder.h"
 #include "WaterGBuffer.h"
 #include "WaterDisplacement.h"
@@ -1014,6 +1015,11 @@ bool Renderer::render(const Camera& camera) {
     systems_->leaf().updateUniforms(frame.frameIndex, frame.cameraPosition, frame.viewProj, frame.cameraPosition, frame.playerVelocity, frame.deltaTime, frame.time,
                                frame.terrainSize, frame.heightScale);
 
+    // Update tree LOD system for impostor rendering
+    if (systems_->treeLOD() && systems_->tree()) {
+        systems_->treeLOD()->update(frame.deltaTime, frame.cameraPosition, *systems_->tree());
+    }
+
     // Update water system uniforms
     systems_->water().updateUniforms(frame.frameIndex);
 
@@ -1515,6 +1521,16 @@ void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
     // Render procedural trees using dedicated TreeRenderer with wind animation
     if (systems_->tree() && systems_->treeRenderer()) {
         systems_->treeRenderer()->render(cmd, frameIndex, systems_->wind().getTime(), *systems_->tree());
+    }
+
+    // Render tree impostors for distant trees
+    if (systems_->treeLOD()) {
+        systems_->treeLOD()->renderImpostors(
+            cmd, frameIndex,
+            systems_->globalBuffers().uniformBuffers.buffers[frameIndex],
+            systems_->shadow().getShadowImageView(),
+            systems_->shadow().getShadowSampler()
+        );
     }
 }
 

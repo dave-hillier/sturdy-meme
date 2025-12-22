@@ -137,7 +137,8 @@ void main() {
     }
 
     // === DISTANCE FADE ===
-    float fadeStart = 40.0;
+    // Fade starts at LOD fullDetailDistance, ends at fullDetailDistance + blendRange
+    float fadeStart = 50.0;
     float fadeEnd = 60.0;
     float distanceFade = 1.0 - smoothstep(fadeStart, fadeEnd, fragDistToCamera);
 
