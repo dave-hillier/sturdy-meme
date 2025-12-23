@@ -3,7 +3,7 @@
 #include <cmath>
 
 Camera::Camera()
-    : position(0.0f, 1.0f, 5.0f)
+    : position(0.0f, 1.5f, 5.0f)
     , worldUp(0.0f, 1.0f, 0.0f)
     , yaw(-90.0f)
     , pitch(0.0f)
@@ -14,7 +14,7 @@ Camera::Camera()
     , thirdPersonTarget(0.0f, 1.5f, 0.0f)
     , thirdPersonDistance(5.0f)
     , thirdPersonMinDistance(2.0f)
-    , thirdPersonMaxDistance(15.0f)
+    , thirdPersonMaxDistance(10.0f)
     , smoothedTarget(0.0f, 1.5f, 0.0f)
     , smoothedYaw(-90.0f)
     , smoothedPitch(0.0f)
