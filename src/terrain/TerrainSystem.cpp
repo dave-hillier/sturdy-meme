@@ -1,6 +1,7 @@
 #include "TerrainSystem.h"
 #include "TerrainBuffers.h"
 #include "TerrainCameraOptimizer.h"
+#include "Bindings.h"
 #include "DescriptorManager.h"
 #include "GpuProfiler.h"
 #include "UBOs.h"
@@ -66,6 +67,7 @@ bool TerrainSystem::initInternal(const InitInfo& info, const TerrainConfig& cfg)
     texturesInfo.graphicsQueue = graphicsQueue;
     texturesInfo.commandPool = commandPool;
     texturesInfo.resourcePath = texturePath;
+    texturesInfo.biomeMapPath = config.biomeMapPath;
     textures = RAIIAdapter<TerrainTextures>::create(
         [&](auto& t) { return t.init(texturesInfo); },
         [this](auto& t) { t.destroy(device, allocator); }
@@ -577,11 +579,31 @@ void TerrainSystem::setCaustics(VkDevice device, VkImageView causticsView, VkSam
     }
 }
 
+void TerrainSystem::setBiomeMap(VkDevice device, VkImageView biomeMapView, VkSampler biomeMapSampler) {
+    for (uint32_t i = 0; i < framesInFlight; i++) {
+        DescriptorManager::SetWriter(device, renderDescriptorSets[i])
+            .writeImage(Bindings::TERRAIN_BIOME_MAP, biomeMapView, biomeMapSampler)
+            .update();
+    }
+}
+
+bool TerrainSystem::hasBiomeMap() const {
+    return textures && (*textures)->hasBiomeMap();
+}
+
+void TerrainSystem::initBiomeMapBinding(VkDevice device) {
+    if (hasBiomeMap()) {
+        setBiomeMap(device, (*textures)->getBiomeMapView(), (*textures)->getBiomeMapSampler());
+        SDL_Log("Biome map bound to terrain descriptor sets");
+    }
+}
+
 void TerrainSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos,
                                     const glm::mat4& view, const glm::mat4& proj,
                                     const std::array<glm::vec4, 3>& snowCascadeParams,
                                     bool useVolumetricSnow,
-                                    float snowMaxHeight) {
+                                    float snowMaxHeight,
+                                    bool showBiomeDebug) {
     // Track camera movement for skip-frame optimization
     cameraOptimizer.update(cameraPos, view);
 
@@ -628,7 +650,7 @@ void TerrainSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraP
     uniforms.snowCascade2Params = snowCascadeParams[2];
     uniforms.useVolumetricSnow = useVolumetricSnow ? 1.0f : 0.0f;
     uniforms.snowMaxHeight = snowMaxHeight;
-    uniforms.snowPadding1 = 0.0f;
+    uniforms.showBiomeDebug = showBiomeDebug ? 1.0f : 0.0f;
     uniforms.snowPadding2 = 0.0f;
 
     memcpy((*buffers)->getUniformMappedPtr(frameIndex), &uniforms, sizeof(TerrainUniforms));

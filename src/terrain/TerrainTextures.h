@@ -5,7 +5,7 @@
 #include <string>
 #include "VulkanRAII.h"
 
-// Terrain textures - albedo and grass far LOD textures
+// Terrain textures - albedo, grass far LOD, and biome visualization textures
 class TerrainTextures {
 public:
     struct InitInfo {
@@ -14,6 +14,7 @@ public:
         VkQueue graphicsQueue;
         VkCommandPool commandPool;
         std::string resourcePath;
+        std::string biomeMapPath;  // Optional: path to biome_debug.png for visualization
     };
 
     TerrainTextures() = default;
@@ -30,9 +31,15 @@ public:
     VkImageView getGrassFarLODView() const { return grassFarLODView; }
     VkSampler getGrassFarLODSampler() const { return grassFarLODSampler.get(); }
 
+    // Biome map texture (for debug visualization)
+    VkImageView getBiomeMapView() const { return biomeMapView; }
+    VkSampler getBiomeMapSampler() const { return biomeMapSampler.get(); }
+    bool hasBiomeMap() const { return biomeMapImage != VK_NULL_HANDLE; }
+
 private:
     bool createAlbedoTexture();
     bool createGrassFarLODTexture();
+    bool createBiomeMapTexture();
     bool uploadImageData(VkImage image, const void* data, uint32_t width, uint32_t height,
                          VkFormat format, uint32_t bytesPerPixel);
 
@@ -42,6 +49,7 @@ private:
     VkQueue graphicsQueue = VK_NULL_HANDLE;
     VkCommandPool commandPool = VK_NULL_HANDLE;
     std::string resourcePath;
+    std::string biomeMapPath;
 
     // Terrain albedo texture
     VkImage albedoImage = VK_NULL_HANDLE;
@@ -54,4 +62,10 @@ private:
     VmaAllocation grassFarLODAllocation = VK_NULL_HANDLE;
     VkImageView grassFarLODView = VK_NULL_HANDLE;
     ManagedSampler grassFarLODSampler;
+
+    // Biome map texture (optional, for debug visualization)
+    VkImage biomeMapImage = VK_NULL_HANDLE;
+    VmaAllocation biomeMapAllocation = VK_NULL_HANDLE;
+    VkImageView biomeMapView = VK_NULL_HANDLE;
+    ManagedSampler biomeMapSampler;
 };

@@ -759,7 +759,8 @@ bool Renderer::render(const Camera& camera) {
     systems_->grass().updateDisplacementSources(frame.playerPosition, frame.playerCapsuleRadius, frame.deltaTime);
     systems_->weather().updateUniforms(frame.frameIndex, frame.cameraPosition, frame.viewProj, frame.deltaTime, frame.time, systems_->wind());
     systems_->terrain().updateUniforms(frame.frameIndex, frame.cameraPosition, frame.view, frame.projection,
-                                  systems_->volumetricSnow().getCascadeParams(), useVolumetricSnow, MAX_SNOW_HEIGHT);
+                                  systems_->volumetricSnow().getCascadeParams(), useVolumetricSnow, MAX_SNOW_HEIGHT,
+                                  showBiomeDebug);
 
     // Update snow mask system - accumulation/melting based on weather type
     bool isSnowing = (systems_->weather().getWeatherType() == 1);  // 1 = snow

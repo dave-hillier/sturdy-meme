@@ -109,6 +109,9 @@
 #define BINDING_VT_FEEDBACK_COUNTER    22   // VT feedback counter (SSBO)
 #define BINDING_VT_PARAMS_UBO          23   // VT parameters UBO
 
+// Biome debug visualization
+#define BINDING_TERRAIN_BIOME_MAP      24   // Biome debug visualization texture
+
 // =============================================================================
 // Grass Compute Shader Descriptor Set
 // =============================================================================
@@ -524,6 +527,7 @@ constexpr uint32_t VT_PHYSICAL_CACHE      = BINDING_VT_PHYSICAL_CACHE;
 constexpr uint32_t VT_FEEDBACK            = BINDING_VT_FEEDBACK;
 constexpr uint32_t VT_FEEDBACK_COUNTER    = BINDING_VT_FEEDBACK_COUNTER;
 constexpr uint32_t VT_PARAMS_UBO          = BINDING_VT_PARAMS_UBO;
+constexpr uint32_t TERRAIN_BIOME_MAP      = BINDING_TERRAIN_BIOME_MAP;
 
 // Grass Compute
 constexpr uint32_t GRASS_COMPUTE_INSTANCES   = BINDING_GRASS_COMPUTE_INSTANCES;

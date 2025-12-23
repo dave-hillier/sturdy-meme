@@ -12,9 +12,17 @@ bool TerrainTextures::init(const InitInfo& info) {
     graphicsQueue = info.graphicsQueue;
     commandPool = info.commandPool;
     resourcePath = info.resourcePath;
+    biomeMapPath = info.biomeMapPath;
 
     if (!createAlbedoTexture()) return false;
     if (!createGrassFarLODTexture()) return false;
+
+    // Biome map is optional - don't fail init if it's missing
+    if (!biomeMapPath.empty()) {
+        if (!createBiomeMapTexture()) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Biome map not loaded - biome visualization disabled");
+        }
+    }
 
     SDL_Log("TerrainTextures initialized");
     return true;
@@ -30,10 +38,16 @@ void TerrainTextures::destroy(VkDevice device, VmaAllocator allocator) {
     if (grassFarLODView) vkDestroyImageView(device, grassFarLODView, nullptr);
     if (grassFarLODImage) vmaDestroyImage(allocator, grassFarLODImage, grassFarLODAllocation);
 
+    biomeMapSampler.reset();
+    if (biomeMapView) vkDestroyImageView(device, biomeMapView, nullptr);
+    if (biomeMapImage) vmaDestroyImage(allocator, biomeMapImage, biomeMapAllocation);
+
     albedoView = VK_NULL_HANDLE;
     albedoImage = VK_NULL_HANDLE;
     grassFarLODView = VK_NULL_HANDLE;
     grassFarLODImage = VK_NULL_HANDLE;
+    biomeMapView = VK_NULL_HANDLE;
+    biomeMapImage = VK_NULL_HANDLE;
 }
 
 bool TerrainTextures::createAlbedoTexture() {
@@ -179,6 +193,82 @@ bool TerrainTextures::createGrassFarLODTexture() {
 
     stbi_image_free(pixels);
     SDL_Log("Grass far LOD texture loaded: %s (%ux%u)", texturePath.c_str(), width, height);
+    return true;
+}
+
+bool TerrainTextures::createBiomeMapTexture() {
+    if (biomeMapPath.empty()) {
+        return false;
+    }
+
+    int texWidth, texHeight, channels;
+    stbi_uc* pixels = stbi_load(biomeMapPath.c_str(), &texWidth, &texHeight, &channels, STBI_rgb_alpha);
+
+    if (!pixels) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to load biome map texture: %s", biomeMapPath.c_str());
+        return false;
+    }
+
+    uint32_t width = static_cast<uint32_t>(texWidth);
+    uint32_t height = static_cast<uint32_t>(texHeight);
+
+    // Create Vulkan image
+    VkImageCreateInfo imageInfo{};
+    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    imageInfo.imageType = VK_IMAGE_TYPE_2D;
+    imageInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
+    imageInfo.extent = {width, height, 1};
+    imageInfo.mipLevels = 1;
+    imageInfo.arrayLayers = 1;
+    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imageInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+
+    if (vmaCreateImage(allocator, &imageInfo, &allocInfo, &biomeMapImage, &biomeMapAllocation, nullptr) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create biome map image");
+        stbi_image_free(pixels);
+        return false;
+    }
+
+    // Create image view
+    VkImageViewCreateInfo viewInfo{};
+    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewInfo.image = biomeMapImage;
+    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
+    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.subresourceRange.baseMipLevel = 0;
+    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.baseArrayLayer = 0;
+    viewInfo.subresourceRange.layerCount = 1;
+
+    if (vkCreateImageView(device, &viewInfo, nullptr, &biomeMapView) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create biome map image view");
+        stbi_image_free(pixels);
+        return false;
+    }
+
+    // Create sampler with clamp-to-edge (biome map covers terrain exactly)
+    if (!VulkanResourceFactory::createSamplerLinearClamp(device, biomeMapSampler)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create biome map sampler");
+        stbi_image_free(pixels);
+        return false;
+    }
+
+    // Upload texture to GPU
+    if (!uploadImageData(biomeMapImage, pixels, width, height, VK_FORMAT_R8G8B8A8_SRGB, 4)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to upload biome map texture to GPU");
+        stbi_image_free(pixels);
+        return false;
+    }
+
+    stbi_image_free(pixels);
+    SDL_Log("Biome map texture loaded: %s (%ux%u)", biomeMapPath.c_str(), width, height);
     return true;
 }
 

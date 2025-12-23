@@ -121,6 +121,9 @@ struct TerrainConfig {
     // Virtual texture settings
     std::string virtualTextureTileDir;  // Directory containing VT tiles (empty = disabled)
     bool useVirtualTexture = false;     // Enable virtual texturing for terrain
+
+    // Biome visualization
+    std::string biomeMapPath;           // Path to biome_debug.png (empty = disabled)
 };
 
 class TerrainSystem : public ITerrainControl {
@@ -191,12 +194,22 @@ public:
     void setCaustics(VkDevice device, VkImageView causticsView, VkSampler causticsSampler,
                      float waterLevel = 0.0f, bool enabled = true);
 
+    // Set biome debug visualization map
+    void setBiomeMap(VkDevice device, VkImageView biomeMapView, VkSampler biomeMapSampler);
+
+    // Check if biome map is available
+    bool hasBiomeMap() const;
+
+    // Initialize biome map binding from internal textures (call after init)
+    void initBiomeMapBinding(VkDevice device);
+
     // Update terrain uniforms for a frame
     void updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos,
                         const glm::mat4& view, const glm::mat4& proj,
                         const std::array<glm::vec4, 3>& snowCascadeParams = {},
                         bool useVolumetricSnow = false,
-                        float snowMaxHeight = 10.0f);
+                        float snowMaxHeight = 10.0f,
+                        bool showBiomeDebug = false);
 
     // Record compute commands (subdivision update)
     // Pass optional GpuProfiler for detailed per-phase profiling

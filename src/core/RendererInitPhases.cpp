@@ -773,6 +773,9 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
 
     // Note: Caustics setup moved to initPhase4Complete after water system is created
 
+    // Initialize biome map binding if available
+    systems_->terrain().initBiomeMapBinding(device);
+
     // Update cloud shadow bindings across all descriptor sets
     RendererInit::updateCloudShadowBindings(device, systems_->scene().getSceneBuilder().getMaterialRegistry(),
                                             rockDescriptorSets, detritusDescriptorSets, systems_->skinnedMesh(),

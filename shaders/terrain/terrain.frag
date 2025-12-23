@@ -43,6 +43,14 @@ layout(std140, binding = BINDING_TERRAIN_UBO) uniform TerrainUniforms {
     vec2 screenSize;
     float lodFactor;
     float terrainPadding;
+    // Volumetric snow parameters
+    vec4 snowCascade0Params;
+    vec4 snowCascade1Params;
+    vec4 snowCascade2Params;
+    float useVolumetricSnow;
+    float snowMaxHeight;
+    float showBiomeDebug;    // 1.0 = show biome visualization
+    float terrainPadding2;
 };
 
 // Textures
@@ -77,6 +85,9 @@ layout(std140, binding = BINDING_TERRAIN_CAUSTICS_UBO) uniform CausticsUniforms 
     float causticsEnabled;         // 0 = disabled, 1 = enabled
     float causticsPadding;         // Alignment padding
 };
+
+// Biome debug visualization map
+layout(binding = BINDING_TERRAIN_BIOME_MAP) uniform sampler2D biomeMap;
 
 // Far LOD grass parameters (where to start/end grass-to-terrain transition)
 const float GRASS_RENDER_DISTANCE = 60.0;     // Should match grass system maxDrawDistance
@@ -425,6 +436,23 @@ void main() {
 
         // Overlay depth color (70% blend)
         atmosphericColor = mix(atmosphericColor, depthColor, 0.7);
+    }
+
+    // Biome debug visualization - show biome colors instead of terrain texture
+    if (showBiomeDebug > 0.5) {
+        // Sample biome map using terrain UV coordinates
+        // Biome map covers the entire terrain (0,0) to (terrainSize, terrainSize)
+        vec2 biomeUV = fragWorldPos.xz / terrainParams.x;
+        biomeUV = clamp(biomeUV, 0.0, 1.0);
+
+        vec3 biomeColor = texture(biomeMap, biomeUV).rgb;
+
+        // Apply simple diffuse lighting for better visibility
+        float diffuse = max(dot(normal, normalize(ubo.sunDirection.xyz)), 0.0) * 0.7 + 0.3;
+        biomeColor *= diffuse;
+
+        // Replace terrain color with biome visualization
+        atmosphericColor = biomeColor;
     }
 
     // DEBUG: Test fog UBO values after alignment fix
