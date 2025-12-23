@@ -499,6 +499,8 @@ void TreeSystem::createSceneObjects() {
                 .withMetallic(0.0f)
                 .withAlphaTest(opts.leaves.alphaTest)
                 .withLeafType(opts.leaves.type)
+                .withLeafTint(opts.leaves.tint)
+                .withAutumnHueShift(opts.leaves.autumnHueShift)
                 .build();
 
             // Store the mesh index so the renderer can look up leaf draw info

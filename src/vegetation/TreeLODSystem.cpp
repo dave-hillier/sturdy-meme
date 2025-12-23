@@ -864,13 +864,16 @@ void TreeLODSystem::renderImpostors(VkCommandBuffer cmd, uint32_t frameIndex,
                            0, 1, &impostorDescriptorSets_[frameIndex], 0, nullptr);
 
     // Push constants
+    // cameraPos: xyz=camera position, w=autumnHueShift
+    // lodParams: x=blend, y=brightness, z=normalStrength, w=debugElevation
+    // atlasParams: x=hSize, y=vSize, z=baseOffset, w=debugShowCellIndex
     struct {
         glm::vec4 cameraPos;
         glm::vec4 lodParams;
         glm::vec4 atlasParams;
     } pushConstants;
 
-    pushConstants.cameraPos = glm::vec4(lastCameraPos_, 1.0f);
+    pushConstants.cameraPos = glm::vec4(lastCameraPos_, settings.autumnHueShift);
     // lodParams: x=blend, y=brightness, z=normalStrength, w=debugElevation (negative=disabled)
     pushConstants.lodParams = glm::vec4(
         1.0f,  // blend factor (handled per-instance)

@@ -57,6 +57,13 @@ void GuiTreeTab::render(Renderer& renderer) {
             ImGui::SliderFloat("Normal Strength", &settings.normalStrength, 0.0f, 1.0f, "%.2f");
 
             ImGui::Spacing();
+            ImGui::Text("Seasonal Effects (Global):");
+            ImGui::SliderFloat("Global Autumn", &settings.autumnHueShift, 0.0f, 1.0f, "%.2f");
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Apply autumn colors to all tree impostors\n0 = summer, 1 = full autumn");
+            }
+
+            ImGui::Spacing();
             ImGui::Text("Debug:");
 
             // Show actual calculated elevation
@@ -352,6 +359,15 @@ void GuiTreeTab::render(Renderer& renderer) {
         if (ImGui::ColorEdit3("Leaf Tint", leafTint)) {
             opts.leaves.tint = glm::vec3(leafTint[0], leafTint[1], leafTint[2]);
             changed = true;
+        }
+
+        ImGui::Spacing();
+        ImGui::Text("Seasonal Effects:");
+        if (ImGui::SliderFloat("Autumn", &opts.leaves.autumnHueShift, 0.0f, 1.0f, "%.2f")) {
+            changed = true;
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Shift leaf colors toward autumn tones\n0 = summer green, 1 = full autumn");
         }
     }
 

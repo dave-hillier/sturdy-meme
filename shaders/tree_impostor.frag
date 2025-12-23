@@ -7,6 +7,7 @@ const int NUM_CASCADES = 4;
 #include "bindings.glsl"
 #include "ubo_common.glsl"
 #include "shadow_common.glsl"
+#include "color_common.glsl"
 
 layout(location = 0) in vec2 fragTexCoord;
 layout(location = 1) in vec3 fragWorldPos;
@@ -25,7 +26,7 @@ layout(binding = BINDING_TREE_IMPOSTOR_NORMAL) uniform sampler2DArray normalDept
 layout(binding = BINDING_TREE_IMPOSTOR_SHADOW_MAP) uniform sampler2DArrayShadow shadowMapArray;
 
 layout(push_constant) uniform PushConstants {
-    vec4 cameraPos;
+    vec4 cameraPos;     // xyz = camera position, w = autumnHueShift
     vec4 lodParams;     // x = blend factor, y = brightness, z = normal strength, w = debug elevation
     vec4 atlasParams;   // x = hSize, y = vSize, z = baseOffset, w = debugShowCellIndex
 } push;
@@ -97,6 +98,10 @@ void main() {
 
     // Get albedo and apply brightness adjustment
     vec3 albedo = albedoAlpha.rgb * push.lodParams.y;
+
+    // Apply autumn hue shift (cameraPos.w contains autumnHueShift)
+    float autumnFactor = push.cameraPos.w;
+    albedo = applyAutumnHueShift(albedo, autumnFactor);
 
     // PBR parameters for tree foliage
     float metallic = 0.0;

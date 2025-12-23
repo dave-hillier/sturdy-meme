@@ -65,6 +65,9 @@ struct TreeLODSettings {
     bool enableDebugElevation = false;     // Override elevation angle for testing
     float debugElevation = 0.0f;           // Debug elevation angle in degrees (-90 to 90)
     bool debugShowCellIndex = false;       // Color-code impostors by cell index
+
+    // Seasonal effects (global for all impostors)
+    float autumnHueShift = 0.0f;           // 0 = summer green, 1 = full autumn colors
 };
 
 class TreeImpostorAtlas {

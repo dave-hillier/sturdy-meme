@@ -90,6 +90,9 @@ struct LeafOptions {
 
     // Alpha test threshold for transparency
     float alphaTest = 0.5f;
+
+    // Autumn hue shift (0.0 = summer green, 1.0 = full autumn colors)
+    float autumnHueShift = 0.0f;
 };
 
 // Complete tree configuration
@@ -153,7 +156,7 @@ struct alignas(16) TreeParamsGPU {
     glm::vec2 barkTextureScale;
 
     glm::vec4 barkTint;
-    glm::vec4 leafTint;
+    glm::vec4 leafTint;  // xyz = tint color, w = autumnHueShift (0-1)
 
     static TreeParamsGPU fromOptions(const TreeOptions& opts);
 };

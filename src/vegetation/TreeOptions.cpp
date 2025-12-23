@@ -457,7 +457,7 @@ TreeParamsGPU TreeParamsGPU::fromOptions(const TreeOptions& opts) {
     gpu.barkTextured = opts.bark.textured ? 1 : 0;
     gpu.barkTextureScale = opts.bark.textureScale;
     gpu.barkTint = glm::vec4(opts.bark.tint, 1.0f);
-    gpu.leafTint = glm::vec4(opts.leaves.tint, 1.0f);
+    gpu.leafTint = glm::vec4(opts.leaves.tint, opts.leaves.autumnHueShift);
 
     return gpu;
 }

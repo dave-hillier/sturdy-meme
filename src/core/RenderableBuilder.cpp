@@ -61,6 +61,16 @@ RenderableBuilder& RenderableBuilder::withLeafType(const std::string& type) {
     return *this;
 }
 
+RenderableBuilder& RenderableBuilder::withLeafTint(const glm::vec3& tint) {
+    leafTint_ = tint;
+    return *this;
+}
+
+RenderableBuilder& RenderableBuilder::withAutumnHueShift(float shift) {
+    autumnHueShift_ = shift;
+    return *this;
+}
+
 RenderableBuilder& RenderableBuilder::atPosition(const glm::vec3& position) {
     transform_ = glm::translate(glm::mat4(1.0f), position);
     return *this;
@@ -98,6 +108,8 @@ Renderable RenderableBuilder::build() const {
     renderable.alphaTestThreshold = alphaTestThreshold_;
     renderable.barkType = barkType_;
     renderable.leafType = leafType_;
+    renderable.leafTint = leafTint_;
+    renderable.autumnHueShift = autumnHueShift_;
 
     return renderable;
 }

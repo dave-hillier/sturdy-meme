@@ -31,6 +31,8 @@ struct Renderable {
     std::string barkType = "oak";  // Bark texture type for trees (oak, pine, birch, willow)
     std::string leafType = "oak";  // Leaf texture type for trees (oak, ash, aspen, pine)
     int leafInstanceIndex = -1;  // Index into TreeSystem::leafDrawInfoPerTree_ for instanced leaf rendering
+    glm::vec3 leafTint = glm::vec3(1.0f);  // Leaf color tint
+    float autumnHueShift = 0.0f;  // Autumn hue shift (0=summer, 1=full autumn)
 
 private:
     friend class RenderableBuilder;
@@ -79,6 +81,12 @@ public:
     // Optional: Set leaf texture type for trees (oak, ash, aspen, pine)
     RenderableBuilder& withLeafType(const std::string& type);
 
+    // Optional: Set leaf color tint
+    RenderableBuilder& withLeafTint(const glm::vec3& tint);
+
+    // Optional: Set autumn hue shift (0=summer green, 1=full autumn colors)
+    RenderableBuilder& withAutumnHueShift(float shift);
+
     // Convenience: Set position only (creates translation matrix)
     RenderableBuilder& atPosition(const glm::vec3& position);
 
@@ -102,4 +110,6 @@ private:
     float alphaTestThreshold_ = 0.0f;
     std::string barkType_ = "oak";
     std::string leafType_ = "oak";
+    glm::vec3 leafTint_ = glm::vec3(1.0f);
+    float autumnHueShift_ = 0.0f;
 };

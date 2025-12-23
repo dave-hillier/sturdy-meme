@@ -26,14 +26,15 @@ struct TreeBranchPushConstants {
 };
 
 struct TreeLeafPushConstants {
-    glm::mat4 model;     // offset 0, size 64
-    float time;          // offset 64, size 4
-    float lodBlendFactor;// offset 68, size 4 (0=full geometry, 1=full impostor)
-    float _pad1[2];      // offset 72, size 8 (padding to align vec3 to 16 bytes)
-    glm::vec3 leafTint;  // offset 80, size 12
-    float alphaTest;     // offset 92, size 4
+    glm::mat4 model;       // offset 0, size 64
+    float time;            // offset 64, size 4
+    float lodBlendFactor;  // offset 68, size 4 (0=full geometry, 1=full impostor)
+    float _pad1[2];        // offset 72, size 8 (padding to align vec3 to 16 bytes)
+    glm::vec3 leafTint;    // offset 80, size 12
+    float alphaTest;       // offset 92, size 4
     int32_t firstInstance; // offset 96, size 4 (offset into leaf SSBO for this tree)
-    float _pad2[3];      // offset 100, size 12 (padding to 16-byte boundary)
+    float autumnHueShift;  // offset 100, size 4 (0=summer, 1=full autumn colors)
+    float _pad2[2];        // offset 104, size 8 (padding to 16-byte boundary)
 };
 
 // Shadow pass push constants (branches)

@@ -8,6 +8,7 @@
 #include "shadow_common.glsl"
 #include "ubo_common.glsl"
 #include "atmosphere_common.glsl"
+#include "color_common.glsl"
 
 layout(binding = BINDING_TREE_GFX_SHADOW_MAP) uniform sampler2DArrayShadow shadowMapArray;
 layout(binding = BINDING_TREE_GFX_LEAF_ALBEDO) uniform sampler2D leafAlbedo;
@@ -18,6 +19,8 @@ layout(push_constant) uniform PushConstants {
     float lodBlendFactor;  // 0=full geometry, 1=full impostor
     vec3 leafTint;
     float alphaTest;
+    int firstInstance;
+    float autumnHueShift;  // 0=summer green, 1=full autumn colors
 } push;
 
 layout(location = 0) in vec3 fragNormal;
@@ -54,7 +57,9 @@ void main() {
         }
     }
 
+    // Apply tint and autumn hue shift
     vec3 baseColor = albedo.rgb * push.leafTint;
+    baseColor = applyAutumnHueShift(baseColor, push.autumnHueShift);
 
     // Use geometry normal (leaves are flat)
     vec3 N = normalize(fragNormal);
