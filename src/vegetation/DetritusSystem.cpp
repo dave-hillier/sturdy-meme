@@ -167,7 +167,7 @@ bool DetritusSystem::generateMeshFromBranches(const GeneratedBranch& branchData,
 
                 // Local position on unit circle
                 glm::vec3 localPos(std::cos(angle), 0.0f, std::sin(angle));
-                glm::vec3 localNormal = -localPos;
+                glm::vec3 localNormal = localPos;  // Outward facing normal
 
                 // Transform by section orientation
                 glm::vec3 worldOffset = section.orientation * (localPos * section.radius);
