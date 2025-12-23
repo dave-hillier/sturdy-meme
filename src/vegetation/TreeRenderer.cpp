@@ -5,6 +5,7 @@
 #include "Mesh.h"
 #include "Bindings.h"
 #include <SDL3/SDL_log.h>
+#include <algorithm>
 
 std::unique_ptr<TreeRenderer> TreeRenderer::create(const InitInfo& info) {
     auto renderer = std::unique_ptr<TreeRenderer>(new TreeRenderer());
@@ -1090,6 +1091,9 @@ void TreeRenderer::render(VkCommandBuffer cmd, uint32_t frameIndex, float time,
     const auto& leafDrawInfo = treeSystem.getLeafDrawInfo();
     const Mesh& sharedQuad = treeSystem.getSharedLeafQuadMesh();
 
+    // Get global autumn setting from LOD system (affects both impostors and full geometry)
+    float globalAutumnHueShift = lodSystem ? lodSystem->getLODSettings().autumnHueShift : 0.0f;
+
     // Bind shared quad mesh once (used for all leaf instances)
     if (sharedQuad.getIndexCount() > 0) {
         VkBuffer vertexBuffers[] = {sharedQuad.getVertexBuffer()};
@@ -1154,7 +1158,7 @@ void TreeRenderer::render(VkCommandBuffer cmd, uint32_t frameIndex, float time,
             push.leafTint = renderable.leafTint;
             push.alphaTest = renderable.alphaTestThreshold > 0.0f ? renderable.alphaTestThreshold : 0.5f;
             push.firstInstance = static_cast<int32_t>(perTreeOutputOffsets_[treeIdx]);
-            push.autumnHueShift = renderable.autumnHueShift;
+            push.autumnHueShift = std::max(globalAutumnHueShift, renderable.autumnHueShift);
 
             vkCmdPushConstants(cmd, leafPipelineLayout_.get(),
                                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -1209,7 +1213,7 @@ void TreeRenderer::render(VkCommandBuffer cmd, uint32_t frameIndex, float time,
             push.leafTint = renderable.leafTint;
             push.alphaTest = renderable.alphaTestThreshold > 0.0f ? renderable.alphaTestThreshold : 0.5f;
             push.firstInstance = static_cast<int32_t>(drawInfo.firstInstance);
-            push.autumnHueShift = renderable.autumnHueShift;
+            push.autumnHueShift = std::max(globalAutumnHueShift, renderable.autumnHueShift);
 
             vkCmdPushConstants(cmd, leafPipelineLayout_.get(),
                                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
