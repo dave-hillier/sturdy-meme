@@ -8,6 +8,7 @@
 #include "TerrainTileCache.h"
 #include "RockSystem.h"
 #include "TreeSystem.h"
+#include "DetritusSystem.h"
 #include "SceneManager.h"
 #include "WaterSystem.h"
 #include "WindSystem.h"
@@ -137,6 +138,33 @@ bool Application::init(const std::string& title, int width, int height) {
                                        rock.scale, rotation);
     }
     SDL_Log("Created %zu rock convex hull colliders", rockInstances.size());
+
+    // Create convex hull colliders for fallen branches (detritus)
+    if (const DetritusSystem* detritusSystem = renderer_->getDetritusSystem()) {
+        const auto& detritusInstances = detritusSystem->getInstances();
+        const auto& detritusMeshes = detritusSystem->getMeshes();
+
+        for (const auto& detritus : detritusInstances) {
+            // Get the mesh for this detritus variation
+            const Mesh& mesh = detritusMeshes[detritus.meshVariation];
+            const auto& vertices = mesh.getVertices();
+
+            // Extract positions from vertex data
+            std::vector<glm::vec3> positions;
+            positions.reserve(vertices.size());
+            for (const auto& v : vertices) {
+                positions.push_back(v.position);
+            }
+
+            // Create rotation quaternion from euler angles (x, y, z)
+            glm::quat rotation = glm::quat(detritus.rotation);
+
+            // Create convex hull from mesh vertices with detritus scale
+            physics().createStaticConvexHull(detritus.position, positions.data(), positions.size(),
+                                           detritus.scale, rotation);
+        }
+        SDL_Log("Created %zu detritus convex hull colliders", detritusInstances.size());
+    }
 
     // Create compound capsule colliders for trees (trunk + major branches)
     if (TreeSystem* treeSystem = renderer_->getTreeSystem()) {

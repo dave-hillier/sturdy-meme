@@ -1953,6 +1953,9 @@ const SceneManager& Renderer::getSceneManager() const { return systems_->scene()
 // Rock system access
 const RockSystem& Renderer::getRockSystem() const { return systems_->rock(); }
 
+// Detritus system access
+const DetritusSystem* Renderer::getDetritusSystem() const { return systems_->detritus(); }
+
 // Tree system access
 TreeSystem* Renderer::getTreeSystem() { return systems_->tree(); }
 const TreeSystem* Renderer::getTreeSystem() const { return systems_->tree(); }

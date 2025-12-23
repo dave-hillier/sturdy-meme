@@ -46,6 +46,7 @@ class SceneBuilder;
 class Mesh;
 class PhysicsWorld;
 class TreeSystem;
+class DetritusSystem;
 
 #ifdef JPH_DEBUG_RENDERER
 class PhysicsDebugRenderer;
@@ -281,6 +282,9 @@ public:
 
     // Rock system access for physics integration
     const RockSystem& getRockSystem() const;
+
+    // Detritus system access for physics integration
+    const DetritusSystem* getDetritusSystem() const;
 
     // Tree system access for GUI
     TreeSystem* getTreeSystem();

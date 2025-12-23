@@ -81,6 +81,9 @@ public:
     // Get instances for physics integration
     const std::vector<DetritusInstance>& getInstances() const { return instances_; }
 
+    // Get meshes for physics collision shapes
+    const std::vector<Mesh>& getMeshes() const { return meshes_; }
+
 private:
     DetritusSystem() = default;  // Private: use factory
 
