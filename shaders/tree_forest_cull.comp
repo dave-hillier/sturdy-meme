@@ -1,0 +1,176 @@
+#version 450
+
+#extension GL_GOOGLE_include_directive : require
+
+#include "bindings.glsl"
+#include "tree_forest.glsl"
+
+// 256 threads per workgroup - good balance for occupancy
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+// Input: Source tree data (1M trees, static)
+layout(std430, binding = BINDING_TREE_FOREST_SOURCE) readonly buffer TreeSourceBuffer {
+    TreeSource trees[];
+};
+
+// Input: Cluster data
+layout(std430, binding = BINDING_TREE_FOREST_CLUSTERS) readonly buffer ClusterBuffer {
+    ClusterData clusters[];
+};
+
+// Input: Cluster visibility (computed in separate pre-pass or CPU)
+// Packed format: each uint has visibility in low bit, forceImpostor in bit 1
+layout(std430, binding = BINDING_TREE_FOREST_CLUSTER_VIS) readonly buffer ClusterVisBuffer {
+    uint clusterVisibility[];    // bit 0 = visible, bit 1 = force impostor
+};
+
+// Output: Full detail tree instances
+layout(std430, binding = BINDING_TREE_FOREST_FULL_DETAIL) writeonly buffer FullDetailBuffer {
+    TreeFullDetail fullDetailTrees[];
+};
+
+// Output: Impostor instances
+layout(std430, binding = BINDING_TREE_FOREST_IMPOSTORS) writeonly buffer ImpostorBuffer {
+    TreeImpostor impostorTrees[];
+};
+
+// Output: Indirect draw commands
+layout(std430, binding = BINDING_TREE_FOREST_INDIRECT) buffer IndirectBuffer {
+    DrawIndexedIndirectCommand fullDetailCmd;
+    DrawIndirectCommand impostorCmd;
+};
+
+// Uniforms
+layout(std140, binding = BINDING_TREE_FOREST_UNIFORMS) uniform Uniforms {
+    ForestUniforms u;
+};
+
+// Tree-to-cluster mapping (which cluster does each tree belong to)
+layout(std430, binding = BINDING_TREE_FOREST_TREE_CLUSTER) readonly buffer TreeClusterMap {
+    uint treeClusterIndex[];  // cluster index for each tree
+};
+
+// Push constants for per-frame data
+layout(push_constant) uniform PushConstants {
+    uint frameIndex;
+    uint _pad1;
+    uint _pad2;
+    uint _pad3;
+} push;
+
+void main() {
+    uint treeIdx = gl_GlobalInvocationID.x;
+
+    // Bounds check
+    if (treeIdx >= u.totalTreeCount) {
+        return;
+    }
+
+    // Load tree data
+    TreeSource tree = trees[treeIdx];
+    vec3 position = tree.positionScale.xyz;
+    float scale = tree.positionScale.w;
+    float rotation = tree.rotationArchetype.x;
+    uint archetype = uint(tree.rotationArchetype.y);
+
+    // Get cluster index for this tree
+    uint clusterIdx = treeClusterIndex[treeIdx];
+
+    // Read packed cluster visibility
+    uint clusterVis = (clusterIdx < u.clusterCount) ? clusterVisibility[clusterIdx] : 1u;
+    bool clusterVisible = (clusterVis & 1u) != 0u;
+    bool forceImpostor = (clusterVis & 2u) != 0u;
+
+    // Early out: if cluster is culled, skip this tree entirely
+    if (!clusterVisible) {
+        return;
+    }
+
+    // Calculate distance to camera
+    float distance = length(position - u.cameraPosition.xyz);
+
+    // Distance culling
+    if (distance > u.cullDistance) {
+        return;
+    }
+
+    // Frustum culling (sphere test with tree bounding radius)
+    // Approximate tree radius from scale
+    float treeRadius = scale * 10.0;  // Conservative estimate
+    if (!isInFrustumSphere(u.frustumPlanes, position, treeRadius)) {
+        return;
+    }
+
+    // Determine LOD level
+    int lodLevel;
+    if (forceImpostor) {
+        lodLevel = 2;  // Force impostor
+    } else {
+        lodLevel = calculateLODLevel(distance, u.fullDetailDistance,
+                                      u.impostorStartDistance, u.impostorEndDistance,
+                                      u.cullDistance);
+    }
+
+    // Skip culled trees
+    if (lodLevel == 3) {
+        return;
+    }
+
+    // Calculate blend factor for transitions
+    float blendFactor = calculateBlendFactor(distance, u.impostorStartDistance, u.impostorEndDistance);
+
+    // Get archetype bounds for impostor sizing
+    vec4 bounds = u.archetypeBounds[archetype % 4];
+    float hSize = bounds.x * scale * 1.1;
+    float vSize = bounds.y * scale * 1.1;
+    float baseOffset = bounds.z * scale;
+
+    // Output based on LOD level
+    if (lodLevel == 0) {
+        // Full detail - atomic add to get slot
+        uint slot = atomicAdd(fullDetailCmd.instanceCount, 1);
+
+        // Enforce budget (drop if over)
+        if (slot < u.fullDetailBudget) {
+            TreeFullDetail fd;
+            fd.positionScale = vec4(position, scale);
+            fd.rotationBlend = vec4(rotation, 0.0, 0.0, 0.0);
+            fd.archetypeIndex = archetype;
+            fd.treeIndex = treeIdx;
+            fd._pad = vec2(0.0);
+            fullDetailTrees[slot] = fd;
+        }
+    } else if (lodLevel == 1) {
+        // Blending - render BOTH full detail and impostor
+
+        // Full detail (with blend factor)
+        uint fullSlot = atomicAdd(fullDetailCmd.instanceCount, 1);
+        if (fullSlot < u.fullDetailBudget) {
+            TreeFullDetail fd;
+            fd.positionScale = vec4(position, scale);
+            fd.rotationBlend = vec4(rotation, blendFactor, 0.0, 0.0);
+            fd.archetypeIndex = archetype;
+            fd.treeIndex = treeIdx;
+            fd._pad = vec2(0.0);
+            fullDetailTrees[fullSlot] = fd;
+        }
+
+        // Impostor (with inverse blend)
+        uint impSlot = atomicAdd(impostorCmd.instanceCount, 1);
+        TreeImpostor imp;
+        imp.position = vec4(position, scale);
+        imp.sizeParams = vec4(hSize, vSize, baseOffset, blendFactor);
+        imp.rotationAtlas = vec4(rotation, float(archetype), 0.0, 0.0);
+        impostorTrees[impSlot] = imp;
+
+    } else {
+        // Pure impostor
+        uint slot = atomicAdd(impostorCmd.instanceCount, 1);
+
+        TreeImpostor imp;
+        imp.position = vec4(position, scale);
+        imp.sizeParams = vec4(hSize, vSize, baseOffset, 1.0);
+        imp.rotationAtlas = vec4(rotation, float(archetype), 0.0, 0.0);
+        impostorTrees[slot] = imp;
+    }
+}

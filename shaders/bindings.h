@@ -175,6 +175,18 @@
 #define BINDING_TREE_LOD_SORTED_INDICES    5   // Sorted tree indices output
 
 // =============================================================================
+// GPU Forest System (1M trees) - tree_forest_cull.comp
+// =============================================================================
+#define BINDING_TREE_FOREST_SOURCE         0   // TreeSource SSBO (1M static tree data)
+#define BINDING_TREE_FOREST_CLUSTERS       1   // ClusterData SSBO (spatial clusters)
+#define BINDING_TREE_FOREST_CLUSTER_VIS    2   // Cluster visibility SSBO
+#define BINDING_TREE_FOREST_FULL_DETAIL    3   // Full detail output SSBO
+#define BINDING_TREE_FOREST_IMPOSTORS      4   // Impostor output SSBO
+#define BINDING_TREE_FOREST_INDIRECT       5   // Indirect draw commands
+#define BINDING_TREE_FOREST_UNIFORMS       6   // ForestUniforms UBO
+#define BINDING_TREE_FOREST_TREE_CLUSTER   7   // Tree-to-cluster mapping
+
+// =============================================================================
 // Leaf Compute Shader Descriptor Set
 // =============================================================================
 #define BINDING_LEAF_COMPUTE_INPUT         0   // Input particle buffer
@@ -523,6 +535,16 @@ constexpr uint32_t TREE_LOD_STATES        = BINDING_TREE_LOD_STATES;
 constexpr uint32_t TREE_LOD_UNIFORMS      = BINDING_TREE_LOD_UNIFORMS;
 constexpr uint32_t TREE_LOD_COUNTERS      = BINDING_TREE_LOD_COUNTERS;
 constexpr uint32_t TREE_LOD_SORTED_INDICES = BINDING_TREE_LOD_SORTED_INDICES;
+
+// GPU Forest System (1M trees)
+constexpr uint32_t TREE_FOREST_SOURCE       = BINDING_TREE_FOREST_SOURCE;
+constexpr uint32_t TREE_FOREST_CLUSTERS     = BINDING_TREE_FOREST_CLUSTERS;
+constexpr uint32_t TREE_FOREST_CLUSTER_VIS  = BINDING_TREE_FOREST_CLUSTER_VIS;
+constexpr uint32_t TREE_FOREST_FULL_DETAIL  = BINDING_TREE_FOREST_FULL_DETAIL;
+constexpr uint32_t TREE_FOREST_IMPOSTORS    = BINDING_TREE_FOREST_IMPOSTORS;
+constexpr uint32_t TREE_FOREST_INDIRECT     = BINDING_TREE_FOREST_INDIRECT;
+constexpr uint32_t TREE_FOREST_UNIFORMS     = BINDING_TREE_FOREST_UNIFORMS;
+constexpr uint32_t TREE_FOREST_TREE_CLUSTER = BINDING_TREE_FOREST_TREE_CLUSTER;
 
 // Leaf Compute
 constexpr uint32_t LEAF_COMPUTE_INPUT     = BINDING_LEAF_COMPUTE_INPUT;
