@@ -95,6 +95,7 @@ public:
         VkCommandPool commandPool = VK_NULL_HANDLE;
         VkQueue graphicsQueue = VK_NULL_HANDLE;
         DescriptorManager::Pool* descriptorPool = nullptr;
+        std::string resourcePath;  // Path to resources (shaders, etc.)
         uint32_t maxTreeCount = 1000000;  // Default 1M trees
         uint32_t maxFullDetailTrees = 5000;  // Budget for full detail
         uint32_t maxImpostorTrees = 200000;  // Max visible impostors
@@ -168,6 +169,7 @@ private:
     VkCommandPool commandPool_ = VK_NULL_HANDLE;
     VkQueue graphicsQueue_ = VK_NULL_HANDLE;
     DescriptorManager::Pool* descriptorPool_ = nullptr;
+    std::string resourcePath_;
 
     // Compute pipeline
     VkPipeline cullPipeline_ = VK_NULL_HANDLE;

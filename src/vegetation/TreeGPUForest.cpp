@@ -27,6 +27,7 @@ bool TreeGPUForest::init(const InitInfo& info) {
     commandPool_ = info.commandPool;
     graphicsQueue_ = info.graphicsQueue;
     descriptorPool_ = info.descriptorPool;
+    resourcePath_ = info.resourcePath;
     maxTreeCount_ = info.maxTreeCount;
     maxFullDetailTrees_ = info.maxFullDetailTrees;
     maxImpostorTrees_ = info.maxImpostorTrees;
@@ -162,9 +163,10 @@ bool TreeGPUForest::createBuffers() {
 
 bool TreeGPUForest::createPipeline() {
     // Load compute shader
-    auto shaderModuleOpt = ShaderLoader::loadShaderModule(device_, "shaders/tree_forest_cull.comp.spv");
+    std::string shaderPath = resourcePath_ + "/shaders/tree_forest_cull.comp.spv";
+    auto shaderModuleOpt = ShaderLoader::loadShaderModule(device_, shaderPath);
     if (!shaderModuleOpt.has_value()) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeGPUForest: Failed to load cull shader");
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeGPUForest: Failed to load cull shader from %s", shaderPath.c_str());
         return false;
     }
     VkShaderModule shaderModule = shaderModuleOpt.value();

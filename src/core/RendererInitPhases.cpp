@@ -502,6 +502,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         gpuForestInfo.commandPool = commandPool.get();
         gpuForestInfo.graphicsQueue = graphicsQueue;
         gpuForestInfo.descriptorPool = &*descriptorManagerPool;
+        gpuForestInfo.resourcePath = resourcePath;
         gpuForestInfo.maxTreeCount = 1000000;      // 1M trees target
         gpuForestInfo.maxFullDetailTrees = 5000;   // Budget for nearby trees
         gpuForestInfo.maxImpostorTrees = 200000;   // Max visible impostors
