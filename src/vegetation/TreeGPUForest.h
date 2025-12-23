@@ -8,6 +8,8 @@
 #include <memory>
 #include <functional>
 #include "core/DescriptorManager.h"
+#include "core/BufferUtils.h"
+#include "core/VulkanRAII.h"
 
 struct TreeLODSettings;
 
@@ -88,6 +90,9 @@ struct ForestIndirectCommands {
  */
 class TreeGPUForest {
 public:
+    // Triple-buffered to match MAX_FRAMES_IN_FLIGHT = 3
+    static constexpr uint32_t BUFFER_SET_COUNT = 3;
+
     struct InitInfo {
         VkDevice device = VK_NULL_HANDLE;
         VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
@@ -141,9 +146,9 @@ public:
                                const TreeLODSettings& settings);
 
     // Get buffers for rendering (returns the READ buffer set - previous frame's compute output)
-    VkBuffer getFullDetailInstanceBuffer() const { return fullDetailBuffer_; }
-    VkBuffer getImpostorInstanceBuffer() const { return impostorBuffers_[readBufferSet_]; }
-    VkBuffer getIndirectBuffer() const { return indirectBuffers_[readBufferSet_]; }
+    VkBuffer getFullDetailInstanceBuffer() const { return fullDetailBuffer_.buffer; }
+    VkBuffer getImpostorInstanceBuffer() const { return impostorBuffers_.buffers[readBufferSet_]; }
+    VkBuffer getIndirectBuffer() const { return indirectBuffers_.buffers[readBufferSet_]; }
 
     // Advance buffer sets after frame is complete (call at end of frame)
     // Matches ParticleSystem pattern: render reads from where compute wrote, compute moves to next
@@ -178,47 +183,32 @@ private:
     DescriptorManager::Pool* descriptorPool_ = nullptr;
     std::string resourcePath_;
 
-    // Compute pipeline
-    VkPipeline cullPipeline_ = VK_NULL_HANDLE;
-    VkPipelineLayout cullPipelineLayout_ = VK_NULL_HANDLE;
-    VkDescriptorSetLayout descriptorSetLayout_ = VK_NULL_HANDLE;
-    std::array<VkDescriptorSet, 2> descriptorSets_{};
+    // Compute pipeline (RAII managed)
+    ManagedPipeline cullPipeline_;
+    ManagedPipelineLayout cullPipelineLayout_;
+    ManagedDescriptorSetLayout descriptorSetLayout_;
+    std::vector<VkDescriptorSet> descriptorSets_;
 
-    // Buffers
-    VkBuffer sourceBuffer_ = VK_NULL_HANDLE;        // Tree source data (static)
-    VmaAllocation sourceAllocation_ = VK_NULL_HANDLE;
-
-    VkBuffer clusterBuffer_ = VK_NULL_HANDLE;       // Cluster bounds
-    VmaAllocation clusterAllocation_ = VK_NULL_HANDLE;
-
-    VkBuffer clusterVisBuffer_ = VK_NULL_HANDLE;    // Cluster visibility (updated each frame)
-    VmaAllocation clusterVisAllocation_ = VK_NULL_HANDLE;
+    // Static buffers (single allocation)
+    BufferUtils::SingleBuffer sourceBuffer_;        // Tree source data (static)
+    BufferUtils::SingleBuffer clusterBuffer_;       // Cluster bounds
+    BufferUtils::SingleBuffer clusterVisBuffer_;    // Cluster visibility (updated each frame)
     uint32_t* clusterVisMapped_ = nullptr;
+    BufferUtils::SingleBuffer treeClusterMapBuffer_; // Tree -> cluster index mapping
+    BufferUtils::SingleBuffer fullDetailBuffer_;    // Output: full detail instances
 
-    VkBuffer treeClusterMapBuffer_ = VK_NULL_HANDLE; // Tree -> cluster index mapping
-    VmaAllocation treeClusterMapAllocation_ = VK_NULL_HANDLE;
-
-    VkBuffer fullDetailBuffer_ = VK_NULL_HANDLE;    // Output: full detail instances
-    VmaAllocation fullDetailAllocation_ = VK_NULL_HANDLE;
-
-    // Double-buffered for compute/render separation (avoids synchronization issues)
-    static constexpr uint32_t BUFFER_SET_COUNT = 2;
-    std::array<VkBuffer, BUFFER_SET_COUNT> impostorBuffers_{};      // Output: impostor instances
-    std::array<VmaAllocation, BUFFER_SET_COUNT> impostorAllocations_{};
-
-    std::array<VkBuffer, BUFFER_SET_COUNT> indirectBuffers_{};      // Indirect draw commands
-    std::array<VmaAllocation, BUFFER_SET_COUNT> indirectAllocations_{};
+    // Triple-buffered output buffers (compute writes to one, graphics reads from another)
+    BufferUtils::DoubleBufferedBufferSet impostorBuffers_;  // Output: impostor instances
+    BufferUtils::DoubleBufferedBufferSet indirectBuffers_;  // Indirect draw commands
 
     uint32_t writeBufferSet_ = 0;  // Compute writes to this set
     uint32_t readBufferSet_ = 0;   // Graphics reads from this set (starts at 0, first frame reads compute output via barrier)
 
-    VkBuffer uniformBuffer_ = VK_NULL_HANDLE;       // Forest uniforms
-    VmaAllocation uniformAllocation_ = VK_NULL_HANDLE;
-    ForestUniformsGPU* uniformsMapped_ = nullptr;
+    // Per-frame uniform buffer
+    BufferUtils::PerFrameBufferSet uniformBuffers_;  // Forest uniforms
 
     // Staging buffer for readback
-    VkBuffer stagingBuffer_ = VK_NULL_HANDLE;
-    VmaAllocation stagingAllocation_ = VK_NULL_HANDLE;
+    BufferUtils::SingleBuffer stagingBuffer_;
 
     // Configuration
     uint32_t maxTreeCount_ = 1000000;

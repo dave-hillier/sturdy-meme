@@ -3,6 +3,7 @@
 #include "core/DescriptorManager.h"
 #include "core/ShaderLoader.h"
 #include "core/VulkanBarriers.h"
+#include "core/PipelineBuilder.h"
 #include "shaders/bindings.h"
 #include <SDL3/SDL.h>
 #include <random>
@@ -58,107 +59,114 @@ bool TreeGPUForest::init(const InitInfo& info) {
 }
 
 bool TreeGPUForest::createBuffers() {
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    VmaAllocationCreateInfo allocInfo{};
+    uint32_t maxClusters = 1000;
 
     // Source buffer (static tree data) - GPU only
-    bufferInfo.size = maxTreeCount_ * sizeof(TreeSourceGPU);
-    bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-
-    if (vmaCreateBuffer(allocator_, &bufferInfo, &allocInfo,
-                        &sourceBuffer_, &sourceAllocation_, nullptr) != VK_SUCCESS) {
+    BufferUtils::SingleBufferBuilder sourceBuilder;
+    if (!sourceBuilder.setAllocator(allocator_)
+             .setSize(maxTreeCount_ * sizeof(TreeSourceGPU))
+             .setUsage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)
+             .setMemoryUsage(VMA_MEMORY_USAGE_GPU_ONLY)
+             .setAllocationFlags(0)
+             .build(sourceBuffer_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create tree source buffer");
         return false;
     }
 
     // Cluster buffer - GPU only
-    // Estimate max clusters: 1km² with 50m cells = 400 clusters
-    uint32_t maxClusters = 1000;
-    bufferInfo.size = maxClusters * sizeof(ClusterDataGPU);
-    if (vmaCreateBuffer(allocator_, &bufferInfo, &allocInfo,
-                        &clusterBuffer_, &clusterAllocation_, nullptr) != VK_SUCCESS) {
+    BufferUtils::SingleBufferBuilder clusterBuilder;
+    if (!clusterBuilder.setAllocator(allocator_)
+             .setSize(maxClusters * sizeof(ClusterDataGPU))
+             .setUsage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)
+             .setMemoryUsage(VMA_MEMORY_USAGE_GPU_ONLY)
+             .setAllocationFlags(0)
+             .build(clusterBuffer_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create cluster buffer");
         return false;
     }
 
-    // Cluster visibility buffer - CPU writable, GPU readable
-    bufferInfo.size = maxClusters * sizeof(uint32_t);
-    bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-    allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
-    allocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
-    VmaAllocationInfo visAllocInfo{};
-    if (vmaCreateBuffer(allocator_, &bufferInfo, &allocInfo,
-                        &clusterVisBuffer_, &clusterVisAllocation_, &visAllocInfo) != VK_SUCCESS) {
+    // Cluster visibility buffer - CPU writable, GPU readable (mapped)
+    BufferUtils::SingleBufferBuilder clusterVisBuilder;
+    if (!clusterVisBuilder.setAllocator(allocator_)
+             .setSize(maxClusters * sizeof(uint32_t))
+             .setUsage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+             .setMemoryUsage(VMA_MEMORY_USAGE_CPU_TO_GPU)
+             .setAllocationFlags(VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT)
+             .build(clusterVisBuffer_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create cluster visibility buffer");
         return false;
     }
-    clusterVisMapped_ = static_cast<uint32_t*>(visAllocInfo.pMappedData);
+    clusterVisMapped_ = static_cast<uint32_t*>(clusterVisBuffer_.mappedPointer);
 
     // Tree-to-cluster mapping buffer - GPU only
-    bufferInfo.size = maxTreeCount_ * sizeof(uint32_t);
-    bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-    allocInfo.flags = 0;
-
-    if (vmaCreateBuffer(allocator_, &bufferInfo, &allocInfo,
-                        &treeClusterMapBuffer_, &treeClusterMapAllocation_, nullptr) != VK_SUCCESS) {
+    BufferUtils::SingleBufferBuilder treeClusterBuilder;
+    if (!treeClusterBuilder.setAllocator(allocator_)
+             .setSize(maxTreeCount_ * sizeof(uint32_t))
+             .setUsage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)
+             .setMemoryUsage(VMA_MEMORY_USAGE_GPU_ONLY)
+             .setAllocationFlags(0)
+             .build(treeClusterMapBuffer_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create tree-cluster map buffer");
         return false;
     }
 
-    // Full detail output buffer
-    bufferInfo.size = maxFullDetailTrees_ * sizeof(TreeFullDetailGPU);
-    bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-
-    if (vmaCreateBuffer(allocator_, &bufferInfo, &allocInfo,
-                        &fullDetailBuffer_, &fullDetailAllocation_, nullptr) != VK_SUCCESS) {
+    // Full detail output buffer - GPU only
+    BufferUtils::SingleBufferBuilder fullDetailBuilder;
+    if (!fullDetailBuilder.setAllocator(allocator_)
+             .setSize(maxFullDetailTrees_ * sizeof(TreeFullDetailGPU))
+             .setUsage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)
+             .setMemoryUsage(VMA_MEMORY_USAGE_GPU_ONLY)
+             .setAllocationFlags(0)
+             .build(fullDetailBuffer_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create full detail buffer");
         return false;
     }
 
-    // Double-buffered impostor output buffers (compute writes to one, graphics reads from other)
-    bufferInfo.size = maxImpostorTrees_ * sizeof(TreeImpostorGPU);
-
-    for (uint32_t i = 0; i < BUFFER_SET_COUNT; ++i) {
-        if (vmaCreateBuffer(allocator_, &bufferInfo, &allocInfo,
-                            &impostorBuffers_[i], &impostorAllocations_[i], nullptr) != VK_SUCCESS) {
-            return false;
-        }
-    }
-
-    // Double-buffered indirect draw buffers
-    bufferInfo.size = sizeof(ForestIndirectCommands);
-    bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
-                       VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-
-    for (uint32_t i = 0; i < BUFFER_SET_COUNT; ++i) {
-        if (vmaCreateBuffer(allocator_, &bufferInfo, &allocInfo,
-                            &indirectBuffers_[i], &indirectAllocations_[i], nullptr) != VK_SUCCESS) {
-            return false;
-        }
-    }
-
-    // Uniform buffer - CPU writable
-    bufferInfo.size = sizeof(ForestUniformsGPU);
-    bufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-    allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
-    allocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
-    VmaAllocationInfo uniformAllocInfo{};
-    if (vmaCreateBuffer(allocator_, &bufferInfo, &allocInfo,
-                        &uniformBuffer_, &uniformAllocation_, &uniformAllocInfo) != VK_SUCCESS) {
+    // Triple-buffered impostor output buffers
+    BufferUtils::DoubleBufferedBufferBuilder impostorBuilder;
+    if (!impostorBuilder.setAllocator(allocator_)
+             .setSetCount(BUFFER_SET_COUNT)
+             .setSize(maxImpostorTrees_ * sizeof(TreeImpostorGPU))
+             .setUsage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)
+             .setMemoryUsage(VMA_MEMORY_USAGE_GPU_ONLY)
+             .build(impostorBuffers_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create impostor buffers");
         return false;
     }
-    uniformsMapped_ = static_cast<ForestUniformsGPU*>(uniformAllocInfo.pMappedData);
+
+    // Triple-buffered indirect draw buffers
+    BufferUtils::DoubleBufferedBufferBuilder indirectBuilder;
+    if (!indirectBuilder.setAllocator(allocator_)
+             .setSetCount(BUFFER_SET_COUNT)
+             .setSize(sizeof(ForestIndirectCommands))
+             .setUsage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)
+             .setMemoryUsage(VMA_MEMORY_USAGE_GPU_ONLY)
+             .build(indirectBuffers_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create indirect buffers");
+        return false;
+    }
+
+    // Per-frame uniform buffers (triple-buffered, CPU writable)
+    BufferUtils::PerFrameBufferBuilder uniformBuilder;
+    if (!uniformBuilder.setAllocator(allocator_)
+             .setFrameCount(BUFFER_SET_COUNT)
+             .setSize(sizeof(ForestUniformsGPU))
+             .setUsage(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT)
+             .setMemoryUsage(VMA_MEMORY_USAGE_CPU_TO_GPU)
+             .build(uniformBuffers_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create uniform buffers");
+        return false;
+    }
 
     // Staging buffer for readback
-    bufferInfo.size = sizeof(ForestIndirectCommands);
-    bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    allocInfo.usage = VMA_MEMORY_USAGE_GPU_TO_CPU;
-    allocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
-    if (vmaCreateBuffer(allocator_, &bufferInfo, &allocInfo,
-                        &stagingBuffer_, &stagingAllocation_, nullptr) != VK_SUCCESS) {
+    BufferUtils::SingleBufferBuilder stagingBuilder;
+    if (!stagingBuilder.setAllocator(allocator_)
+             .setSize(sizeof(ForestIndirectCommands))
+             .setUsage(VK_BUFFER_USAGE_TRANSFER_DST_BIT)
+             .setMemoryUsage(VMA_MEMORY_USAGE_GPU_TO_CPU)
+             .setAllocationFlags(VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT)
+             .build(stagingBuffer_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create staging buffer");
         return false;
     }
 
@@ -166,138 +174,77 @@ bool TreeGPUForest::createBuffers() {
 }
 
 bool TreeGPUForest::createPipeline() {
-    // Load compute shader
-    std::string shaderPath = resourcePath_ + "/shaders/tree_forest_cull.comp.spv";
-    auto shaderModuleOpt = ShaderLoader::loadShaderModule(device_, shaderPath);
-    if (!shaderModuleOpt.has_value()) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeGPUForest: Failed to load cull shader from %s", shaderPath.c_str());
+    // Build descriptor set layout using PipelineBuilder
+    PipelineBuilder layoutBuilder(device_);
+    layoutBuilder.addDescriptorBinding(Bindings::TREE_FOREST_SOURCE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT)
+        .addDescriptorBinding(Bindings::TREE_FOREST_CLUSTERS, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT)
+        .addDescriptorBinding(Bindings::TREE_FOREST_CLUSTER_VIS, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT)
+        .addDescriptorBinding(Bindings::TREE_FOREST_FULL_DETAIL, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT)
+        .addDescriptorBinding(Bindings::TREE_FOREST_IMPOSTORS, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT)
+        .addDescriptorBinding(Bindings::TREE_FOREST_INDIRECT, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT)
+        .addDescriptorBinding(Bindings::TREE_FOREST_UNIFORMS, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT)
+        .addDescriptorBinding(Bindings::TREE_FOREST_TREE_CLUSTER, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT);
+
+    VkDescriptorSetLayout rawDescSetLayout = VK_NULL_HANDLE;
+    if (!layoutBuilder.buildDescriptorSetLayout(rawDescSetLayout)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeGPUForest: Failed to create descriptor set layout");
         return false;
     }
-    VkShaderModule shaderModule = shaderModuleOpt.value();
+    // Adopt raw handle into RAII wrapper
+    descriptorSetLayout_ = ManagedDescriptorSetLayout::fromRaw(device_, rawDescSetLayout);
 
-    // Descriptor set layout
-    std::array<VkDescriptorSetLayoutBinding, 8> bindings{};
+    // Build pipeline with PipelineBuilder
+    PipelineBuilder pipelineBuilder(device_);
+    pipelineBuilder.addShaderStage(resourcePath_ + "/shaders/tree_forest_cull.comp.spv", VK_SHADER_STAGE_COMPUTE_BIT)
+        .addPushConstantRange(VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(uint32_t) * 4);  // frameIndex + padding
 
-    // Binding 0: Tree source buffer
-    bindings[0].binding = Bindings::TREE_FOREST_SOURCE;
-    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bindings[0].descriptorCount = 1;
-    bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-    // Binding 1: Cluster buffer
-    bindings[1].binding = Bindings::TREE_FOREST_CLUSTERS;
-    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bindings[1].descriptorCount = 1;
-    bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-    // Binding 2: Cluster visibility
-    bindings[2].binding = Bindings::TREE_FOREST_CLUSTER_VIS;
-    bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bindings[2].descriptorCount = 1;
-    bindings[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-    // Binding 3: Full detail output
-    bindings[3].binding = Bindings::TREE_FOREST_FULL_DETAIL;
-    bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bindings[3].descriptorCount = 1;
-    bindings[3].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-    // Binding 4: Impostor output
-    bindings[4].binding = Bindings::TREE_FOREST_IMPOSTORS;
-    bindings[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bindings[4].descriptorCount = 1;
-    bindings[4].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-    // Binding 5: Indirect commands
-    bindings[5].binding = Bindings::TREE_FOREST_INDIRECT;
-    bindings[5].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bindings[5].descriptorCount = 1;
-    bindings[5].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-    // Binding 6: Uniforms
-    bindings[6].binding = Bindings::TREE_FOREST_UNIFORMS;
-    bindings[6].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    bindings[6].descriptorCount = 1;
-    bindings[6].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-    // Binding 7: Tree-to-cluster mapping
-    bindings[7].binding = Bindings::TREE_FOREST_TREE_CLUSTER;
-    bindings[7].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bindings[7].descriptorCount = 1;
-    bindings[7].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-    VkDescriptorSetLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
-    layoutInfo.pBindings = bindings.data();
-
-    if (vkCreateDescriptorSetLayout(device_, &layoutInfo, nullptr, &descriptorSetLayout_) != VK_SUCCESS) {
-        vkDestroyShaderModule(device_, shaderModule, nullptr);
+    VkPipelineLayout rawPipelineLayout = VK_NULL_HANDLE;
+    if (!pipelineBuilder.buildPipelineLayout({descriptorSetLayout_.get()}, rawPipelineLayout)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeGPUForest: Failed to create pipeline layout");
         return false;
     }
+    cullPipelineLayout_ = ManagedPipelineLayout::fromRaw(device_, rawPipelineLayout);
 
-    // Push constant for frame index
-    VkPushConstantRange pushConstant{};
-    pushConstant.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    pushConstant.offset = 0;
-    pushConstant.size = sizeof(uint32_t) * 4;  // frameIndex + padding
-
-    // Pipeline layout
-    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
-    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutInfo.setLayoutCount = 1;
-    pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout_;
-    pipelineLayoutInfo.pushConstantRangeCount = 1;
-    pipelineLayoutInfo.pPushConstantRanges = &pushConstant;
-
-    if (vkCreatePipelineLayout(device_, &pipelineLayoutInfo, nullptr, &cullPipelineLayout_) != VK_SUCCESS) {
-        vkDestroyShaderModule(device_, shaderModule, nullptr);
+    VkPipeline rawPipeline = VK_NULL_HANDLE;
+    if (!pipelineBuilder.buildComputePipeline(cullPipelineLayout_.get(), rawPipeline)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeGPUForest: Failed to create compute pipeline");
         return false;
     }
+    cullPipeline_ = ManagedPipeline::fromRaw(device_, rawPipeline);
 
-    // Compute pipeline
-    VkComputePipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    pipelineInfo.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    pipelineInfo.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    pipelineInfo.stage.module = shaderModule;
-    pipelineInfo.stage.pName = "main";
-    pipelineInfo.layout = cullPipelineLayout_;
-
-    VkResult result = vkCreateComputePipelines(device_, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &cullPipeline_);
-    vkDestroyShaderModule(device_, shaderModule, nullptr);
-
-    return result == VK_SUCCESS;
+    return true;
 }
 
 bool TreeGPUForest::createDescriptorSets() {
-    // Allocate descriptor sets
-    for (uint32_t i = 0; i < 2; ++i) {
-        descriptorSets_[i] = descriptorPool_->allocateSingle(descriptorSetLayout_);
-        if (descriptorSets_[i] == VK_NULL_HANDLE) {
-            return false;
-        }
+    // Batch allocate descriptor sets - one per buffer set for triple-buffering
+    descriptorSets_ = descriptorPool_->allocate(descriptorSetLayout_.get(), BUFFER_SET_COUNT);
+    if (descriptorSets_.size() != BUFFER_SET_COUNT) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeGPUForest: Failed to allocate descriptor sets");
+        return false;
+    }
 
-        // Write descriptors
+    for (uint32_t i = 0; i < BUFFER_SET_COUNT; ++i) {
+        // Write descriptors - use non-fluent pattern to avoid copy semantics bug
         DescriptorManager::SetWriter writer(device_, descriptorSets_[i]);
 
-        writer.writeBuffer(Bindings::TREE_FOREST_SOURCE, sourceBuffer_, 0,
+        writer.writeBuffer(Bindings::TREE_FOREST_SOURCE, sourceBuffer_.buffer, 0,
                           maxTreeCount_ * sizeof(TreeSourceGPU), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-        writer.writeBuffer(Bindings::TREE_FOREST_CLUSTERS, clusterBuffer_, 0,
+        writer.writeBuffer(Bindings::TREE_FOREST_CLUSTERS, clusterBuffer_.buffer, 0,
                           1000 * sizeof(ClusterDataGPU), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-        writer.writeBuffer(Bindings::TREE_FOREST_CLUSTER_VIS, clusterVisBuffer_, 0,
+        writer.writeBuffer(Bindings::TREE_FOREST_CLUSTER_VIS, clusterVisBuffer_.buffer, 0,
                           1000 * sizeof(uint32_t), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-        writer.writeBuffer(Bindings::TREE_FOREST_FULL_DETAIL, fullDetailBuffer_, 0,
+        writer.writeBuffer(Bindings::TREE_FOREST_FULL_DETAIL, fullDetailBuffer_.buffer, 0,
                           maxFullDetailTrees_ * sizeof(TreeFullDetailGPU), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-        // Each descriptor set binds to its corresponding buffer set (set 0 -> buffers[0], set 1 -> buffers[1])
+        // Each descriptor set binds to its corresponding buffer set (set 0 -> buffers[0], set 1 -> buffers[1], etc.)
         // This matches GrassSystem convention - no per-frame descriptor updates needed
-        writer.writeBuffer(Bindings::TREE_FOREST_IMPOSTORS, impostorBuffers_[i], 0,
+        writer.writeBuffer(Bindings::TREE_FOREST_IMPOSTORS, impostorBuffers_.buffers[i], 0,
                           maxImpostorTrees_ * sizeof(TreeImpostorGPU), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-        writer.writeBuffer(Bindings::TREE_FOREST_INDIRECT, indirectBuffers_[i], 0,
+        writer.writeBuffer(Bindings::TREE_FOREST_INDIRECT, indirectBuffers_.buffers[i], 0,
                           sizeof(ForestIndirectCommands), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-        writer.writeBuffer(Bindings::TREE_FOREST_UNIFORMS, uniformBuffer_, 0,
+        // Use per-frame uniform buffer (frame i uses uniform buffer i)
+        writer.writeBuffer(Bindings::TREE_FOREST_UNIFORMS, uniformBuffers_.buffers[i], 0,
                           sizeof(ForestUniformsGPU));
-        writer.writeBuffer(Bindings::TREE_FOREST_TREE_CLUSTER, treeClusterMapBuffer_, 0,
+        writer.writeBuffer(Bindings::TREE_FOREST_TREE_CLUSTER, treeClusterMapBuffer_.buffer, 0,
                           maxTreeCount_ * sizeof(uint32_t), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
 
         writer.update();
@@ -309,32 +256,26 @@ bool TreeGPUForest::createDescriptorSets() {
 void TreeGPUForest::cleanup() {
     if (device_ == VK_NULL_HANDLE) return;
 
-    vkDestroyPipeline(device_, cullPipeline_, nullptr);
-    vkDestroyPipelineLayout(device_, cullPipelineLayout_, nullptr);
-    vkDestroyDescriptorSetLayout(device_, descriptorSetLayout_, nullptr);
+    // RAII wrappers (cullPipeline_, cullPipelineLayout_, descriptorSetLayout_)
+    // are automatically cleaned up when the object is destroyed
 
-    auto destroyBuffer = [this](VkBuffer& buf, VmaAllocation& alloc) {
-        if (buf != VK_NULL_HANDLE) {
-            vmaDestroyBuffer(allocator_, buf, alloc);
-            buf = VK_NULL_HANDLE;
-            alloc = VK_NULL_HANDLE;
-        }
-    };
+    // Destroy single buffers
+    BufferUtils::destroyBuffer(allocator_, sourceBuffer_);
+    BufferUtils::destroyBuffer(allocator_, clusterBuffer_);
+    BufferUtils::destroyBuffer(allocator_, clusterVisBuffer_);
+    clusterVisMapped_ = nullptr;
+    BufferUtils::destroyBuffer(allocator_, treeClusterMapBuffer_);
+    BufferUtils::destroyBuffer(allocator_, fullDetailBuffer_);
 
-    destroyBuffer(sourceBuffer_, sourceAllocation_);
-    destroyBuffer(clusterBuffer_, clusterAllocation_);
-    destroyBuffer(clusterVisBuffer_, clusterVisAllocation_);
-    destroyBuffer(treeClusterMapBuffer_, treeClusterMapAllocation_);
-    destroyBuffer(fullDetailBuffer_, fullDetailAllocation_);
+    // Destroy triple-buffered output buffers
+    BufferUtils::destroyBuffers(allocator_, impostorBuffers_);
+    BufferUtils::destroyBuffers(allocator_, indirectBuffers_);
 
-    // Destroy double-buffered impostor and indirect buffers
-    for (uint32_t i = 0; i < BUFFER_SET_COUNT; ++i) {
-        destroyBuffer(impostorBuffers_[i], impostorAllocations_[i]);
-        destroyBuffer(indirectBuffers_[i], indirectAllocations_[i]);
-    }
+    // Destroy per-frame uniform buffers
+    BufferUtils::destroyBuffers(allocator_, uniformBuffers_);
 
-    destroyBuffer(uniformBuffer_, uniformAllocation_);
-    destroyBuffer(stagingBuffer_, stagingAllocation_);
+    // Destroy staging buffer
+    BufferUtils::destroyBuffer(allocator_, stagingBuffer_);
 }
 
 void TreeGPUForest::generateProceduralForest(const glm::vec3& worldMin, const glm::vec3& worldMax,
@@ -593,7 +534,7 @@ void TreeGPUForest::uploadTreeData(const std::vector<TreeSourceGPU>& trees) {
     copyRegion.srcOffset = 0;
     copyRegion.dstOffset = 0;
     copyRegion.size = dataSize;
-    vkCmdCopyBuffer(cmd, stagingBuf, sourceBuffer_, 1, &copyRegion);
+    vkCmdCopyBuffer(cmd, stagingBuf, sourceBuffer_.buffer, 1, &copyRegion);
 
     vkEndCommandBuffer(cmd);
 
@@ -695,12 +636,12 @@ void TreeGPUForest::buildClusterGrid(float cellSize) {
     copyRegion.srcOffset = 0;
     copyRegion.dstOffset = 0;
     copyRegion.size = clusterSize;
-    vkCmdCopyBuffer(cmd, stagingBuf, clusterBuffer_, 1, &copyRegion);
+    vkCmdCopyBuffer(cmd, stagingBuf, clusterBuffer_.buffer, 1, &copyRegion);
 
     // Copy tree-cluster mapping
     copyRegion.srcOffset = clusterSize;
     copyRegion.size = mapSize;
-    vkCmdCopyBuffer(cmd, stagingBuf, treeClusterMapBuffer_, 1, &copyRegion);
+    vkCmdCopyBuffer(cmd, stagingBuf, treeClusterMapBuffer_.buffer, 1, &copyRegion);
 
     vkEndCommandBuffer(cmd);
 
@@ -769,27 +710,27 @@ void TreeGPUForest::recordCullingCompute(VkCommandBuffer cmd, uint32_t frameInde
                                           const TreeLODSettings& settings) {
     if (!initialized_ || currentTreeCount_ == 0) return;
 
-    // Update uniforms
-    uniformsMapped_->cameraPosition = glm::vec4(cameraPos, 0.0f);
+    // Update uniforms to the per-frame uniform buffer (uses writeBufferSet_ to match descriptor set)
+    ForestUniformsGPU* uniforms = static_cast<ForestUniformsGPU*>(uniformBuffers_.mappedPointers[writeBufferSet_]);
+    uniforms->cameraPosition = glm::vec4(cameraPos, 0.0f);
     for (int i = 0; i < 6; ++i) {
-        uniformsMapped_->frustumPlanes[i] = frustumPlanes[i];
+        uniforms->frustumPlanes[i] = frustumPlanes[i];
     }
-    uniformsMapped_->fullDetailDistance = settings.fullDetailDistance;
-    uniformsMapped_->impostorStartDistance = settings.fullDetailDistance;
-    uniformsMapped_->impostorEndDistance = settings.fullDetailDistance + settings.blendRange;
-    uniformsMapped_->cullDistance = settings.impostorDistance;
-    uniformsMapped_->fullDetailBudget = settings.fullDetailBudget;
-    uniformsMapped_->totalTreeCount = currentTreeCount_;
-    uniformsMapped_->clusterCount = clusterCount_;
-    uniformsMapped_->clusterImpostorDist = settings.clusterImpostorDistance;
+    uniforms->fullDetailDistance = settings.fullDetailDistance;
+    uniforms->impostorStartDistance = settings.fullDetailDistance;
+    uniforms->impostorEndDistance = settings.fullDetailDistance + settings.blendRange;
+    uniforms->cullDistance = settings.impostorDistance;
+    uniforms->fullDetailBudget = settings.fullDetailBudget;
+    uniforms->totalTreeCount = currentTreeCount_;
+    uniforms->clusterCount = clusterCount_;
+    uniforms->clusterImpostorDist = settings.clusterImpostorDistance;
 
     for (int i = 0; i < 4; ++i) {
-        uniformsMapped_->archetypeBounds[i] = archetypeBounds_[i];
+        uniforms->archetypeBounds[i] = archetypeBounds_[i];
     }
 
-    // Use write buffer set for compute output (double-buffering)
-    VkBuffer writeIndirectBuffer = indirectBuffers_[writeBufferSet_];
-    VkBuffer writeImpostorBuffer = impostorBuffers_[writeBufferSet_];
+    // Use write buffer set for compute output (triple-buffering)
+    VkBuffer writeIndirectBuffer = indirectBuffers_.buffers[writeBufferSet_];
 
     // Clear indirect buffer using vkCmdFillBuffer (more reliable than vkCmdUpdateBuffer)
     // This zeros out the entire buffer including all instanceCount fields
@@ -817,13 +758,13 @@ void TreeGPUForest::recordCullingCompute(VkCommandBuffer cmd, uint32_t frameInde
     // Bind pipeline and descriptor set
     // Use writeBufferSet_ to select descriptor set (matches GrassSystem convention)
     // Each descriptor set is permanently bound to its buffer set at init time
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullPipeline_);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullPipelineLayout_,
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullPipeline_.get());
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullPipelineLayout_.get(),
                             0, 1, &descriptorSets_[writeBufferSet_], 0, nullptr);
 
     // Push constants
     uint32_t pushData[4] = {frameIndex, 0, 0, 0};
-    vkCmdPushConstants(cmd, cullPipelineLayout_, VK_SHADER_STAGE_COMPUTE_BIT,
+    vkCmdPushConstants(cmd, cullPipelineLayout_.get(), VK_SHADER_STAGE_COMPUTE_BIT,
                        0, sizeof(pushData), pushData);
 
     // Dispatch: 256 threads per workgroup
