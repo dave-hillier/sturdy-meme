@@ -651,7 +651,7 @@ void TerrainSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraP
     uniforms.useVolumetricSnow = useVolumetricSnow ? 1.0f : 0.0f;
     uniforms.snowMaxHeight = snowMaxHeight;
     uniforms.showBiomeDebug = showBiomeDebug ? 1.0f : 0.0f;
-    uniforms.snowPadding2 = 0.0f;
+    uniforms.terrainPadding2 = 0.0f;
 
     memcpy((*buffers)->getUniformMappedPtr(frameIndex), &uniforms, sizeof(TerrainUniforms));
 
