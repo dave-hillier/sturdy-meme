@@ -256,7 +256,19 @@ void Renderer::setupRenderPipeline() {
 
     renderPipeline.shadowStage.setTreeCallback([this](VkCommandBuffer cb, uint32_t cascade, const glm::mat4& lightMatrix) {
         (void)lightMatrix;
-        if (systems_->tree() && systems_->treeRenderer()) {
+        bool gpuForestActive = systems_->treeGPUForest() && systems_->treeGPUForest()->isReady();
+
+        if (gpuForestActive && systems_->treeLOD()) {
+            // Render GPU forest impostor shadows using indirect draw
+            VkBuffer uniformBuffer = systems_->globalBuffers().uniformBuffers.buffers[currentFrame];
+            VkDeviceSize impostorCmdOffset = sizeof(VkDrawIndexedIndirectCommand);
+            systems_->treeLOD()->renderImpostorShadowsIndirect(
+                cb, currentFrame, static_cast<int>(cascade), uniformBuffer,
+                systems_->treeGPUForest()->getImpostorInstanceBuffer(),
+                systems_->treeGPUForest()->getIndirectBuffer(),
+                impostorCmdOffset
+            );
+        } else if (systems_->tree() && systems_->treeRenderer()) {
             systems_->treeRenderer()->renderShadows(cb, currentFrame, *systems_->tree(), static_cast<int>(cascade), systems_->treeLOD());
         }
     });
@@ -1250,6 +1262,9 @@ bool Renderer::render(const Camera& camera) {
     systems_->grass().advanceBufferSet();
     systems_->weather().advanceBufferSet();
     systems_->leaf().advanceBufferSet();
+    if (systems_->treeGPUForest()) {
+        systems_->treeGPUForest()->advanceBufferSet();
+    }
 
     // Update water tile cull visibility tracking (uses absolute frame counter)
     systems_->waterTileCull().endFrame(currentFrame);
@@ -1461,13 +1476,27 @@ void Renderer::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float 
 
     auto treeCallback = [this, frameIndex](VkCommandBuffer cb, uint32_t cascade, const glm::mat4& lightMatrix) {
         (void)lightMatrix;
-        if (systems_->tree() && systems_->treeRenderer()) {
-            systems_->treeRenderer()->renderShadows(cb, frameIndex, *systems_->tree(), static_cast<int>(cascade), systems_->treeLOD());
-        }
-        // Render impostor shadows
-        if (systems_->treeLOD()) {
+        bool gpuForestActive = systems_->treeGPUForest() && systems_->treeGPUForest()->isReady();
+
+        if (gpuForestActive && systems_->treeLOD()) {
+            // Render GPU forest impostor shadows using indirect draw
             VkBuffer uniformBuffer = systems_->globalBuffers().uniformBuffers.buffers[frameIndex];
-            systems_->treeLOD()->renderImpostorShadows(cb, frameIndex, static_cast<int>(cascade), uniformBuffer);
+            VkDeviceSize impostorCmdOffset = sizeof(VkDrawIndexedIndirectCommand);
+            systems_->treeLOD()->renderImpostorShadowsIndirect(
+                cb, frameIndex, static_cast<int>(cascade), uniformBuffer,
+                systems_->treeGPUForest()->getImpostorInstanceBuffer(),
+                systems_->treeGPUForest()->getIndirectBuffer(),
+                impostorCmdOffset
+            );
+        } else {
+            // Old tree rendering path
+            if (systems_->tree() && systems_->treeRenderer()) {
+                systems_->treeRenderer()->renderShadows(cb, frameIndex, *systems_->tree(), static_cast<int>(cascade), systems_->treeLOD());
+            }
+            if (systems_->treeLOD()) {
+                VkBuffer uniformBuffer = systems_->globalBuffers().uniformBuffers.buffers[frameIndex];
+                systems_->treeLOD()->renderImpostorShadows(cb, frameIndex, static_cast<int>(cascade), uniformBuffer);
+            }
         }
     };
 
@@ -1592,13 +1621,18 @@ void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
         }
     }
 
+    // Check if GPU forest is handling tree rendering
+    bool gpuForestActive = systems_->treeGPUForest() && systems_->treeGPUForest()->isReady();
+
     // Render procedural trees using dedicated TreeRenderer with wind animation
-    if (systems_->tree() && systems_->treeRenderer()) {
+    // Skip when GPU forest is active - it handles all trees
+    if (!gpuForestActive && systems_->tree() && systems_->treeRenderer()) {
         systems_->treeRenderer()->render(cmd, frameIndex, systems_->wind().getTime(), *systems_->tree(), systems_->treeLOD());
     }
 
     // Render tree impostors for distant trees
-    if (systems_->treeLOD()) {
+    // Skip when GPU forest is active - it handles impostors via indirect draw
+    if (!gpuForestActive && systems_->treeLOD()) {
         systems_->treeLOD()->renderImpostors(
             cmd, frameIndex,
             systems_->globalBuffers().uniformBuffers.buffers[frameIndex],
@@ -1608,7 +1642,7 @@ void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
     }
 
     // Render GPU forest impostors using indirect draw
-    if (systems_->treeGPUForest() && systems_->treeGPUForest()->isReady() && systems_->treeLOD()) {
+    if (gpuForestActive && systems_->treeLOD()) {
         // Offset to impostor command in indirect buffer (after fullDetailCmd)
         VkDeviceSize impostorCmdOffset = sizeof(VkDrawIndexedIndirectCommand);
 

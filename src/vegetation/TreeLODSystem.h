@@ -98,6 +98,11 @@ public:
     void renderImpostorShadows(VkCommandBuffer cmd, uint32_t frameIndex,
                                int cascadeIndex, VkBuffer uniformBuffer);
 
+    // Render impostor shadows using indirect draw with external buffers (for GPU forest)
+    void renderImpostorShadowsIndirect(VkCommandBuffer cmd, uint32_t frameIndex,
+                                        int cascadeIndex, VkBuffer uniformBuffer,
+                                        VkBuffer instanceBuffer, VkBuffer indirectBuffer, VkDeviceSize indirectOffset);
+
     // Get LOD state for a specific tree
     const TreeLODState& getTreeLODState(uint32_t treeIndex) const;
 

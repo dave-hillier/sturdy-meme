@@ -1182,6 +1182,100 @@ void TreeLODSystem::renderImpostorShadows(VkCommandBuffer cmd, uint32_t frameInd
     vkCmdDrawIndexed(cmd, billboardIndexCount_, static_cast<uint32_t>(visibleImpostors_.size()), 0, 0, 0);
 }
 
+void TreeLODSystem::renderImpostorShadowsIndirect(VkCommandBuffer cmd, uint32_t frameIndex,
+                                                   int cascadeIndex, VkBuffer uniformBuffer,
+                                                   VkBuffer instanceBuffer, VkBuffer indirectBuffer, VkDeviceSize indirectOffset) {
+    if (impostorAtlas_->getArchetypeCount() == 0) return;
+    if (shadowPipeline_.get() == VK_NULL_HANDLE) return;
+    if (uniformBuffer == VK_NULL_HANDLE) return;
+
+    const auto& settings = getLODSettings();
+    if (!settings.enableImpostors) return;
+
+    // Update shadow descriptor set with UBO and albedo atlas
+    if (!shadowDescriptorSets_.empty() && impostorAtlas_->getArchetypeCount() > 0) {
+        VkImageView albedoView = impostorAtlas_->getAlbedoAtlasView(0);
+        VkSampler atlasSampler = impostorAtlas_->getAtlasSampler();
+
+        if (albedoView != VK_NULL_HANDLE) {
+            std::array<VkWriteDescriptorSet, 2> writes{};
+
+            // UBO
+            VkDescriptorBufferInfo uboInfo{};
+            uboInfo.buffer = uniformBuffer;
+            uboInfo.offset = 0;
+            uboInfo.range = VK_WHOLE_SIZE;
+
+            writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[0].dstSet = shadowDescriptorSets_[frameIndex];
+            writes[0].dstBinding = BINDING_TREE_IMPOSTOR_UBO;
+            writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            writes[0].descriptorCount = 1;
+            writes[0].pBufferInfo = &uboInfo;
+
+            // Albedo atlas
+            VkDescriptorImageInfo albedoInfo{};
+            albedoInfo.sampler = atlasSampler;
+            albedoInfo.imageView = albedoView;
+            albedoInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+            writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[1].dstSet = shadowDescriptorSets_[frameIndex];
+            writes[1].dstBinding = BINDING_TREE_IMPOSTOR_ALBEDO;
+            writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            writes[1].descriptorCount = 1;
+            writes[1].pImageInfo = &albedoInfo;
+
+            vkUpdateDescriptorSets(device_, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+        }
+    }
+
+    // Bind shadow pipeline
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipeline_.get());
+
+    // Bind descriptor sets
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipelineLayout_.get(),
+                           0, 1, &shadowDescriptorSets_[frameIndex], 0, nullptr);
+
+    // Push constants with cascade index
+    struct {
+        glm::vec4 cameraPos;
+        glm::vec4 lodParams;
+        glm::vec4 atlasParams;
+        int cascadeIndex;
+    } pushConstants;
+
+    pushConstants.cameraPos = glm::vec4(lastCameraPos_, 1.0f);
+    pushConstants.lodParams = glm::vec4(
+        1.0f,
+        settings.impostorBrightness,
+        settings.normalStrength,
+        settings.enableDebugElevation ? settings.debugElevation : -999.0f
+    );
+
+    if (impostorAtlas_->getArchetypeCount() > 0) {
+        const auto* archetype = impostorAtlas_->getArchetype(0u);
+        float hSize = archetype ? archetype->boundingSphereRadius * 1.1f : 10.0f;
+        float vSize = archetype ? archetype->treeHeight * 0.5f * 1.1f : 10.0f;
+        float baseOffset = archetype ? archetype->baseOffset : 0.0f;
+        pushConstants.atlasParams = glm::vec4(hSize, vSize, baseOffset, 0.0f);
+    }
+    pushConstants.cascadeIndex = cascadeIndex;
+
+    vkCmdPushConstants(cmd, shadowPipelineLayout_.get(),
+                      VK_SHADER_STAGE_VERTEX_BIT,
+                      0, sizeof(pushConstants), &pushConstants);
+
+    // Bind buffers - use external instance buffer
+    VkBuffer vertexBuffers[] = {billboardVertexBuffer_, instanceBuffer};
+    VkDeviceSize offsets[] = {0, 0};
+    vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
+    vkCmdBindIndexBuffer(cmd, billboardIndexBuffer_, 0, VK_INDEX_TYPE_UINT32);
+
+    // Draw indexed indirect - GPU determines instance count
+    vkCmdDrawIndexedIndirect(cmd, indirectBuffer, indirectOffset, 1, sizeof(VkDrawIndexedIndirectCommand));
+}
+
 const TreeLODState& TreeLODSystem::getTreeLODState(uint32_t treeIndex) const {
     static TreeLODState defaultState;
     if (treeIndex < lodStates_.size()) {

@@ -116,22 +116,26 @@ bool TreeGPUForest::createBuffers() {
         return false;
     }
 
-    // Impostor output buffer
+    // Double-buffered impostor output buffers (compute writes to one, graphics reads from other)
     bufferInfo.size = maxImpostorTrees_ * sizeof(TreeImpostorGPU);
 
-    if (vmaCreateBuffer(allocator_, &bufferInfo, &allocInfo,
-                        &impostorBuffer_, &impostorAllocation_, nullptr) != VK_SUCCESS) {
-        return false;
+    for (uint32_t i = 0; i < BUFFER_SET_COUNT; ++i) {
+        if (vmaCreateBuffer(allocator_, &bufferInfo, &allocInfo,
+                            &impostorBuffers_[i], &impostorAllocations_[i], nullptr) != VK_SUCCESS) {
+            return false;
+        }
     }
 
-    // Indirect draw buffer
+    // Double-buffered indirect draw buffers
     bufferInfo.size = sizeof(ForestIndirectCommands);
     bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
                        VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 
-    if (vmaCreateBuffer(allocator_, &bufferInfo, &allocInfo,
-                        &indirectBuffer_, &indirectAllocation_, nullptr) != VK_SUCCESS) {
-        return false;
+    for (uint32_t i = 0; i < BUFFER_SET_COUNT; ++i) {
+        if (vmaCreateBuffer(allocator_, &bufferInfo, &allocInfo,
+                            &indirectBuffers_[i], &indirectAllocations_[i], nullptr) != VK_SUCCESS) {
+            return false;
+        }
     }
 
     // Uniform buffer - CPU writable
@@ -285,9 +289,10 @@ bool TreeGPUForest::createDescriptorSets() {
                           1000 * sizeof(uint32_t), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
         writer.writeBuffer(Bindings::TREE_FOREST_FULL_DETAIL, fullDetailBuffer_, 0,
                           maxFullDetailTrees_ * sizeof(TreeFullDetailGPU), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-        writer.writeBuffer(Bindings::TREE_FOREST_IMPOSTORS, impostorBuffer_, 0,
+        // Initial binding uses writeBufferSet_; will be updated dynamically in recordCullingCompute
+        writer.writeBuffer(Bindings::TREE_FOREST_IMPOSTORS, impostorBuffers_[writeBufferSet_], 0,
                           maxImpostorTrees_ * sizeof(TreeImpostorGPU), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-        writer.writeBuffer(Bindings::TREE_FOREST_INDIRECT, indirectBuffer_, 0,
+        writer.writeBuffer(Bindings::TREE_FOREST_INDIRECT, indirectBuffers_[writeBufferSet_], 0,
                           sizeof(ForestIndirectCommands), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
         writer.writeBuffer(Bindings::TREE_FOREST_UNIFORMS, uniformBuffer_, 0,
                           sizeof(ForestUniformsGPU));
@@ -320,8 +325,13 @@ void TreeGPUForest::cleanup() {
     destroyBuffer(clusterVisBuffer_, clusterVisAllocation_);
     destroyBuffer(treeClusterMapBuffer_, treeClusterMapAllocation_);
     destroyBuffer(fullDetailBuffer_, fullDetailAllocation_);
-    destroyBuffer(impostorBuffer_, impostorAllocation_);
-    destroyBuffer(indirectBuffer_, indirectAllocation_);
+
+    // Destroy double-buffered impostor and indirect buffers
+    for (uint32_t i = 0; i < BUFFER_SET_COUNT; ++i) {
+        destroyBuffer(impostorBuffers_[i], impostorAllocations_[i]);
+        destroyBuffer(indirectBuffers_[i], indirectAllocations_[i]);
+    }
+
     destroyBuffer(uniformBuffer_, uniformAllocation_);
     destroyBuffer(stagingBuffer_, stagingAllocation_);
 }
@@ -334,32 +344,191 @@ void TreeGPUForest::generateProceduralForest(const glm::vec3& worldMin, const gl
 
 void TreeGPUForest::generateProceduralForest(const glm::vec3& worldMin, const glm::vec3& worldMax,
                                               uint32_t treeCount, const HeightFunction& getHeight, uint32_t seed) {
+    // Poisson disc sampling with minimum spacing
+    constexpr float minSpacing = 8.0f;  // Minimum distance between trees
+    constexpr float minHeight = 22.0f;  // Don't place trees below this height
+    constexpr int maxAttempts = 30;     // Attempts per active sample
+
     std::mt19937 rng(seed);
-    std::uniform_real_distribution<float> distX(worldMin.x, worldMax.x);
-    std::uniform_real_distribution<float> distZ(worldMin.z, worldMax.z);
+    std::uniform_real_distribution<float> distUnit(0.0f, 1.0f);
     std::uniform_real_distribution<float> distRot(0.0f, 6.28318f);
     std::uniform_real_distribution<float> distScale(0.8f, 1.2f);
     std::uniform_int_distribution<uint32_t> distArchetype(0, 3);
-    std::uniform_real_distribution<float> distSeed(0.0f, 1.0f);
 
-    std::vector<TreeSourceGPU> trees(treeCount);
+    float worldWidth = worldMax.x - worldMin.x;
+    float worldDepth = worldMax.z - worldMin.z;
 
-    for (uint32_t i = 0; i < treeCount; ++i) {
-        float x = distX(rng);
-        float z = distZ(rng);
+    // Grid for spatial lookup (cell size = minSpacing / sqrt(2))
+    float cellSize = minSpacing / 1.414f;
+    int gridWidth = static_cast<int>(std::ceil(worldWidth / cellSize));
+    int gridDepth = static_cast<int>(std::ceil(worldDepth / cellSize));
+
+    // Grid stores index into trees vector, -1 = empty
+    std::vector<int> grid(gridWidth * gridDepth, -1);
+    std::vector<TreeSourceGPU> trees;
+    trees.reserve(treeCount);
+
+    // Active list for Poisson disc sampling
+    std::vector<size_t> active;
+
+    // Helper to get grid index
+    auto toGrid = [&](float x, float z) -> std::pair<int, int> {
+        int gx = static_cast<int>((x - worldMin.x) / cellSize);
+        int gz = static_cast<int>((z - worldMin.z) / cellSize);
+        return {std::clamp(gx, 0, gridWidth - 1), std::clamp(gz, 0, gridDepth - 1)};
+    };
+
+    // Check if position is valid (no nearby trees within minSpacing)
+    auto isValidPosition = [&](float x, float z) -> bool {
+        auto [gx, gz] = toGrid(x, z);
+
+        // Check 5x5 neighborhood
+        for (int dz = -2; dz <= 2; ++dz) {
+            for (int dx = -2; dx <= 2; ++dx) {
+                int nx = gx + dx;
+                int nz = gz + dz;
+                if (nx < 0 || nx >= gridWidth || nz < 0 || nz >= gridDepth) continue;
+
+                int idx = grid[nz * gridWidth + nx];
+                if (idx >= 0) {
+                    const auto& other = trees[idx];
+                    float ox = other.positionScale.x;
+                    float oz = other.positionScale.z;
+                    float dist2 = (x - ox) * (x - ox) + (z - oz) * (z - oz);
+                    if (dist2 < minSpacing * minSpacing) {
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
+    };
+
+    // Add a tree at position
+    auto addTree = [&](float x, float z) {
         float y = getHeight ? getHeight(x, z) : 0.0f;
 
-        trees[i].positionScale = glm::vec4(x, y, z, distScale(rng));
-        trees[i].rotationArchetype = glm::vec4(
+        // Skip if below minimum height (water/beach level)
+        if (y < minHeight) return;
+
+        TreeSourceGPU tree;
+        tree.positionScale = glm::vec4(x, y, z, distScale(rng));
+        tree.rotationArchetype = glm::vec4(
             distRot(rng),
             static_cast<float>(distArchetype(rng)),
-            distSeed(rng),
+            distUnit(rng),  // seed
             0.0f
         );
+
+        auto [gx, gz] = toGrid(x, z);
+        grid[gz * gridWidth + gx] = static_cast<int>(trees.size());
+        trees.push_back(tree);
+        active.push_back(trees.size() - 1);
+    };
+
+    // Find valid starting points near the world center (where player spawns)
+    // Search outward from center to find a point above minimum height
+    bool foundStart = false;
+    float searchRadius = 100.0f;  // Start searching close to center
+    float maxSearchRadius = std::min(worldWidth, worldDepth) * 0.5f;
+
+    while (!foundStart && searchRadius < maxSearchRadius) {
+        for (int startAttempt = 0; startAttempt < 100 && !foundStart; ++startAttempt) {
+            // Random angle and distance from center
+            float angle = distUnit(rng) * 6.28318f;
+            float dist = distUnit(rng) * searchRadius;
+            float startX = std::cos(angle) * dist;
+            float startZ = std::sin(angle) * dist;
+
+            // Clamp to world bounds
+            startX = std::clamp(startX, worldMin.x, worldMax.x);
+            startZ = std::clamp(startZ, worldMin.z, worldMax.z);
+
+            float startY = getHeight ? getHeight(startX, startZ) : 0.0f;
+
+            if (startY >= minHeight) {
+                TreeSourceGPU tree;
+                tree.positionScale = glm::vec4(startX, startY, startZ, distScale(rng));
+                tree.rotationArchetype = glm::vec4(
+                    distRot(rng),
+                    static_cast<float>(distArchetype(rng)),
+                    distUnit(rng),
+                    0.0f
+                );
+
+                auto [gx, gz] = toGrid(startX, startZ);
+                grid[gz * gridWidth + gx] = static_cast<int>(trees.size());
+                trees.push_back(tree);
+                active.push_back(trees.size() - 1);
+                foundStart = true;
+                SDL_Log("TreeGPUForest: Starting point at (%.1f, %.1f, %.1f) at search radius %.1f",
+                        startX, startY, startZ, searchRadius);
+            }
+        }
+        searchRadius *= 2.0f;  // Expand search radius
     }
 
+    if (!foundStart) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "TreeGPUForest: Could not find valid starting point above %.1f", minHeight);
+        return;
+    }
+
+    // Poisson disc sampling main loop
+    while (!active.empty() && trees.size() < treeCount) {
+        // Pick random active sample
+        size_t activeIdx = static_cast<size_t>(distUnit(rng) * active.size());
+        size_t sampleIdx = active[activeIdx];
+        const auto& sample = trees[sampleIdx];
+        float sx = sample.positionScale.x;
+        float sz = sample.positionScale.z;
+
+        bool foundValid = false;
+        for (int attempt = 0; attempt < maxAttempts; ++attempt) {
+            // Generate random point in annulus [minSpacing, 2*minSpacing]
+            float angle = distUnit(rng) * 6.28318f;
+            float radius = minSpacing + distUnit(rng) * minSpacing;
+            float nx = sx + std::cos(angle) * radius;
+            float nz = sz + std::sin(angle) * radius;
+
+            // Check bounds
+            if (nx < worldMin.x || nx > worldMax.x || nz < worldMin.z || nz > worldMax.z) {
+                continue;
+            }
+
+            // Check spacing
+            if (isValidPosition(nx, nz)) {
+                addTree(nx, nz);
+                foundValid = true;
+                break;
+            }
+        }
+
+        // Remove from active if no valid point found
+        if (!foundValid) {
+            active[activeIdx] = active.back();
+            active.pop_back();
+        }
+    }
+
+    if (trees.empty()) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "TreeGPUForest: No valid tree positions found (all below min height %.1f)", minHeight);
+        return;
+    }
+
+    // Log tree distribution bounds for debugging
+    glm::vec3 minPos(std::numeric_limits<float>::max());
+    glm::vec3 maxPos(std::numeric_limits<float>::lowest());
+    for (const auto& tree : trees) {
+        minPos = glm::min(minPos, glm::vec3(tree.positionScale));
+        maxPos = glm::max(maxPos, glm::vec3(tree.positionScale));
+    }
+    SDL_Log("TreeGPUForest: Tree bounds: (%.1f, %.1f, %.1f) to (%.1f, %.1f, %.1f)",
+            minPos.x, minPos.y, minPos.z, maxPos.x, maxPos.y, maxPos.z);
+
     uploadTreeData(trees);
-    SDL_Log("TreeGPUForest: Generated %u procedural trees with terrain sampling", treeCount);
+    SDL_Log("TreeGPUForest: Generated %zu procedural trees (Poisson disc, minHeight=%.1f, minSpacing=%.1f)",
+            trees.size(), minHeight, minSpacing);
 }
 
 void TreeGPUForest::uploadTreeData(const std::vector<TreeSourceGPU>& trees) {
@@ -617,33 +786,43 @@ void TreeGPUForest::recordCullingCompute(VkCommandBuffer cmd, uint32_t frameInde
         uniformsMapped_->archetypeBounds[i] = archetypeBounds_[i];
     }
 
-    // Clear indirect commands
-    ForestIndirectCommands clearCmds{};
-    clearCmds.fullDetailCmd.indexCount = 0;  // Will be set per-archetype
-    clearCmds.fullDetailCmd.instanceCount = 0;
-    clearCmds.fullDetailCmd.firstIndex = 0;
-    clearCmds.fullDetailCmd.vertexOffset = 0;
-    clearCmds.fullDetailCmd.firstInstance = 0;
+    // Use write buffer set for compute output (double-buffering)
+    VkBuffer writeIndirectBuffer = indirectBuffers_[writeBufferSet_];
+    VkBuffer writeImpostorBuffer = impostorBuffers_[writeBufferSet_];
 
-    // Impostor uses indexed draw with billboard quad (6 indices for 2 triangles)
-    clearCmds.impostorCmd.indexCount = 6;
-    clearCmds.impostorCmd.instanceCount = 0;  // Compute shader fills this via atomicAdd
-    clearCmds.impostorCmd.firstIndex = 0;
-    clearCmds.impostorCmd.vertexOffset = 0;
-    clearCmds.impostorCmd.firstInstance = 0;
+    // Clear indirect buffer using vkCmdFillBuffer (more reliable than vkCmdUpdateBuffer)
+    // This zeros out the entire buffer including all instanceCount fields
+    Barriers::clearBufferForComputeReadWrite(cmd, writeIndirectBuffer, 0, sizeof(ForestIndirectCommands));
 
-    vkCmdUpdateBuffer(cmd, indirectBuffer_, 0, sizeof(ForestIndirectCommands), &clearCmds);
+    // Now set the non-zero fields via vkCmdUpdateBuffer
+    // impostorCmd.indexCount = 6 (6 indices for billboard quad)
+    // Offset: fullDetailCmd is 20 bytes, impostorCmd.indexCount is at offset 20
+    uint32_t impostorIndexCount = 6;
+    vkCmdUpdateBuffer(cmd, writeIndirectBuffer,
+                      offsetof(ForestIndirectCommands, impostorCmd) + offsetof(VkDrawIndexedIndirectCommand, indexCount),
+                      sizeof(uint32_t), &impostorIndexCount);
 
-    // Barrier before compute
-    VkMemoryBarrier memBarrier{};
-    memBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-    memBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    memBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    // Barrier after the update
+    {
+        VkMemoryBarrier barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+        vkCmdPipelineBarrier(cmd,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             0, 1, &barrier, 0, nullptr, 0, nullptr);
+    }
 
-    vkCmdPipelineBarrier(cmd,
-                         VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         0, 1, &memBarrier, 0, nullptr, 0, nullptr);
+    // Update descriptor set to use current write buffer set
+    // (double-buffering: compute writes to writeBufferSet_, graphics reads from readBufferSet_)
+    {
+        DescriptorManager::SetWriter writer(device_, descriptorSets_[frameIndex % 2]);
+        writer.writeBuffer(Bindings::TREE_FOREST_IMPOSTORS, writeImpostorBuffer, 0,
+                          maxImpostorTrees_ * sizeof(TreeImpostorGPU), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        writer.writeBuffer(Bindings::TREE_FOREST_INDIRECT, writeIndirectBuffer, 0,
+                          sizeof(ForestIndirectCommands), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        writer.update();
+    }
 
     // Bind pipeline and descriptor set
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullPipeline_);
@@ -659,14 +838,8 @@ void TreeGPUForest::recordCullingCompute(VkCommandBuffer cmd, uint32_t frameInde
     uint32_t workgroupCount = (currentTreeCount_ + 255) / 256;
     vkCmdDispatch(cmd, workgroupCount, 1, 1);
 
-    // Barrier before draw
-    memBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    memBarrier.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
-
-    vkCmdPipelineBarrier(cmd,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
-                         0, 1, &memBarrier, 0, nullptr, 0, nullptr);
+    // Barrier: compute write -> indirect draw + vertex input
+    Barriers::computeToIndirectDraw(cmd);
 }
 
 uint32_t TreeGPUForest::readFullDetailCount() {

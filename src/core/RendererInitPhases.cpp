@@ -519,7 +519,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
                 return systems_->terrain().getHeightAt(x, z);
             };
 
-            gpuForest->generateProceduralForest(worldMin, worldMax, 1000000, getHeight, 42);  // 1M trees
+            gpuForest->generateProceduralForest(worldMin, worldMax, 10000, getHeight, 42);  // 10K trees for debugging
 
             // Build spatial cluster grid (50m cells)
             gpuForest->buildClusterGrid(50.0f);

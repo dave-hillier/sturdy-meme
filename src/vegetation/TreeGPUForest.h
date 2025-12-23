@@ -140,10 +140,15 @@ public:
                                const std::array<glm::vec4, 6>& frustumPlanes,
                                const TreeLODSettings& settings);
 
-    // Get buffers for rendering
+    // Get buffers for rendering (returns the READ buffer set - previous frame's compute output)
     VkBuffer getFullDetailInstanceBuffer() const { return fullDetailBuffer_; }
-    VkBuffer getImpostorInstanceBuffer() const { return impostorBuffer_; }
-    VkBuffer getIndirectBuffer() const { return indirectBuffer_; }
+    VkBuffer getImpostorInstanceBuffer() const { return impostorBuffers_[readBufferSet_]; }
+    VkBuffer getIndirectBuffer() const { return indirectBuffers_[readBufferSet_]; }
+
+    // Advance buffer sets after frame is complete (call at end of frame)
+    void advanceBufferSet() {
+        std::swap(writeBufferSet_, readBufferSet_);
+    }
 
     // Get instance counts (read back from GPU - causes sync!)
     uint32_t readFullDetailCount();
@@ -194,11 +199,16 @@ private:
     VkBuffer fullDetailBuffer_ = VK_NULL_HANDLE;    // Output: full detail instances
     VmaAllocation fullDetailAllocation_ = VK_NULL_HANDLE;
 
-    VkBuffer impostorBuffer_ = VK_NULL_HANDLE;      // Output: impostor instances
-    VmaAllocation impostorAllocation_ = VK_NULL_HANDLE;
+    // Double-buffered for compute/render separation (avoids synchronization issues)
+    static constexpr uint32_t BUFFER_SET_COUNT = 2;
+    std::array<VkBuffer, BUFFER_SET_COUNT> impostorBuffers_{};      // Output: impostor instances
+    std::array<VmaAllocation, BUFFER_SET_COUNT> impostorAllocations_{};
 
-    VkBuffer indirectBuffer_ = VK_NULL_HANDLE;      // Indirect draw commands
-    VmaAllocation indirectAllocation_ = VK_NULL_HANDLE;
+    std::array<VkBuffer, BUFFER_SET_COUNT> indirectBuffers_{};      // Indirect draw commands
+    std::array<VmaAllocation, BUFFER_SET_COUNT> indirectAllocations_{};
+
+    uint32_t writeBufferSet_ = 0;  // Compute writes to this set
+    uint32_t readBufferSet_ = 1;   // Graphics reads from this set
 
     VkBuffer uniformBuffer_ = VK_NULL_HANDLE;       // Forest uniforms
     VmaAllocation uniformAllocation_ = VK_NULL_HANDLE;
