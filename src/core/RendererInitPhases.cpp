@@ -499,6 +499,8 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         gpuForestInfo.device = device;
         gpuForestInfo.physicalDevice = physicalDevice;
         gpuForestInfo.allocator = allocator;
+        gpuForestInfo.commandPool = commandPool.get();
+        gpuForestInfo.graphicsQueue = graphicsQueue;
         gpuForestInfo.descriptorPool = &*descriptorManagerPool;
         gpuForestInfo.maxTreeCount = 1000000;      // 1M trees target
         gpuForestInfo.maxFullDetailTrees = 5000;   // Budget for nearby trees

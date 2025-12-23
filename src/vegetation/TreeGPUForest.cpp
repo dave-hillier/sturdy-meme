@@ -24,6 +24,8 @@ bool TreeGPUForest::init(const InitInfo& info) {
     device_ = info.device;
     physicalDevice_ = info.physicalDevice;
     allocator_ = info.allocator;
+    commandPool_ = info.commandPool;
+    graphicsQueue_ = info.graphicsQueue;
     descriptorPool_ = info.descriptorPool;
     maxTreeCount_ = info.maxTreeCount;
     maxFullDetailTrees_ = info.maxFullDetailTrees;
@@ -367,11 +369,12 @@ void TreeGPUForest::uploadTreeData(const std::vector<TreeSourceGPU>& trees) {
     }
 
     currentTreeCount_ = static_cast<uint32_t>(trees.size());
+    VkDeviceSize dataSize = trees.size() * sizeof(TreeSourceGPU);
 
     // Create staging buffer
     VkBufferCreateInfo stagingInfo{};
     stagingInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    stagingInfo.size = trees.size() * sizeof(TreeSourceGPU);
+    stagingInfo.size = dataSize;
     stagingInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     stagingInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
@@ -390,14 +393,53 @@ void TreeGPUForest::uploadTreeData(const std::vector<TreeSourceGPU>& trees) {
     }
 
     // Copy data to staging
-    memcpy(allocInfo.pMappedData, trees.data(), trees.size() * sizeof(TreeSourceGPU));
+    memcpy(allocInfo.pMappedData, trees.data(), dataSize);
 
-    // TODO: Record copy command and submit
-    // For now, we'll need to integrate with the renderer's command buffer system
+    // Allocate command buffer for transfer
+    VkCommandBufferAllocateInfo cmdAllocInfo{};
+    cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cmdAllocInfo.commandPool = commandPool_;
+    cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cmdAllocInfo.commandBufferCount = 1;
 
+    VkCommandBuffer cmd;
+    if (vkAllocateCommandBuffers(device_, &cmdAllocInfo, &cmd) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeGPUForest: Failed to allocate command buffer");
+        vmaDestroyBuffer(allocator_, stagingBuf, stagingAlloc);
+        return;
+    }
+
+    // Begin recording
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    vkBeginCommandBuffer(cmd, &beginInfo);
+
+    // Copy staging buffer to source buffer
+    VkBufferCopy copyRegion{};
+    copyRegion.srcOffset = 0;
+    copyRegion.dstOffset = 0;
+    copyRegion.size = dataSize;
+    vkCmdCopyBuffer(cmd, stagingBuf, sourceBuffer_, 1, &copyRegion);
+
+    vkEndCommandBuffer(cmd);
+
+    // Submit and wait
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &cmd;
+
+    vkQueueSubmit(graphicsQueue_, 1, &submitInfo, VK_NULL_HANDLE);
+    vkQueueWaitIdle(graphicsQueue_);
+
+    // Cleanup
+    vkFreeCommandBuffers(device_, commandPool_, 1, &cmd);
     vmaDestroyBuffer(allocator_, stagingBuf, stagingAlloc);
 
-    SDL_Log("TreeGPUForest: Uploaded %u trees to GPU", currentTreeCount_);
+    SDL_Log("TreeGPUForest: Uploaded %u trees (%.1f MB) to GPU",
+            currentTreeCount_, dataSize / (1024.0f * 1024.0f));
 }
 
 void TreeGPUForest::setArchetypeBounds(uint32_t archetype, const glm::vec3& halfExtents, float baseOffset) {
@@ -409,10 +451,104 @@ void TreeGPUForest::setArchetypeBounds(uint32_t archetype, const glm::vec3& half
 void TreeGPUForest::buildClusterGrid(float cellSize) {
     if (currentTreeCount_ == 0) return;
 
-    // TODO: Read back tree positions and build spatial grid
-    // For now, use simple grid partitioning
+    // For now, create a single cluster containing all trees
+    // This ensures all trees are visible and the shader doesn't read garbage data
+    // A proper implementation would create a spatial grid
 
-    SDL_Log("TreeGPUForest: Built cluster grid with cell size %.1f", cellSize);
+    clusterCount_ = 1;
+    clusterInfos_.resize(1);
+    clusterInfos_[0].center = glm::vec3(0.0f, 0.0f, 0.0f);  // World center
+    clusterInfos_[0].radius = 20000.0f;  // Large enough to contain all trees
+    clusterInfos_[0].treeCount = currentTreeCount_;
+    clusterInfos_[0].firstTreeIndex = 0;
+
+    // Create tree-to-cluster mapping (all trees in cluster 0)
+    std::vector<uint32_t> treeClusterMap(currentTreeCount_, 0);
+
+    // Upload cluster data to GPU
+    std::vector<ClusterDataGPU> clusterData(1);
+    clusterData[0].centerRadius = glm::vec4(0.0f, 0.0f, 0.0f, 20000.0f);
+    clusterData[0].minBounds = glm::vec4(-10000.0f, 0.0f, -10000.0f, static_cast<float>(currentTreeCount_));
+    clusterData[0].maxBounds = glm::vec4(10000.0f, 500.0f, 10000.0f, 0.0f);
+
+    // Upload via staging buffers
+    VkDeviceSize clusterSize = sizeof(ClusterDataGPU);
+    VkDeviceSize mapSize = currentTreeCount_ * sizeof(uint32_t);
+    VkDeviceSize totalSize = clusterSize + mapSize;
+
+    // Create staging buffer
+    VkBufferCreateInfo stagingInfo{};
+    stagingInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    stagingInfo.size = totalSize;
+    stagingInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    stagingInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VmaAllocationCreateInfo stagingAllocInfo{};
+    stagingAllocInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
+    stagingAllocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+    VkBuffer stagingBuf;
+    VmaAllocation stagingAlloc;
+    VmaAllocationInfo allocInfo;
+
+    if (vmaCreateBuffer(allocator_, &stagingInfo, &stagingAllocInfo,
+                        &stagingBuf, &stagingAlloc, &allocInfo) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeGPUForest: Failed to create staging buffer for clusters");
+        return;
+    }
+
+    // Copy data to staging
+    uint8_t* data = static_cast<uint8_t*>(allocInfo.pMappedData);
+    memcpy(data, clusterData.data(), clusterSize);
+    memcpy(data + clusterSize, treeClusterMap.data(), mapSize);
+
+    // Allocate command buffer
+    VkCommandBufferAllocateInfo cmdAllocInfo{};
+    cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cmdAllocInfo.commandPool = commandPool_;
+    cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cmdAllocInfo.commandBufferCount = 1;
+
+    VkCommandBuffer cmd;
+    vkAllocateCommandBuffers(device_, &cmdAllocInfo, &cmd);
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    vkBeginCommandBuffer(cmd, &beginInfo);
+
+    // Copy cluster data
+    VkBufferCopy copyRegion{};
+    copyRegion.srcOffset = 0;
+    copyRegion.dstOffset = 0;
+    copyRegion.size = clusterSize;
+    vkCmdCopyBuffer(cmd, stagingBuf, clusterBuffer_, 1, &copyRegion);
+
+    // Copy tree-cluster mapping
+    copyRegion.srcOffset = clusterSize;
+    copyRegion.size = mapSize;
+    vkCmdCopyBuffer(cmd, stagingBuf, treeClusterMapBuffer_, 1, &copyRegion);
+
+    vkEndCommandBuffer(cmd);
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &cmd;
+
+    vkQueueSubmit(graphicsQueue_, 1, &submitInfo, VK_NULL_HANDLE);
+    vkQueueWaitIdle(graphicsQueue_);
+
+    vkFreeCommandBuffers(device_, commandPool_, 1, &cmd);
+    vmaDestroyBuffer(allocator_, stagingBuf, stagingAlloc);
+
+    // Initialize cluster visibility (all visible)
+    if (clusterVisMapped_) {
+        clusterVisMapped_[0] = 1;  // visible, not forcing impostor
+    }
+
+    SDL_Log("TreeGPUForest: Built cluster grid with %u clusters (cell size %.1f)", clusterCount_, cellSize);
 }
 
 void TreeGPUForest::updateClusterVisibility(const glm::vec3& cameraPos,

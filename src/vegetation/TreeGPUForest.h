@@ -92,6 +92,8 @@ public:
         VkDevice device = VK_NULL_HANDLE;
         VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
         VmaAllocator allocator = VK_NULL_HANDLE;
+        VkCommandPool commandPool = VK_NULL_HANDLE;
+        VkQueue graphicsQueue = VK_NULL_HANDLE;
         DescriptorManager::Pool* descriptorPool = nullptr;
         uint32_t maxTreeCount = 1000000;  // Default 1M trees
         uint32_t maxFullDetailTrees = 5000;  // Budget for full detail
@@ -163,6 +165,8 @@ private:
     VkDevice device_ = VK_NULL_HANDLE;
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
     VmaAllocator allocator_ = VK_NULL_HANDLE;
+    VkCommandPool commandPool_ = VK_NULL_HANDLE;
+    VkQueue graphicsQueue_ = VK_NULL_HANDLE;
     DescriptorManager::Pool* descriptorPool_ = nullptr;
 
     // Compute pipeline
