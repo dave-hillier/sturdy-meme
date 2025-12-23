@@ -329,6 +329,15 @@ void DetritusSystem::generatePlacements(const InitInfo& info) {
     }
 
     SDL_Log("DetritusSystem: Placed %d pieces in %d attempts", placed, attempts);
+
+    // Log each detritus location for debugging
+    for (size_t i = 0; i < instances_.size(); ++i) {
+        const auto& inst = instances_[i];
+        SDL_Log("  Detritus[%zu]: pos(%.1f, %.1f, %.1f) rot(%.2f, %.2f, %.2f) scale=%.2f mesh=%d",
+                i, inst.position.x, inst.position.y, inst.position.z,
+                inst.rotation.x, inst.rotation.y, inst.rotation.z,
+                inst.scale, inst.meshVariation);
+    }
 }
 
 void DetritusSystem::createSceneObjects() {
