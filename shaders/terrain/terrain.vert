@@ -65,8 +65,8 @@ layout(std140, binding = BINDING_TERRAIN_UBO) uniform TerrainUniforms {
     vec4 snowCascade2Params;  // xy = origin, z = size, w = texel size
     float useVolumetricSnow;  // 1.0 = enabled
     float snowMaxHeight;      // Maximum snow height in meters
-    float snowPadding1;
-    float snowPadding2;
+    float showBiomeDebug;     // 1.0 = show biome visualization
+    float terrainPadding2;
 };
 
 #define TERRAIN_SIZE (terrainParams.x)

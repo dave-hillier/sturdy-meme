@@ -130,6 +130,15 @@ void GuiTerrainTab::render(ITerrainControl& terrainControl) {
         ImGui::SetTooltip("Show terrain mesh wireframe overlay");
     }
 
+    // Biome debug visualization
+    bool biomeDebug = renderer.isShowingBiomeDebug();
+    if (ImGui::Checkbox("Biome Visualization", &biomeDebug)) {
+        renderer.toggleBiomeDebug();
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Show biome zone colors on terrain (requires biome_debug.png)");
+    }
+
     ImGui::Spacing();
     ImGui::Separator();
     ImGui::Spacing();
