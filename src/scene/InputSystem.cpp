@@ -62,6 +62,21 @@ bool InputSystem::processEvent(const SDL_Event& event) {
                 SDL_Log("Camera mode: %s", thirdPersonMode ? "Third Person" : "Free Camera");
                 return true;
             }
+            if (event.key.scancode == SDL_SCANCODE_M) {
+                mouseLookEnabled = !mouseLookEnabled;
+                SDL_SetWindowRelativeMouseMode(SDL_GetKeyboardFocus(), mouseLookEnabled);
+                SDL_Log("Mouse look: %s", mouseLookEnabled ? "ON" : "OFF");
+                return true;
+            }
+            break;
+
+        case SDL_EVENT_MOUSE_MOTION:
+            if (mouseLookEnabled) {
+                // Accumulate mouse motion for camera control
+                mouseYawAccumulator += event.motion.xrel * 0.1f;
+                mousePitchAccumulator -= event.motion.yrel * 0.1f;
+                return true;
+            }
             break;
 
         case SDL_EVENT_MOUSE_WHEEL:
@@ -80,8 +95,11 @@ void InputSystem::update(float deltaTime, float cameraYaw) {
     // Reset input accumulators
     movementDirection = glm::vec3(0.0f);
     jumpRequested = false;
-    cameraYawInput = 0.0f;
-    cameraPitchInput = 0.0f;
+    // Start with accumulated mouse look input, then reset it
+    cameraYawInput = mouseYawAccumulator;
+    cameraPitchInput = mousePitchAccumulator;
+    mouseYawAccumulator = 0.0f;
+    mousePitchAccumulator = 0.0f;
     // Start with accumulated mouse wheel input, then reset it
     cameraZoomInput = mouseWheelAccumulator;
     mouseWheelAccumulator = 0.0f;

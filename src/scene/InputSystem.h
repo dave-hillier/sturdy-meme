@@ -120,6 +120,11 @@ private:
     float cameraPitchInput = 0.0f;
     float cameraZoomInput = 0.0f;
 
+    // Mouse look state
+    bool mouseLookEnabled = false;
+    float mouseYawAccumulator = 0.0f;
+    float mousePitchAccumulator = 0.0f;
+
     // Free camera movement
     float freeCameraForward = 0.0f;
     float freeCameraRight = 0.0f;
