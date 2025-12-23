@@ -41,6 +41,51 @@ void GuiTreeTab::render(Renderer& renderer) {
             ImGui::Checkbox("Enable Impostors", &settings.enableImpostors);
 
             ImGui::Spacing();
+            ImGui::Text("Budget-Based LOD:");
+            ImGui::Checkbox("Enable Budget LOD", &settings.enableBudgetLOD);
+            if (settings.enableBudgetLOD) {
+                int budget = static_cast<int>(settings.fullDetailBudget);
+                if (ImGui::SliderInt("Full Detail Budget", &budget, 10, 200)) {
+                    settings.fullDetailBudget = static_cast<uint32_t>(budget);
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Maximum trees rendered at full detail (nearest N)");
+                }
+                int maxDist = static_cast<int>(settings.maxFullDetailDistance);
+                if (ImGui::SliderInt("Max Full Detail Dist", &maxDist, 50, 500)) {
+                    settings.maxFullDetailDistance = static_cast<uint32_t>(maxDist);
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Hard cap distance even for budgeted trees");
+                }
+            }
+
+            ImGui::Spacing();
+            ImGui::Text("GPU-Driven LOD:");
+            ImGui::Checkbox("Enable GPU LOD", &settings.enableGPUDrivenLOD);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Use GPU compute shaders for LOD calculations\n(experimental)");
+            }
+            if (settings.enableGPUDrivenLOD) {
+                bool gpuActive = treeLOD->isGPUDrivenLODActive();
+                if (gpuActive) {
+                    ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "  GPU pipeline active");
+                } else {
+                    ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "  GPU pipeline not available");
+                }
+            }
+
+            ImGui::Spacing();
+            ImGui::Text("Shadow LOD:");
+            ImGui::Checkbox("Enable Leaf Shadow LOD", &settings.enableLeafShadowLOD);
+            if (settings.enableLeafShadowLOD) {
+                ImGui::SliderFloat("Leaf Shadow Max Dist", &settings.leafShadowMaxDistance, 25.0f, 200.0f, "%.0f");
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Skip expensive leaf shadows beyond this distance");
+                }
+            }
+
+            ImGui::Spacing();
             ImGui::Text("Distance Thresholds:");
             ImGui::SliderFloat("Full Detail Dist", &settings.fullDetailDistance, 0.0f, 500.0f, "%.1f");
             ImGui::SliderFloat("Impostor Dist", &settings.impostorDistance, 0.0f, 10000.0f, "%.0f");
