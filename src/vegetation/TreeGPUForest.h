@@ -6,6 +6,7 @@
 #include <vector>
 #include <array>
 #include <memory>
+#include <functional>
 #include "core/DescriptorManager.h"
 
 struct TreeLODSettings;
@@ -104,9 +105,16 @@ public:
     TreeGPUForest(const TreeGPUForest&) = delete;
     TreeGPUForest& operator=(const TreeGPUForest&) = delete;
 
+    // Height sampling function type (returns Y for given X, Z)
+    using HeightFunction = std::function<float(float, float)>;
+
     // Initialize tree positions (procedural or from data)
     void generateProceduralForest(const glm::vec3& worldMin, const glm::vec3& worldMax,
                                    uint32_t treeCount, uint32_t seed = 12345);
+
+    // Generate procedural forest with terrain height sampling
+    void generateProceduralForest(const glm::vec3& worldMin, const glm::vec3& worldMax,
+                                   uint32_t treeCount, const HeightFunction& getHeight, uint32_t seed = 12345);
 
     // Upload pre-generated tree data
     void uploadTreeData(const std::vector<TreeSourceGPU>& trees);

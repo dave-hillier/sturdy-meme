@@ -324,6 +324,12 @@ void TreeGPUForest::cleanup() {
 
 void TreeGPUForest::generateProceduralForest(const glm::vec3& worldMin, const glm::vec3& worldMax,
                                               uint32_t treeCount, uint32_t seed) {
+    // Call the overload with no height function (trees at y=0)
+    generateProceduralForest(worldMin, worldMax, treeCount, nullptr, seed);
+}
+
+void TreeGPUForest::generateProceduralForest(const glm::vec3& worldMin, const glm::vec3& worldMax,
+                                              uint32_t treeCount, const HeightFunction& getHeight, uint32_t seed) {
     std::mt19937 rng(seed);
     std::uniform_real_distribution<float> distX(worldMin.x, worldMax.x);
     std::uniform_real_distribution<float> distZ(worldMin.z, worldMax.z);
@@ -337,7 +343,7 @@ void TreeGPUForest::generateProceduralForest(const glm::vec3& worldMin, const gl
     for (uint32_t i = 0; i < treeCount; ++i) {
         float x = distX(rng);
         float z = distZ(rng);
-        float y = 0.0f;  // Will be set by terrain sampling later
+        float y = getHeight ? getHeight(x, z) : 0.0f;
 
         trees[i].positionScale = glm::vec4(x, y, z, distScale(rng));
         trees[i].rotationArchetype = glm::vec4(
@@ -349,7 +355,7 @@ void TreeGPUForest::generateProceduralForest(const glm::vec3& worldMin, const gl
     }
 
     uploadTreeData(trees);
-    SDL_Log("TreeGPUForest: Generated %u procedural trees", treeCount);
+    SDL_Log("TreeGPUForest: Generated %u procedural trees with terrain sampling", treeCount);
 }
 
 void TreeGPUForest::uploadTreeData(const std::vector<TreeSourceGPU>& trees) {

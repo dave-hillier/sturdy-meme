@@ -505,11 +505,17 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
 
         auto gpuForest = TreeGPUForest::create(gpuForestInfo);
         if (gpuForest) {
-            // Generate procedural forest across terrain
+            // Generate procedural forest across terrain with height sampling
             float halfSize = core.terrain.size * 0.5f;
             glm::vec3 worldMin(-halfSize, 0.0f, -halfSize);
             glm::vec3 worldMax(halfSize, 500.0f, halfSize);  // Up to 500m height
-            gpuForest->generateProceduralForest(worldMin, worldMax, 100000, 42);  // Start with 100k trees
+
+            // Height function samples terrain
+            auto getHeight = [this](float x, float z) -> float {
+                return systems_->terrain().getHeightAt(x, z);
+            };
+
+            gpuForest->generateProceduralForest(worldMin, worldMax, 100000, getHeight, 42);  // Start with 100k trees
 
             // Build spatial cluster grid (50m cells)
             gpuForest->buildClusterGrid(50.0f);
