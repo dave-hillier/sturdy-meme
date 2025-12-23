@@ -482,7 +482,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         }
     }
 
-    // Initialize detritus system (fallen branches scattered on forest floor)
+    // Initialize detritus system (fallen branches scattered near trees)
     {
         DetritusSystem::InitInfo detritusInfo{};
         detritusInfo.device = device;
@@ -494,6 +494,15 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         detritusInfo.terrainSize = core.terrain.size;
         detritusInfo.getTerrainHeight = core.terrain.getHeightAt;
 
+        // Gather tree positions for scattering detritus nearby
+        if (systems_->tree()) {
+            const auto& treeInstances = systems_->tree()->getTreeInstances();
+            detritusInfo.treePositions.reserve(treeInstances.size());
+            for (const auto& tree : treeInstances) {
+                detritusInfo.treePositions.push_back(tree.position);
+            }
+        }
+
         DetritusConfig detritusConfig{};
         detritusConfig.branchVariations = 8;
         detritusConfig.branchesPerVariation = 4;
@@ -501,7 +510,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         detritusConfig.maxLength = 2.5f;
         detritusConfig.minRadius = 0.03f;
         detritusConfig.maxRadius = 0.12f;
-        detritusConfig.placementRadius = 60.0f;
+        detritusConfig.placementRadius = 8.0f;  // Scatter within 8m of each tree
         detritusConfig.minDistanceBetween = 1.5f;
         detritusConfig.breakChance = 0.7f;
         detritusConfig.maxChildren = 3;
@@ -511,8 +520,8 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         auto detritusSystem = DetritusSystem::create(detritusInfo, detritusConfig);
         if (detritusSystem) {
             systems_->setDetritus(std::move(detritusSystem));
-            SDL_Log("DetritusSystem initialized with %zu fallen branches",
-                    systems_->detritus()->getDetritusCount());
+            SDL_Log("DetritusSystem initialized with %zu fallen branches near %zu trees",
+                    systems_->detritus()->getDetritusCount(), detritusInfo.treePositions.size());
         } else {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "DetritusSystem creation failed (non-fatal)");
         }

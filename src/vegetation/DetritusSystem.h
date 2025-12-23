@@ -51,6 +51,7 @@ public:
         std::string resourcePath;
         std::function<float(float, float)> getTerrainHeight;  // Terrain height query
         float terrainSize;
+        std::vector<glm::vec3> treePositions;  // Tree positions to scatter detritus near
     };
 
     /**

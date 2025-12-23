@@ -173,99 +173,82 @@ void DetritusSystem::generatePlacements(const InitInfo& info) {
     instances_.clear();
 
     const int totalMeshes = config_.branchVariations + config_.forkedVariations;
-    const int totalPieces = totalMeshes * config_.branchesPerVariation;
-    const float minDist = config_.minDistanceBetween;
-    const float minDistSq = minDist * minDist;
 
-    // Golden angle for spiral distribution
-    const float goldenAngle = 2.39996323f;
-
-    int placed = 0;
-    int attempts = 0;
-    const int maxAttempts = totalPieces * 30;
-
-    while (placed < totalPieces && attempts < maxAttempts) {
-        attempts++;
-
-        float x, z;
-
-        if (attempts % 3 == 0) {
-            // Spiral distribution
-            float radius = config_.placementRadius * std::sqrt(float(placed + 1) / float(totalPieces + 1));
-            float angle = placed * goldenAngle;
-            x = radius * std::cos(angle);
-            z = radius * std::sin(angle);
-        } else {
-            // Random with hash
-            float angle = hashPosition(float(attempts), 0.0f, 54321) * 2.0f * 3.14159f;
-            float radius = std::sqrt(hashPosition(float(attempts), 1.0f, 54322)) * config_.placementRadius;
-            x = radius * std::cos(angle);
-            z = radius * std::sin(angle);
-        }
-
-        // Add jitter
-        x += (hashPosition(x, z, 11111) - 0.5f) * minDist * 0.5f;
-        z += (hashPosition(x, z, 22222) - 0.5f) * minDist * 0.5f;
-
-        // Check bounds
-        float halfTerrain = info.terrainSize * 0.48f;
-        if (std::abs(x) > halfTerrain || std::abs(z) > halfTerrain) {
-            continue;
-        }
-
-        // Check distance from existing pieces
-        bool tooClose = false;
-        for (const auto& existing : instances_) {
-            float dx = x - existing.position.x;
-            float dz = z - existing.position.z;
-            if (dx * dx + dz * dz < minDistSq) {
-                tooClose = true;
-                break;
-            }
-        }
-
-        if (tooClose) {
-            continue;
-        }
-
-        // Get terrain height
-        float y = 0.0f;
-        if (info.getTerrainHeight) {
-            y = info.getTerrainHeight(x, z);
-        }
-
-        // Skip very low areas (water level) or very steep slopes
-        if (y < 1.0f) {
-            continue;
-        }
-
-        // Create detritus instance
-        DetritusInstance instance;
-        instance.position = glm::vec3(x, y, z);
-
-        // Rotation: fallen branches lie on the ground with random orientations
-        float yaw = hashPosition(x, z, 33333) * 2.0f * 3.14159f;  // Random horizontal rotation
-
-        // Branch is generated pointing UP (Y axis). To make it lie flat,
-        // we rotate around X (pitch) by ~π/2. With Y-X-Z rotation order,
-        // pitch is applied second and tips the branch to horizontal.
-        float pitch = glm::half_pi<float>() - 0.1f + (hashPosition(x, z, 44444) - 0.5f) * 0.2f;  // Tip to horizontal
-        float roll = (hashPosition(x, z, 55555) - 0.5f) * 0.3f;  // Small twist variation
-
-        instance.rotation = glm::vec3(pitch, yaw, roll);
-
-        // Random scale
-        float t = hashPosition(x, z, 66666);
-        instance.scale = 0.7f + t * 0.6f;
-
-        // Assign mesh variation (cycles through all meshes including forked)
-        instance.meshVariation = placed % totalMeshes;
-
-        instances_.push_back(instance);
-        placed++;
+    // If no tree positions provided, skip placement
+    if (info.treePositions.empty()) {
+        SDL_Log("DetritusSystem: No tree positions provided, skipping detritus placement");
+        return;
     }
 
-    SDL_Log("DetritusSystem: Placed %d pieces in %d attempts", placed, attempts);
+    // Limit total detritus to avoid performance issues with many trees
+    const int maxTotalDetritus = 100;
+    const int numTrees = static_cast<int>(info.treePositions.size());
+
+    // Distribute detritus across trees, but cap total count
+    int branchesPerTree = std::max(1, maxTotalDetritus / numTrees);
+    branchesPerTree = std::min(branchesPerTree, config_.branchesPerVariation);
+
+    int placed = 0;
+
+    for (int treeIndex = 0; treeIndex < numTrees && placed < maxTotalDetritus; ++treeIndex) {
+        const auto& treePos = info.treePositions[treeIndex];
+
+        // Place branches near this tree
+        for (int b = 0; b < branchesPerTree && placed < maxTotalDetritus; ++b) {
+            // Generate position near tree - use hash for deterministic placement
+            uint32_t seed = static_cast<uint32_t>(treeIndex * 1000 + b * 100);
+            float angle = hashPosition(float(seed), 0.0f, 12345) * 2.0f * 3.14159f;
+            // Distance from tree: 1.5m to placementRadius (default ~8m from trunk)
+            float distFromTree = 1.5f + hashPosition(float(seed), 1.0f, 23456) * (config_.placementRadius - 1.5f);
+
+            float x = treePos.x + distFromTree * std::cos(angle);
+            float z = treePos.z + distFromTree * std::sin(angle);
+
+            // Check bounds
+            float halfTerrain = info.terrainSize * 0.48f;
+            if (std::abs(x) > halfTerrain || std::abs(z) > halfTerrain) {
+                continue;
+            }
+
+            // Get terrain height
+            float y = 0.0f;
+            if (info.getTerrainHeight) {
+                y = info.getTerrainHeight(x, z);
+            }
+
+            // Skip very low areas (water level)
+            if (y < 1.0f) {
+                continue;
+            }
+
+            // Create detritus instance
+            DetritusInstance instance;
+            instance.position = glm::vec3(x, y, z);
+
+            // Rotation: fallen branches lie on the ground with random orientations
+            float yaw = hashPosition(x, z, 33333) * 2.0f * 3.14159f;
+
+            // Branch is generated pointing UP (Y axis). To make it lie flat,
+            // we rotate around X (pitch) by ~π/2.
+            float pitch = glm::half_pi<float>() - 0.1f + (hashPosition(x, z, 44444) - 0.5f) * 0.2f;
+            float roll = (hashPosition(x, z, 55555) - 0.5f) * 0.3f;
+
+            instance.rotation = glm::vec3(pitch, yaw, roll);
+
+            // Random scale
+            float t = hashPosition(x, z, 66666);
+            instance.scale = 0.7f + t * 0.6f;
+
+            // Assign mesh variation
+            instance.meshVariation = placed % totalMeshes;
+
+            instances_.push_back(instance);
+            placed++;
+        }
+    }
+
+    SDL_Log("DetritusSystem: Placed %d pieces near %d trees (max %d)",
+            placed, numTrees, maxTotalDetritus);
 }
 
 void DetritusSystem::createSceneObjects() {
