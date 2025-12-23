@@ -1,0 +1,99 @@
+#version 450
+
+// GPU Tree LOD Pipeline - Stage 2: Bitonic Sort
+// Sorts distance-key pairs by distance (ascending)
+// Uses bitonic merge sort - requires multiple dispatches with barriers
+//
+// For N elements, requires ceil(log2(N)) stages
+// Each stage s has s+1 substages
+// Call with push constants: { numElements, stage, substage }
+
+#extension GL_GOOGLE_include_directive : require
+
+#include "bindings.glsl"
+#include "tree_lod_common.glsl"
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+// Distance-key pairs to sort (in-place)
+layout(std430, binding = BINDING_TREE_LOD_DISTANCE_KEYS) buffer DistanceKeys {
+    TreeDistanceKey distanceKeys[];
+};
+
+// Sort parameters passed via push constants
+layout(push_constant) uniform SortParams {
+    uint numElements;    // Total elements to sort
+    uint stage;          // Current merge stage (0 to ceil(log2(n))-1)
+    uint substage;       // Sub-stage within merge (0 to stage)
+    uint _pad;
+};
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+
+    // Each thread handles one comparison
+    // Calculate which element pair to compare based on bitonic pattern
+
+    // Block size doubles each stage
+    uint blockSize = 2u << stage;
+    uint halfBlock = blockSize >> 1u;
+
+    // Within each stage, substage determines the stride for comparison
+    uint stride = halfBlock >> substage;
+
+    // Determine which block this thread is in
+    uint blockIdx = idx / halfBlock;
+    uint posInHalfBlock = idx % halfBlock;
+
+    // First element index
+    uint first = blockIdx * blockSize + posInHalfBlock;
+
+    // Partner element for comparison
+    uint second = first + stride;
+
+    // Skip if second element is out of bounds
+    if (second >= numElements) {
+        return;
+    }
+
+    // For substage 0, we need special handling
+    // In substage 0, we compare across the half-blocks
+    if (substage == 0u) {
+        // In the first substage of each stage, the stride equals halfBlock
+        // We compare elements that are halfBlock apart
+        second = first + halfBlock;
+        if (second >= numElements) {
+            return;
+        }
+    }
+
+    // Determine sort direction based on block position
+    // Even blocks sort ascending, odd blocks sort descending (for bitonic sequence)
+    bool ascending = ((blockIdx & 1u) == 0u);
+
+    // During the final merge stages (after initial bitonic sequence is built),
+    // everything sorts in the same direction
+    // This happens when we're processing the largest block sizes
+    if (stage == 0u || substage > 0u) {
+        // For substage > 0, direction depends on which half of the block we're in
+        uint subBlockIdx = posInHalfBlock / stride;
+        ascending = ((subBlockIdx & 1u) == 0u) == ascending;
+    }
+
+    // Load elements
+    TreeDistanceKey a = distanceKeys[first];
+    TreeDistanceKey b = distanceKeys[second];
+
+    // Compare and swap
+    bool shouldSwap;
+    if (ascending) {
+        shouldSwap = a.distance > b.distance;
+    } else {
+        shouldSwap = a.distance < b.distance;
+    }
+
+    if (shouldSwap) {
+        distanceKeys[first] = b;
+        distanceKeys[second] = a;
+    }
+}

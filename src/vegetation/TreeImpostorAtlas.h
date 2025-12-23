@@ -77,6 +77,9 @@ struct TreeLODSettings {
 
     // Seasonal effects (global for all impostors)
     float autumnHueShift = 0.0f;           // 0 = summer green, 1 = full autumn colors
+
+    // GPU-driven LOD (experimental)
+    bool enableGPUDrivenLOD = false;       // Use GPU compute for LOD calculations
 };
 
 class TreeImpostorAtlas {

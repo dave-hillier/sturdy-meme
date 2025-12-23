@@ -1,0 +1,107 @@
+#version 450
+
+// GPU Tree LOD Pipeline - Stage 3: LOD Selection
+// Uses sorted distance array to determine LOD level for each tree
+// Budget-based: first N trees in sorted order get full detail
+
+#extension GL_GOOGLE_include_directive : require
+
+#include "bindings.glsl"
+#include "tree_lod_common.glsl"
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+// Input: Sorted distance-key pairs
+layout(std430, binding = BINDING_TREE_LOD_DISTANCE_KEYS) readonly buffer DistanceKeys {
+    TreeDistanceKey sortedKeys[];
+};
+
+// Input: Static tree instance data
+layout(std430, binding = BINDING_TREE_LOD_INSTANCES) readonly buffer TreeInstances {
+    TreeInstanceGPU trees[];
+};
+
+// Output: Per-tree LOD states
+layout(std430, binding = BINDING_TREE_LOD_STATES) writeonly buffer LODStates {
+    TreeLODStateGPU lodStates[];
+};
+
+// Atomic counters for draw command generation
+layout(std430, binding = BINDING_TREE_LOD_COUNTERS) buffer DrawCounters {
+    uint fullDetailCount;
+    uint impostorCount;
+    uint blendingCount;
+    uint _pad;
+};
+
+// LOD uniforms
+layout(std140, binding = BINDING_TREE_LOD_UNIFORMS) uniform TreeLODUniforms {
+    vec4 cameraPosition;          // xyz = camera pos, w = unused
+    vec4 frustumPlanes[6];        // Frustum planes (future use)
+
+    uint numTrees;                // Total number of trees
+    uint fullDetailBudget;        // Max trees at full detail (e.g., 75)
+    float fullDetailDistance;     // Base distance for full detail
+    float maxFullDetailDistance;  // Hard cap distance even for budgeted trees
+
+    float blendRange;             // Distance over which to blend LODs
+    float hysteresis;             // Dead zone for LOD transitions
+    float _pad0;
+    float _pad1;
+};
+
+void main() {
+    uint sortedIdx = gl_GlobalInvocationID.x;
+
+    // Early exit if beyond tree count
+    if (sortedIdx >= numTrees) {
+        return;
+    }
+
+    // Get the tree at this sorted position
+    TreeDistanceKey key = sortedKeys[sortedIdx];
+    uint treeIdx = key.treeIndex;
+    float distance = key.distance;
+
+    // Budget-based LOD selection:
+    // First fullDetailBudget trees (in sorted order) get full detail,
+    // but only if they're within maxFullDetailDistance
+    bool withinBudget = (sortedIdx < fullDetailBudget) &&
+                        (distance <= maxFullDetailDistance);
+
+    // Calculate effective full detail distance
+    float effectiveFullDetailDist = withinBudget ? fullDetailDistance : 0.0;
+
+    // Calculate blend factor
+    float blendFactor;
+    uint lodLevel;
+
+    if (effectiveFullDetailDist <= 0.0) {
+        // Not in budget - full impostor
+        blendFactor = 1.0;
+        lodLevel = TREE_LOD_IMPOSTOR;
+    } else {
+        // Calculate blend based on distance
+        blendFactor = calculateBlendFactor(distance, effectiveFullDetailDist, blendRange, 1.0);
+        lodLevel = getLODLevelFromBlend(blendFactor);
+    }
+
+    // Write LOD state for this tree
+    lodStates[treeIdx].distance = distance;
+    lodStates[treeIdx].blendFactor = blendFactor;
+    lodStates[treeIdx].lodLevel = lodLevel;
+    lodStates[treeIdx].sortedIndex = sortedIdx;
+
+    // Increment counters (atomic)
+    // These are used by the CPU to know how many draws to issue
+    if (lodLevel == TREE_LOD_FULL_DETAIL) {
+        atomicAdd(fullDetailCount, 1u);
+    } else if (lodLevel == TREE_LOD_BLENDING) {
+        atomicAdd(blendingCount, 1u);
+        // Blending trees need both full detail AND impostor
+        atomicAdd(fullDetailCount, 1u);
+        atomicAdd(impostorCount, 1u);
+    } else {
+        atomicAdd(impostorCount, 1u);
+    }
+}

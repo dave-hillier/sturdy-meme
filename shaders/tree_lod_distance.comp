@@ -1,0 +1,58 @@
+#version 450
+
+// GPU Tree LOD Pipeline - Stage 1: Distance Calculation
+// Calculates distance from camera to each tree in parallel
+// Output is distance-index pairs ready for sorting
+
+#extension GL_GOOGLE_include_directive : require
+
+#include "bindings.glsl"
+#include "tree_lod_common.glsl"
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+// Input: Static tree instance data
+layout(std430, binding = BINDING_TREE_LOD_INSTANCES) readonly buffer TreeInstances {
+    TreeInstanceGPU trees[];
+};
+
+// Output: Distance-key pairs for sorting
+layout(std430, binding = BINDING_TREE_LOD_DISTANCE_KEYS) writeonly buffer DistanceKeys {
+    TreeDistanceKey distanceKeys[];
+};
+
+// LOD uniforms
+layout(std140, binding = BINDING_TREE_LOD_UNIFORMS) uniform TreeLODUniforms {
+    vec4 cameraPosition;          // xyz = camera pos, w = unused
+    vec4 frustumPlanes[6];        // Frustum planes (future use)
+
+    uint numTrees;                // Total number of trees
+    uint fullDetailBudget;        // Max trees at full detail
+    float fullDetailDistance;     // Base distance for full detail
+    float maxFullDetailDistance;  // Hard cap distance
+
+    float blendRange;             // Distance over which to blend LODs
+    float hysteresis;             // Dead zone for LOD transitions
+    float _pad0;
+    float _pad1;
+};
+
+void main() {
+    uint treeIdx = gl_GlobalInvocationID.x;
+
+    // Early exit if beyond tree count
+    if (treeIdx >= numTrees) {
+        return;
+    }
+
+    // Get tree position
+    TreeInstanceGPU tree = trees[treeIdx];
+    vec3 treePos = getTreePosition(tree);
+
+    // Calculate distance to camera
+    float distance = length(treePos - cameraPosition.xyz);
+
+    // Write distance-key pair for sorting
+    distanceKeys[treeIdx].distance = distance;
+    distanceKeys[treeIdx].treeIndex = treeIdx;
+}

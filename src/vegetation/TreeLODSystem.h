@@ -8,6 +8,7 @@
 #include <string>
 
 #include "TreeImpostorAtlas.h"
+#include "TreeGPULODPipeline.h"
 #include "core/VulkanRAII.h"
 #include "core/DescriptorManager.h"
 
@@ -69,6 +70,17 @@ public:
     // Update LOD states based on camera position
     void update(float deltaTime, const glm::vec3& cameraPos, const TreeSystem& treeSystem);
 
+    // Record GPU LOD compute pass (call before main render pass)
+    // Only effective when enableGPUDrivenLOD is true
+    void recordGPULODCompute(VkCommandBuffer cmd, uint32_t frameIndex, const glm::vec3& cameraPos);
+
+    // Sync GPU LOD states back to CPU (call after compute pass, before rendering)
+    // Only effective when enableGPUDrivenLOD is true
+    void syncGPULODStates();
+
+    // Check if GPU LOD pipeline is available and enabled
+    bool isGPUDrivenLODActive() const;
+
     // Render impostors (called after full geometry trees are rendered)
     void renderImpostors(VkCommandBuffer cmd, uint32_t frameIndex,
                          VkBuffer uniformBuffer, VkImageView shadowMap, VkSampler shadowSampler);
@@ -106,6 +118,9 @@ public:
 
     // Update tree count (call when trees are added/removed)
     void updateTreeCount(size_t count);
+
+    // Upload tree instances to GPU pipeline (call when trees change)
+    void uploadTreeInstancesToGPU(const TreeSystem& treeSystem);
 
     // Update extent on resize
     void setExtent(VkExtent2D newExtent);
@@ -152,6 +167,10 @@ private:
 
     // Impostor atlas generator
     std::unique_ptr<TreeImpostorAtlas> impostorAtlas_;
+
+    // GPU-driven LOD pipeline (optional)
+    std::unique_ptr<TreeGPULODPipeline> gpuLODPipeline_;
+    bool gpuLODInitialized_ = false;
 
     // Per-tree LOD states
     std::vector<TreeLODState> lodStates_;

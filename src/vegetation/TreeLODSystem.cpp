@@ -108,6 +108,25 @@ bool TreeLODSystem::initInternal(const InitInfo& info) {
         return false;
     }
 
+    // Try to create GPU LOD pipeline (optional, graceful fallback to CPU)
+    TreeGPULODPipeline::InitInfo gpuInfo{};
+    gpuInfo.device = device_;
+    gpuInfo.physicalDevice = physicalDevice_;
+    gpuInfo.allocator = allocator_;
+    gpuInfo.commandPool = commandPool_;
+    gpuInfo.computeQueue = graphicsQueue_;  // Use graphics queue for compute
+    gpuInfo.descriptorPool = descriptorPool_;
+    gpuInfo.resourcePath = resourcePath_;
+    gpuInfo.maxTrees = 4096;  // Reasonable maximum
+    gpuInfo.maxFramesInFlight = maxFramesInFlight_;
+
+    gpuLODPipeline_ = TreeGPULODPipeline::create(gpuInfo);
+    if (gpuLODPipeline_) {
+        SDL_Log("TreeLODSystem: GPU LOD pipeline initialized (optional, can be enabled in settings)");
+    } else {
+        SDL_Log("TreeLODSystem: GPU LOD pipeline not available (will use CPU-based LOD)");
+    }
+
     SDL_Log("TreeLODSystem: Initialized successfully");
     return true;
 }
@@ -1089,4 +1108,69 @@ void TreeLODSystem::updateTreeCount(size_t count) {
 
 void TreeLODSystem::setExtent(VkExtent2D newExtent) {
     extent_ = newExtent;
+}
+
+bool TreeLODSystem::isGPUDrivenLODActive() const {
+    const auto& settings = getLODSettings();
+    return settings.enableGPUDrivenLOD && gpuLODPipeline_ && gpuLODPipeline_->isReady();
+}
+
+void TreeLODSystem::uploadTreeInstancesToGPU(const TreeSystem& treeSystem) {
+    if (!gpuLODPipeline_ || !gpuLODPipeline_->isReady()) {
+        return;
+    }
+
+    const auto& instances = treeSystem.getTreeInstances();
+    if (instances.empty()) {
+        return;
+    }
+
+    // Collect bounding info from meshes
+    std::vector<glm::vec3> boundingBoxHalfExtents;
+    std::vector<float> boundingSphereRadii;
+    boundingBoxHalfExtents.reserve(instances.size());
+    boundingSphereRadii.reserve(instances.size());
+
+    for (size_t i = 0; i < instances.size(); ++i) {
+        const auto& tree = instances[i];
+        if (tree.meshIndex < treeSystem.getMeshCount()) {
+            const auto& meshBounds = treeSystem.getBranchMesh(tree.meshIndex).getBounds();
+            glm::vec3 halfExtents = (meshBounds.max - meshBounds.min) * 0.5f * tree.scale;
+            float radius = glm::length(halfExtents);
+            boundingBoxHalfExtents.push_back(halfExtents);
+            boundingSphereRadii.push_back(radius);
+        } else {
+            // Default fallback
+            boundingBoxHalfExtents.push_back(glm::vec3(5.0f, 10.0f, 5.0f));
+            boundingSphereRadii.push_back(15.0f);
+        }
+    }
+
+    gpuLODPipeline_->uploadTreeInstances(instances, boundingBoxHalfExtents, boundingSphereRadii);
+    gpuLODInitialized_ = true;
+}
+
+void TreeLODSystem::recordGPULODCompute(VkCommandBuffer cmd, uint32_t frameIndex, const glm::vec3& cameraPos) {
+    if (!isGPUDrivenLODActive() || !gpuLODInitialized_) {
+        return;
+    }
+
+    const auto& settings = getLODSettings();
+    gpuLODPipeline_->recordLODCompute(cmd, frameIndex, cameraPos, settings);
+}
+
+void TreeLODSystem::syncGPULODStates() {
+    if (!isGPUDrivenLODActive() || !gpuLODInitialized_) {
+        return;
+    }
+
+    // Read draw counters for debugging (optional - can be removed for performance)
+    TreeDrawCounters counters = gpuLODPipeline_->readDrawCounters();
+    SDL_LogDebug(SDL_LOG_CATEGORY_APPLICATION,
+                 "GPU LOD: fullDetail=%u, impostor=%u, blending=%u",
+                 counters.fullDetailCount, counters.impostorCount, counters.blendingCount);
+
+    // Note: For now, we still use CPU-based impostor collection after this.
+    // Full GPU-driven would require the render shaders to read LOD states directly
+    // from the GPU buffer. That's Phase 2 of the GPU-driven pipeline.
 }

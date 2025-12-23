@@ -166,6 +166,14 @@
 #define BINDING_TREE_IMPOSTOR_SHADOW_MAP   3   // Shadow map
 #define BINDING_TREE_IMPOSTOR_INSTANCES    4   // Impostor instance SSBO
 
+// Tree GPU LOD Pipeline Descriptor Set (GPU-driven LOD selection)
+#define BINDING_TREE_LOD_INSTANCES         0   // TreeInstanceGPU SSBO (static tree data)
+#define BINDING_TREE_LOD_DISTANCE_KEYS     1   // TreeDistanceKey SSBO (for sorting)
+#define BINDING_TREE_LOD_STATES            2   // TreeLODStateGPU SSBO (computed LOD states)
+#define BINDING_TREE_LOD_UNIFORMS          3   // TreeLODUniformsGPU UBO
+#define BINDING_TREE_LOD_COUNTERS          4   // Atomic counters for draw generation
+#define BINDING_TREE_LOD_SORTED_INDICES    5   // Sorted tree indices output
+
 // =============================================================================
 // Leaf Compute Shader Descriptor Set
 // =============================================================================
@@ -507,6 +515,14 @@ constexpr uint32_t TREE_IMPOSTOR_ALBEDO   = BINDING_TREE_IMPOSTOR_ALBEDO;
 constexpr uint32_t TREE_IMPOSTOR_NORMAL   = BINDING_TREE_IMPOSTOR_NORMAL;
 constexpr uint32_t TREE_IMPOSTOR_SHADOW_MAP = BINDING_TREE_IMPOSTOR_SHADOW_MAP;
 constexpr uint32_t TREE_IMPOSTOR_INSTANCES = BINDING_TREE_IMPOSTOR_INSTANCES;
+
+// Tree GPU LOD Pipeline
+constexpr uint32_t TREE_LOD_INSTANCES     = BINDING_TREE_LOD_INSTANCES;
+constexpr uint32_t TREE_LOD_DISTANCE_KEYS = BINDING_TREE_LOD_DISTANCE_KEYS;
+constexpr uint32_t TREE_LOD_STATES        = BINDING_TREE_LOD_STATES;
+constexpr uint32_t TREE_LOD_UNIFORMS      = BINDING_TREE_LOD_UNIFORMS;
+constexpr uint32_t TREE_LOD_COUNTERS      = BINDING_TREE_LOD_COUNTERS;
+constexpr uint32_t TREE_LOD_SORTED_INDICES = BINDING_TREE_LOD_SORTED_INDICES;
 
 // Leaf Compute
 constexpr uint32_t LEAF_COMPUTE_INPUT     = BINDING_LEAF_COMPUTE_INPUT;
