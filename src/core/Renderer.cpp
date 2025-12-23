@@ -1606,6 +1606,22 @@ void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
             systems_->shadow().getShadowSampler()
         );
     }
+
+    // Render GPU forest impostors using indirect draw
+    if (systems_->treeGPUForest() && systems_->treeGPUForest()->isReady() && systems_->treeLOD()) {
+        // Offset to impostor command in indirect buffer (after fullDetailCmd)
+        VkDeviceSize impostorCmdOffset = sizeof(VkDrawIndexedIndirectCommand);
+
+        systems_->treeLOD()->renderImpostorsIndirect(
+            cmd, frameIndex,
+            systems_->globalBuffers().uniformBuffers.buffers[frameIndex],
+            systems_->shadow().getShadowImageView(),
+            systems_->shadow().getShadowSampler(),
+            systems_->treeGPUForest()->getImpostorInstanceBuffer(),
+            systems_->treeGPUForest()->getIndirectBuffer(),
+            impostorCmdOffset
+        );
+    }
 }
 
 void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float grassTime) {

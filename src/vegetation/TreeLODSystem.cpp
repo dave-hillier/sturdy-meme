@@ -1007,6 +1007,81 @@ void TreeLODSystem::renderImpostors(VkCommandBuffer cmd, uint32_t frameIndex,
     vkCmdDrawIndexed(cmd, billboardIndexCount_, static_cast<uint32_t>(visibleImpostors_.size()), 0, 0, 0);
 }
 
+void TreeLODSystem::renderImpostorsIndirect(VkCommandBuffer cmd, uint32_t frameIndex,
+                                             VkBuffer uniformBuffer, VkImageView shadowMap, VkSampler shadowSampler,
+                                             VkBuffer instanceBuffer, VkBuffer indirectBuffer, VkDeviceSize indirectOffset) {
+    if (impostorAtlas_->getArchetypeCount() == 0) return;
+
+    const auto& settings = getLODSettings();
+    if (!settings.enableImpostors) return;
+
+    // Update descriptor sets
+    updateDescriptorSets(frameIndex, uniformBuffer, shadowMap, shadowSampler);
+
+    // Bind pipeline
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, impostorPipeline_.get());
+
+    // Set viewport and scissor
+    VkViewport viewport{};
+    viewport.x = 0.0f;
+    viewport.y = 0.0f;
+    viewport.width = static_cast<float>(extent_.width);
+    viewport.height = static_cast<float>(extent_.height);
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+    VkRect2D scissor{};
+    scissor.offset = {0, 0};
+    scissor.extent = extent_;
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+    // Bind descriptor sets
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, impostorPipelineLayout_.get(),
+                           0, 1, &impostorDescriptorSets_[frameIndex], 0, nullptr);
+
+    // Push constants (same as regular renderImpostors)
+    struct {
+        glm::vec4 cameraPos;
+        glm::vec4 lodParams;
+        glm::vec4 atlasParams;
+    } pushConstants;
+
+    pushConstants.cameraPos = glm::vec4(lastCameraPos_, settings.autumnHueShift);
+    pushConstants.lodParams = glm::vec4(
+        1.0f,
+        settings.impostorBrightness,
+        settings.normalStrength,
+        settings.enableDebugElevation ? settings.debugElevation : -999.0f
+    );
+
+    if (impostorAtlas_->getArchetypeCount() > 0) {
+        const auto* archetype = impostorAtlas_->getArchetype(0u);
+        float hSize = archetype ? archetype->boundingSphereRadius * 1.1f : 10.0f;
+        float vSize = archetype ? archetype->treeHeight * 0.5f * 1.1f : 10.0f;
+        float baseOffset = archetype ? archetype->baseOffset : 0.0f;
+        pushConstants.atlasParams = glm::vec4(
+            hSize,
+            vSize,
+            baseOffset,
+            settings.debugShowCellIndex ? 1.0f : 0.0f
+        );
+    }
+
+    vkCmdPushConstants(cmd, impostorPipelineLayout_.get(),
+                      VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                      0, sizeof(pushConstants), &pushConstants);
+
+    // Bind buffers - use external instance buffer instead of internal one
+    VkBuffer vertexBuffers[] = {billboardVertexBuffer_, instanceBuffer};
+    VkDeviceSize offsets[] = {0, 0};
+    vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
+    vkCmdBindIndexBuffer(cmd, billboardIndexBuffer_, 0, VK_INDEX_TYPE_UINT32);
+
+    // Draw indexed indirect - GPU determines instance count
+    vkCmdDrawIndexedIndirect(cmd, indirectBuffer, indirectOffset, 1, sizeof(VkDrawIndexedIndirectCommand));
+}
+
 void TreeLODSystem::renderImpostorShadows(VkCommandBuffer cmd, uint32_t frameIndex,
                                            int cascadeIndex, VkBuffer uniformBuffer) {
     if (visibleImpostors_.empty() || impostorAtlas_->getArchetypeCount() == 0) return;

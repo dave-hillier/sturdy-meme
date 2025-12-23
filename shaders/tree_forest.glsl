@@ -19,11 +19,18 @@ struct TreeFullDetail {
     vec2 _pad;
 };
 
-// Output for impostor rendering
+// Output for impostor rendering (matches ImpostorInstanceGPU in TreeLODSystem.h)
+// Layout must match vertex shader input attributes (locations 2-9)
 struct TreeImpostor {
-    vec4 position;          // xyz = world position, w = scale
-    vec4 sizeParams;        // x = hSize, y = vSize, z = baseOffset, w = blend factor
-    vec4 rotationAtlas;     // x = rotation, y = archetype index, zw = atlas UV offset
+    vec3 position;          // location 2: world position
+    float scale;            // location 3: tree scale
+    float rotation;         // location 4: Y-axis rotation
+    uint archetypeIndex;    // location 5: archetype for atlas lookup
+    float blendFactor;      // location 6: LOD blend (0=full geo, 1=impostor)
+    float hSize;            // location 7: horizontal half-size (pre-scaled)
+    float vSize;            // location 8: vertical half-size (pre-scaled)
+    float baseOffset;       // location 9: base offset (pre-scaled)
+    float _padding;         // alignment padding
 };
 
 // Cluster data for hierarchical culling

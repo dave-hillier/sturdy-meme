@@ -481,9 +481,11 @@ void TreeGPUForest::recordCullingCompute(VkCommandBuffer cmd, uint32_t frameInde
     clearCmds.fullDetailCmd.vertexOffset = 0;
     clearCmds.fullDetailCmd.firstInstance = 0;
 
-    clearCmds.impostorCmd.vertexCount = 6;  // Billboard quad
-    clearCmds.impostorCmd.instanceCount = 0;
-    clearCmds.impostorCmd.firstVertex = 0;
+    // Impostor uses indexed draw with billboard quad (6 indices for 2 triangles)
+    clearCmds.impostorCmd.indexCount = 6;
+    clearCmds.impostorCmd.instanceCount = 0;  // Compute shader fills this via atomicAdd
+    clearCmds.impostorCmd.firstIndex = 0;
+    clearCmds.impostorCmd.vertexOffset = 0;
     clearCmds.impostorCmd.firstInstance = 0;
 
     vkCmdUpdateBuffer(cmd, indirectBuffer_, 0, sizeof(ForestIndirectCommands), &clearCmds);

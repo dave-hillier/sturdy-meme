@@ -27,13 +27,20 @@ struct TreeFullDetailGPU {
 };
 static_assert(sizeof(TreeFullDetailGPU) == 48, "TreeFullDetailGPU must be 48 bytes");
 
-// GPU-side impostor output (matches shader struct)
+// GPU-side impostor output (matches ImpostorInstanceGPU in TreeLODSystem.h)
+// Layout matches vertex shader input attributes (locations 2-9)
 struct TreeImpostorGPU {
-    glm::vec4 position;          // xyz = position, w = scale
-    glm::vec4 sizeParams;        // x = hSize, y = vSize, z = baseOffset, w = blend
-    glm::vec4 rotationAtlas;     // x = rotation, y = archetype, zw = atlas offset
+    glm::vec3 position;          // location 2: world position
+    float scale;                 // location 3: tree scale
+    float rotation;              // location 4: Y-axis rotation
+    uint32_t archetypeIndex;     // location 5: archetype for atlas lookup
+    float blendFactor;           // location 6: LOD blend (0=full geo, 1=impostor)
+    float hSize;                 // location 7: horizontal half-size (pre-scaled)
+    float vSize;                 // location 8: vertical half-size (pre-scaled)
+    float baseOffset;            // location 9: base offset (pre-scaled)
+    float _padding;              // alignment padding
 };
-static_assert(sizeof(TreeImpostorGPU) == 48, "TreeImpostorGPU must be 48 bytes");
+static_assert(sizeof(TreeImpostorGPU) == 44, "TreeImpostorGPU must match ImpostorInstanceGPU (44 bytes)");
 
 // Forest uniforms (matches shader struct)
 struct ForestUniformsGPU {
@@ -61,10 +68,10 @@ struct ClusterDataGPU {
 };
 static_assert(sizeof(ClusterDataGPU) == 48, "ClusterDataGPU must be 48 bytes");
 
-// Indirect draw commands
+// Indirect draw commands (both use indexed draw for billboard mesh)
 struct ForestIndirectCommands {
     VkDrawIndexedIndirectCommand fullDetailCmd;
-    VkDrawIndirectCommand impostorCmd;
+    VkDrawIndexedIndirectCommand impostorCmd;
 };
 
 /**

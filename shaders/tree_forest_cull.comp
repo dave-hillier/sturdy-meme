@@ -34,10 +34,10 @@ layout(std430, binding = BINDING_TREE_FOREST_IMPOSTORS) writeonly buffer Imposto
     TreeImpostor impostorTrees[];
 };
 
-// Output: Indirect draw commands
+// Output: Indirect draw commands (both use indexed draw for billboard mesh)
 layout(std430, binding = BINDING_TREE_FOREST_INDIRECT) buffer IndirectBuffer {
     DrawIndexedIndirectCommand fullDetailCmd;
-    DrawIndirectCommand impostorCmd;
+    DrawIndexedIndirectCommand impostorCmd;
 };
 
 // Uniforms
@@ -158,9 +158,15 @@ void main() {
         // Impostor (with inverse blend)
         uint impSlot = atomicAdd(impostorCmd.instanceCount, 1);
         TreeImpostor imp;
-        imp.position = vec4(position, scale);
-        imp.sizeParams = vec4(hSize, vSize, baseOffset, blendFactor);
-        imp.rotationAtlas = vec4(rotation, float(archetype), 0.0, 0.0);
+        imp.position = position;
+        imp.scale = scale;
+        imp.rotation = rotation;
+        imp.archetypeIndex = archetype;
+        imp.blendFactor = blendFactor;
+        imp.hSize = hSize;
+        imp.vSize = vSize;
+        imp.baseOffset = baseOffset;
+        imp._padding = 0.0;
         impostorTrees[impSlot] = imp;
 
     } else {
@@ -168,9 +174,15 @@ void main() {
         uint slot = atomicAdd(impostorCmd.instanceCount, 1);
 
         TreeImpostor imp;
-        imp.position = vec4(position, scale);
-        imp.sizeParams = vec4(hSize, vSize, baseOffset, 1.0);
-        imp.rotationAtlas = vec4(rotation, float(archetype), 0.0, 0.0);
+        imp.position = position;
+        imp.scale = scale;
+        imp.rotation = rotation;
+        imp.archetypeIndex = archetype;
+        imp.blendFactor = 1.0;
+        imp.hSize = hSize;
+        imp.vSize = vSize;
+        imp.baseOffset = baseOffset;
+        imp._padding = 0.0;
         impostorTrees[slot] = imp;
     }
 }

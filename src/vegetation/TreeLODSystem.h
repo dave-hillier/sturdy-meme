@@ -89,6 +89,11 @@ public:
     void renderImpostors(VkCommandBuffer cmd, uint32_t frameIndex,
                          VkBuffer uniformBuffer, VkImageView shadowMap, VkSampler shadowSampler);
 
+    // Render impostors using indirect draw with external buffers (for GPU forest)
+    void renderImpostorsIndirect(VkCommandBuffer cmd, uint32_t frameIndex,
+                                  VkBuffer uniformBuffer, VkImageView shadowMap, VkSampler shadowSampler,
+                                  VkBuffer instanceBuffer, VkBuffer indirectBuffer, VkDeviceSize indirectOffset);
+
     // Render impostor shadows for a specific cascade
     void renderImpostorShadows(VkCommandBuffer cmd, uint32_t frameIndex,
                                int cascadeIndex, VkBuffer uniformBuffer);
