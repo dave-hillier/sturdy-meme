@@ -1025,6 +1025,8 @@ bool Renderer::render(const Camera& camera) {
 
     // Update tree LOD system for impostor rendering
     if (systems_->treeLOD() && systems_->tree()) {
+        // Sync GPU LOD states from previous frame (for UI display)
+        systems_->treeLOD()->syncGPULODStates();
         systems_->treeLOD()->update(frame.deltaTime, frame.cameraPosition, *systems_->tree());
     }
 
@@ -1048,6 +1050,11 @@ bool Renderer::render(const Camera& camera) {
     // Build render resources and context for pipeline stages
     RenderResources resources = buildRenderResources(imageIndex);
     RenderContext ctx(cmd, frame.frameIndex, frame, resources);
+
+    // Record GPU LOD compute pass for trees (if enabled)
+    if (systems_->treeLOD() && systems_->treeLOD()->isGPUDrivenLODActive()) {
+        systems_->treeLOD()->recordGPULODCompute(cmd, frame.frameIndex, frame.cameraPosition);
+    }
 
     // Execute all compute passes via pipeline
     renderPipeline.computeStage.execute(ctx);

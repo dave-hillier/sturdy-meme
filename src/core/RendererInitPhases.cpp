@@ -478,6 +478,9 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
                         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Missing textures for %s impostor", info.name.c_str());
                     }
                 }
+
+                // Upload tree instances to GPU LOD pipeline
+                treeLOD->uploadTreeInstancesToGPU(*treeSystem);
             }
         }
     }

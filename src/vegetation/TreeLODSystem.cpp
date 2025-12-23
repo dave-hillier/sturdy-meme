@@ -1161,14 +1161,12 @@ void TreeLODSystem::recordGPULODCompute(VkCommandBuffer cmd, uint32_t frameIndex
 
 void TreeLODSystem::syncGPULODStates() {
     if (!isGPUDrivenLODActive() || !gpuLODInitialized_) {
+        lastGPUCounters_ = {};
         return;
     }
 
-    // Read draw counters for debugging (optional - can be removed for performance)
-    TreeDrawCounters counters = gpuLODPipeline_->readDrawCounters();
-    SDL_LogDebug(SDL_LOG_CATEGORY_APPLICATION,
-                 "GPU LOD: fullDetail=%u, impostor=%u, blending=%u",
-                 counters.fullDetailCount, counters.impostorCount, counters.blendingCount);
+    // Read draw counters and store for UI display
+    lastGPUCounters_ = gpuLODPipeline_->readDrawCounters();
 
     // Note: For now, we still use CPU-based impostor collection after this.
     // Full GPU-driven would require the render shaders to read LOD states directly

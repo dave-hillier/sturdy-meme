@@ -70,6 +70,10 @@ void GuiTreeTab::render(Renderer& renderer) {
                 bool gpuActive = treeLOD->isGPUDrivenLODActive();
                 if (gpuActive) {
                     ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "  GPU pipeline active");
+                    const auto& stats = treeLOD->getGPULODStats();
+                    ImGui::Text("    Full detail: %u", stats.fullDetailCount);
+                    ImGui::Text("    Impostors: %u", stats.impostorCount);
+                    ImGui::Text("    Blending: %u", stats.blendingCount);
                 } else {
                     ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "  GPU pipeline not available");
                 }

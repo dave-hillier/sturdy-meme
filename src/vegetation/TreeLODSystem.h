@@ -81,6 +81,9 @@ public:
     // Check if GPU LOD pipeline is available and enabled
     bool isGPUDrivenLODActive() const;
 
+    // Get last GPU LOD stats (only valid when GPU LOD is active)
+    const TreeDrawCounters& getGPULODStats() const { return lastGPUCounters_; }
+
     // Render impostors (called after full geometry trees are rendered)
     void renderImpostors(VkCommandBuffer cmd, uint32_t frameIndex,
                          VkBuffer uniformBuffer, VkImageView shadowMap, VkSampler shadowSampler);
@@ -171,6 +174,7 @@ private:
     // GPU-driven LOD pipeline (optional)
     std::unique_ptr<TreeGPULODPipeline> gpuLODPipeline_;
     bool gpuLODInitialized_ = false;
+    TreeDrawCounters lastGPUCounters_{};
 
     // Per-tree LOD states
     std::vector<TreeLODState> lodStates_;
