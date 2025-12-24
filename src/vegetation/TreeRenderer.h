@@ -71,6 +71,17 @@ struct TreeCellCullUniforms {
     uint32_t _pad0;
 };
 
+// Uniforms for tree filter compute shader (Phase 3: Two-Phase Culling)
+// Must match tree_filter.comp TreeFilterUniforms layout
+struct TreeFilterUniforms {
+    glm::vec4 cameraPosition;           // xyz = camera pos, w = unused
+    glm::vec4 frustumPlanes[6];         // Frustum planes for culling
+    float maxDrawDistance;              // Maximum leaf draw distance
+    uint32_t maxTreesPerCell;           // Maximum trees per cell (for bounds checking)
+    uint32_t _pad0;
+    uint32_t _pad1;
+};
+
 // Number of leaf types (must match tree_leaf_cull.comp NUM_LEAF_TYPES)
 constexpr uint32_t NUM_LEAF_TYPES = 4;
 // Leaf type indices (oak=0, ash=1, aspen=2, pine=3)
@@ -225,6 +236,10 @@ public:
     // Check if leaf culling is enabled
     bool isLeafCullingEnabled() const { return cullPipeline_.get() != VK_NULL_HANDLE; }
 
+    // Enable/disable two-phase culling (Phase 3)
+    void setTwoPhaseLeafCulling(bool enabled) { twoPhaseLeafCullingEnabled_ = enabled; }
+    bool isTwoPhaseLeafCullingEnabled() const { return twoPhaseLeafCullingEnabled_; }
+
     VkDevice getDevice() const { return device_; }
 
 private:
@@ -237,6 +252,8 @@ private:
     bool createCullBuffers(uint32_t maxLeafInstances, uint32_t numTrees);
     bool createCellCullPipeline();
     bool createCellCullBuffers();
+    bool createTreeFilterPipeline();
+    bool createTreeFilterBuffers(uint32_t maxTrees);
 
     VkDevice device_ = VK_NULL_HANDLE;
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
@@ -364,6 +381,15 @@ private:
 
     // Per-frame tree filter descriptor sets
     std::vector<VkDescriptorSet> treeFilterDescriptorSets_;
+
+    // Uniform buffer for tree filtering
+    BufferUtils::PerFrameBufferSet treeFilterUniformBuffers_;
+
+    // Phase 3 leaf culling pipeline (processes visible trees only)
+    ManagedPipeline leafCullPhase3Pipeline_;
+    ManagedPipelineLayout leafCullPhase3PipelineLayout_;
+    ManagedDescriptorSetLayout leafCullPhase3DescriptorSetLayout_;
+    std::vector<VkDescriptorSet> leafCullPhase3DescriptorSets_;
 
     // Visible tree output buffer (compacted list of visible trees)
     // Contains: [visibleTreeCount, VisibleTreeData[0], VisibleTreeData[1], ...]
