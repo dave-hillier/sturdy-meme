@@ -386,12 +386,22 @@
 #define BINDING_OCEAN_NORMAL_OUTPUT        4   // Normal map output (rgba16f)
 #define BINDING_OCEAN_FOAM_OUTPUT          5   // Foam/folding map output (r16f)
 
-// Sampling in water shader
+// Sampling in water shader (cascade 0 - large swells, 256m)
 #define BINDING_WATER_OCEAN_DISP          11   // Ocean displacement map (water shader)
 #define BINDING_WATER_OCEAN_NORMAL        12   // Ocean normal map (water shader)
 #define BINDING_WATER_OCEAN_FOAM          13   // Ocean foam map (water shader)
 #define BINDING_WATER_TILE_ARRAY          14   // LOD tile array (high-res shore detection)
 #define BINDING_WATER_TILE_INFO           15   // Tile info SSBO
+
+// Ocean FFT cascade 1 (medium waves, 64m)
+#define BINDING_WATER_OCEAN_DISP_1        16   // Cascade 1 displacement
+#define BINDING_WATER_OCEAN_NORMAL_1      17   // Cascade 1 normal
+#define BINDING_WATER_OCEAN_FOAM_1        18   // Cascade 1 foam
+
+// Ocean FFT cascade 2 (small ripples, 16m)
+#define BINDING_WATER_OCEAN_DISP_2        19   // Cascade 2 displacement
+#define BINDING_WATER_OCEAN_NORMAL_2      20   // Cascade 2 normal
+#define BINDING_WATER_OCEAN_FOAM_2        21   // Cascade 2 foam
 
 // =============================================================================
 // C++ Type-Safe Wrappers
@@ -704,6 +714,12 @@ constexpr uint32_t WATER_OCEAN_NORMAL     = BINDING_WATER_OCEAN_NORMAL;
 constexpr uint32_t WATER_OCEAN_FOAM       = BINDING_WATER_OCEAN_FOAM;
 constexpr uint32_t WATER_TILE_ARRAY       = BINDING_WATER_TILE_ARRAY;
 constexpr uint32_t WATER_TILE_INFO        = BINDING_WATER_TILE_INFO;
+constexpr uint32_t WATER_OCEAN_DISP_1     = BINDING_WATER_OCEAN_DISP_1;
+constexpr uint32_t WATER_OCEAN_NORMAL_1   = BINDING_WATER_OCEAN_NORMAL_1;
+constexpr uint32_t WATER_OCEAN_FOAM_1     = BINDING_WATER_OCEAN_FOAM_1;
+constexpr uint32_t WATER_OCEAN_DISP_2     = BINDING_WATER_OCEAN_DISP_2;
+constexpr uint32_t WATER_OCEAN_NORMAL_2   = BINDING_WATER_OCEAN_NORMAL_2;
+constexpr uint32_t WATER_OCEAN_FOAM_2     = BINDING_WATER_OCEAN_FOAM_2;
 
 } // namespace Bindings
 

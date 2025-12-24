@@ -473,15 +473,27 @@ void main() {
     vec3 baseColor = mat.color.rgb * waterTransmission;
 
     // =========================================================================
-    // DEPTH-BASED COLOR BLENDING (English estuary style)
-    // Shallow water is murky/muddy, surface is grey-green, deep is dark grey-blue
+    // DEPTH-BASED COLOR BLENDING (Material-driven)
+    // Colors derived from material properties instead of hardcoded values
+    // Shore: brightened base + turbidity, Surface: base color, Deep: absorbed
     // =========================================================================
-    vec3 shoreColor = vec3(0.35, 0.38, 0.32);   // Muddy brown-green (estuary sediment)
-    vec3 surfaceColor = vec3(0.15, 0.22, 0.25); // Grey-green (mid-depth)
-    vec3 depthColor = vec3(0.05, 0.1, 0.15);    // Dark grey-blue (deep water)
 
-    // Per-channel extinction distances for realistic color falloff
-    vec3 extinctionDist = vec3(5.0, 40.0, 150.0); // Red fades fast, blue lingers
+    // Derive depth colors from material properties
+    // Shore color: brighter and muddier (turbidity adds sediment tint)
+    vec3 sedimentTint = vec3(0.4, 0.35, 0.25);  // Sandy/sediment color
+    vec3 shoreColor = mix(mat.color.rgb * 1.5, sedimentTint, turbidity * 0.5);
+
+    // Surface color: the base material color slightly darkened
+    vec3 surfaceColor = mat.color.rgb * 0.8;
+
+    // Deep color: heavily absorbed, only blue-ish light remains
+    // Use absorption coefficients to determine what color survives at depth
+    vec3 depthColor = mat.color.rgb * exp(-absorption * 20.0) * 0.3;
+
+    // Per-channel extinction distances based on absorption coefficients
+    // Lower absorption = longer extinction distance
+    vec3 extinctionDist = 5.0 / (absorption + 0.01); // Avoid div by zero
+    extinctionDist = clamp(extinctionDist, 5.0, 200.0);
 
     // Blend shore color into surface based on shallow depth
     float shoreBlend = 1.0 - smoothstep(0.0, 10.0, waterDepth);
