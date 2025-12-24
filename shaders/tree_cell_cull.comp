@@ -1,0 +1,140 @@
+#version 450
+
+#extension GL_GOOGLE_include_directive : require
+
+#include "bindings.glsl"
+#include "instancing_common.glsl"
+
+// Workgroup size: 256 threads per workgroup
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+// Cell data (packed for GPU - 32 bytes per cell)
+// boundsMinAndFirst: xyz = boundsMin, w = firstTreeIndex as float bits
+// boundsMaxAndCount: xyz = boundsMax, w = treeCount as float bits
+struct TreeCellGPU {
+    vec4 boundsMinAndFirst;
+    vec4 boundsMaxAndCount;
+};
+
+// Input: All cells in the spatial grid
+layout(std430, binding = BINDING_TREE_CELL_CULL_CELLS) readonly buffer CellBuffer {
+    TreeCellGPU cells[];
+};
+
+// Output: Visible cell indices (compacted list)
+layout(std430, binding = BINDING_TREE_CELL_CULL_VISIBLE) buffer VisibleCellBuffer {
+    uint visibleCellCount;
+    uint visibleCellIndices[];
+};
+
+// Indirect dispatch command for tree culling pass
+// x = number of workgroups, y = 1, z = 1
+layout(std430, binding = BINDING_TREE_CELL_CULL_INDIRECT) buffer IndirectDispatchBuffer {
+    uint dispatchX;
+    uint dispatchY;
+    uint dispatchZ;
+    uint totalVisibleTrees;  // Running count of trees in visible cells
+};
+
+// Culling uniforms
+layout(binding = BINDING_TREE_CELL_CULL_UNIFORMS) uniform CellCullUniforms {
+    vec4 cameraPosition;           // xyz = camera pos, w = unused
+    vec4 frustumPlanes[6];         // Frustum planes for culling
+    float maxDrawDistance;         // Maximum tree draw distance
+    uint numCells;                 // Total number of cells in grid
+    uint treesPerWorkgroup;        // How many trees to process per workgroup in tree cull
+    uint _pad0;
+};
+
+// AABB vs frustum test
+// Returns true if the AABB is at least partially inside the frustum
+bool isAABBInFrustum(vec3 boundsMin, vec3 boundsMax, vec4 planes[6]) {
+    // For each frustum plane, find the vertex of the AABB that is most
+    // in the direction of the plane normal. If this vertex is behind the plane,
+    // the AABB is completely outside the frustum.
+    for (int i = 0; i < 6; i++) {
+        vec3 normal = planes[i].xyz;
+
+        // Find the positive vertex (vertex most in direction of normal)
+        vec3 positiveVertex;
+        positiveVertex.x = (normal.x >= 0.0) ? boundsMax.x : boundsMin.x;
+        positiveVertex.y = (normal.y >= 0.0) ? boundsMax.y : boundsMin.y;
+        positiveVertex.z = (normal.z >= 0.0) ? boundsMax.z : boundsMin.z;
+
+        // Test if positive vertex is behind the plane
+        if (dot(vec4(positiveVertex, 1.0), planes[i]) < 0.0) {
+            return false;  // Completely outside this plane
+        }
+    }
+    return true;  // At least partially inside all planes
+}
+
+// Distance culling for AABB
+// Returns true if the AABB's closest point is within max distance
+bool isAABBInRange(vec3 boundsMin, vec3 boundsMax, vec3 cameraPos, float maxDistance) {
+    // Find closest point on AABB to camera
+    vec3 closestPoint;
+    closestPoint.x = clamp(cameraPos.x, boundsMin.x, boundsMax.x);
+    closestPoint.y = clamp(cameraPos.y, boundsMin.y, boundsMax.y);
+    closestPoint.z = clamp(cameraPos.z, boundsMin.z, boundsMax.z);
+
+    // Check if closest point is within range
+    float dist = length(closestPoint - cameraPos);
+    return dist <= maxDistance;
+}
+
+void main() {
+    uint cellIdx = gl_GlobalInvocationID.x;
+
+    // First thread initializes output buffers
+    if (cellIdx == 0) {
+        visibleCellCount = 0;
+        dispatchX = 0;
+        dispatchY = 1;
+        dispatchZ = 1;
+        totalVisibleTrees = 0;
+    }
+
+    // Ensure initialization is complete before any thread proceeds
+    barrier();
+    memoryBarrierBuffer();
+
+    // Early exit if beyond cell count
+    if (cellIdx >= numCells) {
+        return;
+    }
+
+    // Load cell data
+    TreeCellGPU cell = cells[cellIdx];
+    vec3 boundsMin = cell.boundsMinAndFirst.xyz;
+    vec3 boundsMax = cell.boundsMaxAndCount.xyz;
+    uint firstTreeIndex = floatBitsToUint(cell.boundsMinAndFirst.w);
+    uint treeCount = floatBitsToUint(cell.boundsMaxAndCount.w);
+
+    // Skip empty cells
+    if (treeCount == 0) {
+        return;
+    }
+
+    // Distance culling: skip cells too far from camera
+    if (!isAABBInRange(boundsMin, boundsMax, cameraPosition.xyz, maxDrawDistance)) {
+        return;
+    }
+
+    // Frustum culling: skip cells completely outside frustum
+    if (!isAABBInFrustum(boundsMin, boundsMax, frustumPlanes)) {
+        return;
+    }
+
+    // Cell is visible - atomically add to visible list
+    uint visibleIdx = atomicAdd(visibleCellCount, 1);
+    visibleCellIndices[visibleIdx] = cellIdx;
+
+    // Update tree count and dispatch size
+    atomicAdd(totalVisibleTrees, treeCount);
+
+    // Calculate number of workgroups needed for this cell's trees
+    // Each workgroup will process treesPerWorkgroup trees
+    uint workgroupsForCell = (treeCount + treesPerWorkgroup - 1) / treesPerWorkgroup;
+    atomicAdd(dispatchX, workgroupsForCell);
+}

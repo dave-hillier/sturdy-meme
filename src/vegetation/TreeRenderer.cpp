@@ -39,6 +39,18 @@ TreeRenderer::~TreeRenderer() {
     if (treeRenderDataBuffer_ != VK_NULL_HANDLE) {
         vmaDestroyBuffer(allocator_, treeRenderDataBuffer_, treeRenderDataAllocation_);
     }
+    // Clean up cell culling buffers
+    if (visibleCellBuffer_ != VK_NULL_HANDLE) {
+        vmaDestroyBuffer(allocator_, visibleCellBuffer_, visibleCellAllocation_);
+    }
+    if (cellCullIndirectBuffer_ != VK_NULL_HANDLE) {
+        vmaDestroyBuffer(allocator_, cellCullIndirectBuffer_, cellCullIndirectAllocation_);
+    }
+    for (size_t i = 0; i < cellCullUniformBuffers_.buffers.size(); ++i) {
+        if (cellCullUniformBuffers_.buffers[i] != VK_NULL_HANDLE) {
+            vmaDestroyBuffer(allocator_, cellCullUniformBuffers_.buffers[i], cellCullUniformBuffers_.allocations[i]);
+        }
+    }
 }
 
 bool TreeRenderer::initInternal(const InitInfo& info) {
@@ -68,6 +80,11 @@ bool TreeRenderer::initInternal(const InitInfo& info) {
     // Create culling pipeline (optional - gracefully degrade if fails)
     if (!createCullPipeline()) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "TreeRenderer: Culling pipeline not available, using direct rendering");
+    }
+
+    // Create cell culling pipeline for spatial partitioning (Phase 1)
+    if (!createCellCullPipeline()) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "TreeRenderer: Cell culling pipeline not available, using non-spatial culling");
     }
 
     SDL_Log("TreeRenderer initialized successfully");
@@ -503,6 +520,243 @@ bool TreeRenderer::createCullBuffers(uint32_t maxLeafInstances, uint32_t numTree
             maxLeafInstances, numTrees,
             static_cast<float>(cullOutputBufferSize_ * CULL_BUFFER_SET_COUNT) / (1024.0f * 1024.0f));
     return true;
+}
+
+bool TreeRenderer::createCellCullPipeline() {
+    // Create cell culling descriptor set layout
+    std::vector<VkDescriptorSetLayoutBinding> cellCullBindings = {
+        {Bindings::TREE_CELL_CULL_CELLS, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
+        {Bindings::TREE_CELL_CULL_VISIBLE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
+        {Bindings::TREE_CELL_CULL_INDIRECT, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
+        {Bindings::TREE_CELL_CULL_UNIFORMS, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
+    };
+
+    VkDescriptorSetLayoutCreateInfo layoutInfo{};
+    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layoutInfo.bindingCount = static_cast<uint32_t>(cellCullBindings.size());
+    layoutInfo.pBindings = cellCullBindings.data();
+
+    VkDescriptorSetLayout rawLayout;
+    if (vkCreateDescriptorSetLayout(device_, &layoutInfo, nullptr, &rawLayout) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeRenderer: Failed to create cell cull descriptor set layout");
+        return false;
+    }
+    cellCullDescriptorSetLayout_ = ManagedDescriptorSetLayout::fromRaw(device_, rawLayout);
+
+    // Create cell culling pipeline layout
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipelineLayoutInfo.setLayoutCount = 1;
+    VkDescriptorSetLayout setLayout = cellCullDescriptorSetLayout_.get();
+    pipelineLayoutInfo.pSetLayouts = &setLayout;
+
+    VkPipelineLayout rawPipelineLayout;
+    if (vkCreatePipelineLayout(device_, &pipelineLayoutInfo, nullptr, &rawPipelineLayout) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeRenderer: Failed to create cell cull pipeline layout");
+        return false;
+    }
+    cellCullPipelineLayout_ = ManagedPipelineLayout::fromRaw(device_, rawPipelineLayout);
+
+    // Load compute shader
+    std::string shaderPath = resourcePath_ + "/shaders/tree_cell_cull.comp.spv";
+    auto shaderModuleOpt = ShaderLoader::loadShaderModule(device_, shaderPath);
+    if (!shaderModuleOpt.has_value()) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "TreeRenderer: Cell cull shader not found: %s", shaderPath.c_str());
+        return false;
+    }
+    VkShaderModule computeShaderModule = shaderModuleOpt.value();
+
+    VkPipelineShaderStageCreateInfo shaderStageInfo{};
+    shaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    shaderStageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    shaderStageInfo.module = computeShaderModule;
+    shaderStageInfo.pName = "main";
+
+    VkComputePipelineCreateInfo pipelineInfo{};
+    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    pipelineInfo.stage = shaderStageInfo;
+    pipelineInfo.layout = cellCullPipelineLayout_.get();
+
+    VkPipeline rawPipeline;
+    VkResult result = vkCreateComputePipelines(device_, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &rawPipeline);
+    vkDestroyShaderModule(device_, computeShaderModule, nullptr);
+
+    if (result != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeRenderer: Failed to create cell cull compute pipeline");
+        return false;
+    }
+    cellCullPipeline_ = ManagedPipeline::fromRaw(device_, rawPipeline);
+
+    SDL_Log("TreeRenderer: Created cell culling compute pipeline");
+    return true;
+}
+
+bool TreeRenderer::createCellCullBuffers() {
+    if (!spatialIndex_ || !spatialIndex_->isValid()) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "TreeRenderer: Cannot create cell cull buffers without valid spatial index");
+        return false;
+    }
+
+    uint32_t numCells = spatialIndex_->getCellCount();
+
+    // Create visible cell output buffer (one uint per cell for worst case)
+    // Plus 1 uint at the beginning for the count
+    visibleCellBufferSize_ = (numCells + 1) * sizeof(uint32_t);
+
+    VkBufferCreateInfo bufferInfo{};
+    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferInfo.size = visibleCellBufferSize_;
+    bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+
+    if (vmaCreateBuffer(allocator_, &bufferInfo, &allocInfo,
+                        &visibleCellBuffer_, &visibleCellAllocation_, nullptr) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeRenderer: Failed to create visible cell buffer");
+        return false;
+    }
+
+    // Create indirect dispatch buffer (4 uints: dispatchX, dispatchY, dispatchZ, totalVisibleTrees)
+    VkBufferCreateInfo indirectInfo{};
+    indirectInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    indirectInfo.size = 4 * sizeof(uint32_t);
+    indirectInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
+                         VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    indirectInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    if (vmaCreateBuffer(allocator_, &indirectInfo, &allocInfo,
+                        &cellCullIndirectBuffer_, &cellCullIndirectAllocation_, nullptr) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeRenderer: Failed to create cell cull indirect buffer");
+        return false;
+    }
+
+    // Create uniform buffers for cell culling (per-frame)
+    if (!BufferUtils::PerFrameBufferBuilder()
+            .setAllocator(allocator_)
+            .setFrameCount(maxFramesInFlight_)
+            .setSize(sizeof(TreeCellCullUniforms))
+            .setUsage(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)
+            .build(cellCullUniformBuffers_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeRenderer: Failed to create cell cull uniform buffers");
+        return false;
+    }
+
+    // Allocate descriptor sets for cell culling
+    cellCullDescriptorSets_ = descriptorPool_->allocate(cellCullDescriptorSetLayout_.get(), maxFramesInFlight_);
+    if (cellCullDescriptorSets_.empty()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeRenderer: Failed to allocate cell cull descriptor sets");
+        return false;
+    }
+
+    // Update descriptor sets with buffer bindings
+    for (uint32_t f = 0; f < maxFramesInFlight_; ++f) {
+        VkDescriptorBufferInfo cellsInfo{};
+        cellsInfo.buffer = spatialIndex_->getCellBuffer();
+        cellsInfo.offset = 0;
+        cellsInfo.range = VK_WHOLE_SIZE;
+
+        VkDescriptorBufferInfo visibleInfo{};
+        visibleInfo.buffer = visibleCellBuffer_;
+        visibleInfo.offset = 0;
+        visibleInfo.range = VK_WHOLE_SIZE;
+
+        VkDescriptorBufferInfo indirectBufferInfo{};
+        indirectBufferInfo.buffer = cellCullIndirectBuffer_;
+        indirectBufferInfo.offset = 0;
+        indirectBufferInfo.range = VK_WHOLE_SIZE;
+
+        VkDescriptorBufferInfo uniformInfo{};
+        uniformInfo.buffer = cellCullUniformBuffers_.buffers[f];
+        uniformInfo.offset = 0;
+        uniformInfo.range = sizeof(TreeCellCullUniforms);
+
+        std::array<VkWriteDescriptorSet, 4> writes{};
+
+        writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[0].dstSet = cellCullDescriptorSets_[f];
+        writes[0].dstBinding = Bindings::TREE_CELL_CULL_CELLS;
+        writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[0].descriptorCount = 1;
+        writes[0].pBufferInfo = &cellsInfo;
+
+        writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[1].dstSet = cellCullDescriptorSets_[f];
+        writes[1].dstBinding = Bindings::TREE_CELL_CULL_VISIBLE;
+        writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[1].descriptorCount = 1;
+        writes[1].pBufferInfo = &visibleInfo;
+
+        writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[2].dstSet = cellCullDescriptorSets_[f];
+        writes[2].dstBinding = Bindings::TREE_CELL_CULL_INDIRECT;
+        writes[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[2].descriptorCount = 1;
+        writes[2].pBufferInfo = &indirectBufferInfo;
+
+        writes[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[3].dstSet = cellCullDescriptorSets_[f];
+        writes[3].dstBinding = Bindings::TREE_CELL_CULL_UNIFORMS;
+        writes[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        writes[3].descriptorCount = 1;
+        writes[3].pBufferInfo = &uniformInfo;
+
+        vkUpdateDescriptorSets(device_, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+    }
+
+    SDL_Log("TreeRenderer: Created cell culling buffers (%u cells, %.2f KB visible buffer)",
+            numCells, visibleCellBufferSize_ / 1024.0f);
+    return true;
+}
+
+void TreeRenderer::updateSpatialIndex(const TreeSystem& treeSystem) {
+    const auto& trees = treeSystem.getTreeInstances();
+    const auto& leafRenderables = treeSystem.getLeafRenderables();
+
+    if (trees.empty()) {
+        spatialIndex_.reset();
+        return;
+    }
+
+    // Create spatial index if needed
+    if (!spatialIndex_) {
+        TreeSpatialIndex::InitInfo indexInfo{};
+        indexInfo.device = device_;
+        indexInfo.allocator = allocator_;
+        indexInfo.cellSize = 64.0f;  // 64m cells
+        indexInfo.worldSize = terrainSize_;
+
+        spatialIndex_ = TreeSpatialIndex::create(indexInfo);
+        if (!spatialIndex_) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeRenderer: Failed to create spatial index");
+            return;
+        }
+    }
+
+    // Collect model matrices from leaf renderables
+    std::vector<glm::mat4> treeModels;
+    treeModels.reserve(leafRenderables.size());
+    for (const auto& renderable : leafRenderables) {
+        treeModels.push_back(renderable.transform);
+    }
+
+    // Rebuild index with current tree data
+    spatialIndex_->rebuild(trees, treeModels);
+
+    // Upload to GPU
+    if (!spatialIndex_->uploadToGPU()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeRenderer: Failed to upload spatial index to GPU");
+        return;
+    }
+
+    // Create cell culling buffers if needed
+    if (visibleCellBuffer_ == VK_NULL_HANDLE && cellCullPipeline_.get() != VK_NULL_HANDLE) {
+        createCellCullBuffers();
+    }
+
+    SDL_Log("TreeRenderer: Updated spatial index (%zu trees, %u non-empty cells)",
+            trees.size(), spatialIndex_->getNonEmptyCellCount());
 }
 
 void TreeRenderer::updateBarkDescriptorSet(
@@ -1064,6 +1318,52 @@ void TreeRenderer::recordLeafCulling(VkCommandBuffer cmd, uint32_t frameIndex,
         writes[1].pBufferInfo = &indirectInfo;
 
         vkUpdateDescriptorSets(device_, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+    }
+
+    // =========================================================================
+    // Phase 1: Cell Culling (Spatial Partitioning)
+    // Cull cells before leaf culling to reduce workload
+    // =========================================================================
+    if (isSpatialIndexEnabled() && cellCullPipeline_.get() != VK_NULL_HANDLE) {
+        // Update cell culling uniforms
+        TreeCellCullUniforms cellUniforms{};
+        cellUniforms.cameraPosition = glm::vec4(cameraPos, 1.0f);
+        for (int i = 0; i < 6; ++i) {
+            cellUniforms.frustumPlanes[i] = frustumPlanes[i];
+        }
+        cellUniforms.maxDrawDistance = 250.0f;  // Match leaf culling distance
+        cellUniforms.numCells = spatialIndex_->getCellCount();
+        cellUniforms.treesPerWorkgroup = 64;    // Tunable parameter
+
+        void* mappedData;
+        vmaMapMemory(allocator_, cellCullUniformBuffers_.allocations[frameIndex], &mappedData);
+        memcpy(mappedData, &cellUniforms, sizeof(TreeCellCullUniforms));
+        vmaUnmapMemory(allocator_, cellCullUniformBuffers_.allocations[frameIndex]);
+
+        // Memory barrier for uniform buffer update
+        VkMemoryBarrier cellUniformBarrier{};
+        cellUniformBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        cellUniformBarrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
+        cellUniformBarrier.dstAccessMask = VK_ACCESS_UNIFORM_READ_BIT;
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             0, 1, &cellUniformBarrier, 0, nullptr, 0, nullptr);
+
+        // Bind cell culling pipeline and dispatch
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cellCullPipeline_.get());
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cellCullPipelineLayout_.get(),
+                                0, 1, &cellCullDescriptorSets_[frameIndex], 0, nullptr);
+
+        // One thread per cell
+        uint32_t cellWorkgroups = (cellUniforms.numCells + 255) / 256;
+        vkCmdDispatch(cmd, cellWorkgroups, 1, 1);
+
+        // Memory barrier for cell culling output
+        VkMemoryBarrier cellBarrier{};
+        cellBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        cellBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        cellBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             0, 1, &cellBarrier, 0, nullptr, 0, nullptr);
     }
 
     // Bind compute pipeline and descriptor set

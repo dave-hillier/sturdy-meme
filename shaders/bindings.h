@@ -146,6 +146,15 @@
 #define BINDING_TREE_LEAF_CULL_INDIRECT    2   // Indirect draw command
 #define BINDING_TREE_LEAF_CULL_UNIFORMS    3   // Culling uniforms
 #define BINDING_TREE_LEAF_CULL_TREES       4   // Per-tree data SSBO (batched)
+#define BINDING_TREE_LEAF_CULL_CELLS       5   // Cell data SSBO (spatial index)
+#define BINDING_TREE_LEAF_CULL_SORTED      6   // Sorted tree indices SSBO
+#define BINDING_TREE_LEAF_CULL_VISIBLE_CELLS 7 // Visible cell indices (output from cell cull)
+
+// Tree Cell Cull Compute Descriptor Set (Phase 1: Spatial Partitioning)
+#define BINDING_TREE_CELL_CULL_CELLS       0   // All cells (input)
+#define BINDING_TREE_CELL_CULL_VISIBLE     1   // Visible cell indices (output)
+#define BINDING_TREE_CELL_CULL_INDIRECT    2   // Indirect dispatch for tree cull
+#define BINDING_TREE_CELL_CULL_UNIFORMS    3   // Culling uniforms
 
 // Tree Graphics Descriptor Set
 #define BINDING_TREE_GFX_UBO               0   // Scene uniforms
@@ -496,6 +505,15 @@ constexpr uint32_t TREE_LEAF_CULL_OUTPUT  = BINDING_TREE_LEAF_CULL_OUTPUT;
 constexpr uint32_t TREE_LEAF_CULL_INDIRECT = BINDING_TREE_LEAF_CULL_INDIRECT;
 constexpr uint32_t TREE_LEAF_CULL_UNIFORMS = BINDING_TREE_LEAF_CULL_UNIFORMS;
 constexpr uint32_t TREE_LEAF_CULL_TREES   = BINDING_TREE_LEAF_CULL_TREES;
+constexpr uint32_t TREE_LEAF_CULL_CELLS   = BINDING_TREE_LEAF_CULL_CELLS;
+constexpr uint32_t TREE_LEAF_CULL_SORTED  = BINDING_TREE_LEAF_CULL_SORTED;
+constexpr uint32_t TREE_LEAF_CULL_VISIBLE_CELLS = BINDING_TREE_LEAF_CULL_VISIBLE_CELLS;
+
+// Tree Cell Cull Compute
+constexpr uint32_t TREE_CELL_CULL_CELLS   = BINDING_TREE_CELL_CULL_CELLS;
+constexpr uint32_t TREE_CELL_CULL_VISIBLE = BINDING_TREE_CELL_CULL_VISIBLE;
+constexpr uint32_t TREE_CELL_CULL_INDIRECT = BINDING_TREE_CELL_CULL_INDIRECT;
+constexpr uint32_t TREE_CELL_CULL_UNIFORMS = BINDING_TREE_CELL_CULL_UNIFORMS;
 
 // Tree Graphics
 constexpr uint32_t TREE_GFX_UBO           = BINDING_TREE_GFX_UBO;

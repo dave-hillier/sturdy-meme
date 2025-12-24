@@ -11,6 +11,7 @@
 
 #include "TreeSystem.h"
 #include "TreeLODSystem.h"
+#include "TreeSpatialIndex.h"
 #include "core/VulkanRAII.h"
 #include "core/DescriptorManager.h"
 #include "BufferUtils.h"
@@ -57,6 +58,17 @@ struct TreeLeafCullUniforms {
     uint32_t totalLeafInstances;        // Total leaf instances across all trees
     uint32_t maxLeavesPerType;          // Max leaves per leaf type in output buffer
     uint32_t _pad1;
+};
+
+// Uniforms for cell culling compute shader (Phase 1: Spatial Partitioning)
+// Must match tree_cell_cull.comp layout
+struct TreeCellCullUniforms {
+    glm::vec4 cameraPosition;           // xyz = camera pos, w = unused
+    glm::vec4 frustumPlanes[6];         // Frustum planes for culling
+    float maxDrawDistance;              // Maximum tree draw distance
+    uint32_t numCells;                  // Total number of cells in grid
+    uint32_t treesPerWorkgroup;         // How many trees to process per workgroup
+    uint32_t _pad0;
 };
 
 // Number of leaf types (must match tree_leaf_cull.comp NUM_LEAF_TYPES)
@@ -171,6 +183,13 @@ public:
                            const glm::vec3& cameraPos,
                            const glm::vec4* frustumPlanes);
 
+    // Initialize or update spatial index from tree data
+    // Call when trees are added/removed/moved
+    void updateSpatialIndex(const TreeSystem& treeSystem);
+
+    // Check if spatial indexing is enabled
+    bool isSpatialIndexEnabled() const { return spatialIndex_ != nullptr && spatialIndex_->isValid(); }
+
     // Render all trees (optionally filtering by LOD)
     void render(VkCommandBuffer cmd, uint32_t frameIndex, float time,
                 const TreeSystem& treeSystem, const TreeLODSystem* lodSystem = nullptr);
@@ -196,6 +215,8 @@ private:
     bool allocateDescriptorSets(uint32_t maxFramesInFlight);
     bool createCullPipeline();
     bool createCullBuffers(uint32_t maxLeafInstances, uint32_t numTrees);
+    bool createCellCullPipeline();
+    bool createCellCullBuffers();
 
     VkDevice device_ = VK_NULL_HANDLE;
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
@@ -283,4 +304,32 @@ private:
 
     // Max leaves per leaf type (for partitioned output buffer)
     uint32_t maxLeavesPerType_ = 0;
+
+    // =========================================================================
+    // Spatial Index (Phase 1: Spatial Partitioning)
+    // =========================================================================
+    std::unique_ptr<TreeSpatialIndex> spatialIndex_;
+
+    // Cell culling compute pipeline
+    ManagedPipeline cellCullPipeline_;
+    ManagedPipelineLayout cellCullPipelineLayout_;
+    ManagedDescriptorSetLayout cellCullDescriptorSetLayout_;
+
+    // Per-frame cell culling descriptor sets
+    std::vector<VkDescriptorSet> cellCullDescriptorSets_;
+
+    // Visible cell output buffer (indices of cells that passed frustum culling)
+    VkBuffer visibleCellBuffer_ = VK_NULL_HANDLE;
+    VmaAllocation visibleCellAllocation_ = VK_NULL_HANDLE;
+    VkDeviceSize visibleCellBufferSize_ = 0;
+
+    // Indirect dispatch buffer for tree culling (set by cell culling)
+    VkBuffer cellCullIndirectBuffer_ = VK_NULL_HANDLE;
+    VmaAllocation cellCullIndirectAllocation_ = VK_NULL_HANDLE;
+
+    // Uniform buffer for cell culling
+    BufferUtils::PerFrameBufferSet cellCullUniformBuffers_;
+
+    // Terrain size for spatial index configuration
+    float terrainSize_ = 4096.0f;
 };
