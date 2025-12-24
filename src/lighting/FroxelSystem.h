@@ -11,13 +11,14 @@
 #include "DescriptorManager.h"
 #include "InitContext.h"
 #include "VulkanRAII.h"
+#include "interfaces/IFogControl.h"
 
 // Froxel-based volumetric fog system (Phase 4.3)
 // Implements frustum-aligned voxel grid for efficient volumetric rendering
 
 static constexpr uint32_t FROXEL_NUM_CASCADES = 4;
 
-class FroxelSystem {
+class FroxelSystem : public IFogControl {
 public:
     struct InitInfo {
         VkDevice device;
@@ -71,37 +72,32 @@ public:
     VkImageView getIntegratedVolumeView() const { return integratedVolumeView; }
     VkSampler getVolumeSampler() const { return volumeSampler.get(); }
 
-    // Fog parameters (reset temporal history on change for immediate feedback)
-    void setFogBaseHeight(float h) { fogBaseHeight = h; resetTemporalHistory(); }
-    float getFogBaseHeight() const { return fogBaseHeight; }
-    void setFogScaleHeight(float h) { fogScaleHeight = h; resetTemporalHistory(); }
-    float getFogScaleHeight() const { return fogScaleHeight; }
-    void setFogDensity(float d) { fogDensity = d; resetTemporalHistory(); }
-    float getFogDensity() const { return fogDensity; }
-    void setFogAbsorption(float a) { fogAbsorption = a; resetTemporalHistory(); }
-    float getFogAbsorption() const { return fogAbsorption; }
+    // IFogControl implementation (reset temporal history on change for immediate feedback)
+    void setEnabled(bool e) override { enabled = e; }
+    bool isEnabled() const override { return enabled; }
+    void setFogDensity(float d) override { fogDensity = d; resetTemporalHistory(); }
+    float getFogDensity() const override { return fogDensity; }
+    void setFogAbsorption(float a) override { fogAbsorption = a; resetTemporalHistory(); }
+    float getFogAbsorption() const override { return fogAbsorption; }
+    void setFogBaseHeight(float h) override { fogBaseHeight = h; resetTemporalHistory(); }
+    float getFogBaseHeight() const override { return fogBaseHeight; }
+    void setFogScaleHeight(float h) override { fogScaleHeight = h; resetTemporalHistory(); }
+    float getFogScaleHeight() const override { return fogScaleHeight; }
+    void setVolumetricFarPlane(float f) override { volumetricFarPlane = f; }
+    float getVolumetricFarPlane() const override { return volumetricFarPlane; }
+    void setTemporalBlend(float b) override { temporalBlend = b; }
+    float getTemporalBlend() const override { return temporalBlend; }
 
-    // Ground fog layer parameters
-    void setLayerHeight(float h) { layerHeight = h; resetTemporalHistory(); }
-    float getLayerHeight() const { return layerHeight; }
-    void setLayerThickness(float t) { layerThickness = t; resetTemporalHistory(); }
-    float getLayerThickness() const { return layerThickness; }
-    void setLayerDensity(float d) { layerDensity = d; resetTemporalHistory(); }
-    float getLayerDensity() const { return layerDensity; }
+    // Height fog layer parameters (IFogControl)
+    void setLayerHeight(float h) override { layerHeight = h; resetTemporalHistory(); }
+    float getLayerHeight() const override { return layerHeight; }
+    void setLayerThickness(float t) override { layerThickness = t; resetTemporalHistory(); }
+    float getLayerThickness() const override { return layerThickness; }
+    void setLayerDensity(float d) override { layerDensity = d; resetTemporalHistory(); }
+    float getLayerDensity() const override { return layerDensity; }
 
     // Reset temporal history (call when fog parameters change significantly)
     void resetTemporalHistory() { frameCounter = 0; }
-
-    void setVolumetricFarPlane(float f) { volumetricFarPlane = f; }
-    float getVolumetricFarPlane() const { return volumetricFarPlane; }
-
-    // Temporal filtering
-    void setTemporalBlend(float b) { temporalBlend = b; }
-    float getTemporalBlend() const { return temporalBlend; }
-
-    // Is the system enabled?
-    void setEnabled(bool e) { enabled = e; }
-    bool isEnabled() const { return enabled; }
 
 private:
     bool createScatteringVolume();

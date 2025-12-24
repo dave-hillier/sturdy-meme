@@ -1,6 +1,7 @@
 #pragma once
 
 #include <glm/glm.hpp>
+#include "interfaces/ILocationControl.h"
 
 // Geographic location on Earth
 struct GeographicLocation {
@@ -55,13 +56,13 @@ struct TideInfo {
 };
 
 // Calculates astronomical positions of celestial bodies
-class CelestialCalculator {
+class CelestialCalculator : public ILocationControl {
 public:
     CelestialCalculator();
 
-    // Set observer location on Earth
-    void setLocation(const GeographicLocation& location);
-    const GeographicLocation& getLocation() const { return location_; }
+    // ILocationControl implementation
+    void setLocation(const GeographicLocation& location) override;
+    const GeographicLocation& getLocation() const override { return location_; }
 
     // Calculate sun position for given date/time
     CelestialPosition calculateSunPosition(const DateTime& dateTime) const;

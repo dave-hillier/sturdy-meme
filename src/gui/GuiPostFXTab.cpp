@@ -1,11 +1,12 @@
 #include "GuiPostFXTab.h"
-#include "core/interfaces/IPostProcessControl.h"
+#include "core/interfaces/IPostProcessState.h"
+#include "core/interfaces/ICloudShadowControl.h"
 #include "HiZSystem.h"
 #include "PostProcessSystem.h"
 
 #include <imgui.h>
 
-void GuiPostFXTab::render(IPostProcessControl& postProcess) {
+void GuiPostFXTab::render(IPostProcessState& postProcess, ICloudShadowControl& cloudShadow) {
     ImGui::Spacing();
 
     // HDR Tonemapping toggle
@@ -38,18 +39,18 @@ void GuiPostFXTab::render(IPostProcessControl& postProcess) {
     ImGui::Text("CLOUD SHADOWS");
     ImGui::PopStyleColor();
 
-    bool cloudShadowEnabled = postProcess.isCloudShadowEnabled();
+    bool cloudShadowEnabled = cloudShadow.isEnabled();
     if (ImGui::Checkbox("Cloud Shadows", &cloudShadowEnabled)) {
-        postProcess.setCloudShadowEnabled(cloudShadowEnabled);
+        cloudShadow.setEnabled(cloudShadowEnabled);
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Enable/disable cloud shadow projection on terrain");
     }
 
     if (cloudShadowEnabled) {
-        float cloudShadowIntensity = postProcess.getCloudShadowIntensity();
+        float cloudShadowIntensity = cloudShadow.getShadowIntensity();
         if (ImGui::SliderFloat("Shadow Intensity", &cloudShadowIntensity, 0.0f, 1.0f)) {
-            postProcess.setCloudShadowIntensity(cloudShadowIntensity);
+            cloudShadow.setShadowIntensity(cloudShadowIntensity);
         }
     }
 

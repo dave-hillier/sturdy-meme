@@ -6,9 +6,10 @@
 // Interface headers for casting
 #include "core/interfaces/ITimeSystem.h"
 #include "core/interfaces/ILocationControl.h"
-#include "core/interfaces/IWeatherControl.h"
+#include "core/interfaces/IWeatherState.h"
 #include "core/interfaces/IEnvironmentControl.h"
-#include "core/interfaces/IPostProcessControl.h"
+#include "core/interfaces/IPostProcessState.h"
+#include "core/interfaces/ICloudShadowControl.h"
 #include "core/interfaces/ITerrainControl.h"
 #include "core/interfaces/IWaterControl.h"
 #include "core/interfaces/ITreeControl.h"
@@ -301,7 +302,7 @@ void GuiSystem::render(Renderer& renderer, const Camera& camera, float deltaTime
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Weather")) {
-                GuiWeatherTab::render(renderer.getWeatherControl());
+                GuiWeatherTab::render(renderer.getWeatherState(), renderer.getEnvironmentSettings());
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Environment")) {
@@ -309,7 +310,7 @@ void GuiSystem::render(Renderer& renderer, const Camera& camera, float deltaTime
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Post FX")) {
-                GuiPostFXTab::render(renderer.getPostProcessControl());
+                GuiPostFXTab::render(renderer.getPostProcessState(), renderer.getCloudShadowControl());
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Terrain")) {

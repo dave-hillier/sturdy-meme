@@ -13,6 +13,7 @@
 #include "DescriptorManager.h"
 #include "InitContext.h"
 #include "VulkanRAII.h"
+#include "interfaces/IPostProcessState.h"
 
 // Histogram reduce compute shader parameters
 struct HistogramReduceParams {
@@ -38,7 +39,7 @@ struct ExposureData {
     float adaptedExposure;
 };
 
-class PostProcessSystem {
+class PostProcessSystem : public IPostProcessState {
 public:
     struct InitInfo {
         VkDevice device;
@@ -80,11 +81,17 @@ public:
                           VkFramebuffer swapchainFB, float deltaTime,
                           PreEndCallback preEndCallback = nullptr);
 
+    // IPostProcessState exposure controls
+    void setManualExposure(float ev) override { manualExposure = ev; }
+    float getManualExposure() const override { return manualExposure; }
+    void setAutoExposureEnabled(bool enabled) override { autoExposureEnabled = enabled; }
+    bool isAutoExposureEnabled() const override { return autoExposureEnabled; }
+    float getCurrentExposure() const override { return currentExposure; }
+
+    // Legacy aliases for internal use
     void setExposure(float ev) { manualExposure = ev; }
     float getExposure() const { return manualExposure; }
     void setAutoExposure(bool enabled) { autoExposureEnabled = enabled; }
-    bool isAutoExposureEnabled() const { return autoExposureEnabled; }
-    float getCurrentExposure() const { return currentExposure; }
 
     void setBloomThreshold(float t) { bloomThreshold = t; }
     float getBloomThreshold() const { return bloomThreshold; }
@@ -100,17 +107,19 @@ public:
     float getGodRayIntensity() const { return godRayIntensity; }
     void setGodRayDecay(float d) { godRayDecay = d; }
     float getGodRayDecay() const { return godRayDecay; }
-    void setGodRaysEnabled(bool enabled) { godRaysEnabled = enabled; }
-    bool isGodRaysEnabled() const { return godRaysEnabled; }
+    void setGodRaysEnabled(bool enabled) override { godRaysEnabled = enabled; }
+    bool isGodRaysEnabled() const override { return godRaysEnabled; }
 
     // God ray quality (sample count): 0=Low(16), 1=Medium(32), 2=High(64)
     enum class GodRayQuality { Low = 0, Medium = 1, High = 2 };
+    void setGodRayQuality(int quality) override { setGodRayQuality(static_cast<GodRayQuality>(quality)); }
+    int getGodRayQuality() const override { return static_cast<int>(godRayQuality); }
     void setGodRayQuality(GodRayQuality quality);
-    GodRayQuality getGodRayQuality() const { return godRayQuality; }
+    GodRayQuality getGodRayQualityEnum() const { return godRayQuality; }
 
     // Froxel filter quality: false=trilinear (fast), true=tricubic (quality)
-    void setFroxelFilterQuality(bool highQuality) { froxelFilterHighQuality = highQuality; }
-    bool isFroxelFilterHighQuality() const { return froxelFilterHighQuality; }
+    void setFroxelFilterQuality(bool highQuality) override { froxelFilterHighQuality = highQuality; }
+    bool isFroxelFilterHighQuality() const override { return froxelFilterHighQuality; }
 
     // Froxel volumetrics (Phase 4.3)
     void setFroxelVolume(VkImageView volumeView, VkSampler volumeSampler);
@@ -118,28 +127,32 @@ public:
 
     // Bloom (multi-pass)
     void setBloomTexture(VkImageView bloomView, VkSampler bloomSampler);
-    void setBloomEnabled(bool enabled) { bloomEnabled = enabled; }
-    bool isBloomEnabled() const { return bloomEnabled; }
+    void setBloomEnabled(bool enabled) override { bloomEnabled = enabled; }
+    bool isBloomEnabled() const override { return bloomEnabled; }
     bool isFroxelEnabled() const { return froxelEnabled; }
 
     // Local tone mapping (bilateral grid) - Ghost of Tsushima technique
     void setBilateralGrid(VkImageView gridView, VkSampler gridSampler);
-    void setLocalToneMapEnabled(bool enabled) { localToneMapEnabled = enabled; }
-    bool isLocalToneMapEnabled() const { return localToneMapEnabled; }
-    void setLocalToneMapContrast(float c) { localToneMapContrast = glm::clamp(c, 0.0f, 1.0f); }
-    float getLocalToneMapContrast() const { return localToneMapContrast; }
-    void setLocalToneMapDetail(float d) { localToneMapDetail = glm::clamp(d, 0.5f, 2.0f); }
-    float getLocalToneMapDetail() const { return localToneMapDetail; }
-    void setBilateralBlend(float b) { bilateralBlend = glm::clamp(b, 0.0f, 1.0f); }
-    float getBilateralBlend() const { return bilateralBlend; }
+    void setLocalToneMapEnabled(bool enabled) override { localToneMapEnabled = enabled; }
+    bool isLocalToneMapEnabled() const override { return localToneMapEnabled; }
+    void setLocalToneMapContrast(float c) override { localToneMapContrast = glm::clamp(c, 0.0f, 1.0f); }
+    float getLocalToneMapContrast() const override { return localToneMapContrast; }
+    void setLocalToneMapDetail(float d) override { localToneMapDetail = glm::clamp(d, 0.5f, 2.0f); }
+    float getLocalToneMapDetail() const override { return localToneMapDetail; }
+    void setBilateralBlend(float b) override { bilateralBlend = glm::clamp(b, 0.0f, 1.0f); }
+    float getBilateralBlend() const override { return bilateralBlend; }
     void setLocalToneMapLumRange(float minLog, float maxLog) {
         minLogLuminance = minLog;
         maxLogLuminance = maxLog;
     }
 
     // HDR tonemapping bypass (for comparison/debugging)
-    void setHDREnabled(bool enabled) { hdrEnabled = enabled; }
-    bool isHDREnabled() const { return hdrEnabled; }
+    void setHDREnabled(bool enabled) override { hdrEnabled = enabled; }
+    bool isHDREnabled() const override { return hdrEnabled; }
+
+    // HDR pass (whether to render to HDR target at all)
+    void setHDRPassEnabled(bool enabled) override { hdrPassEnabled = enabled; }
+    bool isHDRPassEnabled() const override { return hdrPassEnabled; }
     void setFroxelParams(float farPlane, float depthDist) {
         froxelFarPlane = farPlane;
         froxelDepthDist = depthDist;
@@ -239,6 +252,7 @@ private:
     VkSampler bloomSampler = VK_NULL_HANDLE;
     bool froxelEnabled = false;
     bool hdrEnabled = true;  // HDR tonemapping enabled by default
+    bool hdrPassEnabled = true;  // HDR pass enabled by default
     bool bloomEnabled = true;  // Bloom enabled by default
     float froxelFarPlane = 200.0f;
     float froxelDepthDist = 1.2f;

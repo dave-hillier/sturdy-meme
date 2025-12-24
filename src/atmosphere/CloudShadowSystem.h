@@ -10,6 +10,7 @@
 #include "InitContext.h"
 #include "core/VulkanRAII.h"
 #include "BufferUtils.h"
+#include "interfaces/ICloudShadowControl.h"
 
 // Cloud Shadow System
 // Generates a world-space cloud shadow map by ray-marching through the cloud layer
@@ -29,7 +30,7 @@ struct CloudShadowUniforms {
     float padding;
 };
 
-class CloudShadowSystem {
+class CloudShadowSystem : public ICloudShadowControl {
 public:
     struct InitInfo {
         VkDevice device;
@@ -81,10 +82,13 @@ public:
     // Get the world-to-shadow-UV matrix for sampling in fragment shaders
     const glm::mat4& getWorldToShadowUV() const { return worldToShadowUV; }
 
-    // Control parameters
-    void setShadowIntensity(float intensity) { shadowIntensity = glm::clamp(intensity, 0.0f, 1.0f); }
-    float getShadowIntensity() const { return shadowIntensity; }
+    // ICloudShadowControl implementation
+    void setEnabled(bool e) override { enabled = e; }
+    bool isEnabled() const override { return enabled; }
+    void setShadowIntensity(float intensity) override { shadowIntensity = glm::clamp(intensity, 0.0f, 1.0f); }
+    float getShadowIntensity() const override { return shadowIntensity; }
 
+    // Additional control parameters
     void setShadowSoftness(float softness) { shadowSoftness = glm::clamp(softness, 0.0f, 1.0f); }
     float getShadowSoftness() const { return shadowSoftness; }
 
@@ -93,9 +97,6 @@ public:
 
     void setCloudDensity(float density) { cloudDensity = glm::clamp(density, 0.0f, 2.0f); }
     float getCloudDensity() const { return cloudDensity; }
-
-    void setEnabled(bool e) { enabled = e; }
-    bool isEnabled() const { return enabled; }
 
 private:
     bool createShadowMap();

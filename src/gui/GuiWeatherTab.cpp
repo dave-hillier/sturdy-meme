@@ -1,38 +1,36 @@
 #include "GuiWeatherTab.h"
-#include "core/interfaces/IWeatherControl.h"
-#include "WindSystem.h"
-#include "LeafSystem.h"
+#include "interfaces/IWeatherState.h"
 #include "EnvironmentSettings.h"
 
 #include <imgui.h>
 #include <glm/glm.hpp>
 
-void GuiWeatherTab::render(IWeatherControl& weatherControl) {
+void GuiWeatherTab::render(IWeatherState& weatherState, EnvironmentSettings& env) {
     ImGui::Spacing();
 
     // Weather type
     const char* weatherTypes[] = { "Rain", "Snow" };
-    int weatherType = static_cast<int>(weatherControl.getWeatherType());
+    int weatherType = static_cast<int>(weatherState.getWeatherType());
     if (ImGui::Combo("Weather Type", &weatherType, weatherTypes, 2)) {
-        weatherControl.setWeatherType(static_cast<uint32_t>(weatherType));
+        weatherState.setWeatherType(static_cast<uint32_t>(weatherType));
     }
 
     // Intensity
-    float intensity = weatherControl.getIntensity();
+    float intensity = weatherState.getIntensity();
     if (ImGui::SliderFloat("Intensity", &intensity, 0.0f, 1.0f)) {
-        weatherControl.setWeatherIntensity(intensity);
+        weatherState.setIntensity(intensity);
     }
 
     // Quick intensity buttons
     ImGui::Text("Presets:");
     ImGui::SameLine();
-    if (ImGui::Button("Clear")) weatherControl.setWeatherIntensity(0.0f);
+    if (ImGui::Button("Clear")) weatherState.setIntensity(0.0f);
     ImGui::SameLine();
-    if (ImGui::Button("Light")) weatherControl.setWeatherIntensity(0.3f);
+    if (ImGui::Button("Light")) weatherState.setIntensity(0.3f);
     ImGui::SameLine();
-    if (ImGui::Button("Medium")) weatherControl.setWeatherIntensity(0.6f);
+    if (ImGui::Button("Medium")) weatherState.setIntensity(0.6f);
     ImGui::SameLine();
-    if (ImGui::Button("Heavy")) weatherControl.setWeatherIntensity(1.0f);
+    if (ImGui::Button("Heavy")) weatherState.setIntensity(1.0f);
 
     ImGui::Spacing();
     ImGui::Separator();
@@ -43,19 +41,12 @@ void GuiWeatherTab::render(IWeatherControl& weatherControl) {
     ImGui::Text("SNOW COVERAGE");
     ImGui::PopStyleColor();
 
-    float snowAmount = weatherControl.getSnowAmount();
-    if (ImGui::SliderFloat("Snow Amount", &snowAmount, 0.0f, 1.0f)) {
-        weatherControl.setSnowAmount(snowAmount);
-    }
+    if (ImGui::SliderFloat("Snow Amount", &env.snowAmount, 0.0f, 1.0f)) {}
 
-    glm::vec3 snowColor = weatherControl.getSnowColor();
-    float sc[3] = {snowColor.r, snowColor.g, snowColor.b};
+    float sc[3] = {env.snowColor.r, env.snowColor.g, env.snowColor.b};
     if (ImGui::ColorEdit3("Snow Color", sc)) {
-        weatherControl.setSnowColor(glm::vec3(sc[0], sc[1], sc[2]));
+        env.snowColor = glm::vec3(sc[0], sc[1], sc[2]);
     }
-
-    // Environment settings for snow
-    auto& env = weatherControl.getEnvironmentSettings();
 
     if (ImGui::SliderFloat("Snow Roughness", &env.snowRoughness, 0.0f, 1.0f)) {}
     if (ImGui::SliderFloat("Accumulation Rate", &env.snowAccumulationRate, 0.0f, 1.0f)) {}

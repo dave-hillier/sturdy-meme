@@ -1030,3 +1030,12 @@ void Renderer::initResizeCoordinator() {
 
     SDL_Log("Resize coordinator configured with %zu systems", 17UL);
 }
+
+void Renderer::initControlSubsystems() {
+    // Initialize control subsystems in RendererSystems
+    // These subsystems implement GUI-facing interfaces directly
+    systems_->initControlSubsystems(vulkanContext, perfToggles);
+
+    // Set up the performance sync callback
+    systems_->setPerformanceSyncCallback([this]() { syncPerformanceToggles(); });
+}

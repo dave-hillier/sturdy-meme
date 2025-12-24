@@ -42,6 +42,16 @@ set(SOURCES
     src/core/ResizeCoordinator.cpp
     src/core/UBOBuilder.cpp
     src/core/RendererSystems.cpp
+    # Control subsystems (coordinate multiple systems for GUI interfaces)
+    # Note: Some systems implement their interfaces directly (CelestialCalculator -> ILocationControl,
+    #       TerrainSystem -> ITerrainControl, Profiler -> IProfilerControl, WeatherSystem -> IWeatherState,
+    #       PostProcessSystem -> IPostProcessState, CloudShadowSystem -> ICloudShadowControl)
+    src/core/controls/EnvironmentControlSubsystem.cpp
+    src/core/controls/WaterControlSubsystem.cpp
+    src/core/controls/TreeControlSubsystem.cpp
+    src/core/controls/DebugControlSubsystem.cpp
+    src/core/controls/SceneControlSubsystem.cpp
+    src/core/controls/PlayerControlSubsystem.cpp
     src/core/VulkanContext.cpp
     src/core/Mesh.cpp
     src/core/BufferUtils.cpp

@@ -13,6 +13,7 @@
 #include "BufferUtils.h"
 #include "UBOs.h"
 #include "core/RAIIAdapter.h"
+#include "interfaces/ILeafControl.h"
 #include <optional>
 
 // Leaf particle states
@@ -45,7 +46,7 @@ struct LeafPushConstants {
     int padding[2];
 };
 
-class LeafSystem {
+class LeafSystem : public ILeafControl {
 public:
     using InitInfo = ParticleSystem::InitInfo;
 
@@ -93,9 +94,9 @@ public:
     // Double-buffer management
     void advanceBufferSet();
 
-    // Leaf control
-    void setIntensity(float intensity) { leafIntensity = intensity; }
-    float getIntensity() const { return leafIntensity; }
+    // ILeafControl implementation
+    void setIntensity(float intensity) override { leafIntensity = intensity; }
+    float getIntensity() const override { return leafIntensity; }
     void setGroundLevel(float level) { groundLevel = level; }
     void setSpawnRegion(const glm::vec3& minBounds, const glm::vec3& maxBounds) {
         spawnRegionMin = minBounds;

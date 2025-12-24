@@ -7,6 +7,7 @@
 #include <string>
 #include <array>
 #include <memory>
+#include "interfaces/ITerrainControl.h"
 #include "UBOs.h"
 #include "TerrainHeightMap.h"
 #include "TerrainTextures.h"
@@ -122,7 +123,7 @@ struct TerrainConfig {
     bool useVirtualTexture = false;     // Enable virtual texturing for terrain
 };
 
-class TerrainSystem {
+class TerrainSystem : public ITerrainControl {
 public:
     struct InitInfo {
         VkDevice device;
@@ -267,7 +268,17 @@ public:
         return tileCache ? tileCache->getTileInfoBuffer(frameIndex) : VK_NULL_HANDLE;
     }
 
-    // Toggle wireframe mode for debugging
+    // ITerrainControl implementation
+    void setTerrainEnabled(bool enabled) override { terrainEnabled_ = enabled; }
+    bool isTerrainEnabled() const override { return terrainEnabled_; }
+    void toggleTerrainWireframe() override { wireframeMode = !wireframeMode; }
+    bool isTerrainWireframeMode() const override { return wireframeMode; }
+    uint32_t getTerrainNodeCount() const override { return getTriangleCount(); }
+    float getTerrainHeightAt(float x, float z) const override { return getHeightAt(x, z); }
+    TerrainSystem& getTerrainSystem() override { return *this; }
+    const TerrainSystem& getTerrainSystem() const override { return *this; }
+
+    // Toggle wireframe mode for debugging (legacy, prefer toggleTerrainWireframe)
     void setWireframeMode(bool enabled) { wireframeMode = enabled; }
     bool isWireframeMode() const { return wireframeMode; }
 
@@ -331,6 +342,7 @@ private:
 
     // Configuration
     TerrainConfig config;
+    bool terrainEnabled_ = true;
     bool wireframeMode = false;
     bool gpuCullingEnabled = true;             // GPU frustum culling for split phase
     bool shadowCullingEnabled = true;          // GPU frustum culling for shadow cascades

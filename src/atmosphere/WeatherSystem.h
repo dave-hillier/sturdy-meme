@@ -12,6 +12,7 @@
 #include "ParticleSystem.h"
 #include "UBOs.h"
 #include "core/RAIIAdapter.h"
+#include "interfaces/IWeatherState.h"
 
 // Forward declaration
 class WindSystem;
@@ -36,7 +37,7 @@ struct WeatherPushConstants {
     int padding;
 };
 
-class WeatherSystem {
+class WeatherSystem : public IWeatherState {
 public:
     using InitInfo = ParticleSystem::InitInfo;
 
@@ -81,11 +82,13 @@ public:
     // Double-buffer management
     void advanceBufferSet();
 
+    // IWeatherState implementation
+    void setIntensity(float intensity) override { weatherIntensity = intensity; }
+    float getIntensity() const override { return weatherIntensity; }
+    void setWeatherType(uint32_t type) override { weatherType = type; }
+    uint32_t getWeatherType() const override { return weatherType; }
+
     // Weather control
-    void setIntensity(float intensity) { weatherIntensity = intensity; }
-    float getIntensity() const { return weatherIntensity; }
-    void setWeatherType(uint32_t type) { weatherType = type; }
-    uint32_t getWeatherType() const { return weatherType; }
     void setGroundLevel(float level) { groundLevel = level; }
 
 private:

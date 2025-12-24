@@ -1,7 +1,8 @@
 #pragma once
 
-class IWeatherControl;
+class IWeatherState;
+struct EnvironmentSettings;
 
 namespace GuiWeatherTab {
-    void render(IWeatherControl& weatherControl);
+    void render(IWeatherState& weatherState, EnvironmentSettings& envSettings);
 }

@@ -2,6 +2,7 @@
 
 #include "GpuProfiler.h"
 #include "CpuProfiler.h"
+#include "interfaces/IProfilerControl.h"
 #include <memory>
 #include <optional>
 
@@ -15,7 +16,7 @@
  *   auto profiler = Profiler::create(device, physicalDevice, framesInFlight);
  *   // GPU may be disabled if init fails, but CPU profiling always works
  */
-class Profiler {
+class Profiler : public IProfilerControl {
 public:
     /**
      * Factory: Create a profiler instance.
@@ -134,6 +135,10 @@ public:
     CpuProfiler& getCpuProfiler() { return cpuProfiler; }
     const GpuProfiler& getGpuProfiler() const { return *gpuProfiler_; }
     const CpuProfiler& getCpuProfiler() const { return cpuProfiler; }
+
+    // IProfilerControl implementation
+    Profiler& getProfiler() override { return *this; }
+    const Profiler& getProfiler() const override { return *this; }
 
 private:
     Profiler() = default;  // Private: use factory

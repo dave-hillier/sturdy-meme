@@ -1,24 +1,21 @@
 #pragma once
 
 /**
- * Interface for post-processing controls.
- * Used by GuiPostFXTab to control HDR, bloom, god rays, tone mapping, etc.
+ * Interface for post-processing state controls.
+ * PostProcessSystem implements this directly.
+ * Used by GUI to control HDR, bloom, god rays, local tone mapping, exposure.
  */
-class IPostProcessControl {
+class IPostProcessState {
 public:
-    virtual ~IPostProcessControl() = default;
+    virtual ~IPostProcessState() = default;
 
-    // HDR pipeline
-    virtual void setHDRPassEnabled(bool enabled) = 0;
-    virtual bool isHDRPassEnabled() const = 0;
+    // HDR tonemapping
     virtual void setHDREnabled(bool enabled) = 0;
     virtual bool isHDREnabled() const = 0;
 
-    // Cloud shadows
-    virtual void setCloudShadowEnabled(bool enabled) = 0;
-    virtual bool isCloudShadowEnabled() const = 0;
-    virtual void setCloudShadowIntensity(float intensity) = 0;
-    virtual float getCloudShadowIntensity() const = 0;
+    // HDR pass (whether to render to HDR target)
+    virtual void setHDRPassEnabled(bool enabled) = 0;
+    virtual bool isHDRPassEnabled() const = 0;
 
     // Bloom
     virtual void setBloomEnabled(bool enabled) = 0;
@@ -30,7 +27,7 @@ public:
     virtual void setGodRayQuality(int quality) = 0;
     virtual int getGodRayQuality() const = 0;
 
-    // Froxel volumetric fog quality
+    // Froxel volumetric fog filter quality
     virtual void setFroxelFilterQuality(bool highQuality) = 0;
     virtual bool isFroxelFilterHighQuality() const = 0;
 

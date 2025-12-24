@@ -1,7 +1,8 @@
 #pragma once
 
-class IPostProcessControl;
+class IPostProcessState;
+class ICloudShadowControl;
 
 namespace GuiPostFXTab {
-    void render(IPostProcessControl& postProcess);
+    void render(IPostProcessState& postProcess, ICloudShadowControl& cloudShadow);
 }
