@@ -1,9 +1,11 @@
 #include "GuiSystem.h"
 #include "Renderer.h"
 #include "Camera.h"
+#include "TimeSystem.h"
 
 // Interface headers for casting
-#include "core/interfaces/ITimeControl.h"
+#include "core/interfaces/ITimeSystem.h"
+#include "core/interfaces/ILocationControl.h"
 #include "core/interfaces/IWeatherControl.h"
 #include "core/interfaces/IEnvironmentControl.h"
 #include "core/interfaces/IPostProcessControl.h"
@@ -294,7 +296,8 @@ void GuiSystem::render(Renderer& renderer, const Camera& camera, float deltaTime
 
         if (ImGui::BeginTabBar("ControlTabs")) {
             if (ImGui::BeginTabItem("Time")) {
-                GuiTimeTab::render(static_cast<ITimeControl&>(renderer));
+                // TimeSystem implements ITimeSystem directly, Renderer implements ILocationControl
+                GuiTimeTab::render(renderer.getTimeSystem(), static_cast<ILocationControl&>(renderer));
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Weather")) {

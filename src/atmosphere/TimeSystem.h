@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <glm/glm.hpp>
+#include "core/interfaces/ITimeSystem.h"
 
 /**
  * TimingData - Time-related values for a single frame
@@ -30,10 +31,10 @@ struct TimingData {
  *   TimingData timing = timeSystem.update();
  *   // Use timing.deltaTime, timing.elapsedTime, timing.timeOfDay
  */
-class TimeSystem {
+class TimeSystem : public ITimeSystem {
 public:
     TimeSystem() = default;
-    ~TimeSystem() = default;
+    ~TimeSystem() override = default;
 
     /**
      * Update time state and return timing data for this frame.
@@ -43,14 +44,14 @@ public:
      */
     TimingData update();
 
-    // Time scale control (affects day/night cycle speed)
-    void setTimeScale(float scale) { timeScale = scale; }
-    float getTimeScale() const { return timeScale; }
+    // ITimeSystem implementation - Time scale control
+    void setTimeScale(float scale) override { timeScale = scale; }
+    float getTimeScale() const override { return timeScale; }
 
-    // Manual time control
-    void setTimeOfDay(float time) { manualTime = glm::clamp(time, 0.0f, 1.0f); useManualTime = true; }
-    void resumeAutoTime() { useManualTime = false; }
-    float getTimeOfDay() const { return currentTimeOfDay; }
+    // ITimeSystem implementation - Time of day control
+    void setTimeOfDay(float time) override { manualTime = glm::clamp(time, 0.0f, 1.0f); useManualTime = true; }
+    void resumeAutoTime() override { useManualTime = false; }
+    float getTimeOfDay() const override { return currentTimeOfDay; }
     bool isUsingManualTime() const { return useManualTime; }
     float getManualTime() const { return manualTime; }
 
@@ -58,33 +59,33 @@ public:
     void setCycleDuration(float seconds) { cycleDuration = seconds; }
     float getCycleDuration() const { return cycleDuration; }
 
-    // Date tracking (for celestial calculations)
-    void setDate(int year, int month, int day);
-    int getCurrentYear() const { return currentYear; }
-    int getCurrentMonth() const { return currentMonth; }
-    int getCurrentDay() const { return currentDay; }
+    // ITimeSystem implementation - Date tracking
+    void setDate(int year, int month, int day) override;
+    int getCurrentYear() const override { return currentYear; }
+    int getCurrentMonth() const override { return currentMonth; }
+    int getCurrentDay() const override { return currentDay; }
 
-    // Moon phase override
-    void setMoonPhaseOverride(bool enabled) { useMoonPhaseOverride = enabled; }
-    bool isMoonPhaseOverrideEnabled() const { return useMoonPhaseOverride; }
-    void setMoonPhase(float phase) { manualMoonPhase = glm::clamp(phase, 0.0f, 1.0f); }
-    float getMoonPhase() const { return manualMoonPhase; }
-    float getCurrentMoonPhase() const { return currentMoonPhase; }
+    // ITimeSystem implementation - Moon phase override
+    void setMoonPhaseOverride(bool enabled) override { useMoonPhaseOverride = enabled; }
+    bool isMoonPhaseOverrideEnabled() const override { return useMoonPhaseOverride; }
+    void setMoonPhase(float phase) override { manualMoonPhase = glm::clamp(phase, 0.0f, 1.0f); }
+    float getMoonPhase() const override { return manualMoonPhase; }
+    float getCurrentMoonPhase() const override { return currentMoonPhase; }
     void setCurrentMoonPhase(float phase) { currentMoonPhase = phase; }
 
-    // Moon brightness controls
-    void setMoonBrightness(float brightness) { moonBrightness = glm::clamp(brightness, 0.0f, 5.0f); }
-    float getMoonBrightness() const { return moonBrightness; }
-    void setMoonDiscIntensity(float intensity) { moonDiscIntensity = glm::clamp(intensity, 0.0f, 50.0f); }
-    float getMoonDiscIntensity() const { return moonDiscIntensity; }
-    void setMoonEarthshine(float earthshine) { moonEarthshine = glm::clamp(earthshine, 0.0f, 0.2f); }
-    float getMoonEarthshine() const { return moonEarthshine; }
+    // ITimeSystem implementation - Moon brightness controls
+    void setMoonBrightness(float brightness) override { moonBrightness = glm::clamp(brightness, 0.0f, 5.0f); }
+    float getMoonBrightness() const override { return moonBrightness; }
+    void setMoonDiscIntensity(float intensity) override { moonDiscIntensity = glm::clamp(intensity, 0.0f, 50.0f); }
+    float getMoonDiscIntensity() const override { return moonDiscIntensity; }
+    void setMoonEarthshine(float earthshine) override { moonEarthshine = glm::clamp(earthshine, 0.0f, 0.2f); }
+    float getMoonEarthshine() const override { return moonEarthshine; }
 
-    // Eclipse simulation
-    void setEclipseEnabled(bool enabled) { eclipseEnabled = enabled; }
-    bool isEclipseEnabled() const { return eclipseEnabled; }
-    void setEclipseAmount(float amount) { eclipseAmount = glm::clamp(amount, 0.0f, 1.0f); }
-    float getEclipseAmount() const { return eclipseAmount; }
+    // ITimeSystem implementation - Eclipse simulation
+    void setEclipseEnabled(bool enabled) override { eclipseEnabled = enabled; }
+    bool isEclipseEnabled() const override { return eclipseEnabled; }
+    void setEclipseAmount(float amount) override { eclipseAmount = glm::clamp(amount, 0.0f, 1.0f); }
+    float getEclipseAmount() const override { return eclipseAmount; }
 
     // Access to raw timing values (for systems that need more control)
     float getDeltaTime() const { return lastDeltaTime; }

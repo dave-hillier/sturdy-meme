@@ -24,7 +24,7 @@
 #include "PerformanceToggles.h"
 
 // GUI-facing interfaces
-#include "interfaces/ITimeControl.h"
+#include "interfaces/ILocationControl.h"
 #include "interfaces/IWeatherControl.h"
 #include "interfaces/IEnvironmentControl.h"
 #include "interfaces/IPostProcessControl.h"
@@ -74,7 +74,7 @@ constexpr uint32_t PBR_HAS_AO_MAP        = (1u << 2);
 constexpr uint32_t PBR_HAS_HEIGHT_MAP    = (1u << 3);
 
 
-class Renderer : public ITimeControl,
+class Renderer : public ILocationControl,
                   public IWeatherControl,
                   public IEnvironmentControl,
                   public IPostProcessControl,
@@ -160,12 +160,12 @@ public:
     using GuiRenderCallback = std::function<void(VkCommandBuffer)>;
     void setGuiRenderCallback(GuiRenderCallback callback) { guiRenderCallback = callback; }
 
-    // ITimeControl implementation
-    void setTimeScale(float scale) override;
-    float getTimeScale() const override;
-    void setTimeOfDay(float time) override;
-    void resumeAutoTime() override;
-    float getTimeOfDay() const override;
+    // Time system access (TimeSystem implements ITimeSystem directly)
+    void setTimeScale(float scale);
+    float getTimeScale() const;
+    void setTimeOfDay(float time);
+    void resumeAutoTime();
+    float getTimeOfDay() const;
     TimeSystem& getTimeSystem();
     const TimeSystem& getTimeSystem() const;
 
@@ -338,32 +338,34 @@ public:
     // Start a jump with trajectory prediction for animation sync
     void startCharacterJump(const glm::vec3& startPos, const glm::vec3& velocity, float gravity, const PhysicsWorld* physics);
 
-    // ITimeControl implementation (celestial/astronomical)
+    // ILocationControl implementation
     void setLocation(const GeographicLocation& location) override;
     const GeographicLocation& getLocation() const override;
-    void setDate(int year, int month, int day) override;
-    int getCurrentYear() const override;
-    int getCurrentMonth() const override;
-    int getCurrentDay() const override;
     const CelestialCalculator& getCelestialCalculator() const;
 
-    void setMoonPhaseOverride(bool enabled) override;
-    bool isMoonPhaseOverrideEnabled() const override;
-    void setMoonPhase(float phase) override;
-    float getMoonPhase() const override;
-    float getCurrentMoonPhase() const override;
+    // Time system delegates (TimeSystem implements ITimeSystem)
+    void setDate(int year, int month, int day);
+    int getCurrentYear() const;
+    int getCurrentMonth() const;
+    int getCurrentDay() const;
 
-    void setMoonBrightness(float brightness) override;
-    float getMoonBrightness() const override;
-    void setMoonDiscIntensity(float intensity) override;
-    float getMoonDiscIntensity() const override;
-    void setMoonEarthshine(float earthshine) override;
-    float getMoonEarthshine() const override;
+    void setMoonPhaseOverride(bool enabled);
+    bool isMoonPhaseOverrideEnabled() const;
+    void setMoonPhase(float phase);
+    float getMoonPhase() const;
+    float getCurrentMoonPhase() const;
 
-    void setEclipseEnabled(bool enabled) override;
-    bool isEclipseEnabled() const override;
-    void setEclipseAmount(float amount) override;
-    float getEclipseAmount() const override;
+    void setMoonBrightness(float brightness);
+    float getMoonBrightness() const;
+    void setMoonDiscIntensity(float intensity);
+    float getMoonDiscIntensity() const;
+    void setMoonEarthshine(float earthshine);
+    float getMoonEarthshine() const;
+
+    void setEclipseEnabled(bool enabled);
+    bool isEclipseEnabled() const;
+    void setEclipseAmount(float amount);
+    float getEclipseAmount() const;
 
     // IDebugControl implementation (Hi-Z culling)
     void setHiZCullingEnabled(bool enabled) override;

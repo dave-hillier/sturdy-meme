@@ -1,7 +1,8 @@
 #pragma once
 
-class ITimeControl;
+class ITimeSystem;
+class ILocationControl;
 
 namespace GuiTimeTab {
-    void render(ITimeControl& timeControl);
+    void render(ITimeSystem& timeSystem, ILocationControl& locationControl);
 }
