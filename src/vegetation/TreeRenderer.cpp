@@ -1029,98 +1029,15 @@ bool TreeRenderer::createLeafCullPhase3Pipeline() {
 }
 
 bool TreeRenderer::createLeafCullPhase3DescriptorSets() {
-    if (visibleTreeBuffer_ == VK_NULL_HANDLE || cullInputBuffer_ == VK_NULL_HANDLE) {
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "TreeRenderer: Cannot create Phase 3 descriptor sets without required buffers");
-        return false;
-    }
-
-    // Allocate descriptor sets for Phase 3 leaf culling
+    // Just allocate descriptor sets - buffers will be bound at runtime in recordLeafCulling
+    // because the leaf instance buffer comes from TreeSystem which isn't available at init time
     leafCullPhase3DescriptorSets_ = descriptorPool_->allocate(leafCullPhase3DescriptorSetLayout_.get(), maxFramesInFlight_);
     if (leafCullPhase3DescriptorSets_.empty()) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeRenderer: Failed to allocate Phase 3 leaf cull descriptor sets");
         return false;
     }
 
-    // Update descriptor sets with buffer bindings
-    for (uint32_t f = 0; f < maxFramesInFlight_; ++f) {
-        VkDescriptorBufferInfo visibleTreesInfo{};
-        visibleTreesInfo.buffer = visibleTreeBuffer_;
-        visibleTreesInfo.offset = 0;
-        visibleTreesInfo.range = VK_WHOLE_SIZE;
-
-        VkDescriptorBufferInfo allTreesInfo{};
-        allTreesInfo.buffer = treeDataBuffer_;
-        allTreesInfo.offset = 0;
-        allTreesInfo.range = VK_WHOLE_SIZE;
-
-        VkDescriptorBufferInfo inputInfo{};
-        inputInfo.buffer = cullInputBuffer_;
-        inputInfo.offset = 0;
-        inputInfo.range = VK_WHOLE_SIZE;
-
-        VkDescriptorBufferInfo outputInfo{};
-        outputInfo.buffer = cullOutputBuffers_[currentCullBufferSet_];
-        outputInfo.offset = 0;
-        outputInfo.range = VK_WHOLE_SIZE;
-
-        VkDescriptorBufferInfo indirectInfo{};
-        indirectInfo.buffer = cullIndirectBuffers_[currentCullBufferSet_];
-        indirectInfo.offset = 0;
-        indirectInfo.range = VK_WHOLE_SIZE;
-
-        VkDescriptorBufferInfo uniformInfo{};
-        uniformInfo.buffer = cullUniformBuffers_.buffers[f];
-        uniformInfo.offset = 0;
-        uniformInfo.range = sizeof(TreeLeafCullUniforms);
-
-        std::array<VkWriteDescriptorSet, 6> writes{};
-
-        writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[0].dstSet = leafCullPhase3DescriptorSets_[f];
-        writes[0].dstBinding = Bindings::LEAF_CULL_P3_VISIBLE_TREES;
-        writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[0].descriptorCount = 1;
-        writes[0].pBufferInfo = &visibleTreesInfo;
-
-        writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[1].dstSet = leafCullPhase3DescriptorSets_[f];
-        writes[1].dstBinding = Bindings::LEAF_CULL_P3_ALL_TREES;
-        writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[1].descriptorCount = 1;
-        writes[1].pBufferInfo = &allTreesInfo;
-
-        writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[2].dstSet = leafCullPhase3DescriptorSets_[f];
-        writes[2].dstBinding = Bindings::LEAF_CULL_P3_INPUT;
-        writes[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[2].descriptorCount = 1;
-        writes[2].pBufferInfo = &inputInfo;
-
-        writes[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[3].dstSet = leafCullPhase3DescriptorSets_[f];
-        writes[3].dstBinding = Bindings::LEAF_CULL_P3_OUTPUT;
-        writes[3].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[3].descriptorCount = 1;
-        writes[3].pBufferInfo = &outputInfo;
-
-        writes[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[4].dstSet = leafCullPhase3DescriptorSets_[f];
-        writes[4].dstBinding = Bindings::LEAF_CULL_P3_INDIRECT;
-        writes[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[4].descriptorCount = 1;
-        writes[4].pBufferInfo = &indirectInfo;
-
-        writes[5].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[5].dstSet = leafCullPhase3DescriptorSets_[f];
-        writes[5].dstBinding = Bindings::LEAF_CULL_P3_UNIFORMS;
-        writes[5].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        writes[5].descriptorCount = 1;
-        writes[5].pBufferInfo = &uniformInfo;
-
-        vkUpdateDescriptorSets(device_, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
-    }
-
-    SDL_Log("TreeRenderer: Created Phase 3 leaf culling descriptor sets");
+    SDL_Log("TreeRenderer: Allocated %u Phase 3 leaf cull descriptor sets", maxFramesInFlight_);
     return true;
 }
 
@@ -1852,8 +1769,23 @@ void TreeRenderer::recordLeafCulling(VkCommandBuffer cmd, uint32_t frameIndex,
 
             // Phase 3 leaf culling - use indirect dispatch based on visible tree count
             if (leafCullPhase3Pipeline_.get() != VK_NULL_HANDLE && !leafCullPhase3DescriptorSets_.empty()) {
-                // Update Phase 3 descriptor sets for current buffer set (double-buffering)
+                // Update all Phase 3 descriptor set bindings
                 {
+                    VkDescriptorBufferInfo visibleTreesInfo{};
+                    visibleTreesInfo.buffer = visibleTreeBuffer_;
+                    visibleTreesInfo.offset = 0;
+                    visibleTreesInfo.range = VK_WHOLE_SIZE;
+
+                    VkDescriptorBufferInfo allTreesInfo{};
+                    allTreesInfo.buffer = treeDataBuffer_;
+                    allTreesInfo.offset = 0;
+                    allTreesInfo.range = VK_WHOLE_SIZE;
+
+                    VkDescriptorBufferInfo inputInfo{};
+                    inputInfo.buffer = treeSystem.getLeafInstanceBuffer();
+                    inputInfo.offset = 0;
+                    inputInfo.range = VK_WHOLE_SIZE;
+
                     VkDescriptorBufferInfo outputInfo{};
                     outputInfo.buffer = cullOutputBuffers_[currentCullBufferSet_];
                     outputInfo.offset = 0;
@@ -1864,21 +1796,54 @@ void TreeRenderer::recordLeafCulling(VkCommandBuffer cmd, uint32_t frameIndex,
                     indirectInfo.offset = 0;
                     indirectInfo.range = VK_WHOLE_SIZE;
 
-                    std::array<VkWriteDescriptorSet, 2> writes{};
+                    VkDescriptorBufferInfo uniformInfo{};
+                    uniformInfo.buffer = cullUniformBuffers_.buffers[frameIndex];
+                    uniformInfo.offset = 0;
+                    uniformInfo.range = sizeof(TreeLeafCullUniforms);
+
+                    std::array<VkWriteDescriptorSet, 6> writes{};
 
                     writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
                     writes[0].dstSet = leafCullPhase3DescriptorSets_[frameIndex];
-                    writes[0].dstBinding = Bindings::LEAF_CULL_P3_OUTPUT;
+                    writes[0].dstBinding = Bindings::LEAF_CULL_P3_VISIBLE_TREES;
                     writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
                     writes[0].descriptorCount = 1;
-                    writes[0].pBufferInfo = &outputInfo;
+                    writes[0].pBufferInfo = &visibleTreesInfo;
 
                     writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
                     writes[1].dstSet = leafCullPhase3DescriptorSets_[frameIndex];
-                    writes[1].dstBinding = Bindings::LEAF_CULL_P3_INDIRECT;
+                    writes[1].dstBinding = Bindings::LEAF_CULL_P3_ALL_TREES;
                     writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
                     writes[1].descriptorCount = 1;
-                    writes[1].pBufferInfo = &indirectInfo;
+                    writes[1].pBufferInfo = &allTreesInfo;
+
+                    writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                    writes[2].dstSet = leafCullPhase3DescriptorSets_[frameIndex];
+                    writes[2].dstBinding = Bindings::LEAF_CULL_P3_INPUT;
+                    writes[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                    writes[2].descriptorCount = 1;
+                    writes[2].pBufferInfo = &inputInfo;
+
+                    writes[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                    writes[3].dstSet = leafCullPhase3DescriptorSets_[frameIndex];
+                    writes[3].dstBinding = Bindings::LEAF_CULL_P3_OUTPUT;
+                    writes[3].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                    writes[3].descriptorCount = 1;
+                    writes[3].pBufferInfo = &outputInfo;
+
+                    writes[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                    writes[4].dstSet = leafCullPhase3DescriptorSets_[frameIndex];
+                    writes[4].dstBinding = Bindings::LEAF_CULL_P3_INDIRECT;
+                    writes[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                    writes[4].descriptorCount = 1;
+                    writes[4].pBufferInfo = &indirectInfo;
+
+                    writes[5].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                    writes[5].dstSet = leafCullPhase3DescriptorSets_[frameIndex];
+                    writes[5].dstBinding = Bindings::LEAF_CULL_P3_UNIFORMS;
+                    writes[5].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                    writes[5].descriptorCount = 1;
+                    writes[5].pBufferInfo = &uniformInfo;
 
                     vkUpdateDescriptorSets(device_, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
                 }
