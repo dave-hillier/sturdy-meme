@@ -724,14 +724,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     // Connect cloud shadow map to terrain system
     systems_->terrain().setCloudShadowMap(device, systems_->cloudShadow().getShadowMapView(), systems_->cloudShadow().getShadowMapSampler());
 
-    // Connect underwater caustics to terrain system (use foam texture as caustics pattern)
-    if (systems_->water().getFoamTextureView() != VK_NULL_HANDLE) {
-        systems_->terrain().setCaustics(device,
-                                         systems_->water().getFoamTextureView(),
-                                         systems_->water().getFoamTextureSampler(),
-                                         systems_->water().getWaterLevel(),
-                                         true);  // Enable caustics
-    }
+    // Note: Caustics setup moved to initPhase4Complete after water system is created
 
     // Update cloud shadow bindings across all descriptor sets
     RendererInit::updateCloudShadowBindings(device, systems_->scene().getSceneBuilder().getMaterialRegistry(),
@@ -912,6 +905,16 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     if (!RendererInit::createWaterDescriptorSets(waterSubs, systems_->globalBuffers().uniformBuffers.buffers,
                                                   sizeof(UniformBufferObject), systems_->shadow(), systems_->terrain(),
                                                   systems_->postProcess(), depthSampler.get())) return false;
+
+    // Connect underwater caustics to terrain system (use foam texture as caustics pattern)
+    // Must happen after water system is fully initialized
+    if (systems_->water().getFoamTextureView() != VK_NULL_HANDLE) {
+        systems_->terrain().setCaustics(device,
+                                         systems_->water().getFoamTextureView(),
+                                         systems_->water().getFoamTextureSampler(),
+                                         systems_->water().getWaterLevel(),
+                                         true);  // Enable caustics
+    }
 
     if (!createSyncObjects()) return false;
 
