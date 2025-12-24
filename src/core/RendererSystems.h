@@ -24,6 +24,7 @@ class RockSystem;
 class TreeSystem;
 class TreeRenderer;
 class TreeLODSystem;
+class ImpostorCullSystem;
 class DetritusSystem;
 class CloudShadowSystem;
 class HiZSystem;
@@ -197,6 +198,9 @@ public:
     TreeLODSystem* treeLOD() { return treeLODSystem_.get(); }
     const TreeLODSystem* treeLOD() const { return treeLODSystem_.get(); }
     void setTreeLOD(std::unique_ptr<TreeLODSystem> system);
+    ImpostorCullSystem* impostorCull() { return impostorCullSystem_.get(); }
+    const ImpostorCullSystem* impostorCull() const { return impostorCullSystem_.get(); }
+    void setImpostorCull(std::unique_ptr<ImpostorCullSystem> system);
     DetritusSystem* detritus() { return detritusSystem_.get(); }
     const DetritusSystem* detritus() const { return detritusSystem_.get(); }
     void setDetritus(std::unique_ptr<DetritusSystem> system);
@@ -290,6 +294,7 @@ private:
     std::unique_ptr<TreeSystem> treeSystem_;
     std::unique_ptr<TreeRenderer> treeRenderer_;
     std::unique_ptr<TreeLODSystem> treeLODSystem_;
+    std::unique_ptr<ImpostorCullSystem> impostorCullSystem_;
     std::unique_ptr<DetritusSystem> detritusSystem_;
 
     // Tier 2 - Culling

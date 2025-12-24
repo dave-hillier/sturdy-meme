@@ -44,6 +44,7 @@
 #include "TreeSystem.h"
 #include "TreeRenderer.h"
 #include "TreeLODSystem.h"
+#include "ImpostorCullSystem.h"
 #include "DetritusSystem.h"
 #include "UBOBuilder.h"
 #include "WaterGBuffer.h"
@@ -173,6 +174,42 @@ void Renderer::setupRenderPipeline() {
             ctx.cmd, ctx.frameIndex, *systems_->tree(),
             ctx.frame.cameraPosition, ctx.frame.frustumPlanes);
         systems_->profiler().endGpuZone(ctx.cmd, "TreeLeafCull");
+    });
+
+    // Tree impostor Hi-Z occlusion culling compute pass (Phase 2)
+    // Uses Hi-Z pyramid from previous frame for occlusion testing
+    renderPipeline.computeStage.addPass("impostorCull", [this](RenderContext& ctx) {
+        auto* impostorCull = systems_->impostorCull();
+        if (!impostorCull || !systems_->tree()) return;
+
+        systems_->profiler().beginGpuZone(ctx.cmd, "ImpostorCull");
+
+        // Get Hi-Z pyramid from previous frame for occlusion testing
+        VkImageView hiZView = systems_->hiZ().getHiZPyramidView();
+        VkSampler hiZSampler = systems_->hiZ().getHiZSampler();
+
+        // Get LOD settings for distance thresholds
+        float fullDetailDist = 50.0f;   // Default values
+        float impostorDist = 500.0f;
+        if (systems_->treeLOD()) {
+            const auto& lodSettings = systems_->treeLOD()->getLODSettings();
+            fullDetailDist = lodSettings.fullDetailDistance;
+            impostorDist = lodSettings.impostorDistance;
+        }
+
+        impostorCull->recordCulling(
+            ctx.cmd, ctx.frameIndex,
+            ctx.frame.cameraPosition,
+            ctx.frame.frustumPlanes,
+            ctx.frame.viewProj,
+            hiZView, hiZSampler,
+            fullDetailDist,
+            impostorDist,
+            5.0f,   // hysteresis
+            10.0f   // blend range
+        );
+
+        systems_->profiler().endGpuZone(ctx.cmd, "ImpostorCull");
     });
 
     // Water foam persistence compute pass

@@ -118,8 +118,9 @@ public:
     // Get actual draw count after culling (read back for debugging)
     uint32_t getVisibleCount(uint32_t frameIndex) const;
 
-    // Hi-Z pyramid access (for debugging/visualization)
+    // Hi-Z pyramid access (for debugging/visualization and external occlusion culling)
     VkImageView getHiZPyramidView() const { return hiZPyramid.fullView.get(); }
+    VkSampler getHiZSampler() const { return hiZSampler.get(); }
     VkImageView getHiZMipView(uint32_t mipLevel) const;
     uint32_t getMipLevelCount() const { return mipLevelCount; }
 

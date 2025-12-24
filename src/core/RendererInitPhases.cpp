@@ -27,6 +27,7 @@
 #include "TreeSystem.h"
 #include "TreeRenderer.h"
 #include "TreeLODSystem.h"
+#include "ImpostorCullSystem.h"
 #include "DetritusSystem.h"
 #include "WaterSystem.h"
 #include "WaterDisplacement.h"
@@ -318,6 +319,28 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         }
     }
 
+    // Initialize ImpostorCullSystem for GPU-driven impostor culling with Hi-Z
+    {
+        ImpostorCullSystem::InitInfo impostorCullInfo{};
+        impostorCullInfo.device = device;
+        impostorCullInfo.physicalDevice = physicalDevice;
+        impostorCullInfo.allocator = allocator;
+        impostorCullInfo.descriptorPool = &*descriptorManagerPool;
+        impostorCullInfo.extent = systems_->postProcess().getExtent();
+        impostorCullInfo.resourcePath = resourcePath;
+        impostorCullInfo.maxFramesInFlight = MAX_FRAMES_IN_FLIGHT;
+        impostorCullInfo.maxTrees = 100000;
+        impostorCullInfo.maxArchetypes = 16;
+
+        auto impostorCull = ImpostorCullSystem::create(impostorCullInfo);
+        if (impostorCull) {
+            systems_->setImpostorCull(std::move(impostorCull));
+            SDL_Log("ImpostorCullSystem initialized for GPU-driven Hi-Z occlusion culling");
+        } else {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "ImpostorCullSystem creation failed (non-fatal)");
+        }
+    }
+
     // Add a forest 300 units away from the initial position (0, 0, 0)
     // The forest is placed away from spawn for load testing
     {
@@ -478,6 +501,14 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
                         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Missing textures for %s impostor", info.name.c_str());
                     }
                 }
+            }
+
+            // Update ImpostorCullSystem with tree data for GPU-driven culling
+            auto* impostorCull = systems_->impostorCull();
+            if (impostorCull && treeLOD) {
+                impostorCull->updateTreeData(*treeSystem, treeLOD->getImpostorAtlas());
+                impostorCull->updateArchetypeData(treeLOD->getImpostorAtlas());
+                SDL_Log("ImpostorCullSystem: Updated with %u trees", impostorCull->getTreeCount());
             }
         }
     }
