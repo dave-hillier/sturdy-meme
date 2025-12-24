@@ -1,7 +1,7 @@
 #pragma once
 
-class Renderer;
+class ITimeControl;
 
 namespace GuiTimeTab {
-    void render(Renderer& renderer);
+    void render(ITimeControl& timeControl);
 }

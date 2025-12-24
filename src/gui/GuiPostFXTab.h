@@ -1,7 +1,7 @@
 #pragma once
 
-class Renderer;
+class IPostProcessControl;
 
 namespace GuiPostFXTab {
-    void render(Renderer& renderer);
+    void render(IPostProcessControl& postProcess);
 }

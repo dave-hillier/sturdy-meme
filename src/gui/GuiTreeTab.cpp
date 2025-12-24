@@ -1,5 +1,5 @@
 #include "GuiTreeTab.h"
-#include "Renderer.h"
+#include "core/interfaces/ITreeControl.h"
 #include "vegetation/TreeSystem.h"
 #include "vegetation/TreeOptions.h"
 #include "vegetation/TreeLODSystem.h"
@@ -8,8 +8,8 @@
 
 #include <imgui.h>
 
-void GuiTreeTab::render(Renderer& renderer) {
-    auto* treeSystem = renderer.getTreeSystem();
+void GuiTreeTab::render(ITreeControl& treeControl) {
+    auto* treeSystem = treeControl.getTreeSystem();
     if (!treeSystem) {
         ImGui::Text("Tree system not initialized");
         return;
@@ -33,7 +33,7 @@ void GuiTreeTab::render(Renderer& renderer) {
     ImGui::Separator();
 
     // LOD Settings Section
-    auto* treeLOD = renderer.getSystems().treeLOD();
+    auto* treeLOD = treeControl.getSystems().treeLOD();
     if (treeLOD) {
         if (ImGui::CollapsingHeader("LOD Settings", ImGuiTreeNodeFlags_DefaultOpen)) {
             auto& settings = treeLOD->getLODSettings();

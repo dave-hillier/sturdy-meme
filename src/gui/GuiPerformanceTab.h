@@ -1,7 +1,7 @@
 #pragma once
 
-class Renderer;
+class IPerformanceControl;
 
 namespace GuiPerformanceTab {
-    void render(Renderer& renderer);
+    void render(IPerformanceControl& perfControl);
 }

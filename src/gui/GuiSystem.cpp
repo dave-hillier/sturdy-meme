@@ -2,6 +2,21 @@
 #include "Renderer.h"
 #include "Camera.h"
 
+// Interface headers for casting
+#include "core/interfaces/ITimeControl.h"
+#include "core/interfaces/IWeatherControl.h"
+#include "core/interfaces/IEnvironmentControl.h"
+#include "core/interfaces/IPostProcessControl.h"
+#include "core/interfaces/ITerrainControl.h"
+#include "core/interfaces/IWaterControl.h"
+#include "core/interfaces/ITreeControl.h"
+#include "core/interfaces/IDebugControl.h"
+#include "core/interfaces/IProfilerControl.h"
+#include "core/interfaces/IPerformanceControl.h"
+#include "core/interfaces/ISceneControl.h"
+#include "core/interfaces/IPlayerControl.h"
+
+// GUI tab headers
 #include "GuiTimeTab.h"
 #include "GuiWeatherTab.h"
 #include "GuiEnvironmentTab.h"
@@ -279,51 +294,51 @@ void GuiSystem::render(Renderer& renderer, const Camera& camera, float deltaTime
 
         if (ImGui::BeginTabBar("ControlTabs")) {
             if (ImGui::BeginTabItem("Time")) {
-                GuiTimeTab::render(renderer);
+                GuiTimeTab::render(static_cast<ITimeControl&>(renderer));
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Weather")) {
-                GuiWeatherTab::render(renderer);
+                GuiWeatherTab::render(static_cast<IWeatherControl&>(renderer));
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Environment")) {
-                GuiEnvironmentTab::render(renderer, environmentTabState);
+                GuiEnvironmentTab::render(static_cast<IEnvironmentControl&>(renderer), environmentTabState);
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Post FX")) {
-                GuiPostFXTab::render(renderer);
+                GuiPostFXTab::render(static_cast<IPostProcessControl&>(renderer));
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Terrain")) {
-                GuiTerrainTab::render(renderer);
+                GuiTerrainTab::render(static_cast<ITerrainControl&>(renderer));
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Water")) {
-                GuiWaterTab::render(renderer);
+                GuiWaterTab::render(static_cast<IWaterControl&>(renderer));
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Trees")) {
-                GuiTreeTab::render(renderer);
+                GuiTreeTab::render(static_cast<ITreeControl&>(renderer));
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Player")) {
-                GuiPlayerTab::render(renderer, playerSettings);
+                GuiPlayerTab::render(static_cast<IPlayerControl&>(renderer), playerSettings);
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("IK")) {
-                GuiIKTab::render(renderer, camera, ikDebugSettings);
+                GuiIKTab::render(static_cast<ISceneControl&>(renderer), camera, ikDebugSettings);
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Debug")) {
-                GuiDebugTab::render(renderer);
+                GuiDebugTab::render(static_cast<IDebugControl&>(renderer));
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Perf")) {
-                GuiPerformanceTab::render(renderer);
+                GuiPerformanceTab::render(static_cast<IPerformanceControl&>(renderer));
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Profiler")) {
-                GuiProfilerTab::render(renderer);
+                GuiProfilerTab::render(static_cast<IProfilerControl&>(renderer));
                 ImGui::EndTabItem();
             }
             ImGui::EndTabBar();
@@ -336,7 +351,7 @@ void GuiSystem::render(Renderer& renderer, const Camera& camera, float deltaTime
 
     // Skeleton/IK debug overlay
     if (ikDebugSettings.showSkeleton || ikDebugSettings.showIKTargets) {
-        GuiIKTab::renderSkeletonOverlay(renderer, camera, ikDebugSettings, playerSettings.showCapeColliders);
+        GuiIKTab::renderSkeletonOverlay(static_cast<ISceneControl&>(renderer), camera, ikDebugSettings, playerSettings.showCapeColliders);
     }
 }
 

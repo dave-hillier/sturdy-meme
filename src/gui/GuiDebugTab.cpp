@@ -1,5 +1,5 @@
 #include "GuiDebugTab.h"
-#include "Renderer.h"
+#include "core/interfaces/IDebugControl.h"
 #include "DebugLineSystem.h"
 #ifdef JPH_DEBUG_RENDERER
 #include "PhysicsDebugRenderer.h"
@@ -7,24 +7,24 @@
 
 #include <imgui.h>
 
-void GuiDebugTab::render(Renderer& renderer) {
+void GuiDebugTab::render(IDebugControl& debugControl) {
     ImGui::Spacing();
 
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.6f, 0.6f, 1.0f));
     ImGui::Text("DEBUG VISUALIZATIONS");
     ImGui::PopStyleColor();
 
-    bool cascadeDebug = renderer.isShowingCascadeDebug();
+    bool cascadeDebug = debugControl.isShowingCascadeDebug();
     if (ImGui::Checkbox("Shadow Cascade Debug", &cascadeDebug)) {
-        renderer.toggleCascadeDebug();
+        debugControl.toggleCascadeDebug();
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Shows colored overlay for each shadow cascade");
     }
 
-    bool snowDepthDebug = renderer.isShowingSnowDepthDebug();
+    bool snowDepthDebug = debugControl.isShowingSnowDepthDebug();
     if (ImGui::Checkbox("Snow Depth Debug", &snowDepthDebug)) {
-        renderer.toggleSnowDepthDebug();
+        debugControl.toggleSnowDepthDebug();
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Shows snow accumulation depth as heat map");
@@ -33,9 +33,9 @@ void GuiDebugTab::render(Renderer& renderer) {
 #ifdef JPH_DEBUG_RENDERER
     ImGui::Spacing();
 
-    bool physicsDebug = renderer.isPhysicsDebugEnabled();
+    bool physicsDebug = debugControl.isPhysicsDebugEnabled();
     if (ImGui::Checkbox("Physics Debug", &physicsDebug)) {
-        renderer.setPhysicsDebugEnabled(physicsDebug);
+        debugControl.setPhysicsDebugEnabled(physicsDebug);
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Draw Jolt Physics collision shapes and debug info");
@@ -44,7 +44,7 @@ void GuiDebugTab::render(Renderer& renderer) {
     if (physicsDebug) {
         ImGui::Indent();
 
-        auto* debugRenderer = renderer.getPhysicsDebugRenderer();
+        auto* debugRenderer = debugControl.getPhysicsDebugRenderer();
         if (debugRenderer) {
             auto& options = debugRenderer->getOptions();
 
@@ -71,7 +71,7 @@ void GuiDebugTab::render(Renderer& renderer) {
     }
 
     // Show stats
-    auto& debugLines = renderer.getDebugLineSystem();
+    auto& debugLines = debugControl.getDebugLineSystem();
     if (physicsDebug) {
         ImGui::Spacing();
         ImGui::Text("Lines: %zu", debugLines.getLineCount());
@@ -87,16 +87,16 @@ void GuiDebugTab::render(Renderer& renderer) {
     ImGui::Text("OCCLUSION CULLING");
     ImGui::PopStyleColor();
 
-    bool hiZEnabled = renderer.isHiZCullingEnabled();
+    bool hiZEnabled = debugControl.isHiZCullingEnabled();
     if (ImGui::Checkbox("Hi-Z Occlusion Culling", &hiZEnabled)) {
-        renderer.setHiZCullingEnabled(hiZEnabled);
+        debugControl.setHiZCullingEnabled(hiZEnabled);
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Enable/disable hierarchical Z-buffer occlusion culling (8 key)");
     }
 
     // Display culling statistics
-    auto stats = renderer.getHiZCullingStats();
+    auto stats = debugControl.getHiZCullingStats();
     ImGui::Text("Total Objects: %u", stats.totalObjects);
     ImGui::Text("Visible: %u", stats.visibleObjects);
     ImGui::Text("Frustum Culled: %u", stats.frustumCulled);

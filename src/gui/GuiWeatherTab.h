@@ -1,7 +1,7 @@
 #pragma once
 
-class Renderer;
+class IWeatherControl;
 
 namespace GuiWeatherTab {
-    void render(Renderer& renderer);
+    void render(IWeatherControl& weatherControl);
 }

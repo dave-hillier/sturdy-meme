@@ -1,13 +1,13 @@
 #include "GuiPlayerTab.h"
-#include "Renderer.h"
+#include "core/interfaces/IPlayerControl.h"
 #include "SceneBuilder.h"
 
 #include <imgui.h>
 
-void GuiPlayerTab::render(Renderer& renderer, PlayerSettings& settings) {
+void GuiPlayerTab::render(IPlayerControl& playerControl, PlayerSettings& settings) {
     ImGui::Spacing();
 
-    auto& sceneBuilder = renderer.getSceneBuilder();
+    auto& sceneBuilder = playerControl.getSceneBuilder();
     if (!sceneBuilder.hasCharacter()) {
         ImGui::TextDisabled("No animated character loaded");
         return;

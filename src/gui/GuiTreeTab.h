@@ -1,7 +1,7 @@
 #pragma once
 
-class Renderer;
+class ITreeControl;
 
 namespace GuiTreeTab {
-    void render(Renderer& renderer);
+    void render(ITreeControl& treeControl);
 }

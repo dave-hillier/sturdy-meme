@@ -2,7 +2,7 @@
 
 #include <glm/glm.hpp>
 
-class Renderer;
+class ISceneControl;
 class Camera;
 
 // IK debug settings for GUI control
@@ -26,6 +26,6 @@ struct IKDebugSettings {
 };
 
 namespace GuiIKTab {
-    void render(Renderer& renderer, const Camera& camera, IKDebugSettings& settings);
-    void renderSkeletonOverlay(Renderer& renderer, const Camera& camera, const IKDebugSettings& settings, bool showCapeColliders);
+    void render(ISceneControl& sceneControl, const Camera& camera, IKDebugSettings& settings);
+    void renderSkeletonOverlay(ISceneControl& sceneControl, const Camera& camera, const IKDebugSettings& settings, bool showCapeColliders);
 }

@@ -1,11 +1,11 @@
 #include "GuiPostFXTab.h"
-#include "Renderer.h"
+#include "core/interfaces/IPostProcessControl.h"
 #include "HiZSystem.h"
 #include "PostProcessSystem.h"
 
 #include <imgui.h>
 
-void GuiPostFXTab::render(Renderer& renderer) {
+void GuiPostFXTab::render(IPostProcessControl& postProcess) {
     ImGui::Spacing();
 
     // HDR Tonemapping toggle
@@ -13,17 +13,17 @@ void GuiPostFXTab::render(Renderer& renderer) {
     ImGui::Text("HDR PIPELINE");
     ImGui::PopStyleColor();
 
-    bool hdrPassEnabled = renderer.isHDRPassEnabled();
+    bool hdrPassEnabled = postProcess.isHDRPassEnabled();
     if (ImGui::Checkbox("HDR Pass (Scene Rendering)", &hdrPassEnabled)) {
-        renderer.setHDRPassEnabled(hdrPassEnabled);
+        postProcess.setHDRPassEnabled(hdrPassEnabled);
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Enable/disable entire HDR scene rendering pass (for performance debugging)");
     }
 
-    bool hdrEnabled = renderer.isHDREnabled();
+    bool hdrEnabled = postProcess.isHDREnabled();
     if (ImGui::Checkbox("HDR Tonemapping", &hdrEnabled)) {
-        renderer.setHDREnabled(hdrEnabled);
+        postProcess.setHDREnabled(hdrEnabled);
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Enable/disable ACES tonemapping and exposure control");
@@ -38,18 +38,18 @@ void GuiPostFXTab::render(Renderer& renderer) {
     ImGui::Text("CLOUD SHADOWS");
     ImGui::PopStyleColor();
 
-    bool cloudShadowEnabled = renderer.isCloudShadowEnabled();
+    bool cloudShadowEnabled = postProcess.isCloudShadowEnabled();
     if (ImGui::Checkbox("Cloud Shadows", &cloudShadowEnabled)) {
-        renderer.setCloudShadowEnabled(cloudShadowEnabled);
+        postProcess.setCloudShadowEnabled(cloudShadowEnabled);
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Enable/disable cloud shadow projection on terrain");
     }
 
     if (cloudShadowEnabled) {
-        float cloudShadowIntensity = renderer.getCloudShadowIntensity();
+        float cloudShadowIntensity = postProcess.getCloudShadowIntensity();
         if (ImGui::SliderFloat("Shadow Intensity", &cloudShadowIntensity, 0.0f, 1.0f)) {
-            renderer.setCloudShadowIntensity(cloudShadowIntensity);
+            postProcess.setCloudShadowIntensity(cloudShadowIntensity);
         }
     }
 
@@ -61,9 +61,9 @@ void GuiPostFXTab::render(Renderer& renderer) {
     ImGui::Text("BLOOM");
     ImGui::PopStyleColor();
 
-    bool bloomEnabled = renderer.isBloomEnabled();
+    bool bloomEnabled = postProcess.isBloomEnabled();
     if (ImGui::Checkbox("Enable Bloom", &bloomEnabled)) {
-        renderer.setBloomEnabled(bloomEnabled);
+        postProcess.setBloomEnabled(bloomEnabled);
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Enable/disable bloom glow effect");
@@ -77,9 +77,9 @@ void GuiPostFXTab::render(Renderer& renderer) {
     ImGui::Text("GOD RAYS");
     ImGui::PopStyleColor();
 
-    bool godRaysEnabled = renderer.isGodRaysEnabled();
+    bool godRaysEnabled = postProcess.isGodRaysEnabled();
     if (ImGui::Checkbox("Enable God Rays", &godRaysEnabled)) {
-        renderer.setGodRaysEnabled(godRaysEnabled);
+        postProcess.setGodRaysEnabled(godRaysEnabled);
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Toggle god ray light shafts effect");
@@ -88,9 +88,9 @@ void GuiPostFXTab::render(Renderer& renderer) {
     if (godRaysEnabled) {
         // God ray quality dropdown
         const char* qualityNames[] = {"Low (16 samples)", "Medium (32 samples)", "High (64 samples)"};
-        int currentQuality = static_cast<int>(renderer.getGodRayQuality());
+        int currentQuality = static_cast<int>(postProcess.getGodRayQuality());
         if (ImGui::Combo("God Ray Quality", &currentQuality, qualityNames, 3)) {
-            renderer.setGodRayQuality(currentQuality);
+            postProcess.setGodRayQuality(currentQuality);
         }
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Higher quality = more samples = better rays but slower");
@@ -105,9 +105,9 @@ void GuiPostFXTab::render(Renderer& renderer) {
     ImGui::Text("VOLUMETRIC FOG");
     ImGui::PopStyleColor();
 
-    bool froxelHighQuality = renderer.isFroxelFilterHighQuality();
+    bool froxelHighQuality = postProcess.isFroxelFilterHighQuality();
     if (ImGui::Checkbox("High Quality Fog Filter", &froxelHighQuality)) {
-        renderer.setFroxelFilterQuality(froxelHighQuality);
+        postProcess.setFroxelFilterQuality(froxelHighQuality);
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Tricubic filtering (8 samples) vs Trilinear (1 sample)");
@@ -121,34 +121,34 @@ void GuiPostFXTab::render(Renderer& renderer) {
     ImGui::Text("LOCAL TONE MAPPING");
     ImGui::PopStyleColor();
 
-    bool localToneMapEnabled = renderer.isLocalToneMapEnabled();
+    bool localToneMapEnabled = postProcess.isLocalToneMapEnabled();
     if (ImGui::Checkbox("Enable Local Tone Mapping", &localToneMapEnabled)) {
-        renderer.setLocalToneMapEnabled(localToneMapEnabled);
+        postProcess.setLocalToneMapEnabled(localToneMapEnabled);
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Ghost of Tsushima bilateral grid technique for detail-preserving contrast");
     }
 
     if (localToneMapEnabled) {
-        float contrast = renderer.getLocalToneMapContrast();
+        float contrast = postProcess.getLocalToneMapContrast();
         if (ImGui::SliderFloat("Contrast Reduction", &contrast, 0.0f, 1.0f)) {
-            renderer.setLocalToneMapContrast(contrast);
+            postProcess.setLocalToneMapContrast(contrast);
         }
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("0 = no contrast reduction, 0.5 = typical, 1.0 = very flat");
         }
 
-        float detail = renderer.getLocalToneMapDetail();
+        float detail = postProcess.getLocalToneMapDetail();
         if (ImGui::SliderFloat("Detail Boost", &detail, 0.5f, 2.0f)) {
-            renderer.setLocalToneMapDetail(detail);
+            postProcess.setLocalToneMapDetail(detail);
         }
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("1.0 = neutral, 1.5 = punchy, 2.0 = maximum detail");
         }
 
-        float bilateralBlend = renderer.getBilateralBlend();
+        float bilateralBlend = postProcess.getBilateralBlend();
         if (ImGui::SliderFloat("Bilateral Blend", &bilateralBlend, 0.0f, 1.0f)) {
-            renderer.setBilateralBlend(bilateralBlend);
+            postProcess.setBilateralBlend(bilateralBlend);
         }
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("GOT used 40%% bilateral, 60%% gaussian for smooth gradients");
@@ -163,20 +163,20 @@ void GuiPostFXTab::render(Renderer& renderer) {
     ImGui::Text("EXPOSURE");
     ImGui::PopStyleColor();
 
-    bool autoExposure = renderer.isAutoExposureEnabled();
+    bool autoExposure = postProcess.isAutoExposureEnabled();
     if (ImGui::Checkbox("Auto Exposure", &autoExposure)) {
-        renderer.setAutoExposureEnabled(autoExposure);
+        postProcess.setAutoExposureEnabled(autoExposure);
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Enable/disable histogram-based auto-exposure");
     }
 
     if (autoExposure) {
-        ImGui::TextDisabled("Current: %.2f EV", renderer.getCurrentExposure());
+        ImGui::TextDisabled("Current: %.2f EV", postProcess.getCurrentExposure());
     } else {
-        float manualExposure = renderer.getManualExposure();
+        float manualExposure = postProcess.getManualExposure();
         if (ImGui::SliderFloat("Manual Exposure", &manualExposure, -4.0f, 4.0f, "%.2f EV")) {
-            renderer.setManualExposure(manualExposure);
+            postProcess.setManualExposure(manualExposure);
         }
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Manual exposure value in EV (-4 to +4)");

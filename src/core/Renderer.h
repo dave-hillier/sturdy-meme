@@ -324,7 +324,7 @@ public:
 
     // ISceneControl / IPlayerControl implementation
     SceneBuilder& getSceneBuilder() override;
-    const SceneBuilder& getSceneBuilder() const;
+    const SceneBuilder& getSceneBuilder() const override;
     Mesh& getFlagClothMesh();
     Mesh& getFlagPoleMesh();
     void uploadFlagClothMesh();

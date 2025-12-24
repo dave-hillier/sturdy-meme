@@ -1,37 +1,38 @@
 #include "GuiWeatherTab.h"
-#include "Renderer.h"
+#include "core/interfaces/IWeatherControl.h"
 #include "WindSystem.h"
 #include "LeafSystem.h"
+#include "EnvironmentSettings.h"
 
 #include <imgui.h>
 #include <glm/glm.hpp>
 
-void GuiWeatherTab::render(Renderer& renderer) {
+void GuiWeatherTab::render(IWeatherControl& weatherControl) {
     ImGui::Spacing();
 
     // Weather type
     const char* weatherTypes[] = { "Rain", "Snow" };
-    int weatherType = static_cast<int>(renderer.getWeatherType());
+    int weatherType = static_cast<int>(weatherControl.getWeatherType());
     if (ImGui::Combo("Weather Type", &weatherType, weatherTypes, 2)) {
-        renderer.setWeatherType(static_cast<uint32_t>(weatherType));
+        weatherControl.setWeatherType(static_cast<uint32_t>(weatherType));
     }
 
     // Intensity
-    float intensity = renderer.getIntensity();
+    float intensity = weatherControl.getIntensity();
     if (ImGui::SliderFloat("Intensity", &intensity, 0.0f, 1.0f)) {
-        renderer.setWeatherIntensity(intensity);
+        weatherControl.setWeatherIntensity(intensity);
     }
 
     // Quick intensity buttons
     ImGui::Text("Presets:");
     ImGui::SameLine();
-    if (ImGui::Button("Clear")) renderer.setWeatherIntensity(0.0f);
+    if (ImGui::Button("Clear")) weatherControl.setWeatherIntensity(0.0f);
     ImGui::SameLine();
-    if (ImGui::Button("Light")) renderer.setWeatherIntensity(0.3f);
+    if (ImGui::Button("Light")) weatherControl.setWeatherIntensity(0.3f);
     ImGui::SameLine();
-    if (ImGui::Button("Medium")) renderer.setWeatherIntensity(0.6f);
+    if (ImGui::Button("Medium")) weatherControl.setWeatherIntensity(0.6f);
     ImGui::SameLine();
-    if (ImGui::Button("Heavy")) renderer.setWeatherIntensity(1.0f);
+    if (ImGui::Button("Heavy")) weatherControl.setWeatherIntensity(1.0f);
 
     ImGui::Spacing();
     ImGui::Separator();
@@ -42,19 +43,19 @@ void GuiWeatherTab::render(Renderer& renderer) {
     ImGui::Text("SNOW COVERAGE");
     ImGui::PopStyleColor();
 
-    float snowAmount = renderer.getSnowAmount();
+    float snowAmount = weatherControl.getSnowAmount();
     if (ImGui::SliderFloat("Snow Amount", &snowAmount, 0.0f, 1.0f)) {
-        renderer.setSnowAmount(snowAmount);
+        weatherControl.setSnowAmount(snowAmount);
     }
 
-    glm::vec3 snowColor = renderer.getSnowColor();
+    glm::vec3 snowColor = weatherControl.getSnowColor();
     float sc[3] = {snowColor.r, snowColor.g, snowColor.b};
     if (ImGui::ColorEdit3("Snow Color", sc)) {
-        renderer.setSnowColor(glm::vec3(sc[0], sc[1], sc[2]));
+        weatherControl.setSnowColor(glm::vec3(sc[0], sc[1], sc[2]));
     }
 
     // Environment settings for snow
-    auto& env = renderer.getEnvironmentSettings();
+    auto& env = weatherControl.getEnvironmentSettings();
 
     if (ImGui::SliderFloat("Snow Roughness", &env.snowRoughness, 0.0f, 1.0f)) {}
     if (ImGui::SliderFloat("Accumulation Rate", &env.snowAccumulationRate, 0.0f, 1.0f)) {}

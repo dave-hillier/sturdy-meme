@@ -1,7 +1,7 @@
 #pragma once
 
-class Renderer;
+class IDebugControl;
 
 namespace GuiDebugTab {
-    void render(Renderer& renderer);
+    void render(IDebugControl& debugControl);
 }

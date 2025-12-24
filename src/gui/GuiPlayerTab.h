@@ -1,6 +1,6 @@
 #pragma once
 
-class Renderer;
+class IPlayerControl;
 
 // Player settings for GUI control
 struct PlayerSettings {
@@ -12,5 +12,5 @@ struct PlayerSettings {
 };
 
 namespace GuiPlayerTab {
-    void render(Renderer& renderer, PlayerSettings& settings);
+    void render(IPlayerControl& playerControl, PlayerSettings& settings);
 }

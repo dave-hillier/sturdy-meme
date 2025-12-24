@@ -1,7 +1,7 @@
 #pragma once
 
-class Renderer;
+class IProfilerControl;
 
 namespace GuiProfilerTab {
-    void render(Renderer& renderer);
+    void render(IProfilerControl& profilerControl);
 }

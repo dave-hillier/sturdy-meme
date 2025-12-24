@@ -1,14 +1,14 @@
 #include "GuiPerformanceTab.h"
-#include "Renderer.h"
+#include "core/interfaces/IPerformanceControl.h"
 #include "PerformanceToggles.h"
 
 #include <imgui.h>
 #include <string>
 
-void GuiPerformanceTab::render(Renderer& renderer) {
+void GuiPerformanceTab::render(IPerformanceControl& perfControl) {
     ImGui::Spacing();
 
-    PerformanceToggles& toggles = renderer.getPerformanceToggles();
+    PerformanceToggles& toggles = perfControl.getPerformanceToggles();
 
     // Quick actions
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.8f, 0.4f, 1.0f));

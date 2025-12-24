@@ -1,7 +1,7 @@
 #pragma once
 
-class Renderer;
+class IWaterControl;
 
 namespace GuiWaterTab {
-    void render(Renderer& renderer);
+    void render(IWaterControl& waterControl);
 }

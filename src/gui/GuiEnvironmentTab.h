@@ -1,6 +1,6 @@
 #pragma once
 
-class Renderer;
+class IEnvironmentControl;
 
 // State for environment tab toggles that need to persist
 struct EnvironmentTabState {
@@ -12,5 +12,5 @@ struct EnvironmentTabState {
 };
 
 namespace GuiEnvironmentTab {
-    void render(Renderer& renderer, EnvironmentTabState& state);
+    void render(IEnvironmentControl& envControl, EnvironmentTabState& state);
 }

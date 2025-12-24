@@ -1,7 +1,7 @@
 #pragma once
 
-class Renderer;
+class ITerrainControl;
 
 namespace GuiTerrainTab {
-    void render(Renderer& renderer);
+    void render(ITerrainControl& terrainControl);
 }

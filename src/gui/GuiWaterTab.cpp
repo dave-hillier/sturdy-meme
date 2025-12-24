@@ -1,15 +1,15 @@
 #include "GuiWaterTab.h"
-#include "Renderer.h"
+#include "core/interfaces/IWaterControl.h"
 #include "WaterSystem.h"
 #include "WaterTileCull.h"
 
 #include <imgui.h>
 #include <glm/glm.hpp>
 
-void GuiWaterTab::render(Renderer& renderer) {
+void GuiWaterTab::render(IWaterControl& waterControl) {
     ImGui::Spacing();
 
-    auto& water = renderer.getWaterSystem();
+    auto& water = waterControl.getWaterSystem();
 
     // Water info header
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 0.7f, 0.9f, 1.0f));
@@ -184,7 +184,7 @@ void GuiWaterTab::render(Renderer& renderer) {
     ImGui::Text("PERFORMANCE");
     ImGui::PopStyleColor();
 
-    auto& tileCull = renderer.getWaterTileCull();
+    auto& tileCull = waterControl.getWaterTileCull();
     bool tileCullEnabled = tileCull.isEnabled();
     if (ImGui::Checkbox("Tile Culling", &tileCullEnabled)) {
         tileCull.setEnabled(tileCullEnabled);

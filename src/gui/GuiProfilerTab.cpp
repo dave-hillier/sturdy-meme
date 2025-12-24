@@ -1,15 +1,15 @@
 #include "GuiProfilerTab.h"
-#include "Renderer.h"
+#include "core/interfaces/IProfilerControl.h"
 #include "Profiler.h"
 
 #include <imgui.h>
 #include <algorithm>
 #include <cstdio>
 
-void GuiProfilerTab::render(Renderer& renderer) {
+void GuiProfilerTab::render(IProfilerControl& profilerControl) {
     ImGui::Spacing();
 
-    auto& profiler = renderer.getProfiler();
+    auto& profiler = profilerControl.getProfiler();
 
     // Enable/disable toggle
     bool enabled = profiler.isEnabled();
@@ -137,10 +137,10 @@ void GuiProfilerTab::render(Renderer& renderer) {
     float targetMs = 16.67f;  // 60 FPS target
     float gpuTime = gpuStats.totalGpuTimeMs;
     float cpuTime = cpuStats.totalCpuTimeMs;
-    float maxTime = std::max(gpuTime, cpuTime);
+    float maxTimeVal = std::max(gpuTime, cpuTime);
 
     // Budget bar
-    float budgetUsed = maxTime / targetMs;
+    float budgetUsed = maxTimeVal / targetMs;
     ImVec4 budgetColor;
     if (budgetUsed < 0.8f) {
         budgetColor = ImVec4(0.4f, 1.0f, 0.4f, 1.0f);  // Green
@@ -153,7 +153,7 @@ void GuiProfilerTab::render(Renderer& renderer) {
     ImGui::PushStyleColor(ImGuiCol_PlotHistogram, budgetColor);
     char budgetText[64];
     snprintf(budgetText, sizeof(budgetText), "%.1f / %.1f ms (%.0f%%)",
-             maxTime, targetMs, budgetUsed * 100.0f);
+             maxTimeVal, targetMs, budgetUsed * 100.0f);
     ImGui::ProgressBar(std::min(budgetUsed, 1.5f) / 1.5f, ImVec2(-1, 20), budgetText);
     ImGui::PopStyleColor();
 

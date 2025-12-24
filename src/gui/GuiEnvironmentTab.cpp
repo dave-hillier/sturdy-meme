@@ -1,12 +1,12 @@
 #include "GuiEnvironmentTab.h"
-#include "Renderer.h"
+#include "core/interfaces/IEnvironmentControl.h"
 #include "AtmosphereLUTSystem.h"
 #include "EnvironmentSettings.h"
 
 #include <imgui.h>
 #include <glm/glm.hpp>
 
-void GuiEnvironmentTab::render(Renderer& renderer, EnvironmentTabState& state) {
+void GuiEnvironmentTab::render(IEnvironmentControl& envControl, EnvironmentTabState& state) {
     ImGui::Spacing();
 
     // ========== FROXEL VOLUMETRIC FOG ==========
@@ -14,9 +14,9 @@ void GuiEnvironmentTab::render(Renderer& renderer, EnvironmentTabState& state) {
     ImGui::Text("FROXEL VOLUMETRIC FOG");
     ImGui::PopStyleColor();
 
-    bool fogEnabled = renderer.isFogEnabled();
+    bool fogEnabled = envControl.isFogEnabled();
     if (ImGui::Checkbox("Enable Froxel Fog", &fogEnabled)) {
-        renderer.setFogEnabled(fogEnabled);
+        envControl.setFogEnabled(fogEnabled);
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Frustum-aligned voxel grid volumetric fog with temporal reprojection");
@@ -24,49 +24,49 @@ void GuiEnvironmentTab::render(Renderer& renderer, EnvironmentTabState& state) {
 
     if (fogEnabled) {
         // Main fog parameters - wide ranges for extreme testing
-        float fogDensity = renderer.getFogDensity();
+        float fogDensity = envControl.getFogDensity();
         if (ImGui::SliderFloat("Fog Density", &fogDensity, 0.0f, 1.0f, "%.4f", ImGuiSliderFlags_Logarithmic)) {
-            renderer.setFogDensity(fogDensity);
+            envControl.setFogDensity(fogDensity);
         }
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("0 = no fog, 1 = extremely dense (logarithmic scale)");
         }
 
-        float fogAbsorption = renderer.getFogAbsorption();
+        float fogAbsorption = envControl.getFogAbsorption();
         if (ImGui::SliderFloat("Absorption", &fogAbsorption, 0.0f, 1.0f, "%.4f", ImGuiSliderFlags_Logarithmic)) {
-            renderer.setFogAbsorption(fogAbsorption);
+            envControl.setFogAbsorption(fogAbsorption);
         }
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Light absorption coefficient (0 = transparent, 1 = opaque fog)");
         }
 
-        float fogBaseHeight = renderer.getFogBaseHeight();
+        float fogBaseHeight = envControl.getFogBaseHeight();
         if (ImGui::SliderFloat("Base Height", &fogBaseHeight, -500.0f, 500.0f, "%.1f")) {
-            renderer.setFogBaseHeight(fogBaseHeight);
+            envControl.setFogBaseHeight(fogBaseHeight);
         }
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Height where fog density is maximum");
         }
 
-        float fogScaleHeight = renderer.getFogScaleHeight();
+        float fogScaleHeight = envControl.getFogScaleHeight();
         if (ImGui::SliderFloat("Scale Height", &fogScaleHeight, 0.1f, 2000.0f, "%.1f", ImGuiSliderFlags_Logarithmic)) {
-            renderer.setFogScaleHeight(fogScaleHeight);
+            envControl.setFogScaleHeight(fogScaleHeight);
         }
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Exponential falloff (0.1 = thin layer, 2000 = fog everywhere)");
         }
 
-        float volumetricFar = renderer.getVolumetricFarPlane();
+        float volumetricFar = envControl.getVolumetricFarPlane();
         if (ImGui::SliderFloat("Far Plane", &volumetricFar, 10.0f, 5000.0f, "%.0f", ImGuiSliderFlags_Logarithmic)) {
-            renderer.setVolumetricFarPlane(volumetricFar);
+            envControl.setVolumetricFarPlane(volumetricFar);
         }
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Volumetric range (10 = close only, 5000 = entire scene)");
         }
 
-        float temporalBlend = renderer.getTemporalBlend();
+        float temporalBlend = envControl.getTemporalBlend();
         if (ImGui::SliderFloat("Temporal Blend", &temporalBlend, 0.0f, 0.999f, "%.3f")) {
-            renderer.setTemporalBlend(temporalBlend);
+            envControl.setTemporalBlend(temporalBlend);
         }
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("0 = no temporal filtering (noisy), 0.999 = extreme smoothing (ghosting)");
@@ -76,20 +76,20 @@ void GuiEnvironmentTab::render(Renderer& renderer, EnvironmentTabState& state) {
         ImGui::Text("Presets:");
         ImGui::SameLine();
         if (ImGui::Button("Clear##froxel")) {
-            renderer.setFogDensity(0.0f);
-            renderer.setLayerDensity(0.0f);
+            envControl.setFogDensity(0.0f);
+            envControl.setLayerDensity(0.0f);
         }
         ImGui::SameLine();
         if (ImGui::Button("Light##froxel")) {
-            renderer.setFogDensity(0.005f);
-            renderer.setFogAbsorption(0.005f);
-            renderer.setFogScaleHeight(100.0f);
+            envControl.setFogDensity(0.005f);
+            envControl.setFogAbsorption(0.005f);
+            envControl.setFogScaleHeight(100.0f);
         }
         ImGui::SameLine();
         if (ImGui::Button("Dense##froxel")) {
-            renderer.setFogDensity(0.03f);
-            renderer.setFogAbsorption(0.02f);
-            renderer.setFogScaleHeight(50.0f);
+            envControl.setFogDensity(0.03f);
+            envControl.setFogAbsorption(0.02f);
+            envControl.setFogScaleHeight(50.0f);
         }
     }
 
@@ -107,12 +107,12 @@ void GuiEnvironmentTab::render(Renderer& renderer, EnvironmentTabState& state) {
         if (ImGui::Checkbox("Enable Height Fog", &state.heightFogEnabled)) {
             if (state.heightFogEnabled) {
                 // Restore cached density
-                renderer.setLayerDensity(state.cachedLayerDensity);
+                envControl.setLayerDensity(state.cachedLayerDensity);
             } else {
                 // Cache current density and zero it out
-                state.cachedLayerDensity = renderer.getLayerDensity();
+                state.cachedLayerDensity = envControl.getLayerDensity();
                 if (state.cachedLayerDensity < 0.001f) state.cachedLayerDensity = 0.02f;  // Ensure valid restore value
-                renderer.setLayerDensity(0.0f);
+                envControl.setLayerDensity(0.0f);
             }
         }
         if (ImGui::IsItemHovered()) {
@@ -120,25 +120,25 @@ void GuiEnvironmentTab::render(Renderer& renderer, EnvironmentTabState& state) {
         }
 
         if (state.heightFogEnabled) {
-            float layerHeight = renderer.getLayerHeight();
+            float layerHeight = envControl.getLayerHeight();
             if (ImGui::SliderFloat("Layer Height", &layerHeight, -200.0f, 500.0f, "%.1f")) {
-                renderer.setLayerHeight(layerHeight);
+                envControl.setLayerHeight(layerHeight);
             }
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("Top of ground fog layer (-200 = below ground, 500 = high altitude cloud)");
             }
 
-            float layerThickness = renderer.getLayerThickness();
+            float layerThickness = envControl.getLayerThickness();
             if (ImGui::SliderFloat("Layer Thickness", &layerThickness, 0.1f, 500.0f, "%.1f", ImGuiSliderFlags_Logarithmic)) {
-                renderer.setLayerThickness(layerThickness);
+                envControl.setLayerThickness(layerThickness);
             }
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("Vertical extent (0.1 = paper thin, 500 = massive fog bank)");
             }
 
-            float layerDensity = renderer.getLayerDensity();
+            float layerDensity = envControl.getLayerDensity();
             if (ImGui::SliderFloat("Layer Density", &layerDensity, 0.0f, 1.0f, "%.4f", ImGuiSliderFlags_Logarithmic)) {
-                renderer.setLayerDensity(layerDensity);
+                envControl.setLayerDensity(layerDensity);
                 state.cachedLayerDensity = layerDensity;  // Update cache when manually changed
             }
             if (ImGui::IsItemHovered()) {
@@ -149,16 +149,16 @@ void GuiEnvironmentTab::render(Renderer& renderer, EnvironmentTabState& state) {
             ImGui::Text("Presets:");
             ImGui::SameLine();
             if (ImGui::Button("Valley##layer")) {
-                renderer.setLayerHeight(20.0f);
-                renderer.setLayerThickness(30.0f);
-                renderer.setLayerDensity(0.03f);
+                envControl.setLayerHeight(20.0f);
+                envControl.setLayerThickness(30.0f);
+                envControl.setLayerDensity(0.03f);
                 state.cachedLayerDensity = 0.03f;
             }
             ImGui::SameLine();
             if (ImGui::Button("Thick Mist##layer")) {
-                renderer.setLayerHeight(10.0f);
-                renderer.setLayerThickness(15.0f);
-                renderer.setLayerDensity(0.1f);
+                envControl.setLayerHeight(10.0f);
+                envControl.setLayerThickness(15.0f);
+                envControl.setLayerDensity(0.1f);
                 state.cachedLayerDensity = 0.1f;
             }
         }
@@ -176,15 +176,15 @@ void GuiEnvironmentTab::render(Renderer& renderer, EnvironmentTabState& state) {
     ImGui::PopStyleColor();
 
     // Sky exposure - controls overall sky brightness
-    float skyExposure = renderer.getSkyExposure();
+    float skyExposure = envControl.getSkyExposure();
     if (ImGui::SliderFloat("Sky Exposure", &skyExposure, 1.0f, 20.0f, "%.1f")) {
-        renderer.setSkyExposure(skyExposure);
+        envControl.setSkyExposure(skyExposure);
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Sky brightness multiplier (1 = dim, 5 = default, 20 = very bright)");
     }
 
-    AtmosphereParams atmosParams = renderer.getAtmosphereParams();
+    AtmosphereParams atmosParams = envControl.getAtmosphereParams();
     bool atmosChanged = false;
 
     // Enable toggle for atmospheric scattering
@@ -312,7 +312,7 @@ void GuiEnvironmentTab::render(Renderer& renderer, EnvironmentTabState& state) {
         ImGui::Text("Presets:");
         if (ImGui::Button("Earth##atmos")) {
             AtmosphereParams earth;
-            renderer.setAtmosphereParams(earth);
+            envControl.setAtmosphereParams(earth);
             state.cachedRayleighScale = 13.558f;
             state.cachedMieScale = 3.996f;
             atmosChanged = false;  // Already set
@@ -322,7 +322,7 @@ void GuiEnvironmentTab::render(Renderer& renderer, EnvironmentTabState& state) {
             AtmosphereParams clear;
             clear.mieScatteringBase = 1.0e-3f;
             clear.mieAbsorptionBase = 1.0e-3f;
-            renderer.setAtmosphereParams(clear);
+            envControl.setAtmosphereParams(clear);
             state.cachedMieScale = 1.0f;
             atmosChanged = false;
         }
@@ -332,14 +332,14 @@ void GuiEnvironmentTab::render(Renderer& renderer, EnvironmentTabState& state) {
             hazy.mieScatteringBase = 15.0e-3f;
             hazy.mieAbsorptionBase = 10.0e-3f;
             hazy.mieAnisotropy = 0.7f;
-            renderer.setAtmosphereParams(hazy);
+            envControl.setAtmosphereParams(hazy);
             state.cachedMieScale = 15.0f;
             atmosChanged = false;
         }
     }
 
     if (atmosChanged) {
-        renderer.setAtmosphereParams(atmosParams);
+        envControl.setAtmosphereParams(atmosParams);
     }
 
     ImGui::Spacing();
@@ -351,9 +351,9 @@ void GuiEnvironmentTab::render(Renderer& renderer, EnvironmentTabState& state) {
     ImGui::Text("FALLING LEAVES");
     ImGui::PopStyleColor();
 
-    float leafIntensity = renderer.getLeafIntensity();
+    float leafIntensity = envControl.getLeafIntensity();
     if (ImGui::SliderFloat("Leaf Intensity", &leafIntensity, 0.0f, 1.0f)) {
-        renderer.setLeafIntensity(leafIntensity);
+        envControl.setLeafIntensity(leafIntensity);
     }
 
     ImGui::Spacing();
@@ -365,26 +365,26 @@ void GuiEnvironmentTab::render(Renderer& renderer, EnvironmentTabState& state) {
     ImGui::Text("CLOUDS");
     ImGui::PopStyleColor();
 
-    bool paraboloid = renderer.isUsingParaboloidClouds();
+    bool paraboloid = envControl.isUsingParaboloidClouds();
     if (ImGui::Checkbox("Paraboloid LUT Clouds", &paraboloid)) {
-        renderer.toggleCloudStyle();
+        envControl.toggleCloudStyle();
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Toggle between procedural and paraboloid LUT hybrid cloud rendering");
     }
 
     // Cloud coverage and density controls
-    float cloudCoverage = renderer.getCloudCoverage();
+    float cloudCoverage = envControl.getCloudCoverage();
     if (ImGui::SliderFloat("Cloud Coverage", &cloudCoverage, 0.0f, 1.0f, "%.2f")) {
-        renderer.setCloudCoverage(cloudCoverage);
+        envControl.setCloudCoverage(cloudCoverage);
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("0 = clear sky, 0.5 = partly cloudy, 1 = overcast");
     }
 
-    float cloudDensity = renderer.getCloudDensity();
+    float cloudDensity = envControl.getCloudDensity();
     if (ImGui::SliderFloat("Cloud Density", &cloudDensity, 0.0f, 1.0f, "%.2f")) {
-        renderer.setCloudDensity(cloudDensity);
+        envControl.setCloudDensity(cloudDensity);
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("0 = thin/wispy, 0.3 = normal, 1 = thick/opaque");
@@ -394,23 +394,23 @@ void GuiEnvironmentTab::render(Renderer& renderer, EnvironmentTabState& state) {
     ImGui::Text("Presets:");
     ImGui::SameLine();
     if (ImGui::Button("Clear##clouds")) {
-        renderer.setCloudCoverage(0.0f);
-        renderer.setCloudDensity(0.3f);
+        envControl.setCloudCoverage(0.0f);
+        envControl.setCloudDensity(0.3f);
     }
     ImGui::SameLine();
     if (ImGui::Button("Partly##clouds")) {
-        renderer.setCloudCoverage(0.4f);
-        renderer.setCloudDensity(0.3f);
+        envControl.setCloudCoverage(0.4f);
+        envControl.setCloudDensity(0.3f);
     }
     ImGui::SameLine();
     if (ImGui::Button("Cloudy##clouds")) {
-        renderer.setCloudCoverage(0.7f);
-        renderer.setCloudDensity(0.5f);
+        envControl.setCloudCoverage(0.7f);
+        envControl.setCloudDensity(0.5f);
     }
     ImGui::SameLine();
     if (ImGui::Button("Overcast##clouds")) {
-        renderer.setCloudCoverage(0.95f);
-        renderer.setCloudDensity(0.7f);
+        envControl.setCloudCoverage(0.95f);
+        envControl.setCloudDensity(0.7f);
     }
 
     ImGui::Spacing();
@@ -422,7 +422,7 @@ void GuiEnvironmentTab::render(Renderer& renderer, EnvironmentTabState& state) {
     ImGui::Text("GRASS INTERACTION");
     ImGui::PopStyleColor();
 
-    auto& env = renderer.getEnvironmentSettings();
+    auto& env = envControl.getEnvironmentSettings();
     if (ImGui::SliderFloat("Displacement Decay", &env.grassDisplacementDecay, 0.1f, 5.0f)) {}
     if (ImGui::SliderFloat("Max Displacement", &env.grassMaxDisplacement, 0.0f, 2.0f)) {}
 }

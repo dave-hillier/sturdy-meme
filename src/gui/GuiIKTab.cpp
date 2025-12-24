@@ -1,5 +1,5 @@
 #include "GuiIKTab.h"
-#include "Renderer.h"
+#include "core/interfaces/ISceneControl.h"
 #include "Camera.h"
 #include "AnimatedCharacter.h"
 #include "PlayerCape.h"
@@ -8,11 +8,11 @@
 #include <imgui.h>
 #include <glm/glm.hpp>
 
-void GuiIKTab::render(Renderer& renderer, const Camera& camera, IKDebugSettings& settings) {
+void GuiIKTab::render(ISceneControl& sceneControl, const Camera& camera, IKDebugSettings& settings) {
     ImGui::Spacing();
 
     // Check if character is loaded
-    auto& sceneBuilder = renderer.getSceneBuilder();
+    auto& sceneBuilder = sceneControl.getSceneBuilder();
     if (!sceneBuilder.hasCharacter()) {
         ImGui::TextDisabled("No animated character loaded");
         return;
@@ -165,8 +165,8 @@ void GuiIKTab::render(Renderer& renderer, const Camera& camera, IKDebugSettings&
     }
 }
 
-void GuiIKTab::renderSkeletonOverlay(Renderer& renderer, const Camera& camera, const IKDebugSettings& settings, bool showCapeColliders) {
-    auto& sceneBuilder = renderer.getSceneBuilder();
+void GuiIKTab::renderSkeletonOverlay(ISceneControl& sceneControl, const Camera& camera, const IKDebugSettings& settings, bool showCapeColliders) {
+    auto& sceneBuilder = sceneControl.getSceneBuilder();
     if (!sceneBuilder.hasCharacter()) {
         return;
     }
@@ -183,8 +183,8 @@ void GuiIKTab::renderSkeletonOverlay(Renderer& renderer, const Camera& camera, c
     glm::mat4 worldTransform = sceneObjects[playerIndex].transform;
 
     // Get viewport size
-    float width = static_cast<float>(renderer.getWidth());
-    float height = static_cast<float>(renderer.getHeight());
+    float width = static_cast<float>(sceneControl.getWidth());
+    float height = static_cast<float>(sceneControl.getHeight());
 
     // Get view-projection matrix
     glm::mat4 viewProj = camera.getProjectionMatrix() * camera.getViewMatrix();
