@@ -254,6 +254,8 @@ private:
     bool createCellCullBuffers();
     bool createTreeFilterPipeline();
     bool createTreeFilterBuffers(uint32_t maxTrees);
+    bool createLeafCullPhase3Pipeline();
+    bool createLeafCullPhase3DescriptorSets();
 
     VkDevice device_ = VK_NULL_HANDLE;
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;

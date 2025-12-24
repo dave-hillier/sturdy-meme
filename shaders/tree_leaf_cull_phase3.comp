@@ -44,34 +44,34 @@ struct TreeCullData {
 };
 
 // Input: Visible trees (from tree_filter.comp)
-layout(std430, binding = 0) readonly buffer VisibleTreesBuffer {
+layout(std430, binding = BINDING_LEAF_CULL_P3_VISIBLE_TREES) readonly buffer VisibleTreesBuffer {
     uint visibleTreeCount;
     VisibleTreeData visibleTrees[];
 };
 
 // Input: All tree cull data (for model matrix)
-layout(std430, binding = 1) readonly buffer AllTreesBuffer {
+layout(std430, binding = BINDING_LEAF_CULL_P3_ALL_TREES) readonly buffer AllTreesBuffer {
     TreeCullData allTrees[];
 };
 
 // Input: All leaf instances (tree-local space)
-layout(std430, binding = 2) readonly buffer InputBuffer {
+layout(std430, binding = BINDING_LEAF_CULL_P3_INPUT) readonly buffer InputBuffer {
     LeafInstance inputInstances[];
 };
 
 // Output: Visible leaf instances (world space with tree index)
 // Buffer is partitioned: [type0 leaves][type1 leaves][type2 leaves][type3 leaves]
-layout(std430, binding = 3) writeonly buffer OutputBuffer {
+layout(std430, binding = BINDING_LEAF_CULL_P3_OUTPUT) writeonly buffer OutputBuffer {
     WorldLeafInstance outputInstances[];
 };
 
 // One indirect draw command per leaf type
-layout(std430, binding = 4) buffer IndirectBuffer {
+layout(std430, binding = BINDING_LEAF_CULL_P3_INDIRECT) buffer IndirectBuffer {
     DrawIndexedIndirectCommand drawCmds[NUM_LEAF_TYPES];
 };
 
 // Global culling uniforms
-layout(binding = 5) uniform TreeLeafCullUniforms {
+layout(binding = BINDING_LEAF_CULL_P3_UNIFORMS) uniform TreeLeafCullUniforms {
     vec4 cameraPosition;
     vec4 frustumPlanes[6];
     float maxDrawDistance;
