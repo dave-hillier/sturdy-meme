@@ -186,6 +186,10 @@ public:
     // Set cloud shadow map texture
     void setCloudShadowMap(VkDevice device, VkImageView cloudShadowView, VkSampler cloudShadowSampler);
 
+    // Set caustics texture for underwater light projection
+    void setCaustics(VkDevice device, VkImageView causticsView, VkSampler causticsSampler,
+                     float waterLevel = 0.0f, bool enabled = true);
+
     // Update terrain uniforms for a frame
     void updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos,
                         const glm::mat4& view, const glm::mat4& proj,
@@ -339,6 +343,11 @@ private:
     uint32_t currentNodeCount = 2;  // Start with 2 root triangles
     uint32_t subdivisionFrameCount = 0;  // Frame counter for split/merge ping-pong
     SubgroupCapabilities subgroupCaps;  // GPU subgroup feature support
+
+    // Caustics state
+    float causticsWaterLevel = 0.0f;
+    bool causticsEnabled = false;
+    float causticsTime = 0.0f;  // Animation time accumulator
 
     // Constants
     static constexpr uint32_t SUBDIVISION_WORKGROUP_SIZE = 64;

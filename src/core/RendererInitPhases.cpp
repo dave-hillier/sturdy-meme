@@ -724,6 +724,15 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     // Connect cloud shadow map to terrain system
     systems_->terrain().setCloudShadowMap(device, systems_->cloudShadow().getShadowMapView(), systems_->cloudShadow().getShadowMapSampler());
 
+    // Connect underwater caustics to terrain system (use foam texture as caustics pattern)
+    if (water.system.getFoamTextureView() != VK_NULL_HANDLE) {
+        systems_->terrain().setCaustics(device,
+                                         water.system.getFoamTextureView(),
+                                         water.system.getFoamTextureSampler(),
+                                         water.system.getWaterLevel(),
+                                         true);  // Enable caustics
+    }
+
     // Update cloud shadow bindings across all descriptor sets
     RendererInit::updateCloudShadowBindings(device, systems_->scene().getSceneBuilder().getMaterialRegistry(),
                                             rockDescriptorSets, detritusDescriptorSets, systems_->skinnedMesh(),

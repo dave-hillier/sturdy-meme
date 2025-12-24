@@ -36,6 +36,10 @@ public:
     VkBuffer getShadowVisibleBuffer() const { return shadowVisible.buffer; }
     VkBuffer getShadowIndirectDrawBuffer() const { return shadowIndirectDraw.buffer; }
 
+    // Caustics UBO accessors
+    VkBuffer getCausticsUniformBuffer(uint32_t frameIndex) const { return causticsUniforms.buffers[frameIndex]; }
+    void* getCausticsMappedPtr(uint32_t frameIndex) const { return causticsUniforms.mappedPointers[frameIndex]; }
+
 private:
     bool createUniformBuffers(const InitInfo& info);
     bool createIndirectBuffers(const InitInfo& info);
@@ -54,4 +58,7 @@ private:
     // Shadow culling buffers
     BufferUtils::SingleBuffer shadowVisible;
     BufferUtils::SingleBuffer shadowIndirectDraw;
+
+    // Caustics uniform buffers (per-frame for underwater caustics)
+    BufferUtils::PerFrameBufferSet causticsUniforms;
 };

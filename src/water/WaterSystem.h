@@ -156,6 +156,10 @@ public:
     float getWaterLevel() const { return waterUniforms.waterLevel; }
     float getBaseWaterLevel() const { return baseWaterLevel; }
     float getTidalRange() const { return tidalRange; }
+
+    // Foam texture accessors (can be used for terrain caustics)
+    VkImageView getFoamTextureView() const { return foamTexture ? (*foamTexture)->getImageView() : VK_NULL_HANDLE; }
+    VkSampler getFoamTextureSampler() const { return foamTexture ? (*foamTexture)->getSampler() : VK_NULL_HANDLE; }
     glm::vec4 getWaterColor() const { return waterUniforms.waterColor; }
     float getWaveAmplitude() const { return waterUniforms.waveParams.x; }
     float getWaveLength() const { return waterUniforms.waveParams.y; }

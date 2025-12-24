@@ -11,6 +11,7 @@ bool TerrainBuffers::init(const InitInfo& info) {
 
 void TerrainBuffers::destroy(VmaAllocator allocator) {
     BufferUtils::destroyBuffers(allocator, uniformBuffers);
+    BufferUtils::destroyBuffers(allocator, causticsUniforms);
     BufferUtils::destroyBuffer(allocator, indirectDispatch);
     BufferUtils::destroyBuffer(allocator, indirectDraw);
     BufferUtils::destroyBuffer(allocator, visibleIndices);
@@ -20,12 +21,31 @@ void TerrainBuffers::destroy(VmaAllocator allocator) {
 }
 
 bool TerrainBuffers::createUniformBuffers(const InitInfo& info) {
-    return BufferUtils::PerFrameBufferBuilder()
+    // Main terrain uniforms
+    if (!BufferUtils::PerFrameBufferBuilder()
         .setAllocator(info.allocator)
         .setFrameCount(info.framesInFlight)
         .setSize(sizeof(TerrainUniforms))
         .setUsage(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT)
-        .build(uniformBuffers);
+        .build(uniformBuffers)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create terrain uniform buffers");
+        return false;
+    }
+
+    // Caustics uniforms (8 floats = 32 bytes, std140 aligned)
+    // Matches CausticsUniforms in terrain.frag
+    constexpr VkDeviceSize causticsUBOSize = 32;  // 8 * sizeof(float)
+    if (!BufferUtils::PerFrameBufferBuilder()
+        .setAllocator(info.allocator)
+        .setFrameCount(info.framesInFlight)
+        .setSize(causticsUBOSize)
+        .setUsage(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT)
+        .build(causticsUniforms)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create caustics uniform buffers");
+        return false;
+    }
+
+    return true;
 }
 
 bool TerrainBuffers::createIndirectBuffers(const InitInfo& info) {

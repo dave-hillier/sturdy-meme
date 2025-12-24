@@ -272,6 +272,7 @@ bool TerrainSystem::createRenderDescriptorSetLayout() {
     // 14: shadow visible indices, 16: hole mask
     // 17: snow UBO, 18: cloud shadow UBO
     // 19: tile array texture, 20: tile info SSBO
+    // 21: caustics texture, 22: caustics UBO
 
     renderDescriptorSetLayout = DescriptorManager::LayoutBuilder(device)
         .addBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT)
@@ -292,6 +293,8 @@ bool TerrainSystem::createRenderDescriptorSetLayout() {
         .addBinding(18, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT)          // cloud shadow UBO
         .addBinding(19, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_VERTEX_BIT)    // tile array texture
         .addBinding(20, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT)            // tile info SSBO
+        .addBinding(21, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)  // caustics texture
+        .addBinding(22, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT)          // caustics UBO
         .build();
 
     return renderDescriptorSetLayout != VK_NULL_HANDLE;
@@ -496,7 +499,30 @@ void TerrainSystem::updateDescriptorSets(VkDevice device,
                               VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
         }
 
+        // Caustics texture (binding 21) - use heightmap as placeholder until setCaustics is called
+        writer.writeImage(21, heightMap->getView(), heightMap->getSampler(),
+                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+        // Caustics UBO (binding 22) - per-frame buffer for underwater caustics
+        constexpr VkDeviceSize causticsUBOSize = 32;  // 8 floats
+        writer.writeBuffer(22, (*buffers)->getCausticsUniformBuffer(i), 0, causticsUBOSize);
+
         writer.update();
+    }
+
+    // Initialize caustics UBO with disabled state (causticsEnabled = 0)
+    for (uint32_t i = 0; i < framesInFlight; i++) {
+        float* causticsData = static_cast<float*>((*buffers)->getCausticsMappedPtr(i));
+        if (causticsData) {
+            causticsData[0] = 0.0f;   // causticsWaterLevel
+            causticsData[1] = 0.05f;  // causticsScale
+            causticsData[2] = 0.3f;   // causticsSpeed
+            causticsData[3] = 0.5f;   // causticsIntensity
+            causticsData[4] = 20.0f;  // causticsMaxDepth
+            causticsData[5] = 0.0f;   // causticsTime
+            causticsData[6] = 0.0f;   // causticsEnabled (disabled by default)
+            causticsData[7] = 0.0f;   // causticsPadding
+        }
     }
 }
 
@@ -525,6 +551,29 @@ void TerrainSystem::setCloudShadowMap(VkDevice device, VkImageView cloudShadowVi
         DescriptorManager::SetWriter(device, renderDescriptorSets[i])
             .writeImage(13, cloudShadowView, cloudShadowSampler)
             .update();
+    }
+}
+
+void TerrainSystem::setCaustics(VkDevice device, VkImageView causticsView, VkSampler causticsSampler,
+                                 float waterLevel, bool enabled) {
+    // Update texture binding (21)
+    for (uint32_t i = 0; i < framesInFlight; i++) {
+        DescriptorManager::SetWriter(device, renderDescriptorSets[i])
+            .writeImage(21, causticsView, causticsSampler)
+            .update();
+    }
+
+    // Store state for UBO updates
+    causticsWaterLevel = waterLevel;
+    causticsEnabled = enabled;
+
+    // Update caustics UBO with new water level and enabled state
+    for (uint32_t i = 0; i < framesInFlight; i++) {
+        float* causticsData = static_cast<float*>((*buffers)->getCausticsMappedPtr(i));
+        if (causticsData) {
+            causticsData[0] = waterLevel;            // causticsWaterLevel
+            causticsData[6] = enabled ? 1.0f : 0.0f; // causticsEnabled
+        }
     }
 }
 
@@ -583,6 +632,13 @@ void TerrainSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraP
     uniforms.snowPadding2 = 0.0f;
 
     memcpy((*buffers)->getUniformMappedPtr(frameIndex), &uniforms, sizeof(TerrainUniforms));
+
+    // Update caustics animation time (assumes ~60fps, ~16.67ms per frame)
+    causticsTime += 0.0167f;
+    float* causticsData = static_cast<float*>((*buffers)->getCausticsMappedPtr(frameIndex));
+    if (causticsData && causticsEnabled) {
+        causticsData[5] = causticsTime;  // causticsTime in UBO
+    }
 }
 
 void TerrainSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, GpuProfiler* profiler) {
