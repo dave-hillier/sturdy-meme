@@ -182,6 +182,7 @@
 #define BINDING_TREE_IMPOSTOR_CULL_INDIRECT    2   // Indirect draw command
 #define BINDING_TREE_IMPOSTOR_CULL_UNIFORMS    3   // Culling uniforms
 #define BINDING_TREE_IMPOSTOR_CULL_ARCHETYPE   4   // Per-archetype data (sizes, offsets)
+#define BINDING_TREE_IMPOSTOR_CULL_HIZ         5   // Hi-Z pyramid for occlusion culling
 
 // =============================================================================
 // Leaf Compute Shader Descriptor Set
@@ -541,6 +542,7 @@ constexpr uint32_t TREE_IMPOSTOR_CULL_OUTPUT    = BINDING_TREE_IMPOSTOR_CULL_OUT
 constexpr uint32_t TREE_IMPOSTOR_CULL_INDIRECT  = BINDING_TREE_IMPOSTOR_CULL_INDIRECT;
 constexpr uint32_t TREE_IMPOSTOR_CULL_UNIFORMS  = BINDING_TREE_IMPOSTOR_CULL_UNIFORMS;
 constexpr uint32_t TREE_IMPOSTOR_CULL_ARCHETYPE = BINDING_TREE_IMPOSTOR_CULL_ARCHETYPE;
+constexpr uint32_t TREE_IMPOSTOR_CULL_HIZ       = BINDING_TREE_IMPOSTOR_CULL_HIZ;
 
 // Leaf Compute
 constexpr uint32_t LEAF_COMPUTE_INPUT     = BINDING_LEAF_COMPUTE_INPUT;

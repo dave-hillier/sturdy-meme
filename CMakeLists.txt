@@ -80,6 +80,7 @@ set(SOURCES
     src/vegetation/TreeImpostorAtlas.cpp
     src/vegetation/TreeLODSystem.cpp
     src/vegetation/TreeSpatialIndex.cpp
+    src/vegetation/ImpostorCullSystem.cpp
     src/vegetation/BranchGenerator.cpp
     src/vegetation/DetritusSystem.cpp
     # Postprocess

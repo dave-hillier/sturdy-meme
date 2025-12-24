@@ -38,15 +38,20 @@ layout(std430, binding = BINDING_TREE_IMPOSTOR_CULL_INDIRECT) buffer IndirectBuf
 layout(binding = BINDING_TREE_IMPOSTOR_CULL_UNIFORMS) uniform ImpostorCullUniforms {
     vec4 cameraPosition;           // xyz = camera pos, w = unused
     vec4 frustumPlanes[6];         // Frustum planes for culling
+    mat4 viewProjMatrix;           // View-projection matrix for Hi-Z testing
+    vec4 screenParams;             // x = width, y = height, z = 1/width, w = 1/height
     float fullDetailDistance;      // Trees closer than this render as geometry
     float impostorDistance;        // Trees beyond this are culled
     float hysteresis;              // Hysteresis for LOD transitions
     float blendRange;              // Distance over which to blend LODs
     uint numTrees;                 // Total number of trees
+    uint enableHiZ;                // 1 = enable Hi-Z culling, 0 = frustum only
     uint _pad0;
     uint _pad1;
-    uint _pad2;
 };
+
+// Hi-Z pyramid for occlusion culling
+layout(binding = BINDING_TREE_IMPOSTOR_CULL_HIZ) uniform sampler2D hiZPyramid;
 
 // Per-archetype sizing data
 struct ArchetypeData {
@@ -56,6 +61,58 @@ struct ArchetypeData {
 layout(std430, binding = BINDING_TREE_IMPOSTOR_CULL_ARCHETYPE) readonly buffer ArchetypeBuffer {
     ArchetypeData archetypes[];
 };
+
+// Hi-Z occlusion test
+// Returns true if the object is occluded (not visible)
+bool isOccludedHiZ(vec3 worldPos, float boundingRadius) {
+    // Project tree center to clip space
+    vec4 clipPos = viewProjMatrix * vec4(worldPos, 1.0);
+
+    // Skip if behind camera
+    if (clipPos.w <= 0.0) {
+        return true;  // Behind camera, treat as occluded
+    }
+
+    // Convert to NDC
+    vec3 ndc = clipPos.xyz / clipPos.w;
+
+    // Skip if outside NDC range (should be caught by frustum culling, but double check)
+    if (abs(ndc.x) > 1.0 || abs(ndc.y) > 1.0 || ndc.z < 0.0 || ndc.z > 1.0) {
+        return false;  // Outside screen, let frustum culling handle it
+    }
+
+    // Convert to UV coordinates [0,1]
+    vec2 screenUV = ndc.xy * 0.5 + 0.5;
+
+    // Calculate screen-space radius for mip level selection
+    // Project a point offset by boundingRadius to estimate screen coverage
+    float screenRadius = boundingRadius / clipPos.w * screenParams.x * 0.5;
+
+    // Choose mip level based on screen-space size
+    // Use a conservative (higher) mip level to avoid false culling
+    float mipLevel = max(0.0, log2(max(screenRadius * 2.0, 1.0)));
+
+    // Clamp to valid mip range (assume max 12 levels for 4K)
+    mipLevel = min(mipLevel, 11.0);
+
+    // Sample Hi-Z at appropriate mip (returns max depth in the region)
+    float occluderDepth = textureLod(hiZPyramid, screenUV, mipLevel).r;
+
+    // Calculate conservative depth for tree (use front of bounding sphere)
+    // Project the closest point of the bounding sphere
+    vec3 toCamera = normalize(cameraPosition.xyz - worldPos);
+    vec3 closestPoint = worldPos + toCamera * boundingRadius;
+    vec4 closestClip = viewProjMatrix * vec4(closestPoint, 1.0);
+    float treeDepth = closestClip.z / closestClip.w;
+
+    // Convert to [0,1] depth range (Vulkan uses [0,1] NDC depth)
+    treeDepth = treeDepth * 0.5 + 0.5;
+
+    // Tree is occluded if its closest depth is greater than the occluder's max depth
+    // Add small margin to account for precision issues
+    float depthMargin = 0.001;
+    return treeDepth > occluderDepth + depthMargin;
+}
 
 void main() {
     uint treeIdx = gl_GlobalInvocationID.x;
@@ -102,6 +159,11 @@ void main() {
     // Frustum culling with margin for billboard size
     float margin = boundingRadius * 2.0;
     if (!isInFrustum(frustumPlanes, treePos, margin)) {
+        return;
+    }
+
+    // Hi-Z occlusion culling (Phase 2: eliminate trees behind terrain/occluders)
+    if (enableHiZ != 0u && isOccludedHiZ(treePos, boundingRadius)) {
         return;
     }
 
