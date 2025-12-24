@@ -509,6 +509,10 @@ void TerrainSystem::updateDescriptorSets(VkDevice device,
         constexpr VkDeviceSize causticsUBOSize = 32;  // 8 floats
         writer.writeBuffer(22, (*buffers)->getCausticsUniformBuffer(i), 0, causticsUBOSize);
 
+        // Biome map placeholder (binding 24) - use albedo as fallback until real biome map is loaded
+        // This prevents accessing an unbound descriptor if biome visualization is enabled
+        writer.writeImage(Bindings::TERRAIN_BIOME_MAP, (*textures)->getAlbedoView(), (*textures)->getAlbedoSampler(),
+                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         writer.update();
     }
 
