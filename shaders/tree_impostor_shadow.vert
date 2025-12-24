@@ -6,24 +6,21 @@ const int NUM_CASCADES = 4;
 
 #include "bindings.glsl"
 #include "ubo_common.glsl"
+#include "tree_impostor_instance.glsl"
 
 // Per-vertex data for impostor billboards
 layout(location = 0) in vec3 inPosition;   // Billboard quad vertex position
 layout(location = 1) in vec2 inTexCoord;   // Billboard quad UV
 
-// Instance data
-layout(location = 2) in vec3 instancePos;      // World position of tree
-layout(location = 3) in float instanceScale;   // Tree scale
-layout(location = 4) in float instanceRotation; // Y-axis rotation
-layout(location = 5) in uint instanceArchetype; // Archetype index for atlas lookup
-layout(location = 6) in float instanceHSize;   // Horizontal half-size (pre-scaled)
-layout(location = 7) in float instanceVSize;   // Vertical half-size (pre-scaled)
-layout(location = 8) in float instanceBaseOffset; // Base offset (pre-scaled)
+// Visible impostor instances from compute shader (SSBO)
+layout(std430, binding = BINDING_TREE_IMPOSTOR_INSTANCES) readonly buffer InstanceBuffer {
+    ImpostorInstance instances[];
+};
 
+// Simplified push constants
 layout(push_constant) uniform PushConstants {
     vec4 cameraPos;         // xyz = camera world position (for billboard facing)
-    vec4 lodParams;         // x = blend factor, y = brightness, z = normal strength
-    vec4 atlasParams;       // x = hSize (horizontal half-size), y = vSize (vertical half-size), z = baseOffset
+    vec4 lodParams;         // unused for shadow, but keep layout consistency
     int cascadeIndex;       // Which shadow cascade we're rendering
 } push;
 
@@ -36,10 +33,16 @@ const int HORIZONTAL_ANGLES = 8;
 const float ANGLE_STEP = 360.0 / float(HORIZONTAL_ANGLES);  // 45 degrees
 
 void main() {
-    // Get tree instance data
-    vec3 treePos = instancePos;
-    float scale = instanceScale;
-    float rotation = instanceRotation;
+    // Get instance data from SSBO
+    ImpostorInstance inst = instances[gl_InstanceIndex];
+
+    vec3 treePos = inst.positionAndScale.xyz;
+    float scale = inst.positionAndScale.w;
+    float rotation = inst.rotationAndArchetype.x;
+    uint archetypeIndex = uint(inst.rotationAndArchetype.y);
+    float hSize = inst.sizeAndOffset.x;
+    float vSize = inst.sizeAndOffset.y;
+    float baseOffset = inst.sizeAndOffset.z;
 
     // For shadows, orient billboard to face the sun (not the camera)
     // This gives a full shadow profile instead of a thin edge shadow
@@ -106,11 +109,7 @@ void main() {
         right = cross(up, forward);
     }
 
-    // Position billboard vertex - use per-instance dimensions (already pre-scaled)
-    float hSize = instanceHSize;
-    float vSize = instanceVSize;
-    float baseOffset = instanceBaseOffset;
-
+    // Position billboard vertex
     vec3 localPos = right * inPosition.x * hSize * 2.0 +
                     up * inPosition.y * vSize * 2.0;
 
@@ -120,5 +119,5 @@ void main() {
     // Transform by cascade light matrix
     gl_Position = ubo.cascadeViewProj[push.cascadeIndex] * vec4(worldPos, 1.0);
 
-    fragArchetypeIndex = instanceArchetype;
+    fragArchetypeIndex = archetypeIndex;
 }

@@ -13,30 +13,20 @@
 layout(binding = BINDING_TREE_GFX_SHADOW_MAP) uniform sampler2DArrayShadow shadowMapArray;
 layout(binding = BINDING_TREE_GFX_LEAF_ALBEDO) uniform sampler2D leafAlbedo;
 
+// Simplified push constants - no more per-tree data
 layout(push_constant) uniform PushConstants {
-    mat4 model;
     float time;
-    float lodBlendFactor;  // 0=full geometry, 1=full impostor
-    vec3 leafTint;
     float alphaTest;
-    int firstInstance;
-    float autumnHueShift;  // 0=summer green, 1=full autumn colors
 } push;
 
 layout(location = 0) in vec3 fragNormal;
 layout(location = 1) in vec2 fragTexCoord;
 layout(location = 2) in vec3 fragWorldPos;
 layout(location = 3) in float fragLeafSize;
+layout(location = 4) in vec3 fragLeafTint;
+layout(location = 5) in float fragAutumnHueShift;
 
 layout(location = 0) out vec4 outColor;
-
-// 4x4 Bayer dither matrix for LOD transition
-const float bayerMatrix[16] = float[16](
-    0.0/16.0,  8.0/16.0,  2.0/16.0, 10.0/16.0,
-    12.0/16.0, 4.0/16.0, 14.0/16.0,  6.0/16.0,
-    3.0/16.0, 11.0/16.0,  1.0/16.0,  9.0/16.0,
-    15.0/16.0, 7.0/16.0, 13.0/16.0,  5.0/16.0
-);
 
 void main() {
     // Sample leaf texture
@@ -47,19 +37,9 @@ void main() {
         discard;
     }
 
-    // LOD dithered fade-out - discard more pixels as blend factor increases
-    if (push.lodBlendFactor > 0.01) {
-        ivec2 pixelCoord = ivec2(gl_FragCoord.xy);
-        int ditherIndex = (pixelCoord.x % 4) + (pixelCoord.y % 4) * 4;
-        float ditherValue = bayerMatrix[ditherIndex];
-        if (push.lodBlendFactor > ditherValue) {
-            discard;
-        }
-    }
-
-    // Apply tint and autumn hue shift
-    vec3 baseColor = albedo.rgb * push.leafTint;
-    baseColor = applyAutumnHueShift(baseColor, push.autumnHueShift);
+    // Apply tint and autumn hue shift (from vertex shader / tree data SSBO)
+    vec3 baseColor = albedo.rgb * fragLeafTint;
+    baseColor = applyAutumnHueShift(baseColor, fragAutumnHueShift);
 
     // Use geometry normal (leaves are flat)
     vec3 N = normalize(fragNormal);

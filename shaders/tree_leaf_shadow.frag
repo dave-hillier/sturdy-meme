@@ -6,8 +6,8 @@
 
 layout(binding = BINDING_TREE_GFX_LEAF_ALBEDO) uniform sampler2D leafAlbedo;
 
+// Simplified push constants - no more per-tree data
 layout(push_constant) uniform PushConstants {
-    mat4 model;
     int cascadeIndex;
     float alphaTest;
 } push;

@@ -7,16 +7,21 @@ const int NUM_CASCADES = 4;
 #include "bindings.glsl"
 #include "ubo_common.glsl"
 #include "noise_common.glsl"
-#include "tree_leaf_instance.glsl"
+#include "tree_leaf_world.glsl"
 
 // Vertex attributes (matching shared leaf quad mesh)
 layout(location = 0) in vec3 inPosition;  // Local quad position [-0.5, 0.5] x [0, 1] x [0, 0]
 layout(location = 1) in vec3 inNormal;    // Default normal (not used - computed from orientation)
 layout(location = 2) in vec2 inTexCoord;  // Quad UVs
 
-// Leaf instance SSBO
+// World-space leaf instance SSBO (from compute culling)
 layout(std430, binding = BINDING_TREE_GFX_LEAF_INSTANCES) readonly buffer LeafInstanceBuffer {
-    LeafInstance leafInstances[];
+    WorldLeafInstance leafInstances[];
+};
+
+// Tree render data SSBO (transforms, tints, etc.)
+layout(std430, binding = BINDING_TREE_GFX_TREE_DATA) readonly buffer TreeDataBuffer {
+    TreeRenderData treeData[];
 };
 
 // Wind uniform buffer
@@ -25,40 +30,42 @@ layout(binding = BINDING_TREE_GFX_WIND_UBO) uniform WindUniforms {
     vec4 windParams;                 // x = gustFrequency, y = gustAmplitude, z = noiseScale, w = time
 } wind;
 
+// Simplified push constants - no more per-tree data
 layout(push_constant) uniform PushConstants {
-    mat4 model;
     float time;
-    vec3 leafTint;
     float alphaTest;
-    int firstInstance;  // Offset into leafInstances[] for this tree
 } push;
 
 layout(location = 0) out vec3 fragNormal;
 layout(location = 1) out vec2 fragTexCoord;
 layout(location = 2) out vec3 fragWorldPos;
 layout(location = 3) out float fragLeafSize;
+layout(location = 4) out vec3 fragLeafTint;
+layout(location = 5) out float fragAutumnHueShift;
 
 void main() {
-    // Get leaf instance data from SSBO
-    int instanceIndex = push.firstInstance + gl_InstanceIndex;
-    LeafInstance leaf = leafInstances[instanceIndex];
+    // Get world-space leaf instance data from SSBO
+    WorldLeafInstance leaf = leafInstances[gl_InstanceIndex];
 
-    vec3 leafPosition = leaf.positionAndSize.xyz;
-    float leafSize = leaf.positionAndSize.w;
-    vec4 orientation = leaf.orientation;
+    vec3 worldPosition = leaf.worldPosition.xyz;
+    float leafSize = leaf.worldPosition.w;
+    vec4 worldOrientation = leaf.worldOrientation;
+    uint treeIndex = leaf.treeIndex;
+
+    // Get tree render data
+    TreeRenderData tree = treeData[treeIndex];
+    vec3 leafTint = tree.tintAndParams.rgb;
+    float autumnHueShift = tree.tintAndParams.a;
+    float windPhaseOffset = tree.windPhaseAndLOD.x;
 
     // Scale the local quad position by leaf size
     vec3 scaledPos = inPosition * leafSize;
 
-    // Rotate by leaf orientation quaternion
-    vec3 rotatedPos = rotateByQuat(scaledPos, orientation);
+    // Rotate by world-space orientation quaternion
+    vec3 rotatedPos = rotateByQuatWorld(scaledPos, worldOrientation);
 
-    // Transform to world space: leaf position is in tree-local space
-    vec3 treeLocalPos = leafPosition + rotatedPos;
-    vec4 worldPos = push.model * vec4(treeLocalPos, 1.0);
-
-    // Compute world-space pivot for wind animation
-    vec4 worldPivot = push.model * vec4(leafPosition, 1.0);
+    // World position (already in world space from compute shader)
+    vec3 worldPos = worldPosition + rotatedPos;
 
     // Wind animation for leaves (matches ez-tree behavior)
     float windStrength = wind.windDirectionAndStrength.z;
@@ -67,8 +74,8 @@ void main() {
     vec2 windDir = wind.windDirectionAndStrength.xy;
     float gustFreq = wind.windParams.x;
 
-    // Sample wind noise using pivot position so all vertices of this leaf get same wind
-    float windOffset = 2.0 * 3.14159265 * simplex3(worldPivot.xyz / windScale);
+    // Sample wind noise using world position so all vertices of this leaf get same wind
+    float windOffset = 2.0 * 3.14159265 * simplex3(worldPosition / windScale) + windPhaseOffset;
 
     // Leaves sway more at tips (UV.y=0 = top of leaf) than at branch attachment (UV.y=1 = bottom)
     float swayFactor = 1.0 - inTexCoord.y;
@@ -80,17 +87,18 @@ void main() {
         0.2 * sin(5.0 * windTime * gustFreq + 1.5 * windOffset)
     );
 
-    worldPos.xyz += windSway;
+    worldPos += windSway;
 
-    gl_Position = ubo.proj * ubo.view * worldPos;
+    gl_Position = ubo.proj * ubo.view * vec4(worldPos, 1.0);
 
-    // Compute normal from orientation
+    // Compute normal from world-space orientation
     vec3 localNormal = vec3(0.0, 0.0, 1.0);
-    vec3 rotatedNormal = rotateByQuat(localNormal, orientation);
-    mat3 normalMatrix = mat3(push.model);
-    fragNormal = normalize(normalMatrix * rotatedNormal);
+    vec3 worldNormal = rotateByQuatWorld(localNormal, worldOrientation);
+    fragNormal = normalize(worldNormal);
 
     fragTexCoord = inTexCoord;
-    fragWorldPos = worldPos.xyz;
+    fragWorldPos = worldPos;
     fragLeafSize = leafSize;
+    fragLeafTint = leafTint;
+    fragAutumnHueShift = autumnHueShift;
 }

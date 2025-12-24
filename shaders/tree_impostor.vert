@@ -6,25 +6,21 @@ const int NUM_CASCADES = 4;
 
 #include "bindings.glsl"
 #include "ubo_common.glsl"
+#include "tree_impostor_instance.glsl"
 
-// Per-instance data for impostor billboards
+// Per-vertex data for billboard quad
 layout(location = 0) in vec3 inPosition;   // Billboard quad vertex position
 layout(location = 1) in vec2 inTexCoord;   // Billboard quad UV
 
-// Instance data (passed via instance attributes or SSBO)
-layout(location = 2) in vec3 instancePos;      // World position of tree
-layout(location = 3) in float instanceScale;   // Tree scale
-layout(location = 4) in float instanceRotation; // Y-axis rotation
-layout(location = 5) in uint instanceArchetype; // Archetype index for atlas lookup
-layout(location = 6) in float instanceBlendFactor; // LOD blend factor (0=full geo, 1=impostor)
-layout(location = 7) in float instanceHSize;   // Horizontal half-size (pre-scaled)
-layout(location = 8) in float instanceVSize;   // Vertical half-size (pre-scaled)
-layout(location = 9) in float instanceBaseOffset; // Base offset (pre-scaled)
+// Visible impostor instances from compute shader (SSBO)
+layout(std430, binding = BINDING_TREE_IMPOSTOR_INSTANCES) readonly buffer InstanceBuffer {
+    ImpostorInstance instances[];
+};
 
+// Simplified push constants - instance data comes from SSBO
 layout(push_constant) uniform PushConstants {
-    vec4 cameraPos;         // xyz = camera world position
-    vec4 lodParams;         // x = blend factor (0 = full geo, 1 = impostor), y = brightness, z = normal strength
-    vec4 atlasParams;       // x = hSize (horizontal half-size), y = vSize (vertical half-size), z = baseOffset
+    vec4 cameraPos;         // xyz = camera world position, w = autumnHueShift
+    vec4 lodParams;         // x = unused, y = brightness, z = normal strength, w = debug elevation
 } push;
 
 layout(location = 0) out vec2 fragTexCoord;
@@ -40,10 +36,17 @@ const int HORIZONTAL_ANGLES = 8;
 const float ANGLE_STEP = 360.0 / float(HORIZONTAL_ANGLES);  // 45 degrees
 
 void main() {
-    // Get tree instance data
-    vec3 treePos = instancePos;
-    float scale = instanceScale;
-    float rotation = instanceRotation;
+    // Get instance data from SSBO
+    ImpostorInstance inst = instances[gl_InstanceIndex];
+
+    vec3 treePos = inst.positionAndScale.xyz;
+    float scale = inst.positionAndScale.w;
+    float rotation = inst.rotationAndArchetype.x;
+    uint archetypeIndex = uint(inst.rotationAndArchetype.y);
+    float blendFactor = inst.rotationAndArchetype.z;
+    float hSize = inst.sizeAndOffset.x;
+    float vSize = inst.sizeAndOffset.y;
+    float baseOffset = inst.sizeAndOffset.z;
 
     // Compute view direction FROM tree TO camera (horizontal only for angle selection)
     // This must match the capture convention where azimuth=0 means camera on +Z axis
@@ -106,10 +109,6 @@ void main() {
 
     // Billboard orientation depends on view angle
     vec3 forward, up, right;
-    // Use per-instance dimensions (already pre-scaled in C++)
-    float hSize = instanceHSize;
-    float vSize = instanceVSize;
-    float baseOffset = instanceBaseOffset;
     vec3 localPos;
     vec3 billboardCenter;
 
@@ -163,6 +162,6 @@ void main() {
 
     gl_Position = ubo.proj * ubo.view * vec4(worldPos, 1.0);
 
-    fragBlendFactor = instanceBlendFactor;
-    fragArchetypeIndex = instanceArchetype;
+    fragBlendFactor = blendFactor;
+    fragArchetypeIndex = archetypeIndex;
 }

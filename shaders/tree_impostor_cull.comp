@@ -1,0 +1,134 @@
+#version 450
+
+#extension GL_GOOGLE_include_directive : require
+
+#include "bindings.glsl"
+#include "instancing_common.glsl"
+
+// Workgroup size: 256 threads per workgroup
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+// Input: All trees in the scene (uploaded once when trees change)
+struct TreeInputData {
+    vec4 positionAndScale;    // xyz = world position, w = scale
+    vec4 rotationAndArchetype; // x = Y-axis rotation, yzw = archetype index as uint bits
+};
+
+layout(std430, binding = BINDING_TREE_IMPOSTOR_CULL_INPUT) readonly buffer InputBuffer {
+    TreeInputData trees[];
+};
+
+// Output: Visible impostor instances (GPU-generated each frame)
+struct ImpostorOutputData {
+    vec4 positionAndScale;     // xyz = world position, w = scale
+    vec4 rotationAndArchetype; // x = rotation, y = archetype, z = blend factor, w = reserved
+    vec4 sizeAndOffset;        // x = hSize, y = vSize, z = baseOffset, w = reserved
+};
+
+layout(std430, binding = BINDING_TREE_IMPOSTOR_CULL_OUTPUT) writeonly buffer OutputBuffer {
+    ImpostorOutputData visibleImpostors[];
+};
+
+// Single indirect draw command for ALL visible impostors
+layout(std430, binding = BINDING_TREE_IMPOSTOR_CULL_INDIRECT) buffer IndirectBuffer {
+    DrawIndexedIndirectCommand drawCmd;
+};
+
+// Culling uniforms
+layout(binding = BINDING_TREE_IMPOSTOR_CULL_UNIFORMS) uniform ImpostorCullUniforms {
+    vec4 cameraPosition;           // xyz = camera pos, w = unused
+    vec4 frustumPlanes[6];         // Frustum planes for culling
+    float fullDetailDistance;      // Trees closer than this render as geometry
+    float impostorDistance;        // Trees beyond this are culled
+    float hysteresis;              // Hysteresis for LOD transitions
+    float blendRange;              // Distance over which to blend LODs
+    uint numTrees;                 // Total number of trees
+    uint _pad0;
+    uint _pad1;
+    uint _pad2;
+};
+
+// Per-archetype sizing data
+struct ArchetypeData {
+    vec4 sizingData;  // x = hSize, y = vSize, z = baseOffset, w = boundingSphereRadius
+};
+
+layout(std430, binding = BINDING_TREE_IMPOSTOR_CULL_ARCHETYPE) readonly buffer ArchetypeBuffer {
+    ArchetypeData archetypes[];
+};
+
+void main() {
+    uint treeIdx = gl_GlobalInvocationID.x;
+
+    // First thread initializes the indirect command (constant values)
+    if (treeIdx == 0) {
+        drawCmd.indexCount = 6;       // Billboard quad: 6 indices
+        drawCmd.firstIndex = 0;
+        drawCmd.vertexOffset = 0;
+        drawCmd.firstInstance = 0;
+        // instanceCount is set via atomicAdd below
+    }
+
+    // Early exit if beyond tree count
+    if (treeIdx >= numTrees) {
+        return;
+    }
+
+    // Load tree data
+    TreeInputData tree = trees[treeIdx];
+    vec3 treePos = tree.positionAndScale.xyz;
+    float treeScale = tree.positionAndScale.w;
+    float rotation = tree.rotationAndArchetype.x;
+    uint archetypeIndex = floatBitsToUint(tree.rotationAndArchetype.y);
+
+    // Distance to camera
+    float distToCamera = getDistanceToCamera(treePos, cameraPosition.xyz);
+
+    // Skip trees too close (they render as full geometry)
+    // Use hysteresis to prevent flickering at the boundary
+    if (distToCamera < fullDetailDistance - hysteresis) {
+        return;
+    }
+
+    // Skip trees too far
+    if (distToCamera > impostorDistance) {
+        return;
+    }
+
+    // Get archetype sizing data
+    ArchetypeData arch = archetypes[archetypeIndex];
+    float boundingRadius = arch.sizingData.w * treeScale;
+
+    // Frustum culling with margin for billboard size
+    float margin = boundingRadius * 2.0;
+    if (!isInFrustum(frustumPlanes, treePos, margin)) {
+        return;
+    }
+
+    // Calculate blend factor for LOD transition
+    // 0 = pure geometry, 1 = pure impostor
+    float blendFactor = 1.0;
+    if (distToCamera < fullDetailDistance + blendRange) {
+        blendFactor = smoothstep(fullDetailDistance - hysteresis,
+                                  fullDetailDistance + blendRange,
+                                  distToCamera);
+    }
+
+    // This impostor is visible - atomically get output slot
+    uint outputSlot = atomicAdd(drawCmd.instanceCount, 1);
+
+    // Write visible impostor data
+    visibleImpostors[outputSlot].positionAndScale = vec4(treePos, treeScale);
+    visibleImpostors[outputSlot].rotationAndArchetype = vec4(
+        rotation,
+        float(archetypeIndex),
+        blendFactor,
+        0.0  // reserved
+    );
+    visibleImpostors[outputSlot].sizeAndOffset = vec4(
+        arch.sizingData.x * treeScale,  // hSize pre-scaled
+        arch.sizingData.y * treeScale,  // vSize pre-scaled
+        arch.sizingData.z * treeScale,  // baseOffset pre-scaled
+        0.0  // reserved
+    );
+}
