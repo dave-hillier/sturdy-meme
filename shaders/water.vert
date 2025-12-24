@@ -64,9 +64,20 @@ layout(std140, binding = BINDING_WATER_UBO) uniform WaterUniforms {
 layout(binding = BINDING_WATER_DISPLACEMENT) uniform sampler2D displacementMap;
 
 // FFT Ocean displacement maps (3 cascades for multi-scale detail)
-layout(binding = BINDING_WATER_OCEAN_DISP) uniform sampler2D oceanDisplacement0;   // Large swells
-layout(binding = BINDING_WATER_OCEAN_NORMAL) uniform sampler2D oceanNormal0;       // Ocean normals
-layout(binding = BINDING_WATER_OCEAN_FOAM) uniform sampler2D oceanFoam0;           // Ocean foam
+// Cascade 0: Large swells (256m patch)
+layout(binding = BINDING_WATER_OCEAN_DISP) uniform sampler2D oceanDisplacement0;
+layout(binding = BINDING_WATER_OCEAN_NORMAL) uniform sampler2D oceanNormal0;
+layout(binding = BINDING_WATER_OCEAN_FOAM) uniform sampler2D oceanFoam0;
+
+// Cascade 1: Medium waves (64m patch)
+layout(binding = BINDING_WATER_OCEAN_DISP_1) uniform sampler2D oceanDisplacement1;
+layout(binding = BINDING_WATER_OCEAN_NORMAL_1) uniform sampler2D oceanNormal1;
+layout(binding = BINDING_WATER_OCEAN_FOAM_1) uniform sampler2D oceanFoam1;
+
+// Cascade 2: Small ripples (16m patch)
+layout(binding = BINDING_WATER_OCEAN_DISP_2) uniform sampler2D oceanDisplacement2;
+layout(binding = BINDING_WATER_OCEAN_NORMAL_2) uniform sampler2D oceanNormal2;
+layout(binding = BINDING_WATER_OCEAN_FOAM_2) uniform sampler2D oceanFoam2;
 
 layout(push_constant) uniform PushConstants {
     mat4 model;
@@ -128,31 +139,33 @@ vec3 gerstnerWave(vec2 pos, float time, vec2 direction, float wavelength, float 
     return displacement;
 }
 
-// Sample FFT ocean displacement from cascaded maps
-// Returns xyz = total displacement, w = jacobian
-vec4 sampleFFTOcean(vec2 worldXZ, float oceanSize) {
-    // Calculate UV from world position (tiling)
+// Sample FFT ocean displacement from a specific cascade
+// Returns xyz = displacement, w = jacobian
+vec4 sampleFFTOceanCascade(sampler2D dispMap, vec2 worldXZ, float oceanSize) {
     vec2 uv = worldXZ / oceanSize;
-
-    // Sample displacement map (xyz = displacement, w = jacobian)
-    vec4 dispSample = texture(oceanDisplacement0, uv);
-
-    return dispSample;
+    return texture(dispMap, uv);
 }
 
-// Sample FFT ocean normal
-vec3 sampleFFTNormal(vec2 worldXZ, float oceanSize) {
+// Sample FFT ocean normal from a specific cascade
+vec3 sampleFFTNormalCascade(sampler2D normalMap, vec2 worldXZ, float oceanSize) {
     vec2 uv = worldXZ / oceanSize;
-
     // Normal is stored in [0,1] range, decode to [-1,1]
-    vec3 normal = texture(oceanNormal0, uv).xyz * 2.0 - 1.0;
-    return normalize(normal);
+    vec3 normal = texture(normalMap, uv).xyz * 2.0 - 1.0;
+    return normal;  // Don't normalize yet - we'll blend first
 }
 
-// Sample FFT ocean foam
-float sampleFFTFoam(vec2 worldXZ, float oceanSize) {
+// Sample FFT ocean foam from a specific cascade
+float sampleFFTFoamCascade(sampler2D foamMap, vec2 worldXZ, float oceanSize) {
     vec2 uv = worldXZ / oceanSize;
-    return texture(oceanFoam0, uv).r;
+    return texture(foamMap, uv).r;
+}
+
+// Blend normals using Reoriented Normal Mapping (RNM) technique
+// This properly combines detail normals without flattening
+vec3 blendNormalsRNM(vec3 n1, vec3 n2) {
+    n1.z += 1.0;
+    n2.xy = -n2.xy;
+    return normalize(n1 * dot(n1, n2) - n2 * n1.z);
 }
 
 void main() {
@@ -171,21 +184,41 @@ void main() {
     if (push.useFFTOcean != 0) {
         // =========================================================================
         // FFT OCEAN MODE - Sample from pre-computed displacement maps
-        // Uses Tessendorf's FFT-based ocean simulation
+        // Uses Tessendorf's FFT-based ocean simulation with 3 cascades
+        // Cascade 0: Large swells (256m), Cascade 1: Medium waves (64m), Cascade 2: Ripples (16m)
         // =========================================================================
 
-        // Sample primary cascade (large swells)
-        vec4 disp0 = sampleFFTOcean(pos, push.oceanSize0);
-        totalDisplacement = disp0.xyz;
-        totalJacobian = disp0.w;  // Jacobian from displacement shader
+        // Sample all 3 cascades for displacement
+        vec4 disp0 = sampleFFTOceanCascade(oceanDisplacement0, pos, push.oceanSize0);
+        vec4 disp1 = sampleFFTOceanCascade(oceanDisplacement1, pos, push.oceanSize1);
+        vec4 disp2 = sampleFFTOceanCascade(oceanDisplacement2, pos, push.oceanSize2);
 
-        // Sample normal from FFT
-        normal = sampleFFTNormal(pos, push.oceanSize0);
+        // Sum displacements from all cascades for multi-scale wave detail
+        totalDisplacement = disp0.xyz + disp1.xyz + disp2.xyz;
 
-        // Sample foam
-        oceanFoam = sampleFFTFoam(pos, push.oceanSize0);
+        // Combine Jacobians (multiply for proper folding detection)
+        // Jacobian < 0 indicates wave surface folding (whitecap formation)
+        totalJacobian = disp0.w * disp1.w * disp2.w;
 
-        // Apply displacement
+        // Sample and blend normals from all cascades
+        vec3 normal0 = sampleFFTNormalCascade(oceanNormal0, pos, push.oceanSize0);
+        vec3 normal1 = sampleFFTNormalCascade(oceanNormal1, pos, push.oceanSize1);
+        vec3 normal2 = sampleFFTNormalCascade(oceanNormal2, pos, push.oceanSize2);
+
+        // Blend normals progressively: large + medium + detail
+        // Use RNM blending for proper normal combination
+        vec3 blendedNormal = blendNormalsRNM(normal0, normal1);
+        blendedNormal = blendNormalsRNM(blendedNormal, normal2);
+        normal = normalize(blendedNormal);
+
+        // Sample foam from all cascades and combine
+        float foam0 = sampleFFTFoamCascade(oceanFoam0, pos, push.oceanSize0);
+        float foam1 = sampleFFTFoamCascade(oceanFoam1, pos, push.oceanSize1);
+        float foam2 = sampleFFTFoamCascade(oceanFoam2, pos, push.oceanSize2);
+        // Max blending for foam - foam from any cascade contributes
+        oceanFoam = max(max(foam0, foam1), foam2);
+
+        // Apply combined displacement
         worldPos.xyz += totalDisplacement;
 
     } else {

@@ -121,9 +121,11 @@ bool WaterSystem::createDescriptorSetLayout() {
     // 8: Caustics texture (Phase 9: animated underwater light patterns)
     // 9: SSR texture (Phase 10: screen-space reflections)
     // 10: Scene depth texture (Phase 11: dual depth for refraction)
-    // 11-13: FFT Ocean displacement maps (vertex shader)
+    // 11-13: FFT Ocean cascade 0 (large swells, 256m)
     // 14: Tile array (high-res terrain tiles near camera)
     // 15: Tile info SSBO
+    // 16-18: FFT Ocean cascade 1 (medium waves, 64m)
+    // 19-21: FFT Ocean cascade 2 (small ripples, 16m)
 
     VkDescriptorSetLayout rawLayout = DescriptorManager::LayoutBuilder(device)
         .addUniformBuffer(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)  // 0: Main UBO
@@ -137,11 +139,17 @@ bool WaterSystem::createDescriptorSetLayout() {
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 8: Caustics texture
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 9: SSR texture
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 10: Scene depth
-        .addCombinedImageSampler(VK_SHADER_STAGE_VERTEX_BIT)    // 11: Ocean displacement
-        .addCombinedImageSampler(VK_SHADER_STAGE_VERTEX_BIT)    // 12: Ocean normal
-        .addCombinedImageSampler(VK_SHADER_STAGE_VERTEX_BIT)    // 13: Ocean foam
+        .addCombinedImageSampler(VK_SHADER_STAGE_VERTEX_BIT)    // 11: Ocean displacement (cascade 0)
+        .addCombinedImageSampler(VK_SHADER_STAGE_VERTEX_BIT)    // 12: Ocean normal (cascade 0)
+        .addCombinedImageSampler(VK_SHADER_STAGE_VERTEX_BIT)    // 13: Ocean foam (cascade 0)
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 14: Tile array
         .addStorageBuffer(VK_SHADER_STAGE_FRAGMENT_BIT)         // 15: Tile info SSBO
+        .addCombinedImageSampler(VK_SHADER_STAGE_VERTEX_BIT)    // 16: Ocean displacement (cascade 1)
+        .addCombinedImageSampler(VK_SHADER_STAGE_VERTEX_BIT)    // 17: Ocean normal (cascade 1)
+        .addCombinedImageSampler(VK_SHADER_STAGE_VERTEX_BIT)    // 18: Ocean foam (cascade 1)
+        .addCombinedImageSampler(VK_SHADER_STAGE_VERTEX_BIT)    // 19: Ocean displacement (cascade 2)
+        .addCombinedImageSampler(VK_SHADER_STAGE_VERTEX_BIT)    // 20: Ocean normal (cascade 2)
+        .addCombinedImageSampler(VK_SHADER_STAGE_VERTEX_BIT)    // 21: Ocean foam (cascade 2)
         .build();
 
     if (rawLayout == VK_NULL_HANDLE) {
@@ -399,10 +407,20 @@ bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffe
             writer.writeBuffer(15, tileInfoBuffers_[0], 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
         }
 
+        // FFT Ocean cascade 1 and 2 (bindings 16-21)
+        // Currently using placeholders until OceanFFT is integrated into the renderer
+        // TODO: Replace with actual OceanFFT cascade views when integrated
+        writer.writeImage(16, displacementMapView, displacementMapSampler);  // Cascade 1 displacement placeholder
+        writer.writeImage(17, displacementMapView, displacementMapSampler);  // Cascade 1 normal placeholder
+        writer.writeImage(18, displacementMapView, displacementMapSampler);  // Cascade 1 foam placeholder
+        writer.writeImage(19, displacementMapView, displacementMapSampler);  // Cascade 2 displacement placeholder
+        writer.writeImage(20, displacementMapView, displacementMapSampler);  // Cascade 2 normal placeholder
+        writer.writeImage(21, displacementMapView, displacementMapSampler);  // Cascade 2 foam placeholder
+
         writer.update();
     }
 
-    SDL_Log("Water descriptor sets created with terrain heightmap, flow map, displacement map, foam texture, temporal foam, caustics, SSR, scene depth, and tile cache");
+    SDL_Log("Water descriptor sets created with terrain heightmap, flow map, displacement map, foam texture, temporal foam, caustics, SSR, scene depth, tile cache, and FFT cascade placeholders");
     return true;
 }
 
