@@ -409,8 +409,12 @@ bool TreeRenderer::createCullBuffers(uint32_t maxLeafInstances, uint32_t numTree
     // Store number of trees for indirect buffer sizing
     numTreesForIndirect_ = numTrees;
 
-    // Calculate buffer sizes - use WorldLeafInstanceGPU (48 bytes) for world-space output
-    cullOutputBufferSize_ = maxLeafInstances * sizeof(WorldLeafInstanceGPU);
+    // Calculate per-type limits (use full count per type for unbalanced forests)
+    maxLeavesPerType_ = maxLeafInstances;  // Conservative: each type can have all leaves
+
+    // Calculate buffer sizes - output buffer partitioned into NUM_LEAF_TYPES regions
+    // Each region can hold maxLeavesPerType_ leaves (48 bytes each)
+    cullOutputBufferSize_ = NUM_LEAF_TYPES * maxLeavesPerType_ * sizeof(WorldLeafInstanceGPU);
 
     VkBufferCreateInfo bufferInfo{};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -420,7 +424,7 @@ bool TreeRenderer::createCullBuffers(uint32_t maxLeafInstances, uint32_t numTree
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
-    // Create double-buffered output buffers (world-space leaves)
+    // Create double-buffered output buffers (world-space leaves, partitioned by type)
     for (uint32_t i = 0; i < CULL_BUFFER_SET_COUNT; ++i) {
         bufferInfo.size = cullOutputBufferSize_;
         if (vmaCreateBuffer(allocator_, &bufferInfo, &allocInfo,
@@ -430,10 +434,10 @@ bool TreeRenderer::createCullBuffers(uint32_t maxLeafInstances, uint32_t numTree
         }
     }
 
-    // Create indirect draw buffers (SINGLE command for all leaves)
+    // Create indirect draw buffers (one command per leaf type)
     VkBufferCreateInfo indirectInfo{};
     indirectInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    indirectInfo.size = sizeof(VkDrawIndexedIndirectCommand);  // Single command
+    indirectInfo.size = NUM_LEAF_TYPES * sizeof(VkDrawIndexedIndirectCommand);  // One per type
     indirectInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
                          VK_BUFFER_USAGE_TRANSFER_DST_BIT;  // For vkCmdUpdateBuffer
     indirectInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -877,13 +881,19 @@ void TreeRenderer::recordLeafCulling(VkCommandBuffer cmd, uint32_t frameIndex,
             static_cast<size_t>(renderable.leafInstanceIndex) < leafDrawInfo.size()) {
             const auto& drawInfo = leafDrawInfo[renderable.leafInstanceIndex];
             if (drawInfo.instanceCount > 0) {
+                // Convert leaf type string to index (oak=0, ash=1, aspen=2, pine=3)
+                uint32_t leafTypeIdx = LEAF_TYPE_OAK;  // default
+                if (renderable.leafType == "ash") leafTypeIdx = LEAF_TYPE_ASH;
+                else if (renderable.leafType == "aspen") leafTypeIdx = LEAF_TYPE_ASPEN;
+                else if (renderable.leafType == "pine") leafTypeIdx = LEAF_TYPE_PINE;
+
                 // Cull data for compute shader
                 TreeCullData treeData{};
                 treeData.treeModel = renderable.transform;
                 treeData.inputFirstInstance = drawInfo.firstInstance;
                 treeData.inputInstanceCount = drawInfo.instanceCount;
                 treeData.treeIndex = numTrees;  // Index for render data lookup
-                treeData._pad = 0;
+                treeData.leafTypeIndex = leafTypeIdx;
 
                 treeDataList.push_back(treeData);
 
@@ -1011,7 +1021,7 @@ void TreeRenderer::recordLeafCulling(VkCommandBuffer cmd, uint32_t frameIndex,
     uniforms.maxLodDropRate = leafMaxLodDropRate_;
     uniforms.numTrees = numTrees;
     uniforms.totalLeafInstances = totalLeafInstances;
-    uniforms._pad0 = 0;
+    uniforms.maxLeavesPerType = maxLeavesPerType_;
     uniforms._pad1 = 0;
 
     vkCmdUpdateBuffer(cmd, cullUniformBuffers_.buffers[frameIndex], 0,
@@ -1150,29 +1160,42 @@ void TreeRenderer::render(VkCommandBuffer cmd, uint32_t frameIndex, float time,
                          cullIndirectBuffers_[currentCullBufferSet_] != VK_NULL_HANDLE;
 
     if (useCulledPath) {
-        // GPU-culled SINGLE indirect draw path
-        // All leaves from all trees are drawn in ONE call (world-space data from compute shader)
+        // GPU-culled multi-indirect draw path
+        // One indirect draw per leaf type, each binding appropriate texture
 
-        // Use first leaf type's descriptor set (assumes homogeneous leaf types for now)
-        // TODO: Group by leaf type for heterogeneous forests
+        // Leaf type names in order matching shader indices (oak=0, ash=1, aspen=2, pine=3)
+        static const std::string leafTypeNames[NUM_LEAF_TYPES] = {"oak", "ash", "aspen", "pine"};
+
+        // Get alpha test threshold from first renderable (or default)
+        float alphaTest = 0.5f;
         if (!leafRenderables.empty()) {
-            const auto& firstRenderable = leafRenderables[0];
-            VkDescriptorSet descriptorSet = getCulledLeafDescriptorSet(frameIndex, firstRenderable.leafType);
+            alphaTest = leafRenderables[0].alphaTestThreshold > 0.0f ?
+                        leafRenderables[0].alphaTestThreshold : 0.5f;
+        }
+
+        // Issue one indirect draw per leaf type
+        for (uint32_t leafType = 0; leafType < NUM_LEAF_TYPES; ++leafType) {
+            // Get descriptor set for this leaf type's texture
+            VkDescriptorSet descriptorSet = getCulledLeafDescriptorSet(frameIndex, leafTypeNames[leafType]);
+            if (descriptorSet == VK_NULL_HANDLE) continue;
+
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, leafPipelineLayout_.get(),
                                     0, 1, &descriptorSet, 0, nullptr);
 
-            // Simplified push constants - per-tree data comes from SSBO
+            // Push constants (same for all types in this implementation)
             TreeLeafPushConstants push{};
             push.time = time;
-            push.alphaTest = firstRenderable.alphaTestThreshold > 0.0f ? firstRenderable.alphaTestThreshold : 0.5f;
+            push.alphaTest = alphaTest;
 
             vkCmdPushConstants(cmd, leafPipelineLayout_.get(),
                                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                                0, sizeof(TreeLeafPushConstants), &push);
 
-            // SINGLE indirect draw for ALL visible leaves across ALL trees
+            // Indirect draw for this leaf type
+            // Offset to the correct command in the indirect buffer
+            VkDeviceSize commandOffset = leafType * sizeof(VkDrawIndexedIndirectCommand);
             vkCmdDrawIndexedIndirect(cmd, cullIndirectBuffers_[currentCullBufferSet_],
-                                     0, 1, sizeof(VkDrawIndexedIndirectCommand));
+                                     commandOffset, 1, sizeof(VkDrawIndexedIndirectCommand));
         }
 
         // Swap buffer sets for next frame (after all indirect draws complete)
@@ -1255,26 +1278,42 @@ void TreeRenderer::renderShadows(VkCommandBuffer cmd, uint32_t frameIndex,
                              cullIndirectBuffers_[currentCullBufferSet_] != VK_NULL_HANDLE;
 
         if (useCulledPath && !leafRenderables.empty()) {
-            // GPU-culled SINGLE indirect draw path for shadows
-            const auto& firstRenderable = leafRenderables[0];
+            // GPU-culled multi-indirect draw path for shadows
+            // One indirect draw per leaf type
 
-            // Use culled descriptor set (has world-space output buffer)
-            VkDescriptorSet leafSet = getCulledLeafDescriptorSet(frameIndex, firstRenderable.leafType);
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                    leafShadowPipelineLayout_.get(), 0, 1, &leafSet, 0, nullptr);
+            // Leaf type names in order matching shader indices (oak=0, ash=1, aspen=2, pine=3)
+            static const std::string leafTypeNames[NUM_LEAF_TYPES] = {"oak", "ash", "aspen", "pine"};
 
-            // Simplified push constants
-            TreeLeafShadowPushConstants push{};
-            push.cascadeIndex = cascadeIndex;
-            push.alphaTest = firstRenderable.alphaTestThreshold > 0.0f ? firstRenderable.alphaTestThreshold : 0.5f;
+            // Get alpha test threshold from first renderable (or default)
+            float alphaTest = 0.5f;
+            if (!leafRenderables.empty()) {
+                alphaTest = leafRenderables[0].alphaTestThreshold > 0.0f ?
+                            leafRenderables[0].alphaTestThreshold : 0.5f;
+            }
 
-            vkCmdPushConstants(cmd, leafShadowPipelineLayout_.get(),
-                               VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                               0, sizeof(TreeLeafShadowPushConstants), &push);
+            // Issue one indirect draw per leaf type
+            for (uint32_t leafType = 0; leafType < NUM_LEAF_TYPES; ++leafType) {
+                // Get descriptor set for this leaf type's texture
+                VkDescriptorSet leafSet = getCulledLeafDescriptorSet(frameIndex, leafTypeNames[leafType]);
+                if (leafSet == VK_NULL_HANDLE) continue;
 
-            // SINGLE indirect draw for ALL visible leaves
-            vkCmdDrawIndexedIndirect(cmd, cullIndirectBuffers_[currentCullBufferSet_],
-                                     0, 1, sizeof(VkDrawIndexedIndirectCommand));
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                        leafShadowPipelineLayout_.get(), 0, 1, &leafSet, 0, nullptr);
+
+                // Push constants
+                TreeLeafShadowPushConstants push{};
+                push.cascadeIndex = cascadeIndex;
+                push.alphaTest = alphaTest;
+
+                vkCmdPushConstants(cmd, leafShadowPipelineLayout_.get(),
+                                   VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                                   0, sizeof(TreeLeafShadowPushConstants), &push);
+
+                // Indirect draw for this leaf type
+                VkDeviceSize commandOffset = leafType * sizeof(VkDrawIndexedIndirectCommand);
+                vkCmdDrawIndexedIndirect(cmd, cullIndirectBuffers_[currentCullBufferSet_],
+                                         commandOffset, 1, sizeof(VkDrawIndexedIndirectCommand));
+            }
         } else {
             // Direct draw path (fallback when culling not available)
             const auto& leafDrawInfo = treeSystem.getLeafDrawInfo();

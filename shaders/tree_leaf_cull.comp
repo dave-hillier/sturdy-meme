@@ -10,20 +10,24 @@
 // Workgroup size: 256 threads per workgroup
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
+// Number of leaf types (oak=0, ash=1, aspen=2, pine=3)
+const uint NUM_LEAF_TYPES = 4;
+
 // Input: all leaf instances from TreeSystem (tree-local space)
 layout(std430, binding = BINDING_TREE_LEAF_CULL_INPUT) readonly buffer InputBuffer {
     LeafInstance inputInstances[];
 };
 
 // Output: visible leaf instances after culling (WORLD space with tree index)
+// Buffer is partitioned: [type0 leaves][type1 leaves][type2 leaves][type3 leaves]
 layout(std430, binding = BINDING_TREE_LEAF_CULL_OUTPUT) writeonly buffer OutputBuffer {
     WorldLeafInstance outputInstances[];
 };
 
-// Single indirect draw command for ALL visible leaves
+// One indirect draw command per leaf type
 // Uses DrawIndexedIndirectCommand for vkCmdDrawIndexedIndirect
 layout(std430, binding = BINDING_TREE_LEAF_CULL_INDIRECT) buffer IndirectBuffer {
-    DrawIndexedIndirectCommand drawCmd;
+    DrawIndexedIndirectCommand drawCmds[NUM_LEAF_TYPES];
 };
 
 // Per-tree culling data (batched for all trees)
@@ -32,7 +36,7 @@ struct TreeCullData {
     uint inputFirstInstance;       // Offset into inputInstances for this tree
     uint inputInstanceCount;       // Number of input instances for this tree
     uint treeIndex;                // Index of this tree (for render data lookup)
-    uint _pad;
+    uint leafTypeIndex;            // Leaf type (0=oak, 1=ash, 2=aspen, 3=pine)
 };
 
 layout(std430, binding = BINDING_TREE_LEAF_CULL_TREES) readonly buffer TreeDataBuffer {
@@ -49,20 +53,24 @@ layout(binding = BINDING_TREE_LEAF_CULL_UNIFORMS) uniform TreeLeafCullUniforms {
     float maxLodDropRate;         // Maximum LOD drop rate (0.0-1.0)
     uint numTrees;                // Total number of trees
     uint totalLeafInstances;      // Total leaf instances across all trees
-    uint _pad0;
+    uint maxLeavesPerType;        // Max leaves per leaf type in output buffer
     uint _pad1;
 };
 
 void main() {
     uint globalIdx = gl_GlobalInvocationID.x;
 
-    // First thread initializes the indirect command (constant values)
+    // First thread initializes all indirect commands (constant values)
     if (globalIdx == 0) {
-        drawCmd.indexCount = 6;       // Quad: 6 indices
-        drawCmd.firstIndex = 0;
-        drawCmd.vertexOffset = 0;
-        drawCmd.firstInstance = 0;
-        // instanceCount is set via atomicAdd below
+        for (uint i = 0; i < NUM_LEAF_TYPES; i++) {
+            drawCmds[i].indexCount = 6;       // Quad: 6 indices
+            drawCmds[i].firstIndex = 0;
+            drawCmds[i].vertexOffset = 0;
+            // firstInstance is the base offset into the output buffer for this type
+            // This makes gl_InstanceIndex point to the correct leaf in the partitioned buffer
+            drawCmds[i].firstInstance = i * maxLeavesPerType;
+            // instanceCount is set via atomicAdd below
+        }
     }
 
     // Early exit if beyond total leaf count
@@ -129,8 +137,21 @@ void main() {
         return;
     }
 
-    // This leaf is visible - atomically get output slot (SINGLE global counter)
-    uint outputSlot = atomicAdd(drawCmd.instanceCount, 1);
+    // Get leaf type for this tree (0=oak, 1=ash, 2=aspen, 3=pine)
+    uint leafType = min(tree.leafTypeIndex, NUM_LEAF_TYPES - 1);
+
+    // Atomically get output slot within this leaf type's region
+    uint typeLocalSlot = atomicAdd(drawCmds[leafType].instanceCount, 1);
+
+    // Check bounds - don't overflow into next type's region
+    if (typeLocalSlot >= maxLeavesPerType) {
+        // Undo the atomic add (best effort - may leave gaps but prevents overflow)
+        atomicAdd(drawCmds[leafType].instanceCount, -1);
+        return;
+    }
+
+    // Calculate global output slot: type's base offset + local slot
+    uint outputSlot = leafType * maxLeavesPerType + typeLocalSlot;
 
     // Transform orientation to world space
     // Extract rotation from model matrix and combine with local orientation

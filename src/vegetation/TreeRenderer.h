@@ -55,9 +55,17 @@ struct TreeLeafCullUniforms {
     float maxLodDropRate;               // Maximum LOD drop rate (0.0-1.0)
     uint32_t numTrees;                  // Total number of trees
     uint32_t totalLeafInstances;        // Total leaf instances across all trees
-    uint32_t _pad0;
+    uint32_t maxLeavesPerType;          // Max leaves per leaf type in output buffer
     uint32_t _pad1;
 };
+
+// Number of leaf types (must match tree_leaf_cull.comp NUM_LEAF_TYPES)
+constexpr uint32_t NUM_LEAF_TYPES = 4;
+// Leaf type indices (oak=0, ash=1, aspen=2, pine=3)
+constexpr uint32_t LEAF_TYPE_OAK = 0;
+constexpr uint32_t LEAF_TYPE_ASH = 1;
+constexpr uint32_t LEAF_TYPE_ASPEN = 2;
+constexpr uint32_t LEAF_TYPE_PINE = 3;
 
 // Per-tree culling data (stored in SSBO, one entry per tree)
 // Must match tree_leaf_cull.comp TreeCullData struct
@@ -66,7 +74,7 @@ struct TreeCullData {
     uint32_t inputFirstInstance;        // Offset into inputInstances for this tree
     uint32_t inputInstanceCount;        // Number of input instances for this tree
     uint32_t treeIndex;                 // Index of this tree (for render data lookup)
-    uint32_t _pad;                      // Padding
+    uint32_t leafTypeIndex;             // Leaf type (0=oak, 1=ash, 2=aspen, 3=pine)
 };
 
 // World-space leaf instance data (output from compute, input to vertex shader)
@@ -272,4 +280,7 @@ private:
 
     // Number of trees for indirect buffer sizing
     uint32_t numTreesForIndirect_ = 0;
+
+    // Max leaves per leaf type (for partitioned output buffer)
+    uint32_t maxLeavesPerType_ = 0;
 };
