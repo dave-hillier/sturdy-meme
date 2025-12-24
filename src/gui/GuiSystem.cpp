@@ -296,52 +296,52 @@ void GuiSystem::render(Renderer& renderer, const Camera& camera, float deltaTime
 
         if (ImGui::BeginTabBar("ControlTabs")) {
             if (ImGui::BeginTabItem("Time")) {
-                // TimeSystem implements ITimeSystem directly, Renderer implements ILocationControl
-                GuiTimeTab::render(renderer.getTimeSystem(), static_cast<ILocationControl&>(renderer));
+                // TimeSystem implements ITimeSystem directly, Renderer provides ILocationControl
+                GuiTimeTab::render(renderer.getTimeSystem(), renderer.getLocationControl());
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Weather")) {
-                GuiWeatherTab::render(static_cast<IWeatherControl&>(renderer));
+                GuiWeatherTab::render(renderer.getWeatherControl());
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Environment")) {
-                GuiEnvironmentTab::render(static_cast<IEnvironmentControl&>(renderer), environmentTabState);
+                GuiEnvironmentTab::render(renderer.getEnvironmentControl(), environmentTabState);
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Post FX")) {
-                GuiPostFXTab::render(static_cast<IPostProcessControl&>(renderer));
+                GuiPostFXTab::render(renderer.getPostProcessControl());
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Terrain")) {
-                GuiTerrainTab::render(static_cast<ITerrainControl&>(renderer));
+                GuiTerrainTab::render(renderer.getTerrainControl());
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Water")) {
-                GuiWaterTab::render(static_cast<IWaterControl&>(renderer));
+                GuiWaterTab::render(renderer.getWaterControl());
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Trees")) {
-                GuiTreeTab::render(static_cast<ITreeControl&>(renderer));
+                GuiTreeTab::render(renderer.getTreeControl());
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Player")) {
-                GuiPlayerTab::render(static_cast<IPlayerControl&>(renderer), playerSettings);
+                GuiPlayerTab::render(renderer.getPlayerControl(), playerSettings);
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("IK")) {
-                GuiIKTab::render(static_cast<ISceneControl&>(renderer), camera, ikDebugSettings);
+                GuiIKTab::render(renderer.getSceneControl(), camera, ikDebugSettings);
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Debug")) {
-                GuiDebugTab::render(static_cast<IDebugControl&>(renderer));
+                GuiDebugTab::render(renderer.getDebugControl());
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Perf")) {
-                GuiPerformanceTab::render(static_cast<IPerformanceControl&>(renderer));
+                GuiPerformanceTab::render(renderer.getPerformanceControl());
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Profiler")) {
-                GuiProfilerTab::render(static_cast<IProfilerControl&>(renderer));
+                GuiProfilerTab::render(renderer.getProfilerControl());
                 ImGui::EndTabItem();
             }
             ImGui::EndTabBar();
@@ -354,7 +354,7 @@ void GuiSystem::render(Renderer& renderer, const Camera& camera, float deltaTime
 
     // Skeleton/IK debug overlay
     if (ikDebugSettings.showSkeleton || ikDebugSettings.showIKTargets) {
-        GuiIKTab::renderSkeletonOverlay(static_cast<ISceneControl&>(renderer), camera, ikDebugSettings, playerSettings.showCapeColliders);
+        GuiIKTab::renderSkeletonOverlay(renderer.getSceneControl(), camera, ikDebugSettings, playerSettings.showCapeColliders);
     }
 }
 

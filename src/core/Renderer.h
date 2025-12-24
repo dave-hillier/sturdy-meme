@@ -74,18 +74,18 @@ constexpr uint32_t PBR_HAS_AO_MAP        = (1u << 2);
 constexpr uint32_t PBR_HAS_HEIGHT_MAP    = (1u << 3);
 
 
-class Renderer : public ILocationControl,
-                  public IWeatherControl,
-                  public IEnvironmentControl,
-                  public IPostProcessControl,
-                  public ITerrainControl,
-                  public IWaterControl,
-                  public ITreeControl,
-                  public IDebugControl,
-                  public IProfilerControl,
-                  public IPerformanceControl,
-                  public ISceneControl,
-                  public IPlayerControl {
+class Renderer : private ILocationControl,
+                  private IWeatherControl,
+                  private IEnvironmentControl,
+                  private IPostProcessControl,
+                  private ITerrainControl,
+                  private IWaterControl,
+                  private ITreeControl,
+                  private IDebugControl,
+                  private IProfilerControl,
+                  private IPerformanceControl,
+                  private ISceneControl,
+                  private IPlayerControl {
 public:
     // Configuration for renderer initialization
     struct Config {
@@ -155,6 +155,32 @@ public:
     // Access to VulkanContext
     VulkanContext& getVulkanContext() { return vulkanContext; }
     const VulkanContext& getVulkanContext() const { return vulkanContext; }
+
+    // Interface accessors - provide access to GUI-facing control interfaces
+    ILocationControl& getLocationControl() { return *this; }
+    const ILocationControl& getLocationControl() const { return *this; }
+    IWeatherControl& getWeatherControl() { return *this; }
+    const IWeatherControl& getWeatherControl() const { return *this; }
+    IEnvironmentControl& getEnvironmentControl() { return *this; }
+    const IEnvironmentControl& getEnvironmentControl() const { return *this; }
+    IPostProcessControl& getPostProcessControl() { return *this; }
+    const IPostProcessControl& getPostProcessControl() const { return *this; }
+    ITerrainControl& getTerrainControl() { return *this; }
+    const ITerrainControl& getTerrainControl() const { return *this; }
+    IWaterControl& getWaterControl() { return *this; }
+    const IWaterControl& getWaterControl() const { return *this; }
+    ITreeControl& getTreeControl() { return *this; }
+    const ITreeControl& getTreeControl() const { return *this; }
+    IDebugControl& getDebugControl() { return *this; }
+    const IDebugControl& getDebugControl() const { return *this; }
+    IProfilerControl& getProfilerControl() { return *this; }
+    const IProfilerControl& getProfilerControl() const { return *this; }
+    IPerformanceControl& getPerformanceControl() { return *this; }
+    const IPerformanceControl& getPerformanceControl() const { return *this; }
+    ISceneControl& getSceneControl() { return *this; }
+    const ISceneControl& getSceneControl() const { return *this; }
+    IPlayerControl& getPlayerControl() { return *this; }
+    const IPlayerControl& getPlayerControl() const { return *this; }
 
     // GUI rendering callback (called during swapchain render pass)
     using GuiRenderCallback = std::function<void(VkCommandBuffer)>;
