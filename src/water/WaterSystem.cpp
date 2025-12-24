@@ -103,6 +103,7 @@ void WaterSystem::cleanup() {
 
     // RAII wrappers handle cleanup automatically - just reset them
     pipeline = ManagedPipeline();
+    tessellationPipeline = ManagedPipeline();
     pipelineLayout = ManagedPipelineLayout();
     descriptorSetLayout = ManagedDescriptorSetLayout();
     descriptorSets.clear();
@@ -128,29 +129,35 @@ bool WaterSystem::createDescriptorSetLayout() {
     // 19-21: FFT Ocean cascade 2 (small ripples, 16m)
     // 22: Environment cubemap (Phase 2: SSR fallback)
 
+    // Stage flags for vertex + tessellation evaluation (both can sample ocean textures)
+    constexpr VkShaderStageFlags VERTEX_TESS = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
+    // Stage flags for all stages that need UBO access
+    constexpr VkShaderStageFlags ALL_STAGES = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT |
+                                               VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT | VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
+
     VkDescriptorSetLayout rawLayout = DescriptorManager::LayoutBuilder(device)
-        .addUniformBuffer(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)  // 0: Main UBO
-        .addUniformBuffer(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)  // 1: Water uniforms
+        .addUniformBuffer(ALL_STAGES)                           // 0: Main UBO (used by all stages)
+        .addUniformBuffer(VERTEX_TESS | VK_SHADER_STAGE_FRAGMENT_BIT)  // 1: Water uniforms
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 2: Shadow map
-        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 3: Terrain heightmap
+        .addCombinedImageSampler(VERTEX_TESS | VK_SHADER_STAGE_FRAGMENT_BIT)  // 3: Terrain heightmap (breaking wave detection)
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 4: Flow map
-        .addCombinedImageSampler(VK_SHADER_STAGE_VERTEX_BIT)    // 5: Displacement map
+        .addCombinedImageSampler(VERTEX_TESS)                   // 5: Displacement map (interactive splashes)
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 6: Foam texture
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 7: Temporal foam
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 8: Caustics texture
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 9: SSR texture
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 10: Scene depth
-        .addCombinedImageSampler(VK_SHADER_STAGE_VERTEX_BIT)    // 11: Ocean displacement (cascade 0)
-        .addCombinedImageSampler(VK_SHADER_STAGE_VERTEX_BIT)    // 12: Ocean normal (cascade 0)
-        .addCombinedImageSampler(VK_SHADER_STAGE_VERTEX_BIT)    // 13: Ocean foam (cascade 0)
+        .addCombinedImageSampler(VERTEX_TESS)                   // 11: Ocean displacement (cascade 0)
+        .addCombinedImageSampler(VERTEX_TESS)                   // 12: Ocean normal (cascade 0)
+        .addCombinedImageSampler(VERTEX_TESS)                   // 13: Ocean foam (cascade 0)
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 14: Tile array
         .addStorageBuffer(VK_SHADER_STAGE_FRAGMENT_BIT)         // 15: Tile info SSBO
-        .addCombinedImageSampler(VK_SHADER_STAGE_VERTEX_BIT)    // 16: Ocean displacement (cascade 1)
-        .addCombinedImageSampler(VK_SHADER_STAGE_VERTEX_BIT)    // 17: Ocean normal (cascade 1)
-        .addCombinedImageSampler(VK_SHADER_STAGE_VERTEX_BIT)    // 18: Ocean foam (cascade 1)
-        .addCombinedImageSampler(VK_SHADER_STAGE_VERTEX_BIT)    // 19: Ocean displacement (cascade 2)
-        .addCombinedImageSampler(VK_SHADER_STAGE_VERTEX_BIT)    // 20: Ocean normal (cascade 2)
-        .addCombinedImageSampler(VK_SHADER_STAGE_VERTEX_BIT)    // 21: Ocean foam (cascade 2)
+        .addCombinedImageSampler(VERTEX_TESS)                   // 16: Ocean displacement (cascade 1)
+        .addCombinedImageSampler(VERTEX_TESS)                   // 17: Ocean normal (cascade 1)
+        .addCombinedImageSampler(VERTEX_TESS)                   // 18: Ocean foam (cascade 1)
+        .addCombinedImageSampler(VERTEX_TESS)                   // 19: Ocean displacement (cascade 2)
+        .addCombinedImageSampler(VERTEX_TESS)                   // 20: Ocean normal (cascade 2)
+        .addCombinedImageSampler(VERTEX_TESS)                   // 21: Ocean foam (cascade 2)
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 22: Environment cubemap
         .build();
 
@@ -161,8 +168,11 @@ bool WaterSystem::createDescriptorSetLayout() {
     descriptorSetLayout = ManagedDescriptorSetLayout::fromRaw(device, rawLayout);
 
     // Create pipeline layout with push constants for model matrix + FFT params
+    // Push constants are used by vertex shader (non-tessellated) and tessellation evaluation shader (tessellated)
     VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT |
+                                   VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT |
+                                   VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
     pushConstantRange.offset = 0;
     pushConstantRange.size = sizeof(PushConstants);
 
@@ -209,6 +219,34 @@ bool WaterSystem::createPipeline() {
     }
 
     pipeline = ManagedPipeline::fromRaw(device, rawPipeline);
+
+    // Create tessellation pipeline for GPU wave geometry detail
+    // This is optional - if it fails, we fall back to the regular pipeline
+    factory.reset();
+    VkPipeline rawTessPipeline = VK_NULL_HANDLE;
+    bool tessSuccess = factory
+        .setShaders(shaderPath + "/water_tess.vert.spv", shaderPath + "/water.frag.spv")
+        .setTessellationShaders(shaderPath + "/water.tesc.spv", shaderPath + "/water.tese.spv")
+        .setRenderPass(hdrRenderPass)
+        .setPipelineLayout(pipelineLayout.get())
+        .setExtent(extent)
+        .setDynamicViewport(true)
+        .setVertexInput(bindings, attributes)
+        .setDepthTest(true)
+        .setDepthWrite(false)
+        .setDepthBias(1.0f, 1.5f)
+        .setBlendMode(GraphicsPipelineFactory::BlendMode::Alpha)
+        .setCullMode(VK_CULL_MODE_NONE)
+        .build(rawTessPipeline);
+
+    if (tessSuccess) {
+        tessellationPipeline = ManagedPipeline::fromRaw(device, rawTessPipeline);
+        SDL_Log("Water tessellation pipeline created successfully");
+    } else {
+        SDL_Log("Water tessellation pipeline creation failed - tessellation disabled");
+        // Continue without tessellation - not a fatal error
+    }
+
     return true;
 }
 
@@ -458,7 +496,10 @@ void WaterSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
             .update();
     }
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.get());
+    // Use tessellation pipeline if enabled and available
+    bool useTess = useTessellation_ && isTessellationSupported();
+    VkPipeline activePipeline = useTess ? tessellationPipeline.get() : pipeline.get();
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, activePipeline);
 
     // Set dynamic viewport and scissor to handle window resize
     VkViewport viewport{};
@@ -486,6 +527,7 @@ void WaterSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
         waterUniforms.waterExtent.y
     ));
     // useFFTOcean and oceanSize values are set via setUseFFTOcean()
+    // Push constants are used by vertex shader (non-tess) or both vertex + tess eval shaders
     vkCmdPushConstants(cmd, pipelineLayout.get(), VK_SHADER_STAGE_VERTEX_BIT,
                        0, sizeof(PushConstants), &pushConstants);
 

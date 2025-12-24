@@ -59,6 +59,9 @@ public:
     GraphicsPipelineFactory& setShaders(const std::string& vertPath, const std::string& fragPath);
     GraphicsPipelineFactory& setVertexShader(const std::string& path);
     GraphicsPipelineFactory& setFragmentShader(const std::string& path);
+    GraphicsPipelineFactory& setTessellationShaders(const std::string& tescPath, const std::string& tesePath);
+    GraphicsPipelineFactory& setTessellationControlShader(const std::string& path);
+    GraphicsPipelineFactory& setTessellationEvaluationShader(const std::string& path);
 
     // Render pass and layout
     GraphicsPipelineFactory& setRenderPass(VkRenderPass renderPass, uint32_t subpass = 0);
@@ -118,6 +121,8 @@ private:
     // Shader state
     std::string vertShaderPath;
     std::string fragShaderPath;
+    std::string tescShaderPath;  // Tessellation control shader
+    std::string teseShaderPath;  // Tessellation evaluation shader
     std::vector<VkShaderModule> shaderModules;
 
     // Pipeline configuration

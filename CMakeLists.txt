@@ -545,6 +545,9 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/hiz_culling.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water.frag.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_tess.vert.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water.tesc.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water.tese.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_position.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_position.frag.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_displacement.comp.spv
@@ -731,6 +734,9 @@ if(SHADER_COMPILE_CMD)
     set(WATER_SHADERS
         water.vert
         water.frag
+        water_tess.vert
+        water.tesc
+        water.tese
         water_position.vert
         water_position.frag
     )
@@ -925,6 +931,9 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/hiz_culling.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water.frag.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_tess.vert.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water.tesc.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water.tese.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_position.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_position.frag.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_displacement.comp.spv

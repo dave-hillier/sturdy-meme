@@ -21,6 +21,8 @@ GraphicsPipelineFactory& GraphicsPipelineFactory::reset() {
 
     vertShaderPath.clear();
     fragShaderPath.clear();
+    tescShaderPath.clear();
+    teseShaderPath.clear();
     renderPass = VK_NULL_HANDLE;
     subpass = 0;
     pipelineLayout = VK_NULL_HANDLE;
@@ -108,6 +110,22 @@ GraphicsPipelineFactory& GraphicsPipelineFactory::setVertexShader(const std::str
 
 GraphicsPipelineFactory& GraphicsPipelineFactory::setFragmentShader(const std::string& path) {
     fragShaderPath = path;
+    return *this;
+}
+
+GraphicsPipelineFactory& GraphicsPipelineFactory::setTessellationShaders(const std::string& tescPath, const std::string& tesePath) {
+    tescShaderPath = tescPath;
+    teseShaderPath = tesePath;
+    return *this;
+}
+
+GraphicsPipelineFactory& GraphicsPipelineFactory::setTessellationControlShader(const std::string& path) {
+    tescShaderPath = path;
+    return *this;
+}
+
+GraphicsPipelineFactory& GraphicsPipelineFactory::setTessellationEvaluationShader(const std::string& path) {
+    teseShaderPath = path;
     return *this;
 }
 
@@ -326,6 +344,46 @@ bool GraphicsPipelineFactory::loadShaderModules(std::vector<VkPipelineShaderStag
     fragStage.pName = "main";
 
     stages.push_back(vertStage);
+
+    // Load tessellation shaders if provided
+    if (!tescShaderPath.empty() && !teseShaderPath.empty()) {
+        auto tescCode = ShaderLoader::readFile(tescShaderPath);
+        auto teseCode = ShaderLoader::readFile(teseShaderPath);
+
+        if (!tescCode || !teseCode) {
+            SDL_Log("GraphicsPipelineFactory: Failed to read tessellation shader files");
+            return false;
+        }
+
+        auto tescModule = ShaderLoader::createShaderModule(device, *tescCode);
+        auto teseModule = ShaderLoader::createShaderModule(device, *teseCode);
+
+        if (!tescModule || !teseModule) {
+            SDL_Log("GraphicsPipelineFactory: Failed to create tessellation shader modules");
+            if (tescModule) vkDestroyShaderModule(device, *tescModule, nullptr);
+            if (teseModule) vkDestroyShaderModule(device, *teseModule, nullptr);
+            return false;
+        }
+
+        shaderModules.push_back(*tescModule);
+        shaderModules.push_back(*teseModule);
+
+        VkPipelineShaderStageCreateInfo tescStage{};
+        tescStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        tescStage.stage = VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
+        tescStage.module = *tescModule;
+        tescStage.pName = "main";
+
+        VkPipelineShaderStageCreateInfo teseStage{};
+        teseStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        teseStage.stage = VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
+        teseStage.module = *teseModule;
+        teseStage.pName = "main";
+
+        stages.push_back(tescStage);
+        stages.push_back(teseStage);
+    }
+
     stages.push_back(fragStage);
 
     return true;
@@ -360,11 +418,20 @@ bool GraphicsPipelineFactory::build(VkPipeline& pipeline) {
     vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(vertexAttributes.size());
     vertexInputInfo.pVertexAttributeDescriptions = vertexAttributes.empty() ? nullptr : vertexAttributes.data();
 
+    // Check if tessellation is enabled
+    bool hasTessellation = !tescShaderPath.empty() && !teseShaderPath.empty();
+
     // Input assembly state
     VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
     inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    inputAssembly.topology = topology;
+    // When using tessellation, topology must be patch list
+    inputAssembly.topology = hasTessellation ? VK_PRIMITIVE_TOPOLOGY_PATCH_LIST : topology;
     inputAssembly.primitiveRestartEnable = VK_FALSE;
+
+    // Tessellation state (only used when tessellation shaders are present)
+    VkPipelineTessellationStateCreateInfo tessellationState{};
+    tessellationState.sType = VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO;
+    tessellationState.patchControlPoints = 3;  // Triangles - 3 control points per patch
 
     // Viewport and scissor
     VkViewport viewport{};
@@ -460,6 +527,7 @@ bool GraphicsPipelineFactory::build(VkPipeline& pipeline) {
     pipelineInfo.pStages = shaderStages.data();
     pipelineInfo.pVertexInputState = &vertexInputInfo;
     pipelineInfo.pInputAssemblyState = &inputAssembly;
+    pipelineInfo.pTessellationState = hasTessellation ? &tessellationState : nullptr;
     pipelineInfo.pViewportState = &viewportState;
     pipelineInfo.pRasterizationState = &rasterizer;
     pipelineInfo.pMultisampleState = &multisampling;

@@ -245,6 +245,11 @@ public:
     float getOceanSize1() const { return pushConstants.oceanSize1; }
     float getOceanSize2() const { return pushConstants.oceanSize2; }
 
+    // Tessellation mode (GPU tessellation for wave geometry detail)
+    void setUseTessellation(bool enabled) { useTessellation_ = enabled; }
+    bool getUseTessellation() const { return useTessellation_; }
+    bool isTessellationSupported() const { return tessellationPipeline.get() != VK_NULL_HANDLE; }
+
     // Get uniform buffers (for G-buffer pass descriptor sets)
     VkBuffer getUniformBuffer(size_t frameIndex) const { return waterUniformBuffers_[frameIndex].get(); }
     std::vector<VkBuffer> getUniformBuffers() const {
@@ -331,9 +336,11 @@ private:
 
     // Pipeline resources (RAII-managed)
     ManagedPipeline pipeline;
+    ManagedPipeline tessellationPipeline;  // GPU tessellation pipeline for wave detail
     ManagedPipelineLayout pipelineLayout;
     ManagedDescriptorSetLayout descriptorSetLayout;
     std::vector<VkDescriptorSet> descriptorSets;
+    bool useTessellation_ = false;  // Whether to use tessellation when supported
 
     // Water mesh (a subdivided plane for wave animation) - RAII-managed
     std::optional<RAIIAdapter<Mesh>> waterMesh;
