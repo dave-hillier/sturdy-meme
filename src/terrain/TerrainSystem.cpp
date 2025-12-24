@@ -275,6 +275,7 @@ bool TerrainSystem::createRenderDescriptorSetLayout() {
     // 17: snow UBO, 18: cloud shadow UBO
     // 19: tile array texture, 20: tile info SSBO
     // 21: caustics texture, 22: caustics UBO
+    // 24: biome debug visualization map
 
     renderDescriptorSetLayout = DescriptorManager::LayoutBuilder(device)
         .addBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT)
@@ -297,6 +298,7 @@ bool TerrainSystem::createRenderDescriptorSetLayout() {
         .addBinding(20, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT)            // tile info SSBO
         .addBinding(21, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)  // caustics texture
         .addBinding(22, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT)          // caustics UBO
+        .addBinding(Bindings::TERRAIN_BIOME_MAP, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)  // biome map
         .build();
 
     return renderDescriptorSetLayout != VK_NULL_HANDLE;
