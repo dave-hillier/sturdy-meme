@@ -112,8 +112,9 @@ void main() {
 
     vec3 directLight = (diffuse + specular) * sunLighting;
 
-    // Ambient/sky contribution
-    vec3 ambient = baseColor * 0.15 * ao;
+    // Ambient/sky contribution - use scene ambient and soften AO impact
+    float softAO = mix(1.0, ao, 0.5);  // Reduce AO darkening effect
+    vec3 ambient = baseColor * ubo.ambientColor.rgb * softAO;
 
     // Final color
     vec3 color = directLight + ambient;
