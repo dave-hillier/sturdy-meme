@@ -404,5 +404,5 @@ private:
     VmaAllocation leafCullIndirectDispatchAllocation_ = VK_NULL_HANDLE;
 
     // Flag to enable two-phase culling (Phase 3)
-    bool twoPhaseLeafCullingEnabled_ = false;
+    bool twoPhaseLeafCullingEnabled_ = true;
 };
