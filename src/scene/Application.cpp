@@ -333,14 +333,18 @@ void Application::run() {
         physicsTerrainManager_.update(playerPos);
 
         // Update player position from physics character controller
-        glm::vec3 physicsPos = playerPos;
+        // Physics returns capsule CENTER, but Player expects position at GROUND level
+        // Convert by subtracting half the capsule height
+        glm::vec3 groundLevelPos = playerPos;
+        groundLevelPos.y -= Player::CAPSULE_HEIGHT * 0.5f;  // Capsule center → ground level
         glm::vec3 physicsVelocity = physics().getCharacterVelocity();
-        player.setPosition(physicsPos);
+        player.setPosition(groundLevelPos);
 
         // Update breadcrumb tracker (Ghost of Tsushima respawn optimization)
         // Only track positions when player is grounded and not in water/hazards
+        // Use original capsule center position for consistency with respawn system
         if (physics().isCharacterOnGround()) {
-            breadcrumbTracker.update(physicsPos);
+            breadcrumbTracker.update(playerPos);
         }
 
         // Update scene object transforms from physics
