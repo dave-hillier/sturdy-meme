@@ -1,0 +1,178 @@
+#version 450
+
+#extension GL_GOOGLE_include_directive : require
+
+#include "bindings.glsl"
+#include "instancing_common.glsl"
+
+// Workgroup size: One workgroup per visible cell
+// Each thread in the workgroup processes one tree from the cell
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+// Per-tree culling data (from TreeRenderer - all trees)
+struct TreeCullData {
+    mat4 treeModel;                // Tree's model matrix
+    uint inputFirstInstance;       // Offset into leaf instances for this tree
+    uint inputInstanceCount;       // Number of leaves for this tree
+    uint treeIndex;                // Index for render data lookup
+    uint leafTypeIndex;            // Leaf type (0=oak, 1=ash, 2=aspen, 3=pine)
+    float lodBlendFactor;          // LOD blend factor (0=full detail, 1=full impostor)
+    uint _pad0;
+    uint _pad1;
+    uint _pad2;
+};
+
+// Visible tree data (output - compacted list of visible trees)
+struct VisibleTreeData {
+    uint originalTreeIndex;        // Index into TreeCullData array
+    uint leafFirstInstance;        // Offset into leaf instance buffer
+    uint leafInstanceCount;        // Number of leaves for this tree
+    uint leafTypeIndex;            // Leaf type (0=oak, 1=ash, 2=aspen, 3=pine)
+    float lodBlendFactor;          // LOD blend factor
+    uint _pad0;
+    uint _pad1;
+    uint _pad2;
+};
+
+// Cell data (from spatial index)
+struct TreeCellGPU {
+    vec4 boundsMinAndFirst;        // xyz = boundsMin, w = firstTreeIndex as float bits
+    vec4 boundsMaxAndCount;        // xyz = boundsMax, w = treeCount as float bits
+};
+
+// Sorted tree entry (maps to original tree index)
+struct SortedTreeEntry {
+    uint originalTreeIndex;
+    uint cellIndex;
+};
+
+// Input: All tree cull data
+layout(std430, binding = BINDING_TREE_FILTER_ALL_TREES) readonly buffer AllTreesBuffer {
+    TreeCullData allTrees[];
+};
+
+// Input: Visible cell indices (from cell culling)
+layout(std430, binding = BINDING_TREE_FILTER_VISIBLE_CELLS) readonly buffer VisibleCellsBuffer {
+    uint visibleCellCount;
+    uint visibleCellIndices[];
+};
+
+// Input: Cell data for tree ranges
+layout(std430, binding = BINDING_TREE_FILTER_CELL_DATA) readonly buffer CellDataBuffer {
+    TreeCellGPU cells[];
+};
+
+// Input: Sorted tree entries (trees sorted by cell)
+layout(std430, binding = BINDING_TREE_FILTER_SORTED_TREES) readonly buffer SortedTreesBuffer {
+    SortedTreeEntry sortedTrees[];
+};
+
+// Output: Visible trees (compacted)
+layout(std430, binding = BINDING_TREE_FILTER_VISIBLE_TREES) buffer VisibleTreesBuffer {
+    uint visibleTreeCount;
+    VisibleTreeData visibleTrees[];
+};
+
+// Output: Indirect dispatch for leaf culling
+// One workgroup per visible tree (using 256 threads per workgroup in leaf cull)
+layout(std430, binding = BINDING_TREE_FILTER_INDIRECT) buffer IndirectDispatchBuffer {
+    uint dispatchX;
+    uint dispatchY;
+    uint dispatchZ;
+};
+
+// Uniforms
+layout(binding = BINDING_TREE_FILTER_UNIFORMS) uniform TreeFilterUniforms {
+    vec4 cameraPosition;           // xyz = camera pos, w = unused
+    vec4 frustumPlanes[6];         // Frustum planes for culling
+    float maxDrawDistance;         // Maximum leaf draw distance
+    uint maxTreesPerCell;          // Maximum trees per cell (for bounds checking)
+    uint _pad0;
+    uint _pad1;
+};
+
+void main() {
+    uint cellLocalIdx = gl_LocalInvocationID.x;  // Tree index within cell
+    uint visibleCellIdx = gl_WorkGroupID.x;      // Which visible cell we're processing
+
+    // First thread in first workgroup initializes output buffers
+    if (gl_GlobalInvocationID.x == 0) {
+        visibleTreeCount = 0;
+        dispatchX = 0;
+        dispatchY = 1;
+        dispatchZ = 1;
+    }
+
+    // Ensure initialization is complete
+    barrier();
+    memoryBarrierBuffer();
+
+    // Early exit if beyond visible cell count
+    if (visibleCellIdx >= visibleCellCount) {
+        return;
+    }
+
+    // Get the actual cell index from the visible list
+    uint cellIdx = visibleCellIndices[visibleCellIdx];
+
+    // Load cell data
+    TreeCellGPU cell = cells[cellIdx];
+    uint firstTreeIndex = floatBitsToUint(cell.boundsMinAndFirst.w);
+    uint treeCount = floatBitsToUint(cell.boundsMaxAndCount.w);
+
+    // Early exit if this thread is beyond the tree count for this cell
+    if (cellLocalIdx >= treeCount) {
+        return;
+    }
+
+    // Get the sorted tree entry
+    uint sortedIdx = firstTreeIndex + cellLocalIdx;
+    SortedTreeEntry entry = sortedTrees[sortedIdx];
+    uint originalTreeIdx = entry.originalTreeIndex;
+
+    // Get the original tree data
+    TreeCullData tree = allTrees[originalTreeIdx];
+
+    // Skip trees that are fully in impostor mode (no leaves needed)
+    if (tree.lodBlendFactor >= 1.0) {
+        return;
+    }
+
+    // Skip trees with no leaves
+    if (tree.inputInstanceCount == 0) {
+        return;
+    }
+
+    // Get tree world position from model matrix
+    vec3 treeWorldPos = vec3(tree.treeModel[3]);
+
+    // Distance culling
+    float distToCamera = distance(treeWorldPos, cameraPosition.xyz);
+    if (distToCamera > maxDrawDistance) {
+        return;
+    }
+
+    // Frustum culling (use bounding sphere approximation)
+    // Trees are typically 5-15m tall, use generous margin
+    float boundingRadius = 10.0;
+    if (!isInFrustum(frustumPlanes, treeWorldPos, boundingRadius)) {
+        return;
+    }
+
+    // Tree passed culling - add to visible list
+    uint visibleIdx = atomicAdd(visibleTreeCount, 1);
+
+    // Write visible tree data
+    visibleTrees[visibleIdx].originalTreeIndex = originalTreeIdx;
+    visibleTrees[visibleIdx].leafFirstInstance = tree.inputFirstInstance;
+    visibleTrees[visibleIdx].leafInstanceCount = tree.inputInstanceCount;
+    visibleTrees[visibleIdx].leafTypeIndex = tree.leafTypeIndex;
+    visibleTrees[visibleIdx].lodBlendFactor = tree.lodBlendFactor;
+    visibleTrees[visibleIdx]._pad0 = 0;
+    visibleTrees[visibleIdx]._pad1 = 0;
+    visibleTrees[visibleIdx]._pad2 = 0;
+
+    // Update indirect dispatch count
+    // One workgroup per visible tree in leaf culling (using 256 threads)
+    atomicAdd(dispatchX, 1);
+}

@@ -37,6 +37,10 @@ struct TreeCullData {
     uint inputInstanceCount;       // Number of input instances for this tree
     uint treeIndex;                // Index of this tree (for render data lookup)
     uint leafTypeIndex;            // Leaf type (0=oak, 1=ash, 2=aspen, 3=pine)
+    float lodBlendFactor;          // LOD blend factor (0=full detail, 1=full impostor)
+    uint _pad0;                    // Padding for std430 alignment
+    uint _pad1;
+    uint _pad2;
 };
 
 layout(std430, binding = BINDING_TREE_LEAF_CULL_TREES) readonly buffer TreeDataBuffer {
@@ -102,6 +106,11 @@ void main() {
     // Get tree data
     TreeCullData tree = treeData[treeIdx];
 
+    // LOD blend culling - skip all leaves when tree is fully in impostor mode
+    if (tree.lodBlendFactor >= 1.0) {
+        return;
+    }
+
     // Local index within this tree's leaf instances
     uint localIdx = globalIdx - tree.inputFirstInstance;
 
@@ -131,9 +140,17 @@ void main() {
     }
 
     // LOD blade dropping - use position-based hash for consistent results
+    // Also incorporate LOD blend factor to drop leaves during transition
     float instanceHash = hash2D(leafLocalPos.xz);
+    float effectiveDropRate = maxLodDropRate + tree.lodBlendFactor * (1.0 - maxLodDropRate);
     if (lodCull(distToCamera, lodTransitionStart, lodTransitionEnd,
-                maxLodDropRate, instanceHash)) {
+                effectiveDropRate, instanceHash)) {
+        return;
+    }
+
+    // Additional stochastic culling based on LOD blend factor during transition
+    // This gradually removes leaves as we transition to impostor
+    if (tree.lodBlendFactor > 0.0 && instanceHash < tree.lodBlendFactor) {
         return;
     }
 

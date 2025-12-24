@@ -4,6 +4,7 @@
 #include "vegetation/TreeOptions.h"
 #include "vegetation/TreeLODSystem.h"
 #include "vegetation/TreeImpostorAtlas.h"
+#include "vegetation/TreeRenderer.h"
 #include "core/RendererSystems.h"
 
 #include <imgui.h>
@@ -114,6 +115,20 @@ void GuiTreeTab::render(ITreeControl& treeControl) {
                 ImGui::TextColored(ImVec4(0.5f, 0.0f, 1.0f, 1.0f), "Purple=270 (-X)");
                 ImGui::SameLine();
                 ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), "Magenta=315");
+            }
+
+            // Two-phase leaf culling toggle
+            auto* treeRenderer = treeControl.getSystems().treeRenderer();
+            if (treeRenderer) {
+                bool twoPhase = treeRenderer->isTwoPhaseLeafCullingEnabled();
+                if (ImGui::Checkbox("Two-Phase Leaf Culling", &twoPhase)) {
+                    treeRenderer->setTwoPhaseLeafCulling(twoPhase);
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Use efficient two-phase culling:\n"
+                                      "1. Filter visible trees from cells\n"
+                                      "2. Cull leaves only for visible trees");
+                }
             }
 
             // Atlas preview

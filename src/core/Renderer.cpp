@@ -175,6 +175,7 @@ void Renderer::setupRenderPipeline() {
         systems_->profiler().beginGpuZone(ctx.cmd, "TreeLeafCull");
         systems_->treeRenderer()->recordLeafCulling(
             ctx.cmd, ctx.frameIndex, *systems_->tree(),
+            systems_->treeLOD(),  // Pass LOD system for blend factor lookup
             ctx.frame.cameraPosition, ctx.frame.frustumPlanes);
         systems_->profiler().endGpuZone(ctx.cmd, "TreeLeafCull");
     });
