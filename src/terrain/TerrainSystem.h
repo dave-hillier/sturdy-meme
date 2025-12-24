@@ -290,6 +290,8 @@ public:
     bool isTerrainEnabled() const override { return terrainEnabled_; }
     void toggleTerrainWireframe() override { wireframeMode = !wireframeMode; }
     bool isTerrainWireframeMode() const override { return wireframeMode; }
+    void toggleBiomeDebug() override { showBiomeDebug_ = !showBiomeDebug_; }
+    bool isShowingBiomeDebug() const override { return showBiomeDebug_; }
     uint32_t getTerrainNodeCount() const override { return getTriangleCount(); }
     float getTerrainHeightAt(float x, float z) const override { return getHeightAt(x, z); }
     TerrainSystem& getTerrainSystem() override { return *this; }
@@ -361,6 +363,7 @@ private:
     TerrainConfig config;
     bool terrainEnabled_ = true;
     bool wireframeMode = false;
+    bool showBiomeDebug_ = false;              // Show biome zone visualization
     bool gpuCullingEnabled = true;             // GPU frustum culling for split phase
     bool shadowCullingEnabled = true;          // GPU frustum culling for shadow cascades
 

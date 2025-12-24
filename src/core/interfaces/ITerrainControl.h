@@ -20,6 +20,10 @@ public:
     virtual void toggleTerrainWireframe() = 0;
     virtual bool isTerrainWireframeMode() const = 0;
 
+    // Biome debug visualization
+    virtual void toggleBiomeDebug() = 0;
+    virtual bool isShowingBiomeDebug() const = 0;
+
     // Terrain statistics
     virtual uint32_t getTerrainNodeCount() const = 0;
     virtual float getTerrainHeightAt(float x, float z) const = 0;

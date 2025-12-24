@@ -131,9 +131,9 @@ void GuiTerrainTab::render(ITerrainControl& terrainControl) {
     }
 
     // Biome debug visualization
-    bool biomeDebug = renderer.isShowingBiomeDebug();
+    bool biomeDebug = terrainControl.isShowingBiomeDebug();
     if (ImGui::Checkbox("Biome Visualization", &biomeDebug)) {
-        renderer.toggleBiomeDebug();
+        terrainControl.toggleBiomeDebug();
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Show biome zone colors on terrain (requires biome_debug.png)");

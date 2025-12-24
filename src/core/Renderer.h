@@ -194,9 +194,6 @@ public:
     void toggleSnowDepthDebug() { showSnowDepthDebug = !showSnowDepthDebug; }
     bool isShowingSnowDepthDebug() const { return showSnowDepthDebug; }
 
-    void toggleBiomeDebug() { showBiomeDebug = !showBiomeDebug; }
-    bool isShowingBiomeDebug() const { return showBiomeDebug; }
-
     // Cloud control
     void toggleCloudStyle() { useParaboloidClouds = !useParaboloidClouds; }
     bool isUsingParaboloidClouds() const { return useParaboloidClouds; }
@@ -531,7 +528,6 @@ private:
 
     bool showCascadeDebug = false;         // true = show cascade colors overlay
     bool showSnowDepthDebug = false;       // true = show snow depth heat map overlay
-    bool showBiomeDebug = false;           // true = show biome visualization on terrain
     bool useParaboloidClouds = true;       // true = paraboloid LUT hybrid, false = procedural
     bool hdrEnabled = true;                // true = HDR tonemapping/bloom, false = bypass
     bool hdrPassEnabled = true;            // true = render HDR pass, false = skip entire HDR scene rendering
