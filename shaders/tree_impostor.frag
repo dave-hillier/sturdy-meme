@@ -18,16 +18,20 @@ layout(location = 7) flat in uint fragArchetypeIndex;
 
 layout(location = 0) out vec4 outColor;
 
-// Impostor atlas texture arrays (one layer per archetype)
+// Legacy impostor atlas texture arrays (one layer per archetype)
 layout(binding = BINDING_TREE_IMPOSTOR_ALBEDO) uniform sampler2DArray albedoAlphaAtlas;
 layout(binding = BINDING_TREE_IMPOSTOR_NORMAL) uniform sampler2DArray normalDepthAOAtlas;
+
+// Octahedral impostor atlas texture arrays
+layout(binding = BINDING_TREE_IMPOSTOR_OCT_ALBEDO) uniform sampler2DArray octAlbedoAlphaAtlas;
+layout(binding = BINDING_TREE_IMPOSTOR_OCT_NORMAL) uniform sampler2DArray octNormalDepthAOAtlas;
 
 // Shadow map
 layout(binding = BINDING_TREE_IMPOSTOR_SHADOW_MAP) uniform sampler2DArrayShadow shadowMapArray;
 
 layout(push_constant) uniform PushConstants {
     vec4 cameraPos;     // xyz = camera position, w = autumnHueShift
-    vec4 lodParams;     // x = blend factor, y = brightness, z = normal strength, w = debug elevation
+    vec4 lodParams;     // x = useOctahedral (0 or 1), y = brightness, z = normal strength, w = debug elevation
     vec4 atlasParams;   // x = hSize, y = vSize, z = baseOffset, w = debugShowCellIndex
 } push;
 
@@ -63,10 +67,23 @@ const float bayerMatrix[16] = float[16](
 );
 
 void main() {
+    // Check if using octahedral mapping
+    bool useOctahedral = push.lodParams.x > 0.5;
+
     // Sample impostor atlas array using archetype index as layer
     vec3 atlasCoord = vec3(fragTexCoord, float(fragArchetypeIndex));
-    vec4 albedoAlpha = texture(albedoAlphaAtlas, atlasCoord);
-    vec4 normalDepthAO = texture(normalDepthAOAtlas, atlasCoord);
+    vec4 albedoAlpha;
+    vec4 normalDepthAO;
+
+    if (useOctahedral) {
+        // Sample octahedral atlas
+        albedoAlpha = texture(octAlbedoAlphaAtlas, atlasCoord);
+        normalDepthAO = texture(octNormalDepthAOAtlas, atlasCoord);
+    } else {
+        // Sample legacy 17-view atlas
+        albedoAlpha = texture(albedoAlphaAtlas, atlasCoord);
+        normalDepthAO = texture(normalDepthAOAtlas, atlasCoord);
+    }
 
     // Alpha test
     if (albedoAlpha.a < 0.5) {

@@ -12,7 +12,7 @@
 #include "core/VulkanRAII.h"
 #include "core/DescriptorManager.h"
 
-// Impostor atlas configuration
+// Legacy impostor atlas configuration (17 discrete views)
 // Layout: 2 rows x 9 columns = 18 cells (17 used, 1 unused)
 // Row 0: 8 horizon views (0-315 degrees) + 1 top-down
 // Row 1: 8 elevated views (45 degrees elevation) + 1 unused
@@ -24,6 +24,23 @@ struct ImpostorAtlasConfig {
     static constexpr int CELL_SIZE = 256;             // Pixels per cell (increased from 128)
     static constexpr int ATLAS_WIDTH = CELLS_PER_ROW * CELL_SIZE;   // 2304 pixels
     static constexpr int ATLAS_HEIGHT = VERTICAL_LEVELS * CELL_SIZE; // 512 pixels
+};
+
+// Octahedral impostor atlas configuration (continuous view mapping)
+// Uses octahedral projection for smooth interpolation across all view angles
+// Single square texture with hemispherical coverage
+struct OctahedralAtlasConfig {
+    static constexpr int RESOLUTION = 512;            // Square texture resolution
+    static constexpr int ATLAS_WIDTH = RESOLUTION;
+    static constexpr int ATLAS_HEIGHT = RESOLUTION;
+
+    // Capture settings: number of samples per axis for rendering
+    // More samples = better quality but slower generation
+    static constexpr int CAPTURE_SAMPLES = 32;        // 32x32 = 1024 view directions
+
+    // Elevation range for capture (degrees)
+    static constexpr float MIN_ELEVATION = 0.0f;      // Horizon
+    static constexpr float MAX_ELEVATION = 90.0f;     // Top-down
 };
 
 // A single tree archetype's impostor data
@@ -66,6 +83,7 @@ struct TreeLODSettings {
     bool enableImpostors = true;
     float impostorBrightness = 1.0f;       // Brightness adjustment for impostors
     float normalStrength = 1.0f;           // How much normals affect lighting
+    bool useOctahedralMapping = true;      // Use octahedral atlas (Phase 6) vs legacy 17-view
 
     // Debug settings
     bool enableDebugElevation = false;     // Override elevation angle for testing
@@ -117,10 +135,14 @@ public:
     // Get number of archetypes
     size_t getArchetypeCount() const { return archetypes_.size(); }
 
-    // Get atlas array textures for binding (single array covers all archetypes)
+    // Get legacy atlas array textures for binding (17-view discrete atlas)
     VkImageView getAlbedoAtlasArrayView() const { return albedoArrayView_.get(); }
     VkImageView getNormalAtlasArrayView() const { return normalArrayView_.get(); }
     VkSampler getAtlasSampler() const { return atlasSampler_.get(); }
+
+    // Get octahedral atlas array textures (continuous octahedral mapping)
+    VkImageView getOctAlbedoAtlasArrayView() const { return octAlbedoArrayView_.get(); }
+    VkImageView getOctNormalAtlasArrayView() const { return octNormalArrayView_.get(); }
 
     // Legacy per-archetype access (for preview/debug)
     VkImageView getAlbedoAtlasView(uint32_t archetypeIndex) const;
@@ -140,12 +162,14 @@ private:
 
     bool createRenderPass();
     bool createCapturePipeline();
-    bool createAtlasArrayTextures();  // Create the shared array textures
-    bool createAtlasResources(uint32_t archetypeIndex);  // Create per-layer framebuffer
+    bool createAtlasArrayTextures();  // Create the shared legacy array textures
+    bool createOctahedralAtlasArrayTextures();  // Create the octahedral array textures
+    bool createAtlasResources(uint32_t archetypeIndex);  // Create per-layer framebuffer (legacy)
+    bool createOctahedralAtlasResources(uint32_t archetypeIndex);  // Create per-layer framebuffer (octahedral)
     bool createSampler();
     bool createPreviewDescriptorSets();
 
-    // Render tree from a specific viewing angle to atlas cell
+    // Render tree from a specific viewing angle to legacy atlas cell
     void renderToCell(
         VkCommandBuffer cmd,
         int cellX, int cellY,
@@ -160,6 +184,24 @@ private:
         float baseY,                 // Y coordinate of tree base (for asymmetric projection)
         VkDescriptorSet branchDescSet,
         VkDescriptorSet leafDescSet);
+
+    // Render tree to octahedral atlas from a specific view direction
+    void renderToOctahedral(
+        VkCommandBuffer cmd,
+        float azimuth,           // Horizontal angle (0-360)
+        float elevation,         // Vertical angle (0 = horizon, 90 = top-down)
+        const Mesh& branchMesh,
+        const std::vector<LeafInstanceGPU>& leafInstances,
+        float horizontalRadius,
+        float boundingSphereRadius,
+        float halfHeight,
+        float centerHeight,
+        float baseY,
+        VkDescriptorSet branchDescSet,
+        VkDescriptorSet leafDescSet);
+
+    // Helper to compute octahedral UV from direction
+    static glm::vec2 octahedralEncode(glm::vec3 dir);
 
     bool createLeafCapturePipeline();
     bool createLeafQuadMesh();
@@ -214,7 +256,7 @@ private:
     // Archetype data
     std::vector<TreeImpostorArchetype> archetypes_;
 
-    // Texture array for all archetypes (shared across all archetypes)
+    // Legacy texture array for all archetypes (17-view discrete atlas)
     VkImage albedoArrayImage_ = VK_NULL_HANDLE;
     VmaAllocation albedoArrayAllocation_ = VK_NULL_HANDLE;
     ManagedImageView albedoArrayView_;  // View of entire array for shader binding
@@ -222,6 +264,24 @@ private:
     VkImage normalArrayImage_ = VK_NULL_HANDLE;
     VmaAllocation normalArrayAllocation_ = VK_NULL_HANDLE;
     ManagedImageView normalArrayView_;  // View of entire array for shader binding
+
+    // Octahedral texture array for all archetypes (continuous octahedral mapping)
+    VkImage octAlbedoArrayImage_ = VK_NULL_HANDLE;
+    VmaAllocation octAlbedoArrayAllocation_ = VK_NULL_HANDLE;
+    ManagedImageView octAlbedoArrayView_;
+
+    VkImage octNormalArrayImage_ = VK_NULL_HANDLE;
+    VmaAllocation octNormalArrayAllocation_ = VK_NULL_HANDLE;
+    ManagedImageView octNormalArrayView_;
+
+    // Octahedral atlas per-archetype resources (framebuffers for capture)
+    struct OctahedralAtlasTextures {
+        VkImage depthImage = VK_NULL_HANDLE;
+        VmaAllocation depthAllocation = VK_NULL_HANDLE;
+        ManagedImageView depthView;
+        ManagedFramebuffer framebuffer;
+    };
+    std::vector<OctahedralAtlasTextures> octAtlasTextures_;
 
     uint32_t maxArchetypes_ = 16;  // Maximum layers in the array
     uint32_t currentArchetypeCount_ = 0;

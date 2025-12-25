@@ -222,7 +222,7 @@ bool TreeLODSystem::createBillboardMesh() {
 }
 
 bool TreeLODSystem::createDescriptorSetLayout() {
-    std::array<VkDescriptorSetLayoutBinding, 5> bindings{};
+    std::array<VkDescriptorSetLayoutBinding, 7> bindings{};
 
     // UBO
     bindings[0].binding = BINDING_TREE_IMPOSTOR_UBO;
@@ -230,13 +230,13 @@ bool TreeLODSystem::createDescriptorSetLayout() {
     bindings[0].descriptorCount = 1;
     bindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
-    // Albedo atlas
+    // Legacy albedo atlas (17-view)
     bindings[1].binding = BINDING_TREE_IMPOSTOR_ALBEDO;
     bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     bindings[1].descriptorCount = 1;
     bindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-    // Normal atlas
+    // Legacy normal atlas (17-view)
     bindings[2].binding = BINDING_TREE_IMPOSTOR_NORMAL;
     bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     bindings[2].descriptorCount = 1;
@@ -253,6 +253,18 @@ bool TreeLODSystem::createDescriptorSetLayout() {
     bindings[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     bindings[4].descriptorCount = 1;
     bindings[4].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
+    // Octahedral albedo atlas (Phase 6)
+    bindings[5].binding = BINDING_TREE_IMPOSTOR_OCT_ALBEDO;
+    bindings[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[5].descriptorCount = 1;
+    bindings[5].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    // Octahedral normal atlas (Phase 6)
+    bindings[6].binding = BINDING_TREE_IMPOSTOR_OCT_NORMAL;
+    bindings[6].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[6].descriptorCount = 1;
+    bindings[6].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -425,8 +437,8 @@ bool TreeLODSystem::allocateDescriptorSets() {
 
 bool TreeLODSystem::createShadowDescriptorSetLayout() {
     // Shadow pass needs UBO (for cascade matrices), albedo atlas (for alpha testing),
-    // and instance buffer (for GPU-culled rendering)
-    std::array<VkDescriptorSetLayoutBinding, 3> bindings{};
+    // instance buffer (for GPU-culled rendering), and octahedral albedo atlas (Phase 6)
+    std::array<VkDescriptorSetLayoutBinding, 4> bindings{};
 
     // UBO
     bindings[0].binding = BINDING_TREE_IMPOSTOR_UBO;
@@ -446,6 +458,12 @@ bool TreeLODSystem::createShadowDescriptorSetLayout() {
     bindings[2].descriptorCount = 1;
     bindings[2].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 
+    // Octahedral albedo atlas (Phase 6 - for alpha testing with octahedral mapping)
+    bindings[3].binding = BINDING_TREE_IMPOSTOR_OCT_ALBEDO;
+    bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[3].descriptorCount = 1;
+    bindings[3].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
@@ -461,11 +479,11 @@ bool TreeLODSystem::createShadowDescriptorSetLayout() {
 }
 
 bool TreeLODSystem::createShadowPipeline() {
-    // Push constants: cameraPos, lodParams, atlasParams, cascadeIndex
+    // Push constants: cameraPos, lodParams, cascadeIndex (matching shader structure)
     VkPushConstantRange pushConstant{};
-    pushConstant.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    pushConstant.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     pushConstant.offset = 0;
-    pushConstant.size = sizeof(glm::vec4) * 3 + sizeof(int);  // cameraPos, lodParams, atlasParams, cascadeIndex
+    pushConstant.size = sizeof(glm::vec4) * 2 + sizeof(int);  // cameraPos, lodParams, cascadeIndex
 
     VkDescriptorSetLayout layouts[] = {shadowDescriptorSetLayout_.get()};
 
@@ -825,11 +843,13 @@ void TreeLODSystem::updateDescriptorSets(uint32_t frameIndex, VkBuffer uniformBu
     // Use the shared array views that contain all archetypes
     VkImageView albedoView = impostorAtlas_->getAlbedoAtlasArrayView();
     VkImageView normalView = impostorAtlas_->getNormalAtlasArrayView();
+    VkImageView octAlbedoView = impostorAtlas_->getOctAlbedoAtlasArrayView();
+    VkImageView octNormalView = impostorAtlas_->getOctNormalAtlasArrayView();
     VkSampler atlasSampler = impostorAtlas_->getAtlasSampler();
 
     if (albedoView == VK_NULL_HANDLE || normalView == VK_NULL_HANDLE) return;
 
-    std::array<VkWriteDescriptorSet, 5> writes{};
+    std::array<VkWriteDescriptorSet, 7> writes{};
 
     VkDescriptorBufferInfo uboInfo{};
     uboInfo.buffer = uniformBuffer;
@@ -892,6 +912,32 @@ void TreeLODSystem::updateDescriptorSets(uint32_t frameIndex, VkBuffer uniformBu
     writes[4].descriptorCount = 1;
     writes[4].pBufferInfo = &instanceInfo;
 
+    // Octahedral albedo atlas (Phase 6)
+    VkDescriptorImageInfo octAlbedoInfo{};
+    octAlbedoInfo.sampler = atlasSampler;
+    octAlbedoInfo.imageView = octAlbedoView;
+    octAlbedoInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    writes[5].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[5].dstSet = impostorDescriptorSets_[frameIndex];
+    writes[5].dstBinding = BINDING_TREE_IMPOSTOR_OCT_ALBEDO;
+    writes[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[5].descriptorCount = 1;
+    writes[5].pImageInfo = &octAlbedoInfo;
+
+    // Octahedral normal atlas (Phase 6)
+    VkDescriptorImageInfo octNormalInfo{};
+    octNormalInfo.sampler = atlasSampler;
+    octNormalInfo.imageView = octNormalView;
+    octNormalInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    writes[6].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[6].dstSet = impostorDescriptorSets_[frameIndex];
+    writes[6].dstBinding = BINDING_TREE_IMPOSTOR_OCT_NORMAL;
+    writes[6].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[6].descriptorCount = 1;
+    writes[6].pImageInfo = &octNormalInfo;
+
     vkUpdateDescriptorSets(device_, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 }
 
@@ -938,9 +984,9 @@ void TreeLODSystem::renderImpostors(VkCommandBuffer cmd, uint32_t frameIndex,
     } pushConstants;
 
     pushConstants.cameraPos = glm::vec4(lastCameraPos_, settings.autumnHueShift);
-    // lodParams: x=blend, y=brightness, z=normalStrength, w=debugElevation (negative=disabled)
+    // lodParams: x=useOctahedral, y=brightness, z=normalStrength, w=debugElevation (negative=disabled)
     pushConstants.lodParams = glm::vec4(
-        1.0f,  // blend factor (handled per-instance)
+        settings.useOctahedralMapping ? 1.0f : 0.0f,  // Phase 6: octahedral mode flag
         settings.impostorBrightness,
         settings.normalStrength,
         settings.enableDebugElevation ? settings.debugElevation : -999.0f  // -999 = disabled
@@ -1102,11 +1148,13 @@ void TreeLODSystem::renderImpostorsGPUCulled(VkCommandBuffer cmd, uint32_t frame
     // Use the shared array views that contain all archetypes (same as CPU path)
     VkImageView albedoView = impostorAtlas_->getAlbedoAtlasArrayView();
     VkImageView normalView = impostorAtlas_->getNormalAtlasArrayView();
+    VkImageView octAlbedoView = impostorAtlas_->getOctAlbedoAtlasArrayView();
+    VkImageView octNormalView = impostorAtlas_->getOctNormalAtlasArrayView();
     VkSampler atlasSampler = impostorAtlas_->getAtlasSampler();
 
     if (albedoView == VK_NULL_HANDLE || normalView == VK_NULL_HANDLE) return;
 
-    std::array<VkWriteDescriptorSet, 5> writes{};
+    std::array<VkWriteDescriptorSet, 7> writes{};
 
     VkDescriptorBufferInfo uniformInfo{};
     uniformInfo.buffer = uniformBuffer;
@@ -1169,6 +1217,32 @@ void TreeLODSystem::renderImpostorsGPUCulled(VkCommandBuffer cmd, uint32_t frame
     writes[4].descriptorCount = 1;
     writes[4].pBufferInfo = &instanceInfo;
 
+    // Octahedral albedo atlas (Phase 6)
+    VkDescriptorImageInfo octAlbedoInfo{};
+    octAlbedoInfo.sampler = atlasSampler;
+    octAlbedoInfo.imageView = octAlbedoView;
+    octAlbedoInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    writes[5].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[5].dstSet = impostorDescriptorSets_[frameIndex];
+    writes[5].dstBinding = BINDING_TREE_IMPOSTOR_OCT_ALBEDO;
+    writes[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[5].descriptorCount = 1;
+    writes[5].pImageInfo = &octAlbedoInfo;
+
+    // Octahedral normal atlas (Phase 6)
+    VkDescriptorImageInfo octNormalInfo{};
+    octNormalInfo.sampler = atlasSampler;
+    octNormalInfo.imageView = octNormalView;
+    octNormalInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    writes[6].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[6].dstSet = impostorDescriptorSets_[frameIndex];
+    writes[6].dstBinding = BINDING_TREE_IMPOSTOR_OCT_NORMAL;
+    writes[6].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[6].descriptorCount = 1;
+    writes[6].pImageInfo = &octNormalInfo;
+
     vkUpdateDescriptorSets(device_, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 
     // Bind pipeline
@@ -1202,7 +1276,7 @@ void TreeLODSystem::renderImpostorsGPUCulled(VkCommandBuffer cmd, uint32_t frame
 
     pushConstants.cameraPos = glm::vec4(lastCameraPos_, settings.autumnHueShift);
     pushConstants.lodParams = glm::vec4(
-        1.0f,
+        settings.useOctahedralMapping ? 1.0f : 0.0f,  // Phase 6: octahedral mode flag
         settings.impostorBrightness,
         settings.normalStrength,
         settings.enableDebugElevation ? settings.debugElevation : -999.0f
@@ -1243,11 +1317,12 @@ void TreeLODSystem::renderImpostorShadowsGPUCulled(VkCommandBuffer cmd, uint32_t
     // Update shadow descriptor set with GPU-culled instance buffer
     if (shadowDescriptorSets_.empty()) return;
 
-    VkImageView albedoView = impostorAtlas_->getAlbedoAtlasView(0);
+    VkImageView albedoView = impostorAtlas_->getAlbedoAtlasArrayView();
+    VkImageView octAlbedoView = impostorAtlas_->getOctAlbedoAtlasArrayView();
     VkSampler atlasSampler = impostorAtlas_->getAtlasSampler();
     if (albedoView == VK_NULL_HANDLE) return;
 
-    std::array<VkWriteDescriptorSet, 3> writes{};
+    std::array<VkWriteDescriptorSet, 4> writes{};
 
     VkDescriptorBufferInfo uniformInfo{};
     uniformInfo.buffer = uniformBuffer;
@@ -1256,7 +1331,7 @@ void TreeLODSystem::renderImpostorShadowsGPUCulled(VkCommandBuffer cmd, uint32_t
 
     writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writes[0].dstSet = shadowDescriptorSets_[frameIndex];
-    writes[0].dstBinding = 0;
+    writes[0].dstBinding = BINDING_TREE_IMPOSTOR_UBO;
     writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     writes[0].descriptorCount = 1;
     writes[0].pBufferInfo = &uniformInfo;
@@ -1268,7 +1343,7 @@ void TreeLODSystem::renderImpostorShadowsGPUCulled(VkCommandBuffer cmd, uint32_t
 
     writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writes[1].dstSet = shadowDescriptorSets_[frameIndex];
-    writes[1].dstBinding = 1;
+    writes[1].dstBinding = BINDING_TREE_IMPOSTOR_ALBEDO;
     writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     writes[1].descriptorCount = 1;
     writes[1].pImageInfo = &albedoInfo;
@@ -1286,6 +1361,19 @@ void TreeLODSystem::renderImpostorShadowsGPUCulled(VkCommandBuffer cmd, uint32_t
     writes[2].descriptorCount = 1;
     writes[2].pBufferInfo = &instanceInfo;
 
+    // Octahedral albedo atlas (Phase 6)
+    VkDescriptorImageInfo octAlbedoInfo{};
+    octAlbedoInfo.sampler = atlasSampler;
+    octAlbedoInfo.imageView = octAlbedoView;
+    octAlbedoInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    writes[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[3].dstSet = shadowDescriptorSets_[frameIndex];
+    writes[3].dstBinding = BINDING_TREE_IMPOSTOR_OCT_ALBEDO;
+    writes[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[3].descriptorCount = 1;
+    writes[3].pImageInfo = &octAlbedoInfo;
+
     vkUpdateDescriptorSets(device_, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 
     // Bind shadow pipeline
@@ -1293,17 +1381,22 @@ void TreeLODSystem::renderImpostorShadowsGPUCulled(VkCommandBuffer cmd, uint32_t
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipelineLayout_.get(),
                            0, 1, &shadowDescriptorSets_[frameIndex], 0, nullptr);
 
-    // Push constants for shadow pass
+    // Push constants for shadow pass (matching shader layout: cameraPos, lodParams, cascadeIndex)
     struct {
         glm::vec4 cameraPos;
+        glm::vec4 lodParams;
         int cascadeIndex;
         float _pad[3];
     } pushConstants;
     pushConstants.cameraPos = glm::vec4(lastCameraPos_, 0.0f);
+    pushConstants.lodParams = glm::vec4(
+        settings.useOctahedralMapping ? 1.0f : 0.0f,  // Phase 6: octahedral mode flag
+        0.0f, 0.0f, 0.0f  // unused in shadow pass
+    );
     pushConstants.cascadeIndex = cascadeIndex;
 
     vkCmdPushConstants(cmd, shadowPipelineLayout_.get(),
-                      VK_SHADER_STAGE_VERTEX_BIT,
+                      VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                       0, sizeof(pushConstants), &pushConstants);
 
     // Bind vertex and index buffers

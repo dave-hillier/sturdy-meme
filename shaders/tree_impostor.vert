@@ -7,6 +7,7 @@ const int NUM_CASCADES = 4;
 #include "bindings.glsl"
 #include "ubo_common.glsl"
 #include "tree_impostor_instance.glsl"
+#include "octahedral_mapping.glsl"
 
 // Per-vertex data for billboard quad
 layout(location = 0) in vec3 inPosition;   // Billboard quad vertex position
@@ -20,7 +21,7 @@ layout(std430, binding = BINDING_TREE_IMPOSTOR_INSTANCES) readonly buffer Instan
 // Simplified push constants - instance data comes from SSBO
 layout(push_constant) uniform PushConstants {
     vec4 cameraPos;         // xyz = camera world position, w = autumnHueShift
-    vec4 lodParams;         // x = unused, y = brightness, z = normal strength, w = debug elevation
+    vec4 lodParams;         // x = useOctahedral (0 or 1), y = brightness, z = normal strength, w = debug elevation
 } push;
 
 layout(location = 0) out vec2 fragTexCoord;
@@ -48,64 +49,76 @@ void main() {
     float vSize = inst.sizeAndOffset.y;
     float baseOffset = inst.sizeAndOffset.z;
 
-    // Compute view direction FROM tree TO camera (horizontal only for angle selection)
-    // This must match the capture convention where azimuth=0 means camera on +Z axis
+    // Compute view direction FROM tree TO camera
     vec3 toCamera = push.cameraPos.xyz - treePos;
-    vec2 toCameraHorizontal = normalize(toCamera.xz);
+    float dist = length(toCamera);
+    vec3 viewDir = toCamera / dist;
 
-    // Compute horizontal angle (0-360 degrees)
-    // atan(x, z) gives angle where +Z is 0°, +X is 90°
-    // This matches capture convention: azimuth=0 is camera at +Z, azimuth=90 is camera at +X
-    float hAngle = atan(toCameraHorizontal.x, toCameraHorizontal.y);
-    hAngle = degrees(hAngle);
-    if (hAngle < 0.0) hAngle += 360.0;
-
-    // Apply tree rotation offset - add rotation because we're rotating the view around the tree
-    hAngle = mod(hAngle + degrees(rotation) + 360.0, 360.0);
-
-    // Select horizontal cell index (0-7)
-    int hIndex = int(mod(round(hAngle / ANGLE_STEP), float(HORIZONTAL_ANGLES)));
+    // Check if using octahedral mapping (Phase 6)
+    bool useOctahedral = push.lodParams.x > 0.5;
 
     // Compute elevation angle (how much camera is above tree)
-    float dist = length(toCamera);
-    float elevation = degrees(asin(clamp(toCamera.y / dist, -1.0, 1.0)));
+    float elevation = degrees(asin(clamp(viewDir.y, -1.0, 1.0)));
 
     // Debug elevation override (lodParams.w >= -90 means override is enabled)
     if (push.lodParams.w >= -90.0) {
         elevation = push.lodParams.w;
+        // Recalculate viewDir for debug elevation
+        float debugElevRad = radians(elevation);
+        vec2 horizDir = normalize(toCamera.xz);
+        viewDir = vec3(horizDir.x * cos(debugElevRad), sin(debugElevRad), horizDir.y * cos(debugElevRad));
     }
 
-    // Select vertical level
-    // Level 0: horizon (-22.5 to 22.5 degrees)
-    // Level 1: elevated (22.5 to 67.5 degrees)
-    // Level 2: top-down (> 67.5 degrees) - uses single cell
-    int vIndex;
-    int cellIndex;
+    vec2 atlasUV;
+    int cellIndex = 0;
 
-    if (elevation > 67.5) {
-        // Top-down view: use cell 8 of row 0
-        cellIndex = 8;
-        vIndex = 0;
-    } else if (elevation > 22.5) {
-        // Elevated view: row 1
-        cellIndex = CELLS_PER_ROW + hIndex;
-        vIndex = 1;
+    if (useOctahedral) {
+        // === OCTAHEDRAL MAPPING (Phase 6) ===
+        // Convert view direction to impostor space (apply tree rotation)
+        vec3 impostorDir = viewToImpostorSpace(viewDir, rotation);
+
+        // Compute octahedral UV
+        atlasUV = octahedralEncode(impostorDir);
+
+        // Map quad UV within the octahedral atlas
+        // The quad UV (inTexCoord) represents position within the billboard
+        // We sample the atlas at the octahedral UV corresponding to view direction
+        fragTexCoord = atlasUV;
+        fragCellIndex = -1;  // Not using cell index for octahedral
     } else {
-        // Horizon view: row 0
-        cellIndex = hIndex;
-        vIndex = 0;
+        // === LEGACY 17-VIEW MAPPING ===
+        vec2 toCameraHorizontal = normalize(toCamera.xz);
+
+        // Compute horizontal angle (0-360 degrees)
+        float hAngle = atan(toCameraHorizontal.x, toCameraHorizontal.y);
+        hAngle = degrees(hAngle);
+        if (hAngle < 0.0) hAngle += 360.0;
+
+        // Apply tree rotation offset
+        hAngle = mod(hAngle + degrees(rotation) + 360.0, 360.0);
+
+        // Select horizontal cell index (0-7)
+        int hIndex = int(mod(round(hAngle / ANGLE_STEP), float(HORIZONTAL_ANGLES)));
+
+        // Select vertical level
+        if (elevation > 67.5) {
+            cellIndex = 8;  // Top-down view
+        } else if (elevation > 22.5) {
+            cellIndex = CELLS_PER_ROW + hIndex;  // Elevated view
+        } else {
+            cellIndex = hIndex;  // Horizon view
+        }
+
+        fragCellIndex = cellIndex;
+
+        // Compute atlas UV offset for this cell
+        int cellX = cellIndex % CELLS_PER_ROW;
+        int cellY = cellIndex / CELLS_PER_ROW;
+
+        vec2 cellUV = inTexCoord;
+        atlasUV = (vec2(cellX, cellY) + cellUV) / vec2(float(CELLS_PER_ROW), 2.0);
+        fragTexCoord = atlasUV;
     }
-
-    fragCellIndex = cellIndex;
-
-    // Compute atlas UV offset for this cell
-    int cellX = cellIndex % CELLS_PER_ROW;
-    int cellY = cellIndex / CELLS_PER_ROW;
-
-    // Transform quad UV to atlas UV (no rotation needed - billboard orientation handles it)
-    vec2 cellUV = inTexCoord;
-    vec2 atlasUV = (vec2(cellX, cellY) + cellUV) / vec2(float(CELLS_PER_ROW), 2.0);
-    fragTexCoord = atlasUV;
 
     // Billboard orientation depends on view angle
     vec3 forward, up, right;
@@ -113,32 +126,36 @@ void main() {
     vec3 billboardCenter;
 
     if (elevation > 67.5) {
-        // Top-down view: billboard lies flat, fixed orientation based on tree rotation only
-        forward = vec3(0.0, 1.0, 0.0);  // Billboard faces up
-        // Fixed orientation based on tree rotation (doesn't change with camera angle)
+        // Top-down view: billboard lies flat
+        forward = vec3(0.0, 1.0, 0.0);
         right = vec3(cos(rotation), 0.0, -sin(rotation));
         up = vec3(sin(rotation), 0.0, cos(rotation));
 
-        // For top-down, use same size in both directions (it's a square from above)
         float maxSize = max(hSize, vSize);
-        // Billboard is centered on the tree at canopy height
-        // inPosition.x is -0.5 to 0.5, inPosition.y is 0 to 1
-        // Remap Y to also be -0.5 to 0.5 for centered quad
         localPos = right * inPosition.x * maxSize * 2.0 +
                    up * (inPosition.y - 0.5) * maxSize * 2.0;
-        // Center the billboard at tree center height (half the tree height)
         billboardCenter = treePos + vec3(0.0, vSize, 0.0);
     } else {
         // Normal billboard: face camera but stay upright
-        // Forward points toward camera (opposite of toCamera horizontal direction)
         forward = -normalize(vec3(toCamera.x, 0.0, toCamera.z));
         up = vec3(0.0, 1.0, 0.0);
         right = cross(up, forward);
 
-        // For elevated views (row 1, captured at 45 degrees), tilt billboard 45 degrees
-        // Tilt top of billboard away from camera so face tilts up toward camera
-        if (elevation > 22.5) {
-            float tiltAngle = radians(45.0);  // Fixed 45 degrees to match capture angle
+        // For octahedral mode, use smooth tilt based on elevation
+        // For legacy mode, use discrete tilt for elevated views
+        if (useOctahedral) {
+            // Smooth tilt interpolation based on elevation
+            float tiltAmount = smoothstep(15.0, 60.0, elevation);
+            float tiltAngle = tiltAmount * radians(45.0);
+
+            vec3 tiltedUp = cos(tiltAngle) * up + sin(tiltAngle) * forward;
+            vec3 tiltedForward = -sin(tiltAngle) * up + cos(tiltAngle) * forward;
+            forward = tiltedForward;
+            up = tiltedUp;
+            right = cross(up, forward);
+        } else if (elevation > 22.5) {
+            // Legacy discrete 45 degree tilt
+            float tiltAngle = radians(45.0);
             vec3 tiltedUp = cos(tiltAngle) * up + sin(tiltAngle) * forward;
             vec3 tiltedForward = -sin(tiltAngle) * up + cos(tiltAngle) * forward;
             forward = tiltedForward;
@@ -146,9 +163,6 @@ void main() {
             right = cross(up, forward);
         }
 
-        // inPosition.x is -0.5 to 0.5, inPosition.y is 0 to 1
-        // Billboard width = 2*hSize, height = 2*vSize
-        // Base of billboard (y=0) should be at tree base
         localPos = right * inPosition.x * hSize * 2.0 +
                    up * inPosition.y * vSize * 2.0;
         billboardCenter = treePos + vec3(0.0, baseOffset, 0.0);

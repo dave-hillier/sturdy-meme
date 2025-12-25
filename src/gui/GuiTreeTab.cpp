@@ -85,6 +85,17 @@ void GuiTreeTab::render(ITreeControl& treeControl) {
             ImGui::SliderFloat("Normal Strength", &settings.normalStrength, 0.0f, 1.0f, "%.2f");
 
             ImGui::Spacing();
+            ImGui::Text("Octahedral Mapping (Phase 6):");
+            ImGui::Checkbox("Use Octahedral Impostors", &settings.useOctahedralMapping);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Octahedral impostor mapping provides:\n"
+                                  "- Continuous view interpolation (no popping)\n"
+                                  "- Smooth blending between viewing angles\n"
+                                  "- Better quality at oblique angles\n\n"
+                                  "When disabled, uses legacy 17-view discrete atlas.");
+            }
+
+            ImGui::Spacing();
             ImGui::Text("Seasonal Effects (Global):");
             ImGui::SliderFloat("Global Autumn", &settings.autumnHueShift, 0.0f, 1.0f, "%.2f");
             if (ImGui::IsItemHovered()) {

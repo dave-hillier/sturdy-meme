@@ -2,9 +2,9 @@
 
 Scaling the tree rendering system to support 1M+ tree instances, based on techniques from SpeedTree, Unreal Engine 5, Nanite, and AAA game development.
 
-## Current Status: 5/6 Phases Complete ✅
+## Current Status: 6/6 Phases Complete ✅
 
-The tree rendering optimization roadmap is nearly complete. All core GPU-driven culling and LOD systems are implemented:
+The tree rendering optimization roadmap is complete. All GPU-driven culling, LOD, and impostor systems are implemented:
 
 | Phase | Status |
 |-------|--------|
@@ -13,9 +13,9 @@ The tree rendering optimization roadmap is nearly complete. All core GPU-driven 
 | 3. Two-Phase Tree-to-Leaf Culling | ✅ Complete |
 | 4. Screen-Space Error LOD | ✅ Complete |
 | 5. Temporal Coherence | ✅ Complete |
-| **6. Octahedral Impostor Mapping** | ❌ Remaining |
+| 6. Octahedral Impostor Mapping | ✅ Complete |
 
-**Only Phase 6 remains** - replacing the 17-view discrete impostor atlas with continuous octahedral mapping for smoother transitions and reduced memory.
+**All phases complete.** The tree rendering system now supports 1M+ trees with GPU-driven culling, screen-space error LOD, temporal coherence, and octahedral impostor mapping for smooth, continuous view interpolation.
 
 ## Core Philosophy: Screen-Space Error Budget
 
@@ -253,12 +253,12 @@ The existing tree rendering system implements several modern GPU-driven techniqu
 | Phase 3: Two-Phase Tree-to-Leaf Culling | ✅ Complete | `tree_filter.comp`, `tree_leaf_cull_phase3.comp` with UI toggle |
 | Phase 4: Screen-Space Error LOD | ✅ Complete | `TreeLODSettings.useScreenSpaceError`, FOV-aware LOD selection |
 | Phase 5: Temporal Coherence | ✅ Complete | `ImpostorCullSystem::TemporalSettings`, visibility cache with UI toggle |
-| Phase 6: Octahedral Impostor Mapping | ❌ Not Started | Still using 17-view atlas |
+| Phase 6: Octahedral Impostor Mapping | ✅ Complete | `octahedral_mapping.glsl`, 512x512 hemispherical atlas with UI toggle |
 
-### Remaining Work
+### System Complete
 
-1. **Octahedral Impostors (Phase 6)**: Current 17-view discrete atlas could be replaced with continuous octahedral mapping for smoother transitions and ~60% memory reduction
-2. **Optional: Shader LOD variants**: Could add simplified PBR variants for distant trees (currently full PBR at all distances)
+All optimization phases are now implemented. Optional future enhancements:
+1. **Shader LOD variants**: Could add simplified PBR variants for distant trees (currently full PBR at all distances)
 
 ---
 
@@ -758,24 +758,32 @@ void main() {
 
 ---
 
-## Phase 6: Octahedral Impostor Mapping
+## Phase 6: Octahedral Impostor Mapping ✅ COMPLETE
 
 **Goal**: Improve impostor quality and reduce memory with continuous view mapping
 
-### Current System
+**Status**: Fully implemented with hemispherical octahedral mapping. Atlas generation captures 128 views (16 azimuth × 8 elevation angles) rendered to a 512×512 texture per archetype. Runtime shader includes both octahedral and legacy 17-view modes with UI toggle.
 
-- 17 discrete views per archetype (8 horizontal + 8 elevated + 1 top-down)
-- 256x256 pixels per cell
-- Atlas size: 2304x512 per archetype
-- ~4MB per archetype (albedo + normal)
+### Implementation Details
+
+| Component | Implementation |
+|-----------|---------------|
+| Shader utilities | `shaders/octahedral_mapping.glsl` - `octahedralEncode()`, `viewToImpostorSpace()` |
+| Atlas config | `TreeImpostorAtlas.h` - `OctahedralAtlasConfig` struct (512×512 resolution) |
+| Atlas textures | Octahedral albedo/normal arrays alongside legacy atlases |
+| Vertex shader | `tree_impostor.vert` - octahedral UV calculation with smooth billboard tilt |
+| Fragment shader | `tree_impostor.frag` - samples from `octAlbedoAlphaAtlas`/`octNormalDepthAOAtlas` |
+| Shadow shaders | `tree_impostor_shadow.vert/frag` - octahedral support for shadow passes |
+| Descriptor bindings | `BINDING_TREE_IMPOSTOR_OCT_ALBEDO` (5), `BINDING_TREE_IMPOSTOR_OCT_NORMAL` (6) |
+| UI toggle | "Use Octahedral Impostors" checkbox in Tree LOD Settings |
 
 ### Octahedral Mapping
 
 Single hemisphere projection providing continuous view coverage:
 
 ```
-Octahedral UV mapping:
-    +Y (top-down)
+Octahedral UV mapping (hemispherical):
+    +Y (top-down) → center of atlas
        /\
       /  \
      /    \
@@ -785,47 +793,49 @@ Octahedral UV mapping:
    | W   E  |
    |   S    |
    +--------+
+    Horizon → edges of atlas
 ```
-
-### Benefits
-
-- **Smoother transitions**: No discrete view jumps
-- **Better coverage**: Continuous interpolation between all angles
-- **Memory reduction**: Single 512x512 texture (~1.5MB per archetype)
 
 ### Shader Implementation
 
 ```glsl
-// Convert view direction to octahedral UV
+// shaders/octahedral_mapping.glsl
 vec2 octahedralEncode(vec3 dir) {
-    dir /= abs(dir.x) + abs(dir.y) + abs(dir.z);
+    // Normalize to L1 sphere
+    dir /= (abs(dir.x) + abs(dir.y) + abs(dir.z));
 
+    // Hemispherical: fold bottom hemisphere
     if (dir.y < 0.0) {
-        dir.xz = (1.0 - abs(dir.zx)) * sign(dir.xz);
+        vec2 signNotZero = vec2(dir.x >= 0.0 ? 1.0 : -1.0, dir.z >= 0.0 ? 1.0 : -1.0);
+        dir.xz = (1.0 - abs(dir.zx)) * signNotZero;
     }
 
+    // Map to [0, 1] UV space
     return dir.xz * 0.5 + 0.5;
 }
 
-// Sample impostor with octahedral mapping
-vec4 sampleImpostor(vec3 viewDir, uint archetypeIndex) {
-    vec2 uv = octahedralEncode(viewDir);
-    return texture(impostorArray, vec3(uv, float(archetypeIndex)));
+vec3 viewToImpostorSpace(vec3 toCamera, float treeRotation) {
+    float c = cos(-treeRotation);
+    float s = sin(-treeRotation);
+    return vec3(c * toCamera.x - s * toCamera.z,
+                toCamera.y,
+                s * toCamera.x + c * toCamera.z);
 }
 ```
 
-### Migration Path
+### Benefits Realized
 
-1. Generate octahedral impostors alongside current system
-2. Add runtime toggle for comparison
-3. Validate quality matches or exceeds current system
-4. Remove legacy 17-view system
+- **Smoother transitions**: No discrete view jumps when rotating around trees
+- **Better coverage**: Continuous bilinear interpolation between all viewing angles
+- **Backward compatible**: Legacy 17-view mode preserved with runtime toggle
 
-### Expected Impact
+### Testing
 
-- **Memory reduction**: ~60% per archetype
-- **Quality**: Smoother view transitions, no angular artifacts
-- **Generation time**: Slightly faster (fewer render passes)
+To test the octahedral impostor system:
+1. Run the application and navigate to the Tree LOD Settings panel
+2. Toggle "Use Octahedral Impostors" checkbox to switch between modes
+3. Orbit around distant trees to observe smooth view transitions
+4. Compare with legacy mode to see the difference in view interpolation quality
 
 ---
 
@@ -838,15 +848,17 @@ vec4 sampleImpostor(vec3 viewDir, uint archetypeIndex) {
 | 3. Two-Phase Culling | ✅ Done | Phase 1 | High | `tree_filter.comp`, `tree_leaf_cull_phase3.comp`, `TreeRenderer.cpp` |
 | 4. Screen-Space Error LOD | ✅ Done | None | Medium | `TreeLODSettings`, `tree_impostor_cull.comp`, `TreeLODSystem.cpp` |
 | 5. Temporal Coherence | ✅ Done | Phase 1, 3 | Medium | `ImpostorCullSystem.h/cpp`, `tree_impostor_cull.comp`, `GuiTreeTab.cpp` |
-| 6. Octahedral Impostors | ❌ Next | None | High | `TreeImpostorAtlas.cpp`, `tree_impostor.vert/frag` |
+| 6. Octahedral Impostors | ✅ Done | None | High | `TreeImpostorAtlas.h/cpp`, `tree_impostor.vert/frag`, `TreeLODSystem.cpp`, `octahedral_mapping.glsl` |
 
-### Recommended Next Steps
+### Roadmap Complete
 
-**Phase 6: Octahedral Impostor Mapping** is the recommended next phase because:
-- Replaces 17-view discrete atlas with continuous octahedral mapping
-- Reduces texture memory by ~60% through shared coverage
-- Eliminates angular seams when rotating around trees
-- Smoother view transitions with bilinear interpolation in spherical space
+All 6 phases of the tree rendering optimization roadmap are now implemented. The system supports:
+- GPU-driven spatial culling with uniform grid partitioning
+- Hi-Z occlusion culling for terrain-occluded trees
+- Two-phase tree-to-leaf culling for efficient leaf processing
+- Screen-space error LOD selection for resolution-independent quality
+- Temporal coherence for camera stability optimization
+- Octahedral impostor mapping for smooth continuous view interpolation
 
 ---
 
