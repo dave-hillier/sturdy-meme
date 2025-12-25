@@ -40,16 +40,47 @@ void GuiTreeTab::render(ITreeControl& treeControl) {
         if (ImGui::CollapsingHeader("LOD Settings", ImGuiTreeNodeFlags_DefaultOpen)) {
             auto& settings = treeLOD->getLODSettings();
 
-            ImGui::Checkbox("Enable Impostors", &settings.enableImpostors);
+            // Simple LOD Mode - primary control
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.9f, 0.4f, 1.0f));
+            ImGui::Text("Simple LOD Mode:");
+            ImGui::PopStyleColor();
+
+            const char* lodModes[] = {"Auto", "Full Detail Only", "Impostor Only"};
+            int currentMode = static_cast<int>(settings.simpleLODMode);
+            if (ImGui::Combo("LOD Mode", &currentMode, lodModes, 3)) {
+                settings.simpleLODMode = static_cast<SimpleLODMode>(currentMode);
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Auto: Use automatic LOD based on distance/screen error\n"
+                                  "Full Detail Only: Force all trees to use full geometry\n"
+                                  "Impostor Only: Force all trees to use impostors");
+            }
 
             ImGui::Spacing();
-            ImGui::Text("LOD Mode:");
-            ImGui::Checkbox("Use Screen-Space Error", &settings.useScreenSpaceError);
+            ImGui::Separator();
+
+            // Forest toggle
+            ImGui::Checkbox("Enable Forest", &settings.enableForest);
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Use FOV-aware screen-space error for LOD selection.\n"
-                                  "Gives consistent quality across resolutions and zoom levels.\n"
-                                  "When disabled, uses fixed distance thresholds.");
+                ImGui::SetTooltip("Enable/disable forest trees (500 trees in the distance).\n"
+                                  "Disable for debugging display trees only.");
             }
+
+            ImGui::Spacing();
+            ImGui::Separator();
+
+            ImGui::Checkbox("Enable Impostors", &settings.enableImpostors);
+
+            // Only show Auto mode settings when in Auto mode
+            if (settings.simpleLODMode == SimpleLODMode::Auto) {
+                ImGui::Spacing();
+                ImGui::Text("Auto LOD Settings:");
+                ImGui::Checkbox("Use Screen-Space Error", &settings.useScreenSpaceError);
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Use FOV-aware screen-space error for LOD selection.\n"
+                                      "Gives consistent quality across resolutions and zoom levels.\n"
+                                      "When disabled, uses fixed distance thresholds.");
+                }
 
             ImGui::Spacing();
             if (settings.useScreenSpaceError) {
@@ -114,6 +145,7 @@ void GuiTreeTab::render(ITreeControl& treeControl) {
                     ImGui::SetTooltip("Blend curve: 1.0 = linear, >1 = faster falloff.");
                 }
             }
+            } // End of Auto mode settings
 
             ImGui::Spacing();
             ImGui::Text("Impostor Appearance:");

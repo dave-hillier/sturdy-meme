@@ -54,8 +54,21 @@ struct TreeImpostorArchetype {
     uint32_t atlasIndex = 0;
 };
 
+// Simple LOD mode - forces all trees to use a specific LOD level
+enum class SimpleLODMode {
+    Auto,       // Use normal LOD calculations (distance/screen-space based)
+    FullDetail, // Force all trees to full geometry
+    Impostor    // Force all trees to impostor
+};
+
 // LOD settings with hysteresis support
 struct TreeLODSettings {
+    // Simple LOD mode - overrides automatic LOD selection
+    SimpleLODMode simpleLODMode = SimpleLODMode::Auto;
+
+    // Forest enable/disable
+    bool enableForest = false;             // Disable forest by default for debugging
+
     // Distance thresholds (used when useScreenSpaceError = false)
     float fullDetailDistance = 250.0f;     // Full geometry below this
     float impostorDistance = 50000.0f;     // Impostors visible up to this distance (very far)

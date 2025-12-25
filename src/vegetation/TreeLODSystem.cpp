@@ -652,6 +652,14 @@ void TreeLODSystem::update(float deltaTime, const glm::vec3& cameraPos, const Tr
         const auto& tree = instances[i];
         auto& state = lodStates_[i];
 
+        // Skip forest trees if forest is disabled
+        if (i >= numDisplayTrees && !settings.enableForest) {
+            state.currentLevel = TreeLODState::Level::FullDetail;
+            state.targetLevel = TreeLODState::Level::FullDetail;
+            state.blendFactor = 0.0f;
+            continue;
+        }
+
         // Assign archetype index based on tree type
         // Display trees (0-3) map directly to their archetype
         // Forest trees (4+) cycle through archetypes
@@ -666,7 +674,54 @@ void TreeLODSystem::update(float deltaTime, const glm::vec3& cameraPos, const Tr
         float distance = glm::distance(cameraPos, tree.position);
         state.lastDistance = distance;
 
-        // Determine target LOD level and blend factor
+        // Handle Simple LOD Mode - binary selection with no blending
+        if (settings.simpleLODMode == SimpleLODMode::FullDetail) {
+            state.currentLevel = TreeLODState::Level::FullDetail;
+            state.targetLevel = TreeLODState::Level::FullDetail;
+            state.blendFactor = 0.0f;
+            continue;
+        } else if (settings.simpleLODMode == SimpleLODMode::Impostor) {
+            state.currentLevel = TreeLODState::Level::Impostor;
+            state.targetLevel = TreeLODState::Level::Impostor;
+            state.blendFactor = 1.0f;
+            // Continue to add to impostor list below
+            if (settings.enableImpostors && state.archetypeIndex < impostorAtlas_->getArchetypeCount()) {
+                ImpostorInstanceGPU instance;
+                instance.position = tree.position;
+                instance.scale = tree.scale;
+                instance.rotation = tree.rotation;
+                instance.archetypeIndex = state.archetypeIndex;
+                instance.blendFactor = 1.0f;
+
+                // Use actual tree mesh bounds
+                if (tree.meshIndex < treeSystem.getMeshCount()) {
+                    const auto& meshBounds = treeSystem.getBranchMesh(tree.meshIndex).getBounds();
+                    glm::vec3 minB = meshBounds.min;
+                    glm::vec3 maxB = meshBounds.max;
+                    glm::vec3 extent = maxB - minB;
+                    float horizontalRadius = std::max(extent.x, extent.z) * 0.5f;
+                    float halfHeight = extent.y * 0.5f;
+                    float boundingSphereRadius = glm::length(extent) * 0.5f;
+                    float maxHSize = boundingSphereRadius * 1.15f;
+                    float maxVSize = halfHeight * 1.15f;
+                    float projSize = std::max(maxHSize, maxVSize) * tree.scale;
+                    instance.hSize = projSize;
+                    instance.vSize = projSize;
+                    float centerY = (minB.y + maxB.y) * 0.5f;
+                    instance.baseOffset = centerY * tree.scale;
+                } else {
+                    const auto* archetype = impostorAtlas_->getArchetype(state.archetypeIndex);
+                    float projSize = (archetype ? archetype->boundingSphereRadius * 1.15f : 10.0f) * tree.scale;
+                    instance.hSize = projSize;
+                    instance.vSize = projSize;
+                    instance.baseOffset = (archetype ? archetype->centerHeight : 0.0f) * tree.scale;
+                }
+                visibleImpostors_.push_back(instance);
+            }
+            continue;
+        }
+
+        // Auto mode - determine target LOD level and blend factor
         TreeLODState::Level newTarget = state.targetLevel;
 
         if (settings.useScreenSpaceError) {
@@ -1339,6 +1394,14 @@ const TreeLODState& TreeLODSystem::getTreeLODState(uint32_t treeIndex) const {
 
 bool TreeLODSystem::shouldRenderFullGeometry(uint32_t treeIndex) const {
     if (treeIndex >= lodStates_.size()) return true;
+
+    // Skip forest trees when forest is disabled
+    const uint32_t numDisplayTrees = 4;
+    const auto& settings = getLODSettings();
+    if (treeIndex >= numDisplayTrees && !settings.enableForest) {
+        return false;
+    }
+
     const auto& state = lodStates_[treeIndex];
     return state.currentLevel == TreeLODState::Level::FullDetail ||
            state.currentLevel == TreeLODState::Level::Blending;
@@ -1346,6 +1409,14 @@ bool TreeLODSystem::shouldRenderFullGeometry(uint32_t treeIndex) const {
 
 bool TreeLODSystem::shouldRenderImpostor(uint32_t treeIndex) const {
     if (treeIndex >= lodStates_.size()) return false;
+
+    // Skip forest trees when forest is disabled
+    const uint32_t numDisplayTrees = 4;
+    const auto& settings = getLODSettings();
+    if (treeIndex >= numDisplayTrees && !settings.enableForest) {
+        return false;
+    }
+
     const auto& state = lodStates_[treeIndex];
     return state.currentLevel == TreeLODState::Level::Impostor ||
            state.currentLevel == TreeLODState::Level::Blending;
