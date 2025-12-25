@@ -80,9 +80,9 @@ void main() {
         // Compute octahedral UV (center of the rendered cell for this view)
         vec2 centerUV = octahedralEncode(impostorDir);
 
-        // Each view was rendered to a 64x64 region in the 512x512 atlas
-        // The cell scale maps billboard UV [0,1] to the 64-pixel cell extent
-        const float CELL_SCALE = 64.0 / 512.0;  // 0.125
+        // Each view was rendered to a 128x128 region in the 2048x2048 atlas
+        // The cell scale maps billboard UV [0,1] to the cell extent
+        const float CELL_SCALE = 128.0 / 2048.0;  // 0.0625
 
         // The billboard quad has:
         // - inPosition.x in [-0.5, 0.5], scaled by hSize*2 for world position

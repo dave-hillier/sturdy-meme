@@ -276,12 +276,14 @@ void GuiTreeTab::render(ITreeControl& treeControl) {
 
                     // Preview popup window
                     if (ImGui::BeginPopup("OctAtlasPreview")) {
-                        ImGui::Text("Octahedral Impostor Atlas (512x512, continuous mapping)");
+                        ImGui::Text("Octahedral Impostor Atlas (%dx%d, continuous mapping)",
+                                   OctahedralAtlasConfig::ATLAS_WIDTH, OctahedralAtlasConfig::ATLAS_HEIGHT);
                         ImGui::Separator();
 
-                        // Draw atlas at 1:1 scale
-                        ImVec2 imageSize(static_cast<float>(OctahedralAtlasConfig::ATLAS_WIDTH),
-                                        static_cast<float>(OctahedralAtlasConfig::ATLAS_HEIGHT));
+                        // Draw atlas scaled to fit (512 display size for 2048 atlas)
+                        const float displayScale = 0.25f;  // Show at 1/4 scale
+                        ImVec2 imageSize(OctahedralAtlasConfig::ATLAS_WIDTH * displayScale,
+                                        OctahedralAtlasConfig::ATLAS_HEIGHT * displayScale);
 
                         ImVec2 cursorPos = ImGui::GetCursorScreenPos();
                         ImGui::Image(reinterpret_cast<ImTextureID>(octPreviewSet), imageSize);

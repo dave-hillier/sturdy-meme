@@ -1686,8 +1686,8 @@ void TreeImpostorAtlas::renderToOctahedral(
     // - vertical: similar, with adjustment for octahedral distortion
 
     // Compute viewport region for this view
-    // Use a fixed cell size based on the sampling grid
-    const int CELL_SIZE = 64;  // Each view covers 64x64 pixels (overlapping for smooth blending)
+    // Use cell size from config
+    const int CELL_SIZE = OctahedralAtlasConfig::CELL_SIZE;
 
     int viewportX = static_cast<int>(octUV.x * OctahedralAtlasConfig::ATLAS_WIDTH - CELL_SIZE / 2);
     int viewportY = static_cast<int>(octUV.y * OctahedralAtlasConfig::ATLAS_HEIGHT - CELL_SIZE / 2);

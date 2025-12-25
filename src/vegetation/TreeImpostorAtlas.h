@@ -30,9 +30,10 @@ struct ImpostorAtlasConfig {
 // Uses octahedral projection for smooth interpolation across all view angles
 // Single square texture with hemispherical coverage
 struct OctahedralAtlasConfig {
-    static constexpr int RESOLUTION = 512;            // Square texture resolution
+    static constexpr int RESOLUTION = 2048;           // Square texture resolution (was 512)
     static constexpr int ATLAS_WIDTH = RESOLUTION;
     static constexpr int ATLAS_HEIGHT = RESOLUTION;
+    static constexpr int CELL_SIZE = 128;             // Each view covers 128x128 pixels (was 64)
 
     // Capture settings: number of samples per axis for rendering
     // More samples = better quality but slower generation
