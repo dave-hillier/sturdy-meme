@@ -77,12 +77,20 @@ void main() {
         // Convert view direction to impostor space (apply tree rotation)
         vec3 impostorDir = viewToImpostorSpace(viewDir, rotation);
 
-        // Compute octahedral UV
-        atlasUV = octahedralEncode(impostorDir);
+        // Compute octahedral UV (center of the rendered cell for this view)
+        vec2 centerUV = octahedralEncode(impostorDir);
 
-        // Map quad UV within the octahedral atlas
-        // The quad UV (inTexCoord) represents position within the billboard
-        // We sample the atlas at the octahedral UV corresponding to view direction
+        // Each view was rendered to a 64x64 region centered at its octahedral UV
+        // The cell scale is 64/512 = 0.125 of the atlas
+        const float CELL_SCALE = 64.0 / 512.0;
+
+        // Offset from the center UV based on the billboard quad's local UV
+        // inTexCoord goes from (0,0) to (1,1), so (inTexCoord - 0.5) gives offset from center
+        atlasUV = centerUV + (inTexCoord - 0.5) * CELL_SCALE;
+
+        // Clamp to valid atlas range
+        atlasUV = clamp(atlasUV, vec2(0.0), vec2(1.0));
+
         fragTexCoord = atlasUV;
         fragCellIndex = -1;  // Not using cell index for octahedral
     } else {
