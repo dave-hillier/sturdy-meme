@@ -1629,7 +1629,12 @@ void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
     // Render tree impostors for distant trees
     if (systems_->treeLOD()) {
         auto* impostorCull = systems_->impostorCull();
-        if (impostorCull && impostorCull->getTreeCount() > 0) {
+        const auto& lodSettings = systems_->treeLOD()->getLODSettings();
+        // Use GPU-culled path only in Auto mode (SimpleLODMode not forced)
+        // In forced modes (FullDetail/Impostor), use CPU path which respects SimpleLODMode
+        bool useGPUCulledPath = impostorCull && impostorCull->getTreeCount() > 0 &&
+                                lodSettings.simpleLODMode == SimpleLODMode::Auto;
+        if (useGPUCulledPath) {
             // Use GPU-culled indirect rendering
             systems_->treeLOD()->renderImpostorsGPUCulled(
                 cmd, frameIndex,
@@ -1640,7 +1645,7 @@ void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
                 impostorCull->getIndirectDrawBuffer()
             );
         } else {
-            // Fall back to CPU-culled rendering
+            // CPU-culled rendering (also handles forced SimpleLODMode)
             systems_->treeLOD()->renderImpostors(
                 cmd, frameIndex,
                 systems_->globalBuffers().uniformBuffers.buffers[frameIndex],

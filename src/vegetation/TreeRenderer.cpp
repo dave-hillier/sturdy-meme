@@ -1480,6 +1480,12 @@ void TreeRenderer::recordLeafCulling(VkCommandBuffer cmd, uint32_t frameIndex,
             static_cast<size_t>(renderable.leafInstanceIndex) < leafDrawInfo.size()) {
             const auto& drawInfo = leafDrawInfo[renderable.leafInstanceIndex];
             if (drawInfo.instanceCount > 0) {
+                // Skip if LOD system says this tree should be pure impostor (no full geometry)
+                if (lodSystem && !lodSystem->shouldRenderFullGeometry(lodTreeIndex)) {
+                    lodTreeIndex++;
+                    continue;
+                }
+
                 // Get LOD blend factor from LOD system
                 float lodBlendFactor = 0.0f;
                 if (lodSystem) {
