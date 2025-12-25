@@ -61,7 +61,7 @@ bool Application::init(const std::string& title, int width, int height) {
 
     // Position camera at terrain height, looking at scene objects
     {
-        const auto& terrain = renderer_->getTerrainSystem();
+        const auto& terrain = renderer_->getSystems().terrain();
         float cameraX = 0.0f, cameraZ = 10.0f;  // Start behind the scene
         float terrainY = terrain.getHeightAt(cameraX, cameraZ);
         camera.setPosition(glm::vec3(cameraX, terrainY + 2.0f, cameraZ));
@@ -79,8 +79,8 @@ bool Application::init(const std::string& title, int width, int height) {
     // Create terrain hole at well entrance location
     // This must be done before terrain physics is initialized
     {
-        auto& terrain = renderer_->getTerrainSystem();
-        const auto& sceneBuilder = renderer_->getSceneManager().getSceneBuilder();
+        auto& terrain = renderer_->getSystems().terrain();
+        const auto& sceneBuilder = renderer_->getSystems().scene().getSceneBuilder();
         float wellX = sceneBuilder.getWellEntranceX();
         float wellZ = sceneBuilder.getWellEntranceZ();
         terrain.setHoleCircle(wellX, wellZ, SceneBuilder::WELL_HOLE_RADIUS, true);
@@ -90,7 +90,7 @@ bool Application::init(const std::string& title, int width, int height) {
     }
 
     // Get terrain reference for spawning objects
-    auto& terrain = renderer_->getTerrainSystem();
+    auto& terrain = renderer_->getSystems().terrain();
 
     // Initialize tiled physics terrain manager
     // Uses high-resolution terrain tiles (~1m spacing) within 1000m of player
@@ -116,10 +116,10 @@ bool Application::init(const std::string& title, int width, int height) {
     }
 
     // Initialize scene physics (dynamic objects)
-    renderer_->getSceneManager().initPhysics(physics());
+    renderer_->getSystems().scene().initPhysics(physics());
 
     // Create convex hull colliders for rocks using actual mesh geometry
-    const auto& rockSystem = renderer_->getRockSystem();
+    const auto& rockSystem = renderer_->getSystems().rock();
     const auto& rockInstances = rockSystem.getRockInstances();
     const auto& rockMeshes = rockSystem.getRockMeshes();
 
@@ -149,7 +149,7 @@ bool Application::init(const std::string& title, int width, int height) {
     SDL_Log("Created %zu rock convex hull colliders", rockInstances.size());
 
     // Create convex hull colliders for fallen branches (detritus)
-    if (const DetritusSystem* detritusSystem = renderer_->getDetritusSystem()) {
+    if (const DetritusSystem* detritusSystem = renderer_->getSystems().detritus()) {
         const auto& detritusInstances = detritusSystem->getInstances();
         const auto& detritusMeshes = detritusSystem->getMeshes();
 
@@ -176,7 +176,7 @@ bool Application::init(const std::string& title, int width, int height) {
     }
 
     // Create compound capsule colliders for trees (trunk + major branches)
-    if (TreeSystem* treeSystem = renderer_->getTreeSystem()) {
+    if (TreeSystem* treeSystem = renderer_->getSystems().tree()) {
         const auto& treeInstances = treeSystem->getTreeInstances();
         TreeCollision::Config treeCollisionConfig;
         treeCollisionConfig.maxBranchLevel = 2;  // Trunk + first 2 levels of branches
@@ -219,12 +219,12 @@ bool Application::init(const std::string& title, int width, int height) {
     // Safety check: not in water, not in terrain holes
     breadcrumbTracker.setSafetyCheck([this](const glm::vec3& pos) {
         // Check if position is above water level (with margin)
-        float waterLevel = renderer_->getWaterSystem().getWaterLevel();
+        float waterLevel = renderer_->getSystems().water().getWaterLevel();
         if (pos.y < waterLevel + 0.5f) {
             return false;  // In or near water
         }
         // Check if position is in a terrain hole
-        if (renderer_->getTerrainSystem().isHole(pos.x, pos.z)) {
+        if (renderer_->getSystems().terrain().isHole(pos.x, pos.z)) {
             return false;  // In terrain hole (cave entrance, etc.)
         }
         return true;
@@ -346,7 +346,7 @@ void Application::run() {
             // Velocity: horizontal from input + jump impulse (5.0 m/s up, matching PhysicsSystem)
             glm::vec3 jumpVelocity = desiredVelocity;
             jumpVelocity.y = 5.0f;
-            renderer_->startCharacterJump(startPos, jumpVelocity, 9.81f, &physics());
+            renderer_->getSystems().scene().getSceneBuilder().startCharacterJump(startPos, jumpVelocity, 9.81f, &physics());
         }
 
         // Always update physics character controller (handles gravity, jumping, and movement)
@@ -371,7 +371,7 @@ void Application::run() {
         }
 
         // Update scene object transforms from physics
-        renderer_->getSceneManager().update(physics());
+        renderer_->getSystems().scene().update(physics());
 
         // Update player position for grass interaction (always, regardless of camera mode)
         renderer_->setPlayerState(player.getPosition(), physicsVelocity, Player::CAPSULE_RADIUS);
@@ -390,15 +390,18 @@ void Application::run() {
         bool isGrounded = physics().isCharacterOnGround();
 
         // Sync cape enabled state from GUI
-        renderer_->getSceneBuilder().setCapeEnabled(gui_->getPlayerSettings().capeEnabled);
+        renderer_->getSystems().scene().getSceneBuilder().setCapeEnabled(gui_->getPlayerSettings().capeEnabled);
 
-        renderer_->updateAnimatedCharacter(deltaTime, movementSpeed, isGrounded, isJumping);
+        renderer_->getSystems().scene().getSceneBuilder().updateAnimatedCharacter(
+            deltaTime, renderer_->getVulkanContext().getAllocator(), renderer_->getVulkanContext().getDevice(),
+            renderer_->getCommandPool(), renderer_->getVulkanContext().getGraphicsQueue(),
+            movementSpeed, isGrounded, isJumping);
 
         // Update camera and player based on mode
         if (input.isThirdPersonMode()) {
             camera.setThirdPersonTarget(player.getFocusPoint());
             camera.updateThirdPerson(deltaTime);
-            renderer_->getSceneManager().updatePlayerTransform(player.getModelMatrix());
+            renderer_->getSystems().scene().updatePlayerTransform(player.getModelMatrix());
 
             // Dynamic FOV: widen during sprinting for sense of speed
             float targetFov = 45.0f;  // Base FOV
@@ -701,7 +704,7 @@ void Application::initPhysics() {
 
     // Helper to get terrain height at a position
     auto getTerrainY = [this](float x, float z) -> float {
-        return renderer_->getTerrainHeightAt(x, z);
+        return renderer_->getSystems().terrain().getHeightAt(x, z);
     };
 
     // Scene object layout from SceneBuilder (after multi-lights update):
@@ -780,14 +783,14 @@ void Application::initPhysics() {
 
 void Application::updatePhysicsToScene() {
     // Update scene object transforms from physics simulation
-    auto& sceneObjects = renderer_->getSceneManager().getRenderables();
+    auto& sceneObjects = renderer_->getSystems().scene().getRenderables();
 
     for (size_t i = 1; i < scenePhysicsBodies.size() && i < sceneObjects.size(); i++) {
         PhysicsBodyID bodyID = scenePhysicsBodies[i];
         if (bodyID == INVALID_BODY_ID) continue;
 
         // Skip player object (handled separately)
-        if (i == renderer_->getSceneManager().getPlayerObjectIndex()) continue;
+        if (i == renderer_->getSystems().scene().getPlayerObjectIndex()) continue;
 
         // Get transform from physics (position and rotation only)
         glm::mat4 physicsTransform = physics().getBodyTransform(bodyID);
@@ -807,7 +810,7 @@ void Application::updatePhysicsToScene() {
         // Update orb light position to follow the emissive sphere (index 7)
         if (i == 7) {
             glm::vec3 orbPosition = glm::vec3(physicsTransform[3]);
-            renderer_->getSceneManager().setOrbLightPosition(orbPosition);
+            renderer_->getSystems().scene().setOrbLightPosition(orbPosition);
         }
     }
 }
@@ -823,7 +826,7 @@ void Application::initFlag() {
     // Top of pole is at terrain height + 1.5 + 1.5 = terrain + 3.0
     const float flagPoleX = 5.0f;
     const float flagPoleZ = 0.0f;
-    float terrainHeight = renderer_->getTerrainHeightAt(flagPoleX, flagPoleZ);
+    float terrainHeight = renderer_->getSystems().terrain().getHeightAt(flagPoleX, flagPoleZ);
     float poleTopY = terrainHeight + 3.0f;  // Pole center is 1.5m above terrain, pole is 3m tall
     glm::vec3 clothTopLeft(flagPoleX - 0.1f, poleTopY, flagPoleZ);  // Slightly to the left of pole center
 
@@ -835,8 +838,11 @@ void Application::initFlag() {
     }
 
     // Create initial mesh geometry and upload to GPU
-    clothSim.createMesh(renderer_->getFlagClothMesh());
-    renderer_->uploadFlagClothMesh();
+    auto& sceneBuilder = renderer_->getSystems().scene().getSceneBuilder();
+    clothSim.createMesh(sceneBuilder.getFlagClothMesh());
+    sceneBuilder.uploadFlagClothMesh(
+        renderer_->getVulkanContext().getAllocator(), renderer_->getVulkanContext().getDevice(),
+        renderer_->getCommandPool(), renderer_->getVulkanContext().getGraphicsQueue());
 
     SDL_Log("Flag initialized with %dx%d cloth simulation", clothWidth, clothHeight);
 }
@@ -865,13 +871,13 @@ void Application::updateCameraOcclusion(float deltaTime) {
     }
 
     // Update opacities for all scene objects
-    auto& sceneObjects = renderer_->getSceneManager().getRenderables();
+    auto& sceneObjects = renderer_->getSystems().scene().getRenderables();
     for (size_t i = 0; i < scenePhysicsBodies.size() && i < sceneObjects.size(); i++) {
         PhysicsBodyID bodyID = scenePhysicsBodies[i];
         if (bodyID == INVALID_BODY_ID) continue;
 
         // Skip player (handled separately)
-        if (i == renderer_->getSceneManager().getPlayerObjectIndex()) continue;
+        if (i == renderer_->getSystems().scene().getPlayerObjectIndex()) continue;
 
         bool isOccluding = currentlyOccluding.count(bodyID) > 0;
         float targetOpacity = isOccluding ? occludedOpacity : 1.0f;
@@ -900,11 +906,11 @@ void Application::updateFlag(float deltaTime) {
     clothSim.addSphereCollision(playerPos + glm::vec3(0, playerHeight - playerRadius, 0), playerRadius);
 
     // Add collision spheres for dynamic physics objects
-    auto& sceneObjects = renderer_->getSceneManager().getRenderables();
+    auto& sceneObjects = renderer_->getSystems().scene().getRenderables();
     for (size_t i = 1; i < scenePhysicsBodies.size() && i < sceneObjects.size(); i++) {
         PhysicsBodyID bodyID = scenePhysicsBodies[i];
         if (bodyID == INVALID_BODY_ID) continue;
-        if (i == renderer_->getSceneManager().getPlayerObjectIndex()) continue; // Skip player (already handled)
+        if (i == renderer_->getSystems().scene().getPlayerObjectIndex()) continue; // Skip player (already handled)
         if (i == 11 || i == 12) continue; // Skip flag pole and cloth itself
 
         PhysicsBodyInfo info = physics().getBodyInfo(bodyID);
@@ -915,9 +921,12 @@ void Application::updateFlag(float deltaTime) {
     }
 
     // Update cloth simulation with wind
-    clothSim.update(deltaTime, &renderer_->getWindSystem());
+    clothSim.update(deltaTime, &renderer_->getSystems().wind());
 
     // Update the mesh vertices from cloth particles and re-upload to GPU
-    clothSim.updateMesh(renderer_->getFlagClothMesh());
-    renderer_->uploadFlagClothMesh();
+    auto& flagSceneBuilder = renderer_->getSystems().scene().getSceneBuilder();
+    clothSim.updateMesh(flagSceneBuilder.getFlagClothMesh());
+    flagSceneBuilder.uploadFlagClothMesh(
+        renderer_->getVulkanContext().getAllocator(), renderer_->getVulkanContext().getDevice(),
+        renderer_->getCommandPool(), renderer_->getVulkanContext().getGraphicsQueue());
 }
