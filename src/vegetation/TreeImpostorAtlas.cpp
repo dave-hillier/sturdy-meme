@@ -1002,8 +1002,7 @@ bool TreeImpostorAtlas::createOctahedralAtlasResources(uint32_t archetypeIndex) 
     viewInfo.subresourceRange.layerCount = 1;
     viewInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
 
-    // We need temporary views for the framebuffer - store them in temporary variables
-    // since we'll use the array views directly
+    // Create per-layer views for the framebuffer - these must remain valid for framebuffer lifetime
     VkImageView albedoLayerView, normalLayerView;
 
     viewInfo.image = octAlbedoArrayImage_;
@@ -1011,13 +1010,14 @@ bool TreeImpostorAtlas::createOctahedralAtlasResources(uint32_t archetypeIndex) 
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create octahedral albedo layer view");
         return false;
     }
+    atlas.albedoLayerView = ManagedImageView(makeUniqueImageView(device_, albedoLayerView));
 
     viewInfo.image = octNormalArrayImage_;
     if (vkCreateImageView(device_, &viewInfo, nullptr, &normalLayerView) != VK_SUCCESS) {
-        vkDestroyImageView(device_, albedoLayerView, nullptr);
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create octahedral normal layer view");
         return false;
     }
+    atlas.normalLayerView = ManagedImageView(makeUniqueImageView(device_, normalLayerView));
 
     // Create depth image for octahedral rendering
     VkImageCreateInfo depthImageInfo{};
@@ -1040,8 +1040,6 @@ bool TreeImpostorAtlas::createOctahedralAtlasResources(uint32_t archetypeIndex) 
 
     if (vmaCreateImage(allocator_, &depthImageInfo, &allocInfo,
                        &atlas.depthImage, &atlas.depthAllocation, nullptr) != VK_SUCCESS) {
-        vkDestroyImageView(device_, albedoLayerView, nullptr);
-        vkDestroyImageView(device_, normalLayerView, nullptr);
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create octahedral depth image");
         return false;
     }
@@ -1052,8 +1050,6 @@ bool TreeImpostorAtlas::createOctahedralAtlasResources(uint32_t archetypeIndex) 
     viewInfo.subresourceRange.baseArrayLayer = 0;
     VkImageView depthView;
     if (vkCreateImageView(device_, &viewInfo, nullptr, &depthView) != VK_SUCCESS) {
-        vkDestroyImageView(device_, albedoLayerView, nullptr);
-        vkDestroyImageView(device_, normalLayerView, nullptr);
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create octahedral depth view");
         return false;
     }
@@ -1061,8 +1057,8 @@ bool TreeImpostorAtlas::createOctahedralAtlasResources(uint32_t archetypeIndex) 
 
     // Create framebuffer for octahedral atlas rendering
     std::array<VkImageView, 3> attachments = {
-        albedoLayerView,
-        normalLayerView,
+        atlas.albedoLayerView.get(),
+        atlas.normalLayerView.get(),
         atlas.depthView.get()
     };
 
@@ -1077,17 +1073,12 @@ bool TreeImpostorAtlas::createOctahedralAtlasResources(uint32_t archetypeIndex) 
 
     VkFramebuffer framebuffer;
     if (vkCreateFramebuffer(device_, &fbInfo, nullptr, &framebuffer) != VK_SUCCESS) {
-        vkDestroyImageView(device_, albedoLayerView, nullptr);
-        vkDestroyImageView(device_, normalLayerView, nullptr);
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create octahedral framebuffer");
         return false;
     }
     atlas.framebuffer = ManagedFramebuffer(makeUniqueFramebuffer(device_, framebuffer));
 
-    // Clean up the temporary layer views (they're now embedded in the framebuffer)
-    // Note: Vulkan allows destroying image views after framebuffer creation
-    vkDestroyImageView(device_, albedoLayerView, nullptr);
-    vkDestroyImageView(device_, normalLayerView, nullptr);
-
+    // Note: Layer views are stored in atlas struct and must remain valid for framebuffer lifetime
     return true;
 }
 

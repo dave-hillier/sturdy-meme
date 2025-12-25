@@ -279,6 +279,8 @@ private:
         VkImage depthImage = VK_NULL_HANDLE;
         VmaAllocation depthAllocation = VK_NULL_HANDLE;
         ManagedImageView depthView;
+        ManagedImageView albedoLayerView;   // Per-layer view for framebuffer
+        ManagedImageView normalLayerView;   // Per-layer view for framebuffer
         ManagedFramebuffer framebuffer;
     };
     std::vector<OctahedralAtlasTextures> octAtlasTextures_;
