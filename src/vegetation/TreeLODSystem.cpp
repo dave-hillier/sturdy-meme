@@ -705,19 +705,18 @@ void TreeLODSystem::update(uint32_t frameIndex, float deltaTime, const glm::vec3
                     float vSize = halfHeight * 1.15f * tree.scale;
                     instance.hSize = hSize;
                     instance.vSize = vSize;
-                    // Position billboard so its bottom aligns with tree base (minB.y)
-                    // Billboard extends from baseOffset-vSize to baseOffset+vSize
-                    // So: baseOffset - vSize = minB.y * scale
-                    //     baseOffset = minB.y * scale + vSize
-                    instance.baseOffset = minB.y * tree.scale + vSize;
+                    // Center billboard at tree's visual center
+                    // The 1.15 margin provides room for tilted views - when billboard
+                    // tilts toward camera, tree needs extra space to fit within quad
+                    float centerY = (minB.y + maxB.y) * 0.5f;
+                    instance.baseOffset = centerY * tree.scale;
                 } else {
                     const auto* archetype = impostorAtlas_->getArchetype(state.archetypeIndex);
                     float projSize = (archetype ? archetype->boundingSphereRadius * 1.15f : 10.0f) * tree.scale;
                     instance.hSize = projSize;
                     instance.vSize = projSize;
-                    // For archetype path, use centerHeight + vSize to align bottom properly
-                    float vSize = projSize;
-                    instance.baseOffset = vSize;  // Assumes tree base at y=0
+                    // Use archetype's center height for positioning
+                    instance.baseOffset = (archetype ? archetype->centerHeight : projSize) * tree.scale;
                 }
                 visibleImpostors_.push_back(instance);
             }
@@ -835,17 +834,18 @@ void TreeLODSystem::update(uint32_t frameIndex, float deltaTime, const glm::vec3
                 float vSize = halfHeight * 1.15f * tree.scale;
                 instance.hSize = hSize;
                 instance.vSize = vSize;
-                // Position billboard so its bottom aligns with tree base (minB.y)
-                // Billboard extends from baseOffset-vSize to baseOffset+vSize
-                instance.baseOffset = minB.y * tree.scale + vSize;
+                // Center billboard at tree's visual center
+                // The 1.15 margin provides room for tilted views
+                float centerY = (minB.y + maxB.y) * 0.5f;
+                instance.baseOffset = centerY * tree.scale;
             } else {
                 // Fallback to archetype bounds if mesh not available
                 const auto* archetype = impostorAtlas_->getArchetype(state.archetypeIndex);
                 float projSize = (archetype ? archetype->boundingSphereRadius * 1.15f : 10.0f) * tree.scale;
                 instance.hSize = projSize;
                 instance.vSize = projSize;
-                // Position billboard so bottom is at ground level
-                instance.baseOffset = projSize;
+                // Use archetype's center height for positioning
+                instance.baseOffset = (archetype ? archetype->centerHeight : projSize) * tree.scale;
             }
             visibleImpostors_.push_back(instance);
         }
