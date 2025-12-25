@@ -683,11 +683,11 @@ void TreeLODSystem::update(uint32_t frameIndex, float deltaTime, const glm::vec3
             state.blendFactor = 1.0f;
             // In forced Impostor mode, always add to impostor list (ignore enableImpostors flag)
             if (state.archetypeIndex < impostorAtlas_->getArchetypeCount()) {
-                ImpostorInstanceGPU instance;
+                ImpostorInstanceGPU instance{};
                 instance.position = tree.position;
                 instance.scale = tree.scale;
                 instance.rotation = tree.rotation;
-                instance.archetypeIndex = state.archetypeIndex;
+                instance.archetypeIndex = static_cast<float>(state.archetypeIndex);
                 instance.blendFactor = 1.0f;
 
                 // Use actual tree mesh bounds
@@ -804,11 +804,11 @@ void TreeLODSystem::update(uint32_t frameIndex, float deltaTime, const glm::vec3
 
         // Collect visible impostors (CPU fallback path only)
         if (settings.enableImpostors && state.blendFactor > 0.0f && state.archetypeIndex < impostorAtlas_->getArchetypeCount()) {
-            ImpostorInstanceGPU instance;
+            ImpostorInstanceGPU instance{};
             instance.position = tree.position;
             instance.scale = tree.scale;
             instance.rotation = tree.rotation;
-            instance.archetypeIndex = state.archetypeIndex;
+            instance.archetypeIndex = static_cast<float>(state.archetypeIndex);
             instance.blendFactor = state.blendFactor;
 
             // Use actual tree mesh bounds instead of archetype bounds
@@ -900,12 +900,19 @@ void TreeLODSystem::updateInstanceBuffer(const std::vector<ImpostorInstanceGPU>&
 
 void TreeLODSystem::updateDescriptorSets(uint32_t frameIndex, VkBuffer uniformBuffer,
                                           VkImageView shadowMap, VkSampler shadowSampler) {
+    // Validate frame index
+    if (frameIndex >= impostorDescriptorSets_.size() ||
+        frameIndex >= instanceBuffers_.buffers.size()) {
+        return;
+    }
+
     // Use the shared array views that contain all archetypes
     VkImageView albedoView = impostorAtlas_->getAlbedoAtlasArrayView();
     VkImageView normalView = impostorAtlas_->getNormalAtlasArrayView();
     VkSampler atlasSampler = impostorAtlas_->getAtlasSampler();
 
     if (albedoView == VK_NULL_HANDLE || normalView == VK_NULL_HANDLE) return;
+    if (instanceBuffers_.buffers[frameIndex] == VK_NULL_HANDLE) return;
 
     std::array<VkWriteDescriptorSet, 5> writes{};
 
@@ -980,6 +987,21 @@ void TreeLODSystem::renderImpostors(VkCommandBuffer cmd, uint32_t frameIndex,
     const auto& settings = getLODSettings();
     // Skip enableImpostors check when in forced Impostor mode
     if (settings.simpleLODMode != SimpleLODMode::Impostor && !settings.enableImpostors) return;
+
+    // Ensure instance buffers are valid
+    if (frameIndex >= instanceBuffers_.buffers.size() ||
+        instanceBuffers_.buffers[frameIndex] == VK_NULL_HANDLE) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "TreeLODSystem::renderImpostors: Invalid instance buffer for frame %u", frameIndex);
+        return;
+    }
+
+    // Ensure atlas textures are ready
+    VkImageView albedoView = impostorAtlas_->getAlbedoAtlasArrayView();
+    VkImageView normalView = impostorAtlas_->getNormalAtlasArrayView();
+    if (albedoView == VK_NULL_HANDLE || normalView == VK_NULL_HANDLE) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "TreeLODSystem::renderImpostors: Atlas textures not ready");
+        return;
+    }
 
     // Update descriptor sets
     updateDescriptorSets(frameIndex, uniformBuffer, shadowMap, shadowSampler);
