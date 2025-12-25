@@ -154,8 +154,13 @@ void main() {
         }
 
         // Additional stochastic culling based on LOD blend factor
-        if (visTree.lodBlendFactor > 0.0 && instanceHash < visTree.lodBlendFactor) {
-            continue;
+        // Use a power curve to make leaves fade out faster than the impostor fades in
+        // At blendFactor=0.5, about 75% of leaves should be culled (sqrt(0.5) ≈ 0.71 threshold)
+        if (visTree.lodBlendFactor > 0.0) {
+            float adjustedBlend = sqrt(visTree.lodBlendFactor);  // More aggressive fade-out
+            if (instanceHash < adjustedBlend) {
+                continue;
+            }
         }
 
         // Get leaf type

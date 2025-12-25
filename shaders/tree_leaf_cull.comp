@@ -150,8 +150,14 @@ void main() {
 
     // Additional stochastic culling based on LOD blend factor during transition
     // This gradually removes leaves as we transition to impostor
-    if (tree.lodBlendFactor > 0.0 && instanceHash < tree.lodBlendFactor) {
-        return;
+    // Use a power curve to make leaves fade out faster than the impostor fades in
+    // At blendFactor=0.5, about 75% of leaves should be culled (sqrt(0.5) ≈ 0.71 threshold)
+    // This ensures leaves are mostly gone by the time the impostor is fully visible
+    if (tree.lodBlendFactor > 0.0) {
+        float adjustedBlend = sqrt(tree.lodBlendFactor);  // More aggressive fade-out
+        if (instanceHash < adjustedBlend) {
+            return;
+        }
     }
 
     // Get leaf type for this tree (0=oak, 1=ash, 2=aspen, 3=pine)
