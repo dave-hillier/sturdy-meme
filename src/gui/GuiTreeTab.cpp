@@ -40,20 +40,18 @@ void GuiTreeTab::render(ITreeControl& treeControl) {
         if (ImGui::CollapsingHeader("LOD Settings", ImGuiTreeNodeFlags_DefaultOpen)) {
             auto& settings = treeLOD->getLODSettings();
 
-            // Simple LOD Mode - primary control
+            // Simple LOD Mode - just a toggle (Auto/transition modes are broken)
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.9f, 0.4f, 1.0f));
-            ImGui::Text("Simple LOD Mode:");
+            ImGui::Text("LOD Mode:");
             ImGui::PopStyleColor();
 
-            const char* lodModes[] = {"Auto", "Full Detail Only", "Impostor Only"};
-            int currentMode = static_cast<int>(settings.simpleLODMode);
-            if (ImGui::Combo("LOD Mode", &currentMode, lodModes, 3)) {
-                settings.simpleLODMode = static_cast<SimpleLODMode>(currentMode);
+            bool useImpostor = (settings.simpleLODMode == SimpleLODMode::Impostor);
+            if (ImGui::Checkbox("Use Impostor Mode", &useImpostor)) {
+                settings.simpleLODMode = useImpostor ? SimpleLODMode::Impostor : SimpleLODMode::FullDetail;
             }
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Auto: Use automatic LOD based on distance/screen error\n"
-                                  "Full Detail Only: Force all trees to use full geometry\n"
-                                  "Impostor Only: Force all trees to use impostors");
+                ImGui::SetTooltip("Checked: Render trees as impostors (billboards)\n"
+                                  "Unchecked: Render trees as full geometry");
             }
 
             ImGui::Spacing();
@@ -65,87 +63,6 @@ void GuiTreeTab::render(ITreeControl& treeControl) {
                 ImGui::SetTooltip("Enable/disable forest trees (500 trees in the distance).\n"
                                   "Disable for debugging display trees only.");
             }
-
-            ImGui::Spacing();
-            ImGui::Separator();
-
-            ImGui::Checkbox("Enable Impostors", &settings.enableImpostors);
-
-            // Only show Auto mode settings when in Auto mode
-            if (settings.simpleLODMode == SimpleLODMode::Auto) {
-                ImGui::Spacing();
-                ImGui::Text("Auto LOD Settings:");
-                ImGui::Checkbox("Use Screen-Space Error", &settings.useScreenSpaceError);
-                if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("Use FOV-aware screen-space error for LOD selection.\n"
-                                      "Gives consistent quality across resolutions and zoom levels.\n"
-                                      "When disabled, uses fixed distance thresholds.");
-                }
-
-                ImGui::Spacing();
-                if (settings.useScreenSpaceError) {
-                    // Screen-space error LOD controls
-                    ImGui::Text("Screen-Space Error Thresholds:");
-                    ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "  (High error = close/large, Low error = far/small)");
-
-                    ImGui::SliderFloat("Full Detail Error", &settings.errorThresholdFull, 0.5f, 20.0f, "%.1f px");
-                    if (ImGui::IsItemHovered()) {
-                        ImGui::SetTooltip("Screen error threshold for full geometry.\n"
-                                          "Trees with error ABOVE this use full geometry.\n"
-                                          "Higher = use geometry only when very close.");
-                    }
-
-                    // Clamp impostor error to be less than full detail error
-                    float maxImpostorError = settings.errorThresholdFull - 0.1f;
-                    if (settings.errorThresholdImpostor > maxImpostorError) {
-                        settings.errorThresholdImpostor = maxImpostorError;
-                    }
-                    ImGui::SliderFloat("Impostor Error", &settings.errorThresholdImpostor, 0.1f, maxImpostorError, "%.2f px");
-                    if (ImGui::IsItemHovered()) {
-                        ImGui::SetTooltip("Screen error threshold for impostor LOD.\n"
-                                          "Trees with error BELOW this use full impostor.\n"
-                                          "Blend occurs between Full Detail and Impostor thresholds.");
-                    }
-
-                    // Clamp cull error to be less than impostor error
-                    float maxCullError = settings.errorThresholdImpostor - 0.01f;
-                    if (settings.errorThresholdCull > maxCullError) {
-                        settings.errorThresholdCull = maxCullError;
-                    }
-                    ImGui::SliderFloat("Cull Error", &settings.errorThresholdCull, 0.01f, maxCullError, "%.3f px");
-                    if (ImGui::IsItemHovered()) {
-                        ImGui::SetTooltip("Screen error threshold for culling.\n"
-                                          "Trees with error BELOW this are culled entirely.\n"
-                                          "Very small on screen = not worth rendering.");
-                    }
-                } else {
-                    // Distance-based LOD controls
-                    ImGui::Text("Distance Thresholds:");
-                    ImGui::SliderFloat("Full Detail Dist", &settings.fullDetailDistance, 0.0f, 500.0f, "%.1f m");
-                    if (ImGui::IsItemHovered()) {
-                        ImGui::SetTooltip("Trees closer than this use full geometry.");
-                    }
-                    ImGui::SliderFloat("Impostor Dist", &settings.impostorDistance, 0.0f, 10000.0f, "%.0f m");
-                    if (ImGui::IsItemHovered()) {
-                        ImGui::SetTooltip("Trees beyond this distance are culled.");
-                    }
-                    ImGui::SliderFloat("Hysteresis", &settings.hysteresis, 0.0f, 20.0f, "%.1f m");
-                    if (ImGui::IsItemHovered()) {
-                        ImGui::SetTooltip("Dead zone to prevent flickering at LOD boundaries.");
-                    }
-
-                    ImGui::Spacing();
-                    ImGui::Text("Blending:");
-                    ImGui::SliderFloat("Blend Range", &settings.blendRange, 0.0f, 50.0f, "%.1f m");
-                    if (ImGui::IsItemHovered()) {
-                        ImGui::SetTooltip("Distance over which to blend between geometry and impostor.");
-                    }
-                    ImGui::SliderFloat("Blend Exponent", &settings.blendExponent, 0.0f, 3.0f, "%.2f");
-                    if (ImGui::IsItemHovered()) {
-                        ImGui::SetTooltip("Blend curve: 1.0 = linear, >1 = faster falloff.");
-                    }
-                }
-            } // End of Auto mode settings
 
             ImGui::Spacing();
             ImGui::Text("Impostor Appearance:");
