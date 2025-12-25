@@ -1,6 +1,7 @@
 #pragma once
 
 #include "interfaces/IEnvironmentControl.h"
+#include <glm/glm.hpp>
 
 class FroxelSystem;
 class AtmosphereLUTSystem;
@@ -62,6 +63,7 @@ public:
     // Leaves/particles
     void setLeafIntensity(float intensity) override;
     float getLeafIntensity() const override;
+    void spawnConfetti(const glm::vec3& position, float velocity, float count, float coneAngle) override;
 
     // Cloud style and parameters
     void toggleCloudStyle() override;

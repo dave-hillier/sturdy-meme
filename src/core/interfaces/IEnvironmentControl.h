@@ -1,5 +1,7 @@
 #pragma once
 
+#include <glm/glm.hpp>
+
 struct AtmosphereParams;
 struct EnvironmentSettings;
 
@@ -44,6 +46,7 @@ public:
     // Leaves/particles
     virtual void setLeafIntensity(float intensity) = 0;
     virtual float getLeafIntensity() const = 0;
+    virtual void spawnConfetti(const glm::vec3& position, float velocity = 8.0f, float count = 100.0f, float coneAngle = 0.5f) = 0;
 
     // Cloud style and parameters
     virtual void toggleCloudStyle() = 0;

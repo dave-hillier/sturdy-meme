@@ -117,6 +117,10 @@ float EnvironmentControlSubsystem::getLeafIntensity() const {
     return leaf_.getIntensity();
 }
 
+void EnvironmentControlSubsystem::spawnConfetti(const glm::vec3& position, float velocity, float count, float coneAngle) {
+    leaf_.spawnConfetti(position, velocity, count, coneAngle);
+}
+
 // Cloud style and parameters
 void EnvironmentControlSubsystem::toggleCloudStyle() {
     useParaboloidClouds_ = !useParaboloidClouds_;

@@ -10,8 +10,8 @@
 #include "GuiIKTab.h"
 #include "GuiPlayerTab.h"
 #include "GuiEnvironmentTab.h"
+#include "GuiInterfaces.h"
 
-class Renderer;
 class Camera;
 
 class GuiSystem {
@@ -35,7 +35,7 @@ public:
 
     void processEvent(const SDL_Event& event);
     void beginFrame();
-    void render(Renderer& renderer, const Camera& camera, float deltaTime, float fps);
+    void render(GuiInterfaces& interfaces, const Camera& camera, float deltaTime, float fps);
     void endFrame(VkCommandBuffer cmd);
     void cancelFrame();  // End frame without rendering (for early returns)
 
@@ -60,7 +60,7 @@ private:
     void cleanup();
 
     void setupStyle();
-    void renderDashboard(Renderer& renderer, const Camera& camera, float fps);
+    void renderDashboard(GuiInterfaces& interfaces, const Camera& camera, float fps);
     void renderPositionPanel(const Camera& camera);
 
     VkDevice device_ = VK_NULL_HANDLE;  // Stored for cleanup

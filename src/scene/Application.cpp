@@ -12,6 +12,15 @@
 #include "SceneManager.h"
 #include "WaterSystem.h"
 #include "WindSystem.h"
+#include "GuiInterfaces.h"
+#include "core/RendererSystems.h"
+#include "EnvironmentSettings.h"
+#include "TimeSystem.h"
+#include "core/interfaces/ITimeSystem.h"
+#include "core/interfaces/IEnvironmentControl.h"
+#include "core/interfaces/IDebugControl.h"
+#include "core/interfaces/IWeatherState.h"
+#include "core/interfaces/ITerrainControl.h"
 
 #ifdef JPH_DEBUG_RENDERER
 #include "PhysicsDebugRenderer.h"
@@ -269,7 +278,25 @@ void Application::run() {
 
         // Begin GUI frame
         gui_->beginFrame();
-        gui_->render(*renderer_, camera, lastDeltaTime, currentFps);
+        auto& systems = renderer_->getSystems();
+        GuiInterfaces guiInterfaces{
+            systems.time(),
+            systems.locationControl(),
+            systems.weatherState(),
+            systems.environmentControl(),
+            systems.postProcessState(),
+            systems.cloudShadowControl(),
+            systems.terrainControl(),
+            systems.waterControl(),
+            systems.treeControl(),
+            systems.debugControl(),
+            systems.profilerControl(),
+            systems.performanceControl(),
+            systems.sceneControl(),
+            systems.playerControl(),
+            systems.environmentSettings()
+        };
+        gui_->render(guiInterfaces, camera, lastDeltaTime, currentFps);
 
         // Update input system
         input.update(deltaTime, camera.getYaw());
@@ -400,7 +427,7 @@ void Application::run() {
         if (deltaTime > 0.0f) {
             smoothedFps = smoothedFps * 0.95f + (1.0f / deltaTime) * 0.05f;
         }
-        float timeOfDay = renderer_->getTimeOfDay();
+        float timeOfDay = systems.time().getTimeOfDay();
         int hours = static_cast<int>(timeOfDay * 24.0f);
         int minutes = static_cast<int>((timeOfDay * 24.0f - hours) * 60.0f);
         char title[96];
@@ -462,7 +489,8 @@ void Application::processEvents() {
                     renderer_->notifyWindowRestored();
                 }
                 break;
-            case SDL_EVENT_KEY_DOWN:
+            case SDL_EVENT_KEY_DOWN: {
+                auto& sys = renderer_->getSystems();
                 if (event.key.scancode == SDL_SCANCODE_ESCAPE) {
                     running = false;
                 }
@@ -470,136 +498,139 @@ void Application::processEvents() {
                     gui_->toggleVisibility();
                 }
                 else if (event.key.scancode == SDL_SCANCODE_1) {
-                    renderer_->setTimeOfDay(0.25f);
+                    sys.time().setTimeOfDay(0.25f);
                 }
                 else if (event.key.scancode == SDL_SCANCODE_2) {
-                    renderer_->setTimeOfDay(0.5f);
+                    sys.time().setTimeOfDay(0.5f);
                 }
                 else if (event.key.scancode == SDL_SCANCODE_3) {
-                    renderer_->setTimeOfDay(0.75f);
+                    sys.time().setTimeOfDay(0.75f);
                 }
                 else if (event.key.scancode == SDL_SCANCODE_4) {
-                    renderer_->setTimeOfDay(0.0f);
+                    sys.time().setTimeOfDay(0.0f);
                 }
                 else if (event.key.scancode == SDL_SCANCODE_EQUALS) {
-                    renderer_->setTimeScale(renderer_->getTimeScale() * 2.0f);
+                    sys.time().setTimeScale(sys.time().getTimeScale() * 2.0f);
                 }
                 else if (event.key.scancode == SDL_SCANCODE_MINUS) {
-                    renderer_->setTimeScale(renderer_->getTimeScale() * 0.5f);
+                    sys.time().setTimeScale(sys.time().getTimeScale() * 0.5f);
                 }
                 else if (event.key.scancode == SDL_SCANCODE_R) {
-                    renderer_->resumeAutoTime();
-                    renderer_->setTimeScale(1.0f);
+                    sys.time().resumeAutoTime();
+                    sys.time().setTimeScale(1.0f);
                 }
                 else if (event.key.scancode == SDL_SCANCODE_6) {
-                    renderer_->toggleCascadeDebug();
-                    SDL_Log("Cascade debug visualization: %s", renderer_->isShowingCascadeDebug() ? "ON" : "OFF");
+                    sys.debugControl().toggleCascadeDebug();
+                    SDL_Log("Cascade debug visualization: %s", sys.debugControl().isShowingCascadeDebug() ? "ON" : "OFF");
                 }
                 else if (event.key.scancode == SDL_SCANCODE_7) {
-                    renderer_->toggleSnowDepthDebug();
-                    SDL_Log("Snow depth debug visualization: %s", renderer_->isShowingSnowDepthDebug() ? "ON" : "OFF");
+                    sys.debugControl().toggleSnowDepthDebug();
+                    SDL_Log("Snow depth debug visualization: %s", sys.debugControl().isShowingSnowDepthDebug() ? "ON" : "OFF");
                 }
                 else if (event.key.scancode == SDL_SCANCODE_8) {
-                    renderer_->setHiZCullingEnabled(!renderer_->isHiZCullingEnabled());
-                    SDL_Log("Hi-Z occlusion culling: %s", renderer_->isHiZCullingEnabled() ? "ON" : "OFF");
+                    sys.debugControl().setHiZCullingEnabled(!sys.debugControl().isHiZCullingEnabled());
+                    SDL_Log("Hi-Z occlusion culling: %s", sys.debugControl().isHiZCullingEnabled() ? "ON" : "OFF");
                 }
                 else if (event.key.scancode == SDL_SCANCODE_Z) {
-                    float currentIntensity = renderer_->getIntensity();
-                    renderer_->setWeatherIntensity(std::max(0.0f, currentIntensity - 0.1f));
-                    SDL_Log("Weather intensity: %.1f", renderer_->getIntensity());
+                    float currentIntensity = sys.weatherState().getIntensity();
+                    sys.weatherState().setIntensity(std::max(0.0f, currentIntensity - 0.1f));
+                    SDL_Log("Weather intensity: %.1f", sys.weatherState().getIntensity());
                 }
                 else if (event.key.scancode == SDL_SCANCODE_X) {
-                    float currentIntensity = renderer_->getIntensity();
-                    renderer_->setWeatherIntensity(std::min(1.0f, currentIntensity + 0.1f));
-                    SDL_Log("Weather intensity: %.1f", renderer_->getIntensity());
+                    float currentIntensity = sys.weatherState().getIntensity();
+                    sys.weatherState().setIntensity(std::min(1.0f, currentIntensity + 0.1f));
+                    SDL_Log("Weather intensity: %.1f", sys.weatherState().getIntensity());
                 }
                 else if (event.key.scancode == SDL_SCANCODE_C) {
-                    uint32_t currentType = renderer_->getWeatherType();
-                    if (renderer_->getIntensity() == 0.0f && currentType == 0) {
-                        renderer_->setWeatherType(0);
-                        renderer_->setWeatherIntensity(0.5f);
+                    uint32_t currentType = sys.weatherState().getWeatherType();
+                    if (sys.weatherState().getIntensity() == 0.0f && currentType == 0) {
+                        sys.weatherState().setWeatherType(0);
+                        sys.weatherState().setIntensity(0.5f);
                     } else if (currentType == 0) {
-                        renderer_->setWeatherType(1);
-                        renderer_->setWeatherIntensity(0.5f);
+                        sys.weatherState().setWeatherType(1);
+                        sys.weatherState().setIntensity(0.5f);
                     } else if (currentType == 1) {
-                        renderer_->setWeatherType(0);
-                        renderer_->setWeatherIntensity(0.0f);
+                        sys.weatherState().setWeatherType(0);
+                        sys.weatherState().setIntensity(0.0f);
                     }
 
                     std::string weatherStatus = "Clear";
-                    if (renderer_->getIntensity() > 0.0f) {
-                        if (renderer_->getWeatherType() == 0) {
+                    if (sys.weatherState().getIntensity() > 0.0f) {
+                        if (sys.weatherState().getWeatherType() == 0) {
                             weatherStatus = "Rain";
-                        } else if (renderer_->getWeatherType() == 1) {
+                        } else if (sys.weatherState().getWeatherType() == 1) {
                             weatherStatus = "Snow";
                         }
                     }
-                    SDL_Log("Weather type: %s, Intensity: %.1f", weatherStatus.c_str(), renderer_->getIntensity());
+                    SDL_Log("Weather type: %s, Intensity: %.1f", weatherStatus.c_str(), sys.weatherState().getIntensity());
                 }
                 else if (event.key.scancode == SDL_SCANCODE_F) {
                     glm::vec3 playerPos = player.getPosition();
-                    renderer_->spawnConfetti(playerPos, 8.0f, 100.0f, 0.5f);
+                    sys.environmentControl().spawnConfetti(playerPos, 8.0f, 100.0f, 0.5f);
                     SDL_Log("Confetti!");
                 }
                 else if (event.key.scancode == SDL_SCANCODE_V) {
-                    renderer_->toggleCloudStyle();
-                    SDL_Log("Cloud style: %s", renderer_->isUsingParaboloidClouds() ? "Paraboloid LUT Hybrid" : "Procedural");
+                    sys.environmentControl().toggleCloudStyle();
+                    SDL_Log("Cloud style: %s", sys.environmentControl().isUsingParaboloidClouds() ? "Paraboloid LUT Hybrid" : "Procedural");
                 }
                 else if (event.key.scancode == SDL_SCANCODE_LEFTBRACKET) {
-                    float density = renderer_->getFogDensity();
-                    renderer_->setFogDensity(std::max(0.0f, density - 0.0025f));
-                    SDL_Log("Fog density: %.3f", renderer_->getFogDensity());
+                    float density = sys.environmentControl().getFogDensity();
+                    sys.environmentControl().setFogDensity(std::max(0.0f, density - 0.0025f));
+                    SDL_Log("Fog density: %.3f", sys.environmentControl().getFogDensity());
                 }
                 else if (event.key.scancode == SDL_SCANCODE_RIGHTBRACKET) {
-                    float density = renderer_->getFogDensity();
-                    renderer_->setFogDensity(std::min(0.2f, density + 0.0025f));
-                    SDL_Log("Fog density: %.3f", renderer_->getFogDensity());
+                    float density = sys.environmentControl().getFogDensity();
+                    sys.environmentControl().setFogDensity(std::min(0.2f, density + 0.0025f));
+                    SDL_Log("Fog density: %.3f", sys.environmentControl().getFogDensity());
                 }
                 else if (event.key.scancode == SDL_SCANCODE_BACKSLASH) {
-                    renderer_->setFogEnabled(!renderer_->isFogEnabled());
-                    SDL_Log("Fog: %s", renderer_->isFogEnabled() ? "ON" : "OFF");
+                    sys.environmentControl().setFogEnabled(!sys.environmentControl().isFogEnabled());
+                    SDL_Log("Fog: %s", sys.environmentControl().isFogEnabled() ? "ON" : "OFF");
                 }
                 else if (event.key.scancode == SDL_SCANCODE_COMMA) {
-                    float snow = renderer_->getSnowAmount();
-                    renderer_->setSnowAmount(std::max(0.0f, snow - 0.1f));
-                    SDL_Log("Snow amount: %.1f", renderer_->getSnowAmount());
+                    float snow = sys.environmentSettings().snowAmount;
+                    sys.environmentSettings().snowAmount = std::max(0.0f, snow - 0.1f);
+                    SDL_Log("Snow amount: %.1f", sys.environmentSettings().snowAmount);
                 }
                 else if (event.key.scancode == SDL_SCANCODE_PERIOD) {
-                    float snow = renderer_->getSnowAmount();
-                    renderer_->setSnowAmount(std::min(1.0f, snow + 0.1f));
-                    SDL_Log("Snow amount: %.1f", renderer_->getSnowAmount());
+                    float snow = sys.environmentSettings().snowAmount;
+                    sys.environmentSettings().snowAmount = std::min(1.0f, snow + 0.1f);
+                    SDL_Log("Snow amount: %.1f", sys.environmentSettings().snowAmount);
                 }
                 else if (event.key.scancode == SDL_SCANCODE_SLASH) {
-                    float snow = renderer_->getSnowAmount();
-                    renderer_->setSnowAmount(snow < 0.5f ? 1.0f : 0.0f);
-                    SDL_Log("Snow amount: %.1f", renderer_->getSnowAmount());
+                    float snow = sys.environmentSettings().snowAmount;
+                    sys.environmentSettings().snowAmount = (snow < 0.5f ? 1.0f : 0.0f);
+                    SDL_Log("Snow amount: %.1f", sys.environmentSettings().snowAmount);
                 }
                 else if (event.key.scancode == SDL_SCANCODE_T) {
-                    renderer_->toggleTerrainWireframe();
-                    SDL_Log("Terrain wireframe: %s", renderer_->isTerrainWireframeMode() ? "ON" : "OFF");
+                    sys.terrainControl().toggleTerrainWireframe();
+                    SDL_Log("Terrain wireframe: %s", sys.terrainControl().isTerrainWireframeMode() ? "ON" : "OFF");
                 }
                 break;
-            case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+            }
+            case SDL_EVENT_GAMEPAD_BUTTON_DOWN: {
+                auto& time = renderer_->getSystems().time();
                 if (event.gbutton.button == SDL_GAMEPAD_BUTTON_SOUTH) {
-                    renderer_->setTimeOfDay(0.25f);
+                    time.setTimeOfDay(0.25f);
                 }
                 else if (event.gbutton.button == SDL_GAMEPAD_BUTTON_EAST) {
-                    renderer_->setTimeOfDay(0.5f);
+                    time.setTimeOfDay(0.5f);
                 }
                 else if (event.gbutton.button == SDL_GAMEPAD_BUTTON_WEST) {
-                    renderer_->setTimeOfDay(0.75f);
+                    time.setTimeOfDay(0.75f);
                 }
                 else if (event.gbutton.button == SDL_GAMEPAD_BUTTON_NORTH) {
-                    renderer_->setTimeOfDay(0.0f);
+                    time.setTimeOfDay(0.0f);
                 }
                 else if (event.gbutton.button == SDL_GAMEPAD_BUTTON_START) {
-                    renderer_->resumeAutoTime();
-                    renderer_->setTimeScale(1.0f);
+                    time.resumeAutoTime();
+                    time.setTimeScale(1.0f);
                 }
                 else if (event.gbutton.button == SDL_GAMEPAD_BUTTON_BACK) {
                     running = false;
                 }
                 break;
+            }
             default:
                 break;
         }
@@ -636,7 +667,8 @@ void Application::applyInputToCamera() {
     // Handle gamepad time scale input
     float timeScaleInput = input.getTimeScaleInput();
     if (timeScaleInput != 0.0f) {
-        renderer_->setTimeScale(renderer_->getTimeScale() * timeScaleInput);
+        auto& time = renderer_->getSystems().time();
+        time.setTimeScale(time.getTimeScale() * timeScaleInput);
     }
 }
 

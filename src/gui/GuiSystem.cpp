@@ -1,9 +1,8 @@
 #include "GuiSystem.h"
-#include "Renderer.h"
+#include "GuiInterfaces.h"
 #include "Camera.h"
-#include "TimeSystem.h"
 
-// Interface headers for casting
+// Interface headers
 #include "core/interfaces/ITimeSystem.h"
 #include "core/interfaces/ILocationControl.h"
 #include "core/interfaces/IWeatherState.h"
@@ -18,6 +17,7 @@
 #include "core/interfaces/IPerformanceControl.h"
 #include "core/interfaces/ISceneControl.h"
 #include "core/interfaces/IPlayerControl.h"
+#include "EnvironmentSettings.h"
 
 // GUI tab headers
 #include "GuiTimeTab.h"
@@ -268,7 +268,7 @@ void GuiSystem::beginFrame() {
     ImGui::NewFrame();
 }
 
-void GuiSystem::render(Renderer& renderer, const Camera& camera, float deltaTime, float fps) {
+void GuiSystem::render(GuiInterfaces& ui, const Camera& camera, float deltaTime, float fps) {
     if (!visible) return;
 
     // Update frame time history
@@ -289,7 +289,7 @@ void GuiSystem::render(Renderer& renderer, const Camera& camera, float deltaTime
     ImGui::SetNextWindowSize(ImVec2(340, 680), ImGuiCond_FirstUseEver);
 
     if (ImGui::Begin("Engine Controls", &visible, windowFlags)) {
-        renderDashboard(renderer, camera, fps);
+        renderDashboard(ui, camera, fps);
 
         ImGui::Spacing();
         ImGui::Separator();
@@ -297,52 +297,51 @@ void GuiSystem::render(Renderer& renderer, const Camera& camera, float deltaTime
 
         if (ImGui::BeginTabBar("ControlTabs")) {
             if (ImGui::BeginTabItem("Time")) {
-                // TimeSystem implements ITimeSystem directly, Renderer provides ILocationControl
-                GuiTimeTab::render(renderer.getTimeSystem(), renderer.getLocationControl());
+                GuiTimeTab::render(ui.time, ui.location);
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Weather")) {
-                GuiWeatherTab::render(renderer.getWeatherState(), renderer.getEnvironmentSettings());
+                GuiWeatherTab::render(ui.weather, ui.environmentSettings);
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Environment")) {
-                GuiEnvironmentTab::render(renderer.getEnvironmentControl(), environmentTabState);
+                GuiEnvironmentTab::render(ui.environment, environmentTabState);
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Post FX")) {
-                GuiPostFXTab::render(renderer.getPostProcessState(), renderer.getCloudShadowControl());
+                GuiPostFXTab::render(ui.postProcess, ui.cloudShadow);
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Terrain")) {
-                GuiTerrainTab::render(renderer.getTerrainControl());
+                GuiTerrainTab::render(ui.terrain);
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Water")) {
-                GuiWaterTab::render(renderer.getWaterControl());
+                GuiWaterTab::render(ui.water);
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Trees")) {
-                GuiTreeTab::render(renderer.getTreeControl());
+                GuiTreeTab::render(ui.tree);
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Player")) {
-                GuiPlayerTab::render(renderer.getPlayerControl(), playerSettings);
+                GuiPlayerTab::render(ui.player, playerSettings);
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("IK")) {
-                GuiIKTab::render(renderer.getSceneControl(), camera, ikDebugSettings);
+                GuiIKTab::render(ui.scene, camera, ikDebugSettings);
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Debug")) {
-                GuiDebugTab::render(renderer.getDebugControl());
+                GuiDebugTab::render(ui.debug);
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Perf")) {
-                GuiPerformanceTab::render(renderer.getPerformanceControl());
+                GuiPerformanceTab::render(ui.performance);
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Profiler")) {
-                GuiProfilerTab::render(renderer.getProfilerControl());
+                GuiProfilerTab::render(ui.profiler);
                 ImGui::EndTabItem();
             }
             ImGui::EndTabBar();
@@ -355,7 +354,7 @@ void GuiSystem::render(Renderer& renderer, const Camera& camera, float deltaTime
 
     // Skeleton/IK debug overlay
     if (ikDebugSettings.showSkeleton || ikDebugSettings.showIKTargets) {
-        GuiIKTab::renderSkeletonOverlay(renderer.getSceneControl(), camera, ikDebugSettings, playerSettings.showCapeColliders);
+        GuiIKTab::renderSkeletonOverlay(ui.scene, camera, ikDebugSettings, playerSettings.showCapeColliders);
     }
 }
 
@@ -375,7 +374,7 @@ bool GuiSystem::wantsInput() const {
     return io.WantCaptureMouse || io.WantCaptureKeyboard;
 }
 
-void GuiSystem::renderDashboard(Renderer& renderer, const Camera& camera, float fps) {
+void GuiSystem::renderDashboard(GuiInterfaces& ui, const Camera& camera, float fps) {
     // Performance metrics header
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.8f, 1.0f, 1.0f));
     ImGui::Text("PERFORMANCE");
@@ -412,7 +411,7 @@ void GuiSystem::renderDashboard(Renderer& renderer, const Camera& camera, float 
     ImGui::Columns(2, nullptr, false);
     ImGui::SetColumnWidth(0, 160);
 
-    uint32_t triCount = renderer.getTerrainNodeCount();
+    uint32_t triCount = ui.terrain.getTerrainNodeCount();
     ImGui::Text("Terrain Tris");
     ImGui::SameLine(100);
     if (triCount >= 1000000) {
@@ -425,7 +424,7 @@ void GuiSystem::renderDashboard(Renderer& renderer, const Camera& camera, float 
 
     ImGui::NextColumn();
 
-    float tod = renderer.getTimeOfDay();
+    float tod = ui.time.getTimeOfDay();
     int h = static_cast<int>(tod * 24.0f);
     int m = static_cast<int>((tod * 24.0f - h) * 60.0f);
     ImGui::Text("Time");
