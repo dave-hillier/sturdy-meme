@@ -697,21 +697,27 @@ void TreeLODSystem::update(uint32_t frameIndex, float deltaTime, const glm::vec3
                     glm::vec3 maxB = meshBounds.max;
                     glm::vec3 extent = maxB - minB;
                     float horizontalRadius = std::max(extent.x, extent.z) * 0.5f;
-                    float halfHeight = extent.y * 0.5f;
+                    float treeHeight = extent.y;
+                    float halfHeight = treeHeight * 0.5f;
                     float boundingSphereRadius = glm::length(extent) * 0.5f;
-                    float maxHSize = boundingSphereRadius * 1.15f;
-                    float maxVSize = halfHeight * 1.15f;
-                    float projSize = std::max(maxHSize, maxVSize) * tree.scale;
-                    instance.hSize = projSize;
-                    instance.vSize = projSize;
-                    float centerY = (minB.y + maxB.y) * 0.5f;
-                    instance.baseOffset = centerY * tree.scale;
+                    // Use separate horizontal and vertical sizes
+                    float hSize = std::max(horizontalRadius, boundingSphereRadius) * 1.15f * tree.scale;
+                    float vSize = halfHeight * 1.15f * tree.scale;
+                    instance.hSize = hSize;
+                    instance.vSize = vSize;
+                    // Position billboard so its bottom aligns with tree base (minB.y)
+                    // Billboard extends from baseOffset-vSize to baseOffset+vSize
+                    // So: baseOffset - vSize = minB.y * scale
+                    //     baseOffset = minB.y * scale + vSize
+                    instance.baseOffset = minB.y * tree.scale + vSize;
                 } else {
                     const auto* archetype = impostorAtlas_->getArchetype(state.archetypeIndex);
                     float projSize = (archetype ? archetype->boundingSphereRadius * 1.15f : 10.0f) * tree.scale;
                     instance.hSize = projSize;
                     instance.vSize = projSize;
-                    instance.baseOffset = (archetype ? archetype->centerHeight : 0.0f) * tree.scale;
+                    // For archetype path, use centerHeight + vSize to align bottom properly
+                    float vSize = projSize;
+                    instance.baseOffset = vSize;  // Assumes tree base at y=0
                 }
                 visibleImpostors_.push_back(instance);
             }
@@ -819,30 +825,27 @@ void TreeLODSystem::update(uint32_t frameIndex, float deltaTime, const glm::vec3
                 glm::vec3 maxB = meshBounds.max;
                 glm::vec3 extent = maxB - minB;
 
-                // Match the octahedral capture projection sizing
-                // Capture uses: max(mix(hRadius, sphereRadius, elevFactor) * 1.15, halfHeight * 1.15)
-                // Billboard needs the maximum size (at top-down view where elevFactor=1)
                 float horizontalRadius = std::max(extent.x, extent.z) * 0.5f;
-                float halfHeight = extent.y * 0.5f;
+                float treeHeight = extent.y;
+                float halfHeight = treeHeight * 0.5f;
                 float boundingSphereRadius = glm::length(extent) * 0.5f;
 
-                // At max elevation, effectiveHSize approaches boundingSphereRadius
-                float maxHSize = boundingSphereRadius * 1.15f;
-                float maxVSize = halfHeight * 1.15f;
-                float projSize = std::max(maxHSize, maxVSize) * tree.scale;
-
-                instance.hSize = projSize;
-                instance.vSize = projSize;
-                // Center offset: tree center height relative to origin
-                float centerY = (minB.y + maxB.y) * 0.5f;
-                instance.baseOffset = centerY * tree.scale;
+                // Use separate horizontal and vertical sizes
+                float hSize = std::max(horizontalRadius, boundingSphereRadius) * 1.15f * tree.scale;
+                float vSize = halfHeight * 1.15f * tree.scale;
+                instance.hSize = hSize;
+                instance.vSize = vSize;
+                // Position billboard so its bottom aligns with tree base (minB.y)
+                // Billboard extends from baseOffset-vSize to baseOffset+vSize
+                instance.baseOffset = minB.y * tree.scale + vSize;
             } else {
                 // Fallback to archetype bounds if mesh not available
                 const auto* archetype = impostorAtlas_->getArchetype(state.archetypeIndex);
                 float projSize = (archetype ? archetype->boundingSphereRadius * 1.15f : 10.0f) * tree.scale;
                 instance.hSize = projSize;
                 instance.vSize = projSize;
-                instance.baseOffset = (archetype ? archetype->centerHeight : 0.0f) * tree.scale;
+                // Position billboard so bottom is at ground level
+                instance.baseOffset = projSize;
             }
             visibleImpostors_.push_back(instance);
         }
