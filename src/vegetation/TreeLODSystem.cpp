@@ -684,8 +684,8 @@ void TreeLODSystem::update(float deltaTime, const glm::vec3& cameraPos, const Tr
             state.currentLevel = TreeLODState::Level::Impostor;
             state.targetLevel = TreeLODState::Level::Impostor;
             state.blendFactor = 1.0f;
-            // Continue to add to impostor list below
-            if (settings.enableImpostors && state.archetypeIndex < impostorAtlas_->getArchetypeCount()) {
+            // In forced Impostor mode, always add to impostor list (ignore enableImpostors flag)
+            if (state.archetypeIndex < impostorAtlas_->getArchetypeCount()) {
                 ImpostorInstanceGPU instance;
                 instance.position = tree.position;
                 instance.scale = tree.scale;
@@ -976,7 +976,8 @@ void TreeLODSystem::renderImpostors(VkCommandBuffer cmd, uint32_t frameIndex,
     if (visibleImpostors_.empty() || impostorAtlas_->getArchetypeCount() == 0) return;
 
     const auto& settings = getLODSettings();
-    if (!settings.enableImpostors) return;
+    // Skip enableImpostors check when in forced Impostor mode
+    if (settings.simpleLODMode != SimpleLODMode::Impostor && !settings.enableImpostors) return;
 
     // Update descriptor sets
     updateDescriptorSets(frameIndex, uniformBuffer, shadowMap, shadowSampler);
@@ -1051,7 +1052,8 @@ void TreeLODSystem::renderImpostorShadows(VkCommandBuffer cmd, uint32_t frameInd
     if (uniformBuffer == VK_NULL_HANDLE) return;
 
     const auto& settings = getLODSettings();
-    if (!settings.enableImpostors) return;
+    // Skip enableImpostors check when in forced Impostor mode
+    if (settings.simpleLODMode != SimpleLODMode::Impostor && !settings.enableImpostors) return;
 
     // Update shadow descriptor set with UBO, albedo atlas, and instance buffer
     if (!shadowDescriptorSets_.empty() && impostorAtlas_->getArchetypeCount() > 0) {
