@@ -1000,7 +1000,8 @@ void TreeLODSystem::renderImpostorShadows(VkCommandBuffer cmd, uint32_t frameInd
 
     // Update shadow descriptor set with UBO, albedo atlas, and instance buffer
     if (!shadowDescriptorSets_.empty() && impostorAtlas_->getArchetypeCount() > 0) {
-        VkImageView albedoView = impostorAtlas_->getAlbedoAtlasView(0);
+        // Use the same array view as main rendering (octahedral when enabled)
+        VkImageView albedoView = impostorAtlas_->getAlbedoAtlasArrayView();
         VkSampler atlasSampler = impostorAtlas_->getAtlasSampler();
 
         if (albedoView != VK_NULL_HANDLE) {
@@ -1251,7 +1252,8 @@ void TreeLODSystem::renderImpostorShadowsGPUCulled(VkCommandBuffer cmd, uint32_t
     // Update shadow descriptor set with GPU-culled instance buffer
     if (shadowDescriptorSets_.empty()) return;
 
-    VkImageView albedoView = impostorAtlas_->getAlbedoAtlasView(0);
+    // Use the same array view as main rendering (octahedral when enabled)
+    VkImageView albedoView = impostorAtlas_->getAlbedoAtlasArrayView();
     VkSampler atlasSampler = impostorAtlas_->getAtlasSampler();
     if (albedoView == VK_NULL_HANDLE) return;
 
@@ -1305,12 +1307,13 @@ void TreeLODSystem::renderImpostorShadowsGPUCulled(VkCommandBuffer cmd, uint32_t
     // vec4 cameraPos (offset 0), vec4 lodParams (offset 16), int cascadeIndex (offset 32)
     struct {
         glm::vec4 cameraPos;
-        glm::vec4 lodParams;  // unused but needed for layout alignment
+        glm::vec4 lodParams;
         int cascadeIndex;
         float _pad[3];
     } pushConstants;
     pushConstants.cameraPos = glm::vec4(lastCameraPos_, 0.0f);
-    pushConstants.lodParams = glm::vec4(0.0f);  // unused for shadow
+    // lodParams.x = useOctahedral - must match main rendering mode for correct atlas UV lookup
+    pushConstants.lodParams = glm::vec4(settings.useOctahedralMapping ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
     pushConstants.cascadeIndex = cascadeIndex;
 
     vkCmdPushConstants(cmd, shadowPipelineLayout_.get(),

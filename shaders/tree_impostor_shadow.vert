@@ -7,6 +7,7 @@ const int NUM_CASCADES = 4;
 #include "bindings.glsl"
 #include "ubo_common.glsl"
 #include "tree_impostor_instance.glsl"
+#include "octahedral_mapping.glsl"
 
 // Per-vertex data for impostor billboards
 layout(location = 0) in vec3 inPosition;   // Billboard quad vertex position
@@ -17,20 +18,15 @@ layout(std430, binding = BINDING_TREE_IMPOSTOR_SHADOW_INSTANCES) readonly buffer
     ImpostorInstance instances[];
 };
 
-// Simplified push constants
+// Push constants - must match layout from TreeLODSystem
 layout(push_constant) uniform PushConstants {
-    vec4 cameraPos;         // xyz = camera world position (for billboard facing)
-    vec4 lodParams;         // unused for shadow, but keep layout consistency
+    vec4 cameraPos;         // xyz = camera world position (unused for shadow)
+    vec4 lodParams;         // unused for shadow but needed for layout consistency
     int cascadeIndex;       // Which shadow cascade we're rendering
 } push;
 
 layout(location = 0) out vec2 fragTexCoord;
 layout(location = 1) flat out uint fragArchetypeIndex;
-
-// Atlas layout constants
-const int CELLS_PER_ROW = 9;
-const int HORIZONTAL_ANGLES = 8;
-const float ANGLE_STEP = 360.0 / float(HORIZONTAL_ANGLES);  // 45 degrees
 
 void main() {
     // Get instance data from SSBO
@@ -47,71 +43,61 @@ void main() {
     // For shadows, orient billboard to face the sun (not the camera)
     // This gives a full shadow profile instead of a thin edge shadow
     vec3 sunDir = normalize(ubo.sunDirection.xyz);  // Points toward sun
-    vec3 toSun = sunDir;  // Direction from tree to sun
-    vec2 toSunHorizontal = normalize(toSun.xz);
 
-    // Compute horizontal angle from sun direction (0-360 degrees, clockwise from +Z)
-    float hAngle = atan(toSunHorizontal.x, toSunHorizontal.y);
-    hAngle = degrees(hAngle);
-    if (hAngle < 0.0) hAngle += 360.0;
+    // Apply tree rotation to view direction (rotate view around Y axis)
+    float cosRot = cos(-rotation);
+    float sinRot = sin(-rotation);
+    vec3 rotatedSunDir = vec3(
+        sunDir.x * cosRot - sunDir.z * sinRot,
+        sunDir.y,
+        sunDir.x * sinRot + sunDir.z * cosRot
+    );
 
-    // Apply tree rotation offset - add rotation because we're rotating the view around the tree
-    hAngle = mod(hAngle + degrees(rotation) + 360.0, 360.0);
-
-    // Select horizontal cell index (0-7)
-    int hIndex = int(mod(round(hAngle / ANGLE_STEP), float(HORIZONTAL_ANGLES)));
-
-    // Compute sun elevation angle (how high the sun is above horizon)
+    // Compute sun elevation angle
     float sunElevation = degrees(asin(clamp(sunDir.y, -1.0, 1.0)));
 
-    // Select vertical level based on sun elevation
-    int cellIndex;
-    if (sunElevation > 67.5) {
-        cellIndex = 8;  // Top-down view (sun directly above)
-    } else if (sunElevation > 22.5) {
-        cellIndex = CELLS_PER_ROW + hIndex;  // Elevated view
-    } else {
-        cellIndex = hIndex;  // Horizon view
-    }
+    // Octahedral atlas UV lookup - compute which cell based on sun direction
+    vec2 octaUV = hemiOctaEncode(rotatedSunDir);
+    float gridSize = float(OCTA_GRID_SIZE);
+    ivec2 cell = ivec2(floor(octaUV * gridSize));
+    cell = clamp(cell, ivec2(0), ivec2(OCTA_GRID_SIZE - 1));
 
-    // Compute atlas UV offset for this cell
-    int cellX = cellIndex % CELLS_PER_ROW;
-    int cellY = cellIndex / CELLS_PER_ROW;
-
-    // Transform quad UV to atlas UV
-    vec2 cellUV = inTexCoord;
-
-    // For top-down view (sun directly overhead), rotate UV by horizontal angle
-    if (sunElevation > 67.5) {
-        float rotAngle = radians(-hAngle);
-        vec2 centered = cellUV - 0.5;
-        cellUV = vec2(
-            centered.x * cos(rotAngle) - centered.y * sin(rotAngle),
-            centered.x * sin(rotAngle) + centered.y * cos(rotAngle)
-        ) + 0.5;
-    }
-
-    vec2 atlasUV = (vec2(cellX, cellY) + cellUV) / vec2(float(CELLS_PER_ROW), 2.0);
+    // Map billboard's local UV to the cell position in atlas
+    vec2 atlasUV = (vec2(cell) + inTexCoord) / gridSize;
     fragTexCoord = atlasUV;
 
     // Billboard orientation: face toward sun to cast full shadow
-    vec3 forward = normalize(vec3(toSun.x, 0.0, toSun.z));
+    // forward points FROM sun TO tree (so billboard front faces the sun)
+    vec3 forward = -normalize(vec3(sunDir.x, 0.0, sunDir.z));
     vec3 up = vec3(0.0, 1.0, 0.0);
     vec3 right = cross(up, forward);
 
-    // For elevated sun angles, tilt the billboard to face the sun
-    if (sunElevation > 22.5) {
-        float tiltAngle = radians(min(sunElevation - 22.5, 45.0));
-        vec3 tiltedUp = cos(tiltAngle) * up - sin(tiltAngle) * forward;
-        vec3 tiltedForward = sin(tiltAngle) * up + cos(tiltAngle) * forward;
+    // Handle top-down view (sun nearly overhead)
+    if (sunElevation > 67.5) {
+        forward = vec3(0.0, 1.0, 0.0);
+        right = vec3(cos(rotation), 0.0, -sin(rotation));
+        up = vec3(sin(rotation), 0.0, cos(rotation));
+    } else if (sunElevation > 5.0) {
+        // Tilt billboard to match capture angle for elevated sun
+        float tiltAngle = radians(clamp(sunElevation, 0.0, 80.0));
+        vec3 tiltedUp = cos(tiltAngle) * up + sin(tiltAngle) * forward;
+        vec3 tiltedForward = -sin(tiltAngle) * up + cos(tiltAngle) * forward;
         forward = tiltedForward;
         up = tiltedUp;
         right = cross(up, forward);
     }
 
     // Position billboard vertex - center Y around origin so baseOffset positions correctly
-    vec3 localPos = right * inPosition.x * hSize * 2.0 +
-                    up * (inPosition.y - 0.5) * vSize * 2.0;
+    vec3 localPos;
+    if (sunElevation > 67.5) {
+        // Top-down: use max size for both dimensions
+        float maxSize = max(hSize, vSize);
+        localPos = right * inPosition.x * maxSize * 2.0 +
+                   up * (inPosition.y - 0.5) * maxSize * 2.0;
+    } else {
+        localPos = right * inPosition.x * hSize * 2.0 +
+                   up * (inPosition.y - 0.5) * vSize * 2.0;
+    }
 
     // Position billboard centered at tree's center height
     vec3 worldPos = treePos + vec3(0.0, baseOffset, 0.0) + localPos;
