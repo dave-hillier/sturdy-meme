@@ -67,7 +67,8 @@ void main() {
     fragTexCoord = atlasUV;
 
     // Billboard orientation: face toward sun to cast full shadow
-    vec3 forward = normalize(vec3(sunDir.x, 0.0, sunDir.z));
+    // forward points FROM sun TO tree (so billboard front faces the sun)
+    vec3 forward = -normalize(vec3(sunDir.x, 0.0, sunDir.z));
     vec3 up = vec3(0.0, 1.0, 0.0);
     vec3 right = cross(up, forward);
 
