@@ -853,6 +853,14 @@ void TreeLODSystem::update(float deltaTime, const glm::vec3& cameraPos, const Tr
 
     lastCameraPos_ = cameraPos;
 
+    // Update instance buffer for CPU rendering path
+    // Always update when in forced Impostor mode, or when GPU culling is disabled
+    bool needsCPUInstanceBuffer = !gpuCullingEnabled_ ||
+                                   settings.simpleLODMode == SimpleLODMode::Impostor;
+    if (needsCPUInstanceBuffer && !visibleImpostors_.empty()) {
+        updateInstanceBuffer(visibleImpostors_);
+    }
+
     // Skip debug info calculation when GPU culling is enabled (expensive O(n) loop)
     if (!gpuCullingEnabled_) {
         // Update debug info - find nearest tree and calculate elevation
@@ -871,11 +879,6 @@ void TreeLODSystem::update(float deltaTime, const glm::vec3& cameraPos, const Tr
                     debugInfo_.calculatedElevation = glm::degrees(std::asin(glm::clamp(-toTree.y / toTreeDist, -1.0f, 1.0f)));
                 }
             }
-        }
-
-        // Update instance buffer (CPU fallback path only)
-        if (!visibleImpostors_.empty()) {
-            updateInstanceBuffer(visibleImpostors_);
         }
     }
 }
