@@ -140,7 +140,9 @@ bool isOccludedHiZ(vec3 worldPos, float boundingRadius) {
 bool getVisibilityCached(uint treeIdx) {
     uint wordIdx = treeIdx / 32u;
     uint bitIdx = treeIdx % 32u;
-    return (visibilityBits[wordIdx] & (1u << bitIdx)) != 0u;
+    // Use atomicOr with 0 to perform an atomic read (avoids race with concurrent writes)
+    uint word = atomicOr(visibilityBits[wordIdx], 0u);
+    return (word & (1u << bitIdx)) != 0u;
 }
 
 void setVisibilityCached(uint treeIdx, bool visible) {
@@ -331,13 +333,13 @@ void main() {
                 // Tree should be rendered as full geometry, not impostor
                 isVisible = false;
             } else {
-                // Tree is in frustum and should be impostor - check cache
-                bool wasCachedVisible = getVisibilityCached(treeIdx);
-                isVisible = wasCachedVisible || inFrustum;
-
-                if (!wasCachedVisible && isVisible) {
-                    setVisibilityCached(treeIdx, true);
-                }
+                // Tree is in frustum and should be impostor
+                // In skip/partial mode, we trust the cache for Hi-Z occlusion results.
+                // But if cache says not visible and tree is now in frustum, it may have
+                // just entered the view - mark it visible (conservative, may over-render).
+                // The next full update will do proper Hi-Z culling.
+                isVisible = true;
+                setVisibilityCached(treeIdx, true);
             }
         }
 
