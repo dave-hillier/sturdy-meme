@@ -51,7 +51,7 @@ TreeRenderer::~TreeRenderer() {
             vmaDestroyBuffer(allocator_, cellCullUniformBuffers_.buffers[i], cellCullUniformBuffers_.allocations[i]);
         }
     }
-    // Clean up Phase 3 tree filter buffers
+    // Clean up two-phase tree filter buffers
     if (visibleTreeBuffer_ != VK_NULL_HANDLE) {
         vmaDestroyBuffer(allocator_, visibleTreeBuffer_, visibleTreeAllocation_);
     }
@@ -94,19 +94,19 @@ bool TreeRenderer::initInternal(const InitInfo& info) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "TreeRenderer: Culling pipeline not available, using direct rendering");
     }
 
-    // Create cell culling pipeline for spatial partitioning (Phase 1)
+    // Create cell culling pipeline for spatial partitioning
     if (!createCellCullPipeline()) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "TreeRenderer: Cell culling pipeline not available, using non-spatial culling");
     }
 
-    // Create tree filter pipeline for two-phase culling (Phase 3)
+    // Create tree filter pipeline for two-phase culling
     if (!createTreeFilterPipeline()) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "TreeRenderer: Tree filter pipeline not available, using single-phase culling");
     }
 
-    // Create Phase 3 leaf culling pipeline
-    if (!createLeafCullPhase3Pipeline()) {
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "TreeRenderer: Phase 3 leaf cull pipeline not available");
+    // Create two-phase leaf culling pipeline
+    if (!createTwoPhaseLeafCullPipeline()) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "TreeRenderer: Two-phase leaf cull pipeline not available");
     }
 
     SDL_Log("TreeRenderer initialized successfully");
@@ -800,7 +800,7 @@ bool TreeRenderer::createTreeFilterPipeline() {
     }
     treeFilterPipeline_ = ManagedPipeline::fromRaw(device_, rawPipeline);
 
-    SDL_Log("TreeRenderer: Created tree filter compute pipeline (Phase 3)");
+    SDL_Log("TreeRenderer: Created tree filter compute pipeline");
     return true;
 }
 
@@ -952,13 +952,13 @@ bool TreeRenderer::createTreeFilterBuffers(uint32_t maxTrees) {
         vkUpdateDescriptorSets(device_, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
     }
 
-    SDL_Log("TreeRenderer: Created tree filter buffers (Phase 3, max %u trees, %.2f KB visible tree buffer)",
+    SDL_Log("TreeRenderer: Created tree filter buffers (max %u trees, %.2f KB visible tree buffer)",
             maxTrees, visibleTreeBufferSize_ / 1024.0f);
     return true;
 }
 
-bool TreeRenderer::createLeafCullPhase3Pipeline() {
-    // Create Phase 3 leaf culling descriptor set layout
+bool TreeRenderer::createTwoPhaseLeafCullPipeline() {
+    // Create two-phase leaf culling descriptor set layout
     std::vector<VkDescriptorSetLayoutBinding> p3Bindings = {
         {Bindings::LEAF_CULL_P3_VISIBLE_TREES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
         {Bindings::LEAF_CULL_P3_ALL_TREES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
@@ -975,30 +975,30 @@ bool TreeRenderer::createLeafCullPhase3Pipeline() {
 
     VkDescriptorSetLayout rawLayout;
     if (vkCreateDescriptorSetLayout(device_, &layoutInfo, nullptr, &rawLayout) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeRenderer: Failed to create Phase 3 leaf cull descriptor set layout");
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeRenderer: Failed to create two-phase leaf cull descriptor set layout");
         return false;
     }
-    leafCullPhase3DescriptorSetLayout_ = ManagedDescriptorSetLayout::fromRaw(device_, rawLayout);
+    twoPhaseLeafCullDescriptorSetLayout_ = ManagedDescriptorSetLayout::fromRaw(device_, rawLayout);
 
-    // Create Phase 3 leaf culling pipeline layout
+    // Create two-phase leaf culling pipeline layout
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.setLayoutCount = 1;
-    VkDescriptorSetLayout setLayout = leafCullPhase3DescriptorSetLayout_.get();
+    VkDescriptorSetLayout setLayout = twoPhaseLeafCullDescriptorSetLayout_.get();
     pipelineLayoutInfo.pSetLayouts = &setLayout;
 
     VkPipelineLayout rawPipelineLayout;
     if (vkCreatePipelineLayout(device_, &pipelineLayoutInfo, nullptr, &rawPipelineLayout) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeRenderer: Failed to create Phase 3 leaf cull pipeline layout");
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeRenderer: Failed to create two-phase leaf cull pipeline layout");
         return false;
     }
-    leafCullPhase3PipelineLayout_ = ManagedPipelineLayout::fromRaw(device_, rawPipelineLayout);
+    twoPhaseLeafCullPipelineLayout_ = ManagedPipelineLayout::fromRaw(device_, rawPipelineLayout);
 
     // Load compute shader
     std::string shaderPath = resourcePath_ + "/shaders/tree_leaf_cull_phase3.comp.spv";
     auto shaderModuleOpt = ShaderLoader::loadShaderModule(device_, shaderPath);
     if (!shaderModuleOpt.has_value()) {
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "TreeRenderer: Phase 3 leaf cull shader not found: %s", shaderPath.c_str());
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "TreeRenderer: Two-phase leaf cull shader not found: %s", shaderPath.c_str());
         return false;
     }
     VkShaderModule computeShaderModule = shaderModuleOpt.value();
@@ -1012,32 +1012,32 @@ bool TreeRenderer::createLeafCullPhase3Pipeline() {
     VkComputePipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
     pipelineInfo.stage = shaderStageInfo;
-    pipelineInfo.layout = leafCullPhase3PipelineLayout_.get();
+    pipelineInfo.layout = twoPhaseLeafCullPipelineLayout_.get();
 
     VkPipeline rawPipeline;
     VkResult result = vkCreateComputePipelines(device_, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &rawPipeline);
     vkDestroyShaderModule(device_, computeShaderModule, nullptr);
 
     if (result != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeRenderer: Failed to create Phase 3 leaf cull compute pipeline");
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeRenderer: Failed to create two-phase leaf cull compute pipeline");
         return false;
     }
-    leafCullPhase3Pipeline_ = ManagedPipeline::fromRaw(device_, rawPipeline);
+    twoPhaseLeafCullPipeline_ = ManagedPipeline::fromRaw(device_, rawPipeline);
 
-    SDL_Log("TreeRenderer: Created Phase 3 leaf culling compute pipeline");
+    SDL_Log("TreeRenderer: Created two-phase leaf culling compute pipeline");
     return true;
 }
 
-bool TreeRenderer::createLeafCullPhase3DescriptorSets() {
+bool TreeRenderer::createTwoPhaseLeafCullDescriptorSets() {
     // Just allocate descriptor sets - buffers will be bound at runtime in recordLeafCulling
     // because the leaf instance buffer comes from TreeSystem which isn't available at init time
-    leafCullPhase3DescriptorSets_ = descriptorPool_->allocate(leafCullPhase3DescriptorSetLayout_.get(), maxFramesInFlight_);
-    if (leafCullPhase3DescriptorSets_.empty()) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeRenderer: Failed to allocate Phase 3 leaf cull descriptor sets");
+    twoPhaseLeafCullDescriptorSets_ = descriptorPool_->allocate(twoPhaseLeafCullDescriptorSetLayout_.get(), maxFramesInFlight_);
+    if (twoPhaseLeafCullDescriptorSets_.empty()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeRenderer: Failed to allocate two-phase leaf cull descriptor sets");
         return false;
     }
 
-    SDL_Log("TreeRenderer: Allocated %u Phase 3 leaf cull descriptor sets", maxFramesInFlight_);
+    SDL_Log("TreeRenderer: Allocated %u two-phase leaf cull descriptor sets", maxFramesInFlight_);
     return true;
 }
 
@@ -1086,16 +1086,16 @@ void TreeRenderer::updateSpatialIndex(const TreeSystem& treeSystem) {
         createCellCullBuffers();
     }
 
-    // Create tree filter buffers if needed (Phase 3)
+    // Create tree filter buffers if needed
     if (visibleTreeBuffer_ == VK_NULL_HANDLE && treeFilterPipeline_.get() != VK_NULL_HANDLE &&
         visibleCellBuffer_ != VK_NULL_HANDLE) {
         createTreeFilterBuffers(static_cast<uint32_t>(trees.size()));
     }
 
-    // Create Phase 3 leaf cull descriptor sets if needed
-    if (leafCullPhase3DescriptorSets_.empty() && leafCullPhase3Pipeline_.get() != VK_NULL_HANDLE &&
+    // Create two-phase leaf cull descriptor sets if needed
+    if (twoPhaseLeafCullDescriptorSets_.empty() && twoPhaseLeafCullPipeline_.get() != VK_NULL_HANDLE &&
         visibleTreeBuffer_ != VK_NULL_HANDLE) {
-        createLeafCullPhase3DescriptorSets();
+        createTwoPhaseLeafCullDescriptorSets();
     }
 
     SDL_Log("TreeRenderer: Updated spatial index (%zu trees, %u non-empty cells)",
@@ -1510,9 +1510,9 @@ void TreeRenderer::recordLeafCulling(VkCommandBuffer cmd, uint32_t frameIndex,
                 TreeRenderDataGPU renderData{};
                 renderData.model = renderable.transform;
                 renderData.tintAndParams = glm::vec4(renderable.leafTint, renderable.autumnHueShift);
-                // Wind phase offset based on tree position for variation
-                float windPhase = glm::fract(renderable.transform[3][0] * 0.1f + renderable.transform[3][2] * 0.1f) * 6.28318f;
-                renderData.windPhaseAndLOD = glm::vec4(windPhase, lodBlendFactor, 0.0f, 0.0f);
+                // Wind offset based on tree position for variation
+                float windOffset = glm::fract(renderable.transform[3][0] * 0.1f + renderable.transform[3][2] * 0.1f) * 6.28318f;
+                renderData.windOffsetAndLOD = glm::vec4(windOffset, lodBlendFactor, 0.0f, 0.0f);
 
                 treeRenderDataList.push_back(renderData);
 
@@ -1677,7 +1677,7 @@ void TreeRenderer::recordLeafCulling(VkCommandBuffer cmd, uint32_t frameIndex,
     }
 
     // =========================================================================
-    // Phase 1: Cell Culling (Spatial Partitioning)
+    // Cell Culling (Spatial Partitioning)
     // Cull cells before leaf culling to reduce workload
     // =========================================================================
     if (isSpatialIndexEnabled() && cellCullPipeline_.get() != VK_NULL_HANDLE) {
@@ -1722,7 +1722,7 @@ void TreeRenderer::recordLeafCulling(VkCommandBuffer cmd, uint32_t frameIndex,
                              0, 1, &cellBarrier, 0, nullptr, 0, nullptr);
 
         // =========================================================================
-        // Phase 3: Tree Filtering (Two-Phase Culling)
+        // Tree Filtering (Two-Phase Culling)
         // Filter trees from visible cells into compacted visible tree list
         // =========================================================================
         if (twoPhaseLeafCullingEnabled_ && treeFilterPipeline_.get() != VK_NULL_HANDLE &&
@@ -1767,9 +1767,9 @@ void TreeRenderer::recordLeafCulling(VkCommandBuffer cmd, uint32_t frameIndex,
             vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                                  0, 1, &treeFilterBarrier, 0, nullptr, 0, nullptr);
 
-            // Phase 3 leaf culling - use indirect dispatch based on visible tree count
-            if (leafCullPhase3Pipeline_.get() != VK_NULL_HANDLE && !leafCullPhase3DescriptorSets_.empty()) {
-                // Update all Phase 3 descriptor set bindings
+            // Two-phase leaf culling - use indirect dispatch based on visible tree count
+            if (twoPhaseLeafCullPipeline_.get() != VK_NULL_HANDLE && !twoPhaseLeafCullDescriptorSets_.empty()) {
+                // Update all two-phase descriptor set bindings
                 {
                     VkDescriptorBufferInfo visibleTreesInfo{};
                     visibleTreesInfo.buffer = visibleTreeBuffer_;
@@ -1804,42 +1804,42 @@ void TreeRenderer::recordLeafCulling(VkCommandBuffer cmd, uint32_t frameIndex,
                     std::array<VkWriteDescriptorSet, 6> writes{};
 
                     writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                    writes[0].dstSet = leafCullPhase3DescriptorSets_[frameIndex];
+                    writes[0].dstSet = twoPhaseLeafCullDescriptorSets_[frameIndex];
                     writes[0].dstBinding = Bindings::LEAF_CULL_P3_VISIBLE_TREES;
                     writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
                     writes[0].descriptorCount = 1;
                     writes[0].pBufferInfo = &visibleTreesInfo;
 
                     writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                    writes[1].dstSet = leafCullPhase3DescriptorSets_[frameIndex];
+                    writes[1].dstSet = twoPhaseLeafCullDescriptorSets_[frameIndex];
                     writes[1].dstBinding = Bindings::LEAF_CULL_P3_ALL_TREES;
                     writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
                     writes[1].descriptorCount = 1;
                     writes[1].pBufferInfo = &allTreesInfo;
 
                     writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                    writes[2].dstSet = leafCullPhase3DescriptorSets_[frameIndex];
+                    writes[2].dstSet = twoPhaseLeafCullDescriptorSets_[frameIndex];
                     writes[2].dstBinding = Bindings::LEAF_CULL_P3_INPUT;
                     writes[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
                     writes[2].descriptorCount = 1;
                     writes[2].pBufferInfo = &inputInfo;
 
                     writes[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                    writes[3].dstSet = leafCullPhase3DescriptorSets_[frameIndex];
+                    writes[3].dstSet = twoPhaseLeafCullDescriptorSets_[frameIndex];
                     writes[3].dstBinding = Bindings::LEAF_CULL_P3_OUTPUT;
                     writes[3].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
                     writes[3].descriptorCount = 1;
                     writes[3].pBufferInfo = &outputInfo;
 
                     writes[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                    writes[4].dstSet = leafCullPhase3DescriptorSets_[frameIndex];
+                    writes[4].dstSet = twoPhaseLeafCullDescriptorSets_[frameIndex];
                     writes[4].dstBinding = Bindings::LEAF_CULL_P3_INDIRECT;
                     writes[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
                     writes[4].descriptorCount = 1;
                     writes[4].pBufferInfo = &indirectInfo;
 
                     writes[5].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                    writes[5].dstSet = leafCullPhase3DescriptorSets_[frameIndex];
+                    writes[5].dstSet = twoPhaseLeafCullDescriptorSets_[frameIndex];
                     writes[5].dstBinding = Bindings::LEAF_CULL_P3_UNIFORMS;
                     writes[5].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
                     writes[5].descriptorCount = 1;
@@ -1848,10 +1848,10 @@ void TreeRenderer::recordLeafCulling(VkCommandBuffer cmd, uint32_t frameIndex,
                     vkUpdateDescriptorSets(device_, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
                 }
 
-                // Bind Phase 3 leaf cull pipeline
-                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, leafCullPhase3Pipeline_.get());
-                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, leafCullPhase3PipelineLayout_.get(),
-                                        0, 1, &leafCullPhase3DescriptorSets_[frameIndex], 0, nullptr);
+                // Bind two-phase leaf cull pipeline
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, twoPhaseLeafCullPipeline_.get());
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, twoPhaseLeafCullPipelineLayout_.get(),
+                                        0, 1, &twoPhaseLeafCullDescriptorSets_[frameIndex], 0, nullptr);
 
                 // Indirect dispatch: one workgroup per visible tree
                 // The tree filter wrote dispatchX = visible tree count to leafCullIndirectDispatch_
@@ -1870,7 +1870,7 @@ void TreeRenderer::recordLeafCulling(VkCommandBuffer cmd, uint32_t frameIndex,
         }
     }
 
-    // Fallback: Single-phase leaf culling (when Phase 3 is not available or not enabled)
+    // Fallback: Single-phase leaf culling (when two-phase culling is not available or not enabled)
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullPipeline_.get());
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullPipelineLayout_.get(),
                             0, 1, &cullDescriptorSets_[frameIndex], 0, nullptr);

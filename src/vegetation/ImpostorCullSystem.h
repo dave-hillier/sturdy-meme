@@ -31,7 +31,7 @@ struct alignas(16) ImpostorCullUniforms {
     float errorThresholdFull;           // Screen error threshold for full detail (pixels)
     float errorThresholdImpostor;       // Screen error threshold for impostor (pixels)
     float errorThresholdCull;           // Screen error beyond which to cull
-    uint32_t temporalUpdateMode;        // 0=full, 1=partial, 2=skip (Phase 5)
+    uint32_t temporalUpdateMode;        // 0=full, 1=partial, 2=skip
     uint32_t temporalUpdateOffset;      // For partial: start index of trees to update
     uint32_t temporalUpdateCount;       // For partial: number of trees to update this frame
     uint32_t _pad0;
@@ -57,7 +57,7 @@ struct ImpostorOutputData {
 };
 
 /**
- * GPU-driven impostor culling system with Hi-Z occlusion culling (Phase 2).
+ * GPU-driven impostor culling system with Hi-Z occlusion culling.
  *
  * This system performs frustum culling and Hi-Z occlusion culling for tree
  * impostors using compute shaders, outputting visible instances for indirect
@@ -111,7 +111,7 @@ public:
         float errorThresholdCull = 32.0f;
     };
 
-    // Temporal coherence settings (Phase 5)
+    // Temporal coherence settings
     struct TemporalSettings {
         bool enabled = true;                    // Enable temporal coherence
         float positionThreshold = 5.0f;         // Camera position change threshold for full update (meters)
@@ -156,7 +156,7 @@ public:
     void setHiZEnabled(bool enabled) { hiZEnabled_ = enabled; }
     bool isHiZEnabled() const { return hiZEnabled_; }
 
-    // Temporal coherence settings (Phase 5)
+    // Temporal coherence settings
     TemporalSettings& getTemporalSettings() { return temporalSettings_; }
     const TemporalSettings& getTemporalSettings() const { return temporalSettings_; }
     void setTemporalEnabled(bool enabled) { temporalSettings_.enabled = enabled; }
@@ -217,7 +217,7 @@ private:
     // Uniform buffers (per-frame)
     BufferUtils::PerFrameBufferSet uniformBuffers_;
 
-    // Visibility cache buffer for temporal coherence (Phase 5)
+    // Visibility cache buffer for temporal coherence
     // Stores 1 bit per tree: 1 = visible as impostor, 0 = not visible
     VkBuffer visibilityCacheBuffer_ = VK_NULL_HANDLE;
     VmaAllocation visibilityCacheAllocation_ = VK_NULL_HANDLE;
@@ -229,7 +229,7 @@ private:
     uint32_t lastVisibleCount_ = 0;
     bool hiZEnabled_ = true;
 
-    // Temporal coherence state (Phase 5)
+    // Temporal coherence state
     TemporalSettings temporalSettings_;
     glm::vec3 lastCameraPos_{0.0f};
     glm::vec3 lastCameraDir_{0.0f, 0.0f, -1.0f};

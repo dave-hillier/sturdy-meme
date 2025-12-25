@@ -67,7 +67,7 @@ struct TreeLODSettings {
     float blendRange = 10.0f;              // Distance over which to blend LODs
     float blendExponent = 1.0f;            // Blend curve (1.0 = linear)
 
-    // Screen-space error LOD (Phase 4)
+    // Screen-space error LOD
     bool useScreenSpaceError = true;       // Use screen-space error instead of distance
     float errorThresholdFull = 2.0f;       // Max screen error for full detail (pixels)
     float errorThresholdImpostor = 8.0f;   // Max screen error for impostor (pixels)
@@ -78,7 +78,7 @@ struct TreeLODSettings {
     float impostorBrightness = 1.0f;       // Brightness adjustment for impostors
     float normalStrength = 1.0f;           // How much normals affect lighting
 
-    // Octahedral impostor mode (Phase 6)
+    // Octahedral impostor mode
     bool useOctahedralMapping = true;      // Use octahedral vs legacy 17-view atlas
     bool enableFrameBlending = true;       // Blend between 3 nearest frames for smooth transitions
 

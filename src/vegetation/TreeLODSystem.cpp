@@ -669,7 +669,7 @@ void TreeLODSystem::update(float deltaTime, const glm::vec3& cameraPos, const Tr
         TreeLODState::Level newTarget = state.targetLevel;
 
         if (settings.useScreenSpaceError) {
-            // Screen-space error based LOD (Phase 4)
+            // Screen-space error based LOD
             // Get archetype world error values
             const auto* archetype = impostorAtlas_->getArchetype(state.archetypeIndex);
             float worldErrorFull = 0.1f * tree.scale;  // ~10cm branch thickness, scaled

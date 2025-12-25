@@ -60,7 +60,7 @@ struct TreeLeafCullUniforms {
     uint32_t _pad1;
 };
 
-// Uniforms for cell culling compute shader (Phase 1: Spatial Partitioning)
+// Uniforms for cell culling compute shader
 // Must match tree_cell_cull.comp layout
 struct TreeCellCullUniforms {
     glm::vec4 cameraPosition;           // xyz = camera pos, w = unused
@@ -71,7 +71,7 @@ struct TreeCellCullUniforms {
     uint32_t _pad0;
 };
 
-// Uniforms for tree filter compute shader (Phase 3: Two-Phase Culling)
+// Uniforms for tree filter compute shader
 // Must match tree_filter.comp TreeFilterUniforms layout
 struct TreeFilterUniforms {
     glm::vec4 cameraPosition;           // xyz = camera pos, w = unused
@@ -105,7 +105,7 @@ struct TreeCullData {
 };
 static_assert(sizeof(TreeCullData) == 96, "TreeCullData must be 96 bytes for std430 layout");
 
-// Phase 3: Visible tree data (output from tree filtering, input to leaf culling)
+// Visible tree data (output from tree filtering, input to leaf culling)
 // Must match tree_filter.comp and tree_leaf_cull_phase3.comp VisibleTreeData struct
 struct VisibleTreeData {
     uint32_t originalTreeIndex;         // Index into full TreeCullData array
@@ -136,7 +136,7 @@ static_assert(sizeof(WorldLeafInstanceGPU) == 48, "WorldLeafInstanceGPU must be 
 struct TreeRenderDataGPU {
     glm::mat4 model;                    // Tree model matrix (for normals, wind pivot)
     glm::vec4 tintAndParams;            // rgb = leaf tint, a = autumn hue shift
-    glm::vec4 windPhaseAndLOD;          // x = wind phase offset, y = LOD blend factor, zw = reserved
+    glm::vec4 windOffsetAndLOD;         // x = wind offset, y = LOD blend factor, zw = reserved
 };
 
 class TreeRenderer {
@@ -236,7 +236,7 @@ public:
     // Check if leaf culling is enabled
     bool isLeafCullingEnabled() const { return cullPipeline_.get() != VK_NULL_HANDLE; }
 
-    // Enable/disable two-phase culling (Phase 3)
+    // Enable/disable two-phase culling
     void setTwoPhaseLeafCulling(bool enabled) { twoPhaseLeafCullingEnabled_ = enabled; }
     bool isTwoPhaseLeafCullingEnabled() const { return twoPhaseLeafCullingEnabled_; }
 
@@ -254,8 +254,8 @@ private:
     bool createCellCullBuffers();
     bool createTreeFilterPipeline();
     bool createTreeFilterBuffers(uint32_t maxTrees);
-    bool createLeafCullPhase3Pipeline();
-    bool createLeafCullPhase3DescriptorSets();
+    bool createTwoPhaseLeafCullPipeline();
+    bool createTwoPhaseLeafCullDescriptorSets();
 
     VkDevice device_ = VK_NULL_HANDLE;
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
@@ -321,7 +321,7 @@ private:
     VmaAllocation treeDataAllocation_ = VK_NULL_HANDLE;
     VkDeviceSize treeDataBufferSize_ = 0;
 
-    // Per-tree render data buffer (SSBO with tints, autumn, wind phase for vertex shader)
+    // Per-tree render data buffer (SSBO with tints, autumn, wind offset for vertex shader)
     VkBuffer treeRenderDataBuffer_ = VK_NULL_HANDLE;
     VmaAllocation treeRenderDataAllocation_ = VK_NULL_HANDLE;
     VkDeviceSize treeRenderDataBufferSize_ = 0;
@@ -345,7 +345,7 @@ private:
     uint32_t maxLeavesPerType_ = 0;
 
     // =========================================================================
-    // Spatial Index (Phase 1: Spatial Partitioning)
+    // Spatial Index
     // =========================================================================
     std::unique_ptr<TreeSpatialIndex> spatialIndex_;
 
@@ -373,7 +373,7 @@ private:
     float terrainSize_ = 4096.0f;
 
     // =========================================================================
-    // Phase 3: Two-Phase Tree-to-Leaf Culling
+    // Two-Phase Tree-to-Leaf Culling
     // =========================================================================
 
     // Tree filtering compute pipeline (filters trees from visible cells)
@@ -387,11 +387,11 @@ private:
     // Uniform buffer for tree filtering
     BufferUtils::PerFrameBufferSet treeFilterUniformBuffers_;
 
-    // Phase 3 leaf culling pipeline (processes visible trees only)
-    ManagedPipeline leafCullPhase3Pipeline_;
-    ManagedPipelineLayout leafCullPhase3PipelineLayout_;
-    ManagedDescriptorSetLayout leafCullPhase3DescriptorSetLayout_;
-    std::vector<VkDescriptorSet> leafCullPhase3DescriptorSets_;
+    // Two-phase leaf culling pipeline (processes visible trees only)
+    ManagedPipeline twoPhaseLeafCullPipeline_;
+    ManagedPipelineLayout twoPhaseLeafCullPipelineLayout_;
+    ManagedDescriptorSetLayout twoPhaseLeafCullDescriptorSetLayout_;
+    std::vector<VkDescriptorSet> twoPhaseLeafCullDescriptorSets_;
 
     // Visible tree output buffer (compacted list of visible trees)
     // Contains: [visibleTreeCount, VisibleTreeData[0], VisibleTreeData[1], ...]
@@ -403,6 +403,6 @@ private:
     VkBuffer leafCullIndirectDispatch_ = VK_NULL_HANDLE;
     VmaAllocation leafCullIndirectDispatchAllocation_ = VK_NULL_HANDLE;
 
-    // Flag to enable two-phase culling (Phase 3)
+    // Flag to enable two-phase culling
     bool twoPhaseLeafCullingEnabled_ = true;
 };

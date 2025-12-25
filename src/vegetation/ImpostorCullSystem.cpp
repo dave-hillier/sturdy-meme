@@ -126,7 +126,7 @@ bool ImpostorCullSystem::createDescriptorSetLayout() {
     bindings[5].descriptorCount = 1;
     bindings[5].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
-    // Binding 6: Visibility cache (SSBO) - Phase 5: Temporal Coherence
+    // Binding 6: Visibility cache (SSBO) for temporal coherence
     bindings[6].binding = BINDING_TREE_IMPOSTOR_CULL_VISIBILITY;
     bindings[6].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     bindings[6].descriptorCount = 1;
@@ -254,7 +254,7 @@ bool ImpostorCullSystem::createBuffers() {
         return false;
     }
 
-    // Visibility cache buffer for temporal coherence (Phase 5)
+    // Visibility cache buffer for temporal coherence
     // 1 bit per tree, packed into uint32_t words
     visibilityCacheBufferSize_ = ((maxTrees_ + 31) / 32) * sizeof(uint32_t);
     bufferInfo.size = visibilityCacheBufferSize_;
@@ -425,7 +425,7 @@ void ImpostorCullSystem::updateDescriptorSets(uint32_t frameIndex, VkImageView h
     writes[5].descriptorCount = 1;
     writes[5].pImageInfo = &hiZInfo;
 
-    // Visibility cache buffer (Phase 5: Temporal Coherence)
+    // Visibility cache buffer for temporal coherence
     VkDescriptorBufferInfo visibilityInfo{};
     visibilityInfo.buffer = visibilityCacheBuffer_;
     visibilityInfo.offset = 0;
@@ -450,7 +450,7 @@ void ImpostorCullSystem::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
                                         const LODParams& lodParams) {
     if (treeCount_ == 0) return;
 
-    // Phase 5: Temporal Coherence - determine update mode based on camera movement
+    // Temporal coherence - determine update mode based on camera movement
     uint32_t temporalUpdateMode = 0;  // 0=full, 1=partial, 2=skip
     uint32_t temporalUpdateOffset = 0;
     uint32_t temporalUpdateCount = 0;
@@ -518,7 +518,7 @@ void ImpostorCullSystem::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
     uniforms.errorThresholdFull = lodParams.errorThresholdFull;
     uniforms.errorThresholdImpostor = lodParams.errorThresholdImpostor;
     uniforms.errorThresholdCull = lodParams.errorThresholdCull;
-    // Temporal coherence parameters (Phase 5)
+    // Temporal coherence parameters
     uniforms.temporalUpdateMode = temporalUpdateMode;
     uniforms.temporalUpdateOffset = temporalUpdateOffset;
     uniforms.temporalUpdateCount = temporalUpdateCount;

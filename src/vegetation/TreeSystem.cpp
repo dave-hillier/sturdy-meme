@@ -47,7 +47,7 @@ bool TreeSystem::initInternal(const InitInfo& info) {
         defaultOptions_ = TreeOptions::defaultOak();
     }
 
-    // Trees are added via addTree() from RendererInitPhases
+    // Trees are added via addTree() from initialization
     if (!treeInstances_.empty()) {
         selectedTreeIndex_ = 0;
     }
