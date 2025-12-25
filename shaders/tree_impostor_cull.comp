@@ -284,7 +284,27 @@ void main() {
         }
     } else {
         // Use cached visibility (skip or partial mode for non-updated trees)
-        isVisible = getVisibilityCached(treeIdx);
+        // BUT always re-check frustum to catch trees that just entered the view
+        vec3 treeCenter = treePos + vec3(0.0, vSize, 0.0);
+        float margin = boundingRadius * 2.0;
+        bool inFrustum = isInFrustum(frustumPlanes, treeCenter, margin);
+
+        if (!inFrustum) {
+            // Tree is outside frustum - not visible regardless of cache
+            isVisible = false;
+        } else {
+            // Tree is in frustum - check cache for occlusion/LOD status
+            // If it was visible before, keep it visible
+            // If it was NOT visible but is now in frustum, make it visible
+            // (conservative: may show trees that would be occluded, but prevents pop-in)
+            bool wasCachedVisible = getVisibilityCached(treeIdx);
+            isVisible = wasCachedVisible || inFrustum;  // Show if newly in frustum
+
+            // Update cache if we're making a tree visible that wasn't before
+            if (!wasCachedVisible && isVisible) {
+                setVisibilityCached(treeIdx, true);
+            }
+        }
 
         if (isVisible) {
             // Recalculate blend factor (it depends on current camera position)
