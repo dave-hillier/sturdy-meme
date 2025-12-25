@@ -2027,17 +2027,23 @@ void TreeRenderer::renderShadows(VkCommandBuffer cmd, uint32_t frameIndex,
     if (!branchRenderables.empty() && branchShadowPipeline_.get() != VK_NULL_HANDLE) {
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, branchShadowPipeline_.get());
 
-        // Bind descriptor set for UBO access
-        VkDescriptorSet branchSet = defaultBranchDescriptorSets_[frameIndex];
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                branchShadowPipelineLayout_.get(), 0, 1, &branchSet, 0, nullptr);
-
+        // Track bark type to avoid redundant descriptor set binds
+        std::string lastBarkType;
         uint32_t branchTreeIndex = 0;
         for (const auto& renderable : branchRenderables) {
             // Skip if LOD system says this tree should be pure impostor (no full geometry)
             if (lodSystem && !lodSystem->shouldRenderFullGeometry(branchTreeIndex)) {
                 branchTreeIndex++;
                 continue;
+            }
+
+            // Bind descriptor set for this bark type if different from last
+            // (needed for UBO access with cascade matrices)
+            if (renderable.barkType != lastBarkType) {
+                VkDescriptorSet branchSet = getBranchDescriptorSet(frameIndex, renderable.barkType);
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                        branchShadowPipelineLayout_.get(), 0, 1, &branchSet, 0, nullptr);
+                lastBarkType = renderable.barkType;
             }
 
             TreeBranchShadowPushConstants push{};
