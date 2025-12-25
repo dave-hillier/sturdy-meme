@@ -1070,6 +1070,12 @@ bool Renderer::render(const Camera& camera) {
 
     // Update tree LOD system for impostor rendering
     if (systems_->treeLOD() && systems_->tree()) {
+        // Enable GPU culling optimization when ImpostorCullSystem is available
+        // This skips expensive CPU impostor list building since GPU handles it
+        auto* impostorCull = systems_->impostorCull();
+        bool gpuCullingAvailable = impostorCull && impostorCull->getTreeCount() > 0;
+        systems_->treeLOD()->setGPUCullingEnabled(gpuCullingAvailable);
+
         // Compute screen params for screen-space error LOD
         TreeLODSystem::ScreenParams screenParams;
         screenParams.screenHeight = static_cast<float>(extent.height);

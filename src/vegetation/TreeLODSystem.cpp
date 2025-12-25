@@ -739,7 +739,13 @@ void TreeLODSystem::update(float deltaTime, const glm::vec3& cameraPos, const Tr
             state.currentLevel = TreeLODState::Level::Blending;
         }
 
-        // Collect visible impostors
+        // Skip CPU impostor list building when GPU culling handles it
+        // GPU culling (ImpostorCullSystem) already computes visibility, LOD, and sizing
+        if (gpuCullingEnabled_) {
+            continue;
+        }
+
+        // Collect visible impostors (CPU fallback path only)
         if (settings.enableImpostors && state.blendFactor > 0.0f && state.archetypeIndex < impostorAtlas_->getArchetypeCount()) {
             ImpostorInstanceGPU instance;
             instance.position = tree.position;
@@ -780,27 +786,30 @@ void TreeLODSystem::update(float deltaTime, const glm::vec3& cameraPos, const Tr
 
     lastCameraPos_ = cameraPos;
 
-    // Update debug info - find nearest tree and calculate elevation
-    debugInfo_.cameraPos = cameraPos;
-    debugInfo_.nearestTreeDistance = std::numeric_limits<float>::max();
-    for (const auto& tree : instances) {
-        float dist = glm::distance(cameraPos, tree.position);
-        if (dist < debugInfo_.nearestTreeDistance) {
-            debugInfo_.nearestTreeDistance = dist;
-            debugInfo_.nearestTreePos = tree.position;
+    // Skip debug info calculation when GPU culling is enabled (expensive O(n) loop)
+    if (!gpuCullingEnabled_) {
+        // Update debug info - find nearest tree and calculate elevation
+        debugInfo_.cameraPos = cameraPos;
+        debugInfo_.nearestTreeDistance = std::numeric_limits<float>::max();
+        for (const auto& tree : instances) {
+            float dist = glm::distance(cameraPos, tree.position);
+            if (dist < debugInfo_.nearestTreeDistance) {
+                debugInfo_.nearestTreeDistance = dist;
+                debugInfo_.nearestTreePos = tree.position;
 
-            // Calculate elevation angle (same as shader)
-            glm::vec3 toTree = tree.position - cameraPos;
-            float toTreeDist = glm::length(toTree);
-            if (toTreeDist > 0.001f) {
-                debugInfo_.calculatedElevation = glm::degrees(std::asin(glm::clamp(-toTree.y / toTreeDist, -1.0f, 1.0f)));
+                // Calculate elevation angle (same as shader)
+                glm::vec3 toTree = tree.position - cameraPos;
+                float toTreeDist = glm::length(toTree);
+                if (toTreeDist > 0.001f) {
+                    debugInfo_.calculatedElevation = glm::degrees(std::asin(glm::clamp(-toTree.y / toTreeDist, -1.0f, 1.0f)));
+                }
             }
         }
-    }
 
-    // Update instance buffer
-    if (!visibleImpostors_.empty()) {
-        updateInstanceBuffer(visibleImpostors_);
+        // Update instance buffer (CPU fallback path only)
+        if (!visibleImpostors_.empty()) {
+            updateInstanceBuffer(visibleImpostors_);
+        }
     }
 }
 

@@ -131,6 +131,11 @@ public:
     // Update extent on resize
     void setExtent(VkExtent2D newExtent);
 
+    // Enable/disable GPU culling mode
+    // When enabled, update() skips building CPU impostor list (GPU handles it)
+    void setGPUCullingEnabled(bool enabled) { gpuCullingEnabled_ = enabled; }
+    bool isGPUCullingEnabled() const { return gpuCullingEnabled_; }
+
     // Update descriptor sets
     void updateDescriptorSets(uint32_t frameIndex, VkBuffer uniformBuffer,
                               VkImageView shadowMap, VkSampler shadowSampler);
@@ -207,6 +212,9 @@ private:
     // Current frame data
     std::vector<ImpostorInstanceGPU> visibleImpostors_;
     glm::vec3 lastCameraPos_{0.0f};
+
+    // GPU culling mode - when true, skip building CPU impostor list
+    bool gpuCullingEnabled_ = false;
 
     // Debug info
     DebugInfo debugInfo_;
