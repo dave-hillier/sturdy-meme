@@ -836,6 +836,7 @@ To test the octahedral impostor system:
 2. Toggle "Use Octahedral Impostors" checkbox to switch between modes
 3. Orbit around distant trees to observe smooth view transitions
 4. Compare with legacy mode to see the difference in view interpolation quality
+5. Use "Preview Octahedral Atlas" button to inspect the generated 512×512 atlas texture
 
 ---
 

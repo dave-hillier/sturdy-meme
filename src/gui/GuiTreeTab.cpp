@@ -220,16 +220,16 @@ void GuiTreeTab::render(ITreeControl& treeControl) {
                     }
                 }
 
-                // Atlas texture preview button
+                // Atlas texture preview button (legacy 17-view)
                 VkDescriptorSet previewSet = atlas->getPreviewDescriptorSet(0);
                 if (previewSet != VK_NULL_HANDLE) {
-                    if (ImGui::Button("Preview Atlas Texture")) {
+                    if (ImGui::Button("Preview Legacy Atlas")) {
                         ImGui::OpenPopup("AtlasPreview");
                     }
 
                     // Preview popup window
                     if (ImGui::BeginPopup("AtlasPreview")) {
-                        ImGui::Text("Impostor Atlas (9x2 cells, 256px each)");
+                        ImGui::Text("Legacy Impostor Atlas (9x2 cells, 256px each)");
                         ImGui::Separator();
 
                         // Draw atlas with cell grid overlay
@@ -261,6 +261,45 @@ void GuiTreeTab::render(ITreeControl& treeControl) {
                         ImGui::Spacing();
                         ImGui::Text("Row 0: 8 horizon views (0-315 deg) + top-down");
                         ImGui::Text("Row 1: 8 elevated views (45 deg elevation)");
+
+                        ImGui::EndPopup();
+                    }
+                }
+
+                // Octahedral atlas texture preview button
+                VkDescriptorSet octPreviewSet = atlas->getOctPreviewDescriptorSet(0);
+                if (octPreviewSet != VK_NULL_HANDLE) {
+                    ImGui::SameLine();
+                    if (ImGui::Button("Preview Octahedral Atlas")) {
+                        ImGui::OpenPopup("OctAtlasPreview");
+                    }
+
+                    // Preview popup window
+                    if (ImGui::BeginPopup("OctAtlasPreview")) {
+                        ImGui::Text("Octahedral Impostor Atlas (512x512, continuous mapping)");
+                        ImGui::Separator();
+
+                        // Draw atlas at 1:1 scale
+                        ImVec2 imageSize(static_cast<float>(OctahedralAtlasConfig::ATLAS_WIDTH),
+                                        static_cast<float>(OctahedralAtlasConfig::ATLAS_HEIGHT));
+
+                        ImVec2 cursorPos = ImGui::GetCursorScreenPos();
+                        ImGui::Image(reinterpret_cast<ImTextureID>(octPreviewSet), imageSize);
+
+                        // Draw center cross to show UV origin
+                        ImDrawList* drawList = ImGui::GetWindowDrawList();
+                        ImU32 crossColor = IM_COL32(255, 255, 255, 100);
+                        float centerX = cursorPos.x + imageSize.x * 0.5f;
+                        float centerY = cursorPos.y + imageSize.y * 0.5f;
+                        drawList->AddLine(ImVec2(centerX, cursorPos.y),
+                                         ImVec2(centerX, cursorPos.y + imageSize.y), crossColor);
+                        drawList->AddLine(ImVec2(cursorPos.x, centerY),
+                                         ImVec2(cursorPos.x + imageSize.x, centerY), crossColor);
+
+                        ImGui::Spacing();
+                        ImGui::Text("Center: top-down view (90 deg elevation)");
+                        ImGui::Text("Edges: horizon views (0 deg elevation)");
+                        ImGui::Text("Continuous octahedral projection allows smooth interpolation");
 
                         ImGui::EndPopup();
                     }

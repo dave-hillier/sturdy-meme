@@ -66,12 +66,22 @@ void main() {
         // Compute octahedral UV (center of the rendered cell for this view)
         vec2 centerUV = octahedralEncode(impostorDir);
 
-        // Each view was rendered to a 64x64 region centered at its octahedral UV
-        // The cell scale is 64/512 = 0.125 of the atlas
+        // Each view was rendered to a 64x64 region in the 512x512 atlas
         const float CELL_SCALE = 64.0 / 512.0;
 
-        // Offset from the center UV based on the billboard quad's local UV
-        atlasUV = centerUV + (inTexCoord - 0.5) * CELL_SCALE;
+        // Map billboard UV to cell UV offset
+        vec2 uvOffset = inTexCoord - vec2(0.5);
+
+        // Account for aspect ratio: billboard has dimensions 2*hSize x 2*vSize
+        // but the atlas cell is square (64x64)
+        float aspectRatio = hSize / max(vSize, 0.001);
+        if (aspectRatio < 1.0) {
+            uvOffset.x *= aspectRatio;
+        } else {
+            uvOffset.y /= aspectRatio;
+        }
+
+        atlasUV = centerUV + uvOffset * CELL_SCALE;
         atlasUV = clamp(atlasUV, vec2(0.0), vec2(1.0));
         fragTexCoord = atlasUV;
     } else {

@@ -156,6 +156,9 @@ public:
     VkImageView getPreviewImageView(uint32_t archetypeIndex) const;
     VkDescriptorSet getPreviewDescriptorSet(uint32_t archetypeIndex);
 
+    // Get octahedral atlas preview (lazy-initializes ImGui descriptor on first call)
+    VkDescriptorSet getOctPreviewDescriptorSet(uint32_t archetypeIndex);
+
 private:
     TreeImpostorAtlas() = default;
     bool initInternal(const InitInfo& info);
@@ -282,6 +285,9 @@ private:
         ManagedImageView albedoLayerView;   // Per-layer view for framebuffer
         ManagedImageView normalLayerView;   // Per-layer view for framebuffer
         ManagedFramebuffer framebuffer;
+
+        // Preview descriptor for ImGui
+        VkDescriptorSet previewDescriptorSet = VK_NULL_HANDLE;
     };
     std::vector<OctahedralAtlasTextures> octAtlasTextures_;
 

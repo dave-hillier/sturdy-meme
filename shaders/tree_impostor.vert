@@ -80,13 +80,34 @@ void main() {
         // Compute octahedral UV (center of the rendered cell for this view)
         vec2 centerUV = octahedralEncode(impostorDir);
 
-        // Each view was rendered to a 64x64 region centered at its octahedral UV
-        // The cell scale is 64/512 = 0.125 of the atlas
-        const float CELL_SCALE = 64.0 / 512.0;
+        // Each view was rendered to a 64x64 region in the 512x512 atlas
+        // The cell scale maps billboard UV [0,1] to the 64-pixel cell extent
+        const float CELL_SCALE = 64.0 / 512.0;  // 0.125
 
-        // Offset from the center UV based on the billboard quad's local UV
-        // inTexCoord goes from (0,0) to (1,1), so (inTexCoord - 0.5) gives offset from center
-        atlasUV = centerUV + (inTexCoord - 0.5) * CELL_SCALE;
+        // The billboard quad has:
+        // - inPosition.x in [-0.5, 0.5], scaled by hSize*2 for world position
+        // - inPosition.y in [0, 1], scaled by vSize*2 for world position
+        // - inTexCoord.x in [0, 1], inTexCoord.y in [1, 0] (y inverted)
+
+        // Map billboard UV to cell UV offset
+        // Center of billboard (inTexCoord = 0.5, 0.5) should sample center of cell
+        vec2 uvOffset = inTexCoord - vec2(0.5);
+
+        // Account for aspect ratio: the billboard has dimensions 2*hSize x 2*vSize
+        // but the atlas cell is square (64x64). We need to scale the offset so that
+        // the billboard's extent maps to the correct portion of the cell.
+        // If the tree is taller than wide (vSize > hSize), the horizontal extent
+        // uses less of the cell width.
+        float aspectRatio = hSize / max(vSize, 0.001);
+        if (aspectRatio < 1.0) {
+            // Tree is taller than wide - horizontal content is centered
+            uvOffset.x *= aspectRatio;
+        } else {
+            // Tree is wider than tall - vertical content is centered
+            uvOffset.y /= aspectRatio;
+        }
+
+        atlasUV = centerUV + uvOffset * CELL_SCALE;
 
         // Clamp to valid atlas range
         atlasUV = clamp(atlasUV, vec2(0.0), vec2(1.0));

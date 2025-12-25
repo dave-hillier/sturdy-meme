@@ -1856,3 +1856,24 @@ VkDescriptorSet TreeImpostorAtlas::getPreviewDescriptorSet(uint32_t archetypeInd
 
     return atlasTextures_[archetypeIndex].previewDescriptorSet;
 }
+
+VkDescriptorSet TreeImpostorAtlas::getOctPreviewDescriptorSet(uint32_t archetypeIndex) {
+    if (archetypeIndex >= octAtlasTextures_.size()) {
+        return VK_NULL_HANDLE;
+    }
+
+    // Lazy initialization: create ImGui descriptor set on first request
+    if (octAtlasTextures_[archetypeIndex].previewDescriptorSet == VK_NULL_HANDLE) {
+        VkImageView layerView = octAtlasTextures_[archetypeIndex].albedoLayerView.get();
+        if (layerView == VK_NULL_HANDLE) {
+            return VK_NULL_HANDLE;
+        }
+        octAtlasTextures_[archetypeIndex].previewDescriptorSet = ImGui_ImplVulkan_AddTexture(
+            atlasSampler_.get(),
+            layerView,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+        );
+    }
+
+    return octAtlasTextures_[archetypeIndex].previewDescriptorSet;
+}
