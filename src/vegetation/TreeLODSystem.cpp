@@ -938,28 +938,21 @@ void TreeLODSystem::renderImpostors(VkCommandBuffer cmd, uint32_t frameIndex,
     } pushConstants;
 
     pushConstants.cameraPos = glm::vec4(lastCameraPos_, settings.autumnHueShift);
-    // lodParams: x=blend, y=brightness, z=normalStrength, w=debugElevation (negative=disabled)
+    // lodParams: x=useOctahedral, y=brightness, z=normalStrength, w=debugElevation (negative=disabled)
     pushConstants.lodParams = glm::vec4(
-        1.0f,  // blend factor (handled per-instance)
+        settings.useOctahedralMapping ? 1.0f : 0.0f,
         settings.impostorBrightness,
         settings.normalStrength,
         settings.enableDebugElevation ? settings.debugElevation : -999.0f  // -999 = disabled
     );
 
-    if (impostorAtlas_->getArchetypeCount() > 0) {
-        const auto* archetype = impostorAtlas_->getArchetype(0u);
-        // atlasParams: x=hSize (horizontal half-size), y=vSize (vertical half-size), z=baseOffset, w=debugShowCellIndex
-        // hSize = boundingSphereRadius * 1.1, vSize = halfHeight * 1.1 (matches capture projection)
-        float hSize = archetype ? archetype->boundingSphereRadius * 1.1f : 10.0f;
-        float vSize = archetype ? archetype->treeHeight * 0.5f * 1.1f : 10.0f;
-        float baseOffset = archetype ? archetype->baseOffset : 0.0f;
-        pushConstants.atlasParams = glm::vec4(
-            hSize,
-            vSize,
-            baseOffset,
-            settings.debugShowCellIndex ? 1.0f : 0.0f
-        );
-    }
+    // atlasParams: x=enableFrameBlending, y=unused, z=unused, w=debugShowCellIndex
+    pushConstants.atlasParams = glm::vec4(
+        settings.enableFrameBlending ? 1.0f : 0.0f,
+        0.0f,
+        0.0f,
+        settings.debugShowCellIndex ? 1.0f : 0.0f
+    );
 
     vkCmdPushConstants(cmd, impostorPipelineLayout_.get(),
                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -1051,27 +1044,21 @@ void TreeLODSystem::renderImpostorShadows(VkCommandBuffer cmd, uint32_t frameInd
     } pushConstants;
 
     pushConstants.cameraPos = glm::vec4(lastCameraPos_, 1.0f);
-    // lodParams: x=blend, y=brightness, z=normalStrength, w=debugElevation (negative=disabled)
+    // lodParams: x=useOctahedral, y=brightness, z=normalStrength, w=debugElevation (negative=disabled)
     pushConstants.lodParams = glm::vec4(
-        1.0f,
+        settings.useOctahedralMapping ? 1.0f : 0.0f,
         settings.impostorBrightness,
         settings.normalStrength,
         settings.enableDebugElevation ? settings.debugElevation : -999.0f  // -999 = disabled
     );
 
-    if (impostorAtlas_->getArchetypeCount() > 0) {
-        const auto* archetype = impostorAtlas_->getArchetype(0u);
-        // atlasParams: x=hSize (horizontal half-size), y=vSize (vertical half-size), z=baseOffset, w=debugShowCellIndex
-        float hSize = archetype ? archetype->boundingSphereRadius * 1.1f : 10.0f;
-        float vSize = archetype ? archetype->treeHeight * 0.5f * 1.1f : 10.0f;
-        float baseOffset = archetype ? archetype->baseOffset : 0.0f;
-        pushConstants.atlasParams = glm::vec4(
-            hSize,
-            vSize,
-            baseOffset,
-            settings.debugShowCellIndex ? 1.0f : 0.0f
-        );
-    }
+    // atlasParams: x=enableFrameBlending, y=unused, z=unused, w=debugShowCellIndex
+    pushConstants.atlasParams = glm::vec4(
+        settings.enableFrameBlending ? 1.0f : 0.0f,
+        0.0f,
+        0.0f,
+        settings.debugShowCellIndex ? 1.0f : 0.0f
+    );
     pushConstants.cascadeIndex = cascadeIndex;
 
     vkCmdPushConstants(cmd, shadowPipelineLayout_.get(),
@@ -1201,21 +1188,21 @@ void TreeLODSystem::renderImpostorsGPUCulled(VkCommandBuffer cmd, uint32_t frame
     } pushConstants;
 
     pushConstants.cameraPos = glm::vec4(lastCameraPos_, settings.autumnHueShift);
+    // lodParams: x=useOctahedral, y=brightness, z=normalStrength, w=debugElevation (negative=disabled)
     pushConstants.lodParams = glm::vec4(
-        1.0f,
+        settings.useOctahedralMapping ? 1.0f : 0.0f,
         settings.impostorBrightness,
         settings.normalStrength,
         settings.enableDebugElevation ? settings.debugElevation : -999.0f
     );
 
-    if (impostorAtlas_->getArchetypeCount() > 0) {
-        const auto* archetype = impostorAtlas_->getArchetype(0u);
-        float hSize = archetype ? archetype->boundingSphereRadius * 1.1f : 10.0f;
-        float vSize = archetype ? archetype->treeHeight * 0.5f * 1.1f : 10.0f;
-        float baseOffset = archetype ? archetype->baseOffset : 0.0f;
-        pushConstants.atlasParams = glm::vec4(hSize, vSize, baseOffset,
-            settings.debugShowCellIndex ? 1.0f : 0.0f);
-    }
+    // atlasParams: x=enableFrameBlending, y=unused, z=unused, w=debugShowCellIndex
+    pushConstants.atlasParams = glm::vec4(
+        settings.enableFrameBlending ? 1.0f : 0.0f,
+        0.0f,
+        0.0f,
+        settings.debugShowCellIndex ? 1.0f : 0.0f
+    );
 
     vkCmdPushConstants(cmd, impostorPipelineLayout_.get(),
                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,

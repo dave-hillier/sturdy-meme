@@ -238,7 +238,7 @@ The existing tree rendering system implements several modern GPU-driven techniqu
 | Phase 3: Two-Phase Tree-to-Leaf Culling | ✅ Complete | `tree_filter.comp`, `tree_leaf_cull_phase3.comp` with UI toggle |
 | Phase 4: Screen-Space Error LOD | ✅ Complete | `TreeLODSettings.useScreenSpaceError`, FOV-aware LOD selection |
 | Phase 5: Temporal Coherence | ✅ Complete | `ImpostorCullSystem::TemporalSettings`, visibility cache with UI toggle |
-| Phase 6: Octahedral Impostor Mapping | ❌ Not Started | Still using 17-view atlas |
+| Phase 6: Octahedral Impostor Mapping | ✅ Complete | `octahedral_mapping.glsl`, 8x8 grid, 3-frame blending |
 
 ### Remaining Bottlenecks
 
@@ -823,15 +823,15 @@ vec4 sampleImpostor(vec3 viewDir, uint archetypeIndex) {
 | 3. Two-Phase Culling | ✅ Done | Phase 1 | High | `tree_filter.comp`, `tree_leaf_cull_phase3.comp`, `TreeRenderer.cpp` |
 | 4. Screen-Space Error LOD | ✅ Done | None | Medium | `TreeLODSettings`, `tree_impostor_cull.comp`, `TreeLODSystem.cpp` |
 | 5. Temporal Coherence | ✅ Done | Phase 1, 3 | Medium | `ImpostorCullSystem.h/cpp`, `tree_impostor_cull.comp`, `GuiTreeTab.cpp` |
-| 6. Octahedral Impostors | ❌ Next | None | High | `TreeImpostorAtlas.cpp`, `tree_impostor.vert/frag` |
+| 6. Octahedral Impostors | ✅ Done | None | High | `octahedral_mapping.glsl`, `TreeImpostorAtlas.cpp`, `tree_impostor.vert/frag` |
 
 ### Recommended Next Steps
 
-**Phase 6: Octahedral Impostor Mapping** is the recommended next phase because:
-- Replaces 17-view discrete atlas with continuous octahedral mapping
-- Reduces texture memory by ~60% through shared coverage
-- Eliminates angular seams when rotating around trees
-- Smoother view transitions with bilinear interpolation in spherical space
+All six phases are now complete! Potential future improvements:
+- **Triangle Budget Control**: Limit total triangle count across all visible trees
+- **Mesh LOD Merging**: Combine nearby tree geometry into shared mesh chunks
+- **Virtual Texturing**: Stream impostor atlas tiles on demand
+- **Ray-Marched Impostors**: Replace billboards with volumetric ray-marching for close views
 
 ---
 

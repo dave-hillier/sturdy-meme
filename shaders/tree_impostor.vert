@@ -7,6 +7,7 @@ const int NUM_CASCADES = 4;
 #include "bindings.glsl"
 #include "ubo_common.glsl"
 #include "tree_impostor_instance.glsl"
+#include "octahedral_mapping.glsl"
 
 // Per-vertex data for billboard quad
 layout(location = 0) in vec3 inPosition;   // Billboard quad vertex position
@@ -17,23 +18,30 @@ layout(std430, binding = BINDING_TREE_IMPOSTOR_INSTANCES) readonly buffer Instan
     ImpostorInstance instances[];
 };
 
-// Simplified push constants - instance data comes from SSBO
+// Push constants
 layout(push_constant) uniform PushConstants {
     vec4 cameraPos;         // xyz = camera world position, w = autumnHueShift
-    vec4 lodParams;         // x = unused, y = brightness, z = normal strength, w = debug elevation
+    vec4 lodParams;         // x = useOctahedral, y = brightness, z = normal strength, w = debug elevation
 } push;
 
+// Outputs for legacy mode
 layout(location = 0) out vec2 fragTexCoord;
 layout(location = 1) out vec3 fragWorldPos;
 layout(location = 2) out float fragBlendFactor;
 layout(location = 3) flat out int fragCellIndex;
-layout(location = 4) out mat3 fragImpostorToWorld;  // Rotation from impostor space to world
+layout(location = 4) out mat3 fragImpostorToWorld;
 layout(location = 7) flat out uint fragArchetypeIndex;
 
-// Atlas layout constants
+// Outputs for octahedral mode (frame blending)
+layout(location = 8) out vec2 fragOctaUV;           // Continuous octahedral UV
+layout(location = 9) out vec3 fragViewDir;          // View direction for frame lookup
+layout(location = 10) flat out int fragUseOctahedral;  // Mode flag
+layout(location = 11) out vec2 fragLocalUV;         // Billboard local UV for frame sampling
+
+// Legacy atlas layout constants
 const int CELLS_PER_ROW = 9;
 const int HORIZONTAL_ANGLES = 8;
-const float ANGLE_STEP = 360.0 / float(HORIZONTAL_ANGLES);  // 45 degrees
+const float ANGLE_STEP = 360.0 / float(HORIZONTAL_ANGLES);
 
 void main() {
     // Get instance data from SSBO
@@ -48,97 +56,71 @@ void main() {
     float vSize = inst.sizeAndOffset.y;
     float baseOffset = inst.sizeAndOffset.z;
 
-    // Compute view direction FROM tree TO camera (horizontal only for angle selection)
-    // This must match the capture convention where azimuth=0 means camera on +Z axis
+    // Compute view direction FROM tree TO camera
     vec3 toCamera = push.cameraPos.xyz - treePos;
-    vec2 toCameraHorizontal = normalize(toCamera.xz);
-
-    // Compute horizontal angle (0-360 degrees)
-    // atan(x, z) gives angle where +Z is 0°, +X is 90°
-    // This matches capture convention: azimuth=0 is camera at +Z, azimuth=90 is camera at +X
-    float hAngle = atan(toCameraHorizontal.x, toCameraHorizontal.y);
-    hAngle = degrees(hAngle);
-    if (hAngle < 0.0) hAngle += 360.0;
-
-    // Apply tree rotation offset - add rotation because we're rotating the view around the tree
-    hAngle = mod(hAngle + degrees(rotation) + 360.0, 360.0);
-
-    // Select horizontal cell index (0-7)
-    int hIndex = int(mod(round(hAngle / ANGLE_STEP), float(HORIZONTAL_ANGLES)));
-
-    // Compute elevation angle (how much camera is above tree)
     float dist = length(toCamera);
-    float elevation = degrees(asin(clamp(toCamera.y / dist, -1.0, 1.0)));
+    vec3 viewDir = toCamera / dist;
 
-    // Debug elevation override (lodParams.w >= -90 means override is enabled)
+    // Apply tree rotation to view direction (rotate view around Y axis)
+    float cosRot = cos(-rotation);
+    float sinRot = sin(-rotation);
+    vec3 rotatedViewDir = vec3(
+        viewDir.x * cosRot - viewDir.z * sinRot,
+        viewDir.y,
+        viewDir.x * sinRot + viewDir.z * cosRot
+    );
+
+    // Check octahedral mode
+    bool useOctahedral = push.lodParams.x > 0.5;
+    fragUseOctahedral = useOctahedral ? 1 : 0;
+
+    // Compute elevation angle
+    float elevation = degrees(asin(clamp(viewDir.y, -1.0, 1.0)));
+
+    // Debug elevation override
     if (push.lodParams.w >= -90.0) {
         elevation = push.lodParams.w;
+        // Reconstruct view direction from debug elevation
+        float debugElevRad = radians(elevation);
+        viewDir.y = sin(debugElevRad);
+        float horizScale = cos(debugElevRad);
+        viewDir.x *= horizScale / max(length(vec2(viewDir.x, viewDir.z)), 0.001);
+        viewDir.z *= horizScale / max(length(vec2(viewDir.x, viewDir.z)), 0.001);
     }
 
-    // Select vertical level
-    // Level 0: horizon (-22.5 to 22.5 degrees)
-    // Level 1: elevated (22.5 to 67.5 degrees)
-    // Level 2: top-down (> 67.5 degrees) - uses single cell
-    int vIndex;
-    int cellIndex;
-
-    if (elevation > 67.5) {
-        // Top-down view: use cell 8 of row 0
-        cellIndex = 8;
-        vIndex = 0;
-    } else if (elevation > 22.5) {
-        // Elevated view: row 1
-        cellIndex = CELLS_PER_ROW + hIndex;
-        vIndex = 1;
-    } else {
-        // Horizon view: row 0
-        cellIndex = hIndex;
-        vIndex = 0;
-    }
-
-    fragCellIndex = cellIndex;
-
-    // Compute atlas UV offset for this cell
-    int cellX = cellIndex % CELLS_PER_ROW;
-    int cellY = cellIndex / CELLS_PER_ROW;
-
-    // Transform quad UV to atlas UV (no rotation needed - billboard orientation handles it)
-    vec2 cellUV = inTexCoord;
-    vec2 atlasUV = (vec2(cellX, cellY) + cellUV) / vec2(float(CELLS_PER_ROW), 2.0);
-    fragTexCoord = atlasUV;
-
-    // Billboard orientation depends on view angle
+    // Billboard orientation
     vec3 forward, up, right;
     vec3 localPos;
     vec3 billboardCenter;
 
     if (elevation > 67.5) {
-        // Top-down view: billboard lies flat, fixed orientation based on tree rotation only
-        forward = vec3(0.0, 1.0, 0.0);  // Billboard faces up
-        // Fixed orientation based on tree rotation (doesn't change with camera angle)
+        // Top-down view: billboard lies flat
+        forward = vec3(0.0, 1.0, 0.0);
         right = vec3(cos(rotation), 0.0, -sin(rotation));
         up = vec3(sin(rotation), 0.0, cos(rotation));
 
-        // For top-down, use same size in both directions (it's a square from above)
         float maxSize = max(hSize, vSize);
-        // Billboard is centered on the tree at canopy height
-        // inPosition.x is -0.5 to 0.5, inPosition.y is 0 to 1
-        // Remap Y to also be -0.5 to 0.5 for centered quad
         localPos = right * inPosition.x * maxSize * 2.0 +
                    up * (inPosition.y - 0.5) * maxSize * 2.0;
-        // Center the billboard at tree center height (half the tree height)
         billboardCenter = treePos + vec3(0.0, vSize, 0.0);
     } else {
         // Normal billboard: face camera but stay upright
-        // Forward points toward camera (opposite of toCamera horizontal direction)
         forward = -normalize(vec3(toCamera.x, 0.0, toCamera.z));
         up = vec3(0.0, 1.0, 0.0);
         right = cross(up, forward);
 
-        // For elevated views (row 1, captured at 45 degrees), tilt billboard 45 degrees
-        // Tilt top of billboard away from camera so face tilts up toward camera
-        if (elevation > 22.5) {
-            float tiltAngle = radians(45.0);  // Fixed 45 degrees to match capture angle
+        // Tilt for elevated views
+        if (elevation > 22.5 && !useOctahedral) {
+            // Legacy mode: tilt at fixed 45 degrees for elevated row
+            float tiltAngle = radians(45.0);
+            vec3 tiltedUp = cos(tiltAngle) * up + sin(tiltAngle) * forward;
+            vec3 tiltedForward = -sin(tiltAngle) * up + cos(tiltAngle) * forward;
+            forward = tiltedForward;
+            up = tiltedUp;
+            right = cross(up, forward);
+        } else if (useOctahedral && elevation > 5.0) {
+            // Octahedral mode: tilt to match capture angle more smoothly
+            float tiltAngle = radians(clamp(elevation, 0.0, 80.0));
             vec3 tiltedUp = cos(tiltAngle) * up + sin(tiltAngle) * forward;
             vec3 tiltedForward = -sin(tiltAngle) * up + cos(tiltAngle) * forward;
             forward = tiltedForward;
@@ -146,22 +128,72 @@ void main() {
             right = cross(up, forward);
         }
 
-        // inPosition.x is -0.5 to 0.5, inPosition.y is 0 to 1
-        // Billboard width = 2*hSize, height = 2*vSize
-        // Base of billboard (y=0) should be at tree base
         localPos = right * inPosition.x * hSize * 2.0 +
                    up * inPosition.y * vSize * 2.0;
         billboardCenter = treePos + vec3(0.0, baseOffset, 0.0);
     }
 
-    // Build impostor-to-world rotation matrix for normal transformation
+    // Build impostor-to-world rotation matrix
     fragImpostorToWorld = mat3(right, up, forward);
 
     vec3 worldPos = billboardCenter + localPos;
     fragWorldPos = worldPos;
-
     gl_Position = ubo.proj * ubo.view * vec4(worldPos, 1.0);
 
     fragBlendFactor = blendFactor;
     fragArchetypeIndex = archetypeIndex;
+    fragViewDir = rotatedViewDir;
+
+    // Pass local UV for frame blending
+    fragLocalUV = inTexCoord;
+
+    if (useOctahedral) {
+        // Octahedral mode: compute which cell we're viewing from
+        vec2 octaUV = hemiOctaEncode(rotatedViewDir);
+        fragOctaUV = octaUV;
+
+        // Find the cell in the grid
+        float gridSize = float(OCTA_GRID_SIZE);
+        ivec2 cell = ivec2(floor(octaUV * gridSize));
+        cell = clamp(cell, ivec2(0), ivec2(OCTA_GRID_SIZE - 1));
+
+        // Map billboard's local UV (inTexCoord) to the cell position in atlas
+        // Each cell spans 1/gridSize of the atlas
+        vec2 atlasUV = (vec2(cell) + inTexCoord) / gridSize;
+        fragTexCoord = atlasUV;
+
+        fragCellIndex = cell.y * OCTA_GRID_SIZE + cell.x;
+    } else {
+        // Legacy mode: discrete cell selection
+        vec2 toCameraHorizontal = normalize(toCamera.xz);
+        float hAngle = atan(toCameraHorizontal.x, toCameraHorizontal.y);
+        hAngle = degrees(hAngle);
+        if (hAngle < 0.0) hAngle += 360.0;
+        hAngle = mod(hAngle + degrees(rotation) + 360.0, 360.0);
+
+        int hIndex = int(mod(round(hAngle / ANGLE_STEP), float(HORIZONTAL_ANGLES)));
+
+        int vIndex;
+        int cellIndex;
+
+        if (elevation > 67.5) {
+            cellIndex = 8;
+            vIndex = 0;
+        } else if (elevation > 22.5) {
+            cellIndex = CELLS_PER_ROW + hIndex;
+            vIndex = 1;
+        } else {
+            cellIndex = hIndex;
+            vIndex = 0;
+        }
+
+        fragCellIndex = cellIndex;
+
+        int cellX = cellIndex % CELLS_PER_ROW;
+        int cellY = cellIndex / CELLS_PER_ROW;
+        vec2 cellUV = inTexCoord;
+        vec2 atlasUV = (vec2(cellX, cellY) + cellUV) / vec2(float(CELLS_PER_ROW), 2.0);
+        fragTexCoord = atlasUV;
+        fragOctaUV = vec2(0.0);
+    }
 }

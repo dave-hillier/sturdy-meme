@@ -92,6 +92,29 @@ void GuiTreeTab::render(ITreeControl& treeControl) {
             }
 
             ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.6f, 0.8f, 1.0f, 1.0f));
+            ImGui::Text("Octahedral Impostor Mode (Phase 6):");
+            ImGui::PopStyleColor();
+            ImGui::Checkbox("Use Octahedral Mapping", &settings.useOctahedralMapping);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Use octahedral (hemi-sphere) impostor atlas instead of legacy 17-view.\n"
+                                  "Provides smoother view transitions and better angle coverage.\n"
+                                  "8x8 grid = 64 views vs 17 discrete views.");
+            }
+            if (settings.useOctahedralMapping) {
+                ImGui::Checkbox("Frame Blending", &settings.enableFrameBlending);
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Blend between 3 nearest frames for smooth transitions.\n"
+                                      "Eliminates popping when view angle changes.\n"
+                                      "Slightly more expensive (3 texture lookups).");
+                }
+                ImGui::TextColored(ImVec4(0.5f, 1.0f, 0.5f, 1.0f), "  Octahedral: 8x8 grid = 64 views");
+            } else {
+                ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.5f, 1.0f), "  Legacy: 2x9 grid = 17 views");
+            }
+
+            ImGui::Spacing();
             ImGui::Text("Debug:");
 
             // Show actual calculated elevation
@@ -209,16 +232,16 @@ void GuiTreeTab::render(ITreeControl& treeControl) {
                     }
                 }
 
-                // Atlas texture preview button
+                // Atlas texture preview buttons
                 VkDescriptorSet previewSet = atlas->getPreviewDescriptorSet(0);
                 if (previewSet != VK_NULL_HANDLE) {
-                    if (ImGui::Button("Preview Atlas Texture")) {
+                    if (ImGui::Button("Preview Legacy Atlas")) {
                         ImGui::OpenPopup("AtlasPreview");
                     }
 
                     // Preview popup window
                     if (ImGui::BeginPopup("AtlasPreview")) {
-                        ImGui::Text("Impostor Atlas (9x2 cells, 256px each)");
+                        ImGui::Text("Legacy Impostor Atlas (9x2 cells, 256px each)");
                         ImGui::Separator();
 
                         // Draw atlas with cell grid overlay
@@ -250,6 +273,52 @@ void GuiTreeTab::render(ITreeControl& treeControl) {
                         ImGui::Spacing();
                         ImGui::Text("Row 0: 8 horizon views (0-315 deg) + top-down");
                         ImGui::Text("Row 1: 8 elevated views (45 deg elevation)");
+
+                        ImGui::EndPopup();
+                    }
+                }
+
+                // Octahedral atlas preview
+                ImGui::SameLine();
+                VkDescriptorSet octaPreviewSet = atlas->getOctahedralPreviewDescriptorSet(0);
+                if (octaPreviewSet != VK_NULL_HANDLE) {
+                    if (ImGui::Button("Preview Octahedral Atlas")) {
+                        ImGui::OpenPopup("OctaAtlasPreview");
+                    }
+
+                    if (ImGui::BeginPopup("OctaAtlasPreview")) {
+                        ImGui::Text("Octahedral Impostor Atlas (8x8 grid, 256px cells)");
+                        ImGui::Separator();
+
+                        // Draw octahedral atlas with grid overlay
+                        float scale = 0.4f;  // Smaller scale since it's larger
+                        ImVec2 imageSize(OctahedralAtlasConfig::ATLAS_WIDTH * scale,
+                                        OctahedralAtlasConfig::ATLAS_HEIGHT * scale);
+
+                        ImVec2 cursorPos = ImGui::GetCursorScreenPos();
+                        ImGui::Image(reinterpret_cast<ImTextureID>(octaPreviewSet), imageSize);
+
+                        // Draw grid lines
+                        ImDrawList* drawList = ImGui::GetWindowDrawList();
+                        float cellSize = imageSize.x / OctahedralAtlasConfig::GRID_SIZE;
+                        ImU32 gridColor = IM_COL32(255, 255, 255, 80);
+
+                        // Vertical lines
+                        for (int x = 0; x <= OctahedralAtlasConfig::GRID_SIZE; x++) {
+                            float px = cursorPos.x + x * cellSize;
+                            drawList->AddLine(ImVec2(px, cursorPos.y),
+                                            ImVec2(px, cursorPos.y + imageSize.y), gridColor);
+                        }
+                        // Horizontal lines
+                        for (int y = 0; y <= OctahedralAtlasConfig::GRID_SIZE; y++) {
+                            float py = cursorPos.y + y * cellSize;
+                            drawList->AddLine(ImVec2(cursorPos.x, py),
+                                            ImVec2(cursorPos.x + imageSize.x, py), gridColor);
+                        }
+
+                        ImGui::Spacing();
+                        ImGui::Text("Hemi-octahedral mapping: 64 views (8x8)");
+                        ImGui::Text("UV encodes view direction on upper hemisphere");
 
                         ImGui::EndPopup();
                     }
