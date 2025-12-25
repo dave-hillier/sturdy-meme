@@ -209,17 +209,20 @@ void main() {
 
         if (useScreenSpaceError != 0u) {
             // Screen-space error LOD (Phase 4)
+            // Screen error is HIGH when close (large on screen), LOW when far (small on screen)
+            // We want: close trees = full geometry, far trees = impostor
             float worldErrorFull = arch.lodErrorData.x * treeScale;
             float worldErrorImpostor = arch.lodErrorData.y * treeScale;
 
             float screenErrorFull = computeScreenError(worldErrorFull, distToCamera);
             float screenErrorImpostor = computeScreenError(worldErrorImpostor, distToCamera);
 
-            if (screenErrorFull <= errorThresholdFull) {
-                // Tree is close enough for full detail - skip impostor
+            if (screenErrorFull > errorThresholdFull) {
+                // Tree is close (high screen error) - needs full detail, skip impostor
                 setVisibilityCached(treeIdx, false);
                 return;
-            } else if (screenErrorImpostor > errorThresholdCull) {
+            } else if (screenErrorImpostor < errorThresholdCull) {
+                // Tree is very far (very low screen error) - cull entirely
                 shouldCull = true;
             } else {
                 shouldRenderAsImpostor = true;
@@ -263,16 +266,21 @@ void main() {
         setVisibilityCached(treeIdx, true);
 
         // Calculate blend factor
+        // blendFactor: 0.0 = full geometry only (close), 1.0 = impostor only (far)
         if (useScreenSpaceError != 0u) {
             float worldErrorFull = arch.lodErrorData.x * treeScale;
             float screenErrorFull = computeScreenError(worldErrorFull, distToCamera);
 
-            if (screenErrorFull < errorThresholdFull) {
-                blendFactor = 0.0;
-            } else if (screenErrorFull > errorThresholdImpostor) {
-                blendFactor = 1.0;
+            // High screen error = close = more geometry (low blend)
+            // Low screen error = far = more impostor (high blend)
+            if (screenErrorFull > errorThresholdFull) {
+                blendFactor = 0.0;  // Close: full geometry
+            } else if (screenErrorFull < errorThresholdImpostor) {
+                blendFactor = 1.0;  // Far: full impostor
             } else {
-                blendFactor = smoothstep(errorThresholdFull, errorThresholdImpostor, screenErrorFull);
+                // Blend zone: errorThresholdImpostor < screenError < errorThresholdFull
+                // As screenError decreases (farther), blend increases toward 1.0
+                blendFactor = 1.0 - smoothstep(errorThresholdImpostor, errorThresholdFull, screenErrorFull);
             }
         } else {
             float distToCamera = getDistanceToCamera(treePos, cameraPosition.xyz);
@@ -308,18 +316,21 @@ void main() {
 
         if (isVisible) {
             // Recalculate blend factor (it depends on current camera position)
+            // blendFactor: 0.0 = full geometry only (close), 1.0 = impostor only (far)
             float distToCamera = getDistanceToCamera(treePos, cameraPosition.xyz);
 
             if (useScreenSpaceError != 0u) {
                 float worldErrorFull = arch.lodErrorData.x * treeScale;
                 float screenErrorFull = computeScreenError(worldErrorFull, distToCamera);
 
-                if (screenErrorFull < errorThresholdFull) {
-                    blendFactor = 0.0;
-                } else if (screenErrorFull > errorThresholdImpostor) {
-                    blendFactor = 1.0;
+                // High screen error = close = more geometry (low blend)
+                // Low screen error = far = more impostor (high blend)
+                if (screenErrorFull > errorThresholdFull) {
+                    blendFactor = 0.0;  // Close: full geometry
+                } else if (screenErrorFull < errorThresholdImpostor) {
+                    blendFactor = 1.0;  // Far: full impostor
                 } else {
-                    blendFactor = smoothstep(errorThresholdFull, errorThresholdImpostor, screenErrorFull);
+                    blendFactor = 1.0 - smoothstep(errorThresholdImpostor, errorThresholdFull, screenErrorFull);
                 }
             } else {
                 if (distToCamera < fullDetailDistance + blendRange) {

@@ -99,6 +99,8 @@ public:
     void updateArchetypeData(const TreeImpostorAtlas* atlas);
 
     // LOD parameters for screen-space error calculation
+    // Screen error is HIGH when close (object large on screen), LOW when far (object small)
+    // Logic: close (high error) = full geometry, far (low error) = impostor/cull
     struct LODParams {
         float fullDetailDistance = 250.0f;
         float impostorDistance = 50000.0f;
@@ -106,9 +108,9 @@ public:
         float blendRange = 10.0f;
         bool useScreenSpaceError = true;
         float tanHalfFOV = 1.0f;  // tan(fov/2)
-        float errorThresholdFull = 2.0f;
-        float errorThresholdImpostor = 8.0f;
-        float errorThresholdCull = 32.0f;
+        float errorThresholdFull = 4.0f;       // Above this error: use full geometry (close trees)
+        float errorThresholdImpostor = 1.0f;   // Below this error: use full impostor (far trees)
+        float errorThresholdCull = 0.25f;      // Below this error: cull entirely (very far trees)
     };
 
     // Temporal coherence settings

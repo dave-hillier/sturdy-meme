@@ -1563,8 +1563,9 @@ void TreeImpostorAtlas::renderToCell(
 
     // Orthographic projection: use horizontalRadius for horizontal extent, halfHeight for vertical
     // This gives proper framing for the tree's actual shape
-    float hSize = horizontalRadius * 1.1f;  // Horizontal extent with small margin
-    float vSize = halfHeight * 1.1f;        // Vertical extent with small margin
+    // Use 25% margin to ensure leaves and branches aren't clipped at edges
+    float hSize = horizontalRadius * 1.25f;  // Horizontal extent with margin
+    float vSize = halfHeight * 1.25f;        // Vertical extent with margin
 
     glm::mat4 proj;
     if (elevation < 80.0f) {
@@ -1709,23 +1710,22 @@ void TreeImpostorAtlas::renderOctahedralCell(
 
     glm::mat4 view = glm::lookAt(camPos, target, up);
 
-    // Orthographic projection that encompasses the tree
-    float hSize = horizontalRadius * 1.1f;
-    float vSize = halfHeight * 1.1f;
+    // Orthographic projection that encompasses the tree from the current view angle
+    // For elevated views, the tree's depth contributes to projected width
+    // Use squared elevation factor for gentler blending - most views stay close to horizontalRadius
+    float elevationFactor = glm::abs(elevation) / 90.0f;  // 0 at horizon, 1 at top-down
+    float blendFactor = elevationFactor * elevationFactor;  // Quadratic: stays low until high elevations
+
+    // Horizontal size: blend from horizontalRadius toward bounding sphere at steep angles
+    float effectiveHSize = glm::mix(horizontalRadius, boundingSphereRadius, blendFactor) * 1.15f;
+    // Vertical size: use half-height with margin
+    float effectiveVSize = halfHeight * 1.15f;
+    // Use the larger of the two for a square projection (simpler billboard math)
+    float projSize = glm::max(effectiveHSize, effectiveVSize);
 
     glm::mat4 proj;
-    if (elevation < 80.0f) {
-        // Compute view-space Y bounds for non-top-down views
-        float elevCos = glm::cos(glm::radians(elevation));
-        float baseInViewSpace = (baseY - centerHeight) * elevCos;
-        float yBottom = baseInViewSpace;
-        float yTop = yBottom + 2.0f * vSize * elevCos;
-        proj = glm::ortho(-hSize, hSize, yBottom, yTop, 0.1f, camDist + boundingSphereRadius * 2.0f);
-    } else {
-        // Top-down: symmetric projection
-        float maxSize = glm::max(hSize, vSize);
-        proj = glm::ortho(-maxSize, maxSize, -maxSize, maxSize, 0.1f, camDist + boundingSphereRadius * 2.0f);
-    }
+    // Symmetric projection centered on tree center
+    proj = glm::ortho(-projSize, projSize, -projSize, projSize, 0.1f, camDist + boundingSphereRadius * 2.0f);
 
     // Vulkan clip space correction
     proj[1][1] *= -1;

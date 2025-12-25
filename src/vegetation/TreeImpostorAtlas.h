@@ -68,10 +68,12 @@ struct TreeLODSettings {
     float blendExponent = 1.0f;            // Blend curve (1.0 = linear)
 
     // Screen-space error LOD
+    // Screen error is HIGH when close (object large on screen), LOW when far (object small)
+    // Logic: close (high error) = full geometry, far (low error) = impostor/cull
     bool useScreenSpaceError = true;       // Use screen-space error instead of distance
-    float errorThresholdFull = 2.0f;       // Max screen error for full detail (pixels)
-    float errorThresholdImpostor = 8.0f;   // Max screen error for impostor (pixels)
-    float errorThresholdCull = 32.0f;      // Screen error beyond which to cull (sub-pixel)
+    float errorThresholdFull = 4.0f;       // Above this error: use full geometry (close trees)
+    float errorThresholdImpostor = 1.0f;   // Below this error: use full impostor (far trees)
+    float errorThresholdCull = 0.25f;      // Below this error: cull entirely (very far trees)
 
     // Impostor settings
     bool enableImpostors = true;
