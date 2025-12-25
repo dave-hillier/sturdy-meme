@@ -55,6 +55,7 @@ public:
         VkExtent2D extent;
         std::string resourcePath;
         uint32_t maxFramesInFlight;
+        uint32_t shadowMapSize = 2048;  // Shadow map dimensions
     };
 
     static std::unique_ptr<TreeLODSystem> create(const InitInfo& info);
@@ -175,6 +176,7 @@ private:
     std::string resourcePath_;
     VkExtent2D extent_{};
     uint32_t maxFramesInFlight_ = 0;
+    uint32_t shadowMapSize_ = 2048;
 
     // Impostor atlas generator
     std::unique_ptr<TreeImpostorAtlas> impostorAtlas_;

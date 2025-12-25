@@ -47,6 +47,7 @@ bool TreeLODSystem::initInternal(const InitInfo& info) {
     resourcePath_ = info.resourcePath;
     extent_ = info.extent;
     maxFramesInFlight_ = info.maxFramesInFlight;
+    shadowMapSize_ = info.shadowMapSize;
 
     // Create impostor atlas
     TreeImpostorAtlas::InitInfo atlasInfo{};
@@ -502,31 +503,20 @@ bool TreeLODSystem::createShadowPipeline() {
     shaderStages[1].module = *fragModule;
     shaderStages[1].pName = "main";
 
-    // Vertex input: same as main pipeline
-    std::array<VkVertexInputBindingDescription, 2> bindingDescriptions{};
-    bindingDescriptions[0].binding = 0;
-    bindingDescriptions[0].stride = sizeof(glm::vec3) + sizeof(glm::vec2);
-    bindingDescriptions[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+    // Vertex input: only billboard quad vertices (instances come from SSBO)
+    VkVertexInputBindingDescription bindingDescription{};
+    bindingDescription.binding = 0;
+    bindingDescription.stride = sizeof(glm::vec3) + sizeof(glm::vec2);
+    bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
-    bindingDescriptions[1].binding = 1;
-    bindingDescriptions[1].stride = sizeof(ImpostorInstanceGPU);
-    bindingDescriptions[1].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
-
-    std::array<VkVertexInputAttributeDescription, 9> attributeDescriptions{};
-    attributeDescriptions[0] = {0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0};
-    attributeDescriptions[1] = {1, 0, VK_FORMAT_R32G32_SFLOAT, sizeof(glm::vec3)};
-    attributeDescriptions[2] = {2, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(ImpostorInstanceGPU, position)};
-    attributeDescriptions[3] = {3, 1, VK_FORMAT_R32_SFLOAT, offsetof(ImpostorInstanceGPU, scale)};
-    attributeDescriptions[4] = {4, 1, VK_FORMAT_R32_SFLOAT, offsetof(ImpostorInstanceGPU, rotation)};
-    attributeDescriptions[5] = {5, 1, VK_FORMAT_R32_UINT, offsetof(ImpostorInstanceGPU, archetypeIndex)};
-    attributeDescriptions[6] = {6, 1, VK_FORMAT_R32_SFLOAT, offsetof(ImpostorInstanceGPU, hSize)};
-    attributeDescriptions[7] = {7, 1, VK_FORMAT_R32_SFLOAT, offsetof(ImpostorInstanceGPU, vSize)};
-    attributeDescriptions[8] = {8, 1, VK_FORMAT_R32_SFLOAT, offsetof(ImpostorInstanceGPU, baseOffset)};
+    std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
+    attributeDescriptions[0] = {0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0};                  // inPosition
+    attributeDescriptions[1] = {1, 0, VK_FORMAT_R32G32_SFLOAT, sizeof(glm::vec3)};     // inTexCoord
 
     VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
     vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vertexInputInfo.vertexBindingDescriptionCount = static_cast<uint32_t>(bindingDescriptions.size());
-    vertexInputInfo.pVertexBindingDescriptions = bindingDescriptions.data();
+    vertexInputInfo.vertexBindingDescriptionCount = 1;
+    vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
     vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
     vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
 
@@ -534,10 +524,25 @@ bool TreeLODSystem::createShadowPipeline() {
     inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
     inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
+    // Static viewport and scissor for shadow map
+    VkViewport viewport{};
+    viewport.x = 0.0f;
+    viewport.y = 0.0f;
+    viewport.width = static_cast<float>(shadowMapSize_);
+    viewport.height = static_cast<float>(shadowMapSize_);
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+
+    VkRect2D scissor{};
+    scissor.offset = {0, 0};
+    scissor.extent = {shadowMapSize_, shadowMapSize_};
+
     VkPipelineViewportStateCreateInfo viewportState{};
     viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
     viewportState.viewportCount = 1;
+    viewportState.pViewports = &viewport;
     viewportState.scissorCount = 1;
+    viewportState.pScissors = &scissor;
 
     VkPipelineRasterizationStateCreateInfo rasterizer{};
     rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
@@ -564,15 +569,11 @@ bool TreeLODSystem::createShadowPipeline() {
     colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
     colorBlending.attachmentCount = 0;
 
-    std::array<VkDynamicState, 2> dynamicStates = {
-        VK_DYNAMIC_STATE_VIEWPORT,
-        VK_DYNAMIC_STATE_SCISSOR
-    };
-
+    // No dynamic state - viewport and scissor are static
     VkPipelineDynamicStateCreateInfo dynamicState{};
     dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
-    dynamicState.pDynamicStates = dynamicStates.data();
+    dynamicState.dynamicStateCount = 0;
+    dynamicState.pDynamicStates = nullptr;
 
     VkGraphicsPipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -1300,13 +1301,16 @@ void TreeLODSystem::renderImpostorShadowsGPUCulled(VkCommandBuffer cmd, uint32_t
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipelineLayout_.get(),
                            0, 1, &shadowDescriptorSets_[frameIndex], 0, nullptr);
 
-    // Push constants for shadow pass
+    // Push constants for shadow pass - must match shader layout:
+    // vec4 cameraPos (offset 0), vec4 lodParams (offset 16), int cascadeIndex (offset 32)
     struct {
         glm::vec4 cameraPos;
+        glm::vec4 lodParams;  // unused but needed for layout alignment
         int cascadeIndex;
         float _pad[3];
     } pushConstants;
     pushConstants.cameraPos = glm::vec4(lastCameraPos_, 0.0f);
+    pushConstants.lodParams = glm::vec4(0.0f);  // unused for shadow
     pushConstants.cascadeIndex = cascadeIndex;
 
     vkCmdPushConstants(cmd, shadowPipelineLayout_.get(),

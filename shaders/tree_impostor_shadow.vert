@@ -13,7 +13,7 @@ layout(location = 0) in vec3 inPosition;   // Billboard quad vertex position
 layout(location = 1) in vec2 inTexCoord;   // Billboard quad UV
 
 // Visible impostor instances from compute shader (SSBO)
-layout(std430, binding = BINDING_TREE_IMPOSTOR_INSTANCES) readonly buffer InstanceBuffer {
+layout(std430, binding = BINDING_TREE_IMPOSTOR_SHADOW_INSTANCES) readonly buffer InstanceBuffer {
     ImpostorInstance instances[];
 };
 
@@ -109,11 +109,11 @@ void main() {
         right = cross(up, forward);
     }
 
-    // Position billboard vertex
+    // Position billboard vertex - center Y around origin so baseOffset positions correctly
     vec3 localPos = right * inPosition.x * hSize * 2.0 +
-                    up * inPosition.y * vSize * 2.0;
+                    up * (inPosition.y - 0.5) * vSize * 2.0;
 
-    // Position billboard with base at tree's base position
+    // Position billboard centered at tree's center height
     vec3 worldPos = treePos + vec3(0.0, baseOffset, 0.0) + localPos;
 
     // Transform by cascade light matrix

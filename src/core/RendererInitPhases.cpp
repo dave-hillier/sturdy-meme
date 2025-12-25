@@ -309,6 +309,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         treeLODInfo.extent = systems_->postProcess().getExtent();
         treeLODInfo.resourcePath = resourcePath;
         treeLODInfo.maxFramesInFlight = MAX_FRAMES_IN_FLIGHT;
+        treeLODInfo.shadowMapSize = systems_->shadow().getShadowMapSize();
 
         auto treeLOD = TreeLODSystem::create(treeLODInfo);
         if (treeLOD) {
