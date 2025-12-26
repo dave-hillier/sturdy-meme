@@ -8,6 +8,8 @@
 #include <array>
 #include <cstring>
 
+using namespace vk;  // Vulkan-Hpp type-safe wrappers
+
 std::unique_ptr<CloudShadowSystem> CloudShadowSystem::create(const InitInfo& info) {
     std::unique_ptr<CloudShadowSystem> system(new CloudShadowSystem());
     if (!system->initInternal(info)) {
@@ -70,39 +72,40 @@ void CloudShadowSystem::cleanup() {
 bool CloudShadowSystem::createShadowMap() {
     // Create cloud shadow map texture
     // R16F format stores shadow attenuation factor (0 = full shadow, 1 = no shadow)
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.format = VK_FORMAT_R16_SFLOAT;
-    imageInfo.extent = {SHADOW_MAP_SIZE, SHADOW_MAP_SIZE, 1};
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    ImageCreateInfo imageInfo{
+        {},                                  // flags
+        ImageType::e2D,
+        Format::eR16Sfloat,
+        Extent3D{SHADOW_MAP_SIZE, SHADOW_MAP_SIZE, 1},
+        1, 1,                                // mipLevels, arrayLayers
+        SampleCountFlagBits::e1,
+        ImageTiling::eOptimal,
+        ImageUsageFlagBits::eStorage | ImageUsageFlagBits::eSampled,
+        SharingMode::eExclusive,
+        0, nullptr,                          // queueFamilyIndexCount, pQueueFamilyIndices
+        ImageLayout::eUndefined
+    };
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
-    if (!ManagedImage::create(allocator, imageInfo, allocInfo, shadowMap_)) {
+    auto vkImageInfo = static_cast<VkImageCreateInfo>(imageInfo);
+    if (!ManagedImage::create(allocator, vkImageInfo, allocInfo, shadowMap_)) {
         SDL_Log("Failed to create cloud shadow map");
         return false;
     }
 
-    VkImageViewCreateInfo viewInfo{};
-    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.image = shadowMap_.get();
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format = VK_FORMAT_R16_SFLOAT;
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = 1;
-    viewInfo.subresourceRange.baseArrayLayer = 0;
-    viewInfo.subresourceRange.layerCount = 1;
+    ImageViewCreateInfo viewInfo{
+        {},                              // flags
+        shadowMap_.get(),
+        ImageViewType::e2D,
+        Format::eR16Sfloat,
+        ComponentMapping{},              // identity swizzle
+        ImageSubresourceRange{ImageAspectFlagBits::eColor, 0, 1, 0, 1}
+    };
 
-    if (!ManagedImageView::create(device, viewInfo, shadowMapView_)) {
+    auto vkViewInfo = static_cast<VkImageViewCreateInfo>(viewInfo);
+    if (!ManagedImageView::create(device, vkViewInfo, shadowMapView_)) {
         SDL_Log("Failed to create cloud shadow map view");
         return false;
     }
@@ -188,30 +191,35 @@ bool CloudShadowSystem::createComputePipeline() {
         return false;
     }
 
-    VkPipelineShaderStageCreateInfo stageInfo{};
-    stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stageInfo.module = *shaderModule;
-    stageInfo.pName = "main";
+    PipelineShaderStageCreateInfo stageInfo{
+        {},                              // flags
+        ShaderStageFlagBits::eCompute,
+        *shaderModule,
+        "main"
+    };
 
     // Push constant for temporal spreading quadrant index
-    VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(uint32_t);  // quadrantIndex
+    PushConstantRange pushConstantRange{
+        ShaderStageFlagBits::eCompute,
+        0,
+        sizeof(uint32_t)  // quadrantIndex
+    };
 
-    if (!DescriptorManager::createManagedPipelineLayout(device, descriptorSetLayout.get(), pipelineLayout, {pushConstantRange})) {
+    auto vkPushConstantRange = static_cast<VkPushConstantRange>(pushConstantRange);
+    if (!DescriptorManager::createManagedPipelineLayout(device, descriptorSetLayout.get(), pipelineLayout, {vkPushConstantRange})) {
         vkDestroyShaderModule(device, *shaderModule, nullptr);
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create cloud shadow pipeline layout");
         return false;
     }
 
-    VkComputePipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    pipelineInfo.stage = stageInfo;
-    pipelineInfo.layout = pipelineLayout.get();
+    ComputePipelineCreateInfo pipelineInfo{
+        {},                              // flags
+        stageInfo,
+        pipelineLayout.get()
+    };
 
-    if (!ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, computePipeline)) {
+    auto vkPipelineInfo = static_cast<VkComputePipelineCreateInfo>(pipelineInfo);
+    if (!ManagedPipeline::createCompute(device, VK_NULL_HANDLE, vkPipelineInfo, computePipeline)) {
         vkDestroyShaderModule(device, *shaderModule, nullptr);
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create cloud shadow compute pipeline");
         return false;
