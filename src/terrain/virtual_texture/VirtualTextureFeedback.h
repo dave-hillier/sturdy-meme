@@ -1,7 +1,7 @@
 #pragma once
 
 #include "VirtualTextureTypes.h"
-#include "core/VulkanRAII.h"
+#include "VulkanRAII.h"
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
 #include <vector>

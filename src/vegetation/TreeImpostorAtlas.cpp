@@ -2,7 +2,7 @@
 #include "TreeSystem.h"
 #include "Mesh.h"
 #include "ShaderLoader.h"
-#include "core/BufferUtils.h"
+#include "BufferUtils.h"
 #include "shaders/bindings.h"
 
 #include <SDL3/SDL.h>

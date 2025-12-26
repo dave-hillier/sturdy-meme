@@ -14,7 +14,7 @@
 #include "RenderableBuilder.h"
 #include "GlobalBufferManager.h"
 #include "BufferUtils.h"
-#include "core/VulkanRAII.h"
+#include "VulkanRAII.h"
 
 class AnimatedCharacter;
 

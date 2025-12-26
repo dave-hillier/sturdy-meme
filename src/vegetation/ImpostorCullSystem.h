@@ -8,9 +8,9 @@
 #include <string>
 
 #include "CullCommon.h"
-#include "core/VulkanRAII.h"
-#include "core/DescriptorManager.h"
-#include "core/BufferUtils.h"
+#include "VulkanRAII.h"
+#include "DescriptorManager.h"
+#include "BufferUtils.h"
 
 class TreeSystem;
 class TreeImpostorAtlas;

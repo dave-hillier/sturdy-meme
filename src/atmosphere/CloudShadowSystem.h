@@ -8,7 +8,7 @@
 #include <memory>
 #include "DescriptorManager.h"
 #include "InitContext.h"
-#include "core/VulkanRAII.h"
+#include "VulkanRAII.h"
 #include "BufferUtils.h"
 #include "interfaces/ICloudShadowControl.h"
 

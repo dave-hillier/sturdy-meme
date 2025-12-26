@@ -8,8 +8,8 @@
 #include <string>
 
 #include "TreeImpostorAtlas.h"
-#include "core/VulkanRAII.h"
-#include "core/DescriptorManager.h"
+#include "VulkanRAII.h"
+#include "DescriptorManager.h"
 
 class TreeSystem;
 

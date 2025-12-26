@@ -3,7 +3,7 @@
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
 #include <cstdint>
-#include "core/VulkanRAII.h"
+#include "VulkanRAII.h"
 
 // Concurrent Binary Tree (CBT) buffer for terrain subdivision
 class TerrainCBT {

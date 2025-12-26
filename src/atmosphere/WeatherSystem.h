@@ -11,7 +11,7 @@
 #include "BufferUtils.h"
 #include "ParticleSystem.h"
 #include "UBOs.h"
-#include "core/RAIIAdapter.h"
+#include "RAIIAdapter.h"
 #include "interfaces/IWeatherState.h"
 
 // Forward declaration

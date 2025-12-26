@@ -16,8 +16,8 @@
 #include "Mesh.h"
 #include "Texture.h"
 #include "RenderableBuilder.h"
-#include "core/RAIIAdapter.h"
-#include "core/BufferUtils.h"
+#include "RAIIAdapter.h"
+#include "BufferUtils.h"
 
 // GPU leaf instance data - matches shaders/tree_leaf_instance.glsl
 // std430 layout: 32 bytes per instance

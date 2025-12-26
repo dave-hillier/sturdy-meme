@@ -15,7 +15,7 @@
 #include "AnimatedCharacter.h"
 #include "MaterialRegistry.h"
 #include "PlayerCape.h"
-#include "core/RAIIAdapter.h"
+#include "RAIIAdapter.h"
 #include <optional>
 #include <memory>
 

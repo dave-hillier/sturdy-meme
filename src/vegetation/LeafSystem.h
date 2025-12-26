@@ -12,7 +12,7 @@
 #include "ParticleSystem.h"
 #include "BufferUtils.h"
 #include "UBOs.h"
-#include "core/RAIIAdapter.h"
+#include "RAIIAdapter.h"
 #include "interfaces/ILeafControl.h"
 #include <optional>
 
