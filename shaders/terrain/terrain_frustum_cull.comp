@@ -63,6 +63,7 @@ layout(std140, binding = BINDING_TERRAIN_UBO) uniform TerrainUniforms {
 // Visible indices buffer: [count, index0, index1, ...]
 layout(std430, binding = BINDING_TERRAIN_VISIBLE_INDICES) buffer VisibleIndices {
     uint visibleCount;
+    uint workgroupsCompleted;  // Atomic counter to track completed workgroups
     uint indices[];
 };
 
@@ -76,6 +77,7 @@ layout(std430, binding = BINDING_TERRAIN_CULL_DISPATCH) writeonly buffer CullDis
 // Push constants
 layout(push_constant) uniform PushConstants {
     uint subdivisionWorkgroupSize;  // Subdivision workgroup size for dispatch calculation
+    uint totalWorkgroups;           // Total number of workgroups in this dispatch
 };
 
 // Shared memory for workgroup-level aggregation
@@ -183,27 +185,22 @@ void main() {
         indices[globalSlot] = myLeafIndex;
     }
 
-    // Last workgroup writes dispatch args (optimization: replaces separate prepare dispatch pass)
-    // We use a memory barrier and check if we're the last workgroup to finish
-    // For simplicity, we let every workgroup's thread 0 write the dispatch args
-    // The last write with the final visibleCount will be correct due to barrier order
+    // Synchronize and ensure all index writes are visible
     barrier();
     memoryBarrierBuffer();
 
-    // Thread 0 of workgroup 0 of the last dispatch writes final args
-    // Since we can't easily detect "last workgroup", we write speculatively
-    // and rely on the fact that all writes happen after atomicAdd is complete
-    // The prepare dispatch shader is eliminated - we write directly here
-    //
-    // Note: This creates a race where multiple workgroups write, but all write
-    // the same correct value since atomicAdd is complete before this point
+    // Use atomic counter to detect the last workgroup to finish
+    // Only the last workgroup writes dispatch args to avoid race condition
     if (localIndex == 0u) {
-        // Compute final dispatch size based on current visible count
-        // This may be slightly stale for other workgroups but the final
-        // workgroup to write will have the correct value
-        uint finalCount = visibleCount;
-        dispatchX = (finalCount + subdivisionWorkgroupSize - 1u) / subdivisionWorkgroupSize;
-        dispatchY = 1u;
-        dispatchZ = 1u;
+        // Increment completion counter and check if we're the last workgroup
+        uint completed = atomicAdd(workgroupsCompleted, 1u) + 1u;
+
+        if (completed == totalWorkgroups) {
+            // We're the last workgroup - safe to read final visibleCount
+            uint finalCount = visibleCount;
+            dispatchX = (finalCount + subdivisionWorkgroupSize - 1u) / subdivisionWorkgroupSize;
+            dispatchY = 1u;
+            dispatchZ = 1u;
+        }
     }
 }

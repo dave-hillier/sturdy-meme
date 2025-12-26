@@ -211,25 +211,53 @@ void main() {
         // This ensures nearby trees always have leaves even when total budget is exhausted
 
         uint tierIndex = leafType * NUM_DISTANCE_TIERS + tier;
-        uint tierSlot = atomicAdd(tierCounts[tierIndex], 1);
 
-        // Check if this tier's budget is exhausted
+        // Calculate tier capacity
         uint tierBudget = getTierBudgetLimit(leafType, tier);
         uint prevTierBudget = (tier > 0) ? getTierBudgetLimit(leafType, tier - 1) : 0;
         uint tierCapacity = tierBudget - prevTierBudget;
 
+        // Use compare-and-swap to safely reserve tier slot without race condition
+        uint tierSlot;
+        uint currentTierCount = tierCounts[tierIndex];
+        while (true) {
+            if (currentTierCount >= tierCapacity) {
+                // Tier budget exhausted - this leaf doesn't get rendered
+                tierSlot = tierCapacity; // Mark as failed
+                break;
+            }
+            uint prevCount = atomicCompSwap(tierCounts[tierIndex], currentTierCount, currentTierCount + 1);
+            if (prevCount == currentTierCount) {
+                tierSlot = currentTierCount;
+                break;
+            }
+            currentTierCount = prevCount;
+        }
+
         if (tierSlot >= tierCapacity) {
-            // Tier budget exhausted - this leaf doesn't get rendered
-            atomicAdd(tierCounts[tierIndex], -1);
             continue;
         }
 
-        // Atomically get output slot within this leaf type's region
-        uint typeLocalSlot = atomicAdd(drawCmds[leafType].instanceCount, 1);
+        // Use compare-and-swap to safely reserve output slot without race condition
+        uint typeLocalSlot;
+        uint currentCount = drawCmds[leafType].instanceCount;
+        while (true) {
+            if (currentCount >= maxLeavesPerType) {
+                // Budget exhausted
+                typeLocalSlot = maxLeavesPerType;
+                break;
+            }
+            uint prevCount = atomicCompSwap(drawCmds[leafType].instanceCount, currentCount, currentCount + 1);
+            if (prevCount == currentCount) {
+                typeLocalSlot = currentCount;
+                break;
+            }
+            currentCount = prevCount;
+        }
 
-        // Double-check total bounds (should be redundant with tier check, but safety)
         if (typeLocalSlot >= maxLeavesPerType) {
-            atomicAdd(drawCmds[leafType].instanceCount, -1);
+            // Undo tier reservation since we couldn't get an output slot
+            atomicAdd(tierCounts[tierIndex], -1);
             continue;
         }
 

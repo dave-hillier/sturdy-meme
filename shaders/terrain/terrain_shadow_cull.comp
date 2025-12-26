@@ -59,13 +59,14 @@ layout(push_constant) uniform PushConstants {
     float terrainSize;
     float heightScale;
     uint cascadeIndex;
-    uint padding;
+    uint totalWorkgroups;   // Total number of workgroups in this dispatch
 };
 
 // Shadow visible indices buffer: [count, index0, index1, ...]
 // This is a separate buffer from the main camera's visible indices
 layout(std430, binding = BINDING_TERRAIN_SHADOW_VISIBLE) buffer ShadowVisibleIndices {
     uint shadowVisibleCount;
+    uint workgroupsCompleted;  // Atomic counter to track completed workgroups
     uint shadowIndices[];
 };
 
@@ -185,31 +186,37 @@ void main() {
         shadowIndices[globalSlot] = myLeafIndex;
     }
 
-    // Write shadow draw indirect args
-    // Multiple workgroups will write, but all write the same correct value
-    // since atomicAdd is complete before this point
+    // Synchronize and ensure all index writes are visible
     barrier();
     memoryBarrierBuffer();
 
+    // Use atomic counter to detect the last workgroup to finish
+    // Only the last workgroup writes draw args to avoid race condition
     if (localIndex == 0u) {
-        uint finalCount = shadowVisibleCount;
+        // Increment completion counter and check if we're the last workgroup
+        uint completed = atomicAdd(workgroupsCompleted, 1u) + 1u;
 
-        if (MESHLET_INDEX_COUNT > 0u) {
-            // Indexed meshlet draw: one instance per visible triangle
-            indexCount = MESHLET_INDEX_COUNT;
-            instanceCount = finalCount;
-            firstIndex = 0u;
-            vertexOffset = 0;
-            firstInstance = 0u;
-        } else {
-            // Direct triangle draw: 3 vertices per visible triangle
-            // Note: For shadow, we're drawing all triangles directly from CBT
-            // The vertex shader will use shadowIndices to map to the correct CBT node
-            indexCount = finalCount * 3u;  // Actually vertexCount for non-indexed
-            instanceCount = 1u;
-            firstIndex = 0u;
-            vertexOffset = 0;
-            firstInstance = 0u;
+        if (completed == totalWorkgroups) {
+            // We're the last workgroup - safe to read final shadowVisibleCount
+            uint finalCount = shadowVisibleCount;
+
+            if (MESHLET_INDEX_COUNT > 0u) {
+                // Indexed meshlet draw: one instance per visible triangle
+                indexCount = MESHLET_INDEX_COUNT;
+                instanceCount = finalCount;
+                firstIndex = 0u;
+                vertexOffset = 0;
+                firstInstance = 0u;
+            } else {
+                // Direct triangle draw: 3 vertices per visible triangle
+                // Note: For shadow, we're drawing all triangles directly from CBT
+                // The vertex shader will use shadowIndices to map to the correct CBT node
+                indexCount = finalCount * 3u;  // Actually vertexCount for non-indexed
+                instanceCount = 1u;
+                firstIndex = 0u;
+                vertexOffset = 0;
+                firstInstance = 0u;
+            }
         }
     }
 }

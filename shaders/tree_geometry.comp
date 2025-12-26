@@ -149,9 +149,20 @@ void main() {
         }
     }
 
-    // Update indirect draw command (only one thread should do this)
+    // Ensure all vertex and index writes within this workgroup are complete
+    // before updating the indirect draw command
+    // Note: This only synchronizes within the workgroup. For multi-workgroup
+    // dispatches, the CPU should ensure proper synchronization via pipeline barriers.
+    barrier();
+    memoryBarrierBuffer();
+
+    // Update indirect draw command (only first thread does this)
+    // This is safe because:
+    // 1. All threads in this workgroup have completed their writes (barrier above)
+    // 2. The CPU must issue a memory barrier before using the draw command
     if (branchIdx == 0) {
-        // Calculate total indices
+        // Calculate total indices from branch parameters
+        // (This could be precomputed on CPU for better efficiency)
         uint totalIndices = 0;
         for (uint i = 0; i < branchCount; i++) {
             int sc = int(branches[i].params.z);

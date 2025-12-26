@@ -25,6 +25,10 @@ layout(binding = BINDING_BILATERAL_HDR_INPUT) uniform sampler2D hdrInput;
 // Output bilateral grid (RGBA16F: RG = weighted log lum + weight)
 layout(binding = BINDING_BILATERAL_GRID, rgba16f) uniform image3D bilateralGrid;
 
+// Atomic accumulation buffer (2 uints per grid cell: packed log lum sum, packed weight sum)
+// Uses fixed-point representation for atomic accumulation
+layout(binding = BINDING_BILATERAL_ATOMIC, r32ui) uniform uimage3D bilateralGridAtomic;
+
 layout(binding = BINDING_BILATERAL_UNIFORMS) uniform BilateralUniforms {
     vec2 inputSize;        // HDR input resolution
     vec2 invInputSize;     // 1.0 / inputSize
@@ -40,6 +44,21 @@ layout(binding = BINDING_BILATERAL_UNIFORMS) uniform BilateralUniforms {
 // Standard luminance weights
 float getLuminance(vec3 color) {
     return dot(color, vec3(0.2126, 0.7152, 0.0722));
+}
+
+// Fixed-point conversion for atomic accumulation
+// Scale factor chosen to preserve precision while avoiding overflow
+// With max ~4M pixels contributing to a cell, we need headroom
+const float FIXED_POINT_SCALE = 256.0;
+
+uint floatToFixed(float val) {
+    // Offset to handle negative log luminance values (minLogLum can be -8)
+    // Range [-16, 16] mapped to [0, 2^24] with 8 bits fractional
+    return uint(clamp((val + 16.0) * FIXED_POINT_SCALE, 0.0, 16777215.0));
+}
+
+float fixedToFloat(uint val) {
+    return float(val) / FIXED_POINT_SCALE - 16.0;
 }
 
 void main() {
@@ -91,14 +110,17 @@ void main() {
     ivec3 nearestCoord = ivec3(round(gridXY.x), round(gridXY.y), round(gridZ));
     nearestCoord = clamp(nearestCoord, ivec3(0), ivec3(gridSize - 1, int(gridDepth) - 1));
 
-    // Read-modify-write pattern (will cause race conditions - see note)
-    vec4 existing = imageLoad(bilateralGrid, nearestCoord);
-    vec4 contribution = vec4(logLum * weight, weight, 0.0, 0.0);
-    imageStore(bilateralGrid, nearestCoord, existing + contribution);
+    // Use atomic operations to safely accumulate contributions
+    // We store weighted log luminance and weight separately using fixed-point encoding
+    // The atomic buffer has 2 layers: layer 0 = weighted log lum, layer 1 = weight
+    uint fixedLogLum = floatToFixed(logLum * weight);
+    uint fixedWeight = floatToFixed(weight);
 
-    // NOTE: The read-modify-write above has race conditions.
-    // For production, use one of:
-    // 1. Atomic operations on a separate uint buffer, then unpack
-    // 2. Multiple smaller dispatch groups with barriers
-    // 3. Accept some noise in the grid (often acceptable for tone mapping)
+    // Atomic add for weighted log luminance (stored in R channel, z*2 layer)
+    ivec3 lumCoord = ivec3(nearestCoord.x, nearestCoord.y, nearestCoord.z * 2);
+    imageAtomicAdd(bilateralGridAtomic, lumCoord, fixedLogLum);
+
+    // Atomic add for weight (stored in z*2+1 layer)
+    ivec3 weightCoord = ivec3(nearestCoord.x, nearestCoord.y, nearestCoord.z * 2 + 1);
+    imageAtomicAdd(bilateralGridAtomic, weightCoord, fixedWeight);
 }

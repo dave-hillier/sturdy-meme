@@ -68,14 +68,19 @@ void main() {
     if (globalIdx == 0) {
         for (uint i = 0; i < NUM_LEAF_TYPES; i++) {
             drawCmds[i].indexCount = 6;       // Quad: 6 indices
+            drawCmds[i].instanceCount = 0;    // Reset count
             drawCmds[i].firstIndex = 0;
             drawCmds[i].vertexOffset = 0;
             // firstInstance is the base offset into the output buffer for this type
             // This makes gl_InstanceIndex point to the correct leaf in the partitioned buffer
             drawCmds[i].firstInstance = i * maxLeavesPerType;
-            // instanceCount is set via atomicAdd below
         }
     }
+
+    // Ensure initialization is complete before any thread proceeds
+    // This prevents threads from reading stale instanceCount values
+    barrier();
+    memoryBarrierBuffer();
 
     // Early exit if beyond total leaf count
     if (globalIdx >= totalLeafInstances) {
@@ -166,14 +171,25 @@ void main() {
     // Get leaf type for this tree (0=oak, 1=ash, 2=aspen, 3=pine)
     uint leafType = min(tree.leafTypeIndex, NUM_LEAF_TYPES - 1);
 
-    // Atomically get output slot within this leaf type's region
-    uint typeLocalSlot = atomicAdd(drawCmds[leafType].instanceCount, 1);
-
-    // Check bounds - don't overflow into next type's region
-    if (typeLocalSlot >= maxLeavesPerType) {
-        // Undo the atomic add (best effort - may leave gaps but prevents overflow)
-        atomicAdd(drawCmds[leafType].instanceCount, -1);
-        return;
+    // Atomically reserve output slot within this leaf type's region
+    // Use compare-and-swap loop to safely enforce bounds without race condition
+    uint typeLocalSlot;
+    uint currentCount = drawCmds[leafType].instanceCount;
+    while (true) {
+        // Check if we have capacity before attempting to reserve
+        if (currentCount >= maxLeavesPerType) {
+            // Budget exhausted - this leaf doesn't get rendered
+            return;
+        }
+        // Try to atomically increment if count hasn't changed
+        uint prevCount = atomicCompSwap(drawCmds[leafType].instanceCount, currentCount, currentCount + 1);
+        if (prevCount == currentCount) {
+            // Successfully reserved slot
+            typeLocalSlot = currentCount;
+            break;
+        }
+        // Another thread modified the count, retry with new value
+        currentCount = prevCount;
     }
 
     // Calculate global output slot: type's base offset + local slot

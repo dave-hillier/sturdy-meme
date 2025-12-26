@@ -256,6 +256,7 @@
 #define BINDING_BILATERAL_HDR_INPUT        0   // HDR input image
 #define BINDING_BILATERAL_GRID             1   // Bilateral grid output/input
 #define BINDING_BILATERAL_UNIFORMS         2   // Build uniforms
+#define BINDING_BILATERAL_ATOMIC           3   // Atomic counters for grid build
 #define BINDING_BILATERAL_GRID_SRC         0   // Source grid (blur input)
 #define BINDING_BILATERAL_GRID_DST         1   // Dest grid (blur output)
 #define BINDING_BILATERAL_BLUR_UNIFORMS    2   // Blur uniforms
@@ -653,6 +654,7 @@ constexpr uint32_t PP_BILATERAL_GRID      = BINDING_PP_BILATERAL_GRID;
 constexpr uint32_t BILATERAL_HDR_INPUT    = BINDING_BILATERAL_HDR_INPUT;
 constexpr uint32_t BILATERAL_GRID         = BINDING_BILATERAL_GRID;
 constexpr uint32_t BILATERAL_UNIFORMS     = BINDING_BILATERAL_UNIFORMS;
+constexpr uint32_t BILATERAL_ATOMIC       = BINDING_BILATERAL_ATOMIC;
 constexpr uint32_t BILATERAL_GRID_SRC     = BINDING_BILATERAL_GRID_SRC;
 constexpr uint32_t BILATERAL_GRID_DST     = BINDING_BILATERAL_GRID_DST;
 constexpr uint32_t BILATERAL_BLUR_UNIFORMS = BINDING_BILATERAL_BLUR_UNIFORMS;
