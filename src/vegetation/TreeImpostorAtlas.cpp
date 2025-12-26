@@ -613,8 +613,8 @@ bool TreeImpostorAtlas::createCapturePipeline() {
 
     // Load shaders
     std::string shaderPath = resourcePath_ + "/shaders/";
-    auto vertModule = ShaderLoader::loadShaderModule(device_, shaderPath + "tree_impostor_capture.vert.spv");
-    auto fragModule = ShaderLoader::loadShaderModule(device_, shaderPath + "tree_impostor_capture.frag.spv");
+    auto vertModule = ShaderLoader::loadShaderModuleManaged(device_, shaderPath + "tree_impostor_capture.vert.spv");
+    auto fragModule = ShaderLoader::loadShaderModuleManaged(device_, shaderPath + "tree_impostor_capture.frag.spv");
 
     if (!vertModule || !fragModule) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to load capture shaders");
@@ -624,11 +624,11 @@ bool TreeImpostorAtlas::createCapturePipeline() {
     std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages{};
     shaderStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     shaderStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-    shaderStages[0].module = *vertModule;
+    shaderStages[0].module = vertModule->get();
     shaderStages[0].pName = "main";
     shaderStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     shaderStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    shaderStages[1].module = *fragModule;
+    shaderStages[1].module = fragModule->get();
     shaderStages[1].pName = "main";
 
     // Vertex input (position, normal, texcoord)
@@ -739,14 +739,10 @@ bool TreeImpostorAtlas::createCapturePipeline() {
 
     VkPipeline pipeline;
     if (vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline) != VK_SUCCESS) {
-        vkDestroyShaderModule(device_, *vertModule, nullptr);
-        vkDestroyShaderModule(device_, *fragModule, nullptr);
-        return false;
+        return false;  // Shader modules auto-destroyed
     }
     branchCapturePipeline_ = ManagedPipeline(makeUniquePipeline(device_, pipeline));
-
-    vkDestroyShaderModule(device_, *vertModule, nullptr);
-    vkDestroyShaderModule(device_, *fragModule, nullptr);
+    // Shader modules auto-destroyed when function returns
 
     return true;
 }
@@ -805,8 +801,8 @@ bool TreeImpostorAtlas::createLeafCapturePipeline() {
 
     // Load shaders
     std::string shaderPath = resourcePath_ + "/shaders/";
-    auto vertModule = ShaderLoader::loadShaderModule(device_, shaderPath + "tree_impostor_capture_leaf.vert.spv");
-    auto fragModule = ShaderLoader::loadShaderModule(device_, shaderPath + "tree_impostor_capture.frag.spv");
+    auto vertModule = ShaderLoader::loadShaderModuleManaged(device_, shaderPath + "tree_impostor_capture_leaf.vert.spv");
+    auto fragModule = ShaderLoader::loadShaderModuleManaged(device_, shaderPath + "tree_impostor_capture.frag.spv");
 
     if (!vertModule || !fragModule) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to load leaf capture shaders");
@@ -816,11 +812,11 @@ bool TreeImpostorAtlas::createLeafCapturePipeline() {
     std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages{};
     shaderStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     shaderStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-    shaderStages[0].module = *vertModule;
+    shaderStages[0].module = vertModule->get();
     shaderStages[0].pName = "main";
     shaderStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     shaderStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    shaderStages[1].module = *fragModule;
+    shaderStages[1].module = fragModule->get();
     shaderStages[1].pName = "main";
 
     // Vertex input (same as branch capture - position, normal, texcoord)
@@ -903,14 +899,10 @@ bool TreeImpostorAtlas::createLeafCapturePipeline() {
 
     VkPipeline pipeline;
     if (vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline) != VK_SUCCESS) {
-        vkDestroyShaderModule(device_, *vertModule, nullptr);
-        vkDestroyShaderModule(device_, *fragModule, nullptr);
-        return false;
+        return false;  // Shader modules auto-destroyed
     }
     leafCapturePipeline_ = ManagedPipeline(makeUniquePipeline(device_, pipeline));
-
-    vkDestroyShaderModule(device_, *vertModule, nullptr);
-    vkDestroyShaderModule(device_, *fragModule, nullptr);
+    // Shader modules auto-destroyed when function returns
 
     SDL_Log("TreeImpostorAtlas: Created leaf capture pipeline");
     return true;
