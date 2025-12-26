@@ -175,19 +175,18 @@ private:
     // Displacement source data for current frame
     std::vector<DisplacementSource> currentDisplacementSources;
 
-    // Double-buffered storage buffers: A/B sets that alternate each frame
-    // Set A and Set B alternate: compute writes to one while graphics reads from other
-    // Note: We don't need per-frame copies since the set alternation provides isolation
-    static constexpr uint32_t BUFFER_SET_COUNT = 2;
+    // Triple-buffered storage buffers: one per frame in flight
+    // Each frame gets its own buffer set to avoid GPU read/CPU write conflicts.
+    // Buffer set count MUST match frames in flight (3) to prevent race conditions.
     BufferUtils::DoubleBufferedBufferSet instanceBuffers;      // [setIndex]
     BufferUtils::DoubleBufferedBufferSet indirectBuffers;
 
     // Uniform buffers for culling (per frame, not double-buffered)
     BufferUtils::PerFrameBufferSet uniformBuffers;
 
-    // Descriptor sets: [2] for A/B buffer sets, one per set
+    // Descriptor sets: one per buffer set (matches frames in flight)
     // Per-frame descriptor sets for uniform buffers that DO need per-frame copies
-    VkDescriptorSet shadowDescriptorSetsDB[BUFFER_SET_COUNT];
+    std::vector<VkDescriptorSet> shadowDescriptorSetsDB;
 
     // Terrain heightmap for grass placement (stored for compute descriptor updates)
     VkImageView terrainHeightMapView = VK_NULL_HANDLE;

@@ -14,10 +14,12 @@ std::unique_ptr<TreeLeafCulling> TreeLeafCulling::create(const InitInfo& info) {
 }
 
 TreeLeafCulling::~TreeLeafCulling() {
-    for (uint32_t i = 0; i < BUFFER_SET_COUNT; ++i) {
+    for (size_t i = 0; i < cullOutputBuffers_.size(); ++i) {
         if (cullOutputBuffers_[i] != VK_NULL_HANDLE) {
             vmaDestroyBuffer(allocator_, cullOutputBuffers_[i], cullOutputAllocations_[i]);
         }
+    }
+    for (size_t i = 0; i < cullIndirectBuffers_.size(); ++i) {
         if (cullIndirectBuffers_[i] != VK_NULL_HANDLE) {
             vmaDestroyBuffer(allocator_, cullIndirectBuffers_[i], cullIndirectAllocations_[i]);
         }
@@ -156,7 +158,11 @@ bool TreeLeafCulling::createLeafCullBuffers(uint32_t maxLeafInstances, uint32_t 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
-    for (uint32_t i = 0; i < BUFFER_SET_COUNT; ++i) {
+    // Resize vectors to match frames in flight for proper triple buffering
+    cullOutputBuffers_.resize(maxFramesInFlight_, VK_NULL_HANDLE);
+    cullOutputAllocations_.resize(maxFramesInFlight_, VK_NULL_HANDLE);
+
+    for (uint32_t i = 0; i < maxFramesInFlight_; ++i) {
         bufferInfo.size = cullOutputBufferSize_;
         if (vmaCreateBuffer(allocator_, &bufferInfo, &allocInfo,
                             &cullOutputBuffers_[i], &cullOutputAllocations_[i], nullptr) != VK_SUCCESS) {
@@ -172,7 +178,11 @@ bool TreeLeafCulling::createLeafCullBuffers(uint32_t maxLeafInstances, uint32_t 
                          VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     indirectInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    for (uint32_t i = 0; i < BUFFER_SET_COUNT; ++i) {
+    // Resize vectors to match frames in flight for proper triple buffering
+    cullIndirectBuffers_.resize(maxFramesInFlight_, VK_NULL_HANDLE);
+    cullIndirectAllocations_.resize(maxFramesInFlight_, VK_NULL_HANDLE);
+
+    for (uint32_t i = 0; i < maxFramesInFlight_; ++i) {
         if (vmaCreateBuffer(allocator_, &indirectInfo, &allocInfo,
                             &cullIndirectBuffers_[i], &cullIndirectAllocations_[i], nullptr) != VK_SUCCESS) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to create cull indirect buffer %u", i);
@@ -224,7 +234,7 @@ bool TreeLeafCulling::createLeafCullBuffers(uint32_t maxLeafInstances, uint32_t 
 
     SDL_Log("TreeLeafCulling: Created leaf culling buffers (max %u instances, %u trees, %.2f MB output)",
             maxLeafInstances, numTrees,
-            static_cast<float>(cullOutputBufferSize_ * BUFFER_SET_COUNT) / (1024.0f * 1024.0f));
+            static_cast<float>(cullOutputBufferSize_ * maxFramesInFlight_) / (1024.0f * 1024.0f));
     return true;
 }
 
@@ -661,7 +671,7 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
     if (numTrees == 0 || totalLeafInstances == 0) return;
 
     // Lazy initialization of cull buffers
-    if (cullOutputBuffers_[0] == VK_NULL_HANDLE) {
+    if (cullOutputBuffers_.empty() || cullOutputBuffers_[0] == VK_NULL_HANDLE) {
         if (!createLeafCullBuffers(totalLeafInstances, numTrees)) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to create cull buffers");
             return;

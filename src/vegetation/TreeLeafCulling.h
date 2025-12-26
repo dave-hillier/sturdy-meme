@@ -156,13 +156,17 @@ public:
     const CullingParams& getParams() const { return params_; }
 
     // Get output buffers for rendering (current buffer set)
-    VkBuffer getOutputBuffer() const { return cullOutputBuffers_[currentBufferSet_]; }
-    VkBuffer getIndirectBuffer() const { return cullIndirectBuffers_[currentBufferSet_]; }
+    VkBuffer getOutputBuffer() const {
+        return cullOutputBuffers_.empty() ? VK_NULL_HANDLE : cullOutputBuffers_[currentBufferSet_];
+    }
+    VkBuffer getIndirectBuffer() const {
+        return cullIndirectBuffers_.empty() ? VK_NULL_HANDLE : cullIndirectBuffers_[currentBufferSet_];
+    }
     VkBuffer getTreeRenderDataBuffer() const { return treeRenderDataBuffer_; }
     uint32_t getMaxLeavesPerType() const { return maxLeavesPerType_; }
 
     // Swap buffer sets (call after rendering completes)
-    void swapBufferSets() { currentBufferSet_ = (currentBufferSet_ + 1) % BUFFER_SET_COUNT; }
+    void swapBufferSets() { currentBufferSet_ = (currentBufferSet_ + 1) % maxFramesInFlight_; }
 
     VkDevice getDevice() const { return device_; }
 
@@ -199,16 +203,16 @@ private:
     ManagedDescriptorSetLayout cullDescriptorSetLayout_;
     std::vector<VkDescriptorSet> cullDescriptorSets_;
 
-    // Double-buffered output buffers
-    static constexpr uint32_t BUFFER_SET_COUNT = 2;
+    // Triple-buffered output buffers (matches frames in flight)
+    // Buffer set count MUST match frames in flight to avoid compute/graphics race conditions.
     uint32_t currentBufferSet_ = 0;
 
-    std::array<VkBuffer, BUFFER_SET_COUNT> cullOutputBuffers_{};
-    std::array<VmaAllocation, BUFFER_SET_COUNT> cullOutputAllocations_{};
+    std::vector<VkBuffer> cullOutputBuffers_;
+    std::vector<VmaAllocation> cullOutputAllocations_;
     VkDeviceSize cullOutputBufferSize_ = 0;
 
-    std::array<VkBuffer, BUFFER_SET_COUNT> cullIndirectBuffers_{};
-    std::array<VmaAllocation, BUFFER_SET_COUNT> cullIndirectAllocations_{};
+    std::vector<VkBuffer> cullIndirectBuffers_;
+    std::vector<VmaAllocation> cullIndirectAllocations_;
 
     BufferUtils::PerFrameBufferSet cullUniformBuffers_;
 

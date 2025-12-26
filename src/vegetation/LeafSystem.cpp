@@ -51,7 +51,8 @@ bool LeafSystem::initInternal(const InitInfo& info) {
     particleSystem = RAIIAdapter<ParticleSystem>::create(
         [&](auto& ps) {
             initializingPS = &ps;
-            return ps.init(info, hooks, BUFFER_SET_COUNT);
+            // Use framesInFlight for buffer set count to ensure proper triple buffering
+            return ps.init(info, hooks, info.framesInFlight);
         },
         [](auto& ps) { ps.destroy(ps.getDevice(), ps.getAllocator()); }
     );
@@ -76,9 +77,12 @@ bool LeafSystem::createBuffers() {
     VkDeviceSize indirectBufferSize = sizeof(VkDrawIndirectCommand);
     VkDeviceSize uniformBufferSize = sizeof(LeafUniforms);
 
+    // Use framesInFlight for buffer set count to ensure proper triple buffering
+    uint32_t bufferSetCount = getFramesInFlight();
+
     BufferUtils::DoubleBufferedBufferBuilder particleBuilder;
     if (!particleBuilder.setAllocator(getAllocator())
-             .setSetCount(BUFFER_SET_COUNT)
+             .setSetCount(bufferSetCount)
              .setSize(particleBufferSize)
              .setUsage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)
              .build(particleBuffers)) {
@@ -88,7 +92,7 @@ bool LeafSystem::createBuffers() {
 
     BufferUtils::DoubleBufferedBufferBuilder indirectBuilder;
     if (!indirectBuilder.setAllocator(getAllocator())
-             .setSetCount(BUFFER_SET_COUNT)
+             .setSetCount(bufferSetCount)
              .setSize(indirectBufferSize)
              .setUsage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)
              .build(indirectBuffers)) {
@@ -412,10 +416,12 @@ void LeafSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>&
     // Store dynamic renderer UBO reference for per-frame binding with dynamic offsets
     this->dynamicRendererUBO_ = dynamicRendererUBO;
 
-    // Update compute and graphics descriptor sets for both buffer sets
+    // Update compute and graphics descriptor sets for all buffer sets
     // Note: tile info buffer (binding 9) is updated per-frame in recordResetAndCompute
-    for (uint32_t set = 0; set < BUFFER_SET_COUNT; set++) {
-        uint32_t inputSet = (set == 0) ? 1 : 0;  // Read from opposite buffer
+    uint32_t bufferSetCount = (*particleSystem)->getBufferSetCount();
+    for (uint32_t set = 0; set < bufferSetCount; set++) {
+        // For triple buffering, input is the previous buffer set (wraps around)
+        uint32_t inputSet = (set == 0) ? (bufferSetCount - 1) : (set - 1);
         uint32_t outputSet = set;
 
         // Compute descriptor set - use non-fluent pattern to avoid copy semantics bug

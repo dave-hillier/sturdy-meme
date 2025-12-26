@@ -10,6 +10,14 @@
 
 namespace BufferUtils {
 
+// IMPORTANT: When using multiple buffer sets for compute/render ping-pong patterns,
+// the buffer set count MUST match the frames-in-flight count. Using fewer buffer sets
+// (e.g., 2 sets with 3 frames in flight) causes frame N and frame N+2 to share buffers,
+// leading to race conditions where GPU may still be reading from a buffer while CPU writes.
+//
+// Use TripleBufferedBufferSet for systems that need per-frame isolation with 3 frames in flight.
+// The buffer set count should always equal MAX_FRAMES_IN_FLIGHT from Renderer.h.
+
 // Single buffer for one-shot allocations (e.g., staging buffers, one-time uniform buffers)
 struct SingleBuffer {
     VkBuffer buffer = VK_NULL_HANDLE;

@@ -62,7 +62,8 @@ bool GrassSystem::initInternal(const InitInfo& info) {
     particleSystem = RAIIAdapter<ParticleSystem>::create(
         [&](auto& ps) {
             initializingPS = &ps;  // Store pointer for hooks to use
-            return ps.init(info, hooks, BUFFER_SET_COUNT);
+            // Use framesInFlight for buffer set count to ensure proper triple buffering
+            return ps.init(info, hooks, info.framesInFlight);
         },
         [](auto& ps) { ps.destroy(ps.getDevice(), ps.getAllocator()); }
     );
@@ -113,9 +114,12 @@ bool GrassSystem::createBuffers() {
     VkDeviceSize indirectBufferSize = sizeof(VkDrawIndirectCommand);
     VkDeviceSize uniformBufferSize = sizeof(GrassUniforms);
 
+    // Use framesInFlight for buffer set count to ensure proper triple buffering
+    uint32_t bufferSetCount = getFramesInFlight();
+
     BufferUtils::DoubleBufferedBufferBuilder instanceBuilder;
     if (!instanceBuilder.setAllocator(getAllocator())
-             .setSetCount(BUFFER_SET_COUNT)
+             .setSetCount(bufferSetCount)
              .setSize(instanceBufferSize)
              .setUsage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)
              .build(instanceBuffers)) {
@@ -125,7 +129,7 @@ bool GrassSystem::createBuffers() {
 
     BufferUtils::DoubleBufferedBufferBuilder indirectBuilder;
     if (!indirectBuilder.setAllocator(getAllocator())
-             .setSetCount(BUFFER_SET_COUNT)
+             .setSetCount(bufferSetCount)
              .setSize(indirectBufferSize)
              .setUsage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)
              .build(indirectBuffers)) {
@@ -560,8 +564,11 @@ bool GrassSystem::createDescriptorSets() {
     SDL_Log("GrassSystem::createDescriptorSets - pool=%p, shadowLayout=%p", (void*)getDescriptorPool(), (void*)shadowDescriptorSetLayout_.get());
     SDL_Log("GrassSystem::createDescriptorSets - about to allocate shadow sets");
 
-    // Allocate shadow descriptor sets for both buffer sets using managed pool
-    for (uint32_t set = 0; set < BUFFER_SET_COUNT; set++) {
+    // Allocate shadow descriptor sets for all buffer sets (matches frames in flight)
+    uint32_t bufferSetCount = getFramesInFlight();
+    shadowDescriptorSetsDB.resize(bufferSetCount);
+
+    for (uint32_t set = 0; set < bufferSetCount; set++) {
         SDL_Log("GrassSystem::createDescriptorSets - allocating shadow set %u", set);
         shadowDescriptorSetsDB[set] = getDescriptorPool()->allocateSingle(shadowDescriptorSetLayout_.get());
         SDL_Log("GrassSystem::createDescriptorSets - allocated shadow set %u", set);
@@ -578,7 +585,8 @@ void GrassSystem::writeComputeDescriptorSets() {
     // Write compute descriptor sets with instance and indirect buffers
     // Called after ParticleSystem is fully initialized and descriptor sets are allocated
     // Note: Tile cache resources are written later in updateDescriptorSets when available
-    for (uint32_t set = 0; set < BUFFER_SET_COUNT; set++) {
+    uint32_t bufferSetCount = (*particleSystem)->getBufferSetCount();
+    for (uint32_t set = 0; set < bufferSetCount; set++) {
         // Use non-fluent pattern to avoid copy semantics bug with DescriptorManager::SetWriter
         DescriptorManager::SetWriter writer(getDevice(), (*particleSystem)->getComputeDescriptorSet(set));
         writer.writeBuffer(0, instanceBuffers.buffers[set], 0, sizeof(GrassInstance) * MAX_INSTANCES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
@@ -624,7 +632,8 @@ void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>
     // Update compute descriptor sets with terrain heightmap, displacement, and tile cache
     // Note: Bindings 0, 1, 2 are already written in writeComputeDescriptorSets() - only write new bindings here
     // Note: tile info buffer (binding 6) is updated per-frame in recordResetAndCompute
-    for (uint32_t set = 0; set < BUFFER_SET_COUNT; set++) {
+    uint32_t bufferSetCount = (*particleSystem)->getBufferSetCount();
+    for (uint32_t set = 0; set < bufferSetCount; set++) {
         // Use non-fluent pattern to avoid copy semantics bug with DescriptorManager::SetWriter
         DescriptorManager::SetWriter computeWriter(dev, (*particleSystem)->getComputeDescriptorSet(set));
         computeWriter.writeImage(3, terrainHeightMapView, terrainHeightMapSampler);
@@ -642,8 +651,8 @@ void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>
         computeWriter.update();
     }
 
-    // Update graphics and shadow descriptor sets for both buffer sets (A and B)
-    for (uint32_t set = 0; set < BUFFER_SET_COUNT; set++) {
+    // Update graphics and shadow descriptor sets for all buffer sets
+    for (uint32_t set = 0; set < bufferSetCount; set++) {
         // Graphics descriptor set - use non-fluent pattern
         DescriptorManager::SetWriter graphicsWriter(dev, (*particleSystem)->getGraphicsDescriptorSet(set));
         // Use dynamic UBO if available (avoids per-frame descriptor updates)
@@ -896,7 +905,8 @@ void GrassSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex, flo
 
 void GrassSystem::setSnowMask(VkDevice device, VkImageView snowMaskView, VkSampler snowMaskSampler) {
     // Update graphics descriptor sets with snow mask texture
-    for (uint32_t setIndex = 0; setIndex < BUFFER_SET_COUNT; setIndex++) {
+    uint32_t bufferSetCount = (*particleSystem)->getBufferSetCount();
+    for (uint32_t setIndex = 0; setIndex < bufferSetCount; setIndex++) {
         DescriptorManager::SetWriter(device, (*particleSystem)->getGraphicsDescriptorSet(setIndex))
             .writeImage(5, snowMaskView, snowMaskSampler)
             .update();

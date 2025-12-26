@@ -53,7 +53,8 @@ bool WeatherSystem::initInternal(const InitInfo& info) {
     particleSystem = RAIIAdapter<ParticleSystem>::create(
         [&](auto& p) {
             initializingPS = &p;
-            return p.init(info, hooks, BUFFER_SET_COUNT);
+            // Use framesInFlight for buffer set count to ensure proper triple buffering
+            return p.init(info, hooks, info.framesInFlight);
         },
         [](auto& p) { p.destroy(p.getDevice(), p.getAllocator()); }
     );
@@ -76,9 +77,12 @@ bool WeatherSystem::createBuffers() {
     VkDeviceSize indirectBufferSize = sizeof(VkDrawIndirectCommand);
     VkDeviceSize uniformBufferSize = sizeof(WeatherUniforms);
 
+    // Use framesInFlight for buffer set count to ensure proper triple buffering
+    uint32_t bufferSetCount = getFramesInFlight();
+
     BufferUtils::DoubleBufferedBufferBuilder particleBuilder;
     if (!particleBuilder.setAllocator(getAllocator())
-             .setSetCount(BUFFER_SET_COUNT)
+             .setSetCount(bufferSetCount)
              .setSize(particleBufferSize)
              .setUsage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)
              .build(particleBuffers)) {
@@ -88,7 +92,7 @@ bool WeatherSystem::createBuffers() {
 
     BufferUtils::DoubleBufferedBufferBuilder indirectBuilder;
     if (!indirectBuilder.setAllocator(getAllocator())
-             .setSetCount(BUFFER_SET_COUNT)
+             .setSetCount(bufferSetCount)
              .setSize(indirectBufferSize)
              .setUsage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)
              .build(indirectBuffers)) {
@@ -267,9 +271,11 @@ void WeatherSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffe
     // Store dynamic renderer UBO reference for per-frame binding with dynamic offsets
     dynamicRendererUBO_ = dynamicRendererUBO;
 
-    // Update compute and graphics descriptor sets for both buffer sets
-    for (uint32_t set = 0; set < BUFFER_SET_COUNT; set++) {
-        uint32_t inputSet = (set == 0) ? 1 : 0;  // Read from opposite buffer
+    // Update compute and graphics descriptor sets for all buffer sets
+    uint32_t bufferSetCount = (*particleSystem)->getBufferSetCount();
+    for (uint32_t set = 0; set < bufferSetCount; set++) {
+        // For triple buffering, input is the previous buffer set (wraps around)
+        uint32_t inputSet = (set == 0) ? (bufferSetCount - 1) : (set - 1);
         uint32_t outputSet = set;
 
         // Compute descriptor set
@@ -449,7 +455,8 @@ void WeatherSystem::setFroxelVolume(VkImageView volumeView, VkSampler volumeSamp
 
     // Update graphics descriptor sets with froxel volume
     if (froxelVolumeView != VK_NULL_HANDLE && froxelVolumeSampler != VK_NULL_HANDLE) {
-        for (uint32_t set = 0; set < BUFFER_SET_COUNT; set++) {
+        uint32_t bufferSetCount = (*particleSystem)->getBufferSetCount();
+        for (uint32_t set = 0; set < bufferSetCount; set++) {
             DescriptorManager::SetWriter(getDevice(), (*particleSystem)->getGraphicsDescriptorSet(set))
                 .writeImage(3, froxelVolumeView, froxelVolumeSampler)
                 .update();

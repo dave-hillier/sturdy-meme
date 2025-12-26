@@ -145,8 +145,9 @@ private:
     std::string storedShaderPath;
     uint32_t storedFramesInFlight = 0;
 
-    // Double-buffered storage buffers
-    static constexpr uint32_t BUFFER_SET_COUNT = 2;
+    // Triple-buffered storage buffers: one per frame in flight
+    // Each frame gets its own buffer set to avoid GPU read/CPU write conflicts.
+    // Buffer set count MUST match frames in flight (3) to prevent race conditions.
     BufferUtils::DoubleBufferedBufferSet particleBuffers;
     BufferUtils::DoubleBufferedBufferSet indirectBuffers;
 
