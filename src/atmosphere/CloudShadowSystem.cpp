@@ -56,21 +56,15 @@ void CloudShadowSystem::cleanup() {
     if (!device) return;  // Not initialized
 
     // RAII wrappers handle cleanup automatically
-    computePipeline = ManagedPipeline();
-    pipelineLayout = ManagedPipelineLayout();
-    descriptorSetLayout = ManagedDescriptorSetLayout();
+    computePipeline.reset();
+    pipelineLayout.reset();
+    descriptorSetLayout.reset();
 
     BufferUtils::destroyBuffers(allocator, uniformBuffers);
 
     shadowMapSampler.reset();
-    if (shadowMapView != VK_NULL_HANDLE) {
-        vkDestroyImageView(device, shadowMapView, nullptr);
-        shadowMapView = VK_NULL_HANDLE;
-    }
-    if (shadowMap != VK_NULL_HANDLE) {
-        vmaDestroyImage(allocator, shadowMap, shadowMapAllocation);
-        shadowMap = VK_NULL_HANDLE;
-    }
+    shadowMapView_.reset();
+    shadowMap_.reset();
 }
 
 bool CloudShadowSystem::createShadowMap() {
@@ -92,15 +86,14 @@ bool CloudShadowSystem::createShadowMap() {
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
-    if (vmaCreateImage(allocator, &imageInfo, &allocInfo,
-                       &shadowMap, &shadowMapAllocation, nullptr) != VK_SUCCESS) {
+    if (!ManagedImage::create(allocator, imageInfo, allocInfo, shadowMap_)) {
         SDL_Log("Failed to create cloud shadow map");
         return false;
     }
 
     VkImageViewCreateInfo viewInfo{};
     viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.image = shadowMap;
+    viewInfo.image = shadowMap_.get();
     viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
     viewInfo.format = VK_FORMAT_R16_SFLOAT;
     viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -109,7 +102,7 @@ bool CloudShadowSystem::createShadowMap() {
     viewInfo.subresourceRange.baseArrayLayer = 0;
     viewInfo.subresourceRange.layerCount = 1;
 
-    if (vkCreateImageView(device, &viewInfo, nullptr, &shadowMapView) != VK_SUCCESS) {
+    if (!ManagedImageView::create(device, viewInfo, shadowMapView_)) {
         SDL_Log("Failed to create cloud shadow map view");
         return false;
     }
@@ -172,7 +165,7 @@ bool CloudShadowSystem::createDescriptorSets() {
     // Update descriptor sets
     for (uint32_t i = 0; i < framesInFlight; i++) {
         DescriptorManager::SetWriter(device, descriptorSets[i])
-            .writeStorageImage(0, shadowMapView)
+            .writeStorageImage(0, shadowMapView_.get())
             .writeImage(1, cloudMapLUTView, cloudMapLUTSampler)
             .writeBuffer(2, uniformBuffers.buffers[i], 0, sizeof(CloudShadowUniforms))
             .update();
@@ -303,7 +296,7 @@ void CloudShadowSystem::recordUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
     memcpy(uniformBuffers.mappedPointers[frameIndex], &uniforms, sizeof(uniforms));
 
     // Transition shadow map to general layout for compute write
-    Barriers::transitionImage(cmd, shadowMap,
+    Barriers::transitionImage(cmd, shadowMap_.get(),
         VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
         VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_SHADER_WRITE_BIT);
@@ -326,6 +319,6 @@ void CloudShadowSystem::recordUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
     vkCmdDispatch(cmd, groupCountX, groupCountY, 1);
 
     // Transition shadow map to shader read for fragment shaders
-    Barriers::imageComputeToSampling(cmd, shadowMap,
+    Barriers::imageComputeToSampling(cmd, shadowMap_.get(),
         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
 }

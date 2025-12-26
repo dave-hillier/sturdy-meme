@@ -74,26 +74,14 @@ void FroxelSystem::cleanup() {
 }
 
 void FroxelSystem::destroyVolumeResources() {
-    // Destroy both double-buffered scattering volumes
+    // RAII wrappers handle cleanup automatically
     for (int i = 0; i < 2; i++) {
-        if (scatteringVolumeViews[i] != VK_NULL_HANDLE) {
-            vkDestroyImageView(device, scatteringVolumeViews[i], nullptr);
-            scatteringVolumeViews[i] = VK_NULL_HANDLE;
-        }
-        if (scatteringVolumes[i] != VK_NULL_HANDLE) {
-            vmaDestroyImage(allocator, scatteringVolumes[i], scatteringAllocations[i]);
-            scatteringVolumes[i] = VK_NULL_HANDLE;
-        }
+        scatteringVolumeViews_[i].reset();
+        scatteringVolumes_[i].reset();
     }
 
-    if (integratedVolumeView != VK_NULL_HANDLE) {
-        vkDestroyImageView(device, integratedVolumeView, nullptr);
-        integratedVolumeView = VK_NULL_HANDLE;
-    }
-    if (integratedVolume != VK_NULL_HANDLE) {
-        vmaDestroyImage(allocator, integratedVolume, integratedAllocation);
-        integratedVolume = VK_NULL_HANDLE;
-    }
+    integratedVolumeView_.reset();
+    integratedVolume_.reset();
 }
 
 void FroxelSystem::resize(VkDevice device, VmaAllocator allocator, VkExtent2D newExtent) {
@@ -132,14 +120,13 @@ bool FroxelSystem::createScatteringVolume() {
 
     // Create both buffers for ping-pong
     for (int i = 0; i < 2; i++) {
-        if (vmaCreateImage(allocator, &imageInfo, &allocInfo,
-                           &scatteringVolumes[i], &scatteringAllocations[i], nullptr) != VK_SUCCESS) {
+        if (!ManagedImage::create(allocator, imageInfo, allocInfo, scatteringVolumes_[i])) {
             SDL_Log("Failed to create scattering volume %d", i);
             return false;
         }
 
-        viewInfo.image = scatteringVolumes[i];
-        if (vkCreateImageView(device, &viewInfo, nullptr, &scatteringVolumeViews[i]) != VK_SUCCESS) {
+        viewInfo.image = scatteringVolumes_[i].get();
+        if (!ManagedImageView::create(device, viewInfo, scatteringVolumeViews_[i])) {
             SDL_Log("Failed to create scattering volume view %d", i);
             return false;
         }
@@ -166,15 +153,14 @@ bool FroxelSystem::createIntegratedVolume() {
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
-    if (vmaCreateImage(allocator, &imageInfo, &allocInfo,
-                       &integratedVolume, &integratedAllocation, nullptr) != VK_SUCCESS) {
+    if (!ManagedImage::create(allocator, imageInfo, allocInfo, integratedVolume_)) {
         SDL_Log("Failed to create integrated volume");
         return false;
     }
 
     VkImageViewCreateInfo viewInfo{};
     viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.image = integratedVolume;
+    viewInfo.image = integratedVolume_.get();
     viewInfo.viewType = VK_IMAGE_VIEW_TYPE_3D;
     viewInfo.format = VK_FORMAT_R16G16B16A16_SFLOAT;
     viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -183,7 +169,7 @@ bool FroxelSystem::createIntegratedVolume() {
     viewInfo.subresourceRange.baseArrayLayer = 0;
     viewInfo.subresourceRange.layerCount = 1;
 
-    if (vkCreateImageView(device, &viewInfo, nullptr, &integratedVolumeView) != VK_SUCCESS) {
+    if (!ManagedImageView::create(device, viewInfo, integratedVolumeView_)) {
         SDL_Log("Failed to create integrated volume view");
         return false;
     }
@@ -267,12 +253,12 @@ bool FroxelSystem::createDescriptorSets() {
 
     for (uint32_t i = 0; i < framesInFlight; i++) {
         DescriptorManager::SetWriter(device, froxelDescriptorSets[i])
-            .writeStorageImage(0, scatteringVolumeViews[0])  // Current scattering volume (write target)
-            .writeStorageImage(1, integratedVolumeView)      // Integrated volume
+            .writeStorageImage(0, scatteringVolumeViews_[0].get())  // Current scattering volume (write target)
+            .writeStorageImage(1, integratedVolumeView_.get())      // Integrated volume
             .writeBuffer(2, uniformBuffers.buffers[i], 0, sizeof(FroxelUniforms))
             .writeImage(3, shadowMapView, shadowSampler, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL)
             .writeBuffer(4, lightBuffers[i], 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeStorageImage(5, scatteringVolumeViews[1])  // History scattering volume (read for temporal)
+            .writeStorageImage(5, scatteringVolumeViews_[1].get())  // History scattering volume (read for temporal)
             .update();
     }
 
@@ -396,34 +382,34 @@ void FroxelSystem::recordFroxelUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
 
     // Update descriptor sets with correct volume bindings for this frame
     DescriptorManager::SetWriter(device, froxelDescriptorSets[frameIndex])
-        .writeStorageImage(0, scatteringVolumeViews[currentVolumeIdx])  // Current scattering volume (write)
-        .writeStorageImage(5, scatteringVolumeViews[historyVolumeIdx])  // History scattering volume (read)
+        .writeStorageImage(0, scatteringVolumeViews_[currentVolumeIdx].get())  // Current scattering volume (write)
+        .writeStorageImage(5, scatteringVolumeViews_[historyVolumeIdx].get())  // History scattering volume (read)
         .update();
 
     // Note: frameCounter was already incremented above, so first frame is frameCounter == 1
     bool isFirstFrame = (frameCounter == 1);
 
     // Current scattering volume (write target) - can discard previous contents
-    Barriers::prepareImageForCompute(cmd, scatteringVolumes[currentVolumeIdx]);
+    Barriers::prepareImageForCompute(cmd, scatteringVolumes_[currentVolumeIdx].get());
 
     // History scattering volume (read source) - preserve data from previous frame
     if (isFirstFrame) {
         // First frame: no valid history yet, clear to zero
-        Barriers::prepareImageForTransferDst(cmd, scatteringVolumes[historyVolumeIdx]);
+        Barriers::prepareImageForTransferDst(cmd, scatteringVolumes_[historyVolumeIdx].get());
 
         VkClearColorValue clearValue = {{0.0f, 0.0f, 0.0f, 0.0f}};
         VkImageSubresourceRange clearRange{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        vkCmdClearColorImage(cmd, scatteringVolumes[historyVolumeIdx],
+        vkCmdClearColorImage(cmd, scatteringVolumes_[historyVolumeIdx].get(),
                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearValue, 1, &clearRange);
 
         // Transition to GENERAL for shader access
-        Barriers::transitionImage(cmd, scatteringVolumes[historyVolumeIdx],
+        Barriers::transitionImage(cmd, scatteringVolumes_[historyVolumeIdx].get(),
             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
             VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
             VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
     } else {
         // Subsequent frames: history volume was written in previous frame
-        Barriers::transitionImage(cmd, scatteringVolumes[historyVolumeIdx],
+        Barriers::transitionImage(cmd, scatteringVolumes_[historyVolumeIdx].get(),
             VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL,
             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
             VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
@@ -432,21 +418,21 @@ void FroxelSystem::recordFroxelUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
     // Integrated volume: transitions between GENERAL (for compute) and SHADER_READ_ONLY (for fragment)
     if (isFirstFrame) {
         // First frame: clear to zero
-        Barriers::prepareImageForTransferDst(cmd, integratedVolume);
+        Barriers::prepareImageForTransferDst(cmd, integratedVolume_.get());
 
         VkClearColorValue clearValue = {{0.0f, 0.0f, 0.0f, 0.0f}};
         VkImageSubresourceRange clearRange{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        vkCmdClearColorImage(cmd, integratedVolume,
+        vkCmdClearColorImage(cmd, integratedVolume_.get(),
                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearValue, 1, &clearRange);
 
         // Transition to GENERAL for compute
-        Barriers::transitionImage(cmd, integratedVolume,
+        Barriers::transitionImage(cmd, integratedVolume_.get(),
             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
             VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
             VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_WRITE_BIT);
     } else {
         // Subsequent frames: transition from SHADER_READ_ONLY_OPTIMAL
-        Barriers::transitionImage(cmd, integratedVolume,
+        Barriers::transitionImage(cmd, integratedVolume_.get(),
             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
             VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_SHADER_WRITE_BIT);
@@ -475,5 +461,5 @@ void FroxelSystem::recordFroxelUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
     vkCmdDispatch(cmd, groupsX, groupsY, 1);
 
     // Transition integrated volume to shader read for fragment sampling
-    Barriers::imageComputeToSampling(cmd, integratedVolume);
+    Barriers::imageComputeToSampling(cmd, integratedVolume_.get());
 }
