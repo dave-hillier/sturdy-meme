@@ -671,7 +671,7 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
     if (numTrees == 0 || totalLeafInstances == 0) return;
 
     // Lazy initialization of cull buffers
-    if (cullOutputBuffers_[0] == VK_NULL_HANDLE) {
+    if (cullOutputBuffers_.empty() || cullOutputBuffers_[0] == VK_NULL_HANDLE) {
         if (!createLeafCullBuffers(totalLeafInstances, numTrees)) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to create cull buffers");
             return;
