@@ -324,8 +324,8 @@ void ImpostorCullSystem::updateArchetypeData(const TreeImpostorAtlas* atlas) {
         if (archetype) {
             // Match the octahedral capture projection sizing (15% margin)
             // projSize = max(boundingSphereRadius * 1.15, halfHeight * 1.15)
-            float maxHSize = archetype->boundingSphereRadius * 1.15f;
-            float maxVSize = archetype->treeHeight * 0.5f * 1.15f;
+            float maxHSize = archetype->boundingSphereRadius * TreeLODConstants::IMPOSTOR_SIZE_MARGIN;
+            float maxVSize = archetype->treeHeight * 0.5f * TreeLODConstants::IMPOSTOR_SIZE_MARGIN;
             float projSize = glm::max(maxHSize, maxVSize);
             archetypeData[i].sizingData = glm::vec4(
                 projSize,                                  // hSize (matches capture)

@@ -1,5 +1,6 @@
 #include "TreeImpostorAtlas.h"
 #include "TreeSystem.h"
+#include "CullCommon.h"
 #include "Mesh.h"
 #include "ShaderLoader.h"
 #include "core/BufferUtils.h"
@@ -1717,9 +1718,9 @@ void TreeImpostorAtlas::renderOctahedralCell(
     float blendFactor = elevationFactor * elevationFactor;  // Quadratic: stays low until high elevations
 
     // Horizontal size: blend from horizontalRadius toward bounding sphere at steep angles
-    float effectiveHSize = glm::mix(horizontalRadius, boundingSphereRadius, blendFactor) * 1.15f;
+    float effectiveHSize = glm::mix(horizontalRadius, boundingSphereRadius, blendFactor) * TreeLODConstants::IMPOSTOR_SIZE_MARGIN;
     // Vertical size: use half-height with margin
-    float effectiveVSize = halfHeight * 1.15f;
+    float effectiveVSize = halfHeight * TreeLODConstants::IMPOSTOR_SIZE_MARGIN;
     // Use the larger of the two for a square projection (simpler billboard math)
     float projSize = glm::max(effectiveHSize, effectiveVSize);
 

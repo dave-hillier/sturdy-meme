@@ -1,6 +1,7 @@
 #include "TreeLODSystem.h"
 #include "TreeSystem.h"
 #include "TreeOptions.h"
+#include "CullCommon.h"
 #include "Mesh.h"
 #include "ShaderLoader.h"
 #include "shaders/bindings.h"
@@ -626,11 +627,7 @@ bool TreeLODSystem::createInstanceBuffer(size_t maxInstances) {
                            &instanceBuffer_, &instanceAllocation_, nullptr) == VK_SUCCESS;
 }
 
-// Helper function to compute screen-space error
-static float computeScreenError(float worldError, float distance, float screenHeight, float tanHalfFOV) {
-    if (distance <= 0.0f) return 9999.0f;
-    return worldError * screenHeight / (2.0f * distance * tanHalfFOV);
-}
+// computeScreenError is now in CullCommon.h
 
 void TreeLODSystem::update(float deltaTime, const glm::vec3& cameraPos, const TreeSystem& treeSystem,
                            const ScreenParams& screenParams) {
@@ -775,8 +772,8 @@ void TreeLODSystem::update(float deltaTime, const glm::vec3& cameraPos, const Tr
                 float boundingSphereRadius = glm::length(extent) * 0.5f;
 
                 // At max elevation, effectiveHSize approaches boundingSphereRadius
-                float maxHSize = boundingSphereRadius * 1.15f;
-                float maxVSize = halfHeight * 1.15f;
+                float maxHSize = boundingSphereRadius * TreeLODConstants::IMPOSTOR_SIZE_MARGIN;
+                float maxVSize = halfHeight * TreeLODConstants::IMPOSTOR_SIZE_MARGIN;
                 float projSize = std::max(maxHSize, maxVSize) * tree.scale;
 
                 instance.hSize = projSize;
@@ -787,7 +784,7 @@ void TreeLODSystem::update(float deltaTime, const glm::vec3& cameraPos, const Tr
             } else {
                 // Fallback to archetype bounds if mesh not available
                 const auto* archetype = impostorAtlas_->getArchetype(state.archetypeIndex);
-                float projSize = (archetype ? archetype->boundingSphereRadius * 1.15f : 10.0f) * tree.scale;
+                float projSize = (archetype ? archetype->boundingSphereRadius * TreeLODConstants::IMPOSTOR_SIZE_MARGIN : 10.0f) * tree.scale;
                 instance.hSize = projSize;
                 instance.vSize = projSize;
                 instance.baseOffset = (archetype ? archetype->centerHeight : 0.0f) * tree.scale;

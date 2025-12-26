@@ -73,6 +73,26 @@ namespace TreeLODConstants {
     // Hysteresis to prevent LOD flickering at boundaries
     constexpr float HYSTERESIS = 5.0f;
     constexpr float BLEND_RANGE = 10.0f;
+
+    // Impostor sizing margin - adds padding to ensure tree fits in billboard
+    // Used during atlas capture and runtime sizing calculations
+    constexpr float IMPOSTOR_SIZE_MARGIN = 1.15f;
+}
+
+// ============================================================================
+// Screen-Space Error Calculation
+// ============================================================================
+// Computes how many pixels of error a world-space feature would produce at a given distance.
+// High error = close/large on screen = needs detail, Low error = far/small = can use LOD
+//
+// Formula: screenError = worldError * screenHeight / (2 * distance * tan(fov/2))
+//
+// This same formula is used in:
+// - TreeLODSystem::update() for CPU LOD decisions
+// - tree_impostor_cull.comp for GPU culling
+inline float computeScreenError(float worldError, float distance, float screenHeight, float tanHalfFOV) {
+    if (distance <= 0.0f) return 9999.0f;
+    return worldError * screenHeight / (2.0f * distance * tanHalfFOV);
 }
 
 // Number of leaf types (must match tree_leaf_cull.comp NUM_LEAF_TYPES)
