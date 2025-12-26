@@ -6,6 +6,10 @@
 
 #include "InitContext.h"
 #include "CoreResources.h"
+#include "AtmosphereSystemGroup.h"
+#include "VegetationSystemGroup.h"
+#include "WaterSystemGroup.h"
+#include "SnowSystemGroup.h"
 
 // Forward declarations for control subsystems (only those that coordinate multiple systems)
 class EnvironmentControlSubsystem;
@@ -276,6 +280,69 @@ public:
     // Environment settings
     EnvironmentSettings& environmentSettings() { return *environmentSettings_; }
     const EnvironmentSettings& environmentSettings() const { return *environmentSettings_; }
+
+    // ========================================================================
+    // System group accessors (reduce coupling by grouping related systems)
+    // ========================================================================
+
+    /**
+     * Get the atmosphere system group (sky, froxel, atmosphereLUT, cloudShadow)
+     * Returns a lightweight struct with non-owning references to the systems.
+     */
+    AtmosphereSystemGroup atmosphere() {
+        return AtmosphereSystemGroup{
+            skySystem_.get(),
+            froxelSystem_.get(),
+            atmosphereLUTSystem_.get(),
+            cloudShadowSystem_.get()
+        };
+    }
+
+    /**
+     * Get the vegetation system group (grass, wind, trees, rocks, detritus)
+     * Returns a lightweight struct with non-owning references to the systems.
+     */
+    VegetationSystemGroup vegetation() {
+        return VegetationSystemGroup{
+            grassSystem_.get(),
+            windSystem_.get(),
+            treeSystem_.get(),
+            treeRenderer_.get(),
+            treeLODSystem_.get(),
+            impostorCullSystem_.get(),
+            detritusSystem_.get(),
+            rockSystem_.get()
+        };
+    }
+
+    /**
+     * Get the water system group (water surface, displacement, foam, SSR)
+     * Returns a lightweight struct with non-owning references to the systems.
+     */
+    WaterSystemGroup waterGroup() {
+        return WaterSystemGroup{
+            waterSystem_.get(),
+            waterDisplacement_.get(),
+            flowMapGenerator_.get(),
+            foamBuffer_.get(),
+            ssrSystem_.get(),
+            waterTileCull_.get(),
+            waterGBuffer_.get()
+        };
+    }
+
+    /**
+     * Get the snow/weather system group (snow mask, volumetric, weather, leaves)
+     * Returns a lightweight struct with non-owning references to the systems.
+     */
+    SnowSystemGroup snowGroup() {
+        return SnowSystemGroup{
+            snowMaskSystem_.get(),
+            volumetricSnowSystem_.get(),
+            weatherSystem_.get(),
+            leafSystem_.get()
+        };
+    }
 
 #ifdef JPH_DEBUG_RENDERER
     PhysicsDebugRenderer* physicsDebugRenderer() { return physicsDebugRenderer_.get(); }
