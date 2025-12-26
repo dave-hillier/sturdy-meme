@@ -10,8 +10,8 @@
 
 #include "TreeOptions.h"
 #include "CullCommon.h"
-#include "core/VulkanRAII.h"
-#include "core/DescriptorManager.h"
+#include "VulkanRAII.h"
+#include "DescriptorManager.h"
 
 // Legacy impostor atlas configuration (17-view discrete)
 // Layout: 2 rows x 9 columns = 18 cells (17 used, 1 unused)

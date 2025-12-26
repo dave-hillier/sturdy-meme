@@ -37,12 +37,12 @@ set(SOURCES
     src/core/Renderer.cpp
     src/core/RendererInit.cpp
     src/core/RendererInitPhases.cpp
-    src/core/VulkanResourceFactory.cpp
+    src/core/vulkan/VulkanResourceFactory.cpp
     src/core/CoreResources.cpp
     src/core/ResizeCoordinator.cpp
     src/core/UBOBuilder.cpp
     src/core/RendererSystems.cpp
-    src/core/RenderPipelineFactory.cpp
+    src/core/pipeline/RenderPipelineFactory.cpp
     # Control subsystems (coordinate multiple systems for GUI interfaces)
     # Note: Some systems implement their interfaces directly (CelestialCalculator -> ILocationControl,
     #       TerrainSystem -> ITerrainControl, Profiler -> IProfilerControl, WeatherSystem -> IWeatherState,
@@ -53,17 +53,17 @@ set(SOURCES
     src/core/controls/DebugControlSubsystem.cpp
     src/core/controls/SceneControlSubsystem.cpp
     src/core/controls/PlayerControlSubsystem.cpp
-    src/core/VulkanContext.cpp
+    src/core/vulkan/VulkanContext.cpp
     src/core/Mesh.cpp
     src/core/BufferUtils.cpp
     src/core/Texture.cpp
     src/core/ShaderLoader.cpp
-    src/core/PipelineBuilder.cpp
-    src/core/PipelineCache.cpp
-    src/core/GraphicsPipelineFactory.cpp
-    src/core/DescriptorManager.cpp
-    src/core/MaterialDescriptorFactory.cpp
-    src/core/MaterialRegistry.cpp
+    src/core/pipeline/PipelineBuilder.cpp
+    src/core/pipeline/PipelineCache.cpp
+    src/core/pipeline/GraphicsPipelineFactory.cpp
+    src/core/material/DescriptorManager.cpp
+    src/core/material/MaterialDescriptorFactory.cpp
+    src/core/material/MaterialRegistry.cpp
     src/core/RenderableBuilder.cpp
     # Atmosphere
     src/atmosphere/TimeSystem.cpp
@@ -122,11 +122,11 @@ set(SOURCES
     src/terrain/TerrainMeshlet.cpp
     src/terrain/TerrainTileCache.cpp
     src/terrain/ErosionDataLoader.cpp
-    src/terrain/VirtualTextureCache.cpp
-    src/terrain/VirtualTexturePageTable.cpp
-    src/terrain/VirtualTextureFeedback.cpp
-    src/terrain/VirtualTextureTileLoader.cpp
-    src/terrain/VirtualTextureSystem.cpp
+    src/terrain/virtual_texture/VirtualTextureCache.cpp
+    src/terrain/virtual_texture/VirtualTexturePageTable.cpp
+    src/terrain/virtual_texture/VirtualTextureFeedback.cpp
+    src/terrain/virtual_texture/VirtualTextureTileLoader.cpp
+    src/terrain/virtual_texture/VirtualTextureSystem.cpp
     # Water
     src/water/WaterSystem.cpp
     src/water/FlowMapGenerator.cpp
@@ -190,6 +190,9 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/animation
     ${CMAKE_CURRENT_SOURCE_DIR}/src/atmosphere
     ${CMAKE_CURRENT_SOURCE_DIR}/src/core
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/core/vulkan
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/core/pipeline
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/core/material
     ${CMAKE_CURRENT_SOURCE_DIR}/src/debug
     ${CMAKE_CURRENT_SOURCE_DIR}/src/gui
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ik
@@ -201,6 +204,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/stages
     ${CMAKE_CURRENT_SOURCE_DIR}/src/subdivision
     ${CMAKE_CURRENT_SOURCE_DIR}/src/terrain
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/terrain/virtual_texture
     ${CMAKE_CURRENT_SOURCE_DIR}/src/vegetation
     ${CMAKE_CURRENT_SOURCE_DIR}/src/water
     ${CMAKE_CURRENT_SOURCE_DIR}/generated

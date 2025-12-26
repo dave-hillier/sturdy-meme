@@ -7,7 +7,7 @@
 #include <string>
 #include <memory>
 #include "InitContext.h"
-#include "core/VulkanRAII.h"
+#include "VulkanRAII.h"
 
 /**
  * OceanFFT - FFT-based Ocean Simulation (Tessendorf Method)

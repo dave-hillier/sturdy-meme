@@ -11,8 +11,8 @@
 #include "TreeSystem.h"
 #include "TreeLODSystem.h"
 #include "TreeLeafCulling.h"
-#include "core/VulkanRAII.h"
-#include "core/DescriptorManager.h"
+#include "VulkanRAII.h"
+#include "DescriptorManager.h"
 
 // Push constants for tree rendering
 struct TreeBranchPushConstants {

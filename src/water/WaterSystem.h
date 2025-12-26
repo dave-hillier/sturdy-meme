@@ -12,8 +12,8 @@
 #include "Mesh.h"
 #include "Texture.h"
 #include "DescriptorManager.h"
-#include "core/RAIIAdapter.h"
-#include "core/VulkanRAII.h"
+#include "RAIIAdapter.h"
+#include "VulkanRAII.h"
 
 class ShadowSystem;
 

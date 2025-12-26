@@ -3,7 +3,7 @@
 #include <vulkan/vulkan.h>
 #include <string>
 #include <memory>
-#include "core/VulkanRAII.h"
+#include "VulkanRAII.h"
 
 struct SubgroupCapabilities;
 class TerrainMeshlet;

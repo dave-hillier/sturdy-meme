@@ -8,7 +8,7 @@
 #include <memory>
 
 #include "DescriptorManager.h"
-#include "core/VulkanRAII.h"
+#include "VulkanRAII.h"
 
 /**
  * WaterGBuffer - Phase 3: Screen-Space Mini G-Buffer

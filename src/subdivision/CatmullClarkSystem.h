@@ -11,8 +11,8 @@
 #include "CatmullClarkCBT.h"
 #include "CatmullClarkMesh.h"
 #include "DescriptorManager.h"
-#include "core/RAIIAdapter.h"
-#include "core/VulkanRAII.h"
+#include "RAIIAdapter.h"
+#include "VulkanRAII.h"
 
 // Push constants for rendering
 struct CatmullClarkPushConstants {

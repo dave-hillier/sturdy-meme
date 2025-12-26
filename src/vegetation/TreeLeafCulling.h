@@ -10,8 +10,8 @@
 
 #include "TreeSpatialIndex.h"
 #include "CullCommon.h"
-#include "core/VulkanRAII.h"
-#include "core/DescriptorManager.h"
+#include "VulkanRAII.h"
+#include "DescriptorManager.h"
 #include "BufferUtils.h"
 
 // Forward declarations

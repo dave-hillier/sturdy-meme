@@ -20,7 +20,7 @@
 #include "VirtualTextureSystem.h"
 #include "DescriptorManager.h"
 #include "InitContext.h"
-#include "core/RAIIAdapter.h"
+#include "RAIIAdapter.h"
 #include <optional>
 
 class GpuProfiler;

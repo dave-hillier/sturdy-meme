@@ -12,7 +12,7 @@
 #include "DescriptorManager.h"
 #include "InitContext.h"
 #include "Mesh.h"
-#include "core/VulkanRAII.h"
+#include "VulkanRAII.h"
 #include "core/ImageBuilder.h"
 
 // GPU-side object data for culling (matches shader struct)

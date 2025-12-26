@@ -8,7 +8,7 @@
 #include <memory>
 #include "InitContext.h"
 #include "DescriptorManager.h"
-#include "core/VulkanRAII.h"
+#include "VulkanRAII.h"
 
 /**
  * SSRSystem - Phase 10: Screen-Space Reflections

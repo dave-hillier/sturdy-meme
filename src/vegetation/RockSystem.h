@@ -11,7 +11,7 @@
 #include "Mesh.h"
 #include "Texture.h"
 #include "RenderableBuilder.h"
-#include "core/RAIIAdapter.h"
+#include "RAIIAdapter.h"
 #include <optional>
 
 // Configuration for rock generation and placement

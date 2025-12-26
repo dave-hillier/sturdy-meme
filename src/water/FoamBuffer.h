@@ -7,7 +7,7 @@
 #include <string>
 #include <memory>
 
-#include "core/VulkanRAII.h"
+#include "VulkanRAII.h"
 
 /**
  * FoamBuffer - Phase 14 & 16: Temporal Foam Persistence + Wake System

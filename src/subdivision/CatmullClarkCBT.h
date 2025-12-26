@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <vector>
 #include <memory>
-#include "core/VulkanRAII.h"
+#include "VulkanRAII.h"
 
 // Concurrent Binary Tree (CBT) buffer for Catmull-Clark subdivision
 // Based on the implementation from https://github.com/jdupuy/LongestEdgeBisection2D

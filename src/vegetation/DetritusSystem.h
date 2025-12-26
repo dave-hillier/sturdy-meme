@@ -12,7 +12,7 @@
 #include "Mesh.h"
 #include "Texture.h"
 #include "RenderableBuilder.h"
-#include "core/RAIIAdapter.h"
+#include "RAIIAdapter.h"
 #include <optional>
 
 // Configuration for detritus generation and placement

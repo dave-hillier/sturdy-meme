@@ -7,7 +7,7 @@
 #include <string>
 #include <memory>
 
-#include "core/VulkanRAII.h"
+#include "VulkanRAII.h"
 
 /**
  * WaterDisplacement - Phase 4: Vector Displacement Maps (Interactive Splashes)

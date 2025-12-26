@@ -7,7 +7,7 @@
 #include <string>
 #include <memory>
 
-#include "core/VulkanRAII.h"
+#include "VulkanRAII.h"
 
 /**
  * WaterTileCull - Phase 7: Screen-Space Tile Visibility

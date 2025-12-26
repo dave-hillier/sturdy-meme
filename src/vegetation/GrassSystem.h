@@ -12,8 +12,8 @@
 #include "BufferUtils.h"
 #include "ParticleSystem.h"
 #include "UBOs.h"
-#include "core/RAIIAdapter.h"
-#include "core/VulkanRAII.h"
+#include "RAIIAdapter.h"
+#include "VulkanRAII.h"
 #include <optional>
 
 struct GrassPushConstants {
