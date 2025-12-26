@@ -136,6 +136,7 @@ set(SOURCES
     src/water/WaterDisplacement.cpp
     src/water/FoamBuffer.cpp
     src/water/WaterTileCull.cpp
+    src/water/OceanFFT.cpp
     # GUI
     src/gui/GuiSystem.cpp
     src/gui/GuiTimeTab.cpp
@@ -572,6 +573,10 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ssr.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ssr_blur.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_tile_cull.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ocean_spectrum.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ocean_time_evolution.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ocean_fft.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ocean_displacement.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/debug_line.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/debug_line.frag.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree.vert.spv
@@ -814,6 +819,23 @@ if(SHADER_COMPILE_CMD)
         COMMENT "Compiling water tile cull compute shader"
     )
 
+    # Ocean FFT compute shaders (Tessendorf-style ocean simulation)
+    set(OCEAN_FFT_SHADERS
+        ocean_spectrum.comp
+        ocean_time_evolution.comp
+        ocean_fft.comp
+        ocean_displacement.comp
+    )
+
+    foreach(SHADER ${OCEAN_FFT_SHADERS})
+        add_custom_command(
+            OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}.spv
+            COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/shaders -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}
+            DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER} ${BINDINGS_DEPS}
+            COMMENT "Compiling ocean FFT shader: ${SHADER}"
+        )
+    endforeach()
+
     # Terrain shaders (LEB terrain system)
     set(TERRAIN_CBT_DEPS
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/cbt.glsl
@@ -1008,6 +1030,10 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_impostor_shadow.frag.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_branch_shadow_cull.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_branch_shadow_instanced.vert.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ocean_spectrum.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ocean_time_evolution.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ocean_fft.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ocean_displacement.comp.spv
     )
 
     # Generate UBO headers from SPIR-V reflection
