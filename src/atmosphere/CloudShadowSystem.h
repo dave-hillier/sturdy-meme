@@ -76,7 +76,7 @@ public:
                       const glm::vec3& cameraPos);
 
     // Accessors for shader binding
-    VkImageView getShadowMapView() const { return shadowMapView; }
+    VkImageView getShadowMapView() const { return shadowMapView_.get(); }
     VkSampler getShadowMapSampler() const { return shadowMapSampler.get(); }
 
     // Get the world-to-shadow-UV matrix for sampling in fragment shaders
@@ -118,10 +118,9 @@ private:
     VkImageView cloudMapLUTView = VK_NULL_HANDLE;
     VkSampler cloudMapLUTSampler = VK_NULL_HANDLE;
 
-    // Cloud shadow map (R16F - stores shadow attenuation 0=full shadow, 1=no shadow)
-    VkImage shadowMap = VK_NULL_HANDLE;
-    VmaAllocation shadowMapAllocation = VK_NULL_HANDLE;
-    VkImageView shadowMapView = VK_NULL_HANDLE;
+    // Cloud shadow map (R16F - stores shadow attenuation 0=full shadow, 1=no shadow) - RAII-managed
+    ManagedImage shadowMap_;
+    ManagedImageView shadowMapView_;
     ManagedSampler shadowMapSampler;
 
     // Compute pipeline (RAII-managed)

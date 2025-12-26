@@ -67,9 +67,9 @@ public:
                            const glm::vec4& cascadeSplits);
 
     // Get the scattering volume (raw, pre-integration) - returns current frame's output
-    VkImageView getScatteringVolumeView() const { return scatteringVolumeViews[frameCounter % 2]; }
+    VkImageView getScatteringVolumeView() const { return scatteringVolumeViews_[frameCounter % 2].get(); }
     // Get the integrated volume for compositing (front-to-back integrated result)
-    VkImageView getIntegratedVolumeView() const { return integratedVolumeView; }
+    VkImageView getIntegratedVolumeView() const { return integratedVolumeView_.get(); }
     VkSampler getVolumeSampler() const { return volumeSampler.get(); }
 
     // IFogControl implementation (reset temporal history on change for immediate feedback)
@@ -137,17 +137,15 @@ private:
     VkSampler shadowSampler = VK_NULL_HANDLE;
     std::vector<VkBuffer> lightBuffers;  // Per-frame light buffers
 
-    // Double-buffered scattering volumes for temporal reprojection (ping-pong)
+    // Double-buffered scattering volumes for temporal reprojection (ping-pong) - RAII-managed
     // Format: RGBA16F - stores in-scattered light / opacity
     // [0] = current write target, [1] = previous frame history (swapped each frame)
-    VkImage scatteringVolumes[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
-    VmaAllocation scatteringAllocations[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
-    VkImageView scatteringVolumeViews[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
+    ManagedImage scatteringVolumes_[2];
+    ManagedImageView scatteringVolumeViews_[2];
 
-    // Integrated scattering volume (front-to-back integrated)
-    VkImage integratedVolume = VK_NULL_HANDLE;
-    VmaAllocation integratedAllocation = VK_NULL_HANDLE;
-    VkImageView integratedVolumeView = VK_NULL_HANDLE;
+    // Integrated scattering volume (front-to-back integrated) - RAII-managed
+    ManagedImage integratedVolume_;
+    ManagedImageView integratedVolumeView_;
 
     // Volume sampler (trilinear filtering)
     ManagedSampler volumeSampler;

@@ -39,18 +39,10 @@ bool SkinnedMeshRenderer::initInternal(const InitInfo& info) {
 void SkinnedMeshRenderer::cleanup() {
     if (device == VK_NULL_HANDLE) return;
 
-    if (pipeline != VK_NULL_HANDLE) {
-        vkDestroyPipeline(device, pipeline, nullptr);
-        pipeline = VK_NULL_HANDLE;
-    }
-    if (pipelineLayout != VK_NULL_HANDLE) {
-        vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
-        pipelineLayout = VK_NULL_HANDLE;
-    }
-    if (descriptorSetLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
-        descriptorSetLayout = VK_NULL_HANDLE;
-    }
+    // RAII wrappers handle cleanup automatically
+    pipeline_.reset();
+    pipelineLayout_.reset();
+    descriptorSetLayout_.reset();
 
     BufferUtils::destroyBuffers(allocator, boneMatricesBuffers);
 
@@ -65,9 +57,8 @@ bool SkinnedMeshRenderer::createDescriptorSetLayout() {
     addCommonBindings(builder);
     // Add skinned-specific binding
     builder.addBinding(Bindings::BONE_MATRICES, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT);
-    descriptorSetLayout = builder.build();
 
-    if (descriptorSetLayout == VK_NULL_HANDLE) {
+    if (!builder.buildManaged(descriptorSetLayout_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create skinned descriptor set layout");
         return false;
     }
@@ -82,14 +73,15 @@ bool SkinnedMeshRenderer::createPipeline() {
     pushConstantRange.offset = 0;
     pushConstantRange.size = sizeof(PushConstants);
 
+    VkDescriptorSetLayout rawLayout = descriptorSetLayout_.get();
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.setLayoutCount = 1;
-    pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;
+    pipelineLayoutInfo.pSetLayouts = &rawLayout;
     pipelineLayoutInfo.pushConstantRangeCount = 1;
     pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
 
-    if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
+    if (!ManagedPipelineLayout::create(device, pipelineLayoutInfo, pipelineLayout_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create skinned pipeline layout");
         return false;
     }
@@ -98,6 +90,7 @@ bool SkinnedMeshRenderer::createPipeline() {
     auto bindingDescription = SkinnedVertex::getBindingDescription();
     auto attributeDescriptions = SkinnedVertex::getAttributeDescriptions();
 
+    VkPipeline rawPipeline = VK_NULL_HANDLE;
     GraphicsPipelineFactory factory(device);
     bool success = factory
         .applyPreset(GraphicsPipelineFactory::Preset::Default)
@@ -106,16 +99,18 @@ bool SkinnedMeshRenderer::createPipeline() {
         .setVertexInput({bindingDescription},
                         {attributeDescriptions.begin(), attributeDescriptions.end()})
         .setRenderPass(renderPass)
-        .setPipelineLayout(pipelineLayout)
+        .setPipelineLayout(pipelineLayout_.get())
         .setExtent(extent)
         .setDynamicViewport(true)
         .setBlendMode(GraphicsPipelineFactory::BlendMode::Alpha)
-        .build(pipeline);
+        .build(rawPipeline);
 
     if (!success) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create skinned graphics pipeline");
         return false;
     }
+
+    pipeline_ = ManagedPipeline::fromRaw(device, rawPipeline);
 
     SDL_Log("Created skinned graphics pipeline for GPU skinning");
     return true;
@@ -149,7 +144,7 @@ bool SkinnedMeshRenderer::createBoneMatricesBuffers() {
 
 bool SkinnedMeshRenderer::createDescriptorSets(const DescriptorResources& resources) {
     // Allocate descriptor sets
-    descriptorSets = descriptorPool->allocate(descriptorSetLayout, framesInFlight);
+    descriptorSets = descriptorPool->allocate(descriptorSetLayout_.get(), framesInFlight);
     if (descriptorSets.empty()) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate skinned descriptor sets");
         return false;
@@ -241,7 +236,7 @@ void SkinnedMeshRenderer::updateBoneMatrices(uint32_t frameIndex, AnimatedCharac
 void SkinnedMeshRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex,
                                   const Renderable& playerObj, AnimatedCharacter& character) {
     // Bind skinned pipeline
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_.get());
 
     // Set dynamic viewport and scissor to handle window resize
     VkViewport viewport{};
@@ -260,7 +255,7 @@ void SkinnedMeshRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex,
 
     // Bind skinned descriptor set
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            pipelineLayout, 0, 1, &descriptorSets[frameIndex], 0, nullptr);
+                            pipelineLayout_.get(), 0, 1, &descriptorSets[frameIndex], 0, nullptr);
 
     // Push constants
     PushConstants push{};
@@ -272,7 +267,7 @@ void SkinnedMeshRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex,
     push.emissiveColor = glm::vec4(playerObj.emissiveColor, 1.0f);
     push.pbrFlags = playerObj.pbrFlags;
 
-    vkCmdPushConstants(cmd, pipelineLayout,
+    vkCmdPushConstants(cmd, pipelineLayout_.get(),
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                        0, sizeof(PushConstants), &push);
 

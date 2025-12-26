@@ -14,6 +14,7 @@
 #include "RenderableBuilder.h"
 #include "GlobalBufferManager.h"
 #include "BufferUtils.h"
+#include "core/VulkanRAII.h"
 
 class AnimatedCharacter;
 
@@ -92,9 +93,9 @@ public:
     void setExtent(VkExtent2D newExtent) { extent = newExtent; }
 
     // Accessors for ShadowSystem integration
-    VkDescriptorSetLayout getDescriptorSetLayout() const { return descriptorSetLayout; }
-    VkPipelineLayout getPipelineLayout() const { return pipelineLayout; }
-    VkPipeline getPipeline() const { return pipeline; }
+    VkDescriptorSetLayout getDescriptorSetLayout() const { return descriptorSetLayout_.get(); }
+    VkPipelineLayout getPipelineLayout() const { return pipelineLayout_.get(); }
+    VkPipeline getPipeline() const { return pipeline_.get(); }
     VkDescriptorSet getDescriptorSet(uint32_t frameIndex) const { return descriptorSets[frameIndex]; }
 
 private:
@@ -116,10 +117,10 @@ private:
     uint32_t framesInFlight = 0;
     AddCommonBindingsCallback addCommonBindings;
 
-    // Created resources
-    VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
-    VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
-    VkPipeline pipeline = VK_NULL_HANDLE;
+    // Created resources (RAII-managed)
+    ManagedDescriptorSetLayout descriptorSetLayout_;
+    ManagedPipelineLayout pipelineLayout_;
+    ManagedPipeline pipeline_;
 
     std::vector<VkDescriptorSet> descriptorSets;
     BufferUtils::PerFrameBufferSet boneMatricesBuffers;
