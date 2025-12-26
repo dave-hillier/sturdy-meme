@@ -543,6 +543,10 @@ void TreeRenderer::updateBranchCullingData(const TreeSystem& treeSystem, const T
     }
 }
 
+bool TreeRenderer::isBranchShadowCullingAvailable() const {
+    return branchShadowCulling_ && branchShadowCulling_->isEnabled();
+}
+
 bool TreeRenderer::isBranchShadowCullingEnabled() const {
     return branchShadowCulling_ && branchShadowCulling_->isEnabled() && branchShadowCulling_->isEnabledByUser();
 }

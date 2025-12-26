@@ -62,13 +62,17 @@ public:
     // Record shadow pass for all cascades
     // Callback signature: void(VkCommandBuffer cmd, uint32_t cascade, const glm::mat4& lightMatrix)
     using DrawCallback = std::function<void(VkCommandBuffer, uint32_t, const glm::mat4&)>;
+    // Pre-cascade compute callback: runs BEFORE each cascade's render pass (for GPU culling)
+    // Signature: void(VkCommandBuffer cmd, uint32_t frameIndex, uint32_t cascade, const glm::mat4& lightMatrix)
+    using ComputeCallback = std::function<void(VkCommandBuffer, uint32_t, uint32_t, const glm::mat4&)>;
     void recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex,
                           VkDescriptorSet descriptorSet,
                           const std::vector<Renderable>& sceneObjects,
                           const DrawCallback& terrainDrawCallback,
                           const DrawCallback& grassDrawCallback,
                           const DrawCallback& treeDrawCallback = nullptr,
-                          const DrawCallback& skinnedDrawCallback = nullptr);
+                          const DrawCallback& skinnedDrawCallback = nullptr,
+                          const ComputeCallback& preCascadeComputeCallback = nullptr);
 
     // Record skinned mesh shadow for a single cascade (called after bindSkinnedShadowPipeline)
     void recordSkinnedMeshShadow(VkCommandBuffer cmd, uint32_t cascade,

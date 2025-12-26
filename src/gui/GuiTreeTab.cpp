@@ -306,7 +306,7 @@ void GuiTreeTab::render(ITreeControl& treeControl) {
             }
 
             // GPU Branch Shadow Culling toggle
-            if (treeRenderer && treeRenderer->isBranchShadowCullingEnabled()) {
+            if (treeRenderer && treeRenderer->isBranchShadowCullingAvailable()) {
                 ImGui::Spacing();
                 bool gpuCulling = treeRenderer->isBranchShadowCullingEnabled();
                 if (ImGui::Checkbox("GPU Branch Shadow Culling", &gpuCulling)) {

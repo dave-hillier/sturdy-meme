@@ -132,7 +132,10 @@ public:
     // Update branch culling data (call when trees change)
     void updateBranchCullingData(const TreeSystem& treeSystem, const TreeLODSystem* lodSystem);
 
-    // Check if branch shadow culling is enabled
+    // Check if branch shadow culling is available (subsystem initialized)
+    bool isBranchShadowCullingAvailable() const;
+
+    // Check if branch shadow culling is enabled (available AND user toggle is on)
     bool isBranchShadowCullingEnabled() const;
 
     // Enable/disable branch shadow culling

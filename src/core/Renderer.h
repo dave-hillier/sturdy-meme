@@ -221,7 +221,7 @@ private:
     void updateUniformBuffer(uint32_t currentImage, const Camera& camera);
 
     // Render pass recording helpers (pure - only record commands, no state mutation)
-    void recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float grassTime);
+    void recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float grassTime, const glm::vec3& cameraPosition);
     void recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float grassTime);
     void recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex);
 
