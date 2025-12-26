@@ -651,7 +651,7 @@ if(SHADER_COMPILE_CMD)
         postprocess.vert postprocess.frag
         bloom_downsample.frag bloom_upsample.frag bloom_composite.frag
         histogram_build.comp histogram_reduce.comp
-        hiz_downsample.comp hiz_culling.comp
+        hiz_downsample.comp
         debug_line.vert debug_line.frag
     )
 
@@ -687,6 +687,7 @@ if(SHADER_COMPILE_CMD)
         tree_impostor_capture.vert tree_impostor_capture.frag
         tree_impostor_capture_leaf.vert
         tree_impostor_shadow.vert tree_impostor_shadow.frag
+        hiz_culling.comp
     )
 
     foreach(SHADER ${SHADERS_WITH_BINDINGS})

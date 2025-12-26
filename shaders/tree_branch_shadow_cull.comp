@@ -1,6 +1,8 @@
 #version 450
 
 #extension GL_GOOGLE_include_directive : require
+#extension GL_KHR_shader_subgroup_ballot : require
+#extension GL_KHR_shader_subgroup_arithmetic : require
 
 #include "bindings.glsl"
 
@@ -133,10 +135,32 @@ void main() {
         }
     }
 
-    // Atomically get output slot
-    uint slot = atomicAdd(drawCmds[groupIdx].instanceCount, 1);
-    if (slot >= meshGroups[groupIdx].maxInstances) {
-        atomicAdd(drawCmds[groupIdx].instanceCount, -1);
+    // Use subgroup operations to batch atomic updates per mesh group
+    uint slot = ~0u;
+    uint maxInstances = meshGroups[groupIdx].maxInstances;
+
+    for (uint g = 0; g < MAX_MESH_GROUPS; g++) {
+        uvec4 groupMask = subgroupBallot(groupIdx == g);
+        uint groupCount = subgroupBallotBitCount(groupMask);
+
+        if (groupCount > 0) {
+            uint electedLane = subgroupBallotFindLSB(groupMask);
+            uint baseSlot = 0;
+
+            if (gl_SubgroupInvocationID == electedLane) {
+                baseSlot = atomicAdd(drawCmds[g].instanceCount, groupCount);
+            }
+
+            baseSlot = subgroupBroadcast(baseSlot, electedLane);
+
+            if (groupIdx == g) {
+                uint laneOffset = subgroupBallotExclusiveBitCount(groupMask);
+                slot = baseSlot + laneOffset;
+            }
+        }
+    }
+
+    if (slot >= maxInstances) {
         return;
     }
 

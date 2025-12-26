@@ -1,6 +1,8 @@
 #version 450
 
 #extension GL_GOOGLE_include_directive : require
+#extension GL_KHR_shader_subgroup_ballot : require
+#extension GL_KHR_shader_subgroup_arithmetic : require
 
 #include "bindings.glsl"
 #include "instancing_common.glsl"
@@ -175,8 +177,18 @@ void main() {
         return;
     }
 
-    // Tree passed culling - add to visible list
-    uint visibleIdx = atomicAdd(visibleTreeCount, 1);
+    // Use subgroup operations to batch atomic updates
+    uvec4 activeMask = subgroupBallot(true);
+    uint activeCount = subgroupBallotBitCount(activeMask);
+    uint laneOffset = subgroupBallotExclusiveBitCount(activeMask);
+
+    uint baseIdx;
+    if (subgroupElect()) {
+        baseIdx = atomicAdd(visibleTreeCount, activeCount);
+        atomicAdd(dispatchX, activeCount);
+    }
+    baseIdx = subgroupBroadcastFirst(baseIdx);
+    uint visibleIdx = baseIdx + laneOffset;
 
     // Write visible tree data
     visibleTrees[visibleIdx].originalTreeIndex = originalTreeIdx;
@@ -187,8 +199,4 @@ void main() {
     visibleTrees[visibleIdx]._pad0 = 0;
     visibleTrees[visibleIdx]._pad1 = 0;
     visibleTrees[visibleIdx]._pad2 = 0;
-
-    // Update indirect dispatch count
-    // One workgroup per visible tree in leaf culling (using 256 threads)
-    atomicAdd(dispatchX, 1);
 }

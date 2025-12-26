@@ -17,6 +17,8 @@
  */
 
 #extension GL_GOOGLE_include_directive : require
+#extension GL_KHR_shader_subgroup_ballot : require
+#extension GL_KHR_shader_subgroup_arithmetic : require
 
 #include "bindings.glsl"
 
@@ -145,9 +147,21 @@ void main() {
         tileVisible = true;
     }
 
-    // Write visible tile to output
+    // Write visible tile to output using subgroup batching
+    uvec4 visibleMask = subgroupBallot(tileVisible);
+    uint visibleInSubgroup = subgroupBallotBitCount(visibleMask);
+
+    uint baseIdx = 0;
+    if (visibleInSubgroup > 0) {
+        if (subgroupElect()) {
+            baseIdx = atomicAdd(visibleCount, visibleInSubgroup);
+        }
+        baseIdx = subgroupBroadcastFirst(baseIdx);
+    }
+
     if (tileVisible) {
-        uint tileIndex = atomicAdd(visibleCount, 1);
+        uint laneOffset = subgroupBallotExclusiveBitCount(visibleMask);
+        uint tileIndex = baseIdx + laneOffset;
 
         // Store tile data
         tiles[tileIndex].tileCoord = tileCoord;

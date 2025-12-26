@@ -1,6 +1,8 @@
 #version 450
 
 #extension GL_GOOGLE_include_directive : require
+#extension GL_KHR_shader_subgroup_ballot : require
+#extension GL_KHR_shader_subgroup_arithmetic : require
 
 #include "bindings.glsl"
 #include "instancing_common.glsl"
@@ -167,19 +169,37 @@ void main() {
     float distToCamera = length(cellCenter - cameraPosition.xyz);
     uint bucket = getDistanceBucket(distToCamera);
 
-    // Atomically reserve a slot in the appropriate bucket
-    uint bucketSlot = atomicAdd(bucketCounts[bucket], 1);
-
-    // Store cell index in a temporary location (we'll reorder in tree_filter)
-    // For now, store with bucket info encoded: high 3 bits = bucket, low 29 bits = cellIdx
-    uint visibleIdx = atomicAdd(visibleCellCount, 1);
-    visibleCellIndices[visibleIdx] = (bucket << 29) | (cellIdx & 0x1FFFFFFF);
-
-    // Update tree count and dispatch size
-    atomicAdd(totalVisibleTrees, treeCount);
-
-    // Calculate number of workgroups needed for this cell's trees
-    // Each workgroup will process treesPerWorkgroup trees
+    // Calculate workgroups needed for this cell
     uint workgroupsForCell = (treeCount + treesPerWorkgroup - 1) / treesPerWorkgroup;
-    atomicAdd(dispatchX, workgroupsForCell);
+
+    // Use subgroup operations to batch atomic updates
+
+    // 1. Batch bucket counts per bucket (like leaf types)
+    for (uint b = 0; b < NUM_DISTANCE_BUCKETS; b++) {
+        uvec4 bucketMask = subgroupBallot(bucket == b);
+        uint bucketCount = subgroupBallotBitCount(bucketMask);
+        if (bucketCount > 0 && subgroupBallotFindLSB(bucketMask) == gl_SubgroupInvocationID) {
+            atomicAdd(bucketCounts[b], bucketCount);
+        }
+    }
+
+    // 2. Batch visibleCellCount (simple counter)
+    uvec4 activeMask = subgroupBallot(true);
+    uint activeCount = subgroupBallotBitCount(activeMask);
+    uint laneOffset = subgroupBallotExclusiveBitCount(activeMask);
+
+    uint baseIdx;
+    if (subgroupElect()) {
+        baseIdx = atomicAdd(visibleCellCount, activeCount);
+        // 3. Sum and batch totalVisibleTrees and dispatchX
+        uint totalTrees = subgroupAdd(treeCount);
+        uint totalWorkgroups = subgroupAdd(workgroupsForCell);
+        atomicAdd(totalVisibleTrees, totalTrees);
+        atomicAdd(dispatchX, totalWorkgroups);
+    }
+    baseIdx = subgroupBroadcastFirst(baseIdx);
+    uint visibleIdx = baseIdx + laneOffset;
+
+    // Store cell index with bucket info encoded
+    visibleCellIndices[visibleIdx] = (bucket << 29) | (cellIdx & 0x1FFFFFFF);
 }

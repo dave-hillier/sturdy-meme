@@ -1,5 +1,7 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
+#extension GL_KHR_shader_subgroup_ballot : require
+#extension GL_KHR_shader_subgroup_arithmetic : require
 
 #include "bindings.glsl"
 
@@ -238,8 +240,17 @@ void main() {
         }
     }
 
-    // Object is visible - add to draw buffer
-    uint drawIndex = atomicAdd(drawCount, 1);
+    // Use subgroup operations to batch atomic updates
+    uvec4 activeMask = subgroupBallot(true);
+    uint activeCount = subgroupBallotBitCount(activeMask);
+    uint laneOffset = subgroupBallotExclusiveBitCount(activeMask);
+
+    uint baseIdx;
+    if (subgroupElect()) {
+        baseIdx = atomicAdd(drawCount, activeCount);
+    }
+    baseIdx = subgroupBroadcastFirst(baseIdx);
+    uint drawIndex = baseIdx + laneOffset;
 
     // Write indirect draw command
     drawCommands[drawIndex].indexCount = obj.indexCount;
