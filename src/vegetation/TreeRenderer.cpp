@@ -1267,9 +1267,9 @@ void TreeRenderer::updateCulledLeafDescriptorSet(
     VkSampler leafSampler) {
 
     // Skip if cull output buffer not created yet (buffers are lazily allocated)
-    // Use getReadIndex() since this updates descriptors for graphics reads
+    // Use getWriteIndex() - graphics reads from same buffer compute writes to (barrier ensures sync)
     if (cullOutputBuffers_.buffers.empty() ||
-        cullOutputBuffers_.buffers[cullBufferTracker_.getReadIndex()] == VK_NULL_HANDLE) {
+        cullOutputBuffers_.buffers[cullBufferTracker_.getWriteIndex()] == VK_NULL_HANDLE) {
         return;
     }
 
@@ -1312,9 +1312,10 @@ void TreeRenderer::updateCulledLeafDescriptorSet(
 
     // Use culled output buffer for leaf instances (world-space)
     // IMPORTANT: Must update SSBO binding every frame because we double-buffer
-    // Use cullBufferTracker_.getReadIndex() since this descriptor is for graphics to read
+    // Use getWriteIndex() - graphics reads from same buffer compute writes to this frame
+    // (the barrier in recordLeafCulling ensures compute finishes before graphics reads)
     VkDescriptorBufferInfo leafInstanceInfo{};
-    leafInstanceInfo.buffer = cullOutputBuffers_.buffers[cullBufferTracker_.getReadIndex()];
+    leafInstanceInfo.buffer = cullOutputBuffers_.buffers[cullBufferTracker_.getWriteIndex()];
     leafInstanceInfo.offset = 0;
     leafInstanceInfo.range = VK_WHOLE_SIZE;
 
@@ -1931,10 +1932,10 @@ void TreeRenderer::render(VkCommandBuffer cmd, uint32_t frameIndex, float time,
     bool hasCulledDescriptors = !culledLeafDescriptorSets_.empty() &&
                                  frameIndex < culledLeafDescriptorSets_.size() &&
                                  !culledLeafDescriptorSets_[frameIndex].empty();
-    // Graphics reads from cullBufferTracker_.getReadIndex() (previous frame's compute output)
+    // Graphics reads from same buffer compute writes to (barrier ensures sync)
     bool useCulledPath = isLeafCullingEnabled() &&
                          hasCulledDescriptors &&
-                         cullIndirectBuffers_.buffers[cullBufferTracker_.getReadIndex()] != VK_NULL_HANDLE;
+                         cullIndirectBuffers_.buffers[cullBufferTracker_.getWriteIndex()] != VK_NULL_HANDLE;
 
     if (useCulledPath) {
         // GPU-culled multi-indirect draw path
@@ -1970,9 +1971,9 @@ void TreeRenderer::render(VkCommandBuffer cmd, uint32_t frameIndex, float time,
 
             // Indirect draw for this leaf type
             // Offset to the correct command in the indirect buffer
-            // Graphics reads from cullBufferTracker_.getReadIndex()
+            // Graphics reads from same buffer compute writes to
             VkDeviceSize commandOffset = leafType * sizeof(VkDrawIndexedIndirectCommand);
-            vkCmdDrawIndexedIndirect(cmd, cullIndirectBuffers_.buffers[cullBufferTracker_.getReadIndex()],
+            vkCmdDrawIndexedIndirect(cmd, cullIndirectBuffers_.buffers[cullBufferTracker_.getWriteIndex()],
                                      commandOffset, 1, sizeof(VkDrawIndexedIndirectCommand));
         }
         // Note: buffer set swap now happens via advanceBufferSet() at frame end
@@ -2055,13 +2056,13 @@ void TreeRenderer::renderShadows(VkCommandBuffer cmd, uint32_t frameIndex,
         }
 
         // Check if we should use GPU culling with indirect draws for shadows
-        // Graphics reads from cullBufferTracker_.getReadIndex() (previous frame's compute output)
+        // Graphics reads from same buffer compute writes to (barrier ensures sync)
         bool hasCulledDescriptors = !culledLeafDescriptorSets_.empty() &&
                                      frameIndex < culledLeafDescriptorSets_.size() &&
                                      !culledLeafDescriptorSets_[frameIndex].empty();
         bool useCulledPath = isLeafCullingEnabled() &&
                              hasCulledDescriptors &&
-                             cullIndirectBuffers_.buffers[cullBufferTracker_.getReadIndex()] != VK_NULL_HANDLE;
+                             cullIndirectBuffers_.buffers[cullBufferTracker_.getWriteIndex()] != VK_NULL_HANDLE;
 
         if (useCulledPath && !leafRenderables.empty()) {
             // GPU-culled multi-indirect draw path for shadows
@@ -2095,9 +2096,9 @@ void TreeRenderer::renderShadows(VkCommandBuffer cmd, uint32_t frameIndex,
                                    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                                    0, sizeof(TreeLeafShadowPushConstants), &push);
 
-                // Indirect draw for this leaf type (graphics reads from cullBufferTracker_.getReadIndex())
+                // Indirect draw for this leaf type (graphics reads same buffer compute writes to)
                 VkDeviceSize commandOffset = leafType * sizeof(VkDrawIndexedIndirectCommand);
-                vkCmdDrawIndexedIndirect(cmd, cullIndirectBuffers_.buffers[cullBufferTracker_.getReadIndex()],
+                vkCmdDrawIndexedIndirect(cmd, cullIndirectBuffers_.buffers[cullBufferTracker_.getWriteIndex()],
                                          commandOffset, 1, sizeof(VkDrawIndexedIndirectCommand));
             }
         } else {
