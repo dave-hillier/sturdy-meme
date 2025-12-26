@@ -3,12 +3,11 @@
 #extension GL_GOOGLE_include_directive : require
 
 #include "bindings.glsl"
-#include "constants_common.glsl"
-#include "lighting_common.glsl"
 #include "shadow_common.glsl"
 #include "ubo_common.glsl"
 #include "atmosphere_common.glsl"
 #include "color_common.glsl"
+#include "tree_lighting_common.glsl"
 
 layout(binding = BINDING_TREE_GFX_SHADOW_MAP) uniform sampler2DArrayShadow shadowMapArray;
 layout(binding = BINDING_TREE_GFX_LEAF_ALBEDO) uniform sampler2D leafAlbedo;
@@ -81,34 +80,22 @@ void main() {
         ubo.shadowMapSize, shadowMapArray
     );
 
-    // Simple lighting for leaves
-    float NdotL = max(dot(N, L), 0.0);
-
-    // Subsurface scattering approximation (light through leaves)
-    float NdotLBack = max(dot(-N, L), 0.0);
-    float subsurface = NdotLBack * 0.5;
-
-    // Diffuse with translucency
-    vec3 diffuse = baseColor * (NdotL + subsurface);
-
-    // Sun contribution
-    vec3 sunColor = ubo.sunColor.rgb;
-    float sunIntensity = ubo.sunDirection.w;
-    vec3 sunLighting = sunColor * sunIntensity * shadow;
-
-    vec3 directLight = diffuse * sunLighting;
-
-    // Ambient contribution
-    vec3 ambient = baseColor * 0.2;
-
-    // Final color
-    vec3 color = directLight + ambient;
+    // Calculate lighting using common function
+    vec3 color = calculateTreeLeafLighting(
+        N, V, L,
+        baseColor,
+        shadow,
+        ubo.sunColor.rgb,
+        ubo.sunDirection.w,
+        ubo.ambientColor.rgb
+    );
 
     // Apply aerial perspective for distant leaves
     vec3 cameraToFrag = fragWorldPos - ubo.cameraPosition.xyz;
     float viewDist = length(cameraToFrag);
     vec3 viewDir = normalize(cameraToFrag);
     vec3 sunDir = normalize(-ubo.sunDirection.xyz);
+    vec3 sunColor = ubo.sunColor.rgb * ubo.sunDirection.w;
     color = applyAerialPerspective(color, ubo.cameraPosition.xyz, viewDir, viewDist, sunDir, sunColor);
 
     // Output with alpha=1.0 since we use alpha-test (discard) for transparency

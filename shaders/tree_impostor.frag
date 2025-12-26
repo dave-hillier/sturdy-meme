@@ -9,6 +9,7 @@ const int NUM_CASCADES = 4;
 #include "shadow_common.glsl"
 #include "color_common.glsl"
 #include "octahedral_mapping.glsl"
+#include "tree_lighting_common.glsl"
 
 layout(location = 0) in vec2 fragTexCoord;
 layout(location = 1) in vec3 fragWorldPos;
@@ -167,7 +168,6 @@ void main() {
     vec3 worldNormal = normalize(fragImpostorToWorld * impostorNormal);
     worldNormal = mix(vec3(0.0, 1.0, 0.0), worldNormal, normalStrength);
 
-    float depth = normalDepthAO.b;
     float ao = normalDepthAO.a;
 
     // Get albedo and apply brightness adjustment
@@ -177,40 +177,27 @@ void main() {
     float autumnFactor = push.cameraPos.w;
     albedo = applyAutumnHueShift(albedo, autumnFactor);
 
-    // PBR parameters for tree foliage
-    float metallic = 0.0;
-    float roughness = 0.7;
-
-    // Calculate lighting
-    vec3 viewDir = normalize(ubo.cameraPosition.xyz - fragWorldPos);
-    vec3 lightDir = normalize(-ubo.sunDirection.xyz);
-
-    // Simple PBR-like lighting
-    float NdotL = max(dot(worldNormal, lightDir), 0.0);
-    vec3 halfVec = normalize(lightDir + viewDir);
-    float NdotH = max(dot(worldNormal, halfVec), 0.0);
-    float NdotV = max(dot(worldNormal, viewDir), 0.001);
-
-    // Diffuse
-    vec3 diffuse = albedo / 3.14159265;
-
-    // Simple specular
-    float spec = pow(NdotH, 32.0) * (1.0 - roughness);
-    vec3 specular = vec3(spec) * 0.1;
+    // Calculate lighting directions
+    vec3 V = normalize(ubo.cameraPosition.xyz - fragWorldPos);
+    vec3 L = normalize(-ubo.sunDirection.xyz);
 
     // Shadow sampling
     float shadow = calculateCascadedShadow(
-        fragWorldPos, worldNormal, lightDir,
+        fragWorldPos, worldNormal, L,
         ubo.view, ubo.cascadeSplits, ubo.cascadeViewProj,
         ubo.shadowMapSize, shadowMapArray
     );
 
-    // Combine lighting
-    vec3 sunLight = ubo.sunColor.rgb * ubo.sunColor.a;
-    vec3 ambient = ubo.ambientColor.rgb * ubo.ambientColor.a * ao;
-
-    vec3 color = ambient * albedo;
-    color += (diffuse + specular) * sunLight * NdotL * shadow;
+    // Calculate lighting using common function
+    vec3 color = calculateTreeImpostorLighting(
+        worldNormal, V, L,
+        albedo,
+        ao,
+        shadow,
+        ubo.sunColor.rgb,
+        ubo.sunDirection.w,
+        ubo.ambientColor.rgb
+    );
 
     outColor = vec4(color, 1.0);
 }
