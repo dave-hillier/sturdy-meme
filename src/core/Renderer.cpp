@@ -779,7 +779,8 @@ bool Renderer::render(const Camera& camera) {
         TreeLODSystem::ScreenParams screenParams;
         screenParams.screenHeight = static_cast<float>(extent.height);
         // Extract tanHalfFOV from projection matrix: proj[1][1] = 1/tan(fov/2)
-        screenParams.tanHalfFOV = 1.0f / frame.projection[1][1];
+        // Note: Vulkan Y-flip makes proj[1][1] negative, so use abs()
+        screenParams.tanHalfFOV = 1.0f / std::abs(frame.projection[1][1]);
         systems_->treeLOD()->update(frame.deltaTime, frame.cameraPosition, *systems_->tree(), screenParams);
     }
 

@@ -137,7 +137,8 @@ void RenderPipelineFactory::setupPipeline(
             lodParams.errorThresholdImpostor = lodSettings.errorThresholdImpostor;
             lodParams.errorThresholdCull = lodSettings.errorThresholdCull;
         }
-        lodParams.tanHalfFOV = 1.0f / ctx.frame.projection[1][1];
+        // Note: Vulkan Y-flip makes projection[1][1] negative, so use abs()
+        lodParams.tanHalfFOV = 1.0f / std::abs(ctx.frame.projection[1][1]);
 
         impostorCull->recordCulling(
             ctx.cmd, ctx.frameIndex,
