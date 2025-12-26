@@ -537,6 +537,21 @@ uint32_t TreeSystem::addTree(const glm::vec3& position, float rotation, float sc
     instance.meshIndex = meshIndex;
     instance.isSelected = false;
 
+    // Determine archetype index based on leaf type
+    // Archetypes: 0=oak, 1=pine, 2=ash, 3=aspen
+    const std::string& leafType = options.leaves.type;
+    if (leafType == "oak") {
+        instance.archetypeIndex = 0;
+    } else if (leafType == "pine") {
+        instance.archetypeIndex = 1;
+    } else if (leafType == "ash") {
+        instance.archetypeIndex = 2;
+    } else if (leafType == "aspen") {
+        instance.archetypeIndex = 3;
+    } else {
+        instance.archetypeIndex = 0;  // Default to oak
+    }
+
     uint32_t treeIndex = static_cast<uint32_t>(treeInstances_.size());
     treeInstances_.push_back(instance);
 

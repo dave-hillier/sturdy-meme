@@ -12,6 +12,7 @@ layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 struct TreeInputData {
     vec4 positionAndScale;    // xyz = world position, w = scale
     vec4 rotationAndArchetype; // x = Y-axis rotation, yzw = archetype index as uint bits
+    vec4 sizeAndOffset;       // x = hSize, y = vSize, z = centerHeight (all at scale=1)
 };
 
 layout(std430, binding = BINDING_TREE_IMPOSTOR_CULL_INPUT) readonly buffer InputBuffer {
@@ -371,6 +372,8 @@ void main() {
     uint outputSlot = atomicAdd(drawCmd.instanceCount, 1);
 
     // Write visible impostor data
+    // Use per-tree sizing from input data (already computed from actual mesh bounds)
+    vec4 treeSizing = trees[treeIdx].sizeAndOffset;
     visibleImpostors[outputSlot].positionAndScale = vec4(treePos, treeScale);
     visibleImpostors[outputSlot].rotationAndArchetype = vec4(
         rotation,
@@ -379,9 +382,9 @@ void main() {
         0.0  // reserved
     );
     visibleImpostors[outputSlot].sizeAndOffset = vec4(
-        arch.sizingData.x * treeScale,  // hSize pre-scaled
-        arch.sizingData.y * treeScale,  // vSize pre-scaled
-        arch.sizingData.z * treeScale,  // baseOffset pre-scaled
+        treeSizing.x * treeScale,  // hSize pre-scaled (from per-tree mesh bounds)
+        treeSizing.y * treeScale,  // vSize pre-scaled (from per-tree mesh bounds)
+        treeSizing.z * treeScale,  // centerHeight pre-scaled (from per-tree mesh bounds)
         0.0  // reserved
     );
 }

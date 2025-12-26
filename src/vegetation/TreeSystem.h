@@ -39,6 +39,7 @@ struct TreeInstanceData {
     float rotation;         // Y-axis rotation
     float scale;            // Uniform scale factor
     uint32_t meshIndex;     // Which tree mesh to use
+    uint32_t archetypeIndex; // Which impostor archetype to use (0=oak, 1=pine, 2=ash, 3=aspen)
     bool isSelected;        // Is this the currently editable tree
 };
 

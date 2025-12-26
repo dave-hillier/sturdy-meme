@@ -291,10 +291,10 @@ void ImpostorCullSystem::updateTreeData(const TreeSystem& treeSystem, const Tree
         const auto& tree = trees[i];
         inputData[i].positionAndScale = glm::vec4(tree.position, tree.scale);
 
-        // Assign archetype index based on tree type
-        uint32_t archetypeIndex = 0;
-        if (numArchetypes > 0) {
-            archetypeIndex = static_cast<uint32_t>(i % numArchetypes);
+        // Use the tree's stored archetype index (set based on leaf type)
+        uint32_t archetypeIndex = tree.archetypeIndex;
+        if (numArchetypes > 0 && archetypeIndex >= numArchetypes) {
+            archetypeIndex = archetypeIndex % numArchetypes;
         }
 
         inputData[i].rotationAndArchetype = glm::vec4(
@@ -302,6 +302,36 @@ void ImpostorCullSystem::updateTreeData(const TreeSystem& treeSystem, const Tree
             glm::uintBitsToFloat(archetypeIndex),
             0.0f, 0.0f
         );
+
+        // Compute per-tree sizing from actual mesh bounds (at scale=1)
+        if (tree.meshIndex < treeSystem.getMeshCount()) {
+            const auto& meshBounds = treeSystem.getBranchMesh(tree.meshIndex).getBounds();
+            glm::vec3 minB = meshBounds.min;
+            glm::vec3 maxB = meshBounds.max;
+            glm::vec3 extent = maxB - minB;
+
+            float horizontalRadius = std::max(extent.x, extent.z) * 0.5f;
+            float halfHeight = extent.y * 0.5f;
+            float boundingSphereRadius = glm::length(extent) * 0.5f;
+
+            // Match the sizing calculation from CPU path
+            float maxHSize = boundingSphereRadius * TreeLODConstants::IMPOSTOR_SIZE_MARGIN;
+            float maxVSize = halfHeight * TreeLODConstants::IMPOSTOR_SIZE_MARGIN;
+            float projSize = std::max(maxHSize, maxVSize);
+            float centerHeight = (minB.y + maxB.y) * 0.5f;
+
+            inputData[i].sizeAndOffset = glm::vec4(projSize, projSize, centerHeight, 0.0f);
+        } else if (atlas && archetypeIndex < atlas->getArchetypeCount()) {
+            // Fallback to archetype bounds
+            const auto* archetype = atlas->getArchetype(archetypeIndex);
+            float maxHSize = archetype->boundingSphereRadius * TreeLODConstants::IMPOSTOR_SIZE_MARGIN;
+            float maxVSize = archetype->treeHeight * 0.5f * TreeLODConstants::IMPOSTOR_SIZE_MARGIN;
+            float projSize = std::max(maxHSize, maxVSize);
+            inputData[i].sizeAndOffset = glm::vec4(projSize, projSize, archetype->centerHeight, 0.0f);
+        } else {
+            // Default fallback
+            inputData[i].sizeAndOffset = glm::vec4(10.0f, 10.0f, 5.0f, 0.0f);
+        }
     }
 
     // Upload to GPU

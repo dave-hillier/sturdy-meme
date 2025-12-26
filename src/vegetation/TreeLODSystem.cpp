@@ -649,14 +649,11 @@ void TreeLODSystem::update(float deltaTime, const glm::vec3& cameraPos, const Tr
         const auto& tree = instances[i];
         auto& state = lodStates_[i];
 
-        // Assign archetype index based on tree type
-        // Display trees (0-3) map directly to their archetype
-        // Forest trees (4+) cycle through archetypes
+        // Use the tree's stored archetype index (set based on leaf type in TreeSystem)
         if (numArchetypes > 0) {
-            if (i < numDisplayTrees) {
-                state.archetypeIndex = static_cast<uint32_t>(i) % numArchetypes;
-            } else {
-                state.archetypeIndex = static_cast<uint32_t>((i - numDisplayTrees) % numArchetypes);
+            state.archetypeIndex = tree.archetypeIndex;
+            if (state.archetypeIndex >= numArchetypes) {
+                state.archetypeIndex = state.archetypeIndex % numArchetypes;
             }
         }
 

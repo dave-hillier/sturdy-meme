@@ -126,14 +126,17 @@ void main() {
     vec3 leafLocalPos = leaf.positionAndSize.xyz;
     vec4 worldPos = tree.treeModel * vec4(leafLocalPos, 1.0);
 
+    // Extract uniform scale from model matrix (assumes uniform scaling)
+    float treeScale = length(tree.treeModel[0].xyz);
+
     // Distance culling
     float distToCamera = getDistanceToCamera(worldPos.xyz, cameraPosition.xyz);
     if (distToCamera > maxDrawDistance) {
         return;
     }
 
-    // Frustum culling with margin for leaf size
-    float leafSize = leaf.positionAndSize.w;
+    // Scale leaf size by tree scale to match impostor sizing
+    float leafSize = leaf.positionAndSize.w * treeScale;
     float margin = leafSize * 2.0;  // Extra margin for leaf billboard rotation
     if (!isInFrustum(frustumPlanes, worldPos.xyz, margin)) {
         return;

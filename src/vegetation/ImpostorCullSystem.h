@@ -48,6 +48,7 @@ struct ArchetypeCullData {
 struct TreeCullInputData {
     glm::vec4 positionAndScale;      // xyz = world position, w = scale
     glm::vec4 rotationAndArchetype;  // x = Y-axis rotation, yzw = archetype index as uint bits
+    glm::vec4 sizeAndOffset;         // x = hSize, y = vSize, z = centerHeight (all at scale=1)
 };
 
 // Visible impostor output data (matches shader struct)
