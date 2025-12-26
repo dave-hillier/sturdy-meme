@@ -7,6 +7,8 @@
 #include <array>
 #include <cmath>
 
+using namespace vk;  // Vulkan-Hpp type-safe wrappers
+
 std::unique_ptr<FroxelSystem> FroxelSystem::create(const InitInfo& info) {
     std::unique_ptr<FroxelSystem> system(new FroxelSystem());
     if (!system->initInternal(info)) {
@@ -92,41 +94,43 @@ void FroxelSystem::resize(VkDevice device, VmaAllocator allocator, VkExtent2D ne
 bool FroxelSystem::createScatteringVolume() {
     // Create two 3D images for double-buffered scattering data (ping-pong for temporal)
     // Format: R16G16B16A16_SFLOAT for in-scatter RGB and opacity
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_3D;
-    imageInfo.format = VK_FORMAT_R16G16B16A16_SFLOAT;
-    imageInfo.extent = {FROXEL_WIDTH, FROXEL_HEIGHT, FROXEL_DEPTH};
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    ImageCreateInfo imageInfo{
+        {},                                  // flags
+        ImageType::e3D,
+        Format::eR16G16B16A16Sfloat,
+        Extent3D{FROXEL_WIDTH, FROXEL_HEIGHT, FROXEL_DEPTH},
+        1, 1,                                // mipLevels, arrayLayers
+        SampleCountFlagBits::e1,
+        ImageTiling::eOptimal,
+        ImageUsageFlagBits::eStorage | ImageUsageFlagBits::eSampled,
+        SharingMode::eExclusive,
+        0, nullptr,                          // queueFamilyIndexCount, pQueueFamilyIndices
+        ImageLayout::eUndefined
+    };
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
-    VkImageViewCreateInfo viewInfo{};
-    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_3D;
-    viewInfo.format = VK_FORMAT_R16G16B16A16_SFLOAT;
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = 1;
-    viewInfo.subresourceRange.baseArrayLayer = 0;
-    viewInfo.subresourceRange.layerCount = 1;
+    auto vkImageInfo = static_cast<VkImageCreateInfo>(imageInfo);
 
     // Create both buffers for ping-pong
     for (int i = 0; i < 2; i++) {
-        if (!ManagedImage::create(allocator, imageInfo, allocInfo, scatteringVolumes_[i])) {
+        if (!ManagedImage::create(allocator, vkImageInfo, allocInfo, scatteringVolumes_[i])) {
             SDL_Log("Failed to create scattering volume %d", i);
             return false;
         }
 
-        viewInfo.image = scatteringVolumes_[i].get();
-        if (!ManagedImageView::create(device, viewInfo, scatteringVolumeViews_[i])) {
+        ImageViewCreateInfo viewInfo{
+            {},                              // flags
+            scatteringVolumes_[i].get(),
+            ImageViewType::e3D,
+            Format::eR16G16B16A16Sfloat,
+            ComponentMapping{},              // identity swizzle
+            ImageSubresourceRange{ImageAspectFlagBits::eColor, 0, 1, 0, 1}
+        };
+
+        auto vkViewInfo = static_cast<VkImageViewCreateInfo>(viewInfo);
+        if (!ManagedImageView::create(device, vkViewInfo, scatteringVolumeViews_[i])) {
             SDL_Log("Failed to create scattering volume view %d", i);
             return false;
         }
@@ -137,39 +141,40 @@ bool FroxelSystem::createScatteringVolume() {
 
 bool FroxelSystem::createIntegratedVolume() {
     // Create 3D image for integrated scattering (front-to-back)
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_3D;
-    imageInfo.format = VK_FORMAT_R16G16B16A16_SFLOAT;
-    imageInfo.extent = {FROXEL_WIDTH, FROXEL_HEIGHT, FROXEL_DEPTH};
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    ImageCreateInfo imageInfo{
+        {},                                  // flags
+        ImageType::e3D,
+        Format::eR16G16B16A16Sfloat,
+        Extent3D{FROXEL_WIDTH, FROXEL_HEIGHT, FROXEL_DEPTH},
+        1, 1,                                // mipLevels, arrayLayers
+        SampleCountFlagBits::e1,
+        ImageTiling::eOptimal,
+        ImageUsageFlagBits::eStorage | ImageUsageFlagBits::eSampled,
+        SharingMode::eExclusive,
+        0, nullptr,                          // queueFamilyIndexCount, pQueueFamilyIndices
+        ImageLayout::eUndefined
+    };
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
-    if (!ManagedImage::create(allocator, imageInfo, allocInfo, integratedVolume_)) {
+    auto vkImageInfo = static_cast<VkImageCreateInfo>(imageInfo);
+    if (!ManagedImage::create(allocator, vkImageInfo, allocInfo, integratedVolume_)) {
         SDL_Log("Failed to create integrated volume");
         return false;
     }
 
-    VkImageViewCreateInfo viewInfo{};
-    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.image = integratedVolume_.get();
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_3D;
-    viewInfo.format = VK_FORMAT_R16G16B16A16_SFLOAT;
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = 1;
-    viewInfo.subresourceRange.baseArrayLayer = 0;
-    viewInfo.subresourceRange.layerCount = 1;
+    ImageViewCreateInfo viewInfo{
+        {},                              // flags
+        integratedVolume_.get(),
+        ImageViewType::e3D,
+        Format::eR16G16B16A16Sfloat,
+        ComponentMapping{},              // identity swizzle
+        ImageSubresourceRange{ImageAspectFlagBits::eColor, 0, 1, 0, 1}
+    };
 
-    if (!ManagedImageView::create(device, viewInfo, integratedVolumeView_)) {
+    auto vkViewInfo = static_cast<VkImageViewCreateInfo>(viewInfo);
+    if (!ManagedImageView::create(device, vkViewInfo, integratedVolumeView_)) {
         SDL_Log("Failed to create integrated volume view");
         return false;
     }
@@ -178,22 +183,23 @@ bool FroxelSystem::createIntegratedVolume() {
 }
 
 bool FroxelSystem::createSampler() {
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.mipLodBias = 0.0f;
-    samplerInfo.anisotropyEnable = VK_FALSE;
-    samplerInfo.compareEnable = VK_FALSE;
-    samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = 0.0f;
-    samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
+    SamplerCreateInfo samplerInfo{
+        {},                                  // flags
+        Filter::eLinear,
+        Filter::eLinear,
+        SamplerMipmapMode::eLinear,
+        SamplerAddressMode::eClampToEdge,
+        SamplerAddressMode::eClampToEdge,
+        SamplerAddressMode::eClampToEdge,
+        0.0f,                                // mipLodBias
+        VK_FALSE, 1.0f,                      // anisotropyEnable, maxAnisotropy
+        VK_FALSE, {},                        // compareEnable, compareOp
+        0.0f, 0.0f,                          // minLod, maxLod
+        BorderColor::eFloatTransparentBlack
+    };
 
-    if (!ManagedSampler::create(device, samplerInfo, volumeSampler)) {
+    auto vkSamplerInfo = static_cast<VkSamplerCreateInfo>(samplerInfo);
+    if (!ManagedSampler::create(device, vkSamplerInfo, volumeSampler)) {
         SDL_Log("Failed to create volume sampler");
         return false;
     }
@@ -279,18 +285,21 @@ bool FroxelSystem::createFroxelUpdatePipeline() {
         return false;
     }
 
-    VkPipelineShaderStageCreateInfo stageInfo{};
-    stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stageInfo.module = *shaderModule;
-    stageInfo.pName = "main";
+    PipelineShaderStageCreateInfo stageInfo{
+        {},                              // flags
+        ShaderStageFlagBits::eCompute,
+        *shaderModule,
+        "main"
+    };
 
-    VkComputePipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    pipelineInfo.stage = stageInfo;
-    pipelineInfo.layout = froxelPipelineLayout.get();
+    ComputePipelineCreateInfo pipelineInfo{
+        {},                              // flags
+        stageInfo,
+        froxelPipelineLayout.get()
+    };
 
-    bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, froxelUpdatePipeline);
+    auto vkPipelineInfo = static_cast<VkComputePipelineCreateInfo>(pipelineInfo);
+    bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, vkPipelineInfo, froxelUpdatePipeline);
     vkDestroyShaderModule(device, *shaderModule, nullptr);
 
     if (!success) {
@@ -315,18 +324,21 @@ bool FroxelSystem::createIntegrationPipeline() {
         return false;
     }
 
-    VkPipelineShaderStageCreateInfo stageInfo{};
-    stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stageInfo.module = *shaderModule;
-    stageInfo.pName = "main";
+    PipelineShaderStageCreateInfo stageInfo{
+        {},                              // flags
+        ShaderStageFlagBits::eCompute,
+        *shaderModule,
+        "main"
+    };
 
-    VkComputePipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    pipelineInfo.stage = stageInfo;
-    pipelineInfo.layout = froxelPipelineLayout.get();
+    ComputePipelineCreateInfo pipelineInfo{
+        {},                              // flags
+        stageInfo,
+        froxelPipelineLayout.get()
+    };
 
-    bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, integrationPipeline);
+    auto vkPipelineInfo = static_cast<VkComputePipelineCreateInfo>(pipelineInfo);
+    bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, vkPipelineInfo, integrationPipeline);
     vkDestroyShaderModule(device, *shaderModule, nullptr);
 
     if (!success) {
