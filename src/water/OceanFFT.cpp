@@ -2,6 +2,7 @@
 #include "ShaderLoader.h"
 #include "DescriptorManager.h"
 #include "VulkanBarriers.h"
+#include "VulkanResourceFactory.h"
 #include "shaders/bindings.h"
 #include <SDL3/SDL_log.h>
 #include <cmath>
