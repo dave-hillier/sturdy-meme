@@ -818,14 +818,14 @@ void GrassSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex
     vkCmdDispatch(cmd, 63, 63, 1);
 
     // Memory barrier: compute write -> vertex shader read (storage buffer) and indirect read
-    // Note: This barrier ensures the compute results are visible when we draw from this buffer
-    // in the NEXT frame (after advanceBufferSet swaps the sets)
+    // This barrier ensures compute finishes before graphics reads from the same buffer
     Barriers::computeToVertexAndIndirectDraw(cmd);
 }
 
 void GrassSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time) {
-    // Double-buffer: graphics reads from renderBufferSet (previous frame's compute output)
-    uint32_t readSet = (*particleSystem)->getRenderBufferSet();
+    // Same-frame: graphics reads from computeBufferSet (same buffer compute writes to)
+    // The barrier in recordResetAndCompute ensures compute finishes before graphics reads
+    uint32_t readSet = (*particleSystem)->getComputeBufferSet();
 
     // Dynamic UBO: no per-frame descriptor update needed - we pass the offset at bind time instead
     // This eliminates per-frame vkUpdateDescriptorSets calls for the renderer UBO
@@ -870,8 +870,8 @@ void GrassSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float tim
 }
 
 void GrassSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time, uint32_t cascadeIndex) {
-    // Double-buffer: shadow pass reads from renderBufferSet (same as main draw)
-    uint32_t readSet = (*particleSystem)->getRenderBufferSet();
+    // Same-frame: shadow pass reads from computeBufferSet (same as main draw)
+    uint32_t readSet = (*particleSystem)->getComputeBufferSet();
 
     // Update shadow descriptor set to use this frame's renderer UBO
     if (!rendererUniformBuffers_.empty()) {

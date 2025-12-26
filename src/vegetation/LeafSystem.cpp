@@ -573,8 +573,9 @@ void LeafSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex,
 }
 
 void LeafSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time) {
-    // Double-buffer: graphics reads from renderBufferSet (previous frame's compute output)
-    uint32_t readSet = (*particleSystem)->getRenderBufferSet();
+    // Same-frame: graphics reads from computeBufferSet (same buffer compute writes to)
+    // The barrier in recordResetAndCompute ensures compute finishes before graphics reads
+    uint32_t readSet = (*particleSystem)->getComputeBufferSet();
 
     // Dynamic UBO: no per-frame descriptor update needed - we pass the offset at bind time instead
     // This eliminates per-frame vkUpdateDescriptorSets calls for the renderer UBO
