@@ -14,6 +14,7 @@
 #include "DescriptorManager.h"
 #include "core/RAIIAdapter.h"
 #include "core/VulkanRAII.h"
+#include "OceanFFT.h"
 
 class ShadowSystem;
 
@@ -250,6 +251,11 @@ public:
     bool getUseTessellation() const { return useTessellation_; }
     bool isTessellationSupported() const { return tessellationPipeline.get() != VK_NULL_HANDLE; }
 
+    // FFT Ocean access
+    OceanFFT* getOceanFFT() { return oceanFFT_.get(); }
+    const OceanFFT* getOceanFFT() const { return oceanFFT_.get(); }
+    void updateOceanFFT(VkCommandBuffer cmd, uint32_t frameIndex, float time);
+
     // Get uniform buffers (for G-buffer pass descriptor sets)
     VkBuffer getUniformBuffer(size_t frameIndex) const { return waterUniformBuffers_[frameIndex].get(); }
     std::vector<VkBuffer> getUniformBuffers() const {
@@ -392,6 +398,9 @@ private:
 
     // Caustics texture (Phase 9) - RAII-managed
     std::optional<RAIIAdapter<Texture>> causticsTexture;
+
+    // FFT Ocean simulation
+    std::unique_ptr<OceanFFT> oceanFFT_;
 
     // Tidal parameters
     float baseWaterLevel = 0.0f;  // Mean sea level

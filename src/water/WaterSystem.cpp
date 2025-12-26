@@ -86,6 +86,36 @@ bool WaterSystem::initInternal(const InitInfo& info) {
     if (!loadFoamTexture()) return false;
     if (!loadCausticsTexture()) return false;
 
+    // Initialize FFT Ocean simulation
+    OceanFFT::OceanParams oceanParams;
+    oceanParams.resolution = 256;
+    oceanParams.oceanSize = 256.0f;
+    oceanParams.windSpeed = 10.0f;
+    oceanParams.windDirection = glm::vec2(0.8f, 0.6f);
+    oceanParams.amplitude = 0.0002f;
+    oceanParams.choppiness = 1.2f;
+    oceanParams.heightScale = 1.0f;
+
+    OceanFFT::InitInfo oceanInfo{};
+    oceanInfo.device = device;
+    oceanInfo.physicalDevice = physicalDevice;
+    oceanInfo.allocator = allocator;
+    oceanInfo.commandPool = commandPool;
+    oceanInfo.computeQueue = graphicsQueue;  // Use graphics queue for compute
+    oceanInfo.shaderPath = shaderPath;
+    oceanInfo.framesInFlight = framesInFlight;
+    oceanInfo.params = oceanParams;
+    oceanInfo.useCascades = true;
+
+    oceanFFT_ = OceanFFT::create(oceanInfo);
+    if (!oceanFFT_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "WaterSystem: Failed to create OceanFFT");
+        return false;
+    }
+
+    // Set FFT ocean mode by default
+    setUseFFTOcean(true, oceanParams.oceanSize, oceanParams.oceanSize / 4.0f, oceanParams.oceanSize / 16.0f);
+
     return true;
 }
 
@@ -93,6 +123,7 @@ void WaterSystem::cleanup() {
     if (device == VK_NULL_HANDLE) return;  // Not initialized
 
     // Destroy RAII-managed resources
+    oceanFFT_.reset();
     foamTexture.reset();
     causticsTexture.reset();
     waterMesh.reset();
@@ -436,9 +467,19 @@ bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffe
         writer.writeImage(8, (*causticsTexture)->getImageView(), (*causticsTexture)->getSampler());
         writer.writeImage(9, ssrView, ssrSampler, VK_IMAGE_LAYOUT_GENERAL);
         writer.writeImage(10, sceneDepthView, sceneDepthSampler, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
-        writer.writeImage(11, displacementMapView, displacementMapSampler);  // FFT Ocean displacement placeholder
-        writer.writeImage(12, displacementMapView, displacementMapSampler);  // FFT Ocean normal placeholder
-        writer.writeImage(13, displacementMapView, displacementMapSampler);  // FFT Ocean foam placeholder
+
+        // FFT Ocean cascade 0 (bindings 11-13)
+        if (oceanFFT_ && oceanFFT_->getDisplacementView(0) != VK_NULL_HANDLE) {
+            VkSampler oceanSampler = oceanFFT_->getSampler();
+            writer.writeImage(11, oceanFFT_->getDisplacementView(0), oceanSampler);
+            writer.writeImage(12, oceanFFT_->getNormalView(0), oceanSampler);
+            writer.writeImage(13, oceanFFT_->getFoamView(0), oceanSampler);
+        } else {
+            // Fallback to placeholders if OceanFFT not ready
+            writer.writeImage(11, displacementMapView, displacementMapSampler);
+            writer.writeImage(12, displacementMapView, displacementMapSampler);
+            writer.writeImage(13, displacementMapView, displacementMapSampler);
+        }
 
         // Tile cache bindings (14 and 15) - for high-res terrain sampling
         if (tileArrayView != VK_NULL_HANDLE && tileSampler != VK_NULL_HANDLE) {
@@ -450,14 +491,27 @@ bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffe
         }
 
         // FFT Ocean cascade 1 and 2 (bindings 16-21)
-        // Currently using placeholders until OceanFFT is integrated into the renderer
-        // TODO: Replace with actual OceanFFT cascade views when integrated
-        writer.writeImage(16, displacementMapView, displacementMapSampler);  // Cascade 1 displacement placeholder
-        writer.writeImage(17, displacementMapView, displacementMapSampler);  // Cascade 1 normal placeholder
-        writer.writeImage(18, displacementMapView, displacementMapSampler);  // Cascade 1 foam placeholder
-        writer.writeImage(19, displacementMapView, displacementMapSampler);  // Cascade 2 displacement placeholder
-        writer.writeImage(20, displacementMapView, displacementMapSampler);  // Cascade 2 normal placeholder
-        writer.writeImage(21, displacementMapView, displacementMapSampler);  // Cascade 2 foam placeholder
+        if (oceanFFT_ && oceanFFT_->getCascadeCount() >= 2) {
+            VkSampler oceanSampler = oceanFFT_->getSampler();
+            writer.writeImage(16, oceanFFT_->getDisplacementView(1), oceanSampler);
+            writer.writeImage(17, oceanFFT_->getNormalView(1), oceanSampler);
+            writer.writeImage(18, oceanFFT_->getFoamView(1), oceanSampler);
+        } else {
+            writer.writeImage(16, displacementMapView, displacementMapSampler);
+            writer.writeImage(17, displacementMapView, displacementMapSampler);
+            writer.writeImage(18, displacementMapView, displacementMapSampler);
+        }
+
+        if (oceanFFT_ && oceanFFT_->getCascadeCount() >= 3) {
+            VkSampler oceanSampler = oceanFFT_->getSampler();
+            writer.writeImage(19, oceanFFT_->getDisplacementView(2), oceanSampler);
+            writer.writeImage(20, oceanFFT_->getNormalView(2), oceanSampler);
+            writer.writeImage(21, oceanFFT_->getFoamView(2), oceanSampler);
+        } else {
+            writer.writeImage(19, displacementMapView, displacementMapSampler);
+            writer.writeImage(20, displacementMapView, displacementMapSampler);
+            writer.writeImage(21, displacementMapView, displacementMapSampler);
+        }
 
         // Environment cubemap (binding 22) - Phase 2 SSR fallback
         if (envCubemapView != VK_NULL_HANDLE && envCubemapSampler != VK_NULL_HANDLE) {
@@ -477,6 +531,12 @@ bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffe
 void WaterSystem::updateUniforms(uint32_t frameIndex) {
     // Copy water uniforms to mapped buffer
     std::memcpy(waterUniformMapped[frameIndex], &waterUniforms, sizeof(WaterUniforms));
+}
+
+void WaterSystem::updateOceanFFT(VkCommandBuffer cmd, uint32_t frameIndex, float time) {
+    if (oceanFFT_ && pushConstants.useFFTOcean) {
+        oceanFFT_->update(cmd, frameIndex, time);
+    }
 }
 
 void WaterSystem::setWaterExtent(const glm::vec2& position, const glm::vec2& size) {

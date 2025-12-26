@@ -151,6 +151,14 @@ void RenderPipelineFactory::setupPipeline(
         systems.profiler().endGpuZone(ctx.cmd, "ImpostorCull");
     });
 
+    // Ocean FFT compute pass (Tessendorf ocean simulation)
+    pipeline.computeStage.addPass("oceanFFT", [&systems](RenderContext& ctx) {
+        if (!systems.water().getUseFFTOcean()) return;
+        systems.profiler().beginGpuZone(ctx.cmd, "OceanFFT");
+        systems.water().updateOceanFFT(ctx.cmd, ctx.frameIndex, ctx.frame.time);
+        systems.profiler().endGpuZone(ctx.cmd, "OceanFFT");
+    });
+
     // Water foam persistence compute pass
     pipeline.computeStage.addPass("foam", [&systems](RenderContext& ctx) {
         systems.profiler().beginGpuZone(ctx.cmd, "FoamCompute");
