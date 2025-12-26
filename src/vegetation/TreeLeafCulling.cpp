@@ -136,7 +136,24 @@ bool TreeLeafCulling::createLeafCullPipeline() {
 
 bool TreeLeafCulling::createLeafCullBuffers(uint32_t maxLeafInstances, uint32_t numTrees) {
     numTreesForIndirect_ = numTrees;
-    maxLeavesPerType_ = maxLeafInstances;
+
+    // Use a fixed budget for visible leaf output rather than sizing for all possible instances.
+    // The GPU culling pass outputs only visible leaves, so we size for expected maximum visibility:
+    // - ~30-50 trees visible at once (close enough for full leaf detail)
+    // - ~2000-3000 leaves per tree on average
+    // - Total: ~60k-150k visible leaf instances per type at peak
+    //
+    // Using 50k per type = 200k total * 48 bytes * 3 frames = ~28.8MB
+    // This is a reasonable GPU memory budget for leaf rendering.
+    constexpr uint32_t MAX_VISIBLE_LEAVES_PER_TYPE = 50000;
+    maxLeavesPerType_ = MAX_VISIBLE_LEAVES_PER_TYPE;
+
+    // Only log if input was much larger (avoid spam for reasonable inputs)
+    if (maxLeafInstances > MAX_VISIBLE_LEAVES_PER_TYPE * 4) {
+        SDL_Log("TreeLeafCulling: Using fixed output budget of %u leaves/type (input was %u total)",
+                MAX_VISIBLE_LEAVES_PER_TYPE, maxLeafInstances);
+    }
+
     cullOutputBufferSize_ = NUM_LEAF_TYPES * maxLeavesPerType_ * sizeof(WorldLeafInstanceGPU);
 
     VkBufferCreateInfo bufferInfo{};

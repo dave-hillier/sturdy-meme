@@ -512,34 +512,40 @@ void TreeRenderer::recordBranchShadowCulling(VkCommandBuffer cmd, uint32_t frame
 }
 
 void TreeRenderer::updateBranchCullingData(const TreeSystem& treeSystem, const TreeLODSystem* lodSystem) {
-    if (branchShadowCulling_) {
-        branchShadowCulling_->updateTreeData(treeSystem, lodSystem);
+    if (!branchShadowCulling_) return;
 
-        // Update descriptor sets with new instance buffer
-        if (!branchShadowInstancedDescriptorSets_.empty()) {
-            VkBuffer instanceBuffer = branchShadowCulling_->getInstanceBuffer();
-            if (instanceBuffer != VK_NULL_HANDLE) {
-                for (uint32_t i = 0; i < branchShadowInstancedDescriptorSets_.size(); ++i) {
-                    // Note: We need the UBO buffer from somewhere - this is updated per-frame
-                    // For now, we update only the instance buffer binding
-                    VkDescriptorBufferInfo instanceBufferInfo{};
-                    instanceBufferInfo.buffer = instanceBuffer;
-                    instanceBufferInfo.offset = 0;
-                    instanceBufferInfo.range = VK_WHOLE_SIZE;
+    branchShadowCulling_->updateTreeData(treeSystem, lodSystem);
 
-                    VkWriteDescriptorSet instanceWrite{};
-                    instanceWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                    instanceWrite.dstSet = branchShadowInstancedDescriptorSets_[i];
-                    instanceWrite.dstBinding = Bindings::TREE_GFX_BRANCH_SHADOW_INSTANCES;
-                    instanceWrite.dstArrayElement = 0;
-                    instanceWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-                    instanceWrite.descriptorCount = 1;
-                    instanceWrite.pBufferInfo = &instanceBufferInfo;
+    // Update descriptor sets with frame-specific instance buffers
+    // Only proceed if culling system is fully initialized with valid buffers
+    if (branchShadowInstancedDescriptorSets_.empty() ||
+        !branchShadowCulling_->isEnabled()) {
+        return;
+    }
 
-                    vkUpdateDescriptorSets(device_, 1, &instanceWrite, 0, nullptr);
-                }
-            }
+    for (uint32_t i = 0; i < branchShadowInstancedDescriptorSets_.size(); ++i) {
+        VkBuffer instanceBuffer = branchShadowCulling_->getInstanceBuffer(i);
+        if (instanceBuffer == VK_NULL_HANDLE) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "TreeRenderer: Instance buffer %u is NULL, skipping descriptor update", i);
+            continue;
         }
+
+        VkDescriptorBufferInfo instanceBufferInfo{};
+        instanceBufferInfo.buffer = instanceBuffer;
+        instanceBufferInfo.offset = 0;
+        instanceBufferInfo.range = VK_WHOLE_SIZE;
+
+        VkWriteDescriptorSet instanceWrite{};
+        instanceWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        instanceWrite.dstSet = branchShadowInstancedDescriptorSets_[i];
+        instanceWrite.dstBinding = Bindings::TREE_GFX_BRANCH_SHADOW_INSTANCES;
+        instanceWrite.dstArrayElement = 0;
+        instanceWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        instanceWrite.descriptorCount = 1;
+        instanceWrite.pBufferInfo = &instanceBufferInfo;
+
+        vkUpdateDescriptorSets(device_, 1, &instanceWrite, 0, nullptr);
     }
 }
 
@@ -687,7 +693,7 @@ void TreeRenderer::renderShadows(VkCommandBuffer cmd, uint32_t frameIndex,
                                 branchShadowInstancedPipeline_.get() != VK_NULL_HANDLE &&
                                 !branchShadowInstancedDescriptorSets_.empty() &&
                                 frameIndex < branchShadowInstancedDescriptorSets_.size() &&
-                                branchShadowCulling_->getIndirectBuffer() != VK_NULL_HANDLE;
+                                branchShadowCulling_->getIndirectBuffer(frameIndex) != VK_NULL_HANDLE;
 
         if (useInstancedPath) {
             // GPU-driven instanced branch shadow rendering
@@ -718,13 +724,11 @@ void TreeRenderer::renderShadows(VkCommandBuffer cmd, uint32_t frameIndex,
                                            VK_SHADER_STAGE_VERTEX_BIT,
                                            0, sizeof(TreeBranchShadowInstancedPushConstants), &push);
 
-                        vkCmdDrawIndexedIndirect(cmd, branchShadowCulling_->getIndirectBuffer(),
+                        vkCmdDrawIndexedIndirect(cmd, branchShadowCulling_->getIndirectBuffer(frameIndex),
                                                  group.indirectOffset, 1, sizeof(VkDrawIndexedIndirectCommand));
                     }
                 }
             }
-
-            branchShadowCulling_->swapBufferSets();
         } else if (branchShadowPipeline_.get() != VK_NULL_HANDLE) {
             // Fallback: per-tree branch shadow rendering
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, branchShadowPipeline_.get());

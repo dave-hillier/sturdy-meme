@@ -79,12 +79,18 @@ bool isInFrustum(vec3 center, float radius) {
     return true;
 }
 
+// Maximum mesh groups to prevent GPU hang from garbage uniform data
+const uint MAX_MESH_GROUPS = 16u;
+
 void main() {
     uint treeIdx = gl_GlobalInvocationID.x;
 
+    // Clamp to prevent infinite loop if uniform data is garbage
+    uint safeNumMeshGroups = min(uniforms.numMeshGroups, MAX_MESH_GROUPS);
+
     // Initialize indirect commands (first thread in first workgroup)
     if (gl_LocalInvocationID.x == 0 && gl_WorkGroupID.x == 0) {
-        for (uint g = 0; g < uniforms.numMeshGroups; g++) {
+        for (uint g = 0; g < safeNumMeshGroups; g++) {
             drawCmds[g].indexCount = meshGroups[g].indexCount;
             drawCmds[g].instanceCount = 0;
             drawCmds[g].firstIndex = 0;
@@ -95,7 +101,8 @@ void main() {
     barrier();
     memoryBarrierBuffer();
 
-    if (treeIdx >= uniforms.numTrees) return;
+    // Early exit if no work to do (also prevents buffer access with uninitialized data)
+    if (treeIdx >= uniforms.numTrees || safeNumMeshGroups == 0) return;
 
     BranchShadowInput tree = trees[treeIdx];
     vec3 treePos = tree.positionAndScale.xyz;
@@ -116,10 +123,10 @@ void main() {
         return;
     }
 
-    // Find mesh group for this tree
+    // Find mesh group for this tree (use clamped value to prevent GPU hang)
     uint meshIdx = floatBitsToUint(tree.rotationAndArchetype.y);
     uint groupIdx = 0;
-    for (uint g = 0; g < uniforms.numMeshGroups; g++) {
+    for (uint g = 0; g < safeNumMeshGroups; g++) {
         if (meshGroups[g].meshIndex == meshIdx) {
             groupIdx = g;
             break;

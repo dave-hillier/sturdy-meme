@@ -97,9 +97,9 @@ public:
     void setEnabled(bool enabled) { enabled_ = enabled; }
     bool isEnabledByUser() const { return enabled_; }
 
-    // Get output buffers for rendering
-    VkBuffer getInstanceBuffer() const;
-    VkBuffer getIndirectBuffer() const;
+    // Get output buffers for rendering (use frameIndex to match compute dispatch)
+    VkBuffer getInstanceBuffer(uint32_t frameIndex) const;
+    VkBuffer getIndirectBuffer(uint32_t frameIndex) const;
 
     // Get mesh group info for rendering loop
     struct MeshGroupRenderInfo {
@@ -109,9 +109,6 @@ public:
         uint32_t instanceOffset;
     };
     const std::vector<MeshGroupRenderInfo>& getMeshGroups() const { return meshGroupRenderInfo_; }
-
-    // Swap buffer sets (call after rendering completes)
-    void swapBufferSets() { currentBufferSet_ = (currentBufferSet_ + 1) % maxFramesInFlight_; }
 
     VkDevice getDevice() const { return device_; }
 
@@ -149,8 +146,7 @@ private:
     VkBuffer meshGroupBuffer_ = VK_NULL_HANDLE;
     VmaAllocation meshGroupAllocation_ = VK_NULL_HANDLE;
 
-    // Triple-buffered output buffers
-    uint32_t currentBufferSet_ = 0;
+    // Per-frame output buffers
     std::vector<VkBuffer> outputBuffers_;
     std::vector<VmaAllocation> outputAllocations_;
     VkDeviceSize outputBufferSize_ = 0;

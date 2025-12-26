@@ -280,6 +280,11 @@ void TreeBranchCulling::updateDescriptorSets() {
 }
 
 void TreeBranchCulling::updateTreeData(const TreeSystem& treeSystem, const TreeLODSystem* lodSystem) {
+    // Guard: buffers may not exist if pipeline creation failed (graceful degradation)
+    if (inputBuffer_ == VK_NULL_HANDLE || meshGroupBuffer_ == VK_NULL_HANDLE) {
+        return;
+    }
+
     const auto& instances = treeSystem.getTreeInstances();
     const auto& branchRenderables = treeSystem.getBranchRenderables();
 
@@ -330,7 +335,7 @@ void TreeBranchCulling::updateTreeData(const TreeSystem& treeSystem, const TreeL
         MeshGroupRenderInfo info{};
         info.meshIndex = meshIndex;
         info.barkTypeIndex = group.barkTypeIndex;
-        info.indirectOffset = meshGroups_.size() - 1;
+        info.indirectOffset = (meshGroups_.size() - 1) * sizeof(VkDrawIndexedIndirectCommand);
         info.instanceOffset = outputOffset;
         meshGroupRenderInfo_.push_back(info);
 
@@ -374,6 +379,12 @@ void TreeBranchCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
                                        const TreeLODSystem* lodSystem) {
     if (!isEnabled() || numTrees_ == 0 || meshGroups_.empty()) return;
 
+    // Guard: descriptor sets must be initialized before dispatch
+    if (!descriptorSetsInitialized_ || cullDescriptorSets_.empty() ||
+        frameIndex >= cullDescriptorSets_.size()) {
+        return;
+    }
+
     // Update uniforms
     BranchShadowCullUniforms uniforms{};
     uniforms.cameraPosition = glm::vec4(cameraPos, 1.0f);
@@ -414,10 +425,16 @@ void TreeBranchCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
                          0, 1, &barrier, 0, nullptr, 0, nullptr);
 }
 
-VkBuffer TreeBranchCulling::getInstanceBuffer() const {
-    return outputBuffers_.empty() ? VK_NULL_HANDLE : outputBuffers_[currentBufferSet_];
+VkBuffer TreeBranchCulling::getInstanceBuffer(uint32_t frameIndex) const {
+    if (outputBuffers_.empty() || frameIndex >= outputBuffers_.size()) {
+        return VK_NULL_HANDLE;
+    }
+    return outputBuffers_[frameIndex];
 }
 
-VkBuffer TreeBranchCulling::getIndirectBuffer() const {
-    return indirectBuffers_.empty() ? VK_NULL_HANDLE : indirectBuffers_[currentBufferSet_];
+VkBuffer TreeBranchCulling::getIndirectBuffer(uint32_t frameIndex) const {
+    if (indirectBuffers_.empty() || frameIndex >= indirectBuffers_.size()) {
+        return VK_NULL_HANDLE;
+    }
+    return indirectBuffers_[frameIndex];
 }
