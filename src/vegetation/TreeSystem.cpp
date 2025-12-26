@@ -149,12 +149,12 @@ bool TreeSystem::loadTextures(const InitInfo& info) {
     // Leaf type names (data-driven from JSON presets)
     std::vector<std::string> leafTypeNames = {"ash", "aspen", "pine", "oak"};
 
-    // Load all leaf textures
+    // Load all leaf textures with mipmaps for proper filtering at distance
     for (const auto& typeName : leafTypeNames) {
         std::string path = texturePath + "leaves/" + typeName + "_color.png";
         leafTextures_[typeName] = RAIIAdapter<Texture>::create(
             [&](auto& t) {
-                if (!t.load(path, info.allocator, info.device,
+                if (!t.loadWithMipmaps(path, info.allocator, info.device,
                            info.commandPool, info.graphicsQueue, info.physicalDevice)) {
                     SDL_Log("TreeSystem: Using placeholder for %s leaf texture", typeName.c_str());
                     if (!t.createSolidColor(51, 102, 51, 200, info.allocator, info.device,
@@ -163,7 +163,7 @@ bool TreeSystem::loadTextures(const InitInfo& info) {
                         return false;
                     }
                 } else {
-                    SDL_Log("TreeSystem: Loaded leaf texture: %s", path.c_str());
+                    SDL_Log("TreeSystem: Loaded leaf texture with mipmaps: %s", path.c_str());
                 }
                 return true;
             },

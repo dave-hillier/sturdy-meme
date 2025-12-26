@@ -416,3 +416,288 @@ bool Texture::copyBufferToImage(VkDevice device, VkCommandPool commandPool, VkQu
 
     return cmd.end();
 }
+
+// Generate a single mip level on CPU with alpha-coverage preservation
+// This keeps alpha values high enough to pass alpha testing at lower mip levels
+static void generateMipLevelAlphaCoverage(
+    const uint8_t* srcPixels, int srcWidth, int srcHeight,
+    uint8_t* dstPixels, int dstWidth, int dstHeight,
+    float alphaTestThreshold = 0.5f)
+{
+    for (int dy = 0; dy < dstHeight; ++dy) {
+        for (int dx = 0; dx < dstWidth; ++dx) {
+            // Sample 2x2 block from source
+            int sx = dx * 2;
+            int sy = dy * 2;
+
+            float r = 0, g = 0, b = 0, a = 0;
+            float totalWeight = 0;
+            int passingPixels = 0;
+
+            for (int oy = 0; oy < 2; ++oy) {
+                for (int ox = 0; ox < 2; ++ox) {
+                    int px = std::min(sx + ox, srcWidth - 1);
+                    int py = std::min(sy + oy, srcHeight - 1);
+                    const uint8_t* src = srcPixels + (py * srcWidth + px) * 4;
+
+                    float srcA = src[3] / 255.0f;
+
+                    // Count pixels that pass alpha test
+                    if (srcA >= alphaTestThreshold) {
+                        passingPixels++;
+                    }
+
+                    // Weight RGB by alpha for proper color blending
+                    float weight = srcA;
+                    r += src[0] * weight;
+                    g += src[1] * weight;
+                    b += src[2] * weight;
+                    a += srcA;
+                    totalWeight += weight;
+                }
+            }
+
+            uint8_t* dst = dstPixels + (dy * dstWidth + dx) * 4;
+
+            if (totalWeight > 0.001f) {
+                // Normalize RGB by total weight (alpha-weighted average)
+                dst[0] = static_cast<uint8_t>(std::clamp(r / totalWeight, 0.0f, 255.0f));
+                dst[1] = static_cast<uint8_t>(std::clamp(g / totalWeight, 0.0f, 255.0f));
+                dst[2] = static_cast<uint8_t>(std::clamp(b / totalWeight, 0.0f, 255.0f));
+            } else {
+                dst[0] = dst[1] = dst[2] = 0;
+            }
+
+            // Scale alpha to preserve coverage ratio
+            // If 2 out of 4 pixels passed alpha test, output alpha should also pass
+            float coverageRatio = passingPixels / 4.0f;
+            float avgAlpha = a / 4.0f;
+
+            // Boost alpha to maintain coverage: if any pixels passed, ensure output can pass too
+            float outputAlpha;
+            if (passingPixels > 0) {
+                // Scale alpha so that coverage is preserved
+                // If original coverage was 50% (2/4 pixels), output alpha should be ~threshold
+                outputAlpha = std::max(avgAlpha, coverageRatio * (alphaTestThreshold + 0.1f) + (1.0f - coverageRatio) * avgAlpha);
+                outputAlpha = std::min(outputAlpha, 1.0f);
+            } else {
+                outputAlpha = avgAlpha;
+            }
+
+            dst[3] = static_cast<uint8_t>(outputAlpha * 255.0f);
+        }
+    }
+}
+
+bool Texture::loadWithMipmaps(const std::string& path, VmaAllocator allocator, VkDevice device,
+                               VkCommandPool commandPool, VkQueue queue, VkPhysicalDevice physicalDevice,
+                               bool useSRGB, bool enableAnisotropy) {
+    // Load with stb_image (PNG, JPG, etc.)
+    int channels;
+    stbi_uc* pixels = stbi_load(path.c_str(), &width, &height, &channels, STBI_rgb_alpha);
+
+    if (!pixels) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load texture: %s", path.c_str());
+        return false;
+    }
+
+    auto pixelGuard = makeScopeGuard([&]() { stbi_image_free(pixels); });
+
+    VkFormat imageFormat = useSRGB ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+
+    // Calculate mip levels
+    uint32_t mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(width, height)))) + 1;
+
+    // Generate all mip levels on CPU with alpha coverage preservation
+    std::vector<std::vector<uint8_t>> mipData(mipLevels);
+    std::vector<uint32_t> mipWidths(mipLevels);
+    std::vector<uint32_t> mipHeights(mipLevels);
+
+    // Level 0 is the original image
+    mipWidths[0] = width;
+    mipHeights[0] = height;
+    mipData[0].resize(width * height * 4);
+    memcpy(mipData[0].data(), pixels, width * height * 4);
+
+    // Generate subsequent mip levels
+    for (uint32_t i = 1; i < mipLevels; ++i) {
+        mipWidths[i] = std::max(1u, mipWidths[i-1] / 2);
+        mipHeights[i] = std::max(1u, mipHeights[i-1] / 2);
+        mipData[i].resize(mipWidths[i] * mipHeights[i] * 4);
+
+        generateMipLevelAlphaCoverage(
+            mipData[i-1].data(), mipWidths[i-1], mipHeights[i-1],
+            mipData[i].data(), mipWidths[i], mipHeights[i],
+            0.5f  // Alpha test threshold
+        );
+    }
+
+    // Calculate total size needed for staging buffer
+    VkDeviceSize totalSize = 0;
+    std::vector<VkDeviceSize> mipOffsets(mipLevels);
+    for (uint32_t i = 0; i < mipLevels; ++i) {
+        mipOffsets[i] = totalSize;
+        totalSize += mipWidths[i] * mipHeights[i] * 4;
+    }
+
+    // Create staging buffer for all mip levels
+    ManagedBuffer stagingBuffer;
+    if (!VulkanResourceFactory::createStagingBuffer(allocator, totalSize, stagingBuffer)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create staging buffer for texture: %s", path.c_str());
+        return false;
+    }
+
+    // Copy all mip levels to staging buffer
+    uint8_t* data = static_cast<uint8_t*>(stagingBuffer.map());
+    if (!data) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to map staging buffer for texture: %s", path.c_str());
+        return false;
+    }
+    for (uint32_t i = 0; i < mipLevels; ++i) {
+        memcpy(data + mipOffsets[i], mipData[i].data(), mipData[i].size());
+    }
+    stagingBuffer.unmap();
+
+    // Create image with mip levels
+    ManagedImage managedImage;
+    if (!ImageBuilder(allocator)
+            .setExtent(static_cast<uint32_t>(width), static_cast<uint32_t>(height))
+            .setFormat(imageFormat)
+            .setMipLevels(mipLevels)
+            .asTexture()  // Just transfer dst + sampled, no need for transfer src
+            .build(managedImage)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create image for texture: %s", path.c_str());
+        return false;
+    }
+
+    // Transition all mip levels to transfer dst
+    {
+        CommandScope cmd(device, commandPool, queue);
+        if (!cmd.begin()) return false;
+
+        VkImageMemoryBarrier barrier{};
+        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barrier.image = managedImage.get();
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        barrier.subresourceRange.baseMipLevel = 0;
+        barrier.subresourceRange.levelCount = mipLevels;
+        barrier.subresourceRange.baseArrayLayer = 0;
+        barrier.subresourceRange.layerCount = 1;
+        barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barrier.srcAccessMask = 0;
+        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+        vkCmdPipelineBarrier(cmd.get(),
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
+            0, nullptr, 0, nullptr, 1, &barrier);
+
+        if (!cmd.end()) return false;
+    }
+
+    // Copy each mip level from staging buffer to image
+    {
+        CommandScope cmd(device, commandPool, queue);
+        if (!cmd.begin()) return false;
+
+        std::vector<VkBufferImageCopy> regions(mipLevels);
+        for (uint32_t i = 0; i < mipLevels; ++i) {
+            regions[i] = {};
+            regions[i].bufferOffset = mipOffsets[i];
+            regions[i].bufferRowLength = 0;
+            regions[i].bufferImageHeight = 0;
+            regions[i].imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            regions[i].imageSubresource.mipLevel = i;
+            regions[i].imageSubresource.baseArrayLayer = 0;
+            regions[i].imageSubresource.layerCount = 1;
+            regions[i].imageOffset = {0, 0, 0};
+            regions[i].imageExtent = {mipWidths[i], mipHeights[i], 1};
+        }
+
+        vkCmdCopyBufferToImage(cmd.get(), stagingBuffer.get(), managedImage.get(),
+                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                               static_cast<uint32_t>(regions.size()), regions.data());
+
+        if (!cmd.end()) return false;
+    }
+
+    // Transition all mip levels to shader read
+    {
+        CommandScope cmd(device, commandPool, queue);
+        if (!cmd.begin()) return false;
+
+        VkImageMemoryBarrier barrier{};
+        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barrier.image = managedImage.get();
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        barrier.subresourceRange.baseMipLevel = 0;
+        barrier.subresourceRange.levelCount = mipLevels;
+        barrier.subresourceRange.baseArrayLayer = 0;
+        barrier.subresourceRange.layerCount = 1;
+        barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+        vkCmdPipelineBarrier(cmd.get(),
+            VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0,
+            0, nullptr, 0, nullptr, 1, &barrier);
+
+        if (!cmd.end()) return false;
+    }
+
+    // Create image view with all mip levels
+    VkImageViewCreateInfo viewInfo{};
+    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewInfo.image = managedImage.get();
+    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format = imageFormat;
+    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.subresourceRange.baseMipLevel = 0;
+    viewInfo.subresourceRange.levelCount = mipLevels;
+    viewInfo.subresourceRange.baseArrayLayer = 0;
+    viewInfo.subresourceRange.layerCount = 1;
+
+    ManagedImageView managedView;
+    if (!ManagedImageView::create(device, viewInfo, managedView)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create image view for texture: %s", path.c_str());
+        return false;
+    }
+
+    // Create sampler with mipmapping and optional anisotropy
+    VkSamplerCreateInfo samplerInfo{};
+    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    samplerInfo.magFilter = VK_FILTER_LINEAR;
+    samplerInfo.minFilter = VK_FILTER_LINEAR;
+    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.anisotropyEnable = enableAnisotropy ? VK_TRUE : VK_FALSE;
+    samplerInfo.maxAnisotropy = enableAnisotropy ? 8.0f : 1.0f;
+    samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+    samplerInfo.unnormalizedCoordinates = VK_FALSE;
+    samplerInfo.compareEnable = VK_FALSE;
+    samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
+    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    samplerInfo.mipLodBias = 0.0f;
+    samplerInfo.minLod = 0.0f;
+    samplerInfo.maxLod = static_cast<float>(mipLevels);
+
+    ManagedSampler managedSampler;
+    if (!ManagedSampler::create(device, samplerInfo, managedSampler)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create sampler for texture: %s", path.c_str());
+        return false;
+    }
+
+    // Transfer ownership
+    managedImage.releaseToRaw(image, allocation);
+    imageView = managedView.release();
+    sampler = managedSampler.release();
+
+    SDL_Log("Loaded texture with %u mip levels: %s (%dx%d)", mipLevels, path.c_str(), width, height);
+    return true;
+}
