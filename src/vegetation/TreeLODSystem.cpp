@@ -761,29 +761,27 @@ void TreeLODSystem::update(float deltaTime, const glm::vec3& cameraPos, const Tr
                 glm::vec3 maxB = meshBounds.max;
                 glm::vec3 extent = maxB - minB;
 
-                // Match the octahedral capture projection sizing
-                // Capture uses: max(mix(hRadius, sphereRadius, elevFactor) * 1.15, halfHeight * 1.15)
-                // Billboard needs the maximum size (at top-down view where elevFactor=1)
+                // Billboard sizing: hSize uses bounding sphere for horizontal coverage,
+                // vSize uses half height to prevent ground penetration.
                 float horizontalRadius = std::max(extent.x, extent.z) * 0.5f;
                 float halfHeight = extent.y * 0.5f;
                 float boundingSphereRadius = glm::length(extent) * 0.5f;
 
-                // At max elevation, effectiveHSize approaches boundingSphereRadius
-                float maxHSize = boundingSphereRadius * TreeLODConstants::IMPOSTOR_SIZE_MARGIN;
-                float maxVSize = halfHeight * TreeLODConstants::IMPOSTOR_SIZE_MARGIN;
-                float projSize = std::max(maxHSize, maxVSize) * tree.scale;
+                float hSize = boundingSphereRadius * TreeLODConstants::IMPOSTOR_SIZE_MARGIN * tree.scale;
+                float vSize = halfHeight * TreeLODConstants::IMPOSTOR_SIZE_MARGIN * tree.scale;
 
-                instance.hSize = projSize;
-                instance.vSize = projSize;
+                instance.hSize = hSize;
+                instance.vSize = vSize;
                 // Center offset: tree center height relative to origin
                 float centerY = (minB.y + maxB.y) * 0.5f;
                 instance.baseOffset = centerY * tree.scale;
             } else {
                 // Fallback to archetype bounds if mesh not available
                 const auto* archetype = impostorAtlas_->getArchetype(state.archetypeIndex);
-                float projSize = (archetype ? archetype->boundingSphereRadius * TreeLODConstants::IMPOSTOR_SIZE_MARGIN : 10.0f) * tree.scale;
-                instance.hSize = projSize;
-                instance.vSize = projSize;
+                float hSize = (archetype ? archetype->boundingSphereRadius * TreeLODConstants::IMPOSTOR_SIZE_MARGIN : 10.0f) * tree.scale;
+                float vSize = (archetype ? archetype->treeHeight * 0.5f * TreeLODConstants::IMPOSTOR_SIZE_MARGIN : 10.0f) * tree.scale;
+                instance.hSize = hSize;
+                instance.vSize = vSize;
                 instance.baseOffset = (archetype ? archetype->centerHeight : 0.0f) * tree.scale;
             }
             visibleImpostors_.push_back(instance);

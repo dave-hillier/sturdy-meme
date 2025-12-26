@@ -314,20 +314,21 @@ void ImpostorCullSystem::updateTreeData(const TreeSystem& treeSystem, const Tree
             float halfHeight = extent.y * 0.5f;
             float boundingSphereRadius = glm::length(extent) * 0.5f;
 
-            // Match the sizing calculation from CPU path
-            float maxHSize = boundingSphereRadius * TreeLODConstants::IMPOSTOR_SIZE_MARGIN;
-            float maxVSize = halfHeight * TreeLODConstants::IMPOSTOR_SIZE_MARGIN;
-            float projSize = std::max(maxHSize, maxVSize);
+            // Billboard sizing: hSize uses bounding sphere for horizontal coverage,
+            // vSize uses half height to prevent ground penetration.
+            // The billboard center is at centerHeight, and extends vSize up/down.
+            // If vSize > centerHeight, the billboard bottom would go below ground.
+            float hSize = boundingSphereRadius * TreeLODConstants::IMPOSTOR_SIZE_MARGIN;
+            float vSize = halfHeight * TreeLODConstants::IMPOSTOR_SIZE_MARGIN;
             float centerHeight = (minB.y + maxB.y) * 0.5f;
 
-            inputData[i].sizeAndOffset = glm::vec4(projSize, projSize, centerHeight, 0.0f);
+            inputData[i].sizeAndOffset = glm::vec4(hSize, vSize, centerHeight, 0.0f);
         } else if (atlas && archetypeIndex < atlas->getArchetypeCount()) {
             // Fallback to archetype bounds
             const auto* archetype = atlas->getArchetype(archetypeIndex);
-            float maxHSize = archetype->boundingSphereRadius * TreeLODConstants::IMPOSTOR_SIZE_MARGIN;
-            float maxVSize = archetype->treeHeight * 0.5f * TreeLODConstants::IMPOSTOR_SIZE_MARGIN;
-            float projSize = std::max(maxHSize, maxVSize);
-            inputData[i].sizeAndOffset = glm::vec4(projSize, projSize, archetype->centerHeight, 0.0f);
+            float hSize = archetype->boundingSphereRadius * TreeLODConstants::IMPOSTOR_SIZE_MARGIN;
+            float vSize = archetype->treeHeight * 0.5f * TreeLODConstants::IMPOSTOR_SIZE_MARGIN;
+            inputData[i].sizeAndOffset = glm::vec4(hSize, vSize, archetype->centerHeight, 0.0f);
         } else {
             // Default fallback
             inputData[i].sizeAndOffset = glm::vec4(10.0f, 10.0f, 5.0f, 0.0f);
@@ -352,14 +353,13 @@ void ImpostorCullSystem::updateArchetypeData(const TreeImpostorAtlas* atlas) {
     for (uint32_t i = 0; i < archetypeCount_; i++) {
         const auto* archetype = atlas->getArchetype(i);
         if (archetype) {
-            // Match the octahedral capture projection sizing (15% margin)
-            // projSize = max(boundingSphereRadius * 1.15, halfHeight * 1.15)
-            float maxHSize = archetype->boundingSphereRadius * TreeLODConstants::IMPOSTOR_SIZE_MARGIN;
-            float maxVSize = archetype->treeHeight * 0.5f * TreeLODConstants::IMPOSTOR_SIZE_MARGIN;
-            float projSize = glm::max(maxHSize, maxVSize);
+            // Billboard sizing: hSize uses bounding sphere, vSize uses half height
+            // to prevent ground penetration when billboard center is at centerHeight
+            float hSize = archetype->boundingSphereRadius * TreeLODConstants::IMPOSTOR_SIZE_MARGIN;
+            float vSize = archetype->treeHeight * 0.5f * TreeLODConstants::IMPOSTOR_SIZE_MARGIN;
             archetypeData[i].sizingData = glm::vec4(
-                projSize,                                  // hSize (matches capture)
-                projSize,                                  // vSize (matches capture)
+                hSize,                                     // hSize (horizontal radius)
+                vSize,                                     // vSize (half height)
                 archetype->centerHeight,                   // baseOffset (center of tree)
                 archetype->boundingSphereRadius            // bounding radius for culling
             );
