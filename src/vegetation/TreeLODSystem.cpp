@@ -588,74 +588,26 @@ void TreeLODSystem::update(uint32_t frameIndex, float deltaTime, const glm::vec3
             continue;
         }
 
-        // Auto mode - determine target LOD level and blend factor
-        TreeLODState::Level newTarget = state.targetLevel;
+        // Auto mode - determine target LOD level and blend factor using screen-space error
+        const auto* archetype = impostorAtlas_->getArchetype(state.archetypeIndex);
+        float worldErrorFull = 0.1f * tree.scale;  // ~10cm branch thickness, scaled
+        float screenErrorFull = computeScreenError(worldErrorFull, distance,
+                                                    screenParams.screenHeight, screenParams.tanHalfFOV);
 
-        if (settings.useScreenSpaceError) {
-            // Screen-space error based LOD
-            // Get archetype world error values
-            const auto* archetype = impostorAtlas_->getArchetype(state.archetypeIndex);
-            float worldErrorFull = 0.1f * tree.scale;  // ~10cm branch thickness, scaled
-            float worldErrorImpostor = (archetype ? archetype->boundingSphereRadius * 0.1f : 1.0f) * tree.scale;
-
-            float screenErrorFull = computeScreenError(worldErrorFull, distance,
-                                                        screenParams.screenHeight, screenParams.tanHalfFOV);
-
-            // Determine LOD level based on screen error
-            // High screen error = close = needs full geometry
-            // Low screen error = far = can use impostor
-            if (screenErrorFull > settings.errorThresholdFull) {
-                newTarget = TreeLODState::Level::FullDetail;
-            } else {
-                newTarget = TreeLODState::Level::Impostor;
-            }
-
-            // Compute blend factor based on screen error
-            // blendFactor: 0.0 = full geometry only (close), 1.0 = impostor only (far)
-            if (screenErrorFull > settings.errorThresholdFull) {
-                state.blendFactor = 0.0f;  // Close: full geometry
-            } else if (screenErrorFull < settings.errorThresholdImpostor) {
-                state.blendFactor = 1.0f;  // Far: full impostor
-            } else {
-                // Blend zone: errorThresholdImpostor < screenError < errorThresholdFull
-                // As screenError decreases (farther), blend increases toward 1.0
-                float t = (settings.errorThresholdFull - screenErrorFull) /
-                          (settings.errorThresholdFull - settings.errorThresholdImpostor);
-                state.blendFactor = t * t * (3.0f - 2.0f * t);  // smoothstep
-            }
+        // Determine LOD level: high screen error = close = full geometry
+        if (screenErrorFull > settings.errorThresholdFull) {
+            state.targetLevel = TreeLODState::Level::FullDetail;
+            state.blendFactor = 0.0f;
+        } else if (screenErrorFull < settings.errorThresholdImpostor) {
+            state.targetLevel = TreeLODState::Level::Impostor;
+            state.blendFactor = 1.0f;
         } else {
-            // Legacy distance-based LOD
-            if (state.targetLevel == TreeLODState::Level::FullDetail) {
-                // Currently at full detail, check if should switch to impostor
-                if (distance > settings.fullDetailDistance + settings.hysteresis) {
-                    newTarget = TreeLODState::Level::Impostor;
-                }
-            } else {
-                // Currently at impostor, check if should switch to full detail
-                if (distance < settings.fullDetailDistance - settings.hysteresis) {
-                    newTarget = TreeLODState::Level::FullDetail;
-                }
-            }
-
-            // Update blend factor
-            if (settings.blendRange > 0.0f) {
-                float blendStart = settings.fullDetailDistance;
-                float blendEnd = settings.fullDetailDistance + settings.blendRange;
-
-                if (distance < blendStart) {
-                    state.blendFactor = 0.0f;
-                } else if (distance > blendEnd) {
-                    state.blendFactor = 1.0f;
-                } else {
-                    float t = (distance - blendStart) / settings.blendRange;
-                    state.blendFactor = std::pow(t, settings.blendExponent);
-                }
-            } else {
-                state.blendFactor = (state.targetLevel == TreeLODState::Level::Impostor) ? 1.0f : 0.0f;
-            }
+            // Blend zone
+            state.targetLevel = TreeLODState::Level::Blending;
+            float t = (settings.errorThresholdFull - screenErrorFull) /
+                      (settings.errorThresholdFull - settings.errorThresholdImpostor);
+            state.blendFactor = t * t * (3.0f - 2.0f * t);  // smoothstep
         }
-
-        state.targetLevel = newTarget;
 
         // Determine current level based on blend factor
         if (state.blendFactor < 0.01f) {

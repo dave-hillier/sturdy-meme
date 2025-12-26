@@ -322,50 +322,7 @@ void ImpostorCullSystem::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
                                         float tanHalfFOV) {
     if (treeCount_ == 0) return;
 
-    // Temporal coherence - determine update mode based on camera movement
-    uint32_t temporalUpdateMode = 0;  // 0=full, 1=partial, 2=skip
-    uint32_t temporalUpdateOffset = 0;
-    uint32_t temporalUpdateCount = 0;
-
-    if (temporalSettings_.enabled) {
-        // Calculate camera position delta
-        float posDelta = glm::length(cameraPos - lastCameraPos_);
-
-        // Extract camera forward direction from view matrix (third column negated)
-        glm::vec3 cameraDir = -glm::normalize(glm::vec3(viewProjMatrix[0][2], viewProjMatrix[1][2], viewProjMatrix[2][2]));
-        float rotDelta = glm::degrees(glm::acos(glm::clamp(glm::dot(cameraDir, lastCameraDir_), -1.0f, 1.0f)));
-
-        // Increment frame counter
-        temporalSettings_.framesSinceFullUpdate++;
-
-        // Determine update mode
-        if (posDelta > temporalSettings_.positionThreshold ||
-            rotDelta > temporalSettings_.rotationThreshold ||
-            temporalSettings_.framesSinceFullUpdate >= temporalSettings_.maxFramesBetweenFullUpdates) {
-            // Full update: camera moved significantly or periodic forced update
-            temporalUpdateMode = 0;
-            temporalSettings_.framesSinceFullUpdate = 0;
-        } else if (posDelta < 0.1f && rotDelta < 0.5f) {
-            // Skip update: camera nearly stationary
-            temporalUpdateMode = 2;
-        } else {
-            // Partial update: camera moving slowly, update a subset of trees
-            temporalUpdateMode = 1;
-            temporalUpdateCount = static_cast<uint32_t>(
-                static_cast<float>(treeCount_) * temporalSettings_.partialUpdateFraction);
-            temporalUpdateCount = std::max(temporalUpdateCount, 1u);
-            temporalUpdateOffset = partialUpdateOffset_;
-
-            // Advance rolling offset for next frame
-            partialUpdateOffset_ = (partialUpdateOffset_ + temporalUpdateCount) % treeCount_;
-        }
-
-        // Update camera tracking state
-        lastCameraPos_ = cameraPos;
-        lastCameraDir_ = cameraDir;
-    }
-
-    // Update uniforms
+    // Update uniforms (always full update - temporal coherence removed as it caused flickering)
     ImpostorCullUniforms uniforms{};
     uniforms.cameraPosition = glm::vec4(cameraPos, 0.0f);
     for (int i = 0; i < 6; i++) {
@@ -390,10 +347,10 @@ void ImpostorCullSystem::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
     uniforms.errorThresholdFull = lodSettings.errorThresholdFull;
     uniforms.errorThresholdImpostor = lodSettings.errorThresholdImpostor;
     uniforms.errorThresholdCull = lodSettings.errorThresholdCull;
-    // Temporal coherence parameters
-    uniforms.temporalUpdateMode = temporalUpdateMode;
-    uniforms.temporalUpdateOffset = temporalUpdateOffset;
-    uniforms.temporalUpdateCount = temporalUpdateCount;
+    // Always full update (mode 0) - temporal coherence disabled
+    uniforms.temporalUpdateMode = 0;
+    uniforms.temporalUpdateOffset = 0;
+    uniforms.temporalUpdateCount = 0;
 
     // Upload uniforms
     void* data;

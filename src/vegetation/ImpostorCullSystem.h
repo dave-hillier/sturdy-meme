@@ -98,16 +98,6 @@ public:
      */
     void updateArchetypeData(const TreeImpostorAtlas* atlas);
 
-    // Temporal coherence settings
-    struct TemporalSettings {
-        bool enabled = false;                   // Disable temporal coherence by default (can cause flickering)
-        float positionThreshold = 5.0f;         // Camera position change threshold for full update (meters)
-        float rotationThreshold = 10.0f;        // Camera rotation change threshold for full update (degrees)
-        float partialUpdateFraction = 0.1f;     // Fraction of trees to update per frame in partial mode
-        uint32_t framesSinceFullUpdate = 0;     // Counter for forcing periodic full updates
-        uint32_t maxFramesBetweenFullUpdates = 60;  // Force full update every N frames
-    };
-
     /**
      * Record compute dispatch for impostor culling.
      * Call after terrain depth pass and Hi-Z pyramid generation.
@@ -148,12 +138,6 @@ public:
     // Enable/disable Hi-Z culling
     void setHiZEnabled(bool enabled) { hiZEnabled_ = enabled; }
     bool isHiZEnabled() const { return hiZEnabled_; }
-
-    // Temporal coherence settings
-    TemporalSettings& getTemporalSettings() { return temporalSettings_; }
-    const TemporalSettings& getTemporalSettings() const { return temporalSettings_; }
-    void setTemporalEnabled(bool enabled) { temporalSettings_.enabled = enabled; }
-    bool isTemporalEnabled() const { return temporalSettings_.enabled; }
 
     // Get tree count
     uint32_t getTreeCount() const { return treeCount_; }
@@ -217,12 +201,6 @@ private:
     uint32_t archetypeCount_ = 0;
     uint32_t lastVisibleCount_ = 0;
     bool hiZEnabled_ = true;
-
-    // Temporal coherence state
-    TemporalSettings temporalSettings_;
-    glm::vec3 lastCameraPos_{0.0f};
-    glm::vec3 lastCameraDir_{0.0f, 0.0f, -1.0f};
-    uint32_t partialUpdateOffset_ = 0;  // Rolling offset for partial updates
 
     // Track if Hi-Z texture changed
     VkImageView lastHiZView_ = VK_NULL_HANDLE;
