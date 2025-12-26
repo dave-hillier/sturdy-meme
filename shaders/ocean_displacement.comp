@@ -39,11 +39,8 @@ layout(push_constant) uniform PushConstants {
     float normalStrength;   // Normal map intensity
 };
 
-// Sample displacement with wrapping (tiling)
-vec2 sampleDisp(readonly image2D img, ivec2 coord) {
-    coord = coord & (resolution - 1);  // Wrap using power-of-2 mask
-    return imageLoad(img, coord).xy;
-}
+// Macro to sample displacement with wrapping (tiling)
+#define SAMPLE_DISP(img, c) imageLoad(img, (c) & (resolution - 1)).x
 
 void main() {
     ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
@@ -53,9 +50,9 @@ void main() {
     // Read displacement values
     // FFT output is complex, but for real input the imaginary part should be ~0
     // We take the real part as our displacement
-    float dy = sampleDisp(dispY, coord).x * heightScale;
-    float dx = sampleDisp(dispX, coord).x;
-    float dz = sampleDisp(dispZ, coord).x;
+    float dy = SAMPLE_DISP(dispY, coord) * heightScale;
+    float dx = SAMPLE_DISP(dispX, coord);
+    float dz = SAMPLE_DISP(dispZ, coord);
 
     // Store combined displacement
     vec3 displacement = vec3(dx, dy, dz);
@@ -64,20 +61,20 @@ void main() {
     float texelSize = oceanSize / float(resolution);
 
     // Sample neighbors for gradient calculation
-    float dy_px = sampleDisp(dispY, coord + ivec2(1, 0)).x * heightScale;
-    float dy_nx = sampleDisp(dispY, coord + ivec2(-1, 0)).x * heightScale;
-    float dy_py = sampleDisp(dispY, coord + ivec2(0, 1)).x * heightScale;
-    float dy_ny = sampleDisp(dispY, coord + ivec2(0, -1)).x * heightScale;
+    float dy_px = SAMPLE_DISP(dispY, coord + ivec2(1, 0)) * heightScale;
+    float dy_nx = SAMPLE_DISP(dispY, coord + ivec2(-1, 0)) * heightScale;
+    float dy_py = SAMPLE_DISP(dispY, coord + ivec2(0, 1)) * heightScale;
+    float dy_ny = SAMPLE_DISP(dispY, coord + ivec2(0, -1)) * heightScale;
 
-    float dx_px = sampleDisp(dispX, coord + ivec2(1, 0)).x;
-    float dx_nx = sampleDisp(dispX, coord + ivec2(-1, 0)).x;
-    float dx_py = sampleDisp(dispX, coord + ivec2(0, 1)).x;
-    float dx_ny = sampleDisp(dispX, coord + ivec2(0, -1)).x;
+    float dx_px = SAMPLE_DISP(dispX, coord + ivec2(1, 0));
+    float dx_nx = SAMPLE_DISP(dispX, coord + ivec2(-1, 0));
+    float dx_py = SAMPLE_DISP(dispX, coord + ivec2(0, 1));
+    float dx_ny = SAMPLE_DISP(dispX, coord + ivec2(0, -1));
 
-    float dz_px = sampleDisp(dispZ, coord + ivec2(1, 0)).x;
-    float dz_nx = sampleDisp(dispZ, coord + ivec2(-1, 0)).x;
-    float dz_py = sampleDisp(dispZ, coord + ivec2(0, 1)).x;
-    float dz_ny = sampleDisp(dispZ, coord + ivec2(0, -1)).x;
+    float dz_px = SAMPLE_DISP(dispZ, coord + ivec2(1, 0));
+    float dz_nx = SAMPLE_DISP(dispZ, coord + ivec2(-1, 0));
+    float dz_py = SAMPLE_DISP(dispZ, coord + ivec2(0, 1));
+    float dz_ny = SAMPLE_DISP(dispZ, coord + ivec2(0, -1));
 
     // Height gradients (for normal calculation)
     float dydx = (dy_px - dy_nx) / (2.0 * texelSize);
