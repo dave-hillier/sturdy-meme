@@ -116,7 +116,7 @@ public:
 
     // Temporal coherence settings
     struct TemporalSettings {
-        bool enabled = true;                    // Enable temporal coherence
+        bool enabled = false;                   // Disabled: causes 1-frame flickering with triple-buffering
         float positionThreshold = 5.0f;         // Camera position change threshold for full update (meters)
         float rotationThreshold = 10.0f;        // Camera rotation change threshold for full update (degrees)
         float partialUpdateFraction = 0.1f;     // Fraction of trees to update per frame in partial mode

@@ -158,14 +158,9 @@ void setVisibilityCached(uint treeIdx, bool visible) {
 void main() {
     uint treeIdx = gl_GlobalInvocationID.x;
 
-    // First thread initializes the indirect command (constant values)
-    if (treeIdx == 0) {
-        drawCmd.indexCount = 6;       // Billboard quad: 6 indices
-        drawCmd.firstIndex = 0;
-        drawCmd.vertexOffset = 0;
-        drawCmd.firstInstance = 0;
-        // instanceCount is set via atomicAdd below
-    }
+    // Note: drawCmd is initialized by C++ via vkCmdUpdateBuffer before dispatch
+    // indexCount=6, instanceCount=0, firstIndex=0, vertexOffset=0, firstInstance=0
+    // instanceCount is incremented atomically below
 
     // Early exit if beyond tree count
     if (treeIdx >= numTrees) {

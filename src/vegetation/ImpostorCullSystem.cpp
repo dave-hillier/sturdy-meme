@@ -567,15 +567,16 @@ void ImpostorCullSystem::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
         lastHiZView_ = hiZPyramidView;
     }
 
-    // Reset indirect draw count by filling the buffer with zeros
+    // Reset indirect draw command with proper values
     // instanceCount starts at 0 and is incremented atomically by the shader
+    // We use vkCmdUpdateBuffer to set the full struct (small update, fits in command buffer)
     VkDrawIndexedIndirectCommand resetCmd{};
-    resetCmd.indexCount = 0;
-    resetCmd.instanceCount = 0;
+    resetCmd.indexCount = 6;        // Billboard quad: 6 indices
+    resetCmd.instanceCount = 0;     // Will be incremented atomically by shader
     resetCmd.firstIndex = 0;
     resetCmd.vertexOffset = 0;
     resetCmd.firstInstance = 0;
-    vkCmdFillBuffer(cmd, indirectDrawBuffer_, 0, sizeof(VkDrawIndexedIndirectCommand), 0);
+    vkCmdUpdateBuffer(cmd, indirectDrawBuffer_, 0, sizeof(VkDrawIndexedIndirectCommand), &resetCmd);
 
     // Memory barrier to ensure fill is complete before compute
     VkMemoryBarrier fillBarrier{};
