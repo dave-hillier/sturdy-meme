@@ -9,6 +9,8 @@
 #include <cmath>
 #include <SDL3/SDL.h>
 
+using namespace vk;  // Vulkan-Hpp type-safe wrappers
+
 std::unique_ptr<BloomSystem> BloomSystem::create(const InitInfo& info) {
     auto system = std::unique_ptr<BloomSystem>(new BloomSystem());
     if (!system->initInternal(info)) {
