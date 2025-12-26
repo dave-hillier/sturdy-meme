@@ -8,12 +8,10 @@
 #include "instancing_common.glsl"
 #include "tree_leaf_instance.glsl"
 #include "tree_leaf_world.glsl"
+#include "tree_leaf_cull_common.glsl"
 
 // Workgroup size: 256 threads per workgroup
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
-
-// Number of leaf types (oak=0, ash=1, aspen=2, pine=3)
-const uint NUM_LEAF_TYPES = 4;
 
 // Input: all leaf instances from TreeSystem (tree-local space)
 layout(std430, binding = BINDING_TREE_LEAF_CULL_INPUT) readonly buffer InputBuffer {
@@ -27,60 +25,43 @@ layout(std430, binding = BINDING_TREE_LEAF_CULL_OUTPUT) writeonly buffer OutputB
 };
 
 // One indirect draw command per leaf type
-// Uses DrawIndexedIndirectCommand for vkCmdDrawIndexedIndirect
 layout(std430, binding = BINDING_TREE_LEAF_CULL_INDIRECT) buffer IndirectBuffer {
     DrawIndexedIndirectCommand drawCmds[NUM_LEAF_TYPES];
-};
-
-// Per-tree culling data (batched for all trees)
-struct TreeCullData {
-    mat4 treeModel;                // Tree's model matrix
-    uint inputFirstInstance;       // Offset into inputInstances for this tree
-    uint inputInstanceCount;       // Number of input instances for this tree
-    uint treeIndex;                // Index of this tree (for render data lookup)
-    uint leafTypeIndex;            // Leaf type (0=oak, 1=ash, 2=aspen, 3=pine)
-    float lodBlendFactor;          // LOD blend factor (0=full detail, 1=full impostor)
-    uint _pad0;                    // Padding for std430 alignment
-    uint _pad1;
-    uint _pad2;
 };
 
 layout(std430, binding = BINDING_TREE_LEAF_CULL_TREES) readonly buffer TreeDataBuffer {
     TreeCullData treeData[];
 };
 
-// Global culling uniforms (shared across all trees)
+// Global culling uniforms
 layout(binding = BINDING_TREE_LEAF_CULL_UNIFORMS) uniform TreeLeafCullUniforms {
-    vec4 cameraPosition;          // xyz = camera pos, w = unused
-    vec4 frustumPlanes[6];        // Frustum planes for culling
-    float maxDrawDistance;        // Maximum leaf draw distance
-    float lodTransitionStart;     // LOD transition start distance
-    float lodTransitionEnd;       // LOD transition end distance
-    float maxLodDropRate;         // Maximum LOD drop rate (0.0-1.0)
-    uint numTrees;                // Total number of trees
-    uint totalLeafInstances;      // Total leaf instances across all trees
-    uint maxLeavesPerType;        // Max leaves per leaf type in output buffer
+    vec4 cameraPosition;
+    vec4 frustumPlanes[6];
+    float maxDrawDistance;
+    float lodTransitionStart;
+    float lodTransitionEnd;
+    float maxLodDropRate;
+    uint numTrees;
+    uint totalLeafInstances;
+    uint maxLeavesPerType;
     uint _pad1;
 };
 
 void main() {
     uint globalIdx = gl_GlobalInvocationID.x;
 
-    // First thread initializes all indirect commands (constant values)
+    // First thread initializes all indirect commands
     if (globalIdx == 0) {
         for (uint i = 0; i < NUM_LEAF_TYPES; i++) {
-            drawCmds[i].indexCount = 6;       // Quad: 6 indices
-            drawCmds[i].instanceCount = 0;    // Reset count
+            drawCmds[i].indexCount = 6;
+            drawCmds[i].instanceCount = 0;
             drawCmds[i].firstIndex = 0;
             drawCmds[i].vertexOffset = 0;
-            // firstInstance is the base offset into the output buffer for this type
-            // This makes gl_InstanceIndex point to the correct leaf in the partitioned buffer
             drawCmds[i].firstInstance = i * maxLeavesPerType;
         }
     }
 
     // Ensure initialization is complete before any thread proceeds
-    // This prevents threads from reading stale instanceCount values
     barrier();
     memoryBarrierBuffer();
 
@@ -90,7 +71,6 @@ void main() {
     }
 
     // Find which tree this leaf belongs to using binary search
-    // Since we know input ranges are contiguous, we can search for the tree
     uint treeIdx = 0;
     uint low = 0;
     uint high = numTrees;
@@ -113,61 +93,39 @@ void main() {
     // Get tree data
     TreeCullData tree = treeData[treeIdx];
 
-    // LOD blend culling - skip all leaves when tree is fully in impostor mode
+    // Skip trees fully in impostor mode
     if (tree.lodBlendFactor >= 1.0) {
         return;
     }
 
-    // Local index within this tree's leaf instances
+    // Sanity check local index
     uint localIdx = globalIdx - tree.inputFirstInstance;
-
-    // Sanity check
     if (localIdx >= tree.inputInstanceCount) {
         return;
     }
 
-    // Get input instance
+    // Get input instance and cull
     LeafInstance leaf = inputInstances[globalIdx];
+    vec4 worldPos;
+    float leafSize;
+    float distToCamera;
 
-    // Transform leaf position to world space
-    vec3 leafLocalPos = leaf.positionAndSize.xyz;
-    vec4 worldPos = tree.treeModel * vec4(leafLocalPos, 1.0);
-
-    // Extract uniform scale from model matrix (assumes uniform scaling)
-    float treeScale = length(tree.treeModel[0].xyz);
-
-    // Distance culling
-    float distToCamera = getDistanceToCamera(worldPos.xyz, cameraPosition.xyz);
-    if (distToCamera > maxDrawDistance) {
+    if (cullLeaf(
+        leaf.positionAndSize.xyz,
+        leaf.positionAndSize.w,
+        tree.treeModel,
+        tree.lodBlendFactor,
+        cameraPosition.xyz,
+        frustumPlanes,
+        maxDrawDistance,
+        lodTransitionStart,
+        lodTransitionEnd,
+        maxLodDropRate,
+        worldPos,
+        leafSize,
+        distToCamera
+    )) {
         return;
-    }
-
-    // Scale leaf size by tree scale to match impostor sizing
-    float leafSize = leaf.positionAndSize.w * treeScale;
-    float margin = leafSize * 2.0;  // Extra margin for leaf billboard rotation
-    if (!isInFrustum(frustumPlanes, worldPos.xyz, margin)) {
-        return;
-    }
-
-    // LOD blade dropping - use position-based hash for consistent results
-    // Also incorporate LOD blend factor to drop leaves during transition
-    float instanceHash = hash2D(leafLocalPos.xz);
-    float effectiveDropRate = maxLodDropRate + tree.lodBlendFactor * (1.0 - maxLodDropRate);
-    if (lodCull(distToCamera, lodTransitionStart, lodTransitionEnd,
-                effectiveDropRate, instanceHash)) {
-        return;
-    }
-
-    // Additional stochastic culling based on LOD blend factor during transition
-    // This gradually removes leaves as we transition to impostor
-    // Use a power curve to make leaves fade out faster than the impostor fades in
-    // At blendFactor=0.5, about 75% of leaves should be culled (sqrt(0.5) ≈ 0.71 threshold)
-    // This ensures leaves are mostly gone by the time the impostor is fully visible
-    if (tree.lodBlendFactor > 0.0) {
-        float adjustedBlend = sqrt(tree.lodBlendFactor);  // More aggressive fade-out
-        if (instanceHash < adjustedBlend) {
-            return;
-        }
     }
 
     // Get leaf type for this tree (0=oak, 1=ash, 2=aspen, 3=pine)
@@ -210,15 +168,9 @@ void main() {
     // Calculate global output slot: type's base offset + local slot
     uint outputSlot = leafType * maxLeavesPerType + typeLocalSlot;
 
-    // Transform orientation to world space
-    // Extract rotation from model matrix and combine with local orientation
-    mat3 rotationMatrix = mat3(tree.treeModel);
-    vec4 treeRotQuat = mat3ToQuat(rotationMatrix);
-    vec4 worldOrientation = quatMul(treeRotQuat, leaf.orientation);
-
     // Write world-space leaf with tree index
     outputInstances[outputSlot].worldPosition = vec4(worldPos.xyz, leafSize);
-    outputInstances[outputSlot].worldOrientation = worldOrientation;
+    outputInstances[outputSlot].worldOrientation = transformLeafOrientation(leaf.orientation, tree.treeModel);
     outputInstances[outputSlot].treeIndex = tree.treeIndex;
     outputInstances[outputSlot]._pad0 = 0;
     outputInstances[outputSlot]._pad1 = 0;

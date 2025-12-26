@@ -12,23 +12,20 @@
 #include "instancing_common.glsl"
 #include "tree_leaf_instance.glsl"
 #include "tree_leaf_world.glsl"
+#include "tree_leaf_cull_common.glsl"
 
 // Workgroup size: 256 threads per workgroup
 // Each workgroup processes one visible tree's leaves
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
-// Number of leaf types (oak=0, ash=1, aspen=2, pine=3)
-const uint NUM_LEAF_TYPES = 4;
-
 // Distance-based budget tiers to prioritize nearby tree leaves
-// This ensures close trees always have leaves, even when budget is tight
 // Aligned with 64m cell size for consistency with spatial index
 const uint NUM_DISTANCE_TIERS = 3;
 const float TIER_DISTANCES[NUM_DISTANCE_TIERS] = float[](64.0, 128.0, 256.0);
 // Budget allocation per tier (as fraction of maxLeavesPerType):
-// Tier 0 (0-64m):    50% of budget - close trees always get leaves
-// Tier 1 (64-128m):  30% of budget - medium distance
-// Tier 2 (128m+):    20% of budget - distant trees share remainder
+// Tier 0 (0-64m):    50% - close trees always get leaves
+// Tier 1 (64-128m):  30% - medium distance
+// Tier 2 (128m+):    20% - distant trees share remainder
 const float TIER_BUDGET_FRACTIONS[NUM_DISTANCE_TIERS] = float[](0.5, 0.3, 0.2);
 
 // Visible tree data (from tree_filter.comp)
@@ -38,19 +35,6 @@ struct VisibleTreeData {
     uint leafInstanceCount;        // Number of leaves for this tree
     uint leafTypeIndex;            // Leaf type (0=oak, 1=ash, 2=aspen, 3=pine)
     float lodBlendFactor;          // LOD blend factor
-    uint _pad0;
-    uint _pad1;
-    uint _pad2;
-};
-
-// Per-tree culling data (for model matrix lookup)
-struct TreeCullData {
-    mat4 treeModel;
-    uint inputFirstInstance;
-    uint inputInstanceCount;
-    uint treeIndex;
-    uint leafTypeIndex;
-    float lodBlendFactor;
     uint _pad0;
     uint _pad1;
     uint _pad2;
@@ -126,8 +110,8 @@ void main() {
     // First thread in first workgroup initializes indirect commands
     if (gl_GlobalInvocationID.x == 0) {
         for (uint i = 0; i < NUM_LEAF_TYPES; i++) {
-            drawCmds[i].indexCount = 6;       // Quad: 6 indices
-            drawCmds[i].instanceCount = 0;    // Will be atomically incremented
+            drawCmds[i].indexCount = 6;
+            drawCmds[i].instanceCount = 0;
             drawCmds[i].firstIndex = 0;
             drawCmds[i].vertexOffset = 0;
             drawCmds[i].firstInstance = i * maxLeavesPerType;
@@ -166,40 +150,27 @@ void main() {
         // Get input leaf instance
         LeafInstance leaf = inputInstances[globalLeafIdx];
 
-        // Transform leaf position to world space
-        vec3 leafLocalPos = leaf.positionAndSize.xyz;
-        vec4 worldPos = tree.treeModel * vec4(leafLocalPos, 1.0);
+        // Cull leaf using shared function
+        vec4 worldPos;
+        float leafSize;
+        float distToCamera;
 
-        // Distance culling
-        float distToCamera = getDistanceToCamera(worldPos.xyz, cameraPosition.xyz);
-        if (distToCamera > maxDrawDistance) {
+        if (cullLeaf(
+            leaf.positionAndSize.xyz,
+            leaf.positionAndSize.w,
+            tree.treeModel,
+            visTree.lodBlendFactor,
+            cameraPosition.xyz,
+            frustumPlanes,
+            maxDrawDistance,
+            lodTransitionStart,
+            lodTransitionEnd,
+            maxLodDropRate,
+            worldPos,
+            leafSize,
+            distToCamera
+        )) {
             continue;
-        }
-
-        // Frustum culling with margin for leaf size
-        float leafSize = leaf.positionAndSize.w;
-        float margin = leafSize * 2.0;
-        if (!isInFrustum(frustumPlanes, worldPos.xyz, margin)) {
-            continue;
-        }
-
-        // LOD blade dropping - use position-based hash for consistent results
-        // Incorporate LOD blend factor for smooth transitions
-        float instanceHash = hash2D(leafLocalPos.xz);
-        float effectiveDropRate = maxLodDropRate + visTree.lodBlendFactor * (1.0 - maxLodDropRate);
-        if (lodCull(distToCamera, lodTransitionStart, lodTransitionEnd,
-                    effectiveDropRate, instanceHash)) {
-            continue;
-        }
-
-        // Additional stochastic culling based on LOD blend factor
-        // Use a power curve to make leaves fade out faster than the impostor fades in
-        // At blendFactor=0.5, about 75% of leaves should be culled (sqrt(0.5) ≈ 0.71 threshold)
-        if (visTree.lodBlendFactor > 0.0) {
-            float adjustedBlend = sqrt(visTree.lodBlendFactor);  // More aggressive fade-out
-            if (instanceHash < adjustedBlend) {
-                continue;
-            }
         }
 
         // Get leaf type and distance tier
@@ -235,14 +206,9 @@ void main() {
         // Calculate global output slot
         uint outputSlot = leafType * maxLeavesPerType + typeLocalSlot;
 
-        // Transform orientation to world space
-        mat3 rotationMatrix = mat3(tree.treeModel);
-        vec4 treeRotQuat = mat3ToQuat(rotationMatrix);
-        vec4 worldOrientation = quatMul(treeRotQuat, leaf.orientation);
-
         // Write world-space leaf with tree index
         outputInstances[outputSlot].worldPosition = vec4(worldPos.xyz, leafSize);
-        outputInstances[outputSlot].worldOrientation = worldOrientation;
+        outputInstances[outputSlot].worldOrientation = transformLeafOrientation(leaf.orientation, tree.treeModel);
         outputInstances[outputSlot].treeIndex = tree.treeIndex;
         outputInstances[outputSlot]._pad0 = 0;
         outputInstances[outputSlot]._pad1 = 0;
