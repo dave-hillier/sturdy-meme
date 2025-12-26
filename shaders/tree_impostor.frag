@@ -34,21 +34,10 @@ layout(binding = BINDING_TREE_IMPOSTOR_SHADOW_MAP) uniform sampler2DArrayShadow 
 
 layout(push_constant) uniform PushConstants {
     vec4 cameraPos;     // xyz = camera position, w = autumnHueShift
-    vec4 lodParams;     // x = useOctahedral, y = brightness, z = normal strength, w = debug elevation
-    vec4 atlasParams;   // x = enableFrameBlending, y = unused, z = unused, w = debugShowCellIndex
+    vec4 lodParams;     // x = useOctahedral, y = brightness, z = normal strength, w = unused
+    vec4 atlasParams;   // x = enableFrameBlending, y = unused, z = unused, w = unused
 } push;
 
-// Debug colors for angles
-const vec3 debugColors[8] = vec3[8](
-    vec3(1.0, 0.0, 0.0),   // Red
-    vec3(1.0, 0.5, 0.0),   // Orange
-    vec3(1.0, 1.0, 0.0),   // Yellow
-    vec3(0.0, 1.0, 0.0),   // Green
-    vec3(0.0, 1.0, 1.0),   // Cyan
-    vec3(0.0, 0.0, 1.0),   // Blue
-    vec3(0.5, 0.0, 1.0),   // Purple
-    vec3(1.0, 0.0, 1.0)    // Magenta
-);
 
 // Octahedral normal decoding
 vec3 decodeOctahedral(vec2 e) {
@@ -222,24 +211,6 @@ void main() {
 
     vec3 color = ambient * albedo;
     color += (diffuse + specular) * sunLight * NdotL * shadow;
-
-    // Debug: show cell index as color
-    if (push.atlasParams.w > 0.5) {
-        if (fragUseOctahedral != 0) {
-            // Octahedral mode: show grid position as color gradient
-            color = vec3(fragOctaUV.x, fragOctaUV.y, 0.5);
-        } else {
-            // Legacy mode: discrete cell colors
-            if (fragCellIndex == 8) {
-                color = vec3(1.0);  // Top-down = white
-            } else if (fragCellIndex < 8) {
-                color = debugColors[fragCellIndex];
-            } else {
-                int hIndex = fragCellIndex - 9;
-                color = debugColors[hIndex % 8] * 0.7;
-            }
-        }
-    }
 
     outColor = vec4(color, 1.0);
 }

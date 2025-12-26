@@ -150,59 +150,6 @@ void GuiTreeTab::render(ITreeControl& treeControl) {
                 ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.5f, 1.0f), "  Legacy: 2x9 grid = 17 views");
             }
 
-            ImGui::Spacing();
-            ImGui::Text("Debug:");
-
-            // Show actual calculated elevation
-            const auto& dbg = treeLOD->getDebugInfo();
-            ImGui::Text("Camera Y: %.1f", dbg.cameraPos.y);
-            ImGui::Text("Nearest tree: (%.1f, %.1f, %.1f) dist=%.1f",
-                        dbg.nearestTreePos.x, dbg.nearestTreePos.y, dbg.nearestTreePos.z,
-                        dbg.nearestTreeDistance);
-            ImGui::Text("Calculated elevation: %.1f deg", dbg.calculatedElevation);
-            if (dbg.calculatedElevation > 67.5f) {
-                ImGui::SameLine();
-                ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "(top-down)");
-            } else if (dbg.calculatedElevation > 22.5f) {
-                ImGui::SameLine();
-                ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "(elevated)");
-            } else {
-                ImGui::SameLine();
-                ImGui::TextColored(ImVec4(0.5f, 0.5f, 1.0f, 1.0f), "(horizon)");
-            }
-
-            ImGui::Spacing();
-            ImGui::Checkbox("Override Elevation", &settings.enableDebugElevation);
-            if (settings.enableDebugElevation) {
-                ImGui::SliderFloat("Elevation Angle", &settings.debugElevation, -90.0f, 90.0f, "%.1f deg");
-                if (settings.debugElevation > 67.5f) {
-                    ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "  -> Top-down view (cell 8)");
-                } else if (settings.debugElevation > 22.5f) {
-                    ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "  -> Elevated view (row 1)");
-                } else {
-                    ImGui::TextColored(ImVec4(0.5f, 0.5f, 1.0f, 1.0f), "  -> Horizon view (row 0)");
-                }
-            }
-
-            ImGui::Checkbox("Show Cell Index Colors", &settings.debugShowCellIndex);
-            if (settings.debugShowCellIndex) {
-                ImGui::TextWrapped("Colors show which atlas cell is used:");
-                ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "Red=0 (+Z)");
-                ImGui::SameLine();
-                ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "Orange=45");
-                ImGui::SameLine();
-                ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "Yellow=90 (+X)");
-                ImGui::SameLine();
-                ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "Green=135");
-                ImGui::TextColored(ImVec4(0.0f, 1.0f, 1.0f, 1.0f), "Cyan=180 (-Z)");
-                ImGui::SameLine();
-                ImGui::TextColored(ImVec4(0.0f, 0.0f, 1.0f, 1.0f), "Blue=225");
-                ImGui::SameLine();
-                ImGui::TextColored(ImVec4(0.5f, 0.0f, 1.0f, 1.0f), "Purple=270 (-X)");
-                ImGui::SameLine();
-                ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), "Magenta=315");
-            }
-
             // Two-phase leaf culling toggle
             auto* treeRenderer = treeControl.getSystems().treeRenderer();
             if (treeRenderer) {

@@ -85,11 +85,6 @@ struct TreeLODSettings {
     bool useOctahedralMapping = true;      // Use octahedral vs legacy 17-view atlas
     bool enableFrameBlending = true;       // Blend between 3 nearest frames for smooth transitions
 
-    // Debug settings
-    bool enableDebugElevation = false;     // Override elevation angle for testing
-    float debugElevation = 0.0f;           // Debug elevation angle in degrees (-90 to 90)
-    bool debugShowCellIndex = false;       // Color-code impostors by cell index
-
     // Seasonal effects (global for all impostors)
     float autumnHueShift = 0.0f;           // 0 = summer green, 1 = full autumn colors
 

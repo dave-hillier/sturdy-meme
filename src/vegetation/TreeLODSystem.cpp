@@ -951,20 +951,20 @@ void TreeLODSystem::renderImpostors(VkCommandBuffer cmd, uint32_t frameIndex,
     } pushConstants;
 
     pushConstants.cameraPos = glm::vec4(lastCameraPos_, settings.autumnHueShift);
-    // lodParams: x=useOctahedral, y=brightness, z=normalStrength, w=debugElevation (negative=disabled)
+    // lodParams: x=useOctahedral, y=brightness, z=normalStrength, w=unused
     pushConstants.lodParams = glm::vec4(
         settings.useOctahedralMapping ? 1.0f : 0.0f,
         settings.impostorBrightness,
         settings.normalStrength,
-        settings.enableDebugElevation ? settings.debugElevation : -999.0f  // -999 = disabled
+        0.0f
     );
 
-    // atlasParams: x=enableFrameBlending, y=unused, z=unused, w=debugShowCellIndex
+    // atlasParams: x=enableFrameBlending, y=unused, z=unused, w=unused
     pushConstants.atlasParams = glm::vec4(
         settings.enableFrameBlending ? 1.0f : 0.0f,
         0.0f,
         0.0f,
-        settings.debugShowCellIndex ? 1.0f : 0.0f
+        0.0f
     );
 
     vkCmdPushConstants(cmd, impostorPipelineLayout_.get(),
@@ -1058,20 +1058,20 @@ void TreeLODSystem::renderImpostorShadows(VkCommandBuffer cmd, uint32_t frameInd
     } pushConstants;
 
     pushConstants.cameraPos = glm::vec4(lastCameraPos_, 1.0f);
-    // lodParams: x=useOctahedral, y=brightness, z=normalStrength, w=debugElevation (negative=disabled)
+    // lodParams: x=useOctahedral, y=brightness, z=normalStrength, w=unused
     pushConstants.lodParams = glm::vec4(
         settings.useOctahedralMapping ? 1.0f : 0.0f,
         settings.impostorBrightness,
         settings.normalStrength,
-        settings.enableDebugElevation ? settings.debugElevation : -999.0f  // -999 = disabled
+        0.0f
     );
 
-    // atlasParams: x=enableFrameBlending, y=unused, z=unused, w=debugShowCellIndex
+    // atlasParams: x=enableFrameBlending, y=unused, z=unused, w=unused
     pushConstants.atlasParams = glm::vec4(
         settings.enableFrameBlending ? 1.0f : 0.0f,
         0.0f,
         0.0f,
-        settings.debugShowCellIndex ? 1.0f : 0.0f
+        0.0f
     );
     pushConstants.cascadeIndex = cascadeIndex;
 
@@ -1202,20 +1202,20 @@ void TreeLODSystem::renderImpostorsGPUCulled(VkCommandBuffer cmd, uint32_t frame
     } pushConstants;
 
     pushConstants.cameraPos = glm::vec4(lastCameraPos_, settings.autumnHueShift);
-    // lodParams: x=useOctahedral, y=brightness, z=normalStrength, w=debugElevation (negative=disabled)
+    // lodParams: x=useOctahedral, y=brightness, z=normalStrength, w=unused
     pushConstants.lodParams = glm::vec4(
         settings.useOctahedralMapping ? 1.0f : 0.0f,
         settings.impostorBrightness,
         settings.normalStrength,
-        settings.enableDebugElevation ? settings.debugElevation : -999.0f
+        0.0f
     );
 
-    // atlasParams: x=enableFrameBlending, y=unused, z=unused, w=debugShowCellIndex
+    // atlasParams: x=enableFrameBlending, y=unused, z=unused, w=unused
     pushConstants.atlasParams = glm::vec4(
         settings.enableFrameBlending ? 1.0f : 0.0f,
         0.0f,
         0.0f,
-        settings.debugShowCellIndex ? 1.0f : 0.0f
+        0.0f
     );
 
     vkCmdPushConstants(cmd, impostorPipelineLayout_.get(),
