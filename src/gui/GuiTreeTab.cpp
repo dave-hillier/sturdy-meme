@@ -57,11 +57,11 @@ void GuiTreeTab::render(ITreeControl& treeControl) {
                 ImGui::Text("Screen-Space Error Thresholds:");
                 ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "  (High error = close/large, Low error = far/small)");
 
-                ImGui::SliderFloat("Full Detail Error", &settings.errorThresholdFull, 0.5f, 20.0f, "%.1f px");
+                ImGui::SliderFloat("Detail Threshold", &settings.errorThresholdFull, 0.5f, 20.0f, "%.1f px");
                 if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("Screen error threshold for full geometry.\n"
-                                      "Trees with error ABOVE this use full geometry.\n"
-                                      "Higher = use geometry only when very close.");
+                    ImGui::SetTooltip("Minimum screen error for full geometry.\n"
+                                      "Lower = more trees use full geometry (higher quality).\n"
+                                      "Higher = fewer trees use full geometry (better performance).");
                 }
 
                 // Clamp impostor error to be less than full detail error
@@ -69,11 +69,11 @@ void GuiTreeTab::render(ITreeControl& treeControl) {
                 if (settings.errorThresholdImpostor > maxImpostorError) {
                     settings.errorThresholdImpostor = maxImpostorError;
                 }
-                ImGui::SliderFloat("Impostor Error", &settings.errorThresholdImpostor, 0.1f, maxImpostorError, "%.2f px");
+                ImGui::SliderFloat("Impostor Threshold", &settings.errorThresholdImpostor, 0.1f, maxImpostorError, "%.2f px");
                 if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("Screen error threshold for impostor LOD.\n"
-                                      "Trees with error BELOW this use full impostor.\n"
-                                      "Blend occurs between Full Detail and Impostor thresholds.");
+                    ImGui::SetTooltip("Maximum screen error for pure impostor.\n"
+                                      "Lower = impostors used only for distant trees.\n"
+                                      "Blend zone exists between Detail and Impostor thresholds.");
                 }
 
                 // Clamp cull error to be less than impostor error
@@ -81,11 +81,11 @@ void GuiTreeTab::render(ITreeControl& treeControl) {
                 if (settings.errorThresholdCull > maxCullError) {
                     settings.errorThresholdCull = maxCullError;
                 }
-                ImGui::SliderFloat("Cull Error", &settings.errorThresholdCull, 0.01f, maxCullError, "%.3f px");
+                ImGui::SliderFloat("Cull Threshold", &settings.errorThresholdCull, 0.01f, maxCullError, "%.3f px");
                 if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("Screen error threshold for culling.\n"
-                                      "Trees with error BELOW this are culled entirely.\n"
-                                      "Very small on screen = not worth rendering.");
+                    ImGui::SetTooltip("Maximum screen error for culling.\n"
+                                      "Lower = only cull extremely distant trees.\n"
+                                      "Higher = more aggressive culling (better performance).");
                 }
             } else {
                 // Distance-based LOD controls

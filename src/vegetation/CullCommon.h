@@ -59,7 +59,7 @@ inline void extractFrustumPlanes(const glm::mat4& viewProj, glm::vec4* outPlanes
 
 // Screen-space error LOD thresholds (used by TreeLODSystem and ImpostorCullSystem)
 namespace TreeLODConstants {
-    constexpr float ERROR_THRESHOLD_FULL = 4.0f;        // Above: full geometry (close trees)
+    constexpr float ERROR_THRESHOLD_FULL = 2.0f;        // Above: full geometry (close trees)
     constexpr float ERROR_THRESHOLD_IMPOSTOR = 1.0f;    // Below: full impostor (far trees)
     constexpr float ERROR_THRESHOLD_CULL = 0.25f;       // Below: cull entirely (very far)
 

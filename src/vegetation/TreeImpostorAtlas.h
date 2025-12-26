@@ -92,8 +92,8 @@ struct TreeLODSettings {
     // Controls which cascades render full geometry vs impostors only
     struct ShadowSettings {
         // Cascade >= geometryCascadeCutoff uses impostors only (no branches/leaves)
-        // Default: cascades 0-1 get geometry, 2-3 get impostors only
-        uint32_t geometryCascadeCutoff = 2;
+        // Default: cascades 0-2 get geometry, cascade 3 gets impostors only
+        uint32_t geometryCascadeCutoff = 3;
 
         // Cascade >= leafCascadeCutoff skips leaf shadows entirely
         // Default: cascade 3 has no leaf shadows (impostor shadows only)
