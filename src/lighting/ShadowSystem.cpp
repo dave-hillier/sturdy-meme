@@ -342,8 +342,14 @@ void ShadowSystem::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex,
                                      const DrawCallback& terrainDrawCallback,
                                      const DrawCallback& grassDrawCallback,
                                      const DrawCallback& treeDrawCallback,
-                                     const DrawCallback& skinnedDrawCallback) {
+                                     const DrawCallback& skinnedDrawCallback,
+                                     const ComputeCallback& preCascadeComputeCallback) {
     for (uint32_t cascade = 0; cascade < NUM_SHADOW_CASCADES; cascade++) {
+        // Run pre-cascade compute pass (GPU culling) BEFORE the render pass
+        if (preCascadeComputeCallback) {
+            preCascadeComputeCallback(cmd, frameIndex, cascade, cascadeMatrices[cascade]);
+        }
+
         VkRenderPassBeginInfo shadowPassInfo{};
         shadowPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         shadowPassInfo.renderPass = shadowRenderPass;

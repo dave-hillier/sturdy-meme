@@ -47,6 +47,7 @@
 #include "TreeLODSystem.h"
 #include "ImpostorCullSystem.h"
 #include "DetritusSystem.h"
+#include "CullCommon.h"  // For extractFrustumPlanes
 // Water
 #include "WaterSystem.h"
 #include "WaterTileCull.h"
@@ -822,7 +823,7 @@ bool Renderer::render(const Camera& camera) {
     // Shadow pass (skip when sun is below horizon or shadows disabled)
     if (lastSunIntensity > 0.001f && perfToggles.shadowPass) {
         systems_->profiler().beginGpuZone(cmd, "ShadowPass");
-        recordShadowPass(cmd, frame.frameIndex, frame.time);
+        recordShadowPass(cmd, frame.frameIndex, frame.time, frame.cameraPosition);
         systems_->profiler().endGpuZone(cmd, "ShadowPass");
     }
 
@@ -1162,7 +1163,7 @@ RenderResources Renderer::buildRenderResources(uint32_t swapchainImageIndex) con
 
 // Render pass recording helpers - pure command recording, no state mutation
 
-void Renderer::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float grassTime) {
+void Renderer::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float grassTime, const glm::vec3& cameraPosition) {
     // Delegate to the shadow system with callbacks for terrain and grass
     auto terrainCallback = [this, frameIndex](VkCommandBuffer cb, uint32_t cascade, const glm::mat4& lightMatrix) {
         if (terrainEnabled && perfToggles.terrainShadows) {
@@ -1242,13 +1243,28 @@ void Renderer::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float 
         };
     }
 
+    // Pre-cascade compute callback for GPU culling (runs before each cascade's render pass)
+    ShadowSystem::ComputeCallback preCascadeComputeCallback = [this, cameraPosition](
+        VkCommandBuffer cb, uint32_t frame, uint32_t cascade, const glm::mat4& lightMatrix) {
+        if (systems_->treeRenderer() && systems_->tree() && systems_->treeLOD()) {
+            // Extract frustum planes from the light view-projection matrix
+            glm::vec4 cascadeFrustumPlanes[6];
+            extractFrustumPlanes(lightMatrix, cascadeFrustumPlanes);
+
+            // Record GPU culling pass for branch shadows
+            systems_->treeRenderer()->recordBranchShadowCulling(
+                cb, frame, cascade, cascadeFrustumPlanes, cameraPosition, systems_->treeLOD());
+        }
+    };
+
     // Use any MaterialRegistry descriptor set for shadow pass (only needs common bindings/UBO)
     // MaterialId 0 is the first registered material (crate)
     const auto& materialRegistry = systems_->scene().getSceneBuilder().getMaterialRegistry();
     VkDescriptorSet shadowDescriptorSet = materialRegistry.getDescriptorSet(0, frameIndex);
     systems_->shadow().recordShadowPass(cmd, frameIndex, shadowDescriptorSet,
                                    allObjects,
-                                   terrainCallback, grassCallback, treeCallback, skinnedCallback);
+                                   terrainCallback, grassCallback, treeCallback, skinnedCallback,
+                                   preCascadeComputeCallback);
 }
 
 void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
