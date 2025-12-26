@@ -218,6 +218,12 @@ void OceanFFT::cleanup() {
     // Clear cascades (RAII handles cleanup)
     cascades.clear();
 
+    // Clear descriptor set vectors (handles freed when pool is destroyed)
+    spectrumDescSets.clear();
+    timeEvolutionDescSets.clear();
+    fftDescSets.clear();
+    displacementDescSets.clear();
+
     // Destroy descriptor pool
     if (descriptorPool != VK_NULL_HANDLE) {
         vkDestroyDescriptorPool(device, descriptorPool, nullptr);
@@ -659,6 +665,22 @@ bool OceanFFT::createDescriptorSets() {
 
             // Note: These will be updated dynamically based on which FFT buffer has the result
         }
+
+        // FFT descriptor set (reused for all FFT passes within this cascade)
+        {
+            VkDescriptorSetLayout layout = fftDescLayout.get();
+            VkDescriptorSetAllocateInfo allocInfo{};
+            allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+            allocInfo.descriptorPool = descriptorPool;
+            allocInfo.descriptorSetCount = 1;
+            allocInfo.pSetLayouts = &layout;
+
+            VkDescriptorSet fftSet;
+            if (vkAllocateDescriptorSets(device, &allocInfo, &fftSet) != VK_SUCCESS) {
+                return false;
+            }
+            fftDescSets.push_back(fftSet);
+        }
     }
 
     return true;
@@ -800,23 +822,13 @@ void OceanFFT::recordFFT(VkCommandBuffer cmd, Cascade& cascade,
     // For a proper implementation, we'd need to do horizontal then vertical FFT
     // Each direction requires log2(N) butterfly passes
 
+    int cascadeIndex = static_cast<int>(&cascade - &cascades[0]);
     int numStages = static_cast<int>(std::log2(params.resolution));
     uint32_t groupSize = 16;
     uint32_t groupCount = (params.resolution + groupSize - 1) / groupSize;
 
-    // Allocate temporary FFT descriptor sets dynamically
-    VkDescriptorSet fftDescSet;
-    VkDescriptorSetLayout layout = fftDescLayout.get();
-    VkDescriptorSetAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = descriptorPool;
-    allocInfo.descriptorSetCount = 1;
-    allocInfo.pSetLayouts = &layout;
-
-    if (vkAllocateDescriptorSets(device, &allocInfo, &fftDescSet) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to allocate FFT descriptor set");
-        return;
-    }
+    // Use pre-allocated FFT descriptor set for this cascade
+    VkDescriptorSet fftDescSet = fftDescSets[cascadeIndex];
 
     // Track which buffer has current data
     VkImage currentInput = input;
