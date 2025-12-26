@@ -18,6 +18,17 @@ layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 // Number of leaf types (oak=0, ash=1, aspen=2, pine=3)
 const uint NUM_LEAF_TYPES = 4;
 
+// Distance-based budget tiers to prioritize nearby tree leaves
+// This ensures close trees always have leaves, even when budget is tight
+// Aligned with 64m cell size for consistency with spatial index
+const uint NUM_DISTANCE_TIERS = 3;
+const float TIER_DISTANCES[NUM_DISTANCE_TIERS] = float[](64.0, 128.0, 256.0);
+// Budget allocation per tier (as fraction of maxLeavesPerType):
+// Tier 0 (0-64m):    50% of budget - close trees always get leaves
+// Tier 1 (64-128m):  30% of budget - medium distance
+// Tier 2 (128m+):    20% of budget - distant trees share remainder
+const float TIER_BUDGET_FRACTIONS[NUM_DISTANCE_TIERS] = float[](0.5, 0.3, 0.2);
+
 // Visible tree data (from tree_filter.comp)
 struct VisibleTreeData {
     uint originalTreeIndex;        // Index into TreeCullData array
@@ -66,8 +77,12 @@ layout(std430, binding = BINDING_LEAF_CULL_P3_OUTPUT) writeonly buffer OutputBuf
 };
 
 // One indirect draw command per leaf type
+// Also includes per-tier budget tracking for distance-based prioritization
 layout(std430, binding = BINDING_LEAF_CULL_P3_INDIRECT) buffer IndirectBuffer {
     DrawIndexedIndirectCommand drawCmds[NUM_LEAF_TYPES];
+    // Per-type, per-tier instance counts for budget enforcement
+    // Layout: tierCounts[leafType][tier]
+    uint tierCounts[NUM_LEAF_TYPES * NUM_DISTANCE_TIERS];
 };
 
 // Global culling uniforms
@@ -84,6 +99,24 @@ layout(binding = BINDING_LEAF_CULL_P3_UNIFORMS) uniform TreeLeafCullUniforms {
     uint _pad1;
 };
 
+// Get distance tier for budget allocation
+uint getDistanceTier(float dist) {
+    if (dist < TIER_DISTANCES[0]) return 0;
+    if (dist < TIER_DISTANCES[1]) return 1;
+    return 2;
+}
+
+// Get budget limit for a specific tier within a leaf type
+uint getTierBudgetLimit(uint leafType, uint tier) {
+    // Each tier gets a fraction of the per-type budget
+    // Cumulative: tier 0 gets its fraction, tier 1 gets tier0 + its fraction, etc.
+    float cumulativeFraction = 0.0;
+    for (uint t = 0; t <= tier; t++) {
+        cumulativeFraction += TIER_BUDGET_FRACTIONS[t];
+    }
+    return uint(float(maxLeavesPerType) * cumulativeFraction);
+}
+
 void main() {
     uint localIdx = gl_LocalInvocationID.x;     // Leaf index within this tree
     uint visibleTreeIdx = gl_WorkGroupID.x;     // Which visible tree we're processing
@@ -96,6 +129,10 @@ void main() {
             drawCmds[i].firstIndex = 0;
             drawCmds[i].vertexOffset = 0;
             drawCmds[i].firstInstance = i * maxLeavesPerType;
+        }
+        // Initialize tier counts
+        for (uint i = 0; i < NUM_LEAF_TYPES * NUM_DISTANCE_TIERS; i++) {
+            tierCounts[i] = 0;
         }
     }
 
@@ -163,13 +200,34 @@ void main() {
             }
         }
 
-        // Get leaf type
+        // Get leaf type and distance tier
         uint leafType = min(visTree.leafTypeIndex, NUM_LEAF_TYPES - 1);
+        uint tier = getDistanceTier(distToCamera);
+
+        // Tiered budget allocation:
+        // - Tier 0 (close): gets first 50% of slots
+        // - Tier 1 (medium): gets next 30% of slots
+        // - Tier 2 (far): gets remaining 20% of slots
+        // This ensures nearby trees always have leaves even when total budget is exhausted
+
+        uint tierIndex = leafType * NUM_DISTANCE_TIERS + tier;
+        uint tierSlot = atomicAdd(tierCounts[tierIndex], 1);
+
+        // Check if this tier's budget is exhausted
+        uint tierBudget = getTierBudgetLimit(leafType, tier);
+        uint prevTierBudget = (tier > 0) ? getTierBudgetLimit(leafType, tier - 1) : 0;
+        uint tierCapacity = tierBudget - prevTierBudget;
+
+        if (tierSlot >= tierCapacity) {
+            // Tier budget exhausted - this leaf doesn't get rendered
+            atomicAdd(tierCounts[tierIndex], -1);
+            continue;
+        }
 
         // Atomically get output slot within this leaf type's region
         uint typeLocalSlot = atomicAdd(drawCmds[leafType].instanceCount, 1);
 
-        // Check bounds
+        // Double-check total bounds (should be redundant with tier check, but safety)
         if (typeLocalSlot >= maxLeavesPerType) {
             atomicAdd(drawCmds[leafType].instanceCount, -1);
             continue;

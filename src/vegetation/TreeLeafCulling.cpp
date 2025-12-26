@@ -139,13 +139,15 @@ bool TreeLeafCulling::createLeafCullBuffers(uint32_t maxLeafInstances, uint32_t 
 
     // Use a fixed budget for visible leaf output rather than sizing for all possible instances.
     // The GPU culling pass outputs only visible leaves, so we size for expected maximum visibility:
-    // - ~30-50 trees visible at once (close enough for full leaf detail)
+    // - ~50-100 trees visible at once (close enough for full leaf detail)
     // - ~2000-3000 leaves per tree on average
-    // - Total: ~60k-150k visible leaf instances per type at peak
+    // - Total: ~100k-300k visible leaf instances per type at peak
     //
-    // Using 50k per type = 200k total * 48 bytes * 3 frames = ~28.8MB
+    // Using 100k per type = 400k total * 48 bytes * 3 frames = ~57.6MB
     // This is a reasonable GPU memory budget for leaf rendering.
-    constexpr uint32_t MAX_VISIBLE_LEAVES_PER_TYPE = 50000;
+    // The tiered distance budget in tree_leaf_cull_phase3.comp ensures nearby trees
+    // always have leaves even when total budget is exhausted.
+    constexpr uint32_t MAX_VISIBLE_LEAVES_PER_TYPE = 100000;
     maxLeavesPerType_ = MAX_VISIBLE_LEAVES_PER_TYPE;
 
     // Only log if input was much larger (avoid spam for reasonable inputs)
@@ -318,9 +320,12 @@ bool TreeLeafCulling::createCellCullBuffers() {
         return false;
     }
 
+    // Indirect buffer now includes bucket counts/offsets for distance-sorted processing
+    // Layout: dispatchX, dispatchY, dispatchZ, totalVisibleTrees, bucketCounts[8], bucketOffsets[8]
+    constexpr uint32_t NUM_DISTANCE_BUCKETS = 8;
     VkBufferCreateInfo indirectInfo{};
     indirectInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    indirectInfo.size = 4 * sizeof(uint32_t);
+    indirectInfo.size = (4 + NUM_DISTANCE_BUCKETS * 2) * sizeof(uint32_t);  // 20 uints = 80 bytes
     indirectInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
                          VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     indirectInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -685,16 +690,19 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
         updateCullDescriptorSets(treeSystem);
     }
 
-    // Reset indirect draw commands
-    VkDrawIndexedIndirectCommand resetCmd{};
-    resetCmd.indexCount = 6;
-    resetCmd.instanceCount = 0;
-    resetCmd.firstIndex = 0;
-    resetCmd.vertexOffset = 0;
-    resetCmd.firstInstance = 0;
+    // Reset all 4 indirect draw commands (one per leaf type: oak, ash, aspen, pine)
+    constexpr uint32_t NUM_LEAF_TYPES = 4;
+    VkDrawIndexedIndirectCommand resetCmds[NUM_LEAF_TYPES];
+    for (uint32_t i = 0; i < NUM_LEAF_TYPES; ++i) {
+        resetCmds[i].indexCount = 6;       // Quad: 6 indices
+        resetCmds[i].instanceCount = 0;    // Will be set by compute shader
+        resetCmds[i].firstIndex = 0;
+        resetCmds[i].vertexOffset = 0;
+        resetCmds[i].firstInstance = i * maxLeavesPerType_;  // Base offset for each leaf type
+    }
 
     vkCmdUpdateBuffer(cmd, cullIndirectBuffers_[currentBufferSet_],
-                      0, sizeof(VkDrawIndexedIndirectCommand), &resetCmd);
+                      0, sizeof(resetCmds), resetCmds);
 
     // Upload per-tree data
     vkCmdUpdateBuffer(cmd, treeDataBuffer_, 0,

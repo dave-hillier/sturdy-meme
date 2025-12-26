@@ -18,7 +18,8 @@ TreeOptions TreeOptions::defaultOak() {
 
     opts.branch.levels = 3;
     opts.branch.angle = {0.0f, 70.0f, 60.0f, 60.0f};
-    opts.branch.children = {7, 7, 5, 0};
+    // Reduced from {7, 7, 5, 0} to reduce leaf count (each final branch gets leaves)
+    opts.branch.children = {5, 5, 4, 0};
     opts.branch.forceDirection = glm::vec3(0.0f, 1.0f, 0.0f);
     opts.branch.forceStrength = 0.01f;
     opts.branch.gnarliness = {0.15f, 0.2f, 0.3f, 0.02f};
@@ -56,7 +57,8 @@ TreeOptions TreeOptions::defaultPine() {
 
     opts.branch.levels = 3;
     opts.branch.angle = {0.0f, 80.0f, 70.0f, 60.0f};
-    opts.branch.children = {12, 8, 4, 0};
+    // Reduced from {12, 8, 4, 0} to reduce leaf count
+    opts.branch.children = {8, 5, 3, 0};
     opts.branch.forceDirection = glm::vec3(0.0f, 1.0f, 0.0f);
     opts.branch.forceStrength = 0.02f;
     opts.branch.gnarliness = {0.05f, 0.1f, 0.15f, 0.02f};
@@ -132,7 +134,8 @@ TreeOptions TreeOptions::defaultWillow() {
 
     opts.branch.levels = 3;
     opts.branch.angle = {0.0f, 60.0f, 80.0f, 90.0f};
-    opts.branch.children = {6, 8, 6, 0};
+    // Reduced from {6, 8, 6, 0} to reduce leaf count
+    opts.branch.children = {5, 5, 4, 0};
     opts.branch.forceDirection = glm::vec3(0.0f, -0.5f, 0.0f);  // Drooping
     opts.branch.forceStrength = 0.03f;
     opts.branch.gnarliness = {0.1f, 0.2f, 0.4f, 0.1f};

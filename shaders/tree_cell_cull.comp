@@ -8,6 +8,10 @@
 // Workgroup size: 256 threads per workgroup
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
+// Distance bucketing for prioritized cell processing
+// Cells are sorted into buckets by distance so nearby trees get processed first
+const uint NUM_DISTANCE_BUCKETS = 8;
+
 // Cell data (packed for GPU - 32 bytes per cell)
 // boundsMinAndFirst: xyz = boundsMin, w = firstTreeIndex as float bits
 // boundsMaxAndCount: xyz = boundsMax, w = treeCount as float bits
@@ -21,7 +25,9 @@ layout(std430, binding = BINDING_TREE_CELL_CULL_CELLS) readonly buffer CellBuffe
     TreeCellGPU cells[];
 };
 
-// Output: Visible cell indices (compacted list)
+// Output: Visible cell indices (compacted list, sorted by distance bucket)
+// Layout: [bucket0 cells][bucket1 cells]...[bucket7 cells]
+// Each bucket is contiguous, bucket counts stored in IndirectDispatchBuffer
 layout(std430, binding = BINDING_TREE_CELL_CULL_VISIBLE) buffer VisibleCellBuffer {
     uint visibleCellCount;
     uint visibleCellIndices[];
@@ -34,6 +40,9 @@ layout(std430, binding = BINDING_TREE_CELL_CULL_INDIRECT) buffer IndirectDispatc
     uint dispatchY;
     uint dispatchZ;
     uint totalVisibleTrees;  // Running count of trees in visible cells
+    // Bucket offsets for distance-sorted cell output
+    uint bucketCounts[NUM_DISTANCE_BUCKETS];
+    uint bucketOffsets[NUM_DISTANCE_BUCKETS];  // Prefix sum (computed after first pass)
 };
 
 // Culling uniforms
@@ -83,8 +92,26 @@ bool isAABBInRange(vec3 boundsMin, vec3 boundsMax, vec3 cameraPos, float maxDist
     return dist <= maxDistance;
 }
 
+// Calculate which distance bucket a cell belongs to
+uint getDistanceBucket(float dist) {
+    // Bucket boundaries aligned with 64m cell size:
+    // 0-64m (1 cell), 64-128m (2 cells), 128-192m, 192-256m, 256-320m, 320-400m, 400-500m, 500m+
+    if (dist < 64.0) return 0;
+    if (dist < 128.0) return 1;
+    if (dist < 192.0) return 2;
+    if (dist < 256.0) return 3;
+    if (dist < 320.0) return 4;
+    if (dist < 400.0) return 5;
+    if (dist < 500.0) return 6;
+    return 7;
+}
+
+// Shared memory for bucket prefix sum calculation
+shared uint sharedBucketCounts[NUM_DISTANCE_BUCKETS];
+
 void main() {
     uint cellIdx = gl_GlobalInvocationID.x;
+    uint localIdx = gl_LocalInvocationID.x;
 
     // First thread initializes output buffers
     if (cellIdx == 0) {
@@ -93,6 +120,15 @@ void main() {
         dispatchY = 1;
         dispatchZ = 1;
         totalVisibleTrees = 0;
+        for (uint i = 0; i < NUM_DISTANCE_BUCKETS; i++) {
+            bucketCounts[i] = 0;
+            bucketOffsets[i] = 0;
+        }
+    }
+
+    // Initialize shared memory
+    if (localIdx < NUM_DISTANCE_BUCKETS) {
+        sharedBucketCounts[localIdx] = 0;
     }
 
     // Ensure initialization is complete before any thread proceeds
@@ -126,9 +162,18 @@ void main() {
         return;
     }
 
-    // Cell is visible - atomically add to visible list
+    // Calculate distance to cell center for bucket assignment
+    vec3 cellCenter = (boundsMin + boundsMax) * 0.5;
+    float distToCamera = length(cellCenter - cameraPosition.xyz);
+    uint bucket = getDistanceBucket(distToCamera);
+
+    // Atomically reserve a slot in the appropriate bucket
+    uint bucketSlot = atomicAdd(bucketCounts[bucket], 1);
+
+    // Store cell index in a temporary location (we'll reorder in tree_filter)
+    // For now, store with bucket info encoded: high 3 bits = bucket, low 29 bits = cellIdx
     uint visibleIdx = atomicAdd(visibleCellCount, 1);
-    visibleCellIndices[visibleIdx] = cellIdx;
+    visibleCellIndices[visibleIdx] = (bucket << 29) | (cellIdx & 0x1FFFFFFF);
 
     // Update tree count and dispatch size
     atomicAdd(totalVisibleTrees, treeCount);
