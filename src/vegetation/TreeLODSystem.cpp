@@ -793,190 +793,42 @@ void TreeLODSystem::updateDescriptorSets(uint32_t frameIndex, VkBuffer uniformBu
 }
 
 void TreeLODSystem::renderImpostors(VkCommandBuffer cmd, uint32_t frameIndex,
-                                     VkBuffer uniformBuffer, VkImageView shadowMap, VkSampler shadowSampler) {
-    if (visibleImpostors_.empty() || impostorAtlas_->getArchetypeCount() == 0) return;
+                                     VkBuffer uniformBuffer, VkImageView shadowMap, VkSampler shadowSampler,
+                                     VkBuffer gpuInstanceBuffer, VkBuffer indirectDrawBuffer) {
+    if (impostorAtlas_->getArchetypeCount() == 0) return;
 
     const auto& settings = getLODSettings();
     // Skip enableImpostors check when in forced Impostor mode
     if (settings.simpleLODMode != SimpleLODMode::Impostor && !settings.enableImpostors) return;
 
-    // Ensure instance buffers are valid
-    if (frameIndex >= instanceBuffers_.buffers.size() ||
-        instanceBuffers_.buffers[frameIndex] == VK_NULL_HANDLE) {
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "TreeLODSystem::renderImpostors: Invalid instance buffer for frame %u", frameIndex);
-        return;
-    }
+    // Determine if using GPU-culled path
+    bool useGPUPath = (gpuInstanceBuffer != VK_NULL_HANDLE && indirectDrawBuffer != VK_NULL_HANDLE);
+
+    // For CPU path, check we have visible impostors
+    if (!useGPUPath && visibleImpostors_.empty()) return;
 
     // Ensure atlas textures are ready
     VkImageView albedoView = impostorAtlas_->getAlbedoAtlasArrayView();
     VkImageView normalView = impostorAtlas_->getNormalAtlasArrayView();
-    if (albedoView == VK_NULL_HANDLE || normalView == VK_NULL_HANDLE) {
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "TreeLODSystem::renderImpostors: Atlas textures not ready");
-        return;
-    }
+    VkSampler atlasSampler = impostorAtlas_->getAtlasSampler();
+    if (albedoView == VK_NULL_HANDLE || normalView == VK_NULL_HANDLE) return;
 
-    // Update descriptor sets
-    updateDescriptorSets(frameIndex, uniformBuffer, shadowMap, shadowSampler);
-
-    // Bind pipeline
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, impostorPipeline_.get());
-
-    // Set viewport and scissor
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = static_cast<float>(extent_.width);
-    viewport.height = static_cast<float>(extent_.height);
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(cmd, 0, 1, &viewport);
-
-    VkRect2D scissor{};
-    scissor.offset = {0, 0};
-    scissor.extent = extent_;
-    vkCmdSetScissor(cmd, 0, 1, &scissor);
-
-    // Bind descriptor sets
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, impostorPipelineLayout_.get(),
-                           0, 1, &impostorDescriptorSets_[frameIndex], 0, nullptr);
-
-    // Push constants
-    // cameraPos: xyz=camera position, w=autumnHueShift
-    // lodParams: x=blend, y=brightness, z=normalStrength, w=debugElevation
-    // atlasParams: x=hSize, y=vSize, z=baseOffset, w=debugShowCellIndex
-    struct {
-        glm::vec4 cameraPos;
-        glm::vec4 lodParams;
-        glm::vec4 atlasParams;
-    } pushConstants;
-
-    pushConstants.cameraPos = glm::vec4(lastCameraPos_, settings.autumnHueShift);
-    // lodParams: x=useOctahedral, y=brightness, z=normalStrength, w=debugElevation (negative=disabled)
-    pushConstants.lodParams = glm::vec4(
-        settings.useOctahedralMapping ? 1.0f : 0.0f,
-        settings.impostorBrightness,
-        settings.normalStrength,
-        settings.enableDebugElevation ? settings.debugElevation : -999.0f  // -999 = disabled
-    );
-
-    // atlasParams: x=enableFrameBlending, y=unused, z=unused, w=debugShowCellIndex
-    pushConstants.atlasParams = glm::vec4(
-        settings.enableFrameBlending ? 1.0f : 0.0f,
-        0.0f,
-        0.0f,
-        settings.debugShowCellIndex ? 1.0f : 0.0f
-    );
-
-    vkCmdPushConstants(cmd, impostorPipelineLayout_.get(),
-                      VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                      0, sizeof(pushConstants), &pushConstants);
-
-    // Bind buffers (use per-frame instance buffer)
-    VkBuffer vertexBuffers[] = {billboardVertexBuffer_.get(), instanceBuffers_.buffers[frameIndex]};
-    VkDeviceSize offsets[] = {0, 0};
-    vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
-    vkCmdBindIndexBuffer(cmd, billboardIndexBuffer_.get(), 0, VK_INDEX_TYPE_UINT32);
-
-    // Draw instanced
-    vkCmdDrawIndexed(cmd, billboardIndexCount_, static_cast<uint32_t>(visibleImpostors_.size()), 0, 0, 0);
-}
-
-void TreeLODSystem::renderImpostorShadows(VkCommandBuffer cmd, uint32_t frameIndex,
-                                           int cascadeIndex, VkBuffer uniformBuffer) {
-    if (visibleImpostors_.empty() || impostorAtlas_->getArchetypeCount() == 0) return;
-    if (shadowPipeline_.get() == VK_NULL_HANDLE) return;
-    if (uniformBuffer == VK_NULL_HANDLE) return;
-
-    const auto& settings = getLODSettings();
-    // Skip enableImpostors check when in forced Impostor mode
-    if (settings.simpleLODMode != SimpleLODMode::Impostor && !settings.enableImpostors) return;
-
-    // Update shadow descriptor set with UBO, albedo atlas, and instance buffer
-    if (!shadowDescriptorSets_.empty() && impostorAtlas_->getArchetypeCount() > 0) {
-        VkImageView albedoView = impostorAtlas_->getAlbedoAtlasArrayView();
-        VkSampler atlasSampler = impostorAtlas_->getAtlasSampler();
-
-        if (albedoView != VK_NULL_HANDLE) {
-            DescriptorManager::SetWriter(device_, shadowDescriptorSets_[frameIndex])
-                .writeBuffer(BINDING_TREE_IMPOSTOR_UBO, uniformBuffer, 0, VK_WHOLE_SIZE)
-                .writeImage(BINDING_TREE_IMPOSTOR_ALBEDO, albedoView, atlasSampler)
-                .writeBuffer(BINDING_TREE_IMPOSTOR_SHADOW_INSTANCES, instanceBuffers_.buffers[frameIndex],
-                             0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-                .update();
+    // For CPU path, ensure instance buffers are valid
+    if (!useGPUPath) {
+        if (frameIndex >= instanceBuffers_.buffers.size() ||
+            instanceBuffers_.buffers[frameIndex] == VK_NULL_HANDLE) {
+            return;
         }
     }
 
-    // Bind shadow pipeline
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipeline_.get());
-
-    // Bind descriptor sets - use the main UBO descriptor set passed in for cascade matrices
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipelineLayout_.get(),
-                           0, 1, &shadowDescriptorSets_[frameIndex], 0, nullptr);
-
-    // Push constants with cascade index
-    struct {
-        glm::vec4 cameraPos;
-        glm::vec4 lodParams;
-        glm::vec4 atlasParams;
-        int cascadeIndex;
-    } pushConstants;
-
-    pushConstants.cameraPos = glm::vec4(lastCameraPos_, 1.0f);
-    // lodParams: x=useOctahedral, y=brightness, z=normalStrength, w=debugElevation (negative=disabled)
-    pushConstants.lodParams = glm::vec4(
-        settings.useOctahedralMapping ? 1.0f : 0.0f,
-        settings.impostorBrightness,
-        settings.normalStrength,
-        settings.enableDebugElevation ? settings.debugElevation : -999.0f  // -999 = disabled
-    );
-
-    // atlasParams: x=enableFrameBlending, y=unused, z=unused, w=debugShowCellIndex
-    pushConstants.atlasParams = glm::vec4(
-        settings.enableFrameBlending ? 1.0f : 0.0f,
-        0.0f,
-        0.0f,
-        settings.debugShowCellIndex ? 1.0f : 0.0f
-    );
-    pushConstants.cascadeIndex = cascadeIndex;
-
-    vkCmdPushConstants(cmd, shadowPipelineLayout_.get(),
-                      VK_SHADER_STAGE_VERTEX_BIT,
-                      0, sizeof(pushConstants), &pushConstants);
-
-    // Bind buffers (use per-frame instance buffer)
-    VkBuffer vertexBuffers[] = {billboardVertexBuffer_.get(), instanceBuffers_.buffers[frameIndex]};
-    VkDeviceSize offsets[] = {0, 0};
-    vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
-    vkCmdBindIndexBuffer(cmd, billboardIndexBuffer_.get(), 0, VK_INDEX_TYPE_UINT32);
-
-    // Draw instanced
-    vkCmdDrawIndexed(cmd, billboardIndexCount_, static_cast<uint32_t>(visibleImpostors_.size()), 0, 0, 0);
-}
-
-void TreeLODSystem::renderImpostorsGPUCulled(VkCommandBuffer cmd, uint32_t frameIndex,
-                                              VkBuffer uniformBuffer, VkImageView shadowMap, VkSampler shadowSampler,
-                                              VkBuffer gpuInstanceBuffer, VkBuffer indirectDrawBuffer) {
-    if (impostorAtlas_->getArchetypeCount() == 0) return;
-
-    const auto& settings = getLODSettings();
-    if (!settings.enableImpostors) return;
-
-    // Update descriptor sets with GPU-culled instance buffer
-    if (impostorDescriptorSets_.empty()) return;
-
-    // Use the shared array views that contain all archetypes (same as CPU path)
-    VkImageView albedoView = impostorAtlas_->getAlbedoAtlasArrayView();
-    VkImageView normalView = impostorAtlas_->getNormalAtlasArrayView();
-    VkSampler atlasSampler = impostorAtlas_->getAtlasSampler();
-
-    if (albedoView == VK_NULL_HANDLE || normalView == VK_NULL_HANDLE) return;
-
+    // Update descriptor sets with appropriate instance buffer
+    VkBuffer instanceBuffer = useGPUPath ? gpuInstanceBuffer : instanceBuffers_.buffers[frameIndex];
     DescriptorManager::SetWriter(device_, impostorDescriptorSets_[frameIndex])
         .writeBuffer(BINDING_TREE_IMPOSTOR_UBO, uniformBuffer, 0, VK_WHOLE_SIZE)
         .writeImage(BINDING_TREE_IMPOSTOR_ALBEDO, albedoView, atlasSampler)
         .writeImage(BINDING_TREE_IMPOSTOR_NORMAL, normalView, atlasSampler)
         .writeImage(BINDING_TREE_IMPOSTOR_SHADOW_MAP, shadowMap, shadowSampler)
-        .writeBuffer(BINDING_TREE_IMPOSTOR_INSTANCES, gpuInstanceBuffer,
+        .writeBuffer(BINDING_TREE_IMPOSTOR_INSTANCES, instanceBuffer,
                      0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
         .update();
 
@@ -1010,15 +862,12 @@ void TreeLODSystem::renderImpostorsGPUCulled(VkCommandBuffer cmd, uint32_t frame
     } pushConstants;
 
     pushConstants.cameraPos = glm::vec4(lastCameraPos_, settings.autumnHueShift);
-    // lodParams: x=useOctahedral, y=brightness, z=normalStrength, w=debugElevation (negative=disabled)
     pushConstants.lodParams = glm::vec4(
         settings.useOctahedralMapping ? 1.0f : 0.0f,
         settings.impostorBrightness,
         settings.normalStrength,
         settings.enableDebugElevation ? settings.debugElevation : -999.0f
     );
-
-    // atlasParams: x=enableFrameBlending, y=unused, z=unused, w=debugShowCellIndex
     pushConstants.atlasParams = glm::vec4(
         settings.enableFrameBlending ? 1.0f : 0.0f,
         0.0f,
@@ -1036,32 +885,52 @@ void TreeLODSystem::renderImpostorsGPUCulled(VkCommandBuffer cmd, uint32_t frame
     vkCmdBindVertexBuffers(cmd, 0, 1, &vb, &offset);
     vkCmdBindIndexBuffer(cmd, billboardIndexBuffer_.get(), 0, VK_INDEX_TYPE_UINT32);
 
-    // Draw using indirect buffer from GPU culling
-    vkCmdDrawIndexedIndirect(cmd, indirectDrawBuffer, 0, 1, sizeof(VkDrawIndexedIndirectCommand));
+    // Draw - indirect for GPU path, direct for CPU path
+    if (useGPUPath) {
+        vkCmdDrawIndexedIndirect(cmd, indirectDrawBuffer, 0, 1, sizeof(VkDrawIndexedIndirectCommand));
+    } else {
+        vkCmdDrawIndexed(cmd, billboardIndexCount_, static_cast<uint32_t>(visibleImpostors_.size()), 0, 0, 0);
+    }
 }
 
-void TreeLODSystem::renderImpostorShadowsGPUCulled(VkCommandBuffer cmd, uint32_t frameIndex,
-                                                   int cascadeIndex, VkBuffer uniformBuffer,
-                                                   VkBuffer gpuInstanceBuffer, VkBuffer indirectDrawBuffer) {
+void TreeLODSystem::renderImpostorShadows(VkCommandBuffer cmd, uint32_t frameIndex,
+                                           int cascadeIndex, VkBuffer uniformBuffer,
+                                           VkBuffer gpuInstanceBuffer, VkBuffer indirectDrawBuffer) {
     if (impostorAtlas_->getArchetypeCount() == 0) return;
     if (shadowPipeline_.get() == VK_NULL_HANDLE) return;
     if (uniformBuffer == VK_NULL_HANDLE) return;
 
     const auto& settings = getLODSettings();
-    if (!settings.enableImpostors) return;
+    // Skip enableImpostors check when in forced Impostor mode
+    if (settings.simpleLODMode != SimpleLODMode::Impostor && !settings.enableImpostors) return;
 
-    // Update shadow descriptor set with GPU-culled instance buffer
+    // Determine if using GPU-culled path
+    bool useGPUPath = (gpuInstanceBuffer != VK_NULL_HANDLE && indirectDrawBuffer != VK_NULL_HANDLE);
+
+    // For CPU path, check we have visible impostors
+    if (!useGPUPath && visibleImpostors_.empty()) return;
+
+    // Update shadow descriptor set with UBO, albedo atlas, and instance buffer
     if (shadowDescriptorSets_.empty()) return;
 
-    // Use the same array view as main rendering (octahedral when enabled)
+    // For CPU path, ensure instance buffers are valid
+    if (!useGPUPath) {
+        if (frameIndex >= instanceBuffers_.buffers.size() ||
+            instanceBuffers_.buffers[frameIndex] == VK_NULL_HANDLE) {
+            return;
+        }
+    }
+
     VkImageView albedoView = impostorAtlas_->getAlbedoAtlasArrayView();
     VkSampler atlasSampler = impostorAtlas_->getAtlasSampler();
     if (albedoView == VK_NULL_HANDLE) return;
 
+    // Update descriptor with appropriate instance buffer
+    VkBuffer instanceBuffer = useGPUPath ? gpuInstanceBuffer : instanceBuffers_.buffers[frameIndex];
     DescriptorManager::SetWriter(device_, shadowDescriptorSets_[frameIndex])
         .writeBuffer(BINDING_TREE_IMPOSTOR_UBO, uniformBuffer, 0, VK_WHOLE_SIZE)
         .writeImage(BINDING_TREE_IMPOSTOR_ALBEDO, albedoView, atlasSampler)
-        .writeBuffer(BINDING_TREE_IMPOSTOR_SHADOW_INSTANCES, gpuInstanceBuffer,
+        .writeBuffer(BINDING_TREE_IMPOSTOR_SHADOW_INSTANCES, instanceBuffer,
                      0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
         .update();
 
@@ -1070,8 +939,7 @@ void TreeLODSystem::renderImpostorShadowsGPUCulled(VkCommandBuffer cmd, uint32_t
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipelineLayout_.get(),
                            0, 1, &shadowDescriptorSets_[frameIndex], 0, nullptr);
 
-    // Push constants for shadow pass - must match shader layout:
-    // vec4 cameraPos (offset 0), vec4 lodParams (offset 16), int cascadeIndex (offset 32)
+    // Push constants
     struct {
         glm::vec4 cameraPos;
         glm::vec4 lodParams;
@@ -1079,7 +947,6 @@ void TreeLODSystem::renderImpostorShadowsGPUCulled(VkCommandBuffer cmd, uint32_t
         float _pad[3];
     } pushConstants;
     pushConstants.cameraPos = glm::vec4(lastCameraPos_, 0.0f);
-    // lodParams.x = useOctahedral - must match main rendering mode for correct atlas UV lookup
     pushConstants.lodParams = glm::vec4(settings.useOctahedralMapping ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
     pushConstants.cascadeIndex = cascadeIndex;
 
@@ -1093,8 +960,12 @@ void TreeLODSystem::renderImpostorShadowsGPUCulled(VkCommandBuffer cmd, uint32_t
     vkCmdBindVertexBuffers(cmd, 0, 1, &vb, &offset);
     vkCmdBindIndexBuffer(cmd, billboardIndexBuffer_.get(), 0, VK_INDEX_TYPE_UINT32);
 
-    // Draw using indirect buffer from GPU culling
-    vkCmdDrawIndexedIndirect(cmd, indirectDrawBuffer, 0, 1, sizeof(VkDrawIndexedIndirectCommand));
+    // Draw - indirect for GPU path, direct for CPU path
+    if (useGPUPath) {
+        vkCmdDrawIndexedIndirect(cmd, indirectDrawBuffer, 0, 1, sizeof(VkDrawIndexedIndirectCommand));
+    } else {
+        vkCmdDrawIndexed(cmd, billboardIndexCount_, static_cast<uint32_t>(visibleImpostors_.size()), 0, 0, 0);
+    }
 }
 
 const TreeLODState& TreeLODSystem::getTreeLODState(uint32_t treeIndex) const {

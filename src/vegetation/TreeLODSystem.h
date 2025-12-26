@@ -89,24 +89,19 @@ public:
     void update(uint32_t frameIndex, float deltaTime, const glm::vec3& cameraPos, const TreeSystem& treeSystem,
                 const ScreenParams& screenParams = ScreenParams());
 
-    // Render impostors (called after full geometry trees are rendered)
+    // Render impostors (unified method - uses GPU culling when buffers provided)
+    // @param gpuInstanceBuffer - GPU-culled instance buffer (null for CPU path)
+    // @param indirectDrawBuffer - indirect draw buffer (null for CPU path)
     void renderImpostors(VkCommandBuffer cmd, uint32_t frameIndex,
-                         VkBuffer uniformBuffer, VkImageView shadowMap, VkSampler shadowSampler);
+                         VkBuffer uniformBuffer, VkImageView shadowMap, VkSampler shadowSampler,
+                         VkBuffer gpuInstanceBuffer = VK_NULL_HANDLE,
+                         VkBuffer indirectDrawBuffer = VK_NULL_HANDLE);
 
-    // Render impostors using GPU-culled data (indirect drawing with Hi-Z occlusion)
-    // Call this instead of renderImpostors when ImpostorCullSystem is available
-    void renderImpostorsGPUCulled(VkCommandBuffer cmd, uint32_t frameIndex,
-                                  VkBuffer uniformBuffer, VkImageView shadowMap, VkSampler shadowSampler,
-                                  VkBuffer gpuInstanceBuffer, VkBuffer indirectDrawBuffer);
-
-    // Render impostor shadows for a specific cascade
+    // Render impostor shadows (unified method - uses GPU culling when buffers provided)
     void renderImpostorShadows(VkCommandBuffer cmd, uint32_t frameIndex,
-                               int cascadeIndex, VkBuffer uniformBuffer);
-
-    // Render impostor shadows using GPU-culled data (indirect drawing with Hi-Z occlusion)
-    void renderImpostorShadowsGPUCulled(VkCommandBuffer cmd, uint32_t frameIndex,
-                                        int cascadeIndex, VkBuffer uniformBuffer,
-                                        VkBuffer gpuInstanceBuffer, VkBuffer indirectDrawBuffer);
+                               int cascadeIndex, VkBuffer uniformBuffer,
+                               VkBuffer gpuInstanceBuffer = VK_NULL_HANDLE,
+                               VkBuffer indirectDrawBuffer = VK_NULL_HANDLE);
 
     // Get LOD state for a specific tree
     const TreeLODState& getTreeLODState(uint32_t treeIndex) const;

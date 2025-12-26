@@ -1474,21 +1474,18 @@ void Renderer::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float 
         if (systems_->tree() && systems_->treeRenderer()) {
             systems_->treeRenderer()->renderShadows(cb, frameIndex, *systems_->tree(), static_cast<int>(cascade), systems_->treeLOD());
         }
-        // Render impostor shadows
+        // Render impostor shadows (unified method - uses GPU path when available)
         if (systems_->treeLOD()) {
             VkBuffer uniformBuffer = systems_->globalBuffers().uniformBuffers.buffers[frameIndex];
             auto* impostorCull = systems_->impostorCull();
-            if (impostorCull && impostorCull->getTreeCount() > 0) {
-                // Use GPU-culled indirect rendering
-                systems_->treeLOD()->renderImpostorShadowsGPUCulled(
-                    cb, frameIndex, static_cast<int>(cascade), uniformBuffer,
-                    impostorCull->getVisibleImpostorBuffer(frameIndex),
-                    impostorCull->getIndirectDrawBuffer(frameIndex)
-                );
-            } else {
-                // Fall back to CPU-culled rendering
-                systems_->treeLOD()->renderImpostorShadows(cb, frameIndex, static_cast<int>(cascade), uniformBuffer);
-            }
+            VkBuffer gpuInstanceBuffer = (impostorCull && impostorCull->getTreeCount() > 0)
+                ? impostorCull->getVisibleImpostorBuffer(frameIndex) : VK_NULL_HANDLE;
+            VkBuffer indirectBuffer = (impostorCull && impostorCull->getTreeCount() > 0)
+                ? impostorCull->getIndirectDrawBuffer(frameIndex) : VK_NULL_HANDLE;
+            systems_->treeLOD()->renderImpostorShadows(
+                cb, frameIndex, static_cast<int>(cascade), uniformBuffer,
+                gpuInstanceBuffer, indirectBuffer
+            );
         }
     };
 
@@ -1620,31 +1617,22 @@ void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
 
     // Render tree impostors for distant trees
     if (systems_->treeLOD()) {
+        // Unified impostor rendering - uses GPU path when available and in Auto mode
         auto* impostorCull = systems_->impostorCull();
         const auto& lodSettings = systems_->treeLOD()->getLODSettings();
-        // Use GPU-culled path only in Auto mode (SimpleLODMode not forced)
-        // In forced modes (FullDetail/Impostor), use CPU path which respects SimpleLODMode
-        bool useGPUCulledPath = impostorCull && impostorCull->getTreeCount() > 0 &&
-                                lodSettings.simpleLODMode == SimpleLODMode::Auto;
-        if (useGPUCulledPath) {
-            // Use GPU-culled indirect rendering
-            systems_->treeLOD()->renderImpostorsGPUCulled(
-                cmd, frameIndex,
-                systems_->globalBuffers().uniformBuffers.buffers[frameIndex],
-                systems_->shadow().getShadowImageView(),
-                systems_->shadow().getShadowSampler(),
-                impostorCull->getVisibleImpostorBuffer(frameIndex),
-                impostorCull->getIndirectDrawBuffer(frameIndex)
-            );
-        } else {
-            // CPU-culled rendering (also handles forced SimpleLODMode)
-            systems_->treeLOD()->renderImpostors(
-                cmd, frameIndex,
-                systems_->globalBuffers().uniformBuffers.buffers[frameIndex],
-                systems_->shadow().getShadowImageView(),
-                systems_->shadow().getShadowSampler()
-            );
-        }
+        // Only use GPU culling in Auto mode; forced modes (FullDetail/Impostor) use CPU path
+        bool useGPU = impostorCull && impostorCull->getTreeCount() > 0 &&
+                      lodSettings.simpleLODMode == SimpleLODMode::Auto;
+        VkBuffer gpuInstanceBuffer = useGPU ? impostorCull->getVisibleImpostorBuffer(frameIndex) : VK_NULL_HANDLE;
+        VkBuffer indirectBuffer = useGPU ? impostorCull->getIndirectDrawBuffer(frameIndex) : VK_NULL_HANDLE;
+
+        systems_->treeLOD()->renderImpostors(
+            cmd, frameIndex,
+            systems_->globalBuffers().uniformBuffers.buffers[frameIndex],
+            systems_->shadow().getShadowImageView(),
+            systems_->shadow().getShadowSampler(),
+            gpuInstanceBuffer, indirectBuffer
+        );
     }
 }
 
