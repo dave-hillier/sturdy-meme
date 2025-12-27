@@ -606,9 +606,12 @@ bool Renderer::render(const Camera& camera) {
         return false;
     }
 
-    // Frame synchronization
+    // Frame synchronization - use non-blocking check first to avoid unnecessary waits
+    // With triple buffering, the fence is often already signaled
     systems_->profiler().beginCpuZone("FenceWait");
-    inFlightFences[currentFrame].wait();
+    if (!inFlightFences[currentFrame].isSignaled()) {
+        inFlightFences[currentFrame].wait();
+    }
     systems_->profiler().endCpuZone("FenceWait");
 
     systems_->profiler().beginCpuZone("AcquireImage");
@@ -993,7 +996,10 @@ void Renderer::waitForPreviousFrame() {
     // This prevents race conditions where we destroy mesh buffers while the GPU
     // is still reading them from the previous frame's commands.
     uint32_t previousFrame = (currentFrame + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT;
-    inFlightFences[previousFrame].wait();
+    // Use non-blocking check first - often already signaled with triple buffering
+    if (!inFlightFences[previousFrame].isSignaled()) {
+        inFlightFences[previousFrame].wait();
+    }
 }
 
 void Renderer::destroyDepthImageAndView() {

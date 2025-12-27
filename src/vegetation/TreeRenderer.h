@@ -7,6 +7,7 @@
 #include <string>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "TreeSystem.h"
 #include "TreeLODSystem.h"
@@ -209,6 +210,12 @@ private:
 
     // Per-frame, per-type descriptor sets for culled leaf output buffer
     std::vector<std::unordered_map<std::string, VkDescriptorSet>> culledLeafDescriptorSets_;
+
+    // Track which descriptor sets have been initialized (to avoid redundant updates)
+    // Key format: "frameIndex:typeName"
+    std::unordered_set<std::string> initializedBarkDescriptors_;
+    std::unordered_set<std::string> initializedLeafDescriptors_;
+    std::unordered_set<std::string> initializedCulledLeafDescriptors_;
 
     // Leaf Culling subsystem (handles all compute culling)
     std::unique_ptr<TreeLeafCulling> leafCulling_;
