@@ -37,15 +37,7 @@ TreeImpostorAtlas::~TreeImpostorAtlas() {
         vmaDestroyBuffer(allocator_, leafQuadIndexBuffer_, leafQuadIndexAllocation_);
     }
 
-    // Cleanup legacy array textures
-    if (albedoArrayImage_ != VK_NULL_HANDLE) {
-        vmaDestroyImage(allocator_, albedoArrayImage_, albedoArrayAllocation_);
-    }
-    if (normalArrayImage_ != VK_NULL_HANDLE) {
-        vmaDestroyImage(allocator_, normalArrayImage_, normalArrayAllocation_);
-    }
-
-    // Cleanup octahedral array textures
+    // Cleanup array textures
     if (octaAlbedoArrayImage_ != VK_NULL_HANDLE) {
         vmaDestroyImage(allocator_, octaAlbedoArrayImage_, octaAlbedoArrayAllocation_);
     }
@@ -57,13 +49,6 @@ TreeImpostorAtlas::~TreeImpostorAtlas() {
     // Note: Don't call ImGui_ImplVulkan_RemoveTexture here - ImGui may already
     // be shut down. ImGui cleans up its own descriptor pool on shutdown anyway.
     for (auto& atlas : atlasTextures_) {
-        if (atlas.depthImage != VK_NULL_HANDLE) {
-            vmaDestroyImage(allocator_, atlas.depthImage, atlas.depthAllocation);
-        }
-    }
-
-    // Cleanup octahedral per-archetype atlas textures
-    for (auto& atlas : octaAtlasTextures_) {
         if (atlas.depthImage != VK_NULL_HANDLE) {
             vmaDestroyImage(allocator_, atlas.depthImage, atlas.depthAllocation);
         }
@@ -87,11 +72,6 @@ bool TreeImpostorAtlas::initInternal(const InitInfo& info) {
 
     if (!createAtlasArrayTextures()) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create atlas array textures");
-        return false;
-    }
-
-    if (!createOctahedralAtlasArrayTextures()) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create octahedral atlas array textures");
         return false;
     }
 
@@ -195,127 +175,8 @@ bool TreeImpostorAtlas::createRenderPass() {
 }
 
 bool TreeImpostorAtlas::createAtlasArrayTextures() {
-    // Create array textures that will hold all archetypes
-    // Each layer is one archetype's atlas (2304 x 512)
-
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.extent.width = ImpostorAtlasConfig::ATLAS_WIDTH;
-    imageInfo.extent.height = ImpostorAtlasConfig::ATLAS_HEIGHT;
-    imageInfo.extent.depth = 1;
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = maxArchetypes_;  // Pre-allocate for all archetypes
-    imageInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    imageInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    VmaAllocationCreateInfo allocInfo{};
-    allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-
-    // Create albedo+alpha array
-    if (vmaCreateImage(allocator_, &imageInfo, &allocInfo,
-                       &albedoArrayImage_, &albedoArrayAllocation_, nullptr) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create albedo array image");
-        return false;
-    }
-
-    // Create normal+depth+AO array
-    if (vmaCreateImage(allocator_, &imageInfo, &allocInfo,
-                       &normalArrayImage_, &normalArrayAllocation_, nullptr) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create normal array image");
-        return false;
-    }
-
-    // Create image views for the entire arrays (for shader binding)
-    VkImageViewCreateInfo viewInfo{};
-    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = 1;
-    viewInfo.subresourceRange.baseArrayLayer = 0;
-    viewInfo.subresourceRange.layerCount = maxArchetypes_;
-    viewInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
-
-    viewInfo.image = albedoArrayImage_;
-    VkImageView albedoView;
-    if (vkCreateImageView(device_, &viewInfo, nullptr, &albedoView) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create albedo array view");
-        return false;
-    }
-    albedoArrayView_ = ManagedImageView(makeUniqueImageView(device_, albedoView));
-
-    viewInfo.image = normalArrayImage_;
-    VkImageView normalView;
-    if (vkCreateImageView(device_, &viewInfo, nullptr, &normalView) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create normal array view");
-        return false;
-    }
-    normalArrayView_ = ManagedImageView(makeUniqueImageView(device_, normalView));
-
-    // Transition both array images to shader read optimal layout
-    // (They'll be transitioned to attachment when rendering each layer)
-    VkCommandBufferAllocateInfo cmdAllocInfo{};
-    cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    cmdAllocInfo.commandPool = commandPool_;
-    cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    cmdAllocInfo.commandBufferCount = 1;
-
-    VkCommandBuffer cmd;
-    vkAllocateCommandBuffers(device_, &cmdAllocInfo, &cmd);
-
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(cmd, &beginInfo);
-
-    VkImageMemoryBarrier barrier{};
-    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    barrier.subresourceRange.baseMipLevel = 0;
-    barrier.subresourceRange.levelCount = 1;
-    barrier.subresourceRange.baseArrayLayer = 0;
-    barrier.subresourceRange.layerCount = maxArchetypes_;
-    barrier.srcAccessMask = 0;
-    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-    // Batch both image barriers into a single call
-    std::array<VkImageMemoryBarrier, 2> barriers = {barrier, barrier};
-    barriers[0].image = albedoArrayImage_;
-    barriers[1].image = normalArrayImage_;
-
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                         0, 0, nullptr, 0, nullptr,
-                         static_cast<uint32_t>(barriers.size()), barriers.data());
-
-    vkEndCommandBuffer(cmd);
-
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &cmd;
-
-    vkQueueSubmit(graphicsQueue_, 1, &submitInfo, VK_NULL_HANDLE);
-    vkQueueWaitIdle(graphicsQueue_);
-    vkFreeCommandBuffers(device_, commandPool_, 1, &cmd);
-
-    SDL_Log("TreeImpostorAtlas: Created array textures (%dx%d, %d layers)",
-            ImpostorAtlasConfig::ATLAS_WIDTH, ImpostorAtlasConfig::ATLAS_HEIGHT, maxArchetypes_);
-
-    return true;
-}
-
-bool TreeImpostorAtlas::createOctahedralAtlasArrayTextures() {
     // Create octahedral array textures that will hold all archetypes
-    // Each layer is one archetype's octahedral atlas (GRID_SIZE x GRID_SIZE cells)
+    // Each layer is one archetype's atlas (GRID_SIZE x GRID_SIZE cells)
 
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -466,9 +327,9 @@ glm::vec3 TreeImpostorAtlas::hemiOctaDecode(glm::vec2 uv) {
     return glm::normalize(glm::vec3(enc.x, glm::max(y, 0.0f), enc.y));
 }
 
-bool TreeImpostorAtlas::createOctahedralAtlasResources(uint32_t archetypeIndex) {
-    if (archetypeIndex >= octaAtlasTextures_.size()) {
-        octaAtlasTextures_.resize(archetypeIndex + 1);
+bool TreeImpostorAtlas::createAtlasResources(uint32_t archetypeIndex) {
+    if (archetypeIndex >= atlasTextures_.size()) {
+        atlasTextures_.resize(archetypeIndex + 1);
     }
 
     if (archetypeIndex >= maxArchetypes_) {
@@ -477,9 +338,9 @@ bool TreeImpostorAtlas::createOctahedralAtlasResources(uint32_t archetypeIndex) 
         return false;
     }
 
-    auto& atlas = octaAtlasTextures_[archetypeIndex];
+    auto& atlas = atlasTextures_[archetypeIndex];
 
-    // Create per-layer views into the shared octahedral array textures
+    // Create per-layer views into the shared array textures
     VkImageViewCreateInfo viewInfo{};
     viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
@@ -493,7 +354,7 @@ bool TreeImpostorAtlas::createOctahedralAtlasResources(uint32_t archetypeIndex) 
     viewInfo.image = octaAlbedoArrayImage_;
     VkImageView albedoView;
     if (vkCreateImageView(device_, &viewInfo, nullptr, &albedoView) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create octahedral albedo layer view");
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create albedo layer view");
         return false;
     }
     atlas.albedoView = ManagedImageView(makeUniqueImageView(device_, albedoView));
@@ -501,7 +362,7 @@ bool TreeImpostorAtlas::createOctahedralAtlasResources(uint32_t archetypeIndex) 
     viewInfo.image = octaNormalArrayImage_;
     VkImageView normalView;
     if (vkCreateImageView(device_, &viewInfo, nullptr, &normalView) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create octahedral normal layer view");
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create normal layer view");
         return false;
     }
     atlas.normalView = ManagedImageView(makeUniqueImageView(device_, normalView));
@@ -527,7 +388,7 @@ bool TreeImpostorAtlas::createOctahedralAtlasResources(uint32_t archetypeIndex) 
 
     if (vmaCreateImage(allocator_, &depthImageInfo, &allocInfo,
                        &atlas.depthImage, &atlas.depthAllocation, nullptr) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create octahedral depth image");
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create depth image");
         return false;
     }
 
@@ -537,7 +398,7 @@ bool TreeImpostorAtlas::createOctahedralAtlasResources(uint32_t archetypeIndex) 
     viewInfo.subresourceRange.baseArrayLayer = 0;
     VkImageView depthView;
     if (vkCreateImageView(device_, &viewInfo, nullptr, &depthView) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create octahedral depth view");
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create depth view");
         return false;
     }
     atlas.depthView = ManagedImageView(makeUniqueImageView(device_, depthView));
@@ -659,14 +520,14 @@ bool TreeImpostorAtlas::createCapturePipeline() {
     VkViewport viewport{};
     viewport.x = 0.0f;
     viewport.y = 0.0f;
-    viewport.width = static_cast<float>(ImpostorAtlasConfig::CELL_SIZE);
-    viewport.height = static_cast<float>(ImpostorAtlasConfig::CELL_SIZE);
+    viewport.width = static_cast<float>(OctahedralAtlasConfig::CELL_SIZE);
+    viewport.height = static_cast<float>(OctahedralAtlasConfig::CELL_SIZE);
     viewport.minDepth = 0.0f;
     viewport.maxDepth = 1.0f;
 
     VkRect2D scissor{};
     scissor.offset = {0, 0};
-    scissor.extent = {ImpostorAtlasConfig::CELL_SIZE, ImpostorAtlasConfig::CELL_SIZE};
+    scissor.extent = {OctahedralAtlasConfig::CELL_SIZE, OctahedralAtlasConfig::CELL_SIZE};
 
     VkPipelineViewportStateCreateInfo viewportState{};
     viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
@@ -1014,108 +875,6 @@ bool TreeImpostorAtlas::createLeafQuadMesh() {
     return true;
 }
 
-bool TreeImpostorAtlas::createAtlasResources(uint32_t archetypeIndex) {
-    // Ensure we have space for this archetype
-    if (archetypeIndex >= atlasTextures_.size()) {
-        atlasTextures_.resize(archetypeIndex + 1);
-    }
-
-    if (archetypeIndex >= maxArchetypes_) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-            "TreeImpostorAtlas: Archetype index %u exceeds max %u", archetypeIndex, maxArchetypes_);
-        return false;
-    }
-
-    auto& atlas = atlasTextures_[archetypeIndex];
-
-    // Create per-layer views into the shared array textures (for framebuffer attachment)
-    VkImageViewCreateInfo viewInfo{};
-    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;  // Single layer view for framebuffer
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = 1;
-    viewInfo.subresourceRange.baseArrayLayer = archetypeIndex;  // This layer
-    viewInfo.subresourceRange.layerCount = 1;
-    viewInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
-
-    viewInfo.image = albedoArrayImage_;
-    VkImageView albedoView;
-    if (vkCreateImageView(device_, &viewInfo, nullptr, &albedoView) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create albedo layer view");
-        return false;
-    }
-    atlas.albedoAlphaView = ManagedImageView(makeUniqueImageView(device_, albedoView));
-
-    viewInfo.image = normalArrayImage_;
-    VkImageView normalView;
-    if (vkCreateImageView(device_, &viewInfo, nullptr, &normalView) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create normal layer view");
-        return false;
-    }
-    atlas.normalDepthAOView = ManagedImageView(makeUniqueImageView(device_, normalView));
-
-    // Create depth image (not shared, one per archetype for rendering)
-    VkImageCreateInfo depthImageInfo{};
-    depthImageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    depthImageInfo.imageType = VK_IMAGE_TYPE_2D;
-    depthImageInfo.extent.width = ImpostorAtlasConfig::ATLAS_WIDTH;
-    depthImageInfo.extent.height = ImpostorAtlasConfig::ATLAS_HEIGHT;
-    depthImageInfo.extent.depth = 1;
-    depthImageInfo.mipLevels = 1;
-    depthImageInfo.arrayLayers = 1;
-    depthImageInfo.format = VK_FORMAT_D32_SFLOAT;
-    depthImageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    depthImageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    depthImageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-    depthImageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    depthImageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    VmaAllocationCreateInfo allocInfo{};
-    allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-
-    if (vmaCreateImage(allocator_, &depthImageInfo, &allocInfo,
-                       &atlas.depthImage, &atlas.depthAllocation, nullptr) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create depth image");
-        return false;
-    }
-
-    viewInfo.image = atlas.depthImage;
-    viewInfo.format = VK_FORMAT_D32_SFLOAT;
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-    viewInfo.subresourceRange.baseArrayLayer = 0;  // Depth is not shared
-    VkImageView depthView;
-    if (vkCreateImageView(device_, &viewInfo, nullptr, &depthView) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create depth view");
-        return false;
-    }
-    atlas.depthView = ManagedImageView(makeUniqueImageView(device_, depthView));
-
-    // Create framebuffer
-    std::array<VkImageView, 3> attachments = {
-        atlas.albedoAlphaView.get(),
-        atlas.normalDepthAOView.get(),
-        atlas.depthView.get()
-    };
-
-    VkFramebufferCreateInfo fbInfo{};
-    fbInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-    fbInfo.renderPass = captureRenderPass_.get();
-    fbInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
-    fbInfo.pAttachments = attachments.data();
-    fbInfo.width = ImpostorAtlasConfig::ATLAS_WIDTH;
-    fbInfo.height = ImpostorAtlasConfig::ATLAS_HEIGHT;
-    fbInfo.layers = 1;
-
-    VkFramebuffer framebuffer;
-    if (vkCreateFramebuffer(device_, &fbInfo, nullptr, &framebuffer) != VK_SUCCESS) {
-        return false;
-    }
-    atlas.framebuffer = ManagedFramebuffer(makeUniqueFramebuffer(device_, framebuffer));
-
-    return true;
-}
-
 bool TreeImpostorAtlas::createSampler() {
     VkSamplerCreateInfo samplerInfo{};
     samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
@@ -1316,7 +1075,7 @@ int32_t TreeImpostorAtlas::generateArchetype(
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(cmd, &beginInfo);
 
-    // Transition the specific array layer to color attachment for rendering
+    // Transition the array layer to color attachment for rendering
     VkImageMemoryBarrier preBarrier{};
     preBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     preBarrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -1333,8 +1092,8 @@ int32_t TreeImpostorAtlas::generateArchetype(
 
     // Batch both image barriers into a single call
     std::array<VkImageMemoryBarrier, 2> preBarriers = {preBarrier, preBarrier};
-    preBarriers[0].image = albedoArrayImage_;
-    preBarriers[1].image = normalArrayImage_;
+    preBarriers[0].image = octaAlbedoArrayImage_;
+    preBarriers[1].image = octaNormalArrayImage_;
 
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
                          0, 0, nullptr, 0, nullptr,
@@ -1351,46 +1110,26 @@ int32_t TreeImpostorAtlas::generateArchetype(
     renderPassInfo.renderPass = captureRenderPass_.get();
     renderPassInfo.framebuffer = atlasTextures_[archetypeIndex].framebuffer.get();
     renderPassInfo.renderArea.offset = {0, 0};
-    renderPassInfo.renderArea.extent = {ImpostorAtlasConfig::ATLAS_WIDTH, ImpostorAtlasConfig::ATLAS_HEIGHT};
+    renderPassInfo.renderArea.extent = {OctahedralAtlasConfig::ATLAS_WIDTH, OctahedralAtlasConfig::ATLAS_HEIGHT};
     renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
     renderPassInfo.pClearValues = clearValues.data();
 
     vkCmdBeginRenderPass(cmd, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, branchCapturePipeline_.get());
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, capturePipelineLayout_.get(),
-                           0, 1, &captureDescSet, 0, nullptr);
 
-    // Bind mesh buffers
-    VkBuffer vertexBuffers[] = {branchMesh.getVertexBuffer()};
-    VkDeviceSize offsets[] = {0};
-    vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
-    vkCmdBindIndexBuffer(cmd, branchMesh.getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+    // Render from each octahedral view direction
+    int cellCount = 0;
+    for (int y = 0; y < OctahedralAtlasConfig::GRID_SIZE; y++) {
+        for (int x = 0; x < OctahedralAtlasConfig::GRID_SIZE; x++) {
+            // Compute view direction for this cell using hemi-octahedral decode
+            glm::vec2 cellCenter = (glm::vec2(x, y) + 0.5f) / static_cast<float>(OctahedralAtlasConfig::GRID_SIZE);
+            glm::vec3 viewDir = hemiOctaDecode(cellCenter);
 
-    // Render from each viewing angle
-    int cellIndex = 0;
-
-    // Row 0: 8 horizon views + 1 top-down
-    for (int h = 0; h < ImpostorAtlasConfig::HORIZONTAL_ANGLES; h++) {
-        float azimuth = h * (360.0f / ImpostorAtlasConfig::HORIZONTAL_ANGLES);
-        renderToCell(cmd, h, 0, azimuth, 0.0f, branchMesh, leafInstances,
-                     horizontalRadius, boundingSphereRadius, halfHeight,
-                     centerHeight, minBounds.y, captureDescSet, leafCaptureDescSet);
-        cellIndex++;
-    }
-
-    // Top-down view (cell 8 of row 0)
-    renderToCell(cmd, 8, 0, 0.0f, 90.0f, branchMesh, leafInstances,
-                 horizontalRadius, boundingSphereRadius, halfHeight,
-                 centerHeight, minBounds.y, captureDescSet, leafCaptureDescSet);
-    cellIndex++;
-
-    // Row 1: 8 elevated views (45 degrees)
-    for (int h = 0; h < ImpostorAtlasConfig::HORIZONTAL_ANGLES; h++) {
-        float azimuth = h * (360.0f / ImpostorAtlasConfig::HORIZONTAL_ANGLES);
-        renderToCell(cmd, h, 1, azimuth, 45.0f, branchMesh, leafInstances,
-                     horizontalRadius, boundingSphereRadius, halfHeight,
-                     centerHeight, minBounds.y, captureDescSet, leafCaptureDescSet);
-        cellIndex++;
+            // Render tree from this direction
+            renderOctahedralCell(cmd, x, y, viewDir, branchMesh, leafInstances,
+                                 horizontalRadius, boundingSphereRadius, halfHeight,
+                                 centerHeight, minBounds.y, captureDescSet, leafCaptureDescSet);
+            cellCount++;
+        }
     }
 
     vkCmdEndRenderPass(cmd);
@@ -1407,91 +1146,6 @@ int32_t TreeImpostorAtlas::generateArchetype(
 
     vkFreeCommandBuffers(device_, commandPool_, 1, &cmd);
 
-    // ============ OCTAHEDRAL ATLAS CAPTURE ============
-    // Create octahedral atlas resources for this archetype
-    if (!createOctahedralAtlasResources(archetypeIndex)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create octahedral atlas resources for %s", name.c_str());
-        // Continue anyway - legacy atlas was created successfully
-    } else {
-        // Begin command buffer for octahedral capture
-        vkAllocateCommandBuffers(device_, &cmdAllocInfo, &cmd);
-        vkBeginCommandBuffer(cmd, &beginInfo);
-
-        // Transition the octahedral array layer to color attachment
-        VkImageMemoryBarrier octaPreBarrier{};
-        octaPreBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        octaPreBarrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        octaPreBarrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        octaPreBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        octaPreBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        octaPreBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        octaPreBarrier.subresourceRange.baseMipLevel = 0;
-        octaPreBarrier.subresourceRange.levelCount = 1;
-        octaPreBarrier.subresourceRange.baseArrayLayer = archetypeIndex;
-        octaPreBarrier.subresourceRange.layerCount = 1;
-        octaPreBarrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        octaPreBarrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-
-        // Batch both image barriers into a single call
-        std::array<VkImageMemoryBarrier, 2> octaPreBarriers = {octaPreBarrier, octaPreBarrier};
-        octaPreBarriers[0].image = octaAlbedoArrayImage_;
-        octaPreBarriers[1].image = octaNormalArrayImage_;
-
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                             0, 0, nullptr, 0, nullptr,
-                             static_cast<uint32_t>(octaPreBarriers.size()), octaPreBarriers.data());
-
-        // Clear the octahedral atlas
-        std::array<VkClearValue, 3> octaClearValues{};
-        octaClearValues[0].color = {{0.0f, 0.0f, 0.0f, 0.0f}};
-        octaClearValues[1].color = {{0.5f, 0.5f, 0.5f, 1.0f}};
-        octaClearValues[2].depthStencil = {1.0f, 0};
-
-        VkRenderPassBeginInfo octaRenderPassInfo{};
-        octaRenderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        octaRenderPassInfo.renderPass = captureRenderPass_.get();
-        octaRenderPassInfo.framebuffer = octaAtlasTextures_[archetypeIndex].framebuffer.get();
-        octaRenderPassInfo.renderArea.offset = {0, 0};
-        octaRenderPassInfo.renderArea.extent = {OctahedralAtlasConfig::ATLAS_WIDTH, OctahedralAtlasConfig::ATLAS_HEIGHT};
-        octaRenderPassInfo.clearValueCount = static_cast<uint32_t>(octaClearValues.size());
-        octaRenderPassInfo.pClearValues = octaClearValues.data();
-
-        vkCmdBeginRenderPass(cmd, &octaRenderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-        // Render from each octahedral view direction
-        int octaCellCount = 0;
-        for (int y = 0; y < OctahedralAtlasConfig::GRID_SIZE; y++) {
-            for (int x = 0; x < OctahedralAtlasConfig::GRID_SIZE; x++) {
-                // Compute view direction for this cell using hemi-octahedral decode
-                glm::vec2 cellCenter = (glm::vec2(x, y) + 0.5f) / static_cast<float>(OctahedralAtlasConfig::GRID_SIZE);
-                glm::vec3 viewDir = hemiOctaDecode(cellCenter);
-
-                // Render tree from this direction
-                renderOctahedralCell(cmd, x, y, viewDir, branchMesh, leafInstances,
-                                     horizontalRadius, boundingSphereRadius, halfHeight,
-                                     centerHeight, minBounds.y, captureDescSet, leafCaptureDescSet);
-                octaCellCount++;
-            }
-        }
-
-        vkCmdEndRenderPass(cmd);
-        vkEndCommandBuffer(cmd);
-
-        // Submit and wait
-        VkSubmitInfo octaSubmitInfo{};
-        octaSubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        octaSubmitInfo.commandBufferCount = 1;
-        octaSubmitInfo.pCommandBuffers = &cmd;
-
-        vkQueueSubmit(graphicsQueue_, 1, &octaSubmitInfo, VK_NULL_HANDLE);
-        vkQueueWaitIdle(graphicsQueue_);
-
-        vkFreeCommandBuffers(device_, commandPool_, 1, &cmd);
-
-        SDL_Log("TreeImpostorAtlas: Generated octahedral atlas for '%s' (%dx%d grid, %d views)",
-                name.c_str(), OctahedralAtlasConfig::GRID_SIZE, OctahedralAtlasConfig::GRID_SIZE, octaCellCount);
-    }
-
     // Store archetype info
     TreeImpostorArchetype archetype;
     archetype.name = name;
@@ -1500,8 +1154,8 @@ int32_t TreeImpostorAtlas::generateArchetype(
     archetype.centerHeight = centerHeight;
     archetype.treeHeight = treeExtent.y;
     archetype.baseOffset = minBounds.y;
-    archetype.albedoAlphaView = atlasTextures_[archetypeIndex].albedoAlphaView.get();
-    archetype.normalDepthAOView = atlasTextures_[archetypeIndex].normalDepthAOView.get();
+    archetype.albedoAlphaView = atlasTextures_[archetypeIndex].albedoView.get();
+    archetype.normalDepthAOView = atlasTextures_[archetypeIndex].normalView.get();
     archetype.atlasIndex = archetypeIndex;
 
     archetypes_.push_back(archetype);
@@ -1509,167 +1163,11 @@ int32_t TreeImpostorAtlas::generateArchetype(
     // Note: Preview descriptor set is created lazily in getPreviewDescriptorSet()
     // because ImGui may not be initialized yet at this point
 
-    SDL_Log("TreeImpostorAtlas: Generated archetype '%s' (hRadius=%.2f, height=%.2f, baseOffset=%.2f, %d cells)",
-            name.c_str(), horizontalRadius, treeExtent.y, minBounds.y, cellIndex);
+    SDL_Log("TreeImpostorAtlas: Generated archetype '%s' (%dx%d grid = %d views, hRadius=%.2f, height=%.2f)",
+            name.c_str(), OctahedralAtlasConfig::GRID_SIZE, OctahedralAtlasConfig::GRID_SIZE, cellCount,
+            horizontalRadius, treeExtent.y);
 
     return static_cast<int32_t>(archetypeIndex);
-}
-
-void TreeImpostorAtlas::renderToCell(
-    VkCommandBuffer cmd,
-    int cellX, int cellY,
-    float azimuth,
-    float elevation,
-    const Mesh& branchMesh,
-    const std::vector<LeafInstanceGPU>& leafInstances,
-    float horizontalRadius,
-    float boundingSphereRadius,
-    float halfHeight,
-    float centerHeight,
-    float baseY,
-    VkDescriptorSet branchDescSet,
-    VkDescriptorSet leafDescSet) {
-
-    // Set viewport and scissor for this cell
-    VkViewport viewport{};
-    viewport.x = static_cast<float>(cellX * ImpostorAtlasConfig::CELL_SIZE);
-    viewport.y = static_cast<float>(cellY * ImpostorAtlasConfig::CELL_SIZE);
-    viewport.width = static_cast<float>(ImpostorAtlasConfig::CELL_SIZE);
-    viewport.height = static_cast<float>(ImpostorAtlasConfig::CELL_SIZE);
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-
-    VkRect2D scissor{};
-    scissor.offset = {cellX * ImpostorAtlasConfig::CELL_SIZE, cellY * ImpostorAtlasConfig::CELL_SIZE};
-    scissor.extent = {static_cast<uint32_t>(ImpostorAtlasConfig::CELL_SIZE),
-                      static_cast<uint32_t>(ImpostorAtlasConfig::CELL_SIZE)};
-
-    vkCmdSetViewport(cmd, 0, 1, &viewport);
-    vkCmdSetScissor(cmd, 0, 1, &scissor);
-
-    // Calculate camera position for this view angle
-    // Camera looks at tree center (at centerHeight)
-    float azimuthRad = glm::radians(azimuth);
-    float elevationRad = glm::radians(elevation);
-
-    // Use bounding sphere for camera distance and depth clipping to ensure no geometry is clipped
-    float camDist = boundingSphereRadius * 3.0f;
-    glm::vec3 target(0.0f, centerHeight, 0.0f);  // Look at actual tree center
-    glm::vec3 camPos(
-        camDist * cos(elevationRad) * sin(azimuthRad),
-        centerHeight + camDist * sin(elevationRad),
-        camDist * cos(elevationRad) * cos(azimuthRad)
-    );
-    // For top-down view (elevation ~90), up vector (0,1,0) is parallel to view direction
-    // which makes lookAt degenerate. Use a horizontal up vector instead.
-    glm::vec3 up = (elevation > 80.0f) ? glm::vec3(0.0f, 0.0f, -1.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
-
-    glm::mat4 view = glm::lookAt(camPos, target, up);
-
-    // Orthographic projection: use horizontalRadius for horizontal extent, halfHeight for vertical
-    // This gives proper framing for the tree's actual shape
-    // Use 25% margin to ensure leaves and branches aren't clipped at edges
-    float hSize = horizontalRadius * 1.25f;  // Horizontal extent with margin
-    float vSize = halfHeight * 1.25f;        // Vertical extent with margin
-
-    glm::mat4 proj;
-    if (elevation < 80.0f) {
-        // For horizon and elevated views: place tree base at bottom of cell
-        // In view space, Y coordinate depends on viewing elevation:
-        // view.y = (worldY - centerHeight) * cos(elevation)
-        float elevCos = cos(elevationRad);
-        float baseInViewSpace = (baseY - centerHeight) * elevCos;
-        float yBottom = baseInViewSpace;
-        float yTop = yBottom + 2.0f * vSize * elevCos;
-        // Use boundingSphereRadius for near/far to ensure no depth clipping
-        proj = glm::ortho(-hSize, hSize, yBottom, yTop, 0.1f, camDist + boundingSphereRadius * 2.0f);
-    } else {
-        // For top-down views: use symmetric projection (no clear "bottom")
-        // Use max of horizontal and vertical for both axes
-        float maxSize = glm::max(hSize, vSize);
-        proj = glm::ortho(-maxSize, maxSize, -maxSize, maxSize, 0.1f, camDist + boundingSphereRadius * 2.0f);
-    }
-
-    // Vulkan clip space correction - for asymmetric projections, must flip both Y scale and Y translation
-    proj[1][1] *= -1;
-    proj[3][1] *= -1;
-
-    glm::mat4 viewProj = proj * view;
-
-    // ===== DRAW BRANCHES =====
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, branchCapturePipeline_.get());
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, capturePipelineLayout_.get(),
-                           0, 1, &branchDescSet, 0, nullptr);
-
-    // Bind branch mesh buffers
-    VkBuffer branchVertexBuffers[] = {branchMesh.getVertexBuffer()};
-    VkDeviceSize offsets[] = {0};
-    vkCmdBindVertexBuffers(cmd, 0, 1, branchVertexBuffers, offsets);
-    vkCmdBindIndexBuffer(cmd, branchMesh.getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
-
-    // Push constants for branches
-    struct {
-        glm::mat4 viewProj;
-        glm::mat4 model;
-        glm::vec4 captureParams;
-    } branchPush;
-
-    branchPush.viewProj = viewProj;
-    branchPush.model = glm::mat4(1.0f);
-    branchPush.captureParams = glm::vec4(
-        static_cast<float>(cellX + cellY * ImpostorAtlasConfig::CELLS_PER_ROW),
-        0.0f,  // is leaf pass = false
-        boundingSphereRadius,
-        0.1f   // alpha test
-    );
-
-    vkCmdPushConstants(cmd, capturePipelineLayout_.get(),
-                      VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                      0, sizeof(branchPush), &branchPush);
-
-    // Draw branches
-    vkCmdDrawIndexed(cmd, branchMesh.getIndexCount(), 1, 0, 0, 0);
-
-    // ===== DRAW LEAVES =====
-    if (leafDescSet != VK_NULL_HANDLE && !leafInstances.empty() && leafQuadIndexCount_ > 0) {
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, leafCapturePipeline_.get());
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, leafCapturePipelineLayout_.get(),
-                               0, 1, &leafDescSet, 0, nullptr);
-
-        // Bind leaf quad mesh
-        VkBuffer leafVertexBuffers[] = {leafQuadVertexBuffer_};
-        vkCmdBindVertexBuffers(cmd, 0, 1, leafVertexBuffers, offsets);
-        vkCmdBindIndexBuffer(cmd, leafQuadIndexBuffer_, 0, VK_INDEX_TYPE_UINT32);
-
-        // Reset viewport and scissor (they may have been affected)
-        vkCmdSetViewport(cmd, 0, 1, &viewport);
-        vkCmdSetScissor(cmd, 0, 1, &scissor);
-
-        // Push constants for leaves
-        struct {
-            glm::mat4 viewProj;
-            glm::mat4 model;
-            glm::vec4 captureParams;
-            int32_t firstInstance;
-        } leafPush;
-
-        leafPush.viewProj = viewProj;
-        leafPush.model = glm::mat4(1.0f);
-        leafPush.captureParams = glm::vec4(
-            static_cast<float>(cellX + cellY * ImpostorAtlasConfig::CELLS_PER_ROW),
-            1.0f,  // is leaf pass = true
-            boundingSphereRadius,
-            0.3f   // alpha test for leaves
-        );
-        leafPush.firstInstance = 0;  // All leaves start at offset 0
-
-        vkCmdPushConstants(cmd, leafCapturePipelineLayout_.get(),
-                          VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                          0, sizeof(leafPush), &leafPush);
-
-        // Draw all leaf instances
-        vkCmdDrawIndexed(cmd, leafQuadIndexCount_, static_cast<uint32_t>(leafInstances.size()), 0, 0, 0);
-    }
 }
 
 void TreeImpostorAtlas::renderOctahedralCell(
@@ -1807,22 +1305,6 @@ void TreeImpostorAtlas::renderOctahedralCell(
     }
 }
 
-VkImageView TreeImpostorAtlas::getAlbedoAtlasArrayView() const {
-    // Return octahedral atlas if enabled and available, otherwise legacy
-    if (lodSettings_.useOctahedralMapping && octaAlbedoArrayView_.get() != VK_NULL_HANDLE) {
-        return octaAlbedoArrayView_.get();
-    }
-    return albedoArrayView_.get();
-}
-
-VkImageView TreeImpostorAtlas::getNormalAtlasArrayView() const {
-    // Return octahedral atlas if enabled and available, otherwise legacy
-    if (lodSettings_.useOctahedralMapping && octaNormalArrayView_.get() != VK_NULL_HANDLE) {
-        return octaNormalArrayView_.get();
-    }
-    return normalArrayView_.get();
-}
-
 const TreeImpostorArchetype* TreeImpostorAtlas::getArchetype(const std::string& name) const {
     for (const auto& archetype : archetypes_) {
         if (archetype.name == name) {
@@ -1839,24 +1321,6 @@ const TreeImpostorArchetype* TreeImpostorAtlas::getArchetype(uint32_t index) con
     return nullptr;
 }
 
-VkImageView TreeImpostorAtlas::getAlbedoAtlasView(uint32_t archetypeIndex) const {
-    if (archetypeIndex < atlasTextures_.size()) {
-        return atlasTextures_[archetypeIndex].albedoAlphaView.get();
-    }
-    return VK_NULL_HANDLE;
-}
-
-VkImageView TreeImpostorAtlas::getNormalAtlasView(uint32_t archetypeIndex) const {
-    if (archetypeIndex < atlasTextures_.size()) {
-        return atlasTextures_[archetypeIndex].normalDepthAOView.get();
-    }
-    return VK_NULL_HANDLE;
-}
-
-VkImageView TreeImpostorAtlas::getPreviewImageView(uint32_t archetypeIndex) const {
-    return getAlbedoAtlasView(archetypeIndex);
-}
-
 VkDescriptorSet TreeImpostorAtlas::getPreviewDescriptorSet(uint32_t archetypeIndex) {
     if (archetypeIndex >= atlasTextures_.size()) {
         return VK_NULL_HANDLE;
@@ -1865,31 +1329,14 @@ VkDescriptorSet TreeImpostorAtlas::getPreviewDescriptorSet(uint32_t archetypeInd
     // Lazy initialization: create ImGui descriptor set on first request
     // (ImGui must be initialized by this point, which happens after renderer init)
     if (atlasTextures_[archetypeIndex].previewDescriptorSet == VK_NULL_HANDLE) {
-        atlasTextures_[archetypeIndex].previewDescriptorSet = ImGui_ImplVulkan_AddTexture(
-            atlasSampler_.get(),
-            atlasTextures_[archetypeIndex].albedoAlphaView.get(),
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-        );
-    }
-
-    return atlasTextures_[archetypeIndex].previewDescriptorSet;
-}
-
-VkDescriptorSet TreeImpostorAtlas::getOctahedralPreviewDescriptorSet(uint32_t archetypeIndex) {
-    if (archetypeIndex >= octaAtlasTextures_.size()) {
-        return VK_NULL_HANDLE;
-    }
-
-    // Lazy initialization for octahedral atlas preview
-    if (octaAtlasTextures_[archetypeIndex].previewDescriptorSet == VK_NULL_HANDLE) {
-        if (octaAtlasTextures_[archetypeIndex].albedoView.get() != VK_NULL_HANDLE) {
-            octaAtlasTextures_[archetypeIndex].previewDescriptorSet = ImGui_ImplVulkan_AddTexture(
+        if (atlasTextures_[archetypeIndex].albedoView.get() != VK_NULL_HANDLE) {
+            atlasTextures_[archetypeIndex].previewDescriptorSet = ImGui_ImplVulkan_AddTexture(
                 atlasSampler_.get(),
-                octaAtlasTextures_[archetypeIndex].albedoView.get(),
+                atlasTextures_[archetypeIndex].albedoView.get(),
                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
             );
         }
     }
 
-    return octaAtlasTextures_[archetypeIndex].previewDescriptorSet;
+    return atlasTextures_[archetypeIndex].previewDescriptorSet;
 }

@@ -21,27 +21,19 @@ layout(std430, binding = BINDING_TREE_IMPOSTOR_INSTANCES) readonly buffer Instan
 // Push constants
 layout(push_constant) uniform PushConstants {
     vec4 cameraPos;         // xyz = camera world position, w = autumnHueShift
-    vec4 lodParams;         // x = useOctahedral, y = brightness, z = normal strength, w = debug elevation
+    vec4 lodParams;         // x = unused, y = brightness, z = normal strength, w = debug elevation
 } push;
 
-// Outputs for legacy mode
+// Fragment shader outputs
 layout(location = 0) out vec2 fragTexCoord;
 layout(location = 1) out vec3 fragWorldPos;
 layout(location = 2) out float fragBlendFactor;
 layout(location = 3) flat out int fragCellIndex;
 layout(location = 4) out mat3 fragImpostorToWorld;
 layout(location = 7) flat out uint fragArchetypeIndex;
-
-// Outputs for octahedral mode (frame blending)
 layout(location = 8) out vec2 fragOctaUV;           // Continuous octahedral UV
 layout(location = 9) out vec3 fragViewDir;          // View direction for frame lookup
-layout(location = 10) flat out int fragUseOctahedral;  // Mode flag
 layout(location = 11) out vec2 fragLocalUV;         // Billboard local UV for frame sampling
-
-// Legacy atlas layout constants
-const int CELLS_PER_ROW = 9;
-const int HORIZONTAL_ANGLES = 8;
-const float ANGLE_STEP = 360.0 / float(HORIZONTAL_ANGLES);
 
 void main() {
     // Get instance data from SSBO
@@ -71,10 +63,6 @@ void main() {
         viewDir.y,
         viewDir.x * sinRot + viewDir.z * cosRot
     );
-
-    // Check octahedral mode
-    bool useOctahedral = push.lodParams.x > 0.5;
-    fragUseOctahedral = useOctahedral ? 1 : 0;
 
     // Compute elevation angle
     float elevation = degrees(asin(clamp(viewDir.y, -1.0, 1.0)));
@@ -111,17 +99,8 @@ void main() {
         up = vec3(0.0, 1.0, 0.0);
         right = cross(up, forward);
 
-        // Tilt for elevated views
-        if (elevation > 22.5 && !useOctahedral) {
-            // Legacy mode: tilt at fixed 45 degrees for elevated row
-            float tiltAngle = radians(45.0);
-            vec3 tiltedUp = cos(tiltAngle) * up + sin(tiltAngle) * forward;
-            vec3 tiltedForward = -sin(tiltAngle) * up + cos(tiltAngle) * forward;
-            forward = tiltedForward;
-            up = tiltedUp;
-            right = cross(up, forward);
-        } else if (useOctahedral && elevation > 5.0) {
-            // Octahedral mode: tilt to match capture angle more smoothly
+        // Tilt to match capture angle for elevated views
+        if (elevation > 5.0) {
             float tiltAngle = radians(clamp(elevation, 0.0, 80.0));
             vec3 tiltedUp = cos(tiltAngle) * up + sin(tiltAngle) * forward;
             vec3 tiltedForward = -sin(tiltAngle) * up + cos(tiltAngle) * forward;
@@ -136,8 +115,7 @@ void main() {
                    up * (inPosition.y - 0.5) * vSize * 2.0;
 
         // When tilted, the billboard center needs to move forward to keep the base grounded
-        // The base is at billboardCenter - up * vSize, and we want it to stay at ground level
-        float tiltAngle = (useOctahedral && elevation > 5.0) ? radians(clamp(elevation, 0.0, 80.0)) : 0.0;
+        float tiltAngle = elevation > 5.0 ? radians(clamp(elevation, 0.0, 80.0)) : 0.0;
         vec3 tiltCompensation = forward * vSize * sin(tiltAngle);
         billboardCenter = treePos + vec3(0.0, baseOffset, 0.0) + tiltCompensation;
     }
@@ -156,53 +134,18 @@ void main() {
     // Pass local UV for frame blending
     fragLocalUV = inTexCoord;
 
-    if (useOctahedral) {
-        // Octahedral mode: compute which cell we're viewing from
-        vec2 octaUV = hemiOctaEncode(rotatedViewDir);
-        fragOctaUV = octaUV;
+    // Octahedral mode: compute which cell we're viewing from
+    vec2 octaUV = hemiOctaEncode(rotatedViewDir);
+    fragOctaUV = octaUV;
 
-        // Find the cell in the grid
-        float gridSize = float(OCTA_GRID_SIZE);
-        ivec2 cell = ivec2(floor(octaUV * gridSize));
-        cell = clamp(cell, ivec2(0), ivec2(OCTA_GRID_SIZE - 1));
+    // Find the cell in the grid
+    float gridSize = float(OCTA_GRID_SIZE);
+    ivec2 cell = ivec2(floor(octaUV * gridSize));
+    cell = clamp(cell, ivec2(0), ivec2(OCTA_GRID_SIZE - 1));
 
-        // Map billboard's local UV (inTexCoord) to the cell position in atlas
-        // Each cell spans 1/gridSize of the atlas
-        vec2 atlasUV = (vec2(cell) + inTexCoord) / gridSize;
-        fragTexCoord = atlasUV;
+    // Map billboard's local UV (inTexCoord) to the cell position in atlas
+    vec2 atlasUV = (vec2(cell) + inTexCoord) / gridSize;
+    fragTexCoord = atlasUV;
 
-        fragCellIndex = cell.y * OCTA_GRID_SIZE + cell.x;
-    } else {
-        // Legacy mode: discrete cell selection
-        vec2 toCameraHorizontal = normalize(toCamera.xz);
-        float hAngle = atan(toCameraHorizontal.x, toCameraHorizontal.y);
-        hAngle = degrees(hAngle);
-        if (hAngle < 0.0) hAngle += 360.0;
-        hAngle = mod(hAngle + degrees(rotation) + 360.0, 360.0);
-
-        int hIndex = int(mod(round(hAngle / ANGLE_STEP), float(HORIZONTAL_ANGLES)));
-
-        int vIndex;
-        int cellIndex;
-
-        if (elevation > 67.5) {
-            cellIndex = 8;
-            vIndex = 0;
-        } else if (elevation > 22.5) {
-            cellIndex = CELLS_PER_ROW + hIndex;
-            vIndex = 1;
-        } else {
-            cellIndex = hIndex;
-            vIndex = 0;
-        }
-
-        fragCellIndex = cellIndex;
-
-        int cellX = cellIndex % CELLS_PER_ROW;
-        int cellY = cellIndex / CELLS_PER_ROW;
-        vec2 cellUV = inTexCoord;
-        vec2 atlasUV = (vec2(cellX, cellY) + cellUV) / vec2(float(CELLS_PER_ROW), 2.0);
-        fragTexCoord = atlasUV;
-        fragOctaUV = vec2(0.0);
-    }
+    fragCellIndex = cell.y * OCTA_GRID_SIZE + cell.x;
 }

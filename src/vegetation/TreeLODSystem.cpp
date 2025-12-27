@@ -1037,9 +1037,9 @@ void TreeLODSystem::renderImpostors(VkCommandBuffer cmd, uint32_t frameIndex,
     } pushConstants;
 
     pushConstants.cameraPos = glm::vec4(lastCameraPos_, settings.autumnHueShift);
-    // lodParams: x=useOctahedral, y=brightness, z=normalStrength, w=unused
+    // lodParams: x=unused, y=brightness, z=normalStrength, w=unused
     pushConstants.lodParams = glm::vec4(
-        settings.useOctahedralMapping ? 1.0f : 0.0f,
+        1.0f,
         settings.impostorBrightness,
         settings.normalStrength,
         0.0f
@@ -1092,9 +1092,9 @@ void TreeLODSystem::renderImpostorShadows(VkCommandBuffer cmd, uint32_t frameInd
     } pushConstants;
 
     pushConstants.cameraPos = glm::vec4(lastCameraPos_, 1.0f);
-    // lodParams: x=useOctahedral, y=brightness, z=normalStrength, w=unused
+    // lodParams: x=unused, y=brightness, z=normalStrength, w=unused
     pushConstants.lodParams = glm::vec4(
-        settings.useOctahedralMapping ? 1.0f : 0.0f,
+        1.0f,
         settings.impostorBrightness,
         settings.normalStrength,
         0.0f
@@ -1164,9 +1164,9 @@ void TreeLODSystem::renderImpostorsGPUCulled(VkCommandBuffer cmd, uint32_t frame
     } pushConstants;
 
     pushConstants.cameraPos = glm::vec4(lastCameraPos_, settings.autumnHueShift);
-    // lodParams: x=useOctahedral, y=brightness, z=normalStrength, w=unused
+    // lodParams: x=unused, y=brightness, z=normalStrength, w=unused
     pushConstants.lodParams = glm::vec4(
-        settings.useOctahedralMapping ? 1.0f : 0.0f,
+        1.0f,
         settings.impostorBrightness,
         settings.normalStrength,
         0.0f
@@ -1219,8 +1219,8 @@ void TreeLODSystem::renderImpostorShadowsGPUCulled(VkCommandBuffer cmd, uint32_t
         float _pad[3];
     } pushConstants;
     pushConstants.cameraPos = glm::vec4(lastCameraPos_, 0.0f);
-    // lodParams.x = useOctahedral - must match main rendering mode for correct atlas UV lookup
-    pushConstants.lodParams = glm::vec4(settings.useOctahedralMapping ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
+    // lodParams is unused in shadow shader but kept for struct compatibility
+    pushConstants.lodParams = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f);
     pushConstants.cascadeIndex = cascadeIndex;
 
     vkCmdPushConstants(cmd, shadowPipelineLayout_.get(),
