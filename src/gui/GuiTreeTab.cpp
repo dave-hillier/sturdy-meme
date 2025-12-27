@@ -115,7 +115,52 @@ void GuiTreeTab::render(ITreeControl& treeControl) {
                 }
             }
 
-            // Reduced Detail LOD (LOD1) settings
+            // Adaptive LOD Settings
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.9f, 0.5f, 1.0f));
+            ImGui::Text("Adaptive LOD (Performance Budget):");
+            ImGui::PopStyleColor();
+
+            auto& adaptiveLOD = treeLOD->getAdaptiveLODState();
+            ImGui::Checkbox("Enable Adaptive LOD", &adaptiveLOD.enabled);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Automatically adjust LOD quality based on scene complexity.\n"
+                                  "Sparse scenes (single tree) get higher quality.\n"
+                                  "Dense scenes reduce quality to maintain performance.");
+            }
+
+            if (adaptiveLOD.enabled) {
+                int budget = static_cast<int>(adaptiveLOD.leafBudget);
+                if (ImGui::SliderInt("Leaf Budget", &budget, 50000, 2000000, "%d leaves")) {
+                    adaptiveLOD.leafBudget = static_cast<uint32_t>(budget);
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Target maximum leaves per frame.\n"
+                                      "Lower = more aggressive quality scaling.\n"
+                                      "Higher = allows more leaves before reducing quality.");
+                }
+
+                ImGui::SliderFloat("Smoothing", &adaptiveLOD.scaleSmoothing, 0.01f, 0.3f, "%.2f");
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("How quickly quality adapts to scene changes.\n"
+                                      "Lower = smoother transitions.\n"
+                                      "Higher = faster response.");
+                }
+
+                // Display current state
+                ImGui::Spacing();
+                float budgetRatio = static_cast<float>(adaptiveLOD.lastFrameLeafCount) /
+                                    static_cast<float>(adaptiveLOD.leafBudget) * 100.0f;
+                ImGui::TextColored(ImVec4(0.7f, 0.9f, 0.7f, 1.0f),
+                                   "Leaves: %u / %u (%.1f%%)",
+                                   adaptiveLOD.lastFrameLeafCount,
+                                   adaptiveLOD.leafBudget,
+                                   budgetRatio);
+                ImGui::TextColored(ImVec4(0.7f, 0.9f, 0.7f, 1.0f),
+                                   "Quality Scale: %.2fx", adaptiveLOD.adaptiveScale);
+            }
+
             ImGui::Spacing();
             ImGui::Separator();
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.9f, 0.7f, 1.0f));

@@ -230,203 +230,71 @@ For each enhancement:
 
 ---
 
-## Priority Fix: Leaf Flickering and LOD Clarity
+## Implemented: Adaptive LOD (Performance Budget)
 
-### Problem 1: Leaf Flickering
+### Problem
 
-**Root cause**: Leaf culling uses continuous `lodBlendFactor` for stochastic culling. Even tiny floating point variations cause different leaves to be culled each frame.
+Fixed LOD thresholds don't adapt to scene complexity. A single tree uses the same aggressive LOD as a forest of 10,000 trees. This causes noticeable quality reduction when viewing individual trees.
 
-In `tree_leaf_cull_common.glsl`:
-```glsl
-// This flickers because lodBlendFactor has floating point noise!
-if (lodBlendFactor > 0.0) {
-    float adjustedBlend = sqrt(lodBlendFactor);
-    if (instanceHash < adjustedBlend) {  // Different leaves each frame!
-        return true;
-    }
-}
-```
+### Solution: Performance Budget-Based LOD
 
-Even if the camera is still, `lodBlendFactor` computed from screen-space error may vary slightly due to floating point precision in the chain:
-`tanHalfFOV` → `screenError` → `blendFactor` → `adjustedBlend`
-
-A change from 0.249 to 0.251 flips leaves with `instanceHash` around 0.5.
-
-**Solution: Quantized Distance Bands with Hysteresis**
-
-Replace continuous LOD factor with discrete distance bands:
-
-```glsl
-// Quantize distance into bands (e.g., every 10 meters)
-float bandSize = 10.0;
-float quantizedDist = floor(distToCamera / bandSize) * bandSize;
-
-// Add hysteresis: use different thresholds for appearing vs disappearing
-// Higher lodFactor = more leaves dropped, so:
-// - To keep a visible leaf visible longer: use LOWER effective distance
-// - To delay a hidden leaf appearing: use HIGHER effective distance
-float hysteresis = bandSize * 0.3;  // 30% overlap
-float effectiveDist = wasVisibleLastFrame
-    ? quantizedDist - hysteresis   // Pretend closer → lower lodFactor → stays visible
-    : quantizedDist + hysteresis;  // Pretend farther → higher lodFactor → stays hidden
-
-float lodFactor = calculateLodFactor(effectiveDist, lodStart, lodEnd);
-```
-
-However, tracking per-leaf state is expensive. **Simpler alternative**:
-
-```glsl
-// Use leaf hash to create per-leaf distance offsets (pseudo-hysteresis)
-float leafDistOffset = (instanceHash - 0.5) * hysteresisRange;
-float effectiveDist = distToCamera + leafDistOffset;
-float lodFactor = calculateLodFactor(effectiveDist, lodStart, lodEnd);
-```
-
-This spreads transitions across a range rather than having all leaves switch at the same distance.
-
-**Simplest fix: Quantize the blend factor on CPU**
-
-Before passing `lodBlendFactor` to the GPU, quantize it to discrete steps:
+The system now tracks rendered leaf count and scales LOD thresholds based on budget utilization:
 
 ```cpp
-// In TreeLODSystem::update() or TreeLeafCulling::recordCulling()
-// Quantize to 10 discrete levels (0.0, 0.1, 0.2, ... 1.0)
-float quantizedBlend = std::round(lodBlendFactor * 10.0f) / 10.0f;
-treeData.lodBlendFactor = quantizedBlend;
-```
-
-This ensures `lodBlendFactor` only changes when crossing a 0.1 threshold, not on every tiny floating point variation.
-
-**Files to modify:**
-- `src/vegetation/TreeLeafCulling.cpp` - Quantize `lodBlendFactor` before GPU upload
-- Or: `src/vegetation/TreeLODSystem.cpp` - Quantize in `update()` before storing
-
----
-
-### Problem 2: Confusing Screen-Space Error Metrics
-
-**Current state**: Abstract pixel-based thresholds that are hard to reason about.
-
-**Solution: Add Simple Distance Mode as Alternative**
-
-Keep screen-space error for advanced users, but add a simpler distance-based mode:
-
-```cpp
-struct TreeLODSettings {
-    // Simple mode: direct distance control
-    bool useSimpleDistanceMode = true;
-    float fullDetailDistance = 50.0f;    // Meters - full geometry below this
-    float impostorStartDistance = 80.0f; // Meters - start blending to impostor
-    float impostorOnlyDistance = 120.0f; // Meters - impostor only beyond this
-
-    // Advanced mode: screen-space error (existing)
-    bool useScreenSpaceError = false;
-    float errorThresholdFull = 2.0f;     // Pixels
-    // ...
-};
-```
-
-**Documentation for screen-space error** (add to comments):
-```cpp
-// Screen-space error measures: "How many pixels would fine detail occupy?"
-// Formula: screenError = detailSize × screenHeight / (2 × distance × tan(fov/2))
-//
-// At 1080p with 90° FOV (tan(45°)=1) and 10cm (0.1m) branch detail:
-//   screenError = 0.1 × 1080 / (2 × distance × 1) = 54 / distance
-//
-//   - 13m  → 4.2 pixels (clearly visible branches)
-//   - 27m  → 2.0 pixels (threshold - switch to impostor blend)
-//   - 54m  → 1.0 pixels (full impostor)
-//   - 108m → 0.5 pixels (could cull entirely)
-//
-// errorThresholdFull=2.0 means: "Switch to impostor when branches are <2 pixels"
-// This happens at ~27 meters for 10cm detail at 1080p/90° FOV
-```
-
-**Files to modify:**
-- `src/vegetation/TreeImpostorAtlas.h` - Add simple distance mode to `TreeLODSettings`
-- `src/vegetation/TreeLODSystem.cpp` - Implement simple distance mode path
-- `shaders/tree_impostor_cull.comp` - Support both modes
-
----
-
-### Problem 3: Screen-Space Error Not Adaptive
-
-**Current state**: Fixed thresholds regardless of scene complexity. A single tree uses the same aggressive LOD as a forest of 10,000 trees.
-
-**Issue**: With one tree visible:
-- Viewer attention is focused on it
-- Performance isn't constrained
-- Quality reduction is very noticeable
-
-**Solution: Performance Budget-Based LOD**
-
-Use a leaf count budget from the previous frame to adapt quality:
-```cpp
-// In TreeLODSystem or a new AdaptiveLOD component
 struct AdaptiveLODState {
-    uint32_t leafBudget = 500000;          // Target max leaves
-    uint32_t lastFrameLeafCount = 0;       // From indirect draw readback
-    float adaptiveScale = 1.0f;            // Current scale factor
-    float scaleSmoothing = 0.1f;           // Smooth transitions
+    uint32_t leafBudget = 500000;      // Target max leaves per frame
+    uint32_t lastFrameLeafCount = 0;   // From previous frame estimate
+    float adaptiveScale = 1.0f;        // Current LOD threshold scale
+    float scaleSmoothing = 0.05f;      // Transition smoothing
+    bool enabled = true;
 };
-
-void updateAdaptiveScale(AdaptiveLODState& state, uint32_t renderedLeaves) {
-    state.lastFrameLeafCount = renderedLeaves;
-    float budgetRatio = float(renderedLeaves) / float(state.leafBudget);
-
-    // Target scale based on budget utilization
-    float targetScale = 1.0f;
-    if (budgetRatio < 0.3f) {
-        // Way under budget - render at maximum quality
-        targetScale = 3.0f;  // 3x quality for single tree scenarios
-    } else if (budgetRatio < 0.6f) {
-        // Under budget - render higher quality
-        targetScale = 1.5f;
-    } else if (budgetRatio > 0.95f) {
-        // Over budget - reduce quality
-        targetScale = 0.7f;
-    }
-
-    // Smooth transition to avoid popping
-    state.adaptiveScale = glm::mix(state.adaptiveScale, targetScale, state.scaleSmoothing);
-}
-
-// Apply to LOD thresholds:
-float effectiveErrorThreshold = settings.errorThresholdFull * state.adaptiveScale;
-// Higher threshold = larger screen error allowed = more full-detail trees
 ```
 
-**Benefits of budget approach:**
-- Automatically adapts to different tree types (pine needles vs oak leaves)
-- Handles mixed scenes (some trees close, some far)
-- Self-adjusting to hardware capabilities
-- Single tree gets ~3x quality boost automatically
+**Quality scaling based on budget usage:**
+- <20% budget: 4x quality (single tree scenarios)
+- <40% budget: 2x quality
+- <70% budget: 1.5x quality
+- >85% budget: 0.9x quality
+- >95% budget: 0.7x quality (dense forests)
 
-**Files to modify:**
-- `src/vegetation/TreeLODSystem.h` - Add `AdaptiveLODState`
-- `src/vegetation/TreeLODSystem.cpp` - Implement budget tracking and scaling
-- `src/vegetation/TreeLeafCulling.cpp` - Readback leaf count from indirect buffer
+### Benefits
+
+- Single trees automatically get higher quality at greater distances
+- Dense forests reduce quality to maintain performance
+- Self-adjusting to hardware capabilities
+- Smooth transitions prevent popping
+
+### UI Controls
+
+Available in the Tree tab under "Adaptive LOD (Performance Budget)":
+- **Enable Adaptive LOD**: Toggle the system on/off
+- **Leaf Budget**: Target maximum leaves per frame (50k-2M)
+- **Smoothing**: How quickly quality adapts (0.01-0.3)
+- **Status display**: Current leaf count, budget usage %, and quality scale
+
+### Files Modified
+
+- `src/vegetation/TreeLODSystem.h` - `AdaptiveLODState` struct and methods
+- `src/vegetation/TreeLODSystem.cpp` - `updateAdaptiveLOD()` implementation
+- `src/vegetation/TreeLeafCulling.h/cpp` - Leaf count estimation
+- `src/vegetation/TreeRenderer.h/cpp` - `getEstimatedRenderedLeaves()` accessor
+- `src/core/Renderer.cpp` - Integration call each frame
+- `src/gui/GuiTreeTab.cpp` - UI controls
 
 ---
 
-### Implementation Order
+## Known Issue: Leaf Flickering
 
-1. **Fix leaf flickering first** (most noticeable issue) ✓
-   - Quantize lodBlendFactor to prevent floating point noise
+Leaf culling uses stochastic culling based on `lodBlendFactor`. Small floating point variations in the blend factor cause different leaves to be culled each frame, resulting in flickering.
 
-2. **Add performance budget LOD** (context-aware quality)
-   - Track rendered leaf count from previous frame
-   - Scale LOD thresholds based on budget utilization
-   - Improves single-tree and sparse scene quality
+**Current mitigations applied:**
+- Per-leaf distance offsets spread transitions across a range
+- Blend factor quantization in shader
 
-3. **Add simple distance mode** (easier to tune)
-   - Add settings to `TreeLODSettings`
-   - Implement in CPU and GPU LOD paths
-
-4. **Document screen-space error** (for advanced users)
-   - Add clear comments explaining the formula
-   - Include distance examples at common resolutions
+**Still needs investigation:** The flickering persists. A more robust solution may require:
+- True per-leaf visibility state tracking (expensive)
+- Temporal filtering of the blend factor
+- Different stochastic culling approach
 
 ---
 
