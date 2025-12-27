@@ -46,19 +46,27 @@ void GuiTreeTab::render(ITreeControl& treeControl) {
             ImGui::Spacing();
             auto& adaptiveLOD = treeLOD->getAdaptiveLODState();
 
+            ImGui::SliderFloat("Impostor Distance", &adaptiveLOD.impostorStartDistance, 10.0f, 200.0f, "%.0f m");
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Base distance where impostors start.\n"
+                                  "This is scaled by the leaf budget - when under budget,\n"
+                                  "impostors start further away (more full detail).\n"
+                                  "When over budget, impostors kick in closer.");
+            }
+
             int budget = static_cast<int>(adaptiveLOD.leafBudget);
             if (ImGui::SliderInt("Leaf Budget", &budget, 50000, 2000000, "%d leaves")) {
                 adaptiveLOD.leafBudget = static_cast<uint32_t>(budget);
             }
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("Target maximum leaves per frame.\n"
-                                  "Lower = more aggressive quality scaling.\n"
-                                  "Higher = allows more leaves before reducing quality.");
+                                  "When under budget, impostor distance increases.\n"
+                                  "When over budget, impostors kick in closer.");
             }
 
             ImGui::SliderFloat("Smoothing", &adaptiveLOD.scaleSmoothing, 0.01f, 0.3f, "%.2f");
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("How quickly quality adapts to scene changes.\n"
+                ImGui::SetTooltip("How quickly LOD adapts to scene changes.\n"
                                   "Lower = smoother transitions.\n"
                                   "Higher = faster response.");
             }
@@ -73,7 +81,9 @@ void GuiTreeTab::render(ITreeControl& treeControl) {
                                adaptiveLOD.leafBudget,
                                budgetRatio);
             ImGui::TextColored(ImVec4(0.7f, 0.9f, 0.7f, 1.0f),
-                               "Quality Scale: %.2fx", adaptiveLOD.adaptiveScale);
+                               "Current Impostor Dist: %.1f m (%.1fx base)",
+                               adaptiveLOD.currentImpostorDistance,
+                               adaptiveLOD.adaptiveScale);
 
             ImGui::Spacing();
             ImGui::Separator();
@@ -91,35 +101,11 @@ void GuiTreeTab::render(ITreeControl& treeControl) {
             if (settings.enableReducedDetailLOD) {
                 ImGui::Indent();
 
-                if (settings.useScreenSpaceError) {
-                    // Clamp reduced threshold between full and impostor
-                    float minReduced = settings.errorThresholdImpostor + 0.1f;
-                    float maxReduced = settings.errorThresholdFull - 0.1f;
-                    if (settings.errorThresholdReduced < minReduced) {
-                        settings.errorThresholdReduced = minReduced;
-                    }
-                    if (settings.errorThresholdReduced > maxReduced) {
-                        settings.errorThresholdReduced = maxReduced;
-                    }
-                    ImGui::SliderFloat("LOD1 Threshold", &settings.errorThresholdReduced, minReduced, maxReduced, "%.2f px");
-                    if (ImGui::IsItemHovered()) {
-                        ImGui::SetTooltip("Screen error threshold for LOD1.\n"
-                                          "Must be between Detail (%.1f) and Impostor (%.1f).\n"
-                                          "Trees with error below this use reduced geometry.",
-                                          settings.errorThresholdFull, settings.errorThresholdImpostor);
-                    }
-                } else {
-                    // Distance-based threshold
-                    float maxDist = settings.fullDetailDistance - 10.0f;
-                    if (settings.reducedDetailDistance > maxDist) {
-                        settings.reducedDetailDistance = maxDist;
-                    }
-                    ImGui::SliderFloat("LOD1 Distance", &settings.reducedDetailDistance, 50.0f, maxDist, "%.0f m");
-                    if (ImGui::IsItemHovered()) {
-                        ImGui::SetTooltip("Trees beyond this distance use reduced geometry.\n"
-                                          "Must be less than Full Detail Distance (%.0f m).",
-                                          settings.fullDetailDistance);
-                    }
+                // Distance-based LOD1 threshold
+                ImGui::SliderFloat("LOD1 Distance", &settings.reducedDetailDistance, 20.0f, 200.0f, "%.0f m");
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Trees beyond this distance use reduced geometry.\n"
+                                      "Reduced geometry has fewer, larger leaves.");
                 }
 
                 ImGui::Spacing();
