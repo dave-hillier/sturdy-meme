@@ -55,27 +55,9 @@ struct TreeImpostorArchetype {
     uint32_t atlasIndex = 0;
 };
 
-// LOD settings with hysteresis support
+// LOD settings - uses adaptive performance budget for LOD decisions
+// See AdaptiveLODState in TreeLODSystem.h for the primary LOD control
 struct TreeLODSettings {
-    // Distance thresholds (used when useScreenSpaceError = false)
-    float fullDetailDistance = TreeLODConstants::FULL_DETAIL_DISTANCE;
-    float impostorDistance = 50000.0f;     // Impostors visible up to this distance (very far)
-
-    // Hysteresis (prevents flickering at LOD boundaries)
-    float hysteresis = TreeLODConstants::HYSTERESIS;
-
-    // Blending characteristics
-    float blendRange = TreeLODConstants::BLEND_RANGE;
-    float blendExponent = 1.0f;            // Blend curve (1.0 = linear)
-
-    // Screen-space error LOD
-    // Screen error is HIGH when close (object large on screen), LOW when far (object small)
-    // Logic: close (high error) = full geometry, far (low error) = impostor/cull
-    bool useScreenSpaceError = true;       // Use screen-space error instead of distance
-    float errorThresholdFull = TreeLODConstants::ERROR_THRESHOLD_FULL;
-    float errorThresholdImpostor = TreeLODConstants::ERROR_THRESHOLD_IMPOSTOR;
-    float errorThresholdCull = TreeLODConstants::ERROR_THRESHOLD_CULL;
-
     // Impostor settings
     bool enableImpostors = true;
     float impostorBrightness = 1.0f;       // Brightness adjustment for impostors

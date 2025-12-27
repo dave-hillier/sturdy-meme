@@ -579,18 +579,20 @@ void ImpostorCullSystem::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
         1.0f / static_cast<float>(extent_.width),
         1.0f / static_cast<float>(extent_.height)
     );
-    uniforms.fullDetailDistance = lodParams.fullDetailDistance;
-    uniforms.impostorDistance = lodParams.impostorDistance;
-    uniforms.hysteresis = lodParams.hysteresis;
-    uniforms.blendRange = lodParams.blendRange;
+    // Use constants with adaptive scale for LOD thresholds
+    float adaptiveScale = lodParams.adaptiveScale;
+    uniforms.fullDetailDistance = TreeLODConstants::FULL_DETAIL_DISTANCE;
+    uniforms.impostorDistance = 50000.0f;
+    uniforms.hysteresis = TreeLODConstants::HYSTERESIS;
+    uniforms.blendRange = TreeLODConstants::BLEND_RANGE;
     uniforms.numTrees = treeCount_;
     uniforms.enableHiZ = (hiZEnabled_ && hiZPyramidView != VK_NULL_HANDLE) ? 1u : 0u;
-    // Screen-space error LOD parameters
-    uniforms.useScreenSpaceError = lodParams.useScreenSpaceError ? 1u : 0u;
+    // Screen-space error LOD parameters with adaptive scaling
+    uniforms.useScreenSpaceError = 1u;  // Always use screen-space error
     uniforms.tanHalfFOV = lodParams.tanHalfFOV;
-    uniforms.errorThresholdFull = lodParams.errorThresholdFull;
-    uniforms.errorThresholdImpostor = lodParams.errorThresholdImpostor;
-    uniforms.errorThresholdCull = lodParams.errorThresholdCull;
+    uniforms.errorThresholdFull = TreeLODConstants::ERROR_THRESHOLD_FULL * adaptiveScale;
+    uniforms.errorThresholdImpostor = TreeLODConstants::ERROR_THRESHOLD_IMPOSTOR * adaptiveScale;
+    uniforms.errorThresholdCull = TreeLODConstants::ERROR_THRESHOLD_CULL * adaptiveScale;
     // Temporal coherence parameters
     uniforms.temporalUpdateMode = temporalUpdateMode;
     uniforms.temporalUpdateOffset = temporalUpdateOffset;

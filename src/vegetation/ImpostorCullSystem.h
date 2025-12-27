@@ -101,18 +101,10 @@ public:
     void updateArchetypeData(const TreeImpostorAtlas* atlas);
 
     // LOD parameters for screen-space error calculation
-    // Screen error is HIGH when close (object large on screen), LOW when far (object small)
-    // Logic: close (high error) = full geometry, far (low error) = impostor/cull
+    // Uses adaptive LOD scaling - thresholds come from TreeLODConstants
     struct LODParams {
-        float fullDetailDistance = TreeLODConstants::FULL_DETAIL_DISTANCE;
-        float impostorDistance = 50000.0f;
-        float hysteresis = TreeLODConstants::HYSTERESIS;
-        float blendRange = TreeLODConstants::BLEND_RANGE;
-        bool useScreenSpaceError = true;
-        float tanHalfFOV = 1.0f;  // tan(fov/2)
-        float errorThresholdFull = TreeLODConstants::ERROR_THRESHOLD_FULL;
-        float errorThresholdImpostor = TreeLODConstants::ERROR_THRESHOLD_IMPOSTOR;
-        float errorThresholdCull = TreeLODConstants::ERROR_THRESHOLD_CULL;
+        float tanHalfFOV = 1.0f;       // tan(fov/2) for screen error calculation
+        float adaptiveScale = 1.0f;    // Multiplier from adaptive LOD system
     };
 
     // Temporal coherence settings
