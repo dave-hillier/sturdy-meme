@@ -127,19 +127,11 @@ void RenderPipelineFactory::setupPipeline(
         VkSampler hiZSampler = systems.hiZ().getHiZSampler();
 
         ImpostorCullSystem::LODParams lodParams;
-        if (systems.treeLOD()) {
-            const auto& lodSettings = systems.treeLOD()->getLODSettings();
-            lodParams.fullDetailDistance = lodSettings.fullDetailDistance;
-            lodParams.impostorDistance = lodSettings.impostorDistance;
-            lodParams.hysteresis = lodSettings.hysteresis;
-            lodParams.blendRange = lodSettings.blendRange;
-            lodParams.useScreenSpaceError = lodSettings.useScreenSpaceError;
-            lodParams.errorThresholdFull = lodSettings.errorThresholdFull;
-            lodParams.errorThresholdImpostor = lodSettings.errorThresholdImpostor;
-            lodParams.errorThresholdCull = lodSettings.errorThresholdCull;
-        }
         // Note: Vulkan Y-flip makes projection[1][1] negative, so use abs()
         lodParams.tanHalfFOV = 1.0f / std::abs(ctx.frame.projection[1][1]);
+        if (systems.treeLOD()) {
+            lodParams.adaptiveScale = systems.treeLOD()->getAdaptiveScale();
+        }
 
         impostorCull->recordCulling(
             ctx.cmd, ctx.frameIndex,

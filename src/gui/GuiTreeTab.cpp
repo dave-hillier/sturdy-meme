@@ -42,124 +42,38 @@ void GuiTreeTab::render(ITreeControl& treeControl) {
 
             ImGui::Checkbox("Enable Impostors", &settings.enableImpostors);
 
+            // Adaptive LOD Settings (primary LOD control)
             ImGui::Spacing();
-            ImGui::Text("LOD Mode:");
-            ImGui::Checkbox("Use Screen-Space Error", &settings.useScreenSpaceError);
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Use FOV-aware screen-space error for LOD selection.\n"
-                                  "Gives consistent quality across resolutions and zoom levels.\n"
-                                  "When disabled, uses fixed distance thresholds.");
-            }
-
-            ImGui::Spacing();
-            if (settings.useScreenSpaceError) {
-                // Screen-space error LOD controls
-                ImGui::Text("Screen-Space Error Thresholds:");
-                ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "  (High error = close/large, Low error = far/small)");
-
-                ImGui::SliderFloat("Detail Threshold", &settings.errorThresholdFull, 0.5f, 20.0f, "%.1f px");
-                if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("Minimum screen error for full geometry.\n"
-                                      "Lower = more trees use full geometry (higher quality).\n"
-                                      "Higher = fewer trees use full geometry (better performance).");
-                }
-
-                // Clamp impostor error to be less than full detail error
-                float maxImpostorError = settings.errorThresholdFull - 0.1f;
-                if (settings.errorThresholdImpostor > maxImpostorError) {
-                    settings.errorThresholdImpostor = maxImpostorError;
-                }
-                ImGui::SliderFloat("Impostor Threshold", &settings.errorThresholdImpostor, 0.1f, maxImpostorError, "%.2f px");
-                if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("Maximum screen error for pure impostor.\n"
-                                      "Lower = impostors used only for distant trees.\n"
-                                      "Blend zone exists between Detail and Impostor thresholds.");
-                }
-
-                // Clamp cull error to be less than impostor error
-                float maxCullError = settings.errorThresholdImpostor - 0.01f;
-                if (settings.errorThresholdCull > maxCullError) {
-                    settings.errorThresholdCull = maxCullError;
-                }
-                ImGui::SliderFloat("Cull Threshold", &settings.errorThresholdCull, 0.01f, maxCullError, "%.3f px");
-                if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("Maximum screen error for culling.\n"
-                                      "Lower = only cull extremely distant trees.\n"
-                                      "Higher = more aggressive culling (better performance).");
-                }
-            } else {
-                // Distance-based LOD controls
-                ImGui::Text("Distance Thresholds:");
-                ImGui::SliderFloat("Full Detail Dist", &settings.fullDetailDistance, 0.0f, 500.0f, "%.1f m");
-                if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("Trees closer than this use full geometry.");
-                }
-                ImGui::SliderFloat("Impostor Dist", &settings.impostorDistance, 0.0f, 10000.0f, "%.0f m");
-                if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("Trees beyond this distance are culled.");
-                }
-                ImGui::SliderFloat("Hysteresis", &settings.hysteresis, 0.0f, 20.0f, "%.1f m");
-                if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("Dead zone to prevent flickering at LOD boundaries.");
-                }
-
-                ImGui::Spacing();
-                ImGui::Text("Blending:");
-                ImGui::SliderFloat("Blend Range", &settings.blendRange, 0.0f, 50.0f, "%.1f m");
-                if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("Distance over which to blend between geometry and impostor.");
-                }
-                ImGui::SliderFloat("Blend Exponent", &settings.blendExponent, 0.0f, 3.0f, "%.2f");
-                if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("Blend curve: 1.0 = linear, >1 = faster falloff.");
-                }
-            }
-
-            // Adaptive LOD Settings
-            ImGui::Spacing();
-            ImGui::Separator();
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.9f, 0.5f, 1.0f));
-            ImGui::Text("Adaptive LOD (Performance Budget):");
-            ImGui::PopStyleColor();
-
             auto& adaptiveLOD = treeLOD->getAdaptiveLODState();
-            ImGui::Checkbox("Enable Adaptive LOD", &adaptiveLOD.enabled);
+
+            int budget = static_cast<int>(adaptiveLOD.leafBudget);
+            if (ImGui::SliderInt("Leaf Budget", &budget, 50000, 2000000, "%d leaves")) {
+                adaptiveLOD.leafBudget = static_cast<uint32_t>(budget);
+            }
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Automatically adjust LOD quality based on scene complexity.\n"
-                                  "Sparse scenes (single tree) get higher quality.\n"
-                                  "Dense scenes reduce quality to maintain performance.");
+                ImGui::SetTooltip("Target maximum leaves per frame.\n"
+                                  "Lower = more aggressive quality scaling.\n"
+                                  "Higher = allows more leaves before reducing quality.");
             }
 
-            if (adaptiveLOD.enabled) {
-                int budget = static_cast<int>(adaptiveLOD.leafBudget);
-                if (ImGui::SliderInt("Leaf Budget", &budget, 50000, 2000000, "%d leaves")) {
-                    adaptiveLOD.leafBudget = static_cast<uint32_t>(budget);
-                }
-                if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("Target maximum leaves per frame.\n"
-                                      "Lower = more aggressive quality scaling.\n"
-                                      "Higher = allows more leaves before reducing quality.");
-                }
-
-                ImGui::SliderFloat("Smoothing", &adaptiveLOD.scaleSmoothing, 0.01f, 0.3f, "%.2f");
-                if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("How quickly quality adapts to scene changes.\n"
-                                      "Lower = smoother transitions.\n"
-                                      "Higher = faster response.");
-                }
-
-                // Display current state
-                ImGui::Spacing();
-                float budgetRatio = static_cast<float>(adaptiveLOD.lastFrameLeafCount) /
-                                    static_cast<float>(adaptiveLOD.leafBudget) * 100.0f;
-                ImGui::TextColored(ImVec4(0.7f, 0.9f, 0.7f, 1.0f),
-                                   "Leaves: %u / %u (%.1f%%)",
-                                   adaptiveLOD.lastFrameLeafCount,
-                                   adaptiveLOD.leafBudget,
-                                   budgetRatio);
-                ImGui::TextColored(ImVec4(0.7f, 0.9f, 0.7f, 1.0f),
-                                   "Quality Scale: %.2fx", adaptiveLOD.adaptiveScale);
+            ImGui::SliderFloat("Smoothing", &adaptiveLOD.scaleSmoothing, 0.01f, 0.3f, "%.2f");
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("How quickly quality adapts to scene changes.\n"
+                                  "Lower = smoother transitions.\n"
+                                  "Higher = faster response.");
             }
+
+            // Display current state
+            ImGui::Spacing();
+            float budgetRatio = static_cast<float>(adaptiveLOD.lastFrameLeafCount) /
+                                static_cast<float>(adaptiveLOD.leafBudget) * 100.0f;
+            ImGui::TextColored(ImVec4(0.7f, 0.9f, 0.7f, 1.0f),
+                               "Leaves: %u / %u (%.1f%%)",
+                               adaptiveLOD.lastFrameLeafCount,
+                               adaptiveLOD.leafBudget,
+                               budgetRatio);
+            ImGui::TextColored(ImVec4(0.7f, 0.9f, 0.7f, 1.0f),
+                               "Quality Scale: %.2fx", adaptiveLOD.adaptiveScale);
 
             ImGui::Spacing();
             ImGui::Separator();

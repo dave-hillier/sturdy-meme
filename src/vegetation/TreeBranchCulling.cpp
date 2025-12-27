@@ -419,10 +419,9 @@ void TreeBranchCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
     for (int i = 0; i < 6; ++i) {
         uniforms.cascadeFrustumPlanes[i] = cascadeFrustumPlanes[i];
     }
-    uniforms.fullDetailDistance = lodSystem ? lodSystem->getLODSettings().fullDetailDistance
-                                            : TreeLODConstants::FULL_DETAIL_DISTANCE;
-    uniforms.hysteresis = lodSystem ? lodSystem->getLODSettings().hysteresis
-                                    : TreeLODConstants::HYSTERESIS;
+    // Use constants for LOD thresholds (adaptive LOD is handled at the tree level)
+    uniforms.fullDetailDistance = TreeLODConstants::FULL_DETAIL_DISTANCE;
+    uniforms.hysteresis = TreeLODConstants::HYSTERESIS;
     uniforms.cascadeIndex = cascadeIndex;
     uniforms.numTrees = numTrees_;
     uniforms.numMeshGroups = static_cast<uint32_t>(meshGroups_.size());
