@@ -21,6 +21,7 @@
   - `SDL_LogDebug(SDL_LOG_CATEGORY_APPLICATION, ...)` for debug output
 - procedurally generated content should be generated as part of the build process.
 - generated textures should be saved in png format
+- Vulkan-hpp: Use vulkan-hpp (`#include <vulkan/vulkan.hpp>`) for new Vulkan code. Prefer builder pattern with `.set*()` methods over positional constructors (e.g., `vk::BufferCreateInfo{}.setSize(...).setUsage(...)`). Run `./scripts/analyze-vulkan-usage.sh` to see migration guidance.
 
 ## Web Claude Code Environment
 
