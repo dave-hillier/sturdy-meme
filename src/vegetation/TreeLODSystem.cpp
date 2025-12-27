@@ -601,41 +601,23 @@ void TreeLODSystem::update(float deltaTime, const glm::vec3& cameraPos, const Tr
         // Determine target LOD level and blend factor
         TreeLODState::Level newTarget = state.targetLevel;
 
-        // Adaptive LOD using screen-space error
-        // Get archetype world error values
-        const auto* archetype = impostorAtlas_->getArchetype(state.archetypeIndex);
-        float worldErrorFull = 0.1f * tree.scale;  // ~10cm branch thickness, scaled
-        float worldErrorImpostor = (archetype ? archetype->boundingSphereRadius * 0.1f : 1.0f) * tree.scale;
+        // Distance-based LOD driven by performance budget
+        // currentImpostorDistance is adjusted by updateAdaptiveLOD based on leaf count
+        float impostorDist = adaptiveLOD_.currentImpostorDistance;
+        float blendRange = impostorDist * 0.2f;  // 20% blend zone
+        float fullDetailDist = impostorDist - blendRange;
 
-        float screenErrorFull = computeScreenError(worldErrorFull, distance,
-                                                    screenParams.screenHeight, screenParams.tanHalfFOV);
-
-        // Apply adaptive LOD scaling - higher scale = more lenient thresholds
-        // This allows single-tree scenarios to get higher quality automatically
-        float adaptiveScale = adaptiveLOD_.adaptiveScale;
-        float effectiveThresholdFull = TreeLODConstants::ERROR_THRESHOLD_FULL * adaptiveScale;
-        float effectiveThresholdImpostor = TreeLODConstants::ERROR_THRESHOLD_IMPOSTOR * adaptiveScale;
-
-        // Determine LOD level based on screen error
-        // High screen error = close = needs full geometry
-        // Low screen error = far = can use impostor
-        if (screenErrorFull > effectiveThresholdFull) {
+        // Determine LOD level based on distance
+        if (distance < fullDetailDist) {
             newTarget = TreeLODState::Level::FullDetail;
-        } else {
+            state.blendFactor = 0.0f;
+        } else if (distance > impostorDist) {
             newTarget = TreeLODState::Level::Impostor;
-        }
-
-        // Compute blend factor based on screen error
-        // blendFactor: 0.0 = full geometry only (close), 1.0 = impostor only (far)
-        if (screenErrorFull > effectiveThresholdFull) {
-            state.blendFactor = 0.0f;  // Close: full geometry
-        } else if (screenErrorFull < effectiveThresholdImpostor) {
-            state.blendFactor = 1.0f;  // Far: full impostor
+            state.blendFactor = 1.0f;
         } else {
-            // Blend zone: effectiveThresholdImpostor < screenError < effectiveThresholdFull
-            // As screenError decreases (farther), blend increases toward 1.0
-            float t = (effectiveThresholdFull - screenErrorFull) /
-                      (effectiveThresholdFull - effectiveThresholdImpostor);
+            // Blend zone between fullDetailDist and impostorDist
+            newTarget = TreeLODState::Level::Blending;
+            float t = (distance - fullDetailDist) / blendRange;
             state.blendFactor = t * t * (3.0f - 2.0f * t);  // smoothstep
         }
 
@@ -1230,36 +1212,47 @@ void TreeLODSystem::setExtent(VkExtent2D newExtent) {
 }
 
 void TreeLODSystem::updateAdaptiveLOD(uint32_t renderedLeafCount) {
-    if (!adaptiveLOD_.enabled) {
-        adaptiveLOD_.adaptiveScale = 1.0f;
-        return;
-    }
-
     adaptiveLOD_.lastFrameLeafCount = renderedLeafCount;
+
     float budgetRatio = static_cast<float>(renderedLeafCount) / static_cast<float>(adaptiveLOD_.leafBudget);
 
-    // Target scale based on budget utilization
-    // Higher scale = more lenient thresholds = more full-detail trees
-    float targetScale = 1.0f;
+    // Target impostor distance based on budget utilization
+    // Under budget: increase distance (more full-detail trees)
+    // Over budget: decrease distance (more impostors)
+    float baseDistance = adaptiveLOD_.impostorStartDistance;
+    float targetDistance = baseDistance;
+
     if (budgetRatio < 0.2f) {
         // Way under budget (single tree scenario) - render at maximum quality
-        targetScale = 4.0f;  // 4x quality for very sparse scenes
+        targetDistance = baseDistance * 4.0f;  // 4x distance for very sparse scenes
     } else if (budgetRatio < 0.4f) {
         // Under budget - render higher quality
-        targetScale = 2.0f;
-    } else if (budgetRatio < 0.7f) {
+        targetDistance = baseDistance * 2.5f;
+    } else if (budgetRatio < 0.6f) {
         // Moderate budget usage
-        targetScale = 1.5f;
-    } else if (budgetRatio > 0.95f) {
-        // Over budget - reduce quality to maintain performance
-        targetScale = 0.7f;
-    } else if (budgetRatio > 0.85f) {
-        // Near budget - slightly reduce
-        targetScale = 0.9f;
+        targetDistance = baseDistance * 1.5f;
+    } else if (budgetRatio < 0.8f) {
+        // Near target - use base distance
+        targetDistance = baseDistance;
+    } else if (budgetRatio < 1.0f) {
+        // Approaching budget - start reducing
+        targetDistance = baseDistance * 0.8f;
+    } else {
+        // Over budget - aggressively reduce distance to use more impostors
+        // The more over budget, the more we reduce
+        float overBudgetFactor = glm::clamp(budgetRatio - 1.0f, 0.0f, 1.0f);
+        targetDistance = baseDistance * glm::mix(0.5f, 0.2f, overBudgetFactor);
     }
 
     // Smooth transition to avoid popping
-    adaptiveLOD_.adaptiveScale = glm::mix(adaptiveLOD_.adaptiveScale, targetScale, adaptiveLOD_.scaleSmoothing);
+    adaptiveLOD_.currentImpostorDistance = glm::mix(
+        adaptiveLOD_.currentImpostorDistance,
+        targetDistance,
+        adaptiveLOD_.scaleSmoothing
+    );
+
+    // Update adaptiveScale for compatibility (ratio of current to base)
+    adaptiveLOD_.adaptiveScale = adaptiveLOD_.currentImpostorDistance / baseDistance;
 
     // Clamp to reasonable range
     adaptiveLOD_.adaptiveScale = glm::clamp(adaptiveLOD_.adaptiveScale, 0.5f, 5.0f);

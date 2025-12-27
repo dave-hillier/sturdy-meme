@@ -35,7 +35,8 @@ struct AdaptiveLODState {
     uint32_t lastFrameLeafCount = 0;       // Rendered leaf count from previous frame
     float adaptiveScale = 1.0f;            // Current LOD threshold scale factor
     float scaleSmoothing = 0.05f;          // Smoothing factor for scale transitions
-    bool enabled = true;                   // Enable/disable adaptive LOD
+    float impostorStartDistance = 50.0f;   // Base distance where impostors start (scaled by budget)
+    float currentImpostorDistance = 50.0f; // Actual impostor distance after budget scaling
 };
 
 // GPU instance data for impostor rendering
