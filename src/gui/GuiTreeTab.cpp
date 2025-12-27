@@ -46,19 +46,27 @@ void GuiTreeTab::render(ITreeControl& treeControl) {
             ImGui::Spacing();
             auto& adaptiveLOD = treeLOD->getAdaptiveLODState();
 
+            ImGui::SliderFloat("Impostor Distance", &adaptiveLOD.impostorStartDistance, 10.0f, 200.0f, "%.0f m");
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Base distance where impostors start.\n"
+                                  "This is scaled by the leaf budget - when under budget,\n"
+                                  "impostors start further away (more full detail).\n"
+                                  "When over budget, impostors kick in closer.");
+            }
+
             int budget = static_cast<int>(adaptiveLOD.leafBudget);
             if (ImGui::SliderInt("Leaf Budget", &budget, 50000, 2000000, "%d leaves")) {
                 adaptiveLOD.leafBudget = static_cast<uint32_t>(budget);
             }
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("Target maximum leaves per frame.\n"
-                                  "Lower = more aggressive quality scaling.\n"
-                                  "Higher = allows more leaves before reducing quality.");
+                                  "When under budget, impostor distance increases.\n"
+                                  "When over budget, impostors kick in closer.");
             }
 
             ImGui::SliderFloat("Smoothing", &adaptiveLOD.scaleSmoothing, 0.01f, 0.3f, "%.2f");
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("How quickly quality adapts to scene changes.\n"
+                ImGui::SetTooltip("How quickly LOD adapts to scene changes.\n"
                                   "Lower = smoother transitions.\n"
                                   "Higher = faster response.");
             }
@@ -73,7 +81,9 @@ void GuiTreeTab::render(ITreeControl& treeControl) {
                                adaptiveLOD.leafBudget,
                                budgetRatio);
             ImGui::TextColored(ImVec4(0.7f, 0.9f, 0.7f, 1.0f),
-                               "Quality Scale: %.2fx", adaptiveLOD.adaptiveScale);
+                               "Current Impostor Dist: %.1f m (%.1fx base)",
+                               adaptiveLOD.currentImpostorDistance,
+                               adaptiveLOD.adaptiveScale);
 
             ImGui::Spacing();
             ImGui::Text("Impostor Appearance:");

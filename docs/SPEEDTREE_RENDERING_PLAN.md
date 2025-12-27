@@ -234,52 +234,45 @@ For each enhancement:
 
 ### Problem
 
-Fixed LOD thresholds don't adapt to scene complexity. A single tree uses the same aggressive LOD as a forest of 10,000 trees. This causes noticeable quality reduction when viewing individual trees.
+Fixed LOD thresholds don't adapt to scene complexity. A single tree uses the same aggressive LOD as a forest of 10,000 trees. When the leaf budget is exhausted, impostors should kick in automatically.
 
-### Solution: Performance Budget-Based LOD
+### Solution: Distance-Based LOD Driven by Budget
 
-The system now tracks rendered leaf count and scales LOD thresholds based on budget utilization:
+The system uses a simple distance-based LOD that scales based on leaf budget utilization:
 
 ```cpp
 struct AdaptiveLODState {
-    uint32_t leafBudget = 500000;      // Target max leaves per frame
-    uint32_t lastFrameLeafCount = 0;   // From previous frame estimate
-    float adaptiveScale = 1.0f;        // Current LOD threshold scale
-    float scaleSmoothing = 0.05f;      // Transition smoothing
-    bool enabled = true;
+    uint32_t leafBudget = 500000;          // Target max leaves per frame
+    uint32_t lastFrameLeafCount = 0;       // Rendered leaves from previous frame
+    float impostorStartDistance = 50.0f;   // Base distance where impostors start
+    float currentImpostorDistance = 50.0f; // Actual distance after budget scaling
+    float scaleSmoothing = 0.05f;          // Transition smoothing
 };
 ```
 
-**Quality scaling based on budget usage:**
-- <20% budget: 4x quality (single tree scenarios)
-- <40% budget: 2x quality
-- <70% budget: 1.5x quality
-- >85% budget: 0.9x quality
-- >95% budget: 0.7x quality (dense forests)
+**Distance scaling based on budget usage:**
+- <20% budget: 4x distance (single tree scenarios - impostors at 200m)
+- <40% budget: 2.5x distance
+- <60% budget: 1.5x distance
+- <80% budget: 1x distance (base impostor distance)
+- <100% budget: 0.8x distance
+- >100% budget: 0.5x-0.2x distance (aggressive impostor usage)
 
-### Benefits
+### How It Works
 
-- Single trees automatically get higher quality at greater distances
-- Dense forests reduce quality to maintain performance
-- Self-adjusting to hardware capabilities
-- Smooth transitions prevent popping
+1. Track rendered leaf count from previous frame
+2. Compare to leaf budget to get budget ratio
+3. Scale impostor distance: under budget = more full detail, over budget = more impostors
+4. Trees beyond `currentImpostorDistance` render as impostors
+5. 20% blend zone for smooth transitions
 
 ### UI Controls
 
-Available in the Tree tab under "Adaptive LOD (Performance Budget)":
-- **Enable Adaptive LOD**: Toggle the system on/off
+Available in the Tree tab under "LOD Settings":
+- **Impostor Distance**: Base distance where impostors start (10-200m)
 - **Leaf Budget**: Target maximum leaves per frame (50k-2M)
-- **Smoothing**: How quickly quality adapts (0.01-0.3)
-- **Status display**: Current leaf count, budget usage %, and quality scale
-
-### Files Modified
-
-- `src/vegetation/TreeLODSystem.h` - `AdaptiveLODState` struct and methods
-- `src/vegetation/TreeLODSystem.cpp` - `updateAdaptiveLOD()` implementation
-- `src/vegetation/TreeLeafCulling.h/cpp` - Leaf count estimation
-- `src/vegetation/TreeRenderer.h/cpp` - `getEstimatedRenderedLeaves()` accessor
-- `src/core/Renderer.cpp` - Integration call each frame
-- `src/gui/GuiTreeTab.cpp` - UI controls
+- **Smoothing**: How quickly LOD adapts to scene changes (0.01-0.3)
+- **Status display**: Current leaf count, budget %, and actual impostor distance
 
 ---
 
