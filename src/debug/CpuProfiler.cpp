@@ -1,6 +1,16 @@
 #include "CpuProfiler.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
+#include <cstring>
+
+// Helper to check if a zone name represents a wait/sync operation
+static bool isWaitZoneName(const std::string& name) {
+    // Zones prefixed with "Wait:" are explicitly marked as wait zones
+    if (name.rfind("Wait:", 0) == 0) return true;
+    // Legacy zone names that represent waiting
+    if (name == "FenceWait" || name == "AcquireImage") return true;
+    return false;
+}
 
 void CpuProfiler::beginFrame() {
     if (!enabled) return;
@@ -21,6 +31,9 @@ void CpuProfiler::endFrame() {
     lastFrameStats.zones.clear();
     zoneNames.clear();
 
+    float totalWorkMs = 0.0f;
+    float totalWaitMs = 0.0f;
+
     for (const auto& zoneName : currentFrameZoneOrder) {
         auto it = activeZones.find(zoneName);
         if (it != activeZones.end()) {
@@ -28,20 +41,39 @@ void CpuProfiler::endFrame() {
             result.name = zoneName;
             result.cpuTimeMs = it->second.accumulatedMs;
             result.percentOfFrame = (frameTimeMs > 0.0f) ? (result.cpuTimeMs / frameTimeMs * 100.0f) : 0.0f;
+            result.isWaitZone = isWaitZoneName(zoneName);
+
+            // Accumulate work vs wait time
+            if (result.isWaitZone) {
+                totalWaitMs += result.cpuTimeMs;
+            } else {
+                totalWorkMs += result.cpuTimeMs;
+            }
 
             lastFrameStats.zones.push_back(result);
             zoneNames.push_back(zoneName);
         }
     }
 
+    // Calculate breakdown
+    lastFrameStats.workTimeMs = totalWorkMs;
+    lastFrameStats.waitTimeMs = totalWaitMs;
+    lastFrameStats.overheadTimeMs = std::max(0.0f, frameTimeMs - totalWorkMs - totalWaitMs);
+
     // Update smoothed stats
     if (smoothedStats.zones.empty()) {
         // First frame - initialize with current values
         smoothedStats = lastFrameStats;
     } else {
-        // Exponential moving average
+        // Exponential moving average for aggregate stats
         smoothedStats.totalCpuTimeMs = smoothedStats.totalCpuTimeMs * SMOOTHING_FACTOR +
                                         lastFrameStats.totalCpuTimeMs * (1.0f - SMOOTHING_FACTOR);
+        smoothedStats.workTimeMs = smoothedStats.workTimeMs * SMOOTHING_FACTOR +
+                                    lastFrameStats.workTimeMs * (1.0f - SMOOTHING_FACTOR);
+        smoothedStats.waitTimeMs = smoothedStats.waitTimeMs * SMOOTHING_FACTOR +
+                                    lastFrameStats.waitTimeMs * (1.0f - SMOOTHING_FACTOR);
+        smoothedStats.overheadTimeMs = smoothedStats.overheadTimeMs * SMOOTHING_FACTOR +
+                                        lastFrameStats.overheadTimeMs * (1.0f - SMOOTHING_FACTOR);
 
         // Update zones (match by name)
         for (auto& smoothedZone : smoothedStats.zones) {
@@ -51,6 +83,7 @@ void CpuProfiler::endFrame() {
                                               currentZone.cpuTimeMs * (1.0f - SMOOTHING_FACTOR);
                     smoothedZone.percentOfFrame = smoothedZone.percentOfFrame * SMOOTHING_FACTOR +
                                                    currentZone.percentOfFrame * (1.0f - SMOOTHING_FACTOR);
+                    smoothedZone.isWaitZone = currentZone.isWaitZone;
                     break;
                 }
             }

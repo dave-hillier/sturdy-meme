@@ -96,8 +96,37 @@ void GuiProfilerTab::render(IProfilerControl& profilerControl) {
     if (cpuStats.zones.empty()) {
         ImGui::TextDisabled("No CPU data yet");
     } else {
-        // Total CPU time
+        // Total CPU time with work/wait breakdown
         ImGui::Text("Total CPU: %.2f ms", cpuStats.totalCpuTimeMs);
+
+        // Work vs Wait breakdown with visual bars
+        ImGui::Spacing();
+        float workPct = (cpuStats.totalCpuTimeMs > 0.0f) ? (cpuStats.workTimeMs / cpuStats.totalCpuTimeMs) : 0.0f;
+        float waitPct = (cpuStats.totalCpuTimeMs > 0.0f) ? (cpuStats.waitTimeMs / cpuStats.totalCpuTimeMs) : 0.0f;
+        float overheadPct = (cpuStats.totalCpuTimeMs > 0.0f) ? (cpuStats.overheadTimeMs / cpuStats.totalCpuTimeMs) : 0.0f;
+
+        // Work time bar (green)
+        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.4f, 0.8f, 0.4f, 1.0f));
+        char workLabel[64];
+        snprintf(workLabel, sizeof(workLabel), "Work: %.2f ms (%.0f%%)", cpuStats.workTimeMs, workPct * 100.0f);
+        ImGui::ProgressBar(workPct, ImVec2(-1, 14), workLabel);
+        ImGui::PopStyleColor();
+
+        // Wait time bar (cyan - indicates idle CPU waiting for GPU)
+        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.4f, 0.8f, 1.0f, 1.0f));
+        char waitLabel[64];
+        snprintf(waitLabel, sizeof(waitLabel), "Wait: %.2f ms (%.0f%%)", cpuStats.waitTimeMs, waitPct * 100.0f);
+        ImGui::ProgressBar(waitPct, ImVec2(-1, 14), waitLabel);
+        ImGui::PopStyleColor();
+
+        // Overhead time bar (gray - untracked time)
+        if (cpuStats.overheadTimeMs > 0.1f) {
+            ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.5f, 0.5f, 0.5f, 1.0f));
+            char overheadLabel[64];
+            snprintf(overheadLabel, sizeof(overheadLabel), "Other: %.2f ms (%.0f%%)", cpuStats.overheadTimeMs, overheadPct * 100.0f);
+            ImGui::ProgressBar(overheadPct, ImVec2(-1, 14), overheadLabel);
+            ImGui::PopStyleColor();
+        }
 
         ImGui::Spacing();
 
@@ -112,13 +141,31 @@ void GuiProfilerTab::render(IProfilerControl& profilerControl) {
                 ImGui::TableNextRow();
 
                 ImGui::TableNextColumn();
+                // Color wait zones cyan to make them stand out
+                if (zone.isWaitZone) {
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 0.8f, 1.0f, 1.0f));
+                }
                 ImGui::Text("%s", zone.name.c_str());
+                if (zone.isWaitZone) {
+                    ImGui::PopStyleColor();
+                }
 
                 ImGui::TableNextColumn();
                 ImGui::Text("%.3f", zone.cpuTimeMs);
 
                 ImGui::TableNextColumn();
+                // Color code by percentage (but wait zones always cyan)
+                if (zone.isWaitZone) {
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 0.8f, 1.0f, 1.0f));
+                } else if (zone.percentOfFrame > 30.0f) {
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
+                } else if (zone.percentOfFrame > 15.0f) {
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.8f, 0.4f, 1.0f));
+                } else {
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 1.0f, 0.4f, 1.0f));
+                }
                 ImGui::Text("%.1f%%", zone.percentOfFrame);
+                ImGui::PopStyleColor();
             }
 
             ImGui::EndTable();
@@ -157,6 +204,26 @@ void GuiProfilerTab::render(IProfilerControl& profilerControl) {
     ImGui::ProgressBar(std::min(budgetUsed, 1.5f) / 1.5f, ImVec2(-1, 20), budgetText);
     ImGui::PopStyleColor();
 
-    ImGui::Text("GPU Bound: %s", (gpuTime > cpuTime) ? "Yes" : "No");
-    ImGui::Text("CPU Bound: %s", (cpuTime > gpuTime) ? "Yes" : "No");
+    // Determine bottleneck
+    bool gpuBound = gpuTime > cpuTime && gpuTime > cpuStats.waitTimeMs;
+    bool cpuWorkBound = cpuStats.workTimeMs > gpuTime && cpuStats.workTimeMs > cpuStats.waitTimeMs;
+    bool waitBound = cpuStats.waitTimeMs > cpuStats.workTimeMs && cpuStats.waitTimeMs > 0.5f;
+
+    if (gpuBound) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
+        ImGui::Text("Status: GPU Bound");
+        ImGui::PopStyleColor();
+    } else if (cpuWorkBound) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.8f, 0.4f, 1.0f));
+        ImGui::Text("Status: CPU Bound");
+        ImGui::PopStyleColor();
+    } else if (waitBound) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 0.8f, 1.0f, 1.0f));
+        ImGui::Text("Status: Wait Bound (CPU idle, waiting for GPU)");
+        ImGui::PopStyleColor();
+    } else {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 1.0f, 0.4f, 1.0f));
+        ImGui::Text("Status: Balanced");
+        ImGui::PopStyleColor();
+    }
 }

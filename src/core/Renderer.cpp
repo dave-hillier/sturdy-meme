@@ -608,17 +608,17 @@ bool Renderer::render(const Camera& camera) {
 
     // Frame synchronization - use non-blocking check first to avoid unnecessary waits
     // With triple buffering, the fence is often already signaled
-    systems_->profiler().beginCpuZone("FenceWait");
+    systems_->profiler().beginCpuZone("Wait:FenceSync");
     if (!inFlightFences[currentFrame].isSignaled()) {
         inFlightFences[currentFrame].wait();
     }
-    systems_->profiler().endCpuZone("FenceWait");
+    systems_->profiler().endCpuZone("Wait:FenceSync");
 
-    systems_->profiler().beginCpuZone("AcquireImage");
+    systems_->profiler().beginCpuZone("Wait:AcquireImage");
     uint32_t imageIndex;
     VkResult result = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX,
                                             imageAvailableSemaphores[currentFrame].get(), VK_NULL_HANDLE, &imageIndex);
-    systems_->profiler().endCpuZone("AcquireImage");
+    systems_->profiler().endCpuZone("Wait:AcquireImage");
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR) {
         handleResize();
@@ -806,6 +806,8 @@ bool Renderer::render(const Camera& camera) {
     systems_->profiler().endCpuZone("SystemUpdates");
 
     // Begin command buffer recording
+    systems_->profiler().beginCpuZone("CmdBufferRecord");
+
     vkResetCommandBuffer(commandBuffers[frame.frameIndex], 0);
 
     VkCommandBufferBeginInfo beginInfo{};
@@ -822,7 +824,9 @@ bool Renderer::render(const Camera& camera) {
     RenderContext ctx(cmd, frame.frameIndex, frame, resources);
 
     // Execute all compute passes via pipeline
+    systems_->profiler().beginCpuZone("ComputeDispatch");
     renderPipeline.computeStage.execute(ctx);
+    systems_->profiler().endCpuZone("ComputeDispatch");
 
     // Shadow pass (skip when sun is below horizon or shadows disabled)
     if (lastSunIntensity > 0.001f && perfToggles.shadowPass) {
@@ -863,7 +867,9 @@ bool Renderer::render(const Camera& camera) {
     // Note: HDRPass is not wrapped in a profiler zone because recordHDRPass()
     // contains granular HDR:* sub-zones. Nesting would confuse the profiler.
     if (hdrPassEnabled) {
+        systems_->profiler().beginCpuZone("RenderPassRecord");
         recordHDRPass(cmd, frame.frameIndex, frame.time);
+        systems_->profiler().endCpuZone("RenderPassRecord");
 
         // Screen-Space Reflections compute pass (Phase 10)
         // Computes SSR for next frame's water - uses current scene for temporal stability
@@ -918,7 +924,11 @@ bool Renderer::render(const Camera& camera) {
 
     vkEndCommandBuffer(cmd);
 
+    systems_->profiler().endCpuZone("CmdBufferRecord");
+
     // Queue submission
+    systems_->profiler().beginCpuZone("QueueSubmit");
+
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
@@ -935,6 +945,8 @@ bool Renderer::render(const Camera& camera) {
     submitInfo.pSignalSemaphores = signalSemaphores;
 
     result = vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame].get());
+    systems_->profiler().endCpuZone("QueueSubmit");
+
     if (result == VK_ERROR_DEVICE_LOST) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Device lost during queue submit");
         framebufferResized = true;
@@ -945,6 +957,8 @@ bool Renderer::render(const Camera& camera) {
     }
 
     // Present
+    systems_->profiler().beginCpuZone("Wait:Present");
+
     VkPresentInfoKHR presentInfo{};
     presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     presentInfo.waitSemaphoreCount = 1;
@@ -956,6 +970,8 @@ bool Renderer::render(const Camera& camera) {
     presentInfo.pImageIndices = &imageIndex;
 
     result = vkQueuePresentKHR(presentQueue, &presentInfo);
+
+    systems_->profiler().endCpuZone("Wait:Present");
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
         framebufferResized = true;

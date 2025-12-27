@@ -11,11 +11,19 @@
  * Uses high-resolution clock to measure time spent in various CPU operations
  * like culling, uniform updates, command buffer recording, etc.
  *
+ * Zones prefixed with "Wait:" are tracked separately as GPU sync points
+ * (time where CPU is idle waiting for GPU). This helps diagnose performance
+ * bottlenecks and identify CPU vs GPU bound scenarios.
+ *
  * Usage:
  *   profiler.beginFrame();
  *   {
  *       CpuProfiler::ScopedZone zone(profiler, "UniformUpdate");
  *       // ... update uniforms ...
+ *   }
+ *   {
+ *       CpuProfiler::ScopedZone waitZone(profiler, "Wait:FenceWait");
+ *       // ... wait for GPU fence ...
  *   }
  *   profiler.endFrame();
  */
@@ -25,10 +33,14 @@ public:
         std::string name;
         float cpuTimeMs;       // CPU time in milliseconds
         float percentOfFrame;  // Percentage of total frame CPU time
+        bool isWaitZone;       // True if this zone represents waiting for GPU
     };
 
     struct FrameStats {
         float totalCpuTimeMs;
+        float workTimeMs;      // Time doing actual CPU work (excludes wait zones)
+        float waitTimeMs;      // Time waiting for GPU/sync operations
+        float overheadTimeMs;  // Unaccounted time (profiling overhead, untracked work)
         std::vector<TimingResult> zones;
     };
 
