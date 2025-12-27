@@ -198,6 +198,10 @@ public:
     }
     uint32_t getMaxLeavesPerType() const { return maxLeavesPerType_; }
 
+    // Get estimated rendered leaf count from last frame (for adaptive LOD)
+    // This is an estimate based on blend factors, not actual GPU count
+    uint32_t getEstimatedRenderedLeaves() const { return estimatedRenderedLeaves_; }
+
     VkDevice getDevice() const { return device_; }
 
 private:
@@ -254,6 +258,7 @@ private:
 
     uint32_t numTreesForIndirect_ = 0;
     uint32_t maxLeavesPerType_ = 0;
+    uint32_t estimatedRenderedLeaves_ = 0;  // Estimate for adaptive LOD
 
     // =========================================================================
     // Spatial Index & Cell Culling

@@ -889,6 +889,13 @@ bool Renderer::render(const Camera& camera) {
         bool gpuCullingAvailable = impostorCull && impostorCull->getTreeCount() > 0;
         systems_->treeLOD()->setGPUCullingEnabled(gpuCullingAvailable);
 
+        // Update adaptive LOD based on previous frame's rendered leaf count
+        // This allows sparse scenes (single tree) to get higher quality automatically
+        if (auto* treeRenderer = systems_->treeRenderer()) {
+            uint32_t estimatedLeaves = treeRenderer->getEstimatedRenderedLeaves();
+            systems_->treeLOD()->updateAdaptiveLOD(estimatedLeaves);
+        }
+
         // Compute screen params for screen-space error LOD
         TreeLODSystem::ScreenParams screenParams;
         screenParams.screenHeight = static_cast<float>(extent.height);

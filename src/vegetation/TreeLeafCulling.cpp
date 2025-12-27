@@ -676,6 +676,7 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
 
     uint32_t numTrees = 0;
     uint32_t totalLeafInstances = 0;
+    float estimatedVisibleLeaves = 0.0f;  // Estimate for adaptive LOD
 
     for (const auto& renderable : leafRenderables) {
         if (renderable.leafInstanceIndex >= 0 &&
@@ -721,11 +722,20 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
                 renderData.windOffsetAndLOD = glm::vec4(windOffset, lodBlendFactor, 0.0f, 0.0f);
                 treeRenderDataList.push_back(renderData);
 
+                // Estimate visible leaves based on blend factor
+                // blendFactor 0 = full detail (all leaves), blendFactor 1 = impostor (no leaves)
+                float visibleRatio = 1.0f - lodBlendFactor;
+                estimatedVisibleLeaves += static_cast<float>(drawInfo.instanceCount) * visibleRatio;
+
                 totalLeafInstances += drawInfo.instanceCount;
                 numTrees++;
             }
         }
     }
+
+    // Store estimate for adaptive LOD system
+    estimatedRenderedLeaves_ = static_cast<uint32_t>(estimatedVisibleLeaves);
+
     if (numTrees == 0 || totalLeafInstances == 0) return;
 
     // CRITICAL: Sort tree data by inputFirstInstance for binary search in shader.

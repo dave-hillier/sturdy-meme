@@ -612,10 +612,16 @@ void TreeLODSystem::update(float deltaTime, const glm::vec3& cameraPos, const Tr
             float screenErrorFull = computeScreenError(worldErrorFull, distance,
                                                         screenParams.screenHeight, screenParams.tanHalfFOV);
 
+            // Apply adaptive LOD scaling - higher scale = more lenient thresholds
+            // This allows single-tree scenarios to get higher quality automatically
+            float adaptiveScale = adaptiveLOD_.adaptiveScale;
+            float effectiveThresholdFull = settings.errorThresholdFull * adaptiveScale;
+            float effectiveThresholdImpostor = settings.errorThresholdImpostor * adaptiveScale;
+
             // Determine LOD level based on screen error
             // High screen error = close = needs full geometry
             // Low screen error = far = can use impostor
-            if (screenErrorFull > settings.errorThresholdFull) {
+            if (screenErrorFull > effectiveThresholdFull) {
                 newTarget = TreeLODState::Level::FullDetail;
             } else {
                 newTarget = TreeLODState::Level::Impostor;
@@ -623,15 +629,15 @@ void TreeLODSystem::update(float deltaTime, const glm::vec3& cameraPos, const Tr
 
             // Compute blend factor based on screen error
             // blendFactor: 0.0 = full geometry only (close), 1.0 = impostor only (far)
-            if (screenErrorFull > settings.errorThresholdFull) {
+            if (screenErrorFull > effectiveThresholdFull) {
                 state.blendFactor = 0.0f;  // Close: full geometry
-            } else if (screenErrorFull < settings.errorThresholdImpostor) {
+            } else if (screenErrorFull < effectiveThresholdImpostor) {
                 state.blendFactor = 1.0f;  // Far: full impostor
             } else {
-                // Blend zone: errorThresholdImpostor < screenError < errorThresholdFull
+                // Blend zone: effectiveThresholdImpostor < screenError < effectiveThresholdFull
                 // As screenError decreases (farther), blend increases toward 1.0
-                float t = (settings.errorThresholdFull - screenErrorFull) /
-                          (settings.errorThresholdFull - settings.errorThresholdImpostor);
+                float t = (effectiveThresholdFull - screenErrorFull) /
+                          (effectiveThresholdFull - effectiveThresholdImpostor);
                 state.blendFactor = t * t * (3.0f - 2.0f * t);  // smoothstep
             }
         } else {
@@ -1254,4 +1260,40 @@ void TreeLODSystem::updateTreeCount(size_t count) {
 
 void TreeLODSystem::setExtent(VkExtent2D newExtent) {
     extent_ = newExtent;
+}
+
+void TreeLODSystem::updateAdaptiveLOD(uint32_t renderedLeafCount) {
+    if (!adaptiveLOD_.enabled) {
+        adaptiveLOD_.adaptiveScale = 1.0f;
+        return;
+    }
+
+    adaptiveLOD_.lastFrameLeafCount = renderedLeafCount;
+    float budgetRatio = static_cast<float>(renderedLeafCount) / static_cast<float>(adaptiveLOD_.leafBudget);
+
+    // Target scale based on budget utilization
+    // Higher scale = more lenient thresholds = more full-detail trees
+    float targetScale = 1.0f;
+    if (budgetRatio < 0.2f) {
+        // Way under budget (single tree scenario) - render at maximum quality
+        targetScale = 4.0f;  // 4x quality for very sparse scenes
+    } else if (budgetRatio < 0.4f) {
+        // Under budget - render higher quality
+        targetScale = 2.0f;
+    } else if (budgetRatio < 0.7f) {
+        // Moderate budget usage
+        targetScale = 1.5f;
+    } else if (budgetRatio > 0.95f) {
+        // Over budget - reduce quality to maintain performance
+        targetScale = 0.7f;
+    } else if (budgetRatio > 0.85f) {
+        // Near budget - slightly reduce
+        targetScale = 0.9f;
+    }
+
+    // Smooth transition to avoid popping
+    adaptiveLOD_.adaptiveScale = glm::mix(adaptiveLOD_.adaptiveScale, targetScale, adaptiveLOD_.scaleSmoothing);
+
+    // Clamp to reasonable range
+    adaptiveLOD_.adaptiveScale = glm::clamp(adaptiveLOD_.adaptiveScale, 0.5f, 5.0f);
 }
