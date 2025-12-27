@@ -509,7 +509,21 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
             if (impostorCull && treeLOD) {
                 impostorCull->updateTreeData(*treeSystem, treeLOD->getImpostorAtlas());
                 impostorCull->updateArchetypeData(treeLOD->getImpostorAtlas());
+                impostorCull->initializeDescriptorSets();
                 SDL_Log("ImpostorCullSystem: Updated with %u trees", impostorCull->getTreeCount());
+            }
+
+            // Initialize TreeLODSystem descriptor sets now that impostors are generated
+            if (treeLOD) {
+                treeLOD->initializeDescriptorSets(
+                    systems_->globalBuffers().uniformBuffers.buffers,
+                    systems_->shadow().getShadowImageView(),
+                    systems_->shadow().getShadowSampler());
+
+                // If GPU culling is available, update instance buffer binding
+                if (impostorCull) {
+                    treeLOD->initializeGPUCulledDescriptors(impostorCull->getVisibleImpostorBuffer());
+                }
             }
         }
     }

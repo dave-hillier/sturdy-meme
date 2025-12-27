@@ -142,9 +142,12 @@ public:
     void setGPUCullingEnabled(bool enabled) { gpuCullingEnabled_ = enabled; }
     bool isGPUCullingEnabled() const { return gpuCullingEnabled_; }
 
-    // Update descriptor sets
-    void updateDescriptorSets(uint32_t frameIndex, VkBuffer uniformBuffer,
-                              VkImageView shadowMap, VkSampler shadowSampler);
+    // Initialize descriptor sets with static bindings (call once during init)
+    void initializeDescriptorSets(const std::vector<VkBuffer>& uniformBuffers,
+                                  VkImageView shadowMap, VkSampler shadowSampler);
+
+    // Initialize GPU-culled descriptor sets with the GPU instance buffer (call once when GPU culling is enabled)
+    void initializeGPUCulledDescriptors(VkBuffer gpuInstanceBuffer);
 
     VkDevice getDevice() const { return device_; }
 
