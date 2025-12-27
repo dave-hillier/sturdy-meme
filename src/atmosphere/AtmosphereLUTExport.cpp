@@ -2,6 +2,7 @@
 #include "VulkanBarriers.h"
 #include "VulkanRAII.h"
 #include <SDL3/SDL_log.h>
+#include <vulkan/vulkan.hpp>
 #include <vector>
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -28,44 +29,40 @@ bool AtmosphereLUTSystem::exportImageToPNG(VkImage image, VkFormat format, uint3
     // Create staging buffer with correct size based on actual format
     VkDeviceSize imageSize = width * height * channelCount * sizeof(uint16_t);
 
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = imageSize;
-    bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    auto bufferInfo = vk::BufferCreateInfo{}
+        .setSize(imageSize)
+        .setUsage(vk::BufferUsageFlagBits::eTransferDst)
+        .setSharingMode(vk::SharingMode::eExclusive);
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_GPU_TO_CPU;
 
     ManagedBuffer stagingBuffer;
-    if (!ManagedBuffer::create(allocator, bufferInfo, allocInfo, stagingBuffer)) {
+    if (!ManagedBuffer::create(allocator, reinterpret_cast<const VkBufferCreateInfo&>(bufferInfo), allocInfo, stagingBuffer)) {
         SDL_Log("Failed to create staging buffer for PNG export");
         return false;
     }
 
     // Create command buffer for the copy
     VkCommandPool commandPool;
-    VkCommandPoolCreateInfo poolInfo{};
-    poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    poolInfo.queueFamilyIndex = 0; // Assuming graphics queue family 0
-    poolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+    auto poolInfo = vk::CommandPoolCreateInfo{}
+        .setQueueFamilyIndex(0) // Assuming graphics queue family 0
+        .setFlags(vk::CommandPoolCreateFlagBits::eTransient);
 
-    vkCreateCommandPool(device, &poolInfo, nullptr, &commandPool);
+    vkCreateCommandPool(device, reinterpret_cast<const VkCommandPoolCreateInfo*>(&poolInfo), nullptr, &commandPool);
 
     VkCommandBuffer commandBuffer;
-    VkCommandBufferAllocateInfo allocInfo2{};
-    allocInfo2.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo2.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo2.commandPool = commandPool;
-    allocInfo2.commandBufferCount = 1;
+    auto allocInfo2 = vk::CommandBufferAllocateInfo{}
+        .setLevel(vk::CommandBufferLevel::ePrimary)
+        .setCommandPool(commandPool)
+        .setCommandBufferCount(1);
 
-    vkAllocateCommandBuffers(device, &allocInfo2, &commandBuffer);
+    vkAllocateCommandBuffers(device, reinterpret_cast<const VkCommandBufferAllocateInfo*>(&allocInfo2), &commandBuffer);
 
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    auto beginInfo = vk::CommandBufferBeginInfo{}
+        .setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
 
-    vkBeginCommandBuffer(commandBuffer, &beginInfo);
+    vkBeginCommandBuffer(commandBuffer, reinterpret_cast<const VkCommandBufferBeginInfo*>(&beginInfo));
 
     // Transition image to TRANSFER_SRC_OPTIMAL
     Barriers::transitionImage(commandBuffer, image,

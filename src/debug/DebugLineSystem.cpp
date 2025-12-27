@@ -1,6 +1,7 @@
 #include "DebugLineSystem.h"
 #include "ShaderLoader.h"
 #include <SDL3/SDL_log.h>
+#include <vulkan/vulkan.hpp>
 #include <cstring>
 #include <algorithm>
 
@@ -126,15 +127,15 @@ bool DebugLineSystem::createPipeline(VkRenderPass renderPass, const std::string&
     }
 
     // Push constant for view-projection matrix
-    VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-    pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(glm::mat4);
+    auto pushConstantRange = vk::PushConstantRange{}
+        .setStageFlags(vk::ShaderStageFlagBits::eVertex)
+        .setOffset(0)
+        .setSize(sizeof(glm::mat4));
 
     VkPipelineLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     layoutInfo.pushConstantRangeCount = 1;
-    layoutInfo.pPushConstantRanges = &pushConstantRange;
+    layoutInfo.pPushConstantRanges = reinterpret_cast<const VkPushConstantRange*>(&pushConstantRange);
 
     if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "DebugLineSystem: Failed to create pipeline layout");
@@ -144,125 +145,119 @@ bool DebugLineSystem::createPipeline(VkRenderPass renderPass, const std::string&
     }
 
     // Shader stages
-    VkPipelineShaderStageCreateInfo shaderStages[2]{};
-    shaderStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    shaderStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-    shaderStages[0].module = *vertShader;
-    shaderStages[0].pName = "main";
-    shaderStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    shaderStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    shaderStages[1].module = *fragShader;
-    shaderStages[1].pName = "main";
+    std::array<vk::PipelineShaderStageCreateInfo, 2> shaderStages = {{
+        vk::PipelineShaderStageCreateInfo{}
+            .setStage(vk::ShaderStageFlagBits::eVertex)
+            .setModule(*vertShader)
+            .setPName("main"),
+        vk::PipelineShaderStageCreateInfo{}
+            .setStage(vk::ShaderStageFlagBits::eFragment)
+            .setModule(*fragShader)
+            .setPName("main")
+    }};
 
     // Vertex input
-    VkVertexInputBindingDescription bindingDesc{};
-    bindingDesc.binding = 0;
-    bindingDesc.stride = sizeof(DebugLineVertex);
-    bindingDesc.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+    auto bindingDesc = vk::VertexInputBindingDescription{}
+        .setBinding(0)
+        .setStride(sizeof(DebugLineVertex))
+        .setInputRate(vk::VertexInputRate::eVertex);
 
-    VkVertexInputAttributeDescription attrDescs[2]{};
-    attrDescs[0].location = 0;
-    attrDescs[0].binding = 0;
-    attrDescs[0].format = VK_FORMAT_R32G32B32_SFLOAT;
-    attrDescs[0].offset = offsetof(DebugLineVertex, position);
-    attrDescs[1].location = 1;
-    attrDescs[1].binding = 0;
-    attrDescs[1].format = VK_FORMAT_R32G32B32A32_SFLOAT;
-    attrDescs[1].offset = offsetof(DebugLineVertex, color);
+    std::array<vk::VertexInputAttributeDescription, 2> attrDescs = {{
+        vk::VertexInputAttributeDescription{}
+            .setLocation(0)
+            .setBinding(0)
+            .setFormat(vk::Format::eR32G32B32Sfloat)
+            .setOffset(offsetof(DebugLineVertex, position)),
+        vk::VertexInputAttributeDescription{}
+            .setLocation(1)
+            .setBinding(0)
+            .setFormat(vk::Format::eR32G32B32A32Sfloat)
+            .setOffset(offsetof(DebugLineVertex, color))
+    }};
 
-    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
-    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vertexInputInfo.vertexBindingDescriptionCount = 1;
-    vertexInputInfo.pVertexBindingDescriptions = &bindingDesc;
-    vertexInputInfo.vertexAttributeDescriptionCount = 2;
-    vertexInputInfo.pVertexAttributeDescriptions = attrDescs;
+    auto vertexInputInfo = vk::PipelineVertexInputStateCreateInfo{}
+        .setVertexBindingDescriptionCount(1)
+        .setPVertexBindingDescriptions(&bindingDesc)
+        .setVertexAttributeDescriptionCount(static_cast<uint32_t>(attrDescs.size()))
+        .setPVertexAttributeDescriptions(attrDescs.data());
 
     // Input assembly for lines
-    VkPipelineInputAssemblyStateCreateInfo inputAssemblyLine{};
-    inputAssemblyLine.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    inputAssemblyLine.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
-    inputAssemblyLine.primitiveRestartEnable = VK_FALSE;
+    auto inputAssemblyLine = vk::PipelineInputAssemblyStateCreateInfo{}
+        .setTopology(vk::PrimitiveTopology::eLineList)
+        .setPrimitiveRestartEnable(VK_FALSE);
 
     // Input assembly for triangles
-    VkPipelineInputAssemblyStateCreateInfo inputAssemblyTriangle{};
-    inputAssemblyTriangle.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    inputAssemblyTriangle.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    inputAssemblyTriangle.primitiveRestartEnable = VK_FALSE;
+    auto inputAssemblyTriangle = vk::PipelineInputAssemblyStateCreateInfo{}
+        .setTopology(vk::PrimitiveTopology::eTriangleList)
+        .setPrimitiveRestartEnable(VK_FALSE);
 
     // Dynamic viewport and scissor
-    VkPipelineViewportStateCreateInfo viewportState{};
-    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewportState.viewportCount = 1;
-    viewportState.scissorCount = 1;
+    auto viewportState = vk::PipelineViewportStateCreateInfo{}
+        .setViewportCount(1)
+        .setScissorCount(1);
 
-    VkDynamicState dynamicStates[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
-    VkPipelineDynamicStateCreateInfo dynamicState{};
-    dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dynamicState.dynamicStateCount = 2;
-    dynamicState.pDynamicStates = dynamicStates;
+    std::array<vk::DynamicState, 2> dynamicStates = { vk::DynamicState::eViewport, vk::DynamicState::eScissor };
+    auto dynamicState = vk::PipelineDynamicStateCreateInfo{}
+        .setDynamicStateCount(static_cast<uint32_t>(dynamicStates.size()))
+        .setPDynamicStates(dynamicStates.data());
 
     // Rasterization
-    VkPipelineRasterizationStateCreateInfo rasterizer{};
-    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rasterizer.depthClampEnable = VK_FALSE;
-    rasterizer.rasterizerDiscardEnable = VK_FALSE;
-    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-    rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_NONE;
-    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    rasterizer.depthBiasEnable = VK_FALSE;
+    auto rasterizer = vk::PipelineRasterizationStateCreateInfo{}
+        .setDepthClampEnable(VK_FALSE)
+        .setRasterizerDiscardEnable(VK_FALSE)
+        .setPolygonMode(vk::PolygonMode::eFill)
+        .setLineWidth(1.0f)
+        .setCullMode(vk::CullModeFlagBits::eNone)
+        .setFrontFace(vk::FrontFace::eCounterClockwise)
+        .setDepthBiasEnable(VK_FALSE);
 
     // Multisampling
-    VkPipelineMultisampleStateCreateInfo multisampling{};
-    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisampling.sampleShadingEnable = VK_FALSE;
-    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    auto multisampling = vk::PipelineMultisampleStateCreateInfo{}
+        .setSampleShadingEnable(VK_FALSE)
+        .setRasterizationSamples(vk::SampleCountFlagBits::e1);
 
     // Depth stencil - read depth but don't write (overlay on top of scene)
-    VkPipelineDepthStencilStateCreateInfo depthStencil{};
-    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    depthStencil.depthTestEnable = VK_TRUE;
-    depthStencil.depthWriteEnable = VK_FALSE;
-    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
-    depthStencil.depthBoundsTestEnable = VK_FALSE;
-    depthStencil.stencilTestEnable = VK_FALSE;
+    auto depthStencil = vk::PipelineDepthStencilStateCreateInfo{}
+        .setDepthTestEnable(VK_TRUE)
+        .setDepthWriteEnable(VK_FALSE)
+        .setDepthCompareOp(vk::CompareOp::eLessOrEqual)
+        .setDepthBoundsTestEnable(VK_FALSE)
+        .setStencilTestEnable(VK_FALSE);
 
     // Color blending - alpha blending for semi-transparent debug visualization
-    VkPipelineColorBlendAttachmentState colorBlendAttachment{};
-    colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-                                          VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    colorBlendAttachment.blendEnable = VK_TRUE;
-    colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-    colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-    colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
-    colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-    colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
-    colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+    auto colorBlendAttachment = vk::PipelineColorBlendAttachmentState{}
+        .setColorWriteMask(vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
+                           vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA)
+        .setBlendEnable(VK_TRUE)
+        .setSrcColorBlendFactor(vk::BlendFactor::eSrcAlpha)
+        .setDstColorBlendFactor(vk::BlendFactor::eOneMinusSrcAlpha)
+        .setColorBlendOp(vk::BlendOp::eAdd)
+        .setSrcAlphaBlendFactor(vk::BlendFactor::eOne)
+        .setDstAlphaBlendFactor(vk::BlendFactor::eZero)
+        .setAlphaBlendOp(vk::BlendOp::eAdd);
 
-    VkPipelineColorBlendStateCreateInfo colorBlending{};
-    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    colorBlending.logicOpEnable = VK_FALSE;
-    colorBlending.attachmentCount = 1;
-    colorBlending.pAttachments = &colorBlendAttachment;
+    auto colorBlending = vk::PipelineColorBlendStateCreateInfo{}
+        .setLogicOpEnable(VK_FALSE)
+        .setAttachmentCount(1)
+        .setPAttachments(&colorBlendAttachment);
 
     // Create line pipeline
-    VkGraphicsPipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pipelineInfo.stageCount = 2;
-    pipelineInfo.pStages = shaderStages;
-    pipelineInfo.pVertexInputState = &vertexInputInfo;
-    pipelineInfo.pInputAssemblyState = &inputAssemblyLine;
-    pipelineInfo.pViewportState = &viewportState;
-    pipelineInfo.pRasterizationState = &rasterizer;
-    pipelineInfo.pMultisampleState = &multisampling;
-    pipelineInfo.pDepthStencilState = &depthStencil;
-    pipelineInfo.pColorBlendState = &colorBlending;
-    pipelineInfo.pDynamicState = &dynamicState;
-    pipelineInfo.layout = pipelineLayout;
-    pipelineInfo.renderPass = renderPass;
-    pipelineInfo.subpass = 0;
+    auto pipelineInfo = vk::GraphicsPipelineCreateInfo{}
+        .setStageCount(static_cast<uint32_t>(shaderStages.size()))
+        .setPStages(shaderStages.data())
+        .setPVertexInputState(&vertexInputInfo)
+        .setPInputAssemblyState(&inputAssemblyLine)
+        .setPViewportState(&viewportState)
+        .setPRasterizationState(&rasterizer)
+        .setPMultisampleState(&multisampling)
+        .setPDepthStencilState(&depthStencil)
+        .setPColorBlendState(&colorBlending)
+        .setPDynamicState(&dynamicState)
+        .setLayout(pipelineLayout)
+        .setRenderPass(renderPass)
+        .setSubpass(0);
 
-    if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &linePipeline) != VK_SUCCESS) {
+    if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, reinterpret_cast<const VkGraphicsPipelineCreateInfo*>(&pipelineInfo), nullptr, &linePipeline) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "DebugLineSystem: Failed to create line pipeline");
         vkDestroyShaderModule(device, *vertShader, nullptr);
         vkDestroyShaderModule(device, *fragShader, nullptr);
@@ -270,8 +265,8 @@ bool DebugLineSystem::createPipeline(VkRenderPass renderPass, const std::string&
     }
 
     // Create triangle pipeline
-    pipelineInfo.pInputAssemblyState = &inputAssemblyTriangle;
-    if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &trianglePipeline) != VK_SUCCESS) {
+    pipelineInfo.setPInputAssemblyState(&inputAssemblyTriangle);
+    if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, reinterpret_cast<const VkGraphicsPipelineCreateInfo*>(&pipelineInfo), nullptr, &trianglePipeline) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "DebugLineSystem: Failed to create triangle pipeline");
         vkDestroyPipeline(device, linePipeline, nullptr);
         linePipeline = VK_NULL_HANDLE;
@@ -461,17 +456,16 @@ void DebugLineSystem::uploadLines() {
 
             size_t newSize = std::max(requiredSize, INITIAL_BUFFER_SIZE);
 
-            VkBufferCreateInfo bufferInfo{};
-            bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-            bufferInfo.size = newSize;
-            bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-            bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+            auto bufferInfo = vk::BufferCreateInfo{}
+                .setSize(newSize)
+                .setUsage(vk::BufferUsageFlagBits::eVertexBuffer)
+                .setSharingMode(vk::SharingMode::eExclusive);
 
             VmaAllocationCreateInfo allocInfo{};
             allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
             allocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
 
-            if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo,
+            if (vmaCreateBuffer(allocator, reinterpret_cast<const VkBufferCreateInfo*>(&bufferInfo), &allocInfo,
                                &frame.lineVertexBuffer, &frame.lineVertexAllocation, nullptr) != VK_SUCCESS) {
                 SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "DebugLineSystem: Failed to create line vertex buffer");
                 return;
@@ -498,17 +492,16 @@ void DebugLineSystem::uploadLines() {
 
             size_t newSize = std::max(requiredSize, INITIAL_BUFFER_SIZE);
 
-            VkBufferCreateInfo bufferInfo{};
-            bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-            bufferInfo.size = newSize;
-            bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-            bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+            auto bufferInfo = vk::BufferCreateInfo{}
+                .setSize(newSize)
+                .setUsage(vk::BufferUsageFlagBits::eVertexBuffer)
+                .setSharingMode(vk::SharingMode::eExclusive);
 
             VmaAllocationCreateInfo allocInfo{};
             allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
             allocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
 
-            if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo,
+            if (vmaCreateBuffer(allocator, reinterpret_cast<const VkBufferCreateInfo*>(&bufferInfo), &allocInfo,
                                &frame.triangleVertexBuffer, &frame.triangleVertexAllocation, nullptr) != VK_SUCCESS) {
                 SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "DebugLineSystem: Failed to create triangle vertex buffer");
                 return;
