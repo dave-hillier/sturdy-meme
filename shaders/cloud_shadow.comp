@@ -94,9 +94,11 @@ vec2 directionToParaboloidUV(vec3 dir) {
 
 // Sample cloud density from paraboloid LUT
 float sampleCloudMapDensity(vec3 dir) {
-    if (dir.y < 0.0) return 0.0;
+    // Smooth transition near horizon to avoid discontinuity
+    float horizonFade = smoothstep(-0.02, 0.02, dir.y);
+    if (horizonFade < 0.001) return 0.0;
     vec2 uv = directionToParaboloidUV(dir);
-    return texture(cloudMapLUT, uv).r;
+    return texture(cloudMapLUT, uv).r * horizonFade;
 }
 
 // Cloud height gradient (cumulus shape)
@@ -161,8 +163,9 @@ float sampleCloudDensity(vec3 worldPos, vec3 sunDir) {
 
 // Ray march through cloud layer to compute shadow attenuation
 float computeCloudShadow(vec3 worldPos, vec3 sunDir) {
-    // Skip if sun is below horizon
-    if (sunDir.y < 0.01) return 1.0;
+    // Smooth transition when sun is near/below horizon to avoid discontinuity
+    float sunHorizonFade = smoothstep(0.0, 0.03, sunDir.y);
+    if (sunHorizonFade < 0.001) return 1.0;
 
     // Calculate ray march parameters
     // Start from ground position and march toward sun through cloud layer
@@ -211,7 +214,8 @@ float computeCloudShadow(vec3 worldPos, vec3 sunDir) {
     // Lerp between no shadow (1.0) and full shadow (1.0 - intensity)
     float shadow = mix(1.0, 1.0 - shadowIntensity, 1.0 - transmittance);
 
-    return shadow;
+    // Blend shadow toward 1.0 (no shadow) as sun approaches horizon
+    return mix(1.0, shadow, sunHorizonFade);
 }
 
 void main() {

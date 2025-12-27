@@ -93,14 +93,15 @@ vec3 paraboloidUVToDirection(vec2 uv) {
 // Sample cloud density for a sky direction
 // Returns: R = base density, G = detail density, B = coverage mask, A = height gradient
 vec4 sampleCloudForDirection(vec3 dir) {
-    // Only generate clouds for upper hemisphere
-    if (dir.y < 0.0) {
+    // Smooth transition near horizon to avoid discontinuity
+    float horizonFade = smoothstep(-0.02, 0.02, dir.y);
+    if (horizonFade < 0.001) {
         return vec4(0.0);
     }
 
     // Project direction to a virtual cloud plane
     // Use a dome projection: clouds at higher elevations are "closer" to viewer
-    float elevationFactor = dir.y;  // 0 at horizon, 1 at zenith
+    float elevationFactor = max(dir.y, 0.001);  // Avoid division issues at horizon
 
     // 3D position for noise sampling - creates hemisphere-mapped cloud field
     // Scale by inverse elevation to create more clouds near horizon
@@ -131,6 +132,9 @@ vec4 sampleCloudForDirection(vec3 dir) {
     float finalDensity = baseDensity * heightGradient;
     finalDensity -= detailNoise * 0.25 * (1.0 - elevationFactor);
     finalDensity = max(finalDensity, 0.0) * density;
+
+    // Apply horizon fade to density for smooth transition
+    finalDensity *= horizonFade;
 
     // Coverage mask (binary cloud/no-cloud for shadow calculations)
     float coverageMask = step(0.01, finalDensity);
