@@ -128,7 +128,7 @@ bool BloomSystem::createMipChain() {
         auto fbInfo = vk::FramebufferCreateInfo{}
             .setRenderPass(downsampleRenderPass_.get())
             .setAttachmentCount(1)
-            .setPAttachments(&mip.imageView)
+            .setPAttachments(reinterpret_cast<const vk::ImageView*>(&mip.imageView))
             .setWidth(mip.extent.width)
             .setHeight(mip.extent.height)
             .setLayers(1);
@@ -252,7 +252,7 @@ bool BloomSystem::createPipelines() {
     VkDescriptorSetLayout downsampleLayout = downsampleDescSetLayout_.get();
     auto downsampleLayoutInfo = vk::PipelineLayoutCreateInfo{}
         .setSetLayoutCount(1)
-        .setPSetLayouts(&downsampleLayout)
+        .setPSetLayouts(reinterpret_cast<const vk::DescriptorSetLayout*>(&downsampleLayout))
         .setPushConstantRangeCount(1)
         .setPPushConstantRanges(&downsamplePushConstantRange);
 
@@ -268,7 +268,7 @@ bool BloomSystem::createPipelines() {
     VkDescriptorSetLayout upsampleLayout = upsampleDescSetLayout_.get();
     auto upsampleLayoutInfo = vk::PipelineLayoutCreateInfo{}
         .setSetLayoutCount(1)
-        .setPSetLayouts(&upsampleLayout)
+        .setPSetLayouts(reinterpret_cast<const vk::DescriptorSetLayout*>(&upsampleLayout))
         .setPushConstantRangeCount(1)
         .setPPushConstantRanges(&upsamplePushConstantRange);
 
@@ -353,10 +353,11 @@ void BloomSystem::recordBloomPass(VkCommandBuffer cmd, VkImageView hdrInput) {
             .update();
 
         // Begin render pass using vulkan-hpp builder
+        vk::Extent2D mipExtent{mipChain[i].extent.width, mipChain[i].extent.height};
         auto renderPassInfo = vk::RenderPassBeginInfo{}
             .setRenderPass(downsampleRenderPass_.get())
             .setFramebuffer(mipChain[i].framebuffer)
-            .setRenderArea(vk::Rect2D{{0, 0}, mipChain[i].extent});
+            .setRenderArea(vk::Rect2D{{0, 0}, mipExtent});
 
         vkCmdBeginRenderPass(cmd, reinterpret_cast<const VkRenderPassBeginInfo*>(&renderPassInfo), VK_SUBPASS_CONTENTS_INLINE);
 
@@ -372,7 +373,7 @@ void BloomSystem::recordBloomPass(VkCommandBuffer cmd, VkImageView hdrInput) {
 
         auto scissor = vk::Rect2D{}
             .setOffset({0, 0})
-            .setExtent(mipChain[i].extent);
+            .setExtent(mipExtent);
         vkCmdSetScissor(cmd, 0, 1, reinterpret_cast<const VkRect2D*>(&scissor));
 
         // Bind pipeline and descriptor set
@@ -418,10 +419,11 @@ void BloomSystem::recordBloomPass(VkCommandBuffer cmd, VkImageView hdrInput) {
             VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
 
         // Begin render pass with LOAD operation to preserve downsampled content using vulkan-hpp builder
+        vk::Extent2D mipExtent{mipChain[i].extent.width, mipChain[i].extent.height};
         auto renderPassInfo = vk::RenderPassBeginInfo{}
             .setRenderPass(upsampleRenderPass_.get())
             .setFramebuffer(mipChain[i].framebuffer)
-            .setRenderArea(vk::Rect2D{{0, 0}, mipChain[i].extent});
+            .setRenderArea(vk::Rect2D{{0, 0}, mipExtent});
 
         vkCmdBeginRenderPass(cmd, reinterpret_cast<const VkRenderPassBeginInfo*>(&renderPassInfo), VK_SUBPASS_CONTENTS_INLINE);
 
@@ -437,7 +439,7 @@ void BloomSystem::recordBloomPass(VkCommandBuffer cmd, VkImageView hdrInput) {
 
         auto scissor = vk::Rect2D{}
             .setOffset({0, 0})
-            .setExtent(mipChain[i].extent);
+            .setExtent(mipExtent);
         vkCmdSetScissor(cmd, 0, 1, reinterpret_cast<const VkRect2D*>(&scissor));
 
         // Bind pipeline and descriptor set

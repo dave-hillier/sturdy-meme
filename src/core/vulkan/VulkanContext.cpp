@@ -67,8 +67,8 @@ bool VulkanContext::createInstance() {
     vkbInstance = instRet.value();
     instance = vkbInstance.instance;
 
-    // Initialize vulkan-hpp dynamic dispatcher with instance
-    VULKAN_HPP_DEFAULT_DISPATCHER.init(instance);
+    // Initialize vulkan-hpp dynamic dispatcher with instance-level functions
+    VULKAN_HPP_DEFAULT_DISPATCHER.init(vk::Instance(instance), vkGetInstanceProcAddr);
 
     return true;
 }
@@ -113,8 +113,8 @@ bool VulkanContext::createLogicalDevice() {
     vkbDevice = devRet.value();
     device = vkbDevice.device;
 
-    // Initialize vulkan-hpp dynamic dispatcher with device
-    VULKAN_HPP_DEFAULT_DISPATCHER.init(device);
+    // Initialize vulkan-hpp dynamic dispatcher with device-level functions
+    VULKAN_HPP_DEFAULT_DISPATCHER.init(vk::Device(device));
 
     auto graphicsQueueRet = vkbDevice.get_queue(vkb::QueueType::graphics);
     if (!graphicsQueueRet) {
