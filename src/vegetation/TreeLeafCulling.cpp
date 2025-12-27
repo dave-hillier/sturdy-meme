@@ -9,6 +9,7 @@
 #include <vulkan/vulkan.hpp>
 #include <algorithm>
 #include <numeric>
+#include <cmath>
 
 std::unique_ptr<TreeLeafCulling> TreeLeafCulling::create(const InitInfo& info) {
     auto culling = std::make_unique<TreeLeafCulling>(ConstructToken{});
@@ -707,6 +708,9 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
                     // Use leafInstanceIndex (== tree instance index) for LOD lookup
                     // This correctly maps to treeInstances_ even if some trees have no leaves
                     lodBlendFactor = lodSystem->getBlendFactor(static_cast<uint32_t>(renderable.leafInstanceIndex));
+                    // Quantize to 20 discrete levels to prevent flickering from floating point noise
+                    // This ensures lodBlendFactor only changes when crossing 0.05 thresholds
+                    lodBlendFactor = std::round(lodBlendFactor * 20.0f) / 20.0f;
                 }
 
                 uint32_t leafTypeIdx = LEAF_TYPE_OAK;

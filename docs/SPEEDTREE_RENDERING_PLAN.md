@@ -350,18 +350,81 @@ struct TreeLODSettings {
 
 ---
 
+### Problem 3: Screen-Space Error Not Adaptive
+
+**Current state**: Fixed thresholds regardless of scene complexity. A single tree uses the same aggressive LOD as a forest of 10,000 trees.
+
+**Issue**: With one tree visible:
+- Viewer attention is focused on it
+- Performance isn't constrained
+- Quality reduction is very noticeable
+
+**Solution: Performance Budget-Based LOD**
+
+Use a leaf count budget from the previous frame to adapt quality:
+```cpp
+// In TreeLODSystem or a new AdaptiveLOD component
+struct AdaptiveLODState {
+    uint32_t leafBudget = 500000;          // Target max leaves
+    uint32_t lastFrameLeafCount = 0;       // From indirect draw readback
+    float adaptiveScale = 1.0f;            // Current scale factor
+    float scaleSmoothing = 0.1f;           // Smooth transitions
+};
+
+void updateAdaptiveScale(AdaptiveLODState& state, uint32_t renderedLeaves) {
+    state.lastFrameLeafCount = renderedLeaves;
+    float budgetRatio = float(renderedLeaves) / float(state.leafBudget);
+
+    // Target scale based on budget utilization
+    float targetScale = 1.0f;
+    if (budgetRatio < 0.3f) {
+        // Way under budget - render at maximum quality
+        targetScale = 3.0f;  // 3x quality for single tree scenarios
+    } else if (budgetRatio < 0.6f) {
+        // Under budget - render higher quality
+        targetScale = 1.5f;
+    } else if (budgetRatio > 0.95f) {
+        // Over budget - reduce quality
+        targetScale = 0.7f;
+    }
+
+    // Smooth transition to avoid popping
+    state.adaptiveScale = glm::mix(state.adaptiveScale, targetScale, state.scaleSmoothing);
+}
+
+// Apply to LOD thresholds:
+float effectiveErrorThreshold = settings.errorThresholdFull * state.adaptiveScale;
+// Higher threshold = larger screen error allowed = more full-detail trees
+```
+
+**Benefits of budget approach:**
+- Automatically adapts to different tree types (pine needles vs oak leaves)
+- Handles mixed scenes (some trees close, some far)
+- Self-adjusting to hardware capabilities
+- Single tree gets ~3x quality boost automatically
+
+**Files to modify:**
+- `src/vegetation/TreeLODSystem.h` - Add `AdaptiveLODState`
+- `src/vegetation/TreeLODSystem.cpp` - Implement budget tracking and scaling
+- `src/vegetation/TreeLeafCulling.cpp` - Readback leaf count from indirect buffer
+
+---
+
 ### Implementation Order
 
-1. **Fix leaf flickering first** (most noticeable issue)
-   - Modify `lodCull` to use hash-based distance offsets
-   - Test with single tree scenario
+1. **Fix leaf flickering first** (most noticeable issue) ✓
+   - Quantize lodBlendFactor to prevent floating point noise
 
-2. **Add simple distance mode** (easier to tune)
+2. **Add performance budget LOD** (context-aware quality)
+   - Track rendered leaf count from previous frame
+   - Scale LOD thresholds based on budget utilization
+   - Improves single-tree and sparse scene quality
+
+3. **Add simple distance mode** (easier to tune)
    - Add settings to `TreeLODSettings`
    - Implement in CPU and GPU LOD paths
-   - Default to simple mode for easier tuning
 
-3. **Document screen-space error** (for advanced users)
+4. **Document screen-space error** (for advanced users)
    - Add clear comments explaining the formula
    - Include distance examples at common resolutions
 
