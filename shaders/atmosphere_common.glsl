@@ -104,8 +104,10 @@ float DistanceToPlanetSurface(float r, float mu, float planetRadius) {
 }
 
 // Check if ray from point at distance r with zenith angle mu intersects planet
+// Use small negative threshold (-0.02) to match sky.frag horizon blending range
+// This ensures LUT rays near horizon get proper scattering instead of black
 bool RayIntersectsPlanet(float r, float mu, float planetRadius) {
-    return mu < 0.0 && r * r * (mu * mu - 1.0) + planetRadius * planetRadius >= 0.0;
+    return mu < -0.02 && r * r * (mu * mu - 1.0) + planetRadius * planetRadius >= 0.0;
 }
 
 // UV to transmittance LUT parameters
