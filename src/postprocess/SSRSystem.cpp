@@ -4,6 +4,7 @@
 #include "VulkanBarriers.h"
 #include "VulkanRAII.h"
 #include <SDL3/SDL.h>
+#include <vulkan/vulkan.hpp>
 #include <array>
 #include <cstring>
 
@@ -144,82 +145,82 @@ bool SSRSystem::createSSRBuffers() {
     if (ssrExtent.width < 1) ssrExtent.width = 1;
     if (ssrExtent.height < 1) ssrExtent.height = 1;
 
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.format = VK_FORMAT_R16G16B16A16_SFLOAT;
-    imageInfo.extent = {ssrExtent.width, ssrExtent.height, 1};
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    auto imageInfo = vk::ImageCreateInfo{}
+        .setImageType(vk::ImageType::e2D)
+        .setFormat(vk::Format::eR16G16B16A16Sfloat)
+        .setExtent(vk::Extent3D{ssrExtent.width, ssrExtent.height, 1})
+        .setMipLevels(1)
+        .setArrayLayers(1)
+        .setSamples(vk::SampleCountFlagBits::e1)
+        .setTiling(vk::ImageTiling::eOptimal)
+        .setUsage(vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled)
+        .setInitialLayout(vk::ImageLayout::eUndefined);
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
     for (int i = 0; i < 2; i++) {
-        if (vmaCreateImage(allocator, &imageInfo, &allocInfo,
+        if (vmaCreateImage(allocator, reinterpret_cast<const VkImageCreateInfo*>(&imageInfo), &allocInfo,
                            &ssrResult[i], &ssrAllocation[i], nullptr) != VK_SUCCESS) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SSR result image %d", i);
             return false;
         }
 
-        VkImageViewCreateInfo viewInfo{};
-        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        viewInfo.image = ssrResult[i];
-        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        viewInfo.format = VK_FORMAT_R16G16B16A16_SFLOAT;
-        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        viewInfo.subresourceRange.baseMipLevel = 0;
-        viewInfo.subresourceRange.levelCount = 1;
-        viewInfo.subresourceRange.baseArrayLayer = 0;
-        viewInfo.subresourceRange.layerCount = 1;
+        auto viewInfo = vk::ImageViewCreateInfo{}
+            .setImage(ssrResult[i])
+            .setViewType(vk::ImageViewType::e2D)
+            .setFormat(vk::Format::eR16G16B16A16Sfloat)
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1));
 
-        if (vkCreateImageView(device, &viewInfo, nullptr, &ssrResultView[i]) != VK_SUCCESS) {
+        if (vkCreateImageView(device, reinterpret_cast<const VkImageViewCreateInfo*>(&viewInfo),
+                              nullptr, &ssrResultView[i]) != VK_SUCCESS) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SSR result image view %d", i);
             return false;
         }
     }
 
     // Create intermediate buffer for blur pass
-    if (vmaCreateImage(allocator, &imageInfo, &allocInfo,
+    if (vmaCreateImage(allocator, reinterpret_cast<const VkImageCreateInfo*>(&imageInfo), &allocInfo,
                        &ssrIntermediate, &ssrIntermediateAllocation, nullptr) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SSR intermediate image");
         return false;
     }
 
     {
-        VkImageViewCreateInfo viewInfo{};
-        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        viewInfo.image = ssrIntermediate;
-        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        viewInfo.format = VK_FORMAT_R16G16B16A16_SFLOAT;
-        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        viewInfo.subresourceRange.baseMipLevel = 0;
-        viewInfo.subresourceRange.levelCount = 1;
-        viewInfo.subresourceRange.baseArrayLayer = 0;
-        viewInfo.subresourceRange.layerCount = 1;
+        auto viewInfo = vk::ImageViewCreateInfo{}
+            .setImage(ssrIntermediate)
+            .setViewType(vk::ImageViewType::e2D)
+            .setFormat(vk::Format::eR16G16B16A16Sfloat)
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1));
 
-        if (vkCreateImageView(device, &viewInfo, nullptr, &ssrIntermediateView) != VK_SUCCESS) {
+        if (vkCreateImageView(device, reinterpret_cast<const VkImageViewCreateInfo*>(&viewInfo),
+                              nullptr, &ssrIntermediateView) != VK_SUCCESS) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SSR intermediate image view");
             return false;
         }
     }
 
     // Create sampler
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.maxLod = 1.0f;
+    auto samplerInfo = vk::SamplerCreateInfo{}
+        .setMagFilter(vk::Filter::eLinear)
+        .setMinFilter(vk::Filter::eLinear)
+        .setMipmapMode(vk::SamplerMipmapMode::eLinear)
+        .setAddressModeU(vk::SamplerAddressMode::eClampToEdge)
+        .setAddressModeV(vk::SamplerAddressMode::eClampToEdge)
+        .setAddressModeW(vk::SamplerAddressMode::eClampToEdge)
+        .setMaxLod(1.0f);
 
-    if (!ManagedSampler::create(device, samplerInfo, sampler)) {
+    if (!ManagedSampler::create(device, *reinterpret_cast<const VkSamplerCreateInfo*>(&samplerInfo), sampler)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SSR sampler");
         return false;
     }
@@ -261,13 +262,14 @@ bool SSRSystem::createComputePipeline() {
     }
 
     // Push constant range for SSR parameters
-    VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(SSRPushConstants);
+    auto pushConstantRange = vk::PushConstantRange{}
+        .setStageFlags(vk::ShaderStageFlagBits::eCompute)
+        .setOffset(0)
+        .setSize(sizeof(SSRPushConstants));
 
     if (!DescriptorManager::createManagedPipelineLayout(
-            device, descriptorSetLayout.get(), computePipelineLayout, {pushConstantRange})) {
+            device, descriptorSetLayout.get(), computePipelineLayout,
+            {*reinterpret_cast<const VkPushConstantRange*>(&pushConstantRange)})) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SSR pipeline layout");
         return false;
     }
@@ -280,18 +282,17 @@ bool SSRSystem::createComputePipeline() {
         return false;
     }
 
-    VkPipelineShaderStageCreateInfo stageInfo{};
-    stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stageInfo.module = *shaderModule;
-    stageInfo.pName = "main";
+    auto stageInfo = vk::PipelineShaderStageCreateInfo{}
+        .setStage(vk::ShaderStageFlagBits::eCompute)
+        .setModule(*shaderModule)
+        .setPName("main");
 
-    VkComputePipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    pipelineInfo.stage = stageInfo;
-    pipelineInfo.layout = computePipelineLayout.get();
+    auto pipelineInfo = vk::ComputePipelineCreateInfo{}
+        .setStage(stageInfo)
+        .setLayout(computePipelineLayout.get());
 
-    bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, computePipeline);
+    bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE,
+        *reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), computePipeline);
     vkDestroyShaderModule(device, *shaderModule, nullptr);
 
     if (!success) {
@@ -320,13 +321,14 @@ bool SSRSystem::createBlurPipeline() {
     }
 
     // Push constant range for blur parameters
-    VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(BlurPushConstants);
+    auto pushConstantRange = vk::PushConstantRange{}
+        .setStageFlags(vk::ShaderStageFlagBits::eCompute)
+        .setOffset(0)
+        .setSize(sizeof(BlurPushConstants));
 
     if (!DescriptorManager::createManagedPipelineLayout(
-            device, blurDescriptorSetLayout.get(), blurPipelineLayout, {pushConstantRange})) {
+            device, blurDescriptorSetLayout.get(), blurPipelineLayout,
+            {*reinterpret_cast<const VkPushConstantRange*>(&pushConstantRange)})) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SSR blur pipeline layout");
         return false;
     }
@@ -339,18 +341,17 @@ bool SSRSystem::createBlurPipeline() {
         return false;
     }
 
-    VkPipelineShaderStageCreateInfo stageInfo{};
-    stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stageInfo.module = *shaderModule;
-    stageInfo.pName = "main";
+    auto stageInfo = vk::PipelineShaderStageCreateInfo{}
+        .setStage(vk::ShaderStageFlagBits::eCompute)
+        .setModule(*shaderModule)
+        .setPName("main");
 
-    VkComputePipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    pipelineInfo.stage = stageInfo;
-    pipelineInfo.layout = blurPipelineLayout.get();
+    auto pipelineInfo = vk::ComputePipelineCreateInfo{}
+        .setStage(stageInfo)
+        .setLayout(blurPipelineLayout.get());
 
-    bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, blurPipeline);
+    bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE,
+        *reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), blurPipeline);
     vkDestroyShaderModule(device, *shaderModule, nullptr);
 
     if (!success) {

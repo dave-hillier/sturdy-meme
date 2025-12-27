@@ -1,6 +1,7 @@
 #include "BilateralGridSystem.h"
 #include "ShaderLoader.h"
 #include <SDL3/SDL.h>
+#include <vulkan/vulkan.hpp>
 #include <array>
 #include <cstring>
 
@@ -93,43 +94,43 @@ void BilateralGridSystem::cleanup() {
 }
 
 bool BilateralGridSystem::createGridTextures() {
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_3D;
-    imageInfo.format = GRID_FORMAT;
-    imageInfo.extent = {GRID_WIDTH, GRID_HEIGHT, GRID_DEPTH};
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
-                      VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    auto imageInfo = vk::ImageCreateInfo{}
+        .setImageType(vk::ImageType::e3D)
+        .setFormat(static_cast<vk::Format>(GRID_FORMAT))
+        .setExtent(vk::Extent3D{GRID_WIDTH, GRID_HEIGHT, GRID_DEPTH})
+        .setMipLevels(1)
+        .setArrayLayers(1)
+        .setSamples(vk::SampleCountFlagBits::e1)
+        .setTiling(vk::ImageTiling::eOptimal)
+        .setUsage(vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled |
+                  vk::ImageUsageFlagBits::eTransferDst)
+        .setSharingMode(vk::SharingMode::eExclusive)
+        .setInitialLayout(vk::ImageLayout::eUndefined);
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
     for (int i = 0; i < 2; i++) {
-        if (vmaCreateImage(allocator, &imageInfo, &allocInfo,
+        if (vmaCreateImage(allocator, reinterpret_cast<const VkImageCreateInfo*>(&imageInfo), &allocInfo,
                           &gridImages[i], &gridAllocations[i], nullptr) != VK_SUCCESS) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                         "BilateralGridSystem: Failed to create grid image %d", i);
             return false;
         }
 
-        VkImageViewCreateInfo viewInfo{};
-        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        viewInfo.image = gridImages[i];
-        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_3D;
-        viewInfo.format = GRID_FORMAT;
-        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        viewInfo.subresourceRange.baseMipLevel = 0;
-        viewInfo.subresourceRange.levelCount = 1;
-        viewInfo.subresourceRange.baseArrayLayer = 0;
-        viewInfo.subresourceRange.layerCount = 1;
+        auto viewInfo = vk::ImageViewCreateInfo{}
+            .setImage(gridImages[i])
+            .setViewType(vk::ImageViewType::e3D)
+            .setFormat(static_cast<vk::Format>(GRID_FORMAT))
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1));
 
-        if (vkCreateImageView(device, &viewInfo, nullptr, &gridViews[i]) != VK_SUCCESS) {
+        if (vkCreateImageView(device, reinterpret_cast<const VkImageViewCreateInfo*>(&viewInfo),
+                              nullptr, &gridViews[i]) != VK_SUCCESS) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                         "BilateralGridSystem: Failed to create grid view %d", i);
             return false;
@@ -154,23 +155,23 @@ void BilateralGridSystem::destroyGridResources() {
 }
 
 bool BilateralGridSystem::createSampler() {
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.mipLodBias = 0.0f;
-    samplerInfo.anisotropyEnable = VK_FALSE;
-    samplerInfo.compareEnable = VK_FALSE;
-    samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = 0.0f;
-    samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
+    auto samplerInfo = vk::SamplerCreateInfo{}
+        .setMagFilter(vk::Filter::eLinear)
+        .setMinFilter(vk::Filter::eLinear)
+        .setMipmapMode(vk::SamplerMipmapMode::eNearest)
+        .setAddressModeU(vk::SamplerAddressMode::eClampToEdge)
+        .setAddressModeV(vk::SamplerAddressMode::eClampToEdge)
+        .setAddressModeW(vk::SamplerAddressMode::eClampToEdge)
+        .setMipLodBias(0.0f)
+        .setAnisotropyEnable(VK_FALSE)
+        .setCompareEnable(VK_FALSE)
+        .setMinLod(0.0f)
+        .setMaxLod(0.0f)
+        .setBorderColor(vk::BorderColor::eFloatOpaqueBlack);
 
     VkSampler sampler;
-    if (vkCreateSampler(device, &samplerInfo, nullptr, &sampler) != VK_SUCCESS) {
+    if (vkCreateSampler(device, reinterpret_cast<const VkSamplerCreateInfo*>(&samplerInfo),
+                        nullptr, &sampler) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                     "BilateralGridSystem: Failed to create sampler");
         return false;
@@ -182,33 +183,35 @@ bool BilateralGridSystem::createSampler() {
 bool BilateralGridSystem::createDescriptorSetLayout() {
     // Build layout: HDR input (sampler) + grid output (storage image) + uniforms
     {
-        std::array<VkDescriptorSetLayoutBinding, 3> bindings{};
+        std::array<vk::DescriptorSetLayoutBinding, 3> bindings{};
 
         // HDR input texture
-        bindings[0].binding = 0;
-        bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        bindings[0].descriptorCount = 1;
-        bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        bindings[0] = vk::DescriptorSetLayoutBinding{}
+            .setBinding(0)
+            .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+            .setDescriptorCount(1)
+            .setStageFlags(vk::ShaderStageFlagBits::eCompute);
 
         // Grid output (storage image)
-        bindings[1].binding = 1;
-        bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        bindings[1].descriptorCount = 1;
-        bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        bindings[1] = vk::DescriptorSetLayoutBinding{}
+            .setBinding(1)
+            .setDescriptorType(vk::DescriptorType::eStorageImage)
+            .setDescriptorCount(1)
+            .setStageFlags(vk::ShaderStageFlagBits::eCompute);
 
         // Uniforms
-        bindings[2].binding = 2;
-        bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        bindings[2].descriptorCount = 1;
-        bindings[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        bindings[2] = vk::DescriptorSetLayoutBinding{}
+            .setBinding(2)
+            .setDescriptorType(vk::DescriptorType::eUniformBuffer)
+            .setDescriptorCount(1)
+            .setStageFlags(vk::ShaderStageFlagBits::eCompute);
 
-        VkDescriptorSetLayoutCreateInfo layoutInfo{};
-        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
-        layoutInfo.pBindings = bindings.data();
+        auto layoutInfo = vk::DescriptorSetLayoutCreateInfo{}
+            .setBindings(bindings);
 
         VkDescriptorSetLayout layout;
-        if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &layout) != VK_SUCCESS) {
+        if (vkCreateDescriptorSetLayout(device, reinterpret_cast<const VkDescriptorSetLayoutCreateInfo*>(&layoutInfo),
+                                        nullptr, &layout) != VK_SUCCESS) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                         "BilateralGridSystem: Failed to create build descriptor set layout");
             return false;
@@ -218,33 +221,35 @@ bool BilateralGridSystem::createDescriptorSetLayout() {
 
     // Blur layout: grid src (storage image) + grid dst (storage image) + uniforms
     {
-        std::array<VkDescriptorSetLayoutBinding, 3> bindings{};
+        std::array<vk::DescriptorSetLayoutBinding, 3> bindings{};
 
         // Grid source
-        bindings[0].binding = 0;
-        bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        bindings[0].descriptorCount = 1;
-        bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        bindings[0] = vk::DescriptorSetLayoutBinding{}
+            .setBinding(0)
+            .setDescriptorType(vk::DescriptorType::eStorageImage)
+            .setDescriptorCount(1)
+            .setStageFlags(vk::ShaderStageFlagBits::eCompute);
 
         // Grid destination
-        bindings[1].binding = 1;
-        bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        bindings[1].descriptorCount = 1;
-        bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        bindings[1] = vk::DescriptorSetLayoutBinding{}
+            .setBinding(1)
+            .setDescriptorType(vk::DescriptorType::eStorageImage)
+            .setDescriptorCount(1)
+            .setStageFlags(vk::ShaderStageFlagBits::eCompute);
 
         // Uniforms
-        bindings[2].binding = 2;
-        bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        bindings[2].descriptorCount = 1;
-        bindings[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        bindings[2] = vk::DescriptorSetLayoutBinding{}
+            .setBinding(2)
+            .setDescriptorType(vk::DescriptorType::eUniformBuffer)
+            .setDescriptorCount(1)
+            .setStageFlags(vk::ShaderStageFlagBits::eCompute);
 
-        VkDescriptorSetLayoutCreateInfo layoutInfo{};
-        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
-        layoutInfo.pBindings = bindings.data();
+        auto layoutInfo = vk::DescriptorSetLayoutCreateInfo{}
+            .setBindings(bindings);
 
         VkDescriptorSetLayout layout;
-        if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &layout) != VK_SUCCESS) {
+        if (vkCreateDescriptorSetLayout(device, reinterpret_cast<const VkDescriptorSetLayoutCreateInfo*>(&layoutInfo),
+                                        nullptr, &layout) != VK_SUCCESS) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                         "BilateralGridSystem: Failed to create blur descriptor set layout");
             return false;
@@ -287,7 +292,7 @@ bool BilateralGridSystem::createUniformBuffers() {
 }
 
 bool BilateralGridSystem::createBuildPipeline() {
-    // Pipeline layout
+    // Pipeline layout - keep as C-style due to setSetLayouts type issues with raw VkDescriptorSetLayout
     VkPipelineLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     VkDescriptorSetLayout layouts[] = {buildDescriptorSetLayout.get()};
@@ -312,19 +317,18 @@ bool BilateralGridSystem::createBuildPipeline() {
     }
     VkShaderModule shaderModule = *shaderModuleOpt;
 
-    VkPipelineShaderStageCreateInfo stageInfo{};
-    stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stageInfo.module = shaderModule;
-    stageInfo.pName = "main";
+    auto stageInfo = vk::PipelineShaderStageCreateInfo{}
+        .setStage(vk::ShaderStageFlagBits::eCompute)
+        .setModule(shaderModule)
+        .setPName("main");
 
-    VkComputePipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    pipelineInfo.stage = stageInfo;
-    pipelineInfo.layout = buildPipelineLayout.get();
+    auto pipelineInfo = vk::ComputePipelineCreateInfo{}
+        .setStage(stageInfo)
+        .setLayout(buildPipelineLayout.get());
 
     VkPipeline pipeline;
-    VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo,
+    VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1,
+                                               reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo),
                                                nullptr, &pipeline);
     vkDestroyShaderModule(device, shaderModule, nullptr);
 
@@ -338,7 +342,7 @@ bool BilateralGridSystem::createBuildPipeline() {
 }
 
 bool BilateralGridSystem::createBlurPipeline() {
-    // Pipeline layout
+    // Pipeline layout - keep as C-style due to setSetLayouts type issues with raw VkDescriptorSetLayout
     VkPipelineLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     VkDescriptorSetLayout layouts[] = {blurDescriptorSetLayout.get()};
@@ -363,19 +367,18 @@ bool BilateralGridSystem::createBlurPipeline() {
     }
     VkShaderModule shaderModule = *shaderModuleOpt;
 
-    VkPipelineShaderStageCreateInfo stageInfo{};
-    stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stageInfo.module = shaderModule;
-    stageInfo.pName = "main";
+    auto stageInfo = vk::PipelineShaderStageCreateInfo{}
+        .setStage(vk::ShaderStageFlagBits::eCompute)
+        .setModule(shaderModule)
+        .setPName("main");
 
-    VkComputePipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    pipelineInfo.stage = stageInfo;
-    pipelineInfo.layout = blurPipelineLayout.get();
+    auto pipelineInfo = vk::ComputePipelineCreateInfo{}
+        .setStage(stageInfo)
+        .setLayout(blurPipelineLayout.get());
 
     VkPipeline pipeline;
-    VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo,
+    VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1,
+                                               reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo),
                                                nullptr, &pipeline);
     vkDestroyShaderModule(device, shaderModule, nullptr);
 
@@ -422,58 +425,62 @@ bool BilateralGridSystem::createDescriptorSets() {
         // X blur: grid[0] -> grid[1]
         // Y blur: grid[1] -> grid[0]
         // Z blur: grid[0] -> grid[1] (final output in grid[1], but we'll copy back)
-        VkDescriptorImageInfo srcInfo{}, dstInfo{};
-        srcInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-        dstInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        auto srcInfo = vk::DescriptorImageInfo{}
+            .setImageLayout(vk::ImageLayout::eGeneral);
+        auto dstInfo = vk::DescriptorImageInfo{}
+            .setImageLayout(vk::ImageLayout::eGeneral);
 
         // X: 0 -> 1
-        srcInfo.imageView = gridViews[0];
-        dstInfo.imageView = gridViews[1];
+        srcInfo.setImageView(gridViews[0]);
+        dstInfo.setImageView(gridViews[1]);
 
-        VkDescriptorBufferInfo bufferInfo{};
-        bufferInfo.buffer = blurUniformBuffers.buffers[i];
-        bufferInfo.offset = 0;
-        bufferInfo.range = sizeof(BilateralBlurUniforms);
+        auto bufferInfo = vk::DescriptorBufferInfo{}
+            .setBuffer(blurUniformBuffers.buffers[i])
+            .setOffset(0)
+            .setRange(sizeof(BilateralBlurUniforms));
 
-        std::array<VkWriteDescriptorSet, 3> writes{};
-        writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[0].dstSet = blurDescriptorSetsX[i];
-        writes[0].dstBinding = 0;
-        writes[0].descriptorCount = 1;
-        writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        writes[0].pImageInfo = &srcInfo;
+        std::array<vk::WriteDescriptorSet, 3> writes{};
+        writes[0] = vk::WriteDescriptorSet{}
+            .setDstSet(blurDescriptorSetsX[i])
+            .setDstBinding(0)
+            .setDescriptorCount(1)
+            .setDescriptorType(vk::DescriptorType::eStorageImage)
+            .setPImageInfo(&srcInfo);
 
-        writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[1].dstSet = blurDescriptorSetsX[i];
-        writes[1].dstBinding = 1;
-        writes[1].descriptorCount = 1;
-        writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        writes[1].pImageInfo = &dstInfo;
+        writes[1] = vk::WriteDescriptorSet{}
+            .setDstSet(blurDescriptorSetsX[i])
+            .setDstBinding(1)
+            .setDescriptorCount(1)
+            .setDescriptorType(vk::DescriptorType::eStorageImage)
+            .setPImageInfo(&dstInfo);
 
-        writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[2].dstSet = blurDescriptorSetsX[i];
-        writes[2].dstBinding = 2;
-        writes[2].descriptorCount = 1;
-        writes[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        writes[2].pBufferInfo = &bufferInfo;
+        writes[2] = vk::WriteDescriptorSet{}
+            .setDstSet(blurDescriptorSetsX[i])
+            .setDstBinding(2)
+            .setDescriptorCount(1)
+            .setDescriptorType(vk::DescriptorType::eUniformBuffer)
+            .setPBufferInfo(&bufferInfo);
 
-        vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+        vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()),
+                               reinterpret_cast<const VkWriteDescriptorSet*>(writes.data()), 0, nullptr);
 
         // Y: 1 -> 0
-        srcInfo.imageView = gridViews[1];
-        dstInfo.imageView = gridViews[0];
-        writes[0].dstSet = blurDescriptorSetsY[i];
-        writes[1].dstSet = blurDescriptorSetsY[i];
-        writes[2].dstSet = blurDescriptorSetsY[i];
-        vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+        srcInfo.setImageView(gridViews[1]);
+        dstInfo.setImageView(gridViews[0]);
+        writes[0].setDstSet(blurDescriptorSetsY[i]);
+        writes[1].setDstSet(blurDescriptorSetsY[i]);
+        writes[2].setDstSet(blurDescriptorSetsY[i]);
+        vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()),
+                               reinterpret_cast<const VkWriteDescriptorSet*>(writes.data()), 0, nullptr);
 
         // Z: 0 -> 1 (or skip Z blur for simplicity like GOT sometimes did)
-        srcInfo.imageView = gridViews[0];
-        dstInfo.imageView = gridViews[1];
-        writes[0].dstSet = blurDescriptorSetsZ[i];
-        writes[1].dstSet = blurDescriptorSetsZ[i];
-        writes[2].dstSet = blurDescriptorSetsZ[i];
-        vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+        srcInfo.setImageView(gridViews[0]);
+        dstInfo.setImageView(gridViews[1]);
+        writes[0].setDstSet(blurDescriptorSetsZ[i]);
+        writes[1].setDstSet(blurDescriptorSetsZ[i]);
+        writes[2].setDstSet(blurDescriptorSetsZ[i]);
+        vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()),
+                               reinterpret_cast<const VkWriteDescriptorSet*>(writes.data()), 0, nullptr);
     }
 
     return true;
@@ -486,82 +493,89 @@ void BilateralGridSystem::resize(VkExtent2D newExtent) {
 
 void BilateralGridSystem::recordClearGrid(VkCommandBuffer cmd) {
     // Transition grid[0] to TRANSFER_DST for clearing
-    VkImageMemoryBarrier barrier{};
-    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    barrier.srcAccessMask = 0;
-    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    barrier.image = gridImages[0];
-    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    barrier.subresourceRange.baseMipLevel = 0;
-    barrier.subresourceRange.levelCount = 1;
-    barrier.subresourceRange.baseArrayLayer = 0;
-    barrier.subresourceRange.layerCount = 1;
+    auto subresourceRange = vk::ImageSubresourceRange{}
+        .setAspectMask(vk::ImageAspectFlagBits::eColor)
+        .setBaseMipLevel(0)
+        .setLevelCount(1)
+        .setBaseArrayLayer(0)
+        .setLayerCount(1);
+
+    auto barrier = vk::ImageMemoryBarrier{}
+        .setOldLayout(vk::ImageLayout::eUndefined)
+        .setNewLayout(vk::ImageLayout::eTransferDstOptimal)
+        .setSrcAccessMask(vk::AccessFlags{})
+        .setDstAccessMask(vk::AccessFlagBits::eTransferWrite)
+        .setImage(gridImages[0])
+        .setSubresourceRange(subresourceRange);
 
     vkCmdPipelineBarrier(cmd,
                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                         VK_PIPELINE_STAGE_TRANSFER_BIT,
-                        0, 0, nullptr, 0, nullptr, 1, &barrier);
+                        0, 0, nullptr, 0, nullptr, 1,
+                        reinterpret_cast<const VkImageMemoryBarrier*>(&barrier));
 
     // Clear to zero
     VkClearColorValue clearColor = {{0.0f, 0.0f, 0.0f, 0.0f}};
-    VkImageSubresourceRange range{};
-    range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    range.baseMipLevel = 0;
-    range.levelCount = 1;
-    range.baseArrayLayer = 0;
-    range.layerCount = 1;
+    auto range = vk::ImageSubresourceRange{}
+        .setAspectMask(vk::ImageAspectFlagBits::eColor)
+        .setBaseMipLevel(0)
+        .setLevelCount(1)
+        .setBaseArrayLayer(0)
+        .setLayerCount(1);
 
     vkCmdClearColorImage(cmd, gridImages[0], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                        &clearColor, 1, &range);
+                        &clearColor, 1, reinterpret_cast<const VkImageSubresourceRange*>(&range));
 
     // Transition both grids to GENERAL for compute in a single batched barrier
     // grid[0]: TRANSFER_DST → GENERAL (after clear)
     // grid[1]: UNDEFINED → GENERAL (no prior dependency)
-    std::array<VkImageMemoryBarrier, 2> barriers{};
+    std::array<vk::ImageMemoryBarrier, 2> barriers{};
 
     // grid[0]: needs to wait for transfer (clear) to complete
-    barriers[0] = barrier;  // Copy common fields
-    barriers[0].image = gridImages[0];
-    barriers[0].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    barriers[0].newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    barriers[0].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    barriers[0].dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    barriers[0] = vk::ImageMemoryBarrier{}
+        .setOldLayout(vk::ImageLayout::eTransferDstOptimal)
+        .setNewLayout(vk::ImageLayout::eGeneral)
+        .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite)
+        .setImage(gridImages[0])
+        .setSubresourceRange(subresourceRange);
 
     // grid[1]: no prior access, just needs layout transition
-    barriers[1] = barrier;  // Copy common fields
-    barriers[1].image = gridImages[1];
-    barriers[1].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    barriers[1].newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    barriers[1].srcAccessMask = 0;
-    barriers[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    barriers[1] = vk::ImageMemoryBarrier{}
+        .setOldLayout(vk::ImageLayout::eUndefined)
+        .setNewLayout(vk::ImageLayout::eGeneral)
+        .setSrcAccessMask(vk::AccessFlags{})
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite)
+        .setImage(gridImages[1])
+        .setSubresourceRange(subresourceRange);
 
     // Single barrier call for both transitions (TRANSFER covers TOP_OF_PIPE)
     vkCmdPipelineBarrier(cmd,
                         VK_PIPELINE_STAGE_TRANSFER_BIT,
                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                         0, 0, nullptr, 0, nullptr,
-                        static_cast<uint32_t>(barriers.size()), barriers.data());
+                        static_cast<uint32_t>(barriers.size()),
+                        reinterpret_cast<const VkImageMemoryBarrier*>(barriers.data()));
 }
 
 void BilateralGridSystem::recordGridBarrier(VkCommandBuffer cmd, VkImage image,
                                             VkAccessFlags srcAccess, VkAccessFlags dstAccess,
                                             VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage) {
-    VkImageMemoryBarrier barrier{};
-    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-    barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    barrier.srcAccessMask = srcAccess;
-    barrier.dstAccessMask = dstAccess;
-    barrier.image = image;
-    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    barrier.subresourceRange.baseMipLevel = 0;
-    barrier.subresourceRange.levelCount = 1;
-    barrier.subresourceRange.baseArrayLayer = 0;
-    barrier.subresourceRange.layerCount = 1;
+    auto barrier = vk::ImageMemoryBarrier{}
+        .setOldLayout(vk::ImageLayout::eGeneral)
+        .setNewLayout(vk::ImageLayout::eGeneral)
+        .setSrcAccessMask(static_cast<vk::AccessFlags>(srcAccess))
+        .setDstAccessMask(static_cast<vk::AccessFlags>(dstAccess))
+        .setImage(image)
+        .setSubresourceRange(vk::ImageSubresourceRange{}
+            .setAspectMask(vk::ImageAspectFlagBits::eColor)
+            .setBaseMipLevel(0)
+            .setLevelCount(1)
+            .setBaseArrayLayer(0)
+            .setLayerCount(1));
 
-    vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+    vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1,
+                        reinterpret_cast<const VkImageMemoryBarrier*>(&barrier));
 }
 
 void BilateralGridSystem::recordBilateralGrid(VkCommandBuffer cmd, uint32_t frameIndex,
@@ -588,43 +602,44 @@ void BilateralGridSystem::recordBilateralGrid(VkCommandBuffer cmd, uint32_t fram
     vmaUnmapMemory(allocator, buildUniformBuffers.allocations[frameIndex]);
 
     // Update build descriptor set with HDR input
-    VkDescriptorImageInfo hdrInfo{};
-    hdrInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    hdrInfo.imageView = hdrInputView;
-    hdrInfo.sampler = gridSampler.get();  // Reuse sampler
+    auto hdrInfo = vk::DescriptorImageInfo{}
+        .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+        .setImageView(hdrInputView)
+        .setSampler(gridSampler.get());
 
-    VkDescriptorImageInfo gridInfo{};
-    gridInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-    gridInfo.imageView = gridViews[0];
+    auto gridInfo = vk::DescriptorImageInfo{}
+        .setImageLayout(vk::ImageLayout::eGeneral)
+        .setImageView(gridViews[0]);
 
-    VkDescriptorBufferInfo bufferInfo{};
-    bufferInfo.buffer = buildUniformBuffers.buffers[frameIndex];
-    bufferInfo.offset = 0;
-    bufferInfo.range = sizeof(BilateralBuildUniforms);
+    auto bufferInfo = vk::DescriptorBufferInfo{}
+        .setBuffer(buildUniformBuffers.buffers[frameIndex])
+        .setOffset(0)
+        .setRange(sizeof(BilateralBuildUniforms));
 
-    std::array<VkWriteDescriptorSet, 3> writes{};
-    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[0].dstSet = buildDescriptorSets[frameIndex];
-    writes[0].dstBinding = 0;
-    writes[0].descriptorCount = 1;
-    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    writes[0].pImageInfo = &hdrInfo;
+    std::array<vk::WriteDescriptorSet, 3> writes{};
+    writes[0] = vk::WriteDescriptorSet{}
+        .setDstSet(buildDescriptorSets[frameIndex])
+        .setDstBinding(0)
+        .setDescriptorCount(1)
+        .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+        .setPImageInfo(&hdrInfo);
 
-    writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[1].dstSet = buildDescriptorSets[frameIndex];
-    writes[1].dstBinding = 1;
-    writes[1].descriptorCount = 1;
-    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    writes[1].pImageInfo = &gridInfo;
+    writes[1] = vk::WriteDescriptorSet{}
+        .setDstSet(buildDescriptorSets[frameIndex])
+        .setDstBinding(1)
+        .setDescriptorCount(1)
+        .setDescriptorType(vk::DescriptorType::eStorageImage)
+        .setPImageInfo(&gridInfo);
 
-    writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[2].dstSet = buildDescriptorSets[frameIndex];
-    writes[2].dstBinding = 2;
-    writes[2].descriptorCount = 1;
-    writes[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    writes[2].pBufferInfo = &bufferInfo;
+    writes[2] = vk::WriteDescriptorSet{}
+        .setDstSet(buildDescriptorSets[frameIndex])
+        .setDstBinding(2)
+        .setDescriptorCount(1)
+        .setDescriptorType(vk::DescriptorType::eUniformBuffer)
+        .setPBufferInfo(&bufferInfo);
 
-    vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+    vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()),
+                           reinterpret_cast<const VkWriteDescriptorSet*>(writes.data()), 0, nullptr);
 
     // Build pass
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, buildPipeline.get());
@@ -684,21 +699,22 @@ void BilateralGridSystem::recordBilateralGrid(VkCommandBuffer cmd, uint32_t fram
                      VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
 
     // Transition grid[0] to SHADER_READ_ONLY for fragment shader sampling
-    VkImageMemoryBarrier finalBarrier{};
-    finalBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    finalBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-    finalBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    finalBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    finalBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-    finalBarrier.image = gridImages[0];
-    finalBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    finalBarrier.subresourceRange.baseMipLevel = 0;
-    finalBarrier.subresourceRange.levelCount = 1;
-    finalBarrier.subresourceRange.baseArrayLayer = 0;
-    finalBarrier.subresourceRange.layerCount = 1;
+    auto finalBarrier = vk::ImageMemoryBarrier{}
+        .setOldLayout(vk::ImageLayout::eGeneral)
+        .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+        .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+        .setImage(gridImages[0])
+        .setSubresourceRange(vk::ImageSubresourceRange{}
+            .setAspectMask(vk::ImageAspectFlagBits::eColor)
+            .setBaseMipLevel(0)
+            .setLevelCount(1)
+            .setBaseArrayLayer(0)
+            .setLayerCount(1));
 
     vkCmdPipelineBarrier(cmd,
                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                        0, 0, nullptr, 0, nullptr, 1, &finalBarrier);
+                        0, 0, nullptr, 0, nullptr, 1,
+                        reinterpret_cast<const VkImageMemoryBarrier*>(&finalBarrier));
 }
