@@ -43,6 +43,7 @@
     "lodepng",
     "nlohmann-json",
     "miniz",
-    "libarchive"
+    "libarchive",
+    "entt"
   ]
 }
