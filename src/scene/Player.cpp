@@ -1,107 +1,90 @@
 #include "Player.h"
+#include <cmath>
 
-Player::Player() {
-    // Create the player entity in the ECS world
-    playerEntity_ = world_.createPlayer(glm::vec3{0.0f}, 0.0f);
+Player::Player()
+    : position(0.0f, 0.0f, 0.0f)
+    , yaw(0.0f)
+    , verticalVelocity(0.0f)
+    , onGround(true)
+{
 }
 
 void Player::moveForward(float delta) {
-    accumulatedForward_ += delta;
+    position += getForward() * delta;
 }
 
 void Player::moveRight(float delta) {
-    accumulatedRight_ += delta;
+    position += getRight() * delta;
 }
 
 void Player::rotate(float yawDelta) {
-    if (world_.valid(playerEntity_)) {
-        auto& registry = world_.registry();
-        if (registry.all_of<ecs::Transform>(playerEntity_)) {
-            auto& transform = registry.get<ecs::Transform>(playerEntity_);
-            transform.yaw += yawDelta;
-            transform.normalizeYaw();
-        }
-    }
+    yaw += yawDelta;
+    // Keep yaw in reasonable range
+    while (yaw > 360.0f) yaw -= 360.0f;
+    while (yaw < 0.0f) yaw += 360.0f;
 }
 
 void Player::update(float deltaTime) {
-    // Apply accumulated movement through the controller
-    if (world_.valid(playerEntity_)) {
-        auto& registry = world_.registry();
-        if (registry.all_of<ecs::Transform, ecs::PlayerController>(playerEntity_)) {
-            auto& transform = registry.get<ecs::Transform>(playerEntity_);
-            auto& controller = registry.get<ecs::PlayerController>(playerEntity_);
+    // Apply gravity
+    verticalVelocity -= GRAVITY * deltaTime;
 
-            // Apply movement as position delta (kinematic movement)
-            glm::vec3 movement{0.0f};
-            movement += transform.getForward() * accumulatedForward_;
-            movement += transform.getRight() * accumulatedRight_;
-            transform.position += movement;
+    // Update vertical position
+    position.y += verticalVelocity * deltaTime;
 
-            // Clear accumulated movement
-            accumulatedForward_ = 0.0f;
-            accumulatedRight_ = 0.0f;
-        }
+    // Ground collision
+    if (position.y <= GROUND_LEVEL) {
+        position.y = GROUND_LEVEL;
+        verticalVelocity = 0.0f;
+        onGround = true;
+    } else {
+        onGround = false;
     }
-
-    // Run ECS systems (gravity, ground collision, etc.)
-    world_.update(deltaTime);
 }
 
 void Player::jump() {
-    world_.requestPlayerJump(playerEntity_);
-}
-
-glm::vec3 Player::getPosition() const {
-    return world_.getPlayerPosition(playerEntity_);
-}
-
-float Player::getYaw() const {
-    return world_.getPlayerYaw(playerEntity_);
-}
-
-bool Player::isOnGround() const {
-    return world_.isPlayerOnGround(playerEntity_);
+    if (onGround) {
+        verticalVelocity = JUMP_VELOCITY;
+        onGround = false;
+    }
 }
 
 glm::vec3 Player::getFocusPoint() const {
-    return world_.getPlayerFocusPoint(playerEntity_);
+    // Camera focus at roughly eye level (top of capsule minus a bit)
+    return position + glm::vec3(0.0f, CAPSULE_HEIGHT * 0.85f, 0.0f);
 }
 
 glm::mat4 Player::getModelMatrix() const {
-    return world_.getPlayerModelMatrix(playerEntity_);
+    glm::mat4 model = glm::mat4(1.0f);
+    // Translate to position (capsule center is at ground level, so offset up by half height)
+    model = glm::translate(model, position + glm::vec3(0.0f, CAPSULE_HEIGHT * 0.5f, 0.0f));
+    // Rotate around Y axis based on yaw (use locked yaw if orientation locked)
+    float effectiveYaw = orientationLocked ? lockedYaw : yaw;
+    model = glm::rotate(model, glm::radians(effectiveYaw), glm::vec3(0.0f, 1.0f, 0.0f));
+    return model;
 }
 
-void Player::setPosition(const glm::vec3& pos) {
-    world_.setPlayerPosition(playerEntity_, pos);
+glm::vec3 Player::getForward() const {
+    float radYaw = glm::radians(yaw);
+    return glm::vec3(sin(radYaw), 0.0f, cos(radYaw));
 }
 
-bool Player::isOrientationLocked() const {
-    return world_.isPlayerOrientationLocked(playerEntity_);
+glm::vec3 Player::getRight() const {
+    float radYaw = glm::radians(yaw + 90.0f);
+    return glm::vec3(sin(radYaw), 0.0f, cos(radYaw));
 }
 
 void Player::setOrientationLock(bool locked) {
-    if (world_.valid(playerEntity_)) {
-        ecs::setOrientationLock(world_.registry(), playerEntity_, locked);
+    orientationLocked = locked;
+    if (locked) {
+        lockedYaw = yaw;
     }
 }
 
 void Player::toggleOrientationLock() {
-    world_.togglePlayerOrientationLock(playerEntity_);
+    setOrientationLock(!orientationLocked);
 }
 
 void Player::lockToCurrentOrientation() {
-    if (world_.valid(playerEntity_)) {
-        auto& registry = world_.registry();
-        if (registry.all_of<ecs::Transform, ecs::PlayerController>(playerEntity_)) {
-            auto& transform = registry.get<ecs::Transform>(playerEntity_);
-            auto& controller = registry.get<ecs::PlayerController>(playerEntity_);
-            controller.lockedYaw = transform.yaw;
-            controller.orientationLocked = true;
-        }
-    }
-}
-
-float Player::getLockedYaw() const {
-    return world_.getPlayerLockedYaw(playerEntity_);
+    lockedYaw = yaw;
+    orientationLocked = true;
 }

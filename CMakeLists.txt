@@ -18,7 +18,6 @@ find_package(fastgltf CONFIG REQUIRED)
 find_package(unofficial-openfbx CONFIG REQUIRED)
 find_package(lodepng CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
-find_package(EnTT CONFIG REQUIRED)
 
 find_path(STB_INCLUDE_DIRS "stb_image.h")
 
@@ -227,7 +226,6 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     unoffical::openfbx::openfbx
     lodepng
     nlohmann_json::nlohmann_json
-    EnTT::EnTT
 )
 
 # Enable Jolt Physics debug renderer for visualization
