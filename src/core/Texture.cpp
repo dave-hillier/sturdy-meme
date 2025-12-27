@@ -656,44 +656,45 @@ bool Texture::loadWithMipmaps(const std::string& path, VmaAllocator allocator, V
     }
 
     // Create image view with all mip levels
-    VkImageViewCreateInfo viewInfo{};
-    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.image = managedImage.get();
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format = imageFormat;
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = mipLevels;
-    viewInfo.subresourceRange.baseArrayLayer = 0;
-    viewInfo.subresourceRange.layerCount = 1;
+    ImageViewCreateInfo viewInfo{
+        {},                                              // flags
+        managedImage.get(),
+        ImageViewType::e2D,
+        static_cast<Format>(imageFormat),
+        ComponentMapping{},                              // identity swizzle
+        ImageSubresourceRange{ImageAspectFlagBits::eColor, 0, mipLevels, 0, 1}
+    };
 
     ManagedImageView managedView;
-    if (!ManagedImageView::create(device, viewInfo, managedView)) {
+    auto vkViewInfo = static_cast<VkImageViewCreateInfo>(viewInfo);
+    if (!ManagedImageView::create(device, vkViewInfo, managedView)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create image view for texture: %s", path.c_str());
         return false;
     }
 
     // Create sampler with mipmapping and optional anisotropy
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.anisotropyEnable = enableAnisotropy ? VK_TRUE : VK_FALSE;
-    samplerInfo.maxAnisotropy = enableAnisotropy ? 8.0f : 1.0f;
-    samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
-    samplerInfo.unnormalizedCoordinates = VK_FALSE;
-    samplerInfo.compareEnable = VK_FALSE;
-    samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    samplerInfo.mipLodBias = 0.0f;
-    samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = static_cast<float>(mipLevels);
+    SamplerCreateInfo samplerInfo{
+        {},                                              // flags
+        Filter::eLinear,                                 // magFilter
+        Filter::eLinear,                                 // minFilter
+        SamplerMipmapMode::eLinear,
+        SamplerAddressMode::eClampToEdge,                // addressModeU
+        SamplerAddressMode::eClampToEdge,                // addressModeV
+        SamplerAddressMode::eClampToEdge,                // addressModeW
+        0.0f,                                            // mipLodBias
+        enableAnisotropy ? VK_TRUE : VK_FALSE,           // anisotropyEnable
+        enableAnisotropy ? 8.0f : 1.0f,                  // maxAnisotropy
+        VK_FALSE,                                        // compareEnable
+        CompareOp::eAlways,                              // compareOp
+        0.0f,                                            // minLod
+        static_cast<float>(mipLevels),                   // maxLod
+        BorderColor::eIntOpaqueBlack,
+        VK_FALSE                                         // unnormalizedCoordinates
+    };
 
     ManagedSampler managedSampler;
-    if (!ManagedSampler::create(device, samplerInfo, managedSampler)) {
+    auto vkSamplerInfo = static_cast<VkSamplerCreateInfo>(samplerInfo);
+    if (!ManagedSampler::create(device, vkSamplerInfo, managedSampler)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create sampler for texture: %s", path.c_str());
         return false;
     }
