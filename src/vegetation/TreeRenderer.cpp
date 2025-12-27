@@ -895,5 +895,4 @@ void TreeRenderer::invalidateDescriptorCache() {
     initializedBarkDescriptors_.clear();
     initializedLeafDescriptors_.clear();
     initializedCulledLeafDescriptors_.clear();
-    allDescriptorsInitialized_ = false;
 }

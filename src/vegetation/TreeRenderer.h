@@ -74,12 +74,6 @@ public:
     TreeRenderer(TreeRenderer&&) = delete;
     TreeRenderer& operator=(TreeRenderer&&) = delete;
 
-    // Check if descriptor updates are still needed (fast-path for after initialization)
-    bool needsDescriptorUpdates() const { return !allDescriptorsInitialized_; }
-
-    // Mark all descriptors as initialized (call after all types have been updated for all frames)
-    void markAllDescriptorsInitialized() { allDescriptorsInitialized_ = true; }
-
     // Update descriptor sets for a specific texture type
     void updateBarkDescriptorSet(
         uint32_t frameIndex,
@@ -225,9 +219,6 @@ private:
     std::unordered_set<std::string> initializedBarkDescriptors_;
     std::unordered_set<std::string> initializedLeafDescriptors_;
     std::unordered_set<std::string> initializedCulledLeafDescriptors_;
-
-    // Fast-path flag: once all descriptors are initialized for all frames, skip updates entirely
-    bool allDescriptorsInitialized_ = false;
 
     // Leaf Culling subsystem (handles all compute culling)
     std::unique_ptr<TreeLeafCulling> leafCulling_;
