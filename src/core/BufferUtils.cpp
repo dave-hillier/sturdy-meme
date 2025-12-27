@@ -1,4 +1,5 @@
 #include "BufferUtils.h"
+#include <vulkan/vulkan.hpp>
 
 namespace BufferUtils {
 namespace {
@@ -56,11 +57,10 @@ bool PerFrameBufferBuilder::build(PerFrameBufferSet& outBuffers) const {
     result.allocations.resize(frameCount, VK_NULL_HANDLE);
     result.mappedPointers.resize(frameCount, nullptr);
 
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = bufferSize;
-    bufferInfo.usage = usage;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    auto bufferInfo = vk::BufferCreateInfo{}
+        .setSize(bufferSize)
+        .setUsage(static_cast<vk::BufferUsageFlags>(usage))
+        .setSharingMode(vk::SharingMode::eExclusive);
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = memoryUsage;
@@ -68,7 +68,7 @@ bool PerFrameBufferBuilder::build(PerFrameBufferSet& outBuffers) const {
 
     for (uint32_t i = 0; i < frameCount; i++) {
         VmaAllocationInfo allocationInfo{};
-        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &result.buffers[i], &result.allocations[i],
+        if (vmaCreateBuffer(allocator, reinterpret_cast<const VkBufferCreateInfo*>(&bufferInfo), &allocInfo, &result.buffers[i], &result.allocations[i],
                             &allocationInfo) != VK_SUCCESS) {
             SDL_Log("Failed to create per-frame buffer %u", i);
             destroyCreatedBuffers(allocator, result.buffers, result.allocations, i);
@@ -117,17 +117,16 @@ bool DoubleBufferedBufferBuilder::build(DoubleBufferedBufferSet& outBuffers) con
     result.buffers.resize(setCount, VK_NULL_HANDLE);
     result.allocations.resize(setCount, VK_NULL_HANDLE);
 
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = bufferSize;
-    bufferInfo.usage = usage;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    auto bufferInfo = vk::BufferCreateInfo{}
+        .setSize(bufferSize)
+        .setUsage(static_cast<vk::BufferUsageFlags>(usage))
+        .setSharingMode(vk::SharingMode::eExclusive);
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = memoryUsage;
 
     for (uint32_t i = 0; i < setCount; i++) {
-        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &result.buffers[i], &result.allocations[i], nullptr) !=
+        if (vmaCreateBuffer(allocator, reinterpret_cast<const VkBufferCreateInfo*>(&bufferInfo), &allocInfo, &result.buffers[i], &result.allocations[i], nullptr) !=
             VK_SUCCESS) {
             SDL_Log("Failed to create double-buffered buffer %u", i);
             destroyCreatedBuffers(allocator, result.buffers, result.allocations, i);
@@ -190,11 +189,10 @@ bool SingleBufferBuilder::build(SingleBuffer& outBuffer) const {
         return false;
     }
 
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = bufferSize;
-    bufferInfo.usage = usage;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    auto bufferInfo = vk::BufferCreateInfo{}
+        .setSize(bufferSize)
+        .setUsage(static_cast<vk::BufferUsageFlags>(usage))
+        .setSharingMode(vk::SharingMode::eExclusive);
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = memoryUsage;
@@ -203,7 +201,7 @@ bool SingleBufferBuilder::build(SingleBuffer& outBuffer) const {
     SingleBuffer result{};
     VmaAllocationInfo allocationInfo{};
 
-    if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &result.buffer, &result.allocation,
+    if (vmaCreateBuffer(allocator, reinterpret_cast<const VkBufferCreateInfo*>(&bufferInfo), &allocInfo, &result.buffer, &result.allocation,
                         &allocationInfo) != VK_SUCCESS) {
         SDL_Log("Failed to create single buffer");
         return false;
@@ -266,11 +264,10 @@ bool DynamicUniformBufferBuilder::build(DynamicUniformBuffer& outBuffer) const {
     VkDeviceSize alignedSize = (elementSize + minAlignment - 1) & ~(minAlignment - 1);
     VkDeviceSize totalSize = alignedSize * frameCount;
 
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = totalSize;
-    bufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    auto bufferInfo = vk::BufferCreateInfo{}
+        .setSize(totalSize)
+        .setUsage(vk::BufferUsageFlagBits::eUniformBuffer)
+        .setSharingMode(vk::SharingMode::eExclusive);
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
@@ -279,7 +276,7 @@ bool DynamicUniformBufferBuilder::build(DynamicUniformBuffer& outBuffer) const {
     DynamicUniformBuffer result{};
     VmaAllocationInfo allocationInfo{};
 
-    if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &result.buffer, &result.allocation,
+    if (vmaCreateBuffer(allocator, reinterpret_cast<const VkBufferCreateInfo*>(&bufferInfo), &allocInfo, &result.buffer, &result.allocation,
                         &allocationInfo) != VK_SUCCESS) {
         SDL_Log("Failed to create dynamic uniform buffer");
         return false;
@@ -341,18 +338,17 @@ bool DoubleBufferedImageBuilder::build(DoubleBufferedImageSet& outImages) const 
         return false;
     }
 
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = (depth > 1) ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
-    imageInfo.format = format;
-    imageInfo.extent = {width, height, depth};
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.usage = usage;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    auto imageInfo = vk::ImageCreateInfo{}
+        .setImageType((depth > 1) ? vk::ImageType::e3D : vk::ImageType::e2D)
+        .setFormat(static_cast<vk::Format>(format))
+        .setExtent(vk::Extent3D{width, height, depth})
+        .setMipLevels(1)
+        .setArrayLayers(1)
+        .setSamples(vk::SampleCountFlagBits::e1)
+        .setTiling(vk::ImageTiling::eOptimal)
+        .setUsage(static_cast<vk::ImageUsageFlags>(usage))
+        .setSharingMode(vk::SharingMode::eExclusive)
+        .setInitialLayout(vk::ImageLayout::eUndefined);
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
@@ -361,7 +357,7 @@ bool DoubleBufferedImageBuilder::build(DoubleBufferedImageSet& outImages) const 
 
     // Create both images
     for (int i = 0; i < 2; i++) {
-        if (vmaCreateImage(allocator, &imageInfo, &allocInfo, &result.images[i],
+        if (vmaCreateImage(allocator, reinterpret_cast<const VkImageCreateInfo*>(&imageInfo), &allocInfo, &result.images[i],
                            &result.allocations[i], nullptr) != VK_SUCCESS) {
             SDL_Log("Failed to create double-buffered image %d", i);
             // Clean up any already created
@@ -372,20 +368,20 @@ bool DoubleBufferedImageBuilder::build(DoubleBufferedImageSet& outImages) const 
         }
     }
 
-    // Create image views
-    VkImageViewCreateInfo viewInfo{};
-    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.viewType = (depth > 1) ? VK_IMAGE_VIEW_TYPE_3D : VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format = format;
-    viewInfo.subresourceRange.aspectMask = aspectMask;
-    viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = 1;
-    viewInfo.subresourceRange.baseArrayLayer = 0;
-    viewInfo.subresourceRange.layerCount = 1;
-
+    // Create image views using vulkan-hpp builder
     for (int i = 0; i < 2; i++) {
-        viewInfo.image = result.images[i];
-        if (vkCreateImageView(device, &viewInfo, nullptr, &result.views[i]) != VK_SUCCESS) {
+        auto viewInfo = vk::ImageViewCreateInfo{}
+            .setImage(result.images[i])
+            .setViewType((depth > 1) ? vk::ImageViewType::e3D : vk::ImageViewType::e2D)
+            .setFormat(static_cast<vk::Format>(format))
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(static_cast<vk::ImageAspectFlags>(aspectMask))
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1));
+
+        if (vkCreateImageView(device, reinterpret_cast<const VkImageViewCreateInfo*>(&viewInfo), nullptr, &result.views[i]) != VK_SUCCESS) {
             SDL_Log("Failed to create double-buffered image view %d", i);
             // Clean up views and images
             for (int j = 0; j < i; j++) {
