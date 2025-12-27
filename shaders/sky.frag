@@ -577,13 +577,8 @@ ScatteringResult integrateAtmosphere(vec3 origin, vec3 dir, int sampleCount) {
     float start = max(atmo.x, 0.0);
     float end = atmo.y;
 
-    if (end <= 0.0) {
+    if (end <= start) {
         return ScatteringResult(vec3(0.0), vec3(1.0));
-    }
-
-    vec2 planet = raySphereIntersect(origin, dir, PLANET_RADIUS);
-    if (planet.x > 0.0) {
-        end = min(end, planet.x);
     }
 
     // Extract atmosphere parameters from UBO (use defaults if UBO values are zero/disabled)

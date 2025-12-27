@@ -80,13 +80,6 @@ void main() {
     // Find intersection with atmosphere
     float rayLength = DistanceToAtmosphereBoundary(r, viewDir.y, uAtmosphere.params.atmosphereRadius);
 
-    // Check if ray hits planet
-    if (RayIntersectsPlanet(r, viewDir.y, uAtmosphere.params.planetRadius)) {
-        // Ray hits planet - return black (will be replaced by terrain/ocean)
-        imageStore(skyViewLUT, texel, vec4(0.0, 0.0, 0.0, 1.0));
-        return;
-    }
-
     // Ray march through atmosphere (simplified integration matching sky.frag)
     float stepSize = rayLength / float(SKY_VIEW_STEPS);
     vec3 inscatter = vec3(0.0);
