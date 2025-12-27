@@ -183,6 +183,9 @@
 #define BINDING_TREE_GFX_SHADOW_MAP        2   // Shadow map
 #define BINDING_TREE_GFX_WIND_UBO          3   // Wind uniforms
 #define BINDING_TREE_GFX_BARK_ALBEDO       4   // Bark albedo texture
+
+// Tree Shadow Descriptor Set (separate from graphics)
+#define BINDING_TREE_SHADOW_WIND_UBO       1   // Wind uniforms for tree shadow pass
 #define BINDING_TREE_GFX_BARK_NORMAL       5   // Bark normal map
 #define BINDING_TREE_GFX_BARK_ROUGHNESS    6   // Bark roughness map
 #define BINDING_TREE_GFX_BARK_AO           7   // Bark AO map
@@ -587,6 +590,7 @@ constexpr uint32_t TREE_GFX_UBO           = BINDING_TREE_GFX_UBO;
 constexpr uint32_t TREE_GFX_VERTICES      = BINDING_TREE_GFX_VERTICES;
 constexpr uint32_t TREE_GFX_SHADOW_MAP    = BINDING_TREE_GFX_SHADOW_MAP;
 constexpr uint32_t TREE_GFX_WIND_UBO      = BINDING_TREE_GFX_WIND_UBO;
+constexpr uint32_t TREE_SHADOW_WIND_UBO   = BINDING_TREE_SHADOW_WIND_UBO;
 constexpr uint32_t TREE_GFX_BARK_ALBEDO   = BINDING_TREE_GFX_BARK_ALBEDO;
 constexpr uint32_t TREE_GFX_BARK_NORMAL   = BINDING_TREE_GFX_BARK_NORMAL;
 constexpr uint32_t TREE_GFX_BARK_ROUGHNESS = BINDING_TREE_GFX_BARK_ROUGHNESS;
