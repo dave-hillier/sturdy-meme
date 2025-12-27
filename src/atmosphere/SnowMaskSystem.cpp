@@ -5,6 +5,7 @@
 #include "VulkanResourceFactory.h"
 #include "DescriptorManager.h"
 #include <SDL3/SDL.h>
+#include <vulkan/vulkan.hpp>
 #include <cstring>
 #include <array>
 
@@ -83,43 +84,40 @@ bool SnowMaskSystem::createBuffers() {
 
 bool SnowMaskSystem::createSnowMaskTexture() {
     // Create snow mask texture (R16F, single channel for coverage 0-1)
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.extent.width = SNOW_MASK_SIZE;
-    imageInfo.extent.height = SNOW_MASK_SIZE;
-    imageInfo.extent.depth = 1;
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
-    imageInfo.format = VK_FORMAT_R16_SFLOAT;  // R16F for coverage value
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    imageInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    auto imageInfo = vk::ImageCreateInfo{}
+        .setImageType(vk::ImageType::e2D)
+        .setExtent(vk::Extent3D{SNOW_MASK_SIZE, SNOW_MASK_SIZE, 1})
+        .setMipLevels(1)
+        .setArrayLayers(1)
+        .setFormat(vk::Format::eR16Sfloat)  // R16F for coverage value
+        .setTiling(vk::ImageTiling::eOptimal)
+        .setInitialLayout(vk::ImageLayout::eUndefined)
+        .setUsage(vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled)
+        .setSharingMode(vk::SharingMode::eExclusive)
+        .setSamples(vk::SampleCountFlagBits::e1);
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
 
-    if (vmaCreateImage(getAllocator(), &imageInfo, &allocInfo,
+    if (vmaCreateImage(getAllocator(), reinterpret_cast<const VkImageCreateInfo*>(&imageInfo), &allocInfo,
                        &snowMaskImage, &snowMaskAllocation, nullptr) != VK_SUCCESS) {
         SDL_Log("Failed to create snow mask image");
         return false;
     }
 
     // Create image view
-    VkImageViewCreateInfo viewInfo{};
-    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.image = snowMaskImage;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format = VK_FORMAT_R16_SFLOAT;
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = 1;
-    viewInfo.subresourceRange.baseArrayLayer = 0;
-    viewInfo.subresourceRange.layerCount = 1;
+    auto viewInfo = vk::ImageViewCreateInfo{}
+        .setImage(snowMaskImage)
+        .setViewType(vk::ImageViewType::e2D)
+        .setFormat(vk::Format::eR16Sfloat)
+        .setSubresourceRange(vk::ImageSubresourceRange{}
+            .setAspectMask(vk::ImageAspectFlagBits::eColor)
+            .setBaseMipLevel(0)
+            .setLevelCount(1)
+            .setBaseArrayLayer(0)
+            .setLayerCount(1));
 
-    if (vkCreateImageView(getDevice(), &viewInfo, nullptr, &snowMaskView) != VK_SUCCESS) {
+    if (vkCreateImageView(getDevice(), reinterpret_cast<const VkImageViewCreateInfo*>(&viewInfo), nullptr, &snowMaskView) != VK_SUCCESS) {
         SDL_Log("Failed to create snow mask image view");
         return false;
     }
