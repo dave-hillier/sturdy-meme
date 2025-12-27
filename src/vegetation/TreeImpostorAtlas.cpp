@@ -11,6 +11,8 @@
 #include <array>
 #include <imgui_impl_vulkan.h>
 
+using namespace vk;
+
 std::unique_ptr<TreeImpostorAtlas> TreeImpostorAtlas::create(const InitInfo& info) {
     auto atlas = std::unique_ptr<TreeImpostorAtlas>(new TreeImpostorAtlas());
     if (!atlas->initInternal(info)) {
@@ -121,72 +123,79 @@ bool TreeImpostorAtlas::initInternal(const InitInfo& info) {
 
 bool TreeImpostorAtlas::createRenderPass() {
     // Two color attachments: albedo+alpha and normal+depth+AO
-    std::array<VkAttachmentDescription, 3> attachments{};
+    std::array<AttachmentDescription, 3> attachments{{
+        {
+            {},                                      // flags
+            Format::eR8G8B8A8Unorm,
+            SampleCountFlagBits::e1,
+            AttachmentLoadOp::eClear,
+            AttachmentStoreOp::eStore,
+            AttachmentLoadOp::eDontCare,             // stencilLoadOp
+            AttachmentStoreOp::eDontCare,            // stencilStoreOp
+            ImageLayout::eColorAttachmentOptimal,    // initialLayout
+            ImageLayout::eShaderReadOnlyOptimal      // finalLayout
+        },
+        {
+            {},                                      // flags
+            Format::eR8G8B8A8Unorm,
+            SampleCountFlagBits::e1,
+            AttachmentLoadOp::eClear,
+            AttachmentStoreOp::eStore,
+            AttachmentLoadOp::eDontCare,             // stencilLoadOp
+            AttachmentStoreOp::eDontCare,            // stencilStoreOp
+            ImageLayout::eColorAttachmentOptimal,    // initialLayout
+            ImageLayout::eShaderReadOnlyOptimal      // finalLayout
+        },
+        {
+            {},                                      // flags
+            Format::eD32Sfloat,
+            SampleCountFlagBits::e1,
+            AttachmentLoadOp::eClear,
+            AttachmentStoreOp::eDontCare,
+            AttachmentLoadOp::eDontCare,             // stencilLoadOp
+            AttachmentStoreOp::eDontCare,            // stencilStoreOp
+            ImageLayout::eUndefined,                 // initialLayout
+            ImageLayout::eDepthStencilAttachmentOptimal // finalLayout
+        }
+    }};
 
-    // Albedo + Alpha attachment (RGBA8)
-    // Note: We pre-transition array layers to COLOR_ATTACHMENT_OPTIMAL before the render pass
-    attachments[0].format = VK_FORMAT_R8G8B8A8_UNORM;
-    attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
-    attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    attachments[0].initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    attachments[0].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    std::array<AttachmentReference, 2> colorRefs{{
+        {0, ImageLayout::eColorAttachmentOptimal},
+        {1, ImageLayout::eColorAttachmentOptimal}
+    }};
 
-    // Normal + Depth + AO attachment (RGBA8)
-    attachments[1].format = VK_FORMAT_R8G8B8A8_UNORM;
-    attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
-    attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    attachments[1].initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    attachments[1].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    AttachmentReference depthRef{2, ImageLayout::eDepthStencilAttachmentOptimal};
 
-    // Depth attachment
-    attachments[2].format = VK_FORMAT_D32_SFLOAT;
-    attachments[2].samples = VK_SAMPLE_COUNT_1_BIT;
-    attachments[2].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    attachments[2].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    attachments[2].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    attachments[2].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    attachments[2].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    attachments[2].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    SubpassDescription subpass{
+        {},                                          // flags
+        PipelineBindPoint::eGraphics,
+        0, nullptr,                                  // inputAttachments
+        static_cast<uint32_t>(colorRefs.size()), colorRefs.data(),
+        nullptr,                                     // resolveAttachments
+        &depthRef,
+        0, nullptr                                   // preserveAttachments
+    };
 
-    std::array<VkAttachmentReference, 2> colorRefs{};
-    colorRefs[0] = {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
-    colorRefs[1] = {1, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+    SubpassDependency dependency{
+        VK_SUBPASS_EXTERNAL,                         // srcSubpass
+        0,                                           // dstSubpass
+        PipelineStageFlagBits::eColorAttachmentOutput | PipelineStageFlagBits::eEarlyFragmentTests,
+        PipelineStageFlagBits::eColorAttachmentOutput | PipelineStageFlagBits::eEarlyFragmentTests,
+        {},                                          // srcAccessMask
+        AccessFlagBits::eColorAttachmentWrite | AccessFlagBits::eDepthStencilAttachmentWrite,
+        {}                                           // dependencyFlags
+    };
 
-    VkAttachmentReference depthRef{};
-    depthRef.attachment = 2;
-    depthRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    RenderPassCreateInfo renderPassInfo{
+        {},                                          // flags
+        attachments,
+        subpass,
+        dependency
+    };
 
-    VkSubpassDescription subpass{};
-    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    subpass.colorAttachmentCount = static_cast<uint32_t>(colorRefs.size());
-    subpass.pColorAttachments = colorRefs.data();
-    subpass.pDepthStencilAttachment = &depthRef;
-
-    VkSubpassDependency dependency{};
-    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-    dependency.dstSubpass = 0;
-    dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-    dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-    dependency.srcAccessMask = 0;
-    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-
-    VkRenderPassCreateInfo renderPassInfo{};
-    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    renderPassInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
-    renderPassInfo.pAttachments = attachments.data();
-    renderPassInfo.subpassCount = 1;
-    renderPassInfo.pSubpasses = &subpass;
-    renderPassInfo.dependencyCount = 1;
-    renderPassInfo.pDependencies = &dependency;
-
+    auto vkRenderPassInfo = static_cast<VkRenderPassCreateInfo>(renderPassInfo);
     VkRenderPass renderPass;
-    if (vkCreateRenderPass(device_, &renderPassInfo, nullptr, &renderPass) != VK_SUCCESS) {
+    if (vkCreateRenderPass(device_, &vkRenderPassInfo, nullptr, &renderPass) != VK_SUCCESS) {
         return false;
     }
     captureRenderPass_ = ManagedRenderPass(makeUniqueRenderPass(device_, renderPass));
@@ -198,60 +207,61 @@ bool TreeImpostorAtlas::createAtlasArrayTextures() {
     // Create array textures that will hold all archetypes
     // Each layer is one archetype's atlas (2304 x 512)
 
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.extent.width = ImpostorAtlasConfig::ATLAS_WIDTH;
-    imageInfo.extent.height = ImpostorAtlasConfig::ATLAS_HEIGHT;
-    imageInfo.extent.depth = 1;
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = maxArchetypes_;  // Pre-allocate for all archetypes
-    imageInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    imageInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    ImageCreateInfo imageInfo{
+        {},                                          // flags
+        ImageType::e2D,
+        Format::eR8G8B8A8Unorm,
+        Extent3D{ImpostorAtlasConfig::ATLAS_WIDTH, ImpostorAtlasConfig::ATLAS_HEIGHT, 1},
+        1, maxArchetypes_,                           // mipLevels, arrayLayers
+        SampleCountFlagBits::e1,
+        ImageTiling::eOptimal,
+        ImageUsageFlagBits::eColorAttachment | ImageUsageFlagBits::eSampled,
+        SharingMode::eExclusive,
+        0, nullptr,                                  // queueFamilyIndexCount, pQueueFamilyIndices
+        ImageLayout::eUndefined
+    };
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
+    auto vkImageInfo = static_cast<VkImageCreateInfo>(imageInfo);
+
     // Create albedo+alpha array
-    if (vmaCreateImage(allocator_, &imageInfo, &allocInfo,
+    if (vmaCreateImage(allocator_, &vkImageInfo, &allocInfo,
                        &albedoArrayImage_, &albedoArrayAllocation_, nullptr) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create albedo array image");
         return false;
     }
 
     // Create normal+depth+AO array
-    if (vmaCreateImage(allocator_, &imageInfo, &allocInfo,
+    if (vmaCreateImage(allocator_, &vkImageInfo, &allocInfo,
                        &normalArrayImage_, &normalArrayAllocation_, nullptr) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create normal array image");
         return false;
     }
 
     // Create image views for the entire arrays (for shader binding)
-    VkImageViewCreateInfo viewInfo{};
-    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = 1;
-    viewInfo.subresourceRange.baseArrayLayer = 0;
-    viewInfo.subresourceRange.layerCount = maxArchetypes_;
-    viewInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
+    ImageViewCreateInfo viewInfo{
+        {},                                          // flags
+        albedoArrayImage_,
+        ImageViewType::e2DArray,
+        Format::eR8G8B8A8Unorm,
+        ComponentMapping{},                          // identity swizzle
+        ImageSubresourceRange{ImageAspectFlagBits::eColor, 0, 1, 0, maxArchetypes_}
+    };
 
-    viewInfo.image = albedoArrayImage_;
+    auto vkViewInfo = static_cast<VkImageViewCreateInfo>(viewInfo);
     VkImageView albedoView;
-    if (vkCreateImageView(device_, &viewInfo, nullptr, &albedoView) != VK_SUCCESS) {
+    if (vkCreateImageView(device_, &vkViewInfo, nullptr, &albedoView) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create albedo array view");
         return false;
     }
     albedoArrayView_ = ManagedImageView(makeUniqueImageView(device_, albedoView));
 
     viewInfo.image = normalArrayImage_;
+    vkViewInfo = static_cast<VkImageViewCreateInfo>(viewInfo);
     VkImageView normalView;
-    if (vkCreateImageView(device_, &viewInfo, nullptr, &normalView) != VK_SUCCESS) {
+    if (vkCreateImageView(device_, &vkViewInfo, nullptr, &normalView) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create normal array view");
         return false;
     }
@@ -316,60 +326,61 @@ bool TreeImpostorAtlas::createOctahedralAtlasArrayTextures() {
     // Create octahedral array textures that will hold all archetypes
     // Each layer is one archetype's octahedral atlas (GRID_SIZE x GRID_SIZE cells)
 
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.extent.width = OctahedralAtlasConfig::ATLAS_WIDTH;
-    imageInfo.extent.height = OctahedralAtlasConfig::ATLAS_HEIGHT;
-    imageInfo.extent.depth = 1;
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = maxArchetypes_;
-    imageInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    imageInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    ImageCreateInfo imageInfo{
+        {},                                          // flags
+        ImageType::e2D,
+        Format::eR8G8B8A8Unorm,
+        Extent3D{OctahedralAtlasConfig::ATLAS_WIDTH, OctahedralAtlasConfig::ATLAS_HEIGHT, 1},
+        1, maxArchetypes_,                           // mipLevels, arrayLayers
+        SampleCountFlagBits::e1,
+        ImageTiling::eOptimal,
+        ImageUsageFlagBits::eColorAttachment | ImageUsageFlagBits::eSampled,
+        SharingMode::eExclusive,
+        0, nullptr,                                  // queueFamilyIndexCount, pQueueFamilyIndices
+        ImageLayout::eUndefined
+    };
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
+    auto vkImageInfo = static_cast<VkImageCreateInfo>(imageInfo);
+
     // Create octahedral albedo+alpha array
-    if (vmaCreateImage(allocator_, &imageInfo, &allocInfo,
+    if (vmaCreateImage(allocator_, &vkImageInfo, &allocInfo,
                        &octaAlbedoArrayImage_, &octaAlbedoArrayAllocation_, nullptr) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create octahedral albedo array image");
         return false;
     }
 
     // Create octahedral normal+depth+AO array
-    if (vmaCreateImage(allocator_, &imageInfo, &allocInfo,
+    if (vmaCreateImage(allocator_, &vkImageInfo, &allocInfo,
                        &octaNormalArrayImage_, &octaNormalArrayAllocation_, nullptr) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create octahedral normal array image");
         return false;
     }
 
     // Create image views for the entire arrays
-    VkImageViewCreateInfo viewInfo{};
-    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = 1;
-    viewInfo.subresourceRange.baseArrayLayer = 0;
-    viewInfo.subresourceRange.layerCount = maxArchetypes_;
-    viewInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
+    ImageViewCreateInfo viewInfo{
+        {},                                          // flags
+        octaAlbedoArrayImage_,
+        ImageViewType::e2DArray,
+        Format::eR8G8B8A8Unorm,
+        ComponentMapping{},                          // identity swizzle
+        ImageSubresourceRange{ImageAspectFlagBits::eColor, 0, 1, 0, maxArchetypes_}
+    };
 
-    viewInfo.image = octaAlbedoArrayImage_;
+    auto vkViewInfo = static_cast<VkImageViewCreateInfo>(viewInfo);
     VkImageView albedoView;
-    if (vkCreateImageView(device_, &viewInfo, nullptr, &albedoView) != VK_SUCCESS) {
+    if (vkCreateImageView(device_, &vkViewInfo, nullptr, &albedoView) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create octahedral albedo array view");
         return false;
     }
     octaAlbedoArrayView_ = ManagedImageView(makeUniqueImageView(device_, albedoView));
 
     viewInfo.image = octaNormalArrayImage_;
+    vkViewInfo = static_cast<VkImageViewCreateInfo>(viewInfo);
     VkImageView normalView;
-    if (vkCreateImageView(device_, &viewInfo, nullptr, &normalView) != VK_SUCCESS) {
+    if (vkCreateImageView(device_, &vkViewInfo, nullptr, &normalView) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create octahedral normal array view");
         return false;
     }
@@ -478,63 +489,63 @@ bool TreeImpostorAtlas::createOctahedralAtlasResources(uint32_t archetypeIndex) 
     auto& atlas = octaAtlasTextures_[archetypeIndex];
 
     // Create per-layer views into the shared octahedral array textures
-    VkImageViewCreateInfo viewInfo{};
-    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = 1;
-    viewInfo.subresourceRange.baseArrayLayer = archetypeIndex;
-    viewInfo.subresourceRange.layerCount = 1;
-    viewInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
+    ImageViewCreateInfo viewInfo{
+        {},                                          // flags
+        octaAlbedoArrayImage_,
+        ImageViewType::e2D,
+        Format::eR8G8B8A8Unorm,
+        ComponentMapping{},                          // identity swizzle
+        ImageSubresourceRange{ImageAspectFlagBits::eColor, 0, 1, archetypeIndex, 1}
+    };
 
-    viewInfo.image = octaAlbedoArrayImage_;
+    auto vkViewInfo = static_cast<VkImageViewCreateInfo>(viewInfo);
     VkImageView albedoView;
-    if (vkCreateImageView(device_, &viewInfo, nullptr, &albedoView) != VK_SUCCESS) {
+    if (vkCreateImageView(device_, &vkViewInfo, nullptr, &albedoView) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create octahedral albedo layer view");
         return false;
     }
     atlas.albedoView = ManagedImageView(makeUniqueImageView(device_, albedoView));
 
     viewInfo.image = octaNormalArrayImage_;
+    vkViewInfo = static_cast<VkImageViewCreateInfo>(viewInfo);
     VkImageView normalView;
-    if (vkCreateImageView(device_, &viewInfo, nullptr, &normalView) != VK_SUCCESS) {
+    if (vkCreateImageView(device_, &vkViewInfo, nullptr, &normalView) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create octahedral normal layer view");
         return false;
     }
     atlas.normalView = ManagedImageView(makeUniqueImageView(device_, normalView));
 
     // Create depth image
-    VkImageCreateInfo depthImageInfo{};
-    depthImageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    depthImageInfo.imageType = VK_IMAGE_TYPE_2D;
-    depthImageInfo.extent.width = OctahedralAtlasConfig::ATLAS_WIDTH;
-    depthImageInfo.extent.height = OctahedralAtlasConfig::ATLAS_HEIGHT;
-    depthImageInfo.extent.depth = 1;
-    depthImageInfo.mipLevels = 1;
-    depthImageInfo.arrayLayers = 1;
-    depthImageInfo.format = VK_FORMAT_D32_SFLOAT;
-    depthImageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    depthImageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    depthImageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-    depthImageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    depthImageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    ImageCreateInfo depthImageInfo{
+        {},                                          // flags
+        ImageType::e2D,
+        Format::eD32Sfloat,
+        Extent3D{OctahedralAtlasConfig::ATLAS_WIDTH, OctahedralAtlasConfig::ATLAS_HEIGHT, 1},
+        1, 1,                                        // mipLevels, arrayLayers
+        SampleCountFlagBits::e1,
+        ImageTiling::eOptimal,
+        ImageUsageFlagBits::eDepthStencilAttachment,
+        SharingMode::eExclusive,
+        0, nullptr,                                  // queueFamilyIndexCount, pQueueFamilyIndices
+        ImageLayout::eUndefined
+    };
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
-    if (vmaCreateImage(allocator_, &depthImageInfo, &allocInfo,
+    auto vkDepthImageInfo = static_cast<VkImageCreateInfo>(depthImageInfo);
+    if (vmaCreateImage(allocator_, &vkDepthImageInfo, &allocInfo,
                        &atlas.depthImage, &atlas.depthAllocation, nullptr) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create octahedral depth image");
         return false;
     }
 
     viewInfo.image = atlas.depthImage;
-    viewInfo.format = VK_FORMAT_D32_SFLOAT;
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-    viewInfo.subresourceRange.baseArrayLayer = 0;
+    viewInfo.format = Format::eD32Sfloat;
+    viewInfo.subresourceRange = ImageSubresourceRange{ImageAspectFlagBits::eDepth, 0, 1, 0, 1};
+    vkViewInfo = static_cast<VkImageViewCreateInfo>(viewInfo);
     VkImageView depthView;
-    if (vkCreateImageView(device_, &viewInfo, nullptr, &depthView) != VK_SUCCESS) {
+    if (vkCreateImageView(device_, &vkViewInfo, nullptr, &depthView) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create octahedral depth view");
         return false;
     }
@@ -928,22 +939,26 @@ bool TreeImpostorAtlas::createLeafQuadMesh() {
     std::array<uint32_t, 6> indices = {0, 1, 2, 2, 3, 0};
     leafQuadIndexCount_ = 6;
 
-    VkDeviceSize vertexSize = sizeof(vertices);
-    VkDeviceSize indexSize = sizeof(indices);
-    VkDeviceSize stagingSize = vertexSize + indexSize;
+    DeviceSize vertexSize = sizeof(vertices);
+    DeviceSize indexSize = sizeof(indices);
+    DeviceSize stagingSize = vertexSize + indexSize;
 
     // Create staging buffer
     VkBuffer stagingBuffer;
     VmaAllocation stagingAllocation;
-    VkBufferCreateInfo stagingInfo{};
-    stagingInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    stagingInfo.size = stagingSize;
-    stagingInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    BufferCreateInfo stagingInfo{
+        {},                                          // flags
+        stagingSize,                                 // size
+        BufferUsageFlagBits::eTransferSrc,
+        SharingMode::eExclusive,
+        0, nullptr                                   // queueFamilyIndexCount, pQueueFamilyIndices
+    };
 
     VmaAllocationCreateInfo stagingAllocInfo{};
     stagingAllocInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
 
-    if (vmaCreateBuffer(allocator_, &stagingInfo, &stagingAllocInfo, &stagingBuffer, &stagingAllocation, nullptr) != VK_SUCCESS) {
+    auto vkStagingInfo = static_cast<VkBufferCreateInfo>(stagingInfo);
+    if (vmaCreateBuffer(allocator_, &vkStagingInfo, &stagingAllocInfo, &stagingBuffer, &stagingAllocation, nullptr) != VK_SUCCESS) {
         return false;
     }
 
@@ -954,23 +969,33 @@ bool TreeImpostorAtlas::createLeafQuadMesh() {
     vmaUnmapMemory(allocator_, stagingAllocation);
 
     // Create GPU buffers
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    BufferCreateInfo vertexBufferInfo{
+        {},                                          // flags
+        vertexSize,                                  // size
+        BufferUsageFlagBits::eVertexBuffer | BufferUsageFlagBits::eTransferDst,
+        SharingMode::eExclusive,
+        0, nullptr                                   // queueFamilyIndexCount, pQueueFamilyIndices
+    };
 
     VmaAllocationCreateInfo gpuAllocInfo{};
     gpuAllocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
-    bufferInfo.size = vertexSize;
-    bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    if (vmaCreateBuffer(allocator_, &bufferInfo, &gpuAllocInfo, &leafQuadVertexBuffer_, &leafQuadVertexAllocation_, nullptr) != VK_SUCCESS) {
+    auto vkVertexBufferInfo = static_cast<VkBufferCreateInfo>(vertexBufferInfo);
+    if (vmaCreateBuffer(allocator_, &vkVertexBufferInfo, &gpuAllocInfo, &leafQuadVertexBuffer_, &leafQuadVertexAllocation_, nullptr) != VK_SUCCESS) {
         vmaDestroyBuffer(allocator_, stagingBuffer, stagingAllocation);
         return false;
     }
 
-    bufferInfo.size = indexSize;
-    bufferInfo.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    if (vmaCreateBuffer(allocator_, &bufferInfo, &gpuAllocInfo, &leafQuadIndexBuffer_, &leafQuadIndexAllocation_, nullptr) != VK_SUCCESS) {
+    BufferCreateInfo indexBufferInfo{
+        {},                                          // flags
+        indexSize,                                   // size
+        BufferUsageFlagBits::eIndexBuffer | BufferUsageFlagBits::eTransferDst,
+        SharingMode::eExclusive,
+        0, nullptr                                   // queueFamilyIndexCount, pQueueFamilyIndices
+    };
+
+    auto vkIndexBufferInfo = static_cast<VkBufferCreateInfo>(indexBufferInfo);
+    if (vmaCreateBuffer(allocator_, &vkIndexBufferInfo, &gpuAllocInfo, &leafQuadIndexBuffer_, &leafQuadIndexAllocation_, nullptr) != VK_SUCCESS) {
         vmaDestroyBuffer(allocator_, stagingBuffer, stagingAllocation);
         return false;
     }
@@ -1027,63 +1052,63 @@ bool TreeImpostorAtlas::createAtlasResources(uint32_t archetypeIndex) {
     auto& atlas = atlasTextures_[archetypeIndex];
 
     // Create per-layer views into the shared array textures (for framebuffer attachment)
-    VkImageViewCreateInfo viewInfo{};
-    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;  // Single layer view for framebuffer
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = 1;
-    viewInfo.subresourceRange.baseArrayLayer = archetypeIndex;  // This layer
-    viewInfo.subresourceRange.layerCount = 1;
-    viewInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
+    ImageViewCreateInfo viewInfo{
+        {},                                          // flags
+        albedoArrayImage_,
+        ImageViewType::e2D,                          // Single layer view for framebuffer
+        Format::eR8G8B8A8Unorm,
+        ComponentMapping{},                          // identity swizzle
+        ImageSubresourceRange{ImageAspectFlagBits::eColor, 0, 1, archetypeIndex, 1}
+    };
 
-    viewInfo.image = albedoArrayImage_;
+    auto vkViewInfo = static_cast<VkImageViewCreateInfo>(viewInfo);
     VkImageView albedoView;
-    if (vkCreateImageView(device_, &viewInfo, nullptr, &albedoView) != VK_SUCCESS) {
+    if (vkCreateImageView(device_, &vkViewInfo, nullptr, &albedoView) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create albedo layer view");
         return false;
     }
     atlas.albedoAlphaView = ManagedImageView(makeUniqueImageView(device_, albedoView));
 
     viewInfo.image = normalArrayImage_;
+    vkViewInfo = static_cast<VkImageViewCreateInfo>(viewInfo);
     VkImageView normalView;
-    if (vkCreateImageView(device_, &viewInfo, nullptr, &normalView) != VK_SUCCESS) {
+    if (vkCreateImageView(device_, &vkViewInfo, nullptr, &normalView) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create normal layer view");
         return false;
     }
     atlas.normalDepthAOView = ManagedImageView(makeUniqueImageView(device_, normalView));
 
     // Create depth image (not shared, one per archetype for rendering)
-    VkImageCreateInfo depthImageInfo{};
-    depthImageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    depthImageInfo.imageType = VK_IMAGE_TYPE_2D;
-    depthImageInfo.extent.width = ImpostorAtlasConfig::ATLAS_WIDTH;
-    depthImageInfo.extent.height = ImpostorAtlasConfig::ATLAS_HEIGHT;
-    depthImageInfo.extent.depth = 1;
-    depthImageInfo.mipLevels = 1;
-    depthImageInfo.arrayLayers = 1;
-    depthImageInfo.format = VK_FORMAT_D32_SFLOAT;
-    depthImageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    depthImageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    depthImageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-    depthImageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    depthImageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    ImageCreateInfo depthImageInfo{
+        {},                                          // flags
+        ImageType::e2D,
+        Format::eD32Sfloat,
+        Extent3D{ImpostorAtlasConfig::ATLAS_WIDTH, ImpostorAtlasConfig::ATLAS_HEIGHT, 1},
+        1, 1,                                        // mipLevels, arrayLayers
+        SampleCountFlagBits::e1,
+        ImageTiling::eOptimal,
+        ImageUsageFlagBits::eDepthStencilAttachment,
+        SharingMode::eExclusive,
+        0, nullptr,                                  // queueFamilyIndexCount, pQueueFamilyIndices
+        ImageLayout::eUndefined
+    };
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
-    if (vmaCreateImage(allocator_, &depthImageInfo, &allocInfo,
+    auto vkDepthImageInfo = static_cast<VkImageCreateInfo>(depthImageInfo);
+    if (vmaCreateImage(allocator_, &vkDepthImageInfo, &allocInfo,
                        &atlas.depthImage, &atlas.depthAllocation, nullptr) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create depth image");
         return false;
     }
 
     viewInfo.image = atlas.depthImage;
-    viewInfo.format = VK_FORMAT_D32_SFLOAT;
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-    viewInfo.subresourceRange.baseArrayLayer = 0;  // Depth is not shared
+    viewInfo.format = Format::eD32Sfloat;
+    viewInfo.subresourceRange = ImageSubresourceRange{ImageAspectFlagBits::eDepth, 0, 1, 0, 1};  // Depth is not shared
+    vkViewInfo = static_cast<VkImageViewCreateInfo>(viewInfo);
     VkImageView depthView;
-    if (vkCreateImageView(device_, &viewInfo, nullptr, &depthView) != VK_SUCCESS) {
+    if (vkCreateImageView(device_, &vkViewInfo, nullptr, &depthView) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create depth view");
         return false;
     }
@@ -1199,16 +1224,19 @@ int32_t TreeImpostorAtlas::generateArchetype(
                 vmaDestroyBuffer(allocator_, leafCaptureBuffer_, leafCaptureAllocation_);
             }
 
-            VkBufferCreateInfo bufferInfo{};
-            bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-            bufferInfo.size = requiredSize;
-            bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-            bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+            BufferCreateInfo bufferInfo{
+                {},                                          // flags
+                requiredSize,                                // size
+                BufferUsageFlagBits::eStorageBuffer | BufferUsageFlagBits::eTransferDst,
+                SharingMode::eExclusive,
+                0, nullptr                                   // queueFamilyIndexCount, pQueueFamilyIndices
+            };
 
             VmaAllocationCreateInfo allocInfo{};
             allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
 
-            if (vmaCreateBuffer(allocator_, &bufferInfo, &allocInfo, &leafCaptureBuffer_, &leafCaptureAllocation_, nullptr) != VK_SUCCESS) {
+            auto vkBufferInfo = static_cast<VkBufferCreateInfo>(bufferInfo);
+            if (vmaCreateBuffer(allocator_, &vkBufferInfo, &allocInfo, &leafCaptureBuffer_, &leafCaptureAllocation_, nullptr) != VK_SUCCESS) {
                 SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create leaf capture buffer");
                 return -1;
             }

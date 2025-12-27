@@ -6,6 +6,8 @@
 #include <SDL3/SDL.h>
 #include <array>
 
+using namespace vk;
+
 std::unique_ptr<PostProcessSystem> PostProcessSystem::create(const InitInfo& info) {
     std::unique_ptr<PostProcessSystem> system(new PostProcessSystem());
     if (!system->initInternal(info)) {
@@ -129,85 +131,81 @@ void PostProcessSystem::resize(VkExtent2D newExtent) {
 
 bool PostProcessSystem::createHDRRenderTarget() {
     // Create HDR color image
-    VkImageCreateInfo colorImageInfo{};
-    colorImageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    colorImageInfo.imageType = VK_IMAGE_TYPE_2D;
-    colorImageInfo.extent.width = extent.width;
-    colorImageInfo.extent.height = extent.height;
-    colorImageInfo.extent.depth = 1;
-    colorImageInfo.mipLevels = 1;
-    colorImageInfo.arrayLayers = 1;
-    colorImageInfo.format = HDR_FORMAT;
-    colorImageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    colorImageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    colorImageInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                           VK_IMAGE_USAGE_SAMPLED_BIT |
-                           VK_IMAGE_USAGE_STORAGE_BIT;
-    colorImageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    colorImageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    ImageCreateInfo colorImageInfo{
+        {},                                  // flags
+        ImageType::e2D,
+        static_cast<Format>(HDR_FORMAT),
+        Extent3D{extent.width, extent.height, 1},
+        1, 1,                                // mipLevels, arrayLayers
+        SampleCountFlagBits::e1,
+        ImageTiling::eOptimal,
+        ImageUsageFlagBits::eColorAttachment | ImageUsageFlagBits::eSampled | ImageUsageFlagBits::eStorage,
+        SharingMode::eExclusive,
+        0, nullptr,                          // queueFamilyIndexCount, pQueueFamilyIndices
+        ImageLayout::eUndefined
+    };
 
     VmaAllocationCreateInfo colorAllocInfo{};
     colorAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
 
-    if (vmaCreateImage(allocator, &colorImageInfo, &colorAllocInfo,
+    auto vkColorImageInfo = static_cast<VkImageCreateInfo>(colorImageInfo);
+    if (vmaCreateImage(allocator, &vkColorImageInfo, &colorAllocInfo,
                        &hdrColorImage, &hdrColorAllocation, nullptr) != VK_SUCCESS) {
         SDL_Log("Failed to create HDR color image");
         return false;
     }
 
-    VkImageViewCreateInfo colorViewInfo{};
-    colorViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    colorViewInfo.image = hdrColorImage;
-    colorViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    colorViewInfo.format = HDR_FORMAT;
-    colorViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    colorViewInfo.subresourceRange.baseMipLevel = 0;
-    colorViewInfo.subresourceRange.levelCount = 1;
-    colorViewInfo.subresourceRange.baseArrayLayer = 0;
-    colorViewInfo.subresourceRange.layerCount = 1;
+    ImageViewCreateInfo colorViewInfo{
+        {},                              // flags
+        hdrColorImage,
+        ImageViewType::e2D,
+        static_cast<Format>(HDR_FORMAT),
+        ComponentMapping{},              // identity swizzle
+        ImageSubresourceRange{ImageAspectFlagBits::eColor, 0, 1, 0, 1}
+    };
 
-    if (vkCreateImageView(device, &colorViewInfo, nullptr, &hdrColorView) != VK_SUCCESS) {
+    auto vkColorViewInfo = static_cast<VkImageViewCreateInfo>(colorViewInfo);
+    if (vkCreateImageView(device, &vkColorViewInfo, nullptr, &hdrColorView) != VK_SUCCESS) {
         SDL_Log("Failed to create HDR color image view");
         return false;
     }
 
     // Create HDR depth image
-    VkImageCreateInfo depthImageInfo{};
-    depthImageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    depthImageInfo.imageType = VK_IMAGE_TYPE_2D;
-    depthImageInfo.extent.width = extent.width;
-    depthImageInfo.extent.height = extent.height;
-    depthImageInfo.extent.depth = 1;
-    depthImageInfo.mipLevels = 1;
-    depthImageInfo.arrayLayers = 1;
-    depthImageInfo.format = DEPTH_FORMAT;
-    depthImageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    depthImageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    depthImageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    depthImageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    depthImageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    ImageCreateInfo depthImageInfo{
+        {},                                  // flags
+        ImageType::e2D,
+        static_cast<Format>(DEPTH_FORMAT),
+        Extent3D{extent.width, extent.height, 1},
+        1, 1,                                // mipLevels, arrayLayers
+        SampleCountFlagBits::e1,
+        ImageTiling::eOptimal,
+        ImageUsageFlagBits::eDepthStencilAttachment | ImageUsageFlagBits::eSampled,
+        SharingMode::eExclusive,
+        0, nullptr,                          // queueFamilyIndexCount, pQueueFamilyIndices
+        ImageLayout::eUndefined
+    };
 
     VmaAllocationCreateInfo depthAllocInfo{};
     depthAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
 
-    if (vmaCreateImage(allocator, &depthImageInfo, &depthAllocInfo,
+    auto vkDepthImageInfo = static_cast<VkImageCreateInfo>(depthImageInfo);
+    if (vmaCreateImage(allocator, &vkDepthImageInfo, &depthAllocInfo,
                        &hdrDepthImage, &hdrDepthAllocation, nullptr) != VK_SUCCESS) {
         SDL_Log("Failed to create HDR depth image");
         return false;
     }
 
-    VkImageViewCreateInfo depthViewInfo{};
-    depthViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    depthViewInfo.image = hdrDepthImage;
-    depthViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    depthViewInfo.format = DEPTH_FORMAT;
-    depthViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-    depthViewInfo.subresourceRange.baseMipLevel = 0;
-    depthViewInfo.subresourceRange.levelCount = 1;
-    depthViewInfo.subresourceRange.baseArrayLayer = 0;
-    depthViewInfo.subresourceRange.layerCount = 1;
+    ImageViewCreateInfo depthViewInfo{
+        {},                              // flags
+        hdrDepthImage,
+        ImageViewType::e2D,
+        static_cast<Format>(DEPTH_FORMAT),
+        ComponentMapping{},              // identity swizzle
+        ImageSubresourceRange{ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
+    };
 
-    if (vkCreateImageView(device, &depthViewInfo, nullptr, &hdrDepthView) != VK_SUCCESS) {
+    auto vkDepthViewInfo = static_cast<VkImageViewCreateInfo>(depthViewInfo);
+    if (vkCreateImageView(device, &vkDepthViewInfo, nullptr, &hdrDepthView) != VK_SUCCESS) {
         SDL_Log("Failed to create HDR depth image view");
         return false;
     }
@@ -216,63 +214,61 @@ bool PostProcessSystem::createHDRRenderTarget() {
 }
 
 bool PostProcessSystem::createHDRRenderPass() {
-    VkAttachmentDescription colorAttachment{};
-    colorAttachment.format = HDR_FORMAT;
-    colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    AttachmentDescription colorAttachment{
+        {},                                  // flags
+        static_cast<Format>(HDR_FORMAT),
+        SampleCountFlagBits::e1,
+        AttachmentLoadOp::eClear,
+        AttachmentStoreOp::eStore,
+        AttachmentLoadOp::eDontCare,         // stencilLoadOp
+        AttachmentStoreOp::eDontCare,        // stencilStoreOp
+        ImageLayout::eUndefined,
+        ImageLayout::eShaderReadOnlyOptimal
+    };
 
-    VkAttachmentDescription depthAttachment{};
-    depthAttachment.format = DEPTH_FORMAT;
-    depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;  // Store for sampling in post-process
-    depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;  // For sampling
+    AttachmentDescription depthAttachment{
+        {},                                  // flags
+        static_cast<Format>(DEPTH_FORMAT),
+        SampleCountFlagBits::e1,
+        AttachmentLoadOp::eClear,
+        AttachmentStoreOp::eStore,           // Store for sampling in post-process
+        AttachmentLoadOp::eDontCare,         // stencilLoadOp
+        AttachmentStoreOp::eDontCare,        // stencilStoreOp
+        ImageLayout::eUndefined,
+        ImageLayout::eDepthStencilReadOnlyOptimal  // For sampling
+    };
 
-    VkAttachmentReference colorAttachmentRef{};
-    colorAttachmentRef.attachment = 0;
-    colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    AttachmentReference colorAttachmentRef{0, ImageLayout::eColorAttachmentOptimal};
+    AttachmentReference depthAttachmentRef{1, ImageLayout::eDepthStencilAttachmentOptimal};
 
-    VkAttachmentReference depthAttachmentRef{};
-    depthAttachmentRef.attachment = 1;
-    depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    SubpassDescription subpass{
+        {},                                  // flags
+        PipelineBindPoint::eGraphics,
+        0, nullptr,                          // inputAttachmentCount, pInputAttachments
+        1, &colorAttachmentRef,              // colorAttachmentCount, pColorAttachments
+        nullptr,                             // pResolveAttachments
+        &depthAttachmentRef                  // pDepthStencilAttachment
+    };
 
-    VkSubpassDescription subpass{};
-    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    subpass.colorAttachmentCount = 1;
-    subpass.pColorAttachments = &colorAttachmentRef;
-    subpass.pDepthStencilAttachment = &depthAttachmentRef;
+    SubpassDependency dependency{
+        VK_SUBPASS_EXTERNAL, 0,              // srcSubpass, dstSubpass
+        PipelineStageFlagBits::eColorAttachmentOutput | PipelineStageFlagBits::eEarlyFragmentTests,
+        PipelineStageFlagBits::eColorAttachmentOutput | PipelineStageFlagBits::eEarlyFragmentTests,
+        {},                                  // srcAccessMask
+        AccessFlagBits::eColorAttachmentWrite | AccessFlagBits::eDepthStencilAttachmentWrite
+    };
 
-    VkSubpassDependency dependency{};
-    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-    dependency.dstSubpass = 0;
-    dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
-                              VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-    dependency.srcAccessMask = 0;
-    dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
-                              VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
-                               VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    std::array<AttachmentDescription, 2> attachments = {colorAttachment, depthAttachment};
 
-    std::array<VkAttachmentDescription, 2> attachments = {colorAttachment, depthAttachment};
+    RenderPassCreateInfo renderPassInfo{
+        {},                                  // flags
+        attachments,
+        subpass,
+        dependency
+    };
 
-    VkRenderPassCreateInfo renderPassInfo{};
-    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    renderPassInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
-    renderPassInfo.pAttachments = attachments.data();
-    renderPassInfo.subpassCount = 1;
-    renderPassInfo.pSubpasses = &subpass;
-    renderPassInfo.dependencyCount = 1;
-    renderPassInfo.pDependencies = &dependency;
-
-    if (vkCreateRenderPass(device, &renderPassInfo, nullptr, &hdrRenderPass) != VK_SUCCESS) {
+    auto vkRenderPassInfo = static_cast<VkRenderPassCreateInfo>(renderPassInfo);
+    if (vkCreateRenderPass(device, &vkRenderPassInfo, nullptr, &hdrRenderPass) != VK_SUCCESS) {
         SDL_Log("Failed to create HDR render pass");
         return false;
     }
@@ -283,6 +279,7 @@ bool PostProcessSystem::createHDRRenderPass() {
 bool PostProcessSystem::createHDRFramebuffer() {
     std::array<VkImageView, 2> attachments = {hdrColorView, hdrDepthView};
 
+    // Use raw struct for VkImageView array interop
     VkFramebufferCreateInfo framebufferInfo{};
     framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
     framebufferInfo.renderPass = hdrRenderPass;
@@ -397,85 +394,93 @@ bool PostProcessSystem::createCompositePipeline() {
         return false;
     }
 
-    VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
-    vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
-    vertShaderStageInfo.module = *vertShaderModule;
-    vertShaderStageInfo.pName = "main";
+    PipelineShaderStageCreateInfo vertShaderStageInfo{
+        {},                              // flags
+        ShaderStageFlagBits::eVertex,
+        *vertShaderModule,
+        "main"
+    };
 
     // Specialization constant for god ray sample count
     // constant_id = 0 maps to GOD_RAY_SAMPLES in shader
-    VkSpecializationMapEntry specMapEntry{};
-    specMapEntry.constantID = 0;
-    specMapEntry.offset = 0;
-    specMapEntry.size = sizeof(int32_t);
+    SpecializationMapEntry specMapEntry{0, 0, sizeof(int32_t)};
 
     // Sample counts for each quality level: Low=16, Medium=32, High=64
     const int32_t sampleCounts[3] = {16, 32, 64};
 
-    VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
-    fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    fragShaderStageInfo.module = *fragShaderModule;
-    fragShaderStageInfo.pName = "main";
+    PipelineShaderStageCreateInfo fragShaderStageInfo{
+        {},                              // flags
+        ShaderStageFlagBits::eFragment,
+        *fragShaderModule,
+        "main"
+    };
 
-    VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
+    VkPipelineShaderStageCreateInfo shaderStages[] = {
+        static_cast<VkPipelineShaderStageCreateInfo>(vertShaderStageInfo),
+        static_cast<VkPipelineShaderStageCreateInfo>(fragShaderStageInfo)
+    };
 
     // No vertex input (fullscreen triangle generated in shader)
-    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
-    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vertexInputInfo.vertexBindingDescriptionCount = 0;
-    vertexInputInfo.vertexAttributeDescriptionCount = 0;
+    PipelineVertexInputStateCreateInfo vertexInputInfo{};
 
-    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
-    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    inputAssembly.primitiveRestartEnable = VK_FALSE;
+    PipelineInputAssemblyStateCreateInfo inputAssembly{
+        {},                              // flags
+        PrimitiveTopology::eTriangleList,
+        VK_FALSE                         // primitiveRestartEnable
+    };
 
-    VkPipelineViewportStateCreateInfo viewportState{};
-    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewportState.viewportCount = 1;
-    viewportState.scissorCount = 1;
+    PipelineViewportStateCreateInfo viewportState{
+        {},                              // flags
+        1, nullptr,                      // viewportCount, pViewports
+        1, nullptr                       // scissorCount, pScissors
+    };
 
-    VkPipelineRasterizationStateCreateInfo rasterizer{};
-    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rasterizer.depthClampEnable = VK_FALSE;
-    rasterizer.rasterizerDiscardEnable = VK_FALSE;
-    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-    rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_NONE;
-    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    rasterizer.depthBiasEnable = VK_FALSE;
+    PipelineRasterizationStateCreateInfo rasterizer{
+        {},                              // flags
+        VK_FALSE,                        // depthClampEnable
+        VK_FALSE,                        // rasterizerDiscardEnable
+        PolygonMode::eFill,
+        CullModeFlagBits::eNone,
+        FrontFace::eCounterClockwise,
+        VK_FALSE, 0.0f, 0.0f, 0.0f,      // depthBias params
+        1.0f                             // lineWidth
+    };
 
-    VkPipelineMultisampleStateCreateInfo multisampling{};
-    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisampling.sampleShadingEnable = VK_FALSE;
-    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    PipelineMultisampleStateCreateInfo multisampling{
+        {},                              // flags
+        SampleCountFlagBits::e1,
+        VK_FALSE                         // sampleShadingEnable
+    };
 
-    VkPipelineDepthStencilStateCreateInfo depthStencil{};
-    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    depthStencil.depthTestEnable = VK_FALSE;
-    depthStencil.depthWriteEnable = VK_FALSE;
-    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
-    depthStencil.depthBoundsTestEnable = VK_FALSE;
-    depthStencil.stencilTestEnable = VK_FALSE;
+    PipelineDepthStencilStateCreateInfo depthStencil{
+        {},                              // flags
+        VK_FALSE,                        // depthTestEnable
+        VK_FALSE,                        // depthWriteEnable
+        CompareOp::eLess,
+        VK_FALSE,                        // depthBoundsTestEnable
+        VK_FALSE                         // stencilTestEnable
+    };
 
-    VkPipelineColorBlendAttachmentState colorBlendAttachment{};
-    colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-                                          VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    colorBlendAttachment.blendEnable = VK_FALSE;
+    PipelineColorBlendAttachmentState colorBlendAttachment{
+        VK_FALSE,                        // blendEnable
+        {}, {}, {},                      // srcColorBlendFactor, dstColorBlendFactor, colorBlendOp
+        {}, {}, {},                      // srcAlphaBlendFactor, dstAlphaBlendFactor, alphaBlendOp
+        ColorComponentFlagBits::eR | ColorComponentFlagBits::eG |
+        ColorComponentFlagBits::eB | ColorComponentFlagBits::eA
+    };
 
-    VkPipelineColorBlendStateCreateInfo colorBlending{};
-    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    colorBlending.logicOpEnable = VK_FALSE;
-    colorBlending.attachmentCount = 1;
-    colorBlending.pAttachments = &colorBlendAttachment;
+    PipelineColorBlendStateCreateInfo colorBlending{
+        {},                              // flags
+        VK_FALSE,                        // logicOpEnable
+        {},                              // logicOp
+        1, &colorBlendAttachment
+    };
 
-    std::vector<VkDynamicState> dynamicStates = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
-    VkPipelineDynamicStateCreateInfo dynamicState{};
-    dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
-    dynamicState.pDynamicStates = dynamicStates.data();
+    std::array<DynamicState, 2> dynamicStates = {DynamicState::eViewport, DynamicState::eScissor};
+    PipelineDynamicStateCreateInfo dynamicState{
+        {},                              // flags
+        dynamicStates
+    };
 
     compositePipelineLayout = DescriptorManager::createPipelineLayout(device, compositeDescriptorSetLayout);
     if (compositePipelineLayout == VK_NULL_HANDLE) {
@@ -485,32 +490,42 @@ bool PostProcessSystem::createCompositePipeline() {
         return false;
     }
 
+    auto vkVertexInputInfo = static_cast<VkPipelineVertexInputStateCreateInfo>(vertexInputInfo);
+    auto vkInputAssembly = static_cast<VkPipelineInputAssemblyStateCreateInfo>(inputAssembly);
+    auto vkViewportState = static_cast<VkPipelineViewportStateCreateInfo>(viewportState);
+    auto vkRasterizer = static_cast<VkPipelineRasterizationStateCreateInfo>(rasterizer);
+    auto vkMultisampling = static_cast<VkPipelineMultisampleStateCreateInfo>(multisampling);
+    auto vkDepthStencil = static_cast<VkPipelineDepthStencilStateCreateInfo>(depthStencil);
+    auto vkColorBlending = static_cast<VkPipelineColorBlendStateCreateInfo>(colorBlending);
+    auto vkDynamicState = static_cast<VkPipelineDynamicStateCreateInfo>(dynamicState);
+
     VkGraphicsPipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
     pipelineInfo.stageCount = 2;
     pipelineInfo.pStages = shaderStages;
-    pipelineInfo.pVertexInputState = &vertexInputInfo;
-    pipelineInfo.pInputAssemblyState = &inputAssembly;
-    pipelineInfo.pViewportState = &viewportState;
-    pipelineInfo.pRasterizationState = &rasterizer;
-    pipelineInfo.pMultisampleState = &multisampling;
-    pipelineInfo.pDepthStencilState = &depthStencil;
-    pipelineInfo.pColorBlendState = &colorBlending;
-    pipelineInfo.pDynamicState = &dynamicState;
+    pipelineInfo.pVertexInputState = &vkVertexInputInfo;
+    pipelineInfo.pInputAssemblyState = &vkInputAssembly;
+    pipelineInfo.pViewportState = &vkViewportState;
+    pipelineInfo.pRasterizationState = &vkRasterizer;
+    pipelineInfo.pMultisampleState = &vkMultisampling;
+    pipelineInfo.pDepthStencilState = &vkDepthStencil;
+    pipelineInfo.pColorBlendState = &vkColorBlending;
+    pipelineInfo.pDynamicState = &vkDynamicState;
     pipelineInfo.layout = compositePipelineLayout;
     pipelineInfo.renderPass = outputRenderPass;
     pipelineInfo.subpass = 0;
 
     // Create pipeline variants for each god ray quality level
     for (int i = 0; i < 3; i++) {
-        VkSpecializationInfo specInfo{};
-        specInfo.mapEntryCount = 1;
-        specInfo.pMapEntries = &specMapEntry;
-        specInfo.dataSize = sizeof(int32_t);
-        specInfo.pData = &sampleCounts[i];
+        SpecializationInfo specInfo{
+            1, &specMapEntry,
+            sizeof(int32_t),
+            &sampleCounts[i]
+        };
 
         // Update fragment shader stage with specialization info
-        shaderStages[1].pSpecializationInfo = &specInfo;
+        auto vkSpecInfo = static_cast<VkSpecializationInfo>(specInfo);
+        shaderStages[1].pSpecializationInfo = &vkSpecInfo;
 
         if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &compositePipelines[i]) != VK_SUCCESS) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create composite graphics pipeline variant %d", i);
@@ -639,16 +654,18 @@ void PostProcessSystem::recordPostProcess(VkCommandBuffer cmd, uint32_t frameInd
 
 bool PostProcessSystem::createHistogramResources() {
     // Create histogram buffer (256 uint values)
-    VkBufferCreateInfo histogramBufferInfo{};
-    histogramBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    histogramBufferInfo.size = HISTOGRAM_BINS * sizeof(uint32_t);
-    histogramBufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    histogramBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    BufferCreateInfo histogramBufferInfo{
+        {},                                  // flags
+        HISTOGRAM_BINS * sizeof(uint32_t),
+        BufferUsageFlagBits::eStorageBuffer | BufferUsageFlagBits::eTransferDst,
+        SharingMode::eExclusive
+    };
 
     VmaAllocationCreateInfo histogramAllocInfo{};
     histogramAllocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
-    if (!ManagedBuffer::create(allocator, histogramBufferInfo, histogramAllocInfo, histogramBuffer)) {
+    auto vkHistogramBufferInfo = static_cast<VkBufferCreateInfo>(histogramBufferInfo);
+    if (!ManagedBuffer::create(allocator, vkHistogramBufferInfo, histogramAllocInfo, histogramBuffer)) {
         SDL_Log("Failed to create histogram buffer");
         return false;
     }
@@ -728,18 +745,21 @@ bool PostProcessSystem::createHistogramPipelines() {
             return false;
         }
 
-        VkPipelineShaderStageCreateInfo stageInfo{};
-        stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        stageInfo.module = *shaderModule;
-        stageInfo.pName = "main";
+        PipelineShaderStageCreateInfo stageInfo{
+            {},                              // flags
+            ShaderStageFlagBits::eCompute,
+            *shaderModule,
+            "main"
+        };
 
-        VkComputePipelineCreateInfo pipelineInfo{};
-        pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-        pipelineInfo.stage = stageInfo;
-        pipelineInfo.layout = histogramBuildPipelineLayout;
+        ComputePipelineCreateInfo pipelineInfo{
+            {},                              // flags
+            stageInfo,
+            histogramBuildPipelineLayout
+        };
 
-        VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &histogramBuildPipeline);
+        auto vkPipelineInfo = static_cast<VkComputePipelineCreateInfo>(pipelineInfo);
+        VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &vkPipelineInfo, nullptr, &histogramBuildPipeline);
         vkDestroyShaderModule(device, *shaderModule, nullptr);
 
         if (result != VK_SUCCESS) {
@@ -783,18 +803,21 @@ bool PostProcessSystem::createHistogramPipelines() {
             return false;
         }
 
-        VkPipelineShaderStageCreateInfo stageInfo{};
-        stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        stageInfo.module = *shaderModule;
-        stageInfo.pName = "main";
+        PipelineShaderStageCreateInfo stageInfo{
+            {},                              // flags
+            ShaderStageFlagBits::eCompute,
+            *shaderModule,
+            "main"
+        };
 
-        VkComputePipelineCreateInfo pipelineInfo{};
-        pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-        pipelineInfo.stage = stageInfo;
-        pipelineInfo.layout = histogramReducePipelineLayout;
+        ComputePipelineCreateInfo pipelineInfo{
+            {},                              // flags
+            stageInfo,
+            histogramReducePipelineLayout
+        };
 
-        VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &histogramReducePipeline);
+        auto vkPipelineInfo = static_cast<VkComputePipelineCreateInfo>(pipelineInfo);
+        VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &vkPipelineInfo, nullptr, &histogramReducePipeline);
         vkDestroyShaderModule(device, *shaderModule, nullptr);
 
         if (result != VK_SUCCESS) {

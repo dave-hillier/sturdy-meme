@@ -7,6 +7,8 @@
 #include <queue>
 #include <cmath>
 
+using namespace vk;
+
 std::unique_ptr<FlowMapGenerator> FlowMapGenerator::create(const InitInfo& info) {
     std::unique_ptr<FlowMapGenerator> system(new FlowMapGenerator());
     if (!system->initInternal(info)) {
@@ -69,41 +71,42 @@ bool FlowMapGenerator::createImage(uint32_t resolution) {
     currentResolution = resolution;
 
     // Create image
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
-    imageInfo.extent = {resolution, resolution, 1};
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    ImageCreateInfo imageInfo{
+        {},                                  // flags
+        ImageType::e2D,
+        Format::eR8G8B8A8Unorm,
+        Extent3D{resolution, resolution, 1},
+        1, 1,                                // mipLevels, arrayLayers
+        SampleCountFlagBits::e1,
+        ImageTiling::eOptimal,
+        ImageUsageFlagBits::eSampled | ImageUsageFlagBits::eTransferDst,
+        SharingMode::eExclusive,
+        0, nullptr,                          // queueFamilyIndexCount, pQueueFamilyIndices
+        ImageLayout::eUndefined
+    };
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
-    if (vmaCreateImage(allocator, &imageInfo, &allocInfo,
+    auto vkImageInfo = static_cast<VkImageCreateInfo>(imageInfo);
+    if (vmaCreateImage(allocator, &vkImageInfo, &allocInfo,
                        &flowMapImage, &flowMapAllocation, nullptr) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create flow map image");
         return false;
     }
 
     // Create image view
-    VkImageViewCreateInfo viewInfo{};
-    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.image = flowMapImage;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = 1;
-    viewInfo.subresourceRange.baseArrayLayer = 0;
-    viewInfo.subresourceRange.layerCount = 1;
+    ImageViewCreateInfo viewInfo{
+        {},                              // flags
+        flowMapImage,
+        ImageViewType::e2D,
+        Format::eR8G8B8A8Unorm,
+        ComponentMapping{},              // identity swizzle
+        ImageSubresourceRange{ImageAspectFlagBits::eColor, 0, 1, 0, 1}
+    };
 
-    if (vkCreateImageView(device, &viewInfo, nullptr, &flowMapView) != VK_SUCCESS) {
+    auto vkViewInfo = static_cast<VkImageViewCreateInfo>(viewInfo);
+    if (vkCreateImageView(device, &vkViewInfo, nullptr, &flowMapView) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create flow map view");
         return false;
     }
@@ -113,23 +116,24 @@ bool FlowMapGenerator::createImage(uint32_t resolution) {
 }
 
 bool FlowMapGenerator::createSampler() {
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.anisotropyEnable = VK_TRUE;
-    samplerInfo.maxAnisotropy = 4.0f;
-    samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
-    samplerInfo.unnormalizedCoordinates = VK_FALSE;
-    samplerInfo.compareEnable = VK_FALSE;
-    samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = 0.0f;
+    SamplerCreateInfo samplerInfo{
+        {},                                  // flags
+        Filter::eLinear,
+        Filter::eLinear,
+        SamplerMipmapMode::eLinear,
+        SamplerAddressMode::eClampToEdge,
+        SamplerAddressMode::eClampToEdge,
+        SamplerAddressMode::eClampToEdge,
+        0.0f,                                // mipLodBias
+        VK_TRUE, 4.0f,                       // anisotropyEnable, maxAnisotropy
+        VK_FALSE, {},                        // compareEnable, compareOp
+        0.0f, 0.0f,                          // minLod, maxLod
+        BorderColor::eFloatOpaqueBlack,
+        VK_FALSE                             // unnormalizedCoordinates
+    };
 
-    return ManagedSampler::create(device, samplerInfo, flowMapSampler);
+    auto vkSamplerInfo = static_cast<VkSamplerCreateInfo>(samplerInfo);
+    return ManagedSampler::create(device, vkSamplerInfo, flowMapSampler);
 }
 
 void FlowMapGenerator::uploadToGPU() {

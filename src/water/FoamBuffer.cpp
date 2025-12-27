@@ -7,6 +7,8 @@
 #include <array>
 #include <cstring>
 
+using namespace vk;
+
 std::unique_ptr<FoamBuffer> FoamBuffer::create(const InitInfo& info) {
     std::unique_ptr<FoamBuffer> system(new FoamBuffer());
     if (!system->initInternal(info)) {
@@ -96,61 +98,76 @@ void FoamBuffer::cleanup() {
 
 bool FoamBuffer::createFoamBuffers() {
     // Create two foam buffers for ping-pong
+    // Using Vulkan-Hpp type-safe structs
     for (int i = 0; i < 2; i++) {
-        VkImageCreateInfo imageInfo{};
-        imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-        imageInfo.imageType = VK_IMAGE_TYPE_2D;
-        imageInfo.format = VK_FORMAT_R16_SFLOAT;
-        imageInfo.extent = {resolution, resolution, 1};
-        imageInfo.mipLevels = 1;
-        imageInfo.arrayLayers = 1;
-        imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-        imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-        imageInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-        imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        ImageCreateInfo imageInfo{
+            {},                              // flags
+            ImageType::e2D,
+            Format::eR16Sfloat,
+            Extent3D{resolution, resolution, 1},
+            1,                               // mipLevels
+            1,                               // arrayLayers
+            SampleCountFlagBits::e1,
+            ImageTiling::eOptimal,
+            ImageUsageFlagBits::eStorage | ImageUsageFlagBits::eSampled | ImageUsageFlagBits::eTransferDst,
+            SharingMode::eExclusive,
+            0,                               // queueFamilyIndexCount
+            nullptr,                         // pQueueFamilyIndices
+            ImageLayout::eUndefined
+        };
 
         VmaAllocationCreateInfo allocInfo{};
         allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
-        if (vmaCreateImage(allocator, &imageInfo, &allocInfo, &foamBuffer[i], &foamAllocation[i], nullptr) != VK_SUCCESS) {
+        // VMA requires C-style struct, cast from vk:: to Vk
+        auto vkImageInfo = static_cast<VkImageCreateInfo>(imageInfo);
+        if (vmaCreateImage(allocator, &vkImageInfo, &allocInfo, &foamBuffer[i], &foamAllocation[i], nullptr) != VK_SUCCESS) {
             return false;
         }
 
-        VkImageViewCreateInfo viewInfo{};
-        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        viewInfo.image = foamBuffer[i];
-        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        viewInfo.format = VK_FORMAT_R16_SFLOAT;
-        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        viewInfo.subresourceRange.baseMipLevel = 0;
-        viewInfo.subresourceRange.levelCount = 1;
-        viewInfo.subresourceRange.baseArrayLayer = 0;
-        viewInfo.subresourceRange.layerCount = 1;
+        ImageViewCreateInfo viewInfo{
+            {},                              // flags
+            foamBuffer[i],
+            ImageViewType::e2D,
+            Format::eR16Sfloat,
+            ComponentMapping{},              // identity swizzle
+            ImageSubresourceRange{
+                ImageAspectFlagBits::eColor,
+                0,                           // baseMipLevel
+                1,                           // levelCount
+                0,                           // baseArrayLayer
+                1                            // layerCount
+            }
+        };
 
-        if (vkCreateImageView(device, &viewInfo, nullptr, &foamBufferView[i]) != VK_SUCCESS) {
+        // vkCreateImageView requires C-style struct
+        auto vkViewInfo = static_cast<VkImageViewCreateInfo>(viewInfo);
+        if (vkCreateImageView(device, &vkViewInfo, nullptr, &foamBufferView[i]) != VK_SUCCESS) {
             return false;
         }
     }
 
     // Create sampler
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.mipLodBias = 0.0f;
-    samplerInfo.anisotropyEnable = VK_FALSE;
-    samplerInfo.maxAnisotropy = 1.0f;
-    samplerInfo.compareEnable = VK_FALSE;
-    samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = 0.0f;
-    samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
+    SamplerCreateInfo samplerInfo{
+        {},                                  // flags
+        Filter::eLinear,                     // magFilter
+        Filter::eLinear,                     // minFilter
+        SamplerMipmapMode::eNearest,
+        SamplerAddressMode::eClampToEdge,    // addressModeU
+        SamplerAddressMode::eClampToEdge,    // addressModeV
+        SamplerAddressMode::eClampToEdge,    // addressModeW
+        0.0f,                                // mipLodBias
+        VK_FALSE,                            // anisotropyEnable
+        1.0f,                                // maxAnisotropy
+        VK_FALSE,                            // compareEnable
+        CompareOp::eNever,
+        0.0f,                                // minLod
+        0.0f,                                // maxLod
+        BorderColor::eFloatTransparentBlack,
+        VK_FALSE                             // unnormalizedCoordinates
+    };
 
-    return ManagedSampler::create(device, samplerInfo, sampler);
+    return ManagedSampler::create(device, static_cast<VkSamplerCreateInfo>(samplerInfo), sampler);
 }
 
 bool FoamBuffer::createWakeBuffers() {
@@ -176,55 +193,44 @@ bool FoamBuffer::createWakeBuffers() {
 
 bool FoamBuffer::createComputePipeline() {
     // Descriptor set layout
-    std::array<VkDescriptorSetLayoutBinding, 4> bindings{};
+    std::array<DescriptorSetLayoutBinding, 4> bindings{{
+        // Binding 0: Current foam buffer (storage image, read/write)
+        {0, DescriptorType::eStorageImage, 1, ShaderStageFlagBits::eCompute},
+        // Binding 1: Previous foam buffer (sampled image, read)
+        {1, DescriptorType::eCombinedImageSampler, 1, ShaderStageFlagBits::eCompute},
+        // Binding 2: Flow map (sampled image, for advection)
+        {2, DescriptorType::eCombinedImageSampler, 1, ShaderStageFlagBits::eCompute},
+        // Binding 3: Wake sources uniform buffer (Phase 16)
+        {3, DescriptorType::eUniformBuffer, 1, ShaderStageFlagBits::eCompute}
+    }};
 
-    // Binding 0: Current foam buffer (storage image, read/write)
-    bindings[0].binding = 0;
-    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    bindings[0].descriptorCount = 1;
-    bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    DescriptorSetLayoutCreateInfo layoutInfo{
+        {},                                          // flags
+        static_cast<uint32_t>(bindings.size()),
+        bindings.data()
+    };
 
-    // Binding 1: Previous foam buffer (sampled image, read)
-    bindings[1].binding = 1;
-    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    bindings[1].descriptorCount = 1;
-    bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-    // Binding 2: Flow map (sampled image, for advection)
-    bindings[2].binding = 2;
-    bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    bindings[2].descriptorCount = 1;
-    bindings[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-    // Binding 3: Wake sources uniform buffer (Phase 16)
-    bindings[3].binding = 3;
-    bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    bindings[3].descriptorCount = 1;
-    bindings[3].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-    VkDescriptorSetLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
-    layoutInfo.pBindings = bindings.data();
-
-    if (!ManagedDescriptorSetLayout::create(device, layoutInfo, descriptorSetLayout)) {
+    if (!ManagedDescriptorSetLayout::create(device, static_cast<VkDescriptorSetLayoutCreateInfo>(layoutInfo), descriptorSetLayout)) {
         return false;
     }
 
     // Push constant range
-    VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(FoamPushConstants);
+    PushConstantRange pushConstantRange{
+        ShaderStageFlagBits::eCompute,
+        0,                                           // offset
+        sizeof(FoamPushConstants)
+    };
 
-    // Pipeline layout
+    // Pipeline layout - use raw struct for VMA/raw Vulkan interop
     VkDescriptorSetLayout rawLayout = descriptorSetLayout.get();
+    VkPushConstantRange vkPushConstantRange = static_cast<VkPushConstantRange>(pushConstantRange);
+
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.setLayoutCount = 1;
     pipelineLayoutInfo.pSetLayouts = &rawLayout;
     pipelineLayoutInfo.pushConstantRangeCount = 1;
-    pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
+    pipelineLayoutInfo.pPushConstantRanges = &vkPushConstantRange;
 
     if (!ManagedPipelineLayout::create(device, pipelineLayoutInfo, computePipelineLayout)) {
         return false;
@@ -238,19 +244,23 @@ bool FoamBuffer::createComputePipeline() {
         return true;  // Allow system to work without temporal foam
     }
 
-    VkPipelineShaderStageCreateInfo shaderStage{};
-    shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    shaderStage.module = *shaderModule;
-    shaderStage.pName = "main";
+    // 
+    PipelineShaderStageCreateInfo shaderStage{
+        {},                                          // flags
+        ShaderStageFlagBits::eCompute,
+        *shaderModule,
+        "main"
+    };
 
-    VkComputePipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    pipelineInfo.stage = shaderStage;
-    pipelineInfo.layout = computePipelineLayout.get();
+    ComputePipelineCreateInfo pipelineInfo{
+        {},                                          // flags
+        static_cast<VkPipelineShaderStageCreateInfo>(shaderStage),
+        computePipelineLayout.get()
+    };
 
     VkPipeline rawPipeline = VK_NULL_HANDLE;
-    VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &rawPipeline);
+    auto vkPipelineInfo = static_cast<VkComputePipelineCreateInfo>(pipelineInfo);
+    VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &vkPipelineInfo, nullptr, &rawPipeline);
 
     vkDestroyShaderModule(device, *shaderModule, nullptr);
 
@@ -265,25 +275,26 @@ bool FoamBuffer::createDescriptorSets() {
     // Create descriptor pool (need 2 sets for ping-pong, times frames in flight)
     uint32_t setCount = framesInFlight * 2;  // 2 for ping-pong per frame
 
-    std::array<VkDescriptorPoolSize, 3> poolSizes{};
-    poolSizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    poolSizes[0].descriptorCount = setCount;
-    poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = setCount * 2;  // prev foam + flow map
-    poolSizes[2].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSizes[2].descriptorCount = setCount;  // wake uniform buffer
+    // 
+    std::array<DescriptorPoolSize, 3> poolSizes{{
+        {DescriptorType::eStorageImage, setCount},
+        {DescriptorType::eCombinedImageSampler, setCount * 2},  // prev foam + flow map
+        {DescriptorType::eUniformBuffer, setCount}              // wake uniform buffer
+    }};
 
-    VkDescriptorPoolCreateInfo poolInfo{};
-    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
-    poolInfo.pPoolSizes = poolSizes.data();
-    poolInfo.maxSets = setCount;
+    DescriptorPoolCreateInfo poolInfo{
+        {},                                          // flags
+        setCount,                                    // maxSets
+        static_cast<uint32_t>(poolSizes.size()),
+        poolSizes.data()
+    };
 
-    if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS) {
+    auto vkPoolInfo = static_cast<VkDescriptorPoolCreateInfo>(poolInfo);
+    if (vkCreateDescriptorPool(device, &vkPoolInfo, nullptr, &descriptorPool) != VK_SUCCESS) {
         return false;
     }
 
-    // Allocate descriptor sets (2 per frame for ping-pong)
+    // Allocate descriptor sets (2 per frame for ping-pong) - use raw struct for Vulkan interop
     std::vector<VkDescriptorSetLayout> layouts(setCount, descriptorSetLayout.get());
 
     VkDescriptorSetAllocateInfo allocInfo{};
@@ -404,19 +415,22 @@ void FoamBuffer::setWorldExtent(const glm::vec2& center, const glm::vec2& size) 
 
 void FoamBuffer::clear(VkCommandBuffer cmd) {
     // Clear both foam buffers to zero
-    VkClearColorValue clearValue = {{0.0f, 0.0f, 0.0f, 0.0f}};
+    ClearColorValue clearValue{std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f}};
 
     for (int i = 0; i < 2; i++) {
         Barriers::prepareImageForTransferDst(cmd, foamBuffer[i]);
 
-        VkImageSubresourceRange range{};
-        range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        range.baseMipLevel = 0;
-        range.levelCount = 1;
-        range.baseArrayLayer = 0;
-        range.layerCount = 1;
+        ImageSubresourceRange range{
+            ImageAspectFlagBits::eColor,
+            0,  // baseMipLevel
+            1,  // levelCount
+            0,  // baseArrayLayer
+            1   // layerCount
+        };
 
-        vkCmdClearColorImage(cmd, foamBuffer[i], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearValue, 1, &range);
+        auto vkRange = static_cast<VkImageSubresourceRange>(range);
+        auto vkClearValue = static_cast<VkClearColorValue>(clearValue);
+        vkCmdClearColorImage(cmd, foamBuffer[i], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &vkClearValue, 1, &vkRange);
 
         Barriers::imageTransferToSampling(cmd, foamBuffer[i]);
     }

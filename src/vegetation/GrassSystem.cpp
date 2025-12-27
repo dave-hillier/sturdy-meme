@@ -10,6 +10,8 @@
 #include <cstring>
 #include <array>
 
+using namespace vk;
+
 // Forward declare UniformBufferObject size (needed for descriptor set update)
 struct UniformBufferObject;
 
@@ -152,43 +154,42 @@ bool GrassSystem::createBuffers() {
 
 bool GrassSystem::createDisplacementResources() {
     // Create displacement texture (RG16F, 512x512)
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.extent.width = DISPLACEMENT_TEXTURE_SIZE;
-    imageInfo.extent.height = DISPLACEMENT_TEXTURE_SIZE;
-    imageInfo.extent.depth = 1;
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
-    imageInfo.format = VK_FORMAT_R16G16_SFLOAT;  // RG16F for XZ displacement
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    imageInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    ImageCreateInfo imageInfo{
+        {},                                  // flags
+        ImageType::e2D,
+        Format::eR16G16Sfloat,               // RG16F for XZ displacement
+        Extent3D{DISPLACEMENT_TEXTURE_SIZE, DISPLACEMENT_TEXTURE_SIZE, 1},
+        1, 1,                                // mipLevels, arrayLayers
+        SampleCountFlagBits::e1,
+        ImageTiling::eOptimal,
+        ImageUsageFlagBits::eStorage | ImageUsageFlagBits::eSampled,
+        SharingMode::eExclusive,
+        0, nullptr,                          // queueFamilyIndexCount, pQueueFamilyIndices
+        ImageLayout::eUndefined
+    };
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
 
-    if (vmaCreateImage(getAllocator(), &imageInfo, &allocInfo,
+    auto vkImageInfo = static_cast<VkImageCreateInfo>(imageInfo);
+    if (vmaCreateImage(getAllocator(), &vkImageInfo, &allocInfo,
                        &displacementImage, &displacementAllocation, nullptr) != VK_SUCCESS) {
         SDL_Log("Failed to create displacement image");
         return false;
     }
 
     // Create image view
-    VkImageViewCreateInfo viewInfo{};
-    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.image = displacementImage;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format = VK_FORMAT_R16G16_SFLOAT;
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = 1;
-    viewInfo.subresourceRange.baseArrayLayer = 0;
-    viewInfo.subresourceRange.layerCount = 1;
+    ImageViewCreateInfo viewInfo{
+        {},                                  // flags
+        displacementImage,
+        ImageViewType::e2D,
+        Format::eR16G16Sfloat,
+        ComponentMapping{},                  // identity swizzle
+        ImageSubresourceRange{ImageAspectFlagBits::eColor, 0, 1, 0, 1}
+    };
 
-    if (vkCreateImageView(getDevice(), &viewInfo, nullptr, &displacementImageView) != VK_SUCCESS) {
+    auto vkViewInfo = static_cast<VkImageViewCreateInfo>(viewInfo);
+    if (vkCreateImageView(getDevice(), &vkViewInfo, nullptr, &displacementImageView) != VK_SUCCESS) {
         SDL_Log("Failed to create displacement image view");
         return false;
     }
@@ -264,18 +265,21 @@ bool GrassSystem::createDisplacementPipeline() {
         return false;
     }
 
-    VkPipelineShaderStageCreateInfo shaderStageInfo{};
-    shaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    shaderStageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    shaderStageInfo.module = *compShaderModule;
-    shaderStageInfo.pName = "main";
+    PipelineShaderStageCreateInfo shaderStageInfo{
+        {},                              // flags
+        ShaderStageFlagBits::eCompute,
+        *compShaderModule,
+        "main"
+    };
 
-    VkComputePipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    pipelineInfo.stage = shaderStageInfo;
-    pipelineInfo.layout = displacementPipelineLayout_.get();
+    ComputePipelineCreateInfo pipelineInfo{
+        {},                              // flags
+        shaderStageInfo,
+        displacementPipelineLayout_.get()
+    };
 
-    bool success = ManagedPipeline::createCompute(getDevice(), VK_NULL_HANDLE, pipelineInfo, displacementPipeline_);
+    auto vkPipelineInfo = static_cast<VkComputePipelineCreateInfo>(pipelineInfo);
+    bool success = ManagedPipeline::createCompute(getDevice(), VK_NULL_HANDLE, vkPipelineInfo, displacementPipeline_);
 
     vkDestroyShaderModule(getDevice(), *compShaderModule, nullptr);
 
@@ -361,92 +365,101 @@ bool GrassSystem::createGraphicsPipeline(SystemLifecycleHelper::PipelineHandles&
         .addPushConstantRange(VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GrassPushConstants));
 
     // No vertex input - procedural geometry from instance buffer
-    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
-    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vertexInputInfo.vertexBindingDescriptionCount = 0;
-    vertexInputInfo.pVertexBindingDescriptions = nullptr;
-    vertexInputInfo.vertexAttributeDescriptionCount = 0;
-    vertexInputInfo.pVertexAttributeDescriptions = nullptr;
+    PipelineVertexInputStateCreateInfo vertexInputInfo{};
 
-    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
-    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
-    inputAssembly.primitiveRestartEnable = VK_FALSE;
+    PipelineInputAssemblyStateCreateInfo inputAssembly{
+        {},                              // flags
+        PrimitiveTopology::eTriangleStrip,
+        VK_FALSE                         // primitiveRestartEnable
+    };
 
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = static_cast<float>(getExtent().width);
-    viewport.height = static_cast<float>(getExtent().height);
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
+    Viewport viewport{
+        0.0f, 0.0f,
+        static_cast<float>(getExtent().width),
+        static_cast<float>(getExtent().height),
+        0.0f, 1.0f
+    };
 
-    VkRect2D scissor{};
-    scissor.offset = {0, 0};
-    scissor.extent = getExtent();
+    Rect2D scissor{{0, 0}, getExtent()};
 
-    VkPipelineViewportStateCreateInfo viewportState{};
-    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewportState.viewportCount = 1;
-    viewportState.pViewports = &viewport;
-    viewportState.scissorCount = 1;
-    viewportState.pScissors = &scissor;
+    PipelineViewportStateCreateInfo viewportState{
+        {},                              // flags
+        1, &viewport,
+        1, &scissor
+    };
 
-    VkPipelineRasterizationStateCreateInfo rasterizer{};
-    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rasterizer.depthClampEnable = VK_FALSE;
-    rasterizer.rasterizerDiscardEnable = VK_FALSE;
-    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-    rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_NONE;  // No culling for grass
-    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    rasterizer.depthBiasEnable = VK_FALSE;
+    PipelineRasterizationStateCreateInfo rasterizer{
+        {},                              // flags
+        VK_FALSE,                        // depthClampEnable
+        VK_FALSE,                        // rasterizerDiscardEnable
+        PolygonMode::eFill,
+        CullModeFlagBits::eNone,         // No culling for grass
+        FrontFace::eCounterClockwise,
+        VK_FALSE,                        // depthBiasEnable
+        0.0f, 0.0f, 0.0f,                // depthBias factors
+        1.0f                             // lineWidth
+    };
 
-    VkPipelineMultisampleStateCreateInfo multisampling{};
-    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisampling.sampleShadingEnable = VK_FALSE;
-    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    PipelineMultisampleStateCreateInfo multisampling{
+        {},                              // flags
+        SampleCountFlagBits::e1,
+        VK_FALSE                         // sampleShadingEnable
+    };
 
-    VkPipelineDepthStencilStateCreateInfo depthStencil{};
-    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    depthStencil.depthTestEnable = VK_TRUE;
-    depthStencil.depthWriteEnable = VK_TRUE;
-    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
-    depthStencil.depthBoundsTestEnable = VK_FALSE;
-    depthStencil.stencilTestEnable = VK_FALSE;
+    PipelineDepthStencilStateCreateInfo depthStencil{
+        {},                              // flags
+        VK_TRUE,                         // depthTestEnable
+        VK_TRUE,                         // depthWriteEnable
+        CompareOp::eLess,
+        VK_FALSE,                        // depthBoundsTestEnable
+        VK_FALSE                         // stencilTestEnable
+    };
 
-    VkPipelineColorBlendAttachmentState colorBlendAttachment{};
-    colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-                                          VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    colorBlendAttachment.blendEnable = VK_FALSE;
+    PipelineColorBlendAttachmentState colorBlendAttachment{
+        VK_FALSE,                        // blendEnable
+        {}, {}, {}, {}, {}, {},          // blend factors (unused)
+        ColorComponentFlagBits::eR | ColorComponentFlagBits::eG |
+        ColorComponentFlagBits::eB | ColorComponentFlagBits::eA
+    };
 
-    VkPipelineColorBlendStateCreateInfo colorBlending{};
-    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    colorBlending.logicOpEnable = VK_FALSE;
-    colorBlending.attachmentCount = 1;
-    colorBlending.pAttachments = &colorBlendAttachment;
+    PipelineColorBlendStateCreateInfo colorBlending{
+        {},                              // flags
+        VK_FALSE,                        // logicOpEnable
+        {},                              // logicOp
+        1, &colorBlendAttachment
+    };
 
     // Enable dynamic viewport and scissor for window resize handling
-    std::array<VkDynamicState, 2> dynamicStates = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
-    VkPipelineDynamicStateCreateInfo dynamicState{};
-    dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
-    dynamicState.pDynamicStates = dynamicStates.data();
+    std::array<DynamicState, 2> dynamicStates = {DynamicState::eViewport, DynamicState::eScissor};
+    PipelineDynamicStateCreateInfo dynamicState{
+        {},                              // flags
+        dynamicStates
+    };
 
     if (!builder.buildPipelineLayout({handles.descriptorSetLayout}, handles.pipelineLayout)) {
         return false;
     }
 
+    // Cast to C types for PipelineBuilder compatibility
+    auto vkVertexInputInfo = static_cast<VkPipelineVertexInputStateCreateInfo>(vertexInputInfo);
+    auto vkInputAssembly = static_cast<VkPipelineInputAssemblyStateCreateInfo>(inputAssembly);
+    auto vkViewportState = static_cast<VkPipelineViewportStateCreateInfo>(viewportState);
+    auto vkRasterizer = static_cast<VkPipelineRasterizationStateCreateInfo>(rasterizer);
+    auto vkMultisampling = static_cast<VkPipelineMultisampleStateCreateInfo>(multisampling);
+    auto vkDepthStencil = static_cast<VkPipelineDepthStencilStateCreateInfo>(depthStencil);
+    auto vkColorBlending = static_cast<VkPipelineColorBlendStateCreateInfo>(colorBlending);
+    auto vkDynamicState = static_cast<VkPipelineDynamicStateCreateInfo>(dynamicState);
+
     VkGraphicsPipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pipelineInfo.pVertexInputState = &vertexInputInfo;
-    pipelineInfo.pInputAssemblyState = &inputAssembly;
-    pipelineInfo.pViewportState = &viewportState;
-    pipelineInfo.pRasterizationState = &rasterizer;
-    pipelineInfo.pMultisampleState = &multisampling;
-    pipelineInfo.pDepthStencilState = &depthStencil;
-    pipelineInfo.pColorBlendState = &colorBlending;
-    pipelineInfo.pDynamicState = &dynamicState;
+    pipelineInfo.pVertexInputState = &vkVertexInputInfo;
+    pipelineInfo.pInputAssemblyState = &vkInputAssembly;
+    pipelineInfo.pViewportState = &vkViewportState;
+    pipelineInfo.pRasterizationState = &vkRasterizer;
+    pipelineInfo.pMultisampleState = &vkMultisampling;
+    pipelineInfo.pDepthStencilState = &vkDepthStencil;
+    pipelineInfo.pColorBlendState = &vkColorBlending;
+    pipelineInfo.pDynamicState = &vkDynamicState;
     pipelineInfo.renderPass = getRenderPass();
     pipelineInfo.subpass = 0;
 
@@ -472,63 +485,65 @@ bool GrassSystem::createShadowPipeline() {
         .addPushConstantRange(VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GrassPushConstants));
 
     // No vertex input - procedural geometry from instance buffer
-    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
-    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    PipelineVertexInputStateCreateInfo vertexInputInfo{};
 
-    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
-    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
-    inputAssembly.primitiveRestartEnable = VK_FALSE;
+    PipelineInputAssemblyStateCreateInfo inputAssembly{
+        {},                              // flags
+        PrimitiveTopology::eTriangleStrip,
+        VK_FALSE                         // primitiveRestartEnable
+    };
 
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = static_cast<float>(shadowMapSize);
-    viewport.height = static_cast<float>(shadowMapSize);
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
+    Viewport viewport{
+        0.0f, 0.0f,
+        static_cast<float>(shadowMapSize),
+        static_cast<float>(shadowMapSize),
+        0.0f, 1.0f
+    };
 
-    VkRect2D scissor{};
-    scissor.offset = {0, 0};
-    scissor.extent = {shadowMapSize, shadowMapSize};
+    Rect2D scissor{{0, 0}, {shadowMapSize, shadowMapSize}};
 
-    VkPipelineViewportStateCreateInfo viewportState{};
-    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewportState.viewportCount = 1;
-    viewportState.pViewports = &viewport;
-    viewportState.scissorCount = 1;
-    viewportState.pScissors = &scissor;
+    PipelineViewportStateCreateInfo viewportState{
+        {},                              // flags
+        1, &viewport,
+        1, &scissor
+    };
 
-    VkPipelineRasterizationStateCreateInfo rasterizer{};
-    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rasterizer.depthClampEnable = VK_FALSE;
-    rasterizer.rasterizerDiscardEnable = VK_FALSE;
-    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-    rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_NONE;  // No culling for grass
-    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    rasterizer.depthBiasEnable = VK_TRUE;
-    rasterizer.depthBiasConstantFactor = 0.25f;
-    rasterizer.depthBiasSlopeFactor = 0.75f;
+    PipelineRasterizationStateCreateInfo rasterizer{
+        {},                              // flags
+        VK_FALSE,                        // depthClampEnable
+        VK_FALSE,                        // rasterizerDiscardEnable
+        PolygonMode::eFill,
+        CullModeFlagBits::eNone,         // No culling for grass
+        FrontFace::eCounterClockwise,
+        VK_TRUE,                         // depthBiasEnable
+        0.25f,                           // depthBiasConstantFactor
+        0.0f,                            // depthBiasClamp
+        0.75f,                           // depthBiasSlopeFactor
+        1.0f                             // lineWidth
+    };
 
-    VkPipelineMultisampleStateCreateInfo multisampling{};
-    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisampling.sampleShadingEnable = VK_FALSE;
-    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    PipelineMultisampleStateCreateInfo multisampling{
+        {},                              // flags
+        SampleCountFlagBits::e1,
+        VK_FALSE                         // sampleShadingEnable
+    };
 
-    VkPipelineDepthStencilStateCreateInfo depthStencil{};
-    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    depthStencil.depthTestEnable = VK_TRUE;
-    depthStencil.depthWriteEnable = VK_TRUE;
-    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
-    depthStencil.depthBoundsTestEnable = VK_FALSE;
-    depthStencil.stencilTestEnable = VK_FALSE;
+    PipelineDepthStencilStateCreateInfo depthStencil{
+        {},                              // flags
+        VK_TRUE,                         // depthTestEnable
+        VK_TRUE,                         // depthWriteEnable
+        CompareOp::eLess,
+        VK_FALSE,                        // depthBoundsTestEnable
+        VK_FALSE                         // stencilTestEnable
+    };
 
     // No color attachment for shadow pass
-    VkPipelineColorBlendStateCreateInfo colorBlending{};
-    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    colorBlending.logicOpEnable = VK_FALSE;
-    colorBlending.attachmentCount = 0;
+    PipelineColorBlendStateCreateInfo colorBlending{
+        {},                              // flags
+        VK_FALSE,                        // logicOpEnable
+        {},                              // logicOp
+        0, nullptr                       // no attachments
+    };
 
     VkPipelineLayout rawPipelineLayout = VK_NULL_HANDLE;
     if (!builder.buildPipelineLayout({shadowDescriptorSetLayout_.get()}, rawPipelineLayout)) {
@@ -536,15 +551,24 @@ bool GrassSystem::createShadowPipeline() {
     }
     shadowPipelineLayout_ = ManagedPipelineLayout::fromRaw(getDevice(), rawPipelineLayout);
 
+    // Cast to C types for PipelineBuilder compatibility
+    auto vkVertexInputInfo = static_cast<VkPipelineVertexInputStateCreateInfo>(vertexInputInfo);
+    auto vkInputAssembly = static_cast<VkPipelineInputAssemblyStateCreateInfo>(inputAssembly);
+    auto vkViewportState = static_cast<VkPipelineViewportStateCreateInfo>(viewportState);
+    auto vkRasterizer = static_cast<VkPipelineRasterizationStateCreateInfo>(rasterizer);
+    auto vkMultisampling = static_cast<VkPipelineMultisampleStateCreateInfo>(multisampling);
+    auto vkDepthStencil = static_cast<VkPipelineDepthStencilStateCreateInfo>(depthStencil);
+    auto vkColorBlending = static_cast<VkPipelineColorBlendStateCreateInfo>(colorBlending);
+
     VkGraphicsPipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pipelineInfo.pVertexInputState = &vertexInputInfo;
-    pipelineInfo.pInputAssemblyState = &inputAssembly;
-    pipelineInfo.pViewportState = &viewportState;
-    pipelineInfo.pRasterizationState = &rasterizer;
-    pipelineInfo.pMultisampleState = &multisampling;
-    pipelineInfo.pDepthStencilState = &depthStencil;
-    pipelineInfo.pColorBlendState = &colorBlending;
+    pipelineInfo.pVertexInputState = &vkVertexInputInfo;
+    pipelineInfo.pInputAssemblyState = &vkInputAssembly;
+    pipelineInfo.pViewportState = &vkViewportState;
+    pipelineInfo.pRasterizationState = &vkRasterizer;
+    pipelineInfo.pMultisampleState = &vkMultisampling;
+    pipelineInfo.pDepthStencilState = &vkDepthStencil;
+    pipelineInfo.pColorBlendState = &vkColorBlending;
     pipelineInfo.renderPass = shadowRenderPass;
     pipelineInfo.subpass = 0;
 

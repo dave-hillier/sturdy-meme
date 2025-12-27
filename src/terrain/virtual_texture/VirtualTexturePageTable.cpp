@@ -6,6 +6,8 @@
 #include <cstring>
 #include <algorithm>
 
+using namespace vk;
+
 namespace VirtualTexture {
 
 std::unique_ptr<VirtualTexturePageTable> VirtualTexturePageTable::create(VkDevice device, VmaAllocator allocator,
@@ -136,44 +138,44 @@ bool VirtualTexturePageTable::createPageTableTextures(VkDevice device, VmaAlloca
     for (uint32_t mip = 0; mip < config.maxMipLevels; ++mip) {
         uint32_t tilesAtMip = config.getTilesAtMip(mip);
 
-        VkImageCreateInfo imageInfo{};
-        imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-        imageInfo.imageType = VK_IMAGE_TYPE_2D;
-        imageInfo.format = VK_FORMAT_R8G8B8A8_UINT;  // RGBA8 for page table
-        imageInfo.extent.width = tilesAtMip;
-        imageInfo.extent.height = tilesAtMip;
-        imageInfo.extent.depth = 1;
-        imageInfo.mipLevels = 1;
-        imageInfo.arrayLayers = 1;
-        imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-        imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-        imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-        imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        // Create page table image
+        ImageCreateInfo imageInfo{
+            {},                                          // flags
+            ImageType::e2D,
+            Format::eR8G8B8A8Uint,                       // RGBA8 for page table
+            Extent3D{tilesAtMip, tilesAtMip, 1},
+            1, 1,                                        // mipLevels, arrayLayers
+            SampleCountFlagBits::e1,
+            ImageTiling::eOptimal,
+            ImageUsageFlagBits::eTransferDst | ImageUsageFlagBits::eSampled,
+            SharingMode::eExclusive,
+            0, nullptr,                                  // queueFamilyIndexCount, pQueueFamilyIndices
+            ImageLayout::eUndefined
+        };
 
         VmaAllocationCreateInfo allocInfo{};
         allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
         allocInfo.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 
-        if (vmaCreateImage(allocator, &imageInfo, &allocInfo, &pageTableImages[mip],
+        auto vkImageInfo = static_cast<VkImageCreateInfo>(imageInfo);
+        if (vmaCreateImage(allocator, &vkImageInfo, &allocInfo, &pageTableImages[mip],
                            &pageTableAllocations[mip], nullptr) != VK_SUCCESS) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create page table image for mip %u", mip);
             return false;
         }
 
         // Create image view
-        VkImageViewCreateInfo viewInfo{};
-        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        viewInfo.image = pageTableImages[mip];
-        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        viewInfo.format = VK_FORMAT_R8G8B8A8_UINT;
-        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        viewInfo.subresourceRange.baseMipLevel = 0;
-        viewInfo.subresourceRange.levelCount = 1;
-        viewInfo.subresourceRange.baseArrayLayer = 0;
-        viewInfo.subresourceRange.layerCount = 1;
+        ImageViewCreateInfo viewInfo{
+            {},                                          // flags
+            pageTableImages[mip],
+            ImageViewType::e2D,
+            Format::eR8G8B8A8Uint,
+            ComponentMapping{},                          // identity swizzle
+            ImageSubresourceRange{ImageAspectFlagBits::eColor, 0, 1, 0, 1}
+        };
 
-        if (vkCreateImageView(device, &viewInfo, nullptr, &pageTableViews[mip]) != VK_SUCCESS) {
+        auto vkViewInfo = static_cast<VkImageViewCreateInfo>(viewInfo);
+        if (vkCreateImageView(device, &vkViewInfo, nullptr, &pageTableViews[mip]) != VK_SUCCESS) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create page table view for mip %u", mip);
             return false;
         }

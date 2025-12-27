@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cstring>
 
+using namespace vk;
+
 namespace VirtualTexture {
 
 bool VirtualTextureCache::init(VkDevice device, VmaAllocator allocator,
@@ -95,45 +97,45 @@ void VirtualTextureCache::destroy(VkDevice device, VmaAllocator allocator) {
 
 bool VirtualTextureCache::createCacheTexture(VkDevice device, VmaAllocator allocator,
                                               VkCommandPool commandPool, VkQueue queue) {
-    VkFormat cacheFormat = useCompression_ ? VK_FORMAT_BC1_RGB_SRGB_BLOCK : VK_FORMAT_R8G8B8A8_SRGB;
+    Format cacheFormat = useCompression_ ? Format::eBc1RgbSrgbBlock : Format::eR8G8B8A8Srgb;
 
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.format = cacheFormat;
-    imageInfo.extent.width = config.cacheSizePixels;
-    imageInfo.extent.height = config.cacheSizePixels;
-    imageInfo.extent.depth = 1;
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    // Create cache image
+    ImageCreateInfo imageInfo{
+        {},                                          // flags
+        ImageType::e2D,
+        cacheFormat,
+        Extent3D{config.cacheSizePixels, config.cacheSizePixels, 1},
+        1, 1,                                        // mipLevels, arrayLayers
+        SampleCountFlagBits::e1,
+        ImageTiling::eOptimal,
+        ImageUsageFlagBits::eTransferDst | ImageUsageFlagBits::eSampled,
+        SharingMode::eExclusive,
+        0, nullptr,                                  // queueFamilyIndexCount, pQueueFamilyIndices
+        ImageLayout::eUndefined
+    };
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
     allocInfo.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 
-    if (vmaCreateImage(allocator, &imageInfo, &allocInfo, &cacheImage,
+    auto vkImageInfo = static_cast<VkImageCreateInfo>(imageInfo);
+    if (vmaCreateImage(allocator, &vkImageInfo, &allocInfo, &cacheImage,
                        &cacheAllocation, nullptr) != VK_SUCCESS) {
         return false;
     }
 
     // Create image view
-    VkImageViewCreateInfo viewInfo{};
-    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.image = cacheImage;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format = cacheFormat;
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = 1;
-    viewInfo.subresourceRange.baseArrayLayer = 0;
-    viewInfo.subresourceRange.layerCount = 1;
+    ImageViewCreateInfo viewInfo{
+        {},                                          // flags
+        cacheImage,
+        ImageViewType::e2D,
+        cacheFormat,
+        ComponentMapping{},                          // identity swizzle
+        ImageSubresourceRange{ImageAspectFlagBits::eColor, 0, 1, 0, 1}
+    };
 
-    if (vkCreateImageView(device, &viewInfo, nullptr, &cacheImageView) != VK_SUCCESS) {
+    auto vkViewInfo = static_cast<VkImageViewCreateInfo>(viewInfo);
+    if (vkCreateImageView(device, &vkViewInfo, nullptr, &cacheImageView) != VK_SUCCESS) {
         return false;
     }
 

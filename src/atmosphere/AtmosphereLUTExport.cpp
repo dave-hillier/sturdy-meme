@@ -7,6 +7,8 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
 
+using namespace vk;
+
 bool AtmosphereLUTSystem::exportImageToPNG(VkImage image, VkFormat format, uint32_t width, uint32_t height, const std::string& filename) {
     // Determine channel count from format
     uint32_t channelCount = 0;
@@ -26,31 +28,35 @@ bool AtmosphereLUTSystem::exportImageToPNG(VkImage image, VkFormat format, uint3
     }
 
     // Create staging buffer with correct size based on actual format
-    VkDeviceSize imageSize = width * height * channelCount * sizeof(uint16_t);
+    DeviceSize imageSize = width * height * channelCount * sizeof(uint16_t);
 
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = imageSize;
-    bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    BufferCreateInfo bufferInfo{
+        {},                                          // flags
+        imageSize,                                   // size
+        BufferUsageFlagBits::eTransferDst,
+        SharingMode::eExclusive,
+        0, nullptr                                   // queueFamilyIndexCount, pQueueFamilyIndices
+    };
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_GPU_TO_CPU;
 
+    auto vkBufferInfo = static_cast<VkBufferCreateInfo>(bufferInfo);
     ManagedBuffer stagingBuffer;
-    if (!ManagedBuffer::create(allocator, bufferInfo, allocInfo, stagingBuffer)) {
+    if (!ManagedBuffer::create(allocator, vkBufferInfo, allocInfo, stagingBuffer)) {
         SDL_Log("Failed to create staging buffer for PNG export");
         return false;
     }
 
     // Create command buffer for the copy
     VkCommandPool commandPool;
-    VkCommandPoolCreateInfo poolInfo{};
-    poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    poolInfo.queueFamilyIndex = 0; // Assuming graphics queue family 0
-    poolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+    CommandPoolCreateInfo poolInfo{
+        CommandPoolCreateFlagBits::eTransient,       // flags
+        0                                            // queueFamilyIndex (graphics queue family 0)
+    };
 
-    vkCreateCommandPool(device, &poolInfo, nullptr, &commandPool);
+    auto vkPoolInfo = static_cast<VkCommandPoolCreateInfo>(poolInfo);
+    vkCreateCommandPool(device, &vkPoolInfo, nullptr, &commandPool);
 
     VkCommandBuffer commandBuffer;
     VkCommandBufferAllocateInfo allocInfo2{};

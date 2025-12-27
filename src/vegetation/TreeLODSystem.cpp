@@ -12,6 +12,8 @@
 #include <algorithm>
 #include <limits>
 
+using namespace vk;
+
 std::unique_ptr<TreeLODSystem> TreeLODSystem::create(const InitInfo& info) {
     auto system = std::unique_ptr<TreeLODSystem>(new TreeLODSystem());
     if (!system->initInternal(info)) {
@@ -133,28 +135,36 @@ bool TreeLODSystem::createBillboardMesh() {
     billboardIndexCount_ = 6;
 
     // Create vertex buffer
-    VkDeviceSize vertexSize = sizeof(vertices);
-    VkBufferCreateInfo vertexBufferInfo{};
-    vertexBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    vertexBufferInfo.size = vertexSize;
-    vertexBufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    DeviceSize vertexSize = sizeof(vertices);
+    BufferCreateInfo vertexBufferInfo{
+        {},                                              // flags
+        vertexSize,                                      // size
+        BufferUsageFlagBits::eVertexBuffer | BufferUsageFlagBits::eTransferDst,
+        SharingMode::eExclusive,
+        0, nullptr                                       // queueFamilyIndexCount, pQueueFamilyIndices
+    };
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
-    if (vmaCreateBuffer(allocator_, &vertexBufferInfo, &allocInfo,
+    auto vkVertexBufferInfo = static_cast<VkBufferCreateInfo>(vertexBufferInfo);
+    if (vmaCreateBuffer(allocator_, &vkVertexBufferInfo, &allocInfo,
                         &billboardVertexBuffer_, &billboardVertexAllocation_, nullptr) != VK_SUCCESS) {
         return false;
     }
 
     // Create index buffer
-    VkDeviceSize indexSize = sizeof(indices);
-    VkBufferCreateInfo indexBufferInfo{};
-    indexBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    indexBufferInfo.size = indexSize;
-    indexBufferInfo.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    DeviceSize indexSize = sizeof(indices);
+    BufferCreateInfo indexBufferInfo{
+        {},                                              // flags
+        indexSize,                                       // size
+        BufferUsageFlagBits::eIndexBuffer | BufferUsageFlagBits::eTransferDst,
+        SharingMode::eExclusive,
+        0, nullptr                                       // queueFamilyIndexCount, pQueueFamilyIndices
+    };
 
-    if (vmaCreateBuffer(allocator_, &indexBufferInfo, &allocInfo,
+    auto vkIndexBufferInfo = static_cast<VkBufferCreateInfo>(indexBufferInfo);
+    if (vmaCreateBuffer(allocator_, &vkIndexBufferInfo, &allocInfo,
                         &billboardIndexBuffer_, &billboardIndexAllocation_, nullptr) != VK_SUCCESS) {
         return false;
     }
@@ -162,17 +172,21 @@ bool TreeLODSystem::createBillboardMesh() {
     // Upload data via staging buffer
     VkBuffer stagingBuffer;
     VmaAllocation stagingAllocation;
-    VkDeviceSize stagingSize = vertexSize + indexSize;
+    DeviceSize stagingSize = vertexSize + indexSize;
 
-    VkBufferCreateInfo stagingInfo{};
-    stagingInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    stagingInfo.size = stagingSize;
-    stagingInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    BufferCreateInfo stagingInfo{
+        {},                                              // flags
+        stagingSize,                                     // size
+        BufferUsageFlagBits::eTransferSrc,
+        SharingMode::eExclusive,
+        0, nullptr                                       // queueFamilyIndexCount, pQueueFamilyIndices
+    };
 
     VmaAllocationCreateInfo stagingAllocInfo{};
     stagingAllocInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
 
-    if (vmaCreateBuffer(allocator_, &stagingInfo, &stagingAllocInfo,
+    auto vkStagingInfo = static_cast<VkBufferCreateInfo>(stagingInfo);
+    if (vmaCreateBuffer(allocator_, &vkStagingInfo, &stagingAllocInfo,
                         &stagingBuffer, &stagingAllocation, nullptr) != VK_SUCCESS) {
         return false;
     }
@@ -615,15 +629,19 @@ bool TreeLODSystem::createInstanceBuffer(size_t maxInstances) {
     maxInstances_ = maxInstances;
     instanceBufferSize_ = maxInstances * sizeof(ImpostorInstanceGPU);
 
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = instanceBufferSize_;
-    bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    BufferCreateInfo bufferInfo{
+        {},                                              // flags
+        instanceBufferSize_,                             // size
+        BufferUsageFlagBits::eVertexBuffer | BufferUsageFlagBits::eTransferDst,
+        SharingMode::eExclusive,
+        0, nullptr                                       // queueFamilyIndexCount, pQueueFamilyIndices
+    };
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
 
-    return vmaCreateBuffer(allocator_, &bufferInfo, &allocInfo,
+    auto vkBufferInfo = static_cast<VkBufferCreateInfo>(bufferInfo);
+    return vmaCreateBuffer(allocator_, &vkBufferInfo, &allocInfo,
                            &instanceBuffer_, &instanceAllocation_, nullptr) == VK_SUCCESS;
 }
 

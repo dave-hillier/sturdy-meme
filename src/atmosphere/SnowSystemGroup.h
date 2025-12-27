@@ -1,7 +1,7 @@
 #pragma once
 
 #include <memory>
-#include <vulkan/vulkan.h>
+#include <vulkan/vulkan.hpp>
 
 // Forward declarations
 class SnowMaskSystem;

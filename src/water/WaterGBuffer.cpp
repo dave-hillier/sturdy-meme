@@ -7,6 +7,8 @@
 #include <array>
 #include <algorithm>
 
+using namespace vk;
+
 std::unique_ptr<WaterGBuffer> WaterGBuffer::create(const InitInfo& info) {
     std::unique_ptr<WaterGBuffer> system(new WaterGBuffer());
     if (!system->initInternal(info)) {
@@ -121,116 +123,113 @@ void WaterGBuffer::resize(VkExtent2D newFullResExtent) {
 }
 
 bool WaterGBuffer::createImages() {
+    VmaAllocationCreateInfo vmaAllocInfo{};
+    vmaAllocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+
     // Data image (RGBA8 - material data)
     {
-        VkImageCreateInfo imageInfo{};
-        imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-        imageInfo.imageType = VK_IMAGE_TYPE_2D;
-        imageInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
-        imageInfo.extent = {gbufferExtent.width, gbufferExtent.height, 1};
-        imageInfo.mipLevels = 1;
-        imageInfo.arrayLayers = 1;
-        imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-        imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-        imageInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-        imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        ImageCreateInfo imageInfo{
+            {},                                  // flags
+            ImageType::e2D,
+            Format::eR8G8B8A8Unorm,
+            Extent3D{gbufferExtent.width, gbufferExtent.height, 1},
+            1, 1,                                // mipLevels, arrayLayers
+            SampleCountFlagBits::e1,
+            ImageTiling::eOptimal,
+            ImageUsageFlagBits::eColorAttachment | ImageUsageFlagBits::eSampled,
+            SharingMode::eExclusive,
+            0, nullptr,                          // queueFamilyIndexCount, pQueueFamilyIndices
+            ImageLayout::eUndefined
+        };
 
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-
-        if (vmaCreateImage(allocator, &imageInfo, &allocInfo, &dataImage, &dataAllocation, nullptr) != VK_SUCCESS) {
+        auto vkImageInfo = static_cast<VkImageCreateInfo>(imageInfo);
+        if (vmaCreateImage(allocator, &vkImageInfo, &vmaAllocInfo, &dataImage, &dataAllocation, nullptr) != VK_SUCCESS) {
             return false;
         }
 
-        VkImageViewCreateInfo viewInfo{};
-        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        viewInfo.image = dataImage;
-        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        viewInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
-        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        viewInfo.subresourceRange.baseMipLevel = 0;
-        viewInfo.subresourceRange.levelCount = 1;
-        viewInfo.subresourceRange.baseArrayLayer = 0;
-        viewInfo.subresourceRange.layerCount = 1;
+        ImageViewCreateInfo viewInfo{
+            {},                                  // flags
+            dataImage,
+            ImageViewType::e2D,
+            Format::eR8G8B8A8Unorm,
+            ComponentMapping{},                  // identity swizzle
+            ImageSubresourceRange{ImageAspectFlagBits::eColor, 0, 1, 0, 1}
+        };
 
-        if (vkCreateImageView(device, &viewInfo, nullptr, &dataImageView) != VK_SUCCESS) {
+        auto vkViewInfo = static_cast<VkImageViewCreateInfo>(viewInfo);
+        if (vkCreateImageView(device, &vkViewInfo, nullptr, &dataImageView) != VK_SUCCESS) {
             return false;
         }
     }
 
     // Normal image (RGBA16F - normals + depth)
     {
-        VkImageCreateInfo imageInfo{};
-        imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-        imageInfo.imageType = VK_IMAGE_TYPE_2D;
-        imageInfo.format = VK_FORMAT_R16G16B16A16_SFLOAT;
-        imageInfo.extent = {gbufferExtent.width, gbufferExtent.height, 1};
-        imageInfo.mipLevels = 1;
-        imageInfo.arrayLayers = 1;
-        imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-        imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-        imageInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-        imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        ImageCreateInfo imageInfo{
+            {},                                  // flags
+            ImageType::e2D,
+            Format::eR16G16B16A16Sfloat,
+            Extent3D{gbufferExtent.width, gbufferExtent.height, 1},
+            1, 1,                                // mipLevels, arrayLayers
+            SampleCountFlagBits::e1,
+            ImageTiling::eOptimal,
+            ImageUsageFlagBits::eColorAttachment | ImageUsageFlagBits::eSampled,
+            SharingMode::eExclusive,
+            0, nullptr,                          // queueFamilyIndexCount, pQueueFamilyIndices
+            ImageLayout::eUndefined
+        };
 
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-
-        if (vmaCreateImage(allocator, &imageInfo, &allocInfo, &normalImage, &normalAllocation, nullptr) != VK_SUCCESS) {
+        auto vkImageInfo = static_cast<VkImageCreateInfo>(imageInfo);
+        if (vmaCreateImage(allocator, &vkImageInfo, &vmaAllocInfo, &normalImage, &normalAllocation, nullptr) != VK_SUCCESS) {
             return false;
         }
 
-        VkImageViewCreateInfo viewInfo{};
-        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        viewInfo.image = normalImage;
-        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        viewInfo.format = VK_FORMAT_R16G16B16A16_SFLOAT;
-        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        viewInfo.subresourceRange.baseMipLevel = 0;
-        viewInfo.subresourceRange.levelCount = 1;
-        viewInfo.subresourceRange.baseArrayLayer = 0;
-        viewInfo.subresourceRange.layerCount = 1;
+        ImageViewCreateInfo viewInfo{
+            {},                                  // flags
+            normalImage,
+            ImageViewType::e2D,
+            Format::eR16G16B16A16Sfloat,
+            ComponentMapping{},                  // identity swizzle
+            ImageSubresourceRange{ImageAspectFlagBits::eColor, 0, 1, 0, 1}
+        };
 
-        if (vkCreateImageView(device, &viewInfo, nullptr, &normalImageView) != VK_SUCCESS) {
+        auto vkViewInfo = static_cast<VkImageViewCreateInfo>(viewInfo);
+        if (vkCreateImageView(device, &vkViewInfo, nullptr, &normalImageView) != VK_SUCCESS) {
             return false;
         }
     }
 
     // Depth image (D32F - water-only depth)
     {
-        VkImageCreateInfo imageInfo{};
-        imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-        imageInfo.imageType = VK_IMAGE_TYPE_2D;
-        imageInfo.format = VK_FORMAT_D32_SFLOAT;
-        imageInfo.extent = {gbufferExtent.width, gbufferExtent.height, 1};
-        imageInfo.mipLevels = 1;
-        imageInfo.arrayLayers = 1;
-        imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-        imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-        imageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-        imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        ImageCreateInfo imageInfo{
+            {},                                  // flags
+            ImageType::e2D,
+            Format::eD32Sfloat,
+            Extent3D{gbufferExtent.width, gbufferExtent.height, 1},
+            1, 1,                                // mipLevels, arrayLayers
+            SampleCountFlagBits::e1,
+            ImageTiling::eOptimal,
+            ImageUsageFlagBits::eDepthStencilAttachment | ImageUsageFlagBits::eSampled,
+            SharingMode::eExclusive,
+            0, nullptr,                          // queueFamilyIndexCount, pQueueFamilyIndices
+            ImageLayout::eUndefined
+        };
 
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-
-        if (vmaCreateImage(allocator, &imageInfo, &allocInfo, &depthImage, &depthAllocation, nullptr) != VK_SUCCESS) {
+        auto vkImageInfo = static_cast<VkImageCreateInfo>(imageInfo);
+        if (vmaCreateImage(allocator, &vkImageInfo, &vmaAllocInfo, &depthImage, &depthAllocation, nullptr) != VK_SUCCESS) {
             return false;
         }
 
-        VkImageViewCreateInfo viewInfo{};
-        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        viewInfo.image = depthImage;
-        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        viewInfo.format = VK_FORMAT_D32_SFLOAT;
-        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-        viewInfo.subresourceRange.baseMipLevel = 0;
-        viewInfo.subresourceRange.levelCount = 1;
-        viewInfo.subresourceRange.baseArrayLayer = 0;
-        viewInfo.subresourceRange.layerCount = 1;
+        ImageViewCreateInfo viewInfo{
+            {},                                  // flags
+            depthImage,
+            ImageViewType::e2D,
+            Format::eD32Sfloat,
+            ComponentMapping{},                  // identity swizzle
+            ImageSubresourceRange{ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
+        };
 
-        if (vkCreateImageView(device, &viewInfo, nullptr, &depthImageView) != VK_SUCCESS) {
+        auto vkViewInfo = static_cast<VkImageViewCreateInfo>(viewInfo);
+        if (vkCreateImageView(device, &vkViewInfo, nullptr, &depthImageView) != VK_SUCCESS) {
             return false;
         }
     }
@@ -272,82 +271,90 @@ void WaterGBuffer::destroyImages() {
 
 bool WaterGBuffer::createRenderPass() {
     // Attachment descriptions
-    std::array<VkAttachmentDescription, 3> attachments{};
+    std::array<AttachmentDescription, 3> attachments{{
+        // Data attachment (RGBA8)
+        {
+            {},                                      // flags
+            Format::eR8G8B8A8Unorm,
+            SampleCountFlagBits::e1,
+            AttachmentLoadOp::eClear,
+            AttachmentStoreOp::eStore,
+            AttachmentLoadOp::eDontCare,             // stencilLoadOp
+            AttachmentStoreOp::eDontCare,            // stencilStoreOp
+            ImageLayout::eUndefined,
+            ImageLayout::eShaderReadOnlyOptimal
+        },
+        // Normal attachment (RGBA16F)
+        {
+            {},                                      // flags
+            Format::eR16G16B16A16Sfloat,
+            SampleCountFlagBits::e1,
+            AttachmentLoadOp::eClear,
+            AttachmentStoreOp::eStore,
+            AttachmentLoadOp::eDontCare,             // stencilLoadOp
+            AttachmentStoreOp::eDontCare,            // stencilStoreOp
+            ImageLayout::eUndefined,
+            ImageLayout::eShaderReadOnlyOptimal
+        },
+        // Depth attachment (D32F)
+        {
+            {},                                      // flags
+            Format::eD32Sfloat,
+            SampleCountFlagBits::e1,
+            AttachmentLoadOp::eClear,
+            AttachmentStoreOp::eStore,
+            AttachmentLoadOp::eDontCare,             // stencilLoadOp
+            AttachmentStoreOp::eDontCare,            // stencilStoreOp
+            ImageLayout::eUndefined,
+            ImageLayout::eDepthStencilReadOnlyOptimal
+        }
+    }};
 
-    // Data attachment (RGBA8)
-    attachments[0].format = VK_FORMAT_R8G8B8A8_UNORM;
-    attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
-    attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    attachments[0].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    // Subpass attachment references
+    std::array<AttachmentReference, 2> colorRefs{{
+        {0, ImageLayout::eColorAttachmentOptimal},
+        {1, ImageLayout::eColorAttachmentOptimal}
+    }};
 
-    // Normal attachment (RGBA16F)
-    attachments[1].format = VK_FORMAT_R16G16B16A16_SFLOAT;
-    attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
-    attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    attachments[1].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    attachments[1].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    AttachmentReference depthRef{2, ImageLayout::eDepthStencilAttachmentOptimal};
 
-    // Depth attachment (D32F)
-    attachments[2].format = VK_FORMAT_D32_SFLOAT;
-    attachments[2].samples = VK_SAMPLE_COUNT_1_BIT;
-    attachments[2].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    attachments[2].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    attachments[2].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    attachments[2].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    attachments[2].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    attachments[2].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
-
-    // Subpass
-    std::array<VkAttachmentReference, 2> colorRefs{};
-    colorRefs[0].attachment = 0;
-    colorRefs[0].layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    colorRefs[1].attachment = 1;
-    colorRefs[1].layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-    VkAttachmentReference depthRef{};
-    depthRef.attachment = 2;
-    depthRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-    VkSubpassDescription subpass{};
-    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    subpass.colorAttachmentCount = static_cast<uint32_t>(colorRefs.size());
-    subpass.pColorAttachments = colorRefs.data();
-    subpass.pDepthStencilAttachment = &depthRef;
+    SubpassDescription subpass{
+        {},                                          // flags
+        PipelineBindPoint::eGraphics,
+        0, nullptr,                                  // inputAttachmentCount, pInputAttachments
+        static_cast<uint32_t>(colorRefs.size()),
+        colorRefs.data(),
+        nullptr,                                     // pResolveAttachments
+        &depthRef
+    };
 
     // Subpass dependencies
-    std::array<VkSubpassDependency, 2> dependencies{};
+    std::array<SubpassDependency, 2> dependencies{{
+        {
+            VK_SUBPASS_EXTERNAL, 0,
+            PipelineStageFlagBits::eFragmentShader,
+            PipelineStageFlagBits::eColorAttachmentOutput | PipelineStageFlagBits::eEarlyFragmentTests,
+            AccessFlagBits::eShaderRead,
+            AccessFlagBits::eColorAttachmentWrite | AccessFlagBits::eDepthStencilAttachmentWrite
+        },
+        {
+            0, VK_SUBPASS_EXTERNAL,
+            PipelineStageFlagBits::eColorAttachmentOutput | PipelineStageFlagBits::eLateFragmentTests,
+            PipelineStageFlagBits::eFragmentShader,
+            AccessFlagBits::eColorAttachmentWrite | AccessFlagBits::eDepthStencilAttachmentWrite,
+            AccessFlagBits::eShaderRead
+        }
+    }};
 
-    dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
-    dependencies[0].dstSubpass = 0;
-    dependencies[0].srcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-    dependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-    dependencies[0].srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-    dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    RenderPassCreateInfo renderPassInfo{
+        {},                                          // flags
+        attachments,
+        subpass,
+        dependencies
+    };
 
-    dependencies[1].srcSubpass = 0;
-    dependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
-    dependencies[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-    dependencies[1].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-    dependencies[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    dependencies[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-    VkRenderPassCreateInfo renderPassInfo{};
-    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    renderPassInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
-    renderPassInfo.pAttachments = attachments.data();
-    renderPassInfo.subpassCount = 1;
-    renderPassInfo.pSubpasses = &subpass;
-    renderPassInfo.dependencyCount = static_cast<uint32_t>(dependencies.size());
-    renderPassInfo.pDependencies = dependencies.data();
-
-    return ManagedRenderPass::create(device, renderPassInfo, renderPass);
+    auto vkRenderPassInfo = static_cast<VkRenderPassCreateInfo>(renderPassInfo);
+    return ManagedRenderPass::create(device, vkRenderPassInfo, renderPass);
 }
 
 bool WaterGBuffer::createFramebuffer() {
@@ -357,6 +364,7 @@ bool WaterGBuffer::createFramebuffer() {
         depthImageView
     };
 
+    // Use raw struct for VkImageView array interop
     VkFramebufferCreateInfo framebufferInfo{};
     framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
     framebufferInfo.renderPass = renderPass.get();
@@ -370,23 +378,26 @@ bool WaterGBuffer::createFramebuffer() {
 }
 
 bool WaterGBuffer::createSampler() {
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.mipLodBias = 0.0f;
-    samplerInfo.anisotropyEnable = VK_FALSE;
-    samplerInfo.maxAnisotropy = 1.0f;
-    samplerInfo.compareEnable = VK_FALSE;
-    samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = 0.0f;
-    samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
+    SamplerCreateInfo samplerInfo{
+        {},                                          // flags
+        Filter::eLinear,                             // magFilter
+        Filter::eLinear,                             // minFilter
+        SamplerMipmapMode::eNearest,
+        SamplerAddressMode::eClampToEdge,            // addressModeU
+        SamplerAddressMode::eClampToEdge,            // addressModeV
+        SamplerAddressMode::eClampToEdge,            // addressModeW
+        0.0f,                                        // mipLodBias
+        VK_FALSE,                                    // anisotropyEnable
+        1.0f,                                        // maxAnisotropy
+        VK_FALSE,                                    // compareEnable
+        {},                                          // compareOp
+        0.0f,                                        // minLod
+        0.0f,                                        // maxLod
+        BorderColor::eFloatOpaqueBlack
+    };
 
-    return ManagedSampler::create(device, samplerInfo, sampler);
+    auto vkSamplerInfo = static_cast<VkSamplerCreateInfo>(samplerInfo);
+    return ManagedSampler::create(device, vkSamplerInfo, sampler);
 }
 
 void WaterGBuffer::beginRenderPass(VkCommandBuffer cmd) {

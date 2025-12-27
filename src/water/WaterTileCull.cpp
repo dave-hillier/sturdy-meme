@@ -7,6 +7,8 @@
 #include <array>
 #include <cstring>
 
+using namespace vk;
+
 std::unique_ptr<WaterTileCull> WaterTileCull::create(const InitInfo& info) {
     std::unique_ptr<WaterTileCull> system(new WaterTileCull());
     if (!system->initInternal(info)) {
@@ -234,21 +236,26 @@ bool WaterTileCull::createComputePipeline() {
     SDL_Log("WaterTileCull compute pipeline created");
 
     // Create depth sampler for tile culling
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_NEAREST;
-    samplerInfo.minFilter = VK_FILTER_NEAREST;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.mipLodBias = 0.0f;
-    samplerInfo.anisotropyEnable = VK_FALSE;
-    samplerInfo.compareEnable = VK_FALSE;
-    samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = 0.0f;
+    SamplerCreateInfo samplerInfo{
+        {},                                          // flags
+        Filter::eNearest,                            // magFilter
+        Filter::eNearest,                            // minFilter
+        SamplerMipmapMode::eNearest,
+        SamplerAddressMode::eClampToEdge,            // addressModeU
+        SamplerAddressMode::eClampToEdge,            // addressModeV
+        SamplerAddressMode::eClampToEdge,            // addressModeW
+        0.0f,                                        // mipLodBias
+        VK_FALSE,                                    // anisotropyEnable
+        1.0f,                                        // maxAnisotropy
+        VK_FALSE,                                    // compareEnable
+        {},                                          // compareOp
+        0.0f,                                        // minLod
+        0.0f,                                        // maxLod
+        BorderColor::eFloatOpaqueBlack
+    };
 
-    if (!ManagedSampler::create(device, samplerInfo, depthSampler)) {
+    auto vkSamplerInfo = static_cast<VkSamplerCreateInfo>(samplerInfo);
+    if (!ManagedSampler::create(device, vkSamplerInfo, depthSampler)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create tile cull depth sampler");
         return false;
     }

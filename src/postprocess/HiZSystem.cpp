@@ -8,6 +8,8 @@
 #include <cstring>
 #include <algorithm>
 
+using namespace vk;
+
 std::unique_ptr<HiZSystem> HiZSystem::create(const InitInfo& info) {
     auto system = std::unique_ptr<HiZSystem>(new HiZSystem());
     if (!system->initInternal(info)) {
@@ -114,19 +116,24 @@ bool HiZSystem::createHiZPyramid() {
     mipLevelCount = hiZPyramid.mipLevelCount;
 
     // Create sampler for Hi-Z reads with mipmap support
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_NEAREST;
-    samplerInfo.minFilter = VK_FILTER_NEAREST;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = static_cast<float>(mipLevelCount);
-    samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+    SamplerCreateInfo samplerInfo{
+        {},                                  // flags
+        Filter::eNearest,
+        Filter::eNearest,
+        SamplerMipmapMode::eNearest,
+        SamplerAddressMode::eClampToEdge,
+        SamplerAddressMode::eClampToEdge,
+        SamplerAddressMode::eClampToEdge,
+        0.0f,                                // mipLodBias
+        VK_FALSE, 1.0f,                      // anisotropyEnable, maxAnisotropy
+        VK_FALSE, {},                        // compareEnable, compareOp
+        0.0f,                                // minLod
+        static_cast<float>(mipLevelCount),   // maxLod
+        BorderColor::eFloatOpaqueWhite
+    };
 
-    if (!ManagedSampler::create(device, samplerInfo, hiZSampler)) {
+    auto vkSamplerInfo = static_cast<VkSamplerCreateInfo>(samplerInfo);
+    if (!ManagedSampler::create(device, vkSamplerInfo, hiZSampler)) {
         SDL_Log("HiZSystem: Failed to create Hi-Z sampler");
         return false;
     }
@@ -159,14 +166,16 @@ bool HiZSystem::createPyramidPipeline() {
     }
 
     // Push constant range
-    VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(HiZPyramidPushConstants);
+    PushConstantRange pushConstantRange{
+        ShaderStageFlagBits::eCompute,
+        0,
+        sizeof(HiZPyramidPushConstants)
+    };
 
     // Pipeline layout
+    auto vkPushConstantRange = static_cast<VkPushConstantRange>(pushConstantRange);
     if (!DescriptorManager::createManagedPipelineLayout(
-            device, pyramidDescSetLayout.get(), pyramidPipelineLayout, {pushConstantRange})) {
+            device, pyramidDescSetLayout.get(), pyramidPipelineLayout, {vkPushConstantRange})) {
         SDL_Log("HiZSystem: Failed to create pyramid pipeline layout");
         return false;
     }
@@ -179,18 +188,21 @@ bool HiZSystem::createPyramidPipeline() {
         return false;
     }
 
-    VkPipelineShaderStageCreateInfo stageInfo{};
-    stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stageInfo.module = *shaderModule;
-    stageInfo.pName = "main";
+    PipelineShaderStageCreateInfo stageInfo{
+        {},                              // flags
+        ShaderStageFlagBits::eCompute,
+        *shaderModule,
+        "main"
+    };
 
-    VkComputePipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    pipelineInfo.stage = stageInfo;
-    pipelineInfo.layout = pyramidPipelineLayout.get();
+    ComputePipelineCreateInfo pipelineInfo{
+        {},                              // flags
+        stageInfo,
+        pyramidPipelineLayout.get()
+    };
 
-    bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, pyramidPipeline);
+    auto vkPipelineInfo = static_cast<VkComputePipelineCreateInfo>(pipelineInfo);
+    bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, vkPipelineInfo, pyramidPipeline);
     vkDestroyShaderModule(device, *shaderModule, nullptr);
 
     if (!success) {
@@ -235,18 +247,21 @@ bool HiZSystem::createCullingPipeline() {
         return false;
     }
 
-    VkPipelineShaderStageCreateInfo stageInfo{};
-    stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stageInfo.module = *shaderModule;
-    stageInfo.pName = "main";
+    PipelineShaderStageCreateInfo stageInfo{
+        {},                              // flags
+        ShaderStageFlagBits::eCompute,
+        *shaderModule,
+        "main"
+    };
 
-    VkComputePipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    pipelineInfo.stage = stageInfo;
-    pipelineInfo.layout = cullingPipelineLayout.get();
+    ComputePipelineCreateInfo pipelineInfo{
+        {},                              // flags
+        stageInfo,
+        cullingPipelineLayout.get()
+    };
 
-    bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, cullingPipeline);
+    auto vkPipelineInfo = static_cast<VkComputePipelineCreateInfo>(pipelineInfo);
+    bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, vkPipelineInfo, cullingPipeline);
     vkDestroyShaderModule(device, *shaderModule, nullptr);
 
     if (!success) {
@@ -279,7 +294,7 @@ bool HiZSystem::createBuffers() {
     objectBufferCapacity = MAX_OBJECTS;
 
     // Create indirect draw buffers (per frame)
-    VkDeviceSize indirectBufferSize = sizeof(DrawIndexedIndirectCommand) * MAX_OBJECTS;
+    VkDeviceSize indirectBufferSize = sizeof(::DrawIndexedIndirectCommand) * MAX_OBJECTS;
     bool success = BufferUtils::PerFrameBufferBuilder()
         .setAllocator(allocator)
         .setFrameCount(framesInFlight)

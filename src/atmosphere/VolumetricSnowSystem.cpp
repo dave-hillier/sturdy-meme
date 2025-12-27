@@ -8,6 +8,8 @@
 #include <cstring>
 #include <array>
 
+using namespace vk;
+
 std::unique_ptr<VolumetricSnowSystem> VolumetricSnowSystem::create(const InitInfo& info) {
     std::unique_ptr<VolumetricSnowSystem> system(new VolumetricSnowSystem());
     if (!system->initInternal(info)) {
@@ -86,44 +88,44 @@ bool VolumetricSnowSystem::createBuffers() {
 
 bool VolumetricSnowSystem::createCascadeTextures() {
     // Create cascade textures (R16F height in meters)
+    ImageCreateInfo imageInfo{
+        {},                                  // flags
+        ImageType::e2D,
+        Format::eR16Sfloat,                  // R16F for height value
+        Extent3D{SNOW_CASCADE_SIZE, SNOW_CASCADE_SIZE, 1},
+        1, 1,                                // mipLevels, arrayLayers
+        SampleCountFlagBits::e1,
+        ImageTiling::eOptimal,
+        ImageUsageFlagBits::eStorage | ImageUsageFlagBits::eSampled,
+        SharingMode::eExclusive,
+        0, nullptr,                          // queueFamilyIndexCount, pQueueFamilyIndices
+        ImageLayout::eUndefined
+    };
+
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+
+    auto vkImageInfo = static_cast<VkImageCreateInfo>(imageInfo);
+
     for (uint32_t i = 0; i < NUM_SNOW_CASCADES; i++) {
-        VkImageCreateInfo imageInfo{};
-        imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-        imageInfo.imageType = VK_IMAGE_TYPE_2D;
-        imageInfo.extent.width = SNOW_CASCADE_SIZE;
-        imageInfo.extent.height = SNOW_CASCADE_SIZE;
-        imageInfo.extent.depth = 1;
-        imageInfo.mipLevels = 1;
-        imageInfo.arrayLayers = 1;
-        imageInfo.format = VK_FORMAT_R16_SFLOAT;  // R16F for height value
-        imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        imageInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-        imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-
-        if (vmaCreateImage(getAllocator(), &imageInfo, &allocInfo,
+        if (vmaCreateImage(getAllocator(), &vkImageInfo, &allocInfo,
                            &cascadeImages[i], &cascadeAllocations[i], nullptr) != VK_SUCCESS) {
             SDL_Log("Failed to create volumetric snow cascade %d image", i);
             return false;
         }
 
         // Create image view
-        VkImageViewCreateInfo viewInfo{};
-        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        viewInfo.image = cascadeImages[i];
-        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        viewInfo.format = VK_FORMAT_R16_SFLOAT;
-        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        viewInfo.subresourceRange.baseMipLevel = 0;
-        viewInfo.subresourceRange.levelCount = 1;
-        viewInfo.subresourceRange.baseArrayLayer = 0;
-        viewInfo.subresourceRange.layerCount = 1;
+        ImageViewCreateInfo viewInfo{
+            {},                              // flags
+            cascadeImages[i],
+            ImageViewType::e2D,
+            Format::eR16Sfloat,
+            ComponentMapping{},              // identity swizzle
+            ImageSubresourceRange{ImageAspectFlagBits::eColor, 0, 1, 0, 1}
+        };
 
-        if (vkCreateImageView(getDevice(), &viewInfo, nullptr, &cascadeViews[i]) != VK_SUCCESS) {
+        auto vkViewInfo = static_cast<VkImageViewCreateInfo>(viewInfo);
+        if (vkCreateImageView(getDevice(), &vkViewInfo, nullptr, &cascadeViews[i]) != VK_SUCCESS) {
             SDL_Log("Failed to create volumetric snow cascade %d image view", i);
             return false;
         }

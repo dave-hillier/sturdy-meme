@@ -8,6 +8,8 @@
 #include <cstring>
 #include <array>
 
+using namespace vk;
+
 std::unique_ptr<SnowMaskSystem> SnowMaskSystem::create(const InitInfo& info) {
     std::unique_ptr<SnowMaskSystem> system(new SnowMaskSystem());
     if (!system->initInternal(info)) {
@@ -83,43 +85,42 @@ bool SnowMaskSystem::createBuffers() {
 
 bool SnowMaskSystem::createSnowMaskTexture() {
     // Create snow mask texture (R16F, single channel for coverage 0-1)
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.extent.width = SNOW_MASK_SIZE;
-    imageInfo.extent.height = SNOW_MASK_SIZE;
-    imageInfo.extent.depth = 1;
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
-    imageInfo.format = VK_FORMAT_R16_SFLOAT;  // R16F for coverage value
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    imageInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    ImageCreateInfo imageInfo{
+        {},                                  // flags
+        ImageType::e2D,
+        Format::eR16Sfloat,                  // R16F for coverage value
+        Extent3D{SNOW_MASK_SIZE, SNOW_MASK_SIZE, 1},
+        1, 1,                                // mipLevels, arrayLayers
+        SampleCountFlagBits::e1,
+        ImageTiling::eOptimal,
+        ImageUsageFlagBits::eStorage | ImageUsageFlagBits::eSampled,
+        SharingMode::eExclusive,
+        0, nullptr,                          // queueFamilyIndexCount, pQueueFamilyIndices
+        ImageLayout::eUndefined
+    };
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
 
-    if (vmaCreateImage(getAllocator(), &imageInfo, &allocInfo,
+    auto vkImageInfo = static_cast<VkImageCreateInfo>(imageInfo);
+    if (vmaCreateImage(getAllocator(), &vkImageInfo, &allocInfo,
                        &snowMaskImage, &snowMaskAllocation, nullptr) != VK_SUCCESS) {
         SDL_Log("Failed to create snow mask image");
         return false;
     }
 
     // Create image view
-    VkImageViewCreateInfo viewInfo{};
-    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.image = snowMaskImage;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format = VK_FORMAT_R16_SFLOAT;
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = 1;
-    viewInfo.subresourceRange.baseArrayLayer = 0;
-    viewInfo.subresourceRange.layerCount = 1;
+    ImageViewCreateInfo viewInfo{
+        {},                              // flags
+        snowMaskImage,
+        ImageViewType::e2D,
+        Format::eR16Sfloat,
+        ComponentMapping{},              // identity swizzle
+        ImageSubresourceRange{ImageAspectFlagBits::eColor, 0, 1, 0, 1}
+    };
 
-    if (vkCreateImageView(getDevice(), &viewInfo, nullptr, &snowMaskView) != VK_SUCCESS) {
+    auto vkViewInfo = static_cast<VkImageViewCreateInfo>(viewInfo);
+    if (vkCreateImageView(getDevice(), &vkViewInfo, nullptr, &snowMaskView) != VK_SUCCESS) {
         SDL_Log("Failed to create snow mask image view");
         return false;
     }

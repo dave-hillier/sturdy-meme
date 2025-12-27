@@ -7,6 +7,8 @@
 #include <cmath>
 #include <array>
 
+using namespace vk;
+
 std::unique_ptr<OceanFFT> OceanFFT::create(const InitInfo& info) {
     std::unique_ptr<OceanFFT> ocean(new OceanFFT());
     if (!ocean->initInternal(info)) {
@@ -73,23 +75,26 @@ bool OceanFFT::initInternal(const InitInfo& info) {
     }
 
     // Create sampler for output textures
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;  // Tiling ocean
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.mipLodBias = 0.0f;
-    samplerInfo.anisotropyEnable = VK_TRUE;
-    samplerInfo.maxAnisotropy = 16.0f;
-    samplerInfo.compareEnable = VK_FALSE;
-    samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = 0.0f;
-    samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
+    SamplerCreateInfo samplerInfo{
+        {},                                  // flags
+        Filter::eLinear,                     // magFilter
+        Filter::eLinear,                     // minFilter
+        SamplerMipmapMode::eLinear,
+        SamplerAddressMode::eRepeat,         // addressModeU - tiling ocean
+        SamplerAddressMode::eRepeat,         // addressModeV
+        SamplerAddressMode::eRepeat,         // addressModeW
+        0.0f,                                // mipLodBias
+        VK_TRUE,                             // anisotropyEnable
+        16.0f,                               // maxAnisotropy
+        VK_FALSE,                            // compareEnable
+        CompareOp::eNever,
+        0.0f,                                // minLod
+        0.0f,                                // maxLod
+        BorderColor::eFloatOpaqueBlack,
+        VK_FALSE                             // unnormalizedCoordinates
+    };
 
-    if (!ManagedSampler::create(device, samplerInfo, sampler)) {
+    if (!ManagedSampler::create(device, static_cast<VkSamplerCreateInfo>(samplerInfo), sampler)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to create sampler");
         return false;
     }
@@ -164,23 +169,26 @@ bool OceanFFT::initInternal(const InitContext& ctx, const OceanParams& oceanPara
     }
 
     // Create sampler for output textures
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;  // Tiling ocean
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.mipLodBias = 0.0f;
-    samplerInfo.anisotropyEnable = VK_TRUE;
-    samplerInfo.maxAnisotropy = 16.0f;
-    samplerInfo.compareEnable = VK_FALSE;
-    samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = 0.0f;
-    samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
+    SamplerCreateInfo samplerInfo{
+        {},                                  // flags
+        Filter::eLinear,                     // magFilter
+        Filter::eLinear,                     // minFilter
+        SamplerMipmapMode::eLinear,
+        SamplerAddressMode::eRepeat,         // addressModeU - tiling ocean
+        SamplerAddressMode::eRepeat,         // addressModeV
+        SamplerAddressMode::eRepeat,         // addressModeW
+        0.0f,                                // mipLodBias
+        VK_TRUE,                             // anisotropyEnable
+        16.0f,                               // maxAnisotropy
+        VK_FALSE,                            // compareEnable
+        CompareOp::eNever,
+        0.0f,                                // minLod
+        0.0f,                                // maxLod
+        BorderColor::eFloatOpaqueBlack,
+        VK_FALSE                             // unnormalizedCoordinates
+    };
 
-    if (!ManagedSampler::create(device, samplerInfo, sampler)) {
+    if (!ManagedSampler::create(device, static_cast<VkSamplerCreateInfo>(samplerInfo), sampler)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to create sampler");
         return false;
     }
@@ -252,38 +260,40 @@ void OceanFFT::cleanup() {
 
 bool OceanFFT::createImage(ManagedImage& image, ManagedImageView& view,
                            VkFormat format, uint32_t width, uint32_t height, VkImageUsageFlags usage) {
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.format = format;
-    imageInfo.extent = {width, height, 1};
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.usage = usage;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    // 
+    ImageCreateInfo imageInfo{
+        {},                                          // flags
+        ImageType::e2D,
+        static_cast<Format>(format),
+        Extent3D{width, height, 1},
+        1, 1,                                        // mipLevels, arrayLayers
+        SampleCountFlagBits::e1,
+        ImageTiling::eOptimal,
+        static_cast<ImageUsageFlags>(usage),
+        SharingMode::eExclusive,
+        0, nullptr,                                  // queueFamilyIndexCount, pQueueFamilyIndices
+        ImageLayout::eUndefined
+    };
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
-    if (!ManagedImage::create(allocator, imageInfo, allocInfo, image)) {
+    auto vkImageInfo = static_cast<VkImageCreateInfo>(imageInfo);
+    if (!ManagedImage::create(allocator, vkImageInfo, allocInfo, image)) {
         return false;
     }
 
-    VkImageViewCreateInfo viewInfo{};
-    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.image = image.get();
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format = format;
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = 1;
-    viewInfo.subresourceRange.baseArrayLayer = 0;
-    viewInfo.subresourceRange.layerCount = 1;
+    ImageViewCreateInfo viewInfo{
+        {},                                          // flags
+        image.get(),
+        ImageViewType::e2D,
+        static_cast<Format>(format),
+        ComponentMapping{},                          // identity swizzle
+        ImageSubresourceRange{ImageAspectFlagBits::eColor, 0, 1, 0, 1}
+    };
 
-    if (!ManagedImageView::create(device, viewInfo, view)) {
+    auto vkViewInfo = static_cast<VkImageViewCreateInfo>(viewInfo);
+    if (!ManagedImageView::create(device, vkViewInfo, view)) {
         return false;
     }
 

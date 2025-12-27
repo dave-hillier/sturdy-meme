@@ -3,6 +3,8 @@
 #include <SDL3/SDL.h>
 #include <cstring>
 
+using namespace vk;
+
 // UBO structures matching shader layouts
 struct BilateralBuildUniforms {
     glm::vec2 inputSize;
@@ -92,43 +94,49 @@ void BilateralGridSystem::cleanup() {
 }
 
 bool BilateralGridSystem::createGridTextures() {
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_3D;
-    imageInfo.format = GRID_FORMAT;
-    imageInfo.extent = {GRID_WIDTH, GRID_HEIGHT, GRID_DEPTH};
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
-                      VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    // 
+    ImageCreateInfo imageInfo{
+        {},                              // flags
+        ImageType::e3D,
+        static_cast<Format>(GRID_FORMAT),
+        Extent3D{GRID_WIDTH, GRID_HEIGHT, GRID_DEPTH},
+        1,                               // mipLevels
+        1,                               // arrayLayers
+        SampleCountFlagBits::e1,
+        ImageTiling::eOptimal,
+        ImageUsageFlagBits::eStorage | ImageUsageFlagBits::eSampled | ImageUsageFlagBits::eTransferDst,
+        SharingMode::eExclusive,
+        0, nullptr,                      // queueFamilyIndices
+        ImageLayout::eUndefined
+    };
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
+    auto vkImageInfo = static_cast<VkImageCreateInfo>(imageInfo);
     for (int i = 0; i < 2; i++) {
-        if (vmaCreateImage(allocator, &imageInfo, &allocInfo,
+        if (vmaCreateImage(allocator, &vkImageInfo, &allocInfo,
                           &gridImages[i], &gridAllocations[i], nullptr) != VK_SUCCESS) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                         "BilateralGridSystem: Failed to create grid image %d", i);
             return false;
         }
 
-        VkImageViewCreateInfo viewInfo{};
-        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        viewInfo.image = gridImages[i];
-        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_3D;
-        viewInfo.format = GRID_FORMAT;
-        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        viewInfo.subresourceRange.baseMipLevel = 0;
-        viewInfo.subresourceRange.levelCount = 1;
-        viewInfo.subresourceRange.baseArrayLayer = 0;
-        viewInfo.subresourceRange.layerCount = 1;
+        ImageViewCreateInfo viewInfo{
+            {},                          // flags
+            gridImages[i],
+            ImageViewType::e3D,
+            static_cast<Format>(GRID_FORMAT),
+            ComponentMapping{},          // identity swizzle
+            ImageSubresourceRange{
+                ImageAspectFlagBits::eColor,
+                0, 1,                    // baseMipLevel, levelCount
+                0, 1                     // baseArrayLayer, layerCount
+            }
+        };
 
-        if (vkCreateImageView(device, &viewInfo, nullptr, &gridViews[i]) != VK_SUCCESS) {
+        auto vkViewInfo = static_cast<VkImageViewCreateInfo>(viewInfo);
+        if (vkCreateImageView(device, &vkViewInfo, nullptr, &gridViews[i]) != VK_SUCCESS) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                         "BilateralGridSystem: Failed to create grid view %d", i);
             return false;
@@ -153,23 +161,29 @@ void BilateralGridSystem::destroyGridResources() {
 }
 
 bool BilateralGridSystem::createSampler() {
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.mipLodBias = 0.0f;
-    samplerInfo.anisotropyEnable = VK_FALSE;
-    samplerInfo.compareEnable = VK_FALSE;
-    samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = 0.0f;
-    samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
+    // 
+    SamplerCreateInfo samplerInfo{
+        {},                                  // flags
+        Filter::eLinear,                     // magFilter
+        Filter::eLinear,                     // minFilter
+        SamplerMipmapMode::eNearest,
+        SamplerAddressMode::eClampToEdge,    // addressModeU
+        SamplerAddressMode::eClampToEdge,    // addressModeV
+        SamplerAddressMode::eClampToEdge,    // addressModeW
+        0.0f,                                // mipLodBias
+        VK_FALSE,                            // anisotropyEnable
+        1.0f,                                // maxAnisotropy
+        VK_FALSE,                            // compareEnable
+        CompareOp::eNever,
+        0.0f,                                // minLod
+        0.0f,                                // maxLod
+        BorderColor::eFloatOpaqueBlack,
+        VK_FALSE                             // unnormalizedCoordinates
+    };
 
     VkSampler sampler;
-    if (vkCreateSampler(device, &samplerInfo, nullptr, &sampler) != VK_SUCCESS) {
+    auto vkSamplerInfo = static_cast<VkSamplerCreateInfo>(samplerInfo);
+    if (vkCreateSampler(device, &vkSamplerInfo, nullptr, &sampler) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                     "BilateralGridSystem: Failed to create sampler");
         return false;
