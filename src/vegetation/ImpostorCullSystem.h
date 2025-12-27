@@ -169,6 +169,9 @@ public:
     // Get tree count
     uint32_t getTreeCount() const { return treeCount_; }
 
+    // Initialize static descriptor set bindings (call once after buffers are created)
+    void initializeDescriptorSets();
+
 private:
     ImpostorCullSystem() = default;
     bool initInternal(const InitInfo& info);
@@ -179,7 +182,7 @@ private:
     bool allocateDescriptorSets();
     bool createBuffers();
 
-    void updateDescriptorSets(uint32_t frameIndex, VkImageView hiZPyramidView, VkSampler hiZSampler);
+    void updateHiZDescriptor(uint32_t frameIndex, VkImageView hiZPyramidView, VkSampler hiZSampler);
 
     VkDevice device_ = VK_NULL_HANDLE;
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;

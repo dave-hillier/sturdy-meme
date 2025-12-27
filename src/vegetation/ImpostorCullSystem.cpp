@@ -383,101 +383,112 @@ void ImpostorCullSystem::updateArchetypeData(const TreeImpostorAtlas* atlas) {
     vmaUnmapMemory(allocator_, archetypeAllocation_);
 }
 
-void ImpostorCullSystem::updateDescriptorSets(uint32_t frameIndex, VkImageView hiZPyramidView, VkSampler hiZSampler) {
-    std::array<VkWriteDescriptorSet, 7> writes{};
+void ImpostorCullSystem::initializeDescriptorSets() {
+    // Initialize static descriptor bindings for all frames
+    for (uint32_t frameIndex = 0; frameIndex < maxFramesInFlight_; ++frameIndex) {
+        std::array<VkWriteDescriptorSet, 6> writes{};
 
-    // Tree input buffer
-    VkDescriptorBufferInfo inputInfo{};
-    inputInfo.buffer = treeInputBuffer_;
-    inputInfo.offset = 0;
-    inputInfo.range = VK_WHOLE_SIZE;
+        // Tree input buffer (static)
+        VkDescriptorBufferInfo inputInfo{};
+        inputInfo.buffer = treeInputBuffer_;
+        inputInfo.offset = 0;
+        inputInfo.range = VK_WHOLE_SIZE;
 
-    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[0].dstSet = cullDescriptorSets_[frameIndex];
-    writes[0].dstBinding = BINDING_TREE_IMPOSTOR_CULL_INPUT;
-    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    writes[0].descriptorCount = 1;
-    writes[0].pBufferInfo = &inputInfo;
+        writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[0].dstSet = cullDescriptorSets_[frameIndex];
+        writes[0].dstBinding = BINDING_TREE_IMPOSTOR_CULL_INPUT;
+        writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[0].descriptorCount = 1;
+        writes[0].pBufferInfo = &inputInfo;
 
-    // Visible output buffer
-    VkDescriptorBufferInfo outputInfo{};
-    outputInfo.buffer = visibleImpostorBuffer_;
-    outputInfo.offset = 0;
-    outputInfo.range = VK_WHOLE_SIZE;
+        // Visible output buffer (static)
+        VkDescriptorBufferInfo outputInfo{};
+        outputInfo.buffer = visibleImpostorBuffer_;
+        outputInfo.offset = 0;
+        outputInfo.range = VK_WHOLE_SIZE;
 
-    writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[1].dstSet = cullDescriptorSets_[frameIndex];
-    writes[1].dstBinding = BINDING_TREE_IMPOSTOR_CULL_OUTPUT;
-    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    writes[1].descriptorCount = 1;
-    writes[1].pBufferInfo = &outputInfo;
+        writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[1].dstSet = cullDescriptorSets_[frameIndex];
+        writes[1].dstBinding = BINDING_TREE_IMPOSTOR_CULL_OUTPUT;
+        writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[1].descriptorCount = 1;
+        writes[1].pBufferInfo = &outputInfo;
 
-    // Indirect draw buffer
-    VkDescriptorBufferInfo indirectInfo{};
-    indirectInfo.buffer = indirectDrawBuffer_;
-    indirectInfo.offset = 0;
-    indirectInfo.range = VK_WHOLE_SIZE;
+        // Indirect draw buffer (static)
+        VkDescriptorBufferInfo indirectInfo{};
+        indirectInfo.buffer = indirectDrawBuffer_;
+        indirectInfo.offset = 0;
+        indirectInfo.range = VK_WHOLE_SIZE;
 
-    writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[2].dstSet = cullDescriptorSets_[frameIndex];
-    writes[2].dstBinding = BINDING_TREE_IMPOSTOR_CULL_INDIRECT;
-    writes[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    writes[2].descriptorCount = 1;
-    writes[2].pBufferInfo = &indirectInfo;
+        writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[2].dstSet = cullDescriptorSets_[frameIndex];
+        writes[2].dstBinding = BINDING_TREE_IMPOSTOR_CULL_INDIRECT;
+        writes[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[2].descriptorCount = 1;
+        writes[2].pBufferInfo = &indirectInfo;
 
-    // Uniform buffer
-    VkDescriptorBufferInfo uniformInfo{};
-    uniformInfo.buffer = uniformBuffers_.buffers[frameIndex];
-    uniformInfo.offset = 0;
-    uniformInfo.range = sizeof(ImpostorCullUniforms);
+        // Uniform buffer (per-frame indexed, but static binding)
+        VkDescriptorBufferInfo uniformInfo{};
+        uniformInfo.buffer = uniformBuffers_.buffers[frameIndex];
+        uniformInfo.offset = 0;
+        uniformInfo.range = sizeof(ImpostorCullUniforms);
 
-    writes[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[3].dstSet = cullDescriptorSets_[frameIndex];
-    writes[3].dstBinding = BINDING_TREE_IMPOSTOR_CULL_UNIFORMS;
-    writes[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    writes[3].descriptorCount = 1;
-    writes[3].pBufferInfo = &uniformInfo;
+        writes[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[3].dstSet = cullDescriptorSets_[frameIndex];
+        writes[3].dstBinding = BINDING_TREE_IMPOSTOR_CULL_UNIFORMS;
+        writes[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        writes[3].descriptorCount = 1;
+        writes[3].pBufferInfo = &uniformInfo;
 
-    // Archetype buffer
-    VkDescriptorBufferInfo archetypeInfo{};
-    archetypeInfo.buffer = archetypeBuffer_;
-    archetypeInfo.offset = 0;
-    archetypeInfo.range = VK_WHOLE_SIZE;
+        // Archetype buffer (static)
+        VkDescriptorBufferInfo archetypeInfo{};
+        archetypeInfo.buffer = archetypeBuffer_;
+        archetypeInfo.offset = 0;
+        archetypeInfo.range = VK_WHOLE_SIZE;
 
-    writes[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[4].dstSet = cullDescriptorSets_[frameIndex];
-    writes[4].dstBinding = BINDING_TREE_IMPOSTOR_CULL_ARCHETYPE;
-    writes[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    writes[4].descriptorCount = 1;
-    writes[4].pBufferInfo = &archetypeInfo;
+        writes[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[4].dstSet = cullDescriptorSets_[frameIndex];
+        writes[4].dstBinding = BINDING_TREE_IMPOSTOR_CULL_ARCHETYPE;
+        writes[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[4].descriptorCount = 1;
+        writes[4].pBufferInfo = &archetypeInfo;
 
-    // Hi-Z pyramid
+        // Visibility cache buffer (per-frame indexed, but static binding)
+        VkDescriptorBufferInfo visibilityInfo{};
+        visibilityInfo.buffer = visibilityCacheBuffers_[frameIndex];
+        visibilityInfo.offset = 0;
+        visibilityInfo.range = VK_WHOLE_SIZE;
+
+        writes[5].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[5].dstSet = cullDescriptorSets_[frameIndex];
+        writes[5].dstBinding = BINDING_TREE_IMPOSTOR_CULL_VISIBILITY;
+        writes[5].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[5].descriptorCount = 1;
+        writes[5].pBufferInfo = &visibilityInfo;
+
+        vkUpdateDescriptorSets(device_, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+    }
+
+    // Reset lastHiZView_ to force Hi-Z binding update on first use
+    lastHiZView_ = VK_NULL_HANDLE;
+}
+
+void ImpostorCullSystem::updateHiZDescriptor(uint32_t frameIndex, VkImageView hiZPyramidView, VkSampler hiZSampler) {
+    // Only update the Hi-Z pyramid descriptor (binding 5)
     VkDescriptorImageInfo hiZInfo{};
     hiZInfo.sampler = hiZSampler;
     hiZInfo.imageView = hiZPyramidView;
     hiZInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-    writes[5].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[5].dstSet = cullDescriptorSets_[frameIndex];
-    writes[5].dstBinding = BINDING_TREE_IMPOSTOR_CULL_HIZ;
-    writes[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    writes[5].descriptorCount = 1;
-    writes[5].pImageInfo = &hiZInfo;
+    VkWriteDescriptorSet write{};
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet = cullDescriptorSets_[frameIndex];
+    write.dstBinding = BINDING_TREE_IMPOSTOR_CULL_HIZ;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    write.descriptorCount = 1;
+    write.pImageInfo = &hiZInfo;
 
-    // Visibility cache buffer for temporal coherence (per-frame)
-    VkDescriptorBufferInfo visibilityInfo{};
-    visibilityInfo.buffer = visibilityCacheBuffers_[frameIndex];
-    visibilityInfo.offset = 0;
-    visibilityInfo.range = VK_WHOLE_SIZE;
-
-    writes[6].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[6].dstSet = cullDescriptorSets_[frameIndex];
-    writes[6].dstBinding = BINDING_TREE_IMPOSTOR_CULL_VISIBILITY;
-    writes[6].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    writes[6].descriptorCount = 1;
-    writes[6].pBufferInfo = &visibilityInfo;
-
-    vkUpdateDescriptorSets(device_, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+    vkUpdateDescriptorSets(device_, 1, &write, 0, nullptr);
 }
 
 void ImpostorCullSystem::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
@@ -591,9 +602,9 @@ void ImpostorCullSystem::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
     memcpy(data, &uniforms, sizeof(ImpostorCullUniforms));
     vmaUnmapMemory(allocator_, uniformBuffers_.allocations[frameIndex]);
 
-    // Update descriptor sets if Hi-Z view changed
-    if (hiZPyramidView != lastHiZView_ || hiZPyramidView != VK_NULL_HANDLE) {
-        updateDescriptorSets(frameIndex, hiZPyramidView, hiZSampler);
+    // Update Hi-Z descriptor only if Hi-Z view changed
+    if (hiZPyramidView != lastHiZView_) {
+        updateHiZDescriptor(frameIndex, hiZPyramidView, hiZSampler);
         lastHiZView_ = hiZPyramidView;
     }
 
