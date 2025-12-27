@@ -76,6 +76,14 @@ struct TreeLODSettings {
     float errorThresholdImpostor = TreeLODConstants::ERROR_THRESHOLD_IMPOSTOR;
     float errorThresholdCull = TreeLODConstants::ERROR_THRESHOLD_CULL;
 
+    // Reduced Detail LOD (LOD1) - intermediate between full geometry and impostor
+    // When enabled, trees at medium distance use simplified geometry with fewer, larger leaves
+    bool enableReducedDetailLOD = false;   // Enable LOD1 (reduced geometry)
+    float errorThresholdReduced = TreeLODConstants::ERROR_THRESHOLD_REDUCED;  // Screen error for LOD1
+    float reducedDetailDistance = TreeLODConstants::REDUCED_DETAIL_DISTANCE;  // Distance for LOD1 (non-SSE mode)
+    float reducedDetailLeafScale = TreeLODConstants::REDUCED_LEAF_SCALE;      // Leaf size multiplier (default 2x)
+    float reducedDetailLeafDensity = TreeLODConstants::REDUCED_LEAF_DENSITY;  // Fraction of leaves (default 50%)
+
     // Impostor settings
     bool enableImpostors = true;
     float impostorBrightness = 1.0f;       // Brightness adjustment for impostors

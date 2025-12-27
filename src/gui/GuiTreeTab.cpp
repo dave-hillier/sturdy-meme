@@ -115,7 +115,89 @@ void GuiTreeTab::render(ITreeControl& treeControl) {
                 }
             }
 
+            // Reduced Detail LOD (LOD1) settings
             ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.9f, 0.7f, 1.0f));
+            ImGui::Text("Reduced Detail LOD (LOD1):");
+            ImGui::PopStyleColor();
+
+            ImGui::Checkbox("Enable LOD1", &settings.enableReducedDetailLOD);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Enable intermediate LOD with reduced geometry.\n"
+                                  "Uses fewer, larger leaves at medium distance.\n"
+                                  "Bridges gap between full detail and impostor.");
+            }
+
+            if (settings.enableReducedDetailLOD) {
+                ImGui::Indent();
+
+                if (settings.useScreenSpaceError) {
+                    // Clamp reduced threshold between full and impostor
+                    float minReduced = settings.errorThresholdImpostor + 0.1f;
+                    float maxReduced = settings.errorThresholdFull - 0.1f;
+                    if (settings.errorThresholdReduced < minReduced) {
+                        settings.errorThresholdReduced = minReduced;
+                    }
+                    if (settings.errorThresholdReduced > maxReduced) {
+                        settings.errorThresholdReduced = maxReduced;
+                    }
+                    ImGui::SliderFloat("LOD1 Threshold", &settings.errorThresholdReduced, minReduced, maxReduced, "%.2f px");
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::SetTooltip("Screen error threshold for LOD1.\n"
+                                          "Must be between Detail (%.1f) and Impostor (%.1f).\n"
+                                          "Trees with error below this use reduced geometry.",
+                                          settings.errorThresholdFull, settings.errorThresholdImpostor);
+                    }
+                } else {
+                    // Distance-based threshold
+                    float maxDist = settings.fullDetailDistance - 10.0f;
+                    if (settings.reducedDetailDistance > maxDist) {
+                        settings.reducedDetailDistance = maxDist;
+                    }
+                    ImGui::SliderFloat("LOD1 Distance", &settings.reducedDetailDistance, 50.0f, maxDist, "%.0f m");
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::SetTooltip("Trees beyond this distance use reduced geometry.\n"
+                                          "Must be less than Full Detail Distance (%.0f m).",
+                                          settings.fullDetailDistance);
+                    }
+                }
+
+                ImGui::Spacing();
+                ImGui::Text("LOD1 Leaf Settings:");
+                ImGui::SliderFloat("Leaf Scale", &settings.reducedDetailLeafScale, 1.0f, 4.0f, "%.1fx");
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Size multiplier for LOD1 leaves.\n"
+                                      "Larger leaves compensate for reduced count.\n"
+                                      "Default: 2x (half leaves, double size).");
+                }
+
+                ImGui::SliderFloat("Leaf Density", &settings.reducedDetailLeafDensity, 0.1f, 1.0f, "%.0f%%",
+                                   ImGuiSliderFlags_AlwaysClamp);
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Fraction of leaves to render in LOD1.\n"
+                                      "0.5 = 50%% of leaves (every other leaf).\n"
+                                      "Lower = better performance, less detail.");
+                }
+
+                // Show effective leaf coverage
+                float coverage = settings.reducedDetailLeafScale * settings.reducedDetailLeafScale * settings.reducedDetailLeafDensity;
+                ImGui::TextColored(
+                    coverage >= 0.9f ? ImVec4(0.5f, 1.0f, 0.5f, 1.0f) :
+                    coverage >= 0.7f ? ImVec4(1.0f, 1.0f, 0.5f, 1.0f) :
+                                       ImVec4(1.0f, 0.5f, 0.5f, 1.0f),
+                    "Effective coverage: %.0f%%", coverage * 100.0f);
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Approximate visual coverage compared to LOD0.\n"
+                                      "= scale^2 * density\n"
+                                      "100%% = same coverage as full detail.");
+                }
+
+                ImGui::Unindent();
+            }
+
+            ImGui::Spacing();
+            ImGui::Separator();
             ImGui::Text("Impostor Appearance:");
             ImGui::SliderFloat("Brightness", &settings.impostorBrightness, 0.0f, 2.0f, "%.2f");
             ImGui::SliderFloat("Normal Strength", &settings.normalStrength, 0.0f, 1.0f, "%.2f");

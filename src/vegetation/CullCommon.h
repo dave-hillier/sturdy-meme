@@ -60,12 +60,14 @@ inline void extractFrustumPlanes(const glm::mat4& viewProj, glm::vec4* outPlanes
 // Screen-space error LOD thresholds (used by TreeLODSystem and ImpostorCullSystem)
 namespace TreeLODConstants {
     constexpr float ERROR_THRESHOLD_FULL = 2.0f;        // Above: full geometry (close trees)
+    constexpr float ERROR_THRESHOLD_REDUCED = 1.5f;     // Above: reduced geometry LOD1 (medium trees)
     constexpr float ERROR_THRESHOLD_IMPOSTOR = 1.0f;    // Below: full impostor (far trees)
     constexpr float ERROR_THRESHOLD_CULL = 0.25f;       // Below: cull entirely (very far)
 
     // Distance-based LOD thresholds (used by TreeLeafCulling for leaf instances)
     // These should be consistent with screen-space error when possible
     constexpr float FULL_DETAIL_DISTANCE = 250.0f;      // Full geometry below this
+    constexpr float REDUCED_DETAIL_DISTANCE = 150.0f;   // Reduced geometry LOD1 below this
     constexpr float MAX_DRAW_DISTANCE = 500.0f;         // Maximum leaf visibility
     constexpr float LOD_TRANSITION_START = 150.0f;      // Start transitioning LOD
     constexpr float LOD_TRANSITION_END = 250.0f;        // Finish transitioning LOD
@@ -77,6 +79,10 @@ namespace TreeLODConstants {
     // Impostor sizing margin - adds padding to ensure tree fits in billboard
     // Used during atlas capture and runtime sizing calculations
     constexpr float IMPOSTOR_SIZE_MARGIN = 1.15f;
+
+    // Reduced detail LOD1 settings
+    constexpr float REDUCED_LEAF_SCALE = 2.0f;          // Leaf size multiplier for LOD1
+    constexpr float REDUCED_LEAF_DENSITY = 0.5f;        // Fraction of leaves to render (50%)
 }
 
 // ============================================================================
