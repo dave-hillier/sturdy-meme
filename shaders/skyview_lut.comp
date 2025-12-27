@@ -71,6 +71,14 @@ void main() {
     // Decode view direction from UV
     vec3 viewDir = SkyViewUVToDirection(uv);
 
+    // Mirror below-horizon rays to above-horizon
+    // This makes the LUT symmetric and continuous at the horizon
+    // sky.frag handles actual below-horizon appearance via horizonBlend
+    viewDir.y = abs(viewDir.y);
+    // Ensure we don't get exactly 0 which could cause issues
+    viewDir.y = max(viewDir.y, 0.0001);
+    viewDir = normalize(viewDir);
+
     // Camera position
     vec3 sunDir = normalize(uAtmosphere.sunDirection.xyz);
     float cameraAltitude = uAtmosphere.cameraPosition.w;
