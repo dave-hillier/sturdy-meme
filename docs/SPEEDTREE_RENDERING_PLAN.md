@@ -234,15 +234,23 @@ For each enhancement:
 
 ### Problem 1: Leaf Flickering
 
-**Root cause**: Leaf culling uses continuous distance-based LOD dropping without hysteresis.
+**Root cause**: Leaf culling uses continuous `lodBlendFactor` for stochastic culling. Even tiny floating point variations cause different leaves to be culled each frame.
 
 In `tree_leaf_cull_common.glsl`:
 ```glsl
-float dropThreshold = lodFactor * maxDropRate;
-return instanceHash < dropThreshold;  // Flickers as lodFactor changes!
+// This flickers because lodBlendFactor has floating point noise!
+if (lodBlendFactor > 0.0) {
+    float adjustedBlend = sqrt(lodBlendFactor);
+    if (instanceHash < adjustedBlend) {  // Different leaves each frame!
+        return true;
+    }
+}
 ```
 
-Small camera movements change `lodFactor`, causing leaves to pop in/out.
+Even if the camera is still, `lodBlendFactor` computed from screen-space error may vary slightly due to floating point precision in the chain:
+`tanHalfFOV` → `screenError` → `blendFactor` → `adjustedBlend`
+
+A change from 0.249 to 0.251 flips leaves with `instanceHash` around 0.5.
 
 **Solution: Quantized Distance Bands with Hysteresis**
 
@@ -276,9 +284,22 @@ float lodFactor = calculateLodFactor(effectiveDist, lodStart, lodEnd);
 
 This spreads transitions across a range rather than having all leaves switch at the same distance.
 
+**Simplest fix: Quantize the blend factor on CPU**
+
+Before passing `lodBlendFactor` to the GPU, quantize it to discrete steps:
+
+```cpp
+// In TreeLODSystem::update() or TreeLeafCulling::recordCulling()
+// Quantize to 10 discrete levels (0.0, 0.1, 0.2, ... 1.0)
+float quantizedBlend = std::round(lodBlendFactor * 10.0f) / 10.0f;
+treeData.lodBlendFactor = quantizedBlend;
+```
+
+This ensures `lodBlendFactor` only changes when crossing a 0.1 threshold, not on every tiny floating point variation.
+
 **Files to modify:**
-- `shaders/instancing_common.glsl` - Add `lodCullWithHysteresis()` function
-- `shaders/tree_leaf_cull_common.glsl` - Use new function
+- `src/vegetation/TreeLeafCulling.cpp` - Quantize `lodBlendFactor` before GPU upload
+- Or: `src/vegetation/TreeLODSystem.cpp` - Quantize in `update()` before storing
 
 ---
 
