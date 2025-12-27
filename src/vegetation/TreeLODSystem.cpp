@@ -7,6 +7,7 @@
 #include "shaders/bindings.h"
 
 #include <SDL3/SDL.h>
+#include <vulkan/vulkan.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <array>
 #include <algorithm>
@@ -134,27 +135,25 @@ bool TreeLODSystem::createBillboardMesh() {
 
     // Create vertex buffer
     VkDeviceSize vertexSize = sizeof(vertices);
-    VkBufferCreateInfo vertexBufferInfo{};
-    vertexBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    vertexBufferInfo.size = vertexSize;
-    vertexBufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    auto vertexBufferInfo = vk::BufferCreateInfo{}
+        .setSize(vertexSize)
+        .setUsage(vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst);
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
-    if (vmaCreateBuffer(allocator_, &vertexBufferInfo, &allocInfo,
+    if (vmaCreateBuffer(allocator_, reinterpret_cast<const VkBufferCreateInfo*>(&vertexBufferInfo), &allocInfo,
                         &billboardVertexBuffer_, &billboardVertexAllocation_, nullptr) != VK_SUCCESS) {
         return false;
     }
 
     // Create index buffer
     VkDeviceSize indexSize = sizeof(indices);
-    VkBufferCreateInfo indexBufferInfo{};
-    indexBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    indexBufferInfo.size = indexSize;
-    indexBufferInfo.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    auto indexBufferInfo = vk::BufferCreateInfo{}
+        .setSize(indexSize)
+        .setUsage(vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferDst);
 
-    if (vmaCreateBuffer(allocator_, &indexBufferInfo, &allocInfo,
+    if (vmaCreateBuffer(allocator_, reinterpret_cast<const VkBufferCreateInfo*>(&indexBufferInfo), &allocInfo,
                         &billboardIndexBuffer_, &billboardIndexAllocation_, nullptr) != VK_SUCCESS) {
         return false;
     }
@@ -164,15 +163,14 @@ bool TreeLODSystem::createBillboardMesh() {
     VmaAllocation stagingAllocation;
     VkDeviceSize stagingSize = vertexSize + indexSize;
 
-    VkBufferCreateInfo stagingInfo{};
-    stagingInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    stagingInfo.size = stagingSize;
-    stagingInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    auto stagingInfo = vk::BufferCreateInfo{}
+        .setSize(stagingSize)
+        .setUsage(vk::BufferUsageFlagBits::eTransferSrc);
 
     VmaAllocationCreateInfo stagingAllocInfo{};
     stagingAllocInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
 
-    if (vmaCreateBuffer(allocator_, &stagingInfo, &stagingAllocInfo,
+    if (vmaCreateBuffer(allocator_, reinterpret_cast<const VkBufferCreateInfo*>(&stagingInfo), &stagingAllocInfo,
                         &stagingBuffer, &stagingAllocation, nullptr) != VK_SUCCESS) {
         return false;
     }
@@ -184,19 +182,17 @@ bool TreeLODSystem::createBillboardMesh() {
     vmaUnmapMemory(allocator_, stagingAllocation);
 
     // Copy to GPU buffers
-    VkCommandBufferAllocateInfo cmdAllocInfo{};
-    cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    cmdAllocInfo.commandPool = commandPool_;
-    cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    cmdAllocInfo.commandBufferCount = 1;
+    auto cmdAllocInfo = vk::CommandBufferAllocateInfo{}
+        .setCommandPool(commandPool_)
+        .setLevel(vk::CommandBufferLevel::ePrimary)
+        .setCommandBufferCount(1);
 
     VkCommandBuffer cmd;
-    vkAllocateCommandBuffers(device_, &cmdAllocInfo, &cmd);
+    vkAllocateCommandBuffers(device_, reinterpret_cast<const VkCommandBufferAllocateInfo*>(&cmdAllocInfo), &cmd);
 
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(cmd, &beginInfo);
+    auto beginInfo = vk::CommandBufferBeginInfo{}
+        .setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
+    vkBeginCommandBuffer(cmd, reinterpret_cast<const VkCommandBufferBeginInfo*>(&beginInfo));
 
     VkBufferCopy vertexCopy{};
     vertexCopy.size = vertexSize;
@@ -302,112 +298,102 @@ bool TreeLODSystem::createPipeline() {
         return false;
     }
 
-    std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages{};
-    shaderStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    shaderStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-    shaderStages[0].module = *vertModule;
-    shaderStages[0].pName = "main";
-    shaderStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    shaderStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    shaderStages[1].module = *fragModule;
-    shaderStages[1].pName = "main";
+    std::array<vk::PipelineShaderStageCreateInfo, 2> shaderStages = {{
+        vk::PipelineShaderStageCreateInfo{}
+            .setStage(vk::ShaderStageFlagBits::eVertex)
+            .setModule(*vertModule)
+            .setPName("main"),
+        vk::PipelineShaderStageCreateInfo{}
+            .setStage(vk::ShaderStageFlagBits::eFragment)
+            .setModule(*fragModule)
+            .setPName("main")
+    }};
 
     // Vertex input: billboard vertex + instance data
-    std::array<VkVertexInputBindingDescription, 2> bindingDescriptions{};
-    bindingDescriptions[0].binding = 0;
-    bindingDescriptions[0].stride = sizeof(glm::vec3) + sizeof(glm::vec2);  // position + texcoord
-    bindingDescriptions[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+    std::array<vk::VertexInputBindingDescription, 2> bindingDescriptions = {{
+        vk::VertexInputBindingDescription{}
+            .setBinding(0)
+            .setStride(sizeof(glm::vec3) + sizeof(glm::vec2))  // position + texcoord
+            .setInputRate(vk::VertexInputRate::eVertex),
+        vk::VertexInputBindingDescription{}
+            .setBinding(1)
+            .setStride(sizeof(ImpostorInstanceGPU))
+            .setInputRate(vk::VertexInputRate::eInstance)
+    }};
 
-    bindingDescriptions[1].binding = 1;
-    bindingDescriptions[1].stride = sizeof(ImpostorInstanceGPU);
-    bindingDescriptions[1].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
+    std::array<vk::VertexInputAttributeDescription, 10> attributeDescriptions = {{
+        // Per-vertex attributes
+        vk::VertexInputAttributeDescription{}.setLocation(0).setBinding(0).setFormat(vk::Format::eR32G32B32Sfloat).setOffset(0),  // position
+        vk::VertexInputAttributeDescription{}.setLocation(1).setBinding(0).setFormat(vk::Format::eR32G32Sfloat).setOffset(sizeof(glm::vec3)),  // texcoord
+        // Per-instance attributes
+        vk::VertexInputAttributeDescription{}.setLocation(2).setBinding(1).setFormat(vk::Format::eR32G32B32Sfloat).setOffset(offsetof(ImpostorInstanceGPU, position)),
+        vk::VertexInputAttributeDescription{}.setLocation(3).setBinding(1).setFormat(vk::Format::eR32Sfloat).setOffset(offsetof(ImpostorInstanceGPU, scale)),
+        vk::VertexInputAttributeDescription{}.setLocation(4).setBinding(1).setFormat(vk::Format::eR32Sfloat).setOffset(offsetof(ImpostorInstanceGPU, rotation)),
+        vk::VertexInputAttributeDescription{}.setLocation(5).setBinding(1).setFormat(vk::Format::eR32Uint).setOffset(offsetof(ImpostorInstanceGPU, archetypeIndex)),
+        vk::VertexInputAttributeDescription{}.setLocation(6).setBinding(1).setFormat(vk::Format::eR32Sfloat).setOffset(offsetof(ImpostorInstanceGPU, blendFactor)),
+        vk::VertexInputAttributeDescription{}.setLocation(7).setBinding(1).setFormat(vk::Format::eR32Sfloat).setOffset(offsetof(ImpostorInstanceGPU, hSize)),
+        vk::VertexInputAttributeDescription{}.setLocation(8).setBinding(1).setFormat(vk::Format::eR32Sfloat).setOffset(offsetof(ImpostorInstanceGPU, vSize)),
+        vk::VertexInputAttributeDescription{}.setLocation(9).setBinding(1).setFormat(vk::Format::eR32Sfloat).setOffset(offsetof(ImpostorInstanceGPU, baseOffset))
+    }};
 
-    std::array<VkVertexInputAttributeDescription, 10> attributeDescriptions{};
-    // Per-vertex attributes
-    attributeDescriptions[0] = {0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0};  // position
-    attributeDescriptions[1] = {1, 0, VK_FORMAT_R32G32_SFLOAT, sizeof(glm::vec3)};  // texcoord
+    auto vertexInputInfo = vk::PipelineVertexInputStateCreateInfo{}
+        .setVertexBindingDescriptions(bindingDescriptions)
+        .setVertexAttributeDescriptions(attributeDescriptions);
 
-    // Per-instance attributes
-    attributeDescriptions[2] = {2, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(ImpostorInstanceGPU, position)};
-    attributeDescriptions[3] = {3, 1, VK_FORMAT_R32_SFLOAT, offsetof(ImpostorInstanceGPU, scale)};
-    attributeDescriptions[4] = {4, 1, VK_FORMAT_R32_SFLOAT, offsetof(ImpostorInstanceGPU, rotation)};
-    attributeDescriptions[5] = {5, 1, VK_FORMAT_R32_UINT, offsetof(ImpostorInstanceGPU, archetypeIndex)};
-    attributeDescriptions[6] = {6, 1, VK_FORMAT_R32_SFLOAT, offsetof(ImpostorInstanceGPU, blendFactor)};
-    attributeDescriptions[7] = {7, 1, VK_FORMAT_R32_SFLOAT, offsetof(ImpostorInstanceGPU, hSize)};
-    attributeDescriptions[8] = {8, 1, VK_FORMAT_R32_SFLOAT, offsetof(ImpostorInstanceGPU, vSize)};
-    attributeDescriptions[9] = {9, 1, VK_FORMAT_R32_SFLOAT, offsetof(ImpostorInstanceGPU, baseOffset)};
+    auto inputAssembly = vk::PipelineInputAssemblyStateCreateInfo{}
+        .setTopology(vk::PrimitiveTopology::eTriangleList);
 
-    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
-    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vertexInputInfo.vertexBindingDescriptionCount = static_cast<uint32_t>(bindingDescriptions.size());
-    vertexInputInfo.pVertexBindingDescriptions = bindingDescriptions.data();
-    vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
-    vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
+    auto viewportState = vk::PipelineViewportStateCreateInfo{}
+        .setViewportCount(1)
+        .setScissorCount(1);
 
-    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
-    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    auto rasterizer = vk::PipelineRasterizationStateCreateInfo{}
+        .setPolygonMode(vk::PolygonMode::eFill)
+        .setLineWidth(1.0f)
+        .setCullMode(vk::CullModeFlagBits::eNone)  // Billboard faces camera
+        .setFrontFace(vk::FrontFace::eCounterClockwise);
 
-    VkPipelineViewportStateCreateInfo viewportState{};
-    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewportState.viewportCount = 1;
-    viewportState.scissorCount = 1;
+    auto multisampling = vk::PipelineMultisampleStateCreateInfo{}
+        .setRasterizationSamples(vk::SampleCountFlagBits::e1);
 
-    VkPipelineRasterizationStateCreateInfo rasterizer{};
-    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-    rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_NONE;  // Billboard faces camera
-    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    auto depthStencil = vk::PipelineDepthStencilStateCreateInfo{}
+        .setDepthTestEnable(VK_TRUE)
+        .setDepthWriteEnable(VK_TRUE)
+        .setDepthCompareOp(vk::CompareOp::eLess);
 
-    VkPipelineMultisampleStateCreateInfo multisampling{};
-    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    auto colorBlendAttachment = vk::PipelineColorBlendAttachmentState{}
+        .setColorWriteMask(vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
+                          vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA)
+        .setBlendEnable(VK_FALSE);
 
-    VkPipelineDepthStencilStateCreateInfo depthStencil{};
-    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    depthStencil.depthTestEnable = VK_TRUE;
-    depthStencil.depthWriteEnable = VK_TRUE;
-    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+    auto colorBlending = vk::PipelineColorBlendStateCreateInfo{}
+        .setAttachmentCount(1)
+        .setPAttachments(&colorBlendAttachment);
 
-    VkPipelineColorBlendAttachmentState colorBlendAttachment{};
-    colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-                                          VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    colorBlendAttachment.blendEnable = VK_FALSE;
-
-    VkPipelineColorBlendStateCreateInfo colorBlending{};
-    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    colorBlending.attachmentCount = 1;
-    colorBlending.pAttachments = &colorBlendAttachment;
-
-    std::array<VkDynamicState, 2> dynamicStates = {
-        VK_DYNAMIC_STATE_VIEWPORT,
-        VK_DYNAMIC_STATE_SCISSOR
+    std::array<vk::DynamicState, 2> dynamicStates = {
+        vk::DynamicState::eViewport,
+        vk::DynamicState::eScissor
     };
 
-    VkPipelineDynamicStateCreateInfo dynamicState{};
-    dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
-    dynamicState.pDynamicStates = dynamicStates.data();
+    auto dynamicState = vk::PipelineDynamicStateCreateInfo{}
+        .setDynamicStates(dynamicStates);
 
-    VkGraphicsPipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pipelineInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
-    pipelineInfo.pStages = shaderStages.data();
-    pipelineInfo.pVertexInputState = &vertexInputInfo;
-    pipelineInfo.pInputAssemblyState = &inputAssembly;
-    pipelineInfo.pViewportState = &viewportState;
-    pipelineInfo.pRasterizationState = &rasterizer;
-    pipelineInfo.pMultisampleState = &multisampling;
-    pipelineInfo.pDepthStencilState = &depthStencil;
-    pipelineInfo.pColorBlendState = &colorBlending;
-    pipelineInfo.pDynamicState = &dynamicState;
-    pipelineInfo.layout = pipelineLayout;
-    pipelineInfo.renderPass = hdrRenderPass_;
-    pipelineInfo.subpass = 0;
+    auto pipelineInfo = vk::GraphicsPipelineCreateInfo{}
+        .setStages(shaderStages)
+        .setPVertexInputState(&vertexInputInfo)
+        .setPInputAssemblyState(&inputAssembly)
+        .setPViewportState(&viewportState)
+        .setPRasterizationState(&rasterizer)
+        .setPMultisampleState(&multisampling)
+        .setPDepthStencilState(&depthStencil)
+        .setPColorBlendState(&colorBlending)
+        .setPDynamicState(&dynamicState)
+        .setLayout(pipelineLayout)
+        .setRenderPass(hdrRenderPass_)
+        .setSubpass(0);
 
     VkPipeline pipeline;
-    VkResult result = vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline);
+    VkResult result = vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, reinterpret_cast<const VkGraphicsPipelineCreateInfo*>(&pipelineInfo), nullptr, &pipeline);
 
     vkDestroyShaderModule(device_, *vertModule, nullptr);
     vkDestroyShaderModule(device_, *fragModule, nullptr);
@@ -494,106 +480,96 @@ bool TreeLODSystem::createShadowPipeline() {
         return false;
     }
 
-    std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages{};
-    shaderStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    shaderStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-    shaderStages[0].module = *vertModule;
-    shaderStages[0].pName = "main";
-    shaderStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    shaderStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    shaderStages[1].module = *fragModule;
-    shaderStages[1].pName = "main";
+    std::array<vk::PipelineShaderStageCreateInfo, 2> shaderStages = {{
+        vk::PipelineShaderStageCreateInfo{}
+            .setStage(vk::ShaderStageFlagBits::eVertex)
+            .setModule(*vertModule)
+            .setPName("main"),
+        vk::PipelineShaderStageCreateInfo{}
+            .setStage(vk::ShaderStageFlagBits::eFragment)
+            .setModule(*fragModule)
+            .setPName("main")
+    }};
 
     // Vertex input: only billboard quad vertices (instances come from SSBO)
-    VkVertexInputBindingDescription bindingDescription{};
-    bindingDescription.binding = 0;
-    bindingDescription.stride = sizeof(glm::vec3) + sizeof(glm::vec2);
-    bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+    auto bindingDescription = vk::VertexInputBindingDescription{}
+        .setBinding(0)
+        .setStride(sizeof(glm::vec3) + sizeof(glm::vec2))
+        .setInputRate(vk::VertexInputRate::eVertex);
 
-    std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
-    attributeDescriptions[0] = {0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0};                  // inPosition
-    attributeDescriptions[1] = {1, 0, VK_FORMAT_R32G32_SFLOAT, sizeof(glm::vec3)};     // inTexCoord
+    std::array<vk::VertexInputAttributeDescription, 2> attributeDescriptions = {{
+        vk::VertexInputAttributeDescription{}.setLocation(0).setBinding(0).setFormat(vk::Format::eR32G32B32Sfloat).setOffset(0),  // inPosition
+        vk::VertexInputAttributeDescription{}.setLocation(1).setBinding(0).setFormat(vk::Format::eR32G32Sfloat).setOffset(sizeof(glm::vec3))  // inTexCoord
+    }};
 
-    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
-    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vertexInputInfo.vertexBindingDescriptionCount = 1;
-    vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
-    vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
-    vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
+    auto vertexInputInfo = vk::PipelineVertexInputStateCreateInfo{}
+        .setVertexBindingDescriptionCount(1)
+        .setPVertexBindingDescriptions(&bindingDescription)
+        .setVertexAttributeDescriptions(attributeDescriptions);
 
-    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
-    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    auto inputAssembly = vk::PipelineInputAssemblyStateCreateInfo{}
+        .setTopology(vk::PrimitiveTopology::eTriangleList);
 
     // Static viewport and scissor for shadow map
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = static_cast<float>(shadowMapSize_);
-    viewport.height = static_cast<float>(shadowMapSize_);
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
+    auto viewport = vk::Viewport{}
+        .setX(0.0f)
+        .setY(0.0f)
+        .setWidth(static_cast<float>(shadowMapSize_))
+        .setHeight(static_cast<float>(shadowMapSize_))
+        .setMinDepth(0.0f)
+        .setMaxDepth(1.0f);
 
-    VkRect2D scissor{};
-    scissor.offset = {0, 0};
-    scissor.extent = {shadowMapSize_, shadowMapSize_};
+    auto scissor = vk::Rect2D{}
+        .setOffset({0, 0})
+        .setExtent({shadowMapSize_, shadowMapSize_});
 
-    VkPipelineViewportStateCreateInfo viewportState{};
-    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewportState.viewportCount = 1;
-    viewportState.pViewports = &viewport;
-    viewportState.scissorCount = 1;
-    viewportState.pScissors = &scissor;
+    auto viewportState = vk::PipelineViewportStateCreateInfo{}
+        .setViewportCount(1)
+        .setPViewports(&viewport)
+        .setScissorCount(1)
+        .setPScissors(&scissor);
 
-    VkPipelineRasterizationStateCreateInfo rasterizer{};
-    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-    rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_NONE;  // Billboard, no culling
-    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    rasterizer.depthBiasEnable = VK_TRUE;  // Enable depth bias for shadow acne
-    rasterizer.depthBiasConstantFactor = 1.25f;
-    rasterizer.depthBiasSlopeFactor = 1.75f;
+    auto rasterizer = vk::PipelineRasterizationStateCreateInfo{}
+        .setPolygonMode(vk::PolygonMode::eFill)
+        .setLineWidth(1.0f)
+        .setCullMode(vk::CullModeFlagBits::eNone)  // Billboard, no culling
+        .setFrontFace(vk::FrontFace::eCounterClockwise)
+        .setDepthBiasEnable(VK_TRUE)  // Enable depth bias for shadow acne
+        .setDepthBiasConstantFactor(1.25f)
+        .setDepthBiasSlopeFactor(1.75f);
 
-    VkPipelineMultisampleStateCreateInfo multisampling{};
-    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    auto multisampling = vk::PipelineMultisampleStateCreateInfo{}
+        .setRasterizationSamples(vk::SampleCountFlagBits::e1);
 
-    VkPipelineDepthStencilStateCreateInfo depthStencil{};
-    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    depthStencil.depthTestEnable = VK_TRUE;
-    depthStencil.depthWriteEnable = VK_TRUE;
-    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+    auto depthStencil = vk::PipelineDepthStencilStateCreateInfo{}
+        .setDepthTestEnable(VK_TRUE)
+        .setDepthWriteEnable(VK_TRUE)
+        .setDepthCompareOp(vk::CompareOp::eLess);
 
     // No color attachment for shadow pass
-    VkPipelineColorBlendStateCreateInfo colorBlending{};
-    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    colorBlending.attachmentCount = 0;
+    auto colorBlending = vk::PipelineColorBlendStateCreateInfo{}
+        .setAttachmentCount(0);
 
     // No dynamic state - viewport and scissor are static
-    VkPipelineDynamicStateCreateInfo dynamicState{};
-    dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dynamicState.dynamicStateCount = 0;
-    dynamicState.pDynamicStates = nullptr;
+    auto dynamicState = vk::PipelineDynamicStateCreateInfo{}
+        .setDynamicStateCount(0);
 
-    VkGraphicsPipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pipelineInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
-    pipelineInfo.pStages = shaderStages.data();
-    pipelineInfo.pVertexInputState = &vertexInputInfo;
-    pipelineInfo.pInputAssemblyState = &inputAssembly;
-    pipelineInfo.pViewportState = &viewportState;
-    pipelineInfo.pRasterizationState = &rasterizer;
-    pipelineInfo.pMultisampleState = &multisampling;
-    pipelineInfo.pDepthStencilState = &depthStencil;
-    pipelineInfo.pColorBlendState = &colorBlending;
-    pipelineInfo.pDynamicState = &dynamicState;
-    pipelineInfo.layout = pipelineLayout;
-    pipelineInfo.renderPass = shadowRenderPass_;
-    pipelineInfo.subpass = 0;
+    auto pipelineInfo = vk::GraphicsPipelineCreateInfo{}
+        .setStages(shaderStages)
+        .setPVertexInputState(&vertexInputInfo)
+        .setPInputAssemblyState(&inputAssembly)
+        .setPViewportState(&viewportState)
+        .setPRasterizationState(&rasterizer)
+        .setPMultisampleState(&multisampling)
+        .setPDepthStencilState(&depthStencil)
+        .setPColorBlendState(&colorBlending)
+        .setPDynamicState(&dynamicState)
+        .setLayout(pipelineLayout)
+        .setRenderPass(shadowRenderPass_)
+        .setSubpass(0);
 
     VkPipeline pipeline;
-    VkResult result = vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline);
+    VkResult result = vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, reinterpret_cast<const VkGraphicsPipelineCreateInfo*>(&pipelineInfo), nullptr, &pipeline);
 
     vkDestroyShaderModule(device_, *vertModule, nullptr);
     vkDestroyShaderModule(device_, *fragModule, nullptr);
@@ -615,15 +591,14 @@ bool TreeLODSystem::createInstanceBuffer(size_t maxInstances) {
     maxInstances_ = maxInstances;
     instanceBufferSize_ = maxInstances * sizeof(ImpostorInstanceGPU);
 
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = instanceBufferSize_;
-    bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    auto bufferInfo = vk::BufferCreateInfo{}
+        .setSize(instanceBufferSize_)
+        .setUsage(vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst);
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
 
-    return vmaCreateBuffer(allocator_, &bufferInfo, &allocInfo,
+    return vmaCreateBuffer(allocator_, reinterpret_cast<const VkBufferCreateInfo*>(&bufferInfo), &allocInfo,
                            &instanceBuffer_, &instanceAllocation_, nullptr) == VK_SUCCESS;
 }
 

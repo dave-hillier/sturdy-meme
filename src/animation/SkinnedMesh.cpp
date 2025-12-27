@@ -1,6 +1,7 @@
 #include "SkinnedMesh.h"
 #include "VulkanRAII.h"
 #include <SDL3/SDL_log.h>
+#include <vulkan/vulkan.hpp>
 #include <cstring>
 
 void SkinnedMesh::setData(const SkinnedMeshData& data) {
@@ -21,16 +22,15 @@ bool SkinnedMesh::upload(VmaAllocator allocator, VkDevice device, VkCommandPool 
     // Create vertex staging buffer using RAII
     ManagedBuffer stagingVertexBuffer;
     {
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = vertexBufferSize;
-        bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        auto bufferInfo = vk::BufferCreateInfo{}
+            .setSize(vertexBufferSize)
+            .setUsage(vk::BufferUsageFlagBits::eTransferSrc)
+            .setSharingMode(vk::SharingMode::eExclusive);
 
         VmaAllocationCreateInfo allocInfo{};
         allocInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
 
-        if (!ManagedBuffer::create(allocator, bufferInfo, allocInfo, stagingVertexBuffer)) {
+        if (!ManagedBuffer::create(allocator, reinterpret_cast<const VkBufferCreateInfo&>(bufferInfo), allocInfo, stagingVertexBuffer)) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SkinnedMesh: Failed to create vertex staging buffer");
             return false;
         }
@@ -47,16 +47,15 @@ bool SkinnedMesh::upload(VmaAllocator allocator, VkDevice device, VkCommandPool 
     // Create index staging buffer using RAII
     ManagedBuffer stagingIndexBuffer;
     {
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = indexBufferSize;
-        bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        auto bufferInfo = vk::BufferCreateInfo{}
+            .setSize(indexBufferSize)
+            .setUsage(vk::BufferUsageFlagBits::eTransferSrc)
+            .setSharingMode(vk::SharingMode::eExclusive);
 
         VmaAllocationCreateInfo allocInfo{};
         allocInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
 
-        if (!ManagedBuffer::create(allocator, bufferInfo, allocInfo, stagingIndexBuffer)) {
+        if (!ManagedBuffer::create(allocator, reinterpret_cast<const VkBufferCreateInfo&>(bufferInfo), allocInfo, stagingIndexBuffer)) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SkinnedMesh: Failed to create index staging buffer");
             return false;
         }
@@ -73,16 +72,15 @@ bool SkinnedMesh::upload(VmaAllocator allocator, VkDevice device, VkCommandPool 
     // Create device-local vertex buffer using RAII
     ManagedBuffer managedVertexBuffer;
     {
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = vertexBufferSize;
-        bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        auto bufferInfo = vk::BufferCreateInfo{}
+            .setSize(vertexBufferSize)
+            .setUsage(vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eVertexBuffer)
+            .setSharingMode(vk::SharingMode::eExclusive);
 
         VmaAllocationCreateInfo allocInfo{};
         allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
-        if (!ManagedBuffer::create(allocator, bufferInfo, allocInfo, managedVertexBuffer)) {
+        if (!ManagedBuffer::create(allocator, reinterpret_cast<const VkBufferCreateInfo&>(bufferInfo), allocInfo, managedVertexBuffer)) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SkinnedMesh: Failed to create device vertex buffer");
             return false;
         }
@@ -91,16 +89,15 @@ bool SkinnedMesh::upload(VmaAllocator allocator, VkDevice device, VkCommandPool 
     // Create device-local index buffer using RAII
     ManagedBuffer managedIndexBuffer;
     {
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = indexBufferSize;
-        bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        auto bufferInfo = vk::BufferCreateInfo{}
+            .setSize(indexBufferSize)
+            .setUsage(vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eIndexBuffer)
+            .setSharingMode(vk::SharingMode::eExclusive);
 
         VmaAllocationCreateInfo allocInfo{};
         allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
-        if (!ManagedBuffer::create(allocator, bufferInfo, allocInfo, managedIndexBuffer)) {
+        if (!ManagedBuffer::create(allocator, reinterpret_cast<const VkBufferCreateInfo&>(bufferInfo), allocInfo, managedIndexBuffer)) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SkinnedMesh: Failed to create device index buffer");
             return false;
         }

@@ -776,15 +776,14 @@ bool TreeImpostorAtlas::createLeafQuadMesh() {
     // Create staging buffer
     VkBuffer stagingBuffer;
     VmaAllocation stagingAllocation;
-    VkBufferCreateInfo stagingInfo{};
-    stagingInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    stagingInfo.size = stagingSize;
-    stagingInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    auto stagingInfo = vk::BufferCreateInfo{}
+        .setSize(stagingSize)
+        .setUsage(vk::BufferUsageFlagBits::eTransferSrc);
 
     VmaAllocationCreateInfo stagingAllocInfo{};
     stagingAllocInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
 
-    if (vmaCreateBuffer(allocator_, &stagingInfo, &stagingAllocInfo, &stagingBuffer, &stagingAllocation, nullptr) != VK_SUCCESS) {
+    if (vmaCreateBuffer(allocator_, reinterpret_cast<const VkBufferCreateInfo*>(&stagingInfo), &stagingAllocInfo, &stagingBuffer, &stagingAllocation, nullptr) != VK_SUCCESS) {
         return false;
     }
 
@@ -795,41 +794,41 @@ bool TreeImpostorAtlas::createLeafQuadMesh() {
     vmaUnmapMemory(allocator_, stagingAllocation);
 
     // Create GPU buffers
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    auto vertexBufferInfo = vk::BufferCreateInfo{}
+        .setSize(vertexSize)
+        .setUsage(vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst)
+        .setSharingMode(vk::SharingMode::eExclusive);
 
     VmaAllocationCreateInfo gpuAllocInfo{};
     gpuAllocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
-    bufferInfo.size = vertexSize;
-    bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    if (vmaCreateBuffer(allocator_, &bufferInfo, &gpuAllocInfo, &leafQuadVertexBuffer_, &leafQuadVertexAllocation_, nullptr) != VK_SUCCESS) {
+    if (vmaCreateBuffer(allocator_, reinterpret_cast<const VkBufferCreateInfo*>(&vertexBufferInfo), &gpuAllocInfo, &leafQuadVertexBuffer_, &leafQuadVertexAllocation_, nullptr) != VK_SUCCESS) {
         vmaDestroyBuffer(allocator_, stagingBuffer, stagingAllocation);
         return false;
     }
 
-    bufferInfo.size = indexSize;
-    bufferInfo.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    if (vmaCreateBuffer(allocator_, &bufferInfo, &gpuAllocInfo, &leafQuadIndexBuffer_, &leafQuadIndexAllocation_, nullptr) != VK_SUCCESS) {
+    auto indexBufferInfo = vk::BufferCreateInfo{}
+        .setSize(indexSize)
+        .setUsage(vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferDst)
+        .setSharingMode(vk::SharingMode::eExclusive);
+
+    if (vmaCreateBuffer(allocator_, reinterpret_cast<const VkBufferCreateInfo*>(&indexBufferInfo), &gpuAllocInfo, &leafQuadIndexBuffer_, &leafQuadIndexAllocation_, nullptr) != VK_SUCCESS) {
         vmaDestroyBuffer(allocator_, stagingBuffer, stagingAllocation);
         return false;
     }
 
     // Copy to GPU
-    VkCommandBufferAllocateInfo cmdAllocInfo{};
-    cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    cmdAllocInfo.commandPool = commandPool_;
-    cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    cmdAllocInfo.commandBufferCount = 1;
+    auto cmdAllocInfo = vk::CommandBufferAllocateInfo{}
+        .setCommandPool(commandPool_)
+        .setLevel(vk::CommandBufferLevel::ePrimary)
+        .setCommandBufferCount(1);
 
     VkCommandBuffer cmd;
-    vkAllocateCommandBuffers(device_, &cmdAllocInfo, &cmd);
+    vkAllocateCommandBuffers(device_, reinterpret_cast<const VkCommandBufferAllocateInfo*>(&cmdAllocInfo), &cmd);
 
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(cmd, &beginInfo);
+    auto beginInfo = vk::CommandBufferBeginInfo{}
+        .setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
+    vkBeginCommandBuffer(cmd, reinterpret_cast<const VkCommandBufferBeginInfo*>(&beginInfo));
 
     VkBufferCopy vertexCopy{0, 0, vertexSize};
     vkCmdCopyBuffer(cmd, stagingBuffer, leafQuadVertexBuffer_, 1, &vertexCopy);
@@ -938,16 +937,15 @@ int32_t TreeImpostorAtlas::generateArchetype(
                 vmaDestroyBuffer(allocator_, leafCaptureBuffer_, leafCaptureAllocation_);
             }
 
-            VkBufferCreateInfo bufferInfo{};
-            bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-            bufferInfo.size = requiredSize;
-            bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-            bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+            auto bufferInfo = vk::BufferCreateInfo{}
+                .setSize(requiredSize)
+                .setUsage(vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst)
+                .setSharingMode(vk::SharingMode::eExclusive);
 
             VmaAllocationCreateInfo allocInfo{};
             allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
 
-            if (vmaCreateBuffer(allocator_, &bufferInfo, &allocInfo, &leafCaptureBuffer_, &leafCaptureAllocation_, nullptr) != VK_SUCCESS) {
+            if (vmaCreateBuffer(allocator_, reinterpret_cast<const VkBufferCreateInfo*>(&bufferInfo), &allocInfo, &leafCaptureBuffer_, &leafCaptureAllocation_, nullptr) != VK_SUCCESS) {
                 SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create leaf capture buffer");
                 return -1;
             }
