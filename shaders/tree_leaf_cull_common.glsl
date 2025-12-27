@@ -57,21 +57,32 @@ bool cullLeaf(
         return true;
     }
 
-    // LOD blade dropping - use position-based hash for consistent results
-    // Incorporate LOD blend factor for smooth transitions
+    // Per-leaf hash for stable stochastic culling
     float instanceHash = hash2D(leafLocalPos.xz);
+
+    // ANTI-FLICKERING: Add per-leaf distance offset based on hash
+    // This spreads LOD transitions across a range instead of a sharp boundary
+    // Each leaf transitions at a slightly different distance, preventing synchronized popping
+    float hysteresisRange = (lodTransitionEnd - lodTransitionStart) * 0.5;
+    float leafDistOffset = (instanceHash - 0.5) * hysteresisRange;
+    float effectiveDist = distToCamera + leafDistOffset;
+
+    // LOD blade dropping with per-leaf offset distance
     float effectiveDropRate = maxLodDropRate + lodBlendFactor * (1.0 - maxLodDropRate);
-    if (lodCull(distToCamera, lodTransitionStart, lodTransitionEnd,
+    if (lodCull(effectiveDist, lodTransitionStart, lodTransitionEnd,
                 effectiveDropRate, instanceHash)) {
         return true;
     }
 
     // Additional stochastic culling based on LOD blend factor
-    // Use a power curve to make leaves fade out faster than the impostor fades in
-    // At blendFactor=0.5, about 75% of leaves should be culled (sqrt(0.5) ~ 0.71 threshold)
+    // Use per-leaf offset to prevent synchronized culling
     if (lodBlendFactor > 0.0) {
-        float adjustedBlend = sqrt(lodBlendFactor);
-        if (instanceHash < adjustedBlend) {
+        // Quantize blend factor to prevent floating point noise flickering
+        float quantizedBlend = floor(lodBlendFactor * 20.0 + 0.5) / 20.0;
+        float adjustedBlend = sqrt(quantizedBlend);
+        // Add small per-leaf variation to spread transitions
+        float leafVariation = (instanceHash - 0.5) * 0.1;
+        if (instanceHash < adjustedBlend + leafVariation) {
             return true;
         }
     }

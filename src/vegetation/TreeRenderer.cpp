@@ -486,6 +486,10 @@ bool TreeRenderer::isLeafCullingEnabled() const {
     return leafCulling_ && leafCulling_->isEnabled();
 }
 
+uint32_t TreeRenderer::getEstimatedRenderedLeaves() const {
+    return leafCulling_ ? leafCulling_->getEstimatedRenderedLeaves() : 0;
+}
+
 bool TreeRenderer::isSpatialIndexEnabled() const {
     return leafCulling_ && leafCulling_->isSpatialIndexEnabled();
 }

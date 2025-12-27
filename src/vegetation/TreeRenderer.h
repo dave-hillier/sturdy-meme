@@ -162,6 +162,9 @@ public:
     // Check if leaf culling is enabled
     bool isLeafCullingEnabled() const;
 
+    // Get estimated rendered leaf count from last frame (for adaptive LOD)
+    uint32_t getEstimatedRenderedLeaves() const;
+
     // Enable/disable two-phase culling
     void setTwoPhaseLeafCulling(bool enabled);
     bool isTwoPhaseLeafCullingEnabled() const;

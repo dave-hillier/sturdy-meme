@@ -28,6 +28,15 @@ struct TreeLODState {
     uint32_t archetypeIndex = 0;    // Index into impostor atlas
 };
 
+// Adaptive LOD state for performance budget-based quality adjustment
+struct AdaptiveLODState {
+    uint32_t leafBudget = 500000;          // Target max leaves per frame
+    uint32_t lastFrameLeafCount = 0;       // Rendered leaf count from previous frame
+    float adaptiveScale = 1.0f;            // Current LOD threshold scale factor
+    float scaleSmoothing = 0.05f;          // Smoothing factor for scale transitions
+    bool enabled = true;                   // Enable/disable adaptive LOD
+};
+
 // GPU instance data for impostor rendering
 struct ImpostorInstanceGPU {
     glm::vec3 position;
@@ -160,6 +169,12 @@ public:
     };
     const DebugInfo& getDebugInfo() const { return debugInfo_; }
 
+    // Adaptive LOD control
+    AdaptiveLODState& getAdaptiveLODState() { return adaptiveLOD_; }
+    const AdaptiveLODState& getAdaptiveLODState() const { return adaptiveLOD_; }
+    void updateAdaptiveLOD(uint32_t renderedLeafCount);
+    float getAdaptiveScale() const { return adaptiveLOD_.adaptiveScale; }
+
 private:
     TreeLODSystem() = default;
     bool initInternal(const InitInfo& info);
@@ -228,4 +243,7 @@ private:
 
     // Debug info
     DebugInfo debugInfo_;
+
+    // Adaptive LOD state
+    AdaptiveLODState adaptiveLOD_;
 };
