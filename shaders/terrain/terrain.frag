@@ -400,11 +400,7 @@ void main() {
     #endif
 
     // === AERIAL PERSPECTIVE ===
-    vec3 cameraToFrag = fragWorldPos - ubo.cameraPosition.xyz;
-    float viewDistance = length(cameraToFrag);
-    vec3 sunDir = normalize(ubo.sunDirection.xyz);
-    vec3 sunColor = ubo.sunColor.rgb * ubo.sunDirection.w;
-    vec3 atmosphericColor = applyAerialPerspective(color, ubo.cameraPosition.xyz, normalize(cameraToFrag), viewDistance, sunDir, sunColor);
+    vec3 atmosphericColor = applyAerialPerspectiveSimple(color, fragWorldPos);
 
     // Debug snow depth visualization
     if (snow.debugSnowDepth > 0.5 && snow.useVolumetricSnow > 0.5) {

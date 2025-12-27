@@ -842,11 +842,7 @@ void main() {
     finalColor = mix(finalColor, foamColor, totalFoamAmount * 0.85);
 
     // Apply aerial perspective (atmospheric scattering)
-    // Note: viewDistance was already calculated for FBM LOD
-    vec3 viewDir = normalize(fragWorldPos - ubo.cameraPosition.xyz);
-    finalColor = applyAerialPerspective(finalColor, ubo.cameraPosition.xyz,
-                                         viewDir, viewDistance,
-                                         sunDir, sunColor);
+    finalColor = applyAerialPerspectiveSimple(finalColor, fragWorldPos);
 
     // =========================================================================
     // ALPHA - soft shore edges + foam opacity

@@ -80,12 +80,7 @@ void main() {
     );
 
     // Apply aerial perspective for distant leaves
-    vec3 cameraToFrag = fragWorldPos - ubo.cameraPosition.xyz;
-    float viewDist = length(cameraToFrag);
-    vec3 viewDir = normalize(cameraToFrag);
-    vec3 sunDir = normalize(ubo.sunDirection.xyz);  // sunDirection points toward sun
-    vec3 sunColor = ubo.sunColor.rgb * ubo.sunDirection.w;
-    color = applyAerialPerspective(color, ubo.cameraPosition.xyz, viewDir, viewDist, sunDir, sunColor);
+    color = applyAerialPerspectiveSimple(color, fragWorldPos);
 
     // Output with alpha=1.0 since we use alpha-test (discard) for transparency
     outColor = vec4(color, 1.0);

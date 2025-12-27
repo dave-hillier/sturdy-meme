@@ -331,10 +331,7 @@ void main() {
     vec3 emissive = emissiveColor * material.emissiveIntensity;
     finalColor += emissive;
 
-    vec3 cameraToFrag = fragWorldPos - ubo.cameraPosition.xyz;
-    vec3 sunDir = normalize(ubo.sunDirection.xyz);
-    vec3 sunColor = ubo.sunColor.rgb * ubo.sunDirection.w;
-    vec3 atmosphericColor = applyAerialPerspective(finalColor, ubo.cameraPosition.xyz, normalize(cameraToFrag), length(cameraToFrag), sunDir, sunColor);
+    vec3 atmosphericColor = applyAerialPerspectiveSimple(finalColor, fragWorldPos);
 
     // Debug cascade visualization overlay
     if (ubo.debugCascades > 0.5) {

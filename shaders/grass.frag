@@ -225,11 +225,7 @@ void main() {
     vec3 finalColor = (ambient + sunLight + moonLight + dynamicLights + rimLight) * ao;
 
     // === AERIAL PERSPECTIVE ===
-    vec3 cameraToFrag = fragWorldPos - ubo.cameraPosition.xyz;
-    float viewDistance = length(cameraToFrag);
-    vec3 sunDir = normalize(ubo.sunDirection.xyz);
-    vec3 sunColor = ubo.sunColor.rgb * ubo.sunDirection.w;
-    vec3 atmosphericColor = applyAerialPerspective(finalColor, ubo.cameraPosition.xyz, normalize(cameraToFrag), viewDistance, sunDir, sunColor);
+    vec3 atmosphericColor = applyAerialPerspectiveSimple(finalColor, fragWorldPos);
 
     outColor = vec4(atmosphericColor, 1.0);
 }

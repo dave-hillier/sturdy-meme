@@ -191,12 +191,7 @@ void main() {
     );
 
     // Apply aerial perspective for distant impostors
-    vec3 cameraToFrag = fragWorldPos - ubo.cameraPosition.xyz;
-    float viewDist = length(cameraToFrag);
-    vec3 viewDir = normalize(cameraToFrag);
-    vec3 sunDir = normalize(ubo.sunDirection.xyz);
-    vec3 sunColor = ubo.sunColor.rgb * ubo.sunDirection.w;
-    color = applyAerialPerspective(color, ubo.cameraPosition.xyz, viewDir, viewDist, sunDir, sunColor);
+    color = applyAerialPerspectiveSimple(color, fragWorldPos);
 
     outColor = vec4(color, 1.0);
 }
