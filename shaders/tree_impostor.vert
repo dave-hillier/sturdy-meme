@@ -56,8 +56,10 @@ void main() {
     float vSize = inst.sizeAndOffset.y;
     float baseOffset = inst.sizeAndOffset.z;
 
-    // Compute view direction FROM tree TO camera
-    vec3 toCamera = push.cameraPos.xyz - treePos;
+    // Compute view direction FROM tree CENTER to camera (not from base)
+    // baseOffset is the center height of the tree
+    vec3 treeCenter = treePos + vec3(0.0, baseOffset, 0.0);
+    vec3 toCamera = push.cameraPos.xyz - treeCenter;
     float dist = length(toCamera);
     vec3 viewDir = toCamera / dist;
 
@@ -132,7 +134,12 @@ void main() {
         // (which is centerHeight) correctly positions the billboard center
         localPos = right * inPosition.x * hSize * 2.0 +
                    up * (inPosition.y - 0.5) * vSize * 2.0;
-        billboardCenter = treePos + vec3(0.0, baseOffset, 0.0);
+
+        // When tilted, the billboard center needs to move forward to keep the base grounded
+        // The base is at billboardCenter - up * vSize, and we want it to stay at ground level
+        float tiltAngle = (useOctahedral && elevation > 5.0) ? radians(clamp(elevation, 0.0, 80.0)) : 0.0;
+        vec3 tiltCompensation = forward * vSize * sin(tiltAngle);
+        billboardCenter = treePos + vec3(0.0, baseOffset, 0.0) + tiltCompensation;
     }
 
     // Build impostor-to-world rotation matrix
