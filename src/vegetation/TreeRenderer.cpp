@@ -890,3 +890,9 @@ void TreeRenderer::renderShadows(VkCommandBuffer cmd, uint32_t frameIndex,
 void TreeRenderer::setExtent(VkExtent2D newExtent) {
     extent_ = newExtent;
 }
+
+void TreeRenderer::invalidateDescriptorCache() {
+    initializedBarkDescriptors_.clear();
+    initializedLeafDescriptors_.clear();
+    initializedCulledLeafDescriptors_.clear();
+}

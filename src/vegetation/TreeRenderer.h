@@ -160,6 +160,9 @@ public:
     // Update extent on resize
     void setExtent(VkExtent2D newExtent);
 
+    // Invalidate descriptor cache (call when bound resources change, e.g., on resize)
+    void invalidateDescriptorCache();
+
     // Check if leaf culling is enabled
     bool isLeafCullingEnabled() const;
 
