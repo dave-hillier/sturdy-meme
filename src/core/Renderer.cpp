@@ -606,9 +606,12 @@ bool Renderer::render(const Camera& camera) {
         return false;
     }
 
-    // Frame synchronization
+    // Frame synchronization - use non-blocking check first to avoid unnecessary waits
+    // With triple buffering, the fence is often already signaled
     systems_->profiler().beginCpuZone("FenceWait");
-    inFlightFences[currentFrame].wait();
+    if (!inFlightFences[currentFrame].isSignaled()) {
+        inFlightFences[currentFrame].wait();
+    }
     systems_->profiler().endCpuZone("FenceWait");
 
     systems_->profiler().beginCpuZone("AcquireImage");
@@ -674,6 +677,7 @@ bool Renderer::render(const Camera& camera) {
     systems_->wind().updateUniforms(frame.frameIndex);
 
     // Update tree renderer descriptor sets with current frame resources and textures
+    // Each update function internally tracks if it was already initialized and skips redundant updates
     if (systems_->treeRenderer() && systems_->tree()) {
         VkDescriptorBufferInfo windInfo = systems_->wind().getBufferInfo(frame.frameIndex);
 
@@ -714,7 +718,7 @@ bool Renderer::render(const Camera& camera) {
         }
 
         // Update culled leaf descriptor sets (for GPU culling path)
-        // Update for each leaf type to support multiple textures
+        // Note: These may not initialize until leaf culling system is ready
         for (const auto& leafType : systems_->tree()->getLeafTextureTypes()) {
             Texture* leafTex = systems_->tree()->getLeafTexture(leafType);
             if (leafTex) {
@@ -993,7 +997,10 @@ void Renderer::waitForPreviousFrame() {
     // This prevents race conditions where we destroy mesh buffers while the GPU
     // is still reading them from the previous frame's commands.
     uint32_t previousFrame = (currentFrame + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT;
-    inFlightFences[previousFrame].wait();
+    // Use non-blocking check first - often already signaled with triple buffering
+    if (!inFlightFences[previousFrame].isSignaled()) {
+        inFlightFences[previousFrame].wait();
+    }
 }
 
 void Renderer::destroyDepthImageAndView() {

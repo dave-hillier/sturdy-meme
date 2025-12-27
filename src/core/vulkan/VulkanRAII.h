@@ -1010,4 +1010,14 @@ public:
         VkFence f = get();
         return vkResetFences(device(), 1, &f);
     }
+
+    // Non-blocking fence status check (VK_SUCCESS = signaled, VK_NOT_READY = not signaled)
+    VkResult getStatus() const {
+        return vkGetFenceStatus(device(), get());
+    }
+
+    // Convenience method to check if fence is already signaled (non-blocking)
+    bool isSignaled() const {
+        return getStatus() == VK_SUCCESS;
+    }
 };

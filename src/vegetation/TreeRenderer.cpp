@@ -352,6 +352,12 @@ void TreeRenderer::updateBarkDescriptorSet(
     VkImageView barkAO,
     VkSampler barkSampler) {
 
+    // Skip redundant updates - descriptor bindings don't change per-frame
+    std::string key = std::to_string(frameIndex) + ":" + barkType;
+    if (initializedBarkDescriptors_.count(key)) {
+        return;
+    }
+
     // Allocate descriptor set for this type if not already allocated
     if (branchDescriptorSets_[frameIndex].find(barkType) == branchDescriptorSets_[frameIndex].end()) {
         auto sets = descriptorPool_->allocate(branchDescriptorSetLayout_.get(), 1);
@@ -373,6 +379,9 @@ void TreeRenderer::updateBarkDescriptorSet(
           .writeImage(Bindings::TREE_GFX_BARK_ROUGHNESS, barkRoughness, barkSampler)
           .writeImage(Bindings::TREE_GFX_BARK_AO, barkAO, barkSampler)
           .update();
+
+    // Mark as initialized to skip redundant updates
+    initializedBarkDescriptors_.insert(key);
 }
 
 void TreeRenderer::updateLeafDescriptorSet(
@@ -386,6 +395,12 @@ void TreeRenderer::updateLeafDescriptorSet(
     VkSampler leafSampler,
     VkBuffer leafInstanceBuffer,
     VkDeviceSize leafInstanceBufferSize) {
+
+    // Skip redundant updates - descriptor bindings don't change per-frame
+    std::string key = std::to_string(frameIndex) + ":" + leafType;
+    if (initializedLeafDescriptors_.count(key)) {
+        return;
+    }
 
     // Allocate descriptor set for this type if not already allocated
     if (leafDescriptorSets_[frameIndex].find(leafType) == leafDescriptorSets_[frameIndex].end()) {
@@ -407,6 +422,9 @@ void TreeRenderer::updateLeafDescriptorSet(
           .writeImage(Bindings::TREE_GFX_LEAF_ALBEDO, leafAlbedo, leafSampler)
           .writeBuffer(Bindings::TREE_GFX_LEAF_INSTANCES, leafInstanceBuffer, 0, range, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
           .update();
+
+    // Mark as initialized to skip redundant updates
+    initializedLeafDescriptors_.insert(key);
 }
 
 void TreeRenderer::updateCulledLeafDescriptorSet(
@@ -418,6 +436,12 @@ void TreeRenderer::updateCulledLeafDescriptorSet(
     VkSampler shadowSampler,
     VkImageView leafAlbedo,
     VkSampler leafSampler) {
+
+    // Skip redundant updates - descriptor bindings don't change per-frame
+    std::string key = std::to_string(frameIndex) + ":" + leafType;
+    if (initializedCulledLeafDescriptors_.count(key)) {
+        return;
+    }
 
     // Skip if culling not available
     if (!leafCulling_ || leafCulling_->getOutputBuffer() == VK_NULL_HANDLE) {
@@ -444,6 +468,9 @@ void TreeRenderer::updateCulledLeafDescriptorSet(
           .writeBuffer(Bindings::TREE_GFX_LEAF_INSTANCES, leafCulling_->getOutputBuffer(), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
           .writeBuffer(Bindings::TREE_GFX_TREE_DATA, leafCulling_->getTreeRenderDataBuffer(), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
           .update();
+
+    // Mark as initialized to skip redundant updates
+    initializedCulledLeafDescriptors_.insert(key);
 }
 
 VkDescriptorSet TreeRenderer::getBranchDescriptorSet(uint32_t frameIndex, const std::string& barkType) const {
@@ -862,4 +889,10 @@ void TreeRenderer::renderShadows(VkCommandBuffer cmd, uint32_t frameIndex,
 
 void TreeRenderer::setExtent(VkExtent2D newExtent) {
     extent_ = newExtent;
+}
+
+void TreeRenderer::invalidateDescriptorCache() {
+    initializedBarkDescriptors_.clear();
+    initializedLeafDescriptors_.clear();
+    initializedCulledLeafDescriptors_.clear();
 }
