@@ -11,7 +11,7 @@ layout(local_size_x = 256) in;
 // Input: all tree transforms
 struct BranchShadowInput {
     vec4 positionAndScale;     // xyz = position, w = scale
-    vec4 rotationAndArchetype; // x = rotation (radians), y = meshIndex, z = archetypeIndex
+    vec4 rotationAndArchetype; // x = rotation (radians), y = meshIndex, z = archetypeIndex, w = boundingRadius (local-space)
 };
 
 layout(std430, binding = BINDING_TREE_BRANCH_SHADOW_INPUT) readonly buffer InputBuffer {
@@ -116,14 +116,14 @@ void main() {
         return; // Too far, will be rendered as impostor
     }
 
-    // Estimate bounding radius based on tree dimensions
-    // Trees are approximately 15 units tall per scale unit, with canopy spread
-    // Use generous radius to avoid culling nearby tree shadows too aggressively
-    float treeHeight = treeScale * 15.0;
-    float boundingRadius = treeHeight * 0.6;  // Radius covers height plus some horizontal extent
+    // Get actual mesh bounding radius from CPU-computed AABB half-diagonal
+    // This is passed in w component, in local (unscaled) space
+    float localBoundingRadius = tree.rotationAndArchetype.w;
+    float boundingRadius = localBoundingRadius * treeScale;
 
-    // Center the bounding sphere at tree center (roughly half height)
-    vec3 boundingCenter = treePos + vec3(0.0, treeHeight * 0.5, 0.0);
+    // Center the bounding sphere at estimated tree center
+    // For vertical trees, the AABB center height is approximately equal to the radius
+    vec3 boundingCenter = treePos + vec3(0.0, boundingRadius, 0.0);
 
     // Frustum culling against cascade light frustum with margin for shadow projection
     // Shadows can extend beyond the tree depending on light angle

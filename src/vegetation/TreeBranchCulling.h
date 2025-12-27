@@ -19,7 +19,7 @@ class TreeLODSystem;
 // Per-tree branch shadow input data (uploaded to GPU)
 struct BranchShadowInputGPU {
     glm::vec4 positionAndScale;     // xyz = position, w = scale
-    glm::vec4 rotationAndArchetype; // x = rotation (radians), yzw = archetype/mesh index as uint bits
+    glm::vec4 rotationAndArchetype; // x = rotation (radians), y = meshIndex (uint bits), z = archetypeIndex (uint bits), w = boundingRadius (local-space)
 };
 static_assert(sizeof(BranchShadowInputGPU) == 32, "BranchShadowInputGPU must be 32 bytes for std430");
 

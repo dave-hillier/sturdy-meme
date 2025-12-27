@@ -342,6 +342,17 @@ void TreeBranchCulling::updateTreeData(const TreeSystem& treeSystem, const TreeL
         outputOffset += group.maxInstances;
     }
 
+    // Pre-compute bounding sphere radius for each mesh (local-space, unscaled)
+    // This is the half-diagonal of the mesh AABB, ensuring the entire mesh fits
+    std::unordered_map<uint32_t, float> meshBoundingRadius;
+    for (const auto& [meshIndex, treeIndices] : treesByMesh) {
+        const Mesh& mesh = treeSystem.getBranchMesh(meshIndex);
+        const AABB& bounds = mesh.getBounds();
+        glm::vec3 extents = bounds.getExtents();
+        float radius = glm::length(extents);
+        meshBoundingRadius[meshIndex] = radius;
+    }
+
     // Upload input data
     void* mappedInput = nullptr;
     vmaMapMemory(allocator_, inputAllocation_, &mappedInput);
@@ -349,12 +360,14 @@ void TreeBranchCulling::updateTreeData(const TreeSystem& treeSystem, const TreeL
     auto* inputData = static_cast<BranchShadowInputGPU*>(mappedInput);
     for (uint32_t i = 0; i < numTrees_; ++i) {
         const auto& inst = instances[i];
+        // Get the pre-computed bounding radius for this mesh (local-space)
+        float boundingRadius = meshBoundingRadius[inst.meshIndex];
         inputData[i].positionAndScale = glm::vec4(inst.position, inst.scale);
         inputData[i].rotationAndArchetype = glm::vec4(
             inst.rotation,
             glm::uintBitsToFloat(inst.meshIndex),
             glm::uintBitsToFloat(inst.archetypeIndex),
-            0.0f
+            boundingRadius  // Pass actual mesh bounding radius to GPU
         );
     }
 
