@@ -230,6 +230,122 @@ For each enhancement:
 
 ---
 
+## Priority Fix: Leaf Flickering and LOD Clarity
+
+### Problem 1: Leaf Flickering
+
+**Root cause**: Leaf culling uses continuous distance-based LOD dropping without hysteresis.
+
+In `tree_leaf_cull_common.glsl`:
+```glsl
+float dropThreshold = lodFactor * maxDropRate;
+return instanceHash < dropThreshold;  // Flickers as lodFactor changes!
+```
+
+Small camera movements change `lodFactor`, causing leaves to pop in/out.
+
+**Solution: Quantized Distance Bands with Hysteresis**
+
+Replace continuous LOD factor with discrete distance bands:
+
+```glsl
+// Quantize distance into bands (e.g., every 10 meters)
+float bandSize = 10.0;
+float quantizedDist = floor(distToCamera / bandSize) * bandSize;
+
+// Add hysteresis: use different thresholds for appearing vs disappearing
+// Higher lodFactor = more leaves dropped, so:
+// - To keep a visible leaf visible longer: use LOWER effective distance
+// - To delay a hidden leaf appearing: use HIGHER effective distance
+float hysteresis = bandSize * 0.3;  // 30% overlap
+float effectiveDist = wasVisibleLastFrame
+    ? quantizedDist - hysteresis   // Pretend closer → lower lodFactor → stays visible
+    : quantizedDist + hysteresis;  // Pretend farther → higher lodFactor → stays hidden
+
+float lodFactor = calculateLodFactor(effectiveDist, lodStart, lodEnd);
+```
+
+However, tracking per-leaf state is expensive. **Simpler alternative**:
+
+```glsl
+// Use leaf hash to create per-leaf distance offsets (pseudo-hysteresis)
+float leafDistOffset = (instanceHash - 0.5) * hysteresisRange;
+float effectiveDist = distToCamera + leafDistOffset;
+float lodFactor = calculateLodFactor(effectiveDist, lodStart, lodEnd);
+```
+
+This spreads transitions across a range rather than having all leaves switch at the same distance.
+
+**Files to modify:**
+- `shaders/instancing_common.glsl` - Add `lodCullWithHysteresis()` function
+- `shaders/tree_leaf_cull_common.glsl` - Use new function
+
+---
+
+### Problem 2: Confusing Screen-Space Error Metrics
+
+**Current state**: Abstract pixel-based thresholds that are hard to reason about.
+
+**Solution: Add Simple Distance Mode as Alternative**
+
+Keep screen-space error for advanced users, but add a simpler distance-based mode:
+
+```cpp
+struct TreeLODSettings {
+    // Simple mode: direct distance control
+    bool useSimpleDistanceMode = true;
+    float fullDetailDistance = 50.0f;    // Meters - full geometry below this
+    float impostorStartDistance = 80.0f; // Meters - start blending to impostor
+    float impostorOnlyDistance = 120.0f; // Meters - impostor only beyond this
+
+    // Advanced mode: screen-space error (existing)
+    bool useScreenSpaceError = false;
+    float errorThresholdFull = 2.0f;     // Pixels
+    // ...
+};
+```
+
+**Documentation for screen-space error** (add to comments):
+```cpp
+// Screen-space error measures: "How many pixels would fine detail occupy?"
+// Formula: screenError = detailSize × screenHeight / (2 × distance × tan(fov/2))
+//
+// At 1080p with 90° FOV (tan(45°)=1) and 10cm (0.1m) branch detail:
+//   screenError = 0.1 × 1080 / (2 × distance × 1) = 54 / distance
+//
+//   - 13m  → 4.2 pixels (clearly visible branches)
+//   - 27m  → 2.0 pixels (threshold - switch to impostor blend)
+//   - 54m  → 1.0 pixels (full impostor)
+//   - 108m → 0.5 pixels (could cull entirely)
+//
+// errorThresholdFull=2.0 means: "Switch to impostor when branches are <2 pixels"
+// This happens at ~27 meters for 10cm detail at 1080p/90° FOV
+```
+
+**Files to modify:**
+- `src/vegetation/TreeImpostorAtlas.h` - Add simple distance mode to `TreeLODSettings`
+- `src/vegetation/TreeLODSystem.cpp` - Implement simple distance mode path
+- `shaders/tree_impostor_cull.comp` - Support both modes
+
+---
+
+### Implementation Order
+
+1. **Fix leaf flickering first** (most noticeable issue)
+   - Modify `lodCull` to use hash-based distance offsets
+   - Test with single tree scenario
+
+2. **Add simple distance mode** (easier to tune)
+   - Add settings to `TreeLODSettings`
+   - Implement in CPU and GPU LOD paths
+   - Default to simple mode for easier tuning
+
+3. **Document screen-space error** (for advanced users)
+   - Add clear comments explaining the formula
+   - Include distance examples at common resolutions
+
+---
+
 ## References
 
 - [GPU Gems 3 Chapter 4: Next-Generation SpeedTree Rendering](https://developer.nvidia.com/gpugems/gpugems3/part-i-geometry/chapter-4-next-generation-speedtree-rendering)
