@@ -178,8 +178,10 @@ void main() {
         discard;
     }
 
-    // LOD dithered transition (fade-in: blend 0=invisible, 1=visible)
-    if (shouldDiscardForLODFadeIn(fragBlendFactor)) {
+    // LOD dithered transition using staggered crossfade
+    // Impostor fade-in is synchronized with leaf fade-out for true leaf crossfade
+    // The impostor stays visible as backdrop while leaves dither in
+    if (shouldDiscardForLODImpostor(fragBlendFactor)) {
         discard;
     }
 

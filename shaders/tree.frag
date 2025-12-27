@@ -37,9 +37,9 @@ layout(location = 0) out vec4 outColor;
 // Note: Bayer dithering is provided by dither_common.glsl
 
 void main() {
-    // LOD dithered fade-out - discard more pixels as blend factor increases
-    // (inverse of impostor fade-in)
-    if (shouldDiscardForLOD(push.lodBlendFactor)) {
+    // LOD dithered fade-out using staggered crossfade
+    // Trunk fades out faster than leaves, so impostor trunk isn't visible at same time
+    if (shouldDiscardForLODTrunk(push.lodBlendFactor)) {
         discard;
     }
 

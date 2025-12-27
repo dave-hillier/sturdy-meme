@@ -32,9 +32,10 @@ layout(location = 0) out vec4 outColor;
 // Note: Bayer dithering is provided by dither_common.glsl
 
 void main() {
-    // LOD dithered fade-out - discard more pixels as blend factor increases
-    // (matches tree.frag branch fade-out, inverse of impostor fade-in)
-    if (shouldDiscardForLOD(fragLodBlendFactor)) {
+    // LOD dithered fade-out using staggered crossfade
+    // Leaves fade out in sync with impostor fade-in for true leaf crossfade
+    // This prevents the impostor disappearing while leaves are still dithering in
+    if (shouldDiscardForLODLeaves(fragLodBlendFactor)) {
         discard;
     }
 
