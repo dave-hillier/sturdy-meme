@@ -4,6 +4,7 @@
 #include "ShaderLoader.h"
 #include "Bindings.h"
 #include <SDL3/SDL_log.h>
+#include <vulkan/vulkan.hpp>
 
 std::unique_ptr<TreeLeafCulling> TreeLeafCulling::create(const InitInfo& info) {
     auto culling = std::unique_ptr<TreeLeafCulling>(new TreeLeafCulling());
@@ -109,19 +110,17 @@ bool TreeLeafCulling::createLeafCullPipeline() {
     }
     VkShaderModule computeShaderModule = shaderModuleOpt.value();
 
-    VkPipelineShaderStageCreateInfo shaderStageInfo{};
-    shaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    shaderStageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    shaderStageInfo.module = computeShaderModule;
-    shaderStageInfo.pName = "main";
+    auto shaderStageInfo = vk::PipelineShaderStageCreateInfo{}
+        .setStage(vk::ShaderStageFlagBits::eCompute)
+        .setModule(computeShaderModule)
+        .setPName("main");
 
-    VkComputePipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    pipelineInfo.stage = shaderStageInfo;
-    pipelineInfo.layout = cullPipelineLayout_.get();
+    auto pipelineInfo = vk::ComputePipelineCreateInfo{}
+        .setStage(shaderStageInfo)
+        .setLayout(cullPipelineLayout_.get());
 
     VkPipeline rawPipeline;
-    VkResult result = vkCreateComputePipelines(device_, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &rawPipeline);
+    VkResult result = vkCreateComputePipelines(device_, VK_NULL_HANDLE, 1, reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), nullptr, &rawPipeline);
     vkDestroyShaderModule(device_, computeShaderModule, nullptr);
 
     if (result != VK_SUCCESS) {
@@ -158,10 +157,9 @@ bool TreeLeafCulling::createLeafCullBuffers(uint32_t maxLeafInstances, uint32_t 
 
     cullOutputBufferSize_ = NUM_LEAF_TYPES * maxLeavesPerType_ * sizeof(WorldLeafInstanceGPU);
 
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    auto bufferInfo = vk::BufferCreateInfo{}
+        .setUsage(vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eVertexBuffer)
+        .setSharingMode(vk::SharingMode::eExclusive);
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
@@ -171,27 +169,26 @@ bool TreeLeafCulling::createLeafCullBuffers(uint32_t maxLeafInstances, uint32_t 
     cullOutputAllocations_.resize(maxFramesInFlight_, VK_NULL_HANDLE);
 
     for (uint32_t i = 0; i < maxFramesInFlight_; ++i) {
-        bufferInfo.size = cullOutputBufferSize_;
-        if (vmaCreateBuffer(allocator_, &bufferInfo, &allocInfo,
+        bufferInfo.setSize(cullOutputBufferSize_);
+        if (vmaCreateBuffer(allocator_, reinterpret_cast<const VkBufferCreateInfo*>(&bufferInfo), &allocInfo,
                             &cullOutputBuffers_[i], &cullOutputAllocations_[i], nullptr) != VK_SUCCESS) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to create cull output buffer %u", i);
             return false;
         }
     }
 
-    VkBufferCreateInfo indirectInfo{};
-    indirectInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    indirectInfo.size = NUM_LEAF_TYPES * sizeof(VkDrawIndexedIndirectCommand);
-    indirectInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
-                         VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    indirectInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    auto indirectInfo = vk::BufferCreateInfo{}
+        .setSize(NUM_LEAF_TYPES * sizeof(VkDrawIndexedIndirectCommand))
+        .setUsage(vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eIndirectBuffer |
+                  vk::BufferUsageFlagBits::eTransferDst)
+        .setSharingMode(vk::SharingMode::eExclusive);
 
     // Resize vectors to match frames in flight for proper triple buffering
     cullIndirectBuffers_.resize(maxFramesInFlight_, VK_NULL_HANDLE);
     cullIndirectAllocations_.resize(maxFramesInFlight_, VK_NULL_HANDLE);
 
     for (uint32_t i = 0; i < maxFramesInFlight_; ++i) {
-        if (vmaCreateBuffer(allocator_, &indirectInfo, &allocInfo,
+        if (vmaCreateBuffer(allocator_, reinterpret_cast<const VkBufferCreateInfo*>(&indirectInfo), &allocInfo,
                             &cullIndirectBuffers_[i], &cullIndirectAllocations_[i], nullptr) != VK_SUCCESS) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to create cull indirect buffer %u", i);
             return false;
@@ -209,26 +206,24 @@ bool TreeLeafCulling::createLeafCullBuffers(uint32_t maxLeafInstances, uint32_t 
     }
 
     treeDataBufferSize_ = numTrees * sizeof(TreeCullData);
-    VkBufferCreateInfo treeDataInfo{};
-    treeDataInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    treeDataInfo.size = treeDataBufferSize_;
-    treeDataInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    treeDataInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    auto treeDataInfo = vk::BufferCreateInfo{}
+        .setSize(treeDataBufferSize_)
+        .setUsage(vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst)
+        .setSharingMode(vk::SharingMode::eExclusive);
 
-    if (vmaCreateBuffer(allocator_, &treeDataInfo, &allocInfo,
+    if (vmaCreateBuffer(allocator_, reinterpret_cast<const VkBufferCreateInfo*>(&treeDataInfo), &allocInfo,
                         &treeDataBuffer_, &treeDataAllocation_, nullptr) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to create tree cull data buffer");
         return false;
     }
 
     treeRenderDataBufferSize_ = numTrees * sizeof(TreeRenderDataGPU);
-    VkBufferCreateInfo treeRenderDataInfo{};
-    treeRenderDataInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    treeRenderDataInfo.size = treeRenderDataBufferSize_;
-    treeRenderDataInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    treeRenderDataInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    auto treeRenderDataInfo = vk::BufferCreateInfo{}
+        .setSize(treeRenderDataBufferSize_)
+        .setUsage(vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst)
+        .setSharingMode(vk::SharingMode::eExclusive);
 
-    if (vmaCreateBuffer(allocator_, &treeRenderDataInfo, &allocInfo,
+    if (vmaCreateBuffer(allocator_, reinterpret_cast<const VkBufferCreateInfo*>(&treeRenderDataInfo), &allocInfo,
                         &treeRenderDataBuffer_, &treeRenderDataAllocation_, nullptr) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to create tree render data buffer");
         return false;
@@ -271,19 +266,17 @@ bool TreeLeafCulling::createCellCullPipeline() {
     }
     VkShaderModule computeShaderModule = shaderModuleOpt.value();
 
-    VkPipelineShaderStageCreateInfo shaderStageInfo{};
-    shaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    shaderStageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    shaderStageInfo.module = computeShaderModule;
-    shaderStageInfo.pName = "main";
+    auto shaderStageInfo = vk::PipelineShaderStageCreateInfo{}
+        .setStage(vk::ShaderStageFlagBits::eCompute)
+        .setModule(computeShaderModule)
+        .setPName("main");
 
-    VkComputePipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    pipelineInfo.stage = shaderStageInfo;
-    pipelineInfo.layout = cellCullPipelineLayout_.get();
+    auto pipelineInfo = vk::ComputePipelineCreateInfo{}
+        .setStage(shaderStageInfo)
+        .setLayout(cellCullPipelineLayout_.get());
 
     VkPipeline rawPipeline;
-    VkResult result = vkCreateComputePipelines(device_, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &rawPipeline);
+    VkResult result = vkCreateComputePipelines(device_, VK_NULL_HANDLE, 1, reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), nullptr, &rawPipeline);
     vkDestroyShaderModule(device_, computeShaderModule, nullptr);
 
     if (result != VK_SUCCESS) {
@@ -305,16 +298,15 @@ bool TreeLeafCulling::createCellCullBuffers() {
     uint32_t numCells = spatialIndex_->getCellCount();
     visibleCellBufferSize_ = (numCells + 1) * sizeof(uint32_t);
 
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = visibleCellBufferSize_;
-    bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    auto bufferInfo = vk::BufferCreateInfo{}
+        .setSize(visibleCellBufferSize_)
+        .setUsage(vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst)
+        .setSharingMode(vk::SharingMode::eExclusive);
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
-    if (vmaCreateBuffer(allocator_, &bufferInfo, &allocInfo,
+    if (vmaCreateBuffer(allocator_, reinterpret_cast<const VkBufferCreateInfo*>(&bufferInfo), &allocInfo,
                         &visibleCellBuffer_, &visibleCellAllocation_, nullptr) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to create visible cell buffer");
         return false;
@@ -323,14 +315,13 @@ bool TreeLeafCulling::createCellCullBuffers() {
     // Indirect buffer now includes bucket counts/offsets for distance-sorted processing
     // Layout: dispatchX, dispatchY, dispatchZ, totalVisibleTrees, bucketCounts[8], bucketOffsets[8]
     constexpr uint32_t NUM_DISTANCE_BUCKETS = 8;
-    VkBufferCreateInfo indirectInfo{};
-    indirectInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    indirectInfo.size = (4 + NUM_DISTANCE_BUCKETS * 2) * sizeof(uint32_t);  // 20 uints = 80 bytes
-    indirectInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
-                         VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    indirectInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    auto indirectInfo = vk::BufferCreateInfo{}
+        .setSize((4 + NUM_DISTANCE_BUCKETS * 2) * sizeof(uint32_t))  // 20 uints = 80 bytes
+        .setUsage(vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eIndirectBuffer |
+                  vk::BufferUsageFlagBits::eTransferDst)
+        .setSharingMode(vk::SharingMode::eExclusive);
 
-    if (vmaCreateBuffer(allocator_, &indirectInfo, &allocInfo,
+    if (vmaCreateBuffer(allocator_, reinterpret_cast<const VkBufferCreateInfo*>(&indirectInfo), &allocInfo,
                         &cellCullIndirectBuffer_, &cellCullIndirectAllocation_, nullptr) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to create cell cull indirect buffer");
         return false;
@@ -395,19 +386,17 @@ bool TreeLeafCulling::createTreeFilterPipeline() {
     }
     VkShaderModule computeShaderModule = shaderModuleOpt.value();
 
-    VkPipelineShaderStageCreateInfo shaderStageInfo{};
-    shaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    shaderStageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    shaderStageInfo.module = computeShaderModule;
-    shaderStageInfo.pName = "main";
+    auto shaderStageInfo = vk::PipelineShaderStageCreateInfo{}
+        .setStage(vk::ShaderStageFlagBits::eCompute)
+        .setModule(computeShaderModule)
+        .setPName("main");
 
-    VkComputePipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    pipelineInfo.stage = shaderStageInfo;
-    pipelineInfo.layout = treeFilterPipelineLayout_.get();
+    auto pipelineInfo = vk::ComputePipelineCreateInfo{}
+        .setStage(shaderStageInfo)
+        .setLayout(treeFilterPipelineLayout_.get());
 
     VkPipeline rawPipeline;
-    VkResult result = vkCreateComputePipelines(device_, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &rawPipeline);
+    VkResult result = vkCreateComputePipelines(device_, VK_NULL_HANDLE, 1, reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), nullptr, &rawPipeline);
     vkDestroyShaderModule(device_, computeShaderModule, nullptr);
 
     if (result != VK_SUCCESS) {
@@ -428,29 +417,27 @@ bool TreeLeafCulling::createTreeFilterBuffers(uint32_t maxTrees) {
 
     visibleTreeBufferSize_ = sizeof(uint32_t) + maxTrees * sizeof(VisibleTreeData);
 
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = visibleTreeBufferSize_;
-    bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    auto bufferInfo = vk::BufferCreateInfo{}
+        .setSize(visibleTreeBufferSize_)
+        .setUsage(vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst)
+        .setSharingMode(vk::SharingMode::eExclusive);
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
-    if (vmaCreateBuffer(allocator_, &bufferInfo, &allocInfo,
+    if (vmaCreateBuffer(allocator_, reinterpret_cast<const VkBufferCreateInfo*>(&bufferInfo), &allocInfo,
                         &visibleTreeBuffer_, &visibleTreeAllocation_, nullptr) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to create visible tree buffer");
         return false;
     }
 
-    VkBufferCreateInfo indirectInfo{};
-    indirectInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    indirectInfo.size = 3 * sizeof(uint32_t);
-    indirectInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
-                         VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    indirectInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    auto indirectInfo = vk::BufferCreateInfo{}
+        .setSize(3 * sizeof(uint32_t))
+        .setUsage(vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eIndirectBuffer |
+                  vk::BufferUsageFlagBits::eTransferDst)
+        .setSharingMode(vk::SharingMode::eExclusive);
 
-    if (vmaCreateBuffer(allocator_, &indirectInfo, &allocInfo,
+    if (vmaCreateBuffer(allocator_, reinterpret_cast<const VkBufferCreateInfo*>(&indirectInfo), &allocInfo,
                         &leafCullIndirectDispatch_, &leafCullIndirectDispatchAllocation_, nullptr) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to create leaf cull indirect dispatch buffer");
         return false;
@@ -517,19 +504,17 @@ bool TreeLeafCulling::createTwoPhaseLeafCullPipeline() {
     }
     VkShaderModule computeShaderModule = shaderModuleOpt.value();
 
-    VkPipelineShaderStageCreateInfo shaderStageInfo{};
-    shaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    shaderStageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    shaderStageInfo.module = computeShaderModule;
-    shaderStageInfo.pName = "main";
+    auto shaderStageInfo = vk::PipelineShaderStageCreateInfo{}
+        .setStage(vk::ShaderStageFlagBits::eCompute)
+        .setModule(computeShaderModule)
+        .setPName("main");
 
-    VkComputePipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    pipelineInfo.stage = shaderStageInfo;
-    pipelineInfo.layout = twoPhaseLeafCullPipelineLayout_.get();
+    auto pipelineInfo = vk::ComputePipelineCreateInfo{}
+        .setStage(shaderStageInfo)
+        .setLayout(twoPhaseLeafCullPipelineLayout_.get());
 
     VkPipeline rawPipeline;
-    VkResult result = vkCreateComputePipelines(device_, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &rawPipeline);
+    VkResult result = vkCreateComputePipelines(device_, VK_NULL_HANDLE, 1, reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), nullptr, &rawPipeline);
     vkDestroyShaderModule(device_, computeShaderModule, nullptr);
 
     if (result != VK_SUCCESS) {
