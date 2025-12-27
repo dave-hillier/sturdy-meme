@@ -5,6 +5,7 @@
 #include "VulkanResourceFactory.h"
 #include <SDL3/SDL.h>
 #include <array>
+#include <vulkan/vulkan.hpp>
 
 std::unique_ptr<PostProcessSystem> PostProcessSystem::create(const InitInfo& info) {
     std::unique_ptr<PostProcessSystem> system(new PostProcessSystem());
@@ -129,85 +130,81 @@ void PostProcessSystem::resize(VkExtent2D newExtent) {
 
 bool PostProcessSystem::createHDRRenderTarget() {
     // Create HDR color image
-    VkImageCreateInfo colorImageInfo{};
-    colorImageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    colorImageInfo.imageType = VK_IMAGE_TYPE_2D;
-    colorImageInfo.extent.width = extent.width;
-    colorImageInfo.extent.height = extent.height;
-    colorImageInfo.extent.depth = 1;
-    colorImageInfo.mipLevels = 1;
-    colorImageInfo.arrayLayers = 1;
-    colorImageInfo.format = HDR_FORMAT;
-    colorImageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    colorImageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    colorImageInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                           VK_IMAGE_USAGE_SAMPLED_BIT |
-                           VK_IMAGE_USAGE_STORAGE_BIT;
-    colorImageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    colorImageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    auto colorImageInfo = vk::ImageCreateInfo{}
+        .setImageType(vk::ImageType::e2D)
+        .setExtent(vk::Extent3D{extent.width, extent.height, 1})
+        .setMipLevels(1)
+        .setArrayLayers(1)
+        .setFormat(static_cast<vk::Format>(HDR_FORMAT))
+        .setTiling(vk::ImageTiling::eOptimal)
+        .setInitialLayout(vk::ImageLayout::eUndefined)
+        .setUsage(vk::ImageUsageFlagBits::eColorAttachment |
+                  vk::ImageUsageFlagBits::eSampled |
+                  vk::ImageUsageFlagBits::eStorage)
+        .setSamples(vk::SampleCountFlagBits::e1)
+        .setSharingMode(vk::SharingMode::eExclusive);
 
     VmaAllocationCreateInfo colorAllocInfo{};
     colorAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
 
-    if (vmaCreateImage(allocator, &colorImageInfo, &colorAllocInfo,
+    if (vmaCreateImage(allocator, reinterpret_cast<const VkImageCreateInfo*>(&colorImageInfo), &colorAllocInfo,
                        &hdrColorImage, &hdrColorAllocation, nullptr) != VK_SUCCESS) {
         SDL_Log("Failed to create HDR color image");
         return false;
     }
 
-    VkImageViewCreateInfo colorViewInfo{};
-    colorViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    colorViewInfo.image = hdrColorImage;
-    colorViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    colorViewInfo.format = HDR_FORMAT;
-    colorViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    colorViewInfo.subresourceRange.baseMipLevel = 0;
-    colorViewInfo.subresourceRange.levelCount = 1;
-    colorViewInfo.subresourceRange.baseArrayLayer = 0;
-    colorViewInfo.subresourceRange.layerCount = 1;
+    auto colorViewInfo = vk::ImageViewCreateInfo{}
+        .setImage(hdrColorImage)
+        .setViewType(vk::ImageViewType::e2D)
+        .setFormat(static_cast<vk::Format>(HDR_FORMAT))
+        .setSubresourceRange(vk::ImageSubresourceRange{}
+            .setAspectMask(vk::ImageAspectFlagBits::eColor)
+            .setBaseMipLevel(0)
+            .setLevelCount(1)
+            .setBaseArrayLayer(0)
+            .setLayerCount(1));
 
-    if (vkCreateImageView(device, &colorViewInfo, nullptr, &hdrColorView) != VK_SUCCESS) {
+    if (vkCreateImageView(device, reinterpret_cast<const VkImageViewCreateInfo*>(&colorViewInfo),
+            nullptr, &hdrColorView) != VK_SUCCESS) {
         SDL_Log("Failed to create HDR color image view");
         return false;
     }
 
     // Create HDR depth image
-    VkImageCreateInfo depthImageInfo{};
-    depthImageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    depthImageInfo.imageType = VK_IMAGE_TYPE_2D;
-    depthImageInfo.extent.width = extent.width;
-    depthImageInfo.extent.height = extent.height;
-    depthImageInfo.extent.depth = 1;
-    depthImageInfo.mipLevels = 1;
-    depthImageInfo.arrayLayers = 1;
-    depthImageInfo.format = DEPTH_FORMAT;
-    depthImageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    depthImageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    depthImageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    depthImageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    depthImageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    auto depthImageInfo = vk::ImageCreateInfo{}
+        .setImageType(vk::ImageType::e2D)
+        .setExtent(vk::Extent3D{extent.width, extent.height, 1})
+        .setMipLevels(1)
+        .setArrayLayers(1)
+        .setFormat(static_cast<vk::Format>(DEPTH_FORMAT))
+        .setTiling(vk::ImageTiling::eOptimal)
+        .setInitialLayout(vk::ImageLayout::eUndefined)
+        .setUsage(vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled)
+        .setSamples(vk::SampleCountFlagBits::e1)
+        .setSharingMode(vk::SharingMode::eExclusive);
 
     VmaAllocationCreateInfo depthAllocInfo{};
     depthAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
 
-    if (vmaCreateImage(allocator, &depthImageInfo, &depthAllocInfo,
+    if (vmaCreateImage(allocator, reinterpret_cast<const VkImageCreateInfo*>(&depthImageInfo), &depthAllocInfo,
                        &hdrDepthImage, &hdrDepthAllocation, nullptr) != VK_SUCCESS) {
         SDL_Log("Failed to create HDR depth image");
         return false;
     }
 
-    VkImageViewCreateInfo depthViewInfo{};
-    depthViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    depthViewInfo.image = hdrDepthImage;
-    depthViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    depthViewInfo.format = DEPTH_FORMAT;
-    depthViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-    depthViewInfo.subresourceRange.baseMipLevel = 0;
-    depthViewInfo.subresourceRange.levelCount = 1;
-    depthViewInfo.subresourceRange.baseArrayLayer = 0;
-    depthViewInfo.subresourceRange.layerCount = 1;
+    auto depthViewInfo = vk::ImageViewCreateInfo{}
+        .setImage(hdrDepthImage)
+        .setViewType(vk::ImageViewType::e2D)
+        .setFormat(static_cast<vk::Format>(DEPTH_FORMAT))
+        .setSubresourceRange(vk::ImageSubresourceRange{}
+            .setAspectMask(vk::ImageAspectFlagBits::eDepth)
+            .setBaseMipLevel(0)
+            .setLevelCount(1)
+            .setBaseArrayLayer(0)
+            .setLayerCount(1));
 
-    if (vkCreateImageView(device, &depthViewInfo, nullptr, &hdrDepthView) != VK_SUCCESS) {
+    if (vkCreateImageView(device, reinterpret_cast<const VkImageViewCreateInfo*>(&depthViewInfo),
+            nullptr, &hdrDepthView) != VK_SUCCESS) {
         SDL_Log("Failed to create HDR depth image view");
         return false;
     }
@@ -639,16 +636,16 @@ void PostProcessSystem::recordPostProcess(VkCommandBuffer cmd, uint32_t frameInd
 
 bool PostProcessSystem::createHistogramResources() {
     // Create histogram buffer (256 uint values)
-    VkBufferCreateInfo histogramBufferInfo{};
-    histogramBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    histogramBufferInfo.size = HISTOGRAM_BINS * sizeof(uint32_t);
-    histogramBufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    histogramBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    auto histogramBufferInfo = vk::BufferCreateInfo{}
+        .setSize(HISTOGRAM_BINS * sizeof(uint32_t))
+        .setUsage(vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst)
+        .setSharingMode(vk::SharingMode::eExclusive);
 
     VmaAllocationCreateInfo histogramAllocInfo{};
     histogramAllocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
-    if (!ManagedBuffer::create(allocator, histogramBufferInfo, histogramAllocInfo, histogramBuffer)) {
+    if (!ManagedBuffer::create(allocator, *reinterpret_cast<const VkBufferCreateInfo*>(&histogramBufferInfo),
+            histogramAllocInfo, histogramBuffer)) {
         SDL_Log("Failed to create histogram buffer");
         return false;
     }
@@ -728,18 +725,17 @@ bool PostProcessSystem::createHistogramPipelines() {
             return false;
         }
 
-        VkPipelineShaderStageCreateInfo stageInfo{};
-        stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        stageInfo.module = *shaderModule;
-        stageInfo.pName = "main";
+        auto stageInfo = vk::PipelineShaderStageCreateInfo{}
+            .setStage(vk::ShaderStageFlagBits::eCompute)
+            .setModule(static_cast<vk::ShaderModule>(*shaderModule))
+            .setPName("main");
 
-        VkComputePipelineCreateInfo pipelineInfo{};
-        pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-        pipelineInfo.stage = stageInfo;
-        pipelineInfo.layout = histogramBuildPipelineLayout;
+        auto pipelineInfo = vk::ComputePipelineCreateInfo{}
+            .setStage(stageInfo)
+            .setLayout(histogramBuildPipelineLayout);
 
-        VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &histogramBuildPipeline);
+        VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1,
+            reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), nullptr, &histogramBuildPipeline);
         vkDestroyShaderModule(device, *shaderModule, nullptr);
 
         if (result != VK_SUCCESS) {
@@ -783,18 +779,17 @@ bool PostProcessSystem::createHistogramPipelines() {
             return false;
         }
 
-        VkPipelineShaderStageCreateInfo stageInfo{};
-        stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        stageInfo.module = *shaderModule;
-        stageInfo.pName = "main";
+        auto stageInfo = vk::PipelineShaderStageCreateInfo{}
+            .setStage(vk::ShaderStageFlagBits::eCompute)
+            .setModule(static_cast<vk::ShaderModule>(*shaderModule))
+            .setPName("main");
 
-        VkComputePipelineCreateInfo pipelineInfo{};
-        pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-        pipelineInfo.stage = stageInfo;
-        pipelineInfo.layout = histogramReducePipelineLayout;
+        auto pipelineInfo = vk::ComputePipelineCreateInfo{}
+            .setStage(stageInfo)
+            .setLayout(histogramReducePipelineLayout);
 
-        VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &histogramReducePipeline);
+        VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1,
+            reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), nullptr, &histogramReducePipeline);
         vkDestroyShaderModule(device, *shaderModule, nullptr);
 
         if (result != VK_SUCCESS) {

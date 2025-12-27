@@ -6,6 +6,7 @@
 #include <SDL3/SDL.h>
 #include <glm/glm.hpp>
 #include <array>
+#include <vulkan/vulkan.hpp>
 
 using ShaderLoader::loadShaderModule;
 
@@ -51,35 +52,34 @@ bool TerrainPipelines::createDispatcherPipeline() {
     auto shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_dispatcher.comp.spv");
     if (!shaderModule) return false;
 
-    VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(TerrainDispatcherPushConstants);
+    auto pushConstantRange = vk::PushConstantRange{}
+        .setStageFlags(vk::ShaderStageFlagBits::eCompute)
+        .setOffset(0)
+        .setSize(sizeof(TerrainDispatcherPushConstants));
 
     VkPipelineLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     layoutInfo.setLayoutCount = 1;
     layoutInfo.pSetLayouts = &computeDescriptorSetLayout;
     layoutInfo.pushConstantRangeCount = 1;
-    layoutInfo.pPushConstantRanges = &pushConstantRange;
+    layoutInfo.pPushConstantRanges = reinterpret_cast<const VkPushConstantRange*>(&pushConstantRange);
 
     if (!ManagedPipelineLayout::create(device, layoutInfo, dispatcherPipelineLayout_)) {
         vkDestroyShaderModule(device, *shaderModule, nullptr);
         return false;
     }
 
-    VkPipelineShaderStageCreateInfo stageInfo{};
-    stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stageInfo.module = *shaderModule;
-    stageInfo.pName = "main";
+    auto stageInfo = vk::PipelineShaderStageCreateInfo{}
+        .setStage(vk::ShaderStageFlagBits::eCompute)
+        .setModule(static_cast<vk::ShaderModule>(*shaderModule))
+        .setPName("main");
 
-    VkComputePipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    pipelineInfo.stage = stageInfo;
-    pipelineInfo.layout = dispatcherPipelineLayout_.get();
+    auto pipelineInfo = vk::ComputePipelineCreateInfo{}
+        .setStage(stageInfo)
+        .setLayout(dispatcherPipelineLayout_.get());
 
-    bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, dispatcherPipeline_);
+    bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE,
+        *reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), dispatcherPipeline_);
     vkDestroyShaderModule(device, *shaderModule, nullptr);
 
     return success;
@@ -89,52 +89,51 @@ bool TerrainPipelines::createSubdivisionPipeline() {
     auto shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_subdivision.comp.spv");
     if (!shaderModule) return false;
 
-    VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(TerrainSubdivisionPushConstants);
+    auto pushConstantRange = vk::PushConstantRange{}
+        .setStageFlags(vk::ShaderStageFlagBits::eCompute)
+        .setOffset(0)
+        .setSize(sizeof(TerrainSubdivisionPushConstants));
 
     VkPipelineLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     layoutInfo.setLayoutCount = 1;
     layoutInfo.pSetLayouts = &computeDescriptorSetLayout;
     layoutInfo.pushConstantRangeCount = 1;
-    layoutInfo.pPushConstantRanges = &pushConstantRange;
+    layoutInfo.pPushConstantRanges = reinterpret_cast<const VkPushConstantRange*>(&pushConstantRange);
 
     if (!ManagedPipelineLayout::create(device, layoutInfo, subdivisionPipelineLayout_)) {
         vkDestroyShaderModule(device, *shaderModule, nullptr);
         return false;
     }
 
-    VkPipelineShaderStageCreateInfo stageInfo{};
-    stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stageInfo.module = *shaderModule;
-    stageInfo.pName = "main";
+    auto stageInfo = vk::PipelineShaderStageCreateInfo{}
+        .setStage(vk::ShaderStageFlagBits::eCompute)
+        .setModule(static_cast<vk::ShaderModule>(*shaderModule))
+        .setPName("main");
 
-    VkComputePipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    pipelineInfo.stage = stageInfo;
-    pipelineInfo.layout = subdivisionPipelineLayout_.get();
+    auto pipelineInfo = vk::ComputePipelineCreateInfo{}
+        .setStage(stageInfo)
+        .setLayout(subdivisionPipelineLayout_.get());
 
-    bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, subdivisionPipeline_);
+    bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE,
+        *reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), subdivisionPipeline_);
     vkDestroyShaderModule(device, *shaderModule, nullptr);
 
     return success;
 }
 
 bool TerrainPipelines::createSumReductionPipelines() {
-    VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(TerrainSumReductionPushConstants);
+    auto pushConstantRange = vk::PushConstantRange{}
+        .setStageFlags(vk::ShaderStageFlagBits::eCompute)
+        .setOffset(0)
+        .setSize(sizeof(TerrainSumReductionPushConstants));
 
     VkPipelineLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     layoutInfo.setLayoutCount = 1;
     layoutInfo.pSetLayouts = &computeDescriptorSetLayout;
     layoutInfo.pushConstantRangeCount = 1;
-    layoutInfo.pPushConstantRanges = &pushConstantRange;
+    layoutInfo.pPushConstantRanges = reinterpret_cast<const VkPushConstantRange*>(&pushConstantRange);
 
     if (!ManagedPipelineLayout::create(device, layoutInfo, sumReductionPipelineLayout_)) {
         return false;
@@ -145,18 +144,17 @@ bool TerrainPipelines::createSumReductionPipelines() {
         auto shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_sum_reduction_prepass.comp.spv");
         if (!shaderModule) return false;
 
-        VkPipelineShaderStageCreateInfo stageInfo{};
-        stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        stageInfo.module = *shaderModule;
-        stageInfo.pName = "main";
+        auto stageInfo = vk::PipelineShaderStageCreateInfo{}
+            .setStage(vk::ShaderStageFlagBits::eCompute)
+            .setModule(static_cast<vk::ShaderModule>(*shaderModule))
+            .setPName("main");
 
-        VkComputePipelineCreateInfo pipelineInfo{};
-        pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-        pipelineInfo.stage = stageInfo;
-        pipelineInfo.layout = sumReductionPipelineLayout_.get();
+        auto pipelineInfo = vk::ComputePipelineCreateInfo{}
+            .setStage(stageInfo)
+            .setLayout(sumReductionPipelineLayout_.get());
 
-        bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, sumReductionPrepassPipeline_);
+        bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE,
+            *reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), sumReductionPrepassPipeline_);
         vkDestroyShaderModule(device, *shaderModule, nullptr);
         if (!success) return false;
     }
@@ -165,18 +163,17 @@ bool TerrainPipelines::createSumReductionPipelines() {
     if (subgroupCaps && subgroupCaps->hasSubgroupArithmetic) {
         auto shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_sum_reduction_prepass_subgroup.comp.spv");
         if (shaderModule) {
-            VkPipelineShaderStageCreateInfo stageInfo{};
-            stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-            stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-            stageInfo.module = *shaderModule;
-            stageInfo.pName = "main";
+            auto stageInfo = vk::PipelineShaderStageCreateInfo{}
+                .setStage(vk::ShaderStageFlagBits::eCompute)
+                .setModule(static_cast<vk::ShaderModule>(*shaderModule))
+                .setPName("main");
 
-            VkComputePipelineCreateInfo pipelineInfo{};
-            pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-            pipelineInfo.stage = stageInfo;
-            pipelineInfo.layout = sumReductionPipelineLayout_.get();
+            auto pipelineInfo = vk::ComputePipelineCreateInfo{}
+                .setStage(stageInfo)
+                .setLayout(sumReductionPipelineLayout_.get());
 
-            bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, sumReductionPrepassSubgroupPipeline_);
+            bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE,
+                *reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), sumReductionPrepassSubgroupPipeline_);
             vkDestroyShaderModule(device, *shaderModule, nullptr);
             if (!success) {
                 SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to create subgroup prepass pipeline, using fallback");
@@ -191,18 +188,17 @@ bool TerrainPipelines::createSumReductionPipelines() {
         auto shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_sum_reduction.comp.spv");
         if (!shaderModule) return false;
 
-        VkPipelineShaderStageCreateInfo stageInfo{};
-        stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        stageInfo.module = *shaderModule;
-        stageInfo.pName = "main";
+        auto stageInfo = vk::PipelineShaderStageCreateInfo{}
+            .setStage(vk::ShaderStageFlagBits::eCompute)
+            .setModule(static_cast<vk::ShaderModule>(*shaderModule))
+            .setPName("main");
 
-        VkComputePipelineCreateInfo pipelineInfo{};
-        pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-        pipelineInfo.stage = stageInfo;
-        pipelineInfo.layout = sumReductionPipelineLayout_.get();
+        auto pipelineInfo = vk::ComputePipelineCreateInfo{}
+            .setStage(stageInfo)
+            .setLayout(sumReductionPipelineLayout_.get());
 
-        bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, sumReductionPipeline_);
+        bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE,
+            *reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), sumReductionPipeline_);
         vkDestroyShaderModule(device, *shaderModule, nullptr);
         if (!success) return false;
     }
@@ -210,17 +206,17 @@ bool TerrainPipelines::createSumReductionPipelines() {
     // Batched sum reduction pipeline (multi-level per dispatch using shared memory)
     {
         // Create pipeline layout for batched push constants
-        VkPushConstantRange batchedPushConstantRange{};
-        batchedPushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-        batchedPushConstantRange.offset = 0;
-        batchedPushConstantRange.size = sizeof(TerrainSumReductionBatchedPushConstants);
+        auto batchedPushConstantRange = vk::PushConstantRange{}
+            .setStageFlags(vk::ShaderStageFlagBits::eCompute)
+            .setOffset(0)
+            .setSize(sizeof(TerrainSumReductionBatchedPushConstants));
 
         VkPipelineLayoutCreateInfo batchedLayoutInfo{};
         batchedLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         batchedLayoutInfo.setLayoutCount = 1;
         batchedLayoutInfo.pSetLayouts = &computeDescriptorSetLayout;
         batchedLayoutInfo.pushConstantRangeCount = 1;
-        batchedLayoutInfo.pPushConstantRanges = &batchedPushConstantRange;
+        batchedLayoutInfo.pPushConstantRanges = reinterpret_cast<const VkPushConstantRange*>(&batchedPushConstantRange);
 
         if (!ManagedPipelineLayout::create(device, batchedLayoutInfo, sumReductionBatchedPipelineLayout_)) {
             return false;
@@ -229,18 +225,17 @@ bool TerrainPipelines::createSumReductionPipelines() {
         auto shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_sum_reduction_batched.comp.spv");
         if (!shaderModule) return false;
 
-        VkPipelineShaderStageCreateInfo stageInfo{};
-        stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        stageInfo.module = *shaderModule;
-        stageInfo.pName = "main";
+        auto stageInfo = vk::PipelineShaderStageCreateInfo{}
+            .setStage(vk::ShaderStageFlagBits::eCompute)
+            .setModule(static_cast<vk::ShaderModule>(*shaderModule))
+            .setPName("main");
 
-        VkComputePipelineCreateInfo pipelineInfo{};
-        pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-        pipelineInfo.stage = stageInfo;
-        pipelineInfo.layout = sumReductionBatchedPipelineLayout_.get();
+        auto pipelineInfo = vk::ComputePipelineCreateInfo{}
+            .setStage(stageInfo)
+            .setLayout(sumReductionBatchedPipelineLayout_.get());
 
-        bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, sumReductionBatchedPipeline_);
+        bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE,
+            *reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), sumReductionBatchedPipeline_);
         vkDestroyShaderModule(device, *shaderModule, nullptr);
         if (!success) return false;
     }
@@ -254,35 +249,34 @@ bool TerrainPipelines::createFrustumCullPipelines() {
         auto shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_frustum_cull.comp.spv");
         if (!shaderModule) return false;
 
-        VkPushConstantRange pushConstantRange{};
-        pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-        pushConstantRange.offset = 0;
-        pushConstantRange.size = sizeof(TerrainFrustumCullPushConstants);
+        auto pushConstantRange = vk::PushConstantRange{}
+            .setStageFlags(vk::ShaderStageFlagBits::eCompute)
+            .setOffset(0)
+            .setSize(sizeof(TerrainFrustumCullPushConstants));
 
         VkPipelineLayoutCreateInfo layoutInfo{};
         layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         layoutInfo.setLayoutCount = 1;
         layoutInfo.pSetLayouts = &computeDescriptorSetLayout;
         layoutInfo.pushConstantRangeCount = 1;
-        layoutInfo.pPushConstantRanges = &pushConstantRange;
+        layoutInfo.pPushConstantRanges = reinterpret_cast<const VkPushConstantRange*>(&pushConstantRange);
 
         if (!ManagedPipelineLayout::create(device, layoutInfo, frustumCullPipelineLayout_)) {
             vkDestroyShaderModule(device, *shaderModule, nullptr);
             return false;
         }
 
-        VkPipelineShaderStageCreateInfo stageInfo{};
-        stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        stageInfo.module = *shaderModule;
-        stageInfo.pName = "main";
+        auto stageInfo = vk::PipelineShaderStageCreateInfo{}
+            .setStage(vk::ShaderStageFlagBits::eCompute)
+            .setModule(static_cast<vk::ShaderModule>(*shaderModule))
+            .setPName("main");
 
-        VkComputePipelineCreateInfo pipelineInfo{};
-        pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-        pipelineInfo.stage = stageInfo;
-        pipelineInfo.layout = frustumCullPipelineLayout_.get();
+        auto pipelineInfo = vk::ComputePipelineCreateInfo{}
+            .setStage(stageInfo)
+            .setLayout(frustumCullPipelineLayout_.get());
 
-        bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, frustumCullPipeline_);
+        bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE,
+            *reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), frustumCullPipeline_);
         vkDestroyShaderModule(device, *shaderModule, nullptr);
         if (!success) return false;
     }
@@ -292,35 +286,34 @@ bool TerrainPipelines::createFrustumCullPipelines() {
         auto shaderModule = loadShaderModule(device, shaderPath + "/terrain/terrain_prepare_cull_dispatch.comp.spv");
         if (!shaderModule) return false;
 
-        VkPushConstantRange pushConstantRange{};
-        pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-        pushConstantRange.offset = 0;
-        pushConstantRange.size = sizeof(TerrainPrepareCullDispatchPushConstants);
+        auto pushConstantRange = vk::PushConstantRange{}
+            .setStageFlags(vk::ShaderStageFlagBits::eCompute)
+            .setOffset(0)
+            .setSize(sizeof(TerrainPrepareCullDispatchPushConstants));
 
         VkPipelineLayoutCreateInfo layoutInfo{};
         layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         layoutInfo.setLayoutCount = 1;
         layoutInfo.pSetLayouts = &computeDescriptorSetLayout;
         layoutInfo.pushConstantRangeCount = 1;
-        layoutInfo.pPushConstantRanges = &pushConstantRange;
+        layoutInfo.pPushConstantRanges = reinterpret_cast<const VkPushConstantRange*>(&pushConstantRange);
 
         if (!ManagedPipelineLayout::create(device, layoutInfo, prepareDispatchPipelineLayout_)) {
             vkDestroyShaderModule(device, *shaderModule, nullptr);
             return false;
         }
 
-        VkPipelineShaderStageCreateInfo stageInfo{};
-        stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        stageInfo.module = *shaderModule;
-        stageInfo.pName = "main";
+        auto stageInfo = vk::PipelineShaderStageCreateInfo{}
+            .setStage(vk::ShaderStageFlagBits::eCompute)
+            .setModule(static_cast<vk::ShaderModule>(*shaderModule))
+            .setPName("main");
 
-        VkComputePipelineCreateInfo pipelineInfo{};
-        pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-        pipelineInfo.stage = stageInfo;
-        pipelineInfo.layout = prepareDispatchPipelineLayout_.get();
+        auto pipelineInfo = vk::ComputePipelineCreateInfo{}
+            .setStage(stageInfo)
+            .setLayout(prepareDispatchPipelineLayout_.get());
 
-        bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, prepareDispatchPipeline_);
+        bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE,
+            *reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), prepareDispatchPipeline_);
         vkDestroyShaderModule(device, *shaderModule, nullptr);
         if (!success) return false;
     }
@@ -447,17 +440,17 @@ bool TerrainPipelines::createShadowCullPipelines() {
     }
 
     // Pipeline layout for shadow cull compute
-    VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(TerrainShadowCullPushConstants);
+    auto pushConstantRange = vk::PushConstantRange{}
+        .setStageFlags(vk::ShaderStageFlagBits::eCompute)
+        .setOffset(0)
+        .setSize(sizeof(TerrainShadowCullPushConstants));
 
     VkPipelineLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     layoutInfo.setLayoutCount = 1;
     layoutInfo.pSetLayouts = &computeDescriptorSetLayout;
     layoutInfo.pushConstantRangeCount = 1;
-    layoutInfo.pPushConstantRanges = &pushConstantRange;
+    layoutInfo.pPushConstantRanges = reinterpret_cast<const VkPushConstantRange*>(&pushConstantRange);
 
     if (!ManagedPipelineLayout::create(device, layoutInfo, shadowCullPipelineLayout_)) {
         vkDestroyShaderModule(device, *cullShaderModule, nullptr);
@@ -465,32 +458,29 @@ bool TerrainPipelines::createShadowCullPipelines() {
         return false;
     }
 
-    // Create compute pipeline
-    VkPipelineShaderStageCreateInfo stageInfo{};
-    stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stageInfo.module = *cullShaderModule;
-    stageInfo.pName = "main";
-
     // Specialization constant for meshlet index count
-    VkSpecializationMapEntry specEntry{};
-    specEntry.constantID = 0;
-    specEntry.offset = 0;
-    specEntry.size = sizeof(uint32_t);
+    auto specEntry = vk::SpecializationMapEntry{}
+        .setConstantID(0)
+        .setOffset(0)
+        .setSize(sizeof(uint32_t));
 
-    VkSpecializationInfo specInfo{};
-    specInfo.mapEntryCount = 1;
-    specInfo.pMapEntries = &specEntry;
-    specInfo.dataSize = sizeof(uint32_t);
-    specInfo.pData = &meshletIndexCount;
-    stageInfo.pSpecializationInfo = &specInfo;
+    auto specInfo = vk::SpecializationInfo{}
+        .setMapEntries(specEntry)
+        .setDataSize(sizeof(uint32_t))
+        .setPData(&meshletIndexCount);
 
-    VkComputePipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    pipelineInfo.stage = stageInfo;
-    pipelineInfo.layout = shadowCullPipelineLayout_.get();
+    auto stageInfo = vk::PipelineShaderStageCreateInfo{}
+        .setStage(vk::ShaderStageFlagBits::eCompute)
+        .setModule(static_cast<vk::ShaderModule>(*cullShaderModule))
+        .setPName("main")
+        .setPSpecializationInfo(&specInfo);
 
-    bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, shadowCullPipeline_);
+    auto pipelineInfo = vk::ComputePipelineCreateInfo{}
+        .setStage(stageInfo)
+        .setLayout(shadowCullPipelineLayout_.get());
+
+    bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE,
+        *reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), shadowCullPipeline_);
     vkDestroyShaderModule(device, *cullShaderModule, nullptr);
 
     if (!success) {
@@ -508,80 +498,70 @@ bool TerrainPipelines::createShadowCullPipelines() {
         return false;
     }
 
-    std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages{};
-    shaderStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    shaderStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-    shaderStages[0].module = *shadowCulledVertModule;
-    shaderStages[0].pName = "main";
-
-    shaderStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    shaderStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    shaderStages[1].module = *shadowFragModule;
-    shaderStages[1].pName = "main";
+    std::array<vk::PipelineShaderStageCreateInfo, 2> shaderStages = {
+        vk::PipelineShaderStageCreateInfo{}
+            .setStage(vk::ShaderStageFlagBits::eVertex)
+            .setModule(static_cast<vk::ShaderModule>(*shadowCulledVertModule))
+            .setPName("main"),
+        vk::PipelineShaderStageCreateInfo{}
+            .setStage(vk::ShaderStageFlagBits::eFragment)
+            .setModule(static_cast<vk::ShaderModule>(*shadowFragModule))
+            .setPName("main")
+    };
 
     // No vertex input for non-meshlet (generated in shader)
-    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
-    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    auto vertexInputInfo = vk::PipelineVertexInputStateCreateInfo{};
 
-    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
-    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    auto inputAssembly = vk::PipelineInputAssemblyStateCreateInfo{}
+        .setTopology(vk::PrimitiveTopology::eTriangleList);
 
-    VkPipelineViewportStateCreateInfo viewportState{};
-    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewportState.viewportCount = 1;
-    viewportState.scissorCount = 1;
+    auto viewportState = vk::PipelineViewportStateCreateInfo{}
+        .setViewportCount(1)
+        .setScissorCount(1);
 
-    VkPipelineRasterizationStateCreateInfo rasterizer{};
-    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-    rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_FRONT_BIT;
-    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    rasterizer.depthBiasEnable = VK_TRUE;
+    auto rasterizer = vk::PipelineRasterizationStateCreateInfo{}
+        .setPolygonMode(vk::PolygonMode::eFill)
+        .setLineWidth(1.0f)
+        .setCullMode(vk::CullModeFlagBits::eFront)
+        .setFrontFace(vk::FrontFace::eCounterClockwise)
+        .setDepthBiasEnable(VK_TRUE);
 
-    VkPipelineMultisampleStateCreateInfo multisampling{};
-    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    auto multisampling = vk::PipelineMultisampleStateCreateInfo{}
+        .setRasterizationSamples(vk::SampleCountFlagBits::e1);
 
-    VkPipelineDepthStencilStateCreateInfo depthStencil{};
-    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    depthStencil.depthTestEnable = VK_TRUE;
-    depthStencil.depthWriteEnable = VK_TRUE;
-    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+    auto depthStencil = vk::PipelineDepthStencilStateCreateInfo{}
+        .setDepthTestEnable(VK_TRUE)
+        .setDepthWriteEnable(VK_TRUE)
+        .setDepthCompareOp(vk::CompareOp::eLess);
 
-    VkPipelineColorBlendStateCreateInfo colorBlending{};
-    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    colorBlending.attachmentCount = 0;
+    auto colorBlending = vk::PipelineColorBlendStateCreateInfo{}
+        .setAttachmentCount(0);
 
-    std::array<VkDynamicState, 3> dynamicStates = {
-        VK_DYNAMIC_STATE_VIEWPORT,
-        VK_DYNAMIC_STATE_SCISSOR,
-        VK_DYNAMIC_STATE_DEPTH_BIAS
+    std::array<vk::DynamicState, 3> dynamicStates = {
+        vk::DynamicState::eViewport,
+        vk::DynamicState::eScissor,
+        vk::DynamicState::eDepthBias
     };
-    VkPipelineDynamicStateCreateInfo dynamicState{};
-    dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
-    dynamicState.pDynamicStates = dynamicStates.data();
+    auto dynamicState = vk::PipelineDynamicStateCreateInfo{}
+        .setDynamicStates(dynamicStates);
 
-    VkGraphicsPipelineCreateInfo gfxPipelineInfo{};
-    gfxPipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    gfxPipelineInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
-    gfxPipelineInfo.pStages = shaderStages.data();
-    gfxPipelineInfo.pVertexInputState = &vertexInputInfo;
-    gfxPipelineInfo.pInputAssemblyState = &inputAssembly;
-    gfxPipelineInfo.pViewportState = &viewportState;
-    gfxPipelineInfo.pRasterizationState = &rasterizer;
-    gfxPipelineInfo.pMultisampleState = &multisampling;
-    gfxPipelineInfo.pDepthStencilState = &depthStencil;
-    gfxPipelineInfo.pColorBlendState = &colorBlending;
-    gfxPipelineInfo.pDynamicState = &dynamicState;
-    gfxPipelineInfo.layout = shadowPipelineLayout_.get();
-    gfxPipelineInfo.renderPass = shadowRenderPass;
-    gfxPipelineInfo.subpass = 0;
+    auto gfxPipelineInfo = vk::GraphicsPipelineCreateInfo{}
+        .setStages(shaderStages)
+        .setPVertexInputState(&vertexInputInfo)
+        .setPInputAssemblyState(&inputAssembly)
+        .setPViewportState(&viewportState)
+        .setPRasterizationState(&rasterizer)
+        .setPMultisampleState(&multisampling)
+        .setPDepthStencilState(&depthStencil)
+        .setPColorBlendState(&colorBlending)
+        .setPDynamicState(&dynamicState)
+        .setLayout(shadowPipelineLayout_.get())
+        .setRenderPass(shadowRenderPass)
+        .setSubpass(0);
 
     VkPipeline rawPipeline = VK_NULL_HANDLE;
-    VkResult result = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &gfxPipelineInfo, nullptr, &rawPipeline);
+    VkResult result = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1,
+        reinterpret_cast<const VkGraphicsPipelineCreateInfo*>(&gfxPipelineInfo), nullptr, &rawPipeline);
     vkDestroyShaderModule(device, *shadowCulledVertModule, nullptr);
     vkDestroyShaderModule(device, *shadowFragModule, nullptr);
 
@@ -602,30 +582,30 @@ bool TerrainPipelines::createShadowCullPipelines() {
             return false;
         }
 
-        shaderStages[0].module = *meshletShadowCulledVertModule;
-        shaderStages[1].module = *meshletShadowFragModule;
+        shaderStages[0].setModule(static_cast<vk::ShaderModule>(*meshletShadowCulledVertModule));
+        shaderStages[1].setModule(static_cast<vk::ShaderModule>(*meshletShadowFragModule));
 
         // Meshlet vertex input: vec2 for local UV
-        VkVertexInputBindingDescription bindingDesc{};
-        bindingDesc.binding = 0;
-        bindingDesc.stride = sizeof(glm::vec2);
-        bindingDesc.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+        auto bindingDesc = vk::VertexInputBindingDescription{}
+            .setBinding(0)
+            .setStride(sizeof(glm::vec2))
+            .setInputRate(vk::VertexInputRate::eVertex);
 
-        VkVertexInputAttributeDescription attrDesc{};
-        attrDesc.binding = 0;
-        attrDesc.location = 0;
-        attrDesc.format = VK_FORMAT_R32G32_SFLOAT;
-        attrDesc.offset = 0;
+        auto attrDesc = vk::VertexInputAttributeDescription{}
+            .setBinding(0)
+            .setLocation(0)
+            .setFormat(vk::Format::eR32G32Sfloat)
+            .setOffset(0);
 
-        vertexInputInfo.vertexBindingDescriptionCount = 1;
-        vertexInputInfo.pVertexBindingDescriptions = &bindingDesc;
-        vertexInputInfo.vertexAttributeDescriptionCount = 1;
-        vertexInputInfo.pVertexAttributeDescriptions = &attrDesc;
+        vertexInputInfo
+            .setVertexBindingDescriptions(bindingDesc)
+            .setVertexAttributeDescriptions(attrDesc);
 
-        gfxPipelineInfo.pStages = shaderStages.data();
+        gfxPipelineInfo.setStages(shaderStages);
 
         rawPipeline = VK_NULL_HANDLE;
-        result = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &gfxPipelineInfo, nullptr, &rawPipeline);
+        result = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1,
+            reinterpret_cast<const VkGraphicsPipelineCreateInfo*>(&gfxPipelineInfo), nullptr, &rawPipeline);
         vkDestroyShaderModule(device, *meshletShadowCulledVertModule, nullptr);
         vkDestroyShaderModule(device, *meshletShadowFragModule, nullptr);
 

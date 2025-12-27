@@ -6,6 +6,7 @@
 #include <SDL_log.h>
 #include <cmath>
 #include <array>
+#include <vulkan/vulkan.hpp>
 
 std::unique_ptr<OceanFFT> OceanFFT::create(const InitInfo& info) {
     std::unique_ptr<OceanFFT> ocean(new OceanFFT());
@@ -73,23 +74,22 @@ bool OceanFFT::initInternal(const InitInfo& info) {
     }
 
     // Create sampler for output textures
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;  // Tiling ocean
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.mipLodBias = 0.0f;
-    samplerInfo.anisotropyEnable = VK_TRUE;
-    samplerInfo.maxAnisotropy = 16.0f;
-    samplerInfo.compareEnable = VK_FALSE;
-    samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = 0.0f;
-    samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
+    auto samplerInfo = vk::SamplerCreateInfo{}
+        .setMagFilter(vk::Filter::eLinear)
+        .setMinFilter(vk::Filter::eLinear)
+        .setMipmapMode(vk::SamplerMipmapMode::eLinear)
+        .setAddressModeU(vk::SamplerAddressMode::eRepeat)  // Tiling ocean
+        .setAddressModeV(vk::SamplerAddressMode::eRepeat)
+        .setAddressModeW(vk::SamplerAddressMode::eRepeat)
+        .setMipLodBias(0.0f)
+        .setAnisotropyEnable(VK_TRUE)
+        .setMaxAnisotropy(16.0f)
+        .setCompareEnable(VK_FALSE)
+        .setMinLod(0.0f)
+        .setMaxLod(0.0f)
+        .setBorderColor(vk::BorderColor::eFloatOpaqueBlack);
 
-    if (!ManagedSampler::create(device, samplerInfo, sampler)) {
+    if (!ManagedSampler::create(device, *reinterpret_cast<const VkSamplerCreateInfo*>(&samplerInfo), sampler)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to create sampler");
         return false;
     }
@@ -164,23 +164,22 @@ bool OceanFFT::initInternal(const InitContext& ctx, const OceanParams& oceanPara
     }
 
     // Create sampler for output textures
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;  // Tiling ocean
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.mipLodBias = 0.0f;
-    samplerInfo.anisotropyEnable = VK_TRUE;
-    samplerInfo.maxAnisotropy = 16.0f;
-    samplerInfo.compareEnable = VK_FALSE;
-    samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = 0.0f;
-    samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
+    auto samplerInfo2 = vk::SamplerCreateInfo{}
+        .setMagFilter(vk::Filter::eLinear)
+        .setMinFilter(vk::Filter::eLinear)
+        .setMipmapMode(vk::SamplerMipmapMode::eLinear)
+        .setAddressModeU(vk::SamplerAddressMode::eRepeat)  // Tiling ocean
+        .setAddressModeV(vk::SamplerAddressMode::eRepeat)
+        .setAddressModeW(vk::SamplerAddressMode::eRepeat)
+        .setMipLodBias(0.0f)
+        .setAnisotropyEnable(VK_TRUE)
+        .setMaxAnisotropy(16.0f)
+        .setCompareEnable(VK_FALSE)
+        .setMinLod(0.0f)
+        .setMaxLod(0.0f)
+        .setBorderColor(vk::BorderColor::eFloatOpaqueBlack);
 
-    if (!ManagedSampler::create(device, samplerInfo, sampler)) {
+    if (!ManagedSampler::create(device, *reinterpret_cast<const VkSamplerCreateInfo*>(&samplerInfo2), sampler)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to create sampler");
         return false;
     }
@@ -252,38 +251,37 @@ void OceanFFT::cleanup() {
 
 bool OceanFFT::createImage(ManagedImage& image, ManagedImageView& view,
                            VkFormat format, uint32_t width, uint32_t height, VkImageUsageFlags usage) {
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.format = format;
-    imageInfo.extent = {width, height, 1};
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.usage = usage;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    auto imageInfo = vk::ImageCreateInfo{}
+        .setImageType(vk::ImageType::e2D)
+        .setFormat(static_cast<vk::Format>(format))
+        .setExtent(vk::Extent3D{width, height, 1})
+        .setMipLevels(1)
+        .setArrayLayers(1)
+        .setSamples(vk::SampleCountFlagBits::e1)
+        .setTiling(vk::ImageTiling::eOptimal)
+        .setUsage(static_cast<vk::ImageUsageFlags>(usage))
+        .setSharingMode(vk::SharingMode::eExclusive)
+        .setInitialLayout(vk::ImageLayout::eUndefined);
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
-    if (!ManagedImage::create(allocator, imageInfo, allocInfo, image)) {
+    if (!ManagedImage::create(allocator, *reinterpret_cast<const VkImageCreateInfo*>(&imageInfo), allocInfo, image)) {
         return false;
     }
 
-    VkImageViewCreateInfo viewInfo{};
-    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.image = image.get();
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format = format;
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = 1;
-    viewInfo.subresourceRange.baseArrayLayer = 0;
-    viewInfo.subresourceRange.layerCount = 1;
+    auto viewInfo = vk::ImageViewCreateInfo{}
+        .setImage(image.get())
+        .setViewType(vk::ImageViewType::e2D)
+        .setFormat(static_cast<vk::Format>(format))
+        .setSubresourceRange(vk::ImageSubresourceRange{}
+            .setAspectMask(vk::ImageAspectFlagBits::eColor)
+            .setBaseMipLevel(0)
+            .setLevelCount(1)
+            .setBaseArrayLayer(0)
+            .setLayerCount(1));
 
-    if (!ManagedImageView::create(device, viewInfo, view)) {
+    if (!ManagedImageView::create(device, *reinterpret_cast<const VkImageViewCreateInfo*>(&viewInfo), view)) {
         return false;
     }
 
@@ -388,15 +386,17 @@ bool OceanFFT::createComputePipelines() {
             return false;
         }
 
-        VkComputePipelineCreateInfo pipelineInfo{};
-        pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-        pipelineInfo.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        pipelineInfo.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        pipelineInfo.stage.module = *shaderModule;
-        pipelineInfo.stage.pName = "main";
-        pipelineInfo.layout = spectrumPipelineLayout.get();
+        auto stageInfo = vk::PipelineShaderStageCreateInfo{}
+            .setStage(vk::ShaderStageFlagBits::eCompute)
+            .setModule(static_cast<vk::ShaderModule>(*shaderModule))
+            .setPName("main");
 
-        bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, spectrumPipeline);
+        auto pipelineInfo = vk::ComputePipelineCreateInfo{}
+            .setStage(stageInfo)
+            .setLayout(spectrumPipelineLayout.get());
+
+        bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE,
+            *reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), spectrumPipeline);
         vkDestroyShaderModule(device, *shaderModule, nullptr);
 
         if (!success) {
@@ -421,12 +421,13 @@ bool OceanFFT::createComputePipelines() {
         timeEvolutionDescLayout = ManagedDescriptorSetLayout::fromRaw(device, rawDescLayout);
 
         // Push constants for time and parameters
-        VkPushConstantRange pushRange{};
-        pushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-        pushRange.offset = 0;
-        pushRange.size = sizeof(OceanTimeEvolutionPushConstants);
+        auto pushRange = vk::PushConstantRange{}
+            .setStageFlags(vk::ShaderStageFlagBits::eCompute)
+            .setOffset(0)
+            .setSize(sizeof(OceanTimeEvolutionPushConstants));
 
-        VkPipelineLayout rawPipelineLayout = DescriptorManager::createPipelineLayout(device, timeEvolutionDescLayout.get(), {pushRange});
+        VkPipelineLayout rawPipelineLayout = DescriptorManager::createPipelineLayout(device, timeEvolutionDescLayout.get(),
+            {*reinterpret_cast<const VkPushConstantRange*>(&pushRange)});
         if (rawPipelineLayout == VK_NULL_HANDLE) {
             return false;
         }
@@ -438,15 +439,17 @@ bool OceanFFT::createComputePipelines() {
             return false;
         }
 
-        VkComputePipelineCreateInfo pipelineInfo{};
-        pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-        pipelineInfo.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        pipelineInfo.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        pipelineInfo.stage.module = *shaderModule;
-        pipelineInfo.stage.pName = "main";
-        pipelineInfo.layout = timeEvolutionPipelineLayout.get();
+        auto stageInfo = vk::PipelineShaderStageCreateInfo{}
+            .setStage(vk::ShaderStageFlagBits::eCompute)
+            .setModule(static_cast<vk::ShaderModule>(*shaderModule))
+            .setPName("main");
 
-        bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, timeEvolutionPipeline);
+        auto pipelineInfo = vk::ComputePipelineCreateInfo{}
+            .setStage(stageInfo)
+            .setLayout(timeEvolutionPipelineLayout.get());
+
+        bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE,
+            *reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), timeEvolutionPipeline);
         vkDestroyShaderModule(device, *shaderModule, nullptr);
 
         if (!success) {
@@ -468,12 +471,13 @@ bool OceanFFT::createComputePipelines() {
         fftDescLayout = ManagedDescriptorSetLayout::fromRaw(device, rawDescLayout);
 
         // Push constants: stage, direction, resolution, inverse
-        VkPushConstantRange pushRange{};
-        pushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-        pushRange.offset = 0;
-        pushRange.size = sizeof(OceanFFTPushConstants);
+        auto pushRange = vk::PushConstantRange{}
+            .setStageFlags(vk::ShaderStageFlagBits::eCompute)
+            .setOffset(0)
+            .setSize(sizeof(OceanFFTPushConstants));
 
-        VkPipelineLayout rawPipelineLayout = DescriptorManager::createPipelineLayout(device, fftDescLayout.get(), {pushRange});
+        VkPipelineLayout rawPipelineLayout = DescriptorManager::createPipelineLayout(device, fftDescLayout.get(),
+            {*reinterpret_cast<const VkPushConstantRange*>(&pushRange)});
         if (rawPipelineLayout == VK_NULL_HANDLE) {
             return false;
         }
@@ -485,15 +489,17 @@ bool OceanFFT::createComputePipelines() {
             return false;
         }
 
-        VkComputePipelineCreateInfo pipelineInfo{};
-        pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-        pipelineInfo.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        pipelineInfo.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        pipelineInfo.stage.module = *shaderModule;
-        pipelineInfo.stage.pName = "main";
-        pipelineInfo.layout = fftPipelineLayout.get();
+        auto stageInfo = vk::PipelineShaderStageCreateInfo{}
+            .setStage(vk::ShaderStageFlagBits::eCompute)
+            .setModule(static_cast<vk::ShaderModule>(*shaderModule))
+            .setPName("main");
 
-        bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, fftPipeline);
+        auto pipelineInfo = vk::ComputePipelineCreateInfo{}
+            .setStage(stageInfo)
+            .setLayout(fftPipelineLayout.get());
+
+        bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE,
+            *reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), fftPipeline);
         vkDestroyShaderModule(device, *shaderModule, nullptr);
 
         if (!success) {
@@ -519,12 +525,13 @@ bool OceanFFT::createComputePipelines() {
         displacementDescLayout = ManagedDescriptorSetLayout::fromRaw(device, rawDescLayout);
 
         // Push constants
-        VkPushConstantRange pushRange{};
-        pushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-        pushRange.offset = 0;
-        pushRange.size = sizeof(OceanDisplacementPushConstants);
+        auto pushRange = vk::PushConstantRange{}
+            .setStageFlags(vk::ShaderStageFlagBits::eCompute)
+            .setOffset(0)
+            .setSize(sizeof(OceanDisplacementPushConstants));
 
-        VkPipelineLayout rawPipelineLayout = DescriptorManager::createPipelineLayout(device, displacementDescLayout.get(), {pushRange});
+        VkPipelineLayout rawPipelineLayout = DescriptorManager::createPipelineLayout(device, displacementDescLayout.get(),
+            {*reinterpret_cast<const VkPushConstantRange*>(&pushRange)});
         if (rawPipelineLayout == VK_NULL_HANDLE) {
             return false;
         }
@@ -536,15 +543,17 @@ bool OceanFFT::createComputePipelines() {
             return false;
         }
 
-        VkComputePipelineCreateInfo pipelineInfo{};
-        pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-        pipelineInfo.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        pipelineInfo.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        pipelineInfo.stage.module = *shaderModule;
-        pipelineInfo.stage.pName = "main";
-        pipelineInfo.layout = displacementPipelineLayout.get();
+        auto stageInfo = vk::PipelineShaderStageCreateInfo{}
+            .setStage(vk::ShaderStageFlagBits::eCompute)
+            .setModule(static_cast<vk::ShaderModule>(*shaderModule))
+            .setPName("main");
 
-        bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE, pipelineInfo, displacementPipeline);
+        auto pipelineInfo = vk::ComputePipelineCreateInfo{}
+            .setStage(stageInfo)
+            .setLayout(displacementPipelineLayout.get());
+
+        bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE,
+            *reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), displacementPipeline);
         vkDestroyShaderModule(device, *shaderModule, nullptr);
 
         if (!success) {
@@ -563,21 +572,24 @@ bool OceanFFT::createDescriptorSets() {
     uint32_t totalSets = cascadeCount * setsPerCascade + cascadeCount * 12;  // Extra FFT sets for ping-pong
 
     // Create descriptor pool
-    std::array<VkDescriptorPoolSize, 3> poolSizes{};
-    poolSizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    poolSizes[0].descriptorCount = totalSets * 6;
-    poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = totalSets * 2;
-    poolSizes[2].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSizes[2].descriptorCount = cascadeCount;
+    std::array<vk::DescriptorPoolSize, 3> poolSizes = {
+        vk::DescriptorPoolSize{}
+            .setType(vk::DescriptorType::eStorageImage)
+            .setDescriptorCount(totalSets * 6),
+        vk::DescriptorPoolSize{}
+            .setType(vk::DescriptorType::eCombinedImageSampler)
+            .setDescriptorCount(totalSets * 2),
+        vk::DescriptorPoolSize{}
+            .setType(vk::DescriptorType::eUniformBuffer)
+            .setDescriptorCount(cascadeCount)
+    };
 
-    VkDescriptorPoolCreateInfo poolInfo{};
-    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    poolInfo.maxSets = totalSets;
-    poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
-    poolInfo.pPoolSizes = poolSizes.data();
+    auto poolInfo = vk::DescriptorPoolCreateInfo{}
+        .setMaxSets(totalSets)
+        .setPoolSizes(poolSizes);
 
-    if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS) {
+    if (vkCreateDescriptorPool(device, reinterpret_cast<const VkDescriptorPoolCreateInfo*>(&poolInfo),
+            nullptr, &descriptorPool) != VK_SUCCESS) {
         return false;
     }
 
