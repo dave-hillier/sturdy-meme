@@ -188,7 +188,7 @@ void main() {
     uint activeCount = subgroupBallotBitCount(activeMask);
     uint laneOffset = subgroupBallotExclusiveBitCount(activeMask);
 
-    uint baseIdx;
+    uint baseIdx = 0;
     if (subgroupElect()) {
         baseIdx = atomicAdd(visibleCellCount, activeCount);
         // 3. Sum and batch totalVisibleTrees and dispatchX

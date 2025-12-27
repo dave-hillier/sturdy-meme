@@ -215,7 +215,7 @@ void main() {
     uint activeCount = subgroupBallotBitCount(activeMask);
     uint laneOffset = subgroupBallotExclusiveBitCount(activeMask);
 
-    uint baseSlot;
+    uint baseSlot = 0;
     if (subgroupElect()) {
         baseSlot = atomicAdd(drawCmd.instanceCount, activeCount);
     }

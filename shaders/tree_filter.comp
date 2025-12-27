@@ -182,7 +182,7 @@ void main() {
     uint activeCount = subgroupBallotBitCount(activeMask);
     uint laneOffset = subgroupBallotExclusiveBitCount(activeMask);
 
-    uint baseIdx;
+    uint baseIdx = 0;
     if (subgroupElect()) {
         baseIdx = atomicAdd(visibleTreeCount, activeCount);
         atomicAdd(dispatchX, activeCount);

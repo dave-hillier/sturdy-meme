@@ -161,7 +161,7 @@ void main() {
     uint subgroupPrefix = subgroupBallotExclusiveBitCount(ballot);
 
     // First active thread in subgroup does atomic add to workgroup counter
-    uint subgroupBaseOffset;
+    uint subgroupBaseOffset = 0;
     if (subgroupElect()) {
         subgroupBaseOffset = atomicAdd(workgroupVisibleCount, subgroupVisibleCount);
     }
