@@ -287,13 +287,14 @@ bool TreeImpostorAtlas::createAtlasArrayTextures() {
     barrier.srcAccessMask = 0;
     barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
-    barrier.image = albedoArrayImage_;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                         0, 0, nullptr, 0, nullptr, 1, &barrier);
+    // Batch both image barriers into a single call
+    std::array<VkImageMemoryBarrier, 2> barriers = {barrier, barrier};
+    barriers[0].image = albedoArrayImage_;
+    barriers[1].image = normalArrayImage_;
 
-    barrier.image = normalArrayImage_;
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                         0, 0, nullptr, 0, nullptr, 1, &barrier);
+                         0, 0, nullptr, 0, nullptr,
+                         static_cast<uint32_t>(barriers.size()), barriers.data());
 
     vkEndCommandBuffer(cmd);
 
@@ -404,13 +405,14 @@ bool TreeImpostorAtlas::createOctahedralAtlasArrayTextures() {
     barrier.srcAccessMask = 0;
     barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
-    barrier.image = octaAlbedoArrayImage_;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                         0, 0, nullptr, 0, nullptr, 1, &barrier);
+    // Batch both image barriers into a single call
+    std::array<VkImageMemoryBarrier, 2> barriers = {barrier, barrier};
+    barriers[0].image = octaAlbedoArrayImage_;
+    barriers[1].image = octaNormalArrayImage_;
 
-    barrier.image = octaNormalArrayImage_;
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                         0, 0, nullptr, 0, nullptr, 1, &barrier);
+                         0, 0, nullptr, 0, nullptr,
+                         static_cast<uint32_t>(barriers.size()), barriers.data());
 
     vkEndCommandBuffer(cmd);
 
@@ -1329,13 +1331,14 @@ int32_t TreeImpostorAtlas::generateArchetype(
     preBarrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
     preBarrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 
-    preBarrier.image = albedoArrayImage_;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                         0, 0, nullptr, 0, nullptr, 1, &preBarrier);
+    // Batch both image barriers into a single call
+    std::array<VkImageMemoryBarrier, 2> preBarriers = {preBarrier, preBarrier};
+    preBarriers[0].image = albedoArrayImage_;
+    preBarriers[1].image = normalArrayImage_;
 
-    preBarrier.image = normalArrayImage_;
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                         0, 0, nullptr, 0, nullptr, 1, &preBarrier);
+                         0, 0, nullptr, 0, nullptr,
+                         static_cast<uint32_t>(preBarriers.size()), preBarriers.data());
 
     // Clear the atlas
     std::array<VkClearValue, 3> clearValues{};
@@ -1429,13 +1432,14 @@ int32_t TreeImpostorAtlas::generateArchetype(
         octaPreBarrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
         octaPreBarrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 
-        octaPreBarrier.image = octaAlbedoArrayImage_;
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                             0, 0, nullptr, 0, nullptr, 1, &octaPreBarrier);
+        // Batch both image barriers into a single call
+        std::array<VkImageMemoryBarrier, 2> octaPreBarriers = {octaPreBarrier, octaPreBarrier};
+        octaPreBarriers[0].image = octaAlbedoArrayImage_;
+        octaPreBarriers[1].image = octaNormalArrayImage_;
 
-        octaPreBarrier.image = octaNormalArrayImage_;
         vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                             0, 0, nullptr, 0, nullptr, 1, &octaPreBarrier);
+                             0, 0, nullptr, 0, nullptr,
+                             static_cast<uint32_t>(octaPreBarriers.size()), octaPreBarriers.data());
 
         // Clear the octahedral atlas
         std::array<VkClearValue, 3> octaClearValues{};

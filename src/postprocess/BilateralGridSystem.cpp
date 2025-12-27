@@ -1,6 +1,7 @@
 #include "BilateralGridSystem.h"
 #include "ShaderLoader.h"
 #include <SDL3/SDL.h>
+#include <array>
 #include <cstring>
 
 // UBO structures matching shader layouts
@@ -515,28 +516,33 @@ void BilateralGridSystem::recordClearGrid(VkCommandBuffer cmd) {
     vkCmdClearColorImage(cmd, gridImages[0], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                         &clearColor, 1, &range);
 
-    // Transition to GENERAL for compute
-    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    // Transition both grids to GENERAL for compute in a single batched barrier
+    // grid[0]: TRANSFER_DST → GENERAL (after clear)
+    // grid[1]: UNDEFINED → GENERAL (no prior dependency)
+    std::array<VkImageMemoryBarrier, 2> barriers{};
 
+    // grid[0]: needs to wait for transfer (clear) to complete
+    barriers[0] = barrier;  // Copy common fields
+    barriers[0].image = gridImages[0];
+    barriers[0].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barriers[0].newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    barriers[0].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barriers[0].dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+
+    // grid[1]: no prior access, just needs layout transition
+    barriers[1] = barrier;  // Copy common fields
+    barriers[1].image = gridImages[1];
+    barriers[1].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barriers[1].newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    barriers[1].srcAccessMask = 0;
+    barriers[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+
+    // Single barrier call for both transitions (TRANSFER covers TOP_OF_PIPE)
     vkCmdPipelineBarrier(cmd,
                         VK_PIPELINE_STAGE_TRANSFER_BIT,
                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                        0, 0, nullptr, 0, nullptr, 1, &barrier);
-
-    // Also transition grid[1] to GENERAL
-    barrier.image = gridImages[1];
-    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    barrier.srcAccessMask = 0;
-    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-
-    vkCmdPipelineBarrier(cmd,
-                        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                        0, 0, nullptr, 0, nullptr, 1, &barrier);
+                        0, 0, nullptr, 0, nullptr,
+                        static_cast<uint32_t>(barriers.size()), barriers.data());
 }
 
 void BilateralGridSystem::recordGridBarrier(VkCommandBuffer cmd, VkImage image,

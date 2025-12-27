@@ -754,16 +754,34 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
         cellUniforms.numCells = spatialIndex_->getCellCount();
         cellUniforms.treesPerWorkgroup = 64;
 
-        void* mappedData;
-        vmaMapMemory(allocator_, cellCullUniformBuffers_.allocations[frameIndex], &mappedData);
-        memcpy(mappedData, &cellUniforms, sizeof(TreeCellCullUniforms));
-        vmaUnmapMemory(allocator_, cellCullUniformBuffers_.allocations[frameIndex]);
+        // Check if two-phase culling will be used so we can batch uniform updates
+        bool useTwoPhase = twoPhaseEnabled_ && treeFilterPipeline_.get() != VK_NULL_HANDLE &&
+                           visibleTreeBuffer_ != VK_NULL_HANDLE && !treeFilterDescriptorSets_.empty();
+
+        // Use vkCmdUpdateBuffer to avoid HOST→COMPUTE stall (keeps update on GPU timeline)
+        vkCmdUpdateBuffer(cmd, cellCullUniformBuffers_.buffers[frameIndex], 0,
+                          sizeof(TreeCellCullUniforms), &cellUniforms);
+
+        // If two-phase culling is enabled, update tree filter uniforms now too
+        // This allows us to combine barriers later (reducing pipeline bubbles)
+        TreeFilterUniforms filterUniforms{};
+        if (useTwoPhase) {
+            filterUniforms.cameraPosition = glm::vec4(cameraPos, 1.0f);
+            for (int i = 0; i < 6; ++i) {
+                filterUniforms.frustumPlanes[i] = frustumPlanes[i];
+            }
+            filterUniforms.maxDrawDistance = params_.maxDrawDistance;
+            filterUniforms.maxTreesPerCell = 64;
+
+            vkCmdUpdateBuffer(cmd, treeFilterUniformBuffers_.buffers[frameIndex], 0,
+                              sizeof(TreeFilterUniforms), &filterUniforms);
+        }
 
         VkMemoryBarrier cellUniformBarrier{};
         cellUniformBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-        cellUniformBarrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
+        cellUniformBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
         cellUniformBarrier.dstAccessMask = VK_ACCESS_UNIFORM_READ_BIT;
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                              0, 1, &cellUniformBarrier, 0, nullptr, 0, nullptr);
 
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cellCullPipeline_.get());
@@ -773,36 +791,16 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
         uint32_t cellWorkgroups = (cellUniforms.numCells + 255) / 256;
         vkCmdDispatch(cmd, cellWorkgroups, 1, 1);
 
-        VkMemoryBarrier cellBarrier{};
-        cellBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-        cellBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        cellBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                             0, 1, &cellBarrier, 0, nullptr, 0, nullptr);
-
         // Tree Filtering (Two-Phase Culling)
-        if (twoPhaseEnabled_ && treeFilterPipeline_.get() != VK_NULL_HANDLE &&
-            visibleTreeBuffer_ != VK_NULL_HANDLE && !treeFilterDescriptorSets_.empty()) {
-
-            TreeFilterUniforms filterUniforms{};
-            filterUniforms.cameraPosition = glm::vec4(cameraPos, 1.0f);
-            for (int i = 0; i < 6; ++i) {
-                filterUniforms.frustumPlanes[i] = frustumPlanes[i];
-            }
-            filterUniforms.maxDrawDistance = params_.maxDrawDistance;
-            filterUniforms.maxTreesPerCell = 64;
-
-            void* filterMappedData;
-            vmaMapMemory(allocator_, treeFilterUniformBuffers_.allocations[frameIndex], &filterMappedData);
-            memcpy(filterMappedData, &filterUniforms, sizeof(TreeFilterUniforms));
-            vmaUnmapMemory(allocator_, treeFilterUniformBuffers_.allocations[frameIndex]);
-
-            VkMemoryBarrier filterUniformBarrier{};
-            filterUniformBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-            filterUniformBarrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
-            filterUniformBarrier.dstAccessMask = VK_ACCESS_UNIFORM_READ_BIT;
-            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                                 0, 1, &filterUniformBarrier, 0, nullptr, 0, nullptr);
+        // Uniforms were already updated above, so we only need COMPUTE→COMPUTE barrier
+        if (useTwoPhase) {
+            // Single barrier: wait for cell cull shader writes before tree filter reads
+            VkMemoryBarrier cellBarrier{};
+            cellBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+            cellBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+            cellBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
+            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                 0, 1, &cellBarrier, 0, nullptr, 0, nullptr);
 
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, treeFilterPipeline_.get());
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, treeFilterPipelineLayout_.get(),
