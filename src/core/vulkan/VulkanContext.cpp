@@ -1,6 +1,10 @@
 #include "VulkanContext.h"
+#include <vulkan/vulkan.hpp>
 #include <SDL3/SDL_vulkan.h>
 #include <SDL3/SDL_log.h>
+
+// Required for dynamic dispatch loader - only define in one .cpp file
+VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
 bool VulkanContext::init(SDL_Window* win) {
     window = win;
@@ -62,6 +66,10 @@ bool VulkanContext::createInstance() {
 
     vkbInstance = instRet.value();
     instance = vkbInstance.instance;
+
+    // Initialize vulkan-hpp dynamic dispatcher with instance
+    VULKAN_HPP_DEFAULT_DISPATCHER.init(instance);
+
     return true;
 }
 
@@ -104,6 +112,9 @@ bool VulkanContext::createLogicalDevice() {
 
     vkbDevice = devRet.value();
     device = vkbDevice.device;
+
+    // Initialize vulkan-hpp dynamic dispatcher with device
+    VULKAN_HPP_DEFAULT_DISPATCHER.init(device);
 
     auto graphicsQueueRet = vkbDevice.get_queue(vkb::QueueType::graphics);
     if (!graphicsQueueRet) {

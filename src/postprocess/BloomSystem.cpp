@@ -4,6 +4,7 @@
 #include "VulkanResourceFactory.h"
 #include "DescriptorManager.h"
 #include "core/ImageBuilder.h"
+#include <vulkan/vulkan.hpp>
 #include <array>
 #include <algorithm>
 #include <cmath>
@@ -121,19 +122,18 @@ bool BloomSystem::createMipChain() {
             mipChain.empty() ? 0 : mipChain[0].extent.width,
             mipChain.empty() ? 0 : mipChain[0].extent.height);
 
-    // Create framebuffers for each mip level
+    // Create framebuffers for each mip level using vulkan-hpp builder
     // Use downsampleRenderPass - both render passes have compatible attachments
     for (auto& mip : mipChain) {
-        VkFramebufferCreateInfo fbInfo = {};
-        fbInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-        fbInfo.renderPass = downsampleRenderPass_.get();
-        fbInfo.attachmentCount = 1;
-        fbInfo.pAttachments = &mip.imageView;
-        fbInfo.width = mip.extent.width;
-        fbInfo.height = mip.extent.height;
-        fbInfo.layers = 1;
+        auto fbInfo = vk::FramebufferCreateInfo{}
+            .setRenderPass(downsampleRenderPass_.get())
+            .setAttachmentCount(1)
+            .setPAttachments(&mip.imageView)
+            .setWidth(mip.extent.width)
+            .setHeight(mip.extent.height)
+            .setLayers(1);
 
-        if (vkCreateFramebuffer(device, &fbInfo, nullptr, &mip.framebuffer) != VK_SUCCESS) {
+        if (vkCreateFramebuffer(device, reinterpret_cast<const VkFramebufferCreateInfo*>(&fbInfo), nullptr, &mip.framebuffer) != VK_SUCCESS) {
             return false;
         }
     }
@@ -142,71 +142,70 @@ bool BloomSystem::createMipChain() {
 }
 
 bool BloomSystem::createRenderPass() {
-    VkAttachmentReference colorRef = {};
-    colorRef.attachment = 0;
-    colorRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    // Using vulkan-hpp builders for render pass creation
+    auto colorRef = vk::AttachmentReference{}
+        .setAttachment(0)
+        .setLayout(vk::ImageLayout::eColorAttachmentOptimal);
 
-    VkSubpassDescription subpass = {};
-    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    subpass.colorAttachmentCount = 1;
-    subpass.pColorAttachments = &colorRef;
+    auto subpass = vk::SubpassDescription{}
+        .setPipelineBindPoint(vk::PipelineBindPoint::eGraphics)
+        .setColorAttachmentCount(1)
+        .setPColorAttachments(&colorRef);
 
-    VkSubpassDependency dependency = {};
-    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-    dependency.dstSubpass = 0;
-    dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dependency.dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-    dependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    dependency.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    auto dependency = vk::SubpassDependency{}
+        .setSrcSubpass(VK_SUBPASS_EXTERNAL)
+        .setDstSubpass(0)
+        .setSrcStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput)
+        .setDstStageMask(vk::PipelineStageFlagBits::eFragmentShader)
+        .setSrcAccessMask(vk::AccessFlagBits::eColorAttachmentWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead);
 
     // Downsample render pass - DONT_CARE since we're writing fresh data
     {
-        VkAttachmentDescription colorAttachment = {};
-        colorAttachment.format = BLOOM_FORMAT;
-        colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-        colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        colorAttachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        auto colorAttachment = vk::AttachmentDescription{}
+            .setFormat(static_cast<vk::Format>(BLOOM_FORMAT))
+            .setSamples(vk::SampleCountFlagBits::e1)
+            .setLoadOp(vk::AttachmentLoadOp::eDontCare)
+            .setStoreOp(vk::AttachmentStoreOp::eStore)
+            .setStencilLoadOp(vk::AttachmentLoadOp::eDontCare)
+            .setStencilStoreOp(vk::AttachmentStoreOp::eDontCare)
+            .setInitialLayout(vk::ImageLayout::eUndefined)
+            .setFinalLayout(vk::ImageLayout::eShaderReadOnlyOptimal);
 
-        VkRenderPassCreateInfo renderPassInfo = {};
-        renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-        renderPassInfo.attachmentCount = 1;
-        renderPassInfo.pAttachments = &colorAttachment;
-        renderPassInfo.subpassCount = 1;
-        renderPassInfo.pSubpasses = &subpass;
-        renderPassInfo.dependencyCount = 1;
-        renderPassInfo.pDependencies = &dependency;
+        auto renderPassInfo = vk::RenderPassCreateInfo{}
+            .setAttachmentCount(1)
+            .setPAttachments(&colorAttachment)
+            .setSubpassCount(1)
+            .setPSubpasses(&subpass)
+            .setDependencyCount(1)
+            .setPDependencies(&dependency);
 
-        if (!ManagedRenderPass::create(device, renderPassInfo, downsampleRenderPass_)) {
+        if (!ManagedRenderPass::create(device, reinterpret_cast<const VkRenderPassCreateInfo&>(renderPassInfo), downsampleRenderPass_)) {
             return false;
         }
     }
 
     // Upsample render pass - LOAD to preserve downsampled content for additive blending
     {
-        VkAttachmentDescription colorAttachment = {};
-        colorAttachment.format = BLOOM_FORMAT;
-        colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-        colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-        colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        colorAttachment.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        colorAttachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        auto colorAttachment = vk::AttachmentDescription{}
+            .setFormat(static_cast<vk::Format>(BLOOM_FORMAT))
+            .setSamples(vk::SampleCountFlagBits::e1)
+            .setLoadOp(vk::AttachmentLoadOp::eLoad)
+            .setStoreOp(vk::AttachmentStoreOp::eStore)
+            .setStencilLoadOp(vk::AttachmentLoadOp::eDontCare)
+            .setStencilStoreOp(vk::AttachmentStoreOp::eDontCare)
+            .setInitialLayout(vk::ImageLayout::eColorAttachmentOptimal)
+            .setFinalLayout(vk::ImageLayout::eShaderReadOnlyOptimal);
 
-        VkRenderPassCreateInfo renderPassInfo = {};
-        renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-        renderPassInfo.attachmentCount = 1;
-        renderPassInfo.pAttachments = &colorAttachment;
-        renderPassInfo.subpassCount = 1;
-        renderPassInfo.pSubpasses = &subpass;
-        renderPassInfo.dependencyCount = 1;
-        renderPassInfo.pDependencies = &dependency;
+        auto renderPassInfo = vk::RenderPassCreateInfo{}
+            .setAttachmentCount(1)
+            .setPAttachments(&colorAttachment)
+            .setSubpassCount(1)
+            .setPSubpasses(&subpass)
+            .setDependencyCount(1)
+            .setPDependencies(&dependency);
 
-        if (!ManagedRenderPass::create(device, renderPassInfo, upsampleRenderPass_)) {
+        if (!ManagedRenderPass::create(device, reinterpret_cast<const VkRenderPassCreateInfo&>(renderPassInfo), upsampleRenderPass_)) {
             return false;
         }
     }
@@ -221,23 +220,22 @@ bool BloomSystem::createSampler() {
 
 bool BloomSystem::createDescriptorSetLayouts() {
     // Both downsample and upsample use the same descriptor set layout
-    // Binding 0: input texture (sampler2D)
-    VkDescriptorSetLayoutBinding binding{};
-    binding.binding = 0;
-    binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    binding.descriptorCount = 1;
-    binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    // Binding 0: input texture (sampler2D) - using vulkan-hpp builder
+    auto binding = vk::DescriptorSetLayoutBinding{}
+        .setBinding(0)
+        .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+        .setDescriptorCount(1)
+        .setStageFlags(vk::ShaderStageFlagBits::eFragment);
 
-    VkDescriptorSetLayoutCreateInfo layoutInfo = {};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layoutInfo.bindingCount = 1;
-    layoutInfo.pBindings = &binding;
+    auto layoutInfo = vk::DescriptorSetLayoutCreateInfo{}
+        .setBindingCount(1)
+        .setPBindings(&binding);
 
-    if (!ManagedDescriptorSetLayout::create(device, layoutInfo, downsampleDescSetLayout_)) {
+    if (!ManagedDescriptorSetLayout::create(device, reinterpret_cast<const VkDescriptorSetLayoutCreateInfo&>(layoutInfo), downsampleDescSetLayout_)) {
         return false;
     }
 
-    if (!ManagedDescriptorSetLayout::create(device, layoutInfo, upsampleDescSetLayout_)) {
+    if (!ManagedDescriptorSetLayout::create(device, reinterpret_cast<const VkDescriptorSetLayoutCreateInfo&>(layoutInfo), upsampleDescSetLayout_)) {
         return false;
     }
 
@@ -245,38 +243,36 @@ bool BloomSystem::createDescriptorSetLayouts() {
 }
 
 bool BloomSystem::createPipelines() {
-    // Create pipeline layouts with push constants
-    VkPushConstantRange downsamplePushConstantRange = {};
-    downsamplePushConstantRange.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    downsamplePushConstantRange.offset = 0;
-    downsamplePushConstantRange.size = sizeof(DownsamplePushConstants);
+    // Create pipeline layouts with push constants using vulkan-hpp builders
+    auto downsamplePushConstantRange = vk::PushConstantRange{}
+        .setStageFlags(vk::ShaderStageFlagBits::eFragment)
+        .setOffset(0)
+        .setSize(sizeof(DownsamplePushConstants));
 
     VkDescriptorSetLayout downsampleLayout = downsampleDescSetLayout_.get();
-    VkPipelineLayoutCreateInfo downsampleLayoutInfo = {};
-    downsampleLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    downsampleLayoutInfo.setLayoutCount = 1;
-    downsampleLayoutInfo.pSetLayouts = &downsampleLayout;
-    downsampleLayoutInfo.pushConstantRangeCount = 1;
-    downsampleLayoutInfo.pPushConstantRanges = &downsamplePushConstantRange;
+    auto downsampleLayoutInfo = vk::PipelineLayoutCreateInfo{}
+        .setSetLayoutCount(1)
+        .setPSetLayouts(&downsampleLayout)
+        .setPushConstantRangeCount(1)
+        .setPPushConstantRanges(&downsamplePushConstantRange);
 
-    if (!ManagedPipelineLayout::create(device, downsampleLayoutInfo, downsamplePipelineLayout_)) {
+    if (!ManagedPipelineLayout::create(device, reinterpret_cast<const VkPipelineLayoutCreateInfo&>(downsampleLayoutInfo), downsamplePipelineLayout_)) {
         return false;
     }
 
-    VkPushConstantRange upsamplePushConstantRange = {};
-    upsamplePushConstantRange.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    upsamplePushConstantRange.offset = 0;
-    upsamplePushConstantRange.size = sizeof(UpsamplePushConstants);
+    auto upsamplePushConstantRange = vk::PushConstantRange{}
+        .setStageFlags(vk::ShaderStageFlagBits::eFragment)
+        .setOffset(0)
+        .setSize(sizeof(UpsamplePushConstants));
 
     VkDescriptorSetLayout upsampleLayout = upsampleDescSetLayout_.get();
-    VkPipelineLayoutCreateInfo upsampleLayoutInfo = {};
-    upsampleLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    upsampleLayoutInfo.setLayoutCount = 1;
-    upsampleLayoutInfo.pSetLayouts = &upsampleLayout;
-    upsampleLayoutInfo.pushConstantRangeCount = 1;
-    upsampleLayoutInfo.pPushConstantRanges = &upsamplePushConstantRange;
+    auto upsampleLayoutInfo = vk::PipelineLayoutCreateInfo{}
+        .setSetLayoutCount(1)
+        .setPSetLayouts(&upsampleLayout)
+        .setPushConstantRangeCount(1)
+        .setPPushConstantRanges(&upsamplePushConstantRange);
 
-    if (!ManagedPipelineLayout::create(device, upsampleLayoutInfo, upsamplePipelineLayout_)) {
+    if (!ManagedPipelineLayout::create(device, reinterpret_cast<const VkPipelineLayoutCreateInfo&>(upsampleLayoutInfo), upsamplePipelineLayout_)) {
         return false;
     }
 
@@ -356,30 +352,28 @@ void BloomSystem::recordBloomPass(VkCommandBuffer cmd, VkImageView hdrInput) {
             .writeImage(0, sourceView, sampler_.get())
             .update();
 
-        // Begin render pass
-        VkRenderPassBeginInfo renderPassInfo = {};
-        renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        renderPassInfo.renderPass = downsampleRenderPass_.get();
-        renderPassInfo.framebuffer = mipChain[i].framebuffer;
-        renderPassInfo.renderArea.offset = {0, 0};
-        renderPassInfo.renderArea.extent = mipChain[i].extent;
+        // Begin render pass using vulkan-hpp builder
+        auto renderPassInfo = vk::RenderPassBeginInfo{}
+            .setRenderPass(downsampleRenderPass_.get())
+            .setFramebuffer(mipChain[i].framebuffer)
+            .setRenderArea(vk::Rect2D{{0, 0}, mipChain[i].extent});
 
-        vkCmdBeginRenderPass(cmd, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+        vkCmdBeginRenderPass(cmd, reinterpret_cast<const VkRenderPassBeginInfo*>(&renderPassInfo), VK_SUBPASS_CONTENTS_INLINE);
 
-        // Set viewport and scissor
-        VkViewport viewport = {};
-        viewport.x = 0.0f;
-        viewport.y = 0.0f;
-        viewport.width = static_cast<float>(mipChain[i].extent.width);
-        viewport.height = static_cast<float>(mipChain[i].extent.height);
-        viewport.minDepth = 0.0f;
-        viewport.maxDepth = 1.0f;
-        vkCmdSetViewport(cmd, 0, 1, &viewport);
+        // Set viewport and scissor using vulkan-hpp builders
+        auto viewport = vk::Viewport{}
+            .setX(0.0f)
+            .setY(0.0f)
+            .setWidth(static_cast<float>(mipChain[i].extent.width))
+            .setHeight(static_cast<float>(mipChain[i].extent.height))
+            .setMinDepth(0.0f)
+            .setMaxDepth(1.0f);
+        vkCmdSetViewport(cmd, 0, 1, reinterpret_cast<const VkViewport*>(&viewport));
 
-        VkRect2D scissor = {};
-        scissor.offset = {0, 0};
-        scissor.extent = mipChain[i].extent;
-        vkCmdSetScissor(cmd, 0, 1, &scissor);
+        auto scissor = vk::Rect2D{}
+            .setOffset({0, 0})
+            .setExtent(mipChain[i].extent);
+        vkCmdSetScissor(cmd, 0, 1, reinterpret_cast<const VkRect2D*>(&scissor));
 
         // Bind pipeline and descriptor set
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, downsamplePipeline_.get());
@@ -423,30 +417,28 @@ void BloomSystem::recordBloomPass(VkCommandBuffer cmd, VkImageView hdrInput) {
             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
             VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
 
-        // Begin render pass with LOAD operation to preserve downsampled content
-        VkRenderPassBeginInfo renderPassInfo = {};
-        renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        renderPassInfo.renderPass = upsampleRenderPass_.get();
-        renderPassInfo.framebuffer = mipChain[i].framebuffer;
-        renderPassInfo.renderArea.offset = {0, 0};
-        renderPassInfo.renderArea.extent = mipChain[i].extent;
+        // Begin render pass with LOAD operation to preserve downsampled content using vulkan-hpp builder
+        auto renderPassInfo = vk::RenderPassBeginInfo{}
+            .setRenderPass(upsampleRenderPass_.get())
+            .setFramebuffer(mipChain[i].framebuffer)
+            .setRenderArea(vk::Rect2D{{0, 0}, mipChain[i].extent});
 
-        vkCmdBeginRenderPass(cmd, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+        vkCmdBeginRenderPass(cmd, reinterpret_cast<const VkRenderPassBeginInfo*>(&renderPassInfo), VK_SUBPASS_CONTENTS_INLINE);
 
-        // Set viewport and scissor
-        VkViewport viewport = {};
-        viewport.x = 0.0f;
-        viewport.y = 0.0f;
-        viewport.width = static_cast<float>(mipChain[i].extent.width);
-        viewport.height = static_cast<float>(mipChain[i].extent.height);
-        viewport.minDepth = 0.0f;
-        viewport.maxDepth = 1.0f;
-        vkCmdSetViewport(cmd, 0, 1, &viewport);
+        // Set viewport and scissor using vulkan-hpp builders
+        auto viewport = vk::Viewport{}
+            .setX(0.0f)
+            .setY(0.0f)
+            .setWidth(static_cast<float>(mipChain[i].extent.width))
+            .setHeight(static_cast<float>(mipChain[i].extent.height))
+            .setMinDepth(0.0f)
+            .setMaxDepth(1.0f);
+        vkCmdSetViewport(cmd, 0, 1, reinterpret_cast<const VkViewport*>(&viewport));
 
-        VkRect2D scissor = {};
-        scissor.offset = {0, 0};
-        scissor.extent = mipChain[i].extent;
-        vkCmdSetScissor(cmd, 0, 1, &scissor);
+        auto scissor = vk::Rect2D{}
+            .setOffset({0, 0})
+            .setExtent(mipChain[i].extent);
+        vkCmdSetScissor(cmd, 0, 1, reinterpret_cast<const VkRect2D*>(&scissor));
 
         // Bind pipeline and descriptor set
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, upsamplePipeline_.get());
