@@ -103,6 +103,22 @@ void AtmosphereLUTSystem::computeSkyViewLUT(VkCommandBuffer cmd, const glm::vec3
 void AtmosphereLUTSystem::updateSkyViewLUT(VkCommandBuffer cmd, uint32_t frameIndex,
                                            const glm::vec3& sunDir,
                                            const glm::vec3& cameraPos, float cameraAltitude) {
+    // Check if update is needed based on input changes
+    bool sunDirChanged = glm::dot(sunDir, lastSkyViewSunDir) < (1.0f - SUN_DIR_THRESHOLD);
+    bool cameraPosChanged = glm::length(cameraPos - lastSkyViewCameraPos) > CAMERA_POS_THRESHOLD;
+    bool altitudeChanged = std::abs(cameraAltitude - lastSkyViewCameraAltitude) > ALTITUDE_THRESHOLD;
+
+    if (!skyViewNeedsUpdate && !sunDirChanged && !cameraPosChanged && !altitudeChanged) {
+        // No significant change, skip LUT update
+        return;
+    }
+
+    // Store current values for next frame comparison
+    lastSkyViewSunDir = sunDir;
+    lastSkyViewCameraPos = cameraPos;
+    lastSkyViewCameraAltitude = cameraAltitude;
+    skyViewNeedsUpdate = false;
+
     // Update per-frame uniform buffer with new sun direction (double-buffered)
     AtmosphereUniforms uniforms{};
     uniforms.params = atmosphereParams;
@@ -159,6 +175,24 @@ void AtmosphereLUTSystem::computeCloudMapLUT(VkCommandBuffer cmd, const glm::vec
 
 void AtmosphereLUTSystem::updateCloudMapLUT(VkCommandBuffer cmd, uint32_t frameIndex,
                                             const glm::vec3& windOffset, float time) {
+    // Check if update is needed based on input changes
+    bool windChanged = glm::length(windOffset - lastCloudWindOffset) > WIND_OFFSET_THRESHOLD;
+    bool timeChanged = std::abs(time - lastCloudTime) > WIND_OFFSET_THRESHOLD;
+    bool coverageChanged = std::abs(cloudCoverage - lastCloudCoverage) > CLOUD_PARAM_THRESHOLD;
+    bool densityChanged = std::abs(cloudDensity - lastCloudDensity) > CLOUD_PARAM_THRESHOLD;
+
+    if (!cloudMapNeedsUpdate && !windChanged && !timeChanged && !coverageChanged && !densityChanged) {
+        // No significant change, skip LUT update
+        return;
+    }
+
+    // Store current values for next frame comparison
+    lastCloudWindOffset = windOffset;
+    lastCloudTime = time;
+    lastCloudCoverage = cloudCoverage;
+    lastCloudDensity = cloudDensity;
+    cloudMapNeedsUpdate = false;
+
     // Update per-frame cloud map uniform buffer (double-buffered)
     CloudMapUniforms uniforms{};
     uniforms.windOffset = glm::vec4(windOffset, time);

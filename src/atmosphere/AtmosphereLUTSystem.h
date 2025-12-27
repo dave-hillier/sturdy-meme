@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 #include <memory>
+#include <cmath>
 #include "UBOs.h"
 #include "BufferUtils.h"
 #include "DescriptorManager.h"
@@ -129,14 +130,27 @@ public:
     // Atmosphere parameters
     void setAtmosphereParams(const AtmosphereParams& params) {
         atmosphereParams = params;
-        paramsDirty = true;  // Mark for LUT recomputation
+        paramsDirty = true;  // Mark for static LUT recomputation
+        skyViewNeedsUpdate = true;  // Sky-view depends on atmosphere params
     }
     const AtmosphereParams& getAtmosphereParams() const { return atmosphereParams; }
 
     // Cloud map parameters (used by updateCloudMapLUT)
-    void setCloudCoverage(float coverage) { cloudCoverage = glm::clamp(coverage, 0.0f, 1.0f); }
+    void setCloudCoverage(float coverage) {
+        float newCoverage = glm::clamp(coverage, 0.0f, 1.0f);
+        if (std::abs(newCoverage - cloudCoverage) > 0.001f) {
+            cloudCoverage = newCoverage;
+            cloudMapNeedsUpdate = true;
+        }
+    }
     float getCloudCoverage() const { return cloudCoverage; }
-    void setCloudDensity(float density) { cloudDensity = glm::clamp(density, 0.0f, 2.0f); }
+    void setCloudDensity(float density) {
+        float newDensity = glm::clamp(density, 0.0f, 2.0f);
+        if (std::abs(newDensity - cloudDensity) > 0.001f) {
+            cloudDensity = newDensity;
+            cloudMapNeedsUpdate = true;
+        }
+    }
     float getCloudDensity() const { return cloudDensity; }
 
     // Check if LUTs need recomputation due to parameter changes
@@ -256,6 +270,26 @@ private:
 
     // Dirty flag for LUT recomputation
     bool paramsDirty = false;
+
+    // Change detection for sky-view LUT (only recompute when inputs change significantly)
+    glm::vec3 lastSkyViewSunDir = glm::vec3(0.0f);
+    glm::vec3 lastSkyViewCameraPos = glm::vec3(0.0f);
+    float lastSkyViewCameraAltitude = -1.0f;
+    bool skyViewNeedsUpdate = true;  // Force initial compute
+
+    // Change detection for cloud map LUT
+    glm::vec3 lastCloudWindOffset = glm::vec3(0.0f);
+    float lastCloudTime = -1.0f;
+    float lastCloudCoverage = -1.0f;
+    float lastCloudDensity = -1.0f;
+    bool cloudMapNeedsUpdate = true;  // Force initial compute
+
+    // Thresholds for detecting significant changes
+    static constexpr float SUN_DIR_THRESHOLD = 0.0001f;      // Sun direction change (dot product)
+    static constexpr float CAMERA_POS_THRESHOLD = 10.0f;     // Camera position change in km
+    static constexpr float ALTITUDE_THRESHOLD = 0.1f;        // Altitude change in km
+    static constexpr float WIND_OFFSET_THRESHOLD = 0.001f;   // Wind offset change
+    static constexpr float CLOUD_PARAM_THRESHOLD = 0.001f;   // Cloud coverage/density change
 
     AtmosphereLUTSystem() = default;  // Private: use factory
 
