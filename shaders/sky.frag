@@ -5,6 +5,7 @@
 #include "constants_common.glsl"
 #include "bindings.glsl"
 #include "ubo_common.glsl"
+#include "atmosphere_common.glsl"
 #include "celestial_common.glsl"
 #include "fbm_common.glsl"
 
@@ -311,15 +312,6 @@ float sampleCloudTransmittanceToSun(vec3 pos, vec3 sunDir, vec3 rayDir) {
     return exp(-opticalDepth);
 }
 
-vec2 raySphereIntersect(vec3 origin, vec3 dir, float radius) {
-    float b = dot(origin, dir);
-    float c = dot(origin, origin) - radius * radius;
-    float h = b * b - c;
-    if (h < 0.0) return vec2(1e9, -1e9);
-    h = sqrt(h);
-    return vec2(-b - h, -b + h);
-}
-
 // Ray-plane intersection for cloud layer bounds
 vec2 intersectCloudLayer(vec3 origin, vec3 dir) {
     // Intersect with spherical shells at cloud layer boundaries
@@ -343,18 +335,9 @@ struct CloudResult {
     float transmittance;
 };
 
-float rayleighPhase(float cosTheta) {
-    return 3.0 / (16.0 * PI) * (1.0 + cosTheta * cosTheta);
-}
+// Use RayleighPhase and CornetteShanksMiePhase from atmosphere_common.glsl
 
-float cornetteShanksPhase(float cosTheta, float g) {
-    float g2 = g * g;
-    float num = 3.0 * (1.0 - g2) * (1.0 + cosTheta * cosTheta);
-    float denom = 8.0 * PI * (2.0 + g2) * pow(1.0 + g2 - 2.0 * g * cosTheta, 1.5);
-    return num / denom;
-}
-
-float ozoneDensity(float altitude) {
+float skyOzoneDensity(float altitude) {
     // Use UBO params if available (non-zero), otherwise use defaults
     float ozoneCenter = ubo.atmosOzoneAbsorption.w > 0.01 ? ubo.atmosOzoneAbsorption.w : OZONE_LAYER_CENTER;
     float ozoneWidth = ubo.atmosOzoneWidth > 0.01 ? ubo.atmosOzoneWidth : OZONE_LAYER_WIDTH;
@@ -456,8 +439,8 @@ vec3 sampleAtmosphericIrradianceWithPhase(vec3 worldPos, vec3 sunDir, vec3 viewD
     AtmosphericIrradiance irr = sampleAtmosphericIrradiance(worldPos, sunDir);
 
     float cosTheta = dot(viewDir, sunDir);
-    float rayleighP = rayleighPhase(cosTheta);
-    float mieP = cornetteShanksPhase(cosTheta, mieG);
+    float rayleighP = RayleighPhase(cosTheta);
+    float mieP = CornetteShanksMiePhase(cosTheta, mieG);
 
     return irr.rayleigh * rayleighP + irr.mie * mieP;
 }
@@ -497,7 +480,7 @@ vec3 computeAtmosphericTransmittance(vec3 worldPos, vec3 lightDir, int samples) 
         // Accumulate optical depth from all scattering/absorption sources
         float rayleighDensity = exp(-altitude / RAYLEIGH_SCALE_HEIGHT);
         float mieDensity = exp(-altitude / MIE_SCALE_HEIGHT);
-        float ozone = ozoneDensity(altitude);
+        float ozone = skyOzoneDensity(altitude);
 
         vec3 extinction = rayleighDensity * RAYLEIGH_SCATTERING_BASE +
                           mieDensity * vec3(MIE_SCATTERING_BASE + MIE_ABSORPTION_BASE) +
@@ -544,10 +527,7 @@ float computeEarthShadow(vec3 worldPos, vec3 sunDir) {
     return 1.0;  // Fully lit
 }
 
-struct ScatteringResult {
-    vec3 inscatter;
-    vec3 transmittance;
-};
+// ScatteringResult struct is defined in atmosphere_common.glsl
 
 // Compute Rayleigh scattering with blended LMS for accurate sunset colors
 // Uses LMS primarily at low sun angles for better sunsets, standard RGB otherwise
@@ -605,10 +585,10 @@ ScatteringResult integrateAtmosphere(vec3 origin, vec3 dir, int sampleCount) {
     vec3 moonDir = normalize(ubo.moonDirection.xyz);
     float cosViewSun = dot(dir, sunDir);
     float cosViewMoon = dot(dir, moonDir);
-    float rayleighPSun = rayleighPhase(cosViewSun);
-    float rayleighPMoon = rayleighPhase(cosViewMoon);
-    float miePSun = cornetteShanksPhase(cosViewSun, mieAniso);
-    float miePMoon = cornetteShanksPhase(cosViewMoon, mieAniso);
+    float rayleighPSun = RayleighPhase(cosViewSun);
+    float rayleighPMoon = RayleighPhase(cosViewMoon);
+    float miePSun = CornetteShanksMiePhase(cosViewSun, mieAniso);
+    float miePMoon = CornetteShanksMiePhase(cosViewMoon, mieAniso);
 
     float sunAltitude = sunDir.y;
     float moonAltitude = moonDir.y;
@@ -625,7 +605,7 @@ ScatteringResult integrateAtmosphere(vec3 origin, vec3 dir, int sampleCount) {
 
         float rayleighDensity = exp(-altitude / rayleighScaleH);
         float mieDensity = exp(-altitude / mieScaleH);
-        float ozone = ozoneDensity(altitude);
+        float ozone = skyOzoneDensity(altitude);
 
         // Sample transmittance LUT for sunlight reaching this point
         float posR = length(pos);
@@ -1139,7 +1119,7 @@ vec3 renderAtmosphere(vec3 dir) {
     float cosSun = dot(normDir, sunDir);
     // Use UBO mie anisotropy if available, otherwise default
     float mieAniso = abs(ubo.atmosMieParams.w) > 0.001 ? clamp(ubo.atmosMieParams.w, -0.99, 0.99) : MIE_ANISOTROPY;
-    float miePhase = cornetteShanksPhase(cosSun, mieAniso);
+    float miePhase = CornetteShanksMiePhase(cosSun, mieAniso);
 
     // The halo intensity should fall off smoothly
     // Mie phase already provides the angular falloff - just scale it for visibility
