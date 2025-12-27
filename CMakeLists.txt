@@ -8,6 +8,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(SKIP_TERRAIN_PREPROCESSING "Skip building terrain preprocessing tools" OFF)
 
 find_package(Vulkan REQUIRED)
+find_package(VulkanHeaders CONFIG REQUIRED)  # vulkan-hpp headers
 find_package(SDL3 CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
 find_package(vk-bootstrap CONFIG REQUIRED)
@@ -215,6 +216,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
     Vulkan::Vulkan
+    Vulkan::Headers
     SDL3::SDL3
     glm::glm
     vk-bootstrap::vk-bootstrap
@@ -229,6 +231,12 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 
 # Enable Jolt Physics debug renderer for visualization
 target_compile_definitions(${PROJECT_NAME} PRIVATE JPH_DEBUG_RENDERER)
+
+# Configure Vulkan-HPP: disable positional constructors to enforce builder pattern
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+    VULKAN_HPP_NO_STRUCT_CONSTRUCTORS   # Force use of setters/.set*() builder methods
+    VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1  # Use dynamic dispatch for flexibility
+)
 
 # Platform-specific setup
 if(APPLE)

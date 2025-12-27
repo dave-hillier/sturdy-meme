@@ -1,4 +1,5 @@
 #include "VulkanResourceFactory.h"
+#include <vulkan/vulkan.hpp>
 #include <SDL3/SDL_log.h>
 #include <array>
 
@@ -48,12 +49,11 @@ bool VulkanResourceFactory::createCommandPool(
     VkCommandPoolCreateFlags flags,
     VkCommandPool& outPool)
 {
-    VkCommandPoolCreateInfo poolInfo{};
-    poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    poolInfo.flags = flags;
-    poolInfo.queueFamilyIndex = queueFamilyIndex;
+    auto poolInfo = vk::CommandPoolCreateInfo{}
+        .setFlags(static_cast<vk::CommandPoolCreateFlags>(flags))
+        .setQueueFamilyIndex(queueFamilyIndex);
 
-    if (vkCreateCommandPool(device, &poolInfo, nullptr, &outPool) != VK_SUCCESS) {
+    if (vkCreateCommandPool(device, reinterpret_cast<const VkCommandPoolCreateInfo*>(&poolInfo), nullptr, &outPool) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create command pool");
         return false;
     }
@@ -69,13 +69,12 @@ bool VulkanResourceFactory::createCommandBuffers(
 {
     outBuffers.resize(count);
 
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.commandPool = pool;
-    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandBufferCount = count;
+    auto allocInfo = vk::CommandBufferAllocateInfo{}
+        .setCommandPool(pool)
+        .setLevel(vk::CommandBufferLevel::ePrimary)
+        .setCommandBufferCount(count);
 
-    if (vkAllocateCommandBuffers(device, &allocInfo, outBuffers.data()) != VK_SUCCESS) {
+    if (vkAllocateCommandBuffers(device, reinterpret_cast<const VkCommandBufferAllocateInfo*>(&allocInfo), outBuffers.data()) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate command buffers");
         return false;
     }
@@ -96,17 +95,15 @@ bool VulkanResourceFactory::createSyncResources(
     outResources.renderFinishedSemaphores.resize(framesInFlight);
     outResources.inFlightFences.resize(framesInFlight);
 
-    VkSemaphoreCreateInfo semaphoreInfo{};
-    semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    auto semaphoreInfo = vk::SemaphoreCreateInfo{};
 
-    VkFenceCreateInfo fenceInfo{};
-    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+    auto fenceInfo = vk::FenceCreateInfo{}
+        .setFlags(vk::FenceCreateFlagBits::eSignaled);
 
     for (uint32_t i = 0; i < framesInFlight; i++) {
-        if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &outResources.imageAvailableSemaphores[i]) != VK_SUCCESS ||
-            vkCreateSemaphore(device, &semaphoreInfo, nullptr, &outResources.renderFinishedSemaphores[i]) != VK_SUCCESS ||
-            vkCreateFence(device, &fenceInfo, nullptr, &outResources.inFlightFences[i]) != VK_SUCCESS) {
+        if (vkCreateSemaphore(device, reinterpret_cast<const VkSemaphoreCreateInfo*>(&semaphoreInfo), nullptr, &outResources.imageAvailableSemaphores[i]) != VK_SUCCESS ||
+            vkCreateSemaphore(device, reinterpret_cast<const VkSemaphoreCreateInfo*>(&semaphoreInfo), nullptr, &outResources.renderFinishedSemaphores[i]) != VK_SUCCESS ||
+            vkCreateFence(device, reinterpret_cast<const VkFenceCreateInfo*>(&fenceInfo), nullptr, &outResources.inFlightFences[i]) != VK_SUCCESS) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create sync objects for frame %u", i);
             // Cleanup already created resources
             outResources.destroy(device);
@@ -130,44 +127,41 @@ bool VulkanResourceFactory::createDepthResources(
 {
     outResources.format = format;
 
-    // Create depth image
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.extent.width = extent.width;
-    imageInfo.extent.height = extent.height;
-    imageInfo.extent.depth = 1;
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
-    imageInfo.format = format;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    // SAMPLED_BIT for Hi-Z pyramid generation
-    imageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    // Create depth image using vulkan-hpp builder
+    auto imageInfo = vk::ImageCreateInfo{}
+        .setImageType(vk::ImageType::e2D)
+        .setExtent(vk::Extent3D{extent.width, extent.height, 1})
+        .setMipLevels(1)
+        .setArrayLayers(1)
+        .setFormat(static_cast<vk::Format>(format))
+        .setTiling(vk::ImageTiling::eOptimal)
+        .setInitialLayout(vk::ImageLayout::eUndefined)
+        // SAMPLED_BIT for Hi-Z pyramid generation
+        .setUsage(vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled)
+        .setSamples(vk::SampleCountFlagBits::e1)
+        .setSharingMode(vk::SharingMode::eExclusive);
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
 
-    if (vmaCreateImage(allocator, &imageInfo, &allocInfo, &outResources.image, &outResources.allocation, nullptr) != VK_SUCCESS) {
+    if (vmaCreateImage(allocator, reinterpret_cast<const VkImageCreateInfo*>(&imageInfo), &allocInfo, &outResources.image, &outResources.allocation, nullptr) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create depth image");
         return false;
     }
 
-    // Create depth image view
-    VkImageViewCreateInfo viewInfo{};
-    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.image = outResources.image;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format = format;
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-    viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = 1;
-    viewInfo.subresourceRange.baseArrayLayer = 0;
-    viewInfo.subresourceRange.layerCount = 1;
+    // Create depth image view using vulkan-hpp builder
+    auto viewInfo = vk::ImageViewCreateInfo{}
+        .setImage(outResources.image)
+        .setViewType(vk::ImageViewType::e2D)
+        .setFormat(static_cast<vk::Format>(format))
+        .setSubresourceRange(vk::ImageSubresourceRange{}
+            .setAspectMask(vk::ImageAspectFlagBits::eDepth)
+            .setBaseMipLevel(0)
+            .setLevelCount(1)
+            .setBaseArrayLayer(0)
+            .setLayerCount(1));
 
-    if (vkCreateImageView(device, &viewInfo, nullptr, &outResources.view) != VK_SUCCESS) {
+    if (vkCreateImageView(device, reinterpret_cast<const VkImageViewCreateInfo*>(&viewInfo), nullptr, &outResources.view) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create depth image view");
         outResources.destroy(device, allocator);
         return false;
@@ -192,43 +186,40 @@ bool VulkanResourceFactory::createDepthImageAndView(
     VmaAllocation& outAllocation,
     VkImageView& outView)
 {
-    // Create depth image
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.extent.width = extent.width;
-    imageInfo.extent.height = extent.height;
-    imageInfo.extent.depth = 1;
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
-    imageInfo.format = format;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    imageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    // Create depth image using vulkan-hpp builder
+    auto imageInfo = vk::ImageCreateInfo{}
+        .setImageType(vk::ImageType::e2D)
+        .setExtent(vk::Extent3D{extent.width, extent.height, 1})
+        .setMipLevels(1)
+        .setArrayLayers(1)
+        .setFormat(static_cast<vk::Format>(format))
+        .setTiling(vk::ImageTiling::eOptimal)
+        .setInitialLayout(vk::ImageLayout::eUndefined)
+        .setUsage(vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled)
+        .setSamples(vk::SampleCountFlagBits::e1)
+        .setSharingMode(vk::SharingMode::eExclusive);
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
 
-    if (vmaCreateImage(allocator, &imageInfo, &allocInfo, &outImage, &outAllocation, nullptr) != VK_SUCCESS) {
+    if (vmaCreateImage(allocator, reinterpret_cast<const VkImageCreateInfo*>(&imageInfo), &allocInfo, &outImage, &outAllocation, nullptr) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create depth image");
         return false;
     }
 
-    // Create depth image view
-    VkImageViewCreateInfo viewInfo{};
-    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.image = outImage;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format = format;
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-    viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = 1;
-    viewInfo.subresourceRange.baseArrayLayer = 0;
-    viewInfo.subresourceRange.layerCount = 1;
+    // Create depth image view using vulkan-hpp builder
+    auto viewInfo = vk::ImageViewCreateInfo{}
+        .setImage(outImage)
+        .setViewType(vk::ImageViewType::e2D)
+        .setFormat(static_cast<vk::Format>(format))
+        .setSubresourceRange(vk::ImageSubresourceRange{}
+            .setAspectMask(vk::ImageAspectFlagBits::eDepth)
+            .setBaseMipLevel(0)
+            .setLevelCount(1)
+            .setBaseArrayLayer(0)
+            .setLayerCount(1));
 
-    if (vkCreateImageView(device, &viewInfo, nullptr, &outView) != VK_SUCCESS) {
+    if (vkCreateImageView(device, reinterpret_cast<const VkImageViewCreateInfo*>(&viewInfo), nullptr, &outView) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create depth image view");
         vmaDestroyImage(allocator, outImage, outAllocation);
         outImage = VK_NULL_HANDLE;
@@ -259,16 +250,15 @@ bool VulkanResourceFactory::createFramebuffers(
             depthImageView
         };
 
-        VkFramebufferCreateInfo framebufferInfo{};
-        framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-        framebufferInfo.renderPass = renderPass;
-        framebufferInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
-        framebufferInfo.pAttachments = attachments.data();
-        framebufferInfo.width = extent.width;
-        framebufferInfo.height = extent.height;
-        framebufferInfo.layers = 1;
+        auto framebufferInfo = vk::FramebufferCreateInfo{}
+            .setRenderPass(renderPass)
+            .setAttachmentCount(static_cast<uint32_t>(attachments.size()))
+            .setPAttachments(reinterpret_cast<const vk::ImageView*>(attachments.data()))
+            .setWidth(extent.width)
+            .setHeight(extent.height)
+            .setLayers(1);
 
-        if (vkCreateFramebuffer(device, &framebufferInfo, nullptr, &outFramebuffers[i]) != VK_SUCCESS) {
+        if (vkCreateFramebuffer(device, reinterpret_cast<const VkFramebufferCreateInfo*>(&framebufferInfo), nullptr, &outFramebuffers[i]) != VK_SUCCESS) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create framebuffer %zu", i);
             // Cleanup already created framebuffers
             destroyFramebuffers(device, outFramebuffers);
@@ -301,44 +291,43 @@ bool VulkanResourceFactory::createRenderPass(
     VkRenderPass& outRenderPass)
 {
     if (config.depthOnly) {
-        // Depth-only render pass (for shadow maps)
-        VkAttachmentDescription depthAttachment{};
-        depthAttachment.format = config.depthFormat;
-        depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-        depthAttachment.loadOp = config.clearDepth ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
-        depthAttachment.storeOp = config.storeDepth ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        depthAttachment.finalLayout = config.finalDepthLayout;
+        // Depth-only render pass (for shadow maps) using vulkan-hpp builders
+        auto depthAttachment = vk::AttachmentDescription{}
+            .setFormat(static_cast<vk::Format>(config.depthFormat))
+            .setSamples(vk::SampleCountFlagBits::e1)
+            .setLoadOp(config.clearDepth ? vk::AttachmentLoadOp::eClear : vk::AttachmentLoadOp::eLoad)
+            .setStoreOp(config.storeDepth ? vk::AttachmentStoreOp::eStore : vk::AttachmentStoreOp::eDontCare)
+            .setStencilLoadOp(vk::AttachmentLoadOp::eDontCare)
+            .setStencilStoreOp(vk::AttachmentStoreOp::eDontCare)
+            .setInitialLayout(vk::ImageLayout::eUndefined)
+            .setFinalLayout(static_cast<vk::ImageLayout>(config.finalDepthLayout));
 
-        VkAttachmentReference depthAttachmentRef{};
-        depthAttachmentRef.attachment = 0;
-        depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        auto depthAttachmentRef = vk::AttachmentReference{}
+            .setAttachment(0)
+            .setLayout(vk::ImageLayout::eDepthStencilAttachmentOptimal);
 
-        VkSubpassDescription subpass{};
-        subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-        subpass.colorAttachmentCount = 0;
-        subpass.pDepthStencilAttachment = &depthAttachmentRef;
+        auto subpass = vk::SubpassDescription{}
+            .setPipelineBindPoint(vk::PipelineBindPoint::eGraphics)
+            .setColorAttachmentCount(0)
+            .setPDepthStencilAttachment(&depthAttachmentRef);
 
-        VkSubpassDependency dependency{};
-        dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-        dependency.dstSubpass = 0;
-        dependency.srcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-        dependency.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        dependency.dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-        dependency.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        auto dependency = vk::SubpassDependency{}
+            .setSrcSubpass(VK_SUBPASS_EXTERNAL)
+            .setDstSubpass(0)
+            .setSrcStageMask(vk::PipelineStageFlagBits::eFragmentShader)
+            .setSrcAccessMask(vk::AccessFlagBits::eShaderRead)
+            .setDstStageMask(vk::PipelineStageFlagBits::eEarlyFragmentTests)
+            .setDstAccessMask(vk::AccessFlagBits::eDepthStencilAttachmentWrite);
 
-        VkRenderPassCreateInfo renderPassInfo{};
-        renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-        renderPassInfo.attachmentCount = 1;
-        renderPassInfo.pAttachments = &depthAttachment;
-        renderPassInfo.subpassCount = 1;
-        renderPassInfo.pSubpasses = &subpass;
-        renderPassInfo.dependencyCount = 1;
-        renderPassInfo.pDependencies = &dependency;
+        auto renderPassInfo = vk::RenderPassCreateInfo{}
+            .setAttachmentCount(1)
+            .setPAttachments(&depthAttachment)
+            .setSubpassCount(1)
+            .setPSubpasses(&subpass)
+            .setDependencyCount(1)
+            .setPDependencies(&dependency);
 
-        if (vkCreateRenderPass(device, &renderPassInfo, nullptr, &outRenderPass) != VK_SUCCESS) {
+        if (vkCreateRenderPass(device, reinterpret_cast<const VkRenderPassCreateInfo*>(&renderPassInfo), nullptr, &outRenderPass) != VK_SUCCESS) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create depth-only render pass");
             return false;
         }
@@ -346,61 +335,60 @@ bool VulkanResourceFactory::createRenderPass(
         return true;
     }
 
-    // Standard color + depth render pass
-    VkAttachmentDescription colorAttachment{};
-    colorAttachment.format = config.colorFormat;
-    colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-    colorAttachment.loadOp = config.clearColor ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
-    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    colorAttachment.finalLayout = config.finalColorLayout;
+    // Standard color + depth render pass using vulkan-hpp builders
+    auto colorAttachment = vk::AttachmentDescription{}
+        .setFormat(static_cast<vk::Format>(config.colorFormat))
+        .setSamples(vk::SampleCountFlagBits::e1)
+        .setLoadOp(config.clearColor ? vk::AttachmentLoadOp::eClear : vk::AttachmentLoadOp::eLoad)
+        .setStoreOp(vk::AttachmentStoreOp::eStore)
+        .setStencilLoadOp(vk::AttachmentLoadOp::eDontCare)
+        .setStencilStoreOp(vk::AttachmentStoreOp::eDontCare)
+        .setInitialLayout(vk::ImageLayout::eUndefined)
+        .setFinalLayout(static_cast<vk::ImageLayout>(config.finalColorLayout));
 
-    VkAttachmentDescription depthAttachment{};
-    depthAttachment.format = config.depthFormat;
-    depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-    depthAttachment.loadOp = config.clearDepth ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
-    depthAttachment.storeOp = config.storeDepth ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    depthAttachment.finalLayout = config.finalDepthLayout;
+    auto depthAttachment = vk::AttachmentDescription{}
+        .setFormat(static_cast<vk::Format>(config.depthFormat))
+        .setSamples(vk::SampleCountFlagBits::e1)
+        .setLoadOp(config.clearDepth ? vk::AttachmentLoadOp::eClear : vk::AttachmentLoadOp::eLoad)
+        .setStoreOp(config.storeDepth ? vk::AttachmentStoreOp::eStore : vk::AttachmentStoreOp::eDontCare)
+        .setStencilLoadOp(vk::AttachmentLoadOp::eDontCare)
+        .setStencilStoreOp(vk::AttachmentStoreOp::eDontCare)
+        .setInitialLayout(vk::ImageLayout::eUndefined)
+        .setFinalLayout(static_cast<vk::ImageLayout>(config.finalDepthLayout));
 
-    VkAttachmentReference colorAttachmentRef{};
-    colorAttachmentRef.attachment = 0;
-    colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    auto colorAttachmentRef = vk::AttachmentReference{}
+        .setAttachment(0)
+        .setLayout(vk::ImageLayout::eColorAttachmentOptimal);
 
-    VkAttachmentReference depthAttachmentRef{};
-    depthAttachmentRef.attachment = 1;
-    depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    auto depthAttachmentRef = vk::AttachmentReference{}
+        .setAttachment(1)
+        .setLayout(vk::ImageLayout::eDepthStencilAttachmentOptimal);
 
-    VkSubpassDescription subpass{};
-    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    subpass.colorAttachmentCount = 1;
-    subpass.pColorAttachments = &colorAttachmentRef;
-    subpass.pDepthStencilAttachment = &depthAttachmentRef;
+    auto subpass = vk::SubpassDescription{}
+        .setPipelineBindPoint(vk::PipelineBindPoint::eGraphics)
+        .setColorAttachmentCount(1)
+        .setPColorAttachments(&colorAttachmentRef)
+        .setPDepthStencilAttachment(&depthAttachmentRef);
 
-    VkSubpassDependency dependency{};
-    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-    dependency.dstSubpass = 0;
-    dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-    dependency.srcAccessMask = 0;
-    dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    auto dependency = vk::SubpassDependency{}
+        .setSrcSubpass(VK_SUBPASS_EXTERNAL)
+        .setDstSubpass(0)
+        .setSrcStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eEarlyFragmentTests)
+        .setSrcAccessMask(vk::AccessFlags{})
+        .setDstStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eEarlyFragmentTests)
+        .setDstAccessMask(vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eDepthStencilAttachmentWrite);
 
-    std::array<VkAttachmentDescription, 2> attachments = {colorAttachment, depthAttachment};
+    std::array<vk::AttachmentDescription, 2> attachments = {colorAttachment, depthAttachment};
 
-    VkRenderPassCreateInfo renderPassInfo{};
-    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    renderPassInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
-    renderPassInfo.pAttachments = attachments.data();
-    renderPassInfo.subpassCount = 1;
-    renderPassInfo.pSubpasses = &subpass;
-    renderPassInfo.dependencyCount = 1;
-    renderPassInfo.pDependencies = &dependency;
+    auto renderPassInfo = vk::RenderPassCreateInfo{}
+        .setAttachmentCount(static_cast<uint32_t>(attachments.size()))
+        .setPAttachments(attachments.data())
+        .setSubpassCount(1)
+        .setPSubpasses(&subpass)
+        .setDependencyCount(1)
+        .setPDependencies(&dependency);
 
-    if (vkCreateRenderPass(device, &renderPassInfo, nullptr, &outRenderPass) != VK_SUCCESS) {
+    if (vkCreateRenderPass(device, reinterpret_cast<const VkRenderPassCreateInfo*>(&renderPassInfo), nullptr, &outRenderPass) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create render pass");
         return false;
     }
@@ -441,71 +429,64 @@ bool VulkanResourceFactory::createDepthArrayResources(
     const DepthArrayConfig& config,
     DepthArrayResources& outResources)
 {
-    // Create depth image array
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.extent.width = config.extent.width;
-    imageInfo.extent.height = config.extent.height;
-    imageInfo.extent.depth = 1;
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = config.arrayLayers;
-    imageInfo.format = config.format;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    imageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    // Create depth image array using vulkan-hpp builder
+    auto imageInfo = vk::ImageCreateInfo{}
+        .setImageType(vk::ImageType::e2D)
+        .setExtent(vk::Extent3D{config.extent.width, config.extent.height, 1})
+        .setMipLevels(1)
+        .setArrayLayers(config.arrayLayers)
+        .setFormat(static_cast<vk::Format>(config.format))
+        .setTiling(vk::ImageTiling::eOptimal)
+        .setInitialLayout(vk::ImageLayout::eUndefined)
+        .setUsage(vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled)
+        .setSamples(vk::SampleCountFlagBits::e1)
+        .setSharingMode(vk::SharingMode::eExclusive);
     if (config.cubeCompatible) {
-        imageInfo.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+        imageInfo.setFlags(vk::ImageCreateFlagBits::eCubeCompatible);
     }
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
 
-    if (vmaCreateImage(allocator, &imageInfo, &allocInfo, &outResources.image,
+    if (vmaCreateImage(allocator, reinterpret_cast<const VkImageCreateInfo*>(&imageInfo), &allocInfo, &outResources.image,
                        &outResources.allocation, nullptr) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create depth array image");
         return false;
     }
 
-    // Create array view (for sampling all layers in shader)
-    VkImageViewCreateInfo arrayViewInfo{};
-    arrayViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    arrayViewInfo.image = outResources.image;
-    if (config.cubeCompatible) {
-        arrayViewInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE_ARRAY;
-    } else {
-        arrayViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
-    }
-    arrayViewInfo.format = config.format;
-    arrayViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-    arrayViewInfo.subresourceRange.baseMipLevel = 0;
-    arrayViewInfo.subresourceRange.levelCount = 1;
-    arrayViewInfo.subresourceRange.baseArrayLayer = 0;
-    arrayViewInfo.subresourceRange.layerCount = config.arrayLayers;
+    // Create array view (for sampling all layers in shader) using vulkan-hpp builder
+    auto arrayViewInfo = vk::ImageViewCreateInfo{}
+        .setImage(outResources.image)
+        .setViewType(config.cubeCompatible ? vk::ImageViewType::eCubeArray : vk::ImageViewType::e2DArray)
+        .setFormat(static_cast<vk::Format>(config.format))
+        .setSubresourceRange(vk::ImageSubresourceRange{}
+            .setAspectMask(vk::ImageAspectFlagBits::eDepth)
+            .setBaseMipLevel(0)
+            .setLevelCount(1)
+            .setBaseArrayLayer(0)
+            .setLayerCount(config.arrayLayers));
 
-    if (vkCreateImageView(device, &arrayViewInfo, nullptr, &outResources.arrayView) != VK_SUCCESS) {
+    if (vkCreateImageView(device, reinterpret_cast<const VkImageViewCreateInfo*>(&arrayViewInfo), nullptr, &outResources.arrayView) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create depth array view");
         outResources.destroy(device, allocator);
         return false;
     }
 
-    // Create per-layer views (for rendering to individual layers)
+    // Create per-layer views (for rendering to individual layers) using vulkan-hpp builder
     outResources.layerViews.resize(config.arrayLayers);
     for (uint32_t i = 0; i < config.arrayLayers; i++) {
-        VkImageViewCreateInfo layerViewInfo{};
-        layerViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        layerViewInfo.image = outResources.image;
-        layerViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        layerViewInfo.format = config.format;
-        layerViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-        layerViewInfo.subresourceRange.baseMipLevel = 0;
-        layerViewInfo.subresourceRange.levelCount = 1;
-        layerViewInfo.subresourceRange.baseArrayLayer = i;
-        layerViewInfo.subresourceRange.layerCount = 1;
+        auto layerViewInfo = vk::ImageViewCreateInfo{}
+            .setImage(outResources.image)
+            .setViewType(vk::ImageViewType::e2D)
+            .setFormat(static_cast<vk::Format>(config.format))
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eDepth)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(i)
+                .setLayerCount(1));
 
-        if (vkCreateImageView(device, &layerViewInfo, nullptr, &outResources.layerViews[i]) != VK_SUCCESS) {
+        if (vkCreateImageView(device, reinterpret_cast<const VkImageViewCreateInfo*>(&layerViewInfo), nullptr, &outResources.layerViews[i]) != VK_SUCCESS) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create depth layer view %u", i);
             outResources.destroy(device, allocator);
             return false;
@@ -534,16 +515,15 @@ bool VulkanResourceFactory::createDepthOnlyFramebuffers(
     outFramebuffers.resize(depthImageViews.size());
 
     for (size_t i = 0; i < depthImageViews.size(); i++) {
-        VkFramebufferCreateInfo framebufferInfo{};
-        framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-        framebufferInfo.renderPass = renderPass;
-        framebufferInfo.attachmentCount = 1;
-        framebufferInfo.pAttachments = &depthImageViews[i];
-        framebufferInfo.width = extent.width;
-        framebufferInfo.height = extent.height;
-        framebufferInfo.layers = 1;
+        auto framebufferInfo = vk::FramebufferCreateInfo{}
+            .setRenderPass(renderPass)
+            .setAttachmentCount(1)
+            .setPAttachments(reinterpret_cast<const vk::ImageView*>(&depthImageViews[i]))
+            .setWidth(extent.width)
+            .setHeight(extent.height)
+            .setLayers(1);
 
-        if (vkCreateFramebuffer(device, &framebufferInfo, nullptr, &outFramebuffers[i]) != VK_SUCCESS) {
+        if (vkCreateFramebuffer(device, reinterpret_cast<const VkFramebufferCreateInfo*>(&framebufferInfo), nullptr, &outFramebuffers[i]) != VK_SUCCESS) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create depth-only framebuffer %zu", i);
             destroyFramebuffers(device, outFramebuffers);
             return false;
@@ -558,205 +538,192 @@ bool VulkanResourceFactory::createDepthOnlyFramebuffers(
 // ============================================================================
 
 bool VulkanResourceFactory::createStagingBuffer(VmaAllocator allocator, VkDeviceSize size, ManagedBuffer& outBuffer) {
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = size;
-    bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    auto bufferInfo = vk::BufferCreateInfo{}
+        .setSize(size)
+        .setUsage(vk::BufferUsageFlagBits::eTransferSrc)
+        .setSharingMode(vk::SharingMode::eExclusive);
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
     allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
                       VMA_ALLOCATION_CREATE_MAPPED_BIT;
 
-    return ManagedBuffer::create(allocator, bufferInfo, allocInfo, outBuffer);
+    return ManagedBuffer::create(allocator, reinterpret_cast<const VkBufferCreateInfo&>(bufferInfo), allocInfo, outBuffer);
 }
 
 bool VulkanResourceFactory::createVertexBuffer(VmaAllocator allocator, VkDeviceSize size, ManagedBuffer& outBuffer) {
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = size;
-    bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    auto bufferInfo = vk::BufferCreateInfo{}
+        .setSize(size)
+        .setUsage(vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eVertexBuffer)
+        .setSharingMode(vk::SharingMode::eExclusive);
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
 
-    return ManagedBuffer::create(allocator, bufferInfo, allocInfo, outBuffer);
+    return ManagedBuffer::create(allocator, reinterpret_cast<const VkBufferCreateInfo&>(bufferInfo), allocInfo, outBuffer);
 }
 
 bool VulkanResourceFactory::createIndexBuffer(VmaAllocator allocator, VkDeviceSize size, ManagedBuffer& outBuffer) {
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = size;
-    bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    auto bufferInfo = vk::BufferCreateInfo{}
+        .setSize(size)
+        .setUsage(vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eIndexBuffer)
+        .setSharingMode(vk::SharingMode::eExclusive);
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
 
-    return ManagedBuffer::create(allocator, bufferInfo, allocInfo, outBuffer);
+    return ManagedBuffer::create(allocator, reinterpret_cast<const VkBufferCreateInfo&>(bufferInfo), allocInfo, outBuffer);
 }
 
 bool VulkanResourceFactory::createUniformBuffer(VmaAllocator allocator, VkDeviceSize size, ManagedBuffer& outBuffer) {
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = size;
-    bufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    auto bufferInfo = vk::BufferCreateInfo{}
+        .setSize(size)
+        .setUsage(vk::BufferUsageFlagBits::eUniformBuffer)
+        .setSharingMode(vk::SharingMode::eExclusive);
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
     allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
                       VMA_ALLOCATION_CREATE_MAPPED_BIT;
 
-    return ManagedBuffer::create(allocator, bufferInfo, allocInfo, outBuffer);
+    return ManagedBuffer::create(allocator, reinterpret_cast<const VkBufferCreateInfo&>(bufferInfo), allocInfo, outBuffer);
 }
 
 bool VulkanResourceFactory::createStorageBuffer(VmaAllocator allocator, VkDeviceSize size, ManagedBuffer& outBuffer) {
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = size;
-    bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                      VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                      VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    auto bufferInfo = vk::BufferCreateInfo{}
+        .setSize(size)
+        .setUsage(vk::BufferUsageFlagBits::eStorageBuffer |
+                  vk::BufferUsageFlagBits::eTransferDst |
+                  vk::BufferUsageFlagBits::eTransferSrc)
+        .setSharingMode(vk::SharingMode::eExclusive);
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
     allocInfo.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 
-    return ManagedBuffer::create(allocator, bufferInfo, allocInfo, outBuffer);
+    return ManagedBuffer::create(allocator, reinterpret_cast<const VkBufferCreateInfo&>(bufferInfo), allocInfo, outBuffer);
 }
 
 bool VulkanResourceFactory::createStorageBufferHostReadable(VmaAllocator allocator, VkDeviceSize size, ManagedBuffer& outBuffer) {
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = size;
-    bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                      VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                      VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    auto bufferInfo = vk::BufferCreateInfo{}
+        .setSize(size)
+        .setUsage(vk::BufferUsageFlagBits::eStorageBuffer |
+                  vk::BufferUsageFlagBits::eTransferDst |
+                  vk::BufferUsageFlagBits::eTransferSrc)
+        .setSharingMode(vk::SharingMode::eExclusive);
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
     allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
                       VMA_ALLOCATION_CREATE_MAPPED_BIT;
 
-    return ManagedBuffer::create(allocator, bufferInfo, allocInfo, outBuffer);
+    return ManagedBuffer::create(allocator, reinterpret_cast<const VkBufferCreateInfo&>(bufferInfo), allocInfo, outBuffer);
 }
 
 bool VulkanResourceFactory::createStorageBufferHostWritable(VmaAllocator allocator, VkDeviceSize size, ManagedBuffer& outBuffer) {
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = size;
-    bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                      VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                      VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    auto bufferInfo = vk::BufferCreateInfo{}
+        .setSize(size)
+        .setUsage(vk::BufferUsageFlagBits::eStorageBuffer |
+                  vk::BufferUsageFlagBits::eTransferDst |
+                  vk::BufferUsageFlagBits::eTransferSrc)
+        .setSharingMode(vk::SharingMode::eExclusive);
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
     allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
                       VMA_ALLOCATION_CREATE_MAPPED_BIT;
 
-    return ManagedBuffer::create(allocator, bufferInfo, allocInfo, outBuffer);
+    return ManagedBuffer::create(allocator, reinterpret_cast<const VkBufferCreateInfo&>(bufferInfo), allocInfo, outBuffer);
 }
 
 bool VulkanResourceFactory::createReadbackBuffer(VmaAllocator allocator, VkDeviceSize size, ManagedBuffer& outBuffer) {
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = size;
-    bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    auto bufferInfo = vk::BufferCreateInfo{}
+        .setSize(size)
+        .setUsage(vk::BufferUsageFlagBits::eTransferDst)
+        .setSharingMode(vk::SharingMode::eExclusive);
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
     allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
                       VMA_ALLOCATION_CREATE_MAPPED_BIT;
 
-    return ManagedBuffer::create(allocator, bufferInfo, allocInfo, outBuffer);
+    return ManagedBuffer::create(allocator, reinterpret_cast<const VkBufferCreateInfo&>(bufferInfo), allocInfo, outBuffer);
 }
 
 bool VulkanResourceFactory::createVertexStorageBuffer(VmaAllocator allocator, VkDeviceSize size, ManagedBuffer& outBuffer) {
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = size;
-    bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
-                      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                      VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    auto bufferInfo = vk::BufferCreateInfo{}
+        .setSize(size)
+        .setUsage(vk::BufferUsageFlagBits::eVertexBuffer |
+                  vk::BufferUsageFlagBits::eStorageBuffer |
+                  vk::BufferUsageFlagBits::eTransferDst)
+        .setSharingMode(vk::SharingMode::eExclusive);
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
     allocInfo.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 
-    return ManagedBuffer::create(allocator, bufferInfo, allocInfo, outBuffer);
+    return ManagedBuffer::create(allocator, reinterpret_cast<const VkBufferCreateInfo&>(bufferInfo), allocInfo, outBuffer);
 }
 
 bool VulkanResourceFactory::createVertexStorageBufferHostWritable(VmaAllocator allocator, VkDeviceSize size, ManagedBuffer& outBuffer) {
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = size;
-    bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
-                      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                      VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    auto bufferInfo = vk::BufferCreateInfo{}
+        .setSize(size)
+        .setUsage(vk::BufferUsageFlagBits::eVertexBuffer |
+                  vk::BufferUsageFlagBits::eStorageBuffer |
+                  vk::BufferUsageFlagBits::eTransferDst)
+        .setSharingMode(vk::SharingMode::eExclusive);
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
     allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
                       VMA_ALLOCATION_CREATE_MAPPED_BIT;
 
-    return ManagedBuffer::create(allocator, bufferInfo, allocInfo, outBuffer);
+    return ManagedBuffer::create(allocator, reinterpret_cast<const VkBufferCreateInfo&>(bufferInfo), allocInfo, outBuffer);
 }
 
 bool VulkanResourceFactory::createIndexBufferHostWritable(VmaAllocator allocator, VkDeviceSize size, ManagedBuffer& outBuffer) {
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = size;
-    bufferInfo.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
-                      VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    auto bufferInfo = vk::BufferCreateInfo{}
+        .setSize(size)
+        .setUsage(vk::BufferUsageFlagBits::eIndexBuffer |
+                  vk::BufferUsageFlagBits::eTransferDst)
+        .setSharingMode(vk::SharingMode::eExclusive);
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
     allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
                       VMA_ALLOCATION_CREATE_MAPPED_BIT;
 
-    return ManagedBuffer::create(allocator, bufferInfo, allocInfo, outBuffer);
+    return ManagedBuffer::create(allocator, reinterpret_cast<const VkBufferCreateInfo&>(bufferInfo), allocInfo, outBuffer);
 }
 
 bool VulkanResourceFactory::createIndirectBuffer(VmaAllocator allocator, VkDeviceSize size, ManagedBuffer& outBuffer) {
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = size;
-    bufferInfo.usage = VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
-                      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                      VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    auto bufferInfo = vk::BufferCreateInfo{}
+        .setSize(size)
+        .setUsage(vk::BufferUsageFlagBits::eIndirectBuffer |
+                  vk::BufferUsageFlagBits::eStorageBuffer |
+                  vk::BufferUsageFlagBits::eTransferDst)
+        .setSharingMode(vk::SharingMode::eExclusive);
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
     allocInfo.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 
-    return ManagedBuffer::create(allocator, bufferInfo, allocInfo, outBuffer);
+    return ManagedBuffer::create(allocator, reinterpret_cast<const VkBufferCreateInfo&>(bufferInfo), allocInfo, outBuffer);
 }
 
 bool VulkanResourceFactory::createDynamicVertexBuffer(VmaAllocator allocator, VkDeviceSize size, ManagedBuffer& outBuffer) {
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = size;
-    bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
-                      VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    auto bufferInfo = vk::BufferCreateInfo{}
+        .setSize(size)
+        .setUsage(vk::BufferUsageFlagBits::eVertexBuffer |
+                  vk::BufferUsageFlagBits::eTransferDst)
+        .setSharingMode(vk::SharingMode::eExclusive);
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
     allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
                       VMA_ALLOCATION_CREATE_MAPPED_BIT;
 
-    return ManagedBuffer::create(allocator, bufferInfo, allocInfo, outBuffer);
+    return ManagedBuffer::create(allocator, reinterpret_cast<const VkBufferCreateInfo&>(bufferInfo), allocInfo, outBuffer);
 }
 
 // ============================================================================
@@ -764,79 +731,74 @@ bool VulkanResourceFactory::createDynamicVertexBuffer(VmaAllocator allocator, Vk
 // ============================================================================
 
 bool VulkanResourceFactory::createSamplerNearestClamp(VkDevice device, ManagedSampler& outSampler) {
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_NEAREST;
-    samplerInfo.minFilter = VK_FILTER_NEAREST;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = 0.0f;
+    auto samplerInfo = vk::SamplerCreateInfo{}
+        .setMagFilter(vk::Filter::eNearest)
+        .setMinFilter(vk::Filter::eNearest)
+        .setMipmapMode(vk::SamplerMipmapMode::eNearest)
+        .setAddressModeU(vk::SamplerAddressMode::eClampToEdge)
+        .setAddressModeV(vk::SamplerAddressMode::eClampToEdge)
+        .setAddressModeW(vk::SamplerAddressMode::eClampToEdge)
+        .setMinLod(0.0f)
+        .setMaxLod(0.0f);
 
-    return ManagedSampler::create(device, samplerInfo, outSampler);
+    return ManagedSampler::create(device, reinterpret_cast<const VkSamplerCreateInfo&>(samplerInfo), outSampler);
 }
 
 bool VulkanResourceFactory::createSamplerLinearClamp(VkDevice device, ManagedSampler& outSampler) {
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = VK_LOD_CLAMP_NONE;
+    auto samplerInfo = vk::SamplerCreateInfo{}
+        .setMagFilter(vk::Filter::eLinear)
+        .setMinFilter(vk::Filter::eLinear)
+        .setMipmapMode(vk::SamplerMipmapMode::eLinear)
+        .setAddressModeU(vk::SamplerAddressMode::eClampToEdge)
+        .setAddressModeV(vk::SamplerAddressMode::eClampToEdge)
+        .setAddressModeW(vk::SamplerAddressMode::eClampToEdge)
+        .setMinLod(0.0f)
+        .setMaxLod(VK_LOD_CLAMP_NONE);
 
-    return ManagedSampler::create(device, samplerInfo, outSampler);
+    return ManagedSampler::create(device, reinterpret_cast<const VkSamplerCreateInfo&>(samplerInfo), outSampler);
 }
 
 bool VulkanResourceFactory::createSamplerLinearRepeat(VkDevice device, ManagedSampler& outSampler) {
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = VK_LOD_CLAMP_NONE;
+    auto samplerInfo = vk::SamplerCreateInfo{}
+        .setMagFilter(vk::Filter::eLinear)
+        .setMinFilter(vk::Filter::eLinear)
+        .setMipmapMode(vk::SamplerMipmapMode::eLinear)
+        .setAddressModeU(vk::SamplerAddressMode::eRepeat)
+        .setAddressModeV(vk::SamplerAddressMode::eRepeat)
+        .setAddressModeW(vk::SamplerAddressMode::eRepeat)
+        .setMinLod(0.0f)
+        .setMaxLod(VK_LOD_CLAMP_NONE);
 
-    return ManagedSampler::create(device, samplerInfo, outSampler);
+    return ManagedSampler::create(device, reinterpret_cast<const VkSamplerCreateInfo&>(samplerInfo), outSampler);
 }
 
 bool VulkanResourceFactory::createSamplerLinearRepeatAnisotropic(VkDevice device, float maxAnisotropy, ManagedSampler& outSampler) {
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.anisotropyEnable = VK_TRUE;
-    samplerInfo.maxAnisotropy = maxAnisotropy;
-    samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = VK_LOD_CLAMP_NONE;
+    auto samplerInfo = vk::SamplerCreateInfo{}
+        .setMagFilter(vk::Filter::eLinear)
+        .setMinFilter(vk::Filter::eLinear)
+        .setMipmapMode(vk::SamplerMipmapMode::eLinear)
+        .setAddressModeU(vk::SamplerAddressMode::eRepeat)
+        .setAddressModeV(vk::SamplerAddressMode::eRepeat)
+        .setAddressModeW(vk::SamplerAddressMode::eRepeat)
+        .setAnisotropyEnable(vk::True)
+        .setMaxAnisotropy(maxAnisotropy)
+        .setMinLod(0.0f)
+        .setMaxLod(VK_LOD_CLAMP_NONE);
 
-    return ManagedSampler::create(device, samplerInfo, outSampler);
+    return ManagedSampler::create(device, reinterpret_cast<const VkSamplerCreateInfo&>(samplerInfo), outSampler);
 }
 
 bool VulkanResourceFactory::createSamplerShadowComparison(VkDevice device, ManagedSampler& outSampler) {
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
-    samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
-    samplerInfo.compareEnable = VK_TRUE;
-    samplerInfo.compareOp = VK_COMPARE_OP_LESS;
+    auto samplerInfo = vk::SamplerCreateInfo{}
+        .setMagFilter(vk::Filter::eLinear)
+        .setMinFilter(vk::Filter::eLinear)
+        .setMipmapMode(vk::SamplerMipmapMode::eNearest)
+        .setAddressModeU(vk::SamplerAddressMode::eClampToBorder)
+        .setAddressModeV(vk::SamplerAddressMode::eClampToBorder)
+        .setAddressModeW(vk::SamplerAddressMode::eClampToBorder)
+        .setBorderColor(vk::BorderColor::eFloatOpaqueWhite)
+        .setCompareEnable(vk::True)
+        .setCompareOp(vk::CompareOp::eLess);
 
-    return ManagedSampler::create(device, samplerInfo, outSampler);
+    return ManagedSampler::create(device, reinterpret_cast<const VkSamplerCreateInfo&>(samplerInfo), outSampler);
 }
