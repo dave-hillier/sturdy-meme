@@ -4,6 +4,7 @@
 #include "ShaderLoader.h"
 #include "Bindings.h"
 #include <SDL3/SDL_log.h>
+#include <cmath>
 
 std::unique_ptr<TreeLeafCulling> TreeLeafCulling::create(const InitInfo& info) {
     auto culling = std::unique_ptr<TreeLeafCulling>(new TreeLeafCulling());
@@ -650,6 +651,9 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
                 float lodBlendFactor = 0.0f;
                 if (lodSystem) {
                     lodBlendFactor = lodSystem->getBlendFactor(lodTreeIndex);
+                    // Quantize to 20 discrete levels to prevent flickering from floating point noise
+                    // This ensures lodBlendFactor only changes when crossing 0.05 thresholds
+                    lodBlendFactor = std::round(lodBlendFactor * 20.0f) / 20.0f;
                 }
 
                 uint32_t leafTypeIdx = LEAF_TYPE_OAK;
