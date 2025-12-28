@@ -998,7 +998,5 @@ bool TerrainSystem::setMeshletSubdivisionLevel(int level) {
     }
 
     config.meshletSubdivisionLevel = level;
-    SDL_Log("Meshlet subdivision level changed to %d (%u triangles per leaf)",
-            level, meshlet->getTriangleCount());
     return true;
 }

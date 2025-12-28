@@ -520,9 +520,4 @@ void AnimatedCharacter::setupLocomotionBlendSpace() {
 
 void AnimatedCharacter::setUseBlendSpace(bool use) {
     stateMachine.setUseBlendSpace(use);
-    if (use) {
-        SDL_Log("AnimatedCharacter: Blend space mode enabled for smooth locomotion");
-    } else {
-        SDL_Log("AnimatedCharacter: Blend space mode disabled, using discrete state transitions");
-    }
 }

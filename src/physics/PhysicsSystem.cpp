@@ -427,8 +427,6 @@ PhysicsBodyID PhysicsWorld::createTerrainDisc(float radius, float heightOffset) 
     }
 
     bodyInterface.AddBody(body->GetID(), JPH::EActivation::DontActivate);
-
-    SDL_Log("Created terrain ground plane with radius %.1f at Y=%.1f", radius, heightOffset);
     return body->GetID().GetIndexAndSequenceNumber();
 }
 
@@ -504,9 +502,6 @@ PhysicsBodyID PhysicsWorld::createTerrainHeightfield(const float* samples, const
     }
 
     bodyInterface.AddBody(body->GetID(), JPH::EActivation::DontActivate);
-
-    SDL_Log("Created terrain heightfield %ux%u, world size %.1f, height scale %.1f",
-            sampleCount, sampleCount, worldSize, heightScale);
     return body->GetID().GetIndexAndSequenceNumber();
 }
 
@@ -792,7 +787,6 @@ PhysicsBodyID PhysicsWorld::createStaticCompoundCapsules(const glm::vec3& positi
     }
 
     bodyInterface.AddBody(body->GetID(), JPH::EActivation::DontActivate);
-    SDL_Log("Created compound shape with %zu capsules", capsules.size());
     return body->GetID().GetIndexAndSequenceNumber();
 }
 
@@ -829,8 +823,6 @@ bool PhysicsWorld::createCharacter(const glm::vec3& position, float height, floa
         physicsSystem.get()
     );
     character->SetListener(&characterContactListener);
-
-    SDL_Log("Created character controller at (%.1f, %.1f, %.1f)", position.x, position.y, position.z);
     return true;
 }
 

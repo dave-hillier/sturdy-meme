@@ -119,7 +119,6 @@ bool Renderer::initInternal(const InitInfo& info) {
 
     // Setup render pipeline stages with lambdas
     setupRenderPipeline();
-    SDL_Log("Render pipeline configured");
 
     return true;
 }
@@ -224,36 +223,22 @@ void Renderer::cleanup() {
         }
 
         // RAII handles: graphicsPipeline, pipelineLayout, descriptorSetLayout
-        SDL_Log("destroying graphicsPipeline");
         graphicsPipeline = ManagedPipeline();
-        SDL_Log("destroying pipelineLayout");
         pipelineLayout = ManagedPipelineLayout();
-        SDL_Log("destroying descriptorSetLayout");
         descriptorSetLayout = ManagedDescriptorSetLayout();
-        SDL_Log("descriptor layouts destroyed");
 
         // RAII handles: commandPool
-        SDL_Log("destroying commandPool");
         commandPool = ManagedCommandPool();
-        SDL_Log("commandPool destroyed");
 
         // RAII handles: depth resources and framebuffers
-        SDL_Log("clearing framebuffers");
         framebuffers.clear();
-        SDL_Log("destroying depthSampler");
         depthSampler = ManagedSampler();
-        SDL_Log("destroying depthImageView");
         depthImageView = ManagedImageView();
-        SDL_Log("destroying depthImage");
         depthImage = ManagedImage();
-        SDL_Log("destroying renderPass");
         renderPass = ManagedRenderPass();
-        SDL_Log("render resources destroyed");
     }
 
-    SDL_Log("calling vulkanContext.shutdown");
     vulkanContext.shutdown();
-    SDL_Log("vulkanContext shutdown complete");
 }
 
 void Renderer::destroyRenderResources() {
@@ -1572,7 +1557,6 @@ bool Renderer::createSkinnedMeshRendererDescriptorSets() {
                 playerNormalView = playerMaterial->normal->getImageView();
                 playerNormalSampler = playerMaterial->normal->getSampler();
             }
-            SDL_Log("SkinnedMeshRenderer: Using player material '%s'", playerMaterial->name.c_str());
         }
     }
 

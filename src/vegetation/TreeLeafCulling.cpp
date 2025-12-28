@@ -587,9 +587,6 @@ void TreeLeafCulling::updateSpatialIndex(const TreeSystem& treeSystem) {
         visibleTreeBuffer_ != VK_NULL_HANDLE) {
         createTwoPhaseLeafCullDescriptorSets();
     }
-
-    SDL_Log("TreeLeafCulling: Updated spatial index (%zu trees, %u non-empty cells)",
-            trees.size(), spatialIndex_->getNonEmptyCellCount());
 }
 
 void TreeLeafCulling::updateCullDescriptorSets(const TreeSystem& treeSystem) {

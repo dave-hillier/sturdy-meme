@@ -515,7 +515,6 @@ bool PostProcessSystem::createCompositePipeline() {
             vkDestroyShaderModule(device, *fragShaderModule, nullptr);
             return false;
         }
-        SDL_Log("Created post-process pipeline variant %d (god ray samples: %d)", i, sampleCounts[i]);
     }
 
     vkDestroyShaderModule(device, *vertShaderModule, nullptr);
@@ -984,6 +983,4 @@ void PostProcessSystem::setBilateralGrid(VkImageView gridView, VkSampler gridSam
 
 void PostProcessSystem::setGodRayQuality(GodRayQuality quality) {
     godRayQuality = quality;
-    const char* qualityNames[] = {"Low (16 samples)", "Medium (32 samples)", "High (64 samples)"};
-    SDL_Log("God ray quality set to: %s", qualityNames[static_cast<int>(quality)]);
 }

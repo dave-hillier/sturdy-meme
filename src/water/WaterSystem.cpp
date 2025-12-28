@@ -625,10 +625,6 @@ void WaterSystem::setWaterType(WaterType type) {
             waterUniforms.scatteringScale = 0.4f;
             break;
     }
-
-    SDL_Log("Water type set with absorption (%.2f, %.2f, %.2f), turbidity %.2f",
-            waterUniforms.scatteringCoeffs.r, waterUniforms.scatteringCoeffs.g,
-            waterUniforms.scatteringCoeffs.b, waterUniforms.scatteringCoeffs.a);
 }
 
 // Phase 12: Material blending implementation
@@ -733,12 +729,10 @@ void WaterSystem::setSecondaryMaterial(const WaterMaterial& material) {
 
 void WaterSystem::setPrimaryMaterial(WaterType type) {
     setPrimaryMaterial(getMaterialPreset(type));
-    SDL_Log("Primary water material set to type %d", static_cast<int>(type));
 }
 
 void WaterSystem::setSecondaryMaterial(WaterType type) {
     setSecondaryMaterial(getMaterialPreset(type));
-    SDL_Log("Secondary water material set to type %d", static_cast<int>(type));
 }
 
 void WaterSystem::setupMaterialTransition(WaterType from, WaterType to, const glm::vec2& center,
@@ -748,8 +742,4 @@ void WaterSystem::setupMaterialTransition(WaterType from, WaterType to, const gl
     setBlendCenter(center);
     setBlendDistance(distance);
     setBlendMode(mode);
-
-    SDL_Log("Material transition set up: type %d -> %d at (%.1f, %.1f), distance %.1fm, mode %d",
-            static_cast<int>(from), static_cast<int>(to),
-            center.x, center.y, distance, static_cast<int>(mode));
 }

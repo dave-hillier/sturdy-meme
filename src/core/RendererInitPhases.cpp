@@ -1038,8 +1038,6 @@ void Renderer::initResizeCoordinator() {
             return {0, 0};
         }
 
-        SDL_Log("Window resized to %ux%u", newExtent.width, newExtent.height);
-
         // Recreate depth resources
         if (!recreateDepthResources(newExtent)) {
             return {0, 0};

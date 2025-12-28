@@ -40,9 +40,6 @@ bool ResizeCoordinator::performResize(VkDevice device, VmaAllocator allocator, V
 
     ensureSorted();
 
-    SDL_Log("ResizeCoordinator: Resizing %zu systems to %ux%u",
-            registrations_.size(), newExtent.width, newExtent.height);
-
     for (const auto& reg : registrations_) {
         SDL_LogDebug(SDL_LOG_CATEGORY_APPLICATION, "  Resizing: %s", reg.resizable->getResizableName());
         reg.resizable->onResize(device, allocator, newExtent);

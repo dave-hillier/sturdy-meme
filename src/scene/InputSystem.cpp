@@ -43,14 +43,12 @@ bool InputSystem::processEvent(const SDL_Event& event) {
             if (event.gbutton.button == SDL_GAMEPAD_BUTTON_LEFT_STICK) {
                 // Left stick click toggles sprint (both modes)
                 gamepadSprintToggle = !gamepadSprintToggle;
-                SDL_Log("Sprint: %s", gamepadSprintToggle ? "ON" : "OFF");
                 return true;
             }
             if (event.gbutton.button == SDL_GAMEPAD_BUTTON_RIGHT_STICK) {
                 // Right stick click toggles camera mode
                 thirdPersonMode = !thirdPersonMode;
                 modeSwitchedThisFrame = true;
-                SDL_Log("Camera mode: %s", thirdPersonMode ? "Third Person" : "Free Camera");
                 return true;
             }
             break;
@@ -59,13 +57,11 @@ bool InputSystem::processEvent(const SDL_Event& event) {
             if (event.key.scancode == SDL_SCANCODE_TAB) {
                 thirdPersonMode = !thirdPersonMode;
                 modeSwitchedThisFrame = true;
-                SDL_Log("Camera mode: %s", thirdPersonMode ? "Third Person" : "Free Camera");
                 return true;
             }
             if (event.key.scancode == SDL_SCANCODE_M) {
                 mouseLookEnabled = !mouseLookEnabled;
                 SDL_SetWindowRelativeMouseMode(SDL_GetKeyboardFocus(), mouseLookEnabled);
-                SDL_Log("Mouse look: %s", mouseLookEnabled ? "ON" : "OFF");
                 return true;
             }
             break;

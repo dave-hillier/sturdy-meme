@@ -200,18 +200,6 @@ bool Application::init(const std::string& title, int width, int height) {
     float playerSpawnX = 0.0f, playerSpawnZ = 0.0f;
     float playerSpawnY = terrain.getHeightAt(playerSpawnX, playerSpawnZ) + 0.1f;
 
-    // Debug: Sample terrain height at spawn position using different methods
-    float heightFromTerrainSystem = terrain.getHeightAt(playerSpawnX, playerSpawnZ);
-    float heightFromTileCache = 0.0f;
-    bool tileHasHeight = false;
-    if (auto* tileCachePtr = terrain.getTileCache()) {
-        tileHasHeight = tileCachePtr->getHeightAt(playerSpawnX, playerSpawnZ, heightFromTileCache);
-    }
-    SDL_Log("DEBUG Height at spawn (%.1f, %.1f):", playerSpawnX, playerSpawnZ);
-    SDL_Log("  TerrainSystem.getHeightAt(): %.2f", heightFromTerrainSystem);
-    SDL_Log("  TileCache.getHeightAt(): %.2f (found=%d)", heightFromTileCache, tileHasHeight ? 1 : 0);
-    SDL_Log("  Player spawn Y (height + 0.1): %.2f", playerSpawnY);
-
     // Create player entity with ECS
     world_.createPlayer(glm::vec3(playerSpawnX, playerSpawnY, playerSpawnZ));
 
@@ -321,7 +309,6 @@ void Application::run() {
                 if (playerMovement.orientationLocked) {
                     playerMovement.lockedYaw = playerTransform.yaw;
                 }
-                SDL_Log("Orientation lock: %s", playerMovement.orientationLocked ? "ON" : "OFF");
             }
 
             // Temporarily lock orientation if holding trigger/middle mouse
@@ -494,7 +481,6 @@ void Application::processEvents() {
             case SDL_EVENT_WINDOW_HIDDEN:
             case SDL_EVENT_WINDOW_OCCLUDED:
                 // Window minimized or hidden (e.g., macOS screen lock)
-                SDL_Log("Window suspended");
                 renderer_->notifyWindowSuspended();
                 break;
             case SDL_EVENT_WINDOW_RESTORED:
@@ -502,7 +488,6 @@ void Application::processEvents() {
             case SDL_EVENT_WINDOW_EXPOSED:
                 // Window restored (e.g., macOS screen unlock)
                 if (renderer_->isWindowSuspended()) {
-                    SDL_Log("Window restored, recreating swapchain");
                     renderer_->notifyWindowRestored();
                 }
                 break;
@@ -538,25 +523,20 @@ void Application::processEvents() {
                 }
                 else if (event.key.scancode == SDL_SCANCODE_6) {
                     sys.debugControl().toggleCascadeDebug();
-                    SDL_Log("Cascade debug visualization: %s", sys.debugControl().isShowingCascadeDebug() ? "ON" : "OFF");
                 }
                 else if (event.key.scancode == SDL_SCANCODE_7) {
                     sys.debugControl().toggleSnowDepthDebug();
-                    SDL_Log("Snow depth debug visualization: %s", sys.debugControl().isShowingSnowDepthDebug() ? "ON" : "OFF");
                 }
                 else if (event.key.scancode == SDL_SCANCODE_8) {
                     sys.debugControl().setHiZCullingEnabled(!sys.debugControl().isHiZCullingEnabled());
-                    SDL_Log("Hi-Z occlusion culling: %s", sys.debugControl().isHiZCullingEnabled() ? "ON" : "OFF");
                 }
                 else if (event.key.scancode == SDL_SCANCODE_Z) {
                     float currentIntensity = sys.weatherState().getIntensity();
                     sys.weatherState().setIntensity(std::max(0.0f, currentIntensity - 0.1f));
-                    SDL_Log("Weather intensity: %.1f", sys.weatherState().getIntensity());
                 }
                 else if (event.key.scancode == SDL_SCANCODE_X) {
                     float currentIntensity = sys.weatherState().getIntensity();
                     sys.weatherState().setIntensity(std::min(1.0f, currentIntensity + 0.1f));
-                    SDL_Log("Weather intensity: %.1f", sys.weatherState().getIntensity());
                 }
                 else if (event.key.scancode == SDL_SCANCODE_C) {
                     uint32_t currentType = sys.weatherState().getWeatherType();
@@ -570,58 +550,39 @@ void Application::processEvents() {
                         sys.weatherState().setWeatherType(0);
                         sys.weatherState().setIntensity(0.0f);
                     }
-
-                    std::string weatherStatus = "Clear";
-                    if (sys.weatherState().getIntensity() > 0.0f) {
-                        if (sys.weatherState().getWeatherType() == 0) {
-                            weatherStatus = "Rain";
-                        } else if (sys.weatherState().getWeatherType() == 1) {
-                            weatherStatus = "Snow";
-                        }
-                    }
-                    SDL_Log("Weather type: %s, Intensity: %.1f", weatherStatus.c_str(), sys.weatherState().getIntensity());
                 }
                 else if (event.key.scancode == SDL_SCANCODE_F) {
                     glm::vec3 playerPos = world_.getPlayerTransform().position;
                     sys.environmentControl().spawnConfetti(playerPos, 8.0f, 100.0f, 0.5f);
-                    SDL_Log("Confetti!");
                 }
                 else if (event.key.scancode == SDL_SCANCODE_V) {
                     sys.environmentControl().toggleCloudStyle();
-                    SDL_Log("Cloud style: %s", sys.environmentControl().isUsingParaboloidClouds() ? "Paraboloid LUT Hybrid" : "Procedural");
                 }
                 else if (event.key.scancode == SDL_SCANCODE_LEFTBRACKET) {
                     float density = sys.environmentControl().getFogDensity();
                     sys.environmentControl().setFogDensity(std::max(0.0f, density - 0.0025f));
-                    SDL_Log("Fog density: %.3f", sys.environmentControl().getFogDensity());
                 }
                 else if (event.key.scancode == SDL_SCANCODE_RIGHTBRACKET) {
                     float density = sys.environmentControl().getFogDensity();
                     sys.environmentControl().setFogDensity(std::min(0.2f, density + 0.0025f));
-                    SDL_Log("Fog density: %.3f", sys.environmentControl().getFogDensity());
                 }
                 else if (event.key.scancode == SDL_SCANCODE_BACKSLASH) {
                     sys.environmentControl().setFogEnabled(!sys.environmentControl().isFogEnabled());
-                    SDL_Log("Fog: %s", sys.environmentControl().isFogEnabled() ? "ON" : "OFF");
                 }
                 else if (event.key.scancode == SDL_SCANCODE_COMMA) {
                     float snow = sys.environmentSettings().snowAmount;
                     sys.environmentSettings().snowAmount = std::max(0.0f, snow - 0.1f);
-                    SDL_Log("Snow amount: %.1f", sys.environmentSettings().snowAmount);
                 }
                 else if (event.key.scancode == SDL_SCANCODE_PERIOD) {
                     float snow = sys.environmentSettings().snowAmount;
                     sys.environmentSettings().snowAmount = std::min(1.0f, snow + 0.1f);
-                    SDL_Log("Snow amount: %.1f", sys.environmentSettings().snowAmount);
                 }
                 else if (event.key.scancode == SDL_SCANCODE_SLASH) {
                     float snow = sys.environmentSettings().snowAmount;
                     sys.environmentSettings().snowAmount = (snow < 0.5f ? 1.0f : 0.0f);
-                    SDL_Log("Snow amount: %.1f", sys.environmentSettings().snowAmount);
                 }
                 else if (event.key.scancode == SDL_SCANCODE_T) {
                     sys.terrainControl().toggleTerrainWireframe();
-                    SDL_Log("Terrain wireframe: %s", sys.terrainControl().isTerrainWireframeMode() ? "ON" : "OFF");
                 }
                 break;
             }
