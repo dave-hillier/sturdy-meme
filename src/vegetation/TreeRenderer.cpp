@@ -438,7 +438,7 @@ void TreeRenderer::updateCulledLeafDescriptorSet(
     VkSampler leafSampler) {
 
     // Skip if culling not available
-    if (!leafCulling_ || leafCulling_->getOutputBuffer() == VK_NULL_HANDLE) {
+    if (!leafCulling_ || leafCulling_->getOutputBuffer(frameIndex) == VK_NULL_HANDLE) {
         return;
     }
 
@@ -454,16 +454,16 @@ void TreeRenderer::updateCulledLeafDescriptorSet(
 
     VkDescriptorSet dstSet = culledLeafDescriptorSets_[frameIndex][leafType];
 
-    // IMPORTANT: Must update SSBO bindings every frame because getOutputBuffer()
-    // returns a different buffer each frame due to triple-buffering.
-    // Previously this was cached, causing leaves to read from stale buffers
-    // and display with wrong textures (the "two textures on same leaves" bug).
+    // IMPORTANT: Must update SSBO bindings every frame because getOutputBuffer(frameIndex)
+    // returns a different buffer for each frame due to triple-buffering.
+    // This ensures compute pass for frame N writes to buffer N, and graphics pass
+    // for frame N reads from buffer N.
     DescriptorManager::SetWriter writer(device_, dstSet);
     writer.writeBuffer(Bindings::TREE_GFX_UBO, uniformBuffer, 0, VK_WHOLE_SIZE)
           .writeImage(Bindings::TREE_GFX_SHADOW_MAP, shadowMapView, shadowSampler)
           .writeBuffer(Bindings::TREE_GFX_WIND_UBO, windBuffer, 0, VK_WHOLE_SIZE)
           .writeImage(Bindings::TREE_GFX_LEAF_ALBEDO, leafAlbedo, leafSampler)
-          .writeBuffer(Bindings::TREE_GFX_LEAF_INSTANCES, leafCulling_->getOutputBuffer(), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+          .writeBuffer(Bindings::TREE_GFX_LEAF_INSTANCES, leafCulling_->getOutputBuffer(frameIndex), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
           .writeBuffer(Bindings::TREE_GFX_TREE_DATA, leafCulling_->getTreeRenderDataBuffer(), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
           .update();
 }
@@ -647,7 +647,7 @@ void TreeRenderer::render(VkCommandBuffer cmd, uint32_t frameIndex, float time,
                                  frameIndex < culledLeafDescriptorSets_.size() &&
                                  !culledLeafDescriptorSets_[frameIndex].empty();
     bool useCulledPath = isLeafCullingEnabled() && hasCulledDescriptors &&
-                         leafCulling_ && leafCulling_->getIndirectBuffer() != VK_NULL_HANDLE;
+                         leafCulling_ && leafCulling_->getIndirectBuffer(frameIndex) != VK_NULL_HANDLE;
 
     if (useCulledPath) {
         static const std::string leafTypeNames[NUM_LEAF_TYPES] = {"oak", "ash", "aspen", "pine"};
@@ -674,11 +674,9 @@ void TreeRenderer::render(VkCommandBuffer cmd, uint32_t frameIndex, float time,
                                0, sizeof(TreeLeafPushConstants), &push);
 
             VkDeviceSize commandOffset = leafType * sizeof(VkDrawIndexedIndirectCommand);
-            vkCmdDrawIndexedIndirect(cmd, leafCulling_->getIndirectBuffer(),
+            vkCmdDrawIndexedIndirect(cmd, leafCulling_->getIndirectBuffer(frameIndex),
                                      commandOffset, 1, sizeof(VkDrawIndexedIndirectCommand));
         }
-
-        leafCulling_->swapBufferSets();
     } else {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "Leaf culling not available - leaves will not render for close trees");
@@ -807,7 +805,7 @@ void TreeRenderer::renderShadows(VkCommandBuffer cmd, uint32_t frameIndex,
                                      frameIndex < culledLeafDescriptorSets_.size() &&
                                      !culledLeafDescriptorSets_[frameIndex].empty();
         bool useCulledPath = isLeafCullingEnabled() && hasCulledDescriptors &&
-                             leafCulling_ && leafCulling_->getIndirectBuffer() != VK_NULL_HANDLE;
+                             leafCulling_ && leafCulling_->getIndirectBuffer(frameIndex) != VK_NULL_HANDLE;
 
         if (useCulledPath && !leafRenderables.empty()) {
             static const std::string leafTypeNames[NUM_LEAF_TYPES] = {"oak", "ash", "aspen", "pine"};
@@ -834,7 +832,7 @@ void TreeRenderer::renderShadows(VkCommandBuffer cmd, uint32_t frameIndex,
                                    0, sizeof(TreeLeafShadowPushConstants), &push);
 
                 VkDeviceSize commandOffset = leafType * sizeof(VkDrawIndexedIndirectCommand);
-                vkCmdDrawIndexedIndirect(cmd, leafCulling_->getIndirectBuffer(),
+                vkCmdDrawIndexedIndirect(cmd, leafCulling_->getIndirectBuffer(frameIndex),
                                          commandOffset, 1, sizeof(VkDrawIndexedIndirectCommand));
             }
         } else {
