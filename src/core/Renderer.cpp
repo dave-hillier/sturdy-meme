@@ -43,6 +43,7 @@
 // Vegetation
 #include "GrassSystem.h"
 #include "RockSystem.h"
+#include "SettlementSystem.h"
 #include "TreeSystem.h"
 #include "TreeRenderer.h"
 #include "TreeLODSystem.h"
@@ -1281,7 +1282,8 @@ void Renderer::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float 
     bool hasCharacter = systems_->scene().getSceneBuilder().hasCharacter();
 
     size_t detritusCount = systems_->detritus() ? systems_->detritus()->getSceneObjects().size() : 0;
-    allObjects.reserve(sceneObjects.size() + systems_->rock().getSceneObjects().size() + detritusCount);
+    size_t settlementCount = systems_->settlement() ? systems_->settlement()->getSceneObjects().size() : 0;
+    allObjects.reserve(sceneObjects.size() + systems_->rock().getSceneObjects().size() + detritusCount + settlementCount);
     for (size_t i = 0; i < sceneObjects.size(); ++i) {
         // Skip player character - rendered with skinned shadow pipeline
         if (hasCharacter && i == playerIndex) {
@@ -1292,6 +1294,9 @@ void Renderer::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float 
     allObjects.insert(allObjects.end(), systems_->rock().getSceneObjects().begin(), systems_->rock().getSceneObjects().end());
     if (systems_->detritus()) {
         allObjects.insert(allObjects.end(), systems_->detritus()->getSceneObjects().begin(), systems_->detritus()->getSceneObjects().end());
+    }
+    if (systems_->settlement()) {
+        allObjects.insert(allObjects.end(), systems_->settlement()->getSceneObjects().begin(), systems_->settlement()->getSceneObjects().end());
     }
 
     // Skinned character shadow callback (renders with GPU skinning)
@@ -1415,6 +1420,13 @@ void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
         VkDescriptorSet detritusDescSet = detritusDescriptorSets[frameIndex];
         for (const auto& detritus : systems_->detritus()->getSceneObjects()) {
             renderObject(detritus, detritusDescSet);
+        }
+    }
+
+    // Render procedural settlements (buildings - reuses rock descriptor sets for now)
+    if (systems_->settlement()) {
+        for (const auto& building : systems_->settlement()->getSceneObjects()) {
+            renderObject(building, rockDescSet);
         }
     }
 
@@ -1694,6 +1706,34 @@ void Renderer::updateHiZObjectData() {
         cullData.vertexOffset = 0;
 
         cullObjects.push_back(cullData);
+    }
+
+    // Also add procedural settlements
+    if (systems_->settlement()) {
+        const auto& settlementObjects = systems_->settlement()->getSceneObjects();
+        size_t baseIndex = sceneObjects.size() + rockObjects.size();
+        for (size_t i = 0; i < settlementObjects.size(); ++i) {
+            const auto& obj = settlementObjects[i];
+            if (obj.mesh == nullptr) continue;
+
+            const AABB& localBounds = obj.mesh->getBounds();
+            AABB worldBounds = localBounds.transformed(obj.transform);
+
+            CullObjectData cullData{};
+            glm::vec3 center = worldBounds.getCenter();
+            glm::vec3 extents = worldBounds.getExtents();
+            float radius = glm::length(extents);
+
+            cullData.boundingSphere = glm::vec4(center, radius);
+            cullData.aabbMin = glm::vec4(worldBounds.min, 0.0f);
+            cullData.aabbMax = glm::vec4(worldBounds.max, 0.0f);
+            cullData.meshIndex = static_cast<uint32_t>(baseIndex + i);
+            cullData.firstIndex = 0;
+            cullData.indexCount = obj.mesh->getIndexCount();
+            cullData.vertexOffset = 0;
+
+            cullObjects.push_back(cullData);
+        }
     }
 
     systems_->hiZ().updateObjectData(cullObjects);

@@ -99,6 +99,8 @@ set(SOURCES
     src/vegetation/ImpostorCullSystem.cpp
     src/vegetation/BranchGenerator.cpp
     src/vegetation/DetritusSystem.cpp
+    # Settlements
+    src/settlements/SettlementSystem.cpp
     # Postprocess
     src/postprocess/PostProcessSystem.cpp
     src/postprocess/BloomSystem.cpp
@@ -211,6 +213,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/terrain
     ${CMAKE_CURRENT_SOURCE_DIR}/src/terrain/virtual_texture
     ${CMAKE_CURRENT_SOURCE_DIR}/src/vegetation
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/settlements
     ${CMAKE_CURRENT_SOURCE_DIR}/src/water
     ${CMAKE_CURRENT_SOURCE_DIR}/generated
     ${CMAKE_CURRENT_SOURCE_DIR}  # For shaders/bindings.h

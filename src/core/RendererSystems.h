@@ -53,6 +53,7 @@ class CatmullClarkSystem;
 class SnowMaskSystem;
 class VolumetricSnowSystem;
 class RockSystem;
+class SettlementSystem;
 class TreeSystem;
 class TreeRenderer;
 class TreeLODSystem;
@@ -221,6 +222,9 @@ public:
     RockSystem& rock() { return *rockSystem_; }
     const RockSystem& rock() const { return *rockSystem_; }
     void setRock(std::unique_ptr<RockSystem> system);
+    SettlementSystem* settlement() { return settlementSystem_.get(); }
+    const SettlementSystem* settlement() const { return settlementSystem_.get(); }
+    void setSettlement(std::unique_ptr<SettlementSystem> system);
     TreeSystem* tree() { return treeSystem_.get(); }
     const TreeSystem* tree() const { return treeSystem_.get(); }
     void setTree(std::unique_ptr<TreeSystem> system);
@@ -427,6 +431,7 @@ private:
     // Tier 2 - Geometry
     std::unique_ptr<CatmullClarkSystem> catmullClarkSystem_;
     std::unique_ptr<RockSystem> rockSystem_;
+    std::unique_ptr<SettlementSystem> settlementSystem_;
     std::unique_ptr<TreeSystem> treeSystem_;
     std::unique_ptr<TreeRenderer> treeRenderer_;
     std::unique_ptr<TreeLODSystem> treeLODSystem_;

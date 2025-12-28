@@ -9,12 +9,16 @@
 namespace RoadGen {
 
 // Road types with their associated widths (in meters)
+// Inter-settlement road types
 enum class RoadType : uint8_t {
-    Footpath = 0,       // 1.5m wide
-    Bridleway = 1,      // 3m wide
-    Lane = 2,           // 4m wide
-    Road = 3,           // 6m wide
-    MainRoad = 4,       // 8m wide
+    Footpath = 0,       // 1.5m wide - hiking trails
+    Bridleway = 1,      // 3m wide - horse paths
+    Lane = 2,           // 4m wide - narrow country lanes
+    Road = 3,           // 6m wide - standard roads
+    MainRoad = 4,       // 8m wide - major routes
+    // Intra-settlement street types (for procedural cities)
+    Street = 5,         // 5m wide - main settlement streets
+    Alley = 6,          // 2m wide - narrow passages between buildings
     Count
 };
 
@@ -26,6 +30,8 @@ inline float getRoadWidth(RoadType type) {
         case RoadType::Lane:      return 4.0f;
         case RoadType::Road:      return 6.0f;
         case RoadType::MainRoad:  return 8.0f;
+        case RoadType::Street:    return 5.0f;
+        case RoadType::Alley:     return 2.0f;
         default:                  return 4.0f;
     }
 }
@@ -38,6 +44,8 @@ inline const char* getRoadTypeName(RoadType type) {
         case RoadType::Lane:      return "lane";
         case RoadType::Road:      return "road";
         case RoadType::MainRoad:  return "main_road";
+        case RoadType::Street:    return "street";
+        case RoadType::Alley:     return "alley";
         default:                  return "unknown";
     }
 }
@@ -49,6 +57,8 @@ inline RoadType parseRoadType(const std::string& name) {
     if (name == "lane") return RoadType::Lane;
     if (name == "road") return RoadType::Road;
     if (name == "main_road") return RoadType::MainRoad;
+    if (name == "street") return RoadType::Street;
+    if (name == "alley") return RoadType::Alley;
     return RoadType::Lane; // default
 }
 

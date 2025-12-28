@@ -24,6 +24,7 @@
 #include "HiZSystem.h"
 #include "CatmullClarkSystem.h"
 #include "RockSystem.h"
+#include "SettlementSystem.h"
 #include "TreeSystem.h"
 #include "TreeRenderer.h"
 #include "TreeLODSystem.h"
@@ -248,6 +249,30 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
             return false;
         }
         systems_->setRock(std::move(rockSystem));
+    }
+
+    // Initialize settlement system via factory
+    SettlementSystem::InitInfo settlementInfo{};
+    settlementInfo.device = device;
+    settlementInfo.allocator = allocator;
+    settlementInfo.commandPool = commandPool.get();
+    settlementInfo.graphicsQueue = graphicsQueue;
+    settlementInfo.physicalDevice = physicalDevice;
+    settlementInfo.resourcePath = resourcePath;
+    settlementInfo.terrainSize = core.terrain.size;
+    settlementInfo.getTerrainHeight = core.terrain.getHeightAt;
+
+    SettlementConfig settlementConfig{};
+    // Use default config for now
+
+    {
+        INIT_PROFILE_PHASE("SettlementSystem");
+        auto settlementSystem = SettlementSystem::create(settlementInfo, settlementConfig);
+        if (!settlementSystem) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SettlementSystem");
+            return false;
+        }
+        systems_->setSettlement(std::move(settlementSystem));
     }
 
     // Initialize tree system via factory
