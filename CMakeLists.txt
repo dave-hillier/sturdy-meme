@@ -90,6 +90,7 @@ set(SOURCES
     src/vegetation/RockSystem.cpp
     src/vegetation/TreeSystem.cpp
     src/vegetation/TreeGenerator.cpp
+    src/vegetation/TreeLODMeshGenerator.cpp
     src/vegetation/TreeOptions.cpp
     src/vegetation/TreeRenderer.cpp
     src/vegetation/TreeLeafCulling.cpp
