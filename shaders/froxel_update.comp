@@ -20,7 +20,7 @@ layout(binding = BINDING_FROXEL_SCATTERING, rgba16f) uniform image3D scatteringV
 layout(binding = BINDING_FROXEL_INTEGRATED, rgba16f) uniform image3D integratedVolume;  // Integrated volume (used by integration pass)
 layout(binding = BINDING_FROXEL_HISTORY, rgba16f) uniform readonly image3D historyVolume;  // Previous frame for temporal reprojection
 
-const int NUM_CASCADES = 4;
+// NUM_CASCADES is defined in constants_common.glsl
 
 layout(binding = BINDING_FROXEL_UNIFORMS) uniform FroxelUniforms {
     mat4 invViewProj;
