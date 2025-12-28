@@ -667,14 +667,17 @@ void TreeLODSystem::update(float deltaTime, const glm::vec3& cameraPos, const Tr
             // Compute blend factor based on screen error
             // blendFactor: 0.0 = full geometry only (close), 1.0 = impostor only (far)
             if (screenErrorFull > settings.errorThresholdFull) {
-                state.blendFactor = 0.0f;  // Close: full geometry
+                state.blendFactor = 0.0f;  // Close: full geometry (LOD0)
+            } else if (settings.enableReducedDetailLOD && screenErrorFull > settings.errorThresholdReduced) {
+                state.blendFactor = 0.0f;  // Medium: reduced geometry (LOD1)
             } else if (screenErrorFull < settings.errorThresholdImpostor) {
                 state.blendFactor = 1.0f;  // Far: full impostor
             } else {
-                // Blend zone: errorThresholdImpostor < screenError < errorThresholdFull
-                // As screenError decreases (farther), blend increases toward 1.0
-                float t = (settings.errorThresholdFull - screenErrorFull) /
-                          (settings.errorThresholdFull - settings.errorThresholdImpostor);
+                // Blend zone: between LOD1/LOD0 threshold and impostor threshold
+                float blendStart = settings.enableReducedDetailLOD ?
+                                   settings.errorThresholdReduced : settings.errorThresholdFull;
+                float t = (blendStart - screenErrorFull) /
+                          (blendStart - settings.errorThresholdImpostor);
                 state.blendFactor = t * t * (3.0f - 2.0f * t);  // smoothstep
             }
         } else {
