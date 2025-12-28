@@ -1,10 +1,12 @@
 #pragma once
 
 #include <vulkan/vulkan.h>
+#include <vulkan/vulkan_raii.hpp>
 #include <vk_mem_alloc.h>
 #include <VkBootstrap.h>
 #include <SDL3/SDL.h>
 #include <vector>
+#include <memory>
 #include "PipelineCache.h"
 
 /**
@@ -46,6 +48,9 @@ public:
     VmaAllocator getAllocator() const { return allocator; }
     VkPipelineCache getPipelineCache() const { return pipelineCache.getCache(); }
 
+    // RAII device access for vulkan-hpp raii types
+    const vk::raii::Device& getRaiiDevice() const { return *raiiDevice_; }
+
     VkSwapchainKHR getSwapchain() const { return swapchain; }
     const std::vector<VkImageView>& getSwapchainImageViews() const { return swapchainImageViews; }
     VkFormat getSwapchainImageFormat() const { return swapchainImageFormat; }
@@ -86,4 +91,10 @@ private:
     std::vector<VkImageView> swapchainImageViews;
     VkFormat swapchainImageFormat = VK_FORMAT_UNDEFINED;
     VkExtent2D swapchainExtent = {0, 0};
+
+    // vulkan-hpp RAII wrappers (non-owning, wrapping existing handles)
+    vk::raii::Context raiiContext_;
+    std::unique_ptr<vk::raii::Instance> raiiInstance_;
+    std::unique_ptr<vk::raii::PhysicalDevice> raiiPhysicalDevice_;
+    std::unique_ptr<vk::raii::Device> raiiDevice_;
 };

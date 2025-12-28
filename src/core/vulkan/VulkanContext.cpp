@@ -1,5 +1,6 @@
 #include "VulkanContext.h"
 #include <vulkan/vulkan.hpp>
+#include <vulkan/vulkan_raii.hpp>
 #include <SDL3/SDL_vulkan.h>
 #include <SDL3/SDL_log.h>
 
@@ -32,6 +33,20 @@ void VulkanContext::shutdown() {
     if (allocator != VK_NULL_HANDLE) {
         vmaDestroyAllocator(allocator);
         allocator = VK_NULL_HANDLE;
+    }
+
+    // Release handles from RAII wrappers before manual destruction
+    // (RAII wrappers took ownership, but we need to destroy in specific order with vkb cleanup)
+    if (raiiDevice_) {
+        raiiDevice_->release();
+        raiiDevice_.reset();
+    }
+    if (raiiPhysicalDevice_) {
+        raiiPhysicalDevice_.reset();  // Physical devices don't need destruction
+    }
+    if (raiiInstance_) {
+        raiiInstance_->release();
+        raiiInstance_.reset();
     }
 
     if (device != VK_NULL_HANDLE) {
@@ -70,6 +85,9 @@ bool VulkanContext::createInstance() {
     // Initialize vulkan-hpp dynamic dispatcher with instance-level functions
     VULKAN_HPP_DEFAULT_DISPATCHER.init(vk::Instance(instance), vkGetInstanceProcAddr);
 
+    // Create RAII wrapper for instance (takes ownership)
+    raiiInstance_ = std::make_unique<vk::raii::Instance>(raiiContext_, instance);
+
     return true;
 }
 
@@ -98,6 +116,10 @@ bool VulkanContext::selectPhysicalDevice() {
 
     vkbPhysicalDevice = physRet.value();
     physicalDevice = vkbPhysicalDevice.physical_device;
+
+    // Create RAII wrapper for physical device (non-owning - physical devices aren't destroyed)
+    raiiPhysicalDevice_ = std::make_unique<vk::raii::PhysicalDevice>(*raiiInstance_, physicalDevice);
+
     return true;
 }
 
@@ -115,6 +137,9 @@ bool VulkanContext::createLogicalDevice() {
 
     // Initialize vulkan-hpp dynamic dispatcher with device-level functions
     VULKAN_HPP_DEFAULT_DISPATCHER.init(vk::Device(device));
+
+    // Create RAII wrapper for device (takes ownership)
+    raiiDevice_ = std::make_unique<vk::raii::Device>(*raiiPhysicalDevice_, device);
 
     auto graphicsQueueRet = vkbDevice.get_queue(vkb::QueueType::graphics);
     if (!graphicsQueueRet) {

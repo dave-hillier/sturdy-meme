@@ -1,5 +1,14 @@
 # Vulkan-hpp Migration Plan
 
+## Migration Status
+
+- [x] **Phase 0**: Add `vk::raii::Device` to VulkanContext (foundation for vk::raii types)
+- [ ] Phase 1: Deprecate VulkanRAII.h custom wrappers
+- [ ] Phase 2: Deprecate VulkanBarriers.h and VulkanResourceFactory
+- [ ] Phase 3: Migrate high-usage files
+
+---
+
 ## Current State Summary
 
 | Category | Count |
