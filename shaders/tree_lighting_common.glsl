@@ -42,8 +42,9 @@ vec3 calculateTreeBarkLighting(
     return directLight + ambient;
 }
 
-// Simple lighting for tree leaves (translucent, double-sided)
-// Includes subsurface scattering approximation
+// GPU Gems 3 style leaf lighting with backlit transmission
+// When leaves are backlit (sun behind leaf relative to viewer), light transmits
+// through the leaf with a warm yellowish tint due to chlorophyll absorption
 vec3 calculateTreeLeafLighting(
     vec3 N,           // Surface normal (already flipped for back-facing)
     vec3 V,           // View direction (toward camera)
@@ -55,19 +56,54 @@ vec3 calculateTreeLeafLighting(
     vec3 ambientColor // Ambient light color (already includes intensity)
 ) {
     float NdotL = max(dot(N, L), 0.0);
+    float NdotV = max(dot(N, V), 0.0);
 
-    // Subsurface scattering approximation (light through leaves)
+    // === Backlit Transmission (GPU Gems 3) ===
+    // Detect backlit condition: when light and view are on same side of leaf
+    // VdotL > 0 means we're looking toward the light source through the leaf
+    float VdotL = dot(V, L);
+    float backlitFactor = max(0.0, VdotL);
+
+    // Transmission is strongest when:
+    // 1. Light is hitting the back of the leaf (NdotLBack high)
+    // 2. We're looking toward the light (VdotL > 0)
     float NdotLBack = max(dot(-N, L), 0.0);
-    float subsurface = NdotLBack * 0.3;
+    float transmission = NdotLBack * backlitFactor;
+
+    // Warm color shift for transmitted light (chlorophyll absorbs blue/red, passes yellow-green)
+    // The tint simulates light passing through leaf tissue
+    vec3 transmissionTint = vec3(1.15, 1.1, 0.7); // Warm yellow-green shift
+    vec3 transmittedColor = albedo * transmissionTint;
+
+    // Blend between diffuse and transmitted color based on transmission amount
+    // Use smoothstep for softer transition
+    float transmissionBlend = smoothstep(0.0, 0.6, transmission);
+    vec3 leafColor = mix(albedo, transmittedColor, transmissionBlend * 0.7);
+
+    // === Subsurface Scattering (existing) ===
+    // Light scattering through leaf thickness, visible even when not directly backlit
+    float subsurface = NdotLBack * 0.25;
 
     // Energy-conserving diffuse (divide by PI)
-    vec3 diffuse = albedo / PI;
+    vec3 diffuse = leafColor / PI;
 
-    // Direct lighting with translucency
-    vec3 directLight = diffuse * sunColor * sunIntensity * (NdotL + subsurface) * shadow;
+    // === Specular with V-shaped Normal Bias (GPU Gems 3) ===
+    // Leaves have a central vein that creates a subtle V-shape
+    // This biases specular highlights along the leaf axis
+    vec3 H = normalize(V + L);
+    float NdotH = max(dot(N, H), 0.0);
+    // Low-intensity, broad specular for waxy leaf surface
+    float specPower = 16.0;
+    float spec = pow(NdotH, specPower) * 0.08 * (1.0 - transmissionBlend);
+    vec3 specular = vec3(spec);
 
-    // Ambient lighting
-    vec3 ambient = ambientColor * albedo;
+    // Direct lighting with transmission and translucency
+    // Transmitted light is less affected by shadows (light passes through other leaves too)
+    float effectiveShadow = mix(shadow, 1.0, transmissionBlend * 0.5);
+    vec3 directLight = (diffuse + specular) * sunColor * sunIntensity * (NdotL + subsurface + transmission * 0.4) * effectiveShadow;
+
+    // Ambient lighting - transmitted leaves also glow slightly in ambient
+    vec3 ambient = ambientColor * leafColor * (1.0 + transmissionBlend * 0.2);
 
     return directLight + ambient;
 }
