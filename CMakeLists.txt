@@ -1010,28 +1010,40 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_branch_shadow_instanced.vert.spv
     )
 
+    # Source shaders used for UBO reflection (curated subset that defines complete UBO structures)
+    set(UBO_REFLECT_SHADERS
+        shaders/shader.vert
+        shaders/shader.frag
+        shaders/sky.frag
+        shaders/grass.vert
+        shaders/grass.comp
+        shaders/postprocess.frag
+        shaders/froxel_update.comp
+        shaders/weather.comp
+        shaders/leaf.comp
+        shaders/terrain/terrain.vert
+        shaders/terrain/terrain.frag
+        shaders/terrain/terrain_subdivision.comp
+        shaders/histogram_build.comp
+        shaders/histogram_reduce.comp
+        shaders/transmittance_lut.comp
+    )
+
+    # Derive .spv file paths from source shader list
+    set(UBO_REFLECT_SPV_FILES "")
+    foreach(SHADER ${UBO_REFLECT_SHADERS})
+        list(APPEND UBO_REFLECT_SPV_FILES ${CMAKE_CURRENT_SOURCE_DIR}/${SHADER}.spv)
+    endforeach()
+
     # Generate UBO headers from SPIR-V reflection
+    # DEPENDS includes actual .spv files for proper rebuild when shaders change
     add_custom_command(
         OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/generated/UBOs.h
         COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_SOURCE_DIR}/generated
         COMMAND shader_reflect
             ${CMAKE_CURRENT_SOURCE_DIR}/generated/UBOs.h
-            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.vert.spv
-            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shader.frag.spv
-            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.frag.spv
-            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.vert.spv
-            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.comp.spv
-            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/postprocess.frag.spv
-            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/froxel_update.comp.spv
-            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather.comp.spv
-            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/leaf.comp.spv
-            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain.vert.spv
-            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain.frag.spv
-            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/terrain/terrain_subdivision.comp.spv
-            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_build.comp.spv
-            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/histogram_reduce.comp.spv
-            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/transmittance_lut.comp.spv
-        DEPENDS shaders shader_reflect
+            ${UBO_REFLECT_SPV_FILES}
+        DEPENDS shader_reflect ${UBO_REFLECT_SPV_FILES}
         COMMENT "Generating UBO headers from SPIR-V reflection"
     )
 

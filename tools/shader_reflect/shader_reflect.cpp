@@ -490,6 +490,25 @@ int main(int argc, char** argv) {
     // Generate header file
     std::string headerContent = generateHeader(uniqueUBOs, uniquePushConstants);
 
+    // Read existing file content (if it exists) to avoid unnecessary writes
+    std::string existingContent;
+    {
+        std::ifstream existingFile(outputPath);
+        if (existingFile.is_open()) {
+            existingContent = std::string(
+                std::istreambuf_iterator<char>(existingFile),
+                std::istreambuf_iterator<char>());
+            existingFile.close();
+        }
+    }
+
+    // Only write if content has changed - avoids triggering C++ recompilation
+    if (headerContent == existingContent) {
+        std::cout << "UBOs.h unchanged (" << uniqueUBOs.size() << " UBOs, "
+                  << uniquePushConstants.size() << " push constants)\n";
+        return 0;
+    }
+
     // Write to file
     std::ofstream outFile(outputPath);
     if (!outFile.is_open()) {
