@@ -4,6 +4,7 @@
 
 #include "bindings.glsl"
 #include "atmosphere_common.glsl"
+#include "lut_compute_common.glsl"
 
 layout(local_size_x = 16, local_size_y = 16) in;
 
@@ -19,12 +20,6 @@ layout(binding = BINDING_ATMO_UNIFORMS) uniform AtmosphereUniforms {
 } uAtmosphere;
 
 const int SKY_VIEW_STEPS = 30;
-
-// Sample transmittance LUT
-vec3 SampleTransmittance(float r, float mu) {
-    vec2 uv = TransmittanceLUTParamsToUV(r, mu, uAtmosphere.params);
-    return texture(transmittanceLUT, uv).rgb;
-}
 
 // Sample multi-scatter LUT
 vec2 SampleMultiScatter(float altitude, float cosSunZenith) {
@@ -61,12 +56,11 @@ void main() {
     ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
     ivec2 lutSize = imageSize(skyViewLUT);
 
-    if (texel.x >= lutSize.x || texel.y >= lutSize.y) {
+    if (isOutOfBounds(texel, lutSize)) {
         return;
     }
 
-    // UV coordinates [0, 1]
-    vec2 uv = (vec2(texel) + 0.5) / vec2(lutSize);
+    vec2 uv = texelToUV(texel, lutSize);
 
     // Decode view direction from UV
     vec3 viewDir = SkyViewUVToDirection(uv);
@@ -99,32 +93,29 @@ void main() {
     float miePhase = CornetteShanksMiePhase(cosTheta, uAtmosphere.params.mieAnisotropy);
 
     for (int i = 0; i < SKY_VIEW_STEPS; i++) {
-        float t = (float(i) + 0.5) * stepSize;
+        float t = rayMarchStepT(i, stepSize);
         vec3 pos = cameraPos + viewDir * t;
         float posR = length(pos);
-        float altitude = max(posR - uAtmosphere.params.planetRadius, 0.0);
+        float altitude = radiusToAltitude(posR, uAtmosphere.params.planetRadius);
 
-        // Get atmospheric density at this point
-        float rayleighDensity = exp(-altitude / uAtmosphere.params.rayleighScaleHeight);
-        float mieDensity = exp(-altitude / uAtmosphere.params.mieScaleHeight);
+        // Get atmospheric density and scattering at this point
+        vec3 density = GetAtmosphereDensity(altitude, uAtmosphere.params);
+        vec3 rayleighScatterBase, mieScatterBase;
+        computeScattering(density, uAtmosphere.params, rayleighScatterBase, mieScatterBase);
 
         // Get transmittance to sun (light reaching this point)
         float muS = dot(normalize(pos), sunDir);
-        vec3 sunTransmittance = SampleTransmittance(posR, muS);
+        vec3 sunTransmittance = sampleTransmittanceLUT(transmittanceLUT, posR, muS, uAtmosphere.params);
 
         // Local scattering with phase functions
-        vec3 rayleighScatter = rayleighDensity * uAtmosphere.params.rayleighScatteringBase * rayleighPhase;
-        vec3 mieScatter = mieDensity * vec3(uAtmosphere.params.mieScatteringBase) * miePhase;
+        vec3 rayleighScatter = rayleighScatterBase * rayleighPhase;
+        vec3 mieScatter = mieScatterBase * miePhase;
 
         // Total segment scattering (attenuated by sunlight reaching this point)
         vec3 segmentScatter = sunTransmittance * (rayleighScatter + mieScatter);
 
-        // Extinction coefficients
-        vec3 rayleighExt = rayleighDensity * uAtmosphere.params.rayleighScatteringBase;
-        float mieExt = mieDensity * (uAtmosphere.params.mieScatteringBase + uAtmosphere.params.mieAbsorptionBase);
-        vec3 extinction = rayleighExt + vec3(mieExt);
-
-        // Segment transmittance
+        // Extinction and segment transmittance
+        vec3 extinction = computeExtinction(density, uAtmosphere.params);
         vec3 segmentTransmittance = exp(-extinction * stepSize);
 
         // Simple integration (matching sky.frag approach)

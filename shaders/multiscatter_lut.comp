@@ -4,6 +4,7 @@
 
 #include "bindings.glsl"
 #include "atmosphere_common.glsl"
+#include "lut_compute_common.glsl"
 
 layout(local_size_x = 8, local_size_y = 8) in;
 
@@ -20,17 +21,11 @@ layout(binding = BINDING_ATMO_MULTISCATTER) uniform AtmosphereUniforms {
 const int SAMPLE_COUNT = 64;
 const int MARCH_STEPS = 20;
 
-// Sample transmittance LUT
-vec3 SampleTransmittance(float r, float mu) {
-    vec2 uv = TransmittanceLUTParamsToUV(r, mu, uAtmosphere.params);
-    return texture(transmittanceLUT, uv).rgb;
-}
-
 // Compute single scattering contribution
 vec3 ComputeSingleScattering(float altitude, vec3 viewDir, float cosSunZenith) {
     float r = uAtmosphere.params.planetRadius + altitude;
     vec3 pos = vec3(0.0, r, 0.0);
-    vec3 sunDir = vec3(sqrt(1.0 - cosSunZenith * cosSunZenith), cosSunZenith, 0.0);
+    vec3 sunDir = sunDirFromZenithCos(cosSunZenith);
 
     // Ray march to accumulate single scattering
     float rayLength = DistanceToAtmosphereBoundary(r, dot(viewDir, normalize(pos)), uAtmosphere.params.atmosphereRadius);
@@ -38,35 +33,32 @@ vec3 ComputeSingleScattering(float altitude, vec3 viewDir, float cosSunZenith) {
 
     vec3 scattering = vec3(0.0);
 
+    // Phase functions (constant for the ray)
+    float cosTheta = dot(viewDir, sunDir);
+    float rayleighPhase = RayleighPhase(cosTheta);
+    float miePhase = HenyeyGreensteinPhase(cosTheta, uAtmosphere.params.mieAnisotropy);
+
     for (int i = 0; i < MARCH_STEPS; i++) {
-        float t = (float(i) + 0.5) * stepSize;
+        float t = rayMarchStepT(i, stepSize);
         vec3 samplePos = pos + viewDir * t;
         float sampleR = length(samplePos);
-        float sampleAlt = sampleR - uAtmosphere.params.planetRadius;
+        float sampleAlt = radiusToAltitude(sampleR, uAtmosphere.params.planetRadius);
 
-        // Get density
+        // Get density and scattering coefficients
         vec3 density = GetAtmosphereDensity(sampleAlt, uAtmosphere.params);
+        vec3 rayleighScatter, mieScatter;
+        computeScattering(density, uAtmosphere.params, rayleighScatter, mieScatter);
 
         // Get transmittance to sun
-        vec3 toSun = sunDir;
-        float muS = dot(normalize(samplePos), toSun);
-        vec3 transmittanceToSun = SampleTransmittance(sampleR, muS);
+        float muS = dot(normalize(samplePos), sunDir);
+        vec3 transmittanceToSun = sampleTransmittanceLUT(transmittanceLUT, sampleR, muS, uAtmosphere.params);
 
-        // Rayleigh and Mie scattering
-        vec3 rayleighScatter = density.x * uAtmosphere.params.rayleighScatteringBase;
-        float mieScatter = density.y * uAtmosphere.params.mieScatteringBase;
-
-        // Phase functions
-        float cosTheta = dot(viewDir, sunDir);
-        float rayleighPhase = RayleighPhase(cosTheta);
-        float miePhase = HenyeyGreensteinPhase(cosTheta, uAtmosphere.params.mieAnisotropy);
-
-        // Accumulate
-        vec3 localScatter = transmittanceToSun * (rayleighScatter * rayleighPhase + vec3(mieScatter * miePhase));
+        // Accumulate with phase functions
+        vec3 localScatter = transmittanceToSun * (rayleighScatter * rayleighPhase + mieScatter * miePhase);
 
         // Get transmittance from camera to sample
         float muView = dot(normalize(pos), viewDir);
-        vec3 transmittanceToView = SampleTransmittance(r, muView);
+        vec3 transmittanceToView = sampleTransmittanceLUT(transmittanceLUT, r, muView, uAtmosphere.params);
 
         scattering += localScatter * transmittanceToView * stepSize;
     }
@@ -78,17 +70,15 @@ void main() {
     ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
     ivec2 lutSize = imageSize(multiScatterLUT);
 
-    if (texel.x >= lutSize.x || texel.y >= lutSize.y) {
+    if (isOutOfBounds(texel, lutSize)) {
         return;
     }
 
-    // UV coordinates [0, 1]
-    vec2 uv = (vec2(texel) + 0.5) / vec2(lutSize);
+    vec2 uv = texelToUV(texel, lutSize);
 
-    // X: cosine of sun zenith angle [-1, 1]
-    // Y: normalized altitude [0, 1]
-    float cosSunZenith = uv.x * 2.0 - 1.0;
-    float altitude = uv.y * (uAtmosphere.params.atmosphereRadius - uAtmosphere.params.planetRadius);
+    // Decode altitude and sun angle from UV
+    float altitude, cosSunZenith;
+    decodeAltitudeSunAngleLUT(uv, uAtmosphere.params, altitude, cosSunZenith);
 
     // Integrate over hemisphere to get average multi-scatter contribution
     vec3 totalLuminance = vec3(0.0);
