@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Components.h"
+#include "Systems.h"
 #include <entt/entt.hpp>
 
 // Thin wrapper around entt::registry providing convenient entity creation
@@ -73,6 +74,151 @@ public:
         } else if (!grounded && registry_.all_of<Grounded>(player)) {
             registry_.remove<Grounded>(player);
         }
+    }
+
+    // ========================================================================
+    // Light Entity Creation
+    // ========================================================================
+
+    // Create a point light entity
+    entt::entity createPointLight(const glm::vec3& position,
+                                   const glm::vec3& color = glm::vec3{1.0f},
+                                   float intensity = 1.0f,
+                                   float radius = 10.0f) {
+        auto entity = registry_.create();
+
+        registry_.emplace<Transform>(entity, Transform{position, 0.0f});
+        PointLight light;
+        light.color = color;
+        light.intensity = intensity;
+        light.radius = radius;
+        registry_.emplace<PointLight>(entity, light);
+        registry_.emplace<LightEnabled>(entity);
+
+        return entity;
+    }
+
+    // Create a spot light entity
+    entt::entity createSpotLight(const glm::vec3& position,
+                                  const glm::vec3& direction,
+                                  const glm::vec3& color = glm::vec3{1.0f},
+                                  float intensity = 1.0f,
+                                  float innerAngle = 30.0f,
+                                  float outerAngle = 45.0f,
+                                  float radius = 15.0f) {
+        auto entity = registry_.create();
+
+        registry_.emplace<Transform>(entity, Transform{position, 0.0f});
+        SpotLight light;
+        light.color = color;
+        light.intensity = intensity;
+        light.direction = glm::normalize(direction);
+        light.innerConeAngle = innerAngle;
+        light.outerConeAngle = outerAngle;
+        light.radius = radius;
+        registry_.emplace<SpotLight>(entity, light);
+        registry_.emplace<LightEnabled>(entity);
+
+        return entity;
+    }
+
+    // Create a light attached to another entity
+    entt::entity createAttachedLight(entt::entity parent,
+                                      const glm::vec3& offset,
+                                      const glm::vec3& color = glm::vec3{1.0f},
+                                      float intensity = 1.0f,
+                                      float radius = 5.0f) {
+        auto entity = createPointLight(glm::vec3{0.0f}, color, intensity, radius);
+        registry_.emplace<LightAttachment>(entity, LightAttachment{parent, offset});
+        return entity;
+    }
+
+    // Enable/disable a light
+    void setLightEnabled(entt::entity light, bool enabled) {
+        if (!registry_.valid(light)) return;
+
+        if (enabled && !registry_.all_of<LightEnabled>(light)) {
+            registry_.emplace<LightEnabled>(light);
+        } else if (!enabled && registry_.all_of<LightEnabled>(light)) {
+            registry_.remove<LightEnabled>(light);
+        }
+    }
+
+    // Get all enabled point lights for rendering
+    auto getEnabledPointLights() {
+        return registry_.view<Transform, PointLight, LightEnabled>();
+    }
+
+    // Get all enabled spot lights for rendering
+    auto getEnabledSpotLights() {
+        return registry_.view<Transform, SpotLight, LightEnabled>();
+    }
+
+    // ========================================================================
+    // NPC Entity Creation
+    // ========================================================================
+
+    // Create an NPC entity with basic AI
+    entt::entity createNPC(const glm::vec3& position,
+                            const std::string& name = "NPC",
+                            float yaw = 0.0f) {
+        auto entity = registry_.create();
+
+        registry_.emplace<Transform>(entity, Transform{position, yaw});
+        registry_.emplace<Velocity>(entity);
+        registry_.emplace<NPCTag>(entity);
+        registry_.emplace<AIState>(entity);
+        registry_.emplace<MovementSettings>(entity);
+        registry_.emplace<NameTag>(entity, NameTag{name});
+        registry_.emplace<Health>(entity);
+        registry_.emplace<ModelMatrix>(entity);
+
+        return entity;
+    }
+
+    // Create an NPC with a patrol path
+    entt::entity createPatrolNPC(const glm::vec3& startPosition,
+                                  const std::vector<glm::vec3>& waypoints,
+                                  const std::string& name = "Guard") {
+        auto entity = createNPC(startPosition, name);
+
+        PatrolPath patrol;
+        patrol.waypoints = waypoints;
+        patrol.currentWaypoint = 0;
+        patrol.loop = true;
+        registry_.emplace<PatrolPath>(entity, patrol);
+
+        // Start in patrol state
+        registry_.get<AIState>(entity).current = AIState::State::Patrol;
+
+        return entity;
+    }
+
+    // Find all NPCs
+    auto findAllNPCs() {
+        return registry_.view<NPCTag, Transform>();
+    }
+
+    // Set NPC AI state
+    void setNPCState(entt::entity npc, AIState::State state) {
+        if (!registry_.valid(npc) || !registry_.all_of<AIState>(npc)) return;
+        auto& aiState = registry_.get<AIState>(npc);
+        aiState.current = state;
+        aiState.stateTimer = 0.0f;
+    }
+
+    // ========================================================================
+    // Extended Update
+    // ========================================================================
+
+    // Update all extended systems (lights and AI)
+    void updateExtended(float deltaTime) {
+        // Light systems
+        lightAttachmentSystem(registry_);
+
+        // AI systems
+        aiStateTimerSystem(registry_, deltaTime);
+        patrolSystem(registry_, deltaTime);
     }
 
 private:
