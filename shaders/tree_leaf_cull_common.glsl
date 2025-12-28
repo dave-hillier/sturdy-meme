@@ -60,7 +60,11 @@ bool cullLeaf(
 
     // LOD blade dropping - use position-based hash for consistent results
     // This handles distance-based leaf density reduction (fewer leaves when far away)
-    float instanceHash = hash2D(leafLocalPos.xz);
+    // Use 3D hash including Y coordinate for uniform distribution across tree canopy.
+    // Using only XZ causes biased dropping where inner/outer branches cluster together,
+    // particularly visible on narrow trees like pine and aspen.
+    vec3 hashInput = leafLocalPos;
+    float instanceHash = hash3D(hashInput).x;
     if (lodCull(distToCamera, lodTransitionStart, lodTransitionEnd,
                 maxLodDropRate, instanceHash)) {
         return true;
