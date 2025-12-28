@@ -134,12 +134,16 @@ Development follows a **breadth-first** approach: fill the entire world with low
 ### Milestone Overview
 
 ```
-M1        M2          M3         M4          M5          M6         M7         M8
-Markers → Footprints → Blockout → Silhouette → Structure → Material → Facade → Props
-  ▼          ▼           ▼          ▼           ▼           ▼          ▼         ▼
- ●●●       ▭▭▭         ▤▤▤        ⌂⌂⌂         🏠🏠🏠       ░░░       ▦▦▦       ⚐⚐⚐
-Dots      Flat        Boxes      Roofs       Types       Colors    Windows   Details
-on map    shapes      extruded   added       visible     applied   doors     placed
+M1        M2          M2.5       M3         M4          M5          M6         M7         M8
+Markers → Footprints → Roamable → Blockout → Silhouette → Structure → Material → Facade → Props
+  ▼          ▼           ▼          ▼          ▼           ▼           ▼          ▼         ▼
+ ●●●       ▭▭▭         ═══        ▤▤▤        ⌂⌂⌂         🏠🏠🏠       ░░░       ▦▦▦       ⚐⚐⚐
+Dots      Flat       Roads+     Boxes      Roofs       Types       Colors    Windows   Details
+on map    shapes     Plots      extruded   added       visible     applied   doors     placed
+                   ═══════════
+                   KEY POINT:
+                   Characters
+                   can roam!
 ```
 
 ### Milestone 1: World Markers
@@ -177,6 +181,155 @@ on map    shapes      extruded   added       visible     applied   doors     pla
 - Terrain decals or flat geometry for all elements
 
 **Enables**: Pathfinding development, NPC placement testing, gameplay area sizing
+
+---
+
+### Milestone 2.5: Roamable World (Key Integration Point)
+**Goal**: Complete world skeleton that characters can navigate - road network, agricultural fields, and properly subdivided settlement plots aligned to streets
+
+This is the **critical integration milestone** where all layout systems connect: inter-settlement roads, intra-settlement streets, and lot subdivision create a coherent navigable world.
+
+#### Road Network (Inter-Settlement)
+
+| Element | Representation |
+|---------|---------------|
+| Main roads | Flat geometry connecting towns, following terrain |
+| Lanes | Narrower paths to villages and hamlets |
+| Footpaths | Minimal paths to isolated locations |
+| Bridges | Simple flat spans over rivers |
+| Fords | Road dips into shallow water |
+
+**Technical Requirements**:
+- Road splines from existing `RoadPathfinder` (A* terrain-aware)
+- Road surface geometry with proper banking on slopes
+- Road-terrain blending (flatten terrain under roads)
+- Clear route from any settlement to any other
+
+#### Farm Fields (Agricultural Zones)
+
+| Element | Representation |
+|---------|---------------|
+| Strip fields | Long narrow plots (~200m × 20-30m) |
+| Common fields | Large enclosed areas |
+| Pasture | Fenced grazing areas |
+| Orchards | Grid-planted tree areas |
+| Field boundaries | Hedgerows, ditches, or low walls |
+
+**Pattern**: Medieval open field system with ridge-and-furrow visible
+
+```
+Village
+   │
+   └──── Common Road ────────────────┐
+              │                      │
+    ┌─────────┼─────────┐    ┌──────┴──────┐
+    │ Strip │ Strip │ Strip │    │  Pasture    │
+    │ Field │ Field │ Field │    │  (fenced)   │
+    │  ▓▓▓  │  ▒▒▒  │  ░░░  │    │             │
+    │  ▓▓▓  │  ▒▒▒  │  ░░░  │    └─────────────┘
+    │  ▓▓▓  │  ▒▒▒  │  ░░░  │
+    └───────┴───────┴───────┘
+```
+
+#### Street Network (Intra-Settlement)
+
+| Element | Representation |
+|---------|---------------|
+| Main street | Primary through-road (continuation of external road) |
+| Market street | Wider section, often with widening for stalls |
+| Back lanes | Narrow access to rear of properties |
+| Alleys | Minimal passages between buildings |
+| Crossroads | Junction points with decision nodes |
+
+**Generation Approach**: Space colonization from settlement entry points (road connections) toward key attractors (church, market, well), then A* refinement for terrain
+
+#### Plot Subdivision (Critical: Road-Aligned Lots)
+
+| Element | Representation |
+|---------|---------------|
+| Street frontage | Plot edge aligned parallel to street |
+| Burgage plots | Deep narrow lots (typical medieval: 5-10m wide × 30-60m deep) |
+| Rear access | Back lane or shared access |
+| Corner plots | Larger, more valuable |
+| Irregular fills | Odd-shaped plots where streets meet |
+
+**Subdivision Algorithm**:
+
+```
+1. Street Network → Generate primary and secondary streets
+2. Block Identification → Find enclosed areas between streets
+3. Frontage Extraction → Identify edges adjacent to streets
+4. Perpendicular Division → Subdivide blocks perpendicular to frontage
+5. Depth Calculation → Extend lots to back lane or block center
+6. Width Assignment → Based on building type requirements
+7. Adjustment → Handle corners, irregular shapes, terrain
+```
+
+**Visual**: Properly aligned lots along street
+
+```
+        Street (Main Road Continuation)
+    ═══════════════════════════════════════════
+         │         │         │         │
+         │  Lot 1  │  Lot 2  │  Lot 3  │  Lot 4
+         │ 8m×40m  │ 6m×40m  │10m×40m  │ 7m×40m
+         │         │         │         │
+         │    ▢    │    ▢    │    ▢    │    ▢     ← Building footprints
+         │         │         │         │              on lots
+         │         │         │         │
+    ─────┴─────────┴─────────┴─────────┴─────────
+                   Back Lane
+```
+
+**Key Properties**:
+- Frontage Width: Street-facing edge determines buildable width
+- Plot Depth: Distance to back boundary (rear lane, neighbor, or block center)
+- Street Alignment: Building façade line parallel to street centerline
+- Setback: Small front yard or building at street edge (period-appropriate)
+
+#### Building Placement on Lots
+
+| Placement Rule | Description |
+|----------------|-------------|
+| Street-facing | Main building front on street frontage |
+| Gable-end or parallel | Based on lot width vs building length |
+| Outbuildings rear | Secondary structures toward back of lot |
+| Yard space | Working area between buildings |
+| Access point | Door faces street or yard |
+
+**Blockout Representation**:
+- Simple extruded box per lot (lot width × depth × estimated height)
+- Color-coded by intended building type
+- Collision mesh for character navigation
+
+#### Navigation & Collision
+
+| Element | Implementation |
+|---------|---------------|
+| Road walkable | Flat, clear paths |
+| Field traversable | Slower movement through crops |
+| Lot boundaries | Implicit (no collision) or low fence |
+| Building collision | Blockout boxes block movement |
+| Water obstacles | Rivers require bridges/fords |
+
+**Deliverables**:
+- Complete road network mesh (all settlements connected)
+- Agricultural field layout with boundaries
+- Street network within each settlement
+- Lot subdivision with proper street alignment
+- Building blockout boxes on each lot
+- NavMesh or equivalent for pathfinding
+- Character can walk from any settlement to any other
+
+**Enables**: Full world traversal, distance testing, NPC routing, gameplay prototyping
+
+**Visual Result**: Looking down at a settlement, you see:
+- Roads entering from outside → becoming streets inside
+- Streets dividing settlement into blocks
+- Blocks subdivided into regular plots aligned to streets
+- Simple box buildings on each plot
+- Fields radiating outward in organized patterns
+- Characters can walk everywhere on roads/streets
 
 ---
 
@@ -364,21 +517,25 @@ on map    shapes      extruded   added       visible     applied   doors     pla
                     │              PARALLEL WORKSTREAMS               │
                     └─────────────────────────────────────────────────┘
 
- SETTLEMENTS        M1 ──▶ M2 ──▶ M3 ──▶ M4 ──▶ M5 ──▶ M6 ──▶ M7 ──▶ M8 ──▶ M9 ──▶ M10
-                    │      │      │      │      │
-                    ▼      ▼      ▼      ▼      ▼
- GAMEPLAY           ·······●──────●──────●──────●─────────────────────────────────────▶
-                           │      │      │
-                           │      ▼      │
- AI/NPCs            ·······●──────●──────●────────────────────────────────────────────▶
-                           │      │
-                           ▼      ▼
- COMBAT             ·······●──────●───────────────────────────────────────────────────▶
-                                  │
-                                  ▼
- QUESTS             ··············●───────────────────────────────────────────────────▶
+ SETTLEMENTS        M1 ──▶ M2 ──▶ M2.5 ──▶ M3 ──▶ M4 ──▶ M5 ──▶ M6 ──▶ M7 ──▶ M8 ──▶ M9 ──▶ M10
+                    │      │       │       │      │      │
+                    ▼      ▼       ▼       ▼      ▼      ▼
+ GAMEPLAY           ·······●───────●───────●──────●──────●─────────────────────────────────▶
+                           │       │       │      │
+                           ▼       ▼       ▼      │
+ AI/NPCs            ·······●───────●───────●──────●──────────────────────────────────────▶
+                           │       │       │
+                           ▼       ▼       ▼
+ EXPLORATION        ·······│───────●───────●──────●──────────────────────────────────────▶
+                                   │       │
+                                   ▼       ▼
+ COMBAT             ···············●───────●─────────────────────────────────────────────▶
+                                           │
+                                           ▼
+ QUESTS             ·······················●─────────────────────────────────────────────▶
 
  Legend: ● = Can begin development  ─▶ = Continues with refinement
+ M2.5 = Roamable World (roads, fields, subdivided plots) - KEY INTEGRATION POINT
 ```
 
 ### Recommended First Pass
@@ -387,10 +544,11 @@ For fastest time-to-playable:
 
 1. **M1**: Generate all settlement markers (use existing BiomeGenerator output)
 2. **M2**: Generate footprints for 3-5 test settlements
-3. **M3**: Blockout those test settlements
-4. **M3.5**: Extend blockout to ALL settlements (wide coverage)
-5. **M4**: Add silhouettes to all (roofs, crenellations)
-6. **Continue breadth-first**: Each milestone covers entire world before next
+3. **M2.5**: Roads + fields + subdivided plots for those settlements (ROAMABLE!)
+4. **M2.5-ext**: Extend M2.5 to ALL settlements (world becomes fully navigable)
+5. **M3**: Blockout buildings on each lot
+6. **M4**: Add silhouettes to all (roofs, crenellations)
+7. **Continue breadth-first**: Each milestone covers entire world before next
 
 ### Quality Tiers
 
@@ -508,12 +666,13 @@ This era represents the peak of medieval English civilization before the Black D
 6. [Phase 3b: Building Interior Generation](#6-phase-3b-building-interior-generation)
 7. [Phase 4: Street & Infrastructure Networks](#7-phase-4-street--infrastructure-networks)
 8. [Phase 4b: Defensive Structures](#8-phase-4b-defensive-structures)
-9. [Phase 5: Props & Detail Population](#9-phase-5-props--detail-population)
-10. [Phase 5b: Terrain Integration & Subterranean](#10-phase-5b-terrain-integration--subterranean)
-11. [Phase 6: LOD & Streaming System](#11-phase-6-lod--streaming-system)
-12. [Phase 7: Integration & Polish](#12-phase-7-integration--polish)
-13. [Quality Assurance & Testing](#13-quality-assurance--testing)
-14. [Research References](#14-research-references)
+9. [Phase 4c: Port & Maritime Infrastructure](#6c-phase-4c-port--maritime-infrastructure)
+10. [Phase 5: Props & Detail Population](#9-phase-5-props--detail-population)
+11. [Phase 5b: Terrain Integration & Subterranean](#10-phase-5b-terrain-integration--subterranean)
+12. [Phase 6: LOD & Streaming System](#11-phase-6-lod--streaming-system)
+13. [Phase 7: Integration & Polish](#12-phase-7-integration--polish)
+14. [Quality Assurance & Testing](#13-quality-assurance--testing)
+15. [Research References](#14-research-references)
 
 ---
 
@@ -2948,6 +3107,564 @@ public:
 - Verify walls follow terrain correctly
 - Verify streets align with gates
 - Walk through gate passages and tower interiors
+
+---
+
+## 6c. Phase 4c: Port & Maritime Infrastructure
+
+Ports are critical for south coast settlements. The Cinque Ports (Hastings, Romney, Hythe, Dover, Sandwich, plus Rye and Winchelsea) were major defensive and commercial centers. This phase covers all maritime infrastructure beyond the defensive harbor elements in Phase 4b.
+
+### 6c.1 Port Town Classification
+
+```cpp
+enum class PortType : uint8_t {
+    FishingHarbor,      // Small, local fishing
+    CoastalPort,        // Regional trade, fishing
+    MajorPort,          // Continental trade, defense
+    CinquePort          // Special status, naval obligations
+};
+
+enum class HarborType : uint8_t {
+    NaturalBay,         // Sheltered natural inlet
+    RiverMouth,         // At river/sea junction
+    Constructed,        // Man-made harbor with moles
+    Tidal               // Exposed at low tide
+};
+
+struct PortSettings {
+    PortType type;
+    HarborType harborType;
+
+    // Scale parameters
+    uint32_t quayLength = 100;          // Total quay length in meters
+    uint32_t numBerths = 4;             // Ship berth capacity
+    float harborDepth = 3.0f;           // Water depth at high tide
+    bool hasTidalBasin = false;         // Enclosed basin for tidal range
+
+    // Features based on port type
+    bool hasCustomsHouse = false;       // For trade ports
+    bool hasShipyard = false;           // Ship repair/building
+    bool hasRopewalk = false;           // Rope manufacture
+    bool hasSaltWorks = false;          // Salt production
+    bool hasWarehouse = true;           // Storage
+    bool hasFishMarket = true;          // Fish sales
+};
+```
+
+### 6c.2 Harbor Layout Generation
+
+```cpp
+struct HarborLayout {
+    // Water area
+    std::vector<glm::vec2> harborPerimeter;  // Water edge
+    std::vector<glm::vec2> channelPath;      // Entrance channel
+    float channelWidth = 15.0f;
+
+    // Quay infrastructure
+    struct Quay {
+        std::vector<glm::vec2> edge;         // Quay face (water side)
+        float height = 2.0f;                 // Height above low water
+        bool hasSteps = true;                // Access steps to water
+        bool hasBollards = true;             // Mooring points
+        bool hasCrane = false;               // Cargo crane
+    };
+    std::vector<Quay> quays;
+
+    // Jetties and piers
+    struct Jetty {
+        glm::vec2 basePosition;
+        float length;
+        float width;
+        bool isTimber = true;               // vs stone
+        int numBerths;
+    };
+    std::vector<Jetty> jetties;
+
+    // Slipways for boat hauling
+    struct Slipway {
+        glm::vec2 position;
+        float angle;                        // Perpendicular to shore
+        float width = 4.0f;
+        float gradient = 0.1f;              // 1:10 slope typical
+    };
+    std::vector<Slipway> slipways;
+
+    // Beach areas (for smaller boats)
+    std::vector<glm::vec2> beachZone;       // Boat landing area
+};
+
+class HarborLayoutGenerator {
+public:
+    HarborLayout generate(
+        const SettlementLayout& settlement,
+        const CoastlineData& coastline,
+        const PortSettings& settings,
+        uint32_t seed
+    );
+
+private:
+    // Find suitable harbor location
+    glm::vec2 findHarborSite(
+        const CoastlineData& coastline,
+        HarborType type
+    );
+
+    // Generate quay alignment
+    std::vector<glm::vec2> generateQuayLine(
+        const CoastlineData& coastline,
+        float desiredLength
+    );
+
+    // Place jetties for additional berths
+    std::vector<Jetty> placeJetties(
+        const std::vector<Quay>& quays,
+        int additionalBerths
+    );
+
+    // Connect harbor to street network
+    void connectToStreets(
+        HarborLayout& harbor,
+        SettlementLayout& settlement
+    );
+};
+```
+
+### 6c.3 Maritime Buildings
+
+```cpp
+// Maritime-specific building types
+enum class MaritimeBuildingType : uint8_t {
+    // Waterfront buildings
+    NetLoft,            // Fish net storage/repair (upper floor)
+    BoatShed,           // Small boat storage
+    Warehouse,          // Goods storage
+    FishMarket,         // Open-sided fish sales
+    CustomsHouse,       // Port authority (major ports)
+
+    // Industrial
+    Shipyard,           // Ship building/repair
+    Ropewalk,           // Rope manufacture (long, narrow)
+    SailLoft,           // Sail making/repair
+    Cooperage,          // Barrel making
+    SaltWorks,          // Salt production
+    Smokehouse,         // Fish smoking
+
+    // Service
+    Tavern,             // Sailor accommodation
+    Chandlery,          // Ship supplies
+    PilotHouse,         // Harbor pilot station
+    BeaconTower,        // Navigation aid
+
+    // Processing
+    FishCuring,         // Salting/drying fish
+    OilPress            // Fish oil production
+};
+
+struct MaritimeBuildingConfig {
+    MaritimeBuildingType type;
+
+    // Size ranges by type
+    static constexpr float getMinWidth(MaritimeBuildingType t);
+    static constexpr float getMaxWidth(MaritimeBuildingType t);
+    static constexpr float getMinLength(MaritimeBuildingType t);
+    static constexpr float getMaxLength(MaritimeBuildingType t);
+
+    // Special requirements
+    bool requiresWaterfrontage = false;
+    bool requiresSlipway = false;
+    float minDistanceFromWater = 0.0f;
+    float maxDistanceFromWater = 50.0f;
+};
+
+// Building dimensions by type (meters)
+/*
+    NetLoft:        5-8m × 8-12m, 2 stories
+    BoatShed:       6-10m × 10-20m, 1 story (tall)
+    Warehouse:      10-15m × 20-40m, 2-3 stories
+    FishMarket:     8-12m × 15-25m, 1 story (open sides)
+    CustomsHouse:   12-18m × 15-20m, 2 stories (imposing)
+
+    Shipyard:       15-30m × 40-80m (includes slip)
+    Ropewalk:       3-5m × 200-400m (extremely long!)
+    SailLoft:       10-15m × 20-30m, upper floor
+    Cooperage:      8-12m × 12-18m
+    SaltWorks:      varies (pans + buildings)
+    Smokehouse:     4-6m × 6-10m (tall chimney)
+*/
+
+class MaritimeBuildingGenerator {
+public:
+    struct MaritimeBuilding {
+        MaritimeBuildingType type;
+        BuildingFootprint footprint;
+        std::vector<BuildingComponent> components;
+        bool hasUpperFloor = false;
+        bool hasLoftDoor = false;        // Cargo hoist door
+        bool hasWideEntrance = false;    // Cart/boat access
+    };
+
+    MaritimeBuilding generate(
+        const MaritimeBuildingConfig& config,
+        const LotData& lot,
+        uint32_t seed
+    );
+
+private:
+    // Net loft with characteristic upper-floor access
+    MaritimeBuilding generateNetLoft(const LotData& lot, uint32_t seed);
+
+    // Open-sided fish market
+    MaritimeBuilding generateFishMarket(const LotData& lot, uint32_t seed);
+
+    // Long, narrow ropewalk
+    MaritimeBuilding generateRopewalk(const LotData& lot, uint32_t seed);
+
+    // Shipyard with slipway
+    MaritimeBuilding generateShipyard(
+        const LotData& lot,
+        const Slipway& slipway,
+        uint32_t seed
+    );
+};
+```
+
+### 6c.4 Waterfront Street Layout
+
+```cpp
+struct WaterfrontLayout {
+    // Primary waterfront road (parallel to quay)
+    std::vector<glm::vec2> quaysideStreet;
+    float quaysideWidth = 6.0f;     // Wider for cargo handling
+
+    // Access roads perpendicular to waterfront
+    struct AccessLane {
+        std::vector<glm::vec2> path;
+        float width;
+        bool forCarts = true;        // Wide enough for carts
+    };
+    std::vector<AccessLane> accessLanes;
+
+    // Working areas
+    struct WorkingQuay {
+        std::vector<glm::vec2> boundary;
+        bool hasCrane = false;
+        bool hasWeighStation = false;
+        std::vector<glm::vec2> barrelStorage;
+    };
+    std::vector<WorkingQuay> workingAreas;
+
+    // Lot subdivision along waterfront
+    std::vector<LotData> waterfrontLots;
+};
+
+class WaterfrontLayoutGenerator {
+public:
+    WaterfrontLayout generate(
+        const HarborLayout& harbor,
+        const SettlementLayout& settlement,
+        const PortSettings& settings,
+        uint32_t seed
+    );
+
+private:
+    // Subdivide waterfront into lots
+    std::vector<LotData> subdivideWaterfront(
+        const std::vector<glm::vec2>& quayLine,
+        const PortSettings& settings
+    );
+
+    // Assign building types to lots
+    void assignBuildingTypes(
+        std::vector<LotData>& lots,
+        const PortSettings& settings
+    );
+};
+```
+
+### 6c.5 Cinque Ports Special Features
+
+The Cinque Ports had special privileges and obligations:
+
+```cpp
+struct CinquePortFeatures {
+    // Naval obligations
+    bool hasShipService = true;      // Obligated to provide ships
+    int shipQuota = 21;              // Ships owed to Crown (varied by port)
+
+    // Special buildings
+    bool hasCourt = true;            // Court of Shepway (confederacy court)
+    bool hasGuildHall = true;        // Portsmen guild
+    bool hasBaronHall = true;        // Baron of Cinque Ports residence
+
+    // Defensive priority
+    bool hasEnhancedDefenses = true;
+    bool hasBeaconChain = true;      // Warning beacon network
+
+    // Trade privileges
+    bool hasFreePassage = true;      // Toll-free trade
+    bool hasYarmouthRights = true;   // Herring fair privileges
+};
+
+// The seven Cinque Ports (5 original + 2 "ancient towns")
+enum class CinquePortName : uint8_t {
+    // Head Ports
+    Hastings,
+    Romney,
+    Hythe,
+    Dover,
+    Sandwich,
+    // Ancient Towns (added later)
+    Rye,
+    Winchelsea
+};
+
+// Each port had "limbs" (subsidiary ports)
+// e.g., Hastings had Seaford, Pevensey, etc.
+```
+
+### 6c.6 Fishing Village Layout
+
+Smaller fishing settlements have distinct patterns:
+
+```cpp
+struct FishingVillageLayout {
+    // Beach-oriented (no formal harbor)
+    std::vector<glm::vec2> beachLine;
+
+    // Boat storage above high water
+    struct BoatPark {
+        glm::vec2 position;
+        float area;
+        int boatCapacity;
+    };
+    std::vector<BoatPark> boatParks;
+
+    // Net drying areas
+    std::vector<glm::vec2> netDryingPoles;
+
+    // Simple buildings
+    struct FishermanCottage {
+        LotData lot;
+        bool hasAttachedStore = false;   // Net/gear storage
+    };
+    std::vector<FishermanCottage> cottages;
+
+    // Communal features
+    glm::vec2 fishLandingPoint;
+    glm::vec2 netMendingArea;
+    bool hasSimpleQuay = false;          // Basic stone quay
+    bool hasChapel = true;               // Often dedicated to maritime saints
+};
+
+class FishingVillageGenerator {
+public:
+    FishingVillageLayout generate(
+        const CoastlineData& coastline,
+        const BiomeZone surroundingBiome,
+        uint32_t populationTarget,
+        uint32_t seed
+    );
+};
+```
+
+### 6c.7 Tidal Considerations
+
+South coast ports deal with significant tidal ranges:
+
+```cpp
+struct TidalData {
+    float highWaterMark = 2.0f;      // Height above datum
+    float lowWaterMark = -2.0f;      // Often exposes mudflats
+    float tidalRange = 4.0f;         // Typical spring tide
+    float meanSeaLevel = 0.0f;
+
+    // Mud/sand exposure at low tide
+    bool exposesFlats = true;
+    float flatExtent = 50.0f;        // How far flats extend
+};
+
+struct TidalInfrastructure {
+    // Tidal basin (enclosed area)
+    struct TidalBasin {
+        std::vector<glm::vec2> boundary;
+        glm::vec2 gatePosition;
+        float gateWidth = 8.0f;
+        float sillHeight = -1.0f;    // Minimum water retained
+    };
+    std::optional<TidalBasin> basin;
+
+    // Causeways for low-tide access
+    struct Causeway {
+        std::vector<glm::vec2> path;
+        float width = 3.0f;
+        float height = 1.0f;         // Above mean low water
+    };
+    std::vector<Causeway> causeways;
+
+    // Hard standings (reinforced beach areas)
+    std::vector<glm::vec2> hardStandings;
+};
+```
+
+### 6c.8 Salt Production
+
+Salt was valuable and produced at coastal sites:
+
+```cpp
+struct SaltWorks {
+    enum class Type {
+        SolarPans,      // Evaporation pans (warmer climates)
+        BoilingHouse    // Heated evaporation (more common in England)
+    };
+
+    Type type = Type::BoilingHouse;
+
+    struct EvaporationPan {
+        glm::vec2 position;
+        float size;                 // 2-5m square
+    };
+    std::vector<EvaporationPan> pans;
+
+    struct BoilingHouse {
+        BuildingFootprint building;
+        int numFurnaces;
+        float leadPanSize;          // Large lead evaporation pans
+    };
+    std::optional<BoilingHouse> boilingHouse;
+
+    // Brine intake
+    glm::vec2 brineSource;         // Seawater intake point
+    std::vector<glm::vec2> brineChannel;
+
+    // Storage
+    BuildingFootprint saltStore;   // Dry storage for finished salt
+};
+```
+
+### 6c.9 Maritime Props
+
+```cpp
+enum class MaritimePropType : uint8_t {
+    // Mooring
+    Bollard,            // Stone or timber mooring post
+    RingBolt,           // Iron ring in quay
+
+    // Cargo handling
+    Crane,              // Wooden cargo crane
+    Winch,              // Rope winch
+    CartRamp,           // Ramped access to quay
+
+    // Fishing
+    NetPole,            // For drying nets
+    NetRack,            // Horizontal net drying
+    FishBasket,         // Wicker fish baskets
+    LobsterPot,         // Lobster/crab pots
+
+    // Boats
+    RowingBoat,         // Small boat on beach
+    FishingBoat,        // Larger fishing vessel
+    Anchor,             // Beached anchor
+    Oars,               // Stacked oars
+
+    // Navigation
+    Beacon,             // Warning beacon
+    DayMark,            // Navigation marker
+
+    // Barrels/storage
+    FishBarrel,         // Herring barrels
+    SaltSack,           // Salt bags
+    CoiledRope,         // Rope coils
+
+    // Miscellaneous
+    Capstan,            // For hauling boats
+    SeaWall,            // Stone sea defense
+    Groyne              // Timber beach groyne
+};
+
+class MaritimePropPlacer {
+public:
+    void placeQuayProps(
+        const Quay& quay,
+        std::vector<PropInstance>& outProps
+    );
+
+    void placeBeachProps(
+        const std::vector<glm::vec2>& beachZone,
+        std::vector<PropInstance>& outProps
+    );
+
+    void placeFishingProps(
+        const FishingVillageLayout& village,
+        std::vector<PropInstance>& outProps
+    );
+};
+```
+
+### 6c.10 Integration with Settlement System
+
+```cpp
+class PortIntegration {
+public:
+    // Modify settlement layout for port
+    void adaptSettlementForPort(
+        SettlementLayout& settlement,
+        const PortSettings& portSettings,
+        const CoastlineData& coastline
+    );
+
+    // Generate complete port infrastructure
+    struct PortComplex {
+        HarborLayout harbor;
+        WaterfrontLayout waterfront;
+        std::vector<MaritimeBuilding> buildings;
+        std::optional<TidalInfrastructure> tidalFeatures;
+        std::optional<SaltWorks> saltWorks;
+        std::vector<PropInstance> props;
+    };
+
+    PortComplex generatePort(
+        const Settlement& settlement,
+        const CoastlineData& coastline,
+        const PortSettings& settings,
+        uint32_t seed
+    );
+
+private:
+    // Detect if settlement should be a port
+    bool shouldBePort(
+        const Settlement& settlement,
+        const CoastlineData& coastline
+    );
+
+    // Determine port type based on settlement
+    PortSettings determinePortSettings(
+        const Settlement& settlement,
+        SettlementType type
+    );
+};
+```
+
+### 6c.11 Deliverables - Phase 4c
+
+- [ ] PortType classification and settings
+- [ ] HarborLayoutGenerator for quays, jetties, slipways
+- [ ] WaterfrontLayoutGenerator with lot subdivision
+- [ ] MaritimeBuildingGenerator for all maritime building types
+- [ ] FishingVillageGenerator for small coastal settlements
+- [ ] TidalInfrastructure generation
+- [ ] SaltWorks generation
+- [ ] MaritimePropPlacer for harbor/beach props
+- [ ] PortIntegration with main settlement system
+- [ ] Mesh generation for quays, jetties, harbor walls
+
+**Testing**:
+- Generate fishing village with beach landing
+- Generate coastal port with quays and warehouses
+- Generate Cinque Port-style major harbor with shipyard
+- Verify waterfront lots align to quay
+- Verify tidal basin gates operate conceptually
+- Walk along quayside and access jetties
+- Verify maritime buildings have correct proportions
 
 ---
 
