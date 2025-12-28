@@ -980,27 +980,29 @@ void TreeLODSystem::renderImpostors(VkCommandBuffer cmd, uint32_t frameIndex,
     const auto& settings = getLODSettings();
     if (!settings.enableImpostors) return;
 
+    vk::CommandBuffer vkCmd(cmd);
+
     // Bind pipeline
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, impostorPipeline_.get());
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, impostorPipeline_.get());
 
     // Set viewport and scissor
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = static_cast<float>(extent_.width);
-    viewport.height = static_cast<float>(extent_.height);
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(cmd, 0, 1, &viewport);
+    auto viewport = vk::Viewport{}
+        .setX(0.0f)
+        .setY(0.0f)
+        .setWidth(static_cast<float>(extent_.width))
+        .setHeight(static_cast<float>(extent_.height))
+        .setMinDepth(0.0f)
+        .setMaxDepth(1.0f);
+    vkCmd.setViewport(0, viewport);
 
-    VkRect2D scissor{};
-    scissor.offset = {0, 0};
-    scissor.extent = extent_;
-    vkCmdSetScissor(cmd, 0, 1, &scissor);
+    auto scissor = vk::Rect2D{}
+        .setOffset({0, 0})
+        .setExtent(extent_);
+    vkCmd.setScissor(0, scissor);
 
     // Bind descriptor sets
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, impostorPipelineLayout_.get(),
-                           0, 1, &impostorDescriptorSets_[frameIndex], 0, nullptr);
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, impostorPipelineLayout_.get(),
+                             0, vk::DescriptorSet(impostorDescriptorSets_[frameIndex]), {});
 
     // Push constants
     // cameraPos: xyz=camera position, w=autumnHueShift
@@ -1029,18 +1031,19 @@ void TreeLODSystem::renderImpostors(VkCommandBuffer cmd, uint32_t frameIndex,
         0.0f
     );
 
-    vkCmdPushConstants(cmd, impostorPipelineLayout_.get(),
-                      VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                      0, sizeof(pushConstants), &pushConstants);
+    vkCmd.pushConstants<decltype(pushConstants)>(
+        impostorPipelineLayout_.get(),
+        vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
+        0, pushConstants);
 
     // Bind buffers
-    VkBuffer vertexBuffers[] = {billboardVertexBuffer_, instanceBuffer_};
-    VkDeviceSize offsets[] = {0, 0};
-    vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
-    vkCmdBindIndexBuffer(cmd, billboardIndexBuffer_, 0, VK_INDEX_TYPE_UINT32);
+    vk::Buffer vertexBuffers[] = {billboardVertexBuffer_, instanceBuffer_};
+    vk::DeviceSize offsets[] = {0, 0};
+    vkCmd.bindVertexBuffers(0, vertexBuffers, offsets);
+    vkCmd.bindIndexBuffer(billboardIndexBuffer_, 0, vk::IndexType::eUint32);
 
     // Draw instanced
-    vkCmdDrawIndexed(cmd, billboardIndexCount_, static_cast<uint32_t>(visibleImpostors_.size()), 0, 0, 0);
+    vkCmd.drawIndexed(billboardIndexCount_, static_cast<uint32_t>(visibleImpostors_.size()), 0, 0, 0);
 }
 
 void TreeLODSystem::renderImpostorShadows(VkCommandBuffer cmd, uint32_t frameIndex,
@@ -1052,12 +1055,14 @@ void TreeLODSystem::renderImpostorShadows(VkCommandBuffer cmd, uint32_t frameInd
     const auto& settings = getLODSettings();
     if (!settings.enableImpostors) return;
 
+    vk::CommandBuffer vkCmd(cmd);
+
     // Bind shadow pipeline
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipeline_.get());
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, shadowPipeline_.get());
 
     // Bind descriptor sets - use the main UBO descriptor set passed in for cascade matrices
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipelineLayout_.get(),
-                           0, 1, &shadowDescriptorSets_[frameIndex], 0, nullptr);
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, shadowPipelineLayout_.get(),
+                             0, vk::DescriptorSet(shadowDescriptorSets_[frameIndex]), {});
 
     // Push constants with cascade index
     struct {
@@ -1085,18 +1090,19 @@ void TreeLODSystem::renderImpostorShadows(VkCommandBuffer cmd, uint32_t frameInd
     );
     pushConstants.cascadeIndex = cascadeIndex;
 
-    vkCmdPushConstants(cmd, shadowPipelineLayout_.get(),
-                      VK_SHADER_STAGE_VERTEX_BIT,
-                      0, sizeof(pushConstants), &pushConstants);
+    vkCmd.pushConstants<decltype(pushConstants)>(
+        shadowPipelineLayout_.get(),
+        vk::ShaderStageFlagBits::eVertex,
+        0, pushConstants);
 
     // Bind buffers
-    VkBuffer vertexBuffers[] = {billboardVertexBuffer_, instanceBuffer_};
-    VkDeviceSize offsets[] = {0, 0};
-    vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
-    vkCmdBindIndexBuffer(cmd, billboardIndexBuffer_, 0, VK_INDEX_TYPE_UINT32);
+    vk::Buffer vertexBuffers[] = {billboardVertexBuffer_, instanceBuffer_};
+    vk::DeviceSize offsets[] = {0, 0};
+    vkCmd.bindVertexBuffers(0, vertexBuffers, offsets);
+    vkCmd.bindIndexBuffer(billboardIndexBuffer_, 0, vk::IndexType::eUint32);
 
     // Draw instanced
-    vkCmdDrawIndexed(cmd, billboardIndexCount_, static_cast<uint32_t>(visibleImpostors_.size()), 0, 0, 0);
+    vkCmd.drawIndexed(billboardIndexCount_, static_cast<uint32_t>(visibleImpostors_.size()), 0, 0, 0);
 }
 
 void TreeLODSystem::renderImpostorsGPUCulled(VkCommandBuffer cmd, uint32_t frameIndex,
@@ -1110,27 +1116,29 @@ void TreeLODSystem::renderImpostorsGPUCulled(VkCommandBuffer cmd, uint32_t frame
 
     if (impostorDescriptorSets_.empty()) return;
 
+    vk::CommandBuffer vkCmd(cmd);
+
     // Bind pipeline
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, impostorPipeline_.get());
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, impostorPipeline_.get());
 
     // Set viewport and scissor
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = static_cast<float>(extent_.width);
-    viewport.height = static_cast<float>(extent_.height);
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(cmd, 0, 1, &viewport);
+    auto viewport = vk::Viewport{}
+        .setX(0.0f)
+        .setY(0.0f)
+        .setWidth(static_cast<float>(extent_.width))
+        .setHeight(static_cast<float>(extent_.height))
+        .setMinDepth(0.0f)
+        .setMaxDepth(1.0f);
+    vkCmd.setViewport(0, viewport);
 
-    VkRect2D scissor{};
-    scissor.offset = {0, 0};
-    scissor.extent = extent_;
-    vkCmdSetScissor(cmd, 0, 1, &scissor);
+    auto scissor = vk::Rect2D{}
+        .setOffset({0, 0})
+        .setExtent(extent_);
+    vkCmd.setScissor(0, scissor);
 
     // Bind descriptor sets
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, impostorPipelineLayout_.get(),
-                           0, 1, &impostorDescriptorSets_[frameIndex], 0, nullptr);
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, impostorPipelineLayout_.get(),
+                             0, vk::DescriptorSet(impostorDescriptorSets_[frameIndex]), {});
 
     // Push constants
     struct {
@@ -1156,17 +1164,18 @@ void TreeLODSystem::renderImpostorsGPUCulled(VkCommandBuffer cmd, uint32_t frame
         0.0f
     );
 
-    vkCmdPushConstants(cmd, impostorPipelineLayout_.get(),
-                      VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                      0, sizeof(pushConstants), &pushConstants);
+    vkCmd.pushConstants<decltype(pushConstants)>(
+        impostorPipelineLayout_.get(),
+        vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
+        0, pushConstants);
 
     // Bind vertex and index buffers
-    VkDeviceSize offset = 0;
-    vkCmdBindVertexBuffers(cmd, 0, 1, &billboardVertexBuffer_, &offset);
-    vkCmdBindIndexBuffer(cmd, billboardIndexBuffer_, 0, VK_INDEX_TYPE_UINT32);
+    vk::DeviceSize offset = 0;
+    vkCmd.bindVertexBuffers(0, vk::Buffer(billboardVertexBuffer_), offset);
+    vkCmd.bindIndexBuffer(billboardIndexBuffer_, 0, vk::IndexType::eUint32);
 
     // Draw using indirect buffer from GPU culling
-    vkCmdDrawIndexedIndirect(cmd, indirectDrawBuffer, 0, 1, sizeof(VkDrawIndexedIndirectCommand));
+    vkCmd.drawIndexedIndirect(indirectDrawBuffer, 0, 1, sizeof(VkDrawIndexedIndirectCommand));
 }
 
 void TreeLODSystem::renderImpostorShadowsGPUCulled(VkCommandBuffer cmd, uint32_t frameIndex,
@@ -1181,10 +1190,12 @@ void TreeLODSystem::renderImpostorShadowsGPUCulled(VkCommandBuffer cmd, uint32_t
 
     if (shadowDescriptorSets_.empty()) return;
 
+    vk::CommandBuffer vkCmd(cmd);
+
     // Bind shadow pipeline
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipeline_.get());
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipelineLayout_.get(),
-                           0, 1, &shadowDescriptorSets_[frameIndex], 0, nullptr);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, shadowPipeline_.get());
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, shadowPipelineLayout_.get(),
+                             0, vk::DescriptorSet(shadowDescriptorSets_[frameIndex]), {});
 
     // Push constants for shadow pass - must match shader layout:
     // vec4 cameraPos (offset 0), vec4 lodParams (offset 16), int cascadeIndex (offset 32)
@@ -1199,17 +1210,18 @@ void TreeLODSystem::renderImpostorShadowsGPUCulled(VkCommandBuffer cmd, uint32_t
     pushConstants.lodParams = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f);
     pushConstants.cascadeIndex = cascadeIndex;
 
-    vkCmdPushConstants(cmd, shadowPipelineLayout_.get(),
-                      VK_SHADER_STAGE_VERTEX_BIT,
-                      0, sizeof(pushConstants), &pushConstants);
+    vkCmd.pushConstants<decltype(pushConstants)>(
+        shadowPipelineLayout_.get(),
+        vk::ShaderStageFlagBits::eVertex,
+        0, pushConstants);
 
     // Bind vertex and index buffers
-    VkDeviceSize offset = 0;
-    vkCmdBindVertexBuffers(cmd, 0, 1, &billboardVertexBuffer_, &offset);
-    vkCmdBindIndexBuffer(cmd, billboardIndexBuffer_, 0, VK_INDEX_TYPE_UINT32);
+    vk::DeviceSize offset = 0;
+    vkCmd.bindVertexBuffers(0, vk::Buffer(billboardVertexBuffer_), offset);
+    vkCmd.bindIndexBuffer(billboardIndexBuffer_, 0, vk::IndexType::eUint32);
 
     // Draw using indirect buffer from GPU culling
-    vkCmdDrawIndexedIndirect(cmd, indirectDrawBuffer, 0, 1, sizeof(VkDrawIndexedIndirectCommand));
+    vkCmd.drawIndexedIndirect(indirectDrawBuffer, 0, 1, sizeof(VkDrawIndexedIndirectCommand));
 }
 
 const TreeLODState& TreeLODSystem::getTreeLODState(uint32_t treeIndex) const {
