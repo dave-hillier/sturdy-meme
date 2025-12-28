@@ -301,6 +301,8 @@ void RendererSystems::destroy(VkDevice device, VmaAllocator allocator) {
     profiler_.reset();
     hiZSystem_.reset();  // RAII cleanup via destructor
 
+    // Geometry/Vegetation
+    detritusSystem_.reset();  // RAII cleanup via destructor
     catmullClarkSystem_.reset();  // RAII cleanup via destructor
     rockSystem_.reset();  // RAII cleanup via destructor
     treeLODSystem_.reset();  // RAII cleanup via destructor
@@ -331,6 +333,7 @@ void RendererSystems::destroy(VkDevice device, VmaAllocator allocator) {
     terrainSystem_.reset();  // RAII cleanup via destructor
     shadowSystem_.reset();  // RAII cleanup via destructor
     skinnedMeshRenderer_.reset();  // RAII cleanup via destructor
+    bilateralGridSystem_.reset();  // RAII cleanup via destructor
     bloomSystem_.reset();  // RAII cleanup via destructor
     postProcessSystem_.reset();  // RAII cleanup via destructor
 
