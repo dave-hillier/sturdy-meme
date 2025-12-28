@@ -149,6 +149,7 @@ public:
 
     // Get atlas image for UI preview (lazy-initializes ImGui descriptor on first call)
     VkDescriptorSet getPreviewDescriptorSet(uint32_t archetypeIndex);
+    VkDescriptorSet getNormalPreviewDescriptorSet(uint32_t archetypeIndex);
 
 private:
     TreeImpostorAtlas() = default;
@@ -246,6 +247,7 @@ private:
         std::optional<vk::raii::ImageView> depthView;
         std::optional<vk::raii::Framebuffer> framebuffer;
         VkDescriptorSet previewDescriptorSet = VK_NULL_HANDLE;
+        VkDescriptorSet normalPreviewDescriptorSet = VK_NULL_HANDLE;
     };
     std::vector<AtlasTextures> atlasTextures_;
 };

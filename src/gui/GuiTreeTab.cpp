@@ -359,15 +359,58 @@ void GuiTreeTab::render(ITreeControl& treeControl) {
                 }
 
                 // Atlas texture preview button
-                VkDescriptorSet previewSet = atlas->getPreviewDescriptorSet(0);
-                if (previewSet != VK_NULL_HANDLE) {
-                    if (ImGui::Button("Preview Atlas")) {
-                        ImGui::OpenPopup("AtlasPreview");
+                if (ImGui::Button("Preview Atlas")) {
+                    ImGui::OpenPopup("AtlasPreview");
+                }
+
+                if (ImGui::BeginPopup("AtlasPreview")) {
+                    ImGui::Text("Octahedral Impostor Atlas (8x8 grid, 256px cells)");
+                    ImGui::Separator();
+
+                    // Atlas selection dropdown
+                    static int selectedArchetype = 0;
+                    static int selectedTextureType = 0;
+                    const char* textureTypes[] = { "Albedo", "Normal/Depth/AO" };
+
+                    ImGui::SetNextItemWidth(200);
+                    if (ImGui::BeginCombo("Archetype",
+                            selectedArchetype < static_cast<int>(atlas->getArchetypeCount())
+                                ? atlas->getArchetype(selectedArchetype)->name.c_str()
+                                : "None")) {
+                        for (size_t i = 0; i < atlas->getArchetypeCount(); i++) {
+                            const auto* archetype = atlas->getArchetype(static_cast<uint32_t>(i));
+                            if (archetype) {
+                                bool isSelected = (selectedArchetype == static_cast<int>(i));
+                                if (ImGui::Selectable(archetype->name.c_str(), isSelected)) {
+                                    selectedArchetype = static_cast<int>(i);
+                                }
+                                if (isSelected) {
+                                    ImGui::SetItemDefaultFocus();
+                                }
+                            }
+                        }
+                        ImGui::EndCombo();
                     }
 
-                    if (ImGui::BeginPopup("AtlasPreview")) {
-                        ImGui::Text("Octahedral Impostor Atlas (8x8 grid, 256px cells)");
-                        ImGui::Separator();
+                    ImGui::SameLine();
+                    ImGui::SetNextItemWidth(150);
+                    ImGui::Combo("Type", &selectedTextureType, textureTypes, IM_ARRAYSIZE(textureTypes));
+
+                    // Clamp selection to valid range
+                    if (selectedArchetype >= static_cast<int>(atlas->getArchetypeCount())) {
+                        selectedArchetype = 0;
+                    }
+
+                    // Get the appropriate descriptor set
+                    VkDescriptorSet previewSet = VK_NULL_HANDLE;
+                    if (selectedTextureType == 0) {
+                        previewSet = atlas->getPreviewDescriptorSet(static_cast<uint32_t>(selectedArchetype));
+                    } else {
+                        previewSet = atlas->getNormalPreviewDescriptorSet(static_cast<uint32_t>(selectedArchetype));
+                    }
+
+                    if (previewSet != VK_NULL_HANDLE) {
+                        ImGui::Spacing();
 
                         // Draw atlas with grid overlay
                         float scale = 0.4f;
@@ -398,9 +441,11 @@ void GuiTreeTab::render(ITreeControl& treeControl) {
                         ImGui::Spacing();
                         ImGui::Text("Hemi-octahedral mapping: 64 views (8x8)");
                         ImGui::Text("UV encodes view direction on upper hemisphere");
-
-                        ImGui::EndPopup();
+                    } else {
+                        ImGui::Text("No preview available for this selection");
                     }
+
+                    ImGui::EndPopup();
                 }
             }
         }
