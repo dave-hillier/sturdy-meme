@@ -50,9 +50,10 @@ void main() {
     // Read displacement values
     // FFT output is complex, but for real input the imaginary part should be ~0
     // We take the real part as our displacement
+    // All displacements scaled by heightScale for consistent meter units
     float dy = SAMPLE_DISP(dispY, coord) * heightScale;
-    float dx = SAMPLE_DISP(dispX, coord);
-    float dz = SAMPLE_DISP(dispZ, coord);
+    float dx = SAMPLE_DISP(dispX, coord) * heightScale;
+    float dz = SAMPLE_DISP(dispZ, coord) * heightScale;
 
     // Store combined displacement
     vec3 displacement = vec3(dx, dy, dz);
@@ -66,15 +67,15 @@ void main() {
     float dy_py = SAMPLE_DISP(dispY, coord + ivec2(0, 1)) * heightScale;
     float dy_ny = SAMPLE_DISP(dispY, coord + ivec2(0, -1)) * heightScale;
 
-    float dx_px = SAMPLE_DISP(dispX, coord + ivec2(1, 0));
-    float dx_nx = SAMPLE_DISP(dispX, coord + ivec2(-1, 0));
-    float dx_py = SAMPLE_DISP(dispX, coord + ivec2(0, 1));
-    float dx_ny = SAMPLE_DISP(dispX, coord + ivec2(0, -1));
+    float dx_px = SAMPLE_DISP(dispX, coord + ivec2(1, 0)) * heightScale;
+    float dx_nx = SAMPLE_DISP(dispX, coord + ivec2(-1, 0)) * heightScale;
+    float dx_py = SAMPLE_DISP(dispX, coord + ivec2(0, 1)) * heightScale;
+    float dx_ny = SAMPLE_DISP(dispX, coord + ivec2(0, -1)) * heightScale;
 
-    float dz_px = SAMPLE_DISP(dispZ, coord + ivec2(1, 0));
-    float dz_nx = SAMPLE_DISP(dispZ, coord + ivec2(-1, 0));
-    float dz_py = SAMPLE_DISP(dispZ, coord + ivec2(0, 1));
-    float dz_ny = SAMPLE_DISP(dispZ, coord + ivec2(0, -1));
+    float dz_px = SAMPLE_DISP(dispZ, coord + ivec2(1, 0)) * heightScale;
+    float dz_nx = SAMPLE_DISP(dispZ, coord + ivec2(-1, 0)) * heightScale;
+    float dz_py = SAMPLE_DISP(dispZ, coord + ivec2(0, 1)) * heightScale;
+    float dz_ny = SAMPLE_DISP(dispZ, coord + ivec2(0, -1)) * heightScale;
 
     // Height gradients (for normal calculation)
     float dydx = (dy_px - dy_nx) / (2.0 * texelSize);

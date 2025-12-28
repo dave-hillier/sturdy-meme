@@ -90,11 +90,11 @@ bool WaterSystem::initInternal(const InitInfo& info) {
     OceanFFT::OceanParams oceanParams;
     oceanParams.resolution = 256;
     oceanParams.oceanSize = 256.0f;
-    oceanParams.windSpeed = 10.0f;
+    oceanParams.windSpeed = 12.0f;                       // ~25 knots moderate wind
     oceanParams.windDirection = glm::vec2(0.8f, 0.6f);
-    oceanParams.amplitude = 0.0002f;
-    oceanParams.choppiness = 1.2f;
-    oceanParams.heightScale = 1.0f;
+    oceanParams.amplitude = 0.001f;                      // Phillips spectrum A constant
+    oceanParams.choppiness = 1.3f;                       // Horizontal displacement scale
+    oceanParams.heightScale = 40.0f;                     // Scale to meters (gives ~1-3m waves)
 
     OceanFFT::InitInfo oceanInfo{};
     oceanInfo.device = device;
