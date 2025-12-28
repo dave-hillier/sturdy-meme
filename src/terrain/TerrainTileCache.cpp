@@ -897,8 +897,8 @@ void TerrainTileCache::updateStats() {
 }
 
 void TerrainTileCache::loadCoarseLODCoverage() {
-    // Load all coarsest LOD tiles (CPU data only for speed)
-    // GPU resources will be created on-demand during updateActiveTiles
+    // Load all coarsest LOD tiles with full GPU upload
+    // This provides immediate terrain coverage for both physics and rendering
     const uint32_t lod = numLODLevels - 1;  // Coarsest LOD (usually 3)
 
     uint32_t lodTilesX = tilesX >> lod;
@@ -909,20 +909,30 @@ void TerrainTileCache::loadCoarseLODCoverage() {
     uint32_t tilesLoaded = 0;
     uint32_t tilesFailed = 0;
 
-    SDL_Log("TerrainTileCache: Loading LOD%u coverage (%ux%u tiles, CPU only)...", lod, lodTilesX, lodTilesZ);
+    SDL_Log("TerrainTileCache: Loading LOD%u coverage (%ux%u tiles, with GPU upload)...", lod, lodTilesX, lodTilesZ);
 
     for (uint32_t tz = 0; tz < lodTilesZ; tz++) {
         for (uint32_t tx = 0; tx < lodTilesX; tx++) {
             TileCoord coord{static_cast<int32_t>(tx), static_cast<int32_t>(tz)};
-            // Load CPU data only - fast, just file I/O
-            // GPU upload will happen via updateActiveTiles on first frame
-            if (loadTileCPUOnly(coord, lod)) {
+            // Full load with GPU upload - tiles are immediately available for shader
+            if (loadTile(coord, lod)) {
                 tilesLoaded++;
             } else {
                 tilesFailed++;
             }
         }
     }
+
+    // Update active tiles list so shader can use them immediately
+    activeTiles.clear();
+    for (auto& [key, tile] : loadedTiles) {
+        if (tile.loaded) {
+            activeTiles.push_back(&tile);
+        }
+    }
+
+    // Update tile info buffer so shader knows about the tiles
+    updateTileInfoBuffer();
 
     // Update stats
     updateStats();

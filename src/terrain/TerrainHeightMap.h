@@ -24,7 +24,6 @@ public:
         std::string heightmapPath;  // Optional: path to 16-bit PNG heightmap (empty = procedural)
         float minAltitude = 0.0f;   // Altitude for height value 0 (when loading from file)
         float maxAltitude = 200.0f; // Altitude for height value 65535 (when loading from file)
-        const std::vector<float>* externalData = nullptr;  // If set, use this data instead of loading from file
     };
 
     // Special return value indicating a hole in terrain (no ground)

@@ -45,8 +45,8 @@ bool TerrainSystem::initInternal(const InitInfo& info, const TerrainConfig& cfg)
     config.heightScale = config.maxAltitude - config.minAltitude;
 
     // Initialize tile cache FIRST for LOD-based height streaming (if configured)
-    // This loads coarse LOD tiles at startup which provide full terrain coverage
-    std::vector<float> synthesizedHeightmap;
+    // This loads coarse LOD tiles at startup with GPU upload for immediate rendering
+    bool hasTileCache = false;
     if (!config.tileCacheDir.empty()) {
         TerrainTileCache::InitInfo tileCacheInfo{};
         tileCacheInfo.cacheDirectory = config.tileCacheDir;
@@ -63,12 +63,13 @@ bool TerrainSystem::initInternal(const InitInfo& info, const TerrainConfig& cfg)
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize tile cache, using global heightmap only");
         } else {
             SDL_Log("Tile cache initialized: %s", config.tileCacheDir.c_str());
-            // Synthesize global heightmap from LOD3 tiles for the GPU shader fallback
-            synthesizedHeightmap = tileCache->synthesizeGlobalHeightmap(512);
+            hasTileCache = true;
         }
     }
 
-    // Initialize height map - use synthesized data from tiles if available
+    // Initialize height map
+    // When tile cache is available, LOD3 tiles are already uploaded to GPU,
+    // so the shader uses them directly. The global heightmap is just a placeholder.
     TerrainHeightMap::InitInfo heightMapInfo{};
     heightMapInfo.device = device;
     heightMapInfo.allocator = allocator;
@@ -80,13 +81,11 @@ bool TerrainSystem::initInternal(const InitInfo& info, const TerrainConfig& cfg)
     heightMapInfo.minAltitude = config.minAltitude;
     heightMapInfo.maxAltitude = config.maxAltitude;
 
-    if (!synthesizedHeightmap.empty()) {
-        // Use data synthesized from tile cache - avoids loading the large file
-        heightMapInfo.externalData = &synthesizedHeightmap;
-    } else {
-        // Fall back to loading from file
+    if (!hasTileCache) {
+        // No tile cache - load from file for both physics and rendering
         heightMapInfo.heightmapPath = config.heightmapPath;
     }
+    // else: tile cache provides full coverage via LOD3 tiles uploaded to GPU
 
     heightMap = TerrainHeightMap::create(heightMapInfo);
     if (!heightMap) return false;
