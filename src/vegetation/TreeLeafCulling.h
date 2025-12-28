@@ -159,7 +159,9 @@ public:
     VkBuffer getIndirectBuffer(uint32_t frameIndex) const {
         return cullIndirectBuffers_.getVk(frameIndex);
     }
-    VkBuffer getTreeRenderDataBuffer() const { return treeRenderDataBuffer_; }
+    VkBuffer getTreeRenderDataBuffer(uint32_t frameIndex) const {
+        return treeRenderDataBuffers_.getVk(frameIndex);
+    }
     uint32_t getMaxLeavesPerType() const { return maxLeavesPerType_; }
 
     VkDevice getDevice() const { return device_; }
@@ -206,12 +208,12 @@ private:
 
     BufferUtils::PerFrameBufferSet cullUniformBuffers_;
 
-    VkBuffer treeDataBuffer_ = VK_NULL_HANDLE;
-    VmaAllocation treeDataAllocation_ = VK_NULL_HANDLE;
+    // Triple-buffered tree data buffers to prevent race conditions.
+    // These are updated every frame via vkCmdUpdateBuffer, so they must be
+    // triple-buffered to avoid overwriting data that in-flight frames are reading.
+    BufferUtils::FrameIndexedBuffers treeDataBuffers_;
+    BufferUtils::FrameIndexedBuffers treeRenderDataBuffers_;
     VkDeviceSize treeDataBufferSize_ = 0;
-
-    VkBuffer treeRenderDataBuffer_ = VK_NULL_HANDLE;
-    VmaAllocation treeRenderDataAllocation_ = VK_NULL_HANDLE;
     VkDeviceSize treeRenderDataBufferSize_ = 0;
 
     uint32_t numTreesForIndirect_ = 0;

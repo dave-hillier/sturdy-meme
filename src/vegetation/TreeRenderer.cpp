@@ -456,16 +456,16 @@ void TreeRenderer::updateCulledLeafDescriptorSet(
     VkDescriptorSet dstSet = culledLeafDescriptorSets_[frameIndex][leafType];
 
     // IMPORTANT: Must update SSBO bindings every frame because getOutputBuffer(frameIndex)
-    // returns a different buffer for each frame due to triple-buffering.
-    // This ensures compute pass for frame N writes to buffer N, and graphics pass
-    // for frame N reads from buffer N.
+    // and getTreeRenderDataBuffer(frameIndex) return different buffers for each frame
+    // due to triple-buffering. This ensures compute pass for frame N writes to buffer N,
+    // and graphics pass for frame N reads from buffer N.
     DescriptorManager::SetWriter writer(device_, dstSet);
     writer.writeBuffer(Bindings::TREE_GFX_UBO, uniformBuffer, 0, VK_WHOLE_SIZE)
           .writeImage(Bindings::TREE_GFX_SHADOW_MAP, shadowMapView, shadowSampler)
           .writeBuffer(Bindings::TREE_GFX_WIND_UBO, windBuffer, 0, VK_WHOLE_SIZE)
           .writeImage(Bindings::TREE_GFX_LEAF_ALBEDO, leafAlbedo, leafSampler)
           .writeBuffer(Bindings::TREE_GFX_LEAF_INSTANCES, leafCulling_->getOutputBuffer(frameIndex), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-          .writeBuffer(Bindings::TREE_GFX_TREE_DATA, leafCulling_->getTreeRenderDataBuffer(), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+          .writeBuffer(Bindings::TREE_GFX_TREE_DATA, leafCulling_->getTreeRenderDataBuffer(frameIndex), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
           .update();
 }
 
