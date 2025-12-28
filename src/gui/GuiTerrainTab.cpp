@@ -266,7 +266,7 @@ void GuiTerrainTab::render(ITerrainControl& terrainControl) {
 
             // Grid settings - one cell per LOD0 tile, capped at 32 for display
             const int gridCells = std::min(32u, std::max(lod0TilesX, lod0TilesZ));
-            const float cellSize = 5.0f;  // Smaller cells for 32x32 grid
+            const float cellSize = 6.0f;  // 6px per cell = 192px for 32x32 grid
             const float gridSize = gridCells * cellSize;
 
             // LOD colors for visualization

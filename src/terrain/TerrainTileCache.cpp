@@ -881,26 +881,27 @@ void TerrainTileCache::updateStats() {
     }
     stats_.totalTilesLoaded = 0;
 
-    // Count tiles by LOD
+    // Count tiles by LOD (count both GPU-loaded and CPU-only tiles)
     for (const auto& [key, tile] : loadedTiles) {
-        if (tile.loaded && tile.lod < 4) {
+        if ((tile.loaded || !tile.cpuData.empty()) && tile.lod < 4) {
             stats_.tilesLoadedPerLOD[tile.lod]++;
             stats_.totalTilesLoaded++;
         }
     }
 
-    // Check if LOD3 coverage is complete (all LOD3 tiles loaded)
-    uint32_t lod3TilesX = tilesX >> 3;
-    uint32_t lod3TilesZ = tilesZ >> 3;
-    if (lod3TilesX < 1) lod3TilesX = 1;
-    if (lod3TilesZ < 1) lod3TilesZ = 1;
-    uint32_t expectedLOD3Tiles = lod3TilesX * lod3TilesZ;
-    stats_.initialLoadComplete = (stats_.tilesLoadedPerLOD[3] >= expectedLOD3Tiles);
+    // Check if coarsest LOD coverage is complete
+    uint32_t coarsestLOD = numLODLevels - 1;
+    uint32_t coarseTilesX = tilesX >> coarsestLOD;
+    uint32_t coarseTilesZ = tilesZ >> coarsestLOD;
+    if (coarseTilesX < 1) coarseTilesX = 1;
+    if (coarseTilesZ < 1) coarseTilesZ = 1;
+    uint32_t expectedCoarseTiles = coarseTilesX * coarseTilesZ;
+    stats_.initialLoadComplete = (stats_.tilesLoadedPerLOD[coarsestLOD] >= expectedCoarseTiles);
 }
 
 void TerrainTileCache::loadCoarseLODCoverage() {
-    // Load all LOD3 (coarsest) tiles to provide base coverage
-    // This happens synchronously at startup to ensure immediate terrain visibility
+    // Load all coarsest LOD tiles (CPU data only for speed)
+    // GPU resources will be created on-demand during updateActiveTiles
     const uint32_t lod = numLODLevels - 1;  // Coarsest LOD (usually 3)
 
     uint32_t lodTilesX = tilesX >> lod;
@@ -911,12 +912,14 @@ void TerrainTileCache::loadCoarseLODCoverage() {
     uint32_t tilesLoaded = 0;
     uint32_t tilesFailed = 0;
 
-    SDL_Log("TerrainTileCache: Loading LOD%u coverage (%ux%u tiles)...", lod, lodTilesX, lodTilesZ);
+    SDL_Log("TerrainTileCache: Loading LOD%u coverage (%ux%u tiles, CPU only)...", lod, lodTilesX, lodTilesZ);
 
     for (uint32_t tz = 0; tz < lodTilesZ; tz++) {
         for (uint32_t tx = 0; tx < lodTilesX; tx++) {
             TileCoord coord{static_cast<int32_t>(tx), static_cast<int32_t>(tz)};
-            if (loadTile(coord, lod)) {
+            // Load CPU data only - fast, just file I/O
+            // GPU upload will happen via updateActiveTiles on first frame
+            if (loadTileCPUOnly(coord, lod)) {
                 tilesLoaded++;
             } else {
                 tilesFailed++;
@@ -927,7 +930,7 @@ void TerrainTileCache::loadCoarseLODCoverage() {
     // Update stats
     updateStats();
 
-    SDL_Log("TerrainTileCache: LOD%u coverage complete - %u tiles loaded, %u failed",
+    SDL_Log("TerrainTileCache: LOD%u coverage complete - %u tiles loaded (CPU), %u failed",
             lod, tilesLoaded, tilesFailed);
 }
 
@@ -951,8 +954,11 @@ int TerrainTileCache::getTileLODAt(int tileX, int tileZ) const {
             continue;
         }
 
+        // Check if tile is loaded (either GPU or CPU-only)
         TileCoord coord{lodTileX, lodTileZ};
-        if (isTileLoaded(coord, lod)) {
+        uint64_t key = makeTileKey(coord, lod);
+        auto it = loadedTiles.find(key);
+        if (it != loadedTiles.end() && (it->second.loaded || !it->second.cpuData.empty())) {
             return static_cast<int>(lod);
         }
     }
