@@ -179,7 +179,8 @@
 #define BINDING_LEAF_CULL_P3_INPUT         2   // Input leaf instances
 #define BINDING_LEAF_CULL_P3_OUTPUT        3   // Output leaf instances
 #define BINDING_LEAF_CULL_P3_INDIRECT      4   // Indirect draw commands
-#define BINDING_LEAF_CULL_P3_UNIFORMS      5   // Culling uniforms
+#define BINDING_LEAF_CULL_P3_CULLING       5   // Shared culling uniforms (CullingUniforms)
+#define BINDING_LEAF_CULL_P3_PARAMS        6   // Phase 3 specific params (LeafCullP3Params)
 
 // Tree Graphics Descriptor Set
 #define BINDING_TREE_GFX_UBO               0   // Scene uniforms
@@ -594,7 +595,8 @@ constexpr uint32_t LEAF_CULL_P3_ALL_TREES = BINDING_LEAF_CULL_P3_ALL_TREES;
 constexpr uint32_t LEAF_CULL_P3_INPUT     = BINDING_LEAF_CULL_P3_INPUT;
 constexpr uint32_t LEAF_CULL_P3_OUTPUT    = BINDING_LEAF_CULL_P3_OUTPUT;
 constexpr uint32_t LEAF_CULL_P3_INDIRECT  = BINDING_LEAF_CULL_P3_INDIRECT;
-constexpr uint32_t LEAF_CULL_P3_UNIFORMS  = BINDING_LEAF_CULL_P3_UNIFORMS;
+constexpr uint32_t LEAF_CULL_P3_CULLING   = BINDING_LEAF_CULL_P3_CULLING;
+constexpr uint32_t LEAF_CULL_P3_PARAMS    = BINDING_LEAF_CULL_P3_PARAMS;
 
 // Tree Graphics
 constexpr uint32_t TREE_GFX_UBO           = BINDING_TREE_GFX_UBO;

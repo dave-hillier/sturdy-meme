@@ -3,6 +3,7 @@
 #include "TreeLODSystem.h"
 #include "ShaderLoader.h"
 #include "Bindings.h"
+#include "UBOs.h"
 #include <SDL3/SDL_log.h>
 #include <vulkan/vulkan.hpp>
 
@@ -20,8 +21,12 @@ TreeLeafCulling::~TreeLeafCulling() {
 
     // Use helper for per-frame buffer sets
     BufferUtils::destroyBuffers(allocator_, cullUniformBuffers_);
+    BufferUtils::destroyBuffers(allocator_, leafCullParamsBuffers_);
     BufferUtils::destroyBuffers(allocator_, cellCullUniformBuffers_);
+    BufferUtils::destroyBuffers(allocator_, cellCullParamsBuffers_);
     BufferUtils::destroyBuffers(allocator_, treeFilterUniformBuffers_);
+    BufferUtils::destroyBuffers(allocator_, treeFilterParamsBuffers_);
+    BufferUtils::destroyBuffers(allocator_, leafCullP3ParamsBuffers_);
 
     // Cleanup single buffers
     if (treeDataBuffer_ != VK_NULL_HANDLE) {
@@ -170,10 +175,20 @@ bool TreeLeafCulling::createLeafCullBuffers(uint32_t maxLeafInstances, uint32_t 
     if (!BufferUtils::PerFrameBufferBuilder()
             .setAllocator(allocator_)
             .setFrameCount(maxFramesInFlight_)
-            .setSize(sizeof(TreeLeafCullUniforms))
+            .setSize(sizeof(CullingUniforms))
             .setUsage(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)
             .build(cullUniformBuffers_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to create cull uniform buffers");
+        return false;
+    }
+
+    if (!BufferUtils::PerFrameBufferBuilder()
+            .setAllocator(allocator_)
+            .setFrameCount(maxFramesInFlight_)
+            .setSize(sizeof(LeafCullParams))
+            .setUsage(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)
+            .build(leafCullParamsBuffers_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to create leaf cull params buffers");
         return false;
     }
 
@@ -307,10 +322,20 @@ bool TreeLeafCulling::createCellCullBuffers() {
     if (!BufferUtils::PerFrameBufferBuilder()
             .setAllocator(allocator_)
             .setFrameCount(maxFramesInFlight_)
-            .setSize(sizeof(TreeCellCullUniforms))
+            .setSize(sizeof(CullingUniforms))
             .setUsage(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)
             .build(cellCullUniformBuffers_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to create cell cull uniform buffers");
+        return false;
+    }
+
+    if (!BufferUtils::PerFrameBufferBuilder()
+            .setAllocator(allocator_)
+            .setFrameCount(maxFramesInFlight_)
+            .setSize(sizeof(CellCullParams))
+            .setUsage(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)
+            .build(cellCullParamsBuffers_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to create cell cull params buffers");
         return false;
     }
 
@@ -326,7 +351,8 @@ bool TreeLeafCulling::createCellCullBuffers() {
         writer.writeBuffer(Bindings::TREE_CELL_CULL_CELLS, spatialIndex_->getCellBuffer(), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
               .writeBuffer(Bindings::TREE_CELL_CULL_VISIBLE, visibleCellBuffer_, 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
               .writeBuffer(Bindings::TREE_CELL_CULL_INDIRECT, cellCullIndirectBuffer_, 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-              .writeBuffer(Bindings::TREE_CELL_CULL_CULLING, cellCullUniformBuffers_.buffers[f], 0, sizeof(TreeCellCullUniforms), VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+              .writeBuffer(Bindings::TREE_CELL_CULL_CULLING, cellCullUniformBuffers_.buffers[f], 0, sizeof(CullingUniforms), VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+              .writeBuffer(Bindings::TREE_CELL_CULL_PARAMS, cellCullParamsBuffers_.buffers[f], 0, sizeof(CellCullParams), VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
               .update();
     }
 
@@ -424,10 +450,20 @@ bool TreeLeafCulling::createTreeFilterBuffers(uint32_t maxTrees) {
     if (!BufferUtils::PerFrameBufferBuilder()
             .setAllocator(allocator_)
             .setFrameCount(maxFramesInFlight_)
-            .setSize(sizeof(TreeFilterUniforms))
+            .setSize(sizeof(CullingUniforms))
             .setUsage(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)
             .build(treeFilterUniformBuffers_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to create tree filter uniform buffers");
+        return false;
+    }
+
+    if (!BufferUtils::PerFrameBufferBuilder()
+            .setAllocator(allocator_)
+            .setFrameCount(maxFramesInFlight_)
+            .setSize(sizeof(TreeFilterParams))
+            .setUsage(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)
+            .build(treeFilterParamsBuffers_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to create tree filter params buffers");
         return false;
     }
 
@@ -446,7 +482,8 @@ bool TreeLeafCulling::createTreeFilterBuffers(uint32_t maxTrees) {
               .writeBuffer(Bindings::TREE_FILTER_SORTED_TREES, spatialIndex_->getSortedTreeBuffer(), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
               .writeBuffer(Bindings::TREE_FILTER_VISIBLE_TREES, visibleTreeBuffer_, 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
               .writeBuffer(Bindings::TREE_FILTER_INDIRECT, leafCullIndirectDispatch_, 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-              .writeBuffer(Bindings::TREE_FILTER_CULLING, treeFilterUniformBuffers_.buffers[f], 0, sizeof(TreeFilterUniforms), VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+              .writeBuffer(Bindings::TREE_FILTER_CULLING, treeFilterUniformBuffers_.buffers[f], 0, sizeof(CullingUniforms), VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+              .writeBuffer(Bindings::TREE_FILTER_PARAMS, treeFilterParamsBuffers_.buffers[f], 0, sizeof(TreeFilterParams), VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
               .update();
     }
 
@@ -462,7 +499,8 @@ bool TreeLeafCulling::createTwoPhaseLeafCullPipeline() {
            .addBinding(Bindings::LEAF_CULL_P3_INPUT, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT)
            .addBinding(Bindings::LEAF_CULL_P3_OUTPUT, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT)
            .addBinding(Bindings::LEAF_CULL_P3_INDIRECT, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT)
-           .addBinding(Bindings::LEAF_CULL_P3_UNIFORMS, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT);
+           .addBinding(Bindings::LEAF_CULL_P3_CULLING, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT)
+           .addBinding(Bindings::LEAF_CULL_P3_PARAMS, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT);
 
     if (!builder.buildManaged(twoPhaseLeafCullDescriptorSetLayout_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to create two-phase leaf cull descriptor set layout");
@@ -506,6 +544,17 @@ bool TreeLeafCulling::createTwoPhaseLeafCullPipeline() {
 }
 
 bool TreeLeafCulling::createTwoPhaseLeafCullDescriptorSets() {
+    // Create params buffer for phase 3
+    if (!BufferUtils::PerFrameBufferBuilder()
+            .setAllocator(allocator_)
+            .setFrameCount(maxFramesInFlight_)
+            .setSize(sizeof(LeafCullP3Params))
+            .setUsage(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)
+            .build(leafCullP3ParamsBuffers_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to create leaf cull P3 params buffers");
+        return false;
+    }
+
     twoPhaseLeafCullDescriptorSets_ = descriptorPool_->allocate(twoPhaseLeafCullDescriptorSetLayout_.get(), maxFramesInFlight_);
     if (twoPhaseLeafCullDescriptorSets_.empty()) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to allocate two-phase leaf cull descriptor sets");
@@ -579,8 +628,9 @@ void TreeLeafCulling::updateCullDescriptorSets(const TreeSystem& treeSystem) {
         writer.writeBuffer(Bindings::TREE_LEAF_CULL_INPUT, treeSystem.getLeafInstanceBuffer(), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
               .writeBuffer(Bindings::TREE_LEAF_CULL_OUTPUT, cullOutputBuffers_.getVk(f), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
               .writeBuffer(Bindings::TREE_LEAF_CULL_INDIRECT, cullIndirectBuffers_.getVk(f), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-              .writeBuffer(Bindings::TREE_LEAF_CULL_CULLING, cullUniformBuffers_.buffers[f], 0, sizeof(TreeLeafCullUniforms), VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+              .writeBuffer(Bindings::TREE_LEAF_CULL_CULLING, cullUniformBuffers_.buffers[f], 0, sizeof(CullingUniforms), VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
               .writeBuffer(Bindings::TREE_LEAF_CULL_TREES, treeDataBuffer_, 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+              .writeBuffer(Bindings::TREE_LEAF_CULL_PARAMS, leafCullParamsBuffers_.buffers[f], 0, sizeof(LeafCullParams), VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
               .update();
     }
     descriptorSetsInitialized_ = true;
@@ -685,22 +735,26 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
     vkCmdUpdateBuffer(cmd, treeRenderDataBuffer_, 0,
                       numTrees * sizeof(TreeRenderDataGPU), treeRenderDataList.data());
 
-    // Upload global uniforms
-    TreeLeafCullUniforms uniforms{};
-    uniforms.cameraPosition = glm::vec4(cameraPos, 0.0f);
+    // Upload global uniforms - split into CullingUniforms and LeafCullParams
+    CullingUniforms culling{};
+    culling.cameraPosition = glm::vec4(cameraPos, 0.0f);
     for (int i = 0; i < 6; ++i) {
-        uniforms.frustumPlanes[i] = frustumPlanes[i];
+        culling.frustumPlanes[i] = frustumPlanes[i];
     }
-    uniforms.maxDrawDistance = params_.maxDrawDistance;
-    uniforms.lodTransitionStart = params_.lodTransitionStart;
-    uniforms.lodTransitionEnd = params_.lodTransitionEnd;
-    uniforms.maxLodDropRate = params_.maxLodDropRate;
-    uniforms.numTrees = numTrees;
-    uniforms.totalLeafInstances = totalLeafInstances;
-    uniforms.maxLeavesPerType = maxLeavesPerType_;
+    culling.maxDrawDistance = params_.maxDrawDistance;
+    culling.lodTransitionStart = params_.lodTransitionStart;
+    culling.lodTransitionEnd = params_.lodTransitionEnd;
+    culling.maxLodDropRate = params_.maxLodDropRate;
+
+    LeafCullParams leafParams{};
+    leafParams.numTrees = numTrees;
+    leafParams.totalLeafInstances = totalLeafInstances;
+    leafParams.maxLeavesPerType = maxLeavesPerType_;
 
     vkCmdUpdateBuffer(cmd, cullUniformBuffers_.buffers[frameIndex], 0,
-                      sizeof(TreeLeafCullUniforms), &uniforms);
+                      sizeof(CullingUniforms), &culling);
+    vkCmdUpdateBuffer(cmd, leafCullParamsBuffers_.buffers[frameIndex], 0,
+                      sizeof(LeafCullParams), &leafParams);
 
     // Barrier for buffer updates
     VkMemoryBarrier barrier{};
@@ -715,14 +769,20 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
 
     // Cell Culling (if spatial index available)
     if (isSpatialIndexEnabled() && cellCullPipeline_.get() != VK_NULL_HANDLE) {
-        TreeCellCullUniforms cellUniforms{};
-        cellUniforms.cameraPosition = glm::vec4(cameraPos, 1.0f);
+        // Split cell cull uniforms: CullingUniforms + CellCullParams
+        CullingUniforms cellCulling{};
+        cellCulling.cameraPosition = glm::vec4(cameraPos, 1.0f);
         for (int i = 0; i < 6; ++i) {
-            cellUniforms.frustumPlanes[i] = frustumPlanes[i];
+            cellCulling.frustumPlanes[i] = frustumPlanes[i];
         }
-        cellUniforms.maxDrawDistance = 250.0f;
-        cellUniforms.numCells = spatialIndex_->getCellCount();
-        cellUniforms.treesPerWorkgroup = 64;
+        cellCulling.maxDrawDistance = 250.0f;
+        cellCulling.lodTransitionStart = params_.lodTransitionStart;
+        cellCulling.lodTransitionEnd = params_.lodTransitionEnd;
+        cellCulling.maxLodDropRate = params_.maxLodDropRate;
+
+        CellCullParams cellParams{};
+        cellParams.numCells = spatialIndex_->getCellCount();
+        cellParams.treesPerWorkgroup = 64;
 
         // Check if two-phase culling will be used so we can batch uniform updates
         bool useTwoPhase = twoPhaseEnabled_ && treeFilterPipeline_.get() != VK_NULL_HANDLE &&
@@ -755,21 +815,31 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
 
         // Use vkCmdUpdateBuffer to avoid HOST→COMPUTE stall (keeps update on GPU timeline)
         vkCmdUpdateBuffer(cmd, cellCullUniformBuffers_.buffers[frameIndex], 0,
-                          sizeof(TreeCellCullUniforms), &cellUniforms);
+                          sizeof(CullingUniforms), &cellCulling);
+        vkCmdUpdateBuffer(cmd, cellCullParamsBuffers_.buffers[frameIndex], 0,
+                          sizeof(CellCullParams), &cellParams);
 
         // If two-phase culling is enabled, update tree filter uniforms now too
         // This allows us to combine barriers later (reducing pipeline bubbles)
-        TreeFilterUniforms filterUniforms{};
         if (useTwoPhase) {
-            filterUniforms.cameraPosition = glm::vec4(cameraPos, 1.0f);
+            // Split tree filter uniforms: CullingUniforms + TreeFilterParams
+            CullingUniforms filterCulling{};
+            filterCulling.cameraPosition = glm::vec4(cameraPos, 1.0f);
             for (int i = 0; i < 6; ++i) {
-                filterUniforms.frustumPlanes[i] = frustumPlanes[i];
+                filterCulling.frustumPlanes[i] = frustumPlanes[i];
             }
-            filterUniforms.maxDrawDistance = params_.maxDrawDistance;
-            filterUniforms.maxTreesPerCell = 64;
+            filterCulling.maxDrawDistance = params_.maxDrawDistance;
+            filterCulling.lodTransitionStart = params_.lodTransitionStart;
+            filterCulling.lodTransitionEnd = params_.lodTransitionEnd;
+            filterCulling.maxLodDropRate = params_.maxLodDropRate;
+
+            TreeFilterParams filterParams{};
+            filterParams.maxTreesPerCell = 64;
 
             vkCmdUpdateBuffer(cmd, treeFilterUniformBuffers_.buffers[frameIndex], 0,
-                              sizeof(TreeFilterUniforms), &filterUniforms);
+                              sizeof(CullingUniforms), &filterCulling);
+            vkCmdUpdateBuffer(cmd, treeFilterParamsBuffers_.buffers[frameIndex], 0,
+                              sizeof(TreeFilterParams), &filterParams);
         }
 
         VkMemoryBarrier cellUniformBarrier{};
@@ -783,7 +853,7 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cellCullPipelineLayout_.get(),
                                 0, 1, &cellCullDescriptorSets_[frameIndex], 0, nullptr);
 
-        uint32_t cellWorkgroups = (cellUniforms.numCells + 255) / 256;
+        uint32_t cellWorkgroups = (cellParams.numCells + 255) / 256;
         vkCmdDispatch(cmd, cellWorkgroups, 1, 1);
 
         // Tree Filtering (Two-Phase Culling)
@@ -812,13 +882,28 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
 
             // Two-phase leaf culling
             if (twoPhaseLeafCullPipeline_.get() != VK_NULL_HANDLE && !twoPhaseLeafCullDescriptorSets_.empty()) {
+                // Upload phase 3 specific params
+                LeafCullP3Params p3Params{};
+                p3Params.maxLeavesPerType = maxLeavesPerType_;
+
+                vkCmdUpdateBuffer(cmd, leafCullP3ParamsBuffers_.buffers[frameIndex], 0,
+                                  sizeof(LeafCullP3Params), &p3Params);
+
+                VkMemoryBarrier p3UniformBarrier{};
+                p3UniformBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+                p3UniformBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                p3UniformBarrier.dstAccessMask = VK_ACCESS_UNIFORM_READ_BIT;
+                vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                     0, 1, &p3UniformBarrier, 0, nullptr, 0, nullptr);
+
                 DescriptorManager::SetWriter writer(device_, twoPhaseLeafCullDescriptorSets_[frameIndex]);
                 writer.writeBuffer(Bindings::LEAF_CULL_P3_VISIBLE_TREES, visibleTreeBuffer_, 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
                       .writeBuffer(Bindings::LEAF_CULL_P3_ALL_TREES, treeDataBuffer_, 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
                       .writeBuffer(Bindings::LEAF_CULL_P3_INPUT, treeSystem.getLeafInstanceBuffer(), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
                       .writeBuffer(Bindings::LEAF_CULL_P3_OUTPUT, cullOutputBuffers_.getVk(frameIndex), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
                       .writeBuffer(Bindings::LEAF_CULL_P3_INDIRECT, cullIndirectBuffers_.getVk(frameIndex), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-                      .writeBuffer(Bindings::LEAF_CULL_P3_UNIFORMS, cullUniformBuffers_.buffers[frameIndex], 0, sizeof(TreeLeafCullUniforms), VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+                      .writeBuffer(Bindings::LEAF_CULL_P3_CULLING, cullUniformBuffers_.buffers[frameIndex], 0, sizeof(CullingUniforms), VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+                      .writeBuffer(Bindings::LEAF_CULL_P3_PARAMS, leafCullP3ParamsBuffers_.buffers[frameIndex], 0, sizeof(LeafCullP3Params), VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
                       .update();
 
                 vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, twoPhaseLeafCullPipeline_.get());
