@@ -4,6 +4,7 @@
 #extension GL_KHR_shader_subgroup_arithmetic : require
 
 #include "bindings.glsl"
+#include "instancing_common.glsl"
 
 // Hi-Z Occlusion Culling Compute Shader
 // Performs frustum culling followed by hierarchical z-buffer occlusion culling
@@ -22,14 +23,7 @@ struct CullObjectData {
     uint vertexOffset;      // Vertex offset
 };
 
-// Indirect draw command (matches VkDrawIndexedIndirectCommand)
-struct DrawIndexedIndirectCommand {
-    uint indexCount;
-    uint instanceCount;
-    uint firstIndex;
-    int  vertexOffset;
-    uint firstInstance;
-};
+// Note: DrawIndexedIndirectCommand is defined in instancing_common.glsl
 
 // Culling uniforms
 layout(std140, binding = BINDING_HIZ_CULL_UNIFORMS) uniform HiZCullUniforms {
@@ -63,28 +57,10 @@ layout(std430, binding = BINDING_HIZ_CULL_COUNT) buffer DrawCountBuffer {
 // Hi-Z pyramid texture
 layout(binding = BINDING_HIZ_CULL_PYRAMID) uniform sampler2D hiZPyramid;
 
-// Check if AABB is completely outside a plane
-bool isOutsidePlane(vec4 plane, vec3 aabbMin, vec3 aabbMax) {
-    // Find the corner most in the direction of the plane normal
-    vec3 pVertex = vec3(
-        plane.x > 0.0 ? aabbMax.x : aabbMin.x,
-        plane.y > 0.0 ? aabbMax.y : aabbMin.y,
-        plane.z > 0.0 ? aabbMax.z : aabbMin.z
-    );
-
-    // If the positive vertex is behind the plane, the AABB is completely outside
-    return dot(vec4(pVertex, 1.0), plane) < 0.0;
-}
-
-// Frustum culling test for AABB
+// Frustum culling test for AABB using shared utility
+// Returns true if the AABB is completely outside the frustum (culled)
 bool frustumCullAABB(vec3 aabbMin, vec3 aabbMax) {
-    // Test against all 6 frustum planes
-    for (int i = 0; i < 6; i++) {
-        if (isOutsidePlane(uniforms.frustumPlanes[i], aabbMin, aabbMax)) {
-            return true;  // Culled
-        }
-    }
-    return false;  // Visible
+    return !isAABBInFrustum(uniforms.frustumPlanes, aabbMin, aabbMax);
 }
 
 // Frustum culling test for bounding sphere (faster but less precise)

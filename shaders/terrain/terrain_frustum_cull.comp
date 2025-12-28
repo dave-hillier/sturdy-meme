@@ -16,6 +16,7 @@
  */
 
 #include "../bindings.glsl"
+#include "../instancing_common.glsl"
 
 #define CBT_BUFFER_BINDING BINDING_TERRAIN_CBT_BUFFER
 #include "cbt.glsl"
@@ -98,23 +99,10 @@ vec3 uvToWorldPos(vec2 uv) {
     return vec3(worldXZ.x, height, worldXZ.y);
 }
 
-// Frustum culling test for AABB
-// Returns true if the AABB is completely outside the frustum
+// Frustum culling test for AABB using shared utility
+// Returns true if the AABB is completely outside the frustum (culled)
 bool frustumCullAABB(vec3 minBound, vec3 maxBound) {
-    for (int i = 0; i < 6; i++) {
-        vec4 plane = frustumPlanes[i];
-        // Find the p-vertex (the vertex most in the direction of the plane normal)
-        vec3 pVertex = vec3(
-            plane.x > 0.0 ? maxBound.x : minBound.x,
-            plane.y > 0.0 ? maxBound.y : minBound.y,
-            plane.z > 0.0 ? maxBound.z : minBound.z
-        );
-        // If p-vertex is behind plane, AABB is completely outside
-        if (dot(vec4(pVertex, 1.0), plane) < 0.0) {
-            return true; // Culled
-        }
-    }
-    return false; // Visible
+    return !isAABBInFrustum(frustumPlanes, minBound, maxBound);
 }
 
 void main() {

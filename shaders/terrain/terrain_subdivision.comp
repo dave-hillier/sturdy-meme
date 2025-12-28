@@ -11,6 +11,7 @@
  */
 
 #include "../bindings.glsl"
+#include "../instancing_common.glsl"
 
 #define CBT_BUFFER_BINDING BINDING_TERRAIN_CBT_BUFFER
 #include "cbt.glsl"
@@ -124,22 +125,11 @@ vec3 uvToWorldPos(vec2 uv) {
     );
 }
 
-// Frustum culling test for AABB with optional margin
+// Frustum culling test for AABB with optional margin using shared utility
 // margin > 0 expands the frustum outward (triangle must be further outside to be culled)
+// Returns true if the AABB is completely outside the frustum (culled)
 bool frustumCullAABB(vec3 minBound, vec3 maxBound, float margin) {
-    for (int i = 0; i < 6; i++) {
-        vec4 plane = frustumPlanes[i];
-        vec3 pVertex = vec3(
-            plane.x > 0.0 ? maxBound.x : minBound.x,
-            plane.y > 0.0 ? maxBound.y : minBound.y,
-            plane.z > 0.0 ? maxBound.z : minBound.z
-        );
-        // Offset the plane by margin (planes are normalized, so margin is in world units)
-        if (dot(vec4(pVertex, 1.0), plane) < -margin) {
-            return true; // Culled
-        }
-    }
-    return false; // Visible
+    return !isAABBInFrustum(frustumPlanes, minBound, maxBound, margin);
 }
 
 bool frustumCullAABB(vec3 minBound, vec3 maxBound) {

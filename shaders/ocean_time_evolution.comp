@@ -19,6 +19,7 @@
 
 #include "bindings.glsl"
 #include "constants_common.glsl"
+#include "ocean_complex_common.glsl"
 
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
@@ -38,24 +39,6 @@ layout(push_constant) uniform PushConstants {
     float oceanSize;
     float choppiness;  // Lambda - horizontal displacement scale (0.5 to 2.0 typical)
 };
-
-// Complex multiplication: (a + bi)(c + di) = (ac - bd) + (ad + bc)i
-vec2 complexMul(vec2 a, vec2 b) {
-    return vec2(
-        a.x * b.x - a.y * b.y,
-        a.x * b.y + a.y * b.x
-    );
-}
-
-// Complex conjugate
-vec2 complexConj(vec2 c) {
-    return vec2(c.x, -c.y);
-}
-
-// Euler's formula: exp(i * theta) = cos(theta) + i*sin(theta)
-vec2 complexExp(float theta) {
-    return vec2(cos(theta), sin(theta));
-}
 
 void main() {
     ivec2 coord = ivec2(gl_GlobalInvocationID.xy);

@@ -57,6 +57,37 @@ bool isInFrustumV4(vec4 frustumPlanes[6], vec4 posW, float margin) {
     return true;
 }
 
+// Check if an AABB (axis-aligned bounding box) is inside the frustum
+// Uses the p-vertex test: tests the vertex of the AABB that is most aligned
+// with each plane's normal. If the p-vertex is behind any plane, the entire
+// AABB is outside the frustum.
+// frustumPlanes: array of 6 vec4 plane equations (nx, ny, nz, d)
+// aabbMin: minimum corner of AABB in world space
+// aabbMax: maximum corner of AABB in world space
+// margin: expand the frustum by this amount (positive = more permissive)
+// Returns true if the AABB is inside (or intersects) the frustum
+bool isAABBInFrustum(vec4 frustumPlanes[6], vec3 aabbMin, vec3 aabbMax, float margin) {
+    for (int i = 0; i < 6; i++) {
+        vec4 plane = frustumPlanes[i];
+        // Find the p-vertex (the vertex most in the direction of the plane normal)
+        vec3 pVertex = vec3(
+            plane.x > 0.0 ? aabbMax.x : aabbMin.x,
+            plane.y > 0.0 ? aabbMax.y : aabbMin.y,
+            plane.z > 0.0 ? aabbMax.z : aabbMin.z
+        );
+        // If p-vertex is behind plane (with margin), AABB is completely outside
+        if (dot(vec4(pVertex, 1.0), plane) < -margin) {
+            return false; // Culled
+        }
+    }
+    return true; // Visible or intersecting
+}
+
+// Convenience overload without margin (defaults to 0.0)
+bool isAABBInFrustum(vec4 frustumPlanes[6], vec3 aabbMin, vec3 aabbMax) {
+    return isAABBInFrustum(frustumPlanes, aabbMin, aabbMax, 0.0);
+}
+
 // ============================================================================
 // Distance Culling
 // ============================================================================

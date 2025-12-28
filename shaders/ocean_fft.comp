@@ -17,6 +17,7 @@
 
 #include "bindings.glsl"
 #include "constants_common.glsl"
+#include "ocean_complex_common.glsl"
 
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
@@ -31,14 +32,6 @@ layout(push_constant) uniform PushConstants {
     int resolution;  // FFT size (must be power of 2)
     int inverse;     // 1 = inverse FFT, 0 = forward FFT
 };
-
-// Complex multiplication
-vec2 complexMul(vec2 a, vec2 b) {
-    return vec2(
-        a.x * b.x - a.y * b.y,
-        a.x * b.y + a.y * b.x
-    );
-}
 
 void main() {
     ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
