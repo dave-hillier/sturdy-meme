@@ -17,51 +17,16 @@
 #define CBT_BUFFER_BINDING BINDING_TERRAIN_CBT_BUFFER
 #include "cbt.glsl"
 #include "leb.glsl"
-#include "../terrain_height_common.glsl"
+#include "terrain_shadow_base.glsl"
 
 // Meshlet vertex buffer (local UV coordinates in unit triangle)
 layout(location = 0) in vec2 inLocalUV;
-
-// Height map (global coarse LOD - fallback for distant terrain)
-layout(binding = BINDING_TERRAIN_HEIGHT_MAP) uniform sampler2D heightMapGlobal;
-
-// LOD tile array (high-res tiles near camera)
-layout(binding = BINDING_TERRAIN_TILE_ARRAY) uniform sampler2DArray heightMapTiles;
-
-// Tile info buffer - world bounds for each active tile
-struct TileInfo {
-    vec4 worldBounds;    // xy = min corner, zw = max corner
-    vec4 uvScaleOffset;  // xy = scale, zw = offset
-    ivec4 layerIndex;    // x = layer index in tile array, yzw = padding
-};
-layout(std430, binding = BINDING_TERRAIN_TILE_INFO) readonly buffer TileInfoBuffer {
-    uint activeTileCount;
-    uint padding1;
-    uint padding2;
-    uint padding3;
-    TileInfo tiles[];
-};
-
-// Include tile cache common after defining prerequisites
-#include "../tile_cache_common.glsl"
 
 // Shadow visible indices buffer: [count, index0, index1, ...]
 layout(std430, binding = BINDING_TERRAIN_SHADOW_VISIBLE) readonly buffer ShadowVisibleIndices {
     uint shadowVisibleCount;
     uint shadowIndices[];
 };
-
-// Push constants for per-cascade matrix
-layout(push_constant) uniform PushConstants {
-    mat4 lightViewProj;
-    float terrainSize;
-    float heightScale;
-    int cascadeIndex;
-    int padding;
-};
-
-// Output UV for hole mask sampling in fragment shader
-layout(location = 0) out vec2 fragTexCoord;
 
 void main() {
     // gl_InstanceIndex is the index into the visible indices buffer
@@ -92,21 +57,6 @@ void main() {
     uv.x = dot(baryWeights, transformedX);
     uv.y = dot(baryWeights, transformedY);
 
-    // Compute world XZ position first (needed for tile lookup)
-    vec2 worldXZ = vec2(
-        (uv.x - 0.5) * terrainSize,
-        (uv.y - 0.5) * terrainSize
-    );
-
-    // Sample height with LOD tile support
-    float height = sampleHeightWithTileCache(heightMapGlobal, heightMapTiles, uv, worldXZ, heightScale, activeTileCount);
-
-    // Compute world position
-    vec3 worldPos = vec3(worldXZ.x, height, worldXZ.y);
-
-    // Transform to light space
-    gl_Position = lightViewProj * vec4(worldPos, 1.0);
-
-    // Pass UV for hole mask sampling
-    fragTexCoord = uv;
+    // Apply common shadow transformation
+    terrainShadowTransform(uv);
 }
