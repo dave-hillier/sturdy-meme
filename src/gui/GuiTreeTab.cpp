@@ -196,6 +196,41 @@ void GuiTreeTab::render(ITreeControl& treeControl) {
                 ImGui::Unindent();
             }
 
+            // LOD Debug Stats
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.8f, 0.4f, 1.0f));
+            ImGui::Text("LOD Debug:");
+            ImGui::PopStyleColor();
+
+            auto lodStats = treeLOD->getLODStats();
+            uint32_t totalTrees = lodStats.fullDetailCount + lodStats.reducedDetailCount +
+                                  lodStats.blendingCount + lodStats.impostorCount;
+
+            if (totalTrees > 0) {
+                // Visual bar showing LOD distribution
+                float fullPct = static_cast<float>(lodStats.fullDetailCount) / totalTrees;
+                float reducedPct = static_cast<float>(lodStats.reducedDetailCount) / totalTrees;
+                float blendPct = static_cast<float>(lodStats.blendingCount) / totalTrees;
+                float impostorPct = static_cast<float>(lodStats.impostorCount) / totalTrees;
+
+                ImGui::Text("LOD Distribution:");
+
+                // Color-coded text for each LOD level
+                ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.3f, 1.0f), "  LOD0 (Full):    %3u (%5.1f%%)",
+                                   lodStats.fullDetailCount, fullPct * 100.0f);
+                if (settings.enableReducedDetailLOD) {
+                    ImGui::TextColored(ImVec4(0.5f, 0.9f, 1.0f, 1.0f), "  LOD1 (Reduced): %3u (%5.1f%%)",
+                                       lodStats.reducedDetailCount, reducedPct * 100.0f);
+                }
+                ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.5f, 1.0f), "  Blending:       %3u (%5.1f%%)",
+                                   lodStats.blendingCount, blendPct * 100.0f);
+                ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "  Impostor:       %3u (%5.1f%%)",
+                                   lodStats.impostorCount, impostorPct * 100.0f);
+            } else {
+                ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "  No trees in scene");
+            }
+
             ImGui::Spacing();
             ImGui::Separator();
             ImGui::Text("Impostor Appearance:");

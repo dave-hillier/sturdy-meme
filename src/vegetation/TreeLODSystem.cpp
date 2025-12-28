@@ -1283,6 +1283,27 @@ bool TreeLODSystem::shouldUseLOD1(uint32_t treeIndex) const {
     return lodStates_[treeIndex].useLOD1;
 }
 
+TreeLODSystem::LODStats TreeLODSystem::getLODStats() const {
+    LODStats stats;
+    for (const auto& state : lodStates_) {
+        switch (state.currentLevel) {
+            case TreeLODState::Level::FullDetail:
+                stats.fullDetailCount++;
+                break;
+            case TreeLODState::Level::ReducedDetail:
+                stats.reducedDetailCount++;
+                break;
+            case TreeLODState::Level::Blending:
+                stats.blendingCount++;
+                break;
+            case TreeLODState::Level::Impostor:
+                stats.impostorCount++;
+                break;
+        }
+    }
+    return stats;
+}
+
 bool TreeLODSystem::shouldRenderBranchShadow(uint32_t treeIndex, uint32_t cascadeIndex) const {
     const auto& shadowSettings = getLODSettings().shadow;
 

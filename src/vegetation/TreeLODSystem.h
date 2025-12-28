@@ -118,6 +118,15 @@ public:
     // Check if tree should use LOD1 (reduced detail) mesh instead of LOD0 (full detail)
     bool shouldUseLOD1(uint32_t treeIndex) const;
 
+    // LOD statistics for debugging
+    struct LODStats {
+        uint32_t fullDetailCount = 0;      // Trees at LOD0 (full geometry)
+        uint32_t reducedDetailCount = 0;   // Trees at LOD1 (simplified geometry)
+        uint32_t blendingCount = 0;        // Trees cross-fading
+        uint32_t impostorCount = 0;        // Trees using billboard impostors
+    };
+    LODStats getLODStats() const;
+
     // Cascade-aware shadow LOD queries
     // These consider both per-tree LOD state AND cascade-specific settings
     bool shouldRenderBranchShadow(uint32_t treeIndex, uint32_t cascadeIndex) const;
