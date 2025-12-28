@@ -591,44 +591,53 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
 
     uint32_t numTrees = 0;
     uint32_t totalLeafInstances = 0;
-    uint32_t lodTreeIndex = 0;
 
-    for (const auto& renderable : leafRenderables) {
+    // IMPORTANT: We must add ALL trees to treeDataList, not just those with valid leaves.
+    // The spatial index stores originalTreeIndex based on the full leafRenderables list.
+    // If we skip trees here, tree_filter.comp will read allTrees[originalTreeIndex] and
+    // get wrong data or read past the buffer end.
+    // Trees with instanceCount=0 are filtered out in tree_filter.comp anyway.
+    for (size_t treeIdx = 0; treeIdx < leafRenderables.size(); ++treeIdx) {
+        const auto& renderable = leafRenderables[treeIdx];
+
+        float lodBlendFactor = 0.0f;
+        if (lodSystem) {
+            lodBlendFactor = lodSystem->getBlendFactor(static_cast<uint32_t>(treeIdx));
+        }
+
+        uint32_t leafTypeIdx = LEAF_TYPE_OAK;
+        if (renderable.leafType == "ash") leafTypeIdx = LEAF_TYPE_ASH;
+        else if (renderable.leafType == "aspen") leafTypeIdx = LEAF_TYPE_ASPEN;
+        else if (renderable.leafType == "pine") leafTypeIdx = LEAF_TYPE_PINE;
+
+        // Get leaf draw info if available
+        uint32_t firstInstance = 0;
+        uint32_t instanceCount = 0;
         if (renderable.leafInstanceIndex >= 0 &&
             static_cast<size_t>(renderable.leafInstanceIndex) < leafDrawInfo.size()) {
             const auto& drawInfo = leafDrawInfo[renderable.leafInstanceIndex];
-            if (drawInfo.instanceCount > 0) {
-                float lodBlendFactor = 0.0f;
-                if (lodSystem) {
-                    lodBlendFactor = lodSystem->getBlendFactor(lodTreeIndex);
-                }
-
-                uint32_t leafTypeIdx = LEAF_TYPE_OAK;
-                if (renderable.leafType == "ash") leafTypeIdx = LEAF_TYPE_ASH;
-                else if (renderable.leafType == "aspen") leafTypeIdx = LEAF_TYPE_ASPEN;
-                else if (renderable.leafType == "pine") leafTypeIdx = LEAF_TYPE_PINE;
-
-                TreeCullData treeData{};
-                treeData.treeModel = renderable.transform;
-                treeData.inputFirstInstance = drawInfo.firstInstance;
-                treeData.inputInstanceCount = drawInfo.instanceCount;
-                treeData.treeIndex = numTrees;
-                treeData.leafTypeIndex = leafTypeIdx;
-                treeData.lodBlendFactor = lodBlendFactor;
-                treeDataList.push_back(treeData);
-
-                TreeRenderDataGPU renderData{};
-                renderData.model = renderable.transform;
-                renderData.tintAndParams = glm::vec4(renderable.leafTint, renderable.autumnHueShift);
-                float windOffset = glm::fract(renderable.transform[3][0] * 0.1f + renderable.transform[3][2] * 0.1f) * 6.28318f;
-                renderData.windOffsetAndLOD = glm::vec4(windOffset, lodBlendFactor, 0.0f, 0.0f);
-                treeRenderDataList.push_back(renderData);
-
-                totalLeafInstances += drawInfo.instanceCount;
-                numTrees++;
-            }
+            firstInstance = drawInfo.firstInstance;
+            instanceCount = drawInfo.instanceCount;
+            totalLeafInstances += instanceCount;
         }
-        lodTreeIndex++;
+
+        TreeCullData treeData{};
+        treeData.treeModel = renderable.transform;
+        treeData.inputFirstInstance = firstInstance;
+        treeData.inputInstanceCount = instanceCount;
+        treeData.treeIndex = numTrees;
+        treeData.leafTypeIndex = leafTypeIdx;
+        treeData.lodBlendFactor = lodBlendFactor;
+        treeDataList.push_back(treeData);
+
+        TreeRenderDataGPU renderData{};
+        renderData.model = renderable.transform;
+        renderData.tintAndParams = glm::vec4(renderable.leafTint, renderable.autumnHueShift);
+        float windOffset = glm::fract(renderable.transform[3][0] * 0.1f + renderable.transform[3][2] * 0.1f) * 6.28318f;
+        renderData.windOffsetAndLOD = glm::vec4(windOffset, lodBlendFactor, 0.0f, 0.0f);
+        treeRenderDataList.push_back(renderData);
+
+        numTrees++;
     }
     if (numTrees == 0 || totalLeafInstances == 0) return;
 
