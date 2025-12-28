@@ -59,14 +59,16 @@ float sampleHeightWithTileCache(sampler2D heightMapGlobal, sampler2DArray height
 // Returns normalized world-space normal vector
 vec3 calculateNormalWithTileCache(sampler2D heightMapGlobal, sampler2DArray heightMapTiles,
                                    vec2 uv, vec2 worldXZ, float terrainSize, float heightScale, uint tileCount) {
-    vec2 texelSize = 1.0 / vec2(textureSize(heightMapGlobal, 0));
-    float worldTexelSize = terrainSize / float(textureSize(heightMapGlobal, 0).x);
+    // Use tile resolution (512) for texel size when tiles are available
+    // This gives proper normal calculation with ~32m sample spacing on 16km terrain
+    float tileRes = 512.0;
+    float worldTexelSize = terrainSize / (32.0 * tileRes);  // 32 LOD0 tiles * 512 texels = full res
 
     // Sample neighboring heights with LOD support
-    float hL = sampleHeightWithTileCache(heightMapGlobal, heightMapTiles, uv + vec2(-texelSize.x, 0.0), worldXZ + vec2(-worldTexelSize, 0.0), heightScale, tileCount);
-    float hR = sampleHeightWithTileCache(heightMapGlobal, heightMapTiles, uv + vec2(texelSize.x, 0.0), worldXZ + vec2(worldTexelSize, 0.0), heightScale, tileCount);
-    float hD = sampleHeightWithTileCache(heightMapGlobal, heightMapTiles, uv + vec2(0.0, -texelSize.y), worldXZ + vec2(0.0, -worldTexelSize), heightScale, tileCount);
-    float hU = sampleHeightWithTileCache(heightMapGlobal, heightMapTiles, uv + vec2(0.0, texelSize.y), worldXZ + vec2(0.0, worldTexelSize), heightScale, tileCount);
+    float hL = sampleHeightWithTileCache(heightMapGlobal, heightMapTiles, uv, worldXZ + vec2(-worldTexelSize, 0.0), heightScale, tileCount);
+    float hR = sampleHeightWithTileCache(heightMapGlobal, heightMapTiles, uv, worldXZ + vec2(worldTexelSize, 0.0), heightScale, tileCount);
+    float hD = sampleHeightWithTileCache(heightMapGlobal, heightMapTiles, uv, worldXZ + vec2(0.0, -worldTexelSize), heightScale, tileCount);
+    float hU = sampleHeightWithTileCache(heightMapGlobal, heightMapTiles, uv, worldXZ + vec2(0.0, worldTexelSize), heightScale, tileCount);
 
     float dx = (hR - hL) / (2.0 * worldTexelSize);
     float dz = (hU - hD) / (2.0 * worldTexelSize);
