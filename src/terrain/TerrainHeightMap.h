@@ -24,7 +24,6 @@ public:
         std::string heightmapPath;  // Optional: path to 16-bit PNG heightmap (empty = procedural)
         float minAltitude = 0.0f;   // Altitude for height value 0 (when loading from file)
         float maxAltitude = 200.0f; // Altitude for height value 65535 (when loading from file)
-        bool deferHeightmapLoad = false;  // If true, skip loading heightmap file (will be set via setFromTileData)
     };
 
     // Special return value indicating a hole in terrain (no ground)
@@ -68,11 +67,6 @@ public:
     uint32_t getResolution() const { return resolution; }
     float getHeightScale() const { return heightScale; }
     float getTerrainSize() const { return terrainSize; }
-
-    // Set heightmap data from external source (e.g., synthesized from tile cache)
-    // This should be called after create() when deferHeightmapLoad=true
-    // Returns true if GPU upload succeeded
-    bool setFromExternalData(const std::vector<float>& data);
 
 private:
     TerrainHeightMap() = default;  // Private: use factory

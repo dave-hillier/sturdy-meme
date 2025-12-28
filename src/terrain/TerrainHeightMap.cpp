@@ -33,13 +33,8 @@ bool TerrainHeightMap::initInternal(const InitInfo& info) {
     terrainSize = info.terrainSize;
     heightScale = info.heightScale;
 
-    // Either load from file, generate procedurally, or defer loading
-    if (info.deferHeightmapLoad) {
-        // Data will be set later via setFromExternalData()
-        // Just allocate the buffer with zeros for now
-        cpuData.resize(resolution * resolution, 0.0f);
-        SDL_Log("TerrainHeightMap: Deferred heightmap loading (will be set from tile cache)");
-    } else if (!info.heightmapPath.empty()) {
+    // Either load from file or generate procedurally
+    if (!info.heightmapPath.empty()) {
         if (!loadHeightDataFromFile(info.heightmapPath, info.minAltitude, info.maxAltitude)) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load heightmap from file, falling back to procedural");
             if (!generateHeightData()) return false;
@@ -515,26 +510,4 @@ float TerrainHeightMap::getHeightAt(float x, float z) const {
 
     // Use shared TerrainHeight function (see TerrainHeight.h for authoritative formula)
     return TerrainHeight::toWorld(h, heightScale);
-}
-
-bool TerrainHeightMap::setFromExternalData(const std::vector<float>& data) {
-    if (data.size() != resolution * resolution) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "TerrainHeightMap::setFromExternalData: data size %zu doesn't match resolution %u",
-                     data.size(), resolution * resolution);
-        return false;
-    }
-
-    // Copy to CPU data
-    cpuData = data;
-
-    // Re-upload to GPU
-    if (!uploadToGPU()) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "TerrainHeightMap::setFromExternalData: failed to upload to GPU");
-        return false;
-    }
-
-    SDL_Log("TerrainHeightMap: Set from external data (%u x %u)", resolution, resolution);
-    return true;
 }
