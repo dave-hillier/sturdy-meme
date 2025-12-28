@@ -51,11 +51,12 @@ bool cullLeaf(
         return true;
     }
 
-    // Frustum culling with margin for leaf billboard rotation
-    float margin = leafSize * 2.0;
-    if (!isInFrustum(frustumPlanes, worldPos.xyz, margin)) {
-        return true;
-    }
+    // NOTE: We intentionally skip frustum culling for leaves.
+    // Unlike branches which have separate shadow culling against the light frustum,
+    // leaves use the same culled buffer for both main rendering and shadows.
+    // Frustum culling against the camera would remove leaves that are behind the
+    // camera but still need to cast shadows into the view.
+    // Distance and LOD culling already limit the leaf count sufficiently.
 
     // LOD blade dropping - use position-based hash for consistent results
     // This handles distance-based leaf density reduction (fewer leaves when far away)
