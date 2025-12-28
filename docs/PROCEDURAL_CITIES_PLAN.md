@@ -23,6 +23,62 @@ The following key decisions have been made:
 | **Performance Budget** | Not constrained initially | Optimize after functionality complete |
 | **Dynamic Settlements** | No | Settlements are static once generated |
 | **Terrain Integration** | Buildings adapt to terrain | Cellars, tunnels, wells cut into terrain; existing terrain cut system (no physics yet) |
+| **Street Networks** | Hybrid: Space colonization + A* terrain-following | L-systems alone insufficient; driven by POIs and terrain constraints |
+| **Building Styles** | Multiple period styles per building type | Norman, Early English Gothic, regional material variations |
+| **Asset Pipeline** | Procedural blockout → hand-crafted replacement | Start procedural, swap in artist assets as available |
+
+### Street Network Algorithm Rationale
+
+Pure L-systems are insufficient because streets must be:
+- **Driven by Points of Interest**: Connections between settlements, key buildings
+- **Terrain-Aware**: Follow contours, avoid steep slopes, cross water at fords
+- **Hierarchical**: Main roads connect towns, lanes branch to serve lots
+
+Selected approach combines:
+1. **Space Colonization**: Organic growth from seed points toward attractors
+2. **A* Pathfinding**: Terrain cost evaluation (existing `RoadPathfinder`)
+3. **Constraint Satisfaction**: Ensure connectivity, avoid obstacles
+
+### Building Style Variations
+
+Each building type has period/style variants:
+
+| Style Period | Date Range | Characteristics |
+|-------------|-----------|-----------------|
+| **Saxon Survival** | Pre-1100 | Simple timber, small windows, steep roofs |
+| **Norman** | 1066-1200 | Round arches, thick walls, herringbone masonry |
+| **Transitional** | 1150-1200 | Mix of round and pointed arches |
+| **Early English** | 1180-1275 | Pointed arches, lancet windows, buttresses |
+
+Buildings select style based on:
+- Settlement wealth parameter
+- Building age (when was it "built")
+- Regional material availability
+
+### Blockout-to-Handcrafted Pipeline
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│   PROCEDURAL    │────▶│    BLOCKOUT     │────▶│   HAND-CRAFTED  │
+│   GENERATION    │     │     ASSET       │     │   REPLACEMENT   │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
+        │                       │                       │
+        ▼                       ▼                       ▼
+  - Dimensions            - Simplified mesh      - Artist-modeled
+  - Footprint             - Material slots       - Full detail
+  - Room layout           - LOD-ready            - Unique variants
+  - Style params          - Collision proxy      - Baked lighting
+```
+
+Each generated building outputs:
+1. **Blockout mesh**: Low-poly placeholder with correct dimensions
+2. **Metadata JSON**: All generation parameters for artist reference
+3. **Asset ID**: Unique identifier for hand-crafted replacement
+
+Artists can then:
+- Model detailed replacements referencing blockout dimensions
+- Register replacement in asset manifest
+- System swaps in hand-crafted version at runtime
 
 ### Implications of Interior Requirement
 
@@ -232,12 +288,14 @@ Based on existing `SettlementType` enum:
 
 | Problem Domain | Selected Algorithm | Rationale |
 |---------------|-------------------|-----------|
-| Settlement Layout | Agent-Based + Template Hybrid | Organic growth with designer control |
-| Street Networks | Extended L-System (Parish-Müller variant) | Proven for organic road networks |
+| Settlement Layout | POI-Driven + Template Hybrid | Key buildings drive layout, templates for consistency |
+| Street Networks | Space Colonization + A* Terrain | Organic growth toward POIs, terrain-aware pathfinding |
 | Building Placement | Wave Function Collapse (WFC) | Respects adjacency constraints |
-| Building Geometry | CGA Shape Grammar | Industry standard, highly flexible |
+| Building Geometry | CGA Shape Grammar → Blockout | Procedural first, artist replacement later |
 | Roof Generation | Straight Skeleton Algorithm | Handles complex footprints |
 | Facade Detail | Hierarchical WFC | Local coherence with global patterns |
+| Floor Plans | BSP/Treemap Partition | Room subdivision with adjacency constraints |
+| Terrain Integration | Height modification layers | Cellars, foundations via terrain cut system |
 
 ---
 
@@ -747,79 +805,250 @@ public:
 
 ### 4.3 Street Network Algorithm
 
-Using an extended L-system approach (Parish-Müller style) adapted for smaller settlements:
+Hybrid approach combining space colonization for organic growth with A* for terrain-aware pathfinding.
 
-#### 4.3.1 L-System Rules
+#### 4.3.1 Algorithm Overview
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                 STREET NETWORK GENERATION                        │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  1. ATTRACTOR PLACEMENT                                         │
+│     ├── Key buildings (church, inn, market)                     │
+│     ├── External road connections                               │
+│     ├── Settlement boundary points                              │
+│     └── Lot frontage requirements                               │
+│                                                                 │
+│  2. SPACE COLONIZATION                                          │
+│     ├── Grow street tree from seed (main road entry)            │
+│     ├── Branches compete for nearby attractors                  │
+│     ├── Kill attractors when reached                            │
+│     └── Natural organic branching pattern                       │
+│                                                                 │
+│  3. A* TERRAIN REFINEMENT                                       │
+│     ├── For each street segment: find terrain-optimal path      │
+│     ├── Cost function: slope + water crossing + cliff penalty   │
+│     ├── Reuse existing RoadPathfinder infrastructure            │
+│     └── Smooth paths with spline interpolation                  │
+│                                                                 │
+│  4. HIERARCHY ASSIGNMENT                                        │
+│     ├── Main street: connects to external roads                 │
+│     ├── Streets: branch from main, serve multiple lots          │
+│     ├── Lanes: serve individual lots                            │
+│     └── Alleys: rear access                                     │
+│                                                                 │
+│  5. INTERSECTION RESOLUTION                                     │
+│     ├── Merge nearby endpoints                                  │
+│     ├── Validate connectivity                                   │
+│     └── Generate intersection geometry                          │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### 4.3.2 Space Colonization Algorithm
+
+Based on Runions et al. (2007) "Modeling Trees with a Space Colonization Algorithm":
 
 ```cpp
-struct StreetRule {
-    std::string predecessor;
-    std::string successor;
-    float probability;
+struct Attractor {
+    glm::vec2 position;
+    float weight;               // Importance (key buildings = high)
+    bool reached = false;
 
-    // Conditions
-    std::function<bool(const StreetContext&)> condition;
+    enum class Type {
+        ExternalRoad,           // Connection to other settlements
+        KeyBuilding,            // Church, inn, market - must be accessible
+        LotFrontage,            // Lots need street access
+        BoundaryPoint           // Settlement perimeter coverage
+    } type;
 };
 
-// Example rules for English village
-std::vector<StreetRule> englishVillageRules = {
-    // Main street continues with slight curve
-    { "M", "M[+B][-B]", 0.3, [](auto& ctx) { return ctx.distanceFromCenter < 100; } },
-    { "M", "M", 0.7, nullptr },
+struct StreetNode {
+    glm::vec2 position;
+    StreetNode* parent = nullptr;
+    std::vector<StreetNode*> children;
 
-    // Branch becomes lane
-    { "B", "L[+l][-l]", 0.4, nullptr },
-    { "B", "L", 0.6, nullptr },
+    float width;                // Street width at this node
+    int depth;                  // Distance from root in tree
+};
 
-    // Lane terminates or continues
-    { "L", "L", 0.5, [](auto& ctx) { return ctx.length < 50; } },
-    { "L", "", 0.5, nullptr },
+class SpaceColonizationStreets {
+public:
+    struct Config {
+        float attractorKillDistance = 10.0f;    // Remove attractor when this close
+        float attractorInfluenceRadius = 50.0f; // Attractors affect nodes within this
+        float segmentLength = 15.0f;            // Growth step size
+        float branchAngleLimit = 60.0f;         // Max deviation from parent direction
+        int maxIterations = 200;
+    };
 
-    // Small lanes can branch to alleys
-    { "l", "a", 0.3, nullptr },
-    { "l", "", 0.7, nullptr }
+    StreetNetwork generate(
+        const std::vector<Attractor>& attractors,
+        glm::vec2 seedPosition,                 // Main road entry point
+        glm::vec2 seedDirection,                // Initial direction
+        const Config& config
+    );
+
+private:
+    // Find attractors influencing a node
+    std::vector<const Attractor*> findInfluencingAttractors(
+        const StreetNode& node,
+        const std::vector<Attractor>& attractors
+    );
+
+    // Calculate growth direction from attractors
+    glm::vec2 calculateGrowthDirection(
+        const StreetNode& node,
+        const std::vector<const Attractor*>& influencers
+    );
+
+    // Check if node can branch (enough attractors in cone)
+    bool shouldBranch(
+        const StreetNode& node,
+        const std::vector<Attractor>& attractors
+    );
 };
 ```
 
-#### 4.3.2 Street Generation Implementation
+#### 4.3.3 Terrain-Aware Path Refinement
+
+```cpp
+class TerrainAwareStreetRefiner {
+public:
+    // Refine street segment using A* on terrain
+    std::vector<glm::vec2> refinePath(
+        glm::vec2 start,
+        glm::vec2 end,
+        const TerrainAnalysis& terrain,
+        const RoadPathfinder& pathfinder     // Reuse existing infrastructure
+    );
+
+    // Cost function for street placement
+    float calculateCost(glm::vec2 from, glm::vec2 to, const TerrainAnalysis& terrain) {
+        float baseCost = glm::length(to - from);
+
+        // Slope penalty (prefer following contours)
+        float slope = terrain.getSlope((from + to) * 0.5f);
+        float slopeCost = slope * slopePenaltyMultiplier;
+
+        // Water crossing penalty
+        bool crossesWater = terrain.isWater(to);
+        float waterCost = crossesWater ? waterPenalty : 0.0f;
+
+        // Cliff penalty (impassable)
+        bool isCliff = slope > cliffThreshold;
+        float cliffCost = isCliff ? INFINITY : 0.0f;
+
+        // Prefer following existing paths/desire lines
+        float existingPathBonus = terrain.hasExistingPath(to) ? -0.5f : 0.0f;
+
+        return baseCost + slopeCost + waterCost + cliffCost + existingPathBonus;
+    }
+
+private:
+    float slopePenaltyMultiplier = 5.0f;
+    float waterPenalty = 100.0f;
+    float cliffThreshold = 0.7f;
+};
+```
+
+#### 4.3.4 Street Hierarchy Assignment
+
+```cpp
+class StreetHierarchyAssigner {
+public:
+    void assignHierarchy(StreetNetwork& network) {
+        // Main street: connects settlement to external road network
+        markMainStreet(network);
+
+        // Streets: branches from main serving multiple buildings
+        markStreets(network);
+
+        // Lanes: short segments serving 1-3 buildings
+        markLanes(network);
+
+        // Alleys: rear access, very narrow
+        markAlleys(network);
+    }
+
+private:
+    void markMainStreet(StreetNetwork& network) {
+        // Path from external connection through settlement center
+        // Widest street type (8m for main road)
+    }
+
+    void markStreets(StreetNetwork& network) {
+        // Branches serving 4+ lots
+        // Medium width (5m)
+    }
+
+    void markLanes(StreetNetwork& network) {
+        // Segments serving 1-3 lots
+        // Narrow (3.5m)
+    }
+
+    void markAlleys(StreetNetwork& network) {
+        // Rear access only
+        // Very narrow (2m)
+    }
+};
+```
+
+#### 4.3.5 Complete Street Generator
 
 ```cpp
 class StreetNetworkGenerator {
 public:
     struct Config {
+        // Street widths
         float mainStreetWidth = 8.0f;
         float streetWidth = 5.0f;
         float laneWidth = 3.5f;
         float alleyWidth = 2.0f;
 
-        float branchAngle = 75.0f;          // Degrees
-        float branchAngleVariance = 20.0f;
-        float segmentLength = 20.0f;
-        float segmentLengthVariance = 5.0f;
+        // Space colonization params
+        float attractorKillDistance = 10.0f;
+        float attractorInfluenceRadius = 50.0f;
+        float segmentLength = 15.0f;
 
-        int maxIterations = 50;
-        float maxExtent = 300.0f;           // Max distance from center
+        // Terrain params
+        float maxStreetSlope = 0.15f;       // 15% grade max for streets
+        float maxLaneSlope = 0.25f;         // Lanes can be steeper
     };
 
     StreetNetwork generate(
         const SettlementDefinition& settlement,
         const TerrainAnalysis& terrain,
-        const std::vector<StreetRule>& rules,
+        const std::vector<BuildingPlacement>& keyBuildings,
         const Config& config
     );
 
 private:
-    // L-system expansion
-    std::string expand(const std::string& axiom, const std::vector<StreetRule>& rules);
+    SpaceColonizationStreets colonization;
+    TerrainAwareStreetRefiner refiner;
+    StreetHierarchyAssigner hierarchy;
 
-    // Interpret expanded string into geometry
-    void interpretStreet(const std::string& expanded, StreetNetwork& network);
+    // Generate attractors from key buildings and settlement bounds
+    std::vector<Attractor> generateAttractors(
+        const SettlementDefinition& settlement,
+        const std::vector<BuildingPlacement>& keyBuildings
+    );
 
-    // Snap streets to terrain and handle intersections
-    void finalizeNetwork(StreetNetwork& network, const TerrainAnalysis& terrain);
+    // Connect to external road network
+    glm::vec2 findExternalConnection(
+        const SettlementDefinition& settlement,
+        const RoadNetwork& externalRoads
+    );
 
     // Detect and merge street intersections
     void mergeIntersections(StreetNetwork& network, float threshold = 5.0f);
+
+    // Validate all key buildings are accessible
+    bool validateConnectivity(
+        const StreetNetwork& network,
+        const std::vector<BuildingPlacement>& keyBuildings
+    );
 };
 ```
 
@@ -2974,19 +3203,25 @@ TEST(SettlementGeneration, EndToEnd) {
 ### 11.1 Academic Papers
 
 1. **Parish, Y. I. H., & Müller, P. (2001)**. "Procedural modeling of cities." *SIGGRAPH '01*. [Link](https://cgl.ethz.ch/Downloads/Publications/Papers/2001/p_Par01.pdf)
-   - Foundation for L-system road networks
+   - Foundation for procedural road networks (reference, but we use space colonization instead)
 
-2. **Müller, P., Wonka, P., Haegler, S., Ulmer, A., & Van Gool, L. (2006)**. "Procedural modeling of buildings." *SIGGRAPH '06*.
+2. **Runions, A., Lane, B., & Prusinkiewicz, P. (2007)**. "Modeling Trees with a Space Colonization Algorithm." *Eurographics Workshop on Natural Phenomena*.
+   - **Key algorithm for street network generation** - organic growth toward attractors
+
+3. **Müller, P., Wonka, P., Haegler, S., Ulmer, A., & Van Gool, L. (2006)**. "Procedural modeling of buildings." *SIGGRAPH '06*.
    - CGA shape grammar for buildings
 
-3. **Merrell, P., & Manocha, D. (2008)**. "Continuous model synthesis." *ACM TOG*.
+4. **Merrell, P., & Manocha, D. (2008)**. "Continuous model synthesis." *ACM TOG*.
    - Early constraint-based generation
 
-4. **Gumin, M. (2016)**. "Wave Function Collapse algorithm."
+5. **Gumin, M. (2016)**. "Wave Function Collapse algorithm."
    - [GitHub](https://github.com/mxgmn/WaveFunctionCollapse)
 
-5. **Alaka, S., & Bidarra, R. (2023)**. "Hierarchical Semantic Wave Function Collapse." *PCG Workshop*.
+6. **Alaka, S., & Bidarra, R. (2023)**. "Hierarchical Semantic Wave Function Collapse." *PCG Workshop*.
    - Hierarchical WFC for complex structures
+
+7. **Vanegas, C. A., et al. (2012)**. "Procedural Generation of Parcels in Urban Modeling." *Computer Graphics Forum*.
+   - Lot subdivision algorithms
 
 ### 11.2 Industry Resources
 
