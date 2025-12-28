@@ -6,6 +6,65 @@
 #include <imgui.h>
 #include <algorithm>
 #include <cstdio>
+#include <sstream>
+#include <iomanip>
+#include <SDL3/SDL.h>
+
+namespace {
+
+std::string generateMarkdownReport(const Profiler& profiler) {
+    std::ostringstream ss;
+
+    const auto& gpuStats = profiler.getSmoothedGpuResults();
+    const auto& cpuStats = profiler.getSmoothedCpuResults();
+    const auto& initResults = InitProfiler::get().getResults();
+
+    // GPU Timing
+    ss << "## GPU Timing\n\n";
+    ss << "**Total: " << std::fixed << std::setprecision(2) << gpuStats.totalGpuTimeMs << " ms**\n\n";
+    if (!gpuStats.zones.empty()) {
+        ss << "| Pass | Time (ms) | % |\n";
+        ss << "|------|-----------|---|\n";
+        for (const auto& zone : gpuStats.zones) {
+            ss << "| " << zone.name << " | " << std::fixed << std::setprecision(2) << zone.gpuTimeMs
+               << " | " << std::setprecision(1) << zone.percentOfFrame << "% |\n";
+        }
+    }
+    ss << "\n";
+
+    // CPU Timing
+    ss << "## CPU Timing\n\n";
+    ss << "**Total: " << std::fixed << std::setprecision(2) << cpuStats.totalCpuTimeMs << " ms** ";
+    ss << "(Work: " << cpuStats.workTimeMs << " ms, Wait: " << cpuStats.waitTimeMs << " ms)\n\n";
+    if (!cpuStats.zones.empty()) {
+        ss << "| Zone | Time (ms) | % |\n";
+        ss << "|------|-----------|---|\n";
+        for (const auto& zone : cpuStats.zones) {
+            ss << "| " << zone.name << " | " << std::fixed << std::setprecision(3) << zone.cpuTimeMs
+               << " | " << std::setprecision(1) << zone.percentOfFrame << "% |\n";
+        }
+    }
+    ss << "\n";
+
+    // Startup Timing
+    if (InitProfiler::get().isFinalized() && !initResults.phases.empty()) {
+        ss << "## Startup Timing\n\n";
+        ss << "**Total: " << std::fixed << std::setprecision(1) << initResults.totalTimeMs << " ms ("
+           << std::setprecision(2) << initResults.totalTimeMs / 1000.0f << " s)**\n\n";
+        ss << "| Phase | Time (ms) | % |\n";
+        ss << "|-------|-----------|---|\n";
+        for (const auto& phase : initResults.phases) {
+            // Indent with spaces for hierarchy
+            std::string indent(phase.depth * 2, ' ');
+            ss << "| " << indent << phase.name << " | " << std::fixed << std::setprecision(1) << phase.timeMs
+               << " | " << phase.percentOfTotal << "% |\n";
+        }
+    }
+
+    return ss.str();
+}
+
+} // anonymous namespace
 
 void GuiProfilerTab::render(IProfilerControl& profilerControl) {
     ImGui::Spacing();
@@ -16,6 +75,13 @@ void GuiProfilerTab::render(IProfilerControl& profilerControl) {
     bool enabled = profiler.isEnabled();
     if (ImGui::Checkbox("Enable Profiling", &enabled)) {
         profiler.setEnabled(enabled);
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("Copy to Clipboard (Markdown)")) {
+        std::string markdown = generateMarkdownReport(profiler);
+        ImGui::SetClipboardText(markdown.c_str());
+        SDL_Log("Profiler data copied to clipboard:\n%s", markdown.c_str());
     }
 
     if (!enabled) {
