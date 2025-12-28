@@ -5,6 +5,7 @@
 #include <unordered_set>
 #include "core/vulkan/VulkanContext.h"
 #include "core/LoadingRenderer.h"
+#include "InitProfiler.h"
 
 #include "Components.h"
 #include "TerrainSystem.h"
@@ -34,42 +35,59 @@
 #endif
 
 bool Application::init(const std::string& title, int width, int height) {
-    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
-        SDL_Log("Failed to initialize SDL: %s", SDL_GetError());
-        return false;
+    // Reset and start init profiler
+    InitProfiler::get().reset();
+
+    {
+        INIT_PROFILE_PHASE("SDL");
+        if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
+            SDL_Log("Failed to initialize SDL: %s", SDL_GetError());
+            return false;
+        }
     }
 
     // Early Vulkan initialization: create instance BEFORE window
     // This allows validation layers and dispatcher to start earlier
-    auto vulkanContext = std::make_unique<VulkanContext>();
-    if (!vulkanContext->initInstance()) {
-        SDL_Log("Failed to initialize Vulkan instance (early init)");
-        SDL_Quit();
-        return false;
+    std::unique_ptr<VulkanContext> vulkanContext;
+    {
+        INIT_PROFILE_PHASE("VulkanInstance");
+        vulkanContext = std::make_unique<VulkanContext>();
+        if (!vulkanContext->initInstance()) {
+            SDL_Log("Failed to initialize Vulkan instance (early init)");
+            SDL_Quit();
+            return false;
+        }
     }
 
     // InputSystem initializes itself in constructor (RAII)
 
-    window = SDL_CreateWindow(title.c_str(), width, height, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
-    if (!window) {
-        SDL_Log("Failed to create window: %s", SDL_GetError());
-        SDL_Quit();
-        return false;
+    {
+        INIT_PROFILE_PHASE("Window");
+        window = SDL_CreateWindow(title.c_str(), width, height, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
+        if (!window) {
+            SDL_Log("Failed to create window: %s", SDL_GetError());
+            SDL_Quit();
+            return false;
+        }
     }
 
     std::string resourcePath = getResourcePath();
 
     // Complete Vulkan device initialization (surface, device, swapchain)
     // This must happen before LoadingRenderer can be created
-    if (!vulkanContext->initDevice(window)) {
-        SDL_Log("Failed to initialize Vulkan device");
-        SDL_DestroyWindow(window);
-        SDL_Quit();
-        return false;
+    {
+        INIT_PROFILE_PHASE("VulkanDevice");
+        if (!vulkanContext->initDevice(window)) {
+            SDL_Log("Failed to initialize Vulkan device");
+            SDL_DestroyWindow(window);
+            SDL_Quit();
+            return false;
+        }
     }
 
     // Create and show loading screen while heavy systems initialize
     {
+        INIT_PROFILE_PHASE("LoadingScreen");
         LoadingRenderer::InitInfo loadingInfo{};
         loadingInfo.vulkanContext = vulkanContext.get();
         loadingInfo.shaderPath = resourcePath + "/shaders";
@@ -114,10 +132,13 @@ bool Application::init(const std::string& title, int width, int height) {
     }
 
     // Initialize physics system using RAII factory
-    physics_ = PhysicsWorld::create();
-    if (!physics_) {
-        SDL_Log("Failed to initialize physics system");
-        return false;
+    {
+        INIT_PROFILE_PHASE("Physics");
+        physics_ = PhysicsWorld::create();
+        if (!physics_) {
+            SDL_Log("Failed to initialize physics system");
+            return false;
+        }
     }
 
     // Create terrain hole at well entrance location
@@ -285,13 +306,16 @@ bool Application::init(const std::string& title, int width, int height) {
     initFlag();
 
     // Initialize GUI system via factory
-    gui_ = GuiSystem::create(window, renderer_->getInstance(), renderer_->getPhysicalDevice(),
-                              renderer_->getDevice(), renderer_->getGraphicsQueueFamily(),
-                              renderer_->getGraphicsQueue(), renderer_->getSwapchainRenderPass(),
-                              renderer_->getSwapchainImageCount());
-    if (!gui_) {
-        SDL_Log("Failed to initialize GUI system");
-        return false;
+    {
+        INIT_PROFILE_PHASE("GUI");
+        gui_ = GuiSystem::create(window, renderer_->getInstance(), renderer_->getPhysicalDevice(),
+                                  renderer_->getDevice(), renderer_->getGraphicsQueueFamily(),
+                                  renderer_->getGraphicsQueue(), renderer_->getSwapchainRenderPass(),
+                                  renderer_->getSwapchainImageCount());
+        if (!gui_) {
+            SDL_Log("Failed to initialize GUI system");
+            return false;
+        }
     }
 
     // Set GUI render callback
@@ -302,6 +326,9 @@ bool Application::init(const std::string& title, int width, int height) {
     // Set up input system with GUI reference for input blocking
     input.setGuiSystem(gui_.get());
     input.setMoveSpeed(moveSpeed);
+
+    // Finalize init profiler and log results
+    InitProfiler::get().finalize();
 
     running = true;
     return true;

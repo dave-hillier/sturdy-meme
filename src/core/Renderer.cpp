@@ -9,6 +9,7 @@
 #include "VulkanResourceFactory.h"
 #include "Bindings.h"
 #include "VulkanRAII.h"
+#include "InitProfiler.h"
 
 // Subsystem includes for render loop
 // Core systems
@@ -83,6 +84,8 @@ Renderer::~Renderer() {
 }
 
 bool Renderer::initInternal(const InitInfo& info) {
+    INIT_PROFILE_PHASE("Renderer");
+
     window = info.window;
     resourcePath = info.resourcePath;
     config_ = info.config;
@@ -94,29 +97,38 @@ bool Renderer::initInternal(const InitInfo& info) {
     // If a pre-initialized context was provided (instance or device already created),
     // take ownership and complete any remaining initialization.
     // Otherwise, create a new context and fully initialize it.
-    if (info.vulkanContext) {
-        vulkanContext_ = std::move(const_cast<std::unique_ptr<VulkanContext>&>(info.vulkanContext));
-        // Only call initDevice if device isn't already initialized
-        // (LoadingRenderer may have already completed device init)
-        if (!vulkanContext_->isDeviceReady()) {
-            if (!vulkanContext_->initDevice(window)) {
-                SDL_Log("Failed to complete Vulkan device initialization");
+    {
+        INIT_PROFILE_PHASE("VulkanContext");
+        if (info.vulkanContext) {
+            vulkanContext_ = std::move(const_cast<std::unique_ptr<VulkanContext>&>(info.vulkanContext));
+            // Only call initDevice if device isn't already initialized
+            // (LoadingRenderer may have already completed device init)
+            if (!vulkanContext_->isDeviceReady()) {
+                if (!vulkanContext_->initDevice(window)) {
+                    SDL_Log("Failed to complete Vulkan device initialization");
+                    return false;
+                }
+            }
+        } else {
+            vulkanContext_ = std::make_unique<VulkanContext>();
+            if (!vulkanContext_->init(window)) {
+                SDL_Log("Failed to initialize Vulkan context");
                 return false;
             }
-        }
-    } else {
-        vulkanContext_ = std::make_unique<VulkanContext>();
-        if (!vulkanContext_->init(window)) {
-            SDL_Log("Failed to initialize Vulkan context");
-            return false;
         }
     }
 
     // Phase 1: Core Vulkan resources (render pass, depth, framebuffers, command pool)
-    if (!initCoreVulkanResources()) return false;
+    {
+        INIT_PROFILE_PHASE("CoreVulkanResources");
+        if (!initCoreVulkanResources()) return false;
+    }
 
     // Phase 2: Descriptor infrastructure (layouts, pools)
-    if (!initDescriptorInfrastructure()) return false;
+    {
+        INIT_PROFILE_PHASE("DescriptorInfrastructure");
+        if (!initDescriptorInfrastructure()) return false;
+    }
 
     // Build shared InitContext for subsystem initialization
     // Pass pool sizes hint so subsystems can create consistent pools if needed
@@ -125,16 +137,28 @@ bool Renderer::initInternal(const InitInfo& info) {
         resourcePath, MAX_FRAMES_IN_FLIGHT, config_.descriptorPoolSizes);
 
     // Phase 3: All subsystems (terrain, grass, weather, snow, water, etc.)
-    if (!initSubsystems(initCtx)) return false;
+    {
+        INIT_PROFILE_PHASE("Subsystems");
+        if (!initSubsystems(initCtx)) return false;
+    }
 
     // Phase 4: Control subsystems (after systems are ready)
-    initControlSubsystems();
+    {
+        INIT_PROFILE_PHASE("ControlSubsystems");
+        initControlSubsystems();
+    }
 
     // Phase 5: Resize coordinator registration
-    initResizeCoordinator();
+    {
+        INIT_PROFILE_PHASE("ResizeCoordinator");
+        initResizeCoordinator();
+    }
 
     // Setup render pipeline stages with lambdas
-    setupRenderPipeline();
+    {
+        INIT_PROFILE_PHASE("RenderPipeline");
+        setupRenderPipeline();
+    }
     SDL_Log("Render pipeline configured");
 
     return true;

@@ -38,6 +38,7 @@
 #include "SSRSystem.h"
 #include "DebugLineSystem.h"
 #include "Profiler.h"
+#include "InitProfiler.h"
 #include "SkinnedMeshRenderer.h"
 #include "SceneManager.h"
 #include "ErosionDataLoader.h"
@@ -71,29 +72,44 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     VkFormat swapchainImageFormat = vulkanContext_->getSwapchainImageFormat();
 
     // Initialize post-processing systems (PostProcessSystem, BloomSystem)
-    if (!RendererInit::initPostProcessing(*systems_, initCtx, renderPass.get(), swapchainImageFormat)) {
-        return false;
+    {
+        INIT_PROFILE_PHASE("PostProcessing");
+        if (!RendererInit::initPostProcessing(*systems_, initCtx, renderPass.get(), swapchainImageFormat)) {
+            return false;
+        }
     }
 
-    if (!createGraphicsPipeline()) return false;
+    {
+        INIT_PROFILE_PHASE("GraphicsPipeline");
+        if (!createGraphicsPipeline()) return false;
+    }
 
     // Initialize skinned mesh rendering (GPU skinning for animated characters)
-    if (!initSkinnedMeshRenderer()) return false;
+    {
+        INIT_PROFILE_PHASE("SkinnedMeshRenderer");
+        if (!initSkinnedMeshRenderer()) return false;
+    }
 
     // Initialize sky system via factory (needs HDR render pass from postProcessSystem)
-    auto skySystem = SkySystem::create(initCtx, systems_->postProcess().getHDRRenderPass());
-    if (!skySystem) return false;
-    systems_->setSky(std::move(skySystem));
+    {
+        INIT_PROFILE_PHASE("SkySystem");
+        auto skySystem = SkySystem::create(initCtx, systems_->postProcess().getHDRRenderPass());
+        if (!skySystem) return false;
+        systems_->setSky(std::move(skySystem));
+    }
 
     if (!createCommandBuffers()) return false;
 
     // Initialize global buffer manager for all per-frame shared buffers
-    auto globalBuffers = GlobalBufferManager::create(allocator, physicalDevice, MAX_FRAMES_IN_FLIGHT);
-    if (!globalBuffers) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize GlobalBufferManager");
-        return false;
+    {
+        INIT_PROFILE_PHASE("GlobalBufferManager");
+        auto globalBuffers = GlobalBufferManager::create(allocator, physicalDevice, MAX_FRAMES_IN_FLIGHT);
+        if (!globalBuffers) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize GlobalBufferManager");
+            return false;
+        }
+        systems_->setGlobalBuffers(std::move(globalBuffers));
     }
-    systems_->setGlobalBuffers(std::move(globalBuffers));
 
     // Initialize light buffers with empty data
     for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
@@ -103,9 +119,12 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     }
 
     // Initialize shadow system (needs descriptor set layouts for pipeline compatibility)
-    auto shadowSystem = ShadowSystem::create(initCtx, descriptorSetLayout.get(), systems_->skinnedMesh().getDescriptorSetLayout());
-    if (!shadowSystem) return false;
-    systems_->setShadow(std::move(shadowSystem));
+    {
+        INIT_PROFILE_PHASE("ShadowSystem");
+        auto shadowSystem = ShadowSystem::create(initCtx, descriptorSetLayout.get(), systems_->skinnedMesh().getDescriptorSetLayout());
+        if (!shadowSystem) return false;
+        systems_->setShadow(std::move(shadowSystem));
+    }
 
     // Initialize terrain system BEFORE scene so scene objects can query terrain height
     std::string heightmapPath = resourcePath + "/assets/terrain/isleofwight-0m-200m.png";
@@ -140,9 +159,13 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     terrainConfig.virtualTextureTileDir = resourcePath + "/vt_tiles";
     terrainConfig.useVirtualTexture = true;
 
-    auto terrainSystem = TerrainSystem::create(initCtx, terrainParams, terrainConfig);
-    if (!terrainSystem) return false;
-    systems_->setTerrain(std::move(terrainSystem));
+    std::unique_ptr<TerrainSystem> terrainSystem;
+    {
+        INIT_PROFILE_PHASE("TerrainSystem");
+        terrainSystem = TerrainSystem::create(initCtx, terrainParams, terrainConfig);
+        if (!terrainSystem) return false;
+        systems_->setTerrain(std::move(terrainSystem));
+    }
 
     // Collect resources from tier-1 systems for tier-2+ initialization
     // This decouples tier-2 systems from tier-1 systems - they depend on resources, not systems
@@ -161,12 +184,15 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         return systems_->terrain().getHeightAt(x, z);
     };
 
-    auto sceneManager = SceneManager::create(sceneInfo);
-    if (!sceneManager) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SceneManager");
-        return false;
+    {
+        INIT_PROFILE_PHASE("SceneManager");
+        auto sceneManager = SceneManager::create(sceneInfo);
+        if (!sceneManager) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SceneManager");
+            return false;
+        }
+        systems_->setScene(std::move(sceneManager));
     }
-    systems_->setScene(std::move(sceneManager));
 
     // Initialize snow subsystems (SnowMaskSystem, VolumetricSnowSystem)
     if (!RendererInit::initSnowSubsystems(*systems_, initCtx, core.hdr)) return false;
@@ -214,12 +240,15 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     rockConfig.materialRoughness = 0.75f;
     rockConfig.materialMetallic = 0.0f;
 
-    auto rockSystem = RockSystem::create(rockInfo, rockConfig);
-    if (!rockSystem) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create RockSystem");
-        return false;
+    {
+        INIT_PROFILE_PHASE("RockSystem");
+        auto rockSystem = RockSystem::create(rockInfo, rockConfig);
+        if (!rockSystem) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create RockSystem");
+            return false;
+        }
+        systems_->setRock(std::move(rockSystem));
     }
-    systems_->setRock(std::move(rockSystem));
 
     // Initialize tree system via factory
     TreeSystem::InitInfo treeInfo{};
@@ -232,10 +261,14 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     treeInfo.terrainSize = core.terrain.size;
     treeInfo.getTerrainHeight = core.terrain.getHeightAt;
 
-    auto treeSystem = TreeSystem::create(treeInfo);
-    if (!treeSystem) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create TreeSystem");
-        return false;
+    std::unique_ptr<TreeSystem> treeSystem;
+    {
+        INIT_PROFILE_PHASE("TreeSystem");
+        treeSystem = TreeSystem::create(treeInfo);
+        if (!treeSystem) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create TreeSystem");
+            return false;
+        }
     }
 
     // Add trees to the scene
@@ -833,26 +866,29 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     systems_->setProfiler(Profiler::create(device, physicalDevice, MAX_FRAMES_IN_FLIGHT));
 
     // Create WaterSystem via factory before initializing other water subsystems
-    WaterSystem::InitInfo waterInfo{};
-    waterInfo.device = device;
-    waterInfo.physicalDevice = physicalDevice;
-    waterInfo.allocator = allocator;
-    waterInfo.descriptorPool = initCtx.descriptorPool;
-    waterInfo.hdrRenderPass = core.hdr.renderPass;
-    waterInfo.shaderPath = initCtx.shaderPath;
-    waterInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
-    waterInfo.extent = initCtx.extent;
-    waterInfo.commandPool = commandPool.get();
-    waterInfo.graphicsQueue = graphicsQueue;
-    waterInfo.waterSize = 65536.0f;  // Extend well beyond terrain for horizon
-    waterInfo.assetPath = resourcePath;
+    {
+        INIT_PROFILE_PHASE("WaterSystem");
+        WaterSystem::InitInfo waterInfo{};
+        waterInfo.device = device;
+        waterInfo.physicalDevice = physicalDevice;
+        waterInfo.allocator = allocator;
+        waterInfo.descriptorPool = initCtx.descriptorPool;
+        waterInfo.hdrRenderPass = core.hdr.renderPass;
+        waterInfo.shaderPath = initCtx.shaderPath;
+        waterInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+        waterInfo.extent = initCtx.extent;
+        waterInfo.commandPool = commandPool.get();
+        waterInfo.graphicsQueue = graphicsQueue;
+        waterInfo.waterSize = 65536.0f;  // Extend well beyond terrain for horizon
+        waterInfo.assetPath = resourcePath;
 
-    auto waterSystem = WaterSystem::create(waterInfo);
-    if (!waterSystem) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create WaterSystem");
-        return false;
+        auto waterSystem = WaterSystem::create(waterInfo);
+        if (!waterSystem) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create WaterSystem");
+            return false;
+        }
+        systems_->setWater(std::move(waterSystem));
     }
-    systems_->setWater(std::move(waterSystem));
 
     // Create water subsystems via factories before constructing WaterSubsystems struct
     // FlowMapGenerator
