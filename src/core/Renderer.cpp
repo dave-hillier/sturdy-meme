@@ -90,10 +90,22 @@ bool Renderer::initInternal(const InitInfo& info) {
     // Create subsystems container
     systems_ = std::make_unique<RendererSystems>();
 
-    // Initialize Vulkan context (instance, device, queues, allocator, swapchain)
-    if (!vulkanContext.init(window)) {
-        SDL_Log("Failed to initialize Vulkan context");
-        return false;
+    // Initialize Vulkan context
+    // If a pre-initialized context was provided (instance already created),
+    // take ownership and complete device initialization.
+    // Otherwise, create a new context and fully initialize it.
+    if (info.vulkanContext) {
+        vulkanContext_ = std::move(const_cast<std::unique_ptr<VulkanContext>&>(info.vulkanContext));
+        if (!vulkanContext_->initDevice(window)) {
+            SDL_Log("Failed to complete Vulkan device initialization");
+            return false;
+        }
+    } else {
+        vulkanContext_ = std::make_unique<VulkanContext>();
+        if (!vulkanContext_->init(window)) {
+            SDL_Log("Failed to initialize Vulkan context");
+            return false;
+        }
     }
 
     // Phase 1: Core Vulkan resources (render pass, depth, framebuffers, command pool)
@@ -105,7 +117,7 @@ bool Renderer::initInternal(const InitInfo& info) {
     // Build shared InitContext for subsystem initialization
     // Pass pool sizes hint so subsystems can create consistent pools if needed
     InitContext initCtx = RendererInit::buildContext(
-        vulkanContext, commandPool.get(), &*descriptorManagerPool,
+        *vulkanContext_, commandPool.get(), &*descriptorManagerPool,
         resourcePath, MAX_FRAMES_IN_FLIGHT, config_.descriptorPoolSizes);
 
     // Phase 3: All subsystems (terrain, grass, weather, snow, water, etc.)
@@ -175,7 +187,7 @@ void Renderer::updatePhysicsDebug(PhysicsWorld& physics, const glm::vec3& camera
     // Create debug renderer on first use (after Jolt is initialized)
     if (!systems_->physicsDebugRenderer()) {
         InitContext initCtx = RendererInit::buildContext(
-            vulkanContext, commandPool.get(), &*descriptorManagerPool,
+            *vulkanContext_, commandPool.get(), &*descriptorManagerPool,
             resourcePath, MAX_FRAMES_IN_FLIGHT);
         systems_->createPhysicsDebugRenderer(initCtx, systems_->postProcess().getHDRRenderPass());
     }
@@ -200,8 +212,8 @@ void Renderer::updatePhysicsDebug(PhysicsWorld& physics, const glm::vec3& camera
 #endif
 
 void Renderer::cleanup() {
-    VkDevice device = vulkanContext.getDevice();
-    VmaAllocator allocator = vulkanContext.getAllocator();
+    VkDevice device = vulkanContext_->getDevice();
+    VmaAllocator allocator = vulkanContext_->getAllocator();
 
     if (device != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(device);
@@ -251,8 +263,8 @@ void Renderer::cleanup() {
         SDL_Log("render resources destroyed");
     }
 
-    SDL_Log("calling vulkanContext.shutdown");
-    vulkanContext.shutdown();
+    SDL_Log("calling vulkanContext_->shutdown");
+    vulkanContext_->shutdown();
     SDL_Log("vulkanContext shutdown complete");
 }
 
@@ -269,29 +281,29 @@ bool Renderer::createRenderPass() {
     depthFormat = VK_FORMAT_D32_SFLOAT;
 
     VulkanResourceFactory::RenderPassConfig config{};
-    config.colorFormat = vulkanContext.getSwapchainImageFormat();
+    config.colorFormat = vulkanContext_->getSwapchainImageFormat();
     config.depthFormat = depthFormat;
     config.finalColorLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
     config.finalDepthLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;  // For Hi-Z
     config.storeDepth = true;  // For Hi-Z pyramid generation
 
     VkRenderPass rawRenderPass = VK_NULL_HANDLE;
-    if (!VulkanResourceFactory::createRenderPass(vulkanContext.getDevice(), config, rawRenderPass)) {
+    if (!VulkanResourceFactory::createRenderPass(vulkanContext_->getDevice(), config, rawRenderPass)) {
         return false;
     }
-    renderPass = ManagedRenderPass::fromRaw(vulkanContext.getDevice(), rawRenderPass);
+    renderPass = ManagedRenderPass::fromRaw(vulkanContext_->getDevice(), rawRenderPass);
     return true;
 }
 
 bool Renderer::createDepthResources() {
     VulkanResourceFactory::DepthResources depth;
     if (!VulkanResourceFactory::createDepthResources(
-            vulkanContext.getDevice(), vulkanContext.getAllocator(),
-            vulkanContext.getSwapchainExtent(), depthFormat, depth)) {
+            vulkanContext_->getDevice(), vulkanContext_->getAllocator(),
+            vulkanContext_->getSwapchainExtent(), depthFormat, depth)) {
         return false;
     }
-    depthImage = ManagedImage::fromRaw(vulkanContext.getAllocator(), depth.image, depth.allocation);
-    depthImageView = ManagedImageView::fromRaw(vulkanContext.getDevice(), depth.view);
+    depthImage = ManagedImage::fromRaw(vulkanContext_->getAllocator(), depth.image, depth.allocation);
+    depthImageView = ManagedImageView::fromRaw(vulkanContext_->getDevice(), depth.view);
     depthSampler = std::move(depth.sampler);
     return true;
 }
@@ -299,35 +311,35 @@ bool Renderer::createDepthResources() {
 bool Renderer::createFramebuffers() {
     std::vector<VkFramebuffer> rawFramebuffers;
     if (!VulkanResourceFactory::createFramebuffers(
-        vulkanContext.getDevice(), renderPass.get(),
-        vulkanContext.getSwapchainImageViews(), depthImageView.get(),
-        vulkanContext.getSwapchainExtent(), rawFramebuffers)) {
+        vulkanContext_->getDevice(), renderPass.get(),
+        vulkanContext_->getSwapchainImageViews(), depthImageView.get(),
+        vulkanContext_->getSwapchainExtent(), rawFramebuffers)) {
         return false;
     }
 
     framebuffers.clear();
     framebuffers.reserve(rawFramebuffers.size());
     for (VkFramebuffer fb : rawFramebuffers) {
-        framebuffers.push_back(ManagedFramebuffer::fromRaw(vulkanContext.getDevice(), fb));
+        framebuffers.push_back(ManagedFramebuffer::fromRaw(vulkanContext_->getDevice(), fb));
     }
     return true;
 }
 
 bool Renderer::createCommandPool() {
     return ManagedCommandPool::create(
-        vulkanContext.getDevice(),
-        vulkanContext.getGraphicsQueueFamily(),
+        vulkanContext_->getDevice(),
+        vulkanContext_->getGraphicsQueueFamily(),
         VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
         commandPool);
 }
 
 bool Renderer::createCommandBuffers() {
     return VulkanResourceFactory::createCommandBuffers(
-        vulkanContext.getDevice(), commandPool.get(), MAX_FRAMES_IN_FLIGHT, commandBuffers);
+        vulkanContext_->getDevice(), commandPool.get(), MAX_FRAMES_IN_FLIGHT, commandBuffers);
 }
 
 bool Renderer::createSyncObjects() {
-    VkDevice device = vulkanContext.getDevice();
+    VkDevice device = vulkanContext_->getDevice();
 
     imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
     renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
@@ -372,7 +384,7 @@ void Renderer::addCommonDescriptorBindings(DescriptorManager::LayoutBuilder& bui
 }
 
 bool Renderer::createDescriptorSetLayout() {
-    VkDevice device = vulkanContext.getDevice();
+    VkDevice device = vulkanContext_->getDevice();
 
     // Main scene descriptor set layout - uses common bindings (0-11, 13-16)
     DescriptorManager::LayoutBuilder builder(device);
@@ -389,8 +401,8 @@ bool Renderer::createDescriptorSetLayout() {
 }
 
 bool Renderer::createGraphicsPipeline() {
-    VkDevice device = vulkanContext.getDevice();
-    VkExtent2D swapchainExtent = vulkanContext.getSwapchainExtent();
+    VkDevice device = vulkanContext_->getDevice();
+    VkExtent2D swapchainExtent = vulkanContext_->getSwapchainExtent();
 
     // Create pipeline layout (still needed - factory expects it to be provided)
     VkPushConstantRange pushConstantRange{};
@@ -448,7 +460,7 @@ void Renderer::updateLightBuffer(uint32_t currentImage, const Camera& camera) {
 }
 
 bool Renderer::createDescriptorPool() {
-    VkDevice device = vulkanContext.getDevice();
+    VkDevice device = vulkanContext_->getDevice();
 
     // Create the auto-growing descriptor pool with configurable sizes
     // Will automatically grow if exhausted
@@ -459,7 +471,7 @@ bool Renderer::createDescriptorPool() {
 }
 
 bool Renderer::createDescriptorSets() {
-    VkDevice device = vulkanContext.getDevice();
+    VkDevice device = vulkanContext_->getDevice();
 
     // Create descriptor sets for all materials via MaterialRegistry
     // This replaces the hardcoded per-material descriptor set allocation
@@ -588,20 +600,20 @@ bool Renderer::render(const Camera& camera) {
     // Sync performance toggles to pipeline stages (allows runtime toggle changes)
     syncPerformanceToggles();
 
-    VkDevice device = vulkanContext.getDevice();
-    VkSwapchainKHR swapchain = vulkanContext.getSwapchain();
-    VkQueue graphicsQueue = vulkanContext.getGraphicsQueue();
-    VkQueue presentQueue = vulkanContext.getPresentQueue();
+    VkDevice device = vulkanContext_->getDevice();
+    VkSwapchainKHR swapchain = vulkanContext_->getSwapchain();
+    VkQueue graphicsQueue = vulkanContext_->getGraphicsQueue();
+    VkQueue presentQueue = vulkanContext_->getPresentQueue();
 
     // Handle pending resize before acquiring next image
     if (framebufferResized) {
         handleResize();
-        swapchain = vulkanContext.getSwapchain();  // Update after resize
+        swapchain = vulkanContext_->getSwapchain();  // Update after resize
         framebufferResized = false;
     }
 
     // Skip rendering if window is minimized
-    VkExtent2D extent = vulkanContext.getSwapchainExtent();
+    VkExtent2D extent = vulkanContext_->getSwapchainExtent();
     if (extent.width == 0 || extent.height == 0) {
         return false;
     }
@@ -1007,7 +1019,7 @@ bool Renderer::render(const Camera& camera) {
 }
 
 void Renderer::waitIdle() {
-    vulkanContext.waitIdle();
+    vulkanContext_->waitIdle();
 }
 
 void Renderer::waitForPreviousFrame() {
@@ -1047,22 +1059,22 @@ bool Renderer::recreateDepthResources(VkExtent2D newExtent) {
     VkImageView rawView = VK_NULL_HANDLE;
 
     if (!VulkanResourceFactory::createDepthImageAndView(
-        vulkanContext.getDevice(), vulkanContext.getAllocator(),
+        vulkanContext_->getDevice(), vulkanContext_->getAllocator(),
         newExtent, depthFormat,
         rawImage, rawAllocation, rawView)) {
         return false;
     }
 
-    depthImage = ManagedImage::fromRaw(vulkanContext.getAllocator(), rawImage, rawAllocation);
-    depthImageView = ManagedImageView::fromRaw(vulkanContext.getDevice(), rawView);
+    depthImage = ManagedImage::fromRaw(vulkanContext_->getAllocator(), rawImage, rawAllocation);
+    depthImageView = ManagedImageView::fromRaw(vulkanContext_->getDevice(), rawView);
     return true;
 }
 
 bool Renderer::handleResize() {
     // Delegate all resize logic to the coordinator (pass {0,0} to trigger core handler)
     bool success = systems_->resizeCoordinator().performResize(
-        vulkanContext.getDevice(),
-        vulkanContext.getAllocator(),
+        vulkanContext_->getDevice(),
+        vulkanContext_->getAllocator(),
         {0, 0}
     );
     framebufferResized = false;
@@ -1183,7 +1195,7 @@ RenderResources Renderer::buildRenderResources(uint32_t swapchainImageIndex) con
     // Swapchain target
     resources.swapchainRenderPass = renderPass.get();
     resources.swapchainFramebuffer = framebuffers[swapchainImageIndex].get();
-    resources.swapchainExtent = {vulkanContext.getWidth(), vulkanContext.getHeight()};
+    resources.swapchainExtent = {vulkanContext_->getWidth(), vulkanContext_->getHeight()};
 
     // Main scene pipeline
     resources.graphicsPipeline = graphicsPipeline.get();
@@ -1517,11 +1529,11 @@ void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float gra
 
 bool Renderer::initSkinnedMeshRenderer() {
     SkinnedMeshRenderer::InitInfo info{};
-    info.device = vulkanContext.getDevice();
-    info.allocator = vulkanContext.getAllocator();
+    info.device = vulkanContext_->getDevice();
+    info.allocator = vulkanContext_->getAllocator();
     info.descriptorPool = &*descriptorManagerPool;
     info.renderPass = systems_->postProcess().getHDRRenderPass();
-    info.extent = vulkanContext.getSwapchainExtent();
+    info.extent = vulkanContext_->getSwapchainExtent();
     info.shaderPath = resourcePath + "/shaders";
     info.framesInFlight = MAX_FRAMES_IN_FLIGHT;
     info.addCommonBindings = [this](DescriptorManager::LayoutBuilder& builder) {

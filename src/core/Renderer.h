@@ -46,6 +46,11 @@ public:
         SDL_Window* window;
         std::string resourcePath;
         Config config{};  // Optional renderer configuration
+
+        // Optional: pre-initialized VulkanContext (instance already created)
+        // If provided, Renderer takes ownership and completes device init.
+        // If nullptr, Renderer creates and fully initializes a new VulkanContext.
+        std::unique_ptr<VulkanContext> vulkanContext;
     };
 
     /**
@@ -72,8 +77,8 @@ public:
     void waitForPreviousFrame();
 
     // Viewport dimensions
-    uint32_t getWidth() const { return vulkanContext.getWidth(); }
-    uint32_t getHeight() const { return vulkanContext.getHeight(); }
+    uint32_t getWidth() const { return vulkanContext_->getWidth(); }
+    uint32_t getHeight() const { return vulkanContext_->getHeight(); }
 
     // Handle window resize (recreate swapchain and dependent resources)
     bool handleResize();
@@ -93,17 +98,17 @@ public:
     bool isWindowSuspended() const { return windowSuspended; }
 
     // Vulkan handle getters for GUI integration
-    VkInstance getInstance() const { return vulkanContext.getInstance(); }
-    VkPhysicalDevice getPhysicalDevice() const { return vulkanContext.getPhysicalDevice(); }
-    VkDevice getDevice() const { return vulkanContext.getDevice(); }
-    VkQueue getGraphicsQueue() const { return vulkanContext.getGraphicsQueue(); }
-    uint32_t getGraphicsQueueFamily() const { return vulkanContext.getGraphicsQueueFamily(); }
+    VkInstance getInstance() const { return vulkanContext_->getInstance(); }
+    VkPhysicalDevice getPhysicalDevice() const { return vulkanContext_->getPhysicalDevice(); }
+    VkDevice getDevice() const { return vulkanContext_->getDevice(); }
+    VkQueue getGraphicsQueue() const { return vulkanContext_->getGraphicsQueue(); }
+    uint32_t getGraphicsQueueFamily() const { return vulkanContext_->getGraphicsQueueFamily(); }
     VkRenderPass getSwapchainRenderPass() const { return renderPass.get(); }
-    uint32_t getSwapchainImageCount() const { return vulkanContext.getSwapchainImageCount(); }
+    uint32_t getSwapchainImageCount() const { return vulkanContext_->getSwapchainImageCount(); }
 
     // Access to VulkanContext
-    VulkanContext& getVulkanContext() { return vulkanContext; }
-    const VulkanContext& getVulkanContext() const { return vulkanContext; }
+    VulkanContext& getVulkanContext() { return *vulkanContext_; }
+    const VulkanContext& getVulkanContext() const { return *vulkanContext_; }
 
     // Interface accessors - provide access to GUI-facing control interfaces via RendererSystems
     ILocationControl& getLocationControl() { return systems_->locationControl(); }
@@ -241,7 +246,7 @@ private:
     std::string resourcePath;
     Config config_;  // Renderer configuration
 
-    VulkanContext vulkanContext;
+    std::unique_ptr<VulkanContext> vulkanContext_;
 
     // All rendering subsystems - managed with automatic lifecycle
     std::unique_ptr<RendererSystems> systems_;

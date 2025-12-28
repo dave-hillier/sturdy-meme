@@ -6,10 +6,27 @@
 // Required for dynamic dispatch loader - only define in one .cpp file
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
-bool VulkanContext::init(SDL_Window* win) {
-    window = win;
+bool VulkanContext::initInstance() {
+    if (instanceReady) {
+        return true;  // Already initialized
+    }
 
     if (!createInstance()) return false;
+
+    instanceReady = true;
+    SDL_Log("Vulkan instance ready (early init phase complete)");
+    return true;
+}
+
+bool VulkanContext::initDevice(SDL_Window* win) {
+    if (!instanceReady) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+            "initDevice called before initInstance");
+        return false;
+    }
+
+    window = win;
+
     if (!createSurface()) return false;
     if (!selectPhysicalDevice()) return false;
     if (!createLogicalDevice()) return false;
@@ -17,6 +34,13 @@ bool VulkanContext::init(SDL_Window* win) {
     if (!createPipelineCache()) return false;
     if (!createSwapchain()) return false;
 
+    return true;
+}
+
+bool VulkanContext::init(SDL_Window* win) {
+    // Combined init for backwards compatibility
+    if (!initInstance()) return false;
+    if (!initDevice(win)) return false;
     return true;
 }
 

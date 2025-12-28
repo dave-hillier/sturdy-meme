@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdio>
 #include <unordered_set>
+#include "core/vulkan/VulkanContext.h"
 
 #include "Components.h"
 #include "TerrainSystem.h"
@@ -37,6 +38,15 @@ bool Application::init(const std::string& title, int width, int height) {
         return false;
     }
 
+    // Early Vulkan initialization: create instance BEFORE window
+    // This allows validation layers and dispatcher to start earlier
+    auto vulkanContext = std::make_unique<VulkanContext>();
+    if (!vulkanContext->initInstance()) {
+        SDL_Log("Failed to initialize Vulkan instance (early init)");
+        SDL_Quit();
+        return false;
+    }
+
     // InputSystem initializes itself in constructor (RAII)
 
     window = SDL_CreateWindow(title.c_str(), width, height, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
@@ -50,6 +60,7 @@ bool Application::init(const std::string& title, int width, int height) {
     Renderer::InitInfo rendererInfo{};
     rendererInfo.window = window;
     rendererInfo.resourcePath = resourcePath;
+    rendererInfo.vulkanContext = std::move(vulkanContext);  // Transfer ownership
     renderer_ = Renderer::create(rendererInfo);
     if (!renderer_) {
         SDL_Log("Failed to initialize renderer");

@@ -26,6 +26,21 @@ public:
     VulkanContext(const VulkanContext&) = delete;
     VulkanContext& operator=(const VulkanContext&) = delete;
 
+    /**
+     * Two-phase initialization for early Vulkan startup.
+     *
+     * initInstance() can be called before window creation to start
+     * Vulkan instance, validation layers, and dispatcher earlier.
+     *
+     * initDevice() completes initialization once a window is available.
+     */
+    bool initInstance();
+    bool initDevice(SDL_Window* window);
+
+    /**
+     * Combined init for backwards compatibility.
+     * Equivalent to initInstance() + initDevice(window).
+     */
     bool init(SDL_Window* window);
     void shutdown();
 
@@ -56,6 +71,9 @@ public:
 
     const vkb::Device& getVkbDevice() const { return vkbDevice; }
 
+    // Check if instance phase is complete (for two-phase init)
+    bool isInstanceReady() const { return instanceReady; }
+
 private:
     bool createInstance();
     bool createSurface();
@@ -65,6 +83,7 @@ private:
     bool createPipelineCache();
 
     SDL_Window* window = nullptr;
+    bool instanceReady = false;
 
     vkb::Instance vkbInstance;
     vkb::PhysicalDevice vkbPhysicalDevice;

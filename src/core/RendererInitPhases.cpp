@@ -64,11 +64,11 @@ bool Renderer::initDescriptorInfrastructure() {
 }
 
 bool Renderer::initSubsystems(const InitContext& initCtx) {
-    VkDevice device = vulkanContext.getDevice();
-    VmaAllocator allocator = vulkanContext.getAllocator();
-    VkPhysicalDevice physicalDevice = vulkanContext.getPhysicalDevice();
-    VkQueue graphicsQueue = vulkanContext.getGraphicsQueue();
-    VkFormat swapchainImageFormat = vulkanContext.getSwapchainImageFormat();
+    VkDevice device = vulkanContext_->getDevice();
+    VmaAllocator allocator = vulkanContext_->getAllocator();
+    VkPhysicalDevice physicalDevice = vulkanContext_->getPhysicalDevice();
+    VkQueue graphicsQueue = vulkanContext_->getGraphicsQueue();
+    VkFormat swapchainImageFormat = vulkanContext_->getSwapchainImageFormat();
 
     // Initialize post-processing systems (PostProcessSystem, BloomSystem)
     if (!RendererInit::initPostProcessing(*systems_, initCtx, renderPass.get(), swapchainImageFormat)) {
@@ -1026,12 +1026,12 @@ void Renderer::initResizeCoordinator() {
     // Register core resize handler for swapchain, depth buffer, and framebuffers
     systems_->resizeCoordinator().setCoreResizeHandler([this](VkDevice, VmaAllocator) -> VkExtent2D {
         // Recreate swapchain
-        if (!vulkanContext.recreateSwapchain()) {
+        if (!vulkanContext_->recreateSwapchain()) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to recreate swapchain");
             return {0, 0};
         }
 
-        VkExtent2D newExtent = vulkanContext.getSwapchainExtent();
+        VkExtent2D newExtent = vulkanContext_->getSwapchainExtent();
 
         // Handle minimized window (extent = 0)
         if (newExtent.width == 0 || newExtent.height == 0) {
@@ -1061,7 +1061,7 @@ void Renderer::initResizeCoordinator() {
 void Renderer::initControlSubsystems() {
     // Initialize control subsystems in RendererSystems
     // These subsystems implement GUI-facing interfaces directly
-    systems_->initControlSubsystems(vulkanContext, perfToggles);
+    systems_->initControlSubsystems(*vulkanContext_, perfToggles);
 
     // Set up the performance sync callback
     systems_->setPerformanceSyncCallback([this]() { syncPerformanceToggles(); });
