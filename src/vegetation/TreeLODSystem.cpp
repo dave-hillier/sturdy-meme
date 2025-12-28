@@ -674,6 +674,10 @@ void TreeLODSystem::update(float deltaTime, const glm::vec3& cameraPos, const Tr
                 state.blendFactor = 1.0f;  // Far: full impostor
             } else {
                 // Blend zone: between LOD1/LOD0 threshold and impostor threshold
+                // Use LOD1 during blend (simpler geometry fading in from impostor)
+                if (settings.enableReducedDetailLOD) {
+                    state.useLOD1 = true;
+                }
                 float blendStart = settings.enableReducedDetailLOD ?
                                    settings.errorThresholdReduced : settings.errorThresholdFull;
                 float t = (blendStart - screenErrorFull) /
