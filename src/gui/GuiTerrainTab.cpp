@@ -1,8 +1,10 @@
 #include "GuiTerrainTab.h"
 #include "core/interfaces/ITerrainControl.h"
 #include "TerrainSystem.h"
+#include "TerrainTileCache.h"
 
 #include <imgui.h>
+#include <algorithm>
 
 void GuiTerrainTab::render(ITerrainControl& terrainControl) {
     ImGui::Spacing();
@@ -199,28 +201,123 @@ void GuiTerrainTab::render(ITerrainControl& terrainControl) {
 
     // Streaming stats (Ghost of Tsushima style)
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.6f, 0.9f, 0.8f, 1.0f));
-    ImGui::Text("STREAMING");
+    ImGui::Text("HEIGHTMAP STREAMING");
     ImGui::PopStyleColor();
 
-    uint32_t activeTiles = 0;
-    uint32_t maxTiles = 64;  // MAX_ACTIVE_TILES constant
-    if (const auto* tileCachePtr = terrain.getTileCache()) {
-        activeTiles = tileCachePtr->getActiveTileCount();
+    const auto* tileCachePtr = terrain.getTileCache();
+    if (tileCachePtr) {
+        const auto& stats = tileCachePtr->getStats();
+
+        // Active tiles with color coding
+        float tileUsage = static_cast<float>(stats.totalTilesLoaded) / static_cast<float>(stats.maxActiveTiles);
+        ImVec4 tileColor = tileUsage < 0.5f ? ImVec4(0.4f, 0.9f, 0.4f, 1.0f) :
+                           tileUsage < 0.8f ? ImVec4(0.9f, 0.9f, 0.4f, 1.0f) :
+                                              ImVec4(0.9f, 0.4f, 0.4f, 1.0f);
+        ImGui::Text("Active Tiles:");
+        ImGui::SameLine();
+        ImGui::PushStyleColor(ImGuiCol_Text, tileColor);
+        ImGui::Text("%u / %u (%.0f%%)", stats.totalTilesLoaded, stats.maxActiveTiles, tileUsage * 100.0f);
+        ImGui::PopStyleColor();
+
+        // Per-LOD breakdown with color coding
+        ImVec4 lodColors[4] = {
+            ImVec4(0.2f, 0.8f, 0.2f, 1.0f),  // LOD0 - bright green (highest detail)
+            ImVec4(0.5f, 0.9f, 0.3f, 1.0f),  // LOD1 - yellow-green
+            ImVec4(0.9f, 0.7f, 0.2f, 1.0f),  // LOD2 - orange
+            ImVec4(0.7f, 0.4f, 0.2f, 1.0f)   // LOD3 - brown (lowest detail)
+        };
+
+        ImGui::Text("Per-LOD:");
+        for (int i = 0; i < 4; i++) {
+            ImGui::SameLine();
+            ImGui::PushStyleColor(ImGuiCol_Text, lodColors[i]);
+            ImGui::Text("L%d:%u", i, stats.tilesLoadedPerLOD[i]);
+            ImGui::PopStyleColor();
+        }
+
+        // Streaming status
+        if (stats.pendingLoads > 0) {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.9f, 0.9f, 0.4f, 1.0f));
+            ImGui::Text("Streaming: %u pending (+%u/frame)", stats.pendingLoads, stats.tilesLoadedThisFrame);
+            ImGui::PopStyleColor();
+        } else {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 0.9f, 0.4f, 1.0f));
+            ImGui::Text("Streaming: idle");
+            ImGui::PopStyleColor();
+        }
+
+        // Initial load status
+        if (!stats.initialLoadComplete) {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.9f, 0.5f, 0.2f, 1.0f));
+            ImGui::Text("Loading base coverage...");
+            ImGui::PopStyleColor();
+        }
+
+        ImGui::Spacing();
+
+        // Mini tile grid visualization
+        if (ImGui::CollapsingHeader("Tile Grid Visualization", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImDrawList* drawList = ImGui::GetWindowDrawList();
+            ImVec2 gridStart = ImGui::GetCursorScreenPos();
+
+            // Grid settings - show a simplified 8x8 view of the terrain
+            const int gridCells = 8;
+            const float cellSize = 20.0f;
+            const float gridSize = gridCells * cellSize;
+
+            // LOD colors for visualization
+            ImU32 lodColorsU32[4] = {
+                IM_COL32(50, 200, 50, 255),   // LOD0 - bright green
+                IM_COL32(130, 230, 80, 255),  // LOD1 - yellow-green
+                IM_COL32(230, 180, 50, 255),  // LOD2 - orange
+                IM_COL32(180, 100, 50, 255)   // LOD3 - brown
+            };
+            ImU32 noTileColor = IM_COL32(50, 50, 60, 255);  // Dark gray - no tile
+            ImU32 gridLineColor = IM_COL32(80, 80, 100, 128);
+
+            // Get terrain grid dimensions
+            uint32_t lod0TilesX = tileCachePtr->getLOD0TilesX();
+            uint32_t lod0TilesZ = tileCachePtr->getLOD0TilesZ();
+
+            // Calculate scaling (how many LOD0 tiles per grid cell)
+            int tilesPerCell = std::max(1u, lod0TilesX / gridCells);
+
+            // Draw grid cells
+            for (int gz = 0; gz < gridCells; gz++) {
+                for (int gx = 0; gx < gridCells; gx++) {
+                    // Map grid cell to terrain tile coordinates
+                    int tileX = gx * tilesPerCell + tilesPerCell / 2;
+                    int tileZ = gz * tilesPerCell + tilesPerCell / 2;
+
+                    // Get the LOD at this position
+                    int lod = tileCachePtr->getTileLODAt(tileX, tileZ);
+
+                    ImVec2 cellMin(gridStart.x + gx * cellSize, gridStart.y + gz * cellSize);
+                    ImVec2 cellMax(cellMin.x + cellSize - 1, cellMin.y + cellSize - 1);
+
+                    ImU32 cellColor = (lod >= 0 && lod < 4) ? lodColorsU32[lod] : noTileColor;
+                    drawList->AddRectFilled(cellMin, cellMax, cellColor);
+                    drawList->AddRect(cellMin, cellMax, gridLineColor);
+                }
+            }
+
+            // Reserve space for grid
+            ImGui::Dummy(ImVec2(gridSize, gridSize));
+
+            // Legend
+            ImGui::Text("Legend:");
+            for (int i = 0; i < 4; i++) {
+                ImGui::SameLine();
+                ImVec2 pos = ImGui::GetCursorScreenPos();
+                drawList->AddRectFilled(pos, ImVec2(pos.x + 12, pos.y + 12), lodColorsU32[i]);
+                ImGui::Dummy(ImVec2(14, 12));
+                ImGui::SameLine();
+                ImGui::Text("L%d", i);
+            }
+        }
+    } else {
+        ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "Tile cache not available");
     }
-
-    // Active tiles with color coding
-    float tileUsage = static_cast<float>(activeTiles) / static_cast<float>(maxTiles);
-    ImVec4 tileColor = tileUsage < 0.5f ? ImVec4(0.4f, 0.9f, 0.4f, 1.0f) :
-                       tileUsage < 0.8f ? ImVec4(0.9f, 0.9f, 0.4f, 1.0f) :
-                                          ImVec4(0.9f, 0.4f, 0.4f, 1.0f);
-    ImGui::Text("Height Tiles:");
-    ImGui::SameLine();
-    ImGui::PushStyleColor(ImGuiCol_Text, tileColor);
-    ImGui::Text("%u / %u (%.0f%%)", activeTiles, maxTiles, tileUsage * 100.0f);
-    ImGui::PopStyleColor();
-
-    // LOD info
-    ImGui::Text("LOD Ranges: <1km:LOD0, 1-2km:LOD1, 2-4km:LOD2");
 
     ImGui::Spacing();
 

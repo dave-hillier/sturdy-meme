@@ -60,6 +60,16 @@ struct TileInfoGPU {
     glm::ivec4 layerIndex;  // x = layer index in tile array, yzw = padding (std140 alignment)
 };
 
+// Statistics for diagnostics and UI visualization
+struct TileCacheStats {
+    uint32_t tilesLoadedPerLOD[4] = {0, 0, 0, 0};  // Tiles loaded per LOD level
+    uint32_t totalTilesLoaded = 0;
+    uint32_t maxActiveTiles = 0;
+    uint32_t pendingLoads = 0;           // Tiles waiting to be loaded
+    uint32_t tilesLoadedThisFrame = 0;   // Tiles loaded in current frame
+    bool initialLoadComplete = false;     // LOD3 coverage complete
+};
+
 // Terrain tile cache - manages LOD-based tile streaming
 class TerrainTileCache {
 public:
@@ -152,6 +162,17 @@ public:
     // Call this before spawning objects to ensure getHeightAt() returns high-res values
     void preloadTilesAround(float worldX, float worldZ, float radius);
 
+    // Get statistics for diagnostics/UI
+    const TileCacheStats& getStats() const { return stats_; }
+
+    // Get tile LOD at a grid position for visualization
+    // Returns -1 if no tile loaded at this position
+    int getTileLODAt(int tileX, int tileZ) const;
+
+    // Get LOD0 grid dimensions
+    uint32_t getLOD0TilesX() const { return tilesX; }
+    uint32_t getLOD0TilesZ() const { return tilesZ; }
+
     // LOD distance thresholds (can be configured)
     static constexpr float LOD0_MAX_DISTANCE = 1000.0f;  // < 1km: LOD0
     static constexpr float LOD1_MAX_DISTANCE = 2000.0f;  // 1-2km: LOD1
@@ -241,4 +262,16 @@ private:
 
     // Free a layer in the tile array texture
     void freeArrayLayer(int32_t layerIndex);
+
+    // Statistics for diagnostics
+    TileCacheStats stats_;
+
+    // Update statistics after tile operations
+    void updateStats();
+
+    // Load coarse LOD (LOD3) tiles for initial coverage
+    void loadCoarseLODCoverage();
+
+    // Pending tile loads with LOD priority (lower LOD value = higher detail = lower priority)
+    std::vector<std::pair<TileCoord, uint32_t>> pendingTileLoads_;
 };

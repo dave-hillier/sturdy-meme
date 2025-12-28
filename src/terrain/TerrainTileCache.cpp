@@ -138,10 +138,16 @@ bool TerrainTileCache::initInternal(const InitInfo& info) {
     // Initialize all array layers as free
     freeArrayLayers_.fill(true);
 
+    // Initialize stats
+    stats_.maxActiveTiles = MAX_ACTIVE_TILES;
+
     SDL_Log("TerrainTileCache initialized: %s", cacheDirectory.c_str());
     SDL_Log("  Terrain size: %.0fm, Tile resolution: %u, LOD levels: %u",
             terrainSize, tileResolution, numLODLevels);
     SDL_Log("  LOD0 grid: %ux%u tiles", tilesX, tilesZ);
+
+    // Load coarse LOD (LOD3) tiles for initial coverage before any high-res streaming
+    loadCoarseLODCoverage();
 
     return true;
 }
@@ -257,6 +263,9 @@ TileCoord TerrainTileCache::worldToTileCoord(float worldX, float worldZ, uint32_
 }
 
 void TerrainTileCache::updateActiveTiles(const glm::vec3& cameraPos, float loadRadius, float unloadRadius) {
+    // Reset per-frame stats
+    stats_.tilesLoadedThisFrame = 0;
+
     // Determine which tiles should be loaded based on camera position
     std::vector<std::pair<TileCoord, uint32_t>> tilesToLoad;
     std::vector<uint64_t> tilesToUnload;
@@ -321,7 +330,7 @@ void TerrainTileCache::updateActiveTiles(const glm::vec3& cameraPos, float loadR
         }
     }
 
-    // Find tiles to unload (too far from camera)
+    // Find tiles to unload (too far from camera OR superseded by higher-detail LOD)
     for (auto& [key, tile] : loadedTiles) {
         float tileCenterX = (tile.worldMinX + tile.worldMaxX) * 0.5f;
         float tileCenterZ = (tile.worldMinZ + tile.worldMaxZ) * 0.5f;
@@ -329,8 +338,16 @@ void TerrainTileCache::updateActiveTiles(const glm::vec3& cameraPos, float loadR
         float dist = std::sqrt((tileCenterX - camX) * (tileCenterX - camX) +
                                (tileCenterZ - camZ) * (tileCenterZ - camZ));
 
+        // Unload if too far OR if a higher-detail tile now covers this area
         if (dist > unloadRadius) {
             tilesToUnload.push_back(key);
+        } else if (tile.lod > 0) {
+            // Check if a higher-detail tile exists for this area
+            uint32_t higherLOD = tile.lod - 1;
+            TileCoord higherCoord = worldToTileCoord(tileCenterX, tileCenterZ, higherLOD);
+            if (isTileLoaded(higherCoord, higherLOD)) {
+                tilesToUnload.push_back(key);
+            }
         }
     }
 
@@ -349,6 +366,13 @@ void TerrainTileCache::updateActiveTiles(const glm::vec3& cameraPos, float loadR
         }
     }
 
+    // Sort tiles by LOD: higher LOD values (coarser detail) load FIRST
+    // This ensures LOD3 (coarsest) always loads before LOD0 (finest)
+    std::sort(tilesToLoad.begin(), tilesToLoad.end(),
+              [](const auto& a, const auto& b) {
+                  return a.second > b.second;  // Higher LOD = higher priority
+              });
+
     // Load new tiles (limit per frame to avoid stalls)
     constexpr uint32_t MAX_TILES_PER_FRAME = 4;
     uint32_t tilesLoadedThisFrame = 0;
@@ -362,6 +386,10 @@ void TerrainTileCache::updateActiveTiles(const glm::vec3& cameraPos, float loadR
         }
     }
 
+    // Track pending loads for stats
+    stats_.pendingLoads = static_cast<uint32_t>(tilesToLoad.size()) - tilesLoadedThisFrame;
+    stats_.tilesLoadedThisFrame = tilesLoadedThisFrame;
+
     // Update active tiles list
     activeTiles.clear();
     for (auto& [key, tile] : loadedTiles) {
@@ -369,6 +397,9 @@ void TerrainTileCache::updateActiveTiles(const glm::vec3& cameraPos, float loadR
             activeTiles.push_back(&tile);
         }
     }
+
+    // Update statistics
+    updateStats();
 
     // Update tile info buffer
     updateTileInfoBuffer();
@@ -841,4 +872,89 @@ void TerrainTileCache::freeArrayLayer(int32_t layerIndex) {
     if (layerIndex >= 0 && layerIndex < static_cast<int32_t>(MAX_ACTIVE_TILES)) {
         freeArrayLayers_[layerIndex] = true;
     }
+}
+
+void TerrainTileCache::updateStats() {
+    // Reset per-LOD counts
+    for (uint32_t i = 0; i < 4; i++) {
+        stats_.tilesLoadedPerLOD[i] = 0;
+    }
+    stats_.totalTilesLoaded = 0;
+
+    // Count tiles by LOD
+    for (const auto& [key, tile] : loadedTiles) {
+        if (tile.loaded && tile.lod < 4) {
+            stats_.tilesLoadedPerLOD[tile.lod]++;
+            stats_.totalTilesLoaded++;
+        }
+    }
+
+    // Check if LOD3 coverage is complete (all LOD3 tiles loaded)
+    uint32_t lod3TilesX = tilesX >> 3;
+    uint32_t lod3TilesZ = tilesZ >> 3;
+    if (lod3TilesX < 1) lod3TilesX = 1;
+    if (lod3TilesZ < 1) lod3TilesZ = 1;
+    uint32_t expectedLOD3Tiles = lod3TilesX * lod3TilesZ;
+    stats_.initialLoadComplete = (stats_.tilesLoadedPerLOD[3] >= expectedLOD3Tiles);
+}
+
+void TerrainTileCache::loadCoarseLODCoverage() {
+    // Load all LOD3 (coarsest) tiles to provide base coverage
+    // This happens synchronously at startup to ensure immediate terrain visibility
+    const uint32_t lod = numLODLevels - 1;  // Coarsest LOD (usually 3)
+
+    uint32_t lodTilesX = tilesX >> lod;
+    uint32_t lodTilesZ = tilesZ >> lod;
+    if (lodTilesX < 1) lodTilesX = 1;
+    if (lodTilesZ < 1) lodTilesZ = 1;
+
+    uint32_t tilesLoaded = 0;
+    uint32_t tilesFailed = 0;
+
+    SDL_Log("TerrainTileCache: Loading LOD%u coverage (%ux%u tiles)...", lod, lodTilesX, lodTilesZ);
+
+    for (uint32_t tz = 0; tz < lodTilesZ; tz++) {
+        for (uint32_t tx = 0; tx < lodTilesX; tx++) {
+            TileCoord coord{static_cast<int32_t>(tx), static_cast<int32_t>(tz)};
+            if (loadTile(coord, lod)) {
+                tilesLoaded++;
+            } else {
+                tilesFailed++;
+            }
+        }
+    }
+
+    // Update stats
+    updateStats();
+
+    SDL_Log("TerrainTileCache: LOD%u coverage complete - %u tiles loaded, %u failed",
+            lod, tilesLoaded, tilesFailed);
+}
+
+int TerrainTileCache::getTileLODAt(int tileX, int tileZ) const {
+    // Check from highest detail (LOD0) to lowest (LOD3)
+    // Return the first (highest detail) LOD that has a tile covering this position
+    for (uint32_t lod = 0; lod < numLODLevels; lod++) {
+        // Convert LOD0 grid position to this LOD's grid
+        uint32_t lodTilesX = tilesX >> lod;
+        uint32_t lodTilesZ = tilesZ >> lod;
+        if (lodTilesX < 1) lodTilesX = 1;
+        if (lodTilesZ < 1) lodTilesZ = 1;
+
+        // Scale the LOD0 position to this LOD's grid
+        int lodTileX = tileX >> lod;
+        int lodTileZ = tileZ >> lod;
+
+        // Check bounds
+        if (lodTileX < 0 || lodTileX >= static_cast<int>(lodTilesX) ||
+            lodTileZ < 0 || lodTileZ >= static_cast<int>(lodTilesZ)) {
+            continue;
+        }
+
+        TileCoord coord{lodTileX, lodTileZ};
+        if (isTileLoaded(coord, lod)) {
+            return static_cast<int>(lod);
+        }
+    }
+    return -1;  // No tile loaded
 }
