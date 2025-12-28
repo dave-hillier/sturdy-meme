@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vulkan/vulkan.h>
+#include <vulkan/vulkan.hpp>
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
 #include <vector>
@@ -148,18 +149,18 @@ public:
     void setParams(const CullingParams& params) { params_ = params; }
     const CullingParams& getParams() const { return params_; }
 
-    // Get output buffers for rendering (current buffer set)
-    VkBuffer getOutputBuffer() const {
-        return cullOutputBuffers_.empty() ? VK_NULL_HANDLE : cullOutputBuffers_[currentBufferSet_];
+    // Get output buffers for rendering (indexed by frameIndex for proper triple-buffering)
+    // IMPORTANT: Always pass the same frameIndex used for recordCulling() to ensure
+    // compute and graphics passes use the same buffer set.
+    // Uses FrameIndexedBuffers to enforce this pattern and prevent desync bugs.
+    VkBuffer getOutputBuffer(uint32_t frameIndex) const {
+        return cullOutputBuffers_.getVk(frameIndex);
     }
-    VkBuffer getIndirectBuffer() const {
-        return cullIndirectBuffers_.empty() ? VK_NULL_HANDLE : cullIndirectBuffers_[currentBufferSet_];
+    VkBuffer getIndirectBuffer(uint32_t frameIndex) const {
+        return cullIndirectBuffers_.getVk(frameIndex);
     }
     VkBuffer getTreeRenderDataBuffer() const { return treeRenderDataBuffer_; }
     uint32_t getMaxLeavesPerType() const { return maxLeavesPerType_; }
-
-    // Swap buffer sets (call after rendering completes)
-    void swapBufferSets() { currentBufferSet_ = (currentBufferSet_ + 1) % maxFramesInFlight_; }
 
     VkDevice getDevice() const { return device_; }
 
@@ -196,16 +197,12 @@ private:
     ManagedDescriptorSetLayout cullDescriptorSetLayout_;
     std::vector<VkDescriptorSet> cullDescriptorSets_;
 
-    // Triple-buffered output buffers (matches frames in flight)
-    // Buffer set count MUST match frames in flight to avoid compute/graphics race conditions.
-    uint32_t currentBufferSet_ = 0;
-
-    std::vector<VkBuffer> cullOutputBuffers_;
-    std::vector<VmaAllocation> cullOutputAllocations_;
-    VkDeviceSize cullOutputBufferSize_ = 0;
-
-    std::vector<VkBuffer> cullIndirectBuffers_;
-    std::vector<VmaAllocation> cullIndirectAllocations_;
+    // Triple-buffered output buffers using FrameIndexedBuffers for type-safe access.
+    // This enforces that buffer access always uses frameIndex, preventing the common
+    // desync bug where a separate counter gets out of sync with frameIndex.
+    BufferUtils::FrameIndexedBuffers cullOutputBuffers_;
+    BufferUtils::FrameIndexedBuffers cullIndirectBuffers_;
+    vk::DeviceSize cullOutputBufferSize_ = 0;
 
     BufferUtils::PerFrameBufferSet cullUniformBuffers_;
 

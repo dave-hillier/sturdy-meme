@@ -15,17 +15,8 @@ std::unique_ptr<TreeBranchCulling> TreeBranchCulling::create(const InitInfo& inf
 }
 
 TreeBranchCulling::~TreeBranchCulling() {
-    // Cleanup triple-buffered output buffers
-    for (size_t i = 0; i < outputBuffers_.size(); ++i) {
-        if (outputBuffers_[i] != VK_NULL_HANDLE) {
-            vmaDestroyBuffer(allocator_, outputBuffers_[i], outputAllocations_[i]);
-        }
-    }
-    for (size_t i = 0; i < indirectBuffers_.size(); ++i) {
-        if (indirectBuffers_[i] != VK_NULL_HANDLE) {
-            vmaDestroyBuffer(allocator_, indirectBuffers_[i], indirectAllocations_[i]);
-        }
-    }
+    // outputBuffers_ and indirectBuffers_ are FrameIndexedBuffers
+    // which clean up automatically via their destructor
 
     BufferUtils::destroyBuffers(allocator_, uniformBuffers_);
 
@@ -144,40 +135,22 @@ bool TreeBranchCulling::createBuffers() {
         return false;
     }
 
-    // Output buffers: triple-buffered visible instances (GPU only)
+    // Output buffers: triple-buffered visible instances using FrameIndexedBuffers
     outputBufferSize_ = maxTrees_ * sizeof(BranchShadowInstanceGPU);
-    bufferInfo.size = outputBufferSize_;
-    bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-    allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-    allocInfo.flags = 0;
-
-    outputBuffers_.resize(maxFramesInFlight_);
-    outputAllocations_.resize(maxFramesInFlight_);
-
-    for (uint32_t i = 0; i < maxFramesInFlight_; ++i) {
-        if (vmaCreateBuffer(allocator_, &bufferInfo, &allocInfo,
-                            &outputBuffers_[i], &outputAllocations_[i], nullptr) != VK_SUCCESS) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                         "TreeBranchCulling: Failed to create output buffer %u", i);
-            return false;
-        }
+    if (!outputBuffers_.resize(
+            allocator_, maxFramesInFlight_, outputBufferSize_,
+            vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eVertexBuffer)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeBranchCulling: Failed to create output buffers");
+        return false;
     }
 
-    // Indirect draw command buffers (one VkDrawIndexedIndirectCommand per mesh group)
-    VkDeviceSize indirectBufferSize = maxMeshGroups_ * sizeof(VkDrawIndexedIndirectCommand);
-    bufferInfo.size = indirectBufferSize;
-    bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
-
-    indirectBuffers_.resize(maxFramesInFlight_);
-    indirectAllocations_.resize(maxFramesInFlight_);
-
-    for (uint32_t i = 0; i < maxFramesInFlight_; ++i) {
-        if (vmaCreateBuffer(allocator_, &bufferInfo, &allocInfo,
-                            &indirectBuffers_[i], &indirectAllocations_[i], nullptr) != VK_SUCCESS) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                         "TreeBranchCulling: Failed to create indirect buffer %u", i);
-            return false;
-        }
+    // Indirect draw command buffers using FrameIndexedBuffers
+    vk::DeviceSize indirectBufferSize = maxMeshGroups_ * sizeof(VkDrawIndexedIndirectCommand);
+    if (!indirectBuffers_.resize(
+            allocator_, maxFramesInFlight_, indirectBufferSize,
+            vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eIndirectBuffer)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeBranchCulling: Failed to create indirect buffers");
+        return false;
     }
 
     // Uniform buffers (per-frame)
@@ -212,15 +185,15 @@ void TreeBranchCulling::updateDescriptorSets() {
         inputBufferInfo.offset = 0;
         inputBufferInfo.range = inputBufferSize_;
 
-        // Output buffer (binding 1)
+        // Output buffer (binding 1) - using FrameIndexedBuffers for type-safe access
         VkDescriptorBufferInfo outputBufferInfo{};
-        outputBufferInfo.buffer = outputBuffers_[i];
+        outputBufferInfo.buffer = outputBuffers_.getVk(i);
         outputBufferInfo.offset = 0;
-        outputBufferInfo.range = outputBufferSize_;
+        outputBufferInfo.range = static_cast<VkDeviceSize>(outputBufferSize_);
 
-        // Indirect buffer (binding 2)
+        // Indirect buffer (binding 2) - using FrameIndexedBuffers for type-safe access
         VkDescriptorBufferInfo indirectBufferInfo{};
-        indirectBufferInfo.buffer = indirectBuffers_[i];
+        indirectBufferInfo.buffer = indirectBuffers_.getVk(i);
         indirectBufferInfo.offset = 0;
         indirectBufferInfo.range = maxMeshGroups_ * sizeof(VkDrawIndexedIndirectCommand);
 
@@ -398,6 +371,30 @@ void TreeBranchCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
         return;
     }
 
+    // Reset indirect draw commands on CPU side BEFORE dispatch.
+    // This is critical: the shader's barrier() only syncs within a workgroup,
+    // so other workgroups may atomicAdd before workgroup 0 finishes initialization.
+    // This was the root cause of tree corruption/flickering in the woods.
+    std::vector<VkDrawIndexedIndirectCommand> resetCmds(meshGroups_.size());
+    for (size_t g = 0; g < meshGroups_.size(); ++g) {
+        resetCmds[g].indexCount = meshGroups_[g].indexCount;
+        resetCmds[g].instanceCount = 0;  // Will be incremented atomically by shader
+        resetCmds[g].firstIndex = 0;
+        resetCmds[g].vertexOffset = 0;
+        resetCmds[g].firstInstance = 0;
+    }
+    vkCmdUpdateBuffer(cmd, indirectBuffers_.getVk(frameIndex), 0,
+                      resetCmds.size() * sizeof(VkDrawIndexedIndirectCommand),
+                      resetCmds.data());
+
+    // Memory barrier to ensure buffer update completes before compute shader reads
+    VkMemoryBarrier resetBarrier{};
+    resetBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    resetBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    resetBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         0, 1, &resetBarrier, 0, nullptr, 0, nullptr);
+
     // Update uniforms
     BranchShadowCullUniforms uniforms{};
     uniforms.cameraPosition = glm::vec4(cameraPos, 1.0f);
@@ -439,15 +436,9 @@ void TreeBranchCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
 }
 
 VkBuffer TreeBranchCulling::getInstanceBuffer(uint32_t frameIndex) const {
-    if (outputBuffers_.empty() || frameIndex >= outputBuffers_.size()) {
-        return VK_NULL_HANDLE;
-    }
-    return outputBuffers_[frameIndex];
+    return outputBuffers_.getVk(frameIndex);
 }
 
 VkBuffer TreeBranchCulling::getIndirectBuffer(uint32_t frameIndex) const {
-    if (indirectBuffers_.empty() || frameIndex >= indirectBuffers_.size()) {
-        return VK_NULL_HANDLE;
-    }
-    return indirectBuffers_[frameIndex];
+    return indirectBuffers_.getVk(frameIndex);
 }

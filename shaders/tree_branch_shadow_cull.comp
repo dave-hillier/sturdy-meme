@@ -75,18 +75,10 @@ void main() {
     // Clamp to prevent infinite loop if uniform data is garbage
     uint safeNumMeshGroups = min(uniforms.numMeshGroups, MAX_MESH_GROUPS);
 
-    // Initialize indirect commands (first thread in first workgroup)
-    if (gl_LocalInvocationID.x == 0 && gl_WorkGroupID.x == 0) {
-        for (uint g = 0; g < safeNumMeshGroups; g++) {
-            drawCmds[g].indexCount = meshGroups[g].indexCount;
-            drawCmds[g].instanceCount = 0;
-            drawCmds[g].firstIndex = 0;
-            drawCmds[g].vertexOffset = 0;
-            drawCmds[g].firstInstance = 0;
-        }
-    }
-    barrier();
-    memoryBarrierBuffer();
+    // NOTE: Indirect command initialization is done on CPU side via vkCmdUpdateBuffer
+    // BEFORE dispatch. Shader-side init with barrier() only syncs within a workgroup,
+    // causing race conditions when multiple workgroups run in parallel (other workgroups
+    // may atomicAdd before workgroup 0 finishes zeroing the counters).
 
     // Early exit if no work to do (also prevents buffer access with uninitialized data)
     if (treeIdx >= uniforms.numTrees || safeNumMeshGroups == 0) return;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vulkan/vulkan.h>
+#include <vulkan/vulkan.hpp>
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
 #include <vector>
@@ -146,14 +147,12 @@ private:
     VkBuffer meshGroupBuffer_ = VK_NULL_HANDLE;
     VmaAllocation meshGroupAllocation_ = VK_NULL_HANDLE;
 
-    // Per-frame output buffers
-    std::vector<VkBuffer> outputBuffers_;
-    std::vector<VmaAllocation> outputAllocations_;
-    VkDeviceSize outputBufferSize_ = 0;
+    // Per-frame output buffers using FrameIndexedBuffers for type-safe access
+    BufferUtils::FrameIndexedBuffers outputBuffers_;
+    vk::DeviceSize outputBufferSize_ = 0;
 
     // Indirect draw command buffers (one command per mesh group per cascade)
-    std::vector<VkBuffer> indirectBuffers_;
-    std::vector<VmaAllocation> indirectAllocations_;
+    BufferUtils::FrameIndexedBuffers indirectBuffers_;
 
     // Per-frame uniform buffers
     BufferUtils::PerFrameBufferSet uniformBuffers_;
