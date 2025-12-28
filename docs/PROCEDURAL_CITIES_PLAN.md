@@ -26,6 +26,28 @@ The following key decisions have been made:
 | **Street Networks** | Hybrid: Space colonization + A* terrain-following | L-systems alone insufficient; driven by POIs and terrain constraints |
 | **Building Styles** | Multiple period styles per building type | Norman, Early English Gothic, regional material variations |
 | **Asset Pipeline** | Procedural blockout → hand-crafted replacement | Start procedural, swap in artist assets as available |
+| **Defensive Structures** | Required for towns, castles for key settlements | South coast = contested frontier; French raids, piracy |
+
+### South Coast Defensive Context
+
+The south coast of England was a **contested frontier** throughout the medieval period:
+
+- **Norman Conquest Legacy**: Castles at strategic points (Arundel, Lewes, Pevensey, Hastings)
+- **French Raids**: Ongoing threat requiring town defenses (Southampton burned 1338)
+- **Cinque Ports**: Defensive confederation (Hastings, Romney, Hythe, Dover, Sandwich + Rye, Winchelsea)
+- **Piracy**: Coastal settlements needed protection
+- **Trade Routes**: Valuable ports required walls and harbor defenses
+
+**Defensive elements by settlement type:**
+
+| Settlement Type | Defenses |
+|----------------|----------|
+| Hamlet | None (flee to nearest fortification) |
+| Village | Church as refuge (thick walls, tower) |
+| Town | Town walls, gates, towers |
+| Fishing Village | Possible watchtower, beacon |
+| Port Town | Full walls + harbor chain/boom |
+| Castle Settlement | Castle + dependent town |
 
 ### Street Network Algorithm Rationale
 
@@ -179,11 +201,15 @@ This era represents the peak of medieval English civilization before the Black D
 | Inn/Tavern | | ✓ | ✓ | ✓ |
 | Market Cross | | ✓ | ✓ | |
 | Guild Hall | | | ✓ | |
-| Town Wall/Gate | | | ✓ | |
+| **Town Wall/Gate** | | | ✓ | |
+| **Towers** | | | ✓ | |
+| **Castle** | | ✓ | ✓ | |
 | Warehouse | | | ✓ | ✓ |
 | Quay/Jetty | | | | ✓ |
 | Net Loft | | | | ✓ |
 | Fish Market | | | | ✓ |
+| **Harbor Defense** | | | | ✓ |
+| **Watchtower/Beacon** | | | | ✓ |
 
 ---
 
@@ -196,12 +222,13 @@ This era represents the peak of medieval English civilization before the Black D
 5. [Phase 3: Building Exterior Generation](#5-phase-3-building-exterior-generation)
 6. [Phase 3b: Building Interior Generation](#6-phase-3b-building-interior-generation)
 7. [Phase 4: Street & Infrastructure Networks](#7-phase-4-street--infrastructure-networks)
-8. [Phase 5: Props & Detail Population](#8-phase-5-props--detail-population)
-9. [Phase 6: Terrain Integration & Subterranean](#9-phase-6-terrain-integration--subterranean)
-10. [Phase 7: LOD & Streaming System](#10-phase-7-lod--streaming-system)
-11. [Phase 8: Integration & Polish](#11-phase-8-integration--polish)
-12. [Quality Assurance & Testing](#12-quality-assurance--testing)
-13. [Research References](#13-research-references)
+8. [Phase 4b: Defensive Structures](#8-phase-4b-defensive-structures)
+9. [Phase 5: Props & Detail Population](#9-phase-5-props--detail-population)
+10. [Phase 5b: Terrain Integration & Subterranean](#10-phase-5b-terrain-integration--subterranean)
+11. [Phase 6: LOD & Streaming System](#11-phase-6-lod--streaming-system)
+12. [Phase 7: Integration & Polish](#12-phase-7-integration--polish)
+13. [Quality Assurance & Testing](#13-quality-assurance--testing)
+14. [Research References](#14-research-references)
 
 ---
 
@@ -2137,6 +2164,508 @@ public:
 
 ---
 
+## 6b. Phase 4b: Defensive Structures
+
+### 6b.1 Overview
+
+Defensive structures are critical for south coast settlements. This phase covers walls, gates, towers, castles, and harbor defenses.
+
+### 6b.2 Town Walls
+
+#### 6b.2.1 Wall Generation
+
+```cpp
+struct TownWall {
+    std::vector<glm::vec2> path;        // Wall centerline
+    float height = 6.0f;                // Wall height
+    float thickness = 2.0f;             // Wall thickness
+    float wallWalkWidth = 1.5f;         // Width of parapet walk
+
+    // Construction
+    enum class Construction {
+        Stone,              // Full stone (wealthy towns)
+        StoneRubble,        // Rubble core with stone facing
+        FlintWithDressing,  // Flint with stone quoins (regional)
+        EarthAndTimber      // Earth bank with timber palisade (early/temporary)
+    } construction;
+
+    // Features
+    bool hasMerlons = true;             // Crenellations
+    bool hasArrowLoops = true;
+    float merlonHeight = 1.0f;
+    float merlonWidth = 0.8f;
+    float crenelWidth = 0.5f;
+};
+
+class TownWallGenerator {
+public:
+    struct Config {
+        float towerSpacing = 40.0f;         // Distance between towers
+        float gateMinSpacing = 100.0f;      // Min distance between gates
+        int maxGates = 4;
+        float wallSetback = 5.0f;           // Distance from buildings to wall
+    };
+
+    // Generate wall path around settlement
+    std::vector<glm::vec2> generateWallPath(
+        const SettlementDefinition& settlement,
+        const std::vector<BuildingLot>& lots,
+        const TerrainAnalysis& terrain
+    );
+
+    // Generate wall mesh with towers
+    WallSystem generate(
+        const std::vector<glm::vec2>& path,
+        const Config& config,
+        uint64_t seed
+    );
+
+private:
+    // Find optimal tower positions
+    std::vector<glm::vec2> placeTowers(
+        const std::vector<glm::vec2>& path,
+        float spacing
+    );
+
+    // Find gate positions (at road entries)
+    std::vector<GatePosition> placeGates(
+        const std::vector<glm::vec2>& path,
+        const StreetNetwork& streets,
+        const RoadNetwork& externalRoads
+    );
+
+    // Adapt wall to terrain (follow contours, cut through slopes)
+    void adaptToTerrain(
+        std::vector<glm::vec2>& path,
+        const TerrainAnalysis& terrain
+    );
+};
+```
+
+#### 6b.2.2 Wall Segments
+
+```cpp
+struct WallSegment {
+    glm::vec2 start;
+    glm::vec2 end;
+    TownWall::Construction construction;
+
+    // Terrain adaptation
+    float startHeight;          // Ground level at start
+    float endHeight;            // Ground level at end
+    bool requiresCut;           // Needs terrain excavation
+    bool requiresFill;          // Needs foundation fill
+
+    // Features along segment
+    bool hasWallWalk;
+    std::vector<float> arrowLoopPositions;  // Parametric positions [0,1]
+};
+
+class WallMeshGenerator {
+public:
+    Mesh generateSegment(const WallSegment& segment, const TownWall& config);
+    Mesh generateMerlons(const WallSegment& segment, const TownWall& config);
+    Mesh generateWallWalk(const WallSegment& segment, const TownWall& config);
+};
+```
+
+### 6b.3 Towers
+
+#### 6b.3.1 Tower Types
+
+```cpp
+enum class TowerType {
+    Interval,           // Regular wall tower (rectangular or D-shaped)
+    Corner,             // Corner tower (larger, often round)
+    Gate,               // Gate tower (flanking gate passage)
+    Keep,               // Main defensive tower (castle)
+    Watchtower,         // Standalone observation post
+    Beacon              // Coastal warning beacon
+};
+
+struct Tower {
+    glm::vec2 position;
+    TowerType type;
+    float rotation;             // Facing direction
+
+    // Dimensions
+    float width = 6.0f;
+    float depth = 6.0f;
+    float height = 12.0f;       // Total height
+
+    // Shape
+    enum class Shape {
+        Square,
+        Rectangular,
+        Round,
+        DShaped,                // Flat inside, curved outside
+        Polygonal               // Octagonal, etc.
+    } shape;
+
+    // Features
+    int floors = 3;
+    bool hasBattlement = true;
+    bool hasMachicolation = false;  // Overhanging parapet (later period)
+    bool hasRoof = false;           // Some towers have conical roofs
+
+    // Interior access
+    bool hasInterior = true;
+    glm::vec2 doorPosition;         // Access from wall walk
+};
+
+class TowerGenerator {
+public:
+    Tower generate(
+        TowerType type,
+        glm::vec2 position,
+        const TownWall& wallConfig,
+        uint64_t seed
+    );
+
+    Mesh generateExterior(const Tower& tower);
+    FloorPlan generateInterior(const Tower& tower);
+};
+```
+
+### 6b.4 Gates
+
+#### 6b.4.1 Gate Types
+
+```cpp
+enum class GateType {
+    Simple,             // Single arch, no towers
+    Towered,            // Flanking towers
+    Barbican,           // Extended gate complex
+    Postern,            // Small secondary gate
+    Water               // Water gate (harbor access)
+};
+
+struct TownGate {
+    glm::vec2 position;
+    float rotation;             // Perpendicular to wall
+    GateType type;
+
+    // Passage
+    float passageWidth = 4.0f;
+    float passageHeight = 5.0f;
+    int archType;               // 0=round (Norman), 1=pointed (Gothic)
+
+    // Defenses
+    bool hasPortcullis = true;
+    bool hasDrawbridge = false; // If over ditch
+    bool hasMurderHoles = true; // Holes in passage ceiling
+    int doorCount = 2;          // Outer and inner doors
+
+    // Flanking towers
+    bool hasTowers = true;
+    Tower leftTower;
+    Tower rightTower;
+
+    // Barbican (extended outer defense)
+    bool hasBarbican = false;
+    float barbicanLength = 15.0f;
+};
+
+class GateGenerator {
+public:
+    TownGate generate(
+        GateType type,
+        glm::vec2 position,
+        float rotation,
+        const TownWall& wallConfig,
+        uint64_t seed
+    );
+
+    Mesh generateExterior(const TownGate& gate);
+    FloorPlan generateInterior(const TownGate& gate);
+
+private:
+    Mesh generatePortcullis(const TownGate& gate);
+    Mesh generateDrawbridge(const TownGate& gate);
+};
+```
+
+### 6b.5 Castles
+
+#### 6b.5.1 Castle Types
+
+```cpp
+enum class CastleType {
+    MotteAndBailey,     // Earth mound + enclosed yard (early Norman)
+    ShellKeep,          // Stone wall on motte top
+    RectangularKeep,    // Classic Norman tower keep
+    RoundKeep,          // Cylindrical keep (later)
+    Concentric,         // Multiple wall circuits (advanced)
+    Coastal             // Adapted for harbor defense
+};
+
+struct Castle {
+    glm::vec2 position;
+    CastleType type;
+    float rotation;
+
+    // Keep (main tower)
+    struct Keep {
+        glm::vec2 position;
+        float width, depth, height;
+        int floors;
+        Tower::Shape shape;
+        bool hasCornerTurrets;
+        bool hasForebuilding;       // Protected entrance structure
+    } keep;
+
+    // Bailey (enclosed courtyard)
+    struct Bailey {
+        std::vector<glm::vec2> wallPath;
+        float wallHeight;
+        std::vector<Tower> towers;
+        std::vector<TownGate> gates;
+
+        // Buildings within bailey
+        std::vector<BuildingPlacement> buildings;  // Hall, chapel, stables, etc.
+    };
+    std::vector<Bailey> baileys;    // Can have inner and outer bailey
+
+    // Motte (earth mound) - for motte-and-bailey
+    struct Motte {
+        glm::vec2 center;
+        float baseRadius;
+        float topRadius;
+        float height;
+        bool hasShellWall;
+    };
+    std::optional<Motte> motte;
+
+    // Ditch/moat
+    struct Ditch {
+        std::vector<glm::vec2> path;
+        float width;
+        float depth;
+        bool isWet;                 // Water-filled moat
+    };
+    std::optional<Ditch> ditch;
+};
+
+class CastleGenerator {
+public:
+    struct Config {
+        CastleType type;
+        float sizeMultiplier = 1.0f;
+        bool generateInteriors = true;
+        float age = 0.5f;           // 0=new, 1=ancient (affects weathering)
+    };
+
+    Castle generate(
+        glm::vec2 position,
+        const TerrainAnalysis& terrain,
+        const Config& config,
+        uint64_t seed
+    );
+
+private:
+    // Type-specific generators
+    Castle generateMotteAndBailey(glm::vec2 position, const Config& config, uint64_t seed);
+    Castle generateRectangularKeep(glm::vec2 position, const Config& config, uint64_t seed);
+    Castle generateCoastalCastle(glm::vec2 position, const Config& config, uint64_t seed);
+
+    // Terrain modification for castle
+    std::vector<TerrainModification> generateTerrainMods(const Castle& castle);
+};
+```
+
+#### 6b.5.2 Castle Interior Buildings
+
+```cpp
+// Buildings typically found within a castle bailey
+enum class CastleBuildingType {
+    GreatHall,          // Main hall for feasting/courts
+    SolarBlock,         // Lord's private chambers
+    Chapel,             // Castle chapel
+    Kitchen,            // Separate building (fire risk)
+    Stables,            // Horse stabling
+    Barracks,           // Garrison accommodation
+    Armoury,            // Weapon storage
+    Granary,            // Food storage
+    Well,               // Water supply (critical)
+    Smithy,             // Blacksmith
+    Bakehouse,          // Bread oven
+    Brewhouse,          // Beer brewing
+    Prison              // Dungeon/cells
+};
+
+struct CastleBuildingSpec {
+    CastleBuildingType type;
+    bool required;              // Must be present
+    float minArea;
+    float maxArea;
+    bool mustBeAgainstWall;     // Built against curtain wall
+    std::vector<CastleBuildingType> nearTo;  // Preferred adjacencies
+};
+```
+
+### 6b.6 Harbor Defenses
+
+#### 6b.6.1 Port Fortifications
+
+```cpp
+struct HarborDefense {
+    // Harbor entrance control
+    struct ChainBoom {
+        glm::vec2 tower1Position;   // Chain anchor point 1
+        glm::vec2 tower2Position;   // Chain anchor point 2
+        float chainLength;
+        bool hasWindlass;           // For raising/lowering
+    };
+    std::optional<ChainBoom> chainBoom;
+
+    // Defensive towers
+    std::vector<Tower> harborTowers;
+
+    // Quay walls (defensible)
+    struct DefensibleQuay {
+        std::vector<glm::vec2> path;
+        float wallHeight;
+        bool hasBattlements;
+        std::vector<float> arrowLoopPositions;
+    };
+    std::vector<DefensibleQuay> quayWalls;
+
+    // Coastal watchtower
+    std::optional<Tower> watchtower;
+
+    // Beacon for warning signals
+    struct Beacon {
+        glm::vec2 position;
+        float height;
+        bool hasShelter;            // Weather protection for fire
+    };
+    std::optional<Beacon> beacon;
+};
+
+class HarborDefenseGenerator {
+public:
+    HarborDefense generate(
+        const SettlementDefinition& settlement,
+        const std::vector<glm::vec2>& harborPath,
+        const TerrainAnalysis& terrain,
+        uint64_t seed
+    );
+
+private:
+    // Find optimal chain boom positions
+    ChainBoom placeChainBoom(
+        const std::vector<glm::vec2>& harborPath,
+        float harborWidth
+    );
+
+    // Place watchtower on high ground
+    Tower placeWatchtower(
+        const SettlementDefinition& settlement,
+        const TerrainAnalysis& terrain
+    );
+};
+```
+
+### 6b.7 Ditches and Moats
+
+#### 6b.7.1 Defensive Earthworks
+
+```cpp
+struct DefensiveDitch {
+    std::vector<glm::vec2> path;    // Centerline
+    float width = 8.0f;
+    float depth = 4.0f;
+
+    enum class Type {
+        Dry,                // Empty ditch
+        Wet,                // Water-filled moat
+        Tidal               // Fills at high tide (coastal)
+    } type;
+
+    enum class Profile {
+        VShape,             // Steep sides meeting at bottom
+        FlatBottom,         // Flat bottom, steep sides
+        Stepped             // With berm partway down
+    } profile;
+
+    // Associated bank (often on inside)
+    bool hasBank = true;
+    float bankHeight = 2.0f;
+};
+
+class DitchGenerator {
+public:
+    DefensiveDitch generate(
+        const std::vector<glm::vec2>& wallPath,
+        float offsetDistance,
+        const TerrainAnalysis& terrain,
+        uint64_t seed
+    );
+
+    // Generate terrain modification
+    TerrainModification generateTerrainCut(const DefensiveDitch& ditch);
+
+    // Generate water surface mesh (for wet moats)
+    Mesh generateWaterSurface(const DefensiveDitch& ditch);
+};
+```
+
+### 6b.8 Integration with Settlement Layout
+
+#### 6b.8.1 Wall-Aware Layout
+
+```cpp
+class DefensiveLayoutIntegration {
+public:
+    // Modify settlement layout to respect walls
+    void integrateWalls(
+        SettlementLayout& layout,
+        const WallSystem& walls
+    );
+
+    // Ensure streets align with gates
+    void alignStreetsToGates(
+        StreetNetwork& streets,
+        const std::vector<TownGate>& gates
+    );
+
+    // Place buildings against walls where appropriate
+    void placeWallBuildings(
+        std::vector<BuildingLot>& lots,
+        const WallSystem& walls
+    );
+
+    // Reserve space for wall walk access stairs
+    void reserveWallAccessPoints(
+        SettlementLayout& layout,
+        const WallSystem& walls
+    );
+};
+```
+
+### 6b.9 Deliverables - Phase 4b
+
+- [ ] TownWallGenerator with terrain adaptation
+- [ ] WallMeshGenerator for wall segments
+- [ ] TowerGenerator for all tower types
+- [ ] GateGenerator with portcullis and drawbridge
+- [ ] CastleGenerator for all castle types
+- [ ] Castle interior building placement
+- [ ] HarborDefenseGenerator for coastal settlements
+- [ ] DitchGenerator with water support
+- [ ] DefensiveLayoutIntegration
+- [ ] Defensive structure blockout meshes
+
+**Testing**:
+- Generate walled town with multiple gates
+- Generate motte-and-bailey castle
+- Generate coastal castle with harbor defenses
+- Verify walls follow terrain correctly
+- Verify streets align with gates
+- Walk through gate passages and tower interiors
+
+---
+
 ## 7. Phase 5: Props & Detail Population
 
 ### 7.1 Vegetation Integration
@@ -3551,23 +4080,157 @@ TEST(SettlementGeneration, EndToEnd) {
 - **Construction**: Stone or timber
 - **Features**: Salt pans, fire pit for evaporation
 
-### D.7 Defensive Structures (Towns only)
+### D.7 Defensive Structures
 
 #### Town Wall
 - **Era**: 12th-14th century
-- **Height**: 4-6m typically
-- **Construction**: Stone, sometimes with rubble core
-- **Features**: Wall walk, merlons, interval towers
+- **Height**: 4-6m typically (up to 10m for major ports)
+- **Thickness**: 2-3m
+- **Construction**:
+  - Wealthy towns: Ashlar stone facing, rubble core
+  - Regional: Flint with stone dressings (south coast typical)
+  - Early/temporary: Earth bank with timber palisade
+- **Features**: Wall walk (1.5m wide), merlons/crenellations, arrow loops
+- **Towers**: Interval towers every 30-50m
+- **Examples**: Southampton, Rye, Winchelsea
+
+#### Interval Tower
+- **Era**: With town walls
+- **Size**: 5-8m across, projecting 3-4m from wall
+- **Height**: 2-3m above wall walk
+- **Shape**: D-shaped (most common), rectangular, round
+- **Construction**: Same as wall
+- **Features**: 2-3 floors, arrow loops on each level, roof platform
+
+#### Corner Tower
+- **Era**: With town walls
+- **Size**: Larger than interval towers (7-10m)
+- **Shape**: Round (most defensible), octagonal
+- **Features**: Command wider field of fire, often stronger construction
 
 #### Town Gate
 - **Era**: With town wall
-- **Size**: 4-6m wide passage
-- **Features**: Twin towers flanking, portcullis, guard chambers
+- **Size**: Passage 3-5m wide, 4-5m high
+- **Construction**: Stone with timber gates
+- **Arch type**: Round (Norman) or pointed (Gothic)
+- **Features**:
+  - Flanking towers
+  - Portcullis groove
+  - Murder holes in passage ceiling
+  - Guard chambers in towers
+  - Room for customs collection
+- **Examples**: Bargate (Southampton), Landgate (Rye)
 
-#### Motte (if pre-existing)
-- **Era**: Norman conquest period
-- **Construction**: Earth mound with timber or stone keep
-- **Features**: May be ruined or replaced by manor house
+#### Barbican
+- **Era**: 13th century onwards
+- **Description**: Extended outer gateway defense
+- **Size**: 10-20m long passage
+- **Features**: Outer gate, inner gate, overlooked by walls on both sides
+- **Purpose**: Trap attackers between two gates
+
+#### Water Gate
+- **Era**: With harbor walls
+- **Description**: Gate providing direct access to harbor
+- **Features**: Lower arch for tide levels, boom attachment points
+
+#### Castle Types
+
+##### Motte and Bailey
+- **Era**: 1066-1150 (Norman Conquest period)
+- **Description**: Earth mound (motte) with timber/stone tower, enclosed yard (bailey)
+- **Motte Size**: 5-10m high, 30-50m base diameter
+- **Bailey**: 0.5-2 acres enclosed
+- **Construction**: Initially timber, often rebuilt in stone
+- **Features**: Steep sides, ditch around base, timber palisade
+
+##### Rectangular Keep (Tower Keep)
+- **Era**: 1080-1200 (Norman)
+- **Size**: 15-30m square, 20-30m tall
+- **Walls**: 3-4m thick at base
+- **Construction**: Massive stone
+- **Floors**: 3-4 (basement, great hall, private chambers, battlements)
+- **Features**:
+  - Corner pilaster buttresses
+  - Forebuilding protecting entrance (raised first floor)
+  - Spiral stairs in corners
+  - Chapel
+- **Examples**: Tower of London, Rochester, Dover
+
+##### Shell Keep
+- **Era**: 12th century
+- **Description**: Stone wall replacing timber palisade on motte top
+- **Size**: 15-25m diameter
+- **Construction**: Stone wall 2-3m thick following motte edge
+- **Features**: Buildings against inside of wall, open courtyard
+
+##### Round Keep
+- **Era**: Late 12th-13th century
+- **Description**: Cylindrical tower without corners (harder to mine)
+- **Size**: 10-15m diameter, 20-25m tall
+- **Construction**: Stone
+- **Examples**: Conisbrough, Pembroke
+
+##### Concentric Castle
+- **Era**: Late 13th century (Edwardian)
+- **Description**: Multiple rings of walls, each higher than the last
+- **Features**: Inner and outer bailey, flanking towers, multiple gates
+- **Examples**: Caernarfon, Beaumaris, Harlech
+
+#### Coastal Defensive Structures
+
+##### Coastal Castle
+- **Era**: Throughout medieval period
+- **Location**: Overlooking harbor or coastal approach
+- **Features**:
+  - Commands harbor entrance
+  - Often on headland or cliff
+  - May integrate with town walls
+- **Examples**: Pevensey, Hastings, Arundel
+
+##### Harbor Tower
+- **Era**: 13th century onwards
+- **Size**: 8-12m diameter, 15-20m tall
+- **Location**: On harbor wall or mole
+- **Features**: Guards harbor entrance, chain boom attachment
+
+##### Chain Boom
+- **Era**: 13th century onwards
+- **Description**: Heavy chain stretched across harbor entrance
+- **Components**: Two anchor towers with windlass mechanism
+- **Features**: Raised/lowered to permit friendly shipping
+
+##### Watchtower
+- **Era**: Throughout medieval period
+- **Size**: 4-6m square, 10-15m tall
+- **Location**: High ground with sea views
+- **Features**: Beacon platform at top, basic accommodation
+
+##### Beacon
+- **Era**: Throughout medieval period
+- **Description**: Warning fire platform on high point
+- **Construction**: Stone platform with iron fire basket
+- **Purpose**: Part of coastal warning network
+
+#### Defensive Earthworks
+
+##### Town Ditch
+- **Era**: With town walls
+- **Size**: 6-10m wide, 3-5m deep
+- **Profile**: V-shaped or flat bottom
+- **Types**: Dry ditch, wet moat, tidal (coastal)
+- **Features**: Often with bank on inside
+
+##### Castle Moat
+- **Era**: Throughout medieval period
+- **Size**: 10-20m wide, 3-6m deep
+- **Construction**: Dug from bedrock or clay-lined
+- **Water source**: Diverted stream, spring, or tidal
+
+##### Earthwork Bank
+- **Era**: Throughout medieval period
+- **Description**: Earth rampart behind ditch
+- **Height**: 2-4m
+- **Features**: May have palisade on top (early) or stone wall (later)
 
 ### D.8 Building Material Palette by Biome
 
