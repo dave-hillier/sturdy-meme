@@ -6,13 +6,13 @@
 
 #include "bindings.glsl"
 #include "instancing_common.glsl"
+#include "cull_compute_common.glsl"
 
 // Workgroup size: One workgroup per visible cell
 // Each thread in the workgroup processes one tree from the cell
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
-// Distance bucketing constants (must match tree_cell_cull.comp)
-const uint NUM_DISTANCE_BUCKETS = 8;
+// Distance bucketing uses NUM_DISTANCE_BUCKETS from cull_compute_common.glsl
 
 // Per-tree culling data (from TreeRenderer - all trees)
 struct TreeCullData {
@@ -58,19 +58,11 @@ layout(std430, binding = BINDING_TREE_FILTER_ALL_TREES) readonly buffer AllTrees
 
 // Input: Visible cell indices (from cell culling)
 // Cell indices are encoded: high 3 bits = distance bucket, low 29 bits = actual cell index
+// Use decodeCellIndex() and decodeBucket() from cull_compute_common.glsl
 layout(std430, binding = BINDING_TREE_FILTER_VISIBLE_CELLS) readonly buffer VisibleCellsBuffer {
     uint visibleCellCount;
     uint visibleCellIndices[];
 };
-
-// Helper to decode bucket-encoded cell index
-uint decodeCellIndex(uint encoded) {
-    return encoded & 0x1FFFFFFF;
-}
-
-uint decodeBucket(uint encoded) {
-    return encoded >> 29;
-}
 
 // Input: Cell data for tree ranges
 layout(std430, binding = BINDING_TREE_FILTER_CELL_DATA) readonly buffer CellDataBuffer {

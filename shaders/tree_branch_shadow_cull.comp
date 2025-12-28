@@ -5,6 +5,8 @@
 #extension GL_KHR_shader_subgroup_arithmetic : require
 
 #include "bindings.glsl"
+#include "instancing_common.glsl"
+#include "cull_compute_common.glsl"
 
 layout(local_size_x = 256) in;
 
@@ -28,14 +30,7 @@ layout(std430, binding = BINDING_TREE_BRANCH_SHADOW_OUTPUT) writeonly buffer Out
 };
 
 // Indirect draw commands (one per mesh group)
-struct DrawIndexedIndirectCommand {
-    uint indexCount;
-    uint instanceCount;
-    uint firstIndex;
-    int vertexOffset;
-    uint firstInstance;
-};
-
+// Uses DrawIndexedIndirectCommand from instancing_common.glsl
 layout(std430, binding = BINDING_TREE_BRANCH_SHADOW_INDIRECT) buffer IndirectBuffer {
     DrawIndexedIndirectCommand drawCmds[];
 };
@@ -69,17 +64,7 @@ layout(binding = BINDING_TREE_BRANCH_SHADOW_UNIFORMS) uniform CullUniforms {
     uint _pad2;
 } uniforms;
 
-// Frustum culling test
-bool isInFrustum(vec3 center, float radius) {
-    for (int i = 0; i < 6; i++) {
-        vec4 plane = uniforms.cascadeFrustumPlanes[i];
-        float dist = dot(plane.xyz, center) + plane.w;
-        if (dist < -radius) {
-            return false;
-        }
-    }
-    return true;
-}
+// Frustum culling uses isSphereInFrustum from cull_compute_common.glsl
 
 // Maximum mesh groups to prevent GPU hang from garbage uniform data
 const uint MAX_MESH_GROUPS = 16u;
@@ -128,7 +113,7 @@ void main() {
     // Frustum culling against cascade light frustum with margin for shadow projection
     // Shadows can extend beyond the tree depending on light angle
     float shadowMargin = boundingRadius * 0.5;
-    if (!isInFrustum(boundingCenter, boundingRadius + shadowMargin)) {
+    if (!isSphereInFrustum(boundingCenter, boundingRadius + shadowMargin, uniforms.cascadeFrustumPlanes)) {
         return;
     }
 

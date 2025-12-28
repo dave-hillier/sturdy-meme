@@ -6,13 +6,12 @@
 
 #include "bindings.glsl"
 #include "instancing_common.glsl"
+#include "cull_compute_common.glsl"
 
 // Workgroup size: 256 threads per workgroup
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
-// Distance bucketing for prioritized cell processing
-// Cells are sorted into buckets by distance so nearby trees get processed first
-const uint NUM_DISTANCE_BUCKETS = 8;
+// Distance bucketing uses NUM_DISTANCE_BUCKETS from cull_compute_common.glsl
 
 // Cell data (packed for GPU - 32 bytes per cell)
 // boundsMinAndFirst: xyz = boundsMin, w = firstTreeIndex as float bits
@@ -57,56 +56,8 @@ layout(binding = BINDING_TREE_CELL_CULL_UNIFORMS) uniform CellCullUniforms {
     uint _pad0;
 };
 
-// AABB vs frustum test
-// Returns true if the AABB is at least partially inside the frustum
-bool isAABBInFrustum(vec3 boundsMin, vec3 boundsMax, vec4 planes[6]) {
-    // For each frustum plane, find the vertex of the AABB that is most
-    // in the direction of the plane normal. If this vertex is behind the plane,
-    // the AABB is completely outside the frustum.
-    for (int i = 0; i < 6; i++) {
-        vec3 normal = planes[i].xyz;
-
-        // Find the positive vertex (vertex most in direction of normal)
-        vec3 positiveVertex;
-        positiveVertex.x = (normal.x >= 0.0) ? boundsMax.x : boundsMin.x;
-        positiveVertex.y = (normal.y >= 0.0) ? boundsMax.y : boundsMin.y;
-        positiveVertex.z = (normal.z >= 0.0) ? boundsMax.z : boundsMin.z;
-
-        // Test if positive vertex is behind the plane
-        if (dot(vec4(positiveVertex, 1.0), planes[i]) < 0.0) {
-            return false;  // Completely outside this plane
-        }
-    }
-    return true;  // At least partially inside all planes
-}
-
-// Distance culling for AABB
-// Returns true if the AABB's closest point is within max distance
-bool isAABBInRange(vec3 boundsMin, vec3 boundsMax, vec3 cameraPos, float maxDistance) {
-    // Find closest point on AABB to camera
-    vec3 closestPoint;
-    closestPoint.x = clamp(cameraPos.x, boundsMin.x, boundsMax.x);
-    closestPoint.y = clamp(cameraPos.y, boundsMin.y, boundsMax.y);
-    closestPoint.z = clamp(cameraPos.z, boundsMin.z, boundsMax.z);
-
-    // Check if closest point is within range
-    float dist = length(closestPoint - cameraPos);
-    return dist <= maxDistance;
-}
-
-// Calculate which distance bucket a cell belongs to
-uint getDistanceBucket(float dist) {
-    // Bucket boundaries aligned with 64m cell size:
-    // 0-64m (1 cell), 64-128m (2 cells), 128-192m, 192-256m, 256-320m, 320-400m, 400-500m, 500m+
-    if (dist < 64.0) return 0;
-    if (dist < 128.0) return 1;
-    if (dist < 192.0) return 2;
-    if (dist < 256.0) return 3;
-    if (dist < 320.0) return 4;
-    if (dist < 400.0) return 5;
-    if (dist < 500.0) return 6;
-    return 7;
-}
+// Culling functions (isAABBInFrustum, isAABBInRange, getDistanceBucket)
+// are provided by cull_compute_common.glsl
 
 // Shared memory for bucket prefix sum calculation
 shared uint sharedBucketCounts[NUM_DISTANCE_BUCKETS];
