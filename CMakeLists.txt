@@ -93,6 +93,7 @@ set(SOURCES
     src/vegetation/TreeLeafCulling.cpp
     src/vegetation/TreeBranchCulling.cpp
     src/vegetation/TreeImpostorAtlas.cpp
+    src/vegetation/TreeImpostorAtlasCapture.cpp
     src/vegetation/TreeLODSystem.cpp
     src/vegetation/TreeSpatialIndex.cpp
     src/vegetation/ImpostorCullSystem.cpp
