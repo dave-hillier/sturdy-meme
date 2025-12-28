@@ -11,6 +11,44 @@ This document outlines a comprehensive plan for implementing procedural city and
 
 ---
 
+## Design Decisions
+
+The following key decisions have been made:
+
+| Decision | Choice | Implication |
+|----------|--------|-------------|
+| **Scalability** | Algorithm must scale from hamlet to town | No "minimum viable" - single system handles all sizes |
+| **Generation Pipeline** | Fully procedural first, then artist modifiers | Build-time generation with post-generation tweaking |
+| **Building Interiors** | Required | Full interior spaces, not solid volumes |
+| **Performance Budget** | Not constrained initially | Optimize after functionality complete |
+| **Dynamic Settlements** | No | Settlements are static once generated |
+| **Terrain Integration** | Buildings adapt to terrain | Cellars, tunnels, wells cut into terrain; existing terrain cut system (no physics yet) |
+
+### Implications of Interior Requirement
+
+Requiring interiors significantly expands scope:
+
+- **Room Layout Generation**: Need floor plan algorithms
+- **Furniture Placement**: Interior prop system required
+- **Lighting**: Interior light sources (hearth, candles, windows)
+- **Occlusion**: Cannot use simple box collision
+- **LOD Complexity**: Interior/exterior LOD transitions
+- **Navigation**: AI pathfinding inside buildings
+
+### Terrain Integration Details
+
+The existing terrain cut system will be extended for:
+
+- **Cellars**: Below-ground rooms in stone houses, churches
+- **Tunnels**: Access passages, crypts under churches
+- **Wells**: Vertical shafts with water table integration
+- **Foundations**: Leveled areas for building footprints
+- **Terracing**: Stepped foundations on slopes
+
+*Note: Physics integration for terrain cuts is pending*
+
+---
+
 ## Historical & Regional Context
 
 ### The High Medieval Period (c. 1100-1300 AD)
@@ -99,13 +137,15 @@ This era represents the peak of medieval English civilization before the Black D
 2. [Architecture & Design Principles](#2-architecture--design-principles)
 3. [Phase 1: Foundation & Data Structures](#3-phase-1-foundation--data-structures)
 4. [Phase 2: Settlement Layout Generation](#4-phase-2-settlement-layout-generation)
-5. [Phase 3: Building Generation System](#5-phase-3-building-generation-system)
-6. [Phase 4: Street & Infrastructure Networks](#6-phase-4-street--infrastructure-networks)
-7. [Phase 5: Props & Detail Population](#7-phase-5-props--detail-population)
-8. [Phase 6: LOD & Streaming System](#8-phase-6-lod--streaming-system)
-9. [Phase 7: Integration & Polish](#9-phase-7-integration--polish)
-10. [Quality Assurance & Testing](#10-quality-assurance--testing)
-11. [Research References](#11-research-references)
+5. [Phase 3: Building Exterior Generation](#5-phase-3-building-exterior-generation)
+6. [Phase 3b: Building Interior Generation](#6-phase-3b-building-interior-generation)
+7. [Phase 4: Street & Infrastructure Networks](#7-phase-4-street--infrastructure-networks)
+8. [Phase 5: Props & Detail Population](#8-phase-5-props--detail-population)
+9. [Phase 6: Terrain Integration & Subterranean](#9-phase-6-terrain-integration--subterranean)
+10. [Phase 7: LOD & Streaming System](#10-phase-7-lod--streaming-system)
+11. [Phase 8: Integration & Polish](#11-phase-8-integration--polish)
+12. [Quality Assurance & Testing](#12-quality-assurance--testing)
+13. [Research References](#13-research-references)
 
 ---
 
@@ -881,7 +921,7 @@ private:
 
 ---
 
-## 5. Phase 3: Building Generation System
+## 5. Phase 3: Building Exterior Generation
 
 ### 5.1 Building Grammar (CGA-Style)
 
@@ -1269,6 +1309,411 @@ struct BuildingMesh {
 
 ---
 
+## 5b. Phase 3b: Building Interior Generation
+
+### 5b.1 Floor Plan Generation
+
+Interior layout generation using space partitioning algorithms.
+
+#### 5b.1.1 Room Types by Building
+
+| Building Type | Rooms | Notes |
+|--------------|-------|-------|
+| Peasant Cottage | Single hall, loft | Open plan, central hearth |
+| Longhouse | Hall, cross-passage, byre | Animals separated by passage |
+| Cruck Hall | Hall, solar, buttery, pantry | High-status open hall |
+| Stone House | Ground floor (storage/workshop), upper hall, chamber | Vertical separation |
+| Parish Church | Nave, chancel, porch, tower base | Ritual sequence |
+| Inn | Hall/drinking room, kitchen, chambers, stable | Multiple functions |
+| Smithy | Forge area, storage | Open work area |
+| Mill | Grinding floor, storage, machinery space | Functional layout |
+
+#### 5b.1.2 Space Partitioning Algorithm
+
+```cpp
+class FloorPlanGenerator {
+public:
+    enum class PartitionMethod {
+        None,               // Single room (cottages)
+        CrossPassage,       // Longhouse style - single bisection
+        Medieval,           // Hall + services + chambers
+        Ecclesiastical,     // Nave/chancel/aisles
+        Commercial          // Shop front + back rooms
+    };
+
+    struct RoomSpec {
+        std::string name;
+        float minArea;
+        float maxArea;
+        float aspectRatioMin;
+        float aspectRatioMax;
+        bool requiresExteriorWall;  // Needs window
+        bool requiresHearth;
+        std::vector<std::string> adjacentTo;  // Required adjacencies
+    };
+
+    struct FloorPlan {
+        std::vector<Room> rooms;
+        std::vector<Wall> interiorWalls;
+        std::vector<Opening> doorways;
+        std::vector<Opening> windows;
+        glm::vec2 hearthPosition;
+    };
+
+    FloorPlan generate(
+        const Polygon& footprint,
+        const std::vector<RoomSpec>& requiredRooms,
+        PartitionMethod method,
+        uint64_t seed
+    );
+
+private:
+    // Binary Space Partition for rectangular division
+    void bspPartition(const Polygon& space, std::vector<Room>& rooms);
+
+    // Squarified treemap for more regular rooms
+    void treemapPartition(const Polygon& space,
+                          const std::vector<float>& areas,
+                          std::vector<Room>& rooms);
+
+    // Validate room adjacencies
+    bool validateAdjacencies(const FloorPlan& plan,
+                            const std::vector<RoomSpec>& specs);
+};
+```
+
+#### 5b.1.3 Room Definition
+
+```cpp
+struct Room {
+    std::string typeId;             // "hall", "solar", "byre", etc.
+    Polygon boundary;               // 2D floor polygon
+    float floorHeight;              // Y offset from building base
+    float ceilingHeight;            // Room height
+
+    enum class FloorType {
+        Earth,          // Beaten earth (common)
+        Stone,          // Stone flags (churches, wealthy)
+        Timber,         // Timber boards (upper floors)
+        Rush            // Rush-strewn earth
+    } floorType;
+
+    bool hasHearth;
+    glm::vec2 hearthPosition;
+
+    bool hasLoft;                   // Storage loft above
+    float loftHeight;
+
+    std::vector<uint32_t> connectedRooms;  // Doorway connections
+};
+```
+
+### 5b.2 Interior Architectural Elements
+
+#### 5b.2.1 Structural Elements
+
+```cpp
+struct InteriorStructure {
+    // Cruck frames (visible A-frames)
+    struct CruckBlade {
+        glm::vec2 basePosition;
+        float height;
+        float curve;                // Curvature of blade
+    };
+    std::vector<CruckBlade> cruckBlades;
+
+    // Timber posts and beams
+    struct TimberFrame {
+        glm::vec3 start;
+        glm::vec3 end;
+        float width;
+        float height;
+    };
+    std::vector<TimberFrame> beams;
+
+    // Stone pillars (churches)
+    struct Pillar {
+        glm::vec2 position;
+        float radius;
+        float height;
+        enum class Style { Round, Octagonal, Clustered } style;
+    };
+    std::vector<Pillar> pillars;
+};
+```
+
+#### 5b.2.2 Central Hearth
+
+Medieval buildings typically had central hearths (chimneys were rare before 1300):
+
+```cpp
+struct Hearth {
+    glm::vec2 position;
+    float width;
+    float depth;
+
+    enum class Type {
+        Open,           // Simple fire on floor
+        Raised,         // Stone platform
+        Brazier         // Portable metal container
+    } type;
+
+    bool hasSmokeHole;          // Hole in roof above
+    bool hasHoodLouvre;         // Timber smoke hood
+};
+
+class HearthGenerator {
+public:
+    Mesh generateHearth(const Hearth& hearth);
+    Mesh generateSmokeHood(const Hearth& hearth, float ceilingHeight);
+
+    // Smoke staining effect on roof interior
+    void generateSmokeStaining(
+        Mesh& roofInterior,
+        const Hearth& hearth,
+        float intensity
+    );
+};
+```
+
+### 5b.3 Interior Wall Surfaces
+
+#### 5b.3.1 Wall Treatments
+
+```cpp
+enum class WallTreatment {
+    ExposeTimber,       // Visible timber frame + infill
+    Limewash,           // White lime wash (common)
+    Painted,            // Decorative painting (churches)
+    Hung,               // Textile hangings (wealthy)
+    Bare                // Exposed stone/daub
+};
+
+class InteriorWallGenerator {
+public:
+    Mesh generate(
+        const Room& room,
+        WallTreatment treatment,
+        bool hasTimberFrame
+    );
+
+private:
+    void addTimberFrame(Mesh& wall, const std::vector<TimberFrame>& frames);
+    void addWattleTexture(Mesh& wall);  // Visible between timbers
+    void addLimewash(Mesh& wall);
+};
+```
+
+### 5b.4 Interior Props and Furniture
+
+#### 5b.4.1 Furniture by Room Type
+
+| Room Type | Essential Furniture | Optional Furniture |
+|-----------|--------------------|--------------------|
+| Hall | Trestle table, benches, hearth | Chest, candlesticks |
+| Solar | Bed, chest | Chair, prie-dieu |
+| Kitchen | Work table, cauldron, spit | Barrels, shelves |
+| Byre | Stalls, mangers | Hay racks |
+| Church Nave | Benches/none, font | Lectern |
+| Church Chancel | Altar, sedilia | Reredos, piscina |
+| Inn Hall | Tables, benches, barrels | Fireplace, tap |
+| Smithy | Anvil, forge, bellows, water trough | Tool racks |
+
+#### 5b.4.2 Furniture Placement Algorithm
+
+```cpp
+class InteriorPropPlacer {
+public:
+    struct FurnitureRule {
+        std::string propId;
+        std::string roomType;
+
+        enum class Placement {
+            Center,             // Center of room
+            Wall,               // Against wall
+            Corner,             // In corner
+            NearHearth,         // Close to fire
+            NearWindow,         // By window for light
+            NearDoor,           // By entrance
+            Custom              // Specific position logic
+        } placement;
+
+        float minClearance;     // Space around item
+        bool required;
+        float probability;
+    };
+
+    std::vector<PropPlacement> place(
+        const Room& room,
+        const std::vector<FurnitureRule>& rules,
+        uint64_t seed
+    );
+
+private:
+    // Place furniture avoiding collisions
+    bool tryPlace(
+        const FurnitureRule& rule,
+        const Room& room,
+        std::vector<PropPlacement>& placed
+    );
+
+    // Find valid wall positions
+    std::vector<glm::vec2> findWallPositions(
+        const Room& room,
+        float itemWidth,
+        float clearance
+    );
+};
+```
+
+#### 5b.4.3 Furniture Models
+
+```json
+// assets/props/furniture/trestle_table.json
+{
+    "id": "trestle_table",
+    "category": "furniture",
+    "applicable_rooms": ["hall", "inn_hall", "kitchen"],
+
+    "dimensions": {
+        "width": [1.5, 3.0],
+        "depth": 0.8,
+        "height": 0.75
+    },
+
+    "construction": {
+        "material": "oak",
+        "style": "trestle"
+    },
+
+    "placement": {
+        "preferred": "center",
+        "orientation": "long_axis_to_door",
+        "clearance": 0.8
+    },
+
+    "lod": {
+        "lod0_triangles": 500,
+        "lod1_triangles": 100,
+        "impostor_distance": 15
+    }
+}
+```
+
+### 5b.5 Interior Lighting
+
+#### 5b.5.1 Light Sources
+
+```cpp
+struct InteriorLightSource {
+    enum class Type {
+        Hearth,             // Central fire
+        Candle,             // Single candle
+        Candlestick,        // Multi-candle holder
+        Rushlight,          // Rush dipped in fat
+        Cresset,            // Oil lamp
+        Window              // Daylight through window
+    } type;
+
+    glm::vec3 position;
+    glm::vec3 color;
+    float intensity;
+    float radius;
+    float flicker;          // Flicker intensity for flames
+};
+
+class InteriorLightingSystem {
+public:
+    std::vector<InteriorLightSource> generate(
+        const Room& room,
+        float timeOfDay,        // 0-24 hours
+        float wealthLevel       // Affects number of candles
+    );
+
+    // Bake ambient occlusion for room corners
+    void bakeAO(Mesh& roomMesh);
+};
+```
+
+#### 5b.5.2 Window Light
+
+```cpp
+struct WindowLight {
+    glm::vec3 position;
+    glm::vec3 direction;        // Light direction
+    glm::vec2 size;             // Window dimensions
+
+    bool hasGlass;              // Rare in medieval period
+    bool hasOiledLinen;         // Translucent covering
+    bool hasShutter;            // Solid shutter
+
+    // Light shaft visualization
+    bool renderLightShaft;
+    float dustParticleDensity;
+};
+```
+
+### 5b.6 Interior/Exterior Transition
+
+#### 5b.6.1 Portal System
+
+```cpp
+struct Portal {
+    glm::vec3 position;
+    glm::vec2 size;
+    glm::quat orientation;
+
+    enum class State {
+        Open,
+        Closed,
+        Broken
+    } state;
+
+    // Visibility determination
+    uint32_t interiorZoneId;
+    uint32_t exteriorZoneId;
+
+    // For rendering
+    bool renderDoorMesh;
+    std::string doorMeshId;
+};
+
+class PortalSystem {
+public:
+    // Determine visible zones from camera position
+    std::vector<uint32_t> getVisibleZones(
+        const Camera& camera,
+        const std::vector<Portal>& portals
+    );
+
+    // Cull interior when door closed and outside
+    bool shouldRenderInterior(
+        const Building& building,
+        const Camera& camera
+    );
+};
+```
+
+### 5b.7 Deliverables - Phase 3b
+
+- [ ] FloorPlanGenerator with partition methods
+- [ ] Room type definitions for all building types
+- [ ] InteriorStructure generation (crucks, beams, pillars)
+- [ ] HearthGenerator with smoke hood
+- [ ] InteriorWallGenerator with treatments
+- [ ] InteriorPropPlacer with furniture rules
+- [ ] Furniture model library
+- [ ] InteriorLightingSystem
+- [ ] PortalSystem for visibility
+
+**Testing**: For each building type:
+- Walk through interior and verify room layout
+- Check furniture placement is sensible
+- Verify lighting responds to time of day
+- Test portal visibility culling
+
+---
+
 ## 6. Phase 4: Street & Infrastructure Networks
 
 ### 6.1 Street Mesh Generation
@@ -1652,6 +2097,338 @@ struct AmbientCreature {
 - Garden trees and orchards visible
 - Ground clutter distributed appropriately
 - Props matching building types (farm props near barns, maritime props near quays)
+
+---
+
+## 7b. Phase 5b: Terrain Integration & Subterranean
+
+### 7b.1 Terrain Modification System
+
+Integration with the existing terrain cut system for building foundations and subterranean spaces.
+
+#### 7b.1.1 Foundation Types
+
+```cpp
+enum class FoundationType {
+    Surface,            // Building sits directly on terrain
+    Leveled,            // Terrain flattened under footprint
+    Cut,                // Cut into hillside
+    CutAndFill,         // Combination for sloped sites
+    Terraced,           // Multiple levels on steep slopes
+    Raised,             // Platform above terrain (waterlogged areas)
+    Piled               // Posts driven into soft ground
+};
+
+struct BuildingFoundation {
+    FoundationType type;
+    Polygon footprint;
+    float targetElevation;
+
+    // Cut parameters
+    float cutDepth;
+    float cutSlope;             // Angle of cut walls
+
+    // Fill parameters
+    float fillHeight;
+    bool retainingWall;
+    std::string wallMaterial;   // "flint", "chalk", "timber"
+
+    // Blending
+    float blendRadius;          // Distance to blend to natural terrain
+};
+```
+
+#### 7b.1.2 Terrain Cut Integration
+
+```cpp
+class SettlementTerrainModifier {
+public:
+    // Generate all terrain modifications for a settlement
+    std::vector<TerrainModification> generate(
+        const SettlementLayout& layout,
+        const TerrainAnalysis& terrain
+    );
+
+    // Export as heightmap modification layer
+    void exportHeightModification(
+        const std::vector<TerrainModification>& mods,
+        const std::string& outputPath,
+        uint32_t resolution
+    );
+
+    // Export as terrain material mask (where to blend settlement ground)
+    void exportMaterialMask(
+        const std::vector<TerrainModification>& mods,
+        const std::string& outputPath,
+        uint32_t resolution
+    );
+
+private:
+    // Calculate optimal foundation for building on slope
+    FoundationType selectFoundationType(
+        const BuildingLot& lot,
+        float maxSlope,
+        float averageSlope
+    );
+
+    // Generate cut geometry
+    Mesh generateCutWalls(const TerrainModification& mod);
+};
+```
+
+### 7b.2 Cellar Generation
+
+#### 7b.2.1 Cellar Types
+
+| Building Type | Cellar Probability | Cellar Type |
+|--------------|-------------------|-------------|
+| Peasant Cottage | 0.1 | Storage pit |
+| Stone House | 0.7 | Full cellar |
+| Inn | 0.9 | Barrel cellar |
+| Church | 0.4 | Crypt |
+| Manor House | 0.8 | Wine cellar |
+| Warehouse | 0.6 | Storage cellar |
+
+```cpp
+struct Cellar {
+    Polygon footprint;          // May be smaller than building
+    float depth;                // Below ground level
+    float ceilingHeight;
+
+    enum class Type {
+        StoragePit,     // Simple pit with ladder
+        VaultedCellar,  // Stone vaulted ceiling
+        TimberCellar,   // Timber-lined
+        Crypt,          // Church undercroft
+        Undercroft      // Ground floor below hall
+    } type;
+
+    // Access
+    enum class Access {
+        InternalStair,      // Stair inside building
+        ExternalStair,      // Steps from outside
+        Trapdoor,           // Hatch in floor
+        Ramp                // Cart access (warehouses)
+    } access;
+    glm::vec2 accessPosition;
+
+    // Contents
+    std::vector<std::string> propTypes;  // Barrels, crates, etc.
+};
+```
+
+#### 7b.2.2 Cellar Generator
+
+```cpp
+class CellarGenerator {
+public:
+    Cellar generate(
+        const Building& building,
+        const Polygon& footprint,
+        float groundLevel,
+        uint64_t seed
+    );
+
+    // Generate cellar geometry
+    Mesh generateMesh(const Cellar& cellar);
+
+    // Generate terrain cut for cellar
+    TerrainModification generateTerrainCut(
+        const Cellar& cellar,
+        glm::vec2 buildingPosition
+    );
+
+private:
+    // Generate vaulted ceiling
+    Mesh generateVaultedCeiling(const Polygon& footprint, float height);
+
+    // Generate access stairs
+    Mesh generateStairs(
+        const Cellar& cellar,
+        Cellar::Access accessType
+    );
+};
+```
+
+### 7b.3 Church Crypts and Undercrofts
+
+#### 7b.3.1 Crypt Structure
+
+```cpp
+struct ChurchCrypt {
+    // Location
+    enum class Position {
+        UnderChancel,       // Most common
+        UnderNave,          // Larger churches
+        UnderTower          // Tower base crypt
+    } position;
+
+    Polygon footprint;
+    float depth;
+
+    // Architecture
+    bool hasAisles;
+    int numBays;
+    float vaultHeight;
+
+    // Features
+    bool hasShrineNiche;        // For relics
+    bool hasAltarPlatform;
+    std::vector<glm::vec2> pillarPositions;
+
+    // Access
+    glm::vec2 stairPosition;
+    bool externalAccess;        // Can be entered from outside
+};
+
+class CryptGenerator {
+public:
+    ChurchCrypt generate(
+        const Building& church,
+        uint64_t seed
+    );
+
+    Mesh generateMesh(const ChurchCrypt& crypt);
+    TerrainModification generateTerrainCut(const ChurchCrypt& crypt);
+};
+```
+
+### 7b.4 Wells and Water Access
+
+#### 7b.4.1 Well Types
+
+```cpp
+struct Well {
+    glm::vec2 position;
+
+    enum class Type {
+        OpenWell,           // Simple stone-lined shaft
+        CoveredWell,        // With roof structure
+        DrawWell,           // With winding gear
+        Pump,               // Hand pump (later period)
+        Spring,             // Natural spring with stone surround
+    } type;
+
+    float shaftDepth;           // To water table
+    float shaftDiameter;
+    float waterLevel;           // Current water depth
+
+    // Structure above ground
+    float wallHeight;
+    bool hasRoof;
+    bool hasWindlass;
+};
+
+class WellGenerator {
+public:
+    Well generate(
+        glm::vec2 position,
+        float groundLevel,
+        float waterTableDepth,
+        uint64_t seed
+    );
+
+    // Generate visible structure
+    Mesh generateAboveGround(const Well& well);
+
+    // Generate shaft (for terrain integration)
+    TerrainModification generateShaft(const Well& well);
+
+    // Generate water surface
+    Mesh generateWaterSurface(const Well& well);
+};
+```
+
+### 7b.5 Tunnels and Passages
+
+#### 7b.5.1 Underground Connections
+
+```cpp
+struct UndergroundPassage {
+    glm::vec2 startPosition;
+    glm::vec2 endPosition;
+
+    std::vector<glm::vec2> waypoints;   // Path through terrain
+
+    float width;
+    float height;
+    float depth;                        // Below ground
+
+    enum class Type {
+        ServiceTunnel,      // Connecting buildings
+        Escape,             // Secret escape route
+        Drainage,           // Water management
+        Crypt_Connection    // Between church areas
+    } type;
+
+    // Construction
+    bool isLined;           // Stone/timber lined
+    std::string liningMaterial;
+};
+
+class TunnelGenerator {
+public:
+    UndergroundPassage generate(
+        glm::vec2 start,
+        glm::vec2 end,
+        const TerrainAnalysis& terrain,
+        uint64_t seed
+    );
+
+    Mesh generateMesh(const UndergroundPassage& passage);
+    std::vector<TerrainModification> generateTerrainCuts(
+        const UndergroundPassage& passage
+    );
+};
+```
+
+### 7b.6 Terrain Physics Integration
+
+*Note: Physics for terrain cuts is pending implementation*
+
+```cpp
+// Future integration point
+class TerrainPhysicsModifier {
+public:
+    // Update physics heightfield for terrain cuts
+    void applyModifications(
+        PhysicsHeightfield& heightfield,
+        const std::vector<TerrainModification>& mods
+    );
+
+    // Generate collision geometry for cellar walls
+    void generateCellarCollision(
+        PhysicsSystem& physics,
+        const Cellar& cellar
+    );
+
+    // Generate collision for tunnel
+    void generateTunnelCollision(
+        PhysicsSystem& physics,
+        const UndergroundPassage& passage
+    );
+};
+```
+
+### 7b.7 Deliverables - Phase 5b
+
+- [ ] SettlementTerrainModifier integration with existing terrain cut
+- [ ] Foundation type selection algorithm
+- [ ] CellarGenerator for all building types
+- [ ] CryptGenerator for churches
+- [ ] WellGenerator with shaft terrain integration
+- [ ] TunnelGenerator for underground passages
+- [ ] Terrain modification export (heightmap layer)
+- [ ] Material mask export for settlement ground
+
+**Testing**:
+- Buildings on slopes have appropriate foundations
+- Cellars are accessible and don't clip terrain
+- Wells connect to water table correctly
+- Church crypts render correctly below ground
+- Terrain cuts blend smoothly to natural terrain
+
+*Physics TODO*: Integrate terrain cuts with Jolt Physics heightfield
 
 ---
 
