@@ -53,6 +53,7 @@ bool TreeLODSystem::initInternal(const InitInfo& info) {
 
     // Create impostor atlas
     TreeImpostorAtlas::InitInfo atlasInfo{};
+    atlasInfo.raiiDevice = info.raiiDevice;
     atlasInfo.device = device_;
     atlasInfo.physicalDevice = physicalDevice_;
     atlasInfo.allocator = allocator_;

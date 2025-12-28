@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vulkan/vulkan.h>
+#include <vulkan/vulkan_raii.hpp>
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
 #include <vector>
@@ -44,6 +45,7 @@ struct ImpostorInstanceGPU {
 class TreeLODSystem {
 public:
     struct InitInfo {
+        const vk::raii::Device* raiiDevice;  // vulkan-hpp RAII device
         VkDevice device;
         VkPhysicalDevice physicalDevice;
         VmaAllocator allocator;

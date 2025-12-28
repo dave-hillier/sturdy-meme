@@ -1,16 +1,17 @@
 #pragma once
 
 #include <vulkan/vulkan.h>
+#include <vulkan/vulkan_raii.hpp>
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
 #include <memory>
 #include <array>
+#include <optional>
 
 #include "TreeOptions.h"
 #include "CullCommon.h"
-#include "VulkanRAII.h"
 #include "DescriptorManager.h"
 
 // Octahedral impostor atlas configuration
@@ -98,6 +99,7 @@ struct TreeLODSettings {
 class TreeImpostorAtlas {
 public:
     struct InitInfo {
+        const vk::raii::Device* raiiDevice;  // vulkan-hpp RAII device
         VkDevice device;
         VkPhysicalDevice physicalDevice;
         VmaAllocator allocator;
@@ -137,9 +139,9 @@ public:
     size_t getArchetypeCount() const { return archetypes_.size(); }
 
     // Get atlas array textures for binding (single array covers all archetypes)
-    VkImageView getAlbedoAtlasArrayView() const { return octaAlbedoArrayView_.get(); }
-    VkImageView getNormalAtlasArrayView() const { return octaNormalArrayView_.get(); }
-    VkSampler getAtlasSampler() const { return atlasSampler_.get(); }
+    VkImageView getAlbedoAtlasArrayView() const { return octaAlbedoArrayView_ ? **octaAlbedoArrayView_ : VK_NULL_HANDLE; }
+    VkImageView getNormalAtlasArrayView() const { return octaNormalArrayView_ ? **octaNormalArrayView_ : VK_NULL_HANDLE; }
+    VkSampler getAtlasSampler() const { return atlasSampler_ ? **atlasSampler_ : VK_NULL_HANDLE; }
 
     // LOD settings
     TreeLODSettings& getLODSettings() { return lodSettings_; }
@@ -180,6 +182,7 @@ private:
     bool createLeafCapturePipeline();
     bool createLeafQuadMesh();
 
+    const vk::raii::Device* raiiDevice_ = nullptr;
     VkDevice device_ = VK_NULL_HANDLE;
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
     VmaAllocator allocator_ = VK_NULL_HANDLE;
@@ -189,15 +192,15 @@ private:
     std::string resourcePath_;
 
     // Render pass for capturing impostors (renders to G-buffer)
-    ManagedRenderPass captureRenderPass_;
+    std::optional<vk::raii::RenderPass> captureRenderPass_;
 
     // Pipeline for capturing tree geometry to G-buffer
-    ManagedPipeline branchCapturePipeline_;
-    ManagedPipeline leafCapturePipeline_;
-    ManagedPipelineLayout capturePipelineLayout_;
-    ManagedPipelineLayout leafCapturePipelineLayout_;
-    ManagedDescriptorSetLayout captureDescriptorSetLayout_;
-    ManagedDescriptorSetLayout leafCaptureDescriptorSetLayout_;
+    std::optional<vk::raii::Pipeline> branchCapturePipeline_;
+    std::optional<vk::raii::Pipeline> leafCapturePipeline_;
+    std::optional<vk::raii::PipelineLayout> capturePipelineLayout_;
+    std::optional<vk::raii::PipelineLayout> leafCapturePipelineLayout_;
+    std::optional<vk::raii::DescriptorSetLayout> captureDescriptorSetLayout_;
+    std::optional<vk::raii::DescriptorSetLayout> leafCaptureDescriptorSetLayout_;
 
     // Leaf quad mesh for capture
     VkBuffer leafQuadVertexBuffer_ = VK_NULL_HANDLE;
@@ -212,16 +215,16 @@ private:
     // Texture array for all archetypes (shared across all archetypes)
     VkImage octaAlbedoArrayImage_ = VK_NULL_HANDLE;
     VmaAllocation octaAlbedoArrayAllocation_ = VK_NULL_HANDLE;
-    ManagedImageView octaAlbedoArrayView_;
+    std::optional<vk::raii::ImageView> octaAlbedoArrayView_;
 
     VkImage octaNormalArrayImage_ = VK_NULL_HANDLE;
     VmaAllocation octaNormalArrayAllocation_ = VK_NULL_HANDLE;
-    ManagedImageView octaNormalArrayView_;
+    std::optional<vk::raii::ImageView> octaNormalArrayView_;
 
     uint32_t maxArchetypes_ = 16;  // Maximum layers in the array
 
     // Shared sampler for atlas textures
-    ManagedSampler atlasSampler_;
+    std::optional<vk::raii::Sampler> atlasSampler_;
 
     // Capture descriptor sets (reused)
     std::vector<VkDescriptorSet> captureDescriptorSets_;
@@ -238,10 +241,10 @@ private:
     struct AtlasTextures {
         VkImage depthImage = VK_NULL_HANDLE;
         VmaAllocation depthAllocation = VK_NULL_HANDLE;
-        ManagedImageView albedoView;   // View into octaAlbedoArrayImage_
-        ManagedImageView normalView;   // View into octaNormalArrayImage_
-        ManagedImageView depthView;
-        ManagedFramebuffer framebuffer;
+        std::optional<vk::raii::ImageView> albedoView;   // View into octaAlbedoArrayImage_
+        std::optional<vk::raii::ImageView> normalView;   // View into octaNormalArrayImage_
+        std::optional<vk::raii::ImageView> depthView;
+        std::optional<vk::raii::Framebuffer> framebuffer;
         VkDescriptorSet previewDescriptorSet = VK_NULL_HANDLE;
     };
     std::vector<AtlasTextures> atlasTextures_;
