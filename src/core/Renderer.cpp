@@ -982,8 +982,8 @@ bool Renderer::render(const Camera& camera) {
         .setImageIndices(imageIndex);
 
     try {
-        result = vk::Queue(presentQueue).presentKHR(presentInfo);
-        if (result == vk::Result::eSuboptimalKHR) {
+        auto presentResult = vk::Queue(presentQueue).presentKHR(presentInfo);
+        if (presentResult == vk::Result::eSuboptimalKHR) {
             framebufferResized = true;
         }
     } catch (const vk::OutOfDateKHRError&) {
@@ -1431,10 +1431,13 @@ void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float gra
     clearValues[0].color = vk::ClearColorValue{std::array<float, 4>{0.0f, 0.0f, 0.0f, 1.0f}};
     clearValues[1].depthStencil = vk::ClearDepthStencilValue{1.0f, 0};
 
+    VkExtent2D rawExtent = systems_->postProcess().getExtent();
+    vk::Extent2D hdrExtent = vk::Extent2D{}.setWidth(rawExtent.width).setHeight(rawExtent.height);
+
     auto hdrPassInfo = vk::RenderPassBeginInfo{}
         .setRenderPass(systems_->postProcess().getHDRRenderPass())
         .setFramebuffer(systems_->postProcess().getHDRFramebuffer())
-        .setRenderArea(vk::Rect2D{{0, 0}, systems_->postProcess().getExtent()})
+        .setRenderArea(vk::Rect2D{{0, 0}, hdrExtent})
         .setClearValues(clearValues);
 
     vkCmd.beginRenderPass(hdrPassInfo, vk::SubpassContents::eInline);
@@ -1513,9 +1516,10 @@ void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float gra
             .setMaxDepth(1.0f);
         vkCmd.setViewport(0, viewport);
 
+        VkExtent2D debugExtent = systems_->postProcess().getExtent();
         auto scissor = vk::Rect2D{}
             .setOffset({0, 0})
-            .setExtent(systems_->postProcess().getExtent());
+            .setExtent(vk::Extent2D{}.setWidth(debugExtent.width).setHeight(debugExtent.height));
         vkCmd.setScissor(0, scissor);
 
         // Need to get viewProj from the current frame data

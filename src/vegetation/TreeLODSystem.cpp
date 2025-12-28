@@ -997,7 +997,7 @@ void TreeLODSystem::renderImpostors(VkCommandBuffer cmd, uint32_t frameIndex,
 
     auto scissor = vk::Rect2D{}
         .setOffset({0, 0})
-        .setExtent(extent_);
+        .setExtent(vk::Extent2D{}.setWidth(extent_.width).setHeight(extent_.height));
     vkCmd.setScissor(0, scissor);
 
     // Bind descriptor sets
@@ -1133,7 +1133,7 @@ void TreeLODSystem::renderImpostorsGPUCulled(VkCommandBuffer cmd, uint32_t frame
 
     auto scissor = vk::Rect2D{}
         .setOffset({0, 0})
-        .setExtent(extent_);
+        .setExtent(vk::Extent2D{}.setWidth(extent_.width).setHeight(extent_.height));
     vkCmd.setScissor(0, scissor);
 
     // Bind descriptor sets
