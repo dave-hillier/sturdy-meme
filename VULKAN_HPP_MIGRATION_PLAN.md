@@ -11,8 +11,8 @@
 ## Migration Strategy
 
 ### Approach
-1. **Bottom-up migration**: Start with core infrastructure files, then move to higher-level systems
-2. **Keep VMA integration**: Custom wrappers for VMA-allocated resources remain (VMA doesn't integrate with vk::raii)
+1. **Deprecate VulkanRAII.h**: Replace custom RAII wrappers with vulkan-hpp's `vk::raii::*` types
+2. **Keep only VMA wrappers**: `ManagedBuffer` and `ManagedImage` stay (VMA doesn't integrate with vk::raii)
 3. **Builder pattern**: Use `.set*()` methods, not positional constructors
 4. **Incremental**: Each file conversion should compile and run
 
@@ -43,145 +43,182 @@ cmd.draw(3, 1, 0, 0);
 
 ---
 
-## Phase 1: Core Infrastructure
+## Phase 1: Deprecate VulkanRAII.h Custom Wrappers
 
-### 1.1 VulkanRAII.h (207 usages) - FOUNDATION
-- Keep VMA wrappers (ManagedBuffer, ManagedImage) but convert internal Vulkan types
-- Convert VkDevice → vk::Device, VkBuffer → vk::Buffer, etc.
-- Update all VkCreate* calls to use vulkan-hpp
+### Types to REMOVE (use vulkan-hpp equivalents)
 
-### 1.2 VulkanBarriers.h (160 usages)
+| Custom Wrapper | vulkan-hpp Replacement | Usage Count |
+|----------------|------------------------|-------------|
+| ManagedImageView | vk::raii::ImageView | 14 files |
+| ManagedSampler | vk::raii::Sampler | 41 files |
+| ManagedPipeline | vk::raii::Pipeline | 53 files |
+| ManagedPipelineLayout | vk::raii::PipelineLayout | 51 files |
+| ManagedRenderPass | vk::raii::RenderPass | 9 files |
+| ManagedFramebuffer | vk::raii::Framebuffer | 7 files |
+| ManagedFence | vk::raii::Fence | 3 files |
+| ManagedSemaphore | vk::raii::Semaphore | 3 files |
+| ManagedCommandPool | vk::raii::CommandPool | 3 files |
+| ManagedDescriptorSetLayout | vk::raii::DescriptorSetLayout | 44 files |
+| CommandScope | vk::raii::CommandBuffer | - |
+| RenderPassScope | cmd.beginRenderPass()/endRenderPass() | - |
+
+### Types to KEEP (VMA integration required)
+
+| Custom Wrapper | Reason | Action |
+|----------------|--------|--------|
+| ManagedBuffer | VMA allocates memory | Update to use vk::Buffer internally |
+| ManagedImage | VMA allocates memory | Update to use vk::Image internally |
+
+### Utilities to Keep
+- `VK_CHECK` / `VK_CHECK_VOID` macros - still useful for error checking
+- `ScopeGuard` - general utility pattern
+
+---
+
+## Phase 2: Core Infrastructure Migration
+
+### 2.1 VulkanBarriers.h (160 usages)
 - Convert VkImageMemoryBarrier → vk::ImageMemoryBarrier
 - Convert VkBufferMemoryBarrier → vk::BufferMemoryBarrier
 - Convert VkMemoryBarrier → vk::MemoryBarrier
 - Convert vkCmdPipelineBarrier → cmd.pipelineBarrier()
 
-### 1.3 VulkanResourceFactory.cpp (94 usages)
+### 2.2 VulkanResourceFactory.cpp (94 usages)
 - Convert all resource creation to vulkan-hpp builder pattern
 - Update VmaCreateBuffer/VmaCreateImage calls with reinterpret_cast
 
 ---
 
-## Phase 2: Terrain System
+## Phase 3: High-Usage Files Migration
 
-### 2.1 TerrainSystem.cpp (91 usages)
-- Convert pipeline creation
-- Convert descriptor set handling
-- Convert command buffer recording
-
-### 2.2 TerrainQuadTree.cpp
-- Convert buffer operations
-- Convert compute dispatch calls
-
-### 2.3 TerrainLOD.cpp / TerrainHeight.cpp
-- Convert remaining terrain-related Vulkan calls
-
----
-
-## Phase 3: Vegetation Systems
-
-### 3.1 TreeImpostorAtlas.cpp (134 usages) - LARGEST FILE
-- Convert image/imageview creation
-- Convert framebuffer setup
-- Convert render pass handling
+### 3.1 TreeImpostorAtlas.cpp (134 usages)
+- Replace ManagedImageView → vk::raii::ImageView
+- Replace ManagedFramebuffer → vk::raii::Framebuffer
+- Replace ManagedRenderPass → vk::raii::RenderPass
+- Convert all Vk* structs to vk::* builder pattern
 
 ### 3.2 TreeLODSystem.cpp (121 usages)
-- Convert compute pipeline usage
-- Convert buffer operations
+- Replace ManagedPipeline → vk::raii::Pipeline
+- Replace ManagedDescriptorSetLayout → vk::raii::DescriptorSetLayout
+- Convert compute dispatch calls
 
 ### 3.3 TreeRenderer.cpp (103 usages)
-- Convert graphics pipeline usage
+- Replace ManagedPipeline → vk::raii::Pipeline
+- Replace ManagedPipelineLayout → vk::raii::PipelineLayout
 - Convert draw calls
 
-### 3.4 GrassSystem.cpp (81 usages)
-- Convert compute and graphics pipelines
+### 3.4 TerrainSystem.cpp (91 usages)
+- Replace all Managed* types with vk::raii::* equivalents
+- Convert command buffer recording
+
+### 3.5 PostProcessSystem.cpp (86 usages)
+- Replace ManagedFramebuffer → vk::raii::Framebuffer
+- Replace ManagedRenderPass → vk::raii::RenderPass
+- Convert post-processing pipeline
+
+### 3.6 GrassSystem.cpp (81 usages)
+- Replace all Managed* types
 - Convert indirect draw calls
 
----
-
-## Phase 4: Rendering Systems
-
-### 4.1 PostProcessSystem.cpp (86 usages)
-- Convert post-processing pipeline
-- Convert framebuffer operations
-
-### 4.2 CatmullClarkSystem.cpp (81 usages)
+### 3.7 CatmullClarkSystem.cpp (81 usages)
+- Replace ManagedPipeline → vk::raii::Pipeline
 - Convert subdivision compute pipelines
 
-### 4.3 Remaining render systems
-- Water rendering (WaterGBuffer, WaterDisplacement)
+---
+
+## Phase 4: Remaining Files
+
+Migrate all other files using Managed* types:
+- WaterGBuffer, WaterDisplacement
+- SkinnedMesh
 - Sky rendering
 - Shadow mapping
+- Any remaining render systems
 
 ---
 
-## Phase 5: Animation & Mesh Systems
+## Phase 5: Final Cleanup
 
-### 5.1 SkinnedMesh.cpp
-- Convert vertex/index buffer handling
-- Convert animation compute shaders
+### 5.1 Update VulkanRAII.h
+- Remove all deprecated Unique*/Managed* types
+- Keep only:
+  - `ManagedBuffer` (VMA wrapper)
+  - `ManagedImage` (VMA wrapper)
+  - `VK_CHECK` macros
+  - `ScopeGuard`
 
-### 5.2 Other mesh systems
-- Convert remaining mesh loading/rendering code
-
----
-
-## Phase 6: Cleanup
-
-### 6.1 Remove deprecated custom wrappers
-- Replace Unique* types with vk::raii equivalents where VMA isn't needed
-- Consolidate remaining VMA wrappers
-
-### 6.2 Final validation
+### 5.2 Code cleanup
 - Ensure all files use `#include <vulkan/vulkan.hpp>`
 - Remove `#include <vulkan/vulkan.h>` (raw C header)
-- Run full test suite
+- Verify build and run
 
 ---
 
 ## Files to Migrate (Priority Order)
 
-| Priority | File | Usages | Notes |
-|----------|------|--------|-------|
-| 1 | src/core/vulkan/VulkanRAII.h | 207 | Foundation - blocks everything |
-| 2 | src/core/vulkan/VulkanBarriers.h | 160 | Used by most render code |
-| 3 | src/core/vulkan/VulkanResourceFactory.cpp | 94 | Resource creation patterns |
-| 4 | src/vegetation/TreeImpostorAtlas.cpp | 134 | Largest non-core file |
-| 5 | src/vegetation/TreeLODSystem.cpp | 121 | High usage count |
-| 6 | src/vegetation/TreeRenderer.cpp | 103 | High usage count |
-| 7 | src/terrain/TerrainSystem.cpp | 91 | Core terrain rendering |
-| 8 | src/postprocess/PostProcessSystem.cpp | 86 | Post-processing |
-| 9 | src/vegetation/GrassSystem.cpp | 81 | Vegetation |
-| 10 | src/subdivision/CatmullClarkSystem.cpp | 81 | Subdivision |
+| Priority | File | Usages | Primary Changes |
+|----------|------|--------|-----------------|
+| 1 | VulkanBarriers.h | 160 | Convert barrier structs/calls |
+| 2 | TreeImpostorAtlas.cpp | 134 | ImageView, Framebuffer, RenderPass |
+| 3 | TreeLODSystem.cpp | 121 | Pipeline, DescriptorSetLayout |
+| 4 | TreeRenderer.cpp | 103 | Pipeline, PipelineLayout |
+| 5 | VulkanResourceFactory.cpp | 94 | Resource creation patterns |
+| 6 | TerrainSystem.cpp | 91 | All Managed* types |
+| 7 | PostProcessSystem.cpp | 86 | Framebuffer, RenderPass |
+| 8 | GrassSystem.cpp | 81 | All Managed* types |
+| 9 | CatmullClarkSystem.cpp | 81 | Pipeline |
+| 10 | Remaining files | - | Clean up stragglers |
 
 ---
 
-## Custom Wrapper Migration Map
+## vulkan-hpp RAII Usage Examples
 
-| Current Wrapper | Target | Notes |
-|-----------------|--------|-------|
-| ManagedBuffer | Keep (VMA) | Just convert internal types |
-| ManagedImage | Keep (VMA) | Just convert internal types |
-| ManagedImageView | vk::raii::ImageView | No VMA needed |
-| ManagedSampler | vk::raii::Sampler | No VMA needed |
-| ManagedPipeline | vk::raii::Pipeline | No VMA needed |
-| ManagedPipelineLayout | vk::raii::PipelineLayout | No VMA needed |
-| ManagedRenderPass | vk::raii::RenderPass | No VMA needed |
-| ManagedFramebuffer | vk::raii::Framebuffer | No VMA needed |
-| ManagedFence | vk::raii::Fence | No VMA needed |
-| ManagedSemaphore | vk::raii::Semaphore | No VMA needed |
-| ManagedCommandPool | vk::raii::CommandPool | No VMA needed |
-| ManagedDescriptorSetLayout | vk::raii::DescriptorSetLayout | No VMA needed |
+### Creating a Pipeline
+```cpp
+// BEFORE
+ManagedPipeline pipeline;
+ManagedPipeline::createGraphics(device, cache, pipelineInfo, pipeline);
 
----
+// AFTER
+auto pipeline = vk::raii::Pipeline(device, cache, pipelineInfo);
+```
 
-## Testing Strategy
+### Creating an ImageView
+```cpp
+// BEFORE
+ManagedImageView imageView;
+ManagedImageView::create(device, viewInfo, imageView);
 
-After each file migration:
-1. Run `cmake --preset debug && cmake --build build/debug`
-2. Run `./run-debug.sh` to verify no crashes
-3. Visual inspection of rendering output
-4. Commit with message: "Convert [filename] to vulkan-hpp"
+// AFTER
+auto imageView = vk::raii::ImageView(device, viewInfo);
+```
+
+### Creating a RenderPass
+```cpp
+// BEFORE
+ManagedRenderPass renderPass;
+ManagedRenderPass::create(device, renderPassInfo, renderPass);
+
+// AFTER
+auto renderPass = vk::raii::RenderPass(device, renderPassInfo);
+```
+
+### Command Buffer Recording
+```cpp
+// BEFORE (CommandScope)
+CommandScope cmd(device, commandPool, queue);
+cmd.begin();
+vkCmdCopyBuffer(cmd.get(), src, dst, 1, &region);
+cmd.end();
+
+// AFTER (vk::raii with one-time submit)
+auto cmdBuffer = vk::raii::CommandBuffer(device, allocInfo);
+cmdBuffer.begin(vk::CommandBufferBeginInfo{}.setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit));
+cmdBuffer.copyBuffer(src, dst, region);
+cmdBuffer.end();
+queue.submit(vk::SubmitInfo{}.setCommandBuffers(*cmdBuffer));
+queue.waitIdle();
+```
 
 ---
 
@@ -198,3 +235,13 @@ VULKAN_HPP_DEFAULT_DISPATCHER.init(instance);
 // After device creation:
 VULKAN_HPP_DEFAULT_DISPATCHER.init(device);
 ```
+
+---
+
+## Testing Strategy
+
+After each file migration:
+1. Run `cmake --preset debug && cmake --build build/debug`
+2. Run `./run-debug.sh` to verify no crashes
+3. Visual inspection of rendering output
+4. Commit with message: "Convert [filename] to vulkan-hpp"
