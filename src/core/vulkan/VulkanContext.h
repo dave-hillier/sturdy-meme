@@ -79,6 +79,9 @@ public:
     // Check if instance phase is complete (for two-phase init)
     bool isInstanceReady() const { return instanceReady; }
 
+    // Check if device phase is complete (device, surface, swapchain created)
+    bool isDeviceReady() const { return device != VK_NULL_HANDLE; }
+
 private:
     bool createInstance();
     bool createSurface();

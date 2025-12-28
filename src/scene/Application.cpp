@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <unordered_set>
 #include "core/vulkan/VulkanContext.h"
+#include "core/LoadingRenderer.h"
 
 #include "Components.h"
 #include "TerrainSystem.h"
@@ -57,6 +58,37 @@ bool Application::init(const std::string& title, int width, int height) {
     }
 
     std::string resourcePath = getResourcePath();
+
+    // Complete Vulkan device initialization (surface, device, swapchain)
+    // This must happen before LoadingRenderer can be created
+    if (!vulkanContext->initDevice(window)) {
+        SDL_Log("Failed to initialize Vulkan device");
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        return false;
+    }
+
+    // Create and show loading screen while heavy systems initialize
+    {
+        LoadingRenderer::InitInfo loadingInfo{};
+        loadingInfo.vulkanContext = vulkanContext.get();
+        loadingInfo.shaderPath = resourcePath + "/shaders";
+
+        auto loadingRenderer = LoadingRenderer::create(loadingInfo);
+        if (loadingRenderer) {
+            // Render a few frames of the loading screen to show it's alive
+            // In a more sophisticated setup, this would run in parallel with asset loading
+            for (int i = 0; i < 30; ++i) {  // ~0.5 seconds at 60fps
+                loadingRenderer->render();
+                SDL_PumpEvents();  // Keep window responsive
+            }
+            loadingRenderer->cleanup();
+        } else {
+            SDL_Log("Warning: LoadingRenderer creation failed, skipping loading screen");
+        }
+    }
+
+    // Create full renderer (takes ownership of vulkanContext with device already initialized)
     Renderer::InitInfo rendererInfo{};
     rendererInfo.window = window;
     rendererInfo.resourcePath = resourcePath;

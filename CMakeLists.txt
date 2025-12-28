@@ -55,6 +55,7 @@ set(SOURCES
     src/core/controls/SceneControlSubsystem.cpp
     src/core/controls/PlayerControlSubsystem.cpp
     src/core/vulkan/VulkanContext.cpp
+    src/core/LoadingRenderer.cpp
     src/core/Mesh.cpp
     src/core/BufferUtils.cpp
     src/core/Texture.cpp
@@ -574,6 +575,8 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_tile_cull.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/debug_line.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/debug_line.frag.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/loading.vert.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/loading.frag.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree.frag.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_leaf.vert.spv
@@ -663,6 +666,7 @@ if(SHADER_COMPILE_CMD)
         histogram_build.comp histogram_reduce.comp
         hiz_downsample.comp
         debug_line.vert debug_line.frag
+        loading.vert loading.frag
     )
 
     foreach(SHADER ${SIMPLE_SHADERS})
@@ -985,6 +989,8 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/catmullclark_render.frag.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/debug_line.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/debug_line.frag.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/loading.vert.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/loading.frag.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree.frag.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_leaf.vert.spv

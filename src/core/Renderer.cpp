@@ -91,14 +91,18 @@ bool Renderer::initInternal(const InitInfo& info) {
     systems_ = std::make_unique<RendererSystems>();
 
     // Initialize Vulkan context
-    // If a pre-initialized context was provided (instance already created),
-    // take ownership and complete device initialization.
+    // If a pre-initialized context was provided (instance or device already created),
+    // take ownership and complete any remaining initialization.
     // Otherwise, create a new context and fully initialize it.
     if (info.vulkanContext) {
         vulkanContext_ = std::move(const_cast<std::unique_ptr<VulkanContext>&>(info.vulkanContext));
-        if (!vulkanContext_->initDevice(window)) {
-            SDL_Log("Failed to complete Vulkan device initialization");
-            return false;
+        // Only call initDevice if device isn't already initialized
+        // (LoadingRenderer may have already completed device init)
+        if (!vulkanContext_->isDeviceReady()) {
+            if (!vulkanContext_->initDevice(window)) {
+                SDL_Log("Failed to complete Vulkan device initialization");
+                return false;
+            }
         }
     } else {
         vulkanContext_ = std::make_unique<VulkanContext>();
