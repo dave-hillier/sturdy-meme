@@ -637,7 +637,7 @@ void PostProcessSystem::recordPostProcess(VkCommandBuffer cmd, uint32_t frameInd
         VkPipeline selectedPipeline = compositePipelines[static_cast<int>(godRayQuality)];
         vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, selectedPipeline);
         vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, compositePipelineLayout,
-                                 0, compositeDescriptorSets[frameIndex], {});
+                                 0, vk::DescriptorSet(compositeDescriptorSets[frameIndex]), {});
 
         vk::Viewport viewport{
             0.0f, 0.0f,
@@ -646,7 +646,7 @@ void PostProcessSystem::recordPostProcess(VkCommandBuffer cmd, uint32_t frameInd
         };
         vkCmd.setViewport(0, viewport);
 
-        vk::Rect2D scissor{{0, 0}, extent};
+        vk::Rect2D scissor{{0, 0}, {extent.width, extent.height}};
         vkCmd.setScissor(0, scissor);
 
         // Draw fullscreen triangle
@@ -935,7 +935,7 @@ void PostProcessSystem::recordHistogramCompute(VkCommandBuffer cmd, uint32_t fra
     vk::CommandBuffer vkCmd(cmd);
     vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, histogramBuildPipeline);
     vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, histogramBuildPipelineLayout,
-                             0, histogramBuildDescSets[frameIndex], {});
+                             0, vk::DescriptorSet(histogramBuildDescSets[frameIndex]), {});
 
     uint32_t groupsX = (extent.width + 15) / 16;
     uint32_t groupsY = (extent.height + 15) / 16;
@@ -946,7 +946,7 @@ void PostProcessSystem::recordHistogramCompute(VkCommandBuffer cmd, uint32_t fra
     // Dispatch histogram reduce (single workgroup of 256 threads)
     vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, histogramReducePipeline);
     vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, histogramReducePipelineLayout,
-                             0, histogramReduceDescSets[frameIndex], {});
+                             0, vk::DescriptorSet(histogramReduceDescSets[frameIndex]), {});
     vkCmd.dispatch(1, 1, 1);
 
     barrierHistogramReduceComplete(cmd, frameIndex);

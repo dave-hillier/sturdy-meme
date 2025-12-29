@@ -8,6 +8,7 @@
 #include "UBOs.h"
 #include "VulkanBarriers.h"
 #include "VulkanResourceFactory.h"
+#include <vulkan/vulkan.hpp>
 #include <SDL3/SDL.h>
 #include <cstring>
 #include <array>
@@ -812,13 +813,14 @@ void GrassSystem::recordDisplacementUpdate(VkCommandBuffer cmd, uint32_t frameIn
         0, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
 
     // Dispatch displacement update compute shader using per-frame descriptor set (double-buffered)
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, displacementPipeline_.get());
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                            displacementPipelineLayout_.get(), 0, 1,
-                            &displacementDescriptorSets[frameIndex], 0, nullptr);
+    vk::CommandBuffer vkCmd(cmd);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, displacementPipeline_.get());
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute,
+                             displacementPipelineLayout_.get(), 0,
+                             vk::DescriptorSet(displacementDescriptorSets[frameIndex]), {});
 
     // Dispatch: 512x512 / 16x16 = 32x32 workgroups
-    vkCmdDispatch(cmd, 32, 32, 1);
+    vkCmd.dispatch(32, 32, 1);
 
     // Barrier: displacement compute write -> grass compute read
     Barriers::imageComputeToSampling(cmd, displacementImage,
@@ -850,21 +852,24 @@ void GrassSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex
     Barriers::clearBufferForComputeReadWrite(cmd, indirectBuffers.buffers[writeSet], 0, sizeof(VkDrawIndirectCommand));
 
     // Dispatch grass compute shader using the compute buffer set
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, getComputePipelineHandles().pipeline);
+    vk::CommandBuffer vkCmd(cmd);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, getComputePipelineHandles().pipeline);
     VkDescriptorSet computeSet = (*particleSystem)->getComputeDescriptorSet(writeSet);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                            getComputePipelineHandles().pipelineLayout, 0, 1,
-                            &computeSet, 0, nullptr);
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute,
+                             getComputePipelineHandles().pipelineLayout, 0,
+                             vk::DescriptorSet(computeSet), {});
 
     GrassPushConstants grassPush{};
     grassPush.time = time;
-    vkCmdPushConstants(cmd, getComputePipelineHandles().pipelineLayout,
-                       VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(GrassPushConstants), &grassPush);
+    vkCmd.pushConstants<GrassPushConstants>(
+        getComputePipelineHandles().pipelineLayout,
+        vk::ShaderStageFlagBits::eCompute,
+        0, grassPush);
 
     // Dispatch: 2D grid of workgroups for better texture cache coherency
     // Grid: 1000x1000 blades, Workgroup: 16x16 threads
     // ceil(1000/16) = 63 workgroups per dimension (63*63*256 = 1,016,064 threads)
-    vkCmdDispatch(cmd, 63, 63, 1);
+    vkCmd.dispatch(63, 63, 1);
 
     // Memory barrier: compute write -> vertex shader read (storage buffer) and indirect read
     // Note: This barrier ensures the compute results are visible when we draw from this buffer
@@ -879,43 +884,47 @@ void GrassSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float tim
     // Dynamic UBO: no per-frame descriptor update needed - we pass the offset at bind time instead
     // This eliminates per-frame vkUpdateDescriptorSets calls for the renderer UBO
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, getGraphicsPipelineHandles().pipeline);
+    vk::CommandBuffer vkCmd(cmd);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, getGraphicsPipelineHandles().pipeline);
 
     // Set dynamic viewport and scissor to handle window resize
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = static_cast<float>(getExtent().width);
-    viewport.height = static_cast<float>(getExtent().height);
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(cmd, 0, 1, &viewport);
+    auto viewport = vk::Viewport{}
+        .setX(0.0f)
+        .setY(0.0f)
+        .setWidth(static_cast<float>(getExtent().width))
+        .setHeight(static_cast<float>(getExtent().height))
+        .setMinDepth(0.0f)
+        .setMaxDepth(1.0f);
+    vkCmd.setViewport(0, viewport);
 
-    VkRect2D scissor{};
-    scissor.offset = {0, 0};
-    scissor.extent = getExtent();
-    vkCmdSetScissor(cmd, 0, 1, &scissor);
+    VkExtent2D rawExtent = getExtent();
+    auto scissor = vk::Rect2D{}
+        .setOffset({0, 0})
+        .setExtent({rawExtent.width, rawExtent.height});
+    vkCmd.setScissor(0, scissor);
 
     VkDescriptorSet graphicsSet = (*particleSystem)->getGraphicsDescriptorSet(readSet);
 
     // Use dynamic offset for binding 0 (renderer UBO) if dynamic buffer is available
     if (dynamicRendererUBO_ && dynamicRendererUBO_->isValid()) {
         uint32_t dynamicOffset = dynamicRendererUBO_->getDynamicOffset(frameIndex);
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                getGraphicsPipelineHandles().pipelineLayout, 0, 1,
-                                &graphicsSet, 1, &dynamicOffset);
+        vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+                                 getGraphicsPipelineHandles().pipelineLayout, 0,
+                                 vk::DescriptorSet(graphicsSet), dynamicOffset);
     } else {
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                getGraphicsPipelineHandles().pipelineLayout, 0, 1,
-                                &graphicsSet, 0, nullptr);
+        vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+                                 getGraphicsPipelineHandles().pipelineLayout, 0,
+                                 vk::DescriptorSet(graphicsSet), {});
     }
 
     GrassPushConstants grassPush{};
     grassPush.time = time;
-    vkCmdPushConstants(cmd, getGraphicsPipelineHandles().pipelineLayout,
-                       VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GrassPushConstants), &grassPush);
+    vkCmd.pushConstants<GrassPushConstants>(
+        getGraphicsPipelineHandles().pipelineLayout,
+        vk::ShaderStageFlagBits::eVertex,
+        0, grassPush);
 
-    vkCmdDrawIndirect(cmd, indirectBuffers.buffers[readSet], 0, 1, sizeof(VkDrawIndirectCommand));
+    vkCmd.drawIndirect(indirectBuffers.buffers[readSet], 0, 1, sizeof(VkDrawIndirectCommand));
 }
 
 void GrassSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time, uint32_t cascadeIndex) {
@@ -929,18 +938,21 @@ void GrassSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex, flo
             .update();
     }
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipeline_.get());
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            shadowPipelineLayout_.get(), 0, 1,
-                            &shadowDescriptorSetsDB[readSet], 0, nullptr);
+    vk::CommandBuffer vkCmd(cmd);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, shadowPipeline_.get());
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+                             shadowPipelineLayout_.get(), 0,
+                             vk::DescriptorSet(shadowDescriptorSetsDB[readSet]), {});
 
     GrassPushConstants grassPush{};
     grassPush.time = time;
     grassPush.cascadeIndex = static_cast<int>(cascadeIndex);
-    vkCmdPushConstants(cmd, shadowPipelineLayout_.get(),
-                       VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GrassPushConstants), &grassPush);
+    vkCmd.pushConstants<GrassPushConstants>(
+        shadowPipelineLayout_.get(),
+        vk::ShaderStageFlagBits::eVertex,
+        0, grassPush);
 
-    vkCmdDrawIndirect(cmd, indirectBuffers.buffers[readSet], 0, 1, sizeof(VkDrawIndirectCommand));
+    vkCmd.drawIndirect(indirectBuffers.buffers[readSet], 0, 1, sizeof(VkDrawIndirectCommand));
 }
 
 void GrassSystem::setSnowMask(VkDevice device, VkImageView snowMaskView, VkSampler snowMaskSampler) {
