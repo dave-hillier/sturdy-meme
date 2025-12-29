@@ -60,8 +60,21 @@ private:
     void cleanup();
 
     void setupStyle();
+    void renderMainMenuBar();
     void renderDashboard(GuiInterfaces& interfaces, const Camera& camera, float fps);
     void renderPositionPanel(const Camera& camera);
+    void renderTimeWindow(GuiInterfaces& ui);
+    void renderWeatherWindow(GuiInterfaces& ui);
+    void renderEnvironmentWindow(GuiInterfaces& ui);
+    void renderPostFXWindow(GuiInterfaces& ui);
+    void renderTerrainWindow(GuiInterfaces& ui);
+    void renderWaterWindow(GuiInterfaces& ui);
+    void renderTreesWindow(GuiInterfaces& ui);
+    void renderPlayerWindow(GuiInterfaces& ui);
+    void renderIKWindow(GuiInterfaces& ui, const Camera& camera);
+    void renderDebugWindow(GuiInterfaces& ui);
+    void renderPerformanceWindow(GuiInterfaces& ui);
+    void renderProfilerWindow(GuiInterfaces& ui);
 
     VkDevice device_ = VK_NULL_HANDLE;  // Stored for cleanup
     VkDescriptorPool imguiPool = VK_NULL_HANDLE;
@@ -80,4 +93,22 @@ private:
     float frameTimeHistory[120] = {0};
     int frameTimeIndex = 0;
     float avgFrameTime = 0.0f;
+
+    // Window visibility states for menu-based UI
+    struct WindowStates {
+        bool showDashboard = true;
+        bool showPosition = true;
+        bool showTime = false;
+        bool showWeather = false;
+        bool showEnvironment = false;
+        bool showPostFX = false;
+        bool showTerrain = false;
+        bool showWater = false;
+        bool showTrees = false;
+        bool showPlayer = false;
+        bool showIK = false;
+        bool showDebug = false;
+        bool showPerformance = false;
+        bool showProfiler = false;
+    } windowStates;
 };

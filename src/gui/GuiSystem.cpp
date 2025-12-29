@@ -282,75 +282,52 @@ void GuiSystem::render(GuiInterfaces& ui, const Camera& camera, float deltaTime,
     }
     avgFrameTime = sum / 120.0f;
 
-    // Main control panel
-    ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoCollapse;
+    // Main menu bar
+    renderMainMenuBar();
 
-    ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(340, 680), ImGuiCond_FirstUseEver);
-
-    if (ImGui::Begin("Engine Controls", &visible, windowFlags)) {
+    // Render individual windows based on visibility state
+    if (windowStates.showDashboard) {
         renderDashboard(ui, camera, fps);
-
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-
-        if (ImGui::BeginTabBar("ControlTabs")) {
-            if (ImGui::BeginTabItem("Time")) {
-                GuiTimeTab::render(ui.time, ui.location);
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Weather")) {
-                GuiWeatherTab::render(ui.weather, ui.environmentSettings);
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Environment")) {
-                GuiEnvironmentTab::render(ui.environment, environmentTabState);
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Post FX")) {
-                GuiPostFXTab::render(ui.postProcess, ui.cloudShadow);
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Terrain")) {
-                GuiTerrainTab::render(ui.terrain);
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Water")) {
-                GuiWaterTab::render(ui.water);
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Trees")) {
-                GuiTreeTab::render(ui.tree);
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Player")) {
-                GuiPlayerTab::render(ui.player, playerSettings);
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("IK")) {
-                GuiIKTab::render(ui.scene, camera, ikDebugSettings);
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Debug")) {
-                GuiDebugTab::render(ui.debug);
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Perf")) {
-                GuiPerformanceTab::render(ui.performance);
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Profiler")) {
-                GuiProfilerTab::render(ui.profiler);
-                ImGui::EndTabItem();
-            }
-            ImGui::EndTabBar();
-        }
     }
-    ImGui::End();
-
-    // Position panel (separate window)
-    renderPositionPanel(camera);
+    if (windowStates.showPosition) {
+        renderPositionPanel(camera);
+    }
+    if (windowStates.showTime) {
+        renderTimeWindow(ui);
+    }
+    if (windowStates.showWeather) {
+        renderWeatherWindow(ui);
+    }
+    if (windowStates.showEnvironment) {
+        renderEnvironmentWindow(ui);
+    }
+    if (windowStates.showPostFX) {
+        renderPostFXWindow(ui);
+    }
+    if (windowStates.showTerrain) {
+        renderTerrainWindow(ui);
+    }
+    if (windowStates.showWater) {
+        renderWaterWindow(ui);
+    }
+    if (windowStates.showTrees) {
+        renderTreesWindow(ui);
+    }
+    if (windowStates.showPlayer) {
+        renderPlayerWindow(ui);
+    }
+    if (windowStates.showIK) {
+        renderIKWindow(ui, camera);
+    }
+    if (windowStates.showDebug) {
+        renderDebugWindow(ui);
+    }
+    if (windowStates.showPerformance) {
+        renderPerformanceWindow(ui);
+    }
+    if (windowStates.showProfiler) {
+        renderProfilerWindow(ui);
+    }
 
     // Skeleton/IK debug overlay
     if (ikDebugSettings.showSkeleton || ikDebugSettings.showIKTargets) {
@@ -374,79 +351,114 @@ bool GuiSystem::wantsInput() const {
     return io.WantCaptureMouse || io.WantCaptureKeyboard;
 }
 
-void GuiSystem::renderDashboard(GuiInterfaces& ui, const Camera& camera, float fps) {
-    // Performance metrics header
-    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.8f, 1.0f, 1.0f));
-    ImGui::Text("PERFORMANCE");
-    ImGui::PopStyleColor();
+void GuiSystem::renderMainMenuBar() {
+    if (ImGui::BeginMainMenuBar()) {
+        if (ImGui::BeginMenu("View")) {
+            ImGui::MenuItem("Dashboard", nullptr, &windowStates.showDashboard);
+            ImGui::MenuItem("Position", nullptr, &windowStates.showPosition);
+            ImGui::EndMenu();
+        }
 
-    ImGui::Separator();
+        if (ImGui::BeginMenu("Environment")) {
+            ImGui::MenuItem("Time", nullptr, &windowStates.showTime);
+            ImGui::MenuItem("Weather", nullptr, &windowStates.showWeather);
+            ImGui::MenuItem("Atmosphere", nullptr, &windowStates.showEnvironment);
+            ImGui::EndMenu();
+        }
 
-    // FPS and frame time in columns
-    ImGui::Columns(2, nullptr, false);
-    ImGui::SetColumnWidth(0, 160);
+        if (ImGui::BeginMenu("Rendering")) {
+            ImGui::MenuItem("Post FX", nullptr, &windowStates.showPostFX);
+            ImGui::MenuItem("Terrain", nullptr, &windowStates.showTerrain);
+            ImGui::MenuItem("Water", nullptr, &windowStates.showWater);
+            ImGui::MenuItem("Trees", nullptr, &windowStates.showTrees);
+            ImGui::EndMenu();
+        }
 
-    ImGui::Text("FPS");
-    ImGui::PushStyleColor(ImGuiCol_Text, fps > 55.0f ? ImVec4(0.4f, 0.9f, 0.4f, 1.0f) :
-                                          fps > 30.0f ? ImVec4(0.9f, 0.9f, 0.4f, 1.0f) :
-                                                        ImVec4(0.9f, 0.4f, 0.4f, 1.0f));
-    ImGui::SameLine(80);
-    ImGui::Text("%.0f", fps);
-    ImGui::PopStyleColor();
+        if (ImGui::BeginMenu("Character")) {
+            ImGui::MenuItem("Player", nullptr, &windowStates.showPlayer);
+            ImGui::MenuItem("IK / Animation", nullptr, &windowStates.showIK);
+            ImGui::EndMenu();
+        }
 
-    ImGui::NextColumn();
+        if (ImGui::BeginMenu("Debug")) {
+            ImGui::MenuItem("Debug Visualizations", nullptr, &windowStates.showDebug);
+            ImGui::MenuItem("Performance Toggles", nullptr, &windowStates.showPerformance);
+            ImGui::MenuItem("Profiler", nullptr, &windowStates.showProfiler);
+            ImGui::EndMenu();
+        }
 
-    ImGui::Text("Frame Time");
-    ImGui::SameLine(80);
-    ImGui::Text("%.2f ms", avgFrameTime);
-
-    ImGui::Columns(1);
-
-    // Frame time graph
-    ImGui::PlotLines("##frametime", frameTimeHistory, 120, frameTimeIndex,
-                     nullptr, 0.0f, 33.3f, ImVec2(-1, 40));
-
-    // Quick stats
-    ImGui::Spacing();
-    ImGui::Columns(2, nullptr, false);
-    ImGui::SetColumnWidth(0, 160);
-
-    uint32_t triCount = ui.terrain.getTerrainNodeCount();
-    ImGui::Text("Terrain Tris");
-    ImGui::SameLine(100);
-    if (triCount >= 1000000) {
-        ImGui::Text("%.2fM", triCount / 1000000.0f);
-    } else if (triCount >= 1000) {
-        ImGui::Text("%.0fK", triCount / 1000.0f);
-    } else {
-        ImGui::Text("%u", triCount);
+        ImGui::EndMainMenuBar();
     }
+}
 
-    ImGui::NextColumn();
+void GuiSystem::renderDashboard(GuiInterfaces& ui, const Camera& camera, float fps) {
+    ImGui::SetNextWindowPos(ImVec2(20, 40), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(280, 200), ImGuiCond_FirstUseEver);
 
-    float tod = ui.time.getTimeOfDay();
-    int h = static_cast<int>(tod * 24.0f);
-    int m = static_cast<int>((tod * 24.0f - h) * 60.0f);
-    ImGui::Text("Time");
-    ImGui::SameLine(60);
-    ImGui::Text("%02d:%02d", h, m);
+    if (ImGui::Begin("Dashboard", &windowStates.showDashboard)) {
+        // FPS and frame time in columns
+        ImGui::Columns(2, nullptr, false);
+        ImGui::SetColumnWidth(0, 140);
 
-    ImGui::Columns(1);
+        ImGui::Text("FPS");
+        ImGui::PushStyleColor(ImGuiCol_Text, fps > 55.0f ? ImVec4(0.4f, 0.9f, 0.4f, 1.0f) :
+                                              fps > 30.0f ? ImVec4(0.9f, 0.9f, 0.4f, 1.0f) :
+                                                            ImVec4(0.9f, 0.4f, 0.4f, 1.0f));
+        ImGui::SameLine(60);
+        ImGui::Text("%.0f", fps);
+        ImGui::PopStyleColor();
 
-    // Camera position
-    ImGui::Spacing();
-    glm::vec3 pos = camera.getPosition();
-    ImGui::Text("Camera: X %.1f  Y %.1f  Z %.1f", pos.x, pos.y, pos.z);
+        ImGui::NextColumn();
+
+        ImGui::Text("Frame");
+        ImGui::SameLine(50);
+        ImGui::Text("%.2f ms", avgFrameTime);
+
+        ImGui::Columns(1);
+
+        // Frame time graph
+        ImGui::PlotLines("##frametime", frameTimeHistory, 120, frameTimeIndex,
+                         nullptr, 0.0f, 33.3f, ImVec2(-1, 35));
+
+        // Quick stats
+        ImGui::Columns(2, nullptr, false);
+        ImGui::SetColumnWidth(0, 140);
+
+        uint32_t triCount = ui.terrain.getTerrainNodeCount();
+        ImGui::Text("Terrain");
+        ImGui::SameLine(60);
+        if (triCount >= 1000000) {
+            ImGui::Text("%.2fM", triCount / 1000000.0f);
+        } else if (triCount >= 1000) {
+            ImGui::Text("%.0fK", triCount / 1000.0f);
+        } else {
+            ImGui::Text("%u", triCount);
+        }
+
+        ImGui::NextColumn();
+
+        float tod = ui.time.getTimeOfDay();
+        int h = static_cast<int>(tod * 24.0f);
+        int m = static_cast<int>((tod * 24.0f - h) * 60.0f);
+        ImGui::Text("Time");
+        ImGui::SameLine(40);
+        ImGui::Text("%02d:%02d", h, m);
+
+        ImGui::Columns(1);
+
+        // Camera position
+        glm::vec3 pos = camera.getPosition();
+        ImGui::Text("Pos: %.0f, %.0f, %.0f", pos.x, pos.y, pos.z);
+    }
+    ImGui::End();
 }
 
 void GuiSystem::renderPositionPanel(const Camera& camera) {
-    ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoCollapse;
-
     // Position in top-right corner
-    ImGui::SetNextWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x - 200, 20), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x - 200, 40), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(180, 280), ImGuiCond_FirstUseEver);
 
-    if (ImGui::Begin("Position", nullptr, windowFlags)) {
+    if (ImGui::Begin("Position", &windowStates.showPosition)) {
         // Position section
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.8f, 1.0f, 1.0f));
         ImGui::Text("POSITION");
@@ -558,6 +570,126 @@ void GuiSystem::renderPositionPanel(const Camera& camera) {
         float bearing = std::fmod(-yaw + 90.0f, 360.0f);
         if (bearing < 0) bearing += 360.0f;
         ImGui::Text("Bearing: %.0f", bearing);
+    }
+    ImGui::End();
+}
+
+void GuiSystem::renderTimeWindow(GuiInterfaces& ui) {
+    ImGui::SetNextWindowPos(ImVec2(20, 260), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(280, 200), ImGuiCond_FirstUseEver);
+
+    if (ImGui::Begin("Time", &windowStates.showTime)) {
+        GuiTimeTab::render(ui.time, ui.location);
+    }
+    ImGui::End();
+}
+
+void GuiSystem::renderWeatherWindow(GuiInterfaces& ui) {
+    ImGui::SetNextWindowPos(ImVec2(20, 260), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(280, 220), ImGuiCond_FirstUseEver);
+
+    if (ImGui::Begin("Weather", &windowStates.showWeather)) {
+        GuiWeatherTab::render(ui.weather, ui.environmentSettings);
+    }
+    ImGui::End();
+}
+
+void GuiSystem::renderEnvironmentWindow(GuiInterfaces& ui) {
+    ImGui::SetNextWindowPos(ImVec2(20, 260), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(280, 300), ImGuiCond_FirstUseEver);
+
+    if (ImGui::Begin("Atmosphere", &windowStates.showEnvironment)) {
+        GuiEnvironmentTab::render(ui.environment, environmentTabState);
+    }
+    ImGui::End();
+}
+
+void GuiSystem::renderPostFXWindow(GuiInterfaces& ui) {
+    ImGui::SetNextWindowPos(ImVec2(320, 40), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(280, 280), ImGuiCond_FirstUseEver);
+
+    if (ImGui::Begin("Post FX", &windowStates.showPostFX)) {
+        GuiPostFXTab::render(ui.postProcess, ui.cloudShadow);
+    }
+    ImGui::End();
+}
+
+void GuiSystem::renderTerrainWindow(GuiInterfaces& ui) {
+    ImGui::SetNextWindowPos(ImVec2(320, 40), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(280, 250), ImGuiCond_FirstUseEver);
+
+    if (ImGui::Begin("Terrain", &windowStates.showTerrain)) {
+        GuiTerrainTab::render(ui.terrain);
+    }
+    ImGui::End();
+}
+
+void GuiSystem::renderWaterWindow(GuiInterfaces& ui) {
+    ImGui::SetNextWindowPos(ImVec2(320, 40), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(280, 200), ImGuiCond_FirstUseEver);
+
+    if (ImGui::Begin("Water", &windowStates.showWater)) {
+        GuiWaterTab::render(ui.water);
+    }
+    ImGui::End();
+}
+
+void GuiSystem::renderTreesWindow(GuiInterfaces& ui) {
+    ImGui::SetNextWindowPos(ImVec2(320, 40), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(280, 200), ImGuiCond_FirstUseEver);
+
+    if (ImGui::Begin("Trees", &windowStates.showTrees)) {
+        GuiTreeTab::render(ui.tree);
+    }
+    ImGui::End();
+}
+
+void GuiSystem::renderPlayerWindow(GuiInterfaces& ui) {
+    ImGui::SetNextWindowPos(ImVec2(620, 40), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(280, 180), ImGuiCond_FirstUseEver);
+
+    if (ImGui::Begin("Player", &windowStates.showPlayer)) {
+        GuiPlayerTab::render(ui.player, playerSettings);
+    }
+    ImGui::End();
+}
+
+void GuiSystem::renderIKWindow(GuiInterfaces& ui, const Camera& camera) {
+    ImGui::SetNextWindowPos(ImVec2(620, 40), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(280, 350), ImGuiCond_FirstUseEver);
+
+    if (ImGui::Begin("IK / Animation", &windowStates.showIK)) {
+        GuiIKTab::render(ui.scene, camera, ikDebugSettings);
+    }
+    ImGui::End();
+}
+
+void GuiSystem::renderDebugWindow(GuiInterfaces& ui) {
+    ImGui::SetNextWindowPos(ImVec2(920, 40), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(320, 400), ImGuiCond_FirstUseEver);
+
+    if (ImGui::Begin("Debug Visualizations", &windowStates.showDebug)) {
+        GuiDebugTab::render(ui.debug);
+    }
+    ImGui::End();
+}
+
+void GuiSystem::renderPerformanceWindow(GuiInterfaces& ui) {
+    ImGui::SetNextWindowPos(ImVec2(920, 40), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(320, 500), ImGuiCond_FirstUseEver);
+
+    if (ImGui::Begin("Performance Toggles", &windowStates.showPerformance)) {
+        GuiPerformanceTab::render(ui.performance);
+    }
+    ImGui::End();
+}
+
+void GuiSystem::renderProfilerWindow(GuiInterfaces& ui) {
+    ImGui::SetNextWindowPos(ImVec2(920, 40), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(400, 600), ImGuiCond_FirstUseEver);
+
+    if (ImGui::Begin("Profiler", &windowStates.showProfiler)) {
+        GuiProfilerTab::render(ui.profiler);
     }
     ImGui::End();
 }
