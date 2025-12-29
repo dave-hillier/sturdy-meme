@@ -254,86 +254,83 @@ bool PostProcessSystem::createHDRRenderTarget() {
 }
 
 bool PostProcessSystem::createHDRRenderPass() {
-    VkAttachmentDescription colorAttachment{};
-    colorAttachment.format = HDR_FORMAT;
-    colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    auto colorAttachment = vk::AttachmentDescription{}
+        .setFormat(static_cast<vk::Format>(HDR_FORMAT))
+        .setSamples(vk::SampleCountFlagBits::e1)
+        .setLoadOp(vk::AttachmentLoadOp::eClear)
+        .setStoreOp(vk::AttachmentStoreOp::eStore)
+        .setStencilLoadOp(vk::AttachmentLoadOp::eDontCare)
+        .setStencilStoreOp(vk::AttachmentStoreOp::eDontCare)
+        .setInitialLayout(vk::ImageLayout::eUndefined)
+        .setFinalLayout(vk::ImageLayout::eShaderReadOnlyOptimal);
 
-    VkAttachmentDescription depthAttachment{};
-    depthAttachment.format = DEPTH_FORMAT;
-    depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;  // Store for sampling in post-process
-    depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;  // For sampling
+    auto depthAttachment = vk::AttachmentDescription{}
+        .setFormat(static_cast<vk::Format>(DEPTH_FORMAT))
+        .setSamples(vk::SampleCountFlagBits::e1)
+        .setLoadOp(vk::AttachmentLoadOp::eClear)
+        .setStoreOp(vk::AttachmentStoreOp::eStore)  // Store for sampling in post-process
+        .setStencilLoadOp(vk::AttachmentLoadOp::eDontCare)
+        .setStencilStoreOp(vk::AttachmentStoreOp::eDontCare)
+        .setInitialLayout(vk::ImageLayout::eUndefined)
+        .setFinalLayout(vk::ImageLayout::eDepthStencilReadOnlyOptimal);  // For sampling
 
-    VkAttachmentReference colorAttachmentRef{};
-    colorAttachmentRef.attachment = 0;
-    colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    auto colorAttachmentRef = vk::AttachmentReference{}
+        .setAttachment(0)
+        .setLayout(vk::ImageLayout::eColorAttachmentOptimal);
 
-    VkAttachmentReference depthAttachmentRef{};
-    depthAttachmentRef.attachment = 1;
-    depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    auto depthAttachmentRef = vk::AttachmentReference{}
+        .setAttachment(1)
+        .setLayout(vk::ImageLayout::eDepthStencilAttachmentOptimal);
 
-    VkSubpassDescription subpass{};
-    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    subpass.colorAttachmentCount = 1;
-    subpass.pColorAttachments = &colorAttachmentRef;
-    subpass.pDepthStencilAttachment = &depthAttachmentRef;
+    auto subpass = vk::SubpassDescription{}
+        .setPipelineBindPoint(vk::PipelineBindPoint::eGraphics)
+        .setColorAttachments(colorAttachmentRef)
+        .setPDepthStencilAttachment(&depthAttachmentRef);
 
-    VkSubpassDependency dependency{};
-    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-    dependency.dstSubpass = 0;
-    dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
-                              VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-    dependency.srcAccessMask = 0;
-    dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
-                              VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
-                               VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    auto dependency = vk::SubpassDependency{}
+        .setSrcSubpass(VK_SUBPASS_EXTERNAL)
+        .setDstSubpass(0)
+        .setSrcStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput |
+                         vk::PipelineStageFlagBits::eEarlyFragmentTests)
+        .setSrcAccessMask(vk::AccessFlags{})
+        .setDstStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput |
+                         vk::PipelineStageFlagBits::eEarlyFragmentTests)
+        .setDstAccessMask(vk::AccessFlagBits::eColorAttachmentWrite |
+                          vk::AccessFlagBits::eDepthStencilAttachmentWrite);
 
-    std::array<VkAttachmentDescription, 2> attachments = {colorAttachment, depthAttachment};
+    std::array<vk::AttachmentDescription, 2> attachments = {colorAttachment, depthAttachment};
 
-    VkRenderPassCreateInfo renderPassInfo{};
-    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    renderPassInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
-    renderPassInfo.pAttachments = attachments.data();
-    renderPassInfo.subpassCount = 1;
-    renderPassInfo.pSubpasses = &subpass;
-    renderPassInfo.dependencyCount = 1;
-    renderPassInfo.pDependencies = &dependency;
+    auto renderPassInfo = vk::RenderPassCreateInfo{}
+        .setAttachments(attachments)
+        .setSubpasses(subpass)
+        .setDependencies(dependency);
 
-    if (vkCreateRenderPass(device, &renderPassInfo, nullptr, &hdrRenderPass) != VK_SUCCESS) {
+    auto result = vk::Device(device).createRenderPass(renderPassInfo);
+    if (!result) {
         SDL_Log("Failed to create HDR render pass");
         return false;
     }
+    hdrRenderPass = result;
 
     return true;
 }
 
 bool PostProcessSystem::createHDRFramebuffer() {
-    std::array<VkImageView, 2> attachments = {hdrColorView, hdrDepthView};
+    std::array<vk::ImageView, 2> attachments = {hdrColorView, hdrDepthView};
 
-    VkFramebufferCreateInfo framebufferInfo{};
-    framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-    framebufferInfo.renderPass = hdrRenderPass;
-    framebufferInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
-    framebufferInfo.pAttachments = attachments.data();
-    framebufferInfo.width = extent.width;
-    framebufferInfo.height = extent.height;
-    framebufferInfo.layers = 1;
+    auto framebufferInfo = vk::FramebufferCreateInfo{}
+        .setRenderPass(hdrRenderPass)
+        .setAttachments(attachments)
+        .setWidth(extent.width)
+        .setHeight(extent.height)
+        .setLayers(1);
 
-    if (vkCreateFramebuffer(device, &framebufferInfo, nullptr, &hdrFramebuffer) != VK_SUCCESS) {
+    auto result = vk::Device(device).createFramebuffer(framebufferInfo);
+    if (!result) {
         SDL_Log("Failed to create HDR framebuffer");
         return false;
     }
+    hdrFramebuffer = result;
 
     return true;
 }
@@ -430,137 +427,127 @@ bool PostProcessSystem::createCompositePipeline() {
 
     if (!vertShaderModule || !fragShaderModule) {
         SDL_Log("Failed to create post-process shader modules");
-        if (vertShaderModule) vkDestroyShaderModule(device, *vertShaderModule, nullptr);
-        if (fragShaderModule) vkDestroyShaderModule(device, *fragShaderModule, nullptr);
+        vk::Device vkDevice(device);
+        if (vertShaderModule) vkDevice.destroyShaderModule(*vertShaderModule);
+        if (fragShaderModule) vkDevice.destroyShaderModule(*fragShaderModule);
         return false;
     }
 
-    VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
-    vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
-    vertShaderStageInfo.module = *vertShaderModule;
-    vertShaderStageInfo.pName = "main";
+    auto vertShaderStageInfo = vk::PipelineShaderStageCreateInfo{}
+        .setStage(vk::ShaderStageFlagBits::eVertex)
+        .setModule(*vertShaderModule)
+        .setPName("main");
 
     // Specialization constant for god ray sample count
     // constant_id = 0 maps to GOD_RAY_SAMPLES in shader
-    VkSpecializationMapEntry specMapEntry{};
-    specMapEntry.constantID = 0;
-    specMapEntry.offset = 0;
-    specMapEntry.size = sizeof(int32_t);
+    auto specMapEntry = vk::SpecializationMapEntry{}
+        .setConstantID(0)
+        .setOffset(0)
+        .setSize(sizeof(int32_t));
 
     // Sample counts for each quality level: Low=16, Medium=32, High=64
     const int32_t sampleCounts[3] = {16, 32, 64};
 
-    VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
-    fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    fragShaderStageInfo.module = *fragShaderModule;
-    fragShaderStageInfo.pName = "main";
+    auto fragShaderStageInfo = vk::PipelineShaderStageCreateInfo{}
+        .setStage(vk::ShaderStageFlagBits::eFragment)
+        .setModule(*fragShaderModule)
+        .setPName("main");
 
-    VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
+    std::array<vk::PipelineShaderStageCreateInfo, 2> shaderStages = {vertShaderStageInfo, fragShaderStageInfo};
 
     // No vertex input (fullscreen triangle generated in shader)
-    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
-    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vertexInputInfo.vertexBindingDescriptionCount = 0;
-    vertexInputInfo.vertexAttributeDescriptionCount = 0;
+    auto vertexInputInfo = vk::PipelineVertexInputStateCreateInfo{};
 
-    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
-    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    inputAssembly.primitiveRestartEnable = VK_FALSE;
+    auto inputAssembly = vk::PipelineInputAssemblyStateCreateInfo{}
+        .setTopology(vk::PrimitiveTopology::eTriangleList)
+        .setPrimitiveRestartEnable(false);
 
-    VkPipelineViewportStateCreateInfo viewportState{};
-    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewportState.viewportCount = 1;
-    viewportState.scissorCount = 1;
+    auto viewportState = vk::PipelineViewportStateCreateInfo{}
+        .setViewportCount(1)
+        .setScissorCount(1);
 
-    VkPipelineRasterizationStateCreateInfo rasterizer{};
-    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rasterizer.depthClampEnable = VK_FALSE;
-    rasterizer.rasterizerDiscardEnable = VK_FALSE;
-    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-    rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_NONE;
-    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    rasterizer.depthBiasEnable = VK_FALSE;
+    auto rasterizer = vk::PipelineRasterizationStateCreateInfo{}
+        .setDepthClampEnable(false)
+        .setRasterizerDiscardEnable(false)
+        .setPolygonMode(vk::PolygonMode::eFill)
+        .setLineWidth(1.0f)
+        .setCullMode(vk::CullModeFlagBits::eNone)
+        .setFrontFace(vk::FrontFace::eCounterClockwise)
+        .setDepthBiasEnable(false);
 
-    VkPipelineMultisampleStateCreateInfo multisampling{};
-    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisampling.sampleShadingEnable = VK_FALSE;
-    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    auto multisampling = vk::PipelineMultisampleStateCreateInfo{}
+        .setSampleShadingEnable(false)
+        .setRasterizationSamples(vk::SampleCountFlagBits::e1);
 
-    VkPipelineDepthStencilStateCreateInfo depthStencil{};
-    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    depthStencil.depthTestEnable = VK_FALSE;
-    depthStencil.depthWriteEnable = VK_FALSE;
-    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
-    depthStencil.depthBoundsTestEnable = VK_FALSE;
-    depthStencil.stencilTestEnable = VK_FALSE;
+    auto depthStencil = vk::PipelineDepthStencilStateCreateInfo{}
+        .setDepthTestEnable(false)
+        .setDepthWriteEnable(false)
+        .setDepthCompareOp(vk::CompareOp::eLess)
+        .setDepthBoundsTestEnable(false)
+        .setStencilTestEnable(false);
 
-    VkPipelineColorBlendAttachmentState colorBlendAttachment{};
-    colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-                                          VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    colorBlendAttachment.blendEnable = VK_FALSE;
+    auto colorBlendAttachment = vk::PipelineColorBlendAttachmentState{}
+        .setColorWriteMask(vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
+                           vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA)
+        .setBlendEnable(false);
 
-    VkPipelineColorBlendStateCreateInfo colorBlending{};
-    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    colorBlending.logicOpEnable = VK_FALSE;
-    colorBlending.attachmentCount = 1;
-    colorBlending.pAttachments = &colorBlendAttachment;
+    auto colorBlending = vk::PipelineColorBlendStateCreateInfo{}
+        .setLogicOpEnable(false)
+        .setAttachments(colorBlendAttachment);
 
-    std::vector<VkDynamicState> dynamicStates = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
-    VkPipelineDynamicStateCreateInfo dynamicState{};
-    dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
-    dynamicState.pDynamicStates = dynamicStates.data();
+    std::array<vk::DynamicState, 2> dynamicStates = {vk::DynamicState::eViewport, vk::DynamicState::eScissor};
+    auto dynamicState = vk::PipelineDynamicStateCreateInfo{}
+        .setDynamicStates(dynamicStates);
 
     compositePipelineLayout = DescriptorManager::createPipelineLayout(device, compositeDescriptorSetLayout);
     if (compositePipelineLayout == VK_NULL_HANDLE) {
         SDL_Log("Failed to create composite pipeline layout");
-        vkDestroyShaderModule(device, *vertShaderModule, nullptr);
-        vkDestroyShaderModule(device, *fragShaderModule, nullptr);
+        vk::Device vkDevice(device);
+        vkDevice.destroyShaderModule(*vertShaderModule);
+        vkDevice.destroyShaderModule(*fragShaderModule);
         return false;
     }
 
-    VkGraphicsPipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pipelineInfo.stageCount = 2;
-    pipelineInfo.pStages = shaderStages;
-    pipelineInfo.pVertexInputState = &vertexInputInfo;
-    pipelineInfo.pInputAssemblyState = &inputAssembly;
-    pipelineInfo.pViewportState = &viewportState;
-    pipelineInfo.pRasterizationState = &rasterizer;
-    pipelineInfo.pMultisampleState = &multisampling;
-    pipelineInfo.pDepthStencilState = &depthStencil;
-    pipelineInfo.pColorBlendState = &colorBlending;
-    pipelineInfo.pDynamicState = &dynamicState;
-    pipelineInfo.layout = compositePipelineLayout;
-    pipelineInfo.renderPass = outputRenderPass;
-    pipelineInfo.subpass = 0;
+    auto pipelineInfo = vk::GraphicsPipelineCreateInfo{}
+        .setStages(shaderStages)
+        .setPVertexInputState(&vertexInputInfo)
+        .setPInputAssemblyState(&inputAssembly)
+        .setPViewportState(&viewportState)
+        .setPRasterizationState(&rasterizer)
+        .setPMultisampleState(&multisampling)
+        .setPDepthStencilState(&depthStencil)
+        .setPColorBlendState(&colorBlending)
+        .setPDynamicState(&dynamicState)
+        .setLayout(compositePipelineLayout)
+        .setRenderPass(outputRenderPass)
+        .setSubpass(0);
+
+    vk::Device vkDevice(device);
 
     // Create pipeline variants for each god ray quality level
     for (int i = 0; i < 3; i++) {
-        VkSpecializationInfo specInfo{};
-        specInfo.mapEntryCount = 1;
-        specInfo.pMapEntries = &specMapEntry;
-        specInfo.dataSize = sizeof(int32_t);
-        specInfo.pData = &sampleCounts[i];
+        auto specInfo = vk::SpecializationInfo{}
+            .setMapEntries(specMapEntry)
+            .setDataSize(sizeof(int32_t))
+            .setPData(&sampleCounts[i]);
 
         // Update fragment shader stage with specialization info
-        shaderStages[1].pSpecializationInfo = &specInfo;
+        shaderStages[1].setPSpecializationInfo(&specInfo);
+        pipelineInfo.setStages(shaderStages);
 
-        if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &compositePipelines[i]) != VK_SUCCESS) {
+        auto result = vkDevice.createGraphicsPipeline(nullptr, pipelineInfo);
+        if (result.result != vk::Result::eSuccess) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create composite graphics pipeline variant %d", i);
-            vkDestroyShaderModule(device, *vertShaderModule, nullptr);
-            vkDestroyShaderModule(device, *fragShaderModule, nullptr);
+            vkDevice.destroyShaderModule(*vertShaderModule);
+            vkDevice.destroyShaderModule(*fragShaderModule);
             return false;
         }
+        compositePipelines[i] = result.value;
         SDL_Log("Created post-process pipeline variant %d (god ray samples: %d)", i, sampleCounts[i]);
     }
 
-    vkDestroyShaderModule(device, *vertShaderModule, nullptr);
-    vkDestroyShaderModule(device, *fragShaderModule, nullptr);
+    vkDevice.destroyShaderModule(*vertShaderModule);
+    vkDevice.destroyShaderModule(*fragShaderModule);
 
     return true;
 }
@@ -646,27 +633,24 @@ void PostProcessSystem::recordPostProcess(VkCommandBuffer cmd, uint32_t frameInd
             .clearDepth(1.0f, 0);
 
         // Select pipeline variant based on god ray quality setting
+        vk::CommandBuffer vkCmd(cmd);
         VkPipeline selectedPipeline = compositePipelines[static_cast<int>(godRayQuality)];
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, selectedPipeline);
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, compositePipelineLayout,
-                                0, 1, &compositeDescriptorSets[frameIndex], 0, nullptr);
+        vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, selectedPipeline);
+        vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, compositePipelineLayout,
+                                 0, compositeDescriptorSets[frameIndex], {});
 
-        VkViewport viewport{};
-        viewport.x = 0.0f;
-        viewport.y = 0.0f;
-        viewport.width = static_cast<float>(extent.width);
-        viewport.height = static_cast<float>(extent.height);
-        viewport.minDepth = 0.0f;
-        viewport.maxDepth = 1.0f;
-        vkCmdSetViewport(cmd, 0, 1, &viewport);
+        vk::Viewport viewport{
+            0.0f, 0.0f,
+            static_cast<float>(extent.width), static_cast<float>(extent.height),
+            0.0f, 1.0f
+        };
+        vkCmd.setViewport(0, viewport);
 
-        VkRect2D scissor{};
-        scissor.offset = {0, 0};
-        scissor.extent = extent;
-        vkCmdSetScissor(cmd, 0, 1, &scissor);
+        vk::Rect2D scissor{{0, 0}, extent};
+        vkCmd.setScissor(0, scissor);
 
         // Draw fullscreen triangle
-        vkCmdDraw(cmd, 3, 1, 0, 0);
+        vkCmd.draw(3, 1, 0, 0);
 
         // Call pre-end callback (e.g., for GUI rendering)
         if (preEndCallback) {
@@ -948,21 +932,22 @@ void PostProcessSystem::recordHistogramCompute(VkCommandBuffer cmd, uint32_t fra
     Barriers::clearBufferForComputeReadWrite(cmd, histogramBuffer.get(), 0, HISTOGRAM_BINS * sizeof(uint32_t));
 
     // Dispatch histogram build
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, histogramBuildPipeline);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, histogramBuildPipelineLayout,
-                            0, 1, &histogramBuildDescSets[frameIndex], 0, nullptr);
+    vk::CommandBuffer vkCmd(cmd);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, histogramBuildPipeline);
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, histogramBuildPipelineLayout,
+                             0, histogramBuildDescSets[frameIndex], {});
 
     uint32_t groupsX = (extent.width + 15) / 16;
     uint32_t groupsY = (extent.height + 15) / 16;
-    vkCmdDispatch(cmd, groupsX, groupsY, 1);
+    vkCmd.dispatch(groupsX, groupsY, 1);
 
     barrierHistogramBuildToReduce(cmd);
 
     // Dispatch histogram reduce (single workgroup of 256 threads)
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, histogramReducePipeline);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, histogramReducePipelineLayout,
-                            0, 1, &histogramReduceDescSets[frameIndex], 0, nullptr);
-    vkCmdDispatch(cmd, 1, 1, 1);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, histogramReducePipeline);
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, histogramReducePipelineLayout,
+                             0, histogramReduceDescSets[frameIndex], {});
+    vkCmd.dispatch(1, 1, 1);
 
     barrierHistogramReduceComplete(cmd, frameIndex);
 }
