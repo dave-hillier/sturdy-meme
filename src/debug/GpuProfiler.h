@@ -42,7 +42,7 @@ public:
      * Note: If timestamps are unsupported, returns a valid but disabled profiler.
      */
     static std::optional<GpuProfiler> create(VkDevice device, VkPhysicalDevice physicalDevice,
-                                              uint32_t framesInFlight, uint32_t maxZones = 32);
+                                              uint32_t framesInFlight, uint32_t maxZones = 64);
 
     // Destructor handles cleanup
     ~GpuProfiler();
