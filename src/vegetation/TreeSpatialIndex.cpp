@@ -135,9 +135,15 @@ void TreeSpatialIndex::rebuild(const std::vector<glm::mat4>& transforms,
     }
 
     // Sort assignments by cell index for contiguous tree ranges
+    // Use stable sort with secondary key (treeIndex) to ensure consistent ordering
+    // within cells - this prevents non-deterministic behavior that could cause
+    // leaf type mismatches when trees of different types share a cell
     std::sort(assignments.begin(), assignments.end(),
               [](const TreeCellAssignment& a, const TreeCellAssignment& b) {
-                  return a.cellIndex < b.cellIndex;
+                  if (a.cellIndex != b.cellIndex) {
+                      return a.cellIndex < b.cellIndex;
+                  }
+                  return a.treeIndex < b.treeIndex;
               });
 
     // Build sorted tree list and update cell firstTreeIndex
