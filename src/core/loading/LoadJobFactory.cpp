@@ -4,6 +4,7 @@
 #include "../vulkan/VulkanHelpers.h"
 #include "../ImageBuilder.h"
 #include <SDL3/SDL_log.h>
+#include <vulkan/vulkan.hpp>
 #include <stb_image.h>
 #include <fstream>
 #include <cstring>
@@ -287,9 +288,9 @@ VkBuffer StagedResourceUploader::uploadBuffer(const StagedBuffer& staged, VkBuff
             return VK_NULL_HANDLE;
         }
 
-        VkBufferCopy copyRegion{};
-        copyRegion.size = bufferSize;
-        vkCmdCopyBuffer(cmdScope.getHandle(), stagingBuffer.get(), deviceBuffer.get(), 1, &copyRegion);
+        vk::CommandBuffer vkCmd(cmdScope.getHandle());
+        auto copyRegion = vk::BufferCopy{}.setSrcOffset(0).setDstOffset(0).setSize(bufferSize);
+        vkCmd.copyBuffer(stagingBuffer.get(), deviceBuffer.get(), copyRegion);
 
         if (!cmdScope.end()) {
             return VK_NULL_HANDLE;

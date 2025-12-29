@@ -2,6 +2,7 @@
 #include "vulkan/VulkanContext.h"
 #include "ShaderLoader.h"
 #include <SDL3/SDL.h>
+#include <vulkan/vulkan.hpp>
 #include <chrono>
 
 std::unique_ptr<LoadingRenderer> LoadingRenderer::create(const InitInfo& info) {
@@ -329,37 +330,31 @@ bool LoadingRenderer::render() {
     }
 
     // Begin render pass
-    VkRenderPassBeginInfo renderPassInfo{};
-    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    renderPassInfo.renderPass = renderPass_.get();
-    renderPassInfo.framebuffer = framebuffers_[imageIndex].get();
-    renderPassInfo.renderArea.offset = {0, 0};
-    renderPassInfo.renderArea.extent = extent;
+    vk::ClearValue clearColor(vk::ClearColorValue(std::array<float, 4>{0.02f, 0.02f, 0.05f, 1.0f}));
+    auto renderPassInfo = vk::RenderPassBeginInfo{}
+        .setRenderPass(renderPass_.get())
+        .setFramebuffer(framebuffers_[imageIndex].get())
+        .setRenderArea(vk::Rect2D{{0, 0}, vk::Extent2D{extent.width, extent.height}})
+        .setClearValues(clearColor);
 
-    // Dark background
-    VkClearValue clearColor = {{{0.02f, 0.02f, 0.05f, 1.0f}}};
-    renderPassInfo.clearValueCount = 1;
-    renderPassInfo.pClearValues = &clearColor;
-
-    vkCmdBeginRenderPass(cmd, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+    vk::CommandBuffer vkCmd(cmd);
+    vkCmd.beginRenderPass(renderPassInfo, vk::SubpassContents::eInline);
 
     // Set viewport and scissor
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = static_cast<float>(extent.width);
-    viewport.height = static_cast<float>(extent.height);
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(cmd, 0, 1, &viewport);
+    auto viewport = vk::Viewport{}
+        .setX(0.0f)
+        .setY(0.0f)
+        .setWidth(static_cast<float>(extent.width))
+        .setHeight(static_cast<float>(extent.height))
+        .setMinDepth(0.0f)
+        .setMaxDepth(1.0f);
+    vkCmd.setViewport(0, viewport);
 
-    VkRect2D scissor{};
-    scissor.offset = {0, 0};
-    scissor.extent = extent;
-    vkCmdSetScissor(cmd, 0, 1, &scissor);
+    auto scissor = vk::Rect2D{{0, 0}, vk::Extent2D{extent.width, extent.height}};
+    vkCmd.setScissor(0, scissor);
 
     // Bind pipeline and draw
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_.get());
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline_.get());
 
     // Push constants
     LoadingPushConstants pushConstants{};
@@ -368,14 +363,15 @@ bool LoadingRenderer::render() {
     pushConstants.progress = progress_;
     pushConstants._pad = 0.0f;
 
-    vkCmdPushConstants(cmd, pipelineLayout_.get(),
-                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                       0, sizeof(LoadingPushConstants), &pushConstants);
+    vkCmd.pushConstants<LoadingPushConstants>(
+        pipelineLayout_.get(),
+        vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
+        0, pushConstants);
 
     // Draw quad (6 vertices, 2 triangles)
-    vkCmdDraw(cmd, 6, 1, 0, 0);
+    vkCmd.draw(6, 1, 0, 0);
 
-    vkCmdEndRenderPass(cmd);
+    vkCmd.endRenderPass();
 
     if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "LoadingRenderer: Failed to end command buffer");
