@@ -51,7 +51,7 @@ void RenderPipelineFactory::setupPipeline(
     // Capture state pointers for use in lambdas
     bool* terrainEnabled = state.terrainEnabled;
     bool* physicsDebugEnabled = state.physicsDebugEnabled;
-    uint32_t* currentFrame = state.currentFrame;
+    const uint32_t* currentFrame = state.currentFrame;
     glm::mat4* lastViewProj = state.lastViewProj;
     VkPipeline graphicsPipeline = state.graphicsPipeline;
 

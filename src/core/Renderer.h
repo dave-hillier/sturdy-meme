@@ -22,6 +22,7 @@
 #include "VulkanRAII.h"
 #include "RendererSystems.h"
 #include "PerformanceToggles.h"
+#include "TripleBuffering.h"
 
 // Forward declarations
 class PhysicsWorld;
@@ -277,9 +278,8 @@ private:
 
     std::optional<DescriptorManager::Pool> descriptorManagerPool;
 
-    std::vector<ManagedSemaphore> imageAvailableSemaphores;
-    std::vector<ManagedSemaphore> renderFinishedSemaphores;
-    std::vector<ManagedFence> inFlightFences;
+    // Triple buffering: frame synchronization and indexing
+    TripleBuffering frameSync_;
 
     // Rock descriptor sets (RockSystem has its own textures, not in MaterialRegistry)
     std::vector<VkDescriptorSet> rockDescriptorSets;
@@ -292,8 +292,8 @@ private:
     std::unordered_map<std::string, std::vector<VkDescriptorSet>> treeBarkDescriptorSets;
     std::unordered_map<std::string, std::vector<VkDescriptorSet>> treeLeafDescriptorSets;
 
-    uint32_t currentFrame = 0;
-    static constexpr int MAX_FRAMES_IN_FLIGHT = 3;
+    // Convenience accessor for frame count (matches TripleBuffering::DEFAULT_FRAME_COUNT)
+    static constexpr int MAX_FRAMES_IN_FLIGHT = TripleBuffering::DEFAULT_FRAME_COUNT;
 
     float lastSunIntensity = 1.0f;
 

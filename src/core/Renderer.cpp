@@ -170,7 +170,7 @@ void Renderer::setupRenderPipeline() {
     RenderPipelineFactory::PipelineState state{};
     state.terrainEnabled = &terrainEnabled;
     state.physicsDebugEnabled = &physicsDebugEnabled;
-    state.currentFrame = &currentFrame;
+    state.currentFrame = frameSync_.currentIndexPtr();
     state.lastViewProj = &lastViewProj;
     state.graphicsPipeline = graphicsPipeline.get();
 
@@ -210,7 +210,7 @@ void Renderer::updatePhysicsDebug(PhysicsWorld& physics, const glm::vec3& camera
     if (!physicsDebugEnabled) return;
 
     // Begin debug line frame (clear previous and set frame index)
-    systems_->debugLine().beginFrame(currentFrame);
+    systems_->debugLine().beginFrame(frameSync_.currentIndex());
 
     // Create debug renderer on first use (after Jolt is initialized)
     if (!systems_->physicsDebugRenderer()) {
@@ -246,10 +246,8 @@ void Renderer::cleanup() {
     if (device != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(device);
 
-        // RAII handles cleanup of sync objects
-        imageAvailableSemaphores.clear();
-        renderFinishedSemaphores.clear();
-        inFlightFences.clear();
+        // RAII handles cleanup of sync objects via TripleBuffering
+        frameSync_.destroy();
 
         // Destroy all subsystems via RendererSystems
         if (systems_) {
@@ -367,24 +365,7 @@ bool Renderer::createCommandBuffers() {
 }
 
 bool Renderer::createSyncObjects() {
-    VkDevice device = vulkanContext_->getDevice();
-
-    imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
-    renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
-    inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
-
-    for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        if (!ManagedSemaphore::create(device, imageAvailableSemaphores[i])) {
-            return false;
-        }
-        if (!ManagedSemaphore::create(device, renderFinishedSemaphores[i])) {
-            return false;
-        }
-        if (!ManagedFence::createSignaled(device, inFlightFences[i])) {
-            return false;
-        }
-    }
-    return true;
+    return frameSync_.init(vulkanContext_->getDevice(), MAX_FRAMES_IN_FLIGHT);
 }
 
 // Adds the common descriptor bindings shared between main and skinned layouts.
@@ -652,15 +633,13 @@ bool Renderer::render(const Camera& camera) {
     // Frame synchronization - use non-blocking check first to avoid unnecessary waits
     // With triple buffering, the fence is often already signaled
     systems_->profiler().beginCpuZone("Wait:FenceSync");
-    if (!inFlightFences[currentFrame].isSignaled()) {
-        inFlightFences[currentFrame].wait();
-    }
+    frameSync_.waitForCurrentFrameIfNeeded();
     systems_->profiler().endCpuZone("Wait:FenceSync");
 
     systems_->profiler().beginCpuZone("Wait:AcquireImage");
     uint32_t imageIndex;
     VkResult result = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX,
-                                            imageAvailableSemaphores[currentFrame].get(), VK_NULL_HANDLE, &imageIndex);
+                                            frameSync_.currentImageAvailableSemaphore(), VK_NULL_HANDLE, &imageIndex);
     systems_->profiler().endCpuZone("Wait:AcquireImage");
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR) {
@@ -682,7 +661,7 @@ bool Renderer::render(const Camera& camera) {
         return false;
     }
 
-    inFlightFences[currentFrame].resetFence();
+    frameSync_.resetCurrentFence();
 
     // Update time system (frame timing and day/night cycle)
     TimingData timing = systems_->time().update();
@@ -691,12 +670,12 @@ bool Renderer::render(const Camera& camera) {
     systems_->profiler().beginCpuZone("UniformUpdates");
 
     // Update uniform buffer data
-    updateUniformBuffer(currentFrame, camera);
+    updateUniformBuffer(frameSync_.currentIndex(), camera);
 
     // Update bone matrices for GPU skinning
     SceneBuilder& sceneBuilder = systems_->scene().getSceneBuilder();
     AnimatedCharacter* character = sceneBuilder.hasCharacter() ? &sceneBuilder.getAnimatedCharacter() : nullptr;
-    systems_->skinnedMesh().updateBoneMatrices(currentFrame, character);
+    systems_->skinnedMesh().updateBoneMatrices(frameSync_.currentIndex(), character);
 
     systems_->profiler().endCpuZone("UniformUpdates");
 
@@ -971,9 +950,9 @@ bool Renderer::render(const Camera& camera) {
     // Queue submission
     systems_->profiler().beginCpuZone("QueueSubmit");
 
-    vk::Semaphore waitSemaphores[] = {imageAvailableSemaphores[currentFrame].get()};
+    vk::Semaphore waitSemaphores[] = {frameSync_.currentImageAvailableSemaphore()};
     vk::PipelineStageFlags waitStages[] = {vk::PipelineStageFlagBits::eColorAttachmentOutput};
-    vk::Semaphore signalSemaphores[] = {renderFinishedSemaphores[currentFrame].get()};
+    vk::Semaphore signalSemaphores[] = {frameSync_.currentRenderFinishedSemaphore()};
 
     auto submitInfo = vk::SubmitInfo{}
         .setWaitSemaphores(waitSemaphores)
@@ -982,7 +961,7 @@ bool Renderer::render(const Camera& camera) {
         .setSignalSemaphores(signalSemaphores);
 
     try {
-        vk::Queue(graphicsQueue).submit(submitInfo, inFlightFences[currentFrame].get());
+        vk::Queue(graphicsQueue).submit(submitInfo, frameSync_.currentFence());
     } catch (const vk::DeviceLostError&) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Device lost during queue submit");
         systems_->profiler().endCpuZone("QueueSubmit");
@@ -1033,9 +1012,9 @@ bool Renderer::render(const Camera& camera) {
     systems_->leaf().advanceBufferSet();
 
     // Update water tile cull visibility tracking (uses absolute frame counter)
-    systems_->waterTileCull().endFrame(currentFrame);
+    systems_->waterTileCull().endFrame(frameSync_.currentIndex());
 
-    currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+    frameSync_.advance();
 
     // End CPU profiling for this frame
     systems_->profiler().endCpuFrame();
@@ -1051,18 +1030,14 @@ void Renderer::waitForPreviousFrame() {
     // Wait for the previous frame's fence to ensure GPU is done with resources
     // we might be about to destroy/update.
     //
-    // With double-buffering (MAX_FRAMES_IN_FLIGHT=2):
-    // - Frame N uses fence[N % 2]
+    // With triple buffering (MAX_FRAMES_IN_FLIGHT=3):
+    // - Frame N uses fence[N % 3]
     // - Before updating meshes for frame N, we need frame N-1's GPU work complete
-    // - Previous frame's fence is fence[(N-1) % 2] = fence[(currentFrame + 1) % 2]
+    // - Previous frame's fence is fence[(N-1) % 3]
     //
     // This prevents race conditions where we destroy mesh buffers while the GPU
     // is still reading them from the previous frame's commands.
-    uint32_t previousFrame = (currentFrame + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT;
-    // Use non-blocking check first - often already signaled with triple buffering
-    if (!inFlightFences[previousFrame].isSignaled()) {
-        inFlightFences[previousFrame].wait();
-    }
+    frameSync_.waitForPreviousFrame();
 }
 
 void Renderer::destroyDepthImageAndView() {
@@ -1124,7 +1099,7 @@ glm::vec2 Renderer::calculateSunScreenPos(const Camera& camera, const glm::vec3&
 FrameData Renderer::buildFrameData(const Camera& camera, float deltaTime, float time) const {
     FrameData frame;
 
-    frame.frameIndex = currentFrame;
+    frame.frameIndex = frameSync_.currentIndex();
     frame.deltaTime = deltaTime;
     frame.time = time;
     frame.timeOfDay = systems_->time().getTimeOfDay();
@@ -1150,7 +1125,7 @@ FrameData Renderer::buildFrameData(const Camera& camera, float deltaTime, float 
     }
 
     // Get sun direction from last computed UBO (already computed in updateUniformBuffer)
-    UniformBufferObject* ubo = static_cast<UniformBufferObject*>(systems_->globalBuffers().uniformBuffers.mappedPointers[currentFrame]);
+    UniformBufferObject* ubo = static_cast<UniformBufferObject*>(systems_->globalBuffers().uniformBuffers.mappedPointers[frameSync_.currentIndex()]);
     frame.sunDirection = glm::normalize(glm::vec3(ubo->sunDirection));
     frame.sunIntensity = ubo->sunDirection.w;
 

@@ -34,8 +34,8 @@ public:
         bool* terrainEnabled = nullptr;
         bool* physicsDebugEnabled = nullptr;
 
-        // Frame state
-        uint32_t* currentFrame = nullptr;
+        // Frame state (const pointer - read-only access)
+        const uint32_t* currentFrame = nullptr;
 
         // Cached state for debug rendering
         glm::mat4* lastViewProj = nullptr;
