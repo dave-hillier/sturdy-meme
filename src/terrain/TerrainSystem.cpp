@@ -333,7 +333,13 @@ bool TerrainSystem::createDescriptorSets() {
         writer.writeBuffer(0, (*cbt)->getBuffer(), 0, (*cbt)->getBufferSize(), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
         writer.writeBuffer(1, (*buffers)->getIndirectDispatchBuffer(), 0, sizeof(VkDispatchIndirectCommand), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
         writer.writeBuffer(2, (*buffers)->getIndirectDrawBuffer(), 0, sizeof(VkDrawIndexedIndirectCommand), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-        writer.writeImage(3, heightMap->getView(), heightMap->getSampler());
+        // Height map fallback (binding 3) - use tile cache base heightmap
+        if (tileCache && tileCache->getBaseHeightMapView() != VK_NULL_HANDLE) {
+            writer.writeImage(3, tileCache->getBaseHeightMapView(), tileCache->getBaseHeightMapSampler());
+        } else {
+            // Fallback to heightMap if tile cache not ready (should not happen in normal operation)
+            writer.writeImage(3, heightMap->getView(), heightMap->getSampler());
+        }
         writer.writeBuffer(4, (*buffers)->getUniformBuffer(i), 0, sizeof(TerrainUniforms));
         writer.writeBuffer(5, (*buffers)->getVisibleIndicesBuffer(), 0, sizeof(uint32_t) * (1 + MAX_VISIBLE_TRIANGLES), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
         writer.writeBuffer(6, (*buffers)->getCullIndirectDispatchBuffer(), 0, sizeof(VkDispatchIndirectCommand), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
@@ -439,9 +445,15 @@ void TerrainSystem::updateDescriptorSets(VkDevice device,
         writer.writeBuffer(0, (*cbt)->getBuffer(), 0, (*cbt)->getBufferSize(),
                           VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
 
-        // Height map (binding 3)
-        writer.writeImage(3, heightMap->getView(), heightMap->getSampler(),
-                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        // Height map fallback (binding 3) - use tile cache base heightmap
+        if (tileCache && tileCache->getBaseHeightMapView() != VK_NULL_HANDLE) {
+            writer.writeImage(3, tileCache->getBaseHeightMapView(), tileCache->getBaseHeightMapSampler(),
+                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        } else {
+            // Fallback to heightMap if tile cache not ready (should not happen in normal operation)
+            writer.writeImage(3, heightMap->getView(), heightMap->getSampler(),
+                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        }
 
         // Terrain uniforms (binding 4)
         writer.writeBuffer(4, (*buffers)->getUniformBuffer(i), 0, sizeof(TerrainUniforms));
@@ -501,9 +513,14 @@ void TerrainSystem::updateDescriptorSets(VkDevice device,
                               VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
         }
 
-        // Caustics texture (binding 21) - use heightmap as placeholder until setCaustics is called
-        writer.writeImage(21, heightMap->getView(), heightMap->getSampler(),
-                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        // Caustics texture (binding 21) - use tile cache base heightmap as placeholder until setCaustics is called
+        if (tileCache && tileCache->getBaseHeightMapView() != VK_NULL_HANDLE) {
+            writer.writeImage(21, tileCache->getBaseHeightMapView(), tileCache->getBaseHeightMapSampler(),
+                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        } else {
+            writer.writeImage(21, heightMap->getView(), heightMap->getSampler(),
+                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        }
 
         // Caustics UBO (binding 22) - per-frame buffer for underwater caustics
         constexpr VkDeviceSize causticsUBOSize = 32;  // 8 floats
@@ -960,20 +977,24 @@ void TerrainSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex,
 }
 
 float TerrainSystem::getHeightAt(float x, float z) const {
-    // Use tile cache for height data - base LOD tiles cover entire terrain
-    if (tileCache) {
-        float tileHeight;
-        if (tileCache->getHeightAt(x, z, tileHeight)) {
-            return tileHeight;
-        }
-        // This should never happen - base LOD tiles cover entire terrain
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                    "TerrainSystem::getHeightAt(%.1f, %.1f): tile cache miss - should never happen",
-                    x, z);
+    // Tile cache is required - base LOD tiles cover entire terrain
+    if (!tileCache) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "TerrainSystem::getHeightAt(%.1f, %.1f): tile cache not initialized - cannot query height",
+                     x, z);
+        return 0.0f;
     }
 
-    // Fallback for positions outside terrain bounds
-    return heightMap->getHeightAt(x, z);
+    float tileHeight;
+    if (tileCache->getHeightAt(x, z, tileHeight)) {
+        return tileHeight;
+    }
+
+    // This should never happen - base LOD tiles cover entire terrain
+    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                 "TerrainSystem::getHeightAt(%.1f, %.1f): tile cache miss - base LOD should cover entire terrain",
+                 x, z);
+    return 0.0f;
 }
 
 bool TerrainSystem::setMeshletSubdivisionLevel(int level) {

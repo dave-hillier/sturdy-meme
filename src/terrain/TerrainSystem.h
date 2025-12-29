@@ -220,9 +220,14 @@ public:
     // Get terrain height at world position (CPU-side, for collision)
     float getHeightAt(float x, float z) const;
 
-    // Get raw heightmap data for physics integration
-    const float* getHeightMapData() const { return heightMap->getData(); }
-    uint32_t getHeightMapResolution() const { return heightMap->getResolution(); }
+    // Get raw heightmap data for flow map generation and other CPU-side uses
+    // Uses tile cache base heightmap (combined from LOD3 tiles)
+    const float* getHeightMapData() const {
+        return tileCache ? tileCache->getBaseHeightMapData().data() : nullptr;
+    }
+    uint32_t getHeightMapResolution() const {
+        return tileCache ? tileCache->getBaseHeightMapResolution() : 0;
+    }
 
     // Get current triangle count from GPU (for debugging/display)
     uint32_t getTriangleCount() const;
@@ -244,9 +249,14 @@ public:
     const TerrainConfig& getConfig() const { return config; }
     void setConfig(const TerrainConfig& newConfig) { config = newConfig; }
 
-    // Heightmap accessors for grass integration
-    VkImageView getHeightMapView() const { return heightMap->getView(); }
-    VkSampler getHeightMapSampler() const { return heightMap->getSampler(); }
+    // Heightmap accessors for grass integration and water rendering
+    // Uses tile cache base heightmap (combined from LOD3 tiles)
+    VkImageView getHeightMapView() const {
+        return tileCache ? tileCache->getBaseHeightMapView() : VK_NULL_HANDLE;
+    }
+    VkSampler getHeightMapSampler() const {
+        return tileCache ? tileCache->getBaseHeightMapSampler() : VK_NULL_HANDLE;
+    }
 
     // Hole mask for caves/wells (areas with no terrain)
     bool isHole(float x, float z) const { return heightMap->isHole(x, z); }
