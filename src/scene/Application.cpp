@@ -5,6 +5,8 @@
 #include <unordered_set>
 #include "core/vulkan/VulkanContext.h"
 #include "core/LoadingRenderer.h"
+#include "core/loading/LoadJobQueue.h"
+#include "core/loading/LoadJobFactory.h"
 #include "InitProfiler.h"
 #include "Profiler.h"
 
@@ -86,7 +88,7 @@ bool Application::init(const std::string& title, int width, int height) {
         }
     }
 
-    // Create and show loading screen while heavy systems initialize
+    // Create and show loading screen while assets load asynchronously
     {
         INIT_PROFILE_PHASE("LoadingScreen");
         LoadingRenderer::InitInfo loadingInfo{};
@@ -95,12 +97,79 @@ bool Application::init(const std::string& title, int width, int height) {
 
         auto loadingRenderer = LoadingRenderer::create(loadingInfo);
         if (loadingRenderer) {
-            // Render a few frames of the loading screen to show it's alive
-            // In a more sophisticated setup, this would run in parallel with asset loading
-            for (int i = 0; i < 30; ++i) {  // ~0.5 seconds at 60fps
-                loadingRenderer->render();
-                SDL_PumpEvents();  // Keep window responsive
+            // Create async job queue with worker threads
+            auto jobQueue = Loading::LoadJobQueue::create(2);  // 2 worker threads
+
+            if (jobQueue) {
+                // Queue texture loads to run in parallel during loading screen
+                // These demonstrate the async loading pattern - resources are loaded
+                // to CPU memory on background threads while loading screen animates
+                std::vector<Loading::LoadJob> jobs;
+
+                // Queue scene textures (priority 0 = highest)
+                jobs.push_back(Loading::LoadJobFactory::createTextureJob(
+                    "crate_diffuse", resourcePath + "/assets/textures/crates/crate1/crate1_diffuse.png", true, 0));
+                jobs.push_back(Loading::LoadJobFactory::createTextureJob(
+                    "crate_normal", resourcePath + "/assets/textures/crates/crate1/crate1_normal.png", false, 0));
+
+                // Queue grass textures
+                jobs.push_back(Loading::LoadJobFactory::createTextureJob(
+                    "grass_diffuse", resourcePath + "/assets/textures/grass/grass/grass01.jpg", true, 1));
+                jobs.push_back(Loading::LoadJobFactory::createTextureJob(
+                    "grass_normal", resourcePath + "/assets/textures/grass/grass/grass01_n.jpg", false, 1));
+
+                // Queue metal textures
+                jobs.push_back(Loading::LoadJobFactory::createTextureJob(
+                    "metal_diffuse", resourcePath + "/assets/textures/industrial/metal_1.jpg", true, 1));
+                jobs.push_back(Loading::LoadJobFactory::createTextureJob(
+                    "metal_normal", resourcePath + "/assets/textures/industrial/metal_1_norm.jpg", false, 1));
+
+                // Queue rock textures
+                jobs.push_back(Loading::LoadJobFactory::createTextureJob(
+                    "rock_diffuse", resourcePath + "/assets/textures/industrial/concrete_1.jpg", true, 2));
+                jobs.push_back(Loading::LoadJobFactory::createTextureJob(
+                    "rock_normal", resourcePath + "/assets/textures/industrial/concrete_1_norm.jpg", false, 2));
+
+                // Set total job count for progress tracking
+                jobQueue->setTotalJobs(static_cast<uint32_t>(jobs.size()));
+                jobQueue->submitBatch(std::move(jobs));
+
+                // Run loading loop - renders loading screen while jobs complete
+                while (!jobQueue->isComplete()) {
+                    // Update progress display
+                    Loading::LoadProgress progress = jobQueue->getProgress();
+                    loadingRenderer->setProgress(progress.getProgress());
+
+                    // Render loading screen frame
+                    loadingRenderer->render();
+
+                    // Process completed jobs (just consume them for now - Renderer
+                    // will reload these textures during its init phase)
+                    auto completed = jobQueue->getCompletedJobs();
+                    for (auto& result : completed) {
+                        if (result.success) {
+                            SDL_Log("Async load complete: %s (%s)",
+                                   result.jobId.c_str(), result.phase.c_str());
+                        }
+                    }
+
+                    // Keep window responsive
+                    SDL_PumpEvents();
+
+                    // Small sleep to avoid spinning too fast
+                    SDL_Delay(1);
+                }
+
+                SDL_Log("Async loading complete: %llu bytes loaded",
+                       static_cast<unsigned long long>(jobQueue->getProgress().bytesLoaded));
+            } else {
+                // Fallback: just show loading screen for a bit
+                for (int i = 0; i < 30; ++i) {
+                    loadingRenderer->render();
+                    SDL_PumpEvents();
+                }
             }
+
             loadingRenderer->cleanup();
         } else {
             SDL_Log("Warning: LoadingRenderer creation failed, skipping loading screen");
