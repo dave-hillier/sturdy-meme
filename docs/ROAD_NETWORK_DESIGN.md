@@ -1,6 +1,16 @@
 # Road Network Generation Design
 
-This document outlines the planned road network generation system.
+This document outlines the road network generation system.
+
+## Implementation Status
+
+- [x] Space colonization algorithm (`SpaceColonization.h/cpp`)
+- [x] SVG output for roads (`RoadSVG.h/cpp`)
+- [x] A* pathfinding with terrain awareness
+- [x] Settlement areas with geography masking
+- [ ] Bridge/ford detection at river crossings
+- [ ] Settlement internal streets generator
+- [ ] Integration of colonization topology with A* routing
 
 ## Overview
 
@@ -145,6 +155,23 @@ Each settlement exports "entry points" at its edge where regional roads connect.
   ]
 }
 ```
+
+## Current Usage
+
+```bash
+# Basic usage (A* pathfinding with existing topology)
+./road_generator heightmap.png biome_map.png settlements.json ./output
+
+# With space colonization for network topology
+./road_generator heightmap.png biome_map.png settlements.json ./output --use-colonization
+```
+
+**Output files:**
+- `roads.json` - Road network in JSON format
+- `roads.bin` - Binary format for runtime loading
+- `roads.svg` - SVG visualization with Catmull-Rom splines
+- `roads_debug.png` - Debug raster visualization
+- `network.svg` - Network topology (if `--use-colonization`)
 
 ## References
 
