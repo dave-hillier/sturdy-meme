@@ -57,6 +57,8 @@ set(SOURCES
     src/core/controls/PlayerControlSubsystem.cpp
     src/core/vulkan/VulkanContext.cpp
     src/core/LoadingRenderer.cpp
+    src/core/loading/LoadJobQueue.cpp
+    src/core/loading/AsyncStartupLoader.cpp
     src/core/Mesh.cpp
     src/core/BufferUtils.cpp
     src/core/TripleBuffering.cpp
