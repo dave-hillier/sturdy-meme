@@ -623,14 +623,26 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
         transform = glm::rotate(transform, instance.rotation, glm::vec3(0.0f, 1.0f, 0.0f));
         transform = glm::scale(transform, glm::vec3(instance.scale));
 
-        // Default values for trees without leaf renderables
+        // Default values
         uint32_t leafTypeIdx = LEAF_TYPE_OAK;
         uint32_t firstInstance = 0;
         uint32_t instanceCount = 0;
         glm::vec3 leafTint(1.0f);
         float autumnHueShift = 0.0f;
 
-        // If this tree has a leafRenderable, get the detailed info
+        // CRITICAL: Always get firstInstance/instanceCount from leafDrawInfo using meshIndex.
+        // This ensures trees are sorted by firstInstance for the binary search in the shader.
+        // leafDrawInfo is indexed by meshIndex, and contains cumulative offsets for ALL trees
+        // (including those with 0 leaves). This maintains the sorted order required by
+        // the binary search in tree_leaf_cull.comp.
+        if (instance.meshIndex < leafDrawInfo.size()) {
+            const auto& drawInfo = leafDrawInfo[instance.meshIndex];
+            firstInstance = drawInfo.firstInstance;
+            instanceCount = drawInfo.instanceCount;
+            totalLeafInstances += instanceCount;
+        }
+
+        // If this tree has a leafRenderable, get the type-specific info (tint, leaf type)
         if (leafIdx >= 0 && static_cast<size_t>(leafIdx) < leafRenderables.size()) {
             const auto& renderable = leafRenderables[leafIdx];
 
@@ -641,14 +653,37 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
             leafTint = renderable.leafTint;
             autumnHueShift = renderable.autumnHueShift;
 
-            // Get leaf draw info
-            if (renderable.leafInstanceIndex >= 0 &&
-                static_cast<size_t>(renderable.leafInstanceIndex) < leafDrawInfo.size()) {
-                const auto& drawInfo = leafDrawInfo[renderable.leafInstanceIndex];
-                firstInstance = drawInfo.firstInstance;
-                instanceCount = drawInfo.instanceCount;
-                totalLeafInstances += instanceCount;
+            // Debug: check for index mismatch
+            if (static_cast<uint32_t>(renderable.leafInstanceIndex) != instance.meshIndex) {
+                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "TreeLeafCulling: Index mismatch! treeIdx=%zu meshIndex=%u leafInstanceIndex=%d leafType=%s",
+                    treeIdx, instance.meshIndex, renderable.leafInstanceIndex, renderable.leafType.c_str());
             }
+        } else if (instanceCount > 0) {
+            // CRITICAL: Tree has leaves but no leafRenderable - this means the leaf type will be wrong!
+            static bool warned = false;
+            if (!warned) {
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                    "TreeLeafCulling: Tree %zu has %u leaves but no leafRenderable! leafType will default to oak",
+                    treeIdx, instanceCount);
+                warned = true;
+            }
+        }
+
+        // Debug: verify meshIndex == treeIdx assumption
+        static bool debugOnce = false;
+        if (!debugOnce && treeIdx != instance.meshIndex) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                "TreeLeafCulling: meshIndex != treeIdx! treeIdx=%zu meshIndex=%u - trees may not be sorted correctly",
+                treeIdx, instance.meshIndex);
+            debugOnce = true;
+        }
+
+        // Debug: count trees by leaf type (once)
+        static uint32_t typeCounts[4] = {0, 0, 0, 0};
+        static bool typeCountsLogged = false;
+        if (!typeCountsLogged && instanceCount > 0) {
+            typeCounts[leafTypeIdx]++;
         }
 
         TreeCullData treeData{};
