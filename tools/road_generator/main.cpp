@@ -70,6 +70,18 @@ bool loadSettlements(const std::string& path, std::vector<Settlement>& settlemen
             settlement.position.x = s["x"].get<float>();
             settlement.position.y = s["z"].get<float>(); // Note: stored as z in JSON
 
+            if (s.contains("radius")) {
+                settlement.radius = s["radius"].get<float>();
+            } else {
+                // Default radii based on settlement type
+                switch (settlement.type) {
+                    case SettlementType::Town: settlement.radius = 200.0f; break;
+                    case SettlementType::Village: settlement.radius = 100.0f; break;
+                    case SettlementType::FishingVillage: settlement.radius = 80.0f; break;
+                    default: settlement.radius = 50.0f; break;
+                }
+            }
+
             if (s.contains("score")) {
                 settlement.score = s["score"].get<float>();
             }
