@@ -34,11 +34,11 @@ public:
 
         static LODConfig mediumDetail() {
             LODConfig cfg;
-            cfg.minBranchRadius = 0.02f;   // Prune very thin branches
-            cfg.maxBranchLevel = 2;         // Keep trunk + 2 levels of branches
+            cfg.minBranchRadius = 0.01f;   // Prune only the thinnest twigs
+            cfg.maxBranchLevel = 4;         // Keep most branch structure
             cfg.sectionReduction = 2;       // Half the sections per branch
-            cfg.leafDensity = 0.5f;         // Half the leaves
-            cfg.leafScale = 1.5f;           // 1.5x larger to compensate
+            cfg.leafDensity = 0.4f;         // 40% of leaves
+            cfg.leafScale = 1.8f;           // Larger to compensate for fewer
             return cfg;
         }
     };
