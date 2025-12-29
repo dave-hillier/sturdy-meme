@@ -143,6 +143,14 @@ bool TerrainTileCache::initInternal(const InitInfo& info) {
             terrainSize, tileResolution, numLODLevels);
     SDL_Log("  LOD0 grid: %ux%u tiles", tilesX, tilesZ);
 
+    // Load all base LOD tiles synchronously at startup
+    // These tiles cover the entire terrain and provide fallback height data
+    if (!loadBaseLODTiles()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "TerrainTileCache: Failed to load base LOD tiles");
+        return false;
+    }
+
     return true;
 }
 
@@ -151,6 +159,10 @@ void TerrainTileCache::cleanup() {
     if (device) {
         vkDeviceWaitIdle(device);
     }
+
+    // Clear base tiles list (pointers into loadedTiles)
+    baseTiles_.clear();
+    baseHeightMapCpuData_.clear();
 
     // Unload all tiles
     for (auto& [key, tile] : loadedTiles) {
@@ -173,6 +185,16 @@ void TerrainTileCache::cleanup() {
     if (tileArrayImage) {
         vmaDestroyImage(allocator, tileArrayImage, tileArrayAllocation);
         tileArrayImage = VK_NULL_HANDLE;
+    }
+
+    // Destroy base heightmap texture
+    if (baseHeightMapView_) {
+        vkDestroyImageView(device, baseHeightMapView_, nullptr);
+        baseHeightMapView_ = VK_NULL_HANDLE;
+    }
+    if (baseHeightMapImage_) {
+        vmaDestroyImage(allocator, baseHeightMapImage_, baseHeightMapAllocation_);
+        baseHeightMapImage_ = VK_NULL_HANDLE;
     }
 
     // Destroy sampler (RAII via reset)
@@ -322,7 +344,11 @@ void TerrainTileCache::updateActiveTiles(const glm::vec3& cameraPos, float loadR
     }
 
     // Find tiles to unload (too far from camera)
+    // Never unload base LOD tiles - they're the fallback for the entire terrain
     for (auto& [key, tile] : loadedTiles) {
+        // Skip base LOD tiles - they're never unloaded
+        if (tile.lod == baseLOD_) continue;
+
         float tileCenterX = (tile.worldMinX + tile.worldMaxX) * 0.5f;
         float tileCenterZ = (tile.worldMinZ + tile.worldMaxZ) * 0.5f;
 
@@ -643,10 +669,13 @@ bool TerrainTileCache::getHeightAt(float worldX, float worldZ, float& outHeight)
     // Also check all loaded tiles (includes CPU-only tiles from physics preloading)
     // This ensures physics and CPU queries use the same high-res tile data
     for (const auto& [key, tile] : loadedTiles) {
+        // Skip base LOD tiles here - we'll check them as fallback
+        if (tile.lod == baseLOD_) continue;
         if (sampleTile(tile)) return true;
     }
 
-    return false; // No tile covers this position
+    // Fallback to base LOD tiles (always loaded, covers entire terrain)
+    return sampleBaseLOD(worldX, worldZ, outHeight);
 }
 
 void TerrainTileCache::copyTileToArrayLayer(TerrainTile* tile, uint32_t layerIndex) {
@@ -841,4 +870,232 @@ void TerrainTileCache::freeArrayLayer(int32_t layerIndex) {
     if (layerIndex >= 0 && layerIndex < static_cast<int32_t>(MAX_ACTIVE_TILES)) {
         freeArrayLayers_[layerIndex] = true;
     }
+}
+
+bool TerrainTileCache::loadBaseLODTiles() {
+    // Load all tiles at the coarsest LOD level (LOD3 typically)
+    // These tiles cover the entire terrain and are never unloaded
+    baseLOD_ = numLODLevels - 1;  // Use highest LOD number (coarsest resolution)
+
+    // Calculate number of tiles at base LOD level
+    uint32_t baseTilesX = tilesX >> baseLOD_;
+    uint32_t baseTilesZ = tilesZ >> baseLOD_;
+    if (baseTilesX < 1) baseTilesX = 1;
+    if (baseTilesZ < 1) baseTilesZ = 1;
+
+    SDL_Log("TerrainTileCache: Loading %ux%u base LOD tiles (LOD%u) synchronously...",
+            baseTilesX, baseTilesZ, baseLOD_);
+
+    baseTiles_.clear();
+    baseTiles_.reserve(baseTilesX * baseTilesZ);
+
+    uint32_t tilesLoaded = 0;
+    uint32_t tilesFailed = 0;
+
+    for (uint32_t tz = 0; tz < baseTilesZ; tz++) {
+        for (uint32_t tx = 0; tx < baseTilesX; tx++) {
+            TileCoord coord{static_cast<int32_t>(tx), static_cast<int32_t>(tz)};
+
+            // Load with CPU data only first (no GPU resources yet)
+            if (loadTileCPUOnly(coord, baseLOD_)) {
+                uint64_t key = makeTileKey(coord, baseLOD_);
+                auto it = loadedTiles.find(key);
+                if (it != loadedTiles.end()) {
+                    baseTiles_.push_back(&it->second);
+                    tilesLoaded++;
+                }
+            } else {
+                tilesFailed++;
+            }
+        }
+    }
+
+    SDL_Log("TerrainTileCache: Loaded %u/%u base LOD tiles (%u failed)",
+            tilesLoaded, baseTilesX * baseTilesZ, tilesFailed);
+
+    if (tilesLoaded == 0) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "TerrainTileCache: Failed to load any base LOD tiles");
+        return false;
+    }
+
+    // Create combined base heightmap texture from base tiles
+    if (!createBaseHeightMap()) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "TerrainTileCache: Failed to create combined base heightmap");
+        // Not fatal - CPU queries will still work via sampleBaseLOD
+    }
+
+    return true;
+}
+
+bool TerrainTileCache::createBaseHeightMap() {
+    // Create a combined heightmap texture from all base LOD tiles
+    // This provides a single GPU texture for rendering fallback
+
+    uint32_t baseTilesX = tilesX >> baseLOD_;
+    uint32_t baseTilesZ = tilesZ >> baseLOD_;
+    if (baseTilesX < 1) baseTilesX = 1;
+    if (baseTilesZ < 1) baseTilesZ = 1;
+
+    // Calculate base heightmap resolution
+    // With 4x4 tiles at 512px each, native would be 2048x2048
+    // Use 1024x1024 as a good balance between quality and memory
+    // This preserves detail while using less VRAM than full native resolution
+    uint32_t nativeRes = std::max(baseTilesX, baseTilesZ) * tileResolution;
+    baseHeightMapResolution_ = std::min(nativeRes, 1024u);
+
+    // Create CPU data by sampling from base tiles
+    baseHeightMapCpuData_.resize(baseHeightMapResolution_ * baseHeightMapResolution_);
+
+    for (uint32_t y = 0; y < baseHeightMapResolution_; y++) {
+        for (uint32_t x = 0; x < baseHeightMapResolution_; x++) {
+            // Map pixel to world coordinates
+            float worldX = (static_cast<float>(x) / (baseHeightMapResolution_ - 1) - 0.5f) * terrainSize;
+            float worldZ = (static_cast<float>(y) / (baseHeightMapResolution_ - 1) - 0.5f) * terrainSize;
+
+            // Sample from base LOD tiles (normalized height)
+            float height = 0.0f;
+            bool found = false;
+
+            for (const TerrainTile* tile : baseTiles_) {
+                if (!tile || tile->cpuData.empty()) continue;
+                if (worldX < tile->worldMinX || worldX >= tile->worldMaxX ||
+                    worldZ < tile->worldMinZ || worldZ >= tile->worldMaxZ) continue;
+
+                // Calculate UV within tile
+                float u = (worldX - tile->worldMinX) / (tile->worldMaxX - tile->worldMinX);
+                float v = (worldZ - tile->worldMinZ) / (tile->worldMaxZ - tile->worldMinZ);
+                u = std::clamp(u, 0.0f, 1.0f);
+                v = std::clamp(v, 0.0f, 1.0f);
+
+                // Bilinear sample
+                float fx = u * (tileResolution - 1);
+                float fy = v * (tileResolution - 1);
+                int x0 = static_cast<int>(fx);
+                int y0 = static_cast<int>(fy);
+                int x1 = std::min(x0 + 1, static_cast<int>(tileResolution - 1));
+                int y1 = std::min(y0 + 1, static_cast<int>(tileResolution - 1));
+
+                float tx = fx - x0;
+                float ty = fy - y0;
+
+                float h00 = tile->cpuData[y0 * tileResolution + x0];
+                float h10 = tile->cpuData[y0 * tileResolution + x1];
+                float h01 = tile->cpuData[y1 * tileResolution + x0];
+                float h11 = tile->cpuData[y1 * tileResolution + x1];
+
+                height = (h00 * (1.0f - tx) + h10 * tx) * (1.0f - ty) +
+                         (h01 * (1.0f - tx) + h11 * tx) * ty;
+                found = true;
+                break;
+            }
+
+            baseHeightMapCpuData_[y * baseHeightMapResolution_ + x] = height;
+        }
+    }
+
+    // Create GPU image
+    auto imageInfo = vk::ImageCreateInfo{}
+        .setImageType(vk::ImageType::e2D)
+        .setFormat(vk::Format::eR32Sfloat)
+        .setExtent(vk::Extent3D{baseHeightMapResolution_, baseHeightMapResolution_, 1})
+        .setMipLevels(1)
+        .setArrayLayers(1)
+        .setSamples(vk::SampleCountFlagBits::e1)
+        .setTiling(vk::ImageTiling::eOptimal)
+        .setUsage(vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst)
+        .setSharingMode(vk::SharingMode::eExclusive)
+        .setInitialLayout(vk::ImageLayout::eUndefined);
+
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+
+    if (vmaCreateImage(allocator, reinterpret_cast<const VkImageCreateInfo*>(&imageInfo),
+                       &allocInfo, &baseHeightMapImage_, &baseHeightMapAllocation_, nullptr) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TerrainTileCache: Failed to create base heightmap image");
+        return false;
+    }
+
+    // Create image view
+    auto viewInfo = vk::ImageViewCreateInfo{}
+        .setImage(baseHeightMapImage_)
+        .setViewType(vk::ImageViewType::e2D)
+        .setFormat(vk::Format::eR32Sfloat)
+        .setSubresourceRange(vk::ImageSubresourceRange{}
+            .setAspectMask(vk::ImageAspectFlagBits::eColor)
+            .setBaseMipLevel(0)
+            .setLevelCount(1)
+            .setBaseArrayLayer(0)
+            .setLayerCount(1));
+
+    if (vkCreateImageView(device, reinterpret_cast<const VkImageViewCreateInfo*>(&viewInfo),
+                          nullptr, &baseHeightMapView_) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TerrainTileCache: Failed to create base heightmap view");
+        return false;
+    }
+
+    // Upload to GPU
+    VkDeviceSize imageSize = baseHeightMapResolution_ * baseHeightMapResolution_ * sizeof(float);
+
+    ManagedBuffer stagingBuffer;
+    if (!VulkanResourceFactory::createStagingBuffer(allocator, imageSize, stagingBuffer)) {
+        return false;
+    }
+
+    void* mappedData = stagingBuffer.map();
+    memcpy(mappedData, baseHeightMapCpuData_.data(), imageSize);
+    stagingBuffer.unmap();
+
+    CommandScope cmd(device, commandPool, graphicsQueue);
+    if (!cmd.begin()) return false;
+
+    Barriers::copyBufferToImage(cmd.get(), stagingBuffer.get(), baseHeightMapImage_,
+                                baseHeightMapResolution_, baseHeightMapResolution_);
+
+    if (!cmd.end()) return false;
+
+    SDL_Log("TerrainTileCache: Created base heightmap (%ux%u) from %zu base tiles",
+            baseHeightMapResolution_, baseHeightMapResolution_, baseTiles_.size());
+
+    return true;
+}
+
+bool TerrainTileCache::sampleBaseLOD(float worldX, float worldZ, float& outHeight) const {
+    // Sample height from base LOD tiles (fallback when no high-res tile covers position)
+    for (const TerrainTile* tile : baseTiles_) {
+        if (!tile || tile->cpuData.empty()) continue;
+        if (worldX < tile->worldMinX || worldX >= tile->worldMaxX ||
+            worldZ < tile->worldMinZ || worldZ >= tile->worldMaxZ) continue;
+
+        // Calculate UV within tile
+        float u = (worldX - tile->worldMinX) / (tile->worldMaxX - tile->worldMinX);
+        float v = (worldZ - tile->worldMinZ) / (tile->worldMaxZ - tile->worldMinZ);
+        u = std::clamp(u, 0.0f, 1.0f);
+        v = std::clamp(v, 0.0f, 1.0f);
+
+        // Bilinear sample
+        float fx = u * (tileResolution - 1);
+        float fy = v * (tileResolution - 1);
+        int x0 = static_cast<int>(fx);
+        int y0 = static_cast<int>(fy);
+        int x1 = std::min(x0 + 1, static_cast<int>(tileResolution - 1));
+        int y1 = std::min(y0 + 1, static_cast<int>(tileResolution - 1));
+
+        float tx = fx - x0;
+        float ty = fy - y0;
+
+        float h00 = tile->cpuData[y0 * tileResolution + x0];
+        float h10 = tile->cpuData[y0 * tileResolution + x1];
+        float h01 = tile->cpuData[y1 * tileResolution + x0];
+        float h11 = tile->cpuData[y1 * tileResolution + x1];
+
+        float h = (h00 * (1.0f - tx) + h10 * tx) * (1.0f - ty) +
+                  (h01 * (1.0f - tx) + h11 * tx) * ty;
+
+        outHeight = TerrainHeight::toWorld(h, heightScale);
+        return true;
+    }
+
+    return false;
 }

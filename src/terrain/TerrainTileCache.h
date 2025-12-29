@@ -152,6 +152,22 @@ public:
     // Call this before spawning objects to ensure getHeightAt() returns high-res values
     void preloadTilesAround(float worldX, float worldZ, float radius);
 
+    // Load all tiles at the coarsest LOD level (LOD3) synchronously at startup
+    // These tiles cover the entire terrain and are never unloaded
+    // Returns true if all base tiles loaded successfully
+    bool loadBaseLODTiles();
+
+    // Check if base LOD tiles are loaded
+    bool hasBaseLODTiles() const { return !baseTiles_.empty(); }
+
+    // Get base heightmap texture (combined from LOD3 tiles) for GPU fallback
+    VkImageView getBaseHeightMapView() const { return baseHeightMapView_; }
+    VkSampler getBaseHeightMapSampler() const { return sampler.get(); }
+
+    // Get base heightmap CPU data for fallback height queries
+    const std::vector<float>& getBaseHeightMapData() const { return baseHeightMapCpuData_; }
+    uint32_t getBaseHeightMapResolution() const { return baseHeightMapResolution_; }
+
     // LOD distance thresholds (can be configured)
     static constexpr float LOD0_MAX_DISTANCE = 1000.0f;  // < 1km: LOD0
     static constexpr float LOD1_MAX_DISTANCE = 2000.0f;  // 1-2km: LOD1
@@ -241,4 +257,21 @@ private:
 
     // Free a layer in the tile array texture
     void freeArrayLayer(int32_t layerIndex);
+
+    // Base LOD tiles (coarsest level, covering entire terrain, never unloaded)
+    std::vector<TerrainTile*> baseTiles_;
+    uint32_t baseLOD_ = 0;  // The LOD level used for base tiles (typically numLODLevels - 1)
+
+    // Combined base heightmap (created from base LOD tiles)
+    VkImage baseHeightMapImage_ = VK_NULL_HANDLE;
+    VmaAllocation baseHeightMapAllocation_ = VK_NULL_HANDLE;
+    VkImageView baseHeightMapView_ = VK_NULL_HANDLE;
+    std::vector<float> baseHeightMapCpuData_;
+    uint32_t baseHeightMapResolution_ = 512;  // Combined base heightmap resolution
+
+    // Create combined base heightmap from base LOD tiles
+    bool createBaseHeightMap();
+
+    // Sample height from base LOD tiles (fallback when no high-res tile covers position)
+    bool sampleBaseLOD(float worldX, float worldZ, float& outHeight) const;
 };
