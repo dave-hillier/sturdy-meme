@@ -949,7 +949,11 @@ bool TerrainTileCache::createBaseHeightMap() {
     baseHeightMapResolution_ = std::min(nativeRes, 1024u);
 
     // Create CPU data by sampling from base tiles
+    // Optimized: compute tile index directly instead of linear search (O(n²) vs O(n²·m))
     baseHeightMapCpuData_.resize(baseHeightMapResolution_ * baseHeightMapResolution_);
+
+    // Precompute inverse for faster division
+    float invTerrainSize = 1.0f / terrainSize;
 
     for (uint32_t y = 0; y < baseHeightMapResolution_; y++) {
         for (uint32_t x = 0; x < baseHeightMapResolution_; x++) {
@@ -957,41 +961,43 @@ bool TerrainTileCache::createBaseHeightMap() {
             float worldX = (static_cast<float>(x) / (baseHeightMapResolution_ - 1) - 0.5f) * terrainSize;
             float worldZ = (static_cast<float>(y) / (baseHeightMapResolution_ - 1) - 0.5f) * terrainSize;
 
-            // Sample from base LOD tiles (normalized height)
+            // Compute tile index directly from world position (tiles stored in row-major order)
+            float normalizedX = (worldX * invTerrainSize) + 0.5f;
+            float normalizedZ = (worldZ * invTerrainSize) + 0.5f;
+            int tileIdxX = std::clamp(static_cast<int>(normalizedX * baseTilesX), 0, static_cast<int>(baseTilesX) - 1);
+            int tileIdxZ = std::clamp(static_cast<int>(normalizedZ * baseTilesZ), 0, static_cast<int>(baseTilesZ) - 1);
+
+            size_t tileIdx = static_cast<size_t>(tileIdxZ * baseTilesX + tileIdxX);
             float height = 0.0f;
-            bool found = false;
 
-            for (const TerrainTile* tile : baseTiles_) {
-                if (!tile || tile->cpuData.empty()) continue;
-                if (worldX < tile->worldMinX || worldX >= tile->worldMaxX ||
-                    worldZ < tile->worldMinZ || worldZ >= tile->worldMaxZ) continue;
+            if (tileIdx < baseTiles_.size()) {
+                const TerrainTile* tile = baseTiles_[tileIdx];
+                if (tile && !tile->cpuData.empty()) {
+                    // Calculate UV within tile
+                    float u = (worldX - tile->worldMinX) / (tile->worldMaxX - tile->worldMinX);
+                    float v = (worldZ - tile->worldMinZ) / (tile->worldMaxZ - tile->worldMinZ);
+                    u = std::clamp(u, 0.0f, 1.0f);
+                    v = std::clamp(v, 0.0f, 1.0f);
 
-                // Calculate UV within tile
-                float u = (worldX - tile->worldMinX) / (tile->worldMaxX - tile->worldMinX);
-                float v = (worldZ - tile->worldMinZ) / (tile->worldMaxZ - tile->worldMinZ);
-                u = std::clamp(u, 0.0f, 1.0f);
-                v = std::clamp(v, 0.0f, 1.0f);
+                    // Bilinear sample
+                    float fx = u * (tileResolution - 1);
+                    float fy = v * (tileResolution - 1);
+                    int x0 = static_cast<int>(fx);
+                    int y0 = static_cast<int>(fy);
+                    int x1 = std::min(x0 + 1, static_cast<int>(tileResolution - 1));
+                    int y1 = std::min(y0 + 1, static_cast<int>(tileResolution - 1));
 
-                // Bilinear sample
-                float fx = u * (tileResolution - 1);
-                float fy = v * (tileResolution - 1);
-                int x0 = static_cast<int>(fx);
-                int y0 = static_cast<int>(fy);
-                int x1 = std::min(x0 + 1, static_cast<int>(tileResolution - 1));
-                int y1 = std::min(y0 + 1, static_cast<int>(tileResolution - 1));
+                    float tx = fx - x0;
+                    float ty = fy - y0;
 
-                float tx = fx - x0;
-                float ty = fy - y0;
+                    float h00 = tile->cpuData[y0 * tileResolution + x0];
+                    float h10 = tile->cpuData[y0 * tileResolution + x1];
+                    float h01 = tile->cpuData[y1 * tileResolution + x0];
+                    float h11 = tile->cpuData[y1 * tileResolution + x1];
 
-                float h00 = tile->cpuData[y0 * tileResolution + x0];
-                float h10 = tile->cpuData[y0 * tileResolution + x1];
-                float h01 = tile->cpuData[y1 * tileResolution + x0];
-                float h11 = tile->cpuData[y1 * tileResolution + x1];
-
-                height = (h00 * (1.0f - tx) + h10 * tx) * (1.0f - ty) +
-                         (h01 * (1.0f - tx) + h11 * tx) * ty;
-                found = true;
-                break;
+                    height = (h00 * (1.0f - tx) + h10 * tx) * (1.0f - ty) +
+                             (h01 * (1.0f - tx) + h11 * tx) * ty;
+                }
             }
 
             baseHeightMapCpuData_[y * baseHeightMapResolution_ + x] = height;
@@ -1066,39 +1072,54 @@ bool TerrainTileCache::createBaseHeightMap() {
 
 bool TerrainTileCache::sampleBaseLOD(float worldX, float worldZ, float& outHeight) const {
     // Sample height from base LOD tiles (fallback when no high-res tile covers position)
-    for (const TerrainTile* tile : baseTiles_) {
-        if (!tile || tile->cpuData.empty()) continue;
-        if (worldX < tile->worldMinX || worldX >= tile->worldMaxX ||
-            worldZ < tile->worldMinZ || worldZ >= tile->worldMaxZ) continue;
+    // Optimized: compute tile index directly instead of linear search
 
-        // Calculate UV within tile
-        float u = (worldX - tile->worldMinX) / (tile->worldMaxX - tile->worldMinX);
-        float v = (worldZ - tile->worldMinZ) / (tile->worldMaxZ - tile->worldMinZ);
-        u = std::clamp(u, 0.0f, 1.0f);
-        v = std::clamp(v, 0.0f, 1.0f);
+    if (baseTiles_.empty()) return false;
 
-        // Bilinear sample
-        float fx = u * (tileResolution - 1);
-        float fy = v * (tileResolution - 1);
-        int x0 = static_cast<int>(fx);
-        int y0 = static_cast<int>(fy);
-        int x1 = std::min(x0 + 1, static_cast<int>(tileResolution - 1));
-        int y1 = std::min(y0 + 1, static_cast<int>(tileResolution - 1));
+    // Compute tile grid dimensions at base LOD
+    uint32_t baseTilesX = tilesX >> baseLOD_;
+    uint32_t baseTilesZ = tilesZ >> baseLOD_;
+    if (baseTilesX < 1) baseTilesX = 1;
+    if (baseTilesZ < 1) baseTilesZ = 1;
 
-        float tx = fx - x0;
-        float ty = fy - y0;
+    // Compute tile index from world position
+    float invTerrainSize = 1.0f / terrainSize;
+    float normalizedX = (worldX * invTerrainSize) + 0.5f;
+    float normalizedZ = (worldZ * invTerrainSize) + 0.5f;
+    int tileIdxX = std::clamp(static_cast<int>(normalizedX * baseTilesX), 0, static_cast<int>(baseTilesX) - 1);
+    int tileIdxZ = std::clamp(static_cast<int>(normalizedZ * baseTilesZ), 0, static_cast<int>(baseTilesZ) - 1);
 
-        float h00 = tile->cpuData[y0 * tileResolution + x0];
-        float h10 = tile->cpuData[y0 * tileResolution + x1];
-        float h01 = tile->cpuData[y1 * tileResolution + x0];
-        float h11 = tile->cpuData[y1 * tileResolution + x1];
+    size_t tileIdx = static_cast<size_t>(tileIdxZ * baseTilesX + tileIdxX);
+    if (tileIdx >= baseTiles_.size()) return false;
 
-        float h = (h00 * (1.0f - tx) + h10 * tx) * (1.0f - ty) +
-                  (h01 * (1.0f - tx) + h11 * tx) * ty;
+    const TerrainTile* tile = baseTiles_[tileIdx];
+    if (!tile || tile->cpuData.empty()) return false;
 
-        outHeight = TerrainHeight::toWorld(h, heightScale);
-        return true;
-    }
+    // Calculate UV within tile
+    float u = (worldX - tile->worldMinX) / (tile->worldMaxX - tile->worldMinX);
+    float v = (worldZ - tile->worldMinZ) / (tile->worldMaxZ - tile->worldMinZ);
+    u = std::clamp(u, 0.0f, 1.0f);
+    v = std::clamp(v, 0.0f, 1.0f);
 
-    return false;
+    // Bilinear sample
+    float fx = u * (tileResolution - 1);
+    float fy = v * (tileResolution - 1);
+    int x0 = static_cast<int>(fx);
+    int y0 = static_cast<int>(fy);
+    int x1 = std::min(x0 + 1, static_cast<int>(tileResolution - 1));
+    int y1 = std::min(y0 + 1, static_cast<int>(tileResolution - 1));
+
+    float tx = fx - x0;
+    float ty = fy - y0;
+
+    float h00 = tile->cpuData[y0 * tileResolution + x0];
+    float h10 = tile->cpuData[y0 * tileResolution + x1];
+    float h01 = tile->cpuData[y1 * tileResolution + x0];
+    float h11 = tile->cpuData[y1 * tileResolution + x1];
+
+    float h = (h00 * (1.0f - tx) + h10 * tx) * (1.0f - ty) +
+              (h01 * (1.0f - tx) + h11 * tx) * ty;
+
+    outHeight = TerrainHeight::toWorld(h, heightScale);
+    return true;
 }

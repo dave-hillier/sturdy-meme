@@ -110,7 +110,8 @@ bool TerrainTextures::createAlbedoTexture() {
 }
 
 bool TerrainTextures::createGrassFarLODTexture() {
-    std::string texturePath = resourcePath + "/grass/grass/grass01.jpg";
+    // Use grass02 for variety - was previously loading grass01 twice (duplicate loading bug)
+    std::string texturePath = resourcePath + "/grass/grass/grass02.jpg";
 
     int texWidth, texHeight, channels;
     stbi_uc* pixels = stbi_load(texturePath.c_str(), &texWidth, &texHeight, &channels, STBI_rgb_alpha);
