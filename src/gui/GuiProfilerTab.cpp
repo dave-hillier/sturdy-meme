@@ -1,4 +1,5 @@
 #include "GuiProfilerTab.h"
+#include "GuiFlamegraph.h"
 #include "core/interfaces/IProfilerControl.h"
 #include "Profiler.h"
 #include "InitProfiler.h"
@@ -9,6 +10,10 @@
 #include <sstream>
 #include <iomanip>
 #include <SDL3/SDL.h>
+
+// Static state for flamegraph navigation
+static int s_gpuFlamegraphIndex = 0;
+static int s_cpuFlamegraphIndex = 0;
 
 namespace {
 
@@ -147,6 +152,21 @@ void GuiProfilerTab::render(IProfilerControl& profilerControl) {
             float fraction = (maxTime > 0.0f) ? (zone.gpuTimeMs / maxTime) : 0.0f;
             ImGui::ProgressBar(fraction, ImVec2(-1, 0), zone.name.c_str());
         }
+
+        // GPU Flamegraph section
+        ImGui::Spacing();
+        if (ImGui::CollapsingHeader("GPU Flamegraph")) {
+            const auto& gpuHistory = profiler.getGpuFlamegraphHistory();
+            if (gpuHistory.count() > 0) {
+                GuiFlamegraph::Config config;
+                config.barHeight = 22.0f;
+                GuiFlamegraph::renderWithHistory("gpu_flamegraph", gpuHistory,
+                                                  s_gpuFlamegraphIndex, config);
+            } else {
+                ImGui::TextDisabled("No flamegraph captures yet (capturing every %d frames)",
+                                   profiler.getCaptureInterval());
+            }
+        }
     }
 
     ImGui::Spacing();
@@ -236,6 +256,21 @@ void GuiProfilerTab::render(IProfilerControl& profilerControl) {
             }
 
             ImGui::EndTable();
+        }
+
+        // CPU Flamegraph section
+        ImGui::Spacing();
+        if (ImGui::CollapsingHeader("CPU Flamegraph")) {
+            const auto& cpuHistory = profiler.getCpuFlamegraphHistory();
+            if (cpuHistory.count() > 0) {
+                GuiFlamegraph::Config config;
+                config.barHeight = 22.0f;
+                GuiFlamegraph::renderWithHistory("cpu_flamegraph", cpuHistory,
+                                                  s_cpuFlamegraphIndex, config);
+            } else {
+                ImGui::TextDisabled("No flamegraph captures yet (capturing every %d frames)",
+                                   profiler.getCaptureInterval());
+            }
         }
     }
 
@@ -360,6 +395,18 @@ void GuiProfilerTab::render(IProfilerControl& profilerControl) {
                     snprintf(label, sizeof(label), "%s: %.1f ms", phase.name.c_str(), phase.timeMs);
                     ImGui::ProgressBar(fraction, ImVec2(-1, 0), label);
                 }
+            }
+
+            // Init Flamegraph (single capture, with hierarchical phases)
+            ImGui::Spacing();
+            ImGui::Text("Flamegraph:");
+            const auto& initFlamegraph = profiler.getInitFlamegraph();
+            if (!initFlamegraph.isEmpty()) {
+                GuiFlamegraph::Config config;
+                config.barHeight = 22.0f;
+                GuiFlamegraph::render("init_flamegraph", initFlamegraph, config);
+            } else {
+                ImGui::TextDisabled("Init flamegraph not captured");
             }
         } else {
             ImGui::PopStyleColor();

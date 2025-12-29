@@ -6,6 +6,7 @@
 #include "core/vulkan/VulkanContext.h"
 #include "core/LoadingRenderer.h"
 #include "InitProfiler.h"
+#include "Profiler.h"
 
 #include "Components.h"
 #include "TerrainSystem.h"
@@ -329,6 +330,9 @@ bool Application::init(const std::string& title, int width, int height) {
 
     // Finalize init profiler and log results
     InitProfiler::get().finalize();
+
+    // Capture init timing to flamegraph
+    renderer_->getSystems().profiler().captureInitFlamegraph();
 
     running = true;
     return true;

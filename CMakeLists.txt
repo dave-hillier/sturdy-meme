@@ -150,6 +150,7 @@ set(SOURCES
     src/gui/GuiWaterTab.cpp
     src/gui/GuiDebugTab.cpp
     src/gui/GuiProfilerTab.cpp
+    src/gui/GuiFlamegraph.cpp
     src/gui/GuiIKTab.cpp
     src/gui/GuiPlayerTab.cpp
     src/gui/GuiPerformanceTab.cpp

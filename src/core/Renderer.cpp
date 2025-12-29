@@ -1019,6 +1019,9 @@ bool Renderer::render(const Camera& camera) {
     // End CPU profiling for this frame
     systems_->profiler().endCpuFrame();
 
+    // Advance frame counter (handles auto-capture for flamegraphs)
+    systems_->profiler().advanceFrame();
+
     return true;
 }
 

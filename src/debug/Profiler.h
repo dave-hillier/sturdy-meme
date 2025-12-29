@@ -2,6 +2,8 @@
 
 #include "GpuProfiler.h"
 #include "CpuProfiler.h"
+#include "InitProfiler.h"
+#include "Flamegraph.h"
 #include "interfaces/IProfilerControl.h"
 #include <memory>
 #include <optional>
@@ -173,11 +175,112 @@ public:
     Profiler& getProfiler() override { return *this; }
     const Profiler& getProfiler() const override { return *this; }
 
+    // Flamegraph capture
+    /**
+     * Capture current CPU timing to flamegraph history.
+     * Call after endCpuFrame() to capture the completed frame.
+     */
+    void captureCpuFlamegraph() {
+        const auto& stats = cpuProfiler.getResults();
+        std::vector<std::tuple<std::string, float, float, bool>> zones;
+        for (const auto& zone : stats.zones) {
+            zones.emplace_back(zone.name, zone.cpuTimeMs, zone.percentOfFrame, zone.isWaitZone);
+        }
+        cpuFlamegraphHistory_.push(FlamegraphCapture::fromCpuStats(
+            stats.totalCpuTimeMs, zones, frameNumber_));
+    }
+
+    /**
+     * Capture current GPU timing to flamegraph history.
+     * Call after endGpuFrame() results are available.
+     */
+    void captureGpuFlamegraph() {
+        if (!gpuProfiler_) return;
+        const auto& stats = gpuProfiler_->getResults();
+        std::vector<std::tuple<std::string, float, float>> zones;
+        for (const auto& zone : stats.zones) {
+            zones.emplace_back(zone.name, zone.gpuTimeMs, zone.percentOfFrame);
+        }
+        gpuFlamegraphHistory_.push(FlamegraphCapture::fromGpuStats(
+            stats.totalGpuTimeMs, zones, frameNumber_));
+    }
+
+    /**
+     * Capture init profiler results to flamegraph (single capture).
+     * Call after InitProfiler::finalize().
+     */
+    void captureInitFlamegraph() {
+        const auto& results = InitProfiler::get().getResults();
+        std::vector<std::tuple<std::string, float, float, int>> phases;
+        for (const auto& phase : results.phases) {
+            phases.emplace_back(phase.name, phase.timeMs, phase.percentOfTotal, phase.depth);
+        }
+        initFlamegraph_ = FlamegraphCapture::fromInitResults(results.totalTimeMs, phases);
+    }
+
+    /**
+     * Increment frame counter and auto-capture if interval reached.
+     * Call once per frame after profiling data is complete.
+     */
+    void advanceFrame() {
+        frameNumber_++;
+        framesSinceCapture_++;
+
+        // Auto-capture at interval
+        if (flamegraphEnabled_ && framesSinceCapture_ >= captureInterval_) {
+            captureCpuFlamegraph();
+            captureGpuFlamegraph();
+            framesSinceCapture_ = 0;
+        }
+    }
+
+    /**
+     * Force an immediate flamegraph capture.
+     */
+    void captureNow() {
+        captureCpuFlamegraph();
+        captureGpuFlamegraph();
+        framesSinceCapture_ = 0;
+    }
+
+    /**
+     * Get current frame number.
+     */
+    uint64_t getFrameNumber() const { return frameNumber_; }
+
+    /**
+     * Set the capture interval (capture every N frames).
+     */
+    void setCaptureInterval(uint32_t interval) { captureInterval_ = std::max(1u, interval); }
+    uint32_t getCaptureInterval() const { return captureInterval_; }
+
+    /**
+     * Enable/disable flamegraph capture.
+     */
+    void setFlamegraphEnabled(bool enabled) { flamegraphEnabled_ = enabled; }
+    bool isFlamegraphEnabled() const { return flamegraphEnabled_; }
+
+    // Flamegraph history access
+    const CpuFlamegraphHistory& getCpuFlamegraphHistory() const { return cpuFlamegraphHistory_; }
+    const GpuFlamegraphHistory& getGpuFlamegraphHistory() const { return gpuFlamegraphHistory_; }
+    const FlamegraphCapture& getInitFlamegraph() const { return initFlamegraph_; }
+
 private:
     Profiler() = default;  // Private: use factory
 
     std::optional<GpuProfiler> gpuProfiler_;
     CpuProfiler cpuProfiler;
+
+    // Flamegraph capture storage
+    CpuFlamegraphHistory cpuFlamegraphHistory_;
+    GpuFlamegraphHistory gpuFlamegraphHistory_;
+    FlamegraphCapture initFlamegraph_;
+    uint64_t frameNumber_ = 0;
+
+    // Flamegraph capture settings
+    uint32_t captureInterval_ = 30;      // Capture every N frames
+    uint32_t framesSinceCapture_ = 0;
+    bool flamegraphEnabled_ = true;
 };
 
 /**
