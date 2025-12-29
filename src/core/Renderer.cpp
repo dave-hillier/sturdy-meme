@@ -670,12 +670,20 @@ bool Renderer::render(const Camera& camera) {
     systems_->profiler().beginCpuZone("UniformUpdates");
 
     // Update uniform buffer data
-    updateUniformBuffer(frameSync_.currentIndex(), camera);
+    {
+        systems_->profiler().beginCpuZone("UniformUpdates:UBO");
+        updateUniformBuffer(frameSync_.currentIndex(), camera);
+        systems_->profiler().endCpuZone("UniformUpdates:UBO");
+    }
 
     // Update bone matrices for GPU skinning
-    SceneBuilder& sceneBuilder = systems_->scene().getSceneBuilder();
-    AnimatedCharacter* character = sceneBuilder.hasCharacter() ? &sceneBuilder.getAnimatedCharacter() : nullptr;
-    systems_->skinnedMesh().updateBoneMatrices(frameSync_.currentIndex(), character);
+    {
+        systems_->profiler().beginCpuZone("UniformUpdates:Bones");
+        SceneBuilder& sceneBuilder = systems_->scene().getSceneBuilder();
+        AnimatedCharacter* character = sceneBuilder.hasCharacter() ? &sceneBuilder.getAnimatedCharacter() : nullptr;
+        systems_->skinnedMesh().updateBoneMatrices(frameSync_.currentIndex(), character);
+        systems_->profiler().endCpuZone("UniformUpdates:Bones");
+    }
 
     systems_->profiler().endCpuZone("UniformUpdates");
 
@@ -695,12 +703,18 @@ bool Renderer::render(const Camera& camera) {
     // Update subsystems (state mutations)
     systems_->profiler().beginCpuZone("SystemUpdates");
 
-    systems_->wind().update(frame.deltaTime);
-    systems_->wind().updateUniforms(frame.frameIndex);
+    // Wind system update
+    {
+        systems_->profiler().beginCpuZone("SystemUpdates:Wind");
+        systems_->wind().update(frame.deltaTime);
+        systems_->wind().updateUniforms(frame.frameIndex);
+        systems_->profiler().endCpuZone("SystemUpdates:Wind");
+    }
 
     // Update tree renderer descriptor sets with current frame resources and textures
     // Each update function internally tracks if it was already initialized and skips redundant updates
     if (systems_->treeRenderer() && systems_->tree()) {
+        systems_->profiler().beginCpuZone("SystemUpdates:TreeDesc");
         VkDescriptorBufferInfo windInfo = systems_->wind().getBufferInfo(frame.frameIndex);
 
         // Update descriptor sets for each bark texture type
@@ -755,47 +769,75 @@ bool Renderer::render(const Camera& camera) {
                     leafTex->getSampler());
             }
         }
+        systems_->profiler().endCpuZone("SystemUpdates:TreeDesc");
     }
 
-    systems_->grass().updateUniforms(frame.frameIndex, frame.cameraPosition, frame.viewProj,
-                               frame.terrainSize, frame.heightScale);
-    systems_->grass().updateDisplacementSources(frame.playerPosition, frame.playerCapsuleRadius, frame.deltaTime);
-    systems_->weather().updateUniforms(frame.frameIndex, frame.cameraPosition, frame.viewProj, frame.deltaTime, frame.time, systems_->wind());
-    systems_->terrain().updateUniforms(frame.frameIndex, frame.cameraPosition, frame.view, frame.projection,
-                                  systems_->volumetricSnow().getCascadeParams(), useVolumetricSnow, MAX_SNOW_HEIGHT);
-
-    // Update snow mask system - accumulation/melting based on weather type
-    bool isSnowing = (systems_->weather().getWeatherType() == 1);  // 1 = snow
-    float weatherIntensity = systems_->weather().getIntensity();
-    auto& envSettings = systems_->environmentSettings();
-    // Auto-adjust snow amount based on weather state
-    if (isSnowing && weatherIntensity > 0.0f) {
-        envSettings.snowAmount = glm::min(envSettings.snowAmount + envSettings.snowAccumulationRate * frame.deltaTime, 1.0f);
-    } else if (envSettings.snowAmount > 0.0f) {
-        envSettings.snowAmount = glm::max(envSettings.snowAmount - envSettings.snowMeltRate * frame.deltaTime, 0.0f);
-    }
-    systems_->snowMask().setMaskCenter(frame.cameraPosition);
-    systems_->snowMask().updateUniforms(frame.frameIndex, frame.deltaTime, isSnowing, weatherIntensity, envSettings);
-
-    // Update volumetric snow system
-    systems_->volumetricSnow().setCameraPosition(frame.cameraPosition);
-    systems_->volumetricSnow().setWindDirection(glm::vec2(systems_->wind().getEnvironmentSettings().windDirection.x,
-                                                     systems_->wind().getEnvironmentSettings().windDirection.y));
-    systems_->volumetricSnow().setWindStrength(systems_->wind().getEnvironmentSettings().windStrength);
-    systems_->volumetricSnow().updateUniforms(frame.frameIndex, frame.deltaTime, isSnowing, weatherIntensity, envSettings);
-
-    // Add player footprint interaction with snow
-    if (envSettings.snowAmount > 0.1f) {
-        systems_->snowMask().addInteraction(frame.playerPosition, frame.playerCapsuleRadius * 1.5f, 0.3f);
-        systems_->volumetricSnow().addInteraction(frame.playerPosition, frame.playerCapsuleRadius * 1.5f, 0.3f);
+    // Grass system update
+    {
+        systems_->profiler().beginCpuZone("SystemUpdates:Grass");
+        systems_->grass().updateUniforms(frame.frameIndex, frame.cameraPosition, frame.viewProj,
+                                   frame.terrainSize, frame.heightScale);
+        systems_->grass().updateDisplacementSources(frame.playerPosition, frame.playerCapsuleRadius, frame.deltaTime);
+        systems_->profiler().endCpuZone("SystemUpdates:Grass");
     }
 
-    // Update leaf system with player position and velocity for disruption
-    systems_->leaf().updateUniforms(frame.frameIndex, frame.cameraPosition, frame.viewProj, frame.cameraPosition, frame.playerVelocity, frame.deltaTime, frame.time,
-                               frame.terrainSize, frame.heightScale);
+    // Weather system update
+    {
+        systems_->profiler().beginCpuZone("SystemUpdates:Weather");
+        systems_->weather().updateUniforms(frame.frameIndex, frame.cameraPosition, frame.viewProj, frame.deltaTime, frame.time, systems_->wind());
+        systems_->profiler().endCpuZone("SystemUpdates:Weather");
+    }
 
-    // Update tree LOD system for impostor rendering
+    // Terrain system update
+    {
+        systems_->profiler().beginCpuZone("SystemUpdates:Terrain");
+        systems_->terrain().updateUniforms(frame.frameIndex, frame.cameraPosition, frame.view, frame.projection,
+                                      systems_->volumetricSnow().getCascadeParams(), useVolumetricSnow, MAX_SNOW_HEIGHT);
+        systems_->profiler().endCpuZone("SystemUpdates:Terrain");
+    }
+
+    // Snow systems update (mask + volumetric)
+    {
+        systems_->profiler().beginCpuZone("SystemUpdates:Snow");
+        // Update snow mask system - accumulation/melting based on weather type
+        bool isSnowing = (systems_->weather().getWeatherType() == 1);  // 1 = snow
+        float weatherIntensity = systems_->weather().getIntensity();
+        auto& envSettings = systems_->environmentSettings();
+        // Auto-adjust snow amount based on weather state
+        if (isSnowing && weatherIntensity > 0.0f) {
+            envSettings.snowAmount = glm::min(envSettings.snowAmount + envSettings.snowAccumulationRate * frame.deltaTime, 1.0f);
+        } else if (envSettings.snowAmount > 0.0f) {
+            envSettings.snowAmount = glm::max(envSettings.snowAmount - envSettings.snowMeltRate * frame.deltaTime, 0.0f);
+        }
+        systems_->snowMask().setMaskCenter(frame.cameraPosition);
+        systems_->snowMask().updateUniforms(frame.frameIndex, frame.deltaTime, isSnowing, weatherIntensity, envSettings);
+
+        // Update volumetric snow system
+        systems_->volumetricSnow().setCameraPosition(frame.cameraPosition);
+        systems_->volumetricSnow().setWindDirection(glm::vec2(systems_->wind().getEnvironmentSettings().windDirection.x,
+                                                         systems_->wind().getEnvironmentSettings().windDirection.y));
+        systems_->volumetricSnow().setWindStrength(systems_->wind().getEnvironmentSettings().windStrength);
+        systems_->volumetricSnow().updateUniforms(frame.frameIndex, frame.deltaTime, isSnowing, weatherIntensity, envSettings);
+
+        // Add player footprint interaction with snow
+        if (envSettings.snowAmount > 0.1f) {
+            systems_->snowMask().addInteraction(frame.playerPosition, frame.playerCapsuleRadius * 1.5f, 0.3f);
+            systems_->volumetricSnow().addInteraction(frame.playerPosition, frame.playerCapsuleRadius * 1.5f, 0.3f);
+        }
+        systems_->profiler().endCpuZone("SystemUpdates:Snow");
+    }
+
+    // Leaf system update
+    {
+        systems_->profiler().beginCpuZone("SystemUpdates:Leaf");
+        systems_->leaf().updateUniforms(frame.frameIndex, frame.cameraPosition, frame.viewProj, frame.cameraPosition, frame.playerVelocity, frame.deltaTime, frame.time,
+                                   frame.terrainSize, frame.heightScale);
+        systems_->profiler().endCpuZone("SystemUpdates:Leaf");
+    }
+
+    // Tree LOD system update
     if (systems_->treeLOD() && systems_->tree()) {
+        systems_->profiler().beginCpuZone("SystemUpdates:TreeLOD");
         // Enable GPU culling optimization when ImpostorCullSystem is available
         // This skips expensive CPU impostor list building since GPU handles it
         auto* impostorCull = systems_->impostorCull();
@@ -809,21 +851,26 @@ bool Renderer::render(const Camera& camera) {
         // Note: Vulkan Y-flip makes proj[1][1] negative, so use abs()
         screenParams.tanHalfFOV = 1.0f / std::abs(frame.projection[1][1]);
         systems_->treeLOD()->update(frame.deltaTime, frame.cameraPosition, *systems_->tree(), screenParams);
+        systems_->profiler().endCpuZone("SystemUpdates:TreeLOD");
     }
 
-    // Update water system uniforms
-    systems_->water().updateUniforms(frame.frameIndex);
+    // Water system update
+    {
+        systems_->profiler().beginCpuZone("SystemUpdates:Water");
+        systems_->water().updateUniforms(frame.frameIndex);
 
-    // Update underwater state for postprocess (Water Volume Renderer Phase 2)
-    auto underwaterParams = systems_->water().getUnderwaterParams(frame.cameraPosition);
-    systems_->postProcess().setUnderwaterState(
-        underwaterParams.isUnderwater,
-        underwaterParams.depth,
-        underwaterParams.absorptionCoeffs,
-        underwaterParams.turbidity,
-        underwaterParams.waterColor,
-        underwaterParams.waterLevel
-    );
+        // Update underwater state for postprocess (Water Volume Renderer Phase 2)
+        auto underwaterParams = systems_->water().getUnderwaterParams(frame.cameraPosition);
+        systems_->postProcess().setUnderwaterState(
+            underwaterParams.isUnderwater,
+            underwaterParams.depth,
+            underwaterParams.absorptionCoeffs,
+            underwaterParams.turbidity,
+            underwaterParams.waterColor,
+            underwaterParams.waterLevel
+        );
+        systems_->profiler().endCpuZone("SystemUpdates:Water");
+    }
 
     systems_->profiler().endCpuZone("SystemUpdates");
 
