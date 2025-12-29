@@ -17,6 +17,8 @@ ImVec4 getNodeColor(FlamegraphColorHint hint, float alpha) {
             return ImVec4(0.5f, 0.7f, 0.3f, alpha);   // Green for terrain
         case FlamegraphColorHint::PostProcess:
             return ImVec4(0.9f, 0.6f, 0.3f, alpha);   // Orange for post-process
+        case FlamegraphColorHint::Atmosphere:
+            return ImVec4(0.6f, 0.7f, 0.9f, alpha);   // Light blue for atmosphere/sky
         case FlamegraphColorHint::Default:
         default:
             return ImVec4(0.8f, 0.4f, 0.3f, alpha);   // Red-orange default (flame-like)

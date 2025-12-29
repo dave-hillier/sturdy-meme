@@ -189,41 +189,79 @@ public:
 
     /**
      * Capture current GPU timing to flamegraph history.
-     * GPU profiler doesn't track hierarchy, so we create flat zones.
+     * Infers hierarchy from zone names using ':' as separator.
+     * E.g., "HDR:Sky" becomes a child of "HDR" if present, else a root.
      * Call after endGpuFrame() results are available.
      */
     void captureGpuFlamegraph() {
         if (!gpuProfiler_ || capturePaused_) return;
 
-        // Build a flat flamegraph from GPU zones (no hierarchy available)
         const auto& stats = gpuProfiler_->getResults();
         FlamegraphCapture capture;
         capture.totalTimeMs = stats.totalGpuTimeMs;
         capture.frameNumber = frameNumber_;
 
+        // Helper to assign color hints
+        auto assignColorHint = [](FlamegraphNode& node, const std::string& name) {
+            if (name.find("Shadow") != std::string::npos) {
+                node.colorHint = FlamegraphColorHint::Shadow;
+            } else if (name.find("Water") != std::string::npos) {
+                node.colorHint = FlamegraphColorHint::Water;
+            } else if (name.find("Terrain") != std::string::npos) {
+                node.colorHint = FlamegraphColorHint::Terrain;
+            } else if (name.find("Post") != std::string::npos ||
+                       name.find("Bloom") != std::string::npos ||
+                       name.find("Tone") != std::string::npos ||
+                       name.find("HDR") != std::string::npos) {
+                node.colorHint = FlamegraphColorHint::PostProcess;
+            } else if (name.find("Atmosphere") != std::string::npos ||
+                       name.find("Froxel") != std::string::npos ||
+                       name.find("Sky") != std::string::npos) {
+                node.colorHint = FlamegraphColorHint::Atmosphere;
+            }
+        };
+
+        // Build hierarchy from zone names
+        // Parent zones (no ':') become roots, child zones (with ':') nest under matching parent
+        std::unordered_map<std::string, FlamegraphNode*> parentNodes;
+        std::unordered_map<std::string, float> parentOffsets;
+
         float offset = 0.0f;
         for (const auto& zone : stats.zones) {
             FlamegraphNode node;
             node.name = zone.name;
-            node.startMs = offset;
             node.durationMs = zone.gpuTimeMs;
             node.isWaitZone = false;
+            assignColorHint(node, zone.name);
 
-            // Assign color hints based on name
-            if (zone.name.find("Shadow") != std::string::npos) {
-                node.colorHint = FlamegraphColorHint::Shadow;
-            } else if (zone.name.find("Water") != std::string::npos) {
-                node.colorHint = FlamegraphColorHint::Water;
-            } else if (zone.name.find("Terrain") != std::string::npos) {
-                node.colorHint = FlamegraphColorHint::Terrain;
-            } else if (zone.name.find("Post") != std::string::npos ||
-                       zone.name.find("Bloom") != std::string::npos ||
-                       zone.name.find("Tone") != std::string::npos) {
-                node.colorHint = FlamegraphColorHint::PostProcess;
+            // Check if this is a child zone (contains ':')
+            size_t colonPos = zone.name.find(':');
+            if (colonPos != std::string::npos) {
+                std::string parentName = zone.name.substr(0, colonPos);
+
+                // Find existing parent node
+                auto it = parentNodes.find(parentName);
+                if (it != parentNodes.end()) {
+                    // Add as child of parent, offset relative to parent start
+                    node.startMs = parentOffsets[parentName];
+                    parentOffsets[parentName] += zone.gpuTimeMs;
+                    it->second->children.push_back(std::move(node));
+                    continue;  // Don't add to roots
+                }
             }
 
-            capture.roots.push_back(std::move(node));
+            // This is a root zone (no ':' or no matching parent)
+            node.startMs = offset;
             offset += zone.gpuTimeMs;
+
+            // If this could be a parent, track it
+            if (colonPos == std::string::npos) {
+                capture.roots.push_back(std::move(node));
+                parentNodes[zone.name] = &capture.roots.back();
+                parentOffsets[zone.name] = 0.0f;
+            } else {
+                capture.roots.push_back(std::move(node));
+            }
         }
 
         gpuFlamegraphHistory_.push(std::move(capture));

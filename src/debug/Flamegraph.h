@@ -23,7 +23,8 @@ enum class FlamegraphColorHint {
     Shadow,     // Shadow-related passes
     Water,      // Water-related passes
     Terrain,    // Terrain-related passes
-    PostProcess // Post-processing passes
+    PostProcess, // Post-processing passes
+    Atmosphere  // Atmosphere/sky/froxel passes
 };
 
 /**
