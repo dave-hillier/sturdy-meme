@@ -349,10 +349,10 @@ Progress checkpoints from [00_OVERVIEW.md](00_OVERVIEW.md)
 
 ### M2.5: Roamable World (KEY MILESTONE)
 - [ ] Complete road network (all settlements connected)
-- [ ] Street networks within settlements
-- [ ] Plot subdivision with street alignment
+- [x] Street networks within settlements (simplified: main street + cross streets for villages/towns)
+- [x] Plot subdivision with street alignment (burgage-style lots: 5-10m × 30-60m perpendicular to frontage)
 - [ ] Agricultural field layouts
-- [ ] Simple building blockout boxes
+- [x] Simple building blockout boxes (placed on lots with frontage alignment)
 - [ ] NavMesh for pathfinding
 - [ ] **Character can walk from any settlement to any other**
 
@@ -450,8 +450,8 @@ Key reuse points from [IMPL_RECONCILIATION.md](IMPL_RECONCILIATION.md)
 
 ### New Systems Required
 - [ ] `Polygon2D` for 2D geometry operations
-- [ ] `FrontageSubdivision` for lot generation
-- [ ] `SpaceColonization` for organic street networks
+- [x] `FrontageSubdivision` for lot generation (simplified, built into SettlementSystem)
+- [x] `SpaceColonization` for organic street networks (simplified, built into SettlementSystem)
 - [ ] `ShapeGrammar` for building geometry
 - [ ] `RoofGenerator` for roof meshes
 - [x] `SettlementSystem` for runtime rendering
