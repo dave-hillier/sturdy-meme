@@ -682,7 +682,10 @@ void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>
     // Store tile cache resources (triple-buffered tile info)
     this->tileArrayView = tileArrayViewParam;
     this->tileSampler = tileSamplerParam;
-    this->tileInfoBuffers = tileInfoBuffersParam;
+    tileInfoBuffers_.resize(tileInfoBuffersParam.size());
+    for (size_t i = 0; i < tileInfoBuffersParam.size(); ++i) {
+        tileInfoBuffers_[i] = tileInfoBuffersParam[i];
+    }
 
     // Store renderer uniform buffers (kept for backward compatibility)
     this->rendererUniformBuffers_ = rendererUniformBuffers;
@@ -705,8 +708,8 @@ void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>
             computeWriter.writeImage(5, tileArrayView, tileSampler);
         }
         // Write initial tile info buffer (frame 0) - will be updated per-frame
-        if (tileInfoBuffers[0] != VK_NULL_HANDLE) {
-            computeWriter.writeBuffer(6, tileInfoBuffers[0], 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        if (!tileInfoBuffers_.empty() && tileInfoBuffers_[0] != VK_NULL_HANDLE) {
+            computeWriter.writeBuffer(6, tileInfoBuffers_[0], 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
         }
 
         computeWriter.update();
@@ -833,8 +836,8 @@ void GrassSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex
     writer.writeBuffer(7, paramsBuffers.buffers[frameIndex], 0, sizeof(GrassParams));
 
     // Update tile info buffer to the correct frame's buffer (triple-buffered to avoid CPU-GPU sync)
-    if (tileInfoBuffers[frameIndex % 3] != VK_NULL_HANDLE) {
-        writer.writeBuffer(6, tileInfoBuffers[frameIndex % 3], 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+    if (!tileInfoBuffers_.empty() && tileInfoBuffers_.at(frameIndex) != VK_NULL_HANDLE) {
+        writer.writeBuffer(6, tileInfoBuffers_.at(frameIndex), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
     }
     writer.update();
 

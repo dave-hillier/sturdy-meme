@@ -226,9 +226,8 @@ private:
 
     // Visibility cache buffers for temporal coherence (per-frame to avoid races)
     // Stores 1 bit per tree: 1 = visible as impostor, 0 = not visible
-    static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 3;
-    std::array<VkBuffer, MAX_FRAMES_IN_FLIGHT> visibilityCacheBuffers_{};
-    std::array<VmaAllocation, MAX_FRAMES_IN_FLIGHT> visibilityCacheAllocations_{};
+    // Using FrameIndexedBuffers for automatic RAII management
+    BufferUtils::FrameIndexedBuffers visibilityCacheBuffers_;
     VkDeviceSize visibilityCacheBufferSize_ = 0;
 
     // State

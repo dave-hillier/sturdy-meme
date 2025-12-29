@@ -79,12 +79,8 @@ void ImpostorCullSystem::cleanup() {
         vmaDestroyBuffer(allocator_, indirectDrawBuffer_, indirectDrawAllocation_);
         indirectDrawBuffer_ = VK_NULL_HANDLE;
     }
-    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-        if (visibilityCacheBuffers_[i] != VK_NULL_HANDLE) {
-            vmaDestroyBuffer(allocator_, visibilityCacheBuffers_[i], visibilityCacheAllocations_[i]);
-            visibilityCacheBuffers_[i] = VK_NULL_HANDLE;
-        }
-    }
+    // FrameIndexedBuffers handles cleanup via RAII
+    visibilityCacheBuffers_.destroy();
 
     device_ = VK_NULL_HANDLE;
 }
@@ -258,16 +254,13 @@ bool ImpostorCullSystem::createBuffers() {
 
     // Visibility cache buffers for temporal coherence (per-frame to avoid cross-frame races)
     // 1 bit per tree, packed into uint32_t words
+    // Using FrameIndexedBuffers for automatic RAII management
     visibilityCacheBufferSize_ = ((maxTrees_ + 31) / 32) * sizeof(uint32_t);
-    bufferInfo.size = visibilityCacheBufferSize_;
-    bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-
-    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-        if (vmaCreateBuffer(allocator_, &bufferInfo, &allocInfo,
-                            &visibilityCacheBuffers_[i], &visibilityCacheAllocations_[i], nullptr) != VK_SUCCESS) {
-            return false;
-        }
+    if (!visibilityCacheBuffers_.resize(
+            allocator_, maxFramesInFlight_, visibilityCacheBufferSize_,
+            vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+            VMA_MEMORY_USAGE_GPU_ONLY)) {
+        return false;
     }
 
     return true;
@@ -454,7 +447,7 @@ void ImpostorCullSystem::initializeDescriptorSets() {
 
         // Visibility cache buffer (per-frame indexed, but static binding)
         VkDescriptorBufferInfo visibilityInfo{};
-        visibilityInfo.buffer = visibilityCacheBuffers_[frameIndex];
+        visibilityInfo.buffer = visibilityCacheBuffers_.getVk(frameIndex);
         visibilityInfo.offset = 0;
         visibilityInfo.range = VK_WHOLE_SIZE;
 
@@ -545,14 +538,14 @@ void ImpostorCullSystem::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
     // For skip/partial modes, copy visibility cache from previous frame to current frame
     // This ensures temporal coherence works correctly with per-frame buffers
     if (temporalUpdateMode != 0) {
-        uint32_t prevFrameIndex = (frameIndex + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT;
+        uint32_t prevFrameIndex = (frameIndex + maxFramesInFlight_ - 1) % maxFramesInFlight_;
 
         VkBufferCopy copyRegion{};
         copyRegion.srcOffset = 0;
         copyRegion.dstOffset = 0;
         copyRegion.size = visibilityCacheBufferSize_;
-        vkCmdCopyBuffer(cmd, visibilityCacheBuffers_[prevFrameIndex],
-                        visibilityCacheBuffers_[frameIndex], 1, &copyRegion);
+        vkCmdCopyBuffer(cmd, visibilityCacheBuffers_.getVk(prevFrameIndex),
+                        visibilityCacheBuffers_.getVk(frameIndex), 1, &copyRegion);
 
         // Barrier to ensure copy completes before compute shader reads/writes
         VkMemoryBarrier copyBarrier{};

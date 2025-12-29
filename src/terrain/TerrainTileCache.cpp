@@ -50,6 +50,7 @@ bool TerrainTileCache::initInternal(const InitInfo& info) {
     // Create tile info buffers for shader using VulkanResourceFactory (triple-buffered)
     // Layout: uint activeTileCount, uint padding[3], TileInfoGPU tiles[MAX_ACTIVE_TILES]
     VkDeviceSize bufferSize = sizeof(uint32_t) * 4 + MAX_ACTIVE_TILES * sizeof(TileInfoGPU);
+    tileInfoBuffers_.resize(FRAMES_IN_FLIGHT);
     for (uint32_t i = 0; i < FRAMES_IN_FLIGHT; i++) {
         if (!VulkanResourceFactory::createStorageBufferHostReadable(allocator, bufferSize, tileInfoBuffers_[i])) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TerrainTileCache: Failed to create tile info buffer %u", i);
@@ -172,10 +173,12 @@ void TerrainTileCache::cleanup() {
     loadedTiles.clear();
     activeTiles.clear();
 
-    // Destroy tile info buffers (RAII via reset)
-    for (uint32_t i = 0; i < FRAMES_IN_FLIGHT; i++) {
-        tileInfoBuffers_[i].reset();
-    }
+    // Destroy tile info buffers (RAII via clear)
+    tileInfoBuffers_.forEach([](uint32_t, ManagedBuffer& buffer) {
+        buffer.reset();
+    });
+    tileInfoBuffers_.clear();
+    tileInfoMappedPtrs_.fill(nullptr);
 
     // Destroy tile array texture
     if (tileArrayView) {

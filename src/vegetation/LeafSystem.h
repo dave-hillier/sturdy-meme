@@ -14,6 +14,7 @@
 #include "UBOs.h"
 #include "RAIIAdapter.h"
 #include "interfaces/ILeafControl.h"
+#include "core/FrameBuffered.h"
 #include <optional>
 
 // Leaf particle states
@@ -175,7 +176,7 @@ private:
     VkSampler displacementMapSampler = VK_NULL_HANDLE;
 
     // Tile cache resources for high-res terrain sampling
-    std::array<VkBuffer, 3> tileInfoBuffers = {};  // Triple-buffered for frames-in-flight sync
+    TripleBuffered<VkBuffer> tileInfoBuffers_;  // Triple-buffered for frames-in-flight sync
 
     // Renderer uniform buffers for per-frame descriptor updates
     std::vector<VkBuffer> rendererUniformBuffers_;

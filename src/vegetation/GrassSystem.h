@@ -15,6 +15,7 @@
 #include "UBOs.h"
 #include "RAIIAdapter.h"
 #include "VulkanRAII.h"
+#include "core/FrameBuffered.h"
 
 // Forward declarations
 class WindSystem;
@@ -219,7 +220,7 @@ private:
     // Tile cache resources for high-res terrain sampling
     VkImageView tileArrayView = VK_NULL_HANDLE;
     VkSampler tileSampler = VK_NULL_HANDLE;
-    std::array<VkBuffer, 3> tileInfoBuffers = {};  // Triple-buffered for frames-in-flight sync
+    TripleBuffered<VkBuffer> tileInfoBuffers_;  // Triple-buffered for frames-in-flight sync
 
     // Renderer uniform buffers for per-frame descriptor updates (stores reference from updateDescriptorSets)
     std::vector<VkBuffer> rendererUniformBuffers_;

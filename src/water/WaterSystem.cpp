@@ -408,7 +408,10 @@ bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffe
                                         VkImageView envCubemapView,
                                         VkSampler envCubemapSampler) {
     // Store tile info buffers for per-frame updates (triple-buffered)
-    tileInfoBuffers_ = tileInfoBuffers;
+    tileInfoBuffers_.resize(tileInfoBuffers.size());
+    for (size_t i = 0; i < tileInfoBuffers.size(); ++i) {
+        tileInfoBuffers_[i] = tileInfoBuffers[i];
+    }
 
     // Allocate descriptor sets using managed pool
     descriptorSets = descriptorPool->allocate(descriptorSetLayout.get(), framesInFlight);
@@ -445,7 +448,7 @@ bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffe
             writer.writeImage(14, tileArrayView, tileSampler);
         }
         // Write initial tile info buffer (frame 0) - will be updated per-frame
-        if (tileInfoBuffers_[0] != VK_NULL_HANDLE) {
+        if (!tileInfoBuffers_.empty() && tileInfoBuffers_[0] != VK_NULL_HANDLE) {
             writer.writeBuffer(15, tileInfoBuffers_[0], 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
         }
 
@@ -490,9 +493,9 @@ void WaterSystem::setWaterExtent(const glm::vec2& position, const glm::vec2& siz
 
 void WaterSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
     // Update tile info buffer binding to the correct frame's buffer (triple-buffered to avoid CPU-GPU sync)
-    if (tileInfoBuffers_[frameIndex % 3] != VK_NULL_HANDLE) {
+    if (!tileInfoBuffers_.empty() && tileInfoBuffers_.at(frameIndex) != VK_NULL_HANDLE) {
         DescriptorManager::SetWriter(device, descriptorSets[frameIndex])
-            .writeBuffer(15, tileInfoBuffers_[frameIndex % 3], 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+            .writeBuffer(15, tileInfoBuffers_.at(frameIndex), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
             .update();
     }
 
