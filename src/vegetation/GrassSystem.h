@@ -182,7 +182,8 @@ private:
     BufferUtils::DoubleBufferedBufferSet indirectBuffers;
 
     // Uniform buffers for culling (per frame, not double-buffered)
-    BufferUtils::PerFrameBufferSet uniformBuffers;
+    BufferUtils::PerFrameBufferSet uniformBuffers;    // CullingUniforms at binding 2
+    BufferUtils::PerFrameBufferSet paramsBuffers;     // GrassParams at binding 7
 
     // Descriptor sets: one per buffer set (matches frames in flight)
     // Per-frame descriptor sets for uniform buffers that DO need per-frame copies

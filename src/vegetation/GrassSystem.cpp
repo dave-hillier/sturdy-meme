@@ -108,12 +108,14 @@ void GrassSystem::destroyBuffers(VmaAllocator alloc) {
     BufferUtils::destroyBuffers(alloc, instanceBuffers);
     BufferUtils::destroyBuffers(alloc, indirectBuffers);
     BufferUtils::destroyBuffers(alloc, uniformBuffers);
+    BufferUtils::destroyBuffers(alloc, paramsBuffers);
 }
 
 bool GrassSystem::createBuffers() {
     VkDeviceSize instanceBufferSize = sizeof(GrassInstance) * MAX_INSTANCES;
     VkDeviceSize indirectBufferSize = sizeof(VkDrawIndirectCommand);
-    VkDeviceSize uniformBufferSize = sizeof(GrassUniforms);
+    VkDeviceSize cullingUniformSize = sizeof(CullingUniforms);
+    VkDeviceSize grassParamsSize = sizeof(GrassParams);
 
     // Use framesInFlight for buffer set count to ensure proper triple buffering
     uint32_t bufferSetCount = getFramesInFlight();
@@ -141,9 +143,18 @@ bool GrassSystem::createBuffers() {
     BufferUtils::PerFrameBufferBuilder uniformBuilder;
     if (!uniformBuilder.setAllocator(getAllocator())
              .setFrameCount(getFramesInFlight())
-             .setSize(uniformBufferSize)
+             .setSize(cullingUniformSize)
              .build(uniformBuffers)) {
-        SDL_Log("Failed to create grass uniform buffers");
+        SDL_Log("Failed to create grass culling uniform buffers");
+        return false;
+    }
+
+    BufferUtils::PerFrameBufferBuilder paramsBuilder;
+    if (!paramsBuilder.setAllocator(getAllocator())
+             .setFrameCount(getFramesInFlight())
+             .setSize(grassParamsSize)
+             .build(paramsBuffers)) {
+        SDL_Log("Failed to create grass params buffers");
         return false;
     }
 
@@ -307,11 +318,12 @@ bool GrassSystem::createComputeDescriptorSetLayout(SystemLifecycleHelper::Pipeli
     PipelineBuilder builder(getDevice());
     builder.addDescriptorBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT)    // instance buffer
         .addDescriptorBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT)       // indirect buffer
-        .addDescriptorBinding(2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT)       // uniforms
+        .addDescriptorBinding(2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT)       // CullingUniforms
         .addDescriptorBinding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_COMPUTE_BIT)  // terrain heightmap
         .addDescriptorBinding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_COMPUTE_BIT)  // displacement map
         .addDescriptorBinding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_COMPUTE_BIT)  // tile array
-        .addDescriptorBinding(6, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT);         // tile info
+        .addDescriptorBinding(6, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT)          // tile info
+        .addDescriptorBinding(7, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT);         // GrassParams
 
     return builder.buildDescriptorSetLayout(handles.descriptorSetLayout);
 }
@@ -592,7 +604,8 @@ void GrassSystem::writeComputeDescriptorSets() {
         DescriptorManager::SetWriter writer(getDevice(), (*particleSystem)->getComputeDescriptorSet(set));
         writer.writeBuffer(0, instanceBuffers.buffers[set], 0, sizeof(GrassInstance) * MAX_INSTANCES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
         writer.writeBuffer(1, indirectBuffers.buffers[set], 0, sizeof(VkDrawIndirectCommand), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-        writer.writeBuffer(2, uniformBuffers.buffers[0], 0, sizeof(GrassUniforms));
+        writer.writeBuffer(2, uniformBuffers.buffers[0], 0, sizeof(CullingUniforms));
+        writer.writeBuffer(7, paramsBuffers.buffers[0], 0, sizeof(GrassParams));
         writer.update();
     }
 }
@@ -684,13 +697,18 @@ void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>
 
 void GrassSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos, const glm::mat4& viewProj,
                                   float terrainSize, float terrainHeightScale) {
-    GrassUniforms uniforms{};
+    // Fill CullingUniforms (shared culling parameters)
+    CullingUniforms culling{};
+    culling.cameraPosition = glm::vec4(cameraPos, 1.0f);
+    extractFrustumPlanes(viewProj, culling.frustumPlanes);
+    culling.maxDrawDistance = 50.0f;
+    culling.lodTransitionStart = 30.0f;
+    culling.lodTransitionEnd = 50.0f;
+    culling.maxLodDropRate = 0.5f;
+    memcpy(uniformBuffers.mappedPointers[frameIndex], &culling, sizeof(CullingUniforms));
 
-    // Camera position
-    uniforms.cameraPosition = glm::vec4(cameraPos, 1.0f);
-
-    // Extract frustum planes from view-projection matrix
-    extractFrustumPlanes(viewProj, uniforms.frustumPlanes);
+    // Fill GrassParams (grass-specific parameters)
+    GrassParams params{};
 
     // Update displacement region to follow camera
     displacementRegionCenter = glm::vec2(cameraPos.x, cameraPos.z);
@@ -698,20 +716,13 @@ void GrassSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos
     // Displacement region info for grass compute shader
     // xy = world center, z = region size (50m), w = texel size
     float texelSize = DISPLACEMENT_REGION_SIZE / static_cast<float>(DISPLACEMENT_TEXTURE_SIZE);
-    uniforms.displacementRegion = glm::vec4(displacementRegionCenter.x, displacementRegionCenter.y,
-                                            DISPLACEMENT_REGION_SIZE, texelSize);
-
-    // Distance thresholds
-    uniforms.maxDrawDistance = 50.0f;
-    uniforms.lodTransitionStart = 30.0f;
-    uniforms.lodTransitionEnd = 50.0f;
+    params.displacementRegion = glm::vec4(displacementRegionCenter.x, displacementRegionCenter.y,
+                                          DISPLACEMENT_REGION_SIZE, texelSize);
 
     // Terrain parameters for heightmap sampling
-    uniforms.terrainSize = terrainSize;
-    uniforms.terrainHeightScale = terrainHeightScale;
-
-    // Copy to mapped buffer
-    memcpy(uniformBuffers.mappedPointers[frameIndex], &uniforms, sizeof(GrassUniforms));
+    params.terrainSize = terrainSize;
+    params.terrainHeightScale = terrainHeightScale;
+    memcpy(paramsBuffers.mappedPointers[frameIndex], &params, sizeof(GrassParams));
 }
 
 void GrassSystem::updateDisplacementSources(const glm::vec3& playerPos, float playerRadius, float deltaTime) {
@@ -771,7 +782,8 @@ void GrassSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex
     // Update compute descriptor set with per-frame buffers only
     // Note: Static images (bindings 3, 4, 5) are already bound in updateDescriptorSets()
     DescriptorManager::SetWriter writer(getDevice(), (*particleSystem)->getComputeDescriptorSet(writeSet));
-    writer.writeBuffer(2, uniformBuffers.buffers[frameIndex], 0, sizeof(GrassUniforms));
+    writer.writeBuffer(2, uniformBuffers.buffers[frameIndex], 0, sizeof(CullingUniforms));
+    writer.writeBuffer(7, paramsBuffers.buffers[frameIndex], 0, sizeof(GrassParams));
 
     // Update tile info buffer to the correct frame's buffer (triple-buffered to avoid CPU-GPU sync)
     if (tileInfoBuffers[frameIndex % 3] != VK_NULL_HANDLE) {

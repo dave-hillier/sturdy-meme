@@ -8,6 +8,10 @@
 #include "instancing_common.glsl"
 #include "cull_compute_common.glsl"
 
+// Include shared culling uniforms
+#define CULLING_UBO_BINDING BINDING_TREE_FILTER_CULLING
+#include "ubo_culling.glsl"
+
 // Workgroup size: One workgroup per visible cell
 // Each thread in the workgroup processes one tree from the cell
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
@@ -88,15 +92,13 @@ layout(std430, binding = BINDING_TREE_FILTER_INDIRECT) buffer IndirectDispatchBu
     uint dispatchZ;
 };
 
-// Uniforms
-layout(binding = BINDING_TREE_FILTER_UNIFORMS) uniform TreeFilterUniforms {
-    vec4 cameraPosition;           // xyz = camera pos, w = unused
-    vec4 frustumPlanes[6];         // Frustum planes for culling
-    float maxDrawDistance;         // Maximum leaf draw distance
+// Tree filter specific parameters
+layout(std140, binding = BINDING_TREE_FILTER_PARAMS) uniform TreeFilterParams {
     uint maxTreesPerCell;          // Maximum trees per cell (for bounds checking)
     uint _pad0;
     uint _pad1;
-};
+    uint _pad2;
+} filterParams;
 
 void main() {
     uint cellLocalIdx = gl_LocalInvocationID.x;  // Tree index within cell
@@ -148,16 +150,16 @@ void main() {
     // Get tree world position from model matrix
     vec3 treeWorldPos = vec3(tree.treeModel[3]);
 
-    // Distance culling
-    float distToCamera = distance(treeWorldPos, cameraPosition.xyz);
-    if (distToCamera > maxDrawDistance) {
+    // Distance culling (uses shared culling UBO)
+    float distToCamera = distance(treeWorldPos, culling.cameraPosition.xyz);
+    if (distToCamera > culling.maxDrawDistance) {
         return;
     }
 
-    // Frustum culling (use bounding sphere approximation)
+    // Frustum culling (uses shared culling UBO)
     // Trees are typically 5-15m tall, use generous margin
     float boundingRadius = 10.0;
-    if (!isInFrustum(frustumPlanes, treeWorldPos, boundingRadius)) {
+    if (!isInFrustum(culling.frustumPlanes, treeWorldPos, boundingRadius)) {
         return;
     }
 

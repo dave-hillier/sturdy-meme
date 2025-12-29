@@ -53,6 +53,36 @@ struct TreeFilterUniforms {
     uint32_t _pad1;
 };
 
+// Params structs for shader-specific data (separate from shared CullingUniforms)
+struct LeafCullParams {
+    uint32_t numTrees;
+    uint32_t totalLeafInstances;
+    uint32_t maxLeavesPerType;
+    uint32_t _pad1;
+};
+
+struct CellCullParams {
+    uint32_t numCells;
+    uint32_t treesPerWorkgroup;
+    uint32_t _pad0;
+    uint32_t _pad1;
+};
+
+struct TreeFilterParams {
+    uint32_t maxTreesPerCell;
+    uint32_t _pad0;
+    uint32_t _pad1;
+    uint32_t _pad2;
+};
+
+// Params for phase 3 leaf culling (matches shader LeafCullP3Params)
+struct LeafCullP3Params {
+    uint32_t maxLeavesPerType;
+    uint32_t _pad0;
+    uint32_t _pad1;
+    uint32_t _pad2;
+};
+
 // Per-tree culling data (stored in SSBO, one entry per tree)
 struct TreeCullData {
     glm::mat4 treeModel;
@@ -204,7 +234,8 @@ private:
     BufferUtils::FrameIndexedBuffers cullIndirectBuffers_;
     vk::DeviceSize cullOutputBufferSize_ = 0;
 
-    BufferUtils::PerFrameBufferSet cullUniformBuffers_;
+    BufferUtils::PerFrameBufferSet cullUniformBuffers_;  // CullingUniforms at binding 3
+    BufferUtils::PerFrameBufferSet leafCullParamsBuffers_;  // LeafCullParams at binding 8
 
     VkBuffer treeDataBuffer_ = VK_NULL_HANDLE;
     VmaAllocation treeDataAllocation_ = VK_NULL_HANDLE;
@@ -234,7 +265,8 @@ private:
     VkBuffer cellCullIndirectBuffer_ = VK_NULL_HANDLE;
     VmaAllocation cellCullIndirectAllocation_ = VK_NULL_HANDLE;
 
-    BufferUtils::PerFrameBufferSet cellCullUniformBuffers_;
+    BufferUtils::PerFrameBufferSet cellCullUniformBuffers_;  // CullingUniforms at binding 3
+    BufferUtils::PerFrameBufferSet cellCullParamsBuffers_;  // CellCullParams at binding 4
 
     // =========================================================================
     // Tree Filtering (Two-Phase Culling)
@@ -244,12 +276,15 @@ private:
     ManagedDescriptorSetLayout treeFilterDescriptorSetLayout_;
     std::vector<VkDescriptorSet> treeFilterDescriptorSets_;
 
-    BufferUtils::PerFrameBufferSet treeFilterUniformBuffers_;
+    BufferUtils::PerFrameBufferSet treeFilterUniformBuffers_;  // CullingUniforms at binding 6
+    BufferUtils::PerFrameBufferSet treeFilterParamsBuffers_;  // TreeFilterParams at binding 7
 
     ManagedPipeline twoPhaseLeafCullPipeline_;
     ManagedPipelineLayout twoPhaseLeafCullPipelineLayout_;
     ManagedDescriptorSetLayout twoPhaseLeafCullDescriptorSetLayout_;
     std::vector<VkDescriptorSet> twoPhaseLeafCullDescriptorSets_;
+
+    BufferUtils::PerFrameBufferSet leafCullP3ParamsBuffers_;  // LeafCullP3Params at binding 6
 
     VkBuffer visibleTreeBuffer_ = VK_NULL_HANDLE;
     VmaAllocation visibleTreeAllocation_ = VK_NULL_HANDLE;

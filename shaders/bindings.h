@@ -114,11 +114,12 @@
 // =============================================================================
 #define BINDING_GRASS_COMPUTE_INSTANCES    0   // Grass instance buffer (output)
 #define BINDING_GRASS_COMPUTE_INDIRECT     1   // Indirect draw buffer
-#define BINDING_GRASS_COMPUTE_UNIFORMS     2   // Grass uniforms
+#define BINDING_GRASS_COMPUTE_CULLING      2   // Shared culling uniforms (CullingUniforms)
 #define BINDING_GRASS_COMPUTE_HEIGHT_MAP   3   // Terrain height map (global coarse LOD)
 #define BINDING_GRASS_COMPUTE_DISPLACEMENT 4   // Displacement map
 #define BINDING_GRASS_COMPUTE_TILE_ARRAY   5   // LOD tile array (high-res tiles near camera)
 #define BINDING_GRASS_COMPUTE_TILE_INFO    6   // Tile info SSBO
+#define BINDING_GRASS_COMPUTE_PARAMS       7   // Grass-specific params (terrain, displacement region)
 
 // =============================================================================
 // Grass Displacement Compute Shader Descriptor Set
@@ -148,17 +149,19 @@
 #define BINDING_TREE_LEAF_CULL_INPUT       0   // Input leaf instances (all)
 #define BINDING_TREE_LEAF_CULL_OUTPUT      1   // Output leaf instances (visible)
 #define BINDING_TREE_LEAF_CULL_INDIRECT    2   // Indirect draw command
-#define BINDING_TREE_LEAF_CULL_UNIFORMS    3   // Culling uniforms
+#define BINDING_TREE_LEAF_CULL_CULLING     3   // Shared culling uniforms (CullingUniforms)
 #define BINDING_TREE_LEAF_CULL_TREES       4   // Per-tree data SSBO (batched)
 #define BINDING_TREE_LEAF_CULL_CELLS       5   // Cell data SSBO (spatial index)
 #define BINDING_TREE_LEAF_CULL_SORTED      6   // Sorted tree indices SSBO
 #define BINDING_TREE_LEAF_CULL_VISIBLE_CELLS 7 // Visible cell indices (output from cell cull)
+#define BINDING_TREE_LEAF_CULL_PARAMS      8   // Leaf cull specific params (numTrees, etc.)
 
 // Tree Cell Cull Compute Descriptor Set (Phase 1: Spatial Partitioning)
 #define BINDING_TREE_CELL_CULL_CELLS       0   // All cells (input)
 #define BINDING_TREE_CELL_CULL_VISIBLE     1   // Visible cell indices (output)
 #define BINDING_TREE_CELL_CULL_INDIRECT    2   // Indirect dispatch for tree cull
-#define BINDING_TREE_CELL_CULL_UNIFORMS    3   // Culling uniforms
+#define BINDING_TREE_CELL_CULL_CULLING     3   // Shared culling uniforms (CullingUniforms)
+#define BINDING_TREE_CELL_CULL_PARAMS      4   // Cell cull specific params (numCells, etc.)
 
 // Tree Filter Compute Descriptor Set (Phase 3: Two-Phase Culling)
 #define BINDING_TREE_FILTER_ALL_TREES      0   // All tree cull data (input)
@@ -167,7 +170,8 @@
 #define BINDING_TREE_FILTER_SORTED_TREES   3   // Trees sorted by cell (input)
 #define BINDING_TREE_FILTER_VISIBLE_TREES  4   // Visible trees output (compacted)
 #define BINDING_TREE_FILTER_INDIRECT       5   // Indirect dispatch for leaf cull
-#define BINDING_TREE_FILTER_UNIFORMS       6   // Filter uniforms
+#define BINDING_TREE_FILTER_CULLING        6   // Shared culling uniforms (CullingUniforms)
+#define BINDING_TREE_FILTER_PARAMS         7   // Filter specific params (maxTreesPerCell)
 
 // Phase 3 Leaf Cull Compute Descriptor Set (Two-Phase Culling)
 #define BINDING_LEAF_CULL_P3_VISIBLE_TREES 0   // Visible trees (from tree filter)
@@ -175,7 +179,8 @@
 #define BINDING_LEAF_CULL_P3_INPUT         2   // Input leaf instances
 #define BINDING_LEAF_CULL_P3_OUTPUT        3   // Output leaf instances
 #define BINDING_LEAF_CULL_P3_INDIRECT      4   // Indirect draw commands
-#define BINDING_LEAF_CULL_P3_UNIFORMS      5   // Culling uniforms
+#define BINDING_LEAF_CULL_P3_CULLING       5   // Shared culling uniforms (CullingUniforms)
+#define BINDING_LEAF_CULL_P3_PARAMS        6   // Phase 3 specific params (LeafCullP3Params)
 
 // Tree Graphics Descriptor Set
 #define BINDING_TREE_GFX_UBO               0   // Scene uniforms
@@ -227,13 +232,14 @@
 #define BINDING_LEAF_COMPUTE_INPUT         0   // Input particle buffer
 #define BINDING_LEAF_COMPUTE_OUTPUT        1   // Output particle buffer
 #define BINDING_LEAF_COMPUTE_INDIRECT      2   // Indirect draw buffer
-#define BINDING_LEAF_COMPUTE_UNIFORMS      3   // Leaf uniforms
+#define BINDING_LEAF_COMPUTE_CULLING       3   // Shared culling uniforms (CullingUniforms)
 #define BINDING_LEAF_COMPUTE_WIND          4   // Wind uniforms
 #define BINDING_LEAF_COMPUTE_HEIGHT_MAP    5   // Terrain height map
 #define BINDING_LEAF_COMPUTE_DISPLACEMENT  6   // Displacement map
 #define BINDING_LEAF_COMPUTE_DISP_REGION   7   // Displacement region
 #define BINDING_LEAF_COMPUTE_TILE_ARRAY    8   // LOD tile array (high-res tiles near camera)
 #define BINDING_LEAF_COMPUTE_TILE_INFO     9   // Tile info SSBO
+#define BINDING_LEAF_COMPUTE_PARAMS       10   // Leaf physics params (player, spawn, terrain, etc.)
 
 // =============================================================================
 // Weather System Descriptor Set
@@ -528,9 +534,12 @@ constexpr uint32_t VT_PARAMS_UBO          = BINDING_VT_PARAMS_UBO;
 // Grass Compute
 constexpr uint32_t GRASS_COMPUTE_INSTANCES   = BINDING_GRASS_COMPUTE_INSTANCES;
 constexpr uint32_t GRASS_COMPUTE_INDIRECT    = BINDING_GRASS_COMPUTE_INDIRECT;
-constexpr uint32_t GRASS_COMPUTE_UNIFORMS    = BINDING_GRASS_COMPUTE_UNIFORMS;
+constexpr uint32_t GRASS_COMPUTE_CULLING     = BINDING_GRASS_COMPUTE_CULLING;
 constexpr uint32_t GRASS_COMPUTE_HEIGHT_MAP  = BINDING_GRASS_COMPUTE_HEIGHT_MAP;
 constexpr uint32_t GRASS_COMPUTE_DISPLACEMENT = BINDING_GRASS_COMPUTE_DISPLACEMENT;
+constexpr uint32_t GRASS_COMPUTE_TILE_ARRAY  = BINDING_GRASS_COMPUTE_TILE_ARRAY;
+constexpr uint32_t GRASS_COMPUTE_TILE_INFO   = BINDING_GRASS_COMPUTE_TILE_INFO;
+constexpr uint32_t GRASS_COMPUTE_PARAMS      = BINDING_GRASS_COMPUTE_PARAMS;
 
 // Grass Displacement
 constexpr uint32_t GRASS_DISP_OUTPUT      = BINDING_GRASS_DISP_OUTPUT;
@@ -556,17 +565,19 @@ constexpr uint32_t TREE_LEAF_PARAMS       = BINDING_TREE_LEAF_PARAMS;
 constexpr uint32_t TREE_LEAF_CULL_INPUT   = BINDING_TREE_LEAF_CULL_INPUT;
 constexpr uint32_t TREE_LEAF_CULL_OUTPUT  = BINDING_TREE_LEAF_CULL_OUTPUT;
 constexpr uint32_t TREE_LEAF_CULL_INDIRECT = BINDING_TREE_LEAF_CULL_INDIRECT;
-constexpr uint32_t TREE_LEAF_CULL_UNIFORMS = BINDING_TREE_LEAF_CULL_UNIFORMS;
+constexpr uint32_t TREE_LEAF_CULL_CULLING = BINDING_TREE_LEAF_CULL_CULLING;
 constexpr uint32_t TREE_LEAF_CULL_TREES   = BINDING_TREE_LEAF_CULL_TREES;
 constexpr uint32_t TREE_LEAF_CULL_CELLS   = BINDING_TREE_LEAF_CULL_CELLS;
 constexpr uint32_t TREE_LEAF_CULL_SORTED  = BINDING_TREE_LEAF_CULL_SORTED;
 constexpr uint32_t TREE_LEAF_CULL_VISIBLE_CELLS = BINDING_TREE_LEAF_CULL_VISIBLE_CELLS;
+constexpr uint32_t TREE_LEAF_CULL_PARAMS  = BINDING_TREE_LEAF_CULL_PARAMS;
 
 // Tree Cell Cull Compute
 constexpr uint32_t TREE_CELL_CULL_CELLS   = BINDING_TREE_CELL_CULL_CELLS;
 constexpr uint32_t TREE_CELL_CULL_VISIBLE = BINDING_TREE_CELL_CULL_VISIBLE;
 constexpr uint32_t TREE_CELL_CULL_INDIRECT = BINDING_TREE_CELL_CULL_INDIRECT;
-constexpr uint32_t TREE_CELL_CULL_UNIFORMS = BINDING_TREE_CELL_CULL_UNIFORMS;
+constexpr uint32_t TREE_CELL_CULL_CULLING = BINDING_TREE_CELL_CULL_CULLING;
+constexpr uint32_t TREE_CELL_CULL_PARAMS  = BINDING_TREE_CELL_CULL_PARAMS;
 
 // Tree Filter Compute (Phase 3)
 constexpr uint32_t TREE_FILTER_ALL_TREES  = BINDING_TREE_FILTER_ALL_TREES;
@@ -575,7 +586,8 @@ constexpr uint32_t TREE_FILTER_CELL_DATA  = BINDING_TREE_FILTER_CELL_DATA;
 constexpr uint32_t TREE_FILTER_SORTED_TREES = BINDING_TREE_FILTER_SORTED_TREES;
 constexpr uint32_t TREE_FILTER_VISIBLE_TREES = BINDING_TREE_FILTER_VISIBLE_TREES;
 constexpr uint32_t TREE_FILTER_INDIRECT   = BINDING_TREE_FILTER_INDIRECT;
-constexpr uint32_t TREE_FILTER_UNIFORMS   = BINDING_TREE_FILTER_UNIFORMS;
+constexpr uint32_t TREE_FILTER_CULLING    = BINDING_TREE_FILTER_CULLING;
+constexpr uint32_t TREE_FILTER_PARAMS     = BINDING_TREE_FILTER_PARAMS;
 
 // Phase 3 Leaf Cull Compute
 constexpr uint32_t LEAF_CULL_P3_VISIBLE_TREES = BINDING_LEAF_CULL_P3_VISIBLE_TREES;
@@ -583,7 +595,8 @@ constexpr uint32_t LEAF_CULL_P3_ALL_TREES = BINDING_LEAF_CULL_P3_ALL_TREES;
 constexpr uint32_t LEAF_CULL_P3_INPUT     = BINDING_LEAF_CULL_P3_INPUT;
 constexpr uint32_t LEAF_CULL_P3_OUTPUT    = BINDING_LEAF_CULL_P3_OUTPUT;
 constexpr uint32_t LEAF_CULL_P3_INDIRECT  = BINDING_LEAF_CULL_P3_INDIRECT;
-constexpr uint32_t LEAF_CULL_P3_UNIFORMS  = BINDING_LEAF_CULL_P3_UNIFORMS;
+constexpr uint32_t LEAF_CULL_P3_CULLING   = BINDING_LEAF_CULL_P3_CULLING;
+constexpr uint32_t LEAF_CULL_P3_PARAMS    = BINDING_LEAF_CULL_P3_PARAMS;
 
 // Tree Graphics
 constexpr uint32_t TREE_GFX_UBO           = BINDING_TREE_GFX_UBO;
@@ -629,13 +642,14 @@ constexpr uint32_t TREE_BRANCH_SHADOW_INSTANCES = BINDING_TREE_BRANCH_SHADOW_INS
 constexpr uint32_t LEAF_COMPUTE_INPUT     = BINDING_LEAF_COMPUTE_INPUT;
 constexpr uint32_t LEAF_COMPUTE_OUTPUT    = BINDING_LEAF_COMPUTE_OUTPUT;
 constexpr uint32_t LEAF_COMPUTE_INDIRECT  = BINDING_LEAF_COMPUTE_INDIRECT;
-constexpr uint32_t LEAF_COMPUTE_UNIFORMS  = BINDING_LEAF_COMPUTE_UNIFORMS;
+constexpr uint32_t LEAF_COMPUTE_CULLING   = BINDING_LEAF_COMPUTE_CULLING;
 constexpr uint32_t LEAF_COMPUTE_WIND      = BINDING_LEAF_COMPUTE_WIND;
 constexpr uint32_t LEAF_COMPUTE_HEIGHT_MAP = BINDING_LEAF_COMPUTE_HEIGHT_MAP;
 constexpr uint32_t LEAF_COMPUTE_DISPLACEMENT = BINDING_LEAF_COMPUTE_DISPLACEMENT;
 constexpr uint32_t LEAF_COMPUTE_DISP_REGION = BINDING_LEAF_COMPUTE_DISP_REGION;
 constexpr uint32_t LEAF_COMPUTE_TILE_ARRAY = BINDING_LEAF_COMPUTE_TILE_ARRAY;
 constexpr uint32_t LEAF_COMPUTE_TILE_INFO = BINDING_LEAF_COMPUTE_TILE_INFO;
+constexpr uint32_t LEAF_COMPUTE_PARAMS    = BINDING_LEAF_COMPUTE_PARAMS;
 
 // Weather System
 constexpr uint32_t WEATHER_PARTICLES      = BINDING_WEATHER_PARTICLES;

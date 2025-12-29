@@ -8,6 +8,10 @@
 #include "terrain_height_common.glsl"
 #include "instancing_common.glsl"
 
+// Include shared culling uniforms
+#define CULLING_UBO_BINDING BINDING_GRASS_COMPUTE_CULLING
+#include "ubo_culling.glsl"
+
 // 2D workgroup layout for better texture cache coherency - threads in the same
 // workgroup sample nearby terrain/displacement texels (16x16 = 256 threads)
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
@@ -28,17 +32,13 @@ layout(std430, binding = BINDING_GRASS_COMPUTE_INDIRECT) buffer IndirectBuffer {
     DrawIndirectCommand drawCmd;
 };
 
-layout(binding = BINDING_GRASS_COMPUTE_UNIFORMS) uniform GrassUniforms {
-    vec4 cameraPosition;
-    vec4 frustumPlanes[6];
+// Grass-specific parameters (terrain and displacement)
+layout(std140, binding = BINDING_GRASS_COMPUTE_PARAMS) uniform GrassParams {
     vec4 displacementRegion;  // xy = world center, z = region size, w = texel size
-    float maxDrawDistance;
-    float lodTransitionStart;
-    float lodTransitionEnd;
     float terrainSize;
     float terrainHeightScale;
-    float padding[3];
-} uniforms;
+    float padding[2];
+} grassParams;
 
 // Terrain heightmap for grass placement on terrain
 layout(binding = BINDING_GRASS_COMPUTE_HEIGHT_MAP) uniform sampler2D terrainHeightMap;
@@ -79,7 +79,7 @@ layout(push_constant) uniform PushConstants {
 // Calculate terrain normal from heightmap gradient with tile cache support
 vec3 calculateTerrainNormal(vec2 uv, vec2 worldXZ) {
     return calculateNormalWithTileCache(terrainHeightMap, heightMapTiles, uv, worldXZ,
-                                         uniforms.terrainSize, uniforms.terrainHeightScale, activeTileCount);
+                                         grassParams.terrainSize, grassParams.terrainHeightScale, activeTileCount);
 }
 
 // Clumping parameters
@@ -89,8 +89,8 @@ const float CLUMP_FACING_INFLUENCE = 0.3;  // How much blades face toward/away f
 
 // Convert world position to displacement map UV coordinates
 vec2 worldPosToDispUV(vec2 worldPos) {
-    vec2 regionCenter = uniforms.displacementRegion.xy;
-    float regionSize = uniforms.displacementRegion.z;
+    vec2 regionCenter = grassParams.displacementRegion.xy;
+    float regionSize = grassParams.displacementRegion.z;
 
     // Convert world pos to UV: center of region maps to UV(0.5, 0.5)
     vec2 offset = worldPos - regionCenter;
@@ -181,33 +181,34 @@ void main() {
 
     // Sample terrain heightmap to get Y position
     // Convert world XZ to heightmap UV: terrain is centered at origin with size = terrainSize
-    vec2 terrainUV = vec2(x, z) / uniforms.terrainSize + 0.5;
+    vec2 terrainUV = vec2(x, z) / grassParams.terrainSize + 0.5;
 
     // Check if grass is within terrain bounds
     if (terrainUV.x < 0.0 || terrainUV.x > 1.0 || terrainUV.y < 0.0 || terrainUV.y > 1.0) return;
 
     // Sample terrain height with tile cache support for ~1m resolution near camera
     float terrainY = sampleHeightWithTileCache(terrainHeightMap, heightMapTiles, terrainUV,
-                                                vec2(x, z), uniforms.terrainHeightScale, activeTileCount);
+                                                vec2(x, z), grassParams.terrainHeightScale, activeTileCount);
 
     vec3 worldPos = vec3(x, terrainY, z);
 
     // Calculate terrain normal for tangent-aligned grass placement (with tile cache)
     vec3 terrainNormal = calculateTerrainNormal(terrainUV, vec2(x, z));
 
-    // Distance culling (relative to camera) using common helper
-    float distToCamera = getDistanceToCamera(worldPos, uniforms.cameraPosition.xyz);
-    if (distToCamera > uniforms.maxDrawDistance) return;
+    // Distance culling (relative to camera) using shared culling UBO
+    float distToCamera = getDistanceToCamera(worldPos, culling.cameraPosition.xyz);
+    if (distToCamera > culling.maxDrawDistance) return;
 
-    // Frustum culling using common helper
+    // Frustum culling using shared culling UBO
     // Use large margin (15.0) to handle double-buffer lag during camera rotation
     // and ensure grass behind camera can still cast shadows
-    if (!isInFrustum(uniforms.frustumPlanes, worldPos, 15.0)) return;
+    if (!isInFrustum(culling.frustumPlanes, worldPos, 15.0)) return;
 
-    // LOD blade dropping using common helper
-    // Drop up to 75% at max LOD distance
+    // LOD blade dropping using shared culling UBO
+    // maxLodDropRate from UBO controls max drop percentage at far LOD
     float instanceHash = hash(cell + vec2(500.0, 500.0));
-    if (lodCull(distToCamera, uniforms.lodTransitionStart, uniforms.lodTransitionEnd, 0.75, instanceHash)) return;
+    if (isLodEnabled() && lodCull(distToCamera, culling.lodTransitionStart, culling.lodTransitionEnd,
+                                   culling.maxLodDropRate, instanceHash)) return;
 
     // Use subgroup operations to batch atomic updates
     // This reduces contention by ~32x compared to per-thread atomics

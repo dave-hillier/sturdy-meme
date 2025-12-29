@@ -152,7 +152,8 @@ private:
     BufferUtils::DoubleBufferedBufferSet indirectBuffers;
 
     // Uniform buffers (per frame)
-    BufferUtils::PerFrameBufferSet uniformBuffers;
+    BufferUtils::PerFrameBufferSet uniformBuffers;    // CullingUniforms at binding 3
+    BufferUtils::PerFrameBufferSet paramsBuffers;     // LeafPhysicsParams at binding 10
 
     // Descriptor sets
     // Descriptor sets managed through ParticleSystem helper

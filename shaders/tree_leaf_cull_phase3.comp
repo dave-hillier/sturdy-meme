@@ -71,19 +71,17 @@ layout(std430, binding = BINDING_LEAF_CULL_P3_INDIRECT) buffer IndirectBuffer {
     uint tierCounts[NUM_LEAF_TYPES * NUM_DISTANCE_TIERS];
 };
 
-// Global culling uniforms
-layout(binding = BINDING_LEAF_CULL_P3_UNIFORMS) uniform TreeLeafCullUniforms {
-    vec4 cameraPosition;
-    vec4 frustumPlanes[6];
-    float maxDrawDistance;
-    float lodTransitionStart;
-    float lodTransitionEnd;
-    float maxLodDropRate;
-    uint numTrees;                 // Not used in Phase 3 (we use visibleTreeCount)
-    uint totalLeafInstances;       // Not used in Phase 3
+// Include shared culling uniforms
+#define CULLING_UBO_BINDING BINDING_LEAF_CULL_P3_CULLING
+#include "ubo_culling.glsl"
+
+// Phase 3 specific parameters
+layout(std140, binding = BINDING_LEAF_CULL_P3_PARAMS) uniform LeafCullP3Params {
     uint maxLeavesPerType;
+    uint _pad0;
     uint _pad1;
-};
+    uint _pad2;
+} leafP3Params;
 
 // Get distance tier for budget allocation
 uint getDistanceTier(float dist) {
@@ -100,7 +98,7 @@ uint getTierBudgetLimit(uint leafType, uint tier) {
     for (uint t = 0; t <= tier; t++) {
         cumulativeFraction += TIER_BUDGET_FRACTIONS[t];
     }
-    return uint(float(maxLeavesPerType) * cumulativeFraction);
+    return uint(float(leafP3Params.maxLeavesPerType) * cumulativeFraction);
 }
 
 void main() {
@@ -145,12 +143,12 @@ void main() {
             leaf.positionAndSize.w,
             tree.treeModel,
             visTree.lodBlendFactor,
-            cameraPosition.xyz,
-            frustumPlanes,
-            maxDrawDistance,
-            lodTransitionStart,
-            lodTransitionEnd,
-            maxLodDropRate,
+            culling.cameraPosition.xyz,
+            culling.frustumPlanes,
+            culling.maxDrawDistance,
+            culling.lodTransitionStart,
+            culling.lodTransitionEnd,
+            culling.maxLodDropRate,
             worldPos,
             leafSize,
             distToCamera
@@ -184,12 +182,12 @@ void main() {
 
         // Allocate output slot with simple atomicAdd
         uint typeLocalSlot = atomicAdd(drawCmds[leafType].instanceCount, 1);
-        if (typeLocalSlot >= maxLeavesPerType) {
+        if (typeLocalSlot >= leafP3Params.maxLeavesPerType) {
             continue;
         }
 
         // Calculate global output slot
-        uint outputSlot = leafType * maxLeavesPerType + typeLocalSlot;
+        uint outputSlot = leafType * leafP3Params.maxLeavesPerType + typeLocalSlot;
 
         // Write world-space leaf with tree index
         outputInstances[outputSlot].worldPosition = vec4(worldPos.xyz, leafSize);

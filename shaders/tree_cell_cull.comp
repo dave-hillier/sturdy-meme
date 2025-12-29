@@ -8,6 +8,10 @@
 #include "instancing_common.glsl"
 #include "cull_compute_common.glsl"
 
+// Include shared culling uniforms
+#define CULLING_UBO_BINDING BINDING_TREE_CELL_CULL_CULLING
+#include "ubo_culling.glsl"
+
 // Workgroup size: 256 threads per workgroup
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
@@ -46,15 +50,13 @@ layout(std430, binding = BINDING_TREE_CELL_CULL_INDIRECT) buffer IndirectDispatc
     uint bucketOffsets[NUM_DISTANCE_BUCKETS];  // Prefix sum (computed after first pass)
 };
 
-// Culling uniforms
-layout(binding = BINDING_TREE_CELL_CULL_UNIFORMS) uniform CellCullUniforms {
-    vec4 cameraPosition;           // xyz = camera pos, w = unused
-    vec4 frustumPlanes[6];         // Frustum planes for culling
-    float maxDrawDistance;         // Maximum tree draw distance
+// Cell cull specific parameters
+layout(std140, binding = BINDING_TREE_CELL_CULL_PARAMS) uniform CellCullParams {
     uint numCells;                 // Total number of cells in grid
     uint treesPerWorkgroup;        // How many trees to process per workgroup in tree cull
     uint _pad0;
-};
+    uint _pad1;
+} cellParams;
 
 // Culling functions (isAABBInFrustum, isAABBInRange, getDistanceBucket)
 // are provided by cull_compute_common.glsl
@@ -79,7 +81,7 @@ void main() {
     barrier();
 
     // Early exit if beyond cell count
-    if (cellIdx >= numCells) {
+    if (cellIdx >= cellParams.numCells) {
         return;
     }
 
@@ -95,23 +97,23 @@ void main() {
         return;
     }
 
-    // Distance culling: skip cells too far from camera
-    if (!isAABBInRange(boundsMin, boundsMax, cameraPosition.xyz, maxDrawDistance)) {
+    // Distance culling: skip cells too far from camera (uses shared culling UBO)
+    if (!isAABBInRange(boundsMin, boundsMax, culling.cameraPosition.xyz, culling.maxDrawDistance)) {
         return;
     }
 
-    // Frustum culling: skip cells completely outside frustum
-    if (!isAABBInFrustum(boundsMin, boundsMax, frustumPlanes)) {
+    // Frustum culling: skip cells completely outside frustum (uses shared culling UBO)
+    if (!isAABBInFrustum(boundsMin, boundsMax, culling.frustumPlanes)) {
         return;
     }
 
     // Calculate distance to cell center for bucket assignment
     vec3 cellCenter = (boundsMin + boundsMax) * 0.5;
-    float distToCamera = length(cellCenter - cameraPosition.xyz);
+    float distToCamera = length(cellCenter - culling.cameraPosition.xyz);
     uint bucket = getDistanceBucket(distToCamera);
 
     // Calculate workgroups needed for this cell
-    uint workgroupsForCell = (treeCount + treesPerWorkgroup - 1) / treesPerWorkgroup;
+    uint workgroupsForCell = (treeCount + cellParams.treesPerWorkgroup - 1) / cellParams.treesPerWorkgroup;
 
     // Use subgroup operations to batch atomic updates
 

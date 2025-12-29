@@ -10,6 +10,10 @@
 #include "tree_leaf_world.glsl"
 #include "tree_leaf_cull_common.glsl"
 
+// Include shared culling uniforms
+#define CULLING_UBO_BINDING BINDING_TREE_LEAF_CULL_CULLING
+#include "ubo_culling.glsl"
+
 // Workgroup size: 256 threads per workgroup
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
@@ -33,19 +37,13 @@ layout(std430, binding = BINDING_TREE_LEAF_CULL_TREES) readonly buffer TreeDataB
     TreeCullData treeData[];
 };
 
-// Global culling uniforms
-layout(binding = BINDING_TREE_LEAF_CULL_UNIFORMS) uniform TreeLeafCullUniforms {
-    vec4 cameraPosition;
-    vec4 frustumPlanes[6];
-    float maxDrawDistance;
-    float lodTransitionStart;
-    float lodTransitionEnd;
-    float maxLodDropRate;
+// Leaf cull specific parameters
+layout(std140, binding = BINDING_TREE_LEAF_CULL_PARAMS) uniform LeafCullParams {
     uint numTrees;
     uint totalLeafInstances;
     uint maxLeavesPerType;
     uint _pad1;
-};
+} leafCullParams;
 
 void main() {
     uint globalIdx = gl_GlobalInvocationID.x;
@@ -55,14 +53,14 @@ void main() {
     // causing race conditions when multiple workgroups run in parallel.
 
     // Early exit if beyond total leaf count
-    if (globalIdx >= totalLeafInstances) {
+    if (globalIdx >= leafCullParams.totalLeafInstances) {
         return;
     }
 
     // Find which tree this leaf belongs to using binary search
     uint treeIdx = 0;
     uint low = 0;
-    uint high = numTrees;
+    uint high = leafCullParams.numTrees;
 
     while (low < high) {
         uint mid = (low + high) / 2;
@@ -104,12 +102,12 @@ void main() {
         leaf.positionAndSize.w,
         tree.treeModel,
         tree.lodBlendFactor,
-        cameraPosition.xyz,
-        frustumPlanes,
-        maxDrawDistance,
-        lodTransitionStart,
-        lodTransitionEnd,
-        maxLodDropRate,
+        culling.cameraPosition.xyz,
+        culling.frustumPlanes,
+        culling.maxDrawDistance,
+        culling.lodTransitionStart,
+        culling.lodTransitionEnd,
+        culling.maxLodDropRate,
         worldPos,
         leafSize,
         distToCamera
@@ -150,12 +148,12 @@ void main() {
     }
 
     // Check if our slot is within budget
-    if (typeLocalSlot >= maxLeavesPerType) {
+    if (typeLocalSlot >= leafCullParams.maxLeavesPerType) {
         return;
     }
 
     // Calculate global output slot: type's base offset + local slot
-    uint outputSlot = leafType * maxLeavesPerType + typeLocalSlot;
+    uint outputSlot = leafType * leafCullParams.maxLeavesPerType + typeLocalSlot;
 
     // Write world-space leaf with tree index
     outputInstances[outputSlot].worldPosition = vec4(worldPos.xyz, leafSize);

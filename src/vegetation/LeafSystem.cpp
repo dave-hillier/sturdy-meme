@@ -69,6 +69,7 @@ void LeafSystem::destroyBuffers(VmaAllocator alloc) {
     BufferUtils::destroyBuffers(alloc, particleBuffers);
     BufferUtils::destroyBuffers(alloc, indirectBuffers);
     BufferUtils::destroyBuffers(alloc, uniformBuffers);
+    BufferUtils::destroyBuffers(alloc, paramsBuffers);
 
     BufferUtils::destroyBuffers(alloc, displacementRegionBuffers);
 }
@@ -76,7 +77,8 @@ void LeafSystem::destroyBuffers(VmaAllocator alloc) {
 bool LeafSystem::createBuffers() {
     VkDeviceSize particleBufferSize = sizeof(LeafParticle) * MAX_PARTICLES;
     VkDeviceSize indirectBufferSize = sizeof(VkDrawIndirectCommand);
-    VkDeviceSize uniformBufferSize = sizeof(LeafUniforms);
+    VkDeviceSize cullingUniformSize = sizeof(CullingUniforms);
+    VkDeviceSize leafPhysicsParamsSize = sizeof(LeafPhysicsParams);
 
     // Use framesInFlight for buffer set count to ensure proper triple buffering
     uint32_t bufferSetCount = getFramesInFlight();
@@ -104,9 +106,18 @@ bool LeafSystem::createBuffers() {
     BufferUtils::PerFrameBufferBuilder uniformBuilder;
     if (!uniformBuilder.setAllocator(getAllocator())
              .setFrameCount(getFramesInFlight())
-             .setSize(uniformBufferSize)
+             .setSize(cullingUniformSize)
              .build(uniformBuffers)) {
-        SDL_Log("Failed to create leaf uniform buffers");
+        SDL_Log("Failed to create leaf culling uniform buffers");
+        return false;
+    }
+
+    BufferUtils::PerFrameBufferBuilder paramsBuilder;
+    if (!paramsBuilder.setAllocator(getAllocator())
+             .setFrameCount(getFramesInFlight())
+             .setSize(leafPhysicsParamsSize)
+             .build(paramsBuffers)) {
+        SDL_Log("Failed to create leaf physics params buffers");
         return false;
     }
 
@@ -131,25 +142,27 @@ bool LeafSystem::createComputeDescriptorSetLayout(SystemLifecycleHelper::Pipelin
     // 0: Particle buffer input (previous frame state)
     // 1: Particle buffer output (current frame result)
     // 2: Indirect buffer (output)
-    // 3: Leaf uniforms
+    // 3: CullingUniforms (shared culling parameters)
     // 4: Wind uniforms
     // 5: Terrain heightmap
     // 6: Displacement map (shared with grass system for player interaction)
     // 7: Displacement region uniform buffer
     // 8: Tile array (high-res terrain tiles near camera)
     // 9: Tile info buffer
+    // 10: LeafPhysicsParams (leaf-specific physics parameters)
 
     handles.descriptorSetLayout = DescriptorManager::LayoutBuilder(getDevice())
         .addStorageBuffer(VK_SHADER_STAGE_COMPUTE_BIT)           // 0: Particle buffer input
         .addStorageBuffer(VK_SHADER_STAGE_COMPUTE_BIT)           // 1: Particle buffer output
         .addStorageBuffer(VK_SHADER_STAGE_COMPUTE_BIT)           // 2: Indirect buffer
-        .addUniformBuffer(VK_SHADER_STAGE_COMPUTE_BIT)           // 3: Leaf uniforms
+        .addUniformBuffer(VK_SHADER_STAGE_COMPUTE_BIT)           // 3: CullingUniforms
         .addUniformBuffer(VK_SHADER_STAGE_COMPUTE_BIT)           // 4: Wind uniforms
         .addCombinedImageSampler(VK_SHADER_STAGE_COMPUTE_BIT)    // 5: Terrain heightmap
         .addCombinedImageSampler(VK_SHADER_STAGE_COMPUTE_BIT)    // 6: Displacement map
         .addUniformBuffer(VK_SHADER_STAGE_COMPUTE_BIT)           // 7: Displacement region
         .addCombinedImageSampler(VK_SHADER_STAGE_COMPUTE_BIT)    // 8: Tile array
         .addStorageBuffer(VK_SHADER_STAGE_COMPUTE_BIT)           // 9: Tile info
+        .addUniformBuffer(VK_SHADER_STAGE_COMPUTE_BIT)           // 10: LeafPhysicsParams
         .build();
 
     if (handles.descriptorSetLayout == VK_NULL_HANDLE) {
@@ -430,11 +443,12 @@ void LeafSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>&
         computeWriter.writeBuffer(0, particleBuffers.buffers[inputSet], 0, sizeof(LeafParticle) * MAX_PARTICLES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
         computeWriter.writeBuffer(1, particleBuffers.buffers[outputSet], 0, sizeof(LeafParticle) * MAX_PARTICLES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
         computeWriter.writeBuffer(2, indirectBuffers.buffers[outputSet], 0, sizeof(VkDrawIndirectCommand), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-        computeWriter.writeBuffer(3, uniformBuffers.buffers[0], 0, sizeof(LeafUniforms));
+        computeWriter.writeBuffer(3, uniformBuffers.buffers[0], 0, sizeof(CullingUniforms));
         computeWriter.writeBuffer(4, windBuffers[0], 0, 32);  // sizeof(WindUniforms)
         computeWriter.writeImage(5, terrainHeightMapView, terrainHeightMapSampler);
         computeWriter.writeImage(6, displacementMapViewParam, displacementMapSamplerParam);
         computeWriter.writeBuffer(7, displacementRegionBuffers.buffers[0], 0, sizeof(glm::vec4));
+        computeWriter.writeBuffer(10, paramsBuffers.buffers[0], 0, sizeof(LeafPhysicsParams));
 
         // Tile cache bindings (8 and 9) - for high-res terrain sampling
         if (tileArrayView != VK_NULL_HANDLE && tileSampler != VK_NULL_HANDLE) {
@@ -467,49 +481,55 @@ void LeafSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos,
                                  const glm::mat4& viewProj, const glm::vec3& playerPos,
                                  const glm::vec3& playerVel, float deltaTime, float totalTime,
                                  float terrainSize, float terrainHeightScale) {
-    LeafUniforms uniforms{};
     const EnvironmentSettings fallbackSettings{};
     const EnvironmentSettings& settings = environmentSettings ? *environmentSettings : fallbackSettings;
 
-    uniforms.cameraPosition = glm::vec4(cameraPos, 1.0f);
+    // Fill CullingUniforms (shared culling parameters)
+    CullingUniforms culling{};
+    culling.cameraPosition = glm::vec4(cameraPos, 1.0f);
+    extractFrustumPlanes(viewProj, culling.frustumPlanes);
+    culling.maxDrawDistance = 60.0f;
+    culling.lodTransitionStart = 40.0f;
+    culling.lodTransitionEnd = 60.0f;
+    culling.maxLodDropRate = 0.5f;
+    memcpy(uniformBuffers.mappedPointers[frameIndex], &culling, sizeof(CullingUniforms));
 
-    // Extract frustum planes from view-projection matrix
-    extractFrustumPlanes(viewProj, uniforms.frustumPlanes);
+    // Fill LeafPhysicsParams (leaf-specific physics parameters)
+    LeafPhysicsParams params{};
 
     // Player data for disruption
-    uniforms.playerPosition = glm::vec4(playerPos, 0.5f);  // w = player collision radius
+    params.playerPosition = glm::vec4(playerPos, 0.5f);  // w = player collision radius
     float playerSpeed = glm::length(playerVel);
-    uniforms.playerVelocity = glm::vec4(playerVel, playerSpeed);
+    params.playerVelocity = glm::vec4(playerVel, playerSpeed);
 
     // Spawn region
-    uniforms.spawnRegionMin = glm::vec4(spawnRegionMin, 0.0f);
-    uniforms.spawnRegionMax = glm::vec4(spawnRegionMax, 0.0f);
+    params.spawnRegionMin = glm::vec4(spawnRegionMin, 0.0f);
+    params.spawnRegionMax = glm::vec4(spawnRegionMax, 0.0f);
 
     // Confetti spawn parameters
-    uniforms.confettiSpawnPos = glm::vec4(confettiSpawnPosition, confettiConeAngle);
-    uniforms.confettiSpawnCount = confettiToSpawn;
-    uniforms.confettiVelocity = confettiSpawnVelocity;
+    params.confettiSpawnPos = glm::vec4(confettiSpawnPosition, confettiConeAngle);
+    params.confettiSpawnCount = confettiToSpawn;
+    params.confettiVelocity = confettiSpawnVelocity;
 
     // General parameters
-    uniforms.groundLevel = groundLevel;
-    uniforms.deltaTime = deltaTime;
-    uniforms.time = totalTime;
-    uniforms.maxDrawDistance = 60.0f;
+    params.groundLevel = groundLevel;
+    params.deltaTime = deltaTime;
+    params.time = totalTime;
 
     // Disruption parameters
-    uniforms.disruptionRadius = settings.leafDisruptionRadius;
-    uniforms.disruptionStrength = settings.leafDisruptionStrength;
-    uniforms.gustThreshold = settings.leafGustLiftThreshold;
+    params.disruptionRadius = settings.leafDisruptionRadius;
+    params.disruptionStrength = settings.leafDisruptionStrength;
+    params.gustThreshold = settings.leafGustLiftThreshold;
 
     // Target counts based on intensity
-    uniforms.targetFallingCount = leafIntensity * 5000.0f;   // 0-5000 falling leaves
-    uniforms.targetGroundedCount = leafIntensity * 20000.0f; // 0-20000 grounded leaves
+    params.targetFallingCount = leafIntensity * 5000.0f;   // 0-5000 falling leaves
+    params.targetGroundedCount = leafIntensity * 20000.0f; // 0-20000 grounded leaves
 
     // Terrain parameters
-    uniforms.terrainSize = terrainSize;
-    uniforms.terrainHeightScale = terrainHeightScale;
+    params.terrainSize = terrainSize;
+    params.terrainHeightScale = terrainHeightScale;
 
-    memcpy(uniformBuffers.mappedPointers[frameIndex], &uniforms, sizeof(LeafUniforms));
+    memcpy(paramsBuffers.mappedPointers[frameIndex], &params, sizeof(LeafPhysicsParams));
 
     // Update displacement region to follow camera (same as grass system)
     displacementRegionCenter = glm::vec2(cameraPos.x, cameraPos.z);
@@ -526,10 +546,11 @@ void LeafSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos,
 void LeafSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex, float time, float deltaTime) {
     uint32_t writeSet = (*particleSystem)->getComputeBufferSet();
 
-    // Update compute descriptor set to use this frame's uniform, displacement region, and tile info buffers
+    // Update compute descriptor set to use this frame's uniform, displacement region, params, and tile info buffers
     DescriptorManager::SetWriter writer(getDevice(), (*particleSystem)->getComputeDescriptorSet(writeSet));
-    writer.writeBuffer(3, uniformBuffers.buffers[frameIndex], 0, sizeof(LeafUniforms))
-          .writeBuffer(7, displacementRegionBuffers.buffers[frameIndex], 0, sizeof(glm::vec4));
+    writer.writeBuffer(3, uniformBuffers.buffers[frameIndex], 0, sizeof(CullingUniforms))
+          .writeBuffer(7, displacementRegionBuffers.buffers[frameIndex], 0, sizeof(glm::vec4))
+          .writeBuffer(10, paramsBuffers.buffers[frameIndex], 0, sizeof(LeafPhysicsParams));
 
     // Update tile info buffer to the correct frame's buffer (triple-buffered to avoid CPU-GPU sync)
     if (tileInfoBuffers[frameIndex % 3] != VK_NULL_HANDLE) {
