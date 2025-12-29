@@ -290,14 +290,15 @@ void SnowMaskSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) {
     }
 
     // Bind compute pipeline and descriptor set
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, getComputePipelineHandles().pipeline);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                            getComputePipelineHandles().pipelineLayout, 0, 1,
-                            &computeDescriptorSets[frameIndex], 0, nullptr);
+    vk::CommandBuffer vkCmd(cmd);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, getComputePipelineHandles().pipeline);
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute,
+                             getComputePipelineHandles().pipelineLayout, 0,
+                             vk::DescriptorSet(computeDescriptorSets[frameIndex]), {});
 
     // Dispatch: 512x512 / 16x16 = 32x32 workgroups
     uint32_t workgroupCount = SNOW_MASK_SIZE / WORKGROUP_SIZE;
-    vkCmdDispatch(cmd, workgroupCount, workgroupCount, 1);
+    vkCmd.dispatch(workgroupCount, workgroupCount, 1);
 
     // Transition snow mask to shader read optimal for fragment shaders
     Barriers::imageComputeToSampling(cmd, snowMaskImage,

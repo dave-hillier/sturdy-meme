@@ -6,6 +6,7 @@
 #include "shaders/bindings.h"
 
 #include <SDL3/SDL.h>
+#include <vulkan/vulkan.hpp>
 #include <array>
 #include <cstring>
 
@@ -623,14 +624,15 @@ void ImpostorCullSystem::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
                          0, 1, &fillBarrier, 0, nullptr, 0, nullptr);
 
     // Bind pipeline and descriptor set
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullPipeline_.get());
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullPipelineLayout_.get(),
-                           0, 1, &cullDescriptorSets_[frameIndex], 0, nullptr);
+    vk::CommandBuffer vkCmd(cmd);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, cullPipeline_.get());
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, cullPipelineLayout_.get(),
+                             0, vk::DescriptorSet(cullDescriptorSets_[frameIndex]), {});
 
     // Dispatch compute shader
     // Each workgroup processes 256 trees
     uint32_t workgroupCount = (treeCount_ + 255) / 256;
-    vkCmdDispatch(cmd, workgroupCount, 1, 1);
+    vkCmd.dispatch(workgroupCount, 1, 1);
 
     // Memory barrier for compute output -> indirect draw
     VkMemoryBarrier computeBarrier{};

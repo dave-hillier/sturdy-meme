@@ -412,9 +412,10 @@ void WaterDisplacement::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) 
     Barriers::prepareImageForCompute(cmd, displacementMap);
 
     // Bind compute pipeline
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline.get());
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayout.get(),
-                           0, 1, &descriptorSets[frameIndex], 0, nullptr);
+    vk::CommandBuffer vkCmd(cmd);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, computePipeline.get());
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, computePipelineLayout.get(),
+                             0, vk::DescriptorSet(descriptorSets[frameIndex]), {});
 
     // Push constants
     DisplacementPushConstants pushConstants{};
@@ -424,14 +425,14 @@ void WaterDisplacement::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) 
     pushConstants.numParticles = static_cast<uint32_t>(particles.size());
     pushConstants.decayRate = decayRate;
 
-    vkCmdPushConstants(cmd, computePipelineLayout.get(), VK_SHADER_STAGE_COMPUTE_BIT,
-                      0, sizeof(pushConstants), &pushConstants);
+    vkCmd.pushConstants<DisplacementPushConstants>(computePipelineLayout.get(),
+                                                    vk::ShaderStageFlagBits::eCompute, 0, pushConstants);
 
     // Dispatch compute shader
     uint32_t groupSize = 16;
     uint32_t groupsX = (displacementResolution + groupSize - 1) / groupSize;
     uint32_t groupsY = (displacementResolution + groupSize - 1) / groupSize;
-    vkCmdDispatch(cmd, groupsX, groupsY, 1);
+    vkCmd.dispatch(groupsX, groupsY, 1);
 
     // Transition to shader read for water shader sampling
     Barriers::imageComputeToSampling(cmd, displacementMap,

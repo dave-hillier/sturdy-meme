@@ -2,6 +2,7 @@
 #include "VulkanResourceFactory.h"
 #include "VulkanBarriers.h"
 #include <SDL3/SDL.h>
+#include <vulkan/vulkan.hpp>
 #include <cstring>
 #include <unordered_map>
 #include <cmath>
@@ -296,17 +297,18 @@ void TerrainMeshlet::recordUpload(VkCommandBuffer cmd, uint32_t frameIndex) {
     }
 
     // Record copy commands: staging -> device-local
-    VkBufferCopy vertexCopy{};
-    vertexCopy.srcOffset = 0;
-    vertexCopy.dstOffset = 0;
-    vertexCopy.size = vertexDataSize;
-    vkCmdCopyBuffer(cmd, vertexStagingBuffers_[bufferIndex].get(), vertexBuffer_.get(), 1, &vertexCopy);
+    vk::CommandBuffer vkCmd(cmd);
+    auto vertexCopy = vk::BufferCopy{}
+        .setSrcOffset(0)
+        .setDstOffset(0)
+        .setSize(vertexDataSize);
+    vkCmd.copyBuffer(vertexStagingBuffers_[bufferIndex].get(), vertexBuffer_.get(), vertexCopy);
 
-    VkBufferCopy indexCopy{};
-    indexCopy.srcOffset = 0;
-    indexCopy.dstOffset = 0;
-    indexCopy.size = indexDataSize;
-    vkCmdCopyBuffer(cmd, indexStagingBuffers_[bufferIndex].get(), indexBuffer_.get(), 1, &indexCopy);
+    auto indexCopy = vk::BufferCopy{}
+        .setSrcOffset(0)
+        .setDstOffset(0)
+        .setSize(indexDataSize);
+    vkCmd.copyBuffer(indexStagingBuffers_[bufferIndex].get(), indexBuffer_.get(), indexCopy);
 
     // Barrier: transfer -> vertex input (so the buffers are ready for drawing)
     Barriers::transferToVertexInput(cmd);

@@ -741,6 +741,8 @@ void OceanFFT::regenerateSpectrum(VkCommandBuffer cmd) {
 }
 
 void OceanFFT::recordSpectrumGeneration(VkCommandBuffer cmd, Cascade& cascade, uint32_t seed) {
+    vk::CommandBuffer vkCmd(cmd);
+
     // Transition images to general layout for compute writes
     Barriers::BarrierBatch(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT)
         .imageTransition(cascade.h0Spectrum.get(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
@@ -751,14 +753,14 @@ void OceanFFT::recordSpectrumGeneration(VkCommandBuffer cmd, Cascade& cascade, u
 
     // Bind pipeline and descriptor set
     int cascadeIndex = static_cast<int>(&cascade - &cascades[0]);
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, spectrumPipeline.get());
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, spectrumPipelineLayout.get(),
-                            0, 1, &spectrumDescSets[cascadeIndex], 0, nullptr);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, spectrumPipeline.get());
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, spectrumPipelineLayout.get(),
+                             0, spectrumDescSets[cascadeIndex], {});
 
     // Dispatch
     uint32_t groupSize = 16;
     uint32_t groupCount = (params.resolution + groupSize - 1) / groupSize;
-    vkCmdDispatch(cmd, groupCount, groupCount, 1);
+    vkCmd.dispatch(groupCount, groupCount, 1);
 
     // Transition to shader read for time evolution
     Barriers::BarrierBatch(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT)
@@ -770,6 +772,7 @@ void OceanFFT::recordSpectrumGeneration(VkCommandBuffer cmd, Cascade& cascade, u
 }
 
 void OceanFFT::recordTimeEvolution(VkCommandBuffer cmd, Cascade& cascade, float time) {
+    vk::CommandBuffer vkCmd(cmd);
     int cascadeIndex = static_cast<int>(&cascade - &cascades[0]);
 
     // Transition output images to general layout
@@ -783,9 +786,9 @@ void OceanFFT::recordTimeEvolution(VkCommandBuffer cmd, Cascade& cascade, float 
         .submit();
 
     // Bind pipeline
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, timeEvolutionPipeline.get());
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, timeEvolutionPipelineLayout.get(),
-                            0, 1, &timeEvolutionDescSets[cascadeIndex], 0, nullptr);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, timeEvolutionPipeline.get());
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, timeEvolutionPipelineLayout.get(),
+                             0, timeEvolutionDescSets[cascadeIndex], {});
 
     // Push constants
     OceanTimeEvolutionPushConstants pushConstants = {
@@ -795,13 +798,13 @@ void OceanFFT::recordTimeEvolution(VkCommandBuffer cmd, Cascade& cascade, float 
         cascade.config.choppiness
     };
 
-    vkCmdPushConstants(cmd, timeEvolutionPipelineLayout.get(), VK_SHADER_STAGE_COMPUTE_BIT,
-                       0, sizeof(pushConstants), &pushConstants);
+    vkCmd.pushConstants<OceanTimeEvolutionPushConstants>(
+        timeEvolutionPipelineLayout.get(), vk::ShaderStageFlagBits::eCompute, 0, pushConstants);
 
     // Dispatch
     uint32_t groupSize = 16;
     uint32_t groupCount = (params.resolution + groupSize - 1) / groupSize;
-    vkCmdDispatch(cmd, groupCount, groupCount, 1);
+    vkCmd.dispatch(groupCount, groupCount, 1);
 }
 
 void OceanFFT::recordFFT(VkCommandBuffer cmd, Cascade& cascade,
@@ -835,7 +838,8 @@ void OceanFFT::recordFFT(VkCommandBuffer cmd, Cascade& cascade,
     VkImage currentOutput = cascade.fftPing.get();
     VkImageView currentOutputView = cascade.fftPingView.get();
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, fftPipeline.get());
+    vk::CommandBuffer vkCmd(cmd);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, fftPipeline.get());
 
     // Horizontal FFT passes
     for (int stage = 0; stage < numStages; stage++) {
@@ -844,15 +848,15 @@ void OceanFFT::recordFFT(VkCommandBuffer cmd, Cascade& cascade,
             .writeStorageImage(Bindings::OCEAN_FFT_OUTPUT, currentOutputView)
             .update();
 
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, fftPipelineLayout.get(),
-                                0, 1, &fftDescSet, 0, nullptr);
+        vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, fftPipelineLayout.get(),
+                                 0, fftDescSet, {});
 
         // Push constants: stage, direction (0=horizontal), resolution, inverse (1=IFFT)
         OceanFFTPushConstants pushData = {stage, 0, params.resolution, 1};
-        vkCmdPushConstants(cmd, fftPipelineLayout.get(), VK_SHADER_STAGE_COMPUTE_BIT,
-                           0, sizeof(pushData), &pushData);
+        vkCmd.pushConstants<OceanFFTPushConstants>(
+            fftPipelineLayout.get(), vk::ShaderStageFlagBits::eCompute, 0, pushData);
 
-        vkCmdDispatch(cmd, groupCount, groupCount, 1);
+        vkCmd.dispatch(groupCount, groupCount, 1);
 
         // Barrier between stages
         Barriers::computeToCompute(cmd);
@@ -883,15 +887,15 @@ void OceanFFT::recordFFT(VkCommandBuffer cmd, Cascade& cascade,
             .writeStorageImage(Bindings::OCEAN_FFT_OUTPUT, currentOutputView)
             .update();
 
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, fftPipelineLayout.get(),
-                                0, 1, &fftDescSet, 0, nullptr);
+        vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, fftPipelineLayout.get(),
+                                 0, fftDescSet, {});
 
         // Push constants: stage, direction (1=vertical), resolution, inverse
         OceanFFTPushConstants pushData = {stage, 1, params.resolution, 1};
-        vkCmdPushConstants(cmd, fftPipelineLayout.get(), VK_SHADER_STAGE_COMPUTE_BIT,
-                           0, sizeof(pushData), &pushData);
+        vkCmd.pushConstants<OceanFFTPushConstants>(
+            fftPipelineLayout.get(), vk::ShaderStageFlagBits::eCompute, 0, pushData);
 
-        vkCmdDispatch(cmd, groupCount, groupCount, 1);
+        vkCmd.dispatch(groupCount, groupCount, 1);
 
         Barriers::computeToCompute(cmd);
 
@@ -932,9 +936,10 @@ void OceanFFT::recordDisplacementGeneration(VkCommandBuffer cmd, Cascade& cascad
         .update();
 
     // Bind and dispatch
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, displacementPipeline.get());
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, displacementPipelineLayout.get(),
-                            0, 1, &displacementDescSets[cascadeIndex], 0, nullptr);
+    vk::CommandBuffer vkCmd(cmd);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, displacementPipeline.get());
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, displacementPipelineLayout.get(),
+                             0, displacementDescSets[cascadeIndex], {});
 
     // Push constants
     OceanDisplacementPushConstants pushConstants = {
@@ -946,12 +951,12 @@ void OceanFFT::recordDisplacementGeneration(VkCommandBuffer cmd, Cascade& cascad
         params.normalStrength
     };
 
-    vkCmdPushConstants(cmd, displacementPipelineLayout.get(), VK_SHADER_STAGE_COMPUTE_BIT,
-                       0, sizeof(pushConstants), &pushConstants);
+    vkCmd.pushConstants<OceanDisplacementPushConstants>(
+        displacementPipelineLayout.get(), vk::ShaderStageFlagBits::eCompute, 0, pushConstants);
 
     uint32_t groupSize = 16;
     uint32_t groupCount = (params.resolution + groupSize - 1) / groupSize;
-    vkCmdDispatch(cmd, groupCount, groupCount, 1);
+    vkCmd.dispatch(groupCount, groupCount, 1);
 
     // Transition outputs to shader read
     Barriers::BarrierBatch(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,

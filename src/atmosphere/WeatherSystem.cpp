@@ -6,6 +6,7 @@
 #include "PipelineBuilder.h"
 #include "VulkanBarriers.h"
 #include <SDL3/SDL.h>
+#include <vulkan/vulkan.hpp>
 #include <cstring>
 #include <algorithm>
 #include <array>
@@ -416,21 +417,22 @@ void WeatherSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameInd
 
     // Dispatch weather compute shader
     auto& computePipeline = getComputePipelineHandles();
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline.pipeline);
+    vk::CommandBuffer vkCmd(cmd);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, computePipeline.pipeline);
     VkDescriptorSet computeSet = (*particleSystem)->getComputeDescriptorSet(writeSet);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                            computePipeline.pipelineLayout, 0, 1,
-                            &computeSet, 0, nullptr);
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute,
+                             computePipeline.pipelineLayout, 0,
+                             vk::DescriptorSet(computeSet), {});
 
     WeatherPushConstants pushConstants{};
     pushConstants.time = time;
     pushConstants.deltaTime = deltaTime;
-    vkCmdPushConstants(cmd, computePipeline.pipelineLayout,
-                       VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(WeatherPushConstants), &pushConstants);
+    vkCmd.pushConstants<WeatherPushConstants>(computePipeline.pipelineLayout,
+                                               vk::ShaderStageFlagBits::eCompute, 0, pushConstants);
 
     // Dispatch: ceil(MAX_PARTICLES / WORKGROUP_SIZE) workgroups
     uint32_t workgroupCount = (MAX_PARTICLES + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-    vkCmdDispatch(cmd, workgroupCount, 1, 1);
+    vkCmd.dispatch(workgroupCount, 1, 1);
 
     // Memory barrier: compute write -> vertex shader read and indirect read
     Barriers::computeToVertexAndIndirectDraw(cmd);
@@ -449,22 +451,24 @@ void WeatherSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float t
     // This eliminates per-frame vkUpdateDescriptorSets calls for the renderer UBO
 
     auto& graphicsPipeline = getGraphicsPipelineHandles();
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline.pipeline);
+    vk::CommandBuffer vkCmd(cmd);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline.pipeline);
 
     // Set dynamic viewport and scissor to handle window resize
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = static_cast<float>(getExtent().width);
-    viewport.height = static_cast<float>(getExtent().height);
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(cmd, 0, 1, &viewport);
+    auto viewport = vk::Viewport{}
+        .setX(0.0f)
+        .setY(0.0f)
+        .setWidth(static_cast<float>(getExtent().width))
+        .setHeight(static_cast<float>(getExtent().height))
+        .setMinDepth(0.0f)
+        .setMaxDepth(1.0f);
+    vkCmd.setViewport(0, viewport);
 
-    VkRect2D scissor{};
-    scissor.offset = {0, 0};
-    scissor.extent = getExtent();
-    vkCmdSetScissor(cmd, 0, 1, &scissor);
+    VkExtent2D ext = getExtent();
+    auto scissor = vk::Rect2D{}
+        .setOffset({0, 0})
+        .setExtent(vk::Extent2D{ext.width, ext.height});
+    vkCmd.setScissor(0, scissor);
 
     VkDescriptorSet graphicsSet = (*particleSystem)->getGraphicsDescriptorSet(readSet);
 
@@ -475,20 +479,20 @@ void WeatherSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float t
                                 graphicsPipeline.pipelineLayout, 0, 1,
                                 &graphicsSet, 1, &dynamicOffset);
     } else {
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                graphicsPipeline.pipelineLayout, 0, 1,
-                                &graphicsSet, 0, nullptr);
+        vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+                                 graphicsPipeline.pipelineLayout, 0,
+                                 vk::DescriptorSet(graphicsSet), {});
     }
 
     WeatherPushConstants pushConstants{};
     pushConstants.time = time;
     pushConstants.deltaTime = 0.0f;  // Not needed for rendering
-    vkCmdPushConstants(cmd, graphicsPipeline.pipelineLayout,
-                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                       0, sizeof(WeatherPushConstants), &pushConstants);
+    vkCmd.pushConstants<WeatherPushConstants>(graphicsPipeline.pipelineLayout,
+                                               vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
+                                               0, pushConstants);
 
     // Indirect draw: 4 vertices per particle (quad)
-    vkCmdDrawIndirect(cmd, indirectBuffers.buffers[readSet], 0, 1, sizeof(VkDrawIndirectCommand));
+    vkCmd.drawIndirect(indirectBuffers.buffers[readSet], 0, 1, sizeof(VkDrawIndirectCommand));
 }
 
 void WeatherSystem::advanceBufferSet() { (*particleSystem)->advanceBufferSet(); }

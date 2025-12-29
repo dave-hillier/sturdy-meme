@@ -435,7 +435,8 @@ void HiZSystem::recordPyramidGeneration(VkCommandBuffer cmd, uint32_t frameIndex
     // Transition Hi-Z pyramid to general for writing
     Barriers::prepareImageForCompute(cmd, hiZPyramid.image.get(), mipLevelCount, 1);
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pyramidPipeline.get());
+    vk::CommandBuffer vkCmd(cmd);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, pyramidPipeline.get());
 
     // Generate each mip level
     uint32_t srcWidth = extent.width;
@@ -459,16 +460,16 @@ void HiZSystem::recordPyramidGeneration(VkCommandBuffer cmd, uint32_t frameIndex
             mip == 0 ? 1u : 0u
         };
 
-        vkCmdPushConstants(cmd, pyramidPipelineLayout.get(), VK_SHADER_STAGE_COMPUTE_BIT,
-                           0, sizeof(pushConstants), &pushConstants);
+        vkCmd.pushConstants<HiZPyramidPushConstants>(
+            pyramidPipelineLayout.get(), vk::ShaderStageFlagBits::eCompute, 0, pushConstants);
 
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                                pyramidPipelineLayout.get(), 0, 1, &pyramidDescSets[mip], 0, nullptr);
+        vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute,
+                                 pyramidPipelineLayout.get(), 0, vk::DescriptorSet(pyramidDescSets[mip]), {});
 
         // Dispatch
         uint32_t groupsX = (dstWidth + 7) / 8;
         uint32_t groupsY = (dstHeight + 7) / 8;
-        vkCmdDispatch(cmd, groupsX, groupsY, 1);
+        vkCmd.dispatch(groupsX, groupsY, 1);
 
         // Barrier between mip levels
         if (mip < mipLevelCount - 1) {
@@ -497,13 +498,14 @@ void HiZSystem::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex) {
     Barriers::clearBufferForComputeReadWrite(cmd, drawCountBuffers.buffers[frameIndex]);
 
     // Bind culling pipeline and descriptor set
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullingPipeline.get());
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                            cullingPipelineLayout.get(), 0, 1, &cullingDescSets[frameIndex], 0, nullptr);
+    vk::CommandBuffer vkCmd(cmd);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, cullingPipeline.get());
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute,
+                             cullingPipelineLayout.get(), 0, vk::DescriptorSet(cullingDescSets[frameIndex]), {});
 
     // Dispatch
     uint32_t groupCount = (objectCount + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-    vkCmdDispatch(cmd, groupCount, 1, 1);
+    vkCmd.dispatch(groupCount, 1, 1);
 
     barrierCullingToIndirectDraw(cmd);
 }

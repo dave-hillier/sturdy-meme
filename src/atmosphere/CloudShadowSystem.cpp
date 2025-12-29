@@ -300,13 +300,13 @@ void CloudShadowSystem::recordUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
         VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_SHADER_WRITE_BIT);
 
     // Bind pipeline and descriptor set
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline.get());
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                            pipelineLayout.get(), 0, 1, &descriptorSets[frameIndex], 0, nullptr);
+    vk::CommandBuffer vkCmd(cmd);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, computePipeline.get());
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute,
+                             pipelineLayout.get(), 0, vk::DescriptorSet(descriptorSets[frameIndex]), {});
 
     // Push current quadrant index for temporal spreading
-    vkCmdPushConstants(cmd, pipelineLayout.get(), VK_SHADER_STAGE_COMPUTE_BIT,
-                       0, sizeof(uint32_t), &quadrantIndex);
+    vkCmd.pushConstants<uint32_t>(pipelineLayout.get(), vk::ShaderStageFlagBits::eCompute, 0, quadrantIndex);
 
     // Cycle quadrant for next frame (0->1->2->3->0...)
     quadrantIndex = (quadrantIndex + 1) % 4;
@@ -314,7 +314,7 @@ void CloudShadowSystem::recordUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
     // Dispatch compute shader (16x16 workgroups)
     uint32_t groupCountX = (SHADOW_MAP_SIZE + 15) / 16;
     uint32_t groupCountY = (SHADOW_MAP_SIZE + 15) / 16;
-    vkCmdDispatch(cmd, groupCountX, groupCountY, 1);
+    vkCmd.dispatch(groupCountX, groupCountY, 1);
 
     // Transition shadow map to shader read for fragment shaders
     Barriers::imageComputeToSampling(cmd, shadowMap_.get(),

@@ -440,26 +440,27 @@ void FroxelSystem::recordFroxelUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
     }
 
     // Dispatch froxel update compute shader
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, froxelUpdatePipeline.get());
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, froxelPipelineLayout.get(),
-                            0, 1, &froxelDescriptorSets[frameIndex], 0, nullptr);
+    vk::CommandBuffer vkCmd(cmd);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, froxelUpdatePipeline.get());
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, froxelPipelineLayout.get(),
+                             0, vk::DescriptorSet(froxelDescriptorSets[frameIndex]), {});
 
     // Dispatch with 4x4x4 local size
     uint32_t groupsX = (FROXEL_WIDTH + 3) / 4;
     uint32_t groupsY = (FROXEL_HEIGHT + 3) / 4;
     uint32_t groupsZ = (FROXEL_DEPTH + 3) / 4;
-    vkCmdDispatch(cmd, groupsX, groupsY, groupsZ);
+    vkCmd.dispatch(groupsX, groupsY, groupsZ);
 
     // Barrier between update and integration - wait for current volume write
     Barriers::computeToCompute(cmd);
 
     // Dispatch integration pass
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, integrationPipeline.get());
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, integrationPipeline.get());
 
     // Integration dispatches per XY column, iterating through Z
     groupsX = (FROXEL_WIDTH + 3) / 4;
     groupsY = (FROXEL_HEIGHT + 3) / 4;
-    vkCmdDispatch(cmd, groupsX, groupsY, 1);
+    vkCmd.dispatch(groupsX, groupsY, 1);
 
     // Transition integrated volume to shader read for fragment sampling
     Barriers::imageComputeToSampling(cmd, integratedVolume_.get());

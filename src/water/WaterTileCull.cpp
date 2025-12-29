@@ -4,6 +4,7 @@
 #include "VulkanResourceFactory.h"
 #include "DescriptorManager.h"
 #include <SDL3/SDL.h>
+#include <vulkan/vulkan.hpp>
 #include <array>
 #include <cstring>
 
@@ -328,16 +329,17 @@ void WaterTileCull::recordTileCull(VkCommandBuffer cmd, uint32_t frameIndex,
     pc.farPlane = 1000.0f;
 
     // Bind pipeline
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline.get());
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                            computePipelineLayout.get(), 0, 1, &descriptorSets[frameIndex], 0, nullptr);
-    vkCmdPushConstants(cmd, computePipelineLayout.get(), VK_SHADER_STAGE_COMPUTE_BIT,
-                       0, sizeof(TileCullPushConstants), &pc);
+    vk::CommandBuffer vkCmd(cmd);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, computePipeline.get());
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, computePipelineLayout.get(),
+                             0, vk::DescriptorSet(descriptorSets[frameIndex]), {});
+    vkCmd.pushConstants<TileCullPushConstants>(computePipelineLayout.get(),
+                                                vk::ShaderStageFlagBits::eCompute, 0, pc);
 
     // Dispatch one thread per tile
     uint32_t groupsX = (tileCount.x + 7) / 8;
     uint32_t groupsY = (tileCount.y + 7) / 8;
-    vkCmdDispatch(cmd, groupsX, groupsY, 1);
+    vkCmd.dispatch(groupsX, groupsY, 1);
 
     barrierCullResultsForDrawAndTransfer(cmd, frameIndex);
 

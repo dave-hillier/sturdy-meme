@@ -289,15 +289,16 @@ void VolumetricSnowSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameInde
     barrierCascadesForCompute(cmd);
 
     // Bind compute pipeline and descriptor set
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, getComputePipelineHandles().pipeline);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                            getComputePipelineHandles().pipelineLayout, 0, 1,
-                            &computeDescriptorSets[frameIndex], 0, nullptr);
+    vk::CommandBuffer vkCmd(cmd);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, getComputePipelineHandles().pipeline);
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute,
+                             getComputePipelineHandles().pipelineLayout, 0,
+                             vk::DescriptorSet(computeDescriptorSets[frameIndex]), {});
 
     // Dispatch for each cascade (same shader, different region in uniforms)
     // All cascades are the same resolution so same dispatch count
     uint32_t workgroupCount = SNOW_CASCADE_SIZE / WORKGROUP_SIZE;
-    vkCmdDispatch(cmd, workgroupCount, workgroupCount, NUM_SNOW_CASCADES);
+    vkCmd.dispatch(workgroupCount, workgroupCount, NUM_SNOW_CASCADES);
 
     barrierCascadesForSampling(cmd);
 

@@ -4,6 +4,7 @@
 #include "ShaderLoader.h"
 #include "Bindings.h"
 #include <SDL3/SDL_log.h>
+#include <vulkan/vulkan.hpp>
 #include <cstring>
 
 std::unique_ptr<TreeBranchCulling> TreeBranchCulling::create(const InitInfo& info) {
@@ -415,13 +416,14 @@ void TreeBranchCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
     vmaUnmapMemory(allocator_, uniformBuffers_.allocations[frameIndex]);
 
     // Bind pipeline and descriptor set
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullPipeline_.get());
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullPipelineLayout_.get(),
-                            0, 1, &cullDescriptorSets_[frameIndex], 0, nullptr);
+    vk::CommandBuffer vkCmd(cmd);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, cullPipeline_.get());
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, cullPipelineLayout_.get(),
+                             0, vk::DescriptorSet(cullDescriptorSets_[frameIndex]), {});
 
     // Dispatch: one workgroup per 256 trees
     uint32_t numWorkgroups = (numTrees_ + 255) / 256;
-    vkCmdDispatch(cmd, numWorkgroups, 1, 1);
+    vkCmd.dispatch(numWorkgroups, 1, 1);
 
     // Memory barrier: compute writes -> graphics reads
     VkMemoryBarrier barrier{};
