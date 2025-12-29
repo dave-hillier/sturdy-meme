@@ -54,8 +54,9 @@ void main() {
     vec3 viewDir = toCamera / dist;
 
     // Apply tree rotation to view direction (rotate view around Y axis)
-    float cosRot = cos(-rotation);
-    float sinRot = sin(-rotation);
+    // Positive rotation since billboard UVs are already mirrored
+    float cosRot = cos(rotation);
+    float sinRot = sin(rotation);
     vec3 rotatedViewDir = vec3(
         viewDir.x * cosRot - viewDir.z * sinRot,
         viewDir.y,
@@ -136,6 +137,7 @@ void main() {
     fragLocalUV = inTexCoord;
 
     // Octahedral mode: compute which cell we're viewing from
+    // rotatedViewDir accounts for tree's Y-axis rotation to select correct atlas frame
     vec2 octaUV = hemiOctaEncode(rotatedViewDir);
     fragOctaUV = octaUV;
 

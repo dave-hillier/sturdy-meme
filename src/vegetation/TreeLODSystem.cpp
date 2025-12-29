@@ -125,10 +125,10 @@ bool TreeLODSystem::createBillboardMesh() {
     };
 
     std::array<BillboardVertex, 4> vertices = {{
-        {{-0.5f, 0.0f, 0.0f}, {0.0f, 1.0f}},  // Bottom-left
-        {{ 0.5f, 0.0f, 0.0f}, {1.0f, 1.0f}},  // Bottom-right
-        {{ 0.5f, 1.0f, 0.0f}, {1.0f, 0.0f}},  // Top-right
-        {{-0.5f, 1.0f, 0.0f}, {0.0f, 0.0f}},  // Top-left
+        {{-0.5f, 0.0f, 0.0f}, {1.0f, 1.0f}},  // Bottom-left (U mirrored for billboard facing)
+        {{ 0.5f, 0.0f, 0.0f}, {0.0f, 1.0f}},  // Bottom-right (U mirrored for billboard facing)
+        {{ 0.5f, 1.0f, 0.0f}, {0.0f, 0.0f}},  // Top-right (U mirrored for billboard facing)
+        {{-0.5f, 1.0f, 0.0f}, {1.0f, 0.0f}},  // Top-left (U mirrored for billboard facing)
     }};
 
     std::array<uint32_t, 6> indices = {0, 1, 2, 2, 3, 0};
