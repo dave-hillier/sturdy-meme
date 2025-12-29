@@ -14,7 +14,7 @@ layout(binding = BINDING_ATMO_MULTISCATTER) uniform sampler2D multiScatterLUT;
 
 layout(binding = BINDING_ATMO_UNIFORMS) uniform AtmosphereUniforms {
     AtmosphereParams params;
-    vec4 sunDirection;
+    vec4 toSunDirection;
     vec4 cameraPosition;  // w = camera altitude
     float padding[2];
 } uAtmosphere;
@@ -74,7 +74,7 @@ void main() {
     viewDir = normalize(viewDir);
 
     // Camera position
-    vec3 sunDir = normalize(uAtmosphere.sunDirection.xyz);
+    vec3 sunDir = normalize(uAtmosphere.toSunDirection.xyz);
     float cameraAltitude = uAtmosphere.cameraPosition.w;
     float r = uAtmosphere.params.planetRadius + cameraAltitude;
     vec3 cameraPos = vec3(0.0, r, 0.0);

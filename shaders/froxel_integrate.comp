@@ -20,7 +20,7 @@ layout(binding = BINDING_FROXEL_UNIFORMS) uniform FroxelUniforms {
     mat4 cascadeViewProj[NUM_CASCADES];  // Light-space matrices for shadow cascades
     vec4 cascadeSplits;                   // View-space split depths
     vec4 cameraPosition;
-    vec4 sunDirection;
+    vec4 toSunDirection;
     vec4 sunColor;
     vec4 fogParams;
     vec4 layerParams;

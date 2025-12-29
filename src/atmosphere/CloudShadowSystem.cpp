@@ -274,7 +274,7 @@ void CloudShadowSystem::recordUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
     // Update uniform buffer
     CloudShadowUniforms uniforms{};
     uniforms.worldToShadowUV = worldToShadowUV;
-    uniforms.sunDirection = glm::vec4(sunDir, sunIntensity);
+    uniforms.toSunDirection = glm::vec4(sunDir, sunIntensity);
     uniforms.windOffset = glm::vec4(windOffset, windTime);
     uniforms.shadowParams = glm::vec4(shadowIntensity, shadowSoftness,
                                        CLOUD_LAYER_BOTTOM, CLOUD_LAYER_TOP - CLOUD_LAYER_BOTTOM);

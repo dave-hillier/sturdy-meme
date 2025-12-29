@@ -92,8 +92,8 @@ void main() {
         vec3 baseColor = vec3(0.7, 0.8, 1.0);
 
         // Add highlight from sun/moon
-        vec3 sunDir = normalize(ubo.sunDirection.xyz);
-        float sunIntensity = ubo.sunDirection.w;
+        vec3 sunDir = normalize(ubo.toSunDirection.xyz);
+        float sunIntensity = ubo.toSunDirection.w;
 
         // Backlit effect when rain is between camera and light
         vec3 viewDir = normalize(ubo.cameraPosition.xyz - fragWorldPos);
@@ -134,7 +134,7 @@ void main() {
         color = baseColor * (ubo.ambientColor.rgb * 0.8 + vec3(0.2));
 
         // Sun contribution
-        float sunIntensity = ubo.sunDirection.w;
+        float sunIntensity = ubo.toSunDirection.w;
         color += baseColor * ubo.sunColor.rgb * sunIntensity * 0.3;
 
         // Moon contribution at night

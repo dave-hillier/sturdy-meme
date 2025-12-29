@@ -48,7 +48,7 @@ struct AtmosphereParams {
 // AtmosphereUniforms struct (manually defined since it contains nested AtmosphereParams)
 struct AtmosphereUniforms {
     AtmosphereParams params;
-    glm::vec4 sunDirection;  // xyz = sun dir, w = unused
+    glm::vec4 toSunDirection;  // xyz = direction toward sun, w = unused
     glm::vec4 cameraPosition; // xyz = camera pos, w = camera altitude
     float padding[2];
 };

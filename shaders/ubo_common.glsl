@@ -20,10 +20,8 @@ layout(set = 0, binding = UBO_BINDING) uniform UniformBufferObject {
     mat4 proj;
     mat4 cascadeViewProj[NUM_CASCADES];  // Per-cascade light matrices
     vec4 cascadeSplits;                   // View-space split depths
-    // Light direction convention: xyz points TOWARD the light source
-    // For lighting calculations, use L = normalize(sunDirection.xyz) directly
-    // The w component stores intensity (0-1)
-    vec4 sunDirection;
+    // Light direction: xyz points TOWARD the sun, w = intensity (0-1)
+    vec4 toSunDirection;
     vec4 moonDirection;
     vec4 sunColor;
     vec4 moonColor;                       // rgb = moon color, a = moon phase (0-1)

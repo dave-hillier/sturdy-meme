@@ -29,7 +29,7 @@ layout(binding = BINDING_IRRADIANCE_TRANSMITTANCE) uniform sampler2D transmittan
 
 layout(binding = BINDING_IRRADIANCE_UNIFORMS) uniform AtmosphereUniforms {
     AtmosphereParams params;
-    vec4 sunDirection;
+    vec4 toSunDirection;
     vec4 cameraPosition;
     float padding[2];
 } uAtmosphere;

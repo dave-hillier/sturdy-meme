@@ -161,7 +161,7 @@ void main() {
     }
 
     // Calculate shadow for sun (terrain + cloud shadows combined)
-    vec3 sunL = normalize(ubo.sunDirection.xyz);
+    vec3 sunL = normalize(ubo.toSunDirection.xyz);
     float terrainShadow = calculateCascadedShadow(
         fragWorldPos, N, sunL,
         ubo.view, ubo.cascadeSplits, ubo.cascadeViewProj,
@@ -179,7 +179,7 @@ void main() {
 
     // Sun lighting with shadow
     // Apply eclipse darkening - moon blocks sunlight during solar eclipse
-    float sunIntensity = ubo.sunDirection.w * (1.0 - ubo.eclipseAmount);
+    float sunIntensity = ubo.toSunDirection.w * (1.0 - ubo.eclipseAmount);
     vec3 sunLight = calculatePBR(N, V, sunL, ubo.sunColor.rgb, sunIntensity, albedo, shadow,
                                   roughness, metallic);
 

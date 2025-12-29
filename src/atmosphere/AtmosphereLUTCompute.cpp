@@ -78,7 +78,7 @@ void AtmosphereLUTSystem::computeSkyViewLUT(VkCommandBuffer cmd, const glm::vec3
     // Update uniform buffer (use frame 0's per-frame buffer for startup computation)
     AtmosphereUniforms uniforms{};
     uniforms.params = atmosphereParams;
-    uniforms.sunDirection = glm::vec4(sunDir, 0.0f);
+    uniforms.toSunDirection = glm::vec4(sunDir, 0.0f);
     uniforms.cameraPosition = glm::vec4(cameraPos, cameraAltitude);
     memcpy(skyViewUniformBuffers.mappedPointers[0], &uniforms, sizeof(AtmosphereUniforms));
 
@@ -122,7 +122,7 @@ void AtmosphereLUTSystem::updateSkyViewLUT(VkCommandBuffer cmd, uint32_t frameIn
     // Update per-frame uniform buffer with new sun direction (double-buffered)
     AtmosphereUniforms uniforms{};
     uniforms.params = atmosphereParams;
-    uniforms.sunDirection = glm::vec4(sunDir, 0.0f);
+    uniforms.toSunDirection = glm::vec4(sunDir, 0.0f);
     uniforms.cameraPosition = glm::vec4(cameraPos, cameraAltitude);
     memcpy(skyViewUniformBuffers.mappedPointers[frameIndex], &uniforms, sizeof(AtmosphereUniforms));
 

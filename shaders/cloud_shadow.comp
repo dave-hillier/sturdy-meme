@@ -21,7 +21,7 @@ layout(binding = BINDING_CLOUD_SHADOW_CLOUDMAP) uniform sampler2D cloudMapLUT;
 // Uniform buffer
 layout(binding = BINDING_CLOUD_SHADOW_UNIFORMS) uniform CloudShadowUniforms {
     mat4 worldToShadowUV;      // Transform world XZ to shadow map UV
-    vec4 sunDirection;          // xyz = sun direction (toward sun), w = intensity
+    vec4 toSunDirection;          // xyz = direction toward sun, w = intensity
     vec4 windOffset;            // xyz = wind offset for cloud animation, w = time
     vec4 shadowParams;          // x = intensity, y = softness, z = cloud height, w = cloud thickness
     vec4 worldBounds;           // xy = world min XZ, zw = world size XZ
@@ -242,7 +242,7 @@ void main() {
     vec3 worldPos = vec3(worldXZ.x, 0.0, worldXZ.y);  // Ground level
 
     // Get sun direction (toward sun)
-    vec3 sunDir = normalize(sunDirection.xyz);
+    vec3 sunDir = normalize(toSunDirection.xyz);
 
     // Compute cloud shadow at this position
     float shadow = computeCloudShadow(worldPos, sunDir);

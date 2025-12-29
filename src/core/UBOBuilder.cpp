@@ -100,7 +100,7 @@ UniformBufferObject UBOBuilder::buildUniformBufferData(
         cascadeSplitDepths[4]
     );
 
-    ubo.sunDirection = glm::vec4(lighting.sunDir, lighting.sunIntensity);
+    ubo.toSunDirection = glm::vec4(lighting.sunDir, lighting.sunIntensity);
     ubo.moonDirection = glm::vec4(lighting.moonDir, lighting.moonIntensity);
     ubo.sunColor = glm::vec4(lighting.sunColor, 1.0f);
     ubo.moonColor = glm::vec4(lighting.moonColor, lighting.moonPhase);  // Pass moon phase in alpha channel

@@ -20,7 +20,7 @@
 // Uniforms for cloud shadow compute shader (must match GLSL layout)
 struct CloudShadowUniforms {
     glm::mat4 worldToShadowUV;   // Transform world XZ to shadow map UV
-    glm::vec4 sunDirection;      // xyz = sun direction, w = intensity
+    glm::vec4 toSunDirection;      // xyz = direction toward sun, w = intensity
     glm::vec4 windOffset;        // xyz = wind offset for cloud animation, w = time
     glm::vec4 shadowParams;      // x = shadow intensity, y = softness, z = cloud height, w = cloud thickness
     glm::vec4 worldBounds;       // xy = world min XZ, zw = world size XZ

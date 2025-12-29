@@ -108,8 +108,8 @@ void main() {
     vec3 viewDir = normalize(ubo.cameraPosition.xyz - fragWorldPos);
 
     // Sun lighting
-    vec3 sunDir = normalize(ubo.sunDirection.xyz);
-    float sunIntensity = ubo.sunDirection.w;
+    vec3 sunDir = normalize(ubo.toSunDirection.xyz);
+    float sunIntensity = ubo.toSunDirection.w;
 
     // Diffuse (Lambert)
     float NdotL = dot(normal, sunDir);

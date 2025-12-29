@@ -1176,8 +1176,8 @@ FrameData Renderer::buildFrameData(const Camera& camera, float deltaTime, float 
 
     // Get sun direction from last computed UBO (already computed in updateUniformBuffer)
     UniformBufferObject* ubo = static_cast<UniformBufferObject*>(systems_->globalBuffers().uniformBuffers.mappedPointers[frameSync_.currentIndex()]);
-    frame.sunDirection = glm::normalize(glm::vec3(ubo->sunDirection));
-    frame.sunIntensity = ubo->sunDirection.w;
+    frame.sunDirection = glm::normalize(glm::vec3(ubo->toSunDirection));
+    frame.sunIntensity = ubo->toSunDirection.w;
 
     frame.playerPosition = playerPosition;
     frame.playerVelocity = playerVelocity;

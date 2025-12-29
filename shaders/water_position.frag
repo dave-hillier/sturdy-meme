@@ -22,7 +22,7 @@ layout(binding = BINDING_UBO) uniform UniformBufferObject {
     mat4 proj;
     mat4 cascadeViewProj[NUM_CASCADES];
     vec4 cascadeSplits;
-    vec4 sunDirection;
+    vec4 toSunDirection;
     vec4 moonDirection;
     vec4 sunColor;
     vec4 moonColor;

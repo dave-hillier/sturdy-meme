@@ -360,7 +360,7 @@ void FroxelSystem::recordFroxelUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
     ubo->cascadeSplits = cascadeSplits;
 
     ubo->cameraPosition = glm::vec4(cameraPos, 1.0f);
-    ubo->sunDirection = glm::vec4(sunDir, sunIntensity);
+    ubo->toSunDirection = glm::vec4(sunDir, sunIntensity);
     ubo->sunColor = glm::vec4(sunColor, 1.0f);
     ubo->fogParams = glm::vec4(fogBaseHeight, fogScaleHeight, fogDensity, fogAbsorption);
     ubo->layerParams = glm::vec4(layerHeight, layerThickness, layerDensity, 0.0f);

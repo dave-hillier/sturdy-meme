@@ -354,7 +354,7 @@ BlendedMaterial getBlendedMaterial(vec3 worldPos) {
 void main() {
     vec3 N = normalize(fragNormal);
     vec3 V = normalize(ubo.cameraPosition.xyz - fragWorldPos);
-    vec3 sunDir = normalize(ubo.sunDirection.xyz);
+    vec3 sunDir = normalize(ubo.toSunDirection.xyz);
     vec3 moonDir = normalize(ubo.moonDirection.xyz);
     float time = ubo.windDirectionAndSpeed.w;
 
@@ -498,7 +498,7 @@ void main() {
     baseColor = mix(baseColor, depthTint * waterTransmission, 0.5);
 
     // Sun color used for SSS and specular - calculate once
-    vec3 sunColor = ubo.sunColor.rgb * ubo.sunDirection.w;
+    vec3 sunColor = ubo.sunColor.rgb * ubo.toSunDirection.w;
 
     // =========================================================================
     // PHASE 17: Enhanced Subsurface Scattering (Sea of Thieves inspired)

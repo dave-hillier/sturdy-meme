@@ -12,7 +12,7 @@ layout(binding = BINDING_ATMO_OUTPUT_LUT, rgba16f) writeonly uniform image2D tra
 
 layout(binding = BINDING_ATMO_TRANSMITTANCE) uniform AtmosphereUniforms {
     AtmosphereParams params;
-    vec4 sunDirection;
+    vec4 toSunDirection;
     vec4 cameraPosition;
     float padding[2];
 } uAtmosphere;

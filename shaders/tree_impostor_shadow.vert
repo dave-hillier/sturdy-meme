@@ -40,7 +40,7 @@ void main() {
 
     // For shadows, orient billboard to face the sun (not the camera)
     // This gives a full shadow profile instead of a thin edge shadow
-    vec3 sunDir = normalize(ubo.sunDirection.xyz);  // Points toward sun
+    vec3 sunDir = normalize(ubo.toSunDirection.xyz);  // Points toward sun
 
     // Apply tree rotation to view direction (rotate view around Y axis)
     float cosRot = cos(-rotation);

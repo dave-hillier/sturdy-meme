@@ -96,7 +96,7 @@ void main() {
     }
 
     // === SUN LIGHTING ===
-    vec3 sunL = normalize(ubo.sunDirection.xyz);
+    vec3 sunL = normalize(ubo.toSunDirection.xyz);
     float terrainShadow = calculateCascadedShadow(
         fragWorldPos, N, sunL,
         ubo.view, ubo.cascadeSplits, ubo.cascadeViewProj,
@@ -128,7 +128,7 @@ void main() {
     // Subsurface scattering - light through grass blades when backlit
     vec3 sss = calculateSSS(sunL, V, N, ubo.sunColor.rgb, albedo, GRASS_SSS_STRENGTH);
 
-    vec3 sunLight = (albedo * sunDiffuse + specular + sss) * ubo.sunColor.rgb * ubo.sunDirection.w * shadow;
+    vec3 sunLight = (albedo * sunDiffuse + specular + sss) * ubo.sunColor.rgb * ubo.toSunDirection.w * shadow;
 
     // === MOON LIGHTING ===
     vec3 moonL = normalize(ubo.moonDirection.xyz);
@@ -137,7 +137,7 @@ void main() {
 
     // Add subsurface scattering for moonlight - fades in smoothly during twilight
     // Smooth transition: starts at sun altitude 10°, full effect at -6°
-    float twilightFactor = smoothstep(0.17, -0.1, ubo.sunDirection.y);
+    float twilightFactor = smoothstep(0.17, -0.1, ubo.toSunDirection.y);
     float moonVisibility = smoothstep(-0.09, 0.1, ubo.moonDirection.y);
     float moonSssFactor = twilightFactor * moonVisibility;
     vec3 moonSss = calculateSSS(moonL, V, N, ubo.moonColor.rgb, albedo, GRASS_SSS_STRENGTH) * 0.5 * moonSssFactor;
@@ -154,7 +154,7 @@ void main() {
     float NoV = max(dot(N, V), 0.0);
     float rimFresnel = pow(1.0 - NoV, 4.0);
     // Rim color based on sky/ambient
-    vec3 rimColor = ubo.ambientColor.rgb * 0.5 + ubo.sunColor.rgb * ubo.sunDirection.w * 0.2;
+    vec3 rimColor = ubo.ambientColor.rgb * 0.5 + ubo.sunColor.rgb * ubo.toSunDirection.w * 0.2;
     vec3 rimLight = rimColor * rimFresnel * 0.15;
 
     // === AMBIENT LIGHTING ===

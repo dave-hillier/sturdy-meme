@@ -581,7 +581,7 @@ ScatteringResult integrateAtmosphere(vec3 origin, vec3 dir, int sampleCount) {
     vec3 transmittance = vec3(1.0);
     vec3 inscatter = vec3(0.0);
 
-    vec3 sunDir = normalize(ubo.sunDirection.xyz);
+    vec3 sunDir = normalize(ubo.toSunDirection.xyz);
     vec3 moonDir = normalize(ubo.moonDirection.xyz);
     float cosViewSun = dot(dir, sunDir);
     float cosViewMoon = dot(dir, moonDir);
@@ -750,7 +750,7 @@ CloudResult marchClouds(vec3 origin, vec3 dir) {
     float jitter = hash(dir * 1000.0 + vec3(ubo.timeOfDay * 0.1));
     tStart += stepSize * jitter * 0.5;
 
-    vec3 sunDir = normalize(ubo.sunDirection.xyz);
+    vec3 sunDir = normalize(ubo.toSunDirection.xyz);
     vec3 moonDir = normalize(ubo.moonDirection.xyz);
     float cosThetaSun = dot(dir, sunDir);
     float cosThetaMoon = dot(dir, moonDir);
@@ -762,14 +762,14 @@ CloudResult marchClouds(vec3 origin, vec3 dir) {
 
     // Base sun/moon color with intensity (for ambient via irradiance LUT)
     // The irradiance LUT already includes solarIrradiance, so we only add SKY_EXPOSURE here
-    vec3 sunLightBase = ubo.sunColor.rgb * ubo.sunDirection.w;
+    vec3 sunLightBase = ubo.sunColor.rgb * ubo.toSunDirection.w;
     vec3 moonLightBase = ubo.moonColor.rgb * ubo.moonDirection.w;
 
     // Full brightness for direct cloud lighting (includes SOLAR_IRRADIANCE for physical correctness)
     vec3 sunLight = sunLightBase * SOLAR_IRRADIANCE * SKY_EXPOSURE;
     vec3 moonLight = moonLightBase * SOLAR_IRRADIANCE * SKY_EXPOSURE;
 
-    float sunAltitude = ubo.sunDirection.y;
+    float sunAltitude = ubo.toSunDirection.y;
     float moonAltitude = ubo.moonDirection.y;
 
     // Moon contribution uses helper from celestial_common.glsl for consistency
@@ -859,7 +859,7 @@ CloudResult marchClouds(vec3 origin, vec3 dir) {
 
 float starField(vec3 dir) {
     // Stars appear as sun goes below horizon - use consistent night factor
-    float nightFactor = getNightFactor(ubo.sunDirection.y);
+    float nightFactor = getNightFactor(ubo.toSunDirection.y);
     if (nightFactor < 0.01) return 0.0;
 
     dir = normalize(dir);
@@ -1028,7 +1028,7 @@ vec3 renderAtmosphere(vec3 dir) {
     // We still do atmospheric scattering for rays near the horizon to get the
     // characteristic horizon glow, but clamp the minimum elevation angle.
 
-    float sunAltitude = ubo.sunDirection.y;
+    float sunAltitude = ubo.toSunDirection.y;
     float moonAltitude = ubo.moonDirection.y;
 
     // Moon sky contribution uses helper from celestial_common.glsl for consistency
@@ -1044,7 +1044,7 @@ vec3 renderAtmosphere(vec3 dir) {
     vec3 horizonOrigin = vec3(0.0, PLANET_RADIUS + 0.001, 0.0);
     vec3 horizonTransmittance = sampleTransmittanceFromPos(horizonOrigin, horizonDir);
 
-    vec3 sunLight = ubo.sunColor.rgb * ubo.sunDirection.w;
+    vec3 sunLight = ubo.sunColor.rgb * ubo.toSunDirection.w;
     vec3 moonLight = ubo.moonColor.rgb * ubo.moonDirection.w;
 
     // Sun contribution to horizon using LUT
@@ -1115,7 +1115,7 @@ vec3 renderAtmosphere(vec3 dir) {
     // The base Mie contribution in inscatter is correct but subtle due to small MIE_SCATTERING_BASE.
     // For a visible sun halo, we add an explicit Mie phase-weighted glow that represents
     // the bright forward-scattering peak around the sun disc.
-    vec3 sunDir = normalize(ubo.sunDirection.xyz);
+    vec3 sunDir = normalize(ubo.toSunDirection.xyz);
     float cosSun = dot(normDir, sunDir);
     // Use UBO mie anisotropy if available, otherwise default
     float mieAniso = abs(ubo.atmosMieParams.w) > 0.001 ? clamp(ubo.atmosMieParams.w, -0.99, 0.99) : MIE_ANISOTROPY;
@@ -1165,21 +1165,21 @@ vec3 renderAtmosphere(vec3 dir) {
 
     // Sun and moon discs (rendered behind clouds)
     // Only show sun/moon if clouds don't fully occlude them
-    float sunDisc = celestialDisc(dir, ubo.sunDirection.xyz, SUN_DISC_SIZE);
+    float sunDisc = celestialDisc(dir, ubo.toSunDirection.xyz, SUN_DISC_SIZE);
 
     // Apply eclipse masking to sun
-    float eclipseMask = solarEclipseMask(dir, ubo.sunDirection.xyz, ubo.moonDirection.xyz,
+    float eclipseMask = solarEclipseMask(dir, ubo.toSunDirection.xyz, ubo.moonDirection.xyz,
                                          ubo.eclipseAmount, MOON_PHASE_RADIUS);
     sky += sunLight * sunDisc * 20.0 * eclipseMask * skyTransmittance * clouds.transmittance;
 
     // Add solar corona during eclipse (visible during totality)
-    vec3 corona = solarCorona(dir, ubo.sunDirection.xyz, ubo.eclipseAmount, MOON_PHASE_RADIUS);
+    vec3 corona = solarCorona(dir, ubo.toSunDirection.xyz, ubo.eclipseAmount, MOON_PHASE_RADIUS);
     sky += corona * skyTransmittance * clouds.transmittance;
 
     // Moon disc with lunar phase simulation
     // Both use constants from celestial_common.glsl for consistency
     float moonDisc = celestialDisc(dir, ubo.moonDirection.xyz, MOON_DISC_SIZE);
-    float phaseMask = lunarPhaseMask(dir, ubo.moonDirection.xyz, ubo.sunDirection.xyz, MOON_PHASE_RADIUS);
+    float phaseMask = lunarPhaseMask(dir, ubo.moonDirection.xyz, ubo.toSunDirection.xyz, MOON_PHASE_RADIUS);
 
     // Apply phase mask with intensity scaled by illumination
     // Moon surface has albedo ~0.12, so it's much dimmer than the sun

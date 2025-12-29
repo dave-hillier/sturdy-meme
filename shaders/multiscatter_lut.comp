@@ -13,7 +13,7 @@ layout(binding = BINDING_ATMO_TRANSMITTANCE) uniform sampler2D transmittanceLUT;
 
 layout(binding = BINDING_ATMO_MULTISCATTER) uniform AtmosphereUniforms {
     AtmosphereParams params;
-    vec4 sunDirection;
+    vec4 toSunDirection;
     vec4 cameraPosition;
     float padding[2];
 } uAtmosphere;

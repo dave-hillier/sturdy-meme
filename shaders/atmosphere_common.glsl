@@ -413,8 +413,8 @@ vec3 applyAerialPerspectiveSimple(vec3 color, vec3 fragWorldPos) {
     vec3 cameraToFrag = fragWorldPos - ubo.cameraPosition.xyz;
     float viewDist = length(cameraToFrag);
     vec3 viewDir = normalize(cameraToFrag);
-    vec3 sunDir = normalize(ubo.sunDirection.xyz);
-    vec3 sunColor = ubo.sunColor.rgb * ubo.sunDirection.w;
+    vec3 sunDir = normalize(ubo.toSunDirection.xyz);
+    vec3 sunColor = ubo.sunColor.rgb * ubo.toSunDirection.w;
     return applyAerialPerspective(color, ubo.cameraPosition.xyz, viewDir, viewDist, sunDir, sunColor);
 }
 

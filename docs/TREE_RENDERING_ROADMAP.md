@@ -119,7 +119,7 @@ Trees must integrate with the engine's lighting and atmospheric systems to avoid
 | Volumetric Fog (Froxels) | Local fog volumes | Sample froxel grid for inscatter/transmittance |
 | Cloud Shadows | Soft cloud shadow projection | Sample cloud shadow map if enabled |
 | Atmosphere LUTs | Sky color, transmittance | Use precomputed LUTs for consistent sky lighting |
-| Time of Day | Sun position, color, intensity | Read from `ubo.sunDirection`, `ubo.sunColor` |
+| Time of Day | Sun position, color, intensity | Read from `ubo.toSunDirection`, `ubo.sunColor` |
 
 ### Current Implementation Status
 
@@ -145,7 +145,7 @@ void main() {
     vec3 cameraToFrag = fragWorldPos - ubo.cameraPosition.xyz;
     float viewDist = length(cameraToFrag);
     vec3 viewDir = normalize(cameraToFrag);
-    vec3 sunDir = normalize(-ubo.sunDirection.xyz);
+    vec3 sunDir = normalize(ubo.toSunDirection.xyz);  // Already points toward sun
 
     color = applyAerialPerspective(
         color,
@@ -164,7 +164,7 @@ void main() {
 
 When cross-fading between geometry and impostors, lighting must match closely to avoid visible seams:
 
-1. **Same sun direction/color**: Both LODs read from `ubo.sunDirection`, `ubo.sunColor`
+1. **Same sun direction/color**: Both LODs read from `ubo.toSunDirection`, `ubo.sunColor`
 2. **Same shadow sampling**: Both use `calculateCascadedShadow()` with same parameters
 3. **Same aerial perspective**: Both apply `applyAerialPerspective()` at same world position
 4. **Matched ambient**: Both use `ubo.ambientColor` for sky contribution

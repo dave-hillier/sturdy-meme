@@ -28,7 +28,7 @@ layout(binding = BINDING_FROXEL_UNIFORMS) uniform FroxelUniforms {
     mat4 cascadeViewProj[NUM_CASCADES];  // Light-space matrices for shadow cascades
     vec4 cascadeSplits;                   // View-space split depths
     vec4 cameraPosition;
-    vec4 sunDirection;      // xyz = direction, w = intensity
+    vec4 toSunDirection;      // xyz = direction toward sun, w = intensity
     vec4 sunColor;
     vec4 fogParams;         // x = base height, y = scale height, z = density, w = absorption
     vec4 layerParams;       // x = layer height, y = layer thickness, z = layer density
@@ -303,8 +303,8 @@ void main() {
     vec2 jitter = blueNoise2D(texel.xy, ubo.gridParams.z) * 0.5 - 0.25;
 
     // Sun direction and lighting
-    vec3 sunDir = normalize(ubo.sunDirection.xyz);
-    float sunIntensity = ubo.sunDirection.w;
+    vec3 sunDir = normalize(ubo.toSunDirection.xyz);
+    float sunIntensity = ubo.toSunDirection.w;
     vec3 sunLight = ubo.sunColor.rgb * sunIntensity;
 
     // View direction (from camera to froxel)

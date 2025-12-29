@@ -127,7 +127,7 @@ layout(location = 0) out vec4 outColor;
 
 // Shadow sampling - use common shadow functions
 float getShadowFactor(vec3 worldPos) {
-    vec3 sunL = normalize(ubo.sunDirection.xyz);
+    vec3 sunL = normalize(ubo.toSunDirection.xyz);
     return calculateCascadedShadow(
         worldPos,
         normalize(fragNormal),
@@ -326,7 +326,7 @@ void main() {
     vec3 V = normalize(ubo.cameraPosition.xyz - fragWorldPos);
 
     // Calculate sun contribution
-    vec3 L = normalize(ubo.sunDirection.xyz);
+    vec3 L = normalize(ubo.toSunDirection.xyz);
     vec3 H = normalize(V + L);
 
     // PBR calculations using common functions
@@ -346,7 +346,7 @@ void main() {
     float denominator = 4.0 * max(dot(normal, V), 0.0) * NdotL + 0.0001;
     vec3 specular = numerator / denominator;
 
-    vec3 radiance = ubo.sunColor.rgb * ubo.sunDirection.w;
+    vec3 radiance = ubo.sunColor.rgb * ubo.toSunDirection.w;
     vec3 sunLight = (kD * albedo / PI + specular) * radiance * NdotL;
 
     // Shadow (terrain + cloud shadows combined)
