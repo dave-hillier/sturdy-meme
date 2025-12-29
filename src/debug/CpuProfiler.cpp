@@ -18,6 +18,11 @@ void CpuProfiler::beginFrame() {
     frameStartTime = Clock::now();
     activeZones.clear();
     currentFrameZoneOrder.clear();
+
+    // Start flamegraph capture for this frame
+    if (flamegraphEnabled) {
+        flamegraphBuilder.beginFrame();
+    }
 }
 
 void CpuProfiler::endFrame() {
@@ -103,27 +108,42 @@ void CpuProfiler::endFrame() {
             }
         }
     }
+
+    // Finalize flamegraph capture
+    if (flamegraphEnabled && flamegraphBuilder.isActive()) {
+        lastFlamegraph = flamegraphBuilder.endFrame(frameTimeMs, frameNumber);
+    }
+    frameNumber++;
 }
 
 void CpuProfiler::beginZone(const char* zoneName) {
     if (!enabled) return;
 
+    auto now = Clock::now();
     auto it = activeZones.find(zoneName);
     if (it == activeZones.end()) {
         // New zone for this frame
         ZoneData data;
-        data.startTime = Clock::now();
+        data.startTime = now;
         data.accumulatedMs = 0.0f;
         activeZones[zoneName] = data;
         currentFrameZoneOrder.push_back(zoneName);
     } else {
         // Zone already exists (nested or repeated call)
-        it->second.startTime = Clock::now();
+        it->second.startTime = now;
+    }
+
+    // Track in flamegraph builder
+    if (flamegraphEnabled && flamegraphBuilder.isActive()) {
+        float timestampMs = std::chrono::duration<float, std::milli>(now - frameStartTime).count();
+        flamegraphBuilder.beginZone(zoneName, timestampMs, isWaitZoneName(zoneName));
     }
 }
 
 void CpuProfiler::endZone(const char* zoneName) {
     if (!enabled) return;
+
+    auto endTime = Clock::now();
 
     auto it = activeZones.find(zoneName);
     if (it == activeZones.end()) {
@@ -131,7 +151,12 @@ void CpuProfiler::endZone(const char* zoneName) {
         return;
     }
 
-    auto endTime = Clock::now();
     float elapsedMs = std::chrono::duration<float, std::milli>(endTime - it->second.startTime).count();
     it->second.accumulatedMs += elapsedMs;
+
+    // Track in flamegraph builder
+    if (flamegraphEnabled && flamegraphBuilder.isActive()) {
+        float timestampMs = std::chrono::duration<float, std::milli>(endTime - frameStartTime).count();
+        flamegraphBuilder.endZone(zoneName, timestampMs);
+    }
 }

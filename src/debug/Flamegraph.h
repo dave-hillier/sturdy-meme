@@ -5,151 +5,207 @@
 #include <array>
 #include <algorithm>
 #include <cstdint>
+#include <stack>
 
 /**
  * Data structures for flamegraph visualization of profiling data.
  *
- * Supports:
- * - Init profiler: Single capture with hierarchical phases
- * - CPU/GPU profiler: Ring buffer of 10 captures for historical viewing
+ * A flamegraph shows hierarchical timing data where:
+ * - Parent zones are at the bottom, children stacked on top
+ * - Each bar's width is proportional to its duration
+ * - Children are positioned within the horizontal span of their parent
  */
 
-struct FlamegraphEntry {
-    std::string name;
-    float timeMs;
-    float startOffsetMs;  // Offset from start of frame/init
-    int depth;            // Stack depth (0 = root level)
-    bool isWaitZone;      // For CPU profiler: indicates wait zone
-
-    // Color hint based on zone type (for rendering)
-    enum class ColorHint {
-        Default,
-        Wait,       // CPU wait zones (cyan)
-        Shadow,     // Shadow-related passes
-        Water,      // Water-related passes
-        Terrain,    // Terrain-related passes
-        PostProcess // Post-processing passes
-    };
-    ColorHint colorHint = ColorHint::Default;
+// Color hint based on zone type (for rendering)
+enum class FlamegraphColorHint {
+    Default,
+    Wait,       // CPU wait zones (cyan)
+    Shadow,     // Shadow-related passes
+    Water,      // Water-related passes
+    Terrain,    // Terrain-related passes
+    PostProcess // Post-processing passes
 };
 
+/**
+ * A node in the flamegraph tree representing a profiled zone.
+ */
+struct FlamegraphNode {
+    std::string name;
+    float startMs = 0.0f;      // Start time relative to frame/init start
+    float durationMs = 0.0f;   // Duration of this zone
+    FlamegraphColorHint colorHint = FlamegraphColorHint::Default;
+    bool isWaitZone = false;
+    std::vector<FlamegraphNode> children;
+
+    /**
+     * Get the end time of this node.
+     */
+    float endMs() const { return startMs + durationMs; }
+
+    /**
+     * Calculate the maximum depth of this subtree.
+     */
+    int maxDepth() const {
+        int max = 0;
+        for (const auto& child : children) {
+            max = std::max(max, child.maxDepth() + 1);
+        }
+        return max;
+    }
+};
+
+/**
+ * A complete flamegraph capture for one frame.
+ */
 struct FlamegraphCapture {
     float totalTimeMs = 0.0f;
-    std::vector<FlamegraphEntry> entries;
-    uint64_t frameNumber = 0;  // Frame when captured (for CPU/GPU)
+    uint64_t frameNumber = 0;
+    std::vector<FlamegraphNode> roots;  // Top-level zones
 
-    bool isEmpty() const { return entries.empty(); }
-
-    /**
-     * Build from CPU profiler results (flat zones -> depth 0)
-     */
-    static FlamegraphCapture fromCpuStats(
-        float totalCpuTimeMs,
-        const std::vector<std::tuple<std::string, float, float, bool>>& zones,
-        uint64_t frameNum)
-    {
-        FlamegraphCapture capture;
-        capture.totalTimeMs = totalCpuTimeMs;
-        capture.frameNumber = frameNum;
-
-        float offset = 0.0f;
-        for (const auto& [name, timeMs, pct, isWait] : zones) {
-            FlamegraphEntry entry;
-            entry.name = name;
-            entry.timeMs = timeMs;
-            entry.startOffsetMs = offset;
-            entry.depth = 0;
-            entry.isWaitZone = isWait;
-            entry.colorHint = isWait ? FlamegraphEntry::ColorHint::Wait : FlamegraphEntry::ColorHint::Default;
-
-            capture.entries.push_back(entry);
-            offset += timeMs;
-        }
-
-        return capture;
-    }
+    bool isEmpty() const { return roots.empty(); }
 
     /**
-     * Build from GPU profiler results (flat zones -> depth 0)
+     * Get the maximum depth of the flamegraph.
      */
-    static FlamegraphCapture fromGpuStats(
-        float totalGpuTimeMs,
-        const std::vector<std::tuple<std::string, float, float>>& zones,
-        uint64_t frameNum)
-    {
-        FlamegraphCapture capture;
-        capture.totalTimeMs = totalGpuTimeMs;
-        capture.frameNumber = frameNum;
-
-        float offset = 0.0f;
-        for (const auto& [name, timeMs, pct] : zones) {
-            FlamegraphEntry entry;
-            entry.name = name;
-            entry.timeMs = timeMs;
-            entry.startOffsetMs = offset;
-            entry.depth = 0;
-            entry.isWaitZone = false;
-
-            // Assign color hints based on name prefix
-            if (name.find("Shadow") != std::string::npos) {
-                entry.colorHint = FlamegraphEntry::ColorHint::Shadow;
-            } else if (name.find("Water") != std::string::npos) {
-                entry.colorHint = FlamegraphEntry::ColorHint::Water;
-            } else if (name.find("Terrain") != std::string::npos) {
-                entry.colorHint = FlamegraphEntry::ColorHint::Terrain;
-            } else if (name.find("Post") != std::string::npos ||
-                       name.find("Bloom") != std::string::npos ||
-                       name.find("Tone") != std::string::npos) {
-                entry.colorHint = FlamegraphEntry::ColorHint::PostProcess;
-            }
-
-            capture.entries.push_back(entry);
-            offset += timeMs;
+    int maxDepth() const {
+        int max = 0;
+        for (const auto& root : roots) {
+            max = std::max(max, root.maxDepth() + 1);
         }
-
-        return capture;
-    }
-
-    /**
-     * Build from init profiler results (already has depth)
-     */
-    static FlamegraphCapture fromInitResults(
-        float totalTimeMs,
-        const std::vector<std::tuple<std::string, float, float, int>>& phases)
-    {
-        FlamegraphCapture capture;
-        capture.totalTimeMs = totalTimeMs;
-        capture.frameNumber = 0;
-
-        // For init, we need to calculate proper offsets per depth level
-        // Track running offset at each depth level
-        std::vector<float> offsetAtDepth(16, 0.0f);  // Up to 16 nesting levels
-
-        for (const auto& [name, timeMs, pct, depth] : phases) {
-            FlamegraphEntry entry;
-            entry.name = name;
-            entry.timeMs = timeMs;
-            entry.depth = depth;
-            entry.isWaitZone = false;
-            entry.colorHint = FlamegraphEntry::ColorHint::Default;
-
-            // Start offset is the current offset at this depth
-            entry.startOffsetMs = offsetAtDepth[depth];
-
-            // Advance offset at this depth
-            offsetAtDepth[depth] += timeMs;
-
-            // Reset deeper levels when we go back up
-            for (size_t d = depth + 1; d < offsetAtDepth.size(); ++d) {
-                offsetAtDepth[d] = offsetAtDepth[depth];
-            }
-
-            capture.entries.push_back(entry);
-        }
-
-        return capture;
+        return max;
     }
 };
+
+/**
+ * Helper class to build a flamegraph capture from profiling events.
+ * Tracks zone hierarchy during a frame and produces a FlamegraphCapture.
+ */
+class FlamegraphBuilder {
+public:
+    void beginFrame() {
+        capture_ = FlamegraphCapture{};
+        while (!activeStack_.empty()) activeStack_.pop();
+        frameStarted_ = true;
+    }
+
+    void beginZone(const char* name, float timestampMs, bool isWaitZone = false) {
+        if (!frameStarted_) return;
+
+        FlamegraphNode node;
+        node.name = name;
+        node.startMs = timestampMs;
+        node.isWaitZone = isWaitZone;
+        node.colorHint = getColorHint(name, isWaitZone);
+
+        activeStack_.push(std::move(node));
+    }
+
+    void endZone(const char* name, float timestampMs) {
+        if (!frameStarted_ || activeStack_.empty()) return;
+
+        FlamegraphNode node = std::move(activeStack_.top());
+        activeStack_.pop();
+
+        // Verify name matches (should match in well-formed profiling)
+        if (node.name != name) {
+            // Mismatched zone - try to recover by keeping the name we started with
+        }
+
+        node.durationMs = timestampMs - node.startMs;
+
+        if (activeStack_.empty()) {
+            // This is a root node
+            capture_.roots.push_back(std::move(node));
+        } else {
+            // This is a child of the current top
+            activeStack_.top().children.push_back(std::move(node));
+        }
+    }
+
+    FlamegraphCapture endFrame(float totalTimeMs, uint64_t frameNumber) {
+        capture_.totalTimeMs = totalTimeMs;
+        capture_.frameNumber = frameNumber;
+        frameStarted_ = false;
+
+        // Move out the capture
+        FlamegraphCapture result = std::move(capture_);
+        capture_ = FlamegraphCapture{};
+        return result;
+    }
+
+    bool isActive() const { return frameStarted_; }
+
+private:
+    static FlamegraphColorHint getColorHint(const char* name, bool isWaitZone) {
+        if (isWaitZone) return FlamegraphColorHint::Wait;
+
+        std::string n(name);
+        if (n.find("Shadow") != std::string::npos) return FlamegraphColorHint::Shadow;
+        if (n.find("Water") != std::string::npos) return FlamegraphColorHint::Water;
+        if (n.find("Terrain") != std::string::npos) return FlamegraphColorHint::Terrain;
+        if (n.find("Post") != std::string::npos ||
+            n.find("Bloom") != std::string::npos ||
+            n.find("Tone") != std::string::npos) return FlamegraphColorHint::PostProcess;
+
+        return FlamegraphColorHint::Default;
+    }
+
+    FlamegraphCapture capture_;
+    std::stack<FlamegraphNode> activeStack_;
+    bool frameStarted_ = false;
+};
+
+/**
+ * Build a FlamegraphCapture from init profiler results.
+ * Init profiler already tracks depth, so we can reconstruct the hierarchy.
+ */
+inline FlamegraphCapture buildInitFlamegraph(
+    float totalTimeMs,
+    const std::vector<std::tuple<std::string, float, float, int>>& phases)
+{
+    FlamegraphCapture capture;
+    capture.totalTimeMs = totalTimeMs;
+    capture.frameNumber = 0;
+
+    // Use a stack to track parent nodes at each depth
+    std::vector<FlamegraphNode*> parentStack;
+
+    // Track end times at each depth to calculate start offsets
+    std::vector<float> endTimeAtDepth(16, 0.0f);
+
+    for (const auto& [name, timeMs, pct, depth] : phases) {
+        FlamegraphNode node;
+        node.name = name;
+        node.durationMs = timeMs;
+        node.isWaitZone = false;
+        node.colorHint = FlamegraphColorHint::Default;
+
+        // Calculate start time based on when previous sibling at this depth ended
+        node.startMs = endTimeAtDepth[depth];
+        endTimeAtDepth[depth] = node.startMs + timeMs;
+
+        // Reset deeper levels (children of this node start at 0 relative to this node's start)
+        for (size_t d = depth + 1; d < endTimeAtDepth.size(); ++d) {
+            endTimeAtDepth[d] = node.startMs;
+        }
+
+        if (depth == 0) {
+            // Root node
+            capture.roots.push_back(std::move(node));
+            parentStack.resize(1);
+            parentStack[0] = &capture.roots.back();
+        } else {
+            // Child node - parent is at depth-1
+            if (static_cast<size_t>(depth) <= parentStack.size() && parentStack[depth - 1]) {
+                parentStack[depth - 1]->children.push_back(std::move(node));
+                parentStack.resize(depth + 1);
+                parentStack[depth] = &parentStack[depth - 1]->children.back();
+            }
+        }
+    }
+
+    return capture;
+}
 
 /**
  * Ring buffer for storing flamegraph capture history.

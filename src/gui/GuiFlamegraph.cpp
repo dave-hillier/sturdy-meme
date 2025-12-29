@@ -5,29 +5,29 @@
 
 namespace GuiFlamegraph {
 
-ImVec4 getEntryColor(FlamegraphEntry::ColorHint hint, float alpha) {
+ImVec4 getNodeColor(FlamegraphColorHint hint, float alpha) {
     switch (hint) {
-        case FlamegraphEntry::ColorHint::Wait:
+        case FlamegraphColorHint::Wait:
             return ImVec4(0.3f, 0.7f, 0.9f, alpha);   // Cyan for wait zones
-        case FlamegraphEntry::ColorHint::Shadow:
+        case FlamegraphColorHint::Shadow:
             return ImVec4(0.5f, 0.4f, 0.7f, alpha);   // Purple for shadow
-        case FlamegraphEntry::ColorHint::Water:
+        case FlamegraphColorHint::Water:
             return ImVec4(0.3f, 0.5f, 0.9f, alpha);   // Blue for water
-        case FlamegraphEntry::ColorHint::Terrain:
+        case FlamegraphColorHint::Terrain:
             return ImVec4(0.5f, 0.7f, 0.3f, alpha);   // Green for terrain
-        case FlamegraphEntry::ColorHint::PostProcess:
+        case FlamegraphColorHint::PostProcess:
             return ImVec4(0.9f, 0.6f, 0.3f, alpha);   // Orange for post-process
-        case FlamegraphEntry::ColorHint::Default:
+        case FlamegraphColorHint::Default:
         default:
             return ImVec4(0.8f, 0.4f, 0.3f, alpha);   // Red-orange default (flame-like)
     }
 }
 
-// Hash function to generate varied colors for entries
-static ImVec4 hashColor(const std::string& name, FlamegraphEntry::ColorHint hint, float alpha) {
+// Generate varied color based on name hash for default-colored nodes
+static ImVec4 hashColor(const std::string& name, FlamegraphColorHint hint, float alpha) {
     // Use hint color if not default
-    if (hint != FlamegraphEntry::ColorHint::Default) {
-        return getEntryColor(hint, alpha);
+    if (hint != FlamegraphColorHint::Default) {
+        return getNodeColor(hint, alpha);
     }
 
     // Generate varied color based on name hash
@@ -63,6 +63,76 @@ static ImVec4 hashColor(const std::string& name, FlamegraphEntry::ColorHint hint
     return ImVec4(r, g, b, alpha);
 }
 
+// Recursive function to render a node and its children
+static void renderNode(
+    ImDrawList* drawList,
+    const FlamegraphNode& node,
+    float canvasX, float canvasY,  // Top-left of flamegraph area
+    float totalTimeMs,
+    float scale,                    // Pixels per ms
+    int depth,
+    int maxDepth,
+    const Config& config,
+    const FlamegraphNode** hoveredNode,
+    ImVec2 mousePos)
+{
+    // Calculate bar position (flamegraphs have roots at bottom, so higher depth = lower y)
+    float barY = canvasY + (maxDepth - depth - 1) * (config.barHeight + config.padding);
+    float barX = canvasX + node.startMs * scale;
+    float barWidth = std::max(node.durationMs * scale, config.minBarWidth);
+
+    // Get color for this node
+    ImVec4 color = hashColor(node.name, node.colorHint, 1.0f);
+    ImU32 barColor = ImGui::ColorConvertFloat4ToU32(color);
+
+    // Darker border color
+    ImVec4 borderColorV = color;
+    borderColorV.x *= 0.6f;
+    borderColorV.y *= 0.6f;
+    borderColorV.z *= 0.6f;
+    ImU32 borderColor = ImGui::ColorConvertFloat4ToU32(borderColorV);
+
+    // Draw filled rectangle
+    ImVec2 min(barX, barY);
+    ImVec2 max(barX + barWidth, barY + config.barHeight);
+    drawList->AddRectFilled(min, max, barColor);
+    drawList->AddRect(min, max, borderColor);
+
+    // Check hover
+    if (mousePos.x >= min.x && mousePos.x < max.x &&
+        mousePos.y >= min.y && mousePos.y < max.y) {
+        *hoveredNode = &node;
+        // Highlight hovered entry
+        drawList->AddRect(min, max, IM_COL32(255, 255, 255, 255), 0.0f, 0, 2.0f);
+    }
+
+    // Draw label if bar is wide enough
+    if (config.showLabels && barWidth > 30.0f) {
+        const char* text = node.name.c_str();
+        ImVec2 textSize = ImGui::CalcTextSize(text);
+        if (textSize.x < barWidth - 4.0f) {
+            float textX = barX + (barWidth - textSize.x) * 0.5f;
+            float textY = barY + (config.barHeight - textSize.y) * 0.5f;
+            drawList->AddText(ImVec2(textX, textY), IM_COL32(255, 255, 255, 255), text);
+        } else if (barWidth > 20.0f) {
+            // Truncate label
+            char truncated[32];
+            size_t maxChars = static_cast<size_t>((barWidth - 8.0f) / 7.0f);
+            if (maxChars > 0 && maxChars < sizeof(truncated) - 1) {
+                snprintf(truncated, std::min(maxChars + 1, sizeof(truncated)), "%s", text);
+                float textY = barY + (config.barHeight - ImGui::CalcTextSize(truncated).y) * 0.5f;
+                drawList->AddText(ImVec2(barX + 2.0f, textY), IM_COL32(255, 255, 255, 200), truncated);
+            }
+        }
+    }
+
+    // Recursively render children
+    for (const auto& child : node.children) {
+        renderNode(drawList, child, canvasX, canvasY, totalTimeMs, scale,
+                   depth + 1, maxDepth, config, hoveredNode, mousePos);
+    }
+}
+
 void render(const char* label, const FlamegraphCapture& capture,
             const Config& config, float width) {
     if (capture.isEmpty()) {
@@ -74,94 +144,48 @@ void render(const char* label, const FlamegraphCapture& capture,
     ImVec2 canvasPos = ImGui::GetCursorScreenPos();
     float availWidth = (width > 0.0f) ? width : ImGui::GetContentRegionAvail().x;
 
-    // Find max depth for height calculation
-    int maxDepth = 0;
-    for (const auto& entry : capture.entries) {
-        maxDepth = std::max(maxDepth, entry.depth);
-    }
+    // Calculate max depth for height
+    int maxDepth = capture.maxDepth();
+    if (maxDepth == 0) maxDepth = 1;  // At least one level
 
-    float totalHeight = (maxDepth + 1) * (config.barHeight + config.padding);
+    float totalHeight = maxDepth * (config.barHeight + config.padding);
 
     // Reserve space for the flamegraph
     ImGui::InvisibleButton(label, ImVec2(availWidth, totalHeight));
     bool isHovered = ImGui::IsItemHovered();
+    ImVec2 mousePos = ImGui::GetIO().MousePos;
 
     // Scale factor: pixels per millisecond
     float scale = (capture.totalTimeMs > 0.0f) ? (availWidth / capture.totalTimeMs) : 1.0f;
 
-    // Track which entry is hovered
-    const FlamegraphEntry* hoveredEntry = nullptr;
+    // Track hovered node for tooltip
+    const FlamegraphNode* hoveredNode = nullptr;
 
-    // Draw entries from bottom to top (lowest depth = bottom of flamegraph)
-    for (const auto& entry : capture.entries) {
-        float x = canvasPos.x + entry.startOffsetMs * scale;
-        float y = canvasPos.y + totalHeight - (entry.depth + 1) * (config.barHeight + config.padding);
-        float barWidth = std::max(entry.timeMs * scale, config.minBarWidth);
-
-        // Get color for this entry
-        ImVec4 color = hashColor(entry.name, entry.colorHint, 1.0f);
-        ImU32 barColor = ImGui::ColorConvertFloat4ToU32(color);
-
-        // Darker border color
-        ImVec4 borderColorV = color;
-        borderColorV.x *= 0.6f;
-        borderColorV.y *= 0.6f;
-        borderColorV.z *= 0.6f;
-        ImU32 borderColor = ImGui::ColorConvertFloat4ToU32(borderColorV);
-
-        // Draw filled rectangle
-        ImVec2 min(x, y);
-        ImVec2 max(x + barWidth, y + config.barHeight);
-        drawList->AddRectFilled(min, max, barColor);
-        drawList->AddRect(min, max, borderColor);
-
-        // Check hover
-        if (isHovered) {
-            ImVec2 mousePos = ImGui::GetIO().MousePos;
-            if (mousePos.x >= min.x && mousePos.x < max.x &&
-                mousePos.y >= min.y && mousePos.y < max.y) {
-                hoveredEntry = &entry;
-
-                // Highlight hovered entry
-                drawList->AddRect(min, max, IM_COL32(255, 255, 255, 255), 0.0f, 0, 2.0f);
-            }
-        }
-
-        // Draw label if bar is wide enough
-        if (config.showLabels && barWidth > 30.0f) {
-            const char* text = entry.name.c_str();
-            ImVec2 textSize = ImGui::CalcTextSize(text);
-            if (textSize.x < barWidth - 4.0f) {
-                float textX = x + (barWidth - textSize.x) * 0.5f;
-                float textY = y + (config.barHeight - textSize.y) * 0.5f;
-                drawList->AddText(ImVec2(textX, textY), IM_COL32(255, 255, 255, 255), text);
-            } else {
-                // Truncate label
-                char truncated[32];
-                size_t maxChars = static_cast<size_t>((barWidth - 8.0f) / 7.0f);
-                if (maxChars > 0 && maxChars < sizeof(truncated) - 1) {
-                    snprintf(truncated, std::min(maxChars + 1, sizeof(truncated)), "%s", text);
-                    float textY = y + (config.barHeight - ImGui::CalcTextSize(truncated).y) * 0.5f;
-                    drawList->AddText(ImVec2(x + 2.0f, textY), IM_COL32(255, 255, 255, 200), truncated);
-                }
-            }
-        }
+    // Render all root nodes
+    for (const auto& root : capture.roots) {
+        renderNode(drawList, root, canvasPos.x, canvasPos.y, capture.totalTimeMs,
+                   scale, 0, maxDepth, config,
+                   isHovered ? &hoveredNode : nullptr, mousePos);
     }
 
-    // Show tooltip for hovered entry
-    if (config.showTooltips && hoveredEntry) {
+    // Show tooltip for hovered node
+    if (config.showTooltips && hoveredNode) {
         ImGui::BeginTooltip();
-        ImGui::Text("%s", hoveredEntry->name.c_str());
+        ImGui::Text("%s", hoveredNode->name.c_str());
         ImGui::Separator();
-        ImGui::Text("Time: %.3f ms", hoveredEntry->timeMs);
+        ImGui::Text("Duration: %.3f ms", hoveredNode->durationMs);
         if (capture.totalTimeMs > 0.0f) {
-            float pct = (hoveredEntry->timeMs / capture.totalTimeMs) * 100.0f;
+            float pct = (hoveredNode->durationMs / capture.totalTimeMs) * 100.0f;
             ImGui::Text("Percent: %.1f%%", pct);
         }
-        if (hoveredEntry->isWaitZone) {
+        ImGui::Text("Start: %.3f ms", hoveredNode->startMs);
+        if (hoveredNode->isWaitZone) {
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.3f, 0.7f, 0.9f, 1.0f));
             ImGui::Text("(Wait zone - CPU idle)");
             ImGui::PopStyleColor();
+        }
+        if (!hoveredNode->children.empty()) {
+            ImGui::Text("Children: %zu", hoveredNode->children.size());
         }
         ImGui::EndTooltip();
     }
@@ -200,12 +224,13 @@ void renderWithHistory(const char* label, const FlamegraphHistory<N>& history,
     if (!canGoOlder) ImGui::EndDisabled();
 
     ImGui::SameLine();
-    ImGui::Text("Frame %d/%zu", selectedIndex + 1, history.count());
+    ImGui::Text("Capture %d/%zu", selectedIndex + 1, history.count());
 
     const FlamegraphCapture* capture = history.get(selectedIndex);
     if (capture) {
         ImGui::SameLine();
-        ImGui::Text("(%.2f ms)", capture->totalTimeMs);
+        ImGui::Text("(%.2f ms, frame %llu)", capture->totalTimeMs,
+                    static_cast<unsigned long long>(capture->frameNumber));
 
         // Render the flamegraph
         char childLabel[64];

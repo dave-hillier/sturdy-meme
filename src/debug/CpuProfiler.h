@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include "Flamegraph.h"
 
 /**
  * CPU Profiler for measuring CPU-side frame time breakdown.
@@ -113,6 +114,18 @@ public:
      */
     const FrameStats& getSmoothedResults() const { return smoothedStats; }
 
+    /**
+     * Get the flamegraph capture from the last completed frame.
+     * Returns empty capture if flamegraph wasn't enabled during the frame.
+     */
+    const FlamegraphCapture& getFlamegraphCapture() const { return lastFlamegraph; }
+
+    /**
+     * Enable/disable flamegraph capture (separate from profiling).
+     */
+    void setFlamegraphEnabled(bool e) { flamegraphEnabled = e; }
+    bool isFlamegraphEnabled() const { return flamegraphEnabled; }
+
 private:
     using Clock = std::chrono::high_resolution_clock;
     using TimePoint = Clock::time_point;
@@ -136,6 +149,12 @@ private:
 
     // Smoothing factor (0.0 = no smoothing, 1.0 = infinite smoothing)
     static constexpr float SMOOTHING_FACTOR = 0.9f;
+
+    // Flamegraph capture
+    bool flamegraphEnabled = true;
+    FlamegraphBuilder flamegraphBuilder;
+    FlamegraphCapture lastFlamegraph;
+    uint64_t frameNumber = 0;
 };
 
 // Macro for convenient scoped profiling

@@ -156,6 +156,28 @@ void GuiProfilerTab::render(IProfilerControl& profilerControl) {
         // GPU Flamegraph section
         ImGui::Spacing();
         if (ImGui::CollapsingHeader("GPU Flamegraph")) {
+            // Capture controls
+            bool paused = profiler.isCapturePaused();
+            if (paused) {
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.6f, 0.2f, 1.0f));
+                if (ImGui::Button("Resume")) {
+                    profiler.setCapturePaused(false);
+                }
+                ImGui::PopStyleColor();
+            } else {
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.6f, 0.2f, 0.2f, 1.0f));
+                if (ImGui::Button("Pause")) {
+                    profiler.setCapturePaused(true);
+                }
+                ImGui::PopStyleColor();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Capture Now")) {
+                profiler.captureNow();
+            }
+            ImGui::SameLine();
+            ImGui::TextDisabled("(auto-capture every %d frames)", profiler.getCaptureInterval());
+
             const auto& gpuHistory = profiler.getGpuFlamegraphHistory();
             if (gpuHistory.count() > 0) {
                 GuiFlamegraph::Config config;
@@ -163,8 +185,7 @@ void GuiProfilerTab::render(IProfilerControl& profilerControl) {
                 GuiFlamegraph::renderWithHistory("gpu_flamegraph", gpuHistory,
                                                   s_gpuFlamegraphIndex, config);
             } else {
-                ImGui::TextDisabled("No flamegraph captures yet (capturing every %d frames)",
-                                   profiler.getCaptureInterval());
+                ImGui::TextDisabled("No flamegraph captures yet");
             }
         }
     }
@@ -261,6 +282,26 @@ void GuiProfilerTab::render(IProfilerControl& profilerControl) {
         // CPU Flamegraph section
         ImGui::Spacing();
         if (ImGui::CollapsingHeader("CPU Flamegraph")) {
+            // Capture controls (shared state with GPU)
+            bool paused = profiler.isCapturePaused();
+            if (paused) {
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.6f, 0.2f, 1.0f));
+                if (ImGui::Button("Resume##cpu")) {
+                    profiler.setCapturePaused(false);
+                }
+                ImGui::PopStyleColor();
+            } else {
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.6f, 0.2f, 0.2f, 1.0f));
+                if (ImGui::Button("Pause##cpu")) {
+                    profiler.setCapturePaused(true);
+                }
+                ImGui::PopStyleColor();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Capture Now##cpu")) {
+                profiler.captureNow();
+            }
+
             const auto& cpuHistory = profiler.getCpuFlamegraphHistory();
             if (cpuHistory.count() > 0) {
                 GuiFlamegraph::Config config;
@@ -268,8 +309,7 @@ void GuiProfilerTab::render(IProfilerControl& profilerControl) {
                 GuiFlamegraph::renderWithHistory("cpu_flamegraph", cpuHistory,
                                                   s_cpuFlamegraphIndex, config);
             } else {
-                ImGui::TextDisabled("No flamegraph captures yet (capturing every %d frames)",
-                                   profiler.getCaptureInterval());
+                ImGui::TextDisabled("No flamegraph captures yet");
             }
         }
     }

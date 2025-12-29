@@ -178,31 +178,55 @@ public:
     // Flamegraph capture
     /**
      * Capture current CPU timing to flamegraph history.
+     * CPU profiler tracks hierarchy, so we get a proper tree structure.
      * Call after endCpuFrame() to capture the completed frame.
      */
     void captureCpuFlamegraph() {
-        const auto& stats = cpuProfiler.getResults();
-        std::vector<std::tuple<std::string, float, float, bool>> zones;
-        for (const auto& zone : stats.zones) {
-            zones.emplace_back(zone.name, zone.cpuTimeMs, zone.percentOfFrame, zone.isWaitZone);
+        if (!capturePaused_) {
+            cpuFlamegraphHistory_.push(cpuProfiler.getFlamegraphCapture());
         }
-        cpuFlamegraphHistory_.push(FlamegraphCapture::fromCpuStats(
-            stats.totalCpuTimeMs, zones, frameNumber_));
     }
 
     /**
      * Capture current GPU timing to flamegraph history.
+     * GPU profiler doesn't track hierarchy, so we create flat zones.
      * Call after endGpuFrame() results are available.
      */
     void captureGpuFlamegraph() {
-        if (!gpuProfiler_) return;
+        if (!gpuProfiler_ || capturePaused_) return;
+
+        // Build a flat flamegraph from GPU zones (no hierarchy available)
         const auto& stats = gpuProfiler_->getResults();
-        std::vector<std::tuple<std::string, float, float>> zones;
+        FlamegraphCapture capture;
+        capture.totalTimeMs = stats.totalGpuTimeMs;
+        capture.frameNumber = frameNumber_;
+
+        float offset = 0.0f;
         for (const auto& zone : stats.zones) {
-            zones.emplace_back(zone.name, zone.gpuTimeMs, zone.percentOfFrame);
+            FlamegraphNode node;
+            node.name = zone.name;
+            node.startMs = offset;
+            node.durationMs = zone.gpuTimeMs;
+            node.isWaitZone = false;
+
+            // Assign color hints based on name
+            if (zone.name.find("Shadow") != std::string::npos) {
+                node.colorHint = FlamegraphColorHint::Shadow;
+            } else if (zone.name.find("Water") != std::string::npos) {
+                node.colorHint = FlamegraphColorHint::Water;
+            } else if (zone.name.find("Terrain") != std::string::npos) {
+                node.colorHint = FlamegraphColorHint::Terrain;
+            } else if (zone.name.find("Post") != std::string::npos ||
+                       zone.name.find("Bloom") != std::string::npos ||
+                       zone.name.find("Tone") != std::string::npos) {
+                node.colorHint = FlamegraphColorHint::PostProcess;
+            }
+
+            capture.roots.push_back(std::move(node));
+            offset += zone.gpuTimeMs;
         }
-        gpuFlamegraphHistory_.push(FlamegraphCapture::fromGpuStats(
-            stats.totalGpuTimeMs, zones, frameNumber_));
+
+        gpuFlamegraphHistory_.push(std::move(capture));
     }
 
     /**
@@ -215,7 +239,7 @@ public:
         for (const auto& phase : results.phases) {
             phases.emplace_back(phase.name, phase.timeMs, phase.percentOfTotal, phase.depth);
         }
-        initFlamegraph_ = FlamegraphCapture::fromInitResults(results.totalTimeMs, phases);
+        initFlamegraph_ = buildInitFlamegraph(results.totalTimeMs, phases);
     }
 
     /**
@@ -260,6 +284,12 @@ public:
     void setFlamegraphEnabled(bool enabled) { flamegraphEnabled_ = enabled; }
     bool isFlamegraphEnabled() const { return flamegraphEnabled_; }
 
+    /**
+     * Pause/resume flamegraph capture (for inspection).
+     */
+    void setCapturePaused(bool paused) { capturePaused_ = paused; }
+    bool isCapturePaused() const { return capturePaused_; }
+
     // Flamegraph history access
     const CpuFlamegraphHistory& getCpuFlamegraphHistory() const { return cpuFlamegraphHistory_; }
     const GpuFlamegraphHistory& getGpuFlamegraphHistory() const { return gpuFlamegraphHistory_; }
@@ -281,6 +311,7 @@ private:
     uint32_t captureInterval_ = 30;      // Capture every N frames
     uint32_t framesSinceCapture_ = 0;
     bool flamegraphEnabled_ = true;
+    bool capturePaused_ = false;         // Pause capture for inspection
 };
 
 /**

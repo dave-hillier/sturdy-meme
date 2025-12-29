@@ -5,6 +5,11 @@
 
 /**
  * ImGui-based flamegraph rendering utilities.
+ *
+ * Renders hierarchical timing data as a flamegraph where:
+ * - Parent zones are at the bottom, children stacked on top
+ * - Bar width is proportional to duration
+ * - Children are positioned within parent bounds
  */
 namespace GuiFlamegraph {
 
@@ -14,7 +19,7 @@ namespace GuiFlamegraph {
 struct Config {
     float barHeight = 20.0f;     // Height of each bar
     float minBarWidth = 2.0f;    // Minimum bar width (for visibility)
-    float padding = 2.0f;        // Padding between bars
+    float padding = 1.0f;        // Vertical padding between levels
     bool showLabels = true;      // Show zone names on bars
     bool showTooltips = true;    // Show detailed tooltips on hover
 };
@@ -45,8 +50,8 @@ void renderWithHistory(const char* label, const FlamegraphHistory<N>& history,
                        float width = 0.0f);
 
 /**
- * Get color for a flamegraph entry based on its color hint.
+ * Get color for a flamegraph node based on its color hint.
  */
-ImVec4 getEntryColor(FlamegraphEntry::ColorHint hint, float alpha = 1.0f);
+ImVec4 getNodeColor(FlamegraphColorHint hint, float alpha = 1.0f);
 
 } // namespace GuiFlamegraph
