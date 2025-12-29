@@ -82,9 +82,9 @@ uint32_t TreeSpatialIndex::getCellIndex(int32_t cellX, int32_t cellZ) const {
     return static_cast<uint32_t>(z * gridDimension_ + x);
 }
 
-void TreeSpatialIndex::rebuild(const std::vector<TreeInstanceData>& trees,
-                                const std::vector<glm::mat4>& treeModels) {
-    if (trees.empty()) {
+void TreeSpatialIndex::rebuild(const std::vector<glm::mat4>& transforms,
+                                const std::vector<float>& scales) {
+    if (transforms.empty()) {
         sortedTrees_.clear();
         nonEmptyCellCount_ = 0;
 
@@ -102,7 +102,7 @@ void TreeSpatialIndex::rebuild(const std::vector<TreeInstanceData>& trees,
         uint32_t cellIndex;
     };
     std::vector<TreeCellAssignment> assignments;
-    assignments.reserve(trees.size());
+    assignments.reserve(transforms.size());
 
     // Reset all cells
     for (auto& cell : cells_) {
@@ -113,10 +113,13 @@ void TreeSpatialIndex::rebuild(const std::vector<TreeInstanceData>& trees,
     }
 
     // Assign each tree to a cell and update bounds
-    for (size_t i = 0; i < trees.size(); ++i) {
-        const auto& tree = trees[i];
+    for (size_t i = 0; i < transforms.size(); ++i) {
+        // Extract position from the model matrix (column 3)
+        glm::vec3 position = glm::vec3(transforms[i][3]);
+        float scale = (i < scales.size()) ? scales[i] : 1.0f;
+
         int32_t cellX, cellZ;
-        worldToCell(tree.position, cellX, cellZ);
+        worldToCell(position, cellX, cellZ);
 
         uint32_t cellIdx = getCellIndex(cellX, cellZ);
         assignments.push_back({static_cast<uint32_t>(i), cellIdx});
@@ -126,9 +129,9 @@ void TreeSpatialIndex::rebuild(const std::vector<TreeInstanceData>& trees,
 
         // Update Y bounds based on tree position
         // Assume trees have some vertical extent (scale-dependent)
-        float treeHeight = tree.scale * 15.0f; // Approximate tree height
-        cell.boundsMin.y = std::min(cell.boundsMin.y, tree.position.y);
-        cell.boundsMax.y = std::max(cell.boundsMax.y, tree.position.y + treeHeight);
+        float treeHeight = scale * 15.0f; // Approximate tree height
+        cell.boundsMin.y = std::min(cell.boundsMin.y, position.y);
+        cell.boundsMax.y = std::max(cell.boundsMax.y, position.y + treeHeight);
     }
 
     // Sort assignments by cell index for contiguous tree ranges
@@ -139,7 +142,7 @@ void TreeSpatialIndex::rebuild(const std::vector<TreeInstanceData>& trees,
 
     // Build sorted tree list and update cell firstTreeIndex
     sortedTrees_.clear();
-    sortedTrees_.reserve(trees.size());
+    sortedTrees_.reserve(transforms.size());
 
     uint32_t currentCellIdx = UINT32_MAX;
     uint32_t treeIdx = 0;
@@ -169,7 +172,7 @@ void TreeSpatialIndex::rebuild(const std::vector<TreeInstanceData>& trees,
     }
 
     SDL_Log("TreeSpatialIndex: Rebuilt with %zu trees across %u non-empty cells",
-            trees.size(), nonEmptyCellCount_);
+            transforms.size(), nonEmptyCellCount_);
 }
 
 bool TreeSpatialIndex::uploadToGPU() {

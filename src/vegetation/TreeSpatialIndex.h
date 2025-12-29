@@ -5,8 +5,7 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include <cstdint>
-
-#include "TreeSystem.h"
+#include <memory>
 
 // CPU-side cell structure
 struct TreeCell {
@@ -67,14 +66,17 @@ public:
     TreeSpatialIndex& operator=(TreeSpatialIndex&&) = delete;
 
     /**
-     * Rebuild the spatial index from tree instance data.
+     * Rebuild the spatial index from tree transforms.
      * Call when trees are added/removed/moved.
      *
-     * @param trees Tree instance data from TreeSystem
-     * @param treeModels Model matrices for each tree (for accurate bounds)
+     * The originalTreeIndex stored will be the index into this transforms array,
+     * which should match the TreeCullData buffer ordering.
+     *
+     * @param transforms Model matrices for each tree (position extracted from column 3)
+     * @param scales Scale factor for each tree (for estimating tree height bounds)
      */
-    void rebuild(const std::vector<TreeInstanceData>& trees,
-                 const std::vector<glm::mat4>& treeModels);
+    void rebuild(const std::vector<glm::mat4>& transforms,
+                 const std::vector<float>& scales);
 
     /**
      * Upload cell and sorted tree data to GPU buffers.

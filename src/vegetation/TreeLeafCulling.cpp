@@ -525,10 +525,9 @@ bool TreeLeafCulling::createTwoPhaseLeafCullDescriptorSets() {
 }
 
 void TreeLeafCulling::updateSpatialIndex(const TreeSystem& treeSystem) {
-    const auto& trees = treeSystem.getTreeInstances();
     const auto& leafRenderables = treeSystem.getLeafRenderables();
 
-    if (trees.empty()) {
+    if (leafRenderables.empty()) {
         spatialIndex_.reset();
         return;
     }
@@ -547,13 +546,21 @@ void TreeLeafCulling::updateSpatialIndex(const TreeSystem& treeSystem) {
         }
     }
 
-    std::vector<glm::mat4> treeModels;
-    treeModels.reserve(leafRenderables.size());
+    // Build transforms and scales from leafRenderables
+    // IMPORTANT: The spatial index must use the same ordering as the TreeCullData buffer
+    // (which is built from leafRenderables, not treeInstances_)
+    std::vector<glm::mat4> transforms;
+    std::vector<float> scales;
+    transforms.reserve(leafRenderables.size());
+    scales.reserve(leafRenderables.size());
     for (const auto& renderable : leafRenderables) {
-        treeModels.push_back(renderable.transform);
+        transforms.push_back(renderable.transform);
+        // Estimate scale from transform (use Y-axis length as approximation)
+        float scale = glm::length(glm::vec3(renderable.transform[1]));
+        scales.push_back(scale);
     }
 
-    spatialIndex_->rebuild(trees, treeModels);
+    spatialIndex_->rebuild(transforms, scales);
 
     if (!spatialIndex_->uploadToGPU()) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to upload spatial index to GPU");
@@ -566,7 +573,7 @@ void TreeLeafCulling::updateSpatialIndex(const TreeSystem& treeSystem) {
 
     if (visibleTreeBuffers_.empty() && treeFilterPipeline_.get() != VK_NULL_HANDLE &&
         !visibleCellBuffers_.empty()) {
-        createTreeFilterBuffers(static_cast<uint32_t>(trees.size()));
+        createTreeFilterBuffers(static_cast<uint32_t>(leafRenderables.size()));
     }
 
     if (twoPhaseLeafCullDescriptorSets_.empty() && twoPhaseLeafCullPipeline_.get() != VK_NULL_HANDLE &&
@@ -575,7 +582,7 @@ void TreeLeafCulling::updateSpatialIndex(const TreeSystem& treeSystem) {
     }
 
     SDL_Log("TreeLeafCulling: Updated spatial index (%zu trees, %u non-empty cells)",
-            trees.size(), spatialIndex_->getNonEmptyCellCount());
+            leafRenderables.size(), spatialIndex_->getNonEmptyCellCount());
 }
 
 void TreeLeafCulling::updateCullDescriptorSets(const TreeSystem& treeSystem) {
