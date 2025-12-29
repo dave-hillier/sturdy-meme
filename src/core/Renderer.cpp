@@ -132,7 +132,7 @@ bool Renderer::initInternal(const InitInfo& info) {
 
     // Build shared InitContext for subsystem initialization
     // Pass pool sizes hint so subsystems can create consistent pools if needed
-    InitContext initCtx = RendererInit::buildContext(
+    InitContext initCtx = InitContext::build(
         *vulkanContext_, commandPool.get(), &*descriptorManagerPool,
         resourcePath, MAX_FRAMES_IN_FLIGHT, config_.descriptorPoolSizes);
 
@@ -214,7 +214,7 @@ void Renderer::updatePhysicsDebug(PhysicsWorld& physics, const glm::vec3& camera
 
     // Create debug renderer on first use (after Jolt is initialized)
     if (!systems_->physicsDebugRenderer()) {
-        InitContext initCtx = RendererInit::buildContext(
+        InitContext initCtx = InitContext::build(
             *vulkanContext_, commandPool.get(), &*descriptorManagerPool,
             resourcePath, MAX_FRAMES_IN_FLIGHT);
         systems_->createPhysicsDebugRenderer(initCtx, systems_->postProcess().getHDRRenderPass());

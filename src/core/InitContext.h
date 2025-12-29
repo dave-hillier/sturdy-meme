@@ -7,6 +7,9 @@
 
 #include "DescriptorManager.h"
 
+// Forward declaration to avoid circular dependency
+class VulkanContext;
+
 /**
  * InitContext - Common resources needed for subsystem initialization
  *
@@ -39,4 +42,48 @@ struct InitContext {
 
     // Optional pool sizes hint for systems that create their own pools
     std::optional<DescriptorPoolSizes> poolSizesHint;
+
+    // ========================================================================
+    // Factory and modifier methods
+    // ========================================================================
+
+    /**
+     * Build an InitContext from VulkanContext and common resources.
+     * This is the preferred way to create an InitContext.
+     */
+    static InitContext build(
+        const VulkanContext& vulkanContext,
+        VkCommandPool commandPool,
+        DescriptorManager::Pool* descriptorPool,
+        const std::string& resourcePath,
+        uint32_t framesInFlight,
+        std::optional<DescriptorPoolSizes> poolSizes = std::nullopt
+    );
+
+    /**
+     * Create a modified InitContext with different extent.
+     * Useful for systems that need different resolution.
+     */
+    [[nodiscard]] InitContext withExtent(VkExtent2D newExtent) const {
+        InitContext modified = *this;
+        modified.extent = newExtent;
+        return modified;
+    }
+
+    /**
+     * Create a modified InitContext with different shader path.
+     * Rare, mainly for testing.
+     */
+    [[nodiscard]] InitContext withShaderPath(const std::string& newShaderPath) const {
+        InitContext modified = *this;
+        modified.shaderPath = newShaderPath;
+        return modified;
+    }
+
+    /**
+     * Update extent in place (e.g., after resize).
+     */
+    void setExtent(VkExtent2D newExtent) {
+        extent = newExtent;
+    }
 };

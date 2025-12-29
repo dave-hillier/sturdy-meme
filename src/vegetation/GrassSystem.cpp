@@ -1,4 +1,6 @@
 #include "GrassSystem.h"
+#include "WindSystem.h"
+#include "InitContext.h"
 #include "CullCommon.h"
 #include "ShaderLoader.h"
 #include "PipelineBuilder.h"
@@ -19,6 +21,51 @@ std::unique_ptr<GrassSystem> GrassSystem::create(const InitInfo& info) {
         return nullptr;
     }
     return system;
+}
+
+std::optional<GrassSystem::Bundle> GrassSystem::createWithDependencies(
+    const InitContext& ctx,
+    VkRenderPass hdrRenderPass,
+    VkRenderPass shadowRenderPass,
+    uint32_t shadowMapSize
+) {
+    // Create wind system
+    WindSystem::InitInfo windInfo{};
+    windInfo.device = ctx.device;
+    windInfo.allocator = ctx.allocator;
+    windInfo.framesInFlight = ctx.framesInFlight;
+
+    auto windSystem = WindSystem::create(windInfo);
+    if (!windSystem) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize WindSystem");
+        return std::nullopt;
+    }
+
+    // Create grass system
+    InitInfo grassInfo{};
+    grassInfo.device = ctx.device;
+    grassInfo.allocator = ctx.allocator;
+    grassInfo.renderPass = hdrRenderPass;
+    grassInfo.shadowRenderPass = shadowRenderPass;
+    grassInfo.descriptorPool = ctx.descriptorPool;
+    grassInfo.extent = ctx.extent;
+    grassInfo.shadowMapSize = shadowMapSize;
+    grassInfo.shaderPath = ctx.shaderPath;
+    grassInfo.framesInFlight = ctx.framesInFlight;
+
+    auto grassSystem = create(grassInfo);
+    if (!grassSystem) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize GrassSystem");
+        return std::nullopt;
+    }
+
+    // Wire environment settings from wind to grass
+    grassSystem->setEnvironmentSettings(&windSystem->getEnvironmentSettings());
+
+    return Bundle{
+        std::move(windSystem),
+        std::move(grassSystem)
+    };
 }
 
 GrassSystem::~GrassSystem() {

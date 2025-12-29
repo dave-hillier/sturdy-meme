@@ -1,5 +1,7 @@
 #include "WeatherSystem.h"
+#include "LeafSystem.h"
 #include "WindSystem.h"
+#include "InitContext.h"
 #include "ShaderLoader.h"
 #include "PipelineBuilder.h"
 #include "VulkanBarriers.h"
@@ -14,6 +16,51 @@ std::unique_ptr<WeatherSystem> WeatherSystem::create(const InitInfo& info) {
         return nullptr;
     }
     return system;
+}
+
+std::optional<WeatherSystem::Bundle> WeatherSystem::createWithDependencies(
+    const InitContext& ctx,
+    VkRenderPass hdrRenderPass
+) {
+    // Create weather particle system (rain/snow)
+    InitInfo weatherInfo{};
+    weatherInfo.device = ctx.device;
+    weatherInfo.allocator = ctx.allocator;
+    weatherInfo.renderPass = hdrRenderPass;
+    weatherInfo.descriptorPool = ctx.descriptorPool;
+    weatherInfo.extent = ctx.extent;
+    weatherInfo.shaderPath = ctx.shaderPath;
+    weatherInfo.framesInFlight = ctx.framesInFlight;
+
+    auto weatherSystem = create(weatherInfo);
+    if (!weatherSystem) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize WeatherSystem");
+        return std::nullopt;
+    }
+
+    // Create leaf particle system
+    LeafSystem::InitInfo leafInfo{};
+    leafInfo.device = ctx.device;
+    leafInfo.allocator = ctx.allocator;
+    leafInfo.renderPass = hdrRenderPass;
+    leafInfo.descriptorPool = ctx.descriptorPool;
+    leafInfo.extent = ctx.extent;
+    leafInfo.shaderPath = ctx.shaderPath;
+    leafInfo.framesInFlight = ctx.framesInFlight;
+
+    auto leafSystem = LeafSystem::create(leafInfo);
+    if (!leafSystem) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize LeafSystem");
+        return std::nullopt;
+    }
+
+    // Set default leaf intensity (autumn scene)
+    leafSystem->setIntensity(0.5f);
+
+    return Bundle{
+        std::move(weatherSystem),
+        std::move(leafSystem)
+    };
 }
 
 WeatherSystem::~WeatherSystem() {

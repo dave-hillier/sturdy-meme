@@ -6,11 +6,16 @@
 #include <vector>
 #include <string>
 #include <memory>
+#include <optional>
 
 #include "BufferUtils.h"
 #include "SystemLifecycleHelper.h"
 #include "EnvironmentSettings.h"
 #include "VulkanRAII.h"
+
+// Forward declarations
+class VolumetricSnowSystem;
+struct InitContext;
 
 // Uniforms for snow accumulation compute shader (256 bytes, aligned)
 struct SnowMaskUniforms {
@@ -35,6 +40,23 @@ public:
      * Returns nullptr on failure.
      */
     static std::unique_ptr<SnowMaskSystem> create(const InitInfo& info);
+
+    /**
+     * Bundle of all snow-related systems
+     */
+    struct Bundle {
+        std::unique_ptr<SnowMaskSystem> snowMask;
+        std::unique_ptr<VolumetricSnowSystem> volumetricSnow;
+    };
+
+    /**
+     * Factory: Create both SnowMaskSystem and VolumetricSnowSystem.
+     * Returns nullopt on failure.
+     */
+    static std::optional<Bundle> createWithDependencies(
+        const InitContext& ctx,
+        VkRenderPass hdrRenderPass
+    );
 
     ~SnowMaskSystem();
 

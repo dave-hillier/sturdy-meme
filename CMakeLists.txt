@@ -43,6 +43,7 @@ set(SOURCES
     src/core/ResizeCoordinator.cpp
     src/core/UBOBuilder.cpp
     src/core/RendererSystems.cpp
+    src/core/InitContext.cpp
     src/core/pipeline/RenderPipelineFactory.cpp
     # Control subsystems (coordinate multiple systems for GUI interfaces)
     # Note: Some systems implement their interfaces directly (CelestialCalculator -> ILocationControl,

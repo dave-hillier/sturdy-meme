@@ -1,4 +1,6 @@
 #include "SnowMaskSystem.h"
+#include "VolumetricSnowSystem.h"
+#include "InitContext.h"
 #include "ShaderLoader.h"
 #include "PipelineBuilder.h"
 #include "VulkanBarriers.h"
@@ -15,6 +17,48 @@ std::unique_ptr<SnowMaskSystem> SnowMaskSystem::create(const InitInfo& info) {
         return nullptr;
     }
     return system;
+}
+
+std::optional<SnowMaskSystem::Bundle> SnowMaskSystem::createWithDependencies(
+    const InitContext& ctx,
+    VkRenderPass hdrRenderPass
+) {
+    // Create snow mask system
+    InitInfo snowMaskInfo{};
+    snowMaskInfo.device = ctx.device;
+    snowMaskInfo.allocator = ctx.allocator;
+    snowMaskInfo.renderPass = hdrRenderPass;
+    snowMaskInfo.descriptorPool = ctx.descriptorPool;
+    snowMaskInfo.extent = ctx.extent;
+    snowMaskInfo.shaderPath = ctx.shaderPath;
+    snowMaskInfo.framesInFlight = ctx.framesInFlight;
+
+    auto snowMaskSystem = create(snowMaskInfo);
+    if (!snowMaskSystem) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize SnowMaskSystem");
+        return std::nullopt;
+    }
+
+    // Create volumetric snow system
+    VolumetricSnowSystem::InitInfo volumetricSnowInfo{};
+    volumetricSnowInfo.device = ctx.device;
+    volumetricSnowInfo.allocator = ctx.allocator;
+    volumetricSnowInfo.renderPass = hdrRenderPass;
+    volumetricSnowInfo.descriptorPool = ctx.descriptorPool;
+    volumetricSnowInfo.extent = ctx.extent;
+    volumetricSnowInfo.shaderPath = ctx.shaderPath;
+    volumetricSnowInfo.framesInFlight = ctx.framesInFlight;
+
+    auto volumetricSnowSystem = VolumetricSnowSystem::create(volumetricSnowInfo);
+    if (!volumetricSnowSystem) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize VolumetricSnowSystem");
+        return std::nullopt;
+    }
+
+    return Bundle{
+        std::move(snowMaskSystem),
+        std::move(volumetricSnowSystem)
+    };
 }
 
 SnowMaskSystem::~SnowMaskSystem() {

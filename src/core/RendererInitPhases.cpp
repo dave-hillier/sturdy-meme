@@ -9,6 +9,7 @@
 #include "VulkanResourceFactory.h"
 #include "PostProcessSystem.h"
 #include "BloomSystem.h"
+#include "BilateralGridSystem.h"
 #include "SkySystem.h"
 #include "GlobalBufferManager.h"
 #include "ShadowSystem.h"
@@ -71,12 +72,16 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     VkQueue graphicsQueue = vulkanContext_->getGraphicsQueue();
     VkFormat swapchainImageFormat = vulkanContext_->getSwapchainImageFormat();
 
-    // Initialize post-processing systems (PostProcessSystem, BloomSystem)
+    // Initialize post-processing systems (PostProcessSystem, BloomSystem, BilateralGridSystem)
     {
         INIT_PROFILE_PHASE("PostProcessing");
-        if (!RendererInit::initPostProcessing(*systems_, initCtx, renderPass.get(), swapchainImageFormat)) {
+        auto bundle = PostProcessSystem::createWithDependencies(initCtx, renderPass.get(), swapchainImageFormat);
+        if (!bundle) {
             return false;
         }
+        systems_->setPostProcess(std::move(bundle->postProcess));
+        systems_->setBloom(std::move(bundle->bloom));
+        systems_->setBilateralGrid(std::move(bundle->bilateralGrid));
     }
 
     {
@@ -195,13 +200,28 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     }
 
     // Initialize snow subsystems (SnowMaskSystem, VolumetricSnowSystem)
-    if (!RendererInit::initSnowSubsystems(*systems_, initCtx, core.hdr)) return false;
+    {
+        auto bundle = SnowMaskSystem::createWithDependencies(initCtx, core.hdr.renderPass);
+        if (!bundle) {
+            return false;
+        }
+        systems_->setSnowMask(std::move(bundle->snowMask));
+        systems_->setVolumetricSnow(std::move(bundle->volumetricSnow));
+    }
 
     if (!createDescriptorSets()) return false;
     if (!createSkinnedMeshRendererDescriptorSets()) return false;
 
-    // Initialize grass and wind subsystems (WindSystem created via factory)
-    if (!RendererInit::initGrassSubsystem(*systems_, initCtx, core.hdr, core.shadow)) return false;
+    // Initialize grass and wind subsystems
+    {
+        auto bundle = GrassSystem::createWithDependencies(
+            initCtx, core.hdr.renderPass, core.shadow.renderPass, core.shadow.mapSize);
+        if (!bundle) {
+            return false;
+        }
+        systems_->setWind(std::move(bundle->wind));
+        systems_->setGrass(std::move(bundle->grass));
+    }
 
     const EnvironmentSettings* envSettings = &systems_->wind().getEnvironmentSettings();
 
@@ -747,9 +767,16 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     }
 
     // Initialize weather and leaf subsystems
-    if (!RendererInit::initWeatherSubsystems(*systems_, initCtx, core.hdr)) return false;
+    {
+        auto bundle = WeatherSystem::createWithDependencies(initCtx, core.hdr.renderPass);
+        if (!bundle) {
+            return false;
+        }
+        systems_->setWeather(std::move(bundle->weather));
+        systems_->setLeaf(std::move(bundle->leaf));
+    }
 
-    // Connect leaf system to environment settings (must be done after initWeatherSubsystems creates LeafSystem)
+    // Connect leaf system to environment settings
     systems_->leaf().setEnvironmentSettings(envSettings);
 
     // Update weather system descriptor sets
@@ -1002,8 +1029,11 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     if (!createSyncObjects()) return false;
 
     // Create debug line system via factory
-    auto debugLineSystem = RendererInit::createDebugLineSystem(initCtx, core.hdr);
-    if (!debugLineSystem) return false;
+    auto debugLineSystem = DebugLineSystem::create(initCtx, core.hdr.renderPass);
+    if (!debugLineSystem) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create debug line system");
+        return false;
+    }
     systems_->setDebugLineSystem(std::move(debugLineSystem));
     SDL_Log("Debug line system initialized");
 

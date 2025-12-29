@@ -1,4 +1,6 @@
 #include "PostProcessSystem.h"
+#include "BloomSystem.h"
+#include "BilateralGridSystem.h"
 #include "ShaderLoader.h"
 #include "DescriptorManager.h"
 #include "VulkanBarriers.h"
@@ -26,6 +28,45 @@ std::unique_ptr<PostProcessSystem> PostProcessSystem::create(const InitContext& 
     info.shaderPath = ctx.shaderPath;
     info.framesInFlight = ctx.framesInFlight;
     return create(info);
+}
+
+std::optional<PostProcessSystem::Bundle> PostProcessSystem::createWithDependencies(
+    const InitContext& ctx,
+    VkRenderPass finalRenderPass,
+    VkFormat swapchainImageFormat
+) {
+    // Create post-process system
+    auto postProcessSystem = create(ctx, finalRenderPass, swapchainImageFormat);
+    if (!postProcessSystem) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize PostProcessSystem");
+        return std::nullopt;
+    }
+
+    // Create bloom system
+    auto bloomSystem = BloomSystem::create(ctx);
+    if (!bloomSystem) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize BloomSystem");
+        return std::nullopt;
+    }
+
+    // Create bilateral grid system (for local tone mapping)
+    auto bilateralGridSystem = BilateralGridSystem::create(ctx);
+    if (!bilateralGridSystem) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize BilateralGridSystem");
+        return std::nullopt;
+    }
+
+    // Wire bloom texture to post-process system
+    postProcessSystem->setBloomTexture(bloomSystem->getBloomOutput(), bloomSystem->getBloomSampler());
+
+    // Wire bilateral grid to post-process system
+    postProcessSystem->setBilateralGrid(bilateralGridSystem->getGridView(), bilateralGridSystem->getGridSampler());
+
+    return Bundle{
+        std::move(postProcessSystem),
+        std::move(bloomSystem),
+        std::move(bilateralGridSystem)
+    };
 }
 
 PostProcessSystem::~PostProcessSystem() {

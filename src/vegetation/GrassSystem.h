@@ -8,13 +8,17 @@
 #include <vector>
 #include <string>
 #include <memory>
+#include <optional>
 
 #include "BufferUtils.h"
 #include "ParticleSystem.h"
 #include "UBOs.h"
 #include "RAIIAdapter.h"
 #include "VulkanRAII.h"
-#include <optional>
+
+// Forward declarations
+class WindSystem;
+struct InitContext;
 
 struct GrassPushConstants {
     float time;
@@ -51,6 +55,25 @@ public:
      * Returns nullptr on failure.
      */
     static std::unique_ptr<GrassSystem> create(const InitInfo& info);
+
+    /**
+     * Bundle of grass-related systems
+     */
+    struct Bundle {
+        std::unique_ptr<WindSystem> wind;
+        std::unique_ptr<GrassSystem> grass;
+    };
+
+    /**
+     * Factory: Create WindSystem and GrassSystem together.
+     * Returns nullopt on failure.
+     */
+    static std::optional<Bundle> createWithDependencies(
+        const InitContext& ctx,
+        VkRenderPass hdrRenderPass,
+        VkRenderPass shadowRenderPass,
+        uint32_t shadowMapSize
+    );
 
     ~GrassSystem();
 

@@ -14,8 +14,10 @@
 #include "RAIIAdapter.h"
 #include "interfaces/IWeatherState.h"
 
-// Forward declaration
+// Forward declarations
 class WindSystem;
+class LeafSystem;
+struct InitContext;
 
 // Weather particle data (32 bytes, matches GPU struct)
 struct WeatherParticle {
@@ -46,6 +48,23 @@ public:
      * Returns nullptr on failure.
      */
     static std::unique_ptr<WeatherSystem> create(const InitInfo& info);
+
+    /**
+     * Bundle of weather-related systems
+     */
+    struct Bundle {
+        std::unique_ptr<WeatherSystem> weather;
+        std::unique_ptr<LeafSystem> leaf;
+    };
+
+    /**
+     * Factory: Create WeatherSystem and LeafSystem together.
+     * Returns nullopt on failure.
+     */
+    static std::optional<Bundle> createWithDependencies(
+        const InitContext& ctx,
+        VkRenderPass hdrRenderPass
+    );
 
     ~WeatherSystem();
 

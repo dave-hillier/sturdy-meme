@@ -8,12 +8,17 @@
 #include <functional>
 #include <array>
 #include <memory>
+#include <optional>
 #include "UBOs.h"
 #include "BufferUtils.h"
 #include "DescriptorManager.h"
 #include "InitContext.h"
 #include "VulkanRAII.h"
 #include "interfaces/IPostProcessState.h"
+
+// Forward declarations
+class BloomSystem;
+class BilateralGridSystem;
 
 // Histogram reduce compute shader parameters
 struct HistogramReduceParams {
@@ -58,6 +63,25 @@ public:
      */
     static std::unique_ptr<PostProcessSystem> create(const InitInfo& info);
     static std::unique_ptr<PostProcessSystem> create(const InitContext& ctx, VkRenderPass outputRenderPass, VkFormat swapchainFormat);
+
+    /**
+     * Bundle of all post-processing related systems
+     */
+    struct Bundle {
+        std::unique_ptr<PostProcessSystem> postProcess;
+        std::unique_ptr<BloomSystem> bloom;
+        std::unique_ptr<BilateralGridSystem> bilateralGrid;
+    };
+
+    /**
+     * Factory: Create PostProcessSystem with all dependencies (Bloom, BilateralGrid).
+     * Systems are already wired together. Returns nullopt on failure.
+     */
+    static std::optional<Bundle> createWithDependencies(
+        const InitContext& ctx,
+        VkRenderPass finalRenderPass,
+        VkFormat swapchainImageFormat
+    );
 
     ~PostProcessSystem();
 

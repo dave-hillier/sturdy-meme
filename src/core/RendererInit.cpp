@@ -4,26 +4,11 @@
 #include "VulkanRAII.h"
 #include "MaterialDescriptorFactory.h"
 
-// Post-processing systems
-#include "PostProcessSystem.h"
-#include "BloomSystem.h"
-#include "BilateralGridSystem.h"
-#include "SSRSystem.h"
-#include "HiZSystem.h"
-
-// Atmosphere/weather systems
-#include "SnowMaskSystem.h"
-#include "VolumetricSnowSystem.h"
-#include "WindSystem.h"
-#include "WeatherSystem.h"
+// Atmosphere systems
 #include "FroxelSystem.h"
 #include "AtmosphereLUTSystem.h"
 #include "CloudShadowSystem.h"
-
-// Vegetation systems
-#include "GrassSystem.h"
-#include "LeafSystem.h"
-#include "RockSystem.h"
+#include "SSRSystem.h"
 
 // Water systems
 #include "WaterSystem.h"
@@ -33,191 +18,14 @@
 #include "WaterTileCull.h"
 #include "WaterGBuffer.h"
 
-// Terrain
-#include "TerrainSystem.h"
-
 // Other systems
-#include "CatmullClarkSystem.h"
+#include "PostProcessSystem.h"
+#include "TerrainSystem.h"
 #include "ShadowSystem.h"
 #include "MaterialRegistry.h"
 #include "SkinnedMeshRenderer.h"
-#include "DebugLineSystem.h"
 
 #include <SDL3/SDL.h>
-
-bool RendererInit::initPostProcessing(
-    RendererSystems& systems,
-    const InitContext& ctx,
-    VkRenderPass finalRenderPass,
-    VkFormat swapchainImageFormat
-) {
-    // Initialize post-process system via factory
-    auto postProcessSystem = PostProcessSystem::create(ctx, finalRenderPass, swapchainImageFormat);
-    if (!postProcessSystem) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize PostProcessSystem");
-        return false;
-    }
-
-    // Initialize bloom system via factory
-    auto bloomSystem = BloomSystem::create(ctx);
-    if (!bloomSystem) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize BloomSystem");
-        return false;
-    }
-
-    // Initialize bilateral grid system via factory (for local tone mapping)
-    auto bilateralGridSystem = BilateralGridSystem::create(ctx);
-    if (!bilateralGridSystem) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize BilateralGridSystem");
-        return false;
-    }
-
-    // Bind bloom texture to post-process system
-    postProcessSystem->setBloomTexture(bloomSystem->getBloomOutput(), bloomSystem->getBloomSampler());
-
-    // Bind bilateral grid to post-process system
-    postProcessSystem->setBilateralGrid(bilateralGridSystem->getGridView(), bilateralGridSystem->getGridSampler());
-
-    // Store in RendererSystems
-    systems.setPostProcess(std::move(postProcessSystem));
-    systems.setBloom(std::move(bloomSystem));
-    systems.setBilateralGrid(std::move(bilateralGridSystem));
-
-    return true;
-}
-
-bool RendererInit::initSnowSubsystems(
-    RendererSystems& systems,
-    const InitContext& ctx,
-    VkRenderPass hdrRenderPass
-) {
-    // Initialize snow mask system via factory
-    SnowMaskSystem::InitInfo snowMaskInfo{};
-    snowMaskInfo.device = ctx.device;
-    snowMaskInfo.allocator = ctx.allocator;
-    snowMaskInfo.renderPass = hdrRenderPass;
-    snowMaskInfo.descriptorPool = ctx.descriptorPool;
-    snowMaskInfo.extent = ctx.extent;
-    snowMaskInfo.shaderPath = ctx.shaderPath;
-    snowMaskInfo.framesInFlight = ctx.framesInFlight;
-
-    auto snowMaskSystem = SnowMaskSystem::create(snowMaskInfo);
-    if (!snowMaskSystem) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize SnowMaskSystem");
-        return false;
-    }
-    systems.setSnowMask(std::move(snowMaskSystem));
-
-    // Initialize volumetric snow system via factory
-    VolumetricSnowSystem::InitInfo volumetricSnowInfo{};
-    volumetricSnowInfo.device = ctx.device;
-    volumetricSnowInfo.allocator = ctx.allocator;
-    volumetricSnowInfo.renderPass = hdrRenderPass;
-    volumetricSnowInfo.descriptorPool = ctx.descriptorPool;
-    volumetricSnowInfo.extent = ctx.extent;
-    volumetricSnowInfo.shaderPath = ctx.shaderPath;
-    volumetricSnowInfo.framesInFlight = ctx.framesInFlight;
-
-    auto volumetricSnowSystem = VolumetricSnowSystem::create(volumetricSnowInfo);
-    if (!volumetricSnowSystem) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize VolumetricSnowSystem");
-        return false;
-    }
-    systems.setVolumetricSnow(std::move(volumetricSnowSystem));
-
-    return true;
-}
-
-bool RendererInit::initGrassSubsystem(
-    RendererSystems& systems,
-    const InitContext& ctx,
-    VkRenderPass hdrRenderPass,
-    VkRenderPass shadowRenderPass,
-    uint32_t shadowMapSize
-) {
-    // Initialize wind system via factory
-    WindSystem::InitInfo windInfo{};
-    windInfo.device = ctx.device;
-    windInfo.allocator = ctx.allocator;
-    windInfo.framesInFlight = ctx.framesInFlight;
-
-    auto windSystem = WindSystem::create(windInfo);
-    if (!windSystem) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize WindSystem");
-        return false;
-    }
-    systems.setWind(std::move(windSystem));
-
-    // Initialize grass system via factory
-    GrassSystem::InitInfo grassInfo{};
-    grassInfo.device = ctx.device;
-    grassInfo.allocator = ctx.allocator;
-    grassInfo.renderPass = hdrRenderPass;
-    grassInfo.shadowRenderPass = shadowRenderPass;
-    grassInfo.descriptorPool = ctx.descriptorPool;
-    grassInfo.extent = ctx.extent;
-    grassInfo.shadowMapSize = shadowMapSize;
-    grassInfo.shaderPath = ctx.shaderPath;
-    grassInfo.framesInFlight = ctx.framesInFlight;
-
-    auto grassSystem = GrassSystem::create(grassInfo);
-    if (!grassSystem) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize GrassSystem");
-        return false;
-    }
-    systems.setGrass(std::move(grassSystem));
-
-    // Connect environment settings to grass (leaf is connected later after initWeatherSubsystems)
-    const EnvironmentSettings* environmentSettings = &systems.wind().getEnvironmentSettings();
-    systems.grass().setEnvironmentSettings(environmentSettings);
-
-    return true;
-}
-
-bool RendererInit::initWeatherSubsystems(
-    RendererSystems& systems,
-    const InitContext& ctx,
-    VkRenderPass hdrRenderPass
-) {
-    // Initialize weather particle system (rain/snow) via factory
-    WeatherSystem::InitInfo weatherInfo{};
-    weatherInfo.device = ctx.device;
-    weatherInfo.allocator = ctx.allocator;
-    weatherInfo.renderPass = hdrRenderPass;
-    weatherInfo.descriptorPool = ctx.descriptorPool;
-    weatherInfo.extent = ctx.extent;
-    weatherInfo.shaderPath = ctx.shaderPath;
-    weatherInfo.framesInFlight = ctx.framesInFlight;
-
-    auto weatherSystem = WeatherSystem::create(weatherInfo);
-    if (!weatherSystem) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize WeatherSystem");
-        return false;
-    }
-    systems.setWeather(std::move(weatherSystem));
-
-    // Initialize leaf particle system via factory
-    LeafSystem::InitInfo leafInfo{};
-    leafInfo.device = ctx.device;
-    leafInfo.allocator = ctx.allocator;
-    leafInfo.renderPass = hdrRenderPass;
-    leafInfo.descriptorPool = ctx.descriptorPool;
-    leafInfo.extent = ctx.extent;
-    leafInfo.shaderPath = ctx.shaderPath;
-    leafInfo.framesInFlight = ctx.framesInFlight;
-
-    auto leafSystem = LeafSystem::create(leafInfo);
-    if (!leafSystem) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize LeafSystem");
-        return false;
-    }
-
-    // Set default leaf intensity (autumn scene)
-    leafSystem->setIntensity(0.5f);
-    systems.setLeaf(std::move(leafSystem));
-
-    return true;
-}
 
 bool RendererInit::initAtmosphereSubsystems(
     RendererSystems& systems,
@@ -396,41 +204,6 @@ bool RendererInit::createWaterDescriptorSets(
     }
 
     return true;
-}
-
-bool RendererInit::initHiZSystem(
-    RendererSystems& systems,
-    const InitContext& ctx,
-    VkFormat depthFormat,
-    VkImageView hdrDepthView,
-    VkSampler depthSampler
-) {
-    auto hiZSystem = HiZSystem::create(ctx, depthFormat);
-    if (!hiZSystem) {
-        SDL_Log("Warning: Hi-Z system initialization failed, occlusion culling disabled");
-        return true;  // Don't fail - Hi-Z is optional
-    }
-
-    // Connect depth buffer to Hi-Z system
-    hiZSystem->setDepthBuffer(hdrDepthView, depthSampler);
-
-    // Store in RendererSystems
-    systems.setHiZ(std::move(hiZSystem));
-
-    return true;
-}
-
-std::unique_ptr<DebugLineSystem> RendererInit::createDebugLineSystem(
-    const InitContext& ctx,
-    VkRenderPass hdrRenderPass
-) {
-    auto system = DebugLineSystem::create(ctx, hdrRenderPass);
-    if (!system) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create debug line system");
-        return nullptr;
-    }
-    SDL_Log("Debug line system created");
-    return system;
 }
 
 void RendererInit::updateCloudShadowBindings(
