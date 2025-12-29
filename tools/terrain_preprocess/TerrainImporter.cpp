@@ -37,9 +37,10 @@ void TerrainImporter::getTileCountForLOD(uint32_t sourceWidth, uint32_t sourceHe
     if (lodWidth < 1) lodWidth = 1;
     if (lodHeight < 1) lodHeight = 1;
 
-    // Ceiling division to get tile count
-    outTilesX = (lodWidth + tileResolution - 1) / tileResolution;
-    outTilesZ = (lodHeight + tileResolution - 1) / tileResolution;
+    // Tiles overlap by 1 pixel for seamless boundaries (stride = tileRes - 1)
+    uint32_t stride = tileResolution - 1;  // 511 for 512x512 tiles
+    outTilesX = (lodWidth > 1) ? ((lodWidth - 1) / stride) + 1 : 1;
+    outTilesZ = (lodHeight > 1) ? ((lodHeight - 1) / stride) + 1 : 1;
 }
 
 bool TerrainImporter::isCacheValid(const TerrainImportConfig& config) const {
@@ -207,13 +208,14 @@ bool TerrainImporter::import(const TerrainImportConfig& config, ImportProgressCa
     worldHeight = sourceHeight * config.metersPerPixel;
 
     // Calculate tiles for LOD 0 based on pixel dimensions
-    // Each tile is exactly tileResolution x tileResolution pixels
-    tilesX = (sourceWidth + config.tileResolution - 1) / config.tileResolution;
-    tilesZ = (sourceHeight + config.tileResolution - 1) / config.tileResolution;
+    // Tiles overlap by 1 pixel for seamless boundaries (stride = tileRes - 1)
+    uint32_t stride = config.tileResolution - 1;  // 511 for 512x512 tiles
+    tilesX = (sourceWidth > 1) ? ((sourceWidth - 1) / stride) + 1 : 1;
+    tilesZ = (sourceHeight > 1) ? ((sourceHeight - 1) / stride) + 1 : 1;
 
     SDL_Log("Source: %ux%u pixels", sourceWidth, sourceHeight);
     SDL_Log("World size: %.1fm x %.1fm", worldWidth, worldHeight);
-    SDL_Log("LOD 0: %ux%u tiles (%ux%u each)", tilesX, tilesZ, config.tileResolution, config.tileResolution);
+    SDL_Log("LOD 0: %ux%u tiles (%ux%u each, stride=%u)", tilesX, tilesZ, config.tileResolution, config.tileResolution, stride);
 
     // Initialize LOD data with source
     lodData = sourceData;
@@ -297,25 +299,29 @@ bool TerrainImporter::generateLODLevel(const TerrainImportConfig& config, uint32
                                         float progressBase, float progressRange) {
     uint32_t tileRes = config.tileResolution;
 
-    // Calculate number of tiles based on current LOD source dimensions
-    // Each tile is exactly tileRes x tileRes pixels extracted from lodData
-    uint32_t numTilesX = (lodWidth + tileRes - 1) / tileRes;  // Ceiling division
-    uint32_t numTilesZ = (lodHeight + tileRes - 1) / tileRes;
+    // Tiles overlap by 1 pixel for seamless boundaries
+    // Tile stride is (tileRes - 1) to share edge pixels
+    uint32_t stride = tileRes - 1;  // 511 for 512x512 tiles
+
+    // Calculate number of tiles based on current LOD source dimensions with overlap
+    // Each tile covers tileRes pixels but advances by stride to share edges
+    uint32_t numTilesX = (lodWidth > 1) ? ((lodWidth - 1) / stride) + 1 : 1;
+    uint32_t numTilesZ = (lodHeight > 1) ? ((lodHeight - 1) / stride) + 1 : 1;
 
     uint32_t totalTiles = numTilesX * numTilesZ;
     uint32_t processedTiles = 0;
 
-    SDL_Log("LOD %u: %ux%u tiles from %ux%u source", lod, numTilesX, numTilesZ, lodWidth, lodHeight);
+    SDL_Log("LOD %u: %ux%u tiles from %ux%u source (stride=%u, overlap=1)", lod, numTilesX, numTilesZ, lodWidth, lodHeight, stride);
 
     std::vector<uint16_t> tileData(tileRes * tileRes);
 
     for (uint32_t tz = 0; tz < numTilesZ; tz++) {
         for (uint32_t tx = 0; tx < numTilesX; tx++) {
-            // Source pixel start for this tile
-            uint32_t srcStartX = tx * tileRes;
-            uint32_t srcStartZ = tz * tileRes;
+            // Source pixel start for this tile - stride creates 1-pixel overlap
+            uint32_t srcStartX = tx * stride;
+            uint32_t srcStartZ = tz * stride;
 
-            // Extract pixels directly - no resampling
+            // Extract pixels with overlap - adjacent tiles share edge pixel
             for (uint32_t py = 0; py < tileRes; py++) {
                 for (uint32_t px = 0; px < tileRes; px++) {
                     uint32_t srcX = srcStartX + px;

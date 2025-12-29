@@ -240,7 +240,31 @@ uint32_t TerrainTileCache::getLODForDistance(float distance) const {
     return numLODLevels; // Beyond all LOD levels - use global fallback
 }
 
+// Helper: Get source dimensions at a given LOD level
+static void getLODSourceDimensions(uint32_t sourceWidth, uint32_t sourceHeight, uint32_t lod,
+                                    uint32_t& outWidth, uint32_t& outHeight) {
+    outWidth = sourceWidth >> lod;
+    outHeight = sourceHeight >> lod;
+    if (outWidth < 1) outWidth = 1;
+    if (outHeight < 1) outHeight = 1;
+}
+
+// Helper: Get tile count at a given LOD level (accounting for 1-texel overlap)
+static void getLODTileCount(uint32_t lodSourceWidth, uint32_t lodSourceHeight, uint32_t tileRes,
+                             uint32_t& outTilesX, uint32_t& outTilesZ) {
+    // Tiles overlap by 1 pixel for seamless boundaries (stride = tileRes - 1)
+    uint32_t stride = tileRes - 1;  // 511 for 512x512 tiles
+    outTilesX = (lodSourceWidth > 1) ? ((lodSourceWidth - 1) / stride) + 1 : 1;
+    outTilesZ = (lodSourceHeight > 1) ? ((lodSourceHeight - 1) / stride) + 1 : 1;
+}
+
 TileCoord TerrainTileCache::worldToTileCoord(float worldX, float worldZ, uint32_t lod) const {
+    // Get LOD source dimensions and tile count
+    uint32_t lodSourceW, lodSourceH;
+    getLODSourceDimensions(sourceWidth, sourceHeight, lod, lodSourceW, lodSourceH);
+    uint32_t lodTilesX, lodTilesZ;
+    getLODTileCount(lodSourceW, lodSourceH, tileResolution, lodTilesX, lodTilesZ);
+
     // Convert world position to normalized [0, 1]
     float normX = (worldX / terrainSize) + 0.5f;
     float normZ = (worldZ / terrainSize) + 0.5f;
@@ -249,15 +273,18 @@ TileCoord TerrainTileCache::worldToTileCoord(float worldX, float worldZ, uint32_
     normX = std::clamp(normX, 0.0f, 0.9999f);
     normZ = std::clamp(normZ, 0.0f, 0.9999f);
 
-    // Calculate tile count at this LOD level
-    uint32_t lodTilesX = tilesX >> lod;
-    uint32_t lodTilesZ = tilesZ >> lod;
-    if (lodTilesX < 1) lodTilesX = 1;
-    if (lodTilesZ < 1) lodTilesZ = 1;
+    // With overlapping tiles (stride = tileRes - 1), compute tile index based on stride
+    uint32_t stride = tileResolution - 1;
+    float worldPixelX = normX * static_cast<float>(lodSourceW);
+    float worldPixelZ = normZ * static_cast<float>(lodSourceH);
 
     TileCoord coord;
-    coord.x = static_cast<int32_t>(normX * lodTilesX);
-    coord.z = static_cast<int32_t>(normZ * lodTilesZ);
+    coord.x = static_cast<int32_t>(worldPixelX / static_cast<float>(stride));
+    coord.z = static_cast<int32_t>(worldPixelZ / static_cast<float>(stride));
+
+    // Clamp to valid tile range
+    coord.x = std::clamp(coord.x, 0, static_cast<int32_t>(lodTilesX - 1));
+    coord.z = std::clamp(coord.z, 0, static_cast<int32_t>(lodTilesZ - 1));
 
     return coord;
 }
@@ -279,17 +306,21 @@ void TerrainTileCache::updateActiveTiles(const glm::vec3& cameraPos, float loadR
     for (int lodInt = static_cast<int>(numLODLevels) - 1; lodInt >= 0; lodInt--) {
         uint32_t lod = static_cast<uint32_t>(lodInt);
 
-        // Calculate tile size at this LOD
-        uint32_t lodTilesX = tilesX >> lod;
-        uint32_t lodTilesZ = tilesZ >> lod;
-        if (lodTilesX < 1) lodTilesX = 1;
-        if (lodTilesZ < 1) lodTilesZ = 1;
+        // Calculate tile count at this LOD using overlap-aware formula
+        uint32_t lodSourceW, lodSourceH;
+        getLODSourceDimensions(sourceWidth, sourceHeight, lod, lodSourceW, lodSourceH);
+        uint32_t lodTilesX, lodTilesZ;
+        getLODTileCount(lodSourceW, lodSourceH, tileResolution, lodTilesX, lodTilesZ);
 
-        // Calculate tile range to check around camera
-        int32_t minTileX = static_cast<int32_t>(((camX - loadRadius) / terrainSize + 0.5f) * lodTilesX);
-        int32_t maxTileX = static_cast<int32_t>(((camX + loadRadius) / terrainSize + 0.5f) * lodTilesX);
-        int32_t minTileZ = static_cast<int32_t>(((camZ - loadRadius) / terrainSize + 0.5f) * lodTilesZ);
-        int32_t maxTileZ = static_cast<int32_t>(((camZ + loadRadius) / terrainSize + 0.5f) * lodTilesZ);
+        // With overlapping tiles, stride determines tile spacing
+        uint32_t stride = tileResolution - 1;
+        float strideWorld = terrainSize * static_cast<float>(stride) / static_cast<float>(lodSourceW);
+
+        // Calculate tile range to check around camera based on stride
+        int32_t minTileX = static_cast<int32_t>(std::floor(((camX - loadRadius) / terrainSize + 0.5f) * lodSourceW / stride));
+        int32_t maxTileX = static_cast<int32_t>(std::floor(((camX + loadRadius) / terrainSize + 0.5f) * lodSourceW / stride));
+        int32_t minTileZ = static_cast<int32_t>(std::floor(((camZ - loadRadius) / terrainSize + 0.5f) * lodSourceH / stride));
+        int32_t maxTileZ = static_cast<int32_t>(std::floor(((camZ + loadRadius) / terrainSize + 0.5f) * lodSourceH / stride));
 
         // Clamp to valid tile range
         minTileX = std::max(0, minTileX);
@@ -299,9 +330,11 @@ void TerrainTileCache::updateActiveTiles(const glm::vec3& cameraPos, float loadR
 
         for (int32_t tz = minTileZ; tz <= maxTileZ; tz++) {
             for (int32_t tx = minTileX; tx <= maxTileX; tx++) {
-                // Calculate tile center in world space
-                float tileCenterX = ((static_cast<float>(tx) + 0.5f) / lodTilesX - 0.5f) * terrainSize;
-                float tileCenterZ = ((static_cast<float>(tz) + 0.5f) / lodTilesZ - 0.5f) * terrainSize;
+                // Calculate tile center in world space (accounting for stride-based positioning)
+                float tileStartX = (static_cast<float>(tx * stride) / lodSourceW - 0.5f) * terrainSize;
+                float tileStartZ = (static_cast<float>(tz * stride) / lodSourceH - 0.5f) * terrainSize;
+                float tileCenterX = tileStartX + strideWorld * 0.5f;
+                float tileCenterZ = tileStartZ + strideWorld * 0.5f;
 
                 float dist = std::sqrt((tileCenterX - camX) * (tileCenterX - camX) +
                                        (tileCenterZ - camZ) * (tileCenterZ - camZ));
@@ -447,19 +480,20 @@ bool TerrainTileCache::loadTile(TileCoord coord, uint32_t lod) {
         tile.coord = coord;
         tile.lod = lod;
 
-        // Calculate world bounds for this tile
-        uint32_t lodTilesX = tilesX >> lod;
-        uint32_t lodTilesZ = tilesZ >> lod;
-        if (lodTilesX < 1) lodTilesX = 1;
-        if (lodTilesZ < 1) lodTilesZ = 1;
+        // Calculate world bounds for this tile using overlap-aware formula
+        uint32_t lodSourceW, lodSourceH;
+        getLODSourceDimensions(sourceWidth, sourceHeight, lod, lodSourceW, lodSourceH);
 
-        float tileWorldSizeX = terrainSize / lodTilesX;
-        float tileWorldSizeZ = terrainSize / lodTilesZ;
+        // With overlapping tiles, stride determines world position of each tile
+        uint32_t stride = tileResolution - 1;  // 511 for 512x512 tiles
+        float pixelWorldSize = terrainSize / static_cast<float>(lodSourceW);
 
-        tile.worldMinX = (static_cast<float>(coord.x) / lodTilesX - 0.5f) * terrainSize;
-        tile.worldMinZ = (static_cast<float>(coord.z) / lodTilesZ - 0.5f) * terrainSize;
-        tile.worldMaxX = tile.worldMinX + tileWorldSizeX;
-        tile.worldMaxZ = tile.worldMinZ + tileWorldSizeZ;
+        // Tile N starts at source pixel (N * stride)
+        tile.worldMinX = (static_cast<float>(coord.x * stride) / lodSourceW - 0.5f) * terrainSize;
+        tile.worldMinZ = (static_cast<float>(coord.z * stride) / lodSourceH - 0.5f) * terrainSize;
+        // Each tile covers tileResolution pixels worth of world space
+        tile.worldMaxX = tile.worldMinX + static_cast<float>(tileResolution) * pixelWorldSize;
+        tile.worldMaxZ = tile.worldMinZ + static_cast<float>(tileResolution) * (terrainSize / static_cast<float>(lodSourceH));
 
         // Convert to float32 directly - NO resampling
         tile.cpuData.resize(tileResolution * tileResolution);
@@ -781,19 +815,20 @@ bool TerrainTileCache::loadTileCPUOnly(TileCoord coord, uint32_t lod) {
     tile.coord = coord;
     tile.lod = lod;
 
-    // Calculate world bounds for this tile
-    uint32_t lodTilesX = tilesX >> lod;
-    uint32_t lodTilesZ = tilesZ >> lod;
-    if (lodTilesX < 1) lodTilesX = 1;
-    if (lodTilesZ < 1) lodTilesZ = 1;
+    // Calculate world bounds for this tile using overlap-aware formula
+    uint32_t lodSourceW, lodSourceH;
+    getLODSourceDimensions(sourceWidth, sourceHeight, lod, lodSourceW, lodSourceH);
 
-    float tileWorldSizeX = terrainSize / lodTilesX;
-    float tileWorldSizeZ = terrainSize / lodTilesZ;
+    // With overlapping tiles, stride determines world position of each tile
+    uint32_t stride = tileResolution - 1;  // 511 for 512x512 tiles
+    float pixelWorldSize = terrainSize / static_cast<float>(lodSourceW);
 
-    tile.worldMinX = (static_cast<float>(coord.x) / lodTilesX - 0.5f) * terrainSize;
-    tile.worldMinZ = (static_cast<float>(coord.z) / lodTilesZ - 0.5f) * terrainSize;
-    tile.worldMaxX = tile.worldMinX + tileWorldSizeX;
-    tile.worldMaxZ = tile.worldMinZ + tileWorldSizeZ;
+    // Tile N starts at source pixel (N * stride)
+    tile.worldMinX = (static_cast<float>(coord.x * stride) / lodSourceW - 0.5f) * terrainSize;
+    tile.worldMinZ = (static_cast<float>(coord.z * stride) / lodSourceH - 0.5f) * terrainSize;
+    // Each tile covers tileResolution pixels worth of world space
+    tile.worldMaxX = tile.worldMinX + static_cast<float>(tileResolution) * pixelWorldSize;
+    tile.worldMaxZ = tile.worldMinZ + static_cast<float>(tileResolution) * (terrainSize / static_cast<float>(lodSourceH));
 
     // Convert to float32 directly - NO resampling
     tile.cpuData.resize(tileResolution * tileResolution);
@@ -816,27 +851,36 @@ void TerrainTileCache::preloadTilesAround(float worldX, float worldZ, float radi
     // Pre-load LOD0 tiles (highest resolution) around the given position
     // This is synchronous and blocks until tiles are loaded
     const uint32_t lod = 0;
-    const float tileWorldSizeX = terrainSize / tilesX;
-    const float tileWorldSizeZ = terrainSize / tilesZ;
+
+    // Calculate LOD0 tile count using overlap-aware formula
+    uint32_t lodSourceW, lodSourceH;
+    getLODSourceDimensions(sourceWidth, sourceHeight, lod, lodSourceW, lodSourceH);
+    uint32_t lodTilesX, lodTilesZ;
+    getLODTileCount(lodSourceW, lodSourceH, tileResolution, lodTilesX, lodTilesZ);
+    uint32_t stride = tileResolution - 1;
 
     // Calculate tile range covering the radius
-    int32_t minTileX = static_cast<int32_t>(((worldX - radius) / terrainSize + 0.5f) * tilesX);
-    int32_t maxTileX = static_cast<int32_t>(((worldX + radius) / terrainSize + 0.5f) * tilesX);
-    int32_t minTileZ = static_cast<int32_t>(((worldZ - radius) / terrainSize + 0.5f) * tilesZ);
-    int32_t maxTileZ = static_cast<int32_t>(((worldZ + radius) / terrainSize + 0.5f) * tilesZ);
+    int32_t minTileX = static_cast<int32_t>(std::floor(((worldX - radius) / terrainSize + 0.5f) * lodSourceW / stride));
+    int32_t maxTileX = static_cast<int32_t>(std::floor(((worldX + radius) / terrainSize + 0.5f) * lodSourceW / stride));
+    int32_t minTileZ = static_cast<int32_t>(std::floor(((worldZ - radius) / terrainSize + 0.5f) * lodSourceH / stride));
+    int32_t maxTileZ = static_cast<int32_t>(std::floor(((worldZ + radius) / terrainSize + 0.5f) * lodSourceH / stride));
 
     // Clamp to valid range
     minTileX = std::max(0, minTileX);
-    maxTileX = std::min(static_cast<int32_t>(tilesX - 1), maxTileX);
+    maxTileX = std::min(static_cast<int32_t>(lodTilesX - 1), maxTileX);
     minTileZ = std::max(0, minTileZ);
-    maxTileZ = std::min(static_cast<int32_t>(tilesZ - 1), maxTileZ);
+    maxTileZ = std::min(static_cast<int32_t>(lodTilesZ - 1), maxTileZ);
+
+    float strideWorld = terrainSize * static_cast<float>(stride) / static_cast<float>(lodSourceW);
 
     uint32_t tilesLoaded = 0;
     for (int32_t tz = minTileZ; tz <= maxTileZ; tz++) {
         for (int32_t tx = minTileX; tx <= maxTileX; tx++) {
             // Calculate tile center for distance check
-            float tileCenterX = ((static_cast<float>(tx) + 0.5f) / tilesX - 0.5f) * terrainSize;
-            float tileCenterZ = ((static_cast<float>(tz) + 0.5f) / tilesZ - 0.5f) * terrainSize;
+            float tileStartX = (static_cast<float>(tx * stride) / lodSourceW - 0.5f) * terrainSize;
+            float tileStartZ = (static_cast<float>(tz * stride) / lodSourceH - 0.5f) * terrainSize;
+            float tileCenterX = tileStartX + strideWorld * 0.5f;
+            float tileCenterZ = tileStartZ + strideWorld * 0.5f;
 
             float dx = worldX - tileCenterX;
             float dz = worldZ - tileCenterZ;
@@ -888,10 +932,10 @@ void TerrainTileCache::updateStats() {
 
     // Check if coarsest LOD coverage is complete
     uint32_t coarsestLOD = numLODLevels - 1;
-    uint32_t coarseTilesX = tilesX >> coarsestLOD;
-    uint32_t coarseTilesZ = tilesZ >> coarsestLOD;
-    if (coarseTilesX < 1) coarseTilesX = 1;
-    if (coarseTilesZ < 1) coarseTilesZ = 1;
+    uint32_t coarseSourceW, coarseSourceH;
+    getLODSourceDimensions(sourceWidth, sourceHeight, coarsestLOD, coarseSourceW, coarseSourceH);
+    uint32_t coarseTilesX, coarseTilesZ;
+    getLODTileCount(coarseSourceW, coarseSourceH, tileResolution, coarseTilesX, coarseTilesZ);
     uint32_t expectedCoarseTiles = coarseTilesX * coarseTilesZ;
     stats_.initialLoadComplete = (stats_.tilesLoadedPerLOD[coarsestLOD] >= expectedCoarseTiles);
 }
@@ -901,10 +945,11 @@ void TerrainTileCache::loadCoarseLODCoverage() {
     // This provides immediate terrain coverage for both physics and rendering
     const uint32_t lod = numLODLevels - 1;  // Coarsest LOD (usually 3)
 
-    uint32_t lodTilesX = tilesX >> lod;
-    uint32_t lodTilesZ = tilesZ >> lod;
-    if (lodTilesX < 1) lodTilesX = 1;
-    if (lodTilesZ < 1) lodTilesZ = 1;
+    // Calculate tile count using overlap-aware formula
+    uint32_t lodSourceW, lodSourceH;
+    getLODSourceDimensions(sourceWidth, sourceHeight, lod, lodSourceW, lodSourceH);
+    uint32_t lodTilesX, lodTilesZ;
+    getLODTileCount(lodSourceW, lodSourceH, tileResolution, lodTilesX, lodTilesZ);
 
     uint32_t tilesLoaded = 0;
     uint32_t tilesFailed = 0;
@@ -942,27 +987,34 @@ void TerrainTileCache::loadCoarseLODCoverage() {
 }
 
 int TerrainTileCache::getTileLODAt(int tileX, int tileZ) const {
+    // Convert LOD0 grid position to world position for lookup
+    uint32_t lod0SourceW, lod0SourceH;
+    getLODSourceDimensions(sourceWidth, sourceHeight, 0, lod0SourceW, lod0SourceH);
+    uint32_t stride0 = tileResolution - 1;
+
+    // Calculate world position at center of LOD0 tile
+    float worldX = (static_cast<float>(tileX * stride0 + tileResolution / 2) / lod0SourceW - 0.5f) * terrainSize;
+    float worldZ = (static_cast<float>(tileZ * stride0 + tileResolution / 2) / lod0SourceH - 0.5f) * terrainSize;
+
     // Check from highest detail (LOD0) to lowest (LOD3)
     // Return the first (highest detail) LOD that has a tile covering this position
     for (uint32_t lod = 0; lod < numLODLevels; lod++) {
-        // Convert LOD0 grid position to this LOD's grid
-        uint32_t lodTilesX = tilesX >> lod;
-        uint32_t lodTilesZ = tilesZ >> lod;
-        if (lodTilesX < 1) lodTilesX = 1;
-        if (lodTilesZ < 1) lodTilesZ = 1;
+        // Calculate tile count for this LOD
+        uint32_t lodSourceW, lodSourceH;
+        getLODSourceDimensions(sourceWidth, sourceHeight, lod, lodSourceW, lodSourceH);
+        uint32_t lodTilesX, lodTilesZ;
+        getLODTileCount(lodSourceW, lodSourceH, tileResolution, lodTilesX, lodTilesZ);
 
-        // Scale the LOD0 position to this LOD's grid
-        int lodTileX = tileX >> lod;
-        int lodTileZ = tileZ >> lod;
+        // Convert world position to this LOD's tile coordinate
+        TileCoord coord = worldToTileCoord(worldX, worldZ, lod);
 
         // Check bounds
-        if (lodTileX < 0 || lodTileX >= static_cast<int>(lodTilesX) ||
-            lodTileZ < 0 || lodTileZ >= static_cast<int>(lodTilesZ)) {
+        if (coord.x < 0 || coord.x >= static_cast<int>(lodTilesX) ||
+            coord.z < 0 || coord.z >= static_cast<int>(lodTilesZ)) {
             continue;
         }
 
         // Check if tile is loaded (either GPU or CPU-only)
-        TileCoord coord{lodTileX, lodTileZ};
         uint64_t key = makeTileKey(coord, lod);
         auto it = loadedTiles.find(key);
         if (it != loadedTiles.end() && (it->second.loaded || !it->second.cpuData.empty())) {
