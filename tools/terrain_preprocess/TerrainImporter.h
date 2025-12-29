@@ -52,9 +52,6 @@ public:
     // Get metadata path
     static std::string getMetadataPath(const std::string& cacheDir);
 
-    // Get base LOD path (single 512x512 heightmap covering entire terrain)
-    static std::string getBaseLODPath(const std::string& cacheDir);
-
     // Calculate number of tiles at a given LOD level
     // LOD 0 uses full resolution, each subsequent LOD has half the source pixels
     static void getTileCountForLOD(uint32_t sourceWidth, uint32_t sourceHeight,
@@ -78,9 +75,6 @@ private:
     // Save/load cache metadata
     bool saveMetadata(const TerrainImportConfig& config) const;
     bool loadAndValidateMetadata(const TerrainImportConfig& config) const;
-
-    // Generate and save base_lod.png - a single 512x512 heightmap covering entire terrain
-    bool generateBaseLOD(const TerrainImportConfig& config);
 
     // Source heightmap data (16-bit)
     std::vector<uint16_t> sourceData;

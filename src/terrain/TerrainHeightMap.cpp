@@ -7,13 +7,10 @@
 #include <cstring>
 #include <cmath>
 #include <algorithm>
-#include <filesystem>
 #include <glm/glm.hpp>
 
 #define STB_IMAGE_IMPLEMENTATION_SKIP  // Already implemented elsewhere
 #include <stb_image.h>
-
-namespace fs = std::filesystem;
 
 std::unique_ptr<TerrainHeightMap> TerrainHeightMap::create(const InitInfo& info) {
     std::unique_ptr<TerrainHeightMap> heightMap(new TerrainHeightMap());
@@ -36,29 +33,12 @@ bool TerrainHeightMap::initInternal(const InitInfo& info) {
     terrainSize = info.terrainSize;
     heightScale = info.heightScale;
 
-    // Loading priority:
-    // 1. base_lod.png from tile cache directory (preprocessed, already at target resolution)
-    // 2. Full heightmap file (requires loading large file and resampling - wasteful)
-    // 3. Procedural generation (fallback)
+    // TerrainHeightMap provides a fallback heightmap for positions outside tile cache coverage.
+    // The tile cache's base LOD tiles (loaded from LOD3) should cover the entire terrain,
+    // so this is mainly used during initialization before tile cache is ready.
     bool heightDataLoaded = false;
 
-    // Try base_lod.png from tile cache first (preferred - avoids loading large source heightmap)
-    if (!info.tileCacheDir.empty()) {
-        std::string baseLodPath = info.tileCacheDir + "/base_lod.png";
-        if (fs::exists(baseLodPath)) {
-            SDL_Log("Loading base LOD from tile cache: %s", baseLodPath.c_str());
-            if (loadHeightDataFromFile(baseLodPath, info.minAltitude, info.maxAltitude)) {
-                heightDataLoaded = true;
-            } else {
-                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to load base_lod.png, trying full heightmap");
-            }
-        }
-    }
-
-    // Fall back to full heightmap if base LOD not available
-    if (!heightDataLoaded && !info.heightmapPath.empty()) {
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-            "Loading full heightmap (consider running terrain_preprocess to generate base_lod.png)");
+    if (!info.heightmapPath.empty()) {
         if (loadHeightDataFromFile(info.heightmapPath, info.minAltitude, info.maxAltitude)) {
             heightDataLoaded = true;
         } else {
@@ -66,7 +46,7 @@ bool TerrainHeightMap::initInternal(const InitInfo& info) {
         }
     }
 
-    // Final fallback: procedural generation
+    // Fallback: procedural generation
     if (!heightDataLoaded) {
         SDL_Log("Using procedural height data");
         if (!generateHeightData()) return false;

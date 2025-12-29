@@ -26,10 +26,6 @@ std::string TerrainImporter::getMetadataPath(const std::string& cacheDir) {
     return cacheDir + "/terrain_tiles.meta";
 }
 
-std::string TerrainImporter::getBaseLODPath(const std::string& cacheDir) {
-    return cacheDir + "/base_lod.png";
-}
-
 void TerrainImporter::getTileCountForLOD(uint32_t sourceWidth, uint32_t sourceHeight,
                                           uint32_t tileResolution, uint32_t lod,
                                           uint32_t& outTilesX, uint32_t& outTilesZ) {
@@ -246,16 +242,6 @@ bool TerrainImporter::import(const TerrainImportConfig& config, ImportProgressCa
         }
     }
 
-    // Generate base LOD (single 512x512 heightmap covering entire terrain)
-    // This is used as the fallback for TerrainHeightMap instead of loading the full 16k source
-    if (progressCallback) {
-        progressCallback(0.98f, "Generating base LOD...");
-    }
-    if (!generateBaseLOD(config)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to generate base LOD");
-        return false;
-    }
-
     // Save metadata
     if (!saveMetadata(config)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to save cache metadata");
@@ -389,54 +375,5 @@ bool TerrainImporter::saveTile(const std::string& path, const std::vector<uint16
         return false;
     }
 
-    return true;
-}
-
-bool TerrainImporter::generateBaseLOD(const TerrainImportConfig& config) {
-    // Generate a single 512x512 heightmap covering the entire terrain
-    // This is used as the base/fallback heightmap for far-field rendering and
-    // initial height queries before tiles are loaded. Much more efficient than
-    // loading the full 16k source heightmap just to resample it.
-
-    const uint32_t baseRes = config.tileResolution;  // 512x512
-    std::vector<uint16_t> baseData(baseRes * baseRes);
-
-    // Bilinear resample from source to 512x512
-    for (uint32_t y = 0; y < baseRes; y++) {
-        for (uint32_t x = 0; x < baseRes; x++) {
-            // Map target pixel to source coordinates
-            float srcX = (static_cast<float>(x) / (baseRes - 1)) * (sourceWidth - 1);
-            float srcY = (static_cast<float>(y) / (baseRes - 1)) * (sourceHeight - 1);
-
-            int x0 = static_cast<int>(srcX);
-            int y0 = static_cast<int>(srcY);
-            int x1 = std::min(x0 + 1, static_cast<int>(sourceWidth - 1));
-            int y1 = std::min(y0 + 1, static_cast<int>(sourceHeight - 1));
-
-            float tx = srcX - x0;
-            float ty = srcY - y0;
-
-            // Sample 4 corners
-            float h00 = static_cast<float>(sourceData[y0 * sourceWidth + x0]);
-            float h10 = static_cast<float>(sourceData[y0 * sourceWidth + x1]);
-            float h01 = static_cast<float>(sourceData[y1 * sourceWidth + x0]);
-            float h11 = static_cast<float>(sourceData[y1 * sourceWidth + x1]);
-
-            // Bilinear interpolation
-            float h0 = h00 * (1.0f - tx) + h10 * tx;
-            float h1 = h01 * (1.0f - tx) + h11 * tx;
-            float h = h0 * (1.0f - ty) + h1 * ty;
-
-            baseData[y * baseRes + x] = static_cast<uint16_t>(std::clamp(h, 0.0f, 65535.0f));
-        }
-    }
-
-    std::string basePath = getBaseLODPath(config.cacheDirectory);
-    if (!saveTile(basePath, baseData, baseRes)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to save base LOD: %s", basePath.c_str());
-        return false;
-    }
-
-    SDL_Log("Generated base_lod.png (%ux%u) from %ux%u source", baseRes, baseRes, sourceWidth, sourceHeight);
     return true;
 }
