@@ -33,12 +33,17 @@
 #include "GuiPlayerTab.h"
 #include "GuiTreeTab.h"
 
+#include "terrain/TerrainSystem.h"
+#include "terrain/TerrainTileCache.h"
+
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
 #include <imgui_impl_vulkan.h>
 
 #include <cmath>
 #include <algorithm>
+#include <unordered_map>
+#include <string>
 
 static void checkVkResult(VkResult err) {
     if (err != VK_SUCCESS) {
@@ -328,6 +333,9 @@ void GuiSystem::render(GuiInterfaces& ui, const Camera& camera, float deltaTime,
     if (windowStates.showProfiler) {
         renderProfilerWindow(ui);
     }
+    if (windowStates.showTileLoader) {
+        renderTileLoaderWindow(ui, camera);
+    }
 
     // Skeleton/IK debug overlay
     if (ikDebugSettings.showSkeleton || ikDebugSettings.showIKTargets) {
@@ -384,6 +392,7 @@ void GuiSystem::renderMainMenuBar() {
             ImGui::MenuItem("Debug Visualizations", nullptr, &windowStates.showDebug);
             ImGui::MenuItem("Performance Toggles", nullptr, &windowStates.showPerformance);
             ImGui::MenuItem("Profiler", nullptr, &windowStates.showProfiler);
+            ImGui::MenuItem("Tile Loader", nullptr, &windowStates.showTileLoader);
             ImGui::EndMenu();
         }
 
@@ -690,6 +699,144 @@ void GuiSystem::renderProfilerWindow(GuiInterfaces& ui) {
 
     if (ImGui::Begin("Profiler", &windowStates.showProfiler)) {
         GuiProfilerTab::render(ui.profiler);
+    }
+    ImGui::End();
+}
+
+void GuiSystem::renderTileLoaderWindow(GuiInterfaces& ui, const Camera& camera) {
+    ImGui::SetNextWindowPos(ImVec2(320, 300), ImGuiCond_FirstUseEver);
+    // Window size: 32x32 grid * 16px cells = 512x512, plus padding and title
+    ImGui::SetNextWindowSize(ImVec2(560, 600), ImGuiCond_FirstUseEver);
+
+    if (ImGui::Begin("Tile Loader", &windowStates.showTileLoader)) {
+        const TerrainTileCache* tileCache = ui.terrain.getTerrainSystem().getTileCache();
+
+        if (!tileCache) {
+            ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f), "Tile cache not enabled");
+            ImGui::End();
+            return;
+        }
+
+        // Grid configuration
+        constexpr int GRID_SIZE = 32;
+        constexpr float CELL_SIZE = 16.0f;
+
+        // LOD colors (distinct colors for each LOD level)
+        const ImU32 lodColors[] = {
+            IM_COL32(80, 200, 80, 255),   // LOD0 - Green (highest detail)
+            IM_COL32(80, 150, 220, 255),  // LOD1 - Blue
+            IM_COL32(220, 180, 60, 255),  // LOD2 - Yellow/Orange
+            IM_COL32(180, 80, 180, 255),  // LOD3 - Purple (lowest detail)
+        };
+        const ImU32 emptyColor = IM_COL32(40, 40, 50, 255);
+        const ImU32 gridLineColor = IM_COL32(60, 60, 70, 255);
+        const ImU32 playerColor = IM_COL32(255, 100, 100, 255);
+
+        // Get camera position for player marker
+        glm::vec3 camPos = camera.getPosition();
+        float terrainSize = tileCache->getTerrainSize();
+
+        // Calculate player grid position (0-31)
+        float playerGridX = (camPos.x / terrainSize + 0.5f) * GRID_SIZE;
+        float playerGridZ = (camPos.z / terrainSize + 0.5f) * GRID_SIZE;
+
+        // Legend
+        ImGui::Text("LOD Legend:");
+        ImGui::SameLine();
+        for (int i = 0; i < 4; i++) {
+            ImGui::SameLine();
+            ImGui::PushStyleColor(ImGuiCol_Button, ImGui::ColorConvertU32ToFloat4(lodColors[i]));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImGui::ColorConvertU32ToFloat4(lodColors[i]));
+            ImGui::SmallButton(std::to_string(i).c_str());
+            ImGui::PopStyleColor(2);
+        }
+
+        ImGui::Spacing();
+
+        // Player position info
+        ImGui::Text("Camera: (%.0f, %.0f, %.0f)", camPos.x, camPos.y, camPos.z);
+        ImGui::Text("Grid pos: (%.1f, %.1f)", playerGridX, playerGridZ);
+
+        // Tile statistics
+        ImGui::Text("Active tiles: %u / %u", tileCache->getActiveTileCount(), 64u);
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        // Draw the tile grid
+        ImDrawList* drawList = ImGui::GetWindowDrawList();
+        ImVec2 gridOrigin = ImGui::GetCursorScreenPos();
+
+        // Create a lookup for loaded tiles: key = (x << 16 | z), value = lod
+        // We need to iterate through active tiles
+        std::unordered_map<uint32_t, uint32_t> tileMap;  // (x,z) -> lod at LOD0 grid scale
+
+        const auto& activeTiles = tileCache->getActiveTiles();
+        for (const TerrainTile* tile : activeTiles) {
+            if (!tile || !tile->loaded) continue;
+
+            uint32_t lod = tile->lod;
+            // Scale the tile coord to LOD0 grid space
+            // At LOD0: 32x32 tiles, at LOD1: 16x16, at LOD2: 8x8, at LOD3: 4x4
+            int scale = 1 << lod;  // 1, 2, 4, 8
+            int baseX = tile->coord.x * scale;
+            int baseZ = tile->coord.z * scale;
+
+            // Fill all cells this tile covers in the LOD0 grid
+            for (int dz = 0; dz < scale; dz++) {
+                for (int dx = 0; dx < scale; dx++) {
+                    int gx = baseX + dx;
+                    int gz = baseZ + dz;
+                    if (gx >= 0 && gx < GRID_SIZE && gz >= 0 && gz < GRID_SIZE) {
+                        uint32_t key = (static_cast<uint32_t>(gx) << 16) | static_cast<uint32_t>(gz);
+                        // Only store if we don't have a higher-detail (lower LOD) tile
+                        auto it = tileMap.find(key);
+                        if (it == tileMap.end() || it->second > lod) {
+                            tileMap[key] = lod;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Draw cells
+        for (int z = 0; z < GRID_SIZE; z++) {
+            for (int x = 0; x < GRID_SIZE; x++) {
+                ImVec2 cellMin(gridOrigin.x + x * CELL_SIZE, gridOrigin.y + z * CELL_SIZE);
+                ImVec2 cellMax(cellMin.x + CELL_SIZE, cellMin.y + CELL_SIZE);
+
+                uint32_t key = (static_cast<uint32_t>(x) << 16) | static_cast<uint32_t>(z);
+                auto it = tileMap.find(key);
+
+                ImU32 color = emptyColor;
+                if (it != tileMap.end()) {
+                    uint32_t lod = it->second;
+                    if (lod < 4) {
+                        color = lodColors[lod];
+                    }
+                }
+
+                drawList->AddRectFilled(cellMin, cellMax, color);
+                drawList->AddRect(cellMin, cellMax, gridLineColor);
+            }
+        }
+
+        // Draw player marker
+        if (playerGridX >= 0 && playerGridX < GRID_SIZE &&
+            playerGridZ >= 0 && playerGridZ < GRID_SIZE) {
+            ImVec2 playerPos(
+                gridOrigin.x + playerGridX * CELL_SIZE,
+                gridOrigin.y + playerGridZ * CELL_SIZE
+            );
+            // Draw a crosshair/circle for player
+            float markerRadius = CELL_SIZE * 0.4f;
+            drawList->AddCircleFilled(playerPos, markerRadius, playerColor);
+            drawList->AddCircle(playerPos, markerRadius + 1, IM_COL32(255, 255, 255, 200), 12, 2.0f);
+        }
+
+        // Reserve space for the grid
+        ImGui::Dummy(ImVec2(GRID_SIZE * CELL_SIZE, GRID_SIZE * CELL_SIZE));
     }
     ImGui::End();
 }

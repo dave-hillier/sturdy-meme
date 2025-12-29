@@ -75,6 +75,7 @@ private:
     void renderDebugWindow(GuiInterfaces& ui);
     void renderPerformanceWindow(GuiInterfaces& ui);
     void renderProfilerWindow(GuiInterfaces& ui);
+    void renderTileLoaderWindow(GuiInterfaces& ui, const Camera& camera);
 
     VkDevice device_ = VK_NULL_HANDLE;  // Stored for cleanup
     VkDescriptorPool imguiPool = VK_NULL_HANDLE;
@@ -110,5 +111,6 @@ private:
         bool showDebug = false;
         bool showPerformance = false;
         bool showProfiler = false;
+        bool showTileLoader = false;
     } windowStates;
 };
