@@ -6,6 +6,7 @@
 #include <queue>
 #include <set>
 #include <sstream>
+#include <utility>
 #include <SDL3/SDL_log.h>
 
 // D8 direction offsets (matching d8.cpp)
@@ -199,6 +200,60 @@ static std::vector<Point> simplify_path(const std::vector<Point>& points, double
     return {points.front(), points.back()};
 }
 
+// Compute offset curves (left and right bank lines) from a centerline path
+// Returns a pair of offset paths at +/- half_width from the centerline
+static std::pair<std::vector<Point>, std::vector<Point>> compute_offset_curves(
+    const std::vector<Point>& points,
+    double half_width
+) {
+    std::vector<Point> left_bank, right_bank;
+
+    if (points.size() < 2) {
+        return {points, points};
+    }
+
+    for (size_t i = 0; i < points.size(); ++i) {
+        // Compute tangent direction at this point
+        double tx, ty;
+
+        if (i == 0) {
+            // First point: use forward difference
+            tx = points[1].x - points[0].x;
+            ty = points[1].y - points[0].y;
+        } else if (i == points.size() - 1) {
+            // Last point: use backward difference
+            tx = points[i].x - points[i - 1].x;
+            ty = points[i].y - points[i - 1].y;
+        } else {
+            // Middle points: use central difference for smoother normals
+            tx = points[i + 1].x - points[i - 1].x;
+            ty = points[i + 1].y - points[i - 1].y;
+        }
+
+        // Normalize tangent
+        double len = std::sqrt(tx * tx + ty * ty);
+        if (len < 1e-10) {
+            // Degenerate case: no movement
+            left_bank.push_back(points[i]);
+            right_bank.push_back(points[i]);
+            continue;
+        }
+        tx /= len;
+        ty /= len;
+
+        // Compute normal (perpendicular to tangent)
+        // Rotate tangent 90 degrees: (tx, ty) -> (-ty, tx)
+        double nx = -ty;
+        double ny = tx;
+
+        // Offset point along normal
+        left_bank.push_back({points[i].x + nx * half_width, points[i].y + ny * half_width});
+        right_bank.push_back({points[i].x - nx * half_width, points[i].y - ny * half_width});
+    }
+
+    return {left_bank, right_bank};
+}
+
 // Generate SVG path string using Catmull-Rom splines converted to Bezier curves
 static std::string generate_svg_path(const std::vector<Point>& points, double tension = 0.5) {
     if (points.size() < 2) return "";
@@ -283,8 +338,10 @@ void write_rivers_svg(
     file << "  <!-- Processing resolution: " << width << "x" << height << " -->\n";
     file << "  <!-- Output resolution: " << svg_width << "x" << svg_height << " -->\n";
 
-    // Write each river as a path
+    // Write each river as a pair of bank lines
     int rivers_written = 0;
+    double bank_stroke_width = 1.0 * scale_x;  // Thin line for bank edges
+
     for (size_t i = 0; i < rivers.size(); ++i) {
         const River& river = rivers[i];
 
@@ -299,16 +356,30 @@ void write_rivers_svg(
         auto simplified = simplify_path(scaled_points, scale_x);
         if (simplified.size() < 2) continue;
 
-        // Calculate stroke width based on max accumulation (scaled for output)
+        // Calculate river half-width based on max accumulation (scaled for output)
         double log_acc = std::log(static_cast<double>(river.max_accumulation) + 1.0);
-        double stroke_width = (0.5 + 4.5 * (log_acc / log_max)) * scale_x;
+        double half_width = (0.5 + 4.5 * (log_acc / log_max)) * scale_x * 0.5;
 
-        // Generate path with Catmull-Rom spline
-        std::string path_d = generate_svg_path(simplified, 0.5);
-        file << "  <path d=\"" << path_d << "\" "
+        // Compute offset curves for left and right banks
+        auto [left_bank, right_bank] = compute_offset_curves(simplified, half_width);
+
+        // Generate paths for both banks
+        std::string left_path_d = generate_svg_path(left_bank, 0.5);
+        std::string right_path_d = generate_svg_path(right_bank, 0.5);
+
+        // Write left bank
+        file << "  <path d=\"" << left_path_d << "\" "
              << "fill=\"none\" "
              << "stroke=\"#1e90ff\" "
-             << "stroke-width=\"" << stroke_width << "\" "
+             << "stroke-width=\"" << bank_stroke_width << "\" "
+             << "stroke-linecap=\"round\" "
+             << "stroke-linejoin=\"round\"/>\n";
+
+        // Write right bank
+        file << "  <path d=\"" << right_path_d << "\" "
+             << "fill=\"none\" "
+             << "stroke=\"#1e90ff\" "
+             << "stroke-width=\"" << bank_stroke_width << "\" "
              << "stroke-linecap=\"round\" "
              << "stroke-linejoin=\"round\"/>\n";
 
