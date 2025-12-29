@@ -58,6 +58,7 @@ set(SOURCES
     src/core/LoadingRenderer.cpp
     src/core/Mesh.cpp
     src/core/BufferUtils.cpp
+    src/core/TripleBuffering.cpp
     src/core/Texture.cpp
     src/core/ShaderLoader.cpp
     src/core/pipeline/PipelineBuilder.cpp
