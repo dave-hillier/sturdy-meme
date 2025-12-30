@@ -749,24 +749,17 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
     }
 
     // Reset all 4 indirect draw commands (one per leaf type: oak, ash, aspen, pine)
-    // Also includes tierCounts for phase 3 distance-based budget allocation
     constexpr uint32_t NUM_LEAF_TYPES = 4;
-    constexpr uint32_t NUM_DISTANCE_TIERS = 3;
 
-    // Structure matches shader's IndirectBuffer: drawCmds[4] followed by tierCounts[12]
-    struct {
-        VkDrawIndexedIndirectCommand drawCmds[NUM_LEAF_TYPES];
-        uint32_t tierCounts[NUM_LEAF_TYPES * NUM_DISTANCE_TIERS];
-    } indirectReset = {};
+    VkDrawIndexedIndirectCommand indirectReset[NUM_LEAF_TYPES] = {};
 
     for (uint32_t i = 0; i < NUM_LEAF_TYPES; ++i) {
-        indirectReset.drawCmds[i].indexCount = 6;       // Quad: 6 indices
-        indirectReset.drawCmds[i].instanceCount = 0;    // Will be set by compute shader
-        indirectReset.drawCmds[i].firstIndex = 0;
-        indirectReset.drawCmds[i].vertexOffset = 0;
-        indirectReset.drawCmds[i].firstInstance = i * maxLeavesPerType_;  // Base offset for each leaf type
+        indirectReset[i].indexCount = 6;       // Quad: 6 indices
+        indirectReset[i].instanceCount = 0;    // Will be set by compute shader
+        indirectReset[i].firstIndex = 0;
+        indirectReset[i].vertexOffset = 0;
+        indirectReset[i].firstInstance = i * maxLeavesPerType_;  // Base offset for each leaf type
     }
-    // tierCounts is already zero-initialized
 
     vkCmd.updateBuffer(cullIndirectBuffers_.getVk(frameIndex),
                        0, sizeof(indirectReset), &indirectReset);
