@@ -190,39 +190,46 @@ vec4 sampleFroxelFog(vec2 uv, float linearDepth) {
     vec3 inScatter = fogData.rgb * fogData.a;
     float transmittance = 1.0 - fogData.a;
 
-    // Extrapolate fog for sky pixels (beyond froxel far plane)
-    // This ensures fog properly affects the sky at infinite distance
+    // Apply fog to sky pixels (beyond froxel far plane)
+    // The froxel volume stores fog accumulated along view rays. Sky pixels have
+    // little/no fog because their rays exit the fog layer quickly. But we want
+    // the sky to show atmospheric haze that blends with the foggy terrain.
+    //
+    // Solution: For sky pixels, search the froxel volume for the densest fog
+    // visible anywhere on screen at the far boundary. This represents what
+    // the atmospheric haze looks like and should be applied to the sky.
     if (linearDepth > ubo.froxelFarPlane) {
-        // Calculate how much fog density exists at the far boundary
-        // We estimate this from the transmittance gradient at the far slices
         float farSlice = float(FROXEL_DEPTH - 1) / float(FROXEL_DEPTH);
-        float nearFarSlice = float(FROXEL_DEPTH - 2) / float(FROXEL_DEPTH);
 
-        vec4 fogFar = texture(froxelVolume, vec3(uv, farSlice));
-        vec4 fogNearFar = texture(froxelVolume, vec3(uv, nearFarSlice));
+        // Search for the maximum fog density across the screen at the far slice
+        // Sample at multiple Y positions to find where terrain fog is densest
+        vec4 maxFog = vec4(0.0);
 
-        // Estimate the fog extinction rate at the boundary
-        // Use the difference in alpha between last two slices
-        float alphaFar = fogFar.a;
-        float alphaNearFar = fogNearFar.a;
-        float alphaDelta = max(alphaFar - alphaNearFar, 0.001);
+        // Sample across multiple X and Y positions to find densest fog
+        for (float sy = 0.5; sy <= 0.98; sy += 0.08) {
+            for (float sx = 0.1; sx <= 0.9; sx += 0.2) {
+                vec4 sampleFog = texture(froxelVolume, vec3(sx, sy, farSlice));
+                if (sampleFog.a > maxFog.a) {
+                    maxFog = sampleFog;
+                }
+            }
+        }
 
-        // Estimate distance per slice at far end (exponential distribution)
-        float sliceDepthFar = ubo.froxelFarPlane * 0.1; // Approximate depth of last slice
-        float extinctionRate = alphaDelta / max(sliceDepthFar, 0.1);
+        // Only apply sky fog if we found significant fog somewhere in the scene
+        if (maxFog.a > 0.01) {
+            // Blend factor based on vertical screen position
+            // Full fog near horizon (y≈0.5), fading toward zenith (y=0)
+            float distFromHorizon = abs(uv.y - 0.5);
+            float skyBlend = 1.0 - smoothstep(0.0, 0.45, distFromHorizon);
 
-        // For sky, apply additional extinction based on a reasonable sky distance
-        // Use a soft asymptotic approach rather than infinite distance
-        float extraDistance = min(linearDepth - ubo.froxelFarPlane, ubo.froxelFarPlane * 2.0);
-        float extraExtinction = 1.0 - exp(-extinctionRate * extraDistance * 0.5);
+            // Apply the densest fog to sky pixels
+            vec3 fogScatter = maxFog.rgb * maxFog.a;
+            float fogTransmittance = 1.0 - maxFog.a;
 
-        // Blend in extra fog for sky: reduce transmittance further
-        // and add more in-scatter from the fog color at the boundary
-        vec3 fogColorAtBoundary = fogFar.rgb;
-        float skyFogBlend = extraExtinction;
-
-        transmittance *= (1.0 - skyFogBlend);
-        inScatter += fogColorAtBoundary * skyFogBlend * (1.0 - transmittance);
+            // Blend fog into sky
+            inScatter = mix(inScatter, fogScatter, skyBlend);
+            transmittance = mix(transmittance, fogTransmittance, skyBlend);
+        }
     }
 
     return vec4(inScatter, transmittance);
