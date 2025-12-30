@@ -11,8 +11,9 @@ struct Point {
 };
 
 struct River {
-    std::vector<Point> points;  // Path from headwater to outlet
-    uint32_t max_accumulation;  // Maximum flow accumulation along river
+    std::vector<Point> points;              // Path from headwater to outlet
+    std::vector<uint32_t> accumulation;     // Flow accumulation at each point
+    uint32_t max_accumulation;              // Maximum flow accumulation along river
 };
 
 // Extract individual river paths from river_map

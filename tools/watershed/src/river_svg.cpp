@@ -75,6 +75,7 @@ static River trace_river_downstream(
 
         // Add point to river (use center of cell)
         river.points.push_back({x + 0.5, y + 0.5});
+        river.accumulation.push_back(river_map[idx]);
         river.max_accumulation = std::max(river.max_accumulation, river_map[idx]);
         visited.insert(idx);
 
@@ -96,6 +97,7 @@ static River trace_river_downstream(
         if (visited.count(nidx)) {
             // Add the junction point and stop
             river.points.push_back({nx + 0.5, ny + 0.5});
+            river.accumulation.push_back(river_map[nidx]);
             break;
         }
 
@@ -201,10 +203,10 @@ static std::vector<Point> simplify_path(const std::vector<Point>& points, double
 }
 
 // Compute offset curves (left and right bank lines) from a centerline path
-// Returns a pair of offset paths at +/- half_width from the centerline
+// Returns a pair of offset paths at +/- half_widths[i] from the centerline
 static std::pair<std::vector<Point>, std::vector<Point>> compute_offset_curves(
     const std::vector<Point>& points,
-    double half_width
+    const std::vector<double>& half_widths
 ) {
     std::vector<Point> left_bank, right_bank;
 
@@ -246,9 +248,10 @@ static std::pair<std::vector<Point>, std::vector<Point>> compute_offset_curves(
         double nx = -ty;
         double ny = tx;
 
-        // Offset point along normal
-        left_bank.push_back({points[i].x + nx * half_width, points[i].y + ny * half_width});
-        right_bank.push_back({points[i].x - nx * half_width, points[i].y - ny * half_width});
+        // Offset point along normal using per-point width
+        double hw = half_widths[i];
+        left_bank.push_back({points[i].x + nx * hw, points[i].y + ny * hw});
+        right_bank.push_back({points[i].x - nx * hw, points[i].y - ny * hw});
     }
 
     return {left_bank, right_bank};
@@ -354,13 +357,19 @@ void write_rivers_svg(
 
         if (scaled_points.size() < 2) continue;
 
-        // Calculate river half-width based on max accumulation (scaled for output)
-        double log_acc = std::log(static_cast<double>(river.max_accumulation) + 1.0);
-        double half_width = (0.5 + 4.5 * (log_acc / log_max)) * scale_x * 0.5;
+        // Calculate per-point half-widths based on flow accumulation
+        // Width varies from narrow at headwaters to wide at mouth
+        std::vector<double> half_widths;
+        half_widths.reserve(river.accumulation.size());
+        for (size_t j = 0; j < river.accumulation.size(); ++j) {
+            double log_acc = std::log(static_cast<double>(river.accumulation[j]) + 1.0);
+            double hw = (0.5 + 4.5 * (log_acc / log_max)) * scale_x * 0.5;
+            half_widths.push_back(hw);
+        }
 
         // Compute offset curves for left and right banks using full resolution points
         // (no simplification - preserves fine-grained terrain alignment)
-        auto [left_bank, right_bank] = compute_offset_curves(scaled_points, half_width);
+        auto [left_bank, right_bank] = compute_offset_curves(scaled_points, half_widths);
 
         // Generate paths for both banks
         std::string left_path_d = generate_svg_path(left_bank, 0.5);
