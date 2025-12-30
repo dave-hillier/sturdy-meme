@@ -47,7 +47,7 @@ bool VulkanContext::init(SDL_Window* win) {
 
 void VulkanContext::shutdown() {
     if (device != VK_NULL_HANDLE) {
-        vkDeviceWaitIdle(device);
+        vk::Device(device).waitIdle();
     }
 
     destroySwapchain();
@@ -74,18 +74,18 @@ void VulkanContext::shutdown() {
     }
 
     if (device != VK_NULL_HANDLE) {
-        vkDestroyDevice(device, nullptr);
+        vk::Device(device).destroy();
         device = VK_NULL_HANDLE;
     }
 
     if (surface != VK_NULL_HANDLE) {
-        vkDestroySurfaceKHR(instance, surface, nullptr);
+        vk::Instance(instance).destroySurfaceKHR(surface);
         surface = VK_NULL_HANDLE;
     }
 
     if (instance != VK_NULL_HANDLE) {
         vkb::destroy_debug_utils_messenger(instance, vkbInstance.debug_messenger);
-        vkDestroyInstance(instance, nullptr);
+        vk::Instance(instance).destroy();
         instance = VK_NULL_HANDLE;
     }
 }
@@ -221,27 +221,28 @@ bool VulkanContext::createSwapchain() {
 void VulkanContext::destroySwapchain() {
     if (device == VK_NULL_HANDLE) return;
 
+    vk::Device vkDevice(device);
     for (auto imageView : swapchainImageViews) {
-        vkDestroyImageView(device, imageView, nullptr);
+        vkDevice.destroyImageView(imageView);
     }
     swapchainImageViews.clear();
     swapchainImages.clear();
 
     if (swapchain != VK_NULL_HANDLE) {
-        vkDestroySwapchainKHR(device, swapchain, nullptr);
+        vkDevice.destroySwapchainKHR(swapchain);
         swapchain = VK_NULL_HANDLE;
     }
 }
 
 bool VulkanContext::recreateSwapchain() {
-    vkDeviceWaitIdle(device);
+    vk::Device(device).waitIdle();
     destroySwapchain();
     return createSwapchain();
 }
 
 void VulkanContext::waitIdle() {
     if (device != VK_NULL_HANDLE) {
-        vkDeviceWaitIdle(device);
+        vk::Device(device).waitIdle();
     }
 }
 
