@@ -649,15 +649,11 @@ void main() {
             // Normal fog rendering
             vec4 fog;
 
-            // Sky pixels (depth >= 0.9999) need special handling:
-            // Froxel rays pointing upward sample high-altitude positions where fog density is near zero.
-            // For sky, sample fog from ground-looking froxels which pass through denser low-altitude fog.
-            const float SKY_DEPTH_THRESHOLD = 0.9999;
+            // Sky pixels need fog applied
+            const float SKY_DEPTH_THRESHOLD = 0.99;
             if (depth >= SKY_DEPTH_THRESHOLD) {
-                // For sky pixels, sample fog from ground-looking direction (lower screen = denser fog)
-                // UV.y = 0.85 corresponds to looking toward ground where fog is denser
-                vec2 groundLookingUV = vec2(fragTexCoord.x, 0.85);
-                fog = sampleFroxelFog(groundLookingUV, ubo.froxelFarPlane);
+                // DEBUG: Force visible fog to verify sky pixel detection
+                fog = vec4(0.5, 0.55, 0.6, 0.5);  // 50% gray-blue fog
             } else {
                 fog = sampleFroxelFog(fragTexCoord, linearDepth);
             }
