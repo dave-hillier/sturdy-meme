@@ -211,14 +211,15 @@ bool OceanFFT::initInternal(const InitContext& ctx, const OceanParams& oceanPara
 void OceanFFT::cleanup() {
     if (device == VK_NULL_HANDLE) return;
 
-    vkDeviceWaitIdle(device);
+    vk::Device vkDevice(device);
+    vkDevice.waitIdle();
 
     // Clear cascades (RAII handles cleanup)
     cascades.clear();
 
     // Destroy descriptor pool
     if (descriptorPool != VK_NULL_HANDLE) {
-        vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+        vkDevice.destroyDescriptorPool(descriptorPool);
         descriptorPool = VK_NULL_HANDLE;
     }
 
@@ -397,7 +398,7 @@ bool OceanFFT::createComputePipelines() {
 
         bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE,
             *reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), spectrumPipeline);
-        vkDestroyShaderModule(device, *shaderModule, nullptr);
+        vk::Device(device).destroyShaderModule(*shaderModule);
 
         if (!success) {
             return false;
@@ -450,7 +451,7 @@ bool OceanFFT::createComputePipelines() {
 
         bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE,
             *reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), timeEvolutionPipeline);
-        vkDestroyShaderModule(device, *shaderModule, nullptr);
+        vk::Device(device).destroyShaderModule(*shaderModule);
 
         if (!success) {
             return false;
@@ -500,7 +501,7 @@ bool OceanFFT::createComputePipelines() {
 
         bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE,
             *reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), fftPipeline);
-        vkDestroyShaderModule(device, *shaderModule, nullptr);
+        vk::Device(device).destroyShaderModule(*shaderModule);
 
         if (!success) {
             return false;
@@ -554,7 +555,7 @@ bool OceanFFT::createComputePipelines() {
 
         bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE,
             *reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), displacementPipeline);
-        vkDestroyShaderModule(device, *shaderModule, nullptr);
+        vk::Device(device).destroyShaderModule(*shaderModule);
 
         if (!success) {
             return false;
@@ -570,6 +571,8 @@ bool OceanFFT::createDescriptorSets() {
     // Simplified: 1 spectrum + 1 time evolution + multiple FFT sets + 1 displacement
     uint32_t setsPerCascade = 4;  // spectrum, time evolution, fft (reuse), displacement
     uint32_t totalSets = cascadeCount * setsPerCascade + cascadeCount * 12;  // Extra FFT sets for ping-pong
+
+    vk::Device vkDevice(device);
 
     // Create descriptor pool
     std::array<vk::DescriptorPoolSize, 3> poolSizes = {
@@ -588,8 +591,10 @@ bool OceanFFT::createDescriptorSets() {
         .setMaxSets(totalSets)
         .setPoolSizes(poolSizes);
 
-    if (vkCreateDescriptorPool(device, reinterpret_cast<const VkDescriptorPoolCreateInfo*>(&poolInfo),
-            nullptr, &descriptorPool) != VK_SUCCESS) {
+    try {
+        descriptorPool = vkDevice.createDescriptorPool(poolInfo);
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to create descriptor pool: %s", e.what());
         return false;
     }
 
@@ -615,14 +620,16 @@ bool OceanFFT::createDescriptorSets() {
     for (int i = 0; i < cascadeCount; i++) {
         // Spectrum descriptor set
         {
-            VkDescriptorSetLayout layout = spectrumDescLayout.get();
-            VkDescriptorSetAllocateInfo allocInfo{};
-            allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-            allocInfo.descriptorPool = descriptorPool;
-            allocInfo.descriptorSetCount = 1;
-            allocInfo.pSetLayouts = &layout;
+            vk::DescriptorSetLayout spectrumLayout(spectrumDescLayout.get());
+            auto allocInfo = vk::DescriptorSetAllocateInfo{}
+                .setDescriptorPool(descriptorPool)
+                .setSetLayouts(spectrumLayout);
 
-            if (vkAllocateDescriptorSets(device, &allocInfo, &spectrumDescSets[i]) != VK_SUCCESS) {
+            try {
+                auto sets = vkDevice.allocateDescriptorSets(allocInfo);
+                spectrumDescSets[i] = sets[0];
+            } catch (const vk::SystemError& e) {
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to allocate spectrum descriptor set: %s", e.what());
                 return false;
             }
 
@@ -635,14 +642,16 @@ bool OceanFFT::createDescriptorSets() {
 
         // Time evolution descriptor set
         {
-            VkDescriptorSetLayout layout = timeEvolutionDescLayout.get();
-            VkDescriptorSetAllocateInfo allocInfo{};
-            allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-            allocInfo.descriptorPool = descriptorPool;
-            allocInfo.descriptorSetCount = 1;
-            allocInfo.pSetLayouts = &layout;
+            vk::DescriptorSetLayout timeLayout(timeEvolutionDescLayout.get());
+            auto allocInfo = vk::DescriptorSetAllocateInfo{}
+                .setDescriptorPool(descriptorPool)
+                .setSetLayouts(timeLayout);
 
-            if (vkAllocateDescriptorSets(device, &allocInfo, &timeEvolutionDescSets[i]) != VK_SUCCESS) {
+            try {
+                auto sets = vkDevice.allocateDescriptorSets(allocInfo);
+                timeEvolutionDescSets[i] = sets[0];
+            } catch (const vk::SystemError& e) {
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to allocate time evolution descriptor set: %s", e.what());
                 return false;
             }
 
@@ -657,14 +666,16 @@ bool OceanFFT::createDescriptorSets() {
 
         // Displacement descriptor set
         {
-            VkDescriptorSetLayout layout = displacementDescLayout.get();
-            VkDescriptorSetAllocateInfo allocInfo{};
-            allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-            allocInfo.descriptorPool = descriptorPool;
-            allocInfo.descriptorSetCount = 1;
-            allocInfo.pSetLayouts = &layout;
+            vk::DescriptorSetLayout dispLayout(displacementDescLayout.get());
+            auto allocInfo = vk::DescriptorSetAllocateInfo{}
+                .setDescriptorPool(descriptorPool)
+                .setSetLayouts(dispLayout);
 
-            if (vkAllocateDescriptorSets(device, &allocInfo, &displacementDescSets[i]) != VK_SUCCESS) {
+            try {
+                auto sets = vkDevice.allocateDescriptorSets(allocInfo);
+                displacementDescSets[i] = sets[0];
+            } catch (const vk::SystemError& e) {
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to allocate displacement descriptor set: %s", e.what());
                 return false;
             }
 
@@ -820,15 +831,16 @@ void OceanFFT::recordFFT(VkCommandBuffer cmd, Cascade& cascade,
 
     // Allocate temporary FFT descriptor sets dynamically
     VkDescriptorSet fftDescSet;
-    VkDescriptorSetLayout layout = fftDescLayout.get();
-    VkDescriptorSetAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = descriptorPool;
-    allocInfo.descriptorSetCount = 1;
-    allocInfo.pSetLayouts = &layout;
+    vk::DescriptorSetLayout fftLayout(fftDescLayout.get());
+    auto allocInfo = vk::DescriptorSetAllocateInfo{}
+        .setDescriptorPool(descriptorPool)
+        .setSetLayouts(fftLayout);
 
-    if (vkAllocateDescriptorSets(device, &allocInfo, &fftDescSet) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to allocate FFT descriptor set");
+    try {
+        auto sets = vk::Device(device).allocateDescriptorSets(allocInfo);
+        fftDescSet = sets[0];
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to allocate FFT descriptor set: %s", e.what());
         return;
     }
 
