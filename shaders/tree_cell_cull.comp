@@ -102,10 +102,11 @@ void main() {
         return;
     }
 
-    // Frustum culling: skip cells completely outside frustum (uses shared culling UBO)
-    if (!isAABBInFrustum(boundsMin, boundsMax, culling.frustumPlanes)) {
-        return;
-    }
+    // NOTE: We intentionally skip frustum culling here.
+    // Leaves use the same culled buffer for both main rendering and shadows.
+    // Frustum culling against the camera would remove cells whose trees' leaves
+    // are behind the camera but still need to cast shadows into the view.
+    // Distance culling is sufficient to limit the workload.
 
     // Calculate distance to cell center for bucket assignment
     vec3 cellCenter = (boundsMin + boundsMax) * 0.5;

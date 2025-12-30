@@ -156,12 +156,12 @@ void main() {
         return;
     }
 
-    // Frustum culling (uses shared culling UBO)
-    // Trees are typically 5-15m tall, use generous margin
-    float boundingRadius = 10.0;
-    if (!isInFrustum(culling.frustumPlanes, treeWorldPos, boundingRadius)) {
-        return;
-    }
+    // NOTE: We intentionally skip frustum culling here.
+    // Unlike branches which have separate shadow culling against the light frustum,
+    // leaves use the same culled buffer for both main rendering and shadows.
+    // Frustum culling against the camera would remove trees whose leaves are behind
+    // the camera but still need to cast shadows into the view.
+    // Distance culling is sufficient - cell culling already limits visible cells.
 
     // Use subgroup operations to batch atomic updates
     uvec4 activeMask = subgroupBallot(true);
