@@ -515,7 +515,8 @@ void BilateralGridSystem::recordClearGrid(VkCommandBuffer cmd) {
                         reinterpret_cast<const VkImageMemoryBarrier*>(&barrier));
 
     // Clear to zero
-    VkClearColorValue clearColor = {{0.0f, 0.0f, 0.0f, 0.0f}};
+    vk::CommandBuffer vkCmd(cmd);
+    auto clearColor = vk::ClearColorValue(std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f});
     auto range = vk::ImageSubresourceRange{}
         .setAspectMask(vk::ImageAspectFlagBits::eColor)
         .setBaseMipLevel(0)
@@ -523,8 +524,7 @@ void BilateralGridSystem::recordClearGrid(VkCommandBuffer cmd) {
         .setBaseArrayLayer(0)
         .setLayerCount(1);
 
-    vkCmdClearColorImage(cmd, gridImages[0], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                        &clearColor, 1, reinterpret_cast<const VkImageSubresourceRange*>(&range));
+    vkCmd.clearColorImage(gridImages[0], vk::ImageLayout::eTransferDstOptimal, clearColor, range);
 
     // Transition both grids to GENERAL for compute in a single batched barrier
     // grid[0]: TRANSFER_DST → GENERAL (after clear)

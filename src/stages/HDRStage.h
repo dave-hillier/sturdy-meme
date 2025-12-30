@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vulkan/vulkan.h>
+#include <vulkan/vulkan.hpp>
 #include <functional>
 #include <vector>
 #include <string>
@@ -52,38 +53,36 @@ struct HDRStage {
 
     void execute(RenderContext& ctx) {
         const auto& res = ctx.resources;
+        vk::CommandBuffer vkCmd(ctx.cmd);
 
         // Begin HDR render pass
-        VkRenderPassBeginInfo renderPassInfo{};
-        renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        renderPassInfo.renderPass = res.hdrRenderPass;
-        renderPassInfo.framebuffer = res.hdrFramebuffer;
-        renderPassInfo.renderArea.offset = {0, 0};
-        renderPassInfo.renderArea.extent = res.hdrExtent;
+        std::array<vk::ClearValue, 2> clearValues{};
+        clearValues[0].color = vk::ClearColorValue(std::array<float, 4>{
+            clearColor[0], clearColor[1], clearColor[2], clearColor[3]});
+        clearValues[1].depthStencil = vk::ClearDepthStencilValue{clearDepth, 0};
 
-        std::array<VkClearValue, 2> clearValues{};
-        clearValues[0].color = {{clearColor[0], clearColor[1], clearColor[2], clearColor[3]}};
-        clearValues[1].depthStencil = {clearDepth, 0};
+        auto renderPassInfo = vk::RenderPassBeginInfo{}
+            .setRenderPass(res.hdrRenderPass)
+            .setFramebuffer(res.hdrFramebuffer)
+            .setRenderArea(vk::Rect2D{{0, 0}, vk::Extent2D{res.hdrExtent.width, res.hdrExtent.height}})
+            .setClearValues(clearValues);
 
-        renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
-        renderPassInfo.pClearValues = clearValues.data();
-
-        vkCmdBeginRenderPass(ctx.cmd, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+        vkCmd.beginRenderPass(renderPassInfo, vk::SubpassContents::eInline);
 
         // Set viewport and scissor
-        VkViewport viewport{};
-        viewport.x = 0.0f;
-        viewport.y = 0.0f;
-        viewport.width = static_cast<float>(res.hdrExtent.width);
-        viewport.height = static_cast<float>(res.hdrExtent.height);
-        viewport.minDepth = 0.0f;
-        viewport.maxDepth = 1.0f;
-        vkCmdSetViewport(ctx.cmd, 0, 1, &viewport);
+        auto viewport = vk::Viewport{}
+            .setX(0.0f)
+            .setY(0.0f)
+            .setWidth(static_cast<float>(res.hdrExtent.width))
+            .setHeight(static_cast<float>(res.hdrExtent.height))
+            .setMinDepth(0.0f)
+            .setMaxDepth(1.0f);
+        vkCmd.setViewport(0, viewport);
 
-        VkRect2D scissor{};
-        scissor.offset = {0, 0};
-        scissor.extent = res.hdrExtent;
-        vkCmdSetScissor(ctx.cmd, 0, 1, &scissor);
+        auto scissor = vk::Rect2D{}
+            .setOffset({0, 0})
+            .setExtent(vk::Extent2D{res.hdrExtent.width, res.hdrExtent.height});
+        vkCmd.setScissor(0, scissor);
 
         // Execute all draw calls in order
         for (auto& call : drawCalls) {
@@ -92,7 +91,7 @@ struct HDRStage {
             }
         }
 
-        vkCmdEndRenderPass(ctx.cmd);
+        vkCmd.endRenderPass();
     }
 
     void clear() {

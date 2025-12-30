@@ -398,10 +398,16 @@ void FroxelSystem::recordFroxelUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
         // First frame: no valid history yet, clear to zero
         Barriers::prepareImageForTransferDst(cmd, scatteringVolumes_[historyVolumeIdx].get());
 
-        VkClearColorValue clearValue = {{0.0f, 0.0f, 0.0f, 0.0f}};
-        VkImageSubresourceRange clearRange{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        vkCmdClearColorImage(cmd, scatteringVolumes_[historyVolumeIdx].get(),
-                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearValue, 1, &clearRange);
+        vk::CommandBuffer vkCmd(cmd);
+        auto clearValue = vk::ClearColorValue(std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f});
+        auto clearRange = vk::ImageSubresourceRange{}
+            .setAspectMask(vk::ImageAspectFlagBits::eColor)
+            .setBaseMipLevel(0)
+            .setLevelCount(1)
+            .setBaseArrayLayer(0)
+            .setLayerCount(1);
+        vkCmd.clearColorImage(scatteringVolumes_[historyVolumeIdx].get(),
+                              vk::ImageLayout::eTransferDstOptimal, clearValue, clearRange);
 
         // Transition to GENERAL for shader access
         Barriers::transitionImage(cmd, scatteringVolumes_[historyVolumeIdx].get(),
@@ -421,10 +427,16 @@ void FroxelSystem::recordFroxelUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
         // First frame: clear to zero
         Barriers::prepareImageForTransferDst(cmd, integratedVolume_.get());
 
-        VkClearColorValue clearValue = {{0.0f, 0.0f, 0.0f, 0.0f}};
-        VkImageSubresourceRange clearRange{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        vkCmdClearColorImage(cmd, integratedVolume_.get(),
-                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearValue, 1, &clearRange);
+        vk::CommandBuffer vkCmdInt(cmd);
+        auto clearValueInt = vk::ClearColorValue(std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f});
+        auto clearRangeInt = vk::ImageSubresourceRange{}
+            .setAspectMask(vk::ImageAspectFlagBits::eColor)
+            .setBaseMipLevel(0)
+            .setLevelCount(1)
+            .setBaseArrayLayer(0)
+            .setLayerCount(1);
+        vkCmdInt.clearColorImage(integratedVolume_.get(),
+                                 vk::ImageLayout::eTransferDstOptimal, clearValueInt, clearRangeInt);
 
         // Transition to GENERAL for compute
         Barriers::transitionImage(cmd, integratedVolume_.get(),

@@ -344,11 +344,11 @@ void WaterTileCull::recordTileCull(VkCommandBuffer cmd, uint32_t frameIndex,
     barrierCullResultsForDrawAndTransfer(cmd, frameIndex);
 
     // Copy the counter value for this frame to the host-visible readback buffer
-    VkBufferCopy copyRegion{};
-    copyRegion.srcOffset = frameIndex * sizeof(uint32_t);
-    copyRegion.dstOffset = frameIndex * sizeof(uint32_t);
-    copyRegion.size = sizeof(uint32_t);
-    vkCmdCopyBuffer(cmd, counterBuffer_.get(), counterReadbackBuffer_.get(), 1, &copyRegion);
+    auto copyRegion = vk::BufferCopy{}
+        .setSrcOffset(frameIndex * sizeof(uint32_t))
+        .setDstOffset(frameIndex * sizeof(uint32_t))
+        .setSize(sizeof(uint32_t));
+    vkCmd.copyBuffer(counterBuffer_.get(), counterReadbackBuffer_.get(), copyRegion);
 
     barrierCounterForHostRead(cmd, frameIndex);
 }

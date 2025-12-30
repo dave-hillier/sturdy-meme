@@ -384,9 +384,11 @@ void TreeBranchCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
         resetCmds[g].vertexOffset = 0;
         resetCmds[g].firstInstance = 0;
     }
-    vkCmdUpdateBuffer(cmd, indirectBuffers_.getVk(frameIndex), 0,
-                      resetCmds.size() * sizeof(VkDrawIndexedIndirectCommand),
-                      resetCmds.data());
+    {
+        vk::CommandBuffer vkCmdReset(cmd);
+        vkCmdReset.updateBuffer(indirectBuffers_.getVk(frameIndex), 0,
+                                vk::ArrayProxy<const VkDrawIndexedIndirectCommand>(resetCmds));
+    }
 
     // Memory barrier to ensure buffer update completes before compute shader reads
     VkMemoryBarrier resetBarrier{};
