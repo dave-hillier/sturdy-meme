@@ -424,6 +424,28 @@ add_custom_target(foam_texture_gen
 # Main target depends on foam texture
 add_dependencies(${PROJECT_NAME} foam_texture_gen)
 
+# Caustics texture generation
+set(CAUSTICS_TEXTURE ${FOAM_TEXTURE_DIR}/caustics.png)
+
+# Generate caustics texture (only regenerate if tool source changes)
+add_custom_command(
+    OUTPUT ${CAUSTICS_TEXTURE}
+    COMMAND $<TARGET_FILE:caustics_gen>
+        --resolution 512
+        --waves 8
+        --output ${CAUSTICS_TEXTURE}
+    DEPENDS caustics_gen
+    COMMENT "Generating caustics texture"
+)
+
+# Custom target for caustics texture generation
+add_custom_target(caustics_texture_gen
+    DEPENDS ${CAUSTICS_TEXTURE}
+)
+
+# Main target depends on caustics texture
+add_dependencies(${PROJECT_NAME} caustics_texture_gen)
+
 # SBSAR (Substance Archive) texture processing
 set(SBSAR_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/assets/substances)
 set(SBSAR_OUTPUT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/assets/textures/substances)
