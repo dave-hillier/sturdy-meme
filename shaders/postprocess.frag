@@ -646,16 +646,14 @@ void main() {
                 hdr = debugVis.rgb;
             }
         } else {
-            // Normal fog rendering
-            vec4 fog;
+            // Normal fog rendering - sample based on actual linearDepth
+            vec4 fog = sampleFroxelFog(fragTexCoord, linearDepth);
 
-            // Sky pixels need fog applied
-            const float SKY_DEPTH_THRESHOLD = 0.99;
-            if (depth >= SKY_DEPTH_THRESHOLD) {
-                // DEBUG: Force visible fog to verify sky pixel detection
-                fog = vec4(0.5, 0.55, 0.6, 0.5);  // 50% gray-blue fog
-            } else {
-                fog = sampleFroxelFog(fragTexCoord, linearDepth);
+            // Sky pixels have broken depth causing them to sample from front of volume
+            // (minimal accumulated fog). Detect by high transmittance and resample at far plane.
+            if (fog.a > 0.99) {
+                // Almost no fog accumulated - likely sky, resample at far plane
+                fog = sampleFroxelFog(fragTexCoord, ubo.froxelFarPlane);
             }
 
             vec3 inScatter = fog.rgb;
