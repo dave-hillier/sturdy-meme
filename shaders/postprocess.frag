@@ -195,34 +195,32 @@ vec4 sampleFroxelFog(vec2 uv, float linearDepth) {
     // little/no fog because their rays exit the fog layer quickly. But we want
     // the sky to show atmospheric haze that blends with the foggy terrain.
     //
-    // Solution: For sky pixels, search the froxel volume for the densest fog
-    // visible anywhere on screen at the far boundary. This represents what
-    // the atmospheric haze looks like and should be applied to the sky.
+    // Solution: Search the froxel volume for the densest fog across the screen
+    // AND across depth slices. The far slice may have low fog if terrain is
+    // closer (ray continues into clear air beyond terrain).
     if (linearDepth > ubo.froxelFarPlane) {
-        float farSlice = float(FROXEL_DEPTH - 1) / float(FROXEL_DEPTH);
-
-        // Search for the maximum fog density across the screen at the far slice
-        // Sample at multiple Y positions to find where terrain fog is densest
+        // Search for maximum fog density across screen positions AND depth slices
         vec4 maxFog = vec4(0.0);
 
-        // Sample across multiple X and Y positions to find densest fog
-        for (float sy = 0.5; sy <= 0.98; sy += 0.08) {
-            for (float sx = 0.1; sx <= 0.9; sx += 0.2) {
-                vec4 sampleFog = texture(froxelVolume, vec3(sx, sy, farSlice));
+        // Sample across depth slices (terrain fog peaks where terrain is)
+        for (float sz = 0.3; sz <= 1.0; sz += 0.1) {
+            // Sample across screen positions (lower screen = more likely terrain)
+            for (float sy = 0.5; sy <= 0.95; sy += 0.15) {
+                vec4 sampleFog = texture(froxelVolume, vec3(uv.x, sy, sz));
                 if (sampleFog.a > maxFog.a) {
                     maxFog = sampleFog;
                 }
             }
         }
 
-        // Only apply sky fog if we found significant fog somewhere in the scene
+        // Only apply sky fog if we found significant fog somewhere
         if (maxFog.a > 0.01) {
             // Blend factor based on vertical screen position
             // Full fog near horizon (y≈0.5), fading toward zenith (y=0)
             float distFromHorizon = abs(uv.y - 0.5);
             float skyBlend = 1.0 - smoothstep(0.0, 0.45, distFromHorizon);
 
-            // Apply the densest fog to sky pixels
+            // Apply the densest fog found to sky pixels
             vec3 fogScatter = maxFog.rgb * maxFog.a;
             float fogTransmittance = 1.0 - maxFog.a;
 
