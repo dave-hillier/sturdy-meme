@@ -4,6 +4,7 @@
 #include "Mesh.h"
 #include "PipelineBuilder.h"
 #include "GraphicsPipelineFactory.h"
+#include <vulkan/vulkan.hpp>
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <glm/gtc/matrix_transform.hpp>
@@ -315,19 +316,22 @@ void ShadowSystem::drawShadowScene(
     const DrawCallback& treeCallback,
     const DrawCallback& skinnedCallback)
 {
+    vk::CommandBuffer vkCmd(cmd);
+
     for (const auto& obj : sceneObjects) {
         if (!obj.castsShadow) continue;
 
         ShadowPushConstants push{};
         push.model = obj.transform;
         push.cascadeIndex = static_cast<int>(cascadeOrFaceIndex);
-        vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(push), &push);
+        vkCmd.pushConstants<ShadowPushConstants>(
+            layout, vk::ShaderStageFlagBits::eVertex, 0, push);
 
         VkBuffer vb[] = {obj.mesh->getVertexBuffer()};
         VkDeviceSize offsets[] = {0};
         vkCmdBindVertexBuffers(cmd, 0, 1, vb, offsets);
-        vkCmdBindIndexBuffer(cmd, obj.mesh->getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
-        vkCmdDrawIndexed(cmd, obj.mesh->getIndexCount(), 1, 0, 0, 0);
+        vkCmd.bindIndexBuffer(obj.mesh->getIndexBuffer(), 0, vk::IndexType::eUint32);
+        vkCmd.drawIndexed(obj.mesh->getIndexCount(), 1, 0, 0, 0);
     }
 
     if (terrainCallback) terrainCallback(cmd, cascadeOrFaceIndex, lightMatrix);
@@ -344,39 +348,41 @@ void ShadowSystem::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex,
                                      const DrawCallback& treeDrawCallback,
                                      const DrawCallback& skinnedDrawCallback,
                                      const ComputeCallback& preCascadeComputeCallback) {
+    vk::CommandBuffer vkCmd(cmd);
+
     for (uint32_t cascade = 0; cascade < NUM_SHADOW_CASCADES; cascade++) {
         // Run pre-cascade compute pass (GPU culling) BEFORE the render pass
         if (preCascadeComputeCallback) {
             preCascadeComputeCallback(cmd, frameIndex, cascade, cascadeMatrices[cascade]);
         }
 
-        VkRenderPassBeginInfo shadowPassInfo{};
-        shadowPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        shadowPassInfo.renderPass = shadowRenderPass;
-        shadowPassInfo.framebuffer = cascadeFramebuffers[cascade];
-        shadowPassInfo.renderArea.offset = {0, 0};
-        shadowPassInfo.renderArea.extent = {SHADOW_MAP_SIZE, SHADOW_MAP_SIZE};
+        vk::ClearValue shadowClear;
+        shadowClear.depthStencil = vk::ClearDepthStencilValue{1.0f, 0};
 
-        VkClearValue shadowClear{};
-        shadowClear.depthStencil = {1.0f, 0};
-        shadowPassInfo.clearValueCount = 1;
-        shadowPassInfo.pClearValues = &shadowClear;
+        auto shadowPassInfo = vk::RenderPassBeginInfo{}
+            .setRenderPass(shadowRenderPass)
+            .setFramebuffer(cascadeFramebuffers[cascade])
+            .setRenderArea({{0, 0}, {SHADOW_MAP_SIZE, SHADOW_MAP_SIZE}})
+            .setClearValues(shadowClear);
 
-        vkCmdBeginRenderPass(cmd, &shadowPassInfo, VK_SUBPASS_CONTENTS_INLINE);
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipeline);
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
+        vkCmd.beginRenderPass(shadowPassInfo, vk::SubpassContents::eInline);
+        vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, shadowPipeline);
+        vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, shadowPipelineLayout,
+                                 0, vk::DescriptorSet(descriptorSet), {});
 
         drawShadowScene(cmd, shadowPipelineLayout, cascade, cascadeMatrices[cascade],
                         sceneObjects, terrainDrawCallback, grassDrawCallback, treeDrawCallback, skinnedDrawCallback);
 
-        vkCmdEndRenderPass(cmd);
+        vkCmd.endRenderPass();
     }
 }
 
 void ShadowSystem::bindSkinnedShadowPipeline(VkCommandBuffer cmd, VkDescriptorSet descriptorSet) {
     if (skinnedShadowPipeline == VK_NULL_HANDLE) return;
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, skinnedShadowPipeline);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, skinnedShadowPipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
+    vk::CommandBuffer vkCmd(cmd);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, skinnedShadowPipeline);
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, skinnedShadowPipelineLayout,
+                             0, vk::DescriptorSet(descriptorSet), {});
 }
 
 void ShadowSystem::recordSkinnedMeshShadow(VkCommandBuffer cmd, uint32_t cascade,
@@ -384,16 +390,19 @@ void ShadowSystem::recordSkinnedMeshShadow(VkCommandBuffer cmd, uint32_t cascade
                                             const SkinnedMesh& mesh) {
     if (skinnedShadowPipelineLayout == VK_NULL_HANDLE) return;
 
+    vk::CommandBuffer vkCmd(cmd);
+
     ShadowPushConstants shadowPush{};
     shadowPush.model = modelMatrix;
     shadowPush.cascadeIndex = static_cast<int>(cascade);
-    vkCmdPushConstants(cmd, skinnedShadowPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(ShadowPushConstants), &shadowPush);
+    vkCmd.pushConstants<ShadowPushConstants>(
+        skinnedShadowPipelineLayout, vk::ShaderStageFlagBits::eVertex, 0, shadowPush);
 
     VkBuffer vertexBuffers[] = {mesh.getVertexBuffer()};
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
-    vkCmdBindIndexBuffer(cmd, mesh.getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
-    vkCmdDrawIndexed(cmd, mesh.getIndexCount(), 1, 0, 0, 0);
+    vkCmd.bindIndexBuffer(mesh.getIndexBuffer(), 0, vk::IndexType::eUint32);
+    vkCmd.drawIndexed(mesh.getIndexCount(), 1, 0, 0, 0);
 }
 
 void ShadowSystem::renderDynamicShadows(VkCommandBuffer cmd, uint32_t frameIndex,
@@ -405,9 +414,18 @@ void ShadowSystem::renderDynamicShadows(VkCommandBuffer cmd, uint32_t frameIndex
                                         const std::vector<Light>& visibleLights) {
     if (dynamicShadowPipeline == VK_NULL_HANDLE) return;
 
-    VkViewport viewport{0.0f, 0.0f, static_cast<float>(DYNAMIC_SHADOW_MAP_SIZE),
-                        static_cast<float>(DYNAMIC_SHADOW_MAP_SIZE), 0.0f, 1.0f};
-    VkRect2D scissor{{0, 0}, {DYNAMIC_SHADOW_MAP_SIZE, DYNAMIC_SHADOW_MAP_SIZE}};
+    vk::CommandBuffer vkCmd(cmd);
+
+    auto viewport = vk::Viewport{}
+        .setX(0.0f)
+        .setY(0.0f)
+        .setWidth(static_cast<float>(DYNAMIC_SHADOW_MAP_SIZE))
+        .setHeight(static_cast<float>(DYNAMIC_SHADOW_MAP_SIZE))
+        .setMinDepth(0.0f)
+        .setMaxDepth(1.0f);
+    auto scissor = vk::Rect2D{}
+        .setOffset({0, 0})
+        .setExtent({DYNAMIC_SHADOW_MAP_SIZE, DYNAMIC_SHADOW_MAP_SIZE});
 
     uint32_t lightCount = static_cast<uint32_t>(std::min<size_t>(visibleLights.size(), MAX_SHADOW_CASTING_LIGHTS));
 
@@ -418,52 +436,50 @@ void ShadowSystem::renderDynamicShadows(VkCommandBuffer cmd, uint32_t frameIndex
         if (light.type == LightType::Point) {
             if (frameIndex >= pointShadowFramebuffers.size()) continue;
             for (uint32_t face = 0; face < pointShadowFramebuffers[frameIndex].size(); face++) {
-                VkRenderPassBeginInfo passInfo{};
-                passInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-                passInfo.renderPass = shadowRenderPass;
-                passInfo.framebuffer = pointShadowFramebuffers[frameIndex][face];
-                passInfo.renderArea.extent = {DYNAMIC_SHADOW_MAP_SIZE, DYNAMIC_SHADOW_MAP_SIZE};
+                vk::ClearValue clear;
+                clear.depthStencil = vk::ClearDepthStencilValue{1.0f, 0};
 
-                VkClearValue clear{};
-                clear.depthStencil = {1.0f, 0};
-                passInfo.clearValueCount = 1;
-                passInfo.pClearValues = &clear;
+                auto passInfo = vk::RenderPassBeginInfo{}
+                    .setRenderPass(shadowRenderPass)
+                    .setFramebuffer(pointShadowFramebuffers[frameIndex][face])
+                    .setRenderArea({{0, 0}, {DYNAMIC_SHADOW_MAP_SIZE, DYNAMIC_SHADOW_MAP_SIZE}})
+                    .setClearValues(clear);
 
-                vkCmdBeginRenderPass(cmd, &passInfo, VK_SUBPASS_CONTENTS_INLINE);
-                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, dynamicShadowPipeline);
-                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, dynamicShadowPipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
-                vkCmdSetViewport(cmd, 0, 1, &viewport);
-                vkCmdSetScissor(cmd, 0, 1, &scissor);
+                vkCmd.beginRenderPass(passInfo, vk::SubpassContents::eInline);
+                vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, dynamicShadowPipeline);
+                vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, dynamicShadowPipelineLayout,
+                                         0, vk::DescriptorSet(descriptorSet), {});
+                vkCmd.setViewport(0, viewport);
+                vkCmd.setScissor(0, scissor);
 
                 drawShadowScene(cmd, dynamicShadowPipelineLayout, face, glm::mat4(1.0f),
                                 sceneObjects, terrainDrawCallback, grassDrawCallback, nullptr, skinnedDrawCallback);
 
-                vkCmdEndRenderPass(cmd);
+                vkCmd.endRenderPass();
             }
         } else {
             if (frameIndex >= spotShadowFramebuffers.size() || lightIndex >= spotShadowFramebuffers[frameIndex].size()) continue;
 
-            VkRenderPassBeginInfo passInfo{};
-            passInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-            passInfo.renderPass = shadowRenderPass;
-            passInfo.framebuffer = spotShadowFramebuffers[frameIndex][lightIndex];
-            passInfo.renderArea.extent = {DYNAMIC_SHADOW_MAP_SIZE, DYNAMIC_SHADOW_MAP_SIZE};
+            vk::ClearValue clear;
+            clear.depthStencil = vk::ClearDepthStencilValue{1.0f, 0};
 
-            VkClearValue clear{};
-            clear.depthStencil = {1.0f, 0};
-            passInfo.clearValueCount = 1;
-            passInfo.pClearValues = &clear;
+            auto passInfo = vk::RenderPassBeginInfo{}
+                .setRenderPass(shadowRenderPass)
+                .setFramebuffer(spotShadowFramebuffers[frameIndex][lightIndex])
+                .setRenderArea({{0, 0}, {DYNAMIC_SHADOW_MAP_SIZE, DYNAMIC_SHADOW_MAP_SIZE}})
+                .setClearValues(clear);
 
-            vkCmdBeginRenderPass(cmd, &passInfo, VK_SUBPASS_CONTENTS_INLINE);
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, dynamicShadowPipeline);
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, dynamicShadowPipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
-            vkCmdSetViewport(cmd, 0, 1, &viewport);
-            vkCmdSetScissor(cmd, 0, 1, &scissor);
+            vkCmd.beginRenderPass(passInfo, vk::SubpassContents::eInline);
+            vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, dynamicShadowPipeline);
+            vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, dynamicShadowPipelineLayout,
+                                     0, vk::DescriptorSet(descriptorSet), {});
+            vkCmd.setViewport(0, viewport);
+            vkCmd.setScissor(0, scissor);
 
             drawShadowScene(cmd, dynamicShadowPipelineLayout, lightIndex, glm::mat4(1.0f),
                             sceneObjects, terrainDrawCallback, grassDrawCallback, nullptr, skinnedDrawCallback);
 
-            vkCmdEndRenderPass(cmd);
+            vkCmd.endRenderPass();
         }
     }
 }

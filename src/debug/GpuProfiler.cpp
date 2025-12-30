@@ -1,5 +1,6 @@
 #include "GpuProfiler.h"
 #include <SDL3/SDL.h>
+#include <vulkan/vulkan.hpp>
 #include <algorithm>
 #include <cstring>
 
@@ -144,20 +145,24 @@ void GpuProfiler::beginFrame(VkCommandBuffer cmd, uint32_t frameIndex) {
     currentFrameZoneOrder.clear();
     currentFrameIndex = frameIndex;
 
+    vk::CommandBuffer vkCmd(cmd);
+
     // Reset the query pool for this frame
-    vkCmdResetQueryPool(cmd, queryPools[frameIndex], 0, (maxZones * QUERIES_PER_ZONE) + 2);
+    vkCmd.resetQueryPool(queryPools[frameIndex], 0, (maxZones * QUERIES_PER_ZONE) + 2);
 
     // Write frame start timestamp
     frameStartQuery = currentQueryIndex++;
-    vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, queryPools[frameIndex], frameStartQuery);
+    vkCmd.writeTimestamp(vk::PipelineStageFlagBits::eTopOfPipe, queryPools[frameIndex], frameStartQuery);
 }
 
 void GpuProfiler::endFrame(VkCommandBuffer cmd, uint32_t frameIndex) {
     if (!enabled || queryPools.empty()) return;
 
+    vk::CommandBuffer vkCmd(cmd);
+
     // Write frame end timestamp
     frameEndQuery = currentQueryIndex++;
-    vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queryPools[frameIndex], frameEndQuery);
+    vkCmd.writeTimestamp(vk::PipelineStageFlagBits::eBottomOfPipe, queryPools[frameIndex], frameEndQuery);
 
     // Store the query count and zone order for this frame for later collection
     frameQueryCounts[frameIndex] = currentQueryIndex;
@@ -177,9 +182,11 @@ void GpuProfiler::beginZone(VkCommandBuffer cmd, const char* zoneName) {
     activeZones[zoneName] = zone;
     currentFrameZoneOrder.push_back(zoneName);
 
+    vk::CommandBuffer vkCmd(cmd);
+
     // Write start timestamp - use ALL_COMMANDS to ensure prior work is complete
-    vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                        queryPools[currentFrameIndex], zone.startQueryIndex);
+    vkCmd.writeTimestamp(vk::PipelineStageFlagBits::eAllCommands,
+                         queryPools[currentFrameIndex], zone.startQueryIndex);
 }
 
 void GpuProfiler::endZone(VkCommandBuffer cmd, const char* zoneName) {
@@ -193,9 +200,11 @@ void GpuProfiler::endZone(VkCommandBuffer cmd, const char* zoneName) {
 
     it->second.endQueryIndex = currentQueryIndex++;
 
+    vk::CommandBuffer vkCmd(cmd);
+
     // Write end timestamp - use ALL_COMMANDS to capture actual work completion
-    vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                        queryPools[currentFrameIndex], it->second.endQueryIndex);
+    vkCmd.writeTimestamp(vk::PipelineStageFlagBits::eAllCommands,
+                         queryPools[currentFrameIndex], it->second.endQueryIndex);
 }
 
 void GpuProfiler::collectResults(uint32_t frameIndex) {

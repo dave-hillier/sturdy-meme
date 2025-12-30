@@ -6,6 +6,7 @@
 #include "VulkanResourceFactory.h"
 #include <SDL3/SDL.h>
 #include <glm/gtc/matrix_transform.hpp>
+#include <vulkan/vulkan.hpp>
 #include <algorithm>
 #include <array>
 #include <cstring>
@@ -542,12 +543,14 @@ void CatmullClarkSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& ca
 }
 
 void CatmullClarkSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) {
+    vk::CommandBuffer vkCmd(cmd);
+
     // Bind the subdivision compute pipeline
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, subdivisionPipeline);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, subdivisionPipeline);
 
     // Bind the compute descriptor set
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, subdivisionPipelineLayout,
-                           0, 1, &computeDescriptorSets[frameIndex], 0, nullptr);
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, subdivisionPipelineLayout,
+                             0, vk::DescriptorSet(computeDescriptorSets[frameIndex]), {});
 
     // Push subdivision parameters
     CatmullClarkSubdivisionPushConstants pc{};
@@ -555,49 +558,51 @@ void CatmullClarkSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex)
     pc.splitThreshold = config.splitThreshold;
     pc.mergeThreshold = config.mergeThreshold;
     pc.padding = 0;
-    vkCmdPushConstants(cmd, subdivisionPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT,
-                      0, sizeof(CatmullClarkSubdivisionPushConstants), &pc);
+    vkCmd.pushConstants<CatmullClarkSubdivisionPushConstants>(
+        subdivisionPipelineLayout, vk::ShaderStageFlagBits::eCompute, 0, pc);
 
     // Dispatch compute shader - one workgroup per face at base level
     uint32_t workgroupCount = (cbt->getFaceCount() + SUBDIVISION_WORKGROUP_SIZE - 1) / SUBDIVISION_WORKGROUP_SIZE;
-    vkCmdDispatch(cmd, std::max(1u, workgroupCount), 1, 1);
+    vkCmd.dispatch(std::max(1u, workgroupCount), 1, 1);
 
     // Memory barrier: compute shader writes -> graphics shader reads
     Barriers::computeToIndirectDraw(cmd);
 }
 
 void CatmullClarkSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
+    vk::CommandBuffer vkCmd(cmd);
+
     // Select pipeline based on wireframe mode
     VkPipeline pipeline = wireframeMode ? wireframePipeline : renderPipeline;
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
 
     // Bind descriptor set for this frame
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, renderPipelineLayout,
-                           0, 1, &renderDescriptorSets[frameIndex], 0, nullptr);
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, renderPipelineLayout,
+                             0, vk::DescriptorSet(renderDescriptorSets[frameIndex]), {});
 
     // Set dynamic viewport
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = static_cast<float>(extent.width);
-    viewport.height = static_cast<float>(extent.height);
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(cmd, 0, 1, &viewport);
+    auto viewport = vk::Viewport{}
+        .setX(0.0f)
+        .setY(0.0f)
+        .setWidth(static_cast<float>(extent.width))
+        .setHeight(static_cast<float>(extent.height))
+        .setMinDepth(0.0f)
+        .setMaxDepth(1.0f);
+    vkCmd.setViewport(0, viewport);
 
     // Set dynamic scissor
-    VkRect2D scissor{};
-    scissor.offset = {0, 0};
-    scissor.extent = extent;
-    vkCmdSetScissor(cmd, 0, 1, &scissor);
+    auto scissor = vk::Rect2D{}
+        .setOffset({0, 0})
+        .setExtent(vk::Extent2D{extent.width, extent.height});
+    vkCmd.setScissor(0, scissor);
 
     // Push model matrix
     CatmullClarkPushConstants pc{};
     pc.model = glm::translate(glm::mat4(1.0f), config.position) *
                glm::scale(glm::mat4(1.0f), config.scale);
-    vkCmdPushConstants(cmd, renderPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT,
-                      0, sizeof(CatmullClarkPushConstants), &pc);
+    vkCmd.pushConstants<CatmullClarkPushConstants>(
+        renderPipelineLayout, vk::ShaderStageFlagBits::eVertex, 0, pc);
 
     // Indirect draw - vertex count populated by subdivision compute shader
-    vkCmdDrawIndirect(cmd, indirectDrawBuffer_.get(), 0, 1, sizeof(VkDrawIndirectCommand));
+    vkCmd.drawIndirect(indirectDrawBuffer_.get(), 0, 1, sizeof(VkDrawIndirectCommand));
 }

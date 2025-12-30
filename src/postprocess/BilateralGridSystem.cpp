@@ -515,7 +515,8 @@ void BilateralGridSystem::recordClearGrid(VkCommandBuffer cmd) {
                         reinterpret_cast<const VkImageMemoryBarrier*>(&barrier));
 
     // Clear to zero
-    VkClearColorValue clearColor = {{0.0f, 0.0f, 0.0f, 0.0f}};
+    vk::CommandBuffer vkCmd(cmd);
+    auto clearColor = vk::ClearColorValue(std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f});
     auto range = vk::ImageSubresourceRange{}
         .setAspectMask(vk::ImageAspectFlagBits::eColor)
         .setBaseMipLevel(0)
@@ -523,8 +524,7 @@ void BilateralGridSystem::recordClearGrid(VkCommandBuffer cmd) {
         .setBaseArrayLayer(0)
         .setLayerCount(1);
 
-    vkCmdClearColorImage(cmd, gridImages[0], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                        &clearColor, 1, reinterpret_cast<const VkImageSubresourceRange*>(&range));
+    vkCmd.clearColorImage(gridImages[0], vk::ImageLayout::eTransferDstOptimal, clearColor, range);
 
     // Transition both grids to GENERAL for compute in a single batched barrier
     // grid[0]: TRANSFER_DST → GENERAL (after clear)
@@ -642,14 +642,15 @@ void BilateralGridSystem::recordBilateralGrid(VkCommandBuffer cmd, uint32_t fram
                            reinterpret_cast<const VkWriteDescriptorSet*>(writes.data()), 0, nullptr);
 
     // Build pass
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, buildPipeline.get());
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, buildPipelineLayout.get(),
-                           0, 1, &buildDescriptorSets[frameIndex], 0, nullptr);
+    vk::CommandBuffer vkCmd(cmd);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, buildPipeline.get());
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, buildPipelineLayout.get(),
+                             0, vk::DescriptorSet(buildDescriptorSets[frameIndex]), {});
 
     // Dispatch one thread per input pixel
     uint32_t groupsX = (extent.width + 15) / 16;
     uint32_t groupsY = (extent.height + 15) / 16;
-    vkCmdDispatch(cmd, groupsX, groupsY, 1);
+    vkCmd.dispatch(groupsX, groupsY, 1);
 
     // Barrier after build
     recordGridBarrier(cmd, gridImages[0],
@@ -662,7 +663,7 @@ void BilateralGridSystem::recordBilateralGrid(VkCommandBuffer cmd, uint32_t fram
     blurUniforms.sigma = 2.0f;      // Wide blur
     blurUniforms.gridDims = glm::ivec4(GRID_WIDTH, GRID_HEIGHT, GRID_DEPTH, 0);
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, blurPipeline.get());
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, blurPipeline.get());
 
     uint32_t blurGroupsX = (GRID_WIDTH + 7) / 8;
     uint32_t blurGroupsY = (GRID_HEIGHT + 7) / 8;
@@ -674,9 +675,9 @@ void BilateralGridSystem::recordBilateralGrid(VkCommandBuffer cmd, uint32_t fram
     memcpy(data, &blurUniforms, sizeof(blurUniforms));
     vmaUnmapMemory(allocator, blurUniformBuffers.allocations[frameIndex]);
 
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, blurPipelineLayout.get(),
-                           0, 1, &blurDescriptorSetsX[frameIndex], 0, nullptr);
-    vkCmdDispatch(cmd, blurGroupsX, blurGroupsY, blurGroupsZ);
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, blurPipelineLayout.get(),
+                             0, vk::DescriptorSet(blurDescriptorSetsX[frameIndex]), {});
+    vkCmd.dispatch(blurGroupsX, blurGroupsY, blurGroupsZ);
 
     // Barrier
     recordGridBarrier(cmd, gridImages[1],
@@ -689,9 +690,9 @@ void BilateralGridSystem::recordBilateralGrid(VkCommandBuffer cmd, uint32_t fram
     memcpy(data, &blurUniforms, sizeof(blurUniforms));
     vmaUnmapMemory(allocator, blurUniformBuffers.allocations[frameIndex]);
 
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, blurPipelineLayout.get(),
-                           0, 1, &blurDescriptorSetsY[frameIndex], 0, nullptr);
-    vkCmdDispatch(cmd, blurGroupsX, blurGroupsY, blurGroupsZ);
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, blurPipelineLayout.get(),
+                             0, vk::DescriptorSet(blurDescriptorSetsY[frameIndex]), {});
+    vkCmd.dispatch(blurGroupsX, blurGroupsY, blurGroupsZ);
 
     // Final barrier for sampling
     recordGridBarrier(cmd, gridImages[0],

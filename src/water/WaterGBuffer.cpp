@@ -388,40 +388,39 @@ bool WaterGBuffer::createSampler() {
 }
 
 void WaterGBuffer::beginRenderPass(VkCommandBuffer cmd) {
-    std::array<VkClearValue, 3> clearValues{};
-    clearValues[0].color = {{0.0f, 0.0f, 0.0f, 0.0f}};  // Data (no water)
-    clearValues[1].color = {{0.0f, 0.0f, 0.0f, 0.0f}};  // Normal
-    clearValues[2].depthStencil = {1.0f, 0};            // Depth (far)
+    std::array<vk::ClearValue, 3> clearValues{};
+    clearValues[0].color = vk::ClearColorValue(std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f});  // Data (no water)
+    clearValues[1].color = vk::ClearColorValue(std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f});  // Normal
+    clearValues[2].depthStencil = vk::ClearDepthStencilValue{1.0f, 0};            // Depth (far)
 
-    VkRenderPassBeginInfo renderPassInfo{};
-    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    renderPassInfo.renderPass = renderPass.get();
-    renderPassInfo.framebuffer = framebuffer.get();
-    renderPassInfo.renderArea.offset = {0, 0};
-    renderPassInfo.renderArea.extent = gbufferExtent;
-    renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
-    renderPassInfo.pClearValues = clearValues.data();
+    auto renderPassInfo = vk::RenderPassBeginInfo{}
+        .setRenderPass(renderPass.get())
+        .setFramebuffer(framebuffer.get())
+        .setRenderArea(vk::Rect2D{{0, 0}, vk::Extent2D{gbufferExtent.width, gbufferExtent.height}})
+        .setClearValues(clearValues);
 
-    vkCmdBeginRenderPass(cmd, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+    vk::CommandBuffer vkCmd(cmd);
+    vkCmd.beginRenderPass(renderPassInfo, vk::SubpassContents::eInline);
 
     // Set viewport and scissor
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = static_cast<float>(gbufferExtent.width);
-    viewport.height = static_cast<float>(gbufferExtent.height);
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(cmd, 0, 1, &viewport);
+    auto viewport = vk::Viewport{}
+        .setX(0.0f)
+        .setY(0.0f)
+        .setWidth(static_cast<float>(gbufferExtent.width))
+        .setHeight(static_cast<float>(gbufferExtent.height))
+        .setMinDepth(0.0f)
+        .setMaxDepth(1.0f);
+    vkCmd.setViewport(0, viewport);
 
-    VkRect2D scissor{};
-    scissor.offset = {0, 0};
-    scissor.extent = gbufferExtent;
-    vkCmdSetScissor(cmd, 0, 1, &scissor);
+    auto scissor = vk::Rect2D{}
+        .setOffset({0, 0})
+        .setExtent(vk::Extent2D{gbufferExtent.width, gbufferExtent.height});
+    vkCmd.setScissor(0, scissor);
 }
 
 void WaterGBuffer::endRenderPass(VkCommandBuffer cmd) {
-    vkCmdEndRenderPass(cmd);
+    vk::CommandBuffer vkCmd(cmd);
+    vkCmd.endRenderPass();
 }
 
 void WaterGBuffer::clear(VkCommandBuffer cmd) {

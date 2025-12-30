@@ -1,6 +1,7 @@
 #include "Mesh.h"
 #include "VulkanRAII.h"
 #include "VulkanResourceFactory.h"
+#include <vulkan/vulkan.hpp>
 #include <cstring>
 #include <stdexcept>
 #include <cmath>
@@ -894,17 +895,13 @@ bool Mesh::upload(VmaAllocator allocator, VkDevice device, VkCommandPool command
         return false;
     }
 
-    VkBufferCopy vertexCopyRegion{};
-    vertexCopyRegion.srcOffset = 0;
-    vertexCopyRegion.dstOffset = 0;
-    vertexCopyRegion.size = vertexBufferSize;
-    vkCmdCopyBuffer(cmd.get(), stagingBuffer.get(), managedVertexBuffer.get(), 1, &vertexCopyRegion);
+    vk::CommandBuffer vkCmd(cmd.get());
 
-    VkBufferCopy indexCopyRegion{};
-    indexCopyRegion.srcOffset = vertexBufferSize;
-    indexCopyRegion.dstOffset = 0;
-    indexCopyRegion.size = indexBufferSize;
-    vkCmdCopyBuffer(cmd.get(), stagingBuffer.get(), managedIndexBuffer.get(), 1, &indexCopyRegion);
+    auto vertexCopy = vk::BufferCopy{}.setSrcOffset(0).setDstOffset(0).setSize(vertexBufferSize);
+    vkCmd.copyBuffer(stagingBuffer.get(), managedVertexBuffer.get(), vertexCopy);
+
+    auto indexCopy = vk::BufferCopy{}.setSrcOffset(vertexBufferSize).setDstOffset(0).setSize(indexBufferSize);
+    vkCmd.copyBuffer(stagingBuffer.get(), managedIndexBuffer.get(), indexCopy);
 
     if (!cmd.end()) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Mesh::upload: Failed to submit command buffer");

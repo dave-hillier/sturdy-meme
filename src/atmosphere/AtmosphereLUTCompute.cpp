@@ -1,5 +1,6 @@
 #include "AtmosphereLUTSystem.h"
 #include "VulkanBarriers.h"
+#include <vulkan/vulkan.hpp>
 #include <SDL3/SDL_log.h>
 #include <cstring>
 
@@ -12,14 +13,16 @@ void AtmosphereLUTSystem::computeTransmittanceLUT(VkCommandBuffer cmd) {
     // Transition to GENERAL layout for compute write
     Barriers::prepareImageForCompute(cmd, transmittanceLUT);
 
+    vk::CommandBuffer vkCmd(cmd);
+
     // Bind pipeline and dispatch
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, transmittancePipeline);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, transmittancePipelineLayout,
-                           0, 1, &transmittanceDescriptorSet, 0, nullptr);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, transmittancePipeline);
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, transmittancePipelineLayout,
+                             0, vk::DescriptorSet(transmittanceDescriptorSet), {});
 
     uint32_t groupCountX = (TRANSMITTANCE_WIDTH + 15) / 16;
     uint32_t groupCountY = (TRANSMITTANCE_HEIGHT + 15) / 16;
-    vkCmdDispatch(cmd, groupCountX, groupCountY, 1);
+    vkCmd.dispatch(groupCountX, groupCountY, 1);
 
     // Transition to SHADER_READ for sampling in later stages
     Barriers::imageComputeToSampling(cmd, transmittanceLUT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
@@ -36,14 +39,16 @@ void AtmosphereLUTSystem::computeMultiScatterLUT(VkCommandBuffer cmd) {
     // Transition to GENERAL layout for compute write
     Barriers::prepareImageForCompute(cmd, multiScatterLUT);
 
+    vk::CommandBuffer vkCmd(cmd);
+
     // Bind pipeline and dispatch
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, multiScatterPipeline);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, multiScatterPipelineLayout,
-                           0, 1, &multiScatterDescriptorSet, 0, nullptr);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, multiScatterPipeline);
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, multiScatterPipelineLayout,
+                             0, vk::DescriptorSet(multiScatterDescriptorSet), {});
 
     uint32_t groupCountX = (MULTISCATTER_SIZE + 7) / 8;
     uint32_t groupCountY = (MULTISCATTER_SIZE + 7) / 8;
-    vkCmdDispatch(cmd, groupCountX, groupCountY, 1);
+    vkCmd.dispatch(groupCountX, groupCountY, 1);
 
     // Transition to SHADER_READ for sampling
     Barriers::imageComputeToSampling(cmd, multiScatterLUT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
@@ -59,14 +64,16 @@ void AtmosphereLUTSystem::computeIrradianceLUT(VkCommandBuffer cmd) {
 
     barrierIrradianceLUTsForCompute(cmd);
 
+    vk::CommandBuffer vkCmd(cmd);
+
     // Bind pipeline and dispatch
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, irradiancePipeline);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, irradiancePipelineLayout,
-                           0, 1, &irradianceDescriptorSet, 0, nullptr);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, irradiancePipeline);
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, irradiancePipelineLayout,
+                             0, vk::DescriptorSet(irradianceDescriptorSet), {});
 
     uint32_t groupCountX = (IRRADIANCE_WIDTH + 7) / 8;
     uint32_t groupCountY = (IRRADIANCE_HEIGHT + 7) / 8;
-    vkCmdDispatch(cmd, groupCountX, groupCountY, 1);
+    vkCmd.dispatch(groupCountX, groupCountY, 1);
 
     barrierIrradianceLUTsForSampling(cmd);
 
@@ -85,14 +92,16 @@ void AtmosphereLUTSystem::computeSkyViewLUT(VkCommandBuffer cmd, const glm::vec3
     // Transition to GENERAL layout for compute write (from UNDEFINED at startup)
     Barriers::prepareImageForCompute(cmd, skyViewLUT);
 
+    vk::CommandBuffer vkCmd(cmd);
+
     // Bind pipeline and dispatch (use frame 0's descriptor set for startup computation)
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, skyViewPipeline);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, skyViewPipelineLayout,
-                           0, 1, &skyViewDescriptorSets[0], 0, nullptr);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, skyViewPipeline);
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, skyViewPipelineLayout,
+                             0, vk::DescriptorSet(skyViewDescriptorSets[0]), {});
 
     uint32_t groupCountX = (SKYVIEW_WIDTH + 15) / 16;
     uint32_t groupCountY = (SKYVIEW_HEIGHT + 15) / 16;
-    vkCmdDispatch(cmd, groupCountX, groupCountY, 1);
+    vkCmd.dispatch(groupCountX, groupCountY, 1);
 
     // Transition to SHADER_READ for sampling
     Barriers::imageComputeToSampling(cmd, skyViewLUT);
@@ -132,14 +141,16 @@ void AtmosphereLUTSystem::updateSkyViewLUT(VkCommandBuffer cmd, uint32_t frameIn
         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
         VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_SHADER_WRITE_BIT);
 
+    vk::CommandBuffer vkCmd(cmd);
+
     // Bind pipeline and per-frame descriptor set (double-buffered)
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, skyViewPipeline);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, skyViewPipelineLayout,
-                           0, 1, &skyViewDescriptorSets[frameIndex], 0, nullptr);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, skyViewPipeline);
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, skyViewPipelineLayout,
+                             0, vk::DescriptorSet(skyViewDescriptorSets[frameIndex]), {});
 
     uint32_t groupCountX = (SKYVIEW_WIDTH + 15) / 16;
     uint32_t groupCountY = (SKYVIEW_HEIGHT + 15) / 16;
-    vkCmdDispatch(cmd, groupCountX, groupCountY, 1);
+    vkCmd.dispatch(groupCountX, groupCountY, 1);
 
     // Transition back to SHADER_READ for sampling in sky.frag
     Barriers::imageComputeToSampling(cmd, skyViewLUT);
@@ -158,14 +169,16 @@ void AtmosphereLUTSystem::computeCloudMapLUT(VkCommandBuffer cmd, const glm::vec
     // Transition to GENERAL layout for compute write
     Barriers::prepareImageForCompute(cmd, cloudMapLUT);
 
+    vk::CommandBuffer vkCmd(cmd);
+
     // Bind pipeline and dispatch (use frame 0's descriptor set for startup computation)
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cloudMapPipeline);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cloudMapPipelineLayout,
-                           0, 1, &cloudMapDescriptorSets[0], 0, nullptr);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, cloudMapPipeline);
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, cloudMapPipelineLayout,
+                             0, vk::DescriptorSet(cloudMapDescriptorSets[0]), {});
 
     uint32_t groupCountX = (CLOUDMAP_SIZE + 15) / 16;
     uint32_t groupCountY = (CLOUDMAP_SIZE + 15) / 16;
-    vkCmdDispatch(cmd, groupCountX, groupCountY, 1);
+    vkCmd.dispatch(groupCountX, groupCountY, 1);
 
     // Transition to SHADER_READ for sampling in sky.frag
     Barriers::imageComputeToSampling(cmd, cloudMapLUT);
@@ -208,14 +221,16 @@ void AtmosphereLUTSystem::updateCloudMapLUT(VkCommandBuffer cmd, uint32_t frameI
         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
         VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_SHADER_WRITE_BIT);
 
+    vk::CommandBuffer vkCmd(cmd);
+
     // Bind pipeline and per-frame descriptor set (double-buffered)
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cloudMapPipeline);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cloudMapPipelineLayout,
-                           0, 1, &cloudMapDescriptorSets[frameIndex], 0, nullptr);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, cloudMapPipeline);
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, cloudMapPipelineLayout,
+                             0, vk::DescriptorSet(cloudMapDescriptorSets[frameIndex]), {});
 
     uint32_t groupCountX = (CLOUDMAP_SIZE + 15) / 16;
     uint32_t groupCountY = (CLOUDMAP_SIZE + 15) / 16;
-    vkCmdDispatch(cmd, groupCountX, groupCountY, 1);
+    vkCmd.dispatch(groupCountX, groupCountY, 1);
 
     // Transition back to SHADER_READ for sampling in sky.frag
     Barriers::imageComputeToSampling(cmd, cloudMapLUT);

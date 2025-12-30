@@ -614,6 +614,8 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
 
     if (leafRenderables.empty() || leafDrawInfo.empty()) return;
 
+    vk::CommandBuffer vkCmd(cmd);
+
     // Build per-tree data for batched culling
     std::vector<TreeCullData> treeDataList;
     std::vector<TreeRenderDataGPU> treeRenderDataList;
@@ -692,14 +694,14 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
     }
     // tierCounts is already zero-initialized
 
-    vkCmdUpdateBuffer(cmd, cullIndirectBuffers_.getVk(frameIndex),
-                      0, sizeof(indirectReset), &indirectReset);
+    vkCmd.updateBuffer(cullIndirectBuffers_.getVk(frameIndex),
+                       0, sizeof(indirectReset), &indirectReset);
 
     // Upload per-tree data to frame-specific buffers (triple-buffered to avoid race conditions)
-    vkCmdUpdateBuffer(cmd, treeDataBuffers_.getVk(frameIndex), 0,
-                      numTrees * sizeof(TreeCullData), treeDataList.data());
-    vkCmdUpdateBuffer(cmd, treeRenderDataBuffers_.getVk(frameIndex), 0,
-                      numTrees * sizeof(TreeRenderDataGPU), treeRenderDataList.data());
+    vkCmd.updateBuffer(treeDataBuffers_.getVk(frameIndex), 0,
+                       numTrees * sizeof(TreeCullData), treeDataList.data());
+    vkCmd.updateBuffer(treeRenderDataBuffers_.getVk(frameIndex), 0,
+                       numTrees * sizeof(TreeRenderDataGPU), treeRenderDataList.data());
 
     // Upload global uniforms - split into CullingUniforms and LeafCullParams
     CullingUniforms culling{};
@@ -717,10 +719,10 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
     leafParams.totalLeafInstances = totalLeafInstances;
     leafParams.maxLeavesPerType = maxLeavesPerType_;
 
-    vkCmdUpdateBuffer(cmd, cullUniformBuffers_.buffers[frameIndex], 0,
-                      sizeof(CullingUniforms), &culling);
-    vkCmdUpdateBuffer(cmd, leafCullParamsBuffers_.buffers[frameIndex], 0,
-                      sizeof(LeafCullParams), &leafParams);
+    vkCmd.updateBuffer(cullUniformBuffers_.buffers[frameIndex], 0,
+                       sizeof(CullingUniforms), &culling);
+    vkCmd.updateBuffer(leafCullParamsBuffers_.buffers[frameIndex], 0,
+                       sizeof(LeafCullParams), &leafParams);
 
     // Barrier for buffer updates
     VkMemoryBarrier barrier{};
@@ -761,30 +763,30 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
         // Using frame-indexed buffers to prevent race conditions between in-flight frames.
 
         // Reset visible cell buffer: first uint is visibleCellCount
-        vkCmdFillBuffer(cmd, visibleCellBuffers_.getVk(frameIndex), 0, sizeof(uint32_t), 0);
+        vkCmd.fillBuffer(visibleCellBuffers_.getVk(frameIndex), 0, sizeof(uint32_t), 0);
 
         // Reset cell cull indirect buffer: dispatchX/Y/Z, totalVisibleTrees, bucketCounts[8], bucketOffsets[8]
         // Structure: { dispatchX=0, dispatchY=1, dispatchZ=1, totalVisibleTrees=0, bucketCounts[8]=0, bucketOffsets[8]=0 }
         constexpr uint32_t NUM_DISTANCE_BUCKETS = 8;
         uint32_t cellIndirectReset[4 + NUM_DISTANCE_BUCKETS * 2] = {0, 1, 1, 0}; // dispatchX=0, Y=1, Z=1, totalTrees=0
         // bucketCounts and bucketOffsets are already 0-initialized
-        vkCmdUpdateBuffer(cmd, cellCullIndirectBuffers_.getVk(frameIndex), 0, sizeof(cellIndirectReset), cellIndirectReset);
+        vkCmd.updateBuffer(cellCullIndirectBuffers_.getVk(frameIndex), 0, sizeof(cellIndirectReset), cellIndirectReset);
 
         // If two-phase culling, also reset visible tree buffer and leaf cull indirect dispatch
         if (useTwoPhase) {
             // Reset visible tree buffer: first uint is visibleTreeCount
-            vkCmdFillBuffer(cmd, visibleTreeBuffers_.getVk(frameIndex), 0, sizeof(uint32_t), 0);
+            vkCmd.fillBuffer(visibleTreeBuffers_.getVk(frameIndex), 0, sizeof(uint32_t), 0);
 
             // Reset leaf cull indirect dispatch: { dispatchX=0, dispatchY=1, dispatchZ=1 }
             uint32_t leafDispatchReset[3] = {0, 1, 1};
-            vkCmdUpdateBuffer(cmd, leafCullIndirectDispatchBuffers_.getVk(frameIndex), 0, sizeof(leafDispatchReset), leafDispatchReset);
+            vkCmd.updateBuffer(leafCullIndirectDispatchBuffers_.getVk(frameIndex), 0, sizeof(leafDispatchReset), leafDispatchReset);
         }
 
-        // Use vkCmdUpdateBuffer to avoid HOST→COMPUTE stall (keeps update on GPU timeline)
-        vkCmdUpdateBuffer(cmd, cellCullUniformBuffers_.buffers[frameIndex], 0,
-                          sizeof(CullingUniforms), &cellCulling);
-        vkCmdUpdateBuffer(cmd, cellCullParamsBuffers_.buffers[frameIndex], 0,
-                          sizeof(CellCullParams), &cellParams);
+        // Use updateBuffer to avoid HOST→COMPUTE stall (keeps update on GPU timeline)
+        vkCmd.updateBuffer(cellCullUniformBuffers_.buffers[frameIndex], 0,
+                           sizeof(CullingUniforms), &cellCulling);
+        vkCmd.updateBuffer(cellCullParamsBuffers_.buffers[frameIndex], 0,
+                           sizeof(CellCullParams), &cellParams);
 
         // If two-phase culling is enabled, update tree filter uniforms now too
         // This allows us to combine barriers later (reducing pipeline bubbles)
@@ -803,10 +805,10 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
             TreeFilterParams filterParams{};
             filterParams.maxTreesPerCell = 64;
 
-            vkCmdUpdateBuffer(cmd, treeFilterUniformBuffers_.buffers[frameIndex], 0,
-                              sizeof(CullingUniforms), &filterCulling);
-            vkCmdUpdateBuffer(cmd, treeFilterParamsBuffers_.buffers[frameIndex], 0,
-                              sizeof(TreeFilterParams), &filterParams);
+            vkCmd.updateBuffer(treeFilterUniformBuffers_.buffers[frameIndex], 0,
+                               sizeof(CullingUniforms), &filterCulling);
+            vkCmd.updateBuffer(treeFilterParamsBuffers_.buffers[frameIndex], 0,
+                               sizeof(TreeFilterParams), &filterParams);
         }
 
         VkMemoryBarrier cellUniformBarrier{};
@@ -816,12 +818,12 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
         vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                              0, 1, &cellUniformBarrier, 0, nullptr, 0, nullptr);
 
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cellCullPipeline_.get());
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cellCullPipelineLayout_.get(),
-                                0, 1, &cellCullDescriptorSets_[frameIndex], 0, nullptr);
+        vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, cellCullPipeline_.get());
+        vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, cellCullPipelineLayout_.get(),
+                                 0, vk::DescriptorSet(cellCullDescriptorSets_[frameIndex]), {});
 
         uint32_t cellWorkgroups = (cellParams.numCells + 255) / 256;
-        vkCmdDispatch(cmd, cellWorkgroups, 1, 1);
+        vkCmd.dispatch(cellWorkgroups, 1, 1);
 
         // Tree Filtering (Two-Phase Culling)
         // Uniforms were already updated above, so we only need COMPUTE→COMPUTE barrier
@@ -834,11 +836,11 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
             vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                                  0, 1, &cellBarrier, 0, nullptr, 0, nullptr);
 
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, treeFilterPipeline_.get());
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, treeFilterPipelineLayout_.get(),
-                                    0, 1, &treeFilterDescriptorSets_[frameIndex], 0, nullptr);
+            vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, treeFilterPipeline_.get());
+            vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, treeFilterPipelineLayout_.get(),
+                                     0, vk::DescriptorSet(treeFilterDescriptorSets_[frameIndex]), {});
 
-            vkCmdDispatchIndirect(cmd, cellCullIndirectBuffers_.getVk(frameIndex), 0);
+            vkCmd.dispatchIndirect(cellCullIndirectBuffers_.getVk(frameIndex), 0);
 
             VkMemoryBarrier treeFilterBarrier{};
             treeFilterBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
@@ -853,8 +855,8 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
                 LeafCullP3Params p3Params{};
                 p3Params.maxLeavesPerType = maxLeavesPerType_;
 
-                vkCmdUpdateBuffer(cmd, leafCullP3ParamsBuffers_.buffers[frameIndex], 0,
-                                  sizeof(LeafCullP3Params), &p3Params);
+                vkCmd.updateBuffer(leafCullP3ParamsBuffers_.buffers[frameIndex], 0,
+                                   sizeof(LeafCullP3Params), &p3Params);
 
                 VkMemoryBarrier p3UniformBarrier{};
                 p3UniformBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
@@ -873,11 +875,11 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
                       .writeBuffer(Bindings::LEAF_CULL_P3_PARAMS, leafCullP3ParamsBuffers_.buffers[frameIndex], 0, sizeof(LeafCullP3Params), VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
                       .update();
 
-                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, twoPhaseLeafCullPipeline_.get());
-                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, twoPhaseLeafCullPipelineLayout_.get(),
-                                        0, 1, &twoPhaseLeafCullDescriptorSets_[frameIndex], 0, nullptr);
+                vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, twoPhaseLeafCullPipeline_.get());
+                vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, twoPhaseLeafCullPipelineLayout_.get(),
+                                         0, vk::DescriptorSet(twoPhaseLeafCullDescriptorSets_[frameIndex]), {});
 
-                vkCmdDispatchIndirect(cmd, leafCullIndirectDispatchBuffers_.getVk(frameIndex), 0);
+                vkCmd.dispatchIndirect(leafCullIndirectDispatchBuffers_.getVk(frameIndex), 0);
 
                 barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
                 barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
@@ -890,12 +892,12 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
     }
 
     // Fallback: Single-phase leaf culling
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullPipeline_.get());
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullPipelineLayout_.get(),
-                            0, 1, &cullDescriptorSets_[frameIndex], 0, nullptr);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, cullPipeline_.get());
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, cullPipelineLayout_.get(),
+                             0, vk::DescriptorSet(cullDescriptorSets_[frameIndex]), {});
 
     uint32_t workgroupCount = (totalLeafInstances + 255) / 256;
-    vkCmdDispatch(cmd, workgroupCount, 1, 1);
+    vkCmd.dispatch(workgroupCount, 1, 1);
 
     barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
     barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_INDIRECT_COMMAND_READ_BIT;

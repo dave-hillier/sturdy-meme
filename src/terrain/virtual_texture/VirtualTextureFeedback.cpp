@@ -2,6 +2,7 @@
 #include "VulkanBarriers.h"
 #include "VulkanResourceFactory.h"
 #include <SDL3/SDL_log.h>
+#include <vulkan/vulkan.hpp>
 #include <algorithm>
 #include <cstring>
 
@@ -89,20 +90,21 @@ void VirtualTextureFeedback::recordCopyToReadback(VkCommandBuffer cmd, uint32_t 
     if (frameIndex >= frameBuffers.size()) return;
 
     FrameBuffer& fb = frameBuffers[frameIndex];
+    vk::CommandBuffer vkCmd(cmd);
 
     // Copy feedback buffer from GPU storage to CPU readback
-    VkBufferCopy feedbackCopy{};
-    feedbackCopy.srcOffset = 0;
-    feedbackCopy.dstOffset = 0;
-    feedbackCopy.size = maxEntries * sizeof(uint32_t);
-    vkCmdCopyBuffer(cmd, fb.feedbackBuffer.get(), fb.readbackBuffer.get(), 1, &feedbackCopy);
+    auto feedbackCopy = vk::BufferCopy{}
+        .setSrcOffset(0)
+        .setDstOffset(0)
+        .setSize(maxEntries * sizeof(uint32_t));
+    vkCmd.copyBuffer(fb.feedbackBuffer.get(), fb.readbackBuffer.get(), feedbackCopy);
 
     // Copy counter buffer
-    VkBufferCopy counterCopy{};
-    counterCopy.srcOffset = 0;
-    counterCopy.dstOffset = 0;
-    counterCopy.size = sizeof(uint32_t);
-    vkCmdCopyBuffer(cmd, fb.counterBuffer.get(), fb.counterReadbackBuffer.get(), 1, &counterCopy);
+    auto counterCopy = vk::BufferCopy{}
+        .setSrcOffset(0)
+        .setDstOffset(0)
+        .setSize(sizeof(uint32_t));
+    vkCmd.copyBuffer(fb.counterBuffer.get(), fb.counterReadbackBuffer.get(), counterCopy);
 
     // Barrier to ensure transfer completes before host read
     // Note: The actual host read happens after fence wait, so we use HOST_BIT

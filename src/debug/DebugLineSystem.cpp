@@ -522,25 +522,27 @@ void DebugLineSystem::recordCommands(VkCommandBuffer cmd, const glm::mat4& viewP
 
     auto& frame = frameData[currentFrame];
 
+    vk::CommandBuffer vkCmd(cmd);
+
     // Draw lines
     if (!lineVertices.empty() && frame.lineVertexBuffer != VK_NULL_HANDLE) {
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, linePipeline);
-        vkCmdPushConstants(cmd, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &viewProj);
+        vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, linePipeline);
+        vkCmd.pushConstants<glm::mat4>(pipelineLayout, vk::ShaderStageFlagBits::eVertex, 0, viewProj);
 
         VkBuffer buffers[] = { frame.lineVertexBuffer };
         VkDeviceSize offsets[] = { 0 };
         vkCmdBindVertexBuffers(cmd, 0, 1, buffers, offsets);
-        vkCmdDraw(cmd, static_cast<uint32_t>(lineVertices.size()), 1, 0, 0);
+        vkCmd.draw(static_cast<uint32_t>(lineVertices.size()), 1, 0, 0);
     }
 
     // Draw triangles (as wireframe)
     if (!triangleVertices.empty() && frame.triangleVertexBuffer != VK_NULL_HANDLE) {
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, trianglePipeline);
-        vkCmdPushConstants(cmd, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &viewProj);
+        vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, trianglePipeline);
+        vkCmd.pushConstants<glm::mat4>(pipelineLayout, vk::ShaderStageFlagBits::eVertex, 0, viewProj);
 
         VkBuffer buffers[] = { frame.triangleVertexBuffer };
         VkDeviceSize offsets[] = { 0 };
         vkCmdBindVertexBuffers(cmd, 0, 1, buffers, offsets);
-        vkCmdDraw(cmd, static_cast<uint32_t>(triangleVertices.size()), 1, 0, 0);
+        vkCmd.draw(static_cast<uint32_t>(triangleVertices.size()), 1, 0, 0);
     }
 }

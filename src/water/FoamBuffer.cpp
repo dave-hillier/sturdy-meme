@@ -4,6 +4,7 @@
 #include "VulkanResourceFactory.h"
 #include "DescriptorManager.h"
 #include <SDL3/SDL_log.h>
+#include <vulkan/vulkan.hpp>
 #include <array>
 #include <cstring>
 
@@ -335,9 +336,10 @@ void FoamBuffer::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, float d
         0, VK_ACCESS_SHADER_READ_BIT);
 
     // Bind compute pipeline
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline.get());
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayout.get(),
-                           0, 1, &descriptorSets[descSetIndex], 0, nullptr);
+    vk::CommandBuffer vkCmd(cmd);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, computePipeline.get());
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, computePipelineLayout.get(),
+                             0, vk::DescriptorSet(descriptorSets[descSetIndex]), {});
 
     // Push constants
     FoamPushConstants pushConstants{};
@@ -351,14 +353,14 @@ void FoamBuffer::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, float d
     pushConstants.padding[1] = 0.0f;
     pushConstants.padding[2] = 0.0f;
 
-    vkCmdPushConstants(cmd, computePipelineLayout.get(), VK_SHADER_STAGE_COMPUTE_BIT,
-                      0, sizeof(pushConstants), &pushConstants);
+    vkCmd.pushConstants<FoamPushConstants>(computePipelineLayout.get(),
+                                            vk::ShaderStageFlagBits::eCompute, 0, pushConstants);
 
     // Dispatch compute shader
     uint32_t groupSize = 16;
     uint32_t groupsX = (resolution + groupSize - 1) / groupSize;
     uint32_t groupsY = (resolution + groupSize - 1) / groupSize;
-    vkCmdDispatch(cmd, groupsX, groupsY, 1);
+    vkCmd.dispatch(groupsX, groupsY, 1);
 
     // Transition write buffer to shader read for water shader sampling
     Barriers::imageComputeToSampling(cmd, foamBuffer[writeBuffer]);
@@ -404,19 +406,20 @@ void FoamBuffer::setWorldExtent(const glm::vec2& center, const glm::vec2& size) 
 
 void FoamBuffer::clear(VkCommandBuffer cmd) {
     // Clear both foam buffers to zero
-    VkClearColorValue clearValue = {{0.0f, 0.0f, 0.0f, 0.0f}};
+    vk::ClearColorValue clearValue(std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f});
+    vk::CommandBuffer vkCmd(cmd);
 
     for (int i = 0; i < 2; i++) {
         Barriers::prepareImageForTransferDst(cmd, foamBuffer[i]);
 
-        VkImageSubresourceRange range{};
-        range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        range.baseMipLevel = 0;
-        range.levelCount = 1;
-        range.baseArrayLayer = 0;
-        range.layerCount = 1;
+        auto range = vk::ImageSubresourceRange{}
+            .setAspectMask(vk::ImageAspectFlagBits::eColor)
+            .setBaseMipLevel(0)
+            .setLevelCount(1)
+            .setBaseArrayLayer(0)
+            .setLayerCount(1);
 
-        vkCmdClearColorImage(cmd, foamBuffer[i], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearValue, 1, &range);
+        vkCmd.clearColorImage(foamBuffer[i], vk::ImageLayout::eTransferDstOptimal, clearValue, range);
 
         Barriers::imageTransferToSampling(cmd, foamBuffer[i]);
     }

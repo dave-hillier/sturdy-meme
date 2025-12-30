@@ -6,6 +6,7 @@
 #include "shaders/bindings.h"
 
 #include <SDL3/SDL.h>
+#include <vulkan/vulkan.hpp>
 #include <array>
 #include <cstring>
 
@@ -540,12 +541,13 @@ void ImpostorCullSystem::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
     if (temporalUpdateMode != 0) {
         uint32_t prevFrameIndex = (frameIndex + maxFramesInFlight_ - 1) % maxFramesInFlight_;
 
-        VkBufferCopy copyRegion{};
-        copyRegion.srcOffset = 0;
-        copyRegion.dstOffset = 0;
-        copyRegion.size = visibilityCacheBufferSize_;
-        vkCmdCopyBuffer(cmd, visibilityCacheBuffers_.getVk(prevFrameIndex),
-                        visibilityCacheBuffers_.getVk(frameIndex), 1, &copyRegion);
+        vk::CommandBuffer vkCmdCopy(cmd);
+        auto copyRegion = vk::BufferCopy{}
+            .setSrcOffset(0)
+            .setDstOffset(0)
+            .setSize(visibilityCacheBufferSize_);
+        vkCmdCopy.copyBuffer(visibilityCacheBuffers_.getVk(prevFrameIndex),
+                             visibilityCacheBuffers_.getVk(frameIndex), copyRegion);
 
         // Barrier to ensure copy completes before compute shader reads/writes
         VkMemoryBarrier copyBarrier{};
@@ -602,14 +604,15 @@ void ImpostorCullSystem::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
 
     // Reset indirect draw command with proper values
     // instanceCount starts at 0 and is incremented atomically by the shader
-    // We use vkCmdUpdateBuffer to set the full struct (small update, fits in command buffer)
+    // We use updateBuffer to set the full struct (small update, fits in command buffer)
     VkDrawIndexedIndirectCommand resetCmd{};
     resetCmd.indexCount = 6;        // Billboard quad: 6 indices
     resetCmd.instanceCount = 0;     // Will be incremented atomically by shader
     resetCmd.firstIndex = 0;
     resetCmd.vertexOffset = 0;
     resetCmd.firstInstance = 0;
-    vkCmdUpdateBuffer(cmd, indirectDrawBuffer_, 0, sizeof(VkDrawIndexedIndirectCommand), &resetCmd);
+    vk::CommandBuffer vkCmdUpdate(cmd);
+    vkCmdUpdate.updateBuffer<VkDrawIndexedIndirectCommand>(indirectDrawBuffer_, 0, resetCmd);
 
     // Memory barrier to ensure fill is complete before compute
     VkMemoryBarrier fillBarrier{};
@@ -623,14 +626,15 @@ void ImpostorCullSystem::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
                          0, 1, &fillBarrier, 0, nullptr, 0, nullptr);
 
     // Bind pipeline and descriptor set
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullPipeline_.get());
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullPipelineLayout_.get(),
-                           0, 1, &cullDescriptorSets_[frameIndex], 0, nullptr);
+    vk::CommandBuffer vkCmd(cmd);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, cullPipeline_.get());
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, cullPipelineLayout_.get(),
+                             0, vk::DescriptorSet(cullDescriptorSets_[frameIndex]), {});
 
     // Dispatch compute shader
     // Each workgroup processes 256 trees
     uint32_t workgroupCount = (treeCount_ + 255) / 256;
-    vkCmdDispatch(cmd, workgroupCount, 1, 1);
+    vkCmd.dispatch(workgroupCount, 1, 1);
 
     // Memory barrier for compute output -> indirect draw
     VkMemoryBarrier computeBarrier{};

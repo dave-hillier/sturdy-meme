@@ -5,6 +5,7 @@
 
 #include "RenderPipelineFactory.h"
 #include "RendererSystems.h"
+#include <vulkan/vulkan.hpp>
 
 // Subsystem headers for render pipeline lambda captures
 #include "PostProcessSystem.h"
@@ -269,7 +270,8 @@ void RenderPipelineFactory::setupPipeline(
 
     // Scene objects (static meshes)
     pipeline.hdrStage.addDrawCall("sceneObjects", [graphicsPipeline, recordSceneObjectsFn](RenderContext& ctx) {
-        vkCmdBindPipeline(ctx.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+        vk::CommandBuffer vkCmd(ctx.cmd);
+        vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline);
         recordSceneObjectsFn(ctx.cmd, ctx.frameIndex);
     });
 
@@ -312,19 +314,19 @@ void RenderPipelineFactory::setupPipeline(
     pipeline.hdrStage.addDrawCall("debugLines", [&systems, physicsDebugEnabled, lastViewProj](RenderContext& ctx) {
 #ifdef JPH_DEBUG_RENDERER
         if (*physicsDebugEnabled && systems.debugLine().hasLines()) {
-            VkViewport viewport{};
-            viewport.x = 0.0f;
-            viewport.y = 0.0f;
-            viewport.width = static_cast<float>(systems.postProcess().getExtent().width);
-            viewport.height = static_cast<float>(systems.postProcess().getExtent().height);
-            viewport.minDepth = 0.0f;
-            viewport.maxDepth = 1.0f;
-            vkCmdSetViewport(ctx.cmd, 0, 1, &viewport);
+            vk::CommandBuffer vkCmd(ctx.cmd);
+            VkExtent2D ext = systems.postProcess().getExtent();
+            auto viewport = vk::Viewport{}
+                .setX(0.0f)
+                .setY(0.0f)
+                .setWidth(static_cast<float>(ext.width))
+                .setHeight(static_cast<float>(ext.height))
+                .setMinDepth(0.0f)
+                .setMaxDepth(1.0f);
+            vkCmd.setViewport(0, viewport);
 
-            VkRect2D scissor{};
-            scissor.offset = {0, 0};
-            scissor.extent = systems.postProcess().getExtent();
-            vkCmdSetScissor(ctx.cmd, 0, 1, &scissor);
+            auto scissor = vk::Rect2D{{0, 0}, vk::Extent2D{ext.width, ext.height}};
+            vkCmd.setScissor(0, scissor);
 
             systems.debugLine().recordCommands(ctx.cmd, *lastViewProj);
         }

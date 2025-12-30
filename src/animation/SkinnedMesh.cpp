@@ -110,15 +110,15 @@ bool SkinnedMesh::upload(VmaAllocator allocator, VkDevice device, VkCommandPool 
         return false;
     }
 
-    VkBufferCopy copyRegion{};
+    vk::CommandBuffer vkCmd(cmd.get());
 
     // Copy vertex buffer
-    copyRegion.size = vertexBufferSize;
-    vkCmdCopyBuffer(cmd.get(), stagingVertexBuffer.get(), managedVertexBuffer.get(), 1, &copyRegion);
+    auto vertexCopy = vk::BufferCopy{}.setSrcOffset(0).setDstOffset(0).setSize(vertexBufferSize);
+    vkCmd.copyBuffer(stagingVertexBuffer.get(), managedVertexBuffer.get(), vertexCopy);
 
     // Copy index buffer
-    copyRegion.size = indexBufferSize;
-    vkCmdCopyBuffer(cmd.get(), stagingIndexBuffer.get(), managedIndexBuffer.get(), 1, &copyRegion);
+    auto indexCopy = vk::BufferCopy{}.setSrcOffset(0).setDstOffset(0).setSize(indexBufferSize);
+    vkCmd.copyBuffer(stagingIndexBuffer.get(), managedIndexBuffer.get(), indexCopy);
 
     if (!cmd.end()) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SkinnedMesh: Failed to submit command buffer");

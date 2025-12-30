@@ -597,23 +597,24 @@ bool Texture::loadWithMipmaps(const std::string& path, VmaAllocator allocator, V
         CommandScope cmd(device, commandPool, queue);
         if (!cmd.begin()) return false;
 
-        std::vector<VkBufferImageCopy> regions(mipLevels);
+        std::vector<vk::BufferImageCopy> regions(mipLevels);
         for (uint32_t i = 0; i < mipLevels; ++i) {
-            regions[i] = {};
-            regions[i].bufferOffset = mipOffsets[i];
-            regions[i].bufferRowLength = 0;
-            regions[i].bufferImageHeight = 0;
-            regions[i].imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            regions[i].imageSubresource.mipLevel = i;
-            regions[i].imageSubresource.baseArrayLayer = 0;
-            regions[i].imageSubresource.layerCount = 1;
-            regions[i].imageOffset = {0, 0, 0};
-            regions[i].imageExtent = {mipWidths[i], mipHeights[i], 1};
+            regions[i] = vk::BufferImageCopy{}
+                .setBufferOffset(mipOffsets[i])
+                .setBufferRowLength(0)
+                .setBufferImageHeight(0)
+                .setImageSubresource(vk::ImageSubresourceLayers{}
+                    .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                    .setMipLevel(i)
+                    .setBaseArrayLayer(0)
+                    .setLayerCount(1))
+                .setImageOffset({0, 0, 0})
+                .setImageExtent({mipWidths[i], mipHeights[i], 1});
         }
 
-        vkCmdCopyBufferToImage(cmd.get(), stagingBuffer.get(), managedImage.get(),
-                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                               static_cast<uint32_t>(regions.size()), regions.data());
+        vk::CommandBuffer vkCmd(cmd.get());
+        vkCmd.copyBufferToImage(stagingBuffer.get(), managedImage.get(),
+                                vk::ImageLayout::eTransferDstOptimal, regions);
 
         if (!cmd.end()) return false;
     }

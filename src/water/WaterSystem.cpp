@@ -3,6 +3,7 @@
 #include "GraphicsPipelineFactory.h"
 #include "VulkanResourceFactory.h"
 #include "DescriptorManager.h"
+#include <vulkan/vulkan.hpp>
 #include <SDL3/SDL.h>
 #include <array>
 #include <cstring>
@@ -499,28 +500,31 @@ void WaterSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
             .update();
     }
 
+    vk::CommandBuffer vkCmd(cmd);
+
     // Use tessellation pipeline if enabled and available
     bool useTess = useTessellation_ && isTessellationSupported();
     VkPipeline activePipeline = useTess ? tessellationPipeline.get() : pipeline.get();
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, activePipeline);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, activePipeline);
 
     // Set dynamic viewport and scissor to handle window resize
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = static_cast<float>(extent.width);
-    viewport.height = static_cast<float>(extent.height);
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(cmd, 0, 1, &viewport);
+    auto viewport = vk::Viewport{}
+        .setX(0.0f)
+        .setY(0.0f)
+        .setWidth(static_cast<float>(extent.width))
+        .setHeight(static_cast<float>(extent.height))
+        .setMinDepth(0.0f)
+        .setMaxDepth(1.0f);
+    vkCmd.setViewport(0, viewport);
 
-    VkRect2D scissor{};
-    scissor.offset = {0, 0};
-    scissor.extent = extent;
-    vkCmdSetScissor(cmd, 0, 1, &scissor);
+    auto scissor = vk::Rect2D{}
+        .setOffset({0, 0})
+        .setExtent({extent.width, extent.height});
+    vkCmd.setScissor(0, scissor);
 
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            pipelineLayout.get(), 0, 1, &descriptorSets[frameIndex], 0, nullptr);
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+                             pipelineLayout.get(), 0,
+                             vk::DescriptorSet(descriptorSets[frameIndex]), {});
 
     // Set up push constants
     pushConstants.model = glm::mat4(1.0f);
@@ -531,24 +535,27 @@ void WaterSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
     ));
     // useFFTOcean and oceanSize values are set via setUseFFTOcean()
     // Push constants are used by vertex shader (non-tess) or both vertex + tess eval shaders
-    vkCmdPushConstants(cmd, pipelineLayout.get(), VK_SHADER_STAGE_VERTEX_BIT,
-                       0, sizeof(PushConstants), &pushConstants);
+    vkCmd.pushConstants<PushConstants>(
+        pipelineLayout.get(),
+        vk::ShaderStageFlagBits::eVertex,
+        0, pushConstants);
 
     // Bind water mesh and draw
     VkBuffer vertexBuffers[] = {(*waterMesh)->getVertexBuffer()};
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
-    vkCmdBindIndexBuffer(cmd, (*waterMesh)->getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
-    vkCmdDrawIndexed(cmd, (*waterMesh)->getIndexCount(), 1, 0, 0, 0);
+    vkCmd.bindIndexBuffer((*waterMesh)->getIndexBuffer(), 0, vk::IndexType::eUint32);
+    vkCmd.drawIndexed((*waterMesh)->getIndexCount(), 1, 0, 0, 0);
 }
 
 void WaterSystem::recordMeshDraw(VkCommandBuffer cmd) {
     // Draw just the mesh (pipeline and descriptors bound externally)
+    vk::CommandBuffer vkCmd(cmd);
     VkBuffer vertexBuffers[] = {(*waterMesh)->getVertexBuffer()};
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
-    vkCmdBindIndexBuffer(cmd, (*waterMesh)->getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
-    vkCmdDrawIndexed(cmd, (*waterMesh)->getIndexCount(), 1, 0, 0, 0);
+    vkCmd.bindIndexBuffer((*waterMesh)->getIndexBuffer(), 0, vk::IndexType::eUint32);
+    vkCmd.drawIndexed((*waterMesh)->getIndexCount(), 1, 0, 0, 0);
 }
 
 void WaterSystem::updateTide(float tideHeight) {

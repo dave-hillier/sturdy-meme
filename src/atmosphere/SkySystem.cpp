@@ -3,6 +3,7 @@
 #include "GraphicsPipelineFactory.h"
 #include "DescriptorManager.h"
 #include "UBOs.h"
+#include <vulkan/vulkan.hpp>
 #include <SDL3/SDL.h>
 #include <array>
 
@@ -146,24 +147,27 @@ bool SkySystem::createPipeline() {
 }
 
 void SkySystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+    vk::CommandBuffer vkCmd(cmd);
+
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
 
     // Set dynamic viewport and scissor to handle window resize
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = static_cast<float>(extent.width);
-    viewport.height = static_cast<float>(extent.height);
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(cmd, 0, 1, &viewport);
+    auto viewport = vk::Viewport{}
+        .setX(0.0f)
+        .setY(0.0f)
+        .setWidth(static_cast<float>(extent.width))
+        .setHeight(static_cast<float>(extent.height))
+        .setMinDepth(0.0f)
+        .setMaxDepth(1.0f);
+    vkCmd.setViewport(0, viewport);
 
-    VkRect2D scissor{};
-    scissor.offset = {0, 0};
-    scissor.extent = extent;
-    vkCmdSetScissor(cmd, 0, 1, &scissor);
+    auto scissor = vk::Rect2D{}
+        .setOffset({0, 0})
+        .setExtent({extent.width, extent.height});
+    vkCmd.setScissor(0, scissor);
 
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            pipelineLayout.get(), 0, 1, &descriptorSets[frameIndex], 0, nullptr);
-    vkCmdDraw(cmd, 3, 1, 0, 0);
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+                             pipelineLayout.get(), 0,
+                             vk::DescriptorSet(descriptorSets[frameIndex]), {});
+    vkCmd.draw(3, 1, 0, 0);
 }

@@ -398,10 +398,16 @@ void FroxelSystem::recordFroxelUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
         // First frame: no valid history yet, clear to zero
         Barriers::prepareImageForTransferDst(cmd, scatteringVolumes_[historyVolumeIdx].get());
 
-        VkClearColorValue clearValue = {{0.0f, 0.0f, 0.0f, 0.0f}};
-        VkImageSubresourceRange clearRange{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        vkCmdClearColorImage(cmd, scatteringVolumes_[historyVolumeIdx].get(),
-                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearValue, 1, &clearRange);
+        vk::CommandBuffer vkCmd(cmd);
+        auto clearValue = vk::ClearColorValue(std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f});
+        auto clearRange = vk::ImageSubresourceRange{}
+            .setAspectMask(vk::ImageAspectFlagBits::eColor)
+            .setBaseMipLevel(0)
+            .setLevelCount(1)
+            .setBaseArrayLayer(0)
+            .setLayerCount(1);
+        vkCmd.clearColorImage(scatteringVolumes_[historyVolumeIdx].get(),
+                              vk::ImageLayout::eTransferDstOptimal, clearValue, clearRange);
 
         // Transition to GENERAL for shader access
         Barriers::transitionImage(cmd, scatteringVolumes_[historyVolumeIdx].get(),
@@ -421,10 +427,16 @@ void FroxelSystem::recordFroxelUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
         // First frame: clear to zero
         Barriers::prepareImageForTransferDst(cmd, integratedVolume_.get());
 
-        VkClearColorValue clearValue = {{0.0f, 0.0f, 0.0f, 0.0f}};
-        VkImageSubresourceRange clearRange{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        vkCmdClearColorImage(cmd, integratedVolume_.get(),
-                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearValue, 1, &clearRange);
+        vk::CommandBuffer vkCmdInt(cmd);
+        auto clearValueInt = vk::ClearColorValue(std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f});
+        auto clearRangeInt = vk::ImageSubresourceRange{}
+            .setAspectMask(vk::ImageAspectFlagBits::eColor)
+            .setBaseMipLevel(0)
+            .setLevelCount(1)
+            .setBaseArrayLayer(0)
+            .setLayerCount(1);
+        vkCmdInt.clearColorImage(integratedVolume_.get(),
+                                 vk::ImageLayout::eTransferDstOptimal, clearValueInt, clearRangeInt);
 
         // Transition to GENERAL for compute
         Barriers::transitionImage(cmd, integratedVolume_.get(),
@@ -440,26 +452,27 @@ void FroxelSystem::recordFroxelUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
     }
 
     // Dispatch froxel update compute shader
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, froxelUpdatePipeline.get());
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, froxelPipelineLayout.get(),
-                            0, 1, &froxelDescriptorSets[frameIndex], 0, nullptr);
+    vk::CommandBuffer vkCmd(cmd);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, froxelUpdatePipeline.get());
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, froxelPipelineLayout.get(),
+                             0, vk::DescriptorSet(froxelDescriptorSets[frameIndex]), {});
 
     // Dispatch with 4x4x4 local size
     uint32_t groupsX = (FROXEL_WIDTH + 3) / 4;
     uint32_t groupsY = (FROXEL_HEIGHT + 3) / 4;
     uint32_t groupsZ = (FROXEL_DEPTH + 3) / 4;
-    vkCmdDispatch(cmd, groupsX, groupsY, groupsZ);
+    vkCmd.dispatch(groupsX, groupsY, groupsZ);
 
     // Barrier between update and integration - wait for current volume write
     Barriers::computeToCompute(cmd);
 
     // Dispatch integration pass
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, integrationPipeline.get());
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, integrationPipeline.get());
 
     // Integration dispatches per XY column, iterating through Z
     groupsX = (FROXEL_WIDTH + 3) / 4;
     groupsY = (FROXEL_HEIGHT + 3) / 4;
-    vkCmdDispatch(cmd, groupsX, groupsY, 1);
+    vkCmd.dispatch(groupsX, groupsY, 1);
 
     // Transition integrated volume to shader read for fragment sampling
     Barriers::imageComputeToSampling(cmd, integratedVolume_.get());

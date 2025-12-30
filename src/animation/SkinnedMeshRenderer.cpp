@@ -4,6 +4,7 @@
 #include "Bindings.h"
 #include "UBOs.h"
 
+#include <vulkan/vulkan.hpp>
 #include <SDL3/SDL.h>
 
 std::unique_ptr<SkinnedMeshRenderer> SkinnedMeshRenderer::create(const InitInfo& info) {
@@ -235,27 +236,30 @@ void SkinnedMeshRenderer::updateBoneMatrices(uint32_t frameIndex, AnimatedCharac
 
 void SkinnedMeshRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex,
                                   const Renderable& playerObj, AnimatedCharacter& character) {
+    vk::CommandBuffer vkCmd(cmd);
+
     // Bind skinned pipeline
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_.get());
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline_.get());
 
     // Set dynamic viewport and scissor to handle window resize
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = static_cast<float>(extent.width);
-    viewport.height = static_cast<float>(extent.height);
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(cmd, 0, 1, &viewport);
+    auto viewport = vk::Viewport{}
+        .setX(0.0f)
+        .setY(0.0f)
+        .setWidth(static_cast<float>(extent.width))
+        .setHeight(static_cast<float>(extent.height))
+        .setMinDepth(0.0f)
+        .setMaxDepth(1.0f);
+    vkCmd.setViewport(0, viewport);
 
-    VkRect2D scissor{};
-    scissor.offset = {0, 0};
-    scissor.extent = extent;
-    vkCmdSetScissor(cmd, 0, 1, &scissor);
+    auto scissor = vk::Rect2D{}
+        .setOffset({0, 0})
+        .setExtent({extent.width, extent.height});
+    vkCmd.setScissor(0, scissor);
 
     // Bind skinned descriptor set
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            pipelineLayout_.get(), 0, 1, &descriptorSets[frameIndex], 0, nullptr);
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+                             pipelineLayout_.get(), 0,
+                             vk::DescriptorSet(descriptorSets[frameIndex]), {});
 
     // Push constants
     PushConstants push{};
@@ -267,9 +271,10 @@ void SkinnedMeshRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex,
     push.emissiveColor = glm::vec4(playerObj.emissiveColor, 1.0f);
     push.pbrFlags = playerObj.pbrFlags;
 
-    vkCmdPushConstants(cmd, pipelineLayout_.get(),
-                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                       0, sizeof(PushConstants), &push);
+    vkCmd.pushConstants<PushConstants>(
+        pipelineLayout_.get(),
+        vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
+        0, push);
 
     // Bind skinned mesh vertex and index buffers
     SkinnedMesh& skinnedMesh = character.getSkinnedMesh();
@@ -277,7 +282,7 @@ void SkinnedMeshRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex,
     VkBuffer vertexBuffers[] = {skinnedMesh.getVertexBuffer()};
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
-    vkCmdBindIndexBuffer(cmd, skinnedMesh.getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+    vkCmd.bindIndexBuffer(skinnedMesh.getIndexBuffer(), 0, vk::IndexType::eUint32);
 
-    vkCmdDrawIndexed(cmd, skinnedMesh.getIndexCount(), 1, 0, 0, 0);
+    vkCmd.drawIndexed(skinnedMesh.getIndexCount(), 1, 0, 0, 0);
 }

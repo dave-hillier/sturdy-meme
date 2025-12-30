@@ -71,18 +71,20 @@ bool AtmosphereLUTSystem::exportImageToPNG(VkImage image, VkFormat format, uint3
         VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_READ_BIT);
 
     // Copy image to buffer
-    VkBufferImageCopy region{};
-    region.bufferOffset = 0;
-    region.bufferRowLength = 0;
-    region.bufferImageHeight = 0;
-    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    region.imageSubresource.mipLevel = 0;
-    region.imageSubresource.baseArrayLayer = 0;
-    region.imageSubresource.layerCount = 1;
-    region.imageOffset = {0, 0, 0};
-    region.imageExtent = {width, height, 1};
+    vk::CommandBuffer vkCmd(commandBuffer);
+    auto region = vk::BufferImageCopy{}
+        .setBufferOffset(0)
+        .setBufferRowLength(0)
+        .setBufferImageHeight(0)
+        .setImageSubresource(vk::ImageSubresourceLayers{}
+            .setAspectMask(vk::ImageAspectFlagBits::eColor)
+            .setMipLevel(0)
+            .setBaseArrayLayer(0)
+            .setLayerCount(1))
+        .setImageOffset({0, 0, 0})
+        .setImageExtent({width, height, 1});
 
-    vkCmdCopyImageToBuffer(commandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, stagingBuffer.get(), 1, &region);
+    vkCmd.copyImageToBuffer(image, vk::ImageLayout::eTransferSrcOptimal, stagingBuffer.get(), region);
 
     // Transition back
     Barriers::transitionImage(commandBuffer, image,

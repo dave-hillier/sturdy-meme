@@ -132,20 +132,20 @@ bool TreeRenderer::createDescriptorSetLayout() {
 
 bool TreeRenderer::createPipelines(const InitInfo& info) {
     // Create pipeline layouts with push constants
-    VkPushConstantRange branchPushRange{};
-    branchPushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-    branchPushRange.offset = 0;
-    branchPushRange.size = sizeof(TreeBranchPushConstants);
+    auto branchPushRange = vk::PushConstantRange{}
+        .setStageFlags(vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment)
+        .setOffset(0)
+        .setSize(sizeof(TreeBranchPushConstants));
 
     if (!DescriptorManager::createManagedPipelineLayout(device_, branchDescriptorSetLayout_.get(),
                                                         branchPipelineLayout_, {branchPushRange})) {
         return false;
     }
 
-    VkPushConstantRange leafPushRange{};
-    leafPushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-    leafPushRange.offset = 0;
-    leafPushRange.size = sizeof(TreeLeafPushConstants);
+    auto leafPushRange = vk::PushConstantRange{}
+        .setStageFlags(vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment)
+        .setOffset(0)
+        .setSize(sizeof(TreeLeafPushConstants));
 
     if (!DescriptorManager::createManagedPipelineLayout(device_, leafDescriptorSetLayout_.get(),
                                                         leafPipelineLayout_, {leafPushRange})) {
@@ -201,10 +201,10 @@ bool TreeRenderer::createPipelines(const InitInfo& info) {
     leafPipeline_ = ManagedPipeline::fromRaw(device_, rawLeafPipeline);
 
     // Create shadow pipeline layouts
-    VkPushConstantRange branchShadowPushRange{};
-    branchShadowPushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-    branchShadowPushRange.offset = 0;
-    branchShadowPushRange.size = sizeof(TreeBranchShadowPushConstants);
+    auto branchShadowPushRange = vk::PushConstantRange{}
+        .setStageFlags(vk::ShaderStageFlagBits::eVertex)
+        .setOffset(0)
+        .setSize(sizeof(TreeBranchShadowPushConstants));
 
     if (!DescriptorManager::createManagedPipelineLayout(device_, branchDescriptorSetLayout_.get(),
                                                         branchShadowPipelineLayout_, {branchShadowPushRange})) {
@@ -212,10 +212,10 @@ bool TreeRenderer::createPipelines(const InitInfo& info) {
         return false;
     }
 
-    VkPushConstantRange leafShadowPushRange{};
-    leafShadowPushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-    leafShadowPushRange.offset = 0;
-    leafShadowPushRange.size = sizeof(TreeLeafShadowPushConstants);
+    auto leafShadowPushRange = vk::PushConstantRange{}
+        .setStageFlags(vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment)
+        .setOffset(0)
+        .setSize(sizeof(TreeLeafShadowPushConstants));
 
     if (!DescriptorManager::createManagedPipelineLayout(device_, leafDescriptorSetLayout_.get(),
                                                         leafShadowPipelineLayout_, {leafShadowPushRange})) {
@@ -279,10 +279,10 @@ bool TreeRenderer::createPipelines(const InitInfo& info) {
         return false;
     }
 
-    VkPushConstantRange instancedShadowPushRange{};
-    instancedShadowPushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-    instancedShadowPushRange.offset = 0;
-    instancedShadowPushRange.size = sizeof(TreeBranchShadowInstancedPushConstants);
+    auto instancedShadowPushRange = vk::PushConstantRange{}
+        .setStageFlags(vk::ShaderStageFlagBits::eVertex)
+        .setOffset(0)
+        .setSize(sizeof(TreeBranchShadowInstancedPushConstants));
 
     if (!DescriptorManager::createManagedPipelineLayout(device_, branchShadowInstancedDescriptorSetLayout_.get(),
                                                         branchShadowInstancedPipelineLayout_, {instancedShadowPushRange})) {
@@ -546,6 +546,7 @@ void TreeRenderer::updateBranchCullingData(const TreeSystem& treeSystem, const T
         return;
     }
 
+    vk::Device vkDevice(device_);
     for (uint32_t i = 0; i < branchShadowInstancedDescriptorSets_.size(); ++i) {
         VkBuffer instanceBuffer = branchShadowCulling_->getInstanceBuffer(i);
         if (instanceBuffer == VK_NULL_HANDLE) {
@@ -554,21 +555,19 @@ void TreeRenderer::updateBranchCullingData(const TreeSystem& treeSystem, const T
             continue;
         }
 
-        VkDescriptorBufferInfo instanceBufferInfo{};
-        instanceBufferInfo.buffer = instanceBuffer;
-        instanceBufferInfo.offset = 0;
-        instanceBufferInfo.range = VK_WHOLE_SIZE;
+        auto instanceBufferInfo = vk::DescriptorBufferInfo{}
+            .setBuffer(instanceBuffer)
+            .setOffset(0)
+            .setRange(VK_WHOLE_SIZE);
 
-        VkWriteDescriptorSet instanceWrite{};
-        instanceWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        instanceWrite.dstSet = branchShadowInstancedDescriptorSets_[i];
-        instanceWrite.dstBinding = Bindings::TREE_GFX_BRANCH_SHADOW_INSTANCES;
-        instanceWrite.dstArrayElement = 0;
-        instanceWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        instanceWrite.descriptorCount = 1;
-        instanceWrite.pBufferInfo = &instanceBufferInfo;
+        auto instanceWrite = vk::WriteDescriptorSet{}
+            .setDstSet(branchShadowInstancedDescriptorSets_[i])
+            .setDstBinding(Bindings::TREE_GFX_BRANCH_SHADOW_INSTANCES)
+            .setDstArrayElement(0)
+            .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+            .setBufferInfo(instanceBufferInfo);
 
-        vkUpdateDescriptorSets(device_, 1, &instanceWrite, 0, nullptr);
+        vkDevice.updateDescriptorSets(instanceWrite, nullptr);
     }
 }
 

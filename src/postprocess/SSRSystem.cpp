@@ -442,13 +442,14 @@ void SSRSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex,
     pc.temporalBlend = temporalBlend;
 
     // Bind pipeline and dispatch main SSR pass
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline.get());
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                            computePipelineLayout.get(), 0, 1, &descriptorSets[frameIndex], 0, nullptr);
-    vkCmdPushConstants(cmd, computePipelineLayout.get(), VK_SHADER_STAGE_COMPUTE_BIT,
-                       0, sizeof(SSRPushConstants), &pc);
+    vk::CommandBuffer vkCmd(cmd);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, computePipeline.get());
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute,
+                             computePipelineLayout.get(), 0, vk::DescriptorSet(descriptorSets[frameIndex]), {});
+    vkCmd.pushConstants<SSRPushConstants>(
+        computePipelineLayout.get(), vk::ShaderStageFlagBits::eCompute, 0, pc);
 
-    vkCmdDispatch(cmd, groupsX, groupsY, 1);
+    vkCmd.dispatch(groupsX, groupsY, 1);
 
     // If blur is enabled, dispatch blur pass
     if (blurEnabled && blurPipeline) {
@@ -473,13 +474,13 @@ void SSRSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex,
         blurPc.blurRadius = blurRadius;
 
         // Dispatch blur pass
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, blurPipeline.get());
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                                blurPipelineLayout.get(), 0, 1, &blurDescriptorSets[frameIndex], 0, nullptr);
-        vkCmdPushConstants(cmd, blurPipelineLayout.get(), VK_SHADER_STAGE_COMPUTE_BIT,
-                           0, sizeof(BlurPushConstants), &blurPc);
+        vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, blurPipeline.get());
+        vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute,
+                                 blurPipelineLayout.get(), 0, vk::DescriptorSet(blurDescriptorSets[frameIndex]), {});
+        vkCmd.pushConstants<BlurPushConstants>(
+            blurPipelineLayout.get(), vk::ShaderStageFlagBits::eCompute, 0, blurPc);
 
-        vkCmdDispatch(cmd, groupsX, groupsY, 1);
+        vkCmd.dispatch(groupsX, groupsY, 1);
 
         // Final barrier: blur output -> fragment shader
         Barriers::transitionImage(cmd, ssrResult[writeBuffer],

@@ -344,6 +344,8 @@ void BloomSystem::destroyMipChain() {
 void BloomSystem::recordBloomPass(VkCommandBuffer cmd, VkImageView hdrInput) {
     if (mipChain.empty()) return;
 
+    vk::CommandBuffer vkCmd(cmd);
+
     // Downsample pass - from HDR to smallest mip
     for (size_t i = 0; i < mipChain.size(); ++i) {
         // Update descriptor set to sample from previous level
@@ -352,16 +354,16 @@ void BloomSystem::recordBloomPass(VkCommandBuffer cmd, VkImageView hdrInput) {
             .writeImage(0, sourceView, sampler_.get())
             .update();
 
-        // Begin render pass using vulkan-hpp builder
+        // Begin render pass
         vk::Extent2D mipExtent{mipChain[i].extent.width, mipChain[i].extent.height};
         auto renderPassInfo = vk::RenderPassBeginInfo{}
             .setRenderPass(downsampleRenderPass_.get())
             .setFramebuffer(mipChain[i].framebuffer)
             .setRenderArea(vk::Rect2D{{0, 0}, mipExtent});
 
-        vkCmdBeginRenderPass(cmd, reinterpret_cast<const VkRenderPassBeginInfo*>(&renderPassInfo), VK_SUBPASS_CONTENTS_INLINE);
+        vkCmd.beginRenderPass(renderPassInfo, vk::SubpassContents::eInline);
 
-        // Set viewport and scissor using vulkan-hpp builders
+        // Set viewport and scissor
         auto viewport = vk::Viewport{}
             .setX(0.0f)
             .setY(0.0f)
@@ -369,17 +371,17 @@ void BloomSystem::recordBloomPass(VkCommandBuffer cmd, VkImageView hdrInput) {
             .setHeight(static_cast<float>(mipChain[i].extent.height))
             .setMinDepth(0.0f)
             .setMaxDepth(1.0f);
-        vkCmdSetViewport(cmd, 0, 1, reinterpret_cast<const VkViewport*>(&viewport));
+        vkCmd.setViewport(0, viewport);
 
         auto scissor = vk::Rect2D{}
             .setOffset({0, 0})
             .setExtent(mipExtent);
-        vkCmdSetScissor(cmd, 0, 1, reinterpret_cast<const VkRect2D*>(&scissor));
+        vkCmd.setScissor(0, scissor);
 
         // Bind pipeline and descriptor set
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, downsamplePipeline_.get());
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, downsamplePipelineLayout_.get(),
-                               0, 1, &downsampleDescSets[i], 0, nullptr);
+        vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, downsamplePipeline_.get());
+        vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, downsamplePipelineLayout_.get(),
+                                 0, vk::DescriptorSet(downsampleDescSets[i]), {});
 
         // Push constants - use SOURCE resolution for texel size calculation
         DownsamplePushConstants pushConstants = {};
@@ -395,13 +397,15 @@ void BloomSystem::recordBloomPass(VkCommandBuffer cmd, VkImageView hdrInput) {
         pushConstants.threshold = threshold;
         pushConstants.isFirstPass = (i == 0) ? 1 : 0;
 
-        vkCmdPushConstants(cmd, downsamplePipelineLayout_.get(), VK_SHADER_STAGE_FRAGMENT_BIT,
-                          0, sizeof(DownsamplePushConstants), &pushConstants);
+        vkCmd.pushConstants<DownsamplePushConstants>(
+            downsamplePipelineLayout_.get(),
+            vk::ShaderStageFlagBits::eFragment,
+            0, pushConstants);
 
         // Draw fullscreen triangle
-        vkCmdDraw(cmd, 3, 1, 0, 0);
+        vkCmd.draw(3, 1, 0, 0);
 
-        vkCmdEndRenderPass(cmd);
+        vkCmd.endRenderPass();
     }
 
     // Upsample pass - from smallest mip back to largest
@@ -418,16 +422,16 @@ void BloomSystem::recordBloomPass(VkCommandBuffer cmd, VkImageView hdrInput) {
             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
             VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
 
-        // Begin render pass with LOAD operation to preserve downsampled content using vulkan-hpp builder
+        // Begin render pass with LOAD operation to preserve downsampled content
         vk::Extent2D mipExtent{mipChain[i].extent.width, mipChain[i].extent.height};
         auto renderPassInfo = vk::RenderPassBeginInfo{}
             .setRenderPass(upsampleRenderPass_.get())
             .setFramebuffer(mipChain[i].framebuffer)
             .setRenderArea(vk::Rect2D{{0, 0}, mipExtent});
 
-        vkCmdBeginRenderPass(cmd, reinterpret_cast<const VkRenderPassBeginInfo*>(&renderPassInfo), VK_SUBPASS_CONTENTS_INLINE);
+        vkCmd.beginRenderPass(renderPassInfo, vk::SubpassContents::eInline);
 
-        // Set viewport and scissor using vulkan-hpp builders
+        // Set viewport and scissor
         auto viewport = vk::Viewport{}
             .setX(0.0f)
             .setY(0.0f)
@@ -435,17 +439,17 @@ void BloomSystem::recordBloomPass(VkCommandBuffer cmd, VkImageView hdrInput) {
             .setHeight(static_cast<float>(mipChain[i].extent.height))
             .setMinDepth(0.0f)
             .setMaxDepth(1.0f);
-        vkCmdSetViewport(cmd, 0, 1, reinterpret_cast<const VkViewport*>(&viewport));
+        vkCmd.setViewport(0, viewport);
 
         auto scissor = vk::Rect2D{}
             .setOffset({0, 0})
             .setExtent(mipExtent);
-        vkCmdSetScissor(cmd, 0, 1, reinterpret_cast<const VkRect2D*>(&scissor));
+        vkCmd.setScissor(0, scissor);
 
         // Bind pipeline and descriptor set
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, upsamplePipeline_.get());
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, upsamplePipelineLayout_.get(),
-                               0, 1, &upsampleDescSets[i], 0, nullptr);
+        vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, upsamplePipeline_.get());
+        vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, upsamplePipelineLayout_.get(),
+                                 0, vk::DescriptorSet(upsampleDescSets[i]), {});
 
         // Push constants - use SOURCE resolution (the smaller mip being sampled)
         UpsamplePushConstants pushConstants = {};
@@ -453,13 +457,15 @@ void BloomSystem::recordBloomPass(VkCommandBuffer cmd, VkImageView hdrInput) {
         pushConstants.resolutionY = static_cast<float>(mipChain[i + 1].extent.height);
         pushConstants.filterRadius = 1.0f;
 
-        vkCmdPushConstants(cmd, upsamplePipelineLayout_.get(), VK_SHADER_STAGE_FRAGMENT_BIT,
-                          0, sizeof(UpsamplePushConstants), &pushConstants);
+        vkCmd.pushConstants<UpsamplePushConstants>(
+            upsamplePipelineLayout_.get(),
+            vk::ShaderStageFlagBits::eFragment,
+            0, pushConstants);
 
         // Draw fullscreen triangle
-        vkCmdDraw(cmd, 3, 1, 0, 0);
+        vkCmd.draw(3, 1, 0, 0);
 
-        vkCmdEndRenderPass(cmd);
+        vkCmd.endRenderPass();
     }
 
     // Final mip is now in SHADER_READ_ONLY_OPTIMAL and ready for compositing
