@@ -1,8 +1,10 @@
 // Road network generator tool
-// Generates road splines connecting settlements using A* pathfinding
+// Generates road splines connecting settlements using space colonization + A* pathfinding
 
 #include "RoadSpline.h"
 #include "RoadPathfinder.h"
+#include "SpaceColonization.h"
+#include "RoadSVG.h"
 #include <SDL3/SDL_log.h>
 #include <nlohmann/json.hpp>
 #include <lodepng.h>
@@ -31,12 +33,15 @@ void printUsage(const char* programName) {
               << "  --max-altitude <value>      Max altitude in heightmap (default: 200.0)\n"
               << "  --grid-resolution <value>   Pathfinding grid size (default: 512)\n"
               << "  --simplify-epsilon <value>  Path simplification threshold in meters (default: 10.0)\n"
+              << "  --use-colonization          Use space colonization for network topology\n"
               << "  --help                      Show this help message\n"
               << "\n"
               << "Output files:\n"
-              << "  roads.json        Road network data in JSON format\n"
-              << "  roads.bin         Binary road network for runtime loading\n"
-              << "  roads_debug.png   Debug visualization of road network\n"
+              << "  roads.json          Road network data in JSON format\n"
+              << "  roads.bin           Binary road network for runtime loading\n"
+              << "  roads_debug.png     Debug visualization of road network\n"
+              << "  roads.svg           SVG visualization of roads\n"
+              << "  network.svg         SVG of network topology (if --use-colonization)\n"
               << "\n"
               << "Example:\n"
               << "  " << programName << " terrain.png biome_map.png settlements.json ./generated\n";
@@ -58,7 +63,7 @@ bool loadSettlements(const std::string& path, std::vector<Settlement>& settlemen
         }
 
         for (const auto& s : j["settlements"]) {
-            Settlement settlement;
+            Settlement settlement{};  // Zero-initialize all fields
             settlement.id = s["id"].get<uint32_t>();
 
             std::string typeStr = s["type"].get<std::string>();
@@ -70,8 +75,22 @@ bool loadSettlements(const std::string& path, std::vector<Settlement>& settlemen
             settlement.position.x = s["x"].get<float>();
             settlement.position.y = s["z"].get<float>(); // Note: stored as z in JSON
 
+            if (s.contains("radius")) {
+                settlement.radius = s["radius"].get<float>();
+            } else {
+                // Default radii based on settlement type
+                switch (settlement.type) {
+                    case SettlementType::Town: settlement.radius = 200.0f; break;
+                    case SettlementType::Village: settlement.radius = 100.0f; break;
+                    case SettlementType::FishingVillage: settlement.radius = 80.0f; break;
+                    default: settlement.radius = 50.0f; break;
+                }
+            }
+
             if (s.contains("score")) {
                 settlement.score = s["score"].get<float>();
+            } else {
+                settlement.score = 0.0f;
             }
 
             if (s.contains("features")) {
@@ -294,6 +313,8 @@ int main(int argc, char* argv[]) {
     config.gridResolution = 512;
     config.simplifyEpsilon = 10.0f;
 
+    bool useColonization = false;
+
     // Parse optional arguments
     for (int i = 5; i < argc; i++) {
         std::string arg = argv[i];
@@ -308,6 +329,8 @@ int main(int argc, char* argv[]) {
             config.gridResolution = std::stoul(argv[++i]);
         } else if (arg == "--simplify-epsilon" && i + 1 < argc) {
             config.simplifyEpsilon = std::stof(argv[++i]);
+        } else if (arg == "--use-colonization") {
+            useColonization = true;
         } else {
             std::cerr << "Unknown option: " << arg << "\n";
             printUsage(argv[0]);
@@ -354,8 +377,70 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Generate road network
-    SDL_Log("Generating road network...");
+    // Space colonization for network topology (optional)
+    RoadGen::ColonizationResult colonizationResult;
+
+    if (useColonization) {
+        SDL_Log("Building network topology with space colonization...");
+
+        // Separate towns (roots) from other settlements (attractions)
+        std::vector<glm::vec2> attractionPoints;
+        std::vector<glm::vec2> rootPoints;
+        std::vector<uint32_t> attractionIds;
+        std::vector<uint32_t> rootIds;
+
+        for (const auto& s : settlements) {
+            if (s.type == SettlementType::Town) {
+                rootPoints.push_back(s.position);
+                rootIds.push_back(s.id);
+            }
+            // All settlements are also attraction points
+            attractionPoints.push_back(s.position);
+            attractionIds.push_back(s.id);
+        }
+
+        // If no towns, use villages as roots
+        if (rootPoints.empty()) {
+            for (const auto& s : settlements) {
+                if (s.type == SettlementType::Village) {
+                    rootPoints.push_back(s.position);
+                    rootIds.push_back(s.id);
+                }
+            }
+        }
+
+        // If still no roots, use the highest scoring settlement
+        if (rootPoints.empty() && !settlements.empty()) {
+            const Settlement* best = &settlements[0];
+            for (const auto& s : settlements) {
+                if (s.score > best->score) best = &s;
+            }
+            rootPoints.push_back(best->position);
+            rootIds.push_back(best->id);
+        }
+
+        RoadGen::ColonizationConfig colonConfig;
+        colonConfig.attractionRadius = config.terrainSize * 0.5f;
+        colonConfig.killRadius = 150.0f;  // Close enough to settlement
+        colonConfig.branchLength = 300.0f;
+
+        RoadGen::SpaceColonization colonizer;
+        colonizer.buildNetwork(
+            attractionPoints, rootPoints,
+            attractionIds, rootIds,
+            colonConfig, colonizationResult,
+            [](float progress, const std::string& status) {
+                SDL_Log("[%3.0f%%] %s", progress * 100.0f, status.c_str());
+            }
+        );
+
+        // Save network topology SVG
+        std::string networkSvgPath = outputDir + "/network.svg";
+        RoadGen::writeNetworkSVG(networkSvgPath, colonizationResult, settlements, config.terrainSize);
+    }
+
+    // Generate road network with A* pathfinding
+    SDL_Log("Generating road paths with A* pathfinding...");
 
     RoadGen::RoadNetwork network;
 
@@ -373,6 +458,7 @@ int main(int argc, char* argv[]) {
     std::string jsonPath = outputDir + "/roads.json";
     std::string binPath = outputDir + "/roads.bin";
     std::string debugPath = outputDir + "/roads_debug.png";
+    std::string svgPath = outputDir + "/roads.svg";
 
     if (!saveRoadsJson(jsonPath, network)) {
         return 1;
@@ -386,11 +472,18 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    // Save roads SVG
+    RoadGen::writeRoadsSVG(svgPath, network, settlements);
+
     SDL_Log("Road generation complete!");
     SDL_Log("Output files:");
     SDL_Log("  %s", jsonPath.c_str());
     SDL_Log("  %s", binPath.c_str());
     SDL_Log("  %s", debugPath.c_str());
+    SDL_Log("  %s", svgPath.c_str());
+    if (useColonization) {
+        SDL_Log("  %s/network.svg", outputDir.c_str());
+    }
 
     return 0;
 }

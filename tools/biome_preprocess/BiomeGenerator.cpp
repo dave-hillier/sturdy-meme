@@ -761,14 +761,18 @@ void BiomeGenerator::placeSettlements(ProgressCallback callback) {
 
         if (score > 8.0f && (distSea < 300.0f || flow > 0.4f)) {
             settlement.type = SettlementType::Town;
+            settlement.radius = config.townRadius;
             settlement.features.push_back("market");
         } else if (distSea < 400.0f && score > 5.0f) {
             settlement.type = SettlementType::FishingVillage;
+            settlement.radius = config.fishingVillageRadius;
             settlement.features.push_back("harbour");
         } else if (score > 5.0f) {
             settlement.type = SettlementType::Village;
+            settlement.radius = config.villageRadius;
         } else {
             settlement.type = SettlementType::Hamlet;
+            settlement.radius = config.hamletRadius;
         }
 
         // Add feature tags
@@ -803,15 +807,35 @@ void BiomeGenerator::placeSettlements(ProgressCallback callback) {
 void BiomeGenerator::computeSettlementDistances(ProgressCallback callback) {
     if (callback) callback(0.8f, "Computing settlement distances...");
 
+    // Helper to check if a zone is valid for settlement
+    auto isValidSettlementZone = [](BiomeZone zone) -> bool {
+        return zone != BiomeZone::Sea &&
+               zone != BiomeZone::River &&
+               zone != BiomeZone::ChalkCliff &&
+               zone != BiomeZone::SaltMarsh &&
+               zone != BiomeZone::Wetland;
+    };
+
     for (uint32_t y = 0; y < result.height; y++) {
         for (uint32_t x = 0; x < result.width; x++) {
             float worldX = (static_cast<float>(x) + 0.5f) / result.width * config.terrainSize;
             float worldZ = (static_cast<float>(y) + 0.5f) / result.height * config.terrainSize;
 
+            BiomeZone currentZone = result.cells[y * result.width + x].zone;
+
             float minDist = std::numeric_limits<float>::max();
             for (const auto& s : result.settlements) {
-                float dist = glm::distance(glm::vec2(worldX, worldZ), s.position);
-                minDist = std::min(minDist, dist);
+                float distFromCenter = glm::distance(glm::vec2(worldX, worldZ), s.position);
+
+                // If within radius AND in valid terrain, this cell is part of settlement
+                if (distFromCenter <= s.radius && isValidSettlementZone(currentZone)) {
+                    minDist = 0.0f;
+                    break;
+                }
+
+                // Otherwise, distance from the settlement edge (accounting for radius)
+                float distFromEdge = std::max(0.0f, distFromCenter - s.radius);
+                minDist = std::min(minDist, distFromEdge);
             }
 
             result.cells[y * result.width + x].distanceToSettlement = minDist;
@@ -900,28 +924,72 @@ bool BiomeGenerator::saveDebugVisualization(const std::string& path) const {
         imageData[i * 4 + 3] = 255;
     }
 
-    // Draw settlements as circles
+    // Helper to check if a zone is valid for settlement
+    auto isValidSettlementZone = [](BiomeZone zone) -> bool {
+        return zone != BiomeZone::Sea &&
+               zone != BiomeZone::River &&
+               zone != BiomeZone::ChalkCliff &&
+               zone != BiomeZone::SaltMarsh &&
+               zone != BiomeZone::Wetland;
+    };
+
+    // Draw settlement areas (constrained by terrain)
     for (const auto& s : result.settlements) {
         int cx = static_cast<int>(s.position.x / config.terrainSize * result.width);
         int cy = static_cast<int>(s.position.y / config.terrainSize * result.height);
 
-        int radius = 3;
-        if (s.type == SettlementType::Village || s.type == SettlementType::FishingVillage) radius = 5;
-        if (s.type == SettlementType::Town) radius = 8;
+        // Convert settlement radius from world units to pixels
+        float pixelsPerMeter = result.width / config.terrainSize;
+        int radiusPixels = static_cast<int>(s.radius * pixelsPerMeter);
 
-        glm::vec3 color(1.0f, 0.2f, 0.2f);  // Red for settlements
+        // Settlement fill color (semi-transparent red overlay)
+        glm::vec3 fillColor(0.8f, 0.3f, 0.2f);
 
-        for (int dy = -radius; dy <= radius; dy++) {
-            for (int dx = -radius; dx <= radius; dx++) {
-                if (dx * dx + dy * dy <= radius * radius) {
+        for (int dy = -radiusPixels; dy <= radiusPixels; dy++) {
+            for (int dx = -radiusPixels; dx <= radiusPixels; dx++) {
+                if (dx * dx + dy * dy <= radiusPixels * radiusPixels) {
                     int px = cx + dx;
                     int py = cy + dy;
                     if (px >= 0 && px < static_cast<int>(result.width) &&
                         py >= 0 && py < static_cast<int>(result.height)) {
                         int idx = py * result.width + px;
-                        imageData[idx * 4 + 0] = static_cast<uint8_t>(color.r * 255.0f);
-                        imageData[idx * 4 + 1] = static_cast<uint8_t>(color.g * 255.0f);
-                        imageData[idx * 4 + 2] = static_cast<uint8_t>(color.b * 255.0f);
+
+                        // Only draw on valid settlement terrain
+                        BiomeZone zone = result.cells[idx].zone;
+                        if (isValidSettlementZone(zone)) {
+                            // Blend with existing color
+                            float blendFactor = 0.6f;
+                            float r = imageData[idx * 4 + 0] / 255.0f;
+                            float g = imageData[idx * 4 + 1] / 255.0f;
+                            float b = imageData[idx * 4 + 2] / 255.0f;
+
+                            r = r * (1.0f - blendFactor) + fillColor.r * blendFactor;
+                            g = g * (1.0f - blendFactor) + fillColor.g * blendFactor;
+                            b = b * (1.0f - blendFactor) + fillColor.b * blendFactor;
+
+                            imageData[idx * 4 + 0] = static_cast<uint8_t>(r * 255.0f);
+                            imageData[idx * 4 + 1] = static_cast<uint8_t>(g * 255.0f);
+                            imageData[idx * 4 + 2] = static_cast<uint8_t>(b * 255.0f);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Draw settlement center marker (small bright dot)
+        glm::vec3 centerColor(1.0f, 1.0f, 0.2f);  // Yellow center
+        int markerRadius = 2;
+        for (int dy = -markerRadius; dy <= markerRadius; dy++) {
+            for (int dx = -markerRadius; dx <= markerRadius; dx++) {
+                if (dx * dx + dy * dy <= markerRadius * markerRadius) {
+                    int px = cx + dx;
+                    int py = cy + dy;
+                    if (px >= 0 && px < static_cast<int>(result.width) &&
+                        py >= 0 && py < static_cast<int>(result.height)) {
+                        int idx = py * result.width + px;
+                        imageData[idx * 4 + 0] = static_cast<uint8_t>(centerColor.r * 255.0f);
+                        imageData[idx * 4 + 1] = static_cast<uint8_t>(centerColor.g * 255.0f);
+                        imageData[idx * 4 + 2] = static_cast<uint8_t>(centerColor.b * 255.0f);
                     }
                 }
             }
@@ -959,6 +1027,7 @@ bool BiomeGenerator::saveSettlements(const std::string& path) const {
         file << "      \"type\": \"" << getSettlementTypeName(s.type) << "\",\n";
         file << "      \"x\": " << s.position.x << ",\n";
         file << "      \"z\": " << s.position.y << ",\n";
+        file << "      \"radius\": " << s.radius << ",\n";
         file << "      \"score\": " << s.score << ",\n";
         file << "      \"features\": [";
 

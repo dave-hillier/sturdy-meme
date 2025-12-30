@@ -154,6 +154,8 @@ target_compile_features(tile_generator PRIVATE cxx_std_17)
 add_executable(road_generator
     road_generator/main.cpp
     road_generator/RoadPathfinder.cpp
+    road_generator/SpaceColonization.cpp
+    road_generator/RoadSVG.cpp
 )
 
 target_include_directories(road_generator PRIVATE

@@ -64,6 +64,7 @@ struct Settlement {
     uint32_t id;
     SettlementType type;
     glm::vec2 position;         // World coordinates
+    float radius;               // Settlement area radius in meters
     float score;
     std::vector<std::string> features;
 };
@@ -107,6 +108,12 @@ struct BiomeConfig {
     float hamletMinDistance = 400.0f;
     float villageMinDistance = 800.0f;
     float townMinDistance = 2000.0f;
+
+    // Settlement area radii (in meters)
+    float hamletRadius = 50.0f;
+    float villageRadius = 100.0f;
+    float townRadius = 200.0f;
+    float fishingVillageRadius = 80.0f;
 };
 
 struct BiomeCell {
