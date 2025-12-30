@@ -506,6 +506,13 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
 
             SDL_Log("Forest added: %d trees (Poisson disk) at distance 300 units", treesPlaced);
 
+            // Update spatial index for GPU-accelerated leaf culling
+            // This must be called after all trees are added to enable two-phase culling
+            if (systems_->treeRenderer()) {
+                systems_->treeRenderer()->updateSpatialIndex(*treeSystem);
+                SDL_Log("Tree spatial index updated for GPU culling");
+            }
+
             // Generate impostor archetypes for each unique tree type
             // The first 4 trees (display trees) define the archetypes: oak, pine, ash, aspen
             auto* treeLOD = systems_->treeLOD();
