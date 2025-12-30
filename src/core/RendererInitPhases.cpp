@@ -328,13 +328,13 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     // Initialize TreeRenderer for dedicated tree shaders with wind animation
     {
         TreeRenderer::InitInfo treeRendererInfo{};
-        treeRendererInfo.device = device;
-        treeRendererInfo.physicalDevice = physicalDevice;
+        treeRendererInfo.device = vk::Device(device);
+        treeRendererInfo.physicalDevice = vk::PhysicalDevice(physicalDevice);
         treeRendererInfo.allocator = allocator;
-        treeRendererInfo.hdrRenderPass = systems_->postProcess().getHDRRenderPass();
-        treeRendererInfo.shadowRenderPass = systems_->shadow().getShadowRenderPass();
+        treeRendererInfo.hdrRenderPass = vk::RenderPass(systems_->postProcess().getHDRRenderPass());
+        treeRendererInfo.shadowRenderPass = vk::RenderPass(systems_->shadow().getShadowRenderPass());
         treeRendererInfo.descriptorPool = &*descriptorManagerPool;
-        treeRendererInfo.extent = systems_->postProcess().getExtent();
+        treeRendererInfo.extent = vk::Extent2D{systems_->postProcess().getExtent().width, systems_->postProcess().getExtent().height};
         treeRendererInfo.shadowMapSize = systems_->shadow().getShadowMapSize();
         treeRendererInfo.resourcePath = resourcePath;
         treeRendererInfo.maxFramesInFlight = MAX_FRAMES_IN_FLIGHT;

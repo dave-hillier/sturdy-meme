@@ -1,6 +1,6 @@
 #pragma once
 
-#include <vulkan/vulkan.h>
+#include <vulkan/vulkan.hpp>
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
 #include <vector>
@@ -53,13 +53,13 @@ struct TreeBranchShadowInstancedPushConstants {
 class TreeRenderer {
 public:
     struct InitInfo {
-        VkDevice device;
-        VkPhysicalDevice physicalDevice;
+        vk::Device device;
+        vk::PhysicalDevice physicalDevice;
         VmaAllocator allocator;
-        VkRenderPass hdrRenderPass;
-        VkRenderPass shadowRenderPass;
+        vk::RenderPass hdrRenderPass;
+        vk::RenderPass shadowRenderPass;
         DescriptorManager::Pool* descriptorPool;
-        VkExtent2D extent;
+        vk::Extent2D extent;
         uint32_t shadowMapSize = 2048;
         std::string resourcePath;
         uint32_t maxFramesInFlight;
@@ -78,53 +78,53 @@ public:
     void updateBarkDescriptorSet(
         uint32_t frameIndex,
         const std::string& barkType,
-        VkBuffer uniformBuffer,
-        VkBuffer windBuffer,
-        VkImageView shadowMapView,
-        VkSampler shadowSampler,
-        VkImageView barkAlbedo,
-        VkImageView barkNormal,
-        VkImageView barkRoughness,
-        VkImageView barkAO,
-        VkSampler barkSampler);
+        vk::Buffer uniformBuffer,
+        vk::Buffer windBuffer,
+        vk::ImageView shadowMapView,
+        vk::Sampler shadowSampler,
+        vk::ImageView barkAlbedo,
+        vk::ImageView barkNormal,
+        vk::ImageView barkRoughness,
+        vk::ImageView barkAO,
+        vk::Sampler barkSampler);
 
     void updateLeafDescriptorSet(
         uint32_t frameIndex,
         const std::string& leafType,
-        VkBuffer uniformBuffer,
-        VkBuffer windBuffer,
-        VkImageView shadowMapView,
-        VkSampler shadowSampler,
-        VkImageView leafAlbedo,
-        VkSampler leafSampler,
-        VkBuffer leafInstanceBuffer,
-        VkDeviceSize leafInstanceBufferSize);
+        vk::Buffer uniformBuffer,
+        vk::Buffer windBuffer,
+        vk::ImageView shadowMapView,
+        vk::Sampler shadowSampler,
+        vk::ImageView leafAlbedo,
+        vk::Sampler leafSampler,
+        vk::Buffer leafInstanceBuffer,
+        vk::DeviceSize leafInstanceBufferSize);
 
     // Update culled leaf descriptor sets (called after cull buffers are created)
     void updateCulledLeafDescriptorSet(
         uint32_t frameIndex,
         const std::string& leafType,
-        VkBuffer uniformBuffer,
-        VkBuffer windBuffer,
-        VkImageView shadowMapView,
-        VkSampler shadowSampler,
-        VkImageView leafAlbedo,
-        VkSampler leafSampler);
+        vk::Buffer uniformBuffer,
+        vk::Buffer windBuffer,
+        vk::ImageView shadowMapView,
+        vk::Sampler shadowSampler,
+        vk::ImageView leafAlbedo,
+        vk::Sampler leafSampler);
 
     // Get descriptor set for a specific type (returns default if type not found)
-    VkDescriptorSet getBranchDescriptorSet(uint32_t frameIndex, const std::string& barkType) const;
-    VkDescriptorSet getLeafDescriptorSet(uint32_t frameIndex, const std::string& leafType) const;
-    VkDescriptorSet getCulledLeafDescriptorSet(uint32_t frameIndex, const std::string& leafType) const;
+    vk::DescriptorSet getBranchDescriptorSet(uint32_t frameIndex, const std::string& barkType) const;
+    vk::DescriptorSet getLeafDescriptorSet(uint32_t frameIndex, const std::string& leafType) const;
+    vk::DescriptorSet getCulledLeafDescriptorSet(uint32_t frameIndex, const std::string& leafType) const;
 
     // Record compute pass for leaf culling (call before render pass)
-    void recordLeafCulling(VkCommandBuffer cmd, uint32_t frameIndex,
+    void recordLeafCulling(vk::CommandBuffer cmd, uint32_t frameIndex,
                            const TreeSystem& treeSystem,
                            const TreeLODSystem* lodSystem,
                            const glm::vec3& cameraPos,
                            const glm::vec4* frustumPlanes);
 
     // Record compute pass for branch shadow culling (call before shadow pass)
-    void recordBranchShadowCulling(VkCommandBuffer cmd, uint32_t frameIndex,
+    void recordBranchShadowCulling(vk::CommandBuffer cmd, uint32_t frameIndex,
                                    uint32_t cascadeIndex,
                                    const glm::vec4* cascadeFrustumPlanes,
                                    const glm::vec3& cameraPos,
@@ -149,16 +149,16 @@ public:
     bool isSpatialIndexEnabled() const;
 
     // Render all trees (optionally filtering by LOD)
-    void render(VkCommandBuffer cmd, uint32_t frameIndex, float time,
+    void render(vk::CommandBuffer cmd, uint32_t frameIndex, float time,
                 const TreeSystem& treeSystem, const TreeLODSystem* lodSystem = nullptr);
 
     // Render tree shadows (optionally filtering by LOD)
-    void renderShadows(VkCommandBuffer cmd, uint32_t frameIndex,
+    void renderShadows(vk::CommandBuffer cmd, uint32_t frameIndex,
                        const TreeSystem& treeSystem, int cascadeIndex,
                        const TreeLODSystem* lodSystem = nullptr);
 
     // Update extent on resize
-    void setExtent(VkExtent2D newExtent);
+    void setExtent(vk::Extent2D newExtent);
 
     // Invalidate descriptor cache (call when bound resources change, e.g., on resize)
     void invalidateDescriptorCache();
@@ -170,7 +170,7 @@ public:
     void setTwoPhaseLeafCulling(bool enabled);
     bool isTwoPhaseLeafCullingEnabled() const;
 
-    VkDevice getDevice() const { return device_; }
+    vk::Device getDevice() const { return device_; }
 
 private:
     TreeRenderer() = default;
@@ -179,12 +179,12 @@ private:
     bool createDescriptorSetLayout();
     bool allocateDescriptorSets(uint32_t maxFramesInFlight);
 
-    VkDevice device_ = VK_NULL_HANDLE;
-    VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
+    vk::Device device_;
+    vk::PhysicalDevice physicalDevice_;
     VmaAllocator allocator_ = VK_NULL_HANDLE;
     DescriptorManager::Pool* descriptorPool_ = nullptr;
     std::string resourcePath_;
-    VkExtent2D extent_{};
+    vk::Extent2D extent_{};
     uint32_t maxFramesInFlight_ = 0;
 
     // Graphics Pipelines
@@ -204,15 +204,15 @@ private:
     ManagedDescriptorSetLayout leafDescriptorSetLayout_;
 
     // Per-frame descriptor sets (indexed by frame, then by texture type)
-    std::vector<std::unordered_map<std::string, VkDescriptorSet>> branchDescriptorSets_;
-    std::vector<std::unordered_map<std::string, VkDescriptorSet>> leafDescriptorSets_;
+    std::vector<std::unordered_map<std::string, vk::DescriptorSet>> branchDescriptorSets_;
+    std::vector<std::unordered_map<std::string, vk::DescriptorSet>> leafDescriptorSets_;
 
     // Default descriptor sets for types without registered textures
-    std::vector<VkDescriptorSet> defaultBranchDescriptorSets_;
-    std::vector<VkDescriptorSet> defaultLeafDescriptorSets_;
+    std::vector<vk::DescriptorSet> defaultBranchDescriptorSets_;
+    std::vector<vk::DescriptorSet> defaultLeafDescriptorSets_;
 
     // Per-frame, per-type descriptor sets for culled leaf output buffer
-    std::vector<std::unordered_map<std::string, VkDescriptorSet>> culledLeafDescriptorSets_;
+    std::vector<std::unordered_map<std::string, vk::DescriptorSet>> culledLeafDescriptorSets_;
 
     // Track which descriptor sets have been initialized (to avoid redundant updates)
     // Key format: "frameIndex:typeName"
@@ -230,5 +230,5 @@ private:
     ManagedPipeline branchShadowInstancedPipeline_;
     ManagedPipelineLayout branchShadowInstancedPipelineLayout_;
     ManagedDescriptorSetLayout branchShadowInstancedDescriptorSetLayout_;
-    std::vector<VkDescriptorSet> branchShadowInstancedDescriptorSets_;
+    std::vector<vk::DescriptorSet> branchShadowInstancedDescriptorSets_;
 };

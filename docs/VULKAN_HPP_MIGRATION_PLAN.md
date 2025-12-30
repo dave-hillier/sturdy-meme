@@ -287,7 +287,7 @@ Based on usage counts and impact. Status indicates current migration progress.
 | File | Status | hpp | raw |
 |------|--------|-----|-----|
 | `src/vegetation/TreeLODSystem.cpp` | ✅ Migrated | 207 | 62 |
-| `src/vegetation/TreeRenderer.cpp` | ⏳ Partial | 57 | 37 |
+| `src/vegetation/TreeRenderer.cpp` | ✅ **Full Type Migration** | 100+ | 0 |
 | `src/terrain/TerrainSystem.cpp` | ⏳ Partial | 52 | 58 |
 | `src/postprocess/PostProcessSystem.cpp` | ✅ Migrated | 131 | 51 |
 | `src/vegetation/GrassSystem.cpp` | ⏳ Partial | 78 | 50 |
@@ -324,10 +324,10 @@ Files with highest remaining raw Vulkan usage:
 | `src/core/vulkan/VulkanBarriers.h` | 151 |
 | `src/core/vulkan/VulkanRAII.h` | 135 |
 | `src/core/vulkan/VulkanResourceFactory.cpp` | 94 |
-| `src/vegetation/TreeRenderer.cpp` | 89 |
 | `src/vegetation/TreeLODSystem.cpp` | 89 |
 | `src/terrain/TerrainSystem.cpp` | 87 |
 | `src/vegetation/GrassSystem.cpp` | 80 |
+| ~~`src/vegetation/TreeRenderer.cpp`~~ | ✅ Fully migrated |
 
 **Note:** VulkanBarriers.h, VulkanRAII.h, and VulkanResourceFactory are deferred to a later phase as noted in the introduction.
 
@@ -371,10 +371,10 @@ The codebase already uses `VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1`. The dispatcher
 ### High Priority
 1. ~~**Pipeline Infrastructure (Tier 3)**~~ — ✅ Complete
 
-2. **Complete partial migrations in Tier 2** — Note: These files have type declarations (VkBuffer, VkDevice, etc.) for interface compatibility but no remaining raw API calls (vkCmd*, vkCreate*, etc.)
-   - `TreeRenderer.cpp` — Type declarations only, API calls migrated
-   - `TerrainSystem.cpp` — Type declarations only, API calls migrated
-   - `GrassSystem.cpp` — Type declarations only, API calls migrated
+2. **Complete full type migrations in Tier 2** — Convert all raw Vulkan types (VkBuffer, VkDevice, etc.) to vulkan-hpp types (vk::Buffer, vk::Device, etc.) throughout:
+   - `TreeRenderer.cpp` — ✅ **Complete** (all types migrated: InitInfo, member variables, function parameters)
+   - `TerrainSystem.cpp` — ⏳ Interface types need migration
+   - `GrassSystem.cpp` — ⏳ Interface types need migration
 
 ### Medium Priority
 3. ~~**Water & Atmosphere (Tier 4)**~~ — ✅ Mostly Complete

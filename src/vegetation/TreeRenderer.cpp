@@ -73,8 +73,12 @@ bool TreeRenderer::initInternal(const InitInfo& info) {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "TreeRenderer: Branch shadow culling not available, using per-tree rendering");
         } else {
             // Allocate instanced shadow descriptor sets
-            branchShadowInstancedDescriptorSets_ = descriptorPool_->allocate(
+            auto rawSets = descriptorPool_->allocate(
                 branchShadowInstancedDescriptorSetLayout_.get(), info.maxFramesInFlight);
+            branchShadowInstancedDescriptorSets_.reserve(rawSets.size());
+            for (auto set : rawSets) {
+                branchShadowInstancedDescriptorSets_.push_back(vk::DescriptorSet(set));
+            }
             if (branchShadowInstancedDescriptorSets_.empty()) {
                 SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "TreeRenderer: Failed to allocate instanced shadow descriptor sets");
                 branchShadowCulling_.reset();
@@ -319,16 +323,24 @@ bool TreeRenderer::allocateDescriptorSets(uint32_t maxFramesInFlight) {
     leafDescriptorSets_.resize(maxFramesInFlight);
     culledLeafDescriptorSets_.resize(maxFramesInFlight);
 
-    defaultBranchDescriptorSets_ = descriptorPool_->allocate(branchDescriptorSetLayout_.get(), maxFramesInFlight);
-    if (defaultBranchDescriptorSets_.empty()) {
+    auto rawBranchSets = descriptorPool_->allocate(branchDescriptorSetLayout_.get(), maxFramesInFlight);
+    if (rawBranchSets.empty()) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate default branch descriptor sets");
         return false;
     }
+    defaultBranchDescriptorSets_.reserve(rawBranchSets.size());
+    for (auto set : rawBranchSets) {
+        defaultBranchDescriptorSets_.push_back(vk::DescriptorSet(set));
+    }
 
-    defaultLeafDescriptorSets_ = descriptorPool_->allocate(leafDescriptorSetLayout_.get(), maxFramesInFlight);
-    if (defaultLeafDescriptorSets_.empty()) {
+    auto rawLeafSets = descriptorPool_->allocate(leafDescriptorSetLayout_.get(), maxFramesInFlight);
+    if (rawLeafSets.empty()) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate default leaf descriptor sets");
         return false;
+    }
+    defaultLeafDescriptorSets_.reserve(rawLeafSets.size());
+    for (auto set : rawLeafSets) {
+        defaultLeafDescriptorSets_.push_back(vk::DescriptorSet(set));
     }
 
     return true;
@@ -343,15 +355,15 @@ void TreeRenderer::updateSpatialIndex(const TreeSystem& treeSystem) {
 void TreeRenderer::updateBarkDescriptorSet(
     uint32_t frameIndex,
     const std::string& barkType,
-    VkBuffer uniformBuffer,
-    VkBuffer windBuffer,
-    VkImageView shadowMapView,
-    VkSampler shadowSampler,
-    VkImageView barkAlbedo,
-    VkImageView barkNormal,
-    VkImageView barkRoughness,
-    VkImageView barkAO,
-    VkSampler barkSampler) {
+    vk::Buffer uniformBuffer,
+    vk::Buffer windBuffer,
+    vk::ImageView shadowMapView,
+    vk::Sampler shadowSampler,
+    vk::ImageView barkAlbedo,
+    vk::ImageView barkNormal,
+    vk::ImageView barkRoughness,
+    vk::ImageView barkAO,
+    vk::Sampler barkSampler) {
 
     // Skip redundant updates - descriptor bindings don't change per-frame
     std::string key = std::to_string(frameIndex) + ":" + barkType;
@@ -366,10 +378,10 @@ void TreeRenderer::updateBarkDescriptorSet(
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate bark descriptor set for type: %s", barkType.c_str());
             return;
         }
-        branchDescriptorSets_[frameIndex][barkType] = sets[0];
+        branchDescriptorSets_[frameIndex][barkType] = vk::DescriptorSet(sets[0]);
     }
 
-    VkDescriptorSet dstSet = branchDescriptorSets_[frameIndex][barkType];
+    vk::DescriptorSet dstSet = branchDescriptorSets_[frameIndex][barkType];
 
     DescriptorManager::SetWriter writer(device_, dstSet);
     writer.writeBuffer(Bindings::TREE_GFX_UBO, uniformBuffer, 0, VK_WHOLE_SIZE)
@@ -388,14 +400,14 @@ void TreeRenderer::updateBarkDescriptorSet(
 void TreeRenderer::updateLeafDescriptorSet(
     uint32_t frameIndex,
     const std::string& leafType,
-    VkBuffer uniformBuffer,
-    VkBuffer windBuffer,
-    VkImageView shadowMapView,
-    VkSampler shadowSampler,
-    VkImageView leafAlbedo,
-    VkSampler leafSampler,
-    VkBuffer leafInstanceBuffer,
-    VkDeviceSize leafInstanceBufferSize) {
+    vk::Buffer uniformBuffer,
+    vk::Buffer windBuffer,
+    vk::ImageView shadowMapView,
+    vk::Sampler shadowSampler,
+    vk::ImageView leafAlbedo,
+    vk::Sampler leafSampler,
+    vk::Buffer leafInstanceBuffer,
+    vk::DeviceSize leafInstanceBufferSize) {
 
     // Skip redundant updates - descriptor bindings don't change per-frame
     std::string key = std::to_string(frameIndex) + ":" + leafType;
@@ -410,11 +422,11 @@ void TreeRenderer::updateLeafDescriptorSet(
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate leaf descriptor set for type: %s", leafType.c_str());
             return;
         }
-        leafDescriptorSets_[frameIndex][leafType] = sets[0];
+        leafDescriptorSets_[frameIndex][leafType] = vk::DescriptorSet(sets[0]);
     }
 
-    VkDescriptorSet dstSet = leafDescriptorSets_[frameIndex][leafType];
-    VkDeviceSize range = leafInstanceBufferSize > 0 ? leafInstanceBufferSize : VK_WHOLE_SIZE;
+    vk::DescriptorSet dstSet = leafDescriptorSets_[frameIndex][leafType];
+    vk::DeviceSize range = leafInstanceBufferSize > 0 ? leafInstanceBufferSize : VK_WHOLE_SIZE;
 
     DescriptorManager::SetWriter writer(device_, dstSet);
     writer.writeBuffer(Bindings::TREE_GFX_UBO, uniformBuffer, 0, VK_WHOLE_SIZE)
@@ -431,12 +443,12 @@ void TreeRenderer::updateLeafDescriptorSet(
 void TreeRenderer::updateCulledLeafDescriptorSet(
     uint32_t frameIndex,
     const std::string& leafType,
-    VkBuffer uniformBuffer,
-    VkBuffer windBuffer,
-    VkImageView shadowMapView,
-    VkSampler shadowSampler,
-    VkImageView leafAlbedo,
-    VkSampler leafSampler) {
+    vk::Buffer uniformBuffer,
+    vk::Buffer windBuffer,
+    vk::ImageView shadowMapView,
+    vk::Sampler shadowSampler,
+    vk::ImageView leafAlbedo,
+    vk::Sampler leafSampler) {
 
     // Skip if culling not available
     if (!leafCulling_ || leafCulling_->getOutputBuffer(frameIndex) == VK_NULL_HANDLE) {
@@ -450,10 +462,10 @@ void TreeRenderer::updateCulledLeafDescriptorSet(
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate culled leaf descriptor set for type: %s", leafType.c_str());
             return;
         }
-        culledLeafDescriptorSets_[frameIndex][leafType] = sets[0];
+        culledLeafDescriptorSets_[frameIndex][leafType] = vk::DescriptorSet(sets[0]);
     }
 
-    VkDescriptorSet dstSet = culledLeafDescriptorSets_[frameIndex][leafType];
+    vk::DescriptorSet dstSet = culledLeafDescriptorSets_[frameIndex][leafType];
 
     // IMPORTANT: Must update SSBO bindings every frame because getOutputBuffer(frameIndex)
     // and getTreeRenderDataBuffer(frameIndex) return different buffers for each frame
@@ -469,7 +481,7 @@ void TreeRenderer::updateCulledLeafDescriptorSet(
           .update();
 }
 
-VkDescriptorSet TreeRenderer::getBranchDescriptorSet(uint32_t frameIndex, const std::string& barkType) const {
+vk::DescriptorSet TreeRenderer::getBranchDescriptorSet(uint32_t frameIndex, const std::string& barkType) const {
     auto frameIt = branchDescriptorSets_[frameIndex].find(barkType);
     if (frameIt != branchDescriptorSets_[frameIndex].end()) {
         return frameIt->second;
@@ -477,7 +489,7 @@ VkDescriptorSet TreeRenderer::getBranchDescriptorSet(uint32_t frameIndex, const 
     return defaultBranchDescriptorSets_[frameIndex];
 }
 
-VkDescriptorSet TreeRenderer::getLeafDescriptorSet(uint32_t frameIndex, const std::string& leafType) const {
+vk::DescriptorSet TreeRenderer::getLeafDescriptorSet(uint32_t frameIndex, const std::string& leafType) const {
     auto frameIt = leafDescriptorSets_[frameIndex].find(leafType);
     if (frameIt != leafDescriptorSets_[frameIndex].end()) {
         return frameIt->second;
@@ -485,7 +497,7 @@ VkDescriptorSet TreeRenderer::getLeafDescriptorSet(uint32_t frameIndex, const st
     return defaultLeafDescriptorSets_[frameIndex];
 }
 
-VkDescriptorSet TreeRenderer::getCulledLeafDescriptorSet(uint32_t frameIndex, const std::string& leafType) const {
+vk::DescriptorSet TreeRenderer::getCulledLeafDescriptorSet(uint32_t frameIndex, const std::string& leafType) const {
     if (frameIndex < culledLeafDescriptorSets_.size()) {
         auto frameIt = culledLeafDescriptorSets_[frameIndex].find(leafType);
         if (frameIt != culledLeafDescriptorSets_[frameIndex].end()) {
@@ -495,7 +507,7 @@ VkDescriptorSet TreeRenderer::getCulledLeafDescriptorSet(uint32_t frameIndex, co
     return getLeafDescriptorSet(frameIndex, leafType);
 }
 
-void TreeRenderer::recordLeafCulling(VkCommandBuffer cmd, uint32_t frameIndex,
+void TreeRenderer::recordLeafCulling(vk::CommandBuffer cmd, uint32_t frameIndex,
                                       const TreeSystem& treeSystem,
                                       const TreeLODSystem* lodSystem,
                                       const glm::vec3& cameraPos,
@@ -523,7 +535,7 @@ bool TreeRenderer::isTwoPhaseLeafCullingEnabled() const {
     return leafCulling_ && leafCulling_->isTwoPhaseEnabled();
 }
 
-void TreeRenderer::recordBranchShadowCulling(VkCommandBuffer cmd, uint32_t frameIndex,
+void TreeRenderer::recordBranchShadowCulling(vk::CommandBuffer cmd, uint32_t frameIndex,
                                               uint32_t cascadeIndex,
                                               const glm::vec4* cascadeFrustumPlanes,
                                               const glm::vec3& cameraPos,
@@ -585,14 +597,14 @@ void TreeRenderer::setBranchShadowCullingEnabled(bool enabled) {
     }
 }
 
-void TreeRenderer::render(VkCommandBuffer cmd, uint32_t frameIndex, float time,
+void TreeRenderer::render(vk::CommandBuffer cmd, uint32_t frameIndex, float time,
                           const TreeSystem& treeSystem, const TreeLODSystem* lodSystem) {
     const auto& branchRenderables = treeSystem.getBranchRenderables();
     const auto& leafRenderables = treeSystem.getLeafRenderables();
 
     if (branchRenderables.empty() && leafRenderables.empty()) return;
 
-    vk::CommandBuffer vkCmd(cmd);
+    vk::CommandBuffer vkCmd = cmd;
 
     // Render branches
     vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, branchPipeline_.get());
@@ -606,9 +618,9 @@ void TreeRenderer::render(VkCommandBuffer cmd, uint32_t frameIndex, float time,
         }
 
         if (renderable.barkType != lastBarkType) {
-            VkDescriptorSet descriptorSet = getBranchDescriptorSet(frameIndex, renderable.barkType);
+            vk::DescriptorSet descriptorSet = getBranchDescriptorSet(frameIndex, renderable.barkType);
             vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, branchPipelineLayout_.get(),
-                                     0, vk::DescriptorSet(descriptorSet), {});
+                                     0, descriptorSet, {});
             lastBarkType = renderable.barkType;
         }
 
@@ -662,11 +674,11 @@ void TreeRenderer::render(VkCommandBuffer cmd, uint32_t frameIndex, float time,
         }
 
         for (uint32_t leafType = 0; leafType < NUM_LEAF_TYPES; ++leafType) {
-            VkDescriptorSet descriptorSet = getCulledLeafDescriptorSet(frameIndex, leafTypeNames[leafType]);
-            if (descriptorSet == VK_NULL_HANDLE) continue;
+            vk::DescriptorSet descriptorSet = getCulledLeafDescriptorSet(frameIndex, leafTypeNames[leafType]);
+            if (!descriptorSet) continue;
 
             vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, leafPipelineLayout_.get(),
-                                     0, vk::DescriptorSet(descriptorSet), {});
+                                     0, descriptorSet, {});
 
             TreeLeafPushConstants push{};
             push.time = time;
@@ -687,7 +699,7 @@ void TreeRenderer::render(VkCommandBuffer cmd, uint32_t frameIndex, float time,
     }
 }
 
-void TreeRenderer::renderShadows(VkCommandBuffer cmd, uint32_t frameIndex,
+void TreeRenderer::renderShadows(vk::CommandBuffer cmd, uint32_t frameIndex,
                                  const TreeSystem& treeSystem, int cascadeIndex,
                                  const TreeLODSystem* lodSystem) {
     const auto& branchRenderables = treeSystem.getBranchRenderables();
@@ -697,7 +709,7 @@ void TreeRenderer::renderShadows(VkCommandBuffer cmd, uint32_t frameIndex,
         return;
     }
 
-    vk::CommandBuffer vkCmd(cmd);
+    vk::CommandBuffer vkCmd = cmd;
     const uint32_t cascade = static_cast<uint32_t>(cascadeIndex);
 
     // Check if this cascade should skip geometry entirely (cascade-aware shadow LOD)
@@ -724,10 +736,10 @@ void TreeRenderer::renderShadows(VkCommandBuffer cmd, uint32_t frameIndex,
             // GPU-driven instanced branch shadow rendering
             vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, branchShadowInstancedPipeline_.get());
 
-            VkDescriptorSet instancedSet = branchShadowInstancedDescriptorSets_[frameIndex];
+            vk::DescriptorSet instancedSet = branchShadowInstancedDescriptorSets_[frameIndex];
             vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
                                      branchShadowInstancedPipelineLayout_.get(), 0,
-                                     vk::DescriptorSet(instancedSet), {});
+                                     instancedSet, {});
 
             const auto& meshGroups = branchShadowCulling_->getMeshGroups();
             for (size_t groupIdx = 0; groupIdx < meshGroups.size(); ++groupIdx) {
@@ -769,10 +781,10 @@ void TreeRenderer::renderShadows(VkCommandBuffer cmd, uint32_t frameIndex,
                 }
 
                 if (renderable.barkType != lastBarkType) {
-                    VkDescriptorSet branchSet = getBranchDescriptorSet(frameIndex, renderable.barkType);
+                    vk::DescriptorSet branchSet = getBranchDescriptorSet(frameIndex, renderable.barkType);
                     vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
                                              branchShadowPipelineLayout_.get(), 0,
-                                             vk::DescriptorSet(branchSet), {});
+                                             branchSet, {});
                     lastBarkType = renderable.barkType;
                 }
 
@@ -826,12 +838,12 @@ void TreeRenderer::renderShadows(VkCommandBuffer cmd, uint32_t frameIndex,
             }
 
             for (uint32_t leafType = 0; leafType < NUM_LEAF_TYPES; ++leafType) {
-                VkDescriptorSet leafSet = getCulledLeafDescriptorSet(frameIndex, leafTypeNames[leafType]);
-                if (leafSet == VK_NULL_HANDLE) continue;
+                vk::DescriptorSet leafSet = getCulledLeafDescriptorSet(frameIndex, leafTypeNames[leafType]);
+                if (!leafSet) continue;
 
                 vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
                                          leafShadowPipelineLayout_.get(), 0,
-                                         vk::DescriptorSet(leafSet), {});
+                                         leafSet, {});
 
                 TreeLeafShadowPushConstants push{};
                 push.cascadeIndex = cascadeIndex;
@@ -870,10 +882,10 @@ void TreeRenderer::renderShadows(VkCommandBuffer cmd, uint32_t frameIndex,
                 }
 
                 if (renderable.leafType != lastLeafType) {
-                    VkDescriptorSet leafSet = getLeafDescriptorSet(frameIndex, renderable.leafType);
+                    vk::DescriptorSet leafSet = getLeafDescriptorSet(frameIndex, renderable.leafType);
                     vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
                                              leafShadowPipelineLayout_.get(), 0,
-                                             vk::DescriptorSet(leafSet), {});
+                                             leafSet, {});
                     lastLeafType = renderable.leafType;
                 }
 
@@ -893,7 +905,7 @@ void TreeRenderer::renderShadows(VkCommandBuffer cmd, uint32_t frameIndex,
     }
 }
 
-void TreeRenderer::setExtent(VkExtent2D newExtent) {
+void TreeRenderer::setExtent(vk::Extent2D newExtent) {
     extent_ = newExtent;
 }
 
