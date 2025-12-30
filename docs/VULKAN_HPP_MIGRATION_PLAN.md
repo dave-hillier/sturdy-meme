@@ -23,8 +23,8 @@ Based on `./scripts/analyze-vulkan-usage.sh`:
 | CatmullClarkSystem | ✅ Mostly migrated | 122 hpp usages |
 | OceanFFT | ✅ Mostly migrated | 97 hpp usages |
 | FroxelSystem | ✅ Mostly migrated | 57 hpp usages |
-| Pipeline Infrastructure | ⏳ Not started | GraphicsPipelineFactory, PipelineBuilder |
-| DescriptorManager | ⏳ Not started | |
+| Pipeline Infrastructure | ✅ Complete | GraphicsPipelineFactory, PipelineBuilder |
+| DescriptorManager | ✅ Complete | |
 | VulkanResourceFactory | ⏳ Not started | 94 raw usages remain |
 
 ## Migration Strategy
@@ -291,12 +291,12 @@ Based on usage counts and impact. Status indicates current migration progress.
 | `src/vegetation/GrassSystem.cpp` | ⏳ Partial | 78 | 50 |
 | `src/subdivision/CatmullClarkSystem.cpp` | ✅ Migrated | 122 | 43 |
 
-### Tier 3: Pipeline Infrastructure ⏳ Not Started
+### Tier 3: Pipeline Infrastructure ✅ Complete
 | File | Status | hpp | raw |
 |------|--------|-----|-----|
-| `src/core/pipeline/GraphicsPipelineFactory.cpp` | ⏳ Not started | 0 | 6 |
-| `src/core/pipeline/PipelineBuilder.cpp` | ⏳ Not started | 0 | 6 |
-| `src/core/material/DescriptorManager.cpp` | ⏳ Not started | 0 | 7 |
+| `src/core/pipeline/GraphicsPipelineFactory.cpp` | ✅ Complete | ~50 | 0 |
+| `src/core/pipeline/PipelineBuilder.cpp` | ✅ Complete | ~40 | 0 |
+| `src/core/material/DescriptorManager.cpp` | ✅ Complete | ~30 | 0 |
 
 ### Tier 4: Water & Atmosphere ⏳ Partial
 | File | Status | hpp | raw |
@@ -367,10 +367,7 @@ The codebase already uses `VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1`. The dispatcher
 ## Remaining Work
 
 ### High Priority
-1. **Pipeline Infrastructure (Tier 3)** — Not started
-   - `GraphicsPipelineFactory.cpp` — Convert pipeline creation to vulkan-hpp
-   - `PipelineBuilder.cpp` — Update builder pattern classes
-   - `DescriptorManager.cpp` — Convert descriptor set management
+1. ~~**Pipeline Infrastructure (Tier 3)**~~ — ✅ Complete
 
 2. **Complete partial migrations in Tier 2**
    - `TreeRenderer.cpp` — 37 raw usages remain
