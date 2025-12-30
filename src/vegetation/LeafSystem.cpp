@@ -198,29 +198,33 @@ bool LeafSystem::createComputePipeline(SystemLifecycleHelper::PipelineHandles& h
     pushConstantRange.offset = 0;
     pushConstantRange.size = sizeof(LeafPushConstants);
 
+    vk::Device vkDevice(getDevice());
+
     handles.pipelineLayout = DescriptorManager::createPipelineLayout(
         getDevice(), handles.descriptorSetLayout, {pushConstantRange});
     if (handles.pipelineLayout == VK_NULL_HANDLE) {
         SDL_Log("Failed to create leaf compute pipeline layout");
-        vkDestroyShaderModule(getDevice(), *compShaderModule, nullptr);
+        vkDevice.destroyShaderModule(*compShaderModule);
         return false;
     }
 
-    VkComputePipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    pipelineInfo.stage = shaderStageInfo;
-    pipelineInfo.layout = handles.pipelineLayout;
+    auto pipelineStageInfo = vk::PipelineShaderStageCreateInfo{}
+        .setStage(vk::ShaderStageFlagBits::eCompute)
+        .setModule(*compShaderModule)
+        .setPName("main");
 
-    VkResult result = vkCreateComputePipelines(getDevice(), VK_NULL_HANDLE, 1,
-                                               &pipelineInfo, nullptr,
-                                               &handles.pipeline);
+    auto pipelineInfo = vk::ComputePipelineCreateInfo{}
+        .setStage(pipelineStageInfo)
+        .setLayout(handles.pipelineLayout);
 
-    vkDestroyShaderModule(getDevice(), *compShaderModule, nullptr);
+    auto result = vkDevice.createComputePipeline(nullptr, pipelineInfo);
+    vkDevice.destroyShaderModule(*compShaderModule);
 
-    if (result != VK_SUCCESS) {
+    if (result.result != vk::Result::eSuccess) {
         SDL_Log("Failed to create leaf compute pipeline");
         return false;
     }
+    handles.pipeline = result.value;
 
     return true;
 }
@@ -256,10 +260,12 @@ bool LeafSystem::createGraphicsPipeline(SystemLifecycleHelper::PipelineHandles& 
     auto vertShaderModule = ShaderLoader::createShaderModule(getDevice(), *vertShaderCode);
     auto fragShaderModule = ShaderLoader::createShaderModule(getDevice(), *fragShaderCode);
 
+    vk::Device vkDevice(getDevice());
+
     if (!vertShaderModule || !fragShaderModule) {
         SDL_Log("Failed to create leaf shader modules");
-        if (vertShaderModule) vkDestroyShaderModule(getDevice(), *vertShaderModule, nullptr);
-        if (fragShaderModule) vkDestroyShaderModule(getDevice(), *fragShaderModule, nullptr);
+        if (vertShaderModule) vkDevice.destroyShaderModule(*vertShaderModule);
+        if (fragShaderModule) vkDevice.destroyShaderModule(*fragShaderModule);
         return false;
     }
 
@@ -366,38 +372,45 @@ bool LeafSystem::createGraphicsPipeline(SystemLifecycleHelper::PipelineHandles& 
         getDevice(), handles.descriptorSetLayout, {pushConstantRange});
     if (handles.pipelineLayout == VK_NULL_HANDLE) {
         SDL_Log("Failed to create leaf graphics pipeline layout");
-        vkDestroyShaderModule(getDevice(), *fragShaderModule, nullptr);
-        vkDestroyShaderModule(getDevice(), *vertShaderModule, nullptr);
+        vkDevice.destroyShaderModule(*fragShaderModule);
+        vkDevice.destroyShaderModule(*vertShaderModule);
         return false;
     }
 
-    VkGraphicsPipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pipelineInfo.stageCount = 2;
-    pipelineInfo.pStages = shaderStages;
-    pipelineInfo.pVertexInputState = &vertexInputInfo;
-    pipelineInfo.pInputAssemblyState = &inputAssembly;
-    pipelineInfo.pViewportState = &viewportState;
-    pipelineInfo.pRasterizationState = &rasterizer;
-    pipelineInfo.pMultisampleState = &multisampling;
-    pipelineInfo.pDepthStencilState = &depthStencil;
-    pipelineInfo.pColorBlendState = &colorBlending;
-    pipelineInfo.pDynamicState = &dynamicState;
-    pipelineInfo.layout = handles.pipelineLayout;
-    pipelineInfo.renderPass = getRenderPass();
-    pipelineInfo.subpass = 0;
+    std::array<vk::PipelineShaderStageCreateInfo, 2> vkShaderStages = {{
+        vk::PipelineShaderStageCreateInfo{}
+            .setStage(vk::ShaderStageFlagBits::eVertex)
+            .setModule(*vertShaderModule)
+            .setPName("main"),
+        vk::PipelineShaderStageCreateInfo{}
+            .setStage(vk::ShaderStageFlagBits::eFragment)
+            .setModule(*fragShaderModule)
+            .setPName("main")
+    }};
 
-    VkResult result = vkCreateGraphicsPipelines(getDevice(), VK_NULL_HANDLE, 1,
-                                                &pipelineInfo, nullptr,
-                                                &handles.pipeline);
+    auto pipelineInfo = vk::GraphicsPipelineCreateInfo{}
+        .setStages(vkShaderStages)
+        .setPVertexInputState(reinterpret_cast<const vk::PipelineVertexInputStateCreateInfo*>(&vertexInputInfo))
+        .setPInputAssemblyState(reinterpret_cast<const vk::PipelineInputAssemblyStateCreateInfo*>(&inputAssembly))
+        .setPViewportState(reinterpret_cast<const vk::PipelineViewportStateCreateInfo*>(&viewportState))
+        .setPRasterizationState(reinterpret_cast<const vk::PipelineRasterizationStateCreateInfo*>(&rasterizer))
+        .setPMultisampleState(reinterpret_cast<const vk::PipelineMultisampleStateCreateInfo*>(&multisampling))
+        .setPDepthStencilState(reinterpret_cast<const vk::PipelineDepthStencilStateCreateInfo*>(&depthStencil))
+        .setPColorBlendState(reinterpret_cast<const vk::PipelineColorBlendStateCreateInfo*>(&colorBlending))
+        .setPDynamicState(reinterpret_cast<const vk::PipelineDynamicStateCreateInfo*>(&dynamicState))
+        .setLayout(handles.pipelineLayout)
+        .setRenderPass(getRenderPass())
+        .setSubpass(0);
 
-    vkDestroyShaderModule(getDevice(), *fragShaderModule, nullptr);
-    vkDestroyShaderModule(getDevice(), *vertShaderModule, nullptr);
+    auto result = vkDevice.createGraphicsPipeline(nullptr, pipelineInfo);
+    vkDevice.destroyShaderModule(*fragShaderModule);
+    vkDevice.destroyShaderModule(*vertShaderModule);
 
-    if (result != VK_SUCCESS) {
+    if (result.result != vk::Result::eSuccess) {
         SDL_Log("Failed to create leaf graphics pipeline");
         return false;
     }
+    handles.pipeline = result.value;
 
     return true;
 }

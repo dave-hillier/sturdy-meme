@@ -97,15 +97,15 @@ bool TreeLeafCulling::createLeafCullPipeline() {
         .setStage(shaderStageInfo)
         .setLayout(cullPipelineLayout_.get());
 
-    VkPipeline rawPipeline;
-    VkResult result = vkCreateComputePipelines(device_, VK_NULL_HANDLE, 1, reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), nullptr, &rawPipeline);
-    vkDestroyShaderModule(device_, computeShaderModule, nullptr);
+    vk::Device vkDevice(device_);
+    auto result = vkDevice.createComputePipeline(nullptr, pipelineInfo);
+    vkDevice.destroyShaderModule(computeShaderModule);
 
-    if (result != VK_SUCCESS) {
+    if (result.result != vk::Result::eSuccess) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to create cull compute pipeline");
         return false;
     }
-    cullPipeline_ = ManagedPipeline::fromRaw(device_, rawPipeline);
+    cullPipeline_ = ManagedPipeline::fromRaw(device_, result.value);
 
     SDL_Log("TreeLeafCulling: Created leaf culling compute pipeline");
     return true;
@@ -239,15 +239,15 @@ bool TreeLeafCulling::createCellCullPipeline() {
         .setStage(shaderStageInfo)
         .setLayout(cellCullPipelineLayout_.get());
 
-    VkPipeline rawPipeline;
-    VkResult result = vkCreateComputePipelines(device_, VK_NULL_HANDLE, 1, reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), nullptr, &rawPipeline);
-    vkDestroyShaderModule(device_, computeShaderModule, nullptr);
+    vk::Device vkDevice(device_);
+    auto result = vkDevice.createComputePipeline(nullptr, pipelineInfo);
+    vkDevice.destroyShaderModule(computeShaderModule);
 
-    if (result != VK_SUCCESS) {
+    if (result.result != vk::Result::eSuccess) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to create cell cull compute pipeline");
         return false;
     }
-    cellCullPipeline_ = ManagedPipeline::fromRaw(device_, rawPipeline);
+    cellCullPipeline_ = ManagedPipeline::fromRaw(device_, result.value);
 
     SDL_Log("TreeLeafCulling: Created cell culling compute pipeline");
     return true;
@@ -365,15 +365,15 @@ bool TreeLeafCulling::createTreeFilterPipeline() {
         .setStage(shaderStageInfo)
         .setLayout(treeFilterPipelineLayout_.get());
 
-    VkPipeline rawPipeline;
-    VkResult result = vkCreateComputePipelines(device_, VK_NULL_HANDLE, 1, reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), nullptr, &rawPipeline);
-    vkDestroyShaderModule(device_, computeShaderModule, nullptr);
+    vk::Device vkDevice(device_);
+    auto result = vkDevice.createComputePipeline(nullptr, pipelineInfo);
+    vkDevice.destroyShaderModule(computeShaderModule);
 
-    if (result != VK_SUCCESS) {
+    if (result.result != vk::Result::eSuccess) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to create tree filter compute pipeline");
         return false;
     }
-    treeFilterPipeline_ = ManagedPipeline::fromRaw(device_, rawPipeline);
+    treeFilterPipeline_ = ManagedPipeline::fromRaw(device_, result.value);
 
     SDL_Log("TreeLeafCulling: Created tree filter compute pipeline");
     return true;
@@ -488,15 +488,15 @@ bool TreeLeafCulling::createTwoPhaseLeafCullPipeline() {
         .setStage(shaderStageInfo)
         .setLayout(twoPhaseLeafCullPipelineLayout_.get());
 
-    VkPipeline rawPipeline;
-    VkResult result = vkCreateComputePipelines(device_, VK_NULL_HANDLE, 1, reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), nullptr, &rawPipeline);
-    vkDestroyShaderModule(device_, computeShaderModule, nullptr);
+    vk::Device vkDevice(device_);
+    auto result = vkDevice.createComputePipeline(nullptr, pipelineInfo);
+    vkDevice.destroyShaderModule(computeShaderModule);
 
-    if (result != VK_SUCCESS) {
+    if (result.result != vk::Result::eSuccess) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to create two-phase leaf cull compute pipeline");
         return false;
     }
-    twoPhaseLeafCullPipeline_ = ManagedPipeline::fromRaw(device_, rawPipeline);
+    twoPhaseLeafCullPipeline_ = ManagedPipeline::fromRaw(device_, result.value);
 
     SDL_Log("TreeLeafCulling: Created two-phase leaf culling compute pipeline");
     return true;

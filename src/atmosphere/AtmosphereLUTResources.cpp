@@ -36,8 +36,10 @@ bool AtmosphereLUTSystem::createTransmittanceLUT() {
             .setBaseArrayLayer(0)
             .setLayerCount(1));
 
-    if (vkCreateImageView(device, reinterpret_cast<const VkImageViewCreateInfo*>(&viewInfo), nullptr, &transmittanceLUTView) != VK_SUCCESS) {
-        SDL_Log("Failed to create transmittance LUT view");
+    try {
+        transmittanceLUTView = vk::Device(device).createImageView(viewInfo);
+    } catch (const vk::SystemError& e) {
+        SDL_Log("Failed to create transmittance LUT view: %s", e.what());
         return false;
     }
 
@@ -77,8 +79,10 @@ bool AtmosphereLUTSystem::createMultiScatterLUT() {
             .setBaseArrayLayer(0)
             .setLayerCount(1));
 
-    if (vkCreateImageView(device, reinterpret_cast<const VkImageViewCreateInfo*>(&viewInfo), nullptr, &multiScatterLUTView) != VK_SUCCESS) {
-        SDL_Log("Failed to create multi-scatter LUT view");
+    try {
+        multiScatterLUTView = vk::Device(device).createImageView(viewInfo);
+    } catch (const vk::SystemError& e) {
+        SDL_Log("Failed to create multi-scatter LUT view: %s", e.what());
         return false;
     }
 
@@ -118,8 +122,10 @@ bool AtmosphereLUTSystem::createSkyViewLUT() {
             .setBaseArrayLayer(0)
             .setLayerCount(1));
 
-    if (vkCreateImageView(device, reinterpret_cast<const VkImageViewCreateInfo*>(&viewInfo), nullptr, &skyViewLUTView) != VK_SUCCESS) {
-        SDL_Log("Failed to create sky-view LUT view");
+    try {
+        skyViewLUTView = vk::Device(device).createImageView(viewInfo);
+    } catch (const vk::SystemError& e) {
+        SDL_Log("Failed to create sky-view LUT view: %s", e.what());
         return false;
     }
 
@@ -160,8 +166,10 @@ bool AtmosphereLUTSystem::createIrradianceLUTs() {
             .setBaseArrayLayer(0)
             .setLayerCount(1));
 
-    if (vkCreateImageView(device, reinterpret_cast<const VkImageViewCreateInfo*>(&viewInfo), nullptr, &rayleighIrradianceLUTView) != VK_SUCCESS) {
-        SDL_Log("Failed to create Rayleigh irradiance LUT view");
+    try {
+        rayleighIrradianceLUTView = vk::Device(device).createImageView(viewInfo);
+    } catch (const vk::SystemError& e) {
+        SDL_Log("Failed to create Rayleigh irradiance LUT view: %s", e.what());
         return false;
     }
 
@@ -173,8 +181,10 @@ bool AtmosphereLUTSystem::createIrradianceLUTs() {
     }
 
     viewInfo.setImage(mieIrradianceLUT);
-    if (vkCreateImageView(device, reinterpret_cast<const VkImageViewCreateInfo*>(&viewInfo), nullptr, &mieIrradianceLUTView) != VK_SUCCESS) {
-        SDL_Log("Failed to create Mie irradiance LUT view");
+    try {
+        mieIrradianceLUTView = vk::Device(device).createImageView(viewInfo);
+    } catch (const vk::SystemError& e) {
+        SDL_Log("Failed to create Mie irradiance LUT view: %s", e.what());
         return false;
     }
 
@@ -215,8 +225,10 @@ bool AtmosphereLUTSystem::createCloudMapLUT() {
             .setBaseArrayLayer(0)
             .setLayerCount(1));
 
-    if (vkCreateImageView(device, reinterpret_cast<const VkImageViewCreateInfo*>(&viewInfo), nullptr, &cloudMapLUTView) != VK_SUCCESS) {
-        SDL_Log("Failed to create cloud map LUT view");
+    try {
+        cloudMapLUTView = vk::Device(device).createImageView(viewInfo);
+    } catch (const vk::SystemError& e) {
+        SDL_Log("Failed to create cloud map LUT view: %s", e.what());
         return false;
     }
 
@@ -267,57 +279,37 @@ bool AtmosphereLUTSystem::createUniformBuffer() {
 }
 
 void AtmosphereLUTSystem::destroyLUTResources() {
-    if (transmittanceLUTView != VK_NULL_HANDLE) {
-        vkDestroyImageView(device, transmittanceLUTView, nullptr);
-        transmittanceLUTView = VK_NULL_HANDLE;
-    }
-    if (transmittanceLUT != VK_NULL_HANDLE) {
-        vmaDestroyImage(allocator, transmittanceLUT, transmittanceLUTAllocation);
-        transmittanceLUT = VK_NULL_HANDLE;
-    }
+    vk::Device vkDevice(device);
 
-    if (multiScatterLUTView != VK_NULL_HANDLE) {
-        vkDestroyImageView(device, multiScatterLUTView, nullptr);
-        multiScatterLUTView = VK_NULL_HANDLE;
-    }
-    if (multiScatterLUT != VK_NULL_HANDLE) {
-        vmaDestroyImage(allocator, multiScatterLUT, multiScatterLUTAllocation);
-        multiScatterLUT = VK_NULL_HANDLE;
-    }
+    auto destroyView = [&](VkImageView& view) {
+        if (view != VK_NULL_HANDLE) {
+            vkDevice.destroyImageView(view);
+            view = VK_NULL_HANDLE;
+        }
+    };
 
-    if (skyViewLUTView != VK_NULL_HANDLE) {
-        vkDestroyImageView(device, skyViewLUTView, nullptr);
-        skyViewLUTView = VK_NULL_HANDLE;
-    }
-    if (skyViewLUT != VK_NULL_HANDLE) {
-        vmaDestroyImage(allocator, skyViewLUT, skyViewLUTAllocation);
-        skyViewLUT = VK_NULL_HANDLE;
-    }
+    auto destroyImage = [&](VkImage& image, VmaAllocation& alloc) {
+        if (image != VK_NULL_HANDLE) {
+            vmaDestroyImage(allocator, image, alloc);
+            image = VK_NULL_HANDLE;
+        }
+    };
 
-    if (rayleighIrradianceLUTView != VK_NULL_HANDLE) {
-        vkDestroyImageView(device, rayleighIrradianceLUTView, nullptr);
-        rayleighIrradianceLUTView = VK_NULL_HANDLE;
-    }
-    if (rayleighIrradianceLUT != VK_NULL_HANDLE) {
-        vmaDestroyImage(allocator, rayleighIrradianceLUT, rayleighIrradianceLUTAllocation);
-        rayleighIrradianceLUT = VK_NULL_HANDLE;
-    }
+    destroyView(transmittanceLUTView);
+    destroyImage(transmittanceLUT, transmittanceLUTAllocation);
 
-    if (mieIrradianceLUTView != VK_NULL_HANDLE) {
-        vkDestroyImageView(device, mieIrradianceLUTView, nullptr);
-        mieIrradianceLUTView = VK_NULL_HANDLE;
-    }
-    if (mieIrradianceLUT != VK_NULL_HANDLE) {
-        vmaDestroyImage(allocator, mieIrradianceLUT, mieIrradianceLUTAllocation);
-        mieIrradianceLUT = VK_NULL_HANDLE;
-    }
+    destroyView(multiScatterLUTView);
+    destroyImage(multiScatterLUT, multiScatterLUTAllocation);
 
-    if (cloudMapLUTView != VK_NULL_HANDLE) {
-        vkDestroyImageView(device, cloudMapLUTView, nullptr);
-        cloudMapLUTView = VK_NULL_HANDLE;
-    }
-    if (cloudMapLUT != VK_NULL_HANDLE) {
-        vmaDestroyImage(allocator, cloudMapLUT, cloudMapLUTAllocation);
-        cloudMapLUT = VK_NULL_HANDLE;
-    }
+    destroyView(skyViewLUTView);
+    destroyImage(skyViewLUT, skyViewLUTAllocation);
+
+    destroyView(rayleighIrradianceLUTView);
+    destroyImage(rayleighIrradianceLUT, rayleighIrradianceLUTAllocation);
+
+    destroyView(mieIrradianceLUTView);
+    destroyImage(mieIrradianceLUT, mieIrradianceLUTAllocation);
+
+    destroyView(cloudMapLUTView);
+    destroyImage(cloudMapLUT, cloudMapLUTAllocation);
 }

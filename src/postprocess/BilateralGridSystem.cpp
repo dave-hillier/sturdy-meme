@@ -73,7 +73,7 @@ bool BilateralGridSystem::initInternal(const InitInfo& info) {
 void BilateralGridSystem::cleanup() {
     if (device == VK_NULL_HANDLE) return;
 
-    vkDeviceWaitIdle(device);
+    vk::Device(device).waitIdle();
 
     destroyGridResources();
 
@@ -129,21 +129,23 @@ bool BilateralGridSystem::createGridTextures() {
                 .setBaseArrayLayer(0)
                 .setLayerCount(1));
 
-        if (vkCreateImageView(device, reinterpret_cast<const VkImageViewCreateInfo*>(&viewInfo),
-                              nullptr, &gridViews[i]) != VK_SUCCESS) {
+        auto viewResult = vk::Device(device).createImageView(viewInfo);
+        if (viewResult == vk::ImageView{}) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                         "BilateralGridSystem: Failed to create grid view %d", i);
             return false;
         }
+        gridViews[i] = viewResult;
     }
 
     return true;
 }
 
 void BilateralGridSystem::destroyGridResources() {
+    vk::Device vkDevice(device);
     for (int i = 0; i < 2; i++) {
         if (gridViews[i] != VK_NULL_HANDLE) {
-            vkDestroyImageView(device, gridViews[i], nullptr);
+            vkDevice.destroyImageView(gridViews[i]);
             gridViews[i] = VK_NULL_HANDLE;
         }
         if (gridImages[i] != VK_NULL_HANDLE) {
@@ -169,14 +171,14 @@ bool BilateralGridSystem::createSampler() {
         .setMaxLod(0.0f)
         .setBorderColor(vk::BorderColor::eFloatOpaqueBlack);
 
-    VkSampler sampler;
-    if (vkCreateSampler(device, reinterpret_cast<const VkSamplerCreateInfo*>(&samplerInfo),
-                        nullptr, &sampler) != VK_SUCCESS) {
+    try {
+        auto sampler = vk::Device(device).createSampler(samplerInfo);
+        gridSampler = ManagedSampler::fromRaw(device, sampler);
+    } catch (const vk::SystemError& e) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                    "BilateralGridSystem: Failed to create sampler");
+                    "BilateralGridSystem: Failed to create sampler: %s", e.what());
         return false;
     }
-    gridSampler = ManagedSampler::fromRaw(device, sampler);
     return true;
 }
 
@@ -209,14 +211,14 @@ bool BilateralGridSystem::createDescriptorSetLayout() {
         auto layoutInfo = vk::DescriptorSetLayoutCreateInfo{}
             .setBindings(bindings);
 
-        VkDescriptorSetLayout layout;
-        if (vkCreateDescriptorSetLayout(device, reinterpret_cast<const VkDescriptorSetLayoutCreateInfo*>(&layoutInfo),
-                                        nullptr, &layout) != VK_SUCCESS) {
+        try {
+            auto layout = vk::Device(device).createDescriptorSetLayout(layoutInfo);
+            buildDescriptorSetLayout = ManagedDescriptorSetLayout::fromRaw(device, layout);
+        } catch (const vk::SystemError& e) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                        "BilateralGridSystem: Failed to create build descriptor set layout");
+                        "BilateralGridSystem: Failed to create build descriptor set layout: %s", e.what());
             return false;
         }
-        buildDescriptorSetLayout = ManagedDescriptorSetLayout::fromRaw(device, layout);
     }
 
     // Blur layout: grid src (storage image) + grid dst (storage image) + uniforms
@@ -247,14 +249,14 @@ bool BilateralGridSystem::createDescriptorSetLayout() {
         auto layoutInfo = vk::DescriptorSetLayoutCreateInfo{}
             .setBindings(bindings);
 
-        VkDescriptorSetLayout layout;
-        if (vkCreateDescriptorSetLayout(device, reinterpret_cast<const VkDescriptorSetLayoutCreateInfo*>(&layoutInfo),
-                                        nullptr, &layout) != VK_SUCCESS) {
+        try {
+            auto layout = vk::Device(device).createDescriptorSetLayout(layoutInfo);
+            blurDescriptorSetLayout = ManagedDescriptorSetLayout::fromRaw(device, layout);
+        } catch (const vk::SystemError& e) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                        "BilateralGridSystem: Failed to create blur descriptor set layout");
+                        "BilateralGridSystem: Failed to create blur descriptor set layout: %s", e.what());
             return false;
         }
-        blurDescriptorSetLayout = ManagedDescriptorSetLayout::fromRaw(device, layout);
     }
 
     return true;
@@ -292,20 +294,21 @@ bool BilateralGridSystem::createUniformBuffers() {
 }
 
 bool BilateralGridSystem::createBuildPipeline() {
-    // Pipeline layout - keep as C-style due to setSetLayouts type issues with raw VkDescriptorSetLayout
-    VkPipelineLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    VkDescriptorSetLayout layouts[] = {buildDescriptorSetLayout.get()};
-    layoutInfo.setLayoutCount = 1;
-    layoutInfo.pSetLayouts = layouts;
+    vk::Device vkDevice(device);
 
-    VkPipelineLayout pipelineLayout;
-    if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
+    // Pipeline layout
+    vk::DescriptorSetLayout setLayout(buildDescriptorSetLayout.get());
+    auto layoutInfo = vk::PipelineLayoutCreateInfo{}
+        .setSetLayouts(setLayout);
+
+    try {
+        auto pipelineLayout = vkDevice.createPipelineLayout(layoutInfo);
+        buildPipelineLayout = ManagedPipelineLayout::fromRaw(device, pipelineLayout);
+    } catch (const vk::SystemError& e) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                    "BilateralGridSystem: Failed to create build pipeline layout");
+                    "BilateralGridSystem: Failed to create build pipeline layout: %s", e.what());
         return false;
     }
-    buildPipelineLayout = ManagedPipelineLayout::fromRaw(device, pipelineLayout);
 
     // Load shader
     std::string shaderFile = shaderPath + "/bilateral_grid_build.comp.spv";
@@ -315,7 +318,7 @@ bool BilateralGridSystem::createBuildPipeline() {
                     "BilateralGridSystem: Failed to load build shader: %s", shaderFile.c_str());
         return false;
     }
-    VkShaderModule shaderModule = *shaderModuleOpt;
+    vk::ShaderModule shaderModule(*shaderModuleOpt);
 
     auto stageInfo = vk::PipelineShaderStageCreateInfo{}
         .setStage(vk::ShaderStageFlagBits::eCompute)
@@ -326,36 +329,34 @@ bool BilateralGridSystem::createBuildPipeline() {
         .setStage(stageInfo)
         .setLayout(buildPipelineLayout.get());
 
-    VkPipeline pipeline;
-    VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1,
-                                               reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo),
-                                               nullptr, &pipeline);
-    vkDestroyShaderModule(device, shaderModule, nullptr);
+    auto result = vkDevice.createComputePipeline(nullptr, pipelineInfo);
+    vkDevice.destroyShaderModule(shaderModule);
 
-    if (result != VK_SUCCESS) {
+    if (result.result != vk::Result::eSuccess) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                     "BilateralGridSystem: Failed to create build pipeline");
         return false;
     }
-    buildPipeline = ManagedPipeline::fromRaw(device, pipeline);
+    buildPipeline = ManagedPipeline::fromRaw(device, result.value);
     return true;
 }
 
 bool BilateralGridSystem::createBlurPipeline() {
-    // Pipeline layout - keep as C-style due to setSetLayouts type issues with raw VkDescriptorSetLayout
-    VkPipelineLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    VkDescriptorSetLayout layouts[] = {blurDescriptorSetLayout.get()};
-    layoutInfo.setLayoutCount = 1;
-    layoutInfo.pSetLayouts = layouts;
+    vk::Device vkDevice(device);
 
-    VkPipelineLayout pipelineLayout;
-    if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
+    // Pipeline layout
+    vk::DescriptorSetLayout setLayout(blurDescriptorSetLayout.get());
+    auto layoutInfo = vk::PipelineLayoutCreateInfo{}
+        .setSetLayouts(setLayout);
+
+    try {
+        auto pipelineLayout = vkDevice.createPipelineLayout(layoutInfo);
+        blurPipelineLayout = ManagedPipelineLayout::fromRaw(device, pipelineLayout);
+    } catch (const vk::SystemError& e) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                    "BilateralGridSystem: Failed to create blur pipeline layout");
+                    "BilateralGridSystem: Failed to create blur pipeline layout: %s", e.what());
         return false;
     }
-    blurPipelineLayout = ManagedPipelineLayout::fromRaw(device, pipelineLayout);
 
     // Load shader
     std::string shaderFile = shaderPath + "/bilateral_grid_blur.comp.spv";
@@ -365,7 +366,7 @@ bool BilateralGridSystem::createBlurPipeline() {
                     "BilateralGridSystem: Failed to load blur shader: %s", shaderFile.c_str());
         return false;
     }
-    VkShaderModule shaderModule = *shaderModuleOpt;
+    vk::ShaderModule shaderModule(*shaderModuleOpt);
 
     auto stageInfo = vk::PipelineShaderStageCreateInfo{}
         .setStage(vk::ShaderStageFlagBits::eCompute)
@@ -376,18 +377,15 @@ bool BilateralGridSystem::createBlurPipeline() {
         .setStage(stageInfo)
         .setLayout(blurPipelineLayout.get());
 
-    VkPipeline pipeline;
-    VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1,
-                                               reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo),
-                                               nullptr, &pipeline);
-    vkDestroyShaderModule(device, shaderModule, nullptr);
+    auto result = vkDevice.createComputePipeline(nullptr, pipelineInfo);
+    vkDevice.destroyShaderModule(shaderModule);
 
-    if (result != VK_SUCCESS) {
+    if (result.result != vk::Result::eSuccess) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                     "BilateralGridSystem: Failed to create blur pipeline");
         return false;
     }
-    blurPipeline = ManagedPipeline::fromRaw(device, pipeline);
+    blurPipeline = ManagedPipeline::fromRaw(device, result.value);
     return true;
 }
 
@@ -461,8 +459,7 @@ bool BilateralGridSystem::createDescriptorSets() {
             .setDescriptorType(vk::DescriptorType::eUniformBuffer)
             .setPBufferInfo(&bufferInfo);
 
-        vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()),
-                               reinterpret_cast<const VkWriteDescriptorSet*>(writes.data()), 0, nullptr);
+        vk::Device(device).updateDescriptorSets(writes, {});
 
         // Y: 1 -> 0
         srcInfo.setImageView(gridViews[1]);
@@ -470,8 +467,7 @@ bool BilateralGridSystem::createDescriptorSets() {
         writes[0].setDstSet(blurDescriptorSetsY[i]);
         writes[1].setDstSet(blurDescriptorSetsY[i]);
         writes[2].setDstSet(blurDescriptorSetsY[i]);
-        vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()),
-                               reinterpret_cast<const VkWriteDescriptorSet*>(writes.data()), 0, nullptr);
+        vk::Device(device).updateDescriptorSets(writes, {});
 
         // Z: 0 -> 1 (or skip Z blur for simplicity like GOT sometimes did)
         srcInfo.setImageView(gridViews[0]);
@@ -479,8 +475,7 @@ bool BilateralGridSystem::createDescriptorSets() {
         writes[0].setDstSet(blurDescriptorSetsZ[i]);
         writes[1].setDstSet(blurDescriptorSetsZ[i]);
         writes[2].setDstSet(blurDescriptorSetsZ[i]);
-        vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()),
-                               reinterpret_cast<const VkWriteDescriptorSet*>(writes.data()), 0, nullptr);
+        vk::Device(device).updateDescriptorSets(writes, {});
     }
 
     return true;
@@ -638,8 +633,7 @@ void BilateralGridSystem::recordBilateralGrid(VkCommandBuffer cmd, uint32_t fram
         .setDescriptorType(vk::DescriptorType::eUniformBuffer)
         .setPBufferInfo(&bufferInfo);
 
-    vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()),
-                           reinterpret_cast<const VkWriteDescriptorSet*>(writes.data()), 0, nullptr);
+    vk::Device(device).updateDescriptorSets(writes, {});
 
     // Build pass
     vk::CommandBuffer vkCmd(cmd);

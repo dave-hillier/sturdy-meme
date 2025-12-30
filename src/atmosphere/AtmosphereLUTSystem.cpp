@@ -54,68 +54,46 @@ void AtmosphereLUTSystem::cleanup() {
     BufferUtils::destroyBuffers(allocator, skyViewUniformBuffers);
     BufferUtils::destroyBuffers(allocator, cloudMapUniformBuffers);
 
-    if (transmittancePipeline != VK_NULL_HANDLE) {
-        vkDestroyPipeline(device, transmittancePipeline, nullptr);
-        transmittancePipeline = VK_NULL_HANDLE;
-    }
-    if (multiScatterPipeline != VK_NULL_HANDLE) {
-        vkDestroyPipeline(device, multiScatterPipeline, nullptr);
-        multiScatterPipeline = VK_NULL_HANDLE;
-    }
-    if (skyViewPipeline != VK_NULL_HANDLE) {
-        vkDestroyPipeline(device, skyViewPipeline, nullptr);
-        skyViewPipeline = VK_NULL_HANDLE;
-    }
-    if (irradiancePipeline != VK_NULL_HANDLE) {
-        vkDestroyPipeline(device, irradiancePipeline, nullptr);
-        irradiancePipeline = VK_NULL_HANDLE;
-    }
-    if (cloudMapPipeline != VK_NULL_HANDLE) {
-        vkDestroyPipeline(device, cloudMapPipeline, nullptr);
-        cloudMapPipeline = VK_NULL_HANDLE;
-    }
+    vk::Device vkDevice(device);
 
-    if (transmittancePipelineLayout != VK_NULL_HANDLE) {
-        vkDestroyPipelineLayout(device, transmittancePipelineLayout, nullptr);
-        transmittancePipelineLayout = VK_NULL_HANDLE;
-    }
-    if (multiScatterPipelineLayout != VK_NULL_HANDLE) {
-        vkDestroyPipelineLayout(device, multiScatterPipelineLayout, nullptr);
-        multiScatterPipelineLayout = VK_NULL_HANDLE;
-    }
-    if (skyViewPipelineLayout != VK_NULL_HANDLE) {
-        vkDestroyPipelineLayout(device, skyViewPipelineLayout, nullptr);
-        skyViewPipelineLayout = VK_NULL_HANDLE;
-    }
-    if (irradiancePipelineLayout != VK_NULL_HANDLE) {
-        vkDestroyPipelineLayout(device, irradiancePipelineLayout, nullptr);
-        irradiancePipelineLayout = VK_NULL_HANDLE;
-    }
-    if (cloudMapPipelineLayout != VK_NULL_HANDLE) {
-        vkDestroyPipelineLayout(device, cloudMapPipelineLayout, nullptr);
-        cloudMapPipelineLayout = VK_NULL_HANDLE;
-    }
+    // Destroy pipelines
+    auto destroyPipeline = [&](VkPipeline& pipeline) {
+        if (pipeline != VK_NULL_HANDLE) {
+            vkDevice.destroyPipeline(pipeline);
+            pipeline = VK_NULL_HANDLE;
+        }
+    };
+    destroyPipeline(transmittancePipeline);
+    destroyPipeline(multiScatterPipeline);
+    destroyPipeline(skyViewPipeline);
+    destroyPipeline(irradiancePipeline);
+    destroyPipeline(cloudMapPipeline);
 
-    if (transmittanceDescriptorSetLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(device, transmittanceDescriptorSetLayout, nullptr);
-        transmittanceDescriptorSetLayout = VK_NULL_HANDLE;
-    }
-    if (multiScatterDescriptorSetLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(device, multiScatterDescriptorSetLayout, nullptr);
-        multiScatterDescriptorSetLayout = VK_NULL_HANDLE;
-    }
-    if (skyViewDescriptorSetLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(device, skyViewDescriptorSetLayout, nullptr);
-        skyViewDescriptorSetLayout = VK_NULL_HANDLE;
-    }
-    if (irradianceDescriptorSetLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(device, irradianceDescriptorSetLayout, nullptr);
-        irradianceDescriptorSetLayout = VK_NULL_HANDLE;
-    }
-    if (cloudMapDescriptorSetLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(device, cloudMapDescriptorSetLayout, nullptr);
-        cloudMapDescriptorSetLayout = VK_NULL_HANDLE;
-    }
+    // Destroy pipeline layouts
+    auto destroyLayout = [&](VkPipelineLayout& layout) {
+        if (layout != VK_NULL_HANDLE) {
+            vkDevice.destroyPipelineLayout(layout);
+            layout = VK_NULL_HANDLE;
+        }
+    };
+    destroyLayout(transmittancePipelineLayout);
+    destroyLayout(multiScatterPipelineLayout);
+    destroyLayout(skyViewPipelineLayout);
+    destroyLayout(irradiancePipelineLayout);
+    destroyLayout(cloudMapPipelineLayout);
+
+    // Destroy descriptor set layouts
+    auto destroyDescLayout = [&](VkDescriptorSetLayout& layout) {
+        if (layout != VK_NULL_HANDLE) {
+            vkDevice.destroyDescriptorSetLayout(layout);
+            layout = VK_NULL_HANDLE;
+        }
+    };
+    destroyDescLayout(transmittanceDescriptorSetLayout);
+    destroyDescLayout(multiScatterDescriptorSetLayout);
+    destroyDescLayout(skyViewDescriptorSetLayout);
+    destroyDescLayout(irradianceDescriptorSetLayout);
+    destroyDescLayout(cloudMapDescriptorSetLayout);
 
     lutSampler.reset();
 }
