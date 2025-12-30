@@ -155,6 +155,78 @@ void GuiEnvironmentTab::render(IEnvironmentControl& envControl, EnvironmentTabSt
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Very thin ground fog layer - tests height fog precision");
         }
+
+        // Altitude-specific tests
+        if (ImGui::Button("Ground Fog")) {
+            envControl.setFogBaseHeight(0.0f);
+            envControl.setFogScaleHeight(10.0f);
+            envControl.setFogDensity(0.05f);
+            envControl.setFogAbsorption(0.03f);
+            envControl.setLayerDensity(0.0f);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Fog concentrated at ground level with rapid altitude falloff");
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button("High Altitude")) {
+            envControl.setFogBaseHeight(200.0f);
+            envControl.setFogScaleHeight(50.0f);
+            envControl.setFogDensity(0.02f);
+            envControl.setFogAbsorption(0.02f);
+            envControl.setLayerDensity(0.0f);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Fog starts at 200m altitude - tests high-altitude froxels");
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button("Inversion")) {
+            envControl.setFogBaseHeight(-100.0f);
+            envControl.setFogScaleHeight(5.0f);
+            envControl.setFogDensity(0.0f);
+            envControl.setLayerHeight(50.0f);
+            envControl.setLayerThickness(20.0f);
+            envControl.setLayerDensity(0.15f);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Temperature inversion layer - fog trapped at specific altitude");
+        }
+
+        if (ImGui::Button("Vertical Slice")) {
+            envControl.setFogBaseHeight(0.0f);
+            envControl.setFogScaleHeight(200.0f);
+            envControl.setFogDensity(0.02f);
+            envControl.setFogAbsorption(0.02f);
+            envControl.setVolumetricFarPlane(500.0f);
+            envControl.setLayerDensity(0.0f);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Uniform fog - tests vertical froxel distribution without height falloff");
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button("Sky Layer")) {
+            envControl.setFogDensity(0.0f);
+            envControl.setLayerHeight(300.0f);
+            envControl.setLayerThickness(100.0f);
+            envControl.setLayerDensity(0.08f);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Cloud-like layer at high altitude (300m)");
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button("Underground")) {
+            envControl.setFogBaseHeight(-200.0f);
+            envControl.setFogScaleHeight(30.0f);
+            envControl.setFogDensity(0.1f);
+            envControl.setFogAbsorption(0.05f);
+            envControl.setLayerDensity(0.0f);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Fog maximum below ground - tests negative altitude handling");
+        }
     }
 
     ImGui::Spacing();
