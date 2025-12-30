@@ -333,27 +333,27 @@ bool GraphicsPipelineFactory::loadShaderModules(std::vector<VkPipelineShaderStag
     auto vertModule = ShaderLoader::createShaderModule(device, *vertCode);
     auto fragModule = ShaderLoader::createShaderModule(device, *fragCode);
 
+    vk::Device vkDevice(device);
+
     if (!vertModule || !fragModule) {
         SDL_Log("GraphicsPipelineFactory: Failed to create shader modules");
-        if (vertModule) vkDestroyShaderModule(device, *vertModule, nullptr);
-        if (fragModule) vkDestroyShaderModule(device, *fragModule, nullptr);
+        if (vertModule) vkDevice.destroyShaderModule(*vertModule);
+        if (fragModule) vkDevice.destroyShaderModule(*fragModule);
         return false;
     }
 
     shaderModules.push_back(*vertModule);
     shaderModules.push_back(*fragModule);
 
-    VkPipelineShaderStageCreateInfo vertStage{};
-    vertStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    vertStage.stage = VK_SHADER_STAGE_VERTEX_BIT;
-    vertStage.module = *vertModule;
-    vertStage.pName = "main";
+    auto vertStage = vk::PipelineShaderStageCreateInfo{}
+        .setStage(vk::ShaderStageFlagBits::eVertex)
+        .setModule(*vertModule)
+        .setPName("main");
 
-    VkPipelineShaderStageCreateInfo fragStage{};
-    fragStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    fragStage.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    fragStage.module = *fragModule;
-    fragStage.pName = "main";
+    auto fragStage = vk::PipelineShaderStageCreateInfo{}
+        .setStage(vk::ShaderStageFlagBits::eFragment)
+        .setModule(*fragModule)
+        .setPName("main");
 
     stages.push_back(vertStage);
 
@@ -372,25 +372,23 @@ bool GraphicsPipelineFactory::loadShaderModules(std::vector<VkPipelineShaderStag
 
         if (!tescModule || !teseModule) {
             SDL_Log("GraphicsPipelineFactory: Failed to create tessellation shader modules");
-            if (tescModule) vkDestroyShaderModule(device, *tescModule, nullptr);
-            if (teseModule) vkDestroyShaderModule(device, *teseModule, nullptr);
+            if (tescModule) vkDevice.destroyShaderModule(*tescModule);
+            if (teseModule) vkDevice.destroyShaderModule(*teseModule);
             return false;
         }
 
         shaderModules.push_back(*tescModule);
         shaderModules.push_back(*teseModule);
 
-        VkPipelineShaderStageCreateInfo tescStage{};
-        tescStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        tescStage.stage = VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
-        tescStage.module = *tescModule;
-        tescStage.pName = "main";
+        auto tescStage = vk::PipelineShaderStageCreateInfo{}
+            .setStage(vk::ShaderStageFlagBits::eTessellationControl)
+            .setModule(*tescModule)
+            .setPName("main");
 
-        VkPipelineShaderStageCreateInfo teseStage{};
-        teseStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        teseStage.stage = VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
-        teseStage.module = *teseModule;
-        teseStage.pName = "main";
+        auto teseStage = vk::PipelineShaderStageCreateInfo{}
+            .setStage(vk::ShaderStageFlagBits::eTessellationEvaluation)
+            .setModule(*teseModule)
+            .setPName("main");
 
         stages.push_back(tescStage);
         stages.push_back(teseStage);
@@ -423,148 +421,125 @@ bool GraphicsPipelineFactory::build(VkPipeline& pipeline) {
     }
 
     // Vertex input state
-    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
-    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vertexInputInfo.vertexBindingDescriptionCount = static_cast<uint32_t>(vertexBindings.size());
-    vertexInputInfo.pVertexBindingDescriptions = vertexBindings.empty() ? nullptr : vertexBindings.data();
-    vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(vertexAttributes.size());
-    vertexInputInfo.pVertexAttributeDescriptions = vertexAttributes.empty() ? nullptr : vertexAttributes.data();
+    auto vertexInputInfo = vk::PipelineVertexInputStateCreateInfo{}
+        .setVertexBindingDescriptions(vertexBindings)
+        .setVertexAttributeDescriptions(vertexAttributes);
 
     // Check if tessellation is enabled
     bool hasTessellation = !tescShaderPath.empty() && !teseShaderPath.empty();
 
-    // Input assembly state
-    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
-    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    // When using tessellation, topology must be patch list
-    inputAssembly.topology = hasTessellation ? VK_PRIMITIVE_TOPOLOGY_PATCH_LIST : topology;
-    inputAssembly.primitiveRestartEnable = VK_FALSE;
+    // Input assembly state - when using tessellation, topology must be patch list
+    auto inputAssembly = vk::PipelineInputAssemblyStateCreateInfo{}
+        .setTopology(hasTessellation ? vk::PrimitiveTopology::ePatchList : static_cast<vk::PrimitiveTopology>(topology))
+        .setPrimitiveRestartEnable(false);
 
     // Tessellation state (only used when tessellation shaders are present)
-    VkPipelineTessellationStateCreateInfo tessellationState{};
-    tessellationState.sType = VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO;
-    tessellationState.patchControlPoints = 3;  // Triangles - 3 control points per patch
+    auto tessellationState = vk::PipelineTessellationStateCreateInfo{}
+        .setPatchControlPoints(3);  // Triangles - 3 control points per patch
 
     // Viewport and scissor
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = static_cast<float>(extent.width);
-    viewport.height = static_cast<float>(extent.height);
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
+    auto viewport = vk::Viewport{}
+        .setX(0.0f)
+        .setY(0.0f)
+        .setWidth(static_cast<float>(extent.width))
+        .setHeight(static_cast<float>(extent.height))
+        .setMinDepth(0.0f)
+        .setMaxDepth(1.0f);
 
-    VkRect2D scissor{};
-    scissor.offset = {0, 0};
-    scissor.extent = extent;
+    auto scissor = vk::Rect2D{}
+        .setOffset({0, 0})
+        .setExtent(extent);
 
-    VkPipelineViewportStateCreateInfo viewportState{};
-    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewportState.viewportCount = 1;
-    viewportState.scissorCount = 1;
-    if (dynamicViewport) {
-        viewportState.pViewports = nullptr;
-        viewportState.pScissors = nullptr;
-    } else {
-        viewportState.pViewports = &viewport;
-        viewportState.pScissors = &scissor;
+    auto viewportState = vk::PipelineViewportStateCreateInfo{}
+        .setViewportCount(1)
+        .setScissorCount(1);
+    if (!dynamicViewport) {
+        viewportState.setPViewports(&viewport).setPScissors(&scissor);
     }
 
     // Rasterization state
-    VkPipelineRasterizationStateCreateInfo rasterizer{};
-    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rasterizer.depthClampEnable = depthClampEnable ? VK_TRUE : VK_FALSE;
-    rasterizer.rasterizerDiscardEnable = VK_FALSE;
-    rasterizer.polygonMode = polygonMode;
-    rasterizer.lineWidth = lineWidth;
-    rasterizer.cullMode = cullMode;
-    rasterizer.frontFace = frontFace;
-    rasterizer.depthBiasEnable = depthBiasEnable ? VK_TRUE : VK_FALSE;
-    rasterizer.depthBiasConstantFactor = depthBiasConstant;
-    rasterizer.depthBiasSlopeFactor = depthBiasSlope;
-    rasterizer.depthBiasClamp = 0.0f;
+    auto rasterizer = vk::PipelineRasterizationStateCreateInfo{}
+        .setDepthClampEnable(depthClampEnable)
+        .setRasterizerDiscardEnable(false)
+        .setPolygonMode(static_cast<vk::PolygonMode>(polygonMode))
+        .setLineWidth(lineWidth)
+        .setCullMode(static_cast<vk::CullModeFlags>(cullMode))
+        .setFrontFace(static_cast<vk::FrontFace>(frontFace))
+        .setDepthBiasEnable(depthBiasEnable)
+        .setDepthBiasConstantFactor(depthBiasConstant)
+        .setDepthBiasSlopeFactor(depthBiasSlope)
+        .setDepthBiasClamp(0.0f);
 
     // Multisampling state
-    VkPipelineMultisampleStateCreateInfo multisampling{};
-    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisampling.sampleShadingEnable = VK_FALSE;
-    multisampling.rasterizationSamples = sampleCount;
-    multisampling.alphaToCoverageEnable = alphaToCoverageEnable ? VK_TRUE : VK_FALSE;
-    multisampling.alphaToOneEnable = alphaToOneEnable ? VK_TRUE : VK_FALSE;
+    auto multisampling = vk::PipelineMultisampleStateCreateInfo{}
+        .setSampleShadingEnable(false)
+        .setRasterizationSamples(static_cast<vk::SampleCountFlagBits>(sampleCount))
+        .setAlphaToCoverageEnable(alphaToCoverageEnable)
+        .setAlphaToOneEnable(alphaToOneEnable);
 
     // Depth/stencil state
-    VkPipelineDepthStencilStateCreateInfo depthStencil{};
-    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    depthStencil.depthTestEnable = depthTestEnable ? VK_TRUE : VK_FALSE;
-    depthStencil.depthWriteEnable = depthWriteEnable ? VK_TRUE : VK_FALSE;
-    depthStencil.depthCompareOp = depthCompareOp;
-    depthStencil.depthBoundsTestEnable = depthBoundsTestEnable ? VK_TRUE : VK_FALSE;
-    depthStencil.minDepthBounds = minDepthBounds;
-    depthStencil.maxDepthBounds = maxDepthBounds;
-    depthStencil.stencilTestEnable = stencilTestEnable ? VK_TRUE : VK_FALSE;
+    auto depthStencil = vk::PipelineDepthStencilStateCreateInfo{}
+        .setDepthTestEnable(depthTestEnable)
+        .setDepthWriteEnable(depthWriteEnable)
+        .setDepthCompareOp(static_cast<vk::CompareOp>(depthCompareOp))
+        .setDepthBoundsTestEnable(depthBoundsTestEnable)
+        .setMinDepthBounds(minDepthBounds)
+        .setMaxDepthBounds(maxDepthBounds)
+        .setStencilTestEnable(stencilTestEnable);
 
     // Color blend state
     // For MRT, we create an array of blend attachments (all using the same settings)
     std::vector<VkPipelineColorBlendAttachmentState> colorBlendAttachments(colorAttachmentCount, colorBlendAttachment);
 
-    VkPipelineColorBlendStateCreateInfo colorBlending{};
-    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    colorBlending.logicOpEnable = VK_FALSE;
+    auto colorBlending = vk::PipelineColorBlendStateCreateInfo{}
+        .setLogicOpEnable(false);
     if (hasColorAttachments) {
-        colorBlending.attachmentCount = colorAttachmentCount;
-        colorBlending.pAttachments = colorBlendAttachments.data();
-    } else {
-        colorBlending.attachmentCount = 0;
-        colorBlending.pAttachments = nullptr;
+        colorBlending.setAttachmentCount(colorAttachmentCount)
+            .setPAttachments(reinterpret_cast<const vk::PipelineColorBlendAttachmentState*>(colorBlendAttachments.data()));
     }
 
     // Dynamic states
-    std::array<VkDynamicState, 2> dynamicStates = {
-        VK_DYNAMIC_STATE_VIEWPORT,
-        VK_DYNAMIC_STATE_SCISSOR
+    std::array<vk::DynamicState, 2> dynamicStates = {
+        vk::DynamicState::eViewport,
+        vk::DynamicState::eScissor
     };
 
-    VkPipelineDynamicStateCreateInfo dynamicState{};
-    dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    auto dynamicState = vk::PipelineDynamicStateCreateInfo{};
     if (dynamicViewport) {
-        dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
-        dynamicState.pDynamicStates = dynamicStates.data();
-    } else {
-        dynamicState.dynamicStateCount = 0;
-        dynamicState.pDynamicStates = nullptr;
+        dynamicState.setDynamicStates(dynamicStates);
     }
 
     // Create the pipeline
-    VkGraphicsPipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pipelineInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
-    pipelineInfo.pStages = shaderStages.data();
-    pipelineInfo.pVertexInputState = &vertexInputInfo;
-    pipelineInfo.pInputAssemblyState = &inputAssembly;
-    pipelineInfo.pTessellationState = hasTessellation ? &tessellationState : nullptr;
-    pipelineInfo.pViewportState = &viewportState;
-    pipelineInfo.pRasterizationState = &rasterizer;
-    pipelineInfo.pMultisampleState = &multisampling;
-    pipelineInfo.pDepthStencilState = &depthStencil;
-    pipelineInfo.pColorBlendState = &colorBlending;
-    pipelineInfo.pDynamicState = dynamicViewport ? &dynamicState : nullptr;
-    pipelineInfo.layout = pipelineLayout;
-    pipelineInfo.renderPass = renderPass;
-    pipelineInfo.subpass = subpass;
+    auto pipelineInfo = vk::GraphicsPipelineCreateInfo{}
+        .setStages(shaderStages)
+        .setPVertexInputState(&vertexInputInfo)
+        .setPInputAssemblyState(&inputAssembly)
+        .setPTessellationState(hasTessellation ? &tessellationState : nullptr)
+        .setPViewportState(&viewportState)
+        .setPRasterizationState(&rasterizer)
+        .setPMultisampleState(&multisampling)
+        .setPDepthStencilState(&depthStencil)
+        .setPColorBlendState(&colorBlending)
+        .setPDynamicState(dynamicViewport ? &dynamicState : nullptr)
+        .setLayout(pipelineLayout)
+        .setRenderPass(renderPass)
+        .setSubpass(subpass);
 
-    VkResult result = vkCreateGraphicsPipelines(device, pipelineCacheHandle, 1, &pipelineInfo, nullptr, &pipeline);
+    vk::Device vkDevice(device);
+    auto result = vkDevice.createGraphicsPipelines(pipelineCacheHandle, pipelineInfo);
     cleanup();
 
-    if (result != VK_SUCCESS) {
+    if (result.result != vk::Result::eSuccess) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
             "GraphicsPipelineFactory: Failed to create graphics pipeline (VkResult=%d) "
             "vert='%s' frag='%s'",
-            static_cast<int>(result),
+            static_cast<int>(result.result),
             vertShaderPath.c_str(),
             fragShaderPath.empty() ? "<none>" : fragShaderPath.c_str());
         return false;
     }
 
+    pipeline = result.value[0];
     return true;
 }
 
@@ -578,8 +553,9 @@ bool GraphicsPipelineFactory::buildManaged(ManagedPipeline& outPipeline) {
 }
 
 void GraphicsPipelineFactory::cleanup() {
+    vk::Device vkDevice(device);
     for (VkShaderModule module : shaderModules) {
-        vkDestroyShaderModule(device, module, nullptr);
+        vkDevice.destroyShaderModule(module);
     }
     shaderModules.clear();
 }

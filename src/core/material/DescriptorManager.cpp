@@ -38,12 +38,11 @@ DescriptorManager::LayoutBuilder& DescriptorManager::LayoutBuilder::addStorageIm
 DescriptorManager::LayoutBuilder& DescriptorManager::LayoutBuilder::addBinding(
     uint32_t binding, VkDescriptorType type, VkShaderStageFlags stages, uint32_t count) {
 
-    VkDescriptorSetLayoutBinding layoutBinding{};
-    layoutBinding.binding = binding;
-    layoutBinding.descriptorType = type;
-    layoutBinding.descriptorCount = count;
-    layoutBinding.stageFlags = stages;
-    layoutBinding.pImmutableSamplers = nullptr;
+    auto layoutBinding = vk::DescriptorSetLayoutBinding{}
+        .setBinding(binding)
+        .setDescriptorType(static_cast<vk::DescriptorType>(type))
+        .setDescriptorCount(count)
+        .setStageFlags(static_cast<vk::ShaderStageFlags>(stages));
 
     bindings.push_back(layoutBinding);
 
@@ -56,18 +55,17 @@ DescriptorManager::LayoutBuilder& DescriptorManager::LayoutBuilder::addBinding(
 }
 
 VkDescriptorSetLayout DescriptorManager::LayoutBuilder::build() {
-    VkDescriptorSetLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
-    layoutInfo.pBindings = bindings.data();
+    auto layoutInfo = vk::DescriptorSetLayoutCreateInfo{}
+        .setBindings(bindings);
 
-    VkDescriptorSetLayout layout;
-    if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &layout) != VK_SUCCESS) {
+    vk::Device vkDevice(device);
+    auto result = vkDevice.createDescriptorSetLayout(layoutInfo);
+    if (result.result != vk::Result::eSuccess) {
         SDL_Log("DescriptorManager: Failed to create descriptor set layout");
         return VK_NULL_HANDLE;
     }
 
-    return layout;
+    return result.value;
 }
 
 bool DescriptorManager::LayoutBuilder::buildManaged(ManagedDescriptorSetLayout& outLayout) {
@@ -104,14 +102,13 @@ DescriptorManager::SetWriter& DescriptorManager::SetWriter::writeBufferArray(
 
     bufferInfos.push_back({buffer, offset, range});
 
-    VkWriteDescriptorSet write{};
-    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    write.dstSet = set;
-    write.dstBinding = binding;
-    write.dstArrayElement = arrayElement;
-    write.descriptorType = type;
-    write.descriptorCount = 1;
-    write.pBufferInfo = &bufferInfos.back();
+    auto write = vk::WriteDescriptorSet{}
+        .setDstSet(set)
+        .setDstBinding(binding)
+        .setDstArrayElement(arrayElement)
+        .setDescriptorType(static_cast<vk::DescriptorType>(type))
+        .setDescriptorCount(1)
+        .setPBufferInfo(reinterpret_cast<const vk::DescriptorBufferInfo*>(&bufferInfos.back()));
 
     writes.push_back(write);
     return *this;
@@ -129,14 +126,13 @@ DescriptorManager::SetWriter& DescriptorManager::SetWriter::writeImageArray(
 
     imageInfos.push_back({sampler, view, layout});
 
-    VkWriteDescriptorSet write{};
-    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    write.dstSet = set;
-    write.dstBinding = binding;
-    write.dstArrayElement = arrayElement;
-    write.descriptorType = type;
-    write.descriptorCount = 1;
-    write.pImageInfo = &imageInfos.back();
+    auto write = vk::WriteDescriptorSet{}
+        .setDstSet(set)
+        .setDstBinding(binding)
+        .setDstArrayElement(arrayElement)
+        .setDescriptorType(static_cast<vk::DescriptorType>(type))
+        .setDescriptorCount(1)
+        .setPImageInfo(reinterpret_cast<const vk::DescriptorImageInfo*>(&imageInfos.back()));
 
     writes.push_back(write);
     return *this;
@@ -147,14 +143,13 @@ DescriptorManager::SetWriter& DescriptorManager::SetWriter::writeStorageImage(
 
     imageInfos.push_back({VK_NULL_HANDLE, view, layout});
 
-    VkWriteDescriptorSet write{};
-    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    write.dstSet = set;
-    write.dstBinding = binding;
-    write.dstArrayElement = 0;
-    write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    write.descriptorCount = 1;
-    write.pImageInfo = &imageInfos.back();
+    auto write = vk::WriteDescriptorSet{}
+        .setDstSet(set)
+        .setDstBinding(binding)
+        .setDstArrayElement(0)
+        .setDescriptorType(vk::DescriptorType::eStorageImage)
+        .setDescriptorCount(1)
+        .setPImageInfo(reinterpret_cast<const vk::DescriptorImageInfo*>(&imageInfos.back()));
 
     writes.push_back(write);
     return *this;
@@ -162,8 +157,8 @@ DescriptorManager::SetWriter& DescriptorManager::SetWriter::writeStorageImage(
 
 void DescriptorManager::SetWriter::update() {
     if (!writes.empty()) {
-        vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()),
-                               writes.data(), 0, nullptr);
+        vk::Device vkDevice(device);
+        vkDevice.updateDescriptorSets(writes, nullptr);
     }
 }
 
@@ -214,41 +209,44 @@ DescriptorManager::Pool& DescriptorManager::Pool::operator=(Pool&& other) noexce
 }
 
 VkDescriptorPool DescriptorManager::Pool::createPool() {
-    std::vector<VkDescriptorPoolSize> sizes;
+    std::vector<vk::DescriptorPoolSize> sizes;
 
     if (poolSizes.uniformBuffers > 0) {
-        sizes.push_back({VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                         poolSizes.uniformBuffers * setsPerPool});
+        sizes.push_back(vk::DescriptorPoolSize{}
+            .setType(vk::DescriptorType::eUniformBuffer)
+            .setDescriptorCount(poolSizes.uniformBuffers * setsPerPool));
     }
     if (poolSizes.storageBuffers > 0) {
-        sizes.push_back({VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                         poolSizes.storageBuffers * setsPerPool});
+        sizes.push_back(vk::DescriptorPoolSize{}
+            .setType(vk::DescriptorType::eStorageBuffer)
+            .setDescriptorCount(poolSizes.storageBuffers * setsPerPool));
     }
     if (poolSizes.combinedImageSamplers > 0) {
-        sizes.push_back({VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                         poolSizes.combinedImageSamplers * setsPerPool});
+        sizes.push_back(vk::DescriptorPoolSize{}
+            .setType(vk::DescriptorType::eCombinedImageSampler)
+            .setDescriptorCount(poolSizes.combinedImageSamplers * setsPerPool));
     }
     if (poolSizes.storageImages > 0) {
-        sizes.push_back({VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                         poolSizes.storageImages * setsPerPool});
+        sizes.push_back(vk::DescriptorPoolSize{}
+            .setType(vk::DescriptorType::eStorageImage)
+            .setDescriptorCount(poolSizes.storageImages * setsPerPool));
     }
 
-    VkDescriptorPoolCreateInfo poolInfo{};
-    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    poolInfo.poolSizeCount = static_cast<uint32_t>(sizes.size());
-    poolInfo.pPoolSizes = sizes.data();
-    poolInfo.maxSets = setsPerPool;
+    auto poolInfo = vk::DescriptorPoolCreateInfo{}
+        .setFlags(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet)
+        .setPoolSizes(sizes)
+        .setMaxSets(setsPerPool);
 
-    VkDescriptorPool pool;
-    if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &pool) != VK_SUCCESS) {
+    vk::Device vkDevice(device);
+    auto result = vkDevice.createDescriptorPool(poolInfo);
+    if (result.result != vk::Result::eSuccess) {
         SDL_Log("DescriptorManager: Failed to create descriptor pool");
         return VK_NULL_HANDLE;
     }
 
     SDL_Log("DescriptorManager: Created new descriptor pool (total: %zu)",
             pools.size() + 1);
-    return pool;
+    return result.value;
 }
 
 bool DescriptorManager::Pool::tryAllocate(VkDescriptorPool pool,
@@ -257,16 +255,19 @@ bool DescriptorManager::Pool::tryAllocate(VkDescriptorPool pool,
                                           std::vector<VkDescriptorSet>& outSets) {
     std::vector<VkDescriptorSetLayout> layouts(count, layout);
 
-    VkDescriptorSetAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = pool;
-    allocInfo.descriptorSetCount = count;
-    allocInfo.pSetLayouts = layouts.data();
+    auto allocInfo = vk::DescriptorSetAllocateInfo{}
+        .setDescriptorPool(pool)
+        .setSetLayouts(layouts);
 
+    vk::Device vkDevice(device);
     outSets.resize(count);
-    VkResult result = vkAllocateDescriptorSets(device, &allocInfo, outSets.data());
+    auto result = vkDevice.allocateDescriptorSets(allocInfo);
 
-    return result == VK_SUCCESS;
+    if (result.result == vk::Result::eSuccess) {
+        std::copy(result.value.begin(), result.value.end(), outSets.begin());
+        return true;
+    }
+    return false;
 }
 
 std::vector<VkDescriptorSet> DescriptorManager::Pool::allocate(
@@ -321,8 +322,9 @@ VkDescriptorSet DescriptorManager::Pool::allocateSingle(VkDescriptorSetLayout la
 }
 
 void DescriptorManager::Pool::reset() {
+    vk::Device vkDevice(device);
     for (auto pool : pools) {
-        vkResetDescriptorPool(device, pool, 0);
+        vkDevice.resetDescriptorPool(pool);
     }
     currentPoolIndex = 0;
     totalAllocatedSets = 0;
@@ -330,9 +332,10 @@ void DescriptorManager::Pool::reset() {
 
 void DescriptorManager::Pool::destroy() {
     if (device != VK_NULL_HANDLE) {
+        vk::Device vkDevice(device);
         for (auto pool : pools) {
             if (pool != VK_NULL_HANDLE) {
-                vkDestroyDescriptorPool(device, pool, nullptr);
+                vkDevice.destroyDescriptorPool(pool);
             }
         }
     }
@@ -350,20 +353,18 @@ VkPipelineLayout DescriptorManager::createPipelineLayout(
     const std::vector<VkDescriptorSetLayout>& setLayouts,
     const std::vector<VkPushConstantRange>& pushConstants) {
 
-    VkPipelineLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    layoutInfo.setLayoutCount = static_cast<uint32_t>(setLayouts.size());
-    layoutInfo.pSetLayouts = setLayouts.data();
-    layoutInfo.pushConstantRangeCount = static_cast<uint32_t>(pushConstants.size());
-    layoutInfo.pPushConstantRanges = pushConstants.empty() ? nullptr : pushConstants.data();
+    auto layoutInfo = vk::PipelineLayoutCreateInfo{}
+        .setSetLayouts(setLayouts)
+        .setPushConstantRanges(pushConstants);
 
-    VkPipelineLayout layout;
-    if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &layout) != VK_SUCCESS) {
+    vk::Device vkDevice(device);
+    auto result = vkDevice.createPipelineLayout(layoutInfo);
+    if (result.result != vk::Result::eSuccess) {
         SDL_Log("DescriptorManager: Failed to create pipeline layout");
         return VK_NULL_HANDLE;
     }
 
-    return layout;
+    return result.value;
 }
 
 VkPipelineLayout DescriptorManager::createPipelineLayout(
