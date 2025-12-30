@@ -646,7 +646,22 @@ void main() {
             }
         } else {
             // Normal fog rendering
-            vec4 fog = sampleFroxelFog(fragTexCoord, linearDepth);
+            vec4 fog;
+
+            // Sky pixels (depth >= 0.9999) need special handling:
+            // Froxel rays pointing upward sample high-altitude positions where fog density is near zero.
+            // For sky, we should apply fog as if viewing through the ground-level fog layer horizontally.
+            // Sample fog from the horizon (UV.y = 0.5) to get consistent fog at the sky boundary.
+            const float SKY_DEPTH_THRESHOLD = 0.9999;
+            if (depth >= SKY_DEPTH_THRESHOLD) {
+                // For sky pixels, sample fog at horizon level (screen center Y)
+                // This ensures sky receives fog consistent with the horizontal fog layer
+                vec2 horizonUV = vec2(fragTexCoord.x, 0.5);
+                fog = sampleFroxelFog(horizonUV, ubo.froxelFarPlane);
+            } else {
+                fog = sampleFroxelFog(fragTexCoord, linearDepth);
+            }
+
             vec3 inScatter = fog.rgb;
             float transmittance = fog.a;
 
