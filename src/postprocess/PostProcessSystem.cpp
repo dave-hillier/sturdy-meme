@@ -632,6 +632,8 @@ void PostProcessSystem::recordPostProcess(VkCommandBuffer cmd, uint32_t frameInd
     ubo->underwaterAbsorption = glm::vec4(underwaterAbsorption_, underwaterTurbidity_);
     ubo->underwaterColor = underwaterColor_;
     ubo->underwaterWaterLevel = underwaterWaterLevel_;
+    // Froxel debug visualization mode
+    ubo->froxelDebugMode = static_cast<float>(froxelDebugMode);
 
     // Store computed exposure for next frame
     lastAutoExposure = autoExposureEnabled ? computedExposure : manualExposure;

@@ -91,6 +91,70 @@ void GuiEnvironmentTab::render(IEnvironmentControl& envControl, EnvironmentTabSt
             envControl.setFogAbsorption(0.02f);
             envControl.setFogScaleHeight(50.0f);
         }
+
+        // Extreme test presets for froxel behavior testing
+        ImGui::Spacing();
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.6f, 0.3f, 1.0f));
+        ImGui::Text("Extreme Tests:");
+        ImGui::PopStyleColor();
+
+        if (ImGui::Button("Max Density")) {
+            envControl.setFogDensity(1.0f);
+            envControl.setFogAbsorption(1.0f);
+            envControl.setFogScaleHeight(2000.0f);
+            envControl.setLayerDensity(0.5f);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Maximum fog density - tests opacity limits");
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button("Near Only")) {
+            envControl.setVolumetricFarPlane(20.0f);
+            envControl.setFogDensity(0.05f);
+            envControl.setFogAbsorption(0.05f);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Very short far plane (20m) - tests near-field froxels");
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button("Full Range")) {
+            envControl.setVolumetricFarPlane(5000.0f);
+            envControl.setFogDensity(0.001f);
+            envControl.setFogAbsorption(0.001f);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Maximum far plane (5000m) - tests full depth distribution");
+        }
+
+        if (ImGui::Button("No Temporal")) {
+            envControl.setTemporalBlend(0.0f);
+            envControl.setFogDensity(0.02f);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Disable temporal filtering - shows raw noise");
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button("Max Temporal")) {
+            envControl.setTemporalBlend(0.999f);
+            envControl.setFogDensity(0.02f);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Maximum temporal filtering - shows ghosting artifacts");
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button("Thin Layer")) {
+            envControl.setFogDensity(0.0f);
+            envControl.setLayerHeight(5.0f);
+            envControl.setLayerThickness(2.0f);
+            envControl.setLayerDensity(0.2f);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Very thin ground fog layer - tests height fog precision");
+        }
     }
 
     ImGui::Spacing();

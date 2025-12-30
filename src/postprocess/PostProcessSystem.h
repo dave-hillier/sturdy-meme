@@ -145,6 +145,10 @@ public:
     void setFroxelFilterQuality(bool highQuality) override { froxelFilterHighQuality = highQuality; }
     bool isFroxelFilterHighQuality() const override { return froxelFilterHighQuality; }
 
+    // Froxel debug visualization mode
+    void setFroxelDebugMode(int mode) override { froxelDebugMode = glm::clamp(mode, 0, 6); }
+    int getFroxelDebugMode() const override { return froxelDebugMode; }
+
     // Froxel volumetrics (Phase 4.3)
     void setFroxelVolume(VkImageView volumeView, VkSampler volumeSampler);
     void setFroxelEnabled(bool enabled) { froxelEnabled = enabled; }
@@ -312,6 +316,7 @@ private:
     float froxelDepthDist = 1.2f;
     float nearPlane = 0.1f;
     float farPlane = 1000.0f;
+    int froxelDebugMode = 0;  // 0=Normal, 1=Depth slices, 2=Density, 3=Transmittance, 4=Grid cells
 
     // Local tone mapping (bilateral grid)
     VkImageView bilateralGridView = VK_NULL_HANDLE;

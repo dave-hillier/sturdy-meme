@@ -31,6 +31,11 @@ public:
     virtual void setFroxelFilterQuality(bool highQuality) = 0;
     virtual bool isFroxelFilterHighQuality() const = 0;
 
+    // Froxel debug visualization mode
+    // 0 = Normal, 1 = Depth slices, 2 = Density, 3 = Transmittance, 4 = Grid cells
+    virtual void setFroxelDebugMode(int mode) = 0;
+    virtual int getFroxelDebugMode() const = 0;
+
     // Local tone mapping (bilateral grid)
     virtual void setLocalToneMapEnabled(bool enabled) = 0;
     virtual bool isLocalToneMapEnabled() const = 0;

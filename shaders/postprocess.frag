@@ -46,7 +46,9 @@ layout(binding = BINDING_PP_UNIFORMS) uniform PostProcessUniforms {
     vec4 underwaterAbsorption;  // xyz = absorption coefficients, w = turbidity
     vec4 underwaterColor;       // Water tint color
     float underwaterWaterLevel; // Water surface Y position
-    float underwaterPad1, underwaterPad2, underwaterPad3;  // Alignment padding
+    // Froxel debug visualization mode (Phase 4.3 testing)
+    float froxelDebugMode;      // 0=Normal, 1=Depth slices, 2=Density, 3=Transmittance, 4=Grid cells
+    float underwaterPad2, underwaterPad3;  // Alignment padding
 } ubo;
 
 // Specialization constant for god ray sample count
@@ -189,6 +191,158 @@ vec4 sampleFroxelFog(vec2 uv, float linearDepth) {
     float transmittance = 1.0 - fogData.a;
 
     return vec4(inScatter, transmittance);
+}
+
+// ============================================================================
+// Froxel Debug Visualization (Phase 4.3 Testing)
+// Provides visual feedback for testing froxel grid behavior
+// ============================================================================
+
+// HSV to RGB conversion for rainbow coloring
+vec3 hsv2rgb(vec3 c) {
+    vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+    vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+}
+
+// Visualize froxel data for debugging
+// Returns: RGB color for the debug visualization, A = 1 if debug mode active
+vec4 visualizeFroxelDebug(vec2 uv, float linearDepth, int debugMode) {
+    // Mode 0 = Normal (no debug), handled in caller
+    if (debugMode <= 0) {
+        return vec4(0.0);
+    }
+
+    // Clamp to volumetric range
+    float clampedDepth = min(linearDepth, ubo.froxelFarPlane);
+    float sliceIndex = depthToSlice(clampedDepth);
+    float w = sliceIndex / float(FROXEL_DEPTH);
+
+    // Sample the raw froxel data
+    vec4 fogData = texture(froxelVolume, vec3(uv, w));
+
+    if (debugMode == 1) {
+        // Mode 1: Depth slices - rainbow gradient based on Z slice
+        // Useful for verifying exponential depth distribution
+        float hue = w;  // 0-1 maps to full rainbow
+        vec3 sliceColor = hsv2rgb(vec3(hue, 0.9, 0.9));
+        // Add grid lines every 8 slices
+        float sliceLines = step(0.9, fract(sliceIndex / 8.0));
+        sliceColor = mix(sliceColor, vec3(1.0), sliceLines * 0.5);
+        return vec4(sliceColor, 1.0);
+    }
+    else if (debugMode == 2) {
+        // Mode 2: Density visualization - grayscale density map
+        // Useful for seeing where fog accumulates
+        float density = fogData.a;  // Alpha stores density/opacity
+        // Apply contrast curve to make low densities more visible
+        float visualDensity = pow(density, 0.5);  // Gamma correction
+        vec3 densityColor = vec3(visualDensity);
+        // Tint very high density values red as warning
+        if (density > 0.9) {
+            densityColor = mix(densityColor, vec3(1.0, 0.0, 0.0), (density - 0.9) * 10.0);
+        }
+        return vec4(densityColor, 1.0);
+    }
+    else if (debugMode == 3) {
+        // Mode 3: Transmittance visualization - shows light penetration
+        // Dark areas = fog blocks light, bright = light passes through
+        float transmittance = 1.0 - fogData.a;
+        // Use blue-white gradient (like x-ray vision)
+        vec3 transColor = mix(vec3(0.0, 0.1, 0.3), vec3(1.0), transmittance);
+        return vec4(transColor, 1.0);
+    }
+    else if (debugMode == 4) {
+        // Mode 4: Grid cells - show froxel boundaries
+        // Useful for understanding the grid resolution
+        vec3 gridCoord = vec3(uv, w) * vec3(float(FROXEL_WIDTH), float(FROXEL_HEIGHT), float(FROXEL_DEPTH));
+        vec3 cellFrac = fract(gridCoord);
+
+        // Draw cell edges
+        float edgeThickness = 0.08;
+        float edgeX = step(cellFrac.x, edgeThickness) + step(1.0 - edgeThickness, cellFrac.x);
+        float edgeY = step(cellFrac.y, edgeThickness) + step(1.0 - edgeThickness, cellFrac.y);
+        float edgeZ = step(cellFrac.z, edgeThickness) + step(1.0 - edgeThickness, cellFrac.z);
+        float isEdge = max(max(edgeX, edgeY), edgeZ);
+
+        // Base color from in-scattered light
+        vec3 inScatter = fogData.rgb * fogData.a;
+        vec3 baseColor = inScatter * 2.0;  // Boost for visibility
+
+        // Overlay grid in cyan
+        vec3 gridColor = mix(baseColor, vec3(0.0, 1.0, 1.0), isEdge * 0.7);
+        return vec4(gridColor, 1.0);
+    }
+    else if (debugMode == 5) {
+        // Mode 5: Volume Raymarch - shows true 3D volumetric structure
+        // Marches through the entire froxel volume to accumulate and visualize 3D density
+        vec3 accumColor = vec3(0.0);
+        float accumAlpha = 0.0;
+
+        // March through all depth slices from front to back
+        const int NUM_SAMPLES = 32;
+        for (int i = 0; i < NUM_SAMPLES; i++) {
+            float sampleW = float(i) / float(NUM_SAMPLES - 1);
+            vec4 sampleData = texture(froxelVolume, vec3(uv, sampleW));
+
+            // Get slice density
+            float density = sampleData.a;
+            vec3 scatter = sampleData.rgb * density;
+
+            // Color by depth (rainbow gradient for 3D effect)
+            float hue = sampleW * 0.8;  // Rainbow from red to violet
+            vec3 sliceColor = hsv2rgb(vec3(hue, 0.8, 0.9));
+
+            // Modulate by density to show where fog actually is
+            sliceColor *= density * 5.0;
+
+            // Front-to-back compositing
+            float sampleAlpha = density * 0.3;  // Scale for visibility
+            accumColor += sliceColor * (1.0 - accumAlpha);
+            accumAlpha += sampleAlpha * (1.0 - accumAlpha);
+
+            if (accumAlpha > 0.95) break;  // Early out when saturated
+        }
+
+        return vec4(accumColor, 1.0);
+    }
+    else if (debugMode == 6) {
+        // Mode 6: Cross-section - show horizontal slice through volume at pixel depth
+        // Reveals the XY distribution of fog at the current depth
+        float sliceNum = floor(sliceIndex);
+        float sliceFrac = fract(sliceIndex);
+
+        // Sample a grid of points at this depth slice
+        vec3 sliceColor = vec3(0.0);
+
+        // Get data at this exact slice
+        vec4 thisSlice = fogData;
+
+        // Show density as brightness
+        float density = thisSlice.a;
+
+        // Add a checkerboard pattern based on XY froxel cells to show resolution
+        vec2 cellXY = vec2(uv) * vec2(float(FROXEL_WIDTH), float(FROXEL_HEIGHT));
+        float checker = mod(floor(cellXY.x) + floor(cellXY.y), 2.0);
+
+        // Color: warm = high density, cool = low density
+        vec3 densityColor = mix(
+            vec3(0.1, 0.2, 0.5),  // Cool blue for low
+            vec3(1.0, 0.4, 0.1),  // Warm orange for high
+            density * 2.0
+        );
+
+        // Subtle checkerboard overlay
+        sliceColor = densityColor * (0.8 + 0.2 * checker);
+
+        // Draw depth slice indicator lines
+        float sliceLine = step(0.95, fract(sliceIndex));
+        sliceColor = mix(sliceColor, vec3(1.0, 1.0, 0.0), sliceLine * 0.5);
+
+        return vec4(sliceColor, 1.0);
+    }
+
+    return vec4(0.0);  // Unknown mode, no debug
 }
 
 // ACES Filmic Tone Mapping
@@ -483,12 +637,23 @@ void main() {
 
     // Apply froxel volumetric fog (Phase 4.3) - only when above water
     if (ubo.froxelEnabled > 0.5 && ubo.underwaterEnabled < 0.5) {
-        vec4 fog = sampleFroxelFog(fragTexCoord, linearDepth);
-        vec3 inScatter = fog.rgb;
-        float transmittance = fog.a;
+        int debugMode = int(ubo.froxelDebugMode + 0.5);  // Round to nearest int
 
-        // Apply fog: scene * transmittance + in-scatter
-        hdr = hdr * transmittance + inScatter;
+        if (debugMode > 0) {
+            // Debug visualization mode - replace scene with debug view
+            vec4 debugVis = visualizeFroxelDebug(fragTexCoord, linearDepth, debugMode);
+            if (debugVis.a > 0.5) {
+                hdr = debugVis.rgb;
+            }
+        } else {
+            // Normal fog rendering
+            vec4 fog = sampleFroxelFog(fragTexCoord, linearDepth);
+            vec3 inScatter = fog.rgb;
+            float transmittance = fog.a;
+
+            // Apply fog: scene * transmittance + in-scatter
+            hdr = hdr * transmittance + inScatter;
+        }
     }
 
     // Apply underwater effects (Water Volume Renderer Phase 2)

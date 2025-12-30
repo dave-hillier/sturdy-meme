@@ -114,6 +114,33 @@ void GuiPostFXTab::render(IPostProcessState& postProcess, ICloudShadowControl& c
         ImGui::SetTooltip("Tricubic filtering (8 samples) vs Trilinear (1 sample)");
     }
 
+    // Froxel debug visualization mode
+    const char* debugModeNames[] = {
+        "Normal",
+        "Depth Slices",
+        "Density",
+        "Transmittance",
+        "Grid Cells",
+        "Volume Raymarch",
+        "Cross-Section"
+    };
+    int currentDebugMode = postProcess.getFroxelDebugMode();
+    if (ImGui::Combo("Debug View", &currentDebugMode, debugModeNames, 7)) {
+        postProcess.setFroxelDebugMode(currentDebugMode);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(
+            "Debug visualization modes:\n"
+            "- Normal: Standard fog rendering\n"
+            "- Depth Slices: Rainbow gradient showing Z distribution\n"
+            "- Density: Grayscale fog density (high = red)\n"
+            "- Transmittance: Light penetration (dark = blocked)\n"
+            "- Grid Cells: Show froxel cell boundaries\n"
+            "- Volume Raymarch: 3D accumulation through entire volume\n"
+            "- Cross-Section: XY density at current depth"
+        );
+    }
+
     ImGui::Spacing();
     ImGui::Separator();
     ImGui::Spacing();
