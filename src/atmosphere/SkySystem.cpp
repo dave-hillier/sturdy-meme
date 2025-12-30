@@ -48,8 +48,9 @@ bool SkySystem::initInternal(const InitInfo& info) {
 void SkySystem::cleanup() {
     if (device == VK_NULL_HANDLE) return;  // Not initialized
 
+    vk::Device vkDevice(device);
     if (pipeline != VK_NULL_HANDLE) {
-        vkDestroyPipeline(device, pipeline, nullptr);
+        vkDevice.destroyPipeline(pipeline);
         pipeline = VK_NULL_HANDLE;
     }
     // RAII wrappers handle cleanup automatically

@@ -541,9 +541,9 @@ void WaterSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
         0, pushConstants);
 
     // Bind water mesh and draw
-    VkBuffer vertexBuffers[] = {(*waterMesh)->getVertexBuffer()};
-    VkDeviceSize offsets[] = {0};
-    vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
+    vk::Buffer vertexBuffers[] = {(*waterMesh)->getVertexBuffer()};
+    vk::DeviceSize offsets[] = {0};
+    vkCmd.bindVertexBuffers(0, 1, vertexBuffers, offsets);
     vkCmd.bindIndexBuffer((*waterMesh)->getIndexBuffer(), 0, vk::IndexType::eUint32);
     vkCmd.drawIndexed((*waterMesh)->getIndexCount(), 1, 0, 0, 0);
 }
@@ -551,9 +551,9 @@ void WaterSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
 void WaterSystem::recordMeshDraw(VkCommandBuffer cmd) {
     // Draw just the mesh (pipeline and descriptors bound externally)
     vk::CommandBuffer vkCmd(cmd);
-    VkBuffer vertexBuffers[] = {(*waterMesh)->getVertexBuffer()};
-    VkDeviceSize offsets[] = {0};
-    vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
+    vk::Buffer vertexBuffers[] = {(*waterMesh)->getVertexBuffer()};
+    vk::DeviceSize offsets[] = {0};
+    vkCmd.bindVertexBuffers(0, 1, vertexBuffers, offsets);
     vkCmd.bindIndexBuffer((*waterMesh)->getIndexBuffer(), 0, vk::IndexType::eUint32);
     vkCmd.drawIndexed((*waterMesh)->getIndexCount(), 1, 0, 0, 0);
 }

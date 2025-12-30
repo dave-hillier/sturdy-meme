@@ -61,13 +61,15 @@ bool ShadowSystem::initInternal(const InitInfo& info) {
 void ShadowSystem::cleanup() {
     if (device == VK_NULL_HANDLE) return;
 
+    vk::Device vkDevice(device);
+
     // Pipeline cleanup
-    if (shadowPipeline != VK_NULL_HANDLE) vkDestroyPipeline(device, shadowPipeline, nullptr);
-    if (shadowPipelineLayout != VK_NULL_HANDLE) vkDestroyPipelineLayout(device, shadowPipelineLayout, nullptr);
-    if (skinnedShadowPipeline != VK_NULL_HANDLE) vkDestroyPipeline(device, skinnedShadowPipeline, nullptr);
-    if (skinnedShadowPipelineLayout != VK_NULL_HANDLE) vkDestroyPipelineLayout(device, skinnedShadowPipelineLayout, nullptr);
-    if (dynamicShadowPipeline != VK_NULL_HANDLE) vkDestroyPipeline(device, dynamicShadowPipeline, nullptr);
-    if (dynamicShadowPipelineLayout != VK_NULL_HANDLE) vkDestroyPipelineLayout(device, dynamicShadowPipelineLayout, nullptr);
+    if (shadowPipeline != VK_NULL_HANDLE) vkDevice.destroyPipeline(shadowPipeline);
+    if (shadowPipelineLayout != VK_NULL_HANDLE) vkDevice.destroyPipelineLayout(shadowPipelineLayout);
+    if (skinnedShadowPipeline != VK_NULL_HANDLE) vkDevice.destroyPipeline(skinnedShadowPipeline);
+    if (skinnedShadowPipelineLayout != VK_NULL_HANDLE) vkDevice.destroyPipelineLayout(skinnedShadowPipelineLayout);
+    if (dynamicShadowPipeline != VK_NULL_HANDLE) vkDevice.destroyPipeline(dynamicShadowPipeline);
+    if (dynamicShadowPipelineLayout != VK_NULL_HANDLE) vkDevice.destroyPipelineLayout(dynamicShadowPipelineLayout);
 
     // CSM cleanup
     VulkanResourceFactory::destroyFramebuffers(device, cascadeFramebuffers);
@@ -77,7 +79,7 @@ void ShadowSystem::cleanup() {
     destroyDynamicShadowResources();
 
     // Render pass
-    if (shadowRenderPass != VK_NULL_HANDLE) vkDestroyRenderPass(device, shadowRenderPass, nullptr);
+    if (shadowRenderPass != VK_NULL_HANDLE) vkDevice.destroyRenderPass(shadowRenderPass);
 
     device = VK_NULL_HANDLE;
 }
@@ -327,9 +329,9 @@ void ShadowSystem::drawShadowScene(
         vkCmd.pushConstants<ShadowPushConstants>(
             layout, vk::ShaderStageFlagBits::eVertex, 0, push);
 
-        VkBuffer vb[] = {obj.mesh->getVertexBuffer()};
-        VkDeviceSize offsets[] = {0};
-        vkCmdBindVertexBuffers(cmd, 0, 1, vb, offsets);
+        vk::Buffer vb[] = {obj.mesh->getVertexBuffer()};
+        vk::DeviceSize offsets[] = {0};
+        vkCmd.bindVertexBuffers(0, 1, vb, offsets);
         vkCmd.bindIndexBuffer(obj.mesh->getIndexBuffer(), 0, vk::IndexType::eUint32);
         vkCmd.drawIndexed(obj.mesh->getIndexCount(), 1, 0, 0, 0);
     }
@@ -398,9 +400,9 @@ void ShadowSystem::recordSkinnedMeshShadow(VkCommandBuffer cmd, uint32_t cascade
     vkCmd.pushConstants<ShadowPushConstants>(
         skinnedShadowPipelineLayout, vk::ShaderStageFlagBits::eVertex, 0, shadowPush);
 
-    VkBuffer vertexBuffers[] = {mesh.getVertexBuffer()};
-    VkDeviceSize offsets[] = {0};
-    vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
+    vk::Buffer vertexBuffers[] = {mesh.getVertexBuffer()};
+    vk::DeviceSize offsets[] = {0};
+    vkCmd.bindVertexBuffers(0, 1, vertexBuffers, offsets);
     vkCmd.bindIndexBuffer(mesh.getIndexBuffer(), 0, vk::IndexType::eUint32);
     vkCmd.drawIndexed(mesh.getIndexCount(), 1, 0, 0, 0);
 }

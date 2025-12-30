@@ -25,35 +25,31 @@ PipelineBuilder& PipelineBuilder::setPipelineCache(VkPipelineCache cache) {
 
 PipelineBuilder& PipelineBuilder::addDescriptorBinding(uint32_t binding, VkDescriptorType type, uint32_t count,
                                                        VkShaderStageFlags stageFlags, const VkSampler* immutableSamplers) {
-    auto layoutBinding = vk::DescriptorSetLayoutBinding{}
-        .setBinding(binding)
-        .setDescriptorType(static_cast<vk::DescriptorType>(type))
-        .setDescriptorCount(count)
-        .setStageFlags(static_cast<vk::ShaderStageFlags>(stageFlags))
-        .setPImmutableSamplers(reinterpret_cast<const vk::Sampler*>(immutableSamplers));
+    VkDescriptorSetLayoutBinding layoutBinding{};
+    layoutBinding.binding = binding;
+    layoutBinding.descriptorType = type;
+    layoutBinding.descriptorCount = count;
+    layoutBinding.stageFlags = stageFlags;
+    layoutBinding.pImmutableSamplers = immutableSamplers;
     descriptorBindings.push_back(layoutBinding);
     return *this;
 }
 
 bool PipelineBuilder::buildDescriptorSetLayout(VkDescriptorSetLayout& layout) const {
     auto layoutInfo = vk::DescriptorSetLayoutCreateInfo{}
-        .setBindings(descriptorBindings);
+        .setBindingCount(static_cast<uint32_t>(descriptorBindings.size()))
+        .setPBindings(reinterpret_cast<const vk::DescriptorSetLayoutBinding*>(descriptorBindings.data()));
 
     vk::Device vkDevice(device);
-    auto result = vkDevice.createDescriptorSetLayout(layoutInfo);
-    if (result.result != vk::Result::eSuccess) {
-        SDL_Log("Failed to create descriptor set layout via PipelineBuilder");
-        return false;
-    }
-    layout = result.value;
+    layout = vkDevice.createDescriptorSetLayout(layoutInfo);
     return true;
 }
 
 PipelineBuilder& PipelineBuilder::addPushConstantRange(VkShaderStageFlags stageFlags, uint32_t offset, uint32_t size) {
-    auto range = vk::PushConstantRange{}
-        .setStageFlags(static_cast<vk::ShaderStageFlags>(stageFlags))
-        .setOffset(offset)
-        .setSize(size);
+    VkPushConstantRange range{};
+    range.stageFlags = stageFlags;
+    range.offset = offset;
+    range.size = size;
     pushConstantRanges.push_back(range);
     return *this;
 }
@@ -65,10 +61,11 @@ PipelineBuilder& PipelineBuilder::addShaderStage(const std::string& path, VkShad
         return *this;
     }
 
-    auto stageInfo = vk::PipelineShaderStageCreateInfo{}
-        .setStage(static_cast<vk::ShaderStageFlagBits>(stage))
-        .setModule(*module)
-        .setPName(entry);
+    VkPipelineShaderStageCreateInfo stageInfo{};
+    stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stageInfo.stage = stage;
+    stageInfo.module = *module;
+    stageInfo.pName = entry;
 
     shaderStages.push_back(stageInfo);
     shaderModules.push_back(*module);
@@ -77,17 +74,13 @@ PipelineBuilder& PipelineBuilder::addShaderStage(const std::string& path, VkShad
 
 bool PipelineBuilder::buildPipelineLayout(const std::vector<VkDescriptorSetLayout>& setLayouts, VkPipelineLayout& layout) const {
     auto layoutInfo = vk::PipelineLayoutCreateInfo{}
-        .setSetLayouts(setLayouts)
-        .setPushConstantRanges(pushConstantRanges);
+        .setSetLayoutCount(static_cast<uint32_t>(setLayouts.size()))
+        .setPSetLayouts(reinterpret_cast<const vk::DescriptorSetLayout*>(setLayouts.data()))
+        .setPushConstantRangeCount(static_cast<uint32_t>(pushConstantRanges.size()))
+        .setPPushConstantRanges(reinterpret_cast<const vk::PushConstantRange*>(pushConstantRanges.data()));
 
     vk::Device vkDevice(device);
-    auto result = vkDevice.createPipelineLayout(layoutInfo);
-    if (result.result != vk::Result::eSuccess) {
-        SDL_Log("Failed to create pipeline layout via PipelineBuilder");
-        return false;
-    }
-
-    layout = result.value;
+    layout = vkDevice.createPipelineLayout(layoutInfo);
     return true;
 }
 
@@ -98,17 +91,12 @@ bool PipelineBuilder::buildComputePipeline(VkPipelineLayout layout, VkPipeline& 
     }
 
     auto pipelineInfo = vk::ComputePipelineCreateInfo{}
-        .setStage(shaderStages[0])
+        .setStage(*reinterpret_cast<const vk::PipelineShaderStageCreateInfo*>(&shaderStages[0]))
         .setLayout(layout);
 
     vk::Device vkDevice(device);
     auto result = vkDevice.createComputePipelines(pipelineCacheHandle, pipelineInfo);
     cleanupShaderModules();
-
-    if (result.result != vk::Result::eSuccess) {
-        SDL_Log("Failed to create compute pipeline via PipelineBuilder");
-        return false;
-    }
 
     pipeline = result.value[0];
     return true;
@@ -121,17 +109,17 @@ bool PipelineBuilder::buildGraphicsPipeline(const VkGraphicsPipelineCreateInfo& 
         return false;
     }
 
-    vk::GraphicsPipelineCreateInfo pipelineInfo(pipelineInfoBase);
-    pipelineInfo.setStages(shaderStages).setLayout(layout);
+    // Copy the base info and modify it
+    VkGraphicsPipelineCreateInfo pipelineInfo = pipelineInfoBase;
+    pipelineInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
+    pipelineInfo.pStages = shaderStages.data();
+    pipelineInfo.layout = layout;
 
     vk::Device vkDevice(device);
-    auto result = vkDevice.createGraphicsPipelines(pipelineCacheHandle, pipelineInfo);
+    auto result = vkDevice.createGraphicsPipelines(
+        pipelineCacheHandle,
+        *reinterpret_cast<const vk::GraphicsPipelineCreateInfo*>(&pipelineInfo));
     cleanupShaderModules();
-
-    if (result.result != vk::Result::eSuccess) {
-        SDL_Log("Failed to create graphics pipeline via PipelineBuilder");
-        return false;
-    }
 
     pipeline = result.value[0];
     return true;
@@ -219,7 +207,8 @@ bool PipelineBuilder::buildGraphicsPipeline(const GraphicsPipelineConfig& config
 
     // Create pipeline
     auto pipelineInfo = vk::GraphicsPipelineCreateInfo{}
-        .setStages(shaderStages)
+        .setStageCount(static_cast<uint32_t>(shaderStages.size()))
+        .setPStages(reinterpret_cast<const vk::PipelineShaderStageCreateInfo*>(shaderStages.data()))
         .setPVertexInputState(&vertexInputInfo)
         .setPInputAssemblyState(&inputAssembly)
         .setPViewportState(&viewportState)
@@ -235,11 +224,6 @@ bool PipelineBuilder::buildGraphicsPipeline(const GraphicsPipelineConfig& config
     vk::Device vkDevice(device);
     auto result = vkDevice.createGraphicsPipelines(pipelineCacheHandle, pipelineInfo);
     cleanupShaderModules();
-
-    if (result.result != vk::Result::eSuccess) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create graphics pipeline");
-        return false;
-    }
 
     pipeline = result.value[0];
     return true;

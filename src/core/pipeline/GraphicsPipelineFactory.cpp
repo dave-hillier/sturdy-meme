@@ -422,8 +422,10 @@ bool GraphicsPipelineFactory::build(VkPipeline& pipeline) {
 
     // Vertex input state
     auto vertexInputInfo = vk::PipelineVertexInputStateCreateInfo{}
-        .setVertexBindingDescriptions(vertexBindings)
-        .setVertexAttributeDescriptions(vertexAttributes);
+        .setVertexBindingDescriptionCount(static_cast<uint32_t>(vertexBindings.size()))
+        .setPVertexBindingDescriptions(reinterpret_cast<const vk::VertexInputBindingDescription*>(vertexBindings.data()))
+        .setVertexAttributeDescriptionCount(static_cast<uint32_t>(vertexAttributes.size()))
+        .setPVertexAttributeDescriptions(reinterpret_cast<const vk::VertexInputAttributeDescription*>(vertexAttributes.data()));
 
     // Check if tessellation is enabled
     bool hasTessellation = !tescShaderPath.empty() && !teseShaderPath.empty();
@@ -448,7 +450,7 @@ bool GraphicsPipelineFactory::build(VkPipeline& pipeline) {
 
     auto scissor = vk::Rect2D{}
         .setOffset({0, 0})
-        .setExtent(extent);
+        .setExtent(vk::Extent2D{extent.width, extent.height});
 
     auto viewportState = vk::PipelineViewportStateCreateInfo{}
         .setViewportCount(1)
@@ -511,7 +513,8 @@ bool GraphicsPipelineFactory::build(VkPipeline& pipeline) {
 
     // Create the pipeline
     auto pipelineInfo = vk::GraphicsPipelineCreateInfo{}
-        .setStages(shaderStages)
+        .setStageCount(static_cast<uint32_t>(shaderStages.size()))
+        .setPStages(reinterpret_cast<const vk::PipelineShaderStageCreateInfo*>(shaderStages.data()))
         .setPVertexInputState(&vertexInputInfo)
         .setPInputAssemblyState(&inputAssembly)
         .setPTessellationState(hasTessellation ? &tessellationState : nullptr)
@@ -528,16 +531,6 @@ bool GraphicsPipelineFactory::build(VkPipeline& pipeline) {
     vk::Device vkDevice(device);
     auto result = vkDevice.createGraphicsPipelines(pipelineCacheHandle, pipelineInfo);
     cleanup();
-
-    if (result.result != vk::Result::eSuccess) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-            "GraphicsPipelineFactory: Failed to create graphics pipeline (VkResult=%d) "
-            "vert='%s' frag='%s'",
-            static_cast<int>(result.result),
-            vertShaderPath.c_str(),
-            fragShaderPath.empty() ? "<none>" : fragShaderPath.c_str());
-        return false;
-    }
 
     pipeline = result.value[0];
     return true;
