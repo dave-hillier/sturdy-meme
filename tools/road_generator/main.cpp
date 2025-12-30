@@ -63,7 +63,7 @@ bool loadSettlements(const std::string& path, std::vector<Settlement>& settlemen
         }
 
         for (const auto& s : j["settlements"]) {
-            Settlement settlement;
+            Settlement settlement{};  // Zero-initialize all fields
             settlement.id = s["id"].get<uint32_t>();
 
             std::string typeStr = s["type"].get<std::string>();
@@ -89,6 +89,8 @@ bool loadSettlements(const std::string& path, std::vector<Settlement>& settlemen
 
             if (s.contains("score")) {
                 settlement.score = s["score"].get<float>();
+            } else {
+                settlement.score = 0.0f;
             }
 
             if (s.contains("features")) {

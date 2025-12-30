@@ -511,9 +511,19 @@ bool RoadPathfinder::generateRoadNetwork(const std::vector<Settlement>& settleme
         road.toSettlementId = to.id;
 
         // Calculate road start/end points at settlement edges
-        glm::vec2 direction = glm::normalize(to.position - from.position);
-        glm::vec2 startPos = from.position + direction * from.radius;
-        glm::vec2 endPos = to.position - direction * to.radius;
+        glm::vec2 diff = to.position - from.position;
+        float dist = glm::length(diff);
+
+        glm::vec2 startPos, endPos;
+        if (dist > 0.001f) {
+            glm::vec2 direction = diff / dist;  // Normalize safely
+            startPos = from.position + direction * from.radius;
+            endPos = to.position - direction * to.radius;
+        } else {
+            // Settlements at same position - use center points
+            startPos = from.position;
+            endPos = to.position;
+        }
 
         if (findPath(startPos, endPos, road.controlPoints)) {
             outNetwork.roads.push_back(std::move(road));
