@@ -62,6 +62,27 @@ target_link_libraries(biome_preprocess PRIVATE
 
 target_compile_features(biome_preprocess PRIVATE cxx_std_17)
 
+# Settlement generator tool (standalone settlement placement)
+add_executable(settlement_generator
+    settlement_generator/main.cpp
+    settlement_generator/SettlementGenerator.cpp
+    settlement_generator/SettlementSVG.cpp
+    common/stb_impl.cpp
+)
+
+target_include_directories(settlement_generator PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/settlement_generator
+    ${STB_INCLUDE_DIRS}
+)
+
+target_link_libraries(settlement_generator PRIVATE
+    SDL3::SDL3
+    glm::glm
+    nlohmann_json::nlohmann_json
+)
+
+target_compile_features(settlement_generator PRIVATE cxx_std_17)
+
 # Foam noise texture generator
 add_executable(foam_noise_gen
     foam_noise_gen/foam_noise_gen.cpp
