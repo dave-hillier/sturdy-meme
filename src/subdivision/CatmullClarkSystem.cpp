@@ -85,6 +85,8 @@ bool CatmullClarkSystem::initInternal(const InitInfo& info, const CatmullClarkCo
 void CatmullClarkSystem::cleanup() {
     if (device == VK_NULL_HANDLE) return;
 
+    vk::Device vkDevice(device);
+
     // RAII-managed subsystems (mesh, cbt) are destroyed automatically via std::optional reset
     mesh.reset();
     cbt.reset();
@@ -96,17 +98,17 @@ void CatmullClarkSystem::cleanup() {
     uniformMappedPtrs.clear();
 
     // Destroy pipelines
-    if (subdivisionPipeline) vkDestroyPipeline(device, subdivisionPipeline, nullptr);
-    if (renderPipeline) vkDestroyPipeline(device, renderPipeline, nullptr);
-    if (wireframePipeline) vkDestroyPipeline(device, wireframePipeline, nullptr);
+    if (subdivisionPipeline) vkDevice.destroyPipeline(subdivisionPipeline);
+    if (renderPipeline) vkDevice.destroyPipeline(renderPipeline);
+    if (wireframePipeline) vkDevice.destroyPipeline(wireframePipeline);
 
     // Destroy pipeline layouts
-    if (subdivisionPipelineLayout) vkDestroyPipelineLayout(device, subdivisionPipelineLayout, nullptr);
-    if (renderPipelineLayout) vkDestroyPipelineLayout(device, renderPipelineLayout, nullptr);
+    if (subdivisionPipelineLayout) vkDevice.destroyPipelineLayout(subdivisionPipelineLayout);
+    if (renderPipelineLayout) vkDevice.destroyPipelineLayout(renderPipelineLayout);
 
     // Destroy descriptor set layouts
-    if (computeDescriptorSetLayout) vkDestroyDescriptorSetLayout(device, computeDescriptorSetLayout, nullptr);
-    if (renderDescriptorSetLayout) vkDestroyDescriptorSetLayout(device, renderDescriptorSetLayout, nullptr);
+    if (computeDescriptorSetLayout) vkDevice.destroyDescriptorSetLayout(computeDescriptorSetLayout);
+    if (renderDescriptorSetLayout) vkDevice.destroyDescriptorSetLayout(renderDescriptorSetLayout);
 }
 
 bool CatmullClarkSystem::createUniformBuffers() {
@@ -141,45 +143,46 @@ bool CatmullClarkSystem::createIndirectBuffers() {
 }
 
 bool CatmullClarkSystem::createComputeDescriptorSetLayout() {
-    std::array<VkDescriptorSetLayoutBinding, 5> bindings{};
+    std::array<vk::DescriptorSetLayoutBinding, 5> bindings = {
+        // Binding 0: Scene UBO
+        vk::DescriptorSetLayoutBinding{}
+            .setBinding(0)
+            .setDescriptorType(vk::DescriptorType::eUniformBuffer)
+            .setDescriptorCount(1)
+            .setStageFlags(vk::ShaderStageFlagBits::eCompute),
+        // Binding 1: CBT buffer
+        vk::DescriptorSetLayoutBinding{}
+            .setBinding(1)
+            .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+            .setDescriptorCount(1)
+            .setStageFlags(vk::ShaderStageFlagBits::eCompute),
+        // Binding 2: Mesh vertices
+        vk::DescriptorSetLayoutBinding{}
+            .setBinding(2)
+            .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+            .setDescriptorCount(1)
+            .setStageFlags(vk::ShaderStageFlagBits::eCompute),
+        // Binding 3: Mesh halfedges
+        vk::DescriptorSetLayoutBinding{}
+            .setBinding(3)
+            .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+            .setDescriptorCount(1)
+            .setStageFlags(vk::ShaderStageFlagBits::eCompute),
+        // Binding 4: Mesh faces
+        vk::DescriptorSetLayoutBinding{}
+            .setBinding(4)
+            .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+            .setDescriptorCount(1)
+            .setStageFlags(vk::ShaderStageFlagBits::eCompute)
+    };
 
-    // Binding 0: Scene UBO
-    bindings[0].binding = 0;
-    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    bindings[0].descriptorCount = 1;
-    bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    auto layoutInfo = vk::DescriptorSetLayoutCreateInfo{}
+        .setBindings(bindings);
 
-    // Binding 1: CBT buffer
-    bindings[1].binding = 1;
-    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bindings[1].descriptorCount = 1;
-    bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-    // Binding 2: Mesh vertices
-    bindings[2].binding = 2;
-    bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bindings[2].descriptorCount = 1;
-    bindings[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-    // Binding 3: Mesh halfedges
-    bindings[3].binding = 3;
-    bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bindings[3].descriptorCount = 1;
-    bindings[3].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-    // Binding 4: Mesh faces
-    bindings[4].binding = 4;
-    bindings[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bindings[4].descriptorCount = 1;
-    bindings[4].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-    VkDescriptorSetLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
-    layoutInfo.pBindings = bindings.data();
-
-    if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &computeDescriptorSetLayout) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create compute descriptor set layout");
+    try {
+        computeDescriptorSetLayout = vk::Device(device).createDescriptorSetLayout(layoutInfo);
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create compute descriptor set layout: %s", e.what());
         return false;
     }
 
@@ -187,45 +190,46 @@ bool CatmullClarkSystem::createComputeDescriptorSetLayout() {
 }
 
 bool CatmullClarkSystem::createRenderDescriptorSetLayout() {
-    std::array<VkDescriptorSetLayoutBinding, 5> bindings{};
+    std::array<vk::DescriptorSetLayoutBinding, 5> bindings = {
+        // Binding 0: Scene UBO
+        vk::DescriptorSetLayoutBinding{}
+            .setBinding(0)
+            .setDescriptorType(vk::DescriptorType::eUniformBuffer)
+            .setDescriptorCount(1)
+            .setStageFlags(vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment),
+        // Binding 1: CBT buffer
+        vk::DescriptorSetLayoutBinding{}
+            .setBinding(1)
+            .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+            .setDescriptorCount(1)
+            .setStageFlags(vk::ShaderStageFlagBits::eVertex),
+        // Binding 2: Mesh vertices
+        vk::DescriptorSetLayoutBinding{}
+            .setBinding(2)
+            .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+            .setDescriptorCount(1)
+            .setStageFlags(vk::ShaderStageFlagBits::eVertex),
+        // Binding 3: Mesh halfedges
+        vk::DescriptorSetLayoutBinding{}
+            .setBinding(3)
+            .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+            .setDescriptorCount(1)
+            .setStageFlags(vk::ShaderStageFlagBits::eVertex),
+        // Binding 4: Mesh faces
+        vk::DescriptorSetLayoutBinding{}
+            .setBinding(4)
+            .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+            .setDescriptorCount(1)
+            .setStageFlags(vk::ShaderStageFlagBits::eVertex)
+    };
 
-    // Binding 0: Scene UBO
-    bindings[0].binding = 0;
-    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    bindings[0].descriptorCount = 1;
-    bindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    auto layoutInfo = vk::DescriptorSetLayoutCreateInfo{}
+        .setBindings(bindings);
 
-    // Binding 1: CBT buffer
-    bindings[1].binding = 1;
-    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bindings[1].descriptorCount = 1;
-    bindings[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-
-    // Binding 2: Mesh vertices
-    bindings[2].binding = 2;
-    bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bindings[2].descriptorCount = 1;
-    bindings[2].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-
-    // Binding 3: Mesh halfedges
-    bindings[3].binding = 3;
-    bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bindings[3].descriptorCount = 1;
-    bindings[3].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-
-    // Binding 4: Mesh faces
-    bindings[4].binding = 4;
-    bindings[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bindings[4].descriptorCount = 1;
-    bindings[4].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-
-    VkDescriptorSetLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
-    layoutInfo.pBindings = bindings.data();
-
-    if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &renderDescriptorSetLayout) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create render descriptor set layout");
+    try {
+        renderDescriptorSetLayout = vk::Device(device).createDescriptorSetLayout(layoutInfo);
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create render descriptor set layout: %s", e.what());
         return false;
     }
 
@@ -283,44 +287,46 @@ bool CatmullClarkSystem::createSubdivisionPipeline() {
         return false;
     }
 
+    vk::Device vkDevice(device);
+
     // Push constants for subdivision parameters
-    VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(CatmullClarkSubdivisionPushConstants);
+    auto pushConstantRange = vk::PushConstantRange{}
+        .setStageFlags(vk::ShaderStageFlagBits::eCompute)
+        .setOffset(0)
+        .setSize(sizeof(CatmullClarkSubdivisionPushConstants));
 
-    VkPipelineLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    layoutInfo.setLayoutCount = 1;
-    layoutInfo.pSetLayouts = &computeDescriptorSetLayout;
-    layoutInfo.pushConstantRangeCount = 1;
-    layoutInfo.pPushConstantRanges = &pushConstantRange;
+    vk::DescriptorSetLayout setLayout(computeDescriptorSetLayout);
+    auto layoutInfo = vk::PipelineLayoutCreateInfo{}
+        .setSetLayouts(setLayout)
+        .setPushConstantRanges(pushConstantRange);
 
-    if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &subdivisionPipelineLayout) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create subdivision pipeline layout");
-        vkDestroyShaderModule(device, *shaderModule, nullptr);
+    try {
+        subdivisionPipelineLayout = vkDevice.createPipelineLayout(layoutInfo);
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create subdivision pipeline layout: %s", e.what());
+        vkDevice.destroyShaderModule(*shaderModule);
         return false;
     }
 
-    VkPipelineShaderStageCreateInfo stageInfo{};
-    stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stageInfo.module = *shaderModule;
-    stageInfo.pName = "main";
+    auto stageInfo = vk::PipelineShaderStageCreateInfo{}
+        .setStage(vk::ShaderStageFlagBits::eCompute)
+        .setModule(*shaderModule)
+        .setPName("main");
 
-    VkComputePipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    pipelineInfo.stage = stageInfo;
-    pipelineInfo.layout = subdivisionPipelineLayout;
+    auto pipelineInfo = vk::ComputePipelineCreateInfo{}
+        .setStage(stageInfo)
+        .setLayout(subdivisionPipelineLayout);
 
-    VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &subdivisionPipeline);
-    vkDestroyShaderModule(device, *shaderModule, nullptr);
-
-    if (result != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create subdivision compute pipeline");
+    try {
+        auto result = vkDevice.createComputePipeline(nullptr, pipelineInfo);
+        subdivisionPipeline = result.value;
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create subdivision compute pipeline: %s", e.what());
+        vkDevice.destroyShaderModule(*shaderModule);
         return false;
     }
 
+    vkDevice.destroyShaderModule(*shaderModule);
     return true;
 }
 
@@ -329,112 +335,106 @@ bool CatmullClarkSystem::createRenderPipeline() {
     auto fragModule = loadShaderModule(device, shaderPath + "/catmullclark_render.frag.spv");
     if (!vertModule || !fragModule) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load Catmull-Clark render shaders");
-        if (vertModule) vkDestroyShaderModule(device, *vertModule, nullptr);
-        if (fragModule) vkDestroyShaderModule(device, *fragModule, nullptr);
+        vk::Device vkDev(device);
+        if (vertModule) vkDev.destroyShaderModule(*vertModule);
+        if (fragModule) vkDev.destroyShaderModule(*fragModule);
         return false;
     }
 
-    std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages{};
-    shaderStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    shaderStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-    shaderStages[0].module = *vertModule;
-    shaderStages[0].pName = "main";
+    vk::Device vkDevice(device);
 
-    shaderStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    shaderStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    shaderStages[1].module = *fragModule;
-    shaderStages[1].pName = "main";
+    std::array<vk::PipelineShaderStageCreateInfo, 2> shaderStages = {
+        vk::PipelineShaderStageCreateInfo{}
+            .setStage(vk::ShaderStageFlagBits::eVertex)
+            .setModule(*vertModule)
+            .setPName("main"),
+        vk::PipelineShaderStageCreateInfo{}
+            .setStage(vk::ShaderStageFlagBits::eFragment)
+            .setModule(*fragModule)
+            .setPName("main")
+    };
 
     // No vertex input - all vertex data comes from buffers bound as storage buffers
-    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
-    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    auto vertexInputInfo = vk::PipelineVertexInputStateCreateInfo{};
 
-    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
-    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    auto inputAssembly = vk::PipelineInputAssemblyStateCreateInfo{}
+        .setTopology(vk::PrimitiveTopology::eTriangleList);
 
-    VkPipelineViewportStateCreateInfo viewportState{};
-    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewportState.viewportCount = 1;
-    viewportState.scissorCount = 1;
+    auto viewportState = vk::PipelineViewportStateCreateInfo{}
+        .setViewportCount(1)
+        .setScissorCount(1);
 
-    VkPipelineRasterizationStateCreateInfo rasterizer{};
-    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-    rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
-    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    auto rasterizer = vk::PipelineRasterizationStateCreateInfo{}
+        .setPolygonMode(vk::PolygonMode::eFill)
+        .setLineWidth(1.0f)
+        .setCullMode(vk::CullModeFlagBits::eBack)
+        .setFrontFace(vk::FrontFace::eCounterClockwise);
 
-    VkPipelineMultisampleStateCreateInfo multisampling{};
-    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    auto multisampling = vk::PipelineMultisampleStateCreateInfo{}
+        .setRasterizationSamples(vk::SampleCountFlagBits::e1);
 
-    VkPipelineDepthStencilStateCreateInfo depthStencil{};
-    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    depthStencil.depthTestEnable = VK_TRUE;
-    depthStencil.depthWriteEnable = VK_TRUE;
-    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+    auto depthStencil = vk::PipelineDepthStencilStateCreateInfo{}
+        .setDepthTestEnable(VK_TRUE)
+        .setDepthWriteEnable(VK_TRUE)
+        .setDepthCompareOp(vk::CompareOp::eLess);
 
-    VkPipelineColorBlendAttachmentState colorBlendAttachment{};
-    colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-                                          VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    auto colorBlendAttachment = vk::PipelineColorBlendAttachmentState{}
+        .setColorWriteMask(vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
+                           vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA);
 
-    VkPipelineColorBlendStateCreateInfo colorBlending{};
-    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    colorBlending.attachmentCount = 1;
-    colorBlending.pAttachments = &colorBlendAttachment;
+    auto colorBlending = vk::PipelineColorBlendStateCreateInfo{}
+        .setAttachments(colorBlendAttachment);
 
-    std::array<VkDynamicState, 2> dynamicStates = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
-    VkPipelineDynamicStateCreateInfo dynamicState{};
-    dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
-    dynamicState.pDynamicStates = dynamicStates.data();
+    std::array<vk::DynamicState, 2> dynamicStates = {vk::DynamicState::eViewport, vk::DynamicState::eScissor};
+    auto dynamicState = vk::PipelineDynamicStateCreateInfo{}
+        .setDynamicStates(dynamicStates);
 
     // Push constants for model matrix
-    VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-    pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(CatmullClarkPushConstants);
+    auto pushConstantRange = vk::PushConstantRange{}
+        .setStageFlags(vk::ShaderStageFlagBits::eVertex)
+        .setOffset(0)
+        .setSize(sizeof(CatmullClarkPushConstants));
 
-    VkPipelineLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    layoutInfo.setLayoutCount = 1;
-    layoutInfo.pSetLayouts = &renderDescriptorSetLayout;
-    layoutInfo.pushConstantRangeCount = 1;
-    layoutInfo.pPushConstantRanges = &pushConstantRange;
+    vk::DescriptorSetLayout setLayout(renderDescriptorSetLayout);
+    auto layoutInfo = vk::PipelineLayoutCreateInfo{}
+        .setSetLayouts(setLayout)
+        .setPushConstantRanges(pushConstantRange);
 
-    if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &renderPipelineLayout) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create render pipeline layout");
-        vkDestroyShaderModule(device, *vertModule, nullptr);
-        vkDestroyShaderModule(device, *fragModule, nullptr);
+    try {
+        renderPipelineLayout = vkDevice.createPipelineLayout(layoutInfo);
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create render pipeline layout: %s", e.what());
+        vkDevice.destroyShaderModule(*vertModule);
+        vkDevice.destroyShaderModule(*fragModule);
         return false;
     }
 
-    VkGraphicsPipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pipelineInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
-    pipelineInfo.pStages = shaderStages.data();
-    pipelineInfo.pVertexInputState = &vertexInputInfo;
-    pipelineInfo.pInputAssemblyState = &inputAssembly;
-    pipelineInfo.pViewportState = &viewportState;
-    pipelineInfo.pRasterizationState = &rasterizer;
-    pipelineInfo.pMultisampleState = &multisampling;
-    pipelineInfo.pDepthStencilState = &depthStencil;
-    pipelineInfo.pColorBlendState = &colorBlending;
-    pipelineInfo.pDynamicState = &dynamicState;
-    pipelineInfo.layout = renderPipelineLayout;
-    pipelineInfo.renderPass = renderPass;
-    pipelineInfo.subpass = 0;
+    auto pipelineInfo = vk::GraphicsPipelineCreateInfo{}
+        .setStages(shaderStages)
+        .setPVertexInputState(&vertexInputInfo)
+        .setPInputAssemblyState(&inputAssembly)
+        .setPViewportState(&viewportState)
+        .setPRasterizationState(&rasterizer)
+        .setPMultisampleState(&multisampling)
+        .setPDepthStencilState(&depthStencil)
+        .setPColorBlendState(&colorBlending)
+        .setPDynamicState(&dynamicState)
+        .setLayout(renderPipelineLayout)
+        .setRenderPass(renderPass)
+        .setSubpass(0);
 
-    VkResult result = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &renderPipeline);
-
-    vkDestroyShaderModule(device, *vertModule, nullptr);
-    vkDestroyShaderModule(device, *fragModule, nullptr);
-
-    if (result != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create render graphics pipeline");
+    try {
+        auto result = vkDevice.createGraphicsPipeline(nullptr, pipelineInfo);
+        renderPipeline = result.value;
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create render graphics pipeline: %s", e.what());
+        vkDevice.destroyShaderModule(*vertModule);
+        vkDevice.destroyShaderModule(*fragModule);
         return false;
     }
+
+    vkDevice.destroyShaderModule(*vertModule);
+    vkDevice.destroyShaderModule(*fragModule);
 
     return true;
 }
@@ -444,93 +444,87 @@ bool CatmullClarkSystem::createWireframePipeline() {
     auto fragModule = loadShaderModule(device, shaderPath + "/catmullclark_render.frag.spv");
     if (!vertModule || !fragModule) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load Catmull-Clark wireframe shaders");
-        if (vertModule) vkDestroyShaderModule(device, *vertModule, nullptr);
-        if (fragModule) vkDestroyShaderModule(device, *fragModule, nullptr);
+        vk::Device vkDev(device);
+        if (vertModule) vkDev.destroyShaderModule(*vertModule);
+        if (fragModule) vkDev.destroyShaderModule(*fragModule);
         return false;
     }
 
-    std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages{};
-    shaderStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    shaderStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-    shaderStages[0].module = *vertModule;
-    shaderStages[0].pName = "main";
+    vk::Device vkDevice(device);
 
-    shaderStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    shaderStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    shaderStages[1].module = *fragModule;
-    shaderStages[1].pName = "main";
+    std::array<vk::PipelineShaderStageCreateInfo, 2> shaderStages = {
+        vk::PipelineShaderStageCreateInfo{}
+            .setStage(vk::ShaderStageFlagBits::eVertex)
+            .setModule(*vertModule)
+            .setPName("main"),
+        vk::PipelineShaderStageCreateInfo{}
+            .setStage(vk::ShaderStageFlagBits::eFragment)
+            .setModule(*fragModule)
+            .setPName("main")
+    };
 
     // No vertex input - all vertex data comes from buffers bound as storage buffers
-    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
-    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    auto vertexInputInfo = vk::PipelineVertexInputStateCreateInfo{};
 
-    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
-    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    auto inputAssembly = vk::PipelineInputAssemblyStateCreateInfo{}
+        .setTopology(vk::PrimitiveTopology::eTriangleList);
 
-    VkPipelineViewportStateCreateInfo viewportState{};
-    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewportState.viewportCount = 1;
-    viewportState.scissorCount = 1;
+    auto viewportState = vk::PipelineViewportStateCreateInfo{}
+        .setViewportCount(1)
+        .setScissorCount(1);
 
     // Wireframe rasterization
-    VkPipelineRasterizationStateCreateInfo rasterizer{};
-    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rasterizer.polygonMode = VK_POLYGON_MODE_LINE;  // Wireframe mode
-    rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_NONE;  // No culling for wireframe
-    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    auto rasterizer = vk::PipelineRasterizationStateCreateInfo{}
+        .setPolygonMode(vk::PolygonMode::eLine)  // Wireframe mode
+        .setLineWidth(1.0f)
+        .setCullMode(vk::CullModeFlagBits::eNone)  // No culling for wireframe
+        .setFrontFace(vk::FrontFace::eCounterClockwise);
 
-    VkPipelineMultisampleStateCreateInfo multisampling{};
-    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    auto multisampling = vk::PipelineMultisampleStateCreateInfo{}
+        .setRasterizationSamples(vk::SampleCountFlagBits::e1);
 
-    VkPipelineDepthStencilStateCreateInfo depthStencil{};
-    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    depthStencil.depthTestEnable = VK_TRUE;
-    depthStencil.depthWriteEnable = VK_TRUE;
-    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+    auto depthStencil = vk::PipelineDepthStencilStateCreateInfo{}
+        .setDepthTestEnable(VK_TRUE)
+        .setDepthWriteEnable(VK_TRUE)
+        .setDepthCompareOp(vk::CompareOp::eLess);
 
-    VkPipelineColorBlendAttachmentState colorBlendAttachment{};
-    colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-                                          VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    auto colorBlendAttachment = vk::PipelineColorBlendAttachmentState{}
+        .setColorWriteMask(vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
+                           vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA);
 
-    VkPipelineColorBlendStateCreateInfo colorBlending{};
-    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    colorBlending.attachmentCount = 1;
-    colorBlending.pAttachments = &colorBlendAttachment;
+    auto colorBlending = vk::PipelineColorBlendStateCreateInfo{}
+        .setAttachments(colorBlendAttachment);
 
-    std::array<VkDynamicState, 2> dynamicStates = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
-    VkPipelineDynamicStateCreateInfo dynamicState{};
-    dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
-    dynamicState.pDynamicStates = dynamicStates.data();
+    std::array<vk::DynamicState, 2> dynamicStates = {vk::DynamicState::eViewport, vk::DynamicState::eScissor};
+    auto dynamicState = vk::PipelineDynamicStateCreateInfo{}
+        .setDynamicStates(dynamicStates);
 
-    VkGraphicsPipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pipelineInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
-    pipelineInfo.pStages = shaderStages.data();
-    pipelineInfo.pVertexInputState = &vertexInputInfo;
-    pipelineInfo.pInputAssemblyState = &inputAssembly;
-    pipelineInfo.pViewportState = &viewportState;
-    pipelineInfo.pRasterizationState = &rasterizer;
-    pipelineInfo.pMultisampleState = &multisampling;
-    pipelineInfo.pDepthStencilState = &depthStencil;
-    pipelineInfo.pColorBlendState = &colorBlending;
-    pipelineInfo.pDynamicState = &dynamicState;
-    pipelineInfo.layout = renderPipelineLayout;  // Reuse render pipeline layout
-    pipelineInfo.renderPass = renderPass;
-    pipelineInfo.subpass = 0;
+    auto pipelineInfo = vk::GraphicsPipelineCreateInfo{}
+        .setStages(shaderStages)
+        .setPVertexInputState(&vertexInputInfo)
+        .setPInputAssemblyState(&inputAssembly)
+        .setPViewportState(&viewportState)
+        .setPRasterizationState(&rasterizer)
+        .setPMultisampleState(&multisampling)
+        .setPDepthStencilState(&depthStencil)
+        .setPColorBlendState(&colorBlending)
+        .setPDynamicState(&dynamicState)
+        .setLayout(renderPipelineLayout)  // Reuse render pipeline layout
+        .setRenderPass(renderPass)
+        .setSubpass(0);
 
-    VkResult result = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &wireframePipeline);
-
-    vkDestroyShaderModule(device, *vertModule, nullptr);
-    vkDestroyShaderModule(device, *fragModule, nullptr);
-
-    if (result != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create wireframe graphics pipeline");
+    try {
+        auto result = vkDevice.createGraphicsPipeline(nullptr, pipelineInfo);
+        wireframePipeline = result.value;
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create wireframe graphics pipeline: %s", e.what());
+        vkDevice.destroyShaderModule(*vertModule);
+        vkDevice.destroyShaderModule(*fragModule);
         return false;
     }
+
+    vkDevice.destroyShaderModule(*vertModule);
+    vkDevice.destroyShaderModule(*fragModule);
 
     return true;
 }
