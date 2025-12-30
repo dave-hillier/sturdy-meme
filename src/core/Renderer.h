@@ -179,6 +179,11 @@ public:
     void setPhysicsDebugEnabled(bool enabled) { physicsDebugEnabled = enabled; }
     bool isPhysicsDebugEnabled() const { return physicsDebugEnabled; }
 
+    // Road/river visualization (uses debug line system)
+    void setRoadRiverVisualizationEnabled(bool enabled) { roadRiverVisEnabled = enabled; }
+    bool isRoadRiverVisualizationEnabled() const { return roadRiverVisEnabled; }
+    void updateRoadRiverVisualization();
+
     // Resource access
     VkCommandPool getCommandPool() const { return commandPool.get(); }
     DescriptorManager::Pool* getDescriptorPool();
@@ -258,6 +263,7 @@ private:
     ManagedPipeline graphicsPipeline;
 
     bool physicsDebugEnabled = false;
+    bool roadRiverVisEnabled = true;  // Road/river visualization enabled by default
     glm::mat4 lastViewProj{1.0f};  // Cached view-projection for debug rendering
     bool useVolumetricSnow = true;  // Use new volumetric system by default
 

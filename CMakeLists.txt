@@ -131,6 +131,7 @@ set(SOURCES
     src/terrain/TerrainMeshlet.cpp
     src/terrain/TerrainTileCache.cpp
     src/terrain/ErosionDataLoader.cpp
+    src/terrain/RoadNetworkLoader.cpp
     src/terrain/virtual_texture/VirtualTextureCache.cpp
     src/terrain/virtual_texture/VirtualTexturePageTable.cpp
     src/terrain/virtual_texture/VirtualTextureFeedback.cpp
@@ -191,6 +192,7 @@ set(SOURCES
     src/debug/GpuProfiler.cpp
     src/debug/CpuProfiler.cpp
     src/debug/DebugLineSystem.cpp
+    src/debug/RoadRiverVisualization.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})

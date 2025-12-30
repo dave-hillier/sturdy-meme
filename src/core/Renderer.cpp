@@ -39,6 +39,7 @@
 // Animation and debug
 #include "SkinnedMeshRenderer.h"
 #include "DebugLineSystem.h"
+#include "RoadRiverVisualization.h"
 #include "HiZSystem.h"
 // Vegetation
 #include "GrassSystem.h"
@@ -205,11 +206,19 @@ void Renderer::setPlayerState(const glm::vec3& position, const glm::vec3& veloci
     playerCapsuleRadius = radius;
 }
 
+void Renderer::updateRoadRiverVisualization() {
+    if (!roadRiverVisEnabled) return;
+
+    // Add road/river visualization to debug lines
+    systems_->roadRiverVis().addToDebugLines(systems_->debugLine());
+}
+
 #ifdef JPH_DEBUG_RENDERER
 void Renderer::updatePhysicsDebug(PhysicsWorld& physics, const glm::vec3& cameraPos) {
     if (!physicsDebugEnabled) return;
 
     // Begin debug line frame (clear previous and set frame index)
+    // This is called here so physics debug lines can be collected before render()
     systems_->debugLine().beginFrame(frameSync_.currentIndex());
 
     // Create debug renderer on first use (after Jolt is initialized)
@@ -693,12 +702,20 @@ bool Renderer::render(const Camera& camera) {
     // Cache view-projection for debug rendering
     lastViewProj = frame.viewProj;
 
-    // Upload debug lines if enabled (lines were collected in updatePhysicsDebug before render)
-#ifdef JPH_DEBUG_RENDERER
-    if (physicsDebugEnabled && systems_->debugLine().hasLines()) {
+    // Begin debug line frame if not already started by physics debug
+    // Physics debug calls beginFrame before render() if enabled
+    // Only call beginFrame if we haven't collected lines yet (no physics debug this frame)
+    if (!systems_->debugLine().hasLines()) {
+        systems_->debugLine().beginFrame(frameSync_.currentIndex());
+    }
+
+    // Add road/river visualization to debug lines
+    updateRoadRiverVisualization();
+
+    // Upload debug lines if any are present
+    if (systems_->debugLine().hasLines()) {
         systems_->debugLine().uploadLines();
     }
-#endif
 
     // Update subsystems (state mutations)
     systems_->profiler().beginCpuZone("SystemUpdates");
@@ -1562,9 +1579,8 @@ void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float gra
     systems_->weather().recordDraw(cmd, frameIndex, grassTime);
     systems_->profiler().endGpuZone(cmd, "HDR:Weather");
 
-    // Draw physics debug lines (if enabled and lines available)
-#ifdef JPH_DEBUG_RENDERER
-    if (physicsDebugEnabled && systems_->debugLine().hasLines()) {
+    // Draw debug lines (if any are present - includes physics debug and road/river visualization)
+    if (systems_->debugLine().hasLines()) {
         // Set up viewport and scissor for debug rendering
         auto viewport = vk::Viewport{}
             .setX(0.0f)
@@ -1585,7 +1601,6 @@ void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float gra
         // For now, use the last known values (could be improved by passing as parameter)
         systems_->debugLine().recordCommands(cmd, lastViewProj);
     }
-#endif
 
     vkCmd.endRenderPass();
 }

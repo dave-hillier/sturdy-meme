@@ -36,6 +36,8 @@
 #include "WaterTileCull.h"
 #include "WaterGBuffer.h"
 #include "ErosionDataLoader.h"
+#include "RoadNetworkLoader.h"
+#include "RoadRiverVisualization.h"
 #include "UBOBuilder.h"
 #include "Profiler.h"
 #include "DebugLineSystem.h"
@@ -105,6 +107,8 @@ RendererSystems::RendererSystems()
     // sceneManager_ created via factory in RendererInitPhases
     // globalBufferManager_ created via factory in RendererInitPhases
     : erosionDataLoader_(std::make_unique<ErosionDataLoader>())
+    , roadNetworkLoader_(std::make_unique<RoadNetworkLoader>())
+    , roadRiverVisualization_(std::make_unique<RoadRiverVisualization>())
     // skinnedMeshRenderer_ created via factory in RendererInitPhases
     // Tools
     // debugLineSystem_ created via factory in RendererInit
@@ -327,6 +331,8 @@ void RendererSystems::destroy(VkDevice device, VmaAllocator allocator) {
 
     sceneManager_.reset();  // RAII cleanup via destructor
     globalBufferManager_.reset();  // RAII cleanup via destructor
+    roadRiverVisualization_.reset();  // RAII cleanup via destructor
+    roadNetworkLoader_.reset();  // RAII cleanup via destructor
 
     // Tier 1
     skySystem_.reset();  // RAII cleanup via destructor

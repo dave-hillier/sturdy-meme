@@ -46,6 +46,7 @@ public:
     void addBox(const glm::vec3& min, const glm::vec3& max, const glm::vec4& color);
     void addSphere(const glm::vec3& center, float radius, const glm::vec4& color, int segments = 16);
     void addCapsule(const glm::vec3& start, const glm::vec3& end, float radius, const glm::vec4& color, int segments = 8);
+    void addCone(const glm::vec3& base, const glm::vec3& tip, float radius, const glm::vec4& color, int segments = 8);
 
 #ifdef JPH_DEBUG_RENDERER
     // Import lines from physics debug renderer

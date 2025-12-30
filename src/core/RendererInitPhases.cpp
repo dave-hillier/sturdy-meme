@@ -43,6 +43,8 @@
 #include "SkinnedMeshRenderer.h"
 #include "SceneManager.h"
 #include "ErosionDataLoader.h"
+#include "RoadNetworkLoader.h"
+#include "RoadRiverVisualization.h"
 #include "ResizeCoordinator.h"
 #include "TimeSystem.h"
 #include "CelestialCalculator.h"
@@ -1036,6 +1038,47 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     }
     systems_->setDebugLineSystem(std::move(debugLineSystem));
     SDL_Log("Debug line system initialized");
+
+    // Load road network data and configure visualization
+    {
+        std::string roadsPath = terrainDataPath + "/roads.bin";
+        std::string roadsJsonPath = terrainDataPath + "/roads.json";
+        if (systems_->roadData().loadFromBinary(roadsPath)) {
+            SDL_Log("Loaded road network from %s", roadsPath.c_str());
+        } else if (systems_->roadData().loadFromJson(roadsJsonPath)) {
+            SDL_Log("Loaded road network from %s", roadsJsonPath.c_str());
+        } else {
+            SDL_Log("No road network data found at %s (visualization disabled)", roadsPath.c_str());
+        }
+
+        // Load water/river data
+        ErosionLoadConfig erosionConfig{};
+        erosionConfig.cacheDirectory = terrainDataPath;
+        erosionConfig.seaLevel = 0.0f;
+        if (systems_->erosionData().loadFromCache(erosionConfig)) {
+            SDL_Log("Loaded water placement data from %s", terrainDataPath.c_str());
+        } else {
+            SDL_Log("No water placement data found at %s (visualization disabled)", terrainDataPath.c_str());
+        }
+
+        // Configure road/river visualization
+        auto& vis = systems_->roadRiverVis();
+        vis.setWaterData(&systems_->erosionData().getWaterData());
+        vis.setRoadNetwork(&systems_->roadData().getRoadNetwork());
+        vis.setTerrainHeightMap(systems_->terrain().getHeightMap());
+
+        // Default config - can be modified via GUI later
+        RoadRiverVisConfig visConfig{};
+        visConfig.showRivers = true;
+        visConfig.showRoads = true;
+        visConfig.coneRadius = 0.5f;
+        visConfig.coneLength = 2.0f;
+        visConfig.heightAboveGround = 1.0f;
+        visConfig.riverConeSpacing = 50.0f;
+        visConfig.roadConeSpacing = 50.0f;
+        vis.setConfig(visConfig);
+        SDL_Log("Road/river visualization configured");
+    }
 
     // Initialize UBO builder with system references
     UBOBuilder::Systems uboSystems{};

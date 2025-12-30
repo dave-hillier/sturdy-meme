@@ -430,6 +430,37 @@ void DebugLineSystem::addCapsule(const glm::vec3& start, const glm::vec3& end, f
     }
 }
 
+void DebugLineSystem::addCone(const glm::vec3& base, const glm::vec3& tip, float radius, const glm::vec4& color, int segments) {
+    glm::vec3 axis = tip - base;
+    float height = glm::length(axis);
+    if (height < 0.0001f) {
+        return; // Degenerate cone
+    }
+    axis = glm::normalize(axis);
+
+    // Find perpendicular vectors
+    glm::vec3 perp1 = glm::abs(axis.y) < 0.9f ?
+        glm::normalize(glm::cross(axis, glm::vec3(0, 1, 0))) :
+        glm::normalize(glm::cross(axis, glm::vec3(1, 0, 0)));
+    glm::vec3 perp2 = glm::cross(axis, perp1);
+
+    const float step = 2.0f * 3.14159265f / static_cast<float>(segments);
+
+    // Draw base circle and lines to tip
+    for (int i = 0; i < segments; i++) {
+        float a0 = step * i;
+        float a1 = step * (i + 1);
+        glm::vec3 off0 = (cosf(a0) * perp1 + sinf(a0) * perp2) * radius;
+        glm::vec3 off1 = (cosf(a1) * perp1 + sinf(a1) * perp2) * radius;
+
+        // Base circle edge
+        addLine(base + off0, base + off1, color);
+
+        // Side edges to tip
+        addLine(base + off0, tip, color);
+    }
+}
+
 #ifdef JPH_DEBUG_RENDERER
 void DebugLineSystem::importFromPhysicsDebugRenderer(const PhysicsDebugRenderer& renderer) {
     // Import lines
