@@ -214,3 +214,22 @@ target_link_libraries(watershed PRIVATE
 )
 
 target_compile_features(watershed PRIVATE cxx_std_17)
+
+# Vegetation placement generator (Poisson disk sampling for trees, rocks, detritus)
+add_executable(vegetation_generator
+    vegetation_generator/main.cpp
+    vegetation_generator/VegetationPlacer.cpp
+)
+
+target_include_directories(vegetation_generator PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/vegetation_generator
+)
+
+target_link_libraries(vegetation_generator PRIVATE
+    SDL3::SDL3
+    glm::glm
+    lodepng
+    nlohmann_json::nlohmann_json
+)
+
+target_compile_features(vegetation_generator PRIVATE cxx_std_17)
