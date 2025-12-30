@@ -526,6 +526,7 @@ bool TreeLeafCulling::createTwoPhaseLeafCullDescriptorSets() {
 
 void TreeLeafCulling::updateSpatialIndex(const TreeSystem& treeSystem) {
     const auto& leafRenderables = treeSystem.getLeafRenderables();
+    const auto& leafDrawInfo = treeSystem.getLeafDrawInfo();
 
     if (leafRenderables.empty()) {
         spatialIndex_.reset();
@@ -547,17 +548,26 @@ void TreeLeafCulling::updateSpatialIndex(const TreeSystem& treeSystem) {
     }
 
     // Build transforms and scales from leafRenderables
-    // IMPORTANT: The spatial index must use the same ordering as the TreeCullData buffer
-    // (which is built from leafRenderables, not treeInstances_)
+    // CRITICAL: The spatial index must use the SAME filtering as recordCulling()
+    // to ensure originalTreeIndex matches the index into the TreeCullData buffer.
+    // Trees with invalid leafInstanceIndex or zero instanceCount are filtered out
+    // in both places to maintain index consistency.
     std::vector<glm::mat4> transforms;
     std::vector<float> scales;
     transforms.reserve(leafRenderables.size());
     scales.reserve(leafRenderables.size());
     for (const auto& renderable : leafRenderables) {
-        transforms.push_back(renderable.transform);
-        // Estimate scale from transform (use Y-axis length as approximation)
-        float scale = glm::length(glm::vec3(renderable.transform[1]));
-        scales.push_back(scale);
+        // Apply same filtering as recordCulling() to ensure index consistency
+        if (renderable.leafInstanceIndex >= 0 &&
+            static_cast<size_t>(renderable.leafInstanceIndex) < leafDrawInfo.size()) {
+            const auto& drawInfo = leafDrawInfo[renderable.leafInstanceIndex];
+            if (drawInfo.instanceCount > 0) {
+                transforms.push_back(renderable.transform);
+                // Estimate scale from transform (use Y-axis length as approximation)
+                float scale = glm::length(glm::vec3(renderable.transform[1]));
+                scales.push_back(scale);
+            }
+        }
     }
 
     spatialIndex_->rebuild(transforms, scales);
