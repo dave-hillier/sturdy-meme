@@ -288,7 +288,7 @@ Based on usage counts and impact. Status indicates current migration progress.
 |------|--------|-----|-----|
 | `src/vegetation/TreeLODSystem.cpp` | ✅ Migrated | 207 | 62 |
 | `src/vegetation/TreeRenderer.cpp` | ✅ **Full Type Migration** | 100+ | 0 |
-| `src/terrain/TerrainSystem.cpp` | ⏳ Partial | 52 | 58 |
+| `src/terrain/TerrainSystem.cpp` | ✅ **Full Type Migration** | 100+ | 0 |
 | `src/postprocess/PostProcessSystem.cpp` | ✅ Migrated | 131 | 51 |
 | `src/vegetation/GrassSystem.cpp` | ⏳ Partial | 78 | 50 |
 | `src/subdivision/CatmullClarkSystem.cpp` | ✅ Migrated | 122 | 43 |
@@ -325,9 +325,9 @@ Files with highest remaining raw Vulkan usage:
 | `src/core/vulkan/VulkanRAII.h` | 135 |
 | `src/core/vulkan/VulkanResourceFactory.cpp` | 94 |
 | `src/vegetation/TreeLODSystem.cpp` | 89 |
-| `src/terrain/TerrainSystem.cpp` | 87 |
 | `src/vegetation/GrassSystem.cpp` | 80 |
 | ~~`src/vegetation/TreeRenderer.cpp`~~ | ✅ Fully migrated |
+| ~~`src/terrain/TerrainSystem.cpp`~~ | ✅ Fully migrated |
 
 **Note:** VulkanBarriers.h, VulkanRAII.h, and VulkanResourceFactory are deferred to a later phase as noted in the introduction.
 
@@ -373,7 +373,7 @@ The codebase already uses `VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1`. The dispatcher
 
 2. **Complete full type migrations in Tier 2** — Convert all raw Vulkan types (VkBuffer, VkDevice, etc.) to vulkan-hpp types (vk::Buffer, vk::Device, etc.) throughout:
    - `TreeRenderer.cpp` — ✅ **Complete** (all types migrated: InitInfo, member variables, function parameters)
-   - `TerrainSystem.cpp` — ⏳ Interface types need migration
+   - `TerrainSystem.cpp` — ✅ **Complete** (all types migrated with backwards-compatible VkExtent2D overload)
    - `GrassSystem.cpp` — ⏳ Interface types need migration
 
 ### Medium Priority
