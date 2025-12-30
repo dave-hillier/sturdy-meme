@@ -298,15 +298,15 @@ Based on usage counts and impact. Status indicates current migration progress.
 | `src/core/pipeline/PipelineBuilder.cpp` | ✅ Complete | ~40 | 0 |
 | `src/core/material/DescriptorManager.cpp` | ✅ Complete | ~30 | 0 |
 
-### Tier 4: Water & Atmosphere ⏳ Partial
+### Tier 4: Water & Atmosphere ✅ Mostly Complete
 | File | Status | hpp | raw |
 |------|--------|-----|-----|
-| `src/water/WaterSystem.cpp` | ⏳ Partial | 10 | 13 |
+| `src/water/WaterSystem.cpp` | ✅ Migrated | 15 | 0 |
 | `src/water/OceanFFT.cpp` | ✅ Migrated | 97 | 30 |
-| `src/atmosphere/AtmosphereLUTSystem.cpp` | ⏳ Not started | 1 | 4 |
-| `src/atmosphere/SkySystem.cpp` | ⏳ Partial | 6 | 7 |
+| `src/atmosphere/AtmosphereLUTSystem.cpp` | ✅ Migrated | 5 | 0 |
+| `src/atmosphere/SkySystem.cpp` | ✅ Migrated | 10 | 0 |
 | `src/lighting/FroxelSystem.cpp` | ✅ Migrated | 57 | 12 |
-| `src/lighting/ShadowSystem.cpp` | ⏳ Partial | 35 | 38 |
+| `src/lighting/ShadowSystem.cpp` | ✅ Migrated | 45 | 0 |
 
 ### Tier 5: Utilities ⏳ Partial
 | File | Status | hpp | raw |
@@ -375,11 +375,11 @@ The codebase already uses `VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1`. The dispatcher
    - `GrassSystem.cpp` — 50 raw usages remain
 
 ### Medium Priority
-3. **Water & Atmosphere (Tier 4)** — Partially complete
-   - `WaterSystem.cpp` — 13 raw usages remain
-   - `AtmosphereLUTSystem.cpp` — 4 raw usages remain
-   - `SkySystem.cpp` — 7 raw usages remain
-   - `ShadowSystem.cpp` — 38 raw usages remain
+3. ~~**Water & Atmosphere (Tier 4)**~~ — ✅ Mostly Complete
+   - `WaterSystem.cpp` — ✅ Migrated
+   - `AtmosphereLUTSystem.cpp` — ✅ Migrated
+   - `SkySystem.cpp` — ✅ Migrated
+   - `ShadowSystem.cpp` — ✅ Migrated
 
 4. **VulkanContext.cpp** — 9 raw usages remain
 
