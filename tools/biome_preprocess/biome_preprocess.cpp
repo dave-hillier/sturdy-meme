@@ -2,6 +2,7 @@
 // Generates biome classification from heightmap and erosion data
 
 #include "BiomeGenerator.h"
+#include "SettlementSVG.h"
 #include <SDL3/SDL_log.h>
 #include <iostream>
 #include <string>
@@ -31,6 +32,7 @@ void printUsage(const char* programName) {
               << "  biome_map.png      RGBA8 biome data (R=zone, G=subzone, B=settlement_dist)\n"
               << "  biome_debug.png    Colored visualization of biome zones\n"
               << "  settlements.json   Settlement locations and metadata\n"
+              << "  settlements.svg    SVG visualization of settlement data\n"
               << "\n"
               << "Biome zones (south coast of England):\n"
               << "  0: Sea            - Below sea level\n"
@@ -126,6 +128,7 @@ int main(int argc, char* argv[]) {
     std::string biomeMapPath = config.outputDir + "/biome_map.png";
     std::string debugPath = config.outputDir + "/biome_debug.png";
     std::string settlementsPath = config.outputDir + "/settlements.json";
+    std::string settlementsSvgPath = config.outputDir + "/settlements.svg";
 
     if (!generator.saveBiomeMap(biomeMapPath)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to save biome map!");
@@ -142,11 +145,19 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    // Save settlement SVG visualization
+    writeSettlementsSVG(
+        settlementsSvgPath,
+        generator.getResult().settlements,
+        config.terrainSize
+    );
+
     SDL_Log("Biome generation complete!");
     SDL_Log("Output files:");
     SDL_Log("  %s", biomeMapPath.c_str());
     SDL_Log("  %s", debugPath.c_str());
     SDL_Log("  %s", settlementsPath.c_str());
+    SDL_Log("  %s", settlementsSvgPath.c_str());
 
     return 0;
 }

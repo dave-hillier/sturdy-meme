@@ -45,6 +45,7 @@ add_executable(biome_preprocess
     biome_preprocess/biome_preprocess.cpp
     biome_preprocess/BiomeGenerator.cpp
     biome_preprocess/WatershedMetrics.cpp
+    biome_preprocess/SettlementSVG.cpp
     common/stb_impl.cpp
 )
 
