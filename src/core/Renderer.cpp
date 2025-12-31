@@ -216,6 +216,24 @@ void Renderer::updateRoadRiverVisualization() {
         return;
     }
 
+    // Sync individual road/river toggles to visualization config
+    auto& config = systems_->roadRiverVis().getConfig();
+    bool needsRebuild = false;
+
+    if (config.showRoads != systems_->debugControl().isRoadVisualizationEnabled()) {
+        config.showRoads = systems_->debugControl().isRoadVisualizationEnabled();
+        needsRebuild = true;
+    }
+    if (config.showRivers != systems_->debugControl().isRiverVisualizationEnabled()) {
+        config.showRivers = systems_->debugControl().isRiverVisualizationEnabled();
+        needsRebuild = true;
+    }
+
+    if (needsRebuild) {
+        systems_->roadRiverVis().invalidateCache();
+        systems_->debugLine().clearPersistentLines();
+    }
+
     // Add road/river visualization to debug lines
     systems_->roadRiverVis().addToDebugLines(systems_->debugLine());
 }

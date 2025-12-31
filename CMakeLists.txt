@@ -335,11 +335,14 @@ set(WATERSHED_FLOW_PNG ${WATERSHED_DATA_DIR}/flow.png)
 set(WATERSHED_FLOW_BIN ${WATERSHED_DATA_DIR}/flow_accumulation.bin)
 set(WATERSHED_DIR_BIN ${WATERSHED_DATA_DIR}/flow_direction.bin)
 set(WATERSHED_LABELS_BIN ${WATERSHED_DATA_DIR}/watershed_labels.bin)
+set(WATERSHED_RIVERS_DAT ${WATERSHED_DATA_DIR}/rivers.dat)
+set(WATERSHED_LAKES_DAT ${WATERSHED_DATA_DIR}/lakes.dat)
 
 # Run watershed tool when heightmap changes
 add_custom_command(
     OUTPUT ${WATERSHED_RIVERS_SVG} ${WATERSHED_FLOW_PNG}
            ${WATERSHED_FLOW_BIN} ${WATERSHED_DIR_BIN} ${WATERSHED_LABELS_BIN}
+           ${WATERSHED_RIVERS_DAT} ${WATERSHED_LAKES_DAT}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${WATERSHED_DATA_DIR}
     COMMAND $<TARGET_FILE:watershed>
         ${TERRAIN_HEIGHTMAP}
@@ -347,13 +350,17 @@ add_custom_command(
         --threshold 5000
         --sea-level 6000
         --resolution 512
+        --terrain-size 16384
+        --min-altitude 0
+        --max-altitude 200
     DEPENDS ${TERRAIN_HEIGHTMAP}
     COMMENT "Running watershed analysis (parallel)"
 )
 
 # Explicit target for watershed generation (enables parallel build)
 add_custom_target(watershed_gen DEPENDS ${WATERSHED_RIVERS_SVG} ${WATERSHED_FLOW_PNG}
-                                        ${WATERSHED_FLOW_BIN} ${WATERSHED_DIR_BIN} ${WATERSHED_LABELS_BIN})
+                                        ${WATERSHED_FLOW_BIN} ${WATERSHED_DIR_BIN} ${WATERSHED_LABELS_BIN}
+                                        ${WATERSHED_RIVERS_DAT} ${WATERSHED_LAKES_DAT})
 add_dependencies(watershed_gen watershed)
 
 # ============================================================================

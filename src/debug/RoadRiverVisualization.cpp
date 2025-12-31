@@ -94,19 +94,27 @@ void RoadRiverVisualization::buildRiverCones() {
             const glm::vec3& prev = river.controlPoints[i - 1];
             const glm::vec3& curr = river.controlPoints[i];
 
-            glm::vec3 segmentDir = curr - prev;
-            float segmentLen = glm::length(segmentDir);
+            // Use XZ for direction, sample terrain for height
+            glm::vec2 prevXZ(prev.x, prev.z);
+            glm::vec2 currXZ(curr.x, curr.z);
+
+            glm::vec2 segmentDir2D = currXZ - prevXZ;
+            float segmentLen = glm::length(segmentDir2D);
             if (segmentLen < 0.001f) continue;
 
-            glm::vec3 direction = segmentDir / segmentLen;
+            glm::vec2 dir2D = segmentDir2D / segmentLen;
 
             // Place cones along this segment
             while (nextConeAt <= accumulated + segmentLen) {
                 float t = (nextConeAt - accumulated) / segmentLen;
-                glm::vec3 pos = glm::mix(prev, curr, t);
+                glm::vec2 posXZ = glm::mix(prevXZ, currXZ, t);
 
-                // River control points already have Y as height, but add offset
-                glm::vec3 basePos = pos + glm::vec3(0.0f, heightOffset, 0.0f);
+                // Sample terrain height at this position (like roads do)
+                float terrainY = getTerrainHeight(posXZ.x, posXZ.y);
+                glm::vec3 basePos(posXZ.x, terrainY + heightOffset, posXZ.y);
+
+                // Direction follows river flow (downstream)
+                glm::vec3 direction(dir2D.x, 0.0f, dir2D.y);
                 glm::vec3 tipPos = basePos + direction * coneLength;
 
                 addConeToCache(basePos, tipPos, config_.coneRadius, config_.riverColor);

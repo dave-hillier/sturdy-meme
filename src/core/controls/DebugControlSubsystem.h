@@ -38,8 +38,16 @@ public:
     DebugLineSystem& getDebugLineSystem() override;
     const DebugLineSystem& getDebugLineSystem() const override;
 
-    void setRoadRiverVisualizationEnabled(bool enabled) override { roadRiverVisEnabled_ = enabled; }
+    void setRoadRiverVisualizationEnabled(bool enabled) override {
+        roadRiverVisEnabled_ = enabled;
+        showRoads_ = enabled;
+        showRivers_ = enabled;
+    }
     bool isRoadRiverVisualizationEnabled() const override { return roadRiverVisEnabled_; }
+    void setRoadVisualizationEnabled(bool enabled) override { showRoads_ = enabled; }
+    bool isRoadVisualizationEnabled() const override { return showRoads_; }
+    void setRiverVisualizationEnabled(bool enabled) override { showRivers_ = enabled; }
+    bool isRiverVisualizationEnabled() const override { return showRivers_; }
 
     void setHiZCullingEnabled(bool enabled) override;
     bool isHiZCullingEnabled() const override;
@@ -50,6 +58,8 @@ public:
     bool& showSnowDepthDebug() { return showSnowDepthDebug_; }
     bool& physicsDebugEnabled() { return physicsDebugEnabled_; }
     bool& roadRiverVisEnabled() { return roadRiverVisEnabled_; }
+    bool& showRoads() { return showRoads_; }
+    bool& showRivers() { return showRivers_; }
 
 private:
     DebugLineSystem& debugLine_;
@@ -59,4 +69,6 @@ private:
     bool showSnowDepthDebug_ = false;
     bool physicsDebugEnabled_ = false;
     bool roadRiverVisEnabled_ = false;  // Default off - expensive visualization
+    bool showRoads_ = true;   // When enabled, show roads by default
+    bool showRivers_ = true;  // When enabled, show rivers by default
 };

@@ -38,6 +38,28 @@ void GuiDebugTab::render(IDebugControl& debugControl) {
         ImGui::SetTooltip("Shows road and river paths with directional cones");
     }
 
+    if (roadRiverVis) {
+        ImGui::Indent();
+
+        bool showRoads = debugControl.isRoadVisualizationEnabled();
+        if (ImGui::Checkbox("Show Roads", &showRoads)) {
+            debugControl.setRoadVisualizationEnabled(showRoads);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Show road paths as bidirectional orange cones");
+        }
+
+        bool showRivers = debugControl.isRiverVisualizationEnabled();
+        if (ImGui::Checkbox("Show Rivers", &showRivers)) {
+            debugControl.setRiverVisualizationEnabled(showRivers);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Show river paths as blue cones pointing downstream");
+        }
+
+        ImGui::Unindent();
+    }
+
 #ifdef JPH_DEBUG_RENDERER
     ImGui::Spacing();
 

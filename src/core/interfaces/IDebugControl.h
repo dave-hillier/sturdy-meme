@@ -40,6 +40,10 @@ public:
     // Road/river visualization
     virtual void setRoadRiverVisualizationEnabled(bool enabled) = 0;
     virtual bool isRoadRiverVisualizationEnabled() const = 0;
+    virtual void setRoadVisualizationEnabled(bool enabled) = 0;
+    virtual bool isRoadVisualizationEnabled() const = 0;
+    virtual void setRiverVisualizationEnabled(bool enabled) = 0;
+    virtual bool isRiverVisualizationEnabled() const = 0;
 
     // Hi-Z occlusion culling
     virtual void setHiZCullingEnabled(bool enabled) = 0;

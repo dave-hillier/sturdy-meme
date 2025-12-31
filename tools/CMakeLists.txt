@@ -202,6 +202,7 @@ add_executable(watershed
     watershed/src/watershed.cpp
     watershed/src/png_io.cpp
     watershed/src/river_svg.cpp
+    watershed/src/river_binary.cpp
 )
 
 target_include_directories(watershed PRIVATE

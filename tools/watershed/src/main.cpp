@@ -2,6 +2,7 @@
 #include "watershed.h"
 #include "png_io.h"
 #include "river_svg.h"
+#include "river_binary.h"
 #include <SDL3/SDL_log.h>
 #include <string>
 #include <cstdlib>
@@ -29,11 +30,15 @@ void print_usage(const char* program) {
         "  -m, --min-area <n>      Minimum watershed area for merging (default: 0, no merging)\n"
         "  -o, --output <dir>      Output directory (default: derived from input filename)\n"
         "  -r, --resolution <n>    Processing resolution (default: 1024, 0 = full resolution)\n"
+        "  --terrain-size <n>      World terrain size in meters (default: 16384.0)\n"
+        "  --min-altitude <n>      Minimum altitude in meters (default: 0.0)\n"
+        "  --max-altitude <n>      Maximum altitude in meters (default: 200.0)\n"
         "  -h, --help              Show this help message\n"
         "\n"
         "The input should be a 16-bit grayscale PNG representing elevation data.\n"
         "Output files are written to a directory derived from the input filename.\n"
-        "River SVG coordinates are scaled back to original image dimensions.\n",
+        "River SVG coordinates are scaled back to original image dimensions.\n"
+        "Binary output (rivers.dat, lakes.dat) uses world-space coordinates.\n",
         program);
 }
 
@@ -49,6 +54,12 @@ int main(int argc, char* argv[]) {
     uint16_t sea_level = 0;
     uint32_t min_area = 0;
     int resolution = 1024;  // Default processing resolution
+
+    // Binary output config (world-space conversion)
+    RiverBinaryConfig binary_config;
+    binary_config.terrainSize = 16384.0f;
+    binary_config.minAltitude = 0.0f;
+    binary_config.maxAltitude = 200.0f;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -86,6 +97,24 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
             resolution = std::stoi(argv[++i]);
+        } else if (arg == "--terrain-size") {
+            if (i + 1 >= argc) {
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Error: %s requires an argument", arg.c_str());
+                return 1;
+            }
+            binary_config.terrainSize = std::stof(argv[++i]);
+        } else if (arg == "--min-altitude") {
+            if (i + 1 >= argc) {
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Error: %s requires an argument", arg.c_str());
+                return 1;
+            }
+            binary_config.minAltitude = std::stof(argv[++i]);
+        } else if (arg == "--max-altitude") {
+            if (i + 1 >= argc) {
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Error: %s requires an argument", arg.c_str());
+                return 1;
+            }
+            binary_config.maxAltitude = std::stof(argv[++i]);
         } else if (arg[0] == '-') {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Error: Unknown option: %s", arg.c_str());
             print_usage(argv[0]);
@@ -184,6 +213,17 @@ int main(int argc, char* argv[]) {
         std::string watershed_bin = (fs::path(output_dir) / "watershed_labels.bin").string();
         SDL_Log("Writing watershed labels binary to: %s", watershed_bin.c_str());
         write_watershed_labels_bin(watershed_bin, watersheds);
+
+        // Write binary files for engine runtime (ErosionDataLoader)
+        std::string rivers_dat = (fs::path(output_dir) / "rivers.dat").string();
+        SDL_Log("Writing rivers binary to: %s (terrain: %.0fm, altitude: %.0f-%.0fm)",
+                rivers_dat.c_str(), binary_config.terrainSize,
+                binary_config.minAltitude, binary_config.maxAltitude);
+        write_rivers_binary(rivers_dat, rivers, full_elevation, d8.width, d8.height, binary_config);
+
+        std::string lakes_dat = (fs::path(output_dir) / "lakes.dat").string();
+        SDL_Log("Writing lakes binary to: %s", lakes_dat.c_str());
+        write_lakes_binary(lakes_dat);
 
         SDL_Log("Done.");
         return 0;
