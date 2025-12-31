@@ -703,6 +703,18 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
         // We need to sort both treeDataList and treeRenderDataList together since
         // treeIndex refers to the position in treeRenderDataList.
 
+        // Check if already sorted
+        bool alreadySorted = true;
+        for (size_t i = 1; i < numTrees && alreadySorted; ++i) {
+            if (treeDataList[i].inputFirstInstance < treeDataList[i-1].inputFirstInstance) {
+                alreadySorted = false;
+            }
+        }
+
+        if (!alreadySorted) {
+            SDL_Log("TreeLeafCulling: Sorting %u trees by inputFirstInstance", numTrees);
+        }
+
         // Create sorted indices
         std::vector<size_t> sortedIndices(numTrees);
         for (size_t i = 0; i < numTrees; ++i) {
@@ -724,6 +736,8 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
         }
         treeDataList = std::move(sortedTreeData);
         treeRenderDataList = std::move(sortedRenderData);
+    } else {
+        SDL_Log("TreeLeafCulling: Using two-phase culling (no sorting)");
     }
 
     // Lazy initialization of cull buffers
