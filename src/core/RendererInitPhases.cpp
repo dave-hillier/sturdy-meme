@@ -1081,14 +1081,15 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
             SDL_Log("No road network data found (checked %s and %s)", roadsPath.c_str(), roadsPathAlt.c_str());
         }
 
-        // Load water/river data
+        // Load water/river data from watershed subdirectory
+        std::string watershedPath = terrainDataPath + "/watershed";
         ErosionLoadConfig erosionConfig{};
-        erosionConfig.cacheDirectory = terrainDataPath;
+        erosionConfig.cacheDirectory = watershedPath;
         erosionConfig.seaLevel = 0.0f;
         if (systems_->erosionData().loadFromCache(erosionConfig)) {
-            SDL_Log("Loaded water placement data from %s", terrainDataPath.c_str());
+            SDL_Log("Loaded water placement data from %s", watershedPath.c_str());
         } else {
-            SDL_Log("No water placement data found at %s (visualization disabled)", terrainDataPath.c_str());
+            SDL_Log("No water placement data found at %s (visualization disabled)", watershedPath.c_str());
         }
 
         // Configure road/river visualization
