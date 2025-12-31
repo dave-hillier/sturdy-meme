@@ -43,9 +43,22 @@ public:
     // Add lines directly
     void addLine(const glm::vec3& start, const glm::vec3& end, const glm::vec4& color);
     void addTriangle(const glm::vec3& v0, const glm::vec3& v1, const glm::vec3& v2, const glm::vec4& color);
+
+    // Bulk operations for performance (avoids per-call overhead)
+    void reserveLines(size_t lineCount);
+    void reserveTriangles(size_t triangleCount);
+    void appendLineVertices(const DebugLineVertex* vertices, size_t count);
+    void appendTriangleVertices(const DebugLineVertex* vertices, size_t count);
+
+    // Persistent lines - not cleared each frame, only when explicitly cleared
+    // Use for static debug geometry that doesn't change often
+    void setPersistentLines(const DebugLineVertex* vertices, size_t count);
+    void clearPersistentLines();
+    size_t getPersistentLineCount() const { return persistentLineVertices.size() / 2; }
     void addBox(const glm::vec3& min, const glm::vec3& max, const glm::vec4& color);
     void addSphere(const glm::vec3& center, float radius, const glm::vec4& color, int segments = 16);
     void addCapsule(const glm::vec3& start, const glm::vec3& end, float radius, const glm::vec4& color, int segments = 8);
+    void addCone(const glm::vec3& base, const glm::vec3& tip, float radius, const glm::vec4& color, int segments = 8);
 
 #ifdef JPH_DEBUG_RENDERER
     // Import lines from physics debug renderer
@@ -59,10 +72,10 @@ public:
     void recordCommands(VkCommandBuffer cmd, const glm::mat4& viewProj);
 
     // Check if there are any lines to draw
-    bool hasLines() const { return !lineVertices.empty(); }
+    bool hasLines() const { return !lineVertices.empty() || !persistentLineVertices.empty(); }
 
     // Statistics
-    size_t getLineCount() const { return lineVertices.size() / 2; }
+    size_t getLineCount() const { return (lineVertices.size() + persistentLineVertices.size()) / 2; }
     size_t getTriangleCount() const { return triangleVertices.size() / 3; }
 
 private:
@@ -94,9 +107,12 @@ private:
     std::vector<FrameData> frameData;
     uint32_t currentFrame = 0;
 
-    // Collected vertices for current frame
+    // Collected vertices for current frame (cleared each frame)
     std::vector<DebugLineVertex> lineVertices;
     std::vector<DebugLineVertex> triangleVertices;
+
+    // Persistent line vertices (not cleared each frame)
+    std::vector<DebugLineVertex> persistentLineVertices;
 
     static constexpr size_t INITIAL_BUFFER_SIZE = 64 * 1024; // 64KB initial buffer
 };

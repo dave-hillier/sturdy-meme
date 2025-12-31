@@ -191,14 +191,20 @@ bool Application::init(const std::string& title, int width, int height) {
 
     camera.setAspectRatio(static_cast<float>(width) / static_cast<float>(height));
 
-    // Position camera at terrain height, looking at scene objects
+    // Position camera at a settlement (Town 1: market town with coastal/agricultural features)
+    // Settlement coords are 0-16384, world coords are centered (-8192 to +8192)
     {
         const auto& terrain = renderer_->getSystems().terrain();
-        float cameraX = 0.0f, cameraZ = 10.0f;  // Start behind the scene
+        // Town 1 at settlement coords (9200, 3000) -> world coords (1008, -5192)
+        const float settlementX = 9200.0f;
+        const float settlementZ = 3000.0f;
+        const float halfTerrain = 8192.0f;
+        float cameraX = settlementX - halfTerrain;  // 1008
+        float cameraZ = settlementZ - halfTerrain;  // -5192
         float terrainY = terrain.getHeightAt(cameraX, cameraZ);
-        camera.setPosition(glm::vec3(cameraX, terrainY + 2.0f, cameraZ));
-        camera.setYaw(-90.0f);   // Look toward -Z (toward scene objects)
-        camera.setPitch(-10.0f); // Slight downward tilt
+        camera.setPosition(glm::vec3(cameraX, terrainY + 2.0f, cameraZ));  // Eye level above ground
+        camera.setYaw(45.0f);    // Look roughly northeast
+        camera.setPitch(0.0f);   // Level view
     }
 
     // Initialize physics system using RAII factory
@@ -334,7 +340,12 @@ bool Application::init(const std::string& title, int width, int height) {
     }
 
     // Create player entity and character controller
-    float playerSpawnX = 0.0f, playerSpawnZ = 0.0f;
+    // Spawn at Town 1 settlement location (same as camera and scene origin)
+    const float halfTerrain = 8192.0f;
+    const float settlementX = 9200.0f;  // Town 1 in 0-16384 space
+    const float settlementZ = 3000.0f;
+    float playerSpawnX = settlementX - halfTerrain;  // 1008
+    float playerSpawnZ = settlementZ - halfTerrain;  // -5192
     float playerSpawnY = terrain.getHeightAt(playerSpawnX, playerSpawnZ) + 0.1f;
 
     // Debug: Sample terrain height at spawn position using different methods

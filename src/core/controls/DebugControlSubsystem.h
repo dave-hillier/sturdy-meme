@@ -38,6 +38,9 @@ public:
     DebugLineSystem& getDebugLineSystem() override;
     const DebugLineSystem& getDebugLineSystem() const override;
 
+    void setRoadRiverVisualizationEnabled(bool enabled) override { roadRiverVisEnabled_ = enabled; }
+    bool isRoadRiverVisualizationEnabled() const override { return roadRiverVisEnabled_; }
+
     void setHiZCullingEnabled(bool enabled) override;
     bool isHiZCullingEnabled() const override;
     CullingStats getHiZCullingStats() const override;
@@ -46,6 +49,7 @@ public:
     bool& showCascadeDebug() { return showCascadeDebug_; }
     bool& showSnowDepthDebug() { return showSnowDepthDebug_; }
     bool& physicsDebugEnabled() { return physicsDebugEnabled_; }
+    bool& roadRiverVisEnabled() { return roadRiverVisEnabled_; }
 
 private:
     DebugLineSystem& debugLine_;
@@ -54,4 +58,5 @@ private:
     bool showCascadeDebug_ = false;
     bool showSnowDepthDebug_ = false;
     bool physicsDebugEnabled_ = false;
+    bool roadRiverVisEnabled_ = false;  // Default off - expensive visualization
 };

@@ -157,7 +157,11 @@ void RockSystem::generateRockPlacements(const InitInfo& info) {
         x += (hashPosition(x, z, 11111) - 0.5f) * minDist * 0.5f;
         z += (hashPosition(x, z, 22222) - 0.5f) * minDist * 0.5f;
 
-        // Check bounds
+        // Offset by placement center
+        x += config.placementCenter.x;
+        z += config.placementCenter.y;
+
+        // Check bounds (rocks must be inside terrain)
         float halfTerrain = info.terrainSize * 0.48f;  // Stay slightly inside terrain
         if (std::abs(x) > halfTerrain || std::abs(z) > halfTerrain) {
             continue;

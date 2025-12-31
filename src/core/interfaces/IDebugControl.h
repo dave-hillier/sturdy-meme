@@ -37,6 +37,10 @@ public:
     virtual DebugLineSystem& getDebugLineSystem() = 0;
     virtual const DebugLineSystem& getDebugLineSystem() const = 0;
 
+    // Road/river visualization
+    virtual void setRoadRiverVisualizationEnabled(bool enabled) = 0;
+    virtual bool isRoadRiverVisualizationEnabled() const = 0;
+
     // Hi-Z occlusion culling
     virtual void setHiZCullingEnabled(bool enabled) = 0;
     virtual bool isHiZCullingEnabled() const = 0;

@@ -68,6 +68,8 @@ class SSRSystem;
 class WaterTileCull;
 class WaterGBuffer;
 class ErosionDataLoader;
+class RoadNetworkLoader;
+class RoadRiverVisualization;
 class UBOBuilder;
 class Profiler;
 class DebugLineSystem;
@@ -251,6 +253,10 @@ public:
     void setGlobalBuffers(std::unique_ptr<GlobalBufferManager> buffers);
     ErosionDataLoader& erosionData() { return *erosionDataLoader_; }
     const ErosionDataLoader& erosionData() const { return *erosionDataLoader_; }
+    RoadNetworkLoader& roadData() { return *roadNetworkLoader_; }
+    const RoadNetworkLoader& roadData() const { return *roadNetworkLoader_; }
+    RoadRiverVisualization& roadRiverVis() { return *roadRiverVisualization_; }
+    const RoadRiverVisualization& roadRiverVis() const { return *roadRiverVisualization_; }
 
     // Animation and skinning
     SkinnedMeshRenderer& skinnedMesh() { return *skinnedMeshRenderer_; }
@@ -440,6 +446,8 @@ private:
     std::unique_ptr<SceneManager> sceneManager_;
     std::unique_ptr<GlobalBufferManager> globalBufferManager_;
     std::unique_ptr<ErosionDataLoader> erosionDataLoader_;
+    std::unique_ptr<RoadNetworkLoader> roadNetworkLoader_;
+    std::unique_ptr<RoadRiverVisualization> roadRiverVisualization_;
     std::unique_ptr<SkinnedMeshRenderer> skinnedMeshRenderer_;
 
     // Tools and debug

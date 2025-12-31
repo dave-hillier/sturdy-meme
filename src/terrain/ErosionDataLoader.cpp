@@ -28,6 +28,22 @@ bool ErosionDataLoader::isCacheValid(const ErosionLoadConfig& config) const {
 }
 
 bool ErosionDataLoader::loadAndValidateMetadata(const ErosionLoadConfig& config) const {
+    // Check all cache files exist first
+    if (!fs::exists(getRiversPath(config.cacheDirectory)) ||
+        !fs::exists(getLakesPath(config.cacheDirectory))) {
+        SDL_Log("Erosion cache: missing cache files in %s", config.cacheDirectory.c_str());
+        return false;
+    }
+
+    // Flow map is optional for visualization-only mode
+    bool hasFlowMap = fs::exists(getFlowMapPath(config.cacheDirectory));
+
+    // Skip source validation if no source heightmap specified (test/development mode)
+    if (config.sourceHeightmapPath.empty()) {
+        SDL_Log("Erosion cache: loading without source validation (test mode)");
+        return true;
+    }
+
     std::string metaPath = getMetadataPath(config.cacheDirectory);
     std::ifstream file(metaPath);
     if (!file.is_open()) {
@@ -59,12 +75,8 @@ bool ErosionDataLoader::loadAndValidateMetadata(const ErosionLoadConfig& config)
         return false;
     }
 
-    // Check all cache files exist
-    if (!fs::exists(getFlowMapPath(config.cacheDirectory)) ||
-        !fs::exists(getRiversPath(config.cacheDirectory)) ||
-        !fs::exists(getLakesPath(config.cacheDirectory))) {
-        SDL_Log("Erosion cache: missing cache files");
-        return false;
+    if (!hasFlowMap) {
+        SDL_Log("Erosion cache: missing flow map (visualization-only mode)");
     }
 
     SDL_Log("Erosion cache: valid cache found");
@@ -75,25 +87,27 @@ bool ErosionDataLoader::loadFromCache(const ErosionLoadConfig& config) {
     uint32_t flowWidth = 0;
     uint32_t flowHeight = 0;
 
-    // Load flow map and direction
+    // Load flow map and direction (optional for visualization-only mode)
     {
         std::ifstream file(getFlowMapPath(config.cacheDirectory), std::ios::binary);
-        if (!file.is_open()) return false;
+        if (file.is_open()) {
+            file.read(reinterpret_cast<char*>(&flowWidth), sizeof(flowWidth));
+            file.read(reinterpret_cast<char*>(&flowHeight), sizeof(flowHeight));
 
-        file.read(reinterpret_cast<char*>(&flowWidth), sizeof(flowWidth));
-        file.read(reinterpret_cast<char*>(&flowHeight), sizeof(flowHeight));
+            waterData.flowAccumulation.resize(flowWidth * flowHeight);
+            file.read(reinterpret_cast<char*>(waterData.flowAccumulation.data()),
+                      waterData.flowAccumulation.size() * sizeof(float));
 
-        waterData.flowAccumulation.resize(flowWidth * flowHeight);
-        file.read(reinterpret_cast<char*>(waterData.flowAccumulation.data()),
-                  waterData.flowAccumulation.size() * sizeof(float));
+            // Try to load flow direction (may not exist in older caches)
+            waterData.flowDirection.resize(flowWidth * flowHeight, -1);
+            file.read(reinterpret_cast<char*>(waterData.flowDirection.data()),
+                      waterData.flowDirection.size() * sizeof(int8_t));
 
-        // Try to load flow direction (may not exist in older caches)
-        waterData.flowDirection.resize(flowWidth * flowHeight, -1);
-        file.read(reinterpret_cast<char*>(waterData.flowDirection.data()),
-                  waterData.flowDirection.size() * sizeof(int8_t));
-
-        waterData.flowMapWidth = flowWidth;
-        waterData.flowMapHeight = flowHeight;
+            waterData.flowMapWidth = flowWidth;
+            waterData.flowMapHeight = flowHeight;
+        } else {
+            SDL_Log("Erosion: flow map not found, visualization-only mode");
+        }
     }
 
     // Load rivers

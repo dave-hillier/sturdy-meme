@@ -43,6 +43,8 @@
 #include "SkinnedMeshRenderer.h"
 #include "SceneManager.h"
 #include "ErosionDataLoader.h"
+#include "RoadNetworkLoader.h"
+#include "RoadRiverVisualization.h"
 #include "ResizeCoordinator.h"
 #include "TimeSystem.h"
 #include "CelestialCalculator.h"
@@ -188,6 +190,10 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     sceneInfo.getTerrainHeight = [this](float x, float z) {
         return systems_->terrain().getHeightAt(x, z);
     };
+    // Place scene at Town 1 settlement (market town with coastal/agricultural features)
+    // Settlement coords (9200, 3000) in 0-16384 space -> world coords by subtracting 8192
+    const float halfTerrain = 8192.0f;
+    sceneInfo.sceneOrigin = glm::vec2(9200.0f - halfTerrain, 3000.0f - halfTerrain);
 
     {
         INIT_PROFILE_PHASE("SceneManager");
@@ -253,6 +259,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     rockConfig.minRadius = 0.4f;
     rockConfig.maxRadius = 2.0f;
     rockConfig.placementRadius = 100.0f;
+    rockConfig.placementCenter = sceneInfo.sceneOrigin;  // Place rocks at settlement location
     rockConfig.minDistanceBetween = 4.0f;
     rockConfig.roughness = 0.35f;
     rockConfig.asymmetry = 0.3f;
@@ -291,7 +298,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         }
     }
 
-    // Add trees to the scene
+    // Add trees to the scene - place woods a few hundred units from settlement
     std::string presetDir = treeInfo.resourcePath + "/assets/trees/presets/";
 
     auto loadPresetOrDefault = [&](const std::string& presetName, TreeOptions (*defaultFn)()) {
@@ -302,23 +309,27 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         return defaultFn();
     };
 
+    // Demo trees placed near the settlement (0-50 units offset)
+    const float demoTreeX = sceneInfo.sceneOrigin.x;
+    const float demoTreeZ = sceneInfo.sceneOrigin.y;
+
     // Oak tree
-    float oakX = 35.0f, oakZ = 25.0f;
+    float oakX = demoTreeX + 35.0f, oakZ = demoTreeZ + 25.0f;
     glm::vec3 oakPos(oakX, core.terrain.getHeightAt(oakX, oakZ), oakZ);
     treeSystem->addTree(oakPos, 0.0f, 1.0f, loadPresetOrDefault("oak_large.json", TreeOptions::defaultOak));
 
     // Pine tree
-    float pineX = 50.0f, pineZ = -30.0f;
+    float pineX = demoTreeX + 50.0f, pineZ = demoTreeZ - 30.0f;
     glm::vec3 pinePos(pineX, core.terrain.getHeightAt(pineX, pineZ), pineZ);
     treeSystem->addTree(pinePos, 0.5f, 1.0f, loadPresetOrDefault("pine_large.json", TreeOptions::defaultPine));
 
     // Ash tree
-    float ashX = -40.0f, ashZ = -25.0f;
+    float ashX = demoTreeX - 40.0f, ashZ = demoTreeZ - 25.0f;
     glm::vec3 ashPos(ashX, core.terrain.getHeightAt(ashX, ashZ), ashZ);
     treeSystem->addTree(ashPos, 1.0f, 1.0f, loadPresetOrDefault("ash_large.json", TreeOptions::defaultOak));
 
     // Aspen tree
-    float aspenX = 30.0f, aspenZ = 40.0f;
+    float aspenX = demoTreeX + 30.0f, aspenZ = demoTreeZ + 40.0f;
     glm::vec3 aspenPos(aspenX, core.terrain.getHeightAt(aspenX, aspenZ), aspenZ);
     treeSystem->addTree(aspenPos, 1.5f, 1.0f, loadPresetOrDefault("aspen_large.json", TreeOptions::defaultOak));
 
@@ -396,13 +407,13 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         }
     }
 
-    // Add a forest 300 units away from the initial position (0, 0, 0)
+    // Add a forest 200 units away from the settlement
     // The forest is placed away from spawn for load testing
     {
         auto* treeSystem = systems_->tree();
         if (treeSystem) {
-            const float forestCenterX = 300.0f;
-            const float forestCenterZ = 100.0f;
+            const float forestCenterX = sceneInfo.sceneOrigin.x + 200.0f;
+            const float forestCenterZ = sceneInfo.sceneOrigin.y + 100.0f;
             const float forestRadius = 80.0f;
             const int numTrees = 500;
 
@@ -504,7 +515,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
                 treesPlaced++;
             }
 
-            SDL_Log("Forest added: %d trees (Poisson disk) at distance 300 units", treesPlaced);
+            SDL_Log("Forest added: %d trees (Poisson disk) at distance 200 units from settlement", treesPlaced);
 
             // Generate impostor archetypes for each unique tree type
             // The first 4 trees (display trees) define the archetypes: oak, pine, ash, aspen
@@ -1036,6 +1047,56 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     }
     systems_->setDebugLineSystem(std::move(debugLineSystem));
     SDL_Log("Debug line system initialized");
+
+    // Load road network data and configure visualization
+    {
+        // Try roads subdirectory first (standard layout), then root terrain_data
+        std::string roadsSubdir = terrainDataPath + "/roads";
+        std::string roadsPath = roadsSubdir + "/roads.bin";
+        std::string roadsJsonPath = roadsSubdir + "/roads.json";
+        std::string roadsPathAlt = terrainDataPath + "/roads.bin";
+        std::string roadsJsonPathAlt = terrainDataPath + "/roads.json";
+
+        if (systems_->roadData().loadFromBinary(roadsPath)) {
+            SDL_Log("Loaded road network from %s", roadsPath.c_str());
+        } else if (systems_->roadData().loadFromJson(roadsJsonPath)) {
+            SDL_Log("Loaded road network from %s", roadsJsonPath.c_str());
+        } else if (systems_->roadData().loadFromBinary(roadsPathAlt)) {
+            SDL_Log("Loaded road network from %s", roadsPathAlt.c_str());
+        } else if (systems_->roadData().loadFromJson(roadsJsonPathAlt)) {
+            SDL_Log("Loaded road network from %s", roadsJsonPathAlt.c_str());
+        } else {
+            SDL_Log("No road network data found (checked %s and %s)", roadsPath.c_str(), roadsPathAlt.c_str());
+        }
+
+        // Load water/river data
+        ErosionLoadConfig erosionConfig{};
+        erosionConfig.cacheDirectory = terrainDataPath;
+        erosionConfig.seaLevel = 0.0f;
+        if (systems_->erosionData().loadFromCache(erosionConfig)) {
+            SDL_Log("Loaded water placement data from %s", terrainDataPath.c_str());
+        } else {
+            SDL_Log("No water placement data found at %s (visualization disabled)", terrainDataPath.c_str());
+        }
+
+        // Configure road/river visualization
+        auto& vis = systems_->roadRiverVis();
+        vis.setWaterData(&systems_->erosionData().getWaterData());
+        vis.setRoadNetwork(&systems_->roadData().getRoadNetwork());
+        vis.setTerrainHeightMap(systems_->terrain().getHeightMap());
+
+        // Default config - can be modified via GUI later
+        RoadRiverVisConfig visConfig{};
+        visConfig.showRivers = true;
+        visConfig.showRoads = true;
+        visConfig.coneRadius = 0.5f;
+        visConfig.coneLength = 2.0f;
+        visConfig.heightAboveGround = 1.0f;
+        visConfig.riverConeSpacing = 50.0f;
+        visConfig.roadConeSpacing = 50.0f;
+        vis.setConfig(visConfig);
+        SDL_Log("Road/river visualization configured");
+    }
 
     // Initialize UBO builder with system references
     UBOBuilder::Systems uboSystems{};

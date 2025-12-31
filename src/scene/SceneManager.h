@@ -79,6 +79,7 @@ private:
     std::unique_ptr<SceneBuilder> sceneBuilder;
     SceneBuilder::HeightQueryFunc terrainHeightFunc;
     LightManager lightManager;
+    glm::vec2 sceneOrigin = glm::vec2(0.0f);  // World XZ offset for scene
 
     // Physics body tracking (mapped to scene object indices)
     std::vector<PhysicsBodyID> scenePhysicsBodies;

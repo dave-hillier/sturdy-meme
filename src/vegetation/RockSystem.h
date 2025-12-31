@@ -20,7 +20,8 @@ struct RockConfig {
     int rocksPerVariation = 8;        // How many instances of each variation
     float minRadius = 0.3f;           // Minimum rock base radius
     float maxRadius = 1.5f;           // Maximum rock base radius
-    float placementRadius = 80.0f;    // Radius from origin to place rocks
+    float placementRadius = 80.0f;    // Radius from center to place rocks
+    glm::vec2 placementCenter = glm::vec2(0.0f);  // Center point for rock placement (world coords)
     float minDistanceBetween = 3.0f;  // Minimum distance between rocks
     float roughness = 0.35f;          // Surface roughness for rock generation
     float asymmetry = 0.25f;          // How non-spherical rocks should be

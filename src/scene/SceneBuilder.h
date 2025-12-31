@@ -33,6 +33,7 @@ public:
         VkPhysicalDevice physicalDevice;
         std::string resourcePath;
         HeightQueryFunc getTerrainHeight;  // Optional: query terrain height for object placement
+        glm::vec2 sceneOrigin = glm::vec2(0.0f);  // World XZ offset for scene objects
     };
 
     /**
@@ -181,6 +182,9 @@ private:
     // Well entrance position (for terrain hole creation)
     float wellEntranceX = 0.0f;
     float wellEntranceZ = 0.0f;
+
+    // Scene origin offset (world XZ position where scene objects are placed)
+    glm::vec2 sceneOrigin = glm::vec2(0.0f);
 
     // Material registry for data-driven material management
     MaterialRegistry materialRegistry;

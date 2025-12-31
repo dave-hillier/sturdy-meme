@@ -21,6 +21,9 @@ bool SceneManager::initInternal(SceneBuilder::InitInfo& builderInfo) {
     // Store terrain height function for physics placement
     terrainHeightFunc = builderInfo.getTerrainHeight;
 
+    // Store scene origin for light positioning
+    sceneOrigin = builderInfo.sceneOrigin;
+
     // Initialize scene builder (meshes, textures, objects)
     sceneBuilder = SceneBuilder::create(builderInfo);
     if (!sceneBuilder) {
@@ -142,10 +145,16 @@ void SceneManager::initializeSceneLights() {
     // Clear any existing lights
     lightManager.clear();
 
-    // Add the glowing orb point light
+    // Helper to apply scene origin offset
+    auto worldPos = [this](float localX, float localZ) -> glm::vec2 {
+        return glm::vec2(localX + sceneOrigin.x, localZ + sceneOrigin.y);
+    };
+
+    // Add the glowing orb point light (follows the emissive sphere on the crate)
+    auto orbPos = worldPos(2.0f, 0.0f);
     Light orbLight;
     orbLight.type = LightType::Point;
-    orbLight.position = glm::vec3(2.0f, 1.3f, 0.0f);
+    orbLight.position = glm::vec3(orbPos.x, 1.3f, orbPos.y);
     orbLight.color = glm::vec3(1.0f, 0.9f, 0.7f);  // Warm white
     orbLight.intensity = 5.0f;
     orbLight.radius = 8.0f;
@@ -153,9 +162,10 @@ void SceneManager::initializeSceneLights() {
     lightManager.addLight(orbLight);
 
     // Add blue light
+    auto bluePos = worldPos(-3.0f, 2.0f);
     Light blueLight;
     blueLight.type = LightType::Point;
-    blueLight.position = glm::vec3(-3.0f, 2.0f, 2.0f);
+    blueLight.position = glm::vec3(bluePos.x, 2.0f, bluePos.y);
     blueLight.color = glm::vec3(0.3f, 0.5f, 1.0f);  // Blue
     blueLight.intensity = 3.0f;
     blueLight.radius = 6.0f;
@@ -163,9 +173,10 @@ void SceneManager::initializeSceneLights() {
     lightManager.addLight(blueLight);
 
     // Add green light
+    auto greenPos = worldPos(4.0f, -2.0f);
     Light greenLight;
     greenLight.type = LightType::Point;
-    greenLight.position = glm::vec3(4.0f, 1.5f, -2.0f);
+    greenLight.position = glm::vec3(greenPos.x, 1.5f, greenPos.y);
     greenLight.color = glm::vec3(0.4f, 1.0f, 0.4f);  // Green
     greenLight.intensity = 2.5f;
     greenLight.radius = 5.0f;

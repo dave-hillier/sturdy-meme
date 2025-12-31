@@ -65,18 +65,18 @@ float TerrainData::sampleSlope(float x, float z, float terrainSize) const {
 }
 
 BiomeZone TerrainData::sampleBiome(float x, float z, float terrainSize) const {
-    if (biomeZones.empty() || width == 0 || height == 0) return BiomeZone::Grassland;
+    if (biomeZones.empty() || biomeWidth == 0 || biomeHeight == 0) return BiomeZone::Grassland;
 
     float u = glm::clamp(x / terrainSize, 0.0f, 1.0f);
     float v = glm::clamp(z / terrainSize, 0.0f, 1.0f);
 
-    int px = static_cast<int>(u * (width - 1));
-    int py = static_cast<int>(v * (height - 1));
+    int px = static_cast<int>(u * (biomeWidth - 1));
+    int py = static_cast<int>(v * (biomeHeight - 1));
 
-    px = glm::clamp(px, 0, static_cast<int>(width - 1));
-    py = glm::clamp(py, 0, static_cast<int>(height - 1));
+    px = glm::clamp(px, 0, static_cast<int>(biomeWidth - 1));
+    py = glm::clamp(py, 0, static_cast<int>(biomeHeight - 1));
 
-    return static_cast<BiomeZone>(biomeZones[py * width + px]);
+    return static_cast<BiomeZone>(biomeZones[py * biomeWidth + px]);
 }
 
 bool TerrainData::isWater(float x, float z, float terrainSize) const {
@@ -127,6 +127,10 @@ bool RoadPathfinder::loadBiomeMap(const std::string& path) {
                      path.c_str(), lodepng_error_text(error));
         return false;
     }
+
+    // Store biome map dimensions separately
+    terrain.biomeWidth = w;
+    terrain.biomeHeight = h;
 
     // Use heightmap dimensions if available, otherwise use biome map dimensions
     if (terrain.width == 0) {

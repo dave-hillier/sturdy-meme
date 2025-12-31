@@ -30,6 +30,14 @@ void GuiDebugTab::render(IDebugControl& debugControl) {
         ImGui::SetTooltip("Shows snow accumulation depth as heat map");
     }
 
+    bool roadRiverVis = debugControl.isRoadRiverVisualizationEnabled();
+    if (ImGui::Checkbox("Road/River Visualization", &roadRiverVis)) {
+        debugControl.setRoadRiverVisualizationEnabled(roadRiverVis);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Shows road and river paths with directional cones");
+    }
+
 #ifdef JPH_DEBUG_RENDERER
     ImGui::Spacing();
 

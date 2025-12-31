@@ -31,8 +31,10 @@ struct PathfinderConfig {
 struct TerrainData {
     std::vector<float> heights;         // Normalized [0,1] heights
     std::vector<uint8_t> biomeZones;    // BiomeZone values
-    uint32_t width = 0;
-    uint32_t height = 0;
+    uint32_t width = 0;                 // Heightmap width
+    uint32_t height = 0;                // Heightmap height
+    uint32_t biomeWidth = 0;            // Biome map width
+    uint32_t biomeHeight = 0;           // Biome map height
 
     float sampleHeight(float x, float z, float terrainSize) const;
     float sampleSlope(float x, float z, float terrainSize) const;

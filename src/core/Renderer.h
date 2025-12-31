@@ -179,6 +179,10 @@ public:
     void setPhysicsDebugEnabled(bool enabled) { physicsDebugEnabled = enabled; }
     bool isPhysicsDebugEnabled() const { return physicsDebugEnabled; }
 
+    // Road/river visualization (uses debug line system)
+    // Delegates to DebugControlSubsystem - use getDebugControl() for GUI access
+    void updateRoadRiverVisualization();
+
     // Resource access
     VkCommandPool getCommandPool() const { return commandPool.get(); }
     DescriptorManager::Pool* getDescriptorPool();

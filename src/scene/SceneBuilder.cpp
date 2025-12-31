@@ -19,6 +19,7 @@ bool SceneBuilder::initInternal(const InitInfo& info) {
     terrainHeightFunc = info.getTerrainHeight;
     storedAllocator = info.allocator;
     storedDevice = info.device;
+    sceneOrigin = info.sceneOrigin;
 
     if (!createMeshes(info)) return false;
     if (!loadTextures(info)) return false;
@@ -327,6 +328,15 @@ void SceneBuilder::createRenderables() {
 
     // Ground disc removed - terrain system provides the ground now
 
+    // Scene objects are placed relative to sceneOrigin (settlement location)
+    const float originX = sceneOrigin.x;
+    const float originZ = sceneOrigin.y;
+
+    // Helper: get world position with scene origin offset
+    auto worldPos = [originX, originZ](float localX, float localZ) -> std::pair<float, float> {
+        return {localX + originX, localZ + originZ};
+    };
+
     // Helper: get Y position for object sitting on terrain
     // objectHeight is the distance from object origin to its bottom
     auto getGroundY = [this](float x, float z, float objectHeight) {
@@ -342,7 +352,7 @@ void SceneBuilder::createRenderables() {
     };
 
     // Wooden crate - slightly shiny, non-metallic (unit cube, half-extent 0.5)
-    float crateX = 2.0f, crateZ = 0.0f;
+    auto [crateX, crateZ] = worldPos(2.0f, 0.0f);
     addPhysicsObject(RenderableBuilder()
         .atPosition(glm::vec3(crateX, getGroundY(crateX, crateZ, 0.5f), crateZ))
         .withMesh(&**cubeMesh)
@@ -353,7 +363,7 @@ void SceneBuilder::createRenderables() {
         .build());
 
     // Rotated wooden crate
-    float rotatedCrateX = -1.5f, rotatedCrateZ = 1.0f;
+    auto [rotatedCrateX, rotatedCrateZ] = worldPos(-1.5f, 1.0f);
     glm::mat4 rotatedCube = glm::translate(glm::mat4(1.0f),
         glm::vec3(rotatedCrateX, getGroundY(rotatedCrateX, rotatedCrateZ, 0.5f), rotatedCrateZ));
     rotatedCube = glm::rotate(rotatedCube, glm::radians(30.0f), glm::vec3(0.0f, 1.0f, 0.0f));
@@ -367,7 +377,7 @@ void SceneBuilder::createRenderables() {
         .build());
 
     // Polished metal sphere - smooth, fully metallic (radius 0.5)
-    float polishedSphereX = 0.0f, polishedSphereZ = -2.0f;
+    auto [polishedSphereX, polishedSphereZ] = worldPos(0.0f, -2.0f);
     addPhysicsObject(RenderableBuilder()
         .atPosition(glm::vec3(polishedSphereX, getGroundY(polishedSphereX, polishedSphereZ, 0.5f), polishedSphereZ))
         .withMesh(&**sphereMesh)
@@ -378,7 +388,7 @@ void SceneBuilder::createRenderables() {
         .build());
 
     // Rough/brushed metal sphere - moderately rough, metallic (radius 0.5)
-    float roughSphereX = -3.0f, roughSphereZ = -1.0f;
+    auto [roughSphereX, roughSphereZ] = worldPos(-3.0f, -1.0f);
     addPhysicsObject(RenderableBuilder()
         .atPosition(glm::vec3(roughSphereX, getGroundY(roughSphereX, roughSphereZ, 0.5f), roughSphereZ))
         .withMesh(&**sphereMesh)
@@ -389,7 +399,7 @@ void SceneBuilder::createRenderables() {
         .build());
 
     // Polished metal cube - smooth, fully metallic (half-extent 0.5)
-    float polishedCubeX = 3.0f, polishedCubeZ = -2.0f;
+    auto [polishedCubeX, polishedCubeZ] = worldPos(3.0f, -2.0f);
     addPhysicsObject(RenderableBuilder()
         .atPosition(glm::vec3(polishedCubeX, getGroundY(polishedCubeX, polishedCubeZ, 0.5f), polishedCubeZ))
         .withMesh(&**cubeMesh)
@@ -400,7 +410,7 @@ void SceneBuilder::createRenderables() {
         .build());
 
     // Brushed metal cube - rough, metallic (half-extent 0.5)
-    float brushedCubeX = -3.0f, brushedCubeZ = -3.0f;
+    auto [brushedCubeX, brushedCubeZ] = worldPos(-3.0f, -3.0f);
     glm::mat4 brushedCube = glm::translate(glm::mat4(1.0f),
         glm::vec3(brushedCubeX, getGroundY(brushedCubeX, brushedCubeZ, 0.5f), brushedCubeZ));
     brushedCube = glm::rotate(brushedCube, glm::radians(45.0f), glm::vec3(0.0f, 1.0f, 0.0f));
@@ -433,7 +443,7 @@ void SceneBuilder::createRenderables() {
         .build());
 
     // Blue light indicator sphere - saturated blue, floating above terrain
-    float blueLightX = -3.0f, blueLightZ = 2.0f;
+    auto [blueLightX, blueLightZ] = worldPos(-3.0f, 2.0f);
     glm::mat4 blueLightTransform = glm::translate(glm::mat4(1.0f),
         glm::vec3(blueLightX, getGroundY(blueLightX, blueLightZ, 1.5f), blueLightZ));
     blueLightTransform = glm::scale(blueLightTransform, glm::vec3(0.2f));
@@ -450,7 +460,7 @@ void SceneBuilder::createRenderables() {
         .build());
 
     // Green light indicator sphere - saturated green, floating above terrain
-    float greenLightX = 4.0f, greenLightZ = -2.0f;
+    auto [greenLightX, greenLightZ] = worldPos(4.0f, -2.0f);
     glm::mat4 greenLightTransform = glm::translate(glm::mat4(1.0f),
         glm::vec3(greenLightX, getGroundY(greenLightX, greenLightZ, 1.5f), greenLightZ));
     greenLightTransform = glm::scale(greenLightTransform, glm::vec3(0.2f));
@@ -467,7 +477,7 @@ void SceneBuilder::createRenderables() {
         .build());
 
     // Debug cube - red emissive cube for testing (half-extent 0.5)
-    float debugCubeX = 5.0f, debugCubeZ = -5.0f;
+    auto [debugCubeX, debugCubeZ] = worldPos(5.0f, -5.0f);
     sceneObjects.push_back(RenderableBuilder()
         .atPosition(glm::vec3(debugCubeX, getGroundY(debugCubeX, debugCubeZ, 0.5f), debugCubeZ))
         .withMesh(&**cubeMesh)
@@ -480,8 +490,8 @@ void SceneBuilder::createRenderables() {
         .build());
 
     // Player character - uses animated character if loaded, otherwise capsule
-    // Player position is controlled by physics, so we place at origin on terrain
-    float playerX = 0.0f, playerZ = 0.0f;
+    // Player position is controlled by physics, so we place at scene origin
+    auto [playerX, playerZ] = worldPos(0.0f, 0.0f);
     float playerTerrainY = getTerrainHeight(playerX, playerZ);
     playerObjectIndex = sceneObjects.size();
     if (hasAnimatedCharacter) {
@@ -528,7 +538,7 @@ void SceneBuilder::createRenderables() {
     }
 
     // Flag pole - 3m pole, center at 1.5m above ground
-    float flagPoleX = 5.0f, flagPoleZ = 0.0f;
+    auto [flagPoleX, flagPoleZ] = worldPos(5.0f, 0.0f);
     flagPoleIndex = sceneObjects.size();
     sceneObjects.push_back(RenderableBuilder()
         .atPosition(glm::vec3(flagPoleX, getGroundY(flagPoleX, flagPoleZ, 1.5f), flagPoleZ))
@@ -568,8 +578,9 @@ void SceneBuilder::createRenderables() {
 
     // Well entrance - demonstrates terrain hole mask system
     // A stone-like frame floating above the terrain hole
-    wellEntranceX = 20.0f;
-    wellEntranceZ = 20.0f;
+    auto [wellX, wellZ] = worldPos(20.0f, 20.0f);
+    wellEntranceX = wellX;
+    wellEntranceZ = wellZ;
     float wellY = getTerrainHeight(wellEntranceX, wellEntranceZ);
     // Frame floats 3m above terrain so hole is visible
     glm::mat4 wellTransform = glm::translate(glm::mat4(1.0f),
