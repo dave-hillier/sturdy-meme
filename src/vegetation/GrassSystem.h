@@ -1,7 +1,7 @@
 #pragma once
 
 #include "EnvironmentSettings.h"
-#include <vulkan/vulkan.h>
+#include <vulkan/vulkan.hpp>
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
 #include <array>
@@ -47,7 +47,7 @@ struct GrassInstance {
 class GrassSystem {
 public:
     struct InitInfo : public ParticleSystem::InitInfo {
-        VkRenderPass shadowRenderPass;
+        vk::RenderPass shadowRenderPass;
         uint32_t shadowMapSize;
     };
 
@@ -71,8 +71,8 @@ public:
      */
     static std::optional<Bundle> createWithDependencies(
         const InitContext& ctx,
-        VkRenderPass hdrRenderPass,
-        VkRenderPass shadowRenderPass,
+        vk::RenderPass hdrRenderPass,
+        vk::RenderPass shadowRenderPass,
         uint32_t shadowMapSize
     );
 
@@ -85,8 +85,23 @@ public:
     GrassSystem& operator=(GrassSystem&&) = delete;
 
     // Update extent for viewport (on window resize)
-    void setExtent(VkExtent2D newExtent) { (*particleSystem)->setExtent(newExtent); }
+    void setExtent(vk::Extent2D newExtent) { (*particleSystem)->setExtent(VkExtent2D{newExtent.width, newExtent.height}); }
+    void setExtent(VkExtent2D newExtent) { (*particleSystem)->setExtent(newExtent); }  // Backward-compatible overload
 
+    void updateDescriptorSets(vk::Device device, const std::vector<vk::Buffer>& uniformBuffers,
+                              vk::ImageView shadowMapView, vk::Sampler shadowSampler,
+                              const std::vector<vk::Buffer>& windBuffers,
+                              const std::vector<vk::Buffer>& lightBuffers,
+                              vk::ImageView terrainHeightMapView, vk::Sampler terrainHeightMapSampler,
+                              const std::vector<vk::Buffer>& snowBuffers,
+                              const std::vector<vk::Buffer>& cloudShadowBuffers,
+                              vk::ImageView cloudShadowMapView, vk::Sampler cloudShadowMapSampler,
+                              vk::ImageView tileArrayView = {},
+                              vk::Sampler tileSampler = {},
+                              const std::array<vk::Buffer, 3>& tileInfoBuffers = {},
+                              const BufferUtils::DynamicUniformBuffer* dynamicRendererUBO = nullptr);
+
+    // Backward-compatible overload for raw Vulkan types
     void updateDescriptorSets(VkDevice device, const std::vector<VkBuffer>& uniformBuffers,
                               VkImageView shadowMapView, VkSampler shadowSampler,
                               const std::vector<VkBuffer>& windBuffers,
@@ -103,22 +118,22 @@ public:
     void updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos, const glm::mat4& viewProj,
                         float terrainSize, float terrainHeightScale);
     void updateDisplacementSources(const glm::vec3& playerPos, float playerRadius, float deltaTime);
-    void recordDisplacementUpdate(VkCommandBuffer cmd, uint32_t frameIndex);
-    void recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex, float time);
-    void recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time);
-    void recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time, uint32_t cascadeIndex);
+    void recordDisplacementUpdate(vk::CommandBuffer cmd, uint32_t frameIndex);
+    void recordResetAndCompute(vk::CommandBuffer cmd, uint32_t frameIndex, float time);
+    void recordDraw(vk::CommandBuffer cmd, uint32_t frameIndex, float time);
+    void recordShadowDraw(vk::CommandBuffer cmd, uint32_t frameIndex, float time, uint32_t cascadeIndex);
 
     // Double-buffer management: call at frame start to swap compute/render buffer sets
     void advanceBufferSet();
 
     // Displacement texture accessors (for sharing with LeafSystem)
-    VkImageView getDisplacementImageView() const { return displacementImageView; }
-    VkSampler getDisplacementSampler() const { return displacementSampler_.get(); }
+    vk::ImageView getDisplacementImageView() const { return displacementImageView_; }
+    vk::Sampler getDisplacementSampler() const { return displacementSampler_.get(); }
 
     void setEnvironmentSettings(const EnvironmentSettings* settings) { environmentSettings = settings; }
 
     // Set snow mask texture for snow on grass blades
-    void setSnowMask(VkDevice device, VkImageView snowMaskView, VkSampler snowMaskSampler);
+    void setSnowMask(vk::Device device, vk::ImageView snowMaskView, vk::Sampler snowMaskSampler);
 
 private:
     GrassSystem() = default;  // Private: use factory
@@ -140,13 +155,13 @@ private:
     void destroyBuffers(VmaAllocator allocator);
 
     // Accessors - use stored initInfo during init, particleSystem after init completes
-    VkDevice getDevice() const { return storedDevice; }
-    VmaAllocator getAllocator() const { return storedAllocator; }
-    VkRenderPass getRenderPass() const { return storedRenderPass; }
-    DescriptorManager::Pool* getDescriptorPool() const { return storedDescriptorPool; }
-    const VkExtent2D& getExtent() const { return particleSystem ? (*particleSystem)->getExtent() : storedExtent; }
-    const std::string& getShaderPath() const { return storedShaderPath; }
-    uint32_t getFramesInFlight() const { return storedFramesInFlight; }
+    vk::Device getDevice() const { return device_; }
+    VmaAllocator getAllocator() const { return allocator_; }
+    vk::RenderPass getRenderPass() const { return renderPass_; }
+    DescriptorManager::Pool* getDescriptorPool() const { return descriptorPool_; }
+    vk::Extent2D getExtent() const { return particleSystem ? vk::Extent2D{(*particleSystem)->getExtent().width, (*particleSystem)->getExtent().height} : extent_; }
+    const std::string& getShaderPath() const { return shaderPath_; }
+    uint32_t getFramesInFlight() const { return framesInFlight_; }
 
     SystemLifecycleHelper::PipelineHandles& getComputePipelineHandles() { return (*particleSystem)->getComputePipelineHandles(); }
     SystemLifecycleHelper::PipelineHandles& getGraphicsPipelineHandles() { return (*particleSystem)->getGraphicsPipelineHandles(); }
@@ -154,16 +169,16 @@ private:
     std::optional<RAIIAdapter<ParticleSystem>> particleSystem;
 
     // Stored init info (available during initialization before particleSystem is created)
-    VkDevice storedDevice = VK_NULL_HANDLE;
-    VmaAllocator storedAllocator = VK_NULL_HANDLE;
-    VkRenderPass storedRenderPass = VK_NULL_HANDLE;
-    DescriptorManager::Pool* storedDescriptorPool = nullptr;
-    VkExtent2D storedExtent = {0, 0};
-    std::string storedShaderPath;
-    uint32_t storedFramesInFlight = 0;
+    vk::Device device_;
+    VmaAllocator allocator_ = VK_NULL_HANDLE;
+    vk::RenderPass renderPass_;
+    DescriptorManager::Pool* descriptorPool_ = nullptr;
+    vk::Extent2D extent_;
+    std::string shaderPath_;
+    uint32_t framesInFlight_ = 0;
 
-    VkRenderPass shadowRenderPass = VK_NULL_HANDLE;
-    uint32_t shadowMapSize = 0;
+    vk::RenderPass shadowRenderPass_;
+    uint32_t shadowMapSize_ = 0;
 
     // Shadow pipeline (for casting shadows)
     ManagedDescriptorSetLayout shadowDescriptorSetLayout_;
@@ -175,9 +190,9 @@ private:
     static constexpr float DISPLACEMENT_REGION_SIZE = 50.0f;    // 50m x 50m coverage
     static constexpr uint32_t MAX_DISPLACEMENT_SOURCES = 16;    // Max sources per frame
 
-    VkImage displacementImage = VK_NULL_HANDLE;
-    VmaAllocation displacementAllocation = VK_NULL_HANDLE;
-    VkImageView displacementImageView = VK_NULL_HANDLE;
+    vk::Image displacementImage_;
+    VmaAllocation displacementAllocation_ = VK_NULL_HANDLE;
+    vk::ImageView displacementImageView_;
     ManagedSampler displacementSampler_;
 
     // Displacement update compute pipeline
@@ -185,7 +200,7 @@ private:
     ManagedPipelineLayout displacementPipelineLayout_;
     ManagedPipeline displacementPipeline_;
     // Per-frame descriptor sets for displacement update (double-buffered)
-    std::vector<VkDescriptorSet> displacementDescriptorSets;
+    std::vector<vk::DescriptorSet> displacementDescriptorSets_;
 
     // Displacement sources buffer (per-frame)
     BufferUtils::PerFrameBufferSet displacementSourceBuffers;
@@ -211,19 +226,19 @@ private:
 
     // Descriptor sets: one per buffer set (matches frames in flight)
     // Per-frame descriptor sets for uniform buffers that DO need per-frame copies
-    std::vector<VkDescriptorSet> shadowDescriptorSetsDB;
+    std::vector<vk::DescriptorSet> shadowDescriptorSets_;
 
     // Terrain heightmap for grass placement (stored for compute descriptor updates)
-    VkImageView terrainHeightMapView = VK_NULL_HANDLE;
-    VkSampler terrainHeightMapSampler = VK_NULL_HANDLE;
+    vk::ImageView terrainHeightMapView_;
+    vk::Sampler terrainHeightMapSampler_;
 
     // Tile cache resources for high-res terrain sampling
-    VkImageView tileArrayView = VK_NULL_HANDLE;
-    VkSampler tileSampler = VK_NULL_HANDLE;
-    TripleBuffered<VkBuffer> tileInfoBuffers_;  // Triple-buffered for frames-in-flight sync
+    vk::ImageView tileArrayView_;
+    vk::Sampler tileSampler_;
+    TripleBuffered<vk::Buffer> tileInfoBuffers_;  // Triple-buffered for frames-in-flight sync
 
     // Renderer uniform buffers for per-frame descriptor updates (stores reference from updateDescriptorSets)
-    std::vector<VkBuffer> rendererUniformBuffers_;
+    std::vector<vk::Buffer> rendererUniformBuffers_;
 
     // Dynamic renderer UBO - used with VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC
     // to avoid per-frame descriptor set updates

@@ -19,7 +19,7 @@ Based on `./scripts/analyze-vulkan-usage.sh`:
 | TreeRenderer | ✅ Partially migrated | 57 hpp usages |
 | TerrainSystem | ✅ Partially migrated | 52 hpp usages |
 | PostProcessSystem | ✅ Mostly migrated | 131 hpp usages |
-| GrassSystem | ✅ Partially migrated | 78 hpp usages |
+| GrassSystem | ✅ **Full Type Migration** | 100+ hpp usages |
 | CatmullClarkSystem | ✅ Mostly migrated | 122 hpp usages |
 | OceanFFT | ✅ Mostly migrated | 97 hpp usages |
 | FroxelSystem | ✅ Mostly migrated | 57 hpp usages |
@@ -290,7 +290,7 @@ Based on usage counts and impact. Status indicates current migration progress.
 | `src/vegetation/TreeRenderer.cpp` | ✅ **Full Type Migration** | 100+ | 0 |
 | `src/terrain/TerrainSystem.cpp` | ✅ **Full Type Migration** | 100+ | 0 |
 | `src/postprocess/PostProcessSystem.cpp` | ✅ Migrated | 131 | 51 |
-| `src/vegetation/GrassSystem.cpp` | ⏳ Partial | 78 | 50 |
+| `src/vegetation/GrassSystem.cpp` | ✅ **Full Type Migration** | 100+ | 0 |
 | `src/subdivision/CatmullClarkSystem.cpp` | ✅ Migrated | 122 | 43 |
 
 ### Tier 3: Pipeline Infrastructure ✅ Complete
@@ -325,7 +325,7 @@ Files with highest remaining raw Vulkan usage:
 | `src/core/vulkan/VulkanRAII.h` | 135 |
 | `src/core/vulkan/VulkanResourceFactory.cpp` | 94 |
 | `src/vegetation/TreeLODSystem.cpp` | 89 |
-| `src/vegetation/GrassSystem.cpp` | 80 |
+| ~~`src/vegetation/GrassSystem.cpp`~~ | ✅ Fully migrated |
 | ~~`src/vegetation/TreeRenderer.cpp`~~ | ✅ Fully migrated |
 | ~~`src/terrain/TerrainSystem.cpp`~~ | ✅ Fully migrated |
 
@@ -374,7 +374,7 @@ The codebase already uses `VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1`. The dispatcher
 2. **Complete full type migrations in Tier 2** — Convert all raw Vulkan types (VkBuffer, VkDevice, etc.) to vulkan-hpp types (vk::Buffer, vk::Device, etc.) throughout:
    - `TreeRenderer.cpp` — ✅ **Complete** (all types migrated: InitInfo, member variables, function parameters)
    - `TerrainSystem.cpp` — ✅ **Complete** (all types migrated with backwards-compatible VkExtent2D overload)
-   - `GrassSystem.cpp` — ⏳ Interface types need migration
+   - `GrassSystem.cpp` — ✅ **Complete** (all types migrated with backwards-compatible VkExtent2D and updateDescriptorSets overloads)
 
 ### Medium Priority
 3. ~~**Water & Atmosphere (Tier 4)**~~ — ✅ Mostly Complete

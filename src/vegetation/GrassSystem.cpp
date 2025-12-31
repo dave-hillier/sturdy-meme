@@ -26,8 +26,8 @@ std::unique_ptr<GrassSystem> GrassSystem::create(const InitInfo& info) {
 
 std::optional<GrassSystem::Bundle> GrassSystem::createWithDependencies(
     const InitContext& ctx,
-    VkRenderPass hdrRenderPass,
-    VkRenderPass shadowRenderPass,
+    vk::RenderPass hdrRenderPass,
+    vk::RenderPass shadowRenderPass,
     uint32_t shadowMapSize
 ) {
     // Create wind system
@@ -74,18 +74,18 @@ GrassSystem::~GrassSystem() {
 }
 
 bool GrassSystem::initInternal(const InitInfo& info) {
-    SDL_Log("GrassSystem::init() starting, device=%p, pool=%p", (void*)info.device, (void*)info.descriptorPool);
-    shadowRenderPass = info.shadowRenderPass;
-    shadowMapSize = info.shadowMapSize;
+    SDL_Log("GrassSystem::init() starting, device=%p, pool=%p", (void*)(VkDevice)info.device, (void*)info.descriptorPool);
+    shadowRenderPass_ = info.shadowRenderPass;
+    shadowMapSize_ = info.shadowMapSize;
 
     // Store init info for accessors used during initialization
-    storedDevice = info.device;
-    storedAllocator = info.allocator;
-    storedRenderPass = info.renderPass;
-    storedDescriptorPool = info.descriptorPool;
-    storedExtent = info.extent;
-    storedShaderPath = info.shaderPath;
-    storedFramesInFlight = info.framesInFlight;
+    device_ = info.device;
+    allocator_ = info.allocator;
+    renderPass_ = info.renderPass;
+    descriptorPool_ = info.descriptorPool;
+    extent_ = info.extent;
+    shaderPath_ = info.shaderPath;
+    framesInFlight_ = info.framesInFlight;
 
     // Pointer to the ParticleSystem being initialized (for hooks to access)
     ParticleSystem* initializingPS = nullptr;
@@ -130,22 +130,20 @@ bool GrassSystem::initInternal(const InitInfo& info) {
 }
 
 void GrassSystem::cleanup() {
-    if (!storedDevice) return;  // Not initialized
-
-    vk::Device vkDevice(storedDevice);
+    if (!device_) return;  // Not initialized
 
     // RAII wrappers automatically clean up: shadowPipeline_, shadowPipelineLayout_,
     // shadowDescriptorSetLayout_, displacementPipeline_, displacementPipelineLayout_,
     // displacementDescriptorSetLayout_, displacementSampler_
 
-    if (displacementImageView) {
-        vkDevice.destroyImageView(displacementImageView);
-        displacementImageView = VK_NULL_HANDLE;
+    if (displacementImageView_) {
+        device_.destroyImageView(displacementImageView_);
+        displacementImageView_ = nullptr;
     }
-    if (displacementImage && storedAllocator) {
-        vmaDestroyImage(storedAllocator, displacementImage, displacementAllocation);
-        displacementImage = VK_NULL_HANDLE;
-        displacementAllocation = VK_NULL_HANDLE;
+    if (displacementImage_ && allocator_) {
+        vmaDestroyImage(allocator_, displacementImage_, displacementAllocation_);
+        displacementImage_ = nullptr;
+        displacementAllocation_ = VK_NULL_HANDLE;
     }
 
     particleSystem.reset();
@@ -228,15 +226,17 @@ bool GrassSystem::createDisplacementResources() {
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
 
+    VkImage rawImage = VK_NULL_HANDLE;
     if (vmaCreateImage(getAllocator(), reinterpret_cast<const VkImageCreateInfo*>(&imageInfo), &allocInfo,
-                       &displacementImage, &displacementAllocation, nullptr) != VK_SUCCESS) {
+                       &rawImage, &displacementAllocation_, nullptr) != VK_SUCCESS) {
         SDL_Log("Failed to create displacement image");
         return false;
     }
+    displacementImage_ = rawImage;
 
     // Create image view
     auto viewInfo = vk::ImageViewCreateInfo{}
-        .setImage(displacementImage)
+        .setImage(displacementImage_)
         .setViewType(vk::ImageViewType::e2D)
         .setFormat(vk::Format::eR16G16Sfloat)
         .setSubresourceRange(vk::ImageSubresourceRange{}
@@ -247,7 +247,7 @@ bool GrassSystem::createDisplacementResources() {
             .setLayerCount(1));
 
     try {
-        displacementImageView = vk::Device(getDevice()).createImageView(viewInfo);
+        displacementImageView_ = getDevice().createImageView(viewInfo);
     } catch (const vk::SystemError& e) {
         SDL_Log("Failed to create displacement image view: %s", e.what());
         return false;
@@ -346,16 +346,20 @@ bool GrassSystem::createDisplacementPipeline() {
     }
 
     // Allocate per-frame displacement descriptor sets (double-buffered) using managed pool
-    displacementDescriptorSets = getDescriptorPool()->allocate(displacementDescriptorSetLayout_.get(), getFramesInFlight());
-    if (displacementDescriptorSets.empty()) {
+    auto rawSets = getDescriptorPool()->allocate(displacementDescriptorSetLayout_.get(), getFramesInFlight());
+    if (rawSets.empty()) {
         SDL_Log("Failed to allocate displacement descriptor sets");
         return false;
+    }
+    displacementDescriptorSets_.resize(rawSets.size());
+    for (size_t i = 0; i < rawSets.size(); ++i) {
+        displacementDescriptorSets_[i] = rawSets[i];
     }
 
     // Update each per-frame descriptor set with image and per-frame buffers
     for (uint32_t i = 0; i < getFramesInFlight(); ++i) {
-        DescriptorManager::SetWriter(getDevice(), displacementDescriptorSets[i])
-            .writeStorageImage(0, displacementImageView)
+        DescriptorManager::SetWriter(getDevice(), displacementDescriptorSets_[i])
+            .writeStorageImage(0, displacementImageView_)
             .writeBuffer(1, displacementSourceBuffers.buffers[i], 0, sizeof(DisplacementSource) * MAX_DISPLACEMENT_SOURCES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
             .writeBuffer(2, displacementUniformBuffers.buffers[i], 0, sizeof(DisplacementUniforms))
             .update();
@@ -504,14 +508,14 @@ bool GrassSystem::createShadowPipeline() {
     auto viewport = vk::Viewport{}
         .setX(0.0f)
         .setY(0.0f)
-        .setWidth(static_cast<float>(shadowMapSize))
-        .setHeight(static_cast<float>(shadowMapSize))
+        .setWidth(static_cast<float>(shadowMapSize_))
+        .setHeight(static_cast<float>(shadowMapSize_))
         .setMinDepth(0.0f)
         .setMaxDepth(1.0f);
 
     auto scissor = vk::Rect2D{}
         .setOffset({0, 0})
-        .setExtent({shadowMapSize, shadowMapSize});
+        .setExtent({shadowMapSize_, shadowMapSize_});
 
     auto viewportState = vk::PipelineViewportStateCreateInfo{}
         .setViewports(viewport)
@@ -551,7 +555,7 @@ bool GrassSystem::createShadowPipeline() {
         .setPMultisampleState(&multisampling)
         .setPDepthStencilState(&depthStencil)
         .setPColorBlendState(&colorBlending)
-        .setRenderPass(shadowRenderPass)
+        .setRenderPass(shadowRenderPass_)
         .setSubpass(0);
 
     VkPipeline rawPipeline = VK_NULL_HANDLE;
@@ -573,13 +577,13 @@ bool GrassSystem::createDescriptorSets() {
 
     // Allocate shadow descriptor sets for all buffer sets (matches frames in flight)
     uint32_t bufferSetCount = getFramesInFlight();
-    shadowDescriptorSetsDB.resize(bufferSetCount);
+    shadowDescriptorSets_.resize(bufferSetCount);
 
     for (uint32_t set = 0; set < bufferSetCount; set++) {
         SDL_Log("GrassSystem::createDescriptorSets - allocating shadow set %u", set);
-        shadowDescriptorSetsDB[set] = getDescriptorPool()->allocateSingle(shadowDescriptorSetLayout_.get());
+        shadowDescriptorSets_[set] = getDescriptorPool()->allocateSingle(shadowDescriptorSetLayout_.get());
         SDL_Log("GrassSystem::createDescriptorSets - allocated shadow set %u", set);
-        if (shadowDescriptorSetsDB[set] == VK_NULL_HANDLE) {
+        if (!shadowDescriptorSets_[set]) {
             SDL_Log("Failed to allocate grass shadow descriptor set (set %u)", set);
             return false;
         }
@@ -610,35 +614,35 @@ bool GrassSystem::createExtraPipelines() {
     return true;
 }
 
-void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>& rendererUniformBuffers,
-                                        VkImageView shadowMapView, VkSampler shadowSampler,
-                                        const std::vector<VkBuffer>& windBuffers,
-                                        const std::vector<VkBuffer>& lightBuffersParam,
-                                        VkImageView terrainHeightMapViewParam, VkSampler terrainHeightMapSamplerParam,
-                                        const std::vector<VkBuffer>& snowBuffersParam,
-                                        const std::vector<VkBuffer>& cloudShadowBuffersParam,
-                                        VkImageView cloudShadowMapView, VkSampler cloudShadowMapSampler,
-                                        VkImageView tileArrayViewParam,
-                                        VkSampler tileSamplerParam,
-                                        const std::array<VkBuffer, 3>& tileInfoBuffersParam,
+void GrassSystem::updateDescriptorSets(vk::Device dev, const std::vector<vk::Buffer>& rendererUniformBuffers,
+                                        vk::ImageView shadowMapView, vk::Sampler shadowSampler,
+                                        const std::vector<vk::Buffer>& windBuffers,
+                                        const std::vector<vk::Buffer>& lightBuffersParam,
+                                        vk::ImageView terrainHeightMapViewParam, vk::Sampler terrainHeightMapSamplerParam,
+                                        const std::vector<vk::Buffer>& snowBuffersParam,
+                                        const std::vector<vk::Buffer>& cloudShadowBuffersParam,
+                                        vk::ImageView cloudShadowMapView, vk::Sampler cloudShadowMapSampler,
+                                        vk::ImageView tileArrayViewParam,
+                                        vk::Sampler tileSamplerParam,
+                                        const std::array<vk::Buffer, 3>& tileInfoBuffersParam,
                                         const BufferUtils::DynamicUniformBuffer* dynamicRendererUBO) {
     // Store terrain heightmap info for compute descriptor set updates
-    this->terrainHeightMapView = terrainHeightMapViewParam;
-    this->terrainHeightMapSampler = terrainHeightMapSamplerParam;
+    terrainHeightMapView_ = terrainHeightMapViewParam;
+    terrainHeightMapSampler_ = terrainHeightMapSamplerParam;
 
     // Store tile cache resources (triple-buffered tile info)
-    this->tileArrayView = tileArrayViewParam;
-    this->tileSampler = tileSamplerParam;
+    tileArrayView_ = tileArrayViewParam;
+    tileSampler_ = tileSamplerParam;
     tileInfoBuffers_.resize(tileInfoBuffersParam.size());
     for (size_t i = 0; i < tileInfoBuffersParam.size(); ++i) {
         tileInfoBuffers_[i] = tileInfoBuffersParam[i];
     }
 
     // Store renderer uniform buffers (kept for backward compatibility)
-    this->rendererUniformBuffers_ = rendererUniformBuffers;
+    rendererUniformBuffers_ = rendererUniformBuffers;
 
     // Store dynamic renderer UBO reference for per-frame binding with dynamic offsets
-    this->dynamicRendererUBO_ = dynamicRendererUBO;
+    dynamicRendererUBO_ = dynamicRendererUBO;
 
     // Update compute descriptor sets with terrain heightmap, displacement, and tile cache
     // Note: Bindings 0, 1, 2 are already written in writeComputeDescriptorSets() - only write new bindings here
@@ -647,15 +651,15 @@ void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>
     for (uint32_t set = 0; set < bufferSetCount; set++) {
         // Use non-fluent pattern to avoid copy semantics bug with DescriptorManager::SetWriter
         DescriptorManager::SetWriter computeWriter(dev, (*particleSystem)->getComputeDescriptorSet(set));
-        computeWriter.writeImage(3, terrainHeightMapView, terrainHeightMapSampler);
-        computeWriter.writeImage(4, displacementImageView, displacementSampler_.get());
+        computeWriter.writeImage(3, terrainHeightMapView_, terrainHeightMapSampler_);
+        computeWriter.writeImage(4, displacementImageView_, displacementSampler_.get());
 
         // Tile cache bindings (5 and 6) - for high-res terrain sampling
-        if (tileArrayView != VK_NULL_HANDLE && tileSampler != VK_NULL_HANDLE) {
-            computeWriter.writeImage(5, tileArrayView, tileSampler);
+        if (tileArrayView_) {
+            computeWriter.writeImage(5, tileArrayView_, tileSampler_);
         }
         // Write initial tile info buffer (frame 0) - will be updated per-frame
-        if (!tileInfoBuffers_.empty() && tileInfoBuffers_[0] != VK_NULL_HANDLE) {
+        if (!tileInfoBuffers_.empty() && tileInfoBuffers_[0]) {
             computeWriter.writeBuffer(6, tileInfoBuffers_[0], 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
         }
 
@@ -684,7 +688,7 @@ void GrassSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>
         graphicsWriter.update();
 
         // Shadow descriptor set - use non-fluent pattern
-        DescriptorManager::SetWriter shadowWriter(dev, shadowDescriptorSetsDB[set]);
+        DescriptorManager::SetWriter shadowWriter(dev, shadowDescriptorSets_[set]);
         shadowWriter.writeBuffer(0, rendererUniformBuffers[0], 0, 160);  // sizeof(UniformBufferObject)
         shadowWriter.writeBuffer(1, instanceBuffers.buffers[set], 0, sizeof(GrassInstance) * MAX_INSTANCES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
         shadowWriter.writeBuffer(2, windBuffers[0], 0, 32);  // sizeof(WindUniforms)
@@ -735,7 +739,7 @@ void GrassSystem::updateDisplacementSources(const glm::vec3& playerPos, float pl
     // Future: Add NPCs, projectiles, etc. here
 }
 
-void GrassSystem::recordDisplacementUpdate(VkCommandBuffer cmd, uint32_t frameIndex) {
+void GrassSystem::recordDisplacementUpdate(vk::CommandBuffer cmd, uint32_t frameIndex) {
     // Copy displacement sources to per-frame buffer (double-buffered)
     memcpy(displacementSourceBuffers.mappedPointers[frameIndex], currentDisplacementSources.data(),
            sizeof(DisplacementSource) * currentDisplacementSources.size());
@@ -753,27 +757,26 @@ void GrassSystem::recordDisplacementUpdate(VkCommandBuffer cmd, uint32_t frameIn
 
     // Transition displacement image to general layout if needed (first frame)
     // For subsequent frames, it should already be in GENERAL layout
-    Barriers::transitionImage(cmd, displacementImage,
+    Barriers::transitionImage(cmd, displacementImage_,
         VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
         0, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
 
     // Dispatch displacement update compute shader using per-frame descriptor set (double-buffered)
-    vk::CommandBuffer vkCmd(cmd);
-    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, displacementPipeline_.get());
-    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute,
-                             displacementPipelineLayout_.get(), 0,
-                             vk::DescriptorSet(displacementDescriptorSets[frameIndex]), {});
+    cmd.bindPipeline(vk::PipelineBindPoint::eCompute, displacementPipeline_.get());
+    cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute,
+                           displacementPipelineLayout_.get(), 0,
+                           displacementDescriptorSets_[frameIndex], {});
 
     // Dispatch: 512x512 / 16x16 = 32x32 workgroups
-    vkCmd.dispatch(32, 32, 1);
+    cmd.dispatch(32, 32, 1);
 
     // Barrier: displacement compute write -> grass compute read
-    Barriers::imageComputeToSampling(cmd, displacementImage,
+    Barriers::imageComputeToSampling(cmd, displacementImage_,
         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
 }
 
-void GrassSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex, float time) {
+void GrassSystem::recordResetAndCompute(vk::CommandBuffer cmd, uint32_t frameIndex, float time) {
     // Double-buffer: compute writes to computeBufferSet
     uint32_t writeSet = (*particleSystem)->getComputeBufferSet();
 
@@ -784,7 +787,7 @@ void GrassSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex
     writer.writeBuffer(7, paramsBuffers.buffers[frameIndex], 0, sizeof(GrassParams));
 
     // Update tile info buffer to the correct frame's buffer (triple-buffered to avoid CPU-GPU sync)
-    if (!tileInfoBuffers_.empty() && tileInfoBuffers_.at(frameIndex) != VK_NULL_HANDLE) {
+    if (!tileInfoBuffers_.empty() && tileInfoBuffers_.at(frameIndex)) {
         writer.writeBuffer(6, tileInfoBuffers_.at(frameIndex), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
     }
     writer.update();
@@ -798,16 +801,15 @@ void GrassSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex
     Barriers::clearBufferForComputeReadWrite(cmd, indirectBuffers.buffers[writeSet], 0, sizeof(VkDrawIndirectCommand));
 
     // Dispatch grass compute shader using the compute buffer set
-    vk::CommandBuffer vkCmd(cmd);
-    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, getComputePipelineHandles().pipeline);
+    cmd.bindPipeline(vk::PipelineBindPoint::eCompute, getComputePipelineHandles().pipeline);
     VkDescriptorSet computeSet = (*particleSystem)->getComputeDescriptorSet(writeSet);
-    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute,
-                             getComputePipelineHandles().pipelineLayout, 0,
-                             vk::DescriptorSet(computeSet), {});
+    cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute,
+                           getComputePipelineHandles().pipelineLayout, 0,
+                           vk::DescriptorSet(computeSet), {});
 
     GrassPushConstants grassPush{};
     grassPush.time = time;
-    vkCmd.pushConstants<GrassPushConstants>(
+    cmd.pushConstants<GrassPushConstants>(
         getComputePipelineHandles().pipelineLayout,
         vk::ShaderStageFlagBits::eCompute,
         0, grassPush);
@@ -815,7 +817,7 @@ void GrassSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex
     // Dispatch: 2D grid of workgroups for better texture cache coherency
     // Grid: 1000x1000 blades, Workgroup: 16x16 threads
     // ceil(1000/16) = 63 workgroups per dimension (63*63*256 = 1,016,064 threads)
-    vkCmd.dispatch(63, 63, 1);
+    cmd.dispatch(63, 63, 1);
 
     // Memory barrier: compute write -> vertex shader read (storage buffer) and indirect read
     // Note: This barrier ensures the compute results are visible when we draw from this buffer
@@ -823,85 +825,83 @@ void GrassSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex
     Barriers::computeToVertexAndIndirectDraw(cmd);
 }
 
-void GrassSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time) {
+void GrassSystem::recordDraw(vk::CommandBuffer cmd, uint32_t frameIndex, float time) {
     // Double-buffer: graphics reads from renderBufferSet (previous frame's compute output)
     uint32_t readSet = (*particleSystem)->getRenderBufferSet();
 
     // Dynamic UBO: no per-frame descriptor update needed - we pass the offset at bind time instead
     // This eliminates per-frame vkUpdateDescriptorSets calls for the renderer UBO
 
-    vk::CommandBuffer vkCmd(cmd);
-    vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, getGraphicsPipelineHandles().pipeline);
+    cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, getGraphicsPipelineHandles().pipeline);
 
     // Set dynamic viewport and scissor to handle window resize
+    vk::Extent2D ext = getExtent();
     auto viewport = vk::Viewport{}
         .setX(0.0f)
         .setY(0.0f)
-        .setWidth(static_cast<float>(getExtent().width))
-        .setHeight(static_cast<float>(getExtent().height))
+        .setWidth(static_cast<float>(ext.width))
+        .setHeight(static_cast<float>(ext.height))
         .setMinDepth(0.0f)
         .setMaxDepth(1.0f);
-    vkCmd.setViewport(0, viewport);
+    cmd.setViewport(0, viewport);
 
-    VkExtent2D rawExtent = getExtent();
     auto scissor = vk::Rect2D{}
         .setOffset({0, 0})
-        .setExtent({rawExtent.width, rawExtent.height});
-    vkCmd.setScissor(0, scissor);
+        .setExtent(ext);
+    cmd.setScissor(0, scissor);
 
     VkDescriptorSet graphicsSet = (*particleSystem)->getGraphicsDescriptorSet(readSet);
 
     // Use dynamic offset for binding 0 (renderer UBO) if dynamic buffer is available
     if (dynamicRendererUBO_ && dynamicRendererUBO_->isValid()) {
         uint32_t dynamicOffset = dynamicRendererUBO_->getDynamicOffset(frameIndex);
-        vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
-                                 getGraphicsPipelineHandles().pipelineLayout, 0,
-                                 vk::DescriptorSet(graphicsSet), dynamicOffset);
+        cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+                               getGraphicsPipelineHandles().pipelineLayout, 0,
+                               vk::DescriptorSet(graphicsSet), dynamicOffset);
     } else {
-        vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
-                                 getGraphicsPipelineHandles().pipelineLayout, 0,
-                                 vk::DescriptorSet(graphicsSet), {});
+        cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+                               getGraphicsPipelineHandles().pipelineLayout, 0,
+                               vk::DescriptorSet(graphicsSet), {});
     }
 
     GrassPushConstants grassPush{};
     grassPush.time = time;
-    vkCmd.pushConstants<GrassPushConstants>(
+    cmd.pushConstants<GrassPushConstants>(
         getGraphicsPipelineHandles().pipelineLayout,
         vk::ShaderStageFlagBits::eVertex,
         0, grassPush);
 
-    vkCmd.drawIndirect(indirectBuffers.buffers[readSet], 0, 1, sizeof(VkDrawIndirectCommand));
+    cmd.drawIndirect(indirectBuffers.buffers[readSet], 0, 1, sizeof(VkDrawIndirectCommand));
 }
 
-void GrassSystem::recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time, uint32_t cascadeIndex) {
+void GrassSystem::recordShadowDraw(vk::CommandBuffer cmd, uint32_t frameIndex, float time, uint32_t cascadeIndex) {
     // Double-buffer: shadow pass reads from renderBufferSet (same as main draw)
     uint32_t readSet = (*particleSystem)->getRenderBufferSet();
 
     // Update shadow descriptor set to use this frame's renderer UBO
     if (!rendererUniformBuffers_.empty()) {
-        DescriptorManager::SetWriter(getDevice(), shadowDescriptorSetsDB[readSet])
+        DescriptorManager::SetWriter(getDevice(), shadowDescriptorSets_[readSet])
             .writeBuffer(0, rendererUniformBuffers_[frameIndex], 0, 160)
             .update();
     }
 
-    vk::CommandBuffer vkCmd(cmd);
-    vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, shadowPipeline_.get());
-    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
-                             shadowPipelineLayout_.get(), 0,
-                             vk::DescriptorSet(shadowDescriptorSetsDB[readSet]), {});
+    cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, shadowPipeline_.get());
+    cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+                           shadowPipelineLayout_.get(), 0,
+                           shadowDescriptorSets_[readSet], {});
 
     GrassPushConstants grassPush{};
     grassPush.time = time;
     grassPush.cascadeIndex = static_cast<int>(cascadeIndex);
-    vkCmd.pushConstants<GrassPushConstants>(
+    cmd.pushConstants<GrassPushConstants>(
         shadowPipelineLayout_.get(),
         vk::ShaderStageFlagBits::eVertex,
         0, grassPush);
 
-    vkCmd.drawIndirect(indirectBuffers.buffers[readSet], 0, 1, sizeof(VkDrawIndirectCommand));
+    cmd.drawIndirect(indirectBuffers.buffers[readSet], 0, 1, sizeof(VkDrawIndirectCommand));
 }
 
-void GrassSystem::setSnowMask(VkDevice device, VkImageView snowMaskView, VkSampler snowMaskSampler) {
+void GrassSystem::setSnowMask(vk::Device device, vk::ImageView snowMaskView, vk::Sampler snowMaskSampler) {
     // Update graphics descriptor sets with snow mask texture
     uint32_t bufferSetCount = (*particleSystem)->getBufferSetCount();
     for (uint32_t setIndex = 0; setIndex < bufferSetCount; setIndex++) {
@@ -909,6 +909,50 @@ void GrassSystem::setSnowMask(VkDevice device, VkImageView snowMaskView, VkSampl
             .writeImage(5, snowMaskView, snowMaskSampler)
             .update();
     }
+}
+
+// Backward-compatible overload: convert raw Vulkan types to vk:: types
+void GrassSystem::updateDescriptorSets(VkDevice device, const std::vector<VkBuffer>& uniformBuffers,
+                                        VkImageView shadowMapView, VkSampler shadowSampler,
+                                        const std::vector<VkBuffer>& windBuffers,
+                                        const std::vector<VkBuffer>& lightBuffersParam,
+                                        VkImageView terrainHeightMapViewParam, VkSampler terrainHeightMapSamplerParam,
+                                        const std::vector<VkBuffer>& snowBuffersParam,
+                                        const std::vector<VkBuffer>& cloudShadowBuffersParam,
+                                        VkImageView cloudShadowMapView, VkSampler cloudShadowMapSampler,
+                                        VkImageView tileArrayViewParam,
+                                        VkSampler tileSamplerParam,
+                                        const std::array<VkBuffer, 3>& tileInfoBuffersParam,
+                                        const BufferUtils::DynamicUniformBuffer* dynamicRendererUBO) {
+    // Convert vectors
+    std::vector<vk::Buffer> vkUniformBuffers(uniformBuffers.begin(), uniformBuffers.end());
+    std::vector<vk::Buffer> vkWindBuffers(windBuffers.begin(), windBuffers.end());
+    std::vector<vk::Buffer> vkLightBuffers(lightBuffersParam.begin(), lightBuffersParam.end());
+    std::vector<vk::Buffer> vkSnowBuffers(snowBuffersParam.begin(), snowBuffersParam.end());
+    std::vector<vk::Buffer> vkCloudShadowBuffers(cloudShadowBuffersParam.begin(), cloudShadowBuffersParam.end());
+    std::array<vk::Buffer, 3> vkTileInfoBuffers;
+    for (size_t i = 0; i < 3; ++i) {
+        vkTileInfoBuffers[i] = tileInfoBuffersParam[i];
+    }
+
+    // Call the vk:: version
+    updateDescriptorSets(
+        vk::Device(device),
+        vkUniformBuffers,
+        vk::ImageView(shadowMapView),
+        vk::Sampler(shadowSampler),
+        vkWindBuffers,
+        vkLightBuffers,
+        vk::ImageView(terrainHeightMapViewParam),
+        vk::Sampler(terrainHeightMapSamplerParam),
+        vkSnowBuffers,
+        vkCloudShadowBuffers,
+        vk::ImageView(cloudShadowMapView),
+        vk::Sampler(cloudShadowMapSampler),
+        vk::ImageView(tileArrayViewParam),
+        vk::Sampler(tileSamplerParam),
+        vkTileInfoBuffers,
+        dynamicRendererUBO);
 }
 
 void GrassSystem::advanceBufferSet() {
