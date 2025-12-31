@@ -340,7 +340,12 @@ bool Application::init(const std::string& title, int width, int height) {
     }
 
     // Create player entity and character controller
-    float playerSpawnX = 0.0f, playerSpawnZ = 0.0f;
+    // Spawn at Town 1 settlement location (same as camera and scene origin)
+    const float halfTerrain = 8192.0f;
+    const float settlementX = 9200.0f;  // Town 1 in 0-16384 space
+    const float settlementZ = 3000.0f;
+    float playerSpawnX = settlementX - halfTerrain;  // 1008
+    float playerSpawnZ = settlementZ - halfTerrain;  // -5192
     float playerSpawnY = terrain.getHeightAt(playerSpawnX, playerSpawnZ) + 0.1f;
 
     // Debug: Sample terrain height at spawn position using different methods

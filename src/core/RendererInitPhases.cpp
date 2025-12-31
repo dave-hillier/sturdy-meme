@@ -259,6 +259,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     rockConfig.minRadius = 0.4f;
     rockConfig.maxRadius = 2.0f;
     rockConfig.placementRadius = 100.0f;
+    rockConfig.placementCenter = sceneInfo.sceneOrigin;  // Place rocks at settlement location
     rockConfig.minDistanceBetween = 4.0f;
     rockConfig.roughness = 0.35f;
     rockConfig.asymmetry = 0.3f;
@@ -297,7 +298,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         }
     }
 
-    // Add trees to the scene
+    // Add trees to the scene - place woods a few hundred units from settlement
     std::string presetDir = treeInfo.resourcePath + "/assets/trees/presets/";
 
     auto loadPresetOrDefault = [&](const std::string& presetName, TreeOptions (*defaultFn)()) {
@@ -308,23 +309,27 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         return defaultFn();
     };
 
+    // Demo trees placed near the settlement (0-50 units offset)
+    const float demoTreeX = sceneInfo.sceneOrigin.x;
+    const float demoTreeZ = sceneInfo.sceneOrigin.y;
+
     // Oak tree
-    float oakX = 35.0f, oakZ = 25.0f;
+    float oakX = demoTreeX + 35.0f, oakZ = demoTreeZ + 25.0f;
     glm::vec3 oakPos(oakX, core.terrain.getHeightAt(oakX, oakZ), oakZ);
     treeSystem->addTree(oakPos, 0.0f, 1.0f, loadPresetOrDefault("oak_large.json", TreeOptions::defaultOak));
 
     // Pine tree
-    float pineX = 50.0f, pineZ = -30.0f;
+    float pineX = demoTreeX + 50.0f, pineZ = demoTreeZ - 30.0f;
     glm::vec3 pinePos(pineX, core.terrain.getHeightAt(pineX, pineZ), pineZ);
     treeSystem->addTree(pinePos, 0.5f, 1.0f, loadPresetOrDefault("pine_large.json", TreeOptions::defaultPine));
 
     // Ash tree
-    float ashX = -40.0f, ashZ = -25.0f;
+    float ashX = demoTreeX - 40.0f, ashZ = demoTreeZ - 25.0f;
     glm::vec3 ashPos(ashX, core.terrain.getHeightAt(ashX, ashZ), ashZ);
     treeSystem->addTree(ashPos, 1.0f, 1.0f, loadPresetOrDefault("ash_large.json", TreeOptions::defaultOak));
 
     // Aspen tree
-    float aspenX = 30.0f, aspenZ = 40.0f;
+    float aspenX = demoTreeX + 30.0f, aspenZ = demoTreeZ + 40.0f;
     glm::vec3 aspenPos(aspenX, core.terrain.getHeightAt(aspenX, aspenZ), aspenZ);
     treeSystem->addTree(aspenPos, 1.5f, 1.0f, loadPresetOrDefault("aspen_large.json", TreeOptions::defaultOak));
 
@@ -402,13 +407,13 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         }
     }
 
-    // Add a forest 300 units away from the initial position (0, 0, 0)
+    // Add a forest 200 units away from the settlement
     // The forest is placed away from spawn for load testing
     {
         auto* treeSystem = systems_->tree();
         if (treeSystem) {
-            const float forestCenterX = 300.0f;
-            const float forestCenterZ = 100.0f;
+            const float forestCenterX = sceneInfo.sceneOrigin.x + 200.0f;
+            const float forestCenterZ = sceneInfo.sceneOrigin.y + 100.0f;
             const float forestRadius = 80.0f;
             const int numTrees = 500;
 
@@ -510,7 +515,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
                 treesPlaced++;
             }
 
-            SDL_Log("Forest added: %d trees (Poisson disk) at distance 300 units", treesPlaced);
+            SDL_Log("Forest added: %d trees (Poisson disk) at distance 200 units from settlement", treesPlaced);
 
             // Generate impostor archetypes for each unique tree type
             // The first 4 trees (display trees) define the archetypes: oak, pine, ash, aspen
