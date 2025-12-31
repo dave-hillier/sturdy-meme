@@ -134,7 +134,6 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     }
 
     // Initialize terrain system BEFORE scene so scene objects can query terrain height
-    std::string heightmapPath = resourcePath + "/assets/terrain/isleofwight-0m-200m.png";
     std::string terrainDataPath = resourcePath + "/terrain_data";
 
     // Initialize terrain system with CBT (loads heightmap directly)
@@ -151,8 +150,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     terrainConfig.targetEdgePixels = 16.0f;
     terrainConfig.splitThreshold = 100.0f;
     terrainConfig.mergeThreshold = 50.0f;
-    // Load Isle of Wight heightmap (-15m to 200m altitude range, includes beaches below sea level)
-    terrainConfig.heightmapPath = resourcePath + "/assets/terrain/isleofwight-0m-200m.png";
+    // Isle of Wight altitude range (-15m to 220m, includes beaches below sea level)
     terrainConfig.minAltitude = -15.0f;
     terrainConfig.maxAltitude = 220.0f;
     // heightScale is computed from minAltitude/maxAltitude during init
@@ -1095,7 +1093,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         auto& vis = systems_->roadRiverVis();
         vis.setWaterData(&systems_->erosionData().getWaterData());
         vis.setRoadNetwork(&systems_->roadData().getRoadNetwork());
-        vis.setTerrainHeightMap(systems_->terrain().getHeightMap());
+        vis.setTerrainTileCache(systems_->terrain().getTileCache());
 
         // Default config - can be modified via GUI later
         RoadRiverVisConfig visConfig{};

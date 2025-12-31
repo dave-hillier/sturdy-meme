@@ -8,7 +8,7 @@
 #include <vector>
 
 class DebugLineSystem;
-class TerrainHeightMap;
+class TerrainTileCache;
 struct WaterPlacementData;
 struct RoadNetwork;
 
@@ -44,7 +44,7 @@ public:
     // Set data sources (marks cache dirty)
     void setWaterData(const WaterPlacementData* waterData) { waterData_ = waterData; dirty_ = true; }
     void setRoadNetwork(const RoadNetwork* roadNetwork) { roadNetwork_ = roadNetwork; dirty_ = true; }
-    void setTerrainHeightMap(const TerrainHeightMap* heightMap) { heightMap_ = heightMap; dirty_ = true; }
+    void setTerrainTileCache(const TerrainTileCache* tileCache) { tileCache_ = tileCache; dirty_ = true; }
 
     // Force rebuild of cached geometry
     void invalidateCache() { dirty_ = true; }
@@ -75,7 +75,7 @@ private:
     RoadRiverVisConfig config_;
     const WaterPlacementData* waterData_ = nullptr;
     const RoadNetwork* roadNetwork_ = nullptr;
-    const TerrainHeightMap* heightMap_ = nullptr;
+    const TerrainTileCache* tileCache_ = nullptr;
 
     // Cached line vertices (pairs for each line segment)
     std::vector<CachedVertex> cachedLineVertices_;

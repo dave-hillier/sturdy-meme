@@ -1,6 +1,5 @@
 #include "PhysicsTerrainTileManager.h"
 #include "terrain/TerrainTileCache.h"
-#include "terrain/TerrainHeightMap.h"
 #include <SDL3/SDL_log.h>
 #include <algorithm>
 #include <cmath>
@@ -13,17 +12,6 @@ bool PhysicsTerrainTileManager::init(PhysicsWorld& physics, TerrainTileCache& ti
     SDL_Log("PhysicsTerrainTileManager: Initialized with loadRadius=%.0f, unloadRadius=%.0f",
             config_.loadRadius, config_.unloadRadius);
     return true;
-}
-
-std::vector<uint8_t> PhysicsTerrainTileManager::generateTileHoleMask(
-    float tileMinX, float tileMinZ, float tileMaxX, float tileMaxZ, uint32_t sampleCount) const {
-
-    if (!terrainHeightMap_) {
-        return std::vector<uint8_t>(sampleCount * sampleCount, 0);
-    }
-
-    // Use TerrainHeightMap's high-resolution tile rasterization
-    return terrainHeightMap_->rasterizeHolesForTile(tileMinX, tileMinZ, tileMaxX, tileMaxZ, sampleCount);
 }
 
 void PhysicsTerrainTileManager::cleanup() {
@@ -123,8 +111,8 @@ bool PhysicsTerrainTileManager::loadPhysicsTile(int32_t tileX, int32_t tileZ, ui
     // Create Jolt heightfield body at tile position
     uint32_t sampleCount = tileCache_->getTileResolution();
 
-    // Generate per-tile hole mask by sampling the global hole mask
-    std::vector<uint8_t> tileHoleMask = generateTileHoleMask(
+    // Generate per-tile hole mask from tile cache
+    std::vector<uint8_t> tileHoleMask = tileCache_->rasterizeHolesForTile(
         tile->worldMinX, tile->worldMinZ,
         tile->worldMaxX, tile->worldMaxZ,
         sampleCount);

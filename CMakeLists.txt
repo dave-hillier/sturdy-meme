@@ -125,7 +125,6 @@ set(SOURCES
     src/terrain/TerrainBuffers.cpp
     src/terrain/TerrainCameraOptimizer.cpp
     src/terrain/TerrainPipelines.cpp
-    src/terrain/TerrainHeightMap.cpp
     src/terrain/TerrainTextures.cpp
     src/terrain/TerrainCBT.cpp
     src/terrain/TerrainMeshlet.cpp

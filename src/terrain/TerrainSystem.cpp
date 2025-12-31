@@ -45,23 +45,6 @@ bool TerrainSystem::initInternal(const InitInfo& info, const TerrainConfig& cfg)
     // Compute heightScale from altitude range
     config.heightScale = config.maxAltitude - config.minAltitude;
 
-    // Initialize height map with RAII wrapper
-    // Note: Tile cache provides base LOD coverage from LOD3 tiles.
-    // TerrainHeightMap is a fallback for positions outside tile cache coverage.
-    TerrainHeightMap::InitInfo heightMapInfo{};
-    heightMapInfo.device = device;
-    heightMapInfo.allocator = allocator;
-    heightMapInfo.graphicsQueue = graphicsQueue;
-    heightMapInfo.commandPool = commandPool;
-    heightMapInfo.resolution = 512;
-    heightMapInfo.terrainSize = config.size;
-    heightMapInfo.heightScale = config.heightScale;
-    heightMapInfo.heightmapPath = config.heightmapPath;
-    heightMapInfo.minAltitude = config.minAltitude;
-    heightMapInfo.maxAltitude = config.maxAltitude;
-    heightMap = TerrainHeightMap::create(heightMapInfo);
-    if (!heightMap) return false;
-
     // Initialize textures with RAII wrapper
     TerrainTextures::InitInfo texturesInfo{};
     texturesInfo.device = device;
@@ -224,7 +207,6 @@ void TerrainSystem::cleanup() {
     meshlet.reset();
     cbt.reset();
     textures.reset();
-    heightMap.reset();
 }
 
 
@@ -343,12 +325,9 @@ bool TerrainSystem::createDescriptorSets() {
         writer.writeBuffer(0, (*cbt)->getBuffer(), 0, (*cbt)->getBufferSize(), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
         writer.writeBuffer(1, (*buffers)->getIndirectDispatchBuffer(), 0, sizeof(VkDispatchIndirectCommand), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
         writer.writeBuffer(2, (*buffers)->getIndirectDrawBuffer(), 0, sizeof(VkDrawIndexedIndirectCommand), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-        // Height map fallback (binding 3) - use tile cache base heightmap
+        // Height map (binding 3) - use tile cache base heightmap
         if (tileCache && tileCache->getBaseHeightMapView() != VK_NULL_HANDLE) {
             writer.writeImage(3, tileCache->getBaseHeightMapView(), tileCache->getBaseHeightMapSampler());
-        } else {
-            // Fallback to heightMap if tile cache not ready (should not happen in normal operation)
-            writer.writeImage(3, heightMap->getView(), heightMap->getSampler());
         }
         writer.writeBuffer(4, (*buffers)->getUniformBuffer(i), 0, sizeof(TerrainUniforms));
         writer.writeBuffer(5, (*buffers)->getVisibleIndicesBuffer(), 0, sizeof(uint32_t) * (1 + MAX_VISIBLE_TRIANGLES), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
@@ -453,13 +432,9 @@ void TerrainSystem::updateDescriptorSets(vk::Device device,
         writer.writeBuffer(0, (*cbt)->getBuffer(), 0, (*cbt)->getBufferSize(),
                           VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
 
-        // Height map fallback (binding 3) - use tile cache base heightmap
+        // Height map (binding 3) - use tile cache base heightmap
         if (tileCache && tileCache->getBaseHeightMapView() != VK_NULL_HANDLE) {
             writer.writeImage(3, tileCache->getBaseHeightMapView(), tileCache->getBaseHeightMapSampler(),
-                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        } else {
-            // Fallback to heightMap if tile cache not ready (should not happen in normal operation)
-            writer.writeImage(3, heightMap->getView(), heightMap->getSampler(),
                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         }
 
@@ -495,8 +470,10 @@ void TerrainSystem::updateDescriptorSets(vk::Device device,
         }
 
         // Hole mask (binding 16)
-        writer.writeImage(16, heightMap->getHoleMaskView(), heightMap->getHoleMaskSampler(),
-                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        if (tileCache && tileCache->getHoleMaskView() != VK_NULL_HANDLE) {
+            writer.writeImage(16, tileCache->getHoleMaskView(), tileCache->getHoleMaskSampler(),
+                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        }
 
         // Snow UBO (binding 17)
         if (i < snowUBOBuffers.size() && snowUBOBuffers[i] != VK_NULL_HANDLE) {
@@ -524,9 +501,6 @@ void TerrainSystem::updateDescriptorSets(vk::Device device,
         // Caustics texture (binding 21) - use tile cache base heightmap as placeholder until setCaustics is called
         if (tileCache && tileCache->getBaseHeightMapView() != VK_NULL_HANDLE) {
             writer.writeImage(21, tileCache->getBaseHeightMapView(), tileCache->getBaseHeightMapSampler(),
-                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        } else {
-            writer.writeImage(21, heightMap->getView(), heightMap->getSampler(),
                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         }
 

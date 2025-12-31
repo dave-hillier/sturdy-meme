@@ -9,7 +9,6 @@
 #include <memory>
 #include "interfaces/ITerrainControl.h"
 #include "UBOs.h"
-#include "TerrainHeightMap.h"
 #include "TerrainTextures.h"
 #include "TerrainCBT.h"
 #include "TerrainMeshlet.h"
@@ -99,9 +98,8 @@ struct TerrainConfig {
     float splitThreshold = 24.0f;     // Screen pixels to trigger split (with hysteresis)
     float mergeThreshold = 8.0f;      // Screen pixels to trigger merge
     uint32_t spreadFactor = 2;        // Temporal spreading: process 1/N triangles per frame (1 = all)
-    std::string heightmapPath;        // Optional: path to 16-bit PNG heightmap
-    float minAltitude = -15.0f;         // Altitude for height value 0 (when loading from file)
-    float maxAltitude = 220.0f;       // Altitude for height value 65535 (when loading from file)
+    float minAltitude = -15.0f;         // Altitude for height value 0
+    float maxAltitude = 220.0f;       // Altitude for height value 65535
 
     // Computed height scale (maxAltitude - minAltitude), set during init
     float heightScale = 0.0f;
@@ -260,17 +258,14 @@ public:
     }
 
     // Hole mask for caves/wells (areas with no terrain)
-    bool isHole(float x, float z) const { return heightMap->isHole(x, z); }
+    bool isHole(float x, float z) const { return tileCache && tileCache->isHole(x, z); }
     void addHoleCircle(float centerX, float centerZ, float radius) {
-        heightMap->addHoleCircle(centerX, centerZ, radius);
+        if (tileCache) tileCache->addHoleCircle(centerX, centerZ, radius);
     }
     void removeHoleCircle(float centerX, float centerZ, float radius) {
-        heightMap->removeHoleCircle(centerX, centerZ, radius);
+        if (tileCache) tileCache->removeHoleCircle(centerX, centerZ, radius);
     }
-    void uploadHoleMaskToGPU() { heightMap->uploadHoleMaskToGPU(); }
-
-    // Access to underlying height map for physics hole queries
-    TerrainHeightMap* getHeightMap() { return heightMap.get(); }
+    void uploadHoleMaskToGPU() { if (tileCache) tileCache->uploadHoleMaskToGPU(); }
 
     // Tile cache accessor for physics integration (returns nullptr if not enabled)
     TerrainTileCache* getTileCache() { return tileCache.get(); }
@@ -340,7 +335,6 @@ private:
     vk::CommandPool commandPool;
 
     // Composed subsystems (RAII-managed)
-    std::unique_ptr<TerrainHeightMap> heightMap;
     std::optional<RAIIAdapter<TerrainTextures>> textures;
     std::optional<RAIIAdapter<TerrainCBT>> cbt;
     std::unique_ptr<TerrainMeshlet> meshlet;

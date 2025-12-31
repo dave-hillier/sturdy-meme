@@ -152,6 +152,19 @@ bool TerrainTileCache::initInternal(const InitInfo& info) {
         return false;
     }
 
+    // Initialize hole mask (starts empty - no holes)
+    holeMaskCpuData_.resize(holeMaskResolution_ * holeMaskResolution_, 0);
+    if (!createHoleMaskResources()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "TerrainTileCache: Failed to create hole mask resources");
+        return false;
+    }
+    if (!uploadHoleMaskToGPUInternal()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "TerrainTileCache: Failed to upload hole mask to GPU");
+        return false;
+    }
+
     return true;
 }
 
@@ -199,6 +212,19 @@ void TerrainTileCache::cleanup() {
         vmaDestroyImage(allocator, baseHeightMapImage_, baseHeightMapAllocation_);
         baseHeightMapImage_ = VK_NULL_HANDLE;
     }
+
+    // Destroy hole mask resources
+    holeMaskSampler_.reset();
+    if (holeMaskImageView_) {
+        vkDestroyImageView(device, holeMaskImageView_, nullptr);
+        holeMaskImageView_ = VK_NULL_HANDLE;
+    }
+    if (holeMaskImage_) {
+        vmaDestroyImage(allocator, holeMaskImage_, holeMaskAllocation_);
+        holeMaskImage_ = VK_NULL_HANDLE;
+    }
+    holeMaskCpuData_.clear();
+    holes_.clear();
 
     // Destroy sampler (RAII via reset)
     sampler.reset();
@@ -1146,4 +1172,231 @@ std::vector<const TerrainTile*> TerrainTileCache::getAllCPUTiles() const {
         }
     }
     return result;
+}
+
+// ============================================================================
+// Hole mask functionality
+// ============================================================================
+
+bool TerrainTileCache::createHoleMaskResources() {
+    // Create Vulkan image for hole mask (R8_UNORM: 0=solid, 255=hole)
+    auto imageInfo = vk::ImageCreateInfo{}
+        .setImageType(vk::ImageType::e2D)
+        .setFormat(vk::Format::eR8Unorm)
+        .setExtent(vk::Extent3D{holeMaskResolution_, holeMaskResolution_, 1})
+        .setMipLevels(1)
+        .setArrayLayers(1)
+        .setSamples(vk::SampleCountFlagBits::e1)
+        .setTiling(vk::ImageTiling::eOptimal)
+        .setUsage(vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst)
+        .setSharingMode(vk::SharingMode::eExclusive)
+        .setInitialLayout(vk::ImageLayout::eUndefined);
+
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+
+    if (vmaCreateImage(allocator, reinterpret_cast<const VkImageCreateInfo*>(&imageInfo), &allocInfo,
+                       &holeMaskImage_, &holeMaskAllocation_, nullptr) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TerrainTileCache: Failed to create hole mask image");
+        return false;
+    }
+
+    // Create image view
+    auto viewInfo = vk::ImageViewCreateInfo{}
+        .setImage(holeMaskImage_)
+        .setViewType(vk::ImageViewType::e2D)
+        .setFormat(vk::Format::eR8Unorm)
+        .setSubresourceRange(vk::ImageSubresourceRange{}
+            .setAspectMask(vk::ImageAspectFlagBits::eColor)
+            .setBaseMipLevel(0)
+            .setLevelCount(1)
+            .setBaseArrayLayer(0)
+            .setLayerCount(1));
+
+    if (vkCreateImageView(device, reinterpret_cast<const VkImageViewCreateInfo*>(&viewInfo), nullptr,
+                          &holeMaskImageView_) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TerrainTileCache: Failed to create hole mask image view");
+        return false;
+    }
+
+    // Create sampler (linear filtering for smooth edges)
+    if (!VulkanResourceFactory::createSamplerLinearClamp(device, holeMaskSampler_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TerrainTileCache: Failed to create hole mask sampler");
+        return false;
+    }
+
+    return true;
+}
+
+bool TerrainTileCache::uploadHoleMaskToGPUInternal() {
+    VkDeviceSize imageSize = holeMaskResolution_ * holeMaskResolution_ * sizeof(uint8_t);
+
+    // Create staging buffer
+    ManagedBuffer stagingBuffer;
+    if (!VulkanResourceFactory::createStagingBuffer(allocator, imageSize, stagingBuffer)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TerrainTileCache: Failed to create staging buffer for hole mask");
+        return false;
+    }
+
+    // Copy data to staging buffer
+    void* mappedData = stagingBuffer.map();
+    memcpy(mappedData, holeMaskCpuData_.data(), imageSize);
+    stagingBuffer.unmap();
+
+    // Use CommandScope for one-time command submission
+    CommandScope cmd(device, commandPool, graphicsQueue);
+    if (!cmd.begin()) return false;
+
+    // Copy staging buffer to hole mask image with automatic barrier transitions
+    Barriers::copyBufferToImage(cmd.get(), stagingBuffer.get(), holeMaskImage_,
+                                holeMaskResolution_, holeMaskResolution_);
+
+    if (!cmd.end()) return false;
+
+    return true;
+}
+
+void TerrainTileCache::worldToHoleMaskTexel(float x, float z, int& texelX, int& texelY) const {
+    float u = (x / terrainSize) + 0.5f;
+    float v = (z / terrainSize) + 0.5f;
+    u = std::clamp(u, 0.0f, 1.0f);
+    v = std::clamp(v, 0.0f, 1.0f);
+    texelX = static_cast<int>(u * (holeMaskResolution_ - 1));
+    texelY = static_cast<int>(v * (holeMaskResolution_ - 1));
+    texelX = std::clamp(texelX, 0, static_cast<int>(holeMaskResolution_ - 1));
+    texelY = std::clamp(texelY, 0, static_cast<int>(holeMaskResolution_ - 1));
+}
+
+bool TerrainTileCache::isHole(float x, float z) const {
+    for (const auto& hole : holes_) {
+        if (hole.type == TerrainHole::Type::Circle) {
+            float dx = x - hole.centerX;
+            float dz = z - hole.centerZ;
+            if (dx * dx + dz * dz <= hole.radius * hole.radius) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+void TerrainTileCache::addHoleCircle(float centerX, float centerZ, float radius) {
+    TerrainHole hole;
+    hole.type = TerrainHole::Type::Circle;
+    hole.centerX = centerX;
+    hole.centerZ = centerZ;
+    hole.radius = radius;
+    holes_.push_back(hole);
+
+    // Rasterize to global mask and mark dirty
+    rasterizeHolesToGlobalMask();
+    holeMaskDirty_ = true;
+
+    SDL_Log("TerrainTileCache: Added hole circle at (%.1f, %.1f) radius %.1f, total holes: %zu",
+            centerX, centerZ, radius, holes_.size());
+}
+
+void TerrainTileCache::removeHoleCircle(float centerX, float centerZ, float radius) {
+    auto it = std::remove_if(holes_.begin(), holes_.end(), [&](const TerrainHole& h) {
+        return h.type == TerrainHole::Type::Circle &&
+               std::abs(h.centerX - centerX) < 0.1f &&
+               std::abs(h.centerZ - centerZ) < 0.1f &&
+               std::abs(h.radius - radius) < 0.1f;
+    });
+    if (it != holes_.end()) {
+        holes_.erase(it, holes_.end());
+        rasterizeHolesToGlobalMask();
+        holeMaskDirty_ = true;
+        SDL_Log("TerrainTileCache: Removed hole circle at (%.1f, %.1f), total holes: %zu",
+                centerX, centerZ, holes_.size());
+    }
+}
+
+void TerrainTileCache::rasterizeHolesToGlobalMask() {
+    // Clear mask
+    std::fill(holeMaskCpuData_.begin(), holeMaskCpuData_.end(), 0);
+
+    // Rasterize each hole
+    for (const auto& hole : holes_) {
+        if (hole.type == TerrainHole::Type::Circle) {
+            float texelsPerUnit = static_cast<float>(holeMaskResolution_ - 1) / terrainSize;
+            int texelRadius = static_cast<int>(std::ceil(hole.radius * texelsPerUnit)) + 1;
+
+            int centerTexelX, centerTexelY;
+            worldToHoleMaskTexel(hole.centerX, hole.centerZ, centerTexelX, centerTexelY);
+
+            for (int dy = -texelRadius; dy <= texelRadius; dy++) {
+                for (int dx = -texelRadius; dx <= texelRadius; dx++) {
+                    int tx = centerTexelX + dx;
+                    int ty = centerTexelY + dy;
+
+                    if (tx < 0 || tx >= static_cast<int>(holeMaskResolution_) ||
+                        ty < 0 || ty >= static_cast<int>(holeMaskResolution_)) {
+                        continue;
+                    }
+
+                    float worldX = (static_cast<float>(tx) / (holeMaskResolution_ - 1) - 0.5f) * terrainSize;
+                    float worldZ = (static_cast<float>(ty) / (holeMaskResolution_ - 1) - 0.5f) * terrainSize;
+                    float distSq = (worldX - hole.centerX) * (worldX - hole.centerX) +
+                                  (worldZ - hole.centerZ) * (worldZ - hole.centerZ);
+
+                    if (distSq <= hole.radius * hole.radius) {
+                        holeMaskCpuData_[ty * holeMaskResolution_ + tx] = 255;
+                    }
+                }
+            }
+        }
+    }
+}
+
+std::vector<uint8_t> TerrainTileCache::rasterizeHolesForTile(
+    float tileMinX, float tileMinZ, float tileMaxX, float tileMaxZ, uint32_t resolution) const {
+
+    std::vector<uint8_t> tileMask(resolution * resolution, 0);
+
+    float tileWidth = tileMaxX - tileMinX;
+    float tileHeight = tileMaxZ - tileMinZ;
+
+    // For each hole, check if it intersects this tile
+    for (const auto& hole : holes_) {
+        if (hole.type == TerrainHole::Type::Circle) {
+            // Quick AABB check for circle-rectangle intersection
+            float closestX = std::clamp(hole.centerX, tileMinX, tileMaxX);
+            float closestZ = std::clamp(hole.centerZ, tileMinZ, tileMaxZ);
+            float dx = hole.centerX - closestX;
+            float dz = hole.centerZ - closestZ;
+            if (dx * dx + dz * dz > hole.radius * hole.radius) {
+                continue;  // Circle doesn't intersect tile
+            }
+
+            // Rasterize circle into tile mask
+            // Shrink radius slightly to match GPU rendering
+            float shrinkAmount = tileWidth / resolution;
+            float effectiveRadius = hole.radius - shrinkAmount;
+            if (effectiveRadius <= 0.0f) effectiveRadius = hole.radius * 0.5f;
+            float radiusSq = effectiveRadius * effectiveRadius;
+
+            for (uint32_t y = 0; y < resolution; y++) {
+                for (uint32_t x = 0; x < resolution; x++) {
+                    float worldX = tileMinX + (static_cast<float>(x) / (resolution - 1)) * tileWidth;
+                    float worldZ = tileMinZ + (static_cast<float>(y) / (resolution - 1)) * tileHeight;
+
+                    float distX = worldX - hole.centerX;
+                    float distZ = worldZ - hole.centerZ;
+                    if (distX * distX + distZ * distZ < radiusSq) {
+                        tileMask[y * resolution + x] = 255;
+                    }
+                }
+            }
+        }
+    }
+
+    return tileMask;
+}
+
+void TerrainTileCache::uploadHoleMaskToGPU() {
+    if (holeMaskDirty_) {
+        uploadHoleMaskToGPUInternal();
+        holeMaskDirty_ = false;
+    }
 }

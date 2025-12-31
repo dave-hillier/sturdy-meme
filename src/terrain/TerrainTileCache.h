@@ -9,8 +9,18 @@
 #include <unordered_map>
 #include <cstdint>
 #include <memory>
+#include <limits>
 #include "VulkanRAII.h"
 #include "core/FrameBuffered.h"
+
+// Hole definition - geometric primitive for terrain holes (caves/wells)
+struct TerrainHole {
+    enum class Type { Circle };
+    Type type = Type::Circle;
+    float centerX = 0.0f;
+    float centerZ = 0.0f;
+    float radius = 0.0f;
+};
 
 // Tile coordinate in the grid
 struct TileCoord {
@@ -75,6 +85,9 @@ public:
         float minAltitude;      // Minimum altitude (for height value 0)
         float maxAltitude;      // Maximum altitude (for height value 65535)
     };
+
+    // Special return value indicating a hole in terrain (no ground)
+    static constexpr float NO_GROUND = -std::numeric_limits<float>::infinity();
 
     /**
      * Factory: Create and initialize TerrainTileCache.
@@ -172,6 +185,27 @@ public:
     // Get base heightmap CPU data for fallback height queries
     const std::vector<float>& getBaseHeightMapData() const { return baseHeightMapCpuData_; }
     uint32_t getBaseHeightMapResolution() const { return baseHeightMapResolution_; }
+
+    // Hole mask GPU resource accessors
+    VkImageView getHoleMaskView() const { return holeMaskImageView_; }
+    VkSampler getHoleMaskSampler() const { return holeMaskSampler_.get(); }
+
+    // Hole management - geometric primitives rasterized on demand
+    void addHoleCircle(float centerX, float centerZ, float radius);
+    void removeHoleCircle(float centerX, float centerZ, float radius);
+    const std::vector<TerrainHole>& getHoles() const { return holes_; }
+
+    // Query if a point is inside any hole (analytical, not rasterized)
+    bool isHole(float x, float z) const;
+
+    // Rasterize holes into a tile mask at specified resolution
+    // Returns mask where 255 = hole, 0 = solid
+    std::vector<uint8_t> rasterizeHolesForTile(float tileMinX, float tileMinZ,
+                                                float tileMaxX, float tileMaxZ,
+                                                uint32_t resolution) const;
+
+    // Upload hole mask to GPU (call after modifying holes)
+    void uploadHoleMaskToGPU();
 
     // LOD distance thresholds (can be configured)
     static constexpr float LOD0_MAX_DISTANCE = 1000.0f;  // < 1km: LOD0
@@ -279,4 +313,24 @@ private:
 
     // Sample height from base LOD tiles (fallback when no high-res tile covers position)
     bool sampleBaseLOD(float worldX, float worldZ, float& outHeight) const;
+
+    // Hole mask GPU resources (R8_UNORM: 0=solid, 255=hole)
+    VkImage holeMaskImage_ = VK_NULL_HANDLE;
+    VmaAllocation holeMaskAllocation_ = VK_NULL_HANDLE;
+    VkImageView holeMaskImageView_ = VK_NULL_HANDLE;
+    ManagedSampler holeMaskSampler_;
+
+    // Hole mask CPU data and state
+    std::vector<uint8_t> holeMaskCpuData_;
+    bool holeMaskDirty_ = false;
+    uint32_t holeMaskResolution_ = 2048;  // Global coarse mask for GPU (~8m/texel)
+
+    // Hole definitions - geometric primitives
+    std::vector<TerrainHole> holes_;
+
+    // Hole mask helper methods
+    bool createHoleMaskResources();
+    bool uploadHoleMaskToGPUInternal();
+    void rasterizeHolesToGlobalMask();
+    void worldToHoleMaskTexel(float x, float z, int& texelX, int& texelY) const;
 };

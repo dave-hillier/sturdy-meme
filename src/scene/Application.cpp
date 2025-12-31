@@ -248,9 +248,6 @@ bool Application::init(const std::string& title, int width, int height) {
 
             if (physicsTerrainManager_.init(physics(), *tileCache, config)) {
                 SDL_Log("Physics terrain tile manager initialized");
-
-                // Set terrain height map for hole queries
-                physicsTerrainManager_.setTerrainHeightMap(terrain.getHeightMap());
             } else {
                 SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize physics terrain tile manager!");
             }
@@ -814,9 +811,23 @@ void Application::processEvents() {
     // Handle camera mode switch initialization
     if (input.wasModeSwitchedThisFrame()) {
         if (input.isThirdPersonMode()) {
+            // Update player Y position to match terrain height (fixes spawn below terrain)
+            auto& playerTransform = world_.getPlayerTransform();
+            float terrainY = renderer_->getSystems().terrain().getHeightAt(
+                playerTransform.position.x, playerTransform.position.z);
+            float newY = terrainY + 0.1f;  // Slightly above terrain
+
+            // Only update if significantly different (avoid jitter)
+            if (std::abs(playerTransform.position.y - newY) > 1.0f) {
+                playerTransform.position.y = newY;
+                // Also update physics character position
+                physics().setCharacterPosition(glm::vec3(
+                    playerTransform.position.x, newY, playerTransform.position.z));
+                SDL_Log("Player height corrected to %.2f (terrain=%.2f)", newY, terrainY);
+            }
+
             // Initialize third-person camera from current free camera position
             // This ensures smooth transition instead of snapping to origin
-            auto& playerTransform = world_.getPlayerTransform();
             auto& playerMovement = world_.getPlayerMovement();
             camera.initializeThirdPersonFromCurrentPosition(playerMovement.getFocusPoint(playerTransform.position));
         } else {

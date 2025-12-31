@@ -143,6 +143,7 @@ public:
     // Character controller
     bool createCharacter(const glm::vec3& position, float height, float radius);
     void updateCharacter(float deltaTime, const glm::vec3& desiredVelocity, bool jump);
+    void setCharacterPosition(const glm::vec3& position);
     glm::vec3 getCharacterPosition() const;
     glm::vec3 getCharacterVelocity() const;
     bool isCharacterOnGround() const;

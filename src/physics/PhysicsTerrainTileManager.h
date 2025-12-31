@@ -20,8 +20,6 @@ struct PhysicsTileEntry {
     float worldMaxZ;
 };
 
-class TerrainHeightMap;  // Forward declaration
-
 class PhysicsTerrainTileManager {
 public:
     struct Config {
@@ -37,8 +35,6 @@ public:
 
     bool init(PhysicsWorld& physics, TerrainTileCache& tileCache, const Config& config);
 
-    // Set terrain height map for hole queries (uses existing TerrainHeightMap::isHole)
-    void setTerrainHeightMap(TerrainHeightMap* heightMap) { terrainHeightMap_ = heightMap; }
     void update(const glm::vec3& playerPosition);
     void cleanup();
 
@@ -60,14 +56,8 @@ private:
     };
     std::vector<TileRequest> calculateRequiredTiles(const glm::vec3& position) const;
 
-    // Generate per-tile hole mask by querying TerrainHeightMap::isHole
-    std::vector<uint8_t> generateTileHoleMask(float tileMinX, float tileMinZ,
-                                               float tileMaxX, float tileMaxZ,
-                                               uint32_t sampleCount) const;
-
     PhysicsWorld* physics_ = nullptr;
     TerrainTileCache* tileCache_ = nullptr;
-    TerrainHeightMap* terrainHeightMap_ = nullptr;
     Config config_;
 
     std::unordered_map<uint64_t, PhysicsTileEntry> loadedTiles_;

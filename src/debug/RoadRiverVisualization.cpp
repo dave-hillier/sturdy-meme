@@ -1,6 +1,6 @@
 #include "RoadRiverVisualization.h"
 #include "DebugLineSystem.h"
-#include "../terrain/TerrainHeightMap.h"
+#include "../terrain/TerrainTileCache.h"
 #include "../terrain/RoadNetworkLoader.h"
 #include "../water/WaterPlacementData.h"
 #include <glm/gtc/constants.hpp>
@@ -175,14 +175,17 @@ void RoadRiverVisualization::buildRoadCones() {
 }
 
 float RoadRiverVisualization::getTerrainHeight(float x, float z) const {
-    if (heightMap_ == nullptr) {
+    if (tileCache_ == nullptr) {
         return 0.0f;
     }
 
-    float height = heightMap_->getHeightAt(x, z);
+    float height;
+    if (!tileCache_->getHeightAt(x, z, height)) {
+        return 0.0f;
+    }
 
     // Handle holes in terrain
-    if (height == TerrainHeightMap::NO_GROUND) {
+    if (height == TerrainTileCache::NO_GROUND) {
         return 0.0f;
     }
 

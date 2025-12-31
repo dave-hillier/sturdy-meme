@@ -906,6 +906,16 @@ void PhysicsWorld::updateCharacter(float deltaTime, const glm::vec3& desiredVelo
     characterWantsJump = jump;
 }
 
+void PhysicsWorld::setCharacterPosition(const glm::vec3& position) {
+    if (!character) return;
+
+    // Character position is at center, so offset by half height
+    JPH::RVec3 centerPos(position.x, position.y + characterHeight * 0.5f, position.z);
+    character->SetPosition(centerPos);
+    // Reset velocity to avoid glitches when teleporting
+    character->SetLinearVelocity(JPH::Vec3::sZero());
+}
+
 glm::vec3 PhysicsWorld::getCharacterPosition() const {
     if (!character) return glm::vec3(0.0f);
 
