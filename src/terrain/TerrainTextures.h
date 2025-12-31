@@ -33,8 +33,9 @@ public:
 private:
     bool createAlbedoTexture();
     bool createGrassFarLODTexture();
-    bool uploadImageData(VkImage image, const void* data, uint32_t width, uint32_t height,
-                         VkFormat format, uint32_t bytesPerPixel);
+    bool uploadImageDataMipLevel(VkImage image, const void* data, uint32_t width, uint32_t height,
+                                  VkFormat format, uint32_t bytesPerPixel, uint32_t mipLevel);
+    bool generateMipmaps(VkImage image, uint32_t width, uint32_t height, uint32_t mipLevels);
 
     // Init params
     VkDevice device = VK_NULL_HANDLE;
@@ -48,10 +49,12 @@ private:
     VmaAllocation albedoAllocation = VK_NULL_HANDLE;
     VkImageView albedoView = VK_NULL_HANDLE;
     ManagedSampler albedoSampler;
+    uint32_t albedoMipLevels = 1;
 
     // Grass far LOD texture
     VkImage grassFarLODImage = VK_NULL_HANDLE;
     VmaAllocation grassFarLODAllocation = VK_NULL_HANDLE;
     VkImageView grassFarLODView = VK_NULL_HANDLE;
     ManagedSampler grassFarLODSampler;
+    uint32_t grassFarLODMipLevels = 1;
 };
