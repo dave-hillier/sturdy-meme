@@ -8,6 +8,7 @@
 #include <string>
 #include <functional>
 #include <cstdint>
+#include <mutex>
 #include <glm/glm.hpp>
 
 namespace VirtualTexture {
@@ -92,15 +93,26 @@ struct BiomeMapData {
     uint8_t sampleSubZone(float x, float z, float terrainSize) const;
 };
 
-// Cache of loaded material textures
-struct MaterialTextureCache {
-    std::unordered_map<std::string, TextureData> textures;
-
-    // Load a texture if not already cached
+// Thread-safe cache of loaded material textures
+class MaterialTextureCache {
+public:
+    // Load a texture if not already cached (thread-safe)
     const TextureData* getTexture(const std::string& path);
 
     // Clear the cache
-    void clear() { textures.clear(); }
+    void clear() {
+        std::lock_guard<std::mutex> lock(mutex);
+        textures.clear();
+    }
+
+    size_t size() const {
+        std::lock_guard<std::mutex> lock(mutex);
+        return textures.size();
+    }
+
+private:
+    std::unordered_map<std::string, TextureData> textures;
+    mutable std::mutex mutex;
 };
 
 // Output tile data
@@ -158,7 +170,7 @@ public:
     bool saveMetadata(const std::string& outputDir) const;
 
     // Get statistics
-    size_t getLoadedTextureCount() const { return textureCache.textures.size(); }
+    size_t getLoadedTextureCount() const { return textureCache.size(); }
 
 private:
     // Sample the base terrain color at a world position

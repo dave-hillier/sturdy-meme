@@ -10,6 +10,7 @@
 #include <string>
 #include <cmath>
 #include <algorithm>
+#include "../common/ParallelProgress.h"
 
 struct CausticsConfig {
     int resolution = 512;
@@ -187,11 +188,11 @@ int main(int argc, char* argv[]) {
         phases.push_back(phaseDist(rng));
     }
 
-    // Generate caustics texture
-    SDL_Log("Generating caustics pattern...");
+    // Generate caustics texture using parallel processing
+    SDL_Log("Generating caustics pattern (%u threads)...", ParallelProgress::getThreadCount());
     std::vector<float> data(config.resolution * config.resolution);
 
-    for (int y = 0; y < config.resolution; y++) {
+    ParallelProgress::parallel_for_progress(0, config.resolution, [&](int y) {
         for (int x = 0; x < config.resolution; x++) {
             glm::vec2 uv(
                 float(x) / float(config.resolution) * 2.0f * 3.14159265359f,
@@ -213,11 +214,7 @@ int main(int argc, char* argv[]) {
 
             data[y * config.resolution + x] = value;
         }
-
-        if (y % 64 == 0) {
-            SDL_Log("  Progress: %d%%", (y * 100) / config.resolution);
-        }
-    }
+    }, nullptr, "Generating caustics");
 
     // Convert to 8-bit grayscale PNG
     SDL_Log("Saving PNG...");

@@ -8,6 +8,7 @@
 #include <filesystem>
 #include "../common/bc_compress.h"
 #include "../common/dds_file.h"
+#include "../common/ParallelProgress.h"
 
 namespace VirtualTexture {
 
@@ -167,6 +168,8 @@ uint8_t BiomeMapData::sampleSubZone(float x, float z, float terrainSize) const {
 // ============================================================================
 
 const TextureData* MaterialTextureCache::getTexture(const std::string& path) {
+    std::lock_guard<std::mutex> lock(mutex);
+
     // Check if already cached
     auto it = textures.find(path);
     if (it != textures.end()) {
@@ -539,51 +542,69 @@ bool TileCompositor::generateMipLevel(uint32_t mipLevel, const std::string& outp
                                        ProgressCallback callback) {
     uint32_t tilesAtMip = config.getTilesAtMip(mipLevel);
     uint32_t totalTiles = tilesAtMip * tilesAtMip;
-    uint32_t processedTiles = 0;
 
     // Create mip directory
     std::string mipDir = outputDir + "/mip" + std::to_string(mipLevel);
     std::filesystem::create_directories(mipDir);
 
-    OutputTile tile;
     std::string extension = config.useCompression ? ".dds" : ".png";
+    std::atomic<bool> hasError{false};
+    std::atomic<uint32_t> processedTiles{0};
 
-    for (uint32_t ty = 0; ty < tilesAtMip; ++ty) {
-        for (uint32_t tx = 0; tx < tilesAtMip; ++tx) {
-            // Generate tile
-            generateTile(tx, ty, mipLevel, tile);
+    SDL_Log("Generating mip level %u: %u tiles (%u threads)",
+            mipLevel, totalTiles, ParallelProgress::getThreadCount());
 
-            // Save tile
-            std::string filename = mipDir + "/tile_" + std::to_string(tx) + "_" + std::to_string(ty) + extension;
+    // Parallel tile generation
+    ParallelProgress::parallel_for(0, static_cast<int>(totalTiles), [&](int tileIndex) {
+        if (hasError.load()) return;  // Early exit on error
 
-            if (config.useCompression) {
-                // Compress to BC1 and save as DDS
-                BCCompress::CompressedImage compressed = BCCompress::compressImage(
-                    tile.pixels.data(), tile.resolution, tile.resolution, BCCompress::BCFormat::BC1);
+        uint32_t tx = tileIndex % tilesAtMip;
+        uint32_t ty = tileIndex / tilesAtMip;
 
-                if (!DDS::write(filename, tile.resolution, tile.resolution, DDS::Format::BC1_SRGB,
-                                compressed.data.data(), static_cast<uint32_t>(compressed.data.size()))) {
-                    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to save tile %s", filename.c_str());
-                    return false;
-                }
-            } else {
-                // Save as PNG
-                unsigned error = lodepng::encode(filename, tile.pixels, tile.resolution, tile.resolution);
-                if (error) {
-                    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to save tile %s: %s",
-                                 filename.c_str(), lodepng_error_text(error));
-                    return false;
-                }
+        // Each thread has its own OutputTile
+        OutputTile tile;
+
+        // Generate tile
+        generateTile(tx, ty, mipLevel, tile);
+
+        // Save tile
+        std::string filename = mipDir + "/tile_" + std::to_string(tx) + "_" + std::to_string(ty) + extension;
+
+        if (config.useCompression) {
+            // Compress to BC1 and save as DDS
+            BCCompress::CompressedImage compressed = BCCompress::compressImage(
+                tile.pixels.data(), tile.resolution, tile.resolution, BCCompress::BCFormat::BC1);
+
+            if (!DDS::write(filename, tile.resolution, tile.resolution, DDS::Format::BC1_SRGB,
+                            compressed.data.data(), static_cast<uint32_t>(compressed.data.size()))) {
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to save tile %s", filename.c_str());
+                hasError.store(true);
+                return;
             }
-
-            processedTiles++;
-
-            if (callback) {
-                float progress = static_cast<float>(processedTiles) / totalTiles;
-                callback(progress, "Generating mip " + std::to_string(mipLevel) +
-                         " (" + std::to_string(processedTiles) + "/" + std::to_string(totalTiles) + ")");
+        } else {
+            // Save as PNG
+            unsigned error = lodepng::encode(filename, tile.pixels, tile.resolution, tile.resolution);
+            if (error) {
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to save tile %s: %s",
+                             filename.c_str(), lodepng_error_text(error));
+                hasError.store(true);
+                return;
             }
         }
+
+        uint32_t completed = ++processedTiles;
+
+        // Report progress periodically (every ~5% of tiles)
+        uint32_t reportInterval = std::max(1u, totalTiles / 20);
+        if (callback && (completed % reportInterval == 0 || completed == totalTiles)) {
+            float progress = static_cast<float>(completed) / totalTiles;
+            callback(progress, "Generating mip " + std::to_string(mipLevel) +
+                     " (" + std::to_string(completed) + "/" + std::to_string(totalTiles) + ")");
+        }
+    });
+
+    if (hasError.load()) {
+        return false;
     }
 
     SDL_Log("Generated mip level %u: %u tiles (%s)", mipLevel, totalTiles,

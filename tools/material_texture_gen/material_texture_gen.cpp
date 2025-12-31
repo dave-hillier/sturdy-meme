@@ -8,12 +8,14 @@
 #include <lodepng.h>
 #include "../common/bc_compress.h"
 #include "../common/dds_file.h"
+#include "../common/ParallelProgress.h"
 #include <vector>
 #include <string>
 #include <filesystem>
 #include <cmath>
 #include <functional>
 #include <cstring>
+#include <atomic>
 
 namespace fs = std::filesystem;
 
@@ -261,7 +263,8 @@ bool generateTexture(const std::string& path, TextureGenerator::ColorFunc colorF
                      float noiseScale, int octaves) {
     std::vector<unsigned char> pixels(TEXTURE_SIZE * TEXTURE_SIZE * 4);
 
-    for (int y = 0; y < TEXTURE_SIZE; y++) {
+    // Parallelize texture generation by rows
+    ParallelProgress::parallel_for(0, TEXTURE_SIZE, [&](int y) {
         for (int x = 0; x < TEXTURE_SIZE; x++) {
             glm::vec2 uv = glm::vec2(float(x), float(y)) / float(TEXTURE_SIZE);
             glm::vec2 noisePos = uv * noiseScale;
@@ -278,7 +281,7 @@ bool generateTexture(const std::string& path, TextureGenerator::ColorFunc colorF
             pixels[idx + 2] = static_cast<unsigned char>(glm::clamp(color.b, 0.0f, 1.0f) * 255.0f);
             pixels[idx + 3] = 255;
         }
-    }
+    });
 
     std::string outputPath = getOutputPath(path);
 
@@ -308,17 +311,17 @@ bool generateTexture(const std::string& path, TextureGenerator::ColorFunc colorF
 bool generateNormalMap(const std::string& path, float scale, float strength) {
     std::vector<unsigned char> pixels(TEXTURE_SIZE * TEXTURE_SIZE * 4);
 
-    // First generate height values
+    // First generate height values (parallelized)
     std::vector<float> heights(TEXTURE_SIZE * TEXTURE_SIZE);
-    for (int y = 0; y < TEXTURE_SIZE; y++) {
+    ParallelProgress::parallel_for(0, TEXTURE_SIZE, [&](int y) {
         for (int x = 0; x < TEXTURE_SIZE; x++) {
             glm::vec2 uv = glm::vec2(float(x), float(y)) / float(TEXTURE_SIZE);
             heights[y * TEXTURE_SIZE + x] = fbm(uv * scale, 4) * strength;
         }
-    }
+    });
 
-    // Then compute normals
-    for (int y = 0; y < TEXTURE_SIZE; y++) {
+    // Then compute normals (parallelized)
+    ParallelProgress::parallel_for(0, TEXTURE_SIZE, [&](int y) {
         for (int x = 0; x < TEXTURE_SIZE; x++) {
             int x0 = (x - 1 + TEXTURE_SIZE) % TEXTURE_SIZE;
             int x1 = (x + 1) % TEXTURE_SIZE;
@@ -339,7 +342,7 @@ bool generateNormalMap(const std::string& path, float scale, float strength) {
             pixels[idx + 2] = static_cast<unsigned char>(normal.z * 255.0f);
             pixels[idx + 3] = 255;
         }
-    }
+    });
 
     std::string outputPath = getOutputPath(path);
 
@@ -388,6 +391,7 @@ int main(int argc, char* argv[]) {
     SDL_Log("Material Texture Generator");
     SDL_Log("Output directory: %s", outputDir.c_str());
     SDL_Log("Compression: %s", g_useCompression ? "BC1/BC5 DDS" : "PNG");
+    SDL_Log("Threads: %u", ParallelProgress::getThreadCount());
 
     // Create all directories
     std::vector<std::string> dirs = {

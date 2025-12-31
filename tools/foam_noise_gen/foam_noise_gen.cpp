@@ -11,6 +11,7 @@
 #include <string>
 #include <cmath>
 #include <algorithm>
+#include "../common/ParallelProgress.h"
 
 struct NoiseConfig {
     int resolution = 512;
@@ -107,7 +108,7 @@ float generateFBMWorley(glm::vec2 uv, const NoiseConfig& config,
     return value / maxValue;
 }
 
-// Make texture seamlessly tileable using flip-and-blend
+// Make texture seamlessly tileable using flip-and-blend (parallelized)
 void makeSeamless(std::vector<float>& data, int resolution) {
     // Create a copy for blending
     std::vector<float> original = data;
@@ -115,13 +116,9 @@ void makeSeamless(std::vector<float>& data, int resolution) {
     // Blend size (how far from edge to blend)
     int blendSize = resolution / 4;
 
-    for (int y = 0; y < resolution; y++) {
+    ParallelProgress::parallel_for(0, resolution, [&](int y) {
         for (int x = 0; x < resolution; x++) {
             float origValue = original[y * resolution + x];
-
-            // Calculate blend weights for edges
-            float blendX = 1.0f;
-            float blendY = 1.0f;
 
             // Left edge - blend with right side (flipped)
             if (x < blendSize) {
@@ -159,7 +156,7 @@ void makeSeamless(std::vector<float>& data, int resolution) {
 
             data[y * resolution + x] = origValue;
         }
-    }
+    });
 }
 
 void printUsage(const char* programName) {
@@ -225,13 +222,16 @@ int main(int argc, char* argv[]) {
         pointsPerOctave.push_back(generateTileablePoints(numPoints, config.seed + i * 1337));
     }
 
-    // Generate noise
-    SDL_Log("Generating Worley noise...");
+    // Generate noise using parallel processing
+    SDL_Log("Generating Worley noise (%u threads)...", ParallelProgress::getThreadCount());
     std::vector<float> noiseData(config.resolution * config.resolution);
 
-    float minVal = 1.0f, maxVal = 0.0f;
+    // Thread-safe min/max accumulator
+    ParallelProgress::MinMaxAccumulator<float> minmax(1.0f, 0.0f);
 
-    for (int y = 0; y < config.resolution; y++) {
+    ParallelProgress::parallel_for_progress(0, config.resolution, [&](int y) {
+        float localMin = 1.0f, localMax = 0.0f;
+
         for (int x = 0; x < config.resolution; x++) {
             glm::vec2 uv(
                 float(x) / float(config.resolution),
@@ -241,14 +241,15 @@ int main(int argc, char* argv[]) {
             float value = generateFBMWorley(uv, config, pointsPerOctave);
             noiseData[y * config.resolution + x] = value;
 
-            minVal = std::min(minVal, value);
-            maxVal = std::max(maxVal, value);
+            localMin = std::min(localMin, value);
+            localMax = std::max(localMax, value);
         }
 
-        if (y % 64 == 0) {
-            SDL_Log("  Progress: %d%%", (y * 100) / config.resolution);
-        }
-    }
+        minmax.update(localMin, localMax);
+    }, nullptr, "Generating noise");
+
+    float minVal = minmax.getMin();
+    float maxVal = minmax.getMax();
 
     // Normalize to 0-1
     SDL_Log("Normalizing (range was %.3f - %.3f)...", minVal, maxVal);
