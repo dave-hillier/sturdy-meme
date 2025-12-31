@@ -8,6 +8,8 @@
 #ifndef GRASS_BLADE_COMMON_GLSL
 #define GRASS_BLADE_COMMON_GLSL
 
+#include "grass_constants.glsl"
+
 // Perlin noise implementation for wind variation
 // Uses fixed permutation table for consistency
 const int grassPerm[512] = int[512](
@@ -98,18 +100,18 @@ float grassSampleWind(vec2 worldPos, vec2 windDir, float windStrength, float win
     // Scroll position in wind direction
     vec2 scrolledPos = worldPos - windDir * windTime * windSpeed * 0.4;
 
-    // Three octaves: ~10m, ~5m, ~2.5m wavelengths
-    // baseFreq = 0.1 gives ~10m wavelength
-    float baseFreq = 0.1;
-    float n1 = grassPerlinNoise(scrolledPos.x * baseFreq, scrolledPos.y * baseFreq);
-    float n2 = grassPerlinNoise(scrolledPos.x * baseFreq * 2.0, scrolledPos.y * baseFreq * 2.0);
-    float n3 = grassPerlinNoise(scrolledPos.x * baseFreq * 4.0, scrolledPos.y * baseFreq * 4.0);
+    // Three octaves: ~10m, ~5m, ~2.5m wavelengths using unified constants
+    float n1 = grassPerlinNoise(scrolledPos.x * GRASS_WIND_BASE_FREQ, scrolledPos.y * GRASS_WIND_BASE_FREQ);
+    float n2 = grassPerlinNoise(scrolledPos.x * GRASS_WIND_BASE_FREQ * GRASS_WIND_OCTAVE2_MULT,
+                                 scrolledPos.y * GRASS_WIND_BASE_FREQ * GRASS_WIND_OCTAVE2_MULT);
+    float n3 = grassPerlinNoise(scrolledPos.x * GRASS_WIND_BASE_FREQ * GRASS_WIND_OCTAVE3_MULT,
+                                 scrolledPos.y * GRASS_WIND_BASE_FREQ * GRASS_WIND_OCTAVE3_MULT);
 
-    // Weighted sum dominated by first octave (like 0.7 + 0.2 + 0.1)
-    float noise = n1 * 0.7 + n2 * 0.2 + n3 * 0.1;
+    // Weighted sum dominated by first octave using unified constants
+    float noise = n1 * GRASS_WIND_OCTAVE1_WEIGHT + n2 * GRASS_WIND_OCTAVE2_WEIGHT + n3 * GRASS_WIND_OCTAVE3_WEIGHT;
 
     // Add time-varying gust
-    float gust = (sin(windTime * gustFreq * 6.28318) * 0.5 + 0.5) * gustAmp;
+    float gust = (sin(windTime * gustFreq * GRASS_TWO_PI) * 0.5 + 0.5) * gustAmp;
 
     return (noise + gust) * windStrength;
 }
@@ -168,21 +170,21 @@ GrassBladeControlPoints grassCalculateBladeDeformation(
 ) {
     GrassBladeControlPoints result;
 
-    // Blade folding for short grass
+    // Blade folding for short grass using unified constants
     // Shorter blades fold over more (like real lawn grass bending under weight)
-    // Height range is ~0.3-0.7, normalize to 0-1 for folding calculation
-    float normalizedHeight = clamp((height - 0.3) / 0.4, 0.0, 1.0);
+    // Height range is GRASS_HEIGHT_MIN to GRASS_HEIGHT_MAX, normalize to 0-1 for folding calculation
+    float normalizedHeight = clamp((height - GRASS_HEIGHT_MIN) / GRASS_HEIGHT_RANGE, 0.0, 1.0);
 
     // Fold amount: short grass (0) folds a lot, tall grass (1) stays upright
-    // foldAmount ranges from 0.6 (short) to 0.1 (tall)
-    float foldAmount = mix(0.6, 0.1, normalizedHeight);
+    // foldAmount ranges from GRASS_FOLD_MAX (short) to GRASS_FOLD_MIN (tall)
+    float foldAmount = mix(GRASS_FOLD_MAX, GRASS_FOLD_MIN, normalizedHeight);
 
     // Add per-blade variation to fold direction using hash
     float foldDirection = (bladeHash - 0.5) * 2.0;  // -1 to 1
     float foldX = foldDirection * foldAmount * height;
 
     // Short grass also droops more - tip ends up lower relative to height
-    float droopFactor = mix(0.3, 0.0, normalizedHeight);  // 30% droop for shortest
+    float droopFactor = mix(GRASS_DROOP_MAX, 0.0, normalizedHeight);  // GRASS_DROOP_MAX for shortest
     float effectiveHeight = height * (1.0 - droopFactor);
 
     // Bezier control points (in local blade space)
@@ -193,9 +195,8 @@ GrassBladeControlPoints grassCalculateBladeDeformation(
     return result;
 }
 
-// Constants for blade geometry
-const uint GRASS_NUM_SEGMENTS = 7;
-const float GRASS_BASE_WIDTH = 0.02;
+// Blade geometry constants are defined in grass_constants.glsl:
+// GRASS_NUM_SEGMENTS, GRASS_BASE_WIDTH, GRASS_WIDTH_TAPER, GRASS_VERTICES_PER_BLADE, GRASS_TIP_VERTEX_INDEX
 
 // Calculate blade vertex position given vertex index
 // Returns: localPos in blade space, t (position along blade 0-1), widthAtT
@@ -212,17 +213,17 @@ void grassCalculateBladeVertex(
     // Vertex 14 is the tip point (width = 0)
 
     // Calculate which height level this vertex is at
-    uint segmentIndex = vertexIndex / 2;  // 0-7
+    uint segmentIndex = vertexIndex / 2;  // 0 to GRASS_NUM_SEGMENTS
     bool isRightSide = (vertexIndex % 2) == 1;
 
     // Calculate t (position along blade, 0 = base, 1 = tip)
     t = float(segmentIndex) / float(GRASS_NUM_SEGMENTS);
 
-    // Width tapers from base to tip (90% taper)
-    widthAtT = GRASS_BASE_WIDTH * (1.0 - t * 0.9);
+    // Width tapers from base to tip using unified constant
+    widthAtT = GRASS_BASE_WIDTH * (1.0 - t * GRASS_WIDTH_TAPER);
 
     // For the last vertex (tip), width is 0
-    if (vertexIndex == 14) {
+    if (vertexIndex == GRASS_TIP_VERTEX_INDEX) {
         widthAtT = 0.0;
         t = 1.0;
     }

@@ -3,6 +3,7 @@
 #extension GL_GOOGLE_include_directive : require
 
 #include "bindings.glsl"
+#include "grass_constants.glsl"
 
 // Grass system uses its own descriptor set layout with custom bindings.
 // Override the UBO bindings before including the shared headers.
@@ -51,13 +52,8 @@ layout(location = 4) in vec3 fragWorldPos;
 
 layout(location = 0) out vec4 outColor;
 
-// Material parameters for grass
-const float GRASS_ROUGHNESS = 0.7;  // Grass is fairly rough/matte
-const float GRASS_SSS_STRENGTH = 0.35;  // Subsurface scattering intensity
-const float GRASS_SPECULAR_STRENGTH = 0.15;  // Subtle specular highlights
-
-// Clump color variation parameters
-const float CLUMP_COLOR_INFLUENCE = 0.15;  // Subtle color variation (0-1)
+// Material parameters and clump color variation are now defined in grass_constants.glsl:
+// GRASS_ROUGHNESS, GRASS_SSS_STRENGTH, GRASS_SPECULAR_STRENGTH, GRASS_CLUMP_COLOR_INFLUENCE
 
 // Dynamic light calculation uses shared functions from dynamic_lights_common.glsl
 // calculateAllDynamicLightsVegetationNoShadow provides consistent vegetation lighting
@@ -70,15 +66,13 @@ void main() {
     // Different clumps have slightly different hue/saturation
     vec3 albedo = fragColor;
 
-    // Subtle hue shift based on clumpId (shift toward yellow or blue-green)
-    vec3 warmShift = vec3(0.05, 0.03, -0.02);    // Slightly warmer/yellower
-    vec3 coolShift = vec3(-0.02, 0.02, 0.03);    // Slightly cooler/bluer
-    vec3 colorShift = mix(coolShift, warmShift, fragClumpId);
-    albedo += colorShift * CLUMP_COLOR_INFLUENCE;
+    // Subtle hue shift based on clumpId using unified constants
+    vec3 colorShift = mix(GRASS_COLOR_SHIFT_COOL, GRASS_COLOR_SHIFT_WARM, fragClumpId);
+    albedo += colorShift * GRASS_CLUMP_COLOR_INFLUENCE;
 
-    // Subtle brightness variation per clump
-    float brightnessVar = 0.9 + fragClumpId * 0.2;  // 0.9 to 1.1
-    albedo *= mix(1.0, brightnessVar, CLUMP_COLOR_INFLUENCE);
+    // Subtle brightness variation per clump using unified constants
+    float brightnessVar = GRASS_BRIGHTNESS_MIN + fragClumpId * (GRASS_BRIGHTNESS_MAX - GRASS_BRIGHTNESS_MIN);
+    albedo *= mix(1.0, brightnessVar, GRASS_CLUMP_COLOR_INFLUENCE);
 
     // === SNOW LAYER ===
     // Sample snow mask at world position
@@ -112,9 +106,9 @@ void main() {
     // Combine terrain and cloud shadows
     float shadow = combineShadows(terrainShadow, cloudShadowFactor);
 
-    // Two-sided diffuse (grass blades are thin)
+    // Two-sided diffuse (grass blades are thin) using unified constant
     float sunNdotL = dot(N, sunL);
-    float sunDiffuse = max(sunNdotL, 0.0) + max(-sunNdotL, 0.0) * 0.6;
+    float sunDiffuse = max(sunNdotL, 0.0) + max(-sunNdotL, 0.0) * GRASS_BACKLIT_DIFFUSE;
 
     // Specular highlight (subtle for grass)
     vec3 H = normalize(V + sunL);
@@ -133,7 +127,7 @@ void main() {
     // === MOON LIGHTING ===
     vec3 moonL = normalize(ubo.moonDirection.xyz);
     float moonNdotL = dot(N, moonL);
-    float moonDiffuse = max(moonNdotL, 0.0) + max(-moonNdotL, 0.0) * 0.6;
+    float moonDiffuse = max(moonNdotL, 0.0) + max(-moonNdotL, 0.0) * GRASS_BACKLIT_DIFFUSE;
 
     // Add subsurface scattering for moonlight - fades in smoothly during twilight
     // Smooth transition: starts at sun altitude 10°, full effect at -6°
@@ -150,16 +144,16 @@ void main() {
                                                                       albedo, GRASS_ROUGHNESS, GRASS_SSS_STRENGTH);
 
     // === FRESNEL RIM LIGHTING ===
-    // Grass blades catch light at grazing angles
+    // Grass blades catch light at grazing angles using unified constants
     float NoV = max(dot(N, V), 0.0);
-    float rimFresnel = pow(1.0 - NoV, 4.0);
+    float rimFresnel = pow(1.0 - NoV, GRASS_RIM_FRESNEL_POWER);
     // Rim color based on sky/ambient
     vec3 rimColor = ubo.ambientColor.rgb * 0.5 + ubo.sunColor.rgb * ubo.toSunDirection.w * 0.2;
-    vec3 rimLight = rimColor * rimFresnel * 0.15;
+    vec3 rimLight = rimColor * rimFresnel * GRASS_RIM_INTENSITY;
 
     // === AMBIENT LIGHTING ===
-    // Ambient occlusion - darker at base, brighter at tip
-    float ao = 0.4 + fragHeight * 0.6;
+    // Ambient occlusion - darker at base, brighter at tip using unified constants
+    float ao = GRASS_AO_BASE + fragHeight * (GRASS_AO_TIP - GRASS_AO_BASE);
 
     // Height-based ambient color shift (base is cooler/darker, tips catch more sky)
     vec3 ambientBase = ubo.ambientColor.rgb * vec3(0.8, 0.85, 0.9);  // Cooler at base

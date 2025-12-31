@@ -79,11 +79,11 @@ void main() {
         windParams
     );
 
-    // Wind offset combines sampled wind with phase offset
+    // Wind offset combines sampled wind with phase offset using unified constants
     float windAngle = atan(windParams.direction.y, windParams.direction.x);
     float relativeWindAngle = windAngle - facing;
-    float windEffect = windSample * 0.25;
-    float windOffset = (windEffect + grassPhaseOffset * 0.25) * cos(relativeWindAngle);
+    float windEffect = windSample * GRASS_WIND_EFFECT_MULTIPLIER;
+    float windOffset = (windEffect + grassPhaseOffset * GRASS_WIND_PHASE_MULTIPLIER) * cos(relativeWindAngle);
 
     // Calculate blade deformation (fold/droop) - shared with shadow pass
     GrassBladeControlPoints cp = grassCalculateBladeDeformation(height, bladeHash, tilt, windOffset);
@@ -104,8 +104,8 @@ void main() {
     // How much we're viewing edge-on (0 = face-on, 1 = edge-on)
     float edgeFactor = abs(dot(viewDir, bladeRight));
 
-    // Thicken by up to 3x when viewed edge-on
-    float thickenAmount = 1.0 + edgeFactor * 2.0;
+    // Thicken when viewed edge-on using unified constants
+    float thickenAmount = 1.0 + edgeFactor * GRASS_EDGE_THICKEN_FACTOR;
     vec3 thickenedPos = vec3(localPos.x * thickenAmount, localPos.y, localPos.z);
 
     // Transform from local blade space to world space using terrain basis
@@ -133,10 +133,8 @@ void main() {
     // Normal is perpendicular to both tangent and blade width direction
     vec3 normal = normalize(cross(worldTangent, bladeRight));
 
-    // Color gradient: darker at base, lighter at tip
-    vec3 baseColor = vec3(0.08, 0.22, 0.04);
-    vec3 tipColor = vec3(0.35, 0.65, 0.18);
-    fragColor = mix(baseColor, tipColor, t);
+    // Color gradient: darker at base, lighter at tip using unified constants
+    fragColor = mix(GRASS_COLOR_BASE, GRASS_COLOR_TIP, t);
 
     fragNormal = normal;
     fragHeight = t;

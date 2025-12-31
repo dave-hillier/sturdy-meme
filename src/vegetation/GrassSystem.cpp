@@ -160,7 +160,7 @@ void GrassSystem::destroyBuffers(VmaAllocator alloc) {
 }
 
 bool GrassSystem::createBuffers() {
-    VkDeviceSize instanceBufferSize = sizeof(GrassInstance) * MAX_INSTANCES;
+    VkDeviceSize instanceBufferSize = sizeof(GrassInstance) * GrassConstants::MAX_INSTANCES;
     VkDeviceSize indirectBufferSize = sizeof(VkDrawIndirectCommand);
     VkDeviceSize cullingUniformSize = sizeof(CullingUniforms);
     VkDeviceSize grassParamsSize = sizeof(GrassParams);
@@ -210,10 +210,10 @@ bool GrassSystem::createBuffers() {
 }
 
 bool GrassSystem::createDisplacementResources() {
-    // Create displacement texture (RG16F, 512x512)
+    // Create displacement texture (RG16F, using unified constant for size)
     auto imageInfo = vk::ImageCreateInfo{}
         .setImageType(vk::ImageType::e2D)
-        .setExtent(vk::Extent3D{DISPLACEMENT_TEXTURE_SIZE, DISPLACEMENT_TEXTURE_SIZE, 1})
+        .setExtent(vk::Extent3D{GrassConstants::DISPLACEMENT_TEXTURE_SIZE, GrassConstants::DISPLACEMENT_TEXTURE_SIZE, 1})
         .setMipLevels(1)
         .setArrayLayers(1)
         .setFormat(vk::Format::eR16G16Sfloat)  // RG16F for XZ displacement
@@ -259,7 +259,7 @@ bool GrassSystem::createDisplacementResources() {
         return false;
     }
 
-    VkDeviceSize sourceBufferSize = sizeof(DisplacementSource) * MAX_DISPLACEMENT_SOURCES;
+    VkDeviceSize sourceBufferSize = sizeof(DisplacementSource) * GrassConstants::MAX_DISPLACEMENT_SOURCES;
     VkDeviceSize uniformBufferSize = sizeof(DisplacementUniforms);
 
     BufferUtils::PerFrameBufferBuilder sourceBuilder;
@@ -360,7 +360,7 @@ bool GrassSystem::createDisplacementPipeline() {
     for (uint32_t i = 0; i < getFramesInFlight(); ++i) {
         DescriptorManager::SetWriter(getDevice(), displacementDescriptorSets_[i])
             .writeStorageImage(0, displacementImageView_)
-            .writeBuffer(1, displacementSourceBuffers.buffers[i], 0, sizeof(DisplacementSource) * MAX_DISPLACEMENT_SOURCES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+            .writeBuffer(1, displacementSourceBuffers.buffers[i], 0, sizeof(DisplacementSource) * GrassConstants::MAX_DISPLACEMENT_SOURCES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
             .writeBuffer(2, displacementUniformBuffers.buffers[i], 0, sizeof(DisplacementUniforms))
             .update();
     }
@@ -527,8 +527,8 @@ bool GrassSystem::createShadowPipeline() {
         .setCullMode(vk::CullModeFlagBits::eNone)  // No culling for grass
         .setFrontFace(vk::FrontFace::eCounterClockwise)
         .setDepthBiasEnable(true)
-        .setDepthBiasConstantFactor(0.25f)
-        .setDepthBiasSlopeFactor(0.75f);
+        .setDepthBiasConstantFactor(GrassConstants::SHADOW_DEPTH_BIAS_CONSTANT)
+        .setDepthBiasSlopeFactor(GrassConstants::SHADOW_DEPTH_BIAS_SLOPE);
 
     auto multisampling = vk::PipelineMultisampleStateCreateInfo{}
         .setRasterizationSamples(vk::SampleCountFlagBits::e1);
@@ -600,7 +600,7 @@ void GrassSystem::writeComputeDescriptorSets() {
     for (uint32_t set = 0; set < bufferSetCount; set++) {
         // Use non-fluent pattern to avoid copy semantics bug with DescriptorManager::SetWriter
         DescriptorManager::SetWriter writer(getDevice(), (*particleSystem)->getComputeDescriptorSet(set));
-        writer.writeBuffer(0, instanceBuffers.buffers[set], 0, sizeof(GrassInstance) * MAX_INSTANCES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        writer.writeBuffer(0, instanceBuffers.buffers[set], 0, sizeof(GrassInstance) * GrassConstants::MAX_INSTANCES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
         writer.writeBuffer(1, indirectBuffers.buffers[set], 0, sizeof(VkDrawIndirectCommand), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
         writer.writeBuffer(2, uniformBuffers.buffers[0], 0, sizeof(CullingUniforms));
         writer.writeBuffer(7, paramsBuffers.buffers[0], 0, sizeof(GrassParams));
@@ -678,7 +678,7 @@ void GrassSystem::updateDescriptorSets(vk::Device dev, const std::vector<vk::Buf
             graphicsWriter.writeBuffer(0, rendererUniformBuffers[0], 0, 160,
                                        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC);  // sizeof(UniformBufferObject)
         }
-        graphicsWriter.writeBuffer(1, instanceBuffers.buffers[set], 0, sizeof(GrassInstance) * MAX_INSTANCES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        graphicsWriter.writeBuffer(1, instanceBuffers.buffers[set], 0, sizeof(GrassInstance) * GrassConstants::MAX_INSTANCES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
         graphicsWriter.writeImage(2, shadowMapView, shadowSampler, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
         graphicsWriter.writeBuffer(3, windBuffers[0], 0, 32);  // sizeof(WindUniforms)
         graphicsWriter.writeBuffer(4, lightBuffersParam[0], 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
@@ -690,7 +690,7 @@ void GrassSystem::updateDescriptorSets(vk::Device dev, const std::vector<vk::Buf
         // Shadow descriptor set - use non-fluent pattern
         DescriptorManager::SetWriter shadowWriter(dev, shadowDescriptorSets_[set]);
         shadowWriter.writeBuffer(0, rendererUniformBuffers[0], 0, 160);  // sizeof(UniformBufferObject)
-        shadowWriter.writeBuffer(1, instanceBuffers.buffers[set], 0, sizeof(GrassInstance) * MAX_INSTANCES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        shadowWriter.writeBuffer(1, instanceBuffers.buffers[set], 0, sizeof(GrassInstance) * GrassConstants::MAX_INSTANCES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
         shadowWriter.writeBuffer(2, windBuffers[0], 0, 32);  // sizeof(WindUniforms)
         shadowWriter.update();
     }
@@ -698,14 +698,14 @@ void GrassSystem::updateDescriptorSets(vk::Device dev, const std::vector<vk::Buf
 
 void GrassSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos, const glm::mat4& viewProj,
                                   float terrainSize, float terrainHeightScale) {
-    // Fill CullingUniforms (shared culling parameters)
+    // Fill CullingUniforms (shared culling parameters) using unified constants
     CullingUniforms culling{};
     culling.cameraPosition = glm::vec4(cameraPos, 1.0f);
     extractFrustumPlanes(viewProj, culling.frustumPlanes);
-    culling.maxDrawDistance = 50.0f;
-    culling.lodTransitionStart = 30.0f;
-    culling.lodTransitionEnd = 50.0f;
-    culling.maxLodDropRate = 0.5f;
+    culling.maxDrawDistance = GrassConstants::MAX_DRAW_DISTANCE;
+    culling.lodTransitionStart = GrassConstants::LOD_TRANSITION_START;
+    culling.lodTransitionEnd = GrassConstants::LOD_TRANSITION_END;
+    culling.maxLodDropRate = GrassConstants::MAX_LOD_DROP_RATE;
     memcpy(uniformBuffers.mappedPointers[frameIndex], &culling, sizeof(CullingUniforms));
 
     // Fill GrassParams (grass-specific parameters)
@@ -714,11 +714,11 @@ void GrassSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos
     // Update displacement region to follow camera
     displacementRegionCenter = glm::vec2(cameraPos.x, cameraPos.z);
 
-    // Displacement region info for grass compute shader
-    // xy = world center, z = region size (50m), w = texel size
-    float texelSize = DISPLACEMENT_REGION_SIZE / static_cast<float>(DISPLACEMENT_TEXTURE_SIZE);
+    // Displacement region info for grass compute shader using unified constants
+    // xy = world center, z = region size, w = texel size (derived from DISPLACEMENT_REGION_SIZE / DISPLACEMENT_TEXTURE_SIZE)
     params.displacementRegion = glm::vec4(displacementRegionCenter.x, displacementRegionCenter.y,
-                                          DISPLACEMENT_REGION_SIZE, texelSize);
+                                          GrassConstants::DISPLACEMENT_REGION_SIZE,
+                                          GrassConstants::DISPLACEMENT_TEXEL_SIZE);
 
     // Terrain parameters for heightmap sampling
     params.terrainSize = terrainSize;
@@ -744,11 +744,11 @@ void GrassSystem::recordDisplacementUpdate(vk::CommandBuffer cmd, uint32_t frame
     memcpy(displacementSourceBuffers.mappedPointers[frameIndex], currentDisplacementSources.data(),
            sizeof(DisplacementSource) * currentDisplacementSources.size());
 
-    // Update displacement uniforms
-    float texelSize = DISPLACEMENT_REGION_SIZE / static_cast<float>(DISPLACEMENT_TEXTURE_SIZE);
+    // Update displacement uniforms using unified constants
     DisplacementUniforms dispUniforms;
     dispUniforms.regionCenter = glm::vec4(displacementRegionCenter.x, displacementRegionCenter.y,
-                                          DISPLACEMENT_REGION_SIZE, texelSize);
+                                          GrassConstants::DISPLACEMENT_REGION_SIZE,
+                                          GrassConstants::DISPLACEMENT_TEXEL_SIZE);
     const EnvironmentSettings fallbackSettings{};
     const EnvironmentSettings& settings = environmentSettings ? *environmentSettings : fallbackSettings;
     dispUniforms.params = glm::vec4(settings.grassDisplacementDecay, settings.grassMaxDisplacement, 1.0f / 60.0f,
@@ -768,8 +768,8 @@ void GrassSystem::recordDisplacementUpdate(vk::CommandBuffer cmd, uint32_t frame
                            displacementPipelineLayout_.get(), 0,
                            displacementDescriptorSets_[frameIndex], {});
 
-    // Dispatch: 512x512 / 16x16 = 32x32 workgroups
-    cmd.dispatch(32, 32, 1);
+    // Dispatch using derived constant: DISPLACEMENT_DISPATCH_SIZE = DISPLACEMENT_TEXTURE_SIZE / WORKGROUP_SIZE
+    cmd.dispatch(GrassConstants::DISPLACEMENT_DISPATCH_SIZE, GrassConstants::DISPLACEMENT_DISPATCH_SIZE, 1);
 
     // Barrier: displacement compute write -> grass compute read
     Barriers::imageComputeToSampling(cmd, displacementImage_,
@@ -814,10 +814,9 @@ void GrassSystem::recordResetAndCompute(vk::CommandBuffer cmd, uint32_t frameInd
         vk::ShaderStageFlagBits::eCompute,
         0, grassPush);
 
-    // Dispatch: 2D grid of workgroups for better texture cache coherency
-    // Grid: 1000x1000 blades, Workgroup: 16x16 threads
-    // ceil(1000/16) = 63 workgroups per dimension (63*63*256 = 1,016,064 threads)
-    cmd.dispatch(63, 63, 1);
+    // Dispatch using derived constant: DISPATCH_SIZE = ceil(GRID_SIZE / WORKGROUP_SIZE)
+    // Grid: GRID_SIZE x GRID_SIZE blades, Workgroup: WORKGROUP_SIZE x WORKGROUP_SIZE threads
+    cmd.dispatch(GrassConstants::DISPATCH_SIZE, GrassConstants::DISPATCH_SIZE, 1);
 
     // Memory barrier: compute write -> vertex shader read (storage buffer) and indirect read
     // Note: This barrier ensures the compute results are visible when we draw from this buffer

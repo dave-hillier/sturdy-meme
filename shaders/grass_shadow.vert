@@ -70,11 +70,11 @@ void main() {
         windParams
     );
 
-    // Wind offset combines sampled wind with phase offset (same as grass.vert)
+    // Wind offset combines sampled wind with phase offset (same as grass.vert) using unified constants
     float windAngle = atan(windParams.direction.y, windParams.direction.x);
     float relativeWindAngle = windAngle - facing;
-    float windEffect = windSample * 0.25;
-    float windOffset = (windEffect + grassPhaseOffset * 0.25) * cos(relativeWindAngle);
+    float windEffect = windSample * GRASS_WIND_EFFECT_MULTIPLIER;
+    float windOffset = (windEffect + grassPhaseOffset * GRASS_WIND_PHASE_MULTIPLIER) * cos(relativeWindAngle);
 
     // Calculate blade deformation (fold/droop) - SAME as main render pass
     GrassBladeControlPoints cp = grassCalculateBladeDeformation(height, bladeHash, tilt, windOffset);

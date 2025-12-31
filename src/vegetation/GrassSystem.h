@@ -1,6 +1,7 @@
 #pragma once
 
 #include "EnvironmentSettings.h"
+#include "GrassConstants.h"
 #include <vulkan/vulkan.hpp>
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
@@ -185,10 +186,10 @@ private:
     ManagedPipelineLayout shadowPipelineLayout_;
     ManagedPipeline shadowPipeline_;
 
-    // Displacement texture resources (for player/NPC grass interaction)
-    static constexpr uint32_t DISPLACEMENT_TEXTURE_SIZE = 512;  // 512x512 texels
-    static constexpr float DISPLACEMENT_REGION_SIZE = 50.0f;    // 50m x 50m coverage
-    static constexpr uint32_t MAX_DISPLACEMENT_SOURCES = 16;    // Max sources per frame
+    // Displacement texture resources use unified constants from GrassConstants.h:
+    // GrassConstants::DISPLACEMENT_TEXTURE_SIZE (512x512 texels)
+    // GrassConstants::DISPLACEMENT_REGION_SIZE (50m x 50m coverage)
+    // GrassConstants::MAX_DISPLACEMENT_SOURCES (max sources per frame)
 
     vk::Image displacementImage_;
     VmaAllocation displacementAllocation_ = VK_NULL_HANDLE;
@@ -244,7 +245,8 @@ private:
     // to avoid per-frame descriptor set updates
     const BufferUtils::DynamicUniformBuffer* dynamicRendererUBO_ = nullptr;
 
-    static constexpr uint32_t MAX_INSTANCES = 100000;  // ~100k rendered after culling
+    // MAX_INSTANCES uses unified constant from GrassConstants.h:
+    // GrassConstants::MAX_INSTANCES (~100k rendered after culling)
 
     const EnvironmentSettings* environmentSettings = nullptr;
 };
