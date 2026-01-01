@@ -236,7 +236,13 @@ bool AtmosphereLUTSystem::createCloudMapLUT() {
 }
 
 bool AtmosphereLUTSystem::createLUTSampler() {
-    if (!VulkanResourceFactory::createSamplerLinearClamp(device, lutSampler)) {
+    if (!raiiDevice_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "AtmosphereLUTSystem requires raiiDevice");
+        return false;
+    }
+
+    lutSampler_ = VulkanResourceFactory::createSamplerLinearClamp(*raiiDevice_);
+    if (!lutSampler_) {
         SDL_Log("Failed to create LUT sampler");
         return false;
     }

@@ -16,6 +16,7 @@ std::unique_ptr<AtmosphereLUTSystem> AtmosphereLUTSystem::create(const InitConte
     info.descriptorPool = ctx.descriptorPool;
     info.shaderPath = ctx.shaderPath;
     info.framesInFlight = ctx.framesInFlight;
+    info.raiiDevice = ctx.raiiDevice;
     return create(info);
 }
 
@@ -29,6 +30,7 @@ bool AtmosphereLUTSystem::initInternal(const InitInfo& info) {
     descriptorPool = info.descriptorPool;
     shaderPath = info.shaderPath;
     framesInFlight = info.framesInFlight;
+    raiiDevice_ = info.raiiDevice;
 
     if (!createTransmittanceLUT()) return false;
     if (!createMultiScatterLUT()) return false;
@@ -95,5 +97,5 @@ void AtmosphereLUTSystem::cleanup() {
     destroyDescLayout(irradianceDescriptorSetLayout);
     destroyDescLayout(cloudMapDescriptorSetLayout);
 
-    lutSampler.reset();
+    lutSampler_.reset();
 }
