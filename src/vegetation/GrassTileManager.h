@@ -4,13 +4,13 @@
 #include "GrassConstants.h"
 #include "BufferUtils.h"
 #include "DescriptorManager.h"
-#include "VulkanRAII.h"
 #include <vulkan/vulkan.hpp>
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
 #include <vector>
 #include <unordered_map>
 #include <array>
+#include <memory>
 
 // Forward declarations
 class DescriptorManager;
