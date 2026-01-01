@@ -15,7 +15,7 @@
 #include "ParticleSystem.h"
 #include "UBOs.h"
 #include "RAIIAdapter.h"
-#include "VulkanRAII.h"
+#include "VmaResources.h"
 #include "core/FrameBuffered.h"
 
 // Forward declarations
@@ -139,7 +139,7 @@ public:
 
     // Displacement texture accessors (for sharing with LeafSystem)
     vk::ImageView getDisplacementImageView() const { return displacementImageView_; }
-    vk::Sampler getDisplacementSampler() const { return displacementSampler_.get(); }
+    vk::Sampler getDisplacementSampler() const { return displacementSampler_ ? **displacementSampler_ : VK_NULL_HANDLE; }
 
     void setEnvironmentSettings(const EnvironmentSettings* settings) { environmentSettings = settings; }
 
@@ -199,10 +199,13 @@ private:
     vk::RenderPass shadowRenderPass_;
     uint32_t shadowMapSize_ = 0;
 
+    // RAII device pointer
+    const vk::raii::Device* raiiDevice_ = nullptr;
+
     // Shadow pipeline (for casting shadows)
-    ManagedDescriptorSetLayout shadowDescriptorSetLayout_;
-    ManagedPipelineLayout shadowPipelineLayout_;
-    ManagedPipeline shadowPipeline_;
+    std::optional<vk::raii::DescriptorSetLayout> shadowDescriptorSetLayout_;
+    std::optional<vk::raii::PipelineLayout> shadowPipelineLayout_;
+    std::optional<vk::raii::Pipeline> shadowPipeline_;
 
     // Displacement texture resources use unified constants from GrassConstants.h:
     // GrassConstants::DISPLACEMENT_TEXTURE_SIZE (512x512 texels)
@@ -212,12 +215,12 @@ private:
     vk::Image displacementImage_;
     VmaAllocation displacementAllocation_ = VK_NULL_HANDLE;
     vk::ImageView displacementImageView_;
-    ManagedSampler displacementSampler_;
+    std::optional<vk::raii::Sampler> displacementSampler_;
 
     // Displacement update compute pipeline
-    ManagedDescriptorSetLayout displacementDescriptorSetLayout_;
-    ManagedPipelineLayout displacementPipelineLayout_;
-    ManagedPipeline displacementPipeline_;
+    std::optional<vk::raii::DescriptorSetLayout> displacementDescriptorSetLayout_;
+    std::optional<vk::raii::PipelineLayout> displacementPipelineLayout_;
+    std::optional<vk::raii::Pipeline> displacementPipeline_;
     // Per-frame descriptor sets for displacement update (double-buffered)
     std::vector<vk::DescriptorSet> displacementDescriptorSets_;
 
@@ -273,7 +276,7 @@ private:
     std::unique_ptr<GrassTileManager> tileManager_;
 
     // Tiled grass compute pipeline (separate from legacy pipeline)
-    ManagedPipeline tiledComputePipeline_;
+    std::optional<vk::raii::Pipeline> tiledComputePipeline_;
 
     // Frame counter for tile unloading (ensures GPU isn't using tile before freeing)
     uint64_t frameCounter_ = 0;

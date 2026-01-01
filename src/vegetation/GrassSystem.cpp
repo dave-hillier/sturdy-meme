@@ -54,6 +54,7 @@ std::optional<GrassSystem::Bundle> GrassSystem::createWithDependencies(
     grassInfo.shadowMapSize = shadowMapSize;
     grassInfo.shaderPath = ctx.shaderPath;
     grassInfo.framesInFlight = ctx.framesInFlight;
+    grassInfo.raiiDevice = ctx.raiiDevice;
 
     auto grassSystem = create(grassInfo);
     if (!grassSystem) {
@@ -87,6 +88,12 @@ bool GrassSystem::initInternal(const InitInfo& info) {
     extent_ = info.extent;
     shaderPath_ = info.shaderPath;
     framesInFlight_ = info.framesInFlight;
+    raiiDevice_ = info.raiiDevice;
+
+    if (!raiiDevice_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "GrassSystem requires raiiDevice");
+        return false;
+    }
 
     // Pointer to the ParticleSystem being initialized (for hooks to access)
     ParticleSystem* initializingPS = nullptr;
@@ -136,9 +143,15 @@ bool GrassSystem::initInternal(const InitInfo& info) {
 void GrassSystem::cleanup() {
     if (!device_) return;  // Not initialized
 
-    // RAII wrappers automatically clean up: shadowPipeline_, shadowPipelineLayout_,
-    // shadowDescriptorSetLayout_, displacementPipeline_, displacementPipelineLayout_,
-    // displacementDescriptorSetLayout_, displacementSampler_
+    // Reset RAII wrappers
+    tiledComputePipeline_.reset();
+    shadowPipeline_.reset();
+    shadowPipelineLayout_.reset();
+    shadowDescriptorSetLayout_.reset();
+    displacementPipeline_.reset();
+    displacementPipelineLayout_.reset();
+    displacementDescriptorSetLayout_.reset();
+    displacementSampler_.reset();
 
     if (displacementImageView_) {
         device_.destroyImageView(displacementImageView_);
@@ -151,6 +164,9 @@ void GrassSystem::cleanup() {
     }
 
     particleSystem.reset();
+
+    device_ = nullptr;
+    raiiDevice_ = nullptr;
 }
 
 void GrassSystem::destroyBuffers(VmaAllocator alloc) {
@@ -258,7 +274,8 @@ bool GrassSystem::createDisplacementResources() {
     }
 
     // Create sampler for grass compute shader to sample displacement
-    if (!VulkanResourceFactory::createSamplerLinearClamp(getDevice(), displacementSampler_)) {
+    displacementSampler_ = VulkanResourceFactory::createSamplerLinearClamp(*raiiDevice_);
+    if (!displacementSampler_) {
         SDL_Log("Failed to create displacement sampler");
         return false;
     }
@@ -305,15 +322,15 @@ bool GrassSystem::createDisplacementPipeline() {
         return false;
     }
     // Adopt raw handle into RAII wrapper
-    displacementDescriptorSetLayout_ = ManagedDescriptorSetLayout::fromRaw(getDevice(), rawDescSetLayout);
+    displacementDescriptorSetLayout_.emplace(*raiiDevice_, rawDescSetLayout);
 
     VkPipelineLayout rawPipelineLayout = DescriptorManager::createPipelineLayout(
-        getDevice(), displacementDescriptorSetLayout_.get());
+        getDevice(), **displacementDescriptorSetLayout_);
     if (rawPipelineLayout == VK_NULL_HANDLE) {
         SDL_Log("Failed to create displacement pipeline layout");
         return false;
     }
-    displacementPipelineLayout_ = ManagedPipelineLayout::fromRaw(getDevice(), rawPipelineLayout);
+    displacementPipelineLayout_.emplace(*raiiDevice_, rawPipelineLayout);
 
     // Load compute shader
     auto compShaderCode = ShaderLoader::readFile(getShaderPath() + "/grass_displacement.comp.spv");
@@ -337,20 +354,22 @@ bool GrassSystem::createDisplacementPipeline() {
 
     auto pipelineInfo = vk::ComputePipelineCreateInfo{}
         .setStage(shaderStageInfo)
-        .setLayout(displacementPipelineLayout_.get());
+        .setLayout(**displacementPipelineLayout_);
 
-    bool success = ManagedPipeline::createCompute(getDevice(), VK_NULL_HANDLE,
-        *reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), displacementPipeline_);
-
-    vkDevice.destroyShaderModule(*compShaderModule);
-
-    if (!success) {
+    VkPipeline rawPipeline = VK_NULL_HANDLE;
+    if (vkCreateComputePipelines(getDevice(), VK_NULL_HANDLE, 1,
+            reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo),
+            nullptr, &rawPipeline) != VK_SUCCESS) {
+        vkDevice.destroyShaderModule(*compShaderModule);
         SDL_Log("Failed to create displacement compute pipeline");
         return false;
     }
+    displacementPipeline_.emplace(*raiiDevice_, rawPipeline);
+
+    vkDevice.destroyShaderModule(*compShaderModule);
 
     // Allocate per-frame displacement descriptor sets (double-buffered) using managed pool
-    auto rawSets = getDescriptorPool()->allocate(displacementDescriptorSetLayout_.get(), getFramesInFlight());
+    auto rawSets = getDescriptorPool()->allocate(**displacementDescriptorSetLayout_, getFramesInFlight());
     if (rawSets.empty()) {
         SDL_Log("Failed to allocate displacement descriptor sets");
         return false;
@@ -496,7 +515,7 @@ bool GrassSystem::createShadowPipeline() {
         return false;
     }
     // Adopt raw handle into RAII wrapper
-    shadowDescriptorSetLayout_ = ManagedDescriptorSetLayout::fromRaw(getDevice(), rawDescSetLayout);
+    shadowDescriptorSetLayout_.emplace(*raiiDevice_, rawDescSetLayout);
 
     PipelineBuilder builder(getDevice());
     builder.addShaderStage(getShaderPath() + "/grass_shadow.vert.spv", VK_SHADER_STAGE_VERTEX_BIT)
@@ -546,10 +565,10 @@ bool GrassSystem::createShadowPipeline() {
     auto colorBlending = vk::PipelineColorBlendStateCreateInfo{};
 
     VkPipelineLayout rawPipelineLayout = VK_NULL_HANDLE;
-    if (!builder.buildPipelineLayout({shadowDescriptorSetLayout_.get()}, rawPipelineLayout)) {
+    if (!builder.buildPipelineLayout({**shadowDescriptorSetLayout_}, rawPipelineLayout)) {
         return false;
     }
-    shadowPipelineLayout_ = ManagedPipelineLayout::fromRaw(getDevice(), rawPipelineLayout);
+    shadowPipelineLayout_.emplace(*raiiDevice_, rawPipelineLayout);
 
     auto pipelineInfo = vk::GraphicsPipelineCreateInfo{}
         .setPVertexInputState(&vertexInputInfo)
@@ -563,10 +582,10 @@ bool GrassSystem::createShadowPipeline() {
         .setSubpass(0);
 
     VkPipeline rawPipeline = VK_NULL_HANDLE;
-    if (!builder.buildGraphicsPipeline(pipelineInfo, shadowPipelineLayout_.get(), rawPipeline)) {
+    if (!builder.buildGraphicsPipeline(pipelineInfo, **shadowPipelineLayout_, rawPipeline)) {
         return false;
     }
-    shadowPipeline_ = ManagedPipeline::fromRaw(getDevice(), rawPipeline);
+    shadowPipeline_.emplace(*raiiDevice_, rawPipeline);
 
     return true;
 }
@@ -576,7 +595,7 @@ bool GrassSystem::createDescriptorSets() {
     // after all hooks complete. This hook only allocates GrassSystem-specific descriptor sets.
     // Compute descriptor set updates happen later in writeComputeDescriptorSets() called after init.
 
-    SDL_Log("GrassSystem::createDescriptorSets - pool=%p, shadowLayout=%p", (void*)getDescriptorPool(), (void*)shadowDescriptorSetLayout_.get());
+    SDL_Log("GrassSystem::createDescriptorSets - pool=%p, shadowLayout=%p", (void*)getDescriptorPool(), (void*)**shadowDescriptorSetLayout_);
     SDL_Log("GrassSystem::createDescriptorSets - about to allocate shadow sets");
 
     // Allocate shadow descriptor sets for all buffer sets (matches frames in flight)
@@ -585,7 +604,7 @@ bool GrassSystem::createDescriptorSets() {
 
     for (uint32_t set = 0; set < bufferSetCount; set++) {
         SDL_Log("GrassSystem::createDescriptorSets - allocating shadow set %u", set);
-        shadowDescriptorSets_[set] = getDescriptorPool()->allocateSingle(shadowDescriptorSetLayout_.get());
+        shadowDescriptorSets_[set] = getDescriptorPool()->allocateSingle(**shadowDescriptorSetLayout_);
         SDL_Log("GrassSystem::createDescriptorSets - allocated shadow set %u", set);
         if (!shadowDescriptorSets_[set]) {
             SDL_Log("Failed to allocate grass shadow descriptor set (set %u)", set);
@@ -629,7 +648,7 @@ bool GrassSystem::createExtraPipelines(SystemLifecycleHelper::PipelineHandles& c
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create tiled grass compute pipeline");
             return false;
         }
-        tiledComputePipeline_ = ManagedPipeline::fromRaw(getDevice(), rawTiledPipeline);
+        tiledComputePipeline_.emplace(*raiiDevice_, rawTiledPipeline);
         SDL_Log("GrassSystem: Created tiled grass compute pipeline");
 
         // Initialize tile manager
@@ -641,7 +660,7 @@ bool GrassSystem::createExtraPipelines(SystemLifecycleHelper::PipelineHandles& c
         tileInfo.shaderPath = getShaderPath();
         tileInfo.computeDescriptorSetLayout = computeHandles.descriptorSetLayout;
         tileInfo.computePipelineLayout = computeHandles.pipelineLayout;
-        tileInfo.computePipeline = tiledComputePipeline_.get();
+        tileInfo.computePipeline = **tiledComputePipeline_;
         tileInfo.graphicsDescriptorSetLayout = graphicsHandles.descriptorSetLayout;
         tileInfo.graphicsPipelineLayout = graphicsHandles.pipelineLayout;
         tileInfo.graphicsPipeline = graphicsHandles.pipeline;
@@ -695,7 +714,7 @@ void GrassSystem::updateDescriptorSets(vk::Device dev, const std::vector<vk::Buf
         // Use non-fluent pattern to avoid copy semantics bug with DescriptorManager::SetWriter
         DescriptorManager::SetWriter computeWriter(dev, (*particleSystem)->getComputeDescriptorSet(set));
         computeWriter.writeImage(3, terrainHeightMapView_, terrainHeightMapSampler_);
-        computeWriter.writeImage(4, displacementImageView_, displacementSampler_.get());
+        computeWriter.writeImage(4, displacementImageView_, **displacementSampler_);
 
         // Tile cache bindings (5 and 6) - for high-res terrain sampling
         if (tileArrayView_) {
@@ -759,7 +778,7 @@ void GrassSystem::updateDescriptorSets(vk::Device dev, const std::vector<vk::Buf
 
         tileManager_->updateDescriptorSets(
             terrainHeightMapView_, terrainHeightMapSampler_,
-            displacementImageView_, displacementSampler_.get(),
+            displacementImageView_, **displacementSampler_,
             tileArrayView_, tileSampler_,
             tileInfoArray,
             vkCullingBuffers,
@@ -841,9 +860,9 @@ void GrassSystem::recordDisplacementUpdate(vk::CommandBuffer cmd, uint32_t frame
         0, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
 
     // Dispatch displacement update compute shader using per-frame descriptor set (double-buffered)
-    cmd.bindPipeline(vk::PipelineBindPoint::eCompute, displacementPipeline_.get());
+    cmd.bindPipeline(vk::PipelineBindPoint::eCompute, **displacementPipeline_);
     cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute,
-                           displacementPipelineLayout_.get(), 0,
+                           **displacementPipelineLayout_, 0,
                            displacementDescriptorSets_[frameIndex], {});
 
     // Dispatch using derived constant: DISPLACEMENT_DISPATCH_SIZE = DISPLACEMENT_TEXTURE_SIZE / WORKGROUP_SIZE
@@ -989,16 +1008,16 @@ void GrassSystem::recordShadowDraw(vk::CommandBuffer cmd, uint32_t frameIndex, f
             .update();
     }
 
-    cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, shadowPipeline_.get());
+    cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, **shadowPipeline_);
     cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
-                           shadowPipelineLayout_.get(), 0,
+                           **shadowPipelineLayout_, 0,
                            shadowDescriptorSets_[readSet], {});
 
     GrassPushConstants grassPush{};
     grassPush.time = time;
     grassPush.cascadeIndex = static_cast<int>(cascadeIndex);
     cmd.pushConstants<GrassPushConstants>(
-        shadowPipelineLayout_.get(),
+        **shadowPipelineLayout_,
         vk::ShaderStageFlagBits::eVertex,
         0, grassPush);
 
