@@ -360,6 +360,13 @@ bool StreetGenerator::generateSkeleton(
     uint32_t rootId = network.addNode(entries[0].position);
     network.nodes[rootId].depth = 0;
 
+    SDL_Log("Skeleton: Entry at (%.1f, %.1f), direction (%.2f, %.2f), center (%.1f, %.1f), radius %.1f",
+            entries[0].position.x, entries[0].position.y,
+            entries[0].direction.x, entries[0].direction.y,
+            center.x, center.y, radius);
+    SDL_Log("Skeleton: %zu attractors, attractionRadius=%.1f, killRadius=%.1f, segmentLength=%.1f",
+            attractors.size(), config.attractionRadius, config.killRadius, config.segmentLength);
+
     // Track active growth nodes
     struct GrowthNode {
         uint32_t nodeId;
@@ -417,19 +424,22 @@ bool StreetGenerator::generateSkeleton(
                 growthDir = glm::normalize(growthDir);
             }
 
-            // Check branch angle constraint
+            // Clamp growth direction to max branch angle (but allow straight-ahead)
             if (node.parentId != UINT32_MAX) {
                 const auto& parent = network.nodes[node.parentId];
                 glm::vec2 parentDir = glm::normalize(node.position - parent.position);
                 float angle = angleBetween(parentDir, growthDir) * 180.0f / 3.14159f;
 
-                if (angle < config.minBranchAngle) continue;
+                // Only clamp if angle exceeds max - allow straight ahead and gentle curves
                 if (angle > config.maxBranchAngle) {
-                    // Clamp direction
                     float maxRad = config.maxBranchAngle * 3.14159f / 180.0f;
                     float currentAngle = std::atan2(growthDir.y, growthDir.x);
                     float parentAngle = std::atan2(parentDir.y, parentDir.x);
                     float angleDiff = currentAngle - parentAngle;
+
+                    // Normalize angle diff to [-pi, pi]
+                    while (angleDiff > 3.14159f) angleDiff -= 2.0f * 3.14159f;
+                    while (angleDiff < -3.14159f) angleDiff += 2.0f * 3.14159f;
 
                     if (angleDiff > maxRad) {
                         float newAngle = parentAngle + maxRad;
@@ -445,11 +455,24 @@ bool StreetGenerator::generateSkeleton(
             glm::vec2 newPos = node.position + growthDir * config.segmentLength;
 
             // Check within settlement
-            if (glm::distance(newPos, center) > radius) continue;
+            float distFromCenter = glm::distance(newPos, center);
+            if (distFromCenter > radius) {
+                SDL_Log("  Skeleton iter %d: node %u rejected - outside settlement (%.1f > %.1f)",
+                        iter, gNode.nodeId, distFromCenter, radius);
+                continue;
+            }
 
             // Check terrain slope
             float slope = terrain.sampleSlope(newPos.x, newPos.y, terrainSize);
-            if (slope > config.maxSlope) continue;
+            if (slope > config.maxSlope) {
+                SDL_Log("  Skeleton iter %d: node %u rejected - slope too steep (%.2f > %.2f)",
+                        iter, gNode.nodeId, slope, config.maxSlope);
+                continue;
+            }
+
+            SDL_Log("  Skeleton iter %d: candidate from node %u at (%.1f,%.1f) -> (%.1f,%.1f), dir=(%.2f,%.2f), influencers=%d",
+                    iter, gNode.nodeId, node.position.x, node.position.y, newPos.x, newPos.y,
+                    growthDir.x, growthDir.y, influenceCount);
 
             candidates.push_back({idx, newPos, growthDir});
         }
@@ -459,17 +482,18 @@ bool StreetGenerator::generateSkeleton(
         for (const auto& [idx, newPos, growthDir] : candidates) {
             if (branchCount >= config.maxBranches) break;
 
-            auto& gNode = growthNodes[idx];
-            const auto& parentNode = network.nodes[gNode.nodeId];
+            // Get parent node ID before any modifications (avoid reference invalidation)
+            uint32_t parentNodeId = growthNodes[idx].nodeId;
+            const auto& parentNode = network.nodes[parentNodeId];
 
             // Create new node
             uint32_t newId = network.addNode(newPos);
-            network.nodes[newId].parentId = gNode.nodeId;
+            network.nodes[newId].parentId = parentNodeId;
             network.nodes[newId].depth = parentNode.depth + 1;
-            network.nodes[gNode.nodeId].children.push_back(newId);
+            network.nodes[parentNodeId].children.push_back(newId);
 
             // Create segment
-            network.addSegment(gNode.nodeId, newId, StreetType::Street, false);
+            network.addSegment(parentNodeId, newId, StreetType::Street, false);
 
             // Check if we reached an attractor
             for (auto& attr : attractors) {
@@ -480,11 +504,11 @@ bool StreetGenerator::generateSkeleton(
                 }
             }
 
+            // Deactivate old growth node BEFORE push_back (to avoid iterator invalidation)
+            growthNodes[idx].active = false;
+
             // Add new growth node
             growthNodes.push_back({newId, growthDir, true});
-
-            // Deactivate old growth node
-            gNode.active = false;
 
             branchCount++;
         }
