@@ -73,6 +73,8 @@
 #include <array>
 #include <limits>
 
+#include "TracyIntegration.h"
+
 std::unique_ptr<Renderer> Renderer::create(const InitInfo& info) {
     std::unique_ptr<Renderer> instance(new Renderer());
     if (!instance->initInternal(info)) {
@@ -639,6 +641,8 @@ void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera& camera) 
 }
 
 bool Renderer::render(const Camera& camera) {
+    TRACY_ZONE_SCOPED_NC("Renderer::render", TRACY_COLOR_POSTFX);
+
     // Skip rendering if window is suspended (e.g., macOS screen lock)
     if (windowSuspended) {
         return false;
@@ -748,9 +752,11 @@ bool Renderer::render(const Camera& camera) {
 
     // Update subsystems (state mutations)
     systems_->profiler().beginCpuZone("SystemUpdates");
+    TRACY_ZONE_SCOPED_N("SystemUpdates");
 
     // Wind system update
     {
+        TRACY_ZONE_SCOPED_NC("Wind", TRACY_COLOR_ATMOSPHERE);
         systems_->profiler().beginCpuZone("SystemUpdates:Wind");
         systems_->wind().update(frame.deltaTime);
         systems_->wind().updateUniforms(frame.frameIndex);
@@ -820,6 +826,7 @@ bool Renderer::render(const Camera& camera) {
 
     // Grass system update
     {
+        TRACY_ZONE_SCOPED_NC("Grass", TRACY_COLOR_VEGETATION);
         systems_->profiler().beginCpuZone("SystemUpdates:Grass");
         systems_->grass().updateUniforms(frame.frameIndex, frame.cameraPosition, frame.viewProj,
                                    frame.terrainSize, frame.heightScale);
@@ -836,6 +843,7 @@ bool Renderer::render(const Camera& camera) {
 
     // Terrain system update
     {
+        TRACY_ZONE_SCOPED_NC("Terrain", TRACY_COLOR_TERRAIN);
         systems_->profiler().beginCpuZone("SystemUpdates:Terrain");
         systems_->terrain().updateUniforms(frame.frameIndex, frame.cameraPosition, frame.view, frame.projection,
                                       systems_->volumetricSnow().getCascadeParams(), useVolumetricSnow, MAX_SNOW_HEIGHT);
@@ -902,6 +910,7 @@ bool Renderer::render(const Camera& camera) {
 
     // Water system update
     {
+        TRACY_ZONE_SCOPED_NC("Water", TRACY_COLOR_WATER);
         systems_->profiler().beginCpuZone("SystemUpdates:Water");
         systems_->water().updateUniforms(frame.frameIndex);
 
