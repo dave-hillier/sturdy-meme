@@ -78,6 +78,9 @@ struct TerrainPrepareCullDispatchPushConstants {
 // Push constants for frustum cull (now includes dispatch calculation)
 struct TerrainFrustumCullPushConstants {
     uint32_t subdivisionWorkgroupSize;  // For computing dispatch args
+    uint32_t totalWorkgroups;           // Total workgroups in this dispatch
+    uint32_t maxVisibleIndices;         // Output buffer capacity
+    uint32_t _pad0;
 };
 
 // Push constants for shadow cascade culling
@@ -87,7 +90,9 @@ struct TerrainShadowCullPushConstants {
     float terrainSize;
     float heightScale;
     uint32_t cascadeIndex;
-    uint32_t padding;
+    uint32_t totalWorkgroups;          // Total workgroups in this dispatch
+    uint32_t maxShadowIndices;         // Output buffer capacity
+    uint32_t _pad0;
 };
 
 // Terrain configuration (outside class to avoid C++17 default argument issues)
@@ -377,5 +382,6 @@ private:
     static constexpr uint32_t SUBDIVISION_WORKGROUP_SIZE = 64;
     static constexpr uint32_t SUM_REDUCTION_WORKGROUP_SIZE = 256;
     static constexpr uint32_t FRUSTUM_CULL_WORKGROUP_SIZE = 256;
+    static constexpr uint32_t SHADOW_CULL_WORKGROUP_SIZE = 256;
     static constexpr uint32_t MAX_VISIBLE_TRIANGLES = 4 * 1024 * 1024;  // 4M triangles max
 };

@@ -48,8 +48,8 @@ layout(std430, set = 0, binding = BINDING_TREE_LEAF_INDIRECT) buffer LeafIndirec
 layout(std140, set = 0, binding = BINDING_TREE_LEAF_PARAMS) uniform LeafParams {
     uint leafCount;
     uint billboard;        // 0 = single, 1 = double
-    float padding1;
-    float padding2;
+    uint maxVertices;      // Vertex buffer capacity
+    uint maxIndices;       // Index buffer capacity
 };
 
 void main() {
@@ -68,6 +68,13 @@ void main() {
     // Vertex and index offsets
     uint vertexOffset = leafIdx * 4 * quadsPerLeaf;
     uint indexOffset = leafIdx * 6 * quadsPerLeaf;
+
+    // Bounds check: verify this leaf's allocation fits in the buffers
+    uint requiredVerts = 4 * quadsPerLeaf;
+    uint requiredIndices = 6 * quadsPerLeaf;
+    if (vertexOffset + requiredVerts > maxVertices || indexOffset + requiredIndices > maxIndices) {
+        return;  // Skip this leaf if it would overflow
+    }
 
     // Half extents
     float halfW = size * 0.5;

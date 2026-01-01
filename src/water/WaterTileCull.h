@@ -56,6 +56,8 @@ public:
         float tileSize;           // Tile size in pixels
         float nearPlane;
         float farPlane;
+        uint32_t maxTiles;        // Output buffer capacity
+        uint32_t _pad0;
     };
 
     // Indirect draw command for Vulkan

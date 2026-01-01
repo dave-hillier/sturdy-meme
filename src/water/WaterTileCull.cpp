@@ -339,6 +339,8 @@ void WaterTileCull::recordTileCull(VkCommandBuffer cmd, uint32_t frameIndex,
     pc.tileSize = static_cast<float>(tileSize);
     pc.nearPlane = 0.1f;
     pc.farPlane = 1000.0f;
+    pc.maxTiles = tileCount.x * tileCount.y;  // Output buffer capacity
+    pc._pad0 = 0;
 
     // Bind pipeline
     vk::CommandBuffer vkCmd(cmd);

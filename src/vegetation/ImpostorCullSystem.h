@@ -36,7 +36,7 @@ struct alignas(16) ImpostorCullUniforms {
     uint32_t temporalUpdateMode;        // 0=full, 1=partial, 2=skip
     uint32_t temporalUpdateOffset;      // For partial: start index of trees to update
     uint32_t temporalUpdateCount;       // For partial: number of trees to update this frame
-    uint32_t _pad0;
+    uint32_t maxVisibleImpostors;       // Output buffer capacity
 };
 
 // Per-archetype sizing data (matches shader struct)

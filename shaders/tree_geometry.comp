@@ -63,6 +63,10 @@ layout(std140, set = 0, binding = BINDING_TREE_PARAMS) uniform TreeParams {
     uint totalSections;
     float textureScaleU;
     float textureScaleV;
+    uint maxVertices;      // Vertex buffer capacity
+    uint maxIndices;       // Index buffer capacity
+    uint _pad0;
+    uint _pad1;
 };
 
 void main() {
@@ -81,11 +85,17 @@ void main() {
     // We have sectionCount+1 rings
     uint vertsPerRing = uint(segmentCount + 1);
     uint totalVerts = vertsPerRing * uint(sectionCount + 1);
+    uint totalIndices = uint(sectionCount * segmentCount * 6);
 
     // Calculate offset based on previous branches
     // This is simplified - in practice you'd use atomic counters or prefix sum
     uint vertexOffset = branchIdx * 1024;  // Conservative allocation per branch
     uint indexOffset = branchIdx * 6144;   // 6 indices per quad, many quads
+
+    // Bounds check: verify this branch's allocation fits in the buffers
+    if (vertexOffset + totalVerts > maxVertices || indexOffset + totalIndices > maxIndices) {
+        return;  // Skip this branch if it would overflow
+    }
 
     // Generate vertices for each section ring
     for (int sectionIdx = 0; sectionIdx <= sectionCount; sectionIdx++) {

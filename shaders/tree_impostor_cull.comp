@@ -57,7 +57,7 @@ layout(binding = BINDING_TREE_IMPOSTOR_CULL_UNIFORMS) uniform ImpostorCullUnifor
     uint temporalUpdateMode;       // 0=full, 1=partial, 2=skip (Phase 5: Temporal Coherence)
     uint temporalUpdateOffset;     // For partial: start index of trees to update
     uint temporalUpdateCount;      // For partial: number of trees to update this frame
-    uint _pad0;
+    uint maxVisibleImpostors;      // Output buffer capacity
 };
 
 // Hi-Z pyramid for occlusion culling
@@ -376,12 +376,37 @@ void main() {
     uint activeCount = subgroupBallotBitCount(activeMask);
     uint laneOffset = subgroupBallotExclusiveBitCount(activeMask);
 
+    // Use compare-and-swap to only allocate slots within buffer capacity
     uint baseSlot = 0;
+    uint slotsAllocated = 0;
     if (subgroupElect()) {
-        baseSlot = atomicAdd(drawCmd.instanceCount, activeCount);
+        uint expected = drawCmd.instanceCount;
+        while (true) {
+            uint available = (expected >= maxVisibleImpostors)
+                ? 0
+                : maxVisibleImpostors - expected;
+            slotsAllocated = min(activeCount, available);
+            if (slotsAllocated == 0) {
+                baseSlot = expected;
+                break;
+            }
+            uint desired = expected + slotsAllocated;
+            uint actual = atomicCompSwap(drawCmd.instanceCount, expected, desired);
+            if (actual == expected) {
+                baseSlot = expected;
+                break;
+            }
+            expected = actual;
+        }
     }
     baseSlot = subgroupBroadcastFirst(baseSlot);
+    slotsAllocated = subgroupBroadcastFirst(slotsAllocated);
     uint outputSlot = baseSlot + laneOffset;
+
+    // Only write if we got a valid slot within bounds
+    if (laneOffset >= slotsAllocated) {
+        return;
+    }
 
     // Write visible impostor data
     // Use per-tree sizing from input data (already computed from actual mesh bounds)

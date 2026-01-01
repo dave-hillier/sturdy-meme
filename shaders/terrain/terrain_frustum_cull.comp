@@ -79,11 +79,14 @@ layout(std430, binding = BINDING_TERRAIN_CULL_DISPATCH) writeonly buffer CullDis
 layout(push_constant) uniform PushConstants {
     uint subdivisionWorkgroupSize;  // Subdivision workgroup size for dispatch calculation
     uint totalWorkgroups;           // Total number of workgroups in this dispatch
+    uint maxVisibleIndices;         // Output buffer capacity
+    uint _pad0;
 };
 
 // Shared memory for workgroup-level aggregation
 shared uint workgroupVisibleCount;
 shared uint workgroupBaseSlot;
+shared uint workgroupSlotsAllocated;
 
 #define TERRAIN_SIZE (terrainParams.x)
 #define HEIGHT_SCALE (terrainParams.y)
@@ -161,14 +164,31 @@ void main() {
     // Synchronize workgroup to get final count
     barrier();
 
-    // First thread in workgroup does single atomic to global buffer
+    // First thread in workgroup does atomic allocation with capacity check
     if (localIndex == 0u) {
-        workgroupBaseSlot = atomicAdd(visibleCount, workgroupVisibleCount);
+        workgroupSlotsAllocated = 0u;
+        // Use compare-and-swap to only allocate slots within buffer capacity
+        uint expected = visibleCount;
+        while (true) {
+            uint available = (expected >= maxVisibleIndices) ? 0 : maxVisibleIndices - expected;
+            workgroupSlotsAllocated = min(workgroupVisibleCount, available);
+            if (workgroupSlotsAllocated == 0u) {
+                workgroupBaseSlot = expected;
+                break;
+            }
+            uint desired = expected + workgroupSlotsAllocated;
+            uint actual = atomicCompSwap(visibleCount, expected, desired);
+            if (actual == expected) {
+                workgroupBaseSlot = expected;
+                break;
+            }
+            expected = actual;
+        }
     }
     barrier();
 
-    // Write visible indices to global buffer
-    if (visible) {
+    // Write visible indices to global buffer (only if we got a valid slot)
+    if (visible && localOffset < workgroupSlotsAllocated) {
         uint globalSlot = workgroupBaseSlot + localOffset;
         indices[globalSlot] = myLeafIndex;
     }

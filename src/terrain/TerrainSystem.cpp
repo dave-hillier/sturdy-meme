@@ -932,6 +932,11 @@ void TerrainSystem::recordShadowCull(vk::CommandBuffer cmd, uint32_t frameIndex,
     pc.terrainSize = config.size;
     pc.heightScale = config.heightScale;
     pc.cascadeIndex = static_cast<uint32_t>(cascadeIndex);
+    // Note: For indirect dispatch, we pass upper bound since actual workgroup count
+    // is GPU-computed. The shader's "last workgroup" detection uses this.
+    pc.totalWorkgroups = (MAX_VISIBLE_TRIANGLES + SHADOW_CULL_WORKGROUP_SIZE - 1) / SHADOW_CULL_WORKGROUP_SIZE;
+    pc.maxShadowIndices = MAX_VISIBLE_TRIANGLES;
+    pc._pad0 = 0;
 
     vkCmd.pushConstants<TerrainShadowCullPushConstants>(
         pipelines->getShadowCullPipelineLayout(),
