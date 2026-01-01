@@ -114,11 +114,30 @@ public:
         return glm::dot(diff, diff);
     }
 
+    /**
+     * Mark the tile as used this frame (for unload tracking)
+     */
+    void markUsed(uint64_t frameNumber) { lastUsedFrame_ = frameNumber; }
+
+    /**
+     * Get the last frame this tile was used
+     */
+    uint64_t getLastUsedFrame() const { return lastUsedFrame_; }
+
+    /**
+     * Check if tile is safe to unload (hasn't been used for N frames)
+     * Uses triple buffering - wait at least 3 frames to ensure GPU isn't using it
+     */
+    bool canUnload(uint64_t currentFrame, uint32_t framesInFlight) const {
+        return (currentFrame - lastUsedFrame_) > framesInFlight;
+    }
+
 private:
     VmaAllocator allocator_ = VK_NULL_HANDLE;
     TileCoord coord_{0, 0};
+    uint64_t lastUsedFrame_ = 0;
 
-    // Per-tile buffers (double-buffered like the main system)
+    // Per-tile buffers (triple-buffered to match frames in flight)
     BufferUtils::DoubleBufferedBufferSet instanceBuffers_;
     BufferUtils::DoubleBufferedBufferSet indirectBuffers_;
 };

@@ -795,7 +795,8 @@ void GrassSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos
 
     // Update active tiles in tiled mode based on camera position
     if (tiledModeEnabled_ && tileManager_) {
-        tileManager_->updateActiveTiles(cameraPos);
+        frameCounter_++;
+        tileManager_->updateActiveTiles(cameraPos, frameCounter_);
     }
 }
 

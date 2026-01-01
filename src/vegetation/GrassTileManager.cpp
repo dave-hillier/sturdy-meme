@@ -93,9 +93,10 @@ bool GrassTileManager::createTileDescriptorSets(GrassTile* tile) {
     return true;
 }
 
-void GrassTileManager::updateActiveTiles(const glm::vec3& cameraPos) {
+void GrassTileManager::updateActiveTiles(const glm::vec3& cameraPos, uint64_t frameNumber) {
     glm::vec2 cameraXZ(cameraPos.x, cameraPos.z);
     GrassTile::TileCoord cameraTile = worldToTileCoord(cameraXZ);
+    currentFrame_ = frameNumber;
 
     // Clear active tiles list
     activeTiles_.clear();
@@ -113,6 +114,7 @@ void GrassTileManager::updateActiveTiles(const glm::vec3& cameraPos) {
 
             GrassTile* tile = getOrCreateTile(coord);
             if (tile) {
+                tile->markUsed(frameNumber);
                 activeTiles_.push_back(tile);
             }
         }
@@ -126,6 +128,47 @@ void GrassTileManager::updateActiveTiles(const glm::vec3& cameraPos) {
         [&cameraXZ](const GrassTile* a, const GrassTile* b) {
             return a->distanceSquaredTo(cameraXZ) < b->distanceSquaredTo(cameraXZ);
         });
+
+    // Unload distant tiles that are safe to release
+    unloadDistantTiles(cameraXZ, frameNumber);
+}
+
+void GrassTileManager::unloadDistantTiles(const glm::vec2& cameraXZ, uint64_t currentFrame) {
+    // Calculate unload distance threshold with hysteresis
+    // Active range is halfExtent tiles, unload beyond that + margin
+    float halfExtent = static_cast<float>(GrassConstants::TILES_PER_AXIS) / 2.0f;
+    float activeRadius = (halfExtent + 0.5f) * GrassConstants::TILE_SIZE;
+    float unloadRadius = activeRadius + GrassConstants::TILE_UNLOAD_MARGIN;
+    float unloadRadiusSq = unloadRadius * unloadRadius;
+
+    // Collect tiles to unload (can't modify map while iterating)
+    std::vector<GrassTile::TileCoord> tilesToUnload;
+
+    for (auto& [coord, tile] : tiles_) {
+        float distSq = tile->distanceSquaredTo(cameraXZ);
+
+        // Only unload if beyond unload radius AND safe (not in use by GPU)
+        if (distSq > unloadRadiusSq && tile->canUnload(currentFrame, framesInFlight_)) {
+            tilesToUnload.push_back(coord);
+        }
+    }
+
+    // Unload collected tiles
+    for (const auto& coord : tilesToUnload) {
+        auto it = tiles_.find(coord);
+        if (it != tiles_.end()) {
+            GrassTile* tilePtr = it->second.get();
+
+            // Remove descriptor sets for this tile
+            tileDescriptorSets_.erase(tilePtr);
+
+            // Log unload for debugging
+            SDL_Log("GrassTileManager: Unloading tile at (%d, %d)", coord.x, coord.z);
+
+            // Remove from tile map (destructor will clean up GPU resources)
+            tiles_.erase(it);
+        }
+    }
 }
 
 void GrassTileManager::updateDescriptorSets(

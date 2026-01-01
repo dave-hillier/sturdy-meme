@@ -64,8 +64,10 @@ public:
     /**
      * Update active tiles based on camera position
      * Call this once per frame before compute/render
+     * @param cameraPos Current camera position
+     * @param frameNumber Current frame number (for tracking tile usage)
      */
-    void updateActiveTiles(const glm::vec3& cameraPos);
+    void updateActiveTiles(const glm::vec3& cameraPos, uint64_t frameNumber);
 
     /**
      * Update descriptor sets with shared resources
@@ -114,7 +116,17 @@ public:
      */
     bool isEnabled() const { return enabled_; }
 
+    /**
+     * Get total number of loaded tiles (including inactive)
+     */
+    size_t getTotalTileCount() const { return tiles_.size(); }
+
 private:
+    /**
+     * Unload tiles that are too far from camera and safe to release
+     * Uses hysteresis margin to prevent thrashing
+     */
+    void unloadDistantTiles(const glm::vec2& cameraXZ, uint64_t currentFrame);
     /**
      * Calculate which tile coordinate contains a world position
      */
@@ -158,6 +170,9 @@ private:
 
     // Current camera tile coordinate (for detecting movement)
     GrassTile::TileCoord currentCameraTile_{0, 0};
+
+    // Frame tracking for tile unloading
+    uint64_t currentFrame_ = 0;
 
     // Shared buffers from GrassSystem (all tiles write to these)
     vk::Buffer sharedInstanceBuffer_;

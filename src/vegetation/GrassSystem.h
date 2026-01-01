@@ -273,4 +273,7 @@ private:
 
     // Tiled grass compute pipeline (separate from legacy pipeline)
     ManagedPipeline tiledComputePipeline_;
+
+    // Frame counter for tile unloading (ensures GPU isn't using tile before freeing)
+    uint64_t frameCounter_ = 0;
 };
