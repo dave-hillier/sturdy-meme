@@ -1,14 +1,15 @@
 #pragma once
 
 #include <vulkan/vulkan.h>
+#include <vulkan/vulkan_raii.hpp>
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
 #include <memory>
+#include <optional>
 #include "InitContext.h"
 #include "DescriptorManager.h"
-#include "VulkanRAII.h"
 
 /**
  * SSRSystem - Phase 10: Screen-Space Reflections
@@ -39,6 +40,7 @@ public:
         uint32_t framesInFlight;
         VkExtent2D extent;
         DescriptorManager::Pool* descriptorPool;  // Shared auto-growing pool
+        const vk::raii::Device* raiiDevice = nullptr;
     };
 
     // Push constants for SSR compute shader
@@ -97,7 +99,7 @@ public:
 
     // Get SSR result texture for sampling in water shader
     VkImageView getSSRResultView() const { return ssrResultView[currentBuffer]; }
-    VkSampler getSampler() const { return sampler.get(); }
+    VkSampler getSampler() const { return sampler_ ? **sampler_ : VK_NULL_HANDLE; }
 
     // Configuration
     void setMaxDistance(float dist) { maxDistance = dist; }
@@ -133,6 +135,7 @@ private:
     VkCommandPool commandPool = VK_NULL_HANDLE;
     VkQueue computeQueue = VK_NULL_HANDLE;
     std::string shaderPath;
+    const vk::raii::Device* raiiDevice_ = nullptr;
 
     uint32_t framesInFlight = 0;
     VkExtent2D extent = {0, 0};
@@ -160,19 +163,19 @@ private:
     int currentBuffer = 0;
 
     // Sampler
-    ManagedSampler sampler;
+    std::optional<vk::raii::Sampler> sampler_;
 
     // Main SSR compute pipeline
-    ManagedPipeline computePipeline;
-    ManagedPipelineLayout computePipelineLayout;
-    ManagedDescriptorSetLayout descriptorSetLayout;
+    std::optional<vk::raii::Pipeline> computePipeline_;
+    std::optional<vk::raii::PipelineLayout> computePipelineLayout_;
+    std::optional<vk::raii::DescriptorSetLayout> descriptorSetLayout_;
     DescriptorManager::Pool* descriptorPool = nullptr;  // Shared auto-growing pool
     std::vector<VkDescriptorSet> descriptorSets;
 
     // Blur compute pipeline
-    ManagedPipeline blurPipeline;
-    ManagedPipelineLayout blurPipelineLayout;
-    ManagedDescriptorSetLayout blurDescriptorSetLayout;
+    std::optional<vk::raii::Pipeline> blurPipeline_;
+    std::optional<vk::raii::PipelineLayout> blurPipelineLayout_;
+    std::optional<vk::raii::DescriptorSetLayout> blurDescriptorSetLayout_;
     std::vector<VkDescriptorSet> blurDescriptorSets;
 
     // Intermediate buffer for blur (SSR writes here, blur reads and writes to final)

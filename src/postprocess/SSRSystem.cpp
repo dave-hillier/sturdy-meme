@@ -2,7 +2,7 @@
 #include "ShaderLoader.h"
 #include "DescriptorManager.h"
 #include "VulkanBarriers.h"
-#include "VulkanRAII.h"
+#include "VulkanHelpers.h"
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.hpp>
 #include <array>
@@ -27,6 +27,7 @@ std::unique_ptr<SSRSystem> SSRSystem::create(const InitContext& ctx) {
     info.framesInFlight = ctx.framesInFlight;
     info.extent = ctx.extent;
     info.descriptorPool = ctx.descriptorPool;
+    info.raiiDevice = ctx.raiiDevice;
     return create(info);
 }
 
@@ -44,6 +45,12 @@ bool SSRSystem::initInternal(const InitInfo& info) {
     framesInFlight = info.framesInFlight;
     extent = info.extent;
     descriptorPool = info.descriptorPool;
+    raiiDevice_ = info.raiiDevice;
+
+    if (!raiiDevice_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SSRSystem requires raiiDevice");
+        return false;
+    }
 
     if (!createSSRBuffers()) return false;
     if (!createComputePipeline()) return false;
@@ -65,15 +72,15 @@ void SSRSystem::cleanup() {
     descriptorPool = nullptr;
 
     // RAII wrappers handle cleanup automatically
-    computePipeline = ManagedPipeline();
-    computePipelineLayout = ManagedPipelineLayout();
-    descriptorSetLayout = ManagedDescriptorSetLayout();
+    computePipeline_.reset();
+    computePipelineLayout_.reset();
+    descriptorSetLayout_.reset();
 
-    blurPipeline = ManagedPipeline();
-    blurPipelineLayout = ManagedPipelineLayout();
-    blurDescriptorSetLayout = ManagedDescriptorSetLayout();
+    blurPipeline_.reset();
+    blurPipelineLayout_.reset();
+    blurDescriptorSetLayout_.reset();
 
-    sampler = ManagedSampler();
+    sampler_.reset();
 
     // Destroy intermediate buffer
     if (ssrIntermediateView != VK_NULL_HANDLE) {
@@ -220,8 +227,10 @@ bool SSRSystem::createSSRBuffers() {
         .setAddressModeW(vk::SamplerAddressMode::eClampToEdge)
         .setMaxLod(1.0f);
 
-    if (!ManagedSampler::create(device, *reinterpret_cast<const VkSamplerCreateInfo*>(&samplerInfo), sampler)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SSR sampler");
+    try {
+        sampler_.emplace(*raiiDevice_, samplerInfo);
+    } catch (const std::exception& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SSR sampler: %s", e.what());
         return false;
     }
 
@@ -250,16 +259,18 @@ bool SSRSystem::createComputePipeline() {
     // 2: SSR output (storage image, write)
     // 3: Previous SSR (sampler2D, for temporal)
 
-    auto layoutBuilder = DescriptorManager::LayoutBuilder(device)
+    VkDescriptorSetLayout rawLayout = DescriptorManager::LayoutBuilder(device)
         .addCombinedImageSampler(VK_SHADER_STAGE_COMPUTE_BIT)  // 0: HDR color input
         .addCombinedImageSampler(VK_SHADER_STAGE_COMPUTE_BIT)  // 1: Depth buffer
         .addStorageImage(VK_SHADER_STAGE_COMPUTE_BIT)          // 2: SSR output
-        .addCombinedImageSampler(VK_SHADER_STAGE_COMPUTE_BIT); // 3: Previous SSR
+        .addCombinedImageSampler(VK_SHADER_STAGE_COMPUTE_BIT)  // 3: Previous SSR
+        .build();
 
-    if (!layoutBuilder.buildManaged(descriptorSetLayout)) {
+    if (rawLayout == VK_NULL_HANDLE) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SSR descriptor set layout");
         return false;
     }
+    descriptorSetLayout_.emplace(*raiiDevice_, rawLayout);
 
     // Push constant range for SSR parameters
     auto pushConstantRange = vk::PushConstantRange{}
@@ -267,10 +278,14 @@ bool SSRSystem::createComputePipeline() {
         .setOffset(0)
         .setSize(sizeof(SSRPushConstants));
 
-    if (!DescriptorManager::createManagedPipelineLayout(
-            device, descriptorSetLayout.get(), computePipelineLayout,
-            {*reinterpret_cast<const VkPushConstantRange*>(&pushConstantRange)})) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SSR pipeline layout");
+    try {
+        vk::DescriptorSetLayout layouts[] = { **descriptorSetLayout_ };
+        auto layoutInfo = vk::PipelineLayoutCreateInfo{}
+            .setSetLayouts(layouts)
+            .setPushConstantRanges(pushConstantRange);
+        computePipelineLayout_.emplace(*raiiDevice_, layoutInfo);
+    } catch (const std::exception& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SSR pipeline layout: %s", e.what());
         return false;
     }
 
@@ -289,16 +304,18 @@ bool SSRSystem::createComputePipeline() {
 
     auto pipelineInfo = vk::ComputePipelineCreateInfo{}
         .setStage(stageInfo)
-        .setLayout(computePipelineLayout.get());
+        .setLayout(**computePipelineLayout_);
 
-    bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE,
-        *reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), computePipeline);
-    vkDestroyShaderModule(device, *shaderModule, nullptr);
-
-    if (!success) {
+    VkPipeline rawPipeline = VK_NULL_HANDLE;
+    if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1,
+            reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo),
+            nullptr, &rawPipeline) != VK_SUCCESS) {
+        vkDestroyShaderModule(device, *shaderModule, nullptr);
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SSR compute pipeline");
         return false;
     }
+    vkDestroyShaderModule(device, *shaderModule, nullptr);
+    computePipeline_.emplace(*raiiDevice_, rawPipeline);
 
     SDL_Log("SSR compute pipeline created");
     return true;
@@ -310,15 +327,17 @@ bool SSRSystem::createBlurPipeline() {
     // 1: Depth buffer (sampler2D) for bilateral weights
     // 2: Blurred output (storage image, write)
 
-    auto layoutBuilder = DescriptorManager::LayoutBuilder(device)
+    VkDescriptorSetLayout rawLayout = DescriptorManager::LayoutBuilder(device)
         .addCombinedImageSampler(VK_SHADER_STAGE_COMPUTE_BIT)  // 0: SSR input
         .addCombinedImageSampler(VK_SHADER_STAGE_COMPUTE_BIT)  // 1: Depth buffer
-        .addStorageImage(VK_SHADER_STAGE_COMPUTE_BIT);         // 2: Blurred output
+        .addStorageImage(VK_SHADER_STAGE_COMPUTE_BIT)          // 2: Blurred output
+        .build();
 
-    if (!layoutBuilder.buildManaged(blurDescriptorSetLayout)) {
+    if (rawLayout == VK_NULL_HANDLE) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SSR blur descriptor set layout");
         return false;
     }
+    blurDescriptorSetLayout_.emplace(*raiiDevice_, rawLayout);
 
     // Push constant range for blur parameters
     auto pushConstantRange = vk::PushConstantRange{}
@@ -326,10 +345,14 @@ bool SSRSystem::createBlurPipeline() {
         .setOffset(0)
         .setSize(sizeof(BlurPushConstants));
 
-    if (!DescriptorManager::createManagedPipelineLayout(
-            device, blurDescriptorSetLayout.get(), blurPipelineLayout,
-            {*reinterpret_cast<const VkPushConstantRange*>(&pushConstantRange)})) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SSR blur pipeline layout");
+    try {
+        vk::DescriptorSetLayout layouts[] = { **blurDescriptorSetLayout_ };
+        auto layoutInfo = vk::PipelineLayoutCreateInfo{}
+            .setSetLayouts(layouts)
+            .setPushConstantRanges(pushConstantRange);
+        blurPipelineLayout_.emplace(*raiiDevice_, layoutInfo);
+    } catch (const std::exception& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SSR blur pipeline layout: %s", e.what());
         return false;
     }
 
@@ -348,16 +371,18 @@ bool SSRSystem::createBlurPipeline() {
 
     auto pipelineInfo = vk::ComputePipelineCreateInfo{}
         .setStage(stageInfo)
-        .setLayout(blurPipelineLayout.get());
+        .setLayout(**blurPipelineLayout_);
 
-    bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE,
-        *reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), blurPipeline);
-    vkDestroyShaderModule(device, *shaderModule, nullptr);
-
-    if (!success) {
+    VkPipeline rawPipeline = VK_NULL_HANDLE;
+    if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1,
+            reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo),
+            nullptr, &rawPipeline) != VK_SUCCESS) {
+        vkDestroyShaderModule(device, *shaderModule, nullptr);
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SSR blur compute pipeline");
         return false;
     }
+    vkDestroyShaderModule(device, *shaderModule, nullptr);
+    blurPipeline_.emplace(*raiiDevice_, rawPipeline);
 
     SDL_Log("SSR blur compute pipeline created");
     return true;
@@ -370,14 +395,14 @@ bool SSRSystem::createDescriptorSets() {
     }
 
     // Allocate main SSR descriptor sets using shared pool
-    descriptorSets = descriptorPool->allocate(descriptorSetLayout.get(), framesInFlight);
+    descriptorSets = descriptorPool->allocate(**descriptorSetLayout_, framesInFlight);
     if (descriptorSets.size() != framesInFlight) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate SSR descriptor sets");
         return false;
     }
 
     // Allocate blur descriptor sets using shared pool
-    blurDescriptorSets = descriptorPool->allocate(blurDescriptorSetLayout.get(), framesInFlight);
+    blurDescriptorSets = descriptorPool->allocate(**blurDescriptorSetLayout_, framesInFlight);
     if (blurDescriptorSets.size() != framesInFlight) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate SSR blur descriptor sets");
         return false;
@@ -414,10 +439,10 @@ void SSRSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex,
 
     // Update descriptor set for main SSR pass using SetWriter
     DescriptorManager::SetWriter(device, descriptorSets[frameIndex])
-        .writeImage(0, hdrColorView, sampler.get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
-        .writeImage(1, hdrDepthView, sampler.get(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL)
+        .writeImage(0, hdrColorView, **sampler_, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+        .writeImage(1, hdrDepthView, **sampler_, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL)
         .writeStorageImage(2, ssrOutputView)
-        .writeImage(3, ssrResultView[currentBuffer], sampler.get(), VK_IMAGE_LAYOUT_GENERAL)
+        .writeImage(3, ssrResultView[currentBuffer], **sampler_, VK_IMAGE_LAYOUT_GENERAL)
         .update();
 
     // Build push constants for main SSR
@@ -443,16 +468,16 @@ void SSRSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex,
 
     // Bind pipeline and dispatch main SSR pass
     vk::CommandBuffer vkCmd(cmd);
-    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, computePipeline.get());
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, **computePipeline_);
     vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute,
-                             computePipelineLayout.get(), 0, vk::DescriptorSet(descriptorSets[frameIndex]), {});
+                             **computePipelineLayout_, 0, vk::DescriptorSet(descriptorSets[frameIndex]), {});
     vkCmd.pushConstants<SSRPushConstants>(
-        computePipelineLayout.get(), vk::ShaderStageFlagBits::eCompute, 0, pc);
+        **computePipelineLayout_, vk::ShaderStageFlagBits::eCompute, 0, pc);
 
     vkCmd.dispatch(groupsX, groupsY, 1);
 
     // If blur is enabled, dispatch blur pass
-    if (blurEnabled && blurPipeline) {
+    if (blurEnabled && blurPipeline_) {
         // Barrier: SSR output -> blur input
         Barriers::transitionImage(cmd, ssrOutputImage,
             VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL,
@@ -461,8 +486,8 @@ void SSRSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex,
 
         // Update blur descriptor set using SetWriter
         DescriptorManager::SetWriter(device, blurDescriptorSets[frameIndex])
-            .writeImage(0, ssrIntermediateView, sampler.get(), VK_IMAGE_LAYOUT_GENERAL)
-            .writeImage(1, hdrDepthView, sampler.get(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL)
+            .writeImage(0, ssrIntermediateView, **sampler_, VK_IMAGE_LAYOUT_GENERAL)
+            .writeImage(1, hdrDepthView, **sampler_, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL)
             .writeStorageImage(2, ssrResultView[writeBuffer])
             .update();
 
@@ -474,11 +499,11 @@ void SSRSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex,
         blurPc.blurRadius = blurRadius;
 
         // Dispatch blur pass
-        vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, blurPipeline.get());
+        vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, **blurPipeline_);
         vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute,
-                                 blurPipelineLayout.get(), 0, vk::DescriptorSet(blurDescriptorSets[frameIndex]), {});
+                                 **blurPipelineLayout_, 0, vk::DescriptorSet(blurDescriptorSets[frameIndex]), {});
         vkCmd.pushConstants<BlurPushConstants>(
-            blurPipelineLayout.get(), vk::ShaderStageFlagBits::eCompute, 0, blurPc);
+            **blurPipelineLayout_, vk::ShaderStageFlagBits::eCompute, 0, blurPc);
 
         vkCmd.dispatch(groupsX, groupsY, 1);
 
