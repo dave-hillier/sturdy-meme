@@ -128,11 +128,12 @@ inline constexpr float SPACING_MULT_LOD1 = 2.0f;  // 2x spacing -> 1/4 density
 inline constexpr float SPACING_MULT_LOD2 = 4.0f;  // 4x spacing -> 1/16 density
 
 // Grid dimensions per tile (same grid size for all LODs - blades just spread out)
-// 320x320 = 102,400 potential blades per tile
-inline constexpr uint32_t TILE_GRID_SIZE = 320;
+// 160x160 = 25,600 potential blades per tile
+// With 9 LOD 0 tiles: 230,400 potential, after culling fits in 100k buffer
+inline constexpr uint32_t TILE_GRID_SIZE = 160;
 
 // Derived: Dispatch size per tile
-// ceil(TILE_GRID_SIZE / WORKGROUP_SIZE) = ceil(320/16) = 20
+// ceil(TILE_GRID_SIZE / WORKGROUP_SIZE) = ceil(160/16) = 10
 inline constexpr uint32_t TILE_DISPATCH_SIZE = (TILE_GRID_SIZE + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
 
 // LOD distance thresholds (meters from camera to tile center)

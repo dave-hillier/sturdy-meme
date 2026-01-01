@@ -241,11 +241,12 @@ const float GRASS_SPACING_MULT_LOD1 = 2.0;  // 2x spacing -> 1/4 density
 const float GRASS_SPACING_MULT_LOD2 = 4.0;  // 4x spacing -> 1/16 density
 
 // Grid dimensions per tile (same for all LODs - blades just spread out)
-// 320x320 = 102,400 potential blades per tile
-const uint GRASS_TILE_GRID_SIZE = 320;
+// 160x160 = 25,600 potential blades per tile
+// With 9 LOD 0 tiles: 230,400 potential, after culling fits in 100k buffer
+const uint GRASS_TILE_GRID_SIZE = 160;
 
 // Derived: Dispatch size per tile
-// ceil(GRASS_TILE_GRID_SIZE / GRASS_WORKGROUP_SIZE) = ceil(320/16) = 20
+// ceil(GRASS_TILE_GRID_SIZE / GRASS_WORKGROUP_SIZE) = ceil(160/16) = 10
 const uint GRASS_TILE_DISPATCH_SIZE = (GRASS_TILE_GRID_SIZE + GRASS_WORKGROUP_SIZE - 1) / GRASS_WORKGROUP_SIZE;
 
 // LOD distance thresholds (meters from camera to tile center)
