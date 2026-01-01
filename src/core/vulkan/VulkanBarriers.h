@@ -1,12 +1,13 @@
 #pragma once
 
 // ============================================================================
-// VulkanBarriers.h - Pure C API Barrier Utilities
+// VulkanBarriers.h - Vulkan Barrier Utilities
 // ============================================================================
-// This file provides barrier utilities using the raw Vulkan C API.
-// For vulkan-hpp types (vk::CommandBuffer, vk::Image, etc.), use VulkanSync.h instead.
+// This file provides barrier utilities with both raw Vulkan C API and vulkan-hpp
+// overloads. All functions accept either VkCommandBuffer or vk::CommandBuffer.
 
 #include <vulkan/vulkan.h>
+#include <vulkan/vulkan.hpp>
 #include <vector>
 
 /**
@@ -136,6 +137,110 @@ inline void transferToVertexInput(VkCommandBuffer cmd) {
 }
 
 // ============================================================================
+// Standalone barrier functions - vk::CommandBuffer overloads
+// ============================================================================
+
+inline void computeToCompute(vk::CommandBuffer cmd) {
+    auto barrier = vk::MemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead);
+    cmd.pipelineBarrier(
+        vk::PipelineStageFlagBits::eComputeShader,
+        vk::PipelineStageFlagBits::eComputeShader,
+        {}, barrier, {}, {});
+}
+
+inline void computeToComputeReadWrite(vk::CommandBuffer cmd) {
+    auto barrier = vk::MemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite);
+    cmd.pipelineBarrier(
+        vk::PipelineStageFlagBits::eComputeShader,
+        vk::PipelineStageFlagBits::eComputeShader,
+        {}, barrier, {}, {});
+}
+
+inline void computeToIndirectDraw(vk::CommandBuffer cmd) {
+    auto barrier = vk::MemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eIndirectCommandRead | vk::AccessFlagBits::eVertexAttributeRead);
+    cmd.pipelineBarrier(
+        vk::PipelineStageFlagBits::eComputeShader,
+        vk::PipelineStageFlagBits::eDrawIndirect | vk::PipelineStageFlagBits::eVertexInput,
+        {}, barrier, {}, {});
+}
+
+inline void computeToVertexAndIndirectDraw(vk::CommandBuffer cmd) {
+    auto barrier = vk::MemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eIndirectCommandRead);
+    cmd.pipelineBarrier(
+        vk::PipelineStageFlagBits::eComputeShader,
+        vk::PipelineStageFlagBits::eDrawIndirect | vk::PipelineStageFlagBits::eVertexShader,
+        {}, barrier, {}, {});
+}
+
+inline void computeToFragmentRead(vk::CommandBuffer cmd) {
+    auto barrier = vk::MemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead);
+    cmd.pipelineBarrier(
+        vk::PipelineStageFlagBits::eComputeShader,
+        vk::PipelineStageFlagBits::eFragmentShader,
+        {}, barrier, {}, {});
+}
+
+inline void transferToCompute(vk::CommandBuffer cmd) {
+    auto barrier = vk::MemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead);
+    cmd.pipelineBarrier(
+        vk::PipelineStageFlagBits::eTransfer,
+        vk::PipelineStageFlagBits::eComputeShader,
+        {}, barrier, {}, {});
+}
+
+inline void transferToFragmentRead(vk::CommandBuffer cmd) {
+    auto barrier = vk::MemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead);
+    cmd.pipelineBarrier(
+        vk::PipelineStageFlagBits::eTransfer,
+        vk::PipelineStageFlagBits::eFragmentShader,
+        {}, barrier, {}, {});
+}
+
+inline void transferToHostRead(vk::CommandBuffer cmd) {
+    auto barrier = vk::MemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eHostRead);
+    cmd.pipelineBarrier(
+        vk::PipelineStageFlagBits::eTransfer,
+        vk::PipelineStageFlagBits::eHost,
+        {}, barrier, {}, {});
+}
+
+inline void hostToCompute(vk::CommandBuffer cmd) {
+    auto barrier = vk::MemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eHostWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead);
+    cmd.pipelineBarrier(
+        vk::PipelineStageFlagBits::eHost,
+        vk::PipelineStageFlagBits::eComputeShader,
+        {}, barrier, {}, {});
+}
+
+inline void transferToVertexInput(vk::CommandBuffer cmd) {
+    auto barrier = vk::MemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eVertexAttributeRead | vk::AccessFlagBits::eIndexRead);
+    cmd.pipelineBarrier(
+        vk::PipelineStageFlagBits::eTransfer,
+        vk::PipelineStageFlagBits::eVertexInput,
+        {}, barrier, {}, {});
+}
+
+// ============================================================================
 // Image layout transition helper
 // ============================================================================
 
@@ -215,6 +320,14 @@ inline void imageTransferToSampling(VkCommandBuffer cmd, VkImage image,
 }
 
 // ============================================================================
+// Image layout transition helper - vk::CommandBuffer overload
+// ============================================================================
+// Note: Functions that take multiple Vulkan handle types (image, buffer) use
+// only the C API overloads to avoid ambiguity. The vk::CommandBuffer can be
+// implicitly converted to VkCommandBuffer, so callers using vk:: types should
+// pass handles as VkImage/VkBuffer directly or use static_cast on the command buffer.
+
+// ============================================================================
 // TrackedImage - RAII image with automatic layout tracking
 // ============================================================================
 
@@ -231,8 +344,20 @@ public:
         , arrayLayers_(arrayLayers)
         , aspect_(aspect) {}
 
+    // vk:: constructor overload
+    explicit TrackedImage(vk::Image image, vk::ImageLayout initialLayout = vk::ImageLayout::eUndefined,
+                          uint32_t mipLevels = 1, uint32_t arrayLayers = 1,
+                          vk::ImageAspectFlags aspect = vk::ImageAspectFlagBits::eColor)
+        : image_(static_cast<VkImage>(image))
+        , currentLayout_(static_cast<VkImageLayout>(initialLayout))
+        , mipLevels_(mipLevels)
+        , arrayLayers_(arrayLayers)
+        , aspect_(static_cast<VkImageAspectFlags>(aspect)) {}
+
     VkImage handle() const { return image_; }
+    vk::Image vkHandle() const { return vk::Image(image_); }
     VkImageLayout layout() const { return currentLayout_; }
+    vk::ImageLayout vkLayout() const { return static_cast<vk::ImageLayout>(currentLayout_); }
     uint32_t mipLevels() const { return mipLevels_; }
     uint32_t arrayLayers() const { return arrayLayers_; }
 
@@ -299,6 +424,39 @@ public:
         currentLayout_ = layout;
     }
 
+    // vk::CommandBuffer overloads
+    bool transitionTo(vk::CommandBuffer cmd,
+                      vk::ImageLayout newLayout,
+                      vk::PipelineStageFlags srcStage,
+                      vk::PipelineStageFlags dstStage,
+                      vk::AccessFlags srcAccess,
+                      vk::AccessFlags dstAccess) {
+        return transitionTo(static_cast<VkCommandBuffer>(cmd),
+                            static_cast<VkImageLayout>(newLayout),
+                            static_cast<VkPipelineStageFlags>(srcStage),
+                            static_cast<VkPipelineStageFlags>(dstStage),
+                            static_cast<VkAccessFlags>(srcAccess),
+                            static_cast<VkAccessFlags>(dstAccess));
+    }
+
+    bool prepareForCompute(vk::CommandBuffer cmd) {
+        return prepareForCompute(static_cast<VkCommandBuffer>(cmd));
+    }
+
+    bool prepareForSampling(vk::CommandBuffer cmd,
+                            vk::PipelineStageFlags dstStage = vk::PipelineStageFlagBits::eFragmentShader) {
+        return prepareForSampling(static_cast<VkCommandBuffer>(cmd),
+                                  static_cast<VkPipelineStageFlags>(dstStage));
+    }
+
+    bool prepareForTransferDst(vk::CommandBuffer cmd) {
+        return prepareForTransferDst(static_cast<VkCommandBuffer>(cmd));
+    }
+
+    void setLayoutWithoutBarrier(vk::ImageLayout layout) {
+        currentLayout_ = static_cast<VkImageLayout>(layout);
+    }
+
 private:
     VkImage image_ = VK_NULL_HANDLE;
     VkImageLayout currentLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -319,6 +477,14 @@ public:
         : cmd_(cmd)
         , srcStages_(srcStages)
         , dstStages_(dstStages) {}
+
+    // vk::CommandBuffer constructor overload
+    explicit BarrierBatch(vk::CommandBuffer cmd,
+                          vk::PipelineStageFlags srcStages = {},
+                          vk::PipelineStageFlags dstStages = {})
+        : cmd_(static_cast<VkCommandBuffer>(cmd))
+        , srcStages_(static_cast<VkPipelineStageFlags>(srcStages))
+        , dstStages_(static_cast<VkPipelineStageFlags>(dstStages)) {}
 
     ~BarrierBatch() {
         submit();
@@ -401,6 +567,56 @@ public:
         return *this;
     }
 
+    // vk:: overloads
+    BarrierBatch& imageTransition(
+        vk::Image image,
+        vk::ImageLayout oldLayout,
+        vk::ImageLayout newLayout,
+        vk::AccessFlags srcAccess,
+        vk::AccessFlags dstAccess,
+        vk::ImageAspectFlags aspect = vk::ImageAspectFlagBits::eColor,
+        uint32_t baseMip = 0,
+        uint32_t mipCount = 1,
+        uint32_t baseLayer = 0,
+        uint32_t layerCount = 1)
+    {
+        return imageTransition(
+            static_cast<VkImage>(image),
+            static_cast<VkImageLayout>(oldLayout),
+            static_cast<VkImageLayout>(newLayout),
+            static_cast<VkAccessFlags>(srcAccess),
+            static_cast<VkAccessFlags>(dstAccess),
+            static_cast<VkImageAspectFlags>(aspect),
+            baseMip, mipCount, baseLayer, layerCount);
+    }
+
+    BarrierBatch& bufferBarrier(
+        vk::Buffer buffer,
+        vk::AccessFlags srcAccess,
+        vk::AccessFlags dstAccess,
+        vk::DeviceSize offset = 0,
+        vk::DeviceSize size = VK_WHOLE_SIZE)
+    {
+        return bufferBarrier(
+            static_cast<VkBuffer>(buffer),
+            static_cast<VkAccessFlags>(srcAccess),
+            static_cast<VkAccessFlags>(dstAccess),
+            static_cast<VkDeviceSize>(offset),
+            static_cast<VkDeviceSize>(size));
+    }
+
+    BarrierBatch& memoryBarrier(vk::AccessFlags srcAccess, vk::AccessFlags dstAccess) {
+        return memoryBarrier(
+            static_cast<VkAccessFlags>(srcAccess),
+            static_cast<VkAccessFlags>(dstAccess));
+    }
+
+    BarrierBatch& setStages(vk::PipelineStageFlags src, vk::PipelineStageFlags dst) {
+        srcStages_ = static_cast<VkPipelineStageFlags>(src);
+        dstStages_ = static_cast<VkPipelineStageFlags>(dst);
+        return *this;
+    }
+
     void submit() {
         if (submitted_) return;
         submitted_ = true;
@@ -466,6 +682,12 @@ public:
         : cmd_(cmd)
         , dstAccess_(dstAccess) {}
 
+    // vk::CommandBuffer constructor overload
+    explicit ScopedComputeBarrier(vk::CommandBuffer cmd,
+                                  vk::AccessFlags dstAccess = vk::AccessFlagBits::eShaderRead)
+        : cmd_(static_cast<VkCommandBuffer>(cmd))
+        , dstAccess_(static_cast<VkAccessFlags>(dstAccess)) {}
+
     ~ScopedComputeBarrier() {
         if (!skipped_) {
             VkMemoryBarrier barrier{};
@@ -502,6 +724,20 @@ public:
         barrier_.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier_.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier_.image = image;
+        barrier_.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        barrier_.subresourceRange.baseMipLevel = 0;
+        barrier_.subresourceRange.levelCount = 1;
+        barrier_.subresourceRange.baseArrayLayer = 0;
+        barrier_.subresourceRange.layerCount = 1;
+    }
+
+    // vk:: constructor overload
+    ImageBarrier(vk::CommandBuffer cmd, vk::Image image)
+        : cmd_(static_cast<VkCommandBuffer>(cmd)) {
+        barrier_.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barrier_.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier_.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier_.image = static_cast<VkImage>(image);
         barrier_.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         barrier_.subresourceRange.baseMipLevel = 0;
         barrier_.subresourceRange.levelCount = 1;
@@ -567,6 +803,38 @@ public:
     ImageBarrier& computeToFragment() {
         srcStage_ = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
         dstStage_ = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        return *this;
+    }
+
+    // vk:: overloads
+    ImageBarrier& from(vk::ImageLayout layout) {
+        barrier_.oldLayout = static_cast<VkImageLayout>(layout);
+        return *this;
+    }
+
+    ImageBarrier& to(vk::ImageLayout layout) {
+        barrier_.newLayout = static_cast<VkImageLayout>(layout);
+        return *this;
+    }
+
+    ImageBarrier& srcAccess(vk::AccessFlags access) {
+        barrier_.srcAccessMask = static_cast<VkAccessFlags>(access);
+        return *this;
+    }
+
+    ImageBarrier& dstAccess(vk::AccessFlags access) {
+        barrier_.dstAccessMask = static_cast<VkAccessFlags>(access);
+        return *this;
+    }
+
+    ImageBarrier& aspect(vk::ImageAspectFlags flags) {
+        barrier_.subresourceRange.aspectMask = static_cast<VkImageAspectFlags>(flags);
+        return *this;
+    }
+
+    ImageBarrier& stages(vk::PipelineStageFlags src, vk::PipelineStageFlags dst) {
+        srcStage_ = static_cast<VkPipelineStageFlags>(src);
+        dstStage_ = static_cast<VkPipelineStageFlags>(dst);
         return *this;
     }
 

@@ -471,12 +471,13 @@ bool Texture::transitionImageLayout(VkDevice device, VkCommandPool commandPool, 
         return false;
     }
 
+    VkCommandBuffer cmdBuf = static_cast<VkCommandBuffer>(cmd.get());
     if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
-        Barriers::prepareImageForTransferDst(cmd.get(), image);
+        Barriers::prepareImageForTransferDst(cmdBuf, image);
     } else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
-        Barriers::imageTransferToSampling(cmd.get(), image);
+        Barriers::imageTransferToSampling(cmdBuf, image);
     } else {
-        Barriers::transitionImage(cmd.get(), image, oldLayout, newLayout,
+        Barriers::transitionImage(cmdBuf, image, oldLayout, newLayout,
             VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0);
     }
 
@@ -491,7 +492,8 @@ bool Texture::copyBufferToImage(VkDevice device, VkCommandPool commandPool, VkQu
     }
 
     // Copy buffer to image (image must already be in TRANSFER_DST_OPTIMAL)
-    Barriers::copyBufferToImageRegion(cmd.get(), buffer, image, 0, 0, width, height);
+    VkCommandBuffer cmdBuf = static_cast<VkCommandBuffer>(cmd.get());
+    Barriers::copyBufferToImageRegion(cmdBuf, buffer, image, 0, 0, width, height);
 
     return cmd.end();
 }
