@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vulkan/vulkan.h>
+#include <vulkan/vulkan_raii.hpp>
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
 #include <vector>
@@ -11,8 +12,7 @@
 #include "CatmullClarkCBT.h"
 #include "CatmullClarkMesh.h"
 #include "DescriptorManager.h"
-#include "RAIIAdapter.h"
-#include "VulkanRAII.h"
+#include "VmaResources.h"
 
 // Push constants for rendering
 struct CatmullClarkPushConstants {
@@ -51,6 +51,7 @@ public:
         uint32_t framesInFlight;
         VkQueue graphicsQueue;
         VkCommandPool commandPool;
+        const vk::raii::Device* raiiDevice = nullptr;  // vulkan-hpp RAII device
     };
 
     /**
@@ -134,16 +135,19 @@ private:
     std::vector<ManagedBuffer> uniformBuffers_;
     std::vector<void*> uniformMappedPtrs;
 
-    // Compute pipelines
-    VkDescriptorSetLayout computeDescriptorSetLayout = VK_NULL_HANDLE;
-    VkPipelineLayout subdivisionPipelineLayout = VK_NULL_HANDLE;
-    VkPipeline subdivisionPipeline = VK_NULL_HANDLE;
+    // RAII device reference
+    const vk::raii::Device* raiiDevice_ = nullptr;
 
-    // Render pipelines
-    VkDescriptorSetLayout renderDescriptorSetLayout = VK_NULL_HANDLE;
-    VkPipelineLayout renderPipelineLayout = VK_NULL_HANDLE;
-    VkPipeline renderPipeline = VK_NULL_HANDLE;
-    VkPipeline wireframePipeline = VK_NULL_HANDLE;
+    // Compute pipelines (RAII-managed)
+    std::optional<vk::raii::DescriptorSetLayout> computeDescriptorSetLayout_;
+    std::optional<vk::raii::PipelineLayout> subdivisionPipelineLayout_;
+    std::optional<vk::raii::Pipeline> subdivisionPipeline_;
+
+    // Render pipelines (RAII-managed)
+    std::optional<vk::raii::DescriptorSetLayout> renderDescriptorSetLayout_;
+    std::optional<vk::raii::PipelineLayout> renderPipelineLayout_;
+    std::optional<vk::raii::Pipeline> renderPipeline_;
+    std::optional<vk::raii::Pipeline> wireframePipeline_;
 
     // Descriptor sets
     std::vector<VkDescriptorSet> computeDescriptorSets;  // Per frame

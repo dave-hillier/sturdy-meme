@@ -26,6 +26,11 @@ CatmullClarkSystem::~CatmullClarkSystem() {
 }
 
 bool CatmullClarkSystem::initInternal(const InitInfo& info, const CatmullClarkConfig& cfg) {
+    if (!info.raiiDevice) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "CatmullClarkSystem::initInternal: raiiDevice is null");
+        return false;
+    }
+    raiiDevice_ = info.raiiDevice;
     device = info.device;
     physicalDevice = info.physicalDevice;
     allocator = info.allocator;
@@ -85,8 +90,6 @@ bool CatmullClarkSystem::initInternal(const InitInfo& info, const CatmullClarkCo
 void CatmullClarkSystem::cleanup() {
     if (device == VK_NULL_HANDLE) return;
 
-    vk::Device vkDevice(device);
-
     // RAII-managed subsystems (mesh, cbt) are destroyed automatically via std::optional reset
     mesh.reset();
     cbt.reset();
@@ -97,18 +100,18 @@ void CatmullClarkSystem::cleanup() {
     uniformBuffers_.clear();
     uniformMappedPtrs.clear();
 
-    // Destroy pipelines
-    if (subdivisionPipeline) vkDevice.destroyPipeline(subdivisionPipeline);
-    if (renderPipeline) vkDevice.destroyPipeline(renderPipeline);
-    if (wireframePipeline) vkDevice.destroyPipeline(wireframePipeline);
+    // RAII-managed pipelines are destroyed automatically via reset
+    subdivisionPipeline_.reset();
+    renderPipeline_.reset();
+    wireframePipeline_.reset();
 
-    // Destroy pipeline layouts
-    if (subdivisionPipelineLayout) vkDevice.destroyPipelineLayout(subdivisionPipelineLayout);
-    if (renderPipelineLayout) vkDevice.destroyPipelineLayout(renderPipelineLayout);
+    // RAII-managed pipeline layouts are destroyed automatically via reset
+    subdivisionPipelineLayout_.reset();
+    renderPipelineLayout_.reset();
 
-    // Destroy descriptor set layouts
-    if (computeDescriptorSetLayout) vkDevice.destroyDescriptorSetLayout(computeDescriptorSetLayout);
-    if (renderDescriptorSetLayout) vkDevice.destroyDescriptorSetLayout(renderDescriptorSetLayout);
+    // RAII-managed descriptor set layouts are destroyed automatically via reset
+    computeDescriptorSetLayout_.reset();
+    renderDescriptorSetLayout_.reset();
 }
 
 bool CatmullClarkSystem::createUniformBuffers() {
@@ -180,7 +183,7 @@ bool CatmullClarkSystem::createComputeDescriptorSetLayout() {
         .setBindings(bindings);
 
     try {
-        computeDescriptorSetLayout = vk::Device(device).createDescriptorSetLayout(layoutInfo);
+        computeDescriptorSetLayout_.emplace(*raiiDevice_, layoutInfo);
     } catch (const vk::SystemError& e) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create compute descriptor set layout: %s", e.what());
         return false;
@@ -227,7 +230,7 @@ bool CatmullClarkSystem::createRenderDescriptorSetLayout() {
         .setBindings(bindings);
 
     try {
-        renderDescriptorSetLayout = vk::Device(device).createDescriptorSetLayout(layoutInfo);
+        renderDescriptorSetLayout_.emplace(*raiiDevice_, layoutInfo);
     } catch (const vk::SystemError& e) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create render descriptor set layout: %s", e.what());
         return false;
@@ -238,14 +241,14 @@ bool CatmullClarkSystem::createRenderDescriptorSetLayout() {
 
 bool CatmullClarkSystem::createDescriptorSets() {
     // Allocate compute descriptor sets using managed pool
-    computeDescriptorSets = descriptorPool->allocate(computeDescriptorSetLayout, framesInFlight);
+    computeDescriptorSets = descriptorPool->allocate(**computeDescriptorSetLayout_, framesInFlight);
     if (computeDescriptorSets.size() != framesInFlight) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate compute descriptor sets");
         return false;
     }
 
     // Allocate render descriptor sets using managed pool
-    renderDescriptorSets = descriptorPool->allocate(renderDescriptorSetLayout, framesInFlight);
+    renderDescriptorSets = descriptorPool->allocate(**renderDescriptorSetLayout_, framesInFlight);
     if (renderDescriptorSets.size() != framesInFlight) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate render descriptor sets");
         return false;
@@ -295,13 +298,13 @@ bool CatmullClarkSystem::createSubdivisionPipeline() {
         .setOffset(0)
         .setSize(sizeof(CatmullClarkSubdivisionPushConstants));
 
-    vk::DescriptorSetLayout setLayout(computeDescriptorSetLayout);
+    vk::DescriptorSetLayout setLayout(**computeDescriptorSetLayout_);
     auto layoutInfo = vk::PipelineLayoutCreateInfo{}
         .setSetLayouts(setLayout)
         .setPushConstantRanges(pushConstantRange);
 
     try {
-        subdivisionPipelineLayout = vkDevice.createPipelineLayout(layoutInfo);
+        subdivisionPipelineLayout_.emplace(*raiiDevice_, layoutInfo);
     } catch (const vk::SystemError& e) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create subdivision pipeline layout: %s", e.what());
         vkDevice.destroyShaderModule(*shaderModule);
@@ -315,11 +318,10 @@ bool CatmullClarkSystem::createSubdivisionPipeline() {
 
     auto pipelineInfo = vk::ComputePipelineCreateInfo{}
         .setStage(stageInfo)
-        .setLayout(subdivisionPipelineLayout);
+        .setLayout(**subdivisionPipelineLayout_);
 
     try {
-        auto result = vkDevice.createComputePipeline(nullptr, pipelineInfo);
-        subdivisionPipeline = result.value;
+        subdivisionPipeline_.emplace(*raiiDevice_, nullptr, pipelineInfo);
     } catch (const vk::SystemError& e) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create subdivision compute pipeline: %s", e.what());
         vkDevice.destroyShaderModule(*shaderModule);
@@ -395,13 +397,13 @@ bool CatmullClarkSystem::createRenderPipeline() {
         .setOffset(0)
         .setSize(sizeof(CatmullClarkPushConstants));
 
-    vk::DescriptorSetLayout setLayout(renderDescriptorSetLayout);
+    vk::DescriptorSetLayout setLayout(**renderDescriptorSetLayout_);
     auto layoutInfo = vk::PipelineLayoutCreateInfo{}
         .setSetLayouts(setLayout)
         .setPushConstantRanges(pushConstantRange);
 
     try {
-        renderPipelineLayout = vkDevice.createPipelineLayout(layoutInfo);
+        renderPipelineLayout_.emplace(*raiiDevice_, layoutInfo);
     } catch (const vk::SystemError& e) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create render pipeline layout: %s", e.what());
         vkDevice.destroyShaderModule(*vertModule);
@@ -419,13 +421,12 @@ bool CatmullClarkSystem::createRenderPipeline() {
         .setPDepthStencilState(&depthStencil)
         .setPColorBlendState(&colorBlending)
         .setPDynamicState(&dynamicState)
-        .setLayout(renderPipelineLayout)
+        .setLayout(**renderPipelineLayout_)
         .setRenderPass(renderPass)
         .setSubpass(0);
 
     try {
-        auto result = vkDevice.createGraphicsPipeline(nullptr, pipelineInfo);
-        renderPipeline = result.value;
+        renderPipeline_.emplace(*raiiDevice_, nullptr, pipelineInfo);
     } catch (const vk::SystemError& e) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create render graphics pipeline: %s", e.what());
         vkDevice.destroyShaderModule(*vertModule);
@@ -509,13 +510,12 @@ bool CatmullClarkSystem::createWireframePipeline() {
         .setPDepthStencilState(&depthStencil)
         .setPColorBlendState(&colorBlending)
         .setPDynamicState(&dynamicState)
-        .setLayout(renderPipelineLayout)  // Reuse render pipeline layout
+        .setLayout(**renderPipelineLayout_)  // Reuse render pipeline layout
         .setRenderPass(renderPass)
         .setSubpass(0);
 
     try {
-        auto result = vkDevice.createGraphicsPipeline(nullptr, pipelineInfo);
-        wireframePipeline = result.value;
+        wireframePipeline_.emplace(*raiiDevice_, nullptr, pipelineInfo);
     } catch (const vk::SystemError& e) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create wireframe graphics pipeline: %s", e.what());
         vkDevice.destroyShaderModule(*vertModule);
@@ -540,10 +540,10 @@ void CatmullClarkSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex)
     vk::CommandBuffer vkCmd(cmd);
 
     // Bind the subdivision compute pipeline
-    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, subdivisionPipeline);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, **subdivisionPipeline_);
 
     // Bind the compute descriptor set
-    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, subdivisionPipelineLayout,
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, **subdivisionPipelineLayout_,
                              0, vk::DescriptorSet(computeDescriptorSets[frameIndex]), {});
 
     // Push subdivision parameters
@@ -553,7 +553,7 @@ void CatmullClarkSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex)
     pc.mergeThreshold = config.mergeThreshold;
     pc.padding = 0;
     vkCmd.pushConstants<CatmullClarkSubdivisionPushConstants>(
-        subdivisionPipelineLayout, vk::ShaderStageFlagBits::eCompute, 0, pc);
+        **subdivisionPipelineLayout_, vk::ShaderStageFlagBits::eCompute, 0, pc);
 
     // Dispatch compute shader - one workgroup per face at base level
     uint32_t workgroupCount = (cbt->getFaceCount() + SUBDIVISION_WORKGROUP_SIZE - 1) / SUBDIVISION_WORKGROUP_SIZE;
@@ -567,11 +567,11 @@ void CatmullClarkSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
     vk::CommandBuffer vkCmd(cmd);
 
     // Select pipeline based on wireframe mode
-    VkPipeline pipeline = wireframeMode ? wireframePipeline : renderPipeline;
+    vk::Pipeline pipeline = wireframeMode ? **wireframePipeline_ : **renderPipeline_;
     vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
 
     // Bind descriptor set for this frame
-    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, renderPipelineLayout,
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, **renderPipelineLayout_,
                              0, vk::DescriptorSet(renderDescriptorSets[frameIndex]), {});
 
     // Set dynamic viewport
@@ -595,7 +595,7 @@ void CatmullClarkSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
     pc.model = glm::translate(glm::mat4(1.0f), config.position) *
                glm::scale(glm::mat4(1.0f), config.scale);
     vkCmd.pushConstants<CatmullClarkPushConstants>(
-        renderPipelineLayout, vk::ShaderStageFlagBits::eVertex, 0, pc);
+        **renderPipelineLayout_, vk::ShaderStageFlagBits::eVertex, 0, pc);
 
     // Indirect draw - vertex count populated by subdivision compute shader
     vkCmd.drawIndirect(indirectDrawBuffer_.get(), 0, 1, sizeof(VkDrawIndirectCommand));
