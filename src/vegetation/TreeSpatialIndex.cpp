@@ -190,7 +190,14 @@ void TreeSpatialIndex::rebuild(const std::vector<glm::mat4>& transforms,
 }
 
 bool TreeSpatialIndex::uploadToGPU() {
-    // Clean up old buffers
+    // CRITICAL: Wait for all in-flight frames to complete before destroying buffers.
+    // Without this, the GPU may still be reading from buffers we're about to destroy,
+    // causing undefined behavior (garbage data -> wrong treeIndex -> all trees become oak).
+    if (!cellBuffers_.empty()) {
+        vkDeviceWaitIdle(device_);
+    }
+
+    // Clean up old buffers (now safe since no frames are in-flight)
     cleanup();
 
     if (cells_.empty() || sortedTrees_.empty()) {
