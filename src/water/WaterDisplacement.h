@@ -1,13 +1,15 @@
 #pragma once
 
 #include <vulkan/vulkan.h>
+#include <vulkan/vulkan_raii.hpp>
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
 #include <memory>
+#include <optional>
 
-#include "VulkanRAII.h"
+#include "VmaResources.h"
 
 /**
  * WaterDisplacement - Phase 4: Vector Displacement Maps (Interactive Splashes)
@@ -32,6 +34,7 @@ public:
         uint32_t framesInFlight;
         uint32_t displacementResolution = 512;  // Displacement map resolution
         float worldSize = 100.0f;               // World size covered by displacement map
+        const vk::raii::Device* raiiDevice = nullptr;
     };
 
     // Splash particle for displacement
@@ -82,10 +85,10 @@ public:
 
     // Get displacement map for sampling in water shader
     VkImageView getDisplacementMapView() const { return displacementMapView; }
-    VkSampler getSampler() const { return sampler.get(); }
+    VkSampler getSampler() const { return sampler_ ? **sampler_ : VK_NULL_HANDLE; }
 
     // Get descriptor set for water shader binding
-    VkDescriptorSetLayout getDescriptorSetLayout() const { return descriptorSetLayout.get(); }
+    VkDescriptorSetLayout getDescriptorSetLayout() const { return descriptorSetLayout_ ? **descriptorSetLayout_ : VK_NULL_HANDLE; }
     VkDescriptorSet getDescriptorSet(uint32_t frameIndex) const { return descriptorSets[frameIndex]; }
 
     // Configuration
@@ -117,6 +120,7 @@ private:
     VmaAllocator allocator = VK_NULL_HANDLE;
     VkCommandPool commandPool = VK_NULL_HANDLE;
     VkQueue computeQueue = VK_NULL_HANDLE;
+    const vk::raii::Device* raiiDevice_ = nullptr;
 
     // Configuration
     uint32_t framesInFlight = 0;
@@ -136,12 +140,12 @@ private:
     VmaAllocation prevDisplacementAllocation = VK_NULL_HANDLE;
 
     // Sampler (RAII-managed)
-    ManagedSampler sampler;
+    std::optional<vk::raii::Sampler> sampler_;
 
     // Compute pipeline (RAII-managed)
-    ManagedPipeline computePipeline;
-    ManagedPipelineLayout computePipelineLayout;
-    ManagedDescriptorSetLayout descriptorSetLayout;
+    std::optional<vk::raii::Pipeline> computePipeline_;
+    std::optional<vk::raii::PipelineLayout> computePipelineLayout_;
+    std::optional<vk::raii::DescriptorSetLayout> descriptorSetLayout_;
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
     std::vector<VkDescriptorSet> descriptorSets;
 

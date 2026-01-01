@@ -29,6 +29,12 @@ bool WaterDisplacement::initInternal(const InitInfo& info) {
     framesInFlight = info.framesInFlight;
     displacementResolution = info.displacementResolution;
     worldSize = info.worldSize;
+    raiiDevice_ = info.raiiDevice;
+
+    if (!raiiDevice_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "WaterDisplacement requires raiiDevice");
+        return false;
+    }
 
     SDL_Log("WaterDisplacement: Initializing with %dx%d resolution, %.1f world size",
             displacementResolution, displacementResolution, worldSize);
@@ -69,16 +75,16 @@ void WaterDisplacement::cleanup() {
     }
 
     // RAII wrappers handle cleanup automatically - just reset them
-    descriptorSetLayout = ManagedDescriptorSetLayout();
-    computePipeline = ManagedPipeline();
-    computePipelineLayout = ManagedPipelineLayout();
+    descriptorSetLayout_.reset();
+    computePipeline_.reset();
+    computePipelineLayout_.reset();
 
     // Destroy particle buffers (RAII-managed)
     particleBuffers_.clear();
     particleMapped.clear();
 
     // RAII-managed sampler
-    sampler = ManagedSampler();
+    sampler_.reset();
 
     // Destroy displacement maps
     if (displacementMapView != VK_NULL_HANDLE) {
@@ -195,7 +201,13 @@ bool WaterDisplacement::createDisplacementMap() {
         .setMaxLod(0.0f)
         .setBorderColor(vk::BorderColor::eFloatTransparentBlack);
 
-    return ManagedSampler::create(device, reinterpret_cast<const VkSamplerCreateInfo&>(samplerInfo), sampler);
+    try {
+        sampler_.emplace(*raiiDevice_, samplerInfo);
+        return true;
+    } catch (const std::exception& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create displacement sampler: %s", e.what());
+        return false;
+    }
 }
 
 bool WaterDisplacement::createParticleBuffer() {
@@ -245,26 +257,27 @@ bool WaterDisplacement::createComputePipeline() {
     layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
     layoutInfo.pBindings = bindings.data();
 
-    if (!ManagedDescriptorSetLayout::create(device, layoutInfo, descriptorSetLayout)) {
+    VkDescriptorSetLayout rawLayout = VK_NULL_HANDLE;
+    if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &rawLayout) != VK_SUCCESS) {
         return false;
     }
+    descriptorSetLayout_.emplace(*raiiDevice_, rawLayout);
 
     // Push constant range
-    VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(DisplacementPushConstants);
+    auto pushConstantRange = vk::PushConstantRange{}
+        .setStageFlags(vk::ShaderStageFlagBits::eCompute)
+        .setOffset(0)
+        .setSize(sizeof(DisplacementPushConstants));
 
     // Pipeline layout
-    VkDescriptorSetLayout rawLayout = descriptorSetLayout.get();
-    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
-    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutInfo.setLayoutCount = 1;
-    pipelineLayoutInfo.pSetLayouts = &rawLayout;
-    pipelineLayoutInfo.pushConstantRangeCount = 1;
-    pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
-
-    if (!ManagedPipelineLayout::create(device, pipelineLayoutInfo, computePipelineLayout)) {
+    try {
+        vk::DescriptorSetLayout layouts[] = { **descriptorSetLayout_ };
+        auto pipelineLayoutInfo = vk::PipelineLayoutCreateInfo{}
+            .setSetLayouts(layouts)
+            .setPushConstantRanges(pushConstantRange);
+        computePipelineLayout_.emplace(*raiiDevice_, pipelineLayoutInfo);
+    } catch (const std::exception& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create displacement pipeline layout: %s", e.what());
         return false;
     }
 
@@ -276,24 +289,23 @@ bool WaterDisplacement::createComputePipeline() {
         return true;
     }
 
-    VkPipelineShaderStageCreateInfo shaderStage{};
-    shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    shaderStage.module = *shaderModule;
-    shaderStage.pName = "main";
+    auto shaderStage = vk::PipelineShaderStageCreateInfo{}
+        .setStage(vk::ShaderStageFlagBits::eCompute)
+        .setModule(*shaderModule)
+        .setPName("main");
 
-    VkComputePipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    pipelineInfo.stage = shaderStage;
-    pipelineInfo.layout = computePipelineLayout.get();
+    auto pipelineInfo = vk::ComputePipelineCreateInfo{}
+        .setStage(shaderStage)
+        .setLayout(**computePipelineLayout_);
 
     VkPipeline rawPipeline = VK_NULL_HANDLE;
-    VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &rawPipeline);
+    VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1,
+        reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), nullptr, &rawPipeline);
 
     vkDestroyShaderModule(device, *shaderModule, nullptr);
 
     if (result == VK_SUCCESS) {
-        computePipeline = ManagedPipeline::fromRaw(device, rawPipeline);
+        computePipeline_.emplace(*raiiDevice_, rawPipeline);
     }
 
     return result == VK_SUCCESS;
@@ -320,7 +332,7 @@ bool WaterDisplacement::createDescriptorSets() {
     }
 
     // Allocate descriptor sets
-    std::vector<VkDescriptorSetLayout> layouts(framesInFlight, descriptorSetLayout.get());
+    std::vector<VkDescriptorSetLayout> layouts(framesInFlight, **descriptorSetLayout_);
 
     VkDescriptorSetAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -337,7 +349,7 @@ bool WaterDisplacement::createDescriptorSets() {
     for (uint32_t i = 0; i < framesInFlight; i++) {
         DescriptorManager::SetWriter(device, descriptorSets[i])
             .writeStorageImage(0, displacementMapView)
-            .writeImage(1, prevDisplacementMapView, sampler.get())
+            .writeImage(1, prevDisplacementMapView, **sampler_)
             .writeBuffer(2, particleBuffers_[i].get(), 0, sizeof(SplashParticle) * MAX_PARTICLES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
             .update();
     }
@@ -403,7 +415,7 @@ void WaterDisplacement::updateParticleBuffer(uint32_t frameIndex) {
 }
 
 void WaterDisplacement::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) {
-    if (!computePipeline.get()) return;
+    if (!computePipeline_) return;
 
     // Update particle buffer
     updateParticleBuffer(frameIndex);
@@ -413,8 +425,8 @@ void WaterDisplacement::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) 
 
     // Bind compute pipeline
     vk::CommandBuffer vkCmd(cmd);
-    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, computePipeline.get());
-    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, computePipelineLayout.get(),
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, **computePipeline_);
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, **computePipelineLayout_,
                              0, vk::DescriptorSet(descriptorSets[frameIndex]), {});
 
     // Push constants
@@ -425,7 +437,7 @@ void WaterDisplacement::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) 
     pushConstants.numParticles = static_cast<uint32_t>(particles.size());
     pushConstants.decayRate = decayRate;
 
-    vkCmd.pushConstants<DisplacementPushConstants>(computePipelineLayout.get(),
+    vkCmd.pushConstants<DisplacementPushConstants>(**computePipelineLayout_,
                                                     vk::ShaderStageFlagBits::eCompute, 0, pushConstants);
 
     // Dispatch compute shader
