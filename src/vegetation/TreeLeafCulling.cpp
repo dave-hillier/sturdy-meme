@@ -125,8 +125,8 @@ bool TreeLeafCulling::createLeafCullBuffers(uint32_t maxLeafInstances, uint32_t 
     //
     // Using 200k per type = 800k total * 48 bytes * 3 frames = ~115MB
     // This is a reasonable GPU memory budget for leaf rendering.
-    // The tiered distance budget in tree_leaf_cull_phase3.comp ensures nearby trees
-    // always have leaves even when total budget is exhausted.
+    // LOD-based distance dropping (like grass) reduces count with distance,
+    // preventing the need for hard budget limits that cause flickering.
     constexpr uint32_t MAX_VISIBLE_LEAVES_PER_TYPE = 200000;
     maxLeavesPerType_ = MAX_VISIBLE_LEAVES_PER_TYPE;
 

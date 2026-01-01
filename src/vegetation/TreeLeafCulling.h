@@ -145,9 +145,11 @@ public:
 
     struct CullingParams {
         float maxDrawDistance = TreeLODConstants::FULL_DETAIL_DISTANCE;
-        float lodTransitionStart = TreeLODConstants::LOD_TRANSITION_START;
-        float lodTransitionEnd = TreeLODConstants::LOD_TRANSITION_END;
-        float maxLodDropRate = 0.75f;
+        // Note: lodTransitionStart/End/maxLodDropRate are legacy - leaf dropping now
+        // uses lodBlendFactor directly (from screen-space error LOD system)
+        float lodTransitionStart = TreeLODConstants::LOD_TRANSITION_START;  // Legacy
+        float lodTransitionEnd = TreeLODConstants::LOD_TRANSITION_END;      // Legacy
+        float maxLodDropRate = 0.75f;                                        // Legacy
     };
 
     static std::unique_ptr<TreeLeafCulling> create(const InitInfo& info);

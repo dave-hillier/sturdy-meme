@@ -105,9 +105,8 @@ void main() {
         culling.cameraPosition.xyz,
         culling.frustumPlanes,
         culling.maxDrawDistance,
-        culling.lodTransitionStart,
-        culling.lodTransitionEnd,
-        culling.maxLodDropRate,
+        localIdx,       // leafIndexInTree - stable integer index
+        treeIdx,        // treeIndex - for unique hash per tree
         worldPos,
         leafSize,
         distToCamera
@@ -117,6 +116,14 @@ void main() {
 
     // Get leaf type for this tree (0=oak, 1=ash, 2=aspen, 3=pine)
     uint leafType = min(tree.leafTypeIndex, NUM_LEAF_TYPES - 1);
+
+    // Use hash to deterministically select which leaves get buffer slots.
+    // This prevents flickering from atomic race conditions when near budget limit.
+    float instanceHash = hashLeafIndex(treeIdx, localIdx);
+    float budgetFraction = 0.95;
+    if (instanceHash > budgetFraction) {
+        return;  // Deterministically drop ~5% of leaves to stay under budget
+    }
 
     // Use subgroup operations to batch atomic updates per leaf type
     // This reduces contention by ~32x compared to per-thread atomics

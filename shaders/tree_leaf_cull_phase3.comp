@@ -22,6 +22,10 @@
 // Each workgroup processes one visible tree's leaves
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
+// No tier-based budget system - rely on LOD distance dropping instead
+// (like the grass system does). This prevents flickering caused by
+// leaves being dropped when tier budgets are exhausted.
+
 // Visible tree data (from tree_filter.comp)
 struct VisibleTreeData {
     uint originalTreeIndex;        // Index into TreeCullData array
@@ -73,28 +77,13 @@ layout(std140, binding = BINDING_LEAF_CULL_P3_PARAMS) uniform LeafCullP3Params {
     uint _pad2;
 } leafP3Params;
 
-// Simple hash function for deterministic leaf selection
-uint hashLeaf(uint treeIndex, uint leafIndex) {
-    uint h = treeIndex * 2654435761u + leafIndex * 2246822519u;
-    h ^= h >> 16;
-    h *= 2246822519u;
-    h ^= h >> 13;
-    h *= 3266489917u;
-    h ^= h >> 16;
-    return h;
-}
-
-// Convert distance to a priority value (0-1, closer = higher priority)
-// Uses exponential falloff so nearby leaves have much higher priority
-float distanceToPriority(float dist, float maxDist) {
-    float normalized = clamp(dist / maxDist, 0.0, 1.0);
-    // Exponential: close leaves get priority ~1.0, far leaves get priority ~0.0
-    return exp(-normalized * 3.0);
-}
-
 void main() {
     uint localIdx = gl_LocalInvocationID.x;     // Thread index within workgroup
     uint visibleTreeIdx = gl_WorkGroupID.x;     // Which visible tree we're processing
+
+    // NOTE: Indirect command initialization is done on CPU side via vkCmdUpdateBuffer
+    // BEFORE dispatch. Shader-side init with barrier() only syncs within a workgroup,
+    // causing race conditions when multiple workgroups run in parallel.
 
     // Early exit if beyond visible tree count
     if (visibleTreeIdx >= visibleTreeCount) {
@@ -131,9 +120,8 @@ void main() {
             culling.cameraPosition.xyz,
             culling.frustumPlanes,
             culling.maxDrawDistance,
-            culling.lodTransitionStart,
-            culling.lodTransitionEnd,
-            culling.maxLodDropRate,
+            i,                              // leafIndexInTree - stable integer index
+            visTree.originalTreeIndex,      // treeIndex - for unique hash per tree
             worldPos,
             leafSize,
             distToCamera
@@ -143,30 +131,29 @@ void main() {
             continue;
         }
 
-        // Deterministic priority-based selection:
-        // - Generate a stable hash for this leaf (same every frame)
-        // - Convert to a threshold value [0, 1]
-        // - Compare against distance-based priority
-        // - Closer leaves have higher priority, so they pass the threshold more often
+        // Get leaf type
+        uint leafType = min(visTree.leafTypeIndex, NUM_LEAF_TYPES - 1);
+
+        // Use hash to deterministically select which leaves get buffer slots.
+        // This prevents flickering from atomic race conditions when near budget limit.
+        // Leaves with hash values above the threshold are dropped consistently.
         //
-        // This ensures the SAME leaves are always selected, eliminating flicker.
-        // When budget pressure increases, far leaves drop out first (deterministically).
+        // The hash was already computed in cullLeaf for LOD dropping.
+        // We reuse it here for budget priority - same hash = same priority each frame.
+        float instanceHash = hashLeafIndex(visTree.originalTreeIndex, i);
 
-        uint leafHash = hashLeaf(tree.treeIndex, i);
-        float hashThreshold = float(leafHash) / float(0xFFFFFFFFu);  // [0, 1]
-
-        // Priority based on distance - closer = higher priority
-        float priority = distanceToPriority(distToCamera, culling.maxDrawDistance);
-
-        // Leaves pass if their priority exceeds the hash threshold
-        // Close leaves (priority ~1.0) almost always pass
-        // Far leaves (priority ~0.05) rarely pass, providing natural LOD
-        if (priority < hashThreshold * 0.5) {
-            continue;  // Deterministically skip this leaf
+        // Reserve some headroom (use 95% of budget) to avoid edge-case racing
+        float budgetFraction = 0.95;
+        if (instanceHash > budgetFraction) {
+            continue;  // Deterministically drop ~5% of leaves to stay under budget
         }
 
-        // Allocate output slot
+        // Allocate output slot using atomicAdd
         uint typeLocalSlot = atomicAdd(drawCmds[leafType].instanceCount, 1);
+        if (typeLocalSlot >= leafP3Params.maxLeavesPerType) {
+            // Over budget - shouldn't happen often with the hash-based pre-filter
+            continue;
+        }
 
         if (typeLocalSlot < leafP3Params.maxLeavesPerType) {
             uint outputSlot = leafType * leafP3Params.maxLeavesPerType + typeLocalSlot;
