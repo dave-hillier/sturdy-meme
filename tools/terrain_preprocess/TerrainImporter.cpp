@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <atomic>
+#include "../common/ParallelProgress.h"
 
 namespace fs = std::filesystem;
 
@@ -265,11 +267,12 @@ void TerrainImporter::downsampleForLOD(uint32_t lod) {
 
     std::vector<uint16_t> newData(newWidth * newHeight);
 
-    for (uint32_t y = 0; y < newHeight; y++) {
+    // Parallelize by rows
+    ParallelProgress::parallel_for(0, static_cast<int>(newHeight), [&](int y) {
         for (uint32_t x = 0; x < newWidth; x++) {
             // Box filter (2x2 average)
             uint32_t srcX = x * 2;
-            uint32_t srcY = y * 2;
+            uint32_t srcY = static_cast<uint32_t>(y) * 2;
 
             uint32_t sum = 0;
             uint32_t count = 0;
@@ -283,7 +286,7 @@ void TerrainImporter::downsampleForLOD(uint32_t lod) {
 
             newData[y * newWidth + x] = static_cast<uint16_t>(sum / count);
         }
-    }
+    });
 
     lodData = std::move(newData);
     lodWidth = newWidth;
@@ -303,51 +306,61 @@ bool TerrainImporter::generateLODLevel(const TerrainImportConfig& config, uint32
     uint32_t numTilesZ = (lodHeight + tileRes - 1) / tileRes;
 
     uint32_t totalTiles = numTilesX * numTilesZ;
-    uint32_t processedTiles = 0;
+    std::atomic<uint32_t> processedTiles{0};
+    std::atomic<bool> hasError{false};
 
-    SDL_Log("LOD %u: %ux%u tiles from %ux%u source", lod, numTilesX, numTilesZ, lodWidth, lodHeight);
+    SDL_Log("LOD %u: %ux%u tiles from %ux%u source (%u threads)",
+            lod, numTilesX, numTilesZ, lodWidth, lodHeight, ParallelProgress::getThreadCount());
 
-    std::vector<uint16_t> tileData(tileRes * tileRes);
+    // Parallel tile generation
+    ParallelProgress::parallel_for(0, static_cast<int>(totalTiles), [&](int tileIndex) {
+        if (hasError.load()) return;  // Early exit on error
 
-    for (uint32_t tz = 0; tz < numTilesZ; tz++) {
-        for (uint32_t tx = 0; tx < numTilesX; tx++) {
-            // Source pixel start for this tile
-            uint32_t srcStartX = tx * tileRes;
-            uint32_t srcStartZ = tz * tileRes;
+        uint32_t tx = tileIndex % numTilesX;
+        uint32_t tz = tileIndex / numTilesX;
 
-            // Extract pixels directly - no resampling
-            for (uint32_t py = 0; py < tileRes; py++) {
-                for (uint32_t px = 0; px < tileRes; px++) {
-                    uint32_t srcX = srcStartX + px;
-                    uint32_t srcZ = srcStartZ + py;
+        // Each thread has its own tile buffer
+        std::vector<uint16_t> tileData(tileRes * tileRes);
 
-                    // Clamp to source bounds for edge tiles
-                    srcX = std::min(srcX, lodWidth - 1);
-                    srcZ = std::min(srcZ, lodHeight - 1);
+        // Source pixel start for this tile
+        uint32_t srcStartX = tx * tileRes;
+        uint32_t srcStartZ = tz * tileRes;
 
-                    tileData[py * tileRes + px] = lodData[srcZ * lodWidth + srcX];
-                }
-            }
+        // Extract pixels directly - no resampling
+        for (uint32_t py = 0; py < tileRes; py++) {
+            for (uint32_t px = 0; px < tileRes; px++) {
+                uint32_t srcX = srcStartX + px;
+                uint32_t srcZ = srcStartZ + py;
 
-            // Save tile
-            std::string tilePath = getTilePath(config.cacheDirectory, tx, tz, lod);
-            if (!saveTile(tilePath, tileData, tileRes)) {
-                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to save tile: %s", tilePath.c_str());
-                return false;
-            }
+                // Clamp to source bounds for edge tiles
+                srcX = std::min(srcX, lodWidth - 1);
+                srcZ = std::min(srcZ, lodHeight - 1);
 
-            processedTiles++;
-
-            if (progressCallback && (processedTiles % 10 == 0 || processedTiles == totalTiles)) {
-                float progress = progressBase + progressRange * (static_cast<float>(processedTiles) / totalTiles);
-                std::ostringstream oss;
-                oss << "LOD " << lod << ": " << processedTiles << "/" << totalTiles << " tiles";
-                progressCallback(progress, oss.str());
+                tileData[py * tileRes + px] = lodData[srcZ * lodWidth + srcX];
             }
         }
-    }
 
-    return true;
+        // Save tile
+        std::string tilePath = getTilePath(config.cacheDirectory, tx, tz, lod);
+        if (!saveTile(tilePath, tileData, tileRes)) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to save tile: %s", tilePath.c_str());
+            hasError.store(true);
+            return;
+        }
+
+        uint32_t completed = ++processedTiles;
+
+        // Report progress periodically
+        uint32_t reportInterval = std::max(1u, totalTiles / 20);
+        if (progressCallback && (completed % reportInterval == 0 || completed == totalTiles)) {
+            float progress = progressBase + progressRange * (static_cast<float>(completed) / totalTiles);
+            std::ostringstream oss;
+            oss << "LOD " << lod << ": " << completed << "/" << totalTiles << " tiles";
+            progressCallback(progress, oss.str());
+        }
+    });
+
+    return !hasError.load();
 }
 
 bool TerrainImporter::saveTile(const std::string& path, const std::vector<uint16_t>& data, uint32_t resolution) {
