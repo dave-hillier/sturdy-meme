@@ -16,6 +16,11 @@ std::unique_ptr<TreeBranchCulling> TreeBranchCulling::create(const InitInfo& inf
 }
 
 TreeBranchCulling::~TreeBranchCulling() {
+    // Reset RAII types first
+    cullPipeline_.reset();
+    cullPipelineLayout_.reset();
+    cullDescriptorSetLayout_.reset();
+
     // outputBuffers_ and indirectBuffers_ are FrameIndexedBuffers
     // which clean up automatically via their destructor
 
@@ -38,6 +43,12 @@ bool TreeBranchCulling::init(const InitInfo& info) {
     maxFramesInFlight_ = info.maxFramesInFlight;
     maxTrees_ = info.maxTrees;
     maxMeshGroups_ = info.maxMeshGroups;
+    raiiDevice_ = info.raiiDevice;
+
+    if (!raiiDevice_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeBranchCulling requires raiiDevice");
+        return false;
+    }
 
     if (!createCullPipeline()) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
@@ -63,17 +74,21 @@ bool TreeBranchCulling::createCullPipeline() {
            .addBinding(Bindings::TREE_BRANCH_SHADOW_UNIFORMS, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT)
            .addBinding(Bindings::TREE_BRANCH_SHADOW_GROUPS, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT);
 
-    if (!builder.buildManaged(cullDescriptorSetLayout_)) {
+    VkDescriptorSetLayout rawDescSetLayout = builder.build();
+    if (rawDescSetLayout == VK_NULL_HANDLE) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "TreeBranchCulling: Failed to create descriptor set layout");
         return false;
     }
+    cullDescriptorSetLayout_.emplace(*raiiDevice_, rawDescSetLayout);
 
-    if (!DescriptorManager::createManagedPipelineLayout(device_, cullDescriptorSetLayout_.get(), cullPipelineLayout_)) {
+    VkPipelineLayout rawPipelineLayout = DescriptorManager::createPipelineLayout(device_, **cullDescriptorSetLayout_);
+    if (rawPipelineLayout == VK_NULL_HANDLE) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "TreeBranchCulling: Failed to create pipeline layout");
         return false;
     }
+    cullPipelineLayout_.emplace(*raiiDevice_, rawPipelineLayout);
 
     std::string shaderPath = resourcePath_ + "/shaders/tree_branch_shadow_cull.comp.spv";
     auto shaderModuleOpt = ShaderLoader::loadShaderModule(device_, shaderPath);
@@ -93,7 +108,7 @@ bool TreeBranchCulling::createCullPipeline() {
     VkComputePipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
     pipelineInfo.stage = shaderStageInfo;
-    pipelineInfo.layout = cullPipelineLayout_.get();
+    pipelineInfo.layout = **cullPipelineLayout_;
 
     VkPipeline rawPipeline;
     VkResult result = vkCreateComputePipelines(device_, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &rawPipeline);
@@ -104,7 +119,7 @@ bool TreeBranchCulling::createCullPipeline() {
                      "TreeBranchCulling: Failed to create compute pipeline");
         return false;
     }
-    cullPipeline_ = ManagedPipeline::fromRaw(device_, rawPipeline);
+    cullPipeline_.emplace(*raiiDevice_, rawPipeline);
 
     SDL_Log("TreeBranchCulling: Created branch shadow culling compute pipeline");
     return true;
@@ -171,7 +186,7 @@ bool TreeBranchCulling::createBuffers() {
 void TreeBranchCulling::updateDescriptorSets() {
     if (descriptorSetsInitialized_) return;
 
-    cullDescriptorSets_ = descriptorPool_->allocate(cullDescriptorSetLayout_.get(), maxFramesInFlight_);
+    cullDescriptorSets_ = descriptorPool_->allocate(**cullDescriptorSetLayout_, maxFramesInFlight_);
     if (cullDescriptorSets_.empty()) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "TreeBranchCulling: Failed to allocate descriptor sets");
@@ -354,7 +369,7 @@ void TreeBranchCulling::updateTreeData(const TreeSystem& treeSystem, const TreeL
     vmaUnmapMemory(allocator_, meshGroupAllocation_);
 
     // Initialize descriptor sets if needed
-    if (cullPipeline_.get() != VK_NULL_HANDLE) {
+    if (cullPipeline_.has_value()) {
         updateDescriptorSets();
     }
 }
@@ -419,8 +434,8 @@ void TreeBranchCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
 
     // Bind pipeline and descriptor set
     vk::CommandBuffer vkCmd(cmd);
-    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, cullPipeline_.get());
-    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, cullPipelineLayout_.get(),
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, **cullPipeline_);
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, **cullPipelineLayout_,
                              0, vk::DescriptorSet(cullDescriptorSets_[frameIndex]), {});
 
     // Dispatch: one workgroup per 256 trees

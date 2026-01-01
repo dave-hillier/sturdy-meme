@@ -2,15 +2,17 @@
 
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan.hpp>
+#include <vulkan/vulkan_raii.hpp>
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
 #include <memory>
 #include <array>
+#include <optional>
 
 #include "CullCommon.h"
-#include "VulkanRAII.h"
+#include "VmaResources.h"
 #include "DescriptorManager.h"
 #include "BufferUtils.h"
 
@@ -71,6 +73,7 @@ public:
         uint32_t maxFramesInFlight;
         uint32_t maxTrees = 10000;
         uint32_t maxMeshGroups = 16;
+        const vk::raii::Device* raiiDevice = nullptr;
     };
 
     static std::unique_ptr<TreeBranchCulling> create(const InitInfo& info);
@@ -92,7 +95,7 @@ public:
                        const TreeLODSystem* lodSystem);
 
     // Check if culling is enabled and ready
-    bool isEnabled() const { return cullPipeline_.get() != VK_NULL_HANDLE && !meshGroups_.empty(); }
+    bool isEnabled() const { return cullPipeline_.has_value() && !meshGroups_.empty(); }
 
     // Enable/disable GPU culling (fallback to per-tree rendering when disabled)
     void setEnabled(bool enabled) { enabled_ = enabled; }
@@ -132,10 +135,13 @@ private:
 
     bool enabled_ = true;
 
+    // RAII device pointer
+    const vk::raii::Device* raiiDevice_ = nullptr;
+
     // Compute pipeline for GPU culling
-    ManagedPipeline cullPipeline_;
-    ManagedPipelineLayout cullPipelineLayout_;
-    ManagedDescriptorSetLayout cullDescriptorSetLayout_;
+    std::optional<vk::raii::Pipeline> cullPipeline_;
+    std::optional<vk::raii::PipelineLayout> cullPipelineLayout_;
+    std::optional<vk::raii::DescriptorSetLayout> cullDescriptorSetLayout_;
     std::vector<VkDescriptorSet> cullDescriptorSets_;
 
     // Input buffer: all tree transforms
