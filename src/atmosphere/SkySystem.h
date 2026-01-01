@@ -1,13 +1,14 @@
 #pragma once
 
 #include <vulkan/vulkan.h>
+#include <vulkan/vulkan_raii.hpp>
 #include <vk_mem_alloc.h>
 #include <vector>
 #include <string>
 #include <memory>
+#include <optional>
 #include "DescriptorManager.h"
 #include "InitContext.h"
-#include "VulkanRAII.h"
 
 class AtmosphereLUTSystem;
 
@@ -21,6 +22,7 @@ public:
         uint32_t framesInFlight;
         VkExtent2D extent;
         VkRenderPass hdrRenderPass;
+        const vk::raii::Device* raiiDevice = nullptr;
     };
 
     /**
@@ -64,9 +66,10 @@ private:
     uint32_t framesInFlight = 0;
     VkExtent2D extent = {0, 0};
     VkRenderPass hdrRenderPass = VK_NULL_HANDLE;
+    const vk::raii::Device* raiiDevice_ = nullptr;
 
-    VkPipeline pipeline = VK_NULL_HANDLE;
-    ManagedPipelineLayout pipelineLayout;
-    ManagedDescriptorSetLayout descriptorSetLayout;
+    std::optional<vk::raii::Pipeline> pipeline_;
+    std::optional<vk::raii::PipelineLayout> pipelineLayout_;
+    std::optional<vk::raii::DescriptorSetLayout> descriptorSetLayout_;
     std::vector<VkDescriptorSet> descriptorSets;
 };

@@ -24,6 +24,7 @@ std::unique_ptr<SkySystem> SkySystem::create(const InitContext& ctx, VkRenderPas
     info.framesInFlight = ctx.framesInFlight;
     info.extent = ctx.extent;
     info.hdrRenderPass = hdrPass;
+    info.raiiDevice = ctx.raiiDevice;
     return create(info);
 }
 
@@ -38,6 +39,12 @@ bool SkySystem::initInternal(const InitInfo& info) {
     framesInFlight = info.framesInFlight;
     extent = info.extent;
     hdrRenderPass = info.hdrRenderPass;
+    raiiDevice_ = info.raiiDevice;
+
+    if (!raiiDevice_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SkySystem requires raiiDevice");
+        return false;
+    }
 
     if (!createDescriptorSetLayout()) return false;
     if (!createPipeline()) return false;
@@ -48,14 +55,10 @@ bool SkySystem::initInternal(const InitInfo& info) {
 void SkySystem::cleanup() {
     if (device == VK_NULL_HANDLE) return;  // Not initialized
 
-    vk::Device vkDevice(device);
-    if (pipeline != VK_NULL_HANDLE) {
-        vkDevice.destroyPipeline(pipeline);
-        pipeline = VK_NULL_HANDLE;
-    }
     // RAII wrappers handle cleanup automatically
-    pipelineLayout = ManagedPipelineLayout();
-    descriptorSetLayout = ManagedDescriptorSetLayout();
+    pipeline_.reset();
+    pipelineLayout_.reset();
+    descriptorSetLayout_.reset();
     // Descriptor sets are freed when the pool is destroyed
     descriptorSets.clear();
 }
@@ -70,7 +73,7 @@ bool SkySystem::createDescriptorSetLayout() {
     // 5: Mie Irradiance LUT sampler (Phase 4.1.9)
     // 6: Cloud Map LUT sampler (Paraboloid projection, updated per-frame)
 
-    if (!DescriptorManager::LayoutBuilder(device)
+    VkDescriptorSetLayout rawLayout = DescriptorManager::LayoutBuilder(device)
             .addUniformBuffer(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)  // 0: UBO
             .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 1: Transmittance LUT
             .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 2: Multi-scatter LUT
@@ -78,13 +81,22 @@ bool SkySystem::createDescriptorSetLayout() {
             .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 4: Rayleigh Irradiance LUT
             .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 5: Mie Irradiance LUT
             .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 6: Cloud Map LUT
-            .buildManaged(descriptorSetLayout)) {
+            .build();
+    if (rawLayout == VK_NULL_HANDLE) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create sky descriptor set layout");
         return false;
     }
+    descriptorSetLayout_.emplace(*raiiDevice_, rawLayout);
 
-    if (!DescriptorManager::createManagedPipelineLayout(device, descriptorSetLayout.get(), pipelineLayout)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create sky pipeline layout");
+    // Create pipeline layout
+    vk::DescriptorSetLayout layouts[] = { **descriptorSetLayout_ };
+    auto layoutInfo = vk::PipelineLayoutCreateInfo{}
+        .setSetLayouts(layouts);
+
+    try {
+        pipelineLayout_.emplace(*raiiDevice_, layoutInfo);
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create sky pipeline layout: %s", e.what());
         return false;
     }
 
@@ -95,7 +107,7 @@ bool SkySystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffers
                                       VkDeviceSize uniformBufferSize,
                                       AtmosphereLUTSystem& atmosphereLUTSystem) {
     // Allocate sky descriptor sets using managed pool
-    descriptorSets = descriptorPool->allocate(descriptorSetLayout.get(), framesInFlight);
+    descriptorSets = descriptorPool->allocate(**descriptorSetLayout_, framesInFlight);
     if (descriptorSets.size() != framesInFlight) {
         SDL_Log("Failed to allocate sky descriptor sets");
         return false;
@@ -130,27 +142,29 @@ bool SkySystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffers
 bool SkySystem::createPipeline() {
     GraphicsPipelineFactory factory(device);
 
+    VkPipeline rawPipeline = VK_NULL_HANDLE;
     bool success = factory
         .applyPreset(GraphicsPipelineFactory::Preset::FullscreenQuad)
         .setShaders(shaderPath + "/sky.vert.spv", shaderPath + "/sky.frag.spv")
         .setRenderPass(hdrRenderPass)
-        .setPipelineLayout(pipelineLayout.get())
+        .setPipelineLayout(**pipelineLayout_)
         .setExtent(extent)
         .setDynamicViewport(true)
-        .build(pipeline);
+        .build(rawPipeline);
 
     if (!success) {
         SDL_Log("Failed to create sky pipeline");
         return false;
     }
 
+    pipeline_.emplace(*raiiDevice_, rawPipeline);
     return true;
 }
 
 void SkySystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
     vk::CommandBuffer vkCmd(cmd);
 
-    vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, **pipeline_);
 
     // Set dynamic viewport and scissor to handle window resize
     auto viewport = vk::Viewport{}
@@ -168,7 +182,7 @@ void SkySystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
     vkCmd.setScissor(0, scissor);
 
     vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
-                             pipelineLayout.get(), 0,
+                             **pipelineLayout_, 0,
                              vk::DescriptorSet(descriptorSets[frameIndex]), {});
     vkCmd.draw(3, 1, 0, 0);
 }
