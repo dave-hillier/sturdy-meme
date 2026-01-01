@@ -77,9 +77,9 @@ int main(int argc, char* argv[]) {
 
     TerrainImporter importer;
 
-    // Check if cache is already valid - skip processing if so
+    // Check if outputs are up to date - skip processing if unchanged
     if (importer.isCacheValid(config)) {
-        SDL_Log("Cache is up to date - skipping terrain preprocessing");
+        SDL_Log("Terrain outputs up to date - skipping");
         return 0;
     }
 

@@ -13,8 +13,8 @@
 
 namespace fs = std::filesystem;
 
-// Cache validation - checks if outputs are up to date with inputs and config
-struct WatershedCacheConfig {
+// Build stamp - tracks inputs and config to skip reprocessing when unchanged
+struct WatershedBuildConfig {
     std::string inputPath;
     std::string outputDir;
     uint32_t riverThreshold;
@@ -25,7 +25,7 @@ struct WatershedCacheConfig {
     float maxAltitude;
 };
 
-bool isWatershedCacheValid(const WatershedCacheConfig& config) {
+bool isWatershedOutputUpToDate(const WatershedBuildConfig& config) {
     std::string metaPath = config.outputDir + "/watershed.meta";
     std::ifstream file(metaPath);
     if (!file.is_open()) {
@@ -68,7 +68,7 @@ bool isWatershedCacheValid(const WatershedCacheConfig& config) {
 
     uintmax_t currentInputSize = fs::file_size(config.inputPath, ec);
     if (ec || currentInputSize != cachedInputSize) {
-        SDL_Log("Watershed cache: input file size changed");
+        SDL_Log("Watershed: input file size changed, reprocessing");
         return false;
     }
 
@@ -79,7 +79,7 @@ bool isWatershedCacheValid(const WatershedCacheConfig& config) {
         std::abs(cachedTerrainSize - config.terrainSize) > 0.1f ||
         std::abs(cachedMinAltitude - config.minAltitude) > 0.01f ||
         std::abs(cachedMaxAltitude - config.maxAltitude) > 0.01f) {
-        SDL_Log("Watershed cache: configuration changed");
+        SDL_Log("Watershed: configuration changed, reprocessing");
         return false;
     }
 
@@ -91,7 +91,7 @@ bool isWatershedCacheValid(const WatershedCacheConfig& config) {
     for (const auto& output : outputs) {
         std::string path = config.outputDir + "/" + output;
         if (!fs::exists(path, ec)) {
-            SDL_Log("Watershed cache: missing output %s", output.c_str());
+            SDL_Log("Watershed: missing output %s, reprocessing", output.c_str());
             return false;
         }
     }
@@ -99,7 +99,7 @@ bool isWatershedCacheValid(const WatershedCacheConfig& config) {
     return true;
 }
 
-bool saveWatershedCacheMeta(const WatershedCacheConfig& config) {
+bool saveWatershedBuildStamp(const WatershedBuildConfig& config) {
     std::string metaPath = config.outputDir + "/watershed.meta";
     std::ofstream file(metaPath);
     if (!file.is_open()) {
@@ -248,19 +248,19 @@ int main(int argc, char* argv[]) {
         output_dir = derive_output_dir(input_file);
     }
 
-    // Check if cache is valid - skip processing if so
-    WatershedCacheConfig cacheConfig;
-    cacheConfig.inputPath = input_file;
-    cacheConfig.outputDir = output_dir;
-    cacheConfig.riverThreshold = river_threshold;
-    cacheConfig.seaLevel = sea_level;
-    cacheConfig.resolution = resolution;
-    cacheConfig.terrainSize = binary_config.terrainSize;
-    cacheConfig.minAltitude = binary_config.minAltitude;
-    cacheConfig.maxAltitude = binary_config.maxAltitude;
+    // Check if outputs are up to date - skip processing if unchanged
+    WatershedBuildConfig buildConfig;
+    buildConfig.inputPath = input_file;
+    buildConfig.outputDir = output_dir;
+    buildConfig.riverThreshold = river_threshold;
+    buildConfig.seaLevel = sea_level;
+    buildConfig.resolution = resolution;
+    buildConfig.terrainSize = binary_config.terrainSize;
+    buildConfig.minAltitude = binary_config.minAltitude;
+    buildConfig.maxAltitude = binary_config.maxAltitude;
 
-    if (isWatershedCacheValid(cacheConfig)) {
-        SDL_Log("Watershed cache is up to date - skipping processing");
+    if (isWatershedOutputUpToDate(buildConfig)) {
+        SDL_Log("Watershed outputs up to date - skipping");
         return 0;
     }
 
@@ -355,8 +355,8 @@ int main(int argc, char* argv[]) {
         SDL_Log("Writing lakes binary to: %s", lakes_dat.c_str());
         write_lakes_binary(lakes_dat);
 
-        // Save cache metadata for future runs
-        saveWatershedCacheMeta(cacheConfig);
+        // Save build stamp for future runs
+        saveWatershedBuildStamp(buildConfig);
 
         SDL_Log("Done.");
         return 0;

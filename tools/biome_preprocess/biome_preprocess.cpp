@@ -14,8 +14,8 @@
 
 namespace fs = std::filesystem;
 
-// Cache validation - checks if outputs are up to date with inputs and config
-bool isBiomeCacheValid(const BiomeConfig& config) {
+// Check if outputs are up to date based on inputs and config
+bool isBiomeOutputUpToDate(const BiomeConfig& config) {
     std::string metaPath = config.outputDir + "/biome.meta";
     std::ifstream file(metaPath);
     if (!file.is_open()) {
@@ -60,7 +60,7 @@ bool isBiomeCacheValid(const BiomeConfig& config) {
 
     uintmax_t currentHeightmapSize = fs::file_size(config.heightmapPath, ec);
     if (ec || currentHeightmapSize != cachedHeightmapSize) {
-        SDL_Log("Biome cache: heightmap file size changed");
+        SDL_Log("Biome: heightmap file size changed, reprocessing");
         return false;
     }
 
@@ -68,7 +68,7 @@ bool isBiomeCacheValid(const BiomeConfig& config) {
     std::string flowAccPath = config.erosionCacheDir + "/flow_accumulation.bin";
     std::string flowDirPath = config.erosionCacheDir + "/flow_direction.bin";
     if (!fs::exists(flowAccPath, ec) || !fs::exists(flowDirPath, ec)) {
-        SDL_Log("Biome cache: erosion input files missing");
+        SDL_Log("Biome: erosion input files missing, reprocessing");
         return false;
     }
 
@@ -79,7 +79,7 @@ bool isBiomeCacheValid(const BiomeConfig& config) {
         std::abs(cachedMaxAltitude - config.maxAltitude) > 0.01f ||
         cachedOutputResolution != config.outputResolution ||
         cachedNumSettlements != config.numSettlements) {
-        SDL_Log("Biome cache: configuration changed");
+        SDL_Log("Biome: configuration changed, reprocessing");
         return false;
     }
 
@@ -90,7 +90,7 @@ bool isBiomeCacheValid(const BiomeConfig& config) {
     for (const auto& output : outputs) {
         std::string path = config.outputDir + "/" + output;
         if (!fs::exists(path, ec)) {
-            SDL_Log("Biome cache: missing output %s", output.c_str());
+            SDL_Log("Biome: missing output %s, reprocessing", output.c_str());
             return false;
         }
     }
@@ -98,7 +98,7 @@ bool isBiomeCacheValid(const BiomeConfig& config) {
     return true;
 }
 
-bool saveBiomeCacheMeta(const BiomeConfig& config) {
+bool saveBiomeBuildStamp(const BiomeConfig& config) {
     std::string metaPath = config.outputDir + "/biome.meta";
     std::ofstream file(metaPath);
     if (!file.is_open()) {
@@ -212,9 +212,9 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // Check if cache is valid - skip processing if so
-    if (isBiomeCacheValid(config)) {
-        SDL_Log("Biome cache is up to date - skipping processing");
+    // Check if outputs are up to date - skip processing if unchanged
+    if (isBiomeOutputUpToDate(config)) {
+        SDL_Log("Biome outputs up to date - skipping");
         return 0;
     }
 
@@ -273,8 +273,8 @@ int main(int argc, char* argv[]) {
         config.terrainSize
     );
 
-    // Save cache metadata for future runs
-    saveBiomeCacheMeta(config);
+    // Save build stamp for future runs
+    saveBiomeBuildStamp(config);
 
     SDL_Log("Biome generation complete!");
     SDL_Log("Output files:");

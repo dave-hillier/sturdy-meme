@@ -18,8 +18,8 @@
 using json = nlohmann::json;
 namespace fs = std::filesystem;
 
-// Cache validation - checks if outputs are up to date with inputs and config
-struct RoadCacheConfig {
+// Build stamp - tracks inputs and config to skip reprocessing when unchanged
+struct RoadBuildConfig {
     std::string heightmapPath;
     std::string biomemapPath;
     std::string settlementsPath;
@@ -32,7 +32,7 @@ struct RoadCacheConfig {
     bool useColonization;
 };
 
-bool isRoadCacheValid(const RoadCacheConfig& config) {
+bool isRoadOutputUpToDate(const RoadBuildConfig& config) {
     std::string metaPath = config.outputDir + "/roads.meta";
     std::ifstream file(metaPath);
     if (!file.is_open()) {
@@ -77,19 +77,19 @@ bool isRoadCacheValid(const RoadCacheConfig& config) {
 
     uintmax_t heightmapSize = fs::file_size(config.heightmapPath, ec);
     if (ec || heightmapSize != cachedHeightmapSize) {
-        SDL_Log("Roads cache: heightmap file size changed");
+        SDL_Log("Roads: heightmap file size changed, reprocessing");
         return false;
     }
 
     uintmax_t biomemapSize = fs::file_size(config.biomemapPath, ec);
     if (ec || biomemapSize != cachedBiomemapSize) {
-        SDL_Log("Roads cache: biome map file size changed");
+        SDL_Log("Roads: biome map file size changed, reprocessing");
         return false;
     }
 
     uintmax_t settlementsSize = fs::file_size(config.settlementsPath, ec);
     if (ec || settlementsSize != cachedSettlementsSize) {
-        SDL_Log("Roads cache: settlements file size changed");
+        SDL_Log("Roads: settlements file size changed, reprocessing");
         return false;
     }
 
@@ -100,7 +100,7 @@ bool isRoadCacheValid(const RoadCacheConfig& config) {
         cachedGridResolution != config.gridResolution ||
         std::abs(cachedSimplifyEpsilon - config.simplifyEpsilon) > 0.01f ||
         cachedUseColonization != config.useColonization) {
-        SDL_Log("Roads cache: configuration changed");
+        SDL_Log("Roads: configuration changed, reprocessing");
         return false;
     }
 
@@ -111,7 +111,7 @@ bool isRoadCacheValid(const RoadCacheConfig& config) {
     for (const auto& output : outputs) {
         std::string path = config.outputDir + "/" + output;
         if (!fs::exists(path, ec)) {
-            SDL_Log("Roads cache: missing output %s", output.c_str());
+            SDL_Log("Roads: missing output %s, reprocessing", output.c_str());
             return false;
         }
     }
@@ -119,7 +119,7 @@ bool isRoadCacheValid(const RoadCacheConfig& config) {
     return true;
 }
 
-bool saveRoadCacheMeta(const RoadCacheConfig& config) {
+bool saveRoadBuildStamp(const RoadBuildConfig& config) {
     std::string metaPath = config.outputDir + "/roads.meta";
     std::ofstream file(metaPath);
     if (!file.is_open()) {
@@ -469,21 +469,21 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // Check if cache is valid - skip processing if so
-    RoadCacheConfig cacheConfig;
-    cacheConfig.heightmapPath = heightmapPath;
-    cacheConfig.biomemapPath = biomemapPath;
-    cacheConfig.settlementsPath = settlementsPath;
-    cacheConfig.outputDir = outputDir;
-    cacheConfig.terrainSize = config.terrainSize;
-    cacheConfig.minAltitude = config.minAltitude;
-    cacheConfig.maxAltitude = config.maxAltitude;
-    cacheConfig.gridResolution = config.gridResolution;
-    cacheConfig.simplifyEpsilon = config.simplifyEpsilon;
-    cacheConfig.useColonization = useColonization;
+    // Check if outputs are up to date - skip processing if unchanged
+    RoadBuildConfig buildConfig;
+    buildConfig.heightmapPath = heightmapPath;
+    buildConfig.biomemapPath = biomemapPath;
+    buildConfig.settlementsPath = settlementsPath;
+    buildConfig.outputDir = outputDir;
+    buildConfig.terrainSize = config.terrainSize;
+    buildConfig.minAltitude = config.minAltitude;
+    buildConfig.maxAltitude = config.maxAltitude;
+    buildConfig.gridResolution = config.gridResolution;
+    buildConfig.simplifyEpsilon = config.simplifyEpsilon;
+    buildConfig.useColonization = useColonization;
 
-    if (isRoadCacheValid(cacheConfig)) {
-        SDL_Log("Roads cache is up to date - skipping processing");
+    if (isRoadOutputUpToDate(buildConfig)) {
+        SDL_Log("Roads outputs up to date - skipping");
         return 0;
     }
 
@@ -624,9 +624,9 @@ int main(int argc, char* argv[]) {
     // Save roads SVG
     RoadGen::writeRoadsSVG(svgPath, network, settlements);
 
-    // Save cache metadata for future runs
-    cacheConfig.terrainSize = config.terrainSize;  // May have been updated from settlements
-    saveRoadCacheMeta(cacheConfig);
+    // Save build stamp for future runs
+    buildConfig.terrainSize = config.terrainSize;  // May have been updated from settlements
+    saveRoadBuildStamp(buildConfig);
 
     SDL_Log("Road generation complete!");
     SDL_Log("Output files:");
