@@ -70,9 +70,9 @@ struct CellCullParams {
 
 struct TreeFilterParams {
     uint32_t maxTreesPerCell;
+    uint32_t maxVisibleTrees;  // Buffer capacity for bounds checking
     uint32_t _pad0;
     uint32_t _pad1;
-    uint32_t _pad2;
 };
 
 // Params for phase 3 leaf culling (matches shader LeafCullP3Params)
@@ -292,6 +292,7 @@ private:
     // Triple-buffered intermediate buffers for two-phase culling
     BufferUtils::FrameIndexedBuffers visibleTreeBuffers_;
     VkDeviceSize visibleTreeBufferSize_ = 0;
+    uint32_t maxVisibleTrees_ = 0;  // Buffer capacity for bounds checking in shader
 
     BufferUtils::FrameIndexedBuffers leafCullIndirectDispatchBuffers_;
 

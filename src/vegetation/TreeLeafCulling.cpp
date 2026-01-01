@@ -386,6 +386,7 @@ bool TreeLeafCulling::createTreeFilterBuffers(uint32_t maxTrees) {
         return false;
     }
 
+    maxVisibleTrees_ = maxTrees;
     visibleTreeBufferSize_ = sizeof(uint32_t) + maxTrees * sizeof(VisibleTreeData);
 
     // Triple-buffered visible tree buffer to prevent race conditions between frames
@@ -592,9 +593,19 @@ void TreeLeafCulling::updateSpatialIndex(const TreeSystem& treeSystem) {
         }
     }
 
-    if (visibleTreeBuffers_.empty() && treeFilterPipeline_.get() != VK_NULL_HANDLE &&
+    uint32_t requiredTreeCapacity = static_cast<uint32_t>(leafRenderables.size());
+    bool needsTreeFilterBuffers = visibleTreeBuffers_.empty() ||
+                                  requiredTreeCapacity > maxVisibleTrees_;
+
+    if (needsTreeFilterBuffers && treeFilterPipeline_.get() != VK_NULL_HANDLE &&
         !visibleCellBuffers_.empty()) {
-        createTreeFilterBuffers(static_cast<uint32_t>(leafRenderables.size()));
+        // Need to wait for GPU before destroying old buffers
+        if (!visibleTreeBuffers_.empty()) {
+            vkDeviceWaitIdle(device_);
+            SDL_Log("TreeLeafCulling: Resizing visible tree buffer from %u to %u trees",
+                    maxVisibleTrees_, requiredTreeCapacity);
+        }
+        createTreeFilterBuffers(requiredTreeCapacity);
     } else if (!treeFilterDescriptorSets_.empty()) {
         // Spatial index buffers were recreated - update descriptor sets with new buffer handles
         for (uint32_t f = 0; f < maxFramesInFlight_; ++f) {
@@ -833,6 +844,7 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
 
             TreeFilterParams filterParams{};
             filterParams.maxTreesPerCell = 64;
+            filterParams.maxVisibleTrees = maxVisibleTrees_;
 
             vkCmd.updateBuffer(treeFilterUniformBuffers_.buffers[frameIndex], 0,
                                sizeof(CullingUniforms), &filterCulling);

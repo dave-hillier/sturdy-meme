@@ -95,9 +95,9 @@ layout(std430, binding = BINDING_TREE_FILTER_INDIRECT) buffer IndirectDispatchBu
 // Tree filter specific parameters
 layout(std140, binding = BINDING_TREE_FILTER_PARAMS) uniform TreeFilterParams {
     uint maxTreesPerCell;          // Maximum trees per cell (for bounds checking)
+    uint maxVisibleTrees;          // Buffer capacity for visible trees
     uint _pad0;
     uint _pad1;
-    uint _pad2;
 } filterParams;
 
 void main() {
@@ -168,13 +168,38 @@ void main() {
     uint activeCount = subgroupBallotBitCount(activeMask);
     uint laneOffset = subgroupBallotExclusiveBitCount(activeMask);
 
+    // Use compare-and-swap to only allocate slots within buffer capacity
     uint baseIdx = 0;
+    uint slotsAllocated = 0;
     if (subgroupElect()) {
-        baseIdx = atomicAdd(visibleTreeCount, activeCount);
-        atomicAdd(dispatchX, activeCount);
+        uint expected = visibleTreeCount;
+        while (true) {
+            uint available = (expected >= filterParams.maxVisibleTrees)
+                ? 0
+                : filterParams.maxVisibleTrees - expected;
+            slotsAllocated = min(activeCount, available);
+            if (slotsAllocated == 0) {
+                baseIdx = expected;
+                break;
+            }
+            uint desired = expected + slotsAllocated;
+            uint actual = atomicCompSwap(visibleTreeCount, expected, desired);
+            if (actual == expected) {
+                baseIdx = expected;
+                atomicAdd(dispatchX, slotsAllocated);
+                break;
+            }
+            expected = actual;
+        }
     }
     baseIdx = subgroupBroadcastFirst(baseIdx);
+    slotsAllocated = subgroupBroadcastFirst(slotsAllocated);
     uint visibleIdx = baseIdx + laneOffset;
+
+    // Only write if we got a valid slot within bounds
+    if (laneOffset >= slotsAllocated) {
+        return;
+    }
 
     // Write visible tree data
     visibleTrees[visibleIdx].originalTreeIndex = originalTreeIdx;
