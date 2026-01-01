@@ -50,6 +50,7 @@ public:
         VmaAllocator allocator;
         float cellSize = 64.0f;     // World units per cell side
         float worldSize = 4096.0f;  // Total world size (for grid allocation)
+        uint32_t maxFramesInFlight = 3;  // For triple-buffering GPU buffers
     };
 
     /**
@@ -84,11 +85,15 @@ public:
      */
     bool uploadToGPU();
 
-    // Accessors for GPU buffers
-    VkBuffer getCellBuffer() const { return cellBuffer_; }
+    // Accessors for GPU buffers (frame-indexed to prevent race conditions)
+    VkBuffer getCellBuffer(uint32_t frameIndex) const {
+        return cellBuffers_[frameIndex % maxFramesInFlight_];
+    }
     VkDeviceSize getCellBufferSize() const { return cellBufferSize_; }
 
-    VkBuffer getSortedTreeBuffer() const { return sortedTreeBuffer_; }
+    VkBuffer getSortedTreeBuffer(uint32_t frameIndex) const {
+        return sortedTreeBuffers_[frameIndex % maxFramesInFlight_];
+    }
     VkDeviceSize getSortedTreeBufferSize() const { return sortedTreeBufferSize_; }
 
     // Accessors for cell data
@@ -106,7 +111,10 @@ public:
     }
 
     // Check if buffers are valid
-    bool isValid() const { return cellBuffer_ != VK_NULL_HANDLE && sortedTreeBuffer_ != VK_NULL_HANDLE; }
+    bool isValid() const {
+        return !cellBuffers_.empty() && cellBuffers_[0] != VK_NULL_HANDLE &&
+               !sortedTreeBuffers_.empty() && sortedTreeBuffers_[0] != VK_NULL_HANDLE;
+    }
 
 private:
     TreeSpatialIndex() = default;
@@ -126,6 +134,7 @@ private:
     float worldSize_ = 4096.0f;
     int32_t gridDimension_ = 0;         // Number of cells per side
     int32_t gridOffset_ = 0;            // Offset to handle negative coordinates
+    uint32_t maxFramesInFlight_ = 3;    // Number of frames for triple-buffering
 
     // CPU-side data
     std::vector<TreeCell> cells_;               // All cells in the grid
@@ -133,12 +142,13 @@ private:
     std::vector<SortedTreeEntry> sortedTrees_; // Trees sorted by cell
     uint32_t nonEmptyCellCount_ = 0;            // Number of cells with trees
 
-    // GPU buffers
-    VkBuffer cellBuffer_ = VK_NULL_HANDLE;
-    VmaAllocation cellAllocation_ = VK_NULL_HANDLE;
+    // GPU buffers (triple-buffered to prevent race conditions when updating
+    // while frames are in-flight - each frame uses its own copy)
+    std::vector<VkBuffer> cellBuffers_;
+    std::vector<VmaAllocation> cellAllocations_;
     VkDeviceSize cellBufferSize_ = 0;
 
-    VkBuffer sortedTreeBuffer_ = VK_NULL_HANDLE;
-    VmaAllocation sortedTreeAllocation_ = VK_NULL_HANDLE;
+    std::vector<VkBuffer> sortedTreeBuffers_;
+    std::vector<VmaAllocation> sortedTreeAllocations_;
     VkDeviceSize sortedTreeBufferSize_ = 0;
 };

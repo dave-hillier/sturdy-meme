@@ -312,9 +312,10 @@ bool TreeLeafCulling::createCellCullBuffers() {
 
     // Update descriptor sets with buffer bindings using SetWriter
     // Each frame's descriptor set uses that frame's buffers for proper triple-buffering
+    // Spatial index buffers are also triple-buffered to prevent race conditions
     for (uint32_t f = 0; f < maxFramesInFlight_; ++f) {
         DescriptorManager::SetWriter writer(device_, cellCullDescriptorSets_[f]);
-        writer.writeBuffer(Bindings::TREE_CELL_CULL_CELLS, spatialIndex_->getCellBuffer(), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+        writer.writeBuffer(Bindings::TREE_CELL_CULL_CELLS, spatialIndex_->getCellBuffer(f), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
               .writeBuffer(Bindings::TREE_CELL_CULL_VISIBLE, visibleCellBuffers_.getVk(f), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
               .writeBuffer(Bindings::TREE_CELL_CULL_INDIRECT, cellCullIndirectBuffers_.getVk(f), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
               .writeBuffer(Bindings::TREE_CELL_CULL_CULLING, cellCullUniformBuffers_.buffers[f], 0, sizeof(CullingUniforms), VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
@@ -433,12 +434,13 @@ bool TreeLeafCulling::createTreeFilterBuffers(uint32_t maxTrees) {
 
     // Update descriptor sets with buffer bindings using SetWriter
     // Each frame's descriptor set uses that frame's buffers for proper triple-buffering
+    // Spatial index buffers are also triple-buffered to prevent race conditions
     for (uint32_t f = 0; f < maxFramesInFlight_; ++f) {
         DescriptorManager::SetWriter writer(device_, treeFilterDescriptorSets_[f]);
         writer.writeBuffer(Bindings::TREE_FILTER_ALL_TREES, treeDataBuffers_.getVk(f), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
               .writeBuffer(Bindings::TREE_FILTER_VISIBLE_CELLS, visibleCellBuffers_.getVk(f), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-              .writeBuffer(Bindings::TREE_FILTER_CELL_DATA, spatialIndex_->getCellBuffer(), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-              .writeBuffer(Bindings::TREE_FILTER_SORTED_TREES, spatialIndex_->getSortedTreeBuffer(), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+              .writeBuffer(Bindings::TREE_FILTER_CELL_DATA, spatialIndex_->getCellBuffer(f), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+              .writeBuffer(Bindings::TREE_FILTER_SORTED_TREES, spatialIndex_->getSortedTreeBuffer(f), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
               .writeBuffer(Bindings::TREE_FILTER_VISIBLE_TREES, visibleTreeBuffers_.getVk(f), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
               .writeBuffer(Bindings::TREE_FILTER_INDIRECT, leafCullIndirectDispatchBuffers_.getVk(f), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
               .writeBuffer(Bindings::TREE_FILTER_CULLING, treeFilterUniformBuffers_.buffers[f], 0, sizeof(CullingUniforms), VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
@@ -539,6 +541,7 @@ void TreeLeafCulling::updateSpatialIndex(const TreeSystem& treeSystem) {
         indexInfo.allocator = allocator_;
         indexInfo.cellSize = 64.0f;
         indexInfo.worldSize = terrainSize_;
+        indexInfo.maxFramesInFlight = maxFramesInFlight_;
 
         spatialIndex_ = TreeSpatialIndex::create(indexInfo);
         if (!spatialIndex_) {
@@ -579,11 +582,27 @@ void TreeLeafCulling::updateSpatialIndex(const TreeSystem& treeSystem) {
 
     if (visibleCellBuffers_.empty() && cellCullPipeline_.get() != VK_NULL_HANDLE) {
         createCellCullBuffers();
+    } else if (!cellCullDescriptorSets_.empty()) {
+        // Spatial index buffers were recreated - update descriptor sets with new buffer handles
+        // This is necessary because uploadToGPU() destroys and recreates all buffers
+        for (uint32_t f = 0; f < maxFramesInFlight_; ++f) {
+            DescriptorManager::SetWriter writer(device_, cellCullDescriptorSets_[f]);
+            writer.writeBuffer(Bindings::TREE_CELL_CULL_CELLS, spatialIndex_->getCellBuffer(f), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+                  .update();
+        }
     }
 
     if (visibleTreeBuffers_.empty() && treeFilterPipeline_.get() != VK_NULL_HANDLE &&
         !visibleCellBuffers_.empty()) {
         createTreeFilterBuffers(static_cast<uint32_t>(leafRenderables.size()));
+    } else if (!treeFilterDescriptorSets_.empty()) {
+        // Spatial index buffers were recreated - update descriptor sets with new buffer handles
+        for (uint32_t f = 0; f < maxFramesInFlight_; ++f) {
+            DescriptorManager::SetWriter writer(device_, treeFilterDescriptorSets_[f]);
+            writer.writeBuffer(Bindings::TREE_FILTER_CELL_DATA, spatialIndex_->getCellBuffer(f), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+                  .writeBuffer(Bindings::TREE_FILTER_SORTED_TREES, spatialIndex_->getSortedTreeBuffer(f), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+                  .update();
+        }
     }
 
     if (twoPhaseLeafCullDescriptorSets_.empty() && twoPhaseLeafCullPipeline_.get() != VK_NULL_HANDLE &&

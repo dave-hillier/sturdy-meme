@@ -22,6 +22,7 @@ bool TreeSpatialIndex::initInternal(const InitInfo& info) {
     allocator_ = info.allocator;
     cellSize_ = info.cellSize;
     worldSize_ = info.worldSize;
+    maxFramesInFlight_ = info.maxFramesInFlight;
 
     // Calculate grid dimensions
     // Add 1 to handle edge cases at world boundaries
@@ -55,14 +56,21 @@ bool TreeSpatialIndex::initInternal(const InitInfo& info) {
 }
 
 void TreeSpatialIndex::cleanup() {
-    if (cellBuffer_ != VK_NULL_HANDLE) {
-        vmaDestroyBuffer(allocator_, cellBuffer_, cellAllocation_);
-        cellBuffer_ = VK_NULL_HANDLE;
+    for (size_t i = 0; i < cellBuffers_.size(); ++i) {
+        if (cellBuffers_[i] != VK_NULL_HANDLE) {
+            vmaDestroyBuffer(allocator_, cellBuffers_[i], cellAllocations_[i]);
+        }
     }
-    if (sortedTreeBuffer_ != VK_NULL_HANDLE) {
-        vmaDestroyBuffer(allocator_, sortedTreeBuffer_, sortedTreeAllocation_);
-        sortedTreeBuffer_ = VK_NULL_HANDLE;
+    cellBuffers_.clear();
+    cellAllocations_.clear();
+
+    for (size_t i = 0; i < sortedTreeBuffers_.size(); ++i) {
+        if (sortedTreeBuffers_[i] != VK_NULL_HANDLE) {
+            vmaDestroyBuffer(allocator_, sortedTreeBuffers_[i], sortedTreeAllocations_[i]);
+        }
     }
+    sortedTreeBuffers_.clear();
+    sortedTreeAllocations_.clear();
 }
 
 void TreeSpatialIndex::worldToCell(const glm::vec3& worldPos, int32_t& cellX, int32_t& cellZ) const {
@@ -207,107 +215,60 @@ bool TreeSpatialIndex::uploadToGPU() {
         cellsGPU_.push_back(gpuCell);
     }
 
-    // Create cell buffer
+    // Calculate buffer sizes
     cellBufferSize_ = cellsGPU_.size() * sizeof(TreeCellGPU);
+    sortedTreeBufferSize_ = sortedTrees_.size() * sizeof(SortedTreeEntry);
 
     auto cellBufferInfo = vk::BufferCreateInfo{}
         .setSize(cellBufferSize_)
         .setUsage(vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst)
         .setSharingMode(vk::SharingMode::eExclusive);
 
-    VmaAllocationCreateInfo allocInfo{};
-    allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-
-    if (vmaCreateBuffer(allocator_, reinterpret_cast<const VkBufferCreateInfo*>(&cellBufferInfo), &allocInfo,
-                        &cellBuffer_, &cellAllocation_, nullptr) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeSpatialIndex: Failed to create cell buffer");
-        return false;
-    }
-
-    // Create sorted tree buffer
-    sortedTreeBufferSize_ = sortedTrees_.size() * sizeof(SortedTreeEntry);
-
     auto sortedBufferInfo = vk::BufferCreateInfo{}
         .setSize(sortedTreeBufferSize_)
         .setUsage(vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst)
         .setSharingMode(vk::SharingMode::eExclusive);
 
-    if (vmaCreateBuffer(allocator_, reinterpret_cast<const VkBufferCreateInfo*>(&sortedBufferInfo), &allocInfo,
-                        &sortedTreeBuffer_, &sortedTreeAllocation_, nullptr) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeSpatialIndex: Failed to create sorted tree buffer");
-        cleanup();
-        return false;
+    // Use CPU_TO_GPU for simplicity (host-visible, device-local when possible)
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+
+    // Create triple-buffered cell and sorted tree buffers
+    cellBuffers_.resize(maxFramesInFlight_, VK_NULL_HANDLE);
+    cellAllocations_.resize(maxFramesInFlight_, VK_NULL_HANDLE);
+    sortedTreeBuffers_.resize(maxFramesInFlight_, VK_NULL_HANDLE);
+    sortedTreeAllocations_.resize(maxFramesInFlight_, VK_NULL_HANDLE);
+
+    for (uint32_t i = 0; i < maxFramesInFlight_; ++i) {
+        if (vmaCreateBuffer(allocator_, reinterpret_cast<const VkBufferCreateInfo*>(&cellBufferInfo), &allocInfo,
+                            &cellBuffers_[i], &cellAllocations_[i], nullptr) != VK_SUCCESS) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeSpatialIndex: Failed to create cell buffer %u", i);
+            cleanup();
+            return false;
+        }
+
+        if (vmaCreateBuffer(allocator_, reinterpret_cast<const VkBufferCreateInfo*>(&sortedBufferInfo), &allocInfo,
+                            &sortedTreeBuffers_[i], &sortedTreeAllocations_[i], nullptr) != VK_SUCCESS) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeSpatialIndex: Failed to create sorted tree buffer %u", i);
+            cleanup();
+            return false;
+        }
+
+        // Upload data to each buffer
+        void* mappedData;
+        vmaMapMemory(allocator_, cellAllocations_[i], &mappedData);
+        memcpy(mappedData, cellsGPU_.data(), cellBufferSize_);
+        vmaUnmapMemory(allocator_, cellAllocations_[i]);
+
+        vmaMapMemory(allocator_, sortedTreeAllocations_[i], &mappedData);
+        memcpy(mappedData, sortedTrees_.data(), sortedTreeBufferSize_);
+        vmaUnmapMemory(allocator_, sortedTreeAllocations_[i]);
     }
 
-    // Upload data using staging buffers
-    VmaAllocationCreateInfo stagingAllocInfo{};
-    stagingAllocInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
-
-    // Stage and upload cell data
-    VkBuffer cellStagingBuffer;
-    VmaAllocation cellStagingAllocation;
-    if (vmaCreateBuffer(allocator_, reinterpret_cast<const VkBufferCreateInfo*>(&cellBufferInfo), &stagingAllocInfo,
-                        &cellStagingBuffer, &cellStagingAllocation, nullptr) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeSpatialIndex: Failed to create cell staging buffer");
-        cleanup();
-        return false;
-    }
-
-    void* mappedData;
-    vmaMapMemory(allocator_, cellStagingAllocation, &mappedData);
-    memcpy(mappedData, cellsGPU_.data(), cellBufferSize_);
-    vmaUnmapMemory(allocator_, cellStagingAllocation);
-
-    // Stage and upload sorted tree data
-    VkBuffer treeStagingBuffer;
-    VmaAllocation treeStagingAllocation;
-    if (vmaCreateBuffer(allocator_, reinterpret_cast<const VkBufferCreateInfo*>(&sortedBufferInfo), &stagingAllocInfo,
-                        &treeStagingBuffer, &treeStagingAllocation, nullptr) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeSpatialIndex: Failed to create tree staging buffer");
-        vmaDestroyBuffer(allocator_, cellStagingBuffer, cellStagingAllocation);
-        cleanup();
-        return false;
-    }
-
-    vmaMapMemory(allocator_, treeStagingAllocation, &mappedData);
-    memcpy(mappedData, sortedTrees_.data(), sortedTreeBufferSize_);
-    vmaUnmapMemory(allocator_, treeStagingAllocation);
-
-    // Note: In a real implementation, we'd need to submit copy commands here
-    // For now, we'll use host-visible memory for simplicity
-    // This should be refactored to use proper staging buffer copies
-
-    // Re-create buffers with CPU_TO_GPU usage for now (simpler but less optimal)
-    vmaDestroyBuffer(allocator_, cellStagingBuffer, cellStagingAllocation);
-    vmaDestroyBuffer(allocator_, treeStagingBuffer, treeStagingAllocation);
-    cleanup();
-
-    stagingAllocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
-
-    if (vmaCreateBuffer(allocator_, reinterpret_cast<const VkBufferCreateInfo*>(&cellBufferInfo), &stagingAllocInfo,
-                        &cellBuffer_, &cellAllocation_, nullptr) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeSpatialIndex: Failed to create cell buffer (CPU_TO_GPU)");
-        return false;
-    }
-
-    vmaMapMemory(allocator_, cellAllocation_, &mappedData);
-    memcpy(mappedData, cellsGPU_.data(), cellBufferSize_);
-    vmaUnmapMemory(allocator_, cellAllocation_);
-
-    if (vmaCreateBuffer(allocator_, reinterpret_cast<const VkBufferCreateInfo*>(&sortedBufferInfo), &stagingAllocInfo,
-                        &sortedTreeBuffer_, &sortedTreeAllocation_, nullptr) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeSpatialIndex: Failed to create tree buffer (CPU_TO_GPU)");
-        cleanup();
-        return false;
-    }
-
-    vmaMapMemory(allocator_, sortedTreeAllocation_, &mappedData);
-    memcpy(mappedData, sortedTrees_.data(), sortedTreeBufferSize_);
-    vmaUnmapMemory(allocator_, sortedTreeAllocation_);
-
-    SDL_Log("TreeSpatialIndex: Uploaded %zu cells (%.2f KB) and %zu sorted trees (%.2f KB)",
+    SDL_Log("TreeSpatialIndex: Uploaded %zu cells (%.2f KB) and %zu sorted trees (%.2f KB) x%u frames",
             cellsGPU_.size(), cellBufferSize_ / 1024.0f,
-            sortedTrees_.size(), sortedTreeBufferSize_ / 1024.0f);
+            sortedTrees_.size(), sortedTreeBufferSize_ / 1024.0f,
+            maxFramesInFlight_);
 
     return true;
 }
