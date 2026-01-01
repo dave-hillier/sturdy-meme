@@ -1,5 +1,6 @@
 #include "WatershedMetrics.h"
 #include <SDL3/SDL_log.h>
+#include <lodepng.h>
 #include <fstream>
 #include <algorithm>
 #include <cmath>
@@ -223,10 +224,12 @@ void WatershedMetrics::loadOrGenerateBasins(
 ) {
     if (callback) callback(0.28f, "Loading watershed basins...");
 
-    std::string basinPath = config.erosionCacheDir + "/watershed_labels.bin";
-    std::ifstream basinFile(basinPath, std::ios::binary);
+    std::string basinPath = config.erosionCacheDir + "/watershed_labels.png";
+    std::vector<unsigned char> pngData;
+    unsigned pngWidth, pngHeight;
+    unsigned pngError = lodepng::decode(pngData, pngWidth, pngHeight, basinPath, LCT_RGBA, 8);
 
-    if (!basinFile.is_open()) {
+    if (pngError != 0) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "Watershed basin data not found at %s, generating from flow", basinPath.c_str());
 
@@ -301,14 +304,22 @@ void WatershedMetrics::loadOrGenerateBasins(
         return;
     }
 
-    uint32_t width, height;
-    basinFile.read(reinterpret_cast<char*>(&width), sizeof(uint32_t));
-    basinFile.read(reinterpret_cast<char*>(&height), sizeof(uint32_t));
-    basinFile.read(reinterpret_cast<char*>(&result.basinCount), sizeof(uint32_t));
-
+    // Decode uint32_t labels from RGBA PNG (R=low byte, G, B, A=high byte)
+    uint32_t width = pngWidth;
+    uint32_t height = pngHeight;
     std::vector<uint32_t> rawLabels(width * height);
-    basinFile.read(reinterpret_cast<char*>(rawLabels.data()), width * height * sizeof(uint32_t));
 
+    uint32_t maxLabel = 0;
+    for (uint32_t i = 0; i < width * height; i++) {
+        uint32_t label = static_cast<uint32_t>(pngData[i * 4 + 0]) |
+                         (static_cast<uint32_t>(pngData[i * 4 + 1]) << 8) |
+                         (static_cast<uint32_t>(pngData[i * 4 + 2]) << 16) |
+                         (static_cast<uint32_t>(pngData[i * 4 + 3]) << 24);
+        rawLabels[i] = label;
+        maxLabel = std::max(maxLabel, label);
+    }
+
+    result.basinCount = maxLabel;
     result.basinLabels.resize(result.width * result.height);
     for (uint32_t y = 0; y < result.height; y++) {
         for (uint32_t x = 0; x < result.width; x++) {

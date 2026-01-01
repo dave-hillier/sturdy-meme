@@ -64,9 +64,9 @@ bool isBiomeOutputUpToDate(const BiomeConfig& config) {
         return false;
     }
 
-    // Check erosion input files exist (flow_accumulation.bin, flow_direction.bin)
-    std::string flowAccPath = config.erosionCacheDir + "/flow_accumulation.bin";
-    std::string flowDirPath = config.erosionCacheDir + "/flow_direction.bin";
+    // Check erosion input files exist (flow_accumulation.exr, flow_direction.png)
+    std::string flowAccPath = config.erosionCacheDir + "/flow_accumulation.exr";
+    std::string flowDirPath = config.erosionCacheDir + "/flow_direction.png";
     if (!fs::exists(flowAccPath, ec) || !fs::exists(flowDirPath, ec)) {
         SDL_Log("Biome: erosion input files missing, reprocessing");
         return false;

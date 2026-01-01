@@ -106,7 +106,7 @@ bool isRoadOutputUpToDate(const RoadBuildConfig& config) {
 
     // Check output files exist
     std::vector<std::string> outputs = {
-        "roads.json", "roads.bin", "roads_debug.png", "roads.svg"
+        "roads.geojson", "roads_debug.png", "roads.svg"
     };
     for (const auto& output : outputs) {
         std::string path = config.outputDir + "/" + output;
@@ -168,8 +168,7 @@ void printUsage(const char* programName) {
               << "  --help                      Show this help message\n"
               << "\n"
               << "Output files:\n"
-              << "  roads.json          Road network data in JSON format\n"
-              << "  roads.bin           Binary road network for runtime loading\n"
+              << "  roads.geojson       Road network data in GeoJSON format\n"
               << "  roads_debug.png     Debug visualization of road network\n"
               << "  roads.svg           SVG visualization of roads\n"
               << "  network.svg         SVG of network topology (if --use-colonization)\n"
@@ -242,90 +241,51 @@ bool loadSettlements(const std::string& path, std::vector<Settlement>& settlemen
     }
 }
 
-bool saveRoadsJson(const std::string& path, const RoadGen::RoadNetwork& network) {
+bool saveRoadsGeoJson(const std::string& path, const RoadGen::RoadNetwork& network) {
     std::ofstream file(path);
     if (!file.is_open()) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create roads JSON file: %s", path.c_str());
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create roads GeoJSON file: %s", path.c_str());
         return false;
     }
 
-    file << "{\n";
-    file << "  \"terrain_size\": " << network.terrainSize << ",\n";
-    file << "  \"total_length_m\": " << network.getTotalLength() << ",\n";
-    file << "  \"roads\": [\n";
+    json featureCollection;
+    featureCollection["type"] = "FeatureCollection";
+    featureCollection["properties"] = {
+        {"terrain_size", network.terrainSize},
+        {"total_length_m", network.getTotalLength()}
+    };
 
-    for (size_t i = 0; i < network.roads.size(); i++) {
-        const auto& road = network.roads[i];
+    json features = json::array();
 
-        file << "    {\n";
-        file << "      \"type\": \"" << RoadGen::getRoadTypeName(road.type) << "\",\n";
-        file << "      \"from_settlement\": " << road.fromSettlementId << ",\n";
-        file << "      \"to_settlement\": " << road.toSettlementId << ",\n";
-        file << "      \"length_m\": " << road.getLength() << ",\n";
-        file << "      \"control_points\": [\n";
-
-        for (size_t j = 0; j < road.controlPoints.size(); j++) {
-            const auto& cp = road.controlPoints[j];
-            file << "        {\"x\": " << cp.position.x << ", \"z\": " << cp.position.y;
-            if (cp.widthOverride > 0.0f) {
-                file << ", \"width\": " << cp.widthOverride;
-            }
-            file << "}";
-            if (j < road.controlPoints.size() - 1) file << ",";
-            file << "\n";
-        }
-
-        file << "      ]\n";
-        file << "    }";
-        if (i < network.roads.size() - 1) file << ",";
-        file << "\n";
-    }
-
-    file << "  ]\n";
-    file << "}\n";
-
-    SDL_Log("Saved roads JSON: %s", path.c_str());
-    return true;
-}
-
-bool saveRoadsBinary(const std::string& path, const RoadGen::RoadNetwork& network) {
-    std::ofstream file(path, std::ios::binary);
-    if (!file.is_open()) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create roads binary file: %s", path.c_str());
-        return false;
-    }
-
-    // Header
-    const char magic[] = "ROAD";
-    file.write(magic, 4);
-
-    uint32_t version = 1;
-    file.write(reinterpret_cast<const char*>(&version), sizeof(version));
-
-    file.write(reinterpret_cast<const char*>(&network.terrainSize), sizeof(network.terrainSize));
-
-    uint32_t numRoads = static_cast<uint32_t>(network.roads.size());
-    file.write(reinterpret_cast<const char*>(&numRoads), sizeof(numRoads));
-
-    // Roads
     for (const auto& road : network.roads) {
-        uint8_t type = static_cast<uint8_t>(road.type);
-        file.write(reinterpret_cast<const char*>(&type), sizeof(type));
-
-        file.write(reinterpret_cast<const char*>(&road.fromSettlementId), sizeof(road.fromSettlementId));
-        file.write(reinterpret_cast<const char*>(&road.toSettlementId), sizeof(road.toSettlementId));
-
-        uint32_t numPoints = static_cast<uint32_t>(road.controlPoints.size());
-        file.write(reinterpret_cast<const char*>(&numPoints), sizeof(numPoints));
-
+        json coordinates = json::array();
         for (const auto& cp : road.controlPoints) {
-            file.write(reinterpret_cast<const char*>(&cp.position.x), sizeof(cp.position.x));
-            file.write(reinterpret_cast<const char*>(&cp.position.y), sizeof(cp.position.y));
-            file.write(reinterpret_cast<const char*>(&cp.widthOverride), sizeof(cp.widthOverride));
+            // GeoJSON format: [x, z] (2D) or [x, z, y] for 3D
+            coordinates.push_back({cp.position.x, cp.position.y});
         }
+
+        json feature;
+        feature["type"] = "Feature";
+        feature["geometry"] = {
+            {"type", "LineString"},
+            {"coordinates", coordinates}
+        };
+        feature["properties"] = {
+            {"type", RoadGen::getRoadTypeName(road.type)},
+            {"from_settlement", road.fromSettlementId},
+            {"to_settlement", road.toSettlementId},
+            {"length_m", road.getLength()},
+            {"width", RoadGen::getRoadWidth(road.type)}
+        };
+
+        features.push_back(feature);
     }
 
-    SDL_Log("Saved roads binary: %s (%lld bytes)", path.c_str(), static_cast<long long>(file.tellp()));
+    featureCollection["features"] = features;
+
+    file << featureCollection.dump(2);
+
+    SDL_Log("Saved roads GeoJSON: %s", path.c_str());
     return true;
 }
 
@@ -604,16 +564,11 @@ int main(int argc, char* argv[]) {
     }
 
     // Save outputs
-    std::string jsonPath = outputDir + "/roads.json";
-    std::string binPath = outputDir + "/roads.bin";
+    std::string geojsonPath = outputDir + "/roads.geojson";
     std::string debugPath = outputDir + "/roads_debug.png";
     std::string svgPath = outputDir + "/roads.svg";
 
-    if (!saveRoadsJson(jsonPath, network)) {
-        return 1;
-    }
-
-    if (!saveRoadsBinary(binPath, network)) {
+    if (!saveRoadsGeoJson(geojsonPath, network)) {
         return 1;
     }
 
@@ -630,8 +585,7 @@ int main(int argc, char* argv[]) {
 
     SDL_Log("Road generation complete!");
     SDL_Log("Output files:");
-    SDL_Log("  %s", jsonPath.c_str());
-    SDL_Log("  %s", binPath.c_str());
+    SDL_Log("  %s", geojsonPath.c_str());
     SDL_Log("  %s", debugPath.c_str());
     SDL_Log("  %s", svgPath.c_str());
     if (useColonization) {

@@ -385,80 +385,94 @@ void write_terrain_traced_rivers_png(
     }
 }
 
-// Binary output functions for biome_preprocess compatibility
+// Standard format output functions for biome_preprocess compatibility
 
-void write_flow_accumulation_bin(const std::string& filename, const D8Result& d8) {
+#define TINYEXR_IMPLEMENTATION
+#include <tinyexr.h>
+
+void write_flow_accumulation_exr(const std::string& filename, const D8Result& d8) {
     // Find max for normalization
     uint32_t max_acc = 1;
     for (const auto& acc : d8.flow_accumulation) {
         max_acc = std::max(max_acc, acc);
     }
 
-    // Write header: width, height as uint32_t
-    std::ofstream file(filename, std::ios::binary);
-    if (!file.is_open()) {
-        throw std::runtime_error("Cannot open file for writing: " + filename);
-    }
-
-    uint32_t width = static_cast<uint32_t>(d8.width);
-    uint32_t height = static_cast<uint32_t>(d8.height);
-    file.write(reinterpret_cast<const char*>(&width), sizeof(width));
-    file.write(reinterpret_cast<const char*>(&height), sizeof(height));
-
-    // Write normalized flow accumulation as floats [0,1]
+    // Create normalized float data [0,1]
     std::vector<float> normalized(d8.flow_accumulation.size());
     for (size_t i = 0; i < d8.flow_accumulation.size(); ++i) {
         normalized[i] = static_cast<float>(d8.flow_accumulation[i]) / static_cast<float>(max_acc);
     }
-    file.write(reinterpret_cast<const char*>(normalized.data()), normalized.size() * sizeof(float));
 
-    if (!file.good()) {
-        throw std::runtime_error("Error writing to file: " + filename);
+    // Write EXR file using tinyexr
+    EXRHeader header;
+    InitEXRHeader(&header);
+
+    EXRImage image;
+    InitEXRImage(&image);
+
+    image.num_channels = 1;
+    image.width = d8.width;
+    image.height = d8.height;
+
+    float* image_ptr = normalized.data();
+    image.images = reinterpret_cast<unsigned char**>(&image_ptr);
+
+    header.num_channels = 1;
+    header.channels = static_cast<EXRChannelInfo*>(malloc(sizeof(EXRChannelInfo)));
+    strncpy(header.channels[0].name, "Y", 255);
+    header.channels[0].name[1] = '\0';
+
+    header.pixel_types = static_cast<int*>(malloc(sizeof(int)));
+    header.requested_pixel_types = static_cast<int*>(malloc(sizeof(int)));
+    header.pixel_types[0] = TINYEXR_PIXELTYPE_FLOAT;
+    header.requested_pixel_types[0] = TINYEXR_PIXELTYPE_FLOAT;
+
+    const char* err = nullptr;
+    int ret = SaveEXRImageToFile(&image, &header, filename.c_str(), &err);
+
+    free(header.channels);
+    free(header.pixel_types);
+    free(header.requested_pixel_types);
+
+    if (ret != TINYEXR_SUCCESS) {
+        std::string error_msg = err ? err : "Unknown error";
+        FreeEXRErrorMessage(err);
+        throw std::runtime_error("Cannot write EXR file: " + filename + " - " + error_msg);
     }
 }
 
-void write_flow_direction_bin(const std::string& filename, const D8Result& d8) {
-    std::ofstream file(filename, std::ios::binary);
-    if (!file.is_open()) {
-        throw std::runtime_error("Cannot open file for writing: " + filename);
-    }
+void write_flow_direction_png(const std::string& filename, const D8Result& d8) {
+    // Flow direction values: 0-7 for 8 directions, 8 = no flow (stored as 255)
+    std::vector<unsigned char> image(d8.width * d8.height);
 
-    uint32_t width = static_cast<uint32_t>(d8.width);
-    uint32_t height = static_cast<uint32_t>(d8.height);
-    file.write(reinterpret_cast<const char*>(&width), sizeof(width));
-    file.write(reinterpret_cast<const char*>(&height), sizeof(height));
-
-    // Convert uint8_t to int8_t (8 = no flow becomes -1)
-    std::vector<int8_t> directions(d8.flow_direction.size());
     for (size_t i = 0; i < d8.flow_direction.size(); ++i) {
         if (d8.flow_direction[i] == 8) {
-            directions[i] = -1;  // No flow / pit
+            image[i] = 255;  // No flow / pit marker
         } else {
-            directions[i] = static_cast<int8_t>(d8.flow_direction[i]);
+            image[i] = d8.flow_direction[i];
         }
     }
-    file.write(reinterpret_cast<const char*>(directions.data()), directions.size() * sizeof(int8_t));
 
-    if (!file.good()) {
-        throw std::runtime_error("Error writing to file: " + filename);
+    unsigned error = lodepng::encode(filename, image, d8.width, d8.height, LCT_GREY, 8);
+    if (error) {
+        throw std::runtime_error("Cannot write file: " + filename + " - " + lodepng_error_text(error));
     }
 }
 
-void write_watershed_labels_bin(const std::string& filename, const WatershedResult& watersheds) {
-    std::ofstream file(filename, std::ios::binary);
-    if (!file.is_open()) {
-        throw std::runtime_error("Cannot open file for writing: " + filename);
+void write_watershed_labels_png(const std::string& filename, const WatershedResult& watersheds) {
+    // Encode uint32_t labels as RGBA (R=low byte, G, B, A=high byte)
+    std::vector<unsigned char> image(watersheds.width * watersheds.height * 4);
+
+    for (size_t i = 0; i < watersheds.labels.size(); ++i) {
+        uint32_t label = watersheds.labels[i];
+        image[i * 4 + 0] = static_cast<unsigned char>(label & 0xFF);
+        image[i * 4 + 1] = static_cast<unsigned char>((label >> 8) & 0xFF);
+        image[i * 4 + 2] = static_cast<unsigned char>((label >> 16) & 0xFF);
+        image[i * 4 + 3] = static_cast<unsigned char>((label >> 24) & 0xFF);
     }
 
-    uint32_t width = static_cast<uint32_t>(watersheds.width);
-    uint32_t height = static_cast<uint32_t>(watersheds.height);
-    file.write(reinterpret_cast<const char*>(&width), sizeof(width));
-    file.write(reinterpret_cast<const char*>(&height), sizeof(height));
-
-    file.write(reinterpret_cast<const char*>(watersheds.labels.data()),
-               watersheds.labels.size() * sizeof(uint32_t));
-
-    if (!file.good()) {
-        throw std::runtime_error("Error writing to file: " + filename);
+    unsigned error = lodepng::encode(filename, image, watersheds.width, watersheds.height, LCT_RGBA, 8);
+    if (error) {
+        throw std::runtime_error("Cannot write file: " + filename + " - " + lodepng_error_text(error));
     }
 }

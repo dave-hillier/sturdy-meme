@@ -7,6 +7,9 @@
 #include <random>
 #include <nlohmann/json.hpp>
 #include <stb_image.h>
+#include <lodepng.h>
+#define TINYEXR_IMPLEMENTATION
+#include <tinyexr.h>
 
 // Settlement SVG generation (reuse from biome_preprocess)
 #include "SettlementSVG.h"
@@ -92,41 +95,62 @@ bool SettlementGenerator::loadHeightmap(const std::string& path, ProgressCallbac
 }
 
 bool SettlementGenerator::loadErosionData(const std::string& cacheDir, ProgressCallback) {
-    std::string flowAccPath = cacheDir + "/flow_accumulation.bin";
-    std::string flowDirPath = cacheDir + "/flow_direction.bin";
+    std::string flowAccPath = cacheDir + "/flow_accumulation.exr";
+    std::string flowDirPath = cacheDir + "/flow_direction.png";
 
-    // Load flow accumulation
+    // Load flow accumulation from EXR
     {
-        std::ifstream file(flowAccPath, std::ios::binary);
-        if (!file) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load flow accumulation: %s", flowAccPath.c_str());
+        float* exrData = nullptr;
+        int width, height;
+        const char* err = nullptr;
+
+        int ret = LoadEXR(&exrData, &width, &height, flowAccPath.c_str(), &err);
+        if (ret != TINYEXR_SUCCESS || exrData == nullptr) {
+            if (err) {
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load flow accumulation EXR: %s - %s",
+                             flowAccPath.c_str(), err);
+                FreeEXRErrorMessage(err);
+            } else {
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load flow accumulation EXR: %s", flowAccPath.c_str());
+            }
             return false;
         }
 
-        uint32_t w, h;
-        file.read(reinterpret_cast<char*>(&w), sizeof(w));
-        file.read(reinterpret_cast<char*>(&h), sizeof(h));
+        flowMapWidth = static_cast<uint32_t>(width);
+        flowMapHeight = static_cast<uint32_t>(height);
+        flowAccumulation.resize(flowMapWidth * flowMapHeight);
 
-        flowMapWidth = w;
-        flowMapHeight = h;
-        flowAccumulation.resize(w * h);
-        file.read(reinterpret_cast<char*>(flowAccumulation.data()), flowAccumulation.size() * sizeof(float));
+        for (uint32_t i = 0; i < flowMapWidth * flowMapHeight; i++) {
+            flowAccumulation[i] = exrData[i];
+        }
+
+        free(exrData);
+        SDL_Log("Loaded flow accumulation from EXR: %ux%u", flowMapWidth, flowMapHeight);
     }
 
-    // Load flow direction
+    // Load flow direction from PNG
     {
-        std::ifstream file(flowDirPath, std::ios::binary);
-        if (!file) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load flow direction: %s", flowDirPath.c_str());
+        std::vector<unsigned char> pngData;
+        unsigned width, height;
+        unsigned error = lodepng::decode(pngData, width, height, flowDirPath, LCT_GREY, 8);
+
+        if (error != 0) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load flow direction PNG: %s - %s",
+                         flowDirPath.c_str(), lodepng_error_text(error));
             return false;
         }
 
-        uint32_t w, h;
-        file.read(reinterpret_cast<char*>(&w), sizeof(w));
-        file.read(reinterpret_cast<char*>(&h), sizeof(h));
+        flowDirection.resize(width * height);
+        for (size_t i = 0; i < width * height; i++) {
+            // 255 = no flow (stored as -1), 0-7 = valid directions
+            if (pngData[i] == 255) {
+                flowDirection[i] = -1;
+            } else {
+                flowDirection[i] = static_cast<int8_t>(pngData[i]);
+            }
+        }
 
-        flowDirection.resize(w * h);
-        file.read(reinterpret_cast<char*>(flowDirection.data()), flowDirection.size());
+        SDL_Log("Loaded flow direction from PNG: %ux%u", width, height);
     }
 
     SDL_Log("Loaded erosion data: %ux%u", flowMapWidth, flowMapHeight);

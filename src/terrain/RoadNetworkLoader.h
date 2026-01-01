@@ -1,7 +1,7 @@
 #pragma once
 
 // Road network loader for runtime use
-// Loads pre-generated road data from binary format
+// Loads pre-generated road data from GeoJSON format
 
 #include <glm/glm.hpp>
 #include <vector>
@@ -62,11 +62,8 @@ public:
     RoadNetworkLoader() = default;
     ~RoadNetworkLoader() = default;
 
-    // Load roads from binary file
-    bool loadFromBinary(const std::string& path);
-
-    // Load roads from JSON file (fallback)
-    bool loadFromJson(const std::string& path);
+    // Load roads from GeoJSON file
+    bool loadFromGeoJson(const std::string& path);
 
     // Get the loaded road network
     const RoadNetwork& getRoadNetwork() const { return roadNetwork; }

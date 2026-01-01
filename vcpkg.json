@@ -43,6 +43,7 @@
     "openfbx",
     "lodepng",
     "nlohmann-json",
+    "tinyexr",
     "miniz",
     "libarchive",
     "entt"

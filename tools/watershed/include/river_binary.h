@@ -6,7 +6,7 @@
 #include <cstdint>
 
 // Configuration for world-space coordinate conversion
-struct RiverBinaryConfig {
+struct RiverGeoJsonConfig {
     float terrainSize = 16384.0f;    // World size in meters
     float minAltitude = 0.0f;        // Minimum altitude for heightmap 0
     float maxAltitude = 200.0f;      // Maximum altitude for heightmap 65535
@@ -14,22 +14,16 @@ struct RiverBinaryConfig {
     float maxRiverWidth = 30.0f;     // Maximum river width in meters
 };
 
-// Write rivers in binary format compatible with ErosionDataLoader
-// Format:
-//   uint32_t numRivers
-//   For each river:
-//     uint32_t numPoints
-//     glm::vec3[numPoints] controlPoints (x, height, z) world-space
-//     float[numPoints] widths
-//     float totalFlow
-bool write_rivers_binary(
+// Write rivers in GeoJSON format compatible with ErosionDataLoader
+// Uses LineString features with properties for width and flow
+bool write_rivers_geojson(
     const std::string& filename,
     const std::vector<River>& rivers,
     const ElevationGrid& elevation,
     int processing_width,
     int processing_height,
-    const RiverBinaryConfig& config
+    const RiverGeoJsonConfig& config
 );
 
-// Write empty lakes.dat file (required by ErosionDataLoader)
-bool write_lakes_binary(const std::string& filename);
+// Write empty lakes.geojson file (required by ErosionDataLoader)
+bool write_lakes_geojson(const std::string& filename);

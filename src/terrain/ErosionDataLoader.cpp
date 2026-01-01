@@ -1,22 +1,24 @@
 #include "ErosionDataLoader.h"
 #include <SDL3/SDL_log.h>
+#include <nlohmann/json.hpp>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 
 namespace fs = std::filesystem;
+using json = nlohmann::json;
 
 // Cache file paths
 std::string ErosionDataLoader::getFlowMapPath(const std::string& cacheDir) {
-    return cacheDir + "/flow_accumulation.raw";
+    return cacheDir + "/flow_accumulation.exr";
 }
 
 std::string ErosionDataLoader::getRiversPath(const std::string& cacheDir) {
-    return cacheDir + "/rivers.dat";
+    return cacheDir + "/rivers.geojson";
 }
 
 std::string ErosionDataLoader::getLakesPath(const std::string& cacheDir) {
-    return cacheDir + "/lakes.dat";
+    return cacheDir + "/lakes.geojson";
 }
 
 std::string ErosionDataLoader::getMetadataPath(const std::string& cacheDir) {
@@ -84,71 +86,115 @@ bool ErosionDataLoader::loadAndValidateMetadata(const ErosionLoadConfig& config)
 }
 
 bool ErosionDataLoader::loadFromCache(const ErosionLoadConfig& config) {
-    uint32_t flowWidth = 0;
-    uint32_t flowHeight = 0;
-
-    // Load flow map and direction (optional for visualization-only mode)
+    // Load rivers from GeoJSON
     {
-        std::ifstream file(getFlowMapPath(config.cacheDirectory), std::ios::binary);
-        if (file.is_open()) {
-            file.read(reinterpret_cast<char*>(&flowWidth), sizeof(flowWidth));
-            file.read(reinterpret_cast<char*>(&flowHeight), sizeof(flowHeight));
+        std::ifstream file(getRiversPath(config.cacheDirectory));
+        if (!file.is_open()) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                "ErosionDataLoader: Failed to open rivers GeoJSON: %s",
+                getRiversPath(config.cacheDirectory).c_str());
+            return false;
+        }
 
-            waterData.flowAccumulation.resize(flowWidth * flowHeight);
-            file.read(reinterpret_cast<char*>(waterData.flowAccumulation.data()),
-                      waterData.flowAccumulation.size() * sizeof(float));
+        try {
+            json j;
+            file >> j;
 
-            // Try to load flow direction (may not exist in older caches)
-            waterData.flowDirection.resize(flowWidth * flowHeight, -1);
-            file.read(reinterpret_cast<char*>(waterData.flowDirection.data()),
-                      waterData.flowDirection.size() * sizeof(int8_t));
+            waterData.rivers.clear();
 
-            waterData.flowMapWidth = flowWidth;
-            waterData.flowMapHeight = flowHeight;
-        } else {
-            SDL_Log("Erosion: flow map not found, visualization-only mode");
+            if (j.contains("features")) {
+                for (const auto& feature : j["features"]) {
+                    if (feature["geometry"]["type"] != "LineString") continue;
+
+                    RiverData river;
+
+                    // Read coordinates (each point is [x, z, y] where y is altitude)
+                    const auto& coords = feature["geometry"]["coordinates"];
+                    for (const auto& coord : coords) {
+                        glm::vec3 point;
+                        point.x = coord[0].get<float>();  // worldX
+                        point.z = coord[1].get<float>();  // worldZ
+                        point.y = coord[2].get<float>();  // worldY (altitude)
+                        river.controlPoints.push_back(point);
+                    }
+
+                    // Read properties
+                    const auto& props = feature["properties"];
+                    river.totalFlow = props.value("totalFlow", 0.0f);
+
+                    // Read per-point widths if available
+                    if (props.contains("widths")) {
+                        for (const auto& w : props["widths"]) {
+                            river.widths.push_back(w.get<float>());
+                        }
+                    } else {
+                        // Fall back to single width for all points
+                        float width = props.value("width", 5.0f);
+                        river.widths.resize(river.controlPoints.size(), width);
+                    }
+
+                    waterData.rivers.push_back(std::move(river));
+                }
+            }
+        } catch (const std::exception& e) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                "ErosionDataLoader: Failed to parse rivers GeoJSON: %s", e.what());
+            return false;
         }
     }
 
-    // Load rivers
+    // Load lakes from GeoJSON
     {
-        std::ifstream file(getRiversPath(config.cacheDirectory), std::ios::binary);
-        if (!file.is_open()) return false;
-
-        uint32_t numRivers;
-        file.read(reinterpret_cast<char*>(&numRivers), sizeof(numRivers));
-
-        waterData.rivers.resize(numRivers);
-        for (auto& river : waterData.rivers) {
-            uint32_t numPoints;
-            file.read(reinterpret_cast<char*>(&numPoints), sizeof(numPoints));
-
-            river.controlPoints.resize(numPoints);
-            river.widths.resize(numPoints);
-
-            file.read(reinterpret_cast<char*>(river.controlPoints.data()),
-                      numPoints * sizeof(glm::vec3));
-            file.read(reinterpret_cast<char*>(river.widths.data()),
-                      numPoints * sizeof(float));
-            file.read(reinterpret_cast<char*>(&river.totalFlow), sizeof(float));
+        std::ifstream file(getLakesPath(config.cacheDirectory));
+        if (!file.is_open()) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                "ErosionDataLoader: Failed to open lakes GeoJSON: %s",
+                getLakesPath(config.cacheDirectory).c_str());
+            return false;
         }
-    }
 
-    // Load lakes
-    {
-        std::ifstream file(getLakesPath(config.cacheDirectory), std::ios::binary);
-        if (!file.is_open()) return false;
+        try {
+            json j;
+            file >> j;
 
-        uint32_t numLakes;
-        file.read(reinterpret_cast<char*>(&numLakes), sizeof(numLakes));
+            waterData.lakes.clear();
 
-        waterData.lakes.resize(numLakes);
-        for (auto& lake : waterData.lakes) {
-            file.read(reinterpret_cast<char*>(&lake.position), sizeof(glm::vec2));
-            file.read(reinterpret_cast<char*>(&lake.waterLevel), sizeof(float));
-            file.read(reinterpret_cast<char*>(&lake.radius), sizeof(float));
-            file.read(reinterpret_cast<char*>(&lake.area), sizeof(float));
-            file.read(reinterpret_cast<char*>(&lake.depth), sizeof(float));
+            if (j.contains("features")) {
+                for (const auto& feature : j["features"]) {
+                    LakeData lake;
+
+                    // Read geometry (Point or Polygon centroid)
+                    const auto& geom = feature["geometry"];
+                    if (geom["type"] == "Point") {
+                        const auto& coord = geom["coordinates"];
+                        lake.position.x = coord[0].get<float>();
+                        lake.position.y = coord[1].get<float>();
+                    } else if (geom["type"] == "Polygon") {
+                        // Calculate centroid from polygon
+                        const auto& coords = geom["coordinates"][0];  // outer ring
+                        float sumX = 0, sumY = 0;
+                        for (const auto& coord : coords) {
+                            sumX += coord[0].get<float>();
+                            sumY += coord[1].get<float>();
+                        }
+                        lake.position.x = sumX / coords.size();
+                        lake.position.y = sumY / coords.size();
+                    }
+
+                    // Read properties
+                    const auto& props = feature["properties"];
+                    lake.waterLevel = props.value("waterLevel", 0.0f);
+                    lake.radius = props.value("radius", 10.0f);
+                    lake.area = props.value("area", 0.0f);
+                    lake.depth = props.value("depth", 1.0f);
+
+                    waterData.lakes.push_back(lake);
+                }
+            }
+        } catch (const std::exception& e) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                "ErosionDataLoader: Failed to parse lakes GeoJSON: %s", e.what());
+            return false;
         }
     }
 

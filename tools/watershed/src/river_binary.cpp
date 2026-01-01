@@ -1,23 +1,20 @@
 #include "river_binary.h"
 #include <SDL3/SDL_log.h>
+#include <nlohmann/json.hpp>
 #include <fstream>
 #include <cmath>
 #include <algorithm>
 
-bool write_rivers_binary(
+using json = nlohmann::json;
+
+bool write_rivers_geojson(
     const std::string& filename,
     const std::vector<River>& rivers,
     const ElevationGrid& elevation,
     int processing_width,
     int processing_height,
-    const RiverBinaryConfig& config
+    const RiverGeoJsonConfig& config
 ) {
-    std::ofstream file(filename, std::ios::binary);
-    if (!file.is_open()) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create rivers binary file: %s", filename.c_str());
-        return false;
-    }
-
     // Find max accumulation for width scaling
     uint32_t global_max_acc = 0;
     for (const auto& river : rivers) {
@@ -35,25 +32,36 @@ bool write_rivers_binary(
     // Height conversion: elevation is 0-65535, maps to minAltitude-maxAltitude
     double height_range = config.maxAltitude - config.minAltitude;
 
-    // Write number of rivers
-    uint32_t numRivers = static_cast<uint32_t>(rivers.size());
-    file.write(reinterpret_cast<const char*>(&numRivers), sizeof(numRivers));
+    // Build GeoJSON FeatureCollection
+    json featureCollection;
+    featureCollection["type"] = "FeatureCollection";
+    featureCollection["properties"] = {
+        {"terrainSize", config.terrainSize},
+        {"minAltitude", config.minAltitude},
+        {"maxAltitude", config.maxAltitude}
+    };
 
+    json features = json::array();
     size_t totalPoints = 0;
 
     for (const auto& river : rivers) {
-        uint32_t numPoints = static_cast<uint32_t>(river.points.size());
-        file.write(reinterpret_cast<const char*>(&numPoints), sizeof(numPoints));
+        // Calculate river width based on log-scaled accumulation
+        double log_acc = std::log(static_cast<double>(river.max_accumulation) + 1.0);
+        double width_factor = log_acc / log_max;
+        float riverWidth = static_cast<float>(
+            config.minRiverWidth + (config.maxRiverWidth - config.minRiverWidth) * width_factor
+        );
 
-        // Write control points (x, height, z) as glm::vec3
+        // Build coordinate array with 3D points [x, z, y] (GeoJSON uses [lon, lat, alt])
+        json coordinates = json::array();
+        json widths = json::array();
+
         for (const auto& pt : river.points) {
             // Convert from processing pixel coords to world coords
-            // pt.x and pt.y are in [0, processing_width/height] (pixel coords with 0.5 offset)
             float worldX = static_cast<float>(pt.x * scale_x - offset);
             float worldZ = static_cast<float>(pt.y * scale_z - offset);
 
             // Sample height from elevation grid
-            // Need to map processing coords back to elevation grid coords
             int elev_x = static_cast<int>(pt.x * elevation.width / processing_width);
             int elev_y = static_cast<int>(pt.y * elevation.height / processing_height);
             elev_x = std::clamp(elev_x, 0, elevation.width - 1);
@@ -63,47 +71,68 @@ bool write_rivers_binary(
             float normalizedHeight = static_cast<float>(elev_val) / 65535.0f;
             float worldY = static_cast<float>(config.minAltitude + normalizedHeight * height_range);
 
-            file.write(reinterpret_cast<const char*>(&worldX), sizeof(float));
-            file.write(reinterpret_cast<const char*>(&worldY), sizeof(float));
-            file.write(reinterpret_cast<const char*>(&worldZ), sizeof(float));
+            // GeoJSON coordinates: [x, z, y] where y is altitude
+            coordinates.push_back({worldX, worldZ, worldY});
+            widths.push_back(riverWidth);
         }
 
-        // Write widths for each point
-        // Width based on log-scaled accumulation, like SVG stroke width
-        double log_acc = std::log(static_cast<double>(river.max_accumulation) + 1.0);
-        double width_factor = log_acc / log_max;
-        float riverWidth = static_cast<float>(
-            config.minRiverWidth + (config.maxRiverWidth - config.minRiverWidth) * width_factor
-        );
+        json feature;
+        feature["type"] = "Feature";
+        feature["geometry"] = {
+            {"type", "LineString"},
+            {"coordinates", coordinates}
+        };
+        feature["properties"] = {
+            {"totalFlow", static_cast<float>(river.max_accumulation)},
+            {"width", riverWidth},
+            {"widths", widths}
+        };
 
-        for (size_t i = 0; i < river.points.size(); i++) {
-            file.write(reinterpret_cast<const char*>(&riverWidth), sizeof(float));
-        }
-
-        // Write total flow (use max_accumulation as proxy)
-        float totalFlow = static_cast<float>(river.max_accumulation);
-        file.write(reinterpret_cast<const char*>(&totalFlow), sizeof(float));
-
+        features.push_back(feature);
         totalPoints += river.points.size();
     }
 
-    SDL_Log("Saved rivers binary: %s (%zu rivers, %zu total points, %lld bytes)",
-            filename.c_str(), rivers.size(), totalPoints, static_cast<long long>(file.tellp()));
+    featureCollection["features"] = features;
+
+    // Write to file with pretty formatting
+    std::ofstream file(filename);
+    if (!file.is_open()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create rivers GeoJSON file: %s", filename.c_str());
+        return false;
+    }
+
+    file << featureCollection.dump(2);
+
+    if (!file.good()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Error writing to file: %s", filename.c_str());
+        return false;
+    }
+
+    SDL_Log("Saved rivers GeoJSON: %s (%zu rivers, %zu total points)",
+            filename.c_str(), rivers.size(), totalPoints);
 
     return true;
 }
 
-bool write_lakes_binary(const std::string& filename) {
-    std::ofstream file(filename, std::ios::binary);
+bool write_lakes_geojson(const std::string& filename) {
+    // Create empty FeatureCollection for lakes
+    json featureCollection;
+    featureCollection["type"] = "FeatureCollection";
+    featureCollection["features"] = json::array();
+
+    std::ofstream file(filename);
     if (!file.is_open()) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create lakes binary file: %s", filename.c_str());
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create lakes GeoJSON file: %s", filename.c_str());
         return false;
     }
 
-    // Write 0 lakes (empty placeholder)
-    uint32_t numLakes = 0;
-    file.write(reinterpret_cast<const char*>(&numLakes), sizeof(numLakes));
+    file << featureCollection.dump(2);
 
-    SDL_Log("Saved lakes binary: %s (0 lakes, placeholder)", filename.c_str());
+    if (!file.good()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Error writing to file: %s", filename.c_str());
+        return false;
+    }
+
+    SDL_Log("Saved lakes GeoJSON: %s (0 lakes, placeholder)", filename.c_str());
     return true;
 }

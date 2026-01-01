@@ -1147,19 +1147,13 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     {
         // Try roads subdirectory first (standard layout), then root terrain_data
         std::string roadsSubdir = terrainDataPath + "/roads";
-        std::string roadsPath = roadsSubdir + "/roads.bin";
-        std::string roadsJsonPath = roadsSubdir + "/roads.json";
-        std::string roadsPathAlt = terrainDataPath + "/roads.bin";
-        std::string roadsJsonPathAlt = terrainDataPath + "/roads.json";
+        std::string roadsPath = roadsSubdir + "/roads.geojson";
+        std::string roadsPathAlt = terrainDataPath + "/roads.geojson";
 
-        if (systems_->roadData().loadFromBinary(roadsPath)) {
+        if (systems_->roadData().loadFromGeoJson(roadsPath)) {
             SDL_Log("Loaded road network from %s", roadsPath.c_str());
-        } else if (systems_->roadData().loadFromJson(roadsJsonPath)) {
-            SDL_Log("Loaded road network from %s", roadsJsonPath.c_str());
-        } else if (systems_->roadData().loadFromBinary(roadsPathAlt)) {
+        } else if (systems_->roadData().loadFromGeoJson(roadsPathAlt)) {
             SDL_Log("Loaded road network from %s", roadsPathAlt.c_str());
-        } else if (systems_->roadData().loadFromJson(roadsJsonPathAlt)) {
-            SDL_Log("Loaded road network from %s", roadsJsonPathAlt.c_str());
         } else {
             SDL_Log("No road network data found (checked %s and %s)", roadsPath.c_str(), roadsPathAlt.c_str());
         }

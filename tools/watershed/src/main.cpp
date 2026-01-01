@@ -85,8 +85,8 @@ bool isWatershedOutputUpToDate(const WatershedBuildConfig& config) {
 
     // Check all output files exist
     std::vector<std::string> outputs = {
-        "rivers.svg", "flow.png", "flow_accumulation.bin",
-        "flow_direction.bin", "watershed_labels.bin", "rivers.dat", "lakes.dat"
+        "rivers.svg", "flow.png", "flow_accumulation.exr",
+        "flow_direction.png", "watershed_labels.png", "rivers.geojson", "lakes.geojson"
     };
     for (const auto& output : outputs) {
         std::string path = config.outputDir + "/" + output;
@@ -152,7 +152,7 @@ void print_usage(const char* program) {
         "The input should be a 16-bit grayscale PNG representing elevation data.\n"
         "Output files are written to a directory derived from the input filename.\n"
         "River SVG coordinates are scaled back to original image dimensions.\n"
-        "Binary output (rivers.dat, lakes.dat) uses world-space coordinates.\n",
+        "GeoJSON output (rivers.geojson, lakes.geojson) uses world-space coordinates.\n",
         program);
 }
 
@@ -169,11 +169,11 @@ int main(int argc, char* argv[]) {
     uint32_t min_area = 0;
     int resolution = 1024;  // Default processing resolution
 
-    // Binary output config (world-space conversion)
-    RiverBinaryConfig binary_config;
-    binary_config.terrainSize = 16384.0f;
-    binary_config.minAltitude = 0.0f;
-    binary_config.maxAltitude = 200.0f;
+    // GeoJSON output config (world-space conversion)
+    RiverGeoJsonConfig geojson_config;
+    geojson_config.terrainSize = 16384.0f;
+    geojson_config.minAltitude = 0.0f;
+    geojson_config.maxAltitude = 200.0f;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -216,19 +216,19 @@ int main(int argc, char* argv[]) {
                 SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Error: %s requires an argument", arg.c_str());
                 return 1;
             }
-            binary_config.terrainSize = std::stof(argv[++i]);
+            geojson_config.terrainSize = std::stof(argv[++i]);
         } else if (arg == "--min-altitude") {
             if (i + 1 >= argc) {
                 SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Error: %s requires an argument", arg.c_str());
                 return 1;
             }
-            binary_config.minAltitude = std::stof(argv[++i]);
+            geojson_config.minAltitude = std::stof(argv[++i]);
         } else if (arg == "--max-altitude") {
             if (i + 1 >= argc) {
                 SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Error: %s requires an argument", arg.c_str());
                 return 1;
             }
-            binary_config.maxAltitude = std::stof(argv[++i]);
+            geojson_config.maxAltitude = std::stof(argv[++i]);
         } else if (arg[0] == '-') {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Error: Unknown option: %s", arg.c_str());
             print_usage(argv[0]);
@@ -255,9 +255,9 @@ int main(int argc, char* argv[]) {
     buildConfig.riverThreshold = river_threshold;
     buildConfig.seaLevel = sea_level;
     buildConfig.resolution = resolution;
-    buildConfig.terrainSize = binary_config.terrainSize;
-    buildConfig.minAltitude = binary_config.minAltitude;
-    buildConfig.maxAltitude = binary_config.maxAltitude;
+    buildConfig.terrainSize = geojson_config.terrainSize;
+    buildConfig.minAltitude = geojson_config.minAltitude;
+    buildConfig.maxAltitude = geojson_config.maxAltitude;
 
     if (isWatershedOutputUpToDate(buildConfig)) {
         SDL_Log("Watershed outputs up to date - skipping");
@@ -331,29 +331,29 @@ int main(int argc, char* argv[]) {
         SDL_Log("Writing watershed map to: %s", output_file.c_str());
         write_watershed_png(output_file, watersheds);
 
-        // Write binary files for biome_preprocess compatibility
-        std::string flow_acc_bin = (fs::path(output_dir) / "flow_accumulation.bin").string();
-        SDL_Log("Writing flow accumulation binary to: %s", flow_acc_bin.c_str());
-        write_flow_accumulation_bin(flow_acc_bin, d8);
+        // Write standard format files for biome_preprocess compatibility
+        std::string flow_acc_exr = (fs::path(output_dir) / "flow_accumulation.exr").string();
+        SDL_Log("Writing flow accumulation EXR to: %s", flow_acc_exr.c_str());
+        write_flow_accumulation_exr(flow_acc_exr, d8);
 
-        std::string flow_dir_bin = (fs::path(output_dir) / "flow_direction.bin").string();
-        SDL_Log("Writing flow direction binary to: %s", flow_dir_bin.c_str());
-        write_flow_direction_bin(flow_dir_bin, d8);
+        std::string flow_dir_png = (fs::path(output_dir) / "flow_direction.png").string();
+        SDL_Log("Writing flow direction PNG to: %s", flow_dir_png.c_str());
+        write_flow_direction_png(flow_dir_png, d8);
 
-        std::string watershed_bin = (fs::path(output_dir) / "watershed_labels.bin").string();
-        SDL_Log("Writing watershed labels binary to: %s", watershed_bin.c_str());
-        write_watershed_labels_bin(watershed_bin, watersheds);
+        std::string watershed_png = (fs::path(output_dir) / "watershed_labels.png").string();
+        SDL_Log("Writing watershed labels PNG to: %s", watershed_png.c_str());
+        write_watershed_labels_png(watershed_png, watersheds);
 
-        // Write binary files for engine runtime (ErosionDataLoader)
-        std::string rivers_dat = (fs::path(output_dir) / "rivers.dat").string();
-        SDL_Log("Writing rivers binary to: %s (terrain: %.0fm, altitude: %.0f-%.0fm)",
-                rivers_dat.c_str(), binary_config.terrainSize,
-                binary_config.minAltitude, binary_config.maxAltitude);
-        write_rivers_binary(rivers_dat, rivers, full_elevation, d8.width, d8.height, binary_config);
+        // Write GeoJSON files for engine runtime (ErosionDataLoader)
+        std::string rivers_geojson = (fs::path(output_dir) / "rivers.geojson").string();
+        SDL_Log("Writing rivers GeoJSON to: %s (terrain: %.0fm, altitude: %.0f-%.0fm)",
+                rivers_geojson.c_str(), geojson_config.terrainSize,
+                geojson_config.minAltitude, geojson_config.maxAltitude);
+        write_rivers_geojson(rivers_geojson, rivers, full_elevation, d8.width, d8.height, geojson_config);
 
-        std::string lakes_dat = (fs::path(output_dir) / "lakes.dat").string();
-        SDL_Log("Writing lakes binary to: %s", lakes_dat.c_str());
-        write_lakes_binary(lakes_dat);
+        std::string lakes_geojson = (fs::path(output_dir) / "lakes.geojson").string();
+        SDL_Log("Writing lakes GeoJSON to: %s", lakes_geojson.c_str());
+        write_lakes_geojson(lakes_geojson);
 
         // Save build stamp for future runs
         saveWatershedBuildStamp(buildConfig);

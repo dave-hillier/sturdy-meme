@@ -2,6 +2,8 @@
 #include <SDL3/SDL_log.h>
 #include <stb_image.h>
 #include <lodepng.h>
+#define TINYEXR_IMPLEMENTATION
+#include <tinyexr.h>
 #include <fstream>
 #include <queue>
 #include <algorithm>
@@ -138,14 +140,76 @@ bool BiomeGenerator::loadHeightmap(const std::string& path, ProgressCallback cal
 bool BiomeGenerator::loadErosionData(const std::string& cacheDir, ProgressCallback callback) {
     if (callback) callback(0.05f, "Loading erosion data...");
 
-    // Try to load flow accumulation binary data
-    std::string flowPath = cacheDir + "/flow_accumulation.bin";
-    std::string dirPath = cacheDir + "/flow_direction.bin";
+    // Try to load flow accumulation from EXR and flow direction from PNG
+    std::string flowPath = cacheDir + "/flow_accumulation.exr";
+    std::string dirPath = cacheDir + "/flow_direction.png";
 
-    std::ifstream flowFile(flowPath, std::ios::binary);
-    std::ifstream dirFile(dirPath, std::ios::binary);
+    bool hasFlowAcc = false;
+    bool hasFlowDir = false;
 
-    if (!flowFile.is_open() || !dirFile.is_open()) {
+    // Load flow accumulation from EXR
+    {
+        float* exrData = nullptr;
+        int width, height;
+        const char* err = nullptr;
+
+        int ret = LoadEXR(&exrData, &width, &height, flowPath.c_str(), &err);
+        if (ret == TINYEXR_SUCCESS && exrData != nullptr) {
+            flowMapWidth = static_cast<uint32_t>(width);
+            flowMapHeight = static_cast<uint32_t>(height);
+            flowAccumulation.resize(flowMapWidth * flowMapHeight);
+
+            // Copy data (EXR stores in scanline order, same as our format)
+            for (uint32_t i = 0; i < flowMapWidth * flowMapHeight; i++) {
+                flowAccumulation[i] = exrData[i];
+            }
+
+            free(exrData);
+            hasFlowAcc = true;
+            SDL_Log("Loaded flow accumulation from EXR: %ux%u", flowMapWidth, flowMapHeight);
+        } else {
+            if (err) {
+                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to load EXR: %s", err);
+                FreeEXRErrorMessage(err);
+            }
+        }
+    }
+
+    // Load flow direction from PNG
+    {
+        std::vector<unsigned char> pngData;
+        unsigned width, height;
+        unsigned error = lodepng::decode(pngData, width, height, dirPath, LCT_GREY, 8);
+
+        if (error == 0) {
+            uint32_t dirWidth = width;
+            uint32_t dirHeight = height;
+            flowDirection.resize(dirWidth * dirHeight);
+
+            for (uint32_t i = 0; i < dirWidth * dirHeight; i++) {
+                // 255 = no flow (stored as -1), 0-7 = valid directions
+                if (pngData[i] == 255) {
+                    flowDirection[i] = -1;
+                } else {
+                    flowDirection[i] = static_cast<int8_t>(pngData[i]);
+                }
+            }
+
+            hasFlowDir = true;
+            SDL_Log("Loaded flow direction from PNG: %ux%u", dirWidth, dirHeight);
+
+            // Use flow direction dimensions if flow accumulation wasn't loaded
+            if (!hasFlowAcc) {
+                flowMapWidth = dirWidth;
+                flowMapHeight = dirHeight;
+            }
+        } else {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to load flow direction PNG: %s",
+                        lodepng_error_text(error));
+        }
+    }
+
+    if (!hasFlowAcc || !hasFlowDir) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "Erosion data not found in %s, will estimate from heightmap", cacheDir.c_str());
 
@@ -229,27 +293,7 @@ bool BiomeGenerator::loadErosionData(const std::string& cacheDir, ProgressCallba
         }
 
         SDL_Log("Generated flow data from heightmap: %ux%u", flowMapWidth, flowMapHeight);
-        return true;
     }
-
-    // Read dimensions
-    flowFile.read(reinterpret_cast<char*>(&flowMapWidth), sizeof(uint32_t));
-    flowFile.read(reinterpret_cast<char*>(&flowMapHeight), sizeof(uint32_t));
-
-    flowAccumulation.resize(flowMapWidth * flowMapHeight);
-    flowFile.read(reinterpret_cast<char*>(flowAccumulation.data()),
-                  flowMapWidth * flowMapHeight * sizeof(float));
-
-    uint32_t dirWidth, dirHeight;
-    dirFile.read(reinterpret_cast<char*>(&dirWidth), sizeof(uint32_t));
-    dirFile.read(reinterpret_cast<char*>(&dirHeight), sizeof(uint32_t));
-
-    flowDirection.resize(dirWidth * dirHeight);
-    dirFile.read(reinterpret_cast<char*>(flowDirection.data()),
-                 dirWidth * dirHeight * sizeof(int8_t));
-
-    SDL_Log("Loaded erosion data: flow %ux%u, direction %ux%u",
-            flowMapWidth, flowMapHeight, dirWidth, dirHeight);
 
     return true;
 }

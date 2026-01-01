@@ -7,6 +7,7 @@ find_package(lodepng CONFIG REQUIRED)
 find_package(miniz CONFIG REQUIRED)
 find_package(LibArchive REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
+find_package(tinyexr CONFIG REQUIRED)
 find_path(STB_INCLUDE_DIRS "stb_image.h")
 
 # Shader reflection tool
@@ -58,6 +59,7 @@ target_link_libraries(biome_preprocess PRIVATE
     SDL3::SDL3
     glm::glm
     lodepng
+    tinyexr::tinyexr
 )
 
 target_compile_features(biome_preprocess PRIVATE cxx_std_17)
@@ -78,7 +80,9 @@ target_include_directories(settlement_generator PRIVATE
 target_link_libraries(settlement_generator PRIVATE
     SDL3::SDL3
     glm::glm
+    lodepng
     nlohmann_json::nlohmann_json
+    tinyexr::tinyexr
 )
 
 target_compile_features(settlement_generator PRIVATE cxx_std_17)
@@ -212,6 +216,8 @@ target_include_directories(watershed PRIVATE
 target_link_libraries(watershed PRIVATE
     SDL3::SDL3
     lodepng
+    nlohmann_json::nlohmann_json
+    tinyexr::tinyexr
 )
 
 target_compile_features(watershed PRIVATE cxx_std_17)
