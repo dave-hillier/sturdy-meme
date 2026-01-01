@@ -23,6 +23,21 @@
 - generated textures should be saved in png format
 - Vulkan-hpp: Use vulkan-hpp (`#include <vulkan/vulkan.hpp>`) for new Vulkan code. Prefer builder pattern with `.set*()` methods over positional constructors (e.g., `vk::BufferCreateInfo{}.setSize(...).setUsage(...)`). Run `./scripts/analyze-vulkan-usage.sh` to see migration guidance.
 
+## Preprocessing Tool Output Formats
+
+Preprocessing tools in `tools/` must use standard, widely-supported file formats. Do NOT use custom binary formats (`.dat`, `.bin`). Preferred formats:
+
+- **GeoJSON** (`.geojson`): For vector/path data such as rivers, lakes, roads. Use `FeatureCollection` with `LineString` geometry. Enables GIS tool compatibility and human readability.
+- **OpenEXR** (`.exr`): For float grids like flow accumulation. Uses tinyexr library. Provides lossless 32-bit float storage with industry-standard tooling support.
+- **PNG** (`.png`): For integer grids. Use 8-bit grayscale for small value ranges (e.g., flow direction 0-7). For larger integers like uint32 watershed labels, encode as RGBA (R=byte0, G=byte1, B=byte2, A=byte3).
+
+Current file outputs:
+- `rivers.geojson`, `lakes.geojson` - Water feature paths with flow/width metadata
+- `roads.geojson` - Road network with type and settlement connections
+- `flow_accumulation.exr` - Float grid of accumulated water flow
+- `flow_direction.png` - 8-bit D8 flow direction (values 0-7)
+- `watershed_labels.png` - RGBA-encoded uint32 watershed basin IDs
+
 ## Web Claude Code Environment
 
 When running in web Claude Code (Linux environment without vcpkg pre-installed):
