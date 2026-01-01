@@ -69,9 +69,12 @@ layout(std430, binding = BINDING_GRASS_COMPUTE_TILE_INFO) readonly buffer TileIn
 
 layout(push_constant) uniform PushConstants {
     float time;
-    float tileOriginX;  // World X origin of this tile (0 for non-tiled mode)
-    float tileOriginZ;  // World Z origin of this tile (0 for non-tiled mode)
-    float padding;
+    float tileOriginX;   // World X origin of this tile (0 for non-tiled mode)
+    float tileOriginZ;   // World Z origin of this tile (0 for non-tiled mode)
+    float tileSize;      // Tile size in world units (varies by LOD: 64, 128, 256)
+    float spacingMult;   // Spacing multiplier for this LOD (1.0, 2.0, 4.0)
+    uint lodLevel;       // LOD level (0 = high detail, 1 = medium, 2 = low)
+    float padding[2];
 } push;
 
 // Check if we're in tiled mode (tile origin is non-zero or explicitly set)

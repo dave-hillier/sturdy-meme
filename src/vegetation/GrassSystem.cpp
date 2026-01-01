@@ -902,6 +902,11 @@ void GrassSystem::recordResetAndCompute(vk::CommandBuffer cmd, uint32_t frameInd
     grassPush.time = time;
     grassPush.tileOriginX = 0.0f;
     grassPush.tileOriginZ = 0.0f;
+    grassPush.tileSize = GrassConstants::TILE_SIZE_LOD0;
+    grassPush.spacingMult = 1.0f;
+    grassPush.lodLevel = 0;
+    grassPush.padding[0] = 0.0f;
+    grassPush.padding[1] = 0.0f;
     cmd.pushConstants<TiledGrassPushConstants>(
         getComputePipelineHandles().pipelineLayout,
         vk::ShaderStageFlagBits::eCompute,
@@ -970,6 +975,11 @@ void GrassSystem::recordDraw(vk::CommandBuffer cmd, uint32_t frameIndex, float t
     grassPush.time = time;
     grassPush.tileOriginX = 0.0f;
     grassPush.tileOriginZ = 0.0f;
+    grassPush.tileSize = GrassConstants::TILE_SIZE_LOD0;
+    grassPush.spacingMult = 1.0f;
+    grassPush.lodLevel = 0;
+    grassPush.padding[0] = 0.0f;
+    grassPush.padding[1] = 0.0f;
     cmd.pushConstants<TiledGrassPushConstants>(
         getGraphicsPipelineHandles().pipelineLayout,
         vk::ShaderStageFlagBits::eVertex,

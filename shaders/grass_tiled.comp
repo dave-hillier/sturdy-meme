@@ -73,15 +73,60 @@ layout(std430, binding = BINDING_GRASS_COMPUTE_TILE_INFO) readonly buffer TileIn
 
 layout(push_constant) uniform PushConstants {
     float time;
-    float tileOriginX;  // World X origin of this tile
-    float tileOriginZ;  // World Z origin of this tile
-    float padding;
+    float tileOriginX;   // World X origin of this tile
+    float tileOriginZ;   // World Z origin of this tile
+    float tileSize;      // Tile size in world units (varies by LOD: 64, 128, 256)
+    float spacingMult;   // Spacing multiplier for this LOD (1.0, 2.0, 4.0)
+    uint lodLevel;       // LOD level (0 = high detail, 1 = medium, 2 = low)
+    float padding[2];
 } push;
 
 // Tiled mode uses per-tile grid size but shared global instance buffer
 #define EFFECTIVE_GRID_SIZE GRASS_TILE_GRID_SIZE
 // All tiles share one instance buffer, so use global limit (not per-tile)
 #define EFFECTIVE_MAX_INSTANCES GRASS_MAX_INSTANCES
+
+// LOD transition blade dropping
+// Ghost of Tsushima: "high LOD tiles drop 3 out of every 4 grass blades
+// before they transition to the low LOD tiles"
+// This function calculates the drop rate based on LOD level and distance
+bool shouldDropForLodTransition(float distToCamera, uint lodLevel, float instanceHash) {
+    // For LOD 0: progressively drop blades as we approach the LOD 0 boundary
+    if (lodLevel == 0) {
+        // Transition zone starts at LOD0_DISTANCE_END - TRANSITION_ZONE
+        float transitionStart = GRASS_LOD0_DISTANCE_END - GRASS_LOD_TRANSITION_ZONE;
+        float transitionEnd = GRASS_LOD0_DISTANCE_END;
+
+        if (distToCamera > transitionStart) {
+            // Calculate how far into transition zone we are (0 at start, 1 at end)
+            float t = (distToCamera - transitionStart) / GRASS_LOD_TRANSITION_ZONE;
+            t = clamp(t, 0.0, 1.0);
+
+            // Drop rate increases from 0 to 75% as we approach the boundary
+            float dropRate = t * GRASS_LOD_TRANSITION_DROP_RATE;
+
+            return instanceHash < dropRate;
+        }
+    }
+    // For LOD 1: similar transition as we approach LOD 1 boundary
+    else if (lodLevel == 1) {
+        float transitionStart = GRASS_LOD1_DISTANCE_END - GRASS_LOD_TRANSITION_ZONE;
+        float transitionEnd = GRASS_LOD1_DISTANCE_END;
+
+        if (distToCamera > transitionStart) {
+            float t = (distToCamera - transitionStart) / GRASS_LOD_TRANSITION_ZONE;
+            t = clamp(t, 0.0, 1.0);
+
+            // Drop rate at LOD 1 boundary
+            float dropRate = t * GRASS_LOD_TRANSITION_DROP_RATE;
+
+            return instanceHash < dropRate;
+        }
+    }
+    // LOD 2 is the furthest, no transition dropping needed
+
+    return false;
+}
 
 // Hash functions - use instancing_common.glsl versions
 // Local aliases for compatibility with existing code
@@ -168,19 +213,23 @@ void main() {
     // Generate grass positions in a grid pattern per tile
     if (gridX >= EFFECTIVE_GRID_SIZE || gridZ >= EFFECTIVE_GRID_SIZE) return;
 
+    // Calculate effective spacing based on LOD level
+    // Higher LOD levels have larger spacing -> lower grass density
+    float effectiveSpacing = GRASS_SPACING * push.spacingMult;
+
     // Map to world space - position relative to tile origin
-    float x = push.tileOriginX + float(gridX) * GRASS_SPACING;
-    float z = push.tileOriginZ + float(gridZ) * GRASS_SPACING;
+    float x = push.tileOriginX + float(gridX) * effectiveSpacing;
+    float z = push.tileOriginZ + float(gridZ) * effectiveSpacing;
 
     // Add some randomness to position (jitter)
     // Use world-space position for hash to ensure unique patterns per tile
-    vec2 worldCell = vec2(x, z) / GRASS_SPACING;
+    vec2 worldCell = vec2(x, z) / effectiveSpacing;
     vec2 cell = worldCell;
     float h1 = hash(cell);
     float h2 = hash2(cell);
 
-    x += (h1 - 0.5) * GRASS_SPACING * GRASS_JITTER_FACTOR;
-    z += (hash(cell + vec2(100.0, 0.0)) - 0.5) * GRASS_SPACING * GRASS_JITTER_FACTOR;
+    x += (h1 - 0.5) * effectiveSpacing * GRASS_JITTER_FACTOR;
+    z += (hash(cell + vec2(100.0, 0.0)) - 0.5) * effectiveSpacing * GRASS_JITTER_FACTOR;
 
     // Sample terrain heightmap to get Y position
     vec2 terrainUV = vec2(x, z) / grassParams.terrainSize + 0.5;
@@ -204,10 +253,16 @@ void main() {
     // Frustum culling
     if (!isInFrustum(culling.frustumPlanes, worldPos, GRASS_FRUSTUM_MARGIN)) return;
 
-    // LOD blade dropping
+    // LOD blade dropping (existing distance-based dropping)
     float instanceHash = hash(cell + vec2(500.0, 500.0));
     if (isLodEnabled() && lodCull(distToCamera, culling.lodTransitionStart, culling.lodTransitionEnd,
                                    culling.maxLodDropRate, instanceHash)) return;
+
+    // LOD transition blade dropping (Ghost of Tsushima style)
+    // Drop blades at LOD level boundaries for smooth transitions
+    // Uses a different hash offset to ensure independent randomness
+    float transitionHash = hash(cell + vec2(750.0, 750.0));
+    if (shouldDropForLodTransition(distToCamera, push.lodLevel, transitionHash)) return;
 
     // Use subgroup operations to batch atomic updates
     uvec4 activeMask = subgroupBallot(true);

@@ -36,11 +36,13 @@ void GrassTileManager::destroy() {
     enabled_ = false;
 }
 
-GrassTile::TileCoord GrassTileManager::worldToTileCoord(const glm::vec2& worldPos) const {
-    // Floor division to get tile coordinate
+GrassTile::TileCoord GrassTileManager::worldToTileCoord(const glm::vec2& worldPos, uint32_t lod) const {
+    // Floor division to get tile coordinate based on LOD tile size
+    float tileSize = GrassConstants::getTileSizeForLod(lod);
     return {
-        static_cast<int>(std::floor(worldPos.x / GrassConstants::TILE_SIZE)),
-        static_cast<int>(std::floor(worldPos.y / GrassConstants::TILE_SIZE))
+        static_cast<int>(std::floor(worldPos.x / tileSize)),
+        static_cast<int>(std::floor(worldPos.y / tileSize)),
+        lod
     };
 }
 
@@ -54,8 +56,9 @@ GrassTile* GrassTileManager::getOrCreateTile(const GrassTile::TileCoord& coord) 
     auto tile = std::make_unique<GrassTile>();
     tile->init(coord);
 
-    SDL_Log("GrassTileManager: Created tile at (%d, %d), world origin (%.1f, %.1f)",
-        coord.x, coord.z, tile->getWorldOrigin().x, tile->getWorldOrigin().y);
+    SDL_Log("GrassTileManager: Created LOD%u tile at (%d, %d), world origin (%.1f, %.1f), size %.0fm",
+        coord.lod, coord.x, coord.z, tile->getWorldOrigin().x, tile->getWorldOrigin().y,
+        tile->getTileSize());
 
     // Create descriptor sets for this tile
     GrassTile* tilePtr = tile.get();
@@ -97,39 +100,92 @@ bool GrassTileManager::createTileDescriptorSets(GrassTile* tile) {
     return true;
 }
 
+bool GrassTileManager::isCoveredByHigherLod(const glm::vec2& worldPos, uint32_t currentLod,
+                                             const glm::vec2& cameraXZ) const {
+    // Check if this world position falls within the active tile range of any higher LOD level
+    for (uint32_t higherLod = 0; higherLod < currentLod; ++higherLod) {
+        float tileSize = GrassConstants::getTileSizeForLod(higherLod);
+        uint32_t tilesPerAxis = (higherLod == 0) ? GrassConstants::TILES_PER_AXIS_LOD0 :
+                                (higherLod == 1) ? GrassConstants::TILES_PER_AXIS_LOD1 :
+                                                   GrassConstants::TILES_PER_AXIS_LOD2;
+        int halfExtent = static_cast<int>(tilesPerAxis) / 2;
+
+        // Calculate the range covered by higher LOD tiles
+        GrassTile::TileCoord cameraTile = worldToTileCoord(cameraXZ, higherLod);
+        float minX = static_cast<float>(cameraTile.x - halfExtent) * tileSize;
+        float maxX = static_cast<float>(cameraTile.x + halfExtent + 1) * tileSize;
+        float minZ = static_cast<float>(cameraTile.z - halfExtent) * tileSize;
+        float maxZ = static_cast<float>(cameraTile.z + halfExtent + 1) * tileSize;
+
+        if (worldPos.x >= minX && worldPos.x < maxX &&
+            worldPos.y >= minZ && worldPos.y < maxZ) {
+            return true;  // Position is covered by higher LOD
+        }
+    }
+    return false;
+}
+
 void GrassTileManager::updateActiveTiles(const glm::vec3& cameraPos, uint64_t frameNumber) {
     glm::vec2 cameraXZ(cameraPos.x, cameraPos.z);
-    GrassTile::TileCoord cameraTile = worldToTileCoord(cameraXZ);
     currentFrame_ = frameNumber;
 
     // Clear active tiles list
     activeTiles_.clear();
 
-    // Calculate tile range around camera
-    int halfExtent = static_cast<int>(GrassConstants::TILES_PER_AXIS) / 2;
+    // Load tiles at each LOD level
+    // LOD 0: High detail (closest to camera)
+    // LOD 1: Medium detail
+    // LOD 2: Low detail (furthest from camera)
+    for (uint32_t lod = 0; lod < GrassConstants::NUM_LOD_LEVELS; ++lod) {
+        float tileSize = GrassConstants::getTileSizeForLod(lod);
+        uint32_t tilesPerAxis = (lod == 0) ? GrassConstants::TILES_PER_AXIS_LOD0 :
+                                (lod == 1) ? GrassConstants::TILES_PER_AXIS_LOD1 :
+                                             GrassConstants::TILES_PER_AXIS_LOD2;
+        int halfExtent = static_cast<int>(tilesPerAxis) / 2;
 
-    // Load tiles in a grid around the camera
-    for (int dz = -halfExtent; dz <= halfExtent; ++dz) {
-        for (int dx = -halfExtent; dx <= halfExtent; ++dx) {
-            GrassTile::TileCoord coord{
-                cameraTile.x + dx,
-                cameraTile.z + dz
-            };
+        // Get camera tile for this LOD level
+        GrassTile::TileCoord cameraTile = worldToTileCoord(cameraXZ, lod);
 
-            GrassTile* tile = getOrCreateTile(coord);
-            if (tile) {
-                tile->markUsed(frameNumber);
-                activeTiles_.push_back(tile);
+        // Load tiles in a grid around the camera
+        for (int dz = -halfExtent; dz <= halfExtent; ++dz) {
+            for (int dx = -halfExtent; dx <= halfExtent; ++dx) {
+                GrassTile::TileCoord coord{
+                    cameraTile.x + dx,
+                    cameraTile.z + dz,
+                    lod
+                };
+
+                // For LOD 1 and 2: Skip tiles that are covered by higher LOD levels
+                if (lod > 0) {
+                    glm::vec2 tileCenter = glm::vec2(
+                        static_cast<float>(coord.x) * tileSize + tileSize * 0.5f,
+                        static_cast<float>(coord.z) * tileSize + tileSize * 0.5f
+                    );
+                    if (isCoveredByHigherLod(tileCenter, lod, cameraXZ)) {
+                        continue;  // Skip - covered by higher LOD tiles
+                    }
+                }
+
+                GrassTile* tile = getOrCreateTile(coord);
+                if (tile) {
+                    tile->markUsed(frameNumber);
+                    activeTiles_.push_back(tile);
+                }
             }
         }
     }
 
-    // Update current camera tile
-    currentCameraTile_ = cameraTile;
+    // Update current camera tile (LOD 0 for legacy compatibility)
+    currentCameraTile_ = worldToTileCoord(cameraXZ, 0);
 
-    // Sort tiles by distance to camera (render closest first)
+    // Sort tiles by LOD first (render high LOD first), then by distance within LOD
     std::sort(activeTiles_.begin(), activeTiles_.end(),
         [&cameraXZ](const GrassTile* a, const GrassTile* b) {
+            // Sort by LOD level first (lower LOD number = higher detail = render first)
+            if (a->getLodLevel() != b->getLodLevel()) {
+                return a->getLodLevel() < b->getLodLevel();
+            }
+            // Within same LOD, sort by distance (closest first)
             return a->distanceSquaredTo(cameraXZ) < b->distanceSquaredTo(cameraXZ);
         });
 
@@ -138,17 +194,21 @@ void GrassTileManager::updateActiveTiles(const glm::vec3& cameraPos, uint64_t fr
 }
 
 void GrassTileManager::unloadDistantTiles(const glm::vec2& cameraXZ, uint64_t currentFrame) {
-    // Calculate unload distance threshold with hysteresis
-    // Active range is halfExtent tiles, unload beyond that + margin
-    float halfExtent = static_cast<float>(GrassConstants::TILES_PER_AXIS) / 2.0f;
-    float activeRadius = (halfExtent + 0.5f) * GrassConstants::TILE_SIZE;
-    float unloadRadius = activeRadius + GrassConstants::TILE_UNLOAD_MARGIN;
-    float unloadRadiusSq = unloadRadius * unloadRadius;
-
     // Collect tiles to unload (can't modify map while iterating)
     std::vector<GrassTile::TileCoord> tilesToUnload;
 
     for (auto& [coord, tile] : tiles_) {
+        // Calculate unload distance based on LOD level
+        uint32_t lod = coord.lod;
+        float tileSize = GrassConstants::getTileSizeForLod(lod);
+        uint32_t tilesPerAxis = (lod == 0) ? GrassConstants::TILES_PER_AXIS_LOD0 :
+                                (lod == 1) ? GrassConstants::TILES_PER_AXIS_LOD1 :
+                                             GrassConstants::TILES_PER_AXIS_LOD2;
+        float halfExtent = static_cast<float>(tilesPerAxis) / 2.0f;
+        float activeRadius = (halfExtent + 0.5f) * tileSize;
+        float unloadRadius = activeRadius + GrassConstants::TILE_UNLOAD_MARGIN;
+        float unloadRadiusSq = unloadRadius * unloadRadius;
+
         float distSq = tile->distanceSquaredTo(cameraXZ);
 
         // Only unload if beyond unload radius AND safe (not in use by GPU)
@@ -335,12 +395,17 @@ void GrassTileManager::recordCompute(vk::CommandBuffer cmd, uint32_t frameIndex,
                                computePipelineLayout_, 0,
                                descSet, {});
 
-        // Push constants with tile origin
+        // Push constants with tile origin and LOD information
         glm::vec2 tileOrigin = tile->getWorldOrigin();
         TiledGrassPushConstants push{};
         push.time = time;
         push.tileOriginX = tileOrigin.x;
         push.tileOriginZ = tileOrigin.y;
+        push.tileSize = tile->getTileSize();
+        push.spacingMult = tile->getSpacingMult();
+        push.lodLevel = tile->getLodLevel();
+        push.padding[0] = 0.0f;
+        push.padding[1] = 0.0f;
 
         cmd.pushConstants(computePipelineLayout_,
                           vk::ShaderStageFlagBits::eCompute,
@@ -383,10 +448,16 @@ void GrassTileManager::recordDraw(vk::CommandBuffer cmd, uint32_t frameIndex, fl
     }
 
     // Push constants (tile origin is 0,0 since all tiles wrote to shared buffer)
+    // LOD info not needed for graphics - instances already have world positions
     TiledGrassPushConstants push{};
     push.time = time;
     push.tileOriginX = 0.0f;
     push.tileOriginZ = 0.0f;
+    push.tileSize = GrassConstants::TILE_SIZE_LOD0;  // Default, not used in vertex shader
+    push.spacingMult = 1.0f;
+    push.lodLevel = 0;
+    push.padding[0] = 0.0f;
+    push.padding[1] = 0.0f;
 
     cmd.pushConstants(graphicsPipelineLayout,
                       vk::ShaderStageFlagBits::eVertex,

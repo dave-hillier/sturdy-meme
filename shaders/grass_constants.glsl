@@ -227,29 +227,66 @@ const float GRASS_SHADOW_DEPTH_BIAS_SLOPE = 0.75;
 // TILED GRASS SYSTEM
 // =============================================================================
 
-// Tile dimensions in world units (64m x 64m per tile)
-const float GRASS_TILE_SIZE = 64.0;
+// Number of LOD levels for variable tile sizes
+// LOD 0: High detail (near camera) - smaller tiles, full density
+// LOD 1: Medium detail - 2x tile size, 2x spacing (1/4 blade density)
+// LOD 2: Low detail (far) - 4x tile size, 4x spacing (1/16 blade density)
+const uint GRASS_NUM_LOD_LEVELS = 3;
 
-// Grid dimensions per tile (320x320 = 102,400 potential blades per tile)
-// With 0.2m spacing: maintains 25 blades per square meter density
+// Tile dimensions per LOD level in world units
+const float GRASS_TILE_SIZE_LOD0 = 64.0;   // High detail: 64m tiles
+const float GRASS_TILE_SIZE_LOD1 = 128.0;  // Medium: 128m tiles (2x)
+const float GRASS_TILE_SIZE_LOD2 = 256.0;  // Low detail: 256m tiles (4x)
+
+// Legacy constant for compatibility
+const float GRASS_TILE_SIZE = GRASS_TILE_SIZE_LOD0;
+
+// Spacing multipliers per LOD (blades spread out further at lower LOD)
+const float GRASS_SPACING_MULT_LOD0 = 1.0;  // Full density
+const float GRASS_SPACING_MULT_LOD1 = 2.0;  // 2x spacing -> 1/4 density
+const float GRASS_SPACING_MULT_LOD2 = 4.0;  // 4x spacing -> 1/16 density
+
+// Grid dimensions per tile (same for all LODs - blades just spread out)
+// 320x320 = 102,400 potential blades per tile
 const uint GRASS_TILE_GRID_SIZE = 320;
 
 // Derived: Dispatch size per tile
 // ceil(GRASS_TILE_GRID_SIZE / GRASS_WORKGROUP_SIZE) = ceil(320/16) = 20
 const uint GRASS_TILE_DISPATCH_SIZE = (GRASS_TILE_GRID_SIZE + GRASS_WORKGROUP_SIZE - 1) / GRASS_WORKGROUP_SIZE;
 
-// Number of tiles around camera in each direction (3x3 = 9 active tiles)
-const uint GRASS_TILES_PER_AXIS = 3;
+// LOD distance thresholds (meters from camera to tile center)
+const float GRASS_LOD0_DISTANCE_END = 80.0;   // LOD 0 within 80m
+const float GRASS_LOD1_DISTANCE_END = 200.0;  // LOD 1 within 200m, LOD 2 beyond
 
-// Total active tiles = GRASS_TILES_PER_AXIS^2 = 9
-const uint GRASS_MAX_ACTIVE_TILES = GRASS_TILES_PER_AXIS * GRASS_TILES_PER_AXIS;
+// LOD transition zones for smooth blade dropping
+// When approaching LOD boundary, progressively drop 3/4 of blades
+// (Ghost of Tsushima: "high LOD tiles drop 3 out of every 4 grass blades
+//  before they transition to the low LOD tiles")
+const float GRASS_LOD_TRANSITION_ZONE = 20.0;     // 20m transition zone
+const float GRASS_LOD_TRANSITION_DROP_RATE = 0.75; // Drop 75% at boundary
+
+// Number of tiles around camera per LOD level
+const uint GRASS_TILES_PER_AXIS_LOD0 = 3;  // 3x3 = 9 high-detail tiles
+const uint GRASS_TILES_PER_AXIS_LOD1 = 3;  // 3x3 = 9 medium tiles
+const uint GRASS_TILES_PER_AXIS_LOD2 = 3;  // 3x3 = 9 low-detail tiles
+
+// Legacy constant for compatibility
+const uint GRASS_TILES_PER_AXIS = GRASS_TILES_PER_AXIS_LOD0;
+
+// Total active tiles = sum of all LOD levels
+const uint GRASS_MAX_ACTIVE_TILES_LOD0 = GRASS_TILES_PER_AXIS_LOD0 * GRASS_TILES_PER_AXIS_LOD0;
+const uint GRASS_MAX_ACTIVE_TILES_LOD1 = GRASS_TILES_PER_AXIS_LOD1 * GRASS_TILES_PER_AXIS_LOD1;
+const uint GRASS_MAX_ACTIVE_TILES_LOD2 = GRASS_TILES_PER_AXIS_LOD2 * GRASS_TILES_PER_AXIS_LOD2;
+const uint GRASS_MAX_ACTIVE_TILES = GRASS_MAX_ACTIVE_TILES_LOD0 + GRASS_MAX_ACTIVE_TILES_LOD1 + GRASS_MAX_ACTIVE_TILES_LOD2;
 
 // Maximum rendered instances per tile after culling (~12k target)
 const uint GRASS_MAX_INSTANCES_PER_TILE = 12000;
 
-// Derived: Total coverage with tiled system
-// GRASS_TILES_PER_AXIS * GRASS_TILE_SIZE = 192m
-const float GRASS_TILED_COVERAGE = float(GRASS_TILES_PER_AXIS) * GRASS_TILE_SIZE;
+// Derived: Total coverage with multi-LOD tiled system
+const float GRASS_TILED_COVERAGE_LOD0 = float(GRASS_TILES_PER_AXIS_LOD0) * GRASS_TILE_SIZE_LOD0;
+const float GRASS_TILED_COVERAGE_LOD1 = float(GRASS_TILES_PER_AXIS_LOD1) * GRASS_TILE_SIZE_LOD1;
+const float GRASS_TILED_COVERAGE_LOD2 = float(GRASS_TILES_PER_AXIS_LOD2) * GRASS_TILE_SIZE_LOD2;
+const float GRASS_TILED_COVERAGE = GRASS_TILED_COVERAGE_LOD2;  // Max coverage is LOD2 extent
 
 // Tile load/unload margins (hysteresis to prevent thrashing)
 const float GRASS_TILE_LOAD_MARGIN = 10.0;

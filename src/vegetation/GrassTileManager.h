@@ -128,9 +128,16 @@ private:
      */
     void unloadDistantTiles(const glm::vec2& cameraXZ, uint64_t currentFrame);
     /**
-     * Calculate which tile coordinate contains a world position
+     * Calculate which tile coordinate contains a world position at a given LOD level
      */
-    GrassTile::TileCoord worldToTileCoord(const glm::vec2& worldPos) const;
+    GrassTile::TileCoord worldToTileCoord(const glm::vec2& worldPos, uint32_t lod) const;
+
+    /**
+     * Check if a world position is covered by higher LOD (more detailed) tiles
+     * Used to avoid rendering lower LOD tiles where higher LOD tiles exist
+     */
+    bool isCoveredByHigherLod(const glm::vec2& worldPos, uint32_t currentLod,
+                               const glm::vec2& cameraXZ) const;
 
     /**
      * Get or create a tile at the given coordinate

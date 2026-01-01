@@ -29,12 +29,15 @@ struct GrassPushConstants {
     int cascadeIndex;  // For shadow pass: which cascade we're rendering
 };
 
-// Extended push constants for tiled grass mode
+// Extended push constants for tiled grass mode with multi-LOD support
 struct TiledGrassPushConstants {
     float time;
-    float tileOriginX;  // World X origin of this tile
-    float tileOriginZ;  // World Z origin of this tile
-    float padding;
+    float tileOriginX;   // World X origin of this tile
+    float tileOriginZ;   // World Z origin of this tile
+    float tileSize;      // Tile size in world units (varies by LOD: 64, 128, 256)
+    float spacingMult;   // Spacing multiplier for this LOD (1.0, 2.0, 4.0)
+    uint32_t lodLevel;   // LOD level (0 = high detail, 1 = medium, 2 = low)
+    float padding[2];    // Padding to align to 16 bytes
 };
 
 // Displacement source for grass interaction (player, NPCs, etc.)
