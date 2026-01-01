@@ -249,9 +249,14 @@ void main() {
     float h1 = hash(cell);
     float h2 = hash2(cell);
 
-    // Use BASE spacing for jitter so blades have identical positions across LOD levels
-    x += (h1 - 0.5) * GRASS_SPACING * GRASS_JITTER_FACTOR;
-    z += (hash(cell + vec2(100.0, 0.0)) - 0.5) * GRASS_SPACING * GRASS_JITTER_FACTOR;
+    // Scale jitter with effective spacing to maintain visual randomness at all LOD levels
+    // At LOD 0: jitter = 0.16m (80% of 0.2m spacing)
+    // At LOD 1: jitter = 0.32m (80% of 0.4m spacing)
+    // At LOD 2: jitter = 0.64m (80% of 0.8m spacing)
+    // This prevents lower LODs from appearing too uniform/grid-like
+    // The position difference at transition distances (43m+, 86m+) is imperceptible
+    x += (h1 - 0.5) * effectiveSpacing * GRASS_JITTER_FACTOR;
+    z += (hash(cell + vec2(100.0, 0.0)) - 0.5) * effectiveSpacing * GRASS_JITTER_FACTOR;
 
     // Sample terrain heightmap to get Y position
     vec2 terrainUV = vec2(x, z) / grassParams.terrainSize + 0.5;
