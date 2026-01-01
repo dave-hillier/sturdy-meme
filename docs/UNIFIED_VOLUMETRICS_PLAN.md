@@ -62,20 +62,61 @@ Add water optical properties to the froxel uniform buffer:
 
 ```glsl
 // Add to FroxelUniforms UBO
-vec4 waterParams;       // x=waterLevel, y=phaseG_water(0.8), z=enabled, w=transitionThickness
+vec4 waterParams;       // x=waterLevel, y=phaseG_water(0.8), z=enabled, w=maxWaveAmplitude
 vec4 waterAbsorption;   // rgb=absorption coeffs (from scatteringCoeffs.rgb), a=Kd_factor
 vec4 waterScattering;   // rgb=scattering coeffs (derived from turbidity), a=multiScatterStrength
-vec4 seafloorParams;    // x=reflectance, y=maxUpwellingDist, z=unused, w=unused
+vec4 seafloorParams;    // x=reflectance, y=maxUpwellingDist, z=oceanSize, w=unused
 ```
 
 Add setters to FroxelSystem:
 - `setWaterLevel(float level)`
+- `setMaxWaveAmplitude(float amp)` - from OceanFFT params
 - `setWaterOpticalProperties(vec3 absorption, float turbidity, float Kd)`
 - `setSeafloorReflectance(float r)`
 
-Wire Renderer to pass WaterSystem parameters to FroxelSystem each frame.
+Wire Renderer to pass WaterSystem + OceanFFT parameters to FroxelSystem each frame.
 
 **Test**: Parameters visible in shader debugger, no visual change yet.
+
+---
+
+### Phase 1b: Wave-Aware Water Surface (Variable Height)
+
+**Problem**: Water height varies due to OceanFFT waves (typically ±0.3-1.5m).
+
+**Solution**: Two-tier approach:
+
+1. **Conservative transition zone** (default): Use `waterLevel ± maxWaveAmplitude`
+   - All froxels in this zone get blended air/water properties
+   - Simple, no extra texture sampling
+   - Works well since wave amplitude << froxel depth resolution
+
+2. **Displacement sampling** (optional, higher quality): Sample OceanFFT displacement texture
+   - Bind displacement cascade 0 to froxel descriptor set
+   - Sample actual wave height at each froxel's XZ position
+
+```glsl
+// Option 1: Conservative (default) - use amplitude bounds
+float maxWaveAmp = ubo.waterParams.w;  // e.g., 1.5m from OceanParams
+float transitionLow = waterLevel - maxWaveAmp;
+float transitionHigh = waterLevel + maxWaveAmp;
+float surfaceBlend = smoothstep(transitionLow, transitionHigh, worldPos.y);
+
+// Option 2: Displacement sampling (higher quality)
+#ifdef SAMPLE_WAVE_DISPLACEMENT
+vec2 oceanUV = worldPos.xz / ubo.seafloorParams.z;  // oceanSize
+float waveDisplacement = texture(oceanDisplacement, oceanUV).y;
+float actualWaterHeight = waterLevel + waveDisplacement;
+float surfaceBlend = smoothstep(actualWaterHeight - 0.3, actualWaterHeight + 0.3, worldPos.y);
+#endif
+```
+
+**Recommendation**: Start with Option 1 (conservative). Froxel slices near the surface are typically 1-3m thick due to exponential distribution, so wave-scale variations (0.3-1.5m) blend naturally. Add displacement sampling later if visual artifacts appear at the surface.
+
+**Files for Option 2**:
+- `FroxelSystem.h` - Add displacement texture binding
+- `FroxelSystem.cpp` - Bind OceanFFT displacement in descriptor set
+- `froxel_update.comp` - Sample displacement texture
 
 ---
 
@@ -83,22 +124,25 @@ Wire Renderer to pass WaterSystem parameters to FroxelSystem each frame.
 
 **Files**: `froxel_update.comp`
 
-Each froxel determines its medium based on world position:
+Each froxel determines its medium based on world position, accounting for wave amplitude:
 
 ```glsl
 float waterLevel = ubo.waterParams.x;
-float transitionThickness = ubo.waterParams.w;  // e.g., 0.3m
+float maxWaveAmp = ubo.waterParams.w;  // From OceanFFT heightScale * amplitude
 
-// Smooth blend at surface
-float surfaceBlend = smoothstep(
-    waterLevel - transitionThickness,
-    waterLevel + transitionThickness,
-    worldPos.y
-);
+// Wave-aware transition zone (conservative approach)
+// Froxels within wave amplitude range get blended properties
+float transitionLow = waterLevel - maxWaveAmp;
+float transitionHigh = waterLevel + maxWaveAmp;
+
+float surfaceBlend = smoothstep(transitionLow, transitionHigh, worldPos.y);
 // surfaceBlend: 0 = fully underwater, 1 = fully above water
 
 bool isUnderwater = surfaceBlend < 0.5;
+bool isInTransition = surfaceBlend > 0.01 && surfaceBlend < 0.99;
 ```
+
+**Note**: The transition zone width equals `2 * maxWaveAmplitude`. For typical ocean waves (amp=0.5m, heightScale=1.0), this creates a 1m transition zone centered on the mean water level. This naturally handles wave crests and troughs without per-froxel displacement sampling.
 
 Create helper function:
 ```glsl
