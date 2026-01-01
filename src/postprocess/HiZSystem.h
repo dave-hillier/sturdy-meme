@@ -122,7 +122,7 @@ public:
     uint32_t getVisibleCount(uint32_t frameIndex) const;
 
     // Hi-Z pyramid access (for debugging/visualization and external occlusion culling)
-    VkImageView getHiZPyramidView() const { return hiZPyramid.fullView.get(); }
+    VkImageView getHiZPyramidView() const { return hiZPyramid.fullView ? **hiZPyramid.fullView : VK_NULL_HANDLE; }
     VkSampler getHiZSampler() const { return hiZSampler_ ? **hiZSampler_ : VK_NULL_HANDLE; }
     VkImageView getHiZMipView(uint32_t mipLevel) const;
     uint32_t getMipLevelCount() const { return mipLevelCount; }

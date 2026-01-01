@@ -1,5 +1,6 @@
 #include "SkinnedMesh.h"
-#include "VulkanRAII.h"
+#include "VmaResources.h"
+#include "VulkanHelpers.h"
 #include <SDL3/SDL_log.h>
 #include <vulkan/vulkan.hpp>
 #include <cstring>

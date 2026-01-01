@@ -1,12 +1,14 @@
 #pragma once
 
-#include <vulkan/vulkan.h>
+#include <vulkan/vulkan.hpp>
+#include <vulkan/vulkan_raii.hpp>
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
 #include <functional>
 #include <memory>
+#include <optional>
 
 #include "SkinnedMesh.h"
 #include "DescriptorManager.h"
@@ -14,7 +16,6 @@
 #include "RenderableBuilder.h"
 #include "GlobalBufferManager.h"
 #include "BufferUtils.h"
-#include "VulkanRAII.h"
 
 class AnimatedCharacter;
 
@@ -33,6 +34,7 @@ public:
         std::string shaderPath;
         uint32_t framesInFlight;
         AddCommonBindingsCallback addCommonBindings;
+        const vk::raii::Device* raiiDevice = nullptr;
     };
 
     // Resources needed for descriptor set writing
@@ -93,9 +95,9 @@ public:
     void setExtent(VkExtent2D newExtent) { extent = newExtent; }
 
     // Accessors for ShadowSystem integration
-    VkDescriptorSetLayout getDescriptorSetLayout() const { return descriptorSetLayout_.get(); }
-    VkPipelineLayout getPipelineLayout() const { return pipelineLayout_.get(); }
-    VkPipeline getPipeline() const { return pipeline_.get(); }
+    VkDescriptorSetLayout getDescriptorSetLayout() const { return descriptorSetLayout_ ? **descriptorSetLayout_ : VK_NULL_HANDLE; }
+    VkPipelineLayout getPipelineLayout() const { return pipelineLayout_ ? **pipelineLayout_ : VK_NULL_HANDLE; }
+    VkPipeline getPipeline() const { return pipeline_ ? **pipeline_ : VK_NULL_HANDLE; }
     VkDescriptorSet getDescriptorSet(uint32_t frameIndex) const { return descriptorSets[frameIndex]; }
 
 private:
@@ -116,11 +118,12 @@ private:
     std::string shaderPath;
     uint32_t framesInFlight = 0;
     AddCommonBindingsCallback addCommonBindings;
+    const vk::raii::Device* raiiDevice_ = nullptr;
 
     // Created resources (RAII-managed)
-    ManagedDescriptorSetLayout descriptorSetLayout_;
-    ManagedPipelineLayout pipelineLayout_;
-    ManagedPipeline pipeline_;
+    std::optional<vk::raii::DescriptorSetLayout> descriptorSetLayout_;
+    std::optional<vk::raii::PipelineLayout> pipelineLayout_;
+    std::optional<vk::raii::Pipeline> pipeline_;
 
     std::vector<VkDescriptorSet> descriptorSets;
     BufferUtils::PerFrameBufferSet boneMatricesBuffers;

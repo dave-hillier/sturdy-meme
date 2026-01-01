@@ -111,7 +111,7 @@ bool HiZSystem::createHiZPyramid() {
     mipLevelCount = calculateMipLevels(extent);
 
     // Create Hi-Z pyramid using MipChainBuilder
-    if (!MipChainBuilder(device, allocator)
+    if (!MipChainBuilder(*raiiDevice_, allocator)
             .setExtent(extent)
             .setFormat(HIZ_FORMAT)
             .asStorageImage()  // sampled + storage for compute mip generation
@@ -377,7 +377,7 @@ bool HiZSystem::createDescriptorSets() {
             .writeBuffer(1, objectDataBuffer_.get(), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
             .writeBuffer(2, indirectDrawBuffers.buffers[i], 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
             .writeBuffer(3, drawCountBuffers.buffers[i], 0, sizeof(uint32_t), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-            .writeImage(4, hiZPyramid.fullView.get(), **hiZSampler_)
+            .writeImage(4, **hiZPyramid.fullView, **hiZSampler_)
             .update();
     }
 
@@ -400,12 +400,12 @@ void HiZSystem::setDepthBuffer(VkImageView depthView, VkSampler depthSampler) {
     }
 
     for (uint32_t mip = 0; mip < mipLevelCount; ++mip) {
-        VkImageView srcMipView = mip > 0 ? hiZPyramid.mipViews[mip - 1].get() : hiZPyramid.mipViews[0].get();
+        VkImageView srcMipView = mip > 0 ? **hiZPyramid.mipViews[mip - 1] : **hiZPyramid.mipViews[0];
 
         DescriptorManager::SetWriter(device, pyramidDescSets[mip])
             .writeImage(0, sourceDepthView, sourceDepthSampler, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL)
             .writeImage(1, srcMipView, **hiZSampler_)
-            .writeStorageImage(2, hiZPyramid.mipViews[mip].get())
+            .writeStorageImage(2, **hiZPyramid.mipViews[mip])
             .update();
     }
 }
@@ -559,8 +559,8 @@ uint32_t HiZSystem::getVisibleCount(uint32_t frameIndex) const {
 }
 
 VkImageView HiZSystem::getHiZMipView(uint32_t mipLevel) const {
-    if (mipLevel < hiZPyramid.mipViews.size()) {
-        return hiZPyramid.mipViews[mipLevel].get();
+    if (mipLevel < hiZPyramid.mipViews.size() && hiZPyramid.mipViews[mipLevel]) {
+        return **hiZPyramid.mipViews[mipLevel];
     }
     return VK_NULL_HANDLE;
 }

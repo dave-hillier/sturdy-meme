@@ -107,19 +107,19 @@ bool BloomSystem::createMipChain() {
 
         // Create image using ImageBuilder
         ManagedImage managedImage;
-        ManagedImageView managedView;
+        VkImageView imageView;
         if (!ImageBuilder(allocator)
                 .setExtent(width, height)
                 .setFormat(BLOOM_FORMAT)
                 .asColorAttachment()
                 .setGpuOnly()
-                .build(device, managedImage, managedView)) {
+                .build(device, managedImage, imageView)) {
             return false;
         }
 
         // Release to raw handles (BloomSystem uses raw handles for mip chain)
         managedImage.releaseToRaw(mip.image, mip.allocation);
-        mip.imageView = managedView.release();
+        mip.imageView = imageView;
 
         mipChain.push_back(mip);
     }

@@ -2,7 +2,8 @@
 #include <stb_image.h>
 #include "Texture.h"
 #include "DDSLoader.h"
-#include "VulkanRAII.h"
+#include "VmaResources.h"
+#include "VulkanHelpers.h"
 #include "VulkanResourceFactory.h"
 #include "VulkanBarriers.h"
 #include "ImageBuilder.h"
@@ -89,7 +90,7 @@ bool Texture::load(const std::string& path, VmaAllocator allocator, VkDevice dev
 
     // stagingBuffer automatically destroyed here
 
-    // Create image view using RAII with vulkan-hpp builder
+    // Create image view using vulkan-hpp builder
     auto viewInfo = vk::ImageViewCreateInfo{}
         .setImage(managedImage.get())
         .setViewType(vk::ImageViewType::e2D)
@@ -101,13 +102,13 @@ bool Texture::load(const std::string& path, VmaAllocator allocator, VkDevice dev
             .setBaseArrayLayer(0)
             .setLayerCount(1));
 
-    ManagedImageView managedView;
-    if (!ManagedImageView::create(device, reinterpret_cast<const VkImageViewCreateInfo&>(viewInfo), managedView)) {
+    VkImageView createdView;
+    if (vkCreateImageView(device, reinterpret_cast<const VkImageViewCreateInfo*>(&viewInfo), nullptr, &createdView) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create image view for texture: %s", path.c_str());
         return false;
     }
 
-    // Create sampler using RAII with vulkan-hpp builder
+    // Create sampler using vulkan-hpp builder
     auto samplerInfo = vk::SamplerCreateInfo{}
         .setMagFilter(vk::Filter::eLinear)
         .setMinFilter(vk::Filter::eLinear)
@@ -125,16 +126,17 @@ bool Texture::load(const std::string& path, VmaAllocator allocator, VkDevice dev
         .setMinLod(0.0f)
         .setMaxLod(0.0f);
 
-    ManagedSampler managedSampler;
-    if (!ManagedSampler::create(device, reinterpret_cast<const VkSamplerCreateInfo&>(samplerInfo), managedSampler)) {
+    VkSampler createdSampler;
+    if (vkCreateSampler(device, reinterpret_cast<const VkSamplerCreateInfo*>(&samplerInfo), nullptr, &createdSampler) != VK_SUCCESS) {
+        vkDestroyImageView(device, createdView, nullptr);
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create sampler for texture: %s", path.c_str());
         return false;
     }
 
     // Success - transfer ownership to member variables
     managedImage.releaseToRaw(image, allocation);
-    imageView = managedView.release();
-    sampler = managedSampler.release();
+    imageView = createdView;
+    sampler = createdSampler;
 
     return true;
 }
@@ -315,7 +317,7 @@ bool Texture::createSolidColor(uint8_t r, uint8_t g, uint8_t b, uint8_t a,
         return false;
     }
 
-    // Create image view using RAII with vulkan-hpp builder
+    // Create image view using vulkan-hpp builder
     auto viewInfo = vk::ImageViewCreateInfo{}
         .setImage(managedImage.get())
         .setViewType(vk::ImageViewType::e2D)
@@ -327,13 +329,13 @@ bool Texture::createSolidColor(uint8_t r, uint8_t g, uint8_t b, uint8_t a,
             .setBaseArrayLayer(0)
             .setLayerCount(1));
 
-    ManagedImageView managedView;
-    if (!ManagedImageView::create(device, reinterpret_cast<const VkImageViewCreateInfo&>(viewInfo), managedView)) {
+    VkImageView createdView;
+    if (vkCreateImageView(device, reinterpret_cast<const VkImageViewCreateInfo*>(&viewInfo), nullptr, &createdView) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create image view for solid color texture");
         return false;
     }
 
-    // Create sampler using RAII with vulkan-hpp builder
+    // Create sampler using vulkan-hpp builder
     auto samplerInfo = vk::SamplerCreateInfo{}
         .setMagFilter(vk::Filter::eNearest)
         .setMinFilter(vk::Filter::eNearest)
@@ -351,16 +353,17 @@ bool Texture::createSolidColor(uint8_t r, uint8_t g, uint8_t b, uint8_t a,
         .setMinLod(0.0f)
         .setMaxLod(0.0f);
 
-    ManagedSampler managedSampler;
-    if (!ManagedSampler::create(device, reinterpret_cast<const VkSamplerCreateInfo&>(samplerInfo), managedSampler)) {
+    VkSampler createdSampler;
+    if (vkCreateSampler(device, reinterpret_cast<const VkSamplerCreateInfo*>(&samplerInfo), nullptr, &createdSampler) != VK_SUCCESS) {
+        vkDestroyImageView(device, createdView, nullptr);
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create sampler for solid color texture");
         return false;
     }
 
     // Success - transfer ownership to member variables
     managedImage.releaseToRaw(image, allocation);
-    imageView = managedView.release();
-    sampler = managedSampler.release();
+    imageView = createdView;
+    sampler = createdSampler;
 
     return true;
 }
@@ -658,8 +661,8 @@ bool Texture::loadWithMipmaps(const std::string& path, VmaAllocator allocator, V
             .setBaseArrayLayer(0)
             .setLayerCount(1));
 
-    ManagedImageView managedView;
-    if (!ManagedImageView::create(device, reinterpret_cast<const VkImageViewCreateInfo&>(viewInfo), managedView)) {
+    VkImageView createdView;
+    if (vkCreateImageView(device, reinterpret_cast<const VkImageViewCreateInfo*>(&viewInfo), nullptr, &createdView) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create image view for texture: %s", path.c_str());
         return false;
     }
@@ -682,16 +685,17 @@ bool Texture::loadWithMipmaps(const std::string& path, VmaAllocator allocator, V
         .setMinLod(0.0f)
         .setMaxLod(static_cast<float>(mipLevels));
 
-    ManagedSampler managedSampler;
-    if (!ManagedSampler::create(device, reinterpret_cast<const VkSamplerCreateInfo&>(samplerInfo), managedSampler)) {
+    VkSampler createdSampler;
+    if (vkCreateSampler(device, reinterpret_cast<const VkSamplerCreateInfo*>(&samplerInfo), nullptr, &createdSampler) != VK_SUCCESS) {
+        vkDestroyImageView(device, createdView, nullptr);
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create sampler for texture: %s", path.c_str());
         return false;
     }
 
     // Transfer ownership
     managedImage.releaseToRaw(image, allocation);
-    imageView = managedView.release();
-    sampler = managedSampler.release();
+    imageView = createdView;
+    sampler = createdSampler;
 
     SDL_Log("Loaded texture with %u mip levels: %s (%dx%d)", mipLevels, path.c_str(), width, height);
     return true;

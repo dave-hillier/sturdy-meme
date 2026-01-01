@@ -1,8 +1,10 @@
 #pragma once
 
-#include <vulkan/vulkan.h>
+#include <vulkan/vulkan.hpp>
+#include <vulkan/vulkan_raii.hpp>
 #include <vk_mem_alloc.h>
-#include "VulkanRAII.h"
+#include <optional>
+#include "VmaResources.h"
 #include <SDL3/SDL_log.h>
 #include <vector>
 #include <cmath>
@@ -222,25 +224,56 @@ public:
         return ManagedImage::create(allocator_, imageInfo_, allocInfo_, outImage);
     }
 
-    // Build image and view together
-    bool build(VkDevice device, ManagedImage& outImage, ManagedImageView& outView,
+    // Build image and view together using vk::raii::ImageView
+    bool build(const vk::raii::Device& device, ManagedImage& outImage,
+               std::optional<vk::raii::ImageView>& outView,
+               vk::ImageAspectFlags aspectMask = vk::ImageAspectFlagBits::eColor) const {
+        if (!ManagedImage::create(allocator_, imageInfo_, allocInfo_, outImage)) {
+            return false;
+        }
+
+        auto viewInfo = vk::ImageViewCreateInfo{}
+            .setImage(outImage.get())
+            .setViewType(static_cast<vk::ImageViewType>(getViewType()))
+            .setFormat(static_cast<vk::Format>(imageInfo_.format))
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(aspectMask)
+                .setBaseMipLevel(0)
+                .setLevelCount(imageInfo_.mipLevels)
+                .setBaseArrayLayer(0)
+                .setLayerCount(imageInfo_.arrayLayers));
+
+        try {
+            outView.emplace(device, viewInfo);
+        } catch (const vk::SystemError& e) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "ImageBuilder: Failed to create image view: %s", e.what());
+            outImage.reset();
+            return false;
+        }
+
+        return true;
+    }
+
+    // Build image and view together - outputs raw VkImageView (for legacy code compatibility)
+    bool build(VkDevice device, ManagedImage& outImage, VkImageView& outView,
                VkImageAspectFlags aspectMask = VK_IMAGE_ASPECT_COLOR_BIT) const {
         if (!ManagedImage::create(allocator_, imageInfo_, allocInfo_, outImage)) {
             return false;
         }
 
-        VkImageViewCreateInfo viewInfo{};
-        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        viewInfo.image = outImage.get();
-        viewInfo.viewType = getViewType();
-        viewInfo.format = imageInfo_.format;
-        viewInfo.subresourceRange.aspectMask = aspectMask;
-        viewInfo.subresourceRange.baseMipLevel = 0;
-        viewInfo.subresourceRange.levelCount = imageInfo_.mipLevels;
-        viewInfo.subresourceRange.baseArrayLayer = 0;
-        viewInfo.subresourceRange.layerCount = imageInfo_.arrayLayers;
+        auto viewInfo = vk::ImageViewCreateInfo{}
+            .setImage(outImage.get())
+            .setViewType(static_cast<vk::ImageViewType>(getViewType()))
+            .setFormat(static_cast<vk::Format>(imageInfo_.format))
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(static_cast<vk::ImageAspectFlags>(aspectMask))
+                .setBaseMipLevel(0)
+                .setLevelCount(imageInfo_.mipLevels)
+                .setBaseArrayLayer(0)
+                .setLayerCount(imageInfo_.arrayLayers));
 
-        if (!ManagedImageView::create(device, viewInfo, outView)) {
+        if (vkCreateImageView(device, reinterpret_cast<const VkImageViewCreateInfo*>(&viewInfo), nullptr, &outView) != VK_SUCCESS) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "ImageBuilder: Failed to create image view");
             outImage.reset();
             return false;
         }
@@ -317,8 +350,8 @@ class MipChainBuilder {
 public:
     struct Result {
         ManagedImage image;
-        ManagedImageView fullView;
-        std::vector<ManagedImageView> mipViews;
+        std::optional<vk::raii::ImageView> fullView;
+        std::vector<std::optional<vk::raii::ImageView>> mipViews;
         uint32_t mipLevelCount = 0;
         VkFormat format = VK_FORMAT_UNDEFINED;
 
@@ -331,12 +364,15 @@ public:
         }
 
         bool isValid() const {
-            return image.get() != VK_NULL_HANDLE && mipLevelCount > 0;
+            return image.get() != VK_NULL_HANDLE && fullView.has_value() && mipLevelCount > 0;
         }
     };
 
     MipChainBuilder(VkDevice device, VmaAllocator allocator)
-        : device_(device), allocator_(allocator), imageBuilder_(allocator) {}
+        : device_(device), raiiDevice_(nullptr), allocator_(allocator), imageBuilder_(allocator) {}
+
+    MipChainBuilder(const vk::raii::Device& raiiDevice, VmaAllocator allocator)
+        : device_(static_cast<VkDevice>(*raiiDevice)), raiiDevice_(&raiiDevice), allocator_(allocator), imageBuilder_(allocator) {}
 
     MipChainBuilder& reset() {
         imageBuilder_.reset();
@@ -445,20 +481,29 @@ public:
         outResult.mipLevelCount = mipLevelCount;
         outResult.format = imageInfo.format;
 
-        // Create full image view (all mip levels)
-        VkImageViewCreateInfo viewInfo{};
-        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        viewInfo.image = outResult.image.get();
-        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        viewInfo.format = imageInfo.format;
-        viewInfo.subresourceRange.aspectMask = aspectMask_;
-        viewInfo.subresourceRange.baseMipLevel = 0;
-        viewInfo.subresourceRange.levelCount = mipLevelCount;
-        viewInfo.subresourceRange.baseArrayLayer = 0;
-        viewInfo.subresourceRange.layerCount = 1;
+        // Need raiiDevice for creating views
+        if (!raiiDevice_) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "MipChainBuilder: raiiDevice required for creating views");
+            outResult.reset();
+            return false;
+        }
 
-        if (!ManagedImageView::create(device_, viewInfo, outResult.fullView)) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "MipChainBuilder: Failed to create full view");
+        // Create full image view (all mip levels)
+        auto viewInfo = vk::ImageViewCreateInfo{}
+            .setImage(outResult.image.get())
+            .setViewType(vk::ImageViewType::e2D)
+            .setFormat(static_cast<vk::Format>(imageInfo.format))
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(static_cast<vk::ImageAspectFlags>(aspectMask_))
+                .setBaseMipLevel(0)
+                .setLevelCount(mipLevelCount)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1));
+
+        try {
+            outResult.fullView.emplace(*raiiDevice_, viewInfo);
+        } catch (const vk::SystemError& e) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "MipChainBuilder: Failed to create full view: %s", e.what());
             outResult.reset();
             return false;
         }
@@ -469,8 +514,10 @@ public:
             viewInfo.subresourceRange.baseMipLevel = i;
             viewInfo.subresourceRange.levelCount = 1;
 
-            if (!ManagedImageView::create(device_, viewInfo, outResult.mipViews[i])) {
-                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "MipChainBuilder: Failed to create mip view %u", i);
+            try {
+                outResult.mipViews[i].emplace(*raiiDevice_, viewInfo);
+            } catch (const vk::SystemError& e) {
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "MipChainBuilder: Failed to create mip view %u: %s", i, e.what());
                 outResult.reset();
                 return false;
             }
@@ -496,6 +543,7 @@ public:
 
 private:
     VkDevice device_;
+    const vk::raii::Device* raiiDevice_ = nullptr;
     VmaAllocator allocator_;
     ImageBuilder imageBuilder_;
     VkImageAspectFlags aspectMask_ = VK_IMAGE_ASPECT_COLOR_BIT;

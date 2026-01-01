@@ -1639,6 +1639,7 @@ void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float gra
 bool Renderer::initSkinnedMeshRenderer() {
     SkinnedMeshRenderer::InitInfo info{};
     info.device = vulkanContext_->getDevice();
+    info.raiiDevice = &vulkanContext_->getRaiiDevice();
     info.allocator = vulkanContext_->getAllocator();
     info.descriptorPool = &*descriptorManagerPool;
     info.renderPass = systems_->postProcess().getHDRRenderPass();

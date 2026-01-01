@@ -28,6 +28,12 @@ bool SkinnedMeshRenderer::initInternal(const InitInfo& info) {
     shaderPath = info.shaderPath;
     framesInFlight = info.framesInFlight;
     addCommonBindings = info.addCommonBindings;
+    raiiDevice_ = info.raiiDevice;
+
+    if (!raiiDevice_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SkinnedMeshRenderer requires raiiDevice");
+        return false;
+    }
 
     if (!createDescriptorSetLayout()) return false;
     if (!createPipeline()) return false;
@@ -59,31 +65,32 @@ bool SkinnedMeshRenderer::createDescriptorSetLayout() {
     // Add skinned-specific binding
     builder.addBinding(Bindings::BONE_MATRICES, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT);
 
-    if (!builder.buildManaged(descriptorSetLayout_)) {
+    VkDescriptorSetLayout rawLayout = builder.build();
+    if (rawLayout == VK_NULL_HANDLE) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create skinned descriptor set layout");
         return false;
     }
+    descriptorSetLayout_.emplace(*raiiDevice_, rawLayout);
 
     return true;
 }
 
 bool SkinnedMeshRenderer::createPipeline() {
-    // Create pipeline layout
-    VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-    pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(PushConstants);
+    // Create pipeline layout using vulkan-hpp builder
+    auto pushConstantRange = vk::PushConstantRange{}
+        .setStageFlags(vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment)
+        .setOffset(0)
+        .setSize(sizeof(PushConstants));
 
-    VkDescriptorSetLayout rawLayout = descriptorSetLayout_.get();
-    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
-    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutInfo.setLayoutCount = 1;
-    pipelineLayoutInfo.pSetLayouts = &rawLayout;
-    pipelineLayoutInfo.pushConstantRangeCount = 1;
-    pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
+    vk::DescriptorSetLayout layouts[] = { **descriptorSetLayout_ };
+    auto layoutInfo = vk::PipelineLayoutCreateInfo{}
+        .setSetLayouts(layouts)
+        .setPushConstantRanges(pushConstantRange);
 
-    if (!ManagedPipelineLayout::create(device, pipelineLayoutInfo, pipelineLayout_)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create skinned pipeline layout");
+    try {
+        pipelineLayout_.emplace(*raiiDevice_, layoutInfo);
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create skinned pipeline layout: %s", e.what());
         return false;
     }
 
@@ -100,7 +107,7 @@ bool SkinnedMeshRenderer::createPipeline() {
         .setVertexInput({bindingDescription},
                         {attributeDescriptions.begin(), attributeDescriptions.end()})
         .setRenderPass(renderPass)
-        .setPipelineLayout(pipelineLayout_.get())
+        .setPipelineLayout(**pipelineLayout_)
         .setExtent(extent)
         .setDynamicViewport(true)
         .setBlendMode(GraphicsPipelineFactory::BlendMode::Alpha)
@@ -111,7 +118,7 @@ bool SkinnedMeshRenderer::createPipeline() {
         return false;
     }
 
-    pipeline_ = ManagedPipeline::fromRaw(device, rawPipeline);
+    pipeline_.emplace(*raiiDevice_, rawPipeline);
 
     SDL_Log("Created skinned graphics pipeline for GPU skinning");
     return true;
@@ -145,7 +152,7 @@ bool SkinnedMeshRenderer::createBoneMatricesBuffers() {
 
 bool SkinnedMeshRenderer::createDescriptorSets(const DescriptorResources& resources) {
     // Allocate descriptor sets
-    descriptorSets = descriptorPool->allocate(descriptorSetLayout_.get(), framesInFlight);
+    descriptorSets = descriptorPool->allocate(**descriptorSetLayout_, framesInFlight);
     if (descriptorSets.empty()) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate skinned descriptor sets");
         return false;
@@ -239,7 +246,7 @@ void SkinnedMeshRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex,
     vk::CommandBuffer vkCmd(cmd);
 
     // Bind skinned pipeline
-    vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline_.get());
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, **pipeline_);
 
     // Set dynamic viewport and scissor to handle window resize
     auto viewport = vk::Viewport{}
@@ -258,7 +265,7 @@ void SkinnedMeshRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex,
 
     // Bind skinned descriptor set
     vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
-                             pipelineLayout_.get(), 0,
+                             **pipelineLayout_, 0,
                              vk::DescriptorSet(descriptorSets[frameIndex]), {});
 
     // Push constants
@@ -272,7 +279,7 @@ void SkinnedMeshRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex,
     push.pbrFlags = playerObj.pbrFlags;
 
     vkCmd.pushConstants<PushConstants>(
-        pipelineLayout_.get(),
+        **pipelineLayout_,
         vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
         0, push);
 
