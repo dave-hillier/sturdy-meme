@@ -112,14 +112,16 @@ const float GRASS_DISPLACEMENT_THRESHOLD = 0.01;
 // CULLING AND LOD
 // =============================================================================
 
-// Maximum draw distance (meters)
-const float GRASS_MAX_DRAW_DISTANCE = 50.0;
+// Maximum draw distance (meters) - must be >= LOD1_DISTANCE_END to see all LOD levels
+// With multi-LOD tiles: LOD0 up to 80m, LOD1 up to 200m, LOD2 beyond
+const float GRASS_MAX_DRAW_DISTANCE = 250.0;
 
-// LOD transition zone
-const float GRASS_LOD_TRANSITION_START = 30.0;
-const float GRASS_LOD_TRANSITION_END = 50.0;
+// Legacy LOD transition zone (for additional blade dropping within tiles)
+// This supplements the tile-based LOD system with smooth per-blade culling
+const float GRASS_LOD_TRANSITION_START = 150.0;
+const float GRASS_LOD_TRANSITION_END = 250.0;
 
-// Maximum blade drop rate at far LOD (50%)
+// Maximum blade drop rate at far distance (50% - on top of tile LOD reduction)
 const float GRASS_MAX_LOD_DROP_RATE = 0.5;
 
 // Frustum culling margin (accounts for double-buffer lag and shadow casting)

@@ -92,14 +92,16 @@ inline constexpr uint32_t MAX_DISPLACEMENT_SOURCES = 16;
 // CULLING AND LOD
 // =============================================================================
 
-// Maximum draw distance (meters)
-inline constexpr float MAX_DRAW_DISTANCE = 50.0f;
+// Maximum draw distance (meters) - must be >= LOD1_DISTANCE_END to see all LOD levels
+// With multi-LOD tiles: LOD0 up to 80m, LOD1 up to 200m, LOD2 beyond
+inline constexpr float MAX_DRAW_DISTANCE = 250.0f;
 
-// LOD transition zone
-inline constexpr float LOD_TRANSITION_START = 30.0f;
-inline constexpr float LOD_TRANSITION_END = 50.0f;
+// Legacy LOD transition zone (for additional blade dropping within tiles)
+// This supplements the tile-based LOD system with smooth per-blade culling
+inline constexpr float LOD_TRANSITION_START = 150.0f;
+inline constexpr float LOD_TRANSITION_END = 250.0f;
 
-// Maximum blade drop rate at far LOD (50%)
+// Maximum blade drop rate at far distance (50% - on top of tile LOD reduction)
 inline constexpr float MAX_LOD_DROP_RATE = 0.5f;
 
 // =============================================================================
