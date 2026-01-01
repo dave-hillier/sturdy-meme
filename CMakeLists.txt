@@ -7,6 +7,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Option to skip terrain preprocessing (faster builds)
 option(SKIP_TERRAIN_PREPROCESSING "Skip building terrain preprocessing tools" OFF)
 
+# Option to enable Tracy profiler
+option(ENABLE_TRACY "Enable Tracy profiler integration" ON)
+
 find_package(Vulkan REQUIRED)
 find_package(VulkanHeaders CONFIG REQUIRED)  # vulkan-hpp headers
 find_package(SDL3 CONFIG REQUIRED)
@@ -19,6 +22,11 @@ find_package(fastgltf CONFIG REQUIRED)
 find_package(unofficial-openfbx CONFIG REQUIRED)
 find_package(lodepng CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
+
+# Tracy profiler (optional)
+if(ENABLE_TRACY)
+    find_package(Tracy CONFIG REQUIRED)
+endif()
 
 find_path(STB_INCLUDE_DIRS "stb_image.h")
 
@@ -300,6 +308,12 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     lodepng
     nlohmann_json::nlohmann_json
 )
+
+# Link Tracy profiler if enabled
+if(ENABLE_TRACY)
+    target_link_libraries(${PROJECT_NAME} PRIVATE Tracy::TracyClient)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE TRACY_ENABLE)
+endif()
 
 # Enable Jolt Physics debug renderer for visualization
 target_compile_definitions(${PROJECT_NAME} PRIVATE JPH_DEBUG_RENDERER)

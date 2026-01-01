@@ -47,6 +47,8 @@
     "miniz",
     "libarchive",
     "doctest",
-    "meshoptimizer"
+    "meshoptimizer",
+    "entt",
+    "tracy"
   ]
 }

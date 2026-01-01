@@ -36,6 +36,8 @@
 #include "PhysicsDebugRenderer.h"
 #endif
 
+#include "TracyIntegration.h"
+
 #ifdef __APPLE__
 #include <CoreFoundation/CoreFoundation.h>
 #endif
@@ -464,6 +466,8 @@ void Application::run() {
         lastDeltaTime = deltaTime;
         if (deltaTime > 0.0f) {
             currentFps = currentFps * 0.95f + (1.0f / deltaTime) * 0.05f;
+            TRACY_PLOT("FPS", currentFps);
+            TRACY_PLOT("Frame Time (ms)", deltaTime * 1000.0f);
         }
 
         processEvents();
@@ -554,16 +558,19 @@ void Application::run() {
         }
 
         // Always update physics character controller (handles gravity, jumping, and movement)
-        physics().updateCharacter(deltaTime, desiredVelocity, wantsJump);
+        {
+            TRACY_ZONE_SCOPED_NC("Physics", TRACY_COLOR_PHYSICS);
+            physics().updateCharacter(deltaTime, desiredVelocity, wantsJump);
 
-        // Update physics simulation
-        physics().update(deltaTime);
+            // Update physics simulation
+            physics().update(deltaTime);
 
-        // Update physics terrain tiles based on player position
-        glm::vec3 playerPos = physics().getCharacterPosition();
-        physicsTerrainManager_.update(playerPos);
+            // Update physics terrain tiles based on player position
+            physicsTerrainManager_.update(physics().getCharacterPosition());
+        }
 
         // Sync player entity position from physics character controller
+        glm::vec3 playerPos = physics().getCharacterPosition();
         glm::vec3 physicsVelocity = physics().getCharacterVelocity();
         playerTransform.position = playerPos;
         player_.grounded = physics().isCharacterOnGround();
@@ -589,20 +596,23 @@ void Application::run() {
         updateFlag(deltaTime);
 
         // Update animated character (skeletal animation)
-        // Calculate movement speed from desired velocity for animation state machine
-        float movementSpeed = glm::length(glm::vec2(desiredVelocity.x, desiredVelocity.z));
-        bool isGrounded = physics().isCharacterOnGround();
+        {
+            TRACY_ZONE_SCOPED_NC("Animation", TRACY_COLOR_ANIMATION);
+            // Calculate movement speed from desired velocity for animation state machine
+            float movementSpeed = glm::length(glm::vec2(desiredVelocity.x, desiredVelocity.z));
+            bool isGrounded = physics().isCharacterOnGround();
 
-        // Sync settings from GUI
-        renderer_->getSystems().scene().getSceneBuilder().setCapeEnabled(gui_->getPlayerSettings().capeEnabled);
-        renderer_->getSystems().scene().getSceneBuilder().setShowSword(gui_->getPlayerSettings().showSword);
-        renderer_->getSystems().scene().getSceneBuilder().setShowShield(gui_->getPlayerSettings().showShield);
-        renderer_->getSystems().scene().getSceneBuilder().setShowWeaponAxes(gui_->getPlayerSettings().showWeaponAxes);
+            // Sync settings from GUI
+            renderer_->getSystems().scene().getSceneBuilder().setCapeEnabled(gui_->getPlayerSettings().capeEnabled);
+            renderer_->getSystems().scene().getSceneBuilder().setShowSword(gui_->getPlayerSettings().showSword);
+            renderer_->getSystems().scene().getSceneBuilder().setShowShield(gui_->getPlayerSettings().showShield);
+            renderer_->getSystems().scene().getSceneBuilder().setShowWeaponAxes(gui_->getPlayerSettings().showWeaponAxes);
 
-        renderer_->getSystems().scene().getSceneBuilder().updateAnimatedCharacter(
-            deltaTime, renderer_->getVulkanContext().getAllocator(), renderer_->getVulkanContext().getVkDevice(),
-            renderer_->getCommandPool(), renderer_->getVulkanContext().getVkGraphicsQueue(),
-            movementSpeed, isGrounded, isJumping);
+            renderer_->getSystems().scene().getSceneBuilder().updateAnimatedCharacter(
+                deltaTime, renderer_->getVulkanContext().getAllocator(), renderer_->getVulkanContext().getVkDevice(),
+                renderer_->getCommandPool(), renderer_->getVulkanContext().getVkGraphicsQueue(),
+                movementSpeed, isGrounded, isJumping);
+        }
 
         // Update NPC animations with LOD based on camera position
         renderer_->getSystems().scene().getSceneBuilder().updateNPCs(
@@ -649,6 +659,9 @@ void Application::run() {
         snprintf(title, sizeof(title), "Vulkan Game - FPS: %.0f | Time: %02d:%02d | %s (Tab to toggle)",
                  smoothedFps, hours, minutes, modeStr);
         SDL_SetWindowTitle(window, title);
+
+        // Mark end of frame for Tracy profiler
+        TRACY_FRAME_MARK;
     }
 
     renderer_->waitIdle();

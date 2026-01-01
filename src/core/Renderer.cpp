@@ -101,6 +101,8 @@
 #include <numeric>
 #include <chrono>
 
+#include "TracyIntegration.h"
+
 std::unique_ptr<Renderer> Renderer::create(const InitInfo& info) {
     auto instance = std::make_unique<Renderer>(ConstructToken{});
 
@@ -418,6 +420,8 @@ bool Renderer::createDescriptorSets() {
 }
 
 bool Renderer::render(const Camera& camera) {
+    TRACY_ZONE_SCOPED_NC("Renderer::render", TRACY_COLOR_POSTFX);
+
     // Skip rendering if window is suspended (e.g., macOS screen lock)
     if (windowSuspended) {
         return false;
@@ -571,10 +575,13 @@ bool Renderer::render(const Camera& camera) {
     }
 
     // Update all subsystems (wind, grass, weather, terrain, snow, trees, water, etc.)
-    FrameUpdater::SnowConfig snowConfig;
-    snowConfig.maxSnowHeight = MAX_SNOW_HEIGHT;
-    snowConfig.useVolumetricSnow = useVolumetricSnow;
-    FrameUpdater::updateAllSystems(*systems_, frame, extent, snowConfig);
+    {
+        TRACY_ZONE_SCOPED_N("SystemUpdates");
+        FrameUpdater::SnowConfig snowConfig;
+        snowConfig.maxSnowHeight = MAX_SNOW_HEIGHT;
+        snowConfig.useVolumetricSnow = useVolumetricSnow;
+        FrameUpdater::updateAllSystems(*systems_, frame, extent, snowConfig);
+    }
 
     // Begin command buffer recording
     systems_->profiler().beginCpuZone("CmdBufferRecord");
