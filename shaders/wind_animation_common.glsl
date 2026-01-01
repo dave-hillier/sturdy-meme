@@ -81,7 +81,7 @@ TreeWindOscillation windCalculateTreeOscillation(vec3 treeBaseWorld, WindParams 
 // branchLevel: 0 = trunk (stiff), 3 = tips (flexible)
 // Returns flexibility factor for bend calculations
 float windCalculateBranchFlexibility(float branchLevel) {
-    return 0.02 + branchLevel * 0.025;  // 0.02 to 0.095
+    return 0.04 + branchLevel * 0.06;  // 0.04 to 0.22 (doubled for more visible sway)
 }
 
 // Calculate wind direction-relative motion scale
@@ -133,7 +133,7 @@ vec3 windCalculateDetailOffset(
 ) {
     float detailFreq = windTime * gustFreq * 5.0;
     float detailNoise = simplex3(vec3(localPos.x * 2.0, localPos.y * 2.0, detailFreq * 0.3));
-    float detailAmount = branchLevel * 0.01 * windStrength;
+    float detailAmount = branchLevel * 0.03 * windStrength;  // Increased from 0.01 for more visible tip flutter
     return vec3(detailNoise, 0.0, detailNoise * 0.7) * detailAmount;
 }
 
@@ -180,7 +180,10 @@ vec3 windCalculateBranchSwayInfluence(
     float leafHeight,
     float windStrength
 ) {
-    float branchInfluence = leafHeight * 0.03 * windStrength;
+    // Match branch tip motion: branches use heightAbovePivot * flexibility
+    // where heightAbovePivot is ~20% of leafHeight for tip branches
+    // and tip flexibility is 0.22, so factor ≈ 0.2 * 0.22 = 0.044
+    float branchInfluence = leafHeight * 0.04 * windStrength;
     return osc.windDir3D * osc.mainBend * branchInfluence +
            osc.windPerp3D * osc.perpBend * branchInfluence * 0.5;
 }
