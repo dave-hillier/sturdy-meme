@@ -1,13 +1,15 @@
 #pragma once
 
 #include <vulkan/vulkan.h>
+#include <vulkan/vulkan_raii.hpp>
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
 #include <memory>
+#include <optional>
 #include "InitContext.h"
-#include "VulkanRAII.h"
+#include "VmaResources.h"
 
 /**
  * OceanFFT - FFT-based Ocean Simulation (Tessendorf Method)
@@ -84,6 +86,7 @@ public:
         uint32_t framesInFlight;
         OceanParams params;
         bool useCascades = true;  // Enable multi-scale cascades
+        const vk::raii::Device* raiiDevice = nullptr;
     };
 
     /**
@@ -112,7 +115,7 @@ public:
     VkImageView getDisplacementView(int cascade = 0) const;
     VkImageView getNormalView(int cascade = 0) const;
     VkImageView getFoamView(int cascade = 0) const;
-    VkSampler getSampler() const { return sampler.get(); }
+    VkSampler getSampler() const { return sampler_ ? **sampler_ : VK_NULL_HANDLE; }
 
     // Parameter access
     void setParams(const OceanParams& newParams);
@@ -155,37 +158,37 @@ private:
     struct Cascade {
         // Spectrum textures (generated once)
         ManagedImage h0Spectrum;
-        ManagedImageView h0SpectrumView;
+        std::optional<vk::raii::ImageView> h0SpectrumView;
 
         ManagedImage omegaSpectrum;
-        ManagedImageView omegaSpectrumView;
+        std::optional<vk::raii::ImageView> omegaSpectrumView;
 
         // Time-evolved spectrum (per frame)
         ManagedImage hktDy;
-        ManagedImageView hktDyView;
+        std::optional<vk::raii::ImageView> hktDyView;
 
         ManagedImage hktDx;
-        ManagedImageView hktDxView;
+        std::optional<vk::raii::ImageView> hktDxView;
 
         ManagedImage hktDz;
-        ManagedImageView hktDzView;
+        std::optional<vk::raii::ImageView> hktDzView;
 
         // FFT ping-pong buffers (reused for all 3 components)
         ManagedImage fftPing;
-        ManagedImageView fftPingView;
+        std::optional<vk::raii::ImageView> fftPingView;
 
         ManagedImage fftPong;
-        ManagedImageView fftPongView;
+        std::optional<vk::raii::ImageView> fftPongView;
 
         // Output textures
         ManagedImage displacementMap;
-        ManagedImageView displacementMapView;
+        std::optional<vk::raii::ImageView> displacementMapView;
 
         ManagedImage normalMap;
-        ManagedImageView normalMapView;
+        std::optional<vk::raii::ImageView> normalMapView;
 
         ManagedImage foamMap;
-        ManagedImageView foamMapView;
+        std::optional<vk::raii::ImageView> foamMapView;
 
         // Cascade-specific config
         CascadeConfig config;
@@ -193,7 +196,7 @@ private:
 
     bool createComputePipelines();
     bool createCascade(Cascade& cascade, const CascadeConfig& config);
-    bool createImage(ManagedImage& image, ManagedImageView& view,
+    bool createImage(ManagedImage& image, std::optional<vk::raii::ImageView>& view,
                      VkFormat format, uint32_t width, uint32_t height, VkImageUsageFlags usage);
     bool createDescriptorSets();
 
@@ -223,21 +226,21 @@ private:
     int cascadeCount = 1;  // Start with single cascade
 
     // Compute pipelines
-    ManagedPipeline spectrumPipeline;
-    ManagedPipelineLayout spectrumPipelineLayout;
-    ManagedDescriptorSetLayout spectrumDescLayout;
+    std::optional<vk::raii::Pipeline> spectrumPipeline_;
+    std::optional<vk::raii::PipelineLayout> spectrumPipelineLayout_;
+    std::optional<vk::raii::DescriptorSetLayout> spectrumDescLayout_;
 
-    ManagedPipeline timeEvolutionPipeline;
-    ManagedPipelineLayout timeEvolutionPipelineLayout;
-    ManagedDescriptorSetLayout timeEvolutionDescLayout;
+    std::optional<vk::raii::Pipeline> timeEvolutionPipeline_;
+    std::optional<vk::raii::PipelineLayout> timeEvolutionPipelineLayout_;
+    std::optional<vk::raii::DescriptorSetLayout> timeEvolutionDescLayout_;
 
-    ManagedPipeline fftPipeline;
-    ManagedPipelineLayout fftPipelineLayout;
-    ManagedDescriptorSetLayout fftDescLayout;
+    std::optional<vk::raii::Pipeline> fftPipeline_;
+    std::optional<vk::raii::PipelineLayout> fftPipelineLayout_;
+    std::optional<vk::raii::DescriptorSetLayout> fftDescLayout_;
 
-    ManagedPipeline displacementPipeline;
-    ManagedPipelineLayout displacementPipelineLayout;
-    ManagedDescriptorSetLayout displacementDescLayout;
+    std::optional<vk::raii::Pipeline> displacementPipeline_;
+    std::optional<vk::raii::PipelineLayout> displacementPipelineLayout_;
+    std::optional<vk::raii::DescriptorSetLayout> displacementDescLayout_;
 
     // Descriptor pool and sets
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
@@ -266,5 +269,8 @@ private:
     std::vector<void*> spectrumUBOMapped;
 
     // Sampler for output textures
-    ManagedSampler sampler;
+    std::optional<vk::raii::Sampler> sampler_;
+
+    // RAII device pointer
+    const vk::raii::Device* raiiDevice_ = nullptr;
 };

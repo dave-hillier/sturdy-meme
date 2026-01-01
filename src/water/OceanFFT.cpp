@@ -37,6 +37,12 @@ bool OceanFFT::initInternal(const InitInfo& info) {
     shaderPath = info.shaderPath;
     framesInFlight = info.framesInFlight;
     params = info.params;
+    raiiDevice_ = info.raiiDevice;
+
+    if (!raiiDevice_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: raiiDevice is required");
+        return false;
+    }
 
     // Set up cascades based on configuration
     if (info.useCascades) {
@@ -89,8 +95,10 @@ bool OceanFFT::initInternal(const InitInfo& info) {
         .setMaxLod(0.0f)
         .setBorderColor(vk::BorderColor::eFloatOpaqueBlack);
 
-    if (!ManagedSampler::create(device, *reinterpret_cast<const VkSamplerCreateInfo*>(&samplerInfo), sampler)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to create sampler");
+    try {
+        sampler_.emplace(*raiiDevice_, samplerInfo);
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to create sampler: %s", e.what());
         return false;
     }
 
@@ -127,6 +135,12 @@ bool OceanFFT::initInternal(const InitContext& ctx, const OceanParams& oceanPara
     shaderPath = ctx.shaderPath;
     framesInFlight = ctx.framesInFlight;
     params = oceanParams;
+    raiiDevice_ = ctx.raiiDevice;
+
+    if (!raiiDevice_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: raiiDevice is required");
+        return false;
+    }
 
     // Set up cascades based on configuration
     if (useCascades) {
@@ -179,8 +193,10 @@ bool OceanFFT::initInternal(const InitContext& ctx, const OceanParams& oceanPara
         .setMaxLod(0.0f)
         .setBorderColor(vk::BorderColor::eFloatOpaqueBlack);
 
-    if (!ManagedSampler::create(device, *reinterpret_cast<const VkSamplerCreateInfo*>(&samplerInfo2), sampler)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to create sampler");
+    try {
+        sampler_.emplace(*raiiDevice_, samplerInfo2);
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to create sampler: %s", e.what());
         return false;
     }
 
@@ -228,29 +244,30 @@ void OceanFFT::cleanup() {
     spectrumUBOMapped.clear();
 
     // Clear pipelines and layouts (RAII handles cleanup)
-    spectrumPipeline = ManagedPipeline();
-    spectrumPipelineLayout = ManagedPipelineLayout();
-    spectrumDescLayout = ManagedDescriptorSetLayout();
+    spectrumPipeline_.reset();
+    spectrumPipelineLayout_.reset();
+    spectrumDescLayout_.reset();
 
-    timeEvolutionPipeline = ManagedPipeline();
-    timeEvolutionPipelineLayout = ManagedPipelineLayout();
-    timeEvolutionDescLayout = ManagedDescriptorSetLayout();
+    timeEvolutionPipeline_.reset();
+    timeEvolutionPipelineLayout_.reset();
+    timeEvolutionDescLayout_.reset();
 
-    fftPipeline = ManagedPipeline();
-    fftPipelineLayout = ManagedPipelineLayout();
-    fftDescLayout = ManagedDescriptorSetLayout();
+    fftPipeline_.reset();
+    fftPipelineLayout_.reset();
+    fftDescLayout_.reset();
 
-    displacementPipeline = ManagedPipeline();
-    displacementPipelineLayout = ManagedPipelineLayout();
-    displacementDescLayout = ManagedDescriptorSetLayout();
+    displacementPipeline_.reset();
+    displacementPipelineLayout_.reset();
+    displacementDescLayout_.reset();
 
     // Clear sampler (RAII handles cleanup)
-    sampler = ManagedSampler();
+    sampler_.reset();
 
     device = VK_NULL_HANDLE;
+    raiiDevice_ = nullptr;
 }
 
-bool OceanFFT::createImage(ManagedImage& image, ManagedImageView& view,
+bool OceanFFT::createImage(ManagedImage& image, std::optional<vk::raii::ImageView>& view,
                            VkFormat format, uint32_t width, uint32_t height, VkImageUsageFlags usage) {
     auto imageInfo = vk::ImageCreateInfo{}
         .setImageType(vk::ImageType::e2D)
@@ -282,7 +299,10 @@ bool OceanFFT::createImage(ManagedImage& image, ManagedImageView& view,
             .setBaseArrayLayer(0)
             .setLayerCount(1));
 
-    if (!ManagedImageView::create(device, *reinterpret_cast<const VkImageViewCreateInfo*>(&viewInfo), view)) {
+    try {
+        view.emplace(*raiiDevice_, viewInfo);
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to create image view: %s", e.what());
         return false;
     }
 
@@ -373,13 +393,13 @@ bool OceanFFT::createComputePipelines() {
         if (rawDescLayout == VK_NULL_HANDLE) {
             return false;
         }
-        spectrumDescLayout = ManagedDescriptorSetLayout::fromRaw(device, rawDescLayout);
+        spectrumDescLayout_.emplace(*raiiDevice_, rawDescLayout);
 
-        VkPipelineLayout rawPipelineLayout = DescriptorManager::createPipelineLayout(device, spectrumDescLayout.get());
+        VkPipelineLayout rawPipelineLayout = DescriptorManager::createPipelineLayout(device, **spectrumDescLayout_);
         if (rawPipelineLayout == VK_NULL_HANDLE) {
             return false;
         }
-        spectrumPipelineLayout = ManagedPipelineLayout::fromRaw(device, rawPipelineLayout);
+        spectrumPipelineLayout_.emplace(*raiiDevice_, rawPipelineLayout);
 
         auto shaderModule = ShaderLoader::loadShaderModule(device, shaderPath + "/ocean_spectrum.comp.spv");
         if (!shaderModule) {
@@ -394,15 +414,17 @@ bool OceanFFT::createComputePipelines() {
 
         auto pipelineInfo = vk::ComputePipelineCreateInfo{}
             .setStage(stageInfo)
-            .setLayout(spectrumPipelineLayout.get());
+            .setLayout(**spectrumPipelineLayout_);
 
-        bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE,
-            *reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), spectrumPipeline);
-        vk::Device(device).destroyShaderModule(*shaderModule);
-
-        if (!success) {
+        VkPipeline rawPipeline = VK_NULL_HANDLE;
+        if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1,
+                reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo),
+                nullptr, &rawPipeline) != VK_SUCCESS) {
+            vk::Device(device).destroyShaderModule(*shaderModule);
             return false;
         }
+        spectrumPipeline_.emplace(*raiiDevice_, rawPipeline);
+        vk::Device(device).destroyShaderModule(*shaderModule);
     }
 
     // =========================================================================
@@ -419,7 +441,7 @@ bool OceanFFT::createComputePipelines() {
         if (rawDescLayout == VK_NULL_HANDLE) {
             return false;
         }
-        timeEvolutionDescLayout = ManagedDescriptorSetLayout::fromRaw(device, rawDescLayout);
+        timeEvolutionDescLayout_.emplace(*raiiDevice_, rawDescLayout);
 
         // Push constants for time and parameters
         auto pushRange = vk::PushConstantRange{}
@@ -427,12 +449,12 @@ bool OceanFFT::createComputePipelines() {
             .setOffset(0)
             .setSize(sizeof(OceanTimeEvolutionPushConstants));
 
-        VkPipelineLayout rawPipelineLayout = DescriptorManager::createPipelineLayout(device, timeEvolutionDescLayout.get(),
+        VkPipelineLayout rawPipelineLayout = DescriptorManager::createPipelineLayout(device, **timeEvolutionDescLayout_,
             {*reinterpret_cast<const VkPushConstantRange*>(&pushRange)});
         if (rawPipelineLayout == VK_NULL_HANDLE) {
             return false;
         }
-        timeEvolutionPipelineLayout = ManagedPipelineLayout::fromRaw(device, rawPipelineLayout);
+        timeEvolutionPipelineLayout_.emplace(*raiiDevice_, rawPipelineLayout);
 
         auto shaderModule = ShaderLoader::loadShaderModule(device, shaderPath + "/ocean_time_evolution.comp.spv");
         if (!shaderModule) {
@@ -447,15 +469,17 @@ bool OceanFFT::createComputePipelines() {
 
         auto pipelineInfo = vk::ComputePipelineCreateInfo{}
             .setStage(stageInfo)
-            .setLayout(timeEvolutionPipelineLayout.get());
+            .setLayout(**timeEvolutionPipelineLayout_);
 
-        bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE,
-            *reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), timeEvolutionPipeline);
-        vk::Device(device).destroyShaderModule(*shaderModule);
-
-        if (!success) {
+        VkPipeline rawPipeline = VK_NULL_HANDLE;
+        if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1,
+                reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo),
+                nullptr, &rawPipeline) != VK_SUCCESS) {
+            vk::Device(device).destroyShaderModule(*shaderModule);
             return false;
         }
+        timeEvolutionPipeline_.emplace(*raiiDevice_, rawPipeline);
+        vk::Device(device).destroyShaderModule(*shaderModule);
     }
 
     // =========================================================================
@@ -469,7 +493,7 @@ bool OceanFFT::createComputePipelines() {
         if (rawDescLayout == VK_NULL_HANDLE) {
             return false;
         }
-        fftDescLayout = ManagedDescriptorSetLayout::fromRaw(device, rawDescLayout);
+        fftDescLayout_.emplace(*raiiDevice_, rawDescLayout);
 
         // Push constants: stage, direction, resolution, inverse
         auto pushRange = vk::PushConstantRange{}
@@ -477,12 +501,12 @@ bool OceanFFT::createComputePipelines() {
             .setOffset(0)
             .setSize(sizeof(OceanFFTPushConstants));
 
-        VkPipelineLayout rawPipelineLayout = DescriptorManager::createPipelineLayout(device, fftDescLayout.get(),
+        VkPipelineLayout rawPipelineLayout = DescriptorManager::createPipelineLayout(device, **fftDescLayout_,
             {*reinterpret_cast<const VkPushConstantRange*>(&pushRange)});
         if (rawPipelineLayout == VK_NULL_HANDLE) {
             return false;
         }
-        fftPipelineLayout = ManagedPipelineLayout::fromRaw(device, rawPipelineLayout);
+        fftPipelineLayout_.emplace(*raiiDevice_, rawPipelineLayout);
 
         auto shaderModule = ShaderLoader::loadShaderModule(device, shaderPath + "/ocean_fft.comp.spv");
         if (!shaderModule) {
@@ -497,15 +521,17 @@ bool OceanFFT::createComputePipelines() {
 
         auto pipelineInfo = vk::ComputePipelineCreateInfo{}
             .setStage(stageInfo)
-            .setLayout(fftPipelineLayout.get());
+            .setLayout(**fftPipelineLayout_);
 
-        bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE,
-            *reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), fftPipeline);
-        vk::Device(device).destroyShaderModule(*shaderModule);
-
-        if (!success) {
+        VkPipeline rawPipeline = VK_NULL_HANDLE;
+        if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1,
+                reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo),
+                nullptr, &rawPipeline) != VK_SUCCESS) {
+            vk::Device(device).destroyShaderModule(*shaderModule);
             return false;
         }
+        fftPipeline_.emplace(*raiiDevice_, rawPipeline);
+        vk::Device(device).destroyShaderModule(*shaderModule);
     }
 
     // =========================================================================
@@ -523,7 +549,7 @@ bool OceanFFT::createComputePipelines() {
         if (rawDescLayout == VK_NULL_HANDLE) {
             return false;
         }
-        displacementDescLayout = ManagedDescriptorSetLayout::fromRaw(device, rawDescLayout);
+        displacementDescLayout_.emplace(*raiiDevice_, rawDescLayout);
 
         // Push constants
         auto pushRange = vk::PushConstantRange{}
@@ -531,12 +557,12 @@ bool OceanFFT::createComputePipelines() {
             .setOffset(0)
             .setSize(sizeof(OceanDisplacementPushConstants));
 
-        VkPipelineLayout rawPipelineLayout = DescriptorManager::createPipelineLayout(device, displacementDescLayout.get(),
+        VkPipelineLayout rawPipelineLayout = DescriptorManager::createPipelineLayout(device, **displacementDescLayout_,
             {*reinterpret_cast<const VkPushConstantRange*>(&pushRange)});
         if (rawPipelineLayout == VK_NULL_HANDLE) {
             return false;
         }
-        displacementPipelineLayout = ManagedPipelineLayout::fromRaw(device, rawPipelineLayout);
+        displacementPipelineLayout_.emplace(*raiiDevice_, rawPipelineLayout);
 
         auto shaderModule = ShaderLoader::loadShaderModule(device, shaderPath + "/ocean_displacement.comp.spv");
         if (!shaderModule) {
@@ -551,15 +577,17 @@ bool OceanFFT::createComputePipelines() {
 
         auto pipelineInfo = vk::ComputePipelineCreateInfo{}
             .setStage(stageInfo)
-            .setLayout(displacementPipelineLayout.get());
+            .setLayout(**displacementPipelineLayout_);
 
-        bool success = ManagedPipeline::createCompute(device, VK_NULL_HANDLE,
-            *reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), displacementPipeline);
-        vk::Device(device).destroyShaderModule(*shaderModule);
-
-        if (!success) {
+        VkPipeline rawPipeline = VK_NULL_HANDLE;
+        if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1,
+                reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo),
+                nullptr, &rawPipeline) != VK_SUCCESS) {
+            vk::Device(device).destroyShaderModule(*shaderModule);
             return false;
         }
+        displacementPipeline_.emplace(*raiiDevice_, rawPipeline);
+        vk::Device(device).destroyShaderModule(*shaderModule);
     }
 
     return true;
@@ -620,7 +648,7 @@ bool OceanFFT::createDescriptorSets() {
     for (int i = 0; i < cascadeCount; i++) {
         // Spectrum descriptor set
         {
-            vk::DescriptorSetLayout spectrumLayout(spectrumDescLayout.get());
+            vk::DescriptorSetLayout spectrumLayout(**spectrumDescLayout_);
             auto allocInfo = vk::DescriptorSetAllocateInfo{}
                 .setDescriptorPool(descriptorPool)
                 .setSetLayouts(spectrumLayout);
@@ -634,15 +662,15 @@ bool OceanFFT::createDescriptorSets() {
             }
 
             DescriptorManager::SetWriter(device, spectrumDescSets[i])
-                .writeStorageImage(Bindings::OCEAN_SPECTRUM_H0, cascades[i].h0SpectrumView.get())
-                .writeStorageImage(Bindings::OCEAN_SPECTRUM_OMEGA, cascades[i].omegaSpectrumView.get())
+                .writeStorageImage(Bindings::OCEAN_SPECTRUM_H0, **cascades[i].h0SpectrumView)
+                .writeStorageImage(Bindings::OCEAN_SPECTRUM_OMEGA, **cascades[i].omegaSpectrumView)
                 .writeBuffer(Bindings::OCEAN_SPECTRUM_PARAMS, spectrumUBOs[i].get(), 0, sizeof(SpectrumUBO))
                 .update();
         }
 
         // Time evolution descriptor set
         {
-            vk::DescriptorSetLayout timeLayout(timeEvolutionDescLayout.get());
+            vk::DescriptorSetLayout timeLayout(**timeEvolutionDescLayout_);
             auto allocInfo = vk::DescriptorSetAllocateInfo{}
                 .setDescriptorPool(descriptorPool)
                 .setSetLayouts(timeLayout);
@@ -656,17 +684,17 @@ bool OceanFFT::createDescriptorSets() {
             }
 
             DescriptorManager::SetWriter(device, timeEvolutionDescSets[i])
-                .writeStorageImage(Bindings::OCEAN_HKT_DY, cascades[i].hktDyView.get())
-                .writeStorageImage(Bindings::OCEAN_HKT_DX, cascades[i].hktDxView.get())
-                .writeStorageImage(Bindings::OCEAN_HKT_DZ, cascades[i].hktDzView.get())
-                .writeImage(Bindings::OCEAN_H0_INPUT, cascades[i].h0SpectrumView.get(), sampler.get())
-                .writeImage(Bindings::OCEAN_OMEGA_INPUT, cascades[i].omegaSpectrumView.get(), sampler.get())
+                .writeStorageImage(Bindings::OCEAN_HKT_DY, **cascades[i].hktDyView)
+                .writeStorageImage(Bindings::OCEAN_HKT_DX, **cascades[i].hktDxView)
+                .writeStorageImage(Bindings::OCEAN_HKT_DZ, **cascades[i].hktDzView)
+                .writeImage(Bindings::OCEAN_H0_INPUT, **cascades[i].h0SpectrumView, **sampler_)
+                .writeImage(Bindings::OCEAN_OMEGA_INPUT, **cascades[i].omegaSpectrumView, **sampler_)
                 .update();
         }
 
         // Displacement descriptor set
         {
-            vk::DescriptorSetLayout dispLayout(displacementDescLayout.get());
+            vk::DescriptorSetLayout dispLayout(**displacementDescLayout_);
             auto allocInfo = vk::DescriptorSetAllocateInfo{}
                 .setDescriptorPool(descriptorPool)
                 .setSetLayouts(dispLayout);
@@ -706,12 +734,12 @@ void OceanFFT::update(VkCommandBuffer cmd, uint32_t frameIndex, float time) {
         Barriers::computeToCompute(cmd);
 
         // FFT for each displacement component
-        recordFFT(cmd, cascade, cascade.hktDy.get(), cascade.hktDyView.get(),
-                  cascade.fftPing.get(), cascade.fftPingView.get());
-        recordFFT(cmd, cascade, cascade.hktDx.get(), cascade.hktDxView.get(),
-                  cascade.fftPong.get(), cascade.fftPongView.get());
-        recordFFT(cmd, cascade, cascade.hktDz.get(), cascade.hktDzView.get(),
-                  cascade.fftPing.get(), cascade.fftPingView.get());
+        recordFFT(cmd, cascade, cascade.hktDy.get(), **cascade.hktDyView,
+                  cascade.fftPing.get(), **cascade.fftPingView);
+        recordFFT(cmd, cascade, cascade.hktDx.get(), **cascade.hktDxView,
+                  cascade.fftPong.get(), **cascade.fftPongView);
+        recordFFT(cmd, cascade, cascade.hktDz.get(), **cascade.hktDzView,
+                  cascade.fftPing.get(), **cascade.fftPingView);
 
         // Barrier before displacement generation
         Barriers::computeToCompute(cmd);
@@ -764,8 +792,8 @@ void OceanFFT::recordSpectrumGeneration(VkCommandBuffer cmd, Cascade& cascade, u
 
     // Bind pipeline and descriptor set
     int cascadeIndex = static_cast<int>(&cascade - &cascades[0]);
-    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, spectrumPipeline.get());
-    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, spectrumPipelineLayout.get(),
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, **spectrumPipeline_);
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, **spectrumPipelineLayout_,
                              0, spectrumDescSets[cascadeIndex], {});
 
     // Dispatch
@@ -797,8 +825,8 @@ void OceanFFT::recordTimeEvolution(VkCommandBuffer cmd, Cascade& cascade, float 
         .submit();
 
     // Bind pipeline
-    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, timeEvolutionPipeline.get());
-    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, timeEvolutionPipelineLayout.get(),
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, **timeEvolutionPipeline_);
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, **timeEvolutionPipelineLayout_,
                              0, timeEvolutionDescSets[cascadeIndex], {});
 
     // Push constants
@@ -810,7 +838,7 @@ void OceanFFT::recordTimeEvolution(VkCommandBuffer cmd, Cascade& cascade, float 
     };
 
     vkCmd.pushConstants<OceanTimeEvolutionPushConstants>(
-        timeEvolutionPipelineLayout.get(), vk::ShaderStageFlagBits::eCompute, 0, pushConstants);
+        **timeEvolutionPipelineLayout_, vk::ShaderStageFlagBits::eCompute, 0, pushConstants);
 
     // Dispatch
     uint32_t groupSize = 16;
@@ -831,7 +859,7 @@ void OceanFFT::recordFFT(VkCommandBuffer cmd, Cascade& cascade,
 
     // Allocate temporary FFT descriptor sets dynamically
     VkDescriptorSet fftDescSet;
-    vk::DescriptorSetLayout fftLayout(fftDescLayout.get());
+    vk::DescriptorSetLayout fftLayout(**fftDescLayout_);
     auto allocInfo = vk::DescriptorSetAllocateInfo{}
         .setDescriptorPool(descriptorPool)
         .setSetLayouts(fftLayout);
@@ -848,10 +876,10 @@ void OceanFFT::recordFFT(VkCommandBuffer cmd, Cascade& cascade,
     VkImage currentInput = input;
     VkImageView currentInputView = inputView;
     VkImage currentOutput = cascade.fftPing.get();
-    VkImageView currentOutputView = cascade.fftPingView.get();
+    VkImageView currentOutputView = **cascade.fftPingView;
 
     vk::CommandBuffer vkCmd(cmd);
-    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, fftPipeline.get());
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, **fftPipeline_);
 
     // Horizontal FFT passes
     for (int stage = 0; stage < numStages; stage++) {
@@ -860,13 +888,13 @@ void OceanFFT::recordFFT(VkCommandBuffer cmd, Cascade& cascade,
             .writeStorageImage(Bindings::OCEAN_FFT_OUTPUT, currentOutputView)
             .update();
 
-        vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, fftPipelineLayout.get(),
+        vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, **fftPipelineLayout_,
                                  0, fftDescSet, {});
 
         // Push constants: stage, direction (0=horizontal), resolution, inverse (1=IFFT)
         OceanFFTPushConstants pushData = {stage, 0, params.resolution, 1};
         vkCmd.pushConstants<OceanFFTPushConstants>(
-            fftPipelineLayout.get(), vk::ShaderStageFlagBits::eCompute, 0, pushData);
+            **fftPipelineLayout_, vk::ShaderStageFlagBits::eCompute, 0, pushData);
 
         vkCmd.dispatch(groupCount, groupCount, 1);
 
@@ -880,14 +908,14 @@ void OceanFFT::recordFFT(VkCommandBuffer cmd, Cascade& cascade,
         // Use ping/pong buffers for subsequent stages
         if (stage == 0) {
             currentOutput = cascade.fftPong.get();
-            currentOutputView = cascade.fftPongView.get();
+            currentOutputView = **cascade.fftPongView;
         } else {
             if (currentOutput == cascade.fftPing.get()) {
                 currentOutput = cascade.fftPong.get();
-                currentOutputView = cascade.fftPongView.get();
+                currentOutputView = **cascade.fftPongView;
             } else {
                 currentOutput = cascade.fftPing.get();
-                currentOutputView = cascade.fftPingView.get();
+                currentOutputView = **cascade.fftPingView;
             }
         }
     }
@@ -899,13 +927,13 @@ void OceanFFT::recordFFT(VkCommandBuffer cmd, Cascade& cascade,
             .writeStorageImage(Bindings::OCEAN_FFT_OUTPUT, currentOutputView)
             .update();
 
-        vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, fftPipelineLayout.get(),
+        vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, **fftPipelineLayout_,
                                  0, fftDescSet, {});
 
         // Push constants: stage, direction (1=vertical), resolution, inverse
         OceanFFTPushConstants pushData = {stage, 1, params.resolution, 1};
         vkCmd.pushConstants<OceanFFTPushConstants>(
-            fftPipelineLayout.get(), vk::ShaderStageFlagBits::eCompute, 0, pushData);
+            **fftPipelineLayout_, vk::ShaderStageFlagBits::eCompute, 0, pushData);
 
         vkCmd.dispatch(groupCount, groupCount, 1);
 
@@ -916,10 +944,10 @@ void OceanFFT::recordFFT(VkCommandBuffer cmd, Cascade& cascade,
 
         if (currentOutput == cascade.fftPing.get()) {
             currentOutput = cascade.fftPong.get();
-            currentOutputView = cascade.fftPongView.get();
+            currentOutputView = **cascade.fftPongView;
         } else {
             currentOutput = cascade.fftPing.get();
-            currentOutputView = cascade.fftPingView.get();
+            currentOutputView = **cascade.fftPingView;
         }
     }
 }
@@ -939,18 +967,18 @@ void OceanFFT::recordDisplacementGeneration(VkCommandBuffer cmd, Cascade& cascad
 
     // Update displacement descriptor set with current FFT results
     DescriptorManager::SetWriter(device, displacementDescSets[cascadeIndex])
-        .writeStorageImage(Bindings::OCEAN_DISP_DY, cascade.fftPingView.get())
-        .writeStorageImage(Bindings::OCEAN_DISP_DX, cascade.fftPongView.get())
-        .writeStorageImage(Bindings::OCEAN_DISP_DZ, cascade.fftPingView.get())
-        .writeStorageImage(Bindings::OCEAN_DISP_OUTPUT, cascade.displacementMapView.get())
-        .writeStorageImage(Bindings::OCEAN_NORMAL_OUTPUT, cascade.normalMapView.get())
-        .writeStorageImage(Bindings::OCEAN_FOAM_OUTPUT, cascade.foamMapView.get())
+        .writeStorageImage(Bindings::OCEAN_DISP_DY, **cascade.fftPingView)
+        .writeStorageImage(Bindings::OCEAN_DISP_DX, **cascade.fftPongView)
+        .writeStorageImage(Bindings::OCEAN_DISP_DZ, **cascade.fftPingView)
+        .writeStorageImage(Bindings::OCEAN_DISP_OUTPUT, **cascade.displacementMapView)
+        .writeStorageImage(Bindings::OCEAN_NORMAL_OUTPUT, **cascade.normalMapView)
+        .writeStorageImage(Bindings::OCEAN_FOAM_OUTPUT, **cascade.foamMapView)
         .update();
 
     // Bind and dispatch
     vk::CommandBuffer vkCmd(cmd);
-    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, displacementPipeline.get());
-    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, displacementPipelineLayout.get(),
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, **displacementPipeline_);
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, **displacementPipelineLayout_,
                              0, displacementDescSets[cascadeIndex], {});
 
     // Push constants
@@ -964,7 +992,7 @@ void OceanFFT::recordDisplacementGeneration(VkCommandBuffer cmd, Cascade& cascad
     };
 
     vkCmd.pushConstants<OceanDisplacementPushConstants>(
-        displacementPipelineLayout.get(), vk::ShaderStageFlagBits::eCompute, 0, pushConstants);
+        **displacementPipelineLayout_, vk::ShaderStageFlagBits::eCompute, 0, pushConstants);
 
     uint32_t groupSize = 16;
     uint32_t groupCount = (params.resolution + groupSize - 1) / groupSize;
@@ -984,17 +1012,17 @@ void OceanFFT::recordDisplacementGeneration(VkCommandBuffer cmd, Cascade& cascad
 
 VkImageView OceanFFT::getDisplacementView(int cascade) const {
     if (cascade < 0 || cascade >= cascadeCount) return VK_NULL_HANDLE;
-    return cascades[cascade].displacementMapView.get();
+    return cascades[cascade].displacementMapView ? **cascades[cascade].displacementMapView : VK_NULL_HANDLE;
 }
 
 VkImageView OceanFFT::getNormalView(int cascade) const {
     if (cascade < 0 || cascade >= cascadeCount) return VK_NULL_HANDLE;
-    return cascades[cascade].normalMapView.get();
+    return cascades[cascade].normalMapView ? **cascades[cascade].normalMapView : VK_NULL_HANDLE;
 }
 
 VkImageView OceanFFT::getFoamView(int cascade) const {
     if (cascade < 0 || cascade >= cascadeCount) return VK_NULL_HANDLE;
-    return cascades[cascade].foamMapView.get();
+    return cascades[cascade].foamMapView ? **cascades[cascade].foamMapView : VK_NULL_HANDLE;
 }
 
 void OceanFFT::setParams(const OceanParams& newParams) {

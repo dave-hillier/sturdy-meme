@@ -1,14 +1,15 @@
 #pragma once
 
 #include <vulkan/vulkan.h>
+#include <vulkan/vulkan_raii.hpp>
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
 #include <memory>
+#include <optional>
 
 #include "DescriptorManager.h"
-#include "VulkanRAII.h"
 
 /**
  * WaterGBuffer - Phase 3: Screen-Space Mini G-Buffer
@@ -31,6 +32,7 @@ public:
         uint32_t framesInFlight;
         std::string shaderPath;         // Path to shader SPV files
         DescriptorManager::Pool* descriptorPool; // For allocating descriptor sets
+        const vk::raii::Device* raiiDevice = nullptr;
     };
 
     // G-buffer data packed into textures
@@ -65,19 +67,19 @@ public:
     void resize(VkExtent2D newFullResExtent);
 
     // Get render pass for position pass
-    VkRenderPass getRenderPass() const { return renderPass.get(); }
-    VkFramebuffer getFramebuffer() const { return framebuffer.get(); }
+    VkRenderPass getRenderPass() const { return renderPass_ ? **renderPass_ : VK_NULL_HANDLE; }
+    VkFramebuffer getFramebuffer() const { return framebuffer_ ? **framebuffer_ : VK_NULL_HANDLE; }
     VkExtent2D getExtent() const { return gbufferExtent; }
 
     // Get G-buffer textures for sampling in composite pass
     VkImageView getDataImageView() const { return dataImageView; }
     VkImageView getNormalImageView() const { return normalImageView; }
     VkImageView getDepthImageView() const { return depthImageView; }
-    VkSampler getSampler() const { return sampler.get(); }
+    VkSampler getSampler() const { return sampler_ ? **sampler_ : VK_NULL_HANDLE; }
 
     // Get pipeline resources
-    VkPipeline getPipeline() const { return pipeline.get(); }
-    VkPipelineLayout getPipelineLayout() const { return pipelineLayout.get(); }
+    VkPipeline getPipeline() const { return pipeline_ ? **pipeline_ : VK_NULL_HANDLE; }
+    VkPipelineLayout getPipelineLayout() const { return pipelineLayout_ ? **pipelineLayout_ : VK_NULL_HANDLE; }
     VkDescriptorSet getDescriptorSet(uint32_t frameIndex) const { return descriptorSets[frameIndex]; }
 
     // Create descriptor sets after resources are available
@@ -135,18 +137,21 @@ private:
     VmaAllocation depthAllocation = VK_NULL_HANDLE;
 
     // Render pass and framebuffer (RAII-managed)
-    ManagedRenderPass renderPass;
-    ManagedFramebuffer framebuffer;
+    std::optional<vk::raii::RenderPass> renderPass_;
+    std::optional<vk::raii::Framebuffer> framebuffer_;
 
     // Sampler for reading G-buffer in composite pass (RAII-managed)
-    ManagedSampler sampler;
+    std::optional<vk::raii::Sampler> sampler_;
 
     // Graphics pipeline for position pass (RAII-managed)
-    ManagedPipeline pipeline;
-    ManagedPipelineLayout pipelineLayout;
-    ManagedDescriptorSetLayout descriptorSetLayout;
+    std::optional<vk::raii::Pipeline> pipeline_;
+    std::optional<vk::raii::PipelineLayout> pipelineLayout_;
+    std::optional<vk::raii::DescriptorSetLayout> descriptorSetLayout_;
     DescriptorManager::Pool* descriptorPool = nullptr;
     std::vector<VkDescriptorSet> descriptorSets;
     std::string shaderPath;
     uint32_t framesInFlight = 0;
+
+    // RAII device pointer
+    const vk::raii::Device* raiiDevice_ = nullptr;
 };

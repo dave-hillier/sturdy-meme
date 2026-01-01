@@ -29,6 +29,12 @@ bool WaterGBuffer::initInternal(const InitInfo& info) {
     shaderPath = info.shaderPath;
     descriptorPool = info.descriptorPool;
     framesInFlight = info.framesInFlight;
+    raiiDevice_ = info.raiiDevice;
+
+    if (!raiiDevice_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "WaterGBuffer: raiiDevice is required");
+        return false;
+    }
 
     // Calculate G-buffer resolution
     gbufferExtent.width = static_cast<uint32_t>(fullResExtent.width * resolutionScale);
@@ -86,15 +92,18 @@ void WaterGBuffer::cleanup() {
     vkDeviceWaitIdle(device);
 
     // RAII wrappers handle cleanup automatically - just reset them
-    pipeline = ManagedPipeline();
-    pipelineLayout = ManagedPipelineLayout();
-    descriptorSetLayout = ManagedDescriptorSetLayout();
+    pipeline_.reset();
+    pipelineLayout_.reset();
+    descriptorSetLayout_.reset();
     // Note: descriptor sets are freed when pool is destroyed
-    sampler = ManagedSampler();
-    framebuffer = ManagedFramebuffer();
-    renderPass = ManagedRenderPass();
+    sampler_.reset();
+    framebuffer_.reset();
+    renderPass_.reset();
 
     destroyImages();
+
+    device = VK_NULL_HANDLE;
+    raiiDevice_ = nullptr;
 
     SDL_Log("WaterGBuffer: Destroyed");
 }
@@ -113,7 +122,7 @@ void WaterGBuffer::resize(VkExtent2D newFullResExtent) {
     vkDeviceWaitIdle(device);
 
     // Destroy old framebuffer (RAII reset)
-    framebuffer = ManagedFramebuffer();
+    framebuffer_.reset();
 
     // Destroy and recreate images
     destroyImages();
@@ -345,7 +354,12 @@ bool WaterGBuffer::createRenderPass() {
     renderPassInfo.dependencyCount = static_cast<uint32_t>(dependencies.size());
     renderPassInfo.pDependencies = dependencies.data();
 
-    return ManagedRenderPass::create(device, renderPassInfo, renderPass);
+    VkRenderPass rawRenderPass = VK_NULL_HANDLE;
+    if (vkCreateRenderPass(device, &renderPassInfo, nullptr, &rawRenderPass) != VK_SUCCESS) {
+        return false;
+    }
+    renderPass_.emplace(*raiiDevice_, rawRenderPass);
+    return true;
 }
 
 bool WaterGBuffer::createFramebuffer() {
@@ -357,34 +371,44 @@ bool WaterGBuffer::createFramebuffer() {
 
     VkFramebufferCreateInfo framebufferInfo{};
     framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-    framebufferInfo.renderPass = renderPass.get();
+    framebufferInfo.renderPass = **renderPass_;
     framebufferInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
     framebufferInfo.pAttachments = attachments.data();
     framebufferInfo.width = gbufferExtent.width;
     framebufferInfo.height = gbufferExtent.height;
     framebufferInfo.layers = 1;
 
-    return ManagedFramebuffer::create(device, framebufferInfo, framebuffer);
+    VkFramebuffer rawFramebuffer = VK_NULL_HANDLE;
+    if (vkCreateFramebuffer(device, &framebufferInfo, nullptr, &rawFramebuffer) != VK_SUCCESS) {
+        return false;
+    }
+    framebuffer_.emplace(*raiiDevice_, rawFramebuffer);
+    return true;
 }
 
 bool WaterGBuffer::createSampler() {
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.mipLodBias = 0.0f;
-    samplerInfo.anisotropyEnable = VK_FALSE;
-    samplerInfo.maxAnisotropy = 1.0f;
-    samplerInfo.compareEnable = VK_FALSE;
-    samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = 0.0f;
-    samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
+    auto samplerInfo = vk::SamplerCreateInfo{}
+        .setMagFilter(vk::Filter::eLinear)
+        .setMinFilter(vk::Filter::eLinear)
+        .setMipmapMode(vk::SamplerMipmapMode::eNearest)
+        .setAddressModeU(vk::SamplerAddressMode::eClampToEdge)
+        .setAddressModeV(vk::SamplerAddressMode::eClampToEdge)
+        .setAddressModeW(vk::SamplerAddressMode::eClampToEdge)
+        .setMipLodBias(0.0f)
+        .setAnisotropyEnable(VK_FALSE)
+        .setMaxAnisotropy(1.0f)
+        .setCompareEnable(VK_FALSE)
+        .setMinLod(0.0f)
+        .setMaxLod(0.0f)
+        .setBorderColor(vk::BorderColor::eFloatOpaqueBlack);
 
-    return ManagedSampler::create(device, samplerInfo, sampler);
+    try {
+        sampler_.emplace(*raiiDevice_, samplerInfo);
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "WaterGBuffer: Failed to create sampler: %s", e.what());
+        return false;
+    }
+    return true;
 }
 
 void WaterGBuffer::beginRenderPass(VkCommandBuffer cmd) {
@@ -394,8 +418,8 @@ void WaterGBuffer::beginRenderPass(VkCommandBuffer cmd) {
     clearValues[2].depthStencil = vk::ClearDepthStencilValue{1.0f, 0};            // Depth (far)
 
     auto renderPassInfo = vk::RenderPassBeginInfo{}
-        .setRenderPass(renderPass.get())
-        .setFramebuffer(framebuffer.get())
+        .setRenderPass(**renderPass_)
+        .setFramebuffer(**framebuffer_)
         .setRenderArea(vk::Rect2D{{0, 0}, vk::Extent2D{gbufferExtent.width, gbufferExtent.height}})
         .setClearValues(clearValues);
 
@@ -464,17 +488,19 @@ bool WaterGBuffer::createDescriptorSetLayout() {
     layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
     layoutInfo.pBindings = bindings.data();
 
-    if (!ManagedDescriptorSetLayout::create(device, layoutInfo, descriptorSetLayout)) {
+    VkDescriptorSetLayout rawLayout = VK_NULL_HANDLE;
+    if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &rawLayout) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "WaterGBuffer: Failed to create descriptor set layout");
         return false;
     }
+    descriptorSetLayout_.emplace(*raiiDevice_, rawLayout);
 
     SDL_Log("WaterGBuffer: Descriptor set layout created");
     return true;
 }
 
 bool WaterGBuffer::createPipelineLayout() {
-    VkDescriptorSetLayout rawLayout = descriptorSetLayout.get();
+    VkDescriptorSetLayout rawLayout = **descriptorSetLayout_;
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.setLayoutCount = 1;
@@ -482,10 +508,12 @@ bool WaterGBuffer::createPipelineLayout() {
     pipelineLayoutInfo.pushConstantRangeCount = 0;
     pipelineLayoutInfo.pPushConstantRanges = nullptr;
 
-    if (!ManagedPipelineLayout::create(device, pipelineLayoutInfo, pipelineLayout)) {
+    VkPipelineLayout rawPipelineLayout = VK_NULL_HANDLE;
+    if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &rawPipelineLayout) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "WaterGBuffer: Failed to create pipeline layout");
         return false;
     }
+    pipelineLayout_.emplace(*raiiDevice_, rawPipelineLayout);
 
     SDL_Log("WaterGBuffer: Pipeline layout created");
     return true;
@@ -505,8 +533,8 @@ bool WaterGBuffer::createPipeline() {
     bool success = factory
         .setShaders(shaderPath + "/water_position.vert.spv",
                     shaderPath + "/water_position.frag.spv")
-        .setRenderPass(renderPass.get())
-        .setPipelineLayout(pipelineLayout.get())
+        .setRenderPass(**renderPass_)
+        .setPipelineLayout(**pipelineLayout_)
         .setExtent(gbufferExtent)
         .setDynamicViewport(true)
         .setVertexInput(bindings, attributes)
@@ -521,7 +549,7 @@ bool WaterGBuffer::createPipeline() {
         return false;
     }
 
-    pipeline = ManagedPipeline::fromRaw(device, rawPipeline);
+    pipeline_.emplace(*raiiDevice_, rawPipeline);
 
     SDL_Log("WaterGBuffer: Pipeline created");
     return true;
@@ -541,7 +569,7 @@ bool WaterGBuffer::createDescriptorSets(
     }
 
     // Allocate descriptor sets using DescriptorManager::Pool
-    descriptorSets = descriptorPool->allocate(descriptorSetLayout.get(), framesInFlight);
+    descriptorSets = descriptorPool->allocate(**descriptorSetLayout_, framesInFlight);
     if (descriptorSets.empty()) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "WaterGBuffer: Failed to allocate descriptor sets");
         return false;
