@@ -3,6 +3,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/constants.hpp>
 #include <filesystem>
+#include <cstring>
 
 namespace {
 // Compute full tree bounds including both branches and leaves
@@ -588,6 +589,75 @@ uint32_t TreeSystem::addTree(const glm::vec3& position, float rotation, float sc
     rebuildSceneObjects();
 
     return treeIndex;
+}
+
+uint32_t TreeSystem::addTreeFromStagedData(
+    const glm::vec3& position, float rotation, float scale,
+    const TreeOptions& options,
+    const std::vector<uint8_t>& branchVertexData,
+    uint32_t branchVertexCount,
+    const std::vector<uint32_t>& branchIndices,
+    const std::vector<uint8_t>& leafInstanceData,
+    uint32_t leafInstanceCount,
+    uint32_t archetypeIndex)
+{
+    // Create branch mesh from staged data
+    Mesh branchMesh;
+
+    if (!branchVertexData.empty() && branchVertexCount > 0) {
+        // Reconstruct vertex vector from raw bytes
+        std::vector<Vertex> vertices(branchVertexCount);
+        std::memcpy(vertices.data(), branchVertexData.data(),
+                    std::min(branchVertexData.size(), branchVertexCount * sizeof(Vertex)));
+
+        branchMesh.setCustomGeometry(vertices, branchIndices);
+        if (!branchMesh.upload(storedAllocator_, storedDevice_, storedCommandPool_, storedQueue_)) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeSystem: Failed to upload staged branch mesh");
+            return UINT32_MAX;
+        }
+    }
+
+    // Reconstruct leaf instances from raw bytes
+    std::vector<LeafInstanceGPU> leafInstances(leafInstanceCount);
+    if (leafInstanceCount > 0 && !leafInstanceData.empty()) {
+        std::memcpy(leafInstances.data(), leafInstanceData.data(),
+                    std::min(leafInstanceData.size(), leafInstanceCount * sizeof(LeafInstanceGPU)));
+    }
+
+    // Compute bounds from mesh and leaf instances
+    AABB fullBounds = computeFullTreeBounds(branchMesh, leafInstances);
+
+    uint32_t meshIndex = static_cast<uint32_t>(branchMeshes_.size());
+    branchMeshes_.push_back(std::move(branchMesh));
+    leafInstancesPerTree_.push_back(std::move(leafInstances));
+    treeOptions_.push_back(options);
+    treeMeshData_.push_back(TreeMeshData{});  // Empty mesh data for staged trees
+    fullTreeBounds_.push_back(fullBounds);
+
+    TreeInstanceData instance;
+    instance.position = position;
+    instance.rotation = rotation;
+    instance.scale = scale;
+    instance.meshIndex = meshIndex;
+    instance.isSelected = false;
+    instance.archetypeIndex = archetypeIndex;
+
+    uint32_t treeIndex = static_cast<uint32_t>(treeInstances_.size());
+    treeInstances_.push_back(instance);
+
+    // Note: Don't upload leaf buffer or rebuild scene objects here
+    // Caller should call finalizeLeafInstanceBuffer() after adding all trees
+
+    return treeIndex;
+}
+
+bool TreeSystem::finalizeLeafInstanceBuffer() {
+    if (!uploadLeafInstanceBuffer()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeSystem: Failed to upload leaf instance buffer");
+        return false;
+    }
+    rebuildSceneObjects();
+    return true;
 }
 
 void TreeSystem::removeTree(uint32_t index) {

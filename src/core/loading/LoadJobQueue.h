@@ -89,6 +89,42 @@ struct StagedBuffer : public StagedResource {
 };
 
 /**
+ * Staged tree mesh data (for threaded tree generation)
+ * Contains CPU-side geometry ready for GPU upload
+ */
+struct StagedTreeMesh : public StagedResource {
+    // Branch mesh geometry
+    std::vector<uint8_t> branchVertexData;  // Vertex data as raw bytes
+    std::vector<uint32_t> branchIndices;
+    uint32_t branchVertexCount = 0;
+    uint32_t branchVertexStride = 0;
+
+    // Leaf instance data (32 bytes per instance: vec4 positionAndSize + vec4 orientation)
+    std::vector<uint8_t> leafInstanceData;
+    uint32_t leafInstanceCount = 0;
+
+    // Tree placement info
+    float positionX = 0.0f;
+    float positionY = 0.0f;
+    float positionZ = 0.0f;
+    float rotation = 0.0f;
+    float scale = 1.0f;
+
+    // Tree options index (references pre-loaded options)
+    uint32_t optionsIndex = 0;
+
+    // For impostor archetype assignment
+    uint32_t archetypeIndex = 0;
+
+    std::string name;
+
+    size_t getMemorySize() const override {
+        return branchVertexData.size() + branchIndices.size() * sizeof(uint32_t) + leafInstanceData.size();
+    }
+    const char* getTypeName() const override { return "TreeMesh"; }
+};
+
+/**
  * Result of a completed load job
  */
 struct LoadJobResult {

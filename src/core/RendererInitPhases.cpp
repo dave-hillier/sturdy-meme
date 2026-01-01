@@ -26,6 +26,7 @@
 #include "CatmullClarkSystem.h"
 #include "RockSystem.h"
 #include "TreeSystem.h"
+#include "ThreadedTreeGenerator.h"
 #include "TreeRenderer.h"
 #include "TreeLODSystem.h"
 #include "ImpostorCullSystem.h"
@@ -419,6 +420,9 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
 
     // Add a forest 200 units away from the settlement
     // The forest is placed away from spawn for load testing
+    // Uses threaded tree generation for faster startup
+    std::unique_ptr<ThreadedTreeGenerator> threadedTreeGen;
+    std::vector<TreeOptions> forestTreeOptions;  // Store options for GPU upload
     {
         auto* treeSystem = systems_->tree();
         if (treeSystem) {
@@ -506,26 +510,101 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
                 }
             }
 
-            // Add trees at Poisson-distributed positions
-            for (size_t i = 0; i < placedTrees.size() && treesPlaced < numTrees; i++) {
-                float x = placedTrees[i].x;
-                float z = placedTrees[i].y;
-                float y = core.terrain.getHeightAt(x, z);
+            // Create threaded tree generator with 4 worker threads
+            threadedTreeGen = ThreadedTreeGenerator::create(4);
+            if (threadedTreeGen) {
+                // Queue all trees for parallel generation
+                std::vector<ThreadedTreeGenerator::TreeRequest> requests;
+                requests.reserve(placedTrees.size());
+                forestTreeOptions.reserve(placedTrees.size());
 
-                // Random rotation and scale variation
-                float rotation = nextRand() * 2.0f * 3.14159265f;
-                float scale = 0.7f + 0.6f * nextRand();
+                for (size_t i = 0; i < placedTrees.size() && treesPlaced < numTrees; i++) {
+                    float x = placedTrees[i].x;
+                    float z = placedTrees[i].y;
+                    float y = core.terrain.getHeightAt(x, z);
 
-                // Select tree type pseudo-randomly
-                size_t presetIdx = static_cast<size_t>(nextRand() * treePresets.size());
-                if (presetIdx >= treePresets.size()) presetIdx = treePresets.size() - 1;
-                auto opts = loadPreset(treePresets[presetIdx].first, treePresets[presetIdx].second);
+                    // Random rotation and scale variation
+                    float rotation = nextRand() * 2.0f * 3.14159265f;
+                    float scale = 0.7f + 0.6f * nextRand();
 
-                treeSystem->addTree(glm::vec3(x, y, z), rotation, scale, opts);
-                treesPlaced++;
+                    // Select tree type pseudo-randomly
+                    size_t presetIdx = static_cast<size_t>(nextRand() * treePresets.size());
+                    if (presetIdx >= treePresets.size()) presetIdx = treePresets.size() - 1;
+                    auto opts = loadPreset(treePresets[presetIdx].first, treePresets[presetIdx].second);
+
+                    // Determine archetype index based on leaf type
+                    uint32_t archetypeIndex = 0;
+                    const std::string& leafType = opts.leaves.type;
+                    if (leafType == "oak") archetypeIndex = 0;
+                    else if (leafType == "pine") archetypeIndex = 1;
+                    else if (leafType == "ash") archetypeIndex = 2;
+                    else if (leafType == "aspen") archetypeIndex = 3;
+
+                    ThreadedTreeGenerator::TreeRequest req;
+                    req.position = glm::vec3(x, y, z);
+                    req.rotation = rotation;
+                    req.scale = scale;
+                    req.options = opts;
+                    req.archetypeIndex = archetypeIndex;
+                    requests.push_back(req);
+                    forestTreeOptions.push_back(opts);
+                    treesPlaced++;
+                }
+
+                // Submit all trees for parallel generation (non-blocking)
+                threadedTreeGen->queueTrees(requests);
+                SDL_Log("Forest: queued %d trees for parallel generation", treesPlaced);
+            } else {
+                // Fallback to serial generation if threaded generator fails
+                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to create threaded tree generator, using serial generation");
+                for (size_t i = 0; i < placedTrees.size() && treesPlaced < numTrees; i++) {
+                    float x = placedTrees[i].x;
+                    float z = placedTrees[i].y;
+                    float y = core.terrain.getHeightAt(x, z);
+
+                    float rotation = nextRand() * 2.0f * 3.14159265f;
+                    float scale = 0.7f + 0.6f * nextRand();
+
+                    size_t presetIdx = static_cast<size_t>(nextRand() * treePresets.size());
+                    if (presetIdx >= treePresets.size()) presetIdx = treePresets.size() - 1;
+                    auto opts = loadPreset(treePresets[presetIdx].first, treePresets[presetIdx].second);
+
+                    treeSystem->addTree(glm::vec3(x, y, z), rotation, scale, opts);
+                    treesPlaced++;
+                }
+                SDL_Log("Forest added: %d trees (serial) at distance 200 units from settlement", treesPlaced);
             }
 
-            SDL_Log("Forest added: %d trees (Poisson disk) at distance 200 units from settlement", treesPlaced);
+            // Wait for threaded tree generation to complete and upload to GPU
+            if (threadedTreeGen) {
+                SDL_Log("Waiting for threaded tree generation to complete...");
+
+                // Wait for all trees to be generated
+                threadedTreeGen->waitForAll();
+
+                // Get completed trees and upload to GPU
+                auto stagedTrees = threadedTreeGen->getCompletedTrees();
+                int uploadedCount = 0;
+                for (auto& staged : stagedTrees) {
+                    uint32_t treeIdx = treeSystem->addTreeFromStagedData(
+                        staged.position, staged.rotation, staged.scale,
+                        staged.options,
+                        staged.branchVertexData, staged.branchVertexCount,
+                        staged.branchIndices,
+                        staged.leafInstanceData, staged.leafInstanceCount,
+                        staged.archetypeIndex);
+
+                    if (treeIdx != UINT32_MAX) {
+                        uploadedCount++;
+                    }
+                }
+
+                // Finalize leaf buffer and rebuild scene objects once for all trees
+                treeSystem->finalizeLeafInstanceBuffer();
+
+                SDL_Log("Forest: uploaded %d/%zu trees to GPU", uploadedCount, stagedTrees.size());
+                threadedTreeGen.reset();  // Clean up generator
+            }
 
             // Generate impostor archetypes for each unique tree type
             // The first 4 trees (display trees) define the archetypes: oak, pine, ash, aspen

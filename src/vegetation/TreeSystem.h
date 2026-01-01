@@ -79,6 +79,39 @@ public:
 
     // Tree management
     uint32_t addTree(const glm::vec3& position, float rotation, float scale, const TreeOptions& options);
+
+    /**
+     * Add a tree from pre-generated staged data (for threaded loading)
+     * This uploads pre-generated mesh data to GPU without regenerating
+     *
+     * @param position World position
+     * @param rotation Y-axis rotation in radians
+     * @param scale Uniform scale factor
+     * @param options Tree options for texture selection
+     * @param branchVertexData Raw vertex data (Vertex structs)
+     * @param branchVertexCount Number of vertices
+     * @param branchIndices Index buffer data
+     * @param leafInstanceData Raw leaf instance data (LeafInstanceGPU structs)
+     * @param leafInstanceCount Number of leaf instances
+     * @param archetypeIndex Impostor archetype index
+     * @return Tree index, or UINT32_MAX on failure
+     */
+    uint32_t addTreeFromStagedData(
+        const glm::vec3& position, float rotation, float scale,
+        const TreeOptions& options,
+        const std::vector<uint8_t>& branchVertexData,
+        uint32_t branchVertexCount,
+        const std::vector<uint32_t>& branchIndices,
+        const std::vector<uint8_t>& leafInstanceData,
+        uint32_t leafInstanceCount,
+        uint32_t archetypeIndex);
+
+    /**
+     * Batch upload leaf instance buffer after adding multiple trees
+     * Call this after adding all trees to avoid re-uploading for each tree
+     */
+    bool finalizeLeafInstanceBuffer();
+
     void removeTree(uint32_t index);
     void selectTree(int index);
     int getSelectedTreeIndex() const { return selectedTreeIndex_; }
