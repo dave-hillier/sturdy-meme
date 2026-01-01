@@ -953,6 +953,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     catmullClarkInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
     catmullClarkInfo.graphicsQueue = graphicsQueue;
     catmullClarkInfo.commandPool = commandPool.get();
+    catmullClarkInfo.raiiDevice = &vulkanContext_->getRaiiDevice();
 
     CatmullClarkConfig catmullClarkConfig{};
     catmullClarkConfig.position = suzannePos;

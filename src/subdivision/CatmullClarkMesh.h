@@ -1,11 +1,11 @@
 #pragma once
 
-#include "VulkanRAII.h"
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
 #include <vector>
 #include <cstdint>
+#include "VmaResources.h"
 
 // Halfedge mesh structure for Catmull-Clark subdivision
 // Based on the implementation from https://github.com/jdupuy/LongestEdgeBisection2D
