@@ -6,6 +6,8 @@
 #include "UBOs.h"
 #include <SDL3/SDL_log.h>
 #include <vulkan/vulkan.hpp>
+#include <algorithm>
+#include <numeric>
 
 std::unique_ptr<TreeLeafCulling> TreeLeafCulling::create(const InitInfo& info) {
     auto culling = std::unique_ptr<TreeLeafCulling>(new TreeLeafCulling());
@@ -704,6 +706,27 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
         }
     }
     if (numTrees == 0 || totalLeafInstances == 0) return;
+
+    // CRITICAL: Sort tree data by inputFirstInstance for binary search in shader.
+    // The shader's binary search assumes trees are sorted by their leaf instance range.
+    // If trees were added in non-sequential order, the search fails and defaults to
+    // tree 0 (usually oak), causing all leaves to render as oak.
+    std::vector<size_t> sortIndices(treeDataList.size());
+    std::iota(sortIndices.begin(), sortIndices.end(), 0);
+    std::sort(sortIndices.begin(), sortIndices.end(), [&](size_t a, size_t b) {
+        return treeDataList[a].inputFirstInstance < treeDataList[b].inputFirstInstance;
+    });
+
+    // Reorder both lists according to sorted indices
+    std::vector<TreeCullData> sortedTreeData(treeDataList.size());
+    std::vector<TreeRenderDataGPU> sortedRenderData(treeRenderDataList.size());
+    for (size_t i = 0; i < sortIndices.size(); ++i) {
+        sortedTreeData[i] = treeDataList[sortIndices[i]];
+        sortedTreeData[i].treeIndex = static_cast<uint32_t>(i);  // Update treeIndex to match new position
+        sortedRenderData[i] = treeRenderDataList[sortIndices[i]];
+    }
+    treeDataList = std::move(sortedTreeData);
+    treeRenderDataList = std::move(sortedRenderData);
 
     // Lazy initialization of cull buffers
     if (cullOutputBuffers_.empty()) {
