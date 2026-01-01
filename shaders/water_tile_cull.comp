@@ -66,6 +66,8 @@ layout(push_constant) uniform TileCullParams {
     float tileSize;
     float nearPlane;
     float farPlane;
+    uint maxTiles;       // Output buffer capacity
+    uint _pad0;
 };
 
 // Check if a point is below water
@@ -151,22 +153,41 @@ void main() {
     uvec4 visibleMask = subgroupBallot(tileVisible);
     uint visibleInSubgroup = subgroupBallotBitCount(visibleMask);
 
+    // Use compare-and-swap to only allocate slots within buffer capacity
     uint baseIdx = 0;
-    if (visibleInSubgroup > 0) {
-        if (subgroupElect()) {
-            baseIdx = atomicAdd(visibleCount, visibleInSubgroup);
+    uint slotsAllocated = 0;
+    if (visibleInSubgroup > 0 && subgroupElect()) {
+        uint expected = visibleCount;
+        while (true) {
+            uint available = (expected >= maxTiles) ? 0 : maxTiles - expected;
+            slotsAllocated = min(visibleInSubgroup, available);
+            if (slotsAllocated == 0) {
+                baseIdx = expected;
+                break;
+            }
+            uint desired = expected + slotsAllocated;
+            uint actual = atomicCompSwap(visibleCount, expected, desired);
+            if (actual == expected) {
+                baseIdx = expected;
+                break;
+            }
+            expected = actual;
         }
-        baseIdx = subgroupBroadcastFirst(baseIdx);
     }
+    baseIdx = subgroupBroadcastFirst(baseIdx);
+    slotsAllocated = subgroupBroadcastFirst(slotsAllocated);
 
     if (tileVisible) {
         uint laneOffset = subgroupBallotExclusiveBitCount(visibleMask);
-        uint tileIndex = baseIdx + laneOffset;
+        // Only write if we got a valid slot within bounds
+        if (laneOffset < slotsAllocated) {
+            uint tileIndex = baseIdx + laneOffset;
 
-        // Store tile data
-        tiles[tileIndex].tileCoord = tileCoord;
-        tiles[tileIndex].minDepth = minLinear;
-        tiles[tileIndex].maxDepth = maxLinear;
+            // Store tile data
+            tiles[tileIndex].tileCoord = tileCoord;
+            tiles[tileIndex].minDepth = minLinear;
+            tiles[tileIndex].maxDepth = maxLinear;
+        }
     }
 
     // First thread updates indirect draw command

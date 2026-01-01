@@ -36,7 +36,8 @@ layout(std140, binding = BINDING_HIZ_CULL_UNIFORMS) uniform HiZCullUniforms {
     vec4 depthParams;           // x = near, y = far, z = numMipLevels, w = unused
     uint objectCount;           // Number of objects to cull
     uint enableHiZ;             // 1 = use Hi-Z, 0 = frustum only
-    uint padding[2];
+    uint maxDrawCommands;       // Output buffer capacity
+    uint padding;
 } uniforms;
 
 // Input: Object data
@@ -221,12 +222,37 @@ void main() {
     uint activeCount = subgroupBallotBitCount(activeMask);
     uint laneOffset = subgroupBallotExclusiveBitCount(activeMask);
 
+    // Use compare-and-swap to only allocate slots within buffer capacity
     uint baseIdx = 0;
+    uint slotsAllocated = 0;
     if (subgroupElect()) {
-        baseIdx = atomicAdd(drawCount, activeCount);
+        uint expected = drawCount;
+        while (true) {
+            uint available = (expected >= uniforms.maxDrawCommands)
+                ? 0
+                : uniforms.maxDrawCommands - expected;
+            slotsAllocated = min(activeCount, available);
+            if (slotsAllocated == 0) {
+                baseIdx = expected;
+                break;
+            }
+            uint desired = expected + slotsAllocated;
+            uint actual = atomicCompSwap(drawCount, expected, desired);
+            if (actual == expected) {
+                baseIdx = expected;
+                break;
+            }
+            expected = actual;
+        }
     }
     baseIdx = subgroupBroadcastFirst(baseIdx);
+    slotsAllocated = subgroupBroadcastFirst(slotsAllocated);
     uint drawIndex = baseIdx + laneOffset;
+
+    // Only write if we got a valid slot within bounds
+    if (laneOffset >= slotsAllocated) {
+        return;
+    }
 
     // Write indirect draw command
     drawCommands[drawIndex].indexCount = obj.indexCount;

@@ -61,6 +61,8 @@ layout(push_constant) uniform PushConstants {
     float heightScale;
     uint cascadeIndex;
     uint totalWorkgroups;   // Total number of workgroups in this dispatch
+    uint maxShadowIndices;  // Output buffer capacity
+    uint _pad0;
 };
 
 // Shadow visible indices buffer: [count, index0, index1, ...]
@@ -88,6 +90,7 @@ layout(constant_id = 0) const uint MESHLET_INDEX_COUNT = 0;
 // Shared memory for workgroup-level aggregation
 shared uint workgroupVisibleCount;
 shared uint workgroupBaseSlot;
+shared uint workgroupSlotsAllocated;
 
 // Transform UV to world position with tile cache support
 vec3 uvToWorldPos(vec2 uv) {
@@ -162,14 +165,31 @@ void main() {
     // Synchronize workgroup to get final count
     barrier();
 
-    // First thread in workgroup does single atomic to global buffer
+    // First thread in workgroup does atomic allocation with capacity check
     if (localIndex == 0u) {
-        workgroupBaseSlot = atomicAdd(shadowVisibleCount, workgroupVisibleCount);
+        workgroupSlotsAllocated = 0u;
+        // Use compare-and-swap to only allocate slots within buffer capacity
+        uint expected = shadowVisibleCount;
+        while (true) {
+            uint available = (expected >= maxShadowIndices) ? 0 : maxShadowIndices - expected;
+            workgroupSlotsAllocated = min(workgroupVisibleCount, available);
+            if (workgroupSlotsAllocated == 0u) {
+                workgroupBaseSlot = expected;
+                break;
+            }
+            uint desired = expected + workgroupSlotsAllocated;
+            uint actual = atomicCompSwap(shadowVisibleCount, expected, desired);
+            if (actual == expected) {
+                workgroupBaseSlot = expected;
+                break;
+            }
+            expected = actual;
+        }
     }
     barrier();
 
-    // Write visible indices to global buffer
-    if (visible) {
+    // Write visible indices to global buffer (only if we got a valid slot)
+    if (visible && localOffset < workgroupSlotsAllocated) {
         uint globalSlot = workgroupBaseSlot + localOffset;
         shadowIndices[globalSlot] = myLeafIndex;
     }
