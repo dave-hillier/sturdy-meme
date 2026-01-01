@@ -160,6 +160,7 @@ void ThreadedTreeGenerator::queueTree(const TreeRequest& request) {
         staged->rotation = request.rotation;
         staged->scale = request.scale;
         staged->archetypeIndex = request.archetypeIndex;
+        staged->options = request.options;
 
         return staged;
     };
@@ -296,6 +297,7 @@ void ThreadedTreeGenerator::queueTrees(const std::vector<TreeRequest>& requests)
             staged->rotation = request.rotation;
             staged->scale = request.scale;
             staged->archetypeIndex = request.archetypeIndex;
+            staged->options = request.options;
 
             return staged;
         };
@@ -340,6 +342,7 @@ std::vector<ThreadedTreeGenerator::StagedTree> ThreadedTreeGenerator::getComplet
         tree.rotation = stagedMesh->rotation;
         tree.scale = stagedMesh->scale;
         tree.archetypeIndex = stagedMesh->archetypeIndex;
+        tree.options = std::move(stagedMesh->options);
 
         trees.push_back(std::move(tree));
         pendingCount_--;

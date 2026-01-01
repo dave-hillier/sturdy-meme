@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 #include <variant>
+#include "vegetation/TreeOptions.h"
 
 /**
  * LoadJobQueue - Generic async job queue for startup loading
@@ -110,8 +111,8 @@ struct StagedTreeMesh : public StagedResource {
     float rotation = 0.0f;
     float scale = 1.0f;
 
-    // Tree options index (references pre-loaded options)
-    uint32_t optionsIndex = 0;
+    // Tree options for texture selection (bark/leaf types)
+    TreeOptions options;
 
     // For impostor archetype assignment
     uint32_t archetypeIndex = 0;
