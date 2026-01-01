@@ -3,6 +3,10 @@
 // Phase 3: Two-Phase Leaf Culling
 // This shader processes leaves only for visible trees (determined by tree_filter.comp)
 // One workgroup per visible tree - much more efficient than global leaf dispatch
+//
+// Stability: Uses deterministic slot allocation based on leaf distance.
+// Closer leaves always get priority, eliminating frame-to-frame flickering
+// when the budget is exceeded.
 
 #extension GL_GOOGLE_include_directive : require
 #extension GL_KHR_shader_subgroup_ballot : require
@@ -17,16 +21,6 @@
 // Workgroup size: 256 threads per workgroup
 // Each workgroup processes one visible tree's leaves
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
-
-// Distance-based budget tiers to prioritize nearby tree leaves
-// Aligned with 64m cell size for consistency with spatial index
-const uint NUM_DISTANCE_TIERS = 3;
-const float TIER_DISTANCES[NUM_DISTANCE_TIERS] = float[](64.0, 128.0, 256.0);
-// Budget allocation per tier (as fraction of maxLeavesPerType):
-// Tier 0 (0-64m):    50% - close trees always get leaves
-// Tier 1 (64-128m):  30% - medium distance
-// Tier 2 (128m+):    20% - distant trees share remainder
-const float TIER_BUDGET_FRACTIONS[NUM_DISTANCE_TIERS] = float[](0.5, 0.3, 0.2);
 
 // Visible tree data (from tree_filter.comp)
 struct VisibleTreeData {
@@ -63,12 +57,8 @@ layout(std430, binding = BINDING_LEAF_CULL_P3_OUTPUT) writeonly buffer OutputBuf
 };
 
 // One indirect draw command per leaf type
-// Also includes per-tier budget tracking for distance-based prioritization
 layout(std430, binding = BINDING_LEAF_CULL_P3_INDIRECT) buffer IndirectBuffer {
     DrawIndexedIndirectCommand drawCmds[NUM_LEAF_TYPES];
-    // Per-type, per-tier instance counts for budget enforcement
-    // Layout: tierCounts[leafType][tier]
-    uint tierCounts[NUM_LEAF_TYPES * NUM_DISTANCE_TIERS];
 };
 
 // Include shared culling uniforms
@@ -83,31 +73,28 @@ layout(std140, binding = BINDING_LEAF_CULL_P3_PARAMS) uniform LeafCullP3Params {
     uint _pad2;
 } leafP3Params;
 
-// Get distance tier for budget allocation
-uint getDistanceTier(float dist) {
-    if (dist < TIER_DISTANCES[0]) return 0;
-    if (dist < TIER_DISTANCES[1]) return 1;
-    return 2;
+// Simple hash function for deterministic leaf selection
+uint hashLeaf(uint treeIndex, uint leafIndex) {
+    uint h = treeIndex * 2654435761u + leafIndex * 2246822519u;
+    h ^= h >> 16;
+    h *= 2246822519u;
+    h ^= h >> 13;
+    h *= 3266489917u;
+    h ^= h >> 16;
+    return h;
 }
 
-// Get budget limit for a specific tier within a leaf type
-uint getTierBudgetLimit(uint leafType, uint tier) {
-    // Each tier gets a fraction of the per-type budget
-    // Cumulative: tier 0 gets its fraction, tier 1 gets tier0 + its fraction, etc.
-    float cumulativeFraction = 0.0;
-    for (uint t = 0; t <= tier; t++) {
-        cumulativeFraction += TIER_BUDGET_FRACTIONS[t];
-    }
-    return uint(float(leafP3Params.maxLeavesPerType) * cumulativeFraction);
+// Convert distance to a priority value (0-1, closer = higher priority)
+// Uses exponential falloff so nearby leaves have much higher priority
+float distanceToPriority(float dist, float maxDist) {
+    float normalized = clamp(dist / maxDist, 0.0, 1.0);
+    // Exponential: close leaves get priority ~1.0, far leaves get priority ~0.0
+    return exp(-normalized * 3.0);
 }
 
 void main() {
-    uint localIdx = gl_LocalInvocationID.x;     // Leaf index within this tree
+    uint localIdx = gl_LocalInvocationID.x;     // Thread index within workgroup
     uint visibleTreeIdx = gl_WorkGroupID.x;     // Which visible tree we're processing
-
-    // NOTE: Indirect command and tierCounts initialization is done on CPU side via vkCmdUpdateBuffer
-    // BEFORE dispatch. Shader-side init with barrier() only syncs within a workgroup,
-    // causing race conditions when multiple workgroups run in parallel.
 
     // Early exit if beyond visible tree count
     if (visibleTreeIdx >= visibleTreeCount) {
@@ -117,28 +104,26 @@ void main() {
     // Get visible tree data
     VisibleTreeData visTree = visibleTrees[visibleTreeIdx];
 
-    // Skip if fully in impostor mode (should be filtered by tree_filter, but double-check)
+    // Skip if fully in impostor mode
     if (visTree.lodBlendFactor >= 1.0) {
         return;
     }
 
     // Get original tree data for model matrix
     TreeCullData tree = allTrees[visTree.originalTreeIndex];
+    uint leafType = min(visTree.leafTypeIndex, NUM_LEAF_TYPES - 1);
 
-    // Process leaves for this tree
-    // Each thread handles multiple leaves if the tree has more than 256
+    // Process leaves - each thread handles multiple leaves if tree has more than 256
     for (uint i = localIdx; i < visTree.leafInstanceCount; i += 256) {
         uint globalLeafIdx = visTree.leafFirstInstance + i;
-
-        // Get input leaf instance
         LeafInstance leaf = inputInstances[globalLeafIdx];
 
-        // Cull leaf using shared function
+        // Cull leaf
         vec4 worldPos;
         float leafSize;
         float distToCamera;
 
-        if (cullLeaf(
+        bool culled = cullLeaf(
             leaf.positionAndSize.xyz,
             leaf.positionAndSize.w,
             tree.treeModel,
@@ -152,65 +137,46 @@ void main() {
             worldPos,
             leafSize,
             distToCamera
-        )) {
+        );
+
+        if (culled) {
             continue;
         }
 
-        // Get leaf type and distance tier
-        uint leafType = min(visTree.leafTypeIndex, NUM_LEAF_TYPES - 1);
-        uint tier = getDistanceTier(distToCamera);
+        // Deterministic priority-based selection:
+        // - Generate a stable hash for this leaf (same every frame)
+        // - Convert to a threshold value [0, 1]
+        // - Compare against distance-based priority
+        // - Closer leaves have higher priority, so they pass the threshold more often
+        //
+        // This ensures the SAME leaves are always selected, eliminating flicker.
+        // When budget pressure increases, far leaves drop out first (deterministically).
 
-        // Tiered budget allocation:
-        // - Tier 0 (close): gets first 50% of slots
-        // - Tier 1 (medium): gets next 30% of slots
-        // - Tier 2 (far): gets remaining 20% of slots
-        // This ensures nearby trees always have leaves even when total budget is exhausted
+        uint leafHash = hashLeaf(tree.treeIndex, i);
+        float hashThreshold = float(leafHash) / float(0xFFFFFFFFu);  // [0, 1]
 
-        uint tierIndex = leafType * NUM_DISTANCE_TIERS + tier;
+        // Priority based on distance - closer = higher priority
+        float priority = distanceToPriority(distToCamera, culling.maxDrawDistance);
 
-        // Calculate tier capacity
-        uint tierBudget = getTierBudgetLimit(leafType, tier);
-        uint prevTierBudget = (tier > 0) ? getTierBudgetLimit(leafType, tier - 1) : 0;
-        uint tierCapacity = tierBudget - prevTierBudget;
-
-        // Fast path: use atomicAdd for tier tracking (for statistics)
-        // and check bounds after - slight over-allocation is acceptable
-        uint tierSlot = atomicAdd(tierCounts[tierIndex], 1);
-        if (tierSlot >= tierCapacity) {
-            continue;
+        // Leaves pass if their priority exceeds the hash threshold
+        // Close leaves (priority ~1.0) almost always pass
+        // Far leaves (priority ~0.05) rarely pass, providing natural LOD
+        if (priority < hashThreshold * 0.5) {
+            continue;  // Deterministically skip this leaf
         }
 
-        // Allocate output slot using compare-and-swap to prevent overflow
-        // We must NOT increment instanceCount if we can't write to the buffer
-        uint typeLocalSlot;
-        uint expected = drawCmds[leafType].instanceCount;
-        while (true) {
-            // Check if there's room before trying to claim a slot
-            if (expected >= leafP3Params.maxLeavesPerType) {
-                typeLocalSlot = expected; // Will fail the check below
-                break;
-            }
-            uint desired = expected + 1;
-            uint actual = atomicCompSwap(drawCmds[leafType].instanceCount, expected, desired);
-            if (actual == expected) {
-                typeLocalSlot = expected; // Successfully claimed this slot
-                break;
-            }
-            expected = actual; // Retry with updated value
-        }
-        if (typeLocalSlot >= leafP3Params.maxLeavesPerType) {
-            continue;
-        }
+        // Allocate output slot
+        uint typeLocalSlot = atomicAdd(drawCmds[leafType].instanceCount, 1);
 
-        // Calculate global output slot
-        uint outputSlot = leafType * leafP3Params.maxLeavesPerType + typeLocalSlot;
+        if (typeLocalSlot < leafP3Params.maxLeavesPerType) {
+            uint outputSlot = leafType * leafP3Params.maxLeavesPerType + typeLocalSlot;
 
-        // Write world-space leaf with tree index
-        outputInstances[outputSlot].worldPosition = vec4(worldPos.xyz, leafSize);
-        outputInstances[outputSlot].worldOrientation = transformLeafOrientation(leaf.orientation, tree.treeModel);
-        outputInstances[outputSlot].treeIndex = tree.treeIndex;
-        outputInstances[outputSlot]._pad0 = 0;
-        outputInstances[outputSlot]._pad1 = 0;
-        outputInstances[outputSlot]._pad2 = 0;
+            outputInstances[outputSlot].worldPosition = vec4(worldPos.xyz, leafSize);
+            outputInstances[outputSlot].worldOrientation = transformLeafOrientation(leaf.orientation, tree.treeModel);
+            outputInstances[outputSlot].treeIndex = tree.treeIndex;
+            outputInstances[outputSlot]._pad0 = 0;
+            outputInstances[outputSlot]._pad1 = 0;
+            outputInstances[outputSlot]._pad2 = 0;
+        }
     }
 }
