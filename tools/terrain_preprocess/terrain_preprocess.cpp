@@ -77,6 +77,12 @@ int main(int argc, char* argv[]) {
 
     TerrainImporter importer;
 
+    // Check if outputs are up to date - skip processing if unchanged
+    if (importer.isCacheValid(config)) {
+        SDL_Log("Terrain outputs up to date - skipping");
+        return 0;
+    }
+
     SDL_Log("Importing terrain heightmap...");
 
     bool success = importer.import(config, [](float progress, const std::string& status) {

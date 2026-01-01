@@ -337,12 +337,13 @@ set(WATERSHED_DIR_BIN ${WATERSHED_DATA_DIR}/flow_direction.bin)
 set(WATERSHED_LABELS_BIN ${WATERSHED_DATA_DIR}/watershed_labels.bin)
 set(WATERSHED_RIVERS_DAT ${WATERSHED_DATA_DIR}/rivers.dat)
 set(WATERSHED_LAKES_DAT ${WATERSHED_DATA_DIR}/lakes.dat)
+set(WATERSHED_META ${WATERSHED_DATA_DIR}/watershed.meta)
 
 # Run watershed tool when heightmap changes
 add_custom_command(
     OUTPUT ${WATERSHED_RIVERS_SVG} ${WATERSHED_FLOW_PNG}
            ${WATERSHED_FLOW_BIN} ${WATERSHED_DIR_BIN} ${WATERSHED_LABELS_BIN}
-           ${WATERSHED_RIVERS_DAT} ${WATERSHED_LAKES_DAT}
+           ${WATERSHED_RIVERS_DAT} ${WATERSHED_LAKES_DAT} ${WATERSHED_META}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${WATERSHED_DATA_DIR}
     COMMAND $<TARGET_FILE:watershed>
         ${TERRAIN_HEIGHTMAP}
@@ -360,7 +361,7 @@ add_custom_command(
 # Explicit target for watershed generation (enables parallel build)
 add_custom_target(watershed_gen DEPENDS ${WATERSHED_RIVERS_SVG} ${WATERSHED_FLOW_PNG}
                                         ${WATERSHED_FLOW_BIN} ${WATERSHED_DIR_BIN} ${WATERSHED_LABELS_BIN}
-                                        ${WATERSHED_RIVERS_DAT} ${WATERSHED_LAKES_DAT})
+                                        ${WATERSHED_RIVERS_DAT} ${WATERSHED_LAKES_DAT} ${WATERSHED_META})
 add_dependencies(watershed_gen watershed)
 
 # ============================================================================
@@ -372,10 +373,11 @@ add_dependencies(watershed_gen watershed)
 set(BIOME_DATA_DIR ${TERRAIN_DATA_DIR}/biome)
 set(BIOME_MAP_PNG ${BIOME_DATA_DIR}/biome_map.png)
 set(BIOME_SETTLEMENTS_JSON ${BIOME_DATA_DIR}/settlements.json)
+set(BIOME_META ${BIOME_DATA_DIR}/biome.meta)
 
 # Run biome_preprocess after watershed completes
 add_custom_command(
-    OUTPUT ${BIOME_MAP_PNG} ${BIOME_SETTLEMENTS_JSON}
+    OUTPUT ${BIOME_MAP_PNG} ${BIOME_SETTLEMENTS_JSON} ${BIOME_META}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${BIOME_DATA_DIR}
     COMMAND $<TARGET_FILE:biome_preprocess>
         ${TERRAIN_HEIGHTMAP}
@@ -392,8 +394,40 @@ add_custom_command(
 )
 
 # Explicit target for biome generation
-add_custom_target(biome_gen DEPENDS ${BIOME_MAP_PNG} ${BIOME_SETTLEMENTS_JSON})
+add_custom_target(biome_gen DEPENDS ${BIOME_MAP_PNG} ${BIOME_SETTLEMENTS_JSON} ${BIOME_META})
 add_dependencies(biome_gen biome_preprocess watershed_gen)
+
+# ============================================================================
+# SEQUENTIAL PHASE: road_generator runs after biome_preprocess completes
+# Road generation requires settlements and biome data
+# ============================================================================
+
+# Road generation outputs
+set(ROADS_DATA_DIR ${TERRAIN_DATA_DIR}/roads)
+set(ROADS_JSON ${ROADS_DATA_DIR}/roads.json)
+set(ROADS_BIN ${ROADS_DATA_DIR}/roads.bin)
+set(ROADS_META ${ROADS_DATA_DIR}/roads.meta)
+
+# Run road_generator after biome_preprocess completes
+add_custom_command(
+    OUTPUT ${ROADS_JSON} ${ROADS_BIN} ${ROADS_META}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${ROADS_DATA_DIR}
+    COMMAND $<TARGET_FILE:road_generator>
+        ${TERRAIN_HEIGHTMAP}
+        ${BIOME_MAP_PNG}
+        ${BIOME_SETTLEMENTS_JSON}
+        ${ROADS_DATA_DIR}
+        --terrain-size 16384
+        --min-altitude -15
+        --max-altitude 220
+        --grid-resolution 512
+    DEPENDS ${TERRAIN_HEIGHTMAP} ${BIOME_MAP_PNG} ${BIOME_SETTLEMENTS_JSON}
+    COMMENT "Generating road network (after biome)"
+)
+
+# Explicit target for road generation
+add_custom_target(roads_gen DEPENDS ${ROADS_JSON} ${ROADS_BIN} ${ROADS_META})
+add_dependencies(roads_gen road_generator biome_gen)
 
 # ============================================================================
 # UMBRELLA TARGET: terrain_preprocessing depends on all outputs
@@ -401,13 +435,14 @@ add_dependencies(biome_gen biome_preprocess watershed_gen)
 
 # Custom target that depends on all preprocessing outputs
 add_custom_target(terrain_preprocessing
-    DEPENDS ${TERRAIN_TILES_META} ${WATERSHED_RIVERS_SVG} ${BIOME_MAP_PNG}
+    DEPENDS ${TERRAIN_TILES_META} ${WATERSHED_RIVERS_SVG} ${BIOME_MAP_PNG} ${ROADS_BIN}
 )
 
 # Dependencies ensure correct build order:
 # - terrain_tiles_gen and watershed_gen can run in parallel
 # - biome_gen runs after watershed_gen completes
-add_dependencies(terrain_preprocessing terrain_tiles_gen watershed_gen biome_gen)
+# - roads_gen runs after biome_gen completes
+add_dependencies(terrain_preprocessing terrain_tiles_gen watershed_gen biome_gen roads_gen)
 
 # Foam noise texture generation
 set(FOAM_TEXTURE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/assets/textures)

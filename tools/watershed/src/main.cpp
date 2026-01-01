@@ -7,8 +7,122 @@
 #include <string>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <cmath>
 
 namespace fs = std::filesystem;
+
+// Build stamp - tracks inputs and config to skip reprocessing when unchanged
+struct WatershedBuildConfig {
+    std::string inputPath;
+    std::string outputDir;
+    uint32_t riverThreshold;
+    uint16_t seaLevel;
+    int resolution;
+    float terrainSize;
+    float minAltitude;
+    float maxAltitude;
+};
+
+bool isWatershedOutputUpToDate(const WatershedBuildConfig& config) {
+    std::string metaPath = config.outputDir + "/watershed.meta";
+    std::ifstream file(metaPath);
+    if (!file.is_open()) {
+        return false;
+    }
+
+    std::string line;
+    std::string cachedInputPath;
+    uintmax_t cachedInputSize = 0;
+    uint32_t cachedThreshold = 0;
+    uint16_t cachedSeaLevel = 0;
+    int cachedResolution = 0;
+    float cachedTerrainSize = 0;
+    float cachedMinAltitude = 0;
+    float cachedMaxAltitude = 0;
+
+    while (std::getline(file, line)) {
+        std::istringstream iss(line);
+        std::string key;
+        if (std::getline(iss, key, '=')) {
+            std::string value;
+            std::getline(iss, value);
+
+            if (key == "input") cachedInputPath = value;
+            else if (key == "inputSize") cachedInputSize = std::stoull(value);
+            else if (key == "threshold") cachedThreshold = std::stoul(value);
+            else if (key == "seaLevel") cachedSeaLevel = static_cast<uint16_t>(std::stoul(value));
+            else if (key == "resolution") cachedResolution = std::stoi(value);
+            else if (key == "terrainSize") cachedTerrainSize = std::stof(value);
+            else if (key == "minAltitude") cachedMinAltitude = std::stof(value);
+            else if (key == "maxAltitude") cachedMaxAltitude = std::stof(value);
+        }
+    }
+
+    // Check input file exists and size matches
+    std::error_code ec;
+    if (!fs::exists(config.inputPath, ec)) {
+        return false;
+    }
+
+    uintmax_t currentInputSize = fs::file_size(config.inputPath, ec);
+    if (ec || currentInputSize != cachedInputSize) {
+        SDL_Log("Watershed: input file size changed, reprocessing");
+        return false;
+    }
+
+    // Check config matches
+    if (cachedThreshold != config.riverThreshold ||
+        cachedSeaLevel != config.seaLevel ||
+        cachedResolution != config.resolution ||
+        std::abs(cachedTerrainSize - config.terrainSize) > 0.1f ||
+        std::abs(cachedMinAltitude - config.minAltitude) > 0.01f ||
+        std::abs(cachedMaxAltitude - config.maxAltitude) > 0.01f) {
+        SDL_Log("Watershed: configuration changed, reprocessing");
+        return false;
+    }
+
+    // Check all output files exist
+    std::vector<std::string> outputs = {
+        "rivers.svg", "flow.png", "flow_accumulation.bin",
+        "flow_direction.bin", "watershed_labels.bin", "rivers.dat", "lakes.dat"
+    };
+    for (const auto& output : outputs) {
+        std::string path = config.outputDir + "/" + output;
+        if (!fs::exists(path, ec)) {
+            SDL_Log("Watershed: missing output %s, reprocessing", output.c_str());
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool saveWatershedBuildStamp(const WatershedBuildConfig& config) {
+    std::string metaPath = config.outputDir + "/watershed.meta";
+    std::ofstream file(metaPath);
+    if (!file.is_open()) {
+        return false;
+    }
+
+    std::error_code ec;
+    uintmax_t inputSize = fs::file_size(config.inputPath, ec);
+    if (ec) {
+        return false;
+    }
+
+    file << "input=" << config.inputPath << "\n";
+    file << "inputSize=" << inputSize << "\n";
+    file << "threshold=" << config.riverThreshold << "\n";
+    file << "seaLevel=" << config.seaLevel << "\n";
+    file << "resolution=" << config.resolution << "\n";
+    file << "terrainSize=" << config.terrainSize << "\n";
+    file << "minAltitude=" << config.minAltitude << "\n";
+    file << "maxAltitude=" << config.maxAltitude << "\n";
+
+    return true;
+}
 
 std::string derive_output_dir(const std::string& input_file) {
     fs::path input_path(input_file);
@@ -134,6 +248,22 @@ int main(int argc, char* argv[]) {
         output_dir = derive_output_dir(input_file);
     }
 
+    // Check if outputs are up to date - skip processing if unchanged
+    WatershedBuildConfig buildConfig;
+    buildConfig.inputPath = input_file;
+    buildConfig.outputDir = output_dir;
+    buildConfig.riverThreshold = river_threshold;
+    buildConfig.seaLevel = sea_level;
+    buildConfig.resolution = resolution;
+    buildConfig.terrainSize = binary_config.terrainSize;
+    buildConfig.minAltitude = binary_config.minAltitude;
+    buildConfig.maxAltitude = binary_config.maxAltitude;
+
+    if (isWatershedOutputUpToDate(buildConfig)) {
+        SDL_Log("Watershed outputs up to date - skipping");
+        return 0;
+    }
+
     try {
         fs::create_directories(output_dir);
         SDL_Log("Output directory: %s", output_dir.c_str());
@@ -224,6 +354,9 @@ int main(int argc, char* argv[]) {
         std::string lakes_dat = (fs::path(output_dir) / "lakes.dat").string();
         SDL_Log("Writing lakes binary to: %s", lakes_dat.c_str());
         write_lakes_binary(lakes_dat);
+
+        // Save build stamp for future runs
+        saveWatershedBuildStamp(buildConfig);
 
         SDL_Log("Done.");
         return 0;

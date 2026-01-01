@@ -8,6 +8,121 @@
 #include <string>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <cmath>
+
+namespace fs = std::filesystem;
+
+// Check if outputs are up to date based on inputs and config
+bool isBiomeOutputUpToDate(const BiomeConfig& config) {
+    std::string metaPath = config.outputDir + "/biome.meta";
+    std::ifstream file(metaPath);
+    if (!file.is_open()) {
+        return false;
+    }
+
+    std::string line;
+    std::string cachedHeightmapPath;
+    uintmax_t cachedHeightmapSize = 0;
+    std::string cachedErosionDir;
+    float cachedSeaLevel = 0;
+    float cachedTerrainSize = 0;
+    float cachedMinAltitude = 0;
+    float cachedMaxAltitude = 0;
+    uint32_t cachedOutputResolution = 0;
+    uint32_t cachedNumSettlements = 0;
+
+    while (std::getline(file, line)) {
+        std::istringstream iss(line);
+        std::string key;
+        if (std::getline(iss, key, '=')) {
+            std::string value;
+            std::getline(iss, value);
+
+            if (key == "heightmap") cachedHeightmapPath = value;
+            else if (key == "heightmapSize") cachedHeightmapSize = std::stoull(value);
+            else if (key == "erosionDir") cachedErosionDir = value;
+            else if (key == "seaLevel") cachedSeaLevel = std::stof(value);
+            else if (key == "terrainSize") cachedTerrainSize = std::stof(value);
+            else if (key == "minAltitude") cachedMinAltitude = std::stof(value);
+            else if (key == "maxAltitude") cachedMaxAltitude = std::stof(value);
+            else if (key == "outputResolution") cachedOutputResolution = std::stoul(value);
+            else if (key == "numSettlements") cachedNumSettlements = std::stoul(value);
+        }
+    }
+
+    // Check heightmap file exists and size matches
+    std::error_code ec;
+    if (!fs::exists(config.heightmapPath, ec)) {
+        return false;
+    }
+
+    uintmax_t currentHeightmapSize = fs::file_size(config.heightmapPath, ec);
+    if (ec || currentHeightmapSize != cachedHeightmapSize) {
+        SDL_Log("Biome: heightmap file size changed, reprocessing");
+        return false;
+    }
+
+    // Check erosion input files exist (flow_accumulation.bin, flow_direction.bin)
+    std::string flowAccPath = config.erosionCacheDir + "/flow_accumulation.bin";
+    std::string flowDirPath = config.erosionCacheDir + "/flow_direction.bin";
+    if (!fs::exists(flowAccPath, ec) || !fs::exists(flowDirPath, ec)) {
+        SDL_Log("Biome: erosion input files missing, reprocessing");
+        return false;
+    }
+
+    // Check config matches
+    if (std::abs(cachedSeaLevel - config.seaLevel) > 0.01f ||
+        std::abs(cachedTerrainSize - config.terrainSize) > 0.1f ||
+        std::abs(cachedMinAltitude - config.minAltitude) > 0.01f ||
+        std::abs(cachedMaxAltitude - config.maxAltitude) > 0.01f ||
+        cachedOutputResolution != config.outputResolution ||
+        cachedNumSettlements != config.numSettlements) {
+        SDL_Log("Biome: configuration changed, reprocessing");
+        return false;
+    }
+
+    // Check all output files exist
+    std::vector<std::string> outputs = {
+        "biome_map.png", "biome_debug.png", "settlements.json", "settlements.svg"
+    };
+    for (const auto& output : outputs) {
+        std::string path = config.outputDir + "/" + output;
+        if (!fs::exists(path, ec)) {
+            SDL_Log("Biome: missing output %s, reprocessing", output.c_str());
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool saveBiomeBuildStamp(const BiomeConfig& config) {
+    std::string metaPath = config.outputDir + "/biome.meta";
+    std::ofstream file(metaPath);
+    if (!file.is_open()) {
+        return false;
+    }
+
+    std::error_code ec;
+    uintmax_t heightmapSize = fs::file_size(config.heightmapPath, ec);
+    if (ec) {
+        return false;
+    }
+
+    file << "heightmap=" << config.heightmapPath << "\n";
+    file << "heightmapSize=" << heightmapSize << "\n";
+    file << "erosionDir=" << config.erosionCacheDir << "\n";
+    file << "seaLevel=" << config.seaLevel << "\n";
+    file << "terrainSize=" << config.terrainSize << "\n";
+    file << "minAltitude=" << config.minAltitude << "\n";
+    file << "maxAltitude=" << config.maxAltitude << "\n";
+    file << "outputResolution=" << config.outputResolution << "\n";
+    file << "numSettlements=" << config.numSettlements << "\n";
+
+    return true;
+}
 
 void printUsage(const char* programName) {
     std::cout << "Usage: " << programName << " <heightmap.png> <erosion_cache> <output_dir> [options]\n"
@@ -97,8 +212,14 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    // Check if outputs are up to date - skip processing if unchanged
+    if (isBiomeOutputUpToDate(config)) {
+        SDL_Log("Biome outputs up to date - skipping");
+        return 0;
+    }
+
     // Create output directory if it doesn't exist
-    std::filesystem::create_directories(config.outputDir);
+    fs::create_directories(config.outputDir);
 
     SDL_Log("Biome Map Preprocessor");
     SDL_Log("======================");
@@ -151,6 +272,9 @@ int main(int argc, char* argv[]) {
         generator.getResult().settlements,
         config.terrainSize
     );
+
+    // Save build stamp for future runs
+    saveBiomeBuildStamp(config);
 
     SDL_Log("Biome generation complete!");
     SDL_Log("Output files:");
