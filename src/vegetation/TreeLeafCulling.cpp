@@ -634,7 +634,6 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
 
     uint32_t numTrees = 0;
     uint32_t totalLeafInstances = 0;
-    uint32_t lodTreeIndex = 0;
 
     for (const auto& renderable : leafRenderables) {
         if (renderable.leafInstanceIndex >= 0 &&
@@ -643,7 +642,9 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
             if (drawInfo.instanceCount > 0) {
                 float lodBlendFactor = 0.0f;
                 if (lodSystem) {
-                    lodBlendFactor = lodSystem->getBlendFactor(lodTreeIndex);
+                    // Use leafInstanceIndex (== tree instance index) for LOD lookup
+                    // This correctly maps to treeInstances_ even if some trees have no leaves
+                    lodBlendFactor = lodSystem->getBlendFactor(static_cast<uint32_t>(renderable.leafInstanceIndex));
                 }
 
                 uint32_t leafTypeIdx = LEAF_TYPE_OAK;
@@ -671,7 +672,6 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
                 numTrees++;
             }
         }
-        lodTreeIndex++;
     }
     if (numTrees == 0 || totalLeafInstances == 0) return;
 
