@@ -9,7 +9,92 @@
 #include <cmath>
 #include <algorithm>
 
-bool TerrainTextures::init(const InitInfo& info) {
+std::unique_ptr<TerrainTextures> TerrainTextures::create(const InitInfo& info) {
+    std::unique_ptr<TerrainTextures> textures(new TerrainTextures());
+    if (!textures->initInternal(info)) {
+        return nullptr;
+    }
+    return textures;
+}
+
+TerrainTextures::~TerrainTextures() {
+    // Samplers via RAII
+    albedoSampler_.reset();
+    if (albedoView) vkDestroyImageView(device, albedoView, nullptr);
+    if (albedoImage) vmaDestroyImage(allocator, albedoImage, albedoAllocation);
+
+    grassFarLODSampler_.reset();
+    if (grassFarLODView) vkDestroyImageView(device, grassFarLODView, nullptr);
+    if (grassFarLODImage) vmaDestroyImage(allocator, grassFarLODImage, grassFarLODAllocation);
+}
+
+TerrainTextures::TerrainTextures(TerrainTextures&& other) noexcept
+    : raiiDevice_(other.raiiDevice_)
+    , device(other.device)
+    , allocator(other.allocator)
+    , graphicsQueue(other.graphicsQueue)
+    , commandPool(other.commandPool)
+    , resourcePath(std::move(other.resourcePath))
+    , albedoImage(other.albedoImage)
+    , albedoAllocation(other.albedoAllocation)
+    , albedoView(other.albedoView)
+    , albedoSampler_(std::move(other.albedoSampler_))
+    , albedoMipLevels(other.albedoMipLevels)
+    , grassFarLODImage(other.grassFarLODImage)
+    , grassFarLODAllocation(other.grassFarLODAllocation)
+    , grassFarLODView(other.grassFarLODView)
+    , grassFarLODSampler_(std::move(other.grassFarLODSampler_))
+    , grassFarLODMipLevels(other.grassFarLODMipLevels)
+{
+    // Null out other's handles to prevent double-free
+    other.device = VK_NULL_HANDLE;
+    other.allocator = VK_NULL_HANDLE;
+    other.albedoImage = VK_NULL_HANDLE;
+    other.albedoView = VK_NULL_HANDLE;
+    other.grassFarLODImage = VK_NULL_HANDLE;
+    other.grassFarLODView = VK_NULL_HANDLE;
+}
+
+TerrainTextures& TerrainTextures::operator=(TerrainTextures&& other) noexcept {
+    if (this != &other) {
+        // Clean up current resources
+        albedoSampler_.reset();
+        if (albedoView) vkDestroyImageView(device, albedoView, nullptr);
+        if (albedoImage) vmaDestroyImage(allocator, albedoImage, albedoAllocation);
+        grassFarLODSampler_.reset();
+        if (grassFarLODView) vkDestroyImageView(device, grassFarLODView, nullptr);
+        if (grassFarLODImage) vmaDestroyImage(allocator, grassFarLODImage, grassFarLODAllocation);
+
+        // Move from other
+        raiiDevice_ = other.raiiDevice_;
+        device = other.device;
+        allocator = other.allocator;
+        graphicsQueue = other.graphicsQueue;
+        commandPool = other.commandPool;
+        resourcePath = std::move(other.resourcePath);
+        albedoImage = other.albedoImage;
+        albedoAllocation = other.albedoAllocation;
+        albedoView = other.albedoView;
+        albedoSampler_ = std::move(other.albedoSampler_);
+        albedoMipLevels = other.albedoMipLevels;
+        grassFarLODImage = other.grassFarLODImage;
+        grassFarLODAllocation = other.grassFarLODAllocation;
+        grassFarLODView = other.grassFarLODView;
+        grassFarLODSampler_ = std::move(other.grassFarLODSampler_);
+        grassFarLODMipLevels = other.grassFarLODMipLevels;
+
+        // Null out other's handles
+        other.device = VK_NULL_HANDLE;
+        other.allocator = VK_NULL_HANDLE;
+        other.albedoImage = VK_NULL_HANDLE;
+        other.albedoView = VK_NULL_HANDLE;
+        other.grassFarLODImage = VK_NULL_HANDLE;
+        other.grassFarLODView = VK_NULL_HANDLE;
+    }
+    return *this;
+}
+
+bool TerrainTextures::initInternal(const InitInfo& info) {
     if (!info.raiiDevice) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TerrainTextures: raiiDevice is null");
         return false;
@@ -26,22 +111,6 @@ bool TerrainTextures::init(const InitInfo& info) {
 
     SDL_Log("TerrainTextures initialized");
     return true;
-}
-
-void TerrainTextures::destroy(VkDevice device, VmaAllocator allocator) {
-    // Samplers via RAII
-    albedoSampler_.reset();
-    if (albedoView) vkDestroyImageView(device, albedoView, nullptr);
-    if (albedoImage) vmaDestroyImage(allocator, albedoImage, albedoAllocation);
-
-    grassFarLODSampler_.reset();
-    if (grassFarLODView) vkDestroyImageView(device, grassFarLODView, nullptr);
-    if (grassFarLODImage) vmaDestroyImage(allocator, grassFarLODImage, grassFarLODAllocation);
-
-    albedoView = VK_NULL_HANDLE;
-    albedoImage = VK_NULL_HANDLE;
-    grassFarLODView = VK_NULL_HANDLE;
-    grassFarLODImage = VK_NULL_HANDLE;
 }
 
 bool TerrainTextures::createAlbedoTexture() {

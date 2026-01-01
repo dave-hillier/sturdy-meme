@@ -50,7 +50,7 @@ void DetritusSystem::cleanup() {
 
     // Manually managed mesh vector
     for (auto& mesh : meshes_) {
-        mesh.destroy(storedAllocator_);
+        mesh.releaseGPUResources();
     }
     meshes_.clear();
 
@@ -61,32 +61,20 @@ void DetritusSystem::cleanup() {
 bool DetritusSystem::loadTextures(const InitInfo& info) {
     // Use oak bark texture for fallen branches (same textures as TreeSystem)
     std::string texturePath = info.resourcePath + "/textures/bark/oak_color_1k.jpg";
-    barkTexture_ = RAIIAdapter<Texture>::create(
-        [&](auto& t) {
-            if (!t.load(texturePath, info.allocator, info.device, info.commandPool,
-                        info.graphicsQueue, info.physicalDevice)) {
-                SDL_Log("DetritusSystem: Failed to load bark texture: %s", texturePath.c_str());
-                return false;
-            }
-            return true;
-        },
-        [this](auto& t) { t.destroy(storedAllocator_, storedDevice_); }
-    );
-    if (!barkTexture_) return false;
+    barkTexture_ = Texture::loadFromFile(texturePath, info.allocator, info.device, info.commandPool,
+                                          info.graphicsQueue, info.physicalDevice);
+    if (!barkTexture_) {
+        SDL_Log("DetritusSystem: Failed to load bark texture: %s", texturePath.c_str());
+        return false;
+    }
 
     std::string normalPath = info.resourcePath + "/textures/bark/oak_normal_1k.jpg";
-    barkNormalMap_ = RAIIAdapter<Texture>::create(
-        [&](auto& t) {
-            if (!t.load(normalPath, info.allocator, info.device, info.commandPool,
-                        info.graphicsQueue, info.physicalDevice, false)) {
-                SDL_Log("DetritusSystem: Failed to load bark normal map: %s", normalPath.c_str());
-                return false;
-            }
-            return true;
-        },
-        [this](auto& t) { t.destroy(storedAllocator_, storedDevice_); }
-    );
-    if (!barkNormalMap_) return false;
+    barkNormalMap_ = Texture::loadFromFile(normalPath, info.allocator, info.device, info.commandPool,
+                                            info.graphicsQueue, info.physicalDevice, false);
+    if (!barkNormalMap_) {
+        SDL_Log("DetritusSystem: Failed to load bark normal map: %s", normalPath.c_str());
+        return false;
+    }
 
     return true;
 }
@@ -269,7 +257,7 @@ void DetritusSystem::createSceneObjects() {
         sceneObjects_.push_back(RenderableBuilder()
             .withTransform(transform)
             .withMesh(&meshes_[instance.meshVariation])
-            .withTexture(&**barkTexture_)
+            .withTexture(barkTexture_.get())
             .withRoughness(config_.materialRoughness)
             .withMetallic(config_.materialMetallic)
             .withCastsShadow(true)

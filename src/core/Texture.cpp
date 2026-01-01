@@ -27,9 +27,96 @@ static bool hasExtension(const std::string& path, const std::string& ext) {
     return pathExt == ext;
 }
 
-bool Texture::load(const std::string& path, VmaAllocator allocator, VkDevice device,
-                   VkCommandPool commandPool, VkQueue queue, VkPhysicalDevice physicalDevice,
-                   bool useSRGB) {
+std::unique_ptr<Texture> Texture::loadFromFile(const std::string& path, VmaAllocator allocator, VkDevice device,
+                                                VkCommandPool commandPool, VkQueue queue, VkPhysicalDevice physicalDevice,
+                                                bool useSRGB) {
+    std::unique_ptr<Texture> texture(new Texture());
+    if (!texture->loadInternal(path, allocator, device, commandPool, queue, physicalDevice, useSRGB)) {
+        return nullptr;
+    }
+    return texture;
+}
+
+std::unique_ptr<Texture> Texture::loadFromFileWithMipmaps(const std::string& path, VmaAllocator allocator, VkDevice device,
+                                                           VkCommandPool commandPool, VkQueue queue, VkPhysicalDevice physicalDevice,
+                                                           bool useSRGB, bool enableAnisotropy) {
+    std::unique_ptr<Texture> texture(new Texture());
+    if (!texture->loadWithMipmapsInternal(path, allocator, device, commandPool, queue, physicalDevice, useSRGB, enableAnisotropy)) {
+        return nullptr;
+    }
+    return texture;
+}
+
+std::unique_ptr<Texture> Texture::createSolidColor(uint8_t r, uint8_t g, uint8_t b, uint8_t a,
+                                                    VmaAllocator allocator, VkDevice device,
+                                                    VkCommandPool commandPool, VkQueue queue) {
+    std::unique_ptr<Texture> texture(new Texture());
+    if (!texture->createSolidColorInternal(r, g, b, a, allocator, device, commandPool, queue)) {
+        return nullptr;
+    }
+    return texture;
+}
+
+Texture::~Texture() {
+    if (sampler != VK_NULL_HANDLE) {
+        vkDestroySampler(device_, sampler, nullptr);
+    }
+    if (imageView != VK_NULL_HANDLE) {
+        vkDestroyImageView(device_, imageView, nullptr);
+    }
+    if (image != VK_NULL_HANDLE) {
+        vmaDestroyImage(allocator_, image, allocation);
+    }
+}
+
+Texture::Texture(Texture&& other) noexcept
+    : allocator_(other.allocator_)
+    , device_(other.device_)
+    , image(other.image)
+    , allocation(other.allocation)
+    , imageView(other.imageView)
+    , sampler(other.sampler)
+    , width(other.width)
+    , height(other.height)
+{
+    other.allocator_ = VK_NULL_HANDLE;
+    other.device_ = VK_NULL_HANDLE;
+    other.image = VK_NULL_HANDLE;
+    other.imageView = VK_NULL_HANDLE;
+    other.sampler = VK_NULL_HANDLE;
+}
+
+Texture& Texture::operator=(Texture&& other) noexcept {
+    if (this != &other) {
+        // Clean up current resources
+        if (sampler != VK_NULL_HANDLE) vkDestroySampler(device_, sampler, nullptr);
+        if (imageView != VK_NULL_HANDLE) vkDestroyImageView(device_, imageView, nullptr);
+        if (image != VK_NULL_HANDLE) vmaDestroyImage(allocator_, image, allocation);
+
+        // Move from other
+        allocator_ = other.allocator_;
+        device_ = other.device_;
+        image = other.image;
+        allocation = other.allocation;
+        imageView = other.imageView;
+        sampler = other.sampler;
+        width = other.width;
+        height = other.height;
+
+        other.allocator_ = VK_NULL_HANDLE;
+        other.device_ = VK_NULL_HANDLE;
+        other.image = VK_NULL_HANDLE;
+        other.imageView = VK_NULL_HANDLE;
+        other.sampler = VK_NULL_HANDLE;
+    }
+    return *this;
+}
+
+bool Texture::loadInternal(const std::string& path, VmaAllocator allocator, VkDevice device,
+                            VkCommandPool commandPool, VkQueue queue, VkPhysicalDevice physicalDevice,
+                            bool useSRGB) {
+    allocator_ = allocator;
+    device_ = device;
 
     // Check if this is a DDS file
     if (hasExtension(path, ".dds")) {
@@ -275,9 +362,11 @@ bool Texture::loadDDS(const std::string& path, VmaAllocator allocator, VkDevice 
     return true;
 }
 
-bool Texture::createSolidColor(uint8_t r, uint8_t g, uint8_t b, uint8_t a,
-                               VmaAllocator allocator, VkDevice device,
-                               VkCommandPool commandPool, VkQueue queue) {
+bool Texture::createSolidColorInternal(uint8_t r, uint8_t g, uint8_t b, uint8_t a,
+                                        VmaAllocator allocator, VkDevice device,
+                                        VkCommandPool commandPool, VkQueue queue) {
+    allocator_ = allocator;
+    device_ = device;
     width = 1;
     height = 1;
     uint8_t pixels[4] = {r, g, b, a};
@@ -373,21 +462,6 @@ bool Texture::createSolidColor(uint8_t r, uint8_t g, uint8_t b, uint8_t a,
     sampler = createdSampler;
 
     return true;
-}
-
-void Texture::destroy(VmaAllocator allocator, VkDevice device) {
-    if (sampler != VK_NULL_HANDLE) {
-        vkDestroySampler(device, sampler, nullptr);
-        sampler = VK_NULL_HANDLE;
-    }
-    if (imageView != VK_NULL_HANDLE) {
-        vkDestroyImageView(device, imageView, nullptr);
-        imageView = VK_NULL_HANDLE;
-    }
-    if (image != VK_NULL_HANDLE) {
-        vmaDestroyImage(allocator, image, allocation);
-        image = VK_NULL_HANDLE;
-    }
 }
 
 bool Texture::transitionImageLayout(VkDevice device, VkCommandPool commandPool, VkQueue queue,
@@ -494,9 +568,12 @@ static void generateMipLevelAlphaCoverage(
     }
 }
 
-bool Texture::loadWithMipmaps(const std::string& path, VmaAllocator allocator, VkDevice device,
-                               VkCommandPool commandPool, VkQueue queue, VkPhysicalDevice physicalDevice,
-                               bool useSRGB, bool enableAnisotropy) {
+bool Texture::loadWithMipmapsInternal(const std::string& path, VmaAllocator allocator, VkDevice device,
+                                       VkCommandPool commandPool, VkQueue queue, VkPhysicalDevice physicalDevice,
+                                       bool useSRGB, bool enableAnisotropy) {
+    allocator_ = allocator;
+    device_ = device;
+
     // Load with stb_image (PNG, JPG, etc.)
     int channels;
     stbi_uc* pixels = stbi_load(path.c_str(), &width, &height, &channels, STBI_rgb_alpha);

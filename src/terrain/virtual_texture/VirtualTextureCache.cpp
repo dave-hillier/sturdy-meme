@@ -5,15 +5,118 @@
 #include <SDL3/SDL_log.h>
 #include <algorithm>
 #include <cstring>
+#include <utility>
 
 namespace VirtualTexture {
 
-bool VirtualTextureCache::init(const InitInfo& info) {
+std::unique_ptr<VirtualTextureCache> VirtualTextureCache::create(const InitInfo& info) {
+    std::unique_ptr<VirtualTextureCache> cache(new VirtualTextureCache());
+    if (!cache->initInternal(info)) {
+        return nullptr;
+    }
+    return cache;
+}
+
+VirtualTextureCache::~VirtualTextureCache() {
+    // VmaBuffer cleanup - unmap first
+    for (size_t i = 0; i < stagingBuffers_.size(); ++i) {
+        if (stagingMapped_[i]) {
+            stagingBuffers_[i].unmap();
+            stagingMapped_[i] = nullptr;
+        }
+        stagingBuffers_[i].reset();
+    }
+    stagingBuffers_.clear();
+    stagingMapped_.clear();
+
+    cacheSampler_.reset();
+
+    if (cacheImageView != VK_NULL_HANDLE) {
+        vkDestroyImageView(device_, cacheImageView, nullptr);
+        cacheImageView = VK_NULL_HANDLE;
+    }
+
+    if (cacheImage != VK_NULL_HANDLE) {
+        vmaDestroyImage(allocator_, cacheImage, cacheAllocation);
+        cacheImage = VK_NULL_HANDLE;
+        cacheAllocation = VK_NULL_HANDLE;
+    }
+
+    slots.clear();
+    tileToSlot.clear();
+}
+
+VirtualTextureCache::VirtualTextureCache(VirtualTextureCache&& other) noexcept
+    : device_(other.device_)
+    , allocator_(other.allocator_)
+    , config(other.config)
+    , useCompression_(other.useCompression_)
+    , raiiDevice_(other.raiiDevice_)
+    , cacheImage(other.cacheImage)
+    , cacheAllocation(other.cacheAllocation)
+    , cacheImageView(other.cacheImageView)
+    , cacheSampler_(std::move(other.cacheSampler_))
+    , stagingBuffers_(std::move(other.stagingBuffers_))
+    , stagingMapped_(std::move(other.stagingMapped_))
+    , framesInFlight_(other.framesInFlight_)
+    , slots(std::move(other.slots))
+    , tileToSlot(std::move(other.tileToSlot))
+{
+    other.device_ = VK_NULL_HANDLE;
+    other.allocator_ = VK_NULL_HANDLE;
+    other.cacheImage = VK_NULL_HANDLE;
+    other.cacheImageView = VK_NULL_HANDLE;
+}
+
+VirtualTextureCache& VirtualTextureCache::operator=(VirtualTextureCache&& other) noexcept {
+    if (this != &other) {
+        // Clean up current resources
+        for (size_t i = 0; i < stagingBuffers_.size(); ++i) {
+            if (stagingMapped_[i]) {
+                stagingBuffers_[i].unmap();
+            }
+            stagingBuffers_[i].reset();
+        }
+        cacheSampler_.reset();
+        if (cacheImageView != VK_NULL_HANDLE) {
+            vkDestroyImageView(device_, cacheImageView, nullptr);
+        }
+        if (cacheImage != VK_NULL_HANDLE) {
+            vmaDestroyImage(allocator_, cacheImage, cacheAllocation);
+        }
+
+        // Move from other
+        device_ = other.device_;
+        allocator_ = other.allocator_;
+        config = other.config;
+        useCompression_ = other.useCompression_;
+        raiiDevice_ = other.raiiDevice_;
+        cacheImage = other.cacheImage;
+        cacheAllocation = other.cacheAllocation;
+        cacheImageView = other.cacheImageView;
+        cacheSampler_ = std::move(other.cacheSampler_);
+        stagingBuffers_ = std::move(other.stagingBuffers_);
+        stagingMapped_ = std::move(other.stagingMapped_);
+        framesInFlight_ = other.framesInFlight_;
+        slots = std::move(other.slots);
+        tileToSlot = std::move(other.tileToSlot);
+
+        other.device_ = VK_NULL_HANDLE;
+        other.allocator_ = VK_NULL_HANDLE;
+        other.cacheImage = VK_NULL_HANDLE;
+        other.cacheImageView = VK_NULL_HANDLE;
+    }
+    return *this;
+}
+
+bool VirtualTextureCache::initInternal(const InitInfo& info) {
     if (!info.raiiDevice) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "VirtualTextureCache::init requires raiiDevice");
         return false;
     }
 
+    device_ = info.device;
+    allocator_ = info.allocator;
     raiiDevice_ = info.raiiDevice;
     config = info.config;
     framesInFlight_ = info.framesInFlight;
@@ -71,35 +174,6 @@ bool VirtualTextureCache::init(const InitInfo& info) {
             useCompression_ ? "BC1" : "RGBA8");
 
     return true;
-}
-
-void VirtualTextureCache::destroy(VkDevice device, VmaAllocator allocator) {
-    // VmaBuffer cleanup - unmap first
-    for (size_t i = 0; i < stagingBuffers_.size(); ++i) {
-        if (stagingMapped_[i]) {
-            stagingBuffers_[i].unmap();
-            stagingMapped_[i] = nullptr;
-        }
-        stagingBuffers_[i].reset();
-    }
-    stagingBuffers_.clear();
-    stagingMapped_.clear();
-
-    cacheSampler_.reset();
-
-    if (cacheImageView != VK_NULL_HANDLE) {
-        vkDestroyImageView(device, cacheImageView, nullptr);
-        cacheImageView = VK_NULL_HANDLE;
-    }
-
-    if (cacheImage != VK_NULL_HANDLE) {
-        vmaDestroyImage(allocator, cacheImage, cacheAllocation);
-        cacheImage = VK_NULL_HANDLE;
-        cacheAllocation = VK_NULL_HANDLE;
-    }
-
-    slots.clear();
-    tileToSlot.clear();
 }
 
 bool VirtualTextureCache::createCacheTexture(VkDevice device, VmaAllocator allocator,

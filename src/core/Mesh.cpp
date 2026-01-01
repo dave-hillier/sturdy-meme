@@ -909,20 +909,69 @@ bool Mesh::upload(VmaAllocator allocator, VkDevice device, VkCommandPool command
         return false;
     }
 
-    // Success - transfer ownership to member variables
+    // Success - store allocator and transfer ownership to member variables
+    allocator_ = allocator;
     managedVertexBuffer.releaseToRaw(vertexBuffer, vertexAllocation);
     managedIndexBuffer.releaseToRaw(indexBuffer, indexAllocation);
 
     return true;
 }
 
-void Mesh::destroy(VmaAllocator allocator) {
-    if (vertexBuffer != VK_NULL_HANDLE) {
-        vmaDestroyBuffer(allocator, vertexBuffer, vertexAllocation);
-        vertexBuffer = VK_NULL_HANDLE;
+Mesh::~Mesh() {
+    releaseGPUResources();
+}
+
+void Mesh::releaseGPUResources() {
+    if (allocator_) {
+        if (vertexBuffer != VK_NULL_HANDLE) {
+            vmaDestroyBuffer(allocator_, vertexBuffer, vertexAllocation);
+            vertexBuffer = VK_NULL_HANDLE;
+            vertexAllocation = VK_NULL_HANDLE;
+        }
+        if (indexBuffer != VK_NULL_HANDLE) {
+            vmaDestroyBuffer(allocator_, indexBuffer, indexAllocation);
+            indexBuffer = VK_NULL_HANDLE;
+            indexAllocation = VK_NULL_HANDLE;
+        }
     }
-    if (indexBuffer != VK_NULL_HANDLE) {
-        vmaDestroyBuffer(allocator, indexBuffer, indexAllocation);
-        indexBuffer = VK_NULL_HANDLE;
+}
+
+Mesh::Mesh(Mesh&& other) noexcept
+    : allocator_(other.allocator_)
+    , vertices(std::move(other.vertices))
+    , indices(std::move(other.indices))
+    , bounds(other.bounds)
+    , vertexBuffer(other.vertexBuffer)
+    , vertexAllocation(other.vertexAllocation)
+    , indexBuffer(other.indexBuffer)
+    , indexAllocation(other.indexAllocation)
+{
+    other.allocator_ = VK_NULL_HANDLE;
+    other.vertexBuffer = VK_NULL_HANDLE;
+    other.indexBuffer = VK_NULL_HANDLE;
+}
+
+Mesh& Mesh::operator=(Mesh&& other) noexcept {
+    if (this != &other) {
+        // Clean up current resources
+        if (allocator_) {
+            if (vertexBuffer != VK_NULL_HANDLE) vmaDestroyBuffer(allocator_, vertexBuffer, vertexAllocation);
+            if (indexBuffer != VK_NULL_HANDLE) vmaDestroyBuffer(allocator_, indexBuffer, indexAllocation);
+        }
+
+        // Move from other
+        allocator_ = other.allocator_;
+        vertices = std::move(other.vertices);
+        indices = std::move(other.indices);
+        bounds = other.bounds;
+        vertexBuffer = other.vertexBuffer;
+        vertexAllocation = other.vertexAllocation;
+        indexBuffer = other.indexBuffer;
+        indexAllocation = other.indexAllocation;
+
+        other.allocator_ = VK_NULL_HANDLE;
+        other.vertexBuffer = VK_NULL_HANDLE;
+        other.indexBuffer = VK_NULL_HANDLE;
     }
+    return *this;
 }

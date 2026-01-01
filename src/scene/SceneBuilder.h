@@ -15,7 +15,6 @@
 #include "AnimatedCharacter.h"
 #include "MaterialRegistry.h"
 #include "PlayerCape.h"
-#include "RAIIAdapter.h"
 #include <optional>
 #include <memory>
 
@@ -65,18 +64,18 @@ public:
     const MaterialRegistry& getMaterialRegistry() const { return materialRegistry; }
 
     // Access to textures for descriptor set creation
-    Texture& getGroundTexture() { return **groundTexture; }
-    Texture& getGroundNormalMap() { return **groundNormalMap; }
-    Texture& getCrateTexture() { return **crateTexture; }
-    Texture& getCrateNormalMap() { return **crateNormalMap; }
-    Texture& getMetalTexture() { return **metalTexture; }
-    Texture& getMetalNormalMap() { return **metalNormalMap; }
-    Texture& getDefaultEmissiveMap() { return **defaultEmissiveMap; }
-    Texture& getWhiteTexture() { return **whiteTexture; }
+    Texture& getGroundTexture() { return *groundTexture; }
+    Texture& getGroundNormalMap() { return *groundNormalMap; }
+    Texture& getCrateTexture() { return *crateTexture; }
+    Texture& getCrateNormalMap() { return *crateNormalMap; }
+    Texture& getMetalTexture() { return *metalTexture; }
+    Texture& getMetalNormalMap() { return *metalNormalMap; }
+    Texture& getDefaultEmissiveMap() { return *defaultEmissiveMap; }
+    Texture& getWhiteTexture() { return *whiteTexture; }
 
     // Access to meshes for dynamic updates (e.g., cloth)
     Mesh& getFlagClothMesh() { return flagClothMesh; }
-    Mesh& getFlagPoleMesh() { return **flagPoleMesh; }
+    Mesh& getFlagPoleMesh() { return *flagPoleMesh; }
     size_t getFlagClothIndex() const { return flagClothIndex; }
     size_t getFlagPoleIndex() const { return flagPoleIndex; }
 
@@ -139,10 +138,10 @@ private:
     VkDevice storedDevice = VK_NULL_HANDLE;
 
     // Meshes (static RAII-managed)
-    std::optional<RAIIAdapter<Mesh>> cubeMesh;
-    std::optional<RAIIAdapter<Mesh>> sphereMesh;
-    std::optional<RAIIAdapter<Mesh>> capsuleMesh;
-    std::optional<RAIIAdapter<Mesh>> flagPoleMesh;
+    std::unique_ptr<Mesh> cubeMesh;
+    std::unique_ptr<Mesh> sphereMesh;
+    std::unique_ptr<Mesh> capsuleMesh;
+    std::unique_ptr<Mesh> flagPoleMesh;
 
     // Meshes (dynamic - manually managed, re-uploaded during runtime)
     Mesh flagClothMesh;
@@ -157,14 +156,14 @@ private:
     bool hasCapeEnabled = false;
 
     // Textures (RAII-managed)
-    std::optional<RAIIAdapter<Texture>> crateTexture;
-    std::optional<RAIIAdapter<Texture>> crateNormalMap;
-    std::optional<RAIIAdapter<Texture>> groundTexture;
-    std::optional<RAIIAdapter<Texture>> groundNormalMap;
-    std::optional<RAIIAdapter<Texture>> metalTexture;
-    std::optional<RAIIAdapter<Texture>> metalNormalMap;
-    std::optional<RAIIAdapter<Texture>> defaultEmissiveMap;  // Black texture for objects without emissive
-    std::optional<RAIIAdapter<Texture>> whiteTexture;        // White texture for vertex-colored objects
+    std::unique_ptr<Texture> crateTexture;
+    std::unique_ptr<Texture> crateNormalMap;
+    std::unique_ptr<Texture> groundTexture;
+    std::unique_ptr<Texture> groundNormalMap;
+    std::unique_ptr<Texture> metalTexture;
+    std::unique_ptr<Texture> metalNormalMap;
+    std::unique_ptr<Texture> defaultEmissiveMap;  // Black texture for objects without emissive
+    std::unique_ptr<Texture> whiteTexture;        // White texture for vertex-colored objects
 
     // Scene objects
     std::vector<Renderable> sceneObjects;

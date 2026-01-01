@@ -2,22 +2,78 @@
 #include "UBOs.h"
 #include <SDL3/SDL_log.h>
 #include <cstring>
+#include <utility>
 
-bool TerrainBuffers::init(const InitInfo& info) {
+std::unique_ptr<TerrainBuffers> TerrainBuffers::create(const InitInfo& info) {
+    std::unique_ptr<TerrainBuffers> buffers(new TerrainBuffers());
+    if (!buffers->initInternal(info)) {
+        return nullptr;
+    }
+    return buffers;
+}
+
+TerrainBuffers::~TerrainBuffers() {
+    if (allocator_) {
+        BufferUtils::destroyBuffers(allocator_, uniformBuffers);
+        BufferUtils::destroyBuffers(allocator_, causticsUniforms);
+        BufferUtils::destroyBuffer(allocator_, indirectDispatch);
+        BufferUtils::destroyBuffer(allocator_, indirectDraw);
+        BufferUtils::destroyBuffer(allocator_, visibleIndices);
+        BufferUtils::destroyBuffer(allocator_, cullIndirectDispatch);
+        BufferUtils::destroyBuffer(allocator_, shadowVisible);
+        BufferUtils::destroyBuffer(allocator_, shadowIndirectDraw);
+    }
+}
+
+TerrainBuffers::TerrainBuffers(TerrainBuffers&& other) noexcept
+    : allocator_(other.allocator_)
+    , uniformBuffers(std::move(other.uniformBuffers))
+    , indirectDispatch(std::move(other.indirectDispatch))
+    , indirectDraw(std::move(other.indirectDraw))
+    , visibleIndices(std::move(other.visibleIndices))
+    , cullIndirectDispatch(std::move(other.cullIndirectDispatch))
+    , shadowVisible(std::move(other.shadowVisible))
+    , shadowIndirectDraw(std::move(other.shadowIndirectDraw))
+    , causticsUniforms(std::move(other.causticsUniforms))
+{
+    other.allocator_ = VK_NULL_HANDLE;
+}
+
+TerrainBuffers& TerrainBuffers::operator=(TerrainBuffers&& other) noexcept {
+    if (this != &other) {
+        // Clean up current resources
+        if (allocator_) {
+            BufferUtils::destroyBuffers(allocator_, uniformBuffers);
+            BufferUtils::destroyBuffers(allocator_, causticsUniforms);
+            BufferUtils::destroyBuffer(allocator_, indirectDispatch);
+            BufferUtils::destroyBuffer(allocator_, indirectDraw);
+            BufferUtils::destroyBuffer(allocator_, visibleIndices);
+            BufferUtils::destroyBuffer(allocator_, cullIndirectDispatch);
+            BufferUtils::destroyBuffer(allocator_, shadowVisible);
+            BufferUtils::destroyBuffer(allocator_, shadowIndirectDraw);
+        }
+
+        // Move from other
+        allocator_ = other.allocator_;
+        uniformBuffers = std::move(other.uniformBuffers);
+        indirectDispatch = std::move(other.indirectDispatch);
+        indirectDraw = std::move(other.indirectDraw);
+        visibleIndices = std::move(other.visibleIndices);
+        cullIndirectDispatch = std::move(other.cullIndirectDispatch);
+        shadowVisible = std::move(other.shadowVisible);
+        shadowIndirectDraw = std::move(other.shadowIndirectDraw);
+        causticsUniforms = std::move(other.causticsUniforms);
+
+        other.allocator_ = VK_NULL_HANDLE;
+    }
+    return *this;
+}
+
+bool TerrainBuffers::initInternal(const InitInfo& info) {
+    allocator_ = info.allocator;
     if (!createUniformBuffers(info)) return false;
     if (!createIndirectBuffers(info)) return false;
     return true;
-}
-
-void TerrainBuffers::destroy(VmaAllocator allocator) {
-    BufferUtils::destroyBuffers(allocator, uniformBuffers);
-    BufferUtils::destroyBuffers(allocator, causticsUniforms);
-    BufferUtils::destroyBuffer(allocator, indirectDispatch);
-    BufferUtils::destroyBuffer(allocator, indirectDraw);
-    BufferUtils::destroyBuffer(allocator, visibleIndices);
-    BufferUtils::destroyBuffer(allocator, cullIndirectDispatch);
-    BufferUtils::destroyBuffer(allocator, shadowVisible);
-    BufferUtils::destroyBuffer(allocator, shadowIndirectDraw);
 }
 
 bool TerrainBuffers::createUniformBuffers(const InitInfo& info) {

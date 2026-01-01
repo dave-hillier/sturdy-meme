@@ -14,7 +14,6 @@
 #include "BufferUtils.h"
 #include "ParticleSystem.h"
 #include "UBOs.h"
-#include "RAIIAdapter.h"
 #include "VmaResources.h"
 #include "core/FrameBuffered.h"
 
@@ -100,8 +99,8 @@ public:
     GrassSystem& operator=(GrassSystem&&) = delete;
 
     // Update extent for viewport (on window resize)
-    void setExtent(vk::Extent2D newExtent) { (*particleSystem)->setExtent(VkExtent2D{newExtent.width, newExtent.height}); }
-    void setExtent(VkExtent2D newExtent) { (*particleSystem)->setExtent(newExtent); }  // Backward-compatible overload
+    void setExtent(vk::Extent2D newExtent) { particleSystem->setExtent(VkExtent2D{newExtent.width, newExtent.height}); }
+    void setExtent(VkExtent2D newExtent) { particleSystem->setExtent(newExtent); }  // Backward-compatible overload
 
     void updateDescriptorSets(vk::Device device, const std::vector<vk::Buffer>& uniformBuffers,
                               vk::ImageView shadowMapView, vk::Sampler shadowSampler,
@@ -182,14 +181,14 @@ private:
     VmaAllocator getAllocator() const { return allocator_; }
     vk::RenderPass getRenderPass() const { return renderPass_; }
     DescriptorManager::Pool* getDescriptorPool() const { return descriptorPool_; }
-    vk::Extent2D getExtent() const { return particleSystem ? vk::Extent2D{(*particleSystem)->getExtent().width, (*particleSystem)->getExtent().height} : extent_; }
+    vk::Extent2D getExtent() const { return particleSystem ? vk::Extent2D{particleSystem->getExtent().width, particleSystem->getExtent().height} : extent_; }
     const std::string& getShaderPath() const { return shaderPath_; }
     uint32_t getFramesInFlight() const { return framesInFlight_; }
 
-    SystemLifecycleHelper::PipelineHandles& getComputePipelineHandles() { return (*particleSystem)->getComputePipelineHandles(); }
-    SystemLifecycleHelper::PipelineHandles& getGraphicsPipelineHandles() { return (*particleSystem)->getGraphicsPipelineHandles(); }
+    SystemLifecycleHelper::PipelineHandles& getComputePipelineHandles() { return particleSystem->getComputePipelineHandles(); }
+    SystemLifecycleHelper::PipelineHandles& getGraphicsPipelineHandles() { return particleSystem->getGraphicsPipelineHandles(); }
 
-    std::optional<RAIIAdapter<ParticleSystem>> particleSystem;
+    std::unique_ptr<ParticleSystem> particleSystem;
 
     // Stored init info (available during initialization before particleSystem is created)
     vk::Device device_;

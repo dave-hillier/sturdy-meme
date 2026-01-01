@@ -158,7 +158,7 @@ bool AnimatedCharacter::loadInternal(const InitInfo& info) {
 void AnimatedCharacter::cleanup() {
     if (allocator_ != VK_NULL_HANDLE) {
         skinnedMesh.destroy(allocator_);
-        renderMesh.destroy(allocator_);
+        renderMesh.releaseGPUResources();
     }
     bindPoseVertices.clear();
     indices.clear();

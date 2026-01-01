@@ -107,7 +107,15 @@ uint32_t TerrainCBT::calculateBufferSize(int maxDepth) {
     return static_cast<uint32_t>(std::min(bitfieldBytes * 2, (uint64_t)256 * 1024 * 1024));
 }
 
-bool TerrainCBT::init(const InitInfo& info) {
+std::unique_ptr<TerrainCBT> TerrainCBT::create(const InitInfo& info) {
+    std::unique_ptr<TerrainCBT> cbt(new TerrainCBT());
+    if (!cbt->initInternal(info)) {
+        return nullptr;
+    }
+    return cbt;
+}
+
+bool TerrainCBT::initInternal(const InitInfo& info) {
     maxDepth = info.maxDepth;
     bufferSize = calculateBufferSize(maxDepth);
 
@@ -157,8 +165,4 @@ bool TerrainCBT::init(const InitInfo& info) {
             (maxNodeID - minNodeID), initDepth, maxDepth);
 
     return true;
-}
-
-void TerrainCBT::destroy() {
-    // RAII handles cleanup automatically
 }

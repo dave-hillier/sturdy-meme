@@ -314,16 +314,9 @@ bool WaterSystem::createWaterMesh() {
         }
     }
 
-    waterMesh = RAIIAdapter<Mesh>::create(
-        [&](auto& m) {
-            m.setCustomGeometry(vertices, indices);
-            m.upload(allocator, device, commandPool, graphicsQueue);
-            return true;
-        },
-        [this](auto& m) { m.destroy(allocator); }
-    );
-
-    if (!waterMesh) {
+    waterMesh = std::make_unique<Mesh>();
+    waterMesh->setCustomGeometry(vertices, indices);
+    if (!waterMesh->upload(allocator, device, commandPool, graphicsQueue)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create water mesh");
         return false;
     }
@@ -353,48 +346,40 @@ bool WaterSystem::loadFoamTexture() {
     std::string foamPath = assetPath + "/textures/foam_noise.png";
 
     // Try to load the foam texture, fall back to white if not found
-    foamTexture = RAIIAdapter<Texture>::create(
-        [&](auto& t) {
-            if (!t.load(foamPath, allocator, device, commandPool, graphicsQueue, physicalDevice, false)) {
-                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                            "Foam texture not found at %s, creating fallback white texture", foamPath.c_str());
-                if (!t.createSolidColor(255, 255, 255, 255, allocator, device, commandPool, graphicsQueue)) {
-                    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create fallback foam texture");
-                    return false;
-                }
-            } else {
-                SDL_Log("Loaded foam texture from %s", foamPath.c_str());
-            }
-            return true;
-        },
-        [this](auto& t) { t.destroy(allocator, device); }
-    );
+    foamTexture = Texture::loadFromFile(foamPath, allocator, device, commandPool, graphicsQueue, physicalDevice, false);
+    if (!foamTexture) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Foam texture not found at %s, creating fallback white texture", foamPath.c_str());
+        foamTexture = Texture::createSolidColor(255, 255, 255, 255, allocator, device, commandPool, graphicsQueue);
+        if (!foamTexture) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create fallback foam texture");
+            return false;
+        }
+    } else {
+        SDL_Log("Loaded foam texture from %s", foamPath.c_str());
+    }
 
-    return foamTexture.has_value();
+    return true;
 }
 
 bool WaterSystem::loadCausticsTexture() {
     std::string causticsPath = assetPath + "/textures/caustics.png";
 
     // Try to load the caustics texture, fall back to white if not found
-    causticsTexture = RAIIAdapter<Texture>::create(
-        [&](auto& t) {
-            if (!t.load(causticsPath, allocator, device, commandPool, graphicsQueue, physicalDevice, false)) {
-                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                            "Caustics texture not found at %s, creating fallback white texture", causticsPath.c_str());
-                if (!t.createSolidColor(255, 255, 255, 255, allocator, device, commandPool, graphicsQueue)) {
-                    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create fallback caustics texture");
-                    return false;
-                }
-            } else {
-                SDL_Log("Loaded caustics texture from %s", causticsPath.c_str());
-            }
-            return true;
-        },
-        [this](auto& t) { t.destroy(allocator, device); }
-    );
+    causticsTexture = Texture::loadFromFile(causticsPath, allocator, device, commandPool, graphicsQueue, physicalDevice, false);
+    if (!causticsTexture) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Caustics texture not found at %s, creating fallback white texture", causticsPath.c_str());
+        causticsTexture = Texture::createSolidColor(255, 255, 255, 255, allocator, device, commandPool, graphicsQueue);
+        if (!causticsTexture) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create fallback caustics texture");
+            return false;
+        }
+    } else {
+        SDL_Log("Loaded caustics texture from %s", causticsPath.c_str());
+    }
 
-    return causticsTexture.has_value();
+    return true;
 }
 
 bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffers,
@@ -444,9 +429,9 @@ bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffe
         writer.writeImage(3, terrainHeightMapView, terrainHeightMapSampler);
         writer.writeImage(4, flowMapView, flowMapSampler);
         writer.writeImage(5, displacementMapView, displacementMapSampler);
-        writer.writeImage(6, (*foamTexture)->getImageView(), (*foamTexture)->getSampler());
+        writer.writeImage(6, foamTexture->getImageView(), foamTexture->getSampler());
         writer.writeImage(7, temporalFoamView, temporalFoamSampler);
-        writer.writeImage(8, (*causticsTexture)->getImageView(), (*causticsTexture)->getSampler());
+        writer.writeImage(8, causticsTexture->getImageView(), causticsTexture->getSampler());
         writer.writeImage(9, ssrView, ssrSampler, VK_IMAGE_LAYOUT_GENERAL);
         writer.writeImage(10, sceneDepthView, sceneDepthSampler, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
         writer.writeImage(11, displacementMapView, displacementMapSampler);  // FFT Ocean displacement placeholder
@@ -550,21 +535,21 @@ void WaterSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
         0, pushConstants);
 
     // Bind water mesh and draw
-    vk::Buffer vertexBuffers[] = {(*waterMesh)->getVertexBuffer()};
+    vk::Buffer vertexBuffers[] = {waterMesh->getVertexBuffer()};
     vk::DeviceSize offsets[] = {0};
     vkCmd.bindVertexBuffers(0, 1, vertexBuffers, offsets);
-    vkCmd.bindIndexBuffer((*waterMesh)->getIndexBuffer(), 0, vk::IndexType::eUint32);
-    vkCmd.drawIndexed((*waterMesh)->getIndexCount(), 1, 0, 0, 0);
+    vkCmd.bindIndexBuffer(waterMesh->getIndexBuffer(), 0, vk::IndexType::eUint32);
+    vkCmd.drawIndexed(waterMesh->getIndexCount(), 1, 0, 0, 0);
 }
 
 void WaterSystem::recordMeshDraw(VkCommandBuffer cmd) {
     // Draw just the mesh (pipeline and descriptors bound externally)
     vk::CommandBuffer vkCmd(cmd);
-    vk::Buffer vertexBuffers[] = {(*waterMesh)->getVertexBuffer()};
+    vk::Buffer vertexBuffers[] = {waterMesh->getVertexBuffer()};
     vk::DeviceSize offsets[] = {0};
     vkCmd.bindVertexBuffers(0, 1, vertexBuffers, offsets);
-    vkCmd.bindIndexBuffer((*waterMesh)->getIndexBuffer(), 0, vk::IndexType::eUint32);
-    vkCmd.drawIndexed((*waterMesh)->getIndexCount(), 1, 0, 0, 0);
+    vkCmd.bindIndexBuffer(waterMesh->getIndexBuffer(), 0, vk::IndexType::eUint32);
+    vkCmd.drawIndexed(waterMesh->getIndexCount(), 1, 0, 0, 0);
 }
 
 void WaterSystem::updateTide(float tideHeight) {

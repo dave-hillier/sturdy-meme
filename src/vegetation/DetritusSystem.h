@@ -12,7 +12,6 @@
 #include "Mesh.h"
 #include "Texture.h"
 #include "RenderableBuilder.h"
-#include "RAIIAdapter.h"
 #include <optional>
 
 // Configuration for detritus generation and placement
@@ -73,8 +72,8 @@ public:
     std::vector<Renderable>& getSceneObjects() { return sceneObjects_; }
 
     // Access to textures for descriptor set binding
-    Texture& getBarkTexture() { return **barkTexture_; }
-    Texture& getBarkNormalMap() { return **barkNormalMap_; }
+    Texture& getBarkTexture() { return *barkTexture_; }
+    Texture& getBarkNormalMap() { return *barkNormalMap_; }
 
     // Get count for statistics
     size_t getDetritusCount() const { return instances_.size(); }
@@ -114,8 +113,8 @@ private:
     std::vector<Mesh> meshes_;
 
     // Textures (RAII-managed)
-    std::optional<RAIIAdapter<Texture>> barkTexture_;
-    std::optional<RAIIAdapter<Texture>> barkNormalMap_;
+    std::unique_ptr<Texture> barkTexture_;
+    std::unique_ptr<Texture> barkNormalMap_;
 
     // Detritus instances (positions, rotations, etc.)
     std::vector<DetritusInstance> instances_;

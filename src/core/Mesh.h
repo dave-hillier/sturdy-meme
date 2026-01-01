@@ -6,6 +6,7 @@
 #include <vector>
 #include <array>
 #include <limits>
+#include <memory>
 
 // Axis-Aligned Bounding Box for culling
 struct AABB {
@@ -106,7 +107,13 @@ struct Vertex {
 class Mesh {
 public:
     Mesh() = default;
-    ~Mesh() = default;
+    ~Mesh();
+
+    // Move-only
+    Mesh(Mesh&& other) noexcept;
+    Mesh& operator=(Mesh&& other) noexcept;
+    Mesh(const Mesh&) = delete;
+    Mesh& operator=(const Mesh&) = delete;
 
     void createCube();
     void createPlane(float width, float depth);
@@ -121,11 +128,13 @@ public:
                             float taper = 0.7f, float gnarliness = 0.15f, float forkAngle = 0.4f);
     void setCustomGeometry(const std::vector<Vertex>& verts, const std::vector<uint32_t>& inds);
     bool upload(VmaAllocator allocator, VkDevice device, VkCommandPool commandPool, VkQueue queue);
-    void destroy(VmaAllocator allocator);
 
     VkBuffer getVertexBuffer() const { return vertexBuffer; }
     VkBuffer getIndexBuffer() const { return indexBuffer; }
     uint32_t getIndexCount() const { return static_cast<uint32_t>(indices.size()); }
+
+    // Release GPU resources without destroying CPU data (for dynamic meshes that need re-upload)
+    void releaseGPUResources();
 
     // Access to vertex data for physics collision shapes
     const std::vector<Vertex>& getVertices() const { return vertices; }
@@ -136,6 +145,9 @@ public:
 private:
     // Recalculate bounding box from vertices
     void calculateBounds();
+
+    // Stored for cleanup
+    VmaAllocator allocator_ = VK_NULL_HANDLE;
 
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;

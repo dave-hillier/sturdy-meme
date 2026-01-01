@@ -3,6 +3,7 @@
 #include "SystemLifecycleHelper.h"
 #include <vulkan/vulkan.h>
 #include <vector>
+#include <memory>
 
 // Utility helper for particle-style systems that share lifecycle, pipeline, and double-buffer management.
 // Prefer composition: systems can embed this helper to centralize common logic while keeping effect-specific code separate.
@@ -11,8 +12,20 @@ public:
     using InitInfo = SystemLifecycleHelper::InitInfo;
     using Hooks = SystemLifecycleHelper::Hooks;
 
-    bool init(const InitInfo& info, const Hooks& hooks, uint32_t bufferSets = 2);
-    void destroy(VkDevice device, VmaAllocator allocator);
+    // Factory method - returns nullptr on failure
+    // The optional outPtr parameter allows callers to get a pointer to the system
+    // before initialization completes (needed for hooks that reference the system)
+    static std::unique_ptr<ParticleSystem> create(const InitInfo& info, const Hooks& hooks,
+                                                   uint32_t bufferSets = 2,
+                                                   ParticleSystem** outPtr = nullptr);
+
+    ~ParticleSystem();
+
+    // Move-only
+    ParticleSystem(ParticleSystem&& other) noexcept;
+    ParticleSystem& operator=(ParticleSystem&& other) noexcept;
+    ParticleSystem(const ParticleSystem&) = delete;
+    ParticleSystem& operator=(const ParticleSystem&) = delete;
 
     // Create standard descriptor sets for all buffer sets (allocates both compute and graphics descriptor sets)
     bool createStandardDescriptorSets();
@@ -42,6 +55,9 @@ public:
     uint32_t getFramesInFlight() const { return lifecycle.getFramesInFlight(); }
 
 private:
+    ParticleSystem() = default;
+    bool initInternal(const InitInfo& info, const Hooks& hooks, uint32_t bufferSets);
+
     SystemLifecycleHelper lifecycle;
     uint32_t bufferSetCount = 0;
     uint32_t computeBufferSet = 0;

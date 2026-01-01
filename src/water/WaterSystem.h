@@ -13,7 +13,6 @@
 #include "Mesh.h"
 #include "Texture.h"
 #include "DescriptorManager.h"
-#include "RAIIAdapter.h"
 #include "VmaResources.h"
 #include "core/FrameBuffered.h"
 
@@ -161,8 +160,8 @@ public:
     float getTidalRange() const { return tidalRange; }
 
     // Foam texture accessors (can be used for terrain caustics)
-    VkImageView getFoamTextureView() const { return foamTexture ? (*foamTexture)->getImageView() : VK_NULL_HANDLE; }
-    VkSampler getFoamTextureSampler() const { return foamTexture ? (*foamTexture)->getSampler() : VK_NULL_HANDLE; }
+    VkImageView getFoamTextureView() const { return foamTexture ? foamTexture->getImageView() : VK_NULL_HANDLE; }
+    VkSampler getFoamTextureSampler() const { return foamTexture ? foamTexture->getSampler() : VK_NULL_HANDLE; }
     glm::vec4 getWaterColor() const { return waterUniforms.waterColor; }
     float getWaveAmplitude() const { return waterUniforms.waveParams.x; }
     float getWaveLength() const { return waterUniforms.waveParams.y; }
@@ -385,7 +384,7 @@ private:
     const vk::raii::Device* raiiDevice_ = nullptr;
 
     // Water mesh (a subdivided plane for wave animation) - RAII-managed
-    std::optional<RAIIAdapter<Mesh>> waterMesh;
+    std::unique_ptr<Mesh> waterMesh;
     glm::mat4 waterModelMatrix = glm::mat4(1.0f);
 
     // Water uniforms (RAII-managed)
@@ -394,10 +393,10 @@ private:
     std::vector<void*> waterUniformMapped;
 
     // Foam texture (tileable Worley noise) - RAII-managed
-    std::optional<RAIIAdapter<Texture>> foamTexture;
+    std::unique_ptr<Texture> foamTexture;
 
     // Caustics texture (Phase 9) - RAII-managed
-    std::optional<RAIIAdapter<Texture>> causticsTexture;
+    std::unique_ptr<Texture> causticsTexture;
 
     // Tidal parameters
     float baseWaterLevel = 0.0f;  // Mean sea level

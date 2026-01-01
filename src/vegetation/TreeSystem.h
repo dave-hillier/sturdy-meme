@@ -16,7 +16,6 @@
 #include "Mesh.h"
 #include "Texture.h"
 #include "RenderableBuilder.h"
-#include "RAIIAdapter.h"
 #include "BufferUtils.h"
 
 // GPU leaf instance data - matches shaders/tree_leaf_instance.glsl
@@ -226,10 +225,9 @@ private:
     std::vector<AABB> fullTreeBounds_;
 
     // Textures indexed by type name (e.g., "oak", "pine", "ash")
-    // Using RAIIAdapter for automatic cleanup matching RockSystem pattern
-    std::unordered_map<std::string, std::optional<RAIIAdapter<Texture>>> barkTextures_;
-    std::unordered_map<std::string, std::optional<RAIIAdapter<Texture>>> barkNormalMaps_;
-    std::unordered_map<std::string, std::optional<RAIIAdapter<Texture>>> leafTextures_;
+    std::unordered_map<std::string, std::unique_ptr<Texture>> barkTextures_;
+    std::unordered_map<std::string, std::unique_ptr<Texture>> barkNormalMaps_;
+    std::unordered_map<std::string, std::unique_ptr<Texture>> leafTextures_;
 
     // Tree instances (positions, rotations, etc.)
     std::vector<TreeInstanceData> treeInstances_;

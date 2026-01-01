@@ -5,6 +5,7 @@
 #include <vk_mem_alloc.h>
 #include <string>
 #include <optional>
+#include <memory>
 #include "VmaResources.h"
 
 // Terrain textures - albedo and grass far LOD textures
@@ -19,11 +20,16 @@ public:
         std::string resourcePath;
     };
 
-    TerrainTextures() = default;
-    ~TerrainTextures() = default;
+    // Factory method - returns nullptr on failure
+    static std::unique_ptr<TerrainTextures> create(const InitInfo& info);
 
-    bool init(const InitInfo& info);
-    void destroy(VkDevice device, VmaAllocator allocator);
+    ~TerrainTextures();
+
+    // Move-only
+    TerrainTextures(TerrainTextures&& other) noexcept;
+    TerrainTextures& operator=(TerrainTextures&& other) noexcept;
+    TerrainTextures(const TerrainTextures&) = delete;
+    TerrainTextures& operator=(const TerrainTextures&) = delete;
 
     // Terrain albedo texture
     VkImageView getAlbedoView() const { return albedoView; }
@@ -34,6 +40,8 @@ public:
     VkSampler getGrassFarLODSampler() const { return grassFarLODSampler_ ? **grassFarLODSampler_ : VK_NULL_HANDLE; }
 
 private:
+    TerrainTextures() = default;
+    bool initInternal(const InitInfo& info);
     bool createAlbedoTexture();
     bool createGrassFarLODTexture();
     bool uploadImageDataMipLevel(VkImage image, const void* data, uint32_t width, uint32_t height,

@@ -20,7 +20,6 @@
 #include "VirtualTextureSystem.h"
 #include "DescriptorManager.h"
 #include "InitContext.h"
-#include "RAIIAdapter.h"
 #include <optional>
 
 class GpuProfiler;
@@ -343,12 +342,12 @@ private:
     vk::CommandPool commandPool;
 
     // Composed subsystems (RAII-managed)
-    std::optional<RAIIAdapter<TerrainTextures>> textures;
-    std::optional<RAIIAdapter<TerrainCBT>> cbt;
+    std::unique_ptr<TerrainTextures> textures;
+    std::unique_ptr<TerrainCBT> cbt;
     std::unique_ptr<TerrainMeshlet> meshlet;
     std::unique_ptr<TerrainTileCache> tileCache;  // LOD-based tile streaming
     std::unique_ptr<VirtualTexture::VirtualTextureSystem> virtualTexture;  // Virtual texture system
-    std::optional<RAIIAdapter<TerrainBuffers>> buffers;      // Uniform, indirect, and visibility buffers
+    std::unique_ptr<TerrainBuffers> buffers;      // Uniform, indirect, and visibility buffers
     TerrainCameraOptimizer cameraOptimizer;                  // Skip-frame optimization (no destroy needed)
     std::unique_ptr<TerrainPipelines> pipelines;  // All compute and graphics pipelines
 

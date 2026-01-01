@@ -49,7 +49,7 @@ void RockSystem::cleanup() {
 
     // Manually managed mesh vector
     for (auto& mesh : rockMeshes) {
-        mesh.destroy(storedAllocator);
+        mesh.releaseGPUResources();
     }
     rockMeshes.clear();
 
@@ -60,32 +60,20 @@ void RockSystem::cleanup() {
 bool RockSystem::loadTextures(const InitInfo& info) {
     // Use concrete texture as a rock-like surface
     std::string texturePath = info.resourcePath + "/assets/textures/industrial/concrete_1.jpg";
-    rockTexture = RAIIAdapter<Texture>::create(
-        [&](auto& t) {
-            if (!t.load(texturePath, info.allocator, info.device, info.commandPool,
-                        info.graphicsQueue, info.physicalDevice)) {
-                SDL_Log("RockSystem: Failed to load rock texture: %s", texturePath.c_str());
-                return false;
-            }
-            return true;
-        },
-        [this](auto& t) { t.destroy(storedAllocator, storedDevice); }
-    );
-    if (!rockTexture) return false;
+    rockTexture = Texture::loadFromFile(texturePath, info.allocator, info.device, info.commandPool,
+                                         info.graphicsQueue, info.physicalDevice);
+    if (!rockTexture) {
+        SDL_Log("RockSystem: Failed to load rock texture: %s", texturePath.c_str());
+        return false;
+    }
 
     std::string normalPath = info.resourcePath + "/assets/textures/industrial/concrete_1_norm.jpg";
-    rockNormalMap = RAIIAdapter<Texture>::create(
-        [&](auto& t) {
-            if (!t.load(normalPath, info.allocator, info.device, info.commandPool,
-                        info.graphicsQueue, info.physicalDevice, false)) {
-                SDL_Log("RockSystem: Failed to load rock normal map: %s", normalPath.c_str());
-                return false;
-            }
-            return true;
-        },
-        [this](auto& t) { t.destroy(storedAllocator, storedDevice); }
-    );
-    if (!rockNormalMap) return false;
+    rockNormalMap = Texture::loadFromFile(normalPath, info.allocator, info.device, info.commandPool,
+                                           info.graphicsQueue, info.physicalDevice, false);
+    if (!rockNormalMap) {
+        SDL_Log("RockSystem: Failed to load rock normal map: %s", normalPath.c_str());
+        return false;
+    }
 
     return true;
 }
@@ -235,7 +223,7 @@ void RockSystem::createSceneObjects() {
         sceneObjects.push_back(RenderableBuilder()
             .withTransform(transform)
             .withMesh(&rockMeshes[rock.meshVariation])
-            .withTexture(&**rockTexture)
+            .withTexture(rockTexture.get())
             .withRoughness(config.materialRoughness)
             .withMetallic(config.materialMetallic)
             .withCastsShadow(true)

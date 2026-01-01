@@ -5,17 +5,28 @@
 #include <optional>
 #include <utility>
 
-// Adapts classes with init/destroy pattern to RAII semantics.
-// Does not modify the underlying class - only changes callsites.
-// Uses unique_ptr internally so wrapped types don't need to be movable.
+// DEPRECATED: This class is deprecated. Use proper RAII with static create() factory methods instead.
 //
-// Usage:
-//   auto pipelines = RAIIAdapter<TerrainPipelines>::create(
-//       [&](auto& p) { return p.init(info); },
-//       [device](auto& p) { p.destroy(device); }
+// All resource-owning classes should:
+// 1. Have a static create() factory that returns std::unique_ptr<T>
+// 2. Store handles needed for cleanup internally
+// 3. Have a destructor that performs cleanup
+// 4. Be move-only (delete copy constructor/assignment)
+//
+// Example replacement:
+//   // Old:
+//   std::optional<RAIIAdapter<Texture>> texture = RAIIAdapter<Texture>::create(
+//       [&](auto& t) { return t.load(...); },
+//       [&](auto& t) { t.destroy(device, allocator); }
 //   );
-//   if (!pipelines) return false;
-//   pipelines->getRenderPipeline();  // Access via ->
+//
+//   // New:
+//   std::unique_ptr<Texture> texture = Texture::loadFromFile(...);
+//
+// This file is kept for reference only. Do not use RAIIAdapter in new code.
+
+// Legacy adapter - adapts classes with init/destroy pattern to RAII semantics.
+// DEPRECATED - prefer using classes with proper RAII (static create() factory methods).
 
 template<typename T>
 class RAIIAdapter {

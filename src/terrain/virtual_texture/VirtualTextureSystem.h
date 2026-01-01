@@ -5,7 +5,6 @@
 #include "VirtualTexturePageTable.h"
 #include "VirtualTextureFeedback.h"
 #include "VirtualTextureTileLoader.h"
-#include "RAIIAdapter.h"
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_raii.hpp>
 #include <vk_mem_alloc.h>
@@ -99,8 +98,8 @@ public:
     /**
      * Get the physical cache texture for shader binding
      */
-    VkImageView getCacheImageView() const { return (*cache)->getCacheImageView(); }
-    VkSampler getCacheSampler() const { return (*cache)->getCacheSampler(); }
+    VkImageView getCacheImageView() const { return cache->getCacheImageView(); }
+    VkSampler getCacheSampler() const { return cache->getCacheSampler(); }
 
     /**
      * Get page table textures for shader binding
@@ -133,7 +132,7 @@ public:
     /**
      * Get statistics
      */
-    uint32_t getCacheUsedSlots() const { return (*cache)->getUsedSlotCount(); }
+    uint32_t getCacheUsedSlots() const { return cache->getUsedSlotCount(); }
     uint32_t getPendingTileCount() const { return tileLoader->getPendingCount(); }
     uint32_t getLoadedTileCount() const { return tileLoader->getLoadedCount(); }
     uint64_t getTotalBytesLoaded() const { return tileLoader->getTotalBytesLoaded(); }
@@ -148,13 +147,13 @@ public:
     /**
      * Check if a tile is resident in cache
      */
-    bool isTileResident(TileId id) const { return (*cache)->hasTile(id); }
+    bool isTileResident(TileId id) const { return cache->hasTile(id); }
 
 private:
     VirtualTextureConfig config;
 
     // RAII-managed subsystems
-    std::optional<RAIIAdapter<VirtualTextureCache>> cache;
+    std::unique_ptr<VirtualTextureCache> cache;
     std::unique_ptr<VirtualTexturePageTable> pageTable;
     std::unique_ptr<VirtualTextureFeedback> feedback;
     std::unique_ptr<VirtualTextureTileLoader> tileLoader;

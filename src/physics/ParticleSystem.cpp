@@ -1,7 +1,58 @@
 #include "ParticleSystem.h"
 #include <SDL3/SDL.h>
+#include <utility>
 
-bool ParticleSystem::init(const InitInfo& info, const Hooks& hooks, uint32_t bufferSets) {
+std::unique_ptr<ParticleSystem> ParticleSystem::create(const InitInfo& info, const Hooks& hooks,
+                                                        uint32_t bufferSets, ParticleSystem** outPtr) {
+    std::unique_ptr<ParticleSystem> system(new ParticleSystem());
+    // Set outPtr before init so hooks can reference the system
+    if (outPtr) {
+        *outPtr = system.get();
+    }
+    if (!system->initInternal(info, hooks, bufferSets)) {
+        return nullptr;
+    }
+    return system;
+}
+
+ParticleSystem::~ParticleSystem() {
+    lifecycle.destroy(lifecycle.getDevice(), lifecycle.getAllocator());
+    computeDescriptorSets.clear();
+    graphicsDescriptorSets.clear();
+}
+
+ParticleSystem::ParticleSystem(ParticleSystem&& other) noexcept
+    : lifecycle(std::move(other.lifecycle))
+    , bufferSetCount(other.bufferSetCount)
+    , computeBufferSet(other.computeBufferSet)
+    , renderBufferSet(other.renderBufferSet)
+    , computeDescriptorSets(std::move(other.computeDescriptorSets))
+    , graphicsDescriptorSets(std::move(other.graphicsDescriptorSets))
+{
+    other.bufferSetCount = 0;
+}
+
+ParticleSystem& ParticleSystem::operator=(ParticleSystem&& other) noexcept {
+    if (this != &other) {
+        // Clean up current resources
+        lifecycle.destroy(lifecycle.getDevice(), lifecycle.getAllocator());
+        computeDescriptorSets.clear();
+        graphicsDescriptorSets.clear();
+
+        // Move from other
+        lifecycle = std::move(other.lifecycle);
+        bufferSetCount = other.bufferSetCount;
+        computeBufferSet = other.computeBufferSet;
+        renderBufferSet = other.renderBufferSet;
+        computeDescriptorSets = std::move(other.computeDescriptorSets);
+        graphicsDescriptorSets = std::move(other.graphicsDescriptorSets);
+
+        other.bufferSetCount = 0;
+    }
+    return *this;
+}
+
+bool ParticleSystem::initInternal(const InitInfo& info, const Hooks& hooks, uint32_t bufferSets) {
     bufferSetCount = bufferSets;
     computeBufferSet = 0;
     renderBufferSet = 0;
@@ -13,12 +64,6 @@ bool ParticleSystem::init(const InitInfo& info, const Hooks& hooks, uint32_t buf
     // Allocate standard descriptor sets after hooks complete
     // (hooks can't call createStandardDescriptorSets since ParticleSystem isn't assigned yet in owner)
     return createStandardDescriptorSets();
-}
-
-void ParticleSystem::destroy(VkDevice device, VmaAllocator allocator) {
-    lifecycle.destroy(device, allocator);
-    computeDescriptorSets.clear();
-    graphicsDescriptorSets.clear();
 }
 
 void ParticleSystem::advanceBufferSet() {

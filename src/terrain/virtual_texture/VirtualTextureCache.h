@@ -7,6 +7,7 @@
 #include <vector>
 #include <unordered_map>
 #include <optional>
+#include <memory>
 #include "VmaResources.h"
 
 namespace VirtualTexture {
@@ -20,13 +21,6 @@ namespace VirtualTexture {
  */
 class VirtualTextureCache {
 public:
-    VirtualTextureCache() = default;
-    ~VirtualTextureCache() = default;
-
-    // Non-copyable
-    VirtualTextureCache(const VirtualTextureCache&) = delete;
-    VirtualTextureCache& operator=(const VirtualTextureCache&) = delete;
-
     struct InitInfo {
         const vk::raii::Device* raiiDevice = nullptr;
         VkDevice device = VK_NULL_HANDLE;
@@ -38,12 +32,16 @@ public:
         bool useCompression = false;
     };
 
-    // Initialize the cache
-    // Set useCompression=true to use BC1 format for the cache (4x smaller GPU memory)
-    bool init(const InitInfo& info);
+    // Factory method - returns nullptr on failure
+    static std::unique_ptr<VirtualTextureCache> create(const InitInfo& info);
 
-    // Cleanup resources
-    void destroy(VkDevice device, VmaAllocator allocator);
+    ~VirtualTextureCache();
+
+    // Move-only
+    VirtualTextureCache(VirtualTextureCache&& other) noexcept;
+    VirtualTextureCache& operator=(VirtualTextureCache&& other) noexcept;
+    VirtualTextureCache(const VirtualTextureCache&) = delete;
+    VirtualTextureCache& operator=(const VirtualTextureCache&) = delete;
 
     // Allocate a slot for a new tile, evicting LRU if needed
     // Returns the cache slot coordinates, or nullptr if allocation failed
@@ -102,6 +100,9 @@ public:
     uint32_t getUsedSlotCount() const;
 
 private:
+    VirtualTextureCache() = default;
+    bool initInternal(const InitInfo& info);
+
     // Find LRU slot for eviction
     size_t findLRUSlot() const;
 
@@ -111,6 +112,10 @@ private:
 
     // Create sampler for the cache
     bool createSampler(VkDevice device);
+
+    // Stored for cleanup
+    VkDevice device_ = VK_NULL_HANDLE;
+    VmaAllocator allocator_ = VK_NULL_HANDLE;
 
     VirtualTextureConfig config;
     bool useCompression_ = false;  // BC1 compressed cache

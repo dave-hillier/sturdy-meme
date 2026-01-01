@@ -11,7 +11,6 @@
 #include "Mesh.h"
 #include "Texture.h"
 #include "RenderableBuilder.h"
-#include "RAIIAdapter.h"
 #include <optional>
 
 // Configuration for rock generation and placement
@@ -70,8 +69,8 @@ public:
     std::vector<Renderable>& getSceneObjects() { return sceneObjects; }
 
     // Access to textures for descriptor set binding
-    Texture& getRockTexture() { return **rockTexture; }
-    Texture& getRockNormalMap() { return **rockNormalMap; }
+    Texture& getRockTexture() { return *rockTexture; }
+    Texture& getRockNormalMap() { return *rockNormalMap; }
 
     // Get rock count for statistics
     size_t getRockCount() const { return rockInstances.size(); }
@@ -106,8 +105,8 @@ private:
     std::vector<Mesh> rockMeshes;
 
     // Rock textures (RAII-managed)
-    std::optional<RAIIAdapter<Texture>> rockTexture;
-    std::optional<RAIIAdapter<Texture>> rockNormalMap;
+    std::unique_ptr<Texture> rockTexture;
+    std::unique_ptr<Texture> rockNormalMap;
 
     // Rock instances (positions, rotations, etc.)
     std::vector<RockInstance> rockInstances;

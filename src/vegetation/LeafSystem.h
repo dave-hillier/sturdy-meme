@@ -12,7 +12,6 @@
 #include "ParticleSystem.h"
 #include "BufferUtils.h"
 #include "UBOs.h"
-#include "RAIIAdapter.h"
 #include "interfaces/ILeafControl.h"
 #include "core/FrameBuffered.h"
 #include <optional>
@@ -66,7 +65,7 @@ public:
     LeafSystem& operator=(LeafSystem&&) = delete;
 
     // Update extent for viewport (on window resize)
-    void setExtent(VkExtent2D newExtent) { (*particleSystem)->setExtent(newExtent); }
+    void setExtent(VkExtent2D newExtent) { particleSystem->setExtent(newExtent); }
 
     // Update descriptor sets with external resources (UBO, wind buffer, heightmap, displacement, tile cache)
     void updateDescriptorSets(VkDevice device, const std::vector<VkBuffer>& uniformBuffers,
@@ -128,14 +127,14 @@ private:
     VmaAllocator getAllocator() const { return storedAllocator; }
     VkRenderPass getRenderPass() const { return storedRenderPass; }
     DescriptorManager::Pool* getDescriptorPool() const { return storedDescriptorPool; }
-    const VkExtent2D& getExtent() const { return particleSystem ? (*particleSystem)->getExtent() : storedExtent; }
+    const VkExtent2D& getExtent() const { return particleSystem ? particleSystem->getExtent() : storedExtent; }
     const std::string& getShaderPath() const { return storedShaderPath; }
     uint32_t getFramesInFlight() const { return storedFramesInFlight; }
 
-    SystemLifecycleHelper::PipelineHandles& getComputePipelineHandles() { return (*particleSystem)->getComputePipelineHandles(); }
-    SystemLifecycleHelper::PipelineHandles& getGraphicsPipelineHandles() { return (*particleSystem)->getGraphicsPipelineHandles(); }
+    SystemLifecycleHelper::PipelineHandles& getComputePipelineHandles() { return particleSystem->getComputePipelineHandles(); }
+    SystemLifecycleHelper::PipelineHandles& getGraphicsPipelineHandles() { return particleSystem->getGraphicsPipelineHandles(); }
 
-    std::optional<RAIIAdapter<ParticleSystem>> particleSystem;
+    std::unique_ptr<ParticleSystem> particleSystem;
 
     // Stored init info (available during initialization before particleSystem is created)
     VkDevice storedDevice = VK_NULL_HANDLE;

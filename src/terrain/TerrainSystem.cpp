@@ -59,21 +59,15 @@ bool TerrainSystem::initInternal(const InitInfo& info, const TerrainConfig& cfg)
     texturesInfo.graphicsQueue = graphicsQueue;
     texturesInfo.commandPool = commandPool;
     texturesInfo.resourcePath = texturePath;
-    textures = RAIIAdapter<TerrainTextures>::create(
-        [&](auto& t) { return t.init(texturesInfo); },
-        [this](auto& t) { t.destroy(device, allocator); }
-    );
+    textures = TerrainTextures::create(texturesInfo);
     if (!textures) return false;
 
-    // Initialize CBT with RAII wrapper
+    // Initialize CBT
     TerrainCBT::InitInfo cbtInfo{};
     cbtInfo.allocator = allocator;
     cbtInfo.maxDepth = config.maxDepth;
     cbtInfo.initDepth = 6;  // Start with 64 triangles
-    cbt = RAIIAdapter<TerrainCBT>::create(
-        [&](auto& c) { return c.init(cbtInfo); },
-        [](auto& c) { c.destroy(); }
-    );
+    cbt = TerrainCBT::create(cbtInfo);
     if (!cbt) return false;
 
     // Initialize meshlet for high-resolution rendering
@@ -147,15 +141,12 @@ bool TerrainSystem::initInternal(const InitInfo& info, const TerrainConfig& cfg)
     // Query GPU subgroup capabilities for optimized compute paths
     querySubgroupCapabilities();
 
-    // Initialize buffers subsystem with RAII wrapper
+    // Initialize buffers subsystem
     TerrainBuffers::InitInfo bufferInfo{};
     bufferInfo.allocator = allocator;
     bufferInfo.framesInFlight = framesInFlight;
     bufferInfo.maxVisibleTriangles = MAX_VISIBLE_TRIANGLES;
-    buffers = RAIIAdapter<TerrainBuffers>::create(
-        [&](auto& b) { return b.init(bufferInfo); },
-        [this](auto& b) { b.destroy(allocator); }
-    );
+    buffers = TerrainBuffers::create(bufferInfo);
     if (!buffers) return false;
 
     // Create descriptor set layouts and sets
@@ -231,7 +222,7 @@ void TerrainSystem::cleanup() {
 
 
 uint32_t TerrainSystem::getTriangleCount() const {
-    void* mappedPtr = (*buffers)->getIndirectDrawMappedPtr();
+    void* mappedPtr = buffers->getIndirectDrawMappedPtr();
     if (!mappedPtr) {
         return 0;
     }
@@ -342,18 +333,18 @@ bool TerrainSystem::createDescriptorSets() {
         // Build writer with all bindings - use separate statements to avoid
         // copy/reference issues with the fluent API pattern
         DescriptorManager::SetWriter writer(device, computeDescriptorSets[i]);
-        writer.writeBuffer(0, (*cbt)->getBuffer(), 0, (*cbt)->getBufferSize(), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-        writer.writeBuffer(1, (*buffers)->getIndirectDispatchBuffer(), 0, sizeof(VkDispatchIndirectCommand), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-        writer.writeBuffer(2, (*buffers)->getIndirectDrawBuffer(), 0, sizeof(VkDrawIndexedIndirectCommand), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        writer.writeBuffer(0, cbt->getBuffer(), 0, cbt->getBufferSize(), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        writer.writeBuffer(1, buffers->getIndirectDispatchBuffer(), 0, sizeof(VkDispatchIndirectCommand), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        writer.writeBuffer(2, buffers->getIndirectDrawBuffer(), 0, sizeof(VkDrawIndexedIndirectCommand), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
         // Height map (binding 3) - use tile cache base heightmap
         if (tileCache && tileCache->getBaseHeightMapView() != VK_NULL_HANDLE) {
             writer.writeImage(3, tileCache->getBaseHeightMapView(), tileCache->getBaseHeightMapSampler());
         }
-        writer.writeBuffer(4, (*buffers)->getUniformBuffer(i), 0, sizeof(TerrainUniforms));
-        writer.writeBuffer(5, (*buffers)->getVisibleIndicesBuffer(), 0, sizeof(uint32_t) * (1 + MAX_VISIBLE_TRIANGLES), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-        writer.writeBuffer(6, (*buffers)->getCullIndirectDispatchBuffer(), 0, sizeof(VkDispatchIndirectCommand), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-        writer.writeBuffer(14, (*buffers)->getShadowVisibleBuffer(), 0, sizeof(uint32_t) * (1 + MAX_VISIBLE_TRIANGLES), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-        writer.writeBuffer(15, (*buffers)->getShadowIndirectDrawBuffer(), 0, sizeof(VkDrawIndexedIndirectCommand), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        writer.writeBuffer(4, buffers->getUniformBuffer(i), 0, sizeof(TerrainUniforms));
+        writer.writeBuffer(5, buffers->getVisibleIndicesBuffer(), 0, sizeof(uint32_t) * (1 + MAX_VISIBLE_TRIANGLES), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        writer.writeBuffer(6, buffers->getCullIndirectDispatchBuffer(), 0, sizeof(VkDispatchIndirectCommand), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        writer.writeBuffer(14, buffers->getShadowVisibleBuffer(), 0, sizeof(uint32_t) * (1 + MAX_VISIBLE_TRIANGLES), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        writer.writeBuffer(15, buffers->getShadowIndirectDrawBuffer(), 0, sizeof(VkDrawIndexedIndirectCommand), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
 
         // LOD tile cache bindings (19 and 20) - for subdivision to use high-res terrain data
         // Note: tile info buffer (binding 20) is updated per-frame in recordCompute
@@ -449,7 +440,7 @@ void TerrainSystem::updateDescriptorSets(vk::Device device,
         auto writer = DescriptorManager::SetWriter(device, renderDescriptorSets[i]);
 
         // CBT buffer (binding 0)
-        writer.writeBuffer(0, (*cbt)->getBuffer(), 0, (*cbt)->getBufferSize(),
+        writer.writeBuffer(0, cbt->getBuffer(), 0, cbt->getBufferSize(),
                           VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
 
         // Height map (binding 3) - use tile cache base heightmap
@@ -459,7 +450,7 @@ void TerrainSystem::updateDescriptorSets(vk::Device device,
         }
 
         // Terrain uniforms (binding 4)
-        writer.writeBuffer(4, (*buffers)->getUniformBuffer(i), 0, sizeof(TerrainUniforms));
+        writer.writeBuffer(4, buffers->getUniformBuffer(i), 0, sizeof(TerrainUniforms));
 
         // Scene UBO (binding 5)
         if (i < sceneUniformBuffers.size()) {
@@ -467,7 +458,7 @@ void TerrainSystem::updateDescriptorSets(vk::Device device,
         }
 
         // Terrain albedo (binding 6)
-        writer.writeImage(6, (*textures)->getAlbedoView(), (*textures)->getAlbedoSampler(),
+        writer.writeImage(6, textures->getAlbedoView(), textures->getAlbedoSampler(),
                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
         // Shadow map (binding 7)
@@ -477,14 +468,14 @@ void TerrainSystem::updateDescriptorSets(vk::Device device,
         }
 
         // Grass far LOD texture (binding 8)
-        if ((*textures)->getGrassFarLODView() != VK_NULL_HANDLE) {
-            writer.writeImage(8, (*textures)->getGrassFarLODView(), (*textures)->getGrassFarLODSampler(),
+        if (textures->getGrassFarLODView() != VK_NULL_HANDLE) {
+            writer.writeImage(8, textures->getGrassFarLODView(), textures->getGrassFarLODSampler(),
                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         }
 
         // Shadow visible indices (binding 14)
-        if ((*buffers)->getShadowVisibleBuffer() != VK_NULL_HANDLE) {
-            writer.writeBuffer(14, (*buffers)->getShadowVisibleBuffer(), 0,
+        if (buffers->getShadowVisibleBuffer() != VK_NULL_HANDLE) {
+            writer.writeBuffer(14, buffers->getShadowVisibleBuffer(), 0,
                               sizeof(uint32_t) * (1 + MAX_VISIBLE_TRIANGLES),
                               VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
         }
@@ -526,14 +517,14 @@ void TerrainSystem::updateDescriptorSets(vk::Device device,
 
         // Caustics UBO (binding 22) - per-frame buffer for underwater caustics
         constexpr VkDeviceSize causticsUBOSize = 32;  // 8 floats
-        writer.writeBuffer(22, (*buffers)->getCausticsUniformBuffer(i), 0, causticsUBOSize);
+        writer.writeBuffer(22, buffers->getCausticsUniformBuffer(i), 0, causticsUBOSize);
 
         writer.update();
     }
 
     // Initialize caustics UBO with disabled state (causticsEnabled = 0)
     for (uint32_t i = 0; i < framesInFlight; i++) {
-        float* causticsData = static_cast<float*>((*buffers)->getCausticsMappedPtr(i));
+        float* causticsData = static_cast<float*>(buffers->getCausticsMappedPtr(i));
         if (causticsData) {
             causticsData[0] = 0.0f;   // causticsWaterLevel
             causticsData[1] = 0.05f;  // causticsScale
@@ -590,7 +581,7 @@ void TerrainSystem::setCaustics(vk::Device device, vk::ImageView causticsView, v
 
     // Update caustics UBO with new water level and enabled state
     for (uint32_t i = 0; i < framesInFlight; i++) {
-        float* causticsData = static_cast<float*>((*buffers)->getCausticsMappedPtr(i));
+        float* causticsData = static_cast<float*>(buffers->getCausticsMappedPtr(i));
         if (causticsData) {
             causticsData[0] = waterLevel;            // causticsWaterLevel
             causticsData[6] = enabled ? 1.0f : 0.0f; // causticsEnabled
@@ -652,11 +643,11 @@ void TerrainSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraP
     uniforms.snowPadding1 = 0.0f;
     uniforms.snowPadding2 = 0.0f;
 
-    memcpy((*buffers)->getUniformMappedPtr(frameIndex), &uniforms, sizeof(TerrainUniforms));
+    memcpy(buffers->getUniformMappedPtr(frameIndex), &uniforms, sizeof(TerrainUniforms));
 
     // Update caustics animation time (assumes ~60fps, ~16.67ms per frame)
     causticsTime += 0.0167f;
-    float* causticsData = static_cast<float*>((*buffers)->getCausticsMappedPtr(frameIndex));
+    float* causticsData = static_cast<float*>(buffers->getCausticsMappedPtr(frameIndex));
     if (causticsData && causticsEnabled) {
         causticsData[5] = causticsTime;  // causticsTime in UBO
     }
@@ -736,7 +727,7 @@ void TerrainSystem::recordCompute(vk::CommandBuffer cmd, uint32_t frameIndex, Gp
             0, subdivPC);
 
         // Dispatch all triangles - inline frustum culling handles early-out
-        vkCmd.dispatchIndirect((*buffers)->getIndirectDispatchBuffer(), 0);
+        vkCmd.dispatchIndirect(buffers->getIndirectDispatchBuffer(), 0);
 
         if (profiler) profiler->endZone(cmd, "Terrain:Subdivision");
     } else {
@@ -758,7 +749,7 @@ void TerrainSystem::recordCompute(vk::CommandBuffer cmd, uint32_t frameIndex, Gp
             0, subdivPC);
 
         // Use the original indirect dispatch (all triangles)
-        vkCmd.dispatchIndirect((*buffers)->getIndirectDispatchBuffer(), 0);
+        vkCmd.dispatchIndirect(buffers->getIndirectDispatchBuffer(), 0);
 
         if (profiler) profiler->endZone(cmd, "Terrain:Subdivision");
     }
@@ -902,10 +893,10 @@ void TerrainSystem::recordDraw(vk::CommandBuffer cmd, uint32_t frameIndex) {
         vkCmd.bindIndexBuffer(meshlet->getIndexBuffer(), 0, vk::IndexType::eUint16);
 
         // Indexed instanced draw
-        vkCmd.drawIndexedIndirect((*buffers)->getIndirectDrawBuffer(), 0, 1, sizeof(VkDrawIndexedIndirectCommand));
+        vkCmd.drawIndexedIndirect(buffers->getIndirectDrawBuffer(), 0, 1, sizeof(VkDrawIndexedIndirectCommand));
     } else {
         // Direct vertex draw (no vertex buffer - vertices generated from gl_VertexIndex)
-        vkCmd.drawIndirect((*buffers)->getIndirectDrawBuffer(), 0, 1, sizeof(VkDrawIndirectCommand));
+        vkCmd.drawIndirect(buffers->getIndirectDrawBuffer(), 0, 1, sizeof(VkDrawIndirectCommand));
     }
 }
 
@@ -918,7 +909,7 @@ void TerrainSystem::recordShadowCull(vk::CommandBuffer cmd, uint32_t frameIndex,
     vk::CommandBuffer vkCmd = cmd;
 
     // Clear the shadow visible count to 0 and barrier for compute
-    Barriers::clearBufferForCompute(cmd, (*buffers)->getShadowVisibleBuffer());
+    Barriers::clearBufferForCompute(cmd, buffers->getShadowVisibleBuffer());
 
     // Bind shadow cull compute pipeline
     vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, pipelines->getShadowCullPipeline());
@@ -944,7 +935,7 @@ void TerrainSystem::recordShadowCull(vk::CommandBuffer cmd, uint32_t frameIndex,
         0, pc);
 
     // Use indirect dispatch - the workgroup count is computed on GPU in terrain_dispatcher
-    vkCmd.dispatchIndirect((*buffers)->getIndirectDispatchBuffer(), 0);
+    vkCmd.dispatchIndirect(buffers->getIndirectDispatchBuffer(), 0);
 
     // Memory barrier to ensure shadow cull results are visible for draw
     Barriers::computeToIndirectDraw(cmd);
@@ -1002,10 +993,10 @@ void TerrainSystem::recordShadowDraw(vk::CommandBuffer cmd, uint32_t frameIndex,
         vkCmd.bindIndexBuffer(meshlet->getIndexBuffer(), 0, vk::IndexType::eUint16);
 
         // Use shadow indirect draw buffer if culling, else main indirect buffer
-        VkBuffer drawBuffer = useCulled ? (*buffers)->getShadowIndirectDrawBuffer() : (*buffers)->getIndirectDrawBuffer();
+        VkBuffer drawBuffer = useCulled ? buffers->getShadowIndirectDrawBuffer() : buffers->getIndirectDrawBuffer();
         vkCmd.drawIndexedIndirect(drawBuffer, 0, 1, sizeof(VkDrawIndexedIndirectCommand));
     } else {
-        VkBuffer drawBuffer = useCulled ? (*buffers)->getShadowIndirectDrawBuffer() : (*buffers)->getIndirectDrawBuffer();
+        VkBuffer drawBuffer = useCulled ? buffers->getShadowIndirectDrawBuffer() : buffers->getIndirectDrawBuffer();
         vkCmd.drawIndirect(drawBuffer, 0, 1, sizeof(VkDrawIndirectCommand));
     }
 }

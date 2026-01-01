@@ -50,16 +50,9 @@ bool LeafSystem::initInternal(const InitInfo& info) {
     hooks.createDescriptorSets = [this]() { return createDescriptorSets(); };
     hooks.destroyBuffers = [this](VmaAllocator allocator) { destroyBuffers(allocator); };
 
-    particleSystem = RAIIAdapter<ParticleSystem>::create(
-        [&](auto& ps) {
-            initializingPS = &ps;
-            // Use framesInFlight for buffer set count to ensure proper triple buffering
-            return ps.init(info, hooks, info.framesInFlight);
-        },
-        [](auto& ps) { ps.destroy(ps.getDevice(), ps.getAllocator()); }
-    );
+    particleSystem = ParticleSystem::create(info, hooks, info.framesInFlight, &initializingPS);
 
-    return particleSystem.has_value();
+    return particleSystem != nullptr;
 }
 
 void LeafSystem::cleanup() {
@@ -449,14 +442,14 @@ void LeafSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>&
 
     // Update compute and graphics descriptor sets for all buffer sets
     // Note: tile info buffer (binding 9) is updated per-frame in recordResetAndCompute
-    uint32_t bufferSetCount = (*particleSystem)->getBufferSetCount();
+    uint32_t bufferSetCount = particleSystem->getBufferSetCount();
     for (uint32_t set = 0; set < bufferSetCount; set++) {
         // For triple buffering, input is the previous buffer set (wraps around)
         uint32_t inputSet = (set == 0) ? (bufferSetCount - 1) : (set - 1);
         uint32_t outputSet = set;
 
         // Compute descriptor set - use non-fluent pattern to avoid copy semantics bug
-        DescriptorManager::SetWriter computeWriter(dev, (*particleSystem)->getComputeDescriptorSet(set));
+        DescriptorManager::SetWriter computeWriter(dev, particleSystem->getComputeDescriptorSet(set));
         computeWriter.writeBuffer(0, particleBuffers.buffers[inputSet], 0, sizeof(LeafParticle) * MAX_PARTICLES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
         computeWriter.writeBuffer(1, particleBuffers.buffers[outputSet], 0, sizeof(LeafParticle) * MAX_PARTICLES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
         computeWriter.writeBuffer(2, indirectBuffers.buffers[outputSet], 0, sizeof(VkDrawIndirectCommand), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
@@ -480,7 +473,7 @@ void LeafSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>&
 
         // Graphics descriptor set - use non-fluent pattern
         // Use dynamic UBO if available (avoids per-frame descriptor updates)
-        DescriptorManager::SetWriter graphicsWriter(dev, (*particleSystem)->getGraphicsDescriptorSet(set));
+        DescriptorManager::SetWriter graphicsWriter(dev, particleSystem->getGraphicsDescriptorSet(set));
         if (dynamicRendererUBO && dynamicRendererUBO->isValid()) {
             graphicsWriter.writeBuffer(0, dynamicRendererUBO->buffer, 0, dynamicRendererUBO->alignedSize,
                                        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC);
@@ -561,10 +554,10 @@ void LeafSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos,
 }
 
 void LeafSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex, float time, float deltaTime) {
-    uint32_t writeSet = (*particleSystem)->getComputeBufferSet();
+    uint32_t writeSet = particleSystem->getComputeBufferSet();
 
     // Update compute descriptor set to use this frame's uniform, displacement region, params, and tile info buffers
-    DescriptorManager::SetWriter writer(getDevice(), (*particleSystem)->getComputeDescriptorSet(writeSet));
+    DescriptorManager::SetWriter writer(getDevice(), particleSystem->getComputeDescriptorSet(writeSet));
     writer.writeBuffer(3, uniformBuffers.buffers[frameIndex], 0, sizeof(CullingUniforms))
           .writeBuffer(7, displacementRegionBuffers.buffers[frameIndex], 0, sizeof(glm::vec4))
           .writeBuffer(10, paramsBuffers.buffers[frameIndex], 0, sizeof(LeafPhysicsParams));
@@ -585,7 +578,7 @@ void LeafSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex,
     // Dispatch leaf compute shader
     vk::CommandBuffer vkCmd(cmd);
     vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, getComputePipelineHandles().pipeline);
-    VkDescriptorSet computeSet = (*particleSystem)->getComputeDescriptorSet(writeSet);
+    VkDescriptorSet computeSet = particleSystem->getComputeDescriptorSet(writeSet);
     vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute,
                              getComputePipelineHandles().pipelineLayout, 0, vk::DescriptorSet(computeSet), {});
 
@@ -605,7 +598,7 @@ void LeafSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex,
 
 void LeafSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time) {
     // Double-buffer: graphics reads from renderBufferSet (previous frame's compute output)
-    uint32_t readSet = (*particleSystem)->getRenderBufferSet();
+    uint32_t readSet = particleSystem->getRenderBufferSet();
 
     // Dynamic UBO: no per-frame descriptor update needed - we pass the offset at bind time instead
     // This eliminates per-frame vkUpdateDescriptorSets calls for the renderer UBO
@@ -629,7 +622,7 @@ void LeafSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time
         .setExtent(vk::Extent2D{ext.width, ext.height});
     vkCmd.setScissor(0, scissor);
 
-    VkDescriptorSet graphicsSet = (*particleSystem)->getGraphicsDescriptorSet(readSet);
+    VkDescriptorSet graphicsSet = particleSystem->getGraphicsDescriptorSet(readSet);
 
     // Use dynamic offset for binding 0 (renderer UBO) if dynamic buffer is available
     if (dynamicRendererUBO_ && dynamicRendererUBO_->isValid()) {
@@ -653,4 +646,4 @@ void LeafSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time
     vkCmd.drawIndirect(indirectBuffers.buffers[readSet], 0, 1, sizeof(VkDrawIndirectCommand));
 }
 
-void LeafSystem::advanceBufferSet() { (*particleSystem)->advanceBufferSet(); }
+void LeafSystem::advanceBufferSet() { particleSystem->advanceBufferSet(); }

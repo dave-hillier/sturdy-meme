@@ -32,10 +32,7 @@ bool VirtualTextureSystem::init(const InitInfo& info) {
     cacheInfo.framesInFlight = framesInFlight_;
     cacheInfo.useCompression = false;
 
-    cache = RAIIAdapter<VirtualTextureCache>::create(
-        [&](auto& c) { return c.init(cacheInfo); },
-        [device = info.device, allocator = info.allocator](auto& c) { c.destroy(device, allocator); }
-    );
+    cache = VirtualTextureCache::create(cacheInfo);
     if (!cache) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize VT cache");
         return false;
@@ -138,13 +135,13 @@ void VirtualTextureSystem::processFeedback(uint32_t frameIndex) {
 
     // Calculate cache pressure: how many tiles we're trying to load vs capacity
     uint32_t totalCacheSlots = config.getTotalCacheSlots();
-    uint32_t usedSlots = (*cache)->getUsedSlotCount();
+    uint32_t usedSlots = cache->getUsedSlotCount();
     uint32_t pendingCount = static_cast<uint32_t>(pendingTiles.size());
 
     // Count how many new tiles we'd be requesting
     uint32_t newRequestCount = 0;
     for (const auto& id : requested) {
-        if (!(*cache)->hasTile(id) &&
+        if (!cache->hasTile(id) &&
             pendingTiles.find(id.pack()) == pendingTiles.end() &&
             !tileLoader->isQueued(id)) {
             newRequestCount++;
@@ -195,8 +192,8 @@ void VirtualTextureSystem::processFeedback(uint32_t frameIndex) {
         uint32_t packed = adjustedId.pack();
 
         // Skip if already in cache
-        if ((*cache)->hasTile(adjustedId)) {
-            (*cache)->markUsed(adjustedId, currentFrame);
+        if (cache->hasTile(adjustedId)) {
+            cache->markUsed(adjustedId, currentFrame);
             continue;
         }
 
@@ -241,7 +238,7 @@ void VirtualTextureSystem::recordPendingTileUploads(VkCommandBuffer cmd, uint32_
         }
 
         // Allocate cache slot
-        CacheSlot* slot = (*cache)->allocateSlot(tile.id, currentFrame);
+        CacheSlot* slot = cache->allocateSlot(tile.id, currentFrame);
         if (!slot) {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                         "VT: Failed to allocate cache slot for tile");
@@ -250,14 +247,14 @@ void VirtualTextureSystem::recordPendingTileUploads(VkCommandBuffer cmd, uint32_
 
         // Record tile upload commands into the main command buffer
         // This uses per-frame staging buffers to avoid race conditions
-        (*cache)->recordTileUpload(tile.id, tile.pixels.data(),
+        cache->recordTileUpload(tile.id, tile.pixels.data(),
                                    tile.width, tile.height,
                                    tile.format, cmd, frameIndex);
 
         // Update page table (CPU-side, will be uploaded via recordUpload)
         uint32_t slotsPerAxis = config.getCacheTilesPerAxis();
         uint32_t packed = tile.id.pack();
-        auto slotIt = (*cache)->getTileSlotIndex(tile.id);
+        auto slotIt = cache->getTileSlotIndex(tile.id);
 
         if (slotIt != UINT32_MAX) {
             uint16_t cacheX = slotIt % slotsPerAxis;
@@ -305,7 +302,7 @@ VTParamsUBO VirtualTextureSystem::getParams() const {
 }
 
 void VirtualTextureSystem::requestTile(TileId id) {
-    if (!(*cache)->hasTile(id) && !tileLoader->isQueued(id)) {
+    if (!cache->hasTile(id) && !tileLoader->isQueued(id)) {
         tileLoader->queueTile(id, 0); // High priority
         pendingTiles.insert(id.pack());
     }
