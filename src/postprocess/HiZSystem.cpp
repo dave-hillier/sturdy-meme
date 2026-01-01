@@ -426,6 +426,7 @@ void HiZSystem::updateUniforms(uint32_t frameIndex, const glm::mat4& view, const
     uniforms.depthParams = glm::vec4(nearPlane, farPlane, static_cast<float>(mipLevelCount), 0.0f);
     uniforms.objectCount = objectCount;
     uniforms.enableHiZ = hiZEnabled ? 1 : 0;
+    uniforms.maxDrawCommands = MAX_OBJECTS;  // Output buffer capacity
 
     // Extract frustum planes
     extractFrustumPlanes(uniforms.viewProjMatrix, uniforms.frustumPlanes);

@@ -585,6 +585,7 @@ void ImpostorCullSystem::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
     uniforms.temporalUpdateMode = temporalUpdateMode;
     uniforms.temporalUpdateOffset = temporalUpdateOffset;
     uniforms.temporalUpdateCount = temporalUpdateCount;
+    uniforms.maxVisibleImpostors = maxTrees_;  // Output buffer capacity
 
     // Upload uniforms
     void* data;

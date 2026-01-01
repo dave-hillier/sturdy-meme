@@ -48,7 +48,8 @@ struct alignas(16) HiZCullUniforms {
     glm::vec4 depthParams;          // x = near, y = far, z = numMipLevels, w = unused
     uint32_t objectCount;           // Number of objects to cull
     uint32_t enableHiZ;             // 1 = use Hi-Z, 0 = frustum only
-    uint32_t padding[2];
+    uint32_t maxDrawCommands;       // Output buffer capacity
+    uint32_t padding;
 };
 
 // Hi-Z pyramid generation push constants
