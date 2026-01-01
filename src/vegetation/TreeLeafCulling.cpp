@@ -714,6 +714,46 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
         updateCullDescriptorSets(treeSystem);
     }
 
+    // CRITICAL: Check if tree count exceeds buffer capacity and resize if needed.
+    // Without this check, vkCmdUpdateBuffer writes out of bounds when trees are added,
+    // corrupting GPU memory and causing leaf type data to be misread (flickering oak leaves).
+    if (numTrees > numTreesForIndirect_) {
+        SDL_Log("TreeLeafCulling: Tree count increased from %u to %u, resizing buffers",
+                numTreesForIndirect_, numTrees);
+        vkDeviceWaitIdle(device_);  // Wait for in-flight frames before destroying buffers
+
+        // Resize tree data buffers
+        treeDataBufferSize_ = numTrees * sizeof(TreeCullData);
+        if (!treeDataBuffers_.resize(
+                allocator_, maxFramesInFlight_, treeDataBufferSize_,
+                vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst)) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to resize tree data buffers");
+            return;
+        }
+
+        treeRenderDataBufferSize_ = numTrees * sizeof(TreeRenderDataGPU);
+        if (!treeRenderDataBuffers_.resize(
+                allocator_, maxFramesInFlight_, treeRenderDataBufferSize_,
+                vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst)) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to resize tree render data buffers");
+            return;
+        }
+
+        numTreesForIndirect_ = numTrees;
+
+        // Must update descriptor sets since buffer handles changed
+        updateCullDescriptorSets(treeSystem);
+
+        // Also update tree filter descriptor sets if they exist (for two-phase culling)
+        if (!treeFilterDescriptorSets_.empty()) {
+            for (uint32_t f = 0; f < maxFramesInFlight_; ++f) {
+                DescriptorManager::SetWriter writer(device_, treeFilterDescriptorSets_[f]);
+                writer.writeBuffer(Bindings::TREE_FILTER_ALL_TREES, treeDataBuffers_.getVk(f), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+                      .update();
+            }
+        }
+    }
+
     // Reset all 4 indirect draw commands (one per leaf type: oak, ash, aspen, pine)
     // Also includes tierCounts for phase 3 distance-based budget allocation
     constexpr uint32_t NUM_LEAF_TYPES = 4;
