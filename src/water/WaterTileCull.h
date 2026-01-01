@@ -1,13 +1,15 @@
 #pragma once
 
 #include <vulkan/vulkan.h>
+#include <vulkan/vulkan_raii.hpp>
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
 #include <memory>
+#include <optional>
 
-#include "VulkanRAII.h"
+#include "VmaResources.h"
 
 /**
  * WaterTileCull - Phase 7: Screen-Space Tile Visibility
@@ -33,6 +35,7 @@ public:
         uint32_t framesInFlight;
         VkExtent2D extent;
         uint32_t tileSize = 32;  // Pixels per tile
+        const vk::raii::Device* raiiDevice = nullptr;
     };
 
     // Tile visibility data
@@ -152,18 +155,21 @@ private:
     ManagedBuffer indirectDrawBuffer_;
 
     // Compute pipeline (RAII-managed)
-    ManagedPipeline computePipeline;
-    ManagedPipelineLayout computePipelineLayout;
-    ManagedDescriptorSetLayout descriptorSetLayout;
+    std::optional<vk::raii::Pipeline> computePipeline_;
+    std::optional<vk::raii::PipelineLayout> computePipelineLayout_;
+    std::optional<vk::raii::DescriptorSetLayout> descriptorSetLayout_;
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
     std::vector<VkDescriptorSet> descriptorSets;
 
     // Depth texture sampler for tile culling (RAII-managed)
-    ManagedSampler depthSampler;
+    std::optional<vk::raii::Sampler> depthSampler_;
 
     // CPU-side visibility tracking to avoid double-buffer aliasing issues
     // Tracks the last frame number where water was visible
     uint64_t lastVisibleFrame = 0;
     uint64_t currentAbsoluteFrame = 0;
     static constexpr uint64_t VISIBILITY_GRACE_FRAMES = 4;  // Keep rendering for N frames after last visible
+
+    // RAII device pointer
+    const vk::raii::Device* raiiDevice_ = nullptr;
 };

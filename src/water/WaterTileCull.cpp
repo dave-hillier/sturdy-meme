@@ -30,6 +30,12 @@ bool WaterTileCull::initInternal(const InitInfo& info) {
     framesInFlight = info.framesInFlight;
     extent = info.extent;
     tileSize = info.tileSize;
+    raiiDevice_ = info.raiiDevice;
+
+    if (!raiiDevice_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "WaterTileCull: raiiDevice is required");
+        return false;
+    }
 
     // Calculate tile count
     tileCount.x = (extent.width + tileSize - 1) / tileSize;
@@ -55,10 +61,10 @@ void WaterTileCull::cleanup() {
     }
 
     // RAII wrappers handle cleanup automatically - just reset them
-    computePipeline = ManagedPipeline();
-    computePipelineLayout = ManagedPipelineLayout();
-    descriptorSetLayout = ManagedDescriptorSetLayout();
-    depthSampler = ManagedSampler();
+    computePipeline_.reset();
+    computePipelineLayout_.reset();
+    descriptorSetLayout_.reset();
+    depthSampler_.reset();
 
     // ManagedBuffer cleanup (RAII handles via reset)
     tileBuffer_.reset();
@@ -69,6 +75,7 @@ void WaterTileCull::cleanup() {
     indirectDrawBuffer_.reset();
 
     device = VK_NULL_HANDLE;
+    raiiDevice_ = nullptr;
 }
 
 void WaterTileCull::resize(VkExtent2D newExtent) {
@@ -177,10 +184,12 @@ bool WaterTileCull::createComputePipeline() {
     layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
     layoutInfo.pBindings = bindings.data();
 
-    if (!ManagedDescriptorSetLayout::create(device, layoutInfo, descriptorSetLayout)) {
+    VkDescriptorSetLayout rawDescLayout = VK_NULL_HANDLE;
+    if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &rawDescLayout) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create tile cull descriptor set layout");
         return false;
     }
+    descriptorSetLayout_.emplace(*raiiDevice_, rawDescLayout);
 
     // Push constant range
     VkPushConstantRange pushConstantRange{};
@@ -188,7 +197,7 @@ bool WaterTileCull::createComputePipeline() {
     pushConstantRange.offset = 0;
     pushConstantRange.size = sizeof(TileCullPushConstants);
 
-    VkDescriptorSetLayout rawLayout = descriptorSetLayout.get();
+    VkDescriptorSetLayout rawLayout = **descriptorSetLayout_;
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.setLayoutCount = 1;
@@ -196,10 +205,12 @@ bool WaterTileCull::createComputePipeline() {
     pipelineLayoutInfo.pushConstantRangeCount = 1;
     pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
 
-    if (!ManagedPipelineLayout::create(device, pipelineLayoutInfo, computePipelineLayout)) {
+    VkPipelineLayout rawPipelineLayout = VK_NULL_HANDLE;
+    if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &rawPipelineLayout) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create tile cull pipeline layout");
         return false;
     }
+    computePipelineLayout_.emplace(*raiiDevice_, rawPipelineLayout);
 
     // Load compute shader
     std::string shaderFile = shaderPath + "/water_tile_cull.comp.spv";
@@ -218,7 +229,7 @@ bool WaterTileCull::createComputePipeline() {
     VkComputePipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
     pipelineInfo.stage = stageInfo;
-    pipelineInfo.layout = computePipelineLayout.get();
+    pipelineInfo.layout = **computePipelineLayout_;
 
     VkPipeline rawPipeline = VK_NULL_HANDLE;
     VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1,
@@ -230,27 +241,28 @@ bool WaterTileCull::createComputePipeline() {
         return false;
     }
 
-    computePipeline = ManagedPipeline::fromRaw(device, rawPipeline);
+    computePipeline_.emplace(*raiiDevice_, rawPipeline);
 
     SDL_Log("WaterTileCull compute pipeline created");
 
     // Create depth sampler for tile culling
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_NEAREST;
-    samplerInfo.minFilter = VK_FILTER_NEAREST;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.mipLodBias = 0.0f;
-    samplerInfo.anisotropyEnable = VK_FALSE;
-    samplerInfo.compareEnable = VK_FALSE;
-    samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = 0.0f;
+    auto samplerInfo = vk::SamplerCreateInfo{}
+        .setMagFilter(vk::Filter::eNearest)
+        .setMinFilter(vk::Filter::eNearest)
+        .setMipmapMode(vk::SamplerMipmapMode::eNearest)
+        .setAddressModeU(vk::SamplerAddressMode::eClampToEdge)
+        .setAddressModeV(vk::SamplerAddressMode::eClampToEdge)
+        .setAddressModeW(vk::SamplerAddressMode::eClampToEdge)
+        .setMipLodBias(0.0f)
+        .setAnisotropyEnable(VK_FALSE)
+        .setCompareEnable(VK_FALSE)
+        .setMinLod(0.0f)
+        .setMaxLod(0.0f);
 
-    if (!ManagedSampler::create(device, samplerInfo, depthSampler)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create tile cull depth sampler");
+    try {
+        depthSampler_.emplace(*raiiDevice_, samplerInfo);
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create tile cull depth sampler: %s", e.what());
         return false;
     }
 
@@ -275,7 +287,7 @@ bool WaterTileCull::createDescriptorSets() {
         return false;
     }
 
-    std::vector<VkDescriptorSetLayout> layouts(framesInFlight, descriptorSetLayout.get());
+    std::vector<VkDescriptorSetLayout> layouts(framesInFlight, **descriptorSetLayout_);
 
     VkDescriptorSetAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -310,7 +322,7 @@ void WaterTileCull::recordTileCull(VkCommandBuffer cmd, uint32_t frameIndex,
 
     // Update descriptor set with depth texture and storage buffers
     DescriptorManager::SetWriter(device, descriptorSets[frameIndex])
-        .writeImage(0, depthView, depthSampler.get())
+        .writeImage(0, depthView, **depthSampler_)
         .writeBuffer(1, tileBuffer_.get(), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
         .writeBuffer(2, counterBuffer_.get(), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
         .writeBuffer(3, indirectDrawBuffer_.get(), 0, sizeof(IndirectDrawCommand), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
@@ -330,10 +342,10 @@ void WaterTileCull::recordTileCull(VkCommandBuffer cmd, uint32_t frameIndex,
 
     // Bind pipeline
     vk::CommandBuffer vkCmd(cmd);
-    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, computePipeline.get());
-    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, computePipelineLayout.get(),
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, **computePipeline_);
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, **computePipelineLayout_,
                              0, vk::DescriptorSet(descriptorSets[frameIndex]), {});
-    vkCmd.pushConstants<TileCullPushConstants>(computePipelineLayout.get(),
+    vkCmd.pushConstants<TileCullPushConstants>(**computePipelineLayout_,
                                                 vk::ShaderStageFlagBits::eCompute, 0, pc);
 
     // Dispatch one thread per tile

@@ -1008,6 +1008,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         waterInfo.graphicsQueue = graphicsQueue;
         waterInfo.waterSize = 65536.0f;  // Extend well beyond terrain for horizon
         waterInfo.assetPath = resourcePath;
+        waterInfo.raiiDevice = &vulkanContext_->getRaiiDevice();
 
         auto waterSystem = WaterSystem::create(waterInfo);
         if (!waterSystem) {
@@ -1024,6 +1025,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     flowInfo.allocator = allocator;
     flowInfo.commandPool = commandPool.get();
     flowInfo.queue = graphicsQueue;
+    flowInfo.raiiDevice = &vulkanContext_->getRaiiDevice();
 
     auto flowMapGenerator = FlowMapGenerator::create(flowInfo);
     if (!flowMapGenerator) {
@@ -1042,6 +1044,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     dispInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
     dispInfo.displacementResolution = 512;
     dispInfo.worldSize = 65536.0f;
+    dispInfo.raiiDevice = &vulkanContext_->getRaiiDevice();
 
     auto waterDisplacement = WaterDisplacement::create(dispInfo);
     if (!waterDisplacement) {
@@ -1061,6 +1064,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     foamInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
     foamInfo.resolution = 512;
     foamInfo.worldSize = 65536.0f;
+    foamInfo.raiiDevice = &vulkanContext_->getRaiiDevice();
 
     auto foamBuffer = FoamBuffer::create(foamInfo);
     if (!foamBuffer) {
@@ -1080,6 +1084,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     tileCullInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
     tileCullInfo.extent = initCtx.extent;
     tileCullInfo.tileSize = 32;
+    tileCullInfo.raiiDevice = &vulkanContext_->getRaiiDevice();
 
     auto waterTileCull = WaterTileCull::create(tileCullInfo);
     if (waterTileCull) {
@@ -1098,6 +1103,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     gbufferInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
     gbufferInfo.shaderPath = initCtx.shaderPath;
     gbufferInfo.descriptorPool = initCtx.descriptorPool;
+    gbufferInfo.raiiDevice = &vulkanContext_->getRaiiDevice();
 
     auto waterGBuffer = WaterGBuffer::create(gbufferInfo);
     if (waterGBuffer) {

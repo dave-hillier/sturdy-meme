@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vulkan/vulkan.h>
+#include <vulkan/vulkan_raii.hpp>
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
 #include <array>
@@ -13,7 +14,7 @@
 #include "Texture.h"
 #include "DescriptorManager.h"
 #include "RAIIAdapter.h"
-#include "VulkanRAII.h"
+#include "VmaResources.h"
 #include "core/FrameBuffered.h"
 
 class ShadowSystem;
@@ -33,6 +34,7 @@ public:
         VkQueue graphicsQueue;
         float waterSize = 100.0f;  // Size of water plane in world units
         std::string assetPath;     // Base path for assets (for foam texture)
+        const vk::raii::Device* raiiDevice = nullptr;
     };
 
     // Water material properties for blending (Phase 12)
@@ -249,7 +251,7 @@ public:
     // Tessellation mode (GPU tessellation for wave geometry detail)
     void setUseTessellation(bool enabled) { useTessellation_ = enabled; }
     bool getUseTessellation() const { return useTessellation_; }
-    bool isTessellationSupported() const { return tessellationPipeline.get() != VK_NULL_HANDLE; }
+    bool isTessellationSupported() const { return tessellationPipeline_.has_value(); }
 
     // Get uniform buffers (for G-buffer pass descriptor sets)
     VkBuffer getUniformBuffer(size_t frameIndex) const { return waterUniformBuffers_[frameIndex].get(); }
@@ -372,12 +374,15 @@ private:
     std::string assetPath;
 
     // Pipeline resources (RAII-managed)
-    ManagedPipeline pipeline;
-    ManagedPipeline tessellationPipeline;  // GPU tessellation pipeline for wave detail
-    ManagedPipelineLayout pipelineLayout;
-    ManagedDescriptorSetLayout descriptorSetLayout;
+    std::optional<vk::raii::Pipeline> pipeline_;
+    std::optional<vk::raii::Pipeline> tessellationPipeline_;  // GPU tessellation pipeline for wave detail
+    std::optional<vk::raii::PipelineLayout> pipelineLayout_;
+    std::optional<vk::raii::DescriptorSetLayout> descriptorSetLayout_;
     std::vector<VkDescriptorSet> descriptorSets;
     bool useTessellation_ = false;  // Whether to use tessellation when supported
+
+    // RAII device pointer
+    const vk::raii::Device* raiiDevice_ = nullptr;
 
     // Water mesh (a subdivided plane for wave animation) - RAII-managed
     std::optional<RAIIAdapter<Mesh>> waterMesh;

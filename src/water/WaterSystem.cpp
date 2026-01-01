@@ -33,6 +33,12 @@ bool WaterSystem::initInternal(const InitInfo& info) {
     graphicsQueue = info.graphicsQueue;
     waterSize = info.waterSize;
     assetPath = info.assetPath;
+    raiiDevice_ = info.raiiDevice;
+
+    if (!raiiDevice_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "WaterSystem requires raiiDevice");
+        return false;
+    }
 
     // Initialize default water parameters - English estuary/coastal style
     waterUniforms.waterColor = glm::vec4(0.15f, 0.22f, 0.25f, 0.9f);  // Grey-green estuary color
@@ -103,11 +109,14 @@ void WaterSystem::cleanup() {
     waterUniformMapped.clear();
 
     // RAII wrappers handle cleanup automatically - just reset them
-    pipeline = ManagedPipeline();
-    tessellationPipeline = ManagedPipeline();
-    pipelineLayout = ManagedPipelineLayout();
-    descriptorSetLayout = ManagedDescriptorSetLayout();
+    pipeline_.reset();
+    tessellationPipeline_.reset();
+    pipelineLayout_.reset();
+    descriptorSetLayout_.reset();
     descriptorSets.clear();
+
+    device = VK_NULL_HANDLE;
+    raiiDevice_ = nullptr;
 }
 
 bool WaterSystem::createDescriptorSetLayout() {
@@ -166,7 +175,7 @@ bool WaterSystem::createDescriptorSetLayout() {
         SDL_Log("Failed to create water descriptor set layout");
         return false;
     }
-    descriptorSetLayout = ManagedDescriptorSetLayout::fromRaw(device, rawLayout);
+    descriptorSetLayout_.emplace(*raiiDevice_, rawLayout);
 
     // Create pipeline layout with push constants for model matrix + FFT params
     // Push constants are used by vertex shader (non-tessellated) and tessellation evaluation shader (tessellated)
@@ -177,12 +186,12 @@ bool WaterSystem::createDescriptorSetLayout() {
     pushConstantRange.offset = 0;
     pushConstantRange.size = sizeof(PushConstants);
 
-    VkPipelineLayout rawPipelineLayout = DescriptorManager::createPipelineLayout(device, descriptorSetLayout.get(), {pushConstantRange});
+    VkPipelineLayout rawPipelineLayout = DescriptorManager::createPipelineLayout(device, **descriptorSetLayout_, {pushConstantRange});
     if (rawPipelineLayout == VK_NULL_HANDLE) {
         SDL_Log("Failed to create water pipeline layout");
         return false;
     }
-    pipelineLayout = ManagedPipelineLayout::fromRaw(device, rawPipelineLayout);
+    pipelineLayout_.emplace(*raiiDevice_, rawPipelineLayout);
 
     return true;
 }
@@ -203,7 +212,7 @@ bool WaterSystem::createPipeline() {
     bool success = factory
         .setShaders(shaderPath + "/water.vert.spv", shaderPath + "/water.frag.spv")
         .setRenderPass(hdrRenderPass)
-        .setPipelineLayout(pipelineLayout.get())
+        .setPipelineLayout(**pipelineLayout_)
         .setExtent(extent)
         .setDynamicViewport(true)
         .setVertexInput(bindings, attributes)
@@ -219,7 +228,7 @@ bool WaterSystem::createPipeline() {
         return false;
     }
 
-    pipeline = ManagedPipeline::fromRaw(device, rawPipeline);
+    pipeline_.emplace(*raiiDevice_, rawPipeline);
 
     // Create tessellation pipeline for GPU wave geometry detail
     // This is optional - if it fails, we fall back to the regular pipeline
@@ -229,7 +238,7 @@ bool WaterSystem::createPipeline() {
         .setShaders(shaderPath + "/water_tess.vert.spv", shaderPath + "/water.frag.spv")
         .setTessellationShaders(shaderPath + "/water.tesc.spv", shaderPath + "/water.tese.spv")
         .setRenderPass(hdrRenderPass)
-        .setPipelineLayout(pipelineLayout.get())
+        .setPipelineLayout(**pipelineLayout_)
         .setExtent(extent)
         .setDynamicViewport(true)
         .setVertexInput(bindings, attributes)
@@ -241,7 +250,7 @@ bool WaterSystem::createPipeline() {
         .build(rawTessPipeline);
 
     if (tessSuccess) {
-        tessellationPipeline = ManagedPipeline::fromRaw(device, rawTessPipeline);
+        tessellationPipeline_.emplace(*raiiDevice_, rawTessPipeline);
         SDL_Log("Water tessellation pipeline created successfully");
     } else {
         SDL_Log("Water tessellation pipeline creation failed - tessellation disabled");
@@ -415,7 +424,7 @@ bool WaterSystem::createDescriptorSets(const std::vector<VkBuffer>& uniformBuffe
     }
 
     // Allocate descriptor sets using managed pool
-    descriptorSets = descriptorPool->allocate(descriptorSetLayout.get(), framesInFlight);
+    descriptorSets = descriptorPool->allocate(**descriptorSetLayout_, framesInFlight);
     if (descriptorSets.size() != framesInFlight) {
         SDL_Log("Failed to allocate water descriptor sets");
         return false;
@@ -504,7 +513,7 @@ void WaterSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
 
     // Use tessellation pipeline if enabled and available
     bool useTess = useTessellation_ && isTessellationSupported();
-    VkPipeline activePipeline = useTess ? tessellationPipeline.get() : pipeline.get();
+    VkPipeline activePipeline = useTess ? **tessellationPipeline_ : **pipeline_;
     vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, activePipeline);
 
     // Set dynamic viewport and scissor to handle window resize
@@ -523,7 +532,7 @@ void WaterSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
     vkCmd.setScissor(0, scissor);
 
     vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
-                             pipelineLayout.get(), 0,
+                             **pipelineLayout_, 0,
                              vk::DescriptorSet(descriptorSets[frameIndex]), {});
 
     // Set up push constants
@@ -536,7 +545,7 @@ void WaterSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
     // useFFTOcean and oceanSize values are set via setUseFFTOcean()
     // Push constants are used by vertex shader (non-tess) or both vertex + tess eval shaders
     vkCmd.pushConstants<PushConstants>(
-        pipelineLayout.get(),
+        **pipelineLayout_,
         vk::ShaderStageFlagBits::eVertex,
         0, pushConstants);
 
