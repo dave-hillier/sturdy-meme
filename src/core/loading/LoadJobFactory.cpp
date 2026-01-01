@@ -1,7 +1,7 @@
 #include "LoadJobFactory.h"
 #include "../vulkan/VulkanResourceFactory.h"
 #include "../vulkan/VulkanBarriers.h"
-#include "../vulkan/VulkanHelpers.h"
+#include "../vulkan/CommandBufferUtils.h"
 #include "../ImageBuilder.h"
 #include <SDL3/SDL_log.h>
 #include <vulkan/vulkan.hpp>

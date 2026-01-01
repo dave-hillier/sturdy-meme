@@ -3,13 +3,20 @@
 #include "Texture.h"
 #include "DDSLoader.h"
 #include "VmaResources.h"
-#include "VulkanHelpers.h"
+#include "CommandBufferUtils.h"
 #include "VulkanResourceFactory.h"
 #include "VulkanBarriers.h"
 #include "ImageBuilder.h"
 #include <vulkan/vulkan.hpp>
 #include <cstring>
 #include <algorithm>
+#include <memory>
+
+// Custom deleter for stbi-loaded pixels
+struct StbiDeleter {
+    void operator()(stbi_uc* ptr) const { if (ptr) stbi_image_free(ptr); }
+};
+using StbiPixels = std::unique_ptr<stbi_uc, StbiDeleter>;
 
 // Check if a path ends with a specific extension (case-insensitive)
 static bool hasExtension(const std::string& path, const std::string& ext) {
@@ -38,8 +45,8 @@ bool Texture::load(const std::string& path, VmaAllocator allocator, VkDevice dev
         return false;
     }
 
-    // Use scope guard to ensure pixels are freed on any exit path
-    auto pixelGuard = makeScopeGuard([&]() { stbi_image_free(pixels); });
+    // Use RAII to ensure pixels are freed on any exit path
+    StbiPixels pixelGuard(pixels);
 
     VkDeviceSize imageSize = width * height * 4;
 
@@ -499,7 +506,7 @@ bool Texture::loadWithMipmaps(const std::string& path, VmaAllocator allocator, V
         return false;
     }
 
-    auto pixelGuard = makeScopeGuard([&]() { stbi_image_free(pixels); });
+    StbiPixels pixelGuard(pixels);
 
     VkFormat imageFormat = useSRGB ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
 

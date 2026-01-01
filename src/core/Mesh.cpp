@@ -1,6 +1,6 @@
 #include "Mesh.h"
 #include "VmaResources.h"
-#include "VulkanHelpers.h"
+#include "CommandBufferUtils.h"
 #include "VulkanResourceFactory.h"
 #include <vulkan/vulkan.hpp>
 #include <cstring>

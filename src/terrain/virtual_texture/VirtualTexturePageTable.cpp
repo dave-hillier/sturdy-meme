@@ -1,6 +1,6 @@
 #include "VirtualTexturePageTable.h"
 #include "VulkanBarriers.h"
-#include "VulkanHelpers.h"
+#include "CommandBufferUtils.h"
 #include "VulkanResourceFactory.h"
 #include <vulkan/vulkan.hpp>
 #include <SDL3/SDL_log.h>

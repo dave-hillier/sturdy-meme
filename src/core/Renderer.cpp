@@ -8,7 +8,6 @@
 #include "MaterialDescriptorFactory.h"
 #include "VulkanResourceFactory.h"
 #include "Bindings.h"
-#include "VulkanHelpers.h"
 #include "InitProfiler.h"
 
 // Subsystem includes for render loop

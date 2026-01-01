@@ -1,7 +1,7 @@
 #include "FlowMapGenerator.h"
 #include "VulkanBarriers.h"
 #include "VulkanResourceFactory.h"
-#include "VulkanHelpers.h"
+#include "CommandBufferUtils.h"
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.hpp>
 #include <cstring>

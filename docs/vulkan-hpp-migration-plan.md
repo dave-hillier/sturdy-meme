@@ -223,10 +223,10 @@ namespace VulkanResources {
    - Barrier convenience functions using vulkan-hpp
    - `copyBufferToImage()` and similar high-level operations
 
-3. **`src/core/vulkan/VulkanHelpers.h`**
-   - `ScopeGuard` (unchanged)
-   - `RenderPassScope` (using vulkan-hpp)
-   - Error handling macros for VMA
+3. **`src/core/vulkan/CommandBufferUtils.h`** (COMPLETED)
+   - `CommandScope` - RAII one-time command buffer submission
+   - `RenderPassScope` - RAII render pass begin/end with builder pattern
+   - Note: `ScopeGuard` removed - replaced with `std::unique_ptr` with custom deleters
 
 4. **`src/core/vulkan/VulkanResources.h`**
    - Complex resource creation (depth buffers, framebuffers, render passes)
@@ -242,11 +242,13 @@ namespace VulkanResources {
 
 ## Implementation Order
 
-### Batch 1: Foundation (Low Risk)
-1. Create `VmaResources.h` with `VmaBuffer`, `VmaImage`
-2. Create `VulkanHelpers.h` with `ScopeGuard`, `RenderPassScope`
-3. Update includes in affected files to use new headers
-4. Verify build compiles
+### Batch 1: Foundation (Low Risk) - COMPLETED
+1. Create `VmaResources.h` with `VmaBuffer`, `VmaImage` ✓
+2. Create `CommandBufferUtils.h` with `CommandScope`, `RenderPassScope` ✓
+   - `VulkanHelpers.h` removed, functionality moved to `CommandBufferUtils.h`
+   - `ScopeGuard` removed, use `std::unique_ptr` with custom deleters instead
+3. Update includes in affected files to use new headers ✓
+4. Verify build compiles ✓
 
 ### Batch 2: Barrier Migration
 1. Create `VulkanSync.h` with vulkan-hpp barrier utilities

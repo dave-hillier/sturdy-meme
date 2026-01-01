@@ -5,7 +5,7 @@
 #include "DescriptorManager.h"
 #include "VulkanBarriers.h"
 #include "VulkanResourceFactory.h"
-#include "VulkanHelpers.h"
+#include "CommandBufferUtils.h"
 #include <SDL3/SDL.h>
 #include <array>
 #include <vulkan/vulkan.hpp>
