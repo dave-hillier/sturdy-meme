@@ -23,6 +23,11 @@ ImpostorCullSystem::~ImpostorCullSystem() {
 }
 
 bool ImpostorCullSystem::initInternal(const InitInfo& info) {
+    raiiDevice_ = info.raiiDevice;
+    if (!raiiDevice_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "ImpostorCullSystem requires raiiDevice");
+        return false;
+    }
     device_ = info.device;
     physicalDevice_ = info.physicalDevice;
     allocator_ = info.allocator;
@@ -141,30 +146,19 @@ bool ImpostorCullSystem::createDescriptorSetLayout() {
     auto layoutInfo = vk::DescriptorSetLayoutCreateInfo{}
         .setBindings(bindings);
 
-    vk::Device vkDevice(device_);
-    auto layoutResult = vkDevice.createDescriptorSetLayout(layoutInfo);
-    if (!layoutResult) {
-        return false;
-    }
-    cullDescriptorSetLayout_ = ManagedDescriptorSetLayout(makeUniqueDescriptorSetLayout(device_, layoutResult));
+    cullDescriptorSetLayout_.emplace(*raiiDevice_, layoutInfo);
 
     return true;
 }
 
 bool ImpostorCullSystem::createComputePipeline() {
-    vk::Device vkDevice(device_);
-
     // Create pipeline layout
-    vk::DescriptorSetLayout layouts[] = {cullDescriptorSetLayout_.get()};
+    vk::DescriptorSetLayout layouts[] = {**cullDescriptorSetLayout_};
 
     auto pipelineLayoutInfo = vk::PipelineLayoutCreateInfo{}
         .setSetLayouts(layouts);
 
-    auto layoutResult = vkDevice.createPipelineLayout(pipelineLayoutInfo);
-    if (!layoutResult) {
-        return false;
-    }
-    cullPipelineLayout_ = ManagedPipelineLayout(makeUniquePipelineLayout(device_, layoutResult));
+    cullPipelineLayout_.emplace(*raiiDevice_, pipelineLayoutInfo);
 
     // Load compute shader
     std::string shaderPath = resourcePath_ + "/shaders/tree_impostor_cull.comp.spv";
@@ -181,21 +175,18 @@ bool ImpostorCullSystem::createComputePipeline() {
 
     auto pipelineInfo = vk::ComputePipelineCreateInfo{}
         .setStage(stageInfo)
-        .setLayout(layoutResult);
+        .setLayout(**cullPipelineLayout_);
 
-    auto pipelineResult = vkDevice.createComputePipeline(nullptr, pipelineInfo);
+    cullPipeline_.emplace(*raiiDevice_, nullptr, pipelineInfo);
+
+    vk::Device vkDevice(device_);
     vkDevice.destroyShaderModule(*shaderModule);
-
-    if (pipelineResult.result != vk::Result::eSuccess) {
-        return false;
-    }
-    cullPipeline_ = ManagedPipeline(makeUniquePipeline(device_, pipelineResult.value));
 
     return true;
 }
 
 bool ImpostorCullSystem::allocateDescriptorSets() {
-    cullDescriptorSets_ = descriptorPool_->allocate(cullDescriptorSetLayout_.get(), maxFramesInFlight_);
+    cullDescriptorSets_ = descriptorPool_->allocate(**cullDescriptorSetLayout_, maxFramesInFlight_);
     return !cullDescriptorSets_.empty();
 }
 
@@ -621,8 +612,8 @@ void ImpostorCullSystem::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
         {}, fillBarrier, nullptr, nullptr);
 
     // Bind pipeline and descriptor set
-    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, cullPipeline_.get());
-    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, cullPipelineLayout_.get(),
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, **cullPipeline_);
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, **cullPipelineLayout_,
                              0, vk::DescriptorSet(cullDescriptorSets_[frameIndex]), {});
 
     // Dispatch compute shader

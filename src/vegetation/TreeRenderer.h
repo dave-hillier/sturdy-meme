@@ -1,11 +1,13 @@
 #pragma once
 
 #include <vulkan/vulkan.hpp>
+#include <vulkan/vulkan_raii.hpp>
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -13,7 +15,6 @@
 #include "TreeLODSystem.h"
 #include "TreeLeafCulling.h"
 #include "TreeBranchCulling.h"
-#include "VulkanRAII.h"
 #include "DescriptorManager.h"
 
 // Push constants for tree rendering
@@ -53,6 +54,7 @@ struct TreeBranchShadowInstancedPushConstants {
 class TreeRenderer {
 public:
     struct InitInfo {
+        const vk::raii::Device* raiiDevice = nullptr;
         vk::Device device;
         vk::PhysicalDevice physicalDevice;
         VmaAllocator allocator;
@@ -179,6 +181,7 @@ private:
     bool createDescriptorSetLayout();
     bool allocateDescriptorSets(uint32_t maxFramesInFlight);
 
+    const vk::raii::Device* raiiDevice_ = nullptr;
     vk::Device device_;
     vk::PhysicalDevice physicalDevice_;
     VmaAllocator allocator_ = VK_NULL_HANDLE;
@@ -188,20 +191,20 @@ private:
     uint32_t maxFramesInFlight_ = 0;
 
     // Graphics Pipelines
-    ManagedPipeline branchPipeline_;
-    ManagedPipeline leafPipeline_;
-    ManagedPipeline branchShadowPipeline_;
-    ManagedPipeline leafShadowPipeline_;
+    std::optional<vk::raii::Pipeline> branchPipeline_;
+    std::optional<vk::raii::Pipeline> leafPipeline_;
+    std::optional<vk::raii::Pipeline> branchShadowPipeline_;
+    std::optional<vk::raii::Pipeline> leafShadowPipeline_;
 
     // Pipeline layouts
-    ManagedPipelineLayout branchPipelineLayout_;
-    ManagedPipelineLayout leafPipelineLayout_;
-    ManagedPipelineLayout branchShadowPipelineLayout_;
-    ManagedPipelineLayout leafShadowPipelineLayout_;
+    std::optional<vk::raii::PipelineLayout> branchPipelineLayout_;
+    std::optional<vk::raii::PipelineLayout> leafPipelineLayout_;
+    std::optional<vk::raii::PipelineLayout> branchShadowPipelineLayout_;
+    std::optional<vk::raii::PipelineLayout> leafShadowPipelineLayout_;
 
     // Descriptor set layouts
-    ManagedDescriptorSetLayout branchDescriptorSetLayout_;
-    ManagedDescriptorSetLayout leafDescriptorSetLayout_;
+    std::optional<vk::raii::DescriptorSetLayout> branchDescriptorSetLayout_;
+    std::optional<vk::raii::DescriptorSetLayout> leafDescriptorSetLayout_;
 
     // Per-frame descriptor sets (indexed by frame, then by texture type)
     std::vector<std::unordered_map<std::string, vk::DescriptorSet>> branchDescriptorSets_;
@@ -227,8 +230,8 @@ private:
     std::unique_ptr<TreeBranchCulling> branchShadowCulling_;
 
     // Instanced branch shadow rendering pipeline
-    ManagedPipeline branchShadowInstancedPipeline_;
-    ManagedPipelineLayout branchShadowInstancedPipelineLayout_;
-    ManagedDescriptorSetLayout branchShadowInstancedDescriptorSetLayout_;
+    std::optional<vk::raii::Pipeline> branchShadowInstancedPipeline_;
+    std::optional<vk::raii::PipelineLayout> branchShadowInstancedPipelineLayout_;
+    std::optional<vk::raii::DescriptorSetLayout> branchShadowInstancedDescriptorSetLayout_;
     std::vector<vk::DescriptorSet> branchShadowInstancedDescriptorSets_;
 };

@@ -2,16 +2,17 @@
 
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan.hpp>
+#include <vulkan/vulkan_raii.hpp>
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
 #include <memory>
 #include <array>
+#include <optional>
 
 #include "TreeSpatialIndex.h"
 #include "CullCommon.h"
-#include "VulkanRAII.h"
 #include "DescriptorManager.h"
 #include "BufferUtils.h"
 
@@ -132,6 +133,7 @@ struct TreeRenderDataGPU {
 class TreeLeafCulling {
 public:
     struct InitInfo {
+        const vk::raii::Device* raiiDevice = nullptr;
         VkDevice device;
         VkPhysicalDevice physicalDevice;
         VmaAllocator allocator;
@@ -168,7 +170,7 @@ public:
                        const glm::vec4* frustumPlanes);
 
     // Check if culling is enabled
-    bool isEnabled() const { return cullPipeline_.get() != VK_NULL_HANDLE; }
+    bool isEnabled() const { return cullPipeline_.has_value(); }
     bool isSpatialIndexEnabled() const { return spatialIndex_ != nullptr && spatialIndex_->isValid(); }
 
     // Enable/disable two-phase culling
@@ -211,6 +213,7 @@ private:
 
     void updateCullDescriptorSets(const TreeSystem& treeSystem);
 
+    const vk::raii::Device* raiiDevice_ = nullptr;
     VkDevice device_ = VK_NULL_HANDLE;
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
     VmaAllocator allocator_ = VK_NULL_HANDLE;
@@ -224,9 +227,9 @@ private:
     // =========================================================================
     // Single-phase Leaf Culling Pipeline
     // =========================================================================
-    ManagedPipeline cullPipeline_;
-    ManagedPipelineLayout cullPipelineLayout_;
-    ManagedDescriptorSetLayout cullDescriptorSetLayout_;
+    std::optional<vk::raii::Pipeline> cullPipeline_;
+    std::optional<vk::raii::PipelineLayout> cullPipelineLayout_;
+    std::optional<vk::raii::DescriptorSetLayout> cullDescriptorSetLayout_;
     std::vector<VkDescriptorSet> cullDescriptorSets_;
 
     // Triple-buffered output buffers using FrameIndexedBuffers for type-safe access.
@@ -255,9 +258,9 @@ private:
     // =========================================================================
     std::unique_ptr<TreeSpatialIndex> spatialIndex_;
 
-    ManagedPipeline cellCullPipeline_;
-    ManagedPipelineLayout cellCullPipelineLayout_;
-    ManagedDescriptorSetLayout cellCullDescriptorSetLayout_;
+    std::optional<vk::raii::Pipeline> cellCullPipeline_;
+    std::optional<vk::raii::PipelineLayout> cellCullPipelineLayout_;
+    std::optional<vk::raii::DescriptorSetLayout> cellCullDescriptorSetLayout_;
     std::vector<VkDescriptorSet> cellCullDescriptorSets_;
 
     // Triple-buffered intermediate buffers to prevent race conditions.
@@ -274,17 +277,17 @@ private:
     // =========================================================================
     // Tree Filtering (Two-Phase Culling)
     // =========================================================================
-    ManagedPipeline treeFilterPipeline_;
-    ManagedPipelineLayout treeFilterPipelineLayout_;
-    ManagedDescriptorSetLayout treeFilterDescriptorSetLayout_;
+    std::optional<vk::raii::Pipeline> treeFilterPipeline_;
+    std::optional<vk::raii::PipelineLayout> treeFilterPipelineLayout_;
+    std::optional<vk::raii::DescriptorSetLayout> treeFilterDescriptorSetLayout_;
     std::vector<VkDescriptorSet> treeFilterDescriptorSets_;
 
     BufferUtils::PerFrameBufferSet treeFilterUniformBuffers_;  // CullingUniforms at binding 6
     BufferUtils::PerFrameBufferSet treeFilterParamsBuffers_;  // TreeFilterParams at binding 7
 
-    ManagedPipeline twoPhaseLeafCullPipeline_;
-    ManagedPipelineLayout twoPhaseLeafCullPipelineLayout_;
-    ManagedDescriptorSetLayout twoPhaseLeafCullDescriptorSetLayout_;
+    std::optional<vk::raii::Pipeline> twoPhaseLeafCullPipeline_;
+    std::optional<vk::raii::PipelineLayout> twoPhaseLeafCullPipelineLayout_;
+    std::optional<vk::raii::DescriptorSetLayout> twoPhaseLeafCullDescriptorSetLayout_;
     std::vector<VkDescriptorSet> twoPhaseLeafCullDescriptorSets_;
 
     BufferUtils::PerFrameBufferSet leafCullP3ParamsBuffers_;  // LeafCullP3Params at binding 6

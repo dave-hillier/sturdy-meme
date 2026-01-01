@@ -33,6 +33,11 @@ TreeLeafCulling::~TreeLeafCulling() {
 }
 
 bool TreeLeafCulling::init(const InitInfo& info) {
+    raiiDevice_ = info.raiiDevice;
+    if (!raiiDevice_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling requires raiiDevice");
+        return false;
+    }
     device_ = info.device;
     physicalDevice_ = info.physicalDevice;
     allocator_ = info.allocator;
@@ -72,15 +77,16 @@ bool TreeLeafCulling::createLeafCullPipeline() {
            .addBinding(Bindings::TREE_LEAF_CULL_TREES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT)
            .addBinding(Bindings::TREE_LEAF_CULL_PARAMS, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT);
 
-    if (!builder.buildManaged(cullDescriptorSetLayout_)) {
+    VkDescriptorSetLayout rawLayout = builder.build();
+    if (rawLayout == VK_NULL_HANDLE) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to create cull descriptor set layout");
         return false;
     }
+    cullDescriptorSetLayout_.emplace(*raiiDevice_, rawLayout);
 
-    if (!DescriptorManager::createManagedPipelineLayout(device_, cullDescriptorSetLayout_.get(), cullPipelineLayout_)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to create cull pipeline layout");
-        return false;
-    }
+    vk::DescriptorSetLayout dsl = **cullDescriptorSetLayout_;
+    auto pipelineLayoutInfo = vk::PipelineLayoutCreateInfo{}.setSetLayouts(dsl);
+    cullPipelineLayout_.emplace(*raiiDevice_, pipelineLayoutInfo);
 
     std::string shaderPath = resourcePath_ + "/shaders/tree_leaf_cull.comp.spv";
     auto shaderModuleOpt = ShaderLoader::loadShaderModule(device_, shaderPath);
@@ -97,17 +103,12 @@ bool TreeLeafCulling::createLeafCullPipeline() {
 
     auto pipelineInfo = vk::ComputePipelineCreateInfo{}
         .setStage(shaderStageInfo)
-        .setLayout(cullPipelineLayout_.get());
+        .setLayout(**cullPipelineLayout_);
+
+    cullPipeline_.emplace(*raiiDevice_, nullptr, pipelineInfo);
 
     vk::Device vkDevice(device_);
-    auto result = vkDevice.createComputePipeline(nullptr, pipelineInfo);
     vkDevice.destroyShaderModule(computeShaderModule);
-
-    if (result.result != vk::Result::eSuccess) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to create cull compute pipeline");
-        return false;
-    }
-    cullPipeline_ = ManagedPipeline::fromRaw(device_, result.value);
 
     SDL_Log("TreeLeafCulling: Created leaf culling compute pipeline");
     return true;
@@ -194,7 +195,7 @@ bool TreeLeafCulling::createLeafCullBuffers(uint32_t maxLeafInstances, uint32_t 
         return false;
     }
 
-    cullDescriptorSets_ = descriptorPool_->allocate(cullDescriptorSetLayout_.get(), maxFramesInFlight_);
+    cullDescriptorSets_ = descriptorPool_->allocate(**cullDescriptorSetLayout_, maxFramesInFlight_);
     if (cullDescriptorSets_.empty()) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to allocate cull descriptor sets");
         return false;
@@ -214,15 +215,16 @@ bool TreeLeafCulling::createCellCullPipeline() {
            .addBinding(Bindings::TREE_CELL_CULL_CULLING, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT)
            .addBinding(Bindings::TREE_CELL_CULL_PARAMS, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT);
 
-    if (!builder.buildManaged(cellCullDescriptorSetLayout_)) {
+    VkDescriptorSetLayout rawLayout = builder.build();
+    if (rawLayout == VK_NULL_HANDLE) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to create cell cull descriptor set layout");
         return false;
     }
+    cellCullDescriptorSetLayout_.emplace(*raiiDevice_, rawLayout);
 
-    if (!DescriptorManager::createManagedPipelineLayout(device_, cellCullDescriptorSetLayout_.get(), cellCullPipelineLayout_)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to create cell cull pipeline layout");
-        return false;
-    }
+    vk::DescriptorSetLayout dsl = **cellCullDescriptorSetLayout_;
+    auto pipelineLayoutInfo = vk::PipelineLayoutCreateInfo{}.setSetLayouts(dsl);
+    cellCullPipelineLayout_.emplace(*raiiDevice_, pipelineLayoutInfo);
 
     std::string shaderPath = resourcePath_ + "/shaders/tree_cell_cull.comp.spv";
     auto shaderModuleOpt = ShaderLoader::loadShaderModule(device_, shaderPath);
@@ -239,17 +241,12 @@ bool TreeLeafCulling::createCellCullPipeline() {
 
     auto pipelineInfo = vk::ComputePipelineCreateInfo{}
         .setStage(shaderStageInfo)
-        .setLayout(cellCullPipelineLayout_.get());
+        .setLayout(**cellCullPipelineLayout_);
+
+    cellCullPipeline_.emplace(*raiiDevice_, nullptr, pipelineInfo);
 
     vk::Device vkDevice(device_);
-    auto result = vkDevice.createComputePipeline(nullptr, pipelineInfo);
     vkDevice.destroyShaderModule(computeShaderModule);
-
-    if (result.result != vk::Result::eSuccess) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to create cell cull compute pipeline");
-        return false;
-    }
-    cellCullPipeline_ = ManagedPipeline::fromRaw(device_, result.value);
 
     SDL_Log("TreeLeafCulling: Created cell culling compute pipeline");
     return true;
@@ -306,7 +303,7 @@ bool TreeLeafCulling::createCellCullBuffers() {
         return false;
     }
 
-    cellCullDescriptorSets_ = descriptorPool_->allocate(cellCullDescriptorSetLayout_.get(), maxFramesInFlight_);
+    cellCullDescriptorSets_ = descriptorPool_->allocate(**cellCullDescriptorSetLayout_, maxFramesInFlight_);
     if (cellCullDescriptorSets_.empty()) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to allocate cell cull descriptor sets");
         return false;
@@ -341,15 +338,16 @@ bool TreeLeafCulling::createTreeFilterPipeline() {
            .addBinding(Bindings::TREE_FILTER_CULLING, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT)
            .addBinding(Bindings::TREE_FILTER_PARAMS, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT);
 
-    if (!builder.buildManaged(treeFilterDescriptorSetLayout_)) {
+    VkDescriptorSetLayout rawLayout = builder.build();
+    if (rawLayout == VK_NULL_HANDLE) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to create tree filter descriptor set layout");
         return false;
     }
+    treeFilterDescriptorSetLayout_.emplace(*raiiDevice_, rawLayout);
 
-    if (!DescriptorManager::createManagedPipelineLayout(device_, treeFilterDescriptorSetLayout_.get(), treeFilterPipelineLayout_)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to create tree filter pipeline layout");
-        return false;
-    }
+    vk::DescriptorSetLayout dsl = **treeFilterDescriptorSetLayout_;
+    auto pipelineLayoutInfo = vk::PipelineLayoutCreateInfo{}.setSetLayouts(dsl);
+    treeFilterPipelineLayout_.emplace(*raiiDevice_, pipelineLayoutInfo);
 
     std::string shaderPath = resourcePath_ + "/shaders/tree_filter.comp.spv";
     auto shaderModuleOpt = ShaderLoader::loadShaderModule(device_, shaderPath);
@@ -366,17 +364,12 @@ bool TreeLeafCulling::createTreeFilterPipeline() {
 
     auto pipelineInfo = vk::ComputePipelineCreateInfo{}
         .setStage(shaderStageInfo)
-        .setLayout(treeFilterPipelineLayout_.get());
+        .setLayout(**treeFilterPipelineLayout_);
+
+    treeFilterPipeline_.emplace(*raiiDevice_, nullptr, pipelineInfo);
 
     vk::Device vkDevice(device_);
-    auto result = vkDevice.createComputePipeline(nullptr, pipelineInfo);
     vkDevice.destroyShaderModule(computeShaderModule);
-
-    if (result.result != vk::Result::eSuccess) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to create tree filter compute pipeline");
-        return false;
-    }
-    treeFilterPipeline_ = ManagedPipeline::fromRaw(device_, result.value);
 
     SDL_Log("TreeLeafCulling: Created tree filter compute pipeline");
     return true;
@@ -429,7 +422,7 @@ bool TreeLeafCulling::createTreeFilterBuffers(uint32_t maxTrees) {
         return false;
     }
 
-    treeFilterDescriptorSets_ = descriptorPool_->allocate(treeFilterDescriptorSetLayout_.get(), maxFramesInFlight_);
+    treeFilterDescriptorSets_ = descriptorPool_->allocate(**treeFilterDescriptorSetLayout_, maxFramesInFlight_);
     if (treeFilterDescriptorSets_.empty()) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to allocate tree filter descriptor sets");
         return false;
@@ -466,15 +459,16 @@ bool TreeLeafCulling::createTwoPhaseLeafCullPipeline() {
            .addBinding(Bindings::LEAF_CULL_P3_CULLING, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT)
            .addBinding(Bindings::LEAF_CULL_P3_PARAMS, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT);
 
-    if (!builder.buildManaged(twoPhaseLeafCullDescriptorSetLayout_)) {
+    VkDescriptorSetLayout rawLayout = builder.build();
+    if (rawLayout == VK_NULL_HANDLE) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to create two-phase leaf cull descriptor set layout");
         return false;
     }
+    twoPhaseLeafCullDescriptorSetLayout_.emplace(*raiiDevice_, rawLayout);
 
-    if (!DescriptorManager::createManagedPipelineLayout(device_, twoPhaseLeafCullDescriptorSetLayout_.get(), twoPhaseLeafCullPipelineLayout_)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to create two-phase leaf cull pipeline layout");
-        return false;
-    }
+    vk::DescriptorSetLayout dsl = **twoPhaseLeafCullDescriptorSetLayout_;
+    auto pipelineLayoutInfo = vk::PipelineLayoutCreateInfo{}.setSetLayouts(dsl);
+    twoPhaseLeafCullPipelineLayout_.emplace(*raiiDevice_, pipelineLayoutInfo);
 
     std::string shaderPath = resourcePath_ + "/shaders/tree_leaf_cull_phase3.comp.spv";
     auto shaderModuleOpt = ShaderLoader::loadShaderModule(device_, shaderPath);
@@ -491,17 +485,12 @@ bool TreeLeafCulling::createTwoPhaseLeafCullPipeline() {
 
     auto pipelineInfo = vk::ComputePipelineCreateInfo{}
         .setStage(shaderStageInfo)
-        .setLayout(twoPhaseLeafCullPipelineLayout_.get());
+        .setLayout(**twoPhaseLeafCullPipelineLayout_);
+
+    twoPhaseLeafCullPipeline_.emplace(*raiiDevice_, nullptr, pipelineInfo);
 
     vk::Device vkDevice(device_);
-    auto result = vkDevice.createComputePipeline(nullptr, pipelineInfo);
     vkDevice.destroyShaderModule(computeShaderModule);
-
-    if (result.result != vk::Result::eSuccess) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to create two-phase leaf cull compute pipeline");
-        return false;
-    }
-    twoPhaseLeafCullPipeline_ = ManagedPipeline::fromRaw(device_, result.value);
 
     SDL_Log("TreeLeafCulling: Created two-phase leaf culling compute pipeline");
     return true;
@@ -519,7 +508,7 @@ bool TreeLeafCulling::createTwoPhaseLeafCullDescriptorSets() {
         return false;
     }
 
-    twoPhaseLeafCullDescriptorSets_ = descriptorPool_->allocate(twoPhaseLeafCullDescriptorSetLayout_.get(), maxFramesInFlight_);
+    twoPhaseLeafCullDescriptorSets_ = descriptorPool_->allocate(**twoPhaseLeafCullDescriptorSetLayout_, maxFramesInFlight_);
     if (twoPhaseLeafCullDescriptorSets_.empty()) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to allocate two-phase leaf cull descriptor sets");
         return false;
@@ -583,7 +572,7 @@ void TreeLeafCulling::updateSpatialIndex(const TreeSystem& treeSystem) {
         return;
     }
 
-    if (visibleCellBuffers_.empty() && cellCullPipeline_.get() != VK_NULL_HANDLE) {
+    if (visibleCellBuffers_.empty() && cellCullPipeline_) {
         createCellCullBuffers();
     } else if (!cellCullDescriptorSets_.empty()) {
         // Spatial index buffers were recreated - update descriptor sets with new buffer handles
@@ -599,7 +588,7 @@ void TreeLeafCulling::updateSpatialIndex(const TreeSystem& treeSystem) {
     bool needsTreeFilterBuffers = visibleTreeBuffers_.empty() ||
                                   requiredTreeCapacity > maxVisibleTrees_;
 
-    if (needsTreeFilterBuffers && treeFilterPipeline_.get() != VK_NULL_HANDLE &&
+    if (needsTreeFilterBuffers && treeFilterPipeline_ &&
         !visibleCellBuffers_.empty()) {
         // Need to wait for GPU before destroying old buffers
         if (!visibleTreeBuffers_.empty()) {
@@ -618,7 +607,7 @@ void TreeLeafCulling::updateSpatialIndex(const TreeSystem& treeSystem) {
         }
     }
 
-    if (twoPhaseLeafCullDescriptorSets_.empty() && twoPhaseLeafCullPipeline_.get() != VK_NULL_HANDLE &&
+    if (twoPhaseLeafCullDescriptorSets_.empty() && twoPhaseLeafCullPipeline_ &&
         !visibleTreeBuffers_.empty()) {
         createTwoPhaseLeafCullDescriptorSets();
     }
@@ -839,7 +828,7 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
     // (see updateCullDescriptorSets), so no per-frame update needed here.
 
     // Cell Culling (if spatial index available)
-    if (isSpatialIndexEnabled() && cellCullPipeline_.get() != VK_NULL_HANDLE) {
+    if (isSpatialIndexEnabled() && cellCullPipeline_) {
         // Split cell cull uniforms: CullingUniforms + CellCullParams
         CullingUniforms cellCulling{};
         cellCulling.cameraPosition = glm::vec4(cameraPos, 1.0f);
@@ -856,7 +845,7 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
         cellParams.treesPerWorkgroup = 64;
 
         // Check if two-phase culling will be used so we can batch uniform updates
-        bool useTwoPhase = twoPhaseEnabled_ && treeFilterPipeline_.get() != VK_NULL_HANDLE &&
+        bool useTwoPhase = twoPhaseEnabled_ && treeFilterPipeline_ &&
                            !visibleTreeBuffers_.empty() && !treeFilterDescriptorSets_.empty();
 
         // Reset cell cull output buffers on CPU side BEFORE dispatch
@@ -926,8 +915,8 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
         vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                              0, 1, &cellUniformBarrier, 0, nullptr, 0, nullptr);
 
-        vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, cellCullPipeline_.get());
-        vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, cellCullPipelineLayout_.get(),
+        vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, **cellCullPipeline_);
+        vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, **cellCullPipelineLayout_,
                                  0, vk::DescriptorSet(cellCullDescriptorSets_[frameIndex]), {});
 
         uint32_t cellWorkgroups = (cellParams.numCells + 255) / 256;
@@ -944,8 +933,8 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
             vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                                  0, 1, &cellBarrier, 0, nullptr, 0, nullptr);
 
-            vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, treeFilterPipeline_.get());
-            vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, treeFilterPipelineLayout_.get(),
+            vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, **treeFilterPipeline_);
+            vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, **treeFilterPipelineLayout_,
                                      0, vk::DescriptorSet(treeFilterDescriptorSets_[frameIndex]), {});
 
             vkCmd.dispatchIndirect(cellCullIndirectBuffers_.getVk(frameIndex), 0);
@@ -958,7 +947,7 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
                                  0, 1, &treeFilterBarrier, 0, nullptr, 0, nullptr);
 
             // Two-phase leaf culling
-            if (twoPhaseLeafCullPipeline_.get() != VK_NULL_HANDLE && !twoPhaseLeafCullDescriptorSets_.empty()) {
+            if (twoPhaseLeafCullPipeline_ && !twoPhaseLeafCullDescriptorSets_.empty()) {
                 // Upload phase 3 specific params
                 LeafCullP3Params p3Params{};
                 p3Params.maxLeavesPerType = maxLeavesPerType_;
@@ -983,8 +972,8 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
                       .writeBuffer(Bindings::LEAF_CULL_P3_PARAMS, leafCullP3ParamsBuffers_.buffers[frameIndex], 0, sizeof(LeafCullP3Params), VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
                       .update();
 
-                vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, twoPhaseLeafCullPipeline_.get());
-                vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, twoPhaseLeafCullPipelineLayout_.get(),
+                vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, **twoPhaseLeafCullPipeline_);
+                vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, **twoPhaseLeafCullPipelineLayout_,
                                          0, vk::DescriptorSet(twoPhaseLeafCullDescriptorSets_[frameIndex]), {});
 
                 vkCmd.dispatchIndirect(leafCullIndirectDispatchBuffers_.getVk(frameIndex), 0);
@@ -1000,8 +989,8 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
     }
 
     // Fallback: Single-phase leaf culling
-    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, cullPipeline_.get());
-    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, cullPipelineLayout_.get(),
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, **cullPipeline_);
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, **cullPipelineLayout_,
                              0, vk::DescriptorSet(cullDescriptorSets_[frameIndex]), {});
 
     uint32_t workgroupCount = (totalLeafInstances + 255) / 256;

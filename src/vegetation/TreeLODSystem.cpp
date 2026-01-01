@@ -38,6 +38,11 @@ TreeLODSystem::~TreeLODSystem() {
 }
 
 bool TreeLODSystem::initInternal(const InitInfo& info) {
+    raiiDevice_ = info.raiiDevice;
+    if (!raiiDevice_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLODSystem requires raiiDevice");
+        return false;
+    }
     device_ = info.device;
     physicalDevice_ = info.physicalDevice;
     allocator_ = info.allocator;
@@ -249,9 +254,7 @@ bool TreeLODSystem::createDescriptorSetLayout() {
     auto layoutInfo = vk::DescriptorSetLayoutCreateInfo{}
         .setBindings(bindings);
 
-    vk::Device vkDevice(device_);
-    vk::DescriptorSetLayout layout = vkDevice.createDescriptorSetLayout(layoutInfo);
-    impostorDescriptorSetLayout_ = ManagedDescriptorSetLayout(makeUniqueDescriptorSetLayout(device_, layout));
+    impostorDescriptorSetLayout_.emplace(*raiiDevice_, layoutInfo);
 
     return true;
 }
@@ -263,15 +266,13 @@ bool TreeLODSystem::createPipeline() {
         .setOffset(0)
         .setSize(sizeof(glm::vec4) * 3);  // cameraPos, lodParams, atlasParams
 
-    vk::DescriptorSetLayout layouts[] = {impostorDescriptorSetLayout_.get()};
+    vk::DescriptorSetLayout layouts[] = {**impostorDescriptorSetLayout_};
 
     auto pipelineLayoutInfo = vk::PipelineLayoutCreateInfo{}
         .setSetLayouts(layouts)
         .setPushConstantRanges(pushConstant);
 
-    vk::Device vkDevice(device_);
-    vk::PipelineLayout pipelineLayout = vkDevice.createPipelineLayout(pipelineLayoutInfo);
-    impostorPipelineLayout_ = ManagedPipelineLayout(makeUniquePipelineLayout(device_, pipelineLayout));
+    impostorPipelineLayout_.emplace(*raiiDevice_, pipelineLayoutInfo);
 
     // Load shaders
     std::string shaderPath = resourcePath_ + "/shaders/";
@@ -373,22 +374,21 @@ bool TreeLODSystem::createPipeline() {
         .setPDepthStencilState(&depthStencil)
         .setPColorBlendState(&colorBlending)
         .setPDynamicState(&dynamicState)
-        .setLayout(pipelineLayout)
+        .setLayout(**impostorPipelineLayout_)
         .setRenderPass(hdrRenderPass_)
         .setSubpass(0);
 
-    auto pipelineResult = vkDevice.createGraphicsPipeline(nullptr, pipelineInfo);
+    impostorPipeline_.emplace(*raiiDevice_, nullptr, pipelineInfo);
 
+    vk::Device vkDevice(device_);
     vkDevice.destroyShaderModule(*vertModule);
     vkDevice.destroyShaderModule(*fragModule);
-
-    impostorPipeline_ = ManagedPipeline(makeUniquePipeline(device_, pipelineResult.value));
 
     return true;
 }
 
 bool TreeLODSystem::allocateDescriptorSets() {
-    impostorDescriptorSets_ = descriptorPool_->allocate(impostorDescriptorSetLayout_.get(), maxFramesInFlight_);
+    impostorDescriptorSets_ = descriptorPool_->allocate(**impostorDescriptorSetLayout_, maxFramesInFlight_);
     return !impostorDescriptorSets_.empty();
 }
 
@@ -419,9 +419,7 @@ bool TreeLODSystem::createShadowDescriptorSetLayout() {
     auto layoutInfo = vk::DescriptorSetLayoutCreateInfo{}
         .setBindings(bindings);
 
-    vk::Device vkDevice(device_);
-    vk::DescriptorSetLayout layout = vkDevice.createDescriptorSetLayout(layoutInfo);
-    shadowDescriptorSetLayout_ = ManagedDescriptorSetLayout(makeUniqueDescriptorSetLayout(device_, layout));
+    shadowDescriptorSetLayout_.emplace(*raiiDevice_, layoutInfo);
 
     return true;
 }
@@ -433,15 +431,13 @@ bool TreeLODSystem::createShadowPipeline() {
         .setOffset(0)
         .setSize(sizeof(glm::vec4) * 3 + sizeof(int));  // cameraPos, lodParams, atlasParams, cascadeIndex
 
-    vk::DescriptorSetLayout layouts[] = {shadowDescriptorSetLayout_.get()};
+    vk::DescriptorSetLayout layouts[] = {**shadowDescriptorSetLayout_};
 
     auto pipelineLayoutInfo = vk::PipelineLayoutCreateInfo{}
         .setSetLayouts(layouts)
         .setPushConstantRanges(pushConstant);
 
-    vk::Device vkDevice(device_);
-    vk::PipelineLayout pipelineLayout = vkDevice.createPipelineLayout(pipelineLayoutInfo);
-    shadowPipelineLayout_ = ManagedPipelineLayout(makeUniquePipelineLayout(device_, pipelineLayout));
+    shadowPipelineLayout_.emplace(*raiiDevice_, pipelineLayoutInfo);
 
     // Load shadow shaders
     std::string shaderPath = resourcePath_ + "/shaders/";
@@ -537,22 +533,21 @@ bool TreeLODSystem::createShadowPipeline() {
         .setPDepthStencilState(&depthStencil)
         .setPColorBlendState(&colorBlending)
         .setPDynamicState(&dynamicState)
-        .setLayout(pipelineLayout)
+        .setLayout(**shadowPipelineLayout_)
         .setRenderPass(shadowRenderPass_)
         .setSubpass(0);
 
-    auto pipelineResult = vkDevice.createGraphicsPipeline(nullptr, pipelineInfo);
+    shadowPipeline_.emplace(*raiiDevice_, nullptr, pipelineInfo);
 
+    vk::Device vkDevice(device_);
     vkDevice.destroyShaderModule(*vertModule);
     vkDevice.destroyShaderModule(*fragModule);
-
-    shadowPipeline_ = ManagedPipeline(makeUniquePipeline(device_, pipelineResult.value));
 
     return true;
 }
 
 bool TreeLODSystem::allocateShadowDescriptorSets() {
-    shadowDescriptorSets_ = descriptorPool_->allocate(shadowDescriptorSetLayout_.get(), maxFramesInFlight_);
+    shadowDescriptorSets_ = descriptorPool_->allocate(**shadowDescriptorSetLayout_, maxFramesInFlight_);
     return !shadowDescriptorSets_.empty();
 }
 
@@ -937,7 +932,7 @@ void TreeLODSystem::renderImpostors(VkCommandBuffer cmd, uint32_t frameIndex,
     vk::CommandBuffer vkCmd(cmd);
 
     // Bind pipeline
-    vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, impostorPipeline_.get());
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, **impostorPipeline_);
 
     // Set viewport and scissor
     auto viewport = vk::Viewport{}
@@ -955,7 +950,7 @@ void TreeLODSystem::renderImpostors(VkCommandBuffer cmd, uint32_t frameIndex,
     vkCmd.setScissor(0, scissor);
 
     // Bind descriptor sets
-    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, impostorPipelineLayout_.get(),
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, **impostorPipelineLayout_,
                              0, vk::DescriptorSet(impostorDescriptorSets_[frameIndex]), {});
 
     // Push constants
@@ -986,7 +981,7 @@ void TreeLODSystem::renderImpostors(VkCommandBuffer cmd, uint32_t frameIndex,
     );
 
     vkCmd.pushConstants<decltype(pushConstants)>(
-        impostorPipelineLayout_.get(),
+        **impostorPipelineLayout_,
         vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
         0, pushConstants);
 
@@ -1004,7 +999,7 @@ void TreeLODSystem::renderImpostorShadows(VkCommandBuffer cmd, uint32_t frameInd
                                            int cascadeIndex, VkBuffer uniformBuffer) {
     (void)uniformBuffer; // Descriptors bound at initialization
     if (visibleImpostors_.empty() || impostorAtlas_->getArchetypeCount() == 0) return;
-    if (shadowPipeline_.get() == VK_NULL_HANDLE) return;
+    if (!shadowPipeline_) return;
 
     const auto& settings = getLODSettings();
     if (!settings.enableImpostors) return;
@@ -1012,10 +1007,10 @@ void TreeLODSystem::renderImpostorShadows(VkCommandBuffer cmd, uint32_t frameInd
     vk::CommandBuffer vkCmd(cmd);
 
     // Bind shadow pipeline
-    vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, shadowPipeline_.get());
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, **shadowPipeline_);
 
     // Bind descriptor sets - use the main UBO descriptor set passed in for cascade matrices
-    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, shadowPipelineLayout_.get(),
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, **shadowPipelineLayout_,
                              0, vk::DescriptorSet(shadowDescriptorSets_[frameIndex]), {});
 
     // Push constants with cascade index
@@ -1045,7 +1040,7 @@ void TreeLODSystem::renderImpostorShadows(VkCommandBuffer cmd, uint32_t frameInd
     pushConstants.cascadeIndex = cascadeIndex;
 
     vkCmd.pushConstants<decltype(pushConstants)>(
-        shadowPipelineLayout_.get(),
+        **shadowPipelineLayout_,
         vk::ShaderStageFlagBits::eVertex,
         0, pushConstants);
 
@@ -1073,7 +1068,7 @@ void TreeLODSystem::renderImpostorsGPUCulled(VkCommandBuffer cmd, uint32_t frame
     vk::CommandBuffer vkCmd(cmd);
 
     // Bind pipeline
-    vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, impostorPipeline_.get());
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, **impostorPipeline_);
 
     // Set viewport and scissor
     auto viewport = vk::Viewport{}
@@ -1091,7 +1086,7 @@ void TreeLODSystem::renderImpostorsGPUCulled(VkCommandBuffer cmd, uint32_t frame
     vkCmd.setScissor(0, scissor);
 
     // Bind descriptor sets
-    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, impostorPipelineLayout_.get(),
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, **impostorPipelineLayout_,
                              0, vk::DescriptorSet(impostorDescriptorSets_[frameIndex]), {});
 
     // Push constants
@@ -1119,7 +1114,7 @@ void TreeLODSystem::renderImpostorsGPUCulled(VkCommandBuffer cmd, uint32_t frame
     );
 
     vkCmd.pushConstants<decltype(pushConstants)>(
-        impostorPipelineLayout_.get(),
+        **impostorPipelineLayout_,
         vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
         0, pushConstants);
 
@@ -1137,7 +1132,7 @@ void TreeLODSystem::renderImpostorShadowsGPUCulled(VkCommandBuffer cmd, uint32_t
                                                    VkBuffer gpuInstanceBuffer, VkBuffer indirectDrawBuffer) {
     (void)uniformBuffer; (void)gpuInstanceBuffer; // Descriptors bound at initialization
     if (impostorAtlas_->getArchetypeCount() == 0) return;
-    if (shadowPipeline_.get() == VK_NULL_HANDLE) return;
+    if (!shadowPipeline_) return;
 
     const auto& settings = getLODSettings();
     if (!settings.enableImpostors) return;
@@ -1147,8 +1142,8 @@ void TreeLODSystem::renderImpostorShadowsGPUCulled(VkCommandBuffer cmd, uint32_t
     vk::CommandBuffer vkCmd(cmd);
 
     // Bind shadow pipeline
-    vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, shadowPipeline_.get());
-    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, shadowPipelineLayout_.get(),
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, **shadowPipeline_);
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, **shadowPipelineLayout_,
                              0, vk::DescriptorSet(shadowDescriptorSets_[frameIndex]), {});
 
     // Push constants for shadow pass - must match shader layout:
@@ -1165,7 +1160,7 @@ void TreeLODSystem::renderImpostorShadowsGPUCulled(VkCommandBuffer cmd, uint32_t
     pushConstants.cascadeIndex = cascadeIndex;
 
     vkCmd.pushConstants<decltype(pushConstants)>(
-        shadowPipelineLayout_.get(),
+        **shadowPipelineLayout_,
         vk::ShaderStageFlagBits::eVertex,
         0, pushConstants);
 

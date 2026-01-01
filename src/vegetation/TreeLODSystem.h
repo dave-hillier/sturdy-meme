@@ -7,9 +7,9 @@
 #include <vector>
 #include <memory>
 #include <string>
+#include <optional>
 
 #include "TreeImpostorAtlas.h"
-#include "VulkanRAII.h"
 #include "DescriptorManager.h"
 
 class TreeSystem;
@@ -175,6 +175,7 @@ private:
     bool createBillboardMesh();
     void updateInstanceBuffer(const std::vector<ImpostorInstanceGPU>& instances);
 
+    const vk::raii::Device* raiiDevice_ = nullptr;
     VkDevice device_ = VK_NULL_HANDLE;
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
     VmaAllocator allocator_ = VK_NULL_HANDLE;
@@ -195,14 +196,14 @@ private:
     std::vector<TreeLODState> lodStates_;
 
     // Impostor rendering pipeline
-    ManagedPipeline impostorPipeline_;
-    ManagedPipelineLayout impostorPipelineLayout_;
-    ManagedDescriptorSetLayout impostorDescriptorSetLayout_;
+    std::optional<vk::raii::Pipeline> impostorPipeline_;
+    std::optional<vk::raii::PipelineLayout> impostorPipelineLayout_;
+    std::optional<vk::raii::DescriptorSetLayout> impostorDescriptorSetLayout_;
 
     // Shadow rendering pipeline
-    ManagedPipeline shadowPipeline_;
-    ManagedPipelineLayout shadowPipelineLayout_;
-    ManagedDescriptorSetLayout shadowDescriptorSetLayout_;
+    std::optional<vk::raii::Pipeline> shadowPipeline_;
+    std::optional<vk::raii::PipelineLayout> shadowPipelineLayout_;
+    std::optional<vk::raii::DescriptorSetLayout> shadowDescriptorSetLayout_;
 
     // Per-frame descriptor sets
     std::vector<VkDescriptorSet> impostorDescriptorSets_;

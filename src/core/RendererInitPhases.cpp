@@ -350,6 +350,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     // Initialize TreeRenderer for dedicated tree shaders with wind animation
     {
         TreeRenderer::InitInfo treeRendererInfo{};
+        treeRendererInfo.raiiDevice = &vulkanContext_->getRaiiDevice();
         treeRendererInfo.device = vk::Device(device);
         treeRendererInfo.physicalDevice = vk::PhysicalDevice(physicalDevice);
         treeRendererInfo.allocator = allocator;

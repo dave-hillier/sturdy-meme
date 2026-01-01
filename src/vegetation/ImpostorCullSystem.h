@@ -1,14 +1,15 @@
 #pragma once
 
 #include <vulkan/vulkan.h>
+#include <vulkan/vulkan_raii.hpp>
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
 #include <vector>
 #include <memory>
 #include <string>
+#include <optional>
 
 #include "CullCommon.h"
-#include "VulkanRAII.h"
 #include "DescriptorManager.h"
 #include "BufferUtils.h"
 
@@ -68,6 +69,7 @@ struct ImpostorOutputData {
 class ImpostorCullSystem {
 public:
     struct InitInfo {
+        const vk::raii::Device* raiiDevice = nullptr;
         VkDevice device;
         VkPhysicalDevice physicalDevice;
         VmaAllocator allocator;
@@ -184,6 +186,7 @@ private:
 
     void updateHiZDescriptor(uint32_t frameIndex, VkImageView hiZPyramidView, VkSampler hiZSampler);
 
+    const vk::raii::Device* raiiDevice_ = nullptr;
     VkDevice device_ = VK_NULL_HANDLE;
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
     VmaAllocator allocator_ = VK_NULL_HANDLE;
@@ -195,9 +198,9 @@ private:
     uint32_t maxArchetypes_ = 0;
 
     // Compute pipeline
-    ManagedPipeline cullPipeline_;
-    ManagedPipelineLayout cullPipelineLayout_;
-    ManagedDescriptorSetLayout cullDescriptorSetLayout_;
+    std::optional<vk::raii::Pipeline> cullPipeline_;
+    std::optional<vk::raii::PipelineLayout> cullPipelineLayout_;
+    std::optional<vk::raii::DescriptorSetLayout> cullDescriptorSetLayout_;
 
     // Per-frame descriptor sets
     std::vector<VkDescriptorSet> cullDescriptorSets_;
