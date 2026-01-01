@@ -89,6 +89,8 @@ set(SOURCES
     src/atmosphere/VolumetricSnowSystem.cpp
     # Vegetation
     src/vegetation/GrassSystem.cpp
+    src/vegetation/GrassTile.cpp
+    src/vegetation/GrassTileManager.cpp
     src/vegetation/LeafSystem.cpp
     src/vegetation/RockSystem.cpp
     src/vegetation/TreeSystem.cpp
@@ -564,6 +566,7 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.frag.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass_tiled.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass_displacement.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.frag.spv
@@ -720,7 +723,7 @@ if(SHADER_COMPILE_CMD)
         shader.vert shader.frag
         skinned.vert skinned_shadow.vert
         sky.vert sky.frag
-        grass.comp grass_displacement.comp grass.vert grass.frag
+        grass.comp grass_tiled.comp grass_displacement.comp grass.vert grass.frag
         grass_shadow.vert grass_shadow.frag
         froxel_update.comp froxel_integrate.comp
         weather.comp weather.vert weather.frag
@@ -960,6 +963,7 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sky.frag.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass_tiled.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass_displacement.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/grass.frag.spv

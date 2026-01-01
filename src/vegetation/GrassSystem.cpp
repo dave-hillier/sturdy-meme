@@ -1,4 +1,5 @@
 #include "GrassSystem.h"
+#include "GrassTileManager.h"
 #include "WindSystem.h"
 #include "InitContext.h"
 #include "CullCommon.h"
@@ -385,7 +386,7 @@ bool GrassSystem::createComputeDescriptorSetLayout(SystemLifecycleHelper::Pipeli
 bool GrassSystem::createComputePipeline(SystemLifecycleHelper::PipelineHandles& handles) {
     PipelineBuilder builder(getDevice());
     builder.addShaderStage(getShaderPath() + "/grass.comp.spv", VK_SHADER_STAGE_COMPUTE_BIT)
-        .addPushConstantRange(VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(GrassPushConstants));
+        .addPushConstantRange(VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(TiledGrassPushConstants));
 
     if (!builder.buildPipelineLayout({handles.descriptorSetLayout}, handles.pipelineLayout)) {
         return false;
@@ -424,7 +425,7 @@ bool GrassSystem::createGraphicsPipeline(SystemLifecycleHelper::PipelineHandles&
     PipelineBuilder builder(getDevice());
     builder.addShaderStage(getShaderPath() + "/grass.vert.spv", VK_SHADER_STAGE_VERTEX_BIT)
         .addShaderStage(getShaderPath() + "/grass.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT)
-        .addPushConstantRange(VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GrassPushConstants));
+        .addPushConstantRange(VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(TiledGrassPushConstants));
 
     // No vertex input - procedural geometry from instance buffer
     auto vertexInputInfo = vk::PipelineVertexInputStateCreateInfo{};
@@ -611,6 +612,44 @@ void GrassSystem::writeComputeDescriptorSets() {
 bool GrassSystem::createExtraPipelines() {
     if (!createDisplacementPipeline()) return false;
     if (!createShadowPipeline()) return false;
+
+    // Create tiled grass compute pipeline
+    if (tiledModeEnabled_) {
+        PipelineBuilder builder(getDevice());
+        builder.addShaderStage(getShaderPath() + "/grass_tiled.comp.spv", VK_SHADER_STAGE_COMPUTE_BIT)
+            .addPushConstantRange(VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(TiledGrassPushConstants));
+
+        // Use existing compute descriptor set layout and pipeline layout
+        VkPipeline rawTiledPipeline = VK_NULL_HANDLE;
+        if (!builder.buildComputePipeline(getComputePipelineHandles().pipelineLayout, rawTiledPipeline)) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create tiled grass compute pipeline");
+            return false;
+        }
+        tiledComputePipeline_ = ManagedPipeline::fromRaw(getDevice(), rawTiledPipeline);
+        SDL_Log("GrassSystem: Created tiled grass compute pipeline");
+
+        // Initialize tile manager
+        GrassTileManager::InitInfo tileInfo{};
+        tileInfo.device = getDevice();
+        tileInfo.allocator = getAllocator();
+        tileInfo.descriptorPool = getDescriptorPool();
+        tileInfo.framesInFlight = getFramesInFlight();
+        tileInfo.shaderPath = getShaderPath();
+        tileInfo.computeDescriptorSetLayout = getComputePipelineHandles().descriptorSetLayout;
+        tileInfo.computePipelineLayout = getComputePipelineHandles().pipelineLayout;
+        tileInfo.computePipeline = tiledComputePipeline_.get();
+        tileInfo.graphicsDescriptorSetLayout = getGraphicsPipelineHandles().descriptorSetLayout;
+        tileInfo.graphicsPipelineLayout = getGraphicsPipelineHandles().pipelineLayout;
+        tileInfo.graphicsPipeline = getGraphicsPipelineHandles().pipeline;
+
+        tileManager_ = std::make_unique<GrassTileManager>();
+        if (!tileManager_->init(tileInfo)) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize GrassTileManager");
+            tileManager_.reset();
+            tiledModeEnabled_ = false;
+        }
+    }
+
     return true;
 }
 
@@ -694,6 +733,35 @@ void GrassSystem::updateDescriptorSets(vk::Device dev, const std::vector<vk::Buf
         shadowWriter.writeBuffer(2, windBuffers[0], 0, 32);  // sizeof(WindUniforms)
         shadowWriter.update();
     }
+
+    // Update tile manager descriptor sets if in tiled mode
+    if (tiledModeEnabled_ && tileManager_) {
+        // Set shared buffers for tile manager to use (all tiles write to these)
+        uint32_t firstBufferSet = 0;  // Will be updated per-frame in recordCompute
+        tileManager_->setSharedBuffers(
+            instanceBuffers.buffers[firstBufferSet],
+            indirectBuffers.buffers[firstBufferSet]
+        );
+
+        // Convert uniform buffer vectors for tile manager
+        std::vector<vk::Buffer> vkCullingBuffers(uniformBuffers.buffers.begin(), uniformBuffers.buffers.end());
+        std::vector<vk::Buffer> vkParamsBuffers(paramsBuffers.buffers.begin(), paramsBuffers.buffers.end());
+
+        // Convert TripleBuffered to std::array for tile info buffers
+        std::array<vk::Buffer, 3> tileInfoArray{};
+        for (size_t i = 0; i < tileInfoBuffers_.size() && i < 3; ++i) {
+            tileInfoArray[i] = tileInfoBuffers_[i];
+        }
+
+        tileManager_->updateDescriptorSets(
+            terrainHeightMapView_, terrainHeightMapSampler_,
+            displacementImageView_, displacementSampler_.get(),
+            tileArrayView_, tileSampler_,
+            tileInfoArray,
+            vkCullingBuffers,
+            vkParamsBuffers
+        );
+    }
 }
 
 void GrassSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos, const glm::mat4& viewProj,
@@ -724,6 +792,11 @@ void GrassSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos
     params.terrainSize = terrainSize;
     params.terrainHeightScale = terrainHeightScale;
     memcpy(paramsBuffers.mappedPointers[frameIndex], &params, sizeof(GrassParams));
+
+    // Update active tiles in tiled mode based on camera position
+    if (tiledModeEnabled_ && tileManager_) {
+        tileManager_->updateActiveTiles(cameraPos);
+    }
 }
 
 void GrassSystem::updateDisplacementSources(const glm::vec3& playerPos, float playerRadius, float deltaTime) {
@@ -780,6 +853,23 @@ void GrassSystem::recordResetAndCompute(vk::CommandBuffer cmd, uint32_t frameInd
     // Double-buffer: compute writes to computeBufferSet
     uint32_t writeSet = (*particleSystem)->getComputeBufferSet();
 
+    // Ensure CPU writes to tile info buffer are visible to GPU before compute dispatch
+    Barriers::hostToCompute(cmd);
+
+    // Use tiled mode if enabled and tile manager is available
+    if (tiledModeEnabled_ && tileManager_) {
+        // Set the correct buffer set for shared buffers before compute
+        tileManager_->setSharedBuffers(
+            instanceBuffers.buffers[writeSet],
+            indirectBuffers.buffers[writeSet]
+        );
+
+        // Tiled mode: dispatch compute for each active tile
+        tileManager_->recordCompute(cmd, frameIndex, time, writeSet);
+        return;
+    }
+
+    // Legacy non-tiled mode (fallback)
     // Update compute descriptor set with per-frame buffers only
     // Note: Static images (bindings 3, 4, 5) are already bound in updateDescriptorSets()
     DescriptorManager::SetWriter writer(getDevice(), (*particleSystem)->getComputeDescriptorSet(writeSet));
@@ -792,11 +882,6 @@ void GrassSystem::recordResetAndCompute(vk::CommandBuffer cmd, uint32_t frameInd
     }
     writer.update();
 
-    // Ensure CPU writes to tile info buffer are visible to GPU before compute dispatch
-    // The tile info buffer is written by CPU in TerrainTileCache::updateTileInfoBuffer()
-    // and needs to be visible to the grass compute shader that samples terrain heights
-    Barriers::hostToCompute(cmd);
-
     // Reset indirect buffer before compute dispatch to prevent accumulation
     Barriers::clearBufferForComputeReadWrite(cmd, indirectBuffers.buffers[writeSet], 0, sizeof(VkDrawIndirectCommand));
 
@@ -807,9 +892,12 @@ void GrassSystem::recordResetAndCompute(vk::CommandBuffer cmd, uint32_t frameInd
                            getComputePipelineHandles().pipelineLayout, 0,
                            vk::DescriptorSet(computeSet), {});
 
-    GrassPushConstants grassPush{};
+    // Use extended push constants even in legacy mode (with zero tile origin)
+    TiledGrassPushConstants grassPush{};
     grassPush.time = time;
-    cmd.pushConstants<GrassPushConstants>(
+    grassPush.tileOriginX = 0.0f;
+    grassPush.tileOriginZ = 0.0f;
+    cmd.pushConstants<TiledGrassPushConstants>(
         getComputePipelineHandles().pipelineLayout,
         vk::ShaderStageFlagBits::eCompute,
         0, grassPush);
@@ -828,11 +916,6 @@ void GrassSystem::recordDraw(vk::CommandBuffer cmd, uint32_t frameIndex, float t
     // Double-buffer: graphics reads from renderBufferSet (previous frame's compute output)
     uint32_t readSet = (*particleSystem)->getRenderBufferSet();
 
-    // Dynamic UBO: no per-frame descriptor update needed - we pass the offset at bind time instead
-    // This eliminates per-frame vkUpdateDescriptorSets calls for the renderer UBO
-
-    cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, getGraphicsPipelineHandles().pipeline);
-
     // Set dynamic viewport and scissor to handle window resize
     vk::Extent2D ext = getExtent();
     auto viewport = vk::Viewport{}
@@ -849,6 +932,21 @@ void GrassSystem::recordDraw(vk::CommandBuffer cmd, uint32_t frameIndex, float t
         .setExtent(ext);
     cmd.setScissor(0, scissor);
 
+    // Use tiled mode if enabled and tile manager is available
+    if (tiledModeEnabled_ && tileManager_) {
+        VkDescriptorSet graphicsSet = (*particleSystem)->getGraphicsDescriptorSet(readSet);
+        tileManager_->recordDraw(cmd, frameIndex, time, readSet,
+                                  getGraphicsPipelineHandles().pipeline,
+                                  getGraphicsPipelineHandles().pipelineLayout,
+                                  graphicsSet,
+                                  indirectBuffers.buffers[readSet],
+                                  dynamicRendererUBO_);
+        return;
+    }
+
+    // Legacy non-tiled mode
+    cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, getGraphicsPipelineHandles().pipeline);
+
     VkDescriptorSet graphicsSet = (*particleSystem)->getGraphicsDescriptorSet(readSet);
 
     // Use dynamic offset for binding 0 (renderer UBO) if dynamic buffer is available
@@ -863,9 +961,11 @@ void GrassSystem::recordDraw(vk::CommandBuffer cmd, uint32_t frameIndex, float t
                                vk::DescriptorSet(graphicsSet), {});
     }
 
-    GrassPushConstants grassPush{};
+    TiledGrassPushConstants grassPush{};
     grassPush.time = time;
-    cmd.pushConstants<GrassPushConstants>(
+    grassPush.tileOriginX = 0.0f;
+    grassPush.tileOriginZ = 0.0f;
+    cmd.pushConstants<TiledGrassPushConstants>(
         getGraphicsPipelineHandles().pipelineLayout,
         vk::ShaderStageFlagBits::eVertex,
         0, grassPush);

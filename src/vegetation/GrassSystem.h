@@ -20,11 +20,21 @@
 
 // Forward declarations
 class WindSystem;
+class GrassTileManager;
 struct InitContext;
 
+// Legacy push constants for non-tiled mode (and shadow pass)
 struct GrassPushConstants {
     float time;
     int cascadeIndex;  // For shadow pass: which cascade we're rendering
+};
+
+// Extended push constants for tiled grass mode
+struct TiledGrassPushConstants {
+    float time;
+    float tileOriginX;  // World X origin of this tile
+    float tileOriginZ;  // World Z origin of this tile
+    float padding;
 };
 
 // Displacement source for grass interaction (player, NPCs, etc.)
@@ -135,6 +145,13 @@ public:
 
     // Set snow mask texture for snow on grass blades
     void setSnowMask(vk::Device device, vk::ImageView snowMaskView, vk::Sampler snowMaskSampler);
+
+    // Tiled grass mode accessors
+    bool isTiledModeEnabled() const { return tiledModeEnabled_; }
+    void setTiledModeEnabled(bool enabled) { tiledModeEnabled_ = enabled; }
+
+    // Get the tile manager (may be null if not in tiled mode)
+    GrassTileManager* getTileManager() const { return tileManager_.get(); }
 
 private:
     GrassSystem() = default;  // Private: use factory
@@ -249,4 +266,11 @@ private:
     // GrassConstants::MAX_INSTANCES (~100k rendered after culling)
 
     const EnvironmentSettings* environmentSettings = nullptr;
+
+    // Tiled grass system (for world-scale rendering)
+    bool tiledModeEnabled_ = true;  // Enable tiled mode by default
+    std::unique_ptr<GrassTileManager> tileManager_;
+
+    // Tiled grass compute pipeline (separate from legacy pipeline)
+    ManagedPipeline tiledComputePipeline_;
 };

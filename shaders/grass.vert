@@ -26,6 +26,9 @@ layout(binding = BINDING_GRASS_WIND_UBO) uniform WindUniforms {
 
 layout(push_constant) uniform PushConstants {
     float time;
+    float tileOriginX;  // For tiled mode (not used in vertex shader, but must match C++ struct)
+    float tileOriginZ;
+    float padding;
 } push;
 
 layout(location = 0) out vec3 fragColor;

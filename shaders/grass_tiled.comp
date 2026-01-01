@@ -1,5 +1,9 @@
 #version 450
 
+// Enable tiled grass mode - this shader variant uses per-tile grid size
+// and positions grass relative to tile origin instead of centered on world origin
+#define GRASS_TILED_MODE 1
+
 #extension GL_GOOGLE_include_directive : require
 #extension GL_KHR_shader_subgroup_ballot : require
 #extension GL_KHR_shader_subgroup_arithmetic : require
@@ -69,20 +73,14 @@ layout(std430, binding = BINDING_GRASS_COMPUTE_TILE_INFO) readonly buffer TileIn
 
 layout(push_constant) uniform PushConstants {
     float time;
-    float tileOriginX;  // World X origin of this tile (0 for non-tiled mode)
-    float tileOriginZ;  // World Z origin of this tile (0 for non-tiled mode)
+    float tileOriginX;  // World X origin of this tile
+    float tileOriginZ;  // World Z origin of this tile
     float padding;
 } push;
 
-// Check if we're in tiled mode (tile origin is non-zero or explicitly set)
-// In tiled mode, we use GRASS_TILE_GRID_SIZE and tile-relative positioning
-#ifdef GRASS_TILED_MODE
-    #define EFFECTIVE_GRID_SIZE GRASS_TILE_GRID_SIZE
-    #define EFFECTIVE_MAX_INSTANCES GRASS_MAX_INSTANCES_PER_TILE
-#else
-    #define EFFECTIVE_GRID_SIZE GRASS_GRID_SIZE
-    #define EFFECTIVE_MAX_INSTANCES GRASS_MAX_INSTANCES
-#endif
+// Tiled mode uses per-tile grid size and instance limits
+#define EFFECTIVE_GRID_SIZE GRASS_TILE_GRID_SIZE
+#define EFFECTIVE_MAX_INSTANCES GRASS_MAX_INSTANCES_PER_TILE
 
 // Hash functions - use instancing_common.glsl versions
 // Local aliases for compatibility with existing code
@@ -95,9 +93,6 @@ vec3 calculateTerrainNormal(vec2 uv, vec2 worldXZ) {
     return calculateNormalWithTileCache(terrainHeightMap, heightMapTiles, uv, worldXZ,
                                          grassParams.terrainSize, grassParams.terrainHeightScale, activeTileCount);
 }
-
-// Clumping parameters - using unified constants from grass_constants.glsl
-// GRASS_CLUMP_SCALE, GRASS_CLUMP_HEIGHT_INFLUENCE, GRASS_CLUMP_FACING_INFLUENCE
 
 // Convert world position to displacement map UV coordinates
 vec2 worldPosToDispUV(vec2 worldPos) {
@@ -141,7 +136,7 @@ void calculateClump(vec2 worldPos, out float clumpId, out float clumpDist, out v
         for (int x = -1; x <= 1; x++) {
             vec2 neighborCell = cellId + vec2(float(x), float(y));
 
-            // Each cell's clump point is jittered based on hash
+            // Each cell's clump point is jittered according to hash
             vec2 jitter = hash2v(neighborCell) * 0.8 + 0.1;
             vec2 clumpPoint = (neighborCell + jitter) * GRASS_CLUMP_SCALE;
 
@@ -161,45 +156,25 @@ void calculateClump(vec2 worldPos, out float clumpId, out float clumpDist, out v
 
 void main() {
     // 2D dispatch: use xy directly instead of computing from flattened index
-    // This eliminates expensive integer division/modulo and improves cache locality
     uint gridX = gl_GlobalInvocationID.x;
     uint gridZ = gl_GlobalInvocationID.y;
 
     // Set vertexCount (only first thread writes this constant value)
-    // Uses derived constant: GRASS_VERTICES_PER_BLADE = GRASS_NUM_SEGMENTS * 2 + 1 = 15
     if (gridX == 0 && gridZ == 0) {
         drawCmd.vertexCount = GRASS_VERTICES_PER_BLADE;
     }
 
-    // Generate grass positions in a grid pattern
-    // In tiled mode: GRASS_TILE_GRID_SIZE x GRASS_TILE_GRID_SIZE per tile
-    // In non-tiled mode: GRASS_GRID_SIZE x GRASS_GRID_SIZE = 1,000,000 potential blades
-    // Culling systems (distance, frustum, LOD) reduce to max rendered instances
+    // Generate grass positions in a grid pattern per tile
     if (gridX >= EFFECTIVE_GRID_SIZE || gridZ >= EFFECTIVE_GRID_SIZE) return;
 
-    // Map to world space
-    // In tiled mode: position relative to tile origin
-    // In non-tiled mode: centered on origin (backward compatible)
-    float x, z;
-#ifdef GRASS_TILED_MODE
-    // Tiled mode: grid covers the tile, starting from tile origin
-    x = push.tileOriginX + float(gridX) * GRASS_SPACING;
-    z = push.tileOriginZ + float(gridZ) * GRASS_SPACING;
-#else
-    // Non-tiled mode: grid centered on origin (legacy behavior)
-    x = (float(gridX) - float(GRASS_GRID_SIZE) / 2.0) * GRASS_SPACING;
-    z = (float(gridZ) - float(GRASS_GRID_SIZE) / 2.0) * GRASS_SPACING;
-#endif
+    // Map to world space - position relative to tile origin
+    float x = push.tileOriginX + float(gridX) * GRASS_SPACING;
+    float z = push.tileOriginZ + float(gridZ) * GRASS_SPACING;
 
     // Add some randomness to position (jitter)
     // Use world-space position for hash to ensure unique patterns per tile
-#ifdef GRASS_TILED_MODE
-    // In tiled mode, hash based on world position to get unique patterns per tile
     vec2 worldCell = vec2(x, z) / GRASS_SPACING;
     vec2 cell = worldCell;
-#else
-    vec2 cell = vec2(gridX, gridZ);
-#endif
     float h1 = hash(cell);
     float h2 = hash2(cell);
 
@@ -207,38 +182,33 @@ void main() {
     z += (hash(cell + vec2(100.0, 0.0)) - 0.5) * GRASS_SPACING * GRASS_JITTER_FACTOR;
 
     // Sample terrain heightmap to get Y position
-    // Convert world XZ to heightmap UV: terrain is centered at origin with size = terrainSize
     vec2 terrainUV = vec2(x, z) / grassParams.terrainSize + 0.5;
 
     // Check if grass is within terrain bounds
     if (terrainUV.x < 0.0 || terrainUV.x > 1.0 || terrainUV.y < 0.0 || terrainUV.y > 1.0) return;
 
-    // Sample terrain height with tile cache support for ~1m resolution near camera
+    // Sample terrain height with tile cache support
     float terrainY = sampleHeightWithTileCache(terrainHeightMap, heightMapTiles, terrainUV,
                                                 vec2(x, z), grassParams.terrainHeightScale, activeTileCount);
 
     vec3 worldPos = vec3(x, terrainY, z);
 
-    // Calculate terrain normal for tangent-aligned grass placement (with tile cache)
+    // Calculate terrain normal for tangent-aligned grass placement
     vec3 terrainNormal = calculateTerrainNormal(terrainUV, vec2(x, z));
 
-    // Distance culling (relative to camera) using shared culling UBO
+    // Distance culling
     float distToCamera = getDistanceToCamera(worldPos, culling.cameraPosition.xyz);
     if (distToCamera > culling.maxDrawDistance) return;
 
-    // Frustum culling using shared culling UBO
-    // Use GRASS_FRUSTUM_MARGIN to handle double-buffer lag during camera rotation
-    // and ensure grass behind camera can still cast shadows
+    // Frustum culling
     if (!isInFrustum(culling.frustumPlanes, worldPos, GRASS_FRUSTUM_MARGIN)) return;
 
-    // LOD blade dropping using shared culling UBO
-    // maxLodDropRate from UBO controls max drop percentage at far LOD
+    // LOD blade dropping
     float instanceHash = hash(cell + vec2(500.0, 500.0));
     if (isLodEnabled() && lodCull(distToCamera, culling.lodTransitionStart, culling.lodTransitionEnd,
                                    culling.maxLodDropRate, instanceHash)) return;
 
     // Use subgroup operations to batch atomic updates
-    // This reduces contention by ~32x compared to per-thread atomics
     uvec4 activeMask = subgroupBallot(true);
     uint activeCount = subgroupBallotBitCount(activeMask);
     uint laneOffset = subgroupBallotExclusiveBitCount(activeMask);
@@ -250,25 +220,25 @@ void main() {
     baseSlot = subgroupBroadcastFirst(baseSlot);
     uint slot = baseSlot + laneOffset;
 
-    // Calculate clumping using unified constants
+    // Clamp to max instances per tile
+    if (slot >= EFFECTIVE_MAX_INSTANCES) return;
+
+    // Calculate clumping
     float clumpId, clumpDist;
     vec2 clumpCenter;
     calculateClump(vec2(x, z), clumpId, clumpDist, clumpCenter);
 
-    // Base random properties using unified constants
-    float randomFacing = h1 * GRASS_TWO_PI;  // Random facing direction (full rotation)
-    float baseHeight = GRASS_HEIGHT_MIN + h2 * GRASS_HEIGHT_RANGE;  // Height between min and max
-    float bladeHash = h1;                    // For wind animation
-    float baseTilt = (hash(cell + vec2(50.0, 50.0)) - 0.5) * GRASS_TILT_RANGE;  // Slight tilt
+    // Base random properties
+    float randomFacing = h1 * GRASS_TWO_PI;
+    float baseHeight = GRASS_HEIGHT_MIN + h2 * GRASS_HEIGHT_RANGE;
+    float bladeHash = h1;
+    float baseTilt = (hash(cell + vec2(50.0, 50.0)) - 0.5) * GRASS_TILT_RANGE;
 
-    // Apply clump height influence using unified constant
-    // Blades in the same clump have similar heights
-    // clumpId varies 0-1, so we map it to a height multiplier
+    // Apply clump height influence
     float clumpHeightMod = mix(1.0, 0.6 + clumpId * 0.8, GRASS_CLUMP_HEIGHT_INFLUENCE);
     float height = baseHeight * clumpHeightMod;
 
     // Apply clump facing influence
-    // Blades lean toward or away from clump center
     vec2 toClumpCenter = clumpCenter - vec2(x, z);
     float distToClump = length(toClumpCenter);
     if (distToClump > 0.01) {
@@ -277,39 +247,26 @@ void main() {
         toClumpCenter = vec2(0.0, 1.0);
     }
 
-    // Calculate facing angle that points toward clump center
     float clumpFacingAngle = atan(toClumpCenter.y, toClumpCenter.x);
-
-    // Blend between random facing and clump-oriented facing
-    // Use clumpId to determine if blades face toward (clumpId < 0.5) or away (clumpId > 0.5)
     float facingTarget = clumpId < 0.5 ? clumpFacingAngle : clumpFacingAngle + 3.14159;
-
-    // Smooth blend between random and clump-oriented facing
     float facing = mix(randomFacing, facingTarget, GRASS_CLUMP_FACING_INFLUENCE);
 
-    // Tilt also influenced by distance to clump center (blades closer lean more)
+    // Tilt influenced by distance to clump center
     float clumpTiltMod = (1.0 - clumpDist / GRASS_CLUMP_SCALE) * GRASS_CLUMP_TILT_MODIFIER;
     float tilt = baseTilt + clumpTiltMod;
 
-    // Apply displacement from displacement buffer (player/NPC interaction)
-    // Sample the displacement texture to get push direction
+    // Apply displacement from player/NPC interaction
     vec2 displacement = sampleDisplacement(vec2(x, z));
     float dispMagnitude = length(displacement);
 
     if (dispMagnitude > GRASS_DISPLACEMENT_THRESHOLD) {
-        // Normalize displacement direction
         vec2 dispDir = displacement / dispMagnitude;
-
-        // Calculate the angle of the displacement direction
         float dispAngle = atan(dispDir.y, dispDir.x);
-
-        // Blend facing toward displacement direction based on magnitude
-        // Stronger displacement = blade faces more in push direction
         float facingBlend = clamp(dispMagnitude * GRASS_DISPLACEMENT_BLEND_MAX, 0.0, GRASS_DISPLACEMENT_BLEND_MAX);
         facing = mix(facing, dispAngle, facingBlend);
     }
 
-    // Write instance data (clumpId stored in w for fragment shader color variation)
+    // Write instance data
     instances[slot].positionAndFacing = vec4(worldPos, facing);
     instances[slot].heightHashTilt = vec4(height, bladeHash, tilt, clumpId);
     instances[slot].terrainNormal = vec4(terrainNormal, 0.0);

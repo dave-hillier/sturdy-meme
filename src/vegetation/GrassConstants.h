@@ -110,4 +110,36 @@ inline constexpr float MAX_LOD_DROP_RATE = 0.5f;
 inline constexpr float SHADOW_DEPTH_BIAS_CONSTANT = 0.25f;
 inline constexpr float SHADOW_DEPTH_BIAS_SLOPE = 0.75f;
 
+// =============================================================================
+// TILED GRASS SYSTEM
+// =============================================================================
+
+// Tile dimensions in world units (64m x 64m per tile)
+inline constexpr float TILE_SIZE = 64.0f;
+
+// Grid dimensions per tile (320x320 = 102,400 potential blades per tile)
+// With 0.2m spacing: maintains 25 blades per square meter density
+inline constexpr uint32_t TILE_GRID_SIZE = 320;
+
+// Derived: Dispatch size per tile
+// ceil(TILE_GRID_SIZE / WORKGROUP_SIZE) = ceil(320/16) = 20
+inline constexpr uint32_t TILE_DISPATCH_SIZE = (TILE_GRID_SIZE + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+
+// Number of tiles around camera in each direction (3x3 = 9 active tiles)
+inline constexpr uint32_t TILES_PER_AXIS = 3;
+
+// Total active tiles = TILES_PER_AXIS^2 = 9
+inline constexpr uint32_t MAX_ACTIVE_TILES = TILES_PER_AXIS * TILES_PER_AXIS;
+
+// Maximum rendered instances per tile after culling (~12k target)
+inline constexpr uint32_t MAX_INSTANCES_PER_TILE = 12000;
+
+// Derived: Total coverage with tiled system
+// TILES_PER_AXIS * TILE_SIZE = 192m
+inline constexpr float TILED_COVERAGE = static_cast<float>(TILES_PER_AXIS) * TILE_SIZE;
+
+// Tile load/unload margins (hysteresis to prevent thrashing)
+inline constexpr float TILE_LOAD_MARGIN = 10.0f;
+inline constexpr float TILE_UNLOAD_MARGIN = 20.0f;
+
 } // namespace GrassConstants

@@ -224,6 +224,38 @@ const float GRASS_SHADOW_DEPTH_BIAS_CONSTANT = 0.25;
 const float GRASS_SHADOW_DEPTH_BIAS_SLOPE = 0.75;
 
 // =============================================================================
+// TILED GRASS SYSTEM
+// =============================================================================
+
+// Tile dimensions in world units (64m x 64m per tile)
+const float GRASS_TILE_SIZE = 64.0;
+
+// Grid dimensions per tile (320x320 = 102,400 potential blades per tile)
+// With 0.2m spacing: maintains 25 blades per square meter density
+const uint GRASS_TILE_GRID_SIZE = 320;
+
+// Derived: Dispatch size per tile
+// ceil(GRASS_TILE_GRID_SIZE / GRASS_WORKGROUP_SIZE) = ceil(320/16) = 20
+const uint GRASS_TILE_DISPATCH_SIZE = (GRASS_TILE_GRID_SIZE + GRASS_WORKGROUP_SIZE - 1) / GRASS_WORKGROUP_SIZE;
+
+// Number of tiles around camera in each direction (3x3 = 9 active tiles)
+const uint GRASS_TILES_PER_AXIS = 3;
+
+// Total active tiles = GRASS_TILES_PER_AXIS^2 = 9
+const uint GRASS_MAX_ACTIVE_TILES = GRASS_TILES_PER_AXIS * GRASS_TILES_PER_AXIS;
+
+// Maximum rendered instances per tile after culling (~12k target)
+const uint GRASS_MAX_INSTANCES_PER_TILE = 12000;
+
+// Derived: Total coverage with tiled system
+// GRASS_TILES_PER_AXIS * GRASS_TILE_SIZE = 192m
+const float GRASS_TILED_COVERAGE = float(GRASS_TILES_PER_AXIS) * GRASS_TILE_SIZE;
+
+// Tile load/unload margins (hysteresis to prevent thrashing)
+const float GRASS_TILE_LOAD_MARGIN = 10.0;
+const float GRASS_TILE_UNLOAD_MARGIN = 20.0;
+
+// =============================================================================
 // MATHEMATICAL CONSTANTS
 // =============================================================================
 
