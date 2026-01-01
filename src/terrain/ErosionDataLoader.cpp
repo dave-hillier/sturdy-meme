@@ -106,7 +106,7 @@ bool ErosionDataLoader::loadFromCache(const ErosionLoadConfig& config) {
                 for (const auto& feature : j["features"]) {
                     if (feature["geometry"]["type"] != "LineString") continue;
 
-                    RiverData river;
+                    RiverSpline river;
 
                     // Read coordinates (each point is [x, z, y] where y is altitude)
                     const auto& coords = feature["geometry"]["coordinates"];
@@ -161,7 +161,7 @@ bool ErosionDataLoader::loadFromCache(const ErosionLoadConfig& config) {
 
             if (j.contains("features")) {
                 for (const auto& feature : j["features"]) {
-                    LakeData lake;
+                    Lake lake;
 
                     // Read geometry (Point or Polygon centroid)
                     const auto& geom = feature["geometry"];
