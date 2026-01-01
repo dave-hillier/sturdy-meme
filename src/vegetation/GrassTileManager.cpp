@@ -67,6 +67,11 @@ GrassTile* GrassTileManager::getOrCreateTile(const GrassTile::TileCoord& coord) 
         return nullptr;
     }
 
+    // Write descriptor sets with shared resources (terrain, displacement, etc.)
+    for (uint32_t setIndex = 0; setIndex < framesInFlight_; ++setIndex) {
+        updateTileDescriptorSets(tilePtr, setIndex);
+    }
+
     tiles_[coord] = std::move(tile);
     return tilePtr;
 }
