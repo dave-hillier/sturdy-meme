@@ -69,8 +69,14 @@ namespace TreeLODConstants {
     constexpr float FULL_DETAIL_DISTANCE = 250.0f;      // Full geometry below this
     constexpr float REDUCED_DETAIL_DISTANCE = 150.0f;   // Reduced geometry LOD1 below this
     constexpr float MAX_DRAW_DISTANCE = 500.0f;         // Maximum leaf visibility
-    constexpr float LOD_TRANSITION_START = 150.0f;      // Start transitioning LOD
-    constexpr float LOD_TRANSITION_END = 250.0f;        // Finish transitioning LOD
+
+    // Note: Leaf dropping now uses lodBlendFactor (from screen-space error system)
+    // instead of distance-based transitions. This ensures consistency with the
+    // error-based LOD system that determines when to show leaves vs impostors.
+    // The LOD_TRANSITION_* constants below are kept for backwards compatibility
+    // but are no longer used by the leaf culling shader.
+    constexpr float LOD_TRANSITION_START = 150.0f;      // (Legacy - not used)
+    constexpr float LOD_TRANSITION_END = 250.0f;        // (Legacy - not used)
 
     // Hysteresis to prevent LOD flickering at boundaries
     constexpr float HYSTERESIS = 5.0f;

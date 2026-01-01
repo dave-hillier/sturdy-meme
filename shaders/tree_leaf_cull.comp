@@ -105,9 +105,8 @@ void main() {
         culling.cameraPosition.xyz,
         culling.frustumPlanes,
         culling.maxDrawDistance,
-        culling.lodTransitionStart,
-        culling.lodTransitionEnd,
-        culling.maxLodDropRate,
+        localIdx,       // leafIndexInTree - stable integer index
+        treeIdx,        // treeIndex - for unique hash per tree
         worldPos,
         leafSize,
         distToCamera

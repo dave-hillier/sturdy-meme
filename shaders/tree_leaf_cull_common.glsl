@@ -21,8 +21,18 @@ struct TreeCullData {
     uint _pad2;
 };
 
+// Hash a leaf index to get a stable per-leaf random value
+// Uses integer hashing for stability (unlike float position which has precision issues)
+float hashLeafIndex(uint treeIndex, uint leafIndexInTree) {
+    // Combine tree index and leaf index for unique hash per leaf
+    uint h = pcgHash(treeIndex ^ pcgHash(leafIndexInTree));
+    return float(h) / 4294967295.0;
+}
+
 // Cull a single leaf instance against frustum, distance, and LOD
 // Returns true if the leaf should be CULLED (not rendered)
+// leafIndexInTree: the index of this leaf within its tree (for stable hashing)
+// treeIndex: the tree's index (combined with leaf index for unique hash)
 bool cullLeaf(
     vec3 leafLocalPos,
     float leafSizeLocal,
@@ -31,9 +41,8 @@ bool cullLeaf(
     vec3 cameraPos,
     vec4 frustumPlanes[6],
     float maxDrawDistance,
-    float lodTransitionStart,
-    float lodTransitionEnd,
-    float maxLodDropRate,
+    uint leafIndexInTree,
+    uint treeIndex,
     out vec4 worldPos,
     out float leafSize,
     out float distToCamera
@@ -58,18 +67,16 @@ bool cullLeaf(
     // camera but still need to cast shadows into the view.
     // Distance and LOD culling already limit the leaf count sufficiently.
 
-    // LOD blade dropping - use position-based hash for consistent results
-    // This handles distance-based leaf density reduction (fewer leaves when far away)
-    float instanceHash = hash2D(leafLocalPos.xz);
-    if (lodCull(distToCamera, lodTransitionStart, lodTransitionEnd,
-                maxLodDropRate, instanceHash)) {
+    // LOD-based leaf dropping using lodBlendFactor (from screen-space error system)
+    // lodBlendFactor: 0 = full detail (close/large), 1 = full impostor (far/small)
+    // Use stable integer-based hash to ensure same leaves dropped each frame.
+    // Drop rate scales with lodBlendFactor: at 0 drop nothing, at 1 drop 90%
+    float instanceHash = hashLeafIndex(treeIndex, leafIndexInTree);
+    float maxDropRate = 0.9;  // Drop up to 90% of leaves as we approach impostor
+    float dropThreshold = lodBlendFactor * maxDropRate;
+    if (instanceHash < dropThreshold) {
         return true;
     }
-
-    // NOTE: We do NOT cull leaves based on lodBlendFactor here!
-    // The fragment shader handles LOD crossfade via dithered discard (shouldDiscardForLODLeaves).
-    // This ensures leaves and impostors use the same screen-space dither pattern
-    // for proper synchronized crossfade.
 
     return false;
 }
