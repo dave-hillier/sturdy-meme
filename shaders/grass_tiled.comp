@@ -78,9 +78,10 @@ layout(push_constant) uniform PushConstants {
     float padding;
 } push;
 
-// Tiled mode uses per-tile grid size and instance limits
+// Tiled mode uses per-tile grid size but shared global instance buffer
 #define EFFECTIVE_GRID_SIZE GRASS_TILE_GRID_SIZE
-#define EFFECTIVE_MAX_INSTANCES GRASS_MAX_INSTANCES_PER_TILE
+// All tiles share one instance buffer, so use global limit (not per-tile)
+#define EFFECTIVE_MAX_INSTANCES GRASS_MAX_INSTANCES
 
 // Hash functions - use instancing_common.glsl versions
 // Local aliases for compatibility with existing code
