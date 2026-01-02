@@ -99,10 +99,10 @@ public:
     bool isWindowSuspended() const { return windowSuspended; }
 
     // Vulkan handle getters for GUI integration
-    VkInstance getInstance() const { return vulkanContext_->getInstance(); }
-    VkPhysicalDevice getPhysicalDevice() const { return vulkanContext_->getPhysicalDevice(); }
-    VkDevice getDevice() const { return vulkanContext_->getDevice(); }
-    VkQueue getGraphicsQueue() const { return vulkanContext_->getGraphicsQueue(); }
+    vk::Instance getInstance() const { return vulkanContext_->getVkInstance(); }
+    vk::PhysicalDevice getPhysicalDevice() const { return vulkanContext_->getVkPhysicalDevice(); }
+    vk::Device getDevice() const { return vulkanContext_->getVkDevice(); }
+    vk::Queue getGraphicsQueue() const { return vulkanContext_->getVkGraphicsQueue(); }
     uint32_t getGraphicsQueueFamily() const { return vulkanContext_->getGraphicsQueueFamily(); }
     VkRenderPass getSwapchainRenderPass() const { return **renderPass_; }
     uint32_t getSwapchainImageCount() const { return vulkanContext_->getSwapchainImageCount(); }

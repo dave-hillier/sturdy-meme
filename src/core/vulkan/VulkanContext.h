@@ -52,24 +52,27 @@ public:
 
     void waitIdle();
 
-    // Getters for Vulkan handles
-    VkInstance getInstance() const { return instance; }
-    VkPhysicalDevice getPhysicalDevice() const { return physicalDevice; }
-    VkDevice getDevice() const { return device; }
-    VkQueue getGraphicsQueue() const { return graphicsQueue; }
-    VkQueue getPresentQueue() const { return presentQueue; }
+    // RAII access for vulkan-hpp raii types (preferred for new code)
+    const vk::raii::Instance& getRaiiInstance() const { return *raiiInstance_; }
+    const vk::raii::PhysicalDevice& getRaiiPhysicalDevice() const { return *raiiPhysicalDevice_; }
+    const vk::raii::Device& getRaiiDevice() const { return *raiiDevice_; }
+
+    // vulkan-hpp handle getters (implicit conversion to VkXxx when needed)
+    vk::Instance getVkInstance() const { return vk::Instance(instance); }
+    vk::PhysicalDevice getVkPhysicalDevice() const { return vk::PhysicalDevice(physicalDevice); }
+    vk::Device getVkDevice() const { return vk::Device(device); }
+    vk::Queue getVkGraphicsQueue() const { return vk::Queue(graphicsQueue); }
+    vk::Queue getVkPresentQueue() const { return vk::Queue(presentQueue); }
+    vk::SwapchainKHR getVkSwapchain() const { return vk::SwapchainKHR(swapchain); }
+    vk::Format getVkSwapchainImageFormat() const { return static_cast<vk::Format>(swapchainImageFormat); }
+    vk::Extent2D getVkSwapchainExtent() const { return vk::Extent2D{swapchainExtent.width, swapchainExtent.height}; }
+
     uint32_t getGraphicsQueueFamily() const;
     uint32_t getPresentQueueFamily() const;
     VmaAllocator getAllocator() const { return allocator; }
     VkPipelineCache getPipelineCache() const { return pipelineCache.getCache(); }
 
-    // RAII device access for vulkan-hpp raii types
-    const vk::raii::Device& getRaiiDevice() const { return *raiiDevice_; }
-
-    VkSwapchainKHR getSwapchain() const { return swapchain; }
     const std::vector<VkImageView>& getSwapchainImageViews() const { return swapchainImageViews; }
-    VkFormat getSwapchainImageFormat() const { return swapchainImageFormat; }
-    VkExtent2D getSwapchainExtent() const { return swapchainExtent; }
     uint32_t getSwapchainImageCount() const { return static_cast<uint32_t>(swapchainImages.size()); }
     uint32_t getWidth() const { return swapchainExtent.width; }
     uint32_t getHeight() const { return swapchainExtent.height; }
