@@ -1117,25 +1117,37 @@ std::unique_ptr<Dwelling> DwellingGenerator::generateDwelling(const Blueprint& b
 void Floor::divideArea(const std::vector<Edge*>& areaContour) {
     auto area = grid->contourToArea(areaContour);
 
-    float sizeFactor = std::pow(2.0f, roomSizeChaos);
-    float randomFactor = 1.0f;
+    // Use a unique seed combining area size, position of first cell, and contour length
+    unsigned int seed = static_cast<unsigned>(area.size() * 48271);
+    if (!area.empty()) {
+        seed ^= static_cast<unsigned>(area[0]->i * 7919 + area[0]->j * 6997);
+    }
+    seed ^= static_cast<unsigned>(areaContour.size() * 3571);
 
-    // Use three random samples for smoother distribution
-    std::mt19937 localRng(static_cast<unsigned>(area.size() * 48271));
+    std::mt19937 localRng(seed);
     auto localRandom = [&]() {
-        return static_cast<float>(localRng()) / localRng.max();
+        return static_cast<float>(localRng()) / static_cast<float>(localRng.max());
     };
 
-    float r1 = localRandom(), r2 = localRandom(), r3 = localRandom();
-    randomFactor = std::pow(sizeFactor, (r1 + r2 + r3) / 3.0f);
+    // Minimum room size - rooms should be 3-8 cells ideally
+    int minRoomSize = 3;
+    int maxRoomSize = static_cast<int>(avgRoomSize * 1.5f);  // Around 9 cells max
 
-    bool shouldStop = regularRooms
-        ? (area.size() < avgRoomSize * sizeFactor)
-        : (area.size() <= avgRoomSize * randomFactor);
-
-    if (shouldStop) {
+    // Always subdivide if area is larger than max room size
+    if (static_cast<int>(area.size()) > maxRoomSize) {
+        // Continue to subdivision logic
+    } else if (static_cast<int>(area.size()) <= minRoomSize) {
+        // Too small to divide further
         addRoom(areaContour);
         return;
+    } else {
+        // Medium-sized area - randomly decide whether to subdivide
+        float subdivideChance = static_cast<float>(area.size() - minRoomSize) /
+                                static_cast<float>(maxRoomSize - minRoomSize);
+        if (localRandom() > subdivideChance) {
+            addRoom(areaContour);
+            return;
+        }
     }
 
     Edge* notch = getNotch(areaContour);
@@ -1222,33 +1234,19 @@ void Floor::divideArea(const std::vector<Edge*>& areaContour) {
         contour2.push_back(e);
     }
 
-    // Calculate quality scores for both divisions
-    auto qualityScore = [this](const std::vector<Edge*>& contour) {
-        auto area = grid->contourToArea(contour);
-        if (noNooks) {
-            int nonNarrow = 0;
-            for (Cell* c : area) {
-                if (!isNarrow(area, c)) nonNarrow++;
-            }
-            return static_cast<float>(nonNarrow + 1) / (area.size() + 1);
-        } else {
-            if (area.size() > avgRoomSize) return 1.0f;
-            int narrowCount = 0;
-            for (Cell* c : area) {
-                if (isNarrow(area, c)) narrowCount++;
-            }
-            return static_cast<float>(narrowCount + 1) / (area.size() + 1);
-        }
-    };
+    // Validate that both resulting areas are non-empty and connected
+    auto area1 = grid->contourToArea(contour1);
+    auto area2 = grid->contourToArea(contour2);
 
-    float score = std::pow(qualityScore(contour1) * qualityScore(contour2), 2.0f);
-
-    if (localRandom() < score) {
-        divideArea(contour1);
-        divideArea(contour2);
-    } else {
+    if (area1.empty() || area2.empty()) {
+        // Invalid split, keep original area
         addRoom(areaContour);
+        return;
     }
+
+    // Recursively divide both resulting areas
+    divideArea(contour1);
+    divideArea(contour2);
 }
 
 Edge* Floor::getNotch(const std::vector<Edge*>& contour) {
@@ -1907,6 +1905,23 @@ std::string DwellingSVG::generateMultiFloor(const Dwelling& dwelling, float scal
             }
         }
 
+        // Draw inner walls (room boundaries that aren't on building exterior)
+        for (const auto& room : floor.rooms) {
+            for (Edge* e : room->contour) {
+                // Skip if this edge is on the building exterior
+                if (contains(floor.contour, e)) continue;
+
+                float x1 = baseX + e->a->j * scale;
+                float y1 = baseY + e->a->i * scale;
+                float x2 = baseX + e->b->j * scale;
+                float y2 = baseY + e->b->i * scale;
+
+                svg << "<line x1=\"" << x1 << "\" y1=\"" << y1 << "\" ";
+                svg << "x2=\"" << x2 << "\" y2=\"" << y2 << "\" ";
+                svg << "stroke=\"#333\" stroke-width=\"1\"/>\n";
+            }
+        }
+
         // Draw outer walls
         svg << "<path d=\"M";
         bool first = true;
@@ -1917,7 +1932,7 @@ std::string DwellingSVG::generateMultiFloor(const Dwelling& dwelling, float scal
         }
         svg << " Z\" fill=\"none\" stroke=\"#000\" stroke-width=\"2\"/>\n";
 
-        // Draw doors
+        // Draw doors as gaps with door swing arcs
         for (const auto& door : floor.doorList) {
             if (!door->edge1) continue;
             float x1 = baseX + door->edge1->a->j * scale;
@@ -1927,9 +1942,33 @@ std::string DwellingSVG::generateMultiFloor(const Dwelling& dwelling, float scal
 
             float mx = (x1 + x2) / 2;
             float my = (y1 + y2) / 2;
+            float doorLen = scale * 0.35f;
 
-            svg << "<circle cx=\"" << mx << "\" cy=\"" << my << "\" r=\"3\" ";
-            svg << "fill=\"#FFF\" stroke=\"#000\" stroke-width=\"1\"/>\n";
+            // Edge direction tells us how the edge runs:
+            // Edge direction: East/West edges are HORIZONTAL (run left-right), North/South are VERTICAL (run up-down)
+            if (door->edge1->dir == Dir::East || door->edge1->dir == Dir::West) {
+                // Horizontal edge - door leaf is horizontal, swings down into room
+                // Door leaf (horizontal line)
+                svg << "<line x1=\"" << mx << "\" y1=\"" << my << "\" ";
+                svg << "x2=\"" << (mx + doorLen) << "\" y2=\"" << my << "\" ";
+                svg << "stroke=\"#000\" stroke-width=\"1\"/>\n";
+                // Door swing arc
+                svg << "<path d=\"M " << (mx + doorLen) << " " << my;
+                svg << " A " << doorLen << " " << doorLen << " 0 0 1 ";
+                svg << mx << " " << (my + doorLen) << "\" ";
+                svg << "fill=\"none\" stroke=\"#000\" stroke-width=\"0.5\"/>\n";
+            } else {
+                // Vertical edge - door leaf is vertical, swings right into room
+                // Door leaf (vertical line)
+                svg << "<line x1=\"" << mx << "\" y1=\"" << my << "\" ";
+                svg << "x2=\"" << mx << "\" y2=\"" << (my + doorLen) << "\" ";
+                svg << "stroke=\"#000\" stroke-width=\"1\"/>\n";
+                // Door swing arc
+                svg << "<path d=\"M " << mx << " " << (my + doorLen);
+                svg << " A " << doorLen << " " << doorLen << " 0 0 0 ";
+                svg << (mx + doorLen) << " " << my << "\" ";
+                svg << "fill=\"none\" stroke=\"#000\" stroke-width=\"0.5\"/>\n";
+            }
         }
 
         // Draw entrance
@@ -1944,7 +1983,7 @@ std::string DwellingSVG::generateMultiFloor(const Dwelling& dwelling, float scal
             svg << "stroke=\"#8B4513\" stroke-width=\"4\"/>\n";
         }
 
-        // Draw windows
+        // Draw windows as gaps in walls with perpendicular end marks
         for (const auto& window : floor.windows) {
             if (!window.edge) continue;
             float x1 = baseX + window.edge->a->j * scale;
@@ -1954,16 +1993,32 @@ std::string DwellingSVG::generateMultiFloor(const Dwelling& dwelling, float scal
 
             float mx = (x1 + x2) / 2;
             float my = (y1 + y2) / 2;
-            float len = scale * 0.3f;
+            float windowLen = scale * 0.3f;   // Half-width of window opening
+            float tickLen = scale * 0.15f;    // Length of tick marks extending inward from wall
 
-            if (window.edge->dir == Dir::North || window.edge->dir == Dir::South) {
-                svg << "<line x1=\"" << (mx - len) << "\" y1=\"" << my << "\" ";
-                svg << "x2=\"" << (mx + len) << "\" y2=\"" << my << "\" ";
+            // Window ticks should intersect the wall at the start and end of the window opening
+            // Edge direction: East/West edges are HORIZONTAL (run left-right), North/South are VERTICAL (run up-down)
+            if (window.edge->dir == Dir::East || window.edge->dir == Dir::West) {
+                // Horizontal wall (runs left-right at constant y)
+                // Left tick: at (mx - windowLen, my), extends vertically through wall
+                svg << "<line x1=\"" << (mx - windowLen) << "\" y1=\"" << (my - tickLen) << "\" ";
+                svg << "x2=\"" << (mx - windowLen) << "\" y2=\"" << (my + tickLen) << "\" ";
+                svg << "stroke=\"#4169E1\" stroke-width=\"1.5\"/>\n";
+                // Right tick: at (mx + windowLen, my), extends vertically through wall
+                svg << "<line x1=\"" << (mx + windowLen) << "\" y1=\"" << (my - tickLen) << "\" ";
+                svg << "x2=\"" << (mx + windowLen) << "\" y2=\"" << (my + tickLen) << "\" ";
+                svg << "stroke=\"#4169E1\" stroke-width=\"1.5\"/>\n";
             } else {
-                svg << "<line x1=\"" << mx << "\" y1=\"" << (my - len) << "\" ";
-                svg << "x2=\"" << mx << "\" y2=\"" << (my + len) << "\" ";
+                // Vertical wall (runs up-down at constant x)
+                // Top tick: at (mx, my - windowLen), extends horizontally through wall
+                svg << "<line x1=\"" << (mx - tickLen) << "\" y1=\"" << (my - windowLen) << "\" ";
+                svg << "x2=\"" << (mx + tickLen) << "\" y2=\"" << (my - windowLen) << "\" ";
+                svg << "stroke=\"#4169E1\" stroke-width=\"1.5\"/>\n";
+                // Bottom tick: at (mx, my + windowLen), extends horizontally through wall
+                svg << "<line x1=\"" << (mx - tickLen) << "\" y1=\"" << (my + windowLen) << "\" ";
+                svg << "x2=\"" << (mx + tickLen) << "\" y2=\"" << (my + windowLen) << "\" ";
+                svg << "stroke=\"#4169E1\" stroke-width=\"1.5\"/>\n";
             }
-            svg << "stroke=\"#4169E1\" stroke-width=\"2\"/>\n";
         }
     };
 
