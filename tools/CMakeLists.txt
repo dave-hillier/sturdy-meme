@@ -241,3 +241,22 @@ target_link_libraries(vegetation_generator PRIVATE
 )
 
 target_compile_features(vegetation_generator PRIVATE cxx_std_17)
+
+# Dwelling generator (procedural house floor plans)
+add_executable(dwelling_generator
+    dwelling_generator/main.cpp
+    dwelling_generator/DwellingGrid.cpp
+    dwelling_generator/DwellingPlan.cpp
+    dwelling_generator/DwellingHouse.cpp
+    dwelling_generator/DwellingSVG.cpp
+)
+
+target_include_directories(dwelling_generator PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/dwelling_generator
+)
+
+target_link_libraries(dwelling_generator PRIVATE
+    SDL3::SDL3
+)
+
+target_compile_features(dwelling_generator PRIVATE cxx_std_17)
