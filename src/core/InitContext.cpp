@@ -11,17 +11,17 @@ InitContext InitContext::build(
 ) {
     InitContext ctx{};
     ctx.raiiDevice = &vulkanContext.getRaiiDevice();
-    ctx.device = vulkanContext.getDevice();
-    ctx.physicalDevice = vulkanContext.getPhysicalDevice();
+    ctx.device = vulkanContext.getVkDevice();
+    ctx.physicalDevice = vulkanContext.getVkPhysicalDevice();
     ctx.allocator = vulkanContext.getAllocator();
     ctx.raiiDevice = &vulkanContext.getRaiiDevice();
-    ctx.graphicsQueue = vulkanContext.getGraphicsQueue();
+    ctx.graphicsQueue = vulkanContext.getVkGraphicsQueue();
     ctx.commandPool = cmdPool;
     ctx.descriptorPool = descPool;
     ctx.shaderPath = resourcePath + "/shaders";
     ctx.resourcePath = resourcePath;
     ctx.framesInFlight = framesInFlight;
-    ctx.extent = vulkanContext.getSwapchainExtent();
+    ctx.extent = vulkanContext.getVkSwapchainExtent();
     ctx.poolSizesHint = poolSizes;
     return ctx;
 }

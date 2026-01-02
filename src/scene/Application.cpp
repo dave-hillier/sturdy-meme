@@ -562,8 +562,8 @@ void Application::run() {
         renderer_->getSystems().scene().getSceneBuilder().setCapeEnabled(gui_->getPlayerSettings().capeEnabled);
 
         renderer_->getSystems().scene().getSceneBuilder().updateAnimatedCharacter(
-            deltaTime, renderer_->getVulkanContext().getAllocator(), renderer_->getVulkanContext().getDevice(),
-            renderer_->getCommandPool(), renderer_->getVulkanContext().getGraphicsQueue(),
+            deltaTime, renderer_->getVulkanContext().getAllocator(), renderer_->getVulkanContext().getVkDevice(),
+            renderer_->getCommandPool(), renderer_->getVulkanContext().getVkGraphicsQueue(),
             movementSpeed, isGrounded, isJumping);
 
         // Update camera and player based on mode
@@ -1027,8 +1027,8 @@ void Application::initFlag() {
     auto& sceneBuilder = renderer_->getSystems().scene().getSceneBuilder();
     clothSim.createMesh(sceneBuilder.getFlagClothMesh());
     sceneBuilder.uploadFlagClothMesh(
-        renderer_->getVulkanContext().getAllocator(), renderer_->getVulkanContext().getDevice(),
-        renderer_->getCommandPool(), renderer_->getVulkanContext().getGraphicsQueue());
+        renderer_->getVulkanContext().getAllocator(), renderer_->getVulkanContext().getVkDevice(),
+        renderer_->getCommandPool(), renderer_->getVulkanContext().getVkGraphicsQueue());
 
     SDL_Log("Flag initialized with %dx%d cloth simulation", clothWidth, clothHeight);
 }
@@ -1115,6 +1115,6 @@ void Application::updateFlag(float deltaTime) {
     auto& flagSceneBuilder = renderer_->getSystems().scene().getSceneBuilder();
     clothSim.updateMesh(flagSceneBuilder.getFlagClothMesh());
     flagSceneBuilder.uploadFlagClothMesh(
-        renderer_->getVulkanContext().getAllocator(), renderer_->getVulkanContext().getDevice(),
-        renderer_->getCommandPool(), renderer_->getVulkanContext().getGraphicsQueue());
+        renderer_->getVulkanContext().getAllocator(), renderer_->getVulkanContext().getVkDevice(),
+        renderer_->getCommandPool(), renderer_->getVulkanContext().getVkGraphicsQueue());
 }

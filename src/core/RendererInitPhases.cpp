@@ -69,11 +69,11 @@ bool Renderer::initDescriptorInfrastructure() {
 }
 
 bool Renderer::initSubsystems(const InitContext& initCtx) {
-    VkDevice device = vulkanContext_->getDevice();
+    VkDevice device = vulkanContext_->getVkDevice();
     VmaAllocator allocator = vulkanContext_->getAllocator();
-    VkPhysicalDevice physicalDevice = vulkanContext_->getPhysicalDevice();
-    VkQueue graphicsQueue = vulkanContext_->getGraphicsQueue();
-    VkFormat swapchainImageFormat = vulkanContext_->getSwapchainImageFormat();
+    VkPhysicalDevice physicalDevice = vulkanContext_->getVkPhysicalDevice();
+    VkQueue graphicsQueue = vulkanContext_->getVkGraphicsQueue();
+    VkFormat swapchainImageFormat = vulkanContext_->getVkSwapchainImageFormat();
 
     // Initialize post-processing systems (PostProcessSystem, BloomSystem, BilateralGridSystem)
     {
@@ -1258,7 +1258,7 @@ void Renderer::initResizeCoordinator() {
             return {0, 0};
         }
 
-        VkExtent2D newExtent = vulkanContext_->getSwapchainExtent();
+        VkExtent2D newExtent = vulkanContext_->getVkSwapchainExtent();
 
         // Handle minimized window (extent = 0)
         if (newExtent.width == 0 || newExtent.height == 0) {
