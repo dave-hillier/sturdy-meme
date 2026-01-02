@@ -84,24 +84,9 @@ inline void destroyTracyVulkanContext(tracy::VkCtx* ctx) {
     TracyVkDestroy(ctx);
 }
 
-// GPU zone helper class for RAII-style profiling
-class TracyVulkanZone {
-public:
-    TracyVulkanZone(tracy::VkCtx* ctx, VkCommandBuffer cmdBuffer, const char* name,
-                    const tracy::SourceLocationData* srcLoc)
-        : scope_(ctx, cmdBuffer, srcLoc, true) {}
-
-private:
-    tracy::VkCtxScope scope_;
-};
-
 // Macro for GPU zone (use in command buffer recording)
-#define TRACY_VK_ZONE(ctx, cmdBuffer, name) \
-    static constexpr tracy::SourceLocationData TracyConcat(__tracy_gpu_src_loc, __LINE__) { \
-        name, __FUNCTION__, __FILE__, (uint32_t)__LINE__, 0 \
-    }; \
-    tracy::VkCtxScope TracyConcat(__tracy_gpu_zone, __LINE__)(ctx, cmdBuffer, \
-        &TracyConcat(__tracy_gpu_src_loc, __LINE__), true)
+// Uses Tracy's built-in TracyVkZone macro for correct API usage
+#define TRACY_VK_ZONE(ctx, cmdBuffer, name) TracyVkZone(ctx, cmdBuffer, name)
 
 // Collect GPU data - call once per frame after queue submit
 #define TRACY_VK_COLLECT(ctx, cmdBuffer) TracyVkCollect(ctx, cmdBuffer)
