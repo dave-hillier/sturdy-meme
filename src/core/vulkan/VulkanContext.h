@@ -52,23 +52,43 @@ public:
 
     void waitIdle();
 
-    // Getters for Vulkan handles
+    // Raw Vulkan handle getters (deprecated - prefer getVkXxx() or getRaiiXxx() versions)
+    [[deprecated("Use getVkInstance() or getRaiiInstance() instead")]]
     VkInstance getInstance() const { return instance; }
+    [[deprecated("Use getVkPhysicalDevice() or getRaiiPhysicalDevice() instead")]]
     VkPhysicalDevice getPhysicalDevice() const { return physicalDevice; }
+    [[deprecated("Use getVkDevice() or getRaiiDevice() instead")]]
     VkDevice getDevice() const { return device; }
+    [[deprecated("Use getVkGraphicsQueue() instead")]]
     VkQueue getGraphicsQueue() const { return graphicsQueue; }
+    [[deprecated("Use getVkPresentQueue() instead")]]
     VkQueue getPresentQueue() const { return presentQueue; }
     uint32_t getGraphicsQueueFamily() const;
     uint32_t getPresentQueueFamily() const;
     VmaAllocator getAllocator() const { return allocator; }
     VkPipelineCache getPipelineCache() const { return pipelineCache.getCache(); }
 
-    // RAII device access for vulkan-hpp raii types
+    // RAII access for vulkan-hpp raii types (preferred for new code)
+    const vk::raii::Instance& getRaiiInstance() const { return *raiiInstance_; }
+    const vk::raii::PhysicalDevice& getRaiiPhysicalDevice() const { return *raiiPhysicalDevice_; }
     const vk::raii::Device& getRaiiDevice() const { return *raiiDevice_; }
 
+    // vulkan-hpp handle getters (implicit conversion to VkXxx when needed)
+    vk::Instance getVkInstance() const { return vk::Instance(instance); }
+    vk::PhysicalDevice getVkPhysicalDevice() const { return vk::PhysicalDevice(physicalDevice); }
+    vk::Device getVkDevice() const { return vk::Device(device); }
+    vk::Queue getVkGraphicsQueue() const { return vk::Queue(graphicsQueue); }
+    vk::Queue getVkPresentQueue() const { return vk::Queue(presentQueue); }
+    vk::SwapchainKHR getVkSwapchain() const { return vk::SwapchainKHR(swapchain); }
+    vk::Format getVkSwapchainImageFormat() const { return static_cast<vk::Format>(swapchainImageFormat); }
+    vk::Extent2D getVkSwapchainExtent() const { return vk::Extent2D{swapchainExtent.width, swapchainExtent.height}; }
+
+    [[deprecated("Use getVkSwapchain() instead")]]
     VkSwapchainKHR getSwapchain() const { return swapchain; }
     const std::vector<VkImageView>& getSwapchainImageViews() const { return swapchainImageViews; }
+    [[deprecated("Use getVkSwapchainImageFormat() instead")]]
     VkFormat getSwapchainImageFormat() const { return swapchainImageFormat; }
+    [[deprecated("Use getVkSwapchainExtent() instead")]]
     VkExtent2D getSwapchainExtent() const { return swapchainExtent; }
     uint32_t getSwapchainImageCount() const { return static_cast<uint32_t>(swapchainImages.size()); }
     uint32_t getWidth() const { return swapchainExtent.width; }
