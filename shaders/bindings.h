@@ -451,6 +451,20 @@
 #define BINDING_WATER_ENV_CUBEMAP         22   // Environment cubemap for SSR fallback
 
 // =============================================================================
+// GTAO (Ground-Truth Ambient Occlusion) Descriptor Set
+// =============================================================================
+#define BINDING_GTAO_DEPTH                 0   // Depth buffer input
+#define BINDING_GTAO_NORMAL                1   // Normal buffer input (optional)
+#define BINDING_GTAO_HIZ                   2   // Hi-Z pyramid for acceleration
+#define BINDING_GTAO_OUTPUT                3   // AO output image
+#define BINDING_GTAO_PREV                  4   // Previous frame AO (temporal)
+
+// GTAO Spatial Filter
+#define BINDING_GTAO_FILTER_INPUT          0   // Raw AO input
+#define BINDING_GTAO_FILTER_DEPTH          1   // Depth for bilateral weight
+#define BINDING_GTAO_FILTER_OUTPUT         2   // Filtered AO output
+
+// =============================================================================
 // C++ Type-Safe Wrappers
 // =============================================================================
 #ifdef __cplusplus
@@ -808,6 +822,16 @@ constexpr uint32_t WATER_OCEAN_DISP_2     = BINDING_WATER_OCEAN_DISP_2;
 constexpr uint32_t WATER_OCEAN_NORMAL_2   = BINDING_WATER_OCEAN_NORMAL_2;
 constexpr uint32_t WATER_OCEAN_FOAM_2     = BINDING_WATER_OCEAN_FOAM_2;
 constexpr uint32_t WATER_ENV_CUBEMAP      = BINDING_WATER_ENV_CUBEMAP;
+
+// GTAO
+constexpr uint32_t GTAO_DEPTH             = BINDING_GTAO_DEPTH;
+constexpr uint32_t GTAO_NORMAL            = BINDING_GTAO_NORMAL;
+constexpr uint32_t GTAO_HIZ               = BINDING_GTAO_HIZ;
+constexpr uint32_t GTAO_OUTPUT            = BINDING_GTAO_OUTPUT;
+constexpr uint32_t GTAO_PREV              = BINDING_GTAO_PREV;
+constexpr uint32_t GTAO_FILTER_INPUT      = BINDING_GTAO_FILTER_INPUT;
+constexpr uint32_t GTAO_FILTER_DEPTH      = BINDING_GTAO_FILTER_DEPTH;
+constexpr uint32_t GTAO_FILTER_OUTPUT     = BINDING_GTAO_FILTER_OUTPUT;
 
 } // namespace Bindings
 

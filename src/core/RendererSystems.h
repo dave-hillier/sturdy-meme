@@ -65,6 +65,7 @@ class WaterDisplacement;
 class FlowMapGenerator;
 class FoamBuffer;
 class SSRSystem;
+class GTAOSystem;
 class WaterTileCull;
 class WaterGBuffer;
 class ErosionDataLoader;
@@ -243,6 +244,11 @@ public:
     HiZSystem& hiZ() { return *hiZSystem_; }
     const HiZSystem& hiZ() const { return *hiZSystem_; }
     void setHiZ(std::unique_ptr<HiZSystem> system);
+
+    // Ambient Occlusion
+    GTAOSystem* gtao() { return gtaoSystem_.get(); }
+    const GTAOSystem* gtao() const { return gtaoSystem_.get(); }
+    void setGTAO(std::unique_ptr<GTAOSystem> system);
 
     // Scene and resources
     SceneManager& scene() { return *sceneManager_; }
@@ -441,6 +447,9 @@ private:
 
     // Tier 2 - Culling
     std::unique_ptr<HiZSystem> hiZSystem_;
+
+    // Ambient Occlusion
+    std::unique_ptr<GTAOSystem> gtaoSystem_;
 
     // Infrastructure (needed throughout)
     std::unique_ptr<SceneManager> sceneManager_;

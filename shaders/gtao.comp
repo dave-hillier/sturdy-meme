@@ -1,0 +1,259 @@
+#version 450
+
+/*
+ * gtao.comp - Ground-Truth Ambient Occlusion Compute Shader
+ *
+ * Implements horizon-based ambient occlusion based on:
+ * - "Practical Real-Time Strategies for Accurate Indirect Occlusion" (SIGGRAPH 2016)
+ * - XeGTAO (Intel)
+ *
+ * Features:
+ * - Per-slice horizon angle computation
+ * - Cosine-weighted visibility integration
+ * - Hi-Z acceleration for distant samples
+ * - Temporal jitter for stability
+ */
+
+#extension GL_GOOGLE_include_directive : require
+
+#include "bindings.glsl"
+#include "constants_common.glsl"
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+// Input textures
+layout(binding = BINDING_GTAO_DEPTH) uniform sampler2D depthTexture;
+layout(binding = BINDING_GTAO_HIZ) uniform sampler2D hiZTexture;
+
+// Output AO texture
+layout(binding = BINDING_GTAO_OUTPUT, r8) uniform writeonly image2D aoOutput;
+
+// Previous frame AO for temporal filtering
+layout(binding = BINDING_GTAO_PREV) uniform sampler2D prevAO;
+
+// Push constants
+layout(push_constant) uniform GTAOParams {
+    mat4 viewMatrix;
+    mat4 projMatrix;
+    mat4 invProjMatrix;
+    vec4 screenParams;     // xy = resolution, zw = 1/resolution
+    vec4 aoParams;         // x = radius, y = falloff, z = intensity, w = bias
+    vec4 sampleParams;     // x = numSlices, y = numSteps, z = temporalOffset, w = thickness
+    float nearPlane;
+    float farPlane;
+    float frameTime;
+    float padding;
+};
+
+// Interleaved Gradient Noise for temporal jitter
+float interleavedGradientNoise(vec2 position) {
+    vec3 magic = vec3(0.06711056, 0.00583715, 52.9829189);
+    return fract(magic.z * fract(dot(position, magic.xy)));
+}
+
+// Linearize depth from hardware depth buffer
+float linearizeDepth(float d) {
+    return nearPlane * farPlane / (farPlane - d * (farPlane - nearPlane));
+}
+
+// Reconstruct view-space position from UV and depth
+vec3 reconstructViewPos(vec2 uv, float depth) {
+    vec4 ndc = vec4(uv * 2.0 - 1.0, depth, 1.0);
+    vec4 viewPos = invProjMatrix * ndc;
+    return viewPos.xyz / viewPos.w;
+}
+
+// Get view-space normal from depth (central differences)
+vec3 getViewNormal(vec2 uv, vec3 viewPos) {
+    vec2 texelSize = screenParams.zw;
+
+    float d_right = texture(depthTexture, uv + vec2(texelSize.x, 0.0)).r;
+    float d_left = texture(depthTexture, uv - vec2(texelSize.x, 0.0)).r;
+    float d_up = texture(depthTexture, uv + vec2(0.0, texelSize.y)).r;
+    float d_down = texture(depthTexture, uv - vec2(0.0, texelSize.y)).r;
+
+    vec3 p_right = reconstructViewPos(uv + vec2(texelSize.x, 0.0), d_right);
+    vec3 p_left = reconstructViewPos(uv - vec2(texelSize.x, 0.0), d_left);
+    vec3 p_up = reconstructViewPos(uv + vec2(0.0, texelSize.y), d_up);
+    vec3 p_down = reconstructViewPos(uv - vec2(0.0, texelSize.y), d_down);
+
+    // Choose the smaller of forward/backward differences
+    vec3 dx = (abs(d_right - viewPos.z) < abs(d_left - viewPos.z))
+              ? (p_right - viewPos) : (viewPos - p_left);
+    vec3 dy = (abs(d_up - viewPos.z) < abs(d_down - viewPos.z))
+              ? (p_up - viewPos) : (viewPos - p_down);
+
+    return normalize(cross(dx, dy));
+}
+
+// Compute horizon angle for a given direction
+// Returns the cosine of the horizon angle
+float computeHorizonAngle(vec2 uv, vec3 viewPos, vec3 viewDir, vec3 sliceDir,
+                          float radius, int numSteps, float jitter) {
+    float maxCosAngle = -1.0;  // Start with horizon at -90 degrees (fully visible)
+
+    float stepSize = radius / float(numSteps);
+
+    for (int i = 1; i <= numSteps; i++) {
+        float t = (float(i) + jitter) * stepSize;
+
+        // Sample point along the slice direction
+        vec3 sampleViewPos = viewPos + sliceDir * t;
+
+        // Project back to screen space
+        vec4 sampleClip = projMatrix * vec4(sampleViewPos, 1.0);
+        vec2 sampleUV = (sampleClip.xy / sampleClip.w) * 0.5 + 0.5;
+
+        // Skip if outside screen
+        if (any(lessThan(sampleUV, vec2(0.0))) || any(greaterThan(sampleUV, vec2(1.0)))) {
+            continue;
+        }
+
+        // Sample depth using Hi-Z for efficiency at larger radii
+        float sampleDepth;
+        if (t > radius * 0.5) {
+            // Use Hi-Z for distant samples (mip 1 or 2)
+            float mipLevel = min(2.0, log2(t / (radius * 0.25)));
+            sampleDepth = textureLod(hiZTexture, sampleUV, mipLevel).r;
+        } else {
+            sampleDepth = texture(depthTexture, sampleUV).r;
+        }
+
+        // Skip sky pixels
+        if (sampleDepth >= 0.9999) {
+            continue;
+        }
+
+        // Reconstruct sample view position from depth
+        vec3 actualSamplePos = reconstructViewPos(sampleUV, sampleDepth);
+
+        // Vector from current position to sample
+        vec3 toSample = actualSamplePos - viewPos;
+        float sampleDist = length(toSample);
+
+        // Skip if too close (self-occlusion) or too far
+        if (sampleDist < aoParams.w || sampleDist > radius * 2.0) {
+            continue;
+        }
+
+        // Compute angle to this sample (cosine with view direction)
+        float cosAngle = dot(normalize(toSample), viewDir);
+
+        // Apply distance falloff
+        float falloff = 1.0 - pow(clamp(sampleDist / (radius * 2.0), 0.0, 1.0), aoParams.y);
+
+        // Update maximum horizon angle (weighted by falloff)
+        maxCosAngle = max(maxCosAngle, cosAngle * falloff);
+    }
+
+    return maxCosAngle;
+}
+
+// Integrate visibility over a hemisphere slice
+// horizonCos1, horizonCos2 are horizon angles on both sides of the slice
+float integrateSlice(vec3 normal, vec3 sliceDir, float horizonCos1, float horizonCos2) {
+    // Project normal onto slice plane
+    float nDotSlice = dot(normal, sliceDir);
+
+    // Compute the visible angle range
+    // Horizon at -1 means fully visible (horizon at -90 degrees)
+    // Horizon at +1 means fully occluded (horizon at +90 degrees)
+
+    // Integrate visibility weighted by cosine (Lambert)
+    // This is a simplified version of the GTAO integral
+    float h1 = acos(clamp(horizonCos1, -1.0, 1.0));
+    float h2 = acos(clamp(horizonCos2, -1.0, 1.0));
+
+    // Visibility is the integral of cos(theta) from -h to h
+    float visibility = (sin(h1) + sin(h2)) * 0.5;
+
+    // Weight by normal projection
+    visibility *= max(0.0, 1.0 - abs(nDotSlice));
+
+    return visibility;
+}
+
+void main() {
+    ivec2 pixelCoord = ivec2(gl_GlobalInvocationID.xy);
+    vec2 resolution = screenParams.xy;
+
+    if (pixelCoord.x >= int(resolution.x) || pixelCoord.y >= int(resolution.y)) {
+        return;
+    }
+
+    vec2 uv = (vec2(pixelCoord) + 0.5) / resolution;
+
+    // Sample depth at full resolution (we're at half res for the UV calculation)
+    float depth = texture(depthTexture, uv).r;
+
+    // Skip sky pixels
+    if (depth >= 0.9999) {
+        imageStore(aoOutput, pixelCoord, vec4(1.0));
+        return;
+    }
+
+    // Reconstruct view-space position
+    vec3 viewPos = reconstructViewPos(uv, depth);
+
+    // Get view-space normal
+    vec3 viewNormal = getViewNormal(uv, viewPos);
+
+    // View direction (from surface to camera)
+    vec3 viewDir = normalize(-viewPos);
+
+    // Temporal jitter for stability
+    float jitter = interleavedGradientNoise(vec2(pixelCoord) + sampleParams.z * 100.0);
+
+    // Scale radius by view distance for consistent screen-space coverage
+    float linearDepth = linearizeDepth(depth);
+    float worldRadius = aoParams.x;
+    float projectedRadius = worldRadius * (projMatrix[1][1] / linearDepth);
+
+    // Clamp to reasonable screen-space range
+    projectedRadius = clamp(projectedRadius, 4.0, 128.0);
+
+    // Number of slices and steps
+    int numSlices = int(sampleParams.x);
+    int numSteps = int(sampleParams.y);
+
+    float totalAO = 0.0;
+
+    // For each angular slice around the view direction
+    for (int slice = 0; slice < numSlices; slice++) {
+        // Compute slice angle with jitter
+        float phi = (PI / float(numSlices)) * (float(slice) + jitter);
+
+        // Slice direction in screen space (tangent to view)
+        vec2 sliceDir2D = vec2(cos(phi), sin(phi));
+
+        // Convert to view-space direction (approximate)
+        // This is on the tangent plane perpendicular to view direction
+        vec3 right = normalize(cross(viewDir, vec3(0.0, 1.0, 0.0)));
+        vec3 up = normalize(cross(right, viewDir));
+        vec3 sliceDir = normalize(right * sliceDir2D.x + up * sliceDir2D.y);
+
+        // Compute horizon angles in both directions along the slice
+        float horizon1 = computeHorizonAngle(uv, viewPos, viewDir, sliceDir,
+                                              projectedRadius * screenParams.z, numSteps, jitter);
+        float horizon2 = computeHorizonAngle(uv, viewPos, viewDir, -sliceDir,
+                                              projectedRadius * screenParams.z, numSteps, jitter);
+
+        // Integrate visibility for this slice
+        float sliceAO = integrateSlice(viewNormal, sliceDir, horizon1, horizon2);
+        totalAO += sliceAO;
+    }
+
+    // Average over slices
+    totalAO /= float(numSlices);
+
+    // Apply intensity and clamp
+    float ao = clamp(totalAO * aoParams.z, 0.0, 1.0);
+
+    // Temporal filtering with previous frame
+    if (sampleParams.z > 0.0) {
+        float prevValue = texture(prevAO, uv).r;
+        ao = mix(ao, prevValue, 0.9);  // Strong temporal blend for stability
+    }
+
+    imageStore(aoOutput, pixelCoord, vec4(ao));
+}

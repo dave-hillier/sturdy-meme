@@ -113,6 +113,7 @@ set(SOURCES
     src/postprocess/BilateralGridSystem.cpp
     src/postprocess/SSRSystem.cpp
     src/postprocess/HiZSystem.cpp
+    src/postprocess/GTAOSystem.cpp
     # Lighting
     src/lighting/FroxelSystem.cpp
     src/lighting/ShadowSystem.cpp
@@ -648,6 +649,8 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/foam_blur.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ssr.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ssr_blur.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/gtao.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/gtao_spatial_filter.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_tile_cull.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/debug_line.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/debug_line.frag.spv
@@ -884,6 +887,22 @@ if(SHADER_COMPILE_CMD)
         COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ssr_blur.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ssr_blur.comp
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ssr_blur.comp
         COMMENT "Compiling SSR blur compute shader"
+    )
+
+    # GTAO compute shader (Ground-Truth Ambient Occlusion)
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/gtao.comp.spv
+        COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/gtao.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/gtao.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/gtao.comp
+        COMMENT "Compiling GTAO compute shader"
+    )
+
+    # GTAO spatial filter compute shader
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/gtao_spatial_filter.comp.spv
+        COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/gtao_spatial_filter.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/gtao_spatial_filter.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/gtao_spatial_filter.comp
+        COMMENT "Compiling GTAO spatial filter compute shader"
     )
 
     # Water tile cull compute shader (Phase 7: Screen-Space Tessellation)

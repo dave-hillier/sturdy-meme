@@ -33,6 +33,7 @@
 #include "FlowMapGenerator.h"
 #include "FoamBuffer.h"
 #include "SSRSystem.h"
+#include "GTAOSystem.h"
 #include "WaterTileCull.h"
 #include "WaterGBuffer.h"
 #include "ErosionDataLoader.h"
@@ -166,6 +167,10 @@ void RendererSystems::setSSR(std::unique_ptr<SSRSystem> system) {
 
 void RendererSystems::setHiZ(std::unique_ptr<HiZSystem> system) {
     hiZSystem_ = std::move(system);
+}
+
+void RendererSystems::setGTAO(std::unique_ptr<GTAOSystem> system) {
+    gtaoSystem_ = std::move(system);
 }
 
 void RendererSystems::setSky(std::unique_ptr<SkySystem> system) {
