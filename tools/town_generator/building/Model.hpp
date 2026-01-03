@@ -197,7 +197,7 @@ public:
     float cityRadius = 0.0f;
 
     // List of all entrances of a city including castle gates
-    std::vector<PointPtr> gates;
+    std::vector<Point> gates;
 
     // Joined list of streets (inside walls) and roads (outside walls)
     // without duplicating segments
@@ -231,11 +231,11 @@ public:
             return Polygon(wards[0]->shape);
         }
 
-        std::vector<PointPtr> A;
-        std::vector<PointPtr> B;
+        std::vector<Point> A;
+        std::vector<Point> B;
 
         for (auto& w1 : wards) {
-            w1->shape.forEdge([&](PointPtr a, PointPtr b) {
+            w1->shape.forEdge([&](const Point& a, const Point& b) {
                 bool outerEdge = true;
                 for (auto& w2 : wards) {
                     if (w2->shape.findEdge(b, a) != -1) {
@@ -251,22 +251,20 @@ public:
         }
 
         Polygon result;
-        if (!A.empty()) {
-            size_t index = 0;
-            size_t safetyLimit = A.size() + 1;
-            do {
-                if (--safetyLimit == 0) break;  // Safety exit
-                result.push_back(A[index]);
-                // Find index of B[index] in A (by pointer identity)
-                auto it = std::find(A.begin(), A.end(), B[index]);
-                index = (it != A.end()) ? std::distance(A.begin(), it) : 0;
-            } while (index != 0);
-        }
+        size_t index = 0;
+        do {
+            result.push_back(A[index]);
+            // Find index of B[index] in A
+            auto it = std::find_if(A.begin(), A.end(), [&](const Point& p) {
+                return p == B[index];
+            });
+            index = (it != A.end()) ? std::distance(A.begin(), it) : 0;
+        } while (index != 0);
 
         return result;
     }
 
-    std::vector<std::shared_ptr<Patch>> patchByVertex(PointPtr v) {
+    std::vector<std::shared_ptr<Patch>> patchByVertex(const Point& v) {
         std::vector<std::shared_ptr<Patch>> result;
         for (auto& patch : patches) {
             if (patch->shape.contains(v)) {
@@ -276,10 +274,10 @@ public:
         return result;
     }
 
-    std::shared_ptr<Patch> getNeighbour(std::shared_ptr<Patch> patch, PointPtr v) {
-        PointPtr nextPt = patch->shape.next(v);
+    std::shared_ptr<Patch> getNeighbour(std::shared_ptr<Patch> patch, const Point& v) {
+        Point next = patch->shape.next(v);
         for (auto& p : patches) {
-            if (p->shape.findEdge(nextPt, v) != -1) {
+            if (p->shape.findEdge(next, v) != -1) {
                 return p;
             }
         }
@@ -313,9 +311,6 @@ private:
     bool citadelNeeded_;
     bool wallsNeeded_;
 
-    // Keep Voronoi alive - it owns the Triangle circumcenters that Patches reference
-    std::unique_ptr<Voronoi> voronoi_;
-
     // Private constructor for create() factory
     Model() : nPatches_(15), plazaNeeded_(false), citadelNeeded_(false), wallsNeeded_(false) {}
 
@@ -332,20 +327,14 @@ private:
         wallsNeeded_ = (walls == -1) ? Random::getBool() : (walls == 1);
 
         bool success = false;
-        int retries = 0;
-        constexpr int MAX_RETRIES = 100;
-        while (!success && retries < MAX_RETRIES) {
+        while (!success) {
             try {
                 build();
                 instance = shared_from_this();
                 success = true;
             } catch (const std::exception& e) {
                 instance = nullptr;
-                retries++;
             }
-        }
-        if (!success) {
-            throw std::runtime_error("Failed to build model after maximum retries");
         }
     }
 
@@ -371,29 +360,29 @@ private:
             points.emplace_back(std::cos(a) * r, std::sin(a) * r);
         }
 
-        voronoi_ = Voronoi::build(points);
+        auto voronoi = Voronoi::build(points);
 
         // Relaxing central wards
         for (int i = 0; i < 3; i++) {
-            std::vector<PointPtr> toRelax;
-            auto& pts = voronoi_->getPointsMutable();
+            std::vector<Point*> toRelax;
+            auto& pts = voronoi->getPointsMutable();
             for (int j = 0; j < 3 && j < static_cast<int>(pts.size()); j++) {
                 toRelax.push_back(pts[j]);
             }
             if (nPatches_ < static_cast<int>(pts.size())) {
                 toRelax.push_back(pts[nPatches_]);
             }
-            voronoi_ = Voronoi::relax(*voronoi_, &toRelax);
+            voronoi = Voronoi::relax(*voronoi, &toRelax);
         }
 
         // Sort points by distance from origin
-        auto& pts = voronoi_->getPointsMutable();
+        auto& pts = voronoi->getPointsMutable();
         std::sort(pts.begin(), pts.end(),
-            [](const PointPtr& p1, const PointPtr& p2) {
+            [](const Point* p1, const Point* p2) {
                 return p1->length() < p2->length();
             });
 
-        auto regions = voronoi_->partioning();
+        auto regions = voronoi->partioning();
 
         patches.clear();
         inner.clear();
@@ -404,10 +393,7 @@ private:
             patches.push_back(patch);
 
             if (count == 0) {
-                PointPtr centerPtr = patch->shape.min([](PointPtr p) { return p ? p->length() : std::numeric_limits<float>::infinity(); });
-                if (centerPtr) {
-                    center = *centerPtr;
-                }
+                center = patch->shape.min([](const Point& p) { return p.length(); });
                 if (plazaNeeded_) {
                     plaza = patch;
                 }
@@ -442,7 +428,6 @@ private:
         patches.erase(
             std::remove_if(patches.begin(), patches.end(),
                 [&](std::shared_ptr<Patch>& p) {
-                    if (p->shape.empty()) return true;  // Remove empty patches
                     return p->shape.distance(center) >= radius * 3.0f;
                 }),
             patches.end()
@@ -466,33 +451,28 @@ private:
     void buildStreets() {
         topology = std::make_shared<Topology>(shared_from_this());
 
-        for (PointPtr gate : gates) {
+        for (auto& gate : gates) {
             // Each gate is connected to the nearest corner of the plaza or to the central junction
             Point end;
-            if (plaza && !plaza->shape.empty()) {
-                PointPtr endPtr = plaza->shape.min([&](PointPtr v) {
-                    return v ? Point::distance(*v, *gate) : std::numeric_limits<float>::infinity();
+            if (plaza) {
+                end = plaza->shape.min([&](const Point& v) {
+                    return Point::distance(v, gate);
                 });
-                if (endPtr) {
-                    end = *endPtr;
-                } else {
-                    end = center;
-                }
             } else {
                 end = center;
             }
 
-            auto street = topology->buildPath(*gate, end, &topology->outer);
+            auto street = topology->buildPath(gate, end, &topology->outer);
             if (street) {
                 streets.push_back(*street);
 
-                // Check if this gate is a border gate (compare by pointer identity)
-                bool isBorderGate = std::find(border->gates.begin(), border->gates.end(), gate)
-                    != border->gates.end();
+                // Check if this gate is a border gate
+                bool isBorderGate = std::find_if(border->gates.begin(), border->gates.end(),
+                    [&](const Point& g) { return g == gate; }) != border->gates.end();
 
                 if (isBorderGate) {
-                    Point dir = gate->norm(1000.0f);
-                    PointPtr start = nullptr;
+                    Point dir = gate.norm(1000.0f);
+                    Point* start = nullptr;
                     float dist = std::numeric_limits<float>::infinity();
 
                     for (auto& [node, pt] : topology->node2pt) {
@@ -504,7 +484,7 @@ private:
                     }
 
                     if (start) {
-                        auto road = topology->buildPath(*start, *gate, &topology->inner);
+                        auto road = topology->buildPath(*start, gate, &topology->inner);
                         if (road) {
                             roads.push_back(*road);
                         }
@@ -525,7 +505,7 @@ private:
     void smoothStreet(Street& street) {
         auto smoothed = street.smoothVertexEq(3);
         for (size_t i = 1; i < street.size() - 1; i++) {
-            street[i]->set(*smoothed[i]);
+            street[i].set(smoothed[i]);
         }
     }
 
@@ -535,19 +515,18 @@ private:
         auto cut2segments = [&](Street& street) {
             if (street.size() < 2) return;
 
-            PointPtr v1 = street[0];
+            Point v1 = street[0];
             for (size_t i = 1; i < street.size(); i++) {
-                PointPtr v0 = v1;
+                Point v0 = v1;
                 v1 = street[i];
 
-                // Removing segments which go along the plaza (compare by pointer identity)
+                // Removing segments which go along the plaza
                 if (plaza && plaza->shape.contains(v0) && plaza->shape.contains(v1)) {
                     continue;
                 }
 
                 bool exists = false;
                 for (auto& seg : segments) {
-                    // Compare by pointer identity
                     if (seg.start == v0 && seg.end == v1) {
                         exists = true;
                         break;
@@ -586,11 +565,7 @@ private:
             }
 
             if (!attached) {
-                // Create a street with just two points
-                Polygon newArtery;
-                newArtery.push(seg.start);
-                newArtery.push(seg.end);
-                arteries.push_back(std::move(newArtery));
+                arteries.push_back(Polygon({ seg.start, seg.end }));
             }
         }
     }
@@ -606,26 +581,23 @@ private:
         for (auto& w : patchesToOptimize) {
             size_t index = 0;
             while (index < w->shape.size()) {
-                PointPtr v0 = w->shape[index];
-                PointPtr v1 = w->shape[(index + 1) % w->shape.size()];
+                Point& v0 = w->shape[index];
+                Point& v1 = w->shape[(index + 1) % w->shape.size()];
 
-                // Compare by pointer identity (v0 != v1 means different objects)
-                if (v0 != v1 && Point::distance(*v0, *v1) < 8.0f) {
+                if (!(v0 == v1) && Point::distance(v0, v1) < 8.0f) {
                     auto vertPatches = patchByVertex(v1);
                     for (auto& w1 : vertPatches) {
                         if (w1 != w) {
                             int idx = w1->shape.indexOf(v1);
                             if (idx != -1) {
-                                // Replace v1 with v0 in the other patch's shape
-                                w1->shape.data()[idx] = v0;
+                                w1->shape[idx] = v0;
                             }
                             wards2clean.push_back(w1);
                         }
                     }
 
-                    // Merge coordinates into v0
-                    v0->addEq(*v1);
-                    v0->scaleEq(0.5f);
+                    v0.addEq(v1);
+                    v0.scaleEq(0.5f);
 
                     w->shape.remove(v1);
                 }
@@ -633,10 +605,10 @@ private:
             }
         }
 
-        // Removing duplicate vertices (by pointer identity)
+        // Removing duplicate vertices
         for (auto& w : wards2clean) {
             for (size_t i = 0; i < w->shape.size(); i++) {
-                PointPtr v = w->shape[i];
+                Point& v = w->shape[i];
                 int dupIdx;
                 while ((dupIdx = w->shape.indexOf(v, i + 1)) != -1) {
                     w->shape.splice(dupIdx, 1);
@@ -657,7 +629,7 @@ private:
         }
 
         // Assigning inner city gate wards
-        for (PointPtr gate : border->gates) {
+        for (auto& gate : border->gates) {
             auto gatePatches = patchByVertex(gate);
             for (auto& patch : gatePatches) {
                 if (patch->withinCity && !patch->ward) {
@@ -696,18 +668,10 @@ private:
 
             if (!wardType.rate) {
                 // No rating function - pick randomly
-                int safetyCounter = 100;
                 do {
                     size_t idx = static_cast<size_t>(Random::getFloat() * static_cast<float>(unassigned.size()));
                     bestPatch = unassigned[idx];
-                } while (bestPatch->ward != nullptr && --safetyCounter > 0);
-                if (safetyCounter <= 0) {
-                    // Fallback: find any unassigned patch
-                    bestPatch = nullptr;
-                    for (auto& p : unassigned) {
-                        if (!p->ward) { bestPatch = p; break; }
-                    }
-                }
+                } while (bestPatch->ward != nullptr);
             } else {
                 // Find patch with minimum rating
                 float minRate = std::numeric_limits<float>::infinity();
@@ -733,7 +697,7 @@ private:
 
         // Outskirts
         if (wall) {
-            for (PointPtr gate : wall->gates) {
+            for (auto& gate : wall->gates) {
                 float prob = 1.0f / static_cast<float>(nPatches_ - 5);
                 if (!Random::getBool(prob)) {
                     auto gatePatches = patchByVertex(gate);
@@ -752,8 +716,8 @@ private:
         for (auto& patch : patches) {
             if (patch->withinCity) {
                 // Radius of the city is the farthest point of all wards from the center
-                for (PointPtr v : patch->shape) {
-                    cityRadius = std::max(cityRadius, v->length());
+                for (auto& v : patch->shape) {
+                    cityRadius = std::max(cityRadius, v.length());
                 }
             } else if (!patch->ward) {
                 bool makeFarm = Random::getBool(0.2f) && patch->shape.compactness() >= 0.7f;
@@ -788,7 +752,7 @@ inline Castle::Castle(std::shared_ptr<Model> model, std::shared_ptr<Patch> patch
 {
     // Filter vertices that are shared with non-city patches
     Polygon reserved;
-    for (PointPtr v : patch->shape) {
+    for (auto& v : patch->shape) {
         auto vertPatches = model->patchByVertex(v);
         bool hasNonCity = std::any_of(vertPatches.begin(), vertPatches.end(),
             [](std::shared_ptr<Patch>& p) { return !p->withinCity; });
@@ -904,7 +868,7 @@ inline Polygon Ward::getCityBlock() {
 
     bool innerPatch = model->wall == nullptr || patch->withinWalls;
 
-    patch->shape.forEdge([&](PointPtr v0, PointPtr v1) {
+    patch->shape.forEdge([&](const Point& v0, const Point& v1) {
         if (model->wall && model->wall->bordersBy(patch, v0, v1)) {
             // Not too close to the wall
             insetDist.push_back(MAIN_STREET / 2.0f);
@@ -940,26 +904,25 @@ inline void Ward::filterOutskirts() {
     };
     std::vector<PopulatedEdge> populatedEdges;
 
-    auto addEdge = [&](PointPtr v1, PointPtr v2, float factor = 1.0f) {
-        float dx = v2->x - v1->x;
-        float dy = v2->y - v1->y;
+    auto addEdge = [&](const Point& v1, const Point& v2, float factor = 1.0f) {
+        float dx = v2.x - v1.x;
+        float dy = v2.y - v1.y;
 
         float maxDist = -std::numeric_limits<float>::infinity();
-        for (PointPtr v : patch->shape) {
+        for (const auto& v : patch->shape) {
             float dist = 0.0f;
-            // Compare by pointer identity
-            if (v != v1 && v != v2) {
-                dist = GeomUtils::distance2line(v1->x, v1->y, dx, dy, v->x, v->y) * factor;
+            if (!(v == v1 || v == v2)) {
+                dist = GeomUtils::distance2line(v1.x, v1.y, dx, dy, v.x, v.y) * factor;
             }
             if (dist > maxDist) {
                 maxDist = dist;
             }
         }
 
-        populatedEdges.push_back({ v1->x, v1->y, dx, dy, maxDist });
+        populatedEdges.push_back({ v1.x, v1.y, dx, dy, maxDist });
     };
 
-    patch->shape.forEdge([&](PointPtr v1, PointPtr v2) {
+    patch->shape.forEdge([&](const Point& v1, const Point& v2) {
         bool onRoad = false;
         for (auto& street : model->arteries) {
             if (street.contains(v1) && street.contains(v2)) {
@@ -983,10 +946,9 @@ inline void Ward::filterOutskirts() {
     // For every vertex: if this belongs only
     // to patches within city, then 1, otherwise 0
     std::vector<float> density;
-    for (PointPtr v : patch->shape) {
-        // Compare by pointer identity
-        bool isGate = std::find(model->gates.begin(), model->gates.end(), v)
-            != model->gates.end();
+    for (auto& v : patch->shape) {
+        bool isGate = std::find_if(model->gates.begin(), model->gates.end(),
+            [&](const Point& g) { return g == v; }) != model->gates.end();
 
         if (isGate) {
             density.push_back(1.0f);
@@ -1003,8 +965,8 @@ inline void Ward::filterOutskirts() {
             [&](Polygon& building) {
                 float minDist = 1.0f;
                 for (auto& edge : populatedEdges) {
-                    for (PointPtr v : building) {
-                        float d = GeomUtils::distance2line(edge.x, edge.y, edge.dx, edge.dy, v->x, v->y);
+                    for (auto& v : building) {
+                        float d = GeomUtils::distance2line(edge.x, edge.y, edge.dx, edge.dy, v.x, v.y);
                         float dist = d / edge.d;
                         if (dist < minDist) {
                             minDist = dist;

@@ -130,7 +130,7 @@ public:
         buffer << indent() << "<polygon points=\"";
         for (size_t i = 0; i < poly.size(); i++) {
             if (i > 0) buffer << " ";
-            buffer << formatFloat(poly[i]->x) << "," << formatFloat(poly[i]->y);
+            buffer << formatFloat(poly[i].x) << "," << formatFloat(poly[i].y);
         }
         buffer << "\" fill=\"" << fill << "\"";
 
@@ -150,7 +150,7 @@ public:
         buffer << indent() << "<polyline points=\"";
         for (size_t i = 0; i < poly.size(); i++) {
             if (i > 0) buffer << " ";
-            buffer << formatFloat(poly[i]->x) << "," << formatFloat(poly[i]->y);
+            buffer << formatFloat(poly[i].x) << "," << formatFloat(poly[i].y);
         }
         buffer << "\" fill=\"none\"";
         buffer << " stroke=\"" << stroke << "\"";

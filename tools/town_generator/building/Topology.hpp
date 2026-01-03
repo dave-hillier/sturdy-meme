@@ -42,8 +42,8 @@ struct NodePtrHash {
 class Topology {
 public:
     // Maps between points and nodes using shared_ptr for proper memory management
-    std::unordered_map<PointPtr, std::shared_ptr<Node>, PointPtrHash, PointPtrEqual> pt2node;
-    std::unordered_map<std::shared_ptr<Node>, PointPtr, NodePtrHash> node2pt;
+    std::unordered_map<Point*, std::shared_ptr<Node>, PointPtrHash> pt2node;
+    std::unordered_map<std::shared_ptr<Node>, Point*, NodePtrHash> node2pt;
 
     std::vector<std::shared_ptr<Node>> inner;
     std::vector<std::shared_ptr<Node>> outer;
@@ -67,14 +67,14 @@ public:
 private:
     std::shared_ptr<Model> model_;
     std::unique_ptr<Graph> graph_;
-    std::vector<PointPtr> blocked_;
+    std::vector<Point*> blocked_;
 
     /**
      * Processes a vertex, creating or retrieving its corresponding node.
      * @param v The vertex to process
      * @return The node, or nullptr if the vertex is blocked
      */
-    std::shared_ptr<Node> processPoint(PointPtr v);
+    std::shared_ptr<Node> processPoint(Point* v);
 
     /**
      * Adds an element to a vector only if it's not already present.
