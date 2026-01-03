@@ -149,9 +149,21 @@ bool shouldDropForLodTransition(vec2 worldCell, float distToCamera, uint lodLeve
 
 // Tile fade-in dropping
 // When a new tile loads, stochastically fade in grass blades over time
-// to prevent all grass from "popping" in at once
+// to prevent density "popping" when transitioning between LOD levels.
+//
+// Key insight: When a tile becomes a higher LOD (e.g., LOD 1 -> LOD 0),
+// we want the density to initially match the lower LOD, then gradually
+// add the extra blades. This makes the transition seamless.
+//
+// Two-phase fade-in:
+// - "Survivor" blades (would exist at lower LOD): fast fade (0.15s)
+// - "Extra" blades (only at this LOD): slow fade (0.75s)
+//
+// worldPos: final jittered world position (for hash randomization)
+// worldCell: base-spacing-aligned grid cell (for LOD survival check)
+// lodLevel: current tile's LOD level
 // Returns true if blade should be dropped (not yet faded in)
-bool shouldDropForTileFadeIn(vec2 worldCell) {
+bool shouldDropForTileFadeIn(vec2 worldPos, vec2 worldCell, uint lodLevel) {
     float tileAge = push.time - push.tileLoadTime;
 
     // Skip fade-in logic if tile is already fully loaded
@@ -159,17 +171,36 @@ bool shouldDropForTileFadeIn(vec2 worldCell) {
         return false;
     }
 
-    // Calculate fade-in progress (0 at start, 1 when complete)
+    // Check if this blade would exist at the PREVIOUS (lower detail) LOD level
+    ivec2 iCell = ivec2(worldCell);
+    bool survivesAtLowerLod = false;
+
+    if (lodLevel == 0) {
+        // LOD 0 blade survives at LOD 1 if at even grid positions
+        survivesAtLowerLod = ((iCell.x & 1) == 0) && ((iCell.y & 1) == 0);
+    } else if (lodLevel == 1) {
+        // LOD 1 blade survives at LOD 2 if at positions divisible by 4
+        // (relative to base spacing, so checking if cell coords are even)
+        survivesAtLowerLod = ((iCell.x & 1) == 0) && ((iCell.y & 1) == 0);
+    } else {
+        // LOD 2 is the lowest detail - no previous LOD to match
+        survivesAtLowerLod = true;
+    }
+
+    // Survivor blades appear IMMEDIATELY - no fade at all
+    // These match what the previous LOD was showing, so instant transition
+    if (survivesAtLowerLod) {
+        return false;
+    }
+
+    // Extra blades fade in over time, with initial offset to avoid frame-1 pop
     float t = clamp(tileAge / GRASS_TILE_FADE_IN_DURATION, 0.0, 1.0);
 
-    // Use smoothstep for gradual acceleration at start and deceleration at end
-    // Then add a small initial offset (0.05) so ~5% of grass appears on first frame
-    // This prevents the jarring 0% -> X% jump on the first visible frame
+    // smoothstep with initial 5% offset so some extras appear on first frame
     float fadeIn = smoothstep(0.0, 1.0, t) * 0.95 + 0.05;
 
-    // Use position-based hash for smooth staggered appearance
-    // Different offset than LOD transition to avoid correlation
-    float fadeHash = hash2D(worldCell + vec2(123.0, 456.0));
+    // Use jittered world position for hash to avoid grid-aligned fade-in patterns
+    float fadeHash = hash2D(worldPos + vec2(123.0, 456.0));
 
     // Drop if blade hasn't "appeared" yet based on its hash threshold
     return fadeHash > fadeIn;
@@ -275,8 +306,12 @@ void main() {
     // Round to nearest base grid cell to avoid floating point instability
     vec2 worldCell = round(vec2(x, z) / GRASS_SPACING);
     vec2 cell = worldCell;
-    float h1 = hash(cell);
-    float h2 = hash2(cell);
+
+    // Use independent hash values for X and Z jitter to break grid correlation
+    // Using hash2D_vec2 gives us two uncorrelated values in one call
+    vec2 jitterHash = hash2v(cell);
+    float jitterX = jitterHash.x;
+    float jitterZ = jitterHash.y;
 
     // Scale jitter with effective spacing to maintain visual randomness at all LOD levels
     // At LOD 0: jitter = 0.16m (80% of 0.2m spacing)
@@ -284,8 +319,8 @@ void main() {
     // At LOD 2: jitter = 0.64m (80% of 0.8m spacing)
     // This prevents lower LODs from appearing too uniform/grid-like
     // The position difference at transition distances (43m+, 86m+) is imperceptible
-    x += (h1 - 0.5) * effectiveSpacing * GRASS_JITTER_FACTOR;
-    z += (hash(cell + vec2(100.0, 0.0)) - 0.5) * effectiveSpacing * GRASS_JITTER_FACTOR;
+    x += (jitterX - 0.5) * effectiveSpacing * GRASS_JITTER_FACTOR;
+    z += (jitterZ - 0.5) * effectiveSpacing * GRASS_JITTER_FACTOR;
 
     // Sample terrain heightmap to get Y position
     vec2 terrainUV = vec2(x, z) / grassParams.terrainSize + 0.5;
@@ -315,8 +350,9 @@ void main() {
     if (shouldDropForLodTransition(cell, distToCamera, push.lodLevel)) return;
 
     // Tile fade-in: stochastically drop blades for newly loaded tiles
-    // Prevents grass from "popping" in all at once when a new tile loads
-    if (shouldDropForTileFadeIn(cell)) return;
+    // Blades that would exist at the previous LOD appear immediately (density matches)
+    // "Extra" blades fade in over time to prevent density popping at LOD transitions
+    if (shouldDropForTileFadeIn(vec2(x, z), cell, push.lodLevel)) return;
 
     // Use subgroup operations to batch atomic updates
     uvec4 activeMask = subgroupBallot(true);
@@ -345,11 +381,17 @@ void main() {
     vec2 clumpCenter;
     calculateClump(vec2(x, z), clumpId, clumpDist, clumpCenter);
 
-    // Base random properties
-    float randomFacing = h1 * GRASS_TWO_PI;
-    float baseHeight = GRASS_HEIGHT_MIN + h2 * GRASS_HEIGHT_RANGE;
-    float bladeHash = h1;
-    float baseTilt = (hash(cell + vec2(50.0, 50.0)) - 0.5) * GRASS_TILT_RANGE;
+    // Generate blade properties using FINAL world position (after jitter)
+    // This decouples blade appearance from grid alignment, preventing visible rows
+    // Using the jittered position ensures independent variation per blade
+    vec2 bladePos = vec2(x, z);
+    vec2 bladeProps1 = hash2v(bladePos);                    // facing, height
+    vec2 bladeProps2 = hash2v(bladePos + vec2(73.0, 91.0)); // bladeHash, tilt
+
+    float randomFacing = bladeProps1.x * GRASS_TWO_PI;
+    float baseHeight = GRASS_HEIGHT_MIN + bladeProps1.y * GRASS_HEIGHT_RANGE;
+    float bladeHash = bladeProps2.x;
+    float baseTilt = (bladeProps2.y - 0.5) * GRASS_TILT_RANGE;
 
     // Apply clump height influence
     float clumpHeightMod = mix(1.0, 0.6 + clumpId * 0.8, GRASS_CLUMP_HEIGHT_INFLUENCE);
