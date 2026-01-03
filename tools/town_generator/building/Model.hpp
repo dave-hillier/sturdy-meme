@@ -251,15 +251,19 @@ public:
         }
 
         Polygon result;
-        size_t index = 0;
-        do {
-            result.push_back(A[index]);
-            // Find index of B[index] in A
-            auto it = std::find_if(A.begin(), A.end(), [&](const Point& p) {
-                return p == B[index];
-            });
-            index = (it != A.end()) ? std::distance(A.begin(), it) : 0;
-        } while (index != 0);
+        if (!A.empty()) {
+            size_t index = 0;
+            size_t safetyLimit = A.size() + 1;  // Safety limit to prevent infinite loops
+            do {
+                if (--safetyLimit == 0) break;  // Safety exit
+                result.push_back(A[index]);
+                // Find index of B[index] in A (by value comparison)
+                auto it = std::find_if(A.begin(), A.end(), [&](const Point& p) {
+                    return p == B[index];
+                });
+                index = (it != A.end()) ? static_cast<size_t>(std::distance(A.begin(), it)) : 0;
+            } while (index != 0);
+        }
 
         return result;
     }

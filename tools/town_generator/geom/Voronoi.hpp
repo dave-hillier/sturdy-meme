@@ -254,12 +254,16 @@ public:
             }
 
             // Create new triangles connecting the point to the boundary
-            size_t index = 0;
-            do {
-                triangles.push_back(std::make_unique<Triangle>(p, a[index], b[index]));
-                auto it = std::find(a.begin(), a.end(), b[index]);
-                index = static_cast<size_t>(std::distance(a.begin(), it));
-            } while (index != 0);
+            // The edges in a/b should form a closed loop, so b[index] should always be in a
+            if (!a.empty()) {
+                size_t index = 0;
+                size_t safety = a.size() + 1;  // Safety limit to prevent infinite loops
+                do {
+                    triangles.push_back(std::make_unique<Triangle>(p, a[index], b[index]));
+                    auto it = std::find(a.begin(), a.end(), b[index]);
+                    index = (it != a.end()) ? static_cast<size_t>(std::distance(a.begin(), it)) : 0;
+                } while (index != 0 && --safety > 0);
+            }
 
             // Remove split triangles
             for (Triangle* tr : toSplit) {
