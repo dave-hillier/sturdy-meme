@@ -1,11 +1,11 @@
 #include "CatmullClarkMesh.h"
-#include "VulkanResourceFactory.h"
+#include "VmaResources.h"
 #include <SDL3/SDL.h>
 #include <cstring>
 
 bool CatmullClarkMesh::uploadToGPU(VmaAllocator allocator) {
     // Upload vertices
-    if (!VulkanResourceFactory::createStorageBufferHostWritable(allocator, vertices.size() * sizeof(Vertex), vertexBuffer_)) {
+    if (!VmaBufferFactory::createStorageBufferHostWritable(allocator, vertices.size() * sizeof(Vertex), vertexBuffer_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create vertex buffer for Catmull-Clark mesh");
         return false;
     }
@@ -14,7 +14,7 @@ bool CatmullClarkMesh::uploadToGPU(VmaAllocator allocator) {
     vertexBuffer_.unmap();
 
     // Upload halfedges
-    if (!VulkanResourceFactory::createStorageBufferHostWritable(allocator, halfedges.size() * sizeof(Halfedge), halfedgeBuffer_)) {
+    if (!VmaBufferFactory::createStorageBufferHostWritable(allocator, halfedges.size() * sizeof(Halfedge), halfedgeBuffer_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create halfedge buffer for Catmull-Clark mesh");
         return false;
     }
@@ -23,7 +23,7 @@ bool CatmullClarkMesh::uploadToGPU(VmaAllocator allocator) {
     halfedgeBuffer_.unmap();
 
     // Upload faces
-    if (!VulkanResourceFactory::createStorageBufferHostWritable(allocator, faces.size() * sizeof(Face), faceBuffer_)) {
+    if (!VmaBufferFactory::createStorageBufferHostWritable(allocator, faces.size() * sizeof(Face), faceBuffer_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create face buffer for Catmull-Clark mesh");
         return false;
     }

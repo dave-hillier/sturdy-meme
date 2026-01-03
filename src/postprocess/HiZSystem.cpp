@@ -1,6 +1,7 @@
 #include "HiZSystem.h"
 #include "ShaderLoader.h"
-#include "VulkanResourceFactory.h"
+#include "VulkanBarriers.h"
+#include "VmaResources.h"
 #include "core/ImageBuilder.h"
 #include <SDL3/SDL_log.h>
 #include <vulkan/vulkan.hpp>
@@ -293,7 +294,7 @@ bool HiZSystem::createBuffers() {
     VkDeviceSize objectBufferSize = sizeof(CullObjectData) * MAX_OBJECTS;
 
     // Create object data buffer using VulkanResourceFactory
-    if (!VulkanResourceFactory::createStorageBufferHostReadable(allocator, objectBufferSize, objectDataBuffer_)) {
+    if (!VmaBufferFactory::createStorageBufferHostReadable(allocator, objectBufferSize, objectDataBuffer_)) {
         SDL_Log("HiZSystem: Failed to create object data buffer");
         return false;
     }

@@ -14,7 +14,7 @@
 #include "Light.h"
 #include "RenderableBuilder.h"
 #include "SkinnedMesh.h"
-#include "VulkanResourceFactory.h"
+#include "VulkanHelpers.h"
 
 // Number of cascades for CSM
 static constexpr uint32_t NUM_SHADOW_CASCADES = 4;
@@ -165,7 +165,7 @@ private:
 
     // CSM shadow map resources
     static constexpr uint32_t SHADOW_MAP_SIZE = 2048;
-    VulkanResourceFactory::DepthArrayResources csmResources;
+    DepthArrayResources csmResources;
     VkRenderPass shadowRenderPass = VK_NULL_HANDLE;
     std::vector<VkFramebuffer> cascadeFramebuffers;
     VkPipeline shadowPipeline = VK_NULL_HANDLE;
@@ -180,11 +180,11 @@ private:
     static constexpr uint32_t MAX_SHADOW_CASTING_LIGHTS = 8;
 
     // Point light shadows (cube maps) - per frame
-    std::vector<VulkanResourceFactory::DepthArrayResources> pointShadowResources;
+    std::vector<DepthArrayResources> pointShadowResources;
     std::vector<std::vector<VkFramebuffer>> pointShadowFramebuffers;  // [frame][face]
 
     // Spot light shadows (2D depth textures) - per frame
-    std::vector<VulkanResourceFactory::DepthArrayResources> spotShadowResources;
+    std::vector<DepthArrayResources> spotShadowResources;
     std::vector<std::vector<VkFramebuffer>> spotShadowFramebuffers;   // [frame][light]
 
     VkPipeline dynamicShadowPipeline = VK_NULL_HANDLE;

@@ -1,5 +1,6 @@
 #include "FlowMapGenerator.h"
-#include "VulkanResourceFactory.h"
+#include "VulkanBarriers.h"
+#include "VmaResources.h"
 #include "CommandBufferUtils.h"
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.hpp>
@@ -151,7 +152,7 @@ void FlowMapGenerator::uploadToGPU() {
     VkDeviceSize imageSize = currentResolution * currentResolution * 4; // RGBA8
 
     ManagedBuffer stagingBuffer;
-    if (!VulkanResourceFactory::createStagingBuffer(allocator, imageSize, stagingBuffer)) {
+    if (!VmaBufferFactory::createStagingBuffer(allocator, imageSize, stagingBuffer)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create staging buffer for flow map");
         return;
     }

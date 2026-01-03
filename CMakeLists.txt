@@ -38,7 +38,6 @@ set(SOURCES
     src/core/Renderer.cpp
     src/core/RendererInit.cpp
     src/core/RendererInitPhases.cpp
-    src/core/vulkan/VulkanResourceFactory.cpp
     src/core/CoreResources.cpp
     src/core/ResizeCoordinator.cpp
     src/core/UBOBuilder.cpp

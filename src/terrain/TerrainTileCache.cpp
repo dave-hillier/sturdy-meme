@@ -1,7 +1,7 @@
 #include "TerrainTileCache.h"
 #include "TerrainHeight.h"
 #include "CommandBufferUtils.h"
-#include "VulkanResourceFactory.h"
+#include "VmaResources.h"
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.hpp>
 #include <stb_image.h>
@@ -68,7 +68,7 @@ bool TerrainTileCache::initInternal(const InitInfo& info) {
     VkDeviceSize bufferSize = sizeof(uint32_t) * 4 + MAX_ACTIVE_TILES * sizeof(TileInfoGPU);
     tileInfoBuffers_.resize(FRAMES_IN_FLIGHT);
     for (uint32_t i = 0; i < FRAMES_IN_FLIGHT; i++) {
-        if (!VulkanResourceFactory::createStorageBufferHostReadable(allocator, bufferSize, tileInfoBuffers_[i])) {
+        if (!VmaBufferFactory::createStorageBufferHostReadable(allocator, bufferSize, tileInfoBuffers_[i])) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TerrainTileCache: Failed to create tile info buffer %u", i);
             return false;
         }
@@ -621,7 +621,7 @@ bool TerrainTileCache::uploadTileToGPU(TerrainTile& tile) {
 
     // Create staging buffer using RAII wrapper
     ManagedBuffer stagingBuffer;
-    if (!VulkanResourceFactory::createStagingBuffer(allocator, imageSize, stagingBuffer)) {
+    if (!VmaBufferFactory::createStagingBuffer(allocator, imageSize, stagingBuffer)) {
         return false;
     }
 
@@ -814,7 +814,7 @@ void TerrainTileCache::copyTileToArrayLayer(TerrainTile* tile, uint32_t layerInd
     VkDeviceSize imageSize = tileResolution * tileResolution * sizeof(float);
 
     ManagedBuffer stagingBuffer;
-    if (!VulkanResourceFactory::createStagingBuffer(allocator, imageSize, stagingBuffer)) {
+    if (!VmaBufferFactory::createStagingBuffer(allocator, imageSize, stagingBuffer)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TerrainTileCache: Failed to create staging buffer for tile copy");
         return;
     }
@@ -1216,7 +1216,7 @@ bool TerrainTileCache::createBaseHeightMap() {
     VkDeviceSize imageSize = baseHeightMapResolution_ * baseHeightMapResolution_ * sizeof(float);
 
     ManagedBuffer stagingBuffer;
-    if (!VulkanResourceFactory::createStagingBuffer(allocator, imageSize, stagingBuffer)) {
+    if (!VmaBufferFactory::createStagingBuffer(allocator, imageSize, stagingBuffer)) {
         return false;
     }
 
@@ -1430,7 +1430,7 @@ bool TerrainTileCache::uploadHoleMaskToGPUInternal() {
 
     // Create staging buffer
     ManagedBuffer stagingBuffer;
-    if (!VulkanResourceFactory::createStagingBuffer(allocator, imageSize, stagingBuffer)) {
+    if (!VmaBufferFactory::createStagingBuffer(allocator, imageSize, stagingBuffer)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TerrainTileCache: Failed to create staging buffer for hole mask");
         return false;
     }

@@ -1,5 +1,6 @@
 #include "TerrainMeshlet.h"
-#include "VulkanResourceFactory.h"
+#include "VmaResources.h"
+#include "VulkanBarriers.h"
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.hpp>
 #include <cstring>
@@ -137,13 +138,13 @@ bool TerrainMeshlet::createBuffers() {
     VkDeviceSize indexBufferSize = pendingIndices_.size() * sizeof(uint16_t);
 
     // Create device-local vertex buffer (with transfer dst for staging uploads)
-    if (!VulkanResourceFactory::createVertexStorageBuffer(allocator_, vertexBufferSize, vertexBuffer_)) {
+    if (!VmaBufferFactory::createVertexStorageBuffer(allocator_, vertexBufferSize, vertexBuffer_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create meshlet vertex buffer");
         return false;
     }
 
     // Create device-local index buffer
-    if (!VulkanResourceFactory::createIndexBuffer(allocator_, indexBufferSize, indexBuffer_)) {
+    if (!VmaBufferFactory::createIndexBuffer(allocator_, indexBufferSize, indexBuffer_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create meshlet index buffer");
         return false;
     }
@@ -178,13 +179,13 @@ bool TerrainMeshlet::initInternal(const InitInfo& info) {
     indexStagingMapped_.resize(framesInFlight_);
 
     for (uint32_t i = 0; i < framesInFlight_; ++i) {
-        if (!VulkanResourceFactory::createStagingBuffer(allocator_, vertexBufferSize, vertexStagingBuffers_[i])) {
+        if (!VmaBufferFactory::createStagingBuffer(allocator_, vertexBufferSize, vertexStagingBuffers_[i])) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create meshlet vertex staging buffer %u", i);
             return false;
         }
         vertexStagingMapped_[i] = vertexStagingBuffers_[i].map();
 
-        if (!VulkanResourceFactory::createStagingBuffer(allocator_, indexBufferSize, indexStagingBuffers_[i])) {
+        if (!VmaBufferFactory::createStagingBuffer(allocator_, indexBufferSize, indexStagingBuffers_[i])) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create meshlet index staging buffer %u", i);
             return false;
         }
@@ -241,13 +242,13 @@ bool TerrainMeshlet::requestSubdivisionChange(uint32_t newLevel) {
             vertexStagingBuffers_[i].reset();
             indexStagingBuffers_[i].reset();
 
-            if (!VulkanResourceFactory::createStagingBuffer(allocator_, vertexBufferSize, vertexStagingBuffers_[i])) {
+            if (!VmaBufferFactory::createStagingBuffer(allocator_, vertexBufferSize, vertexStagingBuffers_[i])) {
                 SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to recreate meshlet vertex staging buffer %u", i);
                 return false;
             }
             vertexStagingMapped_[i] = vertexStagingBuffers_[i].map();
 
-            if (!VulkanResourceFactory::createStagingBuffer(allocator_, indexBufferSize, indexStagingBuffers_[i])) {
+            if (!VmaBufferFactory::createStagingBuffer(allocator_, indexBufferSize, indexStagingBuffers_[i])) {
                 SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to recreate meshlet index staging buffer %u", i);
                 return false;
             }

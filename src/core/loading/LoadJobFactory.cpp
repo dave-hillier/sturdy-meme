@@ -1,5 +1,6 @@
 #include "LoadJobFactory.h"
-#include "../vulkan/VulkanResourceFactory.h"
+#include "../vulkan/VmaResources.h"
+#include "../vulkan/VulkanBarriers.h"
 #include "../vulkan/CommandBufferUtils.h"
 #include "../ImageBuilder.h"
 #include <SDL3/SDL_log.h>
@@ -163,7 +164,7 @@ UploadedTexture StagedResourceUploader::uploadTexture(const StagedTexture& stage
 
     // Create staging buffer
     ManagedBuffer stagingBuffer;
-    if (!VulkanResourceFactory::createStagingBuffer(ctx_.allocator, imageSize, stagingBuffer)) {
+    if (!VmaBufferFactory::createStagingBuffer(ctx_.allocator, imageSize, stagingBuffer)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                     "Failed to create staging buffer for '%s'", staged.name.c_str());
         return result;
@@ -317,7 +318,7 @@ VkBuffer StagedResourceUploader::uploadBuffer(const StagedBuffer& staged, VkBuff
 
     // Create staging buffer
     ManagedBuffer stagingBuffer;
-    if (!VulkanResourceFactory::createStagingBuffer(ctx_.allocator, bufferSize, stagingBuffer)) {
+    if (!VmaBufferFactory::createStagingBuffer(ctx_.allocator, bufferSize, stagingBuffer)) {
         return VK_NULL_HANDLE;
     }
 
@@ -331,7 +332,7 @@ VkBuffer StagedResourceUploader::uploadBuffer(const StagedBuffer& staged, VkBuff
 
     // Create device-local storage buffer (includes TRANSFER_DST usage)
     ManagedBuffer deviceBuffer;
-    if (!VulkanResourceFactory::createStorageBuffer(ctx_.allocator, bufferSize, deviceBuffer)) {
+    if (!VmaBufferFactory::createStorageBuffer(ctx_.allocator, bufferSize, deviceBuffer)) {
         return VK_NULL_HANDLE;
     }
 

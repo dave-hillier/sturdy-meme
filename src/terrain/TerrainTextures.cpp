@@ -1,6 +1,6 @@
 #include "TerrainTextures.h"
 #include "CommandBufferUtils.h"
-#include "VulkanResourceFactory.h"
+#include "VmaResources.h"
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.hpp>
 #include <stb_image.h>
@@ -311,7 +311,7 @@ bool TerrainTextures::uploadImageDataMipLevel(VkImage image, const void* data, u
 
     // Create staging buffer using RAII wrapper
     ManagedBuffer stagingBuffer;
-    if (!VulkanResourceFactory::createStagingBuffer(allocator, imageSize, stagingBuffer)) {
+    if (!VmaBufferFactory::createStagingBuffer(allocator, imageSize, stagingBuffer)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create staging buffer for image upload");
         return false;
     }

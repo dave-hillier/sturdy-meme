@@ -3,7 +3,8 @@
 #include "BilateralGridSystem.h"
 #include "ShaderLoader.h"
 #include "DescriptorManager.h"
-#include "VulkanResourceFactory.h"
+#include "VulkanBarriers.h"
+#include "VmaResources.h"
 #include "CommandBufferUtils.h"
 #include <SDL3/SDL.h>
 #include <array>
@@ -348,7 +349,7 @@ bool PostProcessSystem::createHDRFramebuffer() {
 }
 
 bool PostProcessSystem::createSampler() {
-    hdrSampler_ = VulkanResourceFactory::createSamplerLinearClamp(*raiiDevice_);
+    hdrSampler_ = SamplerFactory::createSamplerLinearClamp(*raiiDevice_);
     if (!hdrSampler_) {
         SDL_Log("Failed to create HDR sampler");
         return false;

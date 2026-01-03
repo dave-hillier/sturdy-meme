@@ -1,7 +1,7 @@
 #include "WaterSystem.h"
 #include "ShadowSystem.h"
 #include "GraphicsPipelineFactory.h"
-#include "VulkanResourceFactory.h"
+#include "VmaResources.h"
 #include "DescriptorManager.h"
 #include <vulkan/vulkan.hpp>
 #include <SDL3/SDL.h>
@@ -332,7 +332,7 @@ bool WaterSystem::createUniformBuffers() {
     waterUniformMapped.resize(framesInFlight);
 
     for (uint32_t i = 0; i < framesInFlight; i++) {
-        if (!VulkanResourceFactory::createUniformBuffer(allocator, sizeof(WaterUniforms), waterUniformBuffers_[i])) {
+        if (!VmaBufferFactory::createUniformBuffer(allocator, sizeof(WaterUniforms), waterUniformBuffers_[i])) {
             SDL_Log("Failed to create water uniform buffer %u", i);
             return false;
         }

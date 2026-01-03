@@ -1,5 +1,5 @@
 #include "TerrainCBT.h"
-#include "VulkanResourceFactory.h"
+#include "VmaResources.h"
 #include <SDL3/SDL.h>
 #include <cstring>
 #include <cmath>
@@ -120,7 +120,7 @@ bool TerrainCBT::initInternal(const InitInfo& info) {
     bufferSize = calculateBufferSize(maxDepth);
 
     // Create buffer using VulkanResourceFactory
-    if (!VulkanResourceFactory::createStorageBufferHostWritable(info.allocator, bufferSize, buffer_)) {
+    if (!VmaBufferFactory::createStorageBufferHostWritable(info.allocator, bufferSize, buffer_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create CBT buffer");
         return false;
     }

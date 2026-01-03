@@ -1,5 +1,5 @@
 #include "CatmullClarkCBT.h"
-#include "VulkanResourceFactory.h"
+#include "VmaResources.h"
 #include <SDL3/SDL.h>
 #include <cstring>
 #include <cmath>
@@ -125,7 +125,7 @@ bool CatmullClarkCBT::initInternal(const InitInfo& info) {
     bufferSize = calculateBufferSize(maxDepth, faceCount);
 
     // Create buffer using VulkanResourceFactory
-    if (!VulkanResourceFactory::createStorageBufferHostWritable(info.allocator, bufferSize, buffer_)) {
+    if (!VmaBufferFactory::createStorageBufferHostWritable(info.allocator, bufferSize, buffer_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create Catmull-Clark CBT buffer");
         return false;
     }

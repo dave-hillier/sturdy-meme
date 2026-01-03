@@ -1,5 +1,5 @@
 #include "AtmosphereLUTSystem.h"
-#include "VulkanResourceFactory.h"
+#include "VmaResources.h"
 #include <SDL3/SDL_log.h>
 #include <vulkan/vulkan.hpp>
 
@@ -241,7 +241,7 @@ bool AtmosphereLUTSystem::createLUTSampler() {
         return false;
     }
 
-    lutSampler_ = VulkanResourceFactory::createSamplerLinearClamp(*raiiDevice_);
+    lutSampler_ = SamplerFactory::createSamplerLinearClamp(*raiiDevice_);
     if (!lutSampler_) {
         SDL_Log("Failed to create LUT sampler");
         return false;

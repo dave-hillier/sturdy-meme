@@ -1,6 +1,8 @@
 #include "OceanFFT.h"
 #include "ShaderLoader.h"
 #include "DescriptorManager.h"
+#include "VulkanBarriers.h"
+#include "VmaResources.h"
 #include "shaders/bindings.h"
 #include <SDL_log.h>
 #include <cmath>
@@ -630,7 +632,7 @@ bool OceanFFT::createDescriptorSets() {
     spectrumUBOMapped.resize(cascadeCount);
 
     for (int i = 0; i < cascadeCount; i++) {
-        if (!VulkanResourceFactory::createUniformBuffer(allocator, sizeof(SpectrumUBO), spectrumUBOs[i])) {
+        if (!VmaBufferFactory::createUniformBuffer(allocator, sizeof(SpectrumUBO), spectrumUBOs[i])) {
             return false;
         }
         spectrumUBOMapped[i] = spectrumUBOs[i].map();

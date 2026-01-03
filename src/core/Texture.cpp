@@ -4,7 +4,7 @@
 #include "DDSLoader.h"
 #include "VmaResources.h"
 #include "CommandBufferUtils.h"
-#include "VulkanResourceFactory.h"
+#include "VulkanBarriers.h"
 #include "ImageBuilder.h"
 #include <vulkan/vulkan.hpp>
 #include <cstring>
@@ -138,7 +138,7 @@ bool Texture::loadInternal(const std::string& path, VmaAllocator allocator, VkDe
 
     // Create staging buffer using RAII
     ManagedBuffer stagingBuffer;
-    if (!VulkanResourceFactory::createStagingBuffer(allocator, imageSize, stagingBuffer)) {
+    if (!VmaBufferFactory::createStagingBuffer(allocator, imageSize, stagingBuffer)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create staging buffer for texture: %s", path.c_str());
         return false;
     }
@@ -265,7 +265,7 @@ bool Texture::loadDDS(const std::string& path, VmaAllocator allocator, VkDevice 
 
     // Create staging buffer
     ManagedBuffer stagingBuffer;
-    if (!VulkanResourceFactory::createStagingBuffer(allocator, imageSize, stagingBuffer)) {
+    if (!VmaBufferFactory::createStagingBuffer(allocator, imageSize, stagingBuffer)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create staging buffer for DDS texture: %s", path.c_str());
         return false;
     }
@@ -374,7 +374,7 @@ bool Texture::createSolidColorInternal(uint8_t r, uint8_t g, uint8_t b, uint8_t 
 
     // Create staging buffer using RAII
     ManagedBuffer stagingBuffer;
-    if (!VulkanResourceFactory::createStagingBuffer(allocator, imageSize, stagingBuffer)) {
+    if (!VmaBufferFactory::createStagingBuffer(allocator, imageSize, stagingBuffer)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create staging buffer for solid color texture");
         return false;
     }
@@ -669,7 +669,7 @@ bool Texture::loadWithMipmapsInternal(const std::string& path, VmaAllocator allo
 
     // Create staging buffer for all mip levels
     ManagedBuffer stagingBuffer;
-    if (!VulkanResourceFactory::createStagingBuffer(allocator, totalSize, stagingBuffer)) {
+    if (!VmaBufferFactory::createStagingBuffer(allocator, totalSize, stagingBuffer)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create staging buffer for texture: %s", path.c_str());
         return false;
     }

@@ -3,7 +3,8 @@
 #include "InitContext.h"
 #include "ShaderLoader.h"
 #include "PipelineBuilder.h"
-#include "VulkanResourceFactory.h"
+#include "VulkanBarriers.h"
+#include "VmaResources.h"
 #include "DescriptorManager.h"
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.hpp>
@@ -169,7 +170,7 @@ bool SnowMaskSystem::createSnowMaskTexture() {
 
     // Create sampler for other systems to sample the snow mask
     if (auto* raiiDevice = lifecycle.getRaiiDevice(); raiiDevice) {
-        snowMaskSampler_ = VulkanResourceFactory::createSamplerLinearClamp(*raiiDevice);
+        snowMaskSampler_ = SamplerFactory::createSamplerLinearClamp(*raiiDevice);
         if (!snowMaskSampler_) {
             SDL_Log("Failed to create snow mask sampler");
             return false;

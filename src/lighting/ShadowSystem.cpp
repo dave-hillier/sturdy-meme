@@ -72,7 +72,10 @@ void ShadowSystem::cleanup() {
     if (dynamicShadowPipelineLayout != VK_NULL_HANDLE) vkDevice.destroyPipelineLayout(dynamicShadowPipelineLayout);
 
     // CSM cleanup
-    VulkanResourceFactory::destroyFramebuffers(device, cascadeFramebuffers);
+    for (auto fb : cascadeFramebuffers) {
+        if (fb != VK_NULL_HANDLE) vkDestroyFramebuffer(device, fb, nullptr);
+    }
+    cascadeFramebuffers.clear();
     csmResources.destroy(device, allocator);
 
     // Dynamic shadow cleanup
@@ -85,29 +88,91 @@ void ShadowSystem::cleanup() {
 }
 
 bool ShadowSystem::createShadowRenderPass() {
-    VulkanResourceFactory::RenderPassConfig cfg;
+    RenderPassConfig cfg;
     cfg.depthFormat = VK_FORMAT_D32_SFLOAT;
     cfg.depthOnly = true;
     cfg.clearDepth = true;
     cfg.storeDepth = true;
     cfg.finalDepthLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-    return VulkanResourceFactory::createRenderPass(device, cfg, shadowRenderPass);
+    // Use raw device wrapper temporarily to get raw VkRenderPass
+    vk::raii::Context ctx;
+    vk::raii::Device raiiDevice(ctx, static_cast<vk::Device>(device));
+    // Prevent destructor from destroying the logical device
+    static_cast<void>(raiiDevice.release());
+
+    // Recreate with proper context - for now just use raw Vulkan
+    auto depthAttachment = vk::AttachmentDescription{}
+        .setFormat(static_cast<vk::Format>(cfg.depthFormat))
+        .setSamples(vk::SampleCountFlagBits::e1)
+        .setLoadOp(vk::AttachmentLoadOp::eClear)
+        .setStoreOp(vk::AttachmentStoreOp::eStore)
+        .setStencilLoadOp(vk::AttachmentLoadOp::eDontCare)
+        .setStencilStoreOp(vk::AttachmentStoreOp::eDontCare)
+        .setInitialLayout(vk::ImageLayout::eUndefined)
+        .setFinalLayout(static_cast<vk::ImageLayout>(cfg.finalDepthLayout));
+
+    auto depthAttachmentRef = vk::AttachmentReference{}
+        .setAttachment(0)
+        .setLayout(vk::ImageLayout::eDepthStencilAttachmentOptimal);
+
+    auto subpass = vk::SubpassDescription{}
+        .setPipelineBindPoint(vk::PipelineBindPoint::eGraphics)
+        .setColorAttachmentCount(0)
+        .setPDepthStencilAttachment(&depthAttachmentRef);
+
+    auto dependency = vk::SubpassDependency{}
+        .setSrcSubpass(VK_SUBPASS_EXTERNAL)
+        .setDstSubpass(0)
+        .setSrcStageMask(vk::PipelineStageFlagBits::eFragmentShader)
+        .setSrcAccessMask(vk::AccessFlagBits::eShaderRead)
+        .setDstStageMask(vk::PipelineStageFlagBits::eEarlyFragmentTests)
+        .setDstAccessMask(vk::AccessFlagBits::eDepthStencilAttachmentWrite);
+
+    auto renderPassInfo = vk::RenderPassCreateInfo{}
+        .setAttachmentCount(1)
+        .setPAttachments(&depthAttachment)
+        .setSubpassCount(1)
+        .setPSubpasses(&subpass)
+        .setDependencyCount(1)
+        .setPDependencies(&dependency);
+
+    if (vkCreateRenderPass(device, reinterpret_cast<const VkRenderPassCreateInfo*>(&renderPassInfo),
+                           nullptr, &shadowRenderPass) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create shadow render pass");
+        return false;
+    }
+    return true;
 }
 
 bool ShadowSystem::createShadowResources() {
-    VulkanResourceFactory::DepthArrayConfig cfg;
+    DepthArrayConfig cfg;
     cfg.extent = {SHADOW_MAP_SIZE, SHADOW_MAP_SIZE};
     cfg.format = VK_FORMAT_D32_SFLOAT;
     cfg.arrayLayers = NUM_SHADOW_CASCADES;
 
-    if (!VulkanResourceFactory::createDepthArrayResources(device, allocator, cfg, csmResources)) {
+    if (!::createDepthArrayResources(device, allocator, cfg, csmResources)) {
         return false;
     }
 
-    return VulkanResourceFactory::createDepthOnlyFramebuffers(
-        device, shadowRenderPass, csmResources.layerViews,
-        {SHADOW_MAP_SIZE, SHADOW_MAP_SIZE}, cascadeFramebuffers);
+    // Create framebuffers for each cascade
+    cascadeFramebuffers.resize(NUM_SHADOW_CASCADES);
+    for (uint32_t i = 0; i < NUM_SHADOW_CASCADES; i++) {
+        auto framebufferInfo = vk::FramebufferCreateInfo{}
+            .setRenderPass(shadowRenderPass)
+            .setAttachmentCount(1)
+            .setPAttachments(reinterpret_cast<const vk::ImageView*>(&csmResources.layerViews[i]))
+            .setWidth(SHADOW_MAP_SIZE)
+            .setHeight(SHADOW_MAP_SIZE)
+            .setLayers(1);
+
+        if (vkCreateFramebuffer(device, reinterpret_cast<const VkFramebufferCreateInfo*>(&framebufferInfo),
+                                nullptr, &cascadeFramebuffers[i]) != VK_SUCCESS) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create cascade framebuffer %u", i);
+            return false;
+        }
+    }
+    return true;
 }
 
 bool ShadowSystem::createShadowPipelineCommon(
@@ -173,37 +238,58 @@ bool ShadowSystem::createDynamicShadowResources() {
 
     for (uint32_t frame = 0; frame < framesInFlight; frame++) {
         // Point lights: cubemap array (6 faces per light)
-        VulkanResourceFactory::DepthArrayConfig pointCfg;
+        DepthArrayConfig pointCfg;
         pointCfg.extent = {DYNAMIC_SHADOW_MAP_SIZE, DYNAMIC_SHADOW_MAP_SIZE};
         pointCfg.arrayLayers = MAX_SHADOW_CASTING_LIGHTS * 6;
         pointCfg.cubeCompatible = true;
         pointCfg.createSampler = (frame == 0);  // Only first frame needs sampler
 
-        if (!VulkanResourceFactory::createDepthArrayResources(device, allocator, pointCfg, pointShadowResources[frame])) {
+        if (!::createDepthArrayResources(device, allocator, pointCfg, pointShadowResources[frame])) {
             return false;
         }
 
         // Create point shadow framebuffers (only first 6 layers for now)
-        std::vector<VkImageView> pointViews(pointShadowResources[frame].layerViews.begin(),
-                                            pointShadowResources[frame].layerViews.begin() + 6);
-        if (!VulkanResourceFactory::createDepthOnlyFramebuffers(device, shadowRenderPass, pointViews,
-                {DYNAMIC_SHADOW_MAP_SIZE, DYNAMIC_SHADOW_MAP_SIZE}, pointShadowFramebuffers[frame])) {
-            return false;
+        pointShadowFramebuffers[frame].resize(6);
+        for (uint32_t i = 0; i < 6; i++) {
+            auto framebufferInfo = vk::FramebufferCreateInfo{}
+                .setRenderPass(shadowRenderPass)
+                .setAttachmentCount(1)
+                .setPAttachments(reinterpret_cast<const vk::ImageView*>(&pointShadowResources[frame].layerViews[i]))
+                .setWidth(DYNAMIC_SHADOW_MAP_SIZE)
+                .setHeight(DYNAMIC_SHADOW_MAP_SIZE)
+                .setLayers(1);
+
+            if (vkCreateFramebuffer(device, reinterpret_cast<const VkFramebufferCreateInfo*>(&framebufferInfo),
+                                    nullptr, &pointShadowFramebuffers[frame][i]) != VK_SUCCESS) {
+                return false;
+            }
         }
 
         // Spot lights: 2D array
-        VulkanResourceFactory::DepthArrayConfig spotCfg;
+        DepthArrayConfig spotCfg;
         spotCfg.extent = {DYNAMIC_SHADOW_MAP_SIZE, DYNAMIC_SHADOW_MAP_SIZE};
         spotCfg.arrayLayers = MAX_SHADOW_CASTING_LIGHTS;
         spotCfg.createSampler = (frame == 0);
 
-        if (!VulkanResourceFactory::createDepthArrayResources(device, allocator, spotCfg, spotShadowResources[frame])) {
+        if (!::createDepthArrayResources(device, allocator, spotCfg, spotShadowResources[frame])) {
             return false;
         }
 
-        if (!VulkanResourceFactory::createDepthOnlyFramebuffers(device, shadowRenderPass, spotShadowResources[frame].layerViews,
-                {DYNAMIC_SHADOW_MAP_SIZE, DYNAMIC_SHADOW_MAP_SIZE}, spotShadowFramebuffers[frame])) {
-            return false;
+        // Create spot shadow framebuffers
+        spotShadowFramebuffers[frame].resize(MAX_SHADOW_CASTING_LIGHTS);
+        for (uint32_t i = 0; i < MAX_SHADOW_CASTING_LIGHTS; i++) {
+            auto framebufferInfo = vk::FramebufferCreateInfo{}
+                .setRenderPass(shadowRenderPass)
+                .setAttachmentCount(1)
+                .setPAttachments(reinterpret_cast<const vk::ImageView*>(&spotShadowResources[frame].layerViews[i]))
+                .setWidth(DYNAMIC_SHADOW_MAP_SIZE)
+                .setHeight(DYNAMIC_SHADOW_MAP_SIZE)
+                .setLayers(1);
+
+            if (vkCreateFramebuffer(device, reinterpret_cast<const VkFramebufferCreateInfo*>(&framebufferInfo),
+                                    nullptr, &spotShadowFramebuffers[frame][i]) != VK_SUCCESS) {
+                return false;
+            }
         }
     }
 
@@ -212,8 +298,14 @@ bool ShadowSystem::createDynamicShadowResources() {
 
 void ShadowSystem::destroyDynamicShadowResources() {
     for (uint32_t frame = 0; frame < framesInFlight; frame++) {
-        VulkanResourceFactory::destroyFramebuffers(device, pointShadowFramebuffers[frame]);
-        VulkanResourceFactory::destroyFramebuffers(device, spotShadowFramebuffers[frame]);
+        for (auto fb : pointShadowFramebuffers[frame]) {
+            if (fb != VK_NULL_HANDLE) vkDestroyFramebuffer(device, fb, nullptr);
+        }
+        pointShadowFramebuffers[frame].clear();
+        for (auto fb : spotShadowFramebuffers[frame]) {
+            if (fb != VK_NULL_HANDLE) vkDestroyFramebuffer(device, fb, nullptr);
+        }
+        spotShadowFramebuffers[frame].clear();
         if (frame < pointShadowResources.size()) pointShadowResources[frame].destroy(device, allocator);
         if (frame < spotShadowResources.size()) spotShadowResources[frame].destroy(device, allocator);
     }

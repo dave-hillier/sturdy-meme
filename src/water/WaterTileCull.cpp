@@ -1,6 +1,7 @@
 #include "WaterTileCull.h"
 #include "ShaderLoader.h"
-#include "VulkanResourceFactory.h"
+#include "VulkanBarriers.h"
+#include "VmaResources.h"
 #include "DescriptorManager.h"
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.hpp>
@@ -114,14 +115,14 @@ bool WaterTileCull::createBuffers() {
     uint32_t maxTiles = tileCount.x * tileCount.y;
 
     // Tile buffer - stores visibility data for each tile
-    if (!VulkanResourceFactory::createStorageBuffer(allocator, maxTiles * sizeof(TileData), tileBuffer_)) {
+    if (!VmaBufferFactory::createStorageBuffer(allocator, maxTiles * sizeof(TileData), tileBuffer_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create tile buffer");
         return false;
     }
 
     // Counter buffer - atomic counter for visible tile count (CPU-to-GPU, mapped)
     VkDeviceSize counterSize = sizeof(uint32_t) * framesInFlight;
-    if (!VulkanResourceFactory::createStorageBufferHostReadable(allocator, counterSize, counterBuffer_)) {
+    if (!VmaBufferFactory::createStorageBufferHostReadable(allocator, counterSize, counterBuffer_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create counter buffer");
         return false;
     }
@@ -134,7 +135,7 @@ bool WaterTileCull::createBuffers() {
     }
 
     // Counter readback buffer (host-visible)
-    if (!VulkanResourceFactory::createReadbackBuffer(allocator, counterSize, counterReadbackBuffer_)) {
+    if (!VmaBufferFactory::createReadbackBuffer(allocator, counterSize, counterReadbackBuffer_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create counter readback buffer");
         return false;
     }
@@ -146,7 +147,7 @@ bool WaterTileCull::createBuffers() {
     }
 
     // Indirect draw buffer
-    if (!VulkanResourceFactory::createIndirectBuffer(allocator, sizeof(IndirectDrawCommand), indirectDrawBuffer_)) {
+    if (!VmaBufferFactory::createIndirectBuffer(allocator, sizeof(IndirectDrawCommand), indirectDrawBuffer_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create indirect draw buffer");
         return false;
     }

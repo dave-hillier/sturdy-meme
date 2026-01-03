@@ -1,7 +1,8 @@
 #include "CloudShadowSystem.h"
 #include "ShaderLoader.h"
 #include "DescriptorManager.h"
-#include "VulkanResourceFactory.h"
+#include "VulkanBarriers.h"
+#include "VmaResources.h"
 #include <SDL3/SDL_log.h>
 #include <vulkan/vulkan.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -120,7 +121,7 @@ bool CloudShadowSystem::createShadowMap() {
 
 bool CloudShadowSystem::createSampler() {
     // Bilinear filtering for smooth shadow edges
-    shadowMapSampler_ = VulkanResourceFactory::createSamplerLinearClamp(*raiiDevice_);
+    shadowMapSampler_ = SamplerFactory::createSamplerLinearClamp(*raiiDevice_);
     if (!shadowMapSampler_) {
         SDL_Log("Failed to create cloud shadow sampler");
         return false;

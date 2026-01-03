@@ -1,5 +1,6 @@
 #include "VirtualTextureCache.h"
-#include "VulkanResourceFactory.h"
+#include "VulkanBarriers.h"
+#include "VmaResources.h"
 #include <vulkan/vulkan.hpp>
 #include <SDL3/SDL_log.h>
 #include <algorithm>
@@ -161,7 +162,7 @@ bool VirtualTextureCache::initInternal(const InitInfo& info) {
     stagingMapped_.resize(framesInFlight_);
 
     for (uint32_t i = 0; i < framesInFlight_; ++i) {
-        if (!VulkanResourceFactory::createStagingBuffer(allocator, stagingSize, stagingBuffers_[i])) {
+        if (!VmaBufferFactory::createStagingBuffer(allocator, stagingSize, stagingBuffers_[i])) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create VT staging buffer %u", i);
             return false;
         }

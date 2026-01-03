@@ -1,6 +1,7 @@
 #include "FoamBuffer.h"
 #include "ShaderLoader.h"
-#include "VulkanResourceFactory.h"
+#include "VulkanBarriers.h"
+#include "VmaResources.h"
 #include "DescriptorManager.h"
 #include <SDL3/SDL_log.h>
 #include <vulkan/vulkan.hpp>
@@ -170,7 +171,7 @@ bool FoamBuffer::createWakeBuffers() {
     wakeUniformMapped.resize(framesInFlight);
 
     for (uint32_t i = 0; i < framesInFlight; i++) {
-        if (!VulkanResourceFactory::createUniformBuffer(allocator, sizeof(WakeUniformData), wakeUniformBuffers_[i])) {
+        if (!VmaBufferFactory::createUniformBuffer(allocator, sizeof(WakeUniformData), wakeUniformBuffers_[i])) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create wake uniform buffer %u", i);
             return false;
         }

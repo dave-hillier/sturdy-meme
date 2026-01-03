@@ -1,7 +1,8 @@
 #include "VolumetricSnowSystem.h"
 #include "ShaderLoader.h"
 #include "PipelineBuilder.h"
-#include "VulkanResourceFactory.h"
+#include "VulkanBarriers.h"
+#include "VmaResources.h"
 #include "DescriptorManager.h"
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.hpp>
@@ -129,7 +130,7 @@ bool VolumetricSnowSystem::createCascadeTextures() {
 
     // Create shared sampler for all cascades
     if (auto* raiiDevice = lifecycle.getRaiiDevice(); raiiDevice) {
-        cascadeSampler_ = VulkanResourceFactory::createSamplerLinearClamp(*raiiDevice);
+        cascadeSampler_ = SamplerFactory::createSamplerLinearClamp(*raiiDevice);
         if (!cascadeSampler_) {
             SDL_Log("Failed to create volumetric snow cascade sampler");
             return false;

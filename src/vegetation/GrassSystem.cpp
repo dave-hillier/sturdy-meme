@@ -7,7 +7,8 @@
 #include "PipelineBuilder.h"
 #include "DescriptorManager.h"
 #include "UBOs.h"
-#include "VulkanResourceFactory.h"
+#include "VulkanBarriers.h"
+#include "VmaResources.h"
 #include <vulkan/vulkan.hpp>
 #include <SDL3/SDL.h>
 #include <cstring>
@@ -266,7 +267,7 @@ bool GrassSystem::createDisplacementResources() {
     }
 
     // Create sampler for grass compute shader to sample displacement
-    displacementSampler_ = VulkanResourceFactory::createSamplerLinearClamp(*raiiDevice_);
+    displacementSampler_ = SamplerFactory::createSamplerLinearClamp(*raiiDevice_);
     if (!displacementSampler_) {
         SDL_Log("Failed to create displacement sampler");
         return false;

@@ -6,7 +6,8 @@
 #include "ShaderLoader.h"
 #include "GraphicsPipelineFactory.h"
 #include "MaterialDescriptorFactory.h"
-#include "VulkanResourceFactory.h"
+#include "VulkanHelpers.h"
+#include "VmaResources.h"
 #include "Bindings.h"
 #include "InitProfiler.h"
 
@@ -339,24 +340,24 @@ void Renderer::destroyRenderResources() {
 bool Renderer::createRenderPass() {
     depthFormat = VK_FORMAT_D32_SFLOAT;
 
-    VulkanResourceFactory::RenderPassConfig config{};
+    RenderPassConfig config{};
     config.colorFormat = static_cast<VkFormat>(vulkanContext_->getVkSwapchainImageFormat());
     config.depthFormat = depthFormat;
     config.finalColorLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
     config.finalDepthLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;  // For Hi-Z
     config.storeDepth = true;  // For Hi-Z pyramid generation
 
-    VkRenderPass rawRenderPass = VK_NULL_HANDLE;
-    if (!VulkanResourceFactory::createRenderPass(vulkanContext_->getVkDevice(), config, rawRenderPass)) {
+    auto result = ::createRenderPass(vulkanContext_->getRaiiDevice(), config);
+    if (!result) {
         return false;
     }
-    renderPass_.emplace(vulkanContext_->getRaiiDevice(), rawRenderPass);
+    renderPass_.emplace(std::move(*result));
     return true;
 }
 
 bool Renderer::createDepthResources() {
-    VulkanResourceFactory::DepthResources depth;
-    if (!VulkanResourceFactory::createDepthResources(
+    DepthResources depth;
+    if (!::createDepthResources(
             vulkanContext_->getVkDevice(), vulkanContext_->getAllocator(),
             vulkanContext_->getVkSwapchainExtent(), depthFormat, depth)) {
         return false;
@@ -369,19 +370,15 @@ bool Renderer::createDepthResources() {
 }
 
 bool Renderer::createFramebuffers() {
-    std::vector<VkFramebuffer> rawFramebuffers;
-    if (!VulkanResourceFactory::createFramebuffers(
-        vulkanContext_->getVkDevice(), **renderPass_,
+    auto result = ::createFramebuffers(
+        vulkanContext_->getRaiiDevice(), *renderPass_,
         vulkanContext_->getSwapchainImageViews(), **depthImageView_,
-        vulkanContext_->getVkSwapchainExtent(), rawFramebuffers)) {
+        vulkanContext_->getVkSwapchainExtent());
+    if (!result) {
         return false;
     }
 
-    framebuffers_.clear();
-    framebuffers_.reserve(rawFramebuffers.size());
-    for (VkFramebuffer fb : rawFramebuffers) {
-        framebuffers_.emplace_back(vulkanContext_->getRaiiDevice(), fb);
-    }
+    framebuffers_ = std::move(*result);
     return true;
 }
 
@@ -399,8 +396,20 @@ bool Renderer::createCommandPool() {
 }
 
 bool Renderer::createCommandBuffers() {
-    return VulkanResourceFactory::createCommandBuffers(
-        vulkanContext_->getVkDevice(), **commandPool_, MAX_FRAMES_IN_FLIGHT, commandBuffers);
+    commandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+
+    auto allocInfo = vk::CommandBufferAllocateInfo{}
+        .setCommandPool(**commandPool_)
+        .setLevel(vk::CommandBufferLevel::ePrimary)
+        .setCommandBufferCount(MAX_FRAMES_IN_FLIGHT);
+
+    if (vkAllocateCommandBuffers(vulkanContext_->getVkDevice(),
+            reinterpret_cast<const VkCommandBufferAllocateInfo*>(&allocInfo),
+            commandBuffers.data()) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate command buffers");
+        return false;
+    }
+    return true;
 }
 
 bool Renderer::createSyncObjects() {
@@ -1157,7 +1166,7 @@ bool Renderer::recreateDepthResources(VkExtent2D newExtent) {
     VmaAllocation rawAllocation = VK_NULL_HANDLE;
     VkImageView rawView = VK_NULL_HANDLE;
 
-    if (!VulkanResourceFactory::createDepthImageAndView(
+    if (!::createDepthImageAndView(
         vulkanContext_->getVkDevice(), vulkanContext_->getAllocator(),
         newExtent, depthFormat,
         rawImage, rawAllocation, rawView)) {

@@ -6,7 +6,6 @@
 #include "Renderer.h"
 #include "RendererInit.h"
 #include "MaterialDescriptorFactory.h"
-#include "VulkanResourceFactory.h"
 #include "PostProcessSystem.h"
 #include "BloomSystem.h"
 #include "BilateralGridSystem.h"

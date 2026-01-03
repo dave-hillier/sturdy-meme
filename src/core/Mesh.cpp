@@ -1,7 +1,6 @@
 #include "Mesh.h"
 #include "VmaResources.h"
 #include "CommandBufferUtils.h"
-#include "VulkanResourceFactory.h"
 #include <vulkan/vulkan.hpp>
 #include <cstring>
 #include <stdexcept>
@@ -860,7 +859,7 @@ bool Mesh::upload(VmaAllocator allocator, VkDevice device, VkCommandPool command
 
     // Create staging buffer using RAII
     ManagedBuffer stagingBuffer;
-    if (!VulkanResourceFactory::createStagingBuffer(allocator, vertexBufferSize + indexBufferSize, stagingBuffer)) {
+    if (!VmaBufferFactory::createStagingBuffer(allocator, vertexBufferSize + indexBufferSize, stagingBuffer)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Mesh::upload: Failed to create staging buffer");
         return false;
     }
@@ -877,14 +876,14 @@ bool Mesh::upload(VmaAllocator allocator, VkDevice device, VkCommandPool command
 
     // Create vertex buffer using RAII
     ManagedBuffer managedVertexBuffer;
-    if (!VulkanResourceFactory::createVertexBuffer(allocator, vertexBufferSize, managedVertexBuffer)) {
+    if (!VmaBufferFactory::createVertexBuffer(allocator, vertexBufferSize, managedVertexBuffer)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Mesh::upload: Failed to create vertex buffer");
         return false;
     }
 
     // Create index buffer using RAII
     ManagedBuffer managedIndexBuffer;
-    if (!VulkanResourceFactory::createIndexBuffer(allocator, indexBufferSize, managedIndexBuffer)) {
+    if (!VmaBufferFactory::createIndexBuffer(allocator, indexBufferSize, managedIndexBuffer)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Mesh::upload: Failed to create index buffer");
         return false;
     }
