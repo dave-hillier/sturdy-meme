@@ -10,6 +10,7 @@
 #include "../geom/Point.hpp"
 #include "../geom/GeomUtils.hpp"
 #include "../utils/MathUtils.hpp"
+#include "../utils/Random.hpp"
 #include <vector>
 #include <cmath>
 #include <functional>
@@ -734,10 +735,10 @@ public:
         return result;
     }
 
-    // Get a random vertex
+    // Get a random vertex (matches Haxe ArrayExtender.random)
     Point random() const {
         if (vertices.empty()) return Point();
-        size_t idx = static_cast<size_t>(std::rand()) % vertices.size();
+        size_t idx = static_cast<size_t>(Random::getFloat() * static_cast<float>(vertices.size()));
         return vertices[idx];
     }
 

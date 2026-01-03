@@ -75,7 +75,7 @@ CurtainWall::CurtainWall(bool real, std::shared_ptr<Model> model,
     }
 
     do {
-        int index = Random::getInt(0, static_cast<int>(entrances.size()));
+        int index = static_cast<int>(Random::getFloat() * static_cast<float>(entrances.size()));
         Point gate = entrances[index];
         gates.push_back(gate);
 

@@ -669,7 +669,8 @@ private:
             if (!wardType.rate) {
                 // No rating function - pick randomly
                 do {
-                    bestPatch = unassigned[Random::getInt(0, static_cast<int>(unassigned.size()))];
+                    size_t idx = static_cast<size_t>(Random::getFloat() * static_cast<float>(unassigned.size()));
+                    bestPatch = unassigned[idx];
                 } while (bestPatch->ward != nullptr);
             } else {
                 // Find patch with minimum rating
