@@ -88,29 +88,15 @@ void ShadowSystem::cleanup() {
 }
 
 bool ShadowSystem::createShadowRenderPass() {
-    RenderPassConfig cfg;
-    cfg.depthFormat = VK_FORMAT_D32_SFLOAT;
-    cfg.depthOnly = true;
-    cfg.clearDepth = true;
-    cfg.storeDepth = true;
-    cfg.finalDepthLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-    // Use raw device wrapper temporarily to get raw VkRenderPass
-    vk::raii::Context ctx;
-    vk::raii::Device raiiDevice(ctx, static_cast<vk::Device>(device));
-    // Prevent destructor from destroying the logical device
-    static_cast<void>(raiiDevice.release());
-
-    // Recreate with proper context - for now just use raw Vulkan
     auto depthAttachment = vk::AttachmentDescription{}
-        .setFormat(static_cast<vk::Format>(cfg.depthFormat))
+        .setFormat(vk::Format::eD32Sfloat)
         .setSamples(vk::SampleCountFlagBits::e1)
         .setLoadOp(vk::AttachmentLoadOp::eClear)
         .setStoreOp(vk::AttachmentStoreOp::eStore)
         .setStencilLoadOp(vk::AttachmentLoadOp::eDontCare)
         .setStencilStoreOp(vk::AttachmentStoreOp::eDontCare)
         .setInitialLayout(vk::ImageLayout::eUndefined)
-        .setFinalLayout(static_cast<vk::ImageLayout>(cfg.finalDepthLayout));
+        .setFinalLayout(vk::ImageLayout::eShaderReadOnlyOptimal);
 
     auto depthAttachmentRef = vk::AttachmentReference{}
         .setAttachment(0)
