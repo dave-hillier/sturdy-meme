@@ -9,9 +9,22 @@
 #include <cmath>
 #include <limits>
 #include <optional>
+#include <memory>
 
 namespace town_generator {
 namespace geom {
+
+// Shared point type for reference semantics like Haxe
+using PointPtr = std::shared_ptr<Point>;
+
+// Helper to create shared points
+inline PointPtr makePoint(double x = 0, double y = 0) {
+    return std::make_shared<Point>(x, y);
+}
+
+inline PointPtr makePoint(const Point& p) {
+    return std::make_shared<Point>(p.x, p.y);
+}
 
 /**
  * Rectangle - Simple bounding rectangle
@@ -34,22 +47,37 @@ struct Rectangle {
 
 /**
  * Polygon - Core polygon class, faithful port from Haxe TownGeneratorOS
- * In Haxe this is abstract Polygon(Array<Point>) - here we wrap std::vector<Point>
+ * Uses shared_ptr<Point> for reference semantics - mutating a shared point
+ * affects all polygons that share it (like Haxe reference types).
  */
 class Polygon {
 private:
     static constexpr double DELTA = 0.000001;
-    std::vector<Point> vertices_;
+    std::vector<PointPtr> vertices_;
 
 public:
     // Constructors
     Polygon() : vertices_() {}
 
-    explicit Polygon(const std::vector<Point>& vertices) : vertices_(vertices) {}
+    // Construct from shared points (shares the points)
+    explicit Polygon(const std::vector<PointPtr>& vertices) : vertices_(vertices) {}
 
-    Polygon(std::initializer_list<Point> init) : vertices_(init) {}
+    // Construct from value points (creates new shared points - no sharing)
+    explicit Polygon(const std::vector<Point>& vertices) {
+        vertices_.reserve(vertices.size());
+        for (const auto& v : vertices) {
+            vertices_.push_back(makePoint(v));
+        }
+    }
 
-    // Copy and assignment
+    Polygon(std::initializer_list<Point> init) {
+        vertices_.reserve(init.size());
+        for (const auto& v : init) {
+            vertices_.push_back(makePoint(v));
+        }
+    }
+
+    // Copy constructor - shares the same points (reference semantics)
     Polygon(const Polygon& other) : vertices_(other.vertices_) {}
 
     Polygon& operator=(const Polygon& other) {
@@ -69,38 +97,59 @@ public:
         return *this;
     }
 
-    // Equality
+    // Deep copy - creates new points (no sharing)
+    Polygon deepCopy() const {
+        std::vector<PointPtr> newVerts;
+        newVerts.reserve(vertices_.size());
+        for (const auto& v : vertices_) {
+            newVerts.push_back(makePoint(*v));
+        }
+        return Polygon(newVerts);
+    }
+
+    // Equality (compares point values, not pointers)
     bool operator==(const Polygon& other) const {
-        return vertices_ == other.vertices_;
+        if (vertices_.size() != other.vertices_.size()) return false;
+        for (size_t i = 0; i < vertices_.size(); ++i) {
+            if (*vertices_[i] != *other.vertices_[i]) return false;
+        }
+        return true;
     }
     bool operator!=(const Polygon& other) const { return !(*this == other); }
 
-    // Array-like access
+    // Array-like access - returns reference to Point (not pointer)
     size_t length() const { return vertices_.size(); }
     size_t size() const { return vertices_.size(); }
     bool empty() const { return vertices_.empty(); }
 
-    Point& operator[](size_t i) { return vertices_[i]; }
-    const Point& operator[](size_t i) const { return vertices_[i]; }
+    Point& operator[](size_t i) { return *vertices_[i]; }
+    const Point& operator[](size_t i) const { return *vertices_[i]; }
+
+    // Access to shared pointer directly
+    PointPtr& ptr(size_t i) { return vertices_[i]; }
+    const PointPtr& ptr(size_t i) const { return vertices_[i]; }
 
     // Set all vertices from another polygon (Haxe's polygon.set())
     void set(const Polygon& p) {
         for (size_t i = 0; i < p.length() && i < vertices_.size(); ++i) {
-            vertices_[i].set(p[i]);
+            vertices_[i]->set(*p.vertices_[i]);
         }
     }
 
-    // Vector operations
-    void push(const Point& p) { vertices_.push_back(p); }
-    void push_back(const Point& p) { vertices_.push_back(p); }
+    // Vector operations - these add new points (no sharing)
+    void push(const Point& p) { vertices_.push_back(makePoint(p)); }
+    void push_back(const Point& p) { vertices_.push_back(makePoint(p)); }
 
-    void unshift(const Point& p) { vertices_.insert(vertices_.begin(), p); }
+    // Add a shared point
+    void pushShared(const PointPtr& p) { vertices_.push_back(p); }
+
+    void unshift(const Point& p) { vertices_.insert(vertices_.begin(), makePoint(p)); }
 
     void insert(size_t index, const Point& p) {
         if (index >= vertices_.size()) {
-            vertices_.push_back(p);
+            vertices_.push_back(makePoint(p));
         } else {
-            vertices_.insert(vertices_.begin() + index, p);
+            vertices_.insert(vertices_.begin() + index, makePoint(p));
         }
     }
 
@@ -111,7 +160,19 @@ public:
         }
     }
 
+    // Remove by value (finds point with same coordinates)
     bool remove(const Point& p) {
+        for (auto it = vertices_.begin(); it != vertices_.end(); ++it) {
+            if (**it == p) {
+                vertices_.erase(it);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Remove by pointer identity
+    bool removePtr(const PointPtr& p) {
         auto it = std::find(vertices_.begin(), vertices_.end(), p);
         if (it != vertices_.end()) {
             vertices_.erase(it);
@@ -120,30 +181,61 @@ public:
         return false;
     }
 
-    Point& last() { return vertices_.back(); }
-    const Point& last() const { return vertices_.back(); }
+    Point& last() { return *vertices_.back(); }
+    const Point& last() const { return *vertices_.back(); }
+    PointPtr& lastPtr() { return vertices_.back(); }
 
     std::vector<Point> slice(size_t start) const {
         if (start >= vertices_.size()) return {};
-        return std::vector<Point>(vertices_.begin() + start, vertices_.end());
+        std::vector<Point> result;
+        result.reserve(vertices_.size() - start);
+        for (size_t i = start; i < vertices_.size(); ++i) {
+            result.push_back(*vertices_[i]);
+        }
+        return result;
     }
 
     std::vector<Point> slice(size_t start, size_t end) const {
         if (start >= vertices_.size()) return {};
         end = std::min(end, vertices_.size());
-        return std::vector<Point>(vertices_.begin() + start, vertices_.begin() + end);
+        std::vector<Point> result;
+        result.reserve(end - start);
+        for (size_t i = start; i < end; ++i) {
+            result.push_back(*vertices_[i]);
+        }
+        return result;
     }
 
-    Polygon copy() const { return Polygon(vertices_); }
+    // Slice returning shared pointers
+    std::vector<PointPtr> sliceShared(size_t start) const {
+        if (start >= vertices_.size()) return {};
+        return std::vector<PointPtr>(vertices_.begin() + start, vertices_.end());
+    }
 
-    // Iterator support
+    std::vector<PointPtr> sliceShared(size_t start, size_t end) const {
+        if (start >= vertices_.size()) return {};
+        end = std::min(end, vertices_.size());
+        return std::vector<PointPtr>(vertices_.begin() + start, vertices_.begin() + end);
+    }
+
+    Polygon copy() const { return Polygon(vertices_); }  // Shares points
+
+    // Iterator support (iterates over PointPtr)
     auto begin() { return vertices_.begin(); }
     auto end() { return vertices_.end(); }
     auto begin() const { return vertices_.begin(); }
     auto end() const { return vertices_.end(); }
 
-    // Find vertex index
+    // Find vertex index by value
     int indexOf(const Point& v) const {
+        for (size_t i = 0; i < vertices_.size(); ++i) {
+            if (*vertices_[i] == v) return static_cast<int>(i);
+        }
+        return -1;
+    }
+
+    // Find vertex index by pointer identity
+    int indexOfPtr(const PointPtr& v) const {
         for (size_t i = 0; i < vertices_.size(); ++i) {
             if (vertices_[i] == v) return static_cast<int>(i);
         }
@@ -152,7 +244,7 @@ public:
 
     int lastIndexOf(const Point& v) const {
         for (int i = static_cast<int>(vertices_.size()) - 1; i >= 0; --i) {
-            if (vertices_[i] == v) return i;
+            if (*vertices_[i] == v) return i;
         }
         return -1;
     }
@@ -161,17 +253,21 @@ public:
         return indexOf(v) != -1;
     }
 
+    bool containsPtr(const PointPtr& v) const {
+        return indexOfPtr(v) != -1;
+    }
+
     // Computed properties
     double square() const {
         if (vertices_.size() < 3) return 0;
 
-        const Point& v1_init = last();
-        const Point& v2_init = vertices_[0];
+        const Point& v1_init = *vertices_.back();
+        const Point& v2_init = *vertices_[0];
         double s = v1_init.x * v2_init.y - v2_init.x * v1_init.y;
 
         for (size_t i = 1; i < vertices_.size(); ++i) {
-            const Point& v1 = vertices_[i - 1];
-            const Point& v2 = vertices_[i];
+            const Point& v1 = *vertices_[i - 1];
+            const Point& v2 = *vertices_[i];
             s += (v1.x * v2.y - v2.x * v1.y);
         }
         return s * 0.5;
@@ -185,17 +281,15 @@ public:
         return len;
     }
 
-    // Compactness: circle=1.0, square=0.79, triangle=0.60
     double compactness() const {
         double p = perimeter();
         return 4 * M_PI * square() / (p * p);
     }
 
-    // Faster approximation of centroid
     Point center() const {
         Point c;
         for (const auto& v : vertices_) {
-            c.addEq(v);
+            c.addEq(*v);
         }
         c.scaleEq(1.0 / vertices_.size());
         return c;
@@ -217,41 +311,46 @@ public:
     void forEdge(std::function<void(const Point&, const Point&)> f) const {
         size_t len = vertices_.size();
         for (size_t i = 0; i < len; ++i) {
-            f(vertices_[i], vertices_[(i + 1) % len]);
+            f(*vertices_[i], *vertices_[(i + 1) % len]);
         }
     }
 
-    // Similar to forEdge but doesn't iterate over last->first
     void forSegment(std::function<void(const Point&, const Point&)> f) const {
         for (size_t i = 0; i < vertices_.size() - 1; ++i) {
-            f(vertices_[i], vertices_[i + 1]);
+            f(*vertices_[i], *vertices_[i + 1]);
         }
     }
 
-    // Offset all vertices
+    // Offset all vertices (mutates shared points!)
     void offset(const Point& p) {
         for (auto& v : vertices_) {
-            v.offset(p.x, p.y);
+            v->offset(p.x, p.y);
         }
     }
 
-    // Rotate all vertices around origin
+    void offset(double dx, double dy) {
+        for (auto& v : vertices_) {
+            v->offset(dx, dy);
+        }
+    }
+
+    // Rotate all vertices around origin (mutates shared points!)
     void rotate(double a) {
         double cosA = std::cos(a);
         double sinA = std::sin(a);
         for (auto& v : vertices_) {
-            double vx = v.x * cosA - v.y * sinA;
-            double vy = v.y * cosA + v.x * sinA;
-            v.setTo(vx, vy);
+            double vx = v->x * cosA - v->y * sinA;
+            double vy = v->y * cosA + v->x * sinA;
+            v->setTo(vx, vy);
         }
     }
 
     // Check if vertex at index is convex
     bool isConvexVertexi(int i) const {
         int len = static_cast<int>(vertices_.size());
-        const Point& v0 = vertices_[(i + len - 1) % len];
-        const Point& v1 = vertices_[i];
-        const Point& v2 = vertices_[(i + 1) % len];
+        const Point& v0 = *vertices_[(i + len - 1) % len];
+        const Point& v1 = *vertices_[i];
+        const Point& v2 = *vertices_[(i + 1) % len];
         return GeomUtils::cross(v1.x - v0.x, v1.y - v0.y, v2.x - v1.x, v2.y - v1.y) > 0;
     }
 
@@ -263,17 +362,17 @@ public:
 
     bool isConvex() const {
         for (const auto& v : vertices_) {
-            if (!isConvexVertex(v)) return false;
+            if (!isConvexVertex(*v)) return false;
         }
         return true;
     }
 
     // Smooth vertex at index
     Point smoothVertexi(int i, double f = 1.0) const {
-        const Point& v = vertices_[i];
+        const Point& v = *vertices_[i];
         int len = static_cast<int>(vertices_.size());
-        const Point& prevV = vertices_[(i + len - 1) % len];
-        const Point& nextV = vertices_[(i + 1) % len];
+        const Point& prevV = *vertices_[(i + len - 1) % len];
+        const Point& nextV = *vertices_[(i + 1) % len];
         return Point(
             (prevV.x + v.x * f + nextV.x) / (2 + f),
             (prevV.y + v.y * f + nextV.y) / (2 + f)
@@ -289,19 +388,21 @@ public:
         ).scale(1.0 / (2 + f));
     }
 
-    // Smooth all vertices
+    // Smooth all vertices - returns new polygon with new points
     Polygon smoothVertexEq(double f = 1.0) const {
         size_t len = vertices_.size();
         std::vector<Point> result;
         result.reserve(len);
 
-        Point v1 = vertices_[len - 1];
-        Point v2 = vertices_[0];
+        const Point& v1_init = *vertices_[len - 1];
+        const Point& v2_init = *vertices_[0];
+        Point v1 = v1_init;
+        Point v2 = v2_init;
 
         for (size_t i = 0; i < len; ++i) {
             Point v0 = v1;
             v1 = v2;
-            v2 = vertices_[(i + 1) % len];
+            v2 = *vertices_[(i + 1) % len];
             result.emplace_back(
                 (v0.x + v1.x * f + v2.x) / (2 + f),
                 (v0.y + v1.y * f + v2.y) / (2 + f)
@@ -310,20 +411,20 @@ public:
         return Polygon(result);
     }
 
-    // Filter out short edges
+    // Filter out short edges - returns new polygon with new points
     Polygon filterShort(double threshold) const {
         if (vertices_.empty()) return Polygon();
 
         std::vector<Point> result;
-        result.push_back(vertices_[0]);
+        result.push_back(*vertices_[0]);
 
         size_t i = 1;
-        Point v0 = vertices_[0];
+        Point v0 = *vertices_[0];
 
         while (i < vertices_.size()) {
             Point v1;
             do {
-                v1 = vertices_[i++];
+                v1 = *vertices_[i++];
             } while (Point::distance(v0, v1) < threshold && i < vertices_.size());
             result.push_back(v1);
             v0 = v1;
@@ -336,9 +437,9 @@ public:
     double distance(const Point& p) const {
         if (vertices_.empty()) return std::numeric_limits<double>::infinity();
 
-        double d = Point::distance(vertices_[0], p);
+        double d = Point::distance(*vertices_[0], p);
         for (size_t i = 1; i < vertices_.size(); ++i) {
-            double d1 = Point::distance(vertices_[i], p);
+            double d1 = Point::distance(*vertices_[i], p);
             if (d1 < d) d = d1;
         }
         return d;
@@ -347,7 +448,7 @@ public:
     // Find edge index starting at vertex a going to b
     int findEdge(const Point& a, const Point& b) const {
         int index = indexOf(a);
-        if (index != -1 && vertices_[(index + 1) % vertices_.size()] == b) {
+        if (index != -1 && *vertices_[(index + 1) % vertices_.size()] == b) {
             return index;
         }
         return -1;
@@ -355,10 +456,20 @@ public:
 
     // Get next/prev vertex
     const Point& next(const Point& a) const {
-        return vertices_[(indexOf(a) + 1) % vertices_.size()];
+        return *vertices_[(indexOf(a) + 1) % vertices_.size()];
     }
 
     const Point& prev(const Point& a) const {
+        int idx = indexOf(a);
+        return *vertices_[(idx + vertices_.size() - 1) % vertices_.size()];
+    }
+
+    // Get next/prev shared pointer
+    PointPtr nextPtr(const Point& a) const {
+        return vertices_[(indexOf(a) + 1) % vertices_.size()];
+    }
+
+    PointPtr prevPtr(const Point& a) const {
         int idx = indexOf(a);
         return vertices_[(idx + vertices_.size() - 1) % vertices_.size()];
     }
@@ -370,7 +481,7 @@ public:
 
     Point vectori(int i) const {
         int nextIdx = (i == static_cast<int>(vertices_.size()) - 1) ? 0 : i + 1;
-        return vertices_[nextIdx].subtract(vertices_[i]);
+        return vertices_[nextIdx]->subtract(*vertices_[i]);
     }
 
     // Check if this polygon borders another
@@ -379,9 +490,9 @@ public:
         size_t len2 = another.length();
 
         for (size_t i = 0; i < len1; ++i) {
-            int j = another.indexOf(vertices_[i]);
+            int j = another.indexOf(*vertices_[i]);
             if (j != -1) {
-                const Point& nextP = vertices_[(i + 1) % len1];
+                const Point& nextP = *vertices_[(i + 1) % len1];
                 if (nextP == another[(j + 1) % len2] ||
                     nextP == another[(j + len2 - 1) % len2]) {
                     return true;
@@ -395,17 +506,17 @@ public:
     Rectangle getBounds() const {
         if (vertices_.empty()) return Rectangle();
 
-        Rectangle rect(vertices_[0].x, vertices_[0].y);
+        Rectangle rect(vertices_[0]->x, vertices_[0]->y);
         for (const auto& v : vertices_) {
-            rect.left = std::min(rect.left, v.x);
-            rect.right = std::max(rect.right, v.x);
-            rect.top = std::min(rect.top, v.y);
-            rect.bottom = std::max(rect.bottom, v.y);
+            rect.left = std::min(rect.left, v->x);
+            rect.right = std::max(rect.right, v->x);
+            rect.top = std::min(rect.top, v->y);
+            rect.bottom = std::max(rect.bottom, v->y);
         }
         return rect;
     }
 
-    // Split polygon at two vertices
+    // Split polygon at two vertices - returns new polygons with new points
     std::vector<Polygon> split(const Point& p1, const Point& p2) const {
         return spliti(indexOf(p1), indexOf(p2));
     }
@@ -436,7 +547,7 @@ public:
     // Inset all edges
     void insetEq(double d) {
         for (size_t i = 0; i < vertices_.size(); ++i) {
-            inset(vertices_[i], d);
+            inset(*vertices_[i], d);
         }
     }
 
@@ -469,7 +580,7 @@ public:
         dd.reserve(vertices_.size());
 
         for (const auto& v : vertices_) {
-            double d = 1.0 / Point::distance(v, p);
+            double d = 1.0 / Point::distance(*v, p);
             sum += d;
             dd.push_back(d);
         }
@@ -484,7 +595,7 @@ public:
     Polygon filter(std::function<bool(const Point&)> pred) const {
         std::vector<Point> result;
         for (const auto& v : vertices_) {
-            if (pred(v)) result.push_back(v);
+            if (pred(*v)) result.push_back(*v);
         }
         return Polygon(result);
     }
@@ -493,41 +604,41 @@ public:
     template<typename F>
     const Point& min(F f) const {
         size_t resultIdx = 0;
-        double minVal = f(vertices_[0]);
+        double minVal = f(*vertices_[0]);
         for (size_t i = 1; i < vertices_.size(); ++i) {
-            double val = f(vertices_[i]);
+            double val = f(*vertices_[i]);
             if (val < minVal) {
                 resultIdx = i;
                 minVal = val;
             }
         }
-        return vertices_[resultIdx];
+        return *vertices_[resultIdx];
     }
 
     template<typename F>
     const Point& max(F f) const {
         size_t resultIdx = 0;
-        double maxVal = f(vertices_[0]);
+        double maxVal = f(*vertices_[0]);
         for (size_t i = 1; i < vertices_.size(); ++i) {
-            double val = f(vertices_[i]);
+            double val = f(*vertices_[i]);
             if (val > maxVal) {
                 resultIdx = i;
                 maxVal = val;
             }
         }
-        return vertices_[resultIdx];
+        return *vertices_[resultIdx];
     }
 
     // Count vertices matching predicate
     int count(std::function<bool(const Point&)> test) const {
         int cnt = 0;
         for (const auto& v : vertices_) {
-            if (test(v)) cnt++;
+            if (test(*v)) cnt++;
         }
         return cnt;
     }
 
-    // Static factory methods
+    // Static factory methods - create new points (no sharing)
     static Polygon rect(double w = 1.0, double h = 1.0) {
         return Polygon({
             Point(-w / 2, -h / 2),
@@ -551,9 +662,19 @@ public:
         return regular(16, r);
     }
 
-    // Access underlying vector
-    std::vector<Point>& vertices() { return vertices_; }
-    const std::vector<Point>& vertices() const { return vertices_; }
+    // Access underlying vector of shared pointers
+    std::vector<PointPtr>& vertices() { return vertices_; }
+    const std::vector<PointPtr>& vertices() const { return vertices_; }
+
+    // Get values as vector (copies)
+    std::vector<Point> vertexValues() const {
+        std::vector<Point> result;
+        result.reserve(vertices_.size());
+        for (const auto& v : vertices_) {
+            result.push_back(*v);
+        }
+        return result;
+    }
 };
 
 } // namespace geom

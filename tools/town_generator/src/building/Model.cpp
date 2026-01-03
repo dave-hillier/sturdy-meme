@@ -133,14 +133,15 @@ void Model::buildPatches() {
     std::sort(sortedRegions.begin(), sortedRegions.end(),
         [](const auto& a, const auto& b) { return a.first < b.first; });
 
-    // Build a map from Triangle* to canonical Point (circumcenter)
-    // This ensures patches share exact vertex coordinates for shared triangles
-    std::map<geom::Triangle*, geom::Point> triangleToVertex;
+    // Build a map from Triangle* to shared PointPtr (circumcenter)
+    // This ensures adjacent patches share the exact same Point object
+    // so mutations propagate automatically (matching Haxe reference semantics)
+    std::map<geom::Triangle*, geom::PointPtr> triangleToVertex;
     for (const auto& tr : voronoi.triangles) {
-        triangleToVertex[tr.get()] = tr->c;
+        triangleToVertex[tr.get()] = geom::makePoint(tr->c);
     }
 
-    // Create patches using the shared vertex map
+    // Create patches using shared vertex pointers
     std::map<geom::Region*, Patch*> regionToPatch;
     int patchesCreated = 0;
 
@@ -150,19 +151,19 @@ void Model::buildPatches() {
         // Skip regions with no triangles (boundary regions)
         if (region->vertices.empty()) continue;
 
-        // Create polygon from region's triangles using shared vertices
-        std::vector<geom::Point> vertices;
+        // Create polygon from region's triangles using shared vertex pointers
+        std::vector<geom::PointPtr> sharedVertices;
         for (auto* tr : region->vertices) {
             auto it = triangleToVertex.find(tr);
             if (it != triangleToVertex.end()) {
-                vertices.push_back(it->second);
+                sharedVertices.push_back(it->second);
             }
         }
 
         // Skip if we couldn't create a valid polygon
-        if (vertices.size() < 3) continue;
+        if (sharedVertices.size() < 3) continue;
 
-        auto patch = std::make_unique<Patch>(vertices);
+        auto patch = std::make_unique<Patch>(geom::Polygon(sharedVertices));
         patchesCreated++;
 
         // Determine if within city (inner patches)
@@ -215,46 +216,39 @@ void Model::buildPatches() {
 
 void Model::optimizeJunctions() {
     // Merge vertices that are too close together (< 8 units)
-    // This needs to update ALL patches sharing the merged vertices
+    // With shared_ptr<Point>, mutations automatically propagate to all
+    // patches sharing the same vertex (matching Haxe reference semantics)
 
-    // Determine which patches to optimize
     std::vector<Patch*> patchesToOptimize = inner;
-    // Note: citadel would be added here if we tracked it as a Patch
-
     std::set<Patch*> patchesToClean;
 
     for (auto* patch : patchesToOptimize) {
         size_t index = 0;
         while (index < patch->shape.length()) {
-            geom::Point v0 = patch->shape[index];
-            geom::Point v1 = patch->shape[(index + 1) % patch->shape.length()];
+            // Get shared pointers to adjacent vertices
+            geom::PointPtr v0Ptr = patch->shape.ptr(index);
+            geom::PointPtr v1Ptr = patch->shape.ptr((index + 1) % patch->shape.length());
 
-            if (!(v0 == v1) && geom::Point::distance(v0, v1) < 8.0) {
-                // Calculate midpoint
-                geom::Point midpoint((v0.x + v1.x) / 2.0, (v0.y + v1.y) / 2.0);
+            if (v0Ptr != v1Ptr && geom::Point::distance(*v0Ptr, *v1Ptr) < 8.0) {
+                // Move v0 to midpoint (mutates the shared point!)
+                // All patches sharing this vertex see the change automatically
+                v0Ptr->addEq(*v1Ptr);
+                v0Ptr->scaleEq(0.5);
 
-                // Find all patches containing v1 and replace with v0 (will update to midpoint)
+                // Replace v1 references with v0 in all patches
                 for (auto* otherPatch : patches) {
                     if (otherPatch == patch) continue;
 
-                    int v1Index = otherPatch->shape.indexOf(v1);
+                    // Find v1 by pointer identity and replace with v0
+                    int v1Index = otherPatch->shape.indexOfPtr(v1Ptr);
                     if (v1Index != -1) {
-                        // Replace v1 with the midpoint in this patch
-                        otherPatch->shape[static_cast<size_t>(v1Index)] = midpoint;
-                        patchesToClean.insert(otherPatch);
-                    }
-
-                    // Also update any v0 occurrences to midpoint
-                    int v0Index = otherPatch->shape.indexOf(v0);
-                    if (v0Index != -1) {
-                        otherPatch->shape[static_cast<size_t>(v0Index)] = midpoint;
+                        otherPatch->shape.vertices()[v1Index] = v0Ptr;
                         patchesToClean.insert(otherPatch);
                     }
                 }
 
-                // Update v0 to midpoint and remove v1 in current patch
-                patch->shape[index] = midpoint;
-                patch->shape.remove(v1);
+                // Remove v1 from current patch
+                patch->shape.removePtr(v1Ptr);
                 patchesToClean.insert(patch);
 
                 // Don't increment index since we removed an element
@@ -264,21 +258,13 @@ void Model::optimizeJunctions() {
         }
     }
 
-    // Remove duplicate vertices from affected patches
+    // Remove duplicate vertices (by pointer identity) from affected patches
     for (auto* patch : patchesToClean) {
-        std::vector<geom::Point> cleaned;
-        for (size_t i = 0; i < patch->shape.length(); ++i) {
-            const geom::Point& v = patch->shape[i];
-            // Check if this vertex already exists in cleaned
-            bool isDuplicate = false;
-            for (const auto& existing : cleaned) {
-                if (existing == v) {
-                    isDuplicate = true;
-                    break;
-                }
-            }
+        std::vector<geom::PointPtr> cleaned;
+        for (const auto& vPtr : patch->shape) {
+            bool isDuplicate = std::find(cleaned.begin(), cleaned.end(), vPtr) != cleaned.end();
             if (!isDuplicate) {
-                cleaned.push_back(v);
+                cleaned.push_back(vPtr);
             }
         }
         patch->shape = geom::Polygon(cleaned);

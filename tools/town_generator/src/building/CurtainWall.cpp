@@ -24,7 +24,8 @@ CurtainWall::CurtainWall(
             double smoothFactor = std::min(1.0, 40.0 / patches.size());
 
             std::vector<geom::Point> smoothed;
-            for (const auto& v : shape) {
+            for (const auto& vPtr : shape) {
+                const geom::Point& v = *vPtr;
                 bool isReserved = std::find(reserved.begin(), reserved.end(), v) != reserved.end();
                 if (isReserved) {
                     smoothed.push_back(v);
@@ -51,7 +52,8 @@ void CurtainWall::buildGates(bool real, Model* model, const std::vector<geom::Po
     std::vector<geom::Point> entrances;
 
     if (patches_.size() > 1) {
-        for (const auto& v : shape) {
+        for (const auto& vPtr : shape) {
+            const geom::Point& v = *vPtr;
             bool isReserved = std::find(reserved.begin(), reserved.end(), v) != reserved.end();
             if (isReserved) continue;
 
@@ -68,7 +70,8 @@ void CurtainWall::buildGates(bool real, Model* model, const std::vector<geom::Po
             }
         }
     } else {
-        for (const auto& v : shape) {
+        for (const auto& vPtr : shape) {
+            const geom::Point& v = *vPtr;
             bool isReserved = std::find(reserved.begin(), reserved.end(), v) != reserved.end();
             if (!isReserved) {
                 entrances.push_back(v);
@@ -78,7 +81,8 @@ void CurtainWall::buildGates(bool real, Model* model, const std::vector<geom::Po
 
     // If no entrances found with strict criteria, use all non-reserved vertices
     if (entrances.empty()) {
-        for (const auto& v : shape) {
+        for (const auto& vPtr : shape) {
+            const geom::Point& v = *vPtr;
             bool isReserved = std::find(reserved.begin(), reserved.end(), v) != reserved.end();
             if (!isReserved) {
                 entrances.push_back(v);
@@ -125,7 +129,8 @@ void CurtainWall::buildGates(bool real, Model* model, const std::vector<geom::Po
                     double maxDot = -std::numeric_limits<double>::infinity();
                     geom::Point farthest = outer->shape[0];
 
-                    for (const auto& v : outer->shape) {
+                    for (const auto& vPtr : outer->shape) {
+                        const geom::Point& v = *vPtr;
                         bool onShape = shape.contains(v);
                         bool isRes = std::find(reserved.begin(), reserved.end(), v) != reserved.end();
 
@@ -222,8 +227,8 @@ void CurtainWall::buildTowers() {
 
 double CurtainWall::getRadius() const {
     double radius = 0.0;
-    for (const auto& v : shape) {
-        radius = std::max(radius, v.length());
+    for (const auto& vPtr : shape) {
+        radius = std::max(radius, vPtr->length());
     }
     return radius;
 }

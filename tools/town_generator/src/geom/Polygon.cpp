@@ -20,8 +20,8 @@ std::vector<Polygon> Polygon::cut(const Point& p1, const Point& p2, double gap) 
     int count = 0;
 
     for (size_t i = 0; i < len; ++i) {
-        const Point& v0 = vertices_[i];
-        const Point& v1 = vertices_[(i + 1) % len];
+        const Point& v0 = *vertices_[i];
+        const Point& v1 = *vertices_[(i + 1) % len];
 
         double x2 = v0.x;
         double y2 = v0.y;
@@ -72,7 +72,7 @@ std::vector<Polygon> Polygon::cut(const Point& p1, const Point& p2, double gap) 
             return {half2, half1};
         }
     } else {
-        return {Polygon(vertices_)};
+        return {deepCopy()};
     }
 }
 
@@ -82,11 +82,11 @@ void Polygon::inset(const Point& p1, double d) {
 
     int len = static_cast<int>(vertices_.size());
     int i0 = (i1 > 0 ? i1 - 1 : len - 1);
-    const Point& p0 = vertices_[i0];
+    const Point& p0 = *vertices_[i0];
     int i2 = (i1 < len - 1 ? i1 + 1 : 0);
-    const Point& p2 = vertices_[i2];
+    const Point& p2 = *vertices_[i2];
     int i3 = (i2 < len - 1 ? i2 + 1 : 0);
-    const Point& p3 = vertices_[i3];
+    const Point& p3 = *vertices_[i3];
 
     Point v0 = p1.subtract(p0);
     Point v1 = p2.subtract(p1);
@@ -103,7 +103,8 @@ void Polygon::inset(const Point& p1, double d) {
         t = std::min(t, v1.length() * 0.5);
     }
     t *= utils::MathUtils::sign(z);
-    vertices_[i1] = p1.subtract(v0.norm(t));
+    // Mutate the shared point
+    vertices_[i1]->set(p1.subtract(v0.norm(t)));
 
     cosVal = v1.dot(v2) / v1.length() / v2.length();
     z = v1.x * v2.y - v1.y * v2.x;
@@ -115,7 +116,8 @@ void Polygon::inset(const Point& p1, double d) {
     } else {
         t = std::min(t, v1.length() * 0.5);
     }
-    vertices_[i2] = p2.add(v2.norm(t));
+    // Mutate the shared point
+    vertices_[i2]->set(p2.add(v2.norm(t)));
 }
 
 Polygon Polygon::buffer(const std::vector<double>& d) const {
@@ -225,7 +227,7 @@ Polygon Polygon::buffer(const std::vector<double>& d) const {
 }
 
 Polygon Polygon::shrink(const std::vector<double>& d) const {
-    Polygon q(vertices_);
+    Polygon q = deepCopy();  // Use deep copy to avoid sharing
     size_t i = 0;
 
     forEdge([&q, &d, &i](const Point& v1, const Point& v2) {
@@ -245,16 +247,16 @@ Polygon Polygon::shrink(const std::vector<double>& d) const {
 
 Polygon Polygon::peel(const Point& v1, double d) const {
     int i1 = indexOf(v1);
-    if (i1 == -1) return Polygon(vertices_);
+    if (i1 == -1) return deepCopy();
 
     int i2 = (i1 == static_cast<int>(vertices_.size()) - 1) ? 0 : i1 + 1;
-    const Point& v2 = vertices_[i2];
+    const Point& v2 = *vertices_[i2];
 
     Point v = v2.subtract(v1);
     Point n = v.rotate90().norm(d);
 
     auto halves = cut(v1.add(n), v2.add(n), 0);
-    return halves.empty() ? Polygon(vertices_) : halves[0];
+    return halves.empty() ? deepCopy() : halves[0];
 }
 
 void Polygon::simplify(int n) {
@@ -264,13 +266,13 @@ void Polygon::simplify(int n) {
         int result = 0;
         double minMeasure = std::numeric_limits<double>::infinity();
 
-        Point b = vertices_[len - 1];
-        Point c = vertices_[0];
+        Point b = *vertices_[len - 1];
+        Point c = *vertices_[0];
 
         for (int i = 0; i < len; ++i) {
             Point a = b;
             b = c;
-            c = vertices_[(i + 1) % len];
+            c = *vertices_[(i + 1) % len];
 
             double measure = std::abs(a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
             if (measure < minMeasure) {

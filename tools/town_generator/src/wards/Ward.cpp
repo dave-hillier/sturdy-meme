@@ -67,8 +67,8 @@ void Ward::filterOutskirts(std::vector<geom::Polygon>& buildings, double minDist
         double minDist = std::numeric_limits<double>::infinity();
         geom::Point center = it->center();
 
-        for (const auto& v : patch->shape) {
-            minDist = std::min(minDist, geom::Point::distance(center, v));
+        for (const auto& vPtr : patch->shape) {
+            minDist = std::min(minDist, geom::Point::distance(center, *vPtr));
         }
 
         if (minDist < minDistance) {

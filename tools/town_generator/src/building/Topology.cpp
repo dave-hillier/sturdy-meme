@@ -12,14 +12,14 @@ Topology::Topology(Model* model) : model_(model) {
     blocked_.clear();
 
     if (model_->citadel) {
-        for (const auto& p : model_->citadel->shape) {
-            blocked_.push_back(p);
+        for (const auto& pPtr : model_->citadel->shape) {
+            blocked_.push_back(*pPtr);
         }
     }
 
     if (model_->wall) {
-        for (const auto& p : model_->wall->shape) {
-            blocked_.push_back(p);
+        for (const auto& pPtr : model_->wall->shape) {
+            blocked_.push_back(*pPtr);
         }
     }
 
