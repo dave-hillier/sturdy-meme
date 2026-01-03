@@ -18,8 +18,9 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <stdexcept>
 #include <map>
+#include <set>
+#include <stdexcept>
 
 namespace town_generator {
 namespace building {
@@ -213,11 +214,74 @@ void Model::buildPatches() {
 }
 
 void Model::optimizeJunctions() {
-    // Simplify patches by removing very short edges
-    for (auto* patch : patches) {
-        if (patch->shape.length() > 4) {
-            patch->shape = patch->shape.filterShort(0.5);
+    // Merge vertices that are too close together (< 8 units)
+    // This needs to update ALL patches sharing the merged vertices
+
+    // Determine which patches to optimize
+    std::vector<Patch*> patchesToOptimize = inner;
+    // Note: citadel would be added here if we tracked it as a Patch
+
+    std::set<Patch*> patchesToClean;
+
+    for (auto* patch : patchesToOptimize) {
+        size_t index = 0;
+        while (index < patch->shape.length()) {
+            geom::Point v0 = patch->shape[index];
+            geom::Point v1 = patch->shape[(index + 1) % patch->shape.length()];
+
+            if (!(v0 == v1) && geom::Point::distance(v0, v1) < 8.0) {
+                // Calculate midpoint
+                geom::Point midpoint((v0.x + v1.x) / 2.0, (v0.y + v1.y) / 2.0);
+
+                // Find all patches containing v1 and replace with v0 (will update to midpoint)
+                for (auto* otherPatch : patches) {
+                    if (otherPatch == patch) continue;
+
+                    int v1Index = otherPatch->shape.indexOf(v1);
+                    if (v1Index != -1) {
+                        // Replace v1 with the midpoint in this patch
+                        otherPatch->shape[static_cast<size_t>(v1Index)] = midpoint;
+                        patchesToClean.insert(otherPatch);
+                    }
+
+                    // Also update any v0 occurrences to midpoint
+                    int v0Index = otherPatch->shape.indexOf(v0);
+                    if (v0Index != -1) {
+                        otherPatch->shape[static_cast<size_t>(v0Index)] = midpoint;
+                        patchesToClean.insert(otherPatch);
+                    }
+                }
+
+                // Update v0 to midpoint and remove v1 in current patch
+                patch->shape[index] = midpoint;
+                patch->shape.remove(v1);
+                patchesToClean.insert(patch);
+
+                // Don't increment index since we removed an element
+            } else {
+                index++;
+            }
         }
+    }
+
+    // Remove duplicate vertices from affected patches
+    for (auto* patch : patchesToClean) {
+        std::vector<geom::Point> cleaned;
+        for (size_t i = 0; i < patch->shape.length(); ++i) {
+            const geom::Point& v = patch->shape[i];
+            // Check if this vertex already exists in cleaned
+            bool isDuplicate = false;
+            for (const auto& existing : cleaned) {
+                if (existing == v) {
+                    isDuplicate = true;
+                    break;
+                }
+            }
+            if (!isDuplicate) {
+                cleaned.push_back(v);
+            }
+        }
+        patch->shape = geom::Polygon(cleaned);
     }
 }
 
