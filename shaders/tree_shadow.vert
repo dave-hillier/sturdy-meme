@@ -57,7 +57,10 @@ void main() {
     // Detail motion
     vec3 detailOffset = windCalculateDetailOffset(localPos, branchLevel, windParams.strength, windParams.gustFreq, windParams.time);
 
-    vec3 animatedLocalPos = localPos + bendOffset + detailOffset;
+    // Transform to world space FIRST, then apply world-space wind offsets
+    // This ensures shadow matches the main render pass
+    vec4 worldPos = push.model * vec4(localPos, 1.0);
+    worldPos.xyz += bendOffset + detailOffset;
 
-    gl_Position = ubo.cascadeViewProj[push.cascadeIndex] * push.model * vec4(animatedLocalPos, 1.0);
+    gl_Position = ubo.cascadeViewProj[push.cascadeIndex] * worldPos;
 }

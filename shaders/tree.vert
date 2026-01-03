@@ -71,11 +71,10 @@ void main() {
     // High-frequency detail motion for tips
     vec3 detailOffset = windCalculateDetailOffset(localPos, branchLevel, windParams.strength, windParams.gustFreq, windParams.time);
 
-    // Combine all offsets
-    vec3 animatedLocalPos = localPos + bendOffset + detailOffset;
-
-    // Transform to world space
-    vec4 worldPos = push.model * vec4(animatedLocalPos, 1.0);
+    // Transform to world space FIRST, then apply world-space wind offsets
+    // This ensures branches and leaves move in the same direction regardless of tree rotation
+    vec4 worldPos = push.model * vec4(localPos, 1.0);
+    worldPos.xyz += bendOffset + detailOffset;
 
     gl_Position = ubo.proj * ubo.view * worldPos;
 
