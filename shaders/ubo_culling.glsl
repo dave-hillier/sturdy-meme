@@ -61,4 +61,17 @@ bool shouldCullingLodDrop(float distance, float instanceHash) {
     return instanceHash < dropThreshold;
 }
 
+// Check if instance should be dropped based on LOD with hysteresis
+// hysteresisHash provides per-instance staggering to prevent synchronized flickering
+bool shouldCullingLodDropWithHysteresis(float distance, float instanceHash, float hysteresisHash) {
+    if (!isLodEnabled()) return false;
+    float lodFactor = getCullingLodFactor(distance);
+    // Each instance gets a unique offset (±5% of transition zone) to stagger transitions
+    const float CULLING_LOD_HYSTERESIS = 0.1;
+    float hysteresisOffset = (hysteresisHash - 0.5) * CULLING_LOD_HYSTERESIS;
+    float effectiveLodFactor = clamp(lodFactor + hysteresisOffset, 0.0, 1.0);
+    float dropThreshold = effectiveLodFactor * culling.maxLodDropRate;
+    return instanceHash < dropThreshold;
+}
+
 #endif // UBO_CULLING_GLSL
