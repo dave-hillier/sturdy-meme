@@ -9,18 +9,32 @@
 #pragma once
 
 #include <cmath>
+#include <memory>
 
 namespace town {
 
+// Forward declaration
+class Point;
+
+// Use shared_ptr for Point to match Haxe's reference semantics
+using PointPtr = std::shared_ptr<Point>;
+
 class Point {
+private:
+    static inline uint64_t nextId_ = 0;
+    uint64_t id_;
+
 public:
     float x;
     float y;
 
-    // Constructors
-    Point() : x(0.0f), y(0.0f) {}
-    Point(float x, float y) : x(x), y(y) {}
-    Point(const Point& other) : x(other.x), y(other.y) {}
+    // Constructors - each Point gets a unique ID for deterministic hashing
+    Point() : id_(nextId_++), x(0.0f), y(0.0f) {}
+    Point(float x, float y) : id_(nextId_++), x(x), y(y) {}
+    Point(const Point& other) : id_(nextId_++), x(other.x), y(other.y) {}
+
+    // Get unique ID for this point (used for deterministic hashing)
+    uint64_t getId() const { return id_; }
 
     // Assignment
     Point& operator=(const Point& other) {
@@ -42,12 +56,12 @@ public:
         return Point(x * scalar, y * scalar);
     }
 
-    bool operator==(const Point& other) const {
-        return x == other.x && y == other.y;
-    }
+    // NOTE: operator== and operator!= intentionally removed.
+    // In the original Haxe code, Point is a reference type and == compares identity.
+    // Use valuesEqual() for explicit coordinate comparison when needed.
 
-    bool operator!=(const Point& other) const {
-        return !(*this == other);
+    static bool valuesEqual(const Point& a, const Point& b) {
+        return a.x == b.x && a.y == b.y;
     }
 
     // OpenFL Point methods
@@ -143,6 +157,29 @@ public:
 // Allow scalar * Point as well as Point * scalar
 inline Point operator*(float scalar, const Point& p) {
     return Point(p.x * scalar, p.y * scalar);
+}
+
+// Factory functions for creating shared Points
+inline PointPtr makePoint() {
+    return std::make_shared<Point>();
+}
+
+inline PointPtr makePoint(float x, float y) {
+    return std::make_shared<Point>(x, y);
+}
+
+inline PointPtr makePoint(const Point& p) {
+    return std::make_shared<Point>(p);
+}
+
+// Explicit identity comparison (pointer equality) - matches Haxe reference semantics
+inline bool sameIdentity(const PointPtr& a, const PointPtr& b) {
+    return a.get() == b.get();
+}
+
+// Explicit coordinate comparison
+inline bool sameCoordinates(const PointPtr& a, const PointPtr& b) {
+    return Point::valuesEqual(*a, *b);
 }
 
 } // namespace town
