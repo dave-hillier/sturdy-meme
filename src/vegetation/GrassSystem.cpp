@@ -7,7 +7,6 @@
 #include "PipelineBuilder.h"
 #include "DescriptorManager.h"
 #include "UBOs.h"
-#include "VulkanBarriers.h"
 #include "VulkanResourceFactory.h"
 #include <vulkan/vulkan.hpp>
 #include <SDL3/SDL.h>
@@ -848,10 +847,22 @@ void GrassSystem::recordDisplacementUpdate(vk::CommandBuffer cmd, uint32_t frame
 
     // Transition displacement image to general layout if needed (first frame)
     // For subsequent frames, it should already be in GENERAL layout
-    Barriers::transitionImage(cmd, displacementImage_,
-        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
-        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-        0, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+    auto imageBarrier = vk::ImageMemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits(0))
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite)
+        .setOldLayout(vk::ImageLayout::eUndefined)
+        .setNewLayout(vk::ImageLayout::eGeneral)
+        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setImage(displacementImage_)
+        .setSubresourceRange(vk::ImageSubresourceRange{}
+            .setAspectMask(vk::ImageAspectFlagBits::eColor)
+            .setBaseMipLevel(0)
+            .setLevelCount(VK_REMAINING_MIP_LEVELS)
+            .setBaseArrayLayer(0)
+            .setLayerCount(VK_REMAINING_ARRAY_LAYERS));
+    cmd.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eComputeShader,
+                        {}, {}, {}, imageBarrier);
 
     // Dispatch displacement update compute shader using per-frame descriptor set (double-buffered)
     cmd.bindPipeline(vk::PipelineBindPoint::eCompute, **displacementPipeline_);
@@ -863,8 +874,22 @@ void GrassSystem::recordDisplacementUpdate(vk::CommandBuffer cmd, uint32_t frame
     cmd.dispatch(GrassConstants::DISPLACEMENT_DISPATCH_SIZE, GrassConstants::DISPLACEMENT_DISPATCH_SIZE, 1);
 
     // Barrier: displacement compute write -> grass compute read
-    Barriers::imageComputeToSampling(cmd, displacementImage_,
-        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+    auto samplingBarrier = vk::ImageMemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+        .setOldLayout(vk::ImageLayout::eGeneral)
+        .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setImage(displacementImage_)
+        .setSubresourceRange(vk::ImageSubresourceRange{}
+            .setAspectMask(vk::ImageAspectFlagBits::eColor)
+            .setBaseMipLevel(0)
+            .setLevelCount(1)
+            .setBaseArrayLayer(0)
+            .setLayerCount(1));
+    cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader,
+                        {}, {}, {}, samplingBarrier);
 }
 
 void GrassSystem::recordResetAndCompute(vk::CommandBuffer cmd, uint32_t frameIndex, float time) {
@@ -872,7 +897,11 @@ void GrassSystem::recordResetAndCompute(vk::CommandBuffer cmd, uint32_t frameInd
     uint32_t writeSet = particleSystem->getComputeBufferSet();
 
     // Ensure CPU writes to tile info buffer are visible to GPU before compute dispatch
-    Barriers::hostToCompute(cmd);
+    auto hostBarrier = vk::MemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eHostWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead);
+    cmd.pipelineBarrier(vk::PipelineStageFlagBits::eHost, vk::PipelineStageFlagBits::eComputeShader,
+                        {}, hostBarrier, {}, {});
 
     // Use tiled mode if enabled and tile manager is available
     if (tiledModeEnabled_ && tileManager_) {
@@ -901,7 +930,12 @@ void GrassSystem::recordResetAndCompute(vk::CommandBuffer cmd, uint32_t frameInd
     writer.update();
 
     // Reset indirect buffer before compute dispatch to prevent accumulation
-    Barriers::clearBufferForComputeReadWrite(cmd, indirectBuffers.buffers[writeSet], 0, sizeof(VkDrawIndirectCommand));
+    cmd.fillBuffer(indirectBuffers.buffers[writeSet], 0, sizeof(VkDrawIndirectCommand), 0);
+    auto clearBarrier = vk::MemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite);
+    cmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eComputeShader,
+                        {}, clearBarrier, {}, {});
 
     // Dispatch grass compute shader using the compute buffer set
     cmd.bindPipeline(vk::PipelineBindPoint::eCompute, getComputePipelineHandles().pipeline);
@@ -932,7 +966,12 @@ void GrassSystem::recordResetAndCompute(vk::CommandBuffer cmd, uint32_t frameInd
     // Memory barrier: compute write -> vertex shader read (storage buffer) and indirect read
     // Note: This barrier ensures the compute results are visible when we draw from this buffer
     // in the NEXT frame (after advanceBufferSet swaps the sets)
-    Barriers::computeToVertexAndIndirectDraw(cmd);
+    auto computeBarrier = vk::MemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eIndirectCommandRead);
+    cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader,
+                        vk::PipelineStageFlagBits::eDrawIndirect | vk::PipelineStageFlagBits::eVertexShader,
+                        {}, computeBarrier, {}, {});
 }
 
 void GrassSystem::recordDraw(vk::CommandBuffer cmd, uint32_t frameIndex, float time) {

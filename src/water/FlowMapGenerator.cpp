@@ -1,5 +1,4 @@
 #include "FlowMapGenerator.h"
-#include "VulkanBarriers.h"
 #include "VulkanResourceFactory.h"
 #include "CommandBufferUtils.h"
 #include <SDL3/SDL.h>
@@ -172,9 +171,48 @@ void FlowMapGenerator::uploadToGPU() {
     CommandScope cmd(device, commandPool, queue);
     if (!cmd.begin()) return;
 
-    // Copy staging buffer to flow map with automatic barrier transitions
-    Barriers::copyBufferToImage(cmd.get(), stagingBuffer.get(), flowMapImage,
-                                currentResolution, currentResolution);
+    // Copy staging buffer to flow map with manual barrier transitions
+    vk::CommandBuffer vkCmd(cmd.get());
+
+    // Transition image from UNDEFINED to TRANSFER_DST
+    auto barrier = vk::ImageMemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlags{})
+        .setDstAccessMask(vk::AccessFlagBits::eTransferWrite)
+        .setOldLayout(vk::ImageLayout::eUndefined)
+        .setNewLayout(vk::ImageLayout::eTransferDstOptimal)
+        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setImage(flowMapImage)
+        .setSubresourceRange(vk::ImageSubresourceRange{}
+            .setAspectMask(vk::ImageAspectFlagBits::eColor)
+            .setBaseMipLevel(0)
+            .setLevelCount(1)
+            .setBaseArrayLayer(0)
+            .setLayerCount(1));
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eTransfer,
+                          {}, {}, {}, barrier);
+
+    // Copy buffer to image
+    auto copyRegion = vk::BufferImageCopy{}
+        .setBufferOffset(0)
+        .setBufferRowLength(0)
+        .setBufferImageHeight(0)
+        .setImageSubresource(vk::ImageSubresourceLayers{}
+            .setAspectMask(vk::ImageAspectFlagBits::eColor)
+            .setMipLevel(0)
+            .setBaseArrayLayer(0)
+            .setLayerCount(1))
+        .setImageOffset(vk::Offset3D{0, 0, 0})
+        .setImageExtent(vk::Extent3D{currentResolution, currentResolution, 1});
+    vkCmd.copyBufferToImage(stagingBuffer.get(), flowMapImage, vk::ImageLayout::eTransferDstOptimal, copyRegion);
+
+    // Transition image from TRANSFER_DST to SHADER_READ_ONLY
+    barrier.setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+        .setOldLayout(vk::ImageLayout::eTransferDstOptimal)
+        .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal);
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eFragmentShader,
+                          {}, {}, {}, barrier);
 
     if (!cmd.end()) return;
 

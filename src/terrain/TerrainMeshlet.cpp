@@ -1,6 +1,5 @@
 #include "TerrainMeshlet.h"
 #include "VulkanResourceFactory.h"
-#include "VulkanBarriers.h"
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.hpp>
 #include <cstring>
@@ -311,7 +310,14 @@ void TerrainMeshlet::recordUpload(VkCommandBuffer cmd, uint32_t frameIndex) {
     vkCmd.copyBuffer(indexStagingBuffers_[bufferIndex].get(), indexBuffer_.get(), indexCopy);
 
     // Barrier: transfer -> vertex input (so the buffers are ready for drawing)
-    Barriers::transferToVertexInput(cmd);
+    {
+        auto barrier = vk::MemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eVertexAttributeRead | vk::AccessFlagBits::eIndexRead);
+        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+                              vk::PipelineStageFlagBits::eVertexInput,
+                              {}, barrier, {}, {});
+    }
 
     // Track upload progress
     if (pendingUploadFrames_ > 0) {

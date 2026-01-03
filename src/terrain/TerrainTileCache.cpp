@@ -1,6 +1,5 @@
 #include "TerrainTileCache.h"
 #include "TerrainHeight.h"
-#include "VulkanBarriers.h"
 #include "CommandBufferUtils.h"
 #include "VulkanResourceFactory.h"
 #include <SDL3/SDL.h>
@@ -128,11 +127,24 @@ bool TerrainTileCache::initInternal(const InitInfo& info) {
             .setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
         vkBeginCommandBuffer(cmd, reinterpret_cast<const VkCommandBufferBeginInfo*>(&beginInfo));
 
-        Barriers::transitionImage(cmd, tileArrayImage,
-            VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
-            0, VK_ACCESS_SHADER_READ_BIT,
-            VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, MAX_ACTIVE_TILES);
+        vk::CommandBuffer vkCmd(cmd);
+        auto barrier = vk::ImageMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlags{})
+            .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+            .setOldLayout(vk::ImageLayout::eUndefined)
+            .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(tileArrayImage)
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(MAX_ACTIVE_TILES));
+        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe,
+                              vk::PipelineStageFlagBits::eVertexShader,
+                              {}, {}, {}, barrier);
 
         vkEndCommandBuffer(cmd);
 
@@ -622,8 +634,66 @@ bool TerrainTileCache::uploadTileToGPU(TerrainTile& tile) {
     CommandScope cmd(device, commandPool, graphicsQueue);
     if (!cmd.begin()) return false;
 
-    // Copy staging buffer to tile image with automatic barrier transitions
-    Barriers::copyBufferToImage(cmd.get(), stagingBuffer.get(), tile.image, tileResolution, tileResolution);
+    // Copy staging buffer to tile image with explicit barriers
+    vk::CommandBuffer vkCmd(cmd.get());
+
+    // Transition to transfer dst
+    {
+        auto barrier = vk::ImageMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlags{})
+            .setDstAccessMask(vk::AccessFlagBits::eTransferWrite)
+            .setOldLayout(vk::ImageLayout::eUndefined)
+            .setNewLayout(vk::ImageLayout::eTransferDstOptimal)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(tile.image)
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1));
+        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe,
+                              vk::PipelineStageFlagBits::eTransfer,
+                              {}, {}, {}, barrier);
+    }
+
+    // Copy buffer to image
+    {
+        auto region = vk::BufferImageCopy{}
+            .setBufferOffset(0)
+            .setBufferRowLength(0)
+            .setBufferImageHeight(0)
+            .setImageSubresource(vk::ImageSubresourceLayers{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setMipLevel(0)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1))
+            .setImageOffset({0, 0, 0})
+            .setImageExtent({tileResolution, tileResolution, 1});
+        vkCmd.copyBufferToImage(stagingBuffer.get(), tile.image, vk::ImageLayout::eTransferDstOptimal, region);
+    }
+
+    // Transition to shader read
+    {
+        auto barrier = vk::ImageMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+            .setOldLayout(vk::ImageLayout::eTransferDstOptimal)
+            .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(tile.image)
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1));
+        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+                              vk::PipelineStageFlagBits::eFragmentShader,
+                              {}, {}, {}, barrier);
+    }
 
     if (!cmd.end()) return false;
 
@@ -758,23 +828,65 @@ void TerrainTileCache::copyTileToArrayLayer(TerrainTile* tile, uint32_t layerInd
     CommandScope cmd(device, commandPool, graphicsQueue);
     if (!cmd.begin()) return;
 
+    vk::CommandBuffer vkCmd(cmd.get());
+
     // Transition tile array layer to transfer dst
-    Barriers::transitionImage(cmd.get(), tileArrayImage,
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-        VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
-        VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, layerIndex, 1);
+    {
+        auto barrier = vk::ImageMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eShaderRead)
+            .setDstAccessMask(vk::AccessFlagBits::eTransferWrite)
+            .setOldLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+            .setNewLayout(vk::ImageLayout::eTransferDstOptimal)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(tileArrayImage)
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(layerIndex)
+                .setLayerCount(1));
+        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eVertexShader,
+                              vk::PipelineStageFlagBits::eTransfer,
+                              {}, {}, {}, barrier);
+    }
 
     // Copy buffer to image layer
-    Barriers::copyBufferToImageLayer(cmd.get(), stagingBuffer.get(), tileArrayImage,
-                                     tileResolution, tileResolution, layerIndex);
+    {
+        auto region = vk::BufferImageCopy{}
+            .setBufferOffset(0)
+            .setBufferRowLength(0)
+            .setBufferImageHeight(0)
+            .setImageSubresource(vk::ImageSubresourceLayers{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setMipLevel(0)
+                .setBaseArrayLayer(layerIndex)
+                .setLayerCount(1))
+            .setImageOffset({0, 0, 0})
+            .setImageExtent({tileResolution, tileResolution, 1});
+        vkCmd.copyBufferToImage(stagingBuffer.get(), tileArrayImage, vk::ImageLayout::eTransferDstOptimal, region);
+    }
 
     // Transition back to shader read
-    Barriers::transitionImage(cmd.get(), tileArrayImage,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
-        VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-        VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, layerIndex, 1);
+    {
+        auto barrier = vk::ImageMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+            .setOldLayout(vk::ImageLayout::eTransferDstOptimal)
+            .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(tileArrayImage)
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(layerIndex)
+                .setLayerCount(1));
+        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+                              vk::PipelineStageFlagBits::eVertexShader,
+                              {}, {}, {}, barrier);
+    }
 
     cmd.end();
     // ManagedBuffer automatically destroyed on scope exit
@@ -1115,8 +1227,65 @@ bool TerrainTileCache::createBaseHeightMap() {
     CommandScope cmd(device, commandPool, graphicsQueue);
     if (!cmd.begin()) return false;
 
-    Barriers::copyBufferToImage(cmd.get(), stagingBuffer.get(), baseHeightMapImage_,
-                                baseHeightMapResolution_, baseHeightMapResolution_);
+    vk::CommandBuffer vkCmd(cmd.get());
+
+    // Transition to transfer dst
+    {
+        auto barrier = vk::ImageMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlags{})
+            .setDstAccessMask(vk::AccessFlagBits::eTransferWrite)
+            .setOldLayout(vk::ImageLayout::eUndefined)
+            .setNewLayout(vk::ImageLayout::eTransferDstOptimal)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(baseHeightMapImage_)
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1));
+        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe,
+                              vk::PipelineStageFlagBits::eTransfer,
+                              {}, {}, {}, barrier);
+    }
+
+    // Copy buffer to image
+    {
+        auto region = vk::BufferImageCopy{}
+            .setBufferOffset(0)
+            .setBufferRowLength(0)
+            .setBufferImageHeight(0)
+            .setImageSubresource(vk::ImageSubresourceLayers{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setMipLevel(0)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1))
+            .setImageOffset({0, 0, 0})
+            .setImageExtent({baseHeightMapResolution_, baseHeightMapResolution_, 1});
+        vkCmd.copyBufferToImage(stagingBuffer.get(), baseHeightMapImage_, vk::ImageLayout::eTransferDstOptimal, region);
+    }
+
+    // Transition to shader read
+    {
+        auto barrier = vk::ImageMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+            .setOldLayout(vk::ImageLayout::eTransferDstOptimal)
+            .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(baseHeightMapImage_)
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1));
+        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+                              vk::PipelineStageFlagBits::eFragmentShader,
+                              {}, {}, {}, barrier);
+    }
 
     if (!cmd.end()) return false;
 
@@ -1275,9 +1444,65 @@ bool TerrainTileCache::uploadHoleMaskToGPUInternal() {
     CommandScope cmd(device, commandPool, graphicsQueue);
     if (!cmd.begin()) return false;
 
-    // Copy staging buffer to hole mask image with automatic barrier transitions
-    Barriers::copyBufferToImage(cmd.get(), stagingBuffer.get(), holeMaskImage_,
-                                holeMaskResolution_, holeMaskResolution_);
+    vk::CommandBuffer vkCmd(cmd.get());
+
+    // Transition to transfer dst
+    {
+        auto barrier = vk::ImageMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlags{})
+            .setDstAccessMask(vk::AccessFlagBits::eTransferWrite)
+            .setOldLayout(vk::ImageLayout::eUndefined)
+            .setNewLayout(vk::ImageLayout::eTransferDstOptimal)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(holeMaskImage_)
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1));
+        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe,
+                              vk::PipelineStageFlagBits::eTransfer,
+                              {}, {}, {}, barrier);
+    }
+
+    // Copy buffer to image
+    {
+        auto region = vk::BufferImageCopy{}
+            .setBufferOffset(0)
+            .setBufferRowLength(0)
+            .setBufferImageHeight(0)
+            .setImageSubresource(vk::ImageSubresourceLayers{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setMipLevel(0)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1))
+            .setImageOffset({0, 0, 0})
+            .setImageExtent({holeMaskResolution_, holeMaskResolution_, 1});
+        vkCmd.copyBufferToImage(stagingBuffer.get(), holeMaskImage_, vk::ImageLayout::eTransferDstOptimal, region);
+    }
+
+    // Transition to shader read
+    {
+        auto barrier = vk::ImageMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+            .setOldLayout(vk::ImageLayout::eTransferDstOptimal)
+            .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(holeMaskImage_)
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1));
+        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+                              vk::PipelineStageFlagBits::eFragmentShader,
+                              {}, {}, {}, barrier);
+    }
 
     if (!cmd.end()) return false;
 

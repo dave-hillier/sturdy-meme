@@ -4,7 +4,6 @@
 #include "DescriptorManager.h"
 #include "GpuProfiler.h"
 #include "UBOs.h"
-#include "VulkanBarriers.h"
 #include <vulkan/vulkan.hpp>
 #include <SDL3/SDL.h>
 #include <cstring>
@@ -671,7 +670,13 @@ void TerrainSystem::recordCompute(vk::CommandBuffer cmd, uint32_t frameIndex, Gp
         cameraOptimizer.recordComputeSkipped();
 
         // Still need the final barrier for rendering (CBT state unchanged but GPU needs it)
-        Barriers::computeToIndirectDraw(cmd);
+        vk::CommandBuffer vkCmd(cmd);
+        auto barrier = vk::MemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eIndirectCommandRead | vk::AccessFlagBits::eVertexAttributeRead);
+        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader,
+                              vk::PipelineStageFlagBits::eDrawIndirect | vk::PipelineStageFlagBits::eVertexInput,
+                              {}, barrier, {}, {});
         return;
     }
 
@@ -699,7 +704,13 @@ void TerrainSystem::recordCompute(vk::CommandBuffer cmd, uint32_t frameIndex, Gp
 
     if (profiler) profiler->endZone(cmd, "Terrain:Dispatcher");
 
-    Barriers::computeToComputeReadWrite(cmd);
+    {
+        auto barrier = vk::MemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite);
+        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader,
+                              {}, barrier, {}, {});
+    }
 
     // 2. Subdivision - LOD update with inline frustum culling
     // Ping-pong between split and merge to avoid race conditions
@@ -756,7 +767,13 @@ void TerrainSystem::recordCompute(vk::CommandBuffer cmd, uint32_t frameIndex, Gp
 
     subdivisionFrameCount++;
 
-    Barriers::computeToComputeReadWrite(cmd);
+    {
+        auto barrier = vk::MemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite);
+        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader,
+                              {}, barrier, {}, {});
+    }
 
     // 3. Sum reduction - rebuild the sum tree
     // Choose optimized or fallback path based on subgroup support
@@ -784,7 +801,13 @@ void TerrainSystem::recordCompute(vk::CommandBuffer cmd, uint32_t frameIndex, Gp
         uint32_t workgroups = std::max(1u, (1u << (config.maxDepth - 5)) / SUM_REDUCTION_WORKGROUP_SIZE);
         vkCmd.dispatch(workgroups, 1, 1);
 
-        Barriers::computeToComputeReadWrite(cmd);
+        {
+            auto barrier = vk::MemoryBarrier{}
+                .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+                .setDstAccessMask(vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite);
+            vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader,
+                                  {}, barrier, {}, {});
+        }
 
         levelsFromPrepass = 13;  // SWAR (5) + subgroup (5) + shared memory (3)
     } else {
@@ -801,7 +824,13 @@ void TerrainSystem::recordCompute(vk::CommandBuffer cmd, uint32_t frameIndex, Gp
         uint32_t workgroups = std::max(1u, (1u << (config.maxDepth - 5)) / SUM_REDUCTION_WORKGROUP_SIZE);
         vkCmd.dispatch(workgroups, 1, 1);
 
-        Barriers::computeToComputeReadWrite(cmd);
+        {
+            auto barrier = vk::MemoryBarrier{}
+                .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+                .setDstAccessMask(vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite);
+            vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader,
+                                  {}, barrier, {}, {});
+        }
 
         levelsFromPrepass = 5;
     }
@@ -828,7 +857,13 @@ void TerrainSystem::recordCompute(vk::CommandBuffer cmd, uint32_t frameIndex, Gp
             uint32_t workgroups = std::max(1u, (1u << depth) / SUM_REDUCTION_WORKGROUP_SIZE);
             vkCmd.dispatch(workgroups, 1, 1);
 
-            Barriers::computeToComputeReadWrite(cmd);
+            {
+                auto barrier = vk::MemoryBarrier{}
+                    .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+                    .setDstAccessMask(vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite);
+                vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader,
+                                      {}, barrier, {}, {});
+            }
         }
 
         if (profiler) profiler->endZone(cmd, "Terrain:SumReductionLevels");
@@ -847,7 +882,14 @@ void TerrainSystem::recordCompute(vk::CommandBuffer cmd, uint32_t frameIndex, Gp
     if (profiler) profiler->endZone(cmd, "Terrain:FinalDispatch");
 
     // Final barrier before rendering
-    Barriers::computeToIndirectDraw(cmd);
+    {
+        auto barrier = vk::MemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eIndirectCommandRead | vk::AccessFlagBits::eVertexAttributeRead);
+        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader,
+                              vk::PipelineStageFlagBits::eDrawIndirect | vk::PipelineStageFlagBits::eVertexInput,
+                              {}, barrier, {}, {});
+    }
 }
 
 void TerrainSystem::recordDraw(vk::CommandBuffer cmd, uint32_t frameIndex) {
@@ -909,7 +951,15 @@ void TerrainSystem::recordShadowCull(vk::CommandBuffer cmd, uint32_t frameIndex,
     vk::CommandBuffer vkCmd = cmd;
 
     // Clear the shadow visible count to 0 and barrier for compute
-    Barriers::clearBufferForCompute(cmd, buffers->getShadowVisibleBuffer());
+    vkCmd.fillBuffer(buffers->getShadowVisibleBuffer(), 0, sizeof(uint32_t), 0);
+    {
+        auto barrier = vk::MemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eShaderRead);
+        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+                              vk::PipelineStageFlagBits::eComputeShader,
+                              {}, barrier, {}, {});
+    }
 
     // Bind shadow cull compute pipeline
     vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, pipelines->getShadowCullPipeline());
@@ -938,7 +988,14 @@ void TerrainSystem::recordShadowCull(vk::CommandBuffer cmd, uint32_t frameIndex,
     vkCmd.dispatchIndirect(buffers->getIndirectDispatchBuffer(), 0);
 
     // Memory barrier to ensure shadow cull results are visible for draw
-    Barriers::computeToIndirectDraw(cmd);
+    {
+        auto barrier = vk::MemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eIndirectCommandRead | vk::AccessFlagBits::eVertexAttributeRead);
+        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader,
+                              vk::PipelineStageFlagBits::eDrawIndirect | vk::PipelineStageFlagBits::eVertexInput,
+                              {}, barrier, {}, {});
+    }
 }
 
 void TerrainSystem::recordShadowDraw(vk::CommandBuffer cmd, uint32_t frameIndex,

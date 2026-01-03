@@ -1,7 +1,6 @@
 #include "SSRSystem.h"
 #include "ShaderLoader.h"
 #include "DescriptorManager.h"
-#include "VulkanBarriers.h"
 #include "CommandBufferUtils.h"
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.hpp>
@@ -239,11 +238,53 @@ bool SSRSystem::createSSRBuffers() {
         CommandScope cmdScope(device, commandPool, computeQueue);
         if (!cmdScope.begin()) return false;
 
+        vk::CommandBuffer vkCmd(cmdScope.get());
+
         // Transition both result buffers and intermediate buffer to GENERAL for compute
         for (int i = 0; i < 2; i++) {
-            Barriers::prepareImageForCompute(cmdScope.get(), ssrResult[i]);
+            auto barrier = vk::ImageMemoryBarrier{}
+                .setSrcAccessMask(vk::AccessFlags{})
+                .setDstAccessMask(vk::AccessFlagBits::eShaderWrite)
+                .setOldLayout(vk::ImageLayout::eUndefined)
+                .setNewLayout(vk::ImageLayout::eGeneral)
+                .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                .setImage(ssrResult[i])
+                .setSubresourceRange(vk::ImageSubresourceRange{}
+                    .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                    .setBaseMipLevel(0)
+                    .setLevelCount(1)
+                    .setBaseArrayLayer(0)
+                    .setLayerCount(1));
+
+            vkCmd.pipelineBarrier(
+                vk::PipelineStageFlagBits::eTopOfPipe,
+                vk::PipelineStageFlagBits::eComputeShader,
+                {}, {}, {}, barrier);
         }
-        Barriers::prepareImageForCompute(cmdScope.get(), ssrIntermediate);
+
+        // Transition intermediate buffer
+        {
+            auto barrier = vk::ImageMemoryBarrier{}
+                .setSrcAccessMask(vk::AccessFlags{})
+                .setDstAccessMask(vk::AccessFlagBits::eShaderWrite)
+                .setOldLayout(vk::ImageLayout::eUndefined)
+                .setNewLayout(vk::ImageLayout::eGeneral)
+                .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                .setImage(ssrIntermediate)
+                .setSubresourceRange(vk::ImageSubresourceRange{}
+                    .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                    .setBaseMipLevel(0)
+                    .setLevelCount(1)
+                    .setBaseArrayLayer(0)
+                    .setLayerCount(1));
+
+            vkCmd.pipelineBarrier(
+                vk::PipelineStageFlagBits::eTopOfPipe,
+                vk::PipelineStageFlagBits::eComputeShader,
+                {}, {}, {}, barrier);
+        }
 
         if (!cmdScope.end()) return false;
     }
@@ -479,10 +520,25 @@ void SSRSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex,
     // If blur is enabled, dispatch blur pass
     if (blurEnabled && blurPipeline_) {
         // Barrier: SSR output -> blur input
-        Barriers::transitionImage(cmd, ssrOutputImage,
-            VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
+        auto barrier = vk::ImageMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+            .setOldLayout(vk::ImageLayout::eGeneral)
+            .setNewLayout(vk::ImageLayout::eGeneral)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(ssrOutputImage)
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1));
+
+        vkCmd.pipelineBarrier(
+            vk::PipelineStageFlagBits::eComputeShader,
+            vk::PipelineStageFlagBits::eComputeShader,
+            {}, {}, {}, barrier);
 
         // Update blur descriptor set using SetWriter
         DescriptorManager::SetWriter(device, blurDescriptorSets[frameIndex])
@@ -508,16 +564,48 @@ void SSRSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex,
         vkCmd.dispatch(groupsX, groupsY, 1);
 
         // Final barrier: blur output -> fragment shader
-        Barriers::transitionImage(cmd, ssrResult[writeBuffer],
-            VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-            VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
+        {
+            auto barrier = vk::ImageMemoryBarrier{}
+                .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+                .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+                .setOldLayout(vk::ImageLayout::eGeneral)
+                .setNewLayout(vk::ImageLayout::eGeneral)
+                .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                .setImage(ssrResult[writeBuffer])
+                .setSubresourceRange(vk::ImageSubresourceRange{}
+                    .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                    .setBaseMipLevel(0)
+                    .setLevelCount(1)
+                    .setBaseArrayLayer(0)
+                    .setLayerCount(1));
+
+            vkCmd.pipelineBarrier(
+                vk::PipelineStageFlagBits::eComputeShader,
+                vk::PipelineStageFlagBits::eFragmentShader,
+                {}, {}, {}, barrier);
+        }
     } else {
         // No blur - barrier directly to fragment shader
-        Barriers::transitionImage(cmd, ssrOutputImage,
-            VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-            VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
+        auto barrier = vk::ImageMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+            .setOldLayout(vk::ImageLayout::eGeneral)
+            .setNewLayout(vk::ImageLayout::eGeneral)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(ssrOutputImage)
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1));
+
+        vkCmd.pipelineBarrier(
+            vk::PipelineStageFlagBits::eComputeShader,
+            vk::PipelineStageFlagBits::eFragmentShader,
+            {}, {}, {}, barrier);
     }
 
     // Swap buffers for next frame

@@ -1,6 +1,5 @@
 #include "FoamBuffer.h"
 #include "ShaderLoader.h"
-#include "VulkanBarriers.h"
 #include "VulkanResourceFactory.h"
 #include "DescriptorManager.h"
 #include <SDL3/SDL_log.h>
@@ -338,16 +337,43 @@ void FoamBuffer::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, float d
         .update();
 
     // Transition write buffer to general layout
-    Barriers::prepareImageForCompute(cmd, foamBuffer[writeBuffer]);
+    vk::CommandBuffer vkCmd(cmd);
+    auto writeBarrier = vk::ImageMemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlags{})
+        .setDstAccessMask(vk::AccessFlagBits::eShaderWrite)
+        .setOldLayout(vk::ImageLayout::eUndefined)
+        .setNewLayout(vk::ImageLayout::eGeneral)
+        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setImage(foamBuffer[writeBuffer])
+        .setSubresourceRange(vk::ImageSubresourceRange{}
+            .setAspectMask(vk::ImageAspectFlagBits::eColor)
+            .setBaseMipLevel(0)
+            .setLevelCount(1)
+            .setBaseArrayLayer(0)
+            .setLayerCount(1));
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eComputeShader,
+                          {}, {}, {}, writeBarrier);
 
     // Transition read buffer to shader read if needed
-    Barriers::transitionImage(cmd, foamBuffer[readBuffer],
-        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-        0, VK_ACCESS_SHADER_READ_BIT);
+    auto readBarrier = vk::ImageMemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlags{})
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+        .setOldLayout(vk::ImageLayout::eUndefined)
+        .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setImage(foamBuffer[readBuffer])
+        .setSubresourceRange(vk::ImageSubresourceRange{}
+            .setAspectMask(vk::ImageAspectFlagBits::eColor)
+            .setBaseMipLevel(0)
+            .setLevelCount(1)
+            .setBaseArrayLayer(0)
+            .setLayerCount(1));
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eComputeShader,
+                          {}, {}, {}, readBarrier);
 
     // Bind compute pipeline
-    vk::CommandBuffer vkCmd(cmd);
     vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, **computePipeline_);
     vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, **computePipelineLayout_,
                              0, vk::DescriptorSet(descriptorSets[descSetIndex]), {});
@@ -374,7 +400,22 @@ void FoamBuffer::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, float d
     vkCmd.dispatch(groupsX, groupsY, 1);
 
     // Transition write buffer to shader read for water shader sampling
-    Barriers::imageComputeToSampling(cmd, foamBuffer[writeBuffer]);
+    auto samplingBarrier = vk::ImageMemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+        .setOldLayout(vk::ImageLayout::eGeneral)
+        .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setImage(foamBuffer[writeBuffer])
+        .setSubresourceRange(vk::ImageSubresourceRange{}
+            .setAspectMask(vk::ImageAspectFlagBits::eColor)
+            .setBaseMipLevel(0)
+            .setLevelCount(1)
+            .setBaseArrayLayer(0)
+            .setLayerCount(1));
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eFragmentShader,
+                          {}, {}, {}, samplingBarrier);
 
     // Swap buffers for next frame
     currentBuffer = writeBuffer;
@@ -421,7 +462,23 @@ void FoamBuffer::clear(VkCommandBuffer cmd) {
     vk::CommandBuffer vkCmd(cmd);
 
     for (int i = 0; i < 2; i++) {
-        Barriers::prepareImageForTransferDst(cmd, foamBuffer[i]);
+        // Transition to transfer dst
+        auto transferDstBarrier = vk::ImageMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlags{})
+            .setDstAccessMask(vk::AccessFlagBits::eTransferWrite)
+            .setOldLayout(vk::ImageLayout::eUndefined)
+            .setNewLayout(vk::ImageLayout::eTransferDstOptimal)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(foamBuffer[i])
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1));
+        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eTransfer,
+                              {}, {}, {}, transferDstBarrier);
 
         auto range = vk::ImageSubresourceRange{}
             .setAspectMask(vk::ImageAspectFlagBits::eColor)
@@ -432,7 +489,23 @@ void FoamBuffer::clear(VkCommandBuffer cmd) {
 
         vkCmd.clearColorImage(foamBuffer[i], vk::ImageLayout::eTransferDstOptimal, clearValue, range);
 
-        Barriers::imageTransferToSampling(cmd, foamBuffer[i]);
+        // Transition to shader read
+        auto samplingBarrier = vk::ImageMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+            .setOldLayout(vk::ImageLayout::eTransferDstOptimal)
+            .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(foamBuffer[i])
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1));
+        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eFragmentShader,
+                              {}, {}, {}, samplingBarrier);
     }
 
     currentBuffer = 0;

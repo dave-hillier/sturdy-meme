@@ -3,7 +3,6 @@
 #include "BilateralGridSystem.h"
 #include "ShaderLoader.h"
 #include "DescriptorManager.h"
-#include "VulkanBarriers.h"
 #include "VulkanResourceFactory.h"
 #include "CommandBufferUtils.h"
 #include <SDL3/SDL.h>
@@ -941,17 +940,47 @@ void PostProcessSystem::recordHistogramCompute(VkCommandBuffer cmd, uint32_t fra
     // (required if memory is not HOST_COHERENT)
     vmaFlushAllocation(allocator, histogramParamsBuffers.allocations[frameIndex], 0, sizeof(HistogramReduceParams));
 
+    vk::CommandBuffer vkCmd(cmd);
+
     // Transition HDR image to general layout for compute access
-    Barriers::transitionImage(cmd, hdrColorImage,
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
+    {
+        auto barrier = vk::ImageMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eColorAttachmentWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+            .setOldLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+            .setNewLayout(vk::ImageLayout::eGeneral)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(hdrColorImage)
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1));
+
+        vkCmd.pipelineBarrier(
+            vk::PipelineStageFlagBits::eColorAttachmentOutput,
+            vk::PipelineStageFlagBits::eComputeShader,
+            {}, {}, {}, barrier);
+    }
 
     // Clear histogram buffer
-    Barriers::clearBufferForComputeReadWrite(cmd, histogramBuffer.get(), 0, HISTOGRAM_BINS * sizeof(uint32_t));
+    vkCmd.fillBuffer(histogramBuffer.get(), 0, HISTOGRAM_BINS * sizeof(uint32_t), 0);
+
+    // Barrier after fillBuffer
+    {
+        auto memBarrier = vk::MemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite);
+
+        vkCmd.pipelineBarrier(
+            vk::PipelineStageFlagBits::eTransfer,
+            vk::PipelineStageFlagBits::eComputeShader,
+            {}, memBarrier, {}, {});
+    }
 
     // Dispatch histogram build
-    vk::CommandBuffer vkCmd(cmd);
     vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, histogramBuildPipeline);
     vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, histogramBuildPipelineLayout,
                              0, vk::DescriptorSet(histogramBuildDescSets[frameIndex]), {});
@@ -960,7 +989,22 @@ void PostProcessSystem::recordHistogramCompute(VkCommandBuffer cmd, uint32_t fra
     uint32_t groupsY = (extent.height + 15) / 16;
     vkCmd.dispatch(groupsX, groupsY, 1);
 
-    barrierHistogramBuildToReduce(cmd);
+    // Barrier: histogram build -> reduce
+    {
+        auto bufBarrier = vk::BufferMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setBuffer(histogramBuffer.get())
+            .setOffset(0)
+            .setSize(HISTOGRAM_BINS * sizeof(uint32_t));
+
+        vkCmd.pipelineBarrier(
+            vk::PipelineStageFlagBits::eComputeShader,
+            vk::PipelineStageFlagBits::eComputeShader,
+            {}, {}, bufBarrier, {});
+    }
 
     // Dispatch histogram reduce (single workgroup of 256 threads)
     vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, histogramReducePipeline);
@@ -968,28 +1012,41 @@ void PostProcessSystem::recordHistogramCompute(VkCommandBuffer cmd, uint32_t fra
                              0, vk::DescriptorSet(histogramReduceDescSets[frameIndex]), {});
     vkCmd.dispatch(1, 1, 1);
 
-    barrierHistogramReduceComplete(cmd, frameIndex);
+    // Barrier: histogram reduce complete
+    {
+        std::array<vk::BufferMemoryBarrier, 1> bufBarriers;
+        bufBarriers[0] = vk::BufferMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eHostRead)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setBuffer(exposureBuffers.buffers[frameIndex])
+            .setOffset(0)
+            .setSize(sizeof(ExposureData));
+
+        std::array<vk::ImageMemoryBarrier, 1> imgBarriers;
+        imgBarriers[0] = vk::ImageMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eShaderRead)
+            .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+            .setOldLayout(vk::ImageLayout::eGeneral)
+            .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(hdrColorImage)
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1));
+
+        vkCmd.pipelineBarrier(
+            vk::PipelineStageFlagBits::eComputeShader,
+            vk::PipelineStageFlagBits::eHost | vk::PipelineStageFlagBits::eFragmentShader,
+            {}, {}, bufBarriers, imgBarriers);
+    }
 }
 
-void PostProcessSystem::barrierHistogramBuildToReduce(VkCommandBuffer cmd) {
-    Barriers::BarrierBatch(cmd)
-        .setStages(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT)
-        .bufferBarrier(histogramBuffer.get(), VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-                       0, HISTOGRAM_BINS * sizeof(uint32_t))
-        .submit();
-}
-
-void PostProcessSystem::barrierHistogramReduceComplete(VkCommandBuffer cmd, uint32_t frameIndex) {
-    Barriers::BarrierBatch(cmd)
-        .setStages(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                   VK_PIPELINE_STAGE_HOST_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT)
-        .bufferBarrier(exposureBuffers.buffers[frameIndex], VK_ACCESS_SHADER_WRITE_BIT,
-                       VK_ACCESS_HOST_READ_BIT, 0, sizeof(ExposureData))
-        .imageTransition(hdrColorImage,
-                         VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                         VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_SHADER_READ_BIT)
-        .submit();
-}
 
 void PostProcessSystem::setFroxelVolume(VkImageView volumeView, VkSampler volumeSampler) {
     froxelVolumeView = volumeView;

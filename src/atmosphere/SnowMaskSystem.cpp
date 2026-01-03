@@ -3,7 +3,6 @@
 #include "InitContext.h"
 #include "ShaderLoader.h"
 #include "PipelineBuilder.h"
-#include "VulkanBarriers.h"
 #include "VulkanResourceFactory.h"
 #include "DescriptorManager.h"
 #include <SDL3/SDL.h>
@@ -282,23 +281,24 @@ void SnowMaskSystem::setMaskCenter(const glm::vec3& worldPos) {
 }
 
 void SnowMaskSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) {
+    vk::CommandBuffer vkCmd(cmd);
+
     // Transition snow mask image to general layout for compute write
-    if (isFirstFrame) {
-        // First frame: image is in undefined state
-        Barriers::transitionImage(cmd, snowMaskImage,
-            VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
-            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            0, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
-    } else {
-        // Subsequent frames: image was left in SHADER_READ_ONLY_OPTIMAL
-        Barriers::transitionImage(cmd, snowMaskImage,
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
-            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
-    }
+    auto prepareBarrier = vk::ImageMemoryBarrier{}
+        .setSrcAccessMask(isFirstFrame ? vk::AccessFlags{} : vk::AccessFlagBits::eShaderRead)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite)
+        .setOldLayout(isFirstFrame ? vk::ImageLayout::eUndefined : vk::ImageLayout::eShaderReadOnlyOptimal)
+        .setNewLayout(vk::ImageLayout::eGeneral)
+        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setImage(snowMaskImage)
+        .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
+    vkCmd.pipelineBarrier(
+        isFirstFrame ? vk::PipelineStageFlagBits::eTopOfPipe : vk::PipelineStageFlagBits::eFragmentShader,
+        vk::PipelineStageFlagBits::eComputeShader,
+        {}, {}, {}, prepareBarrier);
 
     // Bind compute pipeline and descriptor set
-    vk::CommandBuffer vkCmd(cmd);
     vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, getComputePipelineHandles().pipeline);
     vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute,
                              getComputePipelineHandles().pipelineLayout, 0,
@@ -309,8 +309,17 @@ void SnowMaskSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) {
     vkCmd.dispatch(workgroupCount, workgroupCount, 1);
 
     // Transition snow mask to shader read optimal for fragment shaders
-    Barriers::imageComputeToSampling(cmd, snowMaskImage,
-        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+    auto samplingBarrier = vk::ImageMemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+        .setOldLayout(vk::ImageLayout::eGeneral)
+        .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setImage(snowMaskImage)
+        .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eFragmentShader,
+                          {}, {}, {}, samplingBarrier);
 
     // Mark first frame as done
     isFirstFrame = false;

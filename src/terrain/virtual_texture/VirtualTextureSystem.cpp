@@ -1,5 +1,5 @@
 #include "VirtualTextureSystem.h"
-#include "VulkanBarriers.h"
+#include <vulkan/vulkan.hpp>
 #include <SDL3/SDL_log.h>
 #include <algorithm>
 
@@ -88,11 +88,13 @@ void VirtualTextureSystem::beginFrame(VkCommandBuffer cmd, uint32_t frameIndex) 
 
 void VirtualTextureSystem::endFrame(VkCommandBuffer cmd, uint32_t frameIndex) {
     // Memory barrier to ensure shader writes are visible before transfer
-    {
-        Barriers::BarrierBatch batch(cmd,
-            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
-        batch.memoryBarrier(VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
-    }
+    vk::CommandBuffer vkCmd(cmd);
+    auto barrier = vk::MemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eTransferRead);
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eFragmentShader,
+                          vk::PipelineStageFlagBits::eTransfer,
+                          {}, barrier, {}, {});
 
     // Copy feedback buffer from GPU storage to CPU readback buffer
     // The actual CPU read will happen in a future frame after fence wait

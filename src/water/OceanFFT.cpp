@@ -1,7 +1,6 @@
 #include "OceanFFT.h"
 #include "ShaderLoader.h"
 #include "DescriptorManager.h"
-#include "VulkanBarriers.h"
 #include "shaders/bindings.h"
 #include <SDL_log.h>
 #include <cmath>
@@ -731,7 +730,12 @@ void OceanFFT::update(VkCommandBuffer cmd, uint32_t frameIndex, float time) {
         recordTimeEvolution(cmd, cascade, time);
 
         // Insert barrier between time evolution and FFT
-        Barriers::computeToCompute(cmd);
+        vk::CommandBuffer vkCmd(cmd);
+        auto barrier = vk::MemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eShaderRead);
+        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader,
+                              {}, barrier, {}, {});
 
         // FFT for each displacement component
         recordFFT(cmd, cascade, cascade.hktDy.get(), **cascade.hktDyView,
@@ -742,18 +746,29 @@ void OceanFFT::update(VkCommandBuffer cmd, uint32_t frameIndex, float time) {
                   cascade.fftPing.get(), **cascade.fftPingView);
 
         // Barrier before displacement generation
-        Barriers::computeToCompute(cmd);
+        {
+            vk::CommandBuffer vkCmd2(cmd);
+            auto barrier2 = vk::MemoryBarrier{}
+                .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+                .setDstAccessMask(vk::AccessFlagBits::eShaderRead);
+            vkCmd2.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader,
+                                  {}, barrier2, {}, {});
+        }
 
         // Generate final displacement/normal/foam maps
         recordDisplacementGeneration(cmd, cascade);
     }
 
     // Final barrier before water shader can sample
-    Barriers::BarrierBatch(cmd,
-        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-        VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT)
-        .memoryBarrier(VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT)
-        .submit();
+    {
+        vk::CommandBuffer vkCmd3(cmd);
+        auto barrier3 = vk::MemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eShaderRead);
+        vkCmd3.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader,
+                              vk::PipelineStageFlagBits::eVertexShader | vk::PipelineStageFlagBits::eFragmentShader,
+                              {}, barrier3, {}, {});
+    }
 }
 
 void OceanFFT::regenerateSpectrum(VkCommandBuffer cmd) {
@@ -776,19 +791,50 @@ void OceanFFT::regenerateSpectrum(VkCommandBuffer cmd) {
     }
 
     // Barrier after spectrum generation
-    Barriers::computeToCompute(cmd);
+    vk::CommandBuffer vkCmd(cmd);
+    auto barrier = vk::MemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead);
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader,
+                          {}, barrier, {}, {});
 }
 
 void OceanFFT::recordSpectrumGeneration(VkCommandBuffer cmd, Cascade& cascade, uint32_t seed) {
     vk::CommandBuffer vkCmd(cmd);
 
     // Transition images to general layout for compute writes
-    Barriers::BarrierBatch(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT)
-        .imageTransition(cascade.h0Spectrum.get(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
-                         0, VK_ACCESS_SHADER_WRITE_BIT)
-        .imageTransition(cascade.omegaSpectrum.get(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
-                         0, VK_ACCESS_SHADER_WRITE_BIT)
-        .submit();
+    std::array<vk::ImageMemoryBarrier, 2> barriers = {
+        vk::ImageMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlags{})
+            .setDstAccessMask(vk::AccessFlagBits::eShaderWrite)
+            .setOldLayout(vk::ImageLayout::eUndefined)
+            .setNewLayout(vk::ImageLayout::eGeneral)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(cascade.h0Spectrum.get())
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1)),
+        vk::ImageMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlags{})
+            .setDstAccessMask(vk::AccessFlagBits::eShaderWrite)
+            .setOldLayout(vk::ImageLayout::eUndefined)
+            .setNewLayout(vk::ImageLayout::eGeneral)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(cascade.omegaSpectrum.get())
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1))
+    };
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eComputeShader,
+                          {}, {}, {}, barriers);
 
     // Bind pipeline and descriptor set
     int cascadeIndex = static_cast<int>(&cascade - &cascades[0]);
@@ -802,12 +848,38 @@ void OceanFFT::recordSpectrumGeneration(VkCommandBuffer cmd, Cascade& cascade, u
     vkCmd.dispatch(groupCount, groupCount, 1);
 
     // Transition to shader read for time evolution
-    Barriers::BarrierBatch(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT)
-        .imageTransition(cascade.h0Spectrum.get(), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                         VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT)
-        .imageTransition(cascade.omegaSpectrum.get(), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                         VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT)
-        .submit();
+    std::array<vk::ImageMemoryBarrier, 2> readBarriers = {
+        vk::ImageMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+            .setOldLayout(vk::ImageLayout::eGeneral)
+            .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(cascade.h0Spectrum.get())
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1)),
+        vk::ImageMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+            .setOldLayout(vk::ImageLayout::eGeneral)
+            .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(cascade.omegaSpectrum.get())
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1))
+    };
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader,
+                          {}, {}, {}, readBarriers);
 }
 
 void OceanFFT::recordTimeEvolution(VkCommandBuffer cmd, Cascade& cascade, float time) {
@@ -815,14 +887,52 @@ void OceanFFT::recordTimeEvolution(VkCommandBuffer cmd, Cascade& cascade, float 
     int cascadeIndex = static_cast<int>(&cascade - &cascades[0]);
 
     // Transition output images to general layout
-    Barriers::BarrierBatch(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT)
-        .imageTransition(cascade.hktDy.get(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
-                         0, VK_ACCESS_SHADER_WRITE_BIT)
-        .imageTransition(cascade.hktDx.get(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
-                         0, VK_ACCESS_SHADER_WRITE_BIT)
-        .imageTransition(cascade.hktDz.get(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
-                         0, VK_ACCESS_SHADER_WRITE_BIT)
-        .submit();
+    std::array<vk::ImageMemoryBarrier, 3> barriers = {
+        vk::ImageMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlags{})
+            .setDstAccessMask(vk::AccessFlagBits::eShaderWrite)
+            .setOldLayout(vk::ImageLayout::eUndefined)
+            .setNewLayout(vk::ImageLayout::eGeneral)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(cascade.hktDy.get())
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1)),
+        vk::ImageMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlags{})
+            .setDstAccessMask(vk::AccessFlagBits::eShaderWrite)
+            .setOldLayout(vk::ImageLayout::eUndefined)
+            .setNewLayout(vk::ImageLayout::eGeneral)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(cascade.hktDx.get())
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1)),
+        vk::ImageMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlags{})
+            .setDstAccessMask(vk::AccessFlagBits::eShaderWrite)
+            .setOldLayout(vk::ImageLayout::eUndefined)
+            .setNewLayout(vk::ImageLayout::eGeneral)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(cascade.hktDz.get())
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1))
+    };
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eComputeShader,
+                          {}, {}, {}, barriers);
 
     // Bind pipeline
     vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, **timeEvolutionPipeline_);
@@ -899,7 +1009,13 @@ void OceanFFT::recordFFT(VkCommandBuffer cmd, Cascade& cascade,
         vkCmd.dispatch(groupCount, groupCount, 1);
 
         // Barrier between stages
-        Barriers::computeToCompute(cmd);
+        {
+            auto barrier = vk::MemoryBarrier{}
+                .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+                .setDstAccessMask(vk::AccessFlagBits::eShaderRead);
+            vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader,
+                                  {}, barrier, {}, {});
+        }
 
         // Swap buffers for ping-pong
         std::swap(currentInput, currentOutput);
@@ -937,7 +1053,13 @@ void OceanFFT::recordFFT(VkCommandBuffer cmd, Cascade& cascade,
 
         vkCmd.dispatch(groupCount, groupCount, 1);
 
-        Barriers::computeToCompute(cmd);
+        {
+            auto barrier = vk::MemoryBarrier{}
+                .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+                .setDstAccessMask(vk::AccessFlagBits::eShaderRead);
+            vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader,
+                                  {}, barrier, {}, {});
+        }
 
         std::swap(currentInput, currentOutput);
         std::swap(currentInputView, currentOutputView);
@@ -955,15 +1077,55 @@ void OceanFFT::recordFFT(VkCommandBuffer cmd, Cascade& cascade,
 void OceanFFT::recordDisplacementGeneration(VkCommandBuffer cmd, Cascade& cascade) {
     int cascadeIndex = static_cast<int>(&cascade - &cascades[0]);
 
+    vk::CommandBuffer vkCmd(cmd);
+
     // Transition output images to general layout for compute writes
-    Barriers::BarrierBatch(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT)
-        .imageTransition(cascade.displacementMap.get(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
-                         0, VK_ACCESS_SHADER_WRITE_BIT)
-        .imageTransition(cascade.normalMap.get(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
-                         0, VK_ACCESS_SHADER_WRITE_BIT)
-        .imageTransition(cascade.foamMap.get(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
-                         0, VK_ACCESS_SHADER_WRITE_BIT)
-        .submit();
+    std::array<vk::ImageMemoryBarrier, 3> barriers = {
+        vk::ImageMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlags{})
+            .setDstAccessMask(vk::AccessFlagBits::eShaderWrite)
+            .setOldLayout(vk::ImageLayout::eUndefined)
+            .setNewLayout(vk::ImageLayout::eGeneral)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(cascade.displacementMap.get())
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1)),
+        vk::ImageMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlags{})
+            .setDstAccessMask(vk::AccessFlagBits::eShaderWrite)
+            .setOldLayout(vk::ImageLayout::eUndefined)
+            .setNewLayout(vk::ImageLayout::eGeneral)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(cascade.normalMap.get())
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1)),
+        vk::ImageMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlags{})
+            .setDstAccessMask(vk::AccessFlagBits::eShaderWrite)
+            .setOldLayout(vk::ImageLayout::eUndefined)
+            .setNewLayout(vk::ImageLayout::eGeneral)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(cascade.foamMap.get())
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1))
+    };
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eComputeShader,
+                          {}, {}, {}, barriers);
 
     // Update displacement descriptor set with current FFT results
     DescriptorManager::SetWriter(device, displacementDescSets[cascadeIndex])
@@ -976,7 +1138,6 @@ void OceanFFT::recordDisplacementGeneration(VkCommandBuffer cmd, Cascade& cascad
         .update();
 
     // Bind and dispatch
-    vk::CommandBuffer vkCmd(cmd);
     vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, **displacementPipeline_);
     vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, **displacementPipelineLayout_,
                              0, displacementDescSets[cascadeIndex], {});
@@ -999,15 +1160,53 @@ void OceanFFT::recordDisplacementGeneration(VkCommandBuffer cmd, Cascade& cascad
     vkCmd.dispatch(groupCount, groupCount, 1);
 
     // Transition outputs to shader read
-    Barriers::BarrierBatch(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                           VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT)
-        .imageTransition(cascade.displacementMap.get(), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                         VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT)
-        .imageTransition(cascade.normalMap.get(), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                         VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT)
-        .imageTransition(cascade.foamMap.get(), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                         VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT)
-        .submit();
+    std::array<vk::ImageMemoryBarrier, 3> readBarriers = {
+        vk::ImageMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+            .setOldLayout(vk::ImageLayout::eGeneral)
+            .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(cascade.displacementMap.get())
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1)),
+        vk::ImageMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+            .setOldLayout(vk::ImageLayout::eGeneral)
+            .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(cascade.normalMap.get())
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1)),
+        vk::ImageMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+            .setOldLayout(vk::ImageLayout::eGeneral)
+            .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(cascade.foamMap.get())
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1))
+    };
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader,
+                          vk::PipelineStageFlagBits::eVertexShader | vk::PipelineStageFlagBits::eFragmentShader,
+                          {}, {}, {}, readBarriers);
 }
 
 VkImageView OceanFFT::getDisplacementView(int cascade) const {

@@ -1,5 +1,4 @@
 #include "VirtualTextureCache.h"
-#include "VulkanBarriers.h"
 #include "VulkanResourceFactory.h"
 #include <vulkan/vulkan.hpp>
 #include <SDL3/SDL_log.h>
@@ -235,10 +234,24 @@ bool VirtualTextureCache::createCacheTexture(VkDevice device, VmaAllocator alloc
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(cmd, &beginInfo);
 
-    Barriers::transitionImage(cmd, cacheImage,
-        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-        0, VK_ACCESS_SHADER_READ_BIT);
+    vk::CommandBuffer vkCmd(cmd);
+    auto barrier = vk::ImageMemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlags{})
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+        .setOldLayout(vk::ImageLayout::eUndefined)
+        .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setImage(cacheImage)
+        .setSubresourceRange(vk::ImageSubresourceRange{}
+            .setAspectMask(vk::ImageAspectFlagBits::eColor)
+            .setBaseMipLevel(0)
+            .setLevelCount(1)
+            .setBaseArrayLayer(0)
+            .setLayerCount(1));
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe,
+                          vk::PipelineStageFlagBits::eFragmentShader,
+                          {}, {}, {}, barrier);
 
     vkEndCommandBuffer(cmd);
 
@@ -398,20 +411,67 @@ void VirtualTextureCache::recordTileUpload(TileId id, const void* pixelData,
     // Copy to per-frame staging buffer
     std::memcpy(stagingMapped_[bufferIndex], pixelData, dataSize);
 
+    vk::CommandBuffer vkCmd(cmd);
+
     // Transition to transfer dst
-    Barriers::transitionImage(cmd, cacheImage,
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-        VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
+    {
+        auto barrier = vk::ImageMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eShaderRead)
+            .setDstAccessMask(vk::AccessFlagBits::eTransferWrite)
+            .setOldLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+            .setNewLayout(vk::ImageLayout::eTransferDstOptimal)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(cacheImage)
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1));
+        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eFragmentShader,
+                              vk::PipelineStageFlagBits::eTransfer,
+                              {}, {}, {}, barrier);
+    }
 
     // Copy buffer to image region at tile slot position
-    Barriers::copyBufferToImageRegion(cmd, stagingBuffers_[bufferIndex].get(), cacheImage,
-        static_cast<int32_t>(slotX * config.tileSizePixels),
-        static_cast<int32_t>(slotY * config.tileSizePixels),
-        width, height);
+    {
+        auto region = vk::BufferImageCopy{}
+            .setBufferOffset(0)
+            .setBufferRowLength(0)
+            .setBufferImageHeight(0)
+            .setImageSubresource(vk::ImageSubresourceLayers{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setMipLevel(0)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1))
+            .setImageOffset({static_cast<int32_t>(slotX * config.tileSizePixels),
+                            static_cast<int32_t>(slotY * config.tileSizePixels), 0})
+            .setImageExtent({width, height, 1});
+        vkCmd.copyBufferToImage(stagingBuffers_[bufferIndex].get(), cacheImage,
+                                vk::ImageLayout::eTransferDstOptimal, region);
+    }
 
     // Transition back to shader read
-    Barriers::imageTransferToSampling(cmd, cacheImage);
+    {
+        auto barrier = vk::ImageMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+            .setOldLayout(vk::ImageLayout::eTransferDstOptimal)
+            .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(cacheImage)
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1));
+        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+                              vk::PipelineStageFlagBits::eFragmentShader,
+                              {}, {}, {}, barrier);
+    }
 }
 
 uint32_t VirtualTextureCache::getUsedSlotCount() const {

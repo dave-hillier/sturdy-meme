@@ -2,7 +2,6 @@
 #include "OBJLoader.h"
 #include "ShaderLoader.h"
 #include "BufferUtils.h"
-#include "VulkanBarriers.h"
 #include "VulkanResourceFactory.h"
 #include <SDL3/SDL.h>
 #include <glm/gtc/matrix_transform.hpp>
@@ -560,7 +559,12 @@ void CatmullClarkSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex)
     vkCmd.dispatch(std::max(1u, workgroupCount), 1, 1);
 
     // Memory barrier: compute shader writes -> graphics shader reads
-    Barriers::computeToIndirectDraw(cmd);
+    auto memoryBarrier = vk::MemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eIndirectCommandRead | vk::AccessFlagBits::eVertexAttributeRead);
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader,
+                          vk::PipelineStageFlagBits::eDrawIndirect | vk::PipelineStageFlagBits::eVertexInput,
+                          {}, memoryBarrier, {}, {});
 }
 
 void CatmullClarkSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {

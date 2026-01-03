@@ -1,5 +1,4 @@
 #include "VirtualTextureFeedback.h"
-#include "VulkanBarriers.h"
 #include "VulkanResourceFactory.h"
 #include <SDL3/SDL_log.h>
 #include <vulkan/vulkan.hpp>
@@ -83,7 +82,16 @@ void VirtualTextureFeedback::clear(VkCommandBuffer cmd, uint32_t frameIndex) {
     FrameBuffer& fb = frameBuffers[frameIndex];
 
     // Clear counter to 0 and barrier for fragment shader
-    Barriers::clearBufferForFragment(cmd, fb.counterBuffer.get());
+    vk::CommandBuffer vkCmd(cmd);
+    vkCmd.fillBuffer(fb.counterBuffer.get(), 0, sizeof(uint32_t), 0);
+    {
+        auto barrier = vk::MemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eShaderRead);
+        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+                              vk::PipelineStageFlagBits::eFragmentShader,
+                              {}, barrier, {}, {});
+    }
 }
 
 void VirtualTextureFeedback::recordCopyToReadback(VkCommandBuffer cmd, uint32_t frameIndex) {
@@ -108,7 +116,14 @@ void VirtualTextureFeedback::recordCopyToReadback(VkCommandBuffer cmd, uint32_t 
 
     // Barrier to ensure transfer completes before host read
     // Note: The actual host read happens after fence wait, so we use HOST_BIT
-    Barriers::transferToHostRead(cmd);
+    {
+        auto barrier = vk::MemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eHostRead);
+        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+                              vk::PipelineStageFlagBits::eHost,
+                              {}, barrier, {}, {});
+    }
 }
 
 void VirtualTextureFeedback::readback(uint32_t frameIndex) {

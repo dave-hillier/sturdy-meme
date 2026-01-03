@@ -1,7 +1,7 @@
 #include "AtmosphereLUTSystem.h"
-#include "VulkanBarriers.h"
 #include <vulkan/vulkan.hpp>
 #include <SDL3/SDL_log.h>
+#include <array>
 #include <cstring>
 
 void AtmosphereLUTSystem::computeTransmittanceLUT(VkCommandBuffer cmd) {
@@ -10,10 +10,20 @@ void AtmosphereLUTSystem::computeTransmittanceLUT(VkCommandBuffer cmd) {
     uniforms.params = atmosphereParams;
     memcpy(staticUniformBuffers.mappedPointers[0], &uniforms, sizeof(AtmosphereUniforms));
 
-    // Transition to GENERAL layout for compute write
-    Barriers::prepareImageForCompute(cmd, transmittanceLUT);
-
     vk::CommandBuffer vkCmd(cmd);
+
+    // Transition to GENERAL layout for compute write
+    auto prepareBarrier = vk::ImageMemoryBarrier{}
+        .setSrcAccessMask({})
+        .setDstAccessMask(vk::AccessFlagBits::eShaderWrite)
+        .setOldLayout(vk::ImageLayout::eUndefined)
+        .setNewLayout(vk::ImageLayout::eGeneral)
+        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setImage(transmittanceLUT)
+        .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eComputeShader,
+                          {}, {}, {}, prepareBarrier);
 
     // Bind pipeline and dispatch
     vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, transmittancePipeline);
@@ -25,7 +35,17 @@ void AtmosphereLUTSystem::computeTransmittanceLUT(VkCommandBuffer cmd) {
     vkCmd.dispatch(groupCountX, groupCountY, 1);
 
     // Transition to SHADER_READ for sampling in later stages
-    Barriers::imageComputeToSampling(cmd, transmittanceLUT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+    auto samplingBarrier = vk::ImageMemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+        .setOldLayout(vk::ImageLayout::eGeneral)
+        .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setImage(transmittanceLUT)
+        .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader,
+                          {}, {}, {}, samplingBarrier);
 
     SDL_Log("Computed transmittance LUT (%dx%d)", TRANSMITTANCE_WIDTH, TRANSMITTANCE_HEIGHT);
 }
@@ -36,10 +56,20 @@ void AtmosphereLUTSystem::computeMultiScatterLUT(VkCommandBuffer cmd) {
     uniforms.params = atmosphereParams;
     memcpy(staticUniformBuffers.mappedPointers[0], &uniforms, sizeof(AtmosphereUniforms));
 
-    // Transition to GENERAL layout for compute write
-    Barriers::prepareImageForCompute(cmd, multiScatterLUT);
-
     vk::CommandBuffer vkCmd(cmd);
+
+    // Transition to GENERAL layout for compute write
+    auto prepareBarrier = vk::ImageMemoryBarrier{}
+        .setSrcAccessMask({})
+        .setDstAccessMask(vk::AccessFlagBits::eShaderWrite)
+        .setOldLayout(vk::ImageLayout::eUndefined)
+        .setNewLayout(vk::ImageLayout::eGeneral)
+        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setImage(multiScatterLUT)
+        .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eComputeShader,
+                          {}, {}, {}, prepareBarrier);
 
     // Bind pipeline and dispatch
     vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, multiScatterPipeline);
@@ -51,7 +81,17 @@ void AtmosphereLUTSystem::computeMultiScatterLUT(VkCommandBuffer cmd) {
     vkCmd.dispatch(groupCountX, groupCountY, 1);
 
     // Transition to SHADER_READ for sampling
-    Barriers::imageComputeToSampling(cmd, multiScatterLUT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+    auto samplingBarrier = vk::ImageMemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+        .setOldLayout(vk::ImageLayout::eGeneral)
+        .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setImage(multiScatterLUT)
+        .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader,
+                          {}, {}, {}, samplingBarrier);
 
     SDL_Log("Computed multi-scatter LUT (%dx%d)", MULTISCATTER_SIZE, MULTISCATTER_SIZE);
 }
@@ -89,10 +129,20 @@ void AtmosphereLUTSystem::computeSkyViewLUT(VkCommandBuffer cmd, const glm::vec3
     uniforms.cameraPosition = glm::vec4(cameraPos, cameraAltitude);
     memcpy(skyViewUniformBuffers.mappedPointers[0], &uniforms, sizeof(AtmosphereUniforms));
 
-    // Transition to GENERAL layout for compute write (from UNDEFINED at startup)
-    Barriers::prepareImageForCompute(cmd, skyViewLUT);
-
     vk::CommandBuffer vkCmd(cmd);
+
+    // Transition to GENERAL layout for compute write (from UNDEFINED at startup)
+    auto prepareBarrier = vk::ImageMemoryBarrier{}
+        .setSrcAccessMask({})
+        .setDstAccessMask(vk::AccessFlagBits::eShaderWrite)
+        .setOldLayout(vk::ImageLayout::eUndefined)
+        .setNewLayout(vk::ImageLayout::eGeneral)
+        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setImage(skyViewLUT)
+        .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eComputeShader,
+                          {}, {}, {}, prepareBarrier);
 
     // Bind pipeline and dispatch (use frame 0's descriptor set for startup computation)
     vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, skyViewPipeline);
@@ -104,7 +154,17 @@ void AtmosphereLUTSystem::computeSkyViewLUT(VkCommandBuffer cmd, const glm::vec3
     vkCmd.dispatch(groupCountX, groupCountY, 1);
 
     // Transition to SHADER_READ for sampling
-    Barriers::imageComputeToSampling(cmd, skyViewLUT);
+    auto samplingBarrier = vk::ImageMemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+        .setOldLayout(vk::ImageLayout::eGeneral)
+        .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setImage(skyViewLUT)
+        .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eFragmentShader,
+                          {}, {}, {}, samplingBarrier);
 
     SDL_Log("Computed sky-view LUT (%dx%d)", SKYVIEW_WIDTH, SKYVIEW_HEIGHT);
 }
@@ -135,13 +195,20 @@ void AtmosphereLUTSystem::updateSkyViewLUT(VkCommandBuffer cmd, uint32_t frameIn
     uniforms.cameraPosition = glm::vec4(cameraPos, cameraAltitude);
     memcpy(skyViewUniformBuffers.mappedPointers[frameIndex], &uniforms, sizeof(AtmosphereUniforms));
 
-    // Transition from SHADER_READ_ONLY to GENERAL for compute write
-    Barriers::transitionImage(cmd, skyViewLUT,
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
-        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-        VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_SHADER_WRITE_BIT);
-
     vk::CommandBuffer vkCmd(cmd);
+
+    // Transition from SHADER_READ_ONLY to GENERAL for compute write
+    auto prepareBarrier = vk::ImageMemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eShaderRead)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderWrite)
+        .setOldLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+        .setNewLayout(vk::ImageLayout::eGeneral)
+        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setImage(skyViewLUT)
+        .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eFragmentShader, vk::PipelineStageFlagBits::eComputeShader,
+                          {}, {}, {}, prepareBarrier);
 
     // Bind pipeline and per-frame descriptor set (double-buffered)
     vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, skyViewPipeline);
@@ -153,7 +220,17 @@ void AtmosphereLUTSystem::updateSkyViewLUT(VkCommandBuffer cmd, uint32_t frameIn
     vkCmd.dispatch(groupCountX, groupCountY, 1);
 
     // Transition back to SHADER_READ for sampling in sky.frag
-    Barriers::imageComputeToSampling(cmd, skyViewLUT);
+    auto samplingBarrier = vk::ImageMemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+        .setOldLayout(vk::ImageLayout::eGeneral)
+        .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setImage(skyViewLUT)
+        .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eFragmentShader,
+                          {}, {}, {}, samplingBarrier);
 }
 
 void AtmosphereLUTSystem::computeCloudMapLUT(VkCommandBuffer cmd, const glm::vec3& windOffset, float time) {
@@ -166,10 +243,20 @@ void AtmosphereLUTSystem::computeCloudMapLUT(VkCommandBuffer cmd, const glm::vec
     uniforms.detailScale = 2.5f;   // Detail noise scale
     memcpy(cloudMapUniformBuffers.mappedPointers[0], &uniforms, sizeof(CloudMapUniforms));
 
-    // Transition to GENERAL layout for compute write
-    Barriers::prepareImageForCompute(cmd, cloudMapLUT);
-
     vk::CommandBuffer vkCmd(cmd);
+
+    // Transition to GENERAL layout for compute write
+    auto prepareBarrier = vk::ImageMemoryBarrier{}
+        .setSrcAccessMask({})
+        .setDstAccessMask(vk::AccessFlagBits::eShaderWrite)
+        .setOldLayout(vk::ImageLayout::eUndefined)
+        .setNewLayout(vk::ImageLayout::eGeneral)
+        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setImage(cloudMapLUT)
+        .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eComputeShader,
+                          {}, {}, {}, prepareBarrier);
 
     // Bind pipeline and dispatch (use frame 0's descriptor set for startup computation)
     vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, cloudMapPipeline);
@@ -181,7 +268,17 @@ void AtmosphereLUTSystem::computeCloudMapLUT(VkCommandBuffer cmd, const glm::vec
     vkCmd.dispatch(groupCountX, groupCountY, 1);
 
     // Transition to SHADER_READ for sampling in sky.frag
-    Barriers::imageComputeToSampling(cmd, cloudMapLUT);
+    auto samplingBarrier = vk::ImageMemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+        .setOldLayout(vk::ImageLayout::eGeneral)
+        .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setImage(cloudMapLUT)
+        .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eFragmentShader,
+                          {}, {}, {}, samplingBarrier);
 
     SDL_Log("Computed cloud map LUT (%dx%d)", CLOUDMAP_SIZE, CLOUDMAP_SIZE);
 }
@@ -215,13 +312,20 @@ void AtmosphereLUTSystem::updateCloudMapLUT(VkCommandBuffer cmd, uint32_t frameI
     uniforms.detailScale = 2.5f;          // Detail noise scale
     memcpy(cloudMapUniformBuffers.mappedPointers[frameIndex], &uniforms, sizeof(CloudMapUniforms));
 
-    // Transition from SHADER_READ_ONLY to GENERAL for compute write
-    Barriers::transitionImage(cmd, cloudMapLUT,
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
-        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-        VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_SHADER_WRITE_BIT);
-
     vk::CommandBuffer vkCmd(cmd);
+
+    // Transition from SHADER_READ_ONLY to GENERAL for compute write
+    auto prepareBarrier = vk::ImageMemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eShaderRead)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderWrite)
+        .setOldLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+        .setNewLayout(vk::ImageLayout::eGeneral)
+        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setImage(cloudMapLUT)
+        .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eFragmentShader, vk::PipelineStageFlagBits::eComputeShader,
+                          {}, {}, {}, prepareBarrier);
 
     // Bind pipeline and per-frame descriptor set (double-buffered)
     vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, cloudMapPipeline);
@@ -233,7 +337,17 @@ void AtmosphereLUTSystem::updateCloudMapLUT(VkCommandBuffer cmd, uint32_t frameI
     vkCmd.dispatch(groupCountX, groupCountY, 1);
 
     // Transition back to SHADER_READ for sampling in sky.frag
-    Barriers::imageComputeToSampling(cmd, cloudMapLUT);
+    auto samplingBarrier = vk::ImageMemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+        .setOldLayout(vk::ImageLayout::eGeneral)
+        .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setImage(cloudMapLUT)
+        .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eFragmentShader,
+                          {}, {}, {}, samplingBarrier);
 }
 
 void AtmosphereLUTSystem::recomputeStaticLUTs(VkCommandBuffer cmd) {
@@ -254,23 +368,53 @@ void AtmosphereLUTSystem::recomputeStaticLUTs(VkCommandBuffer cmd) {
 }
 
 void AtmosphereLUTSystem::barrierIrradianceLUTsForCompute(VkCommandBuffer cmd) {
-    Barriers::BarrierBatch batch(cmd);
-    batch.imageTransition(rayleighIrradianceLUT,
-        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
-        0, VK_ACCESS_SHADER_WRITE_BIT);
-    batch.imageTransition(mieIrradianceLUT,
-        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
-        0, VK_ACCESS_SHADER_WRITE_BIT);
-    batch.setStages(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+    vk::CommandBuffer vkCmd(cmd);
+    std::array<vk::ImageMemoryBarrier, 2> barriers = {{
+        vk::ImageMemoryBarrier{}
+            .setSrcAccessMask({})
+            .setDstAccessMask(vk::AccessFlagBits::eShaderWrite)
+            .setOldLayout(vk::ImageLayout::eUndefined)
+            .setNewLayout(vk::ImageLayout::eGeneral)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(rayleighIrradianceLUT)
+            .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}),
+        vk::ImageMemoryBarrier{}
+            .setSrcAccessMask({})
+            .setDstAccessMask(vk::AccessFlagBits::eShaderWrite)
+            .setOldLayout(vk::ImageLayout::eUndefined)
+            .setNewLayout(vk::ImageLayout::eGeneral)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(mieIrradianceLUT)
+            .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1})
+    }};
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eComputeShader,
+                          {}, {}, {}, barriers);
 }
 
 void AtmosphereLUTSystem::barrierIrradianceLUTsForSampling(VkCommandBuffer cmd) {
-    Barriers::BarrierBatch batch(cmd);
-    batch.imageTransition(rayleighIrradianceLUT,
-        VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
-    batch.imageTransition(mieIrradianceLUT,
-        VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
-    batch.setStages(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+    vk::CommandBuffer vkCmd(cmd);
+    std::array<vk::ImageMemoryBarrier, 2> barriers = {{
+        vk::ImageMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+            .setOldLayout(vk::ImageLayout::eGeneral)
+            .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(rayleighIrradianceLUT)
+            .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}),
+        vk::ImageMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+            .setOldLayout(vk::ImageLayout::eGeneral)
+            .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(mieIrradianceLUT)
+            .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1})
+    }};
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eFragmentShader,
+                          {}, {}, {}, barriers);
 }

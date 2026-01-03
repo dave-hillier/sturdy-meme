@@ -1,6 +1,5 @@
 #include "WaterTileCull.h"
 #include "ShaderLoader.h"
-#include "VulkanBarriers.h"
 #include "VulkanResourceFactory.h"
 #include "DescriptorManager.h"
 #include <SDL3/SDL.h>
@@ -368,21 +367,55 @@ void WaterTileCull::recordTileCull(VkCommandBuffer cmd, uint32_t frameIndex,
 }
 
 void WaterTileCull::barrierCullResultsForDrawAndTransfer(VkCommandBuffer cmd, uint32_t frameIndex) {
-    Barriers::BarrierBatch batch(cmd,
-        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-        VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
-            VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT);
-    batch.bufferBarrier(counterBuffer_.get(), VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
-                        frameIndex * sizeof(uint32_t), sizeof(uint32_t));
-    batch.bufferBarrier(tileBuffer_.get(), VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
-    batch.bufferBarrier(indirectDrawBuffer_.get(), VK_ACCESS_SHADER_WRITE_BIT,
-                        VK_ACCESS_INDIRECT_COMMAND_READ_BIT, 0, sizeof(IndirectDrawCommand));
+    vk::CommandBuffer vkCmd(cmd);
+
+    std::array<vk::BufferMemoryBarrier, 3> barriers = {
+        vk::BufferMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eTransferRead)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setBuffer(counterBuffer_.get())
+            .setOffset(frameIndex * sizeof(uint32_t))
+            .setSize(sizeof(uint32_t)),
+        vk::BufferMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setBuffer(tileBuffer_.get())
+            .setOffset(0)
+            .setSize(VK_WHOLE_SIZE),
+        vk::BufferMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eIndirectCommandRead)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setBuffer(indirectDrawBuffer_.get())
+            .setOffset(0)
+            .setSize(sizeof(IndirectDrawCommand))
+    };
+
+    vkCmd.pipelineBarrier(
+        vk::PipelineStageFlagBits::eComputeShader,
+        vk::PipelineStageFlagBits::eTransfer | vk::PipelineStageFlagBits::eVertexShader | vk::PipelineStageFlagBits::eDrawIndirect,
+        {}, {}, barriers, {});
 }
 
 void WaterTileCull::barrierCounterForHostRead(VkCommandBuffer cmd, uint32_t frameIndex) {
-    Barriers::BarrierBatch batch(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT);
-    batch.bufferBarrier(counterReadbackBuffer_.get(), VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT,
-                        frameIndex * sizeof(uint32_t), sizeof(uint32_t));
+    vk::CommandBuffer vkCmd(cmd);
+
+    auto barrier = vk::BufferMemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eHostRead)
+        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setBuffer(counterReadbackBuffer_.get())
+        .setOffset(frameIndex * sizeof(uint32_t))
+        .setSize(sizeof(uint32_t));
+
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eHost,
+                          {}, {}, barrier, {});
 }
 
 uint32_t WaterTileCull::getVisibleTileCount(uint32_t frameIndex) const {

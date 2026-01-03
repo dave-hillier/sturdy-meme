@@ -1,5 +1,4 @@
 #include "TerrainTextures.h"
-#include "VulkanBarriers.h"
 #include "CommandBufferUtils.h"
 #include "VulkanResourceFactory.h"
 #include <SDL3/SDL.h>

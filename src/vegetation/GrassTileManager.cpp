@@ -1,6 +1,5 @@
 #include "GrassTileManager.h"
 #include "GrassSystem.h"  // For TiledGrassPushConstants
-#include "VulkanBarriers.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <cmath>
@@ -340,8 +339,12 @@ void GrassTileManager::recordCompute(vk::CommandBuffer cmd, uint32_t frameIndex,
 
     // Reset the shared indirect buffer once at the start (not per-tile)
     if (sharedIndirectBuffer_) {
-        Barriers::clearBufferForComputeReadWrite(cmd,
-            sharedIndirectBuffer_, 0, sizeof(VkDrawIndirectCommand));
+        cmd.fillBuffer(sharedIndirectBuffer_, 0, sizeof(VkDrawIndirectCommand), 0);
+        auto clearBarrier = vk::MemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite);
+        cmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eComputeShader,
+                            {}, clearBarrier, {}, {});
     }
 
     // Bind compute pipeline once
@@ -418,7 +421,12 @@ void GrassTileManager::recordCompute(vk::CommandBuffer cmd, uint32_t frameIndex,
     }
 
     // Memory barrier: compute write -> vertex shader read and indirect draw
-    Barriers::computeToVertexAndIndirectDraw(cmd);
+    auto computeBarrier = vk::MemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eIndirectCommandRead);
+    cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader,
+                        vk::PipelineStageFlagBits::eDrawIndirect | vk::PipelineStageFlagBits::eVertexShader,
+                        {}, computeBarrier, {}, {});
 }
 
 void GrassTileManager::recordDraw(vk::CommandBuffer cmd, uint32_t frameIndex, float time,

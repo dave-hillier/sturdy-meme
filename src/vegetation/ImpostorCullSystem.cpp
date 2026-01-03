@@ -2,7 +2,6 @@
 #include "TreeSystem.h"
 #include "TreeImpostorAtlas.h"
 #include "ShaderLoader.h"
-#include "VulkanBarriers.h"
 #include "shaders/bindings.h"
 
 #include <SDL3/SDL.h>

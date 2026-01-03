@@ -1,6 +1,5 @@
 #include "LoadJobFactory.h"
 #include "../vulkan/VulkanResourceFactory.h"
-#include "../vulkan/VulkanBarriers.h"
 #include "../vulkan/CommandBufferUtils.h"
 #include "../ImageBuilder.h"
 #include <SDL3/SDL_log.h>
@@ -194,7 +193,7 @@ UploadedTexture StagedResourceUploader::uploadTexture(const StagedTexture& stage
         return result;
     }
 
-    // Use CommandScope for one-time submission with Barriers helper
+    // Use CommandScope for one-time submission
     {
         CommandScope cmdScope(vk::Device(ctx_.device),
                               vk::CommandPool(ctx_.commandPool),
@@ -205,11 +204,68 @@ UploadedTexture StagedResourceUploader::uploadTexture(const StagedTexture& stage
             return result;
         }
 
-        // Barriers::copyBufferToImage handles: transition to transfer dst, copy, transition to shader read
-        Barriers::copyBufferToImage(cmdScope.getHandle(),
-                                    stagingBuffer.get(),
-                                    managedImage.get(),
-                                    staged.width, staged.height);
+        vk::CommandBuffer vkCmd(cmdScope.getHandle());
+
+        // Transition image to TRANSFER_DST_OPTIMAL
+        auto barrier1 = vk::ImageMemoryBarrier{}
+            .setImage(managedImage.get())
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1))
+            .setOldLayout(vk::ImageLayout::eUndefined)
+            .setNewLayout(vk::ImageLayout::eTransferDstOptimal)
+            .setSrcAccessMask(vk::AccessFlags{})
+            .setDstAccessMask(vk::AccessFlagBits::eTransferWrite);
+
+        vkCmd.pipelineBarrier(
+            vk::PipelineStageFlagBits::eTopOfPipe,
+            vk::PipelineStageFlagBits::eTransfer,
+            {}, {}, {}, barrier1);
+
+        // Copy buffer to image
+        auto region = vk::BufferImageCopy{}
+            .setBufferOffset(0)
+            .setBufferRowLength(0)
+            .setBufferImageHeight(0)
+            .setImageSubresource(vk::ImageSubresourceLayers{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setMipLevel(0)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1))
+            .setImageOffset({0, 0, 0})
+            .setImageExtent({staged.width, staged.height, 1});
+
+        vkCmd.copyBufferToImage(
+            stagingBuffer.get(),
+            managedImage.get(),
+            vk::ImageLayout::eTransferDstOptimal,
+            region);
+
+        // Transition image to SHADER_READ_ONLY_OPTIMAL
+        auto barrier2 = vk::ImageMemoryBarrier{}
+            .setImage(managedImage.get())
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1))
+            .setOldLayout(vk::ImageLayout::eTransferDstOptimal)
+            .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+            .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eShaderRead);
+
+        vkCmd.pipelineBarrier(
+            vk::PipelineStageFlagBits::eTransfer,
+            vk::PipelineStageFlagBits::eFragmentShader,
+            {}, {}, {}, barrier2);
 
         if (!cmdScope.end()) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,

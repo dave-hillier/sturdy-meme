@@ -5,7 +5,6 @@
 #include "VmaResources.h"
 #include "CommandBufferUtils.h"
 #include "VulkanResourceFactory.h"
-#include "VulkanBarriers.h"
 #include "ImageBuilder.h"
 #include <vulkan/vulkan.hpp>
 #include <cstring>
@@ -471,15 +470,46 @@ bool Texture::transitionImageLayout(VkDevice device, VkCommandPool commandPool, 
         return false;
     }
 
-    VkCommandBuffer cmdBuf = static_cast<VkCommandBuffer>(cmd.get());
+    vk::CommandBuffer vkCmd(cmd.get());
+
+    vk::PipelineStageFlags srcStage;
+    vk::PipelineStageFlags dstStage;
+    vk::AccessFlags srcAccess;
+    vk::AccessFlags dstAccess;
+
     if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
-        Barriers::prepareImageForTransferDst(cmdBuf, image);
+        srcStage = vk::PipelineStageFlagBits::eTopOfPipe;
+        dstStage = vk::PipelineStageFlagBits::eTransfer;
+        srcAccess = {};
+        dstAccess = vk::AccessFlagBits::eTransferWrite;
     } else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
-        Barriers::imageTransferToSampling(cmdBuf, image);
+        srcStage = vk::PipelineStageFlagBits::eTransfer;
+        dstStage = vk::PipelineStageFlagBits::eFragmentShader;
+        srcAccess = vk::AccessFlagBits::eTransferWrite;
+        dstAccess = vk::AccessFlagBits::eShaderRead;
     } else {
-        Barriers::transitionImage(cmdBuf, image, oldLayout, newLayout,
-            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0);
+        srcStage = vk::PipelineStageFlagBits::eTopOfPipe;
+        dstStage = vk::PipelineStageFlagBits::eBottomOfPipe;
+        srcAccess = {};
+        dstAccess = {};
     }
+
+    auto barrier = vk::ImageMemoryBarrier{}
+        .setImage(image)
+        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setSubresourceRange(vk::ImageSubresourceRange{}
+            .setAspectMask(vk::ImageAspectFlagBits::eColor)
+            .setBaseMipLevel(0)
+            .setLevelCount(1)
+            .setBaseArrayLayer(0)
+            .setLayerCount(1))
+        .setOldLayout(static_cast<vk::ImageLayout>(oldLayout))
+        .setNewLayout(static_cast<vk::ImageLayout>(newLayout))
+        .setSrcAccessMask(srcAccess)
+        .setDstAccessMask(dstAccess);
+
+    vkCmd.pipelineBarrier(srcStage, dstStage, {}, {}, {}, barrier);
 
     return cmd.end();
 }
@@ -492,8 +522,21 @@ bool Texture::copyBufferToImage(VkDevice device, VkCommandPool commandPool, VkQu
     }
 
     // Copy buffer to image (image must already be in TRANSFER_DST_OPTIMAL)
-    VkCommandBuffer cmdBuf = static_cast<VkCommandBuffer>(cmd.get());
-    Barriers::copyBufferToImageRegion(cmdBuf, buffer, image, 0, 0, width, height);
+    vk::CommandBuffer vkCmd(cmd.get());
+
+    auto region = vk::BufferImageCopy{}
+        .setBufferOffset(0)
+        .setBufferRowLength(0)
+        .setBufferImageHeight(0)
+        .setImageSubresource(vk::ImageSubresourceLayers{}
+            .setAspectMask(vk::ImageAspectFlagBits::eColor)
+            .setMipLevel(0)
+            .setBaseArrayLayer(0)
+            .setLayerCount(1))
+        .setImageOffset({0, 0, 0})
+        .setImageExtent({width, height, 1});
+
+    vkCmd.copyBufferToImage(buffer, image, vk::ImageLayout::eTransferDstOptimal, region);
 
     return cmd.end();
 }

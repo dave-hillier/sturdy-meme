@@ -1,7 +1,6 @@
 #include "CloudShadowSystem.h"
 #include "ShaderLoader.h"
 #include "DescriptorManager.h"
-#include "VulkanBarriers.h"
 #include "VulkanResourceFactory.h"
 #include <SDL3/SDL_log.h>
 #include <vulkan/vulkan.hpp>
@@ -321,14 +320,22 @@ void CloudShadowSystem::recordUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
 
     memcpy(uniformBuffers.mappedPointers[frameIndex], &uniforms, sizeof(uniforms));
 
-    // Transition shadow map to general layout for compute write
-    Barriers::transitionImage(cmd, shadowMap_.get(),
-        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
-        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-        VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_SHADER_WRITE_BIT);
-
     // Bind pipeline and descriptor set
     vk::CommandBuffer vkCmd(cmd);
+
+    // Transition shadow map to general layout for compute write
+    auto prepareBarrier = vk::ImageMemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eShaderRead)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderWrite)
+        .setOldLayout(vk::ImageLayout::eUndefined)
+        .setNewLayout(vk::ImageLayout::eGeneral)
+        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setImage(shadowMap_.get())
+        .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eFragmentShader, vk::PipelineStageFlagBits::eComputeShader,
+                          {}, {}, {}, prepareBarrier);
+
     vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, **computePipeline_);
     vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute,
                              **pipelineLayout_, 0, vk::DescriptorSet(descriptorSets[frameIndex]), {});
@@ -345,6 +352,15 @@ void CloudShadowSystem::recordUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
     vkCmd.dispatch(groupCountX, groupCountY, 1);
 
     // Transition shadow map to shader read for fragment shaders
-    Barriers::imageComputeToSampling(cmd, shadowMap_.get(),
-        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+    auto samplingBarrier = vk::ImageMemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+        .setOldLayout(vk::ImageLayout::eGeneral)
+        .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setImage(shadowMap_.get())
+        .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eFragmentShader,
+                          {}, {}, {}, samplingBarrier);
 }

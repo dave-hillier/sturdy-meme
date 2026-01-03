@@ -1,5 +1,4 @@
 #include "VirtualTexturePageTable.h"
-#include "VulkanBarriers.h"
 #include "CommandBufferUtils.h"
 #include "VulkanResourceFactory.h"
 #include <vulkan/vulkan.hpp>
@@ -191,15 +190,30 @@ bool VirtualTexturePageTable::createPageTableTextures(VkDevice device, VmaAlloca
         CommandScope cmdScope(device, commandPool, queue);
         if (!cmdScope.begin()) return false;
 
-        {
-            Barriers::BarrierBatch batch(cmdScope.get(),
-                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
-            for (uint32_t mip = 0; mip < config.maxMipLevels; ++mip) {
-                batch.imageTransition(pageTableImages[mip],
-                    VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                    0, VK_ACCESS_SHADER_READ_BIT);
-            }
+        vk::CommandBuffer vkCmd(cmdScope.get());
+        std::vector<vk::ImageMemoryBarrier> barriers;
+        barriers.reserve(config.maxMipLevels);
+
+        for (uint32_t mip = 0; mip < config.maxMipLevels; ++mip) {
+            barriers.push_back(vk::ImageMemoryBarrier{}
+                .setSrcAccessMask(vk::AccessFlags{})
+                .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+                .setOldLayout(vk::ImageLayout::eUndefined)
+                .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+                .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                .setImage(pageTableImages[mip])
+                .setSubresourceRange(vk::ImageSubresourceRange{}
+                    .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                    .setBaseMipLevel(0)
+                    .setLevelCount(1)
+                    .setBaseArrayLayer(0)
+                    .setLayerCount(1)));
         }
+
+        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe,
+                              vk::PipelineStageFlagBits::eFragmentShader,
+                              {}, {}, {}, barriers);
 
         if (!cmdScope.end()) return false;
     }
@@ -298,18 +312,66 @@ void VirtualTexturePageTable::recordUpload(VkCommandBuffer cmd, uint32_t frameIn
             packed[i] = cpuData[mipOffsets[mip] + i].packRGBA8();
         }
 
+        vk::CommandBuffer vkCmd(cmd);
+
         // Transition to transfer dst
-        Barriers::transitionImage(cmd, pageTableImages[mip],
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-            VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
+        {
+            auto barrier = vk::ImageMemoryBarrier{}
+                .setSrcAccessMask(vk::AccessFlagBits::eShaderRead)
+                .setDstAccessMask(vk::AccessFlagBits::eTransferWrite)
+                .setOldLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+                .setNewLayout(vk::ImageLayout::eTransferDstOptimal)
+                .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                .setImage(pageTableImages[mip])
+                .setSubresourceRange(vk::ImageSubresourceRange{}
+                    .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                    .setBaseMipLevel(0)
+                    .setLevelCount(1)
+                    .setBaseArrayLayer(0)
+                    .setLayerCount(1));
+            vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eFragmentShader,
+                                  vk::PipelineStageFlagBits::eTransfer,
+                                  {}, {}, {}, barrier);
+        }
 
         // Copy buffer to page table image
-        Barriers::copyBufferToImageRegion(cmd, stagingBuffers_[bufferIndex].get(), pageTableImages[mip],
-                                          0, 0, tilesAtMip, tilesAtMip);
+        {
+            auto region = vk::BufferImageCopy{}
+                .setBufferOffset(0)
+                .setBufferRowLength(0)
+                .setBufferImageHeight(0)
+                .setImageSubresource(vk::ImageSubresourceLayers{}
+                    .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                    .setMipLevel(0)
+                    .setBaseArrayLayer(0)
+                    .setLayerCount(1))
+                .setImageOffset({0, 0, 0})
+                .setImageExtent({tilesAtMip, tilesAtMip, 1});
+            vkCmd.copyBufferToImage(stagingBuffers_[bufferIndex].get(), pageTableImages[mip],
+                                    vk::ImageLayout::eTransferDstOptimal, region);
+        }
 
         // Transition back to shader read
-        Barriers::imageTransferToSampling(cmd, pageTableImages[mip]);
+        {
+            auto barrier = vk::ImageMemoryBarrier{}
+                .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
+                .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+                .setOldLayout(vk::ImageLayout::eTransferDstOptimal)
+                .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+                .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                .setImage(pageTableImages[mip])
+                .setSubresourceRange(vk::ImageSubresourceRange{}
+                    .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                    .setBaseMipLevel(0)
+                    .setLevelCount(1)
+                    .setBaseArrayLayer(0)
+                    .setLayerCount(1));
+            vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+                                  vk::PipelineStageFlagBits::eFragmentShader,
+                                  {}, {}, {}, barrier);
+        }
 
         mipDirty[mip] = false;
     }

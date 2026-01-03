@@ -1,5 +1,4 @@
 #include "AtmosphereLUTSystem.h"
-#include "VulkanBarriers.h"
 #include "VmaResources.h"
 #include <SDL3/SDL_log.h>
 #include <vulkan/vulkan.hpp>
@@ -64,14 +63,22 @@ bool AtmosphereLUTSystem::exportImageToPNG(VkImage image, VkFormat format, uint3
 
     vkBeginCommandBuffer(commandBuffer, reinterpret_cast<const VkCommandBufferBeginInfo*>(&beginInfo));
 
+    vk::CommandBuffer vkCmd(commandBuffer);
+
     // Transition image to TRANSFER_SRC_OPTIMAL
-    Barriers::transitionImage(commandBuffer, image,
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-        VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+    auto toTransferBarrier = vk::ImageMemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eShaderRead)
+        .setDstAccessMask(vk::AccessFlagBits::eTransferRead)
+        .setOldLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+        .setNewLayout(vk::ImageLayout::eTransferSrcOptimal)
+        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setImage(image)
+        .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eFragmentShader, vk::PipelineStageFlagBits::eTransfer,
+                          {}, {}, {}, toTransferBarrier);
 
     // Copy image to buffer
-    vk::CommandBuffer vkCmd(commandBuffer);
     auto region = vk::BufferImageCopy{}
         .setBufferOffset(0)
         .setBufferRowLength(0)
@@ -87,10 +94,17 @@ bool AtmosphereLUTSystem::exportImageToPNG(VkImage image, VkFormat format, uint3
     vkCmd.copyImageToBuffer(image, vk::ImageLayout::eTransferSrcOptimal, stagingBuffer.get(), region);
 
     // Transition back
-    Barriers::transitionImage(commandBuffer, image,
-        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-        VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_SHADER_READ_BIT);
+    auto toShaderBarrier = vk::ImageMemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eTransferRead)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+        .setOldLayout(vk::ImageLayout::eTransferSrcOptimal)
+        .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setImage(image)
+        .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eFragmentShader,
+                          {}, {}, {}, toShaderBarrier);
 
     vkEndCommandBuffer(commandBuffer);
 

@@ -2,7 +2,6 @@
 #include "CullCommon.h"
 #include "ShaderLoader.h"
 #include "DescriptorManager.h"
-#include "VulkanBarriers.h"
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.hpp>
 #include <cstring>
@@ -570,13 +569,22 @@ void LeafSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex,
 
     // Ensure CPU writes to tile info buffer are visible to GPU before compute dispatch
     // The tile info buffer is written by CPU in TerrainTileCache::updateTileInfoBuffer()
-    Barriers::hostToCompute(cmd);
+    vk::CommandBuffer vkCmd(cmd);
+    auto hostBarrier = vk::MemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eHostWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead);
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eHost, vk::PipelineStageFlagBits::eComputeShader,
+                          {}, hostBarrier, {}, {});
 
     // Reset indirect buffer before compute dispatch
-    Barriers::clearBufferForCompute(cmd, indirectBuffers.buffers[writeSet], 0, sizeof(VkDrawIndirectCommand));
+    vkCmd.fillBuffer(indirectBuffers.buffers[writeSet], 0, sizeof(VkDrawIndirectCommand), 0);
+    auto transferBarrier = vk::MemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead);
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eComputeShader,
+                          {}, transferBarrier, {}, {});
 
     // Dispatch leaf compute shader
-    vk::CommandBuffer vkCmd(cmd);
     vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, getComputePipelineHandles().pipeline);
     VkDescriptorSet computeSet = particleSystem->getComputeDescriptorSet(writeSet);
     vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute,
@@ -593,7 +601,12 @@ void LeafSystem::recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex,
     vkCmd.dispatch(workgroupCount, 1, 1);
 
     // Memory barrier: compute write -> vertex shader read and indirect read
-    Barriers::computeToIndirectDraw(cmd);
+    auto computeBarrier = vk::MemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eIndirectCommandRead | vk::AccessFlagBits::eVertexAttributeRead);
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader,
+                          vk::PipelineStageFlagBits::eDrawIndirect | vk::PipelineStageFlagBits::eVertexInput,
+                          {}, computeBarrier, {}, {});
 }
 
 void LeafSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time) {
