@@ -125,8 +125,8 @@ enum class DwellingStyle {
 
 // Parameters for dwelling generation
 struct DwellingParams {
-    int minCellSize = 3;      // Minimum cells in each dimension
-    int maxCellSize = 7;      // Maximum cells in each dimension
+    int minSectionSize = 3;   // Minimum polyomino section size (building footprint)
+    int maxSectionSize = 7;   // Maximum polyomino section size (building footprint)
     float avgRoomSize = 6.0f; // Average room size in cells
     float roomSizeChaos = 1.0f; // Variation in room sizes
     bool preferCorners = false;  // Mechanical style

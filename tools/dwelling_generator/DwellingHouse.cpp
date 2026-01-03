@@ -193,7 +193,7 @@ void House::generate() {
 void House::createFootprint() {
     // Create building footprint using polyomino
     std::vector<Cell> shapeCells = Polyomino::createShape(
-        params_.minCellSize, params_.maxCellSize, rng_);
+        params_.minSectionSize, params_.maxSectionSize, rng_);
 
     if (shapeCells.empty()) return;
 

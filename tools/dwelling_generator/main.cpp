@@ -14,10 +14,9 @@ void printUsage(const char* programName) {
     SDL_Log("  -s, --seed <number>    Random seed (default: time-based)");
     SDL_Log("  -f, --floors <number>  Number of floors (default: 1)");
     SDL_Log("  --style <name>         Style: natural, mechanical, organic, gothic");
-    SDL_Log("  --min-size <number>    Minimum cell dimension (default: 3)");
-    SDL_Log("  --max-size <number>    Maximum cell dimension (default: 7)");
-    SDL_Log("  --room-size <number>   Average room size in cells (default: 6)");
-    SDL_Log("  --cell-size <number>   Cell size in pixels (default: 30)");
+    SDL_Log("  --building-size <n>    Building footprint section size (default: 3-7)");
+    SDL_Log("  --room-size <number>   Average room size in grid cells (default: 6)");
+    SDL_Log("  --pixel-size <number>  Grid cell size in pixels for SVG (default: 30)");
     SDL_Log("  --windows <0-1>        Window density (default: 0.7)");
     SDL_Log("  --show-grid            Show debug grid lines");
     SDL_Log("  -h, --help             Show this help message");
@@ -32,6 +31,7 @@ void printUsage(const char* programName) {
     SDL_Log("  dwelling_floor_N.svg   Floor plan for each floor");
     SDL_Log("  dwelling_all.svg       All floors combined");
     SDL_Log("  dwelling_3d.svg        Orthographic 3D view");
+    SDL_Log("  dwelling_facade.svg    Front elevation view");
 }
 
 int main(int argc, char* argv[]) {
@@ -59,19 +59,28 @@ int main(int argc, char* argv[]) {
             if (params.numFloors < 1) params.numFloors = 1;
             if (params.numFloors > 6) params.numFloors = 6;
         }
-        else if (strcmp(argv[i], "--min-size") == 0 && i + 1 < argc) {
-            params.minCellSize = std::atoi(argv[++i]);
-            if (params.minCellSize < 2) params.minCellSize = 2;
-        }
-        else if (strcmp(argv[i], "--max-size") == 0 && i + 1 < argc) {
-            params.maxCellSize = std::atoi(argv[++i]);
-            if (params.maxCellSize < params.minCellSize) params.maxCellSize = params.minCellSize;
+        else if (strcmp(argv[i], "--building-size") == 0 && i + 1 < argc) {
+            // Parse "min-max" or just "size"
+            const char* arg = argv[++i];
+            char* dash = const_cast<char*>(strchr(arg, '-'));
+            if (dash) {
+                *dash = '\0';
+                params.minSectionSize = std::atoi(arg);
+                params.maxSectionSize = std::atoi(dash + 1);
+                *dash = '-';  // Restore
+            } else {
+                int size = std::atoi(arg);
+                params.minSectionSize = size;
+                params.maxSectionSize = size;
+            }
+            if (params.minSectionSize < 2) params.minSectionSize = 2;
+            if (params.maxSectionSize < params.minSectionSize) params.maxSectionSize = params.minSectionSize;
         }
         else if (strcmp(argv[i], "--room-size") == 0 && i + 1 < argc) {
             params.avgRoomSize = static_cast<float>(std::atof(argv[++i]));
             if (params.avgRoomSize < 2.0f) params.avgRoomSize = 2.0f;
         }
-        else if (strcmp(argv[i], "--cell-size") == 0 && i + 1 < argc) {
+        else if (strcmp(argv[i], "--pixel-size") == 0 && i + 1 < argc) {
             renderOptions.cellSize = static_cast<float>(std::atof(argv[++i]));
             if (renderOptions.cellSize < 10.0f) renderOptions.cellSize = 10.0f;
         }
@@ -115,7 +124,7 @@ int main(int argc, char* argv[]) {
     SDL_Log("Seed: %u", params.seed);
     SDL_Log("Floors: %d", params.numFloors);
     SDL_Log("Style: %s", styleName);
-    SDL_Log("Cell size range: %d-%d", params.minCellSize, params.maxCellSize);
+    SDL_Log("Building size: %d-%d", params.minSectionSize, params.maxSectionSize);
     SDL_Log("Average room size: %.1f cells", params.avgRoomSize);
     SDL_Log("Window density: %.0f%%", params.windowDensity * 100);
     SDL_Log(" ");
