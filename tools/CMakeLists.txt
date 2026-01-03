@@ -260,6 +260,7 @@ target_link_libraries(dwelling_generator PRIVATE
 )
 
 target_compile_features(dwelling_generator PRIVATE cxx_std_17)
+
 # Medieval town layout generator (SVG output)
 add_executable(town_generator
     town_generator/main.cpp
