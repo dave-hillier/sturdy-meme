@@ -114,6 +114,9 @@ set(SOURCES
     src/postprocess/SSRSystem.cpp
     src/postprocess/HiZSystem.cpp
     src/postprocess/GTAOSystem.cpp
+    # SDF (Signed Distance Field) for AO
+    src/sdf/SDFAtlas.cpp
+    src/sdf/SDFAOSystem.cpp
     # Lighting
     src/lighting/FroxelSystem.cpp
     src/lighting/ShadowSystem.cpp
@@ -651,6 +654,7 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ssr_blur.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/gtao.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/gtao_spatial_filter.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sdf_ao.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/water_tile_cull.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/debug_line.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/debug_line.frag.spv
@@ -903,6 +907,14 @@ if(SHADER_COMPILE_CMD)
         COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/gtao_spatial_filter.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/gtao_spatial_filter.comp
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/gtao_spatial_filter.comp
         COMMENT "Compiling GTAO spatial filter compute shader"
+    )
+
+    # SDF-AO (Signed Distance Field Ambient Occlusion) compute shader
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sdf_ao.comp.spv
+        COMMAND ${GLSLANG_VALIDATOR} --target-env vulkan1.2 -V -o ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sdf_ao.comp.spv ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sdf_ao.comp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sdf_ao.comp
+        COMMENT "Compiling SDF-AO compute shader"
     )
 
     # Water tile cull compute shader (Phase 7: Screen-Space Tessellation)

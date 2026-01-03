@@ -66,6 +66,9 @@ class FlowMapGenerator;
 class FoamBuffer;
 class SSRSystem;
 class GTAOSystem;
+class SDFAtlas;
+class SDFAOSystem;
+struct SDFConfig;
 class WaterTileCull;
 class WaterGBuffer;
 class ErosionDataLoader;
@@ -249,6 +252,14 @@ public:
     GTAOSystem* gtao() { return gtaoSystem_.get(); }
     const GTAOSystem* gtao() const { return gtaoSystem_.get(); }
     void setGTAO(std::unique_ptr<GTAOSystem> system);
+
+    // SDF (Signed Distance Field) for building AO
+    SDFAtlas* sdfAtlas() { return sdfAtlas_.get(); }
+    const SDFAtlas* sdfAtlas() const { return sdfAtlas_.get(); }
+    void setSDFAtlas(std::unique_ptr<SDFAtlas> atlas);
+    SDFAOSystem* sdfAO() { return sdfAOSystem_.get(); }
+    const SDFAOSystem* sdfAO() const { return sdfAOSystem_.get(); }
+    void setSDFAO(std::unique_ptr<SDFAOSystem> system);
 
     // Scene and resources
     SceneManager& scene() { return *sceneManager_; }
@@ -450,6 +461,10 @@ private:
 
     // Ambient Occlusion
     std::unique_ptr<GTAOSystem> gtaoSystem_;
+
+    // SDF (Signed Distance Field) for building AO
+    std::unique_ptr<SDFAtlas> sdfAtlas_;
+    std::unique_ptr<SDFAOSystem> sdfAOSystem_;
 
     // Infrastructure (needed throughout)
     std::unique_ptr<SceneManager> sceneManager_;

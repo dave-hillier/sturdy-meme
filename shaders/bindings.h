@@ -465,6 +465,16 @@
 #define BINDING_GTAO_FILTER_OUTPUT         2   // Filtered AO output
 
 // =============================================================================
+// SDF-AO (Signed Distance Field Ambient Occlusion) Descriptor Set
+// =============================================================================
+#define BINDING_SDF_AO_DEPTH               0   // Depth buffer input
+#define BINDING_SDF_AO_NORMAL              1   // Normal buffer input
+#define BINDING_SDF_AO_ATLAS               2   // SDF 3D texture atlas
+#define BINDING_SDF_AO_ENTRIES             3   // SDF entry metadata SSBO
+#define BINDING_SDF_AO_INSTANCES           4   // SDF instance transforms SSBO
+#define BINDING_SDF_AO_OUTPUT              5   // AO output image
+
+// =============================================================================
 // C++ Type-Safe Wrappers
 // =============================================================================
 #ifdef __cplusplus
@@ -832,6 +842,14 @@ constexpr uint32_t GTAO_PREV              = BINDING_GTAO_PREV;
 constexpr uint32_t GTAO_FILTER_INPUT      = BINDING_GTAO_FILTER_INPUT;
 constexpr uint32_t GTAO_FILTER_DEPTH      = BINDING_GTAO_FILTER_DEPTH;
 constexpr uint32_t GTAO_FILTER_OUTPUT     = BINDING_GTAO_FILTER_OUTPUT;
+
+// SDF-AO
+constexpr uint32_t SDF_AO_DEPTH           = BINDING_SDF_AO_DEPTH;
+constexpr uint32_t SDF_AO_NORMAL          = BINDING_SDF_AO_NORMAL;
+constexpr uint32_t SDF_AO_ATLAS           = BINDING_SDF_AO_ATLAS;
+constexpr uint32_t SDF_AO_ENTRIES         = BINDING_SDF_AO_ENTRIES;
+constexpr uint32_t SDF_AO_INSTANCES       = BINDING_SDF_AO_INSTANCES;
+constexpr uint32_t SDF_AO_OUTPUT          = BINDING_SDF_AO_OUTPUT;
 
 } // namespace Bindings
 

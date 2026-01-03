@@ -1,0 +1,234 @@
+#version 450
+
+/*
+ * sdf_ao.comp - SDF-based Ambient Occlusion via Cone Tracing
+ *
+ * Traces cones against a 3D SDF atlas to compute sub-meter ambient
+ * occlusion for buildings and static geometry. Complements screen-space
+ * GTAO by capturing off-screen occluders.
+ *
+ * Based on UE4's Distance Field Ambient Occlusion technique.
+ */
+
+#extension GL_GOOGLE_include_directive : require
+
+#include "constants_common.glsl"
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+// Input textures
+layout(binding = 0) uniform sampler2D depthTexture;
+layout(binding = 1) uniform sampler2D normalTexture;
+layout(binding = 2) uniform sampler3D sdfAtlas;
+
+// SDF entry metadata
+struct SDFEntry {
+    vec4 boundsMin;      // xyz = world min, w = unused
+    vec4 boundsMax;      // xyz = world max, w = unused
+    vec4 invScale;       // xyz = 1/(max-min), w = atlas layer index
+    mat4 worldToLocal;   // Transform from world to local UV space
+};
+
+// SDF instance (placed in world)
+struct SDFInstance {
+    uint entryIndex;
+    float padding[3];
+    mat4 transform;
+};
+
+layout(binding = 3, std430) readonly buffer SDFEntries {
+    SDFEntry entries[];
+};
+
+layout(binding = 4, std430) readonly buffer SDFInstances {
+    SDFInstance instances[];
+};
+
+// Output AO
+layout(binding = 5, r8) uniform writeonly image2D aoOutput;
+
+// Push constants
+layout(push_constant) uniform SDFAOParams {
+    mat4 invViewMatrix;
+    mat4 invProjMatrix;
+    vec4 screenParams;     // xy = resolution, zw = 1/resolution
+    vec4 aoParams;         // x = numCones, y = maxSteps, z = coneAngle, w = maxDistance
+    vec4 aoParams2;        // x = intensity, y = bias, z = atlasResolution, w = numInstances
+    float nearPlane;
+    float farPlane;
+    float padding[2];
+};
+
+// Reconstruct world position from depth
+vec3 reconstructWorldPos(vec2 uv, float depth) {
+    vec4 ndc = vec4(uv * 2.0 - 1.0, depth, 1.0);
+    vec4 viewPos = invProjMatrix * ndc;
+    viewPos /= viewPos.w;
+    vec4 worldPos = invViewMatrix * viewPos;
+    return worldPos.xyz;
+}
+
+// Sample SDF at world position for a specific instance
+float sampleSDF(vec3 worldPos, uint instanceIdx) {
+    SDFInstance inst = instances[instanceIdx];
+    SDFEntry entry = entries[inst.entryIndex];
+
+    // Transform world position to local SDF space
+    vec4 localPos4 = inverse(inst.transform) * vec4(worldPos, 1.0);
+    vec3 localPos = localPos4.xyz;
+
+    // Check if inside bounds
+    vec3 boundsMin = entry.boundsMin.xyz;
+    vec3 boundsMax = entry.boundsMax.xyz;
+
+    if (any(lessThan(localPos, boundsMin)) || any(greaterThan(localPos, boundsMax))) {
+        return 1000.0; // Outside bounds, return large distance
+    }
+
+    // Convert to UV coordinates [0, 1]
+    vec3 localUV = (localPos - boundsMin) * entry.invScale.xyz;
+
+    // Offset Z by layer index
+    float layerOffset = entry.invScale.w;
+    float atlasRes = aoParams2.z;
+    float layerZ = (localUV.z + layerOffset) / float(256);  // Assuming max 256 layers
+
+    vec3 atlasUV = vec3(localUV.xy, layerZ);
+
+    // Sample SDF (R16F, signed distance in local units)
+    float dist = texture(sdfAtlas, atlasUV).r;
+
+    // Scale to world units (approximate based on instance scale)
+    vec3 scale = vec3(length(inst.transform[0].xyz),
+                      length(inst.transform[1].xyz),
+                      length(inst.transform[2].xyz));
+    float avgScale = (scale.x + scale.y + scale.z) / 3.0;
+
+    return dist * avgScale;
+}
+
+// Sample global SDF (all instances)
+float sampleGlobalSDF(vec3 worldPos) {
+    float minDist = 1000.0;
+    uint numInstances = uint(aoParams2.w);
+
+    for (uint i = 0; i < numInstances && i < 64; i++) {
+        float d = sampleSDF(worldPos, i);
+        minDist = min(minDist, d);
+    }
+
+    return minDist;
+}
+
+// Generate cone direction based on normal
+vec3 getConeDirection(vec3 normal, int coneIndex, int numCones) {
+    // Create a tangent frame
+    vec3 tangent = abs(normal.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    vec3 bitangent = normalize(cross(normal, tangent));
+    tangent = cross(bitangent, normal);
+
+    // Distribute cones in a hemisphere
+    float phi = TWO_PI * float(coneIndex) / float(numCones);
+    float theta = PI * 0.25; // 45 degrees from normal
+
+    vec3 localDir = vec3(
+        sin(theta) * cos(phi),
+        sin(theta) * sin(phi),
+        cos(theta)
+    );
+
+    // Transform to world space
+    return normalize(tangent * localDir.x + bitangent * localDir.y + normal * localDir.z);
+}
+
+// Trace a single cone for AO
+float traceSDFCone(vec3 origin, vec3 dir, float maxDist, float coneAngle) {
+    float occlusion = 0.0;
+    float t = aoParams2.y; // Start with bias offset
+    int maxSteps = int(aoParams.y);
+
+    for (int i = 0; i < maxSteps; i++) {
+        vec3 p = origin + dir * t;
+
+        float d = sampleGlobalSDF(p);
+
+        // If inside geometry, fully occluded
+        if (d < 0.001) {
+            return 1.0;
+        }
+
+        // Cone occlusion: smaller distance relative to cone width = more occlusion
+        float coneWidth = t * coneAngle;
+        float coneOcclusion = saturate(1.0 - d / coneWidth);
+
+        // Accumulate with distance falloff
+        float falloff = 1.0 - t / maxDist;
+        occlusion = max(occlusion, coneOcclusion * falloff);
+
+        // Step by safe distance (sphere tracing)
+        t += max(d * 0.5, 0.1);
+
+        if (t > maxDist) break;
+    }
+
+    return occlusion;
+}
+
+float saturate(float x) {
+    return clamp(x, 0.0, 1.0);
+}
+
+void main() {
+    ivec2 pixelCoord = ivec2(gl_GlobalInvocationID.xy);
+    vec2 resolution = screenParams.xy;
+
+    if (pixelCoord.x >= int(resolution.x) || pixelCoord.y >= int(resolution.y)) {
+        return;
+    }
+
+    vec2 uv = (vec2(pixelCoord) + 0.5) / resolution;
+
+    // Sample depth
+    float depth = texture(depthTexture, uv).r;
+
+    // Skip sky
+    if (depth >= 0.9999) {
+        imageStore(aoOutput, pixelCoord, vec4(1.0));
+        return;
+    }
+
+    // Skip if no instances
+    if (aoParams2.w < 1.0) {
+        imageStore(aoOutput, pixelCoord, vec4(1.0));
+        return;
+    }
+
+    // Reconstruct world position
+    vec3 worldPos = reconstructWorldPos(uv, depth);
+
+    // Get world normal (from GBuffer or reconstruct from depth)
+    vec3 worldNormal = normalize(texture(normalTexture, uv).xyz * 2.0 - 1.0);
+
+    // Offset origin slightly along normal to avoid self-intersection
+    vec3 origin = worldPos + worldNormal * aoParams2.y * 2.0;
+
+    int numCones = int(aoParams.x);
+    float coneAngle = aoParams.z;
+    float maxDist = aoParams.w;
+
+    float totalOcclusion = 0.0;
+
+    // Trace cones
+    for (int i = 0; i < numCones; i++) {
+        vec3 coneDir = getConeDirection(worldNormal, i, numCones);
+        float coneOcclusion = traceSDFCone(origin, coneDir, maxDist, coneAngle);
+        totalOcclusion += coneOcclusion;
+    }
+
+    totalOcclusion /= float(numCones);
+
+    // Convert occlusion to visibility
+    float ao = 1.0 - saturate(totalOcclusion * aoParams2.x);
+
+    imageStore(aoOutput, pixelCoord, vec4(ao));
+}

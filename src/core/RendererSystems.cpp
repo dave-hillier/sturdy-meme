@@ -34,6 +34,8 @@
 #include "FoamBuffer.h"
 #include "SSRSystem.h"
 #include "GTAOSystem.h"
+#include "SDFAtlas.h"
+#include "SDFAOSystem.h"
 #include "WaterTileCull.h"
 #include "WaterGBuffer.h"
 #include "ErosionDataLoader.h"
@@ -171,6 +173,14 @@ void RendererSystems::setHiZ(std::unique_ptr<HiZSystem> system) {
 
 void RendererSystems::setGTAO(std::unique_ptr<GTAOSystem> system) {
     gtaoSystem_ = std::move(system);
+}
+
+void RendererSystems::setSDFAtlas(std::unique_ptr<SDFAtlas> atlas) {
+    sdfAtlas_ = std::move(atlas);
+}
+
+void RendererSystems::setSDFAO(std::unique_ptr<SDFAOSystem> system) {
+    sdfAOSystem_ = std::move(system);
 }
 
 void RendererSystems::setSky(std::unique_ptr<SkySystem> system) {
