@@ -33,8 +33,8 @@ class CurtainWall {
 public:
     Polygon shape;
     std::vector<bool> segments;
-    std::vector<Point> gates;
-    std::vector<Point> towers;
+    std::vector<PointPtr> gates;
+    std::vector<PointPtr> towers;
 
     /**
      * Constructs a CurtainWall around a set of patches.
@@ -55,9 +55,8 @@ public:
         if (real_) {
             size_t len = shape.size();
             for (size_t i = 0; i < len; ++i) {
-                Point t = shape[i];
-                bool isGate = std::find_if(gates.begin(), gates.end(),
-                    [&t](const Point& g) { return g == t; }) != gates.end();
+                PointPtr t = shape[i];
+                bool isGate = std::find(gates.begin(), gates.end(), t) != gates.end();
                 if (!isGate && (segments[(i + len - 1) % len] || segments[i])) {
                     towers.push_back(t);
                 }
@@ -71,8 +70,8 @@ public:
     float getRadius() const {
         float radius = 0.0f;
         for (size_t i = 0; i < shape.size(); ++i) {
-            const Point& v = shape[i];
-            radius = std::max(radius, v.length());
+            PointPtr v = shape[i];
+            radius = std::max(radius, v->length());
         }
         return radius;
     }
@@ -84,7 +83,7 @@ public:
      * @param v1 End vertex of the edge
      * @return True if the edge borders the wall
      */
-    bool bordersBy(std::shared_ptr<Patch> p, const Point& v0, const Point& v1) const {
+    bool bordersBy(std::shared_ptr<Patch> p, PointPtr v0, PointPtr v1) const {
         bool patchInside = containsPatch(p);
         int index;
         if (patchInside) {
@@ -111,8 +110,8 @@ public:
 
         for (size_t i = 0; i < length; ++i) {
             if (segments[i]) {
-                const Point& v0 = shape[i];
-                const Point& v1 = shape[(i + 1) % length];
+                PointPtr v0 = shape[i];
+                PointPtr v1 = shape[(i + 1) % length];
                 int index;
                 if (withinWalls) {
                     index = p->shape.findEdge(v0, v1);

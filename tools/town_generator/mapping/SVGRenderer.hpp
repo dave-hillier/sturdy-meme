@@ -89,20 +89,20 @@ private:
         svg.circle(p.x, p.y, r * strokeScale, palette.darkHex());
     }
 
-    void renderGate(const Polygon& wall, const Point& gate) {
+    void renderGate(const Polygon& wall, PointPtr gate) {
         // g.lineStyle( Brush.THICK_STROKE * 2, palette.dark, false, null, CapsStyle.NONE );
         // var dir = wall.next( gate ).subtract( wall.prev( gate ) );
         // dir.normalize( Brush.THICK_STROKE * 1.5 );
         // g.moveToPoint( gate.subtract( dir ) );
         // g.lineToPoint( gate.add( dir ) );
 
-        Point nextPt = wall.next(gate);
-        Point prevPt = wall.prev(gate);
-        Point dir = nextPt.subtract(prevPt);
+        PointPtr nextPt = wall.next(gate);
+        PointPtr prevPt = wall.prev(gate);
+        Point dir = nextPt->subtract(*prevPt);
         dir.normalize(Brush::THICK_STROKE * 1.5f * strokeScale);
 
-        Point p1 = gate.subtract(dir);
-        Point p2 = gate.add(dir);
+        Point p1 = gate->subtract(dir);
+        Point p2 = gate->add(dir);
 
         svg.line(p1.x, p1.y, p2.x, p2.y,
                  palette.darkHex(),
@@ -117,14 +117,14 @@ private:
                     Brush::THICK_STROKE * strokeScale, "miter");
 
         // for (gate in wall.gates) drawGate( g, wall.shape, gate );
-        for (const auto& gate : wall.gates) {
+        for (PointPtr gate : wall.gates) {
             renderGate(wall.shape, gate);
         }
 
         // for (t in wall.towers) drawTower( g, t, Brush.THICK_STROKE * (large ? 1.5 : 1) );
         float towerRadius = Brush::THICK_STROKE * (large ? 1.5f : 1.0f);
-        for (const auto& t : wall.towers) {
-            renderTower(t, towerRadius);
+        for (PointPtr t : wall.towers) {
+            renderTower(*t, towerRadius);
         }
     }
 

@@ -28,19 +28,19 @@ public:
     /**
      * Bisects a polygon along a line perpendicular to an edge.
      * @param poly The polygon to bisect
-     * @param vertex The starting vertex of the edge to bisect from
+     * @param vertex The starting vertex of the edge to bisect from (PointPtr)
      * @param ratio Position along the edge (0.0 to 1.0, default 0.5)
      * @param angle Rotation of the cut line in radians (default 0.0)
      * @param gap Gap to leave between the resulting polygons (default 0.0)
      * @return Vector of resulting polygons (usually 2)
      */
-    static std::vector<Polygon> bisect(const Polygon& poly, const Point& vertex,
+    static std::vector<Polygon> bisect(const Polygon& poly, PointPtr vertex,
                                         float ratio = 0.5f, float angle = 0.0f,
                                         float gap = 0.0f) {
-        Point next = poly.next(vertex);
+        PointPtr nextPt = poly.next(vertex);
 
-        Point p1 = GeomUtils::interpolate(vertex, next, ratio);
-        Point d = next.subtract(vertex);
+        Point p1 = GeomUtils::interpolate(*vertex, *nextPt, ratio);
+        Point d = nextPt->subtract(*vertex);
 
         float cosB = std::cos(angle);
         float sinB = std::sin(angle);
@@ -70,13 +70,12 @@ public:
 
         std::vector<Polygon> sectors;
 
-        poly.forEdge([&](const Point& v0, const Point& v1) {
-            Polygon sector({c, v0, v1});
+        poly.forEdge([&](PointPtr v0, PointPtr v1) {
+            Polygon sector({c, *v0, *v1});
             if (gap > 0) {
-                std::vector<float> shrinkAmounts = {gap / 2.0f, 0.0f, gap / 2.0f};
-                sector = sector.shrink(shrinkAmounts);
+                sector = sector.shrink({gap / 2.0f, 0.0f, gap / 2.0f});
             }
-            sectors.push_back(sector);
+            sectors.push_back(std::move(sector));
         });
 
         return sectors;
@@ -91,16 +90,14 @@ public:
      * @return Vector of sector polygons
      */
     static std::vector<Polygon> semiRadial(const Polygon& poly,
-                                            const Point* center = nullptr,
+                                            PointPtr center = nullptr,
                                             float gap = 0.0f) {
-        Point c;
-        if (center) {
-            c = *center;
-        } else {
+        PointPtr c = center;
+        if (!c) {
             Point centroid = poly.centroid();
             // Find vertex closest to centroid
-            c = poly.min([&centroid](const Point& v) {
-                return Point::distance(v, centroid);
+            c = poly.min([&centroid](PointPtr v) {
+                return Point::distance(*v, centroid);
             });
         }
 
@@ -108,10 +105,10 @@ public:
 
         std::vector<Polygon> sectors;
 
-        poly.forEdge([&](const Point& v0, const Point& v1) {
+        poly.forEdge([&](PointPtr v0, PointPtr v1) {
             // Skip edges that include the center
-            if (!(v0 == c) && !(v1 == c)) {
-                Polygon sector({c, v0, v1});
+            if (v0 != c && v1 != c) {
+                Polygon sector({*c, *v0, *v1});
                 if (halfGap > 0) {
                     std::vector<float> d = {
                         poly.findEdge(c, v0) == -1 ? halfGap : 0.0f,
@@ -120,7 +117,7 @@ public:
                     };
                     sector = sector.shrink(d);
                 }
-                sectors.push_back(sector);
+                sectors.push_back(std::move(sector));
             }
         });
 
@@ -142,13 +139,13 @@ public:
 
         std::vector<Slice> slices;
 
-        poly.forEdge([&](const Point& v1, const Point& v2) {
-            Point v = v2.subtract(v1);
+        poly.forEdge([&](PointPtr v1, PointPtr v2) {
+            Point v = v2->subtract(*v1);
             Point n = v.rotate90().norm(thickness);
 
             Slice slice;
-            slice.p1 = v1.add(n);
-            slice.p2 = v2.add(n);
+            slice.p1 = v1->add(n);
+            slice.p2 = v2->add(n);
             slice.len = v.length();
             slices.push_back(slice);
         });
@@ -165,9 +162,9 @@ public:
         for (size_t i = 0; i < slices.size(); ++i) {
             auto halves = p.cut(slices[i].p1, slices[i].p2);
             if (!halves.empty()) {
-                p = halves[0];
+                p = std::move(halves[0]);
                 if (halves.size() == 2) {
-                    peel.push_back(halves[1]);
+                    peel.push_back(std::move(halves[1]));
                 }
             }
         }

@@ -40,12 +40,12 @@ public:
         if (statue || offset) {
             // we need an edge both for rotating a statue and offsetting
             float length = -1.0f;
-            patch->shape.forEdge([&](const Point& p0, const Point& p1) {
-                float len = Point::distance(p0, p1);
+            patch->shape.forEdge([&](PointPtr p0, PointPtr p1) {
+                float len = Point::distance(*p0, *p1);
                 if (len > length) {
                     length = len;
-                    v0 = p0;
-                    v1 = p1;
+                    v0 = *p0;
+                    v1 = *p1;
                     hasEdge = true;
                 }
             });
@@ -71,7 +71,7 @@ public:
             object.offset(patch->shape.centroid());
         }
 
-        geometry = { object };
+        geometry = { std::move(object) };
     }
 
     static float rateLocation(std::shared_ptr<Model> model, std::shared_ptr<Patch> patch);

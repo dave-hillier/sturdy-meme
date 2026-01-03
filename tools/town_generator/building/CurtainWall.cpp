@@ -22,16 +22,16 @@ CurtainWall::CurtainWall(bool real, std::shared_ptr<Model> model,
 
         if (real) {
             float smoothFactor = std::min(1.0f, 40.0f / static_cast<float>(patches.size()));
-            std::vector<Point> smoothed;
+            // Smooth vertices in-place to preserve identity (patches reference these points)
             for (size_t i = 0; i < shape.size(); ++i) {
-                const Point& v = shape[i];
-                if (reserved.contains(v)) {
-                    smoothed.push_back(v);
-                } else {
-                    smoothed.push_back(shape.smoothVertex(v, smoothFactor));
+                PointPtr v = shape[i];
+                if (!reserved.contains(v)) {
+                    // Update the point's coordinates in-place
+                    Point smoothedPt = shape.smoothVertex(v, smoothFactor);
+                    v->x = smoothedPt.x;
+                    v->y = smoothedPt.y;
                 }
             }
-            shape = Polygon(smoothed);
         }
     }
 
@@ -44,10 +44,10 @@ CurtainWall::CurtainWall(bool real, std::shared_ptr<Model> model,
     gates.clear();
 
     // Entrances are vertices of the walls with more than 1 adjacent inner ward
-    std::vector<Point> entrances;
+    std::vector<PointPtr> entrances;
     if (patches.size() > 1) {
         for (size_t i = 0; i < shape.size(); ++i) {
-            const Point& v = shape[i];
+            PointPtr v = shape[i];
             if (!reserved.contains(v)) {
                 int count = 0;
                 for (const auto& p : patches) {
@@ -62,7 +62,7 @@ CurtainWall::CurtainWall(bool real, std::shared_ptr<Model> model,
         }
     } else {
         for (size_t i = 0; i < shape.size(); ++i) {
-            const Point& v = shape[i];
+            PointPtr v = shape[i];
             if (!reserved.contains(v)) {
                 entrances.push_back(v);
             }
@@ -76,7 +76,7 @@ CurtainWall::CurtainWall(bool real, std::shared_ptr<Model> model,
 
     do {
         int index = static_cast<int>(Random::getFloat() * static_cast<float>(entrances.size()));
-        Point gate = entrances[index];
+        PointPtr gate = entrances[index];
         gates.push_back(gate);
 
         if (real) {
@@ -100,18 +100,20 @@ CurtainWall::CurtainWall(bool real, std::shared_ptr<Model> model,
                 // Split the outer ward to make room for a road
                 auto outer = outerWards[0];
                 if (outer->shape.size() > 3) {
-                    Point wall = shape.next(gate).subtract(shape.prev(gate));
+                    PointPtr nextGate = shape.next(gate);
+                    PointPtr prevGate = shape.prev(gate);
+                    Point wall = nextGate->subtract(*prevGate);
                     Point out(wall.y, -wall.x);
 
                     // Find farthest point
-                    Point farthest;
+                    PointPtr farthest = nullptr;
                     float maxScore = -std::numeric_limits<float>::infinity();
                     for (size_t j = 0; j < outer->shape.size(); ++j) {
-                        const Point& v = outer->shape[j];
+                        PointPtr v = outer->shape[j];
                         if (shape.contains(v) || reserved.contains(v)) {
                             continue;
                         }
-                        Point dir = v.subtract(gate);
+                        Point dir = v->subtract(*gate);
                         float score = dir.dot(out) / dir.length();
                         if (score > maxScore) {
                             maxScore = score;
@@ -119,18 +121,20 @@ CurtainWall::CurtainWall(bool real, std::shared_ptr<Model> model,
                         }
                     }
 
-                    // Split the patch
-                    auto halves = outer->shape.split(gate, farthest);
-                    std::vector<std::shared_ptr<Patch>> newPatches;
-                    for (auto& half : halves) {
-                        newPatches.push_back(std::make_shared<Patch>(half.data()));
-                    }
+                    if (farthest) {
+                        // Split the patch
+                        auto halves = outer->shape.split(gate, farthest);
+                        std::vector<std::shared_ptr<Patch>> newPatches;
+                        for (auto& half : halves) {
+                            newPatches.push_back(std::make_shared<Patch>(half.data()));
+                        }
 
-                    // Replace in model->patches
-                    auto it = std::find(model->patches.begin(), model->patches.end(), outer);
-                    if (it != model->patches.end()) {
-                        it = model->patches.erase(it);
-                        model->patches.insert(it, newPatches.begin(), newPatches.end());
+                        // Replace in model->patches
+                        auto it = std::find(model->patches.begin(), model->patches.end(), outer);
+                        if (it != model->patches.end()) {
+                            it = model->patches.erase(it);
+                            model->patches.insert(it, newPatches.begin(), newPatches.end());
+                        }
                     }
                 }
             }
@@ -171,7 +175,10 @@ CurtainWall::CurtainWall(bool real, std::shared_ptr<Model> model,
         for (auto& gate : gates) {
             int idx = shape.indexOf(gate);
             if (idx != -1) {
-                shape[idx] = shape.smoothVertex(gate);
+                // Smooth the vertex and update the existing point in-place
+                Point smoothed = shape.smoothVertex(gate);
+                gate->x = smoothed.x;
+                gate->y = smoothed.y;
             }
         }
     }

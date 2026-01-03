@@ -64,18 +64,35 @@ public:
         float emptyProb = 0.04f,
         bool split = true
     ) {
+        // Handle degenerate polygons
+        if (p.size() < 3) {
+            return {};
+        }
+
         // Looking for the longest edge to cut it
         size_t vIdx = 0;
         float length = -1.0f;
 
         for (size_t i = 0; i < p.size(); ++i) {
-            const Point& p0 = p[i];
-            const Point& p1 = p[(i + 1) % p.size()];
-            float len = Point::distance(p0, p1);
+            PointPtr p0 = p[i];
+            PointPtr p1 = p[(i + 1) % p.size()];
+            if (!p0 || !p1) continue;  // Skip null vertices
+            float len = Point::distance(*p0, *p1);
             if (len > length) {
                 length = len;
                 vIdx = i;
             }
+        }
+
+        // If no valid edge found, return empty
+        if (length < 0) {
+            return {};
+        }
+
+        // Ensure the selected vertex is valid
+        PointPtr selectedVertex = p[vIdx];
+        if (!selectedVertex) {
+            return {};
         }
 
         float spread = 0.8f * gridChaos;
@@ -86,7 +103,7 @@ public:
             (p.square() < minSq * 4.0f ? 0.0f : 1.0f);
         float b = (Random::getFloat() - 0.5f) * angleSpread;
 
-        auto halves = Cutter::bisect(p, p[vIdx], ratio, b, split ? ALLEY : 0.0f);
+        auto halves = Cutter::bisect(p, selectedVertex, ratio, b, split ? ALLEY : 0.0f);
 
         std::vector<Polygon> buildings;
         for (auto& half : halves) {
@@ -95,14 +112,16 @@ public:
 
             if (halfSq < threshold) {
                 if (!Random::getBool(emptyProb)) {
-                    buildings.push_back(half);
+                    buildings.push_back(std::move(half));
                 }
             } else {
                 auto subBuildings = createAlleys(
                     half, minSq, gridChaos, sizeChaos, emptyProb,
                     halfSq > minSq / (Random::getFloat() * Random::getFloat())
                 );
-                buildings.insert(buildings.end(), subBuildings.begin(), subBuildings.end());
+                buildings.insert(buildings.end(),
+                    std::make_move_iterator(subBuildings.begin()),
+                    std::make_move_iterator(subBuildings.end()));
             }
         }
 
@@ -115,15 +134,20 @@ public:
         }
 
         size_t longestIdx = findLongestEdgeIndex(poly);
-        Point c1 = poly.vector(poly[longestIdx]);
+        Point c1 = poly.vectori(static_cast<int>(longestIdx));
         Point c2 = c1.rotate90();
 
-        while (true) {
+        // The original Haxe has while(true), but we add a safety limit
+        // to prevent infinite loops in edge cases
+        int maxAttempts = 100;
+        while (maxAttempts-- > 0) {
             auto blocks = slice(poly, c1, c2, minBlockSq, fill);
             if (!blocks.empty()) {
                 return blocks;
             }
         }
+        // Fallback: return the original polygon if we couldn't slice it
+        return { poly };
     }
 
 protected:
@@ -135,8 +159,7 @@ private:
         size_t result = 0;
 
         for (size_t i = 0; i < poly.size(); i++) {
-            const Point& v = poly[i];
-            float len = poly.vector(v).length();
+            float len = poly.vectori(static_cast<int>(i)).length();
             if (len > maxLen) {
                 maxLen = len;
                 result = i;
@@ -150,15 +173,22 @@ private:
         Point& c1,
         Point& c2,
         float minBlockSq,
-        float fill
+        float fill,
+        int depth = 0
     ) {
+        // Safety limit to prevent stack overflow from infinite recursion
+        constexpr int MAX_DEPTH = 50;
+        if (depth >= MAX_DEPTH) {
+            return { poly };  // Return the polygon as-is if we've recursed too deep
+        }
+
         size_t v0Idx = findLongestEdgeIndex(poly);
-        Point v0 = poly[v0Idx];
-        Point v1 = poly.next(v0);
-        Point v = v1.subtract(v0);
+        PointPtr v0 = poly[v0Idx];
+        PointPtr v1 = poly.next(v0);
+        Point v = v1->subtract(*v0);
 
         float ratio = 0.4f + Random::getFloat() * 0.2f;
-        Point p1 = GeomUtils::interpolate(v0, v1, ratio);
+        Point p1 = GeomUtils::interpolate(*v0, *v1, ratio);
 
         Point& c = (std::abs(GeomUtils::scalar(v.x, v.y, c1.x, c1.y)) <
                     std::abs(GeomUtils::scalar(v.x, v.y, c2.x, c2.y))) ? c1 : c2;
@@ -172,11 +202,13 @@ private:
 
             if (halfSq < threshold) {
                 if (Random::getBool(fill)) {
-                    buildings.push_back(half);
+                    buildings.push_back(std::move(half));
                 }
             } else {
-                auto subBlocks = slice(half, c1, c2, minBlockSq, fill);
-                buildings.insert(buildings.end(), subBlocks.begin(), subBlocks.end());
+                auto subBlocks = slice(half, c1, c2, minBlockSq, fill, depth + 1);
+                buildings.insert(buildings.end(),
+                    std::make_move_iterator(subBlocks.begin()),
+                    std::make_move_iterator(subBlocks.end()));
             }
         }
         return buildings;

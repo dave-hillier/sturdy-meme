@@ -29,10 +29,10 @@ public:
 
     void createGeometry() override {
         Polygon housing = Polygon::rect(4.0f, 4.0f);
-        Point randomVert = patch->shape.random();
+        PointPtr randomVertPtr = patch->shape.random();
         Point centroid = patch->shape.centroid();
         Point pos = GeomUtils::interpolate(
-            randomVert,
+            *randomVertPtr,
             centroid,
             0.3f + Random::getFloat() * 0.4f
         );
