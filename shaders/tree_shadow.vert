@@ -52,15 +52,23 @@ void main() {
 
     // Apply bending around pivot point
     vec3 offsetFromPivot = localPos - pivotPoint;
-    vec3 bendOffset = windCalculateBendOffset(osc, offsetFromPivot, flexibility, windParams.strength, directionScale);
+
+    // Calculate inherited sway from parent branches/trunk
+    float pivotHeight = pivotPoint.y;
+    float trunkFlexibility = windCalculateBranchFlexibility(0.0);
+    float inheritedAmount = pivotHeight * trunkFlexibility * windParams.strength;
+    vec3 inheritedSway = osc.windDir3D * osc.mainBend * inheritedAmount +
+                         osc.windPerp3D * osc.perpBend * inheritedAmount * 0.5;
+
+    // Calculate this branch's own sway
+    vec3 branchSway = windCalculateBendOffset(osc, offsetFromPivot, flexibility, windParams.strength, directionScale);
 
     // Detail motion
     vec3 detailOffset = windCalculateDetailOffset(localPos, branchLevel, windParams.strength, windParams.gustFreq, windParams.time);
 
     // Transform to world space FIRST, then apply world-space wind offsets
-    // This ensures shadow matches the main render pass
     vec4 worldPos = push.model * vec4(localPos, 1.0);
-    worldPos.xyz += bendOffset + detailOffset;
+    worldPos.xyz += inheritedSway + branchSway + detailOffset;
 
     gl_Position = ubo.cascadeViewProj[push.cascadeIndex] * worldPos;
 }
