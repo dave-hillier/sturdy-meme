@@ -306,6 +306,51 @@ target_link_libraries(town_generator PRIVATE
 
 target_compile_features(town_generator PRIVATE cxx_std_17)
 
+# Town generator 1 (Medieval Fantasy City Generator port - original)
+add_executable(town_generator1
+    town_generator1/src/main.cpp
+    town_generator1/src/geom/Point.cpp
+    town_generator1/src/geom/Segment.cpp
+    town_generator1/src/geom/Circle.cpp
+    town_generator1/src/geom/GeomUtils.cpp
+    town_generator1/src/geom/Polygon.cpp
+    town_generator1/src/geom/Graph.cpp
+    town_generator1/src/geom/Spline.cpp
+    town_generator1/src/geom/Voronoi.cpp
+    town_generator1/src/utils/Random.cpp
+    town_generator1/src/utils/MathUtils.cpp
+    town_generator1/src/building/Patch.cpp
+    town_generator1/src/building/Cutter.cpp
+    town_generator1/src/building/Topology.cpp
+    town_generator1/src/building/CurtainWall.cpp
+    town_generator1/src/building/Model.cpp
+    town_generator1/src/wards/Ward.cpp
+    town_generator1/src/wards/Castle.cpp
+    town_generator1/src/wards/Cathedral.cpp
+    town_generator1/src/wards/Market.cpp
+    town_generator1/src/wards/CraftsmenWard.cpp
+    town_generator1/src/wards/MerchantWard.cpp
+    town_generator1/src/wards/PatriciateWard.cpp
+    town_generator1/src/wards/CommonWard.cpp
+    town_generator1/src/wards/AdministrationWard.cpp
+    town_generator1/src/wards/MilitaryWard.cpp
+    town_generator1/src/wards/GateWard.cpp
+    town_generator1/src/wards/Slum.cpp
+    town_generator1/src/wards/Farm.cpp
+    town_generator1/src/wards/Park.cpp
+    town_generator1/src/svg/SVGWriter.cpp
+)
+
+target_include_directories(town_generator1 PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/town_generator1/include
+)
+
+target_link_libraries(town_generator1 PRIVATE
+    SDL3::SDL3
+)
+
+target_compile_features(town_generator1 PRIVATE cxx_std_17)
+
 # Town generator 2 (cleaner port with shared_ptr Point semantics)
 add_executable(town_generator2
     town_generator2/src/main.cpp
