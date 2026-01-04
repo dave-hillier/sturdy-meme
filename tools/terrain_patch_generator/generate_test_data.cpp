@@ -213,10 +213,87 @@ int main(int argc, char* argv[]) {
     riverFile.close();
     SDL_Log("Saved rivers: %s", riverPath.c_str());
 
+    // Generate settlements JSON
+    // Place settlements at good locations on the terrain
+    json settlements;
+    settlements["version"] = 1;
+    settlements["terrain_size"] = static_cast<int>(TERRAIN_SIZE);
+    settlements["settlements"] = json::array();
+
+    // Town - near center on plateau (high ground)
+    {
+        json s;
+        s["id"] = 0;
+        s["type"] = "town";
+        s["position"] = json::array({TERRAIN_SIZE * 0.45f, TERRAIN_SIZE * 0.45f});
+        s["radius"] = 250.0f;
+        s["score"] = 85.0f;
+        s["features"] = json::array({"market", "castle"});
+        settlements["settlements"].push_back(s);
+    }
+
+    // Village 1 - near river
+    {
+        json s;
+        s["id"] = 1;
+        s["type"] = "village";
+        s["position"] = json::array({TERRAIN_SIZE * 0.35f, TERRAIN_SIZE * 0.55f});
+        s["radius"] = 150.0f;
+        s["score"] = 65.0f;
+        s["features"] = json::array({"mill"});
+        settlements["settlements"].push_back(s);
+    }
+
+    // Village 2 - on other side
+    {
+        json s;
+        s["id"] = 2;
+        s["type"] = "village";
+        s["position"] = json::array({TERRAIN_SIZE * 0.6f, TERRAIN_SIZE * 0.4f});
+        s["radius"] = 120.0f;
+        s["score"] = 55.0f;
+        s["features"] = json::array();
+        settlements["settlements"].push_back(s);
+    }
+
+    // Fishing village - near coast/river mouth
+    {
+        json s;
+        s["id"] = 3;
+        s["type"] = "fishing_village";
+        s["position"] = json::array({TERRAIN_SIZE * 0.25f, TERRAIN_SIZE * 0.65f});
+        s["radius"] = 80.0f;
+        s["score"] = 45.0f;
+        s["features"] = json::array({"dock"});
+        settlements["settlements"].push_back(s);
+    }
+
+    // Hamlet - isolated
+    {
+        json s;
+        s["id"] = 4;
+        s["type"] = "hamlet";
+        s["position"] = json::array({TERRAIN_SIZE * 0.7f, TERRAIN_SIZE * 0.6f});
+        s["radius"] = 60.0f;
+        s["score"] = 30.0f;
+        s["features"] = json::array();
+        settlements["settlements"].push_back(s);
+    }
+
+    std::string settlementsPath = outputDir + "/test_settlements.json";
+    std::ofstream settlementsFile(settlementsPath);
+    if (!settlementsFile.is_open()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create settlements file");
+        return 1;
+    }
+    settlementsFile << settlements.dump(2);
+    settlementsFile.close();
+    SDL_Log("Saved settlements: %s", settlementsPath.c_str());
+
     SDL_Log("Done! Run terrain_patch_generator with:");
     SDL_Log("  --heightmap %s/test_heightmap.png", outputDir.c_str());
     SDL_Log("  --rivers %s/test_rivers.geojson", outputDir.c_str());
-    SDL_Log("  --center 8192,8192");
+    SDL_Log("  --settlements %s/test_settlements.json", outputDir.c_str());
 
     return 0;
 }
