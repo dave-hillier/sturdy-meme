@@ -2,6 +2,7 @@
 #include "town_generator/building/CurtainWall.h"
 #include "town_generator/building/Topology.h"
 #include <iostream>
+#include <SDL3/SDL_log.h>
 #include "town_generator/wards/Ward.h"
 #include "town_generator/wards/Castle.h"
 #include "town_generator/wards/Cathedral.h"
@@ -37,7 +38,10 @@ Model::Model(int nPatches, int seed) : nPatches_(nPatches) {
 
 Model::~Model() {
     delete citadel;
-    delete wall;
+    if (wall != border) {
+        delete wall;
+    }
+    delete border;
 }
 
 void Model::build() {
@@ -66,14 +70,16 @@ std::vector<geom::Point> Model::generateRandomPoints(int count, double width, do
 
 void Model::buildPatches() {
     // Generate seed points using spiral algorithm (faithful to original)
+    // Generate nPatches * 8 points (faithful to Haxe) - inner patches plus outer
     // sa = random starting angle
     // for each point: a = sa + sqrt(i) * 5, r = (i == 0) ? 0 : 10 + i * (2 + random())
 
     double sa = utils::Random::floatVal() * M_PI * 2;  // Starting angle
     std::vector<geom::Point> seeds;
-    seeds.reserve(nPatches_ + 3);  // Extra for frame
+    int totalPoints = nPatches_ * 8;  // 8x more points for outer regions (faithful to Haxe)
+    seeds.reserve(totalPoints);
 
-    for (int i = 0; i < nPatches_; ++i) {
+    for (int i = 0; i < totalPoints; ++i) {
         double a = sa + std::sqrt(static_cast<double>(i)) * 5.0;
         double r = (i == 0) ? 0.0 : 10.0 + i * (2.0 + utils::Random::floatVal());
         seeds.emplace_back(std::cos(a) * r, std::sin(a) * r);
@@ -146,7 +152,9 @@ void Model::buildPatches() {
     std::map<geom::Region*, Patch*> regionToPatch;
     int patchesCreated = 0;
 
-    for (size_t i = 0; i < sortedRegions.size() && patchesCreated < nPatches_; ++i) {
+    // Create all patches from Voronoi regions
+    // First nPatches_ are considered inner/withinCity, rest are outer (faithful to Haxe)
+    for (size_t i = 0; i < sortedRegions.size(); ++i) {
         auto* region = sortedRegions[i].second;
 
         // Skip regions with no triangles (boundary regions)
@@ -165,16 +173,13 @@ void Model::buildPatches() {
         if (sharedVertices.size() < 3) continue;
 
         auto patch = std::make_unique<Patch>(geom::Polygon(sharedVertices));
+
+        // First nPatches_ are inner, rest are outer (faithful to Haxe)
+        bool isInner = (patchesCreated < nPatches_);
         patchesCreated++;
 
-        // Determine if within city (inner patches)
-        double distFromCenter = sortedRegions[i].first;
-        double cityRadius = (nPatches_ > 15) ?
-            sortedRegions[std::min(static_cast<size_t>(innerCount), sortedRegions.size() - 1)].first * 1.1 :
-            sortedRegions.back().first * 1.1;
-
-        patch->withinCity = (distFromCenter < cityRadius);
-        patch->withinWalls = patch->withinCity && wallsNeeded;
+        patch->withinCity = isInner;
+        patch->withinWalls = isInner && wallsNeeded;
 
         regionToPatch[region] = patch.get();
         patches.push_back(patch.get());
@@ -200,8 +205,8 @@ void Model::buildPatches() {
 
     // Create border patch (the bounding area)
     // Polygon::rect creates centered at origin, so offset to match content
-    border.shape = geom::Polygon::rect(width, height);
-    border.shape.offset(geom::Point(width / 2, height / 2));
+    borderPatch.shape = geom::Polygon::rect(width, height);
+    borderPatch.shape.offset(geom::Point(width / 2, height / 2));
 
     // Mark special patches
     // First patch (closest to center) can be plaza
@@ -301,6 +306,7 @@ void Model::buildWalls() {
                 p->withinWalls = true;
             }
         }
+
     }
 
     // Find citadel patch (innermost patch suitable for fortification)
@@ -321,16 +327,16 @@ void Model::buildWalls() {
 
     // ALWAYS create a border CurtainWall - this provides gates even for unwalled cities
     // The wallsNeeded flag controls whether it's a real wall with towers
-    auto* borderWall = new CurtainWall(wallsNeeded, this, inner, reservedPoints);
+    border = new CurtainWall(wallsNeeded, this, inner, reservedPoints);
 
-    // Set wall reference only if walls are needed
+    // Set wall reference only if walls are needed (wall == border for walled cities)
     if (wallsNeeded) {
-        wall = borderWall;
+        wall = border;
         wall->buildTowers();
     }
 
     // Collect gates from border (always, even if unwalled) - these are already PointPtr
-    for (const auto& gatePtr : borderWall->gates) {
+    for (const auto& gatePtr : border->gates) {
         gates.push_back(gatePtr);
     }
     if (citadel) {
@@ -354,11 +360,26 @@ void Model::buildStreets() {
 
     if (!plaza) return;
 
-    geom::Point plazaCenter = plaza->shape.centroid();
+    auto bounds = borderPatch.shape.getBounds();
+    geom::Point center((bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2);
 
     // Build arteries from each gate to plaza
     for (const auto& gatePtr : gates) {
-        auto path = topology_->buildPath(*gatePtr, plazaCenter);
+        // Find the vertex of the plaza closest to this gate (faithful to Haxe)
+        // This ensures we path to an actual node in the topology graph
+        geom::Point end = center;
+        if (plaza) {
+            double minDist = std::numeric_limits<double>::infinity();
+            for (size_t i = 0; i < plaza->shape.length(); ++i) {
+                double d = geom::Point::distance(*plaza->shape.ptr(i), *gatePtr);
+                if (d < minDist) {
+                    minDist = d;
+                    end = *plaza->shape.ptr(i);
+                }
+            }
+        }
+        // Exclude outer nodes so path stays inside the city (faithful to Haxe)
+        auto path = topology_->buildPath(*gatePtr, end, &topology_->outer);
         if (!path.empty()) {
             // Smooth the path
             if (path.size() > 2) {
@@ -382,7 +403,17 @@ void Model::buildStreets() {
     for (auto* patch : inner) {
         if (patch == plaza) continue;
 
-        geom::Point patchCenter = patch->shape.centroid();
+        // Use the patch vertex closest to the center as the start point
+        // (this ensures we path from an actual node in the topology graph)
+        geom::Point patchStart = patch->shape.length() > 0 ? *patch->shape.ptr(0) : patch->shape.centroid();
+        double minDist = std::numeric_limits<double>::infinity();
+        for (size_t i = 0; i < patch->shape.length(); ++i) {
+            double d = geom::Point::distance(*patch->shape.ptr(i), center);
+            if (d < minDist) {
+                minDist = d;
+                patchStart = *patch->shape.ptr(i);
+            }
+        }
 
         // Try to connect to nearest artery or plaza
         bool connected = false;
@@ -390,7 +421,7 @@ void Model::buildStreets() {
         // Check if already near an artery
         for (const auto& artery : arteries) {
             for (const auto& pt : artery) {
-                if (geom::Point::distance(patchCenter, pt) < 5.0) {
+                if (geom::Point::distance(patchStart, pt) < 5.0) {
                     connected = true;
                     break;
                 }
@@ -399,49 +430,55 @@ void Model::buildStreets() {
         }
 
         if (!connected) {
-            // Build street to plaza
-            auto path = topology_->buildPath(patchCenter, plazaCenter);
+            // Build street to plaza - find nearest plaza vertex
+            geom::Point plazaEnd = center;
+            if (plaza) {
+                double minD = std::numeric_limits<double>::infinity();
+                for (size_t i = 0; i < plaza->shape.length(); ++i) {
+                    double d = geom::Point::distance(*plaza->shape.ptr(i), patchStart);
+                    if (d < minD) {
+                        minD = d;
+                        plazaEnd = *plaza->shape.ptr(i);
+                    }
+                }
+            }
+            // Exclude outer nodes so path stays inside the city
+            auto path = topology_->buildPath(patchStart, plazaEnd, &topology_->outer);
             if (!path.empty() && path.size() > 1) {
                 streets.push_back(path);
             }
         }
     }
+
 }
 
 void Model::buildRoads() {
-    // Build roads from gates outward
-    if (!topology_ || gates.empty()) return;
+    // Build roads from outer edge TO border gates (not citadel gates)
+    // Roads stay OUTSIDE the city walls (exclude inner nodes)
+    // Faithful to Haxe: only border.gates get roads, not citadel gates
+    if (!topology_ || !border) return;
 
-    for (const auto& gatePtr : gates) {
+    for (const auto& gatePtr : border->gates) {
         const geom::Point& gate = *gatePtr;
-        // Find outer node nearest to gate in outward direction
-        geom::Point center = plaza ? plaza->shape.centroid() : geom::Point(0, 0);
-        geom::Point dir = gate.subtract(center).norm();
 
-        // Find best outer node
-        geom::Node* bestOuter = nullptr;
-        double bestScore = -std::numeric_limits<double>::infinity();
+        // Haxe: dir = gate.norm(1000) - point 1000 units from origin in gate direction
+        geom::Point dir = gate.norm(1000);
 
-        for (auto* node : topology_->outer) {
-            auto it = topology_->node2pt.find(node);
-            if (it == topology_->node2pt.end()) continue;
+        // Find the topology node closest to that distant point
+        geom::PointPtr startPtr = nullptr;
+        double minDist = std::numeric_limits<double>::infinity();
 
-            geom::Point nodePos = *it->second;  // Dereference PointPtr
-            geom::Point toNode = nodePos.subtract(gate);
-            double dist = toNode.length();
-            if (dist < 0.01) continue;
-
-            // Score by alignment with outward direction
-            double alignment = toNode.dot(dir) / dist;
-            if (alignment > bestScore) {
-                bestScore = alignment;
-                bestOuter = node;
+        for (const auto& [ptPtr, node] : topology_->pt2node) {
+            double d = geom::Point::distance(*ptPtr, dir);
+            if (d < minDist) {
+                minDist = d;
+                startPtr = ptPtr;
             }
         }
 
-        if (bestOuter) {
-            geom::Point roadEnd = *topology_->node2pt[bestOuter];  // Dereference PointPtr
-            auto path = topology_->buildPath(gate, roadEnd, &topology_->inner);
+        if (startPtr) {
+            // Build path from outer start point TO gate, excluding inner nodes
+            auto path = topology_->buildPath(*startPtr, gate, &topology_->inner);
             if (!path.empty()) {
                 roads.push_back(path);
             }

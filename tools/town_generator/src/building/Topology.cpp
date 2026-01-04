@@ -3,6 +3,7 @@
 #include "town_generator/building/CurtainWall.h"
 #include <algorithm>
 #include <limits>
+#include <SDL3/SDL_log.h>
 
 namespace town_generator {
 namespace building {
@@ -33,7 +34,7 @@ Topology::Topology(Model* model) : model_(model) {
         }
     }
 
-    const auto& border = model_->border.shape;
+    const auto& border = model_->borderPatch.shape;
 
     for (auto* patch : model_->patches) {
         bool withinCity = patch->withinCity;
@@ -111,31 +112,21 @@ std::vector<geom::Point> Topology::buildPath(
     geom::Node* fromNode = nullptr;
     geom::Node* toNode = nullptr;
 
-    // Find node matching 'from' by coordinates
-    double minFromDist = std::numeric_limits<double>::infinity();
+    // Find node matching 'from' by coordinates - require exact match
     for (const auto& [ptPtr, node] : pt2node) {
         double d = geom::Point::distance(from, *ptPtr);
-        if (d < 0.001) {  // Exact match
+        if (d < 0.001) {  // Exact match only
             fromNode = node;
             break;
-        }
-        if (d < minFromDist) {
-            minFromDist = d;
-            fromNode = node;
         }
     }
 
-    // Find node matching 'to' by coordinates
-    double minToDist = std::numeric_limits<double>::infinity();
+    // Find node matching 'to' by coordinates - require exact match
     for (const auto& [ptPtr, node] : pt2node) {
         double d = geom::Point::distance(to, *ptPtr);
-        if (d < 0.001) {  // Exact match
+        if (d < 0.001) {  // Exact match only
             toNode = node;
             break;
-        }
-        if (d < minToDist) {
-            minToDist = d;
-            toNode = node;
         }
     }
 
@@ -149,17 +140,14 @@ std::vector<geom::Point> Topology::buildPath(
         return {};
     }
 
+    // Return path points directly (faithful to Haxe)
     std::vector<geom::Point> result;
-    // Include original 'from' point at start
-    result.push_back(from);
     for (auto* n : path) {
         auto it = node2pt.find(n);
         if (it != node2pt.end()) {
             result.push_back(*it->second);  // Dereference PointPtr
         }
     }
-    // Include original 'to' point at end
-    result.push_back(to);
 
     return result;
 }

@@ -34,10 +34,11 @@ public:
     // Generated data
     std::vector<Patch*> patches;
     std::vector<Patch*> inner;  // Patches within walls
-    Patch border;
+    Patch borderPatch;  // Patch representing outer border
 
     CurtainWall* citadel = nullptr;
-    CurtainWall* wall = nullptr;
+    CurtainWall* wall = nullptr;      // Inner wall (if walled city)
+    CurtainWall* border = nullptr;    // Outer border wall (always exists, provides gates)
     Patch* plaza = nullptr;
 
     std::vector<geom::PointPtr> gates;  // Shared pointers for reference semantics

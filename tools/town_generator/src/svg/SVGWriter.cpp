@@ -40,7 +40,7 @@ std::string SVGWriter::generate(const building::Model& model, const Style& style
     svg << std::fixed << std::setprecision(2);
 
     // Calculate bounds
-    auto bounds = model.border.shape.getBounds();
+    auto bounds = model.borderPatch.shape.getBounds();
     double margin = 5.0;
     double width = bounds.width() + margin * 2;
     double height = bounds.height() + margin * 2;
@@ -50,7 +50,7 @@ std::string SVGWriter::generate(const building::Model& model, const Style& style
     // SVG header
     svg << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
     svg << "<svg xmlns=\"http://www.w3.org/2000/svg\" ";
-    svg << "width=\"" << width * 10 << "\" height=\"" << height * 10 << "\" ";
+    svg << "width=\"" << width * 4 << "\" height=\"" << height * 4 << "\" ";
     svg << "viewBox=\"" << minX << " " << minY << " " << width << " " << height << "\">\n";
 
     // Background

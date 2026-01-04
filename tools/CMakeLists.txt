@@ -286,3 +286,49 @@ target_link_libraries(town_generator PRIVATE
 )
 
 target_compile_features(town_generator PRIVATE cxx_std_17)
+
+# Town generator 2 (cleaner port with shared_ptr Point semantics)
+add_executable(town_generator2
+    town_generator2/src/main.cpp
+    town_generator2/src/Model.cpp
+    town_generator2/src/CurtainWall.cpp
+    town_generator2/src/Topology.cpp
+    town_generator2/src/Ward.cpp
+    town_generator2/src/Castle.cpp
+)
+
+target_include_directories(town_generator2 PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/town_generator2/include
+)
+
+target_link_libraries(town_generator2 PRIVATE
+    SDL3::SDL3
+)
+
+target_compile_features(town_generator2 PRIVATE cxx_std_17)
+
+# Town generator 2 tests
+find_package(doctest CONFIG REQUIRED)
+
+add_executable(town_generator2_tests
+    town_generator2/tests/test_main.cpp
+    town_generator2/tests/test_polygon.cpp
+    town_generator2/tests/test_voronoi.cpp
+    town_generator2/tests/test_model.cpp
+    town_generator2/src/Model.cpp
+    town_generator2/src/CurtainWall.cpp
+    town_generator2/src/Topology.cpp
+    town_generator2/src/Ward.cpp
+    town_generator2/src/Castle.cpp
+)
+
+target_include_directories(town_generator2_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/town_generator2/include
+)
+
+target_link_libraries(town_generator2_tests PRIVATE
+    SDL3::SDL3
+    doctest::doctest
+)
+
+target_compile_features(town_generator2_tests PRIVATE cxx_std_17)

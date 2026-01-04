@@ -49,11 +49,11 @@ public:
             : buildingFill("#d4c4a8")
             , buildingStroke("#8b7355")
             , buildingStrokeWidth(0.5)
-            , streetStroke("#c8b89a")
+            , streetStroke("#0000ff")  // DEBUG: blue for streets/alleys
             , streetStrokeWidth(1.0)
-            , arteryStroke("#a89878")
+            , arteryStroke("#ff0000")  // DEBUG: red for arteries/roads
             , arteryStrokeWidth(2.0)
-            , roadStroke("#b8a888")
+            , roadStroke("#ff0000")    // DEBUG: red for roads
             , roadStrokeWidth(1.5)
             , wallStroke("#5c4033")
             , wallStrokeWidth(3.0)
