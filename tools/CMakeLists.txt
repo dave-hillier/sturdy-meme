@@ -243,92 +243,61 @@ target_link_libraries(vegetation_generator PRIVATE
 target_compile_features(vegetation_generator PRIVATE cxx_std_17)
 
 # Town generator (Medieval Fantasy City Generator port)
-add_executable(town_generator
-    town_generator/src/main.cpp
-    town_generator/src/geom/Point.cpp
-    town_generator/src/geom/Segment.cpp
-    town_generator/src/geom/Circle.cpp
-    town_generator/src/geom/GeomUtils.cpp
-    town_generator/src/geom/Polygon.cpp
-    town_generator/src/geom/Graph.cpp
-    town_generator/src/geom/Spline.cpp
-    town_generator/src/geom/Voronoi.cpp
-    town_generator/src/utils/Random.cpp
-    town_generator/src/utils/MathUtils.cpp
-    town_generator/src/building/Patch.cpp
-    town_generator/src/building/Cutter.cpp
-    town_generator/src/building/Topology.cpp
-    town_generator/src/building/CurtainWall.cpp
-    town_generator/src/building/Model.cpp
-    town_generator/src/wards/Ward.cpp
-    town_generator/src/wards/Castle.cpp
-    town_generator/src/wards/Cathedral.cpp
-    town_generator/src/wards/Market.cpp
-    town_generator/src/wards/CraftsmenWard.cpp
-    town_generator/src/wards/MerchantWard.cpp
-    town_generator/src/wards/PatriciateWard.cpp
-    town_generator/src/wards/CommonWard.cpp
-    town_generator/src/wards/AdministrationWard.cpp
-    town_generator/src/wards/MilitaryWard.cpp
-    town_generator/src/wards/GateWard.cpp
-    town_generator/src/wards/Slum.cpp
-    town_generator/src/wards/Farm.cpp
-    town_generator/src/wards/Park.cpp
-    town_generator/src/svg/SVGWriter.cpp
+add_executable(town_generator1
+    town_generator1/src/main.cpp
+    town_generator1/src/geom/Point.cpp
+    town_generator1/src/geom/Segment.cpp
+    town_generator1/src/geom/Circle.cpp
+    town_generator1/src/geom/GeomUtils.cpp
+    town_generator1/src/geom/Polygon.cpp
+    town_generator1/src/geom/Graph.cpp
+    town_generator1/src/geom/Spline.cpp
+    town_generator1/src/geom/Voronoi.cpp
+    town_generator1/src/utils/Random.cpp
+    town_generator1/src/utils/MathUtils.cpp
+    town_generator1/src/building/Patch.cpp
+    town_generator1/src/building/Cutter.cpp
+    town_generator1/src/building/Topology.cpp
+    town_generator1/src/building/CurtainWall.cpp
+    town_generator1/src/building/Model.cpp
+    town_generator1/src/wards/Ward.cpp
+    town_generator1/src/wards/Castle.cpp
+    town_generator1/src/wards/Cathedral.cpp
+    town_generator1/src/wards/Market.cpp
+    town_generator1/src/wards/CraftsmenWard.cpp
+    town_generator1/src/wards/MerchantWard.cpp
+    town_generator1/src/wards/PatriciateWard.cpp
+    town_generator1/src/wards/CommonWard.cpp
+    town_generator1/src/wards/AdministrationWard.cpp
+    town_generator1/src/wards/MilitaryWard.cpp
+    town_generator1/src/wards/GateWard.cpp
+    town_generator1/src/wards/Slum.cpp
+    town_generator1/src/wards/Farm.cpp
+    town_generator1/src/wards/Park.cpp
+    town_generator1/src/svg/SVGWriter.cpp
 )
 
-target_include_directories(town_generator PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/town_generator/include
+target_include_directories(town_generator1 PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/town_generator1/include
 )
 
-target_link_libraries(town_generator PRIVATE
+target_link_libraries(town_generator1 PRIVATE
     SDL3::SDL3
 )
 
-target_compile_features(town_generator PRIVATE cxx_std_17)
+target_compile_features(town_generator1 PRIVATE cxx_std_17)
 
-# Town generator 2 (cleaner port with shared_ptr Point semantics)
-add_executable(town_generator2
-    town_generator2/src/main.cpp
-    town_generator2/src/Model.cpp
-    town_generator2/src/CurtainWall.cpp
-    town_generator2/src/Topology.cpp
-    town_generator2/src/Ward.cpp
-    town_generator2/src/Castle.cpp
-)
-
-target_include_directories(town_generator2 PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/town_generator2/include
-)
-
-target_link_libraries(town_generator2 PRIVATE
-    SDL3::SDL3
-)
-
-target_compile_features(town_generator2 PRIVATE cxx_std_17)
-
-# Town generator 2 tests
-find_package(doctest CONFIG REQUIRED)
-
-add_executable(town_generator2_tests
-    town_generator2/tests/test_main.cpp
-    town_generator2/tests/test_polygon.cpp
-    town_generator2/tests/test_voronoi.cpp
-    town_generator2/tests/test_model.cpp
-    town_generator2/src/Model.cpp
-    town_generator2/src/CurtainWall.cpp
-    town_generator2/src/Topology.cpp
-    town_generator2/src/Ward.cpp
-    town_generator2/src/Castle.cpp
-)
-
-target_include_directories(town_generator2_tests PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/town_generator2/include
-)
-
-target_link_libraries(town_generator2_tests PRIVATE
-    SDL3::SDL3
-    doctest::doctest
-)
-
-target_compile_features(town_generator2_tests PRIVATE cxx_std_17)
+# Town generator 2 - commented out (files don't exist yet)
+# add_executable(town_generator2
+#     town_generator2/src/main.cpp
+#     town_generator2/src/Model.cpp
+#     town_generator2/src/CurtainWall.cpp
+#     town_generator2/src/Topology.cpp
+#     town_generator2/src/Ward.cpp
+#     town_generator2/src/Castle.cpp
+# )
+# target_include_directories(town_generator2 PRIVATE
+#     ${CMAKE_CURRENT_SOURCE_DIR}/town_generator2/include
+# )
+# target_link_libraries(town_generator2 PRIVATE SDL3::SDL3)
+# target_compile_features(town_generator2 PRIVATE cxx_std_17)
