@@ -235,11 +235,13 @@ void main() {
     // and ensure grass behind camera can still cast shadows
     if (!isInFrustum(culling.frustumPlanes, worldPos, GRASS_FRUSTUM_MARGIN)) return;
 
-    // LOD blade dropping using shared culling UBO
+    // LOD blade dropping using shared culling UBO with hysteresis
     // maxLodDropRate from UBO controls max drop percentage at far LOD
+    // hysteresisHash staggers transition points to prevent synchronized flickering
     float instanceHash = hash(cell + vec2(500.0, 500.0));
-    if (isLodEnabled() && lodCull(distToCamera, culling.lodTransitionStart, culling.lodTransitionEnd,
-                                   culling.maxLodDropRate, instanceHash)) return;
+    float hysteresisHash = hash(cell + vec2(1234.0, 5678.0));
+    if (isLodEnabled() && lodCullWithHysteresis(distToCamera, culling.lodTransitionStart, culling.lodTransitionEnd,
+                                                 culling.maxLodDropRate, instanceHash, hysteresisHash)) return;
 
     // Use subgroup operations to batch atomic updates
     // This reduces contention by ~32x compared to per-thread atomics

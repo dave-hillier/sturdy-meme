@@ -107,6 +107,10 @@ float getDistanceToCamera(vec3 pos, vec3 cameraPos) {
 // LOD (Level of Detail) Dropping
 // ============================================================================
 
+// Hysteresis amount for LOD transitions (prevents flickering)
+// Each instance gets a random offset of ±(LOD_HYSTERESIS/2) to its transition threshold
+const float LOD_HYSTERESIS = 0.1;
+
 // Calculate LOD factor based on distance
 // Returns 0.0 at lodStart, 1.0 at lodEnd
 float calculateLodFactor(float distance, float lodStart, float lodEnd) {
@@ -123,10 +127,31 @@ bool shouldLodDrop(float lodFactor, float maxDropRate, float instanceHash) {
     return instanceHash < dropThreshold;
 }
 
+// Determine if an instance should be dropped based on LOD with hysteresis
+// lodFactor: 0.0-1.0 from calculateLodFactor
+// maxDropRate: maximum percentage of instances to drop (e.g., 0.75 = drop up to 75%)
+// instanceHash: per-instance random value 0.0-1.0
+// hysteresisHash: second per-instance random value for staggering transitions
+// Returns true if the instance should be dropped
+bool shouldLodDropWithHysteresis(float lodFactor, float maxDropRate, float instanceHash, float hysteresisHash) {
+    // Each instance gets a unique offset to stagger transition points
+    // This prevents synchronized flickering when camera oscillates near boundaries
+    float hysteresisOffset = (hysteresisHash - 0.5) * LOD_HYSTERESIS;
+    float effectiveLodFactor = clamp(lodFactor + hysteresisOffset, 0.0, 1.0);
+    float dropThreshold = effectiveLodFactor * maxDropRate;
+    return instanceHash < dropThreshold;
+}
+
 // Combined LOD check: returns true if instance should be dropped
 bool lodCull(float distance, float lodStart, float lodEnd, float maxDropRate, float instanceHash) {
     float lodFactor = calculateLodFactor(distance, lodStart, lodEnd);
     return shouldLodDrop(lodFactor, maxDropRate, instanceHash);
+}
+
+// Combined LOD check with hysteresis: returns true if instance should be dropped
+bool lodCullWithHysteresis(float distance, float lodStart, float lodEnd, float maxDropRate, float instanceHash, float hysteresisHash) {
+    float lodFactor = calculateLodFactor(distance, lodStart, lodEnd);
+    return shouldLodDropWithHysteresis(lodFactor, maxDropRate, instanceHash, hysteresisHash);
 }
 
 // ============================================================================

@@ -141,6 +141,11 @@ CONST_FLOAT_DERIVED(GRASS_MAX_DRAW_DISTANCE, GRASS_TILED_COVERAGE_LOD2 * 0.5);
 CONST_FLOAT_DERIVED(GRASS_LOD_TRANSITION_ZONE, GRASS_TILE_SIZE_LOD0 * 0.35);
 CONST_FLOAT(GRASS_LOD_TRANSITION_DROP_RATE, 0.75);
 
+// Hysteresis to prevent flickering at LOD boundaries
+// Each blade gets a random offset (±half this value) to stagger transitions
+// This prevents all blades at the same distance from flickering together
+CONST_FLOAT(GRASS_LOD_HYSTERESIS, 0.1);
+
 // =============================================================================
 // CLUMPING
 // =============================================================================

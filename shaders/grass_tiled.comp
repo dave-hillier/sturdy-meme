@@ -96,6 +96,10 @@ layout(push_constant) uniform PushConstants {
 // - LOD 0→1: Drop 3/4 of blades (keep only those at even X AND even Z grid positions)
 // - LOD 1→2: Drop 3/4 of remaining (keep only those at positions divisible by 4)
 //
+// Hysteresis: Each blade gets a per-blade offset to its transition threshold.
+// This staggers when blades appear/disappear, preventing synchronized flickering
+// when the camera oscillates near a transition boundary.
+//
 // worldCell: base-spacing-aligned grid cell (used for subset selection)
 // distToCamera: distance to camera for transition zone calculation
 // lodLevel: current tile's LOD level
@@ -119,7 +123,14 @@ bool shouldDropForLodTransition(vec2 worldCell, float distToCamera, uint lodLeve
             if (!survivesAtLod1) {
                 // Use position-based hash for smooth staggered dropping
                 float dropHash = hash2D(worldCell + vec2(850.0, 850.0));
-                return dropHash < t;
+
+                // Hysteresis: give each blade a unique offset to stagger transitions
+                // This prevents all blades at the same distance from flickering together
+                float hysteresisHash = hash2D(worldCell + vec2(1234.0, 5678.0));
+                float hysteresisOffset = (hysteresisHash - 0.5) * GRASS_LOD_HYSTERESIS;
+                float effectiveT = clamp(t + hysteresisOffset, 0.0, 1.0);
+
+                return dropHash < effectiveT;
             }
         }
     }
@@ -138,7 +149,13 @@ bool shouldDropForLodTransition(vec2 worldCell, float distToCamera, uint lodLeve
 
             if (!survivesAtLod2) {
                 float dropHash = hash2D(worldCell + vec2(850.0, 850.0));
-                return dropHash < t;
+
+                // Hysteresis: give each blade a unique offset to stagger transitions
+                float hysteresisHash = hash2D(worldCell + vec2(1234.0, 5678.0));
+                float hysteresisOffset = (hysteresisHash - 0.5) * GRASS_LOD_HYSTERESIS;
+                float effectiveT = clamp(t + hysteresisOffset, 0.0, 1.0);
+
+                return dropHash < effectiveT;
             }
         }
     }
