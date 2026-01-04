@@ -1,6 +1,5 @@
 #include "BloomSystem.h"
 #include "GraphicsPipelineFactory.h"
-#include "VulkanBarriers.h"
 #include "VmaResources.h"
 #include "DescriptorManager.h"
 #include "core/ImageBuilder.h"

@@ -1,6 +1,5 @@
 #include "HiZSystem.h"
 #include "ShaderLoader.h"
-#include "VulkanBarriers.h"
 #include "VmaResources.h"
 #include "core/ImageBuilder.h"
 #include <SDL3/SDL_log.h>

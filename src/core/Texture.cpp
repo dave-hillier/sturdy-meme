@@ -4,7 +4,6 @@
 #include "DDSLoader.h"
 #include "VmaResources.h"
 #include "CommandBufferUtils.h"
-#include "VulkanBarriers.h"
 #include "ImageBuilder.h"
 #include <vulkan/vulkan.hpp>
 #include <cstring>

@@ -3,7 +3,6 @@
 #include "BilateralGridSystem.h"
 #include "ShaderLoader.h"
 #include "DescriptorManager.h"
-#include "VulkanBarriers.h"
 #include "VmaResources.h"
 #include "CommandBufferUtils.h"
 #include <SDL3/SDL.h>

@@ -7,7 +7,6 @@
 #include "PipelineBuilder.h"
 #include "DescriptorManager.h"
 #include "UBOs.h"
-#include "VulkanBarriers.h"
 #include "VmaResources.h"
 #include <vulkan/vulkan.hpp>
 #include <SDL3/SDL.h>

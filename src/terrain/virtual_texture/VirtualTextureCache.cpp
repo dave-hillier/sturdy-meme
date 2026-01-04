@@ -1,5 +1,4 @@
 #include "VirtualTextureCache.h"
-#include "VulkanBarriers.h"
 #include "VmaResources.h"
 #include <vulkan/vulkan.hpp>
 #include <SDL3/SDL_log.h>

@@ -1,6 +1,5 @@
 #include "WaterTileCull.h"
 #include "ShaderLoader.h"
-#include "VulkanBarriers.h"
 #include "VmaResources.h"
 #include "DescriptorManager.h"
 #include <SDL3/SDL.h>

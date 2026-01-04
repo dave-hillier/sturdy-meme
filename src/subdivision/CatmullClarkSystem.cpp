@@ -2,7 +2,6 @@
 #include "OBJLoader.h"
 #include "ShaderLoader.h"
 #include "BufferUtils.h"
-#include "VulkanBarriers.h"
 #include "VmaResources.h"
 #include <SDL3/SDL.h>
 #include <glm/gtc/matrix_transform.hpp>

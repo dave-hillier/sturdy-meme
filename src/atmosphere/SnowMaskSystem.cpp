@@ -3,7 +3,6 @@
 #include "InitContext.h"
 #include "ShaderLoader.h"
 #include "PipelineBuilder.h"
-#include "VulkanBarriers.h"
 #include "VmaResources.h"
 #include "DescriptorManager.h"
 #include <SDL3/SDL.h>

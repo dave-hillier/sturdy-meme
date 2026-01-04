@@ -1,6 +1,5 @@
 #include "LoadJobFactory.h"
 #include "../vulkan/VmaResources.h"
-#include "../vulkan/VulkanBarriers.h"
 #include "../vulkan/CommandBufferUtils.h"
 #include "../ImageBuilder.h"
 #include <SDL3/SDL_log.h>

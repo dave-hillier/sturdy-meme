@@ -1,6 +1,5 @@
 #include "TerrainMeshlet.h"
 #include "VmaResources.h"
-#include "VulkanBarriers.h"
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.hpp>
 #include <cstring>

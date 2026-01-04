@@ -1,7 +1,6 @@
 #include "OceanFFT.h"
 #include "ShaderLoader.h"
 #include "DescriptorManager.h"
-#include "VulkanBarriers.h"
 #include "VmaResources.h"
 #include "shaders/bindings.h"
 #include <SDL_log.h>

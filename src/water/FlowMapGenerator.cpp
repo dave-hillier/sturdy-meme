@@ -1,5 +1,4 @@
 #include "FlowMapGenerator.h"
-#include "VulkanBarriers.h"
 #include "VmaResources.h"
 #include "CommandBufferUtils.h"
 #include <SDL3/SDL.h>
