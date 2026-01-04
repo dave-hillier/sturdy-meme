@@ -287,17 +287,17 @@ target_link_libraries(town_generator1 PRIVATE
 
 target_compile_features(town_generator1 PRIVATE cxx_std_17)
 
-# Town generator 2 - commented out (files don't exist yet)
-# add_executable(town_generator2
-#     town_generator2/src/main.cpp
-#     town_generator2/src/Model.cpp
-#     town_generator2/src/CurtainWall.cpp
-#     town_generator2/src/Topology.cpp
-#     town_generator2/src/Ward.cpp
-#     town_generator2/src/Castle.cpp
-# )
-# target_include_directories(town_generator2 PRIVATE
-#     ${CMAKE_CURRENT_SOURCE_DIR}/town_generator2/include
-# )
-# target_link_libraries(town_generator2 PRIVATE SDL3::SDL3)
-# target_compile_features(town_generator2 PRIVATE cxx_std_17)
+# Town generator 2 (cleaner port with shared_ptr Point semantics)
+add_executable(town_generator2
+    town_generator2/src/main.cpp
+    town_generator2/src/Model.cpp
+    town_generator2/src/CurtainWall.cpp
+    town_generator2/src/Topology.cpp
+    town_generator2/src/Ward.cpp
+    town_generator2/src/Castle.cpp
+)
+target_include_directories(town_generator2 PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/town_generator2/include
+)
+target_link_libraries(town_generator2 PRIVATE SDL3::SDL3)
+target_compile_features(town_generator2 PRIVATE cxx_std_17)
