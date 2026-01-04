@@ -1153,3 +1153,65 @@ if(APPLE)
         "-framework AppKit"
     )
 endif()
+
+# =============================================================================
+# Unit Tests
+# =============================================================================
+option(BUILD_TESTS "Build unit tests" ON)
+
+if(BUILD_TESTS)
+    enable_testing()
+    find_package(doctest CONFIG REQUIRED)
+
+    add_executable(vulkan_game_tests
+        tests/test_main.cpp
+        tests/test_celestial_calculator.cpp
+        tests/test_terrain_height.cpp
+        tests/test_animation.cpp
+        tests/test_ik_utils.cpp
+        tests/test_terrain_loaders.cpp
+        tests/test_virtual_texture_types.cpp
+        tests/test_virtual_texture_loader.cpp
+        tests/test_tile_grid_logic.cpp
+        # Source files needed by tests
+        src/atmosphere/CelestialCalculator.cpp
+        src/ik/IKUtils.cpp
+        src/terrain/ErosionDataLoader.cpp
+        src/terrain/RoadNetworkLoader.cpp
+        src/terrain/virtual_texture/VirtualTextureTileLoader.cpp
+    )
+
+    target_include_directories(vulkan_game_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/loaders  # For GLTFLoader.h used by animation
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/core     # For Mesh.h used by loaders
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/terrain  # For TileGridLogic.h, ErosionDataLoader.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/terrain/virtual_texture  # For VirtualTextureTypes.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/water    # For WaterPlacementData.h
+    )
+
+    target_link_libraries(vulkan_game_tests PRIVATE
+        doctest::doctest
+        glm::glm
+        Vulkan::Vulkan                           # For Vulkan types in Mesh.h, VK_FORMAT in DDSLoader
+        GPUOpen::VulkanMemoryAllocator           # For vk_mem_alloc.h in Mesh.h
+        nlohmann_json::nlohmann_json             # For GeoJSON parsing in terrain loaders
+        SDL3::SDL3                               # For SDL_Log in terrain loaders
+        lodepng                                  # For PNG loading in VirtualTextureTileLoader
+    )
+
+    target_compile_features(vulkan_game_tests PRIVATE cxx_std_17)
+
+    # Define GLM_ENABLE_EXPERIMENTAL for GLM extensions used in IK tests
+    target_compile_definitions(vulkan_game_tests PRIVATE GLM_ENABLE_EXPERIMENTAL)
+
+    # Register tests with CTest
+    add_test(NAME vulkan_game_tests COMMAND vulkan_game_tests)
+
+    # Add a custom target to run tests
+    add_custom_target(run_tests
+        COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
+        DEPENDS vulkan_game_tests
+        COMMENT "Running unit tests"
+    )
+endif()
