@@ -66,15 +66,25 @@ void main() {
 
     // Apply bending around pivot point
     vec3 offsetFromPivot = localPos - pivotPoint;
-    vec3 bendOffset = windCalculateBendOffset(osc, offsetFromPivot, flexibility, windParams.strength, directionScale);
+
+    // Calculate inherited sway from parent branches/trunk
+    // The pivot point itself would have moved due to trunk sway at that height
+    float pivotHeight = pivotPoint.y;
+    float trunkFlexibility = windCalculateBranchFlexibility(0.0);  // Level 0 flexibility
+    float inheritedAmount = pivotHeight * trunkFlexibility * windParams.strength;
+    vec3 inheritedSway = osc.windDir3D * osc.mainBend * inheritedAmount +
+                         osc.windPerp3D * osc.perpBend * inheritedAmount * 0.5;
+
+    // Calculate this branch's own sway (additional movement beyond inherited)
+    vec3 branchSway = windCalculateBendOffset(osc, offsetFromPivot, flexibility, windParams.strength, directionScale);
 
     // High-frequency detail motion for tips
     vec3 detailOffset = windCalculateDetailOffset(localPos, branchLevel, windParams.strength, windParams.gustFreq, windParams.time);
 
     // Transform to world space FIRST, then apply world-space wind offsets
-    // This ensures branches and leaves move in the same direction regardless of tree rotation
+    // Total offset = inherited from trunk + branch's own sway + detail
     vec4 worldPos = push.model * vec4(localPos, 1.0);
-    worldPos.xyz += bendOffset + detailOffset;
+    worldPos.xyz += inheritedSway + branchSway + detailOffset;
 
     gl_Position = ubo.proj * ubo.view * worldPos;
 
