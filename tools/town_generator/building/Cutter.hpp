@@ -28,19 +28,20 @@ public:
     /**
      * Bisects a polygon along a line perpendicular to an edge.
      * @param poly The polygon to bisect
-     * @param vertex The starting vertex of the edge to bisect from
+     * @param vertex The starting vertex of the edge to bisect from (shared_ptr)
      * @param ratio Position along the edge (0.0 to 1.0, default 0.5)
      * @param angle Rotation of the cut line in radians (default 0.0)
      * @param gap Gap to leave between the resulting polygons (default 0.0)
      * @return Vector of resulting polygons (usually 2)
      */
-    static std::vector<Polygon> bisect(const Polygon& poly, const Point& vertex,
+    static std::vector<Polygon> bisect(const Polygon& poly, const PointPtr& vertex,
                                         float ratio = 0.5f, float angle = 0.0f,
                                         float gap = 0.0f) {
-        Point next = poly.next(vertex);
+        PointPtr next = poly.next(vertex);
+        if (!next) return {poly};
 
-        Point p1 = GeomUtils::interpolate(vertex, next, ratio);
-        Point d = next.subtract(vertex);
+        Point p1 = GeomUtils::interpolate(*vertex, *next, ratio);
+        Point d = next->subtract(*vertex);
 
         float cosB = std::cos(angle);
         float sinB = std::sin(angle);
@@ -93,9 +94,12 @@ public:
     static std::vector<Polygon> semiRadial(const Polygon& poly,
                                             const Point* center = nullptr,
                                             float gap = 0.0f) {
-        Point c;
+        PointPtr c;
         if (center) {
-            c = *center;
+            // Find the vertex in poly that matches the given center point
+            c = poly.min([center](const Point& v) {
+                return Point::distance(v, *center);
+            });
         } else {
             Point centroid = poly.centroid();
             // Find vertex closest to centroid
@@ -104,25 +108,36 @@ public:
             });
         }
 
+        if (!c) return {};
+
         float halfGap = gap / 2.0f;
 
         std::vector<Polygon> sectors;
 
-        poly.forEdge([&](const Point& v0, const Point& v1) {
+        // Get the vertices as shared_ptrs for proper edge finding
+        for (size_t i = 0; i < poly.size(); ++i) {
+            const PointPtr& v0 = poly[i];
+            const PointPtr& v1 = poly[(i + 1) % poly.size()];
+
             // Skip edges that include the center
-            if (!(v0 == c) && !(v1 == c)) {
-                Polygon sector({c, v0, v1});
+            if (v0 != c && v1 != c) {
+                Polygon sector({*c, *v0, *v1});
                 if (halfGap > 0) {
+                    // Check if c->v0 edge exists in original polygon
+                    bool cToV0Exists = poly.findEdge(c, v0) != -1;
+                    // Check if v1->c edge exists in original polygon
+                    bool v1ToCExists = poly.findEdge(v1, c) != -1;
+
                     std::vector<float> d = {
-                        poly.findEdge(c, v0) == -1 ? halfGap : 0.0f,
+                        cToV0Exists ? 0.0f : halfGap,
                         0.0f,
-                        poly.findEdge(v1, c) == -1 ? halfGap : 0.0f
+                        v1ToCExists ? 0.0f : halfGap
                     };
                     sector = sector.shrink(d);
                 }
                 sectors.push_back(sector);
             }
-        });
+        }
 
         return sectors;
     }

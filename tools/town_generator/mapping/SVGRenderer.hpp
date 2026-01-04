@@ -82,27 +82,28 @@ private:
         }
     }
 
-    void renderTower(const Point& p, float r) {
+    void renderTower(const PointPtr& p, float r) {
         // g.beginFill( palette.dark );
         // g.drawCircle( p.x, p.y, r );
         // g.endFill();
-        svg.circle(p.x, p.y, r * strokeScale, palette.darkHex());
+        svg.circle(p->x, p->y, r * strokeScale, palette.darkHex());
     }
 
-    void renderGate(const Polygon& wall, const Point& gate) {
+    void renderGate(const Polygon& wall, const PointPtr& gate) {
         // g.lineStyle( Brush.THICK_STROKE * 2, palette.dark, false, null, CapsStyle.NONE );
         // var dir = wall.next( gate ).subtract( wall.prev( gate ) );
         // dir.normalize( Brush.THICK_STROKE * 1.5 );
         // g.moveToPoint( gate.subtract( dir ) );
         // g.lineToPoint( gate.add( dir ) );
 
-        Point nextPt = wall.next(gate);
-        Point prevPt = wall.prev(gate);
-        Point dir = nextPt.subtract(prevPt);
+        PointPtr nextPt = wall.next(gate);
+        PointPtr prevPt = wall.prev(gate);
+        if (!nextPt || !prevPt) return;
+        Point dir = nextPt->subtract(*prevPt);
         dir.normalize(Brush::THICK_STROKE * 1.5f * strokeScale);
 
-        Point p1 = gate.subtract(dir);
-        Point p2 = gate.add(dir);
+        Point p1 = gate->subtract(dir);
+        Point p2 = gate->add(dir);
 
         svg.line(p1.x, p1.y, p2.x, p2.y,
                  palette.darkHex(),

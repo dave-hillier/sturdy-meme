@@ -4,6 +4,11 @@
  * This is a direct port of the original Haxe code. The goal is to preserve
  * the original structure and algorithms as closely as possible. Do NOT "fix"
  * issues by changing how the code works - fix root causes instead.
+ *
+ * Note: Voronoi internally uses raw Point* for the triangulation algorithm
+ * (matching the pointer-identity semantics needed for Delaunay). The Polygon
+ * class uses std::shared_ptr<Point> for external sharing. When regions are
+ * converted to Patches, new shared_ptr<Point>s are created from circumcenters.
  */
 
 #pragma once
@@ -36,6 +41,15 @@ struct PointPtrHash {
 struct PointPtrEqual {
     bool operator()(const Point* a, const Point* b) const {
         return a == b;
+    }
+};
+
+/**
+ * Hash for shared_ptr<Point> - uses pointer identity
+ */
+struct SharedPointPtrHash {
+    std::size_t operator()(const std::shared_ptr<Point>& p) const {
+        return std::hash<const void*>()(p.get());
     }
 };
 

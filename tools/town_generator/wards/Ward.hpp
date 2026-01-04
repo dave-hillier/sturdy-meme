@@ -69,8 +69,8 @@ public:
         float length = -1.0f;
 
         for (size_t i = 0; i < p.size(); ++i) {
-            const Point& p0 = p[i];
-            const Point& p1 = p[(i + 1) % p.size()];
+            const Point& p0 = *p[i];
+            const Point& p1 = *p[(i + 1) % p.size()];
             float len = Point::distance(p0, p1);
             if (len > length) {
                 length = len;
@@ -135,7 +135,7 @@ private:
         size_t result = 0;
 
         for (size_t i = 0; i < poly.size(); i++) {
-            const Point& v = poly[i];
+            const PointPtr& v = poly[i];
             float len = poly.vector(v).length();
             if (len > maxLen) {
                 maxLen = len;
@@ -153,12 +153,14 @@ private:
         float fill
     ) {
         size_t v0Idx = findLongestEdgeIndex(poly);
-        Point v0 = poly[v0Idx];
-        Point v1 = poly.next(v0);
-        Point v = v1.subtract(v0);
+        PointPtr v0 = poly[v0Idx];
+        PointPtr v1 = poly.next(v0);
+        if (!v1) return {};
+
+        Point v = v1->subtract(*v0);
 
         float ratio = 0.4f + Random::getFloat() * 0.2f;
-        Point p1 = GeomUtils::interpolate(v0, v1, ratio);
+        Point p1 = GeomUtils::interpolate(*v0, *v1, ratio);
 
         Point& c = (std::abs(GeomUtils::scalar(v.x, v.y, c1.x, c1.y)) <
                     std::abs(GeomUtils::scalar(v.x, v.y, c2.x, c2.y))) ? c1 : c2;

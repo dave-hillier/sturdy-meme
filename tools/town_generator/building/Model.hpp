@@ -189,7 +189,7 @@ public:
     std::vector<std::shared_ptr<Patch>> inner;
     std::shared_ptr<Patch> citadel;
     std::shared_ptr<Patch> plaza;
-    Point center;
+    PointPtr center;
 
     std::shared_ptr<CurtainWall> border;
     std::shared_ptr<CurtainWall> wall;
@@ -197,7 +197,7 @@ public:
     float cityRadius = 0.0f;
 
     // List of all entrances of a city including castle gates
-    std::vector<Point> gates;
+    PointList gates;
 
     // Joined list of streets (inside walls) and roads (outside walls)
     // without duplicating segments
@@ -231,11 +231,13 @@ public:
             return Polygon(wards[0]->shape);
         }
 
-        std::vector<Point> A;
-        std::vector<Point> B;
+        PointList A;
+        PointList B;
 
         for (auto& w1 : wards) {
-            w1->shape.forEdge([&](const Point& a, const Point& b) {
+            for (size_t i = 0; i < w1->shape.size(); ++i) {
+                const PointPtr& a = w1->shape[i];
+                const PointPtr& b = w1->shape[(i + 1) % w1->shape.size()];
                 bool outerEdge = true;
                 for (auto& w2 : wards) {
                     if (w2->shape.findEdge(b, a) != -1) {
@@ -247,7 +249,7 @@ public:
                     A.push_back(a);
                     B.push_back(b);
                 }
-            });
+            }
         }
 
         Polygon result;
@@ -256,11 +258,9 @@ public:
             size_t safetyLimit = A.size() + 1;  // Safety limit to prevent infinite loops
             do {
                 if (--safetyLimit == 0) break;  // Safety exit
-                result.push_back(A[index]);
-                // Find index of B[index] in A (by value comparison)
-                auto it = std::find_if(A.begin(), A.end(), [&](const Point& p) {
-                    return p == B[index];
-                });
+                result.push(A[index]);
+                // Find index of B[index] in A (by pointer identity)
+                auto it = std::find(A.begin(), A.end(), B[index]);
                 index = (it != A.end()) ? static_cast<size_t>(std::distance(A.begin(), it)) : 0;
             } while (index != 0);
         }
@@ -268,7 +268,7 @@ public:
         return result;
     }
 
-    std::vector<std::shared_ptr<Patch>> patchByVertex(const Point& v) {
+    std::vector<std::shared_ptr<Patch>> patchByVertex(const PointPtr& v) {
         std::vector<std::shared_ptr<Patch>> result;
         for (auto& patch : patches) {
             if (patch->shape.contains(v)) {
@@ -278,8 +278,9 @@ public:
         return result;
     }
 
-    std::shared_ptr<Patch> getNeighbour(std::shared_ptr<Patch> patch, const Point& v) {
-        Point next = patch->shape.next(v);
+    std::shared_ptr<Patch> getNeighbour(std::shared_ptr<Patch> patch, const PointPtr& v) {
+        PointPtr next = patch->shape.next(v);
+        if (!next) return nullptr;
         for (auto& p : patches) {
             if (p->shape.findEdge(next, v) != -1) {
                 return p;
@@ -432,7 +433,7 @@ private:
         patches.erase(
             std::remove_if(patches.begin(), patches.end(),
                 [&](std::shared_ptr<Patch>& p) {
-                    return p->shape.distance(center) >= radius * 3.0f;
+                    return p->shape.distance(*center) >= radius * 3.0f;
                 }),
             patches.end()
         );
@@ -459,24 +460,24 @@ private:
             // Each gate is connected to the nearest corner of the plaza or to the central junction
             Point end;
             if (plaza) {
-                end = plaza->shape.min([&](const Point& v) {
-                    return Point::distance(v, gate);
+                end = *plaza->shape.min([&](const Point& v) {
+                    return Point::distance(v, *gate);
                 });
             } else {
-                end = center;
+                end = *center;
             }
 
-            auto street = topology->buildPath(gate, end, &topology->outer);
+            auto street = topology->buildPath(*gate, end, &topology->outer);
             if (street) {
                 streets.push_back(*street);
 
                 // Check if this gate is a border gate
                 bool isBorderGate = std::find_if(border->gates.begin(), border->gates.end(),
-                    [&](const Point& g) { return g == gate; }) != border->gates.end();
+                    [&](const PointPtr& g) { return *g == *gate; }) != border->gates.end();
 
                 if (isBorderGate) {
-                    Point dir = gate.norm(1000.0f);
-                    Point* start = nullptr;
+                    Point dir = gate->norm(1000.0f);
+                    PointPtr start = nullptr;
                     float dist = std::numeric_limits<float>::infinity();
 
                     for (auto& [node, pt] : topology->node2pt) {
@@ -488,7 +489,7 @@ private:
                     }
 
                     if (start) {
-                        auto road = topology->buildPath(*start, gate, &topology->inner);
+                        auto road = topology->buildPath(*start, *gate, &topology->inner);
                         if (road) {
                             roads.push_back(*road);
                         }
@@ -509,7 +510,7 @@ private:
     void smoothStreet(Street& street) {
         auto smoothed = street.smoothVertexEq(3);
         for (size_t i = 1; i < street.size() - 1; i++) {
-            street[i].set(smoothed[i]);
+            street[i]->set(*smoothed[i]);
         }
     }
 
@@ -519,13 +520,13 @@ private:
         auto cut2segments = [&](Street& street) {
             if (street.size() < 2) return;
 
-            Point v1 = street[0];
+            Point v1 = *street[0];
             for (size_t i = 1; i < street.size(); i++) {
                 Point v0 = v1;
-                v1 = street[i];
+                v1 = *street[i];
 
                 // Removing segments which go along the plaza
-                if (plaza && plaza->shape.contains(v0) && plaza->shape.contains(v1)) {
+                if (plaza && plaza->shape.containsByValue(v0) && plaza->shape.containsByValue(v1)) {
                     continue;
                 }
 
@@ -557,12 +558,12 @@ private:
 
             bool attached = false;
             for (auto& a : arteries) {
-                if (!a.empty() && a[0] == seg.end) {
-                    a.unshift(seg.start);
+                if (!a.empty() && *a[0] == seg.end) {
+                    a.unshift(std::make_shared<Point>(seg.start));
                     attached = true;
                     break;
-                } else if (!a.empty() && a.last() == seg.start) {
-                    a.push_back(seg.end);
+                } else if (!a.empty() && *a.last() == seg.start) {
+                    a.push_back(std::make_shared<Point>(seg.end));
                     attached = true;
                     break;
                 }
@@ -585,32 +586,26 @@ private:
         for (auto& w : patchesToOptimize) {
             size_t index = 0;
             while (index < w->shape.size()) {
-                Point& v0 = w->shape[index];
-                Point& v1 = w->shape[(index + 1) % w->shape.size()];
+                PointPtr v0 = w->shape[index];
+                PointPtr v1 = w->shape[(index + 1) % w->shape.size()];
 
-                if (!(v0 == v1) && Point::distance(v0, v1) < 8.0f) {
-                    // Compute the midpoint first, before propagating to other patches
-                    // In Haxe, Point is a reference type so all patches sharing v0 would
-                    // see mutations automatically. In C++ with value types, we must
-                    // compute the final value first, then propagate it to all patches.
-                    Point midpoint = v0.add(v1).scale(0.5f);
+                if (v0 != v1 && Point::distance(*v0, *v1) < 8.0f) {
+                    // With shared_ptr<Point>, mutations propagate automatically to all
+                    // patches sharing the same Point - matching Haxe reference semantics.
+                    // Compute midpoint and mutate v0 in-place.
+                    v0->addEq(*v1);
+                    v0->scaleEq(0.5f);
 
-                    // Update v0 in the current patch to the midpoint
-                    v0.set(midpoint);
+                    // Remove v1 from the current patch
+                    w->shape.remove(v1);
 
-                    // Propagate the midpoint to all other patches that contain v1
+                    // Track patches that contain v1 for cleanup
                     auto vertPatches = patchByVertex(v1);
                     for (auto& w1 : vertPatches) {
                         if (w1 != w) {
-                            int idx = w1->shape.indexOf(v1);
-                            if (idx != -1) {
-                                w1->shape[idx] = midpoint;
-                            }
                             wards2clean.push_back(w1);
                         }
                     }
-
-                    w->shape.remove(v1);
                 }
                 index++;
             }
@@ -619,7 +614,7 @@ private:
         // Removing duplicate vertices
         for (auto& w : wards2clean) {
             for (size_t i = 0; i < w->shape.size(); i++) {
-                Point& v = w->shape[i];
+                PointPtr v = w->shape[i];
                 int dupIdx;
                 while ((dupIdx = w->shape.indexOf(v, i + 1)) != -1) {
                     w->shape.splice(dupIdx, 1);
@@ -640,7 +635,7 @@ private:
         }
 
         // Assigning inner city gate wards
-        for (auto& gate : border->gates) {
+        for (const auto& gate : border->gates) {
             auto gatePatches = patchByVertex(gate);
             for (auto& patch : gatePatches) {
                 if (patch->withinCity && !patch->ward) {
@@ -708,7 +703,7 @@ private:
 
         // Outskirts
         if (wall) {
-            for (auto& gate : wall->gates) {
+            for (const auto& gate : wall->gates) {
                 float prob = 1.0f / static_cast<float>(nPatches_ - 5);
                 if (!Random::getBool(prob)) {
                     auto gatePatches = patchByVertex(gate);
@@ -727,8 +722,8 @@ private:
         for (auto& patch : patches) {
             if (patch->withinCity) {
                 // Radius of the city is the farthest point of all wards from the center
-                for (auto& v : patch->shape) {
-                    cityRadius = std::max(cityRadius, v.length());
+                for (const auto& v : patch->shape) {
+                    cityRadius = std::max(cityRadius, v->length());
                 }
             } else if (!patch->ward) {
                 bool makeFarm = Random::getBool(0.2f) && patch->shape.compactness() >= 0.7f;
@@ -763,7 +758,7 @@ inline Castle::Castle(std::shared_ptr<Model> model, std::shared_ptr<Patch> patch
 {
     // Filter vertices that are shared with non-city patches
     Polygon reserved;
-    for (auto& v : patch->shape) {
+    for (const auto& v : patch->shape) {
         auto vertPatches = model->patchByVertex(v);
         bool hasNonCity = std::any_of(vertPatches.begin(), vertPatches.end(),
             [](std::shared_ptr<Patch>& p) { return !p->withinCity; });
@@ -792,7 +787,7 @@ inline float Cathedral::rateLocation(std::shared_ptr<Model> model, std::shared_p
     if (model->plaza && patch->shape.borders(model->plaza->shape)) {
         return -1.0f / patch->shape.square();
     } else {
-        Point target = model->plaza ? model->plaza->shape.center() : model->center;
+        Point target = model->plaza ? model->plaza->shape.center() : *model->center;
         return patch->shape.distance(target) * patch->shape.square();
     }
 }
@@ -810,21 +805,21 @@ inline float Market::rateLocation(std::shared_ptr<Model> model, std::shared_ptr<
     if (model->plaza) {
         return patch->shape.square() / model->plaza->shape.square();
     } else {
-        return patch->shape.distance(model->center);
+        return patch->shape.distance(*model->center);
     }
 }
 
 // Slum::rateLocation implementation
 inline float Slum::rateLocation(std::shared_ptr<Model> model, std::shared_ptr<Patch> patch) {
     // Slums should be as far from the center as possible
-    Point target = model->plaza ? model->plaza->shape.center() : model->center;
+    Point target = model->plaza ? model->plaza->shape.center() : *model->center;
     return -patch->shape.distance(target);
 }
 
 // MerchantWard::rateLocation implementation
 inline float MerchantWard::rateLocation(std::shared_ptr<Model> model, std::shared_ptr<Patch> patch) {
     // Merchant ward should be as close to the center as possible
-    Point target = model->plaza ? model->plaza->shape.center() : model->center;
+    Point target = model->plaza ? model->plaza->shape.center() : *model->center;
     return patch->shape.distance(target);
 }
 
@@ -869,7 +864,7 @@ inline float AdministrationWard::rateLocation(std::shared_ptr<Model> model, std:
             return patch->shape.distance(model->plaza->shape.center());
         }
     } else {
-        return patch->shape.distance(model->center);
+        return patch->shape.distance(*model->center);
     }
 }
 
@@ -879,7 +874,7 @@ inline Polygon Ward::getCityBlock() {
 
     bool innerPatch = model->wall == nullptr || patch->withinWalls;
 
-    patch->shape.forEdge([&](const Point& v0, const Point& v1) {
+    patch->shape.forEdgePtr([&](const PointPtr& v0, const PointPtr& v1) {
         if (model->wall && model->wall->bordersBy(patch, v0, v1)) {
             // Not too close to the wall
             insetDist.push_back(MAIN_STREET / 2.0f);
@@ -890,7 +885,7 @@ inline Polygon Ward::getCityBlock() {
             }
             if (!onStreet) {
                 for (auto& street : model->arteries) {
-                    if (street.contains(v0) && street.contains(v1)) {
+                    if (street.containsByValue(*v0) && street.containsByValue(*v1)) {
                         onStreet = true;
                         break;
                     }
@@ -922,8 +917,8 @@ inline void Ward::filterOutskirts() {
         float maxDist = -std::numeric_limits<float>::infinity();
         for (const auto& v : patch->shape) {
             float dist = 0.0f;
-            if (!(v == v1 || v == v2)) {
-                dist = GeomUtils::distance2line(v1.x, v1.y, dx, dy, v.x, v.y) * factor;
+            if (!(*v == v1 || *v == v2)) {
+                dist = GeomUtils::distance2line(v1.x, v1.y, dx, dy, v->x, v->y) * factor;
             }
             if (dist > maxDist) {
                 maxDist = dist;
@@ -933,22 +928,22 @@ inline void Ward::filterOutskirts() {
         populatedEdges.push_back({ v1.x, v1.y, dx, dy, maxDist });
     };
 
-    patch->shape.forEdge([&](const Point& v1, const Point& v2) {
+    patch->shape.forEdgePtr([&](const PointPtr& v1, const PointPtr& v2) {
         bool onRoad = false;
         for (auto& street : model->arteries) {
-            if (street.contains(v1) && street.contains(v2)) {
+            if (street.containsByValue(*v1) && street.containsByValue(*v2)) {
                 onRoad = true;
                 break;
             }
         }
 
         if (onRoad) {
-            addEdge(v1, v2, 1.0f);
+            addEdge(*v1, *v2, 1.0f);
         } else {
             auto n = model->getNeighbour(patch, v1);
             if (n) {
                 if (n->withinCity) {
-                    addEdge(v1, v2, model->isEnclosed(n) ? 1.0f : 0.4f);
+                    addEdge(*v1, *v2, model->isEnclosed(n) ? 1.0f : 0.4f);
                 }
             }
         }
@@ -957,9 +952,9 @@ inline void Ward::filterOutskirts() {
     // For every vertex: if this belongs only
     // to patches within city, then 1, otherwise 0
     std::vector<float> density;
-    for (auto& v : patch->shape) {
+    for (const auto& v : patch->shape) {
         bool isGate = std::find_if(model->gates.begin(), model->gates.end(),
-            [&](const Point& g) { return g == v; }) != model->gates.end();
+            [&](const PointPtr& g) { return *g == *v; }) != model->gates.end();
 
         if (isGate) {
             density.push_back(1.0f);
@@ -976,8 +971,8 @@ inline void Ward::filterOutskirts() {
             [&](Polygon& building) {
                 float minDist = 1.0f;
                 for (auto& edge : populatedEdges) {
-                    for (auto& v : building) {
-                        float d = GeomUtils::distance2line(edge.x, edge.y, edge.dx, edge.dy, v.x, v.y);
+                    for (const auto& v : building) {
+                        float d = GeomUtils::distance2line(edge.x, edge.y, edge.dx, edge.dy, v->x, v->y);
                         float dist = d / edge.d;
                         if (dist < minDist) {
                             minDist = dist;

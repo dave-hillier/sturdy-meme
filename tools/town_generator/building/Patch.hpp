@@ -33,7 +33,13 @@ public:
     bool withinCity = false;
 
     /**
-     * Constructs a Patch from a list of vertices.
+     * Constructs a Patch from a Polygon (shares the same Point instances).
+     */
+    explicit Patch(const Polygon& polygon)
+        : shape(polygon), withinCity(false), withinWalls(false) {}
+
+    /**
+     * Constructs a Patch from a list of Point values (creates new shared_ptrs).
      */
     explicit Patch(const std::vector<Point>& vertices)
         : shape(vertices), withinCity(false), withinWalls(false) {}

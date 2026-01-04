@@ -1,5 +1,8 @@
 /**
  * Implementation of CurtainWall class.
+ *
+ * With shared_ptr<Point>, gates and shape share the same Point objects,
+ * so mutations automatically propagate (matching Haxe reference semantics).
  */
 
 #include "CurtainWall.hpp"
@@ -22,13 +25,13 @@ CurtainWall::CurtainWall(bool real, std::shared_ptr<Model> model,
 
         if (real) {
             float smoothFactor = std::min(1.0f, 40.0f / static_cast<float>(patches.size()));
-            std::vector<Point> smoothed;
+            PointList smoothed;
             for (size_t i = 0; i < shape.size(); ++i) {
-                const Point& v = shape[i];
+                const PointPtr& v = shape[i];
                 if (reserved.contains(v)) {
                     smoothed.push_back(v);
                 } else {
-                    smoothed.push_back(shape.smoothVertex(v, smoothFactor));
+                    smoothed.push_back(std::make_shared<Point>(shape.smoothVertex(v, smoothFactor)));
                 }
             }
             shape = Polygon(smoothed);
@@ -44,10 +47,10 @@ CurtainWall::CurtainWall(bool real, std::shared_ptr<Model> model,
     gates.clear();
 
     // Entrances are vertices of the walls with more than 1 adjacent inner ward
-    std::vector<Point> entrances;
+    PointList entrances;
     if (patches.size() > 1) {
         for (size_t i = 0; i < shape.size(); ++i) {
-            const Point& v = shape[i];
+            const PointPtr& v = shape[i];
             if (!reserved.contains(v)) {
                 int count = 0;
                 for (const auto& p : patches) {
@@ -62,7 +65,7 @@ CurtainWall::CurtainWall(bool real, std::shared_ptr<Model> model,
         }
     } else {
         for (size_t i = 0; i < shape.size(); ++i) {
-            const Point& v = shape[i];
+            const PointPtr& v = shape[i];
             if (!reserved.contains(v)) {
                 entrances.push_back(v);
             }
@@ -76,7 +79,7 @@ CurtainWall::CurtainWall(bool real, std::shared_ptr<Model> model,
 
     do {
         int index = static_cast<int>(Random::getFloat() * static_cast<float>(entrances.size()));
-        Point gate = entrances[index];
+        PointPtr gate = entrances[index];
         gates.push_back(gate);
 
         if (real) {
@@ -100,18 +103,18 @@ CurtainWall::CurtainWall(bool real, std::shared_ptr<Model> model,
                 // Split the outer ward to make room for a road
                 auto outer = outerWards[0];
                 if (outer->shape.size() > 3) {
-                    Point wall = shape.next(gate).subtract(shape.prev(gate));
+                    Point wall = shape.next(gate)->subtract(*shape.prev(gate));
                     Point out(wall.y, -wall.x);
 
                     // Find farthest point
-                    Point farthest;
+                    PointPtr farthest = nullptr;
                     float maxScore = -std::numeric_limits<float>::infinity();
                     for (size_t j = 0; j < outer->shape.size(); ++j) {
-                        const Point& v = outer->shape[j];
+                        const PointPtr& v = outer->shape[j];
                         if (shape.contains(v) || reserved.contains(v)) {
                             continue;
                         }
-                        Point dir = v.subtract(gate);
+                        Point dir = v->subtract(*gate);
                         float score = dir.dot(out) / dir.length();
                         if (score > maxScore) {
                             maxScore = score;
@@ -119,18 +122,20 @@ CurtainWall::CurtainWall(bool real, std::shared_ptr<Model> model,
                         }
                     }
 
-                    // Split the patch
-                    auto halves = outer->shape.split(gate, farthest);
-                    std::vector<std::shared_ptr<Patch>> newPatches;
-                    for (auto& half : halves) {
-                        newPatches.push_back(std::make_shared<Patch>(half.data()));
-                    }
+                    if (farthest) {
+                        // Split the patch
+                        auto halves = outer->shape.split(gate, farthest);
+                        std::vector<std::shared_ptr<Patch>> newPatches;
+                        for (auto& half : halves) {
+                            newPatches.push_back(std::make_shared<Patch>(half));
+                        }
 
-                    // Replace in model->patches
-                    auto it = std::find(model->patches.begin(), model->patches.end(), outer);
-                    if (it != model->patches.end()) {
-                        it = model->patches.erase(it);
-                        model->patches.insert(it, newPatches.begin(), newPatches.end());
+                        // Replace in model->patches
+                        auto it = std::find(model->patches.begin(), model->patches.end(), outer);
+                        if (it != model->patches.end()) {
+                            it = model->patches.erase(it);
+                            model->patches.insert(it, newPatches.begin(), newPatches.end());
+                        }
                     }
                 }
             }
@@ -167,16 +172,15 @@ CurtainWall::CurtainWall(bool real, std::shared_ptr<Model> model,
     }
 
     // Smooth sections of wall near gates
-    // In Haxe, gate.set(...) mutates the Point in place, and since gates[]
-    // and shape[] share the same Point objects, both are updated.
-    // In C++ with value types, we must update both gates[i] and shape[idx].
+    // With shared_ptr<Point>, gates and shape share the same Point objects,
+    // so mutating the Point in shape also updates gates automatically.
     if (real) {
         for (size_t i = 0; i < gates.size(); ++i) {
             int idx = shape.indexOf(gates[i]);
             if (idx != -1) {
+                // Mutate the Point in place - this updates both shape and gates
                 Point smoothed = shape.smoothVertex(gates[i]);
-                shape[idx] = smoothed;
-                gates[i] = smoothed;  // Also update the gate to match
+                gates[i]->set(smoothed);
             }
         }
     }
