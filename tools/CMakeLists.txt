@@ -401,3 +401,65 @@ target_link_libraries(town_generator2_tests PRIVATE
 )
 
 target_compile_features(town_generator2_tests PRIVATE cxx_std_17)
+
+# Town generator tests
+add_executable(town_generator_tests
+    town_generator/tests/test_main.cpp
+    town_generator/tests/test_point.cpp
+    town_generator/tests/test_polygon.cpp
+    town_generator/tests/test_segment.cpp
+    town_generator/tests/test_geometry_utils.cpp
+    town_generator/tests/test_graph.cpp
+    town_generator/src/geom/Point.cpp
+    town_generator/src/geom/Segment.cpp
+    town_generator/src/geom/Circle.cpp
+    town_generator/src/geom/GeomUtils.cpp
+    town_generator/src/geom/Polygon.cpp
+    town_generator/src/geom/Graph.cpp
+    town_generator/src/geom/Spline.cpp
+    town_generator/src/geom/Voronoi.cpp
+    town_generator/src/utils/Random.cpp
+    town_generator/src/utils/MathUtils.cpp
+)
+
+target_include_directories(town_generator_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/town_generator/include
+)
+
+target_link_libraries(town_generator_tests PRIVATE
+    SDL3::SDL3
+    doctest::doctest
+)
+
+target_compile_features(town_generator_tests PRIVATE cxx_std_17)
+
+# Town generator 1 tests
+add_executable(town_generator1_tests
+    town_generator1/tests/test_main.cpp
+    town_generator1/tests/test_point.cpp
+    town_generator1/tests/test_polygon.cpp
+    town_generator1/tests/test_segment.cpp
+    town_generator1/tests/test_geometry_utils.cpp
+    town_generator1/tests/test_graph.cpp
+    town_generator1/src/geom/Point.cpp
+    town_generator1/src/geom/Segment.cpp
+    town_generator1/src/geom/Circle.cpp
+    town_generator1/src/geom/GeomUtils.cpp
+    town_generator1/src/geom/Polygon.cpp
+    town_generator1/src/geom/Graph.cpp
+    town_generator1/src/geom/Spline.cpp
+    town_generator1/src/geom/Voronoi.cpp
+    town_generator1/src/utils/Random.cpp
+    town_generator1/src/utils/MathUtils.cpp
+)
+
+target_include_directories(town_generator1_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/town_generator1/include
+)
+
+target_link_libraries(town_generator1_tests PRIVATE
+    SDL3::SDL3
+    doctest::doctest
+)
+
+target_compile_features(town_generator1_tests PRIVATE cxx_std_17)
