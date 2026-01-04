@@ -463,3 +463,34 @@ target_link_libraries(town_generator1_tests PRIVATE
 )
 
 target_compile_features(town_generator1_tests PRIVATE cxx_std_17)
+
+# Terrain-aware patch generator (preview tool for town placement)
+add_executable(terrain_patch_generator
+    terrain_patch_generator/main.cpp
+)
+
+target_include_directories(terrain_patch_generator PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain_patch_generator
+)
+
+target_link_libraries(terrain_patch_generator PRIVATE
+    SDL3::SDL3
+    glm::glm
+    lodepng
+    nlohmann_json::nlohmann_json
+)
+
+target_compile_features(terrain_patch_generator PRIVATE cxx_std_17)
+
+# Test data generator for terrain_patch_generator
+add_executable(terrain_patch_test_data
+    terrain_patch_generator/generate_test_data.cpp
+)
+
+target_link_libraries(terrain_patch_test_data PRIVATE
+    SDL3::SDL3
+    lodepng
+    nlohmann_json::nlohmann_json
+)
+
+target_compile_features(terrain_patch_test_data PRIVATE cxx_std_17)
