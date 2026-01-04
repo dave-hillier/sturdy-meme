@@ -22,12 +22,14 @@ TimingData TimeSystem::update() {
     lastDeltaTime = deltaTime;
     lastElapsedTime = elapsedTime;
 
-    // Update time of day
-    if (useManualTime) {
-        currentTimeOfDay = manualTime;
-    } else {
-        currentTimeOfDay = std::fmod((elapsedTime * timeScale) / cycleDuration, 1.0f);
+    // Update time of day incrementally based on timeScale
+    // This allows smooth progression at any speed without jumps when changing scale
+    if (timeScale > 0.0f) {
+        float timeIncrement = (deltaTime * timeScale) / cycleDuration;
+        currentTimeOfDay = std::fmod(currentTimeOfDay + timeIncrement, 1.0f);
+        if (currentTimeOfDay < 0.0f) currentTimeOfDay += 1.0f;
     }
+    // When timeScale is 0, time is paused at current position
 
     // Return timing data for this frame
     TimingData timing;

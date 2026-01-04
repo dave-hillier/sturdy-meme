@@ -49,11 +49,14 @@ public:
     float getTimeScale() const override { return timeScale; }
 
     // ITimeSystem implementation - Time of day control
-    void setTimeOfDay(float time) override { manualTime = glm::clamp(time, 0.0f, 1.0f); useManualTime = true; }
-    void resumeAutoTime() override { useManualTime = false; }
+    // setTimeOfDay: jumps to a specific time and pauses (timeScale = 0)
+    // Use setTimeScale() after to resume progression
+    void setTimeOfDay(float time) override {
+        currentTimeOfDay = glm::clamp(time, 0.0f, 1.0f);
+        timeScale = 0.0f;  // Pause so user can see the set time
+    }
+    void resumeAutoTime() override { if (timeScale == 0.0f) timeScale = 1.0f; }
     float getTimeOfDay() const override { return currentTimeOfDay; }
-    bool isUsingManualTime() const { return useManualTime; }
-    float getManualTime() const { return manualTime; }
 
     // Day cycle duration (seconds for a full day cycle in auto mode)
     void setCycleDuration(float seconds) { cycleDuration = seconds; }
@@ -103,11 +106,9 @@ private:
     float lastElapsedTime = 0.0f;
 
     // Day/night cycle
-    float timeScale = 1.0f;
-    float cycleDuration = 120.0f;  // Full day cycle in seconds
-    float manualTime = 0.5f;       // Noon by default
-    bool useManualTime = true;     // Start with manual time
-    float currentTimeOfDay = 0.5f;
+    float timeScale = 0.0f;        // Start paused (0 = paused, 1 = real-time, higher = faster)
+    float cycleDuration = 120.0f;  // Full day cycle in seconds at timeScale=1
+    float currentTimeOfDay = 0.5f; // Noon by default
 
     // Date for celestial calculations
     int currentYear = 2024;
