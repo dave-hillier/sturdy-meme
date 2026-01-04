@@ -40,7 +40,7 @@ public:
     CurtainWall* wall = nullptr;
     Patch* plaza = nullptr;
 
-    std::vector<geom::Point> gates;
+    std::vector<geom::PointPtr> gates;  // Shared pointers for reference semantics
     std::vector<std::vector<geom::Point>> streets;
     std::vector<std::vector<geom::Point>> roads;
     std::vector<std::vector<geom::Point>> arteries;
@@ -67,10 +67,13 @@ public:
 
     void build();
 
-    // Find patches containing a vertex
+    // Find patches containing a vertex (by value - coordinate match)
     std::vector<Patch*> patchByVertex(const geom::Point& v);
 
-    // Find circumference of a set of patches
+    // Find patches sharing a vertex (by pointer identity - true topology)
+    std::vector<Patch*> patchByVertexPtr(const geom::PointPtr& v);
+
+    // Find circumference of a set of patches (preserves shared vertices)
     static geom::Polygon findCircumference(const std::vector<Patch*>& patches);
 
     // Equality

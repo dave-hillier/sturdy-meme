@@ -1,6 +1,7 @@
 #pragma once
 
 #include "town_generator/geom/Point.h"
+#include "town_generator/geom/Polygon.h"
 #include "town_generator/geom/Graph.h"
 #include "town_generator/building/Patch.h"
 #include <vector>
@@ -17,21 +18,22 @@ class CurtainWall;
 /**
  * Topology - Street graph pathfinding, faithful port from Haxe TownGeneratorOS
  *
- * Note on reference semantics: The original Haxe code uses reference equality
- * for Point objects. In C++, we use coordinate-based equality but need to be
- * careful about the mapping between Points and Nodes.
+ * Uses PointPtr (shared_ptr<Point>) for reference semantics matching Haxe.
+ * The pt2node map uses pointer identity so that mutations to shared vertices
+ * are reflected correctly in pathfinding.
  */
 class Topology {
 private:
     Model* model_;
     geom::Graph graph_;
 
-    std::vector<geom::Point> blocked_;
+    std::vector<geom::PointPtr> blocked_;
 
 public:
-    // Point <-> Node mappings (using coordinate-based lookup)
-    std::unordered_map<geom::Point, geom::Node*> pt2node;
-    std::unordered_map<geom::Node*, geom::Point> node2pt;
+    // Point <-> Node mappings using pointer identity (shared_ptr)
+    // This ensures mutations to shared vertices are reflected correctly
+    std::unordered_map<geom::PointPtr, geom::Node*> pt2node;
+    std::unordered_map<geom::Node*, geom::PointPtr> node2pt;
 
     std::vector<geom::Node*> inner;
     std::vector<geom::Node*> outer;
@@ -54,7 +56,7 @@ public:
     }
 
 private:
-    geom::Node* processPoint(const geom::Point& v);
+    geom::Node* processPoint(const geom::PointPtr& vPtr);
 };
 
 } // namespace building

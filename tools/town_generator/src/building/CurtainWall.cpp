@@ -12,28 +12,29 @@ CurtainWall::CurtainWall(
     bool real,
     Model* model,
     const std::vector<Patch*>& patches,
-    const std::vector<geom::Point>& reserved
+    const std::vector<geom::PointPtr>& reserved
 ) : real_(real), patches_(patches) {
 
     if (patches.size() == 1) {
-        shape = patches[0]->shape;
+        shape = patches[0]->shape.copy();  // Shares vertices with patch
     } else {
-        shape = Model::findCircumference(patches);
+        shape = Model::findCircumference(patches);  // Already shares vertices
 
         if (real) {
             double smoothFactor = std::min(1.0, 40.0 / patches.size());
 
             std::vector<geom::Point> smoothed;
             for (const auto& vPtr : shape) {
-                const geom::Point& v = *vPtr;
-                bool isReserved = std::find(reserved.begin(), reserved.end(), v) != reserved.end();
+                // Check if reserved by pointer identity
+                bool isReserved = std::find(reserved.begin(), reserved.end(), vPtr) != reserved.end();
                 if (isReserved) {
-                    smoothed.push_back(v);
+                    smoothed.push_back(*vPtr);
                 } else {
-                    smoothed.push_back(shape.smoothVertex(v, smoothFactor));
+                    smoothed.push_back(shape.smoothVertex(*vPtr, smoothFactor));
                 }
             }
 
+            // Mutate shared vertices in place
             for (size_t i = 0; i < shape.length(); ++i) {
                 shape[i].set(smoothed[i]);
             }
@@ -45,36 +46,35 @@ CurtainWall::CurtainWall(
     buildGates(real, model, reserved);
 }
 
-void CurtainWall::buildGates(bool real, Model* model, const std::vector<geom::Point>& reserved) {
+void CurtainWall::buildGates(bool real, Model* model, const std::vector<geom::PointPtr>& reserved) {
     gates.clear();
 
-    // Find potential entrance points
-    std::vector<geom::Point> entrances;
+    // Find potential entrance points - store as PointPtr to preserve identity
+    std::vector<geom::PointPtr> entrances;
 
     if (patches_.size() > 1) {
         for (const auto& vPtr : shape) {
-            const geom::Point& v = *vPtr;
-            bool isReserved = std::find(reserved.begin(), reserved.end(), v) != reserved.end();
+            // Check if reserved by pointer identity
+            bool isReserved = std::find(reserved.begin(), reserved.end(), vPtr) != reserved.end();
             if (isReserved) continue;
 
-            // Count adjacent inner wards
+            // Count adjacent inner wards (by pointer identity)
             int adjacentCount = 0;
             for (auto* p : patches_) {
-                if (p->shape.contains(v)) {
+                if (p->shape.containsPtr(vPtr)) {
                     adjacentCount++;
                 }
             }
 
             if (adjacentCount > 1) {
-                entrances.push_back(v);
+                entrances.push_back(vPtr);
             }
         }
     } else {
         for (const auto& vPtr : shape) {
-            const geom::Point& v = *vPtr;
-            bool isReserved = std::find(reserved.begin(), reserved.end(), v) != reserved.end();
+            bool isReserved = std::find(reserved.begin(), reserved.end(), vPtr) != reserved.end();
             if (!isReserved) {
-                entrances.push_back(v);
+                entrances.push_back(vPtr);
             }
         }
     }
@@ -82,10 +82,9 @@ void CurtainWall::buildGates(bool real, Model* model, const std::vector<geom::Po
     // If no entrances found with strict criteria, use all non-reserved vertices
     if (entrances.empty()) {
         for (const auto& vPtr : shape) {
-            const geom::Point& v = *vPtr;
-            bool isReserved = std::find(reserved.begin(), reserved.end(), v) != reserved.end();
+            bool isReserved = std::find(reserved.begin(), reserved.end(), vPtr) != reserved.end();
             if (!isReserved) {
-                entrances.push_back(v);
+                entrances.push_back(vPtr);
             }
         }
     }
@@ -93,7 +92,7 @@ void CurtainWall::buildGates(bool real, Model* model, const std::vector<geom::Po
     if (entrances.empty()) {
         // Last resort: just use the first vertex
         if (shape.length() > 0) {
-            entrances.push_back(shape[0]);
+            entrances.push_back(shape.ptr(0));
         } else {
             return;  // Can't create gates on empty shape
         }
@@ -102,14 +101,14 @@ void CurtainWall::buildGates(bool real, Model* model, const std::vector<geom::Po
     // Select gates
     while (!entrances.empty()) {
         int index = utils::Random::intVal(0, static_cast<int>(entrances.size()));
-        geom::Point gate = entrances[index];
-        gates.push_back(gate);
+        geom::PointPtr gatePtr = entrances[index];
+        gates.push_back(gatePtr);  // Store the shared pointer
 
         if (real) {
             // Find outer wards for potential road creation
             std::vector<Patch*> outerWards;
             for (auto* p : model->patches) {
-                if (p->shape.contains(gate)) {
+                if (p->shape.containsPtr(gatePtr)) {
                     bool isInner = std::find(patches_.begin(), patches_.end(), p) != patches_.end();
                     if (!isInner) {
                         outerWards.push_back(p);
@@ -120,32 +119,34 @@ void CurtainWall::buildGates(bool real, Model* model, const std::vector<geom::Po
             if (outerWards.size() == 1) {
                 auto* outer = outerWards[0];
                 if (outer->shape.length() > 3) {
-                    geom::Point prevGate = shape.prev(gate);
-                    geom::Point nextGate = shape.next(gate);
+                    geom::Point prevGate = shape.prev(*gatePtr);
+                    geom::Point nextGate = shape.next(*gatePtr);
                     geom::Point wall = nextGate.subtract(prevGate);
                     geom::Point out(wall.y, -wall.x);
 
                     // Find farthest point in the direction perpendicular to wall
                     double maxDot = -std::numeric_limits<double>::infinity();
-                    geom::Point farthest = outer->shape[0];
+                    geom::PointPtr farthestPtr = outer->shape.ptr(0);
 
                     for (const auto& vPtr : outer->shape) {
-                        const geom::Point& v = *vPtr;
-                        bool onShape = shape.contains(v);
-                        bool isRes = std::find(reserved.begin(), reserved.end(), v) != reserved.end();
+                        bool onShape = shape.containsPtr(vPtr);
+                        bool isRes = std::find(reserved.begin(), reserved.end(), vPtr) != reserved.end();
 
                         if (!onShape && !isRes) {
-                            geom::Point dir = v.subtract(gate);
-                            double dot = dir.dot(out) / dir.length();
-                            if (dot > maxDot) {
-                                maxDot = dot;
-                                farthest = v;
+                            geom::Point dir = vPtr->subtract(*gatePtr);
+                            double len = dir.length();
+                            if (len > 0.001) {
+                                double dot = dir.dot(out) / len;
+                                if (dot > maxDot) {
+                                    maxDot = dot;
+                                    farthestPtr = vPtr;
+                                }
                             }
                         }
                     }
 
                     // Split the outer ward
-                    auto halves = outer->shape.split(gate, farthest);
+                    auto halves = outer->shape.split(*gatePtr, *farthestPtr);
                     std::vector<Patch*> newPatches;
                     for (const auto& half : halves) {
                         auto* newPatch = new Patch(half);
@@ -194,10 +195,11 @@ void CurtainWall::buildGates(bool real, Model* model, const std::vector<geom::Po
         throw std::runtime_error("Bad walled area shape!");
     }
 
-    // Smooth sections of wall with gates
+    // Smooth sections of wall with gates - mutate the shared point in place
     if (real) {
-        for (auto& gate : gates) {
-            gate.set(shape.smoothVertex(gate));
+        for (auto& gatePtr : gates) {
+            // Mutate the shared point directly
+            gatePtr->set(shape.smoothVertex(*gatePtr));
         }
     }
 }
@@ -208,10 +210,10 @@ void CurtainWall::buildTowers() {
     if (real_) {
         size_t len = shape.length();
         for (size_t i = 0; i < len; ++i) {
-            const geom::Point& t = shape[i];
+            geom::PointPtr tPtr = shape.ptr(i);
 
-            // Check if this is a gate
-            bool isGate = std::find(gates.begin(), gates.end(), t) != gates.end();
+            // Check if this is a gate (by pointer identity)
+            bool isGate = std::find(gates.begin(), gates.end(), tPtr) != gates.end();
             if (isGate) continue;
 
             // Check if adjacent segments are real wall
@@ -219,7 +221,7 @@ void CurtainWall::buildTowers() {
             bool currSegment = segments[i];
 
             if (prevSegment || currSegment) {
-                towers.push_back(t);
+                towers.push_back(*tPtr);
             }
         }
     }

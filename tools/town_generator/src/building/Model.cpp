@@ -1,6 +1,7 @@
 #include "town_generator/building/Model.h"
 #include "town_generator/building/CurtainWall.h"
 #include "town_generator/building/Topology.h"
+#include <iostream>
 #include "town_generator/wards/Ward.h"
 #include "town_generator/wards/Castle.h"
 #include "town_generator/wards/Cathedral.h"
@@ -113,7 +114,7 @@ void Model::buildPatches() {
     }
 
     // Build Voronoi diagram
-    geom::Voronoi voronoi(width, height);
+    geom::Voronoi voronoi(0, 0, width, height);
     for (const auto& seed : seeds) {
         voronoi.addPoint(seed);
     }
@@ -198,7 +199,9 @@ void Model::buildPatches() {
     }
 
     // Create border patch (the bounding area)
+    // Polygon::rect creates centered at origin, so offset to match content
     border.shape = geom::Polygon::rect(width, height);
+    border.shape.offset(geom::Point(width / 2, height / 2));
 
     // Mark special patches
     // First patch (closest to center) can be plaza
@@ -303,15 +306,15 @@ void Model::buildWalls() {
     // Find citadel patch (innermost patch suitable for fortification)
     Patch* citadelPatch = nullptr;
     std::vector<Patch*> citadelPatches;
-    std::vector<geom::Point> reservedPoints;  // Points that shouldn't be modified
+    std::vector<geom::PointPtr> reservedPoints;  // Points that shouldn't be modified (by pointer identity)
 
     if (citadelNeeded && wallsNeeded && !inner.empty()) {
         // Use the first inner patch (closest to center) for citadel
         citadelPatch = inner[0];
         citadelPatches.push_back(citadelPatch);
-        // Reserve all vertices of the citadel
+        // Reserve all vertices of the citadel (as PointPtr for identity comparison)
         for (size_t i = 0; i < citadelPatch->shape.length(); ++i) {
-            reservedPoints.push_back(citadelPatch->shape[i]);
+            reservedPoints.push_back(citadelPatch->shape.ptr(i));
         }
         citadel = new CurtainWall(false, this, citadelPatches, {});
     }
@@ -326,13 +329,13 @@ void Model::buildWalls() {
         wall->buildTowers();
     }
 
-    // Collect gates from border (always, even if unwalled)
-    for (const auto& gate : borderWall->gates) {
-        gates.push_back(gate);
+    // Collect gates from border (always, even if unwalled) - these are already PointPtr
+    for (const auto& gatePtr : borderWall->gates) {
+        gates.push_back(gatePtr);
     }
     if (citadel) {
-        for (const auto& gate : citadel->gates) {
-            gates.push_back(gate);
+        for (const auto& gatePtr : citadel->gates) {
+            gates.push_back(gatePtr);
         }
     }
 }
@@ -354,8 +357,8 @@ void Model::buildStreets() {
     geom::Point plazaCenter = plaza->shape.centroid();
 
     // Build arteries from each gate to plaza
-    for (const auto& gate : gates) {
-        auto path = topology_->buildPath(gate, plazaCenter);
+    for (const auto& gatePtr : gates) {
+        auto path = topology_->buildPath(*gatePtr, plazaCenter);
         if (!path.empty()) {
             // Smooth the path
             if (path.size() > 2) {
@@ -409,7 +412,8 @@ void Model::buildRoads() {
     // Build roads from gates outward
     if (!topology_ || gates.empty()) return;
 
-    for (const auto& gate : gates) {
+    for (const auto& gatePtr : gates) {
+        const geom::Point& gate = *gatePtr;
         // Find outer node nearest to gate in outward direction
         geom::Point center = plaza ? plaza->shape.centroid() : geom::Point(0, 0);
         geom::Point dir = gate.subtract(center).norm();
@@ -422,7 +426,7 @@ void Model::buildRoads() {
             auto it = topology_->node2pt.find(node);
             if (it == topology_->node2pt.end()) continue;
 
-            geom::Point nodePos = it->second;
+            geom::Point nodePos = *it->second;  // Dereference PointPtr
             geom::Point toNode = nodePos.subtract(gate);
             double dist = toNode.length();
             if (dist < 0.01) continue;
@@ -436,7 +440,7 @@ void Model::buildRoads() {
         }
 
         if (bestOuter) {
-            geom::Point roadEnd = topology_->node2pt[bestOuter];
+            geom::Point roadEnd = *topology_->node2pt[bestOuter];  // Dereference PointPtr
             auto path = topology_->buildPath(gate, roadEnd, &topology_->inner);
             if (!path.empty()) {
                 roads.push_back(path);
@@ -455,51 +459,66 @@ std::vector<Patch*> Model::patchByVertex(const geom::Point& v) {
     return result;
 }
 
+std::vector<Patch*> Model::patchByVertexPtr(const geom::PointPtr& v) {
+    std::vector<Patch*> result;
+    for (auto* p : patches) {
+        if (p->shape.containsPtr(v)) {
+            result.push_back(p);
+        }
+    }
+    return result;
+}
+
 geom::Polygon Model::findCircumference(const std::vector<Patch*>& patchList) {
     if (patchList.empty()) return geom::Polygon();
-    if (patchList.size() == 1) return patchList[0]->shape;
+    if (patchList.size() == 1) return patchList[0]->shape.copy();
 
     // Find all edges that belong to exactly one patch in the set
-    // An edge is "internal" if BOTH vertices are shared with another patch in the set
-    std::vector<std::pair<geom::Point, geom::Point>> boundaryEdges;
+    // Store edges as pairs of shared pointers to preserve vertex identity
+    // Edge format: (start_ptr, end_ptr)
+    std::vector<std::pair<geom::PointPtr, geom::PointPtr>> boundaryEdges;
 
     for (auto* patch : patchList) {
-        patch->shape.forEdge([&patchList, patch, &boundaryEdges](
-            const geom::Point& v0, const geom::Point& v1
-        ) {
+        size_t len = patch->shape.length();
+        for (size_t i = 0; i < len; ++i) {
+            geom::PointPtr v0Ptr = patch->shape.ptr(i);
+            geom::PointPtr v1Ptr = patch->shape.ptr((i + 1) % len);
+
             // Check if this edge is shared with another patch in the set
-            // Edge is shared if another patch contains both v0 and v1
+            // Edge is shared if another patch has the reverse edge (v1 -> v0)
             bool isShared = false;
             for (auto* other : patchList) {
                 if (other == patch) continue;
-                if (other->shape.contains(v0) && other->shape.contains(v1)) {
+                // Look for reverse edge by pointer identity
+                if (other->shape.findEdgePtr(v1Ptr, v0Ptr) != -1) {
                     isShared = true;
                     break;
                 }
             }
 
             if (!isShared) {
-                boundaryEdges.push_back({v0, v1});
+                boundaryEdges.push_back({v0Ptr, v1Ptr});
             }
-        });
+        }
     }
 
     if (boundaryEdges.empty()) return geom::Polygon();
 
-    // Chain edges together
+    // Chain edges together using pointer identity
     geom::Polygon result;
-    result.push(boundaryEdges[0].first);
+    result.pushShared(boundaryEdges[0].first);
 
-    geom::Point current = boundaryEdges[0].second;
+    geom::PointPtr current = boundaryEdges[0].second;
     boundaryEdges.erase(boundaryEdges.begin());
 
     int maxIter = static_cast<int>(boundaryEdges.size()) + 10;
     int iter = 0;
     while (!boundaryEdges.empty() && iter++ < maxIter) {
-        result.push(current);
+        result.pushShared(current);
 
         bool found = false;
         for (auto it = boundaryEdges.begin(); it != boundaryEdges.end(); ++it) {
+            // Compare by pointer identity
             if (it->first == current) {
                 current = it->second;
                 boundaryEdges.erase(it);
@@ -512,7 +531,7 @@ geom::Polygon Model::findCircumference(const std::vector<Patch*>& patchList) {
             // Try to find any edge to continue
             if (!boundaryEdges.empty()) {
                 current = boundaryEdges[0].second;
-                result.push(boundaryEdges[0].first);
+                result.pushShared(boundaryEdges[0].first);
                 boundaryEdges.erase(boundaryEdges.begin());
             } else {
                 break;
@@ -565,9 +584,9 @@ void Model::createWards() {
             }
             // Gate wards near gates
             else if (!gates.empty()) {
-                for (const auto& gate : gates) {
-                    if (patch->shape.contains(gate) ||
-                        geom::Point::distance(patch->shape.centroid(), gate) < 10.0) {
+                for (const auto& gatePtr : gates) {
+                    if (patch->shape.containsPtr(gatePtr) ||
+                        geom::Point::distance(patch->shape.centroid(), *gatePtr) < 10.0) {
                         ward = new wards::GateWard();
                         break;
                     }
@@ -613,8 +632,8 @@ void Model::createWards() {
 }
 
 void Model::buildGeometry() {
-    for (const auto& ward : wards_) {
-        ward->createGeometry();
+    for (size_t i = 0; i < wards_.size(); ++i) {
+        wards_[i]->createGeometry();
     }
 }
 

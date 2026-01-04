@@ -84,21 +84,29 @@ std::vector<Region*> Region::neighbors(const std::vector<std::unique_ptr<Region>
 }
 
 // Voronoi implementation
-Voronoi::Voronoi(double width, double height) {
-    // Create bounding frame (large triangle that contains all points)
-    double margin = std::max(width, height) * 2;
+Voronoi::Voronoi(double minx, double miny, double maxx, double maxy) {
+    // Create bounding frame as a rectangle (faithful to Haxe TownGeneratorOS)
+    // The frame has 4 corner points and 2 initial triangles
+    Point c1(minx, miny);
+    Point c2(minx, maxy);
+    Point c3(maxx, miny);
+    Point c4(maxx, maxy);
 
-    frame_.push_back(Point(-margin, -margin));
-    frame_.push_back(Point(width + margin, -margin));
-    frame_.push_back(Point(width / 2, height + margin));
+    frame_ = {c1, c2, c3, c4};
 
-    // Initial triangle containing the frame
-    triangles.push_back(std::make_unique<Triangle>(frame_[0], frame_[1], frame_[2]));
+    // Create 2 initial triangles covering the rectangle
+    triangles.push_back(std::make_unique<Triangle>(c1, c2, c3));
+    triangles.push_back(std::make_unique<Triangle>(c2, c3, c4));
 
     // Create regions for frame points
     for (const auto& p : frame_) {
         auto region = std::make_unique<Region>(p);
-        region->vertices.push_back(triangles[0].get());
+        // Each frame point is part of adjacent triangles
+        for (const auto& tr : triangles) {
+            if (tr->p1 == p || tr->p2 == p || tr->p3 == p) {
+                region->vertices.push_back(tr.get());
+            }
+        }
         regions.push_back(std::move(region));
     }
 }
@@ -214,26 +222,37 @@ std::vector<Region*> Voronoi::partitioning() {
     std::vector<Region*> result;
 
     for (auto& region : regions) {
-        // Skip regions that touch the frame
-        bool touchesFrame = false;
+        // Skip regions that touch the frame (seed is a frame point)
+        bool seedTouchesFrame = false;
         for (const auto& framePoint : frame_) {
             if (region->seed == framePoint) {
-                touchesFrame = true;
+                seedTouchesFrame = true;
                 break;
             }
         }
+        if (seedTouchesFrame) continue;
 
-        if (!touchesFrame) {
-            region->sortVertices();
-            result.push_back(region.get());
+        // Skip regions where any triangle touches the frame
+        // (faithful to original Haxe implementation)
+        bool hasFrameTriangle = false;
+        for (const auto* tr : region->vertices) {
+            if (!isRealTriangle(tr)) {
+                hasFrameTriangle = true;
+                break;
+            }
         }
+        if (hasFrameTriangle) continue;
+
+        region->sortVertices();
+        result.push_back(region.get());
     }
 
     return result;
 }
 
 std::vector<Point> Voronoi::relax(const std::vector<Point>& vertices, double width, double height) {
-    Voronoi voronoi(width, height);
+    // Construct with bounds (faithful to Haxe)
+    Voronoi voronoi(0, 0, width, height);
 
     for (const auto& v : vertices) {
         voronoi.addPoint(v);
@@ -251,24 +270,25 @@ std::vector<Point> Voronoi::relax(const std::vector<Point>& vertices, double wid
 
 Voronoi Voronoi::build(const std::vector<Point>& vertices) {
     if (vertices.empty()) {
-        return Voronoi(100, 100);
+        return Voronoi(0, 0, 100, 100);
     }
 
-    // Find bounds
-    double minX = vertices[0].x, maxX = vertices[0].x;
-    double minY = vertices[0].y, maxY = vertices[0].y;
+    // Find bounds (faithful to Haxe TownGeneratorOS)
+    double minX = 1e10, maxX = -1e9;
+    double minY = 1e10, maxY = -1e9;
 
     for (const auto& v : vertices) {
-        minX = std::min(minX, v.x);
-        maxX = std::max(maxX, v.x);
-        minY = std::min(minY, v.y);
-        maxY = std::max(maxY, v.y);
+        if (v.x < minX) minX = v.x;
+        if (v.y < minY) minY = v.y;
+        if (v.x > maxX) maxX = v.x;
+        if (v.y > maxY) maxY = v.y;
     }
 
-    double width = maxX - minX;
-    double height = maxY - minY;
+    double dx = (maxX - minX) * 0.5;
+    double dy = (maxY - minY) * 0.5;
 
-    Voronoi voronoi(width * 2, height * 2);
+    // Frame extends beyond the point bounds by half the extent
+    Voronoi voronoi(minX - dx / 2, minY - dy / 2, maxX + dx / 2, maxY + dy / 2);
 
     for (const auto& v : vertices) {
         voronoi.addPoint(v);

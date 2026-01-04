@@ -34,8 +34,9 @@ std::vector<double> Ward::getCityBlock() {
 
         // Check if edge is on main artery
         for (const auto& artery : model->arteries) {
+            if (artery.size() < 2) continue;  // Need at least 2 points to form an edge
             bool found = false;
-            for (size_t j = 0; j < artery.size() - 1; ++j) {
+            for (size_t j = 0; j + 1 < artery.size(); ++j) {
                 if ((artery[j] == v0 && artery[j + 1] == v1) ||
                     (artery[j] == v1 && artery[j + 1] == v0)) {
                     insetDistances[i] = MAIN_STREET / 2;
@@ -99,8 +100,21 @@ void Ward::createAlleys(
     // Find longest edge
     size_t longestEdge = 0;
     double longestLen = 0;
+    size_t pLen = p.length();
 
-    for (size_t i = 0; i < p.length(); ++i) {
+    if (pLen == 0) {
+        return;
+    }
+
+    // Polygons with less than 3 vertices can't be bisected
+    if (pLen < 3) {
+        if (!utils::Random::boolVal(emptyProbability)) {
+            geometry.push_back(p);
+        }
+        return;
+    }
+
+    for (size_t i = 0; i < pLen; ++i) {
         geom::Point v = p.vectori(static_cast<int>(i));
         double len = v.length();
         if (len > longestLen) {
@@ -115,6 +129,14 @@ void Ward::createAlleys(
     double gap = ALLEY;
 
     auto halves = building::Cutter::bisect(p, p[longestEdge], ratio, angle, gap);
+
+    // If bisect returns only 1 polygon (failed to cut), treat as leaf
+    if (halves.size() == 1) {
+        if (!utils::Random::boolVal(emptyProbability)) {
+            geometry.push_back(p);
+        }
+        return;
+    }
 
     for (const auto& half : halves) {
         createAlleys(half, minArea * (1.0 - sizeChaos * 0.5 + utils::Random::floatVal() * sizeChaos),

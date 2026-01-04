@@ -445,10 +445,19 @@ public:
         return d;
     }
 
-    // Find edge index starting at vertex a going to b
+    // Find edge index starting at vertex a going to b (by value)
     int findEdge(const Point& a, const Point& b) const {
         int index = indexOf(a);
         if (index != -1 && *vertices_[(index + 1) % vertices_.size()] == b) {
+            return index;
+        }
+        return -1;
+    }
+
+    // Find edge index starting at vertex a going to b (by pointer identity)
+    int findEdgePtr(const PointPtr& a, const PointPtr& b) const {
+        int index = indexOfPtr(a);
+        if (index != -1 && vertices_[(index + 1) % vertices_.size()] == b) {
             return index;
         }
         return -1;

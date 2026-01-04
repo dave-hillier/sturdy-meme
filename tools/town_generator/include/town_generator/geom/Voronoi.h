@@ -75,7 +75,8 @@ public:
     std::vector<std::unique_ptr<Triangle>> triangles;
     std::vector<std::unique_ptr<Region>> regions;
 
-    Voronoi(double width, double height);
+    // Constructor takes bounds: minx, miny, maxx, maxy (faithful to Haxe)
+    Voronoi(double minx, double miny, double maxx, double maxy);
 
     void addPoint(const Point& p);
 
@@ -90,6 +91,16 @@ public:
 
     // Get frame
     const std::vector<Point>& frame() const { return frame_; }
+
+    // Check if a triangle doesn't touch any frame points
+    bool isRealTriangle(const Triangle* tr) const {
+        for (const auto& fp : frame_) {
+            if (tr->p1 == fp || tr->p2 == fp || tr->p3 == fp) {
+                return false;
+            }
+        }
+        return true;
+    }
 
     // Equality
     bool operator==(const Voronoi& other) const {

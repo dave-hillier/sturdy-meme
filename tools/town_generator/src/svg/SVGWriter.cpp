@@ -126,8 +126,8 @@ std::string SVGWriter::generate(const building::Model& model, const Style& style
         }
 
         // Gates
-        for (const auto& gate : model.wall->gates) {
-            svg << "    <circle cx=\"" << gate.x << "\" cy=\"" << gate.y << "\" ";
+        for (const auto& gatePtr : model.wall->gates) {
+            svg << "    <circle cx=\"" << gatePtr->x << "\" cy=\"" << gatePtr->y << "\" ";
             svg << "r=\"" << style.towerRadius * 1.2 << "\" ";
             svg << "fill=\"" << style.gateFill << "\" stroke=\"" << style.wallStroke << "\" ";
             svg << "stroke-width=\"1\"/>\n";

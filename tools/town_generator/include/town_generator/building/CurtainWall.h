@@ -14,12 +14,15 @@ class Model;
 /**
  * CurtainWall - City walls with gates and towers
  * Faithful port from Haxe TownGeneratorOS
+ *
+ * Gates are stored as PointPtr to share vertices with the wall shape.
+ * This ensures mutations to gate positions propagate correctly.
  */
 class CurtainWall {
 public:
     geom::Polygon shape;
     std::vector<bool> segments;
-    std::vector<geom::Point> gates;
+    std::vector<geom::PointPtr> gates;  // Shared with shape vertices
     std::vector<geom::Point> towers;
 
 private:
@@ -31,7 +34,7 @@ public:
         bool real,
         Model* model,
         const std::vector<Patch*>& patches,
-        const std::vector<geom::Point>& reserved
+        const std::vector<geom::PointPtr>& reserved
     );
 
     void buildTowers();
@@ -43,7 +46,7 @@ public:
 
     // Equality
     bool operator==(const CurtainWall& other) const {
-        return shape == other.shape && gates == other.gates;
+        return shape == other.shape && gates.size() == other.gates.size();
     }
 
     bool operator!=(const CurtainWall& other) const {
@@ -51,7 +54,7 @@ public:
     }
 
 private:
-    void buildGates(bool real, Model* model, const std::vector<geom::Point>& reserved);
+    void buildGates(bool real, Model* model, const std::vector<geom::PointPtr>& reserved);
 };
 
 } // namespace building

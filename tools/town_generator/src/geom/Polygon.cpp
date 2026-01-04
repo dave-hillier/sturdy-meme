@@ -124,8 +124,10 @@ Polygon Polygon::buffer(const std::vector<double>& d) const {
     // Creating a polygon (probably invalid) with offset edges
     Polygon q;
     size_t i = 0;
+    size_t dSize = d.size();
 
-    forEdge([&q, &d, &i](const Point& v0, const Point& v1) {
+    forEdge([&q, &d, &i, dSize](const Point& v0, const Point& v1) {
+        if (i >= dSize) return;  // Bounds check
         double dd = d[i++];
         if (dd == 0) {
             q.push(v0);
@@ -229,8 +231,10 @@ Polygon Polygon::buffer(const std::vector<double>& d) const {
 Polygon Polygon::shrink(const std::vector<double>& d) const {
     Polygon q = deepCopy();  // Use deep copy to avoid sharing
     size_t i = 0;
+    size_t dSize = d.size();
 
-    forEdge([&q, &d, &i](const Point& v1, const Point& v2) {
+    forEdge([&q, &d, &i, dSize](const Point& v1, const Point& v2) {
+        if (i >= dSize) return;  // Bounds check
         double dd = d[i++];
         if (dd > 0) {
             Point v = v2.subtract(v1);
