@@ -1170,26 +1170,34 @@ if(BUILD_TESTS)
         tests/test_animation.cpp
         tests/test_ik_utils.cpp
         tests/test_terrain_loaders.cpp
+        tests/test_virtual_texture_types.cpp
+        tests/test_virtual_texture_loader.cpp
+        tests/test_tile_grid_logic.cpp
         # Source files needed by tests
         src/atmosphere/CelestialCalculator.cpp
         src/ik/IKUtils.cpp
         src/terrain/ErosionDataLoader.cpp
         src/terrain/RoadNetworkLoader.cpp
+        src/terrain/virtual_texture/VirtualTextureTileLoader.cpp
     )
 
     target_include_directories(vulkan_game_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}/src/loaders  # For GLTFLoader.h used by animation
         ${CMAKE_CURRENT_SOURCE_DIR}/src/core     # For Mesh.h used by loaders
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/terrain  # For TileGridLogic.h, ErosionDataLoader.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/terrain/virtual_texture  # For VirtualTextureTypes.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/water    # For WaterPlacementData.h
     )
 
     target_link_libraries(vulkan_game_tests PRIVATE
         doctest::doctest
         glm::glm
-        Vulkan::Vulkan                           # For Vulkan types in Mesh.h
+        Vulkan::Vulkan                           # For Vulkan types in Mesh.h, VK_FORMAT in DDSLoader
         GPUOpen::VulkanMemoryAllocator           # For vk_mem_alloc.h in Mesh.h
         nlohmann_json::nlohmann_json             # For GeoJSON parsing in terrain loaders
         SDL3::SDL3                               # For SDL_Log in terrain loaders
+        lodepng                                  # For PNG loading in VirtualTextureTileLoader
     )
 
     target_compile_features(vulkan_game_tests PRIVATE cxx_std_17)

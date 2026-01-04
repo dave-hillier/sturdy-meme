@@ -67,15 +67,15 @@ TEST_SUITE("DateTime") {
         CHECK(j2000.toJulianDay() == doctest::Approx(2451545.0).epsilon(0.0001));
 
         // January 1, 1970 (Unix epoch) at noon is approximately JD 2440588.0
-        DateTime unix;
-        unix.year = 1970;
-        unix.month = 1;
-        unix.day = 1;
-        unix.hour = 12;
-        unix.minute = 0;
-        unix.second = 0.0;
+        DateTime unixEpoch;
+        unixEpoch.year = 1970;
+        unixEpoch.month = 1;
+        unixEpoch.day = 1;
+        unixEpoch.hour = 12;
+        unixEpoch.minute = 0;
+        unixEpoch.second = 0.0;
 
-        CHECK(unix.toJulianDay() == doctest::Approx(2440588.0).epsilon(0.01));
+        CHECK(unixEpoch.toJulianDay() == doctest::Approx(2440588.0).epsilon(0.01));
 
         // June 21, 2024 (summer solstice) noon
         DateTime solstice;
