@@ -75,20 +75,12 @@ std::string SVGWriter::generate(const building::Model& model, const Style& style
 
     // Water bodies (rendered first, below everything else)
     svg << "  <g id=\"water\">\n";
-    // Water edge polygon (if coast exists)
+    // Water edge polygon (if coast exists) - use the smoothed boundary
     if (model.waterEdge.length() > 0) {
         svg << "    <path d=\"" << polygonToPath(model.waterEdge) << "\" ";
         svg << "fill=\"" << style.waterFill << "\" stroke=\"none\"/>\n";
     }
-    // Water patches (waterbody == true)
-    for (const auto* patch : model.patches) {
-        if (patch->waterbody) {
-            svg << "    <path d=\"" << polygonToPath(patch->shape) << "\" ";
-            svg << "fill=\"" << style.waterFill << "\" stroke=\"" << style.waterStroke << "\" ";
-            svg << "stroke-width=\"" << style.waterStrokeWidth << "\"/>\n";
-        }
-    }
-    // Shore line
+    // Shore line (rendered on top of water)
     if (model.shore.length() > 0) {
         svg << "    <path d=\"" << polygonToPath(model.shore) << "\" ";
         svg << "fill=\"none\" stroke=\"" << style.shoreFill << "\" ";

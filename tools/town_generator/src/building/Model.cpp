@@ -356,6 +356,17 @@ void Model::buildPatches() {
         }
 
         if (!waterPatches.empty()) {
+            // Split water patches into connected components and take the largest
+            // (faithful to mfcg.js lines 10505-10507: Z.max(Ic.split(a), a => a.length))
+            auto waterComponents = splitIntoConnectedComponents(waterPatches);
+            if (!waterComponents.empty()) {
+                auto largestWater = std::max_element(waterComponents.begin(), waterComponents.end(),
+                    [](const auto& a, const auto& b) { return a.size() < b.size(); });
+                waterPatches = *largestWater;
+                SDL_Log("Coast: %zu water components, using largest with %zu patches",
+                        waterComponents.size(), waterPatches.size());
+            }
+
             // Compute circumference of water patches (boundary polygon)
             waterEdge = findCircumference(waterPatches);
 
@@ -371,6 +382,17 @@ void Model::buildPatches() {
                     landPatches.push_back(patch);
                 }
             }
+
+            // Split land patches into connected components and take the largest
+            auto landComponents = splitIntoConnectedComponents(landPatches);
+            if (!landComponents.empty()) {
+                auto largestLand = std::max_element(landComponents.begin(), landComponents.end(),
+                    [](const auto& a, const auto& b) { return a.size() < b.size(); });
+                landPatches = *largestLand;
+                SDL_Log("Coast: %zu land components, using largest with %zu patches",
+                        landComponents.size(), landPatches.size());
+            }
+
             earthEdge = findCircumference(landPatches);
 
             // Shore is the shared boundary between water and land
@@ -842,6 +864,46 @@ geom::Polygon Model::findCircumference(const std::vector<Patch*>& patchList) {
     }
 
     return result;
+}
+
+std::vector<std::vector<Patch*>> Model::splitIntoConnectedComponents(const std::vector<Patch*>& patchList) {
+    std::vector<std::vector<Patch*>> components;
+    if (patchList.empty()) return components;
+
+    // Create a set of patches we need to process
+    std::set<Patch*> remaining(patchList.begin(), patchList.end());
+
+    while (!remaining.empty()) {
+        // Start a new component with any remaining patch
+        std::vector<Patch*> component;
+        std::vector<Patch*> queue;
+        queue.push_back(*remaining.begin());
+
+        // Flood fill through neighbors
+        while (!queue.empty()) {
+            Patch* current = queue.back();
+            queue.pop_back();
+
+            // Skip if already processed
+            if (remaining.find(current) == remaining.end()) continue;
+
+            remaining.erase(current);
+            component.push_back(current);
+
+            // Add neighbors that are in our original patch list
+            for (Patch* neighbor : current->neighbors) {
+                if (remaining.find(neighbor) != remaining.end()) {
+                    queue.push_back(neighbor);
+                }
+            }
+        }
+
+        if (!component.empty()) {
+            components.push_back(std::move(component));
+        }
+    }
+
+    return components;
 }
 
 void Model::createWards() {

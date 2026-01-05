@@ -90,6 +90,10 @@ public:
     // Find circumference of a set of patches (preserves shared vertices)
     static geom::Polygon findCircumference(const std::vector<Patch*>& patches);
 
+    // Split patches into connected components (groups that share edges)
+    // Like Ic.split in mfcg.js - uses flood fill through neighbor relationships
+    static std::vector<std::vector<Patch*>> splitIntoConnectedComponents(const std::vector<Patch*>& patches);
+
     // Equality
     bool operator==(const Model& other) const {
         return patches.size() == other.patches.size();
