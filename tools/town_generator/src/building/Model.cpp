@@ -35,7 +35,8 @@ Model::Model(int nPatches, int seed) : nPatches_(nPatches) {
     plazaNeeded = utils::Random::boolVal(0.8);
     citadelNeeded = utils::Random::boolVal(0.5);
     wallsNeeded = nPatches > 15;
-    coastNeeded = utils::Random::boolVal(0.3);  // 30% chance of coastal city
+    coastNeeded = utils::Random::boolVal(0.5);  // 50% chance of coastal city (faithful to mfcg.js)
+    riverNeeded = coastNeeded && utils::Random::boolVal(0.67);  // 67% when coast is present
 }
 
 Model::~Model() {
@@ -51,6 +52,15 @@ void Model::build() {
     optimizeJunctions();
     buildWalls();
     buildStreets();
+
+    // Build canals/rivers if needed (faithful to mfcg.js buildCanals)
+    if (riverNeeded && coastNeeded) {
+        auto canal = Canal::createRiver(this);
+        if (canal) {
+            canals.push_back(std::move(canal));
+        }
+    }
+
     createWards();
     buildGeometry();
 }

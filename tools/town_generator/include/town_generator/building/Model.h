@@ -5,6 +5,7 @@
 #include "town_generator/geom/Voronoi.h"
 #include "town_generator/building/Patch.h"
 #include "town_generator/building/Topology.h"
+#include "town_generator/building/Canal.h"
 #include "town_generator/utils/Random.h"
 #include <vector>
 #include <memory>
@@ -61,6 +62,7 @@ public:
     geom::Polygon earthEdge;      // Boundary of land area
     geom::Polygon shore;          // Shore line where land meets water
     bool riverNeeded = false;     // Whether to generate a river/canal
+    std::vector<std::unique_ptr<Canal>> canals;  // Rivers/canals
 
     // Owned wards and patches
     std::vector<std::unique_ptr<wards::Ward>> wards_;

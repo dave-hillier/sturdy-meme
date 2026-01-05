@@ -5,6 +5,7 @@
 #include "town_generator/geom/GeomUtils.h"
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace town_generator {
 namespace wards {
@@ -257,9 +258,6 @@ void Ward::createAlleys(
     double emptyProb,
     double split
 ) {
-    // Find longest edge (faithful to Haxe)
-    size_t longestEdge = 0;
-    double longestLen = 0;
     size_t pLen = p.length();
 
     if (pLen < 3) {
@@ -269,54 +267,135 @@ void Ward::createAlleys(
         return;
     }
 
-    for (size_t i = 0; i < pLen; ++i) {
-        geom::Point v = p.vectori(static_cast<int>(i));
-        double len = v.length();
-        if (len > longestLen) {
-            longestLen = len;
-            longestEdge = i;
+    // Use OBB (Oriented Bounding Box) to find best cut direction (faithful to mfcg.js Bisector)
+    auto obb = p.orientedBoundingBox();
+    if (obb.size() < 4) {
+        // Fall back to longest edge if OBB fails
+        size_t longestEdge = 0;
+        double longestLen = 0;
+        for (size_t i = 0; i < pLen; ++i) {
+            geom::Point v = p.vectori(static_cast<int>(i));
+            double len = v.length();
+            if (len > longestLen) {
+                longestLen = len;
+                longestEdge = i;
+            }
         }
+
+        double spread = 0.8 * gridChaos;
+        double ratio = (1.0 - spread) / 2.0 + utils::Random::floatVal() * spread;
+        double sq = p.square();
+        double angleSpread = M_PI / 6.0 * gridChaos * (sq < minSq * 4 ? 0.0 : 1.0);
+        double angle = (utils::Random::floatVal() - 0.5) * angleSpread;
+        double gap = (split > 0.5) ? ALLEY : 0.0;
+
+        auto halves = building::Cutter::bisect(p, p[longestEdge], ratio, angle, gap);
+
+        if (halves.size() == 1) {
+            if (!utils::Random::boolVal(emptyProb)) {
+                addBuildingLot(p, minSq);
+            }
+            return;
+        }
+
+        for (const auto& half : halves) {
+            double halfSq = half.square();
+            double threshold = minSq * std::pow(2.0, 4.0 * sizeChaos * (utils::Random::floatVal() - 0.5));
+
+            if (halfSq < threshold) {
+                if (!utils::Random::boolVal(emptyProb)) {
+                    addBuildingLot(half, minSq);
+                }
+            } else {
+                double r1 = utils::Random::floatVal();
+                double r2 = utils::Random::floatVal();
+                double divisor = r1 * r2;
+                bool shouldSplit = divisor > 0.0001 && halfSq > minSq / divisor;
+                createAlleys(half, minSq, gridChaos, sizeChaos, emptyProb, shouldSplit ? 1.0 : 0.0);
+            }
+        }
+        return;
     }
 
-    // Ratio based on gridChaos (faithful to town_generator2)
-    double spread = 0.8 * gridChaos;
-    double ratio = (1.0 - spread) / 2.0 + utils::Random::floatVal() * spread;
+    // Calculate OBB dimensions
+    geom::Point edge01 = obb[1].subtract(obb[0]);
+    geom::Point edge12 = obb[2].subtract(obb[1]);
+    double len01 = edge01.length();
+    double len12 = edge12.length();
 
-    // Angle spread: 0 for small blocks, scaled by gridChaos for larger (faithful to Haxe)
-    double sq = p.square();  // Signed area like Haxe
-    double angleSpread = M_PI / 6.0 * gridChaos * (sq < minSq * 4 ? 0.0 : 1.0);
-    double angle = (utils::Random::floatVal() - 0.5) * angleSpread;
+    // Determine long axis (we cut perpendicular to it)
+    geom::Point longAxis = (len01 > len12) ? edge01 : edge12;
+    geom::Point shortAxis = (len01 > len12) ? edge12 : edge01;
+    double longLen = std::max(len01, len12);
 
-    // Conditional alley gap based on split parameter (faithful to town_generator2)
+    // Cut position: project centroid onto long axis, add randomness
+    geom::Point centroid = p.centroid();
+    geom::Point obbCorner = obb[0];
+
+    // Project centroid onto long axis
+    double projT = 0.0;
+    if (longLen > 0.001) {
+        geom::Point toCentroid = centroid.subtract(obbCorner);
+        projT = (toCentroid.x * longAxis.x + toCentroid.y * longAxis.y) / (longLen * longLen);
+    }
+
+    // Faithful to mfcg.js: cutRatio = (proj + random) / 2, for variation around center
+    double normal3 = (utils::Random::floatVal() + utils::Random::floatVal() + utils::Random::floatVal()) / 3.0;
+    double cutRatio = (projT + normal3) / 2.0;
+    cutRatio = std::max(0.2, std::min(0.8, cutRatio));  // Keep within reasonable bounds
+
+    // Calculate cut point along the long axis
+    geom::Point cutPoint(obbCorner.x + longAxis.x * cutRatio, obbCorner.y + longAxis.y * cutRatio);
+
+    // Cut direction is along the short axis (perpendicular to long axis)
+    geom::Point cutDir = shortAxis.norm(1.0);
+    geom::Point cutEnd = cutPoint.add(cutDir.scale(longLen * 2));  // Extend far enough
+
     double gap = (split > 0.5) ? ALLEY : 0.0;
+    auto halves = p.cut(cutPoint, cutEnd, gap);
 
-    auto halves = building::Cutter::bisect(p, p[longestEdge], ratio, angle, gap);
+    // If cut failed, try cutting from the other direction
+    if (halves.size() < 2) {
+        cutEnd = cutPoint.subtract(cutDir.scale(longLen * 2));
+        halves = p.cut(cutPoint, cutEnd, gap);
+    }
 
-    // If bisect returns only 1 polygon (failed to cut), treat as leaf
-    if (halves.size() == 1) {
+    // If still failed, fall back to longest edge bisect
+    if (halves.size() < 2) {
+        size_t longestEdge = 0;
+        double longestLen = 0;
+        for (size_t i = 0; i < pLen; ++i) {
+            geom::Point v = p.vectori(static_cast<int>(i));
+            double len = v.length();
+            if (len > longestLen) {
+                longestLen = len;
+                longestEdge = i;
+            }
+        }
+
+        double spread = 0.8 * gridChaos;
+        double ratio = (1.0 - spread) / 2.0 + utils::Random::floatVal() * spread;
+        halves = building::Cutter::bisect(p, p[longestEdge], ratio, 0.0, gap);
+    }
+
+    if (halves.size() < 2) {
         if (!utils::Random::boolVal(emptyProb)) {
-            geometry.push_back(p);
+            addBuildingLot(p, minSq);
         }
         return;
     }
 
     for (const auto& half : halves) {
-        // Use signed area like Haxe (no abs) - CCW polygons have positive area
-        double halfSq = half.square();
-        // Exponential threshold variation (faithful to Haxe)
+        double halfSq = std::abs(half.square());
         double threshold = minSq * std::pow(2.0, 4.0 * sizeChaos * (utils::Random::floatVal() - 0.5));
 
         if (halfSq < threshold) {
-            // Small enough - add as building
             if (!utils::Random::boolVal(emptyProb)) {
-                geometry.push_back(half);
+                addBuildingLot(half, minSq);
             }
         } else {
-            // Determine if we should create alleys in sub-blocks (faithful to Haxe)
             double r1 = utils::Random::floatVal();
             double r2 = utils::Random::floatVal();
-            // Haxe: half.square > minSq / (Random.float() * Random.float())
-            // When r1*r2 is very small, threshold becomes huge so shouldSplit=false
             double divisor = r1 * r2;
             bool shouldSplit = divisor > 0.0001 && halfSq > minSq / divisor;
             createAlleys(half, minSq, gridChaos, sizeChaos, emptyProb, shouldSplit ? 1.0 : 0.0);
@@ -352,6 +431,138 @@ geom::Polygon Ward::createOrthoBuilding(const geom::Polygon& poly, double fill, 
 geom::Polygon Ward::getInsetShape(double inset) {
     std::vector<double> distances(patch->shape.length(), inset);
     return patch->shape.shrink(distances);
+}
+
+bool Ward::isRectangle(const geom::Polygon& poly) const {
+    // Faithful to mfcg.js isRectangle: 4 vertices and area/obbArea > 0.75
+    if (poly.length() != 4) return false;
+
+    double area = std::abs(poly.square());
+    auto obb = poly.orientedBoundingBox();
+    if (obb.size() < 4) return false;
+
+    // OBB area
+    geom::Point edge01 = obb[1].subtract(obb[0]);
+    geom::Point edge12 = obb[2].subtract(obb[1]);
+    double obbArea = edge01.length() * edge12.length();
+
+    if (obbArea < 0.001) return false;
+
+    return (area / obbArea) > 0.75;
+}
+
+void Ward::addBuildingLot(const geom::Polygon& lot, double minSq) {
+    // Faithful to mfcg.js createLots filtering and createRects
+    // Filter conditions from createLots (lines 12289-12296):
+    // - Must have >= 4 vertices
+    // - Area must be >= minSq/4
+    // - OBB dimensions must both be >= 1.2
+    // - Area/OBBArea ratio must be > 0.5
+
+    size_t numVerts = lot.length();
+
+    // Must have at least 3 vertices to form a shape
+    if (numVerts < 3) return;
+
+    double area = std::abs(lot.square());
+    double minArea = minSq / 4.0;
+
+    // Area check
+    if (area < minArea) return;
+
+    // For triangles (< 4 verts), check proportions and potentially convert
+    if (numVerts < 4) {
+        // Triangles are filtered in mfcg.js
+        return;
+    }
+
+    // Get OBB for dimension checks
+    auto obb = lot.orientedBoundingBox();
+    if (obb.size() < 4) {
+        // Can't compute OBB, reject
+        return;
+    }
+
+    geom::Point edge01 = obb[1].subtract(obb[0]);
+    geom::Point edge12 = obb[2].subtract(obb[1]);
+    double len01 = edge01.length();
+    double len12 = edge12.length();
+    double obbArea = len01 * len12;
+
+    // Minimum dimension check (1.2 in mfcg.js)
+    if (len01 < 1.2 || len12 < 1.2) return;
+
+    // Shape ratio check
+    if (obbArea > 0.001 && (area / obbArea) < 0.5) return;
+
+    // Now convert to rectangle if needed (createRects logic)
+    geom::Polygon building;
+
+    if (isRectangle(lot)) {
+        // Already rectangular enough
+        building = lot;
+    } else {
+        // Use LIR/LIRA to find largest inscribed rectangle
+        std::vector<geom::Point> pts;
+        for (size_t i = 0; i < lot.length(); ++i) {
+            pts.push_back(lot[i]);
+        }
+
+        // Try LIRA (finds best edge to align rectangle with)
+        std::vector<geom::Point> rect = geom::GeomUtils::lira(pts);
+
+        // Validate the rectangle has reasonable dimensions
+        if (rect.size() >= 4) {
+            double minDim = std::sqrt(area) / 2.0;
+            minDim = std::max(1.2, minDim);
+
+            double rectLen01 = geom::Point::distance(rect[0], rect[1]);
+            double rectLen12 = geom::Point::distance(rect[1], rect[2]);
+
+            if (rectLen01 >= minDim && rectLen12 >= minDim) {
+                building = geom::Polygon(rect);
+            } else {
+                // Rectangle too small, use original lot
+                building = lot;
+            }
+        } else {
+            building = lot;
+        }
+    }
+
+    // Simplify polygons with more than 4 vertices (mfcg.js lines 12194-12197)
+    if (building.length() > 4) {
+        // Simplify to 4 vertices by removing shortest edges
+        std::vector<geom::Point> pts;
+        for (size_t i = 0; i < building.length(); ++i) {
+            pts.push_back(building[i]);
+        }
+
+        while (pts.size() > 4) {
+            // Find shortest edge
+            size_t shortestIdx = 0;
+            double shortestLen = std::numeric_limits<double>::max();
+            for (size_t i = 0; i < pts.size(); ++i) {
+                size_t next = (i + 1) % pts.size();
+                double len = geom::Point::distance(pts[i], pts[next]);
+                if (len < shortestLen) {
+                    shortestLen = len;
+                    shortestIdx = i;
+                }
+            }
+
+            // Remove the vertex that creates the shortest edge by merging
+            size_t prev = (shortestIdx + pts.size() - 1) % pts.size();
+            size_t next = (shortestIdx + 1) % pts.size();
+
+            // Keep the vertex that maintains more area
+            pts.erase(pts.begin() + shortestIdx);
+        }
+
+        building = geom::Polygon(pts);
+    }
+
+    geometry.push_back(building);
 }
 
 void Ward::createAlleysWithParams(

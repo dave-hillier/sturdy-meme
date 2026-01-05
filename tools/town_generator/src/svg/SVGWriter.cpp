@@ -1,5 +1,6 @@
 #include "town_generator/svg/SVGWriter.h"
 #include "town_generator/building/CurtainWall.h"
+#include "town_generator/building/Canal.h"
 #include "town_generator/wards/Ward.h"
 #include <cmath>
 
@@ -71,6 +72,52 @@ std::string SVGWriter::generate(const building::Model& model, const Style& style
     svg << "  <rect x=\"" << minX << "\" y=\"" << minY << "\" ";
     svg << "width=\"" << width << "\" height=\"" << height << "\" ";
     svg << "fill=\"" << style.backgroundColor << "\"/>\n";
+
+    // Water bodies (rendered first, below everything else)
+    svg << "  <g id=\"water\">\n";
+    // Water edge polygon (if coast exists)
+    if (model.waterEdge.length() > 0) {
+        svg << "    <path d=\"" << polygonToPath(model.waterEdge) << "\" ";
+        svg << "fill=\"" << style.waterFill << "\" stroke=\"none\"/>\n";
+    }
+    // Water patches (waterbody == true)
+    for (const auto* patch : model.patches) {
+        if (patch->waterbody) {
+            svg << "    <path d=\"" << polygonToPath(patch->shape) << "\" ";
+            svg << "fill=\"" << style.waterFill << "\" stroke=\"" << style.waterStroke << "\" ";
+            svg << "stroke-width=\"" << style.waterStrokeWidth << "\"/>\n";
+        }
+    }
+    // Shore line
+    if (model.shore.length() > 0) {
+        svg << "    <path d=\"" << polygonToPath(model.shore) << "\" ";
+        svg << "fill=\"none\" stroke=\"" << style.shoreFill << "\" ";
+        svg << "stroke-width=\"2.0\"/>\n";
+    }
+    svg << "  </g>\n";
+
+    // Canals/rivers
+    if (!model.canals.empty()) {
+        svg << "  <g id=\"canals\">\n";
+        for (const auto& canal : model.canals) {
+            // Draw canal water polygon
+            geom::Polygon waterPoly = canal->getWaterPolygon();
+            if (waterPoly.length() > 0) {
+                svg << "    <path d=\"" << polygonToPath(waterPoly) << "\" ";
+                svg << "fill=\"" << style.waterFill << "\" stroke=\"" << style.waterStroke << "\" ";
+                svg << "stroke-width=\"" << style.waterStrokeWidth << "\"/>\n";
+            }
+            // Draw bridges
+            for (const auto& [pos, dir] : canal->bridges) {
+                double bridgeLen = canal->width * 1.5;
+                geom::Point offset = dir.scale(bridgeLen / 2);
+                svg << "    <line x1=\"" << (pos.x - offset.x) << "\" y1=\"" << (pos.y - offset.y) << "\" ";
+                svg << "x2=\"" << (pos.x + offset.x) << "\" y2=\"" << (pos.y + offset.y) << "\" ";
+                svg << "stroke=\"" << style.roadStroke << "\" stroke-width=\"2.0\"/>\n";
+            }
+        }
+        svg << "  </g>\n";
+    }
 
     // Patch outlines (optional, for debugging)
     svg << "  <g id=\"patches\" opacity=\"0.5\">\n";

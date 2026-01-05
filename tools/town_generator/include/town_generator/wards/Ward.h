@@ -160,6 +160,13 @@ public:
 protected:
     // Helper to get patch's inset shape
     geom::Polygon getInsetShape(double inset);
+
+    // Helper to add a building lot with filtering and rectangularization
+    // Faithful to mfcg.js createLots filtering and createRects
+    void addBuildingLot(const geom::Polygon& lot, double minSq);
+
+    // Check if a polygon is approximately rectangular
+    bool isRectangle(const geom::Polygon& poly) const;
 };
 
 // Forward declarations of all ward types

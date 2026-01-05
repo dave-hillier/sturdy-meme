@@ -45,6 +45,11 @@ public:
 
         std::string backgroundColor;
 
+        std::string waterFill;
+        std::string waterStroke;
+        double waterStrokeWidth;
+        std::string shoreFill;
+
         Style()
             : buildingFill("#d4c4a8")
             , buildingStroke("#5c4033")  // darker stroke for visible divisions
@@ -64,6 +69,10 @@ public:
             , patchStroke("#e0d5c0")
             , patchStrokeWidth(0.3)
             , backgroundColor("#f5f0e6")
+            , waterFill("#6eb5d4")       // light blue for water
+            , waterStroke("#4a99b5")     // darker blue for water edges
+            , waterStrokeWidth(0.5)
+            , shoreFill("#d4b896")       // sandy shore color
         {}
     };
 
