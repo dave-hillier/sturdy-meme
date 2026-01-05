@@ -19,7 +19,7 @@ void MerchantWard::createGeometry() {
     // gridChaos: 0.5 + random * 0.3 = 0.5-0.8
     double minSq = 50 + 60 * utils::Random::floatVal() * utils::Random::floatVal();
     double gridChaos = 0.5 + utils::Random::floatVal() * 0.3;
-    createAlleys(block, minSq, gridChaos, 0.7, 0.15);
+    createAlleys(block, minSq, gridChaos, 0.7, 0.15, 1.0);  // split=true initially
 }
 
 } // namespace wards

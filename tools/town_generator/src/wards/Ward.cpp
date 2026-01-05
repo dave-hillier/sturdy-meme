@@ -77,33 +77,19 @@ void Ward::filterOutskirts(std::vector<geom::Polygon>& buildings, double minDist
 
 void Ward::createAlleys(
     const geom::Polygon& p,
-    double minArea,
+    double minSq,
     double gridChaos,
     double sizeChaos,
-    double emptyProbability,
+    double emptyProb,
     double split
 ) {
-    double area = std::abs(p.square());
-
-    if (area < minArea) {
-        if (!utils::Random::boolVal(emptyProbability)) {
-            geometry.push_back(p);
-        }
-        return;
-    }
-
-    // Find longest edge
+    // Find longest edge (faithful to town_generator2)
     size_t longestEdge = 0;
     double longestLen = 0;
     size_t pLen = p.length();
 
-    if (pLen == 0) {
-        return;
-    }
-
-    // Polygons with less than 3 vertices can't be bisected
     if (pLen < 3) {
-        if (!utils::Random::boolVal(emptyProbability)) {
+        if (!utils::Random::boolVal(emptyProb)) {
             geometry.push_back(p);
         }
         return;
@@ -118,24 +104,45 @@ void Ward::createAlleys(
         }
     }
 
-    // Bisect at longest edge
-    double ratio = 0.35 + utils::Random::floatVal() * 0.3;
-    double angle = (utils::Random::floatVal() - 0.5) * gridChaos;
-    double gap = ALLEY;
+    // Ratio based on gridChaos (faithful to town_generator2)
+    double spread = 0.8 * gridChaos;
+    double ratio = (1.0 - spread) / 2.0 + utils::Random::floatVal() * spread;
+
+    // Angle spread: 0 for small blocks, scaled by gridChaos for larger (faithful to town_generator2)
+    double sq = std::abs(p.square());
+    double angleSpread = M_PI / 6.0 * gridChaos * (sq < minSq * 4 ? 0.0 : 1.0);
+    double angle = (utils::Random::floatVal() - 0.5) * angleSpread;
+
+    // Conditional alley gap based on split parameter (faithful to town_generator2)
+    double gap = (split > 0.5) ? ALLEY : 0.0;
 
     auto halves = building::Cutter::bisect(p, p[longestEdge], ratio, angle, gap);
 
     // If bisect returns only 1 polygon (failed to cut), treat as leaf
     if (halves.size() == 1) {
-        if (!utils::Random::boolVal(emptyProbability)) {
+        if (!utils::Random::boolVal(emptyProb)) {
             geometry.push_back(p);
         }
         return;
     }
 
     for (const auto& half : halves) {
-        createAlleys(half, minArea * (1.0 - sizeChaos * 0.5 + utils::Random::floatVal() * sizeChaos),
-                     gridChaos, sizeChaos, emptyProbability);
+        double halfSq = std::abs(half.square());
+        // Exponential threshold variation (faithful to town_generator2)
+        double threshold = minSq * std::pow(2.0, 4.0 * sizeChaos * (utils::Random::floatVal() - 0.5));
+
+        if (halfSq < threshold) {
+            // Small enough - add as building
+            if (!utils::Random::boolVal(emptyProb)) {
+                geometry.push_back(half);
+            }
+        } else {
+            // Determine if we should create alleys in sub-blocks (faithful to town_generator2)
+            double r1 = utils::Random::floatVal();
+            double r2 = utils::Random::floatVal();
+            bool shouldSplit = halfSq > minSq / (r1 * r2 + 0.001);  // +0.001 to avoid div by zero
+            createAlleys(half, minSq, gridChaos, sizeChaos, emptyProb, shouldSplit ? 1.0 : 0.0);
+        }
     }
 }
 

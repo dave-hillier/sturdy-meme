@@ -19,7 +19,7 @@ void CraftsmenWard::createGeometry() {
     // gridChaos: 0.5 + random * 0.2 = 0.5-0.7
     double minSq = 10 + 80 * utils::Random::floatVal() * utils::Random::floatVal();
     double gridChaos = 0.5 + utils::Random::floatVal() * 0.2;
-    createAlleys(block, minSq, gridChaos, 0.6, 0.0);
+    createAlleys(block, minSq, gridChaos, 0.6, 0.0, 1.0);  // split=true initially
 }
 
 } // namespace wards
