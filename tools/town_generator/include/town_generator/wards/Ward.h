@@ -23,10 +23,10 @@ namespace wards {
  */
 class Ward {
 public:
-    // Street width constants
-    static constexpr double MAIN_STREET = 2.0;
-    static constexpr double REGULAR_STREET = 1.0;
-    static constexpr double ALLEY = 0.6;
+    // Street width constants (scaled up to match 4x minSq scaling)
+    static constexpr double MAIN_STREET = 4.0;
+    static constexpr double REGULAR_STREET = 2.0;
+    static constexpr double ALLEY = 1.2;
 
     building::Patch* patch = nullptr;
     building::Model* model = nullptr;
@@ -45,8 +45,8 @@ public:
     // Create geometry (buildings)
     virtual void createGeometry();
 
-    // Filter buildings near outskirts
-    void filterOutskirts(std::vector<geom::Polygon>& buildings, double minDistance);
+    // Filter buildings near outskirts (faithful to Haxe filterOutskirts)
+    void filterOutskirts();
 
     // Create alleys recursively
     void createAlleys(

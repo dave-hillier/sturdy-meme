@@ -47,8 +47,8 @@ public:
 
         Style()
             : buildingFill("#d4c4a8")
-            , buildingStroke("#8b7355")
-            , buildingStrokeWidth(0.5)
+            , buildingStroke("#5c4033")  // darker stroke for visible divisions
+            , buildingStrokeWidth(1.2)   // thicker to match 4x scale
             , streetStroke("#0000ff")  // DEBUG: blue for streets/alleys
             , streetStrokeWidth(1.0)
             , arteryStroke("#ff0000")  // DEBUG: red for arteries/roads

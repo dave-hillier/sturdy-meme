@@ -58,20 +58,129 @@ void Ward::createGeometry() {
     // Subclasses override to create appropriate geometry
 }
 
-void Ward::filterOutskirts(std::vector<geom::Polygon>& buildings, double minDistance) {
-    auto it = buildings.begin();
-    while (it != buildings.end()) {
-        double minDist = std::numeric_limits<double>::infinity();
-        geom::Point center = it->center();
+void Ward::filterOutskirts() {
+    if (!patch || !model) return;
 
-        for (const auto& vPtr : patch->shape) {
-            minDist = std::min(minDist, geom::Point::distance(center, *vPtr));
+    // Simplified filterOutskirts - filter buildings based on distance from patch edges
+    // that are on roads or border other city patches.
+
+    // Structure to hold populated edge info
+    struct PopulatedEdge {
+        double x, y, dx, dy, d;
+    };
+    std::vector<PopulatedEdge> populatedEdges;
+
+    // Helper to add an edge with a distance factor
+    auto addEdge = [&](const geom::Point& v1, const geom::Point& v2, double factor) {
+        double dx = v2.x - v1.x;
+        double dy = v2.y - v1.y;
+
+        // Find max distance from any vertex to this edge line
+        double maxDist = 0;
+        for (size_t i = 0; i < patch->shape.length(); ++i) {
+            const geom::Point& v = patch->shape[i];
+            if (v == v1 || v == v2) continue;
+            double dist = geom::GeomUtils::distance2line(v1.x, v1.y, dx, dy, v.x, v.y);
+            maxDist = std::max(maxDist, dist * factor);
         }
 
-        if (minDist < minDistance) {
-            it = buildings.erase(it);
+        if (maxDist > 0) {
+            populatedEdges.push_back({v1.x, v1.y, dx, dy, maxDist});
+        }
+    };
+
+    // Check each edge of the patch
+    patch->shape.forEdge([&](const geom::Point& v1, const geom::Point& v2) {
+        // Check if edge is on a road/artery
+        bool onRoad = false;
+        for (const auto& artery : model->arteries) {
+            if (artery.size() < 2) continue;
+            for (size_t j = 0; j + 1 < artery.size(); ++j) {
+                if ((*artery[j] == v1 && *artery[j + 1] == v2) ||
+                    (*artery[j] == v2 && *artery[j + 1] == v1)) {
+                    onRoad = true;
+                    break;
+                }
+            }
+            if (onRoad) break;
+        }
+
+        if (onRoad) {
+            addEdge(v1, v2, 1.0);
         } else {
+            // For non-road edges, add with reduced factor if patch is within city
+            if (patch->withinCity) {
+                addEdge(v1, v2, 0.4);
+            }
+        }
+    });
+
+    // If no populated edges found, don't filter
+    if (populatedEdges.empty()) return;
+
+    // Calculate density for each vertex based on whether all adjacent patches are in city
+    std::vector<double> density;
+    for (size_t i = 0; i < patch->shape.length(); ++i) {
+        const geom::Point& v = patch->shape[i];
+
+        // Check if this is a gate vertex
+        bool isGate = false;
+        if (model->wall) {
+            for (const auto& gate : model->wall->gates) {
+                if (*gate == v) {
+                    isGate = true;
+                    break;
+                }
+            }
+        }
+
+        if (isGate) {
+            density.push_back(1.0);
+        } else {
+            // Check if all patches at this vertex are within city
+            auto patches = model->patchByVertex(v);
+            bool allWithinCity = true;
+            for (auto* p : patches) {
+                if (!p->withinCity) {
+                    allWithinCity = false;
+                    break;
+                }
+            }
+            density.push_back(allWithinCity ? 2.0 * utils::Random::floatVal() : 0.0);
+        }
+    }
+
+    // Filter buildings
+    auto it = geometry.begin();
+    while (it != geometry.end()) {
+        double minDist = 1.0;
+
+        // Find minimum distance ratio to any populated edge
+        for (const auto& edge : populatedEdges) {
+            for (size_t i = 0; i < it->length(); ++i) {
+                const geom::Point& v = (*it)[i];
+                double d = geom::GeomUtils::distance2line(edge.x, edge.y, edge.dx, edge.dy, v.x, v.y);
+                double dist = edge.d > 0 ? d / edge.d : 1.0;
+                minDist = std::min(minDist, dist);
+            }
+        }
+
+        // Interpolate density at building center
+        geom::Point c = it->center();
+        auto interp = patch->shape.interpolate(c);
+        double p = 0.0;
+        for (size_t j = 0; j < interp.size() && j < density.size(); ++j) {
+            p += density[j] * interp[j];
+        }
+        if (p > 0.001) {
+            minDist /= p;
+        }
+
+        // Filter based on random threshold
+        if (utils::Random::fuzzy(1.0) > minDist) {
             ++it;
+        } else {
+            it = geometry.erase(it);
         }
     }
 }
