@@ -42,9 +42,12 @@ public:
     Patch* plaza = nullptr;
 
     std::vector<geom::PointPtr> gates;  // Shared pointers for reference semantics
-    std::vector<std::vector<geom::Point>> streets;
-    std::vector<std::vector<geom::Point>> roads;
-    std::vector<std::vector<geom::Point>> arteries;
+
+    // Street type: vector of PointPtr for mutable reference semantics (like Haxe)
+    using Street = std::vector<geom::PointPtr>;
+    std::vector<Street> streets;
+    std::vector<Street> roads;
+    std::vector<Street> arteries;  // Consolidated streets+roads with shared vertices
 
     // Configuration
     bool plazaNeeded = false;
@@ -94,7 +97,7 @@ private:
     void optimizeJunctions();
     void buildWalls();
     void buildStreets();
-    void buildRoads();
+    void tidyUpRoads();
     void createWards();
     void buildGeometry();
 

@@ -547,6 +547,29 @@ public:
         return result;
     }
 
+    // Split polygon preserving shared PointPtrs (for reference semantics)
+    std::vector<Polygon> splitShared(const Point& p1, const Point& p2) const {
+        return splitiShared(indexOf(p1), indexOf(p2));
+    }
+
+    std::vector<Polygon> splitiShared(int i1, int i2) const {
+        if (i1 < 0 || i2 < 0) return {};
+        if (i1 > i2) std::swap(i1, i2);
+
+        std::vector<Polygon> result;
+
+        // First half: i1 to i2+1 (shares PointPtrs)
+        result.emplace_back(sliceShared(i1, i2 + 1));
+
+        // Second half: i2 to end + 0 to i1+1 (shares PointPtrs)
+        auto second = sliceShared(i2);
+        auto first = sliceShared(0, i1 + 1);
+        second.insert(second.end(), first.begin(), first.end());
+        result.emplace_back(second);
+
+        return result;
+    }
+
     // Cut polygon with a line
     std::vector<Polygon> cut(const Point& p1, const Point& p2, double gap = 0.0) const;
 

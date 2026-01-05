@@ -49,7 +49,6 @@ void Model::build() {
     optimizeJunctions();
     buildWalls();
     buildStreets();
-    buildRoads();
     createWards();
     buildGeometry();
 }
@@ -147,7 +146,6 @@ void Model::buildPatches() {
     for (const auto& tr : voronoi.triangles) {
         triangleToVertex[tr.get()] = geom::makePoint(tr->c);
     }
-
     // Create patches using shared vertex pointers
     std::map<geom::Region*, Patch*> regionToPatch;
     int patchesCreated = 0;
@@ -349,6 +347,33 @@ void Model::buildWalls() {
 void Model::buildStreets() {
     if (inner.empty()) return;
 
+    // Smoothing function: mutates shared Point objects in place (like Haxe)
+    // This moves both the artery AND the patch boundaries since they share Points
+    auto smoothStreet = [](Street& street) {
+        if (street.size() < 3) return;
+
+        // Calculate smoothed positions (f=3 like Haxe smoothVertexEq(3))
+        const double f = 3.0;
+        std::vector<geom::Point> smoothed;
+        smoothed.reserve(street.size());
+
+        for (size_t i = 0; i < street.size(); ++i) {
+            size_t prev = (i == 0) ? street.size() - 1 : i - 1;
+            size_t next = (i + 1) % street.size();
+
+            geom::Point avg;
+            avg.x = (street[prev]->x + street[i]->x * f + street[next]->x) / (2.0 + f);
+            avg.y = (street[prev]->y + street[i]->y * f + street[next]->y) / (2.0 + f);
+            smoothed.push_back(avg);
+        }
+
+        // Mutate middle points in place (keep endpoints fixed, like Haxe)
+        for (size_t i = 1; i + 1 < street.size(); ++i) {
+            street[i]->x = smoothed[i].x;
+            street[i]->y = smoothed[i].y;
+        }
+    };
+
     // Create topology for pathfinding
     topology_ = std::make_unique<Topology>(this);
 
@@ -363,125 +388,145 @@ void Model::buildStreets() {
     auto bounds = borderPatch.shape.getBounds();
     geom::Point center((bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2);
 
-    // Build arteries from each gate to plaza
+    // Build streets from each gate to plaza, and roads outside for border gates
     for (const auto& gatePtr : gates) {
-        // Find the vertex of the plaza closest to this gate (faithful to Haxe)
-        // This ensures we path to an actual node in the topology graph
-        geom::Point end = center;
-        if (plaza) {
-            double minDist = std::numeric_limits<double>::infinity();
-            for (size_t i = 0; i < plaza->shape.length(); ++i) {
-                double d = geom::Point::distance(*plaza->shape.ptr(i), *gatePtr);
-                if (d < minDist) {
-                    minDist = d;
-                    end = *plaza->shape.ptr(i);
-                }
-            }
-        }
-        // Exclude outer nodes so path stays inside the city (faithful to Haxe)
-        auto path = topology_->buildPath(*gatePtr, end, &topology_->outer);
-        if (!path.empty()) {
-            // Smooth the path
-            if (path.size() > 2) {
-                std::vector<geom::Point> smoothed;
-                smoothed.push_back(path[0]);
-                for (size_t i = 1; i < path.size() - 1; ++i) {
-                    // Simple smoothing: average with neighbors
-                    geom::Point avg;
-                    avg.x = (path[i-1].x + path[i].x + path[i+1].x) / 3.0;
-                    avg.y = (path[i-1].y + path[i].y + path[i+1].y) / 3.0;
-                    smoothed.push_back(avg);
-                }
-                smoothed.push_back(path.back());
-                path = smoothed;
-            }
-            arteries.push_back(path);
-        }
-    }
-
-    // Build secondary streets between patches
-    for (auto* patch : inner) {
-        if (patch == plaza) continue;
-
-        // Use the patch vertex closest to the center as the start point
-        // (this ensures we path from an actual node in the topology graph)
-        geom::Point patchStart = patch->shape.length() > 0 ? *patch->shape.ptr(0) : patch->shape.centroid();
+        // Find the vertex of the plaza closest to this gate using PointPtr
+        geom::PointPtr endPtr = plaza->shape.ptr(0);
         double minDist = std::numeric_limits<double>::infinity();
-        for (size_t i = 0; i < patch->shape.length(); ++i) {
-            double d = geom::Point::distance(*patch->shape.ptr(i), center);
+        for (size_t i = 0; i < plaza->shape.length(); ++i) {
+            double d = geom::Point::distance(*plaza->shape.ptr(i), *gatePtr);
             if (d < minDist) {
                 minDist = d;
-                patchStart = *patch->shape.ptr(i);
+                endPtr = plaza->shape.ptr(i);
             }
         }
 
-        // Try to connect to nearest artery or plaza
-        bool connected = false;
+        // Build street from gate to plaza using PointPtr for mutable references
+        auto path = topology_->buildPathPtrs(gatePtr, endPtr, &topology_->outer);
+        if (!path.empty()) {
+            streets.push_back(path);
 
-        // Check if already near an artery
-        for (const auto& artery : arteries) {
-            for (const auto& pt : artery) {
-                if (geom::Point::distance(patchStart, pt) < 5.0) {
-                    connected = true;
+            // Check if this is a border gate (not a citadel gate)
+            bool isBorderGate = false;
+            for (const auto& bg : border->gates) {
+                if (bg == gatePtr) {
+                    isBorderGate = true;
                     break;
                 }
             }
-            if (connected) break;
-        }
 
-        if (!connected) {
-            // Build street to plaza - find nearest plaza vertex
-            geom::Point plazaEnd = center;
-            if (plaza) {
-                double minD = std::numeric_limits<double>::infinity();
-                for (size_t i = 0; i < plaza->shape.length(); ++i) {
-                    double d = geom::Point::distance(*plaza->shape.ptr(i), patchStart);
-                    if (d < minD) {
-                        minD = d;
-                        plazaEnd = *plaza->shape.ptr(i);
+            // Build road outside city for border gates
+            if (isBorderGate) {
+                // Find farthest outer point in gate direction (like Haxe)
+                // gate.norm(1000) returns point 1000 units from origin in gate direction
+                geom::Point dir = gatePtr->norm(1000);
+                geom::PointPtr startPtr = nullptr;
+                double dist = std::numeric_limits<double>::infinity();
+
+                // Search OUTER topology nodes for closest to the "far direction"
+                // (not all nodes - need to exclude border and inner nodes)
+                for (auto* outerNode : topology_->outer) {
+                    auto it = topology_->node2pt.find(outerNode);
+                    if (it != topology_->node2pt.end()) {
+                        double d = geom::Point::distance(*it->second, dir);
+                        if (d < dist) {
+                            dist = d;
+                            startPtr = it->second;
+                        }
                     }
                 }
-            }
-            // Exclude outer nodes so path stays inside the city
-            auto path = topology_->buildPath(patchStart, plazaEnd, &topology_->outer);
-            if (!path.empty() && path.size() > 1) {
-                streets.push_back(path);
+
+                if (startPtr) {
+                    // Build path from outer start to gate, excluding inner nodes
+                    auto road = topology_->buildPathPtrs(startPtr, gatePtr, &topology_->inner);
+                    if (!road.empty()) {
+                        roads.push_back(road);
+                    }
+                }
             }
         }
     }
 
+    // Consolidate streets and roads into unified arteries
+    tidyUpRoads();
+
+    // Smooth arteries - this MUTATES the shared Point objects,
+    // so patch boundaries move with the streets (like Haxe)
+    for (auto& artery : arteries) {
+        smoothStreet(artery);
+    }
 }
 
-void Model::buildRoads() {
-    // Build roads from outer edge TO border gates (not citadel gates)
-    // Roads stay OUTSIDE the city walls (exclude inner nodes)
-    // Faithful to Haxe: only border.gates get roads, not citadel gates
-    if (!topology_ || !border) return;
+void Model::tidyUpRoads() {
+    // Segment structure for edge tracking (uses PointPtr for reference identity)
+    struct Segment {
+        geom::PointPtr start;
+        geom::PointPtr end;
+    };
+    std::vector<Segment> segments;
 
-    for (const auto& gatePtr : border->gates) {
-        const geom::Point& gate = *gatePtr;
+    // Cut a street/road into segments (streets now use PointPtr directly)
+    auto cut2segments = [&](const Street& street) {
+        for (size_t i = 1; i < street.size(); ++i) {
+            geom::PointPtr v0 = street[i - 1];
+            geom::PointPtr v1 = street[i];
 
-        // Haxe: dir = gate.norm(1000) - point 1000 units from origin in gate direction
-        geom::Point dir = gate.norm(1000);
+            // Skip segments along plaza edges
+            if (plaza && plaza->shape.containsPtr(v0) && plaza->shape.containsPtr(v1)) {
+                continue;
+            }
 
-        // Find the topology node closest to that distant point
-        geom::PointPtr startPtr = nullptr;
-        double minDist = std::numeric_limits<double>::infinity();
+            // Check if segment already exists (by pointer identity, like Haxe)
+            bool exists = false;
+            for (const auto& seg : segments) {
+                if (seg.start == v0 && seg.end == v1) {
+                    exists = true;
+                    break;
+                }
+            }
 
-        for (const auto& [ptPtr, node] : topology_->pt2node) {
-            double d = geom::Point::distance(*ptPtr, dir);
-            if (d < minDist) {
-                minDist = d;
-                startPtr = ptPtr;
+            if (!exists) {
+                segments.push_back({v0, v1});
+            }
+        }
+    };
+
+    // Process all streets and roads
+    for (const auto& street : streets) {
+        cut2segments(street);
+    }
+    for (const auto& road : roads) {
+        cut2segments(road);
+    }
+
+    // Chain segments together into arteries (like Haxe tidyUpRoads)
+    arteries.clear();
+    while (!segments.empty()) {
+        auto seg = segments.back();
+        segments.pop_back();
+
+        bool attached = false;
+        for (auto& artery : arteries) {
+            // Compare by pointer identity (like Haxe: a[0] == seg.end)
+            if (artery.front() == seg.end) {
+                // Prepend to artery
+                artery.insert(artery.begin(), seg.start);
+                attached = true;
+                break;
+            } else if (artery.back() == seg.start) {
+                // Append to artery
+                artery.push_back(seg.end);
+                attached = true;
+                break;
             }
         }
 
-        if (startPtr) {
-            // Build path from outer start point TO gate, excluding inner nodes
-            auto path = topology_->buildPath(*startPtr, gate, &topology_->inner);
-            if (!path.empty()) {
-                roads.push_back(path);
-            }
+        if (!attached) {
+            // Create new artery with PointPtrs
+            Street newArtery;
+            newArtery.push_back(seg.start);
+            newArtery.push_back(seg.end);
+            arteries.push_back(newArtery);
         }
     }
 }

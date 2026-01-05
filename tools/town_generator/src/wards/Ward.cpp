@@ -32,13 +32,14 @@ std::vector<double> Ward::getCityBlock() {
             continue;
         }
 
-        // Check if edge is on main artery
+        // Check if edge is on main artery (arteries now use PointPtr)
         for (const auto& artery : model->arteries) {
             if (artery.size() < 2) continue;  // Need at least 2 points to form an edge
             bool found = false;
             for (size_t j = 0; j + 1 < artery.size(); ++j) {
-                if ((artery[j] == v0 && artery[j + 1] == v1) ||
-                    (artery[j] == v1 && artery[j + 1] == v0)) {
+                // Compare dereferenced PointPtrs with Point values
+                if ((*artery[j] == v0 && *artery[j + 1] == v1) ||
+                    (*artery[j] == v1 && *artery[j + 1] == v0)) {
                     insetDistances[i] = MAIN_STREET / 2;
                     found = true;
                     break;

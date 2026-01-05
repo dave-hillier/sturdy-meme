@@ -77,6 +77,7 @@ public:
 private:
     static std::string polygonToPath(const geom::Polygon& poly);
     static std::string polylineToPath(const std::vector<geom::Point>& points);
+    static std::string polylineToPath(const building::Model::Street& street);  // For PointPtr streets
 };
 
 } // namespace svg

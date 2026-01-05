@@ -145,8 +145,8 @@ void CurtainWall::buildGates(bool real, Model* model, const std::vector<geom::Po
                         }
                     }
 
-                    // Split the outer ward
-                    auto halves = outer->shape.split(*gatePtr, *farthestPtr);
+                    // Split the outer ward (using splitShared to preserve PointPtrs)
+                    auto halves = outer->shape.splitShared(*gatePtr, *farthestPtr);
                     std::vector<Patch*> newPatches;
                     for (const auto& half : halves) {
                         auto* newPatch = new Patch(half);

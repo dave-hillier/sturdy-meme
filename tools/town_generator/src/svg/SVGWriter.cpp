@@ -35,6 +35,20 @@ std::string SVGWriter::polylineToPath(const std::vector<geom::Point>& points) {
     return ss.str();
 }
 
+std::string SVGWriter::polylineToPath(const building::Model::Street& street) {
+    if (street.empty()) return "";
+
+    std::ostringstream ss;
+    ss << std::fixed << std::setprecision(2);
+
+    ss << "M " << street[0]->x << " " << street[0]->y;
+    for (size_t i = 1; i < street.size(); ++i) {
+        ss << " L " << street[i]->x << " " << street[i]->y;
+    }
+
+    return ss.str();
+}
+
 std::string SVGWriter::generate(const building::Model& model, const Style& style) {
     std::ostringstream svg;
     svg << std::fixed << std::setprecision(2);

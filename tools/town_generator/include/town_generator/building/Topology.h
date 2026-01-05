@@ -46,6 +46,20 @@ public:
         const std::vector<geom::Node*>* exclude = nullptr
     );
 
+    // PointPtr-based path building (uses pointer identity for exact node matching)
+    std::vector<geom::Point> buildPath(
+        const geom::PointPtr& from,
+        const geom::PointPtr& to,
+        const std::vector<geom::Node*>* exclude = nullptr
+    );
+
+    // Returns path as PointPtrs for mutable reference semantics (like Haxe Street type)
+    std::vector<geom::PointPtr> buildPathPtrs(
+        const geom::PointPtr& from,
+        const geom::PointPtr& to,
+        const std::vector<geom::Node*>* exclude = nullptr
+    );
+
     // Equality
     bool operator==(const Topology& other) const {
         return model_ == other.model_;

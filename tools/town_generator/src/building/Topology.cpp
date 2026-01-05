@@ -34,7 +34,8 @@ Topology::Topology(Model* model) : model_(model) {
         }
     }
 
-    const auto& border = model_->borderPatch.shape;
+    // Use the actual wall shape, not borderPatch (which is just a bounding rectangle)
+    const auto& border = model_->border->shape;
 
     for (auto* patch : model_->patches) {
         bool withinCity = patch->withinCity;
@@ -146,6 +147,67 @@ std::vector<geom::Point> Topology::buildPath(
         auto it = node2pt.find(n);
         if (it != node2pt.end()) {
             result.push_back(*it->second);  // Dereference PointPtr
+        }
+    }
+
+    return result;
+}
+
+std::vector<geom::Point> Topology::buildPath(
+    const geom::PointPtr& from,
+    const geom::PointPtr& to,
+    const std::vector<geom::Node*>* exclude
+) {
+    // Use pointer identity for exact node matching
+    auto fromIt = pt2node.find(from);
+    auto toIt = pt2node.find(to);
+
+    if (fromIt == pt2node.end() || toIt == pt2node.end()) {
+        return {};
+    }
+
+    auto path = graph_.aStar(fromIt->second, toIt->second, exclude);
+
+    if (path.empty()) {
+        return {};
+    }
+
+    std::vector<geom::Point> result;
+    for (auto* n : path) {
+        auto it = node2pt.find(n);
+        if (it != node2pt.end()) {
+            result.push_back(*it->second);
+        }
+    }
+
+    return result;
+}
+
+std::vector<geom::PointPtr> Topology::buildPathPtrs(
+    const geom::PointPtr& from,
+    const geom::PointPtr& to,
+    const std::vector<geom::Node*>* exclude
+) {
+    // Use pointer identity for exact node matching
+    auto fromIt = pt2node.find(from);
+    auto toIt = pt2node.find(to);
+
+    if (fromIt == pt2node.end() || toIt == pt2node.end()) {
+        return {};
+    }
+
+    auto path = graph_.aStar(fromIt->second, toIt->second, exclude);
+
+    if (path.empty()) {
+        return {};
+    }
+
+    // Return PointPtrs for mutable reference semantics
+    std::vector<geom::PointPtr> result;
+    for (auto* n : path) {
+        auto it = node2pt.find(n);
+        if (it != node2pt.end()) {
+            result.push_back(it->second);
         }
     }
 
