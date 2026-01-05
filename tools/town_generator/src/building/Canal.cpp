@@ -68,6 +68,25 @@ std::unique_ptr<Canal> Canal::createRiver(Model* model) {
         return nullptr;
     }
 
+    // Filter to vertices that are actually on the shore circumference
+    // This ensures the river starts from the actual coastline, not one patch inland
+    std::vector<geom::PointPtr> validShoreVertices;
+    for (const auto& sv : shoreVertices) {
+        if (model->shore.containsPtr(sv)) {
+            validShoreVertices.push_back(sv);
+        }
+    }
+
+    // Fall back to all shore vertices if filtering removed everything
+    if (validShoreVertices.empty()) {
+        SDL_Log("Canal: No vertices on shore circumference, using all %zu shore vertices", shoreVertices.size());
+        validShoreVertices = shoreVertices;
+    } else {
+        SDL_Log("Canal: Filtered to %zu vertices on shore circumference (from %zu)",
+                validShoreVertices.size(), shoreVertices.size());
+        shoreVertices = validShoreVertices;
+    }
+
     // Sort shore vertices by distance from center (prefer vertices near city center for river entry)
     std::sort(shoreVertices.begin(), shoreVertices.end(),
         [](const geom::PointPtr& a, const geom::PointPtr& b) {
@@ -437,6 +456,41 @@ geom::Polygon Canal::getWaterPolygon() const {
     }
 
     return geom::Polygon(polyPoints);
+}
+
+bool Canal::containsVertex(const geom::Point& v, double tolerance) const {
+    for (const auto& cp : course) {
+        if (geom::Point::distance(cp, v) < tolerance) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool Canal::containsEdge(const geom::Point& v0, const geom::Point& v1, double tolerance) const {
+    // Check if both vertices are on the canal course, and they are adjacent in the course
+    int idx0 = -1, idx1 = -1;
+
+    for (size_t i = 0; i < course.size(); ++i) {
+        if (geom::Point::distance(course[i], v0) < tolerance) {
+            idx0 = static_cast<int>(i);
+        }
+        if (geom::Point::distance(course[i], v1) < tolerance) {
+            idx1 = static_cast<int>(i);
+        }
+    }
+
+    if (idx0 == -1 || idx1 == -1) return false;
+
+    // Check if they are adjacent (in either direction)
+    return std::abs(idx0 - idx1) == 1;
+}
+
+double Canal::getWidthAtVertex(const geom::Point& v, double tolerance) const {
+    if (containsVertex(v, tolerance)) {
+        return width;
+    }
+    return 0.0;
 }
 
 } // namespace building

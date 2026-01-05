@@ -34,6 +34,16 @@ std::vector<double> Ward::getCityBlock() {
             continue;
         }
 
+        // Check if edge is on a canal - use canal width / 2 + ALLEY for gap
+        // (faithful to mfcg.js getAvailable() which handles CANAL edge type)
+        for (const auto& canal : model->canals) {
+            if (canal->containsEdge(v0, v1)) {
+                double canalInset = canal->width / 2.0 + ALLEY;
+                insetDistances[i] = std::max(insetDistances[i], canalInset);
+                break;
+            }
+        }
+
         // Check if edge is on main artery (arteries now use PointPtr)
         for (const auto& artery : model->arteries) {
             if (artery.size() < 2) continue;  // Need at least 2 points to form an edge
@@ -48,6 +58,44 @@ std::vector<double> Ward::getCityBlock() {
                 }
             }
             if (found) break;
+        }
+    }
+
+    // Per-vertex exclusion zones for canals and walls
+    // (faithful to mfcg.js getAvailable lines 12326-12381)
+    for (size_t i = 0; i < len; ++i) {
+        const geom::Point& v = patch->shape[i];
+        double maxExclusion = 0.0;
+
+        // Check tower radius from all walls (mfcg.js lines 12334-12337)
+        if (model->wall) {
+            double towerRadius = model->wall->getTowerRadius(v);
+            if (towerRadius > 0) {
+                maxExclusion = std::max(maxExclusion, towerRadius + ALLEY);
+            }
+        }
+        if (model->citadel) {
+            double towerRadius = model->citadel->getTowerRadius(v);
+            if (towerRadius > 0) {
+                maxExclusion = std::max(maxExclusion, towerRadius + ALLEY);
+            }
+        }
+
+        // Check canal width at vertex (mfcg.js lines 12339-12344, 12353-12358)
+        for (const auto& canal : model->canals) {
+            double canalWidth = canal->getWidthAtVertex(v);
+            if (canalWidth > 0) {
+                // For vertices on the canal, use canal width / 2 + ALLEY
+                double canalInset = canalWidth / 2.0 + ALLEY;
+                maxExclusion = std::max(maxExclusion, canalInset);
+            }
+        }
+
+        // Apply exclusion to both adjacent edges
+        if (maxExclusion > 0) {
+            insetDistances[i] = std::max(insetDistances[i], maxExclusion);
+            size_t prevIdx = (i + len - 1) % len;
+            insetDistances[prevIdx] = std::max(insetDistances[prevIdx], maxExclusion);
         }
     }
 

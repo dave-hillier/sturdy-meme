@@ -277,5 +277,27 @@ bool CurtainWall::borders(Patch* p) const {
     return false;
 }
 
+double CurtainWall::getTowerRadius(const geom::Point& vertex) const {
+    // Faithful to mfcg.js getTowerRadius (line 11192-11193)
+    // Returns: LTOWER_RADIUS if vertex is a tower, 1 + 2*TOWER_RADIUS if gate, 0 otherwise
+    if (!real_) return 0.0;
+
+    // Check if vertex is a tower
+    for (const auto& tower : towers) {
+        if (geom::Point::distance(tower, vertex) < 0.5) {
+            return LTOWER_RADIUS;
+        }
+    }
+
+    // Check if vertex is a gate
+    for (const auto& gatePtr : gates) {
+        if (geom::Point::distance(*gatePtr, vertex) < 0.5) {
+            return 1.0 + 2.0 * TOWER_RADIUS;
+        }
+    }
+
+    return 0.0;
+}
+
 } // namespace building
 } // namespace town_generator

@@ -58,6 +58,15 @@ public:
 
     // Get polygon representing the canal water area
     geom::Polygon getWaterPolygon() const;
+
+    // Check if a vertex (by coordinate) is on the canal course
+    bool containsVertex(const geom::Point& v, double tolerance = 0.5) const;
+
+    // Check if an edge (v0 -> v1) is part of the canal course
+    bool containsEdge(const geom::Point& v0, const geom::Point& v1, double tolerance = 0.5) const;
+
+    // Get the canal width at a specific vertex (for building inset)
+    double getWidthAtVertex(const geom::Point& v, double tolerance = 0.5) const;
 };
 
 } // namespace building

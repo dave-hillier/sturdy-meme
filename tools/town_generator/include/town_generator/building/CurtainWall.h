@@ -20,6 +20,11 @@ class Model;
  */
 class CurtainWall {
 public:
+    // Tower radius constants (faithful to mfcg.js pc.TOWER_RADIUS and pc.LTOWER_RADIUS)
+    static constexpr double TOWER_RADIUS = 1.9;
+    static constexpr double LTOWER_RADIUS = 2.5;  // Large tower radius
+    static constexpr double THICKNESS = 1.5;      // Wall thickness
+
     geom::Polygon shape;
     std::vector<bool> segments;
     std::vector<geom::PointPtr> gates;  // Shared with shape vertices
@@ -43,6 +48,10 @@ public:
 
     bool bordersBy(Patch* p, const geom::Point& v0, const geom::Point& v1) const;
     bool borders(Patch* p) const;
+
+    // Get tower radius exclusion at a vertex (faithful to mfcg.js getTowerRadius)
+    // Returns: LTOWER_RADIUS if vertex is a tower, 1 + 2*TOWER_RADIUS if gate, 0 otherwise
+    double getTowerRadius(const geom::Point& vertex) const;
 
     // Equality
     bool operator==(const CurtainWall& other) const {
