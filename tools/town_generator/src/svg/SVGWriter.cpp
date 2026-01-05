@@ -112,12 +112,31 @@ std::string SVGWriter::generate(const building::Model& model, const Style& style
     }
     svg << "  </g>\n";
 
-    // Buildings
+    // Ward type colors for debugging
+    auto getWardColor = [](const std::string& name) -> std::string {
+        if (name == "Craftsmen") return "#d4a574";      // tan/brown
+        if (name == "Merchant") return "#c9a227";       // gold
+        if (name == "Patriciate") return "#8b4513";     // saddle brown
+        if (name == "Slum") return "#a0522d";           // sienna
+        if (name == "Common") return "#deb887";         // burlywood
+        if (name == "Gate") return "#cd853f";           // peru
+        if (name == "Market") return "#f5deb3";         // wheat
+        if (name == "Cathedral") return "#bc8f8f";      // rosy brown
+        if (name == "Castle") return "#696969";         // dim gray
+        if (name == "Administration") return "#b8860b"; // dark goldenrod
+        if (name == "Military") return "#808080";       // gray
+        if (name == "Farm") return "#9acd32";           // yellow green
+        if (name == "Park") return "#90ee90";           // light green
+        return "#d2b48c";                               // default tan
+    };
+
+    // Buildings (colored by ward type)
     svg << "  <g id=\"buildings\">\n";
     for (const auto& ward : model.wards_) {
+        std::string wardColor = getWardColor(ward->getName());
         for (const auto& building : ward->geometry) {
             svg << "    <path d=\"" << polygonToPath(building) << "\" ";
-            svg << "fill=\"" << style.buildingFill << "\" ";
+            svg << "fill=\"" << wardColor << "\" ";
             svg << "stroke=\"" << style.buildingStroke << "\" ";
             svg << "stroke-width=\"" << style.buildingStrokeWidth << "\"/>\n";
         }
