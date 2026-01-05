@@ -15,9 +15,9 @@ void CraftsmenWard::createGeometry() {
     if (block.empty()) return;
 
     // Working class housing - variable density (faithful to Haxe)
-    // minSq: 10 + 80 * random^2 = 10-90
+    // minSq: 10 + 80 * random^2 = 10-90, scaled up 4x for testing
     // gridChaos: 0.5 + random * 0.2 = 0.5-0.7
-    double minSq = 10 + 80 * utils::Random::floatVal() * utils::Random::floatVal();
+    double minSq = 4 * (10 + 80 * utils::Random::floatVal() * utils::Random::floatVal());
     double gridChaos = 0.5 + utils::Random::floatVal() * 0.2;
     createAlleys(block, minSq, gridChaos, 0.6, 0.04, 1.0);  // emptyProb=0.04 (Haxe default)
 }

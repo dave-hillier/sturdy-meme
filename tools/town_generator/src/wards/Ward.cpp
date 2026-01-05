@@ -21,14 +21,15 @@ std::vector<double> Ward::getCityBlock() {
         const geom::Point& v0 = patch->shape[i];
         const geom::Point& v1 = patch->shape[(i + 1) % len];
 
-        // Check if edge borders wall
+        // Check if edge borders wall - use MAIN_STREET/2 like Haxe
         if (model->wall && model->wall->bordersBy(patch, v0, v1)) {
-            insetDistances[i] = 0;
+            insetDistances[i] = MAIN_STREET / 2;
             continue;
         }
 
+        // Citadel borders also use MAIN_STREET/2
         if (model->citadel && model->citadel->bordersBy(patch, v0, v1)) {
-            insetDistances[i] = 0;
+            insetDistances[i] = MAIN_STREET / 2;
             continue;
         }
 
@@ -83,7 +84,7 @@ void Ward::createAlleys(
     double emptyProb,
     double split
 ) {
-    // Find longest edge (faithful to town_generator2)
+    // Find longest edge (faithful to Haxe)
     size_t longestEdge = 0;
     double longestLen = 0;
     size_t pLen = p.length();
@@ -108,8 +109,8 @@ void Ward::createAlleys(
     double spread = 0.8 * gridChaos;
     double ratio = (1.0 - spread) / 2.0 + utils::Random::floatVal() * spread;
 
-    // Angle spread: 0 for small blocks, scaled by gridChaos for larger (faithful to town_generator2)
-    double sq = std::abs(p.square());
+    // Angle spread: 0 for small blocks, scaled by gridChaos for larger (faithful to Haxe)
+    double sq = p.square();  // Signed area like Haxe
     double angleSpread = M_PI / 6.0 * gridChaos * (sq < minSq * 4 ? 0.0 : 1.0);
     double angle = (utils::Random::floatVal() - 0.5) * angleSpread;
 
@@ -127,8 +128,9 @@ void Ward::createAlleys(
     }
 
     for (const auto& half : halves) {
-        double halfSq = std::abs(half.square());
-        // Exponential threshold variation (faithful to town_generator2)
+        // Use signed area like Haxe (no abs) - CCW polygons have positive area
+        double halfSq = half.square();
+        // Exponential threshold variation (faithful to Haxe)
         double threshold = minSq * std::pow(2.0, 4.0 * sizeChaos * (utils::Random::floatVal() - 0.5));
 
         if (halfSq < threshold) {
