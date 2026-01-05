@@ -417,27 +417,24 @@ void Model::buildStreets() {
 
             // Build road outside city for border gates
             if (isBorderGate) {
-                // Find farthest outer point in gate direction (like Haxe)
-                // gate.norm(1000) returns point 1000 units from origin in gate direction
-                geom::Point dir = gatePtr->norm(1000);
+                // Find point at map edge in direction of gate from center
+                // Direction: from town center through the gate, extended far out
+                geom::Point gateDir = gatePtr->subtract(center);
+                geom::Point dir = center.add(gateDir.norm(1000));  // Point 1000 units from center in gate direction
+
                 geom::PointPtr startPtr = nullptr;
                 double dist = std::numeric_limits<double>::infinity();
 
-                // Search OUTER topology nodes for closest to the "far direction"
-                // (not all nodes - need to exclude border and inner nodes)
-                for (auto* outerNode : topology_->outer) {
-                    auto it = topology_->node2pt.find(outerNode);
-                    if (it != topology_->node2pt.end()) {
-                        double d = geom::Point::distance(*it->second, dir);
-                        if (d < dist) {
-                            dist = d;
-                            startPtr = it->second;
-                        }
+                for (const auto& [ptPtr, node] : topology_->pt2node) {
+                    double d = geom::Point::distance(*ptPtr, dir);
+                    if (d < dist) {
+                        dist = d;
+                        startPtr = ptPtr;
                     }
                 }
 
                 if (startPtr) {
-                    // Build path from outer start to gate, excluding inner nodes
+                    // Build path from start to gate, excluding inner nodes
                     auto road = topology_->buildPathPtrs(startPtr, gatePtr, &topology_->inner);
                     if (!road.empty()) {
                         roads.push_back(road);
