@@ -1003,17 +1003,18 @@ std::vector<std::vector<Patch*>> Model::splitIntoConnectedComponents(const std::
 
 void Model::createWards() {
     // Ward type distribution (faithful to original weights)
+    // Note: Slum is NOT included here - slums are only created by buildShantyTowns()
+    // for patches OUTSIDE the city walls (SPRAWL type in MFCG)
     std::vector<std::function<wards::Ward*()>> wardTypes = {
         []() { return new wards::CraftsmenWard(); },
         []() { return new wards::MerchantWard(); },
         []() { return new wards::CommonWard(); },
-        []() { return new wards::Slum(); },
         []() { return new wards::PatriciateWard(); },
         []() { return new wards::AdministrationWard(); },
         []() { return new wards::MilitaryWard(); },
     };
 
-    std::vector<double> weights = {3, 2, 4, 2, 1, 1, 1};
+    std::vector<double> weights = {3, 2, 4, 1, 1, 1};
 
     // Track special ward assignments
     bool castleAssigned = false;
@@ -1359,6 +1360,7 @@ void Model::buildShantyTowns() {
 
         --targetShanties;
     }
+
 }
 
 void Model::buildGeometry() {
