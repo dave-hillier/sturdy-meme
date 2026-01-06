@@ -553,7 +553,7 @@ std::vector<geom::Point> Ward::semiSmooth(
     const geom::Point& p2,
     double minFront
 ) {
-    // Faithful to mfcg.js semiSmooth function
+    // Faithful to mfcg.js semiSmooth function (using Qe.getCircle, Qe.getArc)
     // Smooths a corner (p0, p1, p2) into an arc if appropriate
 
     double dist02 = geom::Point::distance(p0, p2);
@@ -585,21 +585,55 @@ std::vector<geom::Point> Ward::semiSmooth(
         return {p0, p1, p2};  // Keep original corner
     }
 
-    // Create arc approximation
+    // Create arc using getCircle and getArc (faithful to mfcg.js)
     std::vector<geom::Point> result;
     result.push_back(p0);
 
-    // Add arc points
+    // Determine arc endpoints based on shorter segment
+    geom::Point arcStart, arcEnd;
+    geom::Point dir1, dir2;
+
     if (len01 < len12) {
-        // Shorter segment is p0-p1
+        // Shorter segment is p0-p1: arc from p0 to point on p1-p2
         double t = len01 / len12;
-        geom::Point arcPoint(p1.x + v12.x * t, p1.y + v12.y * t);
-        result.push_back(arcPoint);
+        arcStart = p0;
+        arcEnd = geom::Point(p1.x + v12.x * t, p1.y + v12.y * t);
+        dir1 = v01.norm(1.0);
+        dir2 = v12.norm(1.0);
     } else {
-        // Shorter segment is p1-p2
-        double t = -len12 / len01;
-        geom::Point arcPoint(p1.x + v01.x * t, p1.y + v01.y * t);
-        result.push_back(arcPoint);
+        // Shorter segment is p1-p2: arc from point on p0-p1 to p2
+        double t = len12 / len01;
+        arcStart = geom::Point(p1.x - v01.x * t, p1.y - v01.y * t);
+        arcEnd = p2;
+        dir1 = v01.norm(1.0);
+        dir2 = v12.norm(1.0);
+    }
+
+    // Get circle passing through arc endpoints
+    auto circle = geom::GeomUtils::getCircle(arcStart, dir1, arcEnd, dir2);
+
+    if (circle.r > 0.001) {
+        // Calculate angles
+        geom::Point toStart = arcStart.subtract(circle.c);
+        geom::Point toEnd = arcEnd.subtract(circle.c);
+        double startAngle = std::atan2(toStart.y, toStart.x);
+        double endAngle = std::atan2(toEnd.y, toEnd.x);
+
+        // Get arc points (4 segments for smooth curve)
+        auto arcPoints = geom::GeomUtils::getArc(circle, startAngle, endAngle, 4);
+
+        if (!arcPoints.empty()) {
+            // Add arc points (skip first as it's arcStart which is close to p0)
+            for (size_t i = 1; i < arcPoints.size(); ++i) {
+                result.push_back(arcPoints[i]);
+            }
+        } else {
+            // Arc failed, use simple midpoint
+            result.push_back(geom::GeomUtils::lerp(arcStart, arcEnd));
+        }
+    } else {
+        // Circle failed, use simple approach
+        result.push_back(geom::GeomUtils::lerp(arcStart, arcEnd));
     }
 
     result.push_back(p2);

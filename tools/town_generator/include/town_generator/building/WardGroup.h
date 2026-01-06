@@ -57,6 +57,9 @@ public:
     // Greenery level (0-1)
     double greenery = 0.0;
 
+    // Processing mode (e.g., "Shrink" for building setback variation)
+    std::string processingMode;
+
     WardGroup() = default;
     explicit WardGroup(Model* model);
 
