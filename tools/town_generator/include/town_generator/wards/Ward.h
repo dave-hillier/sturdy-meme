@@ -14,6 +14,7 @@ namespace town_generator {
 namespace building {
     class Model;
     class CurtainWall;
+    class Block;
 }
 
 namespace wards {
@@ -90,7 +91,9 @@ public:
 
     std::vector<geom::Polygon> geometry;
     std::vector<std::vector<geom::Point>> alleys;  // Alley cut lines for rendering
+    std::vector<building::Block*> blocks;  // City blocks (MFCG-style)
     geom::Polygon church;  // Church building if created
+    bool urban = true;  // Whether this is an urban ward (affects lot generation)
 
     Ward() = default;
     virtual ~Ward() = default;
@@ -149,6 +152,16 @@ public:
 
     // Create a church in a medium-sized block (faithful to mfcg.js createChurch)
     void createChurch(const geom::Polygon& block);
+
+    // Create a Block (faithful to mfcg.js createBlock)
+    // isSmall: if true, the whole shape becomes a single lot
+    void createBlock(const geom::Polygon& shape, bool isSmall);
+
+    // Create alleys using Bisector (faithful to mfcg.js createAlleys)
+    void createAlleysFaithful(const geom::Polygon& shape, const AlleyParams& params);
+
+    // Check if block is at blockSize threshold (for non-urban wards)
+    bool isBlockSized(const geom::Polygon& shape, const AlleyParams& params);
 
     // Create orthogonal building
     geom::Polygon createOrthoBuilding(
