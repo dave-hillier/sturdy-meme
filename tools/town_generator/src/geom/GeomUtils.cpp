@@ -516,5 +516,56 @@ std::vector<Point> GeomUtils::shrink(const std::vector<Point>& poly, const std::
     return result;
 }
 
+std::vector<Point> GeomUtils::fillArea(const std::vector<Point>& poly, double density, double spacing) {
+    // Faithful to mfcg.js Ae.fillArea
+    // Fills a polygon with points using a hexagonal grid pattern, filtered by density
+
+    std::vector<Point> result;
+
+    if (poly.size() < 3 || density <= 0) {
+        return result;
+    }
+
+    // Find bounding box
+    double minX = std::numeric_limits<double>::max();
+    double maxX = std::numeric_limits<double>::lowest();
+    double minY = std::numeric_limits<double>::max();
+    double maxY = std::numeric_limits<double>::lowest();
+
+    for (const auto& p : poly) {
+        minX = std::min(minX, p.x);
+        maxX = std::max(maxX, p.x);
+        minY = std::min(minY, p.y);
+        maxY = std::max(maxY, p.y);
+    }
+
+    // Hexagonal grid pattern (offset rows for natural distribution)
+    double rowHeight = spacing * std::sqrt(3.0) / 2.0;
+    int row = 0;
+
+    for (double y = minY; y <= maxY; y += rowHeight) {
+        double xOffset = (row % 2 == 0) ? 0 : spacing / 2.0;
+
+        for (double x = minX + xOffset; x <= maxX; x += spacing) {
+            Point p(x, y);
+
+            // Check if point is inside polygon
+            if (containsPoint(poly, p)) {
+                // Simple noise simulation using coordinates
+                double noise = std::sin(x * 1.5) * std::cos(y * 1.7) * 0.5 + 0.5;
+
+                // Filter by density
+                if (noise < density) {
+                    result.push_back(p);
+                }
+            }
+        }
+
+        ++row;
+    }
+
+    return result;
+}
+
 } // namespace geom
 } // namespace town_generator

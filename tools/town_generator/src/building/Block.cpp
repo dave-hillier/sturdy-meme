@@ -397,6 +397,7 @@ void Block::indentFronts() {
 
 std::vector<geom::Point> Block::spawnTrees() {
     // Faithful to mfcg.js Block.spawnTrees (lines 12303-12325)
+    // Uses Ae.fillArea for natural tree distribution
     std::vector<geom::Point> trees;
 
     if (courtyard.empty() || !group) return trees;
@@ -404,30 +405,23 @@ std::vector<geom::Point> Block::spawnTrees() {
     double greenery = group->greenery;
     bool isUrban = group->urban;
 
-    // Reduce greenery for non-urban areas
+    // Reduce greenery for non-urban areas (mfcg.js multiplies by 0.1)
     if (!isUrban) {
         greenery *= 0.1;
     }
 
-    // Spawn trees in courtyard areas based on greenery level
+    // Spawn trees in courtyard areas using fillArea (faithful to MFCG)
     for (const auto& yard : courtyard) {
-        double area = std::abs(yard.square());
-        int numTrees = static_cast<int>(area * greenery / 10.0);
+        // Convert polygon to point vector
+        std::vector<geom::Point> pts;
+        for (size_t i = 0; i < yard.length(); ++i) {
+            pts.push_back(yard[i]);
+        }
 
-        for (int i = 0; i < numTrees; ++i) {
-            // Generate random point inside courtyard
-            // Simple approach: use random barycentric coordinates of bounding box
-            auto bounds = yard.getBounds();
-            for (int attempt = 0; attempt < 10; ++attempt) {
-                double x = bounds.left + utils::Random::floatVal() * (bounds.right - bounds.left);
-                double y = bounds.top + utils::Random::floatVal() * (bounds.bottom - bounds.top);
-                geom::Point p(x, y);
-
-                if (yard.contains(p)) {
-                    trees.push_back(p);
-                    break;
-                }
-            }
+        // Fill with trees using hexagonal grid pattern
+        auto treePts = geom::GeomUtils::fillArea(pts, greenery, 3.0);
+        for (const auto& p : treePts) {
+            trees.push_back(p);
         }
     }
 

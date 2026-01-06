@@ -192,6 +192,17 @@ public:
      */
     static std::vector<Point> shrink(const std::vector<Point>& poly, const std::vector<double>& amounts);
 
+    /**
+     * Fill an area with points using a grid pattern
+     * Based on mfcg.js Ae.fillArea
+     *
+     * @param poly The polygon to fill
+     * @param density Fill density (0-1), higher = more points
+     * @param spacing Grid spacing (default 3.0)
+     * @return Vector of points inside the polygon
+     */
+    static std::vector<Point> fillArea(const std::vector<Point>& poly, double density, double spacing = 3.0);
+
     // Equality (stateless utility class)
     bool operator==(const GeomUtils& other) const { return true; }
     bool operator!=(const GeomUtils& other) const { return false; }
