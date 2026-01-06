@@ -14,9 +14,14 @@ void Slum::createGeometry() {
     auto block = patch->shape.shrink(cityBlock);
     if (block.empty()) return;
 
-    // Cramped housing (faithful to MFCG)
+    // MFCG SPRAWL type parameters (line 11321):
+    // - gridChaos *= 0.5 (more regular layout)
+    // - blockSize *= 2 (larger lots)
+    // - greenery = (1 + greenery) / 2 (more green space)
     AlleyParams params = AlleyParams::createUrban();
-    params.emptyProb = 0.03;  // 3% empty lots (densely packed)
+    params.gridChaos *= 0.5;      // More regular than urban
+    params.blockSize *= 2.0;      // Larger lots
+    params.emptyProb = 0.15;      // More empty lots (greenery)
 
     createAlleys(block, params);
 }
