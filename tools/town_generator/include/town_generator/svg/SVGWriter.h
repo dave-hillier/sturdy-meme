@@ -77,13 +77,13 @@ public:
             , buildingStroke("#1A1917")   // colorDark - ink
             , buildingStrokeWidth(0.3)    // thin strokes like mfcg
             , streetStroke("#1A1917")     // colorDark
-            , streetStrokeWidth(0.6)      // thin for alleys/minor streets
+            , streetStrokeWidth(0.8)      // slightly thicker than alleys
             , arteryStroke("#1A1917")     // colorDark
-            , arteryStrokeWidth(1.0)      // slightly thicker for main streets
+            , arteryStrokeWidth(2.0)      // MFCG: roadWidth = 2 * SCALE (base 2.0)
             , roadStroke("#1A1917")       // colorDark
-            , roadStrokeWidth(0.8)
+            , roadStrokeWidth(2.0)        // MFCG: roadWidth = 2 * SCALE (base 2.0)
             , alleyStroke("#1A1917")      // colorDark
-            , alleyStrokeWidth(0.4)       // thinner than streets
+            , alleyStrokeWidth(0.6)       // MFCG: drawFill(.6) for alleys
             , wallStroke("#1A1917")       // colorDark (walls = ink)
             , wallStrokeWidth(1.9)        // THICKNESS from mfcg
             , towerFill("#1A1917")        // colorDark

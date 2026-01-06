@@ -108,6 +108,101 @@ public:
      */
     static double polygonArea(const std::vector<Point>& poly);
 
+    /**
+     * Polygon intersection (AND operation)
+     * Based on mfcg.js ye.and (PolyBool)
+     * Returns the intersection of two polygons, or empty if no intersection
+     *
+     * @param polyA First polygon
+     * @param polyB Second polygon
+     * @param subtract If true, return A - B instead of A & B
+     * @return Intersection polygon
+     */
+    static std::vector<Point> polygonIntersection(
+        const std::vector<Point>& polyA,
+        const std::vector<Point>& polyB,
+        bool subtract = false
+    );
+
+    /**
+     * Check if point is inside polygon
+     * Based on mfcg.js Gb.containsPoint
+     */
+    static bool containsPoint(const std::vector<Point>& poly, const Point& p, bool excludeBoundary = false);
+
+    /**
+     * Create a stripe polygon from a polyline
+     * Based on mfcg.js Qd.stripe
+     *
+     * @param line The polyline
+     * @param width The stripe width
+     * @param capExtend How much to extend caps at ends (0-1)
+     * @return A polygon representing the stripe
+     */
+    static std::vector<Point> stripe(
+        const std::vector<Point>& line,
+        double width,
+        double capExtend = 1.0
+    );
+
+    /**
+     * Circle passing through points with tangent directions
+     * Based on mfcg.js Qe.getCircle
+     */
+    struct Circle {
+        Point c;
+        double r;
+    };
+    static Circle getCircle(const Point& p0, const Point& dir0, const Point& p1, const Point& dir1);
+
+    /**
+     * Generate arc points between two angles
+     * Based on mfcg.js Qe.getArc
+     *
+     * @param circle The circle (center and radius)
+     * @param startAngle Start angle in radians
+     * @param endAngle End angle in radians
+     * @param numSegments Number of segments for approximation
+     * @return Points along the arc
+     */
+    static std::vector<Point> getArc(
+        const Circle& circle,
+        double startAngle,
+        double endAngle,
+        int numSegments = 4
+    );
+
+    /**
+     * Translate polygon by offset
+     */
+    static std::vector<Point> translate(const std::vector<Point>& poly, double dx, double dy);
+
+    /**
+     * Reverse polygon winding
+     */
+    static std::vector<Point> reverse(const std::vector<Point>& poly);
+
+    /**
+     * Shrink polygon edges inward by varying amounts
+     * Based on mfcg.js gd.shrink
+     *
+     * @param poly The polygon to shrink
+     * @param amounts Shrink amounts for each edge (same length as poly)
+     * @return The shrunk polygon
+     */
+    static std::vector<Point> shrink(const std::vector<Point>& poly, const std::vector<double>& amounts);
+
+    /**
+     * Fill an area with points using a grid pattern
+     * Based on mfcg.js Ae.fillArea
+     *
+     * @param poly The polygon to fill
+     * @param density Fill density (0-1), higher = more points
+     * @param spacing Grid spacing (default 3.0)
+     * @return Vector of points inside the polygon
+     */
+    static std::vector<Point> fillArea(const std::vector<Point>& poly, double density, double spacing = 3.0);
+
     // Equality (stateless utility class)
     bool operator==(const GeomUtils& other) const { return true; }
     bool operator!=(const GeomUtils& other) const { return false; }

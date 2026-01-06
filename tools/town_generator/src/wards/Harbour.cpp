@@ -96,15 +96,11 @@ void Harbour::createGeometry() {
         }
     }
 
-    // Create warehouses/buildings in the non-water part
-    // Harbour buildings are typically larger (warehouses)
-    // minSq: 40-100 (larger than residential)
-    double minSq = 4 * (40 + 60 * utils::Random::floatVal() * utils::Random::floatVal());
-    double gridChaos = 0.3 + utils::Random::floatVal() * 0.3;  // Less chaotic grid
-    createAlleys(block, minSq, gridChaos, 0.5, 0.05, 1.0);  // Lower empty probability
+    // Create warehouses (faithful to MFCG)
+    AlleyParams params = AlleyParams::createUrban();
+    params.emptyProb = 0.05;  // 5% empty lots
 
-    // Filter buildings near water edge for clearer waterfront
-    filterInner(block);
+    createAlleys(block, params);
 
     // Add piers to geometry
     for (const auto& pier : piers) {

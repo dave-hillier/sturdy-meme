@@ -47,6 +47,14 @@ Topology::Topology(Model* model) : model_(model) {
 
         bool withinCity = patch->withinCity;
 
+        // Check if point is a gate - gates should be in BOTH inner and outer
+        auto isGate = [this](const geom::PointPtr& ptr) {
+            for (const auto& gatePtr : model_->gates) {
+                if (gatePtr == ptr) return true;
+            }
+            return false;
+        };
+
         geom::PointPtr v1Ptr = patch->shape.lastPtr();
         geom::Node* n1 = processPoint(v1Ptr);
 
@@ -56,26 +64,53 @@ Topology::Topology(Model* model) : model_(model) {
             geom::Node* n0 = n1;
             n1 = processPoint(v1Ptr);
 
-            if (n0 != nullptr && !border.containsPtr(v0Ptr)) {
-                if (withinCity) {
+            if (n0 != nullptr) {
+                bool onBorder = border.containsPtr(v0Ptr);
+                bool isGatePoint = isGate(v0Ptr);
+
+                // Gates go in BOTH lists (they connect inside to outside)
+                // Non-border points go in inner or outer based on withinCity
+                if (isGatePoint) {
                     if (std::find(inner.begin(), inner.end(), n0) == inner.end()) {
                         inner.push_back(n0);
                     }
-                } else {
                     if (std::find(outer.begin(), outer.end(), n0) == outer.end()) {
                         outer.push_back(n0);
+                    }
+                } else if (!onBorder) {
+                    if (withinCity) {
+                        if (std::find(inner.begin(), inner.end(), n0) == inner.end()) {
+                            inner.push_back(n0);
+                        }
+                    } else {
+                        if (std::find(outer.begin(), outer.end(), n0) == outer.end()) {
+                            outer.push_back(n0);
+                        }
                     }
                 }
             }
 
-            if (n1 != nullptr && !border.containsPtr(v1Ptr)) {
-                if (withinCity) {
+            if (n1 != nullptr) {
+                bool onBorder = border.containsPtr(v1Ptr);
+                bool isGatePoint = isGate(v1Ptr);
+
+                // Gates go in BOTH lists (they connect inside to outside)
+                if (isGatePoint) {
                     if (std::find(inner.begin(), inner.end(), n1) == inner.end()) {
                         inner.push_back(n1);
                     }
-                } else {
                     if (std::find(outer.begin(), outer.end(), n1) == outer.end()) {
                         outer.push_back(n1);
+                    }
+                } else if (!onBorder) {
+                    if (withinCity) {
+                        if (std::find(inner.begin(), inner.end(), n1) == inner.end()) {
+                            inner.push_back(n1);
+                        }
+                    } else {
+                        if (std::find(outer.begin(), outer.end(), n1) == outer.end()) {
+                            outer.push_back(n1);
+                        }
                     }
                 }
             }

@@ -37,11 +37,13 @@ void WardGroup::buildBorder() {
 
     if (patches.size() == 1) {
         border = patches[0]->shape;
-        return;
+    } else {
+        // Use Model::findCircumference to get combined border
+        border = Model::findCircumference(patches);
     }
 
-    // Use Model::findCircumference to get combined border
-    border = Model::findCircumference(patches);
+    // Compute inner vertices after building border (faithful to mfcg.js)
+    computeInnerVertices();
 }
 
 void WardGroup::createParams() {
@@ -167,6 +169,52 @@ bool WardGroup::canAddPatch(Patch* patch) const {
 std::string WardGroup::getTypeName() const {
     if (patches.empty() || !patches[0]->ward) return "";
     return patches[0]->ward->getName();
+}
+
+bool WardGroup::isInnerVertex(const geom::Point& v) const {
+    // Faithful to mfcg.js District.isInnerVertex (lines 979-984)
+    // A vertex is "inner" if ALL adjacent patches are withinCity OR waterbody
+    if (!model) return false;
+
+    auto adjacentPatches = model->patchByVertex(v);
+    for (auto* p : adjacentPatches) {
+        if (!p->withinCity && !p->waterbody) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void WardGroup::computeInnerVertices() {
+    // Faithful to mfcg.js District constructor (lines 719-724)
+    // For each border vertex, check if withinWalls OR isInnerVertex
+    inner.clear();
+
+    if (border.length() < 3) return;
+
+    for (size_t i = 0; i < border.length(); ++i) {
+        const geom::Point& v = border[i];
+
+        // Check if any patch at this vertex is withinWalls
+        bool withinWalls = false;
+        if (model) {
+            auto adjacentPatches = model->patchByVertex(v);
+            for (auto* p : adjacentPatches) {
+                if (p->withinWalls) {
+                    withinWalls = true;
+                    break;
+                }
+            }
+        }
+
+        // A vertex is "inner" if withinWalls OR isInnerVertex
+        if (withinWalls || isInnerVertex(v)) {
+            inner.push_back(v);
+        }
+    }
+
+    // District is "urban" if all border vertices are inner
+    urban = (inner.size() == border.length());
 }
 
 // Helper function to subdivide area into blocks

@@ -14,16 +14,13 @@ void CommonWard::createGeometry() {
     auto block = patch->shape.shrink(cityBlock);
     if (block.empty()) return;
 
-    // Standard residential area (faithful to Haxe)
-    // minSq: 20 + 80 * random^2 = 20-100 (general residential), scaled up 4x for testing
-    // gridChaos: 0.4 + random * 0.3 = 0.4-0.7
-    double minSq = 4 * (20 + 80 * utils::Random::floatVal() * utils::Random::floatVal());
-    double gridChaos = 0.4 + utils::Random::floatVal() * 0.3;
-    createAlleys(block, minSq, gridChaos, 0.6, 0.08, 1.0);  // emptyProb=0.08
+    // Standard residential area (faithful to MFCG)
+    AlleyParams params = AlleyParams::createUrban();
+    // Override some params for CommonWard characteristics
+    params.emptyProb = 0.08;  // 8% empty lots
 
-    // Filter buildings to only keep those touching perimeter (creates empty centers)
-    // Based on mfcg.js filterInner logic
-    filterInner(block);
+    // Use the faithful implementation with Bisector and Block classes
+    createAlleys(block, params);
 }
 
 } // namespace wards

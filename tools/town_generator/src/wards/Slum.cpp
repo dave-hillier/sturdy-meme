@@ -14,15 +14,16 @@ void Slum::createGeometry() {
     auto block = patch->shape.shrink(cityBlock);
     if (block.empty()) return;
 
-    // Cramped housing - high density, chaotic (faithful to Haxe)
-    // minSq: 10 + 30 * random^2 = 10-40, scaled up 4x for testing
-    // gridChaos: 0.6 + random * 0.4 = 0.6-1.0
-    double minSq = 4 * (10 + 30 * utils::Random::floatVal() * utils::Random::floatVal());
-    double gridChaos = 0.6 + utils::Random::floatVal() * 0.4;
-    createAlleys(block, minSq, gridChaos, 0.8, 0.03, 1.0);  // emptyProb=0.03
+    // MFCG SPRAWL type parameters (line 11321):
+    // - gridChaos *= 0.5 (more regular layout)
+    // - blockSize *= 2 (larger lots)
+    // - greenery = (1 + greenery) / 2 (more green space)
+    AlleyParams params = AlleyParams::createUrban();
+    params.gridChaos *= 0.5;      // More regular than urban
+    params.blockSize *= 2.0;      // Larger lots
+    params.emptyProb = 0.15;      // More empty lots (greenery)
 
-    // Filter buildings to only keep those touching perimeter (creates empty centers)
-    filterInner(block);
+    createAlleys(block, params);
 }
 
 } // namespace wards

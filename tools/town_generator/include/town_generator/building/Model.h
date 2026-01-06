@@ -55,6 +55,8 @@ public:
     bool plazaNeeded = false;
     bool citadelNeeded = false;
     bool wallsNeeded = false;
+    bool templeNeeded = false;    // True if city has a cathedral/temple
+    bool shantyNeeded = false;    // True if city has shanty towns outside walls
     bool coastNeeded = false;     // True if city has a coastline
     double coastDir = 0.0;        // Direction of coast (0-2, multiplied by PI)
 
@@ -63,7 +65,14 @@ public:
     geom::Polygon earthEdge;      // Boundary of land area
     geom::Polygon shore;          // Shore line where land meets water
     bool riverNeeded = false;     // Whether to generate a river/canal
+    int maxDocks = 0;             // Maximum number of dock/harbour patches (faithful to mfcg.js)
     std::vector<std::unique_ptr<Canal>> canals;  // Rivers/canals
+
+    // Edge classification (faithful to mfcg.js buildDomains)
+    // Each edge is represented as a pair of points (start, end)
+    using Edge = std::pair<geom::Point, geom::Point>;
+    std::vector<Edge> horizonE;   // Outer boundary edges (no neighbor)
+    std::vector<Edge> shoreE;     // Land-water boundary edges
 
     // Owned wards and patches
     std::vector<std::unique_ptr<wards::Ward>> wards_;
@@ -120,9 +129,12 @@ private:
     void buildPatches();
     void optimizeJunctions();
     void buildWalls();
+    void buildDomains();     // Build horizon/shore edge classification (faithful to mfcg.js)
     void buildStreets();
     void tidyUpRoads();
     void createWards();
+    void buildFarms();       // Build farms with sine-wave radial pattern (faithful to mfcg.js)
+    void buildShantyTowns(); // Build shanty towns outside city walls (faithful to mfcg.js)
     void buildGeometry();
     void setEdgeData();      // Set edge types (COAST, ROAD, WALL, CANAL) on all patches
     void createWardGroups(); // Create WardGroups from adjacent same-type patches

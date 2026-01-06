@@ -17,6 +17,7 @@ private:
     static constexpr int64_t n = 2147483647;
 
     static int64_t seed_;
+    static int64_t savedSeed_;  // For save/restore
 
     static int64_t next() {
         seed_ = static_cast<int64_t>(static_cast<double>(seed_) * g) % n;
@@ -24,6 +25,16 @@ private:
     }
 
 public:
+    // Save current seed state (faithful to mfcg.js C.save)
+    static void save() {
+        savedSeed_ = seed_;
+    }
+
+    // Restore saved seed state (faithful to mfcg.js C.restore)
+    static void restore() {
+        seed_ = savedSeed_;
+    }
+
     // Reset with optional seed
     static void reset(int seed = -1) {
         if (seed != -1) {

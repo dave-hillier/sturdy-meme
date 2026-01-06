@@ -45,7 +45,12 @@ void Graph::remove(Node* node) {
 std::vector<Node*> Graph::aStar(Node* start, Node* goal, const std::vector<Node*>* exclude) {
     std::vector<Node*> closedSet;
     if (exclude != nullptr) {
-        closedSet = *exclude;
+        // Copy exclude list but remove goal - we must be able to reach the destination
+        for (auto* n : *exclude) {
+            if (n != goal) {
+                closedSet.push_back(n);
+            }
+        }
     }
 
     std::vector<Node*> openSet = {start};

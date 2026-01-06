@@ -2,6 +2,8 @@
 #include "town_generator/building/Model.h"
 #include "town_generator/building/CurtainWall.h"
 #include "town_generator/building/Cutter.h"
+#include "town_generator/building/Block.h"
+#include "town_generator/building/Bisector.h"
 #include "town_generator/geom/GeomUtils.h"
 #include <algorithm>
 #include <cmath>
@@ -208,116 +210,108 @@ void Ward::createGeometry() {
 }
 
 void Ward::filterOutskirts() {
+    // Faithful to mfcg.js Ward.filter (lines 889-958)
+    // Uses edge-type-based density at vertices, interpolated to building centers
     if (!patch || !model) return;
 
-    // Simplified filterOutskirts - filter buildings based on distance from patch edges
-    // that are on roads or border other city patches.
+    size_t numVerts = patch->shape.length();
+    if (numVerts < 3) return;
 
-    // Structure to hold populated edge info
-    struct PopulatedEdge {
-        double x, y, dx, dy, d;
-    };
-    std::vector<PopulatedEdge> populatedEdges;
+    // Calculate density for each vertex based on:
+    // 1. If "inner" vertex (all adjacent patches are withinCity or waterbody), density = 1.0
+    // 2. Otherwise, max density from adjacent edges:
+    //    - ROAD edges: 0.3
+    //    - WALL edges: 0.5
+    //    - CANAL edges: 0.1
+    //    - Other edges: 0.0
+    std::vector<double> vertexDensity(numVerts, 0.0);
 
-    // Helper to add an edge with a distance factor
-    auto addEdge = [&](const geom::Point& v1, const geom::Point& v2, double factor) {
-        double dx = v2.x - v1.x;
-        double dy = v2.y - v1.y;
-
-        // Find max distance from any vertex to this edge line
-        double maxDist = 0;
-        for (size_t i = 0; i < patch->shape.length(); ++i) {
-            const geom::Point& v = patch->shape[i];
-            if (v == v1 || v == v2) continue;
-            double dist = geom::GeomUtils::distance2line(v1.x, v1.y, dx, dy, v.x, v.y);
-            maxDist = std::max(maxDist, dist * factor);
-        }
-
-        if (maxDist > 0) {
-            populatedEdges.push_back({v1.x, v1.y, dx, dy, maxDist});
-        }
-    };
-
-    // Check each edge of the patch
-    patch->shape.forEdge([&](const geom::Point& v1, const geom::Point& v2) {
-        // Check if edge is on a road/artery using improved geometric detection
-        bool onRoad = isEdgeOnRoad(v1, v2, model->arteries) ||
-                      isEdgeOnRoad(v1, v2, model->streets) ||
-                      isEdgeOnRoad(v1, v2, model->roads);
-
-        if (onRoad) {
-            addEdge(v1, v2, 1.0);
-        } else {
-            // For non-road edges, add with reduced factor if patch is within city
-            if (patch->withinCity) {
-                addEdge(v1, v2, 0.4);
-            }
-        }
-    });
-
-    // If no populated edges found, don't filter
-    if (populatedEdges.empty()) return;
-
-    // Calculate density for each vertex based on whether all adjacent patches are in city
-    std::vector<double> density;
-    for (size_t i = 0; i < patch->shape.length(); ++i) {
+    for (size_t i = 0; i < numVerts; ++i) {
         const geom::Point& v = patch->shape[i];
 
-        // Check if this is a gate vertex
-        bool isGate = false;
-        if (model->wall) {
-            for (const auto& gate : model->wall->gates) {
-                if (*gate == v) {
-                    isGate = true;
-                    break;
-                }
+        // Check if this is an "inner" vertex (all adjacent patches are withinCity or waterbody)
+        auto adjacentPatches = model->patchByVertex(v);
+        bool isInner = true;
+        for (auto* p : adjacentPatches) {
+            if (!p->withinCity && !p->waterbody) {
+                isInner = false;
+                break;
             }
         }
 
-        if (isGate) {
-            density.push_back(1.0);
-        } else {
-            // Check if all patches at this vertex are within city
-            auto patches = model->patchByVertex(v);
-            bool allWithinCity = true;
-            for (auto* p : patches) {
-                if (!p->withinCity) {
-                    allWithinCity = false;
-                    break;
-                }
-            }
-            density.push_back(allWithinCity ? 2.0 * utils::Random::floatVal() : 0.0);
+        if (isInner) {
+            vertexDensity[i] = 1.0;
+            continue;
         }
+
+        // Not inner - calculate density from adjacent edges
+        // Previous edge (i-1 to i) and current edge (i to i+1)
+        size_t prevIdx = (i + numVerts - 1) % numVerts;
+        const geom::Point& vPrev = patch->shape[prevIdx];
+        const geom::Point& vNext = patch->shape[(i + 1) % numVerts];
+
+        double maxDensity = 0.0;
+
+        // Check previous edge type
+        double prevDensity = 0.0;
+        if (model->wall && model->wall->bordersBy(patch, vPrev, v)) {
+            prevDensity = 0.5;  // WALL
+        } else if (isEdgeOnRoad(vPrev, v, model->arteries) ||
+                   isEdgeOnRoad(vPrev, v, model->streets) ||
+                   isEdgeOnRoad(vPrev, v, model->roads)) {
+            prevDensity = 0.3;  // ROAD
+        }
+        for (const auto& canal : model->canals) {
+            if (canal->containsEdge(vPrev, v)) {
+                prevDensity = std::max(prevDensity, 0.1);  // CANAL
+                break;
+            }
+        }
+        maxDensity = std::max(maxDensity, prevDensity);
+
+        // Check current edge type
+        double currDensity = 0.0;
+        if (model->wall && model->wall->bordersBy(patch, v, vNext)) {
+            currDensity = 0.5;  // WALL
+        } else if (isEdgeOnRoad(v, vNext, model->arteries) ||
+                   isEdgeOnRoad(v, vNext, model->streets) ||
+                   isEdgeOnRoad(v, vNext, model->roads)) {
+            currDensity = 0.3;  // ROAD
+        }
+        for (const auto& canal : model->canals) {
+            if (canal->containsEdge(v, vNext)) {
+                currDensity = std::max(currDensity, 0.1);  // CANAL
+                break;
+            }
+        }
+        maxDensity = std::max(maxDensity, currDensity);
+
+        vertexDensity[i] = maxDensity;
     }
 
-    // Filter buildings
+    // MFCG threshold calculation: density * sqrt(numFaces) - (0.5 * sqrt(numFaces) - 0.5)
+    // Where numFaces is the number of buildings
+    double sqrtFaces = std::sqrt(static_cast<double>(geometry.size()));
+    double offset = 0.5 * sqrtFaces - 0.5;
+
+    // Filter buildings based on interpolated density at center
     auto it = geometry.begin();
     while (it != geometry.end()) {
-        double minDist = 1.0;
+        // Get building center
+        geom::Point center = it->center();
 
-        // Find minimum distance ratio to any populated edge
-        for (const auto& edge : populatedEdges) {
-            for (size_t i = 0; i < it->length(); ++i) {
-                const geom::Point& v = (*it)[i];
-                double d = geom::GeomUtils::distance2line(edge.x, edge.y, edge.dx, edge.dy, v.x, v.y);
-                double dist = edge.d > 0 ? d / edge.d : 1.0;
-                minDist = std::min(minDist, dist);
-            }
+        // Interpolate density at center using barycentric coordinates
+        auto weights = patch->shape.interpolate(center);
+        double interpolatedDensity = 0.0;
+        for (size_t j = 0; j < weights.size() && j < vertexDensity.size(); ++j) {
+            interpolatedDensity += vertexDensity[j] * weights[j];
         }
 
-        // Interpolate density at building center
-        geom::Point c = it->center();
-        auto interp = patch->shape.interpolate(c);
-        double p = 0.0;
-        for (size_t j = 0; j < interp.size() && j < density.size(); ++j) {
-            p += density[j] * interp[j];
-        }
-        if (p > 0.001) {
-            minDist /= p;
-        }
+        // Calculate threshold: interpolatedDensity * sqrtFaces - offset
+        double threshold = interpolatedDensity * sqrtFaces - offset;
 
-        // Filter based on random threshold
-        if (utils::Random::fuzzy(1.0) > minDist) {
+        // Keep building if random < threshold (higher density = more likely to keep)
+        if (utils::Random::floatVal() < threshold) {
             ++it;
         } else {
             it = geometry.erase(it);
@@ -389,158 +383,6 @@ void Ward::filterInner(const geom::Polygon& blockShape) {
     }
 }
 
-void Ward::createAlleys(
-    const geom::Polygon& p,
-    double minSq,
-    double gridChaos,
-    double sizeChaos,
-    double emptyProb,
-    double split
-) {
-    size_t pLen = p.length();
-
-    if (pLen < 3) {
-        if (!utils::Random::boolVal(emptyProb)) {
-            geometry.push_back(p);
-        }
-        return;
-    }
-
-    // Use OBB (Oriented Bounding Box) to find best cut direction (faithful to mfcg.js Bisector)
-    auto obb = p.orientedBoundingBox();
-    if (obb.size() < 4) {
-        // Fall back to longest edge if OBB fails
-        size_t longestEdge = 0;
-        double longestLen = 0;
-        for (size_t i = 0; i < pLen; ++i) {
-            geom::Point v = p.vectori(static_cast<int>(i));
-            double len = v.length();
-            if (len > longestLen) {
-                longestLen = len;
-                longestEdge = i;
-            }
-        }
-
-        double spread = 0.8 * gridChaos;
-        double ratio = (1.0 - spread) / 2.0 + utils::Random::floatVal() * spread;
-        double sq = p.square();
-        double angleSpread = M_PI / 6.0 * gridChaos * (sq < minSq * 4 ? 0.0 : 1.0);
-        double angle = (utils::Random::floatVal() - 0.5) * angleSpread;
-        double gap = (split > 0.5) ? ALLEY : 0.0;
-
-        auto halves = building::Cutter::bisect(p, p[longestEdge], ratio, angle, gap);
-
-        if (halves.size() == 1) {
-            if (!utils::Random::boolVal(emptyProb)) {
-                addBuildingLot(p, minSq);
-            }
-            return;
-        }
-
-        for (const auto& half : halves) {
-            double halfSq = half.square();
-            double threshold = minSq * std::pow(2.0, 4.0 * sizeChaos * (utils::Random::floatVal() - 0.5));
-
-            if (halfSq < threshold) {
-                if (!utils::Random::boolVal(emptyProb)) {
-                    addBuildingLot(half, minSq);
-                }
-            } else {
-                double r1 = utils::Random::floatVal();
-                double r2 = utils::Random::floatVal();
-                double divisor = r1 * r2;
-                bool shouldSplit = divisor > 0.0001 && halfSq > minSq / divisor;
-                createAlleys(half, minSq, gridChaos, sizeChaos, emptyProb, shouldSplit ? 1.0 : 0.0);
-            }
-        }
-        return;
-    }
-
-    // Calculate OBB dimensions
-    geom::Point edge01 = obb[1].subtract(obb[0]);
-    geom::Point edge12 = obb[2].subtract(obb[1]);
-    double len01 = edge01.length();
-    double len12 = edge12.length();
-
-    // Determine long axis (we cut perpendicular to it)
-    geom::Point longAxis = (len01 > len12) ? edge01 : edge12;
-    geom::Point shortAxis = (len01 > len12) ? edge12 : edge01;
-    double longLen = std::max(len01, len12);
-
-    // Cut position: project centroid onto long axis, add randomness
-    geom::Point centroid = p.centroid();
-    geom::Point obbCorner = obb[0];
-
-    // Project centroid onto long axis
-    double projT = 0.0;
-    if (longLen > 0.001) {
-        geom::Point toCentroid = centroid.subtract(obbCorner);
-        projT = (toCentroid.x * longAxis.x + toCentroid.y * longAxis.y) / (longLen * longLen);
-    }
-
-    // Faithful to mfcg.js: cutRatio = (proj + random) / 2, for variation around center
-    double normal3 = (utils::Random::floatVal() + utils::Random::floatVal() + utils::Random::floatVal()) / 3.0;
-    double cutRatio = (projT + normal3) / 2.0;
-    cutRatio = std::max(0.2, std::min(0.8, cutRatio));  // Keep within reasonable bounds
-
-    // Calculate cut point along the long axis
-    geom::Point cutPoint(obbCorner.x + longAxis.x * cutRatio, obbCorner.y + longAxis.y * cutRatio);
-
-    // Cut direction is along the short axis (perpendicular to long axis)
-    geom::Point cutDir = shortAxis.norm(1.0);
-    geom::Point cutEnd = cutPoint.add(cutDir.scale(longLen * 2));  // Extend far enough
-
-    double gap = (split > 0.5) ? ALLEY : 0.0;
-    auto halves = p.cut(cutPoint, cutEnd, gap);
-
-    // If cut failed, try cutting from the other direction
-    if (halves.size() < 2) {
-        cutEnd = cutPoint.subtract(cutDir.scale(longLen * 2));
-        halves = p.cut(cutPoint, cutEnd, gap);
-    }
-
-    // If still failed, fall back to longest edge bisect
-    if (halves.size() < 2) {
-        size_t longestEdge = 0;
-        double longestLen = 0;
-        for (size_t i = 0; i < pLen; ++i) {
-            geom::Point v = p.vectori(static_cast<int>(i));
-            double len = v.length();
-            if (len > longestLen) {
-                longestLen = len;
-                longestEdge = i;
-            }
-        }
-
-        double spread = 0.8 * gridChaos;
-        double ratio = (1.0 - spread) / 2.0 + utils::Random::floatVal() * spread;
-        halves = building::Cutter::bisect(p, p[longestEdge], ratio, 0.0, gap);
-    }
-
-    if (halves.size() < 2) {
-        if (!utils::Random::boolVal(emptyProb)) {
-            addBuildingLot(p, minSq);
-        }
-        return;
-    }
-
-    for (const auto& half : halves) {
-        double halfSq = std::abs(half.square());
-        double threshold = minSq * std::pow(2.0, 4.0 * sizeChaos * (utils::Random::floatVal() - 0.5));
-
-        if (halfSq < threshold) {
-            if (!utils::Random::boolVal(emptyProb)) {
-                addBuildingLot(half, minSq);
-            }
-        } else {
-            double r1 = utils::Random::floatVal();
-            double r2 = utils::Random::floatVal();
-            double divisor = r1 * r2;
-            bool shouldSplit = divisor > 0.0001 && halfSq > minSq / divisor;
-            createAlleys(half, minSq, gridChaos, sizeChaos, emptyProb, shouldSplit ? 1.0 : 0.0);
-        }
-    }
-}
 
 geom::Polygon Ward::createOrthoBuilding(const geom::Polygon& poly, double fill, double ratio) {
     if (poly.length() < 3) return poly;
@@ -704,86 +546,6 @@ void Ward::addBuildingLot(const geom::Polygon& lot, double minSq) {
     geometry.push_back(building);
 }
 
-void Ward::createAlleysWithParams(
-    const geom::Polygon& p,
-    const AlleyParams& params,
-    bool isInitialCall
-) {
-    if (p.length() < 3) return;
-
-    double area = std::abs(p.square());
-
-    // Initial call uses minSq * blockSize as threshold (faithful to mfcg.js line 13067-13068)
-    double threshold = isInitialCall
-        ? params.minSq * params.blockSize * std::pow(2.0, params.sizeChaos * (2.0 * utils::Random::floatVal() - 1.0))
-        : params.minSq * std::pow(2.0, params.sizeChaos * (2.0 * utils::Random::floatVal() - 1.0));
-
-    // If area is small enough, create a block
-    if (area < threshold) {
-        if (!utils::Random::boolVal(params.emptyProb)) {
-            geometry.push_back(p);
-        }
-        return;
-    }
-
-    // Find longest edge
-    size_t longestEdge = 0;
-    double longestLen = 0;
-    for (size_t i = 0; i < p.length(); ++i) {
-        geom::Point v = p.vectori(static_cast<int>(i));
-        double len = v.length();
-        if (len > longestLen) {
-            longestLen = len;
-            longestEdge = i;
-        }
-    }
-
-    // Calculate cut ratio based on gridChaos
-    double spread = 0.8 * params.gridChaos;
-    double ratio = (1.0 - spread) / 2.0 + utils::Random::floatVal() * spread;
-
-    // Angle spread for larger blocks
-    double angleSpread = M_PI / 6.0 * params.gridChaos * (area < params.minSq * 4 ? 0.0 : 1.0);
-    double angle = (utils::Random::floatVal() - 0.5) * angleSpread;
-
-    // Gap for alleys
-    double gap = ALLEY;
-
-    auto halves = building::Cutter::bisect(p, p[longestEdge], ratio, angle, gap);
-
-    if (halves.size() < 2) {
-        // Failed to bisect, treat as leaf
-        if (!utils::Random::boolVal(params.emptyProb)) {
-            geometry.push_back(p);
-        }
-        return;
-    }
-
-    // Store the alley cut line for rendering
-    if (halves.size() >= 2) {
-        // The cut is between the two halves - find shared edge
-        // For now, store centroid to centroid as approximation
-        std::vector<geom::Point> cutLine;
-        cutLine.push_back(halves[0].center());
-        cutLine.push_back(halves[1].center());
-        alleys.push_back(cutLine);
-    }
-
-    // Process each half
-    for (const auto& half : halves) {
-        double halfArea = std::abs(half.square());
-
-        // Check if this could be a church (medium-sized block, first one)
-        double churchThreshold = params.minSq * 4.0;
-        if (church.empty() && halfArea <= churchThreshold && halfArea >= params.minSq) {
-            createChurch(half);
-            continue;
-        }
-
-        // Recursive subdivision with non-initial threshold
-        createAlleysWithParams(half, params, false);
-    }
-}
 
 std::vector<geom::Point> Ward::semiSmooth(
     const geom::Point& p0,
@@ -791,7 +553,7 @@ std::vector<geom::Point> Ward::semiSmooth(
     const geom::Point& p2,
     double minFront
 ) {
-    // Faithful to mfcg.js semiSmooth function
+    // Faithful to mfcg.js semiSmooth function (using Qe.getCircle, Qe.getArc)
     // Smooths a corner (p0, p1, p2) into an arc if appropriate
 
     double dist02 = geom::Point::distance(p0, p2);
@@ -823,21 +585,55 @@ std::vector<geom::Point> Ward::semiSmooth(
         return {p0, p1, p2};  // Keep original corner
     }
 
-    // Create arc approximation
+    // Create arc using getCircle and getArc (faithful to mfcg.js)
     std::vector<geom::Point> result;
     result.push_back(p0);
 
-    // Add arc points
+    // Determine arc endpoints based on shorter segment
+    geom::Point arcStart, arcEnd;
+    geom::Point dir1, dir2;
+
     if (len01 < len12) {
-        // Shorter segment is p0-p1
+        // Shorter segment is p0-p1: arc from p0 to point on p1-p2
         double t = len01 / len12;
-        geom::Point arcPoint(p1.x + v12.x * t, p1.y + v12.y * t);
-        result.push_back(arcPoint);
+        arcStart = p0;
+        arcEnd = geom::Point(p1.x + v12.x * t, p1.y + v12.y * t);
+        dir1 = v01.norm(1.0);
+        dir2 = v12.norm(1.0);
     } else {
-        // Shorter segment is p1-p2
-        double t = -len12 / len01;
-        geom::Point arcPoint(p1.x + v01.x * t, p1.y + v01.y * t);
-        result.push_back(arcPoint);
+        // Shorter segment is p1-p2: arc from point on p0-p1 to p2
+        double t = len12 / len01;
+        arcStart = geom::Point(p1.x - v01.x * t, p1.y - v01.y * t);
+        arcEnd = p2;
+        dir1 = v01.norm(1.0);
+        dir2 = v12.norm(1.0);
+    }
+
+    // Get circle passing through arc endpoints
+    auto circle = geom::GeomUtils::getCircle(arcStart, dir1, arcEnd, dir2);
+
+    if (circle.r > 0.001) {
+        // Calculate angles
+        geom::Point toStart = arcStart.subtract(circle.c);
+        geom::Point toEnd = arcEnd.subtract(circle.c);
+        double startAngle = std::atan2(toStart.y, toStart.x);
+        double endAngle = std::atan2(toEnd.y, toEnd.x);
+
+        // Get arc points (4 segments for smooth curve)
+        auto arcPoints = geom::GeomUtils::getArc(circle, startAngle, endAngle, 4);
+
+        if (!arcPoints.empty()) {
+            // Add arc points (skip first as it's arcStart which is close to p0)
+            for (size_t i = 1; i < arcPoints.size(); ++i) {
+                result.push_back(arcPoints[i]);
+            }
+        } else {
+            // Arc failed, use simple midpoint
+            result.push_back(geom::GeomUtils::lerp(arcStart, arcEnd));
+        }
+    } else {
+        // Circle failed, use simple approach
+        result.push_back(geom::GeomUtils::lerp(arcStart, arcEnd));
     }
 
     result.push_back(p2);
@@ -896,6 +692,112 @@ void Ward::createChurch(const geom::Polygon& block) {
             }
         }
     }
+}
+
+void Ward::createBlock(const geom::Polygon& shape, bool isSmall) {
+    // Faithful to mfcg.js createBlock (lines 13167-13171)
+    // Creates a Block object and stores it
+
+    // Create WardGroup if needed (for Block to get parameters)
+    // For now, create Block directly
+    building::Block* block = new building::Block(shape, nullptr);
+
+    if (isSmall) {
+        // Small block: whole shape is a single lot
+        block->lots = {shape};
+    } else {
+        // Normal block: use TwistedBlock to create lots
+        AlleyParams params = AlleyParams::createUrban();
+        block->lots = building::TwistedBlock::createLots(block, params);
+    }
+
+    // Filter inner lots
+    block->filterInner();
+
+    // Create rectangles from lots
+    block->createRects();
+
+    // Add block's rects to geometry
+    for (const auto& rect : block->rects) {
+        if (rect.length() >= 3) {
+            geometry.push_back(rect);
+        }
+    }
+
+    blocks.push_back(block);
+}
+
+void Ward::createAlleys(const geom::Polygon& shape, const AlleyParams& params) {
+    // Faithful to mfcg.js createAlleys (lines 13124-13145)
+    // Uses Bisector for proper partitioning
+
+    // Create bisector with minArea = minSq * blockSize, variance = 16 * gridChaos
+    double minArea = params.minSq * params.blockSize;
+    double variance = 16.0 * params.gridChaos;
+
+    building::Bisector bisector(shape, minArea, variance);
+
+    // Set gap callback (returns ALLEY)
+    bisector.getGap = [](const std::vector<geom::Point>&) { return ALLEY; };
+
+    // Set processCut to semiSmooth (optional, can be nullptr)
+    double minFront = params.minFront;
+    bisector.processCut = [minFront](const std::vector<geom::Point>& pts) {
+        if (pts.size() >= 3) {
+            return Ward::semiSmooth(pts[0], pts[1], pts[2], minFront);
+        }
+        return pts;
+    };
+
+    // For non-urban wards, use isBlockSized check
+    if (!urban) {
+        bisector.isAtomic = [this, &params](const geom::Polygon& p) {
+            return isBlockSized(p, params);
+        };
+    }
+
+    // Partition
+    auto partitions = bisector.partition();
+
+    // Store alley cuts for rendering
+    for (const auto& cut : bisector.cuts) {
+        alleys.push_back(cut);
+    }
+
+    // Process each partition
+    for (const auto& partition : partitions) {
+        double area = std::abs(partition.square());
+
+        // Calculate threshold with random variation (faithful to mfcg.js line 13138-13139)
+        double threshold = params.minSq * std::pow(2.0,
+            params.sizeChaos * (2.0 * utils::Random::floatVal() - 1.0));
+        double churchThreshold = 4.0 * threshold;
+
+        if (area < threshold) {
+            // Small block - create Block with isSmall=true
+            createBlock(partition, true);
+        } else if (church.empty() && area <= churchThreshold) {
+            // Church-sized block - create church
+            createChurch(partition);
+        } else {
+            // Regular block - create Block with isSmall=false
+            createBlock(partition, false);
+        }
+    }
+}
+
+bool Ward::isBlockSized(const geom::Polygon& shape, const AlleyParams& params) {
+    // Faithful to mfcg.js isBlockSized (line 13131)
+    // For non-urban wards, checks if block is at blockSize threshold
+    double area = std::abs(shape.square());
+    double threshold = params.minSq * params.blockSize;
+
+    // Random variation
+    double normal4 = (utils::Random::floatVal() + utils::Random::floatVal() +
+                      utils::Random::floatVal() + utils::Random::floatVal()) / 2.0;
+    threshold *= std::pow(16.0 * params.gridChaos, std::abs(normal4 - 1.0));
+
+    return area < threshold;
 }
 
 } // namespace wards

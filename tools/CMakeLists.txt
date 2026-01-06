@@ -282,6 +282,8 @@ add_executable(town_generator
     town_generator/src/building/Canal.cpp
     town_generator/src/building/WardGroup.cpp
     town_generator/src/building/Block.cpp
+    town_generator/src/building/Bisector.cpp
+    town_generator/src/building/Building.cpp
     town_generator/src/building/Model.cpp
     town_generator/src/wards/Ward.cpp
     town_generator/src/wards/Castle.cpp

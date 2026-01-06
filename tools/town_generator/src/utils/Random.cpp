@@ -5,6 +5,7 @@ namespace utils {
 
 // Static member initialization
 int64_t Random::seed_ = 1;
+int64_t Random::savedSeed_ = 1;
 
 } // namespace utils
 } // namespace town_generator

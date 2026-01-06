@@ -1,6 +1,7 @@
 #include "town_generator/building/Block.h"
 #include "town_generator/building/WardGroup.h"
 #include "town_generator/building/Cutter.h"
+#include "town_generator/building/Building.h"
 #include "town_generator/geom/GeomUtils.h"
 #include "town_generator/utils/Random.h"
 #include <algorithm>
@@ -194,8 +195,43 @@ void Block::createRects() {
         }
     }
 
-    // Apply shrink processing if enabled (mfcg.js "Shrink" processing mode)
-    // For now, skip this optional step
+    // Apply shrink processing (faithful to mfcg.js "Shrink" processing mode)
+    // This adds variation to building setbacks
+    if (group && group->processingMode == "Shrink") {
+        for (auto& rect : rects) {
+            // Generate random shrink amount (normal distribution approximation)
+            double normal4 = (utils::Random::floatVal() + utils::Random::floatVal() +
+                             utils::Random::floatVal() + utils::Random::floatVal()) / 2.0;
+            double shrinkAmount = inset * (1.0 - std::abs(normal4 - 1.0));
+
+            if (shrinkAmount > 0.3) {
+                // Calculate shrink amounts for each edge
+                // Edges on block perimeter get 0 shrink, others get shrinkAmount
+                std::vector<geom::Point> pts;
+                for (size_t i = 0; i < rect.length(); ++i) {
+                    pts.push_back(rect[i]);
+                }
+
+                std::vector<double> amounts;
+                for (size_t i = 0; i < pts.size(); ++i) {
+                    const geom::Point& v0 = pts[i];
+                    const geom::Point& v1 = pts[(i + 1) % pts.size()];
+
+                    // Check if edge converges with block perimeter
+                    if (edgeConvergesWithBlock(v0, v1)) {
+                        amounts.push_back(0.0);  // No shrink on perimeter edges
+                    } else {
+                        amounts.push_back(shrinkAmount);
+                    }
+                }
+
+                auto shrunk = geom::GeomUtils::shrink(pts, amounts);
+                if (shrunk.size() >= 3) {
+                    rect = geom::Polygon(shrunk);
+                }
+            }
+        }
+    }
 }
 
 void Block::createBuildings() {
@@ -217,7 +253,7 @@ void Block::createBuildings() {
             pts.push_back(rect[i]);
         }
 
-        // If more than 4 vertices, simplify
+        // If more than 4 vertices, simplify to 4
         if (pts.size() > 4) {
             while (pts.size() > 4) {
                 // Find shortest edge
@@ -235,13 +271,23 @@ void Block::createBuildings() {
             }
         }
 
-        geom::Polygon building(pts);
+        geom::Polygon simplified(pts);
 
-        // Create complex building using Dwellings-style algorithm
-        // For now, use the simplified rectangle
-        // TODO: Implement Jd.create for complex L-shaped buildings
-
-        buildings.push_back(building);
+        // Try to create complex L-shaped building using Jd.create
+        // Faithful to mfcg.js: Jd.create(d, c, true, null, 0.6)
+        // where c = minSq/4 * shapeFactor
+        if (simplified.length() == 4) {
+            geom::Polygon lshaped = Building::create(simplified, threshold, true, false, 0.6);
+            if (lshaped.length() >= 3) {
+                buildings.push_back(lshaped);
+            } else {
+                // L-shape creation failed, use original rectangle
+                buildings.push_back(simplified);
+            }
+        } else {
+            // Not a quad, use as-is
+            buildings.push_back(simplified);
+        }
     }
 }
 
@@ -283,7 +329,8 @@ std::vector<geom::Polygon> Block::filterInner() {
                         double distSq = (v.x - projected.x) * (v.x - projected.x) +
                                        (v.y - projected.y) * (v.y - projected.y);
 
-                        if (distSq < 0.01) {
+                        // MFCG uses 1e-9 tolerance, we use 1e-6 for floating point robustness
+                        if (distSq < 1e-6) {
                             touchesPerimeter = true;
                         }
                     }
@@ -324,21 +371,33 @@ void Block::indentFronts() {
 
         dir = dir.scale(indent / dirLen);
 
-        // Translate the lot
-        std::vector<geom::Point> translated;
+        // Translate the block shape by the offset
+        std::vector<geom::Point> blockPts;
+        for (size_t i = 0; i < shape.length(); ++i) {
+            blockPts.push_back(shape[i]);
+        }
+        std::vector<geom::Point> translatedBlock = geom::GeomUtils::translate(blockPts, dir.x, dir.y);
+
+        // Get lot points
+        std::vector<geom::Point> lotPts;
         for (size_t i = 0; i < lot.length(); ++i) {
-            translated.push_back(lot[i].add(dir));
+            lotPts.push_back(lot[i]);
         }
 
-        // Intersect with block shape to ensure it stays within bounds
-        // For now, just use the translated version
-        // TODO: Implement polygon intersection (ye.and)
-        lot = geom::Polygon(translated);
+        // Intersect lot with translated block shape (ye.and)
+        // This ensures the indented lot stays within bounds
+        std::vector<geom::Point> clipped = geom::GeomUtils::polygonIntersection(lotPts, translatedBlock);
+
+        if (clipped.size() >= 3) {
+            lot = geom::Polygon(clipped);
+        }
+        // If intersection fails, keep original lot
     }
 }
 
 std::vector<geom::Point> Block::spawnTrees() {
     // Faithful to mfcg.js Block.spawnTrees (lines 12303-12325)
+    // Uses Ae.fillArea for natural tree distribution
     std::vector<geom::Point> trees;
 
     if (courtyard.empty() || !group) return trees;
@@ -346,30 +405,23 @@ std::vector<geom::Point> Block::spawnTrees() {
     double greenery = group->greenery;
     bool isUrban = group->urban;
 
-    // Reduce greenery for non-urban areas
+    // Reduce greenery for non-urban areas (mfcg.js multiplies by 0.1)
     if (!isUrban) {
         greenery *= 0.1;
     }
 
-    // Spawn trees in courtyard areas based on greenery level
+    // Spawn trees in courtyard areas using fillArea (faithful to MFCG)
     for (const auto& yard : courtyard) {
-        double area = std::abs(yard.square());
-        int numTrees = static_cast<int>(area * greenery / 10.0);
+        // Convert polygon to point vector
+        std::vector<geom::Point> pts;
+        for (size_t i = 0; i < yard.length(); ++i) {
+            pts.push_back(yard[i]);
+        }
 
-        for (int i = 0; i < numTrees; ++i) {
-            // Generate random point inside courtyard
-            // Simple approach: use random barycentric coordinates of bounding box
-            auto bounds = yard.getBounds();
-            for (int attempt = 0; attempt < 10; ++attempt) {
-                double x = bounds.left + utils::Random::floatVal() * (bounds.right - bounds.left);
-                double y = bounds.top + utils::Random::floatVal() * (bounds.bottom - bounds.top);
-                geom::Point p(x, y);
-
-                if (yard.contains(p)) {
-                    trees.push_back(p);
-                    break;
-                }
-            }
+        // Fill with trees using hexagonal grid pattern
+        auto treePts = geom::GeomUtils::fillArea(pts, greenery, 3.0);
+        for (const auto& p : treePts) {
+            trees.push_back(p);
         }
     }
 
