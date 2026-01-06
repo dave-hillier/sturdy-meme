@@ -18,7 +18,7 @@ void PatriciateWard::createGeometry() {
     AlleyParams params = AlleyParams::createUrban();
     params.emptyProb = 0.2;  // 20% empty lots for gardens
 
-    createAlleysFaithful(block, params);
+    createAlleys(block, params);
 }
 
 } // namespace wards

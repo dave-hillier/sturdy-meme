@@ -18,7 +18,7 @@ void GateWard::createGeometry() {
     AlleyParams params = AlleyParams::createUrban();
     params.emptyProb = 0.04;  // 4% empty lots
 
-    createAlleysFaithful(block, params);
+    createAlleys(block, params);
 
     // Apply density-based filtering near walls/gates (faithful to mfcg.js Ward.filter)
     filterOutskirts();

@@ -18,7 +18,7 @@ void Slum::createGeometry() {
     AlleyParams params = AlleyParams::createUrban();
     params.emptyProb = 0.03;  // 3% empty lots (densely packed)
 
-    createAlleysFaithful(block, params);
+    createAlleys(block, params);
 }
 
 } // namespace wards

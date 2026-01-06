@@ -20,7 +20,7 @@ void CommonWard::createGeometry() {
     params.emptyProb = 0.08;  // 8% empty lots
 
     // Use the faithful implementation with Bisector and Block classes
-    createAlleysFaithful(block, params);
+    createAlleys(block, params);
 }
 
 } // namespace wards

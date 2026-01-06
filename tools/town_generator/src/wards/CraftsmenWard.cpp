@@ -18,7 +18,7 @@ void CraftsmenWard::createGeometry() {
     AlleyParams params = AlleyParams::createUrban();
     params.emptyProb = 0.04;  // 4% empty lots
 
-    createAlleysFaithful(block, params);
+    createAlleys(block, params);
 }
 
 } // namespace wards

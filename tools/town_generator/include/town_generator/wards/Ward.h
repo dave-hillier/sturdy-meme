@@ -124,23 +124,6 @@ public:
     // Based on mfcg.js filterInner - buildings that touch perimeter are kept
     void filterInner(const geom::Polygon& blockShape);
 
-    // Create alleys recursively (legacy interface)
-    void createAlleys(
-        const geom::Polygon& p,
-        double minArea,
-        double gridChaos,
-        double sizeChaos,
-        double emptyProbability = 0.0,
-        double split = 0.0
-    );
-
-    // Create alleys with AlleyParams (faithful to mfcg.js createAlleys)
-    // Uses minSq * blockSize for initial subdivision threshold
-    void createAlleysWithParams(
-        const geom::Polygon& p,
-        const AlleyParams& params,
-        bool isInitialCall = true
-    );
 
     // Semi-smooth alley corners into arcs (faithful to mfcg.js semiSmooth)
     static std::vector<geom::Point> semiSmooth(
@@ -158,7 +141,7 @@ public:
     void createBlock(const geom::Polygon& shape, bool isSmall);
 
     // Create alleys using Bisector (faithful to mfcg.js createAlleys)
-    void createAlleysFaithful(const geom::Polygon& shape, const AlleyParams& params);
+    void createAlleys(const geom::Polygon& shape, const AlleyParams& params);
 
     // Check if block is at blockSize threshold (for non-urban wards)
     bool isBlockSized(const geom::Polygon& shape, const AlleyParams& params);

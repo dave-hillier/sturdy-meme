@@ -29,6 +29,7 @@ set(BUILDING_SOURCES
     src/building/Canal.cpp
     src/building/WardGroup.cpp
     src/building/Block.cpp
+    src/building/Bisector.cpp
     src/building/Model.cpp
 )
 

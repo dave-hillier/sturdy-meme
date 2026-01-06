@@ -18,7 +18,7 @@ void MerchantWard::createGeometry() {
     AlleyParams params = AlleyParams::createUrban();
     params.emptyProb = 0.15;  // 15% empty lots for market squares
 
-    createAlleysFaithful(block, params);
+    createAlleys(block, params);
 }
 
 } // namespace wards

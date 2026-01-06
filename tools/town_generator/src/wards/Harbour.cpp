@@ -100,7 +100,7 @@ void Harbour::createGeometry() {
     AlleyParams params = AlleyParams::createUrban();
     params.emptyProb = 0.05;  // 5% empty lots
 
-    createAlleysFaithful(block, params);
+    createAlleys(block, params);
 
     // Add piers to geometry
     for (const auto& pier : piers) {
