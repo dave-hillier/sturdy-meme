@@ -64,6 +64,7 @@ public:
     geom::Polygon earthEdge;      // Boundary of land area
     geom::Polygon shore;          // Shore line where land meets water
     bool riverNeeded = false;     // Whether to generate a river/canal
+    int maxDocks = 0;             // Maximum number of dock/harbour patches (faithful to mfcg.js)
     std::vector<std::unique_ptr<Canal>> canals;  // Rivers/canals
 
     // Owned wards and patches

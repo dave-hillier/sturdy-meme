@@ -39,6 +39,9 @@ Model::Model(int nPatches, int seed) : nPatches_(nPatches) {
     templeNeeded = utils::Random::boolVal(0.6);  // 60% chance of cathedral (faithful to mfcg.js)
     coastNeeded = utils::Random::boolVal(0.5);  // 50% chance of coastal city (faithful to mfcg.js)
     riverNeeded = coastNeeded && utils::Random::boolVal(0.67);  // 67% when coast is present
+
+    // maxDocks: sqrt(nPatches/2) + 2 if river (faithful to mfcg.js line 10239)
+    maxDocks = static_cast<int>(std::sqrt(nPatches / 2.0)) + (riverNeeded ? 2 : 0);
 }
 
 Model::~Model() {
@@ -991,10 +994,11 @@ void Model::createWards() {
                     }
                 }
 
-                if (bordersWater && coastNeeded && utils::Random::boolVal(0.5)) {
-                    // Harbour ward for waterfront patches
+                if (bordersWater && coastNeeded && maxDocks > 0) {
+                    // Harbour ward for waterfront patches (uses maxDocks limit)
                     ward = new wards::Harbour();
                     patch->landing = true;
+                    --maxDocks;
                 } else {
                     // Weighted random selection
                     double total = 0;
@@ -1015,10 +1019,9 @@ void Model::createWards() {
             } else {
                 // Outer patches - most are empty (no ward), some are farms
                 // Reference mfcg.js only assigns farms to specific outer patches
+                // Parks are placed separately (see below)
                 if (utils::Random::boolVal(0.15)) {
                     ward = new wards::Farm();
-                } else if (utils::Random::boolVal(0.1)) {
-                    ward = new wards::Park();
                 }
                 // Otherwise leave as nullptr - no buildings generated
             }
@@ -1030,6 +1033,53 @@ void Model::createWards() {
             patch->ward = ward;
             wards_.emplace_back(ward);
         }
+    }
+
+    // Park placement (faithful to mfcg.js lines 970-993)
+    // 1. Parks near citadel gate
+    // 2. Additional parks in inner patches based on city size
+    int parksCreated = 0;
+    if (citadel && !citadel->gates.empty()) {
+        auto citadelGate = citadel->gates[0];
+        auto patchesAtGate = patchByVertex(*citadelGate);
+        if (patchesAtGate.size() == 3) {
+            double parkProb = 1.0 - 2.0 / static_cast<double>(nPatches_ - 1);
+            if (utils::Random::floatVal() < parkProb) {
+                for (auto* p : patchesAtGate) {
+                    if (!p->ward) {
+                        auto* ward = new wards::Park();
+                        ward->patch = p;
+                        ward->model = this;
+                        p->ward = ward;
+                        wards_.emplace_back(ward);
+                        ++parksCreated;
+                    }
+                }
+            }
+        }
+    }
+
+    // Additional parks based on city size: (nPatches - 10) / 20
+    double parkCount = static_cast<double>(nPatches_ - 10) / 20.0;
+    int targetParks = static_cast<int>(parkCount);
+    double frac = parkCount - targetParks;
+    if (utils::Random::floatVal() < frac) ++targetParks;
+    targetParks -= parksCreated;
+
+    for (int i = 0; i < targetParks; ++i) {
+        // Find a random inner patch without a ward
+        std::vector<Patch*> candidates;
+        for (auto* p : inner) {
+            if (!p->ward) candidates.push_back(p);
+        }
+        if (candidates.empty()) break;
+
+        Patch* p = candidates[utils::Random::intVal(0, static_cast<int>(candidates.size()))];
+        auto* ward = new wards::Park();
+        ward->patch = p;
+        ward->model = this;
+        p->ward = ward;
+        wards_.emplace_back(ward);
     }
 
     // Cathedral placement (faithful to mfcg.js line 997)
